@@ -12,6 +12,8 @@ These fixtures are deliberately small and human-readable. They define interopera
 | `attendees.ics`           | organizer, attendee roles and PARTSTAT                 |
 | `unknown-properties.ics`  | unknown/vendor properties that must survive round-trip |
 | `mixed-components.ics`    | VEVENT with VTODO/VJOURNAL preservation case           |
+| `vtimezone.ics`           | embedded VTIMEZONE preservation across DST             |
+| `folded-escaped.ics`      | escaped text and RFC 5545 content-line folding         |
 
 Rules for agents:
 
