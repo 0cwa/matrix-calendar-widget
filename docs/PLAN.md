@@ -9,7 +9,7 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 - [x] Add repository instructions, target architecture, roadmap, and fork ADRs.
 - [ ] Rename root/workspace packages, Docker image names, user-facing NeoDateFix strings, and repository URLs.
 - [ ] Replace remaining inherited Nordeck CI/deployment assumptions.
-- [ ] Inventory upstream components as **keep / adapt / delete**.
+- [x] Inventory upstream components as **keep / adapt / delete** in `docs/UPSTREAM_INVENTORY.md`.
 - [ ] Establish a small fixture library of representative ICS files.
 - [ ] Add a local integration stack for Synapse + Radicale + widget/gateway development.
 - [ ] Configure main-branch protection after CI status checks exist.
