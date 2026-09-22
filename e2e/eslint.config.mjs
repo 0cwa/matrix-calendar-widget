@@ -1,3 +1,4 @@
+/* Modified for Matrix Calendar Widget fork, 2026. */
 /*
  * Copyright 2026 Nordeck IT + Consulting GmbH
  *
@@ -43,7 +44,7 @@ export default ts.config(
             '../scripts/license-header.txt',
           ),
           onNonMatchingHeader: 'replace',
-          templateVars: { NAME: 'Nordeck IT + Consulting GmbH' },
+          templateVars: { NAME: 'Matrix Calendar Widget contributors' },
           varRegexps: { NAME: /.+/ },
         },
       ],

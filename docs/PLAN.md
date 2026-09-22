@@ -7,11 +7,11 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 - [x] Import pinned NeoDateFix baseline with Apache-2.0 attribution.
 - [x] Separate project-specific work from the upstream import commit.
 - [x] Add repository instructions, target architecture, roadmap, and fork ADRs.
-- [ ] Rename root/workspace packages, Docker image names, user-facing NeoDateFix strings, and repository URLs.
-- [ ] Replace remaining inherited Nordeck CI/deployment assumptions.
+- [x] Rename root/workspace packages, Docker image names, user-facing NeoDateFix strings, and repository URLs.
+- [x] Replace remaining inherited Nordeck CI/deployment assumptions; publishing remains intentionally disabled.
 - [x] Inventory upstream components as **keep / adapt / delete** in `docs/UPSTREAM_INVENTORY.md`.
-- [ ] Establish a small fixture library of representative ICS files.
-- [ ] Add a local integration stack for Synapse + Radicale + widget/gateway development.
+- [x] Establish a small fixture library of representative ICS files in `fixtures/ical/`.
+- [x] Add pinned Synapse + Matrix-authenticated Radicale services in `dev/`; gateway/widget join in M2.
 - [ ] Configure main-branch protection after CI status checks exist.
 
 **Exit:** a contributor can clone the fork, run the inherited tests/build, understand the target architecture, and cannot accidentally publish under Nordeck names.

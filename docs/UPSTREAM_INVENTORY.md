@@ -122,11 +122,14 @@ Some meeting-specific components may contain generally useful UI or Matrix patte
 
 ## Naming migration
 
-Inherited names are intentionally present in the baseline:
+M0 renamed active fork identity to:
 
-- `matrix-meetings-widget`
-- `matrix-meetings-bot`
-- `@nordeck/matrix-meetings-*`
-- NeoDateFix user-facing strings
+- `matrix-calendar-widget/`
+- `matrix-calendar-server/`
+- `@matrix-calendar-widget/widget`
+- `@matrix-calendar-widget/server`
+- `@matrix-calendar-widget/calendar`
+- fork-owned Docker/Helm names and GitHub URLs
+- Matrix Calendar user-facing branding
 
-M0 owns renaming. Functional feature PRs should not opportunistically rename unrelated modules because it makes review and upstream provenance harder.
+Historical changelogs, NOTICE files, and upstream provenance intentionally retain NeoDateFix/Nordeck names. Meeting-specific internal domain concepts remain until later milestones replace them behind tests.

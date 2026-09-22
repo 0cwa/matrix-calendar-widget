@@ -1,3 +1,4 @@
+/* Modified for Matrix Calendar Widget fork, 2026. */
 /*
  * Copyright 2022 Nordeck IT + Consulting GmbH
  *
@@ -44,7 +45,7 @@ test.describe('Recurring Meetings', () => {
 
     await aliceElementWebPage.switchToRoom('My Meeting');
 
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
 
     await aliceElementWebPage.approveWidgetIdentity();
 

@@ -1,0 +1,7 @@
+apiVersion: v2
+name: matrix-calendar-widget
+description: A Matrix team calendar widget for Element and compatible Matrix clients
+type: application
+version: 0.2.0
+appVersion: "0.0.0"
+home: https://github.com/0cwa/matrix-calendar-widget

@@ -32,6 +32,14 @@ jobs:
       - name: Check formatting
         run: yarn prettier:check
 
+      - name: Check fork identity
+        run: bash scripts/check-fork-identity.sh
+
+      - name: Validate local integration stack
+        run: |
+          bash -n dev/up.sh
+          docker compose -f dev/compose.yaml config >/dev/null
+
       - name: Check dependencies
         run: yarn depcheck
 
@@ -54,25 +62,25 @@ jobs:
         run: yarn install --frozen-lockfile
 
       - name: Lint calendar package
-        run: yarn workspace @nordeck/matrix-meetings-calendar lint
+        run: yarn workspace @matrix-calendar-widget/calendar lint
 
       - name: Test calendar package
-        run: yarn workspace @nordeck/matrix-meetings-calendar test:all
+        run: yarn workspace @matrix-calendar-widget/calendar test:all
 
       - name: Build calendar package
-        run: yarn workspace @nordeck/matrix-meetings-calendar build
+        run: yarn workspace @matrix-calendar-widget/calendar build
 
       - name: Lint widget
-        run: yarn workspace @nordeck/matrix-meetings-widget lint
+        run: yarn workspace @matrix-calendar-widget/widget lint
 
       - name: Check widget translations
-        run: yarn workspace @nordeck/matrix-meetings-widget translate --ci --dry-run
+        run: yarn workspace @matrix-calendar-widget/widget translate --ci --dry-run
 
       - name: Test widget
-        run: yarn workspace @nordeck/matrix-meetings-widget test:all
+        run: yarn workspace @matrix-calendar-widget/widget test:all
 
       - name: Build widget
-        run: yarn workspace @nordeck/matrix-meetings-widget build
+        run: yarn workspace @matrix-calendar-widget/widget build
 
   server:
     name: Server and bot
@@ -90,13 +98,13 @@ jobs:
         run: yarn install --frozen-lockfile
 
       - name: Lint server
-        run: yarn workspace @nordeck/matrix-meetings-bot lint
+        run: yarn workspace @matrix-calendar-widget/server lint
 
       - name: Check server translations
-        run: yarn workspace @nordeck/matrix-meetings-bot translate --ci --dry-run
+        run: yarn workspace @matrix-calendar-widget/server translate --ci --dry-run
 
       - name: Test server
-        run: yarn workspace @nordeck/matrix-meetings-bot test:all
+        run: yarn workspace @matrix-calendar-widget/server test:all
 
       - name: Build server
-        run: yarn workspace @nordeck/matrix-meetings-bot build
+        run: yarn workspace @matrix-calendar-widget/server build

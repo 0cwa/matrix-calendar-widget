@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//External Client//EN
+X-WR-CALNAME:External calendar
+X-CUSTOM-CALENDAR-PROPERTY:preserve-calendar-value
+BEGIN:VEVENT
+UID:unknown@example.test
+DTSTAMP:20260922T120000Z
+DTSTART:20261003T100000Z
+DTEND:20261003T103000Z
+SUMMARY:Round-trip preservation
+X-CUSTOM-FLAG:preserve-me
+X-CLIENT-METADATA;X-PARAM=preserve-param:preserve-value
+ATTACH;FMTTYPE=application/pdf:https://example.test/files/agenda.pdf
+END:VEVENT
+END:VCALENDAR

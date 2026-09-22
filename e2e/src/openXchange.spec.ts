@@ -1,3 +1,4 @@
+/* Modified for Matrix Calendar Widget fork, 2026. */
 /*
  * Copyright 2022 Nordeck IT + Consulting GmbH
  *
@@ -50,7 +51,7 @@ test.describe('OpenXchange', () => {
     );
     await expect(aliceJitsiWidgetPage.joinConferenceButton).toBeVisible();
 
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
 
     const meetingDetails = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
@@ -74,7 +75,7 @@ test.describe('OpenXchange', () => {
 
     expect(await aliceElementWebPage.getWidgets()).toEqual([
       'Breakout Sessions',
-      'NeoDateFix Details',
+      'Calendar Details',
       'Video Conference',
     ]);
   });
@@ -100,7 +101,7 @@ test.describe('OpenXchange', () => {
 
     await aliceElementWebPage.acceptRoomInvitation();
 
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
 
     await expect(
       aliceCockpitWidgetPage.getMeeting().meetingTimeRangeText,
@@ -129,7 +130,7 @@ test.describe('OpenXchange', () => {
     await alicePage.goto(meetingUrl);
     await aliceElementWebPage.acceptRoomInvitation();
 
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
 
     const meetingDetails = aliceCockpitWidgetPage.getMeeting();
     await expect(meetingDetails.meetingTimeRangeText).toHaveText(
@@ -225,7 +226,7 @@ test.describe('OpenXchange', () => {
 
     await aliceElementWebPage.acceptRoomInvitation();
 
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
 
     await expect(
       aliceCockpitWidgetPage.getMeeting().meetingTimeRangeText,
@@ -283,7 +284,7 @@ test.describe('OpenXchange', () => {
 
     await aliceElementWebPage.acceptRoomInvitation();
 
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
 
     await aliceElementWebPage.approveWidgetIdentity();
 

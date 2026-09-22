@@ -1,7 +1,7 @@
 {
   "name": "e2e",
-  "description": "End-to-end tests for NeoDateFix",
-  "author": "Nordeck IT + Consulting GmbH",
+  "description": "End-to-end tests for Matrix Calendar Widget",
+  "author": "Matrix Calendar Widget contributors",
   "license": "Apache-2.0",
   "version": "0.0.0",
   "private": true,
@@ -35,9 +35,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/nordeck/matrix-meetings.git"
+    "url": "https://github.com/0cwa/matrix-calendar-widget.git"
   },
   "bugs": {
-    "url": "https://github.com/nordeck/matrix-meetings/issues"
+    "url": "https://github.com/0cwa/matrix-calendar-widget/issues"
   }
 }

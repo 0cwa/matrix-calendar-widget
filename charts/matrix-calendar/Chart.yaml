@@ -1,0 +1,14 @@
+apiVersion: v2
+name: matrix-calendar
+description: A helper chart to deploy the Matrix Calendar widget and server
+type: application
+version: 0.3.0
+appVersion: "0.0.0"
+home: https://github.com/0cwa/matrix-calendar-widget
+dependencies:
+  - name: matrix-calendar-widget
+    version: "*"
+    repository: "file://../matrix-calendar-widget"
+  - name: matrix-calendar-server
+    version: "*"
+    repository: "file://../matrix-calendar-server"

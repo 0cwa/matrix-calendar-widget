@@ -2,8 +2,8 @@
   "name": "matrix-calendar-widget",
   "private": true,
   "workspaces": [
-    "matrix-meetings-widget",
-    "matrix-meetings-bot",
+    "matrix-calendar-widget",
+    "matrix-calendar-server",
     "e2e",
     "packages/*"
   ],
@@ -36,11 +36,11 @@
     "yarn": ">=1.22.1 <2.0.0"
   },
   "scripts": {
-    "start": "yarn workspace @nordeck/matrix-meetings-widget start",
-    "dev": "yarn workspace @nordeck/matrix-meetings-widget dev",
+    "start": "yarn workspace @matrix-calendar-widget/widget start",
+    "dev": "yarn workspace @matrix-calendar-widget/widget dev",
     "build": "yarn workspaces run build",
     "tsc": "yarn workspaces run tsc",
-    "test": "yarn workspace @nordeck/matrix-meetings-widget test",
+    "test": "yarn workspace @matrix-calendar-widget/widget test",
     "test:all": "yarn workspaces run test:all",
     "lint": "yarn workspaces run lint",
     "depcheck": "yarn depcheck:root && yarn workspaces run depcheck",
@@ -53,7 +53,10 @@
     "prettier:write": "prettier --write .",
     "translate": "yarn workspaces run translate",
     "e2e": "yarn workspace e2e e2e",
-    "ci": "yarn prettier:check && yarn depcheck && yarn lint && yarn tsc && yarn test:all && yarn build"
+    "ci": "yarn prettier:check && yarn depcheck && yarn lint && yarn tsc && yarn test:all && yarn build",
+    "dev:services:up": "bash dev/up.sh",
+    "dev:services:down": "docker compose -f dev/compose.yaml down",
+    "dev:services:reset": "docker compose -f dev/compose.yaml down -v --remove-orphans"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [

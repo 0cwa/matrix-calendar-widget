@@ -1,0 +1,14 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Matrix Calendar Widget//Fixtures//EN
+BEGIN:VEVENT
+UID:folded-escaped@example.test
+DTSTAMP:20260922T120000Z
+DTSTART:20261006T100000Z
+DTEND:20261006T110000Z
+SUMMARY:Escaped\, semicolon\; and backslash\\ text
+DESCRIPTION:First line\nSecond line with a comma\, a semicolon\; and a long
+ folded value that continues on the next physical content line without losing data.
+LOCATION:Building A\, Floor 2
+END:VEVENT
+END:VCALENDAR

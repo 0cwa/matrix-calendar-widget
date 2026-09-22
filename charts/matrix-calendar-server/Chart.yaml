@@ -1,0 +1,7 @@
+apiVersion: v2
+name: matrix-calendar-server
+description: Matrix Calendar gateway, bot, and notification service
+type: application
+version: 0.1.1
+appVersion: "0.0.0"
+home: https://github.com/0cwa/matrix-calendar-widget

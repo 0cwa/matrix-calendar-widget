@@ -1,0 +1,32 @@
+name: matrix-calendar-dev
+
+services:
+  synapse:
+    image: ghcr.io/element-hq/synapse:v1.161.0
+    environment:
+      SYNAPSE_SERVER_NAME: localhost
+      SYNAPSE_REPORT_STATS: 'no'
+    ports:
+      - '8008:8008'
+    volumes:
+      - synapse-data:/data
+
+  radicale:
+    image: ghcr.io/etkecc/radicale:3.8.0.0
+    depends_on:
+      - synapse
+    environment:
+      TAKE_FILE_OWNERSHIP: 'true'
+      RADICALE_CONFIG_SERVER_HOSTS: '0.0.0.0:5232'
+      RADICALE_CONFIG_AUTH_TYPE: radicale_auth_matrix
+      RADICALE_CONFIG_AUTH_MATRIX_SERVER: 'http://synapse:8008'
+      RADICALE_CONFIG_RIGHTS_TYPE: owner_only
+      RADICALE_CONFIG_STORAGE_FILESYSTEM_FOLDER: /data/collections
+    ports:
+      - '5232:5232'
+    volumes:
+      - radicale-data:/data
+
+volumes:
+  synapse-data:
+  radicale-data:

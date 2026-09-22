@@ -59,15 +59,13 @@ Any bug caused by an ICS sample should add a minimized regression fixture.
 
 ## Integration environment
 
-M0 will add a reproducible development stack containing at least:
+A pinned Synapse + Matrix-authenticated Radicale stack lives in [dev/](../dev/README.md).
 
-- Matrix homeserver,
-- Radicale,
-- the calendar gateway/bot,
-- the widget,
-- optionally an Element Web instance or test harness.
+```bash
+yarn dev:services:up
+```
 
-Until that stack lands, use inherited widget/bot development instructions where applicable.
+This provides the stable external integration targets now. The calendar gateway/widget will join the stack in M2 once their final API/auth configuration exists.
 
 ## Code review expectations
 

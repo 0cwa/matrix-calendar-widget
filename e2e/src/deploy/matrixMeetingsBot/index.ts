@@ -1,3 +1,4 @@
+/* Modified for Matrix Calendar Widget fork, 2026. */
 /*
  * Copyright 2022 Nordeck IT + Consulting GmbH
  *
@@ -23,7 +24,7 @@ export async function startMatrixMeetingsBot({
   baseURL = 'http://localhost:3000',
   homeserverUrl,
   elementWebUrl,
-  containerImage = 'nordeck/matrix-meetings-bot',
+  containerImage = '0cwa/matrix-calendar-server',
 }: {
   baseURL: string | undefined;
   homeserverUrl: string;

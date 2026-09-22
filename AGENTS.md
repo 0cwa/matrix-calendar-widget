@@ -73,7 +73,7 @@ Also verify:
 
 ## Fork hygiene
 
-The current source contains inherited names such as `matrix-meetings-widget`, `matrix-meetings-bot`, and `@nordeck/*`. Rename them only in the dedicated fork-hygiene workstream. Until then, existing names are implementation details, not product terminology.
+Active fork identity now uses `matrix-calendar-widget`, `matrix-calendar-server`, and the `@matrix-calendar-widget/*` workspace scope. Historical upstream names are allowed only in provenance, NOTICE, and changelog material. CI enforces this with `scripts/check-fork-identity.sh`.
 
 When code is substantially modified from upstream, preserve required copyright headers and follow Apache-2.0 notice requirements.
 

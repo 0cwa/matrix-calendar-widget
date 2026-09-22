@@ -1,8 +1,8 @@
 *
 !/package.json
 !/yarn.lock
-!/matrix-meetings-bot/package.json
-!/matrix-meetings-bot/conf
-!/matrix-meetings-bot/lib
+!/matrix-calendar-server/package.json
+!/matrix-calendar-server/conf
+!/matrix-calendar-server/lib
 !/packages/calendar/package.json
 !/packages/calendar/lib

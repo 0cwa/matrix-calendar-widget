@@ -19,7 +19,7 @@ The primary product is a responsive Matrix widget for Element and other widget-c
 
 The repository currently contains the pinned NeoDateFix upstream codebase. Its UI, Matrix widget plumbing, recurrence controls, calendar rendering, bot structure, tests, and deployment patterns are valuable starting points, but its meeting-room data model is **not** the target architecture.
 
-Some directory and package names still contain `matrix-meetings` / `@nordeck`. They are intentionally left intact until the dedicated fork-hygiene milestone so renaming does not get mixed with functional work.
+Active fork directories, package scopes, Docker/Helm targets, and user-facing branding have been renamed to Matrix Calendar. Historical changelogs, NOTICE files, and upstream provenance intentionally retain NeoDateFix/Nordeck names. The inherited meeting-room **domain model** remains temporarily and will be replaced behind tested seams.
 
 ## Start here
 
@@ -42,7 +42,7 @@ yarn ci
 yarn dev
 ```
 
-The inherited code has its own local development requirements; see the existing package READMEs while the fork is being renamed.
+For Matrix/Radicale integration work, start the pinned local services with `yarn dev:services:up`. See [dev/README.md](./dev/README.md).
 
 ## Upstream
 
