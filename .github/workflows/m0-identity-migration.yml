@@ -86,7 +86,7 @@ jobs:
           for path in root.rglob("*"):
               if not path.is_file() or ".git" in path.parts:
                   continue
-              if path.parts[:3] == (".github", "workflows", "m0-identity-migration.yml"):
+              if len(path.parts) >= 2 and path.parts[0] == ".github" and path.parts[1] == "workflows":
                   continue
               if path.name in {"CHANGELOG.md", "NOTICE"}:
                   continue
@@ -195,8 +195,8 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git restore .github/workflows
           git add -A
-          git reset .github/workflows/m0-identity-migration.yml
           if git diff --cached --quiet; then
             echo "No migration changes"
             exit 0
