@@ -1,0 +1,205 @@
+name: M0 fork identity migration
+
+on:
+  push:
+    branches:
+      - chore/m0-fork-hygiene
+    paths:
+      - .github/workflows/m0-identity-migration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: yarn
+
+      - name: Rename fork directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          git mv matrix-meetings-widget matrix-calendar-widget
+          git mv matrix-meetings-bot matrix-calendar-server
+          git mv charts/matrix-meetings-widget charts/matrix-calendar-widget
+          git mv charts/matrix-meetings-bot charts/matrix-calendar-server
+          git mv charts/matrix-meetings charts/matrix-calendar
+
+      - name: Rewrite fork identity
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+
+          root = Path(".")
+          historical = {
+              Path("docs/UPSTREAM.md"),
+              Path("docs/adrs/adr004-hard-fork-neodatefix.md"),
+          }
+
+          text_suffixes = {
+              ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml", ".yml", ".md",
+              ".txt", ".html", ".toml", ".tpl", ".sh", ".env", ".example",
+          }
+          text_names = {
+              "Dockerfile", ".dockerignore", ".gitignore", ".editorconfig",
+              ".prettierignore", "Chart.yaml", "values.yaml", "NOTICE",
+          }
+
+          identity_replacements = [
+              ("@nordeck/matrix-meetings-calendar", "@matrix-calendar-widget/calendar"),
+              ("@nordeck/matrix-meetings-widget", "@matrix-calendar-widget/widget"),
+              ("@nordeck/matrix-meetings-bot", "@matrix-calendar-widget/server"),
+              ("ghcr.io/nordeck/matrix-meetings-widget", "ghcr.io/0cwa/matrix-calendar-widget"),
+              ("ghcr.io/nordeck/matrix-meetings-bot", "ghcr.io/0cwa/matrix-calendar-server"),
+              ("nordeck/matrix-meetings-widget", "0cwa/matrix-calendar-widget"),
+              ("nordeck/matrix-meetings-bot", "0cwa/matrix-calendar-server"),
+              ("https://github.com/nordeck/matrix-meetings.git", "https://github.com/0cwa/matrix-calendar-widget.git"),
+              ("matrix-meetings-widget", "matrix-calendar-widget"),
+              ("matrix-meetings-bot", "matrix-calendar-server"),
+          ]
+
+          branding_replacements = [
+              ("NeoDateFix Details", "Calendar Details"),
+              ("NeoDateFix Widget", "Matrix Calendar Widget"),
+              ("NeoDateFix-Bot", "Matrix Calendar Bot"),
+              ("NeoDateFix Bot", "Matrix Calendar Bot"),
+              ("NeoDateFix", "Matrix Calendar"),
+              ("net.nordeck.neodatefix:calendar", "io.github.0cwa.matrix-calendar-widget:calendar"),
+          ]
+
+          runtime_roots = {
+              "matrix-calendar-widget",
+              "matrix-calendar-server",
+              "e2e",
+              "charts",
+          }
+
+          modified_source = set()
+
+          for path in root.rglob("*"):
+              if not path.is_file() or ".git" in path.parts:
+                  continue
+              if path.parts[:3] == (".github", "workflows", "m0-identity-migration.yml"):
+                  continue
+              if path.name in {"CHANGELOG.md", "NOTICE"}:
+                  continue
+              if path in historical:
+                  continue
+              if path.suffix not in text_suffixes and path.name not in text_names:
+                  continue
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except UnicodeDecodeError:
+                  continue
+
+              original = text
+              for old, new in identity_replacements:
+                  text = text.replace(old, new)
+
+              if path.parts and path.parts[0] in runtime_roots:
+                  for old, new in branding_replacements:
+                      text = text.replace(old, new)
+
+              if path == Path("docs/configuration.md"):
+                  for old, new in branding_replacements:
+                      text = text.replace(old, new)
+
+              if text != original:
+                  path.write_text(text, encoding="utf-8")
+                  if path.suffix in {".ts", ".tsx", ".js", ".jsx"}:
+                      modified_source.add(path)
+
+          # Package metadata.
+          package_updates = {
+              Path("matrix-calendar-widget/package.json"): {
+                  "name": "@matrix-calendar-widget/widget",
+                  "description": "A Matrix team calendar widget for Element and compatible Matrix clients",
+              },
+              Path("matrix-calendar-server/package.json"): {
+                  "name": "@matrix-calendar-widget/server",
+                  "description": "Matrix Calendar gateway, bot, and notification service",
+              },
+              Path("packages/calendar/package.json"): {
+                  "name": "@matrix-calendar-widget/calendar",
+                  "description": "Calendar domain and recurrence utilities for Matrix Calendar Widget",
+              },
+              Path("e2e/package.json"): {
+                  "description": "End-to-end tests for Matrix Calendar Widget",
+              },
+          }
+          for path, updates in package_updates.items():
+              data = json.loads(path.read_text())
+              data.update(updates)
+              data["repository"] = {
+                  "type": "git",
+                  "url": "https://github.com/0cwa/matrix-calendar-widget.git",
+              }
+              data["bugs"] = {
+                  "url": "https://github.com/0cwa/matrix-calendar-widget/issues",
+              }
+              if path.name == "package.json" and path.parts[0] != "e2e":
+                  data["author"] = "Matrix Calendar Widget contributors"
+              path.write_text(json.dumps(data, indent=2) + "\n")
+
+          # Jest mapper used by the server for the local shared package.
+          server_pkg = Path("matrix-calendar-server/package.json")
+          data = json.loads(server_pkg.read_text())
+          mapper = data.get("jest", {}).get("moduleNameMapper", {})
+          mapper.pop("matrix-meetings-(.*)", None)
+          mapper["@matrix-calendar-widget/(.*)"] = "<rootDir>/../packages/$1/src/index.ts"
+          data["jest"]["moduleNameMapper"] = mapper
+          server_pkg.write_text(json.dumps(data, indent=2) + "\n")
+
+          # Add explicit modification notice to inherited JS/TS files touched above.
+          notice = "/* Modified for Matrix Calendar Widget fork, 2026. */\n"
+          for path in sorted(modified_source):
+              text = path.read_text()
+              if not text.startswith(notice):
+                  path.write_text(notice + text)
+
+          # Add a root NOTICE for the derivative work.
+          Path("NOTICE").write_text(
+              """MATRIX CALENDAR WIDGET
+          ----
+
+          This work is derived from Nordeck's NeoDateFix / matrix-meetings project,
+          licensed under the Apache License, Version 2.0.
+
+          Original upstream baseline:
+          https://github.com/nordeck/matrix-meetings
+          commit 2d3011f665af04c3cd376c388f7ae3bcb06bba25
+
+          Copyright notices and NOTICE files from the upstream work are retained
+          where applicable.
+
+          Modifications for Matrix Calendar Widget began in 2026.
+          """
+          )
+
+      - name: Refresh workspace lockfile
+        run: yarn install --ignore-scripts
+
+      - name: Format changed files
+        run: yarn prettier:write
+
+      - name: Commit migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git reset .github/workflows/m0-identity-migration.yml
+          if git diff --cached --quiet; then
+            echo "No migration changes"
+            exit 0
+          fi
+          git commit -m "chore: rename NeoDateFix fork identity"
+          git push origin HEAD:chore/m0-fork-hygiene
