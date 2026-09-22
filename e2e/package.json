@@ -1,7 +1,7 @@
 {
   "name": "e2e",
   "description": "End-to-end tests for Matrix Calendar Widget",
-  "author": "Nordeck IT + Consulting GmbH",
+  "author": "Matrix Calendar Widget contributors",
   "license": "Apache-2.0",
   "version": "0.0.0",
   "private": true,
