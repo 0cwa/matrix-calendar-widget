@@ -1,6 +1,5 @@
-/* Modified for Matrix Calendar Widget fork, 2026. */
 /*
- * Copyright 2023 Nordeck IT + Consulting GmbH
+ * Copyright 2026 Matrix Calendar Widget contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +14,16 @@
  * limitations under the License.
  */
 
-export * from './model';
-export * from './repository';
-export * from './testing';
-export * from './utils';
+export {
+  CalendarRepositoryError,
+} from './calendarRepository';
+export type {
+  CalendarRepository,
+  CalendarRepositoryErrorCode,
+} from './calendarRepository';
+export {
+  InMemoryCalendarRepository,
+} from './inMemoryCalendarRepository';
+export type {
+  InMemoryCalendarRepositoryOptions,
+} from './inMemoryCalendarRepository';
