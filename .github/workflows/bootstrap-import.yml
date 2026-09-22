@@ -26,8 +26,7 @@ jobs:
           tmp="$(mktemp -d)"
           git clone --no-checkout https://github.com/nordeck/matrix-meetings.git "$tmp/upstream"
           git -C "$tmp/upstream" checkout 2d3011f665af04c3cd376c388f7ae3bcb06bba25
-          rsync -a --exclude='.git' "$tmp/upstream/" ./
-          rm -f .github/workflows/bootstrap-import.yml
+          rsync -a --exclude='.git' --exclude='.github/workflows' "$tmp/upstream/" ./
           rm -rf "$tmp"
 
       - name: Commit upstream baseline
