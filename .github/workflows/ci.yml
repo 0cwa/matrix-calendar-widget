@@ -32,6 +32,14 @@ jobs:
       - name: Check formatting
         run: yarn prettier:check
 
+      - name: Check fork identity
+        run: bash scripts/check-fork-identity.sh
+
+      - name: Validate local integration stack
+        run: |
+          bash -n dev/up.sh
+          docker compose -f dev/compose.yaml config >/dev/null
+
       - name: Check dependencies
         run: yarn depcheck
 
