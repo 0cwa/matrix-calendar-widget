@@ -6,7 +6,7 @@ _Last updated: 2026-09-22_
 
 **M0 — Fork hygiene and safe development baseline**
 
-The pinned NeoDateFix codebase is imported and the fork architecture/agent workflow has been established. Functional CalDAV migration has not started yet.
+The pinned NeoDateFix codebase is imported, fork identity has been renamed, CI is fork-owned, iCalendar fixtures exist, and a pinned Synapse + Matrix-authenticated Radicale development stack is available. Functional CalDAV migration has not started yet.
 
 ## Baseline
 
@@ -28,11 +28,6 @@ The pinned NeoDateFix codebase is imported and the fork architecture/agent workf
 
 ## Next engineering move
 
-After the scaffold PR is green and merged, work #1 first:
-
-1. remove/rename inherited publishing identifiers,
-2. establish ICS fixtures,
-3. add a reproducible Synapse + Radicale development stack,
-4. then begin #2 with the calendar-domain/repository seam.
+Finish M0 by enabling main-branch protection once the stable check names are confirmed. Then begin #2 with the calendar-domain/repository seam.
 
 Do not start by rewriting the UI. Reuse the inherited calendar interface and replace its data source incrementally.
