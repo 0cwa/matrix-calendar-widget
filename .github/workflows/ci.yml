@@ -59,6 +59,9 @@ jobs:
       - name: Test calendar package
         run: yarn workspace @nordeck/matrix-meetings-calendar test:all
 
+      - name: Build calendar package
+        run: yarn workspace @nordeck/matrix-meetings-calendar build
+
       - name: Lint widget
         run: yarn workspace @nordeck/matrix-meetings-widget lint
 
