@@ -26,6 +26,7 @@ These areas solve problems the fork still has:
 ### Widget calendar surfaces
 
 Inherited:
+
 - `MeetingsCalendar`
 - `MeetingsList`
 - `MeetingsFilter`
@@ -36,6 +37,7 @@ Inherited:
 - `ScheduleMeetingModal`
 
 Direction:
+
 - replace meeting entities with calendar-domain events,
 - source data from `CalendarRepository`/gateway APIs,
 - keep responsive and accessibility behavior,
@@ -46,6 +48,7 @@ Direction:
 Inherited `packages/calendar` contains useful recurrence/date logic.
 
 Direction:
+
 - audit semantics against RFC 5545 and real ICS fixtures,
 - separate generic calendar-domain logic from NeoDateFix meeting assumptions,
 - add round-trip and DST regression coverage,
@@ -56,6 +59,7 @@ Direction:
 Inherited `meetingsApi` and selectors encode Matrix meeting-room persistence.
 
 Direction:
+
 - introduce calendar API/repository interfaces,
 - migrate selectors/view models incrementally,
 - remove Matrix meeting event dependencies after the UI is fully routed through the new seam.
@@ -65,6 +69,7 @@ Direction:
 Inherited NestJS bot has useful Matrix lifecycle, logging, configuration, and test patterns.
 
 Direction:
+
 - become the calendar gateway + notification bot,
 - add Matrix OpenID validation,
 - add room authorization policy,
@@ -77,6 +82,7 @@ Direction:
 Keep the Playwright/Testcontainers approach.
 
 Direction:
+
 - replace meeting-room scenarios with Synapse + Radicale calendar scenarios,
 - preserve accessibility coverage,
 - add another CalDAV client or direct CalDAV assertions for interoperability checks.
@@ -86,6 +92,7 @@ Direction:
 Keep as reference only until renamed and redesigned.
 
 Direction:
+
 - do not publish inherited targets,
 - eventually produce fork-owned widget and gateway images,
 - add Radicale integration examples without assuming Radicale must be bundled.
