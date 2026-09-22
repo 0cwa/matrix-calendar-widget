@@ -1,6 +1,6 @@
 {
   "short_name": "Matrix Calendar Widget",
-  "name": "A meetings widget for the Element messenger",
+  "name": "A Matrix team calendar widget for Element and compatible Matrix clients",
   "icons": [
     {
       "src": "favicon.ico",
