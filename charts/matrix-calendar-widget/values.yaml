@@ -74,7 +74,7 @@ tolerations: []
 affinity: {}
 
 settings:
-  hostname: meetings.local
+  hostname: matrix-calendar-widget.local
 
 # Extra env variables to pass to the container
 env: []
