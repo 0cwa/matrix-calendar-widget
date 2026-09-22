@@ -14,16 +14,10 @@
  * limitations under the License.
  */
 
-export {
-  CalendarRepositoryError,
-} from './calendarRepository';
+export { CalendarRepositoryError } from './calendarRepository';
 export type {
   CalendarRepository,
   CalendarRepositoryErrorCode,
 } from './calendarRepository';
-export {
-  InMemoryCalendarRepository,
-} from './inMemoryCalendarRepository';
-export type {
-  InMemoryCalendarRepositoryOptions,
-} from './inMemoryCalendarRepository';
+export { InMemoryCalendarRepository } from './inMemoryCalendarRepository';
+export type { InMemoryCalendarRepositoryOptions } from './inMemoryCalendarRepository';

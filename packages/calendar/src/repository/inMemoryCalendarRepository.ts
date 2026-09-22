@@ -40,7 +40,10 @@ export type InMemoryCalendarRepositoryOptions = {
 
 export class InMemoryCalendarRepository implements CalendarRepository {
   private readonly calendars = new Map<CalendarId, Calendar>();
-  private readonly events = new Map<CalendarId, Map<CalendarEventId, CalendarEvent>>();
+  private readonly events = new Map<
+    CalendarId,
+    Map<CalendarEventId, CalendarEvent>
+  >();
   private readonly idFactory: (sequence: number) => CalendarEventId;
   private sequence = 1;
 
@@ -241,16 +244,15 @@ function eventIntersectsRange(
   return interval.start < range.end && interval.end > range.start;
 }
 
-function eventInterval(
-  event: CalendarEvent,
-  calendar: Calendar,
-): ParsedRange {
+function eventInterval(event: CalendarEvent, calendar: Calendar): ParsedRange {
   if (event.timing.type === 'timed') {
     return timedInterval(event.timing);
   }
 
   const zone = calendar.timezone ?? 'UTC';
-  const start = DateTime.fromISO(event.timing.startDate, { zone }).startOf('day');
+  const start = DateTime.fromISO(event.timing.startDate, { zone }).startOf(
+    'day',
+  );
   const end = DateTime.fromISO(event.timing.endDate, { zone }).startOf('day');
 
   return {
@@ -323,7 +325,6 @@ function cloneCalendarEventInput(
     recurrence: cloneRecurrence(input.recurrence),
   };
 }
-
 
 function cloneRecurrence(
   recurrence: CalendarEvent['recurrence'],

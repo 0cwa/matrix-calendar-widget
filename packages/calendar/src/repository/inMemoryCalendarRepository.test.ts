@@ -14,15 +14,8 @@
  * limitations under the License.
  */
 
-import {
-  Calendar,
-  CalendarEvent,
-  CalendarEventInput,
-} from '../model';
-import {
-  CalendarRepositoryError,
-  InMemoryCalendarRepository,
-} from './index';
+import { Calendar, CalendarEvent, CalendarEventInput } from '../model';
+import { CalendarRepositoryError, InMemoryCalendarRepository } from './index';
 
 const calendars: Calendar[] = [
   {
@@ -194,9 +187,11 @@ describe('InMemoryCalendarRepository', () => {
 
     await repository.deleteEvent('team', 'planning');
 
-    await expect(repository.getEvent('team', 'planning')).rejects.toMatchObject({
-      code: 'event-not-found',
-    });
+    await expect(repository.getEvent('team', 'planning')).rejects.toMatchObject(
+      {
+        code: 'event-not-found',
+      },
+    );
   });
 
   it.each(['create', 'update', 'delete'] as const)(
