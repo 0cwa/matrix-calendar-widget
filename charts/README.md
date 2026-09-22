@@ -1,6 +1,6 @@
 # Matrix Calendar Helm charts
 
-These charts are inherited from NeoDateFix and have been renamed for this fork.
+These charts are retained from the upstream meeting-widget baseline and have been renamed for this fork.
 
 > **Pre-alpha:** chart publishing is intentionally disabled. Treat these as deployment scaffolding until M8 validates the final gateway configuration and release process.
 
