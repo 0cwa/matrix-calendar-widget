@@ -44,3 +44,5 @@ jobs:
           git commit -m "chore: import NeoDateFix upstream baseline" \
             -m "Upstream: nordeck/matrix-meetings@2d3011f665af04c3cd376c388f7ae3bcb06bba25"
           git push origin HEAD:main
+
+# second push intentionally triggers this one-shot workflow
