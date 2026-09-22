@@ -12,7 +12,7 @@ Runtime configuration can be performed via environment variables.
 These environment variables apply to the widget container:
 
 ```sh
-# the base url of the NeoDateFix bot API
+# the base url of the Matrix Calendar bot API
 REACT_APP_API_BASE_URL=http://meetings-widget-bot.example.com
 
 # the userid of the bot user
@@ -54,17 +54,17 @@ HOMESERVER_URL=https://synapse.example.com
 # the access token of the matrix user of the bot
 ACCESS_TOKEN=syt_...
 
-# the url to the NeoDateFix widget that will be added to the planning room
+# the url to the Matrix Calendar widget that will be added to the planning room
 MEETINGWIDGET_URL='http://meetings-widget.example.com/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id'
 
-# optional - the name of the NeoDateFix widget that will be added to the planning room
-MEETINGWIDGET_NAME='NeoDateFix'
+# optional - the name of the Matrix Calendar widget that will be added to the planning room
+MEETINGWIDGET_NAME='Matrix Calendar'
 
 # the url to the cockpit widget that will be added to the meeting rooms
 MEETINGWIDGET_COCKPIT_URL='http://meetings-widget.example.com/cockpit/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id'
 
 # optional - the name of the cockpit widget that will be added to the meeting rooms
-MEETINGWIDGET_COCKPIT_NAME='NeoDateFix Details'
+MEETINGWIDGET_COCKPIT_NAME='Calendar Details'
 
 # the url to the breakout sessions widget that will be added to the meeting rooms
 BREAKOUT_SESSION_WIDGET_URL='http://meetings-widget.example.com/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id'
@@ -73,7 +73,7 @@ BREAKOUT_SESSION_WIDGET_URL='http://meetings-widget.example.com/#/?theme=$org.ma
 BREAKOUT_SESSION_WIDGET_NAME='Breakout Sessions'
 
 # optional - the name of the 1:1 chat room, when a user initiates a chat with the bot.
-CALENDAR_ROOM_NAME='NeoDateFix'
+CALENDAR_ROOM_NAME='Matrix Calendar'
 
 # optional - the log level (one of silent, fatal, error, warn, info, debug, trace)
 LOG_LEVEL=error
@@ -117,7 +117,7 @@ MATRIX_FILTER_APPLY=true
 # optional - configure the maximum number of events in the sync response. use a higher limit to reduce the risk of getting a "limited" sync where the homeserver skips events that will then not be registered by the bot.
 MATRIX_FILTER_TIMELINE_LIMIT=50
 
-# optional - enables workflow to invite the user into a private room and receive commands to help the user with adding the NeoDateFix widget to the room. this is triggered as soon as the bot user is invited into a room.
+# optional - enables workflow to invite the user into a private room and receive commands to help the user with adding the Matrix Calendar widget to the room. this is triggered as soon as the bot user is invited into a room.
 ENABLE_WELCOME_WORKFLOW=true
 
 # optional - default locale for bot-to-user communication

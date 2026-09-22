@@ -1,3 +1,4 @@
+/* Modified for Matrix Calendar Widget fork, 2026. */
 /*
  * Copyright 2024 Nordeck IT + Consulting GmbH
  *
@@ -57,7 +58,7 @@ test.describe('Encrypted Meeting Room', () => {
   }) => {
     expect(await aliceElementWebPage.getWidgets()).toEqual([
       'Breakout Sessions',
-      'NeoDateFix Details',
+      'Calendar Details',
       'Video Conference',
     ]);
 
@@ -66,7 +67,7 @@ test.describe('Encrypted Meeting Room', () => {
       'My Description',
     );
 
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
     const meetingDetails = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
     await expect(meetingDetails.meetingDescriptionText).toHaveText(
@@ -82,7 +83,7 @@ test.describe('Encrypted Meeting Room', () => {
     aliceElementWebPage,
     aliceCockpitWidgetPage,
   }) => {
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
 
     const meetingDetails = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
@@ -103,7 +104,7 @@ test.describe('Encrypted Meeting Room', () => {
     aliceCockpitWidgetPage,
     charlie,
   }) => {
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
 
     const meetingDetails = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
@@ -119,7 +120,7 @@ test.describe('Encrypted Meeting Room', () => {
     aliceElementWebPage,
     aliceCockpitWidgetPage,
   }) => {
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
     const meetingDetails = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
     const aliceEditMeetingWidgetPage = await meetingDetails.editMeeting();
@@ -136,14 +137,14 @@ test.describe('Encrypted Meeting Room', () => {
       .poll(async () => {
         return await aliceElementWebPage.getWidgets();
       })
-      .toEqual(['Breakout Sessions', 'NeoDateFix Details']);
+      .toEqual(['Breakout Sessions', 'Calendar Details']);
   });
 
   test('should enable the optional widget from within the meeting', async ({
     aliceElementWebPage,
     aliceCockpitWidgetPage,
   }) => {
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
     const meetingDetails = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
 
@@ -157,7 +158,7 @@ test.describe('Encrypted Meeting Room', () => {
       })
       .toEqual([
         'Breakout Sessions',
-        'NeoDateFix Details',
+        'Calendar Details',
         'Video Conference',
         'Video Conference (optional)',
       ]);
@@ -182,7 +183,7 @@ test.describe('Encrypted Meeting Room', () => {
     await bobElementWebPage.acceptRoomInvitation();
     await bobElementWebPage.sendMessage('I am Bob');
     await aliceElementWebPage.sendMessage('I am Alice');
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
     const meetingCard = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
     let aliceEditMeetingWidgetPage = await meetingCard.editMeeting();

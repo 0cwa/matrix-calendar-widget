@@ -1,0 +1,139 @@
+{
+  "name": "@matrix-calendar-widget/server",
+  "version": "2.8.7",
+  "description": "Matrix Calendar gateway, bot, and notification service",
+  "author": "Matrix Calendar Widget contributors",
+  "license": "Apache-2.0",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "scripts": {
+    "docker:build": "docker build -t 0cwa/matrix-calendar-server -f Dockerfile ..",
+    "docker:run": "dotenv -c development -- docker run --rm -e HOMESERVER_URL -e ACCESS_TOKEN -e USER_ID -e DATA_PATH -e ETHERPAD_URL -e MEETINGWIDGET_URL -e WHITEBOARD_URL -e JITSI_URL -e JITSI_NAME -e LOG_LEVEL -e WHITEBOARD_NAME -e ETHERPAD_NAME -e MEETINGWIDGET_NAME -e DELETE_ROOMS_AFTER_MINUTES -e MEETINGWIDGET_COCKPIT_URL -e MEETINGWIDGET_COCKPIT_NAME -e JITSI_DIAL_IN_JSON_URL -e JITSI_PIN_URL -e NODE_ENV -e LIST_TO_AUTO_INVITE_ON_MEETING_ROOM_CREATION -e ALLOW_PREVIEW_FOR_PUBLIC_ROOMS -e JITSI_AUTH -e BREAKOUT_SESSION_WIDGET_URL --name matrix-calendar-server 0cwa/matrix-calendar-server",
+    "docker:stop": "docker stop matrix-calendar-server",
+    "docker:remove": "yarn run docker:stop && docker rm -v matrix-calendar-server",
+    "docker:inspect": "docker inspect 0cwa/matrix-calendar-server",
+    "prestart": "yarn build",
+    "build": "nest build && yarn copyfiles && yarn copyImages",
+    "depcheck": "depcheck --ignores=\"@types/jest\"",
+    "start": "PORT=3001 nest start",
+    "start:dev": "PORT=3001 nest start --watch",
+    "start:debug": "PORT=3001 nest start --debug --watch",
+    "copyfiles": "copyfiles -E -u 1 src/static/locales/**/*.json lib",
+    "copyImages": "copyfiles -E -u 1 src/static/images/* lib",
+    "lint": "eslint . --max-warnings=0",
+    "translate": "i18next-cli extract --sync-primary",
+    "test": "jest --watch",
+    "test:all": "jest --coverage --watchAll=false",
+    "generate-disclaimer": "cp ../LICENSE ./lib/LICENSE.txt && cp NOTICE ./lib/NOTICE.txt && yarn licenses generate-disclaimer --prod >> ./lib/NOTICE.txt && yarn licenses list --prod --json --no-progress > ./lib/licenses.json"
+  },
+  "engines": {
+    "node": ">=20",
+    "yarn": ">=1.22.1 <2.0.0"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.22",
+    "@nestjs/config": "^3.3.0",
+    "@nestjs/core": "^11.1.28",
+    "@nestjs/microservices": "^10.4.22",
+    "@nestjs/platform-express": "^10.4.22",
+    "@nestjs/swagger": "^7.4.2",
+    "@matrix-calendar-widget/calendar": "1.0.1",
+    "@supercharge/promise-pool": "^3.2.0",
+    "base64url": "^3.0.1",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "express": "^4.21.2",
+    "html-entities": "^2.5.2",
+    "i18next": "^25.10.10",
+    "i18next-fs-backend": "^2.6.7",
+    "i18next-http-middleware": "^3.9.8",
+    "joi": "^17.13.3",
+    "lodash": "^4.18.1",
+    "luxon": "3.3.0",
+    "matrix-bot-sdk": "npm:@nordeck/matrix-bot-sdk@0.7.1-crypto.beta.12",
+    "mime-types": "^2.1.35",
+    "mustache": "^4.2.0",
+    "nestjs-pino": "^4.1.0",
+    "pino": "^9.2.0",
+    "pino-http": "^10.1.0",
+    "reflect-metadata": "^0.2.2",
+    "rfc4648": "^1.5.3",
+    "rrule": "^2.8.1",
+    "rxjs": "^7.8.0",
+    "uuid": "^11.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@nestjs/cli": "10.4.9",
+    "@types/jest": "^29.5.14",
+    "@types/lodash": "^4.17.15",
+    "@types/luxon": "3.2.2",
+    "@types/mime-types": "^2.1.4",
+    "@types/mustache": "^4.2.5",
+    "@types/node": "^20.19.39",
+    "@types/uuid": "^9.0.8",
+    "copyfiles": "^2.4.1",
+    "depcheck": "^1.4.7",
+    "dotenv-cli": "^7.4.2",
+    "eslint": "^9.39.4",
+    "eslint-plugin-notice": "^1.0.0",
+    "eslint-plugin-promise": "^7.2.1",
+    "i18next-cli": "^1.50.3",
+    "jest": "29.7.0",
+    "jest-fetch-mock": "3.0.3",
+    "ts-jest": "29.4.12",
+    "ts-mockito": "2.6.1",
+    "typescript-eslint": "^8.56.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "automock": false,
+    "resetMocks": true,
+    "setupFiles": [
+      "./setupJest.js"
+    ],
+    "preset": "ts-jest",
+    "verbose": true,
+    "transform": {
+      "^.+\\.(ts|tsx)$": "ts-jest"
+    },
+    "moduleDirectories": [
+      "lib",
+      "node_modules"
+    ],
+    "testRegex": "(/__tests__/.*|\\.(test|spec))\\.(ts|tsx|js)$",
+    "moduleFileExtensions": [
+      "ts",
+      "tsx",
+      "js"
+    ],
+    "setupFilesAfterEnv": [
+      "<rootDir>/setupTests.ts"
+    ],
+    "roots": [
+      "<rootDir>/src",
+      "<rootDir>/test"
+    ],
+    "moduleNameMapper": {
+      "@matrix-calendar-widget/(.*)": "<rootDir>/../packages/$1/src/index.ts"
+    }
+  },
+  "files": [
+    "test/*",
+    "lib/*",
+    "env/*",
+    "tsconfig.json",
+    "tslint.json"
+  ],
+  "directories": {
+    "lib": "lib"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0cwa/matrix-calendar-widget.git"
+  },
+  "bugs": {
+    "url": "https://github.com/0cwa/matrix-calendar-widget/issues"
+  },
+  "homepage": "https://github.com/nordeck/matrix-meetings#readme"
+}

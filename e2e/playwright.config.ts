@@ -1,3 +1,4 @@
+/* Modified for Matrix Calendar Widget fork, 2026. */
 /*
  * Copyright 2022 Nordeck IT + Consulting GmbH
  *
@@ -58,7 +59,7 @@ const config: PlaywrightTestConfig = {
 
   webServer: {
     command: `docker run --rm -p 3000:8080 -e REACT_APP_API_BASE_URL=* ${
-      process.env.IMAGE_ID ?? 'nordeck/matrix-meetings-widget'
+      process.env.IMAGE_ID ?? '0cwa/matrix-calendar-widget'
     }`,
     url: 'http://localhost:3000',
     timeout: 60_000,

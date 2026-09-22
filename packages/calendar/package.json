@@ -1,6 +1,6 @@
 {
-  "name": "@nordeck/matrix-meetings-calendar",
-  "description": "A calendar utils library",
+  "name": "@matrix-calendar-widget/calendar",
+  "description": "Calendar domain and recurrence utilities for Matrix Calendar Widget",
   "license": "Apache-2.0",
   "private": true,
   "version": "1.0.1",
@@ -44,5 +44,13 @@
     "setupFilesAfterEnv": [
       "<rootDir>/setupTests.ts"
     ]
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0cwa/matrix-calendar-widget.git"
+  },
+  "bugs": {
+    "url": "https://github.com/0cwa/matrix-calendar-widget/issues"
+  },
+  "author": "Matrix Calendar Widget contributors"
 }

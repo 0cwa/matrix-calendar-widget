@@ -1,0 +1,14 @@
+MATRIX CALENDAR WIDGET
+----
+
+This work is derived from Nordeck's NeoDateFix / matrix-meetings project,
+licensed under the Apache License, Version 2.0.
+
+Original upstream baseline:
+https://github.com/nordeck/matrix-meetings
+commit 2d3011f665af04c3cd376c388f7ae3bcb06bba25
+
+Copyright notices and NOTICE files from the upstream work are retained
+where applicable.
+
+Modifications for Matrix Calendar Widget began in 2026.

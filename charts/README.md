@@ -20,7 +20,7 @@ You can also use the `init` section to automatically create and log in a bot use
 To set the required values, you need to customize the `values.yaml` file of the charts. Here is an example of how to set the required values:
 
 ```yaml
-matrix-meetings-bot:
+matrix-calendar-server:
   settings:
     additionalEnv:
       - name: HOMESERVER_URL

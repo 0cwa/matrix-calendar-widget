@@ -124,8 +124,8 @@ Some meeting-specific components may contain generally useful UI or Matrix patte
 
 Inherited names are intentionally present in the baseline:
 
-- `matrix-meetings-widget`
-- `matrix-meetings-bot`
+- `matrix-calendar-widget`
+- `matrix-calendar-server`
 - `@nordeck/matrix-meetings-*`
 - NeoDateFix user-facing strings
 

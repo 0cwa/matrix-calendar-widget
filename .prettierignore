@@ -1,7 +1,7 @@
 **/build/
 **/coverage/
-matrix-meetings-bot/lib/
-matrix-meetings-bot/storage
+matrix-calendar-server/lib/
+matrix-calendar-server/storage
 packages/calendar/lib
 
 # Ignore the helm chart

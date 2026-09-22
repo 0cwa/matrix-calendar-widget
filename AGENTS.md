@@ -73,7 +73,7 @@ Also verify:
 
 ## Fork hygiene
 
-The current source contains inherited names such as `matrix-meetings-widget`, `matrix-meetings-bot`, and `@nordeck/*`. Rename them only in the dedicated fork-hygiene workstream. Until then, existing names are implementation details, not product terminology.
+The current source contains inherited names such as `matrix-calendar-widget`, `matrix-calendar-server`, and `@nordeck/*`. Rename them only in the dedicated fork-hygiene workstream. Until then, existing names are implementation details, not product terminology.
 
 When code is substantially modified from upstream, preserve required copyright headers and follow Apache-2.0 notice requirements.
 

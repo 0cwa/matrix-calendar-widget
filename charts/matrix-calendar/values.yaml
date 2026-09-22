@@ -1,0 +1,11 @@
+matrix-calendar-widget:
+  ## Don't prefix the chart name with the name of this helm release
+  fullnameOverride: matrix-calendar-widget
+
+  ## Add further settings for the widget here
+
+matrix-calendar-server:
+  ## Don't prefix the chart name with the name of this helm release
+  fullnameOverride: matrix-calendar-server
+
+  ## Add further settings for the bot here

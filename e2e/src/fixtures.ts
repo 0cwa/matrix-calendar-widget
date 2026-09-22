@@ -1,3 +1,4 @@
+/* Modified for Matrix Calendar Widget fork, 2026. */
 /*
  * Copyright 2022 Nordeck IT + Consulting GmbH
  *
@@ -92,7 +93,7 @@ export const test = base.extend<Fixtures>({
 
     const meetingsWidgetPage = new MeetingsWidgetPage(
       alicePage,
-      aliceElementWebPage.widgetByTitle('NeoDateFix'),
+      aliceElementWebPage.widgetByTitle('Matrix Calendar'),
     );
 
     await meetingsWidgetPage.scheduleMeetingButton.waitFor({
@@ -116,7 +117,7 @@ export const test = base.extend<Fixtures>({
 
     const meetingsWidgetPage = new MeetingsWidgetPage(
       alicePage,
-      aliceElementWebPage.widgetByTitle('NeoDateFix'),
+      aliceElementWebPage.widgetByTitle('Matrix Calendar'),
     );
 
     await meetingsWidgetPage.scheduleMeetingButton.waitFor({
@@ -137,7 +138,7 @@ export const test = base.extend<Fixtures>({
   aliceCockpitWidgetPage: async ({ alicePage, aliceElementWebPage }, use) => {
     const cockpitWidgetPage = new CockpitWidgetPage(
       alicePage,
-      aliceElementWebPage.widgetByTitle('NeoDateFix Details'),
+      aliceElementWebPage.widgetByTitle('Calendar Details'),
     );
 
     await use(cockpitWidgetPage);
@@ -208,7 +209,7 @@ export const test = base.extend<Fixtures>({
   bobMeetingsWidgetPage: async ({ bobPage, bobElementWebPage }, use) => {
     const meetingsWidgetPage = new MeetingsWidgetPage(
       bobPage,
-      bobElementWebPage.widgetByTitle('NeoDateFix'),
+      bobElementWebPage.widgetByTitle('Matrix Calendar'),
     );
 
     await use(meetingsWidgetPage);

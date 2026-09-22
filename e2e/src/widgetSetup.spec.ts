@@ -1,3 +1,4 @@
+/* Modified for Matrix Calendar Widget fork, 2026. */
 /*
  * Copyright 2022 Nordeck IT + Consulting GmbH
  *
@@ -42,7 +43,7 @@ test.describe('Meeting Widget Setup', () => {
     // the bot to setup the page
     const widget = new MeetingsWidgetPage(
       alicePage,
-      aliceElementWebPage.widgetByTitle('NeoDateFix'),
+      aliceElementWebPage.widgetByTitle('Matrix Calendar'),
     );
 
     await expect(widget.scheduleMeetingButton).toBeVisible();
@@ -81,6 +82,6 @@ test.describe('Meeting Widget Setup', () => {
     // eslint-disable-next-line playwright/no-wait-for-timeout
     await alicePage.waitForTimeout(1000);
 
-    expect(await aliceElementWebPage.getWidgets()).toEqual(['NeoDateFix']);
+    expect(await aliceElementWebPage.getWidgets()).toEqual(['Matrix Calendar']);
   });
 });

@@ -1,3 +1,4 @@
+/* Modified for Matrix Calendar Widget fork, 2026. */
 /*
  * Copyright 2022 Nordeck IT + Consulting GmbH
  *
@@ -54,7 +55,7 @@ test.describe('Meeting Room', () => {
   }) => {
     expect(await aliceElementWebPage.getWidgets()).toEqual([
       'Breakout Sessions',
-      'NeoDateFix Details',
+      'Calendar Details',
       'Video Conference',
     ]);
 
@@ -63,7 +64,7 @@ test.describe('Meeting Room', () => {
       'My Description',
     );
 
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
     const meetingDetails = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
     await expect(meetingDetails.meetingDescriptionText).toHaveText(
@@ -79,7 +80,7 @@ test.describe('Meeting Room', () => {
     aliceElementWebPage,
     aliceCockpitWidgetPage,
   }) => {
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
 
     const meetingDetails = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
@@ -100,7 +101,7 @@ test.describe('Meeting Room', () => {
     aliceCockpitWidgetPage,
     charlie,
   }) => {
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
 
     const meetingDetails = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
@@ -116,7 +117,7 @@ test.describe('Meeting Room', () => {
     aliceElementWebPage,
     aliceCockpitWidgetPage,
   }) => {
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
     const meetingDetails = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
     const aliceEditMeetingWidgetPage = await meetingDetails.editMeeting();
@@ -133,14 +134,14 @@ test.describe('Meeting Room', () => {
       .poll(async () => {
         return await aliceElementWebPage.getWidgets();
       })
-      .toEqual(['Breakout Sessions', 'NeoDateFix Details']);
+      .toEqual(['Breakout Sessions', 'Calendar Details']);
   });
 
   test('should enable the optional widget from within the meeting', async ({
     aliceElementWebPage,
     aliceCockpitWidgetPage,
   }) => {
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
     const meetingDetails = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
 
@@ -154,7 +155,7 @@ test.describe('Meeting Room', () => {
       })
       .toEqual([
         'Breakout Sessions',
-        'NeoDateFix Details',
+        'Calendar Details',
         'Video Conference',
         'Video Conference (optional)',
       ]);
@@ -179,7 +180,7 @@ test.describe('Meeting Room', () => {
     await bobElementWebPage.acceptRoomInvitation();
     await bobElementWebPage.sendMessage('I am Bob');
     await aliceElementWebPage.sendMessage('I am Alice');
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
     const meetingCard = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
     let aliceEditMeetingWidgetPage = await meetingCard.editMeeting();
@@ -212,7 +213,7 @@ test.describe('Meeting Room', () => {
       .getMeeting('My Meeting', '10/03/2040')
       .joinMeeting();
     await bobElementWebPage.acceptRoomInvitation();
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
     const meetingDetails = aliceCockpitWidgetPage.getMeeting();
     await aliceElementWebPage.approveWidgetIdentity();
 
@@ -237,13 +238,13 @@ test.describe('Meeting Room', () => {
     aliceElementWebPage,
     aliceCockpitWidgetPage,
   }) => {
-    await aliceElementWebPage.showWidgetInSidebar('NeoDateFix Details');
+    await aliceElementWebPage.showWidgetInSidebar('Calendar Details');
     await aliceElementWebPage.approveWidgetIdentity();
 
     await aliceCockpitWidgetPage.backToParentRoom();
     await aliceElementWebPage.approveWidgetCapabilities();
 
     await expect(aliceElementWebPage.roomNameText).toHaveText('Calendar');
-    expect(await aliceElementWebPage.getWidgets()).toEqual(['NeoDateFix']);
+    expect(await aliceElementWebPage.getWidgets()).toEqual(['Matrix Calendar']);
   });
 });
