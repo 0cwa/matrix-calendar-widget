@@ -1,5 +1,5 @@
 {
-  "name": "root",
+  "name": "matrix-calendar-widget",
   "private": true,
   "workspaces": [
     "matrix-meetings-widget",
@@ -52,7 +52,8 @@
     "prettier:check": "prettier --check .",
     "prettier:write": "prettier --write .",
     "translate": "yarn workspaces run translate",
-    "e2e": "yarn workspace e2e e2e"
+    "e2e": "yarn workspace e2e e2e",
+    "ci": "yarn prettier:check && yarn lint && yarn tsc && yarn test:all && yarn build"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [
