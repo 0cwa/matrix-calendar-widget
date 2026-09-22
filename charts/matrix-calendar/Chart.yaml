@@ -1,10 +1,10 @@
 apiVersion: v2
-name: matrix-meetings
-description: A helper chart to deploy both the widget and the bot
+name: matrix-calendar
+description: A helper chart to deploy the Matrix Calendar widget and server
 type: application
 version: 0.3.0
 appVersion: "0.0.0"
-home: https://github.com/nordeck/matrix-meetings
+home: https://github.com/0cwa/matrix-calendar-widget
 dependencies:
   - name: matrix-calendar-widget
     version: "*"
