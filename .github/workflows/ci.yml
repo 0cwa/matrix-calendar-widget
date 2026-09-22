@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Check formatting
+        run: yarn prettier:check
+
+      - name: Check dependencies
+        run: yarn depcheck
+
+      - name: Type check
+        run: yarn tsc
+
+  widget:
+    name: Widget
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Lint calendar package
+        run: yarn workspace @nordeck/matrix-meetings-calendar lint
+
+      - name: Test calendar package
+        run: yarn workspace @nordeck/matrix-meetings-calendar test:all
+
+      - name: Build calendar package
+        run: yarn workspace @nordeck/matrix-meetings-calendar build
+
+      - name: Lint widget
+        run: yarn workspace @nordeck/matrix-meetings-widget lint
+
+      - name: Check widget translations
+        run: yarn workspace @nordeck/matrix-meetings-widget translate --ci --dry-run
+
+      - name: Test widget
+        run: yarn workspace @nordeck/matrix-meetings-widget test:all
+
+      - name: Build widget
+        run: yarn workspace @nordeck/matrix-meetings-widget build
+
+  server:
+    name: Server and bot
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Lint server
+        run: yarn workspace @nordeck/matrix-meetings-bot lint
+
+      - name: Check server translations
+        run: yarn workspace @nordeck/matrix-meetings-bot translate --ci --dry-run
+
+      - name: Test server
+        run: yarn workspace @nordeck/matrix-meetings-bot test:all
+
+      - name: Build server
+        run: yarn workspace @nordeck/matrix-meetings-bot build
