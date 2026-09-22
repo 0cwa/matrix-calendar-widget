@@ -1,0 +1,46 @@
+name: Bootstrap NeoDateFix import
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/bootstrap-import.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out target repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Import pinned NeoDateFix snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          git clone --no-checkout https://github.com/nordeck/matrix-meetings.git "$tmp/upstream"
+          git -C "$tmp/upstream" checkout 2d3011f665af04c3cd376c388f7ae3bcb06bba25
+          rsync -a --exclude='.git' "$tmp/upstream/" ./
+          rm -f .github/workflows/bootstrap-import.yml
+          rm -rf "$tmp"
+
+      - name: Commit upstream baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing to import"
+            exit 0
+          fi
+          git commit -m "chore: import NeoDateFix upstream baseline" \
+            -m "Upstream: nordeck/matrix-meetings@2d3011f665af04c3cd376c388f7ae3bcb06bba25"
+          git push origin HEAD:main
