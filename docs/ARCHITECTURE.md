@@ -39,18 +39,18 @@ The gateway and bot are initially one deployable service. Split them only when s
 
 ## Source-of-truth boundaries
 
-| Concern | Canonical store |
-| --- | --- |
-| calendar collection | CalDAV/Radicale |
-| VEVENT fields | iCalendar object in Radicale |
-| UID, SEQUENCE, recurrence | iCalendar object |
-| organizer/attendees | iCalendar object |
-| VALARM | iCalendar object |
-| calendar display properties | CalDAV properties where supported |
-| Matrix room ↔ calendar binding | Matrix/gateway configuration |
-| Matrix reminder recipients | gateway sidecar store |
-| reminder delivery history | gateway store |
-| Matrix permissions | Matrix room state + configured policy |
+| Concern                        | Canonical store                       |
+| ------------------------------ | ------------------------------------- |
+| calendar collection            | CalDAV/Radicale                       |
+| VEVENT fields                  | iCalendar object in Radicale          |
+| UID, SEQUENCE, recurrence      | iCalendar object                      |
+| organizer/attendees            | iCalendar object                      |
+| VALARM                         | iCalendar object                      |
+| calendar display properties    | CalDAV properties where supported     |
+| Matrix room ↔ calendar binding | Matrix/gateway configuration          |
+| Matrix reminder recipients     | gateway sidecar store                 |
+| reminder delivery history      | gateway store                         |
+| Matrix permissions             | Matrix room state + configured policy |
 
 ## Collection profile
 
@@ -75,10 +75,20 @@ interface CalendarRepository {
   updateCalendar(id: CalendarId, patch: CalendarPatch): Promise<Calendar>;
   deleteCalendar(id: CalendarId): Promise<void>;
 
-  listEvents(calendarId: CalendarId, range: TimeRange): Promise<CalendarEvent[]>;
+  listEvents(
+    calendarId: CalendarId,
+    range: TimeRange,
+  ): Promise<CalendarEvent[]>;
   getEvent(calendarId: CalendarId, id: EventId): Promise<CalendarEvent>;
-  createEvent(calendarId: CalendarId, input: CalendarEventInput): Promise<CalendarEvent>;
-  updateEvent(calendarId: CalendarId, id: EventId, patch: CalendarEventPatch): Promise<CalendarEvent>;
+  createEvent(
+    calendarId: CalendarId,
+    input: CalendarEventInput,
+  ): Promise<CalendarEvent>;
+  updateEvent(
+    calendarId: CalendarId,
+    id: EventId,
+    patch: CalendarEventPatch,
+  ): Promise<CalendarEvent>;
   deleteEvent(calendarId: CalendarId, id: EventId): Promise<void>;
 }
 ```
@@ -108,7 +118,7 @@ Exact defaults require implementation validation and may become a dedicated ADR.
 
 ## Reminder delivery
 
-VALARM expresses *when* a reminder is due. Matrix recipient targeting is gateway sidecar metadata keyed to a stable event/alarm identity.
+VALARM expresses _when_ a reminder is due. Matrix recipient targeting is gateway sidecar metadata keyed to a stable event/alarm identity.
 
 Delivery uses Matrix messages with:
 

@@ -2,17 +2,17 @@
 
 The roadmap describes sequencing and intent. Detailed acceptance criteria live in [PLAN.md](./PLAN.md).
 
-| Phase | Goal | User-visible result |
-| --- | --- | --- |
-| M0 | safe hard fork | repo can be developed without upstream ambiguity |
-| M1 | domain seam | inherited UI runs on calendar-domain abstractions |
-| M2 | identity + CalDAV discovery | widget can securely list Radicale calendars |
-| M3 | VEVENT CRUD | real events can be created, edited, and deleted |
-| M4 | collection management | Radicale event calendars can be managed from the widget |
-| M5 | serious calendaring | recurrence, alarms, attendees, and round-trip fidelity |
-| M6 | Matrix team features | room policy, member targeting, reminders, MatrixRTC linkage |
-| M7 | fallback commands | essential access from non-widget clients |
-| M8 | hardening | beta deployment, security, scale, compatibility |
+| Phase | Goal                        | User-visible result                                         |
+| ----- | --------------------------- | ----------------------------------------------------------- |
+| M0    | safe hard fork              | repo can be developed without upstream ambiguity            |
+| M1    | domain seam                 | inherited UI runs on calendar-domain abstractions           |
+| M2    | identity + CalDAV discovery | widget can securely list Radicale calendars                 |
+| M3    | VEVENT CRUD                 | real events can be created, edited, and deleted             |
+| M4    | collection management       | Radicale event calendars can be managed from the widget     |
+| M5    | serious calendaring         | recurrence, alarms, attendees, and round-trip fidelity      |
+| M6    | Matrix team features        | room policy, member targeting, reminders, MatrixRTC linkage |
+| M7    | fallback commands           | essential access from non-widget clients                    |
+| M8    | hardening                   | beta deployment, security, scale, compatibility             |
 
 ## Product direction
 
