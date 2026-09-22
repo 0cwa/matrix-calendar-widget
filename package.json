@@ -53,7 +53,7 @@
     "prettier:write": "prettier --write .",
     "translate": "yarn workspaces run translate",
     "e2e": "yarn workspace e2e e2e",
-    "ci": "yarn prettier:check && yarn lint && yarn tsc && yarn test:all && yarn build"
+    "ci": "yarn prettier:check && yarn depcheck && yarn lint && yarn tsc && yarn test:all && yarn build"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [
