@@ -343,15 +343,22 @@ function cloneRecurrence(
 function cloneCalendarEventPatch(
   patch: CalendarEventPatch,
 ): CalendarEventPatch {
-  return {
-    ...patch,
-    timing:
-      patch.timing?.type === 'timed'
+  const cloned: CalendarEventPatch = { ...patch };
+
+  if (patch.timing) {
+    cloned.timing =
+      patch.timing.type === 'timed'
         ? cloneTimedTiming(patch.timing)
-        : patch.timing
-          ? cloneAllDayTiming(patch.timing)
-          : undefined,
-    categories: patch.categories ? [...patch.categories] : undefined,
-    recurrence: cloneRecurrence(patch.recurrence),
-  };
+        : cloneAllDayTiming(patch.timing);
+  }
+
+  if (patch.categories) {
+    cloned.categories = [...patch.categories];
+  }
+
+  if (patch.recurrence) {
+    cloned.recurrence = cloneRecurrence(patch.recurrence);
+  }
+
+  return cloned;
 }
