@@ -1,0 +1,9 @@
+**/build/
+**/coverage/
+matrix-meetings-bot/lib/
+matrix-meetings-bot/storage
+packages/calendar/lib
+
+# Ignore the helm chart
+charts/
+e2e/playwright-report/

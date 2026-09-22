@@ -1,0 +1,43 @@
+{
+  "name": "e2e",
+  "description": "End-to-end tests for NeoDateFix",
+  "author": "Nordeck IT + Consulting GmbH",
+  "license": "Apache-2.0",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {},
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.0",
+    "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.61.0",
+    "@types/node": "^22.19.17",
+    "eslint": "^9.39.4",
+    "eslint-plugin-notice": "^1.0.0",
+    "eslint-plugin-playwright": "^1.6.1",
+    "eslint-plugin-promise": "^7.2.1",
+    "testcontainers": "^11.14.0",
+    "typescript-eslint": "^8.56.0"
+  },
+  "engines": {
+    "node": ">=20",
+    "yarn": ">=1.22.1 <2.0.0"
+  },
+  "scripts": {
+    "build": "echo \"Nothing to build\"",
+    "test:all": "echo \"Nothing to test\"",
+    "generate-disclaimer": "echo \"Nothing to generate\"",
+    "translate": "echo \"Nothing to translate\"",
+    "docker:build": "echo \"Nothing to build\"",
+    "depcheck": "depcheck --ignores=typescript",
+    "lint": "eslint . --max-warnings=0",
+    "e2e": "playwright test --headed --project=chromium --workers=1 --reporter=dot",
+    "e2e:all": "yarn playwright test --reporter=dot"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nordeck/matrix-meetings.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nordeck/matrix-meetings/issues"
+  }
+}

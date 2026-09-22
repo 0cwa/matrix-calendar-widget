@@ -1,0 +1,155 @@
+{
+  "base": {
+    "exception": {
+      "message": "An error \"{{errorName}}\" occurred while processing events for the room {{roomId}} {{roomName}}. <br> Please provide this number: [{{requestId}}] for further questions."
+    }
+  },
+  "bot": {
+    "private": {
+      "errorRoom": {
+        "create": {
+          "message": "Error messages from NeoDateFix-Bot",
+          "topic": "More details"
+        }
+      }
+    }
+  },
+  "commandErrors": {
+    "badCommand": "Bad command, try <code>{{trigger}} help</code>",
+    "badLanguageCode": "Language code is not supported",
+    "generic": "There was an error processing your command: {{message}}",
+    "noCommandProvided": "No command provided, try <code>{{trigger}} help</code>",
+    "noLanguageCode": "Language code is not provided, use one of these ({{availableLanguageCodes}})"
+  },
+  "commandHelp": [
+    "<p>Available commands:</p>",
+    "<ul>",
+    "<li><code>!meeting lang &lt;en|de&gt;</code> (Change the language of the bot in this room.)</li>",
+    "<li><code>!meeting setup</code> (Adds the calendar to the room.)</li>",
+    "<li><code>!meeting status</code> (Checks the ability to add the calendar.)</li>",
+    "</ul>"
+  ],
+  "meeting": {
+    "invite": {
+      "message": "📅 {{range, daterange}}<br/>$t(meeting.invite.messageRecurrence, {\"context\": \"{{recurrenceContext}}\" })<br/>$t(meeting.invite.messageByOrganizer, {\"context\": \"{{organizerContext}}\" })$t(meeting.invite.messageDescription, {\"context\": \"{{descriptionContext}}\" })",
+      "messageByOrganizer_none": "",
+      "messageByOrganizer_present": "\nyou've been invited to a meeting by {{organizerDisplayName}}",
+      "messageDescription_none": "",
+      "messageDescription_present": "\n<hr><i>{{description}}</i>",
+      "messageRecurrence_none": "",
+      "messageRecurrence_present": "\n🔁 Recurrence: {{recurrence}}<br/>"
+    },
+    "room": {
+      "notification": {
+        "changed": {
+          "date": {
+            "current": "Date: {{range, daterange}}",
+            "previous": "(previously: {{range, daterange}})"
+          },
+          "description": {
+            "current": "Description: {{description}}",
+            "previous": "(previously: {{description}})"
+          },
+          "headLine": "CHANGES",
+          "occurrence": {
+            "current": "A single meeting from a meeting series is moved to {{range, daterange}}",
+            "deleted": "A single meeting from a meeting series on {{range, daterange}} is deleted",
+            "previous": "(previously: {{value, daterange}})"
+          },
+          "repetition": {
+            "current": "Repeat meeting: {{repetitionText}}",
+            "previous": "(previously: {{repetitionText}})"
+          },
+          "title": {
+            "current": "Title: {{title}}",
+            "previous": "(previously: {{title}})"
+          }
+        },
+        "closed": {
+          "message": "Room was closed by administrator"
+        },
+        "noRepetition": "No repetition"
+      }
+    },
+    "user": {
+      "kicked": "User {{userId}} has been removed by {{sender}}"
+    }
+  },
+  "recurrenceEditor": {
+    "ordinals": {
+      "first": "first",
+      "fourth": "fourth",
+      "last": "last",
+      "second": "second",
+      "third": "third"
+    },
+    "ruleText": {
+      "afterMeetingCount_one": "for one time",
+      "afterMeetingCount_other": "for {{count}} times",
+      "daily_one": "Every day$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "daily_other": "Every {{count}} days$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "monthly_bymonthday_one": "Every month on the $t(recurrenceEditor.ruleText.ordinal, {\"count\": {{bymonthday}}, \"ordinal\": true })$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "monthly_bymonthday_other": "Every {{count}} months on the $t(recurrenceEditor.ruleText.ordinal, {\"count\": {{bymonthday}}, \"ordinal\": true })$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "monthly_byweekday_one": "Every month on the {{ordinalLabel}} {{byweekday}}$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "monthly_byweekday_other": "Every {{count}} months on the {{ordinalLabel}} {{byweekday}}$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "monthly_simple_one": "Every month$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "monthly_simple_other": "Every {{count}} months$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "ordinal_ordinal_one": "{{count}}st",
+      "ordinal_ordinal_two": "{{count}}nd",
+      "ordinal_ordinal_few": "{{count}}rd",
+      "ordinal_ordinal_other": "{{count}}th",
+      "recurrenceEnd_count": " $t(recurrenceEditor.ruleText.afterMeetingCount, {\"count\": {{afterMeetingCount}}, \"ordinal\": false })",
+      "recurrenceEnd_never": "",
+      "recurrenceEnd_until": " until {{ untilDate, datetime(year: 'numeric'; month: 'long'; day: 'numeric') }}",
+      "unknown": "Unsupported recurrence",
+      "weekly_all_one": "Every week$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "weekly_all_other": "Every {{count}} weeks$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "weekly_some_one": "Every week on {{weekdays, list}}$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "weekly_some_other": "Every {{count}} weeks on {{weekdays, list}}$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "weekly_weekdays_one": "Every weekday$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "weekly_weekdays_other": "Every {{count}} weeks on weekdays$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "yearly_bymonthday_one": "Every {{monthLabel}} on the $t(recurrenceEditor.ruleText.ordinal, {\"count\": {{bymonthday}}, \"ordinal\": true })$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "yearly_bymonthday_other": "Every {{count}} years on the $t(recurrenceEditor.ruleText.ordinal, {\"count\": {{bymonthday}}, \"ordinal\": true }) of {{monthLabel}}$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "yearly_byweekday_one": "Every {{monthLabel}} on the {{ordinalLabel}} {{byweekday}}$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "yearly_byweekday_other": "Every {{count}} years on the {{ordinalLabel}} {{byweekday}} of {{monthLabel}}$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "yearly_simple_one": "Every year$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "yearly_simple_other": "Every {{count}} years$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })"
+    }
+  },
+  "welcome": {
+    "botIsAdmin": "The bot is a moderator in the room <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>. If you enter the command <code>!meeting setup</code> NeoDateFix widget will be added to that room.",
+    "botNotAdmin": "The bot is not a moderator in the room <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>.",
+    "errors": {
+      "meetingWidgetExists": "Can't add a new widget because it already exists.",
+      "notEnoughPermissions": "Unfortunately, I cannot add the calendar function. I don't have the right authorisation. Please give me moderator rights in your room <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>."
+    },
+    "helpWhenNotAdmin": "Unfortunately, I cannot add the calendar function. I don't have the right authorisation. Please give me moderator rights in your room <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>.",
+    "intro": [
+      "<p>Hello {{userDisplayName}}, thank you for inviting me to the <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>.</p>",
+      "<p>I would be happy to help you set up your calendar in that room.</p>",
+      "<p>In order for me to add the calendar function to your room, please give me the necessary right to add widgets to the room <a href='{{originalRoomLink}}'>{{originalRoomName}}</a> (The Moderator role for example). You can do so in my user profile that you can find in the right side menu via the \"info\"-icon.</p>",
+      "<p>If you do not want to give me the necessary permissions, you can add the calendar function to your room manually by sending the following Message into the room: <code>/addwidget {{widgetURL}}</code></p>",
+      "<p>To get an overview of all commands you can send <code>!meeting help</code></p>"
+    ],
+    "introDone": [
+      "<p>Hello {{userDisplayName}}, thank you for inviting me to the <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>.</p>",
+      "<p>My job was to help you set up the calendar.</p>",
+      "<p>The calendar has now been successfully set up in your room. Therefore, you can now leave this chat.</p>",
+      "<p>To get an overview of all commands you can send <code>!meeting help</code></p>"
+    ],
+    "introLanguage": [
+      "Information on the language setting: To enable communication in your language, you can use the following commands:  ",
+      "<ul>",
+      "<li>Change language to English: <code>!meeting lang en</code></li>",
+      "<li>Sprache auf Deutsch umstellen: <code>!meeting lang de</code></li>",
+      "</ul>"
+    ],
+    "languageWasChanged": "The language was changed to <b>{{locale}}</b>.",
+    "meetingWidgetAdded": "<p>My job is done.</p><p>The calendar is already successfully installed into your room. You can leave this private chat-room.</p>",
+    "privateRoom": {
+      "inviteReason": "In this private room bot can help with adding a NeoDateFix widget to the room '{{originalRoomName}}'.",
+      "name": "Help for {{originalRoomName}}",
+      "topic": "How to use this bot to setup the widget bot in the room {{originalRoomName}}."
+    }
+  }
+}
