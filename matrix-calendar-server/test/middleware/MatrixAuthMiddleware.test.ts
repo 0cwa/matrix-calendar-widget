@@ -21,6 +21,7 @@ import { MatrixClient } from 'matrix-bot-sdk';
 import { mock, resetCalls } from 'ts-mockito';
 import { IAppConfiguration } from '../../src/IAppConfiguration';
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
+import { MATRIX_OPENID_CREDENTIAL_CONTEXT } from '../../src/model/IMatrixOpenIdCredential';
 import { createAppConfig } from '../util/MockUtils';
 
 describe('test relevant functionality of MatrixAuthMiddleware', () => {
@@ -67,7 +68,16 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
 
     fetch.mockResponseOnce(JSON.stringify({ sub: 4711 }));
     const result = await matrixAuth.extractUserContext(mockRequest);
+
     expect(result?.userId).toEqual(4711);
+    expect(
+      (mockRequest as Request & Record<string, unknown>)[
+        MATRIX_OPENID_CREDENTIAL_CONTEXT
+      ],
+    ).toEqual({
+      accessToken: 'gaRTYVTSFO-----',
+      matrixServerName: 'server',
+    });
   });
 
   test('MX-Identity invalid authorization-header for example not base64Url', async () => {
@@ -84,6 +94,36 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
     await expect(matrixAuth.extractUserContext(mockRequest)).rejects.toThrow(
       Error,
     );
+    expect(
+      (mockRequest as Request & Record<string, unknown>)[
+        MATRIX_OPENID_CREDENTIAL_CONTEXT
+      ],
+    ).toBeUndefined();
+  });
+
+  test('MX-Identity rejected by homeserver does not retain credential', async () => {
+    appConfig.homeserver_url = 'abc';
+    const matrixAuth = new MatrixAuthMiddleware(appConfig);
+    const auth = `MX-Identity ${base64url(
+      JSON.stringify({
+        access_token: 'rejected-token',
+        matrix_server_name: 'server',
+      }),
+    )}`;
+    const mockRequest = {
+      headers: { authorization: auth },
+    } as Request;
+
+    fetch.mockResponseOnce('Unauthorized', { status: 401 });
+
+    await expect(matrixAuth.extractUserContext(mockRequest)).rejects.toThrow(
+      /Could not verify user by token/,
+    );
+    expect(
+      (mockRequest as Request & Record<string, unknown>)[
+        MATRIX_OPENID_CREDENTIAL_CONTEXT
+      ],
+    ).toBeUndefined();
   });
 
   test('Bearer authorization-header', async () => {
@@ -97,6 +137,12 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
 
     fetch.mockResponseOnce(JSON.stringify({ user_id: '@user' }));
     const result = await matrixAuth.extractUserContext(mockRequest);
+
     expect(result?.userId).toEqual('@user');
+    expect(
+      (mockRequest as Request & Record<string, unknown>)[
+        MATRIX_OPENID_CREDENTIAL_CONTEXT
+      ],
+    ).toBeUndefined();
   });
 });
