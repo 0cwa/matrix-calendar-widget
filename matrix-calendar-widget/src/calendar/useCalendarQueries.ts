@@ -46,18 +46,20 @@ export function useCalendars(): CalendarQueryState<Calendar[]> {
 
     setState((current) => ({ ...current, loading: true, error: undefined }));
 
-    repository.listCalendars().then(
-      (data) => {
+    async function loadCalendars() {
+      try {
+        const data = await repository.listCalendars();
         if (!ignore) {
           setState({ data, loading: false });
         }
-      },
-      (error: unknown) => {
+      } catch (error: unknown) {
         if (!ignore) {
           setState({ data: [], loading: false, error: asError(error) });
         }
-      },
-    );
+      }
+    }
+
+    void loadCalendars();
 
     return () => {
       ignore = true;
@@ -88,18 +90,23 @@ export function useCalendarEvents(
 
     setState((current) => ({ ...current, loading: true, error: undefined }));
 
-    repository.listEvents(requestedCalendarIds, requestedRange).then(
-      (data) => {
+    async function loadEvents() {
+      try {
+        const data = await repository.listEvents(
+          requestedCalendarIds,
+          requestedRange,
+        );
         if (!ignore) {
           setState({ data, loading: false });
         }
-      },
-      (error: unknown) => {
+      } catch (error: unknown) {
         if (!ignore) {
           setState({ data: [], loading: false, error: asError(error) });
         }
-      },
-    );
+      }
+    }
+
+    void loadEvents();
 
     return () => {
       ignore = true;
@@ -126,18 +133,20 @@ export function useCalendarEvent(
 
     setState((current) => ({ ...current, loading: true, error: undefined }));
 
-    repository.getEvent(calendarId, eventId).then(
-      (data) => {
+    async function loadEvent() {
+      try {
+        const data = await repository.getEvent(calendarId, eventId);
         if (!ignore) {
           setState({ data, loading: false });
         }
-      },
-      (error: unknown) => {
+      } catch (error: unknown) {
         if (!ignore) {
           setState({ data: undefined, loading: false, error: asError(error) });
         }
-      },
-    );
+      }
+    }
+
+    void loadEvent();
 
     return () => {
       ignore = true;
