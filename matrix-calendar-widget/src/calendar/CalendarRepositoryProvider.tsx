@@ -15,11 +15,7 @@
  */
 
 import { CalendarRepository } from '@matrix-calendar-widget/calendar';
-import {
-  PropsWithChildren,
-  createContext,
-  useContext,
-} from 'react';
+import { PropsWithChildren, createContext, useContext } from 'react';
 
 const CalendarRepositoryContext = createContext<CalendarRepository | undefined>(
   undefined,
