@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
-import { InMemoryCalendarRepository } from '@matrix-calendar-widget/calendar';
+import {
+  Calendar,
+  CalendarEvent,
+  InMemoryCalendarRepository,
+} from '@matrix-calendar-widget/calendar';
 import { extractWidgetApiParameters as extractWidgetApiParametersMocked } from '@matrix-widget-toolkit/api';
 import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
 import { MockedWidgetApi, mockWidgetApi } from '@matrix-widget-toolkit/testing';
@@ -76,7 +80,27 @@ function enableBreakoutSessionView() {
   });
 }
 
+const testCalendar: Calendar = {
+  id: 'team',
+  name: 'Team calendar',
+  timezone: 'UTC',
+};
+
+const testCalendarEvent: CalendarEvent = {
+  id: 'important',
+  calendarId: 'team',
+  uid: 'important@example.test',
+  title: 'An important meeting',
+  description: 'A brief description',
+  timing: {
+    type: 'timed',
+    start: { local: '2022-03-01T10:00:00', timezone: 'UTC' },
+    end: { local: '2022-03-01T14:00:00', timezone: 'UTC' },
+  },
+};
+
 let widgetApi: MockedWidgetApi;
+let calendarRepository: InMemoryCalendarRepository;
 
 afterEach(() => widgetApi.stop());
 
@@ -110,14 +134,17 @@ describe('<MeetingsPanel/>', () => {
       },
     });
 
+    calendarRepository = new InMemoryCalendarRepository({
+      calendars: [testCalendar],
+      events: [testCalendarEvent],
+    });
+
     Wrapper = ({ children }: PropsWithChildren<{}>) => {
       const [store] = useState(() => {
         const store = createStore({ widgetApi });
         initializeStore(store);
         return store;
       });
-      const calendarRepository = new InMemoryCalendarRepository();
-
       return (
         <LocalizationProvider>
           <WidgetApiMockProvider value={widgetApi}>
@@ -307,8 +334,8 @@ describe('<MeetingsPanel/>', () => {
     render(<MeetingsPanel />, { wrapper: Wrapper });
 
     expect(
-      screen.getByRole('button', { name: 'Schedule Meeting' }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: 'Schedule Meeting' }),
+    ).not.toBeInTheDocument();
 
     expect(screen.getByRole('button', { name: 'Today' })).toBeInTheDocument();
 
@@ -563,9 +590,13 @@ describe('<MeetingsPanel/>', () => {
   });
 
   it('should show empty states in meeting and in breakout mode', async () => {
+    calendarRepository = new InMemoryCalendarRepository({
+      calendars: [testCalendar],
+    });
+
     render(<MeetingsPanel />, { wrapper: Wrapper });
 
-    const list = screen.getByRole('list', { name: /meetings/i });
+    const list = screen.getByRole('list', { name: /calendar events/i });
     expect(
       within(list).getByRole('listitem', { name: /no meetings scheduled/i }),
     ).toBeInTheDocument();
