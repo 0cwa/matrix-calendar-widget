@@ -24,9 +24,7 @@ import {
 class TestAuthorization implements CalendarAuthorization {
   constructor(private readonly allowed: boolean) {}
 
-  async isAllowed(
-    _request: CalendarAuthorizationRequest,
-  ): Promise<boolean> {
+  async isAllowed(_request: CalendarAuthorizationRequest): Promise<boolean> {
     return this.allowed;
   }
 }
@@ -61,10 +59,7 @@ describe('calendar authorization', () => {
     };
 
     try {
-      await requireCalendarAuthorization(
-        new TestAuthorization(false),
-        request,
-      );
+      await requireCalendarAuthorization(new TestAuthorization(false), request);
       throw new Error('Expected authorization to fail');
     } catch (error) {
       expect(error).toBeInstanceOf(CalendarAuthorizationError);
