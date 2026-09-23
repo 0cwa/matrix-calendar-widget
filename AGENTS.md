@@ -9,10 +9,11 @@ Build a fast, responsive Matrix team-calendar widget that uses Radicale/CalDAV a
 ## Required reading before changing code
 
 1. `README.md`
-2. `docs/PLAN.md`
-3. `docs/ARCHITECTURE.md`
-4. `docs/UPSTREAM.md`
-5. Fork ADRs beginning with `docs/adrs/adr004-...`
+2. `docs/STATUS.md`
+3. `docs/PLAN.md`
+4. `docs/ARCHITECTURE.md`
+5. `docs/UPSTREAM.md`
+6. Fork ADRs beginning with `docs/adrs/adr004-...`
 
 The inherited ADR001-ADR003 documents describe NeoDateFix's original meeting architecture. Treat them as historical context unless a fork ADR explicitly adopts them.
 
@@ -40,6 +41,7 @@ The inherited ADR001-ADR003 documents describe NeoDateFix's original meeting arc
 - Keep PRs reviewable. Do not combine package renames, architecture changes, and product features unless the task requires it.
 - Add or update tests with behavior changes.
 - Update `docs/PLAN.md` when completing or materially changing a planned task.
+- Update `docs/STATUS.md` when the active phase, dependency order, or important PR blocker materially changes.
 - Add an ADR for decisions that change a persistence boundary, authentication model, public API, calendar semantics, permission model, or deployment topology.
 - Preserve upstream license and NOTICE requirements.
 - Do not rewrite inherited history or delete upstream ADRs merely because they are no longer current.

@@ -22,11 +22,13 @@ Collection management is part of the product, but DAV vocabulary should stay mos
 
 ## Near-term priorities
 
-1. Fork hygiene without destabilizing inherited tests.
-2. Introduce the calendar repository/domain seam.
-3. Prove Matrix OpenID → gateway → Radicale discovery.
-4. Ship the smallest end-to-end VEVENT CRUD slice.
-5. Expand fidelity and Matrix-specific team features from that working spine.
+1. Land PR #40 to finish the repository-backed M1 create/edit/delete path.
+2. Refresh and land PR #52 (request-scoped OpenID credential) and PR #53 (CalDAV discovery client).
+3. Implement #55 and #56 to connect validated Matrix identity, authorization, delegated credentials, and configured Radicale discovery.
+4. Complete #48's OpenID-capable `radicale-auth-matrix` path and #45's real-container discovery contract tests.
+5. Start M3's real VEVENT CRUD vertical slice only after the authenticated discovery spine is proven.
+
+See [STATUS.md](./STATUS.md) for transient PR/CI details.
 
 ## Explicit non-goals for the first beta
 

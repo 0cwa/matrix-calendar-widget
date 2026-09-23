@@ -17,15 +17,18 @@ The primary product is a responsive Matrix widget for Element and other widget-c
 
 ## Current state
 
-The repository currently contains the pinned NeoDateFix upstream codebase. Its UI, Matrix widget plumbing, recurrence controls, calendar rendering, bot structure, tests, and deployment patterns are valuable starting points, but its meeting-room data model is **not** the target architecture.
+M0 fork hygiene is merged. On `main`, the calendar domain and repository seam, repository-backed calendar/list read paths, mutation hooks, Matrix-authenticated calendar gateway context, Matrix room authorization policy, and the Radicale OpenID delegation contract are implemented.
 
-Active fork directories, package scopes, Docker/Helm targets, and user-facing branding have been renamed to Matrix Calendar. Historical changelogs, NOTICE files, and upstream provenance intentionally retain NeoDateFix/Nordeck names. The inherited meeting-room **domain model** remains temporarily and will be replaced behind tested seams.
+The primary repository-backed event create/edit/delete UI is implemented in PR #40 and is the remaining M1 slice. M2 is active: PR #52 retains validated OpenID credentials request-locally and PR #53 adds the CalDAV discovery client. The end-to-end Radicale path still needs the credential bridge (#55), configured discovery endpoint (#56), OpenID-capable `radicale-auth-matrix` support (#48), and real-container contract tests (#45).
+
+Inherited NeoDateFix meeting-room paths remain only where migration has not yet reached them. Historical changelogs, NOTICE files, and upstream provenance intentionally retain NeoDateFix/Nordeck names. See [docs/STATUS.md](./docs/STATUS.md) for the current execution order and active PR blockers.
 
 ## Start here
 
 - [AGENTS.md](./AGENTS.md) — rules for humans and coding agents
 - [Architecture](./docs/ARCHITECTURE.md)
 - [Implementation plan](./docs/PLAN.md)
+- [Current project status](./docs/STATUS.md)
 - [Roadmap](./docs/ROADMAP.md)
 - [Development guide](./docs/DEVELOPMENT.md)
 - [Upstream provenance](./docs/UPSTREAM.md)
