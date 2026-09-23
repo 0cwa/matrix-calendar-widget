@@ -469,34 +469,31 @@ describe('<MeetingsPanel/>', () => {
   });
 
   it('should switch to day view if clicking on the more button in month view', async () => {
-    mockCreateMeetingRoom(widgetApi, {
-      room_id: '!meeting-room-id-1:example.com',
-      name: { name: 'Meeting 1' },
-      metadata: {
-        calendar: mockCalendar({
-          dtstart: '20220301T110000',
-          dtend: '20220301T120000',
-        }),
+    await calendarRepository.createEvent('team', {
+      uid: 'meeting-1@example.test',
+      title: 'Meeting 1',
+      timing: {
+        type: 'timed',
+        start: { local: '2022-03-01T11:00:00', timezone: 'UTC' },
+        end: { local: '2022-03-01T12:00:00', timezone: 'UTC' },
       },
     });
-    mockCreateMeetingRoom(widgetApi, {
-      room_id: '!meeting-room-id-2:example.com',
-      name: { name: 'Meeting 2' },
-      metadata: {
-        calendar: mockCalendar({
-          dtstart: '20220301T130000',
-          dtend: '20220301T140000',
-        }),
+    await calendarRepository.createEvent('team', {
+      uid: 'meeting-2@example.test',
+      title: 'Meeting 2',
+      timing: {
+        type: 'timed',
+        start: { local: '2022-03-01T13:00:00', timezone: 'UTC' },
+        end: { local: '2022-03-01T14:00:00', timezone: 'UTC' },
       },
     });
-    mockCreateMeetingRoom(widgetApi, {
-      room_id: '!meeting-room-id-3:example.com',
-      name: { name: 'Meeting 3' },
-      metadata: {
-        calendar: mockCalendar({
-          dtstart: '20220301T140000',
-          dtend: '20220301T150000',
-        }),
+    await calendarRepository.createEvent('team', {
+      uid: 'meeting-3@example.test',
+      title: 'Meeting 3',
+      timing: {
+        type: 'timed',
+        start: { local: '2022-03-01T14:00:00', timezone: 'UTC' },
+        end: { local: '2022-03-01T15:00:00', timezone: 'UTC' },
       },
     });
 
@@ -557,36 +554,16 @@ describe('<MeetingsPanel/>', () => {
     ).toHaveTextContent('March 2022');
   });
 
-  it('should render invitations list', async () => {
+  it('should keep legacy invitations out of the calendar management path', () => {
     mockCreateMeetingInvitation(widgetApi, {
       room_id: '!invitation-meeting-room-id',
     });
 
     render(<MeetingsPanel />, { wrapper: Wrapper });
 
-    const navGroup = await screen.findByRole('group', { name: /views/i });
     expect(
-      within(navGroup).getByRole('button', {
-        name: /meetings/i,
-        expanded: true,
-      }),
-    ).toBeInTheDocument();
-
-    await userEvent.click(
-      within(navGroup).getByRole('button', {
-        name: /invitations/i,
-        expanded: false,
-      }),
-    );
-
-    expect(
-      screen.getByRole('heading', { level: 3, name: /invitations/i }),
-    ).toBeInTheDocument();
-
-    const list = screen.getByRole('list', { name: /invitations/i });
-    expect(
-      within(list).getByRole('listitem', { name: /an important meeting/i }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: /invitations/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('should show empty states in meeting and in breakout mode', async () => {
@@ -598,7 +575,7 @@ describe('<MeetingsPanel/>', () => {
 
     const list = screen.getByRole('list', { name: /calendar events/i });
     expect(
-      within(list).getByRole('listitem', { name: /no meetings scheduled/i }),
+      within(list).getByRole('listitem', { name: /no events scheduled/i }),
     ).toBeInTheDocument();
 
     // change to be a meeting room
@@ -634,7 +611,7 @@ describe('<MeetingsPanel/>', () => {
     ).toBeInTheDocument();
 
     expect(
-      screen.getByRole('listitem', { name: /no meetings scheduled/i }),
+      screen.getByRole('listitem', { name: /no events scheduled/i }),
     ).toBeInTheDocument();
   });
 
@@ -707,7 +684,7 @@ describe('<MeetingsPanel/>', () => {
     );
 
     expect(
-      screen.getByRole('listitem', { name: /no meetings scheduled/i }),
+      screen.getByRole('listitem', { name: /no events scheduled/i }),
     ).toBeInTheDocument();
   });
 
