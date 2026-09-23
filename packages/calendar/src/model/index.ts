@@ -1,3 +1,4 @@
+/* Modified for Matrix Calendar Widget fork, 2026. */
 /*
  * Copyright 2023 Nordeck IT + Consulting GmbH
  *
@@ -16,3 +17,24 @@
 
 export { calendarEntrySchema, dateTimeEntrySchema } from './calendarEntry';
 export type { CalendarEntry, DateTimeEntry } from './calendarEntry';
+
+export { isAllDayCalendarEvent, isTimedCalendarEvent } from './calendar';
+export type {
+  AllDayCalendarEventTiming,
+  Calendar,
+  CalendarDate,
+  CalendarEvent,
+  CalendarEventDateTime,
+  CalendarEventId,
+  CalendarEventInput,
+  CalendarEventPatch,
+  CalendarEventRecurrence,
+  CalendarEventStatus,
+  CalendarEventTiming,
+  CalendarEventTransparency,
+  CalendarId,
+  CalendarTimeRange,
+  LocalCalendarDateTime,
+  TimedCalendarEventTiming,
+  ZonedCalendarDateTime,
+} from './calendar';
