@@ -582,7 +582,7 @@ describe('<MeetingsPanel/>', () => {
     mockCreateMeetingRoom(widgetApi, { room_id: '!room-id:example.com' });
 
     await expect(
-      within(list).findByRole('listitem', {
+      screen.findByRole('listitem', {
         name: /no breakout sessions scheduled/i,
       }),
     ).resolves.toBeInTheDocument();
