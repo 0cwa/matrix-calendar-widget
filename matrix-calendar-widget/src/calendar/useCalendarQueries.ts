@@ -22,7 +22,10 @@ import {
   CalendarTimeRange,
 } from '@matrix-calendar-widget/calendar';
 import { useEffect, useState } from 'react';
-import { useCalendarRepository } from './CalendarRepositoryProvider';
+import {
+  useCalendarRepository,
+  useCalendarRepositoryRevision,
+} from './CalendarRepositoryProvider';
 
 export type CalendarQueryState<T> = {
   data: T;
@@ -36,6 +39,7 @@ function asError(error: unknown): Error {
 
 export function useCalendars(): CalendarQueryState<Calendar[]> {
   const repository = useCalendarRepository();
+  const revision = useCalendarRepositoryRevision();
   const [state, setState] = useState<CalendarQueryState<Calendar[]>>({
     data: [],
     loading: true,
@@ -64,7 +68,7 @@ export function useCalendars(): CalendarQueryState<Calendar[]> {
     return () => {
       ignore = true;
     };
-  }, [repository]);
+  }, [repository, revision]);
 
   return state;
 }
@@ -74,6 +78,7 @@ export function useCalendarEvents(
   range: CalendarTimeRange,
 ): CalendarQueryState<CalendarEvent[]> {
   const repository = useCalendarRepository();
+  const revision = useCalendarRepositoryRevision();
   const calendarIdsKey = JSON.stringify(calendarIds);
   const [state, setState] = useState<CalendarQueryState<CalendarEvent[]>>({
     data: [],
@@ -111,7 +116,7 @@ export function useCalendarEvents(
     return () => {
       ignore = true;
     };
-  }, [calendarIdsKey, range.end, range.start, repository]);
+  }, [calendarIdsKey, range.end, range.start, repository, revision]);
 
   return state;
 }
@@ -121,6 +126,7 @@ export function useCalendarEvent(
   eventId: CalendarEventId,
 ): CalendarQueryState<CalendarEvent | undefined> {
   const repository = useCalendarRepository();
+  const revision = useCalendarRepositoryRevision();
   const [state, setState] = useState<
     CalendarQueryState<CalendarEvent | undefined>
   >({
@@ -151,7 +157,7 @@ export function useCalendarEvent(
     return () => {
       ignore = true;
     };
-  }, [calendarId, eventId, repository]);
+  }, [calendarId, eventId, repository, revision]);
 
   return state;
 }

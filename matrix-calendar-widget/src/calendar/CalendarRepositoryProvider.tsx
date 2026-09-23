@@ -15,31 +15,65 @@
  */
 
 import { CalendarRepository } from '@matrix-calendar-widget/calendar';
-import { PropsWithChildren, createContext, useContext } from 'react';
+import {
+  PropsWithChildren,
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from 'react';
 
-const CalendarRepositoryContext = createContext<CalendarRepository | undefined>(
-  undefined,
-);
+type CalendarRepositoryContextValue = {
+  repository: CalendarRepository;
+  revision: number;
+  invalidate: () => void;
+};
+
+const CalendarRepositoryContext = createContext<
+  CalendarRepositoryContextValue | undefined
+>(undefined);
 
 export function CalendarRepositoryProvider({
   children,
   repository,
 }: PropsWithChildren<{ repository: CalendarRepository }>) {
+  const [revision, setRevision] = useState(0);
+  const invalidate = useCallback(() => {
+    setRevision((current) => current + 1);
+  }, []);
+  const value = useMemo(
+    () => ({ repository, revision, invalidate }),
+    [invalidate, repository, revision],
+  );
+
   return (
-    <CalendarRepositoryContext.Provider value={repository}>
+    <CalendarRepositoryContext.Provider value={value}>
       {children}
     </CalendarRepositoryContext.Provider>
   );
 }
 
-export function useCalendarRepository(): CalendarRepository {
-  const repository = useContext(CalendarRepositoryContext);
+function useCalendarRepositoryContext(): CalendarRepositoryContextValue {
+  const value = useContext(CalendarRepositoryContext);
 
-  if (!repository) {
+  if (!value) {
     throw new Error(
       'useCalendarRepository must be used inside CalendarRepositoryProvider',
     );
   }
 
-  return repository;
+  return value;
+}
+
+export function useCalendarRepository(): CalendarRepository {
+  return useCalendarRepositoryContext().repository;
+}
+
+export function useCalendarRepositoryRevision(): number {
+  return useCalendarRepositoryContext().revision;
+}
+
+export function useInvalidateCalendarRepository(): () => void {
+  return useCalendarRepositoryContext().invalidate;
 }

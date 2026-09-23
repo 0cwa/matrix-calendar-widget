@@ -25,8 +25,15 @@ export {
 export {
   CalendarRepositoryProvider,
   useCalendarRepository,
+  useCalendarRepositoryRevision,
+  useInvalidateCalendarRepository,
 } from './CalendarRepositoryProvider';
 export type { CalendarFilters } from './types';
+export {
+  useCreateCalendarEvent,
+  useDeleteCalendarEvent,
+  useUpdateCalendarEvent,
+} from './useCalendarMutations';
 export {
   useCalendarEvent,
   useCalendarEvents,
