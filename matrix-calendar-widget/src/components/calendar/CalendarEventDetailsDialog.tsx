@@ -56,7 +56,8 @@ export function CalendarEventDetailsDialog({
 
               {event.location && (
                 <Typography>
-                  {t('calendarEvents.details.location', 'Location')}: {event.location}
+                  {t('calendarEvents.details.location', 'Location')}:{' '}
+                  {event.location}
                 </Typography>
               )}
 
@@ -85,7 +86,9 @@ export function formatCalendarEventTime(
 ): string {
   if (isAllDayCalendarEvent(event)) {
     const start = DateTime.fromISO(event.timing.startDate).setLocale(locale);
-    const endExclusive = DateTime.fromISO(event.timing.endDate).setLocale(locale);
+    const endExclusive = DateTime.fromISO(event.timing.endDate).setLocale(
+      locale,
+    );
     const endInclusive = endExclusive.minus({ days: 1 });
 
     if (start.hasSame(endInclusive, 'day')) {
