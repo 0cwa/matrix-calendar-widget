@@ -41,7 +41,9 @@ const event: CalendarEvent = {
 };
 
 describe('<CalendarEventsList />', () => {
-  it('renders domain events and selects them without a Meeting adapter', async () => {
+  it(
+    'renders domain events and selects them without a Meeting adapter',
+    async () => {
     const onSelectEvent = vi.fn();
     const user = userEvent.setup();
 
@@ -54,16 +56,15 @@ describe('<CalendarEventsList />', () => {
 
     await user.click(screen.getByRole('button', { name: /Team planning/i }));
 
-    expect(onSelectEvent).toHaveBeenCalledWith(event);
-  });
+      expect(onSelectEvent).toHaveBeenCalledWith(event);
+    },
+  );
 
   it('renders an empty state', () => {
     render(<CalendarEventsList events={[]} onSelectEvent={vi.fn()} />);
 
     expect(
-      screen.getByText(
-        'No events scheduled that match the selected filters.',
-      ),
+      screen.getByText('No events scheduled that match the selected filters.'),
     ).toBeInTheDocument();
   });
 
