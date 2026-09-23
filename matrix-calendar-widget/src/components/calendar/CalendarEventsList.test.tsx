@@ -45,8 +45,6 @@ describe('<CalendarEventsList />', () => {
     'renders domain events and selects them without a Meeting adapter',
     async () => {
       const onSelectEvent = vi.fn();
-      const user = userEvent.setup();
-
       render(
         <CalendarEventsList events={[event]} onSelectEvent={onSelectEvent} />,
       );
@@ -54,7 +52,7 @@ describe('<CalendarEventsList />', () => {
       expect(screen.getByText('Team planning')).toBeInTheDocument();
       expect(screen.getByText('Room 3')).toBeInTheDocument();
 
-      await user.click(
+      await userEvent.click(
         screen.getByRole('button', { name: /Team planning/i }),
       );
 
