@@ -46,6 +46,7 @@ import { MeetingClient } from './client/MeetingClient';
 import { ReactionClient } from './client/ReactionClient';
 import { WidgetClient } from './client/WidgetClient';
 import configuration, { ValidationSchema } from './configuration';
+import { CalendarGatewayController } from './controller/CalendarGatewayController';
 import { CommandController } from './controller/CommandController';
 import { ConfigurationController } from './controller/ConfigurationController';
 import { GuestMemberController } from './controller/GuestMemberController';
@@ -245,6 +246,7 @@ const i18nFactory: FactoryProvider<void> = {
     }),
   ],
   controllers: [
+    CalendarGatewayController,
     CommandController,
     ConfigurationController,
     HealthCheckController,

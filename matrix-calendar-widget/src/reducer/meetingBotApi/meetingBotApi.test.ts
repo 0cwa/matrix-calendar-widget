@@ -40,6 +40,85 @@ describe('meetingBotApi', () => {
     });
   });
 
+  describe('getCalendarGatewayContext', () => {
+    const { initiate } = meetingBotApi.endpoints.getCalendarGatewayContext;
+
+    it('returns the server-validated Matrix identity', async () => {
+      server.use(
+        rest.get('http://localhost/v1/calendar/context', (req, res, ctx) => {
+          if (req.headers.get('Authorization') !== expectedAuthHeader) {
+            return res(ctx.status(401));
+          }
+
+          return res(ctx.json({ userId: '@alice:example.test' }));
+        }),
+      );
+
+      const store = createStore({ widgetApi });
+
+      await expect(store.dispatch(initiate()).unwrap()).resolves.toEqual({
+        userId: '@alice:example.test',
+      });
+    });
+
+    it('passes a room id for server-side membership checks', async () => {
+      server.use(
+        rest.get('http://localhost/v1/calendar/context', (req, res, ctx) => {
+          if (req.headers.get('Authorization') !== expectedAuthHeader) {
+            return res(ctx.status(401));
+          }
+
+          if (req.url.searchParams.get('roomId') !== '!team:example.test') {
+            return res(ctx.status(400));
+          }
+
+          return res(
+            ctx.json({
+              userId: '@alice:example.test',
+              roomId: '!team:example.test',
+            }),
+          );
+        }),
+      );
+
+      const store = createStore({ widgetApi });
+
+      await expect(
+        store.dispatch(initiate({ roomId: '!team:example.test' })).unwrap(),
+      ).resolves.toEqual({
+        userId: '@alice:example.test',
+        roomId: '!team:example.test',
+      });
+    });
+
+    it('rejects malformed gateway responses', async () => {
+      server.use(
+        rest.get('http://localhost/v1/calendar/context', (_req, res, ctx) =>
+          res(ctx.json({ userId: 7 })),
+        ),
+      );
+
+      const store = createStore({ widgetApi });
+
+      await expect(store.dispatch(initiate()).unwrap()).rejects.toMatchObject({
+        status: 'PARSING_ERROR',
+      });
+    });
+
+    it('rejects when Matrix OpenID is unavailable', async () => {
+      widgetApi.requestOpenIDConnectToken.mockRejectedValue(
+        new Error('No token received'),
+      );
+
+      const store = createStore({ widgetApi });
+
+      await expect(store.dispatch(initiate()).unwrap()).rejects.toEqual({
+        error: expect.stringMatching('No token received'),
+        status: 'CUSTOM_ERROR',
+      });
+    });
+  });
+
   describe('getConfiguration', () => {
     const { initiate } = meetingBotApi.endpoints.getConfiguration;
 
