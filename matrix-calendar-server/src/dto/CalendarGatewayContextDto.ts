@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Nordeck IT + Consulting GmbH
+ * Copyright 2026 Matrix Calendar Widget contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,16 +14,18 @@
  * limitations under the License.
  */
 
-export {
-  meetingBotApi,
-  useGetAvailableWidgetsQuery,
-  useGetCalendarGatewayContextQuery,
-  useGetConfigurationQuery,
-  useGetMeetingSharingInformationQuery,
-} from './meetingBotApi';
-export type {
-  AvailableWidget,
-  CalendarGatewayContext,
-  MeetingSharingInformation,
-  MeetingsBotConfiguration,
-} from './types';
+import { IsOptional, IsString } from 'class-validator';
+
+export class CalendarGatewayContextDto {
+  @IsString()
+  userId: string;
+
+  @IsOptional()
+  @IsString()
+  roomId?: string;
+
+  constructor(userId: string, roomId?: string) {
+    this.userId = userId;
+    this.roomId = roomId;
+  }
+}

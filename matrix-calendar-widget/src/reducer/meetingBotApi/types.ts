@@ -37,3 +37,8 @@ export type MeetingsBotConfiguration = {
     meetingUrlTemplate?: string;
   };
 };
+
+export type CalendarGatewayContext = {
+  userId: string;
+  roomId?: string;
+};

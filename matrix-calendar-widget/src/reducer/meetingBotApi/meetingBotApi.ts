@@ -25,6 +25,7 @@ import Joi from 'joi';
 import { ThunkExtraArgument } from '../../store';
 import {
   AvailableWidget,
+  CalendarGatewayContext,
   MeetingsBotConfiguration,
   MeetingSharingInformation,
 } from './types';
@@ -33,6 +34,19 @@ type ConfigurationResponse = {
   jitsiDialInEnabled?: boolean;
   openXchangeMeetingUrlTemplate?: string;
 };
+
+type CalendarGatewayContextResponse = {
+  userId: string;
+  roomId?: string;
+};
+
+const calendarGatewayContextResponseSchema = Joi.object<
+  CalendarGatewayContextResponse,
+  true
+>({
+  userId: Joi.string().required(),
+  roomId: Joi.string().optional(),
+}).unknown(false);
 
 const configurationResponseSchema = Joi.object<ConfigurationResponse, true>({
   jitsiDialInEnabled: Joi.boolean().strict().optional(),
@@ -90,6 +104,43 @@ export const meetingBotApi = createApi({
     },
   }),
   endpoints: (builder) => ({
+    getCalendarGatewayContext: builder.query<
+      CalendarGatewayContext,
+      { roomId?: string } | void
+    >({
+      queryFn: async (args, _, __, fetch) => {
+        try {
+          const response = await fetch({
+            url: '/v1/calendar/context',
+            params: args?.roomId ? { roomId: args.roomId } : undefined,
+          });
+
+          if (response.data) {
+            try {
+              const data =
+                await calendarGatewayContextResponseSchema.validateAsync(
+                  response.data,
+                );
+              return { data };
+            } catch (e) {
+              return {
+                error: {
+                  error: e.message,
+                  status: 'PARSING_ERROR',
+                  originalStatus: response.meta?.response?.status ?? 0,
+                  data: response.data,
+                } as FetchBaseQueryError,
+              };
+            }
+          }
+
+          return { error: response.error as FetchBaseQueryError };
+        } catch (error) {
+          return { error: { error: error.message, status: 'CUSTOM_ERROR' } };
+        }
+      },
+    }),
+
     getConfiguration: builder.query<MeetingsBotConfiguration, void>({
       queryFn: async (_, __, ___, fetch) => {
         try {
@@ -211,6 +262,7 @@ export const meetingBotApi = createApi({
 
 export const {
   useGetAvailableWidgetsQuery,
+  useGetCalendarGatewayContextQuery,
   useGetConfigurationQuery,
   useGetMeetingSharingInformationQuery,
 } = meetingBotApi;
