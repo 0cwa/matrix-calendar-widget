@@ -5,6 +5,10 @@
     "selectUser": "Teilnehmer auswählen",
     "youAreAlwaysMember": "Als Organisator bist du automatisch Mitglied jeder Breakoutsession."
   },
+  "calendarDayPicker": {
+    "chooseDate": "Wähle ein Datum, das gewählte Datum ist {{date, datetime}}",
+    "label": "{{date, datetime}}"
+  },
   "calendarEvents": {
     "details": {
       "allDay": "Ganztägig",
@@ -14,10 +18,6 @@
     "empty": "Keine Termine gefunden, die den ausgewählten Filtern entsprechen.",
     "loadError": "Kalendertermine konnten nicht geladen werden.",
     "title": "Kalendertermine"
-  },
-  "calendarDayPicker": {
-    "chooseDate": "Wähle ein Datum, das gewählte Datum ist {{date, datetime}}",
-    "label": "{{date, datetime}}"
   },
   "calendarMonthPicker": {
     "chooseMonth": "Wähle einen Monat, der gewählte Monat ist {{date, datetime}}",
