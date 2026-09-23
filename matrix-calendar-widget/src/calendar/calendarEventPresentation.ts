@@ -50,8 +50,14 @@ export function calendarEventToFullCalendarEvent(
   return {
     id: calendarEventKey(event),
     title: event.title,
-    start: zonedDateTimeToIso(event.timing.start.local, event.timing.start.timezone),
-    end: zonedDateTimeToIso(event.timing.end.local, event.timing.end.timezone),
+    start: zonedDateTimeToIso(
+      event.timing.start.local,
+      event.timing.start.timezone,
+    ),
+    end: zonedDateTimeToIso(
+      event.timing.end.local,
+      event.timing.end.timezone,
+    ),
     allDay: false,
     extendedProps: {
       calendarId: event.calendarId,
@@ -83,7 +89,12 @@ export function filterCalendarEvents(
   }
 
   return events.filter((event) =>
-    [event.title, event.description, event.location, ...(event.categories ?? [])]
+    [
+      event.title,
+      event.description,
+      event.location,
+      ...(event.categories ?? []),
+    ]
       .filter((value): value is string => Boolean(value))
       .some((value) => value.toLocaleLowerCase().includes(query)),
   );
@@ -129,9 +140,7 @@ export function repositoryRangeForView(
 }
 
 function zonedDateTimeToIso(local: string, timezone: string): string {
-  return (
-    DateTime.fromISO(local, { zone: timezone }).toISO() ?? local
-  );
+  return DateTime.fromISO(local, { zone: timezone }).toISO() ?? local;
 }
 
 function compareCalendarEvents(a: CalendarEvent, b: CalendarEvent): number {
