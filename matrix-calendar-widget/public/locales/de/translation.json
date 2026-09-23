@@ -10,10 +10,37 @@
     "label": "{{date, datetime}}"
   },
   "calendarEvents": {
+    "delete": {
+      "confirm": "Löschen",
+      "description": "„{{title}}“ löschen? Dies kann nicht rückgängig gemacht werden.",
+      "error": "Der Termin konnte nicht gelöscht werden.",
+      "title": "Termin löschen"
+    },
     "details": {
       "allDay": "Ganztägig",
       "close": "Schließen",
+      "delete": "Löschen",
+      "edit": "Bearbeiten",
       "location": "Ort"
+    },
+    "editor": {
+      "allDay": "Ganztägig",
+      "calendar": "Kalender",
+      "create": "Termin erstellen",
+      "createTitle": "Termin erstellen",
+      "description": "Beschreibung",
+      "editTitle": "Termin bearbeiten",
+      "end": "Ende",
+      "invalidRange": "Das Ende muss nach dem Beginn liegen.",
+      "invalidTimezone": "Gib eine gültige IANA-Zeitzone ein.",
+      "location": "Ort",
+      "readOnly": "Dieser Kalender ist schreibgeschützt.",
+      "save": "Speichern",
+      "saveError": "Der Termin konnte nicht gespeichert werden.",
+      "start": "Beginn",
+      "timezone": "Zeitzone",
+      "title": "Titel",
+      "titleRequired": "Ein Titel ist erforderlich."
     },
     "empty": "Keine Termine gefunden, die den ausgewählten Filtern entsprechen.",
     "loadError": "Kalendertermine konnten nicht geladen werden.",

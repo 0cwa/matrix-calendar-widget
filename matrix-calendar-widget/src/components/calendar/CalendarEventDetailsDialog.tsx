@@ -20,6 +20,7 @@ import {
   isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
 import {
+  Alert,
   Button,
   Dialog,
   DialogActions,
@@ -29,7 +30,11 @@ import {
   Typography,
 } from '@mui/material';
 import { DateTime } from 'luxon';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useCalendars, useDeleteCalendarEvent } from '../../calendar';
+import { ConfirmDeleteDialog } from '../common/ConfirmDeleteDialog';
+import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 
 export function CalendarEventDetailsDialog({
   event,
@@ -39,44 +44,147 @@ export function CalendarEventDetailsDialog({
   onClose: () => void;
 }) {
   const { i18n, t } = useTranslation();
+  const calendars = useCalendars();
+  const deleteEvent = useDeleteCalendarEvent();
+  const [currentEvent, setCurrentEvent] = useState(event);
+  const [editing, setEditing] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState(false);
+
+  useEffect(() => {
+    setCurrentEvent(event);
+    setEditing(false);
+    setDeleteOpen(false);
+    setDeleteLoading(false);
+    setDeleteError(false);
+  }, [event]);
+
+  const eventCalendar = currentEvent
+    ? calendars.data.find((calendar) => calendar.id === currentEvent.calendarId)
+    : undefined;
+  const canMutate = Boolean(eventCalendar && !eventCalendar.readOnly);
+
+  const handleDelete = async () => {
+    if (!currentEvent || !canMutate) {
+      return;
+    }
+
+    setDeleteLoading(true);
+    setDeleteError(false);
+
+    try {
+      await deleteEvent(currentEvent.calendarId, currentEvent.id);
+      setDeleteOpen(false);
+      onClose();
+    } catch {
+      setDeleteError(true);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
 
   return (
-    <Dialog fullWidth maxWidth="sm" onClose={onClose} open={Boolean(event)}>
-      {event && (
-        <>
-          <DialogTitle>{event.title}</DialogTitle>
-          <DialogContent>
-            <Stack spacing={1}>
-              <Typography>
-                {formatCalendarEventTime(
-                  event,
-                  i18n.language,
-                  t('calendarEvents.details.allDay', 'All day'),
+    <>
+      <Dialog
+        fullWidth
+        maxWidth="sm"
+        onClose={onClose}
+        open={Boolean(currentEvent) && !editing}
+      >
+        {currentEvent && (
+          <>
+            <DialogTitle>{currentEvent.title}</DialogTitle>
+            <DialogContent>
+              <Stack spacing={1}>
+                {eventCalendar?.readOnly && (
+                  <Alert severity="info">
+                    {t(
+                      'calendarEvents.editor.readOnly',
+                      'This calendar is read-only.',
+                    )}
+                  </Alert>
                 )}
-              </Typography>
 
-              {event.location && (
                 <Typography>
-                  {t('calendarEvents.details.location', 'Location')}:{' '}
-                  {event.location}
+                  {formatCalendarEventTime(
+                    currentEvent,
+                    i18n.language,
+                    t('calendarEvents.details.allDay', 'All day'),
+                  )}
                 </Typography>
-              )}
 
-              {event.description && (
-                <Typography sx={{ whiteSpace: 'pre-wrap' }}>
-                  {event.description}
-                </Typography>
-              )}
-            </Stack>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={onClose}>
-              {t('calendarEvents.details.close', 'Close')}
-            </Button>
-          </DialogActions>
-        </>
+                {currentEvent.location && (
+                  <Typography>
+                    {t('calendarEvents.details.location', 'Location')}:{' '}
+                    {currentEvent.location}
+                  </Typography>
+                )}
+
+                {currentEvent.description && (
+                  <Typography sx={{ whiteSpace: 'pre-wrap' }}>
+                    {currentEvent.description}
+                  </Typography>
+                )}
+              </Stack>
+            </DialogContent>
+            <DialogActions>
+              <Button disabled={!canMutate} onClick={() => setEditing(true)}>
+                {t('calendarEvents.details.edit', 'Edit')}
+              </Button>
+              <Button
+                color="error"
+                disabled={!canMutate}
+                onClick={() => setDeleteOpen(true)}
+              >
+                {t('calendarEvents.details.delete', 'Delete')}
+              </Button>
+              <Button onClick={onClose}>
+                {t('calendarEvents.details.close', 'Close')}
+              </Button>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
+
+      {currentEvent && (
+        <CalendarEventEditorDialog
+          calendars={calendars.data}
+          event={currentEvent}
+          onClose={() => setEditing(false)}
+          onSaved={setCurrentEvent}
+          open={editing}
+        />
       )}
-    </Dialog>
+
+      {currentEvent && (
+        <ConfirmDeleteDialog
+          confirmTitle={t('calendarEvents.delete.confirm', 'Delete')}
+          description={t(
+            'calendarEvents.delete.description',
+            'Delete “{{title}}”? This cannot be undone.',
+            { title: currentEvent.title },
+          )}
+          loading={deleteLoading}
+          onCancel={() => {
+            setDeleteOpen(false);
+            setDeleteError(false);
+          }}
+          onConfirm={handleDelete}
+          open={deleteOpen}
+          title={t('calendarEvents.delete.title', 'Delete event')}
+        >
+          {deleteError && (
+            <Alert severity="error">
+              {t(
+                'calendarEvents.delete.error',
+                'The event could not be deleted.',
+              )}
+            </Alert>
+          )}
+        </ConfirmDeleteDialog>
+      )}
+    </>
   );
 }
 

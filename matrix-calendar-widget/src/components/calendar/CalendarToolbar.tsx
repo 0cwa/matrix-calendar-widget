@@ -14,12 +14,16 @@
  * limitations under the License.
  */
 
-import { Box, Stack, useMediaQuery, useTheme } from '@mui/material';
-import { CalendarFilters } from '../../calendar';
+import AddIcon from '@mui/icons-material/Add';
+import { Box, Button, Stack, useMediaQuery, useTheme } from '@mui/material';
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { CalendarFilters, useCalendars } from '../../calendar';
 import { MeetingsNavigation, ViewType } from '../meetings/MeetingsNavigation';
 import { MeetingsToolbarButtons } from '../meetings/MeetingsToolbar/MeetingsToolbarButtons';
 import { MeetingsToolbarDatePicker } from '../meetings/MeetingsToolbar/MeetingsToolbarDatePicker';
 import { MeetingsToolbarSearch } from '../meetings/MeetingsToolbar/MeetingsToolbarSearch';
+import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 
 type CalendarToolbarProps = {
   filters: CalendarFilters;
@@ -36,42 +40,66 @@ export function CalendarToolbar({
   onSearchChange,
   onViewChange,
 }: CalendarToolbarProps) {
+  const { t } = useTranslation();
   const theme = useTheme();
   const showToolbarButtons = useMediaQuery(theme.breakpoints.up('md'));
+  const calendars = useCalendars();
+  const [createOpen, setCreateOpen] = useState(false);
+  const writableCalendars = calendars.data.filter(
+    (calendar) => !calendar.readOnly,
+  );
 
   return (
-    <Stack direction="row" flexWrap="wrap" gap={1}>
-      {showToolbarButtons && (
-        <Box>
-          <MeetingsToolbarButtons
-            endDate={filters.endDate}
-            onRangeChange={onRangeChange}
-            startDate={filters.startDate}
-            view={view}
+    <>
+      <Stack direction="row" flexWrap="wrap" gap={1}>
+        <Button
+          disabled={calendars.loading || writableCalendars.length === 0}
+          onClick={() => setCreateOpen(true)}
+          startIcon={<AddIcon />}
+          variant="contained"
+        >
+          {t('calendarEvents.editor.create', 'Create event')}
+        </Button>
+
+        {showToolbarButtons && (
+          <Box>
+            <MeetingsToolbarButtons
+              endDate={filters.endDate}
+              onRangeChange={onRangeChange}
+              startDate={filters.startDate}
+              view={view}
+            />
+          </Box>
+        )}
+
+        <MeetingsToolbarDatePicker
+          endDate={filters.endDate}
+          onRangeChange={onRangeChange}
+          startDate={filters.startDate}
+          sx={{ flexGrow: 1 }}
+          view={view}
+        />
+
+        <Box flex={99999999} textAlign="right">
+          <MeetingsToolbarSearch
+            onSearchChange={onSearchChange}
+            search={filters.filterText ?? ''}
           />
         </Box>
-      )}
 
-      <MeetingsToolbarDatePicker
-        endDate={filters.endDate}
-        onRangeChange={onRangeChange}
-        startDate={filters.startDate}
-        sx={{ flexGrow: 1 }}
-        view={view}
-      />
-
-      <Box flex={99999999} textAlign="right">
-        <MeetingsToolbarSearch
-          onSearchChange={onSearchChange}
-          search={filters.filterText ?? ''}
+        <MeetingsNavigation
+          onViewChange={onViewChange}
+          sx={{ flexGrow: 1 }}
+          view={view}
         />
-      </Box>
+      </Stack>
 
-      <MeetingsNavigation
-        onViewChange={onViewChange}
-        sx={{ flexGrow: 1 }}
-        view={view}
+      <CalendarEventEditorDialog
+        calendars={calendars.data}
+        onClose={() => setCreateOpen(false)}
+        onSaved={() => undefined}
+        open={createOpen}
       />
-    </Stack>
+    </>
   );
 }
