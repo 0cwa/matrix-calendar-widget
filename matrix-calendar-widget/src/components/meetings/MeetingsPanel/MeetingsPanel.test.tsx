@@ -34,6 +34,7 @@ import {
   mockMeeting,
   mockPowerLevelsEvent,
 } from '../../../lib/testUtils';
+import { CalendarRepositoryProvider } from '../../../calendar';
 import { createStore } from '../../../store';
 import { initializeStore } from '../../../store/store';
 import { LocalizationProvider } from '../../common/LocalizationProvider';
