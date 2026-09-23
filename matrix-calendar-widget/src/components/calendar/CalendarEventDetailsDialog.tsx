@@ -17,6 +17,7 @@
 import {
   CalendarEvent,
   isAllDayCalendarEvent,
+  isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
 import {
   Button,
@@ -98,6 +99,10 @@ export function formatCalendarEventTime(
     return `${start.toLocaleString(DateTime.DATE_FULL)} – ${endInclusive.toLocaleString(
       DateTime.DATE_FULL,
     )} · ${allDayLabel}`;
+  }
+
+  if (!isTimedCalendarEvent(event)) {
+    return '';
   }
 
   const start = DateTime.fromISO(event.timing.start.local, {
