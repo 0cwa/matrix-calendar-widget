@@ -19,6 +19,15 @@ export {
   useCalendarRepository,
 } from './CalendarRepositoryProvider';
 export {
+  calendarEventKey,
+  calendarEventStartDate,
+  calendarEventToFullCalendarEvent,
+  filterCalendarEvents,
+  groupCalendarEventsByDay,
+  repositoryRangeForView,
+} from './calendarEventPresentation';
+export type { CalendarFilters } from './types';
+export {
   useCalendarEvent,
   useCalendarEvents,
   useCalendars,
