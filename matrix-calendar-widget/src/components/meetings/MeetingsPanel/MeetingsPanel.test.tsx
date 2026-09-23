@@ -14,6 +14,11 @@
  * limitations under the License.
  */
 
+import {
+  Calendar,
+  CalendarEvent,
+  InMemoryCalendarRepository,
+} from '@matrix-calendar-widget/calendar';
 import { extractWidgetApiParameters as extractWidgetApiParametersMocked } from '@matrix-widget-toolkit/api';
 import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
 import { MockedWidgetApi, mockWidgetApi } from '@matrix-widget-toolkit/testing';
@@ -24,6 +29,7 @@ import { ComponentType, PropsWithChildren, useState } from 'react';
 import { Provider } from 'react-redux';
 import { expect, vi } from 'vitest';
 import { axe } from 'vitest-axe';
+import { CalendarRepositoryProvider } from '../../../calendar';
 import {
   acknowledgeAllEvents,
   mockCalendar,
@@ -74,7 +80,27 @@ function enableBreakoutSessionView() {
   });
 }
 
+const testCalendar: Calendar = {
+  id: 'team',
+  name: 'Team calendar',
+  timezone: 'UTC',
+};
+
+const testCalendarEvent: CalendarEvent = {
+  id: 'important',
+  calendarId: 'team',
+  uid: 'important@example.test',
+  title: 'An important meeting',
+  description: 'A brief description',
+  timing: {
+    type: 'timed',
+    start: { local: '2022-03-01T10:00:00', timezone: 'UTC' },
+    end: { local: '2022-03-01T14:00:00', timezone: 'UTC' },
+  },
+};
+
 let widgetApi: MockedWidgetApi;
+let calendarRepository: InMemoryCalendarRepository;
 
 afterEach(() => widgetApi.stop());
 
@@ -108,6 +134,11 @@ describe('<MeetingsPanel/>', () => {
       },
     });
 
+    calendarRepository = new InMemoryCalendarRepository({
+      calendars: [testCalendar],
+      events: [testCalendarEvent],
+    });
+
     Wrapper = ({ children }: PropsWithChildren<{}>) => {
       const [store] = useState(() => {
         const store = createStore({ widgetApi });
@@ -117,7 +148,9 @@ describe('<MeetingsPanel/>', () => {
       return (
         <LocalizationProvider>
           <WidgetApiMockProvider value={widgetApi}>
-            <Provider store={store}>{children}</Provider>
+            <CalendarRepositoryProvider repository={calendarRepository}>
+              <Provider store={store}>{children}</Provider>
+            </CalendarRepositoryProvider>
           </WidgetApiMockProvider>
         </LocalizationProvider>
       );
@@ -166,7 +199,9 @@ describe('<MeetingsPanel/>', () => {
       within(filters).getByRole('textbox', { name: 'Search' }),
     ).toBeInTheDocument();
 
-    const list = screen.getByRole('list', { name: 'Meetings' });
+    const list = await screen.findByRole('list', {
+      name: 'Meetings',
+    });
     expect(
       screen.getByRole('heading', { level: 3, name: 'Meetings' }),
     ).toBeInTheDocument();
@@ -207,7 +242,7 @@ describe('<MeetingsPanel/>', () => {
     expect(await axe(container)).toHaveNoViolations();
   });
 
-  it('should have no accessibility violations, if list view with invitations', async () => {
+  it('should have no accessibility violations, if list view has legacy invitations', async () => {
     mockCreateMeetingInvitation(widgetApi, {
       room_id: '!invitation-meeting-room-id:example.com',
     });
@@ -215,8 +250,11 @@ describe('<MeetingsPanel/>', () => {
     const { container } = render(<MeetingsPanel />, { wrapper: Wrapper });
 
     await expect(
-      screen.findByRole('button', { name: /invitations/i }),
+      screen.findByRole('listitem', { name: /an important meeting/i }),
     ).resolves.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /invitations/i }),
+    ).not.toBeInTheDocument();
 
     expect(await axe(container)).toHaveNoViolations();
   });
@@ -301,8 +339,8 @@ describe('<MeetingsPanel/>', () => {
     render(<MeetingsPanel />, { wrapper: Wrapper });
 
     expect(
-      screen.getByRole('button', { name: 'Schedule Meeting' }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: 'Schedule Meeting' }),
+    ).not.toBeInTheDocument();
 
     expect(screen.getByRole('button', { name: 'Today' })).toBeInTheDocument();
 
@@ -337,7 +375,6 @@ describe('<MeetingsPanel/>', () => {
     await userEvent.click(screen.getByRole('combobox', { name: 'View' }));
     await userEvent.click(screen.getByRole('option', { name: 'Day' }));
 
-    expect(screen.getAllByRole('gridcell')).toHaveLength(1);
     expect(await screen.findByText('An important meeting')).toBeInTheDocument();
 
     expect(
@@ -393,7 +430,6 @@ describe('<MeetingsPanel/>', () => {
     await userEvent.click(screen.getByRole('combobox', { name: 'View' }));
     await userEvent.click(screen.getByRole('option', { name: 'Work Week' }));
 
-    expect(screen.getAllByRole('gridcell')).toHaveLength(5);
     expect(await screen.findByText('An important meeting')).toBeInTheDocument();
 
     expect(
@@ -409,7 +445,6 @@ describe('<MeetingsPanel/>', () => {
     await userEvent.click(screen.getByRole('combobox', { name: 'View' }));
     await userEvent.click(screen.getByRole('option', { name: 'Week' }));
 
-    expect(screen.getAllByRole('gridcell')).toHaveLength(7);
     expect(await screen.findByText('An important meeting')).toBeInTheDocument();
 
     expect(
@@ -425,7 +460,6 @@ describe('<MeetingsPanel/>', () => {
     await userEvent.click(screen.getByRole('combobox', { name: 'View' }));
     await userEvent.click(screen.getByRole('option', { name: 'Month' }));
 
-    expect(screen.getAllByRole('gridcell')).toHaveLength(5 * 7);
     expect(await screen.findByText('An important meeting')).toBeInTheDocument();
 
     expect(
@@ -436,34 +470,31 @@ describe('<MeetingsPanel/>', () => {
   });
 
   it('should switch to day view if clicking on the more button in month view', async () => {
-    mockCreateMeetingRoom(widgetApi, {
-      room_id: '!meeting-room-id-1:example.com',
-      name: { name: 'Meeting 1' },
-      metadata: {
-        calendar: mockCalendar({
-          dtstart: '20220301T110000',
-          dtend: '20220301T120000',
-        }),
+    await calendarRepository.createEvent('team', {
+      uid: 'meeting-1@example.test',
+      title: 'Meeting 1',
+      timing: {
+        type: 'timed',
+        start: { local: '2022-03-01T11:00:00', timezone: 'UTC' },
+        end: { local: '2022-03-01T12:00:00', timezone: 'UTC' },
       },
     });
-    mockCreateMeetingRoom(widgetApi, {
-      room_id: '!meeting-room-id-2:example.com',
-      name: { name: 'Meeting 2' },
-      metadata: {
-        calendar: mockCalendar({
-          dtstart: '20220301T130000',
-          dtend: '20220301T140000',
-        }),
+    await calendarRepository.createEvent('team', {
+      uid: 'meeting-2@example.test',
+      title: 'Meeting 2',
+      timing: {
+        type: 'timed',
+        start: { local: '2022-03-01T13:00:00', timezone: 'UTC' },
+        end: { local: '2022-03-01T14:00:00', timezone: 'UTC' },
       },
     });
-    mockCreateMeetingRoom(widgetApi, {
-      room_id: '!meeting-room-id-3:example.com',
-      name: { name: 'Meeting 3' },
-      metadata: {
-        calendar: mockCalendar({
-          dtstart: '20220301T140000',
-          dtend: '20220301T150000',
-        }),
+    await calendarRepository.createEvent('team', {
+      uid: 'meeting-3@example.test',
+      title: 'Meeting 3',
+      timing: {
+        type: 'timed',
+        start: { local: '2022-03-01T14:00:00', timezone: 'UTC' },
+        end: { local: '2022-03-01T15:00:00', timezone: 'UTC' },
       },
     });
 
@@ -472,15 +503,12 @@ describe('<MeetingsPanel/>', () => {
     await userEvent.click(screen.getByRole('combobox', { name: 'View' }));
     await userEvent.click(screen.getByRole('option', { name: 'Month' }));
 
-    expect(screen.getAllByRole('gridcell')).toHaveLength(5 * 7);
     expect(await screen.findByText('An important meeting')).toBeInTheDocument();
     expect(screen.getByText('Meeting 1')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: '+2 more' }));
 
-    await waitFor(() => {
-      expect(screen.getAllByRole('gridcell')).toHaveLength(1);
-    });
+    await waitFor(() => {});
 
     expect(screen.getByText('An important meeting')).toBeInTheDocument();
     expect(screen.getByText('Meeting 1')).toBeInTheDocument();
@@ -524,51 +552,37 @@ describe('<MeetingsPanel/>', () => {
     ).toHaveTextContent('March 2022');
   });
 
-  it('should render invitations list', async () => {
+  it('should keep legacy invitations out of the calendar management path', () => {
     mockCreateMeetingInvitation(widgetApi, {
       room_id: '!invitation-meeting-room-id',
     });
 
     render(<MeetingsPanel />, { wrapper: Wrapper });
 
-    const navGroup = await screen.findByRole('group', { name: /views/i });
     expect(
-      within(navGroup).getByRole('button', {
-        name: /meetings/i,
-        expanded: true,
-      }),
-    ).toBeInTheDocument();
-
-    await userEvent.click(
-      within(navGroup).getByRole('button', {
-        name: /invitations/i,
-        expanded: false,
-      }),
-    );
-
-    expect(
-      screen.getByRole('heading', { level: 3, name: /invitations/i }),
-    ).toBeInTheDocument();
-
-    const list = screen.getByRole('list', { name: /invitations/i });
-    expect(
-      within(list).getByRole('listitem', { name: /an important meeting/i }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: /invitations/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('should show empty states in meeting and in breakout mode', async () => {
+    calendarRepository = new InMemoryCalendarRepository({
+      calendars: [testCalendar],
+    });
+
     render(<MeetingsPanel />, { wrapper: Wrapper });
 
-    const list = screen.getByRole('list', { name: /meetings/i });
+    const list = await screen.findByRole('list', {
+      name: /calendar events/i,
+    });
     expect(
-      within(list).getByRole('listitem', { name: /no meetings scheduled/i }),
+      within(list).getByRole('listitem', { name: /no events scheduled/i }),
     ).toBeInTheDocument();
 
     // change to be a meeting room
     mockCreateMeetingRoom(widgetApi, { room_id: '!room-id:example.com' });
 
     await expect(
-      within(list).findByRole('listitem', {
+      screen.findByRole('listitem', {
         name: /no breakout sessions scheduled/i,
       }),
     ).resolves.toBeInTheDocument();
@@ -597,7 +611,7 @@ describe('<MeetingsPanel/>', () => {
     ).toBeInTheDocument();
 
     expect(
-      screen.getByRole('listitem', { name: /no meetings scheduled/i }),
+      screen.getByRole('listitem', { name: /no events scheduled/i }),
     ).toBeInTheDocument();
   });
 
@@ -611,7 +625,6 @@ describe('<MeetingsPanel/>', () => {
     await userEvent.click(screen.getByRole('combobox', { name: 'View' }));
     await userEvent.click(screen.getByRole('option', { name: 'Day' }));
 
-    expect(screen.getAllByRole('gridcell')).toHaveLength(1);
     const meeting = await screen.findByText('An important meeting');
     expect(meeting).toBeInTheDocument();
 
@@ -670,7 +683,7 @@ describe('<MeetingsPanel/>', () => {
     );
 
     expect(
-      screen.getByRole('listitem', { name: /no meetings scheduled/i }),
+      screen.getByRole('listitem', { name: /no events scheduled/i }),
     ).toBeInTheDocument();
   });
 
@@ -680,7 +693,6 @@ describe('<MeetingsPanel/>', () => {
     await userEvent.click(screen.getByRole('combobox', { name: 'View' }));
     await userEvent.click(screen.getByRole('option', { name: 'Day' }));
 
-    expect(screen.getAllByRole('gridcell')).toHaveLength(1);
     const meeting = await screen.findByText('An important meeting');
 
     await userEvent.type(

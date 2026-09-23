@@ -9,6 +9,16 @@
     "chooseDate": "Wähle ein Datum, das gewählte Datum ist {{date, datetime}}",
     "label": "{{date, datetime}}"
   },
+  "calendarEvents": {
+    "details": {
+      "allDay": "Ganztägig",
+      "close": "Schließen",
+      "location": "Ort"
+    },
+    "empty": "Keine Termine gefunden, die den ausgewählten Filtern entsprechen.",
+    "loadError": "Kalendertermine konnten nicht geladen werden.",
+    "title": "Kalendertermine"
+  },
   "calendarMonthPicker": {
     "chooseMonth": "Wähle einen Monat, der gewählte Monat ist {{date, datetime}}",
     "label": "{{date, datetime}}"

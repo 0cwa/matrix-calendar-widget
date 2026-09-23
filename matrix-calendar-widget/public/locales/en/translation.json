@@ -9,6 +9,16 @@
     "chooseDate": "Choose date, selected date is {{date, datetime}}",
     "label": "{{date, datetime}}"
   },
+  "calendarEvents": {
+    "details": {
+      "allDay": "All day",
+      "close": "Close",
+      "location": "Location"
+    },
+    "empty": "No events scheduled that match the selected filters.",
+    "loadError": "Calendar events could not be loaded.",
+    "title": "Calendar events"
+  },
   "calendarMonthPicker": {
     "chooseMonth": "Choose month, selected month is {{date, datetime}}",
     "label": "{{date, datetime}}"

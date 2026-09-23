@@ -14,11 +14,13 @@
  * limitations under the License.
  */
 
+import { InMemoryCalendarRepository } from '@matrix-calendar-widget/calendar';
 import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
 import { MockedWidgetApi, mockWidgetApi } from '@matrix-widget-toolkit/testing';
 import { render } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
+import { CalendarRepositoryProvider } from './calendar';
 import { LocalizationProvider } from './components/common/LocalizationProvider';
 import { StoreProvider } from './store';
 
@@ -33,11 +35,15 @@ describe('App', () => {
     render(
       <LocalizationProvider>
         <WidgetApiMockProvider value={widgetApi}>
-          <StoreProvider>
-            <BrowserRouter>
-              <App />
-            </BrowserRouter>
-          </StoreProvider>
+          <CalendarRepositoryProvider
+            repository={new InMemoryCalendarRepository()}
+          >
+            <StoreProvider>
+              <BrowserRouter>
+                <App />
+              </BrowserRouter>
+            </StoreProvider>
+          </CalendarRepositoryProvider>
         </WidgetApiMockProvider>
       </LocalizationProvider>,
     );

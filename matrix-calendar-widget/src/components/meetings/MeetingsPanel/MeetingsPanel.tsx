@@ -22,9 +22,9 @@ import { unstable_useId as useId, visuallyHidden } from '@mui/utils';
 import { DateTime } from 'luxon';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { CalendarFilters } from '../../../calendar';
 import { generateFilterRange } from '../../../lib/utils';
 import {
-  Filters,
   RoomType,
   makeSelectAllInvitedMeetingIds,
   makeSelectHasBreakoutSessions,
@@ -32,12 +32,12 @@ import {
   makeSelectRoomType,
 } from '../../../reducer/meetingsApi';
 import { useAppSelector } from '../../../store';
+import { CalendarEventsSurface, CalendarToolbar } from '../../calendar';
 import { InvitedMeetingsList } from '../InvitedMeetingsList';
 import { MeetingsCalendar } from '../MeetingsCalendar';
 import { MeetingsFilter } from '../MeetingsFilter';
 import { MeetingsList } from '../MeetingsList';
 import { ViewType } from '../MeetingsNavigation';
-import { MeetingsToolbar } from '../MeetingsToolbar';
 import { BreakoutSessionsMessageForm } from './BreakoutSessionsMessageForm';
 import { CreateBreakoutSessionsForm } from './CreateBreakoutSessionsForm';
 import { ToggleListView } from './ToggleListView';
@@ -62,7 +62,7 @@ export const MeetingsPanel = () => {
   const [view, setViewInternal] = useState<ViewType>(
     () => readLastViewTypeFromStorage(widgetApi) ?? 'list',
   );
-  const [filters, setFilters] = useState<Filters>({
+  const [filters, setFilters] = useState<CalendarFilters>({
     startDate: DateTime.now().startOf('day').toISO(),
     endDate: DateTime.now().plus({ days: 6 }).endOf('day').toISO(),
     filterText: '',
@@ -134,13 +134,15 @@ export const MeetingsPanel = () => {
     (state) => selectAllInvitedMeetingIds(state).length,
   );
 
+  const hasMeetingInvitations =
+    roomType !== 'management' && invitedMeetingIdLength > 0;
   const [showInvitations, setShowInvitations] = useState(false);
 
   useEffect(() => {
-    if (invitedMeetingIdLength === 0) {
+    if (!hasMeetingInvitations) {
       setShowInvitations(false);
     }
-  }, [invitedMeetingIdLength]);
+  }, [hasMeetingInvitations]);
 
   const handleShowMore = useCallback(
     (date: Date) => {
@@ -160,7 +162,7 @@ export const MeetingsPanel = () => {
 
   return (
     <Stack height="100%">
-      {invitedMeetingIdLength > 0 && (
+      {hasMeetingInvitations && (
         <Box m={1} mb={0}>
           <Box maxWidth={327} mx="auto">
             <ToggleListView
@@ -182,7 +184,7 @@ export const MeetingsPanel = () => {
 
           {roomType === 'management' ? (
             <Box my={1}>
-              <MeetingsToolbar
+              <CalendarToolbar
                 filters={filters}
                 onRangeChange={handleOnRangeChange}
                 onSearchChange={handleOnSearchChange}
@@ -199,7 +201,13 @@ export const MeetingsPanel = () => {
       )}
 
       <Box flexGrow={1} mb={view === 'list' ? 0 : 1} overflow="hidden">
-        {showInvitations ? (
+        {roomType === 'management' ? (
+          <CalendarEventsSurface
+            filters={filters}
+            onShowMore={handleShowMore}
+            view={view}
+          />
+        ) : showInvitations ? (
           <InvitedMeetingsList
             breakoutSessionMode={roomType === 'meeting'}
             id={invitationsId}
@@ -210,7 +218,7 @@ export const MeetingsPanel = () => {
               breakoutSessionMode={roomType === 'meeting'}
               displayAllMeetings={displayAllMeetings}
               filters={filters}
-              hasInvitations={invitedMeetingIdLength > 0}
+              hasInvitations={hasMeetingInvitations}
               id={meetingsId}
             />
           </Box>
