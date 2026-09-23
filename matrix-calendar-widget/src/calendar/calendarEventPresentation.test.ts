@@ -84,9 +84,7 @@ describe('calendar event presentation', () => {
   });
 
   it('filters by title, description, location, or category', () => {
-    expect(filterCalendarEvents([timedEvent], 'quarterly')).toEqual([
-      timedEvent,
-    ]);
+    expect(filterCalendarEvents([timedEvent], 'quarterly')).toEqual([timedEvent]);
     expect(filterCalendarEvents([timedEvent], 'room 3')).toEqual([timedEvent]);
     expect(filterCalendarEvents([timedEvent], 'team')).toEqual([timedEvent]);
     expect(filterCalendarEvents([timedEvent], 'missing')).toEqual([]);
