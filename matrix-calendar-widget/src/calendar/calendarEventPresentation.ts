@@ -19,6 +19,7 @@ import {
   CalendarEvent,
   CalendarTimeRange,
   isAllDayCalendarEvent,
+  isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
 import { DateTime } from 'luxon';
 import { CalendarViewType } from '../lib/utils';
@@ -47,6 +48,10 @@ export function calendarEventToFullCalendarEvent(
     };
   }
 
+  if (!isTimedCalendarEvent(event)) {
+    throw new Error('Unsupported calendar event timing');
+  }
+
   return {
     id: calendarEventKey(event),
     title: event.title,
@@ -70,6 +75,10 @@ export function calendarEventToFullCalendarEvent(
 export function calendarEventStartDate(event: CalendarEvent): string {
   if (isAllDayCalendarEvent(event)) {
     return event.timing.startDate;
+  }
+
+  if (!isTimedCalendarEvent(event)) {
+    throw new Error('Unsupported calendar event timing');
   }
 
   return (
@@ -155,6 +164,10 @@ function compareCalendarEvents(a: CalendarEvent, b: CalendarEvent): number {
 function eventStartMillis(event: CalendarEvent): number {
   if (isAllDayCalendarEvent(event)) {
     return DateTime.fromISO(event.timing.startDate, { zone: 'utc' }).toMillis();
+  }
+
+  if (!isTimedCalendarEvent(event)) {
+    throw new Error('Unsupported calendar event timing');
   }
 
   return DateTime.fromISO(event.timing.start.local, {
