@@ -5,6 +5,16 @@
     "selectUser": "Select participants",
     "youAreAlwaysMember": "The organizer will always join all breakout sessions."
   },
+  "calendarEvents": {
+    "details": {
+      "allDay": "All day",
+      "close": "Close",
+      "location": "Location"
+    },
+    "empty": "No events scheduled that match the selected filters.",
+    "loadError": "Calendar events could not be loaded.",
+    "title": "Calendar events"
+  },
   "calendarDayPicker": {
     "chooseDate": "Choose date, selected date is {{date, datetime}}",
     "label": "{{date, datetime}}"
