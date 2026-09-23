@@ -35,7 +35,9 @@ describe('App', () => {
     render(
       <LocalizationProvider>
         <WidgetApiMockProvider value={widgetApi}>
-          <CalendarRepositoryProvider repository={new InMemoryCalendarRepository()}>
+          <CalendarRepositoryProvider
+            repository={new InMemoryCalendarRepository()}
+          >
             <StoreProvider>
               <BrowserRouter>
                 <App />

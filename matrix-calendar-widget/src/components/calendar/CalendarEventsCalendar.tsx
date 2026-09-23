@@ -26,7 +26,6 @@ import deLocale from '@fullcalendar/core/locales/de';
 import FullCalendar from '@fullcalendar/react';
 import {
   CalendarEvent,
-  isAllDayCalendarEvent,
   isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
 import EventRepeatIcon from '@mui/icons-material/EventRepeat';
@@ -184,8 +183,8 @@ function CalendarEventCell({
   const { i18n, t } = useTranslation();
   const recurring = Boolean(
     event.recurrence?.rrule ||
-      event.recurrence?.rdates?.length ||
-      event.recurrence?.recurrenceId,
+    event.recurrence?.rdates?.length ||
+    event.recurrence?.recurrenceId,
   );
   const label = `${event.title}: ${formatCalendarEventTime(
     event,

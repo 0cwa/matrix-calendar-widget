@@ -95,10 +95,7 @@ describe('calendar event presentation', () => {
   it('groups and sorts events by their calendar-local start day', () => {
     const groups = groupCalendarEventsByDay([allDayEvent, timedEvent]);
 
-    expect(groups.map(({ day }) => day)).toEqual([
-      '2026-09-23',
-      '2026-09-24',
-    ]);
+    expect(groups.map(({ day }) => day)).toEqual(['2026-09-23', '2026-09-24']);
     expect(groups[0].events).toEqual([timedEvent]);
   });
 

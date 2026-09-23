@@ -59,10 +59,7 @@ export function calendarEventToFullCalendarEvent(
       event.timing.start.local,
       event.timing.start.timezone,
     ),
-    end: zonedDateTimeToIso(
-      event.timing.end.local,
-      event.timing.end.timezone,
-    ),
+    end: zonedDateTimeToIso(event.timing.end.local, event.timing.end.timezone),
     allDay: false,
     extendedProps: {
       calendarId: event.calendarId,

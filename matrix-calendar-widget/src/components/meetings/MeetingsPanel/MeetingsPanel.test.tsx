@@ -29,6 +29,7 @@ import { ComponentType, PropsWithChildren, useState } from 'react';
 import { Provider } from 'react-redux';
 import { expect, vi } from 'vitest';
 import { axe } from 'vitest-axe';
+import { CalendarRepositoryProvider } from '../../../calendar';
 import {
   acknowledgeAllEvents,
   mockCalendar,
@@ -38,7 +39,6 @@ import {
   mockMeeting,
   mockPowerLevelsEvent,
 } from '../../../lib/testUtils';
-import { CalendarRepositoryProvider } from '../../../calendar';
 import { createStore } from '../../../store';
 import { initializeStore } from '../../../store/store';
 import { LocalizationProvider } from '../../common/LocalizationProvider';
