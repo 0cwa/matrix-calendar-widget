@@ -47,7 +47,7 @@ export function CalendarEventsList({
         {t('calendarEvents.title', 'Calendar events')}
       </Typography>
 
-      <Stack component="ul" m={0} p={0}>
+      <Stack aria-labelledby={headingId} component="ul" m={0} p={0}>
         {groups.map(({ day, events: dayEvents }) => (
           <MeetingsListGroup date={day} key={day}>
             {dayEvents.map((event) => (
