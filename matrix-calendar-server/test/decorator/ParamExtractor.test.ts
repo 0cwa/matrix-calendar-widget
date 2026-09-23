@@ -25,6 +25,10 @@ import {
   ParamName,
   paramExtractor,
 } from '../../src/decorator/IParamExtractor';
+import {
+  IMatrixOpenIdCredential,
+  MATRIX_OPENID_CREDENTIAL_CONTEXT,
+} from '../../src/model/IMatrixOpenIdCredential';
 import { IUserContext } from '../../src/model/IUserContext';
 import { IContext } from '../../src/rpc/IContext';
 
@@ -49,12 +53,17 @@ describe('paramExtractor suite', () => {
   });
 
   test('contextExtractor apply http', () => {
+    const openIdCredential: IMatrixOpenIdCredential = {
+      accessToken: 'openid-token',
+      matrixServerName: 'example.test',
+    };
     const httpArgumentsHost: HttpArgumentsHost = {
       getNext(): any {
         return undefined;
       },
       getRequest(): any {
         return {
+          [MATRIX_OPENID_CREDENTIAL_CONTEXT]: openIdCredential,
           [NET_NORDECK_CONTEXT]: context.userContext,
         };
       },
@@ -68,6 +77,9 @@ describe('paramExtractor suite', () => {
 
     expect(paramExtractor(ex, ParamName.USER_CONTEXT)).toBe(
       context.userContext,
+    );
+    expect(paramExtractor(ex, ParamName.MATRIX_OPENID_CREDENTIAL)).toBe(
+      openIdCredential,
     );
   });
 
@@ -88,6 +100,9 @@ describe('paramExtractor suite', () => {
     expect(paramExtractor(ex, ParamName.USER_CONTEXT)).toBe(
       context.userContext,
     );
+    expect(
+      paramExtractor(ex, ParamName.MATRIX_OPENID_CREDENTIAL),
+    ).toBeUndefined();
   });
 
   test('paramExtractor apply other', () => {

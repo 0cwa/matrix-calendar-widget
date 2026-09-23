@@ -15,12 +15,17 @@
  */
 
 import { ExecutionContext } from '@nestjs/common';
+import {
+  IMatrixOpenIdCredential,
+  MATRIX_OPENID_CREDENTIAL_CONTEXT,
+} from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
 import { IContext } from '../rpc/IContext';
 
 export const NET_NORDECK_CONTEXT = 'netNordeckContext';
 
 export enum ParamName {
+  MATRIX_OPENID_CREDENTIAL = 'matrixOpenIdCredential',
   ROOM_ID = 'roomId',
   USER_CONTEXT = 'userContext',
 }
@@ -42,6 +47,10 @@ export const paramExtractor: IParamExtractor = (
     case 'http': {
       const request = executionContext.switchToHttp().getRequest();
       switch (paramName) {
+        case ParamName.MATRIX_OPENID_CREDENTIAL:
+          return request[MATRIX_OPENID_CREDENTIAL_CONTEXT] as
+            | IMatrixOpenIdCredential
+            | undefined;
         case ParamName.ROOM_ID:
           return undefined;
         case ParamName.USER_CONTEXT:
@@ -56,6 +65,8 @@ export const paramExtractor: IParamExtractor = (
     case 'rpc': {
       const context: IContext = executionContext.switchToRpc().getContext();
       switch (paramName) {
+        case ParamName.MATRIX_OPENID_CREDENTIAL:
+          return undefined;
         case ParamName.ROOM_ID:
           return context.roomId;
         case ParamName.USER_CONTEXT:

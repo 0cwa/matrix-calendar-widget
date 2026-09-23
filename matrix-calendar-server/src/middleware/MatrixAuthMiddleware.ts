@@ -21,6 +21,10 @@ import { IAppConfiguration } from '../IAppConfiguration';
 import { MatrixEndpoint } from '../MatrixEndpoint';
 import { ModuleProviderToken } from '../ModuleProviderToken';
 import { NET_NORDECK_CONTEXT } from '../decorator/IParamExtractor';
+import {
+  IMatrixOpenIdCredential,
+  MATRIX_OPENID_CREDENTIAL_CONTEXT,
+} from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
 
 export const BEARER = 'Bearer';
@@ -79,6 +83,14 @@ export class MatrixAuthMiddleware implements NestMiddleware {
           throw new Error('Could not parse Json');
         }
         userId = await this.loginByOpenIdToken(json);
+        (
+          request as Request & {
+            [MATRIX_OPENID_CREDENTIAL_CONTEXT]?: IMatrixOpenIdCredential;
+          }
+        )[MATRIX_OPENID_CREDENTIAL_CONTEXT] = {
+          accessToken: json.access_token,
+          matrixServerName: json.matrix_server_name,
+        };
         break;
       }
       case BEARER: {
@@ -107,6 +119,8 @@ export class MatrixAuthMiddleware implements NestMiddleware {
     openIdTokenFromWidget: any,
   ): Promise<string> {
     if (
+      typeof openIdTokenFromWidget?.matrix_server_name !== 'string' ||
+      typeof openIdTokenFromWidget?.access_token !== 'string' ||
       !openIdTokenFromWidget.matrix_server_name ||
       !openIdTokenFromWidget.access_token
     ) {
