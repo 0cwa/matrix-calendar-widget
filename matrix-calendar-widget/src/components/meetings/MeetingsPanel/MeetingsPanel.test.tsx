@@ -240,7 +240,7 @@ describe('<MeetingsPanel/>', () => {
     expect(await axe(container)).toHaveNoViolations();
   });
 
-  it('should have no accessibility violations, if list view with invitations', async () => {
+  it('should have no accessibility violations, if list view has legacy invitations', async () => {
     mockCreateMeetingInvitation(widgetApi, {
       room_id: '!invitation-meeting-room-id:example.com',
     });
@@ -248,8 +248,11 @@ describe('<MeetingsPanel/>', () => {
     const { container } = render(<MeetingsPanel />, { wrapper: Wrapper });
 
     await expect(
-      screen.findByRole('button', { name: /invitations/i }),
+      screen.findByRole('listitem', { name: /an important meeting/i }),
     ).resolves.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /invitations/i }),
+    ).not.toBeInTheDocument();
 
     expect(await axe(container)).toHaveNoViolations();
   });
