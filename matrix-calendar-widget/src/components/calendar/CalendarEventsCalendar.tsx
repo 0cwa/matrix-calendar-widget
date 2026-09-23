@@ -211,11 +211,7 @@ function CalendarEventCell({
                   }).toLocaleString(DateTime.TIME_SIMPLE)}{' '}
                 </Typography>
               )}
-              <Typography
-                component="span"
-                fontWeight="bold"
-                variant="body2"
-              >
+              <Typography component="span" fontWeight="bold" variant="body2">
                 {event.title}
               </Typography>
             </Box>
