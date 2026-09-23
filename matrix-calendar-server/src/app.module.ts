@@ -67,6 +67,7 @@ import { MatrixServer } from './rpc/MatrixServer';
 import { CommandService } from './service/CommandService';
 import { ControlRoomMigrationService } from './service/ControlRoomMigrationService';
 import { GuestMemberService } from './service/GuestMemberService';
+import { MatrixCalendarAuthorizationFactory } from './service/MatrixCalendarAuthorization';
 import { MeetingService } from './service/MeetingService';
 import { RoomMessageService } from './service/RoomMessageService';
 import { WelcomeWorkflowService } from './service/WelcomeWorkflowService';
@@ -263,6 +264,7 @@ const i18nFactory: FactoryProvider<void> = {
     EventContentRenderer,
     JitsiClient,
     MeetingClient,
+    MatrixCalendarAuthorizationFactory,
     MatrixClientAdapter,
     ReactionClient,
     WidgetClient,
