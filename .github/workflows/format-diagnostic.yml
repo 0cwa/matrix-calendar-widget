@@ -1,0 +1,36 @@
+name: Format diagnostic
+
+on:
+  push:
+    branches:
+      - feat/m1-calendar-presentation
+    paths:
+      - .github/workflows/format-diagnostic.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - name: Show Prettier diff
+        run: |
+          yarn prettier --write \
+            matrix-calendar-widget/src/calendar/calendarEventPresentation.test.ts \
+            matrix-calendar-widget/src/calendar/calendarEventPresentation.ts \
+            matrix-calendar-widget/src/calendar/index.ts \
+            matrix-calendar-widget/src/components/calendar/CalendarEventsCalendar.tsx \
+            matrix-calendar-widget/src/components/calendar/CalendarEventsList.test.tsx
+          git diff -- \
+            matrix-calendar-widget/src/calendar/calendarEventPresentation.test.ts \
+            matrix-calendar-widget/src/calendar/calendarEventPresentation.ts \
+            matrix-calendar-widget/src/calendar/index.ts \
+            matrix-calendar-widget/src/components/calendar/CalendarEventsCalendar.tsx \
+            matrix-calendar-widget/src/components/calendar/CalendarEventsList.test.tsx
