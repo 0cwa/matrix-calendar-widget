@@ -14,6 +14,14 @@
  * limitations under the License.
  */
 
+export {
+  CalendarAuthorizationError,
+  requireCalendarAuthorization,
+} from './calendarAuthorization';
+export type {
+  CalendarAuthorization,
+  CalendarAuthorizationRequest,
+} from './calendarAuthorization';
 export { CalendarRepositoryError } from './calendarRepository';
 export type {
   CalendarRepository,
