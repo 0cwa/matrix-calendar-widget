@@ -199,7 +199,9 @@ describe('<MeetingsPanel/>', () => {
       within(filters).getByRole('textbox', { name: 'Search' }),
     ).toBeInTheDocument();
 
-    const list = await screen.findByRole('list', { name: 'Meetings' });
+    const list = await screen.findByRole('list', {
+      name: 'Meetings',
+    });
     expect(
       screen.getByRole('heading', { level: 3, name: 'Meetings' }),
     ).toBeInTheDocument();
@@ -570,7 +572,9 @@ describe('<MeetingsPanel/>', () => {
 
     render(<MeetingsPanel />, { wrapper: Wrapper });
 
-    const list = await screen.findByRole('list', { name: /calendar events/i });
+    const list = await screen.findByRole('list', {
+      name: /calendar events/i,
+    });
     expect(
       within(list).getByRole('listitem', { name: /no events scheduled/i }),
     ).toBeInTheDocument();
