@@ -52,6 +52,7 @@ export function CalendarEventsList({
           <MeetingsListGroup date={day} key={day}>
             {dayEvents.map((event) => (
               <Box
+                aria-label={event.title}
                 component="li"
                 key={`${event.calendarId}:${event.id}`}
                 sx={{ listStyleType: 'none' }}
