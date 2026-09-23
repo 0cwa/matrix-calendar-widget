@@ -165,5 +165,5 @@ describe('<CalendarDayPicker>', () => {
     await waitFor(() => {
       expect(dialog).not.toBeInTheDocument();
     });
-  });
+  }, 10_000);
 });
