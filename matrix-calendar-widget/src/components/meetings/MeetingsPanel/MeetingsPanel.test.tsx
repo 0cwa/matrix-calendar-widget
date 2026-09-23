@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { InMemoryCalendarRepository } from '@matrix-calendar-widget/calendar';
 import { extractWidgetApiParameters as extractWidgetApiParametersMocked } from '@matrix-widget-toolkit/api';
 import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
 import { MockedWidgetApi, mockWidgetApi } from '@matrix-widget-toolkit/testing';
@@ -114,10 +115,14 @@ describe('<MeetingsPanel/>', () => {
         initializeStore(store);
         return store;
       });
+      const calendarRepository = new InMemoryCalendarRepository();
+
       return (
         <LocalizationProvider>
           <WidgetApiMockProvider value={widgetApi}>
-            <Provider store={store}>{children}</Provider>
+            <CalendarRepositoryProvider repository={calendarRepository}>
+              <Provider store={store}>{children}</Provider>
+            </CalendarRepositoryProvider>
           </WidgetApiMockProvider>
         </LocalizationProvider>
       );
