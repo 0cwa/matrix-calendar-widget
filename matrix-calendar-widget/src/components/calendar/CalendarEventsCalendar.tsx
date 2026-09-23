@@ -27,6 +27,7 @@ import FullCalendar from '@fullcalendar/react';
 import {
   CalendarEvent,
   isAllDayCalendarEvent,
+  isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
 import EventRepeatIcon from '@mui/icons-material/EventRepeat';
 import { Box, Stack, Tooltip, Typography } from '@mui/material';
@@ -204,7 +205,7 @@ function CalendarEventCell({
               textOverflow="ellipsis"
               whiteSpace="nowrap"
             >
-              {view === 'month' && !isAllDayCalendarEvent(event) && (
+              {view === 'month' && isTimedCalendarEvent(event) && (
                 <Typography component="span" variant="body2">
                   {DateTime.fromISO(event.timing.start.local, {
                     zone: event.timing.start.timezone,
