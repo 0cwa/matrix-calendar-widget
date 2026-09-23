@@ -153,15 +153,14 @@ describe('calendar repository hooks', () => {
       end: '2026-11-01T00:00:00Z',
     };
 
+    let range = firstRange;
     const { result, rerender, waitForValueToChange } = renderHook(
-      ({ range }) => useCalendarEvents(['team'], range),
-      {
-        initialProps: { range: firstRange },
-        wrapper: createWrapper(repository),
-      },
+      () => useCalendarEvents(['team'], range),
+      { wrapper: createWrapper(repository) },
     );
 
-    rerender({ range: secondRange });
+    range = secondRange;
+    rerender();
 
     resolveFirst?.([{ ...event, id: 'stale', title: 'Stale event' }]);
     await Promise.resolve();
