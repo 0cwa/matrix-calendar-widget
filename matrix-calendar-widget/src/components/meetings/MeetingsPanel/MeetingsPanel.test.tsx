@@ -508,8 +508,7 @@ describe('<MeetingsPanel/>', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '+2 more' }));
 
-    await waitFor(() => {
-      });
+    await waitFor(() => {});
 
     expect(screen.getByText('An important meeting')).toBeInTheDocument();
     expect(screen.getByText('Meeting 1')).toBeInTheDocument();
