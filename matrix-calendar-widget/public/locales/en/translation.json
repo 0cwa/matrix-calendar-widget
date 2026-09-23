@@ -10,10 +10,37 @@
     "label": "{{date, datetime}}"
   },
   "calendarEvents": {
+    "delete": {
+      "confirm": "Delete",
+      "description": "Delete “{{title}}”? This cannot be undone.",
+      "error": "The event could not be deleted.",
+      "title": "Delete event"
+    },
     "details": {
       "allDay": "All day",
       "close": "Close",
+      "delete": "Delete",
+      "edit": "Edit",
       "location": "Location"
+    },
+    "editor": {
+      "allDay": "All day",
+      "calendar": "Calendar",
+      "create": "Create event",
+      "createTitle": "Create event",
+      "description": "Description",
+      "editTitle": "Edit event",
+      "end": "End",
+      "invalidRange": "The end must be after the start.",
+      "invalidTimezone": "Enter a valid IANA time zone.",
+      "location": "Location",
+      "readOnly": "This calendar is read-only.",
+      "save": "Save",
+      "saveError": "The event could not be saved.",
+      "start": "Start",
+      "timezone": "Time zone",
+      "title": "Title",
+      "titleRequired": "A title is required."
     },
     "empty": "No events scheduled that match the selected filters.",
     "loadError": "Calendar events could not be loaded.",
