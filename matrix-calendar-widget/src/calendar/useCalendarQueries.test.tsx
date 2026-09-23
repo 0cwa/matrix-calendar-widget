@@ -83,8 +83,12 @@ function createWrapper(repository: CalendarRepository) {
 
 describe('calendar repository hooks', () => {
   it('throws a clear error when the provider is missing', () => {
-    expect(() => renderHook(() => useCalendarRepository())).toThrow(
-      'useCalendarRepository must be used inside CalendarRepositoryProvider',
+    const { result } = renderHook(() => useCalendarRepository());
+
+    expect(result.error).toEqual(
+      new Error(
+        'useCalendarRepository must be used inside CalendarRepositoryProvider',
+      ),
     );
   });
 
