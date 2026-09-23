@@ -32,12 +32,7 @@ import EventRepeatIcon from '@mui/icons-material/EventRepeat';
 import { Box, Stack, Tooltip, Typography } from '@mui/material';
 import { unstable_useId as useId } from '@mui/utils';
 import { DateTime } from 'luxon';
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarFilters,
@@ -216,7 +211,11 @@ function CalendarEventCell({
                   }).toLocaleString(DateTime.TIME_SIMPLE)}{' '}
                 </Typography>
               )}
-              <Typography component="span" fontWeight="bold" variant="body2">
+              <Typography
+                component="span"
+                fontWeight="bold"
+                variant="body2"
+              >
                 {event.title}
               </Typography>
             </Box>
