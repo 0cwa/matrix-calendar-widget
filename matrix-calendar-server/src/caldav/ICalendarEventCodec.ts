@@ -17,6 +17,7 @@
 import {
   CalendarEvent,
   CalendarEventId,
+  CalendarEventInput,
   CalendarEventPatch,
   CalendarEventStatus,
   CalendarEventTiming,
@@ -121,6 +122,54 @@ export class ParsedICalendarEvent {
 }
 
 export class ICalendarEventCodec {
+  create(
+    calendarId: CalendarId,
+    eventId: CalendarEventId,
+    input: CalendarEventInput,
+  ): EncodedICalendarEvent {
+    if (input.recurrence) {
+      throw new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Recurrence creation is not part of the basic VEVENT codec',
+      );
+    }
+
+    const calendar = new ICAL.Component('vcalendar');
+    calendar.addPropertyWithValue('version', '2.0');
+    calendar.addPropertyWithValue('prodid', '-//Matrix Calendar Widget//EN');
+
+    const vevent = new ICAL.Component('vevent');
+    calendar.addSubcomponent(vevent);
+
+    setTextProperty(vevent, 'uid', input.uid);
+    setTextProperty(vevent, 'summary', input.title);
+    setTiming(vevent, input.timing);
+    setOptionalProperty(vevent, 'description', input.description);
+    setOptionalProperty(vevent, 'status', input.status?.toUpperCase());
+    setOptionalProperty(
+      vevent,
+      'transp',
+      input.transparency === undefined
+        ? undefined
+        : input.transparency === 'transparent'
+          ? 'TRANSPARENT'
+          : 'OPAQUE',
+    );
+    setOptionalProperty(vevent, 'location', input.location);
+    setOptionalProperty(vevent, 'url', input.url);
+    setCategories(vevent, input.categories);
+    setOptionalProperty(vevent, 'priority', input.priority);
+
+    return {
+      event: {
+        ...input,
+        id: eventId,
+        calendarId,
+      },
+      icalendar: calendar.toString(),
+    };
+  }
+
   parse(
     calendarId: CalendarId,
     eventId: CalendarEventId,
