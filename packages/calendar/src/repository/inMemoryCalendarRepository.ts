@@ -25,6 +25,7 @@ import {
   CalendarEventPatch,
   CalendarId,
   CalendarTimeRange,
+  CreateCalendarInput,
   TimedCalendarEventTiming,
 } from '../model';
 import {
@@ -36,6 +37,7 @@ export type InMemoryCalendarRepositoryOptions = {
   calendars?: Calendar[];
   events?: CalendarEvent[];
   idFactory?: (sequence: number) => CalendarEventId;
+  calendarIdFactory?: (sequence: number) => CalendarId;
 };
 
 export class InMemoryCalendarRepository implements CalendarRepository {
@@ -45,11 +47,15 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     Map<CalendarEventId, CalendarEvent>
   >();
   private readonly idFactory: (sequence: number) => CalendarEventId;
+  private readonly calendarIdFactory: (sequence: number) => CalendarId;
   private sequence = 1;
+  private calendarSequence = 1;
 
   constructor(options: InMemoryCalendarRepositoryOptions = {}) {
     this.idFactory =
       options.idFactory ?? ((sequence) => `memory-event-${sequence}`);
+    this.calendarIdFactory =
+      options.calendarIdFactory ?? ((sequence) => `memory-calendar-${sequence}`);
 
     for (const calendar of options.calendars ?? []) {
       this.calendars.set(calendar.id, cloneCalendar(calendar));
@@ -72,6 +78,19 @@ export class InMemoryCalendarRepository implements CalendarRepository {
 
   async listCalendars(): Promise<Calendar[]> {
     return [...this.calendars.values()].map(cloneCalendar);
+  }
+
+  async createCalendar(input: CreateCalendarInput): Promise<Calendar> {
+    const id = this.nextCalendarId();
+    const calendar: Calendar = {
+      id,
+      name: input.name,
+    };
+
+    this.calendars.set(id, calendar);
+    this.events.set(id, new Map());
+
+    return cloneCalendar(calendar);
   }
 
   async listEvents(
@@ -190,6 +209,16 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     }
 
     return event;
+  }
+
+  private nextCalendarId(): CalendarId {
+    let id: CalendarId;
+
+    do {
+      id = this.calendarIdFactory(this.calendarSequence++);
+    } while (this.calendars.has(id));
+
+    return id;
   }
 
   private nextEventId(
