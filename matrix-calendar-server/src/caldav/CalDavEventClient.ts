@@ -180,9 +180,14 @@ export class CalDavEventClient {
     resourceUrl: string,
     icalendar: string,
   ): Promise<CalDavEventWriteResult> {
-    return this.putEvent(resourceUrl, icalendar, {
-      'If-None-Match': '*',
-    }, 'create');
+    return this.putEvent(
+      resourceUrl,
+      icalendar,
+      {
+        'If-None-Match': '*',
+      },
+      'create',
+    );
   }
 
   async updateEvent(
