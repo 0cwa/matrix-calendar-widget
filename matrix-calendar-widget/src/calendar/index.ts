@@ -21,6 +21,8 @@ export {
   createCalendarEventFormValues,
 } from './calendarEventForm';
 export type { CalendarEventFormValues } from './calendarEventForm';
+export { GatewayCalendarRepository } from './GatewayCalendarRepository';
+export type { GatewayCalendarRepositoryOptions } from './GatewayCalendarRepository';
 export {
   calendarEventKey,
   calendarEventStartDate,
