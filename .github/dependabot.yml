@@ -8,8 +8,30 @@ updates:
       time: '04:00'
       timezone: Europe/Stockholm
     open-pull-requests-limit: 10
-    # Keep compatibility migrations explicit; only routine updates are grouped.
+    # Keep compatibility migrations explicit and keep tightly-coupled tooling
+    # in focused groups so a formatter/i18n/type change cannot block every
+    # otherwise-routine dependency update.
     groups:
+      formatter-updates:
+        patterns:
+          - prettier
+          - prettier-plugin-organize-imports
+        update-types:
+          - minor
+          - patch
+      fullcalendar-updates:
+        patterns:
+          - '@fullcalendar/*'
+        update-types:
+          - minor
+          - patch
+      luxon-updates:
+        patterns:
+          - luxon
+          - '@types/luxon'
+        update-types:
+          - minor
+          - patch
       routine-npm-updates:
         patterns:
           - '*'
@@ -18,6 +40,12 @@ updates:
           - patch
         exclude-patterns:
           - typescript
+          - prettier
+          - prettier-plugin-organize-imports
+          - '@fullcalendar/*'
+          - luxon
+          - '@types/luxon'
+          - i18next-cli
     labels:
       - dependencies
 
