@@ -89,6 +89,66 @@ export class CalDavDiscoveryClient {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
+  async createCalendar(
+    displayName: string,
+    collectionName: string,
+  ): Promise<DiscoveredCalDavCalendar> {
+    const name = displayName.trim();
+    if (!name) {
+      throw new CalDavDiscoveryError('Calendar display name must not be empty');
+    }
+    if (!/^[A-Za-z0-9._-]+$/.test(collectionName)) {
+      throw new CalDavDiscoveryError('Calendar collection name is invalid');
+    }
+
+    const serviceUrl = new URL(this.baseUrl).toString();
+    const principalHref = await this.discoverHref(
+      serviceUrl,
+      PRINCIPAL_BODY,
+      'current-user-principal',
+    );
+    const principalUrl = new URL(principalHref, serviceUrl).toString();
+    const calendarHomeHref = await this.discoverHref(
+      principalUrl,
+      HOME_BODY,
+      'calendar-home-set',
+    );
+    const calendarHomeUrl = new URL(calendarHomeHref, principalUrl).toString();
+    const collectionBase = new URL(calendarHomeUrl);
+    if (!collectionBase.pathname.endsWith('/')) {
+      collectionBase.pathname = `${collectionBase.pathname}/`;
+    }
+    const collectionUrl = new URL(
+      `${collectionName}/`,
+      collectionBase,
+    ).toString();
+
+    const credentialHeaders = await this.credentialProvider.getRequestHeaders();
+    const headers = new Headers(credentialHeaders);
+    headers.set('Content-Type', 'application/xml; charset=utf-8');
+
+    const response = await this.fetchImpl(collectionUrl, {
+      method: 'MKCALENDAR',
+      headers,
+      body: calendarCreateBody(name),
+    });
+
+    if (!response.ok) {
+      throw new CalDavDiscoveryError(
+        `CalDAV MKCALENDAR failed with status ${response.status}`,
+        response.status,
+        collectionUrl,
+      );
+    }
+
+    return {
+      href: collectionUrl,
+      displayName: name,
+      components: ['VEVENT'],
+      readOnly: false,
+    };
+  }
+
   async discover(): Promise<CalDavDiscoveryResult> {
     const serviceUrl = new URL(this.baseUrl).toString();
     const principalHref = await this.discoverHref(
@@ -261,6 +321,29 @@ function asNode(value: unknown): DavNode | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as DavNode)
     : undefined;
+}
+
+function calendarCreateBody(displayName: string): string {
+  return `<?xml version="1.0" encoding="utf-8" ?>
+<C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:set>
+    <D:prop>
+      <D:displayname>${escapeXml(displayName)}</D:displayname>
+      <C:supported-calendar-component-set>
+        <C:comp name="VEVENT"/>
+      </C:supported-calendar-component-set>
+    </D:prop>
+  </D:set>
+</C:mkcalendar>`;
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
 
 function textValue(value: unknown): string | undefined {
