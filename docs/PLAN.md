@@ -42,6 +42,7 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 Landed M2 slices now include request-scoped OpenID credentials (#52), CalDAV discovery (#53), the OpenID→CalDAV credential bridge (#57), and the configured authenticated discovery endpoint (#58).
 
 Remaining M2 work is deliberately narrow:
+
 - #48: add ADR009-compatible OpenID support to the external `radicale-auth-matrix` plugin while preserving password-based CalDAV clients.
 - #60 / #59: real Radicale discovery contract coverage. Password-auth discovery is being validated now; final delegated gateway/OpenID coverage remains blocked on #48.
 
