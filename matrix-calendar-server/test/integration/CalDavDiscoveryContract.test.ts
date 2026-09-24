@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import fetchMock from 'jest-fetch-mock';
 import {
   CalDavCredentialProvider,
   CalDavDiscoveryClient,
@@ -23,6 +24,10 @@ const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
 
 describeContract('CalDAV discovery contract', () => {
+  beforeEach(() => {
+    fetchMock.dontMock();
+  });
+
   const baseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
   const username = process.env.CALDAV_USERNAME ?? 'calendar';
   const password =
