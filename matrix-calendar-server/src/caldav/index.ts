@@ -28,3 +28,11 @@ export {
   MatrixOpenIdCalDavCredentialProvider,
 } from './MatrixOpenIdCalDavCredentialProvider';
 export type { MatrixOpenIdCalDavCredentialErrorCode } from './MatrixOpenIdCalDavCredentialProvider';
+export {
+  ICalendarEventCodec,
+  ICalendarEventCodecError,
+} from './ICalendarEventCodec';
+export type {
+  DecodedICalendarEvent,
+  ICalendarEventIdentity,
+} from './ICalendarEventCodec';
