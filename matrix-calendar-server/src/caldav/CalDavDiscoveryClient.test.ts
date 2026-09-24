@@ -237,6 +237,46 @@ describe('CalDavDiscoveryClient', () => {
     expect(init?.body).not.toContain('VJOURNAL');
   });
 
+  it('creates a unique VEVENT-only calendar in the discovered home', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValueOnce(
+        new Response(principalResponse('/p/alice/'), { status: 207 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(homeResponse('/home/alice/'), { status: 207 }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 201 }));
+
+    const result = await new CalDavDiscoveryClient(
+      'https://radicale.example.test/',
+      credentialProvider,
+      fetchMock,
+    ).createCalendar('Team & Projects');
+
+    expect(result).toMatchObject({
+      href: expect.stringMatching(
+        /^https:\/\/radicale\.example\.test\/home\/alice\/calendar-[0-9a-f-]+\/$/,
+      ),
+      displayName: 'Team & Projects',
+      components: ['VEVENT'],
+      readOnly: false,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const [url, init] = fetchMock.mock.calls[2];
+    expect(url).toBe(result.href);
+    expect(init?.method).toBe('MKCALENDAR');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'Basic delegated',
+    );
+    expect(new Headers(init?.headers).get('Content-Type')).toBe(
+      'application/xml; charset=utf-8',
+    );
+    expect(init?.body).toContain('<D:displayname>Team &amp; Projects</D:displayname>');
+    expect(init?.body).toContain('<C:comp name="VEVENT"/>');
+  });
+
   it('fails with status and URL when a PROPFIND request is rejected', async () => {
     const fetchMock = jest
       .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
