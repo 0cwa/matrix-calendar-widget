@@ -62,6 +62,15 @@
     "chooseWorkWeek": "Choose work week, selected work week is {{range, daterange}}",
     "label": "{{range, daterange}}"
   },
+  "calendars": {
+    "create": {
+      "action": "Create calendar",
+      "error": "The calendar could not be created.",
+      "name": "Calendar name",
+      "submit": "Create calendar",
+      "title": "Create calendar"
+    }
+  },
   "cancel": "Cancel",
   "close": "Close",
   "cockpitPanel": {
@@ -454,14 +463,5 @@
     "loadingError": "Error while loading available Widgets.",
     "noWidgets": "No Widgets.",
     "tagInstructions": "Use the backspace key to delete the entry."
-  },
-  "calendars": {
-    "create": {
-      "action": "Create calendar",
-      "error": "The calendar could not be created.",
-      "name": "Calendar name",
-      "submit": "Create calendar",
-      "title": "Create calendar"
-    }
   }
 }
