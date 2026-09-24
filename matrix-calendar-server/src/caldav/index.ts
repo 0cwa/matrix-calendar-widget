@@ -30,6 +30,7 @@ export {
 export type {
   CalDavEventResource,
   CalDavEventTransportErrorCode,
+  CalDavEventWriteResult,
   CalDavEventTransportMethod,
 } from './CalDavEventClient';
 export {
