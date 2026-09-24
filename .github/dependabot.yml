@@ -8,6 +8,16 @@ updates:
       time: '04:00'
       timezone: Europe/Stockholm
     open-pull-requests-limit: 10
+    # Keep compatibility migrations explicit; only routine updates are grouped.
+    groups:
+      routine-npm-updates:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+        exclude-patterns:
+          - typescript
     labels:
       - dependencies
 
@@ -19,5 +29,12 @@ updates:
       time: '04:30'
       timezone: Europe/Stockholm
     open-pull-requests-limit: 5
+    groups:
+      routine-action-updates:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
     labels:
       - dependencies
