@@ -47,3 +47,5 @@ export {
   useCalendars,
 } from './useCalendarQueries';
 export type { CalendarQueryState } from './useCalendarQueries';
+export { CalendarGatewayRepository } from './CalendarGatewayRepository';
+export type { CalendarGatewayRepositoryOptions } from './CalendarGatewayRepository';
