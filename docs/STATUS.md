@@ -1,14 +1,14 @@
 # Project status
 
-_Last updated: 2026-09-24_
+_Last updated: 2026-09-25_
 
 This file is the short-lived execution snapshot. `docs/PLAN.md` is the durable milestone plan; GitHub issues contain acceptance criteria.
 
 ## Current phase
 
-**Finish the last M2 integration blocker; do not expand scope until the real discovery path is closed.**
+**M3 is complete. Close the external M2 auth blocker while advancing only small, independently useful M4 slices in parallel.**
 
-M1 is complete. The authenticated widget → gateway → CalDAV discovery path is implemented in-repo. The only architectural blocker left in M2 is external: the currently pinned `etkecc/radicale-auth-matrix` plugin only supports Matrix password login, while ADR009 requires short-lived Matrix OpenID delegation.
+The widget now has a real gateway-backed `CalendarRepository`, preservation-first VEVENT CRUD, visible conflict recovery, and a real two-client Radicale interoperability contract. The remaining M2 blocker is external: the pinned `etkecc/radicale-auth-matrix` plugin still only accepts Matrix passwords, while ADR009 requires short-lived Matrix OpenID delegation from the gateway.
 
 ## Landed
 
@@ -16,50 +16,66 @@ M1 is complete. The authenticated widget → gateway → CalDAV discovery path i
 
 Complete on `main`:
 
-- calendar/event domain model,
-- `CalendarRepository` + in-memory implementation,
-- transport-agnostic authorization seam,
-- repository-backed widget read paths,
-- mutation hooks/invalidation,
-- repository-backed create/edit/delete UI.
+- calendar/event domain model and repository seam,
+- in-memory repository,
+- repository-backed calendar/list/editor UI,
+- create/edit/delete mutation hooks and invalidation.
 
 ### M2 — Gateway identity and Radicale discovery
 
-Merged on `main`:
+Merged in-repo:
 
-- authenticated calendar gateway context (#42 / PR #46),
-- Matrix room membership/power-level authorization (#43 / PR #47),
-- request-scoped validated OpenID credential (#50 / PR #52),
-- CalDAV principal/home/calendar discovery client (#49 / PR #53),
-- ADR009 OpenID→Radicale delegation contract (#54),
-- OpenID→CalDAV credential provider bridge (#55 / PR #57),
-- configured authenticated Radicale calendar discovery endpoint (#56 / PR #58).
+- authenticated calendar gateway context,
+- Matrix room membership/power-level authorization,
+- request-scoped validated Matrix OpenID credentials,
+- CalDAV principal/home/calendar discovery,
+- ADR009 delegated credential contract,
+- OpenID→CalDAV credential provider,
+- configured authenticated Radicale discovery endpoint,
+- real password-auth Radicale discovery contract.
+
+Still external/blocking:
+
+- #48 — add ADR009-compatible OpenID mode to `radicale-auth-matrix`,
+- #45 — final real gateway/OpenID/non-member contract after #48.
+
+### M3 — VEVENT CRUD
+
+Complete on `main`:
+
+- preservation-first `ical.js` codec (#61 / PR #70),
+- visible-range and individual resource transport with ETags,
+- conditional create/update/delete and structured conflicts,
+- authenticated room-authorized gateway VEVENT CRUD,
+- gateway-backed widget `CalendarRepository`,
+- visible reload/retry conflict UX,
+- real Radicale two-client round-trip and stale-ETag contract (#66 / PR #90),
+- consolidated M3.2–M3.5 delivery through PR #89.
 
 ## Active
 
-- #48 — external `radicale-auth-matrix` change required for gateway OpenID delegation. The stock plugin still hardcodes `m.login.password`. ADR009 defines the compatible extension. No `0cwa/radicale-auth-matrix` fork currently exists, and this repository connector cannot create one.
-- #45 — final delegated gateway/OpenID/non-member real-container contract. The password-auth Radicale discovery contract is already merged in PR #60; the remaining part depends on #48.
+- #48 — external `radicale-auth-matrix` OpenID delegation. No writable `0cwa/radicale-auth-matrix` fork exists and the available GitHub connector cannot create/fork repositories.
+- #45 — final delegated gateway/OpenID real-container contract, blocked on #48.
+- #92 — M4.1 create VEVENT-only calendar collections from the widget. This is the smallest independent user-facing M4 slice and may proceed while #48 is externally blocked.
+- #29 — enable main-branch protection once repository-rules administration is available.
 
 ## Highest-priority next steps
 
-1. Implement #48 in an upstream/forked `radicale-auth-matrix` repository; do not copy GPL/LGPL-family plugin code into this Apache-licensed repository.
-2. Add the final gateway/OpenID/non-member real-container contract under #45 and close M2.
-3. Only then make M3 implementation the default focus. M3 is decomposed as #61–#66; #61 (preservation-first iCalendar codec) is the best parallel task only if #48 is blocked on external repository access.
+1. Implement #48 in a writable upstream/forked `radicale-auth-matrix` repository; do not copy GPL/LGPL-family plugin code into this Apache-licensed repository.
+2. Land #45's final gateway/OpenID/non-member real-container contract and close M2.
+3. In parallel while #48 is blocked, implement #92 only: friendly VEVENT-only calendar creation through the existing repository/gateway seams.
+4. After #92, reassess before broadening M4. Do not pre-build generic WebDAV administration.
 
-## Friction / working rules
+## Working rules
 
-- Avoid long-lived stacked PR chains. Squash-merging prerequisites repeatedly forced branch-tree reconstruction and obscured small diffs. Prefer short-lived branches directly from current `main`; if a dependency is tiny, merge it promptly before opening the next slice.
-- Stop creating temporary formatter workflows for single files. They created extra commits, action runs, and rebase churn. Run the repo formatter before pushing, or make one direct formatting commit on the feature branch.
-- Do not poll long widget/CodeQL jobs when independent work exists. Use fast gates to continue development; return to merge once the long jobs settle.
-- Keep YAGNI pressure on abstractions. The repository/auth/credential seams are sufficient; do not add another cache/client/service layer until a concrete vertical slice needs it.
-- M3 preservation/ETag work matters, but starting broad recurrence/calendar-management abstractions before M2 closes would be premature.
-
-## Non-blocking administration
-
-- #29 remains open: `main` branch protection is still not enabled.
+- Prefer short-lived branches directly from current `main`; avoid stacked PR chains unless the dependency truly cannot merge first.
+- Do not wait on long CI when independent work exists.
+- Keep YAGNI pressure on abstractions: reuse the existing repository, auth, credential, codec, and transport seams.
+- Do not add caches, sync engines, generic DAV clients, or recurrence/calendar-management frameworks before a concrete slice needs them.
+- Treat protocol details as server-internal; widget users manage Calendars, not DAV collections.
 
 ## Baseline and tracking
 
 - NeoDateFix upstream: `nordeck/matrix-meetings@2d3011f665af04c3cd376c388f7ae3bcb06bba25`
 - milestone trackers: #1 (M0), #2 (M1), #3 (M2), #4–#9 (M3–M8)
-- M3 implementation slices: #61–#66
+- M3 implementation slices: #61–#66 — complete
