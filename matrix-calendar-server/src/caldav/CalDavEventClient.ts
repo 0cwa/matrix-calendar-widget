@@ -24,12 +24,18 @@ export type CalDavEventResource = {
   icalendar: string;
 };
 
+export type CalDavEventWriteResult = {
+  href: string;
+  etag?: string;
+};
+
 export type CalDavEventTransportErrorCode =
+  | 'etag-conflict'
   | 'invalid-range'
   | 'invalid-response'
   | 'request-failed';
 
-export type CalDavEventTransportMethod = 'GET' | 'REPORT';
+export type CalDavEventTransportMethod = 'DELETE' | 'GET' | 'PUT' | 'REPORT';
 
 export class CalDavEventTransportError extends Error {
   constructor(
@@ -163,9 +169,93 @@ export class CalDavEventClient {
     };
   }
 
+  async createEvent(
+    resourceUrl: string,
+    icalendar: string,
+  ): Promise<CalDavEventWriteResult> {
+    return this.putEvent(resourceUrl, icalendar, 'If-None-Match', '*');
+  }
+
+  async updateEvent(
+    resourceUrl: string,
+    etag: string,
+    icalendar: string,
+  ): Promise<CalDavEventWriteResult> {
+    return this.putEvent(resourceUrl, icalendar, 'If-Match', etag);
+  }
+
+  async deleteEvent(
+    resourceUrl: string,
+    etag: string,
+  ): Promise<CalDavEventWriteResult> {
+    const url = new URL(resourceUrl).toString();
+    const headers = await this.requestHeaders();
+    headers.set('If-Match', etag);
+
+    const response = await this.fetchImpl(url, {
+      method: 'DELETE',
+      headers,
+    });
+
+    this.assertWriteSuccess('DELETE', url, response);
+
+    return writeResult(url, response);
+  }
+
+  private async putEvent(
+    resourceUrl: string,
+    icalendar: string,
+    conditionHeader: 'If-Match' | 'If-None-Match',
+    conditionValue: string,
+  ): Promise<CalDavEventWriteResult> {
+    const url = new URL(resourceUrl).toString();
+    const headers = await this.requestHeaders();
+    headers.set('Content-Type', 'text/calendar; charset=utf-8');
+    headers.set(conditionHeader, conditionValue);
+
+    const response = await this.fetchImpl(url, {
+      method: 'PUT',
+      headers,
+      body: icalendar,
+    });
+
+    this.assertWriteSuccess('PUT', url, response);
+
+    return writeResult(url, response);
+  }
+
+  private assertWriteSuccess(
+    method: 'DELETE' | 'PUT',
+    url: string,
+    response: Response,
+  ): void {
+    if (response.ok) {
+      return;
+    }
+
+    if (response.status === 409 || response.status === 412) {
+      throw new CalDavEventTransportError(
+        'etag-conflict',
+        `CalDAV ${method} conflicted with the current event resource`,
+        method,
+        response.status,
+        url,
+      );
+    }
+
+    throw requestFailure(method, url, response.status);
+  }
+
   private async requestHeaders(): Promise<Headers> {
     return new Headers(await this.credentialProvider.getRequestHeaders());
   }
+}
+
+function writeResult(url: string, response: Response): CalDavEventWriteResult {
+  return {
+    href: url,
+    etag: response.headers.get('ETag')?.trim() || undefined,
+  };
 }
 
 function requestFailure(
