@@ -14,12 +14,33 @@
  * limitations under the License.
  */
 
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  ForbiddenException,
+  Get,
+  Inject,
+  Query,
+  ServiceUnavailableException,
+  UnauthorizedException,
+  UseGuards,
+} from '@nestjs/common';
+import { IAppConfiguration } from '../IAppConfiguration';
+import { ModuleProviderToken } from '../ModuleProviderToken';
+import {
+  CalDavDiscoveryClient,
+  MatrixOpenIdCalDavCredentialError,
+  MatrixOpenIdCalDavCredentialProvider,
+} from '../caldav';
+import { MatrixOpenIdCredentialParam } from '../decorator/MatrixOpenIdCredentialParam';
 import { UserContextParam } from '../decorator/UserContextParam';
+import { CalendarGatewayCalendarDto } from '../dto/CalendarGatewayCalendarDto';
 import { CalendarGatewayContextDto } from '../dto/CalendarGatewayContextDto';
 import { MatrixAuthGuard } from '../guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
+import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
+import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
 
 @Controller({
   path: 'calendar',
@@ -27,11 +48,77 @@ import { IUserContext } from '../model/IUserContext';
 })
 @UseGuards(MatrixAuthGuard, MatrixRoomMembershipGuard)
 export class CalendarGatewayController {
+  constructor(
+    @Inject(ModuleProviderToken.APP_CONFIGURATION)
+    private readonly appConfig: IAppConfiguration,
+    private readonly authorizationFactory: MatrixCalendarAuthorizationFactory,
+  ) {}
+
   @Get('context')
   getContext(
     @UserContextParam() userContext: IUserContext,
     @Query('roomId') roomId?: string,
   ): CalendarGatewayContextDto {
     return new CalendarGatewayContextDto(userContext.userId, roomId);
+  }
+
+  @Get('calendars')
+  async listCalendars(
+    @UserContextParam() userContext: IUserContext,
+    @MatrixOpenIdCredentialParam()
+    openIdCredential: IMatrixOpenIdCredential | undefined,
+    @Query('roomId') roomId?: string,
+  ): Promise<CalendarGatewayCalendarDto[]> {
+    if (!roomId) {
+      throw new BadRequestException('roomId is required');
+    }
+
+    const authorization = this.authorizationFactory.forRoom(
+      userContext.userId,
+      roomId,
+    );
+    if (!(await authorization.isAllowed({ action: 'list-calendars' }))) {
+      throw new ForbiddenException(
+        'Not allowed to list calendars for this Matrix room',
+      );
+    }
+
+    if (!this.appConfig.radicale_url) {
+      throw new ServiceUnavailableException({
+        code: 'radicale-not-configured',
+        message: 'RADICALE_URL is required for calendar discovery',
+      });
+    }
+
+    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+      userContext,
+      openIdCredential,
+    );
+
+    try {
+      const result = await new CalDavDiscoveryClient(
+        this.appConfig.radicale_url,
+        credentialProvider,
+      ).discover();
+
+      return result.calendars.map(
+        (calendar) =>
+          new CalendarGatewayCalendarDto(
+            calendar.href,
+            calendar.displayName ?? calendar.href,
+            calendar.color,
+            calendar.readOnly,
+          ),
+      );
+    } catch (error) {
+      if (error instanceof MatrixOpenIdCalDavCredentialError) {
+        throw new UnauthorizedException({
+          code: error.code,
+          message: error.message,
+        });
+      }
+
+      throw error;
+    }
   }
 }

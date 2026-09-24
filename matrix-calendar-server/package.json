@@ -8,7 +8,7 @@
   "types": "lib/index.d.ts",
   "scripts": {
     "docker:build": "docker build -t 0cwa/matrix-calendar-server -f Dockerfile ..",
-    "docker:run": "dotenv -c development -- docker run --rm -e HOMESERVER_URL -e ACCESS_TOKEN -e USER_ID -e DATA_PATH -e ETHERPAD_URL -e MEETINGWIDGET_URL -e WHITEBOARD_URL -e JITSI_URL -e JITSI_NAME -e LOG_LEVEL -e WHITEBOARD_NAME -e ETHERPAD_NAME -e MEETINGWIDGET_NAME -e DELETE_ROOMS_AFTER_MINUTES -e MEETINGWIDGET_COCKPIT_URL -e MEETINGWIDGET_COCKPIT_NAME -e JITSI_DIAL_IN_JSON_URL -e JITSI_PIN_URL -e NODE_ENV -e LIST_TO_AUTO_INVITE_ON_MEETING_ROOM_CREATION -e ALLOW_PREVIEW_FOR_PUBLIC_ROOMS -e JITSI_AUTH -e BREAKOUT_SESSION_WIDGET_URL --name matrix-calendar-server 0cwa/matrix-calendar-server",
+    "docker:run": "dotenv -c development -- docker run --rm -e HOMESERVER_URL -e RADICALE_URL -e ACCESS_TOKEN -e USER_ID -e DATA_PATH -e ETHERPAD_URL -e MEETINGWIDGET_URL -e WHITEBOARD_URL -e JITSI_URL -e JITSI_NAME -e LOG_LEVEL -e WHITEBOARD_NAME -e ETHERPAD_NAME -e MEETINGWIDGET_NAME -e DELETE_ROOMS_AFTER_MINUTES -e MEETINGWIDGET_COCKPIT_URL -e MEETINGWIDGET_COCKPIT_NAME -e JITSI_DIAL_IN_JSON_URL -e JITSI_PIN_URL -e NODE_ENV -e LIST_TO_AUTO_INVITE_ON_MEETING_ROOM_CREATION -e ALLOW_PREVIEW_FOR_PUBLIC_ROOMS -e JITSI_AUTH -e BREAKOUT_SESSION_WIDGET_URL --name matrix-calendar-server 0cwa/matrix-calendar-server",
     "docker:stop": "docker stop matrix-calendar-server",
     "docker:remove": "yarn run docker:stop && docker rm -v matrix-calendar-server",
     "docker:inspect": "docker inspect 0cwa/matrix-calendar-server",

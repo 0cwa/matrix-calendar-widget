@@ -107,6 +107,10 @@ settings:
     # - name: HOMESERVER_URL
     #   value: 'https://matrix-client.matrix.org'
 
+    ## Configure the Radicale/CalDAV base URL used by calendar discovery
+    # - name: RADICALE_URL
+    #   value: 'https://calendar.example.com'
+
     ## Configure the access token (can be skipped if init.getFreshDeviceToken.enabled is activated)
     # - name: ACCESS_TOKEN
     #   secretKeyRef:

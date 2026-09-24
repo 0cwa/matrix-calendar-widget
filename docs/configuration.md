@@ -51,6 +51,10 @@ These environment variables apply to the bot container:
 # the base url of the matrix homeserver
 HOMESERVER_URL=https://synapse.example.com
 
+# optional at startup; required by the authenticated calendar discovery endpoint
+# the base URL of the Radicale/CalDAV service
+RADICALE_URL=https://calendar.example.com
+
 # the access token of the matrix user of the bot
 ACCESS_TOKEN=syt_...
 
