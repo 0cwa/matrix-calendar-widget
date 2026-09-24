@@ -25,15 +25,6 @@ const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
 
 describeContract('CalDAV VEVENT round-trip contract', () => {
-  beforeAll(() => {
-    fetchMock.disableMocks();
-  });
-
-  afterAll(() => {
-    fetchMock.enableMocks();
-    fetchMock.dontMock();
-  });
-
   const baseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
   const username = process.env.CALDAV_USERNAME ?? 'calendar';
   const password = process.env.CALDAV_PASSWORD ?? 'calendar-dev-password';
@@ -43,8 +34,18 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
   ).toString();
   const eventUrl = new URL('round-trip.ics', calendarUrl).toString();
   const credentials = basicCredentialProvider(username, password);
-  const client = new CalDavEventClient(credentials);
   const codec = new ICalendarEventCodec();
+  let client: CalDavEventClient;
+
+  beforeAll(() => {
+    fetchMock.disableMocks();
+    client = new CalDavEventClient(credentials);
+  });
+
+  afterAll(() => {
+    fetchMock.enableMocks();
+    fetchMock.dontMock();
+  });
 
   it(
     'round-trips through the gateway core and a direct CalDAV client without data loss',
