@@ -49,7 +49,7 @@
     "generate-disclaimer": "yarn workspaces run generate-disclaimer",
     "docker:build": "yarn workspaces run docker:build",
     "prepare": "husky",
-    "prettier:check": "prettier --write matrix-calendar-server/src/caldav/ICalendarEventCodec.ts matrix-calendar-server/src/caldav/ICalendarEventCodec.test.ts && git diff -- matrix-calendar-server/src/caldav/ICalendarEventCodec.ts matrix-calendar-server/src/caldav/ICalendarEventCodec.test.ts && git diff --quiet -- matrix-calendar-server/src/caldav/ICalendarEventCodec.ts matrix-calendar-server/src/caldav/ICalendarEventCodec.test.ts",
+    "prettier:check": "prettier --check .",
     "prettier:write": "prettier --write .",
     "translate": "yarn workspaces run translate",
     "e2e": "yarn workspace e2e e2e",
