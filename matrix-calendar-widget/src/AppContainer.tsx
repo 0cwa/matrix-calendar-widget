@@ -19,7 +19,10 @@ import {
   CalendarRepository,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
-import { extractRawWidgetParameters, WidgetApi } from '@matrix-widget-toolkit/api';
+import {
+  extractRawWidgetParameters,
+  WidgetApi,
+} from '@matrix-widget-toolkit/api';
 import {
   getEnvironment,
   MuiThemeProvider,
@@ -27,7 +30,10 @@ import {
 } from '@matrix-widget-toolkit/mui';
 import { Suspense, useMemo } from 'react';
 import App from './App';
-import { CalendarRepositoryProvider, GatewayCalendarRepository } from './calendar';
+import {
+  CalendarRepositoryProvider,
+  GatewayCalendarRepository,
+} from './calendar';
 import { LocalizationProvider } from './components/common/LocalizationProvider';
 import { PageLoader } from './components/common/PageLoader';
 import { StoreProvider } from './store';
@@ -41,8 +47,7 @@ function AppContainer({
 }) {
   const repository = useMemo(
     () =>
-      calendarRepository ??
-      createDefaultCalendarRepository(widgetApiPromise),
+      calendarRepository ?? createDefaultCalendarRepository(widgetApiPromise),
     [calendarRepository, widgetApiPromise],
   );
 
@@ -71,7 +76,6 @@ function AppContainer({
 }
 
 export default AppContainer;
-
 
 function createDefaultCalendarRepository(
   widgetApiPromise: Promise<WidgetApi>,
