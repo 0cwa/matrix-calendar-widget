@@ -15,17 +15,35 @@
  */
 
 import {
+  Calendar,
   CalendarEvent,
   CalendarEventId,
   CalendarEventInput,
   CalendarEventPatch,
   CalendarId,
+  CreateCalendarInput,
 } from '@matrix-calendar-widget/calendar';
 import { useCallback } from 'react';
 import {
   useCalendarRepository,
   useInvalidateCalendarRepository,
 } from './CalendarRepositoryProvider';
+
+export function useCreateCalendar(): (
+  input: CreateCalendarInput,
+) => Promise<Calendar> {
+  const repository = useCalendarRepository();
+  const invalidate = useInvalidateCalendarRepository();
+
+  return useCallback(
+    async (input: CreateCalendarInput) => {
+      const calendar = await repository.createCalendar(input);
+      invalidate();
+      return calendar;
+    },
+    [invalidate, repository],
+  );
+}
 
 export function useCreateCalendarEvent(): (
   calendarId: CalendarId,
