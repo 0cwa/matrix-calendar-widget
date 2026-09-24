@@ -82,9 +82,7 @@ export function CalendarCreateDialog({
       open={open}
     >
       <form onSubmit={handleSubmit}>
-        <DialogTitle>
-          {t('calendars.create.title', 'Create calendar')}
-        </DialogTitle>
+        <DialogTitle>{t('calendars.create.title', 'Create calendar')}</DialogTitle>
         <DialogContent>
           <Stack mt={1} spacing={2}>
             {error && (
