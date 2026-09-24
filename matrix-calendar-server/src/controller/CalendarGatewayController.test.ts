@@ -135,6 +135,68 @@ describe('CalendarGatewayController', () => {
     expect(isAllowed).toHaveBeenCalledWith({ action: 'list-calendars' });
   });
 
+  it('creates an authorized VEVENT-only calendar collection', async () => {
+    isAllowed.mockResolvedValue(true);
+    fetch.mockResponses(
+      [principalResponse('/principals/alice/'), { status: 207 }],
+      [homeResponse('/alice/'), { status: 207 }],
+      [multistatus(''), { status: 207 }],
+      ['', { status: 201 }],
+    );
+
+    const result = await createController().createCalendar(
+      userContext,
+      openIdCredential,
+      { name: '  Team planning  ' },
+      roomId,
+    );
+
+    expect(result).toEqual({
+      id: expect.stringMatching(
+        /^https:\/\/radicale\.example\.test\/alice\/[0-9a-f-]+\/$/,
+      ),
+      name: 'Team planning',
+      color: undefined,
+      readOnly: false,
+    });
+    expect(isAllowed).toHaveBeenCalledWith({ action: 'create-calendar' });
+
+    const [url, init] = fetch.mock.calls[3];
+    expect(url).toBe(result.id);
+    expect(init?.method).toBe('MKCALENDAR');
+    expect(init?.body).toContain('<D:displayname>Team planning</D:displayname>');
+    expect(init?.body).toContain('<C:comp name="VEVENT"/>');
+  });
+
+  it('denies calendar creation when Matrix room policy rejects create-calendar', async () => {
+    isAllowed.mockResolvedValue(false);
+
+    await expect(
+      createController().createCalendar(
+        userContext,
+        openIdCredential,
+        { name: 'Team planning' },
+        roomId,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects an empty calendar name before contacting Radicale', async () => {
+    await expect(
+      createController().createCalendar(
+        userContext,
+        openIdCredential,
+        { name: '   ' },
+        roomId,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(forRoom).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('denies discovery when Matrix room policy rejects list-calendars', async () => {
     isAllowed.mockResolvedValue(false);
 
