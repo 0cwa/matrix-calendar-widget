@@ -23,3 +23,8 @@ export type {
   CalDavDiscoveryResult,
   DiscoveredCalDavCalendar,
 } from './CalDavDiscoveryClient';
+export {
+  MatrixOpenIdCalDavCredentialError,
+  MatrixOpenIdCalDavCredentialProvider,
+} from './MatrixOpenIdCalDavCredentialProvider';
+export type { MatrixOpenIdCalDavCredentialErrorCode } from './MatrixOpenIdCalDavCredentialProvider';
