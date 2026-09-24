@@ -93,6 +93,10 @@ export type Calendar = {
   readOnly?: boolean;
 };
 
+export type CreateCalendarInput = {
+  name: string;
+};
+
 export type CalendarEvent = {
   id: CalendarEventId;
   calendarId: CalendarId;
