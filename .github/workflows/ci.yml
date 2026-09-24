@@ -77,7 +77,10 @@ jobs:
         run: yarn workspace @matrix-calendar-widget/widget lint
 
       - name: Check widget translations
-        run: yarn workspace @matrix-calendar-widget/widget translate --ci --dry-run
+        run: |
+          yarn workspace @matrix-calendar-widget/widget translate
+          git diff -- matrix-calendar-widget/public/locales
+          exit 1
 
       - name: Test widget
         run: yarn workspace @matrix-calendar-widget/widget test:all
