@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { randomUUID } from 'node:crypto';
 import {
   CalendarAuthorizationRequest,
   CalendarEventInput,
@@ -159,7 +160,7 @@ export class CalendarGatewayController {
         credentialProvider,
       ).discover();
       const calendarUrl = new URL(
-        `${crypto.randomUUID()}/`,
+        `${randomUUID()}/`,
         discovery.calendarHomeUrl,
       ).toString();
 
