@@ -62,6 +62,15 @@
     "chooseWorkWeek": "Wähle eine Arbeitswoche, die gewählte Arbeitswoche ist {{range, daterange}}",
     "label": "{{range, daterange}}"
   },
+  "calendars": {
+    "create": {
+      "action": "Kalender erstellen",
+      "error": "Der Kalender konnte nicht erstellt werden.",
+      "name": "Kalendername",
+      "submit": "Kalender erstellen",
+      "title": "Kalender erstellen"
+    }
+  },
   "cancel": "Abbrechen",
   "close": "Schließen",
   "cockpitPanel": {
@@ -454,14 +463,5 @@
     "loadingError": "Fehler beim Laden der Widgets. Du kannst die auch später aktivieren.",
     "noWidgets": "Keine Widgets verfügbar.",
     "tagInstructions": "Nutze die Rücktaste um den Eintrag zu löschen."
-  },
-  "calendars": {
-    "create": {
-      "action": "Kalender erstellen",
-      "error": "Der Kalender konnte nicht erstellt werden.",
-      "name": "Kalendername",
-      "submit": "Kalender erstellen",
-      "title": "Kalender erstellen"
-    }
   }
 }
