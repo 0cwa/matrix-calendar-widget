@@ -30,8 +30,8 @@ export {
 export type {
   CalDavEventResource,
   CalDavEventTransportErrorCode,
-  CalDavEventWriteResult,
   CalDavEventTransportMethod,
+  CalDavEventWriteResult,
 } from './CalDavEventClient';
 export {
   ICalendarEventCodec,
