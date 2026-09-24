@@ -102,16 +102,10 @@ describe('ICalendarEventCodec', () => {
 
     expect(calendar.getFirstSubcomponent('vtimezone')).not.toBeNull();
     expect(
-      calendar
-        .getFirstSubcomponent('vtimezone')
-        ?.getFirstPropertyValue('tzid'),
+      calendar.getFirstSubcomponent('vtimezone')?.getFirstPropertyValue('tzid'),
     ).toBe('Europe/Stockholm');
 
-    const reparsed = codec.parse(
-      'team',
-      'vtimezone.ics',
-      encoded.icalendar,
-    );
+    const reparsed = codec.parse('team', 'vtimezone.ics', encoded.icalendar);
     expect(reparsed.event.timing).toEqual(parsed.event.timing);
   });
 
@@ -126,9 +120,9 @@ describe('ICalendarEventCodec', () => {
     const calendar = ICAL.Component.fromString(encoded.icalendar);
     const event = calendar.getFirstSubcomponent('vevent');
 
-    expect(
-      calendar.getFirstPropertyValue('x-custom-calendar-property'),
-    ).toBe('preserve-calendar-value');
+    expect(calendar.getFirstPropertyValue('x-custom-calendar-property')).toBe(
+      'preserve-calendar-value',
+    );
     expect(event?.getFirstPropertyValue('x-custom-flag')).toBe('preserve-me');
 
     const metadata = event?.getFirstProperty('x-client-metadata');
@@ -185,9 +179,7 @@ describe('ICalendarEventCodec', () => {
       fixture('folded-escaped.ics'),
     );
 
-    expect(parsed.event.title).toBe(
-      'Escaped, semicolon; and backslash\\ text',
-    );
+    expect(parsed.event.title).toBe('Escaped, semicolon; and backslash\\ text');
     expect(parsed.event.description).toContain(
       'Second line with a comma, a semicolon;',
     );
