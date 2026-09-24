@@ -196,7 +196,6 @@ describe('ICalendarEventCodec', () => {
     expect(reparsed.event.location).toBe(parsed.event.location);
   });
 
-
   it('serializes a new basic VEVENT from the calendar domain input', () => {
     const encoded = codec.create('team', 'new.ics', {
       uid: 'new@example.test',
