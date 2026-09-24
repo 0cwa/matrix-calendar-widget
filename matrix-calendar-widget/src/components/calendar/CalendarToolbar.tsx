@@ -24,6 +24,7 @@ import { MeetingsToolbarButtons } from '../meetings/MeetingsToolbar/MeetingsTool
 import { MeetingsToolbarDatePicker } from '../meetings/MeetingsToolbar/MeetingsToolbarDatePicker';
 import { MeetingsToolbarSearch } from '../meetings/MeetingsToolbar/MeetingsToolbarSearch';
 import { CalendarCreateDialog } from './CalendarCreateDialog';
+import { CalendarCreateDialog } from './CalendarCreateDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 
 type CalendarToolbarProps = {
@@ -47,6 +48,7 @@ export function CalendarToolbar({
   const calendars = useCalendars();
   const [createCalendarOpen, setCreateCalendarOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createCalendarOpen, setCreateCalendarOpen] = useState(false);
   const writableCalendars = calendars.data.filter(
     (calendar) => !calendar.readOnly,
   );
@@ -69,6 +71,14 @@ export function CalendarToolbar({
           variant="contained"
         >
           {t('calendarEvents.editor.create', 'Create event')}
+        </Button>
+
+        <Button
+          onClick={() => setCreateCalendarOpen(true)}
+          startIcon={<AddIcon />}
+          variant="outlined"
+        >
+          {t('calendars.create.submit', 'Create calendar')}
         </Button>
 
         {showToolbarButtons && (
@@ -103,6 +113,11 @@ export function CalendarToolbar({
           view={view}
         />
       </Stack>
+
+      <CalendarCreateDialog
+        onClose={() => setCreateCalendarOpen(false)}
+        open={createCalendarOpen}
+      />
 
       <CalendarCreateDialog
         onClose={() => setCreateCalendarOpen(false)}
