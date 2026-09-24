@@ -90,7 +90,11 @@ export function CalendarCreateDialog({
         </DialogTitle>
         <DialogContent>
           <Stack mt={1} spacing={2}>
-            {error && <Alert severity="error">{error.message}</Alert>}
+            {error && (
+              <Alert role="alert" severity="error">
+                {error.message}
+              </Alert>
+            )}
             <TextField
               autoFocus
               disabled={saving}
