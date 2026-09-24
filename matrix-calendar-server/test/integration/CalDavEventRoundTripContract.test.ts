@@ -47,80 +47,77 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     fetchMock.dontMock();
   });
 
-  it(
-    'round-trips through the gateway core and a direct CalDAV client without data loss',
-    async () => {
-      const created = codec.create(calendarUrl, eventUrl, {
-        uid: 'round-trip@matrix-calendar-widget',
-        title: 'Created through gateway core',
-        description: 'Initial description',
-        timing: {
-          type: 'timed',
-          start: {
-            local: '2030-01-15T10:00:00',
-            timezone: 'UTC',
-          },
-          end: {
-            local: '2030-01-15T11:00:00',
-            timezone: 'UTC',
-          },
+  it('round-trips through the gateway core and a direct CalDAV client without data loss', async () => {
+    const created = codec.create(calendarUrl, eventUrl, {
+      uid: 'round-trip@matrix-calendar-widget',
+      title: 'Created through gateway core',
+      description: 'Initial description',
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2030-01-15T10:00:00',
+          timezone: 'UTC',
         },
-      });
+        end: {
+          local: '2030-01-15T11:00:00',
+          timezone: 'UTC',
+        },
+      },
+    });
 
-      await client.createEvent(eventUrl, created.icalendar);
+    await client.createEvent(eventUrl, created.icalendar);
 
-      const directRead = await directGet(eventUrl, credentials);
-      expect(directRead.body).toContain('SUMMARY:Created through gateway core');
+    const directRead = await directGet(eventUrl, credentials);
+    expect(directRead.body).toContain('SUMMARY:Created through gateway core');
 
-      const secondClientBody = directRead.body
-        .replace(
-          'SUMMARY:Created through gateway core',
-          'SUMMARY:Changed by direct CalDAV',
-        )
-        .replace('END:VEVENT', 'X-SECOND-CLIENT:preserve-me\r\nEND:VEVENT');
+    const secondClientBody = directRead.body
+      .replace(
+        'SUMMARY:Created through gateway core',
+        'SUMMARY:Changed by direct CalDAV',
+      )
+      .replace('END:VEVENT', 'X-SECOND-CLIENT:preserve-me\r\nEND:VEVENT');
 
-      await directPut(eventUrl, directRead.etag, secondClientBody, credentials);
+    await directPut(eventUrl, directRead.etag, secondClientBody, credentials);
 
-      const observed = await client.getEvent(eventUrl);
-      expect(
-        codec.parse(calendarUrl, eventUrl, observed.icalendar).event.title,
-      ).toBe('Changed by direct CalDAV');
+    const observed = await client.getEvent(eventUrl);
+    expect(
+      codec.parse(calendarUrl, eventUrl, observed.icalendar).event.title,
+    ).toBe('Changed by direct CalDAV');
 
-      const patched = codec
-        .parse(calendarUrl, eventUrl, observed.icalendar)
-        .applyPatch({ location: 'Matrix room' });
+    const patched = codec
+      .parse(calendarUrl, eventUrl, observed.icalendar)
+      .applyPatch({ location: 'Matrix room' });
 
-      await client.updateEvent(eventUrl, observed.etag, patched.icalendar);
+    await client.updateEvent(eventUrl, observed.etag, patched.icalendar);
 
-      const afterGatewayWrite = await directGet(eventUrl, credentials);
-      expect(afterGatewayWrite.body).toContain('LOCATION:Matrix room');
-      expect(afterGatewayWrite.body).toContain('X-SECOND-CLIENT:preserve-me');
+    const afterGatewayWrite = await directGet(eventUrl, credentials);
+    expect(afterGatewayWrite.body).toContain('LOCATION:Matrix room');
+    expect(afterGatewayWrite.body).toContain('X-SECOND-CLIENT:preserve-me');
 
-      const staleSnapshot = await client.getEvent(eventUrl);
-      const directChangedAgain = staleSnapshot.icalendar.replace(
-        'DESCRIPTION:Initial description',
-        'DESCRIPTION:Changed by second client',
-      );
+    const staleSnapshot = await client.getEvent(eventUrl);
+    const directChangedAgain = staleSnapshot.icalendar.replace(
+      'DESCRIPTION:Initial description',
+      'DESCRIPTION:Changed by second client',
+    );
 
-      await directPut(
-        eventUrl,
-        staleSnapshot.etag,
-        directChangedAgain,
-        credentials,
-      );
+    await directPut(
+      eventUrl,
+      staleSnapshot.etag,
+      directChangedAgain,
+      credentials,
+    );
 
-      const stalePatch = codec
-        .parse(calendarUrl, eventUrl, staleSnapshot.icalendar)
-        .applyPatch({ title: 'Stale gateway edit' });
+    const stalePatch = codec
+      .parse(calendarUrl, eventUrl, staleSnapshot.icalendar)
+      .applyPatch({ title: 'Stale gateway edit' });
 
-      await expect(
-        client.updateEvent(eventUrl, staleSnapshot.etag, stalePatch.icalendar),
-      ).rejects.toMatchObject({
-        code: 'etag-conflict',
-        status: expect.any(Number),
-      });
-    },
-  );
+    await expect(
+      client.updateEvent(eventUrl, staleSnapshot.etag, stalePatch.icalendar),
+    ).rejects.toMatchObject({
+      code: 'etag-conflict',
+      status: expect.any(Number),
+    });
+  });
 });
 
 async function directGet(
