@@ -185,12 +185,12 @@ function createRepository(fetchImpl: typeof fetch): GatewayCalendarRepository {
   });
 }
 
-function mockFetch(...responses: Response[]): typeof fetch {
-  const mock = vi.fn();
+function mockFetch(...responses: Response[]) {
+  const mock = vi.fn<typeof fetch>();
   for (const response of responses) {
     mock.mockResolvedValueOnce(response);
   }
-  return mock as unknown as typeof fetch;
+  return mock;
 }
 
 function jsonResponse(value: unknown): Response {
