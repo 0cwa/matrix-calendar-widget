@@ -37,15 +37,14 @@ Merged on `main`:
 
 ## Active
 
-- #60 / #59 — real Radicale discovery contract. The pinned Synapse + Radicale stack starts successfully, a VEVENT collection is provisioned, and the production discovery client is exercised. Latest work restores native Node fetch inside the integration suite; merge only after both normal CI and the dedicated `CalDAV contract` workflow are green.
 - #48 — external `radicale-auth-matrix` change required for gateway OpenID delegation. The stock plugin still hardcodes `m.login.password`. ADR009 defines the compatible extension. No `0cwa/radicale-auth-matrix` fork currently exists, and this repository connector cannot create one.
+- #45 — final delegated gateway/OpenID/non-member real-container contract. The password-auth Radicale discovery contract is already merged in PR #60; the remaining part depends on #48.
 
 ## Highest-priority next steps
 
-1. Finish and merge PR #60 once the real contract and normal CI are green.
-2. Implement #48 in an upstream/forked `radicale-auth-matrix` repository; do not copy GPL/LGPL-family plugin code into this Apache-licensed repository.
-3. Add the final gateway/OpenID/non-member real-container contract under #45 and close M2.
-4. Only then make M3 implementation the default focus. M3 is decomposed as #61–#66; #61 (preservation-first iCalendar codec) is the best parallel task only if #48 is blocked on external repository access.
+1. Implement #48 in an upstream/forked `radicale-auth-matrix` repository; do not copy GPL/LGPL-family plugin code into this Apache-licensed repository.
+2. Add the final gateway/OpenID/non-member real-container contract under #45 and close M2.
+3. Only then make M3 implementation the default focus. M3 is decomposed as #61–#66; #61 (preservation-first iCalendar codec) is the best parallel task only if #48 is blocked on external repository access.
 
 ## Friction / working rules
 
