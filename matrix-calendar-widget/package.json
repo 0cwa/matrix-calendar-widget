@@ -40,7 +40,7 @@
     "reselect": "^4.1.8",
     "rrule": "^2.8.1",
     "rxjs": "^7.8.1",
-    "timezones-ical-library": "^1.9.1"
+    "timezones-ical-library": "^2.3.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
