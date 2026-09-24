@@ -454,5 +454,15 @@
     "loadingError": "Error while loading available Widgets.",
     "noWidgets": "No Widgets.",
     "tagInstructions": "Use the backspace key to delete the entry."
+  },
+  "calendars": {
+    "create": {
+      "action": "New calendar",
+      "title": "Create calendar",
+      "name": "Calendar name",
+      "eventOnly": "This creates an event calendar for VEVENT entries.",
+      "error": "The calendar could not be created. Try again.",
+      "submit": "Create calendar"
+    }
   }
 }
