@@ -62,6 +62,7 @@ function createRepository(
 ): CalendarRepository {
   return {
     listCalendars: vi.fn().mockResolvedValue([]),
+    createCalendar: vi.fn().mockRejectedValue(new Error('not configured')),
     listEvents: vi.fn().mockResolvedValue([]),
     getEvent: vi.fn().mockRejectedValue(new Error('not configured')),
     createEvent: vi.fn().mockRejectedValue(new Error('not configured')),
