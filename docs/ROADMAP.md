@@ -22,11 +22,11 @@ Collection management is part of the product, but DAV vocabulary should stay mos
 
 ## Near-term priorities
 
-1. Land PR #40 to finish the repository-backed M1 create/edit/delete path.
-2. Refresh and land PR #52 (request-scoped OpenID credential) and PR #53 (CalDAV discovery client).
-3. Implement #55 and #56 to connect validated Matrix identity, authorization, delegated credentials, and configured Radicale discovery.
-4. Complete #48's OpenID-capable `radicale-auth-matrix` path and #45's real-container discovery contract tests.
-5. Start M3's real VEVENT CRUD vertical slice only after the authenticated discovery spine is proven.
+1. Close #48's external ADR009 OpenID-capable `radicale-auth-matrix` gap.
+2. Use that plugin in #45's real gateway/OpenID/non-member contract and close M2.
+3. While #48 is externally blocked, implement #92 only: create a friendly VEVENT-only calendar from the widget through the existing repository/gateway seams.
+4. Reassess after #92 before adding edit/delete/diagnostics. Avoid broad generic WebDAV administration.
+5. Keep M3 regression coverage green; M3 is complete on `main` through PRs #70, #89, and #90.
 
 See [STATUS.md](./STATUS.md) for transient PR/CI details.
 
