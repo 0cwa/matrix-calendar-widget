@@ -66,10 +66,7 @@ export function CalendarCreateDialog({
     } catch {
       setError(
         new Error(
-          t(
-            'calendars.create.error',
-            'The calendar could not be created.',
-          ),
+          t('calendars.create.error', 'The calendar could not be created.'),
         ),
       );
     } finally {
