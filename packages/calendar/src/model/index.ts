@@ -34,6 +34,7 @@ export type {
   CalendarEventTransparency,
   CalendarId,
   CalendarTimeRange,
+  CreateCalendarInput,
   LocalCalendarDateTime,
   TimedCalendarEventTiming,
   ZonedCalendarDateTime,
