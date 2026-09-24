@@ -12,6 +12,7 @@
   "calendarEvents": {
     "delete": {
       "confirm": "Delete",
+      "conflict": "This event changed elsewhere. The latest version was reloaded; review it and retry if you still want to delete it.",
       "description": "Delete “{{title}}”? This cannot be undone.",
       "error": "The event could not be deleted.",
       "title": "Delete event"
@@ -26,6 +27,7 @@
     "editor": {
       "allDay": "All day",
       "calendar": "Calendar",
+      "conflict": "This event changed elsewhere. Reload the latest version before retrying.",
       "create": "Create event",
       "createTitle": "Create event",
       "description": "Description",
@@ -35,6 +37,8 @@
       "invalidTimezone": "Enter a valid IANA time zone.",
       "location": "Location",
       "readOnly": "This calendar is read-only.",
+      "reloadError": "The latest event could not be loaded.",
+      "reloadLatest": "Reload latest",
       "save": "Save",
       "saveError": "The event could not be saved.",
       "start": "Start",
