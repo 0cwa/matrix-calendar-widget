@@ -19,14 +19,15 @@ import {
   CalendarRepository,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
-import { WidgetApi } from '@matrix-widget-toolkit/api';
+import { extractRawWidgetParameters, WidgetApi } from '@matrix-widget-toolkit/api';
 import {
+  getEnvironment,
   MuiThemeProvider,
   MuiWidgetApiProvider,
 } from '@matrix-widget-toolkit/mui';
 import { Suspense, useMemo } from 'react';
 import App from './App';
-import { CalendarRepositoryProvider } from './calendar';
+import { CalendarRepositoryProvider, GatewayCalendarRepository } from './calendar';
 import { LocalizationProvider } from './components/common/LocalizationProvider';
 import { PageLoader } from './components/common/PageLoader';
 import { StoreProvider } from './store';
@@ -39,8 +40,10 @@ function AppContainer({
   widgetApiPromise: Promise<WidgetApi>;
 }) {
   const repository = useMemo(
-    () => calendarRepository ?? new InMemoryCalendarRepository(),
-    [calendarRepository],
+    () =>
+      calendarRepository ??
+      createDefaultCalendarRepository(widgetApiPromise),
+    [calendarRepository, widgetApiPromise],
   );
 
   return (
@@ -68,3 +71,42 @@ function AppContainer({
 }
 
 export default AppContainer;
+
+
+function createDefaultCalendarRepository(
+  widgetApiPromise: Promise<WidgetApi>,
+): CalendarRepository {
+  const parameters = extractRawWidgetParameters();
+  const baseUrl =
+    parameters['meetings_bot_base_url'] ??
+    getEnvironment('REACT_APP_API_BASE_URL');
+  const roomId = parameters['matrix_room_id'];
+
+  if (
+    typeof baseUrl !== 'string' ||
+    baseUrl.length === 0 ||
+    typeof roomId !== 'string' ||
+    roomId.length === 0
+  ) {
+    return new InMemoryCalendarRepository();
+  }
+
+  return new GatewayCalendarRepository({
+    baseUrl,
+    roomId,
+    getAuthorizationHeader: async () => {
+      const widgetApi = await widgetApiPromise;
+      const credentials = await widgetApi.requestOpenIDConnectToken();
+      if (!credentials) {
+        return undefined;
+      }
+
+      return `MX-Identity ${btoa(
+        JSON.stringify({
+          matrix_server_name: credentials.matrix_server_name,
+          access_token: credentials.access_token,
+        }),
+      )}`;
+    },
+  });
+}
