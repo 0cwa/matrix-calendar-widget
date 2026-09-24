@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-import fetchMock from 'jest-fetch-mock';
 import {
   CalDavCredentialProvider,
   CalDavDiscoveryClient,
 } from '../../src/caldav';
+import fetchMock from 'jest-fetch-mock';
 
 const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
