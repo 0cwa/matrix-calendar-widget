@@ -17,6 +17,7 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarRepositoryError,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -130,6 +131,62 @@ describe('<CalendarEventEditorDialog />', () => {
       title: 'Updated planning',
       description: undefined,
     });
+  });
+
+  it('reloads the latest event after an optimistic concurrency conflict', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [event],
+    });
+    const latestEvent: CalendarEvent = {
+      ...event,
+      title: 'Planning changed elsewhere',
+      description: 'Latest server description',
+    };
+    vi.spyOn(repository, 'updateEvent').mockRejectedValueOnce(
+      new CalendarRepositoryError(
+        'event-conflict',
+        'The event changed on the server',
+      ),
+    );
+    vi.spyOn(repository, 'getEvent').mockResolvedValueOnce(latestEvent);
+    const onSaved = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={event}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const title = await screen.findByRole('textbox', { name: /Title/i });
+    await userEvent.clear(title);
+    await userEvent.type(title, 'My stale change');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(
+      await screen.findByText(
+        'This event changed elsewhere. Reload the latest version before retrying.',
+      ),
+    ).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Reload latest' }),
+    );
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(latestEvent));
+    expect(screen.getByRole('textbox', { name: /Title/i })).toHaveValue(
+      'Planning changed elsewhere',
+    );
+    expect(
+      screen.queryByText(
+        'This event changed elsewhere. Reload the latest version before retrying.',
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it('disables saving for a read-only calendar', () => {
