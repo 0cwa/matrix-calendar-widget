@@ -76,9 +76,9 @@ describe('<CalendarCreateDialog />', () => {
       screen.getByRole('button', { name: 'Create calendar' }),
     );
 
-    expect(
-      await screen.findByRole('alert'),
-    ).toHaveTextContent('The calendar could not be created.');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The calendar could not be created.',
+    );
     expect(onClose).not.toHaveBeenCalled();
   });
 });
