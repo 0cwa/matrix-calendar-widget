@@ -6094,6 +6094,10 @@ i18next@^25.10.10:
   dependencies:
     "@babel/runtime" "^7.29.2"
 
+i18next@^26.4.2:
+  version "26.4.2"
+  resolved "https://registry.yarnpkg.com/i18next/-/i18next-26.4.2.tgz#824233630f147359296bcaddf1404945d2b211bf"
+  integrity sha512-RX+R0VLg13IbvRuJSxnqykUFS9vQZTl8wYpWPCIUDWVrSGjsQywB5Y+pjzrkboxGAuYfJZVH1InFTdgBdxq6ug==
 
 ical.js@^2.2.1:
   version "2.2.1"

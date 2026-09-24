@@ -45,7 +45,7 @@
     "express": "^4.21.2",
     "fast-xml-parser": "5.11.1",
     "html-entities": "^2.5.2",
-    "i18next": "^25.10.10",
+    "i18next": "^26.4.2",
     "i18next-fs-backend": "^2.6.7",
     "i18next-http-middleware": "^3.9.8",
     "ical.js": "^2.2.1",
