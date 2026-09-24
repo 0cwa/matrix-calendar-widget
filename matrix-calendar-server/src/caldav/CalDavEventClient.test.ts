@@ -249,6 +249,122 @@ END:VCALENDAR</c:calendar-data>
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('creates an event with If-None-Match and returns the response ETag', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response('', {
+          status: 201,
+          headers: { ETag: '"created-etag"' },
+        }),
+      );
+    const client = new CalDavEventClient(credentialProvider, fetchMock);
+
+    await expect(
+      client.createEvent(
+        'https://radicale.example.test/alice/events/new.ics',
+        'BEGIN:VCALENDAR\nEND:VCALENDAR',
+      ),
+    ).resolves.toEqual({
+      href: 'https://radicale.example.test/alice/events/new.ics',
+      etag: '"created-etag"',
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = new Headers(init?.headers);
+    expect(init?.method).toBe('PUT');
+    expect(headers.get('Authorization')).toBe('Basic delegated');
+    expect(headers.get('Content-Type')).toBe('text/calendar; charset=utf-8');
+    expect(headers.get('If-None-Match')).toBe('*');
+    expect(headers.get('If-Match')).toBeNull();
+    expect(init?.body).toBe('BEGIN:VCALENDAR\nEND:VCALENDAR');
+  });
+
+  it('updates an event with If-Match and returns the latest ETag when present', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response('', {
+          status: 204,
+          headers: { ETag: '"updated-etag"' },
+        }),
+      );
+    const client = new CalDavEventClient(credentialProvider, fetchMock);
+
+    await expect(
+      client.updateEvent(
+        'https://radicale.example.test/alice/events/event.ics',
+        '"old-etag"',
+        'BEGIN:VCALENDAR\nEND:VCALENDAR',
+      ),
+    ).resolves.toEqual({
+      href: 'https://radicale.example.test/alice/events/event.ics',
+      etag: '"updated-etag"',
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = new Headers(init?.headers);
+    expect(init?.method).toBe('PUT');
+    expect(headers.get('If-Match')).toBe('"old-etag"');
+    expect(headers.get('If-None-Match')).toBeNull();
+  });
+
+  it('deletes an event with If-Match and tolerates a success response without ETag', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(new Response('', { status: 204 }));
+    const client = new CalDavEventClient(credentialProvider, fetchMock);
+
+    await expect(
+      client.deleteEvent(
+        'https://radicale.example.test/alice/events/event.ics',
+        '"current-etag"',
+      ),
+    ).resolves.toEqual({
+      href: 'https://radicale.example.test/alice/events/event.ics',
+      etag: undefined,
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = new Headers(init?.headers);
+    expect(init?.method).toBe('DELETE');
+    expect(headers.get('If-Match')).toBe('"current-etag"');
+  });
+
+  it.each([
+    ['create', 412],
+    ['update', 412],
+    ['delete', 409],
+  ] as const)(
+    'maps a stale %s to an ETag conflict',
+    async (operation, status) => {
+      const fetchMock = jest
+        .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+        .mockResolvedValue(new Response('Conflict', { status }));
+      const client = new CalDavEventClient(credentialProvider, fetchMock);
+      const url = 'https://radicale.example.test/alice/events/event.ics';
+
+      const promise =
+        operation === 'create'
+          ? client.createEvent(url, 'BEGIN:VCALENDAR\nEND:VCALENDAR')
+          : operation === 'update'
+            ? client.updateEvent(
+                url,
+                '"stale-etag"',
+                'BEGIN:VCALENDAR\nEND:VCALENDAR',
+              )
+            : client.deleteEvent(url, '"stale-etag"');
+
+      await expect(promise).rejects.toMatchObject({
+        code: 'etag-conflict',
+        method: operation === 'delete' ? 'DELETE' : 'PUT',
+        status,
+        url,
+      });
+    },
+  );
+
 });
 
 function multistatus(body: string, davPrefix = 'd'): string {
