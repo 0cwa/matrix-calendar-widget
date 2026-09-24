@@ -81,11 +81,7 @@ export class ParsedICalendarEvent {
       setTiming(vevent, patch.timing);
     }
     if (hasOwn(patch, 'status')) {
-      setOptionalProperty(
-        vevent,
-        'status',
-        patch.status?.toUpperCase(),
-      );
+      setOptionalProperty(vevent, 'status', patch.status?.toUpperCase());
     }
     if (hasOwn(patch, 'transparency')) {
       setOptionalProperty(
@@ -176,9 +172,7 @@ export class ICalendarEventCodec {
       description: textValue(vevent.getFirstPropertyValue('description')),
       timing,
       status: readStatus(vevent.getFirstPropertyValue('status')),
-      transparency: readTransparency(
-        vevent.getFirstPropertyValue('transp'),
-      ),
+      transparency: readTransparency(vevent.getFirstPropertyValue('transp')),
       location: textValue(vevent.getFirstPropertyValue('location')),
       url: textValue(vevent.getFirstPropertyValue('url')),
       categories: readCategories(vevent),
