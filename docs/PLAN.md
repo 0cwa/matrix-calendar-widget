@@ -24,7 +24,7 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 - [x] Route the inherited calendar/list UI through the repository seam.
 - [x] Preserve the current calendar UX while replacing meeting terminology in the primary read paths.
 - [x] Add timezone/all-day event fixtures and tests.
-- [ ] Route the primary event create/edit/delete UI through the repository seam (#28/#37; PR #40).
+- [x] Route the primary event create/edit/delete UI through the repository seam (#28/#37; PR #40).
 
 **Exit:** the widget can render and edit mocked calendar events without using NeoDateFix meeting-room persistence.
 
@@ -34,12 +34,16 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 - [x] Implement widget Matrix OpenID request/exchange.
 - [x] Validate Matrix identity server-side.
 - [x] Resolve room membership and authorization context.
-- [ ] Implement CalDAV service discovery and calendar enumeration against Radicale (#44/#49/#55/#56).
+- [x] Implement CalDAV service discovery and calendar enumeration against Radicale (#44/#49/#55/#56).
 - [x] Define the server-side Radicale credential/delegation strategy without handling user Matrix passwords (ADR009 / #54).
 - [ ] Add OpenID-capable Radicale auth support while preserving password-based CalDAV clients (#48).
 - [ ] Add contract tests against a real Radicale container (#45).
 
-Active implementation slices are PR #52 (request-scoped validated OpenID credential) and PR #53 (CalDAV discovery client). After they land, #55 bridges those seams and #56 exposes the configured authenticated discovery endpoint.
+Landed M2 slices now include request-scoped OpenID credentials (#52), CalDAV discovery (#53), the OpenID→CalDAV credential bridge (#57), and the configured authenticated discovery endpoint (#58).
+
+Remaining M2 work is deliberately narrow:
+- #48: add ADR009-compatible OpenID support to the external `radicale-auth-matrix` plugin while preserving password-based CalDAV clients.
+- #60 / #59: real Radicale discovery contract coverage. Password-auth discovery is being validated now; final delegated gateway/OpenID coverage remains blocked on #48.
 
 **Exit:** an authenticated widget can list the Radicale calendars it is authorized to see.
 
