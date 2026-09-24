@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import { randomUUID } from 'crypto';
 import { XMLParser } from 'fast-xml-parser';
 import { CalDavCredentialProvider } from './CalDavCredentialProvider';
 
@@ -116,19 +115,7 @@ export class CalDavDiscoveryClient {
       throw new CalDavDiscoveryError('Calendar collection name is invalid');
     }
 
-    const serviceUrl = new URL(this.baseUrl).toString();
-    const principalHref = await this.discoverHref(
-      serviceUrl,
-      PRINCIPAL_BODY,
-      'current-user-principal',
-    );
-    const principalUrl = new URL(principalHref, serviceUrl).toString();
-    const calendarHomeHref = await this.discoverHref(
-      principalUrl,
-      HOME_BODY,
-      'calendar-home-set',
-    );
-    const calendarHomeUrl = new URL(calendarHomeHref, principalUrl).toString();
+    const { calendarHomeUrl } = await this.discoverHome();
     const collectionBase = new URL(calendarHomeUrl);
     if (!collectionBase.pathname.endsWith('/')) {
       collectionBase.pathname = `${collectionBase.pathname}/`;
@@ -145,7 +132,7 @@ export class CalDavDiscoveryClient {
     const response = await this.fetchImpl(collectionUrl, {
       method: 'MKCALENDAR',
       headers,
-      body: calendarCreateBody(name),
+      body: createCalendarBody(name),
     });
 
     if (!response.ok) {
@@ -202,39 +189,6 @@ export class CalDavDiscoveryClient {
       principalUrl,
       calendarHomeUrl,
       calendars,
-    };
-  }
-
-  async createCalendar(displayName: string): Promise<DiscoveredCalDavCalendar> {
-    const { calendarHomeUrl } = await this.discoverHome();
-    const calendarUrl = new URL(
-      `calendar-${randomUUID()}/`,
-      calendarHomeUrl,
-    ).toString();
-    const credentialHeaders =
-      await this.credentialProvider.getRequestHeaders();
-    const headers = new Headers(credentialHeaders);
-    headers.set('Content-Type', 'application/xml; charset=utf-8');
-
-    const response = await this.fetchImpl(calendarUrl, {
-      method: 'MKCALENDAR',
-      headers,
-      body: createCalendarBody(displayName),
-    });
-
-    if (!response.ok) {
-      throw new CalDavDiscoveryError(
-        `CalDAV MKCALENDAR failed with status ${response.status}`,
-        response.status,
-        calendarUrl,
-      );
-    }
-
-    return {
-      href: calendarUrl,
-      displayName,
-      components: ['VEVENT'],
-      readOnly: false,
     };
   }
 
