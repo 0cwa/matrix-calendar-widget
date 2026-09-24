@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { randomUUID } from 'crypto';
 import { XMLParser } from 'fast-xml-parser';
 import { CalDavCredentialProvider } from './CalDavCredentialProvider';
 
@@ -81,6 +82,20 @@ const CALENDARS_BODY = `<?xml version="1.0" encoding="utf-8" ?>
     <A:calendar-color/>
   </D:prop>
 </D:propfind>`;
+
+function createCalendarBody(displayName: string): string {
+  return `<?xml version="1.0" encoding="utf-8" ?>
+<C:mkcalendar xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:D="DAV:">
+  <D:set>
+    <D:prop>
+      <D:displayname>${escapeXmlText(displayName)}</D:displayname>
+      <C:supported-calendar-component-set>
+        <C:comp name="VEVENT"/>
+      </C:supported-calendar-component-set>
+    </D:prop>
+  </D:set>
+</C:mkcalendar>`;
+}
 
 export class CalDavDiscoveryClient {
   constructor(
@@ -150,21 +165,7 @@ export class CalDavDiscoveryClient {
   }
 
   async discover(): Promise<CalDavDiscoveryResult> {
-    const serviceUrl = new URL(this.baseUrl).toString();
-    const principalHref = await this.discoverHref(
-      serviceUrl,
-      PRINCIPAL_BODY,
-      'current-user-principal',
-    );
-    const principalUrl = new URL(principalHref, serviceUrl).toString();
-
-    const calendarHomeHref = await this.discoverHref(
-      principalUrl,
-      HOME_BODY,
-      'calendar-home-set',
-    );
-    const calendarHomeUrl = new URL(calendarHomeHref, principalUrl).toString();
-
+    const { principalUrl, calendarHomeUrl } = await this.discoverHome();
     const responses = await this.propfind(calendarHomeUrl, '1', CALENDARS_BODY);
     const calendars = responses.flatMap((response) => {
       const properties = successfulProperties(response);
@@ -201,6 +202,63 @@ export class CalDavDiscoveryClient {
       principalUrl,
       calendarHomeUrl,
       calendars,
+    };
+  }
+
+  async createCalendar(displayName: string): Promise<DiscoveredCalDavCalendar> {
+    const { calendarHomeUrl } = await this.discoverHome();
+    const calendarUrl = new URL(
+      `calendar-${randomUUID()}/`,
+      calendarHomeUrl,
+    ).toString();
+    const credentialHeaders =
+      await this.credentialProvider.getRequestHeaders();
+    const headers = new Headers(credentialHeaders);
+    headers.set('Content-Type', 'application/xml; charset=utf-8');
+
+    const response = await this.fetchImpl(calendarUrl, {
+      method: 'MKCALENDAR',
+      headers,
+      body: createCalendarBody(displayName),
+    });
+
+    if (!response.ok) {
+      throw new CalDavDiscoveryError(
+        `CalDAV MKCALENDAR failed with status ${response.status}`,
+        response.status,
+        calendarUrl,
+      );
+    }
+
+    return {
+      href: calendarUrl,
+      displayName,
+      components: ['VEVENT'],
+      readOnly: false,
+    };
+  }
+
+  private async discoverHome(): Promise<{
+    principalUrl: string;
+    calendarHomeUrl: string;
+  }> {
+    const serviceUrl = new URL(this.baseUrl).toString();
+    const principalHref = await this.discoverHref(
+      serviceUrl,
+      PRINCIPAL_BODY,
+      'current-user-principal',
+    );
+    const principalUrl = new URL(principalHref, serviceUrl).toString();
+
+    const calendarHomeHref = await this.discoverHref(
+      principalUrl,
+      HOME_BODY,
+      'calendar-home-set',
+    );
+
+    return {
+      principalUrl,
+      calendarHomeUrl: new URL(calendarHomeHref, principalUrl).toString(),
     };
   }
 
@@ -348,4 +406,11 @@ function escapeXml(value: string): string {
 
 function textValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function escapeXmlText(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
