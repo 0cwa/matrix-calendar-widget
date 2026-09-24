@@ -454,5 +454,15 @@
     "loadingError": "Fehler beim Laden der Widgets. Du kannst die auch später aktivieren.",
     "noWidgets": "Keine Widgets verfügbar.",
     "tagInstructions": "Nutze die Rücktaste um den Eintrag zu löschen."
+  },
+  "calendars": {
+    "create": {
+      "action": "Neuer Kalender",
+      "title": "Kalender erstellen",
+      "name": "Kalendername",
+      "eventOnly": "Dadurch wird ein Ereigniskalender für VEVENT-Einträge erstellt.",
+      "error": "Der Kalender konnte nicht erstellt werden. Versuche es erneut.",
+      "submit": "Kalender erstellen"
+    }
   }
 }
