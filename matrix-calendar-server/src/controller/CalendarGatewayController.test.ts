@@ -183,7 +183,6 @@ describe('CalendarGatewayController', () => {
     expect(forRoom).not.toHaveBeenCalled();
   });
 
-
   it('lists authorized VEVENT resources through the gateway', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';
@@ -453,7 +452,6 @@ function homeResponse(href: string): string {
     </d:response>
   `);
 }
-
 
 function simpleEventIcs(
   title = 'Team planning',
