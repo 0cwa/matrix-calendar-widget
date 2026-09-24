@@ -206,6 +206,62 @@ describe('ICalendarEventCodec', () => {
     expect(reparsed.event.location).toBe(parsed.event.location);
   });
 
+
+  it('serializes a new basic VEVENT from the calendar domain input', () => {
+    const encoded = codec.create('team', 'new.ics', {
+      uid: 'new@example.test',
+      title: 'Planning',
+      description: 'Quarterly planning',
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-09-28T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          local: '2026-09-28T10:30:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      status: 'confirmed',
+      transparency: 'opaque',
+      location: 'Room 5',
+      url: 'https://example.test/events/new',
+      categories: ['TEAM', 'PLANNING'],
+      priority: 4,
+    });
+
+    expect(encoded.event).toMatchObject({
+      id: 'new.ics',
+      calendarId: 'team',
+      uid: 'new@example.test',
+      title: 'Planning',
+    });
+
+    const reparsed = codec.parse('team', 'new.ics', encoded.icalendar);
+    expect(reparsed.event).toEqual(encoded.event);
+  });
+
+  it('rejects recurrence creation until recurrence semantics land in M5', () => {
+    expect(() =>
+      codec.create('team', 'new.ics', {
+        uid: 'new@example.test',
+        title: 'Recurring',
+        timing: {
+          type: 'all-day',
+          startDate: '2026-09-28',
+          endDate: '2026-09-29',
+        },
+        recurrence: { rrule: 'FREQ=DAILY' },
+      }),
+    ).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Recurrence creation is not part of the basic VEVENT codec',
+      ),
+    );
+  });
+
   it('rejects recurrence edits until recurrence semantics land in M5', () => {
     const parsed = codec.parse(
       'team',
