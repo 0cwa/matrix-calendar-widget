@@ -28,6 +28,7 @@ export type CalendarRepositoryErrorCode =
   | 'calendar-not-found'
   | 'event-not-found'
   | 'calendar-read-only'
+  | 'invalid-calendar-name'
   | 'invalid-range'
   | 'event-conflict'
   | 'authentication-required'
@@ -45,6 +46,8 @@ export class CalendarRepositoryError extends Error {
 
 export interface CalendarRepository {
   listCalendars(): Promise<Calendar[]>;
+
+  createCalendar(name: string): Promise<Calendar>;
 
   listEvents(
     calendarIds: CalendarId[],
