@@ -195,8 +195,7 @@ function findMasterEvent(
     : events;
 
   return (
-    matching.find((event) => !event.hasProperty('recurrence-id')) ??
-    matching[0]
+    matching.find((event) => !event.hasProperty('recurrence-id')) ?? matching[0]
   );
 }
 
