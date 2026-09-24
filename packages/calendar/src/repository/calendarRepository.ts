@@ -28,7 +28,10 @@ export type CalendarRepositoryErrorCode =
   | 'calendar-not-found'
   | 'event-not-found'
   | 'calendar-read-only'
-  | 'invalid-range';
+  | 'invalid-range'
+  | 'etag-conflict'
+  | 'gateway-auth-failed'
+  | 'gateway-request-failed';
 
 export class CalendarRepositoryError extends Error {
   constructor(
