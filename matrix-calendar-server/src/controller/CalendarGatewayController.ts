@@ -19,6 +19,7 @@ import {
   CalendarEventInput,
   CalendarEventPatch,
   CalendarTimeRange,
+  CreateCalendarInput,
 } from '@matrix-calendar-widget/calendar';
 import {
   BadRequestException,
@@ -40,6 +41,7 @@ import {
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
 import {
+  CalDavCalendarClient,
   CalDavDiscoveryClient,
   CalDavEventClient,
   CalDavEventResource,
@@ -117,6 +119,60 @@ export class CalendarGatewayController {
             calendar.color,
             calendar.readOnly,
           ),
+      );
+    });
+  }
+
+  @Post('calendars')
+  async createCalendar(
+    @UserContextParam() userContext: IUserContext,
+    @MatrixOpenIdCredentialParam()
+    openIdCredential: IMatrixOpenIdCredential | undefined,
+    @Body() input: CreateCalendarInput,
+    @Query('roomId') roomId?: string,
+  ): Promise<CalendarGatewayCalendarDto> {
+    const requiredRoomId = this.requireQuery(roomId, 'roomId');
+    const name = input.name?.trim();
+    if (!name) {
+      throw new BadRequestException('name is required');
+    }
+
+    const authorization = this.authorizationFactory.forRoom(
+      userContext.userId,
+      requiredRoomId,
+    );
+    if (!(await authorization.isAllowed({ action: 'create-calendar' }))) {
+      throw new ForbiddenException(
+        'Not allowed to create calendars for this Matrix room',
+      );
+    }
+
+    const radicaleUrl = this.requireRadicaleBaseUrl();
+    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+      userContext,
+      openIdCredential,
+    );
+
+    return this.runCalDav(async () => {
+      const discovery = await new CalDavDiscoveryClient(
+        radicaleUrl,
+        credentialProvider,
+      ).discover();
+      const calendarUrl = new URL(
+        `${crypto.randomUUID()}/`,
+        discovery.calendarHomeUrl,
+      ).toString();
+
+      await new CalDavCalendarClient(credentialProvider).createCalendar(
+        calendarUrl,
+        { displayName: name },
+      );
+
+      return new CalendarGatewayCalendarDto(
+        calendarUrl,
+        name,
+        undefined,
+        false,
       );
     });
   }
