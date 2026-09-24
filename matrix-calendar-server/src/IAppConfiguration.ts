@@ -19,6 +19,7 @@ export interface IAppConfiguration {
 
   access_token: string;
   homeserver_url: string;
+  radicale_url?: string;
 
   meetingwidget_url: string;
   meetingwidget_name: string;
