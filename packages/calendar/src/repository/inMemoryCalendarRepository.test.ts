@@ -104,7 +104,9 @@ describe('InMemoryCalendarRepository', () => {
   it('creates a named calendar with deterministic identity', async () => {
     const repository = createRepository();
 
-    await expect(repository.createCalendar('  Project Alpha  ')).resolves.toEqual({
+    await expect(
+      repository.createCalendar('  Project Alpha  '),
+    ).resolves.toEqual({
       id: 'calendar-1',
       name: 'Project Alpha',
     });
