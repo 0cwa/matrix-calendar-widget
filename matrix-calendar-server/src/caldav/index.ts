@@ -24,6 +24,15 @@ export type {
   DiscoveredCalDavCalendar,
 } from './CalDavDiscoveryClient';
 export {
+  ICalendarEventCodec,
+  ICalendarEventCodecError,
+  ParsedICalendarEvent,
+} from './ICalendarEventCodec';
+export type {
+  EncodedICalendarEvent,
+  ICalendarEventCodecErrorCode,
+} from './ICalendarEventCodec';
+export {
   MatrixOpenIdCalDavCredentialError,
   MatrixOpenIdCalDavCredentialProvider,
 } from './MatrixOpenIdCalDavCredentialProvider';
