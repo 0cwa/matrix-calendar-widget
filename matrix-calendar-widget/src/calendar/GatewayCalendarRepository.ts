@@ -276,10 +276,7 @@ export class GatewayCalendarRepository implements CalendarRepository {
     );
   }
 
-  private url(
-    path: string,
-    params: Record<string, string>,
-  ): string {
+  private url(path: string, params: Record<string, string>): string {
     const search = new URLSearchParams(params);
     return `${this.options.baseUrl.replace(/\/$/, '')}${path}?${search}`;
   }
