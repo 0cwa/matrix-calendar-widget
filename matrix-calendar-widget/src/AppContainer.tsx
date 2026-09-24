@@ -15,10 +15,7 @@
  * limitations under the License.
  */
 
-import {
-  CalendarRepository,
-  InMemoryCalendarRepository,
-} from '@matrix-calendar-widget/calendar';
+import { CalendarRepository } from '@matrix-calendar-widget/calendar';
 import { WidgetApi } from '@matrix-widget-toolkit/api';
 import {
   MuiThemeProvider,
@@ -26,7 +23,10 @@ import {
 } from '@matrix-widget-toolkit/mui';
 import { Suspense, useMemo } from 'react';
 import App from './App';
-import { CalendarRepositoryProvider } from './calendar';
+import {
+  CalendarGatewayRepository,
+  CalendarRepositoryProvider,
+} from './calendar';
 import { LocalizationProvider } from './components/common/LocalizationProvider';
 import { PageLoader } from './components/common/PageLoader';
 import { StoreProvider } from './store';
@@ -39,8 +39,12 @@ function AppContainer({
   widgetApiPromise: Promise<WidgetApi>;
 }) {
   const repository = useMemo(
-    () => calendarRepository ?? new InMemoryCalendarRepository(),
-    [calendarRepository],
+    () =>
+      calendarRepository ??
+      new CalendarGatewayRepository({
+        widgetApiPromise,
+      }),
+    [calendarRepository, widgetApiPromise],
   );
 
   return (
