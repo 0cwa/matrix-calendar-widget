@@ -152,9 +152,7 @@ describe('ICalendarEventCodec', () => {
     const alarm = event?.getFirstSubcomponent('valarm');
 
     expect(alarm?.getFirstPropertyValue('action')).toBe('DISPLAY');
-    expect(alarm?.getFirstPropertyValue('trigger')?.toString()).toBe(
-      '-PT15M',
-    );
+    expect(alarm?.getFirstPropertyValue('trigger')?.toString()).toBe('-PT15M');
     expect(alarm?.getFirstPropertyValue('description')).toBe(
       'Release checkpoint starts in 15 minutes',
     );
