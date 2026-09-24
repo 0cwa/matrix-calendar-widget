@@ -16,6 +16,8 @@ updates:
         update-types:
           - minor
           - patch
+        exclude-patterns:
+          - typescript
     labels:
       - dependencies
 
