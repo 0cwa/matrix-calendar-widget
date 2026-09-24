@@ -37,27 +37,23 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 - [x] Implement CalDAV service discovery and calendar enumeration against Radicale (#44/#49/#55/#56).
 - [x] Define the server-side Radicale credential/delegation strategy without handling user Matrix passwords (ADR009 / #54).
 - [ ] Add OpenID-capable Radicale auth support while preserving password-based CalDAV clients (#48).
-- [ ] Add contract tests against a real Radicale container (#45).
+- [ ] Add the final delegated gateway/OpenID contract against a real Radicale container (#45).
 
-Landed M2 slices now include request-scoped OpenID credentials (#52), CalDAV discovery (#53), the OpenID→CalDAV credential bridge (#57), and the configured authenticated discovery endpoint (#58).
+Password-auth real-container discovery is already covered by #59 / PR #60. The only remaining M2 path is the external ADR009 plugin change (#48), then the final delegated gateway contract (#45).
 
-Remaining M2 work is deliberately narrow:
-
-- #48: add ADR009-compatible OpenID support to the external `radicale-auth-matrix` plugin while preserving password-based CalDAV clients.
-- #60 / #59: real Radicale discovery contract coverage. Password-auth discovery is being validated now; final delegated gateway/OpenID coverage remains blocked on #48.
-
-**Exit:** an authenticated widget can list the Radicale calendars it is authorized to see.
+**Exit:** an authenticated widget can list the Radicale calendars it is authorized to see through delegated Matrix OpenID without handling user Matrix passwords.
 
 ## M3 — VEVENT CRUD vertical slice
 
-- [ ] Fetch events by visible range.
-- [ ] Render real Radicale events in month/week/day/list views.
-- [ ] Create basic VEVENTs.
-- [ ] Edit basic VEVENTs.
-- [ ] Delete/cancel events with an explicit confirmation flow.
-- [ ] Support title, description, start/end, all-day, timezone, location, URL, status, transparency, categories, priority.
-- [ ] Preserve unknown iCalendar properties on edit.
-- [ ] Implement ETag conflict handling and user-visible conflict recovery.
+- [x] Fetch events by visible range.
+- [x] Render real Radicale events in month/week/day/list views.
+- [x] Create basic VEVENTs.
+- [x] Edit basic VEVENTs.
+- [x] Delete/cancel events with an explicit confirmation flow.
+- [x] Support title, description, start/end, all-day, timezone, location, URL, status, transparency, categories, priority.
+- [x] Preserve unknown iCalendar properties on edit.
+- [x] Implement ETag conflict handling and user-visible conflict recovery.
+- [x] Verify two-client round-trip preservation and stale-ETag behavior against real Radicale (#66 / PR #90).
 
 **Exit:** two independent CalDAV clients can observe each other's basic event changes without destructive round-trip loss.
 
@@ -71,6 +67,8 @@ Remaining M2 work is deliberately narrow:
 - [ ] Hide VJOURNAL-only collections.
 - [ ] Leave VTODO-only collections untouched and hidden from the main calendar UI.
 - [ ] Add CalDAV URL/copy diagnostics for administrators.
+
+Start with #92 only: friendly VEVENT-only calendar creation through the existing repository/gateway seams. Do not build generic WebDAV administration.
 
 **Exit:** normal users no longer need Radicale's web UI to manage team event calendars.
 
