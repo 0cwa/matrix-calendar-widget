@@ -1,3 +1,9 @@
+export {
+  CalDavCalendarClient,
+  CalDavCalendarError,
+} from './CalDavCalendarClient';
+export type { CreateCalDavCalendarInput } from './CalDavCalendarClient';
+
 /*
  * Copyright 2026 Matrix Calendar Widget contributors
  *
