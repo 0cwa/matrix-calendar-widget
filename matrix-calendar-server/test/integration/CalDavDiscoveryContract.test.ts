@@ -17,7 +17,6 @@
 import {
   CalDavCredentialProvider,
   CalDavDiscoveryClient,
-  CalDavDiscoveryError,
 } from '../../src/caldav';
 
 const describeContract =
@@ -51,7 +50,7 @@ describeContract('CalDAV discovery contract', () => {
         baseUrl,
         basicCredentialProvider(username, 'not-the-password'),
       ).discover(),
-    ).rejects.toMatchObject<Partial<CalDavDiscoveryError>>({
+    ).rejects.toMatchObject({
       name: 'CalDavDiscoveryError',
       status: 401,
     });
