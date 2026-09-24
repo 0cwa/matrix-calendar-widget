@@ -42,6 +42,31 @@ const event: CalendarEvent = {
 };
 
 describe('GatewayCalendarRepository', () => {
+  it('creates a calendar through the room-scoped gateway', async () => {
+    const created = {
+      id: 'https://radicale.example.test/alice/new-calendar/',
+      name: 'Team planning',
+      readOnly: false,
+    };
+    const fetchMock = mockFetch(jsonResponse(created));
+    const repository = createRepository(fetchMock);
+
+    await expect(
+      repository.createCalendar({ name: 'Team planning' }),
+    ).resolves.toEqual(created);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/v1/calendar/calendars?');
+    expect(url).toContain(
+      `roomId=${encodeURIComponent('!team:example.test')}`,
+    );
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toBe(JSON.stringify({ name: 'Team planning' }));
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+  });
+
   it('loads visible events and reuses their ETag for updates', async () => {
     const fetchMock = mockFetch(
       jsonResponse([{ event, etag: '"event-etag"' }]),
