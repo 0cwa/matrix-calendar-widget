@@ -1,63 +1,66 @@
 # Project status
 
-_Last updated: 2026-09-23_
+_Last updated: 2026-09-24_
 
 This file is the short-lived execution snapshot. `docs/PLAN.md` is the durable milestone plan; GitHub issues contain acceptance criteria.
 
 ## Current phase
 
-**Finish M1 while advancing M2 in parallel.**
+**Finish the last M2 integration blocker; do not expand scope until the real discovery path is closed.**
 
-The implementation baseline on `main` before this status-only documentation update is `f88f9f4` (`test: stabilize calendar day picker interaction (#51)`).
+M1 is complete. The authenticated widget → gateway → CalDAV discovery path is implemented in-repo. The only architectural blocker left in M2 is external: the currently pinned `etkecc/radicale-auth-matrix` plugin only supports Matrix password login, while ADR009 requires short-lived Matrix OpenID delegation.
+
+## Landed
 
 ### M1 — Calendar domain seam
 
-Merged on `main`:
+Complete on `main`:
 
-- #25 / PR #30 — product calendar domain types,
-- #26 / PR #31 — `CalendarRepository` + in-memory repository,
-- #39 / PR #41 — transport-agnostic calendar authorization seam,
-- #27 / PRs #34/#35 — repository-backed query/read/presentation path,
-- #36 / PR #38 — repository mutation hooks and query invalidation.
+- calendar/event domain model,
+- `CalendarRepository` + in-memory implementation,
+- transport-agnostic authorization seam,
+- repository-backed widget read paths,
+- mutation hooks/invalidation,
+- repository-backed create/edit/delete UI.
 
-Remaining:
-
-- #37 / PR #40 — repository-backed event create/edit/delete UI. The PR is mergeable and its CI + CodeQL are green. Landing it completes #28 and the remaining M1 implementation slice.
-
-### M2 — Matrix OpenID gateway and Radicale discovery
+### M2 — Gateway identity and Radicale discovery
 
 Merged on `main`:
 
-- #42 / PR #46 — authenticated calendar gateway context,
-- #43 / PR #47 — Matrix room membership/power-level authorization policy,
-- #54 — ADR009, defining the OpenID-to-Radicale delegation contract without Matrix passwords.
+- authenticated calendar gateway context (#42 / PR #46),
+- Matrix room membership/power-level authorization (#43 / PR #47),
+- request-scoped validated OpenID credential (#50 / PR #52),
+- CalDAV principal/home/calendar discovery client (#49 / PR #53),
+- ADR009 OpenID→Radicale delegation contract (#54),
+- OpenID→CalDAV credential provider bridge (#55 / PR #57),
+- configured authenticated Radicale calendar discovery endpoint (#56 / PR #58).
 
-Active PRs:
+## Active
 
-- #50 / PR #52 — request-scoped validated OpenID credential context. The PR is mergeable but needs refreshing onto current `main`; its latest workflow runs are `action_required` and contain no jobs.
-- #49 / PR #53 — CalDAV discovery client behind `CalDavCredentialProvider`. The PR is mergeable but CI is red: TypeScript rejects one-generic-argument Jest mocks in `CalDavDiscoveryClient.test.ts` at lines 204 and 233 (TS2743). Widget and CodeQL checks pass; the same compile error fails Quality/type-check and Server/tests. Refresh onto `main`, fix those test typings, and rerun CI.
+- #60 / #59 — real Radicale discovery contract. The pinned Synapse + Radicale stack starts successfully, a VEVENT collection is provisioned, and the production discovery client is exercised. Latest work restores native Node fetch inside the integration suite; merge only after both normal CI and the dedicated `CalDAV contract` workflow are green.
+- #48 — external `radicale-auth-matrix` change required for gateway OpenID delegation. The stock plugin still hardcodes `m.login.password`. ADR009 defines the compatible extension. No `0cwa/radicale-auth-matrix` fork currently exists, and this repository connector cannot create one.
 
-Next dependency order:
+## Highest-priority next steps
 
-1. Land PR #40.
-2. Refresh/fix and land PRs #52 and #53.
-3. Implement #55 — bridge validated Matrix OpenID credentials into `CalDavCredentialProvider` using ADR009.
-4. Implement #56 — configured authenticated Radicale calendar discovery endpoint.
-5. Complete #48 — OpenID-capable `radicale-auth-matrix` mode while retaining ordinary Matrix-password CalDAV compatibility. This can proceed in parallel with steps 1–4.
-6. Complete #45 — real Synapse + Radicale discovery contract tests once the gateway and plugin path are wired.
+1. Finish and merge PR #60 once the real contract and normal CI are green.
+2. Implement #48 in an upstream/forked `radicale-auth-matrix` repository; do not copy GPL/LGPL-family plugin code into this Apache-licensed repository.
+3. Add the final gateway/OpenID/non-member real-container contract under #45 and close M2.
+4. Only then make M3 implementation the default focus. M3 is decomposed as #61–#66; #61 (preservation-first iCalendar codec) is the best parallel task only if #48 is blocked on external repository access.
 
-## Non-blocking repository administration
+## Friction / working rules
 
-- #29 remains open: `main` branch protection is not enabled. The documented policy lives in `docs/BRANCH_PROTECTION.md`.
+- Avoid long-lived stacked PR chains. Squash-merging prerequisites repeatedly forced branch-tree reconstruction and obscured small diffs. Prefer short-lived branches directly from current `main`; if a dependency is tiny, merge it promptly before opening the next slice.
+- Stop creating temporary formatter workflows for single files. They created extra commits, action runs, and rebase churn. Run the repo formatter before pushing, or make one direct formatting commit on the feature branch.
+- Do not poll long widget/CodeQL jobs when independent work exists. Use fast gates to continue development; return to merge once the long jobs settle.
+- Keep YAGNI pressure on abstractions. The repository/auth/credential seams are sufficient; do not add another cache/client/service layer until a concrete vertical slice needs it.
+- M3 preservation/ETag work matters, but starting broad recurrence/calendar-management abstractions before M2 closes would be premature.
+
+## Non-blocking administration
+
+- #29 remains open: `main` branch protection is still not enabled.
 
 ## Baseline and tracking
 
 - NeoDateFix upstream: `nordeck/matrix-meetings@2d3011f665af04c3cd376c388f7ae3bcb06bba25`
-- local upstream import: `387a3292d1a1ffce4d109762608d421f79ba1392`
-- scaffold PR: #10
-- M0 fork-hygiene PR: #24
 - milestone trackers: #1 (M0), #2 (M1), #3 (M2), #4–#9 (M3–M8)
-
-## Engineering direction
-
-Keep working in small vertical slices. Reuse inherited calendar, recurrence, responsive, and accessibility behavior while replacing persistence behind calendar-domain/repository seams. Do not introduce Matrix passwords into the gateway, and keep DAV/XML wire types server-internal.
+- M3 implementation slices: #61–#66
