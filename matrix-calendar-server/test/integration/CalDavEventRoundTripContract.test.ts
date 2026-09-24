@@ -77,17 +77,9 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
           'SUMMARY:Created through gateway core',
           'SUMMARY:Changed by direct CalDAV',
         )
-        .replace(
-          'END:VEVENT',
-          'X-SECOND-CLIENT:preserve-me\r\nEND:VEVENT',
-        );
+        .replace('END:VEVENT', 'X-SECOND-CLIENT:preserve-me\r\nEND:VEVENT');
 
-      await directPut(
-        eventUrl,
-        directRead.etag,
-        secondClientBody,
-        credentials,
-      );
+      await directPut(eventUrl, directRead.etag, secondClientBody, credentials);
 
       const observed = await client.getEvent(eventUrl);
       expect(
