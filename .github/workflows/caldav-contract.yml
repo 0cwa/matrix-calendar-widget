@@ -1,0 +1,70 @@
+name: CalDAV contract
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/caldav-contract.yml'
+      - 'dev/**'
+      - 'matrix-calendar-server/src/caldav/**'
+      - 'matrix-calendar-server/test/integration/CalDavDiscoveryContract.test.ts'
+      - 'matrix-calendar-server/package.json'
+      - 'yarn.lock'
+
+permissions:
+  contents: read
+
+jobs:
+  caldav-contract:
+    name: Real Radicale discovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MATRIX_CALENDAR_DEV_USER: calendar
+      MATRIX_CALENDAR_DEV_PASSWORD: calendar-dev-password
+      CALDAV_CONTRACT: '1'
+      CALDAV_BASE_URL: http://localhost:5232/
+      CALDAV_USERNAME: calendar
+      CALDAV_PASSWORD: calendar-dev-password
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Start pinned Matrix and Radicale services
+        run: bash dev/up.sh
+
+      - name: Provision VEVENT calendar collection
+        run: |
+          curl --fail-with-body             --user "$CALDAV_USERNAME:$CALDAV_PASSWORD"             --request MKCALENDAR             --header 'Content-Type: application/xml; charset=utf-8'             --data-binary @-             "http://localhost:5232/$CALDAV_USERNAME/contract-calendar/" <<'XML'
+          <?xml version="1.0" encoding="utf-8" ?>
+          <C:mkcalendar xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:D="DAV:">
+            <D:set>
+              <D:prop>
+                <D:displayname>Contract Calendar</D:displayname>
+                <C:supported-calendar-component-set>
+                  <C:comp name="VEVENT"/>
+                </C:supported-calendar-component-set>
+              </D:prop>
+            </D:set>
+          </C:mkcalendar>
+          XML
+
+      - name: Run real CalDAV discovery contract
+        run: >
+          yarn workspace @matrix-calendar-widget/server
+          jest test/integration/CalDavDiscoveryContract.test.ts --runInBand
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: docker compose -f dev/compose.yaml logs --no-color
+
+      - name: Stop services
+        if: always()
+        run: docker compose -f dev/compose.yaml down -v --remove-orphans
