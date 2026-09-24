@@ -335,29 +335,6 @@ function asNode(value: unknown): DavNode | undefined {
     : undefined;
 }
 
-function calendarCreateBody(displayName: string): string {
-  return `<?xml version="1.0" encoding="utf-8" ?>
-<C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
-  <D:set>
-    <D:prop>
-      <D:displayname>${escapeXml(displayName)}</D:displayname>
-      <C:supported-calendar-component-set>
-        <C:comp name="VEVENT"/>
-      </C:supported-calendar-component-set>
-    </D:prop>
-  </D:set>
-</C:mkcalendar>`;
-}
-
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
 function textValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
