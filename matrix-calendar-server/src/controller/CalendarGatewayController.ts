@@ -131,10 +131,16 @@ export class CalendarGatewayController {
     @Query('start') start?: string,
     @Query('end') end?: string,
   ): Promise<CalendarGatewayEventDto[]> {
-    const scope = await this.eventScope(userContext, roomId, calendarId, {
-      action: 'read-events',
-      calendarId: this.requireQuery(calendarId, 'calendarId'),
-    });
+    const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
+    const scope = await this.eventScope(
+      userContext,
+      roomId,
+      requestedCalendarId,
+      {
+        action: 'read-events',
+        calendarId: requestedCalendarId,
+      },
+    );
     const range: CalendarTimeRange = {
       start: this.requireQuery(start, 'start'),
       end: this.requireQuery(end, 'end'),
