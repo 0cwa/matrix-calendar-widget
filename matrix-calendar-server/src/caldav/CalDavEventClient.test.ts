@@ -111,14 +111,19 @@ END:VCALENDAR</c:calendar-data>
   });
 
   it.each([
-    ['ETag', '<c:calendar-data>BEGIN:VCALENDAR\nEND:VCALENDAR</c:calendar-data>'],
+    [
+      'ETag',
+      '<c:calendar-data>BEGIN:VCALENDAR\nEND:VCALENDAR</c:calendar-data>',
+    ],
     ['calendar data', '<d:getetag>"etag"</d:getetag>'],
-  ])('rejects a successful REPORT row without %s', async (_missing, properties) => {
-    const fetchMock = jest
-      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
-      .mockResolvedValue(
-        new Response(
-          multistatus(`
+  ])(
+    'rejects a successful REPORT row without %s',
+    async (_missing, properties) => {
+      const fetchMock = jest
+        .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+        .mockResolvedValue(
+          new Response(
+            multistatus(`
             <d:response>
               <d:href>/alice/events/incomplete.ics</d:href>
               <d:propstat>
@@ -127,25 +132,26 @@ END:VCALENDAR</c:calendar-data>
               </d:propstat>
             </d:response>
           `),
-          { status: 207 },
-        ),
-      );
+            { status: 207 },
+          ),
+        );
 
-    await expect(
-      new CalDavEventClient(credentialProvider, fetchMock).listEvents(
-        'https://radicale.example.test/alice/events/',
-        {
-          start: '2026-09-24T00:00:00Z',
-          end: '2026-09-25T00:00:00Z',
-        },
-      ),
-    ).rejects.toMatchObject({
-      code: 'invalid-response',
-      method: 'REPORT',
-      status: 207,
-      url: 'https://radicale.example.test/alice/events/',
-    });
-  });
+      await expect(
+        new CalDavEventClient(credentialProvider, fetchMock).listEvents(
+          'https://radicale.example.test/alice/events/',
+          {
+            start: '2026-09-24T00:00:00Z',
+            end: '2026-09-25T00:00:00Z',
+          },
+        ),
+      ).rejects.toMatchObject({
+        code: 'invalid-response',
+        method: 'REPORT',
+        status: 207,
+        url: 'https://radicale.example.test/alice/events/',
+      });
+    },
+  );
 
   it('gets one event with its ETag and raw iCalendar body', async () => {
     const fetchMock = jest
