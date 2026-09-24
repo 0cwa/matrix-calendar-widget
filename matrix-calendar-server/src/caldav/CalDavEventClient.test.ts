@@ -53,7 +53,9 @@ END:VCALENDAR</c:calendar-data>
               <x:status>HTTP/1.1 404 Not Found</x:status>
             </x:propstat>
           </x:response>
-        `, 'x'),
+        `,
+          'x',
+        ),
         { status: 207 },
       ),
     );
@@ -280,9 +282,9 @@ END:VCALENDAR</c:calendar-data>
 });
 
 function mockFetch(...responses: Response[]): jest.MockedFunction<typeof fetch> {
-  return jest.fn(async () => responses.shift()!) as jest.MockedFunction<
-    typeof fetch
-  >;
+  return jest
+    .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+    .mockImplementation(async () => responses.shift()!);
 }
 
 function multistatus(body: string, davPrefix = 'd'): string {
