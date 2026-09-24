@@ -166,10 +166,15 @@ export class CalendarGatewayController {
     @Query('eventId') eventId?: string,
   ): Promise<CalendarGatewayEventDto> {
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
-    const scope = await this.eventScope(userContext, roomId, requestedCalendarId, {
-      action: 'read-events',
-      calendarId: requestedCalendarId,
-    });
+    const scope = await this.eventScope(
+      userContext,
+      roomId,
+      requestedCalendarId,
+      {
+        action: 'read-events',
+        calendarId: requestedCalendarId,
+      },
+    );
     const normalizedEventId = this.normalizeEventUrl(
       this.requireQuery(eventId, 'eventId'),
       scope.calendarId,
@@ -196,10 +201,15 @@ export class CalendarGatewayController {
     @Query('calendarId') calendarId?: string,
   ): Promise<CalendarGatewayEventDto> {
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
-    const scope = await this.eventScope(userContext, roomId, requestedCalendarId, {
-      action: 'create-event',
-      calendarId: requestedCalendarId,
-    });
+    const scope = await this.eventScope(
+      userContext,
+      roomId,
+      requestedCalendarId,
+      {
+        action: 'create-event',
+        calendarId: requestedCalendarId,
+      },
+    );
 
     if (!input || typeof input.uid !== 'string' || input.uid.length === 0) {
       throw new BadRequestException('event uid is required');
@@ -243,11 +253,16 @@ export class CalendarGatewayController {
       this.requireQuery(eventId, 'eventId'),
       normalizedCalendarId,
     );
-    const scope = await this.eventScope(userContext, roomId, normalizedCalendarId, {
-      action: 'update-event',
-      calendarId: normalizedCalendarId,
-      eventId: normalizedEventId,
-    });
+    const scope = await this.eventScope(
+      userContext,
+      roomId,
+      normalizedCalendarId,
+      {
+        action: 'update-event',
+        calendarId: normalizedCalendarId,
+        eventId: normalizedEventId,
+      },
+    );
     const etag = this.requireQuery(ifMatch, 'If-Match');
 
     return this.runCalDav(async () => {
@@ -436,10 +451,7 @@ export class CalendarGatewayController {
     return url.toString();
   }
 
-  private requireQuery(
-    value: string | undefined,
-    name: string,
-  ): string {
+  private requireQuery(value: string | undefined, name: string): string {
     if (!value) {
       throw new BadRequestException(`${name} is required`);
     }
