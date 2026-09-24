@@ -12,6 +12,7 @@
   "calendarEvents": {
     "delete": {
       "confirm": "Löschen",
+      "conflict": "Dieser Termin wurde an anderer Stelle geändert. Die neueste Version wurde geladen; prüfe sie und versuche das Löschen erneut, wenn du fortfahren möchtest.",
       "description": "„{{title}}“ löschen? Dies kann nicht rückgängig gemacht werden.",
       "error": "Der Termin konnte nicht gelöscht werden.",
       "title": "Termin löschen"
@@ -26,6 +27,7 @@
     "editor": {
       "allDay": "Ganztägig",
       "calendar": "Kalender",
+      "conflict": "Dieser Termin wurde an anderer Stelle geändert. Lade die neueste Version, bevor du es erneut versuchst.",
       "create": "Termin erstellen",
       "createTitle": "Termin erstellen",
       "description": "Beschreibung",
@@ -35,6 +37,8 @@
       "invalidTimezone": "Gib eine gültige IANA-Zeitzone ein.",
       "location": "Ort",
       "readOnly": "Dieser Kalender ist schreibgeschützt.",
+      "reloadError": "Die neueste Version des Termins konnte nicht geladen werden.",
+      "reloadLatest": "Neueste Version laden",
       "save": "Speichern",
       "saveError": "Der Termin konnte nicht gespeichert werden.",
       "start": "Beginn",
