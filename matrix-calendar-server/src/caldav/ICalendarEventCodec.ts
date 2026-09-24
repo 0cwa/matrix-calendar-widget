@@ -17,7 +17,6 @@
 import {
   CalendarEvent,
   CalendarEventId,
-  CalendarEventInput,
   CalendarEventPatch,
   CalendarEventStatus,
   CalendarEventTiming,
@@ -82,11 +81,7 @@ export class ParsedICalendarEvent {
       setTiming(vevent, patch.timing);
     }
     if (hasOwn(patch, 'status')) {
-      setOptionalProperty(
-        vevent,
-        'status',
-        patch.status?.toUpperCase(),
-      );
+      setOptionalProperty(vevent, 'status', patch.status?.toUpperCase());
     }
     if (hasOwn(patch, 'transparency')) {
       setOptionalProperty(
@@ -126,57 +121,6 @@ export class ParsedICalendarEvent {
 }
 
 export class ICalendarEventCodec {
-  create(
-    calendarId: CalendarId,
-    eventId: CalendarEventId,
-    input: CalendarEventInput,
-  ): EncodedICalendarEvent {
-    if (input.recurrence) {
-      throw new ICalendarEventCodecError(
-        'unsupported-patch',
-        'Recurrence creation is not part of the basic VEVENT codec',
-      );
-    }
-
-    const calendar = new ICAL.Component('vcalendar');
-    calendar.addPropertyWithValue('version', '2.0');
-    calendar.addPropertyWithValue(
-      'prodid',
-      '-//Matrix Calendar Widget//EN',
-    );
-
-    const vevent = new ICAL.Component('vevent');
-    calendar.addSubcomponent(vevent);
-
-    setTextProperty(vevent, 'uid', input.uid);
-    setTextProperty(vevent, 'summary', input.title);
-    setTiming(vevent, input.timing);
-    setOptionalProperty(vevent, 'description', input.description);
-    setOptionalProperty(vevent, 'status', input.status?.toUpperCase());
-    setOptionalProperty(
-      vevent,
-      'transp',
-      input.transparency === undefined
-        ? undefined
-        : input.transparency === 'transparent'
-          ? 'TRANSPARENT'
-          : 'OPAQUE',
-    );
-    setOptionalProperty(vevent, 'location', input.location);
-    setOptionalProperty(vevent, 'url', input.url);
-    setCategories(vevent, input.categories);
-    setOptionalProperty(vevent, 'priority', input.priority);
-
-    return {
-      event: {
-        ...input,
-        id: eventId,
-        calendarId,
-      },
-      icalendar: calendar.toString(),
-    };
-  }
-
   parse(
     calendarId: CalendarId,
     eventId: CalendarEventId,
@@ -228,9 +172,7 @@ export class ICalendarEventCodec {
       description: textValue(vevent.getFirstPropertyValue('description')),
       timing,
       status: readStatus(vevent.getFirstPropertyValue('status')),
-      transparency: readTransparency(
-        vevent.getFirstPropertyValue('transp'),
-      ),
+      transparency: readTransparency(vevent.getFirstPropertyValue('transp')),
       location: textValue(vevent.getFirstPropertyValue('location')),
       url: textValue(vevent.getFirstPropertyValue('url')),
       categories: readCategories(vevent),
@@ -253,8 +195,7 @@ function findMasterEvent(
     : events;
 
   return (
-    matching.find((event) => !event.hasProperty('recurrence-id')) ??
-    matching[0]
+    matching.find((event) => !event.hasProperty('recurrence-id')) ?? matching[0]
   );
 }
 
