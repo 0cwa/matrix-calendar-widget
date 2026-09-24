@@ -82,11 +82,7 @@ export class ParsedICalendarEvent {
       setTiming(vevent, patch.timing);
     }
     if (hasOwn(patch, 'status')) {
-      setOptionalProperty(
-        vevent,
-        'status',
-        patch.status?.toUpperCase(),
-      );
+      setOptionalProperty(vevent, 'status', patch.status?.toUpperCase());
     }
     if (hasOwn(patch, 'transparency')) {
       setOptionalProperty(
@@ -140,10 +136,7 @@ export class ICalendarEventCodec {
 
     const calendar = new ICAL.Component('vcalendar');
     calendar.addPropertyWithValue('version', '2.0');
-    calendar.addPropertyWithValue(
-      'prodid',
-      '-//Matrix Calendar Widget//EN',
-    );
+    calendar.addPropertyWithValue('prodid', '-//Matrix Calendar Widget//EN');
 
     const vevent = new ICAL.Component('vevent');
     calendar.addSubcomponent(vevent);
@@ -228,9 +221,7 @@ export class ICalendarEventCodec {
       description: textValue(vevent.getFirstPropertyValue('description')),
       timing,
       status: readStatus(vevent.getFirstPropertyValue('status')),
-      transparency: readTransparency(
-        vevent.getFirstPropertyValue('transp'),
-      ),
+      transparency: readTransparency(vevent.getFirstPropertyValue('transp')),
       location: textValue(vevent.getFirstPropertyValue('location')),
       url: textValue(vevent.getFirstPropertyValue('url')),
       categories: readCategories(vevent),
