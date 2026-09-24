@@ -8,6 +8,7 @@ on:
       - 'dev/**'
       - 'matrix-calendar-server/src/caldav/**'
       - 'matrix-calendar-server/test/integration/CalDavDiscoveryContract.test.ts'
+      - 'matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts'
       - 'matrix-calendar-server/package.json'
       - 'yarn.lock'
 
@@ -16,7 +17,7 @@ permissions:
 
 jobs:
   caldav-contract:
-    name: Real Radicale discovery
+    name: Real Radicale contract
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -56,10 +57,13 @@ jobs:
           </C:mkcalendar>
           XML
 
-      - name: Run real CalDAV discovery contract
+      - name: Run real CalDAV contracts
         run: >
           yarn workspace @matrix-calendar-widget/server
-          jest test/integration/CalDavDiscoveryContract.test.ts --runInBand
+          jest
+          test/integration/CalDavDiscoveryContract.test.ts
+          test/integration/CalDavEventRoundTripContract.test.ts
+          --runInBand
 
       - name: Dump service logs on failure
         if: failure()
