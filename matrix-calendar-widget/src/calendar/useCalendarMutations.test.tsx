@@ -28,6 +28,7 @@ import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from './CalendarRepositoryProvider';
 import {
+  useCreateCalendar,
   useCreateCalendarEvent,
   useDeleteCalendarEvent,
   useUpdateCalendarEvent,
@@ -151,6 +152,7 @@ describe('calendar repository mutation hooks', () => {
     const listEvents = vi.fn().mockResolvedValue([]);
     const repository: CalendarRepository = {
       listCalendars: vi.fn().mockResolvedValue([calendar]),
+      createCalendar: vi.fn().mockRejectedValue(new Error('write failed')),
       listEvents,
       getEvent: vi.fn().mockResolvedValue(event),
       createEvent: vi.fn().mockRejectedValue(new Error('write failed')),
