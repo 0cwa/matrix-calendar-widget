@@ -24,6 +24,7 @@ import {
   CalendarRepository,
   CalendarRepositoryError,
   CalendarTimeRange,
+  CreateCalendarInput,
 } from '@matrix-calendar-widget/calendar';
 
 type CalendarGatewayEventResource = {
@@ -51,6 +52,18 @@ export class GatewayCalendarRepository implements CalendarRepository {
       this.url('/v1/calendar/calendars', {
         roomId: this.options.roomId,
       }),
+    );
+  }
+
+  async createCalendar(input: CreateCalendarInput): Promise<Calendar> {
+    return this.requestJson<Calendar>(
+      this.url('/v1/calendar/calendars', {
+        roomId: this.options.roomId,
+      }),
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
     );
   }
 
