@@ -28,9 +28,7 @@ import {
   useInvalidateCalendarRepository,
 } from './CalendarRepositoryProvider';
 
-export function useCreateCalendar(): (
-  name: string,
-) => Promise<Calendar> {
+export function useCreateCalendar(): (name: string) => Promise<Calendar> {
   const repository = useCalendarRepository();
   const invalidate = useInvalidateCalendarRepository();
 
