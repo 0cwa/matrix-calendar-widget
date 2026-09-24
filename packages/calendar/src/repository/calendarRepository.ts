@@ -22,6 +22,7 @@ import {
   CalendarEventPatch,
   CalendarId,
   CalendarTimeRange,
+  CreateCalendarInput,
 } from '../model';
 
 export type CalendarRepositoryErrorCode =
@@ -45,6 +46,8 @@ export class CalendarRepositoryError extends Error {
 
 export interface CalendarRepository {
   listCalendars(): Promise<Calendar[]>;
+
+  createCalendar(input: CreateCalendarInput): Promise<Calendar>;
 
   listEvents(
     calendarIds: CalendarId[],
