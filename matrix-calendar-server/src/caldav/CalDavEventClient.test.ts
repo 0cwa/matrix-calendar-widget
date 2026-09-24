@@ -204,13 +204,10 @@ END:VCALENDAR</c:calendar-data>
 
       const promise =
         method === 'REPORT'
-          ? client.listEvents(
-              'https://radicale.example.test/alice/events/',
-              {
-                start: '2026-09-24T00:00:00Z',
-                end: '2026-09-25T00:00:00Z',
-              },
-            )
+          ? client.listEvents('https://radicale.example.test/alice/events/', {
+              start: '2026-09-24T00:00:00Z',
+              end: '2026-09-25T00:00:00Z',
+            })
           : client.getEvent(
               'https://radicale.example.test/alice/events/event.ics',
             );
@@ -230,7 +227,10 @@ END:VCALENDAR</c:calendar-data>
   );
 
   it('rejects an invalid or empty range before sending a request', async () => {
-    const fetchMock = jest.fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>();
+    const fetchMock = jest.fn<
+      ReturnType<typeof fetch>,
+      Parameters<typeof fetch>
+    >();
     const client = new CalDavEventClient(credentialProvider, fetchMock);
 
     await expect(
@@ -364,7 +364,6 @@ END:VCALENDAR</c:calendar-data>
       });
     },
   );
-
 });
 
 function multistatus(body: string, davPrefix = 'd'): string {
