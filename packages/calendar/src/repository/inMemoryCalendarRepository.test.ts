@@ -86,6 +86,7 @@ function createRepository(): InMemoryCalendarRepository {
   return new InMemoryCalendarRepository({
     calendars,
     events,
+    calendarIdFactory: (sequence) => `calendar-${sequence}`,
     idFactory: (sequence) => `generated-${sequence}`,
   });
 }
@@ -98,6 +99,28 @@ describe('InMemoryCalendarRepository', () => {
     result[0].name = 'Mutated by caller';
 
     expect((await repository.listCalendars())[0].name).toBe('Team calendar');
+  });
+
+  it('creates a named calendar with deterministic identity', async () => {
+    const repository = createRepository();
+
+    await expect(repository.createCalendar('  Project Alpha  ')).resolves.toEqual({
+      id: 'calendar-1',
+      name: 'Project Alpha',
+    });
+    await expect(repository.listCalendars()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'calendar-1', name: 'Project Alpha' }),
+      ]),
+    );
+  });
+
+  it('rejects an empty calendar name', async () => {
+    const repository = createRepository();
+
+    await expect(repository.createCalendar('   ')).rejects.toMatchObject({
+      code: 'invalid-calendar-name',
+    });
   });
 
   it('lists overlapping events for selected calendars', async () => {
