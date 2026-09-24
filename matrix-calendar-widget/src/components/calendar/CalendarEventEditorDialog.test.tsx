@@ -17,6 +17,11 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarEventId,
+  CalendarEventPatch,
+  CalendarId,
+  CalendarRepository,
+  CalendarRepositoryError,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -51,7 +56,7 @@ const event: CalendarEvent = {
   },
 };
 
-function createWrapper(repository: InMemoryCalendarRepository) {
+function createWrapper(repository: CalendarRepository) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
     return (
       <CalendarRepositoryProvider repository={repository}>
@@ -154,6 +159,69 @@ describe('<CalendarEventEditorDialog />', () => {
 
     expect(screen.getByText('This calendar is read-only.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+
+  it('reloads the latest event after an ETag conflict and allows retry', async () => {
+    class ConflictRepository extends InMemoryCalendarRepository {
+      private conflict = true;
+
+      override async updateEvent(
+        calendarId: CalendarId,
+        eventId: CalendarEventId,
+        patch: CalendarEventPatch,
+      ): Promise<CalendarEvent> {
+        if (this.conflict) {
+          this.conflict = false;
+          throw new CalendarRepositoryError(
+            'etag-conflict',
+            'The event changed on the server',
+          );
+        }
+
+        return super.updateEvent(calendarId, eventId, patch);
+      }
+    }
+
+    const repository = new ConflictRepository({
+      calendars: [calendar],
+      events: [{ ...event, title: 'Remote planning' }],
+    });
+    const onSaved = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={event}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(
+      await screen.findByText(/This event changed elsewhere/i),
+    ).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Reload latest' }),
+    );
+
+    const title = await screen.findByRole('textbox', { name: /Title/i });
+    await waitFor(() => expect(title).toHaveValue('Remote planning'));
+
+    await userEvent.clear(title);
+    await userEvent.type(title, 'Retry planning');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(onSaved).toHaveBeenLastCalledWith(
+        expect.objectContaining({ title: 'Retry planning' }),
+      ),
+    );
   });
 
   it('shows an error when an edited event no longer exists', async () => {
