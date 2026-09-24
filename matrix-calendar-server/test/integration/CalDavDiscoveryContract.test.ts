@@ -24,7 +24,12 @@ const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
 
 describeContract('CalDAV discovery contract', () => {
-  beforeEach(() => {
+  beforeAll(() => {
+    fetchMock.disableMocks();
+  });
+
+  afterAll(() => {
+    fetchMock.enableMocks();
     fetchMock.dontMock();
   });
 
