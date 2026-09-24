@@ -27,7 +27,7 @@ jobs:
       CALDAV_USERNAME: calendar
       CALDAV_PASSWORD: calendar-dev-password
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
