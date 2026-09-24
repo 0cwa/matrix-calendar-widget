@@ -113,39 +113,42 @@ END:VCALENDAR</c:calendar-data>
   it.each([
     ['ETag', '<c:calendar-data>BEGIN:VCALENDAR\nEND:VCALENDAR</c:calendar-data>'],
     ['calendar data', '<d:getetag>"etag"</d:getetag>'],
-  ])('rejects a successful REPORT row without %s', async (_missing, properties) => {
-    const fetchMock = jest
-      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
-      .mockResolvedValue(
-        new Response(
-          multistatus(`
-            <d:response>
-              <d:href>/alice/events/incomplete.ics</d:href>
-              <d:propstat>
-                <d:prop>${properties}</d:prop>
-                <d:status>HTTP/1.1 200 OK</d:status>
-              </d:propstat>
-            </d:response>
-          `),
-          { status: 207 },
-        ),
-      );
+  ])(
+    'rejects a successful REPORT row without %s',
+    async (_missing, properties) => {
+      const fetchMock = jest
+        .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+        .mockResolvedValue(
+          new Response(
+            multistatus(`
+              <d:response>
+                <d:href>/alice/events/incomplete.ics</d:href>
+                <d:propstat>
+                  <d:prop>${properties}</d:prop>
+                  <d:status>HTTP/1.1 200 OK</d:status>
+                </d:propstat>
+              </d:response>
+            `),
+            { status: 207 },
+          ),
+        );
 
-    await expect(
-      new CalDavEventClient(credentialProvider, fetchMock).listEvents(
-        'https://radicale.example.test/alice/events/',
-        {
-          start: '2026-09-24T00:00:00Z',
-          end: '2026-09-25T00:00:00Z',
-        },
-      ),
-    ).rejects.toMatchObject({
-      code: 'invalid-response',
-      method: 'REPORT',
-      status: 207,
-      url: 'https://radicale.example.test/alice/events/',
-    });
-  });
+      await expect(
+        new CalDavEventClient(credentialProvider, fetchMock).listEvents(
+          'https://radicale.example.test/alice/events/',
+          {
+            start: '2026-09-24T00:00:00Z',
+            end: '2026-09-25T00:00:00Z',
+          },
+        ),
+      ).rejects.toMatchObject({
+        code: 'invalid-response',
+        method: 'REPORT',
+        status: 207,
+        url: 'https://radicale.example.test/alice/events/',
+      });
+    },
+  );
 
   it('gets one event with its ETag and raw iCalendar body', async () => {
     const fetchMock = jest
@@ -230,7 +233,10 @@ END:VCALENDAR</c:calendar-data>
   );
 
   it('rejects an invalid or empty range before sending a request', async () => {
-    const fetchMock = jest.fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>();
+    const fetchMock = jest.fn<
+      ReturnType<typeof fetch>,
+      Parameters<typeof fetch>
+    >();
     const client = new CalDavEventClient(credentialProvider, fetchMock);
 
     await expect(
@@ -281,11 +287,11 @@ END:VCALENDAR</c:calendar-data>
     expect(init?.body).toBe('BEGIN:VCALENDAR\nEND:VCALENDAR');
   });
 
-  it('updates an event with If-Match and returns the latest ETag when present', async () => {
+  it('updates an event with If-Match and returns the latest ETag', async () => {
     const fetchMock = jest
       .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
       .mockResolvedValue(
-        new Response('', {
+        new Response(null, {
           status: 204,
           headers: { ETag: '"updated-etag"' },
         }),
@@ -310,10 +316,10 @@ END:VCALENDAR</c:calendar-data>
     expect(headers.get('If-None-Match')).toBeNull();
   });
 
-  it('deletes an event with If-Match and tolerates a success response without ETag', async () => {
+  it('deletes with If-Match and tolerates a missing response ETag', async () => {
     const fetchMock = jest
       .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
-      .mockResolvedValue(new Response('', { status: 204 }));
+      .mockResolvedValue(new Response(null, { status: 204 }));
     const client = new CalDavEventClient(credentialProvider, fetchMock);
 
     await expect(
