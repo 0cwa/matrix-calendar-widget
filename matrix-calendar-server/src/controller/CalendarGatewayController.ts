@@ -307,21 +307,32 @@ export class CalendarGatewayController {
       calendarId,
       'calendarId',
     );
-    const normalizedRequest =
-      'calendarId' in request
-        ? {
-            ...request,
-            calendarId: normalizedCalendarId,
-            ...('eventId' in request
-              ? {
-                  eventId: this.normalizeEventUrl(
-                    request.eventId,
-                    normalizedCalendarId,
-                  ),
-                }
-              : {}),
-          }
-        : request;
+    let normalizedRequest: CalendarAuthorizationRequest;
+    switch (request.action) {
+      case 'read-events':
+      case 'create-event':
+      case 'manage-calendar':
+        normalizedRequest = {
+          action: request.action,
+          calendarId: normalizedCalendarId,
+        };
+        break;
+      case 'update-event':
+      case 'delete-event':
+        normalizedRequest = {
+          action: request.action,
+          calendarId: normalizedCalendarId,
+          eventId: this.normalizeEventUrl(
+            request.eventId,
+            normalizedCalendarId,
+          ),
+        };
+        break;
+      case 'list-calendars':
+      case 'create-calendar':
+        normalizedRequest = request;
+        break;
+    }
     const authorization = this.authorizationFactory.forRoom(
       userContext.userId,
       requiredRoomId,
@@ -363,7 +374,7 @@ export class CalendarGatewayController {
     if (!this.appConfig.radicale_url) {
       throw new ServiceUnavailableException({
         code: 'radicale-not-configured',
-        message: 'RADICALE_URL is required for calendar access',
+        message: 'RADICALE_URL is required for calendar discovery',
       });
     }
 
@@ -385,6 +396,8 @@ export class CalendarGatewayController {
       : `${base.pathname}/`;
 
     if (
+      target.username ||
+      target.password ||
       target.origin !== base.origin ||
       !target.pathname.startsWith(basePath)
     ) {
