@@ -18,6 +18,7 @@ import {
   Calendar,
   CalendarEvent,
   CalendarEventInput,
+  CalendarRepositoryError,
 } from '@matrix-calendar-widget/calendar';
 import { LoadingButton } from '@mui/lab';
 import {
@@ -41,6 +42,7 @@ import {
   calendarEventPatchFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
+  useCalendarRepository,
   useCreateCalendarEvent,
   useUpdateCalendarEvent,
 } from '../../calendar';
@@ -72,6 +74,8 @@ export function CalendarEventEditorDialog({
   const [values, setValues] = useState<CalendarEventFormValues | undefined>();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<Error>();
+  const [conflict, setConflict] = useState(false);
+  const repository = useCalendarRepository();
   const createEvent = useCreateCalendarEvent();
   const updateEvent = useUpdateCalendarEvent();
 
@@ -86,6 +90,7 @@ export function CalendarEventEditorDialog({
         : createCalendarEventFormValues(initialCalendar),
     );
     setError(undefined);
+    setConflict(false);
   }, [event, initialCalendar, open]);
 
   if (!values || !initialCalendar) {
@@ -178,6 +183,7 @@ export function CalendarEventEditorDialog({
 
     setSaving(true);
     setError(undefined);
+    setConflict(false);
 
     try {
       let saved: CalendarEvent;
@@ -198,10 +204,58 @@ export function CalendarEventEditorDialog({
 
       onSaved?.(saved);
       onClose();
+    } catch (caught) {
+      if (
+        event &&
+        caught instanceof CalendarRepositoryError &&
+        caught.code === 'event-conflict'
+      ) {
+        setConflict(true);
+        setError(
+          new Error(
+            t(
+              'calendarEvents.editor.conflict',
+              'This event changed elsewhere. Reload the latest version before retrying.',
+            ),
+          ),
+        );
+      } else {
+        setError(
+          new Error(
+            t(
+              'calendarEvents.editor.saveError',
+              'The event could not be saved.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReloadLatest = async () => {
+    if (!event) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const latest = await repository.getEvent(event.calendarId, event.id);
+      const latestCalendar =
+        calendars.find((calendar) => calendar.id === latest.calendarId) ??
+        initialCalendar;
+      setValues(calendarEventToFormValues(latest, latestCalendar));
+      setConflict(false);
+      setError(undefined);
+      onSaved?.(latest);
     } catch {
       setError(
         new Error(
-          t('calendarEvents.editor.saveError', 'The event could not be saved.'),
+          t(
+            'calendarEvents.editor.reloadError',
+            'The latest event could not be loaded.',
+          ),
         ),
       );
     } finally {
@@ -225,7 +279,25 @@ export function CalendarEventEditorDialog({
 
         <DialogContent>
           <Stack mt={1} spacing={2}>
-            {error && <Alert severity="error">{error.message}</Alert>}
+            {error && (
+              <Alert
+                action={
+                  conflict ? (
+                    <Button
+                      color="inherit"
+                      disabled={saving}
+                      onClick={handleReloadLatest}
+                      size="small"
+                    >
+                      {t('calendarEvents.editor.reloadLatest', 'Reload latest')}
+                    </Button>
+                  ) : undefined
+                }
+                severity="error"
+              >
+                {error.message}
+              </Alert>
+            )}
 
             <TextField
               disabled={Boolean(event)}

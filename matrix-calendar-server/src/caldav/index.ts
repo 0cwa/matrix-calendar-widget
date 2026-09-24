@@ -24,6 +24,16 @@ export type {
   DiscoveredCalDavCalendar,
 } from './CalDavDiscoveryClient';
 export {
+  CalDavEventClient,
+  CalDavEventTransportError,
+} from './CalDavEventClient';
+export type {
+  CalDavEventResource,
+  CalDavEventTransportErrorCode,
+  CalDavEventTransportMethod,
+  CalDavEventWriteResult,
+} from './CalDavEventClient';
+export {
   ICalendarEventCodec,
   ICalendarEventCodecError,
   ParsedICalendarEvent,

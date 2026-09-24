@@ -35,6 +35,8 @@ export {
   useCalendarRepositoryRevision,
   useInvalidateCalendarRepository,
 } from './CalendarRepositoryProvider';
+export { GatewayCalendarRepository } from './GatewayCalendarRepository';
+export type { GatewayCalendarRepositoryOptions } from './GatewayCalendarRepository';
 export type { CalendarFilters } from './types';
 export {
   useCreateCalendarEvent,

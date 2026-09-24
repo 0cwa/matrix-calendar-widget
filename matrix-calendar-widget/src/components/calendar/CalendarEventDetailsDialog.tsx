@@ -16,6 +16,7 @@
 
 import {
   CalendarEvent,
+  CalendarRepositoryError,
   isAllDayCalendarEvent,
   isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
@@ -32,7 +33,11 @@ import {
 import { DateTime } from 'luxon';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useCalendars, useDeleteCalendarEvent } from '../../calendar';
+import {
+  useCalendarRepository,
+  useCalendars,
+  useDeleteCalendarEvent,
+} from '../../calendar';
 import { ConfirmDeleteDialog } from '../common/ConfirmDeleteDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 
@@ -45,19 +50,22 @@ export function CalendarEventDetailsDialog({
 }) {
   const { i18n, t } = useTranslation();
   const calendars = useCalendars();
+  const repository = useCalendarRepository();
   const deleteEvent = useDeleteCalendarEvent();
   const [currentEvent, setCurrentEvent] = useState(event);
   const [editing, setEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [deleteError, setDeleteError] = useState(false);
+  const [deleteError, setDeleteError] = useState<
+    'conflict' | 'generic' | undefined
+  >();
 
   useEffect(() => {
     setCurrentEvent(event);
     setEditing(false);
     setDeleteOpen(false);
     setDeleteLoading(false);
-    setDeleteError(false);
+    setDeleteError(undefined);
   }, [event]);
 
   const eventCalendar = currentEvent
@@ -71,14 +79,30 @@ export function CalendarEventDetailsDialog({
     }
 
     setDeleteLoading(true);
-    setDeleteError(false);
+    setDeleteError(undefined);
 
     try {
       await deleteEvent(currentEvent.calendarId, currentEvent.id);
       setDeleteOpen(false);
       onClose();
-    } catch {
-      setDeleteError(true);
+    } catch (error) {
+      if (
+        error instanceof CalendarRepositoryError &&
+        error.code === 'event-conflict'
+      ) {
+        try {
+          const latest = await repository.getEvent(
+            currentEvent.calendarId,
+            currentEvent.id,
+          );
+          setCurrentEvent(latest);
+          setDeleteError('conflict');
+        } catch {
+          setDeleteError('generic');
+        }
+      } else {
+        setDeleteError('generic');
+      }
     } finally {
       setDeleteLoading(false);
     }
@@ -168,18 +192,23 @@ export function CalendarEventDetailsDialog({
           loading={deleteLoading}
           onCancel={() => {
             setDeleteOpen(false);
-            setDeleteError(false);
+            setDeleteError(undefined);
           }}
           onConfirm={handleDelete}
           open={deleteOpen}
           title={t('calendarEvents.delete.title', 'Delete event')}
         >
           {deleteError && (
-            <Alert severity="error">
-              {t(
-                'calendarEvents.delete.error',
-                'The event could not be deleted.',
-              )}
+            <Alert severity={deleteError === 'conflict' ? 'warning' : 'error'}>
+              {deleteError === 'conflict'
+                ? t(
+                    'calendarEvents.delete.conflict',
+                    'This event changed elsewhere. The latest version was reloaded; review it and retry if you still want to delete it.',
+                  )
+                : t(
+                    'calendarEvents.delete.error',
+                    'The event could not be deleted.',
+                  )}
             </Alert>
           )}
         </ConfirmDeleteDialog>
