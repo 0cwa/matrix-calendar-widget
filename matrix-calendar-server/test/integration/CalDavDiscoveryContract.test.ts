@@ -35,24 +35,26 @@ describeContract('CalDAV discovery contract', () => {
 
   const baseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
   const username = process.env.CALDAV_USERNAME ?? 'calendar';
-  const password =
-    process.env.CALDAV_PASSWORD ?? 'calendar-dev-password';
+  const password = process.env.CALDAV_PASSWORD ?? 'calendar-dev-password';
 
-  it('discovers a real VEVENT collection through Matrix-authenticated Radicale', async () => {
-    const result = await new CalDavDiscoveryClient(
-      baseUrl,
-      basicCredentialProvider(username, password),
-    ).discover();
+  it(
+    'discovers a real VEVENT collection through Matrix-authenticated Radicale',
+    async () => {
+      const result = await new CalDavDiscoveryClient(
+        baseUrl,
+        basicCredentialProvider(username, password),
+      ).discover();
 
-    expect(result.calendars).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          displayName: 'Contract Calendar',
-          components: expect.arrayContaining(['VEVENT']),
-        }),
-      ]),
-    );
-  });
+      expect(result.calendars).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            displayName: 'Contract Calendar',
+            components: expect.arrayContaining(['VEVENT']),
+          }),
+        ]),
+      );
+    },
+  );
 
   it('fails closed for invalid Radicale credentials', async () => {
     await expect(
