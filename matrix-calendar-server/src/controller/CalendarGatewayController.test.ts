@@ -16,6 +16,7 @@
 
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   ServiceUnavailableException,
   UnauthorizedException,
@@ -182,6 +183,230 @@ describe('CalendarGatewayController', () => {
     expect(forRoom).not.toHaveBeenCalled();
   });
 
+
+  it('lists authorized VEVENT resources through the gateway', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch.mockResponseOnce(
+      multistatus(`
+        <d:response>
+          <d:href>/alice/team/event.ics</d:href>
+          <d:propstat>
+            <d:prop>
+              <d:getetag>"event-etag"</d:getetag>
+              <c:calendar-data>${simpleEventIcs()}</c:calendar-data>
+            </d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
+      `),
+      { status: 207 },
+    );
+
+    await expect(
+      createController().listEvents(
+        userContext,
+        openIdCredential,
+        roomId,
+        calendarId,
+        '2026-09-24T00:00:00Z',
+        '2026-09-25T00:00:00Z',
+      ),
+    ).resolves.toEqual([
+      {
+        event: expect.objectContaining({
+          id: 'https://radicale.example.test/alice/team/event.ics',
+          calendarId,
+          uid: 'event@example.test',
+          title: 'Team planning',
+        }),
+        etag: '"event-etag"',
+      },
+    ]);
+
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'read-events',
+      calendarId,
+    });
+    expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
+  });
+
+  it('creates a basic VEVENT and returns the server resource state', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch
+      .mockResponseOnce('', {
+        status: 201,
+        headers: { ETag: '"created-etag"' },
+      })
+      .mockResponseOnce(simpleEventIcs('Created event'), {
+        status: 200,
+        headers: { ETag: '"created-etag"' },
+      });
+
+    const result = await createController().createEvent(
+      userContext,
+      openIdCredential,
+      {
+        uid: 'event@example.test',
+        title: 'Created event',
+        timing: {
+          type: 'timed',
+          start: {
+            local: '2026-09-24T08:00:00',
+            timezone: 'UTC',
+          },
+          end: {
+            local: '2026-09-24T09:00:00',
+            timezone: 'UTC',
+          },
+        },
+      },
+      roomId,
+      calendarId,
+    );
+
+    expect(result).toEqual({
+      event: expect.objectContaining({
+        id: 'https://radicale.example.test/alice/team/event%40example.test.ics',
+        calendarId,
+        uid: 'event@example.test',
+        title: 'Created event',
+      }),
+      etag: '"created-etag"',
+    });
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'create-event',
+      calendarId,
+    });
+
+    const [, putInit] = fetch.mock.calls[0];
+    const putHeaders = new Headers(putInit?.headers);
+    expect(putInit?.method).toBe('PUT');
+    expect(putHeaders.get('If-None-Match')).toBe('*');
+    expect(putInit?.body).toContain('UID:event@example.test');
+    expect(putInit?.body).toContain('SUMMARY:Created event');
+  });
+
+  it('preserves unknown iCalendar data when updating an event', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/event.ics';
+    fetch
+      .mockResponseOnce(simpleEventIcs('Before update', 'X-CUSTOM:preserve'), {
+        status: 200,
+        headers: { ETag: '"old-etag"' },
+      })
+      .mockResponseOnce('', {
+        status: 200,
+        headers: { ETag: '"new-etag"' },
+      })
+      .mockResponseOnce(simpleEventIcs('After update', 'X-CUSTOM:preserve'), {
+        status: 200,
+        headers: { ETag: '"new-etag"' },
+      });
+
+    const result = await createController().updateEvent(
+      userContext,
+      openIdCredential,
+      { title: 'After update' },
+      '"old-etag"',
+      roomId,
+      calendarId,
+      eventId,
+    );
+
+    expect(result.event.title).toBe('After update');
+    expect(result.etag).toBe('"new-etag"');
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'update-event',
+      calendarId,
+      eventId,
+    });
+
+    const [, putInit] = fetch.mock.calls[1];
+    const putHeaders = new Headers(putInit?.headers);
+    expect(putInit?.method).toBe('PUT');
+    expect(putHeaders.get('If-Match')).toBe('"old-etag"');
+    expect(putInit?.body).toContain('SUMMARY:After update');
+    expect(putInit?.body).toContain('X-CUSTOM:preserve');
+  });
+
+  it('maps stale event updates to a stable conflict response', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/event.ics';
+    fetch
+      .mockResponseOnce(simpleEventIcs('Before update'), {
+        status: 200,
+        headers: { ETag: '"current-etag"' },
+      })
+      .mockResponseOnce('Precondition failed', { status: 412 });
+
+    try {
+      await createController().updateEvent(
+        userContext,
+        openIdCredential,
+        { title: 'Stale update' },
+        '"stale-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      );
+      throw new Error('Expected stale update to conflict');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toEqual({
+        code: 'etag-conflict',
+        message: 'CalDAV PUT conflicted with the current event resource',
+      });
+    }
+  });
+
+  it('deletes an authorized event with the caller ETag', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/event.ics';
+    fetch.mockResponseOnce('', { status: 200 });
+
+    await expect(
+      createController().deleteEvent(
+        userContext,
+        openIdCredential,
+        '"event-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'delete-event',
+      calendarId,
+      eventId,
+    });
+    const [, init] = fetch.mock.calls[0];
+    expect(init?.method).toBe('DELETE');
+    expect(new Headers(init?.headers).get('If-Match')).toBe('"event-etag"');
+  });
+
+  it('rejects calendar URLs outside the configured Radicale service', async () => {
+    isAllowed.mockResolvedValue(true);
+
+    await expect(
+      createController().listEvents(
+        userContext,
+        openIdCredential,
+        roomId,
+        'https://attacker.example.test/calendar/',
+        '2026-09-24T00:00:00Z',
+        '2026-09-25T00:00:00Z',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('fails closed when Radicale is not configured', async () => {
     isAllowed.mockResolvedValue(true);
     const config = {} as IAppConfiguration;
@@ -227,6 +452,23 @@ function homeResponse(href: string): string {
       </d:propstat>
     </d:response>
   `);
+}
+
+
+function simpleEventIcs(
+  title = 'Team planning',
+  extraProperty?: string,
+): string {
+  return `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Matrix Calendar Widget Tests//EN
+BEGIN:VEVENT
+UID:event@example.test
+DTSTART:20260924T080000Z
+DTEND:20260924T090000Z
+SUMMARY:${title}
+${extraProperty ? `${extraProperty}\n` : ''}END:VEVENT
+END:VCALENDAR`;
 }
 
 function multistatus(body: string): string {
