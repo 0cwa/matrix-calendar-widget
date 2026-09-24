@@ -24,6 +24,16 @@ export type {
   DiscoveredCalDavCalendar,
 } from './CalDavDiscoveryClient';
 export {
+  CalDavEventClient,
+  CalDavEventConflictError,
+  CalDavEventTransportError,
+} from './CalDavEventClient';
+export type {
+  CalDavEventResource,
+  CalDavEventWriteResult,
+  CalDavUtcRange,
+} from './CalDavEventClient';
+export {
   MatrixOpenIdCalDavCredentialError,
   MatrixOpenIdCalDavCredentialProvider,
 } from './MatrixOpenIdCalDavCredentialProvider';
