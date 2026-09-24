@@ -21,8 +21,6 @@ export {
   createCalendarEventFormValues,
 } from './calendarEventForm';
 export type { CalendarEventFormValues } from './calendarEventForm';
-export { GatewayCalendarRepository } from './GatewayCalendarRepository';
-export type { GatewayCalendarRepositoryOptions } from './GatewayCalendarRepository';
 export {
   calendarEventKey,
   calendarEventStartDate,
@@ -37,6 +35,8 @@ export {
   useCalendarRepositoryRevision,
   useInvalidateCalendarRepository,
 } from './CalendarRepositoryProvider';
+export { GatewayCalendarRepository } from './GatewayCalendarRepository';
+export type { GatewayCalendarRepositoryOptions } from './GatewayCalendarRepository';
 export type { CalendarFilters } from './types';
 export {
   useCreateCalendarEvent,
