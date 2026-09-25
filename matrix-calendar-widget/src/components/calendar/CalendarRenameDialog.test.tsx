@@ -81,6 +81,27 @@ describe('<CalendarRenameDialog />', () => {
     ]);
   });
 
+  it('shows validation when the calendar name is empty', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [writable],
+    });
+
+    render(
+      <CalendarRenameDialog calendars={[writable]} onClose={vi.fn()} open />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const name = screen.getByRole('textbox', { name: 'Calendar name' });
+    await userEvent.clear(name);
+
+    expect(
+      screen.getByText('A calendar name is required.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Rename calendar' }),
+    ).toBeDisabled();
+  });
+
   it('shows a request error without closing the dialog', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [writable],
