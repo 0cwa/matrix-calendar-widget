@@ -198,17 +198,18 @@ describe('CalendarGatewayController', () => {
   });
 
   it.each([
-    ['mixed', ['VEVENT', 'VTODO']],
-    ['unknown', undefined],
+    ['mixed', ['VEVENT', 'VTODO'], true],
+    ['unknown', undefined, true],
+    ['read-only', ['VEVENT'], false],
   ] as const)(
     'refuses to delete a %s calendar collection before DELETE',
-    async (_kind, components) => {
+    async (_kind, components, writable) => {
       isAllowed.mockResolvedValue(true);
       const calendarId = 'https://radicale.example.test/alice/team/';
       fetch.mockResponses(
         [principalResponse('/principals/alice/'), { status: 207 }],
         [homeResponse('/alice/'), { status: 207 }],
-        [calendarCollectionResponse(components), { status: 207 }],
+        [calendarCollectionResponse(components, writable), { status: 207 }],
       );
 
       try {
@@ -584,6 +585,7 @@ function homeResponse(href: string): string {
 
 function calendarCollectionResponse(
   components?: readonly string[],
+  writable = true,
 ): string {
   const componentSet = components
     ? `
@@ -602,7 +604,7 @@ function calendarCollectionResponse(
           ${componentSet}
           <d:current-user-privilege-set>
             <d:privilege><d:read/></d:privilege>
-            <d:privilege><d:write/></d:privilege>
+            ${writable ? '<d:privilege><d:write/></d:privilege>' : ''}
           </d:current-user-privilege-set>
         </d:prop>
         <d:status>HTTP/1.1 200 OK</d:status>
