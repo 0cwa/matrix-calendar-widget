@@ -42,9 +42,7 @@ export function useCreateCalendar(): (name: string) => Promise<Calendar> {
   );
 }
 
-export function useDeleteCalendar(): (
-  calendarId: CalendarId,
-) => Promise<void> {
+export function useDeleteCalendar(): (calendarId: CalendarId) => Promise<void> {
   const repository = useCalendarRepository();
   const invalidate = useInvalidateCalendarRepository();
 
