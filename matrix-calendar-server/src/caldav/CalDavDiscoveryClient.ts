@@ -331,19 +331,6 @@ export class CalDavDiscoveryClient {
   }
 }
 
-function hasFailedPropstat(xml: string): boolean {
-  const document = asNode(parser.parse(xml));
-  const multistatus = asNode(document?.multistatus);
-
-  return asArray(multistatus?.response).some((responseValue) => {
-    const response = asNode(responseValue);
-    return asArray(response?.propstat).some((propstatValue) => {
-      const status = textValue(asNode(propstatValue)?.status);
-      return Boolean(status && !status.includes(' 200 '));
-    });
-  });
-}
-
 function successfulProperties(response: DavNode): DavNode {
   const result: DavNode = {};
 
