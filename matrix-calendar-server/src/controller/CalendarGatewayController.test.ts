@@ -163,7 +163,9 @@ describe('CalendarGatewayController', () => {
 
     const [, init] = fetch.mock.calls[2];
     expect(init?.method).toBe('MKCALENDAR');
-    expect(init?.body).toContain('<D:displayname>Project Alpha</D:displayname>');
+    expect(init?.body).toContain(
+      '<D:displayname>Project Alpha</D:displayname>',
+    );
     expect(init?.body).toContain('<C:comp name="VEVENT"/>');
   });
 
