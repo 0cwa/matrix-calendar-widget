@@ -57,9 +57,7 @@ describe('GatewayCalendarRepository', () => {
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain('/v1/calendar/calendars?');
-    expect(url).toContain(
-      `roomId=${encodeURIComponent('!team:example.test')}`,
-    );
+    expect(url).toContain(`roomId=${encodeURIComponent('!team:example.test')}`);
     expect(init?.method).toBe('POST');
     expect(new Headers(init?.headers).get('Authorization')).toBe(
       'MX-Identity delegated',
