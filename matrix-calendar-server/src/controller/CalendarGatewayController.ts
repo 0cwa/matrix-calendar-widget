@@ -197,7 +197,8 @@ export class CalendarGatewayController {
       if (
         !calendar?.components ||
         calendar.components.length !== 1 ||
-        calendar.components[0] !== 'VEVENT'
+        calendar.components[0] !== 'VEVENT' ||
+        calendar.readOnly !== false
       ) {
         throw new ConflictException({
           code: 'calendar-delete-unsafe',
