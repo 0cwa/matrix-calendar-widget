@@ -188,6 +188,26 @@ export class CalDavDiscoveryClient {
         calendarUrl,
       );
     }
+
+    if (response.status === 207) {
+      const propertyStatus = propPatchPropertyStatus(
+        await response.text(),
+        'displayname',
+      );
+      if (
+        propertyStatus === undefined ||
+        propertyStatus < 200 ||
+        propertyStatus >= 300
+      ) {
+        throw new CalDavDiscoveryError(
+          propertyStatus === undefined
+            ? 'CalDAV PROPPATCH did not report displayname status'
+            : `CalDAV PROPPATCH failed for displayname with status ${propertyStatus}`,
+          propertyStatus ?? response.status,
+          calendarUrl,
+        );
+      }
+    }
   }
 
   async discover(): Promise<CalDavDiscoveryResult> {
@@ -383,4 +403,32 @@ function escapeXmlText(value: string): string {
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;');
+}
+
+function propPatchPropertyStatus(
+  xml: string,
+  propertyName: string,
+): number | undefined {
+  const document = asNode(parser.parse(xml));
+  const multistatus = asNode(document?.multistatus);
+
+  for (const responseValue of asArray(multistatus?.response)) {
+    const response = asNode(responseValue);
+    for (const propstatValue of asArray(response?.propstat)) {
+      const propstat = asNode(propstatValue);
+      const properties = asNode(propstat?.prop);
+      if (
+        properties &&
+        Object.prototype.hasOwnProperty.call(properties, propertyName)
+      ) {
+        const status = textValue(propstat?.status);
+        const match = status?.match(/\\s(\\d{3})\\s/);
+        if (match) {
+          return Number(match[1]);
+        }
+      }
+    }
+  }
+
+  return undefined;
 }
