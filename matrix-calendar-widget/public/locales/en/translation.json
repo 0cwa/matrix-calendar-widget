@@ -61,6 +61,15 @@
       "name": "Calendar name",
       "submit": "Create calendar",
       "title": "Create calendar"
+    },
+    "delete": {
+      "action": "Delete calendar",
+      "calendar": "Calendar",
+      "description": "Delete “{{name}}” and all of its events? This cannot be undone.",
+      "error": "The calendar could not be deleted.",
+      "safeguard": "Calendars containing unsupported or unknown data are protected and cannot be deleted here.",
+      "submit": "Delete calendar",
+      "title": "Delete calendar"
     }
   },
   "calendarWeekPicker": {
