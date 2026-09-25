@@ -237,6 +237,35 @@ describe('CalDavDiscoveryClient', () => {
     expect(init?.body).not.toContain('VJOURNAL');
   });
 
+  it('renames only the DAV display name with PROPPATCH', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(new Response('', { status: 207 }));
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).renameCalendar(
+        'https://radicale.example.test/alice/team/',
+        'Team & Planning',
+      ),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://radicale.example.test/alice/team/');
+    expect(init?.method).toBe('PROPPATCH');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'Basic delegated',
+    );
+    expect(init?.body).toContain(
+      '<D:displayname>Team &amp; Planning</D:displayname>',
+    );
+    expect(init?.body).not.toContain('calendar-color');
+    expect(init?.body).not.toContain('supported-calendar-component-set');
+  });
+
   it('fails with status and URL when a PROPFIND request is rejected', async () => {
     const fetchMock = jest
       .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
