@@ -61,6 +61,14 @@
       "name": "Kalendername",
       "submit": "Kalender erstellen",
       "title": "Kalender erstellen"
+    },
+    "rename": {
+      "action": "Kalender umbenennen",
+      "calendar": "Kalender",
+      "error": "Der Kalender konnte nicht umbenannt werden.",
+      "name": "Kalendername",
+      "submit": "Kalender umbenennen",
+      "title": "Kalender umbenennen"
     }
   },
   "calendarWeekPicker": {
