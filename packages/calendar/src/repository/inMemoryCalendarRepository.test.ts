@@ -125,6 +125,42 @@ describe('InMemoryCalendarRepository', () => {
     });
   });
 
+  it('renames a writable calendar while preserving other fields', async () => {
+    const repository = createRepository();
+
+    await repository.renameCalendar('team', ' Product calendar ');
+
+    await expect(repository.listCalendars()).resolves.toEqual(
+      expect.arrayContaining([
+        {
+          id: 'team',
+          name: 'Product calendar',
+          timezone: 'Europe/Stockholm',
+        },
+      ]),
+    );
+  });
+
+  it('rejects an empty calendar rename', async () => {
+    const repository = createRepository();
+
+    await expect(repository.renameCalendar('team', '   ')).rejects.toMatchObject(
+      {
+        code: 'invalid-calendar-name',
+      },
+    );
+  });
+
+  it('rejects renaming a read-only calendar', async () => {
+    const repository = createRepository();
+
+    await expect(
+      repository.renameCalendar('readonly', 'Nope'),
+    ).rejects.toMatchObject({
+      code: 'calendar-read-only',
+    });
+  });
+
   it('lists overlapping events for selected calendars', async () => {
     const repository = createRepository();
 
