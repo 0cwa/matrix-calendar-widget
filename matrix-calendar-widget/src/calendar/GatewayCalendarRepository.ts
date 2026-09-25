@@ -67,13 +67,26 @@ export class GatewayCalendarRepository implements CalendarRepository {
   }
 
   async deleteCalendar(calendarId: CalendarId): Promise<void> {
-    await this.requestVoid(
-      this.url('/v1/calendar/calendars', {
-        roomId: this.options.roomId,
-        calendarId,
-      }),
-      { method: 'DELETE' },
-    );
+    try {
+      await this.requestVoid(
+        this.url('/v1/calendar/calendars', {
+          roomId: this.options.roomId,
+          calendarId,
+        }),
+        { method: 'DELETE' },
+      );
+    } catch (error) {
+      if (
+        error instanceof CalendarRepositoryError &&
+        error.code === 'event-conflict'
+      ) {
+        throw new CalendarRepositoryError(
+          'request-failed',
+          'Calendar deletion was rejected by the gateway',
+        );
+      }
+      throw error;
+    }
   }
 
   async listEvents(
