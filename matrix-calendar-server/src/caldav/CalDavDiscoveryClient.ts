@@ -158,9 +158,11 @@ export class CalDavDiscoveryClient {
       headers: credentialHeaders,
     });
 
-    if (!response.ok) {
+    if (!response.ok || response.status === 207) {
       throw new CalDavDiscoveryError(
-        `CalDAV DELETE failed with status ${response.status}`,
+        response.status === 207
+          ? 'CalDAV DELETE reported member failures'
+          : `CalDAV DELETE failed with status ${response.status}`,
         response.status,
         calendarUrl,
       );
