@@ -68,7 +68,8 @@
       "error": "Der Kalender konnte nicht umbenannt werden.",
       "name": "Kalendername",
       "submit": "Kalender umbenennen",
-      "title": "Kalender umbenennen"
+      "title": "Kalender umbenennen",
+      "nameRequired": "Ein Kalendername ist erforderlich."
     }
   },
   "calendarWeekPicker": {
