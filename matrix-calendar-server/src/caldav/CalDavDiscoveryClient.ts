@@ -96,6 +96,17 @@ function createCalendarBody(displayName: string): string {
 </C:mkcalendar>`;
 }
 
+function renameCalendarBody(displayName: string): string {
+  return `<?xml version="1.0" encoding="utf-8" ?>
+<D:propertyupdate xmlns:D="DAV:">
+  <D:set>
+    <D:prop>
+      <D:displayname>${escapeXmlText(displayName)}</D:displayname>
+    </D:prop>
+  </D:set>
+</D:propertyupdate>`;
+}
+
 export class CalDavDiscoveryClient {
   constructor(
     private readonly baseUrl: string,
@@ -149,6 +160,34 @@ export class CalDavDiscoveryClient {
       components: ['VEVENT'],
       readOnly: false,
     };
+  }
+
+  async renameCalendar(
+    calendarUrl: string,
+    displayName: string,
+  ): Promise<void> {
+    const name = displayName.trim();
+    if (!name) {
+      throw new CalDavDiscoveryError('Calendar display name must not be empty');
+    }
+
+    const credentialHeaders = await this.credentialProvider.getRequestHeaders();
+    const headers = new Headers(credentialHeaders);
+    headers.set('Content-Type', 'application/xml; charset=utf-8');
+
+    const response = await this.fetchImpl(calendarUrl, {
+      method: 'PROPPATCH',
+      headers,
+      body: renameCalendarBody(name),
+    });
+
+    if (!response.ok) {
+      throw new CalDavDiscoveryError(
+        `CalDAV PROPPATCH failed with status ${response.status}`,
+        response.status,
+        calendarUrl,
+      );
+    }
   }
 
   async discover(): Promise<CalDavDiscoveryResult> {
