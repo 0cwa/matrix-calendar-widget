@@ -240,7 +240,20 @@ describe('CalDavDiscoveryClient', () => {
   it('renames only the DAV display name with PROPPATCH', async () => {
     const fetchMock = jest
       .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
-      .mockResolvedValue(new Response('', { status: 207 }));
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/</d:href>
+              <d:propstat>
+                <d:prop><d:displayname/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
 
     await expect(
       new CalDavDiscoveryClient(
@@ -283,6 +296,42 @@ describe('CalDavDiscoveryClient', () => {
     ).rejects.toEqual(
       new CalDavDiscoveryError(
         'CalDAV PROPPATCH failed with status 403',
+        403,
+        'https://radicale.example.test/alice/team/',
+      ),
+    );
+  });
+
+  it('rejects a 207 PROPPATCH response when displayname failed', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/</d:href>
+              <d:propstat>
+                <d:prop><d:displayname/></d:prop>
+                <d:status>HTTP/1.1 403 Forbidden</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).renameCalendar(
+        'https://radicale.example.test/alice/team/',
+        'Product calendar',
+      ),
+    ).rejects.toEqual(
+      new CalDavDiscoveryError(
+        'CalDAV PROPPATCH failed for displayname with status 403',
         403,
         'https://radicale.example.test/alice/team/',
       ),
