@@ -59,16 +59,17 @@ Password-auth real-container discovery is already covered by #59 / PR #60. The o
 
 ## M4 — Calendar management
 
-- [ ] Calendar list/sidebar.
+- [x] Lightweight calendar list/visibility controls (#95 / PR #96).
 - [x] Create VEVENT-only calendar (#92 / PR #94).
-- [ ] Rename and update description/color/timezone (#98 starts with rename only).
-- [ ] Delete calendar with safeguards.
+- [x] Rename calendar (#98 / PR #99).
+- [ ] Update description/color/timezone.
+- [ ] Delete calendar with safeguards (#100 / PR #101).
 - [ ] Detect mixed collections and expose an advanced compatibility notice.
 - [ ] Hide VJOURNAL-only collections.
 - [ ] Leave VTODO-only collections untouched and hidden from the main calendar UI.
 - [ ] Add CalDAV URL/copy diagnostics for administrators.
 
-Calendar creation is merged in #94. The active next slice is #98 / PR #99: rename writable calendars only. Continue to avoid a generic metadata patch framework until description/color/timezone editing is actually implemented.
+Calendar creation (#94), lightweight visibility controls (#96), and rename (#99) are merged. The active slice is #100 / PR #101: safe deletion of explicitly writable VEVENT-only calendars. Continue to avoid a generic metadata patch framework until a concrete description/color/timezone slice needs it.
 
 **Exit:** normal users no longer need Radicale's web UI to manage team event calendars.
 
