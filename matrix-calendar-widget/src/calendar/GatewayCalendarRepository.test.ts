@@ -91,6 +91,25 @@ describe('GatewayCalendarRepository', () => {
     );
   });
 
+  it('does not expose calendar deletion conflicts as event conflicts', async () => {
+    const repository = createRepository(
+      mockFetch(
+        new Response(
+          JSON.stringify({ code: 'calendar-delete-unsafe' }),
+          {
+            status: 409,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      ),
+    );
+
+    await expect(repository.deleteCalendar(calendarId)).rejects.toMatchObject({
+      code: 'request-failed',
+      message: 'Calendar deletion was rejected by the gateway',
+    });
+  });
+
   it('loads visible events and reuses their ETag for updates', async () => {
     const fetchMock = mockFetch(
       jsonResponse([{ event, etag: '"event-etag"' }]),
