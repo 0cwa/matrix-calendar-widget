@@ -237,6 +237,107 @@ describe('CalDavDiscoveryClient', () => {
     expect(init?.body).not.toContain('VJOURNAL');
   });
 
+  it('renames only the DAV display name with PROPPATCH', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/</d:href>
+              <d:propstat>
+                <d:prop><d:displayname/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).renameCalendar(
+        'https://radicale.example.test/alice/team/',
+        'Team & Planning',
+      ),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://radicale.example.test/alice/team/');
+    expect(init?.method).toBe('PROPPATCH');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'Basic delegated',
+    );
+    expect(init?.body).toContain(
+      '<D:displayname>Team &amp; Planning</D:displayname>',
+    );
+    expect(init?.body).not.toContain('calendar-color');
+    expect(init?.body).not.toContain('supported-calendar-component-set');
+  });
+
+  it('fails with status and URL when a PROPPATCH request is rejected', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(new Response('Forbidden', { status: 403 }));
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).renameCalendar(
+        'https://radicale.example.test/alice/team/',
+        'Product calendar',
+      ),
+    ).rejects.toEqual(
+      new CalDavDiscoveryError(
+        'CalDAV PROPPATCH failed with status 403',
+        403,
+        'https://radicale.example.test/alice/team/',
+      ),
+    );
+  });
+
+  it('rejects a 207 PROPPATCH response when displayname failed', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/</d:href>
+              <d:propstat>
+                <d:prop><d:displayname/></d:prop>
+                <d:status>HTTP/1.1 403 Forbidden</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).renameCalendar(
+        'https://radicale.example.test/alice/team/',
+        'Product calendar',
+      ),
+    ).rejects.toEqual(
+      new CalDavDiscoveryError(
+        'CalDAV PROPPATCH failed for displayname with status 403',
+        403,
+        'https://radicale.example.test/alice/team/',
+      ),
+    );
+  });
+
   it('fails with status and URL when a PROPFIND request is rejected', async () => {
     const fetchMock = jest
       .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()

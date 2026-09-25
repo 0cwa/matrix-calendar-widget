@@ -15,6 +15,7 @@
  */
 
 import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
 import { Box, Button, Stack, useMediaQuery, useTheme } from '@mui/material';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -25,6 +26,7 @@ import { MeetingsToolbarDatePicker } from '../meetings/MeetingsToolbar/MeetingsT
 import { MeetingsToolbarSearch } from '../meetings/MeetingsToolbar/MeetingsToolbarSearch';
 import { CalendarCreateDialog } from './CalendarCreateDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
+import { CalendarRenameDialog } from './CalendarRenameDialog';
 
 type CalendarToolbarProps = {
   filters: CalendarFilters;
@@ -47,6 +49,7 @@ export function CalendarToolbar({
   const calendars = useCalendars();
   const [createCalendarOpen, setCreateCalendarOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
   const writableCalendars = calendars.data.filter(
     (calendar) => !calendar.readOnly,
   );
@@ -69,6 +72,15 @@ export function CalendarToolbar({
           variant="contained"
         >
           {t('calendarEvents.editor.create', 'Create event')}
+        </Button>
+
+        <Button
+          disabled={calendars.loading || writableCalendars.length === 0}
+          onClick={() => setRenameOpen(true)}
+          startIcon={<EditIcon />}
+          variant="outlined"
+        >
+          {t('calendars.rename.action', 'Rename calendar')}
         </Button>
 
         {showToolbarButtons && (
@@ -107,6 +119,12 @@ export function CalendarToolbar({
       <CalendarCreateDialog
         onClose={() => setCreateCalendarOpen(false)}
         open={createCalendarOpen}
+      />
+
+      <CalendarRenameDialog
+        calendars={calendars.data}
+        onClose={() => setRenameOpen(false)}
+        open={renameOpen}
       />
 
       <CalendarEventEditorDialog

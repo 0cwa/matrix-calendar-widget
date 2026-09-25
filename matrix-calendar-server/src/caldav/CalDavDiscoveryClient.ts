@@ -96,6 +96,17 @@ function createCalendarBody(displayName: string): string {
 </C:mkcalendar>`;
 }
 
+function renameCalendarBody(displayName: string): string {
+  return `<?xml version="1.0" encoding="utf-8" ?>
+<D:propertyupdate xmlns:D="DAV:">
+  <D:set>
+    <D:prop>
+      <D:displayname>${escapeXmlText(displayName)}</D:displayname>
+    </D:prop>
+  </D:set>
+</D:propertyupdate>`;
+}
+
 export class CalDavDiscoveryClient {
   constructor(
     private readonly baseUrl: string,
@@ -149,6 +160,54 @@ export class CalDavDiscoveryClient {
       components: ['VEVENT'],
       readOnly: false,
     };
+  }
+
+  async renameCalendar(
+    calendarUrl: string,
+    displayName: string,
+  ): Promise<void> {
+    const name = displayName.trim();
+    if (!name) {
+      throw new CalDavDiscoveryError('Calendar display name must not be empty');
+    }
+
+    const credentialHeaders = await this.credentialProvider.getRequestHeaders();
+    const headers = new Headers(credentialHeaders);
+    headers.set('Content-Type', 'application/xml; charset=utf-8');
+
+    const response = await this.fetchImpl(calendarUrl, {
+      method: 'PROPPATCH',
+      headers,
+      body: renameCalendarBody(name),
+    });
+
+    if (!response.ok) {
+      throw new CalDavDiscoveryError(
+        `CalDAV PROPPATCH failed with status ${response.status}`,
+        response.status,
+        calendarUrl,
+      );
+    }
+
+    if (response.status === 207) {
+      const propertyStatus = propPatchPropertyStatus(
+        await response.text(),
+        'displayname',
+      );
+      if (
+        propertyStatus === undefined ||
+        propertyStatus < 200 ||
+        propertyStatus >= 300
+      ) {
+        throw new CalDavDiscoveryError(
+          propertyStatus === undefined
+            ? 'CalDAV PROPPATCH did not report displayname status'
+            : `CalDAV PROPPATCH failed for displayname with status ${propertyStatus}`,
+          propertyStatus ?? response.status,
+          calendarUrl,
+        );
+      }
+    }
   }
 
   async discover(): Promise<CalDavDiscoveryResult> {
@@ -344,4 +403,32 @@ function escapeXmlText(value: string): string {
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;');
+}
+
+function propPatchPropertyStatus(
+  xml: string,
+  propertyName: string,
+): number | undefined {
+  const document = asNode(parser.parse(xml));
+  const multistatus = asNode(document?.multistatus);
+
+  for (const responseValue of asArray(multistatus?.response)) {
+    const response = asNode(responseValue);
+    for (const propstatValue of asArray(response?.propstat)) {
+      const propstat = asNode(propstatValue);
+      const properties = asNode(propstat?.prop);
+      if (
+        properties &&
+        Object.prototype.hasOwnProperty.call(properties, propertyName)
+      ) {
+        const status = textValue(propstat?.status);
+        const match = status?.match(/\s(\d{3})\s/);
+        if (match) {
+          return Number(match[1]);
+        }
+      }
+    }
+  }
+
+  return undefined;
 }

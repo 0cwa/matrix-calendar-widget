@@ -71,6 +71,24 @@ describe('GatewayCalendarRepository', () => {
     expect(init?.body).toBe(JSON.stringify({ name: 'Project Alpha' }));
   });
 
+  it('renames a calendar through the authenticated gateway', async () => {
+    const fetchMock = mockFetch(new Response(null, { status: 204 }));
+    const repository = createRepository(fetchMock);
+
+    await expect(
+      repository.renameCalendar(calendarId, 'Product calendar'),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/v1/calendar/calendars?');
+    expect(url).toContain(`calendarId=${encodeURIComponent(calendarId)}`);
+    expect(init?.method).toBe('PATCH');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+    expect(init?.body).toBe(JSON.stringify({ name: 'Product calendar' }));
+  });
+
   it('loads visible events and reuses their ETag for updates', async () => {
     const fetchMock = mockFetch(
       jsonResponse([{ event, etag: '"event-etag"' }]),

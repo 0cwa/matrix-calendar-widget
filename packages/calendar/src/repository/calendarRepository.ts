@@ -49,6 +49,8 @@ export interface CalendarRepository {
 
   createCalendar(name: string): Promise<Calendar>;
 
+  renameCalendar(calendarId: CalendarId, name: string): Promise<void>;
+
   listEvents(
     calendarIds: CalendarId[],
     range: CalendarTimeRange,

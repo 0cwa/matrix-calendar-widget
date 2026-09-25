@@ -66,6 +66,19 @@ export class GatewayCalendarRepository implements CalendarRepository {
     );
   }
 
+  async renameCalendar(calendarId: CalendarId, name: string): Promise<void> {
+    await this.requestVoid(
+      this.url('/v1/calendar/calendars', {
+        roomId: this.options.roomId,
+        calendarId,
+      }),
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ name }),
+      },
+    );
+  }
+
   async listEvents(
     calendarIds: CalendarId[],
     range: CalendarTimeRange,

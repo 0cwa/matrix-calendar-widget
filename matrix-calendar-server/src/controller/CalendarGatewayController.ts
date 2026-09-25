@@ -166,6 +166,53 @@ export class CalendarGatewayController {
     });
   }
 
+  @Patch('calendars')
+  async renameCalendar(
+    @UserContextParam() userContext: IUserContext,
+    @MatrixOpenIdCredentialParam()
+    openIdCredential: IMatrixOpenIdCredential | undefined,
+    @Body() input: { name?: string },
+    @Query('roomId') roomId?: string,
+    @Query('calendarId') calendarId?: string,
+  ): Promise<void> {
+    const requiredRoomId = this.requireQuery(roomId, 'roomId');
+    const name = input?.name?.trim();
+    if (!name) {
+      throw new BadRequestException('calendar name is required');
+    }
+
+    const normalizedCalendarId = this.normalizeRadicaleUrl(
+      this.requireQuery(calendarId, 'calendarId'),
+      'calendarId',
+    );
+    const authorization = this.authorizationFactory.forRoom(
+      userContext.userId,
+      requiredRoomId,
+    );
+    if (
+      !(await authorization.isAllowed({
+        action: 'manage-calendar',
+        calendarId: normalizedCalendarId,
+      }))
+    ) {
+      throw new ForbiddenException(
+        'Not allowed to manage calendars for this Matrix room',
+      );
+    }
+
+    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+      userContext,
+      openIdCredential,
+    );
+
+    await this.runCalDav(async () => {
+      await new CalDavDiscoveryClient(
+        this.requireRadicaleBaseUrl(),
+        credentialProvider,
+      ).renameCalendar(normalizedCalendarId, name);
+    });
+  }
+
   @Get('events')
   async listEvents(
     @UserContextParam() userContext: IUserContext,

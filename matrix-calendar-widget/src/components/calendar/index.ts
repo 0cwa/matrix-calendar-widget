@@ -18,4 +18,5 @@ export { CalendarCreateDialog } from './CalendarCreateDialog';
 export { CalendarEventDetailsDialog } from './CalendarEventDetailsDialog';
 export { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 export { CalendarEventsSurface } from './CalendarEventsSurface';
+export { CalendarRenameDialog } from './CalendarRenameDialog';
 export { CalendarToolbar } from './CalendarToolbar';

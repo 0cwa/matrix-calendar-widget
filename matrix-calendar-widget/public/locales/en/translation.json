@@ -61,6 +61,15 @@
       "name": "Calendar name",
       "submit": "Create calendar",
       "title": "Create calendar"
+    },
+    "rename": {
+      "action": "Rename calendar",
+      "calendar": "Calendar",
+      "error": "The calendar could not be renamed.",
+      "name": "Calendar name",
+      "nameRequired": "A calendar name is required.",
+      "submit": "Rename calendar",
+      "title": "Rename calendar"
     }
   },
   "calendarWeekPicker": {

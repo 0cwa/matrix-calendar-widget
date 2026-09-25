@@ -103,6 +103,22 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     return cloneCalendar(calendar);
   }
 
+  async renameCalendar(calendarId: CalendarId, name: string): Promise<void> {
+    const calendar = this.getWritableCalendar(calendarId);
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      throw new CalendarRepositoryError(
+        'invalid-calendar-name',
+        'Calendar name must not be empty',
+      );
+    }
+
+    this.calendars.set(calendarId, {
+      ...calendar,
+      name: trimmedName,
+    });
+  }
+
   async listEvents(
     calendarIds: CalendarId[],
     range: CalendarTimeRange,
