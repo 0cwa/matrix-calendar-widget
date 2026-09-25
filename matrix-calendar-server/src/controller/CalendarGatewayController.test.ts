@@ -197,6 +197,37 @@ describe('CalendarGatewayController', () => {
     expect(fetch.mock.calls[3][1]?.method).toBe('DELETE');
   });
 
+  it('denies calendar deletion when room policy rejects manage-calendar', async () => {
+    isAllowed.mockResolvedValue(false);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+
+    await expect(
+      createController().deleteCalendar(
+        userContext,
+        openIdCredential,
+        roomId,
+        calendarId,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects calendar deletion targets outside the configured Radicale service', async () => {
+    isAllowed.mockResolvedValue(true);
+
+    await expect(
+      createController().deleteCalendar(
+        userContext,
+        openIdCredential,
+        roomId,
+        'https://attacker.example.test/calendar/',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['mixed', ['VEVENT', 'VTODO'], true],
     ['unknown', undefined, true],
