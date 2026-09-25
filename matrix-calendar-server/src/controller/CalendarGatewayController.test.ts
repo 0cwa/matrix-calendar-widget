@@ -172,7 +172,18 @@ describe('CalendarGatewayController', () => {
   it('renames an authorized Radicale calendar display name', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';
-    fetch.mockResponseOnce('', { status: 207 });
+    fetch.mockResponseOnce(
+      multistatus(`
+        <d:response>
+          <d:href>/alice/team/</d:href>
+          <d:propstat>
+            <d:prop><d:displayname/></d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
+      `),
+      { status: 207 },
+    );
 
     await expect(
       createController().renameCalendar(
