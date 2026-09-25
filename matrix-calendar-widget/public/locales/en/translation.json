@@ -54,14 +54,6 @@
     "chooseMonth": "Choose month, selected month is {{date, datetime}}",
     "label": "{{date, datetime}}"
   },
-  "calendarWeekPicker": {
-    "chooseWeek": "Choose week, selected week is {{range, daterange}}",
-    "label": "{{range, daterange}}"
-  },
-  "calendarWorkWeekPicker": {
-    "chooseWorkWeek": "Choose work week, selected work week is {{range, daterange}}",
-    "label": "{{range, daterange}}"
-  },
   "calendars": {
     "create": {
       "action": "Create calendar",
@@ -70,6 +62,14 @@
       "submit": "Create calendar",
       "title": "Create calendar"
     }
+  },
+  "calendarWeekPicker": {
+    "chooseWeek": "Choose week, selected week is {{range, daterange}}",
+    "label": "{{range, daterange}}"
+  },
+  "calendarWorkWeekPicker": {
+    "chooseWorkWeek": "Choose work week, selected work week is {{range, daterange}}",
+    "label": "{{range, daterange}}"
   },
   "cancel": "Cancel",
   "close": "Close",
