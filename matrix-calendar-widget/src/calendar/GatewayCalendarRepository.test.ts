@@ -57,6 +57,9 @@ describe('GatewayCalendarRepository', () => {
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain('/v1/calendar/calendars?');
+    if (typeof url !== 'string') {
+      throw new Error('Expected the gateway request URL to be a string');
+    }
     expect(new URL(url).searchParams.get('roomId')).toBe('!team:example.test');
     expect(init?.method).toBe('POST');
     expect(new Headers(init?.headers).get('Authorization')).toBe(
