@@ -17,11 +17,11 @@ The primary product is a responsive Matrix widget for Element and other widget-c
 
 ## Current state
 
-M0 fork hygiene is merged. On `main`, the calendar domain and repository seam, repository-backed calendar/list read paths, mutation hooks, Matrix-authenticated calendar gateway context, Matrix room authorization policy, and the Radicale OpenID delegation contract are implemented.
+M0 fork hygiene and M1's calendar-domain seam are complete. M3 is also complete on `main`: the widget has a gateway-backed `CalendarRepository`, preservation-first VEVENT create/edit/delete, ETag conflict recovery, and real Radicale interoperability coverage.
 
-The primary repository-backed event create/edit/delete UI is implemented in PR #40 and is the remaining M1 slice. M2 is active: PR #52 retains validated OpenID credentials request-locally and PR #53 adds the CalDAV discovery client. The end-to-end Radicale path still needs the credential bridge (#55), configured discovery endpoint (#56), OpenID-capable `radicale-auth-matrix` support (#48), and real-container contract tests (#45).
+The in-repository M2 identity and CalDAV discovery spine is implemented. The remaining M2 gap is external: `radicale-auth-matrix` still needs the ADR009-compatible short-lived Matrix OpenID authentication mode (#48), after which the final delegated gateway/OpenID real-container contract (#45) can close M2.
 
-Inherited NeoDateFix meeting-room paths remain only where migration has not yet reached them. Historical changelogs, NOTICE files, and upstream provenance intentionally retain NeoDateFix/Nordeck names. See [docs/STATUS.md](./docs/STATUS.md) for the current execution order and active PR blockers.
+Calendar management is now advancing as small M4 vertical slices using the existing repository and gateway seams rather than a generic WebDAV administration framework. Inherited NeoDateFix meeting-room paths remain only where migration has not yet reached them. Historical changelogs, NOTICE files, and upstream provenance intentionally retain NeoDateFix/Nordeck names. See [docs/STATUS.md](./docs/STATUS.md) for transient execution order and active PR blockers.
 
 ## Start here
 
