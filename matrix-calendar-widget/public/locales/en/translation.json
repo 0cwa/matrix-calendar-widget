@@ -68,7 +68,8 @@
       "error": "The calendar could not be renamed.",
       "name": "Calendar name",
       "submit": "Rename calendar",
-      "title": "Rename calendar"
+      "title": "Rename calendar",
+      "nameRequired": "A calendar name is required."
     }
   },
   "calendarWeekPicker": {
