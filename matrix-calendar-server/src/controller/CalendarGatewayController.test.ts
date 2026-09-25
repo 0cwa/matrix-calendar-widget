@@ -261,9 +261,9 @@ describe('CalendarGatewayController', () => {
       }
 
       expect(fetch).toHaveBeenCalledTimes(3);
-      expect(fetch.mock.calls.every(([, init]) => init?.method !== 'DELETE')).toBe(
-        true,
-      );
+      expect(
+        fetch.mock.calls.every(([, init]) => init?.method !== 'DELETE'),
+      ).toBe(true);
     },
   );
 
@@ -621,7 +621,9 @@ function calendarCollectionResponse(
   const componentSet = components
     ? `
         <c:supported-calendar-component-set>
-          ${components.map((component) => `<c:comp name="${component}"/>`).join('')}
+          ${components
+            .map((component) => `<c:comp name="${component}"/>`)
+            .join('')}
         </c:supported-calendar-component-set>`
     : '';
 
