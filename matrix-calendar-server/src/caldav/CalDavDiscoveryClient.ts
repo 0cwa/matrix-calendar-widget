@@ -422,7 +422,7 @@ function propPatchPropertyStatus(
         Object.prototype.hasOwnProperty.call(properties, propertyName)
       ) {
         const status = textValue(propstat?.status);
-        const match = status?.match(/\\s(\\d{3})\\s/);
+        const match = status?.match(/\s(\d{3})\s/);
         if (match) {
           return Number(match[1]);
         }
