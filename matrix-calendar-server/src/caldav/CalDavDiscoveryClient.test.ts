@@ -258,6 +258,26 @@ describe('CalDavDiscoveryClient', () => {
     );
   });
 
+  it('fails with status and URL when DELETE is rejected', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(new Response('Forbidden', { status: 403 }));
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).deleteCalendar('https://radicale.example.test/alice/team/'),
+    ).rejects.toEqual(
+      new CalDavDiscoveryError(
+        'CalDAV DELETE failed with status 403',
+        403,
+        'https://radicale.example.test/alice/team/',
+      ),
+    );
+  });
+
   it('fails with status and URL when a PROPFIND request is rejected', async () => {
     const fetchMock = jest
       .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
