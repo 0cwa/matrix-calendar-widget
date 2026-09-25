@@ -24,8 +24,8 @@ Collection management is part of the product, but DAV vocabulary should stay mos
 
 1. Close #48's external ADR009 OpenID-capable `radicale-auth-matrix` gap.
 2. Use that plugin in #45's real gateway/OpenID/non-member contract and close M2.
-3. While #48 is externally blocked, implement #92 only: create a friendly VEVENT-only calendar from the widget through the existing repository/gateway seams.
-4. Reassess after #92 before adding edit/delete/diagnostics. Avoid broad generic WebDAV administration.
+3. While #48 is externally blocked, finish #98 / PR #99: rename writable calendars through the existing repository/gateway seams. Calendar creation (#92 / PR #94) is merged.
+4. Reassess after rename before description/color/timezone or delete work. Avoid broad generic WebDAV administration.
 5. Keep M3 regression coverage green; M3 is complete on `main` through PRs #70, #89, and #90.
 
 See [STATUS.md](./STATUS.md) for transient PR/CI details.
