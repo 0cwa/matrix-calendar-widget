@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import { randomUUID } from 'crypto';
 import {
   CalendarAuthorizationRequest,
   CalendarEventInput,
@@ -38,6 +37,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
 import {
