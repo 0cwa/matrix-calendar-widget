@@ -198,6 +198,38 @@ describe('CalendarGatewayController', () => {
     );
   });
 
+  it('denies calendar rename when room policy rejects manage-calendar', async () => {
+    isAllowed.mockResolvedValue(false);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+
+    await expect(
+      createController().renameCalendar(
+        userContext,
+        openIdCredential,
+        { name: 'Product calendar' },
+        roomId,
+        calendarId,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects an empty calendar rename before CalDAV access', async () => {
+    await expect(
+      createController().renameCalendar(
+        userContext,
+        openIdCredential,
+        { name: '   ' },
+        roomId,
+        'https://radicale.example.test/alice/team/',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(forRoom).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('rejects calendar rename targets outside the configured Radicale service', async () => {
     isAllowed.mockResolvedValue(true);
 
