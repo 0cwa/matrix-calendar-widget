@@ -66,6 +66,16 @@ export class GatewayCalendarRepository implements CalendarRepository {
     );
   }
 
+  async deleteCalendar(calendarId: CalendarId): Promise<void> {
+    await this.requestVoid(
+      this.url('/v1/calendar/calendars', {
+        roomId: this.options.roomId,
+        calendarId,
+      }),
+      { method: 'DELETE' },
+    );
+  }
+
   async listEvents(
     calendarIds: CalendarId[],
     range: CalendarTimeRange,
