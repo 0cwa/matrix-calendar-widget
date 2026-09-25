@@ -103,6 +103,12 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     return cloneCalendar(calendar);
   }
 
+  async deleteCalendar(calendarId: CalendarId): Promise<void> {
+    this.getWritableCalendar(calendarId);
+    this.calendars.delete(calendarId);
+    this.events.delete(calendarId);
+  }
+
   async listEvents(
     calendarIds: CalendarId[],
     range: CalendarTimeRange,

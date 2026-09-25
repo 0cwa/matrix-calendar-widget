@@ -61,6 +61,15 @@
       "name": "Kalendername",
       "submit": "Kalender erstellen",
       "title": "Kalender erstellen"
+    },
+    "delete": {
+      "action": "Kalender löschen",
+      "calendar": "Kalender",
+      "description": "„{{name}}“ und alle enthaltenen Termine löschen? Dies kann nicht rückgängig gemacht werden.",
+      "error": "Der Kalender konnte nicht gelöscht werden.",
+      "safeguard": "Kalender mit nicht unterstützten oder unbekannten Daten sind geschützt und können hier nicht gelöscht werden.",
+      "submit": "Kalender löschen",
+      "title": "Kalender löschen"
     }
   },
   "calendarWeekPicker": {

@@ -71,6 +71,44 @@ describe('GatewayCalendarRepository', () => {
     expect(init?.body).toBe(JSON.stringify({ name: 'Project Alpha' }));
   });
 
+  it('deletes a calendar through the authenticated gateway', async () => {
+    const fetchMock = mockFetch(new Response(null, { status: 204 }));
+    const repository = createRepository(fetchMock);
+
+    await expect(
+      repository.deleteCalendar(calendarId),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    if (typeof url !== 'string') {
+      throw new Error('Expected the gateway request URL to be a string');
+    }
+    const requestUrl = new URL(url);
+    expect(requestUrl.pathname).toBe('/v1/calendar/calendars');
+    expect(requestUrl.searchParams.get('roomId')).toBe('!team:example.test');
+    expect(requestUrl.searchParams.get('calendarId')).toBe(calendarId);
+    expect(init?.method).toBe('DELETE');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+  });
+
+  it('does not expose calendar deletion conflicts as event conflicts', async () => {
+    const repository = createRepository(
+      mockFetch(
+        new Response(JSON.stringify({ code: 'calendar-delete-unsafe' }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    await expect(repository.deleteCalendar(calendarId)).rejects.toMatchObject({
+      code: 'request-failed',
+      message: 'Calendar deletion was rejected by the gateway',
+    });
+  });
+
   it('loads visible events and reuses their ETag for updates', async () => {
     const fetchMock = mockFetch(
       jsonResponse([{ event, etag: '"event-etag"' }]),

@@ -151,6 +151,24 @@ export class CalDavDiscoveryClient {
     };
   }
 
+  async deleteCalendar(calendarUrl: string): Promise<void> {
+    const credentialHeaders = await this.credentialProvider.getRequestHeaders();
+    const response = await this.fetchImpl(calendarUrl, {
+      method: 'DELETE',
+      headers: credentialHeaders,
+    });
+
+    if (!response.ok || response.status === 207) {
+      throw new CalDavDiscoveryError(
+        response.status === 207
+          ? 'CalDAV DELETE reported member failures'
+          : `CalDAV DELETE failed with status ${response.status}`,
+        response.status,
+        calendarUrl,
+      );
+    }
+  }
+
   async discover(): Promise<CalDavDiscoveryResult> {
     const { principalUrl, calendarHomeUrl } = await this.discoverHome();
     const responses = await this.propfind(calendarHomeUrl, '1', CALENDARS_BODY);

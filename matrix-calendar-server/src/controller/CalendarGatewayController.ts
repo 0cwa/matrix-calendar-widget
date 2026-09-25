@@ -166,6 +166,51 @@ export class CalendarGatewayController {
     });
   }
 
+  @Delete('calendars')
+  async deleteCalendar(
+    @UserContextParam() userContext: IUserContext,
+    @MatrixOpenIdCredentialParam()
+    openIdCredential: IMatrixOpenIdCredential | undefined,
+    @Query('roomId') roomId?: string,
+    @Query('calendarId') calendarId?: string,
+  ): Promise<void> {
+    const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
+    const scope = await this.eventScope(
+      userContext,
+      roomId,
+      requestedCalendarId,
+      {
+        action: 'manage-calendar',
+        calendarId: requestedCalendarId,
+      },
+    );
+    const client = new CalDavDiscoveryClient(
+      this.requireRadicaleBaseUrl(),
+      new MatrixOpenIdCalDavCredentialProvider(userContext, openIdCredential),
+    );
+
+    await this.runCalDav(async () => {
+      const discovery = await client.discover();
+      const calendar = discovery.calendars.find(
+        (candidate) => candidate.href === scope.calendarId,
+      );
+      if (
+        !calendar?.components ||
+        calendar.components.length !== 1 ||
+        calendar.components[0] !== 'VEVENT' ||
+        calendar.readOnly !== false
+      ) {
+        throw new ConflictException({
+          code: 'calendar-delete-unsafe',
+          message:
+            'Calendar deletion is only allowed for explicitly VEVENT-only collections',
+        });
+      }
+
+      await client.deleteCalendar(scope.calendarId);
+    });
+  }
+
   @Get('events')
   async listEvents(
     @UserContextParam() userContext: IUserContext,

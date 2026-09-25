@@ -15,6 +15,7 @@
  */
 
 import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { Box, Button, Stack, useMediaQuery, useTheme } from '@mui/material';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -24,6 +25,7 @@ import { MeetingsToolbarButtons } from '../meetings/MeetingsToolbar/MeetingsTool
 import { MeetingsToolbarDatePicker } from '../meetings/MeetingsToolbar/MeetingsToolbarDatePicker';
 import { MeetingsToolbarSearch } from '../meetings/MeetingsToolbar/MeetingsToolbarSearch';
 import { CalendarCreateDialog } from './CalendarCreateDialog';
+import { CalendarDeleteDialog } from './CalendarDeleteDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 
 type CalendarToolbarProps = {
@@ -46,6 +48,7 @@ export function CalendarToolbar({
   const showToolbarButtons = useMediaQuery(theme.breakpoints.up('md'));
   const calendars = useCalendars();
   const [createCalendarOpen, setCreateCalendarOpen] = useState(false);
+  const [deleteCalendarOpen, setDeleteCalendarOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const writableCalendars = calendars.data.filter(
     (calendar) => !calendar.readOnly,
@@ -60,6 +63,16 @@ export function CalendarToolbar({
           variant="outlined"
         >
           {t('calendars.create.action', 'Create calendar')}
+        </Button>
+
+        <Button
+          color="error"
+          disabled={calendars.loading || writableCalendars.length === 0}
+          onClick={() => setDeleteCalendarOpen(true)}
+          startIcon={<DeleteIcon />}
+          variant="outlined"
+        >
+          {t('calendars.delete.action', 'Delete calendar')}
         </Button>
 
         <Button
@@ -107,6 +120,12 @@ export function CalendarToolbar({
       <CalendarCreateDialog
         onClose={() => setCreateCalendarOpen(false)}
         open={createCalendarOpen}
+      />
+
+      <CalendarDeleteDialog
+        calendars={writableCalendars}
+        onClose={() => setDeleteCalendarOpen(false)}
+        open={deleteCalendarOpen}
       />
 
       <CalendarEventEditorDialog

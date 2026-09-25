@@ -125,6 +125,27 @@ describe('InMemoryCalendarRepository', () => {
     });
   });
 
+  it('deletes a writable calendar and its events', async () => {
+    const repository = createRepository();
+
+    await repository.deleteCalendar('team');
+
+    await expect(repository.listCalendars()).resolves.not.toContainEqual(
+      expect.objectContaining({ id: 'team' }),
+    );
+    await expect(repository.getEvent('team', 'planning')).rejects.toMatchObject(
+      { code: 'calendar-not-found' },
+    );
+  });
+
+  it('rejects deleting a read-only calendar', async () => {
+    const repository = createRepository();
+
+    await expect(repository.deleteCalendar('readonly')).rejects.toMatchObject({
+      code: 'calendar-read-only',
+    });
+  });
+
   it('lists overlapping events for selected calendars', async () => {
     const repository = createRepository();
 
