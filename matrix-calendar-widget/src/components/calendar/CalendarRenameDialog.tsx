@@ -71,7 +71,8 @@ export function CalendarRenameDialog({
     setError(undefined);
   };
 
-  const valid = Boolean(calendarId) && name.trim().length > 0;
+  const nameRequired = name.trim().length === 0;
+  const valid = Boolean(calendarId) && !nameRequired;
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -127,6 +128,15 @@ export function CalendarRenameDialog({
             <TextField
               autoFocus
               disabled={saving}
+              error={nameRequired}
+              helperText={
+                nameRequired
+                  ? t(
+                      'calendars.rename.nameRequired',
+                      'A calendar name is required.',
+                    )
+                  : undefined
+              }
               label={t('calendars.rename.name', 'Calendar name')}
               onChange={(event) => setName(event.target.value)}
               required
