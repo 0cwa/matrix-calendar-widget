@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-import { CalendarEvent } from '@matrix-calendar-widget/calendar';
-import { Alert, Box } from '@mui/material';
+import { CalendarEvent, CalendarId } from '@matrix-calendar-widget/calendar';
+import { Alert, Box, Checkbox, FormControlLabel, FormGroup } from '@mui/material';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -46,14 +46,24 @@ export function CalendarEventsSurface({
     () => calendars.data.map((calendar) => calendar.id),
     [calendars.data],
   );
+  const [hiddenCalendarIds, setHiddenCalendarIds] = useState<Set<CalendarId>>(
+    () => new Set(),
+  );
   const repositoryRange = useMemo(
     () => repositoryRangeForView(filters, view),
     [filters, view],
   );
   const events = useCalendarEvents(calendarIds, repositoryRange);
+  const visibleEvents = useMemo(
+    () =>
+      events.data.filter(
+        (event) => !hiddenCalendarIds.has(event.calendarId),
+      ),
+    [events.data, hiddenCalendarIds],
+  );
   const filteredEvents = useMemo(
-    () => filterCalendarEvents(events.data, filters.filterText),
-    [events.data, filters.filterText],
+    () => filterCalendarEvents(visibleEvents, filters.filterText),
+    [filters.filterText, visibleEvents],
   );
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent>();
 
@@ -76,6 +86,56 @@ export function CalendarEventsSurface({
 
   return (
     <>
+      {calendars.data.length > 1 && (
+        <Box px={1} pb={1}>
+          <FormGroup
+            aria-label={t('calendarEvents.editor.calendar', 'Calendar')}
+            row
+          >
+            {calendars.data.map((calendar) => (
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={!hiddenCalendarIds.has(calendar.id)}
+                    onChange={(_, checked) => {
+                      setHiddenCalendarIds((current) => {
+                        const next = new Set(current);
+                        if (checked) {
+                          next.delete(calendar.id);
+                        } else {
+                          next.add(calendar.id);
+                        }
+                        return next;
+                      });
+                    }}
+                    size="small"
+                  />
+                }
+                key={calendar.id}
+                label={
+                  <>
+                    {calendar.color && (
+                      <Box
+                        component="span"
+                        sx={{
+                          backgroundColor: calendar.color,
+                          borderRadius: '50%',
+                          display: 'inline-block',
+                          height: 10,
+                          mr: 0.75,
+                          width: 10,
+                        }}
+                      />
+                    )}
+                    {calendar.name}
+                  </>
+                }
+              />
+            ))}
+          </FormGroup>
+        </Box>
+      )}
+
       {view === 'list' ? (
         <Box height="100%" overflow="auto">
           <CalendarEventsList
