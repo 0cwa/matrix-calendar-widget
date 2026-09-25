@@ -31,6 +31,7 @@ import {
   useCreateCalendar,
   useCreateCalendarEvent,
   useDeleteCalendarEvent,
+  useRenameCalendar,
   useUpdateCalendarEvent,
 } from './useCalendarMutations';
 import { useCalendarEvents, useCalendars } from './useCalendarQueries';
@@ -101,6 +102,29 @@ describe('calendar repository mutation hooks', () => {
       expect(result.current.calendars.data).toEqual([
         calendar,
         { id: 'project-alpha', name: 'Project Alpha' },
+      ]);
+    });
+  });
+
+  it('refreshes active calendar queries after rename', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+    });
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        calendars: useCalendars(),
+        renameCalendar: useRenameCalendar(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.calendars.loading);
+
+    await result.current.renameCalendar('team', 'Product calendar');
+
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([
+        { ...calendar, name: 'Product calendar' },
       ]);
     });
   });
@@ -179,6 +203,7 @@ describe('calendar repository mutation hooks', () => {
     const repository: CalendarRepository = {
       listCalendars: vi.fn().mockResolvedValue([calendar]),
       createCalendar: vi.fn().mockResolvedValue(calendar),
+      renameCalendar: vi.fn().mockResolvedValue(undefined),
       listEvents,
       getEvent: vi.fn().mockResolvedValue(event),
       createEvent: vi.fn().mockRejectedValue(new Error('write failed')),
