@@ -51,9 +51,9 @@ describe('GatewayCalendarRepository', () => {
     const fetchMock = mockFetch(jsonResponse(createdCalendar));
     const repository = createRepository(fetchMock);
 
-    await expect(repository.createCalendar('Project Alpha')).resolves.toEqual(
-      createdCalendar,
-    );
+    await expect(
+      repository.createCalendar('Project Alpha'),
+    ).resolves.toEqual(createdCalendar);
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain('/v1/calendar/calendars?');
