@@ -41,6 +41,7 @@ export type { CalendarFilters } from './types';
 export {
   useCreateCalendar,
   useCreateCalendarEvent,
+  useDeleteCalendar,
   useDeleteCalendarEvent,
   useUpdateCalendarEvent,
 } from './useCalendarMutations';
