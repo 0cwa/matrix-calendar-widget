@@ -75,7 +75,9 @@ describe('GatewayCalendarRepository', () => {
     const fetchMock = mockFetch(new Response(null, { status: 204 }));
     const repository = createRepository(fetchMock);
 
-    await expect(repository.deleteCalendar(calendarId)).resolves.toBeUndefined();
+    await expect(
+      repository.deleteCalendar(calendarId),
+    ).resolves.toBeUndefined();
 
     const [url, init] = fetchMock.mock.calls[0];
     if (typeof url !== 'string') {
@@ -94,13 +96,10 @@ describe('GatewayCalendarRepository', () => {
   it('does not expose calendar deletion conflicts as event conflicts', async () => {
     const repository = createRepository(
       mockFetch(
-        new Response(
-          JSON.stringify({ code: 'calendar-delete-unsafe' }),
-          {
-            status: 409,
-            headers: { 'Content-Type': 'application/json' },
-          },
-        ),
+        new Response(JSON.stringify({ code: 'calendar-delete-unsafe' }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/json' },
+        }),
       ),
     );
 
