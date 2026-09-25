@@ -15,7 +15,13 @@
  */
 
 import { CalendarEvent, CalendarId } from '@matrix-calendar-widget/calendar';
-import { Alert, Box, Checkbox, FormControlLabel, FormGroup } from '@mui/material';
+import {
+  Alert,
+  Box,
+  Checkbox,
+  FormControlLabel,
+  FormGroup,
+} from '@mui/material';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -56,9 +62,7 @@ export function CalendarEventsSurface({
   const events = useCalendarEvents(calendarIds, repositoryRange);
   const visibleEvents = useMemo(
     () =>
-      events.data.filter(
-        (event) => !hiddenCalendarIds.has(event.calendarId),
-      ),
+      events.data.filter((event) => !hiddenCalendarIds.has(event.calendarId)),
     [events.data, hiddenCalendarIds],
   );
   const filteredEvents = useMemo(
