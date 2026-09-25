@@ -15,6 +15,7 @@
  */
 
 import {
+  Calendar,
   CalendarEvent,
   CalendarEventId,
   CalendarEventInput,
@@ -26,6 +27,20 @@ import {
   useCalendarRepository,
   useInvalidateCalendarRepository,
 } from './CalendarRepositoryProvider';
+
+export function useCreateCalendar(): (name: string) => Promise<Calendar> {
+  const repository = useCalendarRepository();
+  const invalidate = useInvalidateCalendarRepository();
+
+  return useCallback(
+    async (name: string) => {
+      const calendar = await repository.createCalendar(name);
+      invalidate();
+      return calendar;
+    },
+    [invalidate, repository],
+  );
+}
 
 export function useCreateCalendarEvent(): (
   calendarId: CalendarId,

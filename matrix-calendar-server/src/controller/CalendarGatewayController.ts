@@ -37,6 +37,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
 import {
@@ -117,6 +118,50 @@ export class CalendarGatewayController {
             calendar.color,
             calendar.readOnly,
           ),
+      );
+    });
+  }
+
+  @Post('calendars')
+  async createCalendar(
+    @UserContextParam() userContext: IUserContext,
+    @MatrixOpenIdCredentialParam()
+    openIdCredential: IMatrixOpenIdCredential | undefined,
+    @Body() input: { name?: string },
+    @Query('roomId') roomId?: string,
+  ): Promise<CalendarGatewayCalendarDto> {
+    const requiredRoomId = this.requireQuery(roomId, 'roomId');
+    const name = input?.name?.trim();
+    if (!name) {
+      throw new BadRequestException('calendar name is required');
+    }
+
+    const authorization = this.authorizationFactory.forRoom(
+      userContext.userId,
+      requiredRoomId,
+    );
+    if (!(await authorization.isAllowed({ action: 'create-calendar' }))) {
+      throw new ForbiddenException(
+        'Not allowed to create calendars for this Matrix room',
+      );
+    }
+
+    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+      userContext,
+      openIdCredential,
+    );
+
+    return this.runCalDav(async () => {
+      const calendar = await new CalDavDiscoveryClient(
+        this.requireRadicaleBaseUrl(),
+        credentialProvider,
+      ).createCalendar(name, `calendar-${randomUUID()}`);
+
+      return new CalendarGatewayCalendarDto(
+        calendar.href,
+        calendar.displayName ?? name,
+        calendar.color,
+        calendar.readOnly,
       );
     });
   }

@@ -54,6 +54,15 @@
     "chooseMonth": "Wähle einen Monat, der gewählte Monat ist {{date, datetime}}",
     "label": "{{date, datetime}}"
   },
+  "calendars": {
+    "create": {
+      "action": "Kalender erstellen",
+      "error": "Der Kalender konnte nicht erstellt werden.",
+      "name": "Kalendername",
+      "submit": "Kalender erstellen",
+      "title": "Kalender erstellen"
+    }
+  },
   "calendarWeekPicker": {
     "chooseWeek": "Wähle eine Woche, die gewählte Woche ist {{range, daterange}}",
     "label": "{{range, daterange}}"

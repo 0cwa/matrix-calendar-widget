@@ -39,6 +39,7 @@ export { GatewayCalendarRepository } from './GatewayCalendarRepository';
 export type { GatewayCalendarRepositoryOptions } from './GatewayCalendarRepository';
 export type { CalendarFilters } from './types';
 export {
+  useCreateCalendar,
   useCreateCalendarEvent,
   useDeleteCalendarEvent,
   useUpdateCalendarEvent,

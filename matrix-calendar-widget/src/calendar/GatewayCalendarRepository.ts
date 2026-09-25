@@ -54,6 +54,18 @@ export class GatewayCalendarRepository implements CalendarRepository {
     );
   }
 
+  async createCalendar(name: string): Promise<Calendar> {
+    return this.requestJson<Calendar>(
+      this.url('/v1/calendar/calendars', {
+        roomId: this.options.roomId,
+      }),
+      {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      },
+    );
+  }
+
   async listEvents(
     calendarIds: CalendarId[],
     range: CalendarTimeRange,

@@ -28,11 +28,12 @@ import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from './CalendarRepositoryProvider';
 import {
+  useCreateCalendar,
   useCreateCalendarEvent,
   useDeleteCalendarEvent,
   useUpdateCalendarEvent,
 } from './useCalendarMutations';
-import { useCalendarEvents } from './useCalendarQueries';
+import { useCalendarEvents, useCalendars } from './useCalendarQueries';
 
 const calendar: Calendar = {
   id: 'team',
@@ -78,6 +79,32 @@ function createWrapper(repository: CalendarRepository) {
 }
 
 describe('calendar repository mutation hooks', () => {
+  it('refreshes active calendar queries after create', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      calendarIdFactory: () => 'project-alpha',
+    });
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        calendars: useCalendars(),
+        createCalendar: useCreateCalendar(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.calendars.loading);
+    expect(result.current.calendars.data).toEqual([calendar]);
+
+    await result.current.createCalendar('Project Alpha');
+
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([
+        calendar,
+        { id: 'project-alpha', name: 'Project Alpha' },
+      ]);
+    });
+  });
+
   it('refreshes active event queries after create', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
@@ -151,6 +178,7 @@ describe('calendar repository mutation hooks', () => {
     const listEvents = vi.fn().mockResolvedValue([]);
     const repository: CalendarRepository = {
       listCalendars: vi.fn().mockResolvedValue([calendar]),
+      createCalendar: vi.fn().mockResolvedValue(calendar),
       listEvents,
       getEvent: vi.fn().mockResolvedValue(event),
       createEvent: vi.fn().mockRejectedValue(new Error('write failed')),

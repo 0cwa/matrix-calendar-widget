@@ -35,6 +35,7 @@ import {
 export type InMemoryCalendarRepositoryOptions = {
   calendars?: Calendar[];
   events?: CalendarEvent[];
+  calendarIdFactory?: (sequence: number) => CalendarId;
   idFactory?: (sequence: number) => CalendarEventId;
 };
 
@@ -44,10 +45,15 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     CalendarId,
     Map<CalendarEventId, CalendarEvent>
   >();
+  private readonly calendarIdFactory: (sequence: number) => CalendarId;
   private readonly idFactory: (sequence: number) => CalendarEventId;
+  private calendarSequence = 1;
   private sequence = 1;
 
   constructor(options: InMemoryCalendarRepositoryOptions = {}) {
+    this.calendarIdFactory =
+      options.calendarIdFactory ??
+      ((sequence) => `memory-calendar-${sequence}`);
     this.idFactory =
       options.idFactory ?? ((sequence) => `memory-event-${sequence}`);
 
@@ -72,6 +78,29 @@ export class InMemoryCalendarRepository implements CalendarRepository {
 
   async listCalendars(): Promise<Calendar[]> {
     return [...this.calendars.values()].map(cloneCalendar);
+  }
+
+  async createCalendar(name: string): Promise<Calendar> {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      throw new CalendarRepositoryError(
+        'invalid-calendar-name',
+        'Calendar name must not be empty',
+      );
+    }
+
+    let id: CalendarId;
+    do {
+      id = this.calendarIdFactory(this.calendarSequence++);
+    } while (this.calendars.has(id));
+
+    const calendar: Calendar = {
+      id,
+      name: trimmedName,
+    };
+    this.calendars.set(id, calendar);
+    this.events.set(id, new Map());
+    return cloneCalendar(calendar);
   }
 
   async listEvents(

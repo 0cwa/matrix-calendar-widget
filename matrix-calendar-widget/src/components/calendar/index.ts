@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+export { CalendarCreateDialog } from './CalendarCreateDialog';
 export { CalendarEventDetailsDialog } from './CalendarEventDetailsDialog';
 export { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 export { CalendarEventsSurface } from './CalendarEventsSurface';

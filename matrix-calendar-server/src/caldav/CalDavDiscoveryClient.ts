@@ -82,6 +82,20 @@ const CALENDARS_BODY = `<?xml version="1.0" encoding="utf-8" ?>
   </D:prop>
 </D:propfind>`;
 
+function createCalendarBody(displayName: string): string {
+  return `<?xml version="1.0" encoding="utf-8" ?>
+<C:mkcalendar xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:D="DAV:">
+  <D:set>
+    <D:prop>
+      <D:displayname>${escapeXmlText(displayName)}</D:displayname>
+      <C:supported-calendar-component-set>
+        <C:comp name="VEVENT"/>
+      </C:supported-calendar-component-set>
+    </D:prop>
+  </D:set>
+</C:mkcalendar>`;
+}
+
 export class CalDavDiscoveryClient {
   constructor(
     private readonly baseUrl: string,
@@ -89,22 +103,56 @@ export class CalDavDiscoveryClient {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
+  async createCalendar(
+    displayName: string,
+    collectionName: string,
+  ): Promise<DiscoveredCalDavCalendar> {
+    const name = displayName.trim();
+    if (!name) {
+      throw new CalDavDiscoveryError('Calendar display name must not be empty');
+    }
+    if (!/^[A-Za-z0-9._-]+$/.test(collectionName)) {
+      throw new CalDavDiscoveryError('Calendar collection name is invalid');
+    }
+
+    const { calendarHomeUrl } = await this.discoverHome();
+    const collectionBase = new URL(calendarHomeUrl);
+    if (!collectionBase.pathname.endsWith('/')) {
+      collectionBase.pathname = `${collectionBase.pathname}/`;
+    }
+    const collectionUrl = new URL(
+      `${collectionName}/`,
+      collectionBase,
+    ).toString();
+
+    const credentialHeaders = await this.credentialProvider.getRequestHeaders();
+    const headers = new Headers(credentialHeaders);
+    headers.set('Content-Type', 'application/xml; charset=utf-8');
+
+    const response = await this.fetchImpl(collectionUrl, {
+      method: 'MKCALENDAR',
+      headers,
+      body: createCalendarBody(name),
+    });
+
+    if (!response.ok) {
+      throw new CalDavDiscoveryError(
+        `CalDAV MKCALENDAR failed with status ${response.status}`,
+        response.status,
+        collectionUrl,
+      );
+    }
+
+    return {
+      href: collectionUrl,
+      displayName: name,
+      components: ['VEVENT'],
+      readOnly: false,
+    };
+  }
+
   async discover(): Promise<CalDavDiscoveryResult> {
-    const serviceUrl = new URL(this.baseUrl).toString();
-    const principalHref = await this.discoverHref(
-      serviceUrl,
-      PRINCIPAL_BODY,
-      'current-user-principal',
-    );
-    const principalUrl = new URL(principalHref, serviceUrl).toString();
-
-    const calendarHomeHref = await this.discoverHref(
-      principalUrl,
-      HOME_BODY,
-      'calendar-home-set',
-    );
-    const calendarHomeUrl = new URL(calendarHomeHref, principalUrl).toString();
-
+    const { principalUrl, calendarHomeUrl } = await this.discoverHome();
     const responses = await this.propfind(calendarHomeUrl, '1', CALENDARS_BODY);
     const calendars = responses.flatMap((response) => {
       const properties = successfulProperties(response);
@@ -141,6 +189,30 @@ export class CalDavDiscoveryClient {
       principalUrl,
       calendarHomeUrl,
       calendars,
+    };
+  }
+
+  private async discoverHome(): Promise<{
+    principalUrl: string;
+    calendarHomeUrl: string;
+  }> {
+    const serviceUrl = new URL(this.baseUrl).toString();
+    const principalHref = await this.discoverHref(
+      serviceUrl,
+      PRINCIPAL_BODY,
+      'current-user-principal',
+    );
+    const principalUrl = new URL(principalHref, serviceUrl).toString();
+
+    const calendarHomeHref = await this.discoverHref(
+      principalUrl,
+      HOME_BODY,
+      'calendar-home-set',
+    );
+
+    return {
+      principalUrl,
+      calendarHomeUrl: new URL(calendarHomeHref, principalUrl).toString(),
     };
   }
 
@@ -265,4 +337,11 @@ function asNode(value: unknown): DavNode | undefined {
 
 function textValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function escapeXmlText(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
