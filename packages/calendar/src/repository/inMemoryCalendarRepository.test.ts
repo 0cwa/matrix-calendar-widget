@@ -144,11 +144,11 @@ describe('InMemoryCalendarRepository', () => {
   it('rejects an empty calendar rename', async () => {
     const repository = createRepository();
 
-    await expect(repository.renameCalendar('team', '   ')).rejects.toMatchObject(
-      {
-        code: 'invalid-calendar-name',
-      },
-    );
+    await expect(
+      repository.renameCalendar('team', '   '),
+    ).rejects.toMatchObject({
+      code: 'invalid-calendar-name',
+    });
   });
 
   it('rejects renaming a read-only calendar', async () => {
