@@ -278,6 +278,36 @@ describe('CalDavDiscoveryClient', () => {
     );
   });
 
+  it('rejects a DELETE multistatus because it reports member failures', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/locked.ics</d:href>
+              <d:status>HTTP/1.1 423 Locked</d:status>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).deleteCalendar('https://radicale.example.test/alice/team/'),
+    ).rejects.toEqual(
+      new CalDavDiscoveryError(
+        'CalDAV DELETE reported member failures',
+        207,
+        'https://radicale.example.test/alice/team/',
+      ),
+    );
+  });
+
   it('fails with status and URL when a PROPFIND request is rejected', async () => {
     const fetchMock = jest
       .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
