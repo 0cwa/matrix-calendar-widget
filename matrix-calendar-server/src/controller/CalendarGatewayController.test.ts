@@ -169,6 +169,51 @@ describe('CalendarGatewayController', () => {
     expect(init?.body).toContain('<C:comp name="VEVENT"/>');
   });
 
+  it('renames an authorized Radicale calendar display name', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch.mockResponseOnce('', { status: 207 });
+
+    await expect(
+      createController().renameCalendar(
+        userContext,
+        openIdCredential,
+        { name: ' Product calendar ' },
+        roomId,
+        calendarId,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(forRoom).toHaveBeenCalledWith(userContext.userId, roomId);
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'manage-calendar',
+      calendarId,
+    });
+
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe(calendarId);
+    expect(init?.method).toBe('PROPPATCH');
+    expect(init?.body).toContain(
+      '<D:displayname>Product calendar</D:displayname>',
+    );
+  });
+
+  it('rejects calendar rename targets outside the configured Radicale service', async () => {
+    isAllowed.mockResolvedValue(true);
+
+    await expect(
+      createController().renameCalendar(
+        userContext,
+        openIdCredential,
+        { name: 'Nope' },
+        roomId,
+        'https://attacker.example.test/calendar/',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('denies calendar creation when room policy rejects it', async () => {
     isAllowed.mockResolvedValue(false);
 
