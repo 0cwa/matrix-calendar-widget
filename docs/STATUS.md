@@ -39,6 +39,17 @@ Still external/blocking:
 - #48 — add ADR009-compatible OpenID mode to `radicale-auth-matrix`,
 - #45 — final real gateway/OpenID/non-member contract after #48.
 
+### M4 — Calendar management
+
+Landed on `main`:
+
+- VEVENT-only calendar creation through repository → gateway → CalDAV `MKCALENDAR` (#92 / PR #94),
+- small create-calendar dialog with request-error handling.
+
+Active:
+
+- writable-calendar rename via `DAV:displayname` only (#98 / PR #99).
+
 ### M3 — VEVENT CRUD
 
 Complete on `main`:
@@ -56,15 +67,15 @@ Complete on `main`:
 
 - #48 — external `radicale-auth-matrix` OpenID delegation. No writable `0cwa/radicale-auth-matrix` fork exists and the available GitHub connector cannot create/fork repositories.
 - #45 — final delegated gateway/OpenID real-container contract, blocked on #48.
-- #92 — M4.1 create VEVENT-only calendar collections from the widget. This is the smallest independent user-facing M4 slice and may proceed while #48 is externally blocked.
+- #98 / PR #99 — M4 calendar rename slice. #92 / PR #94 calendar creation is merged.
 - #29 — enable main-branch protection once repository-rules administration is available.
 
 ## Highest-priority next steps
 
 1. Implement #48 in a writable upstream/forked `radicale-auth-matrix` repository; do not copy GPL/LGPL-family plugin code into this Apache-licensed repository.
 2. Land #45's final gateway/OpenID/non-member real-container contract and close M2.
-3. In parallel while #48 is blocked, implement #92 only: friendly VEVENT-only calendar creation through the existing repository/gateway seams.
-4. After #92, reassess before broadening M4. Do not pre-build generic WebDAV administration.
+3. In parallel while #48 is blocked, finish #98 / PR #99: rename writable calendars through the existing repository/gateway seams.
+4. After rename lands, reassess before description/color/timezone or delete work. Do not pre-build generic WebDAV administration.
 
 ## Working rules
 
