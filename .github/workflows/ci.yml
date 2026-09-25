@@ -30,10 +30,7 @@ jobs:
         run: yarn install --frozen-lockfile
 
       - name: Check formatting
-        run: |
-          yarn prettier:write
-          git diff -- .
-          exit 1
+        run: yarn prettier:check
 
       - name: Check fork identity
         run: bash scripts/check-fork-identity.sh
@@ -77,10 +74,7 @@ jobs:
         run: yarn workspace @matrix-calendar-widget/widget lint
 
       - name: Check widget translations
-        run: |
-          yarn workspace @matrix-calendar-widget/widget translate
-          git diff -- matrix-calendar-widget/public/locales
-          exit 1
+        run: yarn workspace @matrix-calendar-widget/widget translate --ci --dry-run
 
       - name: Test widget
         run: yarn workspace @matrix-calendar-widget/widget test:all
