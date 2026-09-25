@@ -15,6 +15,7 @@
  */
 
 export { CalendarCreateDialog } from './CalendarCreateDialog';
+export { CalendarDeleteDialog } from './CalendarDeleteDialog';
 export { CalendarEventDetailsDialog } from './CalendarEventDetailsDialog';
 export { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 export { CalendarEventsSurface } from './CalendarEventsSurface';
