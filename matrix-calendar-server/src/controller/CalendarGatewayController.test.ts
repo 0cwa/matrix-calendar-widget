@@ -257,7 +257,11 @@ describe('CalendarGatewayController', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it.each([calendarUrl, 'other-room-calendar'])(
+  it.each([
+    calendarUrl,
+    'https://radicale.example.test/alice/unbound/',
+    'other-room-calendar',
+  ])(
     'rejects caller-selected room calendar targets before any CalDAV factory call (%s)',
     async (requestedCalendarId) => {
       isAllowed.mockResolvedValue(true);
