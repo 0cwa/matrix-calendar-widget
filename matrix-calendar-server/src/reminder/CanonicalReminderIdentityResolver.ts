@@ -151,14 +151,8 @@ function selectDisplayAlarm(
   alarmUid: string,
 ): ICAL.Component | undefined {
   const matches: ICAL.Component[] = [];
+  const seenUids = new Set<string>();
   for (const alarm of event.getAllSubcomponents('valarm')) {
-    const actions = alarm.getAllProperties('action');
-    if (
-      actions.length !== 1 ||
-      String(actions[0].getFirstValue()).toUpperCase() !== 'DISPLAY'
-    ) {
-      continue;
-    }
     const uids = alarm.getAllProperties('uid');
     // UID-less legacy alarms remain valid calendar data but cannot be selected.
     if (uids.length === 0) {
@@ -170,6 +164,18 @@ function selectDisplayAlarm(
     const uid = uids[0].getFirstValue();
     if (typeof uid !== 'string' || !isValidIdentity(uid)) {
       throw new CanonicalReminderResolutionError('invalid-alarm-identity');
+    }
+    if (seenUids.has(uid)) {
+      throw new CanonicalReminderResolutionError('ambiguous-alarm');
+    }
+    seenUids.add(uid);
+
+    const actions = alarm.getAllProperties('action');
+    if (
+      actions.length !== 1 ||
+      String(actions[0].getFirstValue()).toUpperCase() !== 'DISPLAY'
+    ) {
+      continue;
     }
     if (uid === alarmUid) {
       matches.push(alarm);

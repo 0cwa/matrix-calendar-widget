@@ -100,6 +100,67 @@ describe('resolveCanonicalReminderIdentity', () => {
       'END:VALARM\nBEGIN:VALARM\nUID:master-alarm@example.test\nACTION:DISPLAY\nTRIGGER:-PT5M\nDESCRIPTION:second private alarm\nEND:VALARM\nEND:VEVENT',
     );
     expectResolutionError(masterIdentity, duplicateAlarm, 'ambiguous-alarm');
+
+    const displayEmailCollision = resource.replace(
+      'END:VALARM\nEND:VEVENT\nBEGIN:VEVENT\nUID:team-planning@example.test',
+      'END:VALARM\nBEGIN:VALARM\nUID:master-alarm@example.test\nACTION:EMAIL\nTRIGGER:-PT5M\nATTENDEE:mailto:recipient@example.test\nEND:VALARM\nEND:VEVENT\nBEGIN:VEVENT\nUID:team-planning@example.test',
+    );
+    expectResolutionError(
+      masterIdentity,
+      displayEmailCollision,
+      'ambiguous-alarm',
+    );
+  });
+
+  it.each([
+    {
+      label: 'DATE',
+      recurrenceKey: JSON.stringify(['date', '2026-10-12']),
+      masterStart: 'DTSTART;VALUE=DATE:20261005',
+      masterEnd: 'DTEND;VALUE=DATE:20261006',
+      recurrenceLine: 'RECURRENCE-ID;VALUE=DATE:20261012',
+      overrideStart: 'DTSTART;VALUE=DATE:20261012',
+      overrideEnd: 'DTEND;VALUE=DATE:20261013',
+    },
+    {
+      label: 'floating DATE-TIME',
+      recurrenceKey: JSON.stringify([
+        'date-time',
+        'floating',
+        '',
+        '2026-10-12T09:00:00',
+      ]),
+      masterStart: 'DTSTART:20261005T090000',
+      masterEnd: 'DTEND:20261005T100000',
+      recurrenceLine: 'RECURRENCE-ID:20261012T090000',
+      overrideStart: 'DTSTART:20261012T110000',
+      overrideEnd: 'DTEND:20261012T120000',
+    },
+    {
+      label: 'UTC DATE-TIME',
+      recurrenceKey: JSON.stringify([
+        'date-time',
+        'utc',
+        '',
+        '2026-10-12T09:00:00',
+      ]),
+      masterStart: 'DTSTART:20261005T090000Z',
+      masterEnd: 'DTEND:20261005T100000Z',
+      recurrenceLine: 'RECURRENCE-ID:20261012T090000Z',
+      overrideStart: 'DTSTART:20261012T110000Z',
+      overrideEnd: 'DTEND:20261012T120000Z',
+    },
+  ])('resolves canonical $label recurrence keys', (recurrence) => {
+    const identity = {
+      ...overrideIdentity,
+      recurrenceId: recurrence.recurrenceKey,
+    };
+    expect(
+      resolveCanonicalReminderIdentity(
+        identity,
+        recurrenceResource(recurrence),
+      ),
+    ).toEqual({ resolved: true, identity });
   });
 
   it('fails closed for duplicate master components with the same event UID', () => {
@@ -193,4 +254,37 @@ function expectResolutionError(
     expect(error).toBeInstanceOf(CanonicalReminderResolutionError);
     expect((error as CanonicalReminderResolutionError).code).toBe(code);
   }
+}
+
+function recurrenceResource(recurrence: {
+  masterStart: string;
+  masterEnd: string;
+  recurrenceLine: string;
+  overrideStart: string;
+  overrideEnd: string;
+}): string {
+  return `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Matrix Calendar Widget//Recurrence Key Test//EN
+BEGIN:VEVENT
+UID:team-planning@example.test
+DTSTAMP:20260926T120000Z
+${recurrence.masterStart}
+${recurrence.masterEnd}
+RRULE:FREQ=WEEKLY;COUNT=3
+END:VEVENT
+BEGIN:VEVENT
+UID:team-planning@example.test
+DTSTAMP:20260926T120000Z
+${recurrence.recurrenceLine}
+${recurrence.overrideStart}
+${recurrence.overrideEnd}
+BEGIN:VALARM
+UID:override-alarm@example.test
+ACTION:DISPLAY
+TRIGGER:-PT15M
+DESCRIPTION:Occurrence reminder
+END:VALARM
+END:VEVENT
+END:VCALENDAR`;
 }
