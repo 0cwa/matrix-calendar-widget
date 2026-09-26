@@ -29,6 +29,7 @@ export type {
   CalendarEventInput,
   CalendarEventPatch,
   CalendarEventRecurrence,
+  CalendarEventRecurrenceOverride,
   CalendarEventStatus,
   CalendarEventTiming,
   CalendarEventTransparency,

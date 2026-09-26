@@ -172,6 +172,110 @@ describe('ICalendarEventCodec', () => {
     expect(event?.getFirstPropertyValue('status')).toBe('TENTATIVE');
   });
 
+  it('maps all VEVENTs in a recurrence resource and preserves moved identity', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-override.ics',
+      fixture('recurrence-override.ics'),
+    );
+
+    expect(parsed.event.recurrence).toMatchObject({
+      rrule: 'FREQ=WEEKLY;COUNT=4',
+      rdates: [
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-10-26T14:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      ],
+      exdates: [
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-11-02T14:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      ],
+      overrides: [
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-12T14:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          title: 'Weekly review - moved',
+          timing: {
+            type: 'timed',
+            start: {
+              local: '2026-10-12T16:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+            end: {
+              local: '2026-10-12T17:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        },
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-19T14:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          status: 'cancelled',
+          timing: undefined,
+        },
+      ],
+    });
+
+    const encoded = parsed.applyPatch({ title: 'Weekly review updated' });
+    const calendar = ICAL.Component.fromString(encoded.icalendar);
+    const vevents = calendar.getAllSubcomponents('vevent');
+    const override = vevents[1];
+    const cancelledOverride = vevents[2];
+
+    expect(vevents).toHaveLength(3);
+    expect(vevents[0].getFirstPropertyValue('summary')).toBe(
+      'Weekly review updated',
+    );
+    expect(override.getFirstPropertyValue('recurrence-id')?.toString()).toBe(
+      '2026-10-12T14:00:00',
+    );
+    expect(override.getFirstPropertyValue('dtstart')?.toString()).toBe(
+      '2026-10-12T16:00:00',
+    );
+    expect(override.getFirstPropertyValue('x-override-marker')).toBe(
+      'preserve-exception',
+    );
+    expect(
+      override
+        .getFirstProperty('x-override-marker')
+        ?.getFirstParameter('x-origin'),
+    ).toBe('external');
+    expect(calendar.getFirstPropertyValue('x-custom-calendar-property')).toBe(
+      'preserve-resource-value',
+    );
+    expect(
+      calendar.getFirstSubcomponent('vtimezone')?.getFirstPropertyValue('tzid'),
+    ).toBe('Europe/Stockholm');
+    expect(
+      vevents[0]
+        .getFirstProperty('x-client-metadata')
+        ?.getFirstParameter('x-param'),
+    ).toBe('preserve-param');
+    expect(
+      cancelledOverride.getFirstPropertyValue('recurrence-id')?.toString(),
+    ).toBe('2026-10-19T14:00:00');
+    expect(cancelledOverride.getFirstPropertyValue('status')).toBe('CANCELLED');
+  });
+
   it('decodes folded and escaped text without destructive re-encoding', () => {
     const parsed = codec.parse(
       'team',

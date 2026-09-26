@@ -127,6 +127,71 @@ describe('InMemoryCalendarRepository', () => {
     });
   });
 
+  it('returns defensive copies of recurrence override metadata', async () => {
+    const repository = createRepository();
+    const recurrence = {
+      rrule: 'FREQ=WEEKLY',
+      overrides: [
+        {
+          recurrenceId: {
+            type: 'date-time' as const,
+            value: {
+              local: '2026-10-12T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          title: 'Moved sync',
+          timing: {
+            type: 'timed' as const,
+            start: {
+              local: '2026-10-12T11:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+            end: {
+              local: '2026-10-12T11:30:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          categories: ['TEAM'],
+        },
+      ],
+    };
+
+    await repository.updateEvent('team', 'old-recurring', { recurrence });
+    const event = await repository.getEvent('team', 'old-recurring');
+    event.recurrence!.overrides![0].title = 'Caller mutation';
+    const overrideTiming = event.recurrence!.overrides![0].timing;
+    if (overrideTiming?.type === 'timed') {
+      overrideTiming.start.local = '2026-10-12T12:00:00';
+    }
+    event.recurrence!.overrides![0].categories!.push('MUTATED');
+
+    await expect(
+      repository.getEvent('team', 'old-recurring'),
+    ).resolves.toMatchObject({
+      recurrence: {
+        overrides: [
+          {
+            title: 'Moved sync',
+            recurrenceId: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-12T09:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            timing: {
+              start: {
+                local: '2026-10-12T11:00:00',
+              },
+            },
+            categories: ['TEAM'],
+          },
+        ],
+      },
+    });
+  });
+
   it('renames a writable calendar while preserving other fields', async () => {
     const repository = createRepository();
 

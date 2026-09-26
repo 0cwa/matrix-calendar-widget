@@ -14,11 +14,15 @@
  * limitations under the License.
  */
 
+import fs from 'fs';
+import ICAL from 'ical.js';
+import path from 'path';
 import { CalDavCredentialProvider } from './CalDavCredentialProvider';
 import {
   CalDavEventClient,
   CalDavEventTransportError,
 } from './CalDavEventClient';
+import { ICalendarEventCodec } from './ICalendarEventCodec';
 
 const credentialProvider: CalDavCredentialProvider = {
   getRequestHeaders: async () => ({
@@ -314,6 +318,66 @@ END:VCALENDAR</c:calendar-data>
     expect(init?.method).toBe('PUT');
     expect(headers.get('If-Match')).toBe('"old-etag"');
     expect(headers.get('If-None-Match')).toBeNull();
+  });
+
+  it('round-trips one complete recurring resource through GET and conditional PUT', async () => {
+    const icalendar = fs.readFileSync(
+      path.resolve(__dirname, '../../../fixtures/ical/recurrence-override.ics'),
+      'utf8',
+    );
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValueOnce(
+        new Response(icalendar, {
+          status: 200,
+          headers: { ETag: '"resource-etag"' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('', {
+          status: 204,
+          headers: { ETag: '"updated-resource-etag"' },
+        }),
+      );
+    const client = new CalDavEventClient(credentialProvider, fetchMock);
+    const codec = new ICalendarEventCodec();
+    const resourceUrl =
+      'https://radicale.example.test/alice/events/recurring.ics';
+
+    const resource = await client.getEvent(resourceUrl);
+    const parsed = codec.parse('team', resource.href, resource.icalendar);
+    expect(parsed.event.recurrence?.overrides).toHaveLength(2);
+    const encoded = parsed.applyPatch({ title: 'Updated weekly review' });
+
+    await expect(
+      client.updateEvent(resource.href, resource.etag, encoded.icalendar),
+    ).resolves.toEqual({
+      href: resourceUrl,
+      etag: '"updated-resource-etag"',
+    });
+
+    const [, put] = fetchMock.mock.calls[1];
+    expect(put?.method).toBe('PUT');
+    expect(new Headers(put?.headers).get('If-Match')).toBe('"resource-etag"');
+    const written = ICAL.Component.fromString(String(put?.body));
+    expect(written.getAllSubcomponents('vevent')).toHaveLength(3);
+    expect(
+      written.getFirstSubcomponent('vtimezone')?.getFirstPropertyValue('tzid'),
+    ).toBe('Europe/Stockholm');
+    expect(written.getFirstPropertyValue('x-custom-calendar-property')).toBe(
+      'preserve-resource-value',
+    );
+    const writtenEvents = written.getAllSubcomponents('vevent');
+    expect(
+      writtenEvents[1].getFirstPropertyValue('recurrence-id')?.toString(),
+    ).toBe('2026-10-12T14:00:00');
+    expect(writtenEvents[1].getFirstPropertyValue('dtstart')?.toString()).toBe(
+      '2026-10-12T16:00:00',
+    );
+    expect(
+      writtenEvents[2].getFirstPropertyValue('recurrence-id')?.toString(),
+    ).toBe('2026-10-19T14:00:00');
+    expect(writtenEvents[2].getFirstPropertyValue('status')).toBe('CANCELLED');
   });
 
   it('deletes an event with If-Match and tolerates a success response without ETag', async () => {

@@ -415,6 +415,18 @@ function cloneRecurrence(
         recurrenceId: recurrence.recurrenceId
           ? cloneCalendarEventDateTime(recurrence.recurrenceId)
           : undefined,
+        overrides: recurrence.overrides?.map((override) => ({
+          ...override,
+          recurrenceId: cloneCalendarEventDateTime(override.recurrenceId),
+          timing: override.timing
+            ? override.timing.type === 'timed'
+              ? cloneTimedTiming(override.timing)
+              : cloneAllDayTiming(override.timing)
+            : undefined,
+          categories: override.categories
+            ? [...override.categories]
+            : undefined,
+        })),
       }
     : undefined;
 }

@@ -72,6 +72,23 @@ export type CalendarEventStatus = 'confirmed' | 'tentative' | 'cancelled';
 export type CalendarEventTransparency = 'opaque' | 'transparent';
 
 /**
+ * Supported fields from one RECURRENCE-ID VEVENT in a recurring resource.
+ * The recurrenceId remains the original series start even if timing moves.
+ */
+export type CalendarEventRecurrenceOverride = {
+  recurrenceId: CalendarEventDateTime;
+  title?: string;
+  description?: string;
+  timing?: CalendarEventTiming;
+  status?: CalendarEventStatus;
+  transparency?: CalendarEventTransparency;
+  location?: string;
+  url?: string;
+  categories?: string[];
+  priority?: number;
+};
+
+/**
  * Recurrence source metadata.
  *
  * The RRULE string intentionally remains iCalendar-compatible so the existing
@@ -82,6 +99,8 @@ export type CalendarEventRecurrence = {
   rdates?: CalendarEventDateTime[];
   exdates?: CalendarEventDateTime[];
   recurrenceId?: CalendarEventDateTime;
+  /** Sibling exception VEVENTs carried by the same CalDAV resource. */
+  overrides?: CalendarEventRecurrenceOverride[];
 };
 
 export type Calendar = {
