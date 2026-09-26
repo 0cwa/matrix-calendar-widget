@@ -1,14 +1,16 @@
 # Project status
 
-_Last updated: 2026-09-25_
+_Last updated: 2026-09-26_
 
 This file is the short-lived execution snapshot. `docs/PLAN.md` is the durable milestone plan; GitHub issues contain acceptance criteria.
 
 ## Current phase
 
-**M3 is complete. Close the external M2 auth blocker while advancing only small, independently useful M4 slices in parallel.**
+**M3 is complete. M5 recurrence slices are implemented locally; the pinned Radicale interoperability exit check remains active.**
 
 The widget now has a real gateway-backed `CalendarRepository`, preservation-first VEVENT CRUD, visible conflict recovery, and a real two-client Radicale interoperability contract. The remaining M2 blocker is external: the pinned `etkecc/radicale-auth-matrix` plugin still only accepts Matrix passwords, while ADR009 requires short-lived Matrix OpenID delegation from the gateway.
+
+M5 recurrence editing, same-resource instance/following overrides, recurrence-set safety, occurrence presentation, property preservation, and DISPLAY alarm editing are locally implemented. The remaining M5 gate is an end-to-end recurring-resource create/read/patch against the pinned Radicale 3.8.0.0 harness. The contract test is added, but local execution is blocked: `bash dev/up.sh` exited 1 because `/var/run/docker.sock` is absent, and the approved Podman Compose path rejected the pinned Synapse v1.161.0 image before any service started. Radicale alone cannot authenticate this harness because `radicale-auth-matrix` delegates password checks to Synapse. The test remains unverified against a server and M5 stays open; no image substitution or live service was used.
 
 ## Landed
 
@@ -70,6 +72,7 @@ Complete on `main`:
 - #48 — external `radicale-auth-matrix` OpenID delegation. No writable `0cwa/radicale-auth-matrix` fork exists and the available GitHub connector cannot create/fork repositories.
 - #45 — final delegated gateway/OpenID real-container contract, blocked on #48.
 - #100 / PR #101 — M4 safe calendar deletion; implementation is present, but the branch currently diverges from `main` after #99 merged and must be synced before merge.
+- #6 / M5 — the pinned Radicale recurring-resource create/read/patch contract remains unverified until the supported container runtime is available.
 - #29 — enable main-branch protection once repository-rules administration is available.
 
 ## Highest-priority next steps

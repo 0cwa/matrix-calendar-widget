@@ -90,12 +90,16 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [x] Preserve organizer and repeated attendee values/parameters across supported patches.
 - [x] Preserve repeated ATTACH and CONFERENCE values, types, and parameters; the server codec performs no automatic URI fetch.
 - [x] Edit trigger and description on existing DISPLAY alarms while unsupported actions remain inert (ADR018).
+- [x] Add a gated Radicale contract for recurring-resource create/read/patch with a master, moved and cancelled overrides, RRULE/RDATE/EXDATE, and a named timezone in one resource.
+- [ ] Run that recurring-resource contract against pinned Radicale 3.8.0.0; local runtime blocker and exact command are recorded in `docs/STATUS.md`.
 
 The current series editor locks timed/all-day conversion while recurrence data is present. Visible recurring occurrences retain their backing resource ID and original recurrence ID. Editing or cancelling one instance uses a same-resource conditional override and leaves the master and sibling occurrences intact. A separate timing-only “this and following” action writes RFC 5545 `RANGE=THISANDFUTURE`; it keeps the original recurrence identity, changes start time and duration from that boundary forward, and refuses unknown or unsupported boundary data before PUT. Whole-series edit semantics remain separate work.
 
 Series edits that change occurrence membership are checked against every existing detached exception before the resource is written. The server preserves exceptions whose exact original recurrence identities remain and refuses edits that remove an identity or whose membership cannot be proven; it does not remap or delete exceptions.
 
 The fixture-backed server codec check asserts that parsing and patching do not fetch stored URIs; it does not exercise browser navigation. The DISPLAY alarm editor changes only the trigger and description of existing DISPLAY alarms; unsupported actions remain inert. Adding or removing alarms, alarm execution, Matrix reminder scheduling, and attachment/conference UI actions remain separate work.
+
+The gated recurring-resource CalDAV contract is defined in `matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts`. M5 remains open until that contract passes against the pinned Radicale service; see `docs/STATUS.md` for the current local runtime blocker.
 
 **Exit:** common recurring calendars round-trip with mainstream CalDAV clients.
 
