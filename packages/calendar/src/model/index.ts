@@ -26,6 +26,8 @@ export type {
   CalendarDateTimeMode,
   CalendarEvent,
   CalendarEventDateTime,
+  CalendarEventDisplayAlarm,
+  CalendarEventDisplayAlarmEdit,
   CalendarEventId,
   CalendarEventInput,
   CalendarEventOccurrence,

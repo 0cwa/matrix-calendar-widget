@@ -17,6 +17,8 @@
 import {
   CalendarEvent,
   CalendarEventDateTime,
+  CalendarEventDisplayAlarm,
+  CalendarEventDisplayAlarmEdit,
   CalendarEventExpansionError,
   CalendarEventId,
   CalendarEventInput,
@@ -140,6 +142,13 @@ export class ParsedICalendarEvent {
     if (hasOwn(patch, 'priority')) {
       setOptionalProperty(vevent, 'priority', patch.priority);
     }
+    if (patch.displayAlarmEdits !== undefined) {
+      setDisplayAlarmEdits(
+        vevent,
+        patch.displayAlarmEdits,
+        this.event.displayAlarms ?? [],
+      );
+    }
     if (hasOwn(patch, 'recurrence')) {
       setRecurrence(
         vevent,
@@ -167,10 +176,19 @@ export class ParsedICalendarEvent {
       );
     }
 
+    const { displayAlarmEdits, ...eventPatch } = patch;
+    const displayAlarms = displayAlarmEdits
+      ? applyDisplayAlarmEdits(
+          this.event.displayAlarms ?? [],
+          displayAlarmEdits,
+        )
+      : this.event.displayAlarms;
+
     return {
       event: {
         ...this.event,
-        ...patch,
+        ...eventPatch,
+        ...(displayAlarms ? { displayAlarms } : {}),
         title: patch.title ?? this.event.title,
         timing: normalizeTiming(patch.timing ?? this.event.timing),
       },
@@ -745,6 +763,7 @@ export class ICalendarEventCodec {
     const timing = readTiming(vevent);
 
     const recurrence = readRecurrence(calendar, vevent, uid);
+    const displayAlarms = readDisplayAlarms(vevent);
     const hasUnsupportedRangedOverride = hasUnsupportedRangedRecurrenceOverride(
       calendar,
       vevent,
@@ -764,6 +783,7 @@ export class ICalendarEventCodec {
       categories: readCategories(vevent),
       priority: numberValue(vevent.getFirstPropertyValue('priority')),
       ...(recurrence ? { recurrence } : {}),
+      ...(displayAlarms ? { displayAlarms } : {}),
       ...(hasUnsupportedRangedOverride
         ? { unsupportedRecurrence: 'ranged-override' }
         : {}),
@@ -1267,6 +1287,202 @@ function readCategories(vevent: ICAL.Component): string[] | undefined {
     });
 
   return categories.length > 0 ? categories : undefined;
+}
+
+function readDisplayAlarms(
+  vevent: ICAL.Component,
+): CalendarEventDisplayAlarm[] | undefined {
+  const alarms = vevent.getAllSubcomponents('valarm');
+  const displayAlarms = alarms.flatMap((alarm, index) => {
+    const actionProperties = alarm.getAllProperties('action');
+    if (
+      actionProperties.length !== 1 ||
+      textValue(actionProperties[0].getFirstValue())?.toUpperCase() !==
+        'DISPLAY'
+    ) {
+      return [];
+    }
+
+    const trigger = readDisplayAlarmTrigger(alarm);
+    return [
+      {
+        index,
+        description: textValue(
+          alarm.getFirstProperty('description')?.getFirstValue(),
+        ),
+        ...(trigger ? trigger : {}),
+        triggerEditable: trigger !== undefined,
+      },
+    ];
+  });
+
+  return displayAlarms.length > 0 ? displayAlarms : undefined;
+}
+
+function readDisplayAlarmTrigger(
+  alarm: ICAL.Component,
+):
+  | Pick<CalendarEventDisplayAlarm, 'triggerMinutes' | 'triggerRelatedTo'>
+  | undefined {
+  const properties = alarm.getAllProperties('trigger');
+  if (properties.length !== 1) {
+    return undefined;
+  }
+
+  const property = properties[0];
+  const value = property.getFirstValue();
+  if (!(value instanceof ICAL.Duration)) {
+    return undefined;
+  }
+
+  const seconds = value.toSeconds();
+  const minutes = seconds / 60;
+  const relatedValue = property.getFirstParameter('related');
+  const related =
+    typeof relatedValue === 'string'
+      ? relatedValue.toUpperCase()
+      : relatedValue;
+  if (
+    !Number.isSafeInteger(seconds) ||
+    !Number.isSafeInteger(minutes) ||
+    (related !== undefined && related !== 'START' && related !== 'END')
+  ) {
+    return undefined;
+  }
+
+  return {
+    triggerMinutes: minutes,
+    triggerRelatedTo: related === 'END' ? 'end' : 'start',
+  };
+}
+
+function setDisplayAlarmEdits(
+  vevent: ICAL.Component,
+  edits: CalendarEventDisplayAlarmEdit[],
+  supportedAlarms: CalendarEventDisplayAlarm[],
+): void {
+  if (!Array.isArray(edits)) {
+    throw unsupportedDisplayAlarmPatch('Alarm edits must be a list');
+  }
+
+  const alarms = vevent.getAllSubcomponents('valarm');
+  const editedIndexes = new Set<number>();
+
+  for (const edit of edits) {
+    if (!edit || typeof edit !== 'object') {
+      throw unsupportedDisplayAlarmPatch('An alarm edit is invalid');
+    }
+    if (!Number.isSafeInteger(edit.index) || edit.index < 0) {
+      throw unsupportedDisplayAlarmPatch('An alarm index is invalid');
+    }
+    if (editedIndexes.has(edit.index)) {
+      throw unsupportedDisplayAlarmPatch(
+        'A DISPLAY alarm can only be edited once per patch',
+      );
+    }
+    editedIndexes.add(edit.index);
+
+    const alarm = alarms[edit.index];
+    const projectedAlarm = supportedAlarms.find(
+      (candidate) => candidate.index === edit.index,
+    );
+    const actionProperties = alarm?.getAllProperties('action') ?? [];
+    if (
+      !alarm ||
+      !projectedAlarm ||
+      actionProperties.length !== 1 ||
+      textValue(actionProperties[0].getFirstValue())?.toUpperCase() !==
+        'DISPLAY'
+    ) {
+      throw unsupportedDisplayAlarmPatch(
+        'Only an existing DISPLAY alarm can be edited',
+      );
+    }
+
+    const hasTriggerEdit = edit.triggerMinutes !== undefined;
+    const hasDescriptionEdit = hasOwn(edit, 'description');
+    if (!hasTriggerEdit && !hasDescriptionEdit) {
+      throw unsupportedDisplayAlarmPatch(
+        'A DISPLAY alarm edit must change its trigger or description',
+      );
+    }
+
+    if (hasTriggerEdit) {
+      const triggerMinutes = edit.triggerMinutes;
+      if (
+        triggerMinutes === undefined ||
+        !projectedAlarm.triggerEditable ||
+        !Number.isSafeInteger(triggerMinutes) ||
+        !Number.isSafeInteger(triggerMinutes * 60)
+      ) {
+        throw unsupportedDisplayAlarmPatch(
+          'This DISPLAY alarm trigger cannot be represented as whole minutes',
+        );
+      }
+
+      if (triggerMinutes !== projectedAlarm.triggerMinutes) {
+        const triggerProperties = alarm.getAllProperties('trigger');
+        if (triggerProperties.length !== 1) {
+          throw unsupportedDisplayAlarmPatch(
+            'The DISPLAY alarm does not have one editable trigger',
+          );
+        }
+        triggerProperties[0].setValue(
+          ICAL.Duration.fromSeconds(triggerMinutes * 60),
+        );
+      }
+    }
+
+    if (hasDescriptionEdit) {
+      if (typeof edit.description !== 'string') {
+        throw unsupportedDisplayAlarmPatch(
+          'A DISPLAY alarm description must be text',
+        );
+      }
+
+      if (edit.description !== (projectedAlarm.description ?? '')) {
+        const descriptionProperties = alarm.getAllProperties('description');
+        if (descriptionProperties.length > 1) {
+          throw unsupportedDisplayAlarmPatch(
+            'The DISPLAY alarm has multiple descriptions',
+          );
+        }
+        if (descriptionProperties.length === 1) {
+          descriptionProperties[0].setValue(edit.description);
+        } else {
+          alarm.addPropertyWithValue('description', edit.description);
+        }
+      }
+    }
+  }
+}
+
+function applyDisplayAlarmEdits(
+  alarms: CalendarEventDisplayAlarm[],
+  edits: CalendarEventDisplayAlarmEdit[],
+): CalendarEventDisplayAlarm[] {
+  const byIndex = new Map(edits.map((edit) => [edit.index, edit]));
+  return alarms.map((alarm) => {
+    const edit = byIndex.get(alarm.index);
+    if (!edit) {
+      return { ...alarm };
+    }
+    return {
+      ...alarm,
+      ...(edit.triggerMinutes !== undefined
+        ? { triggerMinutes: edit.triggerMinutes }
+        : {}),
+      ...(edit.description !== undefined
+        ? { description: edit.description }
+        : {}),
+    };
+  });
+}
+
+function unsupportedDisplayAlarmPatch(
+  message: string,
+): ICalendarEventCodecError {
+  return new ICalendarEventCodecError('unsupported-patch', message);
 }
 
 function textValue(value: unknown): string | undefined {

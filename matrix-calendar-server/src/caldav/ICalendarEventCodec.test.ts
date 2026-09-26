@@ -155,6 +155,165 @@ describe('ICalendarEventCodec', () => {
     );
   });
 
+  it('edits only selected existing DISPLAY alarms and preserves unsupported siblings', () => {
+    const source = fixture('interoperable-properties.ics');
+    const parsed = codec.parse('team', 'interoperable-properties.ics', source);
+
+    expect(parsed.event.displayAlarms).toEqual([
+      {
+        index: 0,
+        description: 'First reminder',
+        triggerMinutes: -15,
+        triggerRelatedTo: 'start',
+        triggerEditable: true,
+      },
+      {
+        index: 1,
+        description: 'Second reminder',
+        triggerMinutes: -60,
+        triggerRelatedTo: 'start',
+        triggerEditable: true,
+      },
+    ]);
+
+    const sourceEvent =
+      ICAL.Component.fromString(source).getFirstSubcomponent('vevent');
+    const sourceAlarms = sourceEvent?.getAllSubcomponents('valarm') ?? [];
+    const encoded = parsed.applyPatch({
+      displayAlarmEdits: [
+        {
+          index: 0,
+          triggerMinutes: -30,
+          description: 'Updated first reminder',
+        },
+        { index: 1, triggerMinutes: -90 },
+      ],
+    });
+    const reparsed = codec.parse(
+      'team',
+      'interoperable-properties.ics',
+      encoded.icalendar,
+    );
+    const alarms =
+      ICAL.Component.fromString(encoded.icalendar)
+        .getFirstSubcomponent('vevent')
+        ?.getAllSubcomponents('valarm') ?? [];
+
+    expect(reparsed.event.displayAlarms).toMatchObject([
+      { index: 0, triggerMinutes: -30, description: 'Updated first reminder' },
+      { index: 1, triggerMinutes: -90, description: 'Second reminder' },
+    ]);
+    expect(alarms[0].getFirstPropertyValue('action')).toBe('DISPLAY');
+    expect(
+      alarms[0].getFirstProperty('trigger')?.getFirstParameter('related'),
+    ).toBe('START');
+    expect(alarms[0].getFirstPropertyValue('repeat')).toBe(2);
+    expect(alarms[0].getFirstPropertyValue('duration')?.toString()).toBe(
+      'PT5M',
+    );
+    expect(
+      alarms[0].getFirstProperty('description')?.getFirstParameter('language'),
+    ).toBe('en');
+    expect(
+      alarms[0]
+        .getFirstProperty('x-alarm-metadata')
+        ?.getFirstParameter('x-source'),
+    ).toBe('client-a');
+    expect(
+      alarms[1]
+        .getFirstProperty('x-alarm-metadata')
+        ?.getFirstParameter('x-source'),
+    ).toBe('client-b');
+    expect(alarms.slice(2).map((alarm) => alarm.toString())).toEqual(
+      sourceAlarms.slice(2).map((alarm) => alarm.toString()),
+    );
+  });
+
+  it('rejects edits targeting unsupported or missing alarm components', () => {
+    const parsed = codec.parse(
+      'team',
+      'interoperable-properties.ics',
+      fixture('interoperable-properties.ics'),
+    );
+
+    expect(() =>
+      parsed.applyPatch({
+        displayAlarmEdits: [{ index: 2, description: 'Activate email' }],
+      }),
+    ).toThrow('Only an existing DISPLAY alarm can be edited');
+    expect(() =>
+      parsed.applyPatch({
+        displayAlarmEdits: [{ index: 99, description: 'Missing alarm' }],
+      }),
+    ).toThrow('Only an existing DISPLAY alarm can be edited');
+    expect(() =>
+      parsed.applyPatch({
+        displayAlarmEdits: [
+          { index: 0, description: 'First edit' },
+          { index: 0, description: 'Duplicate edit' },
+        ],
+      }),
+    ).toThrow('A DISPLAY alarm can only be edited once per patch');
+    expect(() =>
+      parsed.applyPatch({
+        displayAlarmEdits: [{ index: 0, triggerMinutes: -15.5 }],
+      }),
+    ).toThrow(
+      'This DISPLAY alarm trigger cannot be represented as whole minutes',
+    );
+  });
+
+  it('keeps non-relative DISPLAY triggers read-only while allowing description edits', () => {
+    const parsed = codec.parse(
+      'team',
+      'absolute-alarm.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:absolute-alarm@example.test
+DTSTART:20261001T130000Z
+DTEND:20261001T140000Z
+SUMMARY:Absolute alarm
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER;VALUE=DATE-TIME:20261001T120000Z
+DESCRIPTION:Absolute trigger
+END:VALARM
+END:VEVENT
+END:VCALENDAR`,
+    );
+
+    expect(parsed.event.displayAlarms).toEqual([
+      {
+        index: 0,
+        description: 'Absolute trigger',
+        triggerEditable: false,
+      },
+    ]);
+    const descriptionEdit = parsed.applyPatch({
+      displayAlarmEdits: [
+        { index: 0, description: 'Updated absolute alarm description' },
+      ],
+    });
+    expect(
+      codec.parse('team', 'absolute-alarm.ics', descriptionEdit.icalendar).event
+        .displayAlarms,
+    ).toEqual([
+      {
+        index: 0,
+        description: 'Updated absolute alarm description',
+        triggerEditable: false,
+      },
+    ]);
+    expect(() =>
+      parsed.applyPatch({
+        displayAlarmEdits: [{ index: 0, triggerMinutes: -15 }],
+      }),
+    ).toThrow(
+      'This DISPLAY alarm trigger cannot be represented as whole minutes',
+    );
+  });
+
   it('preserves organizer and attendee data on patch', () => {
     const parsed = codec.parse(
       'team',

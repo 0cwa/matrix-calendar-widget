@@ -125,6 +125,27 @@ export type CalendarEventRecurrence = {
   overrides?: CalendarEventRecurrenceOverride[];
 };
 
+/**
+ * Editable projection of one existing DISPLAY VALARM. The index is its order
+ * among VALARM components in the resource and is valid only for that resource
+ * version; conditional updates protect it from stale edits.
+ */
+export type CalendarEventDisplayAlarm = {
+  index: number;
+  description?: string;
+  /** Relative trigger in whole minutes, when the source form is supported. */
+  triggerMinutes?: number;
+  triggerRelatedTo?: 'start' | 'end';
+  triggerEditable: boolean;
+};
+
+/** Narrow changes for existing DISPLAY VALARMs only. */
+export type CalendarEventDisplayAlarmEdit = {
+  index: number;
+  triggerMinutes?: number;
+  description?: string;
+};
+
 /** One expanded occurrence, retaining the stable original series identity. */
 export type CalendarEventOccurrence = Omit<CalendarEvent, 'recurrence'> & {
   recurrenceId: CalendarEventDateTime;
@@ -169,13 +190,15 @@ export type CalendarEvent = {
   priority?: number;
 
   recurrence?: CalendarEventRecurrence;
+  /** Existing master-event DISPLAY alarms only; unsupported actions are hidden. */
+  displayAlarms?: CalendarEventDisplayAlarm[];
   /** Opaque response-only marker; the source iCalendar component stays server-side. */
   unsupportedRecurrence?: string;
 };
 
 export type CalendarEventInput = Omit<
   CalendarEvent,
-  'id' | 'calendarId' | 'unsupportedRecurrence'
+  'id' | 'calendarId' | 'displayAlarms' | 'unsupportedRecurrence'
 >;
 
 /**
@@ -183,8 +206,13 @@ export type CalendarEventInput = Omit<
  * the stable iCalendar UID.
  */
 export type CalendarEventPatch = Partial<
-  Omit<CalendarEvent, 'id' | 'calendarId' | 'uid' | 'unsupportedRecurrence'>
->;
+  Omit<
+    CalendarEvent,
+    'id' | 'calendarId' | 'uid' | 'displayAlarms' | 'unsupportedRecurrence'
+  >
+> & {
+  displayAlarmEdits?: CalendarEventDisplayAlarmEdit[];
+};
 
 /** Editable values for one detached recurrence override, excluding series data. */
 export type CalendarEventOccurrencePatch = Omit<

@@ -20,18 +20,22 @@ export type {
   CalendarDiagnosticsRepository,
 } from './CalendarDiagnosticsRepository';
 export {
+  calendarEventDisplayAlarmEditsFromForm,
   calendarEventInputFromForm,
   calendarEventOccurrencePatchFromForm,
   calendarEventPatchFromForm,
   calendarEventTimingFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
+  hasInvalidCalendarEventDisplayAlarmFormValues,
   hasInvalidCalendarEventRecurrenceFormValues,
   hasRecurrenceDateTypeMismatch,
+  isInvalidCalendarEventDisplayAlarmTrigger,
   recurrenceDateValueFromForm,
   recurrenceDateValueMatchesTimingType,
 } from './calendarEventForm';
 export type {
+  CalendarEventDisplayAlarmFormValue,
   CalendarEventFormValues,
   CalendarEventRecurrenceDateMode,
   CalendarEventRecurrenceDateValue,

@@ -89,13 +89,13 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [x] Preserve SEQUENCE / DTSTAMP / CREATED / LAST-MODIFIED unchanged across supported patches.
 - [x] Preserve organizer and repeated attendee values/parameters across supported patches.
 - [x] Preserve repeated ATTACH and CONFERENCE values, types, and parameters; the server codec performs no automatic URI fetch.
-- [ ] DISPLAY alarm editor; alarm actions and Matrix reminder scheduling remain separate work.
+- [x] Edit trigger and description on existing DISPLAY alarms while unsupported actions remain inert (ADR018).
 
 The current series editor locks timed/all-day conversion while recurrence data is present. Visible recurring occurrences retain their backing resource ID and original recurrence ID. Editing or cancelling one instance uses a same-resource conditional override and leaves the master and sibling occurrences intact. A separate timing-only “this and following” action writes RFC 5545 `RANGE=THISANDFUTURE`; it keeps the original recurrence identity, changes start time and duration from that boundary forward, and refuses unknown or unsupported boundary data before PUT. Whole-series edit semantics remain separate work.
 
 Series edits that change occurrence membership are checked against every existing detached exception before the resource is written. The server preserves exceptions whose exact original recurrence identities remain and refuses edits that remove an identity or whose membership cannot be proven; it does not remap or delete exceptions.
 
-The fixture-backed server codec check asserts that parsing and patching do not fetch stored URIs; it does not exercise browser navigation. These checks cover preservation only and do not add alarm editing/execution, Matrix reminder scheduling, or attachment/conference UI actions; the DISPLAY alarm editor remains an incomplete M5 slice.
+The fixture-backed server codec check asserts that parsing and patching do not fetch stored URIs; it does not exercise browser navigation. The DISPLAY alarm editor changes only the trigger and description of existing DISPLAY alarms; unsupported actions remain inert. Adding or removing alarms, alarm execution, Matrix reminder scheduling, and attachment/conference UI actions remain separate work.
 
 **Exit:** common recurring calendars round-trip with mainstream CalDAV clients.
 

@@ -26,6 +26,7 @@ import {
   calendarEventPatchFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
+  hasInvalidCalendarEventDisplayAlarmFormValues,
   hasInvalidCalendarEventRecurrenceFormValues,
 } from './calendarEventForm';
 
@@ -218,6 +219,58 @@ describe('calendar event form adapter', () => {
         },
       },
     });
+  });
+
+  it('maps existing display alarms to narrow edits and validates minute triggers', () => {
+    const event: CalendarEvent = {
+      id: 'alarms',
+      calendarId: 'team',
+      uid: 'alarms@example.test',
+      title: 'Alarm test',
+      timing: {
+        type: 'timed',
+        start: { local: '2026-09-23T09:00', timezone: 'Europe/Stockholm' },
+        end: { local: '2026-09-23T10:00', timezone: 'Europe/Stockholm' },
+      },
+      displayAlarms: [
+        {
+          index: 0,
+          description: 'First reminder',
+          triggerMinutes: -15,
+          triggerRelatedTo: 'start',
+          triggerEditable: true,
+        },
+        {
+          index: 2,
+          description: 'Second reminder',
+          triggerEditable: false,
+        },
+      ],
+    };
+    const values = calendarEventToFormValues(event, calendar);
+
+    expect(calendarEventPatchFromForm(values)).not.toHaveProperty(
+      'displayAlarmEdits',
+    );
+    values.displayAlarms![0].triggerMinutes = '-30';
+    values.displayAlarms![0].description = 'Updated first reminder';
+    values.displayAlarms![1].description = 'Updated second reminder';
+
+    expect(hasInvalidCalendarEventDisplayAlarmFormValues(values)).toBe(false);
+    expect(calendarEventPatchFromForm(values).displayAlarmEdits).toEqual([
+      {
+        index: 0,
+        triggerMinutes: -30,
+        description: 'Updated first reminder',
+      },
+      { index: 2, description: 'Updated second reminder' },
+    ]);
+
+    values.displayAlarms![0].triggerMinutes = '';
+    expect(hasInvalidCalendarEventDisplayAlarmFormValues(values)).toBe(true);
+    expect(() => calendarEventPatchFromForm(values)).toThrow(
+      'Invalid display alarm trigger',
+    );
   });
 
   it('creates timed recurring input with explicit floating, UTC, and TZID values', () => {

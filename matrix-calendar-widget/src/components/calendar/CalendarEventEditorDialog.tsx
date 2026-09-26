@@ -57,8 +57,10 @@ import {
   calendarEventTimingFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
+  hasInvalidCalendarEventDisplayAlarmFormValues,
   hasInvalidCalendarEventRecurrenceFormValues,
   hasRecurrenceDateTypeMismatch,
+  isInvalidCalendarEventDisplayAlarmTrigger,
   recurrenceDateValueFromForm,
   recurrenceDateValueMatchesTimingType,
   useCalendarRepository,
@@ -223,6 +225,23 @@ export function CalendarEventEditorDialog({
       );
     };
 
+  const handleDisplayAlarmChange =
+    (index: number, field: 'triggerMinutes' | 'description') =>
+    (change: ChangeEvent<HTMLInputElement>) => {
+      setValues((current) =>
+        current
+          ? {
+              ...current,
+              displayAlarms: (current.displayAlarms ?? []).map((alarm) =>
+                alarm.index === index
+                  ? { ...alarm, [field]: change.target.value }
+                  : alarm,
+              ),
+            }
+          : current,
+      );
+    };
+
   const handleCalendarChange = (change: ChangeEvent<HTMLInputElement>) => {
     const calendarId = change.target.value;
     const calendar = calendars.find((candidate) => candidate.id === calendarId);
@@ -296,8 +315,16 @@ export function CalendarEventEditorDialog({
     values.timingType,
     values.timezone,
   );
+  const displayAlarmValidationError =
+    hasInvalidCalendarEventDisplayAlarmFormValues(values);
   const formValidationError =
     validationError ||
+    (displayAlarmValidationError
+      ? t(
+          'calendarEvents.editor.displayAlarmTriggerInvalid',
+          'Enter a whole number of minutes for each editable display alarm.',
+        )
+      : undefined) ||
     (recurrenceValidationError
       ? recurrenceDateTypeMismatch
         ? t(
@@ -601,6 +628,91 @@ export function CalendarEventEditorDialog({
                 value={values.description}
               />
             )}
+
+            {event &&
+              !occurrenceTarget &&
+              !followingTarget &&
+              (values.displayAlarms?.length ?? 0) > 0 && (
+                <Stack spacing={1}>
+                  <Typography component="h3" variant="subtitle1">
+                    {t(
+                      'calendarEvents.editor.displayAlarms',
+                      'Existing display reminders',
+                    )}
+                  </Typography>
+                  <Typography color="text.secondary" variant="body2">
+                    {t(
+                      'calendarEvents.editor.displayAlarmsHelp',
+                      'Only these existing display alarms can be edited. Other alarm actions stay unchanged and are not run.',
+                    )}
+                  </Typography>
+                  {(values.displayAlarms ?? []).map((alarm, index) => {
+                    const alarmNumber = index + 1;
+                    const triggerInvalid =
+                      isInvalidCalendarEventDisplayAlarmTrigger(alarm);
+                    const triggerHelper = triggerInvalid
+                      ? t(
+                          'calendarEvents.editor.displayAlarmTriggerInvalid',
+                          'Enter a whole number of minutes for each editable display alarm.',
+                        )
+                      : !alarm.triggerEditable
+                        ? t(
+                            'calendarEvents.editor.displayAlarmTriggerUnsupported',
+                            'This trigger format is preserved and cannot be edited here.',
+                          )
+                        : alarm.triggerRelatedTo === 'end'
+                          ? t(
+                              'calendarEvents.editor.displayAlarmTriggerEndHelp',
+                              'Minutes relative to the event end.',
+                            )
+                          : t(
+                              'calendarEvents.editor.displayAlarmTriggerStartHelp',
+                              'Minutes relative to the event start.',
+                            );
+
+                    return (
+                      <Stack key={alarm.index} spacing={1}>
+                        <Typography component="h4" variant="body1">
+                          {t(
+                            'calendarEvents.editor.displayAlarmLabel',
+                            'Display alarm {{number}}',
+                            { number: alarmNumber },
+                          )}
+                        </Typography>
+                        <TextField
+                          disabled={!alarm.triggerEditable}
+                          error={triggerInvalid}
+                          helperText={triggerHelper}
+                          inputProps={{ step: 1 }}
+                          label={t(
+                            'calendarEvents.editor.displayAlarmTrigger',
+                            'Display alarm {{number}} trigger offset (minutes)',
+                            { number: alarmNumber },
+                          )}
+                          onChange={handleDisplayAlarmChange(
+                            alarm.index,
+                            'triggerMinutes',
+                          )}
+                          type="number"
+                          value={alarm.triggerMinutes}
+                        />
+                        <TextField
+                          label={t(
+                            'calendarEvents.editor.displayAlarmDescription',
+                            'Display alarm {{number}} description',
+                            { number: alarmNumber },
+                          )}
+                          onChange={handleDisplayAlarmChange(
+                            alarm.index,
+                            'description',
+                          )}
+                          value={alarm.description}
+                        />
+                      </Stack>
+                    );
+                  })}
+                </Stack>
+              )}
 
             {!occurrenceTarget && !followingTarget && (
               <Stack spacing={1}>

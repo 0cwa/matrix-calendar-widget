@@ -635,6 +635,45 @@ describe('InMemoryCalendarRepository', () => {
     );
   });
 
+  it('applies narrow DISPLAY alarm edits without returning request fields', async () => {
+    const alarmEvent: CalendarEvent = {
+      ...events[0],
+      displayAlarms: [
+        {
+          index: 0,
+          description: 'Reminder',
+          triggerMinutes: -15,
+          triggerRelatedTo: 'start',
+          triggerEditable: true,
+        },
+      ],
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [alarmEvent],
+    });
+
+    await expect(
+      repository.updateEvent('team', 'planning', {
+        displayAlarmEdits: [
+          { index: 0, triggerMinutes: -30, description: 'Updated reminder' },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      displayAlarms: [
+        {
+          index: 0,
+          description: 'Updated reminder',
+          triggerMinutes: -30,
+          triggerEditable: true,
+        },
+      ],
+    });
+    await expect(
+      repository.getEvent('team', 'planning'),
+    ).resolves.not.toHaveProperty('displayAlarmEdits');
+  });
+
   it('deletes an event', async () => {
     const repository = createRepository();
 

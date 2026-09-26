@@ -20,6 +20,7 @@ import {
   Calendar,
   CalendarEvent,
   CalendarEventDateTime,
+  CalendarEventDisplayAlarmEdit,
   CalendarEventId,
   CalendarEventInput,
   CalendarEventOccurrencePatch,
@@ -209,10 +210,21 @@ export class InMemoryCalendarRepository implements CalendarRepository {
   ): Promise<CalendarEvent> {
     this.getWritableCalendar(calendarId);
     const current = this.getStoredEvent(calendarId, eventId);
+    const clonedPatch = cloneCalendarEventPatch(patch);
+    const displayAlarmEdits = clonedPatch.displayAlarmEdits;
+    delete clonedPatch.displayAlarmEdits;
 
     const updated: CalendarEvent = {
       ...current,
-      ...cloneCalendarEventPatch(patch),
+      ...clonedPatch,
+      ...(displayAlarmEdits
+        ? {
+            displayAlarms: applyDisplayAlarmEdits(
+              current.displayAlarms ?? [],
+              displayAlarmEdits,
+            ),
+          }
+        : {}),
       id: current.id,
       calendarId: current.calendarId,
       uid: current.uid,
@@ -627,6 +639,7 @@ function cloneCalendarEvent(event: CalendarEvent): CalendarEvent {
         ? cloneTimedTiming(event.timing)
         : cloneAllDayTiming(event.timing),
     categories: event.categories ? [...event.categories] : undefined,
+    displayAlarms: event.displayAlarms?.map((alarm) => ({ ...alarm })),
     recurrence: cloneRecurrence(event.recurrence),
   };
 }
@@ -687,6 +700,12 @@ function cloneCalendarEventPatch(
 ): CalendarEventPatch {
   const cloned: CalendarEventPatch = { ...patch };
 
+  if (patch.displayAlarmEdits) {
+    cloned.displayAlarmEdits = patch.displayAlarmEdits.map((edit) => ({
+      ...edit,
+    }));
+  }
+
   if (patch.timing) {
     cloned.timing =
       patch.timing.type === 'timed'
@@ -703,6 +722,58 @@ function cloneCalendarEventPatch(
   }
 
   return cloned;
+}
+
+function applyDisplayAlarmEdits(
+  alarms: NonNullable<CalendarEvent['displayAlarms']>,
+  edits: CalendarEventDisplayAlarmEdit[],
+): NonNullable<CalendarEvent['displayAlarms']> {
+  const byIndex = new Map(edits.map((edit) => [edit.index, edit]));
+  if (byIndex.size !== edits.length) {
+    throw new CalendarRepositoryError(
+      'request-failed',
+      'A DISPLAY alarm can only be edited once per patch',
+    );
+  }
+
+  for (const [index, edit] of byIndex) {
+    const alarm = alarms.find((candidate) => candidate.index === index);
+    if (!alarm) {
+      throw new CalendarRepositoryError(
+        'request-failed',
+        'Only an existing DISPLAY alarm can be edited',
+      );
+    }
+    if (
+      (edit.triggerMinutes !== undefined && !alarm.triggerEditable) ||
+      (edit.triggerMinutes !== undefined &&
+        (!Number.isSafeInteger(edit.triggerMinutes) ||
+          !Number.isSafeInteger(edit.triggerMinutes * 60))) ||
+      (edit.description !== undefined &&
+        typeof edit.description !== 'string') ||
+      (edit.triggerMinutes === undefined && edit.description === undefined)
+    ) {
+      throw new CalendarRepositoryError(
+        'request-failed',
+        'The DISPLAY alarm edit is not supported',
+      );
+    }
+  }
+
+  return alarms.map((alarm) => {
+    const edit = byIndex.get(alarm.index);
+    return edit
+      ? {
+          ...alarm,
+          ...(edit.triggerMinutes !== undefined
+            ? { triggerMinutes: edit.triggerMinutes }
+            : {}),
+          ...(edit.description !== undefined
+            ? { description: edit.description }
+            : {}),
+        }
+      : { ...alarm };
+  });
 }
 
 function cloneCalendarEventOccurrencePatch(

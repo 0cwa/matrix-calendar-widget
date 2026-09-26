@@ -18,6 +18,8 @@ import {
   Calendar,
   CalendarEvent,
   CalendarEventDateTime,
+  CalendarEventDisplayAlarm,
+  CalendarEventDisplayAlarmEdit,
   CalendarEventInput,
   CalendarEventOccurrencePatch,
   CalendarEventPatch,
@@ -55,6 +57,16 @@ export type CalendarEventRecurrenceFormValues = {
   exdatesEdited: boolean;
 };
 
+export type CalendarEventDisplayAlarmFormValue = {
+  index: number;
+  originalTriggerMinutes?: number;
+  triggerMinutes: string;
+  triggerEditable: boolean;
+  triggerRelatedTo?: 'start' | 'end';
+  originalDescription?: string;
+  description: string;
+};
+
 export type CalendarEventFormValues = {
   calendarId: CalendarId;
   title: string;
@@ -65,6 +77,7 @@ export type CalendarEventFormValues = {
   end: string;
   timezone: string;
   recurrence: CalendarEventRecurrenceFormValues;
+  displayAlarms?: CalendarEventDisplayAlarmFormValue[];
 };
 
 export function createCalendarEventFormValues(
@@ -109,6 +122,9 @@ export function calendarEventToFormValues(
         'all-day',
         calendar.timezone ?? DateTime.local().zoneName,
       ),
+      displayAlarms: displayAlarmsFormValuesFromDomain(
+        event.displayAlarms ?? [],
+      ),
     };
   }
 
@@ -130,6 +146,7 @@ export function calendarEventToFormValues(
       'timed',
       event.timing.start.timezone,
     ),
+    displayAlarms: displayAlarmsFormValuesFromDomain(event.displayAlarms ?? []),
   };
 }
 
@@ -152,6 +169,7 @@ export function calendarEventInputFromForm(
 export function calendarEventPatchFromForm(
   values: CalendarEventFormValues,
 ): CalendarEventPatch {
+  const displayAlarmEdits = calendarEventDisplayAlarmEditsFromForm(values);
   const recurrence = calendarEventRecurrenceFromForm(
     values.recurrence,
     values.timingType,
@@ -162,7 +180,67 @@ export function calendarEventPatchFromForm(
     description: normalizeOptional(values.description),
     location: normalizeOptional(values.location),
     ...(recurrence !== undefined ? { recurrence } : {}),
+    ...(displayAlarmEdits.length > 0 ? { displayAlarmEdits } : {}),
   };
+}
+
+export function hasInvalidCalendarEventDisplayAlarmFormValues(
+  values: CalendarEventFormValues,
+): boolean {
+  return (values.displayAlarms ?? []).some(
+    isInvalidCalendarEventDisplayAlarmTrigger,
+  );
+}
+
+export function isInvalidCalendarEventDisplayAlarmTrigger(
+  alarm: CalendarEventDisplayAlarmFormValue,
+): boolean {
+  if (!alarm.triggerEditable) {
+    return false;
+  }
+
+  const original =
+    alarm.originalTriggerMinutes === undefined
+      ? ''
+      : String(alarm.originalTriggerMinutes);
+  return (
+    alarm.triggerMinutes !== original &&
+    parseDisplayAlarmTriggerMinutes(alarm.triggerMinutes) === undefined
+  );
+}
+
+export function calendarEventDisplayAlarmEditsFromForm(
+  values: CalendarEventFormValues,
+): CalendarEventDisplayAlarmEdit[] {
+  if (hasInvalidCalendarEventDisplayAlarmFormValues(values)) {
+    throw new Error('Invalid display alarm trigger');
+  }
+
+  const edits: CalendarEventDisplayAlarmEdit[] = [];
+  for (const alarm of values.displayAlarms ?? []) {
+    const edit: CalendarEventDisplayAlarmEdit = { index: alarm.index };
+    if (alarm.triggerEditable) {
+      const triggerMinutes = parseDisplayAlarmTriggerMinutes(
+        alarm.triggerMinutes,
+      );
+      if (
+        triggerMinutes !== undefined &&
+        triggerMinutes !== alarm.originalTriggerMinutes
+      ) {
+        edit.triggerMinutes = triggerMinutes;
+      }
+    }
+
+    if (alarm.description !== (alarm.originalDescription ?? '')) {
+      edit.description = alarm.description;
+    }
+
+    if (Object.keys(edit).length > 1) {
+      edits.push(edit);
+    }
+  }
+
+  return edits;
 }
 
 export function calendarEventOccurrencePatchFromForm(
@@ -356,6 +434,33 @@ function recurrenceDateValueToForm(
     value: value.value.local,
     timezone: mode === 'tzid' ? value.value.timezone : '',
   };
+}
+
+function displayAlarmsFormValuesFromDomain(
+  alarms: CalendarEventDisplayAlarm[],
+): CalendarEventDisplayAlarmFormValue[] {
+  return alarms.map((alarm) => ({
+    index: alarm.index,
+    originalTriggerMinutes: alarm.triggerMinutes,
+    triggerMinutes:
+      alarm.triggerMinutes === undefined ? '' : String(alarm.triggerMinutes),
+    triggerEditable: alarm.triggerEditable,
+    triggerRelatedTo: alarm.triggerRelatedTo,
+    originalDescription: alarm.description,
+    description: alarm.description ?? '',
+  }));
+}
+
+function parseDisplayAlarmTriggerMinutes(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!/^[+-]?\d+$/.test(trimmed)) {
+    return undefined;
+  }
+
+  const minutes = Number(trimmed);
+  return Number.isSafeInteger(minutes) && Number.isSafeInteger(minutes * 60)
+    ? minutes
+    : undefined;
 }
 
 function calendarEventRecurrenceFromForm(

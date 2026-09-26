@@ -53,6 +53,26 @@ const event: CalendarEvent = {
   },
 };
 
+const eventWithDisplayAlarms: CalendarEvent = {
+  ...event,
+  displayAlarms: [
+    {
+      index: 0,
+      description: 'First reminder',
+      triggerMinutes: -15,
+      triggerRelatedTo: 'start',
+      triggerEditable: true,
+    },
+    {
+      index: 1,
+      description: 'Second reminder',
+      triggerMinutes: -60,
+      triggerRelatedTo: 'start',
+      triggerEditable: true,
+    },
+  ],
+};
+
 function createWrapper(repository: InMemoryCalendarRepository) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
     return (
@@ -536,6 +556,186 @@ describe('<CalendarEventEditorDialog />', () => {
     ).resolves.toMatchObject({
       title: 'Updated planning',
       description: undefined,
+    });
+  });
+
+  it('edits multiple existing DISPLAY alarms through accessible controls only', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [eventWithDisplayAlarms],
+    });
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+    const onSaved = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={eventWithDisplayAlarms}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const firstTrigger = await screen.findByRole('spinbutton', {
+      name: 'Display alarm 1 trigger offset (minutes)',
+    });
+    expect(firstTrigger).toHaveValue(-15);
+    expect(
+      screen.getByRole('spinbutton', {
+        name: 'Display alarm 2 trigger offset (minutes)',
+      }),
+    ).toHaveValue(-60);
+    expect(
+      screen.getByRole('textbox', { name: 'Display alarm 2 description' }),
+    ).toHaveValue('Second reminder');
+    expect(screen.queryByRole('textbox', { name: /email|audio/i })).toBeNull();
+    expect(
+      screen.getByText(
+        'Only these existing display alarms can be edited. Other alarm actions stay unchanged and are not run.',
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.change(firstTrigger, { target: { value: '-30' } });
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Display alarm 1 description' }),
+      { target: { value: 'Updated first reminder' } },
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(updateSpy.mock.calls[0][2]).toMatchObject({
+      displayAlarmEdits: [
+        {
+          index: 0,
+          triggerMinutes: -30,
+          description: 'Updated first reminder',
+        },
+      ],
+    });
+    await expect(
+      repository.getEvent('team', 'planning'),
+    ).resolves.toMatchObject({
+      displayAlarms: [
+        {
+          index: 0,
+          triggerMinutes: -30,
+          description: 'Updated first reminder',
+        },
+        { index: 1, triggerMinutes: -60, description: 'Second reminder' },
+      ],
+    });
+  });
+
+  it('blocks saving an invalid display alarm trigger', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [eventWithDisplayAlarms],
+    });
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={eventWithDisplayAlarms}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const trigger = await screen.findByRole('spinbutton', {
+      name: 'Display alarm 1 trigger offset (minutes)',
+    });
+    fireEvent.change(trigger, { target: { value: '' } });
+
+    expect(trigger).toHaveAttribute('aria-invalid', 'true');
+    expect(
+      await screen.findByText(
+        'Enter a whole number of minutes for each editable display alarm.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps an unsupported DISPLAY trigger disabled and preserves it on description edit', async () => {
+    const eventWithUnsupportedTrigger: CalendarEvent = {
+      ...event,
+      displayAlarms: [
+        {
+          index: 0,
+          description: 'Absolute reminder',
+          triggerEditable: false,
+        },
+      ],
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [eventWithUnsupportedTrigger],
+    });
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={eventWithUnsupportedTrigger}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByRole('spinbutton', {
+        name: 'Display alarm 1 trigger offset (minutes)',
+      }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText(
+        'This trigger format is preserved and cannot be edited here.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Display alarm 1 description' }),
+      { target: { value: 'Updated description' } },
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(updateSpy).toHaveBeenCalledOnce());
+    expect(updateSpy.mock.calls[0][2].displayAlarmEdits).toEqual([
+      { index: 0, description: 'Updated description' },
+    ]);
+  });
+
+  it('omits unchanged alarms from an unrelated event patch', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [eventWithDisplayAlarms],
+    });
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={eventWithDisplayAlarms}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const title = await screen.findByRole('textbox', { name: /Title/i });
+    await userEvent.type(title, ' updated');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(updateSpy).toHaveBeenCalledOnce());
+
+    expect(updateSpy.mock.calls[0][2]).not.toHaveProperty('displayAlarmEdits');
+    await expect(
+      repository.getEvent('team', 'planning'),
+    ).resolves.toMatchObject({
+      displayAlarms: eventWithDisplayAlarms.displayAlarms,
     });
   });
 
