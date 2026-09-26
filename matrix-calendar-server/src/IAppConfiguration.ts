@@ -14,12 +14,15 @@
  * limitations under the License.
  */
 
+import { RoomCalendarBinding } from './model/IRoomCalendarBinding';
+
 export interface IAppConfiguration {
   port?: string | number;
 
   access_token: string;
   homeserver_url: string;
   radicale_url?: string;
+  room_calendar_bindings: readonly RoomCalendarBinding[];
 
   meetingwidget_url: string;
   meetingwidget_name: string;
