@@ -90,7 +90,12 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 ## M6 — Matrix team features and reminders
 
 - [ ] Define and enforce an authoritative Matrix room ↔ app-owned calendar
-      binding; this is a prerequisite for M7 room-scoped bot commands (ADR014).
+      binding. For a room-bound widget target, validate the widget actor,
+      membership, and action power before using the bot service principal
+      for CalDAV; this path depends on M2's OpenID plugin and delegated
+      contract (#48 and #45). Personal widget targets continue to use the
+      validated user's principal (ADR014). The binding is also a prerequisite
+      for M7 room commands.
 - [ ] Configurable Matrix power-level calendar policy.
 - [ ] Team/member selector using the widget user directory/member APIs.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
@@ -113,14 +118,17 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [ ] help text directing capable clients to the widget
 
 The M7 data commands (`upcoming`, `event`, create, and delete/cancel) use the
-bot's own OpenID-backed service principal only for explicitly bound,
-app-owned room calendars. They require the M2 OpenID-capable Radicale plugin
-and delegated contract (#48 and #45), plus the M6 room binding and
-server-side membership/power checks (ADR014). They must not use a Matrix
-sender ID as a CalDAV identity or target selector. Per-user bot command targets
-remain deferred until a trusted proof of the sender's identity and explicit
-target-calendar authorization are available. The widget continues to use
-per-user calendar principals.
+same server-side OpenID-backed bot service principal as room-bound widget targets,
+and only for explicitly bound app-owned room calendars. A room-bound widget
+request validates the widget user's OpenID as the actor; a bot command
+validates its homeserver-sourced event actor. Both check membership, action
+power, and the room/calendar binding before CalDAV access. Personal widget
+targets continue to use the validated user's principal. M7 data commands
+require the M2 OpenID-capable Radicale plugin and delegated contract (#48 and
+#45), plus the M6 room binding and server-side checks (ADR014). They must not
+use a Matrix sender ID as a CalDAV identity or target selector. Per-user bot
+command targets remain deferred until a trusted proof of the sender's identity
+and explicit target-calendar authorization are available.
 
 **Exit:** users on non-widget clients can inspect and perform essential calendar actions without duplicating the entire UI.
 
