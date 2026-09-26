@@ -16,6 +16,7 @@
 
 import {
   CalendarEvent,
+  CalendarEventDateTime,
   CalendarRepositoryError,
   isAllDayCalendarEvent,
   isTimedCalendarEvent,
@@ -58,6 +59,7 @@ export function CalendarEventDetailsDialog({
   const cancelOccurrence = useCancelCalendarOccurrence();
   const [currentSelection, setCurrentSelection] = useState(event);
   const [editing, setEditing] = useState(false);
+  const [followingEditing, setFollowingEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -72,6 +74,7 @@ export function CalendarEventDetailsDialog({
   useEffect(() => {
     setCurrentSelection(event);
     setEditing(false);
+    setFollowingEditing(false);
     setDeleteOpen(false);
     setDeleteLoading(false);
     setCancelOpen(false);
@@ -83,6 +86,17 @@ export function CalendarEventDetailsDialog({
   const currentEvent = currentSelection?.event;
   const resourceEvent = currentSelection?.resourceEvent;
   const recurringOccurrence = currentSelection?.recurrenceId !== undefined;
+  const rangeBoundary = Boolean(
+    resourceEvent?.recurrence?.overrides?.some(
+      (override) =>
+        override.range === 'this-and-following' &&
+        currentSelection?.recurrenceId &&
+        sameRecurrenceIdentity(
+          override.recurrenceId,
+          currentSelection.recurrenceId,
+        ),
+    ),
+  );
   const eventCalendar = currentEvent
     ? calendars.data.find((calendar) => calendar.id === currentEvent.calendarId)
     : undefined;
@@ -187,10 +201,15 @@ export function CalendarEventDetailsDialog({
 
                 {recurringOccurrence && (
                   <Alert severity="info">
-                    {t(
-                      'calendarEvents.details.occurrenceActionsAvailable',
-                      'Changes here apply to this occurrence only. Other events in the series remain unchanged.',
-                    )}
+                    {rangeBoundary
+                      ? t(
+                          'calendarEvents.details.rangeBoundaryActionsAvailable',
+                          'This is the start of a following-scope change. Edit or cancel only this occurrence is unavailable; you can update this and later occurrences.',
+                        )
+                      : t(
+                          'calendarEvents.details.occurrenceActionsAvailable',
+                          'Changes here apply to this occurrence only. Other events in the series remain unchanged.',
+                        )}
                   </Alert>
                 )}
                 {cancelError === 'conflict' && (
@@ -230,8 +249,11 @@ export function CalendarEventDetailsDialog({
               {recurringOccurrence ? (
                 <>
                   <Button
-                    disabled={!canMutate}
-                    onClick={() => setEditing(true)}
+                    disabled={!canMutate || rangeBoundary}
+                    onClick={() => {
+                      setFollowingEditing(false);
+                      setEditing(true);
+                    }}
                   >
                     {t(
                       'calendarEvents.details.editThisOccurrence',
@@ -240,7 +262,9 @@ export function CalendarEventDetailsDialog({
                   </Button>
                   <Button
                     color="error"
-                    disabled={!canMutate || cancelError === 'conflict'}
+                    disabled={
+                      !canMutate || rangeBoundary || cancelError === 'conflict'
+                    }
                     onClick={() => {
                       setCancelError(undefined);
                       setCancelOpen(true);
@@ -251,12 +275,27 @@ export function CalendarEventDetailsDialog({
                       'Cancel this event',
                     )}
                   </Button>
+                  <Button
+                    disabled={!canMutate}
+                    onClick={() => {
+                      setFollowingEditing(true);
+                      setEditing(true);
+                    }}
+                  >
+                    {t(
+                      'calendarEvents.details.editThisAndFollowing',
+                      'Edit this and following',
+                    )}
+                  </Button>
                 </>
               ) : (
                 <>
                   <Button
                     disabled={!canMutate}
-                    onClick={() => setEditing(true)}
+                    onClick={() => {
+                      setFollowingEditing(false);
+                      setEditing(true);
+                    }}
                   >
                     {t('calendarEvents.details.edit', 'Edit')}
                   </Button>
@@ -282,14 +321,25 @@ export function CalendarEventDetailsDialog({
           calendars={calendars.data}
           event={currentEvent}
           occurrenceTarget={
-            currentSelection?.recurrenceId && resourceEvent
+            !followingEditing && currentSelection?.recurrenceId && resourceEvent
               ? {
                   resourceEventId: resourceEvent.id,
                   recurrenceId: currentSelection.recurrenceId,
                 }
               : undefined
           }
-          onClose={() => setEditing(false)}
+          followingTarget={
+            followingEditing && currentSelection?.recurrenceId && resourceEvent
+              ? {
+                  resourceEventId: resourceEvent.id,
+                  recurrenceId: currentSelection.recurrenceId,
+                }
+              : undefined
+          }
+          onClose={() => {
+            setEditing(false);
+            setFollowingEditing(false);
+          }}
           onSaved={(savedEvent) => {
             if (currentSelection?.recurrenceId) {
               onClose();
@@ -426,4 +476,23 @@ export function formatCalendarEventTime(
   return `${start.toLocaleString(DateTime.DATETIME_MED)} – ${end.toLocaleString(
     DateTime.DATETIME_MED,
   )}`;
+}
+
+function sameRecurrenceIdentity(
+  left: CalendarEventDateTime,
+  right: CalendarEventDateTime,
+): boolean {
+  if (left.type !== right.type) {
+    return false;
+  }
+  if (left.type === 'date' && right.type === 'date') {
+    return left.value === right.value;
+  }
+  return (
+    left.type === 'date-time' &&
+    right.type === 'date-time' &&
+    left.value.local === right.value.local &&
+    left.value.timezone === right.value.timezone &&
+    (left.value.mode ?? 'tzid') === (right.value.mode ?? 'tzid')
+  );
 }

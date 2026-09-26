@@ -22,6 +22,7 @@ import {
   CalendarEventInput,
   CalendarEventOccurrencePatch,
   CalendarEventPatch,
+  CalendarEventTiming,
   CalendarId,
   CalendarMetadataPatch,
   CalendarRepository,
@@ -251,6 +252,20 @@ export class GatewayCalendarRepository
     );
   }
 
+  async updateFollowingOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+    timing: CalendarEventTiming,
+  ): Promise<CalendarEvent> {
+    return this.mutateOccurrence(
+      calendarId,
+      resourceEventId,
+      '/v1/calendar/events/occurrence/following',
+      { recurrenceId, timing },
+    );
+  }
+
   async deleteEvent(
     calendarId: CalendarId,
     eventId: CalendarEventId,
@@ -433,6 +448,12 @@ export class GatewayCalendarRepository
         throw new CalendarRepositoryError(
           code,
           'The series change cannot be checked safely',
+        );
+      }
+      if (code === 'unsupported-recurrence-range') {
+        throw new CalendarRepositoryError(
+          code,
+          'The following-scope edit cannot be represented safely',
         );
       }
     }

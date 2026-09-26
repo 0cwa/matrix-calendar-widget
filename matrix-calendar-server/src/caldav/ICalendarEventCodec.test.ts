@@ -1090,6 +1090,280 @@ END:VCALENDAR`,
     expect(override?.getFirstParameter('range')).toBe('THISANDFUTURE');
   });
 
+  it('parses, expands, and preserves a supported timing-only RANGE override', () => {
+    const source = `BEGIN:VCALENDAR
+VERSION:2.0
+X-RESOURCE-MARKER:keep
+BEGIN:VEVENT
+UID:range-supported@example.test
+DTSTART:20260101T090000Z
+DTEND:20260101T100000Z
+RRULE:FREQ=DAILY;COUNT=5
+X-MASTER-MARKER;X-KEEP=yes:keep
+END:VEVENT
+BEGIN:VEVENT
+UID:range-supported@example.test
+RECURRENCE-ID;RANGE=THISANDFUTURE:20260103T090000Z
+DTSTART:20260103T110000Z
+DTEND:20260103T130000Z
+END:VEVENT
+END:VCALENDAR`;
+    const parsed = codec.parse('team', 'range-supported.ics', source);
+
+    expect(parsed.event.unsupportedRecurrence).toBeUndefined();
+    expect(parsed.event.recurrence?.overrides).toEqual([
+      expect.objectContaining({
+        recurrenceId: {
+          type: 'date-time',
+          value: { local: '2026-01-03T09:00:00', timezone: 'UTC', mode: 'utc' },
+        },
+        range: 'this-and-following',
+        timing: expect.objectContaining({
+          type: 'timed',
+          start: expect.objectContaining({ local: '2026-01-03T11:00:00' }),
+          end: expect.objectContaining({ local: '2026-01-03T13:00:00' }),
+        }),
+      }),
+    ]);
+    expect(
+      parsed
+        .expandOccurrences({
+          start: '2026-01-01T00:00:00.000Z',
+          end: '2026-01-06T00:00:00.000Z',
+        })
+        .map((occurrence) => [occurrence.recurrenceId, occurrence.timing]),
+    ).toHaveLength(5);
+
+    const patched = parsed.applyPatch({ description: 'Master edit' });
+    const calendar = ICAL.Component.fromString(patched.icalendar);
+    const vevents = calendar.getAllSubcomponents('vevent');
+    expect(calendar.getFirstPropertyValue('x-resource-marker')).toBe('keep');
+    expect(vevents[0].getFirstPropertyValue('x-master-marker')).toBe('keep');
+    expect(
+      vevents[0]
+        .getFirstProperty('x-master-marker')
+        ?.getFirstParameter('x-keep'),
+    ).toBe('yes');
+    expect(
+      vevents[1].getFirstProperty('recurrence-id')?.getFirstParameter('range'),
+    ).toBe('THISANDFUTURE');
+    expect(vevents[1].getFirstPropertyValue('recurrence-id')?.toString()).toBe(
+      '2026-01-03T09:00:00Z',
+    );
+  });
+
+  it('writes a following timing edit at the original recurrence identity', () => {
+    const parsed = codec.parse(
+      'team',
+      'following-write.ics',
+      `BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:following@example.test\nDTSTART:20260101T090000Z\nDTEND:20260101T100000Z\nRRULE:FREQ=DAILY;COUNT=4\nX-KEEP:master\nEND:VEVENT\nEND:VCALENDAR`,
+    );
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-01-02T09:00:00',
+        timezone: 'UTC',
+        mode: 'utc' as const,
+      },
+    };
+    const encoded = parsed.applyFollowingOccurrencePatch(recurrenceId, {
+      type: 'timed',
+      start: { local: '2026-01-02T11:00:00', timezone: 'UTC', mode: 'utc' },
+      end: { local: '2026-01-02T13:00:00', timezone: 'UTC', mode: 'utc' },
+    });
+    const calendar = ICAL.Component.fromString(encoded.icalendar);
+    const vevents = calendar.getAllSubcomponents('vevent');
+    expect(vevents).toHaveLength(2);
+    expect(vevents[0].getFirstPropertyValue('x-keep')).toBe('master');
+    expect(vevents[1].getFirstPropertyValue('uid')).toBe(
+      'following@example.test',
+    );
+    expect(vevents[1].getFirstPropertyValue('recurrence-id')?.toString()).toBe(
+      '2026-01-02T09:00:00Z',
+    );
+    expect(
+      vevents[1].getFirstProperty('recurrence-id')?.getFirstParameter('range'),
+    ).toBe('THISANDFUTURE');
+    expect(vevents[1].getFirstPropertyValue('dtstart')?.toString()).toBe(
+      '2026-01-02T11:00:00Z',
+    );
+    expect(encoded.event.recurrence?.overrides?.[0]).toMatchObject({
+      recurrenceId,
+      range: 'this-and-following',
+    });
+  });
+
+  it('refuses a following edit when the boundary has unsupported non-timing fields', () => {
+    const parsed = codec.parse(
+      'team',
+      'following-unsupported.ics',
+      `BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:following-unsupported@example.test\nDTSTART:20260101T090000Z\nDTEND:20260101T100000Z\nRRULE:FREQ=DAILY;COUNT=4\nEND:VEVENT\nBEGIN:VEVENT\nUID:following-unsupported@example.test\nRECURRENCE-ID;RANGE=THISANDFUTURE:20260102T090000Z\nDTSTART:20260102T110000Z\nDTEND:20260102T120000Z\nSUMMARY:Future title\nEND:VEVENT\nEND:VCALENDAR`,
+    );
+
+    expect(parsed.event.unsupportedRecurrence).toBe('ranged-override');
+    expect(() =>
+      parsed.applyFollowingOccurrencePatch(
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-01-02T09:00:00',
+            timezone: 'UTC',
+            mode: 'utc',
+          },
+        },
+        {
+          type: 'timed',
+          start: {
+            local: '2026-01-02T12:00:00',
+            timezone: 'UTC',
+            mode: 'utc',
+          },
+          end: {
+            local: '2026-01-02T13:00:00',
+            timezone: 'UTC',
+            mode: 'utc',
+          },
+        },
+      ),
+    ).toThrow(
+      expect.objectContaining({ code: 'unsupported-recurrence-range' }),
+    );
+    const preserved = parsed.applyPatch({ description: 'Unrelated change' });
+    expect(preserved.icalendar).toContain('SUMMARY:Future title');
+    expect(preserved.icalendar).toContain('RANGE=THISANDFUTURE');
+  });
+
+  it('revalidates following edits when a later cancelled override has no timing', () => {
+    const parsed = codec.parse(
+      'team',
+      'following-with-cancellation.ics',
+      `BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:following-cancel@example.test\nDTSTART:20260101T090000Z\nDTEND:20260101T100000Z\nRRULE:FREQ=DAILY;COUNT=4\nEND:VEVENT\nBEGIN:VEVENT\nUID:following-cancel@example.test\nRECURRENCE-ID:20260104T090000Z\nSTATUS:CANCELLED\nEND:VEVENT\nEND:VCALENDAR`,
+    );
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-01-02T09:00:00',
+        timezone: 'UTC',
+        mode: 'utc' as const,
+      },
+    };
+
+    const encoded = parsed.applyFollowingOccurrencePatch(recurrenceId, {
+      type: 'timed',
+      start: { local: '2026-01-02T11:00:00', timezone: 'UTC', mode: 'utc' },
+      end: { local: '2026-01-02T12:00:00', timezone: 'UTC', mode: 'utc' },
+    });
+
+    expect(
+      codec
+        .parse('team', 'following-with-cancellation.ics', encoded.icalendar)
+        .expandOccurrences({
+          start: '2026-01-01T00:00:00.000Z',
+          end: '2026-01-06T00:00:00.000Z',
+        })
+        .map((occurrence) => occurrence.recurrenceId),
+    ).toEqual([
+      {
+        type: 'date-time',
+        value: {
+          local: '2026-01-01T09:00:00',
+          timezone: 'UTC',
+          mode: 'utc',
+        },
+      },
+      recurrenceId,
+      {
+        type: 'date-time',
+        value: {
+          local: '2026-01-03T09:00:00',
+          timezone: 'UTC',
+          mode: 'utc',
+        },
+      },
+    ]);
+  });
+
+  it('diagnoses ranged VEVENT child components and preserves their source data', () => {
+    const rangedWithAlarm = `BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:following-alarm@example.test\nDTSTART:20260101T090000Z\nDTEND:20260101T100000Z\nRRULE:FREQ=DAILY;COUNT=3\nEND:VEVENT\nBEGIN:VEVENT\nUID:following-alarm@example.test\nRECURRENCE-ID;RANGE=THISANDFUTURE:20260102T090000Z\nDTSTART:20260102T110000Z\nDTEND:20260102T120000Z\nBEGIN:VALARM\nACTION:DISPLAY\nTRIGGER:-PT15M\nDESCRIPTION:Reminder\nEND:VALARM\nEND:VEVENT\nEND:VCALENDAR`;
+    const parsed = codec.parse('team', 'following-alarm.ics', rangedWithAlarm);
+
+    expect(parsed.event.unsupportedRecurrence).toBe('ranged-override');
+    expect(() =>
+      parsed.applyFollowingOccurrencePatch(
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-01-02T09:00:00',
+            timezone: 'UTC',
+            mode: 'utc',
+          },
+        },
+        {
+          type: 'timed',
+          start: {
+            local: '2026-01-02T12:00:00',
+            timezone: 'UTC',
+            mode: 'utc',
+          },
+          end: {
+            local: '2026-01-02T13:00:00',
+            timezone: 'UTC',
+            mode: 'utc',
+          },
+        },
+      ),
+    ).toThrow(
+      expect.objectContaining({ code: 'unsupported-recurrence-range' }),
+    );
+
+    const preserved = parsed.applyPatch({ description: 'Master changed' });
+    const calendar = ICAL.Component.fromString(preserved.icalendar);
+    const rangeOverride = calendar.getAllSubcomponents('vevent')[1];
+    expect(rangeOverride.getAllSubcomponents('valarm')).toHaveLength(1);
+    expect(preserved.icalendar).toContain('DESCRIPTION:Reminder');
+    expect(preserved.icalendar).toContain('RANGE=THISANDFUTURE');
+  });
+
+  it('marks a ranged component without a UID as unsupported and preserves it', () => {
+    const parsed = codec.parse(
+      'team',
+      'following-missing-uid.ics',
+      `BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:following-missing-uid@example.test\nDTSTART:20260101T090000Z\nDTEND:20260101T100000Z\nRRULE:FREQ=DAILY;COUNT=3\nEND:VEVENT\nBEGIN:VEVENT\nRECURRENCE-ID;RANGE=THISANDFUTURE:20260102T090000Z\nDTSTART:20260102T110000Z\nDTEND:20260102T120000Z\nEND:VEVENT\nEND:VCALENDAR`,
+    );
+
+    expect(parsed.event.unsupportedRecurrence).toBe('ranged-override');
+    expect(() =>
+      parsed.applyFollowingOccurrencePatch(
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-01-02T09:00:00',
+            timezone: 'UTC',
+            mode: 'utc',
+          },
+        },
+        {
+          type: 'timed',
+          start: {
+            local: '2026-01-02T12:00:00',
+            timezone: 'UTC',
+            mode: 'utc',
+          },
+          end: {
+            local: '2026-01-02T13:00:00',
+            timezone: 'UTC',
+            mode: 'utc',
+          },
+        },
+      ),
+    ).toThrow(
+      expect.objectContaining({ code: 'unsupported-recurrence-range' }),
+    );
+    expect(
+      parsed.applyPatch({ title: 'Keep malformed source' }).icalendar,
+    ).toContain('RECURRENCE-ID;RANGE=THISANDFUTURE:20260102T090000Z');
+  });
+
   it('bounds custom VTIMEZONE observance expansion by the requested work limit', () => {
     const parsed = codec.parse(
       'team',

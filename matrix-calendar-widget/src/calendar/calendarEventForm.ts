@@ -22,6 +22,7 @@ import {
   CalendarEventOccurrencePatch,
   CalendarEventPatch,
   CalendarEventRecurrence,
+  CalendarEventTiming,
   CalendarId,
   isAllDayCalendarEvent,
   isCalendarEventRecurrenceRuleSupported,
@@ -169,39 +170,44 @@ export function calendarEventOccurrencePatchFromForm(
 ): CalendarEventOccurrencePatch {
   const description = normalizeOptional(values.description);
   const location = normalizeOptional(values.location);
+  return {
+    title: values.title.trim(),
+    description: description ?? null,
+    location: location ?? null,
+    timing: calendarEventTimingFromForm(values),
+  };
+}
+
+export function calendarEventTimingFromForm(
+  values: CalendarEventFormValues,
+): CalendarEventTiming {
   const mode =
     values.timezone === 'UTC'
       ? 'utc'
       : values.timezone === 'floating'
         ? 'floating'
         : 'tzid';
-  return {
-    title: values.title.trim(),
-    description: description ?? null,
-    location: location ?? null,
-    timing:
-      values.timingType === 'all-day'
-        ? {
-            type: 'all-day',
-            startDate: values.start,
-            endDate:
-              DateTime.fromISO(values.end).plus({ days: 1 }).toISODate() ??
-              values.end,
-          }
-        : {
-            type: 'timed',
-            start: {
-              local: `${values.start}:00`,
-              timezone: values.timezone,
-              mode,
-            },
-            end: {
-              local: `${values.end}:00`,
-              timezone: values.timezone,
-              mode,
-            },
-          },
-  };
+  return values.timingType === 'all-day'
+    ? {
+        type: 'all-day',
+        startDate: values.start,
+        endDate:
+          DateTime.fromISO(values.end).plus({ days: 1 }).toISODate() ??
+          values.end,
+      }
+    : {
+        type: 'timed',
+        start: {
+          local: `${values.start}:00`,
+          timezone: values.timezone,
+          mode,
+        },
+        end: {
+          local: `${values.end}:00`,
+          timezone: values.timezone,
+          mode,
+        },
+      };
 }
 
 export function recurrenceDateValueFromForm(

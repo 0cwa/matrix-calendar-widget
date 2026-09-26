@@ -34,6 +34,7 @@ export type {
   CalendarEventRecurrence,
   CalendarEventRecurrenceOverride,
   CalendarEventRecurrencePeriod,
+  CalendarEventRecurrenceRange,
   CalendarEventStatus,
   CalendarEventTiming,
   CalendarEventTransparency,

@@ -22,6 +22,7 @@ import {
   CalendarEventInput,
   CalendarEventOccurrencePatch,
   CalendarEventPatch,
+  CalendarEventTiming,
   CalendarId,
   CalendarMetadataPatch,
   CalendarRepositoryError,
@@ -188,6 +189,45 @@ export function useCancelCalendarOccurrence(): (
           calendarId,
           resourceEventId,
           recurrenceId,
+        );
+        invalidate();
+        return event;
+      } catch (error) {
+        if (
+          error instanceof CalendarRepositoryError &&
+          error.code === 'event-conflict'
+        ) {
+          invalidate();
+        }
+        throw error;
+      }
+    },
+    [invalidate, repository],
+  );
+}
+
+export function useUpdateCalendarFollowingOccurrence(): (
+  calendarId: CalendarId,
+  resourceEventId: CalendarEventId,
+  recurrenceId: CalendarEventDateTime,
+  timing: CalendarEventTiming,
+) => Promise<CalendarEvent> {
+  const repository = useCalendarRepository();
+  const invalidate = useInvalidateCalendarRepository();
+
+  return useCallback(
+    async (
+      calendarId: CalendarId,
+      resourceEventId: CalendarEventId,
+      recurrenceId: CalendarEventDateTime,
+      timing: CalendarEventTiming,
+    ) => {
+      try {
+        const event = await repository.updateFollowingOccurrence(
+          calendarId,
+          resourceEventId,
+          recurrenceId,
+          timing,
         );
         invalidate();
         return event;

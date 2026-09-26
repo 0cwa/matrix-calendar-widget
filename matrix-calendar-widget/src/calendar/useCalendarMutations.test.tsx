@@ -35,6 +35,7 @@ import {
   useDeleteCalendarEvent,
   useRenameCalendar,
   useUpdateCalendarEvent,
+  useUpdateCalendarFollowingOccurrence,
   useUpdateCalendarMetadata,
   useUpdateCalendarOccurrence,
 } from './useCalendarMutations';
@@ -265,6 +266,59 @@ describe('calendar repository mutation hooks', () => {
     });
   });
 
+  it('refreshes active event queries after a following-scope update', async () => {
+    const recurringEvent: CalendarEvent = {
+      ...event,
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=3' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringEvent],
+    });
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-09-24T09:00:00',
+        timezone: 'Europe/Stockholm',
+        mode: 'tzid' as const,
+      },
+    };
+    const timing = {
+      type: 'timed' as const,
+      start: {
+        local: '2026-09-24T10:00:00',
+        timezone: 'Europe/Stockholm',
+        mode: 'tzid' as const,
+      },
+      end: {
+        local: '2026-09-24T11:00:00',
+        timezone: 'Europe/Stockholm',
+        mode: 'tzid' as const,
+      },
+    };
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        events: useCalendarEvents(['team'], range),
+        updateFollowingOccurrence: useUpdateCalendarFollowingOccurrence(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.events.loading);
+    await result.current.updateFollowingOccurrence(
+      'team',
+      'planning',
+      recurrenceId,
+      timing,
+    );
+
+    await waitFor(() => {
+      expect(
+        result.current.events.data[0].recurrence?.overrides?.[0],
+      ).toMatchObject({ recurrenceId, range: 'this-and-following', timing });
+    });
+  });
+
   it('refreshes active event queries after occurrence cancellation', async () => {
     const recurringEvent: CalendarEvent = {
       ...event,
@@ -328,6 +382,7 @@ describe('calendar repository mutation hooks', () => {
       createEvent: vi.fn().mockRejectedValue(new Error('write failed')),
       updateEvent: vi.fn().mockResolvedValue(event),
       updateOccurrence: vi.fn().mockResolvedValue(event),
+      updateFollowingOccurrence: vi.fn().mockResolvedValue(event),
       cancelOccurrence: vi.fn().mockResolvedValue(event),
       deleteEvent: vi.fn().mockResolvedValue(undefined),
     };

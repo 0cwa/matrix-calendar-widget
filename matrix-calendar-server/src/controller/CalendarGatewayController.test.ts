@@ -783,7 +783,7 @@ describe('CalendarGatewayController', () => {
     expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
   });
 
-  it('returns the opaque unsupported recurrence marker with the event DTO', async () => {
+  it('returns supported following recurrence metadata with the event DTO', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';
     const rangedIcs = `BEGIN:VCALENDAR
@@ -826,7 +826,12 @@ END:VCALENDAR`;
       '2026-09-28T00:00:00Z',
     );
 
-    expect(result[0].event.unsupportedRecurrence).toBe('ranged-override');
+    expect(result[0].event.unsupportedRecurrence).toBeUndefined();
+    expect(result[0].event.recurrence?.overrides).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ range: 'this-and-following' }),
+      ]),
+    );
     expect(JSON.stringify(result)).not.toContain('THISANDFUTURE');
   });
 
@@ -1173,6 +1178,265 @@ END:VCALENDAR`,
     expect(putInit?.body).toContain('RECURRENCE-ID:20260925T080000Z');
     expect(putInit?.body).toContain('STATUS:CANCELLED');
     expect(putInit?.method).not.toBe('DELETE');
+  });
+
+  it('updates supported following timing with authorization and If-Match', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = `${calendarId}series.ics`;
+    const original = recurringEventIcs();
+    const updated = `${original.replace(
+      'END:VCALENDAR',
+      `BEGIN:VEVENT
+UID:series@example.test
+RECURRENCE-ID;RANGE=THISANDFUTURE:20260925T080000Z
+DTSTART:20260925T100000Z
+DTEND:20260925T113000Z
+END:VEVENT
+END:VCALENDAR`,
+    )}`;
+    fetch
+      .mockResponseOnce(original, {
+        status: 200,
+        headers: { ETag: '"old-etag"' },
+      })
+      .mockResponseOnce('', {
+        status: 204,
+        headers: { ETag: '"new-etag"' },
+      })
+      .mockResponseOnce(updated, {
+        status: 200,
+        headers: { ETag: '"new-etag"' },
+      });
+
+    const result = await createController().updateFollowingOccurrence(
+      userContext,
+      openIdCredential,
+      {
+        recurrenceId: {
+          type: 'date-time',
+          value: {
+            local: '2026-09-25T08:00:00',
+            timezone: 'UTC',
+            mode: 'utc',
+          },
+        },
+        timing: {
+          type: 'timed',
+          start: {
+            local: '2026-09-25T10:00:00',
+            timezone: 'UTC',
+            mode: 'utc',
+          },
+          end: {
+            local: '2026-09-25T11:30:00',
+            timezone: 'UTC',
+            mode: 'utc',
+          },
+        },
+      },
+      '"old-etag"',
+      roomId,
+      calendarId,
+      eventId,
+    );
+
+    expect(result.event.recurrence?.overrides).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-09-25T08:00:00',
+              timezone: 'UTC',
+              mode: 'utc',
+            },
+          },
+          range: 'this-and-following',
+        }),
+      ]),
+    );
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'update-event',
+      calendarId,
+      eventId,
+    });
+    const [, putInit] = fetch.mock.calls[1];
+    expect(putInit?.method).toBe('PUT');
+    expect(requestHeader(putInit, 'If-Match')).toBe('"old-etag"');
+    expect(putInit?.body).toContain('RANGE=THISANDFUTURE');
+    expect(putInit?.body).toContain(
+      'RECURRENCE-ID;RANGE=THISANDFUTURE:20260925T080000Z',
+    );
+    expect(putInit?.body).toContain('DTSTART:20260925T100000Z');
+  });
+
+  it('rejects unsupported following payloads before PUT and leaves the CalDAV body untouched', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = `${calendarId}series.ics`;
+    const unsupported = `${recurringEventIcs().replace(
+      'END:VCALENDAR',
+      `BEGIN:VEVENT
+UID:series@example.test
+RECURRENCE-ID;RANGE=THISANDFUTURE:20260925T080000Z
+DTSTART:20260925T100000Z
+DTEND:20260925T110000Z
+SUMMARY:Unsupported propagated field
+END:VEVENT
+END:VCALENDAR`,
+    )}`;
+    fetch.mockResponseOnce(unsupported, {
+      status: 200,
+      headers: { ETag: '"old-etag"' },
+    });
+
+    await expect(
+      createController().updateFollowingOccurrence(
+        userContext,
+        openIdCredential,
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-09-25T08:00:00',
+              timezone: 'UTC',
+              mode: 'utc',
+            },
+          },
+          timing: {
+            type: 'timed',
+            start: {
+              local: '2026-09-25T12:00:00',
+              timezone: 'UTC',
+              mode: 'utc',
+            },
+            end: {
+              local: '2026-09-25T13:00:00',
+              timezone: 'UTC',
+              mode: 'utc',
+            },
+          },
+        },
+        '"old-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'unsupported-recurrence-range',
+      }),
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it('rejects a ranged VALARM before PUT', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = `${calendarId}series.ics`;
+    const withAlarm = `${recurringEventIcs().replace(
+      'END:VCALENDAR',
+      `BEGIN:VEVENT
+UID:series@example.test
+RECURRENCE-ID;RANGE=THISANDFUTURE:20260925T080000Z
+DTSTART:20260925T100000Z
+DTEND:20260925T110000Z
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER:-PT15M
+DESCRIPTION:Reminder
+END:VALARM
+END:VEVENT
+END:VCALENDAR`,
+    )}`;
+    fetch.mockResponseOnce(withAlarm, {
+      status: 200,
+      headers: { ETag: '"old-etag"' },
+    });
+
+    await expect(
+      createController().updateFollowingOccurrence(
+        userContext,
+        openIdCredential,
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-09-25T08:00:00',
+              timezone: 'UTC',
+              mode: 'utc',
+            },
+          },
+          timing: {
+            type: 'timed',
+            start: {
+              local: '2026-09-25T12:00:00',
+              timezone: 'UTC',
+              mode: 'utc',
+            },
+            end: {
+              local: '2026-09-25T13:00:00',
+              timezone: 'UTC',
+              mode: 'utc',
+            },
+          },
+        },
+        '"old-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'unsupported-recurrence-range',
+      }),
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+    expect(withAlarm).toContain('DESCRIPTION:Reminder');
+  });
+
+  it('denies following-scope edits before a CalDAV request', async () => {
+    isAllowed.mockResolvedValue(false);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = `${calendarId}series.ics`;
+
+    await expect(
+      createController().updateFollowingOccurrence(
+        userContext,
+        openIdCredential,
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-09-25T08:00:00',
+              timezone: 'UTC',
+              mode: 'utc',
+            },
+          },
+          timing: {
+            type: 'timed',
+            start: {
+              local: '2026-09-25T10:00:00',
+              timezone: 'UTC',
+              mode: 'utc',
+            },
+            end: {
+              local: '2026-09-25T11:00:00',
+              timezone: 'UTC',
+              mode: 'utc',
+            },
+          },
+        },
+        '"old-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('rejects unsafe occurrence requests before a CalDAV fetch', async () => {

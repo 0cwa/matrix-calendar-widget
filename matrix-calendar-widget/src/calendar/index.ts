@@ -23,6 +23,7 @@ export {
   calendarEventInputFromForm,
   calendarEventOccurrencePatchFromForm,
   calendarEventPatchFromForm,
+  calendarEventTimingFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
   hasInvalidCalendarEventRecurrenceFormValues,
@@ -70,6 +71,7 @@ export {
   useDeleteCalendarEvent,
   useRenameCalendar,
   useUpdateCalendarEvent,
+  useUpdateCalendarFollowingOccurrence,
   useUpdateCalendarMetadata,
   useUpdateCalendarOccurrence,
 } from './useCalendarMutations';

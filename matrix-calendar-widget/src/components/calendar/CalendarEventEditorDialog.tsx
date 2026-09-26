@@ -54,6 +54,7 @@ import {
   calendarEventPatchFromForm,
   CalendarEventRecurrenceDateMode,
   CalendarEventRecurrenceDateValue,
+  calendarEventTimingFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
   hasInvalidCalendarEventRecurrenceFormValues,
@@ -63,6 +64,7 @@ import {
   useCalendarRepository,
   useCreateCalendarEvent,
   useUpdateCalendarEvent,
+  useUpdateCalendarFollowingOccurrence,
   useUpdateCalendarOccurrence,
 } from '../../calendar';
 import { RecurrenceEditor } from '../meetings/RecurrenceEditor/RecurrenceEditor';
@@ -71,6 +73,7 @@ export function CalendarEventEditorDialog({
   calendars,
   event,
   occurrenceTarget,
+  followingTarget,
   onClose,
   onSaved,
   open,
@@ -79,6 +82,10 @@ export function CalendarEventEditorDialog({
   calendars: Calendar[];
   event?: CalendarEvent;
   occurrenceTarget?: {
+    resourceEventId: string;
+    recurrenceId: CalendarEventDateTime;
+  };
+  followingTarget?: {
     resourceEventId: string;
     recurrenceId: CalendarEventDateTime;
   };
@@ -108,6 +115,7 @@ export function CalendarEventEditorDialog({
   const createEvent = useCreateCalendarEvent();
   const updateEvent = useUpdateCalendarEvent();
   const updateOccurrence = useUpdateCalendarOccurrence();
+  const updateFollowingOccurrence = useUpdateCalendarFollowingOccurrence();
 
   useEffect(() => {
     const calendar = initialCalendarRef.current;
@@ -181,7 +189,8 @@ export function CalendarEventEditorDialog({
     initialCalendar;
   const readOnly = Boolean(selectedCalendar.readOnly);
   const recurrenceTimingTypeLocked =
-    Boolean(occurrenceTarget) || recurrenceHasTimingData(values.recurrence);
+    Boolean(occurrenceTarget || followingTarget) ||
+    recurrenceHasTimingData(values.recurrence);
 
   const handleRecurrenceDateRowsChange = (
     field: 'rdates' | 'exdates',
@@ -304,7 +313,11 @@ export function CalendarEventEditorDialog({
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
 
-    if (formValidationError || readOnly || (conflict && occurrenceTarget)) {
+    if (
+      formValidationError ||
+      readOnly ||
+      (conflict && (occurrenceTarget || followingTarget))
+    ) {
       return;
     }
 
@@ -323,11 +336,18 @@ export function CalendarEventEditorDialog({
               occurrenceTarget.recurrenceId,
               calendarEventOccurrencePatchFromForm(values),
             )
-          : await updateEvent(
-              event.calendarId,
-              event.id,
-              calendarEventPatchFromForm(values),
-            );
+          : followingTarget
+            ? await updateFollowingOccurrence(
+                event.calendarId,
+                followingTarget.resourceEventId,
+                followingTarget.recurrenceId,
+                calendarEventTimingFromForm(values),
+              )
+            : await updateEvent(
+                event.calendarId,
+                event.id,
+                calendarEventPatchFromForm(values),
+              );
       } else {
         const input: CalendarEventInput = calendarEventInputFromForm(
           values,
@@ -382,6 +402,18 @@ export function CalendarEventEditorDialog({
             ),
           ),
         );
+      } else if (
+        caught instanceof CalendarRepositoryError &&
+        caught.code === 'unsupported-recurrence-range'
+      ) {
+        setError(
+          new Error(
+            t(
+              'calendarEvents.editor.followingScopeUnsupported',
+              'This following-scope change cannot be represented safely. The series was not changed.',
+            ),
+          ),
+        );
       } else {
         setError(
           new Error(
@@ -398,7 +430,7 @@ export function CalendarEventEditorDialog({
   };
 
   const handleReloadLatest = async () => {
-    if (!event || occurrenceTarget) {
+    if (!event || occurrenceTarget || followingTarget) {
       return;
     }
 
@@ -435,17 +467,30 @@ export function CalendarEventEditorDialog({
     >
       <form onSubmit={handleSubmit}>
         <DialogTitle>
-          {event
-            ? t('calendarEvents.editor.editTitle', 'Edit event')
-            : t('calendarEvents.editor.createTitle', 'Create event')}
+          {followingTarget
+            ? t(
+                'calendarEvents.editor.editThisAndFollowingTitle',
+                'Edit this and following events',
+              )
+            : event
+              ? t('calendarEvents.editor.editTitle', 'Edit event')
+              : t('calendarEvents.editor.createTitle', 'Create event')}
         </DialogTitle>
 
         <DialogContent>
           <Stack mt={1} spacing={2}>
+            {followingTarget && (
+              <Alert severity="info">
+                {t(
+                  'calendarEvents.editor.followingScopeDescription',
+                  'The new start time and duration apply from this occurrence onward. Earlier occurrences and the series identity stay unchanged.',
+                )}
+              </Alert>
+            )}
             {error && (
               <Alert
                 action={
-                  conflict && !occurrenceTarget ? (
+                  conflict && !occurrenceTarget && !followingTarget ? (
                     <Button
                       color="inherit"
                       disabled={saving}
@@ -477,13 +522,15 @@ export function CalendarEventEditorDialog({
               ))}
             </TextField>
 
-            <TextField
-              autoFocus
-              label={t('calendarEvents.editor.title', 'Title')}
-              onChange={handleChange('title')}
-              required
-              value={values.title}
-            />
+            {!followingTarget && (
+              <TextField
+                autoFocus
+                label={t('calendarEvents.editor.title', 'Title')}
+                onChange={handleChange('title')}
+                required
+                value={values.title}
+              />
+            )}
 
             <FormControlLabel
               control={
@@ -495,7 +542,7 @@ export function CalendarEventEditorDialog({
               }
               label={t('calendarEvents.editor.allDay', 'All day')}
             />
-            {recurrenceTimingTypeLocked && (
+            {recurrenceTimingTypeLocked && !followingTarget && (
               <Alert severity="info">
                 {occurrenceTarget
                   ? t(
@@ -530,27 +577,32 @@ export function CalendarEventEditorDialog({
             {values.timingType === 'timed' && (
               <TextField
                 label={t('calendarEvents.editor.timezone', 'Time zone')}
+                disabled={Boolean(followingTarget)}
                 onChange={handleChange('timezone')}
                 required
                 value={values.timezone}
               />
             )}
 
-            <TextField
-              label={t('calendarEvents.editor.location', 'Location')}
-              onChange={handleChange('location')}
-              value={values.location}
-            />
+            {!followingTarget && (
+              <TextField
+                label={t('calendarEvents.editor.location', 'Location')}
+                onChange={handleChange('location')}
+                value={values.location}
+              />
+            )}
 
-            <TextField
-              label={t('calendarEvents.editor.description', 'Description')}
-              multiline
-              minRows={3}
-              onChange={handleChange('description')}
-              value={values.description}
-            />
+            {!followingTarget && (
+              <TextField
+                label={t('calendarEvents.editor.description', 'Description')}
+                multiline
+                minRows={3}
+                onChange={handleChange('description')}
+                value={values.description}
+              />
+            )}
 
-            {!occurrenceTarget && (
+            {!occurrenceTarget && !followingTarget && (
               <Stack spacing={1}>
                 <Typography component="h3" variant="subtitle1">
                   {t('calendarEvents.editor.recurrence', 'Repeat')}
@@ -689,15 +741,20 @@ export function CalendarEventEditorDialog({
             disabled={
               Boolean(formValidationError) ||
               readOnly ||
-              (conflict && Boolean(occurrenceTarget))
+              (conflict && Boolean(occurrenceTarget || followingTarget))
             }
             loading={saving}
             type="submit"
             variant="contained"
           >
-            {event
-              ? t('calendarEvents.editor.save', 'Save')
-              : t('calendarEvents.editor.create', 'Create event')}
+            {followingTarget
+              ? t(
+                  'calendarEvents.editor.saveFollowing',
+                  'Save following changes',
+                )
+              : event
+                ? t('calendarEvents.editor.save', 'Save')
+                : t('calendarEvents.editor.create', 'Create event')}
           </LoadingButton>
         </DialogActions>
       </form>

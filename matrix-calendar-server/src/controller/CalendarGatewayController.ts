@@ -580,6 +580,54 @@ export class CalendarGatewayController {
     });
   }
 
+  @Patch('events/occurrence/following')
+  async updateFollowingOccurrence(
+    @UserContextParam() userContext: IUserContext,
+    @MatrixOpenIdCredentialParam()
+    openIdCredential: IMatrixOpenIdCredential | undefined,
+    @Body() input: unknown,
+    @Headers('if-match') ifMatch?: string,
+    @Query('roomId') roomId?: string,
+    @Query('calendarId') calendarId?: string,
+    @Query('eventId') eventId?: string,
+  ): Promise<CalendarGatewayEventDto> {
+    const { recurrenceId, timing } = parseFollowingOccurrenceBody(input);
+    const normalizedCalendarId = this.normalizeRadicaleUrl(
+      this.requireQuery(calendarId, 'calendarId'),
+      'calendarId',
+    );
+    const normalizedEventId = this.normalizeOccurrenceEventUrl(
+      this.requireQuery(eventId, 'eventId'),
+      normalizedCalendarId,
+    );
+    const scope = await this.eventScope(
+      userContext,
+      roomId,
+      normalizedCalendarId,
+      {
+        action: 'update-event',
+        calendarId: normalizedCalendarId,
+        eventId: normalizedEventId,
+      },
+    );
+    const etag = this.requireQuery(ifMatch, 'If-Match');
+
+    return this.runCodecCalDav(async () => {
+      const client = this.eventClient(userContext, openIdCredential);
+      const codec = new ICalendarEventCodec();
+      const current = await client.getEvent(normalizedEventId);
+      const encoded = codec
+        .parse(scope.calendarId, normalizedEventId, current.icalendar)
+        .applyFollowingOccurrencePatch(recurrenceId, timing);
+      await client.updateEvent(normalizedEventId, etag, encoded.icalendar);
+      return this.eventDto(
+        codec,
+        scope.calendarId,
+        await client.getEvent(normalizedEventId),
+      );
+    });
+  }
+
   @Post('events/occurrence/cancel')
   async cancelOccurrence(
     @UserContextParam() userContext: IUserContext,
@@ -1019,6 +1067,28 @@ function parseOccurrenceCancelBody(input: unknown): CalendarEventDateTime {
     );
   }
   return parseOccurrenceIdentity(body.recurrenceId);
+}
+
+function parseFollowingOccurrenceBody(input: unknown): {
+  recurrenceId: CalendarEventDateTime;
+  timing: NonNullable<CalendarEventOccurrencePatch['timing']>;
+} {
+  const body = plainRecord(input, 'following occurrence patch body');
+  if (
+    Object.keys(body).length !== 2 ||
+    !Object.prototype.hasOwnProperty.call(body, 'recurrenceId') ||
+    !Object.prototype.hasOwnProperty.call(body, 'timing')
+  ) {
+    throw new BadRequestException(
+      'following occurrence patch must contain only recurrenceId and timing',
+    );
+  }
+  const recurrenceId = parseOccurrenceIdentity(body.recurrenceId);
+  const timing = parseOccurrenceTiming(body.timing, recurrenceId);
+  if (!timing) {
+    throw new BadRequestException('following occurrence timing is required');
+  }
+  return { recurrenceId, timing };
 }
 
 function parseOccurrenceIdentity(input: unknown): CalendarEventDateTime {

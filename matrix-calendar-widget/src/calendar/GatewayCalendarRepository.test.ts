@@ -298,6 +298,40 @@ describe('GatewayCalendarRepository', () => {
     expect(JSON.parse(String(init?.body))).toEqual({ recurrenceId });
   });
 
+  it('updates following occurrences through a dedicated conditional endpoint', async () => {
+    const fetchMock = mockFetch(
+      jsonResponse([{ event, etag: '"resource-etag"' }]),
+      jsonResponse({ event, etag: '"updated-etag"' }),
+    );
+    const repository = createRepository(fetchMock);
+    const recurrenceId = { type: 'date' as const, value: '2026-09-25' };
+    const timing = {
+      type: 'all-day' as const,
+      startDate: '2026-09-25',
+      endDate: '2026-09-27',
+    };
+
+    await repository.listEvents([calendarId], {
+      start: '2026-09-24T00:00:00Z',
+      end: '2026-09-26T00:00:00Z',
+    });
+    await repository.updateFollowingOccurrence(
+      calendarId,
+      eventId,
+      recurrenceId,
+      timing,
+    );
+
+    const [url, init] = fetchMock.mock.calls[1];
+    expect(typeof url).toBe('string');
+    expect(new URL(url as string).pathname).toBe(
+      '/v1/calendar/events/occurrence/following',
+    );
+    expect(init?.method).toBe('PATCH');
+    expect(new Headers(init?.headers).get('If-Match')).toBe('"resource-etag"');
+    expect(JSON.parse(String(init?.body))).toEqual({ recurrenceId, timing });
+  });
+
   it('does not retry a conflicting occurrence write and clears the stale ETag', async () => {
     const fetchMock = mockFetch(
       jsonResponse([{ event, etag: '"stale-etag"' }]),

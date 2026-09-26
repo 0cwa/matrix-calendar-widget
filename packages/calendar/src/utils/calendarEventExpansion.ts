@@ -92,6 +92,13 @@ type RecurrenceCandidate = {
   generated: boolean;
 };
 
+type RecurrenceRangePlan = {
+  override: CalendarEventRecurrenceOverride;
+  startDeltaMilliseconds: number;
+  duration: number;
+  allDay: boolean;
+};
+
 type ParsedRule = {
   rule: RRule;
   count?: number;
@@ -241,9 +248,49 @@ export function expandCalendarEvent(
 
   const start = timingStartAsDateTime(event.timing);
   const overrides = recurrence?.overrides ?? [];
+  const rangedOverrides = overrides.filter((override) => override.range);
+  const directOverrides = overrides.filter((override) => !override.range);
   const overrideMap = new Map(
-    overrides.map((override) => [dateTimeKey(override.recurrenceId), override]),
+    directOverrides.map((override) => [
+      dateTimeKey(override.recurrenceId),
+      override,
+    ]),
   );
+  const rangePlans = rangedOverrides
+    .map((override) =>
+      createRecurrenceRangePlan(event.timing, override, options, resolver),
+    )
+    .sort(
+      (left, right) =>
+        dateTimeWallMillis(left.override.recurrenceId) -
+        dateTimeWallMillis(right.override.recurrenceId),
+    );
+  if (
+    directOverrides.some(
+      (override) =>
+        !override.timing &&
+        override.status !== 'cancelled' &&
+        rangePlans.some(
+          (plan) =>
+            dateTimeWallMillis(plan.override.recurrenceId) <=
+            dateTimeWallMillis(override.recurrenceId),
+        ),
+    )
+  ) {
+    throw unsupportedRangeOverride(
+      'A later detached exception has no explicit timing to resolve against the range',
+    );
+  }
+  const rangeAnchors = new Set<string>();
+  for (const plan of rangePlans) {
+    const key = dateTimeKey(plan.override.recurrenceId);
+    if (rangeAnchors.has(key) || overrideMap.has(key)) {
+      throw unsupportedRangeOverride(
+        'Multiple exceptions use the same recurrence identity',
+      );
+    }
+    rangeAnchors.add(key);
+  }
   const exclusions = new Set((recurrence?.exdates ?? []).map(dateTimeKey));
   const candidates = new Map<string, RecurrenceCandidate>();
 
@@ -267,13 +314,17 @@ export function expandCalendarEvent(
 
   if (recurrence?.rrule) {
     const parsedRule = parseRule(recurrence.rrule, start);
+    const earlierRangeShift = rangePlans.reduce(
+      (maximum, plan) => Math.max(maximum, -plan.startDeltaMilliseconds),
+      0,
+    );
     const maxOverrideTime = overrides.reduce(
       (latest, override) =>
         Math.max(latest, dateTimeWallMillis(override.recurrenceId)),
       dateTimeWallMillis(start),
     );
     const searchEnd = Math.max(
-      rangeEnd + 2 * dayMilliseconds,
+      rangeEnd + 2 * dayMilliseconds + earlierRangeShift,
       maxOverrideTime + 2 * dayMilliseconds,
     );
     const ruleStart = dateTimeWallMillis(start);
@@ -350,16 +401,37 @@ export function expandCalendarEvent(
     }
   }
 
+  for (const plan of rangePlans) {
+    if (!candidates.has(dateTimeKey(plan.override.recurrenceId))) {
+      throw unsupportedRangeOverride(
+        'The RANGE anchor is not in the master recurrence set',
+      );
+    }
+  }
+
   const result: CalendarEventOccurrence[] = [];
   for (const candidate of candidates.values()) {
-    const override = overrideMap.get(dateTimeKey(candidate.recurrenceId));
+    const identityKey = dateTimeKey(candidate.recurrenceId);
+    const override = overrideMap.get(identityKey);
     if (override?.status === 'cancelled') {
       continue;
     }
 
-    const timing =
-      override?.timing ??
-      occurrenceTiming(event.timing, candidate, options, resolver);
+    const rangePlan = override
+      ? undefined
+      : [...rangePlans]
+          .reverse()
+          .find(
+            (plan) =>
+              dateTimeWallMillis(plan.override.recurrenceId) <=
+              dateTimeWallMillis(candidate.recurrenceId),
+          );
+    const timing = override
+      ? (override.timing ??
+        occurrenceTiming(event.timing, candidate, options, resolver))
+      : rangePlan
+        ? rangedOccurrenceTiming(candidate, rangePlan, options, resolver)
+        : occurrenceTiming(event.timing, candidate, options, resolver);
     if (
       !occurrenceInRange(
         event,
@@ -382,6 +454,193 @@ export function expandCalendarEvent(
     (left, right) =>
       startInstant(left.timing, options, resolver) -
       startInstant(right.timing, options, resolver),
+  );
+}
+
+function createRecurrenceRangePlan(
+  masterTiming: CalendarEventTiming,
+  override: CalendarEventRecurrenceOverride,
+  options: ExpandCalendarEventOptions,
+  resolver: CalendarTimezoneResolver,
+): RecurrenceRangePlan {
+  const rangeTiming = override.timing;
+  if (
+    override.range !== 'this-and-following' ||
+    !rangeTiming ||
+    override.status !== undefined ||
+    override.title !== undefined ||
+    override.description !== undefined ||
+    override.transparency !== undefined ||
+    override.location !== undefined ||
+    override.url !== undefined ||
+    override.categories !== undefined ||
+    override.priority !== undefined
+  ) {
+    throw unsupportedRangeOverride(
+      'The RANGE component is not a timing-only THISANDFUTURE override',
+    );
+  }
+
+  const masterStart = timingStartAsDateTime(masterTiming);
+  if (
+    !sameDateTimeShape(masterStart, override.recurrenceId) ||
+    !sameDateTimeShape(masterStart, timingStartAsDateTime(rangeTiming))
+  ) {
+    throw unsupportedRangeOverride(
+      'The RANGE anchor and DTSTART must match the master date-time mode',
+    );
+  }
+
+  if (masterTiming.type === 'all-day' && rangeTiming.type === 'all-day') {
+    if (override.recurrenceId.type !== 'date') {
+      throw unsupportedRangeOverride(
+        'The RANGE anchor must use a DATE value for an all-day series',
+      );
+    }
+    const startDeltaDays = dateDifference(
+      override.recurrenceId.value,
+      rangeTiming.startDate,
+    );
+    const durationDays = dateDifference(
+      rangeTiming.startDate,
+      rangeTiming.endDate,
+    );
+    if (!Number.isInteger(startDeltaDays) || durationDays <= 0) {
+      throw unsupportedRangeOverride('The RANGE DATE interval is invalid');
+    }
+    return {
+      override,
+      startDeltaMilliseconds: startDeltaDays * dayMilliseconds,
+      duration: durationDays,
+      allDay: true,
+    };
+  }
+
+  if (
+    masterTiming.type !== 'timed' ||
+    rangeTiming.type !== 'timed' ||
+    !sameZonedDateTimeShape(rangeTiming.start, rangeTiming.end)
+  ) {
+    throw unsupportedRangeOverride(
+      'The RANGE interval must use one timed value mode and timezone',
+    );
+  }
+
+  let duration: number;
+  try {
+    duration = timedDuration(rangeTiming, options, resolver);
+  } catch {
+    throw unsupportedRangeOverride('The RANGE duration cannot be verified');
+  }
+  if (duration <= 0) {
+    throw unsupportedRangeOverride('The RANGE duration must be positive');
+  }
+
+  return {
+    override,
+    startDeltaMilliseconds:
+      dateTimeWallMillis(timingStartAsDateTime(rangeTiming)) -
+      dateTimeWallMillis(override.recurrenceId),
+    duration,
+    allDay: false,
+  };
+}
+
+function rangedOccurrenceTiming(
+  candidate: RecurrenceCandidate,
+  plan: RecurrenceRangePlan,
+  options: ExpandCalendarEventOptions,
+  resolver: CalendarTimezoneResolver,
+): CalendarEventTiming {
+  if (plan.allDay && candidate.recurrenceId.type === 'date') {
+    const startDate = addCalendarDays(
+      candidate.recurrenceId.value,
+      plan.startDeltaMilliseconds / dayMilliseconds,
+    );
+    return {
+      type: 'all-day',
+      startDate,
+      endDate: addCalendarDays(startDate, plan.duration),
+    };
+  }
+
+  if (candidate.recurrenceId.type !== 'date-time' || plan.allDay) {
+    throw unsupportedRangeOverride(
+      'The RANGE recurrence value type does not match its occurrence',
+    );
+  }
+
+  const original = candidate.recurrenceId.value;
+  const shifted = {
+    ...original,
+    local: formatLocal(
+      DateTime.fromMillis(
+        dateTimeWallMillis(candidate.recurrenceId) +
+          plan.startDeltaMilliseconds,
+        { zone: 'UTC' },
+      ),
+    ),
+  };
+  const resolved = resolveDateTime(shifted, options, resolver, false);
+  if (!resolved) {
+    throw unsupportedRangeOverride(
+      'A shifted RANGE start cannot be resolved in its timezone',
+    );
+  }
+
+  const end =
+    dateTimeMode(shifted) === 'floating'
+      ? {
+          ...shifted,
+          local: formatLocal(
+            DateTime.fromMillis(
+              localDateTimeMillis(shifted.local) + plan.duration,
+              { zone: 'UTC' },
+            ),
+          ),
+        }
+      : dateTimeAtInstant(resolved.instant + plan.duration, shifted, resolver);
+
+  return {
+    type: 'timed',
+    start: { ...shifted, local: resolved.local },
+    end,
+  };
+}
+
+function sameDateTimeShape(
+  left: CalendarEventDateTime,
+  right: CalendarEventDateTime,
+): boolean {
+  if (left.type !== right.type) {
+    return false;
+  }
+  if (left.type === 'date' && right.type === 'date') {
+    return true;
+  }
+  return (
+    left.type === 'date-time' &&
+    right.type === 'date-time' &&
+    sameZonedDateTimeShape(left.value, right.value)
+  );
+}
+
+function sameZonedDateTimeShape(
+  left: ZonedCalendarDateTime,
+  right: ZonedCalendarDateTime,
+): boolean {
+  return (
+    dateTimeMode(left) === dateTimeMode(right) &&
+    left.timezone === right.timezone
+  );
+}
+
+function unsupportedRangeOverride(
+  message: string,
+): CalendarEventExpansionError {
+  return new CalendarEventExpansionError(
+    'unsupported-recurrence-override',
+    `RANGE=THISANDFUTURE cannot be expanded safely: ${message}`,
   );
 }
 

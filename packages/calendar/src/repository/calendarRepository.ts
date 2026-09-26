@@ -22,6 +22,7 @@ import {
   CalendarEventInput,
   CalendarEventOccurrencePatch,
   CalendarEventPatch,
+  CalendarEventTiming,
   CalendarId,
   CalendarMetadataPatch,
   CalendarTimeRange,
@@ -36,6 +37,7 @@ export type CalendarRepositoryErrorCode =
   | 'event-conflict'
   | 'recurrence-exception-orphaned'
   | 'recurrence-exception-unverifiable'
+  | 'unsupported-recurrence-range'
   | 'authentication-required'
   | 'request-failed';
 
@@ -95,6 +97,13 @@ export interface CalendarRepository {
     calendarId: CalendarId,
     resourceEventId: CalendarEventId,
     recurrenceId: CalendarEventDateTime,
+  ): Promise<CalendarEvent>;
+
+  updateFollowingOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+    timing: CalendarEventTiming,
   ): Promise<CalendarEvent>;
 
   deleteEvent(calendarId: CalendarId, eventId: CalendarEventId): Promise<void>;

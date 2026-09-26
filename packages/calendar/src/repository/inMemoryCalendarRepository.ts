@@ -25,6 +25,7 @@ import {
   CalendarEventOccurrencePatch,
   CalendarEventPatch,
   CalendarEventRecurrenceOverride,
+  CalendarEventTiming,
   CalendarId,
   CalendarMetadataPatch,
   CalendarTimeRange,
@@ -319,6 +320,67 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     return cloneCalendarEvent(updated);
   }
 
+  async updateFollowingOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+    timing: CalendarEventTiming,
+  ): Promise<CalendarEvent> {
+    this.getWritableCalendar(calendarId);
+    const current = this.getStoredEvent(calendarId, resourceEventId);
+    const recurrence = cloneRecurrence(current.recurrence) ?? {};
+    const overrides = recurrence.overrides ?? [];
+    const matching = overrides
+      .map((override, index) => ({ override, index }))
+      .filter(({ override }) =>
+        sameRecurrenceId(override.recurrenceId, recurrenceId),
+      );
+
+    if (matching.length > 1) {
+      throw new CalendarRepositoryError(
+        'unsupported-recurrence-range',
+        'Calendar resource contains duplicate overrides at this recurrence identity',
+      );
+    }
+
+    if (matching[0]) {
+      const { override, index } = matching[0];
+      if (
+        override.status ||
+        override.title !== undefined ||
+        override.description !== undefined ||
+        override.transparency !== undefined ||
+        override.location !== undefined ||
+        override.url !== undefined ||
+        override.categories !== undefined ||
+        override.priority !== undefined
+      ) {
+        throw new CalendarRepositoryError(
+          'unsupported-recurrence-range',
+          'The existing exception has non-timing changes that cannot be applied to following instances',
+        );
+      }
+      overrides[index] = {
+        ...override,
+        range: 'this-and-following',
+        timing: cloneTiming(timing),
+      };
+    } else {
+      overrides.push({
+        recurrenceId: cloneCalendarEventDateTime(recurrenceId),
+        range: 'this-and-following',
+        timing: cloneTiming(timing),
+      });
+    }
+
+    const updated: CalendarEvent = {
+      ...current,
+      recurrence: { ...recurrence, overrides },
+    };
+    this.events.get(calendarId)!.set(resourceEventId, updated);
+    return cloneCalendarEvent(updated);
+  }
+
   async deleteEvent(
     calendarId: CalendarId,
     eventId: CalendarEventId,
@@ -549,6 +611,12 @@ function cloneAllDayTiming(
   timing: AllDayCalendarEventTiming,
 ): AllDayCalendarEventTiming {
   return { ...timing };
+}
+
+function cloneTiming(timing: CalendarEventTiming): CalendarEventTiming {
+  return timing.type === 'timed'
+    ? cloneTimedTiming(timing)
+    : cloneAllDayTiming(timing);
 }
 
 function cloneCalendarEvent(event: CalendarEvent): CalendarEvent {

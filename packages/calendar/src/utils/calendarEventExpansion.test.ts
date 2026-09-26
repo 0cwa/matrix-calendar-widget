@@ -241,6 +241,262 @@ describe('expandCalendarEvent', () => {
     ]);
   });
 
+  it('applies a THISANDFUTURE timing delta from the original recurrence identity', () => {
+    const event: CalendarEvent = {
+      ...timedEvent('2026-01-01T09:00:00', 'UTC', {
+        rrule: 'FREQ=DAILY;COUNT=5',
+      }),
+      recurrence: {
+        rrule: 'FREQ=DAILY;COUNT=5',
+        overrides: [
+          {
+            recurrenceId: dateTime('2026-01-03T09:00:00', 'UTC'),
+            range: 'this-and-following',
+            timing: {
+              type: 'timed',
+              start: utc('2026-01-03T11:00:00'),
+              end: utc('2026-01-03T13:00:00'),
+            },
+          },
+        ],
+      },
+    };
+
+    const occurrences = expandCalendarEvent(event, {
+      start: '2026-01-01T00:00:00.000Z',
+      end: '2026-01-06T00:00:00.000Z',
+    });
+
+    expect(
+      occurrences.map((occurrence) => [
+        occurrence.recurrenceId,
+        timedStart(occurrence),
+        occurrence.timing.type === 'timed'
+          ? occurrence.timing.end.local
+          : undefined,
+      ]),
+    ).toEqual([
+      [
+        dateTime('2026-01-01T09:00:00', 'UTC'),
+        '2026-01-01T09:00:00',
+        '2026-01-01T10:00:00',
+      ],
+      [
+        dateTime('2026-01-02T09:00:00', 'UTC'),
+        '2026-01-02T09:00:00',
+        '2026-01-02T10:00:00',
+      ],
+      [
+        dateTime('2026-01-03T09:00:00', 'UTC'),
+        '2026-01-03T11:00:00',
+        '2026-01-03T13:00:00',
+      ],
+      [
+        dateTime('2026-01-04T09:00:00', 'UTC'),
+        '2026-01-04T11:00:00',
+        '2026-01-04T13:00:00',
+      ],
+      [
+        dateTime('2026-01-05T09:00:00', 'UTC'),
+        '2026-01-05T11:00:00',
+        '2026-01-05T13:00:00',
+      ],
+    ]);
+  });
+
+  it('keeps later status-only cancellations independent of a following range', () => {
+    const event: CalendarEvent = {
+      ...timedEvent('2026-01-01T09:00:00', 'UTC', {
+        rrule: 'FREQ=DAILY;COUNT=5',
+      }),
+      recurrence: {
+        rrule: 'FREQ=DAILY;COUNT=5',
+        overrides: [
+          {
+            recurrenceId: dateTime('2026-01-02T09:00:00', 'UTC'),
+            range: 'this-and-following',
+            timing: {
+              type: 'timed',
+              start: utc('2026-01-02T11:00:00'),
+              end: utc('2026-01-02T12:00:00'),
+            },
+          },
+          {
+            recurrenceId: dateTime('2026-01-04T09:00:00', 'UTC'),
+            status: 'cancelled',
+          },
+        ],
+      },
+    };
+
+    const occurrences = expandCalendarEvent(event, {
+      start: '2026-01-01T00:00:00.000Z',
+      end: '2026-01-06T00:00:00.000Z',
+    });
+
+    expect(
+      occurrences.map((occurrence) => [
+        occurrence.recurrenceId,
+        timedStart(occurrence),
+      ]),
+    ).toEqual([
+      [dateTime('2026-01-01T09:00:00', 'UTC'), '2026-01-01T09:00:00'],
+      [dateTime('2026-01-02T09:00:00', 'UTC'), '2026-01-02T11:00:00'],
+      [dateTime('2026-01-03T09:00:00', 'UTC'), '2026-01-03T11:00:00'],
+      [dateTime('2026-01-05T09:00:00', 'UTC'), '2026-01-05T11:00:00'],
+    ]);
+  });
+
+  it('includes earlier identities moved into the requested window and keeps direct exceptions independent', () => {
+    const event: CalendarEvent = {
+      ...timedEvent('2026-01-01T09:00:00', 'UTC', {
+        rrule: 'FREQ=DAILY;COUNT=5',
+      }),
+      recurrence: {
+        rrule: 'FREQ=DAILY;COUNT=5',
+        overrides: [
+          {
+            recurrenceId: dateTime('2026-01-02T09:00:00', 'UTC'),
+            range: 'this-and-following',
+            timing: {
+              type: 'timed',
+              start: utc('2026-01-02T12:00:00'),
+              end: utc('2026-01-02T13:00:00'),
+            },
+          },
+          {
+            recurrenceId: dateTime('2026-01-03T09:00:00', 'UTC'),
+            timing: {
+              type: 'timed',
+              start: utc('2026-01-03T16:00:00'),
+              end: utc('2026-01-03T17:00:00'),
+            },
+          },
+        ],
+      },
+    };
+
+    const occurrences = expandCalendarEvent(event, {
+      start: '2026-01-02T11:30:00.000Z',
+      end: '2026-01-02T12:30:00.000Z',
+    });
+
+    expect(occurrences).toHaveLength(1);
+    expect(occurrences[0].recurrenceId).toEqual(
+      dateTime('2026-01-02T09:00:00', 'UTC'),
+    );
+    expect(timedStart(occurrences[0])).toBe('2026-01-02T12:00:00');
+
+    const allOccurrences = expandCalendarEvent(event, {
+      start: '2026-01-01T00:00:00.000Z',
+      end: '2026-01-06T00:00:00.000Z',
+    });
+    expect(allOccurrences.map(timedStart)).toEqual([
+      '2026-01-01T09:00:00',
+      '2026-01-02T12:00:00',
+      '2026-01-03T16:00:00',
+      '2026-01-04T12:00:00',
+      '2026-01-05T12:00:00',
+    ]);
+  });
+
+  it('applies DATE start and duration changes from the range boundary', () => {
+    const event: CalendarEvent = {
+      ...baseEvent,
+      timing: {
+        type: 'all-day',
+        startDate: '2026-10-05',
+        endDate: '2026-10-07',
+      },
+      recurrence: {
+        rrule: 'FREQ=DAILY;COUNT=4',
+        overrides: [
+          {
+            recurrenceId: { type: 'date', value: '2026-10-07' },
+            range: 'this-and-following',
+            timing: {
+              type: 'all-day',
+              startDate: '2026-10-08',
+              endDate: '2026-10-11',
+            },
+          },
+        ],
+      },
+    };
+
+    const occurrences = expandCalendarEvent(
+      event,
+      {
+        start: '2026-10-05T00:00:00.000Z',
+        end: '2026-10-12T00:00:00.000Z',
+      },
+      { rangeTimezone: 'UTC' },
+    );
+
+    expect(
+      occurrences.map((occurrence) => [
+        occurrence.recurrenceId,
+        occurrence.timing,
+      ]),
+    ).toEqual([
+      [
+        { type: 'date', value: '2026-10-05' },
+        { type: 'all-day', startDate: '2026-10-05', endDate: '2026-10-07' },
+      ],
+      [
+        { type: 'date', value: '2026-10-06' },
+        { type: 'all-day', startDate: '2026-10-06', endDate: '2026-10-08' },
+      ],
+      [
+        { type: 'date', value: '2026-10-07' },
+        { type: 'all-day', startDate: '2026-10-08', endDate: '2026-10-11' },
+      ],
+      [
+        { type: 'date', value: '2026-10-08' },
+        { type: 'all-day', startDate: '2026-10-09', endDate: '2026-10-12' },
+      ],
+    ]);
+  });
+
+  it('uses named-zone wall-time movement across daylight saving changes', () => {
+    const event = timedEvent('2024-03-03T09:00:00', 'America/New_York', {
+      rrule: 'FREQ=WEEKLY;COUNT=3',
+    });
+    const recurring: CalendarEvent = {
+      ...event,
+      recurrence: {
+        ...event.recurrence,
+        overrides: [
+          {
+            recurrenceId: dateTime('2024-03-03T09:00:00', 'America/New_York'),
+            range: 'this-and-following',
+            timing: {
+              type: 'timed',
+              start: zoned('2024-03-03T11:00:00', 'America/New_York'),
+              end: zoned('2024-03-03T13:00:00', 'America/New_York'),
+            },
+          },
+        ],
+      },
+    };
+
+    const occurrences = expandCalendarEvent(recurring, {
+      start: '2024-03-03T00:00:00.000Z',
+      end: '2024-03-18T00:00:00.000Z',
+    });
+
+    expect(occurrences.map(timedStart)).toEqual([
+      '2024-03-03T11:00:00',
+      '2024-03-10T11:00:00',
+      '2024-03-17T11:00:00',
+    ]);
+    expect(occurrences.map(startInstant)).toEqual([
+      '2024-03-03T16:00:00.000Z',
+      '2024-03-10T15:00:00.000Z',
+      '2024-03-17T15:00:00.000Z',
+    ]);
+  });
+
   it('includes moved overrides entering the requested range by original identity', () => {
     const event: CalendarEvent = {
       ...timedEvent('2026-01-01T09:00:00', 'UTC', {
@@ -521,6 +777,10 @@ function dateTime(local: string, timezone: string): CalendarEventDateTime {
 
 function utc(local: string) {
   return { local, timezone: 'UTC', mode: 'utc' as const };
+}
+
+function zoned(local: string, timezone: string) {
+  return { local, timezone, mode: 'tzid' as const };
 }
 
 function plusHour(local: string): string {

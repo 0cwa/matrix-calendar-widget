@@ -73,6 +73,9 @@ function createRepository(
     createEvent: vi.fn().mockRejectedValue(new Error('not configured')),
     updateEvent: vi.fn().mockRejectedValue(new Error('not configured')),
     updateOccurrence: vi.fn().mockRejectedValue(new Error('not configured')),
+    updateFollowingOccurrence: vi
+      .fn()
+      .mockRejectedValue(new Error('not configured')),
     cancelOccurrence: vi.fn().mockRejectedValue(new Error('not configured')),
     deleteEvent: vi.fn().mockRejectedValue(new Error('not configured')),
     ...overrides,

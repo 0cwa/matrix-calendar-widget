@@ -256,6 +256,55 @@ describe('InMemoryCalendarRepository', () => {
     });
   });
 
+  it('stores a following timing override on the same resource and keeps series data', async () => {
+    const repository = createRepository();
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-01-12T09:00:00',
+        timezone: 'Europe/Stockholm',
+        mode: 'tzid' as const,
+      },
+    };
+
+    const result = await repository.updateFollowingOccurrence(
+      'team',
+      'old-recurring',
+      recurrenceId,
+      {
+        type: 'timed',
+        start: {
+          local: '2026-01-12T10:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+        end: {
+          local: '2026-01-12T11:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+      },
+    );
+
+    expect(result.id).toBe('old-recurring');
+    expect(result.recurrence).toMatchObject({
+      rrule: 'FREQ=WEEKLY',
+      overrides: [
+        {
+          recurrenceId,
+          range: 'this-and-following',
+          timing: {
+            start: { local: '2026-01-12T10:00:00' },
+            end: { local: '2026-01-12T11:00:00' },
+          },
+        },
+      ],
+    });
+    expect((await repository.getEvent('team', 'old-recurring')).title).toBe(
+      'Weekly sync',
+    );
+  });
+
   it('keeps DATE and DATE-TIME recurrence identities distinct', async () => {
     const repository = createRepository();
     await repository.updateEvent('team', 'old-recurring', {

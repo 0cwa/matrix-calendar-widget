@@ -88,12 +88,16 @@ export type CalendarEventStatus = 'confirmed' | 'tentative' | 'cancelled';
 
 export type CalendarEventTransparency = 'opaque' | 'transparent';
 
+export type CalendarEventRecurrenceRange = 'this-and-following';
+
 /**
  * Supported fields from one RECURRENCE-ID VEVENT in a recurring resource.
  * The recurrenceId remains the original series start even if timing moves.
  */
 export type CalendarEventRecurrenceOverride = {
   recurrenceId: CalendarEventDateTime;
+  /** RFC 5545 RANGE=THISANDFUTURE timing override. */
+  range?: CalendarEventRecurrenceRange;
   title?: string;
   description?: string;
   timing?: CalendarEventTiming;
