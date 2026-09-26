@@ -89,13 +89,20 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 
 ## M6 — Matrix team features and reminders
 
-- [ ] Define and enforce an authoritative Matrix room ↔ app-owned calendar
-      binding. For a room-bound widget target, validate the widget actor,
-      membership, and action power before using the bot service principal
-      for CalDAV; this path depends on M2's OpenID plugin and delegated
-      contract (#48 and #45). Personal widget targets continue to use the
-      validated user's principal (ADR014). The binding is also a prerequisite
-      for M7 room commands.
+- [ ] Define and enforce the server-managed canonical room ID → app-owned
+      calendar binding in ADR015. Initial bindings are configuration-managed;
+      the browser and room members cannot create or change the map. M6 widget
+      requests and M7 commands resolve only the mapped calendar, after actor,
+      membership, and action-power checks, and before CalDAV. Missing,
+      malformed, duplicate, ambiguous, or cross-room mappings fail closed.
+      Room-bound widget and bot targets use the server-side app principal;
+      personal widget targets continue to use the validated user's principal
+      (ADR014). Actual room-target CalDAV access still depends on #48/#45 and
+      the app principal's trusted-domain isolation. With the initial static
+      binding, the widget reads and manages events in its bound collection;
+      collection creation, deletion, rename, and rebinding remain
+      operator/configuration-managed. Dynamic database, room-state, or
+      widget-managed binding or collection lifecycle requires a later ADR.
 - [ ] Configurable Matrix power-level calendar policy.
 - [ ] Team/member selector using the widget user directory/member APIs.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
@@ -105,7 +112,9 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [ ] Event detail action to link/open a Matrix room or MatrixRTC conference.
 - [ ] Audit-friendly event creation/edit messages where appropriate.
 
-**Exit:** teams can manage the calendar entirely from the widget and receive reliable Matrix reminders.
+**Exit:** teams can manage events in their configured room calendar from the
+widget and receive reliable Matrix reminders. Room bindings and calendar
+collection lifecycle remain operator/configuration-managed under ADR015.
 
 ## M7 — Non-widget fallback
 
@@ -119,13 +128,17 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 
 The M7 data commands (`upcoming`, `event`, create, and delete/cancel) use the
 same server-side OpenID-backed bot service principal as room-bound widget targets,
-and only for explicitly bound app-owned room calendars. A room-bound widget
+and only for the app-owned room calendar resolved from the server-managed
+configuration map in ADR015. The command's authenticated room context selects
+the mapping; a sender ID or browser-supplied href/URL does not select a target.
+A room-bound widget
 request validates the widget user's OpenID as the actor; a bot command
 validates its homeserver-sourced event actor. Both check membership, action
-power, and the room/calendar binding before CalDAV access. Personal widget
+power, and the room/calendar binding before CalDAV access. Missing, malformed,
+duplicate, ambiguous, or cross-room mapping data fails closed. Personal widget
 targets continue to use the validated user's principal. M7 data commands
 require the M2 OpenID-capable Radicale plugin and delegated contract (#48 and
-#45), plus the M6 room binding and server-side checks (ADR014). They must not
+#45), plus the M6 room binding and server-side checks (ADR014/ADR015). They must not
 use a Matrix sender ID as a CalDAV identity or target selector. Per-user bot
 command targets remain deferred until a trusted proof of the sender's identity
 and explicit target-calendar authorization are available.
