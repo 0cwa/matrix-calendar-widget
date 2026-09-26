@@ -98,6 +98,9 @@ Series edits that change occurrence membership are checked against every existin
 
 ## M6 — Matrix team features and reminders
 
+- [x] Room widgets use the single server-bound calendar with no calendar target
+      selector or collection lifecycle controls; event actions remain available,
+      and personal-mode calendar controls are preserved.
 - [ ] Define and enforce the server-managed canonical room ID → app-owned
       calendar binding in ADR015. Initial bindings are configuration-managed;
       the browser and room members cannot create or change the map. M6 widget

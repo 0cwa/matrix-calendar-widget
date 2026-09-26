@@ -40,10 +40,12 @@ import { CalendarEventsList } from './CalendarEventsList';
 
 export function CalendarEventsSurface({
   filters,
+  roomContext = false,
   onShowMore,
   view,
 }: {
   filters: CalendarFilters;
+  roomContext?: boolean;
   onShowMore: (date: Date) => void;
   view: ViewType;
 }) {
@@ -129,7 +131,7 @@ export function CalendarEventsSurface({
         </Box>
       )}
 
-      {calendars.data.length > 1 && (
+      {!roomContext && calendars.data.length > 1 && (
         <Box px={1} pb={1}>
           <FormGroup
             aria-label={t('calendarEvents.editor.calendar', 'Calendar')}
@@ -199,6 +201,7 @@ export function CalendarEventsSurface({
       <CalendarEventDetailsDialog
         event={selectedEvent}
         onClose={() => setSelectedEvent(undefined)}
+        roomContext={roomContext}
       />
     </>
   );

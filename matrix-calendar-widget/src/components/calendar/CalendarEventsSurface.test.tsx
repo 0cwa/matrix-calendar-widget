@@ -17,6 +17,7 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarRepository,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -67,7 +68,7 @@ const events: CalendarEvent[] = [
   },
 ];
 
-function createWrapper(repository: InMemoryCalendarRepository) {
+function createWrapper(repository: CalendarRepository) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
     return (
       <CalendarRepositoryProvider repository={repository}>
@@ -78,6 +79,89 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventsSurface />', () => {
+  it('uses the room calendar without a visibility selector and keeps event deletion', async () => {
+    const roomCalendar: Calendar = {
+      id: 'configured-room-calendar',
+      name: 'Planning room calendar',
+    };
+    const roomEvent: CalendarEvent = {
+      ...events[0],
+      id: 'room-planning',
+      calendarId: roomCalendar.id,
+      title: 'Room planning',
+    };
+    const listEvents = vi.fn().mockResolvedValue([roomEvent]);
+    const repository = {
+      listCalendars: vi.fn().mockResolvedValue([roomCalendar]),
+      listEvents,
+      updateEvent: vi.fn().mockResolvedValue(roomEvent),
+      deleteEvent: vi.fn().mockResolvedValue(undefined),
+    } as unknown as CalendarRepository;
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        roomContext
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByText('Room planning')).toBeInTheDocument();
+    expect(listEvents.mock.calls.at(-1)?.[0]).toEqual([roomCalendar.id]);
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /Room planning/i }),
+    );
+    const details = await screen.findByRole('dialog', {
+      name: 'Room planning',
+    });
+    await userEvent.click(
+      within(details).getByRole('button', { name: 'Edit' }),
+    );
+    const editor = await screen.findByRole('dialog', { name: 'Edit event' });
+    expect(within(editor).queryByLabelText('Calendar')).not.toBeInTheDocument();
+    await userEvent.clear(
+      within(editor).getByRole('textbox', { name: 'Title' }),
+    );
+    await userEvent.type(
+      within(editor).getByRole('textbox', { name: 'Title' }),
+      'Updated room planning',
+    );
+    await userEvent.click(within(editor).getByRole('button', { name: 'Save' }));
+    expect(repository.updateEvent).toHaveBeenCalledWith(
+      roomCalendar.id,
+      roomEvent.id,
+      expect.objectContaining({ title: 'Updated room planning' }),
+    );
+
+    const updatedDetails = await screen.findByRole('dialog', {
+      name: 'Room planning',
+    });
+    const deleteEventButton = within(updatedDetails).getByRole('button', {
+      name: 'Delete',
+    });
+    expect(deleteEventButton).toBeEnabled();
+    await userEvent.click(deleteEventButton);
+
+    const confirmation = await screen.findByRole('dialog', {
+      name: 'Delete event',
+    });
+    await userEvent.click(
+      within(confirmation).getByRole('button', { name: 'Delete' }),
+    );
+
+    expect(repository.deleteEvent).toHaveBeenCalledWith(
+      roomCalendar.id,
+      roomEvent.id,
+    );
+  });
+
   it('hides and shows events with lightweight calendar visibility controls', async () => {
     const repository = new InMemoryCalendarRepository({ calendars, events });
 

@@ -72,6 +72,7 @@ import { RecurrenceEditor } from '../meetings/RecurrenceEditor/RecurrenceEditor'
 export function CalendarEventEditorDialog({
   calendars,
   event,
+  roomContext = false,
   occurrenceTarget,
   followingTarget,
   onClose,
@@ -81,6 +82,7 @@ export function CalendarEventEditorDialog({
 }: {
   calendars: Calendar[];
   event?: CalendarEvent;
+  roomContext?: boolean;
   occurrenceTarget?: {
     resourceEventId: string;
     recurrenceId: CalendarEventDateTime;
@@ -507,20 +509,22 @@ export function CalendarEventEditorDialog({
               </Alert>
             )}
 
-            <TextField
-              disabled={Boolean(event)}
-              label={t('calendarEvents.editor.calendar', 'Calendar')}
-              onChange={handleCalendarChange}
-              select
-              SelectProps={{ native: true }}
-              value={values.calendarId}
-            >
-              {(event ? calendars : writableCalendars).map((calendar) => (
-                <option key={calendar.id} value={calendar.id}>
-                  {calendar.name}
-                </option>
-              ))}
-            </TextField>
+            {!roomContext && (
+              <TextField
+                disabled={Boolean(event)}
+                label={t('calendarEvents.editor.calendar', 'Calendar')}
+                onChange={handleCalendarChange}
+                select
+                SelectProps={{ native: true }}
+                value={values.calendarId}
+              >
+                {(event ? calendars : writableCalendars).map((calendar) => (
+                  <option key={calendar.id} value={calendar.id}>
+                    {calendar.name}
+                  </option>
+                ))}
+              </TextField>
+            )}
 
             {!followingTarget && (
               <TextField

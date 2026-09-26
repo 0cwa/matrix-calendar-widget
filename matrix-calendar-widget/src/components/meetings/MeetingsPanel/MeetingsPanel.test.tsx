@@ -177,6 +177,25 @@ describe('<MeetingsPanel/>', () => {
     });
   });
 
+  it('hides room collection controls while keeping event creation available', async () => {
+    render(<MeetingsPanel />, { wrapper: Wrapper });
+
+    expect(await screen.findByText('An important meeting')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create event' })).toBeEnabled();
+    expect(
+      screen.queryByRole('button', { name: 'Create calendar' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Rename calendar' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Delete calendar' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Edit calendar details' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('should render the breakout session view without exploding', async () => {
     enableBreakoutSessionView();
 

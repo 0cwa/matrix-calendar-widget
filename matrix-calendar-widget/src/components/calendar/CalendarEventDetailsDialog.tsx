@@ -47,9 +47,11 @@ import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 
 export function CalendarEventDetailsDialog({
   event,
+  roomContext = false,
   onClose,
 }: {
   event?: CalendarEventPresentation;
+  roomContext?: boolean;
   onClose: () => void;
 }) {
   const { i18n, t } = useTranslation();
@@ -356,6 +358,7 @@ export function CalendarEventDetailsDialog({
             );
           }}
           open={editing}
+          roomContext={roomContext}
         />
       )}
 
