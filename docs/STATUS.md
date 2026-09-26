@@ -1,6 +1,6 @@
 # Project status
 
-_Last updated: 2026-09-25_
+_Last updated: 2026-09-26_
 
 This file is the short-lived execution snapshot. `docs/PLAN.md` is the durable milestone plan; GitHub issues contain acceptance criteria.
 
@@ -71,6 +71,17 @@ Complete on `main`:
 - #45 — final delegated gateway/OpenID real-container contract, blocked on #48.
 - #100 / PR #101 — M4 safe calendar deletion; implementation is present, but the branch currently diverges from `main` after #99 merged and must be synced before merge.
 - #29 — enable main-branch protection once repository-rules administration is available.
+- M6 / issue #7 — the gateway authorization/binding preflight and static
+  single-target room widget UI are complete on local branches, but are not
+  integrated and do not enable live room-principal CalDAV access. Live access
+  remains blocked on #48, #45, and ADR014's trusted-domain isolation gate.
+  Reminder intent is whole-room `@room`, independent of event email attendees;
+  ADR007 sidecar metadata, `m.mentions` delivery, permission checks, and durable
+  idempotent scheduling remain pending. Matrix member APIs do not expose other
+  members' email addresses. Whether to build a verified-email registration and
+  consent flow for iCalendar attendees, and which invitation/response semantics
+  it would support, remains deferred pending a user decision; no such registry
+  work is assumed or authorized by the current reminder direction.
 
 ## Highest-priority next steps
 
