@@ -100,6 +100,63 @@ describe('<CalendarEventEditorDialog />', () => {
     );
   });
 
+  it('does not render or create a room event for plural calendar targets', () => {
+    const roomCalendar: Calendar = {
+      id: 'configured-room-calendar',
+      name: 'Planning room calendar',
+    };
+    const unexpectedCalendar: Calendar = {
+      id: 'unexpected-calendar',
+      name: 'Unexpected calendar',
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [roomCalendar, unexpectedCalendar],
+    });
+    const createEventSpy = vi.spyOn(repository, 'createEvent');
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[roomCalendar, unexpectedCalendar]}
+        onClose={vi.fn()}
+        open
+        roomContext
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(createEventSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not render or update a room event outside the singleton target', () => {
+    const roomCalendar: Calendar = {
+      id: 'configured-room-calendar',
+      name: 'Planning room calendar',
+    };
+    const mismatchedEvent: CalendarEvent = {
+      ...event,
+      calendarId: 'unexpected-calendar',
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [roomCalendar],
+    });
+    const updateEventSpy = vi.spyOn(repository, 'updateEvent');
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[roomCalendar]}
+        event={mismatchedEvent}
+        onClose={vi.fn()}
+        open
+        roomContext
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(updateEventSpy).not.toHaveBeenCalled();
+  });
+
   it('creates a supported series with RDATE and EXDATE from form controls', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],

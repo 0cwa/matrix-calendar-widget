@@ -116,6 +116,49 @@ describe('<CalendarToolbar/>', () => {
     );
   });
 
+  it('fails closed when room mode receives multiple server calendars', async () => {
+    const repository = {
+      listCalendars: vi.fn().mockResolvedValue([
+        { id: 'configured-room-calendar', name: 'Planning room calendar' },
+        { id: 'unexpected-calendar', name: 'Unexpected calendar' },
+      ]),
+      createEvent: vi.fn(),
+    } as unknown as CalendarRepository;
+
+    function Wrapper({ children }: PropsWithChildren) {
+      return (
+        <LocalizationProvider>
+          <CalendarRepositoryProvider repository={repository}>
+            {children}
+          </CalendarRepositoryProvider>
+        </LocalizationProvider>
+      );
+    }
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-26T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        roomContext
+        view="list"
+      />,
+      { wrapper: Wrapper },
+    );
+
+    expect(
+      await screen.findByRole('button', { name: 'Create event' }),
+    ).toBeDisabled();
+    expect(
+      screen.queryByRole('dialog', { name: 'Create event' }),
+    ).not.toBeInTheDocument();
+    expect(repository.createEvent).not.toHaveBeenCalled();
+  });
+
   it('preserves personal calendar selection and collection controls', async () => {
     const calendars: Calendar[] = [
       { id: 'personal', name: 'Personal calendar' },

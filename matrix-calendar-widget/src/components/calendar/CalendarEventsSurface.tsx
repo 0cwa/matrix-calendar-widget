@@ -27,6 +27,7 @@ import { useTranslation } from 'react-i18next';
 import {
   CalendarFilters,
   filterCalendarEvents,
+  getRoomCalendarTarget,
   presentCalendarEvents,
   repositoryRangeForView,
   useCalendarEvents,
@@ -54,9 +55,15 @@ export function CalendarEventsSurface({
   const mixedCalendars = calendars.data.filter(
     (calendar) => calendar.unsupportedComponents?.length,
   );
+  const roomCalendar = getRoomCalendarTarget(calendars.data);
   const calendarIds = useMemo(
-    () => calendars.data.map((calendar) => calendar.id),
-    [calendars.data],
+    () =>
+      roomContext
+        ? roomCalendar
+          ? [roomCalendar.id]
+          : []
+        : calendars.data.map((calendar) => calendar.id),
+    [calendars.data, roomCalendar, roomContext],
   );
   const [hiddenCalendarIds, setHiddenCalendarIds] = useState<Set<CalendarId>>(
     () => new Set(),
@@ -96,6 +103,23 @@ export function CalendarEventsSurface({
           {t(
             'calendarEvents.loadError',
             'Calendar events could not be loaded.',
+          )}
+        </Alert>
+      </Box>
+    );
+  }
+
+  if (
+    roomContext &&
+    (!roomCalendar ||
+      events.data.some((event) => event.calendarId !== roomCalendar.id))
+  ) {
+    return (
+      <Box m={2}>
+        <Alert severity="error">
+          {t(
+            'calendarEvents.roomCalendarUnavailable',
+            'The room calendar could not be loaded safely. Ask an administrator to check the room calendar binding.',
           )}
         </Alert>
       </Box>

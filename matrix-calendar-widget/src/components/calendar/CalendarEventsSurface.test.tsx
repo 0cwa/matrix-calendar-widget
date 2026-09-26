@@ -162,6 +162,99 @@ describe('<CalendarEventsSurface />', () => {
     );
   });
 
+  it('does not query or expose events when room mode receives multiple calendars', async () => {
+    const unexpectedEvent: CalendarEvent = {
+      ...events[0],
+      id: 'unexpected-event',
+      calendarId: 'unexpected-calendar',
+      title: 'Unexpected room event',
+    };
+    const listEvents = vi.fn().mockResolvedValue([unexpectedEvent]);
+    const repository = {
+      listCalendars: vi.fn().mockResolvedValue([
+        { id: 'configured-room-calendar', name: 'Planning room calendar' },
+        { id: 'unexpected-calendar', name: 'Unexpected calendar' },
+      ]),
+      listEvents,
+      updateEvent: vi.fn(),
+      deleteEvent: vi.fn(),
+    } as unknown as CalendarRepository;
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        roomContext
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The room calendar could not be loaded safely.',
+    );
+    expect(listEvents.mock.calls.at(-1)?.[0]).toEqual([]);
+    expect(screen.queryByText('Unexpected room event')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Edit' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Delete' }),
+    ).not.toBeInTheDocument();
+    expect(repository.updateEvent).not.toHaveBeenCalled();
+    expect(repository.deleteEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects events whose calendar ID does not match the singleton room calendar', async () => {
+    const roomCalendar: Calendar = {
+      id: 'configured-room-calendar',
+      name: 'Planning room calendar',
+    };
+    const mismatchedEvent: CalendarEvent = {
+      ...events[0],
+      id: 'mismatched-event',
+      calendarId: 'unexpected-calendar',
+      title: 'Mismatched room event',
+    };
+    const listEvents = vi.fn().mockResolvedValue([mismatchedEvent]);
+    const repository = {
+      listCalendars: vi.fn().mockResolvedValue([roomCalendar]),
+      listEvents,
+      updateEvent: vi.fn(),
+      deleteEvent: vi.fn(),
+    } as unknown as CalendarRepository;
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        roomContext
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The room calendar could not be loaded safely.',
+    );
+    expect(listEvents.mock.calls.at(-1)?.[0]).toEqual([roomCalendar.id]);
+    expect(screen.queryByText('Mismatched room event')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Edit' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Delete' }),
+    ).not.toBeInTheDocument();
+    expect(repository.updateEvent).not.toHaveBeenCalled();
+    expect(repository.deleteEvent).not.toHaveBeenCalled();
+  });
+
   it('hides and shows events with lightweight calendar visibility controls', async () => {
     const repository = new InMemoryCalendarRepository({ calendars, events });
 

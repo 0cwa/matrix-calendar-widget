@@ -23,6 +23,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarFilters,
+  getRoomCalendarTarget,
   isCalendarDiagnosticsRepository,
   useCalendarRepository,
   useCalendars,
@@ -72,6 +73,8 @@ export function CalendarToolbar({
   const writableCalendars = calendars.data.filter(
     (calendar) => !calendar.readOnly,
   );
+  const roomCalendar = getRoomCalendarTarget(calendars.data);
+  const hasValidTarget = !roomContext || Boolean(roomCalendar);
 
   return (
     <>
@@ -99,7 +102,11 @@ export function CalendarToolbar({
         )}
 
         <Button
-          disabled={calendars.loading || writableCalendars.length === 0}
+          disabled={
+            calendars.loading ||
+            writableCalendars.length === 0 ||
+            !hasValidTarget
+          }
           onClick={() => setCreateOpen(true)}
           startIcon={<AddIcon />}
           variant="contained"
@@ -205,13 +212,15 @@ export function CalendarToolbar({
         </>
       )}
 
-      <CalendarEventEditorDialog
-        calendars={calendars.data}
-        onClose={() => setCreateOpen(false)}
-        onSaved={() => undefined}
-        open={createOpen}
-        roomContext={roomContext}
-      />
+      {hasValidTarget && (
+        <CalendarEventEditorDialog
+          calendars={calendars.data}
+          onClose={() => setCreateOpen(false)}
+          onSaved={() => undefined}
+          open={createOpen}
+          roomContext={roomContext}
+        />
+      )}
     </>
   );
 }
