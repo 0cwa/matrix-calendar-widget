@@ -10,7 +10,7 @@ and test those policies for the deployment.
 | Data                                       | Location and purpose                                                                                                                                                                                      | Default and owner                                                                                                                                                                                        |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Reminder configuration and delivery claims | A separate application-owned PostgreSQL database, in the `matrix_calendar` schema. It contains room/calendar/event/recurrence/alarm identifiers and delivery state, not event titles or calendar objects. | The chart does not provision it. The operator provisions the database and least-privilege role.                                                                                                          |
-| Bot filesystem state                       | `/app/storage`, including persisted bot session state.                                                                                                                                                    | `persistence.enabled` is `false` by default, so this path uses ephemeral storage unless the operator enables the chart PVC or supplies an existing claim.                                                |
+| Bot filesystem state                       | `/app/storage`, including persisted bot session state.                                                                                                                                                    | `persistence.enabled` is `false` by default, so this path uses ephemeral storage. Set it to `true` to mount a PVC, whether the chart creates the claim or uses `persistence.existingClaim`.              |
 | Connection and deployment configuration    | The Kubernetes Secret named by `reminders.databaseUrl.existingSecret` and key named by `existingSecretKey`, plus the chart values and release/image identity needed to recreate the deployment.           | The Secret is external to the chart and is required only when reminders are enabled. Protect it with the cluster's approved secret backup and access controls.                                           |
 | Calendar collections and events            | Radicale/CalDAV.                                                                                                                                                                                          | Radicale remains canonical. Neither this PostgreSQL database nor `/app/storage` backs up calendar collections, VEVENTs, or VALARMs. Back up and restore Radicale independently using its own procedures. |
 
@@ -48,9 +48,11 @@ operator's protected backup inventory; do not record the connection URL.
 If `/app/storage` persistence is enabled, separately back up its PVC using the
 storage provider's supported snapshot or file-copy method. The default chart
 uses ephemeral storage, which is not a durable backup source. Preserve the PVC
-claim/volume mapping and required access mode as deployment metadata. If
-persistence is disabled, there is no PVC to back up; decide separately whether
-loss of bot filesystem state is acceptable.
+claim/volume mapping and required access mode as deployment metadata. Set
+`persistence.enabled: true` whether the chart creates a PVC or attaches an
+existing claim; setting `persistence.existingClaim` alone does not enable the
+PVC mount. If persistence is disabled, there is no PVC to back up; decide
+separately whether loss of bot filesystem state is acceptable.
 
 Back up the external Secret and non-secret chart/release configuration using
 the cluster's approved encrypted configuration backup. Include the Secret
