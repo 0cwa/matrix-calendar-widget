@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { CalendarEventOccurrence } from '@matrix-calendar-widget/calendar';
 import fs from 'fs';
 import ICAL from 'ical.js';
 import path from 'path';
@@ -90,10 +91,12 @@ describe('ICalendarEventCodec', () => {
       start: {
         local: '2026-10-26T09:00:00',
         timezone: 'Europe/Stockholm',
+        mode: 'tzid',
       },
       end: {
         local: '2026-10-26T10:00:00',
         timezone: 'Europe/Stockholm',
+        mode: 'tzid',
       },
     });
 
@@ -276,6 +279,350 @@ describe('ICalendarEventCodec', () => {
     expect(cancelledOverride.getFirstPropertyValue('status')).toBe('CANCELLED');
   });
 
+  it('preserves UTC and floating DATE-TIME modes and expands RDATE PERIOD durations', () => {
+    const parsed = codec.parse(
+      'team',
+      'periods.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:periods@example.test
+DTSTART:20260101T090000Z
+DTEND:20260101T100000Z
+RRULE:FREQ=DAILY;COUNT=2
+RDATE;VALUE=PERIOD:20260103T090000Z/PT2H,20260104T100000Z/20260104T130000Z
+END:VEVENT
+END:VCALENDAR`,
+    );
+
+    expect(parsed.event.timing).toEqual({
+      type: 'timed',
+      start: { local: '2026-01-01T09:00:00', timezone: 'UTC', mode: 'utc' },
+      end: { local: '2026-01-01T10:00:00', timezone: 'UTC', mode: 'utc' },
+    });
+    expect(parsed.event.recurrence?.rdatePeriods).toEqual([
+      {
+        start: {
+          type: 'date-time',
+          value: { local: '2026-01-03T09:00:00', timezone: 'UTC', mode: 'utc' },
+        },
+        duration: 'PT2H',
+      },
+      {
+        start: {
+          type: 'date-time',
+          value: { local: '2026-01-04T10:00:00', timezone: 'UTC', mode: 'utc' },
+        },
+        end: {
+          type: 'date-time',
+          value: { local: '2026-01-04T13:00:00', timezone: 'UTC', mode: 'utc' },
+        },
+      },
+    ]);
+
+    const occurrences = parsed.expandOccurrences({
+      start: '2026-01-03T00:00:00.000Z',
+      end: '2026-01-05T00:00:00.000Z',
+    });
+    expect(occurrences.map((occurrence) => occurrence.timing)).toEqual([
+      {
+        type: 'timed',
+        start: { local: '2026-01-03T09:00:00', timezone: 'UTC', mode: 'utc' },
+        end: { local: '2026-01-03T11:00:00', timezone: 'UTC', mode: 'utc' },
+      },
+      {
+        type: 'timed',
+        start: { local: '2026-01-04T10:00:00', timezone: 'UTC', mode: 'utc' },
+        end: { local: '2026-01-04T13:00:00', timezone: 'UTC', mode: 'utc' },
+      },
+    ]);
+
+    const floating = codec.parse(
+      'team',
+      'floating.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:floating@example.test
+DTSTART:20260101T090000
+DTEND:20260101T100000
+END:VEVENT
+END:VCALENDAR`,
+    );
+    expect(floating.event.timing).toEqual({
+      type: 'timed',
+      start: {
+        local: '2026-01-01T09:00:00',
+        timezone: 'floating',
+        mode: 'floating',
+      },
+      end: {
+        local: '2026-01-01T10:00:00',
+        timezone: 'floating',
+        mode: 'floating',
+      },
+    });
+  });
+
+  it('uses custom VTIMEZONE observances for gap omission, COUNT, and first-fold resolution', () => {
+    const timezone = `BEGIN:VTIMEZONE
+TZID:Custom/New_York
+BEGIN:DAYLIGHT
+DTSTART:20240310T020000
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0400
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20241103T020000
+TZOFFSETFROM:-0400
+TZOFFSETTO:-0500
+RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU
+END:STANDARD
+END:VTIMEZONE`;
+    const spring = codec.parse(
+      'team',
+      'custom-gap.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+${timezone}
+BEGIN:VEVENT
+UID:custom-gap@example.test
+DTSTART;TZID=Custom/New_York:20240309T023000
+DTEND;TZID=Custom/New_York:20240309T033000
+RRULE:FREQ=DAILY;COUNT=3
+END:VEVENT
+END:VCALENDAR`,
+    );
+    const springOccurrences = spring.expandOccurrences({
+      start: '2024-03-09T00:00:00.000Z',
+      end: '2024-03-14T00:00:00.000Z',
+    });
+    expect(springOccurrences.map(timedStart)).toEqual([
+      '2024-03-09T02:30:00',
+      '2024-03-11T02:30:00',
+      '2024-03-12T02:30:00',
+    ]);
+
+    const fall = codec.parse(
+      'team',
+      'custom-fold.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+${timezone}
+BEGIN:VEVENT
+UID:custom-fold@example.test
+DTSTART;TZID=Custom/New_York:20241102T013000
+DTEND;TZID=Custom/New_York:20241102T023000
+RRULE:FREQ=DAILY;COUNT=3
+END:VEVENT
+END:VCALENDAR`,
+    );
+    const fallOccurrences = fall.expandOccurrences({
+      start: '2024-11-02T00:00:00.000Z',
+      end: '2024-11-05T00:00:00.000Z',
+    });
+    expect(fallOccurrences.map(timedStart)).toEqual([
+      '2024-11-02T01:30:00',
+      '2024-11-03T01:30:00',
+      '2024-11-04T01:30:00',
+    ]);
+    expect(
+      fall
+        .expandOccurrences({
+          start: '2024-11-03T05:00:00.000Z',
+          end: '2024-11-03T06:00:00.000Z',
+        })
+        .map((occurrence) => occurrence.recurrenceId),
+    ).toEqual([
+      {
+        type: 'date-time',
+        value: {
+          local: '2024-11-03T01:30:00',
+          timezone: 'Custom/New_York',
+          mode: 'tzid',
+        },
+      },
+    ]);
+  });
+
+  it('leaves RANGE=THISANDFUTURE opaque and fails visibly during expansion', () => {
+    const parsed = codec.parse(
+      'team',
+      'range-opaque.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:range@example.test
+DTSTART:20260101T090000Z
+DTEND:20260101T100000Z
+RRULE:FREQ=DAILY;COUNT=3
+END:VEVENT
+BEGIN:VEVENT
+UID:range@example.test
+RECURRENCE-ID;RANGE=THISANDFUTURE:20260102T090000Z
+DTSTART:20260102T120000Z
+DTEND:20260102T130000Z
+SUMMARY:Not modeled yet
+END:VEVENT
+END:VCALENDAR`,
+    );
+
+    expect(parsed.event.recurrence?.overrides).toBeUndefined();
+    expect(() =>
+      parsed.expandOccurrences({
+        start: '2026-01-01T00:00:00.000Z',
+        end: '2026-01-05T00:00:00.000Z',
+      }),
+    ).toThrow(
+      'RECURRENCE-ID RANGE=THISANDFUTURE is preserved but cannot be expanded safely yet',
+    );
+    const patched = parsed.applyPatch({ title: 'Preserved source' });
+    const override = ICAL.Component.fromString(patched.icalendar)
+      .getAllSubcomponents('vevent')[1]
+      .getFirstProperty('recurrence-id');
+    expect(override?.getFirstParameter('range')).toBe('THISANDFUTURE');
+  });
+
+  it('bounds custom VTIMEZONE observance expansion by the requested work limit', () => {
+    const parsed = codec.parse(
+      'team',
+      'bounded-timezone.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VTIMEZONE
+TZID:Custom/Bounded
+BEGIN:DAYLIGHT
+DTSTART:20240310T020000
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0400
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20241103T020000
+TZOFFSETFROM:-0400
+TZOFFSETTO:-0500
+RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:bounded@example.test
+DTSTART;TZID=Custom/Bounded:20240310T090000
+DTEND;TZID=Custom/Bounded:20240310T100000
+RRULE:FREQ=DAILY;COUNT=2
+END:VEVENT
+END:VCALENDAR`,
+    );
+
+    expect(() =>
+      parsed.expandOccurrences(
+        {
+          start: '2024-03-10T00:00:00.000Z',
+          end: '2024-03-12T00:00:00.000Z',
+        },
+        { maxRuleCandidates: 1 },
+      ),
+    ).toThrow(
+      'VTIMEZONE Custom/Bounded exceeds the 1-transition expansion limit',
+    );
+  });
+
+  it('rejects duplicate RRULE properties in VEVENT and VTIMEZONE observances', () => {
+    expect(() =>
+      codec.parse(
+        'team',
+        'duplicate-event-rrule.ics',
+        `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:duplicate@example.test
+DTSTART:20260101T090000Z
+DTEND:20260101T100000Z
+RRULE:FREQ=DAILY;COUNT=2
+RRULE:FREQ=WEEKLY;COUNT=2
+END:VEVENT
+END:VCALENDAR`,
+      ),
+    ).toThrow('A VEVENT cannot contain multiple RRULE properties');
+
+    const parsed = codec.parse(
+      'team',
+      'duplicate-zone-rrule.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VTIMEZONE
+TZID:Custom/Duplicate
+BEGIN:STANDARD
+DTSTART:20240101T020000
+TZOFFSETFROM:+0000
+TZOFFSETTO:+0100
+RRULE:FREQ=YEARLY;BYMONTH=1;BYDAY=1MO
+RRULE:FREQ=YEARLY;BYMONTH=2;BYDAY=1MO
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:duplicate-zone@example.test
+DTSTART;TZID=Custom/Duplicate:20240101T090000
+DTEND;TZID=Custom/Duplicate:20240101T100000
+END:VEVENT
+END:VCALENDAR`,
+    );
+
+    expect(() =>
+      parsed.expandOccurrences({
+        start: '2024-01-01T00:00:00.000Z',
+        end: '2024-01-02T00:00:00.000Z',
+      }),
+    ).toThrow(
+      'A VTIMEZONE observance cannot contain multiple RRULE properties',
+    );
+  });
+
+  it('preflights the 371-date BYWEEKNO bound before calling ical.js expansion', () => {
+    const weeks = Array.from({ length: 53 }, (_value, index) => index + 1).join(
+      ',',
+    );
+    const parsed = codec.parse(
+      'team',
+      'week-number-zone.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VTIMEZONE
+TZID:Custom/WeekNumbers
+BEGIN:STANDARD
+DTSTART:20240101T020000
+TZOFFSETFROM:+0000
+TZOFFSETTO:+0100
+RRULE:FREQ=YEARLY;BYWEEKNO=${weeks};BYDAY=MO,TU,WE,TH,FR,SA,SU;UNTIL=20241231T235959
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:week-number@example.test
+DTSTART;TZID=Custom/WeekNumbers:20240101T090000
+DTEND;TZID=Custom/WeekNumbers:20240101T100000
+END:VEVENT
+END:VCALENDAR`,
+    );
+    const offsetSpy = jest.spyOn(ICAL.Timezone.prototype, 'utcOffset');
+
+    try {
+      expect(() =>
+        parsed.expandOccurrences(
+          {
+            start: '2024-01-01T00:00:00.000Z',
+            end: '2025-01-01T00:00:00.000Z',
+          },
+          { maxRuleCandidates: 368 },
+        ),
+      ).toThrow(
+        'VTIMEZONE Custom/WeekNumbers exceeds the 368-transition expansion limit',
+      );
+      expect(offsetSpy).not.toHaveBeenCalled();
+    } finally {
+      offsetSpy.mockRestore();
+    }
+  });
+
   it('decodes folded and escaped text without destructive re-encoding', () => {
     const parsed = codec.parse(
       'team',
@@ -382,4 +729,11 @@ function fixture(name: string): string {
     path.resolve(__dirname, '../../../fixtures/ical', name),
     'utf8',
   );
+}
+
+function timedStart(occurrence: CalendarEventOccurrence): string {
+  if (occurrence.timing.type !== 'timed') {
+    throw new Error('Expected a timed recurrence occurrence');
+  }
+  return occurrence.timing.start.local;
 }

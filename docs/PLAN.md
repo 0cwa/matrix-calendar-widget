@@ -79,6 +79,7 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [ ] RRULE editor based on inherited NeoDateFix recurrence UI.
 - [ ] RDATE / EXDATE.
 - [ ] RECURRENCE-ID instance overrides.
+- [x] Add range-bounded read expansion for resource RRULE/RDATE/EXDATE sets, RDATE PERIOD durations, and same-resource exceptions (local backend slice; `RANGE=THISANDFUTURE` remains preserved and fails visibly).
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
 - [ ] VALARM preservation and editor.

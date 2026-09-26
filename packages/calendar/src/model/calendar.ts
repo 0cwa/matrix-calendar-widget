@@ -30,14 +30,23 @@ export type CalendarDate = string;
 /**
  * Local wall-clock date/time in ISO form without a numeric UTC offset.
  *
- * The named IANA timezone on {@link ZonedCalendarDateTime} defines how the
- * value is interpreted.
+ * The explicit time mode and timezone on {@link ZonedCalendarDateTime} define
+ * how the value is interpreted. Floating values retain wall-clock time without
+ * a timezone; UTC values use UTC; TZID values use their named timezone.
  */
 export type LocalCalendarDateTime = string;
+
+/** How an iCalendar DATE-TIME is anchored in time. */
+export type CalendarDateTimeMode = 'floating' | 'utc' | 'tzid';
 
 export type ZonedCalendarDateTime = {
   local: LocalCalendarDateTime;
   timezone: string;
+  /**
+   * Explicit iCalendar value mode. Older callers may omit this; adapters
+   * should set it when parsing so floating values are not mistaken for UTC.
+   */
+  mode?: CalendarDateTimeMode;
 };
 
 /**
@@ -66,6 +75,14 @@ export type CalendarEventTiming =
 export type CalendarEventDateTime =
   | { type: 'date-time'; value: ZonedCalendarDateTime }
   | { type: 'date'; value: CalendarDate };
+
+/** An RFC 5545 RDATE PERIOD value. */
+export type CalendarEventRecurrencePeriod = {
+  start: { type: 'date-time'; value: ZonedCalendarDateTime };
+  end?: { type: 'date-time'; value: ZonedCalendarDateTime };
+  /** Preserved iCalendar duration form, such as `PT90M` or `P1D`. */
+  duration?: string;
+};
 
 export type CalendarEventStatus = 'confirmed' | 'tentative' | 'cancelled';
 
@@ -97,10 +114,16 @@ export type CalendarEventRecurrenceOverride = {
 export type CalendarEventRecurrence = {
   rrule?: string;
   rdates?: CalendarEventDateTime[];
+  rdatePeriods?: CalendarEventRecurrencePeriod[];
   exdates?: CalendarEventDateTime[];
   recurrenceId?: CalendarEventDateTime;
   /** Sibling exception VEVENTs carried by the same CalDAV resource. */
   overrides?: CalendarEventRecurrenceOverride[];
+};
+
+/** One expanded occurrence, retaining the stable original series identity. */
+export type CalendarEventOccurrence = Omit<CalendarEvent, 'recurrence'> & {
+  recurrenceId: CalendarEventDateTime;
 };
 
 export type Calendar = {

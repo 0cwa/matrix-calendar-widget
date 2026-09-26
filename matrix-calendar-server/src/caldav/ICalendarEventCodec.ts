@@ -17,17 +17,24 @@
 import {
   CalendarEvent,
   CalendarEventDateTime,
+  CalendarEventExpansionError,
   CalendarEventId,
   CalendarEventInput,
+  CalendarEventOccurrence,
   CalendarEventPatch,
   CalendarEventRecurrence,
   CalendarEventRecurrenceOverride,
+  CalendarEventRecurrencePeriod,
   CalendarEventStatus,
   CalendarEventTiming,
   CalendarEventTransparency,
   CalendarId,
+  CalendarTimeRange,
+  ZonedCalendarDateTime,
+  expandCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
 import ICAL from 'ical.js';
+import { createCalDavTimezoneResolver } from './CalDavTimezoneResolver';
 
 export type EncodedICalendarEvent = {
   event: CalendarEvent;
@@ -40,6 +47,7 @@ export type ICalendarEventCodecErrorCode =
   | 'missing-uid'
   | 'missing-timing'
   | 'invalid-timing'
+  | 'invalid-recurrence'
   | 'unsupported-patch';
 
 export class ICalendarEventCodecError extends Error {
@@ -57,6 +65,28 @@ export class ParsedICalendarEvent {
     private readonly calendar: ICAL.Component,
     public readonly event: CalendarEvent,
   ) {}
+
+  expandOccurrences(
+    range: CalendarTimeRange,
+    options: {
+      rangeTimezone?: string;
+      maxRuleCandidates?: number;
+    } = {},
+  ): CalendarEventOccurrence[] {
+    if (hasRangedRecurrenceOverride(this.calendar, this.event.uid)) {
+      throw new CalendarEventExpansionError(
+        'unsupported-recurrence-override',
+        'RECURRENCE-ID RANGE=THISANDFUTURE is preserved but cannot be expanded safely yet',
+      );
+    }
+    return expandCalendarEvent(this.event, range, {
+      ...options,
+      timezoneResolver: createCalDavTimezoneResolver(
+        this.calendar,
+        options.maxRuleCandidates,
+      ),
+    });
+  }
 
   applyPatch(patch: CalendarEventPatch): EncodedICalendarEvent {
     if (hasOwn(patch, 'recurrence')) {
@@ -116,8 +146,7 @@ export class ParsedICalendarEvent {
         ...this.event,
         ...patch,
         title: patch.title ?? this.event.title,
-        timing: patch.timing ?? this.event.timing,
-        recurrence: this.event.recurrence,
+        timing: normalizeTiming(patch.timing ?? this.event.timing),
       },
       icalendar: calendar.toString(),
     };
@@ -166,6 +195,7 @@ export class ICalendarEventCodec {
     return {
       event: {
         ...input,
+        timing: normalizeTiming(input.timing),
         id: eventId,
         calendarId,
       },
@@ -197,6 +227,8 @@ export class ICalendarEventCodec {
         'iCalendar resource must contain a VCALENDAR root',
       );
     }
+
+    assertSingleRrulePerVevent(calendar);
 
     const vevent = findMasterEvent(calendar);
     if (!vevent) {
@@ -230,10 +262,21 @@ export class ICalendarEventCodec {
       url: textValue(vevent.getFirstPropertyValue('url')),
       categories: readCategories(vevent),
       priority: numberValue(vevent.getFirstPropertyValue('priority')),
-      recurrence,
+      ...(recurrence ? { recurrence } : {}),
     };
 
     return new ParsedICalendarEvent(calendar, event);
+  }
+}
+
+function assertSingleRrulePerVevent(calendar: ICAL.Component): void {
+  for (const vevent of calendar.getAllSubcomponents('vevent')) {
+    if (vevent.getAllProperties('rrule').length > 1) {
+      throw new ICalendarEventCodecError(
+        'invalid-recurrence',
+        'A VEVENT cannot contain multiple RRULE properties',
+      );
+    }
   }
 }
 
@@ -269,10 +312,13 @@ function readRecurrence(
     recurrence.rrule = String(rule);
   }
 
-  const rdates = readDateTimeProperties(master, 'rdate');
+  const { rdates, rdatePeriods } = readRdateProperties(master);
   const exdates = readDateTimeProperties(master, 'exdate');
   if (rdates.length > 0) {
     recurrence.rdates = rdates;
+  }
+  if (rdatePeriods.length > 0) {
+    recurrence.rdatePeriods = rdatePeriods;
   }
   if (exdates.length > 0) {
     recurrence.exdates = exdates;
@@ -289,7 +335,8 @@ function readRecurrence(
       (event) =>
         event !== master &&
         textValue(event.getFirstPropertyValue('uid')) === uid &&
-        event.hasProperty('recurrence-id'),
+        event.hasProperty('recurrence-id') &&
+        !hasRecurrenceRange(event),
     )
     .map(readRecurrenceOverride);
   if (overrides.length > 0) {
@@ -297,6 +344,24 @@ function readRecurrence(
   }
 
   return Object.keys(recurrence).length > 0 ? recurrence : undefined;
+}
+
+function hasRecurrenceRange(vevent: ICAL.Component): boolean {
+  const recurrenceId = vevent.getFirstProperty('recurrence-id');
+  return Boolean(recurrenceId?.getFirstParameter('range'));
+}
+
+function hasRangedRecurrenceOverride(
+  calendar: ICAL.Component,
+  uid: string,
+): boolean {
+  return calendar
+    .getAllSubcomponents('vevent')
+    .some(
+      (vevent) =>
+        textValue(vevent.getFirstPropertyValue('uid')) === uid &&
+        hasRecurrenceRange(vevent),
+    );
 }
 
 function readRecurrenceOverride(
@@ -335,7 +400,7 @@ function readRecurrenceOverride(
 
 function readDateTimeProperties(
   component: ICAL.Component,
-  name: 'rdate' | 'exdate',
+  name: 'exdate',
 ): CalendarEventDateTime[] {
   return component.getAllProperties(name).flatMap((property) =>
     property.getValues().flatMap((value) => {
@@ -345,6 +410,54 @@ function readDateTimeProperties(
       return [readDateTimeValue(value, property)];
     }),
   );
+}
+
+function readRdateProperties(component: ICAL.Component): {
+  rdates: CalendarEventDateTime[];
+  rdatePeriods: CalendarEventRecurrencePeriod[];
+} {
+  const rdates: CalendarEventDateTime[] = [];
+  const rdatePeriods: CalendarEventRecurrencePeriod[] = [];
+
+  for (const property of component.getAllProperties('rdate')) {
+    for (const value of property.getValues()) {
+      if (value instanceof ICAL.Time) {
+        rdates.push(readDateTimeValue(value, property));
+        continue;
+      }
+      if (!(value instanceof ICAL.Period)) {
+        continue;
+      }
+      if (value.start.isDate || (value.end && value.end.isDate)) {
+        throw new ICalendarEventCodecError(
+          'invalid-timing',
+          'RDATE PERIOD values must use DATE-TIME values',
+        );
+      }
+
+      rdatePeriods.push({
+        start: readPeriodDateTime(value.start, property),
+        end: value.end ? readPeriodDateTime(value.end, property) : undefined,
+        duration: value.duration?.toString(),
+      });
+    }
+  }
+
+  return { rdates, rdatePeriods };
+}
+
+function readPeriodDateTime(
+  value: ICAL.Time,
+  property: ICAL.Property,
+): { type: 'date-time'; value: ZonedCalendarDateTime } {
+  const dateTime = readDateTimeValue(value, property);
+  if (dateTime.type !== 'date-time') {
+    throw new ICalendarEventCodecError(
+      'invalid-timing',
+      'RDATE PERIOD values must use DATE-TIME values',
+    );
+  }
+  return dateTime;
 }
 
 function readDateTimeProperty(property: ICAL.Property): CalendarEventDateTime {
@@ -371,9 +484,7 @@ function readDateTimeValue(
     type: 'date-time',
     value: {
       local: formatLocalDateTime(value),
-      timezone: property
-        ? readTimezone(property, value)
-        : value.zone?.tzid || 'UTC',
+      ...readTimezone(property, value),
     },
   };
 }
@@ -418,22 +529,29 @@ function readTiming(vevent: ICAL.Component): CalendarEventTiming {
     type: 'timed',
     start: {
       local: formatLocalDateTime(start),
-      timezone: readTimezone(startProperty, start),
+      ...readTimezone(startProperty, start),
     },
     end: {
       local: formatLocalDateTime(end),
-      timezone: readTimezone(endProperty, end),
+      ...readTimezone(endProperty, end),
     },
   };
 }
 
-function readTimezone(property: ICAL.Property, time: ICAL.Time): string {
-  const tzid = property.getFirstParameter('tzid');
+function readTimezone(
+  property: ICAL.Property | undefined,
+  time: ICAL.Time,
+): Pick<ZonedCalendarDateTime, 'timezone' | 'mode'> {
+  const tzid = property?.getFirstParameter('tzid');
   if (typeof tzid === 'string' && tzid.length > 0) {
-    return tzid;
+    return { timezone: tzid, mode: 'tzid' };
   }
 
-  return time.zone?.tzid === 'Z' ? 'UTC' : time.zone?.tzid || 'UTC';
+  if (time.zone === ICAL.Timezone.utcTimezone || time.zone?.tzid === 'Z') {
+    return { timezone: 'UTC', mode: 'utc' };
+  }
+
+  return { timezone: 'floating', mode: 'floating' };
 }
 
 function formatDate(time: ICAL.Time): string {
@@ -568,14 +686,14 @@ function setTiming(
   setTimeProperty(
     component,
     'dtstart',
-    timedValue(timing.start.local, timing.start.timezone),
-    timing.start.timezone,
+    timedValue(timing.start.local, timing.start.timezone, timing.start.mode),
+    dateTimeMode(timing.start) === 'tzid' ? timing.start.timezone : undefined,
   );
   setTimeProperty(
     component,
     'dtend',
-    timedValue(timing.end.local, timing.end.timezone),
-    timing.end.timezone,
+    timedValue(timing.end.local, timing.end.timezone, timing.end.mode),
+    dateTimeMode(timing.end) === 'tzid' ? timing.end.timezone : undefined,
   );
 }
 
@@ -601,10 +719,45 @@ function setTimeProperty(
   }
 }
 
-function timedValue(local: string, timezone: string): ICAL.Time {
+function timedValue(
+  local: string,
+  timezone: string,
+  mode?: ZonedCalendarDateTime['mode'],
+): ICAL.Time {
   const normalized = normalizeLocalDateTime(local);
+  const resolvedMode =
+    mode ??
+    (timezone === 'UTC'
+      ? 'utc'
+      : timezone === 'floating'
+        ? 'floating'
+        : 'tzid');
   return ICAL.Time.fromDateTimeString(
-    timezone === 'UTC' ? `${normalized}Z` : normalized,
+    resolvedMode === 'utc' ? `${normalized}Z` : normalized,
+  );
+}
+
+function normalizeTiming(timing: CalendarEventTiming): CalendarEventTiming {
+  if (timing.type === 'all-day') {
+    return { ...timing };
+  }
+  return {
+    type: 'timed',
+    start: { ...timing.start, mode: dateTimeMode(timing.start) },
+    end: { ...timing.end, mode: dateTimeMode(timing.end) },
+  };
+}
+
+function dateTimeMode(
+  value: ZonedCalendarDateTime,
+): NonNullable<ZonedCalendarDateTime['mode']> {
+  return (
+    value.mode ??
+    (value.timezone === 'UTC'
+      ? 'utc'
+      : value.timezone === 'floating'
+        ? 'floating'
+        : 'tzid')
   );
 }
 

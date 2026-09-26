@@ -315,23 +315,52 @@ function eventIntersectsRange(
   // Recurrence expansion belongs to the calendar-domain recurrence layer. Keep
   // a recurring source available whenever its master starts before the query
   // end so the caller can expand it into the visible range.
-  if (event.recurrence?.rrule || event.recurrence?.rdates?.length) {
-    return interval.start < range.end;
+  const recurrence = event.recurrence;
+  if (
+    recurrence?.rrule ||
+    recurrence?.rdates?.length ||
+    recurrence?.rdatePeriods?.length ||
+    recurrence?.overrides?.length
+  ) {
+    return (
+      interval.start < range.end ||
+      Boolean(recurrence.rdates?.length) ||
+      Boolean(recurrence.rdatePeriods?.length) ||
+      recurrence.overrides?.some((override) =>
+        override.timing
+          ? timingIntersectsRange(override.timing, calendar, range)
+          : false,
+      ) === true
+    );
   }
 
-  return interval.start < range.end && interval.end > range.start;
+  return timingIntersectsRange(event.timing, calendar, range);
 }
 
 function eventInterval(event: CalendarEvent, calendar: Calendar): ParsedRange {
-  if (event.timing.type === 'timed') {
-    return timedInterval(event.timing);
+  return timingInterval(event.timing, calendar);
+}
+
+function timingIntersectsRange(
+  timing: CalendarEvent['timing'],
+  calendar: Calendar,
+  range: ParsedRange,
+): boolean {
+  const interval = timingInterval(timing, calendar);
+  return interval.start < range.end && interval.end > range.start;
+}
+
+function timingInterval(
+  timing: CalendarEvent['timing'],
+  calendar: Calendar,
+): ParsedRange {
+  if (timing.type === 'timed') {
+    return timedInterval(timing, calendar);
   }
 
   const zone = calendar.timezone ?? 'UTC';
-  const start = DateTime.fromISO(event.timing.startDate, { zone }).startOf(
-    'day',
-  );
-  const end = DateTime.fromISO(event.timing.endDate, { zone }).startOf('day');
+  const start = DateTime.fromISO(timing.startDate, { zone }).startOf('day');
+  const end = DateTime.fromISO(timing.endDate, { zone }).startOf('day');
 
   return {
     start: start.toMillis(),
@@ -339,15 +368,32 @@ function eventInterval(event: CalendarEvent, calendar: Calendar): ParsedRange {
   };
 }
 
-function timedInterval(timing: TimedCalendarEventTiming): ParsedRange {
+function timedInterval(
+  timing: TimedCalendarEventTiming,
+  calendar: Calendar,
+): ParsedRange {
+  const startZone = dateTimeZone(timing.start, calendar);
+  const endZone = dateTimeZone(timing.end, calendar);
   return {
-    start: DateTime.fromISO(timing.start.local, {
-      zone: timing.start.timezone,
-    }).toMillis(),
-    end: DateTime.fromISO(timing.end.local, {
-      zone: timing.end.timezone,
-    }).toMillis(),
+    start: DateTime.fromISO(timing.start.local, { zone: startZone }).toMillis(),
+    end: DateTime.fromISO(timing.end.local, { zone: endZone }).toMillis(),
   };
+}
+
+function dateTimeZone(
+  value: TimedCalendarEventTiming['start'],
+  calendar: Calendar,
+): string {
+  if (value.mode === 'utc' || (!value.mode && value.timezone === 'UTC')) {
+    return 'UTC';
+  }
+  if (
+    value.mode === 'floating' ||
+    (!value.mode && value.timezone === 'floating')
+  ) {
+    return calendar.timezone ?? 'UTC';
+  }
+  return value.timezone;
 }
 
 function cloneCalendar(calendar: Calendar): Calendar {
@@ -411,6 +457,16 @@ function cloneRecurrence(
     ? {
         ...recurrence,
         rdates: recurrence.rdates?.map(cloneCalendarEventDateTime),
+        rdatePeriods: recurrence.rdatePeriods?.map((period) => ({
+          ...period,
+          start: {
+            type: 'date-time',
+            value: { ...period.start.value },
+          },
+          end: period.end
+            ? { type: 'date-time', value: { ...period.end.value } }
+            : undefined,
+        })),
         exdates: recurrence.exdates?.map(cloneCalendarEventDateTime),
         recurrenceId: recurrence.recurrenceId
           ? cloneCalendarEventDateTime(recurrence.recurrenceId)

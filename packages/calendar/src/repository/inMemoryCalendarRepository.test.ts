@@ -192,6 +192,140 @@ describe('InMemoryCalendarRepository', () => {
     });
   });
 
+  it('clones RDATE PERIOD values and keeps their source resource in range queries', async () => {
+    const repository = createRepository();
+    await repository.updateEvent('team', 'old-recurring', {
+      recurrence: {
+        rdatePeriods: [
+          {
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-12T09:00:00',
+                timezone: 'Europe/Stockholm',
+                mode: 'tzid',
+              },
+            },
+            duration: 'P1D',
+          },
+        ],
+      },
+    });
+
+    const returned = await repository.getEvent('team', 'old-recurring');
+    returned.recurrence!.rdatePeriods![0].start.value.local =
+      '2026-10-13T09:00:00';
+
+    await expect(
+      repository.listEvents(['team'], {
+        start: '2026-10-12T00:00:00Z',
+        end: '2026-10-13T00:00:00Z',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: 'old-recurring',
+        recurrence: {
+          rdatePeriods: [
+            expect.objectContaining({
+              start: expect.objectContaining({
+                value: expect.objectContaining({
+                  local: '2026-10-12T09:00:00',
+                }),
+              }),
+              duration: 'P1D',
+            }),
+          ],
+        },
+      }),
+    ]);
+  });
+
+  it('uses the calendar timezone when filtering floating timed events', async () => {
+    const repository = createRepository();
+    await repository.updateEvent('team', 'planning', {
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-09-23T09:00:00',
+          timezone: 'floating',
+          mode: 'floating',
+        },
+        end: {
+          local: '2026-09-23T10:00:00',
+          timezone: 'floating',
+          mode: 'floating',
+        },
+      },
+    });
+
+    await expect(
+      repository.listEvents(['team'], {
+        start: '2026-09-23T06:30:00Z',
+        end: '2026-09-23T08:30:00Z',
+      }),
+    ).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'planning' })]),
+    );
+  });
+
+  it('keeps a future recurring resource when a moved exception enters the range', async () => {
+    const repository = createRepository();
+    await repository.updateEvent('team', 'old-recurring', {
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2027-01-01T09:00:00',
+          timezone: 'UTC',
+          mode: 'utc',
+        },
+        end: {
+          local: '2027-01-01T09:30:00',
+          timezone: 'UTC',
+          mode: 'utc',
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=DAILY;COUNT=2',
+        overrides: [
+          {
+            recurrenceId: {
+              type: 'date-time',
+              value: {
+                local: '2027-01-01T09:00:00',
+                timezone: 'UTC',
+                mode: 'utc',
+              },
+            },
+            timing: {
+              type: 'timed',
+              start: {
+                local: '2026-09-23T09:00:00',
+                timezone: 'Europe/Stockholm',
+                mode: 'tzid',
+              },
+              end: {
+                local: '2026-09-23T09:30:00',
+                timezone: 'Europe/Stockholm',
+                mode: 'tzid',
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    await expect(
+      repository.listEvents(['team'], {
+        start: '2026-09-23T06:00:00Z',
+        end: '2026-09-23T08:00:00Z',
+      }),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'old-recurring' }),
+      ]),
+    );
+  });
+
   it('renames a writable calendar while preserving other fields', async () => {
     const repository = createRepository();
 
