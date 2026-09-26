@@ -142,6 +142,23 @@ describe('MatrixCalendarAuthorizationFactory', () => {
     ).resolves.toBe(true);
   });
 
+  it('denies diagnostics access to an unjoined user with manager power', async () => {
+    when(matrixClientMock.getJoinedRoomMembers(roomId)).thenResolve([
+      '@someone-else:example.test',
+    ]);
+    setPowerLevels({
+      users: { [userId]: 50 },
+      events_default: 0,
+      state_default: 50,
+    });
+
+    await expect(
+      new MatrixCalendarAuthorizationFactory(
+        instance(matrixClientMock),
+      ).canManageCalendars(userId, roomId),
+    ).resolves.toBe(false);
+  });
+
   it('supports dedicated Matrix power-level overrides', async () => {
     setPowerLevels({
       users: { [userId]: 50 },
