@@ -39,18 +39,18 @@ The gateway and bot are initially one deployable service. Split them only when s
 
 ## Source-of-truth boundaries
 
-| Concern                        | Canonical store                                |
-| ------------------------------ | ---------------------------------------------- |
-| calendar collection            | CalDAV/Radicale                                |
-| VEVENT fields                  | iCalendar object in Radicale                   |
-| UID, SEQUENCE, recurrence      | iCalendar object                               |
-| organizer/attendees            | iCalendar object                               |
-| VALARM                         | iCalendar object                               |
-| calendar display properties    | CalDAV properties where supported              |
-| Matrix room ↔ calendar binding | Server-managed configuration (ADR015)          |
-| Matrix reminder configuration  | app-owned PostgreSQL sidecar database (ADR019) |
-| reminder delivery state        | app-owned PostgreSQL sidecar database (ADR019) |
-| Matrix permissions             | Matrix room state + configured policy          |
+| Concern                         | Canonical store                                |
+| ------------------------------- | ---------------------------------------------- |
+| calendar collection             | CalDAV/Radicale                                |
+| VEVENT fields                   | iCalendar object in Radicale                   |
+| UID, SEQUENCE, recurrence       | iCalendar object                               |
+| organizer/attendees             | iCalendar object                               |
+| VALARM content and RFC 9074 UID | iCalendar object                               |
+| calendar display properties     | CalDAV properties where supported              |
+| Matrix room ↔ calendar binding  | Server-managed configuration (ADR015)          |
+| Matrix reminder configuration   | app-owned PostgreSQL sidecar database (ADR019) |
+| reminder delivery state         | app-owned PostgreSQL sidecar database (ADR019) |
+| Matrix permissions              | Matrix room state + configured policy          |
 
 ## Collection profile
 
@@ -151,6 +151,19 @@ gateway sidecar metadata keyed to a stable calendar/event/recurrence/alarm
 identity and stored in the app-owned PostgreSQL database described by ADR019.
 CalDAV remains canonical for event resources and alarm timing; the sidecar
 database is separate from Synapse's schema and credentials.
+
+The widget lets users explicitly add or remove master-event `ACTION:DISPLAY`
+alarms while preserving other alarm actions and unknown iCalendar data. New
+alarms receive one RFC 9074 VALARM UID, a localized description, and a default
+trigger 15 minutes before event start; new events have no alarm unless the user
+adds one. This stable UID is the future sidecar alarm identity, not a Matrix
+recipient field. Imported legacy alarms without UIDs remain unchanged unless
+an explicit UID is supplied.
+
+External CalDAV clients may remove or change optional VALARM UIDs. A future
+configuration API or scheduler must resolve the exact alarm UID from the
+current canonical CalDAV resource and fail closed when the UID is missing,
+changed, or ambiguous; it must not guess from alarm order or description.
 
 Delivery uses normal Matrix messages with `m.mentions.user_ids` for selected
 users or `m.mentions.room: true` for `@room`, only when the bot/user has

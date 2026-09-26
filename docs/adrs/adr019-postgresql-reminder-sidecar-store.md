@@ -12,6 +12,11 @@ remains canonical for events and VALARMs. Reminder configuration and delivery
 state need durable storage that can coordinate claims without putting
 application data in Synapse's database or mirroring calendar resources.
 
+The widget now supports explicit creation and removal of DISPLAY alarms.
+Widget-created alarms carry a stable RFC 9074 VALARM UID for future sidecar
+identity; this does not store Matrix recipients or enable scheduling/delivery.
+Legacy alarms without UIDs remain valid and preserved.
+
 The initial server deployment remains one replica. A shared application-owned
 database and atomic claim protocol establish a path for future workers, but do
 not make the whole bot/server safe to scale horizontally. Operators may already
@@ -27,9 +32,9 @@ role, or credentials an application data boundary.
    but the application must never read or write Synapse tables or use its database,
    schema, role, owner, or initialization credentials.
 2. Keep reminder metadata in the `matrix_calendar` schema. Identity includes the
-   room, bound calendar, event UID, recurrence instance, and stable VALARM UID; it
-   does not copy event titles, bodies, or other calendar content. CalDAV remains
-   canonical for calendar resources and alarm timing.
+   room, bound calendar, event UID, recurrence instance, and stable RFC 9074
+   VALARM UID; it does not copy event titles, bodies, or other calendar content.
+   CalDAV remains canonical for calendar resources and alarm timing.
 3. Configure the optional connection with
    `MATRIX_CALENDAR_REMINDER_DATABASE_URL`. Without it, reminder persistence is
    disabled and store operations fail explicitly. A configured URL enables startup
@@ -83,6 +88,11 @@ role, or credentials an application data boundary.
   PostgreSQL integration contract. Live PostgreSQL integration remains
   dependent on an available database. The scheduler, authenticated reminder
   configuration API, permission checks, and delivery remain unimplemented.
+- Stable alarm identity support is implemented for widget-created DISPLAY
+  alarms. External CalDAV clients can remove or change optional VALARM UIDs, so
+  future configuration and scheduler code must resolve the exact UID from the
+  current CalDAV resource and fail closed when it is absent, changed, or
+  ambiguous; alarm order and description are not fallback identities.
 - Whole-room `@room` is the first reminder target. Email attendees,
   verified-address registration, and consent flows remain deferred.
 - Live room-calendar integration remains subject to ADR014's trusted-domain

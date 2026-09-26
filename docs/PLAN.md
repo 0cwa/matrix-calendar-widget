@@ -92,6 +92,9 @@ The recurrence presentation policy remains viewer-local for DATE and floating va
 - [x] Preserve organizer and repeated attendee values/parameters across supported patches.
 - [x] Preserve repeated ATTACH and CONFERENCE values, types, and parameters; the server codec performs no automatic URI fetch.
 - [x] Edit trigger and description on existing DISPLAY alarms while unsupported actions remain inert (ADR018).
+- [x] Explicitly add and remove master-event DISPLAY alarms. New alarms receive
+      one RFC 9074 VALARM UID, a localized description, and a trigger 15 minutes
+      before event start; existing UID-less alarms remain intact (ADR020).
 - [x] Add a gated Radicale contract for recurring-resource create/read/patch with a master, moved and cancelled overrides, RRULE/RDATE/EXDATE, and a named timezone in one resource.
 - [ ] Run that recurring-resource contract against pinned Radicale 3.8.0.0; local runtime blocker and exact command are recorded in `docs/STATUS.md`.
 
@@ -99,7 +102,7 @@ The current series editor locks timed/all-day conversion while recurrence data i
 
 Series edits that change occurrence membership are checked against every existing detached exception before the resource is written. The server preserves exceptions whose exact original recurrence identities remain and refuses edits that remove an identity or whose membership cannot be proven; it does not remap or delete exceptions.
 
-The fixture-backed server codec check asserts that parsing and patching do not fetch stored URIs; it does not exercise browser navigation. The DISPLAY alarm editor changes only the trigger and description of existing DISPLAY alarms; unsupported actions remain inert. Adding or removing alarms, alarm execution, Matrix reminder scheduling, and attachment/conference UI actions remain separate work.
+The fixture-backed server codec check asserts that parsing and patching do not fetch stored URIs; it does not exercise browser navigation. Users can explicitly add or remove DISPLAY alarms; new events remain alarm-free unless the user adds one. New alarms use one RFC 9074 UID, a localized description, and a 15-minute-before-start default (ADR020). Existing UID-less alarms, unsupported actions, and unknown properties remain unchanged. Alarm execution, Matrix reminder configuration and scheduling, and attachment/conference UI actions remain separate work.
 
 The gated recurring-resource CalDAV contract is defined in `matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts`. M5 remains open until that contract passes against the pinned Radicale service; see `docs/STATUS.md` for the current local runtime blocker.
 
@@ -132,7 +135,10 @@ The gated recurring-resource CalDAV contract is defined in `matrix-calendar-serv
       other members' email addresses; never infer email from a Matrix ID.
 - [ ] Add an authenticated API that persists per-alarm Matrix reminder targets
       as ADR007 sidecar metadata through the implemented PostgreSQL store,
-      outside iCalendar. Require current room membership and event-write checks.
+      outside iCalendar. Use the widget-created RFC 9074 VALARM UID as the
+      stable alarm identity under ADR020; resolve it from current CalDAV data
+      and fail closed if it is absent, changed, or ambiguous. Require current
+      room membership and event-write checks.
 - [x] Implement the optional app-owned PostgreSQL reminder-state store and
       atomic durable delivery claims (ADR019). The store has local unit coverage
       and a PostgreSQL integration contract wired into CI; this does not enable

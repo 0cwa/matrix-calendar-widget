@@ -12,7 +12,7 @@ The local review branch assembles M4 calendar management, M5 recurrence work, M6
 
 The widget now has a real gateway-backed `CalendarRepository`, preservation-first VEVENT CRUD, visible conflict recovery, and a real two-client Radicale interoperability contract. The remaining M2 blocker is external: the pinned `etkecc/radicale-auth-matrix` plugin still only accepts Matrix passwords, while ADR009 requires short-lived Matrix OpenID delegation from the gateway.
 
-M5 recurrence editing, same-resource instance/following overrides, recurrence-set safety, occurrence presentation, property preservation, and DISPLAY alarm editing are locally implemented. The remaining M5 gate is an end-to-end recurring-resource create/read/patch against the pinned Radicale 3.8.0.0 harness. The contract test is added, but local execution is blocked: `bash dev/up.sh` exited 1 because `/var/run/docker.sock` is absent, and the approved Podman Compose path rejected the pinned Synapse v1.161.0 image before any service started. Radicale alone cannot authenticate this harness because `radicale-auth-matrix` delegates password checks to Synapse. The test remains unverified against a server and M5 stays open; no image substitution or live service was used.
+M5 recurrence editing, same-resource instance/following overrides, recurrence-set safety, occurrence presentation, property preservation, and DISPLAY alarm editing/addition/removal are locally implemented. New DISPLAY alarms receive one RFC 9074 VALARM UID, a localized description, and a default trigger 15 minutes before start; adding an alarm is explicit, and new events remain alarm-free by default. Existing UID-less alarms and unsupported alarm actions remain preserved. The remaining M5 gate is an end-to-end recurring-resource create/read/patch against the pinned Radicale 3.8.0.0 harness. The contract test is added, but local execution is blocked: `bash dev/up.sh` exited 1 because `/var/run/docker.sock` is absent, and the approved Podman Compose path rejected the pinned Synapse v1.161.0 image before any service started. Radicale alone cannot authenticate this harness because `radicale-auth-matrix` delegates password checks to Synapse. The test remains unverified against a server and M5 stays open; no image substitution or live service was used.
 
 ## Landed
 
@@ -87,8 +87,13 @@ Complete on `main`:
   Reminder intent is whole-room `@room`, independent of event email attendees;
   this selection is decided. The app-owned PostgreSQL reminder-state store and
   atomic delivery-claim adapter are implemented locally under ADR019, with
-  unit coverage and a PostgreSQL integration contract. ADR007 reminder targets
-  still need an authenticated configuration API. The server chart projects
+  unit coverage and a PostgreSQL integration contract. The widget explicitly
+  creates and removes DISPLAY alarms; each newly created alarm gets a stable
+  RFC 9074 VALARM UID for future sidecar identity. This does not configure
+  Matrix recipients or trigger delivery. ADR007
+  reminder targets still need an authenticated configuration API that resolves
+  the exact UID from current CalDAV data and fails closed if it is absent,
+  changed, or ambiguous. The server chart projects
   `MATRIX_CALENDAR_REMINDER_DATABASE_URL` only from an external Secret when
   reminders are enabled; no database is provisioned by the chart. Do not use
   Synapse's database/schema or `pg-credentials` secret. Email attendee fields,
