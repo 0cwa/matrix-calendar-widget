@@ -223,6 +223,12 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     delete clonedPatch.displayAlarmAdditions;
     delete clonedPatch.displayAlarmRemovals;
 
+    validateDisplayAlarmRemovals(
+      current.displayAlarms ?? [],
+      displayAlarmRemovals,
+      displayAlarmEdits ?? [],
+    );
+
     let displayAlarms = applyDisplayAlarmEdits(
       current.displayAlarms ?? [],
       displayAlarmEdits ?? [],
@@ -484,6 +490,46 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     } while (calendarEvents.has(id));
 
     return id;
+  }
+}
+
+function validateDisplayAlarmRemovals(
+  alarms: CalendarEvent['displayAlarms'],
+  removals: CalendarEventPatch['displayAlarmRemovals'],
+  edits: CalendarEventDisplayAlarmEdit[],
+): void {
+  if (removals === undefined) {
+    return;
+  }
+  if (!Array.isArray(removals)) {
+    throw new CalendarRepositoryError(
+      'request-failed',
+      'Alarm removals must be a list',
+    );
+  }
+
+  const removedIndexes = new Set<number>();
+  const editedIndexes = new Set(edits.map(({ index }) => index));
+  for (const removal of removals) {
+    if (
+      !removal ||
+      !Number.isSafeInteger(removal.index) ||
+      removal.index < 0 ||
+      removedIndexes.has(removal.index) ||
+      editedIndexes.has(removal.index)
+    ) {
+      throw new CalendarRepositoryError(
+        'request-failed',
+        'A DISPLAY alarm removal is invalid',
+      );
+    }
+    if (!alarms?.some((alarm) => alarm.index === removal.index)) {
+      throw new CalendarRepositoryError(
+        'request-failed',
+        'Only an existing DISPLAY alarm can be removed',
+      );
+    }
+    removedIndexes.add(removal.index);
   }
 }
 

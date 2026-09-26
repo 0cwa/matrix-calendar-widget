@@ -230,6 +230,7 @@ export function calendarEventPatchFromForm(
 
 export function createCalendarEventDisplayAlarmFormValue(
   uid: string,
+  defaultDescription: string,
 ): CalendarEventDisplayAlarmFormValue {
   return {
     formId: uid,
@@ -241,7 +242,7 @@ export function createCalendarEventDisplayAlarmFormValue(
     triggerEditable: true,
     triggerRelatedTo: 'start',
     originalDescription: undefined,
-    description: 'Event reminder',
+    description: defaultDescription,
   };
 }
 
