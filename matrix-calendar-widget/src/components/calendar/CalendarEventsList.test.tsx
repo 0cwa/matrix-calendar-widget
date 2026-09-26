@@ -19,6 +19,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import { axe } from 'vitest-axe';
+import { CalendarEventPresentation } from '../../calendar';
 import { CalendarEventsList } from './CalendarEventsList';
 
 const event: CalendarEvent = {
@@ -40,11 +41,22 @@ const event: CalendarEvent = {
   },
 };
 
+const presentation: CalendarEventPresentation = {
+  key: 'team:planning',
+  event,
+  resourceEvent: event,
+  rangeTimezone: 'Europe/Stockholm',
+  viewerTimezone: 'Europe/Stockholm',
+};
+
 describe('<CalendarEventsList />', () => {
   it('renders domain events and selects them without a Meeting adapter', async () => {
     const onSelectEvent = vi.fn();
     render(
-      <CalendarEventsList events={[event]} onSelectEvent={onSelectEvent} />,
+      <CalendarEventsList
+        events={[presentation]}
+        onSelectEvent={onSelectEvent}
+      />,
     );
 
     expect(screen.getByText('Team planning')).toBeInTheDocument();
@@ -54,7 +66,38 @@ describe('<CalendarEventsList />', () => {
       screen.getByRole('button', { name: /Team planning/i }),
     );
 
-    expect(onSelectEvent).toHaveBeenCalledWith(event);
+    expect(onSelectEvent).toHaveBeenCalledWith(presentation);
+  });
+
+  it('formats floating event times in the viewer-local timezone', () => {
+    const floatingEvent: CalendarEventPresentation = {
+      ...presentation,
+      event: {
+        ...event,
+        timing: {
+          type: 'timed',
+          start: {
+            local: '2026-09-23T09:00:00',
+            timezone: 'floating',
+            mode: 'floating',
+          },
+          end: {
+            local: '2026-09-23T10:00:00',
+            timezone: 'floating',
+            mode: 'floating',
+          },
+        },
+      },
+      rangeTimezone: 'America/Los_Angeles',
+      viewerTimezone: 'America/Los_Angeles',
+    };
+
+    render(
+      <CalendarEventsList events={[floatingEvent]} onSelectEvent={vi.fn()} />,
+    );
+
+    expect(screen.getByText(/9:00 AM–10:00 AM/)).toBeInTheDocument();
+    expect(screen.queryByText(/Invalid DateTime/)).toBeNull();
   });
 
   it('renders an empty state', () => {
@@ -67,7 +110,7 @@ describe('<CalendarEventsList />', () => {
 
   it('has no accessibility violations', async () => {
     const { container } = render(
-      <CalendarEventsList events={[event]} onSelectEvent={vi.fn()} />,
+      <CalendarEventsList events={[presentation]} onSelectEvent={vi.fn()} />,
     );
 
     expect(await axe(container)).toHaveNoViolations();

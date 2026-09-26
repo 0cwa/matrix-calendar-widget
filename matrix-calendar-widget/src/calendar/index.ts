@@ -20,19 +20,43 @@ export type {
   CalendarDiagnosticsRepository,
 } from './CalendarDiagnosticsRepository';
 export {
+  calendarEventDisplayAlarmEditsFromForm,
   calendarEventInputFromForm,
+  calendarEventOccurrencePatchFromForm,
   calendarEventPatchFromForm,
+  calendarEventTimingFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
+  hasInvalidCalendarEventDisplayAlarmFormValues,
+  hasInvalidCalendarEventRecurrenceFormValues,
+  hasRecurrenceDateTypeMismatch,
+  isInvalidCalendarEventDisplayAlarmTrigger,
+  recurrenceDateValueFromForm,
+  recurrenceDateValueMatchesTimingType,
 } from './calendarEventForm';
-export type { CalendarEventFormValues } from './calendarEventForm';
+export type {
+  CalendarEventDisplayAlarmFormValue,
+  CalendarEventFormValues,
+  CalendarEventRecurrenceDateMode,
+  CalendarEventRecurrenceDateValue,
+  CalendarEventRecurrenceFormValues,
+} from './calendarEventForm';
 export {
+  calendarEventDateTimeForDisplay,
+  calendarEventDateTimeTimezone,
   calendarEventKey,
+  calendarEventOccurrenceKey,
+  calendarEventPresentationToFullCalendarEvent,
   calendarEventStartDate,
   calendarEventToFullCalendarEvent,
   filterCalendarEvents,
   groupCalendarEventsByDay,
+  presentCalendarEvents,
   repositoryRangeForView,
+} from './calendarEventPresentation';
+export type {
+  CalendarEventPresentation,
+  CalendarEventPresentationResult,
 } from './calendarEventPresentation';
 export {
   CalendarRepositoryProvider,
@@ -44,13 +68,16 @@ export { GatewayCalendarRepository } from './GatewayCalendarRepository';
 export type { GatewayCalendarRepositoryOptions } from './GatewayCalendarRepository';
 export type { CalendarFilters } from './types';
 export {
+  useCancelCalendarOccurrence,
   useCreateCalendar,
   useCreateCalendarEvent,
   useDeleteCalendar,
   useDeleteCalendarEvent,
   useRenameCalendar,
   useUpdateCalendarEvent,
+  useUpdateCalendarFollowingOccurrence,
   useUpdateCalendarMetadata,
+  useUpdateCalendarOccurrence,
 } from './useCalendarMutations';
 export {
   useCalendarEvent,

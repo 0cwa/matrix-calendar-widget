@@ -17,9 +17,12 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarEventDateTime,
   CalendarEventId,
   CalendarEventInput,
+  CalendarEventOccurrencePatch,
   CalendarEventPatch,
+  CalendarEventTiming,
   CalendarId,
   CalendarMetadataPatch,
   CalendarRepository,
@@ -222,6 +225,47 @@ export class GatewayCalendarRepository
     }
   }
 
+  async updateOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+    patch: CalendarEventOccurrencePatch,
+  ): Promise<CalendarEvent> {
+    return this.mutateOccurrence(
+      calendarId,
+      resourceEventId,
+      '/v1/calendar/events/occurrence',
+      { recurrenceId, patch },
+    );
+  }
+
+  async cancelOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+  ): Promise<CalendarEvent> {
+    return this.mutateOccurrence(
+      calendarId,
+      resourceEventId,
+      '/v1/calendar/events/occurrence/cancel',
+      { recurrenceId },
+    );
+  }
+
+  async updateFollowingOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+    timing: CalendarEventTiming,
+  ): Promise<CalendarEvent> {
+    return this.mutateOccurrence(
+      calendarId,
+      resourceEventId,
+      '/v1/calendar/events/occurrence/following',
+      { recurrenceId, timing },
+    );
+  }
+
   async deleteEvent(
     calendarId: CalendarId,
     eventId: CalendarEventId,
@@ -271,6 +315,39 @@ export class GatewayCalendarRepository
     }
 
     return fetched;
+  }
+
+  private async mutateOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    path: string,
+    body: unknown,
+  ): Promise<CalendarEvent> {
+    const etag = await this.etagFor(calendarId, resourceEventId);
+    try {
+      return this.remember(
+        await this.requestJson<CalendarGatewayEventResource>(
+          this.url(path, {
+            roomId: this.options.roomId,
+            calendarId,
+            eventId: resourceEventId,
+          }),
+          {
+            method: path.endsWith('/cancel') ? 'POST' : 'PATCH',
+            headers: { 'If-Match': etag },
+            body: JSON.stringify(body),
+          },
+        ),
+      );
+    } catch (error) {
+      if (
+        error instanceof CalendarRepositoryError &&
+        error.code === 'event-conflict'
+      ) {
+        this.etags.delete(resourceEventId);
+      }
+      throw error;
+    }
   }
 
   private remember(resource: CalendarGatewayEventResource): CalendarEvent {
@@ -350,6 +427,35 @@ export class GatewayCalendarRepository
         'event-conflict',
         'The event changed on the server',
       );
+    }
+
+    if (response.status === 400) {
+      let code: unknown;
+      try {
+        const body = (await response.json()) as { code?: unknown };
+        code = body?.code;
+      } catch {
+        code = undefined;
+      }
+
+      if (code === 'recurrence-exception-orphaned') {
+        throw new CalendarRepositoryError(
+          code,
+          'The series change would detach an existing occurrence override',
+        );
+      }
+      if (code === 'recurrence-exception-unverifiable') {
+        throw new CalendarRepositoryError(
+          code,
+          'The series change cannot be checked safely',
+        );
+      }
+      if (code === 'unsupported-recurrence-range') {
+        throw new CalendarRepositoryError(
+          code,
+          'The following-scope edit cannot be represented safely',
+        );
+      }
     }
 
     throw new CalendarRepositoryError(

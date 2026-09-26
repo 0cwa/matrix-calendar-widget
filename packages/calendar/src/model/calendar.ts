@@ -30,14 +30,23 @@ export type CalendarDate = string;
 /**
  * Local wall-clock date/time in ISO form without a numeric UTC offset.
  *
- * The named IANA timezone on {@link ZonedCalendarDateTime} defines how the
- * value is interpreted.
+ * The explicit time mode and timezone on {@link ZonedCalendarDateTime} define
+ * how the value is interpreted. Floating values retain wall-clock time without
+ * a timezone; UTC values use UTC; TZID values use their named timezone.
  */
 export type LocalCalendarDateTime = string;
+
+/** How an iCalendar DATE-TIME is anchored in time. */
+export type CalendarDateTimeMode = 'floating' | 'utc' | 'tzid';
 
 export type ZonedCalendarDateTime = {
   local: LocalCalendarDateTime;
   timezone: string;
+  /**
+   * Explicit iCalendar value mode. Older callers may omit this; adapters
+   * should set it when parsing so floating values are not mistaken for UTC.
+   */
+  mode?: CalendarDateTimeMode;
 };
 
 /**
@@ -67,9 +76,38 @@ export type CalendarEventDateTime =
   | { type: 'date-time'; value: ZonedCalendarDateTime }
   | { type: 'date'; value: CalendarDate };
 
+/** An RFC 5545 RDATE PERIOD value. */
+export type CalendarEventRecurrencePeriod = {
+  start: { type: 'date-time'; value: ZonedCalendarDateTime };
+  end?: { type: 'date-time'; value: ZonedCalendarDateTime };
+  /** Preserved iCalendar duration form, such as `PT90M` or `P1D`. */
+  duration?: string;
+};
+
 export type CalendarEventStatus = 'confirmed' | 'tentative' | 'cancelled';
 
 export type CalendarEventTransparency = 'opaque' | 'transparent';
+
+export type CalendarEventRecurrenceRange = 'this-and-following';
+
+/**
+ * Supported fields from one RECURRENCE-ID VEVENT in a recurring resource.
+ * The recurrenceId remains the original series start even if timing moves.
+ */
+export type CalendarEventRecurrenceOverride = {
+  recurrenceId: CalendarEventDateTime;
+  /** RFC 5545 RANGE=THISANDFUTURE timing override. */
+  range?: CalendarEventRecurrenceRange;
+  title?: string;
+  description?: string;
+  timing?: CalendarEventTiming;
+  status?: CalendarEventStatus;
+  transparency?: CalendarEventTransparency;
+  location?: string;
+  url?: string;
+  categories?: string[];
+  priority?: number;
+};
 
 /**
  * Recurrence source metadata.
@@ -80,8 +118,37 @@ export type CalendarEventTransparency = 'opaque' | 'transparent';
 export type CalendarEventRecurrence = {
   rrule?: string;
   rdates?: CalendarEventDateTime[];
+  rdatePeriods?: CalendarEventRecurrencePeriod[];
   exdates?: CalendarEventDateTime[];
   recurrenceId?: CalendarEventDateTime;
+  /** Sibling exception VEVENTs carried by the same CalDAV resource. */
+  overrides?: CalendarEventRecurrenceOverride[];
+};
+
+/**
+ * Editable projection of one existing DISPLAY VALARM. The index is its order
+ * among VALARM components in the resource and is valid only for that resource
+ * version; conditional updates protect it from stale edits.
+ */
+export type CalendarEventDisplayAlarm = {
+  index: number;
+  description?: string;
+  /** Relative trigger in whole minutes, when the source form is supported. */
+  triggerMinutes?: number;
+  triggerRelatedTo?: 'start' | 'end';
+  triggerEditable: boolean;
+};
+
+/** Narrow changes for existing DISPLAY VALARMs only. */
+export type CalendarEventDisplayAlarmEdit = {
+  index: number;
+  triggerMinutes?: number;
+  description?: string;
+};
+
+/** One expanded occurrence, retaining the stable original series identity. */
+export type CalendarEventOccurrence = Omit<CalendarEvent, 'recurrence'> & {
+  recurrenceId: CalendarEventDateTime;
 };
 
 export type Calendar = {
@@ -123,17 +190,53 @@ export type CalendarEvent = {
   priority?: number;
 
   recurrence?: CalendarEventRecurrence;
+  /** Existing master-event DISPLAY alarms only; unsupported actions are hidden. */
+  displayAlarms?: CalendarEventDisplayAlarm[];
+  /** Opaque response-only marker; the source iCalendar component stays server-side. */
+  unsupportedRecurrence?: string;
 };
 
-export type CalendarEventInput = Omit<CalendarEvent, 'id' | 'calendarId'>;
+export type CalendarEventInput = Omit<
+  CalendarEvent,
+  'id' | 'calendarId' | 'displayAlarms' | 'unsupportedRecurrence'
+>;
 
 /**
  * Fields editable without changing resource identity, calendar ownership, or
  * the stable iCalendar UID.
  */
 export type CalendarEventPatch = Partial<
-  Omit<CalendarEvent, 'id' | 'calendarId' | 'uid'>
->;
+  Omit<
+    CalendarEvent,
+    'id' | 'calendarId' | 'uid' | 'displayAlarms' | 'unsupportedRecurrence'
+  >
+> & {
+  displayAlarmEdits?: CalendarEventDisplayAlarmEdit[];
+};
+
+/** Editable values for one detached recurrence override, excluding series data. */
+export type CalendarEventOccurrencePatch = Omit<
+  Partial<
+    Pick<
+      CalendarEvent,
+      | 'title'
+      | 'description'
+      | 'timing'
+      | 'transparency'
+      | 'location'
+      | 'url'
+      | 'categories'
+      | 'priority'
+    >
+  >,
+  'description' | 'location' | 'url' | 'priority'
+> & {
+  /** Null removes an optional property from the detached VEVENT. */
+  description?: string | null;
+  location?: string | null;
+  url?: string | null;
+  priority?: number | null;
+};
 
 export type CalendarTimeRange = {
   /** Inclusive ISO instant. */

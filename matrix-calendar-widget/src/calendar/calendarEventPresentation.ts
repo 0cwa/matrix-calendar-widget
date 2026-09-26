@@ -16,8 +16,13 @@
 
 import { EventInput } from '@fullcalendar/core';
 import {
+  Calendar,
   CalendarEvent,
+  CalendarEventDateTime,
+  CalendarEventOccurrence,
   CalendarTimeRange,
+  ZonedCalendarDateTime,
+  expandCalendarEvent,
   isAllDayCalendarEvent,
   isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
@@ -25,13 +30,126 @@ import { DateTime } from 'luxon';
 import { CalendarViewType } from '../lib/utils';
 import { CalendarFilters } from './types';
 
+export type CalendarEventPresentation = {
+  /** Stable UI identity. Recurring instances include the original recurrence ID. */
+  key: string;
+  /** Values rendered for this visible event. */
+  event: CalendarEvent | CalendarEventOccurrence;
+  /** CalDAV resource that owns the event and all of its recurrence data. */
+  resourceEvent: CalendarEvent;
+  /** Viewer zone used to expand DATE/floating values and present them. */
+  rangeTimezone: string;
+  /** Viewer-local zone used to render the resolved floating instant. */
+  viewerTimezone: string;
+  /** Original series identity, unchanged when an override moves an instance. */
+  recurrenceId?: CalendarEventDateTime;
+};
+
+export type CalendarEventPresentationResult = {
+  events: CalendarEventPresentation[];
+  expansionErrors: number;
+};
+
 export function calendarEventKey(event: CalendarEvent): string {
   return `${event.calendarId}:${event.id}`;
 }
 
-export function calendarEventToFullCalendarEvent(
+export function presentCalendarEvents(
+  events: CalendarEvent[],
+  calendars: Calendar[],
+  range: CalendarTimeRange,
+  viewerTimezone = DateTime.local().zoneName || 'UTC',
+): CalendarEventPresentationResult {
+  // Calendar.timezone is metadata, not the viewer's interpretation of DATE or
+  // floating values. Keep the argument for call-site compatibility while the
+  // presentation policy is viewer-local.
+  void calendars;
+  const result: CalendarEventPresentation[] = [];
+  let expansionErrors = 0;
+
+  for (const resourceEvent of events) {
+    const rangeTimezone = viewerTimezone;
+
+    if (resourceEvent.unsupportedRecurrence) {
+      // The raw component is preserved by the server. Do not expand a partial
+      // recurrence set when a ranged override cannot be represented safely.
+      expansionErrors += 1;
+      continue;
+    }
+
+    if (!hasRecurrence(resourceEvent)) {
+      result.push({
+        key: calendarEventKey(resourceEvent),
+        event: resourceEvent,
+        resourceEvent,
+        rangeTimezone,
+        viewerTimezone,
+      });
+      continue;
+    }
+
+    try {
+      const occurrences = expandCalendarEvent(resourceEvent, range, {
+        rangeTimezone,
+      });
+      result.push(
+        ...occurrences.map((event) => ({
+          key: calendarEventOccurrenceKey(resourceEvent, event.recurrenceId),
+          event,
+          resourceEvent,
+          rangeTimezone,
+          viewerTimezone,
+          recurrenceId: event.recurrenceId,
+        })),
+      );
+    } catch {
+      // Unsupported or malformed recurrence data must be visible as a warning
+      // in the surface instead of silently looking like an empty calendar.
+      expansionErrors += 1;
+    }
+  }
+
+  return { events: result, expansionErrors };
+}
+
+export function calendarEventOccurrenceKey(
   event: CalendarEvent,
+  recurrenceId: CalendarEventDateTime,
+): string {
+  return `occurrence:${encodeURIComponent(
+    JSON.stringify([
+      event.calendarId,
+      event.id,
+      recurrenceIdentity(recurrenceId),
+    ]),
+  )}`;
+}
+
+export function calendarEventPresentationToFullCalendarEvent(
+  presentation: CalendarEventPresentation,
   buttonLabelId: string,
+): EventInput {
+  const input = calendarEventToFullCalendarEvent(
+    presentation.event,
+    buttonLabelId,
+    presentation.rangeTimezone,
+  );
+  return {
+    ...input,
+    id: presentation.key,
+    extendedProps: {
+      ...input.extendedProps,
+      calendarId: presentation.resourceEvent.calendarId,
+      eventId: presentation.resourceEvent.id,
+      recurrenceId: presentation.recurrenceId,
+    },
+  };
+}
+
+export function calendarEventToFullCalendarEvent(
+  event: CalendarEvent | CalendarEventOccurrence,
+  buttonLabelId: string,
+  rangeTimezone = DateTime.local().zoneName || 'UTC',
 ): EventInput {
   if (isAllDayCalendarEvent(event)) {
     return {
@@ -55,21 +173,23 @@ export function calendarEventToFullCalendarEvent(
   return {
     id: calendarEventKey(event),
     title: event.title,
-    start: zonedDateTimeToIso(
-      event.timing.start.local,
-      event.timing.start.timezone,
-    ),
-    end: zonedDateTimeToIso(event.timing.end.local, event.timing.end.timezone),
+    start: zonedDateTimeToIso(event.timing.start, rangeTimezone),
+    end: zonedDateTimeToIso(event.timing.end, rangeTimezone),
     allDay: false,
     extendedProps: {
       calendarId: event.calendarId,
       eventId: event.id,
       buttonLabelId,
+      rangeTimezone,
     },
   };
 }
 
-export function calendarEventStartDate(event: CalendarEvent): string {
+export function calendarEventStartDate(
+  event: CalendarEvent | CalendarEventOccurrence,
+  rangeTimezone = DateTime.local().zoneName || 'UTC',
+  viewerTimezone = DateTime.local().zoneName || 'UTC',
+): string {
   if (isAllDayCalendarEvent(event)) {
     return event.timing.startDate;
   }
@@ -79,22 +199,24 @@ export function calendarEventStartDate(event: CalendarEvent): string {
   }
 
   return (
-    DateTime.fromISO(event.timing.start.local, {
-      zone: event.timing.start.timezone,
-    }).toISODate() ?? event.timing.start.local.slice(0, 10)
+    calendarEventDateTimeForDisplay(
+      event.timing.start,
+      rangeTimezone,
+      viewerTimezone,
+    ).toISODate() ?? event.timing.start.local.slice(0, 10)
   );
 }
 
 export function filterCalendarEvents(
-  events: CalendarEvent[],
+  events: CalendarEventPresentation[],
   filterText?: string,
-): CalendarEvent[] {
+): CalendarEventPresentation[] {
   const query = filterText?.trim().toLocaleLowerCase();
   if (!query) {
     return events;
   }
 
-  return events.filter((event) =>
+  return events.filter(({ event }) =>
     [
       event.title,
       event.description,
@@ -107,17 +229,21 @@ export function filterCalendarEvents(
 }
 
 export function groupCalendarEventsByDay(
-  events: CalendarEvent[],
-): Array<{ day: string; events: CalendarEvent[] }> {
-  const groups = new Map<string, CalendarEvent[]>();
+  events: CalendarEventPresentation[],
+): Array<{ day: string; events: CalendarEventPresentation[] }> {
+  const groups = new Map<string, CalendarEventPresentation[]>();
 
-  for (const event of [...events].sort(compareCalendarEvents)) {
-    const day = calendarEventStartDate(event);
+  for (const presentation of [...events].sort(comparePresentations)) {
+    const day = calendarEventStartDate(
+      presentation.event,
+      presentation.rangeTimezone,
+      presentation.viewerTimezone,
+    );
     const group = groups.get(day);
     if (group) {
-      group.push(event);
+      group.push(presentation);
     } else {
-      groups.set(day, [event]);
+      groups.set(day, [presentation]);
     }
   }
 
@@ -145,20 +271,57 @@ export function repositoryRangeForView(
   };
 }
 
-function zonedDateTimeToIso(local: string, timezone: string): string {
-  return DateTime.fromISO(local, { zone: timezone }).toISO() ?? local;
+function zonedDateTimeToIso(
+  dateTime: ZonedCalendarDateTime,
+  rangeTimezone: string,
+): string {
+  return (
+    DateTime.fromISO(dateTime.local, {
+      zone: calendarEventDateTimeTimezone(dateTime, rangeTimezone),
+    }).toISO() ?? dateTime.local
+  );
 }
 
-function compareCalendarEvents(a: CalendarEvent, b: CalendarEvent): number {
-  const startComparison = eventStartMillis(a) - eventStartMillis(b);
+export function calendarEventDateTimeTimezone(
+  dateTime: ZonedCalendarDateTime,
+  rangeTimezone = DateTime.local().zoneName || 'UTC',
+): string {
+  return isFloatingDateTime(dateTime) ? rangeTimezone : dateTime.timezone;
+}
+
+export function calendarEventDateTimeForDisplay(
+  dateTime: ZonedCalendarDateTime,
+  rangeTimezone = DateTime.local().zoneName || 'UTC',
+  viewerTimezone = DateTime.local().zoneName || 'UTC',
+): DateTime {
+  const value = DateTime.fromISO(dateTime.local, {
+    zone: calendarEventDateTimeTimezone(dateTime, rangeTimezone),
+  });
+  return isFloatingDateTime(dateTime) ? value.setZone(viewerTimezone) : value;
+}
+
+function isFloatingDateTime(dateTime: ZonedCalendarDateTime): boolean {
+  return dateTime.mode === 'floating' || dateTime.timezone === 'floating';
+}
+
+function comparePresentations(
+  a: CalendarEventPresentation,
+  b: CalendarEventPresentation,
+): number {
+  const startComparison =
+    eventStartMillis(a.event, a.rangeTimezone) -
+    eventStartMillis(b.event, b.rangeTimezone);
   if (startComparison !== 0) {
     return startComparison;
   }
 
-  return a.title.localeCompare(b.title);
+  return a.event.title.localeCompare(b.event.title);
 }
 
-function eventStartMillis(event: CalendarEvent): number {
+function eventStartMillis(
+  event: CalendarEvent | CalendarEventOccurrence,
+  rangeTimezone: string,
+): number {
   if (isAllDayCalendarEvent(event)) {
     return DateTime.fromISO(event.timing.startDate, { zone: 'utc' }).toMillis();
   }
@@ -168,6 +331,39 @@ function eventStartMillis(event: CalendarEvent): number {
   }
 
   return DateTime.fromISO(event.timing.start.local, {
-    zone: event.timing.start.timezone,
+    zone: calendarEventDateTimeTimezone(event.timing.start, rangeTimezone),
   }).toMillis();
+}
+
+function hasRecurrence(event: CalendarEvent): boolean {
+  const recurrence = event.recurrence;
+  return Boolean(
+    recurrence?.rrule ||
+    recurrence?.rdates?.length ||
+    recurrence?.rdatePeriods?.length ||
+    recurrence?.exdates?.length ||
+    recurrence?.overrides?.length ||
+    recurrence?.recurrenceId,
+  );
+}
+
+function recurrenceIdentity(recurrenceId: CalendarEventDateTime): string {
+  if (recurrenceId.type === 'date') {
+    return JSON.stringify(['date', recurrenceId.value]);
+  }
+
+  const value = recurrenceId.value;
+  const mode =
+    value.mode ??
+    (value.timezone === 'UTC'
+      ? 'utc'
+      : value.timezone === 'floating'
+        ? 'floating'
+        : 'tzid');
+  return JSON.stringify([
+    'date-time',
+    mode,
+    mode === 'tzid' ? value.timezone : '',
+    value.local,
+  ]);
 }

@@ -15,6 +15,9 @@
  */
 
 import fetchMock from 'jest-fetch-mock';
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   CalDavCredentialProvider,
   CalDavEventClient,
@@ -36,10 +39,27 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
   const credentials = basicCredentialProvider(username, password);
   const codec = new ICalendarEventCodec();
   let client: CalDavEventClient;
+  let cleanupResourceUrl: string | undefined;
 
   beforeAll(() => {
     fetchMock.disableMocks();
     client = new CalDavEventClient(credentials);
+  });
+
+  afterEach(async () => {
+    if (!cleanupResourceUrl) {
+      return;
+    }
+
+    const resourceUrl = cleanupResourceUrl;
+    cleanupResourceUrl = undefined;
+
+    try {
+      const resource = await client.getEvent(resourceUrl);
+      await client.deleteEvent(resourceUrl, resource.etag);
+    } catch {
+      // Cleanup is best-effort and targets only this test's unique resource.
+    }
   });
 
   afterAll(() => {
@@ -117,6 +137,137 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       code: 'etag-conflict',
       status: expect.any(Number),
     });
+  });
+
+  it('round-trips a recurring master and detached overrides in one CalDAV resource', async () => {
+    const uid = `radicale-${randomUUID()}@matrix-calendar-widget`;
+    const resourceUrl = new URL(
+      `${randomUUID()}-recurrence.ics`,
+      calendarUrl,
+    ).toString();
+    const source = readFileSync(
+      join(__dirname, '../../../fixtures/ical/recurrence-override.ics'),
+      'utf8',
+    ).replace(/override@example\.test/g, uid);
+
+    await client.createEvent(resourceUrl, source);
+    cleanupResourceUrl = resourceUrl;
+
+    const createdResource = await client.getEvent(resourceUrl);
+    expect(createdResource.href).toBe(resourceUrl);
+    expect(createdResource.etag).toBeTruthy();
+    expect(createdResource.icalendar.match(/BEGIN:VEVENT/g)).toHaveLength(3);
+    expect(
+      Array.from(
+        createdResource.icalendar.matchAll(/^UID:([^\r\n]+)\r?$/gm),
+        ([, value]) => value,
+      ),
+    ).toEqual([uid, uid, uid]);
+
+    const initial = codec.parse(
+      calendarUrl,
+      resourceUrl,
+      createdResource.icalendar,
+    );
+    expect(initial.event.uid).toBe(uid);
+    expect(initial.event.recurrence).toMatchObject({
+      rrule: 'FREQ=WEEKLY;COUNT=4',
+      rdates: [
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-10-26T14:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      ],
+      exdates: [
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-11-02T14:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      ],
+      overrides: [
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-12T14:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          title: 'Weekly review - moved',
+          timing: {
+            type: 'timed',
+            start: {
+              local: '2026-10-12T16:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        },
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-19T14:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          status: 'cancelled',
+          timing: undefined,
+        },
+      ],
+    });
+
+    const patched = initial.applyPatch({ location: 'Interoperability room' });
+    await client.updateEvent(
+      resourceUrl,
+      createdResource.etag,
+      patched.icalendar,
+    );
+
+    const afterPatch = await client.getEvent(resourceUrl);
+    const verified = codec.parse(
+      calendarUrl,
+      resourceUrl,
+      afterPatch.icalendar,
+    );
+    expect(afterPatch.href).toBe(resourceUrl);
+    expect(afterPatch.icalendar.match(/BEGIN:VEVENT/g)).toHaveLength(3);
+    expect(
+      Array.from(
+        afterPatch.icalendar.matchAll(/^UID:([^\r\n]+)\r?$/gm),
+        ([, value]) => value,
+      ),
+    ).toEqual([uid, uid, uid]);
+    expect(verified.event).toMatchObject({
+      uid,
+      location: 'Interoperability room',
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-10-05T14:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    });
+    expect(verified.event.recurrence).toEqual(initial.event.recurrence);
+    expect(afterPatch.icalendar).toContain('BEGIN:VTIMEZONE');
+    expect(afterPatch.icalendar).toContain(
+      'X-CUSTOM-CALENDAR-PROPERTY:preserve-resource-value',
+    );
+    expect(afterPatch.icalendar).toContain(
+      'X-CLIENT-METADATA;X-PARAM=preserve-param:preserve-value',
+    );
+    expect(afterPatch.icalendar).toContain(
+      'X-OVERRIDE-MARKER;X-ORIGIN=external:preserve-exception',
+    );
+    expect(afterPatch.icalendar).toContain(
+      'X-OVERRIDE-MARKER;X-ORIGIN=external:preserve-cancellation',
+    );
   });
 });
 

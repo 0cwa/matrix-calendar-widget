@@ -50,6 +50,7 @@ type RecurrenceEditorProps = {
   rule: string | undefined;
   isMeetingCreation?: boolean;
   disabled?: boolean;
+  repeatLabel?: string;
 };
 
 export const RecurrenceEditor = ({
@@ -58,6 +59,7 @@ export const RecurrenceEditor = ({
   rule,
   isMeetingCreation = true,
   disabled,
+  repeatLabel,
 }: RecurrenceEditorProps) => {
   const { t } = useTranslation();
   const { state, rrule, isValid, dispatch } = useRecurrenceEditorState(
@@ -171,10 +173,8 @@ export const RecurrenceEditor = ({
 
   const repetitionLabelId = useId();
   const selectId = useId();
-  const repetitionLabelText = t(
-    'recurrenceEditor.repeatMeeting',
-    'Repeat meeting',
-  );
+  const repetitionLabelText =
+    repeatLabel ?? t('recurrenceEditor.repeatMeeting', 'Repeat meeting');
 
   return (
     <>

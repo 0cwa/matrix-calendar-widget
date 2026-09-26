@@ -20,9 +20,13 @@ import {
   Calendar,
   CalendarEvent,
   CalendarEventDateTime,
+  CalendarEventDisplayAlarmEdit,
   CalendarEventId,
   CalendarEventInput,
+  CalendarEventOccurrencePatch,
   CalendarEventPatch,
+  CalendarEventRecurrenceOverride,
+  CalendarEventTiming,
   CalendarId,
   CalendarMetadataPatch,
   CalendarTimeRange,
@@ -206,16 +210,186 @@ export class InMemoryCalendarRepository implements CalendarRepository {
   ): Promise<CalendarEvent> {
     this.getWritableCalendar(calendarId);
     const current = this.getStoredEvent(calendarId, eventId);
+    const clonedPatch = cloneCalendarEventPatch(patch);
+    const displayAlarmEdits = clonedPatch.displayAlarmEdits;
+    delete clonedPatch.displayAlarmEdits;
 
     const updated: CalendarEvent = {
       ...current,
-      ...cloneCalendarEventPatch(patch),
+      ...clonedPatch,
+      ...(displayAlarmEdits
+        ? {
+            displayAlarms: applyDisplayAlarmEdits(
+              current.displayAlarms ?? [],
+              displayAlarmEdits,
+            ),
+          }
+        : {}),
       id: current.id,
       calendarId: current.calendarId,
       uid: current.uid,
     };
 
     this.events.get(calendarId)!.set(eventId, updated);
+    return cloneCalendarEvent(updated);
+  }
+
+  async updateOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+    patch: CalendarEventOccurrencePatch,
+  ): Promise<CalendarEvent> {
+    this.getWritableCalendar(calendarId);
+    const current = this.getStoredEvent(calendarId, resourceEventId);
+    const recurrence = cloneRecurrence(current.recurrence) ?? {};
+    const overrides = recurrence.overrides ?? [];
+    const matching = overrides
+      .map((override, index) => ({ override, index }))
+      .filter(({ override }) =>
+        sameRecurrenceId(override.recurrenceId, recurrenceId),
+      );
+
+    if (matching.length > 1) {
+      throw new CalendarRepositoryError(
+        'request-failed',
+        'Calendar resource contains duplicate recurrence overrides',
+      );
+    }
+
+    const clonedPatch = cloneCalendarEventOccurrencePatch(patch);
+    const { description, location, url, priority, ...directFields } =
+      clonedPatch;
+    const normalizedPatch: Partial<CalendarEventRecurrenceOverride> = {
+      ...directFields,
+      ...(description === undefined || description === null
+        ? {}
+        : { description }),
+      ...(location === undefined || location === null ? {} : { location }),
+      ...(url === undefined || url === null ? {} : { url }),
+      ...(priority === undefined || priority === null ? {} : { priority }),
+    };
+    if (matching.length === 1) {
+      const { index, override } = matching[0];
+      const updatedOverride = { ...override, ...normalizedPatch };
+      if (description === null) delete updatedOverride.description;
+      if (location === null) delete updatedOverride.location;
+      if (url === null) delete updatedOverride.url;
+      if (priority === null) delete updatedOverride.priority;
+      overrides[index] = updatedOverride;
+    } else {
+      overrides.push({
+        recurrenceId: cloneCalendarEventDateTime(recurrenceId),
+        ...normalizedPatch,
+      });
+    }
+
+    const updated: CalendarEvent = {
+      ...current,
+      recurrence: { ...recurrence, overrides },
+    };
+    this.events.get(calendarId)!.set(resourceEventId, updated);
+    return cloneCalendarEvent(updated);
+  }
+
+  async cancelOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+  ): Promise<CalendarEvent> {
+    this.getWritableCalendar(calendarId);
+    const current = this.getStoredEvent(calendarId, resourceEventId);
+    const recurrence = cloneRecurrence(current.recurrence) ?? {};
+    const overrides = recurrence.overrides ?? [];
+    const matching = overrides
+      .map((override, index) => ({ override, index }))
+      .filter(({ override }) =>
+        sameRecurrenceId(override.recurrenceId, recurrenceId),
+      );
+
+    if (matching.length > 1) {
+      throw new CalendarRepositoryError(
+        'request-failed',
+        'Calendar resource contains duplicate recurrence overrides',
+      );
+    }
+
+    if (matching.length === 1) {
+      const { index, override } = matching[0];
+      overrides[index] = { ...override, status: 'cancelled' };
+    } else {
+      overrides.push({
+        recurrenceId: cloneCalendarEventDateTime(recurrenceId),
+        status: 'cancelled',
+      });
+    }
+
+    const updated: CalendarEvent = {
+      ...current,
+      recurrence: { ...recurrence, overrides },
+    };
+    this.events.get(calendarId)!.set(resourceEventId, updated);
+    return cloneCalendarEvent(updated);
+  }
+
+  async updateFollowingOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+    timing: CalendarEventTiming,
+  ): Promise<CalendarEvent> {
+    this.getWritableCalendar(calendarId);
+    const current = this.getStoredEvent(calendarId, resourceEventId);
+    const recurrence = cloneRecurrence(current.recurrence) ?? {};
+    const overrides = recurrence.overrides ?? [];
+    const matching = overrides
+      .map((override, index) => ({ override, index }))
+      .filter(({ override }) =>
+        sameRecurrenceId(override.recurrenceId, recurrenceId),
+      );
+
+    if (matching.length > 1) {
+      throw new CalendarRepositoryError(
+        'unsupported-recurrence-range',
+        'Calendar resource contains duplicate overrides at this recurrence identity',
+      );
+    }
+
+    if (matching[0]) {
+      const { override, index } = matching[0];
+      if (
+        override.status ||
+        override.title !== undefined ||
+        override.description !== undefined ||
+        override.transparency !== undefined ||
+        override.location !== undefined ||
+        override.url !== undefined ||
+        override.categories !== undefined ||
+        override.priority !== undefined
+      ) {
+        throw new CalendarRepositoryError(
+          'unsupported-recurrence-range',
+          'The existing exception has non-timing changes that cannot be applied to following instances',
+        );
+      }
+      overrides[index] = {
+        ...override,
+        range: 'this-and-following',
+        timing: cloneTiming(timing),
+      };
+    } else {
+      overrides.push({
+        recurrenceId: cloneCalendarEventDateTime(recurrenceId),
+        range: 'this-and-following',
+        timing: cloneTiming(timing),
+      });
+    }
+
+    const updated: CalendarEvent = {
+      ...current,
+      recurrence: { ...recurrence, overrides },
+    };
+    this.events.get(calendarId)!.set(resourceEventId, updated);
     return cloneCalendarEvent(updated);
   }
 
@@ -315,23 +489,52 @@ function eventIntersectsRange(
   // Recurrence expansion belongs to the calendar-domain recurrence layer. Keep
   // a recurring source available whenever its master starts before the query
   // end so the caller can expand it into the visible range.
-  if (event.recurrence?.rrule || event.recurrence?.rdates?.length) {
-    return interval.start < range.end;
+  const recurrence = event.recurrence;
+  if (
+    recurrence?.rrule ||
+    recurrence?.rdates?.length ||
+    recurrence?.rdatePeriods?.length ||
+    recurrence?.overrides?.length
+  ) {
+    return (
+      interval.start < range.end ||
+      Boolean(recurrence.rdates?.length) ||
+      Boolean(recurrence.rdatePeriods?.length) ||
+      recurrence.overrides?.some((override) =>
+        override.timing
+          ? timingIntersectsRange(override.timing, calendar, range)
+          : false,
+      ) === true
+    );
   }
 
-  return interval.start < range.end && interval.end > range.start;
+  return timingIntersectsRange(event.timing, calendar, range);
 }
 
 function eventInterval(event: CalendarEvent, calendar: Calendar): ParsedRange {
-  if (event.timing.type === 'timed') {
-    return timedInterval(event.timing);
+  return timingInterval(event.timing, calendar);
+}
+
+function timingIntersectsRange(
+  timing: CalendarEvent['timing'],
+  calendar: Calendar,
+  range: ParsedRange,
+): boolean {
+  const interval = timingInterval(timing, calendar);
+  return interval.start < range.end && interval.end > range.start;
+}
+
+function timingInterval(
+  timing: CalendarEvent['timing'],
+  calendar: Calendar,
+): ParsedRange {
+  if (timing.type === 'timed') {
+    return timedInterval(timing, calendar);
   }
 
   const zone = calendar.timezone ?? 'UTC';
-  const start = DateTime.fromISO(event.timing.startDate, { zone }).startOf(
-    'day',
-  );
-  const end = DateTime.fromISO(event.timing.endDate, { zone }).startOf('day');
+  const start = DateTime.fromISO(timing.startDate, { zone }).startOf('day');
+  const end = DateTime.fromISO(timing.endDate, { zone }).startOf('day');
 
   return {
     start: start.toMillis(),
@@ -339,15 +542,32 @@ function eventInterval(event: CalendarEvent, calendar: Calendar): ParsedRange {
   };
 }
 
-function timedInterval(timing: TimedCalendarEventTiming): ParsedRange {
+function timedInterval(
+  timing: TimedCalendarEventTiming,
+  calendar: Calendar,
+): ParsedRange {
+  const startZone = dateTimeZone(timing.start, calendar);
+  const endZone = dateTimeZone(timing.end, calendar);
   return {
-    start: DateTime.fromISO(timing.start.local, {
-      zone: timing.start.timezone,
-    }).toMillis(),
-    end: DateTime.fromISO(timing.end.local, {
-      zone: timing.end.timezone,
-    }).toMillis(),
+    start: DateTime.fromISO(timing.start.local, { zone: startZone }).toMillis(),
+    end: DateTime.fromISO(timing.end.local, { zone: endZone }).toMillis(),
   };
+}
+
+function dateTimeZone(
+  value: TimedCalendarEventTiming['start'],
+  calendar: Calendar,
+): string {
+  if (value.mode === 'utc' || (!value.mode && value.timezone === 'UTC')) {
+    return 'UTC';
+  }
+  if (
+    value.mode === 'floating' ||
+    (!value.mode && value.timezone === 'floating')
+  ) {
+    return calendar.timezone ?? 'UTC';
+  }
+  return value.timezone;
 }
 
 function cloneCalendar(calendar: Calendar): Calendar {
@@ -360,6 +580,33 @@ function cloneCalendarEventDateTime(
   return value.type === 'date'
     ? { ...value }
     : { type: 'date-time', value: { ...value.value } };
+}
+
+function sameRecurrenceId(
+  left: CalendarEventDateTime,
+  right: CalendarEventDateTime,
+): boolean {
+  if (left.type !== right.type) {
+    return false;
+  }
+  if (left.type === 'date' && right.type === 'date') {
+    return left.value === right.value;
+  }
+  if (left.type !== 'date-time' || right.type !== 'date-time') {
+    return false;
+  }
+  const mode = (value: CalendarEventDateTime & { type: 'date-time' }) =>
+    value.value.mode ??
+    (value.value.timezone === 'UTC'
+      ? 'utc'
+      : value.value.timezone === 'floating'
+        ? 'floating'
+        : 'tzid');
+  return (
+    left.value.local === right.value.local &&
+    left.value.timezone === right.value.timezone &&
+    mode(left) === mode(right)
+  );
 }
 
 function cloneTimedTiming(
@@ -378,6 +625,12 @@ function cloneAllDayTiming(
   return { ...timing };
 }
 
+function cloneTiming(timing: CalendarEventTiming): CalendarEventTiming {
+  return timing.type === 'timed'
+    ? cloneTimedTiming(timing)
+    : cloneAllDayTiming(timing);
+}
+
 function cloneCalendarEvent(event: CalendarEvent): CalendarEvent {
   return {
     ...event,
@@ -386,6 +639,7 @@ function cloneCalendarEvent(event: CalendarEvent): CalendarEvent {
         ? cloneTimedTiming(event.timing)
         : cloneAllDayTiming(event.timing),
     categories: event.categories ? [...event.categories] : undefined,
+    displayAlarms: event.displayAlarms?.map((alarm) => ({ ...alarm })),
     recurrence: cloneRecurrence(event.recurrence),
   };
 }
@@ -411,10 +665,32 @@ function cloneRecurrence(
     ? {
         ...recurrence,
         rdates: recurrence.rdates?.map(cloneCalendarEventDateTime),
+        rdatePeriods: recurrence.rdatePeriods?.map((period) => ({
+          ...period,
+          start: {
+            type: 'date-time',
+            value: { ...period.start.value },
+          },
+          end: period.end
+            ? { type: 'date-time', value: { ...period.end.value } }
+            : undefined,
+        })),
         exdates: recurrence.exdates?.map(cloneCalendarEventDateTime),
         recurrenceId: recurrence.recurrenceId
           ? cloneCalendarEventDateTime(recurrence.recurrenceId)
           : undefined,
+        overrides: recurrence.overrides?.map((override) => ({
+          ...override,
+          recurrenceId: cloneCalendarEventDateTime(override.recurrenceId),
+          timing: override.timing
+            ? override.timing.type === 'timed'
+              ? cloneTimedTiming(override.timing)
+              : cloneAllDayTiming(override.timing)
+            : undefined,
+          categories: override.categories
+            ? [...override.categories]
+            : undefined,
+        })),
       }
     : undefined;
 }
@@ -423,6 +699,12 @@ function cloneCalendarEventPatch(
   patch: CalendarEventPatch,
 ): CalendarEventPatch {
   const cloned: CalendarEventPatch = { ...patch };
+
+  if (patch.displayAlarmEdits) {
+    cloned.displayAlarmEdits = patch.displayAlarmEdits.map((edit) => ({
+      ...edit,
+    }));
+  }
 
   if (patch.timing) {
     cloned.timing =
@@ -439,5 +721,73 @@ function cloneCalendarEventPatch(
     cloned.recurrence = cloneRecurrence(patch.recurrence);
   }
 
+  return cloned;
+}
+
+function applyDisplayAlarmEdits(
+  alarms: NonNullable<CalendarEvent['displayAlarms']>,
+  edits: CalendarEventDisplayAlarmEdit[],
+): NonNullable<CalendarEvent['displayAlarms']> {
+  const byIndex = new Map(edits.map((edit) => [edit.index, edit]));
+  if (byIndex.size !== edits.length) {
+    throw new CalendarRepositoryError(
+      'request-failed',
+      'A DISPLAY alarm can only be edited once per patch',
+    );
+  }
+
+  for (const [index, edit] of byIndex) {
+    const alarm = alarms.find((candidate) => candidate.index === index);
+    if (!alarm) {
+      throw new CalendarRepositoryError(
+        'request-failed',
+        'Only an existing DISPLAY alarm can be edited',
+      );
+    }
+    if (
+      (edit.triggerMinutes !== undefined && !alarm.triggerEditable) ||
+      (edit.triggerMinutes !== undefined &&
+        (!Number.isSafeInteger(edit.triggerMinutes) ||
+          !Number.isSafeInteger(edit.triggerMinutes * 60))) ||
+      (edit.description !== undefined &&
+        typeof edit.description !== 'string') ||
+      (edit.triggerMinutes === undefined && edit.description === undefined)
+    ) {
+      throw new CalendarRepositoryError(
+        'request-failed',
+        'The DISPLAY alarm edit is not supported',
+      );
+    }
+  }
+
+  return alarms.map((alarm) => {
+    const edit = byIndex.get(alarm.index);
+    return edit
+      ? {
+          ...alarm,
+          ...(edit.triggerMinutes !== undefined
+            ? { triggerMinutes: edit.triggerMinutes }
+            : {}),
+          ...(edit.description !== undefined
+            ? { description: edit.description }
+            : {}),
+        }
+      : { ...alarm };
+  });
+}
+
+function cloneCalendarEventOccurrencePatch(
+  patch: CalendarEventOccurrencePatch,
+): CalendarEventOccurrencePatch {
+  const cloned = { ...patch };
+  if (patch.timing) {
+    cloned.timing =
+      patch.timing.type === 'timed'
+        ? cloneTimedTiming(patch.timing)
+        : cloneAllDayTiming(patch.timing);
+  }
+  if (patch.categories) {
+    cloned.categories = [...patch.categories];
+  }
   return cloned;
 }

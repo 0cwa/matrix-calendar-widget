@@ -236,6 +236,129 @@ describe('GatewayCalendarRepository', () => {
     ).toBe('"fresh-etag"');
   });
 
+  it('updates an occurrence using its resource ETag and original identity', async () => {
+    const updatedResource = { ...event, etag: 'unused' };
+    const fetchMock = mockFetch(
+      jsonResponse([{ event, etag: '"resource-etag"' }]),
+      jsonResponse({ event: updatedResource, etag: '"updated-etag"' }),
+    );
+    const repository = createRepository(fetchMock);
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-09-25T08:00:00',
+        timezone: 'UTC',
+        mode: 'utc' as const,
+      },
+    };
+
+    await repository.listEvents([calendarId], {
+      start: '2026-09-24T00:00:00Z',
+      end: '2026-09-26T00:00:00Z',
+    });
+    await repository.updateOccurrence(calendarId, eventId, recurrenceId, {
+      title: 'Updated instance',
+    });
+
+    const [url, init] = fetchMock.mock.calls[1];
+    expect(typeof url).toBe('string');
+    expect(new URL(url as string).pathname).toBe(
+      '/v1/calendar/events/occurrence',
+    );
+    expect(new URL(url as string).searchParams.get('eventId')).toBe(eventId);
+    expect(init?.method).toBe('PATCH');
+    expect(new Headers(init?.headers).get('If-Match')).toBe('"resource-etag"');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      recurrenceId,
+      patch: { title: 'Updated instance' },
+    });
+  });
+
+  it('cancels an occurrence through its dedicated endpoint', async () => {
+    const fetchMock = mockFetch(
+      jsonResponse([{ event, etag: '"resource-etag"' }]),
+      jsonResponse({ event, etag: '"updated-etag"' }),
+    );
+    const repository = createRepository(fetchMock);
+    const recurrenceId = { type: 'date' as const, value: '2026-09-25' };
+
+    await repository.listEvents([calendarId], {
+      start: '2026-09-24T00:00:00Z',
+      end: '2026-09-26T00:00:00Z',
+    });
+    await repository.cancelOccurrence(calendarId, eventId, recurrenceId);
+
+    const [url, init] = fetchMock.mock.calls[1];
+    expect(typeof url).toBe('string');
+    expect(new URL(url as string).pathname).toBe(
+      '/v1/calendar/events/occurrence/cancel',
+    );
+    expect(init?.method).toBe('POST');
+    expect(new Headers(init?.headers).get('If-Match')).toBe('"resource-etag"');
+    expect(JSON.parse(String(init?.body))).toEqual({ recurrenceId });
+  });
+
+  it('updates following occurrences through a dedicated conditional endpoint', async () => {
+    const fetchMock = mockFetch(
+      jsonResponse([{ event, etag: '"resource-etag"' }]),
+      jsonResponse({ event, etag: '"updated-etag"' }),
+    );
+    const repository = createRepository(fetchMock);
+    const recurrenceId = { type: 'date' as const, value: '2026-09-25' };
+    const timing = {
+      type: 'all-day' as const,
+      startDate: '2026-09-25',
+      endDate: '2026-09-27',
+    };
+
+    await repository.listEvents([calendarId], {
+      start: '2026-09-24T00:00:00Z',
+      end: '2026-09-26T00:00:00Z',
+    });
+    await repository.updateFollowingOccurrence(
+      calendarId,
+      eventId,
+      recurrenceId,
+      timing,
+    );
+
+    const [url, init] = fetchMock.mock.calls[1];
+    expect(typeof url).toBe('string');
+    expect(new URL(url as string).pathname).toBe(
+      '/v1/calendar/events/occurrence/following',
+    );
+    expect(init?.method).toBe('PATCH');
+    expect(new Headers(init?.headers).get('If-Match')).toBe('"resource-etag"');
+    expect(JSON.parse(String(init?.body))).toEqual({ recurrenceId, timing });
+  });
+
+  it('does not retry a conflicting occurrence write and clears the stale ETag', async () => {
+    const fetchMock = mockFetch(
+      jsonResponse([{ event, etag: '"stale-etag"' }]),
+      new Response('', { status: 409 }),
+      jsonResponse({ event, etag: '"fresh-etag"' }),
+      jsonResponse({ event, etag: '"updated-etag"' }),
+    );
+    const repository = createRepository(fetchMock);
+    const recurrenceId = { type: 'date' as const, value: '2026-09-25' };
+    await repository.listEvents([calendarId], {
+      start: '2026-09-24T00:00:00Z',
+      end: '2026-09-26T00:00:00Z',
+    });
+
+    await expect(
+      repository.cancelOccurrence(calendarId, eventId, recurrenceId),
+    ).rejects.toMatchObject({ code: 'event-conflict' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await repository.cancelOccurrence(calendarId, eventId, recurrenceId);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[2][0]).toContain('/v1/calendar/event?');
+    expect(
+      new Headers(fetchMock.mock.calls[3][1]?.headers).get('If-Match'),
+    ).toBe('"fresh-etag"');
+  });
+
   it('clears a stale ETag after conflict so a retry reloads current state', async () => {
     const fetchMock = mockFetch(
       jsonResponse([{ event, etag: '"stale-etag"' }]),
@@ -280,6 +403,43 @@ describe('GatewayCalendarRepository', () => {
       ),
     );
   });
+
+  it.each([
+    [
+      'recurrence-exception-orphaned',
+      'The series change would detach an existing occurrence override',
+    ],
+    [
+      'recurrence-exception-unverifiable',
+      'The series change cannot be checked safely',
+    ],
+  ] as const)(
+    'maps %s without trusting gateway message text',
+    async (code, message) => {
+      const fetchMock = mockFetch(
+        jsonResponse({ event, etag: '"current-etag"' }),
+        new Response(
+          JSON.stringify({
+            code,
+            message: 'This response must not be shown to the user',
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+      const repository = createRepository(fetchMock);
+      await repository.getEvent(calendarId, eventId);
+
+      await expect(
+        repository.updateEvent(calendarId, eventId, {
+          title: 'Updated title',
+        }),
+      ).rejects.toEqual(new CalendarRepositoryError(code, message));
+
+      expect(
+        new Headers(fetchMock.mock.calls[1][1]?.headers).get('If-Match'),
+      ).toBe('"current-etag"');
+    },
+  );
 
   it('creates and deletes through the gateway', async () => {
     const created = {

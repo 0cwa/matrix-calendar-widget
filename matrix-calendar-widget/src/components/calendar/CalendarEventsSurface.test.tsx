@@ -19,9 +19,10 @@ import {
   CalendarEvent,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
+import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from '../../calendar';
 import { CalendarEventsSurface } from './CalendarEventsSurface';
 
@@ -113,5 +114,131 @@ describe('<CalendarEventsSurface />', () => {
     await userEvent.click(personalCalendar);
 
     expect(await screen.findByText('Dentist')).toBeInTheDocument();
+  });
+
+  it('offers scoped actions for a visible recurring occurrence', async () => {
+    const recurring: CalendarEvent = {
+      id: 'daily-planning',
+      calendarId: 'team',
+      uid: 'daily-planning@example.test',
+      title: 'Daily planning',
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-09-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+        end: {
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+      },
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=5' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendars[0]],
+      events: [recurring],
+    });
+    const deleteSpy = vi.spyOn(repository, 'deleteEvent');
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00+02:00',
+          endDate: '2026-09-25T23:59:59+02:00',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Daily planning/i }),
+    );
+
+    const details = await screen.findByRole('dialog', {
+      name: 'Daily planning',
+    });
+    expect(within(details).getByRole('alert')).toHaveTextContent(
+      'Changes here apply to this occurrence only. Other events in the series remain unchanged.',
+    );
+    expect(
+      within(details).getByRole('button', { name: 'Edit this event' }),
+    ).toBeEnabled();
+    expect(
+      within(details).getByRole('button', { name: 'Cancel this event' }),
+    ).toBeEnabled();
+    expect(
+      within(details).queryByRole('button', { name: 'Edit', exact: true }),
+    ).toBeNull();
+    expect(
+      within(details).queryByRole('button', { name: 'Delete', exact: true }),
+    ).toBeNull();
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it('warns when a recurring resource cannot be expanded', async () => {
+    const invalidRecurrence: CalendarEvent = {
+      ...events[0],
+      recurrence: { rrule: 'FREQ=UNSUPPORTED' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendars[0]],
+      events: [invalidRecurrence],
+    });
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByText(
+        '1 recurring event(s) could not be displayed because their recurrence data is unsupported or invalid.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('warns and omits series with opaque unsupported recurrence metadata', async () => {
+    const rangedRecurrence: CalendarEvent = {
+      ...events[0],
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=3' },
+      unsupportedRecurrence: 'ranged-override',
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendars[0]],
+      events: [rangedRecurrence],
+    });
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByText(
+        '1 recurring event(s) could not be displayed because their recurrence data is unsupported or invalid.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Team planning')).toBeNull();
   });
 });

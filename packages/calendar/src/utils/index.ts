@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+export * from './calendarEventExpansion';
+export { isCalendarEventRecurrenceRuleSupported } from './calendarEventRecurrenceRule';
 export * from './calendarUtils';
 export { formatICalDate, parseICalDate, toISOString } from './dateTimeUtils';
 export { formatRRuleText, getOrdinalLabel, parseRRule } from './format';

@@ -17,14 +17,24 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarEventOccurrence,
   CalendarRepositoryError,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
-import { CalendarRepositoryProvider } from '../../calendar';
+import {
+  CalendarEventPresentation,
+  CalendarRepositoryProvider,
+} from '../../calendar';
 import { CalendarEventDetailsDialog } from './CalendarEventDetailsDialog';
 
 const calendar: Calendar = {
@@ -51,6 +61,52 @@ const event: CalendarEvent = {
   },
 };
 
+const eventPresentation: CalendarEventPresentation = {
+  key: 'team:planning',
+  event,
+  resourceEvent: event,
+  rangeTimezone: 'Europe/Stockholm',
+  viewerTimezone: 'Europe/Stockholm',
+};
+
+const recurringResource: CalendarEvent = {
+  ...event,
+  recurrence: { rrule: 'FREQ=DAILY;COUNT=3' },
+};
+const recurrenceId = {
+  type: 'date-time' as const,
+  value: {
+    local: '2026-09-24T09:00:00',
+    timezone: 'Europe/Stockholm',
+    mode: 'tzid' as const,
+  },
+};
+const recurringOccurrence: CalendarEventOccurrence = {
+  ...event,
+  recurrenceId,
+  timing: {
+    type: 'timed',
+    start: {
+      local: '2026-09-24T09:00:00',
+      timezone: 'Europe/Stockholm',
+      mode: 'tzid',
+    },
+    end: {
+      local: '2026-09-24T10:00:00',
+      timezone: 'Europe/Stockholm',
+      mode: 'tzid',
+    },
+  },
+};
+const occurrencePresentation: CalendarEventPresentation = {
+  key: 'team:planning:occurrence:one',
+  event: recurringOccurrence,
+  resourceEvent: recurringResource,
+  rangeTimezone: 'Europe/Stockholm',
+  viewerTimezone: 'Europe/Stockholm',
+  recurrenceId,
+};
+
 function createWrapper(repository: InMemoryCalendarRepository) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
     return (
@@ -62,6 +118,46 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventDetailsDialog />', () => {
+  it('formats floating detail times in the viewer-local timezone', async () => {
+    const floatingEvent: CalendarEvent = {
+      ...event,
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-09-23T09:00:00',
+          timezone: 'floating',
+          mode: 'floating',
+        },
+        end: {
+          local: '2026-09-23T10:00:00',
+          timezone: 'floating',
+          mode: 'floating',
+        },
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [floatingEvent],
+    });
+
+    render(
+      <CalendarEventDetailsDialog
+        event={{
+          ...eventPresentation,
+          event: floatingEvent,
+          resourceEvent: floatingEvent,
+          rangeTimezone: 'America/Los_Angeles',
+          viewerTimezone: 'America/Los_Angeles',
+        }}
+        onClose={vi.fn()}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByText(/9:00 AM–10:00 AM/)).toBeInTheDocument();
+    expect(screen.queryByText(/Invalid DateTime/)).toBeNull();
+  });
+
   it('deletes an event after confirmation', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
@@ -69,9 +165,15 @@ describe('<CalendarEventDetailsDialog />', () => {
     });
     const onClose = vi.fn();
 
-    render(<CalendarEventDetailsDialog event={event} onClose={onClose} />, {
-      wrapper: createWrapper(repository),
-    });
+    render(
+      <CalendarEventDetailsDialog
+        event={eventPresentation}
+        onClose={onClose}
+      />,
+      {
+        wrapper: createWrapper(repository),
+      },
+    );
 
     const deleteButton = screen.getByRole('button', { name: 'Delete' });
     await waitFor(() => expect(deleteButton).toBeEnabled());
@@ -111,9 +213,15 @@ describe('<CalendarEventDetailsDialog />', () => {
     vi.spyOn(repository, 'getEvent').mockResolvedValueOnce(latestEvent);
     const onClose = vi.fn();
 
-    render(<CalendarEventDetailsDialog event={event} onClose={onClose} />, {
-      wrapper: createWrapper(repository),
-    });
+    render(
+      <CalendarEventDetailsDialog
+        event={eventPresentation}
+        onClose={onClose}
+      />,
+      {
+        wrapper: createWrapper(repository),
+      },
+    );
 
     const deleteButton = screen.getByRole('button', { name: 'Delete' });
     await waitFor(() => expect(deleteButton).toBeEnabled());
@@ -149,14 +257,384 @@ describe('<CalendarEventDetailsDialog />', () => {
       events: [event],
     });
 
-    render(<CalendarEventDetailsDialog event={event} onClose={vi.fn()} />, {
-      wrapper: createWrapper(repository),
-    });
+    render(
+      <CalendarEventDetailsDialog
+        event={eventPresentation}
+        onClose={vi.fn()}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
 
     expect(
       await screen.findByText('This calendar is read-only.'),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  });
+
+  it('edits one occurrence using the original recurrence identity', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringResource],
+    });
+    const deleteSpy = vi.spyOn(repository, 'deleteEvent');
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+    const updateOccurrenceSpy = vi.spyOn(repository, 'updateOccurrence');
+
+    render(
+      <CalendarEventDetailsDialog
+        event={occurrencePresentation}
+        onClose={vi.fn()}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Edit this event' }),
+    );
+    const editor = await screen.findByRole('dialog', { name: 'Edit event' });
+    expect(within(editor).queryByText('Repeat')).toBeNull();
+    expect(within(editor).getByLabelText('All day')).toBeDisabled();
+    await userEvent.clear(within(editor).getByLabelText(/Title/));
+    await userEvent.type(
+      within(editor).getByLabelText(/Title/),
+      'One moved event',
+    );
+    await userEvent.click(within(editor).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(updateOccurrenceSpy).toHaveBeenCalledWith(
+        'team',
+        'planning',
+        recurrenceId,
+        expect.objectContaining({ title: 'One moved event' }),
+      );
+    });
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Edit event' })).toBeNull();
+  });
+
+  it('edits this and following occurrences through the timing-only repository path', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringResource],
+    });
+    const followingSpy = vi.spyOn(repository, 'updateFollowingOccurrence');
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+    const occurrenceSpy = vi.spyOn(repository, 'updateOccurrence');
+    const cancelSpy = vi.spyOn(repository, 'cancelOccurrence');
+    const deleteSpy = vi.spyOn(repository, 'deleteEvent');
+
+    render(
+      <CalendarEventDetailsDialog
+        event={occurrencePresentation}
+        onClose={vi.fn()}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Edit this and following' }),
+    );
+    const editor = await screen.findByRole('dialog', {
+      name: 'Edit this and following events',
+    });
+    expect(within(editor).queryByLabelText(/Title/)).toBeNull();
+    expect(within(editor).queryByLabelText(/Location/)).toBeNull();
+    expect(within(editor).queryByText('Repeat')).toBeNull();
+    expect(within(editor).getByLabelText('All day')).toBeDisabled();
+    expect(within(editor).getByLabelText(/Time zone/)).toBeDisabled();
+    fireEvent.change(within(editor).getByLabelText(/Start/), {
+      target: { value: '2026-09-24T10:00' },
+    });
+    fireEvent.change(within(editor).getByLabelText(/End/), {
+      target: { value: '2026-09-24T11:00' },
+    });
+    await userEvent.click(
+      within(editor).getByRole('button', { name: 'Save following changes' }),
+    );
+
+    await waitFor(() => {
+      expect(followingSpy).toHaveBeenCalledWith(
+        'team',
+        'planning',
+        recurrenceId,
+        {
+          type: 'timed',
+          start: {
+            local: '2026-09-24T10:00:00',
+            timezone: 'Europe/Stockholm',
+            mode: 'tzid',
+          },
+          end: {
+            local: '2026-09-24T11:00:00',
+            timezone: 'Europe/Stockholm',
+            mode: 'tzid',
+          },
+        },
+      );
+    });
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(occurrenceSpy).not.toHaveBeenCalled();
+    expect(cancelSpy).not.toHaveBeenCalled();
+    expect(deleteSpy).not.toHaveBeenCalled();
+    await expect(
+      repository.getEvent('team', 'planning'),
+    ).resolves.toMatchObject({
+      recurrence: {
+        overrides: [
+          expect.objectContaining({
+            recurrenceId,
+            range: 'this-and-following',
+          }),
+        ],
+      },
+    });
+  });
+
+  it('disables one-occurrence edit and cancel at an existing RANGE boundary', async () => {
+    const rangedResource: CalendarEvent = {
+      ...recurringResource,
+      recurrence: {
+        ...recurringResource.recurrence,
+        overrides: [
+          {
+            recurrenceId,
+            range: 'this-and-following',
+            timing: recurringOccurrence.timing,
+          },
+        ],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [rangedResource],
+    });
+
+    render(
+      <CalendarEventDetailsDialog
+        event={{
+          ...occurrencePresentation,
+          resourceEvent: rangedResource,
+        }}
+        onClose={vi.fn()}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByText(/start of a following-scope change/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Edit this event' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Cancel this event' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Edit this and following' }),
+    ).toBeEnabled();
+  });
+
+  it('shows a clear refusal when following data includes non-timing changes', async () => {
+    const rangedResource: CalendarEvent = {
+      ...recurringResource,
+      recurrence: {
+        ...recurringResource.recurrence,
+        overrides: [
+          {
+            recurrenceId,
+            range: 'this-and-following',
+            title: 'Changed future title',
+            timing: recurringOccurrence.timing,
+          },
+        ],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [rangedResource],
+    });
+
+    render(
+      <CalendarEventDetailsDialog
+        event={{ ...occurrencePresentation, resourceEvent: rangedResource }}
+        onClose={vi.fn()}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Edit this and following' }),
+    );
+    const editor = await screen.findByRole('dialog', {
+      name: 'Edit this and following events',
+    });
+    await userEvent.click(
+      within(editor).getByRole('button', { name: 'Save following changes' }),
+    );
+
+    expect(
+      await within(editor).findByText(
+        'This following-scope change cannot be represented safely. The series was not changed.',
+      ),
+    ).toBeInTheDocument();
+    await expect(
+      repository.getEvent('team', 'planning'),
+    ).resolves.toMatchObject({
+      recurrence: {
+        overrides: [
+          expect.objectContaining({
+            title: 'Changed future title',
+            range: 'this-and-following',
+          }),
+        ],
+      },
+    });
+  });
+
+  it('cancels one occurrence without resource-wide mutation', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringResource],
+    });
+    const cancelSpy = vi.spyOn(repository, 'cancelOccurrence');
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+    const deleteSpy = vi.spyOn(repository, 'deleteEvent');
+
+    render(
+      <CalendarEventDetailsDialog
+        event={occurrencePresentation}
+        onClose={vi.fn()}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Cancel this event' }),
+    );
+    const confirmation = await screen.findByRole('dialog', {
+      name: 'Cancel recurring occurrence',
+    });
+    expect(
+      within(confirmation).getByText(
+        'Cancel only this occurrence of “Planning”? The series and other occurrences will remain.',
+      ),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      within(confirmation).getByRole('button', {
+        name: 'Cancel this event',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(cancelSpy).toHaveBeenCalledWith('team', 'planning', recurrenceId);
+    });
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(deleteSpy).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: 'Cancel recurring occurrence' }),
+      ).toBeNull();
+    });
+  });
+
+  it('locks stale occurrence edits after a resource conflict', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringResource],
+    });
+    const updateOccurrenceSpy = vi
+      .spyOn(repository, 'updateOccurrence')
+      .mockRejectedValue(
+        new CalendarRepositoryError(
+          'event-conflict',
+          'The event changed on the server',
+        ),
+      );
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+    const deleteSpy = vi.spyOn(repository, 'deleteEvent');
+
+    render(
+      <CalendarEventDetailsDialog
+        event={occurrencePresentation}
+        onClose={vi.fn()}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Edit this event' }),
+    );
+    const editor = await screen.findByRole('dialog', { name: 'Edit event' });
+    await userEvent.clear(within(editor).getByLabelText(/Title/));
+    await userEvent.type(within(editor).getByLabelText(/Title/), 'Stale edit');
+    await userEvent.click(within(editor).getByRole('button', { name: 'Save' }));
+
+    expect(
+      await within(editor).findByText(
+        'This series changed elsewhere. Close and reopen this occurrence to load the latest version before editing again.',
+      ),
+    ).toBeInTheDocument();
+    expect(within(editor).getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(updateOccurrenceSpy).toHaveBeenCalledTimes(1);
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(deleteSpy).not.toHaveBeenCalled();
+  });
+
+  it('closes and blocks cancellation retry after a resource conflict', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringResource],
+    });
+    const cancelSpy = vi
+      .spyOn(repository, 'cancelOccurrence')
+      .mockRejectedValue(
+        new CalendarRepositoryError(
+          'event-conflict',
+          'The event changed on the server',
+        ),
+      );
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+    const deleteSpy = vi.spyOn(repository, 'deleteEvent');
+
+    render(
+      <CalendarEventDetailsDialog
+        event={occurrencePresentation}
+        onClose={vi.fn()}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Cancel this event' }),
+    );
+    const confirmation = await screen.findByRole('dialog', {
+      name: 'Cancel recurring occurrence',
+    });
+    await userEvent.click(
+      within(confirmation).getByRole('button', {
+        name: 'Cancel this event',
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        'This series changed elsewhere. Close and reopen this occurrence before trying again.',
+      ),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: 'Cancel recurring occurrence' }),
+      ).toBeNull();
+    });
+    const details = screen.getByRole('dialog', { name: 'Planning' });
+    expect(
+      within(details).getByRole('button', { name: 'Cancel this event' }),
+    ).toBeDisabled();
+    expect(cancelSpy).toHaveBeenCalledTimes(1);
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(deleteSpy).not.toHaveBeenCalled();
   });
 });

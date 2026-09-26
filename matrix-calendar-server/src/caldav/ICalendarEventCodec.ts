@@ -16,15 +16,31 @@
 
 import {
   CalendarEvent,
+  CalendarEventDateTime,
+  CalendarEventDisplayAlarm,
+  CalendarEventDisplayAlarmEdit,
+  CalendarEventExpansionError,
   CalendarEventId,
   CalendarEventInput,
+  CalendarEventOccurrence,
+  CalendarEventOccurrencePatch,
   CalendarEventPatch,
+  CalendarEventRecurrence,
+  CalendarEventRecurrenceOverride,
+  CalendarEventRecurrencePeriod,
+  CalendarEventRecurrenceRange,
   CalendarEventStatus,
   CalendarEventTiming,
   CalendarEventTransparency,
   CalendarId,
+  CalendarTimeRange,
+  ZonedCalendarDateTime,
+  expandCalendarEvent,
+  isCalendarEventRecurrenceRuleSupported,
 } from '@matrix-calendar-widget/calendar';
 import ICAL from 'ical.js';
+import { DateTime } from 'luxon';
+import { createCalDavTimezoneResolver } from './CalDavTimezoneResolver';
 
 export type EncodedICalendarEvent = {
   event: CalendarEvent;
@@ -37,6 +53,10 @@ export type ICalendarEventCodecErrorCode =
   | 'missing-uid'
   | 'missing-timing'
   | 'invalid-timing'
+  | 'invalid-recurrence'
+  | 'recurrence-exception-orphaned'
+  | 'recurrence-exception-unverifiable'
+  | 'unsupported-recurrence-range'
   | 'unsupported-patch';
 
 export class ICalendarEventCodecError extends Error {
@@ -55,14 +75,29 @@ export class ParsedICalendarEvent {
     public readonly event: CalendarEvent,
   ) {}
 
-  applyPatch(patch: CalendarEventPatch): EncodedICalendarEvent {
-    if (hasOwn(patch, 'recurrence')) {
-      throw new ICalendarEventCodecError(
-        'unsupported-patch',
-        'Recurrence editing is not part of the basic VEVENT codec',
+  expandOccurrences(
+    range: CalendarTimeRange,
+    options: {
+      rangeTimezone?: string;
+      maxRuleCandidates?: number;
+    } = {},
+  ): CalendarEventOccurrence[] {
+    if (this.event.unsupportedRecurrence === 'ranged-override') {
+      throw new CalendarEventExpansionError(
+        'unsupported-recurrence-override',
+        'RECURRENCE-ID RANGE=THISANDFUTURE is preserved but cannot be expanded safely yet',
       );
     }
+    return expandCalendarEvent(this.event, range, {
+      ...options,
+      timezoneResolver: createCalDavTimezoneResolver(
+        this.calendar,
+        options.maxRuleCandidates,
+      ),
+    });
+  }
 
+  applyPatch(patch: CalendarEventPatch): EncodedICalendarEvent {
     const calendar = ICAL.Component.fromString(this.calendar.toString());
     const vevent = findMasterEvent(calendar, this.event.uid);
     if (!vevent) {
@@ -107,18 +142,533 @@ export class ParsedICalendarEvent {
     if (hasOwn(patch, 'priority')) {
       setOptionalProperty(vevent, 'priority', patch.priority);
     }
+    if (patch.displayAlarmEdits !== undefined) {
+      setDisplayAlarmEdits(
+        vevent,
+        patch.displayAlarmEdits,
+        this.event.displayAlarms ?? [],
+      );
+    }
+    if (hasOwn(patch, 'recurrence')) {
+      setRecurrence(
+        vevent,
+        patch.recurrence,
+        this.event.recurrence,
+        patch.timing ?? this.event.timing,
+      );
+    }
+
+    if (
+      hasOwn(patch, 'recurrence') ||
+      (hasOwn(patch, 'timing') &&
+        patch.timing &&
+        !sameTimingStart(patch.timing, this.event.timing))
+    ) {
+      const proposed = new ICalendarEventCodec().parse(
+        this.event.calendarId,
+        this.event.id,
+        calendar.toString(),
+      ).event;
+      assertRecurrenceExceptionsRetained(
+        this.calendar,
+        this.event.uid,
+        proposed,
+      );
+    }
+
+    const { displayAlarmEdits, ...eventPatch } = patch;
+    const displayAlarms = displayAlarmEdits
+      ? applyDisplayAlarmEdits(
+          this.event.displayAlarms ?? [],
+          displayAlarmEdits,
+        )
+      : this.event.displayAlarms;
 
     return {
       event: {
         ...this.event,
-        ...patch,
+        ...eventPatch,
+        ...(displayAlarms ? { displayAlarms } : {}),
         title: patch.title ?? this.event.title,
-        timing: patch.timing ?? this.event.timing,
-        recurrence: this.event.recurrence,
+        timing: normalizeTiming(patch.timing ?? this.event.timing),
       },
       icalendar: calendar.toString(),
     };
   }
+
+  applyOccurrencePatch(
+    recurrenceId: CalendarEventDateTime,
+    patch: CalendarEventOccurrencePatch,
+  ): EncodedICalendarEvent {
+    if (Object.keys(patch).length === 0) {
+      throw new ICalendarEventCodecError(
+        'unsupported-patch',
+        'An occurrence patch must contain at least one editable field',
+      );
+    }
+    return this.applyOccurrenceMutation(recurrenceId, patch, false);
+  }
+
+  applyOccurrenceCancellation(
+    recurrenceId: CalendarEventDateTime,
+  ): EncodedICalendarEvent {
+    return this.applyOccurrenceMutation(recurrenceId, {}, true);
+  }
+
+  applyFollowingOccurrencePatch(
+    recurrenceId: CalendarEventDateTime,
+    timing: CalendarEventTiming,
+  ): EncodedICalendarEvent {
+    if (this.event.unsupportedRecurrence === 'ranged-override') {
+      throw unsupportedRangePatch(
+        'The resource contains an unsupported or ambiguous RANGE exception',
+      );
+    }
+    const calendar = ICAL.Component.fromString(this.calendar.toString());
+    const master = findMasterEvent(calendar, this.event.uid);
+    const startProperty = master?.getFirstProperty('dtstart');
+    if (!master || !startProperty) {
+      throw new ICalendarEventCodecError(
+        'missing-event',
+        'The recurrence resource no longer contains its master VEVENT',
+      );
+    }
+
+    assertRecurrenceIdentityMatchesStart(
+      recurrenceId,
+      readDateTimeProperty(startProperty),
+    );
+    assertRecurrenceIdentityMatchesTiming(recurrenceId, timing);
+    this.assertOccurrenceIsGenerated(recurrenceId);
+    assertSupportedFollowingTiming(recurrenceId, timing);
+
+    const matches = calendar
+      .getAllSubcomponents('vevent')
+      .filter(
+        (vevent) =>
+          vevent !== master &&
+          textValue(vevent.getFirstPropertyValue('uid')) === this.event.uid &&
+          vevent.hasProperty('recurrence-id') &&
+          dateTimeValueKey(
+            readDateTimeProperty(vevent.getFirstProperty('recurrence-id')!),
+          ) === dateTimeValueKey(recurrenceId),
+      );
+    if (matches.length > 1) {
+      throw unsupportedRangePatch(
+        'The resource has duplicate components for this recurrence identity',
+      );
+    }
+
+    let rangeOverride = matches[0];
+    if (rangeOverride && !hasRecurrenceRange(rangeOverride)) {
+      if (!isTimingOnlyComponent(rangeOverride)) {
+        throw unsupportedRangePatch(
+          'The existing exception contains fields that cannot be safely changed for following instances',
+        );
+      }
+    }
+
+    if (!rangeOverride) {
+      rangeOverride = new ICAL.Component('vevent');
+      setTextProperty(rangeOverride, 'uid', this.event.uid);
+      rangeOverride.addProperty(recurrenceIdProperty(recurrenceId));
+      calendar.addSubcomponent(rangeOverride);
+    }
+
+    setTiming(rangeOverride, timing);
+    const recurrenceProperty = rangeOverride.getFirstProperty('recurrence-id');
+    if (!recurrenceProperty) {
+      throw unsupportedRangePatch('RECURRENCE-ID is missing from the boundary');
+    }
+    recurrenceProperty.setParameter('range', 'THISANDFUTURE');
+
+    const icalendar = calendar.toString();
+    const updatedEvent = new ICalendarEventCodec().parse(
+      this.event.calendarId,
+      this.event.id,
+      icalendar,
+    );
+    const wallStart =
+      recurrenceId.type === 'date'
+        ? `${recurrenceId.value}T00:00:00`
+        : recurrenceId.value.local;
+    const wallEnd =
+      timing.type === 'all-day'
+        ? `${timing.endDate}T00:00:00`
+        : timing.end.local;
+    const validationStart = DateTime.fromISO(wallStart, { zone: 'UTC' })
+      .minus({ days: 3 })
+      .toISO();
+    const validationEnd = DateTime.fromISO(wallEnd, { zone: 'UTC' })
+      .plus({ days: 3 })
+      .toISO();
+    if (!validationStart || !validationEnd) {
+      throw unsupportedRangePatch('The RANGE interval cannot be validated');
+    }
+    try {
+      updatedEvent.expandOccurrences(
+        {
+          start: validationStart,
+          end: validationEnd,
+        },
+        {
+          rangeTimezone: 'UTC',
+          maxRuleCandidates: 100_000,
+        },
+      );
+    } catch {
+      throw unsupportedRangePatch(
+        'The recurrence set or timezone data cannot safely expand with this RANGE interval',
+      );
+    }
+    return { event: updatedEvent.event, icalendar };
+  }
+
+  private applyOccurrenceMutation(
+    recurrenceId: CalendarEventDateTime,
+    patch: CalendarEventOccurrencePatch,
+    cancel: boolean,
+  ): EncodedICalendarEvent {
+    const calendar = ICAL.Component.fromString(this.calendar.toString());
+    const master = findMasterEvent(calendar, this.event.uid);
+    const startProperty = master?.getFirstProperty('dtstart');
+    if (!master || !startProperty) {
+      throw new ICalendarEventCodecError(
+        'missing-event',
+        'The recurrence resource no longer contains its master VEVENT',
+      );
+    }
+
+    assertRecurrenceIdentityMatchesStart(
+      recurrenceId,
+      readDateTimeProperty(startProperty),
+    );
+    if (patch.timing) {
+      assertRecurrenceIdentityMatchesTiming(recurrenceId, patch.timing);
+    }
+
+    const matching = calendar
+      .getAllSubcomponents('vevent')
+      .filter(
+        (vevent) =>
+          vevent !== master &&
+          textValue(vevent.getFirstPropertyValue('uid')) === this.event.uid &&
+          vevent.hasProperty('recurrence-id') &&
+          dateTimeValueKey(
+            readDateTimeProperty(vevent.getFirstProperty('recurrence-id')!),
+          ) === dateTimeValueKey(recurrenceId),
+      );
+
+    if (matching.length > 1) {
+      throw new ICalendarEventCodecError(
+        'invalid-recurrence',
+        'The resource contains duplicate overrides for this recurrence identity',
+      );
+    }
+
+    let override = matching[0];
+    if (override && hasRecurrenceRange(override)) {
+      throw new ICalendarEventCodecError(
+        'unsupported-patch',
+        'A ranged recurrence override cannot be edited as one occurrence',
+      );
+    }
+
+    if (!override) {
+      this.assertOccurrenceIsGenerated(recurrenceId);
+      override = new ICAL.Component('vevent');
+      setTextProperty(override, 'uid', this.event.uid);
+      override.addProperty(recurrenceIdProperty(recurrenceId));
+      calendar.addSubcomponent(override);
+    }
+
+    if (cancel) {
+      setOptionalProperty(override, 'status', 'CANCELLED');
+    } else {
+      applyOccurrencePatch(override, patch);
+    }
+
+    const icalendar = calendar.toString();
+    const updatedEvent = new ICalendarEventCodec().parse(
+      this.event.calendarId,
+      this.event.id,
+      icalendar,
+    ).event;
+
+    return { event: updatedEvent, icalendar };
+  }
+
+  private assertOccurrenceIsGenerated(
+    recurrenceId: CalendarEventDateTime,
+  ): void {
+    const recurrence = this.event.recurrence;
+    if (
+      !recurrence?.rrule &&
+      !recurrence?.rdates?.length &&
+      !recurrence?.rdatePeriods?.length
+    ) {
+      throw new ICalendarEventCodecError(
+        'invalid-recurrence',
+        'The resource does not define a recurrence set for this identity',
+      );
+    }
+
+    const local =
+      recurrenceId.type === 'date'
+        ? `${recurrenceId.value}T00:00:00`
+        : recurrenceId.value.local;
+    const wall = DateTime.fromISO(local, { zone: 'UTC' });
+    if (!wall.isValid) {
+      throw new ICalendarEventCodecError(
+        'invalid-recurrence',
+        'The recurrence identity has an invalid local value',
+      );
+    }
+
+    const range = {
+      start: wall.minus({ days: 3 }).toUTC().toISO(),
+      end: wall.plus({ days: 3 }).toUTC().toISO(),
+    };
+    if (!range.start || !range.end) {
+      throw new ICalendarEventCodecError(
+        'invalid-recurrence',
+        'The recurrence identity cannot be used as a range',
+      );
+    }
+
+    let occurrences: CalendarEventOccurrence[];
+    try {
+      occurrences = expandCalendarEvent(this.event, range, {
+        rangeTimezone: 'UTC',
+        timezoneResolver: createCalDavTimezoneResolver(this.calendar),
+      });
+    } catch {
+      throw new ICalendarEventCodecError(
+        'invalid-recurrence',
+        'The resource recurrence set cannot validate this occurrence identity',
+      );
+    }
+
+    if (
+      !occurrences.some(
+        (occurrence) =>
+          dateTimeValueKey(occurrence.recurrenceId) ===
+          dateTimeValueKey(recurrenceId),
+      )
+    ) {
+      throw new ICalendarEventCodecError(
+        'invalid-recurrence',
+        'The recurrence identity is not part of the resource recurrence set',
+      );
+    }
+  }
+}
+
+const maximumExceptionIdentitiesToValidate = 10_000;
+const recurrenceValidationPaddingMilliseconds = 3 * 24 * 60 * 60 * 1000;
+const maximumRecurrenceCandidatesToValidate = 100_000;
+
+function assertRecurrenceExceptionsRetained(
+  source: ICAL.Component,
+  uid: string,
+  proposedEvent: CalendarEvent,
+): void {
+  const identities: CalendarEventDateTime[] = [];
+
+  for (const vevent of source.getAllSubcomponents('vevent')) {
+    const recurrenceIdProperties = vevent.getAllProperties('recurrence-id');
+    if (recurrenceIdProperties.length === 0) {
+      continue;
+    }
+
+    const uidProperties = vevent.getAllProperties('uid');
+    if (uidProperties.length === 0) {
+      throw recurrenceMembershipUnverifiable();
+    }
+
+    const belongsToSeries = uidProperties.some(
+      (property) => textValue(property.getFirstValue()) === uid,
+    );
+    if (!belongsToSeries) {
+      continue;
+    }
+
+    if (uidProperties.length !== 1 || recurrenceIdProperties.length !== 1) {
+      throw recurrenceMembershipUnverifiable();
+    }
+
+    try {
+      identities.push(readDateTimeProperty(recurrenceIdProperties[0]));
+    } catch {
+      throw recurrenceMembershipUnverifiable();
+    }
+
+    if (identities.length > maximumExceptionIdentitiesToValidate) {
+      throw recurrenceMembershipUnverifiable();
+    }
+  }
+
+  if (identities.length === 0) {
+    return;
+  }
+
+  let minimumWallTime = Number.POSITIVE_INFINITY;
+  let maximumWallTime = Number.NEGATIVE_INFINITY;
+  for (const identity of identities) {
+    const local =
+      identity.type === 'date'
+        ? `${identity.value}T00:00:00`
+        : identity.value.local;
+    const wallTime = DateTime.fromISO(local, { zone: 'UTC' });
+    if (!wallTime.isValid) {
+      throw recurrenceMembershipUnverifiable();
+    }
+    minimumWallTime = Math.min(minimumWallTime, wallTime.toMillis());
+    maximumWallTime = Math.max(maximumWallTime, wallTime.toMillis());
+  }
+
+  const rangeStart = DateTime.fromMillis(
+    minimumWallTime - recurrenceValidationPaddingMilliseconds,
+    { zone: 'UTC' },
+  ).toISO();
+  const rangeEnd = DateTime.fromMillis(
+    maximumWallTime + recurrenceValidationPaddingMilliseconds,
+    { zone: 'UTC' },
+  ).toISO();
+  if (!rangeStart || !rangeEnd) {
+    throw recurrenceMembershipUnverifiable();
+  }
+
+  let generatedIdentities: Set<string>;
+  try {
+    const recurrence = proposedEvent.recurrence;
+    const candidates = expandCalendarEvent(
+      {
+        ...proposedEvent,
+        recurrence: recurrence ? { ...recurrence, overrides: [] } : undefined,
+      },
+      { start: rangeStart, end: rangeEnd },
+      {
+        rangeTimezone: 'UTC',
+        maxRuleCandidates: maximumRecurrenceCandidatesToValidate,
+        timezoneResolver: createCalDavTimezoneResolver(
+          ICAL.Component.fromString(source.toString()),
+          maximumRecurrenceCandidatesToValidate,
+        ),
+      },
+    );
+    generatedIdentities = new Set(
+      candidates.map((candidate) => dateTimeValueKey(candidate.recurrenceId)),
+    );
+  } catch {
+    throw recurrenceMembershipUnverifiable();
+  }
+
+  if (
+    identities.some(
+      (identity) => !generatedIdentities.has(dateTimeValueKey(identity)),
+    )
+  ) {
+    throw new ICalendarEventCodecError(
+      'recurrence-exception-orphaned',
+      'This series change would detach an existing occurrence override. Keep its original occurrence date in the recurrence before saving.',
+    );
+  }
+}
+
+function recurrenceMembershipUnverifiable(): ICalendarEventCodecError {
+  return new ICalendarEventCodecError(
+    'recurrence-exception-unverifiable',
+    'This series change cannot be checked safely because its recurrence rules or timezone data are unsupported or exceed the validation limit.',
+  );
+}
+
+function unsupportedRangePatch(message: string): ICalendarEventCodecError {
+  return new ICalendarEventCodecError(
+    'unsupported-recurrence-range',
+    `The following-scope edit was not saved: ${message}`,
+  );
+}
+
+function assertSupportedFollowingTiming(
+  recurrenceId: CalendarEventDateTime,
+  timing: CalendarEventTiming,
+): void {
+  assertRecurrenceIdentityMatchesTiming(recurrenceId, timing);
+  if (timing.type === 'all-day') {
+    const start = DateTime.fromISO(timing.startDate, { zone: 'UTC' });
+    const end = DateTime.fromISO(timing.endDate, { zone: 'UTC' });
+    if (
+      !start.isValid ||
+      !end.isValid ||
+      start.toFormat('yyyy-MM-dd') !== timing.startDate ||
+      end.toFormat('yyyy-MM-dd') !== timing.endDate ||
+      end.toMillis() <= start.toMillis()
+    ) {
+      throw unsupportedRangePatch('The RANGE DATE interval is invalid');
+    }
+    return;
+  }
+
+  if (
+    recurrenceId.type !== 'date-time' ||
+    dateTimeMode(recurrenceId.value) !== dateTimeMode(timing.start) ||
+    recurrenceId.value.timezone !== timing.start.timezone ||
+    !sameZonedDateTimeShape(timing.start, timing.end)
+  ) {
+    throw unsupportedRangePatch(
+      'The RANGE values must retain the master DATE-TIME mode and timezone',
+    );
+  }
+
+  const start = DateTime.fromISO(timing.start.local, { zone: 'UTC' });
+  const end = DateTime.fromISO(timing.end.local, { zone: 'UTC' });
+  if (
+    !start.isValid ||
+    !end.isValid ||
+    !isValidLocalDateTime(start, timing.start.local) ||
+    !isValidLocalDateTime(end, timing.end.local) ||
+    end.toMillis() <= start.toMillis()
+  ) {
+    throw unsupportedRangePatch('The RANGE DATE-TIME interval is invalid');
+  }
+}
+
+function isValidLocalDateTime(parsed: DateTime, value: string): boolean {
+  const normalized = value.length === 16 ? `${value}:00` : value;
+  return (
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(normalized) &&
+    parsed.toFormat("yyyy-MM-dd'T'HH:mm:ss") === normalized
+  );
+}
+
+function sameZonedDateTimeShape(
+  left: ZonedCalendarDateTime,
+  right: ZonedCalendarDateTime,
+): boolean {
+  return (
+    dateTimeMode(left) === dateTimeMode(right) &&
+    left.timezone === right.timezone
+  );
+}
+
+function sameTimingStart(
+  left: CalendarEventTiming,
+  right: CalendarEventTiming,
+): boolean {
+  if (left.type !== right.type) {
+    return false;
+  }
+  if (left.type === 'all-day' && right.type === 'all-day') {
+    return left.startDate === right.startDate;
+  }
+  if (left.type === 'timed' && right.type === 'timed') {
+    return (
+      dateTimeValueKey({ type: 'date-time', value: left.start }) ===
+      dateTimeValueKey({ type: 'date-time', value: right.start })
+    );
+  }
+  return false;
 }
 
 export class ICalendarEventCodec {
@@ -127,13 +677,6 @@ export class ICalendarEventCodec {
     eventId: CalendarEventId,
     input: CalendarEventInput,
   ): EncodedICalendarEvent {
-    if (input.recurrence) {
-      throw new ICalendarEventCodecError(
-        'unsupported-patch',
-        'Recurrence creation is not part of the basic VEVENT codec',
-      );
-    }
-
     const calendar = new ICAL.Component('vcalendar');
     calendar.addPropertyWithValue('version', '2.0');
     calendar.addPropertyWithValue('prodid', '-//Matrix Calendar Widget//EN');
@@ -159,10 +702,14 @@ export class ICalendarEventCodec {
     setOptionalProperty(vevent, 'url', input.url);
     setCategories(vevent, input.categories);
     setOptionalProperty(vevent, 'priority', input.priority);
+    if (input.recurrence) {
+      setRecurrence(vevent, input.recurrence, undefined, input.timing);
+    }
 
     return {
       event: {
         ...input,
+        timing: normalizeTiming(input.timing),
         id: eventId,
         calendarId,
       },
@@ -195,6 +742,8 @@ export class ICalendarEventCodec {
       );
     }
 
+    assertSingleRrulePerVevent(calendar);
+
     const vevent = findMasterEvent(calendar);
     if (!vevent) {
       throw new ICalendarEventCodecError(
@@ -213,6 +762,13 @@ export class ICalendarEventCodec {
 
     const timing = readTiming(vevent);
 
+    const recurrence = readRecurrence(calendar, vevent, uid);
+    const displayAlarms = readDisplayAlarms(vevent);
+    const hasUnsupportedRangedOverride = hasUnsupportedRangedRecurrenceOverride(
+      calendar,
+      vevent,
+      uid,
+    );
     const event: CalendarEvent = {
       id: eventId,
       calendarId,
@@ -226,9 +782,25 @@ export class ICalendarEventCodec {
       url: textValue(vevent.getFirstPropertyValue('url')),
       categories: readCategories(vevent),
       priority: numberValue(vevent.getFirstPropertyValue('priority')),
+      ...(recurrence ? { recurrence } : {}),
+      ...(displayAlarms ? { displayAlarms } : {}),
+      ...(hasUnsupportedRangedOverride
+        ? { unsupportedRecurrence: 'ranged-override' }
+        : {}),
     };
 
     return new ParsedICalendarEvent(calendar, event);
+  }
+}
+
+function assertSingleRrulePerVevent(calendar: ICAL.Component): void {
+  for (const vevent of calendar.getAllSubcomponents('vevent')) {
+    if (vevent.getAllProperties('rrule').length > 1) {
+      throw new ICalendarEventCodecError(
+        'invalid-recurrence',
+        'A VEVENT cannot contain multiple RRULE properties',
+      );
+    }
   }
 }
 
@@ -246,6 +818,358 @@ function findMasterEvent(
   return (
     matching.find((event) => !event.hasProperty('recurrence-id')) ?? matching[0]
   );
+}
+
+function assertRecurrenceIdentityMatchesStart(
+  recurrenceId: CalendarEventDateTime,
+  start: CalendarEventDateTime,
+): void {
+  if (recurrenceId.type !== start.type) {
+    throw new ICalendarEventCodecError(
+      'invalid-recurrence',
+      'RECURRENCE-ID must use the same DATE or DATE-TIME type as DTSTART',
+    );
+  }
+
+  if (
+    recurrenceId.type === 'date-time' &&
+    start.type === 'date-time' &&
+    (dateTimeMode(recurrenceId.value) !== dateTimeMode(start.value) ||
+      recurrenceId.value.timezone !== start.value.timezone)
+  ) {
+    throw new ICalendarEventCodecError(
+      'invalid-recurrence',
+      'RECURRENCE-ID must use the same DATE-TIME mode and TZID as DTSTART',
+    );
+  }
+}
+
+function assertRecurrenceIdentityMatchesTiming(
+  recurrenceId: CalendarEventDateTime,
+  timing: CalendarEventTiming,
+): void {
+  const timingType = timing.type === 'all-day' ? 'date' : 'date-time';
+  if (recurrenceId.type !== timingType) {
+    throw new ICalendarEventCodecError(
+      'invalid-recurrence',
+      'An occurrence override must retain the master DTSTART value type',
+    );
+  }
+}
+
+function recurrenceIdProperty(value: CalendarEventDateTime): ICAL.Property {
+  const property = new ICAL.Property('recurrence-id');
+  if (value.type === 'date') {
+    property.setValue(ICAL.Time.fromDateString(value.value));
+    return property;
+  }
+
+  const mode = dateTimeMode(value.value);
+  property.setValue(timedValue(value.value.local, value.value.timezone, mode));
+  if (mode === 'tzid') {
+    property.setParameter('tzid', value.value.timezone);
+  }
+  return property;
+}
+
+function applyOccurrencePatch(
+  component: ICAL.Component,
+  patch: CalendarEventOccurrencePatch,
+): void {
+  if (hasOwn(patch, 'title')) {
+    setTextProperty(component, 'summary', patch.title ?? '');
+  }
+  if (hasOwn(patch, 'description')) {
+    setOptionalProperty(
+      component,
+      'description',
+      patch.description ?? undefined,
+    );
+  }
+  if (hasOwn(patch, 'timing') && patch.timing) {
+    setTiming(component, patch.timing);
+  }
+  if (hasOwn(patch, 'transparency')) {
+    setOptionalProperty(
+      component,
+      'transp',
+      patch.transparency === undefined
+        ? undefined
+        : patch.transparency === 'transparent'
+          ? 'TRANSPARENT'
+          : 'OPAQUE',
+    );
+  }
+  if (hasOwn(patch, 'location')) {
+    setOptionalProperty(component, 'location', patch.location ?? undefined);
+  }
+  if (hasOwn(patch, 'url')) {
+    setOptionalProperty(component, 'url', patch.url ?? undefined);
+  }
+  if (hasOwn(patch, 'categories')) {
+    setCategories(component, patch.categories);
+  }
+  if (hasOwn(patch, 'priority')) {
+    setOptionalProperty(component, 'priority', patch.priority ?? undefined);
+  }
+}
+
+function readRecurrence(
+  calendar: ICAL.Component,
+  master: ICAL.Component,
+  uid: string,
+): CalendarEventRecurrence | undefined {
+  const recurrence: CalendarEventRecurrence = {};
+  const rule = master.getFirstPropertyValue('rrule');
+  if (typeof rule === 'string') {
+    recurrence.rrule = rule;
+  } else if (
+    rule &&
+    typeof (rule as { toString?: unknown }).toString === 'function'
+  ) {
+    recurrence.rrule = String(rule);
+  }
+
+  const { rdates, rdatePeriods } = readRdateProperties(master);
+  const exdates = readDateTimeProperties(master, 'exdate');
+  if (rdates.length > 0) {
+    recurrence.rdates = rdates;
+  }
+  if (rdatePeriods.length > 0) {
+    recurrence.rdatePeriods = rdatePeriods;
+  }
+  if (exdates.length > 0) {
+    recurrence.exdates = exdates;
+  }
+
+  const masterRecurrenceId = master.getFirstProperty('recurrence-id');
+  if (masterRecurrenceId) {
+    recurrence.recurrenceId = readDateTimeProperty(masterRecurrenceId);
+  }
+
+  const overrides = calendar
+    .getAllSubcomponents('vevent')
+    .filter(
+      (event) =>
+        event !== master &&
+        textValue(event.getFirstPropertyValue('uid')) === uid &&
+        event.hasProperty('recurrence-id') &&
+        (!hasRecurrenceRange(event) ||
+          isSupportedRangedOverride(event, master)),
+    )
+    .map(readRecurrenceOverride);
+  if (overrides.length > 0) {
+    recurrence.overrides = overrides;
+  }
+
+  return Object.keys(recurrence).length > 0 ? recurrence : undefined;
+}
+
+function hasRecurrenceRange(vevent: ICAL.Component): boolean {
+  const recurrenceId = vevent.getFirstProperty('recurrence-id');
+  return recurrenceId?.getParameter('range') !== undefined;
+}
+
+function hasUnsupportedRangedRecurrenceOverride(
+  calendar: ICAL.Component,
+  master: ICAL.Component,
+  uid: string,
+): boolean {
+  return calendar
+    .getAllSubcomponents('vevent')
+    .some(
+      (vevent) =>
+        vevent !== master &&
+        hasRecurrenceRange(vevent) &&
+        (vevent.getAllProperties('uid').length === 0 ||
+          textValue(vevent.getFirstPropertyValue('uid')) === uid) &&
+        !isSupportedRangedOverride(vevent, master),
+    );
+}
+
+function isSupportedRangedOverride(
+  vevent: ICAL.Component,
+  master: ICAL.Component,
+): boolean {
+  const recurrenceIds = vevent.getAllProperties('recurrence-id');
+  const uids = vevent.getAllProperties('uid');
+  if (recurrenceIds.length !== 1 || uids.length !== 1) {
+    return false;
+  }
+  const range = recurrenceIds[0].getParameter('range');
+  if (range !== 'THISANDFUTURE') {
+    return false;
+  }
+  if (!isTimingOnlyComponent(vevent)) {
+    return false;
+  }
+  if (
+    vevent.getAllProperties('dtstart').length !== 1 ||
+    vevent.getAllProperties('dtend').length !== 1
+  ) {
+    return false;
+  }
+
+  try {
+    const identity = readDateTimeProperty(recurrenceIds[0]);
+    const masterStart = readDateTimeProperty(
+      master.getFirstProperty('dtstart')!,
+    );
+    const boundaryTiming = readTiming(vevent);
+    assertRecurrenceIdentityMatchesStart(identity, masterStart);
+    assertRecurrenceIdentityMatchesTiming(identity, boundaryTiming);
+    assertSupportedFollowingTiming(identity, boundaryTiming);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isTimingOnlyComponent(vevent: ICAL.Component): boolean {
+  const allowed = new Set([
+    'uid',
+    'recurrence-id',
+    'dtstart',
+    'dtend',
+    'dtstamp',
+    'created',
+    'last-modified',
+    'sequence',
+  ]);
+  return (
+    vevent.getAllSubcomponents().length === 0 &&
+    vevent
+      .getAllProperties()
+      .every((property) => allowed.has(property.name.toLowerCase()))
+  );
+}
+
+function readRecurrenceOverride(
+  vevent: ICAL.Component,
+): CalendarEventRecurrenceOverride {
+  const recurrenceId = vevent.getFirstProperty('recurrence-id');
+  if (!recurrenceId) {
+    throw new ICalendarEventCodecError(
+      'invalid-timing',
+      'Recurrence override VEVENT must contain RECURRENCE-ID',
+    );
+  }
+
+  const hasStart = vevent.hasProperty('dtstart');
+  const hasEnd = vevent.hasProperty('dtend');
+  if (hasStart !== hasEnd) {
+    throw new ICalendarEventCodecError(
+      'invalid-timing',
+      'Recurrence override DTSTART and DTEND must be provided together',
+    );
+  }
+
+  return {
+    recurrenceId: readDateTimeProperty(recurrenceId),
+    ...(hasRecurrenceRange(vevent)
+      ? { range: 'this-and-following' as CalendarEventRecurrenceRange }
+      : {}),
+    title: textValue(vevent.getFirstPropertyValue('summary')),
+    description: textValue(vevent.getFirstPropertyValue('description')),
+    timing: hasStart ? readTiming(vevent) : undefined,
+    status: readStatus(vevent.getFirstPropertyValue('status')),
+    transparency: readTransparency(vevent.getFirstPropertyValue('transp')),
+    location: textValue(vevent.getFirstPropertyValue('location')),
+    url: textValue(vevent.getFirstPropertyValue('url')),
+    categories: readCategories(vevent),
+    priority: numberValue(vevent.getFirstPropertyValue('priority')),
+  };
+}
+
+function readDateTimeProperties(
+  component: ICAL.Component,
+  name: 'exdate',
+): CalendarEventDateTime[] {
+  return component.getAllProperties(name).flatMap((property) =>
+    property.getValues().flatMap((value) => {
+      if (!(value instanceof ICAL.Time)) {
+        return [];
+      }
+      return [readDateTimeValue(value, property)];
+    }),
+  );
+}
+
+function readRdateProperties(component: ICAL.Component): {
+  rdates: CalendarEventDateTime[];
+  rdatePeriods: CalendarEventRecurrencePeriod[];
+} {
+  const rdates: CalendarEventDateTime[] = [];
+  const rdatePeriods: CalendarEventRecurrencePeriod[] = [];
+
+  for (const property of component.getAllProperties('rdate')) {
+    for (const value of property.getValues()) {
+      if (value instanceof ICAL.Time) {
+        rdates.push(readDateTimeValue(value, property));
+        continue;
+      }
+      if (!(value instanceof ICAL.Period)) {
+        continue;
+      }
+      if (value.start.isDate || (value.end && value.end.isDate)) {
+        throw new ICalendarEventCodecError(
+          'invalid-timing',
+          'RDATE PERIOD values must use DATE-TIME values',
+        );
+      }
+
+      rdatePeriods.push({
+        start: readPeriodDateTime(value.start, property),
+        end: value.end ? readPeriodDateTime(value.end, property) : undefined,
+        duration: value.duration?.toString(),
+      });
+    }
+  }
+
+  return { rdates, rdatePeriods };
+}
+
+function readPeriodDateTime(
+  value: ICAL.Time,
+  property: ICAL.Property,
+): { type: 'date-time'; value: ZonedCalendarDateTime } {
+  const dateTime = readDateTimeValue(value, property);
+  if (dateTime.type !== 'date-time') {
+    throw new ICalendarEventCodecError(
+      'invalid-timing',
+      'RDATE PERIOD values must use DATE-TIME values',
+    );
+  }
+  return dateTime;
+}
+
+function readDateTimeProperty(property: ICAL.Property): CalendarEventDateTime {
+  const value = property.getFirstValue();
+  if (!(value instanceof ICAL.Time)) {
+    throw new ICalendarEventCodecError(
+      'invalid-timing',
+      `${property.name.toUpperCase()} must be a date or date-time value`,
+    );
+  }
+
+  return readDateTimeValue(value, property);
+}
+
+function readDateTimeValue(
+  value: ICAL.Time,
+  property?: ICAL.Property,
+): CalendarEventDateTime {
+  if (value.isDate) {
+    return { type: 'date', value: formatDate(value) };
+  }
+
+  return {
+    type: 'date-time',
+    value: {
+      local: formatLocalDateTime(value),
+      ...readTimezone(property, value),
+    },
+  };
 }
 
 function readTiming(vevent: ICAL.Component): CalendarEventTiming {
@@ -288,22 +1212,29 @@ function readTiming(vevent: ICAL.Component): CalendarEventTiming {
     type: 'timed',
     start: {
       local: formatLocalDateTime(start),
-      timezone: readTimezone(startProperty, start),
+      ...readTimezone(startProperty, start),
     },
     end: {
       local: formatLocalDateTime(end),
-      timezone: readTimezone(endProperty, end),
+      ...readTimezone(endProperty, end),
     },
   };
 }
 
-function readTimezone(property: ICAL.Property, time: ICAL.Time): string {
-  const tzid = property.getFirstParameter('tzid');
+function readTimezone(
+  property: ICAL.Property | undefined,
+  time: ICAL.Time,
+): Pick<ZonedCalendarDateTime, 'timezone' | 'mode'> {
+  const tzid = property?.getFirstParameter('tzid');
   if (typeof tzid === 'string' && tzid.length > 0) {
-    return tzid;
+    return { timezone: tzid, mode: 'tzid' };
   }
 
-  return time.zone?.tzid === 'Z' ? 'UTC' : time.zone?.tzid || 'UTC';
+  if (time.zone === ICAL.Timezone.utcTimezone || time.zone?.tzid === 'Z') {
+    return { timezone: 'UTC', mode: 'utc' };
+  }
+
+  return { timezone: 'floating', mode: 'floating' };
 }
 
 function formatDate(time: ICAL.Time): string {
@@ -358,6 +1289,202 @@ function readCategories(vevent: ICAL.Component): string[] | undefined {
   return categories.length > 0 ? categories : undefined;
 }
 
+function readDisplayAlarms(
+  vevent: ICAL.Component,
+): CalendarEventDisplayAlarm[] | undefined {
+  const alarms = vevent.getAllSubcomponents('valarm');
+  const displayAlarms = alarms.flatMap((alarm, index) => {
+    const actionProperties = alarm.getAllProperties('action');
+    if (
+      actionProperties.length !== 1 ||
+      textValue(actionProperties[0].getFirstValue())?.toUpperCase() !==
+        'DISPLAY'
+    ) {
+      return [];
+    }
+
+    const trigger = readDisplayAlarmTrigger(alarm);
+    return [
+      {
+        index,
+        description: textValue(
+          alarm.getFirstProperty('description')?.getFirstValue(),
+        ),
+        ...(trigger ? trigger : {}),
+        triggerEditable: trigger !== undefined,
+      },
+    ];
+  });
+
+  return displayAlarms.length > 0 ? displayAlarms : undefined;
+}
+
+function readDisplayAlarmTrigger(
+  alarm: ICAL.Component,
+):
+  | Pick<CalendarEventDisplayAlarm, 'triggerMinutes' | 'triggerRelatedTo'>
+  | undefined {
+  const properties = alarm.getAllProperties('trigger');
+  if (properties.length !== 1) {
+    return undefined;
+  }
+
+  const property = properties[0];
+  const value = property.getFirstValue();
+  if (!(value instanceof ICAL.Duration)) {
+    return undefined;
+  }
+
+  const seconds = value.toSeconds();
+  const minutes = seconds / 60;
+  const relatedValue = property.getFirstParameter('related');
+  const related =
+    typeof relatedValue === 'string'
+      ? relatedValue.toUpperCase()
+      : relatedValue;
+  if (
+    !Number.isSafeInteger(seconds) ||
+    !Number.isSafeInteger(minutes) ||
+    (related !== undefined && related !== 'START' && related !== 'END')
+  ) {
+    return undefined;
+  }
+
+  return {
+    triggerMinutes: minutes,
+    triggerRelatedTo: related === 'END' ? 'end' : 'start',
+  };
+}
+
+function setDisplayAlarmEdits(
+  vevent: ICAL.Component,
+  edits: CalendarEventDisplayAlarmEdit[],
+  supportedAlarms: CalendarEventDisplayAlarm[],
+): void {
+  if (!Array.isArray(edits)) {
+    throw unsupportedDisplayAlarmPatch('Alarm edits must be a list');
+  }
+
+  const alarms = vevent.getAllSubcomponents('valarm');
+  const editedIndexes = new Set<number>();
+
+  for (const edit of edits) {
+    if (!edit || typeof edit !== 'object') {
+      throw unsupportedDisplayAlarmPatch('An alarm edit is invalid');
+    }
+    if (!Number.isSafeInteger(edit.index) || edit.index < 0) {
+      throw unsupportedDisplayAlarmPatch('An alarm index is invalid');
+    }
+    if (editedIndexes.has(edit.index)) {
+      throw unsupportedDisplayAlarmPatch(
+        'A DISPLAY alarm can only be edited once per patch',
+      );
+    }
+    editedIndexes.add(edit.index);
+
+    const alarm = alarms[edit.index];
+    const projectedAlarm = supportedAlarms.find(
+      (candidate) => candidate.index === edit.index,
+    );
+    const actionProperties = alarm?.getAllProperties('action') ?? [];
+    if (
+      !alarm ||
+      !projectedAlarm ||
+      actionProperties.length !== 1 ||
+      textValue(actionProperties[0].getFirstValue())?.toUpperCase() !==
+        'DISPLAY'
+    ) {
+      throw unsupportedDisplayAlarmPatch(
+        'Only an existing DISPLAY alarm can be edited',
+      );
+    }
+
+    const hasTriggerEdit = edit.triggerMinutes !== undefined;
+    const hasDescriptionEdit = hasOwn(edit, 'description');
+    if (!hasTriggerEdit && !hasDescriptionEdit) {
+      throw unsupportedDisplayAlarmPatch(
+        'A DISPLAY alarm edit must change its trigger or description',
+      );
+    }
+
+    if (hasTriggerEdit) {
+      const triggerMinutes = edit.triggerMinutes;
+      if (
+        triggerMinutes === undefined ||
+        !projectedAlarm.triggerEditable ||
+        !Number.isSafeInteger(triggerMinutes) ||
+        !Number.isSafeInteger(triggerMinutes * 60)
+      ) {
+        throw unsupportedDisplayAlarmPatch(
+          'This DISPLAY alarm trigger cannot be represented as whole minutes',
+        );
+      }
+
+      if (triggerMinutes !== projectedAlarm.triggerMinutes) {
+        const triggerProperties = alarm.getAllProperties('trigger');
+        if (triggerProperties.length !== 1) {
+          throw unsupportedDisplayAlarmPatch(
+            'The DISPLAY alarm does not have one editable trigger',
+          );
+        }
+        triggerProperties[0].setValue(
+          ICAL.Duration.fromSeconds(triggerMinutes * 60),
+        );
+      }
+    }
+
+    if (hasDescriptionEdit) {
+      if (typeof edit.description !== 'string') {
+        throw unsupportedDisplayAlarmPatch(
+          'A DISPLAY alarm description must be text',
+        );
+      }
+
+      if (edit.description !== (projectedAlarm.description ?? '')) {
+        const descriptionProperties = alarm.getAllProperties('description');
+        if (descriptionProperties.length > 1) {
+          throw unsupportedDisplayAlarmPatch(
+            'The DISPLAY alarm has multiple descriptions',
+          );
+        }
+        if (descriptionProperties.length === 1) {
+          descriptionProperties[0].setValue(edit.description);
+        } else {
+          alarm.addPropertyWithValue('description', edit.description);
+        }
+      }
+    }
+  }
+}
+
+function applyDisplayAlarmEdits(
+  alarms: CalendarEventDisplayAlarm[],
+  edits: CalendarEventDisplayAlarmEdit[],
+): CalendarEventDisplayAlarm[] {
+  const byIndex = new Map(edits.map((edit) => [edit.index, edit]));
+  return alarms.map((alarm) => {
+    const edit = byIndex.get(alarm.index);
+    if (!edit) {
+      return { ...alarm };
+    }
+    return {
+      ...alarm,
+      ...(edit.triggerMinutes !== undefined
+        ? { triggerMinutes: edit.triggerMinutes }
+        : {}),
+      ...(edit.description !== undefined
+        ? { description: edit.description }
+        : {}),
+    };
+  });
+}
+
+function unsupportedDisplayAlarmPatch(
+  message: string,
+): ICalendarEventCodecError {
+  return new ICalendarEventCodecError('unsupported-patch', message);
+}
+
 function textValue(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
@@ -375,10 +1502,7 @@ function numberValue(value: unknown): number | undefined {
   return undefined;
 }
 
-function hasOwn(
-  value: CalendarEventPatch,
-  key: keyof CalendarEventPatch,
-): boolean {
+function hasOwn(value: object, key: PropertyKey): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
@@ -417,6 +1541,186 @@ function setCategories(
   component.addProperty(property);
 }
 
+function setRecurrence(
+  component: ICAL.Component,
+  recurrence: CalendarEventRecurrence | undefined,
+  previous?: CalendarEventRecurrence,
+  timing?: CalendarEventTiming,
+): void {
+  if (recurrence === undefined) {
+    component.removeAllProperties('rrule');
+    component.removeAllProperties('rdate');
+    component.removeAllProperties('exdate');
+    return;
+  }
+
+  assertRecurrenceDateTypesMatchTiming({ ...previous, ...recurrence }, timing);
+
+  if (recurrence.rrule !== previous?.rrule) {
+    component.removeAllProperties('rrule');
+    if (recurrence.rrule !== undefined) {
+      const timingType = timing?.type ?? 'timed';
+      const timezone = timing?.type === 'timed' ? timing.start.timezone : 'UTC';
+      if (
+        !isCalendarEventRecurrenceRuleSupported(
+          recurrence.rrule,
+          timingType,
+          timezone,
+        )
+      ) {
+        throw new ICalendarEventCodecError(
+          'unsupported-patch',
+          'The recurrence rule uses options that the calendar form cannot edit',
+        );
+      }
+      try {
+        const property = new ICAL.Property('rrule');
+        property.setValue(ICAL.Recur.fromString(recurrence.rrule));
+        component.addProperty(property);
+      } catch {
+        throw new ICalendarEventCodecError(
+          'invalid-recurrence',
+          'The recurrence rule is invalid',
+        );
+      }
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(recurrence, 'rdates')) {
+    updateDateTimeProperties(
+      component,
+      'rdate',
+      recurrence.rdates ?? [],
+      previous?.rdates ?? [],
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(recurrence, 'exdates')) {
+    updateDateTimeProperties(
+      component,
+      'exdate',
+      recurrence.exdates ?? [],
+      previous?.exdates ?? [],
+    );
+  }
+}
+
+function assertRecurrenceDateTypesMatchTiming(
+  recurrence: CalendarEventRecurrence,
+  timing?: CalendarEventTiming,
+): void {
+  const allDay = timing?.type === 'all-day';
+  const expectedType = allDay ? 'date' : 'date-time';
+  const dateValues = [
+    ...(recurrence.rdates ?? []),
+    ...(recurrence.exdates ?? []),
+  ];
+  const hasMismatchedValue = dateValues.some(
+    (value) => value.type !== expectedType,
+  );
+  const hasPeriodOnAllDay =
+    allDay && (recurrence.rdatePeriods?.length ?? 0) > 0;
+
+  if (hasMismatchedValue || hasPeriodOnAllDay) {
+    throw new ICalendarEventCodecError(
+      'invalid-recurrence',
+      'RDATE and EXDATE value types must match DTSTART',
+    );
+  }
+}
+
+function updateDateTimeProperties(
+  component: ICAL.Component,
+  name: 'rdate' | 'exdate',
+  nextValues: CalendarEventDateTime[],
+  previousValues: CalendarEventDateTime[],
+): void {
+  if (sameDateTimeValues(nextValues, previousValues)) {
+    return;
+  }
+
+  const remaining = new Map<string, number>();
+  for (const value of nextValues) {
+    const key = dateTimeValueKey(value);
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+
+  for (const property of component.getAllProperties(name)) {
+    const values = property.getValues();
+    // Keep PERIOD-valued RDATEs and any form this adapter cannot edit intact.
+    if (values.some((value) => !(value instanceof ICAL.Time))) {
+      continue;
+    }
+
+    const retained = values.filter((value) => {
+      const key = dateTimeValueKey(
+        readDateTimeValue(value as ICAL.Time, property),
+      );
+      const count = remaining.get(key) ?? 0;
+      if (count === 0) {
+        return false;
+      }
+      remaining.set(key, count - 1);
+      return true;
+    });
+
+    if (retained.length === 0) {
+      component.removeProperty(property);
+    } else if (retained.length !== values.length) {
+      property.setValues(retained);
+    }
+  }
+
+  for (const [key, count] of remaining) {
+    for (let index = 0; index < count; index += 1) {
+      const value = nextValues.find(
+        (candidate) => dateTimeValueKey(candidate) === key,
+      );
+      if (value) {
+        component.addProperty(dateTimeProperty(name, value));
+      }
+    }
+  }
+}
+
+function dateTimeProperty(
+  name: 'rdate' | 'exdate',
+  value: CalendarEventDateTime,
+): ICAL.Property {
+  const property = new ICAL.Property(name);
+  if (value.type === 'date') {
+    property.setValue(ICAL.Time.fromDateString(value.value));
+    return property;
+  }
+
+  property.setValue(
+    timedValue(value.value.local, value.value.timezone, value.value.mode),
+  );
+  if (dateTimeMode(value.value) === 'tzid') {
+    property.setParameter('tzid', value.value.timezone);
+  }
+  return property;
+}
+
+function sameDateTimeValues(
+  left: CalendarEventDateTime[],
+  right: CalendarEventDateTime[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (value, index) =>
+        dateTimeValueKey(value) === dateTimeValueKey(right[index]),
+    )
+  );
+}
+
+function dateTimeValueKey(value: CalendarEventDateTime): string {
+  if (value.type === 'date') {
+    return `DATE:${value.value}`;
+  }
+  return `DATE-TIME:${dateTimeMode(value.value)}:${value.value.timezone}:${value.value.local}`;
+}
+
 function setTiming(
   component: ICAL.Component,
   timing: CalendarEventTiming,
@@ -438,14 +1742,14 @@ function setTiming(
   setTimeProperty(
     component,
     'dtstart',
-    timedValue(timing.start.local, timing.start.timezone),
-    timing.start.timezone,
+    timedValue(timing.start.local, timing.start.timezone, timing.start.mode),
+    dateTimeMode(timing.start) === 'tzid' ? timing.start.timezone : undefined,
   );
   setTimeProperty(
     component,
     'dtend',
-    timedValue(timing.end.local, timing.end.timezone),
-    timing.end.timezone,
+    timedValue(timing.end.local, timing.end.timezone, timing.end.mode),
+    dateTimeMode(timing.end) === 'tzid' ? timing.end.timezone : undefined,
   );
 }
 
@@ -471,10 +1775,45 @@ function setTimeProperty(
   }
 }
 
-function timedValue(local: string, timezone: string): ICAL.Time {
+function timedValue(
+  local: string,
+  timezone: string,
+  mode?: ZonedCalendarDateTime['mode'],
+): ICAL.Time {
   const normalized = normalizeLocalDateTime(local);
+  const resolvedMode =
+    mode ??
+    (timezone === 'UTC'
+      ? 'utc'
+      : timezone === 'floating'
+        ? 'floating'
+        : 'tzid');
   return ICAL.Time.fromDateTimeString(
-    timezone === 'UTC' ? `${normalized}Z` : normalized,
+    resolvedMode === 'utc' ? `${normalized}Z` : normalized,
+  );
+}
+
+function normalizeTiming(timing: CalendarEventTiming): CalendarEventTiming {
+  if (timing.type === 'all-day') {
+    return { ...timing };
+  }
+  return {
+    type: 'timed',
+    start: { ...timing.start, mode: dateTimeMode(timing.start) },
+    end: { ...timing.end, mode: dateTimeMode(timing.end) },
+  };
+}
+
+function dateTimeMode(
+  value: ZonedCalendarDateTime,
+): NonNullable<ZonedCalendarDateTime['mode']> {
+  return (
+    value.mode ??
+    (value.timezone === 'UTC'
+      ? 'utc'
+      : value.timezone === 'floating'
+        ? 'floating'
+        : 'tzid')
   );
 }
 
