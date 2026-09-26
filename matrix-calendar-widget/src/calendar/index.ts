@@ -21,6 +21,7 @@ export type {
 } from './CalendarDiagnosticsRepository';
 export {
   calendarEventInputFromForm,
+  calendarEventOccurrencePatchFromForm,
   calendarEventPatchFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
@@ -62,6 +63,7 @@ export { GatewayCalendarRepository } from './GatewayCalendarRepository';
 export type { GatewayCalendarRepositoryOptions } from './GatewayCalendarRepository';
 export type { CalendarFilters } from './types';
 export {
+  useCancelCalendarOccurrence,
   useCreateCalendar,
   useCreateCalendarEvent,
   useDeleteCalendar,
@@ -69,6 +71,7 @@ export {
   useRenameCalendar,
   useUpdateCalendarEvent,
   useUpdateCalendarMetadata,
+  useUpdateCalendarOccurrence,
 } from './useCalendarMutations';
 export {
   useCalendarEvent,

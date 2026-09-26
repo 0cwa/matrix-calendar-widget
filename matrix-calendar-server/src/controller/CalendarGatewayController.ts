@@ -16,7 +16,9 @@
 
 import {
   CalendarAuthorizationRequest,
+  CalendarEventDateTime,
   CalendarEventInput,
+  CalendarEventOccurrencePatch,
   CalendarEventPatch,
   CalendarMetadataPatch,
   CalendarTimeRange,
@@ -47,6 +49,7 @@ import {
   CalDavEventResource,
   CalDavEventTransportError,
   ICalendarEventCodec,
+  ICalendarEventCodecError,
   MatrixOpenIdCalDavCredentialError,
   MatrixOpenIdCalDavCredentialProvider,
 } from '../caldav';
@@ -529,6 +532,102 @@ export class CalendarGatewayController {
     });
   }
 
+  @Patch('events/occurrence')
+  async updateOccurrence(
+    @UserContextParam() userContext: IUserContext,
+    @MatrixOpenIdCredentialParam()
+    openIdCredential: IMatrixOpenIdCredential | undefined,
+    @Body() input: unknown,
+    @Headers('if-match') ifMatch?: string,
+    @Query('roomId') roomId?: string,
+    @Query('calendarId') calendarId?: string,
+    @Query('eventId') eventId?: string,
+  ): Promise<CalendarGatewayEventDto> {
+    const { recurrenceId, patch } = parseOccurrenceUpdateBody(input);
+    const normalizedCalendarId = this.normalizeRadicaleUrl(
+      this.requireQuery(calendarId, 'calendarId'),
+      'calendarId',
+    );
+    const normalizedEventId = this.normalizeOccurrenceEventUrl(
+      this.requireQuery(eventId, 'eventId'),
+      normalizedCalendarId,
+    );
+    const scope = await this.eventScope(
+      userContext,
+      roomId,
+      normalizedCalendarId,
+      {
+        action: 'update-event',
+        calendarId: normalizedCalendarId,
+        eventId: normalizedEventId,
+      },
+    );
+    const etag = this.requireQuery(ifMatch, 'If-Match');
+
+    return this.runOccurrenceCalDav(async () => {
+      const client = this.eventClient(userContext, openIdCredential);
+      const codec = new ICalendarEventCodec();
+      const current = await client.getEvent(normalizedEventId);
+      const encoded = codec
+        .parse(scope.calendarId, normalizedEventId, current.icalendar)
+        .applyOccurrencePatch(recurrenceId, patch);
+      await client.updateEvent(normalizedEventId, etag, encoded.icalendar);
+      return this.eventDto(
+        codec,
+        scope.calendarId,
+        await client.getEvent(normalizedEventId),
+      );
+    });
+  }
+
+  @Post('events/occurrence/cancel')
+  async cancelOccurrence(
+    @UserContextParam() userContext: IUserContext,
+    @MatrixOpenIdCredentialParam()
+    openIdCredential: IMatrixOpenIdCredential | undefined,
+    @Body() input: unknown,
+    @Headers('if-match') ifMatch?: string,
+    @Query('roomId') roomId?: string,
+    @Query('calendarId') calendarId?: string,
+    @Query('eventId') eventId?: string,
+  ): Promise<CalendarGatewayEventDto> {
+    const recurrenceId = parseOccurrenceCancelBody(input);
+    const normalizedCalendarId = this.normalizeRadicaleUrl(
+      this.requireQuery(calendarId, 'calendarId'),
+      'calendarId',
+    );
+    const normalizedEventId = this.normalizeOccurrenceEventUrl(
+      this.requireQuery(eventId, 'eventId'),
+      normalizedCalendarId,
+    );
+    const scope = await this.eventScope(
+      userContext,
+      roomId,
+      normalizedCalendarId,
+      {
+        action: 'update-event',
+        calendarId: normalizedCalendarId,
+        eventId: normalizedEventId,
+      },
+    );
+    const etag = this.requireQuery(ifMatch, 'If-Match');
+
+    return this.runOccurrenceCalDav(async () => {
+      const client = this.eventClient(userContext, openIdCredential);
+      const codec = new ICalendarEventCodec();
+      const current = await client.getEvent(normalizedEventId);
+      const encoded = codec
+        .parse(scope.calendarId, normalizedEventId, current.icalendar)
+        .applyOccurrenceCancellation(recurrenceId);
+      await client.updateEvent(normalizedEventId, etag, encoded.icalendar);
+      return this.eventDto(
+        codec,
+        scope.calendarId,
+        await client.getEvent(normalizedEventId),
+      );
+    });
+  }
+
   @Delete('events')
   async deleteEvent(
     @UserContextParam() userContext: IUserContext,
@@ -689,6 +788,26 @@ export class CalendarGatewayController {
     return eventUrl.toString();
   }
 
+  private normalizeOccurrenceEventUrl(
+    value: string,
+    calendarId: string,
+  ): string {
+    const normalized = this.normalizeEventUrl(value, calendarId);
+    const eventUrl = new URL(normalized);
+    const collectionUrl = new URL(this.asCollectionUrl(calendarId));
+    if (
+      eventUrl.search ||
+      eventUrl.hash ||
+      eventUrl.pathname === collectionUrl.pathname ||
+      eventUrl.pathname.slice(collectionUrl.pathname.length).includes('/')
+    ) {
+      throw new BadRequestException(
+        'eventId must identify one resource directly within the selected calendar',
+      );
+    }
+    return normalized;
+  }
+
   private asCollectionUrl(calendarId: string): string {
     const url = new URL(calendarId);
     if (!url.pathname.endsWith('/')) {
@@ -779,6 +898,260 @@ export class CalendarGatewayController {
       throw error;
     }
   }
+
+  private async runOccurrenceCalDav<T>(
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await this.runCalDav(operation);
+    } catch (error) {
+      if (error instanceof ICalendarEventCodecError) {
+        throw new BadRequestException({
+          code: error.code,
+          message: error.message,
+        });
+      }
+      throw error;
+    }
+  }
+}
+
+const occurrencePatchKeys = new Set([
+  'title',
+  'description',
+  'timing',
+  'transparency',
+  'location',
+  'url',
+  'categories',
+  'priority',
+]);
+
+function parseOccurrenceUpdateBody(input: unknown): {
+  recurrenceId: CalendarEventDateTime;
+  patch: CalendarEventOccurrencePatch;
+} {
+  const body = plainRecord(input, 'occurrence patch body');
+  if (
+    Object.keys(body).length !== 2 ||
+    !Object.prototype.hasOwnProperty.call(body, 'recurrenceId') ||
+    !Object.prototype.hasOwnProperty.call(body, 'patch')
+  ) {
+    throw new BadRequestException(
+      'occurrence patch body must contain recurrenceId and patch only',
+    );
+  }
+  const recurrenceId = parseOccurrenceIdentity(body.recurrenceId);
+  const rawPatch = plainRecord(body.patch, 'occurrence patch');
+  const keys = Object.keys(rawPatch);
+  if (keys.length === 0 || keys.some((key) => !occurrencePatchKeys.has(key))) {
+    throw new BadRequestException(
+      'occurrence patch must contain only supported occurrence fields',
+    );
+  }
+
+  const patch: CalendarEventOccurrencePatch = {};
+  for (const key of keys) {
+    const value = rawPatch[key];
+    switch (key) {
+      case 'title':
+        if (typeof value !== 'string' || value.trim().length === 0) {
+          throw new BadRequestException(
+            'occurrence title must be non-empty text',
+          );
+        }
+        patch.title = value;
+        break;
+      case 'description':
+      case 'location':
+      case 'url':
+        if (value !== null && typeof value !== 'string') {
+          throw new BadRequestException(`${key} must be text or null`);
+        }
+        if (key === 'description') patch.description = value as string | null;
+        if (key === 'location') patch.location = value as string | null;
+        if (key === 'url') patch.url = value as string | null;
+        break;
+      case 'timing':
+        patch.timing = parseOccurrenceTiming(value, recurrenceId);
+        break;
+      case 'transparency':
+        if (value !== 'opaque' && value !== 'transparent') {
+          throw new BadRequestException(
+            'occurrence transparency must be opaque or transparent',
+          );
+        }
+        patch.transparency = value;
+        break;
+      case 'categories':
+        if (
+          !Array.isArray(value) ||
+          value.some((category) => typeof category !== 'string')
+        ) {
+          throw new BadRequestException(
+            'occurrence categories must be an array of text values',
+          );
+        }
+        patch.categories = [...value] as string[];
+        break;
+      case 'priority':
+        if (
+          value !== null &&
+          (typeof value !== 'number' || !Number.isInteger(value))
+        ) {
+          throw new BadRequestException(
+            'occurrence priority must be an integer or null',
+          );
+        }
+        patch.priority = value as number | null;
+        break;
+    }
+  }
+  return { recurrenceId, patch };
+}
+
+function parseOccurrenceCancelBody(input: unknown): CalendarEventDateTime {
+  const body = plainRecord(input, 'occurrence cancellation body');
+  if (
+    Object.keys(body).length !== 1 ||
+    !Object.prototype.hasOwnProperty.call(body, 'recurrenceId')
+  ) {
+    throw new BadRequestException(
+      'occurrence cancellation body must contain recurrenceId only',
+    );
+  }
+  return parseOccurrenceIdentity(body.recurrenceId);
+}
+
+function parseOccurrenceIdentity(input: unknown): CalendarEventDateTime {
+  const identity = plainRecord(input, 'recurrenceId');
+  if (
+    Object.keys(identity).length !== 2 ||
+    (identity.type !== 'date' && identity.type !== 'date-time') ||
+    !Object.prototype.hasOwnProperty.call(identity, 'value')
+  ) {
+    throw new BadRequestException('recurrenceId has an invalid value type');
+  }
+  if (identity.type === 'date') {
+    if (typeof identity.value !== 'string' || !isValidDate(identity.value)) {
+      throw new BadRequestException('recurrenceId DATE must be YYYY-MM-DD');
+    }
+    return { type: 'date', value: identity.value };
+  }
+
+  return {
+    type: 'date-time',
+    value: parseZonedDateTime(identity.value, 'recurrenceId'),
+  };
+}
+
+function parseOccurrenceTiming(
+  input: unknown,
+  recurrenceId: CalendarEventDateTime,
+): CalendarEventOccurrencePatch['timing'] {
+  const timing = plainRecord(input, 'occurrence timing');
+  if (timing.type === 'all-day') {
+    if (
+      Object.keys(timing).length !== 3 ||
+      recurrenceId.type !== 'date' ||
+      typeof timing.startDate !== 'string' ||
+      typeof timing.endDate !== 'string' ||
+      !isValidDate(timing.startDate) ||
+      !isValidDate(timing.endDate) ||
+      timing.endDate <= timing.startDate
+    ) {
+      throw new BadRequestException(
+        'all-day occurrence timing must use a valid DATE range matching recurrenceId',
+      );
+    }
+    return {
+      type: 'all-day',
+      startDate: timing.startDate,
+      endDate: timing.endDate,
+    };
+  }
+  if (
+    timing.type !== 'timed' ||
+    Object.keys(timing).length !== 3 ||
+    recurrenceId.type !== 'date-time'
+  ) {
+    throw new BadRequestException(
+      'timed occurrence timing must use DATE-TIME values matching recurrenceId',
+    );
+  }
+  const start = parseZonedDateTime(timing.start, 'timing.start');
+  const end = parseZonedDateTime(timing.end, 'timing.end');
+  if (
+    start.mode !== end.mode ||
+    start.timezone !== end.timezone ||
+    end.local <= start.local
+  ) {
+    throw new BadRequestException(
+      'timed occurrence values must use one mode and timezone and end after start',
+    );
+  }
+  return { type: 'timed', start, end };
+}
+
+function parseZonedDateTime(
+  input: unknown,
+  field: string,
+): { local: string; timezone: string; mode: 'floating' | 'utc' | 'tzid' } {
+  const value = plainRecord(input, field);
+  if (
+    Object.keys(value).some(
+      (key) => !['local', 'timezone', 'mode'].includes(key),
+    ) ||
+    typeof value.local !== 'string' ||
+    typeof value.timezone !== 'string' ||
+    !['floating', 'utc', 'tzid'].includes(String(value.mode))
+  ) {
+    throw new BadRequestException(
+      `${field} must include local, timezone, and mode`,
+    );
+  }
+  const local = value.local;
+  const timezone = value.timezone;
+  const mode = value.mode as 'floating' | 'utc' | 'tzid';
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?$/.test(local) ||
+    !isValidDateTime(local) ||
+    (mode === 'floating' && timezone !== 'floating') ||
+    (mode === 'utc' && timezone !== 'UTC') ||
+    (mode === 'tzid' &&
+      (!timezone || timezone === 'UTC' || timezone === 'floating'))
+  ) {
+    throw new BadRequestException(
+      `${field} has inconsistent DATE-TIME mode or timezone`,
+    );
+  }
+  return { local, timezone, mode };
+}
+
+function plainRecord(input: unknown, field: string): Record<string, unknown> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new BadRequestException(`${field} must be an object`);
+  }
+  return input as Record<string, unknown>;
+}
+
+function isValidDate(value: string): boolean {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return (
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    Number.isFinite(date.getTime()) &&
+    date.toISOString().slice(0, 10) === value
+  );
+}
+
+function isValidDateTime(value: string): boolean {
+  const [date, time] = value.split('T');
+  if (!isValidDate(date)) return false;
+  const match = /^(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/.exec(time);
+  if (!match) return false;
+  return (
+    Number(match[1]) <= 23 && Number(match[2]) <= 59 && Number(match[3]) <= 59
+  );
 }
 
 function safeCalendarCollectionUrl(

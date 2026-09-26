@@ -279,6 +279,256 @@ describe('ICalendarEventCodec', () => {
     expect(cancelledOverride.getFirstPropertyValue('status')).toBe('CANCELLED');
   });
 
+  it('creates a same-resource override for a generated occurrence', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-override.ics',
+      fixture('recurrence-override.ics'),
+    );
+
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-10-05T14:00:00',
+        timezone: 'Europe/Stockholm',
+        mode: 'tzid' as const,
+      },
+    };
+    const encoded = parsed.applyOccurrencePatch(recurrenceId, {
+      title: 'One review only',
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-10-05T16:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+        end: {
+          local: '2026-10-05T17:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+      },
+    });
+    const calendar = ICAL.Component.fromString(encoded.icalendar);
+    const vevents = calendar.getAllSubcomponents('vevent');
+    const created = vevents.find(
+      (vevent) => vevent.getFirstPropertyValue('summary') === 'One review only',
+    );
+
+    expect(vevents).toHaveLength(4);
+    expect(created?.getFirstPropertyValue('uid')).toBe('override@example.test');
+    expect(created?.getFirstPropertyValue('recurrence-id')?.toString()).toBe(
+      '2026-10-05T14:00:00',
+    );
+    expect(
+      created?.getFirstProperty('recurrence-id')?.getFirstParameter('tzid'),
+    ).toBe('Europe/Stockholm');
+    expect(created?.getFirstPropertyValue('dtstart')?.toString()).toBe(
+      '2026-10-05T16:00:00',
+    );
+    expect(vevents[0].getFirstPropertyValue('summary')).toBe('Weekly review');
+    expect(vevents[0].getFirstPropertyValue('rrule')?.toString()).toContain(
+      'COUNT=4',
+    );
+    expect(calendar.getFirstPropertyValue('x-custom-calendar-property')).toBe(
+      'preserve-resource-value',
+    );
+    expect(calendar.getFirstSubcomponent('vtimezone')).toBeDefined();
+    expect(vevents[1].getFirstPropertyValue('x-override-marker')).toBe(
+      'preserve-exception',
+    );
+    expect(vevents[2].getFirstPropertyValue('status')).toBe('CANCELLED');
+  });
+
+  it('creates an override for an RDATE-only occurrence', () => {
+    const parsed = codec.parse(
+      'team',
+      'rdate-only.ics',
+      `BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:rdate-only@example.test\nDTSTART:20260101T090000Z\nDTEND:20260101T100000Z\nRRULE:FREQ=DAILY;COUNT=2\nRDATE:20260105T090000Z\nX-MASTER-ONLY;X-KEEP=yes:preserve\nEND:VEVENT\nEND:VCALENDAR`,
+    );
+
+    const encoded = parsed.applyOccurrencePatch(
+      {
+        type: 'date-time',
+        value: {
+          local: '2026-01-05T09:00:00',
+          timezone: 'UTC',
+          mode: 'utc',
+        },
+      },
+      { title: 'RDATE only edit' },
+    );
+    const calendar = ICAL.Component.fromString(encoded.icalendar);
+    const vevents = calendar.getAllSubcomponents('vevent');
+    const override = vevents[1];
+
+    expect(vevents).toHaveLength(2);
+    expect(override.getFirstPropertyValue('uid')).toBe(
+      'rdate-only@example.test',
+    );
+    expect(override.getFirstPropertyValue('recurrence-id')?.toString()).toBe(
+      '2026-01-05T09:00:00Z',
+    );
+    expect(override.getFirstPropertyValue('summary')).toBe('RDATE only edit');
+    expect(override.hasProperty('rrule')).toBe(false);
+    expect(vevents[0].getFirstPropertyValue('x-master-only')).toBe('preserve');
+    expect(
+      vevents[0].getFirstProperty('x-master-only')?.getFirstParameter('x-keep'),
+    ).toBe('yes');
+  });
+
+  it('updates the unique existing override by original identity and preserves its unknown data', () => {
+    const source = fixture('recurrence-override.ics').replace(
+      'SUMMARY:Weekly review - moved\n',
+      'SUMMARY:Weekly review - moved\nDESCRIPTION:Remove this description\n',
+    );
+    const parsed = codec.parse('team', 'recurrence-override.ics', source);
+    const encoded = parsed.applyOccurrencePatch(
+      {
+        type: 'date-time',
+        value: {
+          local: '2026-10-12T14:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+      },
+      { title: 'Moved review updated', description: null },
+    );
+    const calendar = ICAL.Component.fromString(encoded.icalendar);
+    const vevents = calendar.getAllSubcomponents('vevent');
+    const override = vevents.filter(
+      (vevent) =>
+        vevent.getFirstPropertyValue('recurrence-id')?.toString() ===
+        '2026-10-12T14:00:00',
+    );
+
+    expect(vevents).toHaveLength(3);
+    expect(override).toHaveLength(1);
+    expect(override[0].getFirstPropertyValue('summary')).toBe(
+      'Moved review updated',
+    );
+    expect(override[0].hasProperty('description')).toBe(false);
+    expect(override[0].getFirstPropertyValue('dtstart')?.toString()).toBe(
+      '2026-10-12T16:00:00',
+    );
+    expect(override[0].getFirstPropertyValue('recurrence-id')?.toString()).toBe(
+      '2026-10-12T14:00:00',
+    );
+    expect(override[0].getFirstPropertyValue('x-override-marker')).toBe(
+      'preserve-exception',
+    );
+    expect(
+      override[0]
+        .getFirstProperty('x-override-marker')
+        ?.getFirstParameter('x-origin'),
+    ).toBe('external');
+    expect(calendar.getFirstSubcomponent('vtimezone')).toBeDefined();
+    expect(vevents[0].getFirstPropertyValue('x-client-metadata')).toBe(
+      'preserve-value',
+    );
+  });
+
+  it('cancels one generated occurrence with a same-resource cancelled override', () => {
+    const source = fixture('recurrence-override.ics');
+    const parsed = codec.parse('team', 'recurrence-override.ics', source);
+    const originalMasterExdate = ICAL.Component.fromString(source)
+      .getFirstSubcomponent('vevent')
+      ?.getFirstPropertyValue('exdate')
+      ?.toString();
+    const encoded = parsed.applyOccurrenceCancellation({
+      type: 'date-time',
+      value: {
+        local: '2026-10-05T14:00:00',
+        timezone: 'Europe/Stockholm',
+        mode: 'tzid',
+      },
+    });
+    const calendar = ICAL.Component.fromString(encoded.icalendar);
+    const vevents = calendar.getAllSubcomponents('vevent');
+    const cancellation = vevents.find(
+      (vevent) =>
+        vevent.getFirstPropertyValue('recurrence-id')?.toString() ===
+        '2026-10-05T14:00:00',
+    );
+
+    expect(vevents).toHaveLength(4);
+    expect(cancellation?.getFirstPropertyValue('uid')).toBe(
+      'override@example.test',
+    );
+    expect(cancellation?.getFirstPropertyValue('status')).toBe('CANCELLED');
+    expect(vevents[0].getFirstPropertyValue('exdate')?.toString()).toBe(
+      originalMasterExdate,
+    );
+    expect(vevents[1].getFirstPropertyValue('x-override-marker')).toBe(
+      'preserve-exception',
+    );
+    expect(vevents[2].getFirstPropertyValue('status')).toBe('CANCELLED');
+  });
+
+  it('rejects mismatched recurrence identity modes and duplicate detached targets', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-override.ics',
+      fixture('recurrence-override.ics'),
+    );
+
+    expect(() =>
+      parsed.applyOccurrencePatch(
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-10-05T14:00:00',
+            timezone: 'Europe/Stockholm',
+            mode: 'floating',
+          },
+        },
+        { title: 'Unsafe mode' },
+      ),
+    ).toThrow(/same DATE-TIME mode and TZID/);
+
+    const duplicateSource = fixture('recurrence-override.ics').replace(
+      'END:VCALENDAR',
+      `BEGIN:VEVENT\nUID:override@example.test\nRECURRENCE-ID;TZID=Europe/Stockholm:20261012T140000\nSUMMARY:Duplicate\nEND:VEVENT\nEND:VCALENDAR`,
+    );
+    const duplicate = codec.parse('team', 'duplicate.ics', duplicateSource);
+    expect(() =>
+      duplicate.applyOccurrencePatch(
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-10-12T14:00:00',
+            timezone: 'Europe/Stockholm',
+            mode: 'tzid',
+          },
+        },
+        { title: 'Ambiguous target' },
+      ),
+    ).toThrow(/duplicate overrides/);
+  });
+
+  it('rejects a typed identity that is missing from the recurrence set', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-override.ics',
+      fixture('recurrence-override.ics'),
+    );
+
+    expect(() =>
+      parsed.applyOccurrencePatch(
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-10-07T14:00:00',
+            timezone: 'Europe/Stockholm',
+            mode: 'tzid',
+          },
+        },
+        { title: 'Not a series date' },
+      ),
+    ).toThrow(/not part of the resource recurrence set/);
+  });
+
   it('preserves UTC and floating DATE-TIME modes and expands RDATE PERIOD durations', () => {
     const parsed = codec.parse(
       'team',

@@ -17,6 +17,7 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarEventDateTime,
   CalendarEventInput,
   CalendarRepositoryError,
 } from '@matrix-calendar-widget/calendar';
@@ -42,12 +43,14 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarEventFormValues,
   calendarEventInputFromForm,
+  calendarEventOccurrencePatchFromForm,
   calendarEventPatchFromForm,
   CalendarEventRecurrenceDateMode,
   CalendarEventRecurrenceDateValue,
@@ -60,12 +63,14 @@ import {
   useCalendarRepository,
   useCreateCalendarEvent,
   useUpdateCalendarEvent,
+  useUpdateCalendarOccurrence,
 } from '../../calendar';
 import { RecurrenceEditor } from '../meetings/RecurrenceEditor/RecurrenceEditor';
 
 export function CalendarEventEditorDialog({
   calendars,
   event,
+  occurrenceTarget,
   onClose,
   onSaved,
   open,
@@ -73,6 +78,10 @@ export function CalendarEventEditorDialog({
 }: {
   calendars: Calendar[];
   event?: CalendarEvent;
+  occurrenceTarget?: {
+    resourceEventId: string;
+    recurrenceId: CalendarEventDateTime;
+  };
   onClose: () => void;
   onSaved?: (event: CalendarEvent) => void;
   open: boolean;
@@ -87,6 +96,9 @@ export function CalendarEventEditorDialog({
     calendars.find((calendar) => calendar.id === event?.calendarId) ??
     writableCalendars[0] ??
     calendars[0];
+  const initialCalendarId = initialCalendar?.id;
+  const initialCalendarRef = useRef(initialCalendar);
+  initialCalendarRef.current = initialCalendar;
   const [values, setValues] = useState<CalendarEventFormValues | undefined>();
   const [formSession, setFormSession] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -95,21 +107,23 @@ export function CalendarEventEditorDialog({
   const repository = useCalendarRepository();
   const createEvent = useCreateCalendarEvent();
   const updateEvent = useUpdateCalendarEvent();
+  const updateOccurrence = useUpdateCalendarOccurrence();
 
   useEffect(() => {
-    if (!open || !initialCalendar) {
+    const calendar = initialCalendarRef.current;
+    if (!open || !calendar) {
       return;
     }
 
     setValues(
       event
-        ? calendarEventToFormValues(event, initialCalendar)
-        : createCalendarEventFormValues(initialCalendar),
+        ? calendarEventToFormValues(event, calendar)
+        : createCalendarEventFormValues(calendar),
     );
     setFormSession((current) => current + 1);
     setError(undefined);
     setConflict(false);
-  }, [event, initialCalendar, open]);
+  }, [event, initialCalendarId, open]);
 
   const handleRecurrenceRuleChange = useCallback(
     (rule: string | undefined, isValid: boolean, isDirty: boolean) => {
@@ -166,7 +180,8 @@ export function CalendarEventEditorDialog({
     calendars.find((calendar) => calendar.id === values.calendarId) ??
     initialCalendar;
   const readOnly = Boolean(selectedCalendar.readOnly);
-  const recurrenceTimingTypeLocked = recurrenceHasTimingData(values.recurrence);
+  const recurrenceTimingTypeLocked =
+    Boolean(occurrenceTarget) || recurrenceHasTimingData(values.recurrence);
 
   const handleRecurrenceDateRowsChange = (
     field: 'rdates' | 'exdates',
@@ -221,6 +236,7 @@ export function CalendarEventEditorDialog({
       if (
         !current ||
         current.timingType === timingType ||
+        occurrenceTarget ||
         recurrenceHasTimingData(current.recurrence)
       ) {
         return current;
@@ -288,7 +304,7 @@ export function CalendarEventEditorDialog({
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
 
-    if (formValidationError || readOnly) {
+    if (formValidationError || readOnly || (conflict && occurrenceTarget)) {
       return;
     }
 
@@ -300,11 +316,18 @@ export function CalendarEventEditorDialog({
       let saved: CalendarEvent;
 
       if (event) {
-        saved = await updateEvent(
-          event.calendarId,
-          event.id,
-          calendarEventPatchFromForm(values),
-        );
+        saved = occurrenceTarget
+          ? await updateOccurrence(
+              event.calendarId,
+              occurrenceTarget.resourceEventId,
+              occurrenceTarget.recurrenceId,
+              calendarEventOccurrencePatchFromForm(values),
+            )
+          : await updateEvent(
+              event.calendarId,
+              event.id,
+              calendarEventPatchFromForm(values),
+            );
       } else {
         const input: CalendarEventInput = calendarEventInputFromForm(
           values,
@@ -324,10 +347,15 @@ export function CalendarEventEditorDialog({
         setConflict(true);
         setError(
           new Error(
-            t(
-              'calendarEvents.editor.conflict',
-              'This event changed elsewhere. Reload the latest version before retrying.',
-            ),
+            occurrenceTarget
+              ? t(
+                  'calendarEvents.editor.occurrenceConflict',
+                  'This series changed elsewhere. Close and reopen this occurrence to load the latest version before editing again.',
+                )
+              : t(
+                  'calendarEvents.editor.conflict',
+                  'This event changed elsewhere. Reload the latest version before retrying.',
+                ),
           ),
         );
       } else {
@@ -346,7 +374,7 @@ export function CalendarEventEditorDialog({
   };
 
   const handleReloadLatest = async () => {
-    if (!event) {
+    if (!event || occurrenceTarget) {
       return;
     }
 
@@ -393,7 +421,7 @@ export function CalendarEventEditorDialog({
             {error && (
               <Alert
                 action={
-                  conflict ? (
+                  conflict && !occurrenceTarget ? (
                     <Button
                       color="inherit"
                       disabled={saving}
@@ -445,10 +473,15 @@ export function CalendarEventEditorDialog({
             />
             {recurrenceTimingTypeLocked && (
               <Alert severity="info">
-                {t(
-                  'calendarEvents.editor.recurrenceTimingTypeLocked',
-                  'The timed or all-day type cannot change while recurrence data is present. Remove and save recurrence first.',
-                )}
+                {occurrenceTarget
+                  ? t(
+                      'calendarEvents.editor.occurrenceTimingTypeLocked',
+                      'This occurrence must keep the series date or date-time type.',
+                    )
+                  : t(
+                      'calendarEvents.editor.recurrenceTimingTypeLocked',
+                      'The timed or all-day type cannot change while recurrence data is present. Remove and save recurrence first.',
+                    )}
               </Alert>
             )}
 
@@ -493,120 +526,122 @@ export function CalendarEventEditorDialog({
               value={values.description}
             />
 
-            <Stack spacing={1}>
-              <Typography component="h3" variant="subtitle1">
-                {t('calendarEvents.editor.recurrence', 'Repeat')}
-              </Typography>
+            {!occurrenceTarget && (
+              <Stack spacing={1}>
+                <Typography component="h3" variant="subtitle1">
+                  {t('calendarEvents.editor.recurrence', 'Repeat')}
+                </Typography>
 
-              {values.recurrence.original?.rrule &&
-                !values.recurrence.ruleEditable &&
-                !values.recurrence.ruleEdited && (
-                  <Alert
-                    action={
-                      <Button
-                        color="inherit"
-                        onClick={() =>
-                          setValues((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  recurrence: {
-                                    ...current.recurrence,
-                                    rule: undefined,
-                                    ruleEditable: true,
-                                    ruleEdited: true,
-                                    ruleValid: true,
-                                  },
-                                }
-                              : current,
-                          )
-                        }
-                        size="small"
-                      >
-                        {t(
-                          'calendarEvents.editor.replaceUnsupportedRule',
-                          'Replace with a supported rule',
-                        )}
-                      </Button>
-                    }
-                    severity="warning"
-                  >
-                    {t(
-                      'calendarEvents.editor.unsupportedRule',
-                      'This recurrence has options this form cannot edit. It will be preserved unless you replace it with a supported rule.',
+                {values.recurrence.original?.rrule &&
+                  !values.recurrence.ruleEditable &&
+                  !values.recurrence.ruleEdited && (
+                    <Alert
+                      action={
+                        <Button
+                          color="inherit"
+                          onClick={() =>
+                            setValues((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    recurrence: {
+                                      ...current.recurrence,
+                                      rule: undefined,
+                                      ruleEditable: true,
+                                      ruleEdited: true,
+                                      ruleValid: true,
+                                    },
+                                  }
+                                : current,
+                            )
+                          }
+                          size="small"
+                        >
+                          {t(
+                            'calendarEvents.editor.replaceUnsupportedRule',
+                            'Replace with a supported rule',
+                          )}
+                        </Button>
+                      }
+                      severity="warning"
+                    >
+                      {t(
+                        'calendarEvents.editor.unsupportedRule',
+                        'This recurrence has options this form cannot edit. It will be preserved unless you replace it with a supported rule.',
+                      )}
+                    </Alert>
+                  )}
+
+                {values.recurrence.ruleEditable && open && (
+                  <RecurrenceEditor
+                    key={`${formSession}-${event?.id ?? 'new'}`}
+                    isMeetingCreation={!event}
+                    onChange={handleRecurrenceRuleChange}
+                    repeatLabel={t(
+                      'calendarEvents.editor.repeat',
+                      'Repeat event',
                     )}
+                    rule={values.recurrence.rule}
+                    startDate={recurrenceStartDate}
+                  />
+                )}
+
+                <RecurrenceDateRows
+                  defaultTimezone={values.timezone}
+                  label={t(
+                    'calendarEvents.editor.additionalDates',
+                    'Additional dates',
+                  )}
+                  onChange={(rows) =>
+                    handleRecurrenceDateRowsChange('rdates', rows)
+                  }
+                  rows={values.recurrence.rdates}
+                  type="rdate"
+                  timingType={values.timingType}
+                  start={values.start}
+                />
+                <RecurrenceDateRows
+                  defaultTimezone={values.timezone}
+                  label={t(
+                    'calendarEvents.editor.excludedDates',
+                    'Excluded dates',
+                  )}
+                  onChange={(rows) =>
+                    handleRecurrenceDateRowsChange('exdates', rows)
+                  }
+                  rows={values.recurrence.exdates}
+                  type="exdate"
+                  timingType={values.timingType}
+                  start={values.start}
+                />
+                {values.recurrence.original?.rdatePeriods?.length ? (
+                  <Alert severity="info">
+                    {values.timingType === 'all-day'
+                      ? t(
+                          'calendarEvents.editor.periodsPreservedIncompatible',
+                          'Additional dates with durations are preserved. Their date-time type does not match this all-day event, so remove them with a compatible CalDAV editor before changing recurrence.',
+                        )
+                      : t(
+                          'calendarEvents.editor.periodsPreserved',
+                          'Additional dates with their own durations are preserved and are not editable here.',
+                        )}
+                  </Alert>
+                ) : null}
+                {recurrenceValidationError && (
+                  <Alert severity="error">
+                    {recurrenceDateTypeMismatch
+                      ? t(
+                          'calendarEvents.editor.recurrenceDateTypeMismatch',
+                          'Recurrence dates must use the same date or date-time type as the event start. Correct or remove incompatible saved values before changing recurrence.',
+                        )
+                      : t(
+                          'calendarEvents.editor.invalidRecurrence',
+                          'Check the recurrence rule and date values.',
+                        )}
                   </Alert>
                 )}
-
-              {values.recurrence.ruleEditable && open && (
-                <RecurrenceEditor
-                  key={`${formSession}-${event?.id ?? 'new'}`}
-                  isMeetingCreation={!event}
-                  onChange={handleRecurrenceRuleChange}
-                  repeatLabel={t(
-                    'calendarEvents.editor.repeat',
-                    'Repeat event',
-                  )}
-                  rule={values.recurrence.rule}
-                  startDate={recurrenceStartDate}
-                />
-              )}
-
-              <RecurrenceDateRows
-                defaultTimezone={values.timezone}
-                label={t(
-                  'calendarEvents.editor.additionalDates',
-                  'Additional dates',
-                )}
-                onChange={(rows) =>
-                  handleRecurrenceDateRowsChange('rdates', rows)
-                }
-                rows={values.recurrence.rdates}
-                type="rdate"
-                timingType={values.timingType}
-                start={values.start}
-              />
-              <RecurrenceDateRows
-                defaultTimezone={values.timezone}
-                label={t(
-                  'calendarEvents.editor.excludedDates',
-                  'Excluded dates',
-                )}
-                onChange={(rows) =>
-                  handleRecurrenceDateRowsChange('exdates', rows)
-                }
-                rows={values.recurrence.exdates}
-                type="exdate"
-                timingType={values.timingType}
-                start={values.start}
-              />
-              {values.recurrence.original?.rdatePeriods?.length ? (
-                <Alert severity="info">
-                  {values.timingType === 'all-day'
-                    ? t(
-                        'calendarEvents.editor.periodsPreservedIncompatible',
-                        'Additional dates with durations are preserved. Their date-time type does not match this all-day event, so remove them with a compatible CalDAV editor before changing recurrence.',
-                      )
-                    : t(
-                        'calendarEvents.editor.periodsPreserved',
-                        'Additional dates with their own durations are preserved and are not editable here.',
-                      )}
-                </Alert>
-              ) : null}
-              {recurrenceValidationError && (
-                <Alert severity="error">
-                  {recurrenceDateTypeMismatch
-                    ? t(
-                        'calendarEvents.editor.recurrenceDateTypeMismatch',
-                        'Recurrence dates must use the same date or date-time type as the event start. Correct or remove incompatible saved values before changing recurrence.',
-                      )
-                    : t(
-                        'calendarEvents.editor.invalidRecurrence',
-                        'Check the recurrence rule and date values.',
-                      )}
-                </Alert>
-              )}
-            </Stack>
+              </Stack>
+            )}
 
             {validationError && (
               <Alert severity="warning">{validationError}</Alert>
@@ -627,7 +662,11 @@ export function CalendarEventEditorDialog({
             {t('cancel', 'Cancel')}
           </Button>
           <LoadingButton
-            disabled={Boolean(formValidationError) || readOnly}
+            disabled={
+              Boolean(formValidationError) ||
+              readOnly ||
+              (conflict && Boolean(occurrenceTarget))
+            }
             loading={saving}
             type="submit"
             variant="contained"

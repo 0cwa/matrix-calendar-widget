@@ -182,6 +182,30 @@ export type CalendarEventPatch = Partial<
   Omit<CalendarEvent, 'id' | 'calendarId' | 'uid' | 'unsupportedRecurrence'>
 >;
 
+/** Editable values for one detached recurrence override, excluding series data. */
+export type CalendarEventOccurrencePatch = Omit<
+  Partial<
+    Pick<
+      CalendarEvent,
+      | 'title'
+      | 'description'
+      | 'timing'
+      | 'transparency'
+      | 'location'
+      | 'url'
+      | 'categories'
+      | 'priority'
+    >
+  >,
+  'description' | 'location' | 'url' | 'priority'
+> & {
+  /** Null removes an optional property from the detached VEVENT. */
+  description?: string | null;
+  location?: string | null;
+  url?: string | null;
+  priority?: number | null;
+};
+
 export type CalendarTimeRange = {
   /** Inclusive ISO instant. */
   start: string;

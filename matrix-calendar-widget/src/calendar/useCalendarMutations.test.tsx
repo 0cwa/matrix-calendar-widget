@@ -28,6 +28,7 @@ import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from './CalendarRepositoryProvider';
 import {
+  useCancelCalendarOccurrence,
   useCreateCalendar,
   useCreateCalendarEvent,
   useDeleteCalendar,
@@ -35,6 +36,7 @@ import {
   useRenameCalendar,
   useUpdateCalendarEvent,
   useUpdateCalendarMetadata,
+  useUpdateCalendarOccurrence,
 } from './useCalendarMutations';
 import { useCalendarEvents, useCalendars } from './useCalendarQueries';
 
@@ -226,6 +228,71 @@ describe('calendar repository mutation hooks', () => {
     });
   });
 
+  it('refreshes active event queries after an occurrence update', async () => {
+    const recurringEvent: CalendarEvent = {
+      ...event,
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=3' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringEvent],
+    });
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-09-24T09:00:00',
+        timezone: 'Europe/Stockholm',
+        mode: 'tzid' as const,
+      },
+    };
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        events: useCalendarEvents(['team'], range),
+        updateOccurrence: useUpdateCalendarOccurrence(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.events.loading);
+    await result.current.updateOccurrence('team', 'planning', recurrenceId, {
+      title: 'Updated instance',
+    });
+
+    await waitFor(() => {
+      expect(
+        result.current.events.data[0].recurrence?.overrides?.[0],
+      ).toMatchObject({ recurrenceId, title: 'Updated instance' });
+    });
+  });
+
+  it('refreshes active event queries after occurrence cancellation', async () => {
+    const recurringEvent: CalendarEvent = {
+      ...event,
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=3' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringEvent],
+    });
+    const recurrenceId = { type: 'date' as const, value: '2026-09-24' };
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        events: useCalendarEvents(['team'], range),
+        cancelOccurrence: useCancelCalendarOccurrence(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.events.loading);
+    await result.current.cancelOccurrence('team', 'planning', recurrenceId);
+
+    await waitFor(() => {
+      expect(
+        result.current.events.data[0].recurrence?.overrides?.[0],
+      ).toMatchObject({ recurrenceId, status: 'cancelled' });
+    });
+  });
+
   it('refreshes active event queries after delete', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
@@ -260,6 +327,8 @@ describe('calendar repository mutation hooks', () => {
       getEvent: vi.fn().mockResolvedValue(event),
       createEvent: vi.fn().mockRejectedValue(new Error('write failed')),
       updateEvent: vi.fn().mockResolvedValue(event),
+      updateOccurrence: vi.fn().mockResolvedValue(event),
+      cancelOccurrence: vi.fn().mockResolvedValue(event),
       deleteEvent: vi.fn().mockResolvedValue(undefined),
     };
     const { result, waitForValueToChange } = renderHook(

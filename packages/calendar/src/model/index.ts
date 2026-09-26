@@ -29,6 +29,7 @@ export type {
   CalendarEventId,
   CalendarEventInput,
   CalendarEventOccurrence,
+  CalendarEventOccurrencePatch,
   CalendarEventPatch,
   CalendarEventRecurrence,
   CalendarEventRecurrenceOverride,

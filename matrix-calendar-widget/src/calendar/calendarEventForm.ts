@@ -19,6 +19,7 @@ import {
   CalendarEvent,
   CalendarEventDateTime,
   CalendarEventInput,
+  CalendarEventOccurrencePatch,
   CalendarEventPatch,
   CalendarEventRecurrence,
   CalendarId,
@@ -160,6 +161,46 @@ export function calendarEventPatchFromForm(
     description: normalizeOptional(values.description),
     location: normalizeOptional(values.location),
     ...(recurrence !== undefined ? { recurrence } : {}),
+  };
+}
+
+export function calendarEventOccurrencePatchFromForm(
+  values: CalendarEventFormValues,
+): CalendarEventOccurrencePatch {
+  const description = normalizeOptional(values.description);
+  const location = normalizeOptional(values.location);
+  const mode =
+    values.timezone === 'UTC'
+      ? 'utc'
+      : values.timezone === 'floating'
+        ? 'floating'
+        : 'tzid';
+  return {
+    title: values.title.trim(),
+    description: description ?? null,
+    location: location ?? null,
+    timing:
+      values.timingType === 'all-day'
+        ? {
+            type: 'all-day',
+            startDate: values.start,
+            endDate:
+              DateTime.fromISO(values.end).plus({ days: 1 }).toISODate() ??
+              values.end,
+          }
+        : {
+            type: 'timed',
+            start: {
+              local: `${values.start}:00`,
+              timezone: values.timezone,
+              mode,
+            },
+            end: {
+              local: `${values.end}:00`,
+              timezone: values.timezone,
+              mode,
+            },
+          },
   };
 }
 

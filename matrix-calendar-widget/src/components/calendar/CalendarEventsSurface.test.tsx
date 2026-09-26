@@ -19,7 +19,7 @@ import {
   CalendarEvent,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
@@ -116,7 +116,7 @@ describe('<CalendarEventsSurface />', () => {
     expect(await screen.findByText('Dentist')).toBeInTheDocument();
   });
 
-  it('shows a visible recurring occurrence without exposing resource-wide actions', async () => {
+  it('offers scoped actions for a visible recurring occurrence', async () => {
     const recurring: CalendarEvent = {
       id: 'daily-planning',
       calendarId: 'team',
@@ -160,13 +160,24 @@ describe('<CalendarEventsSurface />', () => {
       await screen.findByRole('button', { name: /Daily planning/i }),
     );
 
+    const details = await screen.findByRole('dialog', {
+      name: 'Daily planning',
+    });
+    expect(within(details).getByRole('alert')).toHaveTextContent(
+      'Changes here apply to this occurrence only. Other events in the series remain unchanged.',
+    );
     expect(
-      await screen.findByText(
-        'Editing or deleting an individual recurring occurrence is not available yet.',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+      within(details).getByRole('button', { name: 'Edit this event' }),
+    ).toBeEnabled();
+    expect(
+      within(details).getByRole('button', { name: 'Cancel this event' }),
+    ).toBeEnabled();
+    expect(
+      within(details).queryByRole('button', { name: 'Edit', exact: true }),
+    ).toBeNull();
+    expect(
+      within(details).queryByRole('button', { name: 'Delete', exact: true }),
+    ).toBeNull();
     expect(deleteSpy).not.toHaveBeenCalled();
     expect(updateSpy).not.toHaveBeenCalled();
   });

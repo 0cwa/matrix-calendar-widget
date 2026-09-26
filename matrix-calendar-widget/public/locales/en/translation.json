@@ -33,7 +33,14 @@
       "delete": "Delete",
       "edit": "Edit",
       "location": "Location",
-      "occurrenceActionsUnavailable": "Editing or deleting an individual recurring occurrence is not available yet."
+      "cancelOccurrenceConfirm": "Cancel this event",
+      "cancelOccurrenceDescription": "Cancel only this occurrence of “{{title}}”? The series and other occurrences will remain.",
+      "cancelOccurrenceError": "This occurrence could not be cancelled.",
+      "cancelOccurrenceTitle": "Cancel recurring occurrence",
+      "cancelThisOccurrence": "Cancel this event",
+      "editThisOccurrence": "Edit this event",
+      "occurrenceActionsAvailable": "Changes here apply to this occurrence only. Other events in the series remain unchanged.",
+      "occurrenceConflict": "This series changed elsewhere. Close and reopen this occurrence before trying again."
     },
     "editor": {
       "addDate": "Add date",
@@ -48,6 +55,8 @@
       "description": "Description",
       "editTitle": "Edit event",
       "end": "End",
+      "occurrenceConflict": "This series changed elsewhere. Close and reopen this occurrence to load the latest version before editing again.",
+      "occurrenceTimingTypeLocked": "This occurrence must keep the series date or date-time type.",
       "excludedDate": "Excluded date",
       "excludedDates": "Excluded dates",
       "dateMode": "All-day date",

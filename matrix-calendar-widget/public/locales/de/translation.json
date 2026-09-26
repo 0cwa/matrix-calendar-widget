@@ -33,7 +33,14 @@
       "delete": "Löschen",
       "edit": "Bearbeiten",
       "location": "Ort",
-      "occurrenceActionsUnavailable": "Einzelne Termine einer wiederkehrenden Serie können noch nicht bearbeitet oder gelöscht werden."
+      "cancelOccurrenceConfirm": "Diesen Termin absagen",
+      "cancelOccurrenceDescription": "Nur dieses Vorkommen von „{{title}}“ absagen? Die Serie und die übrigen Vorkommen bleiben erhalten.",
+      "cancelOccurrenceError": "Dieses Vorkommen konnte nicht abgesagt werden.",
+      "cancelOccurrenceTitle": "Wiederholung absagen",
+      "cancelThisOccurrence": "Diesen Termin absagen",
+      "editThisOccurrence": "Diesen Termin bearbeiten",
+      "occurrenceActionsAvailable": "Änderungen gelten nur für dieses Vorkommen. Die übrigen Termine der Serie bleiben unverändert.",
+      "occurrenceConflict": "Diese Serie wurde an anderer Stelle geändert. Schließe diesen Termin und öffne ihn erneut, bevor du es noch einmal versuchst."
     },
     "editor": {
       "addDate": "Datum hinzufügen",
@@ -48,6 +55,8 @@
       "description": "Beschreibung",
       "editTitle": "Termin bearbeiten",
       "end": "Ende",
+      "occurrenceConflict": "Diese Serie wurde an anderer Stelle geändert. Schließe diesen Termin und öffne ihn erneut, um vor der Bearbeitung die neueste Version zu laden.",
+      "occurrenceTimingTypeLocked": "Dieses Vorkommen muss denselben Datums- oder Datum-Uhrzeit-Typ wie die Serie behalten.",
       "excludedDate": "Ausgeschlossenes Datum",
       "excludedDates": "Ausgeschlossene Daten",
       "dateMode": "Ganztägiges Datum",

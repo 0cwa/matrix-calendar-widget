@@ -78,17 +78,17 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 
 - [x] Supported RRULE series editor based on inherited NeoDateFix recurrence UI; unsupported loaded rules are preserved until explicitly replaced.
 - [x] RDATE / EXDATE series editing with explicit DATE, floating, UTC, and TZID values.
-- [ ] RECURRENCE-ID instance overrides.
+- [x] RECURRENCE-ID instance overrides for generated and RDATE-only occurrences: edit or cancel one instance through a same-resource conditional write (ADR012).
 - [x] Add range-bounded read expansion for resource RRULE/RDATE/EXDATE sets, RDATE PERIOD durations, and same-resource exceptions (local backend slice; `RANGE=THISANDFUTURE` remains preserved and fails visibly).
 - [x] Present generated occurrences in the visible range using the viewer-local timezone for DATE and floating recurrence values, with stable original recurrence identities; explicit UTC/TZID values remain unchanged and unsupported expansion is shown as a warning (ADR011 carries opaque ranged-override diagnostics without interpreting or rewriting the source component; ADR013 records the timezone policy).
-- [ ] “this event / this and following / series” edit semantics where representable.
+- [ ] “this and following / series” edit semantics where representable; single-instance edit and cancel are implemented above.
 - [ ] DST and named-timezone regression suite.
 - [ ] VALARM preservation and editor.
 - [ ] SEQUENCE / DTSTAMP / CREATED / LAST-MODIFIED handling.
 - [ ] Organizer/attendee round-trip.
 - [ ] Attachments/conference properties where safely interoperable.
 
-The current series editor locks timed/all-day conversion while recurrence data is present. Visible recurring occurrences retain their resource ID and original recurrence ID, but individual edit/delete actions are disabled until scoped writes exist. Instance and following-instance edit scopes remain separate work.
+The current series editor locks timed/all-day conversion while recurrence data is present. Visible recurring occurrences retain their backing resource ID and original recurrence ID. Editing or cancelling one instance uses a same-resource conditional override and leaves the master and sibling occurrences intact. “This and following” and series-wide edit scopes remain separate work.
 
 **Exit:** common recurring calendars round-trip with mainstream CalDAV clients.
 

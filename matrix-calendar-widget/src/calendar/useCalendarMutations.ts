@@ -17,11 +17,14 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarEventDateTime,
   CalendarEventId,
   CalendarEventInput,
+  CalendarEventOccurrencePatch,
   CalendarEventPatch,
   CalendarId,
   CalendarMetadataPatch,
+  CalendarRepositoryError,
 } from '@matrix-calendar-widget/calendar';
 import { useCallback } from 'react';
 import {
@@ -122,6 +125,81 @@ export function useUpdateCalendarEvent(): (
       const event = await repository.updateEvent(calendarId, eventId, patch);
       invalidate();
       return event;
+    },
+    [invalidate, repository],
+  );
+}
+
+export function useUpdateCalendarOccurrence(): (
+  calendarId: CalendarId,
+  resourceEventId: CalendarEventId,
+  recurrenceId: CalendarEventDateTime,
+  patch: CalendarEventOccurrencePatch,
+) => Promise<CalendarEvent> {
+  const repository = useCalendarRepository();
+  const invalidate = useInvalidateCalendarRepository();
+
+  return useCallback(
+    async (
+      calendarId: CalendarId,
+      resourceEventId: CalendarEventId,
+      recurrenceId: CalendarEventDateTime,
+      patch: CalendarEventOccurrencePatch,
+    ) => {
+      try {
+        const event = await repository.updateOccurrence(
+          calendarId,
+          resourceEventId,
+          recurrenceId,
+          patch,
+        );
+        invalidate();
+        return event;
+      } catch (error) {
+        if (
+          error instanceof CalendarRepositoryError &&
+          error.code === 'event-conflict'
+        ) {
+          invalidate();
+        }
+        throw error;
+      }
+    },
+    [invalidate, repository],
+  );
+}
+
+export function useCancelCalendarOccurrence(): (
+  calendarId: CalendarId,
+  resourceEventId: CalendarEventId,
+  recurrenceId: CalendarEventDateTime,
+) => Promise<CalendarEvent> {
+  const repository = useCalendarRepository();
+  const invalidate = useInvalidateCalendarRepository();
+
+  return useCallback(
+    async (
+      calendarId: CalendarId,
+      resourceEventId: CalendarEventId,
+      recurrenceId: CalendarEventDateTime,
+    ) => {
+      try {
+        const event = await repository.cancelOccurrence(
+          calendarId,
+          resourceEventId,
+          recurrenceId,
+        );
+        invalidate();
+        return event;
+      } catch (error) {
+        if (
+          error instanceof CalendarRepositoryError &&
+          error.code === 'event-conflict'
+        ) {
+          invalidate();
+        }
+        throw error;
+      }
     },
     [invalidate, repository],
   );

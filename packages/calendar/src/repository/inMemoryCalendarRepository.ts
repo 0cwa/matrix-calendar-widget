@@ -22,7 +22,9 @@ import {
   CalendarEventDateTime,
   CalendarEventId,
   CalendarEventInput,
+  CalendarEventOccurrencePatch,
   CalendarEventPatch,
+  CalendarEventRecurrenceOverride,
   CalendarId,
   CalendarMetadataPatch,
   CalendarTimeRange,
@@ -219,6 +221,104 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     return cloneCalendarEvent(updated);
   }
 
+  async updateOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+    patch: CalendarEventOccurrencePatch,
+  ): Promise<CalendarEvent> {
+    this.getWritableCalendar(calendarId);
+    const current = this.getStoredEvent(calendarId, resourceEventId);
+    const recurrence = cloneRecurrence(current.recurrence) ?? {};
+    const overrides = recurrence.overrides ?? [];
+    const matching = overrides
+      .map((override, index) => ({ override, index }))
+      .filter(({ override }) =>
+        sameRecurrenceId(override.recurrenceId, recurrenceId),
+      );
+
+    if (matching.length > 1) {
+      throw new CalendarRepositoryError(
+        'request-failed',
+        'Calendar resource contains duplicate recurrence overrides',
+      );
+    }
+
+    const clonedPatch = cloneCalendarEventOccurrencePatch(patch);
+    const { description, location, url, priority, ...directFields } =
+      clonedPatch;
+    const normalizedPatch: Partial<CalendarEventRecurrenceOverride> = {
+      ...directFields,
+      ...(description === undefined || description === null
+        ? {}
+        : { description }),
+      ...(location === undefined || location === null ? {} : { location }),
+      ...(url === undefined || url === null ? {} : { url }),
+      ...(priority === undefined || priority === null ? {} : { priority }),
+    };
+    if (matching.length === 1) {
+      const { index, override } = matching[0];
+      const updatedOverride = { ...override, ...normalizedPatch };
+      if (description === null) delete updatedOverride.description;
+      if (location === null) delete updatedOverride.location;
+      if (url === null) delete updatedOverride.url;
+      if (priority === null) delete updatedOverride.priority;
+      overrides[index] = updatedOverride;
+    } else {
+      overrides.push({
+        recurrenceId: cloneCalendarEventDateTime(recurrenceId),
+        ...normalizedPatch,
+      });
+    }
+
+    const updated: CalendarEvent = {
+      ...current,
+      recurrence: { ...recurrence, overrides },
+    };
+    this.events.get(calendarId)!.set(resourceEventId, updated);
+    return cloneCalendarEvent(updated);
+  }
+
+  async cancelOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+  ): Promise<CalendarEvent> {
+    this.getWritableCalendar(calendarId);
+    const current = this.getStoredEvent(calendarId, resourceEventId);
+    const recurrence = cloneRecurrence(current.recurrence) ?? {};
+    const overrides = recurrence.overrides ?? [];
+    const matching = overrides
+      .map((override, index) => ({ override, index }))
+      .filter(({ override }) =>
+        sameRecurrenceId(override.recurrenceId, recurrenceId),
+      );
+
+    if (matching.length > 1) {
+      throw new CalendarRepositoryError(
+        'request-failed',
+        'Calendar resource contains duplicate recurrence overrides',
+      );
+    }
+
+    if (matching.length === 1) {
+      const { index, override } = matching[0];
+      overrides[index] = { ...override, status: 'cancelled' };
+    } else {
+      overrides.push({
+        recurrenceId: cloneCalendarEventDateTime(recurrenceId),
+        status: 'cancelled',
+      });
+    }
+
+    const updated: CalendarEvent = {
+      ...current,
+      recurrence: { ...recurrence, overrides },
+    };
+    this.events.get(calendarId)!.set(resourceEventId, updated);
+    return cloneCalendarEvent(updated);
+  }
+
   async deleteEvent(
     calendarId: CalendarId,
     eventId: CalendarEventId,
@@ -408,6 +508,33 @@ function cloneCalendarEventDateTime(
     : { type: 'date-time', value: { ...value.value } };
 }
 
+function sameRecurrenceId(
+  left: CalendarEventDateTime,
+  right: CalendarEventDateTime,
+): boolean {
+  if (left.type !== right.type) {
+    return false;
+  }
+  if (left.type === 'date' && right.type === 'date') {
+    return left.value === right.value;
+  }
+  if (left.type !== 'date-time' || right.type !== 'date-time') {
+    return false;
+  }
+  const mode = (value: CalendarEventDateTime & { type: 'date-time' }) =>
+    value.value.mode ??
+    (value.value.timezone === 'UTC'
+      ? 'utc'
+      : value.value.timezone === 'floating'
+        ? 'floating'
+        : 'tzid');
+  return (
+    left.value.local === right.value.local &&
+    left.value.timezone === right.value.timezone &&
+    mode(left) === mode(right)
+  );
+}
+
 function cloneTimedTiming(
   timing: TimedCalendarEventTiming,
 ): TimedCalendarEventTiming {
@@ -507,5 +634,21 @@ function cloneCalendarEventPatch(
     cloned.recurrence = cloneRecurrence(patch.recurrence);
   }
 
+  return cloned;
+}
+
+function cloneCalendarEventOccurrencePatch(
+  patch: CalendarEventOccurrencePatch,
+): CalendarEventOccurrencePatch {
+  const cloned = { ...patch };
+  if (patch.timing) {
+    cloned.timing =
+      patch.timing.type === 'timed'
+        ? cloneTimedTiming(patch.timing)
+        : cloneAllDayTiming(patch.timing);
+  }
+  if (patch.categories) {
+    cloned.categories = [...patch.categories];
+  }
   return cloned;
 }

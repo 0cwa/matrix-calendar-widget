@@ -17,8 +17,10 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarEventDateTime,
   CalendarEventId,
   CalendarEventInput,
+  CalendarEventOccurrencePatch,
   CalendarEventPatch,
   CalendarId,
   CalendarMetadataPatch,
@@ -222,6 +224,33 @@ export class GatewayCalendarRepository
     }
   }
 
+  async updateOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+    patch: CalendarEventOccurrencePatch,
+  ): Promise<CalendarEvent> {
+    return this.mutateOccurrence(
+      calendarId,
+      resourceEventId,
+      '/v1/calendar/events/occurrence',
+      { recurrenceId, patch },
+    );
+  }
+
+  async cancelOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+  ): Promise<CalendarEvent> {
+    return this.mutateOccurrence(
+      calendarId,
+      resourceEventId,
+      '/v1/calendar/events/occurrence/cancel',
+      { recurrenceId },
+    );
+  }
+
   async deleteEvent(
     calendarId: CalendarId,
     eventId: CalendarEventId,
@@ -271,6 +300,39 @@ export class GatewayCalendarRepository
     }
 
     return fetched;
+  }
+
+  private async mutateOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    path: string,
+    body: unknown,
+  ): Promise<CalendarEvent> {
+    const etag = await this.etagFor(calendarId, resourceEventId);
+    try {
+      return this.remember(
+        await this.requestJson<CalendarGatewayEventResource>(
+          this.url(path, {
+            roomId: this.options.roomId,
+            calendarId,
+            eventId: resourceEventId,
+          }),
+          {
+            method: path.endsWith('/cancel') ? 'POST' : 'PATCH',
+            headers: { 'If-Match': etag },
+            body: JSON.stringify(body),
+          },
+        ),
+      );
+    } catch (error) {
+      if (
+        error instanceof CalendarRepositoryError &&
+        error.code === 'event-conflict'
+      ) {
+        this.etags.delete(resourceEventId);
+      }
+      throw error;
+    }
   }
 
   private remember(resource: CalendarGatewayEventResource): CalendarEvent {

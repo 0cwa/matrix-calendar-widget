@@ -38,6 +38,7 @@ import {
   CalendarEventPresentation,
   useCalendarRepository,
   useCalendars,
+  useCancelCalendarOccurrence,
   useDeleteCalendarEvent,
 } from '../../calendar';
 import { ConfirmDeleteDialog } from '../common/ConfirmDeleteDialog';
@@ -54,10 +55,16 @@ export function CalendarEventDetailsDialog({
   const calendars = useCalendars();
   const repository = useCalendarRepository();
   const deleteEvent = useDeleteCalendarEvent();
+  const cancelOccurrence = useCancelCalendarOccurrence();
   const [currentSelection, setCurrentSelection] = useState(event);
   const [editing, setEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelError, setCancelError] = useState<
+    'conflict' | 'generic' | undefined
+  >();
   const [deleteError, setDeleteError] = useState<
     'conflict' | 'generic' | undefined
   >();
@@ -67,6 +74,9 @@ export function CalendarEventDetailsDialog({
     setEditing(false);
     setDeleteOpen(false);
     setDeleteLoading(false);
+    setCancelOpen(false);
+    setCancelLoading(false);
+    setCancelError(undefined);
     setDeleteError(undefined);
   }, [event]);
 
@@ -77,7 +87,10 @@ export function CalendarEventDetailsDialog({
     ? calendars.data.find((calendar) => calendar.id === currentEvent.calendarId)
     : undefined;
   const canMutate = Boolean(
-    !recurringOccurrence && eventCalendar && !eventCalendar.readOnly,
+    eventCalendar &&
+    !eventCalendar.readOnly &&
+    resourceEvent &&
+    (!recurringOccurrence || currentSelection?.recurrenceId),
   );
 
   const handleDelete = async () => {
@@ -124,6 +137,32 @@ export function CalendarEventDetailsDialog({
     }
   };
 
+  const handleCancelOccurrence = async () => {
+    if (!currentSelection?.recurrenceId || !resourceEvent || !canMutate) {
+      return;
+    }
+
+    setCancelLoading(true);
+    setCancelError(undefined);
+    try {
+      await cancelOccurrence(
+        resourceEvent.calendarId,
+        resourceEvent.id,
+        currentSelection.recurrenceId,
+      );
+      setCancelOpen(false);
+      onClose();
+    } catch (error) {
+      const conflict =
+        error instanceof CalendarRepositoryError &&
+        error.code === 'event-conflict';
+      setCancelError(conflict ? 'conflict' : 'generic');
+      if (conflict) setCancelOpen(false);
+    } finally {
+      setCancelLoading(false);
+    }
+  };
+
   return (
     <>
       <Dialog
@@ -149,8 +188,16 @@ export function CalendarEventDetailsDialog({
                 {recurringOccurrence && (
                   <Alert severity="info">
                     {t(
-                      'calendarEvents.details.occurrenceActionsUnavailable',
-                      'Editing or deleting an individual recurring occurrence is not available yet.',
+                      'calendarEvents.details.occurrenceActionsAvailable',
+                      'Changes here apply to this occurrence only. Other events in the series remain unchanged.',
+                    )}
+                  </Alert>
+                )}
+                {cancelError === 'conflict' && (
+                  <Alert severity="warning">
+                    {t(
+                      'calendarEvents.details.occurrenceConflict',
+                      'This series changed elsewhere. Close and reopen this occurrence before trying again.',
                     )}
                   </Alert>
                 )}
@@ -180,16 +227,48 @@ export function CalendarEventDetailsDialog({
               </Stack>
             </DialogContent>
             <DialogActions>
-              <Button disabled={!canMutate} onClick={() => setEditing(true)}>
-                {t('calendarEvents.details.edit', 'Edit')}
-              </Button>
-              <Button
-                color="error"
-                disabled={!canMutate}
-                onClick={() => setDeleteOpen(true)}
-              >
-                {t('calendarEvents.details.delete', 'Delete')}
-              </Button>
+              {recurringOccurrence ? (
+                <>
+                  <Button
+                    disabled={!canMutate}
+                    onClick={() => setEditing(true)}
+                  >
+                    {t(
+                      'calendarEvents.details.editThisOccurrence',
+                      'Edit this event',
+                    )}
+                  </Button>
+                  <Button
+                    color="error"
+                    disabled={!canMutate || cancelError === 'conflict'}
+                    onClick={() => {
+                      setCancelError(undefined);
+                      setCancelOpen(true);
+                    }}
+                  >
+                    {t(
+                      'calendarEvents.details.cancelThisOccurrence',
+                      'Cancel this event',
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    disabled={!canMutate}
+                    onClick={() => setEditing(true)}
+                  >
+                    {t('calendarEvents.details.edit', 'Edit')}
+                  </Button>
+                  <Button
+                    color="error"
+                    disabled={!canMutate}
+                    onClick={() => setDeleteOpen(true)}
+                  >
+                    {t('calendarEvents.details.delete', 'Delete')}
+                  </Button>
+                </>
+              )}
               <Button onClick={onClose}>
                 {t('calendarEvents.details.close', 'Close')}
               </Button>
@@ -202,8 +281,20 @@ export function CalendarEventDetailsDialog({
         <CalendarEventEditorDialog
           calendars={calendars.data}
           event={currentEvent}
+          occurrenceTarget={
+            currentSelection?.recurrenceId && resourceEvent
+              ? {
+                  resourceEventId: resourceEvent.id,
+                  recurrenceId: currentSelection.recurrenceId,
+                }
+              : undefined
+          }
           onClose={() => setEditing(false)}
           onSaved={(savedEvent) => {
+            if (currentSelection?.recurrenceId) {
+              onClose();
+              return;
+            }
             setCurrentSelection((current) =>
               current
                 ? {
@@ -246,6 +337,40 @@ export function CalendarEventDetailsDialog({
                     'calendarEvents.delete.error',
                     'The event could not be deleted.',
                   )}
+            </Alert>
+          )}
+        </ConfirmDeleteDialog>
+      )}
+
+      {currentEvent && (
+        <ConfirmDeleteDialog
+          confirmTitle={t(
+            'calendarEvents.details.cancelOccurrenceConfirm',
+            'Cancel this event',
+          )}
+          description={t(
+            'calendarEvents.details.cancelOccurrenceDescription',
+            'Cancel only this occurrence of “{{title}}”? The series and other occurrences will remain.',
+            { title: currentEvent.title },
+          )}
+          loading={cancelLoading}
+          onCancel={() => {
+            setCancelOpen(false);
+            setCancelError(undefined);
+          }}
+          onConfirm={handleCancelOccurrence}
+          open={cancelOpen}
+          title={t(
+            'calendarEvents.details.cancelOccurrenceTitle',
+            'Cancel recurring occurrence',
+          )}
+        >
+          {cancelError === 'generic' && (
+            <Alert severity="error">
+              {t(
+                'calendarEvents.details.occurrenceCancelError',
+                'This occurrence could not be cancelled.',
+              )}
             </Alert>
           )}
         </ConfirmDeleteDialog>

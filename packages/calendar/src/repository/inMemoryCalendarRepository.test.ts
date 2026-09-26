@@ -192,6 +192,97 @@ describe('InMemoryCalendarRepository', () => {
     });
   });
 
+  it('creates and cancels one occurrence without changing the master resource', async () => {
+    const repository = createRepository();
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-01-12T09:00:00',
+        timezone: 'Europe/Stockholm',
+        mode: 'tzid' as const,
+      },
+    };
+
+    await repository.updateOccurrence('team', 'old-recurring', recurrenceId, {
+      title: 'One moved sync',
+      description: 'Remove me',
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-01-12T11:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+        end: {
+          local: '2026-01-12T11:30:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+      },
+    });
+    await repository.updateOccurrence('team', 'old-recurring', recurrenceId, {
+      description: null,
+    });
+
+    const edited = await repository.getEvent('team', 'old-recurring');
+    expect(edited.id).toBe('old-recurring');
+    expect(edited.title).toBe('Weekly sync');
+    expect(edited.recurrence?.overrides).toEqual([
+      expect.objectContaining({
+        recurrenceId,
+        title: 'One moved sync',
+        timing: expect.objectContaining({
+          start: expect.objectContaining({ local: '2026-01-12T11:00:00' }),
+        }),
+      }),
+    ]);
+    expect(edited.recurrence?.overrides?.[0]).not.toHaveProperty('description');
+
+    await repository.cancelOccurrence('team', 'old-recurring', recurrenceId);
+    await expect(
+      repository.getEvent('team', 'old-recurring'),
+    ).resolves.toMatchObject({
+      title: 'Weekly sync',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY',
+        overrides: [
+          expect.objectContaining({
+            recurrenceId,
+            title: 'One moved sync',
+            status: 'cancelled',
+          }),
+        ],
+      },
+    });
+  });
+
+  it('keeps DATE and DATE-TIME recurrence identities distinct', async () => {
+    const repository = createRepository();
+    await repository.updateEvent('team', 'old-recurring', {
+      recurrence: {
+        rdates: [{ type: 'date', value: '2026-01-19' }],
+      },
+    });
+
+    await repository.cancelOccurrence('team', 'old-recurring', {
+      type: 'date',
+      value: '2026-01-19',
+    });
+
+    await expect(
+      repository.getEvent('team', 'old-recurring'),
+    ).resolves.toMatchObject({
+      recurrence: {
+        overrides: [
+          {
+            recurrenceId: { type: 'date', value: '2026-01-19' },
+            status: 'cancelled',
+          },
+        ],
+      },
+    });
+  });
+
   it('clones RDATE PERIOD values and keeps their source resource in range queries', async () => {
     const repository = createRepository();
     await repository.updateEvent('team', 'old-recurring', {

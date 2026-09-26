@@ -22,6 +22,7 @@ import {
 import { DateTime } from 'luxon';
 import {
   calendarEventInputFromForm,
+  calendarEventOccurrencePatchFromForm,
   calendarEventPatchFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
@@ -129,6 +130,42 @@ describe('calendar event form adapter', () => {
       type: 'all-day',
       startDate: '2026-10-05',
       endDate: '2026-10-08',
+    });
+  });
+
+  it('converts the occurrence editor fields without series recurrence data', () => {
+    expect(
+      calendarEventOccurrencePatchFromForm({
+        calendarId: 'team',
+        title: '  Moved occurrence  ',
+        description: '',
+        location: ' Room 2 ',
+        timingType: 'timed',
+        start: '2026-09-24T11:00',
+        end: '2026-09-24T12:00',
+        timezone: 'Europe/Stockholm',
+        recurrence: {
+          ...emptyRecurrence,
+          original: { rrule: 'FREQ=DAILY;COUNT=3' },
+        },
+      }),
+    ).toEqual({
+      title: 'Moved occurrence',
+      description: null,
+      location: 'Room 2',
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-09-24T11:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+        end: {
+          local: '2026-09-24T12:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+      },
     });
   });
 

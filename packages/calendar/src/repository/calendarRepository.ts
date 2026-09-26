@@ -17,8 +17,10 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarEventDateTime,
   CalendarEventId,
   CalendarEventInput,
+  CalendarEventOccurrencePatch,
   CalendarEventPatch,
   CalendarId,
   CalendarMetadataPatch,
@@ -78,6 +80,19 @@ export interface CalendarRepository {
     calendarId: CalendarId,
     eventId: CalendarEventId,
     patch: CalendarEventPatch,
+  ): Promise<CalendarEvent>;
+
+  updateOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
+    patch: CalendarEventOccurrencePatch,
+  ): Promise<CalendarEvent>;
+
+  cancelOccurrence(
+    calendarId: CalendarId,
+    resourceEventId: CalendarEventId,
+    recurrenceId: CalendarEventDateTime,
   ): Promise<CalendarEvent>;
 
   deleteEvent(calendarId: CalendarId, eventId: CalendarEventId): Promise<void>;
