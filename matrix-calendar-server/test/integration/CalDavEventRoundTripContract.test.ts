@@ -39,10 +39,27 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
   const credentials = basicCredentialProvider(username, password);
   const codec = new ICalendarEventCodec();
   let client: CalDavEventClient;
+  let cleanupResourceUrl: string | undefined;
 
   beforeAll(() => {
     fetchMock.disableMocks();
     client = new CalDavEventClient(credentials);
+  });
+
+  afterEach(async () => {
+    if (!cleanupResourceUrl) {
+      return;
+    }
+
+    const resourceUrl = cleanupResourceUrl;
+    cleanupResourceUrl = undefined;
+
+    try {
+      const resource = await client.getEvent(resourceUrl);
+      await client.deleteEvent(resourceUrl, resource.etag);
+    } catch {
+      // Cleanup is best-effort and targets only this test's unique resource.
+    }
   });
 
   afterAll(() => {
@@ -134,6 +151,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     ).replace(/override@example\.test/g, uid);
 
     await client.createEvent(resourceUrl, source);
+    cleanupResourceUrl = resourceUrl;
 
     const createdResource = await client.getEvent(resourceUrl);
     expect(createdResource.href).toBe(resourceUrl);
