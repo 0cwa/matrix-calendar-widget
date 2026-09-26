@@ -23,6 +23,7 @@ export type DiscoveredCalDavCalendar = {
   description?: string;
   color?: string;
   components?: string[];
+  unsupportedComponents?: string[];
   readOnly?: boolean;
 };
 
@@ -326,9 +327,15 @@ export class CalDavDiscoveryClient {
         ? componentNames(componentProperty)
         : undefined;
 
-      if (components && !components.includes('VEVENT')) {
+      // Hide only collections that explicitly exclude VEVENT. Missing
+      // component metadata remains unknown and must not hide the calendar.
+      if (componentProperty !== undefined && !components?.includes('VEVENT')) {
         return [];
       }
+
+      const unsupportedComponents = components?.filter(
+        (component) => component !== 'VEVENT',
+      );
 
       const href = textValue(response.href);
       if (!href) {
@@ -342,6 +349,7 @@ export class CalDavDiscoveryClient {
           description: textValue(properties['calendar-description']),
           color: textValue(properties['calendar-color']),
           components,
+          ...(unsupportedComponents?.length ? { unsupportedComponents } : {}),
           readOnly: readOnlyValue(properties['current-user-privilege-set']),
         },
       ];

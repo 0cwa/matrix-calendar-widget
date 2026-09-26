@@ -37,6 +37,7 @@ const calendars: Calendar[] = [
     name: 'Personal calendar',
     color: '#1976d2',
     timezone: 'UTC',
+    unsupportedComponents: ['VTODO', 'VJOURNAL'],
   },
 ];
 
@@ -93,6 +94,9 @@ describe('<CalendarEventsSurface />', () => {
 
     expect(await screen.findByText('Team planning')).toBeInTheDocument();
     expect(screen.getByText('Dentist')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Personal calendar also supports VTODO, VJOURNAL. Items of those types are not shown or modified here.',
+    );
 
     const personalCalendar = screen.getByRole('checkbox', {
       name: 'Personal calendar',

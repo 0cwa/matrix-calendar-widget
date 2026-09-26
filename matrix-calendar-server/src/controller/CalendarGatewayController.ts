@@ -119,6 +119,7 @@ export class CalendarGatewayController {
             calendar.color,
             calendar.readOnly,
             calendar.description,
+            calendar.unsupportedComponents,
           ),
       );
     });

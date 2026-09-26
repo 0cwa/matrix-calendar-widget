@@ -91,6 +91,8 @@ export type Calendar = {
   color?: string;
   timezone?: string;
   readOnly?: boolean;
+  /** CalDAV component types this calendar also supports beyond VEVENT. */
+  unsupportedComponents?: string[];
 };
 
 /**

@@ -121,11 +121,38 @@ describe('CalendarGatewayController', () => {
                 <a:calendar-color>#336699ff</a:calendar-color>
                 <c:supported-calendar-component-set>
                   <c:comp name="VEVENT"/>
+                  <c:comp name="VJOURNAL"/>
                 </c:supported-calendar-component-set>
                 <d:current-user-privilege-set>
                   <d:privilege><d:read/></d:privilege>
                   <d:privilege><d:write-content/></d:privilege>
                 </d:current-user-privilege-set>
+              </d:prop>
+              <d:status>HTTP/1.1 200 OK</d:status>
+            </d:propstat>
+          </d:response>
+          <d:response>
+            <d:href>/alice/tasks/</d:href>
+            <d:propstat>
+              <d:prop>
+                <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+                <d:displayname>Tasks</d:displayname>
+                <c:supported-calendar-component-set>
+                  <c:comp name="VTODO"/>
+                </c:supported-calendar-component-set>
+              </d:prop>
+              <d:status>HTTP/1.1 200 OK</d:status>
+            </d:propstat>
+          </d:response>
+          <d:response>
+            <d:href>/alice/journal/</d:href>
+            <d:propstat>
+              <d:prop>
+                <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+                <d:displayname>Journal</d:displayname>
+                <c:supported-calendar-component-set>
+                  <c:comp name="VJOURNAL"/>
+                </c:supported-calendar-component-set>
               </d:prop>
               <d:status>HTTP/1.1 200 OK</d:status>
             </d:propstat>
@@ -144,6 +171,7 @@ describe('CalendarGatewayController', () => {
         color: '#336699ff',
         description: 'Shared planning',
         readOnly: false,
+        unsupportedComponents: ['VJOURNAL'],
       },
     ]);
 

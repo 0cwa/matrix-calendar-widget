@@ -48,6 +48,9 @@ export function CalendarEventsSurface({
 }) {
   const { t } = useTranslation();
   const calendars = useCalendars();
+  const mixedCalendars = calendars.data.filter(
+    (calendar) => calendar.unsupportedComponents?.length,
+  );
   const calendarIds = useMemo(
     () => calendars.data.map((calendar) => calendar.id),
     [calendars.data],
@@ -90,6 +93,21 @@ export function CalendarEventsSurface({
 
   return (
     <>
+      {mixedCalendars.length > 0 && (
+        <Box px={1} pb={1}>
+          {mixedCalendars.map((calendar) => (
+            <Alert key={calendar.id} severity="warning" sx={{ mb: 1 }}>
+              {t('calendarEvents.mixedCollectionWarning', {
+                defaultValue:
+                  '{{calendar}} also supports {{components}}. Items of those types are not shown or modified here.',
+                calendar: calendar.name,
+                components: calendar.unsupportedComponents?.join(', '),
+              })}
+            </Alert>
+          ))}
+        </Box>
+      )}
+
       {calendars.data.length > 1 && (
         <Box px={1} pb={1}>
           <FormGroup

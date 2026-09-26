@@ -48,6 +48,7 @@
     },
     "empty": "No events scheduled that match the selected filters.",
     "loadError": "Calendar events could not be loaded.",
+    "mixedCollectionWarning": "{{calendar}} also supports {{components}}. Items of those types are not shown or modified here.",
     "title": "Calendar events"
   },
   "calendarMonthPicker": {
@@ -71,15 +72,6 @@
       "submit": "Delete calendar",
       "title": "Delete calendar"
     },
-    "rename": {
-      "action": "Rename calendar",
-      "calendar": "Calendar",
-      "error": "The calendar could not be renamed.",
-      "name": "Calendar name",
-      "nameRequired": "A calendar name is required.",
-      "submit": "Rename calendar",
-      "title": "Rename calendar"
-    },
     "metadata": {
       "action": "Edit calendar details",
       "calendar": "Calendar",
@@ -90,6 +82,15 @@
       "error": "Calendar details could not be saved.",
       "submit": "Save details",
       "title": "Edit calendar details"
+    },
+    "rename": {
+      "action": "Rename calendar",
+      "calendar": "Calendar",
+      "error": "The calendar could not be renamed.",
+      "name": "Calendar name",
+      "nameRequired": "A calendar name is required.",
+      "submit": "Rename calendar",
+      "title": "Rename calendar"
     }
   },
   "calendarWeekPicker": {

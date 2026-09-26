@@ -48,6 +48,7 @@
     },
     "empty": "Keine Termine gefunden, die den ausgewählten Filtern entsprechen.",
     "loadError": "Kalendertermine konnten nicht geladen werden.",
+    "mixedCollectionWarning": "{{calendar}} unterstützt außerdem {{components}}. Elemente dieser Typen werden hier nicht angezeigt oder geändert.",
     "title": "Kalendertermine"
   },
   "calendarMonthPicker": {
@@ -71,15 +72,6 @@
       "submit": "Kalender löschen",
       "title": "Kalender löschen"
     },
-    "rename": {
-      "action": "Kalender umbenennen",
-      "calendar": "Kalender",
-      "error": "Der Kalender konnte nicht umbenannt werden.",
-      "name": "Kalendername",
-      "nameRequired": "Ein Kalendername ist erforderlich.",
-      "submit": "Kalender umbenennen",
-      "title": "Kalender umbenennen"
-    },
     "metadata": {
       "action": "Kalenderdetails bearbeiten",
       "calendar": "Kalender",
@@ -90,6 +82,15 @@
       "error": "Die Kalenderdetails konnten nicht gespeichert werden.",
       "submit": "Details speichern",
       "title": "Kalenderdetails bearbeiten"
+    },
+    "rename": {
+      "action": "Kalender umbenennen",
+      "calendar": "Kalender",
+      "error": "Der Kalender konnte nicht umbenannt werden.",
+      "name": "Kalendername",
+      "nameRequired": "Ein Kalendername ist erforderlich.",
+      "submit": "Kalender umbenennen",
+      "title": "Kalender umbenennen"
     }
   },
   "calendarWeekPicker": {

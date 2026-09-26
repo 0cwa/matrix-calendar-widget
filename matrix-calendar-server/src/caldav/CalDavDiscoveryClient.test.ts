@@ -27,7 +27,7 @@ const credentialProvider: CalDavCredentialProvider = {
 };
 
 describe('CalDavDiscoveryClient', () => {
-  it('discovers VEVENT calendars across arbitrary XML namespace prefixes', async () => {
+  it('shows mixed VEVENT calendars and hides unsupported-only collections', async () => {
     const fetchMock = createFetchMock(
       multistatus(
         `
@@ -92,6 +92,19 @@ describe('CalDavDiscoveryClient', () => {
             <d:status>HTTP/1.1 200 OK</d:status>
           </d:propstat>
         </d:response>
+        <d:response>
+          <d:href>/alice/journal/</d:href>
+          <d:propstat>
+            <d:prop>
+              <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+              <d:displayname>Journal only</d:displayname>
+              <c:supported-calendar-component-set>
+                <c:comp name="VJOURNAL"/>
+              </c:supported-calendar-component-set>
+            </d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
       `),
     );
 
@@ -111,6 +124,7 @@ describe('CalDavDiscoveryClient', () => {
           description: 'Planning & reviews',
           color: '#336699ff',
           components: ['VEVENT', 'VTODO'],
+          unsupportedComponents: ['VTODO'],
           readOnly: false,
         },
       ],
@@ -123,6 +137,11 @@ describe('CalDavDiscoveryClient', () => {
         'Basic delegated',
       );
     }
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual([
+      'PROPFIND',
+      'PROPFIND',
+      'PROPFIND',
+    ]);
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Depth')).toBe(
       '0',
     );
