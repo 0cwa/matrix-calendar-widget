@@ -121,6 +121,25 @@ describe('MatrixCalendarAuthorizationFactory', () => {
     await expect(
       authorization.isAllowed({ action: 'create-calendar' }),
     ).resolves.toBe(false);
+    await expect(
+      new MatrixCalendarAuthorizationFactory(
+        instance(matrixClientMock),
+      ).canManageCalendars(userId, roomId),
+    ).resolves.toBe(false);
+  });
+
+  it('uses the existing calendar manager power for diagnostics access', async () => {
+    setPowerLevels({
+      users: { [userId]: 50 },
+      events_default: 0,
+      state_default: 50,
+    });
+
+    await expect(
+      new MatrixCalendarAuthorizationFactory(
+        instance(matrixClientMock),
+      ).canManageCalendars(userId, roomId),
+    ).resolves.toBe(true);
   });
 
   it('supports dedicated Matrix power-level overrides', async () => {

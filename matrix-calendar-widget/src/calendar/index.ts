@@ -14,6 +14,11 @@
  * limitations under the License.
  */
 
+export { isCalendarDiagnosticsRepository } from './CalendarDiagnosticsRepository';
+export type {
+  CalDavCalendarDiagnostic,
+  CalendarDiagnosticsRepository,
+} from './CalendarDiagnosticsRepository';
 export {
   calendarEventInputFromForm,
   calendarEventPatchFromForm,

@@ -62,8 +62,10 @@ describe('CalendarGatewayController', () => {
   } as IAppConfiguration;
   const isAllowed = jest.fn();
   const forRoom = jest.fn(() => ({ isAllowed }));
+  const canManageCalendars = jest.fn();
   const authorizationFactory = {
     forRoom,
+    canManageCalendars,
   } as unknown as MatrixCalendarAuthorizationFactory;
 
   beforeEach(() => {
@@ -72,6 +74,8 @@ describe('CalendarGatewayController', () => {
     isAllowed.mockReset();
     forRoom.mockReset();
     forRoom.mockImplementation(() => ({ isAllowed }));
+    canManageCalendars.mockReset();
+    canManageCalendars.mockResolvedValue(true);
   });
 
   function createController(
@@ -177,6 +181,97 @@ describe('CalendarGatewayController', () => {
 
     expect(forRoom).toHaveBeenCalledWith(userContext.userId, roomId);
     expect(isAllowed).toHaveBeenCalledWith({ action: 'list-calendars' });
+  });
+
+  it('returns only safe collection URLs to calendar managers', async () => {
+    isAllowed.mockResolvedValue(true);
+    fetch.mockResponses(
+      [principalResponse('/principals/alice/'), { status: 207 }],
+      [homeResponse('/alice/'), { status: 207 }],
+      [
+        multistatus(
+          [
+            diagnosticCalendarCollectionResponse('/', 'Service root'),
+            diagnosticCalendarCollectionResponse(
+              '/principals/alice/',
+              'Principal root',
+            ),
+            diagnosticCalendarCollectionResponse('/alice/', 'Calendar home'),
+            diagnosticCalendarCollectionResponse('/alice/team/', 'Team events'),
+            diagnosticCalendarCollectionResponse(
+              '/alice/credentials/?access_token=secret',
+              'Credential URL',
+            ),
+            diagnosticCalendarCollectionResponse(
+              'https://alice:password@radicale.example.test/alice/credentials/',
+              'Embedded credentials',
+            ),
+            diagnosticCalendarCollectionResponse(
+              'https://external.example.test/calendar/',
+              'External collection',
+            ),
+          ].join(''),
+        ),
+        { status: 207 },
+      ],
+    );
+
+    const result = await createController().getCalendarDiagnostics(
+      userContext,
+      openIdCredential,
+      roomId,
+    );
+
+    expect(result).toEqual({
+      calendars: [
+        {
+          name: 'Team events',
+          url: 'https://radicale.example.test/alice/team/',
+        },
+      ],
+    });
+    expect(result).not.toHaveProperty('principalUrl');
+    expect(result).not.toHaveProperty('calendarHomeUrl');
+    expect(JSON.stringify(result)).not.toContain('secret');
+    expect(canManageCalendars).toHaveBeenCalledWith(userContext.userId, roomId);
+  });
+
+  it('denies CalDAV diagnostics before discovery without manage permission', async () => {
+    canManageCalendars.mockResolvedValue(false);
+
+    await expect(
+      createController().getCalendarDiagnostics(
+        userContext,
+        openIdCredential,
+        roomId,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(canManageCalendars).toHaveBeenCalledWith(userContext.userId, roomId);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not return CalDAV request details when diagnostics discovery fails', async () => {
+    fetch.mockResponseOnce('https://radicale.example.test/private', {
+      status: 503,
+    });
+
+    try {
+      await createController().getCalendarDiagnostics(
+        userContext,
+        openIdCredential,
+        roomId,
+      );
+      throw new Error('Expected diagnostics discovery to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ServiceUnavailableException);
+      expect((error as ServiceUnavailableException).getResponse()).toEqual({
+        code: 'calendar-diagnostics-unavailable',
+        message: 'CalDAV diagnostics are unavailable',
+      });
+      expect(JSON.stringify(error)).not.toContain('radicale.example.test');
+      expect(JSON.stringify(error)).not.toContain('openid-token');
+    }
   });
 
   it('creates an authorized VEVENT-only Radicale calendar', async () => {
@@ -942,6 +1037,24 @@ function calendarCollectionResponse(
       </d:propstat>
     </d:response>
   `);
+}
+
+function diagnosticCalendarCollectionResponse(
+  href: string,
+  displayName: string,
+): string {
+  return `
+    <d:response>
+      <d:href>${href}</d:href>
+      <d:propstat>
+        <d:prop>
+          <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+          <d:displayname>${displayName}</d:displayname>
+          <c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set>
+        </d:prop>
+        <d:status>HTTP/1.1 200 OK</d:status>
+      </d:propstat>
+    </d:response>`;
 }
 
 function simpleEventIcs(

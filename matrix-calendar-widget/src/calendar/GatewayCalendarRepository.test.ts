@@ -42,6 +42,35 @@ const event: CalendarEvent = {
 };
 
 describe('GatewayCalendarRepository', () => {
+  it('loads CalDAV diagnostics through the authenticated gateway', async () => {
+    const diagnostics = {
+      calendars: [
+        {
+          name: 'Team events',
+          url: 'https://radicale.example.test/alice/team/',
+        },
+      ],
+    };
+    const fetchMock = mockFetch(jsonResponse(diagnostics));
+    const repository = createRepository(fetchMock);
+
+    await expect(repository.getCalendarDiagnostics()).resolves.toEqual(
+      diagnostics.calendars,
+    );
+
+    const [url, init] = fetchMock.mock.calls[0];
+    if (typeof url !== 'string') {
+      throw new Error('Expected the gateway request URL to be a string');
+    }
+    const requestUrl = new URL(url);
+    expect(requestUrl.pathname).toBe('/v1/calendar/calendars/diagnostics');
+    expect(requestUrl.searchParams.get('roomId')).toBe('!team:example.test');
+    expect(init?.method).toBeUndefined();
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+  });
+
   it('creates a calendar through the authenticated gateway', async () => {
     const createdCalendar = {
       id: 'https://radicale.example.test/alice/calendar-1/',

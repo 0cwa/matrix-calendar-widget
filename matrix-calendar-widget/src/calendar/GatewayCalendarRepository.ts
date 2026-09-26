@@ -26,6 +26,10 @@ import {
   CalendarRepositoryError,
   CalendarTimeRange,
 } from '@matrix-calendar-widget/calendar';
+import {
+  CalDavCalendarDiagnostic,
+  CalendarDiagnosticsRepository,
+} from './CalendarDiagnosticsRepository';
 
 type CalendarGatewayEventResource = {
   event: CalendarEvent;
@@ -39,7 +43,9 @@ export type GatewayCalendarRepositoryOptions = {
   fetchImpl?: typeof fetch;
 };
 
-export class GatewayCalendarRepository implements CalendarRepository {
+export class GatewayCalendarRepository
+  implements CalendarRepository, CalendarDiagnosticsRepository
+{
   private readonly etags = new Map<CalendarEventId, string>();
   private readonly fetchImpl: typeof fetch;
 
@@ -53,6 +59,17 @@ export class GatewayCalendarRepository implements CalendarRepository {
         roomId: this.options.roomId,
       }),
     );
+  }
+
+  async getCalendarDiagnostics(): Promise<CalDavCalendarDiagnostic[]> {
+    const response = await this.requestJson<{
+      calendars: CalDavCalendarDiagnostic[];
+    }>(
+      this.url('/v1/calendar/calendars/diagnostics', {
+        roomId: this.options.roomId,
+      }),
+    );
+    return response.calendars;
   }
 
   async createCalendar(name: string): Promise<Calendar> {

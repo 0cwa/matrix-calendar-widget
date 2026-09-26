@@ -16,7 +16,7 @@
 
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { expect } from 'vitest';
+import { expect, vi } from 'vitest';
 import { axe } from 'vitest-axe';
 import { CopyableTextButton } from './CopyableTextButton';
 
@@ -27,6 +27,7 @@ describe('<CopyableTextButton/>', () => {
     expect(
       screen.getByRole('button', { name: /copy to clipboard/i }),
     ).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
 
     expect(screen.getByTestId('ContentCopyOutlinedIcon')).toBeInTheDocument();
   });
@@ -43,9 +44,42 @@ describe('<CopyableTextButton/>', () => {
 
     expect(navigator.clipboard.writeText).toBeCalledWith('Hallo world');
     expect(screen.getByTestId('CheckOutlinedIcon')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Copied to clipboard');
 
     await userEvent.tab();
     expect(screen.getByTestId('ContentCopyOutlinedIcon')).toBeInTheDocument();
+  });
+
+  it('reports clipboard rejection instead of showing a copied state', async () => {
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(
+      new Error('clipboard denied'),
+    );
+    render(<CopyableTextButton text="Hallo world" />);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /copy to clipboard/i }),
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not copy to clipboard',
+    );
+    expect(screen.getByTestId('ErrorOutlineIcon')).toBeInTheDocument();
+    expect(screen.queryByTestId('CheckOutlinedIcon')).not.toBeInTheDocument();
+  });
+
+  it('includes the item name in the copy action for assistive technology', () => {
+    render(
+      <CopyableTextButton
+        itemLabel="Team calendar URL"
+        text="https://example.test/team/"
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', {
+        name: /copy team calendar url to clipboard/i,
+      }),
+    ).toBeInTheDocument();
   });
 
   it('should have no accessibility violations', async () => {

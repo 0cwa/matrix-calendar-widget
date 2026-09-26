@@ -21,13 +21,19 @@ import PaletteIcon from '@mui/icons-material/Palette';
 import { Box, Button, Stack, useMediaQuery, useTheme } from '@mui/material';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CalendarFilters, useCalendars } from '../../calendar';
+import {
+  CalendarFilters,
+  isCalendarDiagnosticsRepository,
+  useCalendarRepository,
+  useCalendars,
+} from '../../calendar';
 import { MeetingsNavigation, ViewType } from '../meetings/MeetingsNavigation';
 import { MeetingsToolbarButtons } from '../meetings/MeetingsToolbar/MeetingsToolbarButtons';
 import { MeetingsToolbarDatePicker } from '../meetings/MeetingsToolbar/MeetingsToolbarDatePicker';
 import { MeetingsToolbarSearch } from '../meetings/MeetingsToolbar/MeetingsToolbarSearch';
 import { CalendarCreateDialog } from './CalendarCreateDialog';
 import { CalendarDeleteDialog } from './CalendarDeleteDialog';
+import { CalendarDiagnosticsDialog } from './CalendarDiagnosticsDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 import { CalendarMetadataDialog } from './CalendarMetadataDialog';
 import { CalendarRenameDialog } from './CalendarRenameDialog';
@@ -51,11 +57,16 @@ export function CalendarToolbar({
   const theme = useTheme();
   const showToolbarButtons = useMediaQuery(theme.breakpoints.up('md'));
   const calendars = useCalendars();
+  const repository = useCalendarRepository();
+  const diagnosticsRepository = isCalendarDiagnosticsRepository(repository)
+    ? repository
+    : undefined;
   const [createCalendarOpen, setCreateCalendarOpen] = useState(false);
   const [deleteCalendarOpen, setDeleteCalendarOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const writableCalendars = calendars.data.filter(
     (calendar) => !calendar.readOnly,
   );
@@ -108,6 +119,12 @@ export function CalendarToolbar({
           {t('calendars.metadata.action', 'Edit calendar details')}
         </Button>
 
+        {diagnosticsRepository && (
+          <Button onClick={() => setDiagnosticsOpen(true)} variant="outlined">
+            {t('calendarDiagnostics.action', 'Advanced CalDAV diagnostics')}
+          </Button>
+        )}
+
         {showToolbarButtons && (
           <Box>
             <MeetingsToolbarButtons
@@ -145,6 +162,14 @@ export function CalendarToolbar({
         onClose={() => setCreateCalendarOpen(false)}
         open={createCalendarOpen}
       />
+
+      {diagnosticsRepository && (
+        <CalendarDiagnosticsDialog
+          onClose={() => setDiagnosticsOpen(false)}
+          open={diagnosticsOpen}
+          repository={diagnosticsRepository}
+        />
+      )}
 
       <CalendarRenameDialog
         calendars={calendars.data}

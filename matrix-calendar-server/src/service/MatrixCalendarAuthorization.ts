@@ -38,6 +38,14 @@ export class MatrixCalendarAuthorizationFactory {
       roomId,
     );
   }
+
+  canManageCalendars(userId: string, roomId: string): Promise<boolean> {
+    return new MatrixRoomCalendarAuthorization(
+      this.matrixClient,
+      userId,
+      roomId,
+    ).canManageCalendars();
+  }
 }
 
 class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
@@ -64,6 +72,10 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
       case 'manage-calendar':
         return await this.hasCalendarManagePower();
     }
+  }
+
+  async canManageCalendars(): Promise<boolean> {
+    return (await this.isJoinedMember()) && this.hasCalendarManagePower();
   }
 
   private async isJoinedMember(): Promise<boolean> {

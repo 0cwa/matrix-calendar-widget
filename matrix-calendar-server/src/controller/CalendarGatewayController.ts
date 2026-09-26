@@ -54,6 +54,7 @@ import { MatrixOpenIdCredentialParam } from '../decorator/MatrixOpenIdCredential
 import { UserContextParam } from '../decorator/UserContextParam';
 import { CalendarGatewayCalendarDto } from '../dto/CalendarGatewayCalendarDto';
 import { CalendarGatewayContextDto } from '../dto/CalendarGatewayContextDto';
+import { CalendarGatewayDiagnosticsDto } from '../dto/CalendarGatewayDiagnosticsDto';
 import { CalendarGatewayEventDto } from '../dto/CalendarGatewayEventDto';
 import { MatrixAuthGuard } from '../guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
@@ -122,6 +123,67 @@ export class CalendarGatewayController {
             calendar.unsupportedComponents,
           ),
       );
+    });
+  }
+
+  @Get('calendars/diagnostics')
+  async getCalendarDiagnostics(
+    @UserContextParam() userContext: IUserContext,
+    @MatrixOpenIdCredentialParam()
+    openIdCredential: IMatrixOpenIdCredential | undefined,
+    @Query('roomId') roomId?: string,
+  ): Promise<CalendarGatewayDiagnosticsDto> {
+    const requiredRoomId = this.requireQuery(roomId, 'roomId');
+    if (
+      !(await this.authorizationFactory.canManageCalendars(
+        userContext.userId,
+        requiredRoomId,
+      ))
+    ) {
+      throw new ForbiddenException(
+        'Not allowed to view CalDAV diagnostics for this Matrix room',
+      );
+    }
+
+    const radicaleUrl = this.requireRadicaleBaseUrl();
+    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+      userContext,
+      openIdCredential,
+    );
+
+    return this.runCalDav(async () => {
+      try {
+        const discovery = await new CalDavDiscoveryClient(
+          radicaleUrl,
+          credentialProvider,
+        ).discover();
+        const excludedRoots = new Set(
+          [radicaleUrl, discovery.principalUrl, discovery.calendarHomeUrl].map(
+            normalizeUrlForComparison,
+          ),
+        );
+
+        return new CalendarGatewayDiagnosticsDto(
+          discovery.calendars.flatMap((calendar) => {
+            const url = safeCalendarCollectionUrl(
+              calendar.href,
+              radicaleUrl,
+              excludedRoots,
+            );
+            return url ? [{ name: calendar.displayName, url }] : [];
+          }),
+        );
+      } catch (error) {
+        if (error instanceof MatrixOpenIdCalDavCredentialError) {
+          throw error;
+        }
+
+        // Do not expose CalDAV URLs or request details in diagnostics errors.
+        throw new ServiceUnavailableException({
+          code: 'calendar-diagnostics-unavailable',
+          message: 'CalDAV diagnostics are unavailable',
+        });
+      }
     });
   }
 
@@ -717,4 +779,43 @@ export class CalendarGatewayController {
       throw error;
     }
   }
+}
+
+function safeCalendarCollectionUrl(
+  value: string,
+  radicaleUrl: string,
+  excludedRoots: Set<string>,
+): string | undefined {
+  let url: URL;
+  let serviceUrl: URL;
+  try {
+    url = new URL(value);
+    serviceUrl = new URL(radicaleUrl);
+  } catch {
+    return undefined;
+  }
+
+  const servicePath = serviceUrl.pathname.endsWith('/')
+    ? serviceUrl.pathname
+    : `${serviceUrl.pathname}/`;
+
+  if (
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    url.origin !== serviceUrl.origin ||
+    !url.pathname.startsWith(servicePath) ||
+    excludedRoots.has(normalizeUrlForComparison(url.toString()))
+  ) {
+    return undefined;
+  }
+
+  return url.toString();
+}
+
+function normalizeUrlForComparison(value: string): string {
+  const url = new URL(value);
+  const path = url.pathname.replace(/\/+$/, '') || '/';
+  return `${url.origin}${path}`;
 }

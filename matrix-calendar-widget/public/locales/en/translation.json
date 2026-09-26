@@ -9,6 +9,16 @@
     "chooseDate": "Choose date, selected date is {{date, datetime}}",
     "label": "{{date, datetime}}"
   },
+  "calendarDiagnostics": {
+    "action": "Advanced CalDAV diagnostics",
+    "copyItemLabel": "{{name}} CalDAV URL",
+    "description": "Copy a calendar collection URL to share with an administrator. Only calendar managers can view these URLs.",
+    "empty": "No calendar collection URLs are available.",
+    "error": "CalDAV diagnostics could not be loaded. Calendar manager permission may be required.",
+    "loading": "Loading diagnostics",
+    "title": "Advanced CalDAV diagnostics",
+    "unnamedCalendar": "Unnamed calendar"
+  },
   "calendarEvents": {
     "delete": {
       "confirm": "Delete",
@@ -107,6 +117,11 @@
     "toParentRoom": "Back to parent room"
   },
   "copyableTextButton": {
+    "copied": "Copied to clipboard",
+    "copied-item": "Copied {{item}} to clipboard",
+    "copy-failed": "Could not copy to clipboard",
+    "copy-failed-item": "Could not copy {{item}} to clipboard",
+    "copy-item": "Copy {{item}} to clipboard",
     "copy-to-clipboard": "Copy to clipboard"
   },
   "dateRangePicker": {

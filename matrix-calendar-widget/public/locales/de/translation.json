@@ -9,6 +9,16 @@
     "chooseDate": "Wähle ein Datum, das gewählte Datum ist {{date, datetime}}",
     "label": "{{date, datetime}}"
   },
+  "calendarDiagnostics": {
+    "action": "Erweiterte CalDAV-Diagnose",
+    "copyItemLabel": "CalDAV-URL von {{name}}",
+    "description": "Kopiere eine Kalender-Collection-URL, um sie mit einer Administration zu teilen. Nur Kalenderadmins können diese URLs sehen.",
+    "empty": "Keine Kalender-Collection-URLs verfügbar.",
+    "error": "CalDAV-Diagnosedaten konnten nicht geladen werden. Möglicherweise ist eine Kalenderadmin-Berechtigung erforderlich.",
+    "loading": "Diagnosedaten werden geladen",
+    "title": "Erweiterte CalDAV-Diagnose",
+    "unnamedCalendar": "Unbenannter Kalender"
+  },
   "calendarEvents": {
     "delete": {
       "confirm": "Löschen",
@@ -107,6 +117,11 @@
     "toParentRoom": "Zum übergeordneten Raum"
   },
   "copyableTextButton": {
+    "copied": "In die Zwischenablage kopiert",
+    "copied-item": "{{item}} in die Zwischenablage kopiert",
+    "copy-failed": "Konnte nicht in die Zwischenablage kopiert werden",
+    "copy-failed-item": "{{item}} konnte nicht in die Zwischenablage kopiert werden",
+    "copy-item": "{{item}} in die Zwischenablage kopieren",
     "copy-to-clipboard": "In die Zwischenablage kopieren"
   },
   "dateRangePicker": {
