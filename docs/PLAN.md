@@ -118,7 +118,7 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [ ] Responsive/a11y pass across narrow Element panels and full-screen widget.
 - [ ] Threat model and security review.
 - [ ] Rate limits and abuse controls.
-- [ ] Free/busy privacy model.
+- [x] Document the initial free/busy privacy boundary; no aggregate availability surface is provided yet ([docs/FREE_BUSY_PRIVACY.md](./FREE_BUSY_PRIVACY.md)).
 - [ ] Backup/recovery documentation.
 - [ ] Container images and deployment docs under fork-owned names.
 - [ ] Upgrade/migration story.
