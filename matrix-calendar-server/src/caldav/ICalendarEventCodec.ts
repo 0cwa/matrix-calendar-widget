@@ -247,6 +247,10 @@ export class ICalendarEventCodec {
     const timing = readTiming(vevent);
 
     const recurrence = readRecurrence(calendar, vevent, uid);
+    const hasUnsupportedRangedOverride = hasRangedRecurrenceOverride(
+      calendar,
+      uid,
+    );
     const event: CalendarEvent = {
       id: eventId,
       calendarId,
@@ -261,6 +265,9 @@ export class ICalendarEventCodec {
       categories: readCategories(vevent),
       priority: numberValue(vevent.getFirstPropertyValue('priority')),
       ...(recurrence ? { recurrence } : {}),
+      ...(hasUnsupportedRangedOverride
+        ? { unsupportedRecurrence: 'ranged-override' }
+        : {}),
     };
 
     return new ParsedICalendarEvent(calendar, event);

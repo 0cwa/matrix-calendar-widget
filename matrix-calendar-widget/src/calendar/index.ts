@@ -36,12 +36,21 @@ export type {
   CalendarEventRecurrenceFormValues,
 } from './calendarEventForm';
 export {
+  calendarEventDateTimeForDisplay,
+  calendarEventDateTimeTimezone,
   calendarEventKey,
+  calendarEventOccurrenceKey,
+  calendarEventPresentationToFullCalendarEvent,
   calendarEventStartDate,
   calendarEventToFullCalendarEvent,
   filterCalendarEvents,
   groupCalendarEventsByDay,
+  presentCalendarEvents,
   repositoryRangeForView,
+} from './calendarEventPresentation';
+export type {
+  CalendarEventPresentation,
+  CalendarEventPresentationResult,
 } from './calendarEventPresentation';
 export {
   CalendarRepositoryProvider,

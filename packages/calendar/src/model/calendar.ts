@@ -165,16 +165,21 @@ export type CalendarEvent = {
   priority?: number;
 
   recurrence?: CalendarEventRecurrence;
+  /** Opaque response-only marker; the source iCalendar component stays server-side. */
+  unsupportedRecurrence?: string;
 };
 
-export type CalendarEventInput = Omit<CalendarEvent, 'id' | 'calendarId'>;
+export type CalendarEventInput = Omit<
+  CalendarEvent,
+  'id' | 'calendarId' | 'unsupportedRecurrence'
+>;
 
 /**
  * Fields editable without changing resource identity, calendar ownership, or
  * the stable iCalendar UID.
  */
 export type CalendarEventPatch = Partial<
-  Omit<CalendarEvent, 'id' | 'calendarId' | 'uid'>
+  Omit<CalendarEvent, 'id' | 'calendarId' | 'uid' | 'unsupportedRecurrence'>
 >;
 
 export type CalendarTimeRange = {

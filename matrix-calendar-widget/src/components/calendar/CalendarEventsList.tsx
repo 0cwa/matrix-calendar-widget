@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import { CalendarEvent } from '@matrix-calendar-widget/calendar';
 import {
   Box,
   Card,
@@ -25,7 +24,10 @@ import {
 } from '@mui/material';
 import { unstable_useId as useId, visuallyHidden } from '@mui/utils';
 import { useTranslation } from 'react-i18next';
-import { groupCalendarEventsByDay } from '../../calendar';
+import {
+  CalendarEventPresentation,
+  groupCalendarEventsByDay,
+} from '../../calendar';
 import { ListEmptyState } from '../common/ListEmptyState';
 import { MeetingsListGroup } from '../meetings/MeetingsList/MeetingsListGroup';
 import { formatCalendarEventTime } from './CalendarEventDetailsDialog';
@@ -34,8 +36,8 @@ export function CalendarEventsList({
   events,
   onSelectEvent,
 }: {
-  events: CalendarEvent[];
-  onSelectEvent: (event: CalendarEvent) => void;
+  events: CalendarEventPresentation[];
+  onSelectEvent: (event: CalendarEventPresentation) => void;
 }) {
   const headingId = useId();
   const { i18n, t } = useTranslation();
@@ -52,27 +54,29 @@ export function CalendarEventsList({
           <MeetingsListGroup date={day} key={day}>
             {dayEvents.map((event) => (
               <Box
-                aria-label={event.title}
+                aria-label={event.event.title}
                 component="li"
-                key={`${event.calendarId}:${event.id}`}
+                key={event.key}
                 sx={{ listStyleType: 'none' }}
               >
                 <Card variant="outlined">
                   <CardActionArea onClick={() => onSelectEvent(event)}>
                     <CardContent>
                       <Typography fontWeight="bold" variant="body1">
-                        {event.title}
+                        {event.event.title}
                       </Typography>
                       <Typography color="text.secondary" variant="body2">
                         {formatCalendarEventTime(
-                          event,
+                          event.event,
                           i18n.language,
                           t('calendarEvents.details.allDay', 'All day'),
+                          event.rangeTimezone,
+                          event.viewerTimezone,
                         )}
                       </Typography>
-                      {event.location && (
+                      {event.event.location && (
                         <Typography color="text.secondary" variant="body2">
-                          {event.location}
+                          {event.event.location}
                         </Typography>
                       )}
                     </CardContent>

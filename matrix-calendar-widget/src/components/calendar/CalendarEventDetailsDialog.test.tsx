@@ -17,6 +17,7 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarEventOccurrence,
   CalendarRepositoryError,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
@@ -24,7 +25,10 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
-import { CalendarRepositoryProvider } from '../../calendar';
+import {
+  CalendarEventPresentation,
+  CalendarRepositoryProvider,
+} from '../../calendar';
 import { CalendarEventDetailsDialog } from './CalendarEventDetailsDialog';
 
 const calendar: Calendar = {
@@ -51,6 +55,52 @@ const event: CalendarEvent = {
   },
 };
 
+const eventPresentation: CalendarEventPresentation = {
+  key: 'team:planning',
+  event,
+  resourceEvent: event,
+  rangeTimezone: 'Europe/Stockholm',
+  viewerTimezone: 'Europe/Stockholm',
+};
+
+const recurringResource: CalendarEvent = {
+  ...event,
+  recurrence: { rrule: 'FREQ=DAILY;COUNT=3' },
+};
+const recurrenceId = {
+  type: 'date-time' as const,
+  value: {
+    local: '2026-09-24T09:00:00',
+    timezone: 'Europe/Stockholm',
+    mode: 'tzid' as const,
+  },
+};
+const recurringOccurrence: CalendarEventOccurrence = {
+  ...event,
+  recurrenceId,
+  timing: {
+    type: 'timed',
+    start: {
+      local: '2026-09-24T09:00:00',
+      timezone: 'Europe/Stockholm',
+      mode: 'tzid',
+    },
+    end: {
+      local: '2026-09-24T10:00:00',
+      timezone: 'Europe/Stockholm',
+      mode: 'tzid',
+    },
+  },
+};
+const occurrencePresentation: CalendarEventPresentation = {
+  key: 'team:planning:occurrence:one',
+  event: recurringOccurrence,
+  resourceEvent: recurringResource,
+  rangeTimezone: 'Europe/Stockholm',
+  viewerTimezone: 'Europe/Stockholm',
+  recurrenceId,
+};
+
 function createWrapper(repository: InMemoryCalendarRepository) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
     return (
@@ -62,6 +112,46 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventDetailsDialog />', () => {
+  it('formats floating detail times using the presentation timezone', async () => {
+    const floatingEvent: CalendarEvent = {
+      ...event,
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-09-23T09:00:00',
+          timezone: 'floating',
+          mode: 'floating',
+        },
+        end: {
+          local: '2026-09-23T10:00:00',
+          timezone: 'floating',
+          mode: 'floating',
+        },
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [floatingEvent],
+    });
+
+    render(
+      <CalendarEventDetailsDialog
+        event={{
+          ...eventPresentation,
+          event: floatingEvent,
+          resourceEvent: floatingEvent,
+          rangeTimezone: 'Pacific/Auckland',
+          viewerTimezone: 'America/Los_Angeles',
+        }}
+        onClose={vi.fn()}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByText(/2:00 PM–3:00 PM/)).toBeInTheDocument();
+    expect(screen.queryByText(/Invalid DateTime/)).toBeNull();
+  });
+
   it('deletes an event after confirmation', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
@@ -69,9 +159,15 @@ describe('<CalendarEventDetailsDialog />', () => {
     });
     const onClose = vi.fn();
 
-    render(<CalendarEventDetailsDialog event={event} onClose={onClose} />, {
-      wrapper: createWrapper(repository),
-    });
+    render(
+      <CalendarEventDetailsDialog
+        event={eventPresentation}
+        onClose={onClose}
+      />,
+      {
+        wrapper: createWrapper(repository),
+      },
+    );
 
     const deleteButton = screen.getByRole('button', { name: 'Delete' });
     await waitFor(() => expect(deleteButton).toBeEnabled());
@@ -111,9 +207,15 @@ describe('<CalendarEventDetailsDialog />', () => {
     vi.spyOn(repository, 'getEvent').mockResolvedValueOnce(latestEvent);
     const onClose = vi.fn();
 
-    render(<CalendarEventDetailsDialog event={event} onClose={onClose} />, {
-      wrapper: createWrapper(repository),
-    });
+    render(
+      <CalendarEventDetailsDialog
+        event={eventPresentation}
+        onClose={onClose}
+      />,
+      {
+        wrapper: createWrapper(repository),
+      },
+    );
 
     const deleteButton = screen.getByRole('button', { name: 'Delete' });
     await waitFor(() => expect(deleteButton).toBeEnabled());
@@ -149,14 +251,47 @@ describe('<CalendarEventDetailsDialog />', () => {
       events: [event],
     });
 
-    render(<CalendarEventDetailsDialog event={event} onClose={vi.fn()} />, {
-      wrapper: createWrapper(repository),
-    });
+    render(
+      <CalendarEventDetailsDialog
+        event={eventPresentation}
+        onClose={vi.fn()}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
 
     expect(
       await screen.findByText('This calendar is read-only.'),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  });
+
+  it('disables resource-wide mutations for a generated occurrence', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringResource],
+    });
+    const deleteSpy = vi.spyOn(repository, 'deleteEvent');
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+
+    render(
+      <CalendarEventDetailsDialog
+        event={occurrencePresentation}
+        onClose={vi.fn()}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByText(
+        'Editing or deleting an individual recurring occurrence is not available yet.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Edit event' })).toBeNull();
   });
 });

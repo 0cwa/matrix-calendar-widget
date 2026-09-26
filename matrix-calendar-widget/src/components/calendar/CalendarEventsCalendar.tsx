@@ -24,10 +24,7 @@ import {
 } from '@fullcalendar/core';
 import deLocale from '@fullcalendar/core/locales/de';
 import FullCalendar from '@fullcalendar/react';
-import {
-  CalendarEvent,
-  isTimedCalendarEvent,
-} from '@matrix-calendar-widget/calendar';
+import { isTimedCalendarEvent } from '@matrix-calendar-widget/calendar';
 import EventRepeatIcon from '@mui/icons-material/EventRepeat';
 import { Box, Stack, Tooltip, Typography } from '@mui/material';
 import { unstable_useId as useId } from '@mui/utils';
@@ -35,9 +32,10 @@ import { DateTime } from 'luxon';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  calendarEventDateTimeForDisplay,
+  CalendarEventPresentation,
+  calendarEventPresentationToFullCalendarEvent,
   CalendarFilters,
-  calendarEventKey,
-  calendarEventToFullCalendarEvent,
 } from '../../calendar';
 import { CalendarViewType } from '../../lib/utils';
 import { FullCalendarThemeProvider } from '../meetings/MeetingsCalendar/FullCalendarThemeProvider';
@@ -55,9 +53,9 @@ export function CalendarEventsCalendar({
   onShowMore,
   view,
 }: {
-  events: CalendarEvent[];
+  events: CalendarEventPresentation[];
   filters: CalendarFilters;
-  onSelectEvent: (event: CalendarEvent) => void;
+  onSelectEvent: (event: CalendarEventPresentation) => void;
   onShowMore: (date: Date) => void;
   view: CalendarViewType;
 }) {
@@ -71,16 +69,16 @@ export function CalendarEventsCalendar({
   const buttonsId = useId();
 
   const eventMap = useMemo(
-    () => new Map(events.map((event) => [calendarEventKey(event), event])),
+    () => new Map(events.map((event) => [event.key, event])),
     [events],
   );
 
   const fullCalendarEvents = useMemo(
     () =>
       events.map((event) =>
-        calendarEventToFullCalendarEvent(
+        calendarEventPresentationToFullCalendarEvent(
           event,
-          `${buttonsId}-${normalizeId(calendarEventKey(event))}`,
+          `${buttonsId}-${normalizeId(event.key)}`,
         ),
       ),
     [buttonsId, events],
@@ -111,7 +109,10 @@ export function CalendarEventsCalendar({
       return (
         <CalendarEventCell
           buttonLabelId={arg.event.extendedProps['buttonLabelId']}
-          event={event}
+          event={event.event}
+          rangeTimezone={event.rangeTimezone}
+          viewerTimezone={event.viewerTimezone}
+          recurringOccurrence={event.recurrenceId !== undefined}
           view={view}
         />
       );
@@ -174,22 +175,26 @@ export function CalendarEventsCalendar({
 function CalendarEventCell({
   buttonLabelId,
   event,
+  rangeTimezone,
+  viewerTimezone,
+  recurringOccurrence,
   view,
 }: {
   buttonLabelId: string;
-  event: CalendarEvent;
+  event: CalendarEventPresentation['event'];
+  rangeTimezone: string;
+  viewerTimezone: string;
+  recurringOccurrence: boolean;
   view: CalendarViewType;
 }) {
   const { i18n, t } = useTranslation();
-  const recurring = Boolean(
-    event.recurrence?.rrule ||
-    event.recurrence?.rdates?.length ||
-    event.recurrence?.recurrenceId,
-  );
+  const recurring = recurringOccurrence;
   const label = `${event.title}: ${formatCalendarEventTime(
     event,
     i18n.language,
     t('calendarEvents.details.allDay', 'All day'),
+    rangeTimezone,
+    viewerTimezone,
   )}`;
 
   return (
@@ -206,9 +211,11 @@ function CalendarEventCell({
             >
               {view === 'month' && isTimedCalendarEvent(event) && (
                 <Typography component="span" variant="body2">
-                  {DateTime.fromISO(event.timing.start.local, {
-                    zone: event.timing.start.timezone,
-                  }).toLocaleString(DateTime.TIME_SIMPLE)}{' '}
+                  {formatCalendarEventMonthTime(
+                    event,
+                    rangeTimezone,
+                    viewerTimezone,
+                  )}{' '}
                 </Typography>
               )}
               <Typography component="span" fontWeight="bold" variant="body2">
@@ -229,6 +236,22 @@ function CalendarEventCell({
       </Box>
     </>
   );
+}
+
+export function formatCalendarEventMonthTime(
+  event: CalendarEventPresentation['event'],
+  rangeTimezone: string,
+  viewerTimezone: string,
+): string {
+  if (!isTimedCalendarEvent(event)) {
+    return '';
+  }
+
+  return calendarEventDateTimeForDisplay(
+    event.timing.start,
+    rangeTimezone,
+    viewerTimezone,
+  ).toLocaleString(DateTime.TIME_SIMPLE);
 }
 
 function fullcalendarViewType(view: CalendarViewType): string {

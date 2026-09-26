@@ -783,6 +783,53 @@ describe('CalendarGatewayController', () => {
     expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
   });
 
+  it('returns the opaque unsupported recurrence marker with the event DTO', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const rangedIcs = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:ranged@example.test
+DTSTART:20260924T080000Z
+DTEND:20260924T090000Z
+RRULE:FREQ=DAILY;COUNT=3
+END:VEVENT
+BEGIN:VEVENT
+UID:ranged@example.test
+RECURRENCE-ID;RANGE=THISANDFUTURE:20260925T080000Z
+DTSTART:20260925T100000Z
+DTEND:20260925T110000Z
+END:VEVENT
+END:VCALENDAR`;
+    fetch.mockResponseOnce(
+      multistatus(`
+        <d:response>
+          <d:href>/alice/team/ranged.ics</d:href>
+          <d:propstat>
+            <d:prop>
+              <d:getetag>"ranged-etag"</d:getetag>
+              <c:calendar-data>${rangedIcs}</c:calendar-data>
+            </d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
+      `),
+      { status: 207 },
+    );
+
+    const result = await createController().listEvents(
+      userContext,
+      openIdCredential,
+      roomId,
+      calendarId,
+      '2026-09-24T00:00:00Z',
+      '2026-09-28T00:00:00Z',
+    );
+
+    expect(result[0].event.unsupportedRecurrence).toBe('ranged-override');
+    expect(JSON.stringify(result)).not.toContain('THISANDFUTURE');
+  });
+
   it('creates a basic VEVENT and returns the server resource state', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';
@@ -833,9 +880,8 @@ describe('CalendarGatewayController', () => {
     });
 
     const [, putInit] = fetch.mock.calls[0];
-    const putHeaders = new Headers(putInit?.headers);
     expect(putInit?.method).toBe('PUT');
-    expect(putHeaders.get('If-None-Match')).toBe('*');
+    expect(requestHeader(putInit, 'If-None-Match')).toBe('*');
     expect(putInit?.body).toContain('UID:event@example.test');
     expect(putInit?.body).toContain('SUMMARY:Created event');
   });
@@ -877,9 +923,8 @@ describe('CalendarGatewayController', () => {
     });
 
     const [, putInit] = fetch.mock.calls[1];
-    const putHeaders = new Headers(putInit?.headers);
     expect(putInit?.method).toBe('PUT');
-    expect(putHeaders.get('If-Match')).toBe('"old-etag"');
+    expect(requestHeader(putInit, 'If-Match')).toBe('"old-etag"');
     expect(putInit?.body).toContain('SUMMARY:After update');
     expect(putInit?.body).toContain('X-CUSTOM:preserve');
   });
@@ -939,7 +984,7 @@ describe('CalendarGatewayController', () => {
     });
     const [, init] = fetch.mock.calls[0];
     expect(init?.method).toBe('DELETE');
-    expect(new Headers(init?.headers).get('If-Match')).toBe('"event-etag"');
+    expect(requestHeader(init, 'If-Match')).toBe('"event-etag"');
   });
 
   it('rejects calendar URLs outside the configured Radicale service', async () => {
@@ -1082,4 +1127,34 @@ function multistatus(body: string): string {
 >
   ${body}
 </d:multistatus>`;
+}
+
+function requestHeader(
+  init: { headers?: unknown } | undefined,
+  name: string,
+): string | undefined {
+  const headers = init?.headers;
+  if (!headers || typeof headers !== 'object') {
+    return undefined;
+  }
+
+  const get = (headers as { get?: (headerName: string) => string | null }).get;
+  if (typeof get === 'function') {
+    return get.call(headers, name) ?? undefined;
+  }
+
+  if (Array.isArray(headers)) {
+    const entry = headers.find(
+      (candidate: unknown) =>
+        Array.isArray(candidate) &&
+        typeof candidate[0] === 'string' &&
+        candidate[0].toLowerCase() === name.toLowerCase(),
+    );
+    return entry ? String(entry[1]) : undefined;
+  }
+
+  const entry = Object.entries(headers).find(
+    ([headerName]) => headerName.toLowerCase() === name.toLowerCase(),
+  );
+  return entry ? String(entry[1]) : undefined;
 }

@@ -32,7 +32,8 @@
       "close": "Close",
       "delete": "Delete",
       "edit": "Edit",
-      "location": "Location"
+      "location": "Location",
+      "occurrenceActionsUnavailable": "Editing or deleting an individual recurring occurrence is not available yet."
     },
     "editor": {
       "addDate": "Add date",
@@ -84,6 +85,7 @@
     "empty": "No events scheduled that match the selected filters.",
     "loadError": "Calendar events could not be loaded.",
     "mixedCollectionWarning": "{{calendar}} also supports {{components}}. Items of those types are not shown or modified here.",
+    "recurrenceExpansionError": "{{count}} recurring event(s) could not be displayed because their recurrence data is unsupported or invalid.",
     "title": "Calendar events"
   },
   "calendarMonthPicker": {

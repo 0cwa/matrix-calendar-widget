@@ -34,6 +34,8 @@ import { DateTime } from 'luxon';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  calendarEventDateTimeForDisplay,
+  CalendarEventPresentation,
   useCalendarRepository,
   useCalendars,
   useDeleteCalendarEvent,
@@ -45,14 +47,14 @@ export function CalendarEventDetailsDialog({
   event,
   onClose,
 }: {
-  event?: CalendarEvent;
+  event?: CalendarEventPresentation;
   onClose: () => void;
 }) {
   const { i18n, t } = useTranslation();
   const calendars = useCalendars();
   const repository = useCalendarRepository();
   const deleteEvent = useDeleteCalendarEvent();
-  const [currentEvent, setCurrentEvent] = useState(event);
+  const [currentSelection, setCurrentSelection] = useState(event);
   const [editing, setEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -61,20 +63,30 @@ export function CalendarEventDetailsDialog({
   >();
 
   useEffect(() => {
-    setCurrentEvent(event);
+    setCurrentSelection(event);
     setEditing(false);
     setDeleteOpen(false);
     setDeleteLoading(false);
     setDeleteError(undefined);
   }, [event]);
 
+  const currentEvent = currentSelection?.event;
+  const resourceEvent = currentSelection?.resourceEvent;
+  const recurringOccurrence = currentSelection?.recurrenceId !== undefined;
   const eventCalendar = currentEvent
     ? calendars.data.find((calendar) => calendar.id === currentEvent.calendarId)
     : undefined;
-  const canMutate = Boolean(eventCalendar && !eventCalendar.readOnly);
+  const canMutate = Boolean(
+    !recurringOccurrence && eventCalendar && !eventCalendar.readOnly,
+  );
 
   const handleDelete = async () => {
-    if (!currentEvent || !canMutate) {
+    if (
+      !currentSelection ||
+      recurringOccurrence ||
+      !resourceEvent ||
+      !canMutate
+    ) {
       return;
     }
 
@@ -82,7 +94,7 @@ export function CalendarEventDetailsDialog({
     setDeleteError(undefined);
 
     try {
-      await deleteEvent(currentEvent.calendarId, currentEvent.id);
+      await deleteEvent(resourceEvent.calendarId, resourceEvent.id);
       setDeleteOpen(false);
       onClose();
     } catch (error) {
@@ -92,10 +104,14 @@ export function CalendarEventDetailsDialog({
       ) {
         try {
           const latest = await repository.getEvent(
-            currentEvent.calendarId,
-            currentEvent.id,
+            resourceEvent.calendarId,
+            resourceEvent.id,
           );
-          setCurrentEvent(latest);
+          setCurrentSelection({
+            ...currentSelection,
+            event: latest,
+            resourceEvent: latest,
+          });
           setDeleteError('conflict');
         } catch {
           setDeleteError('generic');
@@ -130,11 +146,22 @@ export function CalendarEventDetailsDialog({
                   </Alert>
                 )}
 
+                {recurringOccurrence && (
+                  <Alert severity="info">
+                    {t(
+                      'calendarEvents.details.occurrenceActionsUnavailable',
+                      'Editing or deleting an individual recurring occurrence is not available yet.',
+                    )}
+                  </Alert>
+                )}
+
                 <Typography>
                   {formatCalendarEventTime(
                     currentEvent,
                     i18n.language,
                     t('calendarEvents.details.allDay', 'All day'),
+                    currentSelection?.rangeTimezone,
+                    currentSelection?.viewerTimezone,
                   )}
                 </Typography>
 
@@ -176,7 +203,17 @@ export function CalendarEventDetailsDialog({
           calendars={calendars.data}
           event={currentEvent}
           onClose={() => setEditing(false)}
-          onSaved={setCurrentEvent}
+          onSaved={(savedEvent) => {
+            setCurrentSelection((current) =>
+              current
+                ? {
+                    ...current,
+                    event: savedEvent,
+                    resourceEvent: savedEvent,
+                  }
+                : current,
+            );
+          }}
           open={editing}
         />
       )}
@@ -221,6 +258,8 @@ export function formatCalendarEventTime(
   event: CalendarEvent,
   locale: string,
   allDayLabel: string,
+  rangeTimezone?: string,
+  viewerTimezone?: string,
 ): string {
   if (isAllDayCalendarEvent(event)) {
     const start = DateTime.fromISO(event.timing.startDate).setLocale(locale);
@@ -242,12 +281,16 @@ export function formatCalendarEventTime(
     return '';
   }
 
-  const start = DateTime.fromISO(event.timing.start.local, {
-    zone: event.timing.start.timezone,
-  }).setLocale(locale);
-  const end = DateTime.fromISO(event.timing.end.local, {
-    zone: event.timing.end.timezone,
-  }).setLocale(locale);
+  const start = calendarEventDateTimeForDisplay(
+    event.timing.start,
+    rangeTimezone,
+    viewerTimezone,
+  ).setLocale(locale);
+  const end = calendarEventDateTimeForDisplay(
+    event.timing.end,
+    rangeTimezone,
+    viewerTimezone,
+  ).setLocale(locale);
 
   if (start.hasSame(end, 'day')) {
     return `${start.toLocaleString(DateTime.DATE_FULL)} · ${start.toLocaleString(

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { CalendarEvent, CalendarId } from '@matrix-calendar-widget/calendar';
+import { CalendarId } from '@matrix-calendar-widget/calendar';
 import {
   Alert,
   Box,
@@ -27,6 +27,7 @@ import { useTranslation } from 'react-i18next';
 import {
   CalendarFilters,
   filterCalendarEvents,
+  presentCalendarEvents,
   repositoryRangeForView,
   useCalendarEvents,
   useCalendars,
@@ -63,16 +64,24 @@ export function CalendarEventsSurface({
     [filters, view],
   );
   const events = useCalendarEvents(calendarIds, repositoryRange);
+  const presentation = useMemo(
+    () => presentCalendarEvents(events.data, calendars.data, repositoryRange),
+    [calendars.data, events.data, repositoryRange],
+  );
   const visibleEvents = useMemo(
     () =>
-      events.data.filter((event) => !hiddenCalendarIds.has(event.calendarId)),
-    [events.data, hiddenCalendarIds],
+      presentation.events.filter(
+        ({ resourceEvent }) => !hiddenCalendarIds.has(resourceEvent.calendarId),
+      ),
+    [hiddenCalendarIds, presentation.events],
   );
   const filteredEvents = useMemo(
     () => filterCalendarEvents(visibleEvents, filters.filterText),
     [filters.filterText, visibleEvents],
   );
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent>();
+  const [selectedEvent, setSelectedEvent] = useState<
+    (typeof filteredEvents)[number] | undefined
+  >();
 
   if (calendars.loading || events.loading) {
     return <PageLoader />;
@@ -105,6 +114,18 @@ export function CalendarEventsSurface({
               })}
             </Alert>
           ))}
+        </Box>
+      )}
+
+      {presentation.expansionErrors > 0 && (
+        <Box px={1} pb={1}>
+          <Alert severity="warning">
+            {t(
+              'calendarEvents.recurrenceExpansionError',
+              '{{count}} recurring event(s) could not be displayed because their recurrence data is unsupported or invalid.',
+              { count: presentation.expansionErrors },
+            )}
+          </Alert>
         </Box>
       )}
 

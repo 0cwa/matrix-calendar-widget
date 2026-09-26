@@ -32,7 +32,8 @@
       "close": "Schließen",
       "delete": "Löschen",
       "edit": "Bearbeiten",
-      "location": "Ort"
+      "location": "Ort",
+      "occurrenceActionsUnavailable": "Einzelne Termine einer wiederkehrenden Serie können noch nicht bearbeitet oder gelöscht werden."
     },
     "editor": {
       "addDate": "Datum hinzufügen",
@@ -84,6 +85,7 @@
     "empty": "Keine Termine gefunden, die den ausgewählten Filtern entsprechen.",
     "loadError": "Kalendertermine konnten nicht geladen werden.",
     "mixedCollectionWarning": "{{calendar}} unterstützt außerdem {{components}}. Elemente dieser Typen werden hier nicht angezeigt oder geändert.",
+    "recurrenceExpansionError": "{{count}} wiederkehrende Termine konnten wegen nicht unterstützter oder ungültiger Wiederholungsdaten nicht angezeigt werden.",
     "title": "Kalendertermine"
   },
   "calendarMonthPicker": {

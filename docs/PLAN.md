@@ -80,6 +80,7 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [x] RDATE / EXDATE series editing with explicit DATE, floating, UTC, and TZID values.
 - [ ] RECURRENCE-ID instance overrides.
 - [x] Add range-bounded read expansion for resource RRULE/RDATE/EXDATE sets, RDATE PERIOD durations, and same-resource exceptions (local backend slice; `RANGE=THISANDFUTURE` remains preserved and fails visibly).
+- [x] Present generated occurrences in the visible range, with calendar timezone or viewer-local fallback and stable original recurrence identities; unsupported expansion is shown as a warning (ADR011 carries opaque ranged-override diagnostics without interpreting or rewriting the source component).
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
 - [ ] VALARM preservation and editor.
@@ -87,7 +88,7 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [ ] Organizer/attendee round-trip.
 - [ ] Attachments/conference properties where safely interoperable.
 
-The current series editor locks timed/all-day conversion while recurrence data is present. Instance and following-instance edit scopes remain separate work.
+The current series editor locks timed/all-day conversion while recurrence data is present. Visible recurring occurrences retain their resource ID and original recurrence ID, but individual edit/delete actions are disabled until scoped writes exist. Instance and following-instance edit scopes remain separate work.
 
 **Exit:** common recurring calendars round-trip with mainstream CalDAV clients.
 
