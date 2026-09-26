@@ -160,10 +160,15 @@ adds one. This stable UID is the future sidecar alarm identity, not a Matrix
 recipient field. Imported legacy alarms without UIDs remain unchanged unless
 an explicit UID is supplied.
 
-External CalDAV clients may remove or change optional VALARM UIDs. A future
-configuration API or scheduler must resolve the exact alarm UID from the
-current canonical CalDAV resource and fail closed when the UID is missing,
-changed, or ambiguous; it must not guess from alarm order or description.
+The authenticated room reminder configuration API stores inert sidecar intent
+after room membership, room/calendar binding, and event-write policy checks. It
+does not read CalDAV or prove that the referenced event, recurrence instance,
+or alarm exists. Widget controls and API wiring are still pending. External
+CalDAV clients may remove or change optional VALARM UIDs; before any reminder
+is enabled, the CalDAV integration must resolve the exact event, recurrence,
+and alarm UID from the current canonical resource and fail closed when an
+identity is missing, changed, or ambiguous. It must not guess from alarm order
+or description.
 
 Delivery uses normal Matrix messages with `m.mentions.user_ids` for selected
 users or `m.mentions.room: true` for `@room`, only when the bot/user has

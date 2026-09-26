@@ -34,15 +34,19 @@ Matrix recipients and delivery state remain separate under ADR007 and ADR019.
    create, edit, and removal operations.
 5. Use the RFC 9074 UID as the future stable alarm identity for ADR007 sidecar
    configuration, in addition to the room, calendar, event UID, and recurrence
-   identity. The UID is calendar data, not a Matrix recipient field. This
-   decision does not add or change Matrix recipient storage, the authenticated
-   reminder configuration API, a scheduler, permission rechecks, or Matrix
-   message delivery.
+   identity. The UID is calendar data, not a Matrix recipient field. The
+   authenticated room reminder configuration API is implemented separately;
+   it stores inert intent after server-side authorization but does not prove
+   that the event, recurrence instance, or VALARM exists in CalDAV. This
+   decision does not change Matrix recipient storage or implement widget
+   controls/wiring, CalDAV identity resolution, a scheduler, delivery-time
+   permission rechecks, or Matrix message delivery.
 6. Treat alarm UIDs as optional data that external CalDAV clients may remove or
-   change. A future configuration API or scheduler must fetch the canonical
-   current CalDAV resource, resolve the exact UID, and fail closed when that
-   UID is missing, changed, duplicated, or ambiguous. Never fall back to alarm
-   order, description, or trigger to guess an identity.
+   change. Before widget configuration is wired or a scheduler uses stored
+   intent, the CalDAV integration must fetch the current canonical resource,
+   resolve the exact event, recurrence, and alarm UID, and fail closed when an
+   identity is missing, changed, duplicated, or ambiguous. Never fall back to
+   alarm order, description, or trigger to guess an identity.
 7. Keep ADR018's remaining boundaries: only supported DISPLAY alarms are
    editable; unsupported alarm actions remain inert, and the editor does not
    execute alarms or send notifications.
@@ -52,8 +56,13 @@ Matrix recipients and delivery state remain separate under ADR007 and ADR019.
 - Users can deliberately create or remove DISPLAY alarms while new events
   remain alarm-free unless the Add action is used.
 - Widget-created alarms have a stable RFC 9074 identity suitable for a future
-  sidecar API. Imported UID-less alarms remain interoperable and preserved, but
-  cannot be selected by a future sidecar API until an explicit UID is assigned.
+  sidecar integration. Imported UID-less alarms remain interoperable and
+  preserved, but cannot be resolved for scheduling until an explicit UID is
+  assigned.
+- The authenticated server API persists inert intent but does not validate
+  referenced calendar objects. Widget affordance/wiring and current CalDAV
+  event/recurrence/UID resolution remain separate work before reminders can be
+  scheduled or delivered.
 - Another CalDAV client can invalidate a configured alarm identity by changing
   or removing its optional UID. Future reminder code must detect that change
   from canonical CalDAV state and stop rather than guessing.

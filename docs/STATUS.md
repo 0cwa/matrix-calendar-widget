@@ -90,10 +90,12 @@ Complete on `main`:
   unit coverage and a PostgreSQL integration contract. The widget explicitly
   creates and removes DISPLAY alarms; each newly created alarm gets a stable
   RFC 9074 VALARM UID for future sidecar identity. This does not configure
-  Matrix recipients or trigger delivery. ADR007
-  reminder targets still need an authenticated configuration API that resolves
-  the exact UID from current CalDAV data and fails closed if it is absent,
-  changed, or ambiguous. The server chart projects
+  Matrix recipients or trigger delivery. The authenticated room reminder
+  configuration API stores inert intent after room membership, binding, and
+  event-write policy checks. It does not prove the event, recurrence instance,
+  or VALARM UID exists in CalDAV. Widget controls and wiring, current CalDAV
+  existence/UID resolution, scheduling, delivery-time `@room` permission
+  rechecks, and Matrix sends remain incomplete. The server chart projects
   `MATRIX_CALENDAR_REMINDER_DATABASE_URL` only from an external Secret when
   reminders are enabled; no database is provisioned by the chart. Do not use
   Synapse's database/schema or `pg-credentials` secret. Email attendee fields,

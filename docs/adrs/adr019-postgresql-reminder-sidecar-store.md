@@ -50,8 +50,10 @@ role, or credentials an application data boundary.
    with claim tokens. Only one worker can hold an unexpired claim for a delivery;
    expired or explicitly released claims can be retried. Persist sent state before
    considering the delivery complete. The implemented storage port and
-   PostgreSQL adapter provide this durable claim boundary; the scheduler and
-   reminder configuration API remain future work.
+   PostgreSQL adapter provide this durable claim boundary. The authenticated
+   room configuration API also uses this store after its membership, binding,
+   and event-write checks, but it stores inert intent and does not resolve the
+   event, recurrence instance, or alarm in CalDAV.
 6. Treat Matrix delivery as at-least-once. Matrix may accept a message before
    the worker records the sent state, so a crash in that gap can cause a duplicate
    on retry. Exactly-once Matrix event delivery cannot be guaranteed by a database
@@ -69,10 +71,11 @@ role, or credentials an application data boundary.
    stores current bot filesystem state and is separate from PostgreSQL reminder
    persistence. Keep `replicaCount: 1` by default; database claims do not settle
    bot-state and authentication requirements for multiple server replicas.
-10. Reminder delivery still requires ADR007's current visibility and
-    `@room`-permission checks. This decision does not add reminder configuration
-    endpoints, scheduling, Matrix delivery wiring, or relax the #48/#45 Radicale
-    delegation and ADR014 trusted-domain gates.
+10. Reminder delivery still requires ADR007's delivery-time visibility and
+    `@room`-permission rechecks. The API does not validate configured identities
+    against current CalDAV data or add widget controls/wiring, scheduling, or
+    Matrix delivery. The #48/#45 Radicale delegation and ADR014 trusted-domain
+    gates remain in force.
 
 ## Consequences
 
@@ -84,15 +87,18 @@ role, or credentials an application data boundary.
 - A one-replica deployment can persist reminder metadata across restarts. The
   claim protocol supports contention among future workers, but does not
   authorize general multi-replica server operation.
-- The store and claim adapter are implemented with local unit coverage and a
-  PostgreSQL integration contract. Live PostgreSQL integration remains
-  dependent on an available database. The scheduler, authenticated reminder
-  configuration API, permission checks, and delivery remain unimplemented.
+- The store, claim adapter, and authenticated room configuration API are
+  implemented with unit coverage and a PostgreSQL integration contract. The
+  API stores inert target identity after server-side authorization; it does not
+  prove the referenced event, recurrence instance, or VALARM exists in CalDAV.
+  Widget controls/wiring, exact CalDAV identity resolution, scheduling,
+  delivery-time permission rechecks, and Matrix delivery remain unimplemented.
+  Live PostgreSQL integration remains dependent on an available database.
 - Stable alarm identity support is implemented for widget-created DISPLAY
   alarms. External CalDAV clients can remove or change optional VALARM UIDs, so
-  future configuration and scheduler code must resolve the exact UID from the
-  current CalDAV resource and fail closed when it is absent, changed, or
-  ambiguous; alarm order and description are not fallback identities.
+  the CalDAV validation/scheduling path must resolve the exact UID from the
+  current resource and fail closed when it is absent, changed, or ambiguous;
+  alarm order and description are not fallback identities.
 - Whole-room `@room` is the first reminder target. Email attendees,
   verified-address registration, and consent flows remain deferred.
 - Live room-calendar integration remains subject to ADR014's trusted-domain

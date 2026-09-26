@@ -133,16 +133,19 @@ The gated recurring-resource CalDAV contract is defined in `matrix-calendar-serv
       response semantics until member addresses can be verified and their
       owners give explicit consent. Matrix membership/member APIs do not expose
       other members' email addresses; never infer email from a Matrix ID.
-- [ ] Add an authenticated API that persists per-alarm Matrix reminder targets
-      as ADR007 sidecar metadata through the implemented PostgreSQL store,
-      outside iCalendar. Use the widget-created RFC 9074 VALARM UID as the
-      stable alarm identity under ADR020; resolve it from current CalDAV data
-      and fail closed if it is absent, changed, or ambiguous. Require current
-      room membership and event-write checks.
+- [x] Add an authenticated room API that stores per-alarm Matrix reminder
+      intent through the PostgreSQL store (ADR007/ADR019). It checks room
+      membership and event-write policy but does not prove that the referenced
+      event, recurrence instance, or VALARM exists in CalDAV.
+- [ ] Wire the widget's reminder controls to the authenticated configuration
+      API.
+- [ ] Resolve the configured event, recurrence identity, and RFC 9074 VALARM
+      UID against the current CalDAV resource before enabling reminder use.
+      Fail closed if an identity is absent, changed, or ambiguous (ADR020).
 - [x] Implement the optional app-owned PostgreSQL reminder-state store and
       atomic durable delivery claims (ADR019). The store has local unit coverage
-      and a PostgreSQL integration contract wired into CI; this does not enable
-      reminder configuration or delivery.
+      and a PostgreSQL integration contract wired into CI; the API persists
+      inert configuration only and does not enable reminder delivery.
 - [ ] Deliver reminders through standard `m.mentions.room: true` with
       scheduling and delivery-time permission checks. Delivery is at-least-once;
       a Matrix send followed by a process crash before sent-state persistence
@@ -162,8 +165,10 @@ multi-replica safety.
 Local progress only: the gateway actor/membership/power/binding preflight and
 the static single-target room widget UI are complete on local branches. These
 sub-slices do not enable live room-principal CalDAV access and do not complete
-M6 or issue #7. Reminder configuration API, scheduling, delivery-time
-permissions, Matrix delivery, and event attendee email semantics remain open.
+M6 or issue #7. Widget reminder controls, CalDAV event/alarm resolution,
+scheduling, delivery-time permission rechecks, Matrix delivery, and event
+attendee email semantics remain open; the authenticated API currently stores
+inert intent only.
 Live room delivery still depends on #48/#45 and ADR014's trusted-domain isolation gate; the M5 pinned
 Radicale recurring-resource run remains a separate open interoperability gate.
 
