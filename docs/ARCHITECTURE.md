@@ -39,18 +39,18 @@ The gateway and bot are initially one deployable service. Split them only when s
 
 ## Source-of-truth boundaries
 
-| Concern                        | Canonical store                       |
-| ------------------------------ | ------------------------------------- |
-| calendar collection            | CalDAV/Radicale                       |
-| VEVENT fields                  | iCalendar object in Radicale          |
-| UID, SEQUENCE, recurrence      | iCalendar object                      |
-| organizer/attendees            | iCalendar object                      |
-| VALARM                         | iCalendar object                      |
-| calendar display properties    | CalDAV properties where supported     |
-| Matrix room ↔ calendar binding | Server-managed configuration (ADR015) |
-| Matrix reminder recipients     | gateway sidecar store                 |
-| reminder delivery history      | gateway store                         |
-| Matrix permissions             | Matrix room state + configured policy |
+| Concern                        | Canonical store                                |
+| ------------------------------ | ---------------------------------------------- |
+| calendar collection            | CalDAV/Radicale                                |
+| VEVENT fields                  | iCalendar object in Radicale                   |
+| UID, SEQUENCE, recurrence      | iCalendar object                               |
+| organizer/attendees            | iCalendar object                               |
+| VALARM                         | iCalendar object                               |
+| calendar display properties    | CalDAV properties where supported              |
+| Matrix room ↔ calendar binding | Server-managed configuration (ADR015)          |
+| Matrix reminder configuration  | app-owned PostgreSQL sidecar database (ADR019) |
+| reminder delivery state        | app-owned PostgreSQL sidecar database (ADR019) |
+| Matrix permissions             | Matrix room state + configured policy          |
 
 ## Collection profile
 
@@ -146,14 +146,21 @@ access remains gated on the OpenID plugin and real-Radicale contract (#48/#45).
 
 ## Reminder delivery
 
-VALARM expresses _when_ a reminder is due. Matrix recipient targeting is gateway sidecar metadata keyed to a stable event/alarm identity.
+VALARM expresses _when_ a reminder is due. Matrix recipient targeting is
+gateway sidecar metadata keyed to a stable calendar/event/recurrence/alarm
+identity and stored in the app-owned PostgreSQL database described by ADR019.
+CalDAV remains canonical for event resources and alarm timing; the sidecar
+database is separate from Synapse's schema and credentials.
 
-Delivery uses Matrix messages with:
+Delivery uses normal Matrix messages with `m.mentions.user_ids` for selected
+users or `m.mentions.room: true` for `@room`, only when the bot/user has
+permission at delivery time.
 
-- `m.mentions.user_ids` for selected users,
-- `m.mentions.room: true` for `@room`, only when the bot/user has permission.
-
-The scheduler must be idempotent and keep delivery state so restarts do not duplicate reminders.
+The scheduler must use durable delivery state and idempotent claims. Exactly-once
+Matrix delivery is not promised because a Matrix send and PostgreSQL commit
+cannot share one transaction. The initial M6 target is whole-room `@room`; email
+attendee fields are deferred until member addresses can be verified and their
+owners give explicit consent.
 
 ## MSC4496
 
