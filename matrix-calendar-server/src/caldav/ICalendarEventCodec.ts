@@ -51,6 +51,8 @@ export type ICalendarEventCodecErrorCode =
   | 'missing-timing'
   | 'invalid-timing'
   | 'invalid-recurrence'
+  | 'recurrence-exception-orphaned'
+  | 'recurrence-exception-unverifiable'
   | 'unsupported-patch';
 
 export class ICalendarEventCodecError extends Error {
@@ -142,6 +144,24 @@ export class ParsedICalendarEvent {
         patch.recurrence,
         this.event.recurrence,
         patch.timing ?? this.event.timing,
+      );
+    }
+
+    if (
+      hasOwn(patch, 'recurrence') ||
+      (hasOwn(patch, 'timing') &&
+        patch.timing &&
+        !sameTimingStart(patch.timing, this.event.timing))
+    ) {
+      const proposed = new ICalendarEventCodec().parse(
+        this.event.calendarId,
+        this.event.id,
+        calendar.toString(),
+      ).event;
+      assertRecurrenceExceptionsRetained(
+        this.calendar,
+        this.event.uid,
+        proposed,
       );
     }
 
@@ -313,6 +333,144 @@ export class ParsedICalendarEvent {
       );
     }
   }
+}
+
+const maximumExceptionIdentitiesToValidate = 10_000;
+const recurrenceValidationPaddingMilliseconds = 3 * 24 * 60 * 60 * 1000;
+const maximumRecurrenceCandidatesToValidate = 100_000;
+
+function assertRecurrenceExceptionsRetained(
+  source: ICAL.Component,
+  uid: string,
+  proposedEvent: CalendarEvent,
+): void {
+  const identities: CalendarEventDateTime[] = [];
+
+  for (const vevent of source.getAllSubcomponents('vevent')) {
+    const recurrenceIdProperties = vevent.getAllProperties('recurrence-id');
+    if (recurrenceIdProperties.length === 0) {
+      continue;
+    }
+
+    const uidProperties = vevent.getAllProperties('uid');
+    if (uidProperties.length === 0) {
+      throw recurrenceMembershipUnverifiable();
+    }
+
+    const belongsToSeries = uidProperties.some(
+      (property) => textValue(property.getFirstValue()) === uid,
+    );
+    if (!belongsToSeries) {
+      continue;
+    }
+
+    if (uidProperties.length !== 1 || recurrenceIdProperties.length !== 1) {
+      throw recurrenceMembershipUnverifiable();
+    }
+
+    try {
+      identities.push(readDateTimeProperty(recurrenceIdProperties[0]));
+    } catch {
+      throw recurrenceMembershipUnverifiable();
+    }
+
+    if (identities.length > maximumExceptionIdentitiesToValidate) {
+      throw recurrenceMembershipUnverifiable();
+    }
+  }
+
+  if (identities.length === 0) {
+    return;
+  }
+
+  let minimumWallTime = Number.POSITIVE_INFINITY;
+  let maximumWallTime = Number.NEGATIVE_INFINITY;
+  for (const identity of identities) {
+    const local =
+      identity.type === 'date'
+        ? `${identity.value}T00:00:00`
+        : identity.value.local;
+    const wallTime = DateTime.fromISO(local, { zone: 'UTC' });
+    if (!wallTime.isValid) {
+      throw recurrenceMembershipUnverifiable();
+    }
+    minimumWallTime = Math.min(minimumWallTime, wallTime.toMillis());
+    maximumWallTime = Math.max(maximumWallTime, wallTime.toMillis());
+  }
+
+  const rangeStart = DateTime.fromMillis(
+    minimumWallTime - recurrenceValidationPaddingMilliseconds,
+    { zone: 'UTC' },
+  ).toISO();
+  const rangeEnd = DateTime.fromMillis(
+    maximumWallTime + recurrenceValidationPaddingMilliseconds,
+    { zone: 'UTC' },
+  ).toISO();
+  if (!rangeStart || !rangeEnd) {
+    throw recurrenceMembershipUnverifiable();
+  }
+
+  let generatedIdentities: Set<string>;
+  try {
+    const recurrence = proposedEvent.recurrence;
+    const candidates = expandCalendarEvent(
+      {
+        ...proposedEvent,
+        recurrence: recurrence ? { ...recurrence, overrides: [] } : undefined,
+      },
+      { start: rangeStart, end: rangeEnd },
+      {
+        rangeTimezone: 'UTC',
+        maxRuleCandidates: maximumRecurrenceCandidatesToValidate,
+        timezoneResolver: createCalDavTimezoneResolver(
+          ICAL.Component.fromString(source.toString()),
+          maximumRecurrenceCandidatesToValidate,
+        ),
+      },
+    );
+    generatedIdentities = new Set(
+      candidates.map((candidate) => dateTimeValueKey(candidate.recurrenceId)),
+    );
+  } catch {
+    throw recurrenceMembershipUnverifiable();
+  }
+
+  if (
+    identities.some(
+      (identity) => !generatedIdentities.has(dateTimeValueKey(identity)),
+    )
+  ) {
+    throw new ICalendarEventCodecError(
+      'recurrence-exception-orphaned',
+      'This series change would detach an existing occurrence override. Keep its original occurrence date in the recurrence before saving.',
+    );
+  }
+}
+
+function recurrenceMembershipUnverifiable(): ICalendarEventCodecError {
+  return new ICalendarEventCodecError(
+    'recurrence-exception-unverifiable',
+    'This series change cannot be checked safely because its recurrence rules or timezone data are unsupported or exceed the validation limit.',
+  );
+}
+
+function sameTimingStart(
+  left: CalendarEventTiming,
+  right: CalendarEventTiming,
+): boolean {
+  if (left.type !== right.type) {
+    return false;
+  }
+  if (left.type === 'all-day' && right.type === 'all-day') {
+    return left.startDate === right.startDate;
+  }
+  if (left.type === 'timed' && right.type === 'timed') {
+    return (
+      dateTimeValueKey({ type: 'date-time', value: left.start }) ===
+      dateTimeValueKey({ type: 'date-time', value: right.start })
+    );
+  }
+  return false;
 }
 
 export class ICalendarEventCodec {

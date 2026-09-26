@@ -73,6 +73,8 @@
       "readOnly": "Dieser Kalender ist schreibgeschützt.",
       "recurrence": "Wiederholen",
       "recurrenceDateTypeMismatch": "Wiederholungsdaten müssen denselben Datum- oder Datum-Uhrzeit-Typ wie der Terminbeginn haben. Korrigiere oder entferne inkompatible gespeicherte Werte, bevor du die Wiederholung änderst.",
+      "recurrenceExceptionOrphaned": "Diese Serienänderung würde eine vorhandene Ausnahme von ihrem ursprünglichen Vorkommen trennen. Behalte das ursprüngliche Vorkommensdatum in der Wiederholung, bevor du speicherst.",
+      "recurrenceExceptionUnverifiable": "Diese Serienänderung kann nicht sicher geprüft werden, weil die Wiederholungsregeln oder Zeitzonendaten nicht unterstützt werden oder das Prüflimit überschritten ist. Der Termin wurde nicht geändert.",
       "recurrenceTimingTypeLocked": "Der Typ (mit Uhrzeit oder ganztägig) kann bei vorhandenen Wiederholungsdaten nicht geändert werden. Entferne und speichere zuerst die Wiederholung.",
       "reloadError": "Die neueste Version des Termins konnte nicht geladen werden.",
       "reloadLatest": "Neueste Version laden",

@@ -640,4 +640,61 @@ describe('<CalendarEventEditorDialog />', () => {
       await screen.findByText('The event could not be saved.'),
     ).toBeInTheDocument();
   });
+
+  it.each([
+    [
+      'recurrence-exception-orphaned',
+      'This series change would detach an existing occurrence override. Keep its original occurrence date in the recurrence before saving.',
+    ],
+    [
+      'recurrence-exception-unverifiable',
+      'This series change cannot be checked safely because its recurrence rules or timezone data are unsupported or exceed the validation limit. The current event was not changed.',
+    ],
+  ] as const)(
+    'explains %s and keeps the edited series form open',
+    async (code, message) => {
+      const recurringEvent: CalendarEvent = {
+        ...event,
+        recurrence: { rrule: 'FREQ=DAILY' },
+      };
+      const repository = new InMemoryCalendarRepository({
+        calendars: [calendar],
+        events: [recurringEvent],
+      });
+      const updateSpy = vi
+        .spyOn(repository, 'updateEvent')
+        .mockRejectedValue(new CalendarRepositoryError(code, message));
+      const onClose = vi.fn();
+
+      render(
+        <CalendarEventEditorDialog
+          calendars={[calendar]}
+          event={recurringEvent}
+          onClose={onClose}
+          open
+        />,
+        { wrapper: createWrapper(repository) },
+      );
+
+      await userEvent.type(
+        await screen.findByRole('textbox', { name: /Title/i }),
+        ' revised',
+      );
+      await userEvent.click(
+        screen.getByRole('combobox', { name: 'Repeat event' }),
+      );
+      await userEvent.click(
+        await screen.findByRole('option', { name: 'Weekly' }),
+      );
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: /Title/i })).toHaveValue(
+        'Planning revised',
+      );
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+      expect(updateSpy.mock.calls[0][2]).toHaveProperty('recurrence');
+      expect(onClose).not.toHaveBeenCalled();
+    },
+  );
 });

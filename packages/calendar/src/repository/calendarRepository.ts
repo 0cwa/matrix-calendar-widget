@@ -34,6 +34,8 @@ export type CalendarRepositoryErrorCode =
   | 'invalid-calendar-name'
   | 'invalid-range'
   | 'event-conflict'
+  | 'recurrence-exception-orphaned'
+  | 'recurrence-exception-unverifiable'
   | 'authentication-required'
   | 'request-failed';
 

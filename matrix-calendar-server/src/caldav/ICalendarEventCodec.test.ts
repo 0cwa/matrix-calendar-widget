@@ -279,6 +279,361 @@ describe('ICalendarEventCodec', () => {
     expect(cancelledOverride.getFirstPropertyValue('status')).toBe('CANCELLED');
   });
 
+  it('preserves moved and cancelled overrides when a series edit retains their original identities', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-override.ics',
+      fixture('recurrence-override.ics'),
+    );
+
+    const encoded = parsed.applyPatch({
+      recurrence: {
+        ...parsed.event.recurrence!,
+        rrule: 'FREQ=WEEKLY;COUNT=5',
+      },
+    });
+    const calendar = ICAL.Component.fromString(encoded.icalendar);
+    const vevents = calendar.getAllSubcomponents('vevent');
+
+    expect(vevents).toHaveLength(3);
+    expect(vevents[1].getFirstPropertyValue('recurrence-id')?.toString()).toBe(
+      '2026-10-12T14:00:00',
+    );
+    expect(vevents[1].getFirstPropertyValue('dtstart')?.toString()).toBe(
+      '2026-10-12T16:00:00',
+    );
+    expect(vevents[1].getFirstPropertyValue('x-override-marker')).toBe(
+      'preserve-exception',
+    );
+    expect(vevents[2].getFirstPropertyValue('recurrence-id')?.toString()).toBe(
+      '2026-10-19T14:00:00',
+    );
+    expect(vevents[2].getFirstPropertyValue('status')).toBe('CANCELLED');
+    expect(calendar.getFirstSubcomponent('vtimezone')).not.toBeNull();
+    expect(calendar.getFirstPropertyValue('x-custom-calendar-property')).toBe(
+      'preserve-resource-value',
+    );
+  });
+
+  it('rejects recurrence edits that remove an override identity without changing the parsed source', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-override.ics',
+      fixture('recurrence-override.ics'),
+    );
+
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          ...parsed.event.recurrence!,
+          rrule: 'FREQ=WEEKLY;COUNT=2',
+        },
+      }),
+    ).toThrow(
+      expect.objectContaining({ code: 'recurrence-exception-orphaned' }),
+    );
+
+    const unrelatedPatch = parsed.applyPatch({ title: 'Still unchanged' });
+    expect(unrelatedPatch.icalendar).toContain('RRULE:FREQ=WEEKLY;COUNT=4');
+    expect(unrelatedPatch.icalendar).toContain(
+      'RECURRENCE-ID;TZID=Europe/Stockholm:20261012T140000',
+    );
+    expect(unrelatedPatch.icalendar).toContain('SUMMARY:Weekly review - moved');
+  });
+
+  it('rejects DTSTART and EXDATE changes that orphan an existing override', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-override.ics',
+      fixture('recurrence-override.ics'),
+    );
+
+    expect(() =>
+      parsed.applyPatch({
+        timing: {
+          type: 'timed',
+          start: {
+            local: '2026-10-06T14:00:00',
+            timezone: 'Europe/Stockholm',
+            mode: 'tzid',
+          },
+          end: {
+            local: '2026-10-06T15:00:00',
+            timezone: 'Europe/Stockholm',
+            mode: 'tzid',
+          },
+        },
+      }),
+    ).toThrow(
+      expect.objectContaining({ code: 'recurrence-exception-orphaned' }),
+    );
+
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          ...parsed.event.recurrence!,
+          exdates: [
+            ...(parsed.event.recurrence?.exdates ?? []),
+            {
+              type: 'date-time',
+              value: {
+                local: '2026-10-12T14:00:00',
+                timezone: 'Europe/Stockholm',
+                mode: 'tzid',
+              },
+            },
+          ],
+        },
+      }),
+    ).toThrow(
+      expect.objectContaining({ code: 'recurrence-exception-orphaned' }),
+    );
+  });
+
+  it('compares exception identities using their exact DATE-TIME mode', () => {
+    const parsed = codec.parse(
+      'team',
+      'mode-mismatch.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:mode-mismatch@example.test
+DTSTART:20260924T080000Z
+DTEND:20260924T090000Z
+RRULE:FREQ=DAILY;COUNT=2
+SUMMARY:UTC series
+END:VEVENT
+BEGIN:VEVENT
+UID:mode-mismatch@example.test
+RECURRENCE-ID:20260925T080000
+DTSTART:20260925T100000
+DTEND:20260925T110000
+SUMMARY:Floating exception
+END:VEVENT
+END:VCALENDAR`,
+    );
+
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          ...parsed.event.recurrence!,
+          rrule: 'FREQ=DAILY;COUNT=3',
+        },
+      }),
+    ).toThrow(
+      expect.objectContaining({ code: 'recurrence-exception-orphaned' }),
+    );
+  });
+
+  it('checks RDATE-only and RANGE override identities before accepting a series edit', () => {
+    const rdateOnly = codec.parse(
+      'team',
+      'rdate-only.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:rdate-only@example.test
+DTSTART:20260928T090000Z
+DTEND:20260928T100000Z
+RDATE:20261005T090000Z
+SUMMARY:RDATE only
+END:VEVENT
+BEGIN:VEVENT
+UID:rdate-only@example.test
+RECURRENCE-ID:20261005T090000Z
+DTSTART:20261005T110000Z
+DTEND:20261005T120000Z
+SUMMARY:Moved RDATE-only instance
+END:VEVENT
+END:VCALENDAR`,
+    );
+
+    expect(() =>
+      rdateOnly.applyPatch({
+        recurrence: { ...rdateOnly.event.recurrence!, rdates: [] },
+      }),
+    ).toThrow(
+      expect.objectContaining({ code: 'recurrence-exception-orphaned' }),
+    );
+
+    const ranged = codec.parse(
+      'team',
+      'ranged.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:ranged@example.test
+DTSTART:20260928T090000Z
+DTEND:20260928T100000Z
+RRULE:FREQ=WEEKLY;COUNT=4
+SUMMARY:Ranged series
+END:VEVENT
+BEGIN:VEVENT
+UID:ranged@example.test
+RECURRENCE-ID;RANGE=THISANDFUTURE:20261012T090000Z
+DTSTART:20261012T110000Z
+DTEND:20261012T120000Z
+SUMMARY:Opaque range override
+END:VEVENT
+END:VCALENDAR`,
+    );
+
+    expect(ranged.event.unsupportedRecurrence).toBe('ranged-override');
+    expect(() =>
+      ranged.applyPatch({
+        recurrence: {
+          ...ranged.event.recurrence!,
+          rrule: 'FREQ=WEEKLY;COUNT=2',
+        },
+      }),
+    ).toThrow(
+      expect.objectContaining({ code: 'recurrence-exception-orphaned' }),
+    );
+  });
+
+  it('uses PERIOD starts for membership and refuses membership it cannot prove', () => {
+    const period = codec.parse(
+      'team',
+      'period.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:period@example.test
+DTSTART:20260928T090000Z
+DTEND:20260928T100000Z
+RDATE;VALUE=PERIOD:20261005T090000Z/20261005T110000Z
+SUMMARY:Period series
+END:VEVENT
+BEGIN:VEVENT
+UID:period@example.test
+RECURRENCE-ID:20261005T090000Z
+DTSTART:20261005T120000Z
+DTEND:20261005T130000Z
+SUMMARY:Moved period instance
+END:VEVENT
+END:VCALENDAR`,
+    );
+
+    expect(() =>
+      period.applyPatch({
+        recurrence: {
+          ...period.event.recurrence!,
+          rdates: [
+            {
+              type: 'date-time',
+              value: {
+                local: '2026-10-06T09:00:00',
+                timezone: 'UTC',
+                mode: 'utc',
+              },
+            },
+          ],
+        },
+      }),
+    ).not.toThrow();
+
+    const unsupported = codec.parse(
+      'team',
+      'unsupported-with-override.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:unsupported-override@example.test
+DTSTART:20260928T090000Z
+DTEND:20260928T100000Z
+RRULE:COUNT=1
+SUMMARY:Unsupported recurrence
+END:VEVENT
+BEGIN:VEVENT
+UID:unsupported-override@example.test
+RECURRENCE-ID:20260929T090000Z
+DTSTART:20260929T110000Z
+DTEND:20260929T120000Z
+SUMMARY:Moved instance
+END:VEVENT
+END:VCALENDAR`,
+    );
+
+    expect(() =>
+      unsupported.applyPatch({
+        recurrence: {
+          ...unsupported.event.recurrence!,
+          rdates: [],
+        },
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'recurrence-exception-unverifiable',
+      }),
+    );
+
+    const overLimit = codec.parse(
+      'team',
+      'over-limit.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:over-limit@example.test
+DTSTART:20000101T090000Z
+DTEND:20000101T100000Z
+RRULE:FREQ=DAILY
+SUMMARY:Long recurrence
+END:VEVENT
+BEGIN:VEVENT
+UID:over-limit@example.test
+RECURRENCE-ID:24000101T090000Z
+DTSTART:24000101T110000Z
+DTEND:24000101T120000Z
+SUMMARY:Moved distant instance
+END:VEVENT
+END:VCALENDAR`,
+    );
+
+    expect(() =>
+      overLimit.applyPatch({
+        recurrence: { ...overLimit.event.recurrence!, exdates: [] },
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'recurrence-exception-unverifiable',
+      }),
+    );
+  });
+
+  it('refuses recurrence edits when a detached VEVENT has no UID', () => {
+    const parsed = codec.parse(
+      'team',
+      'missing-exception-uid.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:missing-exception-uid@example.test
+DTSTART:20260924T080000Z
+DTEND:20260924T090000Z
+RRULE:FREQ=DAILY;COUNT=3
+SUMMARY:Team planning
+END:VEVENT
+BEGIN:VEVENT
+RECURRENCE-ID:20260926T080000Z
+DTSTART:20260926T100000Z
+DTEND:20260926T110000Z
+SUMMARY:Unverifiable moved planning
+END:VEVENT
+END:VCALENDAR`,
+    );
+
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          ...parsed.event.recurrence!,
+          rrule: 'FREQ=DAILY;COUNT=2',
+        },
+      }),
+    ).toThrow(
+      expect.objectContaining({ code: 'recurrence-exception-unverifiable' }),
+    );
+  });
+
   it('creates a same-resource override for a generated occurrence', () => {
     const parsed = codec.parse(
       'team',

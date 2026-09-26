@@ -929,6 +929,123 @@ END:VCALENDAR`;
     expect(putInit?.body).toContain('X-CUSTOM:preserve');
   });
 
+  it('rejects a series edit that removes an override identity before CalDAV PUT', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = `${calendarId}series.ics`;
+    fetch.mockResponseOnce(
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:series@example.test
+DTSTART:20260924T080000Z
+DTEND:20260924T090000Z
+RRULE:FREQ=DAILY;COUNT=3
+SUMMARY:Team planning
+END:VEVENT
+BEGIN:VEVENT
+UID:series@example.test
+RECURRENCE-ID:20260926T080000Z
+DTSTART:20260926T100000Z
+DTEND:20260926T110000Z
+SUMMARY:Moved planning
+END:VEVENT
+END:VCALENDAR`,
+      {
+        status: 200,
+        headers: { ETag: '"current-etag"' },
+      },
+    );
+
+    try {
+      await createController().updateEvent(
+        userContext,
+        openIdCredential,
+        { recurrence: { rrule: 'FREQ=DAILY;COUNT=2' } },
+        '"current-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      );
+      throw new Error('Expected an orphaning series edit to be refused');
+    } catch (error) {
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getResponse()).toEqual({
+        code: 'recurrence-exception-orphaned',
+        message: expect.stringContaining('would detach an existing'),
+      });
+      expect(
+        JSON.stringify((error as BadRequestException).getResponse()),
+      ).not.toContain('Moved planning');
+    }
+
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'update-event',
+      calendarId,
+      eventId,
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it('refuses an unverifiable detached VEVENT before CalDAV PUT', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = `${calendarId}series.ics`;
+    fetch.mockResponseOnce(
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:series@example.test
+DTSTART:20260924T080000Z
+DTEND:20260924T090000Z
+RRULE:FREQ=DAILY;COUNT=3
+SUMMARY:Team planning
+END:VEVENT
+BEGIN:VEVENT
+RECURRENCE-ID:20260926T080000Z
+DTSTART:20260926T100000Z
+DTEND:20260926T110000Z
+SUMMARY:Unverifiable moved planning
+END:VEVENT
+END:VCALENDAR`,
+      {
+        status: 200,
+        headers: { ETag: '"current-etag"' },
+      },
+    );
+
+    try {
+      await createController().updateEvent(
+        userContext,
+        openIdCredential,
+        { recurrence: { rrule: 'FREQ=DAILY;COUNT=2' } },
+        '"current-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      );
+      throw new Error('Expected an unverifiable series edit to be refused');
+    } catch (error) {
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getResponse()).toEqual({
+        code: 'recurrence-exception-unverifiable',
+        message: expect.stringContaining('cannot be checked safely'),
+      });
+      expect(
+        JSON.stringify((error as BadRequestException).getResponse()),
+      ).not.toContain('Unverifiable moved planning');
+    }
+
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'update-event',
+      calendarId,
+      eventId,
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+  });
+
   it('maps stale event updates to a stable conflict response', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';

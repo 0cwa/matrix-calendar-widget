@@ -79,6 +79,7 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [x] Supported RRULE series editor based on inherited NeoDateFix recurrence UI; unsupported loaded rules are preserved until explicitly replaced.
 - [x] RDATE / EXDATE series editing with explicit DATE, floating, UTC, and TZID values.
 - [x] RECURRENCE-ID instance overrides for generated and RDATE-only occurrences: edit or cancel one instance through a same-resource conditional write (ADR012).
+- [x] Preserve existing detached exceptions when a series edit retains their typed recurrence identities; refuse RRULE, DTSTART, RDATE, or EXDATE edits that orphan or cannot safely verify an exception before PUT (ADR016).
 - [x] Add range-bounded read expansion for resource RRULE/RDATE/EXDATE sets, RDATE PERIOD durations, and same-resource exceptions (local backend slice; `RANGE=THISANDFUTURE` remains preserved and fails visibly).
 - [x] Present generated occurrences in the visible range using the viewer-local timezone for DATE and floating recurrence values, with stable original recurrence identities; explicit UTC/TZID values remain unchanged and unsupported expansion is shown as a warning (ADR011 carries opaque ranged-override diagnostics without interpreting or rewriting the source component; ADR013 records the timezone policy).
 - [ ] “this and following / series” edit semantics where representable; single-instance edit and cancel are implemented above.
@@ -89,6 +90,8 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [ ] Attachments/conference properties where safely interoperable.
 
 The current series editor locks timed/all-day conversion while recurrence data is present. Visible recurring occurrences retain their backing resource ID and original recurrence ID. Editing or cancelling one instance uses a same-resource conditional override and leaves the master and sibling occurrences intact. “This and following” and series-wide edit scopes remain separate work.
+
+Series edits that change occurrence membership are checked against every existing detached exception before the resource is written. The server preserves exceptions whose exact original recurrence identities remain and refuses edits that remove an identity or whose membership cannot be proven; it does not remap or delete exceptions.
 
 **Exit:** common recurring calendars round-trip with mainstream CalDAV clients.
 

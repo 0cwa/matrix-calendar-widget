@@ -514,7 +514,7 @@ export class CalendarGatewayController {
     );
     const etag = this.requireQuery(ifMatch, 'If-Match');
 
-    return this.runCalDav(async () => {
+    return this.runCodecCalDav(async () => {
       const client = this.eventClient(userContext, openIdCredential);
       const codec = new ICalendarEventCodec();
       const current = await client.getEvent(normalizedEventId);
@@ -564,7 +564,7 @@ export class CalendarGatewayController {
     );
     const etag = this.requireQuery(ifMatch, 'If-Match');
 
-    return this.runOccurrenceCalDav(async () => {
+    return this.runCodecCalDav(async () => {
       const client = this.eventClient(userContext, openIdCredential);
       const codec = new ICalendarEventCodec();
       const current = await client.getEvent(normalizedEventId);
@@ -612,7 +612,7 @@ export class CalendarGatewayController {
     );
     const etag = this.requireQuery(ifMatch, 'If-Match');
 
-    return this.runOccurrenceCalDav(async () => {
+    return this.runCodecCalDav(async () => {
       const client = this.eventClient(userContext, openIdCredential);
       const codec = new ICalendarEventCodec();
       const current = await client.getEvent(normalizedEventId);
@@ -899,9 +899,7 @@ export class CalendarGatewayController {
     }
   }
 
-  private async runOccurrenceCalDav<T>(
-    operation: () => Promise<T>,
-  ): Promise<T> {
+  private async runCodecCalDav<T>(operation: () => Promise<T>): Promise<T> {
     try {
       return await this.runCalDav(operation);
     } catch (error) {

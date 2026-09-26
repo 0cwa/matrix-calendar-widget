@@ -370,6 +370,43 @@ describe('GatewayCalendarRepository', () => {
     );
   });
 
+  it.each([
+    [
+      'recurrence-exception-orphaned',
+      'The series change would detach an existing occurrence override',
+    ],
+    [
+      'recurrence-exception-unverifiable',
+      'The series change cannot be checked safely',
+    ],
+  ] as const)(
+    'maps %s without trusting gateway message text',
+    async (code, message) => {
+      const fetchMock = mockFetch(
+        jsonResponse({ event, etag: '"current-etag"' }),
+        new Response(
+          JSON.stringify({
+            code,
+            message: 'This response must not be shown to the user',
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+      const repository = createRepository(fetchMock);
+      await repository.getEvent(calendarId, eventId);
+
+      await expect(
+        repository.updateEvent(calendarId, eventId, {
+          title: 'Updated title',
+        }),
+      ).rejects.toEqual(new CalendarRepositoryError(code, message));
+
+      expect(
+        new Headers(fetchMock.mock.calls[1][1]?.headers).get('If-Match'),
+      ).toBe('"current-etag"');
+    },
+  );
+
   it('creates and deletes through the gateway', async () => {
     const created = {
       ...event,

@@ -358,6 +358,30 @@ export function CalendarEventEditorDialog({
                 ),
           ),
         );
+      } else if (
+        caught instanceof CalendarRepositoryError &&
+        caught.code === 'recurrence-exception-orphaned'
+      ) {
+        setError(
+          new Error(
+            t(
+              'calendarEvents.editor.recurrenceExceptionOrphaned',
+              'This series change would detach an existing occurrence override. Keep its original occurrence date in the recurrence before saving.',
+            ),
+          ),
+        );
+      } else if (
+        caught instanceof CalendarRepositoryError &&
+        caught.code === 'recurrence-exception-unverifiable'
+      ) {
+        setError(
+          new Error(
+            t(
+              'calendarEvents.editor.recurrenceExceptionUnverifiable',
+              'This series change cannot be checked safely because its recurrence rules or timezone data are unsupported or exceed the validation limit. The current event was not changed.',
+            ),
+          ),
+        );
       } else {
         setError(
           new Error(

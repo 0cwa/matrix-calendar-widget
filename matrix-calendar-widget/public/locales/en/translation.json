@@ -73,6 +73,8 @@
       "readOnly": "This calendar is read-only.",
       "recurrence": "Repeat",
       "recurrenceDateTypeMismatch": "Recurrence dates must use the same date or date-time type as the event start. Correct or remove incompatible saved values before changing recurrence.",
+      "recurrenceExceptionOrphaned": "This series change would detach an existing occurrence override. Keep its original occurrence date in the recurrence before saving.",
+      "recurrenceExceptionUnverifiable": "This series change cannot be checked safely because its recurrence rules or timezone data are unsupported or exceed the validation limit. The current event was not changed.",
       "recurrenceTimingTypeLocked": "The timed or all-day type cannot change while recurrence data is present. Remove and save recurrence first.",
       "reloadError": "The latest event could not be loaded.",
       "reloadLatest": "Reload latest",

@@ -414,6 +414,29 @@ export class GatewayCalendarRepository
       );
     }
 
+    if (response.status === 400) {
+      let code: unknown;
+      try {
+        const body = (await response.json()) as { code?: unknown };
+        code = body?.code;
+      } catch {
+        code = undefined;
+      }
+
+      if (code === 'recurrence-exception-orphaned') {
+        throw new CalendarRepositoryError(
+          code,
+          'The series change would detach an existing occurrence override',
+        );
+      }
+      if (code === 'recurrence-exception-unverifiable') {
+        throw new CalendarRepositoryError(
+          code,
+          'The series change cannot be checked safely',
+        );
+      }
+    }
+
     throw new CalendarRepositoryError(
       'request-failed',
       `Calendar gateway request failed with status ${response.status}`,
