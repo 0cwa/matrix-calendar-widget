@@ -133,10 +133,18 @@ The gated recurring-resource CalDAV contract is defined in `matrix-calendar-serv
 - [ ] Store per-alarm Matrix reminder targets as ADR007 sidecar metadata,
       outside iCalendar. The chosen near-term reminder target is whole-room
       `@room`, independent from iCalendar attendee fields.
+- [x] Select an optional app-owned PostgreSQL database for reminder sidecar and
+      delivery state; add a storage port and atomic durable delivery claims
+      (ADR019). This slice has local unit coverage and a PostgreSQL integration
+      contract wired into CI; it does not itself enable reminder delivery.
+- [ ] Persist per-alarm whole-room reminder sidecar configuration through an
+      authenticated API with current room membership and event-write checks.
 - [ ] Deliver reminders through standard `m.mentions.room: true` with
-      scheduling and delivery-time permission checks. Optional selected-user
-      Matrix mentions remain separate from email attendee targeting.
-- [ ] Durable scheduler and idempotent delivery log.
+      scheduling and delivery-time permission checks. Delivery is at-least-once;
+      a Matrix send followed by a process crash before sent-state persistence
+      can cause a retry duplicate. Optional selected-user Matrix mentions remain
+      separate from email attendee targeting.
+- [ ] Durable scheduler integrated with the delivery claim store.
 - [ ] Event detail action to link/open a Matrix room or MatrixRTC conference.
 - [ ] Audit-friendly event creation/edit messages where appropriate.
 
