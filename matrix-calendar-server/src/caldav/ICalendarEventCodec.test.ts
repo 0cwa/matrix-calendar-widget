@@ -181,7 +181,9 @@ describe('ICalendarEventCodec', () => {
     const sourceEvent =
       ICAL.Component.fromString(source).getFirstSubcomponent('vevent');
     const sourceAlarms = sourceEvent?.getAllSubcomponents('valarm') ?? [];
-    const fetchSpy = jest.spyOn(globalThis, 'fetch');
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('Unexpected fetch while handling stored iCalendar URIs');
+    });
 
     try {
       const ordinary = parsed.applyPatch({ location: 'Updated room' });
