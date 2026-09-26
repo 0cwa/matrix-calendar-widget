@@ -125,13 +125,26 @@ The gated recurring-resource CalDAV contract is defined in `matrix-calendar-serv
       operator/configuration-managed. Dynamic database, room-state, or
       widget-managed binding or collection lifecycle requires a later ADR.
 - [ ] Configurable Matrix power-level calendar policy.
-- [ ] Team/member selector using the widget user directory/member APIs.
-- [ ] Per-alarm Matrix recipient sidecar metadata.
-- [ ] Selected-user mentions.
-- [ ] Optional `@room` reminder with permission checks.
+- [ ] Decide whether to support whole-room iCalendar attendees through an
+      explicit verified-email registration and consent flow, and define email
+      invitation/response semantics. Defer this direction pending a user
+      decision. Matrix membership/member APIs do not expose other members'
+      email addresses; never infer email from a Matrix ID.
+- [ ] Store per-alarm Matrix reminder targets as ADR007 sidecar metadata,
+      outside iCalendar. The chosen near-term reminder target is whole-room
+      `@room`, independent from iCalendar attendee fields.
+- [ ] Deliver reminders through standard `m.mentions.room: true` with
+      scheduling and delivery-time permission checks. Optional selected-user
+      Matrix mentions remain separate from email attendee targeting.
 - [ ] Durable scheduler and idempotent delivery log.
 - [ ] Event detail action to link/open a Matrix room or MatrixRTC conference.
 - [ ] Audit-friendly event creation/edit messages where appropriate.
+
+Local progress only: the gateway actor/membership/power/binding preflight and
+the static single-target room widget UI are complete on local branches. These
+sub-slices do not enable live room-principal CalDAV access and do not complete
+M6 or issue #7. Reliable reminders, the ADR007 sidecar/mentions/durable delivery
+path, and event attendee email semantics remain open.
 
 **Exit:** teams can manage events in their configured room calendar from the
 widget and receive reliable Matrix reminders. Room bindings and calendar
