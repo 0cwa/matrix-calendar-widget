@@ -1,6 +1,6 @@
 # Project status
 
-_Last updated: 2026-09-25_
+_Last updated: 2026-09-26_
 
 This file is the short-lived execution snapshot. `docs/PLAN.md` is the durable milestone plan; GitHub issues contain acceptance criteria.
 
@@ -54,7 +54,7 @@ Active:
 
 Deferred beyond M4:
 
-- Collection `Calendar.timezone` editing. The recurrence display and DATE/floating expansion policy remains viewer-local; collection timezone properties remain untouched. Reconsider writes only after query and client semantics are verified for the pinned Radicale deployment.
+- Collection `Calendar.timezone` editing. The recurrence display and DATE/floating expansion policy remains viewer-local; collection timezone properties remain untouched. Reconsider writes only after query/client semantics and collection-property round-trip behavior are verified for the pinned Radicale deployment.
 
 ### M3 — VEVENT CRUD
 
