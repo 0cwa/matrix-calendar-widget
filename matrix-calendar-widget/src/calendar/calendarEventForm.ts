@@ -80,6 +80,30 @@ export type CalendarEventFormValues = {
   displayAlarms?: CalendarEventDisplayAlarmFormValue[];
 };
 
+/** Resolve a floating wall time using the viewer's local timezone. */
+export function calendarEventFormDateTimeZone(timezone: string): string {
+  return timezone === 'floating' ? DateTime.local().zoneName : timezone;
+}
+
+/**
+ * Convert the current DTSTART form value to the Date required by the legacy
+ * recurrence editor, without treating the floating sentinel as a Luxon zone.
+ */
+export function calendarEventRecurrenceStartDate(
+  start: string | undefined,
+  timingType: CalendarEventFormValues['timingType'] | undefined,
+  timezone: string | undefined,
+): Date | undefined {
+  if (!start || !timingType || !timezone) {
+    return undefined;
+  }
+
+  const zone =
+    timingType === 'all-day' ? 'UTC' : calendarEventFormDateTimeZone(timezone);
+  const startDate = DateTime.fromISO(start, { zone });
+  return startDate.isValid ? startDate.toJSDate() : undefined;
+}
+
 export function createCalendarEventFormValues(
   calendar: Calendar,
   now: DateTime = DateTime.local(),
@@ -259,12 +283,7 @@ export function calendarEventOccurrencePatchFromForm(
 export function calendarEventTimingFromForm(
   values: CalendarEventFormValues,
 ): CalendarEventTiming {
-  const mode =
-    values.timezone === 'UTC'
-      ? 'utc'
-      : values.timezone === 'floating'
-        ? 'floating'
-        : 'tzid';
+  const mode = calendarEventFormTimingMode(values.timezone);
   return values.timingType === 'all-day'
     ? {
         type: 'all-day',
@@ -533,13 +552,25 @@ function calendarEventEditableFieldsFromForm(
             start: {
               local: values.start,
               timezone: values.timezone,
+              ...(values.timezone === 'floating' ? { mode: 'floating' } : {}),
             },
             end: {
               local: values.end,
               timezone: values.timezone,
+              ...(values.timezone === 'floating' ? { mode: 'floating' } : {}),
             },
           },
   };
+}
+
+function calendarEventFormTimingMode(
+  timezone: string,
+): 'utc' | 'floating' | 'tzid' {
+  return timezone === 'UTC'
+    ? 'utc'
+    : timezone === 'floating'
+      ? 'floating'
+      : 'tzid';
 }
 
 function normalizeOptional(value: string): string | undefined {

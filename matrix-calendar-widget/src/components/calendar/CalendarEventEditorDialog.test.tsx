@@ -73,6 +73,24 @@ const eventWithDisplayAlarms: CalendarEvent = {
   ],
 };
 
+const floatingEvent: CalendarEvent = {
+  ...event,
+  uid: 'floating@example.test',
+  timing: {
+    type: 'timed',
+    start: {
+      local: '2026-09-23T09:00:00',
+      timezone: 'floating',
+      mode: 'floating',
+    },
+    end: {
+      local: '2026-09-23T10:00:00',
+      timezone: 'floating',
+      mode: 'floating',
+    },
+  },
+};
+
 function createWrapper(repository: InMemoryCalendarRepository) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
     return (
@@ -613,6 +631,53 @@ describe('<CalendarEventEditorDialog />', () => {
     ).resolves.toMatchObject({
       title: 'Updated planning',
       description: undefined,
+    });
+  });
+
+  it('allows editing and saving a floating DTSTART without changing its mode', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [floatingEvent],
+    });
+    const onSaved = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={floatingEvent}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const start = await screen.findByDisplayValue('2026-09-23T09:00');
+    const end = screen.getByDisplayValue('2026-09-23T10:00');
+    fireEvent.change(start, { target: { value: '2026-09-23T11:00' } });
+    fireEvent.change(end, { target: { value: '2026-09-23T12:00' } });
+
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    await expect(
+      repository.getEvent('team', 'planning'),
+    ).resolves.toMatchObject({
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-09-23T11:00',
+          timezone: 'floating',
+          mode: 'floating',
+        },
+        end: {
+          local: '2026-09-23T12:00',
+          timezone: 'floating',
+          mode: 'floating',
+        },
+      },
     });
   });
 

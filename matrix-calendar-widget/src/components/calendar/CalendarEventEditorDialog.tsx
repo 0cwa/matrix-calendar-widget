@@ -49,16 +49,18 @@ import {
 import { useTranslation } from 'react-i18next';
 import {
   CalendarEventFormValues,
+  CalendarEventRecurrenceDateMode,
+  CalendarEventRecurrenceDateValue,
+  calendarEventFormDateTimeZone,
   calendarEventInputFromForm,
   calendarEventOccurrencePatchFromForm,
   calendarEventPatchFromForm,
-  CalendarEventRecurrenceDateMode,
-  CalendarEventRecurrenceDateValue,
+  calendarEventRecurrenceStartDate,
   calendarEventTimingFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
-  hasInvalidCalendarEventDisplayAlarmFormValues,
   getRoomCalendarTarget,
+  hasInvalidCalendarEventDisplayAlarmFormValues,
   hasInvalidCalendarEventRecurrenceFormValues,
   hasRecurrenceDateTypeMismatch,
   isInvalidCalendarEventDisplayAlarmTrigger,
@@ -178,13 +180,11 @@ export function CalendarEventEditorDialog({
   const recurrenceTimingType = values?.timingType;
   const recurrenceTimezone = values?.timezone;
   const recurrenceStartDate = useMemo(() => {
-    if (!recurrenceStart || !recurrenceTimingType || !recurrenceTimezone) {
-      return new Date(0);
-    }
-    const startDate = DateTime.fromISO(recurrenceStart, {
-      zone: recurrenceTimingType === 'all-day' ? 'UTC' : recurrenceTimezone,
-    });
-    return startDate.isValid ? startDate.toJSDate() : new Date(0);
+    return calendarEventRecurrenceStartDate(
+      recurrenceStart,
+      recurrenceTimingType,
+      recurrenceTimezone,
+    );
   }, [recurrenceStart, recurrenceTimingType, recurrenceTimezone]);
 
   if (
@@ -791,19 +791,21 @@ export function CalendarEventEditorDialog({
                     </Alert>
                   )}
 
-                {values.recurrence.ruleEditable && open && (
-                  <RecurrenceEditor
-                    key={`${formSession}-${event?.id ?? 'new'}`}
-                    isMeetingCreation={!event}
-                    onChange={handleRecurrenceRuleChange}
-                    repeatLabel={t(
-                      'calendarEvents.editor.repeat',
-                      'Repeat event',
-                    )}
-                    rule={values.recurrence.rule}
-                    startDate={recurrenceStartDate}
-                  />
-                )}
+                {values.recurrence.ruleEditable &&
+                  open &&
+                  recurrenceStartDate && (
+                    <RecurrenceEditor
+                      key={`${formSession}-${event?.id ?? 'new'}`}
+                      isMeetingCreation={!event}
+                      onChange={handleRecurrenceRuleChange}
+                      repeatLabel={t(
+                        'calendarEvents.editor.repeat',
+                        'Repeat event',
+                      )}
+                      rule={values.recurrence.rule}
+                      startDate={recurrenceStartDate}
+                    />
+                  )}
 
                 <RecurrenceDateRows
                   defaultTimezone={values.timezone}
@@ -930,13 +932,15 @@ export function validateCalendarEventForm(
 
   if (
     !values.timezone.trim() ||
-    !DateTime.local().setZone(values.timezone).isValid
+    !DateTime.local().setZone(calendarEventFormDateTimeZone(values.timezone))
+      .isValid
   ) {
     return 'invalid-timezone';
   }
 
-  const start = DateTime.fromISO(values.start, { zone: values.timezone });
-  const end = DateTime.fromISO(values.end, { zone: values.timezone });
+  const zone = calendarEventFormDateTimeZone(values.timezone);
+  const start = DateTime.fromISO(values.start, { zone });
+  const end = DateTime.fromISO(values.end, { zone });
 
   if (!start.isValid || !end.isValid || end <= start) {
     return 'invalid-range';

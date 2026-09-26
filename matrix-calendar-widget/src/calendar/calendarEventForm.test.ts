@@ -24,6 +24,7 @@ import {
   calendarEventInputFromForm,
   calendarEventOccurrencePatchFromForm,
   calendarEventPatchFromForm,
+  calendarEventRecurrenceStartDate,
   calendarEventToFormValues,
   createCalendarEventFormValues,
   hasInvalidCalendarEventDisplayAlarmFormValues,
@@ -109,6 +110,25 @@ describe('calendar event form adapter', () => {
         },
       },
     });
+  });
+
+  it('anchors floating recurrence starts in the viewer timezone without an epoch fallback', () => {
+    const anchor = calendarEventRecurrenceStartDate(
+      '2026-09-23T09:00',
+      'timed',
+      'floating',
+    );
+
+    expect(anchor).toBeInstanceOf(Date);
+    expect(DateTime.fromJSDate(anchor!).toFormat("yyyy-MM-dd'T'HH:mm")).toBe(
+      '2026-09-23T09:00',
+    );
+    expect(
+      calendarEventRecurrenceStartDate(undefined, 'timed', 'floating'),
+    ).toBeUndefined();
+    expect(
+      calendarEventRecurrenceStartDate('not-a-date', 'timed', 'floating'),
+    ).toBeUndefined();
   });
 
   it('maps inclusive all-day form end dates to exclusive domain end dates', () => {

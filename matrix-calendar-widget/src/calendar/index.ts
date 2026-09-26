@@ -21,9 +21,11 @@ export type {
 } from './CalendarDiagnosticsRepository';
 export {
   calendarEventDisplayAlarmEditsFromForm,
+  calendarEventFormDateTimeZone,
   calendarEventInputFromForm,
   calendarEventOccurrencePatchFromForm,
   calendarEventPatchFromForm,
+  calendarEventRecurrenceStartDate,
   calendarEventTimingFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
