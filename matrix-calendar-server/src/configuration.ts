@@ -17,6 +17,7 @@
 
 import Joi from 'joi';
 import { IAppConfiguration } from './IAppConfiguration';
+import { parseRoomCalendarBindings } from './service/RoomCalendarBindingResolver';
 
 const toBoolean = (
   value: string | undefined,
@@ -49,6 +50,9 @@ function createConfiguration() {
     access_token: process.env.ACCESS_TOKEN as string,
     homeserver_url: process.env.HOMESERVER_URL as string,
     radicale_url: process.env.RADICALE_URL,
+    room_calendar_bindings: parseRoomCalendarBindings(
+      process.env.ROOM_CALENDAR_BINDINGS,
+    ),
 
     meetingwidget_url: process.env.MEETINGWIDGET_URL as string,
     meetingwidget_name: process.env.MEETINGWIDGET_NAME ?? 'Matrix Calendar',
@@ -134,6 +138,7 @@ export const ValidationSchema = Joi.object({
   ACCESS_TOKEN: Joi.string().required(),
   HOMESERVER_URL: Joi.string().required().uri(),
   RADICALE_URL: Joi.string().uri(),
+  ROOM_CALENDAR_BINDINGS: Joi.string(),
 
   MEETINGWIDGET_URL: Joi.string().required().uri(),
   MEETINGWIDGET_NAME: Joi.string(),
