@@ -191,6 +191,17 @@ describe('test CommandService', () => {
     expect(text).toContain('!calendar help');
   });
 
+  test('calendar trigger requires a token boundary before the command', async () => {
+    const event = createEvent();
+    event.content.body = '!calendarhelp';
+
+    await commandService.handleRoomMessage(ROOM_ID, event);
+
+    verify(matrixClientMock.sendHtmlText(ROOM_ID, anyString())).never();
+    const text = capture(matrixClientMock.replyText).last()[2];
+    expect(text).toContain('!calendar help');
+  });
+
   test('handleRoomMessage a custom command', async () => {
     const event = createEvent();
     event.content.body = `!meeting ${SETUP_COMMANDS[0]}`;
