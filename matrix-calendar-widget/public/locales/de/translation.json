@@ -56,6 +56,7 @@
       "createTitle": "Termin erstellen",
       "description": "Beschreibung",
       "displayAlarmDescription": "Beschreibung für Display-Erinnerung {{number}}",
+      "defaultDisplayAlarmDescription": "Terminerinnerung",
       "displayAlarmLabel": "Display-Erinnerung {{number}}",
       "displayAlarms": "Display-Erinnerungen",
       "displayAlarmsHelp": "Neue Display-Erinnerungen beginnen 15 Minuten vor dem Termin. Andere Alarmaktionen bleiben unverändert und werden nicht ausgeführt.",

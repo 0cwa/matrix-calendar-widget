@@ -674,6 +674,63 @@ describe('InMemoryCalendarRepository', () => {
     ).resolves.not.toHaveProperty('displayAlarmEdits');
   });
 
+  it.each([
+    {
+      name: 'duplicate indices',
+      removals: [{ index: 0 }, { index: 0 }],
+      message: 'A DISPLAY alarm removal is invalid',
+    },
+    {
+      name: 'a nonexistent index',
+      removals: [{ index: 3 }],
+      message: 'Only an existing DISPLAY alarm can be removed',
+    },
+    {
+      name: 'an index belonging to an unsupported alarm',
+      removals: [{ index: 1 }],
+      message: 'Only an existing DISPLAY alarm can be removed',
+    },
+  ])(
+    'rejects DISPLAY alarm removal with $name like the codec',
+    async ({ removals, message }) => {
+      const alarmEvent: CalendarEvent = {
+        ...events[0],
+        displayAlarms: [
+          {
+            index: 0,
+            description: 'First reminder',
+            triggerMinutes: -15,
+            triggerRelatedTo: 'start',
+            triggerEditable: true,
+          },
+          {
+            index: 2,
+            description: 'Second reminder',
+            triggerMinutes: -60,
+            triggerRelatedTo: 'start',
+            triggerEditable: true,
+          },
+        ],
+      };
+      const repository = new InMemoryCalendarRepository({
+        calendars,
+        events: [alarmEvent],
+      });
+
+      await expect(
+        repository.updateEvent('team', 'planning', {
+          displayAlarmRemovals: removals,
+        }),
+      ).rejects.toMatchObject({
+        code: 'request-failed',
+        message,
+      });
+      await expect(
+        repository.getEvent('team', 'planning'),
+      ).resolves.toMatchObject({ displayAlarms: alarmEvent.displayAlarms });
+    },
+  );
+
   it('deletes an event', async () => {
     const repository = createRepository();
 

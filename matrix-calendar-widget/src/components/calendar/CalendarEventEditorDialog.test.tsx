@@ -22,6 +22,7 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { changeLanguage } from 'i18next';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from '../../calendar';
@@ -804,6 +805,39 @@ describe('<CalendarEventEditorDialog />', () => {
       }),
     );
     vi.unstubAllGlobals();
+  });
+
+  it('uses the current language for a new alarm description', async () => {
+    await changeLanguage('de');
+    try {
+      const repository = new InMemoryCalendarRepository({
+        calendars: [calendar],
+        events: [event],
+      });
+      render(
+        <CalendarEventEditorDialog
+          calendars={[calendar]}
+          event={event}
+          onClose={vi.fn()}
+          onSaved={vi.fn()}
+          open
+        />,
+        { wrapper: createWrapper(repository) },
+      );
+
+      await userEvent.click(
+        await screen.findByRole('button', {
+          name: 'Display-Erinnerung hinzufügen',
+        }),
+      );
+      expect(
+        screen.getByRole('textbox', {
+          name: 'Beschreibung für Display-Erinnerung 1',
+        }),
+      ).toHaveValue('Terminerinnerung');
+    } finally {
+      await changeLanguage('en');
+    }
   });
 
   it('removes an existing DISPLAY alarm through an accessible control', async () => {

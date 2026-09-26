@@ -56,6 +56,7 @@
       "createTitle": "Create event",
       "description": "Description",
       "displayAlarmDescription": "Display alarm {{number}} description",
+      "defaultDisplayAlarmDescription": "Event reminder",
       "displayAlarmLabel": "Display alarm {{number}}",
       "displayAlarms": "Display reminders",
       "displayAlarmsHelp": "New display alarms start 15 minutes before the event. Other alarm actions stay unchanged and are not run.",

@@ -255,6 +255,7 @@ export function CalendarEventEditorDialog({
   const handleAddDisplayAlarm = () => {
     const alarm = createCalendarEventDisplayAlarmFormValue(
       createDisplayAlarmUid(),
+      t('calendarEvents.editor.defaultDisplayAlarmDescription'),
     );
     setValues((current) =>
       current
