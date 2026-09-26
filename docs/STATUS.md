@@ -52,6 +52,10 @@ Active:
 
 - safe VEVENT-only calendar deletion (#100 / PR #101). The implementation already fails closed for mixed, component-unknown, and read-only collections and rejects DELETE `207 Multi-Status`; the branch currently needs synchronization with `main` after the rename merge.
 
+Deferred beyond M4:
+
+- Collection `Calendar.timezone` editing. The recurrence display and DATE/floating expansion policy remains viewer-local; collection timezone properties remain untouched. Reconsider writes only after query and client semantics are verified for the pinned Radicale deployment.
+
 ### M3 — VEVENT CRUD
 
 Complete on `main`:
@@ -77,7 +81,7 @@ Complete on `main`:
 1. Implement #48 in a writable upstream/forked `radicale-auth-matrix` repository; do not copy GPL/LGPL-family plugin code into this Apache-licensed repository.
 2. Land #45's final gateway/OpenID/non-member real-container contract and close M2.
 3. In parallel while #48 is blocked, synchronize and finish #100 / PR #101: safe VEVENT-only calendar deletion through the existing repository/gateway seams.
-4. After delete lands, reassess the next smallest M4 slice (description, color, timezone, compatibility notice, or diagnostics) rather than pre-building generic WebDAV administration.
+4. After delete lands, reassess the next smallest M4 slice (description, color, compatibility notice, or diagnostics) rather than pre-building generic WebDAV administration. Collection timezone editing is deferred beyond M4 and requires verified Radicale query/client behavior before any future write.
 
 ## Working rules
 
