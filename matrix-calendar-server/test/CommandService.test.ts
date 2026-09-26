@@ -123,6 +123,83 @@ describe('test CommandService', () => {
     verify(matrixClientMock.sendHtmlText(ROOM_ID, anyString())).once();
     const txt = captureSendHtmlText();
     expect(txt).toMatch(/Verfügbare Befehle:/);
+    expect(txt).toContain('!meeting setup');
+    expect(txt).not.toContain('!calendar help');
+  });
+
+  test('calendar help directs widget-capable clients to the widget', async () => {
+    makeRoomPrivate();
+    const event = createEvent();
+    event.content.body = '!calendar help';
+
+    await commandService.handleRoomMessage(ROOM_ID, event);
+
+    verify(matrixClientMock.sendHtmlText(ROOM_ID, anyString())).once();
+    const txt = captureSendHtmlText();
+    expect(txt).toContain('!calendar help');
+    expect(txt).toContain(
+      'For full calendar management, use the Matrix Calendar widget in clients that support widgets.',
+    );
+  });
+
+  test('calendar help uses the default locale when no room locale exists', async () => {
+    makeRoomPublic();
+    const event = createEvent();
+    event.content.body = '!calendar help';
+
+    await commandService.handleRoomMessage(ROOM_ID, event);
+
+    const txt = captureSendHtmlText();
+    expect(txt).toContain('Kalenderbefehle:');
+    expect(txt).toContain('!calendar help');
+    expect(txt).toContain('Clients, die Widgets unterstützen');
+  });
+
+  test('calendar command without a subcommand asks for help', async () => {
+    const event = createEvent();
+    event.content.body = '!calendar';
+
+    await commandService.handleRoomMessage(ROOM_ID, event);
+
+    const [roomId, repliedToEvent, text] = capture(
+      matrixClientMock.replyText,
+    ).last();
+    expect(roomId).toBe(ROOM_ID);
+    expect(repliedToEvent).toBe(event);
+    expect(text).toContain('!calendar help');
+  });
+
+  test('unknown calendar subcommands return localized help guidance', async () => {
+    const event = createEvent();
+    event.content.body = '!calendar upcoming';
+
+    await commandService.handleRoomMessage(ROOM_ID, event);
+
+    const text = capture(matrixClientMock.replyText).last()[2];
+    expect(text).toEqual(
+      'Der Hilfe-Befehl ist leider nicht richtig. Schreibe <code>!calendar help</code>',
+    );
+  });
+
+  test('calendar help rejects extra arguments as malformed input', async () => {
+    const event = createEvent();
+    event.content.body = '!calendar help extra';
+
+    await commandService.handleRoomMessage(ROOM_ID, event);
+
+    const text = capture(matrixClientMock.replyText).last()[2];
+    expect(text).toContain('!calendar help');
+  });
+
+  test('calendar trigger requires a token boundary before the command', async () => {
+    const event = createEvent();
+    event.content.body = '!calendarhelp';
+
+    await commandService.handleRoomMessage(ROOM_ID, event);
+
+    verify(matrixClientMock.sendHtmlText(ROOM_ID, anyString())).never();
+    const text = capture(matrixClientMock.replyText).last()[2];
+    expect(text).toContain('!calendar help');
   });
 
   test('handleRoomMessage a custom command', async () => {

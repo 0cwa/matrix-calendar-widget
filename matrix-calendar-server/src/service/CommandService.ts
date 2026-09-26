@@ -26,6 +26,7 @@ import { StateEventName } from '../model/StateEventName';
 import { WelcomeWorkflowService } from './WelcomeWorkflowService';
 
 const TRIGGER = '!meeting';
+const CALENDAR_TRIGGER = '!calendar';
 
 export const HELP_COMMANDS: string[] = ['help', 'h'];
 export const STATUS_COMMANDS: string[] = ['status', 'stat'];
@@ -57,14 +58,30 @@ export class CommandService {
     const { content: { msgtype = '' } = {} } = event;
     if (msgtype !== 'm.text') return;
 
-    const triggers: string[] = [TRIGGER, this.botUserId];
+    const triggers: string[] = [TRIGGER, CALENDAR_TRIGGER, this.botUserId];
     const body: string = event.content.body;
+
+    const malformedCalendarTrigger =
+      body.startsWith(CALENDAR_TRIGGER) &&
+      body.length > CALENDAR_TRIGGER.length &&
+      !/\s/.test(body.charAt(CALENDAR_TRIGGER.length));
+    if (malformedCalendarTrigger) {
+      return this.replyWithError(
+        roomId,
+        event,
+        'commandErrors.badCommand',
+        { trigger: CALENDAR_TRIGGER },
+      );
+    }
 
     const triggered = triggers.find((trigger) => body.startsWith(trigger));
     if (!triggered) return;
 
     const withoutTrigger = body.substring(triggered.length).trim();
-    const args: string[] = withoutTrigger.split(' ');
+    const args: string[] =
+      triggered === CALENDAR_TRIGGER
+        ? withoutTrigger.split(/\s+/)
+        : withoutTrigger.split(' ');
 
     if (withoutTrigger.length === 0) {
       this.logger.verbose(
@@ -74,7 +91,10 @@ export class CommandService {
         roomId,
         event,
         'commandErrors.noCommandProvided',
-        { trigger: TRIGGER },
+        {
+          trigger:
+            triggered === CALENDAR_TRIGGER ? CALENDAR_TRIGGER : TRIGGER,
+        },
       );
     }
 
@@ -82,7 +102,11 @@ export class CommandService {
     const cmdArgs = args.slice(1);
 
     try {
-      await this.processCommand(commandName, roomId, event, cmdArgs);
+      if (triggered === CALENDAR_TRIGGER) {
+        await this.processCalendarCommand(commandName, cmdArgs, roomId, event);
+      } else {
+        await this.processCommand(commandName, roomId, event, cmdArgs);
+      }
     } catch (e) {
       if (e instanceof TranslatableError) {
         this.logger.debug(
@@ -110,6 +134,33 @@ export class CommandService {
         });
       }
     }
+  }
+
+  private async processCalendarCommand(
+    commandName: string,
+    cmdArgs: string[],
+    roomId: string,
+    event: IRoomEvent<MessageEventContent>,
+  ) {
+    if (commandName !== 'help' || cmdArgs.length > 0) {
+      this.logger.verbose(
+        `commandErrors.badCommand commandName: ${commandName}`,
+      );
+      await this.replyWithError(
+        roomId,
+        event,
+        'commandErrors.badCommand',
+        { trigger: CALENDAR_TRIGGER },
+      );
+      return;
+    }
+
+    const lng: string = await this.detectLocale(roomId);
+    const html: string = i18next.t('calendarCommandHelp', {
+      lng,
+      joinArrays: '',
+    });
+    await this.matrixClient.sendHtmlText(roomId, html);
   }
 
   private async processCommand(
