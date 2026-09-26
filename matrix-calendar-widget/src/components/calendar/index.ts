@@ -19,5 +19,6 @@ export { CalendarDeleteDialog } from './CalendarDeleteDialog';
 export { CalendarEventDetailsDialog } from './CalendarEventDetailsDialog';
 export { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 export { CalendarEventsSurface } from './CalendarEventsSurface';
+export { CalendarMetadataDialog } from './CalendarMetadataDialog';
 export { CalendarRenameDialog } from './CalendarRenameDialog';
 export { CalendarToolbar } from './CalendarToolbar';

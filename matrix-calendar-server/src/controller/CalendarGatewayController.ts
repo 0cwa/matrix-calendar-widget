@@ -18,6 +18,7 @@ import {
   CalendarAuthorizationRequest,
   CalendarEventInput,
   CalendarEventPatch,
+  CalendarMetadataPatch,
   CalendarTimeRange,
 } from '@matrix-calendar-widget/calendar';
 import {
@@ -117,6 +118,7 @@ export class CalendarGatewayController {
             calendar.displayName ?? calendar.href,
             calendar.color,
             calendar.readOnly,
+            calendar.description,
           ),
       );
     });
@@ -162,6 +164,7 @@ export class CalendarGatewayController {
         calendar.displayName ?? name,
         calendar.color,
         calendar.readOnly,
+        calendar.description,
       );
     });
   }
@@ -210,6 +213,49 @@ export class CalendarGatewayController {
         this.requireRadicaleBaseUrl(),
         credentialProvider,
       ).renameCalendar(normalizedCalendarId, name);
+    });
+  }
+
+  @Patch('calendars/metadata')
+  async updateCalendarMetadata(
+    @UserContextParam() userContext: IUserContext,
+    @MatrixOpenIdCredentialParam()
+    openIdCredential: IMatrixOpenIdCredential | undefined,
+    @Body() input: unknown,
+    @Query('roomId') roomId?: string,
+    @Query('calendarId') calendarId?: string,
+  ): Promise<void> {
+    const requiredRoomId = this.requireQuery(roomId, 'roomId');
+    const patch = this.parseCalendarMetadataPatch(input);
+    const normalizedCalendarId = this.normalizeRadicaleUrl(
+      this.requireQuery(calendarId, 'calendarId'),
+      'calendarId',
+    );
+    const authorization = this.authorizationFactory.forRoom(
+      userContext.userId,
+      requiredRoomId,
+    );
+    if (
+      !(await authorization.isAllowed({
+        action: 'manage-calendar',
+        calendarId: normalizedCalendarId,
+      }))
+    ) {
+      throw new ForbiddenException(
+        'Not allowed to manage calendars for this Matrix room',
+      );
+    }
+
+    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+      userContext,
+      openIdCredential,
+    );
+
+    await this.runCalDav(async () => {
+      await new CalDavDiscoveryClient(
+        this.requireRadicaleBaseUrl(),
+        credentialProvider,
+      ).updateCalendarMetadata(normalizedCalendarId, patch);
     });
   }
 
@@ -593,6 +639,47 @@ export class CalendarGatewayController {
       throw new BadRequestException(`${name} is required`);
     }
     return value;
+  }
+
+  private parseCalendarMetadataPatch(input: unknown): CalendarMetadataPatch {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw new BadRequestException('calendar metadata patch is required');
+    }
+
+    const body = input as Record<string, unknown>;
+    const keys = Object.keys(body);
+    if (
+      keys.length === 0 ||
+      keys.some((key) => key !== 'description' && key !== 'color')
+    ) {
+      throw new BadRequestException(
+        'calendar metadata patch may contain only description and color',
+      );
+    }
+
+    const patch: CalendarMetadataPatch = {};
+    if (Object.prototype.hasOwnProperty.call(body, 'description')) {
+      if (body.description !== null && typeof body.description !== 'string') {
+        throw new BadRequestException(
+          'calendar description must be text or null',
+        );
+      }
+      patch.description = body.description as string | null;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'color')) {
+      if (
+        body.color !== null &&
+        (typeof body.color !== 'string' ||
+          !/^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$/.test(body.color))
+      ) {
+        throw new BadRequestException(
+          'calendar color must be a six- or eight-digit hex color or null',
+        );
+      }
+      patch.color = body.color as string | null;
+    }
+
+    return patch;
   }
 
   private async runCalDav<T>(operation: () => Promise<T>): Promise<T> {

@@ -79,6 +79,17 @@
       "nameRequired": "A calendar name is required.",
       "submit": "Rename calendar",
       "title": "Rename calendar"
+    },
+    "metadata": {
+      "action": "Edit calendar details",
+      "calendar": "Calendar",
+      "color": "Color",
+      "colorHelp": "Leave blank to remove the color. Use #RRGGBB or #RRGGBBAA.",
+      "colorInvalid": "Enter a hex color such as #336699 or #336699ff.",
+      "description": "Description",
+      "error": "Calendar details could not be saved.",
+      "submit": "Save details",
+      "title": "Edit calendar details"
     }
   },
   "calendarWeekPicker": {

@@ -24,6 +24,7 @@ import {
   CalendarEventInput,
   CalendarEventPatch,
   CalendarId,
+  CalendarMetadataPatch,
   CalendarTimeRange,
   TimedCalendarEventTiming,
 } from '../model';
@@ -117,6 +118,32 @@ export class InMemoryCalendarRepository implements CalendarRepository {
       ...calendar,
       name: trimmedName,
     });
+  }
+
+  async updateCalendarMetadata(
+    calendarId: CalendarId,
+    patch: CalendarMetadataPatch,
+  ): Promise<void> {
+    const calendar = this.getWritableCalendar(calendarId);
+    const updated = { ...calendar };
+
+    if (patch.description !== undefined) {
+      if (patch.description === null) {
+        delete updated.description;
+      } else {
+        updated.description = patch.description;
+      }
+    }
+
+    if (patch.color !== undefined) {
+      if (patch.color === null) {
+        delete updated.color;
+      } else {
+        updated.color = patch.color;
+      }
+    }
+
+    this.calendars.set(calendarId, updated);
   }
 
   async deleteCalendar(calendarId: CalendarId): Promise<void> {

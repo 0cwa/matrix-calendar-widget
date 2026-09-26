@@ -21,6 +21,7 @@ import {
   CalendarEventInput,
   CalendarEventPatch,
   CalendarId,
+  CalendarMetadataPatch,
   CalendarRepository,
   CalendarRepositoryError,
   CalendarTimeRange,
@@ -75,6 +76,22 @@ export class GatewayCalendarRepository implements CalendarRepository {
       {
         method: 'PATCH',
         body: JSON.stringify({ name }),
+      },
+    );
+  }
+
+  async updateCalendarMetadata(
+    calendarId: CalendarId,
+    patch: CalendarMetadataPatch,
+  ): Promise<void> {
+    await this.requestVoid(
+      this.url('/v1/calendar/calendars/metadata', {
+        roomId: this.options.roomId,
+        calendarId,
+      }),
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
       },
     );
   }

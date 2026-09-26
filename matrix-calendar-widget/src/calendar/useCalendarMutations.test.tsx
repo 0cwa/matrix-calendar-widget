@@ -34,6 +34,7 @@ import {
   useDeleteCalendarEvent,
   useRenameCalendar,
   useUpdateCalendarEvent,
+  useUpdateCalendarMetadata,
 } from './useCalendarMutations';
 import { useCalendarEvents, useCalendars } from './useCalendarQueries';
 
@@ -126,6 +127,31 @@ describe('calendar repository mutation hooks', () => {
     await waitFor(() => {
       expect(result.current.calendars.data).toEqual([
         { ...calendar, name: 'Product calendar' },
+      ]);
+    });
+  });
+
+  it('refreshes active calendar queries after metadata update', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+    });
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        calendars: useCalendars(),
+        updateMetadata: useUpdateCalendarMetadata(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.calendars.loading);
+    await result.current.updateMetadata('team', {
+      description: 'Planning',
+      color: '#336699',
+    });
+
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([
+        { ...calendar, description: 'Planning', color: '#336699' },
       ]);
     });
   });
@@ -228,6 +254,7 @@ describe('calendar repository mutation hooks', () => {
       listCalendars: vi.fn().mockResolvedValue([calendar]),
       createCalendar: vi.fn().mockResolvedValue(calendar),
       renameCalendar: vi.fn().mockResolvedValue(undefined),
+      updateCalendarMetadata: vi.fn().mockResolvedValue(undefined),
       deleteCalendar: vi.fn().mockResolvedValue(undefined),
       listEvents,
       getEvent: vi.fn().mockResolvedValue(event),

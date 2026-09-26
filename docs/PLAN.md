@@ -62,14 +62,15 @@ Password-auth real-container discovery is already covered by #59 / PR #60. The o
 - [x] Lightweight calendar list/visibility controls (#95 / PR #96).
 - [x] Create VEVENT-only calendar (#92 / PR #94).
 - [x] Rename calendar (#98 / PR #99).
-- [ ] Update description/color/timezone.
+- [x] Update calendar description and color (#5; locally validated and ready for integration).
+- [ ] Update calendar time zone (#5; blocked pending confirmation of the pinned Radicale property semantics).
 - [ ] Delete calendar with safeguards (#100 / PR #101).
 - [ ] Detect mixed collections and expose an advanced compatibility notice.
 - [ ] Hide VJOURNAL-only collections.
 - [ ] Leave VTODO-only collections untouched and hidden from the main calendar UI.
 - [ ] Add CalDAV URL/copy diagnostics for administrators.
 
-Calendar creation (#94), lightweight visibility controls (#96), and rename (#99) are merged. The active slice is #100 / PR #101: safe deletion of explicitly writable VEVENT-only calendars. Continue to avoid a generic metadata patch framework until a concrete description/color/timezone slice needs it.
+Calendar creation (#94), lightweight visibility controls (#96), and rename (#99) are merged. The active slice remains #100 / PR #101: safe deletion of explicitly writable VEVENT-only calendars. The description/color portion of #5 is locally validated and ready for integration; issue #5 remains incomplete while timezone editing is blocked pending confirmation of the pinned Radicale property semantics. Keep collection writes explicit to the supported properties.
 
 **Exit:** normal users no longer need Radicale's web UI to manage team event calendars.
 

@@ -32,6 +32,20 @@ import { IUserContext } from '../model/IUserContext';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
 import { CalendarGatewayController } from './CalendarGatewayController';
 
+jest.mock('matrix-bot-sdk', () => ({
+  UserID: class UserID {
+    readonly localpart: string;
+
+    constructor(userId: string) {
+      const separator = userId.indexOf(':');
+      this.localpart =
+        userId.startsWith('@') && separator > 1
+          ? userId.slice(1, separator)
+          : userId;
+    }
+  },
+}));
+
 describe('CalendarGatewayController', () => {
   const userContext: IUserContext = {
     userId: '@alice:example.test',
@@ -103,6 +117,7 @@ describe('CalendarGatewayController', () => {
               <d:prop>
                 <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
                 <d:displayname>Team events</d:displayname>
+                <c:calendar-description>Shared planning</c:calendar-description>
                 <a:calendar-color>#336699ff</a:calendar-color>
                 <c:supported-calendar-component-set>
                   <c:comp name="VEVENT"/>
@@ -127,6 +142,7 @@ describe('CalendarGatewayController', () => {
         id: 'https://radicale.example.test/alice/team/',
         name: 'Team events',
         color: '#336699ff',
+        description: 'Shared planning',
         readOnly: false,
       },
     ]);
@@ -220,6 +236,83 @@ describe('CalendarGatewayController', () => {
         { name: 'Product calendar' },
         roomId,
         calendarId,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('updates only whitelisted calendar metadata after manage authorization', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch.mockResponseOnce(
+      multistatus(`
+        <d:response>
+          <d:propstat>
+            <d:prop><c:calendar-description/></d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+          <d:propstat>
+            <d:prop><a:calendar-color/></d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
+      `),
+      { status: 207 },
+    );
+
+    await expect(
+      createController().updateCalendarMetadata(
+        userContext,
+        openIdCredential,
+        { description: 'Planning & reviews', color: '#336699ff' },
+        roomId,
+        calendarId,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'manage-calendar',
+      calendarId,
+    });
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe(calendarId);
+    expect(init?.method).toBe('PROPPATCH');
+    expect(init?.body).toContain(
+      '<C:calendar-description>Planning &amp; reviews',
+    );
+    expect(init?.body).toContain(
+      '<A:calendar-color>#336699ff</A:calendar-color>',
+    );
+    expect(init?.body).not.toContain('displayname');
+    expect(init?.body).not.toContain('timezone');
+  });
+
+  it('rejects metadata keys outside the description and color whitelist', async () => {
+    await expect(
+      createController().updateCalendarMetadata(
+        userContext,
+        openIdCredential,
+        { description: 'Planning', timezone: 'Europe/Stockholm' },
+        roomId,
+        'https://radicale.example.test/alice/team/',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(forRoom).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('denies calendar metadata changes when room policy rejects manage-calendar', async () => {
+    isAllowed.mockResolvedValue(false);
+
+    await expect(
+      createController().updateCalendarMetadata(
+        userContext,
+        openIdCredential,
+        { color: '#336699' },
+        roomId,
+        'https://radicale.example.test/alice/team/',
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
 

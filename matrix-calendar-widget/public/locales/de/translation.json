@@ -79,6 +79,17 @@
       "nameRequired": "Ein Kalendername ist erforderlich.",
       "submit": "Kalender umbenennen",
       "title": "Kalender umbenennen"
+    },
+    "metadata": {
+      "action": "Kalenderdetails bearbeiten",
+      "calendar": "Kalender",
+      "color": "Farbe",
+      "colorHelp": "Leer lassen, um die Farbe zu entfernen. Nutze #RRGGBB oder #RRGGBBAA.",
+      "colorInvalid": "Gib eine Hex-Farbe wie #336699 oder #336699ff ein.",
+      "description": "Beschreibung",
+      "error": "Die Kalenderdetails konnten nicht gespeichert werden.",
+      "submit": "Details speichern",
+      "title": "Kalenderdetails bearbeiten"
     }
   },
   "calendarWeekPicker": {

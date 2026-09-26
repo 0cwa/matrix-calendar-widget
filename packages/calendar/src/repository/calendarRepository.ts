@@ -21,6 +21,7 @@ import {
   CalendarEventInput,
   CalendarEventPatch,
   CalendarId,
+  CalendarMetadataPatch,
   CalendarTimeRange,
 } from '../model';
 
@@ -50,6 +51,11 @@ export interface CalendarRepository {
   createCalendar(name: string): Promise<Calendar>;
 
   renameCalendar(calendarId: CalendarId, name: string): Promise<void>;
+
+  updateCalendarMetadata(
+    calendarId: CalendarId,
+    patch: CalendarMetadataPatch,
+  ): Promise<void>;
 
   deleteCalendar(calendarId: CalendarId): Promise<void>;
 

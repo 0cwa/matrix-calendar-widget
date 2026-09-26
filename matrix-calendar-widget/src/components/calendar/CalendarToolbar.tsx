@@ -17,6 +17,7 @@
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
+import PaletteIcon from '@mui/icons-material/Palette';
 import { Box, Button, Stack, useMediaQuery, useTheme } from '@mui/material';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -28,6 +29,7 @@ import { MeetingsToolbarSearch } from '../meetings/MeetingsToolbar/MeetingsToolb
 import { CalendarCreateDialog } from './CalendarCreateDialog';
 import { CalendarDeleteDialog } from './CalendarDeleteDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
+import { CalendarMetadataDialog } from './CalendarMetadataDialog';
 import { CalendarRenameDialog } from './CalendarRenameDialog';
 
 type CalendarToolbarProps = {
@@ -53,6 +55,7 @@ export function CalendarToolbar({
   const [deleteCalendarOpen, setDeleteCalendarOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [metadataOpen, setMetadataOpen] = useState(false);
   const writableCalendars = calendars.data.filter(
     (calendar) => !calendar.readOnly,
   );
@@ -94,6 +97,15 @@ export function CalendarToolbar({
           variant="outlined"
         >
           {t('calendars.rename.action', 'Rename calendar')}
+        </Button>
+
+        <Button
+          disabled={calendars.loading || writableCalendars.length === 0}
+          onClick={() => setMetadataOpen(true)}
+          startIcon={<PaletteIcon />}
+          variant="outlined"
+        >
+          {t('calendars.metadata.action', 'Edit calendar details')}
         </Button>
 
         {showToolbarButtons && (
@@ -138,6 +150,12 @@ export function CalendarToolbar({
         calendars={calendars.data}
         onClose={() => setRenameOpen(false)}
         open={renameOpen}
+      />
+
+      <CalendarMetadataDialog
+        calendars={calendars.data}
+        onClose={() => setMetadataOpen(false)}
+        open={metadataOpen}
       />
 
       <CalendarDeleteDialog

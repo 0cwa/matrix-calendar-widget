@@ -89,6 +89,30 @@ describe('GatewayCalendarRepository', () => {
     expect(init?.body).toBe(JSON.stringify({ name: 'Product calendar' }));
   });
 
+  it('updates calendar description and color through the authenticated gateway', async () => {
+    const fetchMock = mockFetch(new Response(null, { status: 204 }));
+    const repository = createRepository(fetchMock);
+    const patch = { description: 'Planning', color: '#336699ff' };
+
+    await expect(
+      repository.updateCalendarMetadata(calendarId, patch),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(typeof url).toBe('string');
+    expect(new URL(url as string).pathname).toBe(
+      '/v1/calendar/calendars/metadata',
+    );
+    expect(new URL(url as string).searchParams.get('calendarId')).toBe(
+      calendarId,
+    );
+    expect(init?.method).toBe('PATCH');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+    expect(init?.body).toBe(JSON.stringify(patch));
+  });
+
   it('deletes a calendar through the authenticated gateway', async () => {
     const fetchMock = mockFetch(new Response(null, { status: 204 }));
     const repository = createRepository(fetchMock);

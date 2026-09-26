@@ -21,6 +21,7 @@ import {
   CalendarEventInput,
   CalendarEventPatch,
   CalendarId,
+  CalendarMetadataPatch,
 } from '@matrix-calendar-widget/calendar';
 import { useCallback } from 'react';
 import {
@@ -65,6 +66,22 @@ export function useDeleteCalendar(): (calendarId: CalendarId) => Promise<void> {
   return useCallback(
     async (calendarId: CalendarId) => {
       await repository.deleteCalendar(calendarId);
+      invalidate();
+    },
+    [invalidate, repository],
+  );
+}
+
+export function useUpdateCalendarMetadata(): (
+  calendarId: CalendarId,
+  patch: CalendarMetadataPatch,
+) => Promise<void> {
+  const repository = useCalendarRepository();
+  const invalidate = useInvalidateCalendarRepository();
+
+  return useCallback(
+    async (calendarId: CalendarId, patch: CalendarMetadataPatch) => {
+      await repository.updateCalendarMetadata(calendarId, patch);
       invalidate();
     },
     [invalidate, repository],

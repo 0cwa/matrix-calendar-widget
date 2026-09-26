@@ -93,6 +93,15 @@ export type Calendar = {
   readOnly?: boolean;
 };
 
+/**
+ * Editable CalDAV collection properties. Omitted fields are unchanged; null
+ * removes an optional property.
+ */
+export type CalendarMetadataPatch = {
+  description?: string | null;
+  color?: string | null;
+};
+
 export type CalendarEvent = {
   id: CalendarEventId;
   calendarId: CalendarId;

@@ -33,6 +33,7 @@ export type {
   CalendarEventTiming,
   CalendarEventTransparency,
   CalendarId,
+  CalendarMetadataPatch,
   CalendarTimeRange,
   LocalCalendarDateTime,
   TimedCalendarEventTiming,

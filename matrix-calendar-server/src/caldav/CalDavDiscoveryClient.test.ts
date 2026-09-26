@@ -65,6 +65,7 @@ describe('CalDavDiscoveryClient', () => {
             <d:prop>
               <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
               <d:displayname>Team events</d:displayname>
+              <c:calendar-description>Planning &amp; reviews</c:calendar-description>
               <a:calendar-color>#336699ff</a:calendar-color>
               <c:supported-calendar-component-set>
                 <c:comp name="VEVENT"/>
@@ -107,6 +108,7 @@ describe('CalDavDiscoveryClient', () => {
         {
           href: 'https://radicale.example.test/alice/events/',
           displayName: 'Team events',
+          description: 'Planning & reviews',
           color: '#336699ff',
           components: ['VEVENT', 'VTODO'],
           readOnly: false,
@@ -159,6 +161,7 @@ describe('CalDavDiscoveryClient', () => {
         {
           href: 'https://radicale.example.test/home/alice/default/',
           displayName: undefined,
+          description: undefined,
           color: undefined,
           components: undefined,
           readOnly: undefined,
@@ -180,6 +183,12 @@ describe('CalDavDiscoveryClient', () => {
               <d:displayname>Team events</d:displayname>
             </d:prop>
             <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+          <d:propstat>
+            <d:prop>
+              <c:calendar-description>Unsafe or unavailable</c:calendar-description>
+            </d:prop>
+            <d:status>HTTP/1.1 403 Forbidden</d:status>
           </d:propstat>
           <d:propstat>
             <d:prop>
@@ -212,6 +221,7 @@ describe('CalDavDiscoveryClient', () => {
       {
         href: 'https://radicale.example.test/home/alice/team/',
         displayName: 'Team events',
+        description: undefined,
         color: undefined,
         components: undefined,
         readOnly: undefined,
@@ -388,6 +398,128 @@ describe('CalDavDiscoveryClient', () => {
         'https://radicale.example.test/alice/team/',
       ),
     );
+  });
+
+  it('updates only calendar description and Apple color and checks each 207 status', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/</d:href>
+              <d:propstat>
+                <d:prop><c:calendar-description/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+              <d:propstat>
+                <d:prop><a:calendar-color/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).updateCalendarMetadata('https://radicale.example.test/alice/team/', {
+        description: 'Planning & <reviews>',
+        color: '#336699ff',
+      }),
+    ).resolves.toBeUndefined();
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init?.method).toBe('PROPPATCH');
+    expect(init?.body).toContain(
+      '<C:calendar-description>Planning &amp; &lt;reviews&gt;</C:calendar-description>',
+    );
+    expect(init?.body).toContain(
+      '<A:calendar-color>#336699ff</A:calendar-color>',
+    );
+    expect(init?.body).not.toContain('displayname');
+    expect(init?.body).not.toContain('timezone');
+    expect(init?.body).not.toContain('supported-calendar-component-set');
+  });
+
+  it('rejects metadata PROPPATCH when an individual property failed', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:propstat>
+                <d:prop><c:calendar-description/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+              <d:propstat>
+                <d:prop><a:calendar-color/></d:prop>
+                <d:status>HTTP/1.1 403 Forbidden</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).updateCalendarMetadata('https://radicale.example.test/alice/team/', {
+        description: 'Planning',
+        color: '#336699',
+      }),
+    ).rejects.toMatchObject({
+      message: 'CalDAV PROPPATCH failed for calendar-color with status 403',
+      status: 403,
+    });
+  });
+
+  it('removes only the selected description and color properties', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:propstat>
+                <d:prop><c:calendar-description/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+              <d:propstat>
+                <d:prop><a:calendar-color/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).updateCalendarMetadata('https://radicale.example.test/alice/team/', {
+        description: null,
+        color: null,
+      }),
+    ).resolves.toBeUndefined();
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init?.body).toContain(
+      '<D:remove><D:prop><C:calendar-description/><A:calendar-color/></D:prop></D:remove>',
+    );
+    expect(init?.body).not.toContain('<D:set>');
+    expect(init?.body).not.toContain('displayname');
   });
 
   it('deletes a calendar collection with delegated credentials', async () => {

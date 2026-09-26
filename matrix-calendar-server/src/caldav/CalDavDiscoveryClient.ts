@@ -20,6 +20,7 @@ import { CalDavCredentialProvider } from './CalDavCredentialProvider';
 export type DiscoveredCalDavCalendar = {
   href: string;
   displayName?: string;
+  description?: string;
   color?: string;
   components?: string[];
   readOnly?: boolean;
@@ -78,6 +79,7 @@ const CALENDARS_BODY = `<?xml version="1.0" encoding="utf-8" ?>
     <D:displayname/>
     <D:current-user-privilege-set/>
     <C:supported-calendar-component-set/>
+    <C:calendar-description/>
     <A:calendar-color/>
   </D:prop>
 </D:propfind>`;
@@ -104,6 +106,30 @@ function renameCalendarBody(displayName: string): string {
       <D:displayname>${escapeXmlText(displayName)}</D:displayname>
     </D:prop>
   </D:set>
+</D:propertyupdate>`;
+}
+
+function calendarMetadataBody(patch: {
+  description?: string | null;
+  color?: string | null;
+}): string {
+  const setProperties = [
+    patch.description !== undefined && patch.description !== null
+      ? `<C:calendar-description>${escapeXmlText(patch.description)}</C:calendar-description>`
+      : undefined,
+    patch.color !== undefined && patch.color !== null
+      ? `<A:calendar-color>${escapeXmlText(patch.color)}</A:calendar-color>`
+      : undefined,
+  ].filter((property): property is string => property !== undefined);
+  const removeProperties = [
+    patch.description === null ? '<C:calendar-description/>' : undefined,
+    patch.color === null ? '<A:calendar-color/>' : undefined,
+  ].filter((property): property is string => property !== undefined);
+
+  return `<?xml version="1.0" encoding="utf-8" ?>
+<D:propertyupdate xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:A="http://apple.com/ns/ical/">
+  ${setProperties.length > 0 ? `<D:set><D:prop>${setProperties.join('')}</D:prop></D:set>` : ''}
+  ${removeProperties.length > 0 ? `<D:remove><D:prop>${removeProperties.join('')}</D:prop></D:remove>` : ''}
 </D:propertyupdate>`;
 }
 
@@ -210,6 +236,64 @@ export class CalDavDiscoveryClient {
     }
   }
 
+  async updateCalendarMetadata(
+    calendarUrl: string,
+    patch: { description?: string | null; color?: string | null },
+  ): Promise<void> {
+    if (Object.keys(patch).length === 0) {
+      throw new CalDavDiscoveryError('Calendar metadata patch is empty');
+    }
+    if (
+      patch.color !== undefined &&
+      patch.color !== null &&
+      !/^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$/.test(patch.color)
+    ) {
+      throw new CalDavDiscoveryError('Calendar color is invalid');
+    }
+
+    const credentialHeaders = await this.credentialProvider.getRequestHeaders();
+    const headers = new Headers(credentialHeaders);
+    headers.set('Content-Type', 'application/xml; charset=utf-8');
+
+    const response = await this.fetchImpl(calendarUrl, {
+      method: 'PROPPATCH',
+      headers,
+      body: calendarMetadataBody(patch),
+    });
+
+    if (!response.ok) {
+      throw new CalDavDiscoveryError(
+        `CalDAV PROPPATCH failed with status ${response.status}`,
+        response.status,
+        calendarUrl,
+      );
+    }
+
+    if (response.status === 207) {
+      const xml = await response.text();
+      for (const property of Object.keys(patch) as Array<keyof typeof patch>) {
+        const propertyName =
+          property === 'description'
+            ? 'calendar-description'
+            : 'calendar-color';
+        const propertyStatus = propPatchPropertyStatus(xml, propertyName);
+        if (
+          propertyStatus === undefined ||
+          propertyStatus < 200 ||
+          propertyStatus >= 300
+        ) {
+          throw new CalDavDiscoveryError(
+            propertyStatus === undefined
+              ? `CalDAV PROPPATCH did not report ${propertyName} status`
+              : `CalDAV PROPPATCH failed for ${propertyName} with status ${propertyStatus}`,
+            propertyStatus ?? response.status,
+            calendarUrl,
+          );
+        }
+      }
+    }
+  }
+
   async deleteCalendar(calendarUrl: string): Promise<void> {
     const credentialHeaders = await this.credentialProvider.getRequestHeaders();
     const response = await this.fetchImpl(calendarUrl, {
@@ -255,6 +339,7 @@ export class CalDavDiscoveryClient {
         {
           href: new URL(href, calendarHomeUrl).toString(),
           displayName: textValue(properties.displayname),
+          description: textValue(properties['calendar-description']),
           color: textValue(properties['calendar-color']),
           components,
           readOnly: readOnlyValue(properties['current-user-privilege-set']),

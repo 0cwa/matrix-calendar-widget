@@ -21,6 +21,8 @@ const calendars: Calendar[] = [
   {
     id: 'team',
     name: 'Team calendar',
+    description: 'Shared planning',
+    color: '#336699ff',
     timezone: 'Europe/Stockholm',
   },
   {
@@ -135,6 +137,8 @@ describe('InMemoryCalendarRepository', () => {
         {
           id: 'team',
           name: 'Product calendar',
+          description: 'Shared planning',
+          color: '#336699ff',
           timezone: 'Europe/Stockholm',
         },
       ]),
@@ -159,6 +163,34 @@ describe('InMemoryCalendarRepository', () => {
     ).rejects.toMatchObject({
       code: 'calendar-read-only',
     });
+  });
+
+  it('updates and clears only the requested calendar metadata', async () => {
+    const repository = createRepository();
+
+    await repository.updateCalendarMetadata('team', {
+      description: 'Updated & shared',
+      color: null,
+    });
+
+    await expect(repository.listCalendars()).resolves.toEqual(
+      expect.arrayContaining([
+        {
+          id: 'team',
+          name: 'Team calendar',
+          description: 'Updated & shared',
+          timezone: 'Europe/Stockholm',
+        },
+      ]),
+    );
+  });
+
+  it('rejects metadata updates to a read-only calendar', async () => {
+    const repository = createRepository();
+
+    await expect(
+      repository.updateCalendarMetadata('readonly', { color: '#123456' }),
+    ).rejects.toMatchObject({ code: 'calendar-read-only' });
   });
 
   it('deletes a writable calendar and its events', async () => {
