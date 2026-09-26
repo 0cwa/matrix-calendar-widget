@@ -61,6 +61,19 @@ export class CommandService {
     const triggers: string[] = [TRIGGER, CALENDAR_TRIGGER, this.botUserId];
     const body: string = event.content.body;
 
+    const malformedCalendarTrigger =
+      body.startsWith(CALENDAR_TRIGGER) &&
+      body.length > CALENDAR_TRIGGER.length &&
+      !/\s/.test(body.charAt(CALENDAR_TRIGGER.length));
+    if (malformedCalendarTrigger) {
+      return this.replyWithError(
+        roomId,
+        event,
+        'commandErrors.badCommand',
+        { trigger: CALENDAR_TRIGGER },
+      );
+    }
+
     const triggered = triggers.find((trigger) => body.startsWith(trigger));
     if (!triggered) return;
 
