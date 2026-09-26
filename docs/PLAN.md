@@ -64,13 +64,13 @@ Password-auth real-container discovery is already covered by #59 / PR #60. The o
 - [x] Rename calendar (#98 / PR #99).
 - [x] Update calendar description and color (#5; locally validated and ready for integration).
 - [ ] Update calendar time zone (#5; deferred beyond M4 until pinned Radicale query and property round-trip semantics are verified).
-- [ ] Delete calendar with safeguards (#100 / PR #101).
+- [x] Implement safe VEVENT-only calendar deletion (#100 / PR #101; local validation passed, remote PR integration pending).
 - [x] Detect mixed collections and expose an advanced compatibility notice.
 - [x] Hide VJOURNAL-only collections.
 - [x] Leave VTODO-only collections untouched and hidden from the main calendar UI.
 - [x] Add CalDAV URL/copy diagnostics for administrators.
 
-Calendar creation (#94), lightweight visibility controls (#96), and rename (#99) are merged. The active M4 slice remains #100 / PR #101: safe deletion of explicitly writable VEVENT-only calendars. The description/color and collection-compatibility portions of #5 are locally validated and ready for integration; mixed collections show VEVENTs with a warning, while unsupported-only collections stay untouched and hidden. Issue #5 remains incomplete while timezone editing is deferred pending pinned Radicale query and property round-trip validation. Keep collection writes explicit to the supported properties.
+Calendar creation (#94), lightweight visibility controls (#96), and rename (#99) are merged. Safe deletion of explicitly writable VEVENT-only calendars is implemented in `codex/m4-delete-101` at source commit `f583dbab1045b57743f72506f79d2d8a30f85e3f`; full `CI=true yarn ci` passed on that branch. This validates the M4 deletion branch only: the current aggregate source head `d3f828e25f96d0cfd59468ea14653e6a3b135d68` has not yet had full CI. Issue #100 and PR #101 remain open pending synchronization with current `main`, remote review, and fresh remote checks. The description/color and collection-compatibility portions of #5 are locally validated and ready for integration; mixed collections show VEVENTs with a warning, while unsupported-only collections stay untouched and hidden. Issue #5 remains incomplete while timezone editing is deferred pending pinned Radicale query and property round-trip validation. Keep collection writes explicit to the supported properties.
 
 The recurrence presentation policy remains viewer-local for DATE and floating values during expansion and display; it does not write collection timezone properties. Any future `Calendar.timezone` write requires verified query and client semantics for the pinned Radicale deployment, including collection-property round-trip behavior.
 

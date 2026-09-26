@@ -1,6 +1,6 @@
 # Project status
 
-_Last updated: 2026-09-26_
+_Last updated: 2026-09-27_
 
 This file is the short-lived execution snapshot. `docs/PLAN.md` is the durable milestone plan; GitHub issues contain acceptance criteria.
 
@@ -54,7 +54,7 @@ Landed on `main`:
 
 Assembled locally, not merged to GitHub `main`:
 
-- safe VEVENT-only calendar deletion (#100 / PR #101), description/color, compatibility, and diagnostics slices. GitHub PR #101 remains open and conflicting against `main`; its public branch still needs synchronization before merge.
+- safe VEVENT-only calendar deletion (#100 / PR #101), description/color, compatibility, and diagnostics slices. The deletion code at `codex/m4-delete-101` source commit `f583dbab1045b57743f72506f79d2d8a30f85e3f` passed full `CI=true yarn ci`; that validates the M4 branch only, not this aggregate branch at `d3f828e25f96d0cfd59468ea14653e6a3b135d68`, whose full CI remains unverified. GitHub PR #101 remains open/conflicting against `main` and needs synchronization, remote review, and fresh checks before merge; no GitHub state was changed here.
 
 Deferred beyond M4:
 
@@ -77,7 +77,7 @@ Complete on `main`:
 
 - #48 — external `radicale-auth-matrix` OpenID delegation. No writable `0cwa/radicale-auth-matrix` fork exists and the available GitHub connector cannot create/fork repositories.
 - #45 — final delegated gateway/OpenID real-container contract, blocked on #48.
-- #100 / PR #101 — GitHub still reports the PR open/conflicting and requires branch synchronization; the reviewed M4 implementation sequence is assembled locally.
+- #100 / PR #101 — deletion is implemented and locally validated on its M4 branch; remote synchronization, review, and fresh checks remain pending.
 - #6 / M5 — the pinned Radicale recurring-resource create/read/patch contract remains unverified until the supported container runtime is available.
 - #29 — main-branch protection requires repository-rules administration; this is an external repository-admin action.
 - M6 / issue #7 — the gateway authorization/binding preflight and static
