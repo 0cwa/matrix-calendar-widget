@@ -50,6 +50,7 @@ import { ConfigurationController } from './controller/ConfigurationController';
 import { GuestMemberController } from './controller/GuestMemberController';
 import { HealthCheckController } from './controller/HealthCheckController';
 import { MeetingController } from './controller/MeetingController';
+import { RoomReminderConfigurationController } from './controller/RoomReminderConfigurationController';
 import { WelcomeWorkflowController } from './controller/WelcomeWorkflowController';
 import { WidgetController } from './controller/WidgetController';
 import { registerDateRangeFormatter } from './dateRangeFormatter';
@@ -78,6 +79,7 @@ import { MatrixCalendarAuthorizationFactory } from './service/MatrixCalendarAuth
 import { MeetingService } from './service/MeetingService';
 import { RoomCalendarCalDavAccess } from './service/RoomCalendarCalDavAccess';
 import { RoomMessageService } from './service/RoomMessageService';
+import { RoomReminderConfigurationService } from './service/RoomReminderConfigurationService';
 import { WelcomeWorkflowService } from './service/WelcomeWorkflowService';
 import { WidgetLayoutService } from './service/WidgetLayoutService';
 import { DoesWidgetWithIdExistConstraint } from './validator/DoesWidgetWithIdExist';
@@ -279,6 +281,7 @@ const i18nFactory: FactoryProvider<void> = {
   ],
   controllers: [
     CalendarGatewayController,
+    RoomReminderConfigurationController,
     CommandController,
     ConfigurationController,
     HealthCheckController,
@@ -300,6 +303,7 @@ const i18nFactory: FactoryProvider<void> = {
     JitsiClient,
     MeetingClient,
     MatrixCalendarAuthorizationFactory,
+    RoomReminderConfigurationService,
     {
       provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
       useClass: RoomCalendarCalDavAccess,
