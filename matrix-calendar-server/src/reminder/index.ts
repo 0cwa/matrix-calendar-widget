@@ -27,6 +27,7 @@ export {
   PostgresRoomReminderStore,
   createReminderDeliveryKey,
 } from './PostgresRoomReminderStore';
+export { RoomReminderMatrixDelivery } from './RoomReminderMatrixDelivery';
 export {
   DisabledRoomReminderStore,
   ReminderStoreDisabledError,

@@ -69,6 +69,7 @@ import { ModuleProviderToken } from './ModuleProviderToken';
 import {
   DisabledRoomReminderStore,
   PostgresRoomReminderStore,
+  RoomReminderMatrixDelivery,
   RoomReminderStore,
 } from './reminder';
 import { MatrixServer } from './rpc/MatrixServer';
@@ -304,6 +305,7 @@ const i18nFactory: FactoryProvider<void> = {
     MeetingClient,
     MatrixCalendarAuthorizationFactory,
     RoomReminderConfigurationService,
+    RoomReminderMatrixDelivery,
     {
       provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
       useClass: RoomCalendarCalDavAccess,
