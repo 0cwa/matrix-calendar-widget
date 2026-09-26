@@ -20,6 +20,7 @@ import {
   CalendarEventDateTime,
   CalendarEventDisplayAlarm,
   CalendarEventDisplayAlarmEdit,
+  CalendarEventDisplayAlarmInput,
   CalendarEventInput,
   CalendarEventOccurrencePatch,
   CalendarEventPatch,
@@ -58,7 +59,10 @@ export type CalendarEventRecurrenceFormValues = {
 };
 
 export type CalendarEventDisplayAlarmFormValue = {
+  formId: string;
   index: number;
+  uid?: string;
+  isNew?: boolean;
   originalTriggerMinutes?: number;
   triggerMinutes: string;
   triggerEditable: boolean;
@@ -78,6 +82,7 @@ export type CalendarEventFormValues = {
   timezone: string;
   recurrence: CalendarEventRecurrenceFormValues;
   displayAlarms?: CalendarEventDisplayAlarmFormValue[];
+  displayAlarmRemovals?: number[];
 };
 
 /** Resolve a floating wall time using the viewer's local timezone. */
@@ -149,6 +154,7 @@ export function calendarEventToFormValues(
       displayAlarms: displayAlarmsFormValuesFromDomain(
         event.displayAlarms ?? [],
       ),
+      displayAlarmRemovals: [],
     };
   }
 
@@ -171,6 +177,7 @@ export function calendarEventToFormValues(
       event.timing.start.timezone,
     ),
     displayAlarms: displayAlarmsFormValuesFromDomain(event.displayAlarms ?? []),
+    displayAlarmRemovals: [],
   };
 }
 
@@ -186,6 +193,9 @@ export function calendarEventInputFromForm(
   return {
     uid,
     ...calendarEventEditableFieldsFromForm(values),
+    ...(newDisplayAlarmInputsFromForm(values).length > 0
+      ? { displayAlarms: newDisplayAlarmInputsFromForm(values) }
+      : {}),
     ...(recurrence ? { recurrence } : {}),
   };
 }
@@ -205,6 +215,33 @@ export function calendarEventPatchFromForm(
     location: normalizeOptional(values.location),
     ...(recurrence !== undefined ? { recurrence } : {}),
     ...(displayAlarmEdits.length > 0 ? { displayAlarmEdits } : {}),
+    ...(newDisplayAlarmInputsFromForm(values).length > 0
+      ? { displayAlarmAdditions: newDisplayAlarmInputsFromForm(values) }
+      : {}),
+    ...(values.displayAlarmRemovals?.length
+      ? {
+          displayAlarmRemovals: values.displayAlarmRemovals.map((index) => ({
+            index,
+          })),
+        }
+      : {}),
+  };
+}
+
+export function createCalendarEventDisplayAlarmFormValue(
+  uid: string,
+): CalendarEventDisplayAlarmFormValue {
+  return {
+    formId: uid,
+    index: -1,
+    uid,
+    isNew: true,
+    originalTriggerMinutes: undefined,
+    triggerMinutes: '-15',
+    triggerEditable: true,
+    triggerRelatedTo: 'start',
+    originalDescription: undefined,
+    description: 'Event reminder',
   };
 }
 
@@ -242,6 +279,9 @@ export function calendarEventDisplayAlarmEditsFromForm(
 
   const edits: CalendarEventDisplayAlarmEdit[] = [];
   for (const alarm of values.displayAlarms ?? []) {
+    if (alarm.isNew || alarm.index < 0) {
+      continue;
+    }
     const edit: CalendarEventDisplayAlarmEdit = { index: alarm.index };
     if (alarm.triggerEditable) {
       const triggerMinutes = parseDisplayAlarmTriggerMinutes(
@@ -459,7 +499,9 @@ function displayAlarmsFormValuesFromDomain(
   alarms: CalendarEventDisplayAlarm[],
 ): CalendarEventDisplayAlarmFormValue[] {
   return alarms.map((alarm) => ({
+    formId: `existing:${alarm.index}`,
     index: alarm.index,
+    ...(alarm.uid ? { uid: alarm.uid } : {}),
     originalTriggerMinutes: alarm.triggerMinutes,
     triggerMinutes:
       alarm.triggerMinutes === undefined ? '' : String(alarm.triggerMinutes),
@@ -468,6 +510,27 @@ function displayAlarmsFormValuesFromDomain(
     originalDescription: alarm.description,
     description: alarm.description ?? '',
   }));
+}
+
+function newDisplayAlarmInputsFromForm(
+  values: CalendarEventFormValues,
+): CalendarEventDisplayAlarmInput[] {
+  return (values.displayAlarms ?? [])
+    .filter((alarm) => alarm.isNew)
+    .map((alarm) => {
+      const triggerMinutes = parseDisplayAlarmTriggerMinutes(
+        alarm.triggerMinutes,
+      );
+      if (!alarm.uid || triggerMinutes === undefined) {
+        throw new Error('Invalid new display alarm');
+      }
+      return {
+        uid: alarm.uid,
+        description: alarm.description,
+        triggerMinutes,
+        triggerRelatedTo: alarm.triggerRelatedTo ?? 'start',
+      };
+    });
 }
 
 function parseDisplayAlarmTriggerMinutes(value: string): number | undefined {

@@ -66,6 +66,8 @@ describe('calendar event form adapter', () => {
       end: '2026-09-23T10:00',
       timezone: 'Europe/Stockholm',
       recurrence: {
+        original: undefined,
+        rule: undefined,
         ruleEditable: true,
         ruleEdited: false,
         ruleValid: true,

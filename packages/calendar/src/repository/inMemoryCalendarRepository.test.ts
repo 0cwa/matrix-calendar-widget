@@ -703,7 +703,12 @@ describe('InMemoryCalendarRepository', () => {
       let promise: Promise<unknown>;
 
       if (operation === 'create') {
-        const { id: _id, calendarId: _calendarId, ...input } = events[0];
+        const {
+          id: _id,
+          calendarId: _calendarId,
+          displayAlarms: _displayAlarms,
+          ...input
+        } = events[0];
         promise = repository.createEvent('readonly', input);
       } else if (operation === 'update') {
         promise = repository.updateEvent('readonly', 'readonly-event', {

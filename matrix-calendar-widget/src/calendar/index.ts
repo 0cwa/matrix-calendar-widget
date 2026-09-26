@@ -28,6 +28,7 @@ export {
   calendarEventRecurrenceStartDate,
   calendarEventTimingFromForm,
   calendarEventToFormValues,
+  createCalendarEventDisplayAlarmFormValue,
   createCalendarEventFormValues,
   hasInvalidCalendarEventDisplayAlarmFormValues,
   hasInvalidCalendarEventRecurrenceFormValues,

@@ -19,6 +19,8 @@ import {
   CalendarEventDateTime,
   CalendarEventDisplayAlarm,
   CalendarEventDisplayAlarmEdit,
+  CalendarEventDisplayAlarmInput,
+  CalendarEventDisplayAlarmRemoval,
   CalendarEventExpansionError,
   CalendarEventId,
   CalendarEventInput,
@@ -149,6 +151,17 @@ export class ParsedICalendarEvent {
         this.event.displayAlarms ?? [],
       );
     }
+    if (patch.displayAlarmRemovals !== undefined) {
+      removeDisplayAlarms(
+        vevent,
+        patch.displayAlarmRemovals,
+        this.event.displayAlarms ?? [],
+        patch.displayAlarmEdits ?? [],
+      );
+    }
+    if (patch.displayAlarmAdditions !== undefined) {
+      setDisplayAlarmAdditions(vevent, patch.displayAlarmAdditions);
+    }
     if (hasOwn(patch, 'recurrence')) {
       setRecurrence(
         vevent,
@@ -176,23 +189,15 @@ export class ParsedICalendarEvent {
       );
     }
 
-    const { displayAlarmEdits, ...eventPatch } = patch;
-    const displayAlarms = displayAlarmEdits
-      ? applyDisplayAlarmEdits(
-          this.event.displayAlarms ?? [],
-          displayAlarmEdits,
-        )
-      : this.event.displayAlarms;
+    const icalendar = calendar.toString();
 
     return {
-      event: {
-        ...this.event,
-        ...eventPatch,
-        ...(displayAlarms ? { displayAlarms } : {}),
-        title: patch.title ?? this.event.title,
-        timing: normalizeTiming(patch.timing ?? this.event.timing),
-      },
-      icalendar: calendar.toString(),
+      event: new ICalendarEventCodec().parse(
+        this.event.calendarId,
+        this.event.id,
+        icalendar,
+      ).event,
+      icalendar,
     };
   }
 
@@ -705,15 +710,13 @@ export class ICalendarEventCodec {
     if (input.recurrence) {
       setRecurrence(vevent, input.recurrence, undefined, input.timing);
     }
+    setDisplayAlarmAdditions(vevent, input.displayAlarms ?? []);
+
+    const icalendar = calendar.toString();
 
     return {
-      event: {
-        ...input,
-        timing: normalizeTiming(input.timing),
-        id: eventId,
-        calendarId,
-      },
-      icalendar: calendar.toString(),
+      event: this.parse(calendarId, eventId, icalendar).event,
+      icalendar,
     };
   }
 
@@ -1304,9 +1307,14 @@ function readDisplayAlarms(
     }
 
     const trigger = readDisplayAlarmTrigger(alarm);
+    const uid =
+      alarm.getAllProperties('uid').length === 1
+        ? textValue(alarm.getFirstPropertyValue('uid'))
+        : undefined;
     return [
       {
         index,
+        ...(uid ? { uid } : {}),
         description: textValue(
           alarm.getFirstProperty('description')?.getFirstValue(),
         ),
@@ -1401,10 +1409,40 @@ function setDisplayAlarmEdits(
 
     const hasTriggerEdit = edit.triggerMinutes !== undefined;
     const hasDescriptionEdit = hasOwn(edit, 'description');
-    if (!hasTriggerEdit && !hasDescriptionEdit) {
+    const hasUidEdit = hasOwn(edit, 'uid');
+    if (!hasTriggerEdit && !hasDescriptionEdit && !hasUidEdit) {
       throw unsupportedDisplayAlarmPatch(
-        'A DISPLAY alarm edit must change its trigger or description',
+        'A DISPLAY alarm edit must change its UID, trigger, or description',
       );
+    }
+
+    if (hasUidEdit) {
+      if (typeof edit.uid !== 'string' || !isValidAlarmUid(edit.uid)) {
+        throw unsupportedDisplayAlarmPatch('A DISPLAY alarm UID is invalid');
+      }
+      if (alarm.getAllProperties('uid').length > 1) {
+        throw unsupportedDisplayAlarmPatch(
+          'The DISPLAY alarm has multiple UIDs',
+        );
+      }
+      const duplicateUid = alarms.some(
+        (candidate, index) =>
+          index !== edit.index &&
+          candidate
+            .getAllProperties('uid')
+            .some((property) => property.getFirstValue() === edit.uid),
+      );
+      if (duplicateUid) {
+        throw unsupportedDisplayAlarmPatch(
+          'DISPLAY alarm UIDs must be unique within an event resource',
+        );
+      }
+      const uidProperty = alarm.getFirstProperty('uid');
+      if (uidProperty) {
+        uidProperty.setValue(edit.uid);
+      } else {
+        alarm.addPropertyWithValue('uid', edit.uid);
+      }
     }
 
     if (hasTriggerEdit) {
@@ -1457,32 +1495,120 @@ function setDisplayAlarmEdits(
   }
 }
 
-function applyDisplayAlarmEdits(
-  alarms: CalendarEventDisplayAlarm[],
-  edits: CalendarEventDisplayAlarmEdit[],
-): CalendarEventDisplayAlarm[] {
-  const byIndex = new Map(edits.map((edit) => [edit.index, edit]));
-  return alarms.map((alarm) => {
-    const edit = byIndex.get(alarm.index);
-    if (!edit) {
-      return { ...alarm };
+function setDisplayAlarmAdditions(
+  vevent: ICAL.Component,
+  additions: CalendarEventDisplayAlarmInput[],
+): void {
+  if (!Array.isArray(additions)) {
+    throw unsupportedDisplayAlarmPatch('Alarm additions must be a list');
+  }
+
+  const existingUids = new Set(
+    vevent
+      .getAllSubcomponents('valarm')
+      .flatMap((alarm) => alarm.getAllProperties('uid'))
+      .map((property) => textValue(property.getFirstValue()))
+      .filter((uid): uid is string => uid !== undefined),
+  );
+  const addedUids = new Set<string>();
+
+  for (const addition of additions) {
+    if (
+      !addition ||
+      !isValidAlarmUid(addition.uid) ||
+      !Number.isSafeInteger(addition.triggerMinutes) ||
+      !Number.isSafeInteger(addition.triggerMinutes * 60) ||
+      typeof addition.description !== 'string' ||
+      (addition.triggerRelatedTo !== undefined &&
+        addition.triggerRelatedTo !== 'start' &&
+        addition.triggerRelatedTo !== 'end')
+    ) {
+      throw unsupportedDisplayAlarmPatch('A new DISPLAY alarm is invalid');
     }
-    return {
-      ...alarm,
-      ...(edit.triggerMinutes !== undefined
-        ? { triggerMinutes: edit.triggerMinutes }
-        : {}),
-      ...(edit.description !== undefined
-        ? { description: edit.description }
-        : {}),
-    };
-  });
+    if (existingUids.has(addition.uid) || addedUids.has(addition.uid)) {
+      throw unsupportedDisplayAlarmPatch(
+        'DISPLAY alarm UIDs must be unique within an event resource',
+      );
+    }
+    addedUids.add(addition.uid);
+
+    const alarm = new ICAL.Component('valarm');
+    alarm.addPropertyWithValue('uid', addition.uid);
+    alarm.addPropertyWithValue('action', 'DISPLAY');
+    alarm.addPropertyWithValue(
+      'trigger',
+      ICAL.Duration.fromSeconds(addition.triggerMinutes * 60),
+    );
+    alarm
+      .getFirstProperty('trigger')
+      ?.setParameter(
+        'related',
+        addition.triggerRelatedTo === 'end' ? 'END' : 'START',
+      );
+    alarm.addPropertyWithValue('description', addition.description);
+    vevent.addSubcomponent(alarm);
+  }
+}
+
+function removeDisplayAlarms(
+  vevent: ICAL.Component,
+  removals: CalendarEventDisplayAlarmRemoval[],
+  supportedAlarms: CalendarEventDisplayAlarm[],
+  edits: CalendarEventDisplayAlarmEdit[],
+): void {
+  if (!Array.isArray(removals)) {
+    throw unsupportedDisplayAlarmPatch('Alarm removals must be a list');
+  }
+
+  const editedIndexes = new Set(edits.map(({ index }) => index));
+  const removedIndexes = new Set<number>();
+  const alarms = vevent.getAllSubcomponents('valarm');
+  const toRemove: ICAL.Component[] = [];
+  for (const removal of removals) {
+    if (
+      !removal ||
+      !Number.isSafeInteger(removal.index) ||
+      removal.index < 0 ||
+      removedIndexes.has(removal.index) ||
+      editedIndexes.has(removal.index)
+    ) {
+      throw unsupportedDisplayAlarmPatch('A DISPLAY alarm removal is invalid');
+    }
+    const projected = supportedAlarms.find(
+      (alarm) => alarm.index === removal.index,
+    );
+    const alarm = alarms[removal.index];
+    if (!projected || !alarm) {
+      throw unsupportedDisplayAlarmPatch(
+        'Only an existing DISPLAY alarm can be removed',
+      );
+    }
+    removedIndexes.add(removal.index);
+    toRemove.push(alarm);
+  }
+  toRemove.forEach((alarm) => vevent.removeSubcomponent(alarm));
 }
 
 function unsupportedDisplayAlarmPatch(
   message: string,
 ): ICalendarEventCodecError {
   return new ICalendarEventCodecError('unsupported-patch', message);
+}
+
+function containsControlCharacters(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code <= 0x1f || code === 0x7f;
+  });
+}
+
+function isValidAlarmUid(value: string): boolean {
+  return (
+    value.trim() === value &&
+    value.length > 0 &&
+    value.length <= 255 &&
+    !containsControlCharacters(value)
+  );
 }
 
 function textValue(value: unknown): string | undefined {
@@ -1791,17 +1917,6 @@ function timedValue(
   return ICAL.Time.fromDateTimeString(
     resolvedMode === 'utc' ? `${normalized}Z` : normalized,
   );
-}
-
-function normalizeTiming(timing: CalendarEventTiming): CalendarEventTiming {
-  if (timing.type === 'all-day') {
-    return { ...timing };
-  }
-  return {
-    type: 'timed',
-    start: { ...timing.start, mode: dateTimeMode(timing.start) },
-    end: { ...timing.end, mode: dateTimeMode(timing.end) },
-  };
 }
 
 function dateTimeMode(

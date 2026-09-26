@@ -715,7 +715,7 @@ describe('<CalendarEventEditorDialog />', () => {
     expect(screen.queryByRole('textbox', { name: /email|audio/i })).toBeNull();
     expect(
       screen.getByText(
-        'Only these existing display alarms can be edited. Other alarm actions stay unchanged and are not run.',
+        'New display alarms start 15 minutes before the event. Other alarm actions stay unchanged and are not run.',
       ),
     ).toBeInTheDocument();
 
@@ -747,6 +747,100 @@ describe('<CalendarEventEditorDialog />', () => {
         },
         { index: 1, triggerMinutes: -60, description: 'Second reminder' },
       ],
+    });
+  });
+
+  it('creates a DISPLAY alarm with one stable UID and allows alarm removal', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [event],
+    });
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+    const randomUUID = vi.fn(() => 'new-alarm-uid');
+    vi.stubGlobal('crypto', { randomUUID });
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={event}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Add display alarm' }),
+    );
+    expect(
+      screen.getByRole('spinbutton', {
+        name: 'Display alarm 1 trigger offset (minutes)',
+      }),
+    ).toHaveValue(-15);
+    expect(
+      screen.getByRole('textbox', { name: 'Display alarm 1 description' }),
+    ).toHaveValue('Event reminder');
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Display alarm 1 description' }),
+      { target: { value: 'Planning starts soon' } },
+    );
+    expect(randomUUID).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(updateSpy).toHaveBeenCalled());
+    expect(updateSpy).toHaveBeenCalledWith(
+      'team',
+      'planning',
+      expect.objectContaining({
+        displayAlarmAdditions: [
+          {
+            uid: 'new-alarm-uid@matrix-calendar-widget',
+            description: 'Planning starts soon',
+            triggerMinutes: -15,
+            triggerRelatedTo: 'start',
+          },
+        ],
+      }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it('removes an existing DISPLAY alarm through an accessible control', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [eventWithDisplayAlarms],
+    });
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={eventWithDisplayAlarms}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      (
+        await screen.findAllByRole('button', {
+          name: 'Remove display alarm',
+        })
+      )[0],
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(updateSpy).toHaveBeenCalled());
+    expect(updateSpy.mock.calls[0][2]).toMatchObject({
+      displayAlarmRemovals: [{ index: 0 }],
+    });
+    await expect(
+      repository.getEvent('team', 'planning'),
+    ).resolves.toMatchObject({
+      displayAlarms: [{ index: 0, description: 'Second reminder' }],
     });
   });
 

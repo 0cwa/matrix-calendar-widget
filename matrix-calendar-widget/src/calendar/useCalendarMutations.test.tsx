@@ -68,8 +68,9 @@ const input: CalendarEventInput = {
   },
 };
 
+const { displayAlarms: _displayAlarms, ...eventInput } = input;
 const event: CalendarEvent = {
-  ...input,
+  ...eventInput,
   id: 'planning',
   calendarId: 'team',
 };
