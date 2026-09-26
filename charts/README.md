@@ -34,9 +34,9 @@ the full connection URL and set `reminders.databaseUrl.existingSecret` plus
 `existingSecretKey`. The chart injects
 `MATRIX_CALENDAR_REMINDER_DATABASE_URL` only when enabled; a missing Secret or
 key prevents the pod from starting. Do not place the URL in Helm values or
-`settings.additionalEnv`. This is deployment scaffolding only: reminder
-scheduling, durable claims, delivery-time room permissions, and database
-migrations are not implemented by this chart change. Restart the server
+`settings.additionalEnv`. The chart only injects the connection URL; application
+startup runs database migrations. Reminder scheduling, delivery-time room
+permissions, and Matrix delivery remain unimplemented. Restart the server
 deployment after rotating the external Secret, because environment variables
 are read when the pod starts.
 
