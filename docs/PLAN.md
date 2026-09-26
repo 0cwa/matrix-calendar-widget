@@ -36,10 +36,13 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 - [x] Resolve room membership and authorization context.
 - [x] Implement CalDAV service discovery and calendar enumeration against Radicale (#44/#49/#55/#56).
 - [x] Define the server-side Radicale credential/delegation strategy without handling user Matrix passwords (ADR009 / #54).
-- [ ] Add OpenID-capable Radicale auth support while preserving password-based CalDAV clients (#48).
-- [ ] Add the final delegated gateway/OpenID contract against a real Radicale container (#45).
+- [ ] Establish a writable implementation target for `radicale-auth-matrix` (#48): submit the change upstream if practical; otherwise maintain a compatible fork/plugin with the same contract. Keep plugin code and its tests outside this Apache-licensed repository.
+- [ ] Add the ADR009-tagged Matrix OpenID credential mode to the Radicale auth plugin while leaving ordinary Matrix username/password authentication unchanged.
+- [ ] Add plugin unit tests for both modes, malformed/invalid delegated credentials, username and homeserver mismatches, and ensuring OpenID credentials are not cached or logged.
+- [ ] Add a minimal, reproducible plugin contract stack in the plugin repository: pinned Synapse plus a locally built Radicale image containing the candidate plugin. Verify a Synapse-issued OpenID token succeeds for its matching localpart, invalid/mismatched proofs fail, and the legacy password mode still works. No MAS, gateway, or widget is needed in this focused stack.
+- [ ] Pin the tested plugin commit/release in this repository's `dev/compose.yaml` and add the final delegated gateway/OpenID/non-member contract (#45).
 
-Password-auth real-container discovery is already covered by #59 / PR #60. The only remaining M2 path is the external ADR009 plugin change (#48), then the final delegated gateway contract (#45).
+Password-auth real-container discovery is already covered by #59 / PR #60. The remaining M2 path is the dual-mode plugin change and its focused container contract (#48), followed by the final gateway/OpenID/non-member contract (#45).
 
 **Exit:** an authenticated widget can list the Radicale calendars it is authorized to see through delegated Matrix OpenID without handling user Matrix passwords.
 

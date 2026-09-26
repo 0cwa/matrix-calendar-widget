@@ -6,9 +6,9 @@ This file is the short-lived execution snapshot. `docs/PLAN.md` is the durable m
 
 ## Current phase
 
-**M3 is complete. Close the external M2 auth blocker while advancing only small, independently useful M4 slices in parallel.**
+**M3 is complete. Close the M2 auth gap with a tested dual-mode Radicale plugin path while advancing only small, independently useful M4 slices in parallel.**
 
-The widget now has a real gateway-backed `CalendarRepository`, preservation-first VEVENT CRUD, visible conflict recovery, and a real two-client Radicale interoperability contract. The remaining M2 blocker is external: the pinned `etkecc/radicale-auth-matrix` plugin still only accepts Matrix passwords, while ADR009 requires short-lived Matrix OpenID delegation from the gateway.
+The widget now has a real gateway-backed `CalendarRepository`, preservation-first VEVENT CRUD, visible conflict recovery, and a real two-client Radicale interoperability contract. The pinned `etkecc/radicale-auth-matrix` plugin still only accepts Matrix passwords, while ADR009 requires short-lived Matrix OpenID delegation from the gateway. The next M2 slice is now planned as a dual-mode plugin change plus a minimal Synapse/Radicale contract stack; this does not require MAS.
 
 ## Landed
 
@@ -36,8 +36,8 @@ Merged in-repo:
 
 Still external/blocking:
 
-- #48 — add ADR009-compatible OpenID mode to `radicale-auth-matrix`,
-- #45 — final real gateway/OpenID/non-member contract after #48.
+- #48 — establish a writable source target, add ADR009-compatible OpenID mode while preserving password auth, and prove both modes in the plugin's minimal container stack.
+- #45 — final real gateway/OpenID/non-member contract after a tested plugin artifact is available.
 
 ### M4 — Calendar management
 
@@ -67,17 +67,18 @@ Complete on `main`:
 
 ## Active
 
-- #48 — external `radicale-auth-matrix` OpenID delegation. No writable `0cwa/radicale-auth-matrix` fork exists and the available GitHub connector cannot create/fork repositories.
+- #48 — dual-mode `radicale-auth-matrix` OpenID delegation. No writable `0cwa/radicale-auth-matrix` fork currently exists; first resolve the source/release path, then implement and container-test the plugin outside this Apache-licensed repo.
 - #45 — final delegated gateway/OpenID real-container contract, blocked on #48.
 - #100 / PR #101 — M4 safe calendar deletion; implementation is present, but the branch currently diverges from `main` after #99 merged and must be synced before merge.
 - #29 — enable main-branch protection once repository-rules administration is available.
 
 ## Highest-priority next steps
 
-1. Implement #48 in a writable upstream/forked `radicale-auth-matrix` repository; do not copy GPL/LGPL-family plugin code into this Apache-licensed repository.
-2. Land #45's final gateway/OpenID/non-member real-container contract and close M2.
-3. In parallel while #48 is blocked, synchronize and finish #100 / PR #101: safe VEVENT-only calendar deletion through the existing repository/gateway seams.
-4. After delete lands, reassess the next smallest M4 slice (description, color, timezone, compatibility notice, or diagnostics) rather than pre-building generic WebDAV administration.
+1. Establish a writable upstream/fork/plugin source and release path for #48.
+2. Add the tagged OpenID credential mode without changing password-mode behavior; unit-test identity binding, invalid proofs, no caching, and log redaction.
+3. Provide a minimal plugin-owned Synapse + locally built Radicale container contract for both credential modes; then pin the tested plugin artifact in this repo's dev stack.
+4. Land #45's final gateway/OpenID/non-member real-container contract and close M2.
+5. In parallel, synchronize and finish #100 / PR #101: safe VEVENT-only calendar deletion through the existing repository/gateway seams. After delete lands, reassess the next smallest M4 slice rather than pre-building generic WebDAV administration.
 
 ## Working rules
 
