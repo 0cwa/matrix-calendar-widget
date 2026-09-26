@@ -176,16 +176,20 @@ describe('ICalendarEventCodec', () => {
   });
 
   it('preserves repeated interoperable properties on ordinary and recurrence patches without acting on URIs', () => {
-    const source = fixture('interoperable-properties.ics');
-    const parsed = codec.parse('team', 'interoperable-properties.ics', source);
-    const sourceEvent =
-      ICAL.Component.fromString(source).getFirstSubcomponent('vevent');
-    const sourceAlarms = sourceEvent?.getAllSubcomponents('valarm') ?? [];
     const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => {
       throw new Error('Unexpected fetch while handling stored iCalendar URIs');
     });
 
     try {
+      const source = fixture('interoperable-properties.ics');
+      const parsed = codec.parse(
+        'team',
+        'interoperable-properties.ics',
+        source,
+      );
+      const sourceEvent =
+        ICAL.Component.fromString(source).getFirstSubcomponent('vevent');
+      const sourceAlarms = sourceEvent?.getAllSubcomponents('valarm') ?? [];
       const ordinary = parsed.applyPatch({ location: 'Updated room' });
       const recurrence = parsed.applyPatch({
         recurrence: {
