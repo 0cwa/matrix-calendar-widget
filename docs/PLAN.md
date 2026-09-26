@@ -216,7 +216,12 @@ and explicit target-calendar authorization are available.
 - [ ] Threat model and security review.
 - [ ] Rate limits and abuse controls.
 - [x] Document the initial free/busy privacy boundary; no aggregate availability surface is provided yet ([docs/FREE_BUSY_PRIVACY.md](./FREE_BUSY_PRIVACY.md)).
-- [ ] Backup/recovery documentation.
+- [x] Document operator backup/recovery boundaries and procedures for the
+      app-owned reminder database, optional `/app/storage` PVC, and external
+      Secret/configuration ([docs/backup-and-recovery.md](./backup-and-recovery.md)).
+      Radicale remains the canonical calendar store and requires an independent
+      backup. This documentation does not configure backups or close other M8
+      pilot gates.
 - [ ] Container images and deployment docs under fork-owned names.
 - [ ] Upgrade/migration story.
 - [ ] Compatibility matrix: Element Web/Desktop and other tested clients.
