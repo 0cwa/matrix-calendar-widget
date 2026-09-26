@@ -130,18 +130,13 @@ The gated recurring-resource CalDAV contract is defined in `matrix-calendar-serv
       response semantics until member addresses can be verified and their
       owners give explicit consent. Matrix membership/member APIs do not expose
       other members' email addresses; never infer email from a Matrix ID.
-- [ ] Store per-alarm Matrix reminder targets as ADR007 sidecar metadata,
-      outside iCalendar, in an app-owned PostgreSQL database and least-privilege
-      role (ADR019). Operators may reuse a PostgreSQL cluster, but not Synapse's
-      database, schema, role, or credentials. The server chart accepts the URL
-      only through an external Kubernetes Secret; reminders remain disabled by
-      default until that Secret is configured.
+- [ ] Add an authenticated API that persists per-alarm Matrix reminder targets
+      as ADR007 sidecar metadata through the implemented PostgreSQL store,
+      outside iCalendar. Require current room membership and event-write checks.
 - [x] Implement the optional app-owned PostgreSQL reminder-state store and
       atomic durable delivery claims (ADR019). The store has local unit coverage
       and a PostgreSQL integration contract wired into CI; this does not enable
       reminder configuration or delivery.
-- [ ] Persist per-alarm whole-room reminder sidecar configuration through an
-      authenticated API with current room membership and event-write checks.
 - [ ] Deliver reminders through standard `m.mentions.room: true` with
       scheduling and delivery-time permission checks. Delivery is at-least-once;
       a Matrix send followed by a process crash before sent-state persistence
