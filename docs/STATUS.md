@@ -54,7 +54,7 @@ Landed on `main`:
 
 Assembled locally, not merged to GitHub `main`:
 
-- safe VEVENT-only calendar deletion (#100 / PR #101), description/color, compatibility, and diagnostics slices. The deletion code at `codex/m4-delete-101` source commit `f583dbab1045b57743f72506f79d2d8a30f85e3f` passed full `CI=true yarn ci`; that validates the M4 branch only, not this aggregate branch at `d3f828e25f96d0cfd59468ea14653e6a3b135d68`, whose full CI remains unverified. GitHub PR #101 remains open/conflicting against `main` and needs synchronization, remote review, and fresh checks before merge; no GitHub state was changed here.
+- safe VEVENT-only calendar deletion (#100 / PR #101), description/color, compatibility, and diagnostics slices. The deletion code at `codex/m4-delete-101` source commit `f583dbab1045b57743f72506f79d2d8a30f85e3f` passed full `CI=true yarn ci`. The combined `codex/m6-reminder-integrated` snapshot `3a8691a0b1f36c0bf03c9af6c1ea8626a4760586` also passed full CI under Node 22.23.3/Yarn 1.22.22 in 335.67 seconds: widget 132 files passed/1 skipped (1,229 passed/31 todo), server 45 suites passed/3 skipped (600 passed/7 skipped), calendar 17 suites/223 tests passed. This validates that exact snapshot; this documentation follow-up is later. `CALDAV_CONTRACT` and `MATRIX_CALENDAR_REMINDER_DATABASE_URL` were unset, leaving the two CalDAV runtime contracts and PostgreSQL integration test unvalidated. GitHub PR #101 remains open/conflicting against `main` and needs synchronization, remote review, and fresh checks before merge; no GitHub state was changed here.
 
 Deferred beyond M4:
 
