@@ -37,7 +37,7 @@ export type CalendarEventPresentation = {
   event: CalendarEvent | CalendarEventOccurrence;
   /** CalDAV resource that owns the event and all of its recurrence data. */
   resourceEvent: CalendarEvent;
-  /** Zone used to expand and present floating values for this resource. */
+  /** Viewer zone used to expand DATE/floating values and present them. */
   rangeTimezone: string;
   /** Viewer-local zone used to render the resolved floating instant. */
   viewerTimezone: string;
@@ -60,15 +60,15 @@ export function presentCalendarEvents(
   range: CalendarTimeRange,
   viewerTimezone = DateTime.local().zoneName || 'UTC',
 ): CalendarEventPresentationResult {
-  const calendarsById = new Map(
-    calendars.map((calendar) => [calendar.id, calendar]),
-  );
+  // Calendar.timezone is metadata, not the viewer's interpretation of DATE or
+  // floating values. Keep the argument for call-site compatibility while the
+  // presentation policy is viewer-local.
+  void calendars;
   const result: CalendarEventPresentation[] = [];
   let expansionErrors = 0;
 
   for (const resourceEvent of events) {
-    const rangeTimezone =
-      calendarsById.get(resourceEvent.calendarId)?.timezone || viewerTimezone;
+    const rangeTimezone = viewerTimezone;
 
     if (resourceEvent.unsupportedRecurrence) {
       // The raw component is preserved by the server. Do not expand a partial

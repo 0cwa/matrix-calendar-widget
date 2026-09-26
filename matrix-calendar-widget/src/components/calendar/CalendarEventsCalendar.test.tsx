@@ -18,7 +18,7 @@ import { CalendarEvent } from '@matrix-calendar-widget/calendar';
 import { formatCalendarEventMonthTime } from './CalendarEventsCalendar';
 
 describe('formatCalendarEventMonthTime', () => {
-  it('formats floating times without treating floating as a Luxon zone', () => {
+  it('formats floating times in viewer-local time', () => {
     const event: CalendarEvent = {
       id: 'planning',
       calendarId: 'team',
@@ -42,9 +42,9 @@ describe('formatCalendarEventMonthTime', () => {
     expect(
       formatCalendarEventMonthTime(
         event,
-        'Pacific/Auckland',
+        'America/Los_Angeles',
         'America/Los_Angeles',
       ),
-    ).toBe('2:00 PM');
+    ).toBe('9:00 AM');
   });
 });

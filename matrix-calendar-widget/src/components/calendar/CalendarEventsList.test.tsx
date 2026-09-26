@@ -69,7 +69,7 @@ describe('<CalendarEventsList />', () => {
     expect(onSelectEvent).toHaveBeenCalledWith(presentation);
   });
 
-  it('formats floating event wall times using the presentation timezone', () => {
+  it('formats floating event times in the viewer-local timezone', () => {
     const floatingEvent: CalendarEventPresentation = {
       ...presentation,
       event: {
@@ -88,7 +88,7 @@ describe('<CalendarEventsList />', () => {
           },
         },
       },
-      rangeTimezone: 'Pacific/Auckland',
+      rangeTimezone: 'America/Los_Angeles',
       viewerTimezone: 'America/Los_Angeles',
     };
 
@@ -96,7 +96,7 @@ describe('<CalendarEventsList />', () => {
       <CalendarEventsList events={[floatingEvent]} onSelectEvent={vi.fn()} />,
     );
 
-    expect(screen.getByText(/2:00 PM–3:00 PM/)).toBeInTheDocument();
+    expect(screen.getByText(/9:00 AM–10:00 AM/)).toBeInTheDocument();
     expect(screen.queryByText(/Invalid DateTime/)).toBeNull();
   });
 

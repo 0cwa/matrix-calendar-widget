@@ -80,7 +80,7 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [x] RDATE / EXDATE series editing with explicit DATE, floating, UTC, and TZID values.
 - [ ] RECURRENCE-ID instance overrides.
 - [x] Add range-bounded read expansion for resource RRULE/RDATE/EXDATE sets, RDATE PERIOD durations, and same-resource exceptions (local backend slice; `RANGE=THISANDFUTURE` remains preserved and fails visibly).
-- [x] Present generated occurrences in the visible range, with calendar timezone or viewer-local fallback and stable original recurrence identities; unsupported expansion is shown as a warning (ADR011 carries opaque ranged-override diagnostics without interpreting or rewriting the source component).
+- [x] Present generated occurrences in the visible range using the viewer-local timezone for DATE and floating recurrence values, with stable original recurrence identities; explicit UTC/TZID values remain unchanged and unsupported expansion is shown as a warning (ADR011 carries opaque ranged-override diagnostics without interpreting or rewriting the source component; ADR013 records the timezone policy).
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
 - [ ] VALARM preservation and editor.

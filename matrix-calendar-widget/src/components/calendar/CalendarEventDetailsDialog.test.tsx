@@ -112,7 +112,7 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventDetailsDialog />', () => {
-  it('formats floating detail times using the presentation timezone', async () => {
+  it('formats floating detail times in the viewer-local timezone', async () => {
     const floatingEvent: CalendarEvent = {
       ...event,
       timing: {
@@ -140,7 +140,7 @@ describe('<CalendarEventDetailsDialog />', () => {
           ...eventPresentation,
           event: floatingEvent,
           resourceEvent: floatingEvent,
-          rangeTimezone: 'Pacific/Auckland',
+          rangeTimezone: 'America/Los_Angeles',
           viewerTimezone: 'America/Los_Angeles',
         }}
         onClose={vi.fn()}
@@ -148,7 +148,7 @@ describe('<CalendarEventDetailsDialog />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    expect(await screen.findByText(/2:00 PM–3:00 PM/)).toBeInTheDocument();
+    expect(await screen.findByText(/9:00 AM–10:00 AM/)).toBeInTheDocument();
     expect(screen.queryByText(/Invalid DateTime/)).toBeNull();
   });
 

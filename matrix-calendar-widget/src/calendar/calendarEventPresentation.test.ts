@@ -17,6 +17,7 @@
 import { Calendar, CalendarEvent } from '@matrix-calendar-widget/calendar';
 import { DateTime } from 'luxon';
 import {
+  calendarEventDateTimeForDisplay,
   calendarEventKey,
   calendarEventOccurrenceKey,
   calendarEventPresentationToFullCalendarEvent,
@@ -169,7 +170,7 @@ describe('calendar event presentation', () => {
     });
   });
 
-  it('anchors floating FullCalendar values in the selected zone for the local grid', () => {
+  it('anchors floating FullCalendar values in the viewer-local zone', () => {
     const floatingEvent: CalendarEvent = {
       ...timedEvent,
       timing: {
@@ -190,34 +191,34 @@ describe('calendar event presentation', () => {
     const input = calendarEventToFullCalendarEvent(
       floatingEvent,
       'label-planning',
-      'Pacific/Auckland',
+      'America/Los_Angeles',
     );
     expect(input).toMatchObject({
-      start: '2026-09-23T09:00:00.000+12:00',
-      end: '2026-09-23T10:00:00.000+12:00',
-      extendedProps: { rangeTimezone: 'Pacific/Auckland' },
+      start: '2026-09-23T09:00:00.000-07:00',
+      end: '2026-09-23T10:00:00.000-07:00',
+      extendedProps: { rangeTimezone: 'America/Los_Angeles' },
     });
     expect(
       DateTime.fromISO(String(input.start))
         .setZone('America/Los_Angeles')
         .toFormat('yyyy-MM-dd HH:mm'),
-    ).toBe('2026-09-22 14:00');
+    ).toBe('2026-09-23 09:00');
     expect(
       calendarEventStartDate(
         floatingEvent,
-        'Pacific/Auckland',
+        'America/Los_Angeles',
         'America/Los_Angeles',
       ),
-    ).toBe('2026-09-22');
+    ).toBe('2026-09-23');
     expect(
       groupCalendarEventsByDay([
         {
           ...asPresentation(floatingEvent),
-          rangeTimezone: 'Pacific/Auckland',
+          rangeTimezone: 'America/Los_Angeles',
           viewerTimezone: 'America/Los_Angeles',
         },
       ]).map(({ day }) => day),
-    ).toEqual(['2026-09-22']);
+    ).toEqual(['2026-09-23']);
   });
 
   it('filters by title, description, location, or category', () => {
@@ -234,7 +235,7 @@ describe('calendar event presentation', () => {
     expect(filterCalendarEvents([presentation], 'missing')).toEqual([]);
   });
 
-  it('groups and sorts events by their calendar-local start day', () => {
+  it('groups and sorts events by their viewer-local start day', () => {
     const groups = groupCalendarEventsByDay([
       asPresentation(allDayEvent),
       asPresentation(timedEvent),
@@ -339,7 +340,7 @@ describe('calendar event presentation', () => {
     ).not.toBe(moved.key);
   });
 
-  it('uses calendar timezone for DATE values and viewer-local fallback for floating values', () => {
+  it('uses viewer-local time for DATE and floating recurrence regardless of Calendar.timezone', () => {
     const allDaySeries: CalendarEvent = {
       ...allDayEvent,
       recurrence: { rrule: 'FREQ=DAILY;COUNT=4' },
@@ -350,28 +351,21 @@ describe('calendar event presentation', () => {
       timezone: 'Pacific/Honolulu',
     };
 
-    const calendarTimezoneResult = presentCalendarEvents(
+    const dateBoundaryResult = presentCalendarEvents(
       [allDaySeries],
       [calendar],
       {
-        start: '2026-09-25T09:00:00Z',
-        end: '2026-09-27T10:00:00Z',
+        start: '2026-09-24T06:59:00Z',
+        end: '2026-09-24T07:01:00Z',
       },
       'America/Los_Angeles',
     );
-    expect(calendarTimezoneResult.events).toHaveLength(2);
-
-    const viewerDateFallbackResult = presentCalendarEvents(
-      [allDaySeries],
-      [{ id: 'team', name: 'Team' }],
-      {
-        start: '2026-09-25T07:00:00Z',
-        end: '2026-09-27T07:00:00Z',
-      },
-      'America/Los_Angeles',
-    );
-    expect(viewerDateFallbackResult.expansionErrors).toBe(0);
-    expect(viewerDateFallbackResult.events).toHaveLength(2);
+    expect(dateBoundaryResult.expansionErrors).toBe(0);
+    expect(dateBoundaryResult.events).toHaveLength(1);
+    expect(dateBoundaryResult.events[0].event.timing).toMatchObject({
+      type: 'all-day',
+      startDate: '2026-09-24',
+    });
 
     const floatingSeries: CalendarEvent = {
       ...timedEvent,
@@ -390,37 +384,39 @@ describe('calendar event presentation', () => {
       },
       recurrence: { rrule: 'FREQ=DAILY;COUNT=2' },
     };
-    const viewerFallbackResult = presentCalendarEvents(
-      [floatingSeries],
-      [{ id: 'team', name: 'Team' }],
-      {
-        start: '2026-09-25T15:00:00Z',
-        end: '2026-09-27T16:00:00Z',
-      },
-      'America/Los_Angeles',
-    );
-
-    expect(viewerFallbackResult.expansionErrors).toBe(0);
-    expect(viewerFallbackResult.events).toHaveLength(2);
-    expect(viewerFallbackResult.events[0].rangeTimezone).toBe(
-      'America/Los_Angeles',
-    );
-    expect(viewerFallbackResult.events[0].viewerTimezone).toBe(
-      'America/Los_Angeles',
-    );
-
-    const calendarFloatingResult = presentCalendarEvents(
+    const floatingBoundaryResult = presentCalendarEvents(
       [floatingSeries],
       [{ id: 'team', name: 'Team', timezone: 'Pacific/Auckland' }],
       {
-        start: '2026-09-25T15:00:00Z',
-        end: '2026-09-27T16:00:00Z',
+        start: '2026-09-25T15:59:00Z',
+        end: '2026-09-25T16:01:00Z',
       },
       'America/Los_Angeles',
     );
-    expect(calendarFloatingResult.events[0].rangeTimezone).toBe(
-      'Pacific/Auckland',
+
+    expect(floatingBoundaryResult.expansionErrors).toBe(0);
+    expect(floatingBoundaryResult.events).toHaveLength(1);
+    const presentation = floatingBoundaryResult.events[0];
+    expect(presentation.rangeTimezone).toBe('America/Los_Angeles');
+    expect(presentation.viewerTimezone).toBe('America/Los_Angeles');
+    const fullCalendarEvent = calendarEventPresentationToFullCalendarEvent(
+      presentation,
+      'label-planning',
     );
+    expect(fullCalendarEvent.start).toBe('2026-09-25T09:00:00.000-07:00');
+    expect(
+      groupCalendarEventsByDay([presentation]).map(({ day }) => day),
+    ).toEqual(['2026-09-25']);
+    if (presentation.event.timing.type !== 'timed') {
+      throw new Error('Expected timed occurrence');
+    }
+    expect(
+      calendarEventDateTimeForDisplay(
+        presentation.event.timing.start,
+        presentation.rangeTimezone,
+        presentation.viewerTimezone,
+      ).toFormat('yyyy-MM-dd HH:mm'),
+    ).toBe('2026-09-25 09:00');
   });
 
   it('does not display a partially modeled ranged recurrence', () => {
