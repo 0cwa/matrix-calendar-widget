@@ -47,7 +47,7 @@ The gateway and bot are initially one deployable service. Split them only when s
 | organizer/attendees            | iCalendar object                      |
 | VALARM                         | iCalendar object                      |
 | calendar display properties    | CalDAV properties where supported     |
-| Matrix room ↔ calendar binding | Matrix/gateway configuration          |
+| Matrix room ↔ calendar binding | Server-managed configuration (ADR015) |
 | Matrix reminder recipients     | gateway sidecar store                 |
 | reminder delivery history      | gateway store                         |
 | Matrix permissions             | Matrix room state + configured policy |
@@ -111,10 +111,38 @@ Start with Matrix room membership plus a small configurable policy mapped to pow
 - room member: view calendar,
 - configured minimum PL: create events,
 - event creator or configured minimum PL: edit/delete,
-- configured minimum PL: manage calendars,
+- configured minimum PL: manage events in the configured room calendar,
 - configured minimum PL and Matrix room permission: schedule `@room` mentions.
 
 Exact defaults require implementation validation and may become a dedicated ADR.
+
+## Room/calendar binding
+
+The initial room-to-calendar source of truth is a server-managed configuration
+map keyed by canonical Matrix room IDs (ADR015). Each configured room resolves
+to exactly one app-owned calendar identifier; a collection identifier can be
+assigned to only one room. A missing, malformed, duplicate, ambiguous, or
+cross-room binding fails closed before CalDAV discovery or access.
+
+The server resolves configured identifiers under the configured Radicale
+service and the ADR014 room principal. A browser-supplied href or URL is never
+the binding authority, and the gateway does not enumerate the service
+principal's whole home to select a room target. Only an operator-managed server
+configuration change may change a binding; the widget and room members cannot
+write or override it. Dynamic database, room-state, or widget-managed binding
+requires a separate ADR. Under this initial contract, the widget can read and
+manage events in the bound collection; collection creation, deletion, rename,
+and room rebinding remain operator/configuration-managed so collection
+lifecycle cannot leave a dangling or unbound target.
+
+For a room-bound widget or bot request, the gateway validates the request actor,
+current membership, action-specific power, and the configured binding before
+CalDAV access. The room principal's credentials stay server-side. Personal
+widget targets continue to use the validated user's principal. The current
+`owner_only` Radicale policy still grants the room principal whole-home access,
+so the deployment must keep that home within one trusted organizational
+boundary or establish equivalent per-room isolation. Actual room-target CalDAV
+access remains gated on the OpenID plugin and real-Radicale contract (#48/#45).
 
 ## Reminder delivery
 

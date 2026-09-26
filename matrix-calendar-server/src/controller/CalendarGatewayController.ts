@@ -33,25 +33,21 @@ import {
   Get,
   Headers,
   Inject,
+  NotFoundException,
   Patch,
   Post,
   Query,
   ServiceUnavailableException,
-  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
 import {
-  CalDavDiscoveryClient,
   CalDavEventClient,
   CalDavEventResource,
   CalDavEventTransportError,
   ICalendarEventCodec,
   ICalendarEventCodecError,
-  MatrixOpenIdCalDavCredentialError,
-  MatrixOpenIdCalDavCredentialProvider,
 } from '../caldav';
 import { MatrixOpenIdCredentialParam } from '../decorator/MatrixOpenIdCredentialParam';
 import { UserContextParam } from '../decorator/UserContextParam';
@@ -64,6 +60,14 @@ import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
+import {
+  resolveRoomCalendarBinding,
+  RoomCalendarBindingError,
+} from '../service/RoomCalendarBindingResolver';
+import {
+  RoomCalendarCalDavAccess,
+  RoomCalendarTarget,
+} from '../service/RoomCalendarCalDavAccess';
 
 @Controller({
   path: 'calendar',
@@ -75,6 +79,8 @@ export class CalendarGatewayController {
     @Inject(ModuleProviderToken.APP_CONFIGURATION)
     private readonly appConfig: IAppConfiguration,
     private readonly authorizationFactory: MatrixCalendarAuthorizationFactory,
+    @Inject(ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS)
+    private readonly roomCalendarCalDavAccess: RoomCalendarCalDavAccess,
   ) {}
 
   @Get('context')
@@ -89,7 +95,7 @@ export class CalendarGatewayController {
   async listCalendars(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Query('roomId') roomId?: string,
   ): Promise<CalendarGatewayCalendarDto[]> {
     const requiredRoomId = this.requireQuery(roomId, 'roomId');
@@ -103,37 +109,22 @@ export class CalendarGatewayController {
       );
     }
 
-    const radicaleUrl = this.requireRadicaleBaseUrl();
-    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
-      userContext,
-      openIdCredential,
-    );
-
-    return this.runCalDav(async () => {
-      const result = await new CalDavDiscoveryClient(
-        radicaleUrl,
-        credentialProvider,
-      ).discover();
-
-      return result.calendars.map(
-        (calendar) =>
-          new CalendarGatewayCalendarDto(
-            calendar.href,
-            calendar.displayName ?? calendar.href,
-            calendar.color,
-            calendar.readOnly,
-            calendar.description,
-            calendar.unsupportedComponents,
-          ),
-      );
-    });
+    const target = this.resolveRoomTarget(requiredRoomId);
+    return [
+      new CalendarGatewayCalendarDto(
+        target.calendarId,
+        target.calendarId,
+        undefined,
+        false,
+      ),
+    ];
   }
 
   @Get('calendars/diagnostics')
   async getCalendarDiagnostics(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Query('roomId') roomId?: string,
   ): Promise<CalendarGatewayDiagnosticsDto> {
     const requiredRoomId = this.requireQuery(roomId, 'roomId');
@@ -148,53 +139,18 @@ export class CalendarGatewayController {
       );
     }
 
-    const radicaleUrl = this.requireRadicaleBaseUrl();
-    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
-      userContext,
-      openIdCredential,
-    );
-
-    return this.runCalDav(async () => {
-      try {
-        const discovery = await new CalDavDiscoveryClient(
-          radicaleUrl,
-          credentialProvider,
-        ).discover();
-        const excludedRoots = new Set(
-          [radicaleUrl, discovery.principalUrl, discovery.calendarHomeUrl].map(
-            normalizeUrlForComparison,
-          ),
-        );
-
-        return new CalendarGatewayDiagnosticsDto(
-          discovery.calendars.flatMap((calendar) => {
-            const url = safeCalendarCollectionUrl(
-              calendar.href,
-              radicaleUrl,
-              excludedRoots,
-            );
-            return url ? [{ name: calendar.displayName, url }] : [];
-          }),
-        );
-      } catch (error) {
-        if (error instanceof MatrixOpenIdCalDavCredentialError) {
-          throw error;
-        }
-
-        // Do not expose CalDAV URLs or request details in diagnostics errors.
-        throw new ServiceUnavailableException({
-          code: 'calendar-diagnostics-unavailable',
-          message: 'CalDAV diagnostics are unavailable',
-        });
-      }
-    });
+    const target = this.resolveRoomTarget(requiredRoomId);
+    const url = this.roomCollectionUrl(target);
+    return new CalendarGatewayDiagnosticsDto([
+      { name: target.calendarId, url },
+    ]);
   }
 
   @Post('calendars')
   async createCalendar(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Body() input: { name?: string },
     @Query('roomId') roomId?: string,
   ): Promise<CalendarGatewayCalendarDto> {
@@ -213,33 +169,15 @@ export class CalendarGatewayController {
         'Not allowed to create calendars for this Matrix room',
       );
     }
-
-    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
-      userContext,
-      openIdCredential,
-    );
-
-    return this.runCalDav(async () => {
-      const calendar = await new CalDavDiscoveryClient(
-        this.requireRadicaleBaseUrl(),
-        credentialProvider,
-      ).createCalendar(name, `calendar-${randomUUID()}`);
-
-      return new CalendarGatewayCalendarDto(
-        calendar.href,
-        calendar.displayName ?? name,
-        calendar.color,
-        calendar.readOnly,
-        calendar.description,
-      );
-    });
+    this.resolveRoomTarget(requiredRoomId);
+    throw this.operatorManagedCollectionError();
   }
 
   @Patch('calendars')
   async renameCalendar(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Body() input: { name?: string },
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
@@ -250,10 +188,7 @@ export class CalendarGatewayController {
       throw new BadRequestException('calendar name is required');
     }
 
-    const normalizedCalendarId = this.normalizeRadicaleUrl(
-      this.requireQuery(calendarId, 'calendarId'),
-      'calendarId',
-    );
+    const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
     const authorization = this.authorizationFactory.forRoom(
       userContext.userId,
       requiredRoomId,
@@ -261,7 +196,7 @@ export class CalendarGatewayController {
     if (
       !(await authorization.isAllowed({
         action: 'manage-calendar',
-        calendarId: normalizedCalendarId,
+        calendarId: requestedCalendarId,
       }))
     ) {
       throw new ForbiddenException(
@@ -269,34 +204,22 @@ export class CalendarGatewayController {
       );
     }
 
-    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
-      userContext,
-      openIdCredential,
-    );
-
-    await this.runCalDav(async () => {
-      await new CalDavDiscoveryClient(
-        this.requireRadicaleBaseUrl(),
-        credentialProvider,
-      ).renameCalendar(normalizedCalendarId, name);
-    });
+    this.resolveRoomTarget(requiredRoomId, requestedCalendarId);
+    throw this.operatorManagedCollectionError();
   }
 
   @Patch('calendars/metadata')
   async updateCalendarMetadata(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Body() input: unknown,
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
   ): Promise<void> {
     const requiredRoomId = this.requireQuery(roomId, 'roomId');
-    const patch = this.parseCalendarMetadataPatch(input);
-    const normalizedCalendarId = this.normalizeRadicaleUrl(
-      this.requireQuery(calendarId, 'calendarId'),
-      'calendarId',
-    );
+    this.parseCalendarMetadataPatch(input);
+    const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
     const authorization = this.authorizationFactory.forRoom(
       userContext.userId,
       requiredRoomId,
@@ -304,7 +227,7 @@ export class CalendarGatewayController {
     if (
       !(await authorization.isAllowed({
         action: 'manage-calendar',
-        calendarId: normalizedCalendarId,
+        calendarId: requestedCalendarId,
       }))
     ) {
       throw new ForbiddenException(
@@ -312,69 +235,43 @@ export class CalendarGatewayController {
       );
     }
 
-    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
-      userContext,
-      openIdCredential,
-    );
-
-    await this.runCalDav(async () => {
-      await new CalDavDiscoveryClient(
-        this.requireRadicaleBaseUrl(),
-        credentialProvider,
-      ).updateCalendarMetadata(normalizedCalendarId, patch);
-    });
+    this.resolveRoomTarget(requiredRoomId, requestedCalendarId);
+    throw this.operatorManagedCollectionError();
   }
 
   @Delete('calendars')
   async deleteCalendar(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
   ): Promise<void> {
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
-    const scope = await this.eventScope(
-      userContext,
-      roomId,
-      requestedCalendarId,
-      {
+    const requiredRoomId = this.requireQuery(roomId, 'roomId');
+    const authorization = this.authorizationFactory.forRoom(
+      userContext.userId,
+      requiredRoomId,
+    );
+    if (
+      !(await authorization.isAllowed({
         action: 'manage-calendar',
         calendarId: requestedCalendarId,
-      },
-    );
-    const client = new CalDavDiscoveryClient(
-      this.requireRadicaleBaseUrl(),
-      new MatrixOpenIdCalDavCredentialProvider(userContext, openIdCredential),
-    );
-
-    await this.runCalDav(async () => {
-      const discovery = await client.discover();
-      const calendar = discovery.calendars.find(
-        (candidate) => candidate.href === scope.calendarId,
+      }))
+    ) {
+      throw new ForbiddenException(
+        'Not allowed to manage calendars for this Matrix room',
       );
-      if (
-        !calendar?.components ||
-        calendar.components.length !== 1 ||
-        calendar.components[0] !== 'VEVENT' ||
-        calendar.readOnly !== false
-      ) {
-        throw new ConflictException({
-          code: 'calendar-delete-unsafe',
-          message:
-            'Calendar deletion is only allowed for explicitly VEVENT-only collections',
-        });
-      }
-
-      await client.deleteCalendar(scope.calendarId);
-    });
+    }
+    this.resolveRoomTarget(requiredRoomId, requestedCalendarId);
+    throw this.operatorManagedCollectionError();
   }
 
   @Get('events')
   async listEvents(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
     @Query('start') start?: string,
@@ -390,15 +287,16 @@ export class CalendarGatewayController {
         calendarId: requestedCalendarId,
       },
     );
+    const calendarUrl = this.roomCollectionUrl(scope);
     const range: CalendarTimeRange = {
       start: this.requireQuery(start, 'start'),
       end: this.requireQuery(end, 'end'),
     };
 
     return this.runCalDav(async () => {
-      const client = this.eventClient(userContext, openIdCredential);
+      const client = this.eventClient(scope);
       const codec = new ICalendarEventCodec();
-      const resources = await client.listEvents(scope.calendarId, range);
+      const resources = await client.listEvents(calendarUrl, range);
       return resources.map((resource) =>
         this.eventDto(codec, scope.calendarId, resource),
       );
@@ -409,7 +307,7 @@ export class CalendarGatewayController {
   async getEvent(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
     @Query('eventId') eventId?: string,
@@ -426,11 +324,11 @@ export class CalendarGatewayController {
     );
     const normalizedEventId = this.normalizeEventUrl(
       this.requireQuery(eventId, 'eventId'),
-      scope.calendarId,
+      this.roomCollectionUrl(scope),
     );
 
     return this.runCalDav(async () => {
-      const client = this.eventClient(userContext, openIdCredential);
+      const client = this.eventClient(scope);
       const resource = await client.getEvent(normalizedEventId);
       return this.eventDto(
         new ICalendarEventCodec(),
@@ -444,7 +342,7 @@ export class CalendarGatewayController {
   async createEvent(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Body() input: CalendarEventInput,
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
@@ -466,11 +364,11 @@ export class CalendarGatewayController {
 
     const eventId = new URL(
       `${encodeURIComponent(input.uid)}.ics`,
-      this.asCollectionUrl(scope.calendarId),
+      this.roomCollectionUrl(scope),
     ).toString();
 
     return this.runCalDav(async () => {
-      const client = this.eventClient(userContext, openIdCredential);
+      const client = this.eventClient(scope);
       const codec = new ICalendarEventCodec();
       const encoded = codec.create(scope.calendarId, eventId, input);
       await client.createEvent(eventId, encoded.icalendar);
@@ -486,7 +384,7 @@ export class CalendarGatewayController {
   async updateEvent(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Body() patch: CalendarEventPatch,
     @Headers('if-match') ifMatch?: string,
     @Query('roomId') roomId?: string,
@@ -494,28 +392,24 @@ export class CalendarGatewayController {
     @Query('eventId') eventId?: string,
   ): Promise<CalendarGatewayEventDto> {
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
-    const normalizedCalendarId = this.normalizeRadicaleUrl(
-      requestedCalendarId,
-      'calendarId',
-    );
-    const normalizedEventId = this.normalizeEventUrl(
-      this.requireQuery(eventId, 'eventId'),
-      normalizedCalendarId,
-    );
     const scope = await this.eventScope(
       userContext,
       roomId,
-      normalizedCalendarId,
+      requestedCalendarId,
       {
         action: 'update-event',
-        calendarId: normalizedCalendarId,
-        eventId: normalizedEventId,
+        calendarId: requestedCalendarId,
+        eventId: this.requireQuery(eventId, 'eventId'),
       },
+    );
+    const normalizedEventId = this.normalizeEventUrl(
+      this.requireQuery(eventId, 'eventId'),
+      this.roomCollectionUrl(scope),
     );
     const etag = this.requireQuery(ifMatch, 'If-Match');
 
     return this.runCodecCalDav(async () => {
-      const client = this.eventClient(userContext, openIdCredential);
+      const client = this.eventClient(scope);
       const codec = new ICalendarEventCodec();
       const current = await client.getEvent(normalizedEventId);
       const encoded = codec
@@ -536,7 +430,7 @@ export class CalendarGatewayController {
   async updateOccurrence(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Body() input: unknown,
     @Headers('if-match') ifMatch?: string,
     @Query('roomId') roomId?: string,
@@ -544,28 +438,25 @@ export class CalendarGatewayController {
     @Query('eventId') eventId?: string,
   ): Promise<CalendarGatewayEventDto> {
     const { recurrenceId, patch } = parseOccurrenceUpdateBody(input);
-    const normalizedCalendarId = this.normalizeRadicaleUrl(
-      this.requireQuery(calendarId, 'calendarId'),
-      'calendarId',
-    );
-    const normalizedEventId = this.normalizeOccurrenceEventUrl(
-      this.requireQuery(eventId, 'eventId'),
-      normalizedCalendarId,
-    );
+    const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
     const scope = await this.eventScope(
       userContext,
       roomId,
-      normalizedCalendarId,
+      requestedCalendarId,
       {
         action: 'update-event',
-        calendarId: normalizedCalendarId,
-        eventId: normalizedEventId,
+        calendarId: requestedCalendarId,
+        eventId: this.requireQuery(eventId, 'eventId'),
       },
+    );
+    const normalizedEventId = this.normalizeOccurrenceEventUrl(
+      this.requireQuery(eventId, 'eventId'),
+      this.roomCollectionUrl(scope),
     );
     const etag = this.requireQuery(ifMatch, 'If-Match');
 
     return this.runCodecCalDav(async () => {
-      const client = this.eventClient(userContext, openIdCredential);
+      const client = this.eventClient(scope);
       const codec = new ICalendarEventCodec();
       const current = await client.getEvent(normalizedEventId);
       const encoded = codec
@@ -584,7 +475,7 @@ export class CalendarGatewayController {
   async updateFollowingOccurrence(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Body() input: unknown,
     @Headers('if-match') ifMatch?: string,
     @Query('roomId') roomId?: string,
@@ -592,28 +483,25 @@ export class CalendarGatewayController {
     @Query('eventId') eventId?: string,
   ): Promise<CalendarGatewayEventDto> {
     const { recurrenceId, timing } = parseFollowingOccurrenceBody(input);
-    const normalizedCalendarId = this.normalizeRadicaleUrl(
-      this.requireQuery(calendarId, 'calendarId'),
-      'calendarId',
-    );
-    const normalizedEventId = this.normalizeOccurrenceEventUrl(
-      this.requireQuery(eventId, 'eventId'),
-      normalizedCalendarId,
-    );
+    const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
     const scope = await this.eventScope(
       userContext,
       roomId,
-      normalizedCalendarId,
+      requestedCalendarId,
       {
         action: 'update-event',
-        calendarId: normalizedCalendarId,
-        eventId: normalizedEventId,
+        calendarId: requestedCalendarId,
+        eventId: this.requireQuery(eventId, 'eventId'),
       },
+    );
+    const normalizedEventId = this.normalizeOccurrenceEventUrl(
+      this.requireQuery(eventId, 'eventId'),
+      this.roomCollectionUrl(scope),
     );
     const etag = this.requireQuery(ifMatch, 'If-Match');
 
     return this.runCodecCalDav(async () => {
-      const client = this.eventClient(userContext, openIdCredential);
+      const client = this.eventClient(scope);
       const codec = new ICalendarEventCodec();
       const current = await client.getEvent(normalizedEventId);
       const encoded = codec
@@ -632,7 +520,7 @@ export class CalendarGatewayController {
   async cancelOccurrence(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Body() input: unknown,
     @Headers('if-match') ifMatch?: string,
     @Query('roomId') roomId?: string,
@@ -640,28 +528,25 @@ export class CalendarGatewayController {
     @Query('eventId') eventId?: string,
   ): Promise<CalendarGatewayEventDto> {
     const recurrenceId = parseOccurrenceCancelBody(input);
-    const normalizedCalendarId = this.normalizeRadicaleUrl(
-      this.requireQuery(calendarId, 'calendarId'),
-      'calendarId',
-    );
-    const normalizedEventId = this.normalizeOccurrenceEventUrl(
-      this.requireQuery(eventId, 'eventId'),
-      normalizedCalendarId,
-    );
+    const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
     const scope = await this.eventScope(
       userContext,
       roomId,
-      normalizedCalendarId,
+      requestedCalendarId,
       {
         action: 'update-event',
-        calendarId: normalizedCalendarId,
-        eventId: normalizedEventId,
+        calendarId: requestedCalendarId,
+        eventId: this.requireQuery(eventId, 'eventId'),
       },
+    );
+    const normalizedEventId = this.normalizeOccurrenceEventUrl(
+      this.requireQuery(eventId, 'eventId'),
+      this.roomCollectionUrl(scope),
     );
     const etag = this.requireQuery(ifMatch, 'If-Match');
 
     return this.runCodecCalDav(async () => {
-      const client = this.eventClient(userContext, openIdCredential);
+      const client = this.eventClient(scope);
       const codec = new ICalendarEventCodec();
       const current = await client.getEvent(normalizedEventId);
       const encoded = codec
@@ -680,33 +565,31 @@ export class CalendarGatewayController {
   async deleteEvent(
     @UserContextParam() userContext: IUserContext,
     @MatrixOpenIdCredentialParam()
-    openIdCredential: IMatrixOpenIdCredential | undefined,
+    _openIdCredential: IMatrixOpenIdCredential | undefined,
     @Headers('if-match') ifMatch?: string,
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
     @Query('eventId') eventId?: string,
   ): Promise<void> {
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
-    const normalizedCalendarId = this.normalizeRadicaleUrl(
+    const scope = await this.eventScope(
+      userContext,
+      roomId,
       requestedCalendarId,
-      'calendarId',
+      {
+        action: 'delete-event',
+        calendarId: requestedCalendarId,
+        eventId: this.requireQuery(eventId, 'eventId'),
+      },
     );
     const normalizedEventId = this.normalizeEventUrl(
       this.requireQuery(eventId, 'eventId'),
-      normalizedCalendarId,
+      this.roomCollectionUrl(scope),
     );
-    await this.eventScope(userContext, roomId, normalizedCalendarId, {
-      action: 'delete-event',
-      calendarId: normalizedCalendarId,
-      eventId: normalizedEventId,
-    });
     const etag = this.requireQuery(ifMatch, 'If-Match');
 
     await this.runCalDav(async () => {
-      await this.eventClient(userContext, openIdCredential).deleteEvent(
-        normalizedEventId,
-        etag,
-      );
+      await this.eventClient(scope).deleteEvent(normalizedEventId, etag);
     });
   }
 
@@ -715,62 +598,83 @@ export class CalendarGatewayController {
     roomId: string | undefined,
     calendarId: string,
     request: CalendarAuthorizationRequest,
-  ): Promise<{ roomId: string; calendarId: string }> {
+  ): Promise<RoomCalendarTarget> {
     const requiredRoomId = this.requireQuery(roomId, 'roomId');
-    const normalizedCalendarId = this.normalizeRadicaleUrl(
-      calendarId,
-      'calendarId',
-    );
-    let normalizedRequest: CalendarAuthorizationRequest;
-    switch (request.action) {
-      case 'read-events':
-      case 'create-event':
-      case 'manage-calendar':
-        normalizedRequest = {
-          action: request.action,
-          calendarId: normalizedCalendarId,
-        };
-        break;
-      case 'update-event':
-      case 'delete-event':
-        normalizedRequest = {
-          action: request.action,
-          calendarId: normalizedCalendarId,
-          eventId: this.normalizeEventUrl(
-            request.eventId,
-            normalizedCalendarId,
-          ),
-        };
-        break;
-      case 'list-calendars':
-      case 'create-calendar':
-        normalizedRequest = request;
-        break;
-    }
     const authorization = this.authorizationFactory.forRoom(
       userContext.userId,
       requiredRoomId,
     );
 
-    if (!(await authorization.isAllowed(normalizedRequest))) {
+    if (!(await authorization.isAllowed(request))) {
       throw new ForbiddenException(
         `Not allowed to ${request.action} for this Matrix room`,
       );
     }
 
-    return {
-      roomId: requiredRoomId,
-      calendarId: normalizedCalendarId,
-    };
+    return this.resolveRoomTarget(requiredRoomId, calendarId);
   }
 
-  private eventClient(
-    userContext: IUserContext,
-    openIdCredential: IMatrixOpenIdCredential | undefined,
-  ): CalDavEventClient {
-    return new CalDavEventClient(
-      new MatrixOpenIdCalDavCredentialProvider(userContext, openIdCredential),
+  private resolveRoomTarget(
+    roomId: string,
+    requestedCalendarId?: string,
+  ): RoomCalendarTarget {
+    try {
+      const binding = resolveRoomCalendarBinding(
+        this.appConfig.room_calendar_bindings,
+        roomId,
+        requestedCalendarId,
+      );
+      return {
+        roomId: binding.roomId,
+        calendarId: binding.calendarId,
+        principal: { kind: 'service' },
+      };
+    } catch (error) {
+      if (!(error instanceof RoomCalendarBindingError)) {
+        throw error;
+      }
+
+      switch (error.code) {
+        case 'invalid_room_id':
+          throw new BadRequestException({
+            code: 'invalid-room-id',
+            message: 'Matrix room identifier is invalid',
+          });
+        case 'missing_binding':
+          throw new NotFoundException({
+            code: 'room-calendar-binding-missing',
+            message: 'No calendar is configured for this Matrix room',
+          });
+        case 'request_calendar_mismatch':
+          throw new BadRequestException({
+            code: 'room-calendar-target-mismatch',
+            message: 'Requested calendar is not the configured room calendar',
+          });
+        default:
+          throw new ServiceUnavailableException({
+            code: 'room-calendar-binding-invalid',
+            message: 'Room calendar configuration is invalid',
+          });
+      }
+    }
+  }
+
+  private roomCollectionUrl(target: RoomCalendarTarget): string {
+    const collectionUrl = this.roomCalendarCalDavAccess.collectionUrl(target);
+    return this.asCollectionUrl(
+      this.normalizeRadicaleUrl(collectionUrl, 'bound calendar URL'),
     );
+  }
+
+  private eventClient(target: RoomCalendarTarget): CalDavEventClient {
+    return this.roomCalendarCalDavAccess.createEventClient(target);
+  }
+
+  private operatorManagedCollectionError(): ForbiddenException {
+    return new ForbiddenException({
+      code: 'room-calendar-collection-operator-managed',
+      message: 'Room calendar collection changes are managed by the operator',
+    });
   }
 
   private eventDto(
@@ -788,7 +692,7 @@ export class CalendarGatewayController {
     if (!this.appConfig.radicale_url) {
       throw new ServiceUnavailableException({
         code: 'radicale-not-configured',
-        message: 'RADICALE_URL is required for calendar discovery',
+        message: 'RADICALE_URL is required for calendar access',
       });
     }
 
@@ -823,11 +727,18 @@ export class CalendarGatewayController {
     return target.toString();
   }
 
-  private normalizeEventUrl(value: string, calendarId: string): string {
+  private normalizeEventUrl(value: string, calendarUrl: string): string {
     const eventUrl = new URL(this.normalizeRadicaleUrl(value, 'eventId'));
-    const calendarUrl = new URL(this.asCollectionUrl(calendarId));
+    const collectionUrl = new URL(this.asCollectionUrl(calendarUrl));
 
-    if (!eventUrl.pathname.startsWith(calendarUrl.pathname)) {
+    const resourcePath = eventUrl.pathname.slice(collectionUrl.pathname.length);
+    if (
+      eventUrl.search ||
+      eventUrl.hash ||
+      eventUrl.pathname === collectionUrl.pathname ||
+      !eventUrl.pathname.startsWith(collectionUrl.pathname) ||
+      resourcePath.includes('/')
+    ) {
       throw new BadRequestException(
         'eventId must be within the selected calendar',
       );
@@ -838,11 +749,11 @@ export class CalendarGatewayController {
 
   private normalizeOccurrenceEventUrl(
     value: string,
-    calendarId: string,
+    calendarUrl: string,
   ): string {
-    const normalized = this.normalizeEventUrl(value, calendarId);
+    const normalized = this.normalizeEventUrl(value, calendarUrl);
     const eventUrl = new URL(normalized);
-    const collectionUrl = new URL(this.asCollectionUrl(calendarId));
+    const collectionUrl = new URL(this.asCollectionUrl(calendarUrl));
     if (
       eventUrl.search ||
       eventUrl.hash ||
@@ -916,13 +827,6 @@ export class CalendarGatewayController {
     try {
       return await operation();
     } catch (error) {
-      if (error instanceof MatrixOpenIdCalDavCredentialError) {
-        throw new UnauthorizedException({
-          code: error.code,
-          message: error.message,
-        });
-      }
-
       if (
         error instanceof CalDavEventTransportError &&
         error.code === 'etag-conflict'
@@ -1220,43 +1124,4 @@ function isValidDateTime(value: string): boolean {
   return (
     Number(match[1]) <= 23 && Number(match[2]) <= 59 && Number(match[3]) <= 59
   );
-}
-
-function safeCalendarCollectionUrl(
-  value: string,
-  radicaleUrl: string,
-  excludedRoots: Set<string>,
-): string | undefined {
-  let url: URL;
-  let serviceUrl: URL;
-  try {
-    url = new URL(value);
-    serviceUrl = new URL(radicaleUrl);
-  } catch {
-    return undefined;
-  }
-
-  const servicePath = serviceUrl.pathname.endsWith('/')
-    ? serviceUrl.pathname
-    : `${serviceUrl.pathname}/`;
-
-  if (
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash ||
-    url.origin !== serviceUrl.origin ||
-    !url.pathname.startsWith(servicePath) ||
-    excludedRoots.has(normalizeUrlForComparison(url.toString()))
-  ) {
-    return undefined;
-  }
-
-  return url.toString();
-}
-
-function normalizeUrlForComparison(value: string): string {
-  const url = new URL(value);
-  const path = url.pathname.replace(/\/+$/, '') || '/';
-  return `${url.origin}${path}`;
 }

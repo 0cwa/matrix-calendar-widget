@@ -70,6 +70,7 @@ import { ControlRoomMigrationService } from './service/ControlRoomMigrationServi
 import { GuestMemberService } from './service/GuestMemberService';
 import { MatrixCalendarAuthorizationFactory } from './service/MatrixCalendarAuthorization';
 import { MeetingService } from './service/MeetingService';
+import { RoomCalendarCalDavAccess } from './service/RoomCalendarCalDavAccess';
 import { RoomMessageService } from './service/RoomMessageService';
 import { WelcomeWorkflowService } from './service/WelcomeWorkflowService';
 import { WidgetLayoutService } from './service/WidgetLayoutService';
@@ -267,6 +268,10 @@ const i18nFactory: FactoryProvider<void> = {
     JitsiClient,
     MeetingClient,
     MatrixCalendarAuthorizationFactory,
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
+      useClass: RoomCalendarCalDavAccess,
+    },
     MatrixClientAdapter,
     ReactionClient,
     WidgetClient,

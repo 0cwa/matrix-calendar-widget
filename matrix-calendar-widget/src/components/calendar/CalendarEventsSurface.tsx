@@ -27,6 +27,7 @@ import { useTranslation } from 'react-i18next';
 import {
   CalendarFilters,
   filterCalendarEvents,
+  getRoomCalendarTarget,
   presentCalendarEvents,
   repositoryRangeForView,
   useCalendarEvents,
@@ -40,10 +41,12 @@ import { CalendarEventsList } from './CalendarEventsList';
 
 export function CalendarEventsSurface({
   filters,
+  roomContext = false,
   onShowMore,
   view,
 }: {
   filters: CalendarFilters;
+  roomContext?: boolean;
   onShowMore: (date: Date) => void;
   view: ViewType;
 }) {
@@ -52,9 +55,15 @@ export function CalendarEventsSurface({
   const mixedCalendars = calendars.data.filter(
     (calendar) => calendar.unsupportedComponents?.length,
   );
+  const roomCalendar = getRoomCalendarTarget(calendars.data);
   const calendarIds = useMemo(
-    () => calendars.data.map((calendar) => calendar.id),
-    [calendars.data],
+    () =>
+      roomContext
+        ? roomCalendar
+          ? [roomCalendar.id]
+          : []
+        : calendars.data.map((calendar) => calendar.id),
+    [calendars.data, roomCalendar, roomContext],
   );
   const [hiddenCalendarIds, setHiddenCalendarIds] = useState<Set<CalendarId>>(
     () => new Set(),
@@ -100,6 +109,23 @@ export function CalendarEventsSurface({
     );
   }
 
+  if (
+    roomContext &&
+    (!roomCalendar ||
+      events.data.some((event) => event.calendarId !== roomCalendar.id))
+  ) {
+    return (
+      <Box m={2}>
+        <Alert severity="error">
+          {t(
+            'calendarEvents.roomCalendarUnavailable',
+            'The room calendar could not be loaded safely. Ask an administrator to check the room calendar binding.',
+          )}
+        </Alert>
+      </Box>
+    );
+  }
+
   return (
     <>
       {mixedCalendars.length > 0 && (
@@ -129,7 +155,7 @@ export function CalendarEventsSurface({
         </Box>
       )}
 
-      {calendars.data.length > 1 && (
+      {!roomContext && calendars.data.length > 1 && (
         <Box px={1} pb={1}>
           <FormGroup
             aria-label={t('calendarEvents.editor.calendar', 'Calendar')}
@@ -199,6 +225,7 @@ export function CalendarEventsSurface({
       <CalendarEventDetailsDialog
         event={selectedEvent}
         onClose={() => setSelectedEvent(undefined)}
+        roomContext={roomContext}
       />
     </>
   );

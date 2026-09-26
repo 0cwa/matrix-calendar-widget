@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Nordeck IT + Consulting GmbH
+ * Copyright 2026 Matrix Calendar Widget contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +14,15 @@
  * limitations under the License.
  */
 
-export enum ModuleProviderToken {
-  APP_CONFIGURATION = 'APP_CONFIGURATION',
-  ROOM_MATRIX_EVENTS = 'ROOM_MATRIX_EVENTS',
-  ROOM_CALENDAR_CALDAV_ACCESS = 'ROOM_CALENDAR_CALDAV_ACCESS',
-  WIDGET_LAYOUTS = 'WIDGET_LAYOUTS',
-  I18N = 'I18N',
+import { Calendar } from '@matrix-calendar-widget/calendar';
+
+/** Return the server-provided room target only when the response is unambiguous. */
+export function getRoomCalendarTarget(
+  calendars: Calendar[],
+): Calendar | undefined {
+  if (calendars.length !== 1 || !calendars[0].id.trim()) {
+    return undefined;
+  }
+
+  return calendars[0];
 }

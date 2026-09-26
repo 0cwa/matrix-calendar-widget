@@ -58,6 +58,7 @@ import {
   calendarEventToFormValues,
   createCalendarEventFormValues,
   hasInvalidCalendarEventDisplayAlarmFormValues,
+  getRoomCalendarTarget,
   hasInvalidCalendarEventRecurrenceFormValues,
   hasRecurrenceDateTypeMismatch,
   isInvalidCalendarEventDisplayAlarmTrigger,
@@ -74,6 +75,7 @@ import { RecurrenceEditor } from '../meetings/RecurrenceEditor/RecurrenceEditor'
 export function CalendarEventEditorDialog({
   calendars,
   event,
+  roomContext = false,
   occurrenceTarget,
   followingTarget,
   onClose,
@@ -83,6 +85,7 @@ export function CalendarEventEditorDialog({
 }: {
   calendars: Calendar[];
   event?: CalendarEvent;
+  roomContext?: boolean;
   occurrenceTarget?: {
     resourceEventId: string;
     recurrenceId: CalendarEventDateTime;
@@ -101,10 +104,12 @@ export function CalendarEventEditorDialog({
     () => calendars.filter((calendar) => !calendar.readOnly),
     [calendars],
   );
-  const initialCalendar =
-    calendars.find((calendar) => calendar.id === event?.calendarId) ??
-    writableCalendars[0] ??
-    calendars[0];
+  const roomCalendar = getRoomCalendarTarget(calendars);
+  const initialCalendar = roomContext
+    ? roomCalendar
+    : (calendars.find((calendar) => calendar.id === event?.calendarId) ??
+      writableCalendars[0] ??
+      calendars[0]);
   const initialCalendarId = initialCalendar?.id;
   const initialCalendarRef = useRef(initialCalendar);
   initialCalendarRef.current = initialCalendar;
@@ -182,7 +187,11 @@ export function CalendarEventEditorDialog({
     return startDate.isValid ? startDate.toJSDate() : new Date(0);
   }, [recurrenceStart, recurrenceTimingType, recurrenceTimezone]);
 
-  if (!values || !initialCalendar) {
+  if (
+    !values ||
+    !initialCalendar ||
+    (roomContext && event && event.calendarId !== initialCalendar.id)
+  ) {
     return null;
   }
 
@@ -340,6 +349,23 @@ export function CalendarEventEditorDialog({
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
 
+    const invalidRoomTarget =
+      roomContext &&
+      (!roomCalendar ||
+        values.calendarId !== roomCalendar.id ||
+        (event && event.calendarId !== roomCalendar.id));
+    if (invalidRoomTarget) {
+      setError(
+        new Error(
+          t(
+            'calendarEvents.editor.roomCalendarUnavailable',
+            'The room calendar could not be loaded safely. Ask an administrator to check the room calendar binding.',
+          ),
+        ),
+      );
+      return;
+    }
+
     if (
       formValidationError ||
       readOnly ||
@@ -354,24 +380,27 @@ export function CalendarEventEditorDialog({
 
     try {
       let saved: CalendarEvent;
+      const targetCalendarId = roomContext
+        ? roomCalendar!.id
+        : values.calendarId;
 
       if (event) {
         saved = occurrenceTarget
           ? await updateOccurrence(
-              event.calendarId,
+              targetCalendarId,
               occurrenceTarget.resourceEventId,
               occurrenceTarget.recurrenceId,
               calendarEventOccurrencePatchFromForm(values),
             )
           : followingTarget
             ? await updateFollowingOccurrence(
-                event.calendarId,
+                targetCalendarId,
                 followingTarget.resourceEventId,
                 followingTarget.recurrenceId,
                 calendarEventTimingFromForm(values),
               )
             : await updateEvent(
-                event.calendarId,
+                targetCalendarId,
                 event.id,
                 calendarEventPatchFromForm(values),
               );
@@ -380,7 +409,7 @@ export function CalendarEventEditorDialog({
           values,
           uidFactory(),
         );
-        saved = await createEvent(values.calendarId, input);
+        saved = await createEvent(targetCalendarId, input);
       }
 
       onSaved?.(saved);
@@ -534,20 +563,22 @@ export function CalendarEventEditorDialog({
               </Alert>
             )}
 
-            <TextField
-              disabled={Boolean(event)}
-              label={t('calendarEvents.editor.calendar', 'Calendar')}
-              onChange={handleCalendarChange}
-              select
-              SelectProps={{ native: true }}
-              value={values.calendarId}
-            >
-              {(event ? calendars : writableCalendars).map((calendar) => (
-                <option key={calendar.id} value={calendar.id}>
-                  {calendar.name}
-                </option>
-              ))}
-            </TextField>
+            {!roomContext && (
+              <TextField
+                disabled={Boolean(event)}
+                label={t('calendarEvents.editor.calendar', 'Calendar')}
+                onChange={handleCalendarChange}
+                select
+                SelectProps={{ native: true }}
+                value={values.calendarId}
+              >
+                {(event ? calendars : writableCalendars).map((calendar) => (
+                  <option key={calendar.id} value={calendar.id}>
+                    {calendar.name}
+                  </option>
+                ))}
+              </TextField>
+            )}
 
             {!followingTarget && (
               <TextField

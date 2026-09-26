@@ -14,7 +14,17 @@
  * limitations under the License.
  */
 
-import { render, screen, within } from '@testing-library/react';
+import {
+  Calendar,
+  CalendarEvent,
+  CalendarRepository,
+} from '@matrix-calendar-widget/calendar';
+import {
+  render,
+  screen,
+  waitForElementToBeRemoved,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
@@ -26,6 +36,203 @@ import { LocalizationProvider } from '../common/LocalizationProvider';
 import { CalendarToolbar } from './CalendarToolbar';
 
 describe('<CalendarToolbar/>', () => {
+  it('keeps room event creation on the one server-returned calendar', async () => {
+    const roomCalendar: Calendar = {
+      id: 'configured-room-calendar',
+      name: 'Planning room calendar',
+    };
+    const createdEvent: CalendarEvent = {
+      id: 'planning.ics',
+      calendarId: roomCalendar.id,
+      uid: 'planning@example.test',
+      title: 'Room planning',
+      timing: {
+        type: 'timed',
+        start: { local: '2026-09-25T10:00', timezone: 'UTC' },
+        end: { local: '2026-09-25T11:00', timezone: 'UTC' },
+      },
+    };
+    const repository = {
+      listCalendars: vi.fn().mockResolvedValue([roomCalendar]),
+      createEvent: vi.fn().mockResolvedValue(createdEvent),
+    } as unknown as CalendarRepository;
+
+    function Wrapper({ children }: PropsWithChildren) {
+      return (
+        <LocalizationProvider>
+          <CalendarRepositoryProvider repository={repository}>
+            {children}
+          </CalendarRepositoryProvider>
+        </LocalizationProvider>
+      );
+    }
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-26T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        roomContext
+        view="list"
+      />,
+      { wrapper: Wrapper },
+    );
+
+    expect(
+      await screen.findByRole('button', { name: 'Create event' }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByRole('button', { name: 'Create calendar' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Rename calendar' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Delete calendar' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Edit calendar details' }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Create event' });
+    expect(within(dialog).queryByLabelText('Calendar')).not.toBeInTheDocument();
+
+    await userEvent.type(
+      within(dialog).getByRole('textbox', { name: 'Title' }),
+      'Room planning',
+    );
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Create event' }),
+    );
+
+    expect(repository.createEvent).toHaveBeenCalledWith(
+      roomCalendar.id,
+      expect.objectContaining({ title: 'Room planning' }),
+    );
+  });
+
+  it('fails closed when room mode receives multiple server calendars', async () => {
+    const repository = {
+      listCalendars: vi.fn().mockResolvedValue([
+        { id: 'configured-room-calendar', name: 'Planning room calendar' },
+        { id: 'unexpected-calendar', name: 'Unexpected calendar' },
+      ]),
+      createEvent: vi.fn(),
+    } as unknown as CalendarRepository;
+
+    function Wrapper({ children }: PropsWithChildren) {
+      return (
+        <LocalizationProvider>
+          <CalendarRepositoryProvider repository={repository}>
+            {children}
+          </CalendarRepositoryProvider>
+        </LocalizationProvider>
+      );
+    }
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-26T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        roomContext
+        view="list"
+      />,
+      { wrapper: Wrapper },
+    );
+
+    expect(
+      await screen.findByRole('button', { name: 'Create event' }),
+    ).toBeDisabled();
+    expect(
+      screen.queryByRole('dialog', { name: 'Create event' }),
+    ).not.toBeInTheDocument();
+    expect(repository.createEvent).not.toHaveBeenCalled();
+  });
+
+  it('preserves personal calendar selection and collection controls', async () => {
+    const calendars: Calendar[] = [
+      { id: 'personal', name: 'Personal calendar' },
+      { id: 'shared', name: 'Shared calendar' },
+    ];
+    const repository = {
+      listCalendars: vi.fn().mockResolvedValue(calendars),
+      createCalendar: vi.fn().mockResolvedValue({
+        id: 'new-calendar',
+        name: 'New calendar',
+      }),
+    } as unknown as CalendarRepository;
+
+    function Wrapper({ children }: PropsWithChildren) {
+      return (
+        <LocalizationProvider>
+          <CalendarRepositoryProvider repository={repository}>
+            {children}
+          </CalendarRepositoryProvider>
+        </LocalizationProvider>
+      );
+    }
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-26T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="list"
+      />,
+      { wrapper: Wrapper },
+    );
+
+    expect(
+      await screen.findByRole('button', { name: 'Create calendar' }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Rename calendar' }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Delete calendar' }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Edit calendar details' }),
+    ).toBeEnabled();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Create calendar' }),
+    );
+    const createDialog = await screen.findByRole('dialog', {
+      name: 'Create calendar',
+    });
+    await userEvent.type(
+      within(createDialog).getByRole('textbox', { name: 'Calendar name' }),
+      'New calendar',
+    );
+    await userEvent.click(
+      within(createDialog).getByRole('button', { name: 'Create calendar' }),
+    );
+    expect(repository.createCalendar).toHaveBeenCalledWith('New calendar');
+    await waitForElementToBeRemoved(createDialog);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Create event' });
+    const calendarSelector = within(dialog).getByRole('combobox', {
+      name: 'Calendar',
+    });
+    expect(within(calendarSelector).getAllByRole('option')).toHaveLength(2);
+  });
+
   it('opens the Advanced diagnostics surface for collection URLs', async () => {
     const collectionUrl = 'https://radicale.example.test/alice/team/';
     const fetchImpl = vi

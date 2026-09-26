@@ -66,6 +66,7 @@ export {
 } from './CalendarRepositoryProvider';
 export { GatewayCalendarRepository } from './GatewayCalendarRepository';
 export type { GatewayCalendarRepositoryOptions } from './GatewayCalendarRepository';
+export { getRoomCalendarTarget } from './roomCalendarTarget';
 export type { CalendarFilters } from './types';
 export {
   useCancelCalendarOccurrence,

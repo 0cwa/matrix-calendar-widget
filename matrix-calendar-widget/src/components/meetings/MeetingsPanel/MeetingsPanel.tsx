@@ -47,6 +47,7 @@ export const MeetingsPanel = () => {
     getEnvironment('REACT_APP_DISPLAY_ALL_MEETINGS', 'false') === 'true';
 
   const widgetApi = useWidgetApi();
+  const isRoomWidget = Boolean(widgetApi.widgetParameters.roomId);
   const { t } = useTranslation();
 
   const selectRoomPermissions = useMemo(makeSelectRoomPermissions, []);
@@ -186,6 +187,7 @@ export const MeetingsPanel = () => {
             <Box my={1}>
               <CalendarToolbar
                 filters={filters}
+                roomContext={isRoomWidget}
                 onRangeChange={handleOnRangeChange}
                 onSearchChange={handleOnSearchChange}
                 onViewChange={setView}
@@ -204,6 +206,7 @@ export const MeetingsPanel = () => {
         {roomType === 'management' ? (
           <CalendarEventsSurface
             filters={filters}
+            roomContext={isRoomWidget}
             onShowMore={handleShowMore}
             view={view}
           />

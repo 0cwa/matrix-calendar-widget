@@ -19,13 +19,22 @@ import {
   CalendarAuthorizationRequest,
 } from '@matrix-calendar-widget/calendar';
 import { Injectable } from '@nestjs/common';
-import { MatrixClient, PowerLevelsEventContent } from 'matrix-bot-sdk';
+import {
+  MatrixClient,
+  MatrixError,
+  PowerLevelsEventContent,
+} from 'matrix-bot-sdk';
 import { StateEventName } from '../model/StateEventName';
 
 export const MATRIX_CALENDAR_EVENT_WRITE_POLICY =
   'io.github.0cwa.matrix-calendar.event.write';
 export const MATRIX_CALENDAR_MANAGE_POLICY =
   'io.github.0cwa.matrix-calendar.manage';
+
+type PowerLevelsLookup =
+  | { kind: 'present'; content: PowerLevelsEventContent }
+  | { kind: 'absent' }
+  | { kind: 'failed' };
 
 @Injectable()
 export class MatrixCalendarAuthorizationFactory {
@@ -88,7 +97,12 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
   }
 
   private async hasEventWritePower(): Promise<boolean> {
-    const powerLevels = await this.getPowerLevels();
+    const lookup = await this.getPowerLevels();
+    if (lookup.kind === 'failed') {
+      return false;
+    }
+
+    const powerLevels = lookup.kind === 'present' ? lookup.content : undefined;
     const requiredPower =
       powerLevels?.events?.[MATRIX_CALENDAR_EVENT_WRITE_POLICY] ??
       powerLevels?.events_default ??
@@ -98,7 +112,12 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
   }
 
   private async hasCalendarManagePower(): Promise<boolean> {
-    const powerLevels = await this.getPowerLevels();
+    const lookup = await this.getPowerLevels();
+    if (lookup.kind === 'failed') {
+      return false;
+    }
+
+    const powerLevels = lookup.kind === 'present' ? lookup.content : undefined;
     const requiredPower =
       powerLevels?.events?.[MATRIX_CALENDAR_MANAGE_POLICY] ??
       powerLevels?.state_default ??
@@ -107,15 +126,26 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
     return this.userPower(powerLevels) >= requiredPower;
   }
 
-  private async getPowerLevels(): Promise<PowerLevelsEventContent | undefined> {
+  private async getPowerLevels(): Promise<PowerLevelsLookup> {
     try {
-      return await this.matrixClient.getRoomStateEvent(
-        this.roomId,
-        StateEventName.M_ROOM_POWER_LEVELS_EVENT,
-        '',
-      );
-    } catch {
-      return undefined;
+      return {
+        kind: 'present',
+        content: await this.matrixClient.getRoomStateEvent(
+          this.roomId,
+          StateEventName.M_ROOM_POWER_LEVELS_EVENT,
+          '',
+        ),
+      };
+    } catch (error) {
+      if (
+        error instanceof MatrixError &&
+        error.statusCode === 404 &&
+        error.errcode === 'M_NOT_FOUND'
+      ) {
+        return { kind: 'absent' };
+      }
+
+      return { kind: 'failed' };
     }
   }
 

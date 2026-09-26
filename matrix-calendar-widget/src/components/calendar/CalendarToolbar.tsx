@@ -23,6 +23,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarFilters,
+  getRoomCalendarTarget,
   isCalendarDiagnosticsRepository,
   useCalendarRepository,
   useCalendars,
@@ -40,6 +41,7 @@ import { CalendarRenameDialog } from './CalendarRenameDialog';
 
 type CalendarToolbarProps = {
   filters: CalendarFilters;
+  roomContext?: boolean;
   view: ViewType;
   onRangeChange: (startDate: string, endDate: string) => void;
   onSearchChange: (search: string) => void;
@@ -48,6 +50,7 @@ type CalendarToolbarProps = {
 
 export function CalendarToolbar({
   filters,
+  roomContext = false,
   view,
   onRangeChange,
   onSearchChange,
@@ -70,30 +73,40 @@ export function CalendarToolbar({
   const writableCalendars = calendars.data.filter(
     (calendar) => !calendar.readOnly,
   );
+  const roomCalendar = getRoomCalendarTarget(calendars.data);
+  const hasValidTarget = !roomContext || Boolean(roomCalendar);
 
   return (
     <>
       <Stack direction="row" flexWrap="wrap" gap={1}>
-        <Button
-          onClick={() => setCreateCalendarOpen(true)}
-          startIcon={<AddIcon />}
-          variant="outlined"
-        >
-          {t('calendars.create.action', 'Create calendar')}
-        </Button>
+        {!roomContext && (
+          <Button
+            onClick={() => setCreateCalendarOpen(true)}
+            startIcon={<AddIcon />}
+            variant="outlined"
+          >
+            {t('calendars.create.action', 'Create calendar')}
+          </Button>
+        )}
+
+        {!roomContext && (
+          <Button
+            color="error"
+            disabled={calendars.loading || writableCalendars.length === 0}
+            onClick={() => setDeleteCalendarOpen(true)}
+            startIcon={<DeleteIcon />}
+            variant="outlined"
+          >
+            {t('calendars.delete.action', 'Delete calendar')}
+          </Button>
+        )}
 
         <Button
-          color="error"
-          disabled={calendars.loading || writableCalendars.length === 0}
-          onClick={() => setDeleteCalendarOpen(true)}
-          startIcon={<DeleteIcon />}
-          variant="outlined"
-        >
-          {t('calendars.delete.action', 'Delete calendar')}
-        </Button>
-
-        <Button
-          disabled={calendars.loading || writableCalendars.length === 0}
+          disabled={
+            calendars.loading ||
+            writableCalendars.length === 0 ||
+            !hasValidTarget
+          }
           onClick={() => setCreateOpen(true)}
           startIcon={<AddIcon />}
           variant="contained"
@@ -101,23 +114,27 @@ export function CalendarToolbar({
           {t('calendarEvents.editor.create', 'Create event')}
         </Button>
 
-        <Button
-          disabled={calendars.loading || writableCalendars.length === 0}
-          onClick={() => setRenameOpen(true)}
-          startIcon={<EditIcon />}
-          variant="outlined"
-        >
-          {t('calendars.rename.action', 'Rename calendar')}
-        </Button>
+        {!roomContext && (
+          <Button
+            disabled={calendars.loading || writableCalendars.length === 0}
+            onClick={() => setRenameOpen(true)}
+            startIcon={<EditIcon />}
+            variant="outlined"
+          >
+            {t('calendars.rename.action', 'Rename calendar')}
+          </Button>
+        )}
 
-        <Button
-          disabled={calendars.loading || writableCalendars.length === 0}
-          onClick={() => setMetadataOpen(true)}
-          startIcon={<PaletteIcon />}
-          variant="outlined"
-        >
-          {t('calendars.metadata.action', 'Edit calendar details')}
-        </Button>
+        {!roomContext && (
+          <Button
+            disabled={calendars.loading || writableCalendars.length === 0}
+            onClick={() => setMetadataOpen(true)}
+            startIcon={<PaletteIcon />}
+            variant="outlined"
+          >
+            {t('calendars.metadata.action', 'Edit calendar details')}
+          </Button>
+        )}
 
         {diagnosticsRepository && (
           <Button onClick={() => setDiagnosticsOpen(true)} variant="outlined">
@@ -158,10 +175,12 @@ export function CalendarToolbar({
         />
       </Stack>
 
-      <CalendarCreateDialog
-        onClose={() => setCreateCalendarOpen(false)}
-        open={createCalendarOpen}
-      />
+      {!roomContext && (
+        <CalendarCreateDialog
+          onClose={() => setCreateCalendarOpen(false)}
+          open={createCalendarOpen}
+        />
+      )}
 
       {diagnosticsRepository && (
         <CalendarDiagnosticsDialog
@@ -171,30 +190,37 @@ export function CalendarToolbar({
         />
       )}
 
-      <CalendarRenameDialog
-        calendars={calendars.data}
-        onClose={() => setRenameOpen(false)}
-        open={renameOpen}
-      />
+      {!roomContext && (
+        <>
+          <CalendarRenameDialog
+            calendars={calendars.data}
+            onClose={() => setRenameOpen(false)}
+            open={renameOpen}
+          />
 
-      <CalendarMetadataDialog
-        calendars={calendars.data}
-        onClose={() => setMetadataOpen(false)}
-        open={metadataOpen}
-      />
+          <CalendarMetadataDialog
+            calendars={calendars.data}
+            onClose={() => setMetadataOpen(false)}
+            open={metadataOpen}
+          />
 
-      <CalendarDeleteDialog
-        calendars={writableCalendars}
-        onClose={() => setDeleteCalendarOpen(false)}
-        open={deleteCalendarOpen}
-      />
+          <CalendarDeleteDialog
+            calendars={writableCalendars}
+            onClose={() => setDeleteCalendarOpen(false)}
+            open={deleteCalendarOpen}
+          />
+        </>
+      )}
 
-      <CalendarEventEditorDialog
-        calendars={calendars.data}
-        onClose={() => setCreateOpen(false)}
-        onSaved={() => undefined}
-        open={createOpen}
-      />
+      {hasValidTarget && (
+        <CalendarEventEditorDialog
+          calendars={calendars.data}
+          onClose={() => setCreateOpen(false)}
+          onSaved={() => undefined}
+          open={createOpen}
+          roomContext={roomContext}
+        />
+      )}
     </>
   );
 }
