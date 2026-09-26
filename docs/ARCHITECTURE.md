@@ -163,7 +163,7 @@ an explicit UID is supplied.
 The authenticated room reminder configuration API stores inert sidecar intent
 after room membership, room/calendar binding, and event-write policy checks. It
 does not read CalDAV or prove that the referenced event, recurrence instance,
-or alarm exists. Widget controls and API wiring are still pending. External
+or alarm exists. Widget controls and client wiring are still pending. External
 CalDAV clients may remove or change optional VALARM UIDs; before any reminder
 is enabled, the CalDAV integration must resolve the exact event, recurrence,
 and alarm UID from the current canonical resource and fail closed when an
