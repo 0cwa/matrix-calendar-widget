@@ -25,7 +25,9 @@ export {
   calendarEventToFormValues,
   createCalendarEventFormValues,
   hasInvalidCalendarEventRecurrenceFormValues,
+  hasRecurrenceDateTypeMismatch,
   recurrenceDateValueFromForm,
+  recurrenceDateValueMatchesTimingType,
 } from './calendarEventForm';
 export type {
   CalendarEventFormValues,

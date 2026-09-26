@@ -131,27 +131,15 @@ describe('<CalendarEventEditorDialog />', () => {
     ).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Add date' }));
-    await userEvent.click(
-      screen.getByRole('combobox', { name: 'Additional date 1 type' }),
-    );
-    await userEvent.click(
-      await screen.findByRole('option', { name: 'All-day date' }),
-    );
     fireEvent.change(screen.getByLabelText(/^Additional date 1\s*\*$/), {
-      target: { value: '2026-10-03' },
+      target: { value: '2026-10-03T09:00' },
     });
 
     await userEvent.click(
       screen.getByRole('button', { name: 'Add excluded date' }),
     );
-    await userEvent.click(
-      screen.getByRole('combobox', { name: 'Excluded date 1 type' }),
-    );
-    await userEvent.click(
-      await screen.findByRole('option', { name: 'All-day date' }),
-    );
     fireEvent.change(screen.getByLabelText(/^Excluded date 1\s*\*$/), {
-      target: { value: '2026-10-04' },
+      target: { value: '2026-10-04T09:00' },
     });
 
     await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
@@ -162,10 +150,156 @@ describe('<CalendarEventEditorDialog />', () => {
     ).resolves.toMatchObject({
       recurrence: {
         rrule: 'FREQ=DAILY',
-        rdates: [{ type: 'date', value: '2026-10-03' }],
-        exdates: [{ type: 'date', value: '2026-10-04' }],
+        rdates: [
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-03T09:00:00',
+              timezone: 'Europe/Stockholm',
+              mode: 'tzid',
+            },
+          },
+        ],
+        exdates: [
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-04T09:00:00',
+              timezone: 'Europe/Stockholm',
+              mode: 'tzid',
+            },
+          },
+        ],
       },
     });
+  });
+
+  it('keeps the date type selector on DATE for all-day events', async () => {
+    const allDayEvent: CalendarEvent = {
+      ...event,
+      timing: {
+        type: 'all-day',
+        startDate: '2026-09-23',
+        endDate: '2026-09-24',
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [allDayEvent],
+    });
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={allDayEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add date' }));
+    expect(screen.getByLabelText(/^Additional date 1\s*\*$/)).toHaveAttribute(
+      'type',
+      'date',
+    );
+    await userEvent.click(
+      screen.getByRole('combobox', { name: 'Additional date 1 type' }),
+    );
+    expect(
+      await screen.findByRole('option', { name: 'All-day date' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: 'UTC time' }),
+    ).not.toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+  });
+
+  it('preserves incompatible loaded recurrence dates on ordinary event edits', async () => {
+    const incompatibleEvent: CalendarEvent = {
+      ...event,
+      recurrence: {
+        rrule: 'FREQ=DAILY',
+        rdates: [{ type: 'date', value: '2026-09-24' }],
+        exdates: [{ type: 'date', value: '2026-09-25' }],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [incompatibleEvent],
+    });
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={incompatibleEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findAllByText(
+        /saved value does not match the event start type/i,
+      ),
+    ).toHaveLength(2);
+    await userEvent.type(
+      await screen.findByRole('textbox', { name: /Title/i }),
+      ' updated',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(updateSpy).toHaveBeenCalled());
+    expect(updateSpy.mock.calls[0][2]).not.toHaveProperty('recurrence');
+    await expect(
+      repository.getEvent('team', 'planning'),
+    ).resolves.toMatchObject({ recurrence: incompatibleEvent.recurrence });
+  });
+
+  it('blocks recurrence edits while loaded RDATE and EXDATE types mismatch DTSTART', async () => {
+    const incompatibleEvent: CalendarEvent = {
+      ...event,
+      recurrence: {
+        rrule: 'FREQ=DAILY',
+        rdates: [{ type: 'date', value: '2026-09-24' }],
+        exdates: [{ type: 'date', value: '2026-09-25' }],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [incompatibleEvent],
+    });
+    const updateSpy = vi.spyOn(repository, 'updateEvent');
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={incompatibleEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('combobox', { name: 'Repeat event' }),
+    );
+    await userEvent.click(
+      await screen.findByRole('option', { name: 'Weekly' }),
+    );
+
+    expect(
+      await screen.findByText(
+        /must use the same date or date-time type as the event start/i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(updateSpy).not.toHaveBeenCalled();
+    await expect(
+      repository.getEvent('team', 'planning'),
+    ).resolves.toMatchObject({ recurrence: incompatibleEvent.recurrence });
   });
 
   it('preserves unsupported loaded rules when saving ordinary event fields', async () => {

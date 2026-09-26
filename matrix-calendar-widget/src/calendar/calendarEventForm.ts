@@ -219,10 +219,52 @@ export function hasInvalidCalendarEventRecurrenceFormValues(
     return true;
   }
 
-  return [
-    ...(values.rdatesEdited ? values.rdates : []),
-    ...(values.exdatesEdited ? values.exdates : []),
-  ].some((value) => recurrenceDateValueFromForm(value) === undefined);
+  const recurrenceEdited =
+    values.ruleEdited || values.rdatesEdited || values.exdatesEdited;
+  if (!recurrenceEdited) {
+    return false;
+  }
+
+  if (
+    timingType === 'all-day' &&
+    (values.original?.rdatePeriods?.length ?? 0) > 0
+  ) {
+    return true;
+  }
+
+  return [...values.rdates, ...values.exdates].some(
+    (value) =>
+      recurrenceDateValueFromForm(value) === undefined ||
+      !recurrenceDateValueMatchesTimingType(value, timingType),
+  );
+}
+
+export function recurrenceDateValueMatchesTimingType(
+  value: CalendarEventRecurrenceDateValue,
+  timingType: CalendarEventFormValues['timingType'],
+): boolean {
+  return timingType === 'all-day'
+    ? value.mode === 'date'
+    : value.mode !== 'date';
+}
+
+export function hasRecurrenceDateTypeMismatch(
+  values: CalendarEventRecurrenceFormValues,
+  timingType: CalendarEventFormValues['timingType'],
+): boolean {
+  const recurrenceEdited =
+    values.ruleEdited || values.rdatesEdited || values.exdatesEdited;
+  if (!recurrenceEdited) {
+    return false;
+  }
+
+  return (
+    (timingType === 'all-day' &&
+      (values.original?.rdatePeriods?.length ?? 0) > 0) ||
+    [...values.rdates, ...values.exdates].some(
+      (value) => !recurrenceDateValueMatchesTimingType(value, timingType),
+    )
+  );
 }
 
 function recurrenceFormValuesFromDomain(

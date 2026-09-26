@@ -676,6 +676,8 @@ function setRecurrence(
     return;
   }
 
+  assertRecurrenceDateTypesMatchTiming({ ...previous, ...recurrence }, timing);
+
   if (recurrence.rrule !== previous?.rrule) {
     component.removeAllProperties('rrule');
     if (recurrence.rrule !== undefined) {
@@ -720,6 +722,30 @@ function setRecurrence(
       'exdate',
       recurrence.exdates ?? [],
       previous?.exdates ?? [],
+    );
+  }
+}
+
+function assertRecurrenceDateTypesMatchTiming(
+  recurrence: CalendarEventRecurrence,
+  timing?: CalendarEventTiming,
+): void {
+  const allDay = timing?.type === 'all-day';
+  const expectedType = allDay ? 'date' : 'date-time';
+  const dateValues = [
+    ...(recurrence.rdates ?? []),
+    ...(recurrence.exdates ?? []),
+  ];
+  const hasMismatchedValue = dateValues.some(
+    (value) => value.type !== expectedType,
+  );
+  const hasPeriodOnAllDay =
+    allDay && (recurrence.rdatePeriods?.length ?? 0) > 0;
+
+  if (hasMismatchedValue || hasPeriodOnAllDay) {
+    throw new ICalendarEventCodecError(
+      'invalid-recurrence',
+      'RDATE and EXDATE value types must match DTSTART',
     );
   }
 }

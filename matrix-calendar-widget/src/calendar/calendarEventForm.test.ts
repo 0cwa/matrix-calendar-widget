@@ -25,6 +25,7 @@ import {
   calendarEventPatchFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
+  hasInvalidCalendarEventRecurrenceFormValues,
 } from './calendarEventForm';
 
 const calendar: Calendar = {
@@ -182,7 +183,7 @@ describe('calendar event form adapter', () => {
     });
   });
 
-  it('creates recurring input with explicit date, floating, UTC, and TZID values', () => {
+  it('creates timed recurring input with explicit floating, UTC, and TZID values', () => {
     const values = createCalendarEventFormValues(
       calendar,
       DateTime.fromISO('2026-09-23T09:37:00', { zone: 'Europe/Stockholm' }),
@@ -192,7 +193,6 @@ describe('calendar event form adapter', () => {
       rule: 'FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4',
       ruleEdited: true,
       rdates: [
-        { mode: 'date', value: '2026-10-01', timezone: '' },
         {
           mode: 'floating',
           value: '2026-10-02T09:30',
@@ -206,7 +206,13 @@ describe('calendar event form adapter', () => {
         },
       ],
       rdatesEdited: true,
-      exdates: [{ mode: 'date', value: '2026-10-05', timezone: '' }],
+      exdates: [
+        {
+          mode: 'utc',
+          value: '2026-10-05T09:00:00',
+          timezone: '',
+        },
+      ],
       exdatesEdited: true,
     };
 
@@ -216,7 +222,6 @@ describe('calendar event form adapter', () => {
       recurrence: {
         rrule: 'FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4',
         rdates: [
-          { type: 'date', value: '2026-10-01' },
           {
             type: 'date-time',
             value: {
@@ -242,9 +247,93 @@ describe('calendar event form adapter', () => {
             },
           },
         ],
-        exdates: [{ type: 'date', value: '2026-10-05' }],
+        exdates: [
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-05T09:00:00',
+              timezone: 'UTC',
+              mode: 'utc',
+            },
+          },
+        ],
       },
     });
+  });
+
+  it('keeps all-day recurrence values as DATE', () => {
+    const event: CalendarEvent = {
+      id: 'all-day-series',
+      calendarId: 'team',
+      uid: 'all-day-series@example.test',
+      title: 'All-day series',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-09-23',
+        endDate: '2026-09-24',
+      },
+    };
+    const values = calendarEventToFormValues(event, calendar);
+    values.recurrence = {
+      ...values.recurrence,
+      rule: 'FREQ=DAILY;COUNT=2',
+      ruleEdited: true,
+      rdates: [{ mode: 'date', value: '2026-09-25', timezone: '' }],
+      rdatesEdited: true,
+      exdates: [{ mode: 'date', value: '2026-09-24', timezone: '' }],
+      exdatesEdited: true,
+    };
+
+    expect(
+      calendarEventInputFromForm(values, 'all-day-series@example.test'),
+    ).toMatchObject({
+      timing: {
+        type: 'all-day',
+      },
+      recurrence: {
+        rdates: [{ type: 'date', value: '2026-09-25' }],
+        exdates: [{ type: 'date', value: '2026-09-24' }],
+      },
+    });
+  });
+
+  it('preserves incompatible loaded values until recurrence is edited, then rejects them', () => {
+    const event: CalendarEvent = {
+      id: 'mixed-series',
+      calendarId: 'team',
+      uid: 'mixed-series@example.test',
+      title: 'Mixed series',
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-09-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=DAILY',
+        rdates: [{ type: 'date', value: '2026-09-24' }],
+      },
+    };
+    const values = calendarEventToFormValues(event, calendar);
+
+    expect(calendarEventPatchFromForm(values)).not.toHaveProperty('recurrence');
+    values.recurrence.ruleEdited = true;
+
+    expect(
+      hasInvalidCalendarEventRecurrenceFormValues(
+        values.recurrence,
+        values.timingType,
+        values.timezone,
+      ),
+    ).toBe(true);
+    expect(() => calendarEventPatchFromForm(values)).toThrow(
+      'Invalid recurrence values',
+    );
   });
 
   it('omits recurrence from a no-op patch so the raw rule stays untouched', () => {

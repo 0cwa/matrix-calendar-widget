@@ -702,7 +702,14 @@ END:VCALENDAR`,
       recurrence: {
         rrule: 'FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4',
         rdates: [
-          { type: 'date', value: '2026-10-01' },
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-01T09:30:00',
+              timezone: 'Europe/Stockholm',
+              mode: 'tzid',
+            },
+          },
           {
             type: 'date-time',
             value: {
@@ -717,8 +724,8 @@ END:VCALENDAR`,
             type: 'date-time',
             value: {
               local: '2026-10-05T09:00:00',
-              timezone: 'UTC',
-              mode: 'utc',
+              timezone: 'Europe/Stockholm',
+              mode: 'tzid',
             },
           },
         ],
@@ -729,13 +736,47 @@ END:VCALENDAR`,
       ...created.event.recurrence,
       rrule: 'FREQ=WEEKLY;COUNT=4;BYDAY=MO,WE',
     });
+    const expanded = parsed.expandOccurrences({
+      start: '2026-09-28T00:00:00.000Z',
+      end: '2026-10-08T00:00:00.000Z',
+    });
+    expect(
+      expanded.every(
+        (occurrence) => occurrence.recurrenceId.type === 'date-time',
+      ),
+    ).toBe(true);
+    expect(expanded.map((occurrence) => occurrence.timing.type)).toEqual(
+      expanded.map(() => 'timed'),
+    );
+    expect(
+      expanded.some(
+        (occurrence) =>
+          occurrence.recurrenceId.type === 'date-time' &&
+          occurrence.recurrenceId.value.local === '2026-10-01T09:30:00',
+      ),
+    ).toBe(true);
+    expect(
+      expanded.some(
+        (occurrence) =>
+          occurrence.recurrenceId.type === 'date-time' &&
+          occurrence.recurrenceId.value.local === '2026-10-05T09:00:00' &&
+          occurrence.recurrenceId.value.timezone === 'Europe/Stockholm',
+      ),
+    ).toBe(false);
 
     const edited = parsed.applyPatch({
       recurrence: {
         ...parsed.event.recurrence,
         rdates: [
           ...(parsed.event.recurrence?.rdates ?? []),
-          { type: 'date', value: '2026-10-06' },
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-06T09:00:00',
+              timezone: 'Europe/Stockholm',
+              mode: 'tzid',
+            },
+          },
         ],
       },
     });
@@ -744,12 +785,89 @@ END:VCALENDAR`,
     ).toMatchObject({
       rrule: 'FREQ=WEEKLY;COUNT=4;BYDAY=MO,WE',
       rdates: [
-        { type: 'date', value: '2026-10-01' },
         expect.objectContaining({ type: 'date-time' }),
-        { type: 'date', value: '2026-10-06' },
+        expect.objectContaining({ type: 'date-time' }),
+        expect.objectContaining({ type: 'date-time' }),
       ],
       exdates: [expect.objectContaining({ type: 'date-time' })],
     });
+  });
+
+  it('rejects DATE/DATE-TIME recurrence values that mismatch DTSTART but preserves them on unrelated patches', () => {
+    const error = new ICalendarEventCodecError(
+      'invalid-recurrence',
+      'RDATE and EXDATE value types must match DTSTART',
+    );
+
+    expect(() =>
+      codec.create('team', 'timed-mixed.ics', {
+        uid: 'timed-mixed@example.test',
+        title: 'Timed mixed recurrence',
+        timing: {
+          type: 'timed',
+          start: { local: '2026-09-28T09:00:00', timezone: 'UTC' },
+          end: { local: '2026-09-28T10:00:00', timezone: 'UTC' },
+        },
+        recurrence: {
+          rrule: 'FREQ=DAILY',
+          rdates: [{ type: 'date', value: '2026-09-29' }],
+        },
+      }),
+    ).toThrow(error);
+
+    expect(() =>
+      codec.create('team', 'all-day-mixed.ics', {
+        uid: 'all-day-mixed@example.test',
+        title: 'All-day mixed recurrence',
+        timing: {
+          type: 'all-day',
+          startDate: '2026-09-28',
+          endDate: '2026-09-29',
+        },
+        recurrence: {
+          rrule: 'FREQ=DAILY',
+          exdates: [
+            {
+              type: 'date-time',
+              value: {
+                local: '2026-09-29T09:00:00',
+                timezone: 'UTC',
+                mode: 'utc',
+              },
+            },
+          ],
+        },
+      }),
+    ).toThrow(error);
+
+    const parsed = codec.parse(
+      'team',
+      'loaded-mixed.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:loaded-mixed@example.test
+DTSTART;TZID=Europe/Stockholm:20260928T090000
+DTEND;TZID=Europe/Stockholm:20260928T100000
+RRULE:FREQ=DAILY
+RDATE;VALUE=DATE:20260929
+EXDATE;VALUE=DATE:20260930
+SUMMARY:Loaded mixed recurrence
+END:VEVENT
+END:VCALENDAR`,
+    );
+
+    const ordinaryPatch = parsed.applyPatch({ title: 'Updated title' });
+    expect(ordinaryPatch.icalendar).toContain('RDATE;VALUE=DATE:20260929');
+    expect(ordinaryPatch.icalendar).toContain('EXDATE;VALUE=DATE:20260930');
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          ...parsed.event.recurrence,
+          rrule: 'FREQ=WEEKLY',
+        },
+      }),
+    ).toThrow(error);
   });
 
   it('preserves unsupported loaded rules on unrelated and RDATE edits', () => {
@@ -776,7 +894,14 @@ END:VCALENDAR`;
         ...parsed.event.recurrence,
         rdates: [
           ...(parsed.event.recurrence?.rdates ?? []).slice(0, 1),
-          { type: 'date', value: '2026-10-02' },
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-02T09:00:00',
+              timezone: 'Europe/Stockholm',
+              mode: 'tzid',
+            },
+          },
         ],
       },
     }).icalendar;
@@ -787,7 +912,7 @@ END:VCALENDAR`;
     expect(edited).toContain(
       'RDATE;TZID=Europe/Stockholm;X-KEEP=1:20260929T090000',
     );
-    expect(edited).toContain('RDATE;VALUE=DATE:20261002');
+    expect(edited).toContain('RDATE;TZID=Europe/Stockholm:20261002T090000');
   });
 
   it('rejects a changed rule outside the editor supported subset', () => {

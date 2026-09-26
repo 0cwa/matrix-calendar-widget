@@ -49,11 +49,14 @@ import {
   CalendarEventFormValues,
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
+  CalendarEventRecurrenceDateMode,
   CalendarEventRecurrenceDateValue,
   calendarEventToFormValues,
   createCalendarEventFormValues,
   hasInvalidCalendarEventRecurrenceFormValues,
+  hasRecurrenceDateTypeMismatch,
   recurrenceDateValueFromForm,
+  recurrenceDateValueMatchesTimingType,
   useCalendarRepository,
   useCreateCalendarEvent,
   useUpdateCalendarEvent,
@@ -259,6 +262,10 @@ export function CalendarEventEditorDialog({
             )
           : undefined;
 
+  const recurrenceDateTypeMismatch = hasRecurrenceDateTypeMismatch(
+    values.recurrence,
+    values.timingType,
+  );
   const recurrenceValidationError = hasInvalidCalendarEventRecurrenceFormValues(
     values.recurrence,
     values.timingType,
@@ -267,10 +274,15 @@ export function CalendarEventEditorDialog({
   const formValidationError =
     validationError ||
     (recurrenceValidationError
-      ? t(
-          'calendarEvents.editor.invalidRecurrence',
-          'Check the recurrence rule and date values.',
-        )
+      ? recurrenceDateTypeMismatch
+        ? t(
+            'calendarEvents.editor.recurrenceDateTypeMismatch',
+            'Recurrence dates must use the same date or date-time type as the event start. Correct or remove incompatible saved values before changing recurrence.',
+          )
+        : t(
+            'calendarEvents.editor.invalidRecurrence',
+            'Check the recurrence rule and date values.',
+          )
       : undefined);
 
   const handleSubmit = async (submitEvent: FormEvent) => {
@@ -570,18 +582,28 @@ export function CalendarEventEditorDialog({
               />
               {values.recurrence.original?.rdatePeriods?.length ? (
                 <Alert severity="info">
-                  {t(
-                    'calendarEvents.editor.periodsPreserved',
-                    'Additional dates with their own durations are preserved and are not editable here.',
-                  )}
+                  {values.timingType === 'all-day'
+                    ? t(
+                        'calendarEvents.editor.periodsPreservedIncompatible',
+                        'Additional dates with durations are preserved. Their date-time type does not match this all-day event, so remove them with a compatible CalDAV editor before changing recurrence.',
+                      )
+                    : t(
+                        'calendarEvents.editor.periodsPreserved',
+                        'Additional dates with their own durations are preserved and are not editable here.',
+                      )}
                 </Alert>
               ) : null}
               {recurrenceValidationError && (
                 <Alert severity="error">
-                  {t(
-                    'calendarEvents.editor.invalidRecurrence',
-                    'Check the recurrence rule and date values.',
-                  )}
+                  {recurrenceDateTypeMismatch
+                    ? t(
+                        'calendarEvents.editor.recurrenceDateTypeMismatch',
+                        'Recurrence dates must use the same date or date-time type as the event start. Correct or remove incompatible saved values before changing recurrence.',
+                      )
+                    : t(
+                        'calendarEvents.editor.invalidRecurrence',
+                        'Check the recurrence rule and date values.',
+                      )}
                 </Alert>
               )}
             </Stack>
@@ -713,6 +735,34 @@ function RecurrenceDateRows({
       : defaultTimezone === 'floating'
         ? 'floating'
         : 'tzid';
+  const supportedModes: {
+    mode: CalendarEventRecurrenceDateMode;
+    label: string;
+  }[] =
+    timingType === 'all-day'
+      ? [
+          {
+            mode: 'date',
+            label: t('calendarEvents.editor.dateMode', 'All-day date'),
+          },
+        ]
+      : [
+          {
+            mode: 'floating',
+            label: t(
+              'calendarEvents.editor.floatingMode',
+              'Floating local time',
+            ),
+          },
+          {
+            mode: 'utc',
+            label: t('calendarEvents.editor.utcMode', 'UTC time'),
+          },
+          {
+            mode: 'tzid',
+            label: t('calendarEvents.editor.timezoneMode', 'Named time zone'),
+          },
+        ];
 
   const updateRow = (
     index: number,
@@ -732,6 +782,19 @@ function RecurrenceDateRows({
       {rows.map((row, index) => {
         const rowLabel = `${itemLabel} ${index + 1}`;
         const invalid = recurrenceDateValueFromForm(row) === undefined;
+        const typeMismatch = !recurrenceDateValueMatchesTimingType(
+          row,
+          timingType,
+        );
+        const modeLabel =
+          supportedModes.find((option) => option.mode === row.mode)?.label ??
+          (row.mode === 'date'
+            ? t('calendarEvents.editor.dateMode', 'All-day date')
+            : row.mode === 'floating'
+              ? t('calendarEvents.editor.floatingMode', 'Floating local time')
+              : row.mode === 'utc'
+                ? t('calendarEvents.editor.utcMode', 'UTC time')
+                : t('calendarEvents.editor.timezoneMode', 'Named time zone'));
         return (
           <Stack
             alignItems="flex-start"
@@ -766,18 +829,20 @@ function RecurrenceDateRows({
               select
               value={row.mode}
             >
-              <MenuItem value="date">
-                {t('calendarEvents.editor.dateMode', 'All-day date')}
-              </MenuItem>
-              <MenuItem value="floating">
-                {t('calendarEvents.editor.floatingMode', 'Floating local time')}
-              </MenuItem>
-              <MenuItem value="utc">
-                {t('calendarEvents.editor.utcMode', 'UTC time')}
-              </MenuItem>
-              <MenuItem value="tzid">
-                {t('calendarEvents.editor.timezoneMode', 'Named time zone')}
-              </MenuItem>
+              {typeMismatch && (
+                <MenuItem disabled value={row.mode}>
+                  {t(
+                    'calendarEvents.editor.existingIncompatibleDateMode',
+                    '{{mode}} (saved value has a different type)',
+                    { mode: modeLabel },
+                  )}
+                </MenuItem>
+              )}
+              {supportedModes.map((option) => (
+                <MenuItem key={option.mode} value={option.mode}>
+                  {option.label}
+                </MenuItem>
+              ))}
             </TextField>
             <TextField
               error={invalid}
@@ -809,6 +874,14 @@ function RecurrenceDateRows({
                 required
                 value={row.timezone}
               />
+            )}
+            {typeMismatch && (
+              <Alert severity="warning">
+                {t(
+                  'calendarEvents.editor.savedRecurrenceDateTypeMismatch',
+                  'This saved value does not match the event start type. Correct or remove it before changing recurrence; it remains unchanged otherwise.',
+                )}
+              </Alert>
             )}
             <Button
               aria-label={t(
