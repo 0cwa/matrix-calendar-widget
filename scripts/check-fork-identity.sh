@@ -17,6 +17,14 @@ then
   failed=1
 fi
 
+# Keep deployment defaults tenant-neutral. This scoped check deliberately does
+# not include provenance documentation or the pinned widget-server build base.
+if grep -RInE 'nordeck\.io' charts dev
+then
+  echo "inherited Nordeck tenant hostname found in chart or dev configuration" >&2
+  failed=1
+fi
+
 if grep -RIn 'NeoDateFix'   matrix-calendar-widget matrix-calendar-server e2e charts   --exclude='CHANGELOG.md'   --exclude='NOTICE'
 then
   echo "legacy NeoDateFix branding found in active runtime/test/deployment files" >&2

@@ -42,4 +42,9 @@ Reset removes the named Docker volumes and all local Matrix/Radicale data.
 
 ## Scope
 
-The gateway and widget are not included in this compose file yet because M2 will define their final authentication/API configuration. The services here are the stable external integration targets for contract tests and manual development.
+This compose file provides Synapse and Radicale only; it does not start the
+gateway or widget. M2 established the gateway API and authentication
+configuration, but the final OpenID-to-Radicale contract still depends on the
+external auth-plugin work tracked in `docs/STATUS.md`. The local Radicale
+service remains useful for password-authenticated CalDAV contract tests. Run
+the gateway and widget separately with their documented configuration.
