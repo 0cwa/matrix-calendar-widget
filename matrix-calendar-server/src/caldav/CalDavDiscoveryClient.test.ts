@@ -167,6 +167,58 @@ describe('CalDavDiscoveryClient', () => {
     });
   });
 
+  it('leaves calendar safety metadata unavailable when its propstats fail', async () => {
+    const fetchMock = createFetchMock(
+      principalResponse('/p/alice/'),
+      homeResponse('/home/alice/'),
+      multistatus(`
+        <d:response>
+          <d:href>/home/alice/team/</d:href>
+          <d:propstat>
+            <d:prop>
+              <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+              <d:displayname>Team events</d:displayname>
+            </d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+          <d:propstat>
+            <d:prop>
+              <c:supported-calendar-component-set>
+                <c:comp name="VEVENT"/>
+              </c:supported-calendar-component-set>
+            </d:prop>
+            <d:status>HTTP/1.1 403 Forbidden</d:status>
+          </d:propstat>
+          <d:propstat>
+            <d:prop>
+              <d:current-user-privilege-set>
+                <d:privilege><d:read/></d:privilege>
+                <d:privilege><d:write/></d:privilege>
+              </d:current-user-privilege-set>
+            </d:prop>
+            <d:status>HTTP/1.1 403 Forbidden</d:status>
+          </d:propstat>
+        </d:response>
+      `),
+    );
+
+    const result = await new CalDavDiscoveryClient(
+      'https://radicale.example.test/',
+      credentialProvider,
+      fetchMock,
+    ).discover();
+
+    expect(result.calendars).toEqual([
+      {
+        href: 'https://radicale.example.test/home/alice/team/',
+        displayName: 'Team events',
+        color: undefined,
+        components: undefined,
+        readOnly: undefined,
+      },
+    ]);
+  });
+
   it('marks collections read-only when DAV write privileges are absent', async () => {
     const fetchMock = createFetchMock(
       principalResponse('/p/alice/'),

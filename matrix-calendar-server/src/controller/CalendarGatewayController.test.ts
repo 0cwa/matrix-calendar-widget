@@ -355,6 +355,65 @@ describe('CalendarGatewayController', () => {
     },
   );
 
+  it('refuses deletion when a PROPFIND safety property has a failed status', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch.mockResponses(
+      [principalResponse('/principals/alice/'), { status: 207 }],
+      [homeResponse('/alice/'), { status: 207 }],
+      [
+        multistatus(`
+          <d:response>
+            <d:href>/alice/team/</d:href>
+            <d:propstat>
+              <d:prop>
+                <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+                <d:displayname>Team events</d:displayname>
+              </d:prop>
+              <d:status>HTTP/1.1 200 OK</d:status>
+            </d:propstat>
+            <d:propstat>
+              <d:prop>
+                <c:supported-calendar-component-set>
+                  <c:comp name="VEVENT"/>
+                </c:supported-calendar-component-set>
+              </d:prop>
+              <d:status>HTTP/1.1 403 Forbidden</d:status>
+            </d:propstat>
+            <d:propstat>
+              <d:prop>
+                <d:current-user-privilege-set>
+                  <d:privilege><d:read/></d:privilege>
+                  <d:privilege><d:write/></d:privilege>
+                </d:current-user-privilege-set>
+              </d:prop>
+              <d:status>HTTP/1.1 200 OK</d:status>
+            </d:propstat>
+          </d:response>
+        `),
+        { status: 207 },
+      ],
+    );
+
+    await expect(
+      createController().deleteCalendar(
+        userContext,
+        openIdCredential,
+        roomId,
+        calendarId,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'calendar-delete-unsafe',
+      },
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(
+      fetch.mock.calls.every(([, init]) => init?.method !== 'DELETE'),
+    ).toBe(true);
+  });
+
   it('refuses deletion when the requested collection is not discoverable', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';
