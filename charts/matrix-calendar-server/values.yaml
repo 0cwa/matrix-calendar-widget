@@ -79,6 +79,14 @@ persistence:
     - ReadWriteMany
   size: 8Gi
 
+## Matrix reminder sidecar database. The chart does not provision a database or
+## Secret; configure an external Secret before enabling reminders.
+reminders:
+  enabled: false
+  databaseUrl:
+    existingSecret: ""
+    existingSecretKey: database-url
+
 additionalVolumes: []
 
 ## Application settings for the bot
@@ -120,6 +128,9 @@ settings:
     ## Other optional variables
     # - name: LOG_LEVEL
     #  value: 'debug'
+
+    ## Do not set MATRIX_CALENDAR_REMINDER_DATABASE_URL here. Configure
+    ## reminders.databaseUrl.existingSecret and existingSecretKey instead.
 
 ## Settings for the automatic creation and login to a bot user. This is optional
 ## and will be executed as init containers. This is an alternative to manually

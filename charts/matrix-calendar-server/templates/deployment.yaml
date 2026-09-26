@@ -144,8 +144,21 @@ spec:
               value: '{{ .Values.settings.widgetUrl }}/cockpit/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id&matrix_base_url=$org.matrix.msc4039.matrix_base_url'
             - name: BREAKOUT_SESSION_WIDGET_URL
               value: '{{ .Values.settings.widgetUrl }}/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id&matrix_base_url=$org.matrix.msc4039.matrix_base_url'
+            {{- range .Values.settings.additionalEnv }}
+            {{- if eq (default "" .name) "MATRIX_CALENDAR_REMINDER_DATABASE_URL" }}
+            {{- fail "set MATRIX_CALENDAR_REMINDER_DATABASE_URL through reminders.databaseUrl.existingSecret, not settings.additionalEnv" }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.settings.additionalEnv }}
               {{- toYaml .Values.settings.additionalEnv | nindent 12 }}
+            {{- end }}
+            {{- if .Values.reminders.enabled }}
+            - name: MATRIX_CALENDAR_REMINDER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "reminders.databaseUrl.existingSecret is required when reminders.enabled=true" .Values.reminders.databaseUrl.existingSecret | quote }}
+                  key: {{ required "reminders.databaseUrl.existingSecretKey is required when reminders.enabled=true" .Values.reminders.databaseUrl.existingSecretKey | quote }}
+                  optional: false
             {{- end }}
           volumeMounts:
             - name: data

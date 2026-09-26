@@ -125,18 +125,21 @@ The gated recurring-resource CalDAV contract is defined in `matrix-calendar-serv
       operator/configuration-managed. Dynamic database, room-state, or
       widget-managed binding or collection lifecycle requires a later ADR.
 - [ ] Configurable Matrix power-level calendar policy.
-- [ ] Decide whether to support whole-room iCalendar attendees through an
-      explicit verified-email registration and consent flow, and define email
-      invitation/response semantics. Defer this direction pending a user
-      decision. Matrix membership/member APIs do not expose other members'
-      email addresses; never infer email from a Matrix ID.
+- [x] Choose whole-room `@room` as the first reminder target. Defer event
+      email attendee fields, verified-address registration, and invitation/
+      response semantics until member addresses can be verified and their
+      owners give explicit consent. Matrix membership/member APIs do not expose
+      other members' email addresses; never infer email from a Matrix ID.
 - [ ] Store per-alarm Matrix reminder targets as ADR007 sidecar metadata,
-      outside iCalendar. The chosen near-term reminder target is whole-room
-      `@room`, independent from iCalendar attendee fields.
-- [x] Select an optional app-owned PostgreSQL database for reminder sidecar and
-      delivery state; add a storage port and atomic durable delivery claims
-      (ADR019). This slice has local unit coverage and a PostgreSQL integration
-      contract wired into CI; it does not itself enable reminder delivery.
+      outside iCalendar, in an app-owned PostgreSQL database and least-privilege
+      role (ADR019). Operators may reuse a PostgreSQL cluster, but not Synapse's
+      database, schema, role, or credentials. The server chart accepts the URL
+      only through an external Kubernetes Secret; reminders remain disabled by
+      default until that Secret is configured.
+- [x] Implement the optional app-owned PostgreSQL reminder-state store and
+      atomic durable delivery claims (ADR019). The store has local unit coverage
+      and a PostgreSQL integration contract wired into CI; this does not enable
+      reminder configuration or delivery.
 - [ ] Persist per-alarm whole-room reminder sidecar configuration through an
       authenticated API with current room membership and event-write checks.
 - [ ] Deliver reminders through standard `m.mentions.room: true` with
@@ -148,11 +151,20 @@ The gated recurring-resource CalDAV contract is defined in `matrix-calendar-serv
 - [ ] Event detail action to link/open a Matrix room or MatrixRTC conference.
 - [ ] Audit-friendly event creation/edit messages where appropriate.
 
+The PostgreSQL reminder-state store and chart integration are implemented
+locally. The chart requires operators to provision an app-owned database/role
+and external Secret before enabling reminders. Existing `/app/storage` PVC
+settings remain independent bot filesystem state and are unchanged. The chart
+defaults to one app replica; database claims do not establish full server
+multi-replica safety.
+
 Local progress only: the gateway actor/membership/power/binding preflight and
 the static single-target room widget UI are complete on local branches. These
 sub-slices do not enable live room-principal CalDAV access and do not complete
-M6 or issue #7. Reliable reminders, the ADR007 sidecar/mentions/durable delivery
-path, and event attendee email semantics remain open.
+M6 or issue #7. Reminder configuration API, scheduling, delivery-time
+permissions, Matrix delivery, and event attendee email semantics remain open.
+Live room delivery still depends on #48/#45 and ADR014's trusted-domain isolation gate; the M5 pinned
+Radicale recurring-resource run remains a separate open interoperability gate.
 
 **Exit:** teams can manage events in their configured room calendar from the
 widget and receive reliable Matrix reminders. Room bindings and calendar

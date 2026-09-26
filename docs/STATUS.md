@@ -85,12 +85,20 @@ Complete on `main`:
   or enable live room-principal CalDAV access. Live access remains blocked on
   #48, #45, and ADR014's trusted-domain isolation gate.
   Reminder intent is whole-room `@room`, independent of event email attendees;
-  ADR007 sidecar metadata, `m.mentions` delivery, permission checks, and durable
-  idempotent scheduling remain pending. Matrix member APIs do not expose other
-  members' email addresses. Whether to build a verified-email registration and
-  consent flow for iCalendar attendees, and which invitation/response semantics
-  it would support, remains deferred pending a user decision; no such registry
-  work is assumed or authorized by the current reminder direction.
+  this selection is decided. The app-owned PostgreSQL reminder-state store and
+  atomic delivery-claim adapter are implemented locally under ADR019, with
+  unit coverage and a PostgreSQL integration contract. ADR007 reminder targets
+  still need an authenticated configuration API. The server chart projects
+  `MATRIX_CALENDAR_REMINDER_DATABASE_URL` only from an external Secret when
+  reminders are enabled; no database is provisioned by the chart. Do not use
+  Synapse's database/schema or `pg-credentials` secret. Email attendee fields,
+  verified-address registration, and invitation/response semantics are
+  deferred until member addresses can be verified and their owners give
+  explicit consent. Matrix member APIs do not expose other members' email
+  addresses. Live room delivery remains blocked on #48/#45 and ADR014's
+  trusted-domain isolation; scheduling, Matrix delivery, and delivery-time
+  `@room` permission checks remain unimplemented. `replicaCount` remains one by default;
+  this DB boundary does not authorize general multi-replica server operation.
 - M7 / issue #8 — `!calendar help` is implemented locally. Data commands and
   fallback messages remain blocked on #48/#45 and the M6 room authorization
   contract; per-user bot targets remain deferred pending trusted actor proof.
@@ -104,6 +112,7 @@ Complete on `main`:
 2. Land #45's final gateway/OpenID/non-member real-container contract and close M2.
 3. In parallel while #48 is blocked, synchronize the public #100 / PR #101 branch with current `main`, then merge the reviewed M4 sequence; its local assembly does not change GitHub state.
 4. Keep the M5 pinned Radicale recurring-resource round-trip and M6 live room-principal access gated until their server/runtime and OpenID prerequisites pass. Collection timezone editing remains deferred beyond M4 until query/client semantics and property round-trip behavior are verified.
+5. For future reminder implementation, first provision an app-owned PostgreSQL database/role and external Secret under ADR019; retain disabled-by-default chart behavior and the one-replica setting until scheduler, bot-state, and authentication validation passes.
 
 ## Working rules
 
