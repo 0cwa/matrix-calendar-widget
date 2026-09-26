@@ -2,18 +2,19 @@
 
 These fixtures are deliberately small and human-readable. They define interoperability cases that the future CalDAV/iCalendar adapter must preserve.
 
-| Fixture                   | Purpose                                                |
-| ------------------------- | ------------------------------------------------------ |
-| `simple-timed.ics`        | timed VEVENT with named timezone and common fields     |
-| `all-day.ics`             | exclusive all-day DTEND semantics                      |
-| `recurring-weekly.ics`    | RRULE plus EXDATE/RDATE                                |
-| `recurrence-override.ics` | RECURRENCE-ID instance override                        |
-| `alarm.ics`               | standard VALARM                                        |
-| `attendees.ics`           | organizer, attendee roles and PARTSTAT                 |
-| `unknown-properties.ics`  | unknown/vendor properties that must survive round-trip |
-| `mixed-components.ics`    | VEVENT with VTODO/VJOURNAL preservation case           |
-| `vtimezone.ics`           | embedded VTIMEZONE preservation across DST             |
-| `folded-escaped.ics`      | escaped text and RFC 5545 content-line folding         |
+| Fixture                        | Purpose                                                |
+| ------------------------------ | ------------------------------------------------------ |
+| `simple-timed.ics`             | timed VEVENT with named timezone and common fields     |
+| `all-day.ics`                  | exclusive all-day DTEND semantics                      |
+| `recurring-weekly.ics`         | RRULE plus EXDATE/RDATE                                |
+| `recurrence-override.ics`      | RECURRENCE-ID instance override                        |
+| `alarm.ics`                    | standard VALARM                                        |
+| `attendees.ics`                | organizer, attendee roles and PARTSTAT                 |
+| `interoperable-properties.ics` | repeated alarms, metadata, and inert URI properties    |
+| `unknown-properties.ics`       | unknown/vendor properties that must survive round-trip |
+| `mixed-components.ics`         | VEVENT with VTODO/VJOURNAL preservation case           |
+| `vtimezone.ics`                | embedded VTIMEZONE preservation across DST             |
+| `folded-escaped.ics`           | escaped text and RFC 5545 content-line folding         |
 
 Rules for agents:
 
