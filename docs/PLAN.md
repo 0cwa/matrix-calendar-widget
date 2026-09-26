@@ -152,7 +152,7 @@ collection lifecycle remain operator/configuration-managed under ADR015.
 
 ## M7 — Non-widget fallback
 
-- [ ] `!calendar help`
+- [x] `!calendar help`
 - [ ] `!calendar upcoming`
 - [ ] `!calendar event <id>`
 - [ ] constrained event creation command

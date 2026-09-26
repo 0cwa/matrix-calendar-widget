@@ -6,7 +6,9 @@ This file is the short-lived execution snapshot. `docs/PLAN.md` is the durable m
 
 ## Current phase
 
-**M3 is complete. M5 recurrence slices are implemented locally; the pinned Radicale interoperability exit check remains active.**
+**M3 is complete. Reviewed M4–M8 slices are assembled on the local integration branch; M5 interoperability and M2/M6 live authorization gates remain active.**
+
+The local review branch assembles M4 calendar management, M5 recurrence work, M6 room-binding/auth preflight and static-target widget UI, M7 `!calendar help`, and M8 free/busy privacy and chart-default preparation. This work is local only; it has not been pushed or merged to GitHub `main`, and it does not close the corresponding issues.
 
 The widget now has a real gateway-backed `CalendarRepository`, preservation-first VEVENT CRUD, visible conflict recovery, and a real two-client Radicale interoperability contract. The remaining M2 blocker is external: the pinned `etkecc/radicale-auth-matrix` plugin still only accepts Matrix passwords, while ADR009 requires short-lived Matrix OpenID delegation from the gateway.
 
@@ -50,9 +52,9 @@ Landed on `main`:
 - writable-calendar rename via `DAV:displayname` only (#98 / PR #99),
 - small create/rename dialogs that keep request errors visible.
 
-Active:
+Assembled locally, not merged to GitHub `main`:
 
-- safe VEVENT-only calendar deletion (#100 / PR #101). The implementation already fails closed for mixed, component-unknown, and read-only collections and rejects DELETE `207 Multi-Status`; the branch currently needs synchronization with `main` after the rename merge.
+- safe VEVENT-only calendar deletion (#100 / PR #101), description/color, compatibility, and diagnostics slices. GitHub PR #101 remains open and conflicting against `main`; its public branch still needs synchronization before merge.
 
 Deferred beyond M4:
 
@@ -75,13 +77,13 @@ Complete on `main`:
 
 - #48 — external `radicale-auth-matrix` OpenID delegation. No writable `0cwa/radicale-auth-matrix` fork exists and the available GitHub connector cannot create/fork repositories.
 - #45 — final delegated gateway/OpenID real-container contract, blocked on #48.
-- #100 / PR #101 — M4 safe calendar deletion; implementation is present, but the branch currently diverges from `main` after #99 merged and must be synced before merge.
+- #100 / PR #101 — GitHub still reports the PR open/conflicting and requires branch synchronization; the reviewed M4 implementation sequence is assembled locally.
 - #6 / M5 — the pinned Radicale recurring-resource create/read/patch contract remains unverified until the supported container runtime is available.
-- #29 — enable main-branch protection once repository-rules administration is available.
+- #29 — main-branch protection requires repository-rules administration; this is an external repository-admin action.
 - M6 / issue #7 — the gateway authorization/binding preflight and static
-  single-target room widget UI are complete on local branches, but are not
-  integrated and do not enable live room-principal CalDAV access. Live access
-  remains blocked on #48, #45, and ADR014's trusted-domain isolation gate.
+  single-target room widget UI are assembled locally, but do not complete #7
+  or enable live room-principal CalDAV access. Live access remains blocked on
+  #48, #45, and ADR014's trusted-domain isolation gate.
   Reminder intent is whole-room `@room`, independent of event email attendees;
   ADR007 sidecar metadata, `m.mentions` delivery, permission checks, and durable
   idempotent scheduling remain pending. Matrix member APIs do not expose other
@@ -89,13 +91,19 @@ Complete on `main`:
   consent flow for iCalendar attendees, and which invitation/response semantics
   it would support, remains deferred pending a user decision; no such registry
   work is assumed or authorized by the current reminder direction.
+- M7 / issue #8 — `!calendar help` is implemented locally. Data commands and
+  fallback messages remain blocked on #48/#45 and the M6 room authorization
+  contract; per-user bot targets remain deferred pending trusted actor proof.
+- M8 / issue #9 — the free/busy privacy boundary and chart development defaults
+  are documented locally; the remaining controlled-pilot hardening and release
+  gates remain open.
 
 ## Highest-priority next steps
 
 1. Implement #48 in a writable upstream/forked `radicale-auth-matrix` repository; do not copy GPL/LGPL-family plugin code into this Apache-licensed repository.
 2. Land #45's final gateway/OpenID/non-member real-container contract and close M2.
-3. In parallel while #48 is blocked, synchronize and finish #100 / PR #101: safe VEVENT-only calendar deletion through the existing repository/gateway seams.
-4. After delete lands, reassess the next smallest M4 slice (description, color, compatibility notice, or diagnostics) rather than pre-building generic WebDAV administration. Collection timezone editing is deferred beyond M4 and requires verified Radicale query/client behavior before any future write.
+3. In parallel while #48 is blocked, synchronize the public #100 / PR #101 branch with current `main`, then merge the reviewed M4 sequence; its local assembly does not change GitHub state.
+4. Keep the M5 pinned Radicale recurring-resource round-trip and M6 live room-principal access gated until their server/runtime and OpenID prerequisites pass. Collection timezone editing remains deferred beyond M4 until query/client semantics and property round-trip behavior are verified.
 
 ## Working rules
 
