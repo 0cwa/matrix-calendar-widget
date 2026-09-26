@@ -29,6 +29,13 @@
     "<li><code>!meeting status</code> (Checks the ability to add the calendar.)</li>",
     "</ul>"
   ],
+  "calendarCommandHelp": [
+    "<p>Calendar commands:</p>",
+    "<ul>",
+    "<li><code>!calendar help</code> (Show this help.)</li>",
+    "</ul>",
+    "<p>For full calendar management, use the Matrix Calendar widget in clients that support widgets.</p>"
+  ],
   "meeting": {
     "invite": {
       "message": "📅 {{range, daterange}}<br/>$t(meeting.invite.messageRecurrence, {\"context\": \"{{recurrenceContext}}\" })<br/>$t(meeting.invite.messageByOrganizer, {\"context\": \"{{organizerContext}}\" })$t(meeting.invite.messageDescription, {\"context\": \"{{descriptionContext}}\" })",
