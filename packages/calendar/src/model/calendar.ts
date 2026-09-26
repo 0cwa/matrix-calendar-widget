@@ -132,6 +132,8 @@ export type CalendarEventRecurrence = {
  */
 export type CalendarEventDisplayAlarm = {
   index: number;
+  /** RFC 9074 VALARM UID. Optional on imported legacy alarms. */
+  uid?: string;
   description?: string;
   /** Relative trigger in whole minutes, when the source form is supported. */
   triggerMinutes?: number;
@@ -139,11 +141,26 @@ export type CalendarEventDisplayAlarm = {
   triggerEditable: boolean;
 };
 
+/** A new DISPLAY alarm added by the calendar widget. */
+export type CalendarEventDisplayAlarmInput = {
+  uid: string;
+  description: string;
+  triggerMinutes: number;
+  triggerRelatedTo?: 'start' | 'end';
+};
+
 /** Narrow changes for existing DISPLAY VALARMs only. */
 export type CalendarEventDisplayAlarmEdit = {
   index: number;
+  /** Assign an RFC 9074 UID when explicitly supplied. */
+  uid?: string;
   triggerMinutes?: number;
   description?: string;
+};
+
+/** Remove one existing DISPLAY alarm by its resource-local index. */
+export type CalendarEventDisplayAlarmRemoval = {
+  index: number;
 };
 
 /** One expanded occurrence, retaining the stable original series identity. */
@@ -199,7 +216,9 @@ export type CalendarEvent = {
 export type CalendarEventInput = Omit<
   CalendarEvent,
   'id' | 'calendarId' | 'displayAlarms' | 'unsupportedRecurrence'
->;
+> & {
+  displayAlarms?: CalendarEventDisplayAlarmInput[];
+};
 
 /**
  * Fields editable without changing resource identity, calendar ownership, or
@@ -212,6 +231,8 @@ export type CalendarEventPatch = Partial<
   >
 > & {
   displayAlarmEdits?: CalendarEventDisplayAlarmEdit[];
+  displayAlarmAdditions?: CalendarEventDisplayAlarmInput[];
+  displayAlarmRemovals?: CalendarEventDisplayAlarmRemoval[];
 };
 
 /** Editable values for one detached recurrence override, excluding series data. */

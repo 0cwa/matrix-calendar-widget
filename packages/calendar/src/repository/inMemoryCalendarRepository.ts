@@ -195,6 +195,11 @@ export class InMemoryCalendarRepository implements CalendarRepository {
 
     const event: CalendarEvent = {
       ...cloneCalendarEventInput(input),
+      displayAlarms: input.displayAlarms?.map((alarm, index) => ({
+        ...alarm,
+        index,
+        triggerEditable: true,
+      })),
       id,
       calendarId,
     };
@@ -212,19 +217,44 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     const current = this.getStoredEvent(calendarId, eventId);
     const clonedPatch = cloneCalendarEventPatch(patch);
     const displayAlarmEdits = clonedPatch.displayAlarmEdits;
+    const displayAlarmAdditions = clonedPatch.displayAlarmAdditions;
+    const displayAlarmRemovals = clonedPatch.displayAlarmRemovals;
     delete clonedPatch.displayAlarmEdits;
+    delete clonedPatch.displayAlarmAdditions;
+    delete clonedPatch.displayAlarmRemovals;
+
+    let displayAlarms = applyDisplayAlarmEdits(
+      current.displayAlarms ?? [],
+      displayAlarmEdits ?? [],
+    );
+    if (displayAlarmRemovals?.length) {
+      const removedIndexes = new Set(
+        displayAlarmRemovals.map(({ index }) => index),
+      );
+      displayAlarms = displayAlarms
+        .filter((alarm) => !removedIndexes.has(alarm.index))
+        .map((alarm, index) => ({ ...alarm, index }));
+    }
+    if (displayAlarmAdditions?.length) {
+      const firstIndex = displayAlarms.reduce(
+        (maximum, alarm) => Math.max(maximum, alarm.index + 1),
+        0,
+      );
+      displayAlarms.push(
+        ...displayAlarmAdditions.map((alarm, index) => ({
+          ...alarm,
+          index: firstIndex + index,
+          triggerEditable: true,
+        })),
+      );
+    }
 
     const updated: CalendarEvent = {
       ...current,
       ...clonedPatch,
-      ...(displayAlarmEdits
-        ? {
-            displayAlarms: applyDisplayAlarmEdits(
-              current.displayAlarms ?? [],
-              displayAlarmEdits,
-            ),
-          }
-        : {}),
+      ...(displayAlarms.length > 0
+        ? { displayAlarms }
+        : { displayAlarms: undefined }),
       id: current.id,
       calendarId: current.calendarId,
       uid: current.uid,
@@ -655,6 +685,7 @@ function cloneCalendarEventInput(
         : cloneAllDayTiming(input.timing),
     categories: input.categories ? [...input.categories] : undefined,
     recurrence: cloneRecurrence(input.recurrence),
+    displayAlarms: input.displayAlarms?.map((alarm) => ({ ...alarm })),
   };
 }
 
@@ -706,6 +737,18 @@ function cloneCalendarEventPatch(
     }));
   }
 
+  if (patch.displayAlarmAdditions) {
+    cloned.displayAlarmAdditions = patch.displayAlarmAdditions.map((alarm) => ({
+      ...alarm,
+    }));
+  }
+
+  if (patch.displayAlarmRemovals) {
+    cloned.displayAlarmRemovals = patch.displayAlarmRemovals.map((removal) => ({
+      ...removal,
+    }));
+  }
+
   if (patch.timing) {
     cloned.timing =
       patch.timing.type === 'timed'
@@ -751,7 +794,22 @@ function applyDisplayAlarmEdits(
           !Number.isSafeInteger(edit.triggerMinutes * 60))) ||
       (edit.description !== undefined &&
         typeof edit.description !== 'string') ||
-      (edit.triggerMinutes === undefined && edit.description === undefined)
+      (edit.uid !== undefined &&
+        (edit.uid.trim() !== edit.uid ||
+          edit.uid.length === 0 ||
+          edit.uid.length > 255 ||
+          Array.from(edit.uid).some((character) => {
+            const code = character.codePointAt(0) ?? 0;
+            return code <= 0x1f || code === 0x7f;
+          }))) ||
+      (edit.uid !== undefined &&
+        alarms.some(
+          (candidate) =>
+            candidate.index !== edit.index && candidate.uid === edit.uid,
+        )) ||
+      (edit.triggerMinutes === undefined &&
+        edit.description === undefined &&
+        edit.uid === undefined)
     ) {
       throw new CalendarRepositoryError(
         'request-failed',
@@ -771,6 +829,7 @@ function applyDisplayAlarmEdits(
           ...(edit.description !== undefined
             ? { description: edit.description }
             : {}),
+          ...(edit.uid !== undefined ? { uid: edit.uid } : {}),
         }
       : { ...alarm };
   });

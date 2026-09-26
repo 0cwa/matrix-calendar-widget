@@ -28,6 +28,8 @@ export type {
   CalendarEventDateTime,
   CalendarEventDisplayAlarm,
   CalendarEventDisplayAlarmEdit,
+  CalendarEventDisplayAlarmInput,
+  CalendarEventDisplayAlarmRemoval,
   CalendarEventId,
   CalendarEventInput,
   CalendarEventOccurrence,

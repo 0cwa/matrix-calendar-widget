@@ -155,6 +155,103 @@ describe('ICalendarEventCodec', () => {
     );
   });
 
+  it('reads and preserves VALARM UIDs while UID-less existing alarms stay UID-less', () => {
+    const uidAlarm = codec.parse(
+      'team',
+      'alarm-uid.ics',
+      fixture('alarm-uid.ics'),
+    );
+    expect(uidAlarm.event.displayAlarms?.map(({ uid }) => uid)).toEqual([
+      'alarm-one@example.test',
+      'alarm-two@example.test',
+    ]);
+
+    const patchedUidAlarm = uidAlarm.applyPatch({ title: 'UID preserved' });
+    const reparsedUidAlarm = codec.parse(
+      'team',
+      'alarm-uid.ics',
+      patchedUidAlarm.icalendar,
+    );
+    expect(reparsedUidAlarm.event.displayAlarms?.map(({ uid }) => uid)).toEqual(
+      ['alarm-one@example.test', 'alarm-two@example.test'],
+    );
+    expect(patchedUidAlarm.icalendar).toContain('X-ALARM-NOTE:preserve-one');
+
+    const removedAlarm = uidAlarm.applyPatch({
+      displayAlarmRemovals: [{ index: 0 }],
+    });
+    expect(
+      codec
+        .parse('team', 'alarm-uid.ics', removedAlarm.icalendar)
+        .event.displayAlarms?.map(({ uid }) => uid),
+    ).toEqual(['alarm-two@example.test']);
+    expect(removedAlarm.icalendar).not.toContain('X-ALARM-NOTE:preserve-one');
+
+    const legacyAlarm = codec.parse('team', 'alarm.ics', fixture('alarm.ics'));
+    expect(legacyAlarm.event.displayAlarms?.[0]).not.toHaveProperty('uid');
+    const patchedLegacyAlarm = legacyAlarm.applyPatch({
+      title: 'Legacy patch',
+    });
+    const legacyValarm = ICAL.Component.fromString(patchedLegacyAlarm.icalendar)
+      .getFirstSubcomponent('vevent')
+      ?.getFirstSubcomponent('valarm');
+    expect(legacyValarm?.getAllProperties('uid')).toHaveLength(0);
+
+    const explicitlyIdentified = legacyAlarm.applyPatch({
+      displayAlarmEdits: [{ index: 0, uid: 'legacy-alarm@example.test' }],
+    });
+    expect(
+      codec.parse('team', 'alarm.ics', explicitlyIdentified.icalendar).event
+        .displayAlarms?.[0].uid,
+    ).toBe('legacy-alarm@example.test');
+  });
+
+  it('keeps a new alarm UID stable across parse, serialize, edit, and reordering', () => {
+    const source = fixture('alarm-uid.ics');
+    const firstAlarm = source.match(/BEGIN:VALARM[\s\S]*?END:VALARM/)?.[0];
+    const secondAlarm = source
+      .replace(firstAlarm ?? '', '')
+      .match(/BEGIN:VALARM[\s\S]*?END:VALARM/)?.[0];
+    expect(firstAlarm).toBeDefined();
+    expect(secondAlarm).toBeDefined();
+    const reorderedSource = source
+      .replace(firstAlarm!, '')
+      .replace(secondAlarm!, `${secondAlarm}\n${firstAlarm}`);
+    const reordered = codec.parse('team', 'alarm-uid.ics', reorderedSource);
+    expect(reordered.event.displayAlarms?.map(({ uid }) => uid)).toEqual([
+      'alarm-two@example.test',
+      'alarm-one@example.test',
+    ]);
+
+    const edited = reordered.applyPatch({
+      displayAlarmEdits: [{ index: 0, description: 'Edited second reminder' }],
+      displayAlarmAdditions: [
+        {
+          uid: 'new-alarm@example.test',
+          description: 'New reminder',
+          triggerMinutes: -15,
+          triggerRelatedTo: 'start',
+        },
+      ],
+    });
+    const afterEdit = codec.parse('team', 'alarm-uid.ics', edited.icalendar);
+    expect(afterEdit.event.displayAlarms?.map(({ uid }) => uid)).toEqual([
+      'alarm-two@example.test',
+      'alarm-one@example.test',
+      'new-alarm@example.test',
+    ]);
+    const serializedAgain = afterEdit.applyPatch({ title: 'Serialize again' });
+    const afterSecondSerialization = codec.parse(
+      'team',
+      'alarm-uid.ics',
+      serializedAgain.icalendar,
+    );
+    expect(afterSecondSerialization.event.displayAlarms?.[2].uid).toBe(
+      'new-alarm@example.test',
+    );
+    expect(serializedAgain.icalendar).toContain('X-ALARM-NOTE:preserve-one');
+  });
+
   it('edits only selected existing DISPLAY alarms and preserves unsupported siblings', () => {
     const source = fixture('interoperable-properties.ics');
     const parsed = codec.parse('team', 'interoperable-properties.ics', source);
