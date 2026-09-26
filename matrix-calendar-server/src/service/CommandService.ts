@@ -66,12 +66,9 @@ export class CommandService {
       body.length > CALENDAR_TRIGGER.length &&
       !/\s/.test(body.charAt(CALENDAR_TRIGGER.length));
     if (malformedCalendarTrigger) {
-      return this.replyWithError(
-        roomId,
-        event,
-        'commandErrors.badCommand',
-        { trigger: CALENDAR_TRIGGER },
-      );
+      return this.replyWithError(roomId, event, 'commandErrors.badCommand', {
+        trigger: CALENDAR_TRIGGER,
+      });
     }
 
     const triggered = triggers.find((trigger) => body.startsWith(trigger));
@@ -92,8 +89,7 @@ export class CommandService {
         event,
         'commandErrors.noCommandProvided',
         {
-          trigger:
-            triggered === CALENDAR_TRIGGER ? CALENDAR_TRIGGER : TRIGGER,
+          trigger: triggered === CALENDAR_TRIGGER ? CALENDAR_TRIGGER : TRIGGER,
         },
       );
     }
@@ -146,12 +142,9 @@ export class CommandService {
       this.logger.verbose(
         `commandErrors.badCommand commandName: ${commandName}`,
       );
-      await this.replyWithError(
-        roomId,
-        event,
-        'commandErrors.badCommand',
-        { trigger: CALENDAR_TRIGGER },
-      );
+      await this.replyWithError(roomId, event, 'commandErrors.badCommand', {
+        trigger: CALENDAR_TRIGGER,
+      });
       return;
     }
 
