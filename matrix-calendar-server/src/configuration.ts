@@ -53,6 +53,7 @@ function createConfiguration() {
     room_calendar_bindings: parseRoomCalendarBindings(
       process.env.ROOM_CALENDAR_BINDINGS,
     ),
+    reminder_database_url: process.env.MATRIX_CALENDAR_REMINDER_DATABASE_URL,
 
     meetingwidget_url: process.env.MEETINGWIDGET_URL as string,
     meetingwidget_name: process.env.MEETINGWIDGET_NAME ?? 'Matrix Calendar',
@@ -139,6 +140,9 @@ export const ValidationSchema = Joi.object({
   HOMESERVER_URL: Joi.string().required().uri(),
   RADICALE_URL: Joi.string().uri(),
   ROOM_CALENDAR_BINDINGS: Joi.string(),
+  MATRIX_CALENDAR_REMINDER_DATABASE_URL: Joi.string().uri({
+    scheme: ['postgres', 'postgresql'],
+  }),
 
   MEETINGWIDGET_URL: Joi.string().required().uri(),
   MEETINGWIDGET_NAME: Joi.string(),

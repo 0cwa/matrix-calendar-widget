@@ -23,6 +23,7 @@ export interface IAppConfiguration {
   homeserver_url: string;
   radicale_url?: string;
   room_calendar_bindings: readonly RoomCalendarBinding[];
+  reminder_database_url?: string;
 
   meetingwidget_url: string;
   meetingwidget_name: string;

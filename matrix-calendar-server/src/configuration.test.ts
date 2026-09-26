@@ -14,16 +14,24 @@
  * limitations under the License.
  */
 
-import configuration from './configuration';
+import configuration, { ValidationSchema } from './configuration';
 
 describe('room calendar binding configuration', () => {
   const originalValue = process.env.ROOM_CALENDAR_BINDINGS;
+  const originalReminderDatabaseUrl =
+    process.env.MATRIX_CALENDAR_REMINDER_DATABASE_URL;
 
   afterEach(() => {
     if (originalValue === undefined) {
       delete process.env.ROOM_CALENDAR_BINDINGS;
     } else {
       process.env.ROOM_CALENDAR_BINDINGS = originalValue;
+    }
+    if (originalReminderDatabaseUrl === undefined) {
+      delete process.env.MATRIX_CALENDAR_REMINDER_DATABASE_URL;
+    } else {
+      process.env.MATRIX_CALENDAR_REMINDER_DATABASE_URL =
+        originalReminderDatabaseUrl;
     }
   });
 
@@ -41,5 +49,35 @@ describe('room calendar binding configuration', () => {
     delete process.env.ROOM_CALENDAR_BINDINGS;
 
     expect(configuration().config.room_calendar_bindings).toEqual([]);
+  });
+
+  it('loads the optional app-owned reminder database URL', () => {
+    process.env.MATRIX_CALENDAR_REMINDER_DATABASE_URL =
+      'postgresql://reminder:secret@localhost:5432/matrix_calendar_reminders';
+
+    expect(configuration().config.reminder_database_url).toBe(
+      'postgresql://reminder:secret@localhost:5432/matrix_calendar_reminders',
+    );
+  });
+
+  it('leaves reminder persistence disabled when no database URL is configured', () => {
+    delete process.env.MATRIX_CALENDAR_REMINDER_DATABASE_URL;
+
+    expect(configuration().config.reminder_database_url).toBeUndefined();
+  });
+
+  it('validates only PostgreSQL connection URL schemes', () => {
+    const databaseUrlSchema = ValidationSchema.extract(
+      'MATRIX_CALENDAR_REMINDER_DATABASE_URL',
+    );
+
+    expect(
+      databaseUrlSchema.validate(
+        'postgresql://reminder:secret@localhost:5432/matrix_calendar',
+      ).error,
+    ).toBeUndefined();
+    expect(
+      databaseUrlSchema.validate('https://example.org/database').error,
+    ).toBeDefined();
   });
 });
