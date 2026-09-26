@@ -111,7 +111,7 @@ Start with Matrix room membership plus a small configurable policy mapped to pow
 - room member: view calendar,
 - configured minimum PL: create events,
 - event creator or configured minimum PL: edit/delete,
-- configured minimum PL: manage calendars,
+- configured minimum PL: manage events in the configured room calendar,
 - configured minimum PL and Matrix room permission: schedule `@room` mentions.
 
 Exact defaults require implementation validation and may become a dedicated ADR.
@@ -131,9 +131,9 @@ principal's whole home to select a room target. Only an operator-managed server
 configuration change may change a binding; the widget and room members cannot
 write or override it. Dynamic database, room-state, or widget-managed binding
 requires a separate ADR. Under this initial contract, the widget can read and
-manage events in the bound collection; collection creation, deletion, and
-rename remain operator/configuration-managed so collection lifecycle cannot
-leave a dangling or unbound target.
+manage events in the bound collection; collection creation, deletion, rename,
+and room rebinding remain operator/configuration-managed so collection
+lifecycle cannot leave a dangling or unbound target.
 
 For a room-bound widget or bot request, the gateway validates the request actor,
 current membership, action-specific power, and the configured binding before
