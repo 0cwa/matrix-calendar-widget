@@ -89,7 +89,8 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 
 ## M6 — Matrix team features and reminders
 
-- [ ] Matrix room ↔ calendar binding.
+- [ ] Define and enforce an authoritative Matrix room ↔ app-owned calendar
+      binding; this is a prerequisite for M7 room-scoped bot commands (ADR014).
 - [ ] Configurable Matrix power-level calendar policy.
 - [ ] Team/member selector using the widget user directory/member APIs.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
@@ -110,6 +111,16 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [ ] constrained delete/cancel command
 - [ ] normal Matrix fallback messages for important widget-created calendar actions
 - [ ] help text directing capable clients to the widget
+
+The M7 data commands (`upcoming`, `event`, create, and delete/cancel) use the
+bot's own OpenID-backed service principal only for explicitly bound,
+app-owned room calendars. They require the M2 OpenID-capable Radicale plugin
+and delegated contract (#48 and #45), plus the M6 room binding and
+server-side membership/power checks (ADR014). They must not use a Matrix
+sender ID as a CalDAV identity or target selector. Per-user bot command targets
+remain deferred until a trusted proof of the sender's identity and explicit
+target-calendar authorization are available. The widget continues to use
+per-user calendar principals.
 
 **Exit:** users on non-widget clients can inspect and perform essential calendar actions without duplicating the entire UI.
 
