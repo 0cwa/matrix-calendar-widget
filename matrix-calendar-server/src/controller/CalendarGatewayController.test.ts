@@ -19,17 +19,20 @@ import {
   ConflictException,
   ForbiddenException,
   ServiceUnavailableException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import fetch from 'jest-fetch-mock';
 import { IAppConfiguration } from '../IAppConfiguration';
-import { CalDavDiscoveryError } from '../caldav';
+import { CalDavEventClient } from '../caldav';
 import { MatrixAuthGuard } from '../guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
+import {
+  RoomCalendarCalDavAccess,
+  RoomCalendarTarget,
+} from '../service/RoomCalendarCalDavAccess';
 import { CalendarGatewayController } from './CalendarGatewayController';
 
 jest.mock('matrix-bot-sdk', () => ({
@@ -57,9 +60,12 @@ describe('CalendarGatewayController', () => {
     matrixServerName: 'example.test',
   };
   const roomId = '!team:example.test';
+  const calendarId = 'team-calendar';
+  const calendarUrl = 'https://radicale.example.test/alice/team/';
   const appConfig = {
     radicale_url: 'https://radicale.example.test/',
-  } as IAppConfiguration;
+    room_calendar_bindings: [{ roomId, calendarId }],
+  } as unknown as IAppConfiguration;
   const isAllowed = jest.fn();
   const forRoom = jest.fn(() => ({ isAllowed }));
   const canManageCalendars = jest.fn();
@@ -67,6 +73,18 @@ describe('CalendarGatewayController', () => {
     forRoom,
     canManageCalendars,
   } as unknown as MatrixCalendarAuthorizationFactory;
+  const requestHeaders = jest.fn(async () => ({
+    Authorization: 'Basic fake-room-principal',
+  }));
+  const collectionUrl = jest.fn((_target: RoomCalendarTarget) => calendarUrl);
+  const createEventClient = jest.fn(
+    (_target: RoomCalendarTarget) =>
+      new CalDavEventClient({ getRequestHeaders: requestHeaders }),
+  );
+  const roomCalendarCalDavAccess = {
+    collectionUrl,
+    createEventClient,
+  } as unknown as RoomCalendarCalDavAccess;
 
   beforeEach(() => {
     fetch.resetMocks();
@@ -76,12 +94,23 @@ describe('CalendarGatewayController', () => {
     forRoom.mockImplementation(() => ({ isAllowed }));
     canManageCalendars.mockReset();
     canManageCalendars.mockResolvedValue(true);
+    collectionUrl.mockReset().mockReturnValue(calendarUrl);
+    createEventClient
+      .mockReset()
+      .mockImplementation(
+        (_target: RoomCalendarTarget) =>
+          new CalDavEventClient({ getRequestHeaders: requestHeaders }),
+      );
+    requestHeaders
+      .mockReset()
+      .mockResolvedValue({ Authorization: 'Basic fake-room-principal' });
   });
 
   function createController(
     config: IAppConfiguration = appConfig,
+    access: RoomCalendarCalDavAccess = roomCalendarCalDavAccess,
   ): CalendarGatewayController {
-    return new CalendarGatewayController(config, authorizationFactory);
+    return new CalendarGatewayController(config, authorizationFactory, access);
   }
 
   it('returns the server-validated Matrix user identity', () => {
@@ -108,113 +137,30 @@ describe('CalendarGatewayController', () => {
     ).toEqual([MatrixAuthGuard, MatrixRoomMembershipGuard]);
   });
 
-  it('discovers and maps authorized Radicale calendars', async () => {
+  it('lists only the configured room calendar without CalDAV discovery', async () => {
     isAllowed.mockResolvedValue(true);
-    fetch.mockResponses(
-      [principalResponse('/principals/alice/'), { status: 207 }],
-      [homeResponse('/alice/'), { status: 207 }],
-      [
-        multistatus(`
-          <d:response>
-            <d:href>/alice/team/</d:href>
-            <d:propstat>
-              <d:prop>
-                <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
-                <d:displayname>Team events</d:displayname>
-                <c:calendar-description>Shared planning</c:calendar-description>
-                <a:calendar-color>#336699ff</a:calendar-color>
-                <c:supported-calendar-component-set>
-                  <c:comp name="VEVENT"/>
-                  <c:comp name="VJOURNAL"/>
-                </c:supported-calendar-component-set>
-                <d:current-user-privilege-set>
-                  <d:privilege><d:read/></d:privilege>
-                  <d:privilege><d:write-content/></d:privilege>
-                </d:current-user-privilege-set>
-              </d:prop>
-              <d:status>HTTP/1.1 200 OK</d:status>
-            </d:propstat>
-          </d:response>
-          <d:response>
-            <d:href>/alice/tasks/</d:href>
-            <d:propstat>
-              <d:prop>
-                <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
-                <d:displayname>Tasks</d:displayname>
-                <c:supported-calendar-component-set>
-                  <c:comp name="VTODO"/>
-                </c:supported-calendar-component-set>
-              </d:prop>
-              <d:status>HTTP/1.1 200 OK</d:status>
-            </d:propstat>
-          </d:response>
-          <d:response>
-            <d:href>/alice/journal/</d:href>
-            <d:propstat>
-              <d:prop>
-                <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
-                <d:displayname>Journal</d:displayname>
-                <c:supported-calendar-component-set>
-                  <c:comp name="VJOURNAL"/>
-                </c:supported-calendar-component-set>
-              </d:prop>
-              <d:status>HTTP/1.1 200 OK</d:status>
-            </d:propstat>
-          </d:response>
-        `),
-        { status: 207 },
-      ],
-    );
 
     await expect(
       createController().listCalendars(userContext, openIdCredential, roomId),
     ).resolves.toEqual([
       {
-        id: 'https://radicale.example.test/alice/team/',
-        name: 'Team events',
-        color: '#336699ff',
-        description: 'Shared planning',
+        id: calendarId,
+        name: calendarId,
+        color: undefined,
         readOnly: false,
-        unsupportedComponents: ['VJOURNAL'],
       },
     ]);
 
     expect(forRoom).toHaveBeenCalledWith(userContext.userId, roomId);
     expect(isAllowed).toHaveBeenCalledWith({ action: 'list-calendars' });
+    expect(collectionUrl).not.toHaveBeenCalled();
+    expect(createEventClient).not.toHaveBeenCalled();
+    expect(requestHeaders).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('returns only safe collection URLs to calendar managers', async () => {
+  it('returns diagnostics for only the configured collection to a manager', async () => {
     isAllowed.mockResolvedValue(true);
-    fetch.mockResponses(
-      [principalResponse('/principals/alice/'), { status: 207 }],
-      [homeResponse('/alice/'), { status: 207 }],
-      [
-        multistatus(
-          [
-            diagnosticCalendarCollectionResponse('/', 'Service root'),
-            diagnosticCalendarCollectionResponse(
-              '/principals/alice/',
-              'Principal root',
-            ),
-            diagnosticCalendarCollectionResponse('/alice/', 'Calendar home'),
-            diagnosticCalendarCollectionResponse('/alice/team/', 'Team events'),
-            diagnosticCalendarCollectionResponse(
-              '/alice/credentials/?access_token=secret',
-              'Credential URL',
-            ),
-            diagnosticCalendarCollectionResponse(
-              'https://alice:password@radicale.example.test/alice/credentials/',
-              'Embedded credentials',
-            ),
-            diagnosticCalendarCollectionResponse(
-              'https://external.example.test/calendar/',
-              'External collection',
-            ),
-          ].join(''),
-        ),
-        { status: 207 },
-      ],
-    );
 
     const result = await createController().getCalendarDiagnostics(
       userContext,
@@ -223,20 +169,20 @@ describe('CalendarGatewayController', () => {
     );
 
     expect(result).toEqual({
-      calendars: [
-        {
-          name: 'Team events',
-          url: 'https://radicale.example.test/alice/team/',
-        },
-      ],
+      calendars: [{ name: calendarId, url: calendarUrl }],
     });
-    expect(result).not.toHaveProperty('principalUrl');
-    expect(result).not.toHaveProperty('calendarHomeUrl');
-    expect(JSON.stringify(result)).not.toContain('secret');
     expect(canManageCalendars).toHaveBeenCalledWith(userContext.userId, roomId);
+    expect(collectionUrl).toHaveBeenCalledWith({
+      roomId,
+      calendarId,
+      principal: { kind: 'service' },
+    });
+    expect(createEventClient).not.toHaveBeenCalled();
+    expect(requestHeaders).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('denies CalDAV diagnostics before discovery without manage permission', async () => {
+  it('denies room diagnostics before resolving a target without manage permission', async () => {
     canManageCalendars.mockResolvedValue(false);
 
     await expect(
@@ -247,444 +193,176 @@ describe('CalendarGatewayController', () => {
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
 
-    expect(canManageCalendars).toHaveBeenCalledWith(userContext.userId, roomId);
+    expect(collectionUrl).not.toHaveBeenCalled();
+    expect(createEventClient).not.toHaveBeenCalled();
+    expect(requestHeaders).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('does not return CalDAV request details when diagnostics discovery fails', async () => {
-    fetch.mockResponseOnce('https://radicale.example.test/private', {
-      status: 503,
-    });
-
-    try {
-      await createController().getCalendarDiagnostics(
-        userContext,
-        openIdCredential,
-        roomId,
-      );
-      throw new Error('Expected diagnostics discovery to fail');
-    } catch (error) {
-      expect(error).toBeInstanceOf(ServiceUnavailableException);
-      expect((error as ServiceUnavailableException).getResponse()).toEqual({
-        code: 'calendar-diagnostics-unavailable',
-        message: 'CalDAV diagnostics are unavailable',
-      });
-      expect(JSON.stringify(error)).not.toContain('radicale.example.test');
-      expect(JSON.stringify(error)).not.toContain('openid-token');
-    }
-  });
-
-  it('creates an authorized VEVENT-only Radicale calendar', async () => {
+  it('rejects room collection lifecycle changes after authorization without CalDAV', async () => {
     isAllowed.mockResolvedValue(true);
-    fetch.mockResponses(
-      [principalResponse('/principals/alice/'), { status: 207 }],
-      [homeResponse('/alice/'), { status: 207 }],
-      ['', { status: 201 }],
-    );
-
-    const result = await createController().createCalendar(
-      userContext,
-      openIdCredential,
-      { name: ' Project Alpha ' },
-      roomId,
-    );
-
-    expect(result).toEqual({
-      id: expect.stringMatching(
-        /^https:\/\/radicale\.example\.test\/alice\/calendar-[0-9a-f-]+\/$/,
-      ),
-      name: 'Project Alpha',
-      color: undefined,
-      readOnly: false,
-    });
-    expect(forRoom).toHaveBeenCalledWith(userContext.userId, roomId);
-    expect(isAllowed).toHaveBeenCalledWith({ action: 'create-calendar' });
-
-    const [, init] = fetch.mock.calls[2];
-    expect(init?.method).toBe('MKCALENDAR');
-    expect(init?.body).toContain(
-      '<D:displayname>Project Alpha</D:displayname>',
-    );
-    expect(init?.body).toContain('<C:comp name="VEVENT"/>');
-  });
-
-  it('renames an authorized Radicale calendar display name', async () => {
-    isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    fetch.mockResponseOnce(
-      multistatus(`
-        <d:response>
-          <d:href>/alice/team/</d:href>
-          <d:propstat>
-            <d:prop><d:displayname/></d:prop>
-            <d:status>HTTP/1.1 200 OK</d:status>
-          </d:propstat>
-        </d:response>
-      `),
-      { status: 207 },
-    );
+    const controller = createController();
 
     await expect(
-      createController().renameCalendar(
+      controller.createCalendar(
         userContext,
         openIdCredential,
-        { name: ' Product calendar ' },
+        { name: 'New calendar' },
+        roomId,
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-collection-operator-managed' },
+    });
+    await expect(
+      controller.renameCalendar(
+        userContext,
+        openIdCredential,
+        { name: 'Renamed' },
         roomId,
         calendarId,
       ),
-    ).resolves.toBeUndefined();
-
-    expect(forRoom).toHaveBeenCalledWith(userContext.userId, roomId);
-    expect(isAllowed).toHaveBeenCalledWith({
-      action: 'manage-calendar',
-      calendarId,
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-collection-operator-managed' },
     });
-
-    const [url, init] = fetch.mock.calls[0];
-    expect(url).toBe(calendarId);
-    expect(init?.method).toBe('PROPPATCH');
-    expect(init?.body).toContain(
-      '<D:displayname>Product calendar</D:displayname>',
-    );
-  });
-
-  it('denies calendar rename when room policy rejects manage-calendar', async () => {
-    isAllowed.mockResolvedValue(false);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-
     await expect(
-      createController().renameCalendar(
+      controller.updateCalendarMetadata(
         userContext,
         openIdCredential,
-        { name: 'Product calendar' },
+        { description: 'Changed' },
         roomId,
         calendarId,
       ),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('updates only whitelisted calendar metadata after manage authorization', async () => {
-    isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    fetch.mockResponseOnce(
-      multistatus(`
-        <d:response>
-          <d:propstat>
-            <d:prop><c:calendar-description/></d:prop>
-            <d:status>HTTP/1.1 200 OK</d:status>
-          </d:propstat>
-          <d:propstat>
-            <d:prop><a:calendar-color/></d:prop>
-            <d:status>HTTP/1.1 200 OK</d:status>
-          </d:propstat>
-        </d:response>
-      `),
-      { status: 207 },
-    );
-
-    await expect(
-      createController().updateCalendarMetadata(
-        userContext,
-        openIdCredential,
-        { description: 'Planning & reviews', color: '#336699ff' },
-        roomId,
-        calendarId,
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(isAllowed).toHaveBeenCalledWith({
-      action: 'manage-calendar',
-      calendarId,
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-collection-operator-managed' },
     });
-    const [url, init] = fetch.mock.calls[0];
-    expect(url).toBe(calendarId);
-    expect(init?.method).toBe('PROPPATCH');
-    expect(init?.body).toContain(
-      '<C:calendar-description>Planning &amp; reviews',
-    );
-    expect(init?.body).toContain(
-      '<A:calendar-color>#336699ff</A:calendar-color>',
-    );
-    expect(init?.body).not.toContain('displayname');
-    expect(init?.body).not.toContain('timezone');
-  });
-
-  it('rejects metadata keys outside the description and color whitelist', async () => {
     await expect(
-      createController().updateCalendarMetadata(
-        userContext,
-        openIdCredential,
-        { description: 'Planning', timezone: 'Europe/Stockholm' },
-        roomId,
-        'https://radicale.example.test/alice/team/',
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-
-    expect(forRoom).not.toHaveBeenCalled();
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('denies calendar metadata changes when room policy rejects manage-calendar', async () => {
-    isAllowed.mockResolvedValue(false);
-
-    await expect(
-      createController().updateCalendarMetadata(
-        userContext,
-        openIdCredential,
-        { color: '#336699' },
-        roomId,
-        'https://radicale.example.test/alice/team/',
-      ),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('rejects an empty calendar rename before CalDAV access', async () => {
-    await expect(
-      createController().renameCalendar(
-        userContext,
-        openIdCredential,
-        { name: '   ' },
-        roomId,
-        'https://radicale.example.test/alice/team/',
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-
-    expect(forRoom).not.toHaveBeenCalled();
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('rejects calendar rename targets outside the configured Radicale service', async () => {
-    isAllowed.mockResolvedValue(true);
-
-    await expect(
-      createController().renameCalendar(
-        userContext,
-        openIdCredential,
-        { name: 'Nope' },
-        roomId,
-        'https://attacker.example.test/calendar/',
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('deletes an authorized explicitly VEVENT-only calendar', async () => {
-    isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    fetch.mockResponses(
-      [principalResponse('/principals/alice/'), { status: 207 }],
-      [homeResponse('/alice/'), { status: 207 }],
-      [calendarCollectionResponse(['VEVENT']), { status: 207 }],
-      ['', { status: 204 }],
-    );
-
-    await expect(
-      createController().deleteCalendar(
-        userContext,
-        openIdCredential,
-        roomId,
-        calendarId,
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(isAllowed).toHaveBeenCalledWith({
-      action: 'manage-calendar',
-      calendarId,
-    });
-    expect(fetch).toHaveBeenCalledTimes(4);
-    expect(fetch.mock.calls[3][0]).toBe(calendarId);
-    expect(fetch.mock.calls[3][1]?.method).toBe('DELETE');
-  });
-
-  it('denies calendar deletion when room policy rejects manage-calendar', async () => {
-    isAllowed.mockResolvedValue(false);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-
-    await expect(
-      createController().deleteCalendar(
-        userContext,
-        openIdCredential,
-        roomId,
-        calendarId,
-      ),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('rejects calendar deletion targets outside the configured Radicale service', async () => {
-    isAllowed.mockResolvedValue(true);
-
-    await expect(
-      createController().deleteCalendar(
-        userContext,
-        openIdCredential,
-        roomId,
-        'https://attacker.example.test/calendar/',
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ['mixed', ['VEVENT', 'VTODO'], true],
-    ['unknown', undefined, true],
-    ['read-only', ['VEVENT'], false],
-  ] as const)(
-    'refuses to delete a %s calendar collection before DELETE',
-    async (_kind, components, writable) => {
-      isAllowed.mockResolvedValue(true);
-      const calendarId = 'https://radicale.example.test/alice/team/';
-      fetch.mockResponses(
-        [principalResponse('/principals/alice/'), { status: 207 }],
-        [homeResponse('/alice/'), { status: 207 }],
-        [calendarCollectionResponse(components, writable), { status: 207 }],
-      );
-
-      try {
-        await createController().deleteCalendar(
-          userContext,
-          openIdCredential,
-          roomId,
-          calendarId,
-        );
-        throw new Error('Expected unsafe calendar deletion to be rejected');
-      } catch (error) {
-        expect(error).toBeInstanceOf(ConflictException);
-        expect((error as ConflictException).getResponse()).toEqual({
-          code: 'calendar-delete-unsafe',
-          message:
-            'Calendar deletion is only allowed for explicitly VEVENT-only collections',
-        });
-      }
-
-      expect(fetch).toHaveBeenCalledTimes(3);
-      expect(
-        fetch.mock.calls.every(([, init]) => init?.method !== 'DELETE'),
-      ).toBe(true);
-    },
-  );
-
-  it('refuses deletion when a PROPFIND safety property has a failed status', async () => {
-    isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    fetch.mockResponses(
-      [principalResponse('/principals/alice/'), { status: 207 }],
-      [homeResponse('/alice/'), { status: 207 }],
-      [
-        multistatus(`
-          <d:response>
-            <d:href>/alice/team/</d:href>
-            <d:propstat>
-              <d:prop>
-                <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
-                <d:displayname>Team events</d:displayname>
-              </d:prop>
-              <d:status>HTTP/1.1 200 OK</d:status>
-            </d:propstat>
-            <d:propstat>
-              <d:prop>
-                <c:supported-calendar-component-set>
-                  <c:comp name="VEVENT"/>
-                </c:supported-calendar-component-set>
-              </d:prop>
-              <d:status>HTTP/1.1 403 Forbidden</d:status>
-            </d:propstat>
-            <d:propstat>
-              <d:prop>
-                <d:current-user-privilege-set>
-                  <d:privilege><d:read/></d:privilege>
-                  <d:privilege><d:write/></d:privilege>
-                </d:current-user-privilege-set>
-              </d:prop>
-              <d:status>HTTP/1.1 200 OK</d:status>
-            </d:propstat>
-          </d:response>
-        `),
-        { status: 207 },
-      ],
-    );
-
-    await expect(
-      createController().deleteCalendar(
+      controller.deleteCalendar(
         userContext,
         openIdCredential,
         roomId,
         calendarId,
       ),
     ).rejects.toMatchObject({
-      response: {
-        code: 'calendar-delete-unsafe',
-      },
+      response: { code: 'room-calendar-collection-operator-managed' },
     });
 
-    expect(fetch).toHaveBeenCalledTimes(3);
-    expect(
-      fetch.mock.calls.every(([, init]) => init?.method !== 'DELETE'),
-    ).toBe(true);
+    expect(isAllowed).toHaveBeenCalledWith({ action: 'create-calendar' });
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'manage-calendar',
+      calendarId,
+    });
+    expect(collectionUrl).not.toHaveBeenCalled();
+    expect(createEventClient).not.toHaveBeenCalled();
+    expect(requestHeaders).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('refuses deletion when the requested collection is not discoverable', async () => {
+  it.each([calendarUrl, 'other-room-calendar'])(
+    'rejects caller-selected room calendar targets before any CalDAV factory call (%s)',
+    async (requestedCalendarId) => {
+      isAllowed.mockResolvedValue(true);
+
+      await expect(
+        createController().listEvents(
+          userContext,
+          openIdCredential,
+          roomId,
+          requestedCalendarId,
+          '2026-09-24T00:00:00Z',
+          '2026-09-25T00:00:00Z',
+        ),
+      ).rejects.toMatchObject({
+        response: { code: 'room-calendar-target-mismatch' },
+      });
+
+      expect(collectionUrl).not.toHaveBeenCalled();
+      expect(createEventClient).not.toHaveBeenCalled();
+      expect(requestHeaders).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an unbound room before any CalDAV factory call', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    fetch.mockResponses(
-      [principalResponse('/principals/alice/'), { status: 207 }],
-      [homeResponse('/alice/'), { status: 207 }],
-      [
-        calendarCollectionResponse(['VEVENT'], true, '/alice/other/'),
-        {
-          status: 207,
-        },
-      ],
-    );
+    const unboundRoomId = '!another:example.test';
 
     await expect(
-      createController().deleteCalendar(
+      createController().listEvents(
+        userContext,
+        openIdCredential,
+        unboundRoomId,
+        calendarId,
+        '2026-09-24T00:00:00Z',
+        '2026-09-25T00:00:00Z',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-binding-missing' },
+    });
+
+    expect(collectionUrl).not.toHaveBeenCalled();
+    expect(createEventClient).not.toHaveBeenCalled();
+    expect(requestHeaders).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on duplicate configured collection assignments before CalDAV', async () => {
+    isAllowed.mockResolvedValue(true);
+    const duplicateBindings = {
+      ...appConfig,
+      room_calendar_bindings: [
+        { roomId, calendarId },
+        { roomId: '!other:example.test', calendarId },
+      ],
+    } as IAppConfiguration;
+
+    await expect(
+      createController(duplicateBindings).listEvents(
         userContext,
         openIdCredential,
         roomId,
         calendarId,
+        '2026-09-24T00:00:00Z',
+        '2026-09-25T00:00:00Z',
       ),
-    ).rejects.toBeInstanceOf(ConflictException);
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-binding-invalid' },
+    });
 
-    expect(fetch).toHaveBeenCalledTimes(3);
-    expect(
-      fetch.mock.calls.every(([, init]) => init?.method !== 'DELETE'),
-    ).toBe(true);
-  });
-
-  it('denies calendar creation when room policy rejects it', async () => {
-    isAllowed.mockResolvedValue(false);
-
-    await expect(
-      createController().createCalendar(
-        userContext,
-        openIdCredential,
-        { name: 'Project Alpha' },
-        roomId,
-      ),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-
+    expect(collectionUrl).not.toHaveBeenCalled();
+    expect(createEventClient).not.toHaveBeenCalled();
+    expect(requestHeaders).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('rejects an empty calendar name before CalDAV access', async () => {
+  it('denies membership, action power, and lookup failures before CalDAV', async () => {
+    isAllowed.mockResolvedValue(false);
+
     await expect(
-      createController().createCalendar(
+      createController().createEvent(
         userContext,
         openIdCredential,
-        { name: '   ' },
+        {
+          uid: 'event@example.test',
+          title: 'Blocked',
+          timing: {
+            type: 'timed',
+            start: { local: '2026-09-24T08:00:00', timezone: 'UTC' },
+            end: { local: '2026-09-24T09:00:00', timezone: 'UTC' },
+          },
+        },
         roomId,
+        calendarId,
       ),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toBeInstanceOf(ForbiddenException);
 
-    expect(forRoom).not.toHaveBeenCalled();
+    expect(forRoom).toHaveBeenCalledWith(userContext.userId, roomId);
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'create-event',
+      calendarId,
+    });
+    expect(collectionUrl).not.toHaveBeenCalled();
+    expect(createEventClient).not.toHaveBeenCalled();
+    expect(requestHeaders).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -694,39 +372,44 @@ describe('CalendarGatewayController', () => {
     await expect(
       createController().listCalendars(userContext, openIdCredential, roomId),
     ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(collectionUrl).not.toHaveBeenCalled();
+    expect(createEventClient).not.toHaveBeenCalled();
+    expect(requestHeaders).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('fails closed when the request has no OpenID delegation credential', async () => {
+  it('does not use the widget OpenID credential as the room CalDAV principal', async () => {
     isAllowed.mockResolvedValue(true);
-
-    try {
-      await createController().listCalendars(userContext, undefined, roomId);
-      throw new Error('Expected discovery to reject without OpenID delegation');
-    } catch (error) {
-      expect(error).toBeInstanceOf(UnauthorizedException);
-      expect((error as UnauthorizedException).getResponse()).toEqual({
-        code: 'missing-openid-credential',
-        message:
-          'Matrix OpenID delegation credential is required for CalDAV access',
-      });
-    }
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('propagates structured CalDAV failures', async () => {
-    isAllowed.mockResolvedValue(true);
-    fetch.mockResponseOnce('Unavailable', { status: 503 });
 
     await expect(
-      createController().listCalendars(userContext, openIdCredential, roomId),
-    ).rejects.toEqual(
-      new CalDavDiscoveryError(
-        'CalDAV PROPFIND failed with status 503',
-        503,
-        'https://radicale.example.test/',
+      createController().listCalendars(userContext, undefined, roomId),
+    ).resolves.toEqual([
+      { id: calendarId, name: calendarId, color: undefined, readOnly: false },
+    ]);
+    expect(createEventClient).not.toHaveBeenCalled();
+    expect(requestHeaders).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps live service-principal CalDAV access disabled by default', async () => {
+    isAllowed.mockResolvedValue(true);
+
+    await expect(
+      createController(appConfig, new RoomCalendarCalDavAccess()).listEvents(
+        userContext,
+        openIdCredential,
+        roomId,
+        calendarId,
+        '2026-09-24T00:00:00Z',
+        '2026-09-25T00:00:00Z',
       ),
-    );
+    ).rejects.toMatchObject({
+      response: {
+        code: 'room-calendar-caldav-disabled',
+        message: 'Room calendar CalDAV access is not enabled',
+      },
+    });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('requires a room id for room-scoped discovery', async () => {
@@ -738,7 +421,6 @@ describe('CalendarGatewayController', () => {
 
   it('lists authorized VEVENT resources through the gateway', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
     fetch.mockResponseOnce(
       multistatus(`
         <d:response>
@@ -780,12 +462,25 @@ describe('CalendarGatewayController', () => {
       action: 'read-events',
       calendarId,
     });
+    expect(collectionUrl).toHaveBeenCalledWith({
+      roomId,
+      calendarId,
+      principal: { kind: 'service' },
+    });
+    expect(createEventClient).toHaveBeenCalledWith({
+      roomId,
+      calendarId,
+      principal: { kind: 'service' },
+    });
+    expect(requestHeaders).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
+    expect(requestHeader(fetch.mock.calls[0][1], 'Authorization')).toBe(
+      'Basic fake-room-principal',
+    );
   });
 
   it('returns supported following recurrence metadata with the event DTO', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
     const rangedIcs = `BEGIN:VCALENDAR
 VERSION:2.0
 BEGIN:VEVENT
@@ -837,7 +532,6 @@ END:VCALENDAR`;
 
   it('creates a basic VEVENT and returns the server resource state', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
     fetch
       .mockResponseOnce('', {
         status: 201,
@@ -893,7 +587,6 @@ END:VCALENDAR`;
 
   it('preserves unknown iCalendar data when updating an event', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
     const eventId = 'https://radicale.example.test/alice/team/event.ics';
     fetch
       .mockResponseOnce(simpleEventIcs('Before update', 'X-CUSTOM:preserve'), {
@@ -936,8 +629,7 @@ END:VCALENDAR`;
 
   it('rejects a series edit that removes an override identity before CalDAV PUT', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    const eventId = `${calendarId}series.ics`;
+    const eventId = `${calendarUrl}series.ics`;
     fetch.mockResponseOnce(
       `BEGIN:VCALENDAR
 VERSION:2.0
@@ -995,8 +687,7 @@ END:VCALENDAR`,
 
   it('refuses an unverifiable detached VEVENT before CalDAV PUT', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    const eventId = `${calendarId}series.ics`;
+    const eventId = `${calendarUrl}series.ics`;
     fetch.mockResponseOnce(
       `BEGIN:VCALENDAR
 VERSION:2.0
@@ -1053,7 +744,6 @@ END:VCALENDAR`,
 
   it('maps stale event updates to a stable conflict response', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
     const eventId = 'https://radicale.example.test/alice/team/event.ics';
     fetch
       .mockResponseOnce(simpleEventIcs('Before update'), {
@@ -1084,8 +774,7 @@ END:VCALENDAR`,
 
   it('updates one occurrence through an authorized conditional resource PUT', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    const eventId = `${calendarId}series.ics`;
+    const eventId = `${calendarUrl}series.ics`;
     fetch
       .mockResponseOnce(recurringEventIcs(), {
         status: 200,
@@ -1137,8 +826,7 @@ END:VCALENDAR`,
 
   it('cancels one occurrence with a same-resource conditional PUT', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    const eventId = `${calendarId}series.ics`;
+    const eventId = `${calendarUrl}series.ics`;
     fetch
       .mockResponseOnce(recurringEventIcs(), {
         status: 200,
@@ -1182,8 +870,7 @@ END:VCALENDAR`,
 
   it('updates supported following timing with authorization and If-Match', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    const eventId = `${calendarId}series.ics`;
+    const eventId = `${calendarUrl}series.ics`;
     const original = recurringEventIcs();
     const updated = `${original.replace(
       'END:VCALENDAR',
@@ -1273,8 +960,7 @@ END:VCALENDAR`,
 
   it('rejects unsupported following payloads before PUT and leaves the CalDAV body untouched', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    const eventId = `${calendarId}series.ics`;
+    const eventId = `${calendarUrl}series.ics`;
     const unsupported = `${recurringEventIcs().replace(
       'END:VCALENDAR',
       `BEGIN:VEVENT
@@ -1334,8 +1020,7 @@ END:VCALENDAR`,
 
   it('rejects a ranged VALARM before PUT', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    const eventId = `${calendarId}series.ics`;
+    const eventId = `${calendarUrl}series.ics`;
     const withAlarm = `${recurringEventIcs().replace(
       'END:VCALENDAR',
       `BEGIN:VEVENT
@@ -1400,8 +1085,7 @@ END:VCALENDAR`,
 
   it('denies following-scope edits before a CalDAV request', async () => {
     isAllowed.mockResolvedValue(false);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    const eventId = `${calendarId}series.ics`;
+    const eventId = `${calendarUrl}series.ics`;
 
     await expect(
       createController().updateFollowingOccurrence(
@@ -1441,8 +1125,7 @@ END:VCALENDAR`,
 
   it('rejects unsafe occurrence requests before a CalDAV fetch', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
-    const eventId = `${calendarId}series.ics`;
+    const eventId = `${calendarUrl}series.ics`;
     const controller = createController();
 
     await expect(
@@ -1596,7 +1279,7 @@ END:VCALENDAR`,
         },
         '"etag"',
         roomId,
-        'https://radicale.example.test/alice/team/',
+        calendarId,
         'https://radicale.example.test/alice/team/series.ics',
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
@@ -1628,7 +1311,7 @@ END:VCALENDAR`,
         },
         '"stale-etag"',
         roomId,
-        'https://radicale.example.test/alice/team/',
+        calendarId,
         'https://radicale.example.test/alice/team/series.ics',
       ),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -1638,7 +1321,6 @@ END:VCALENDAR`,
 
   it('deletes an authorized event with the caller ETag', async () => {
     isAllowed.mockResolvedValue(true);
-    const calendarId = 'https://radicale.example.test/alice/team/';
     const eventId = 'https://radicale.example.test/alice/team/event.ics';
     fetch.mockResponseOnce('', { status: 200 });
 
@@ -1682,101 +1364,29 @@ END:VCALENDAR`,
 
   it('fails closed when Radicale is not configured', async () => {
     isAllowed.mockResolvedValue(true);
-    const config = {} as IAppConfiguration;
+    const config = {
+      room_calendar_bindings: [{ roomId, calendarId }],
+    } as unknown as IAppConfiguration;
 
     try {
-      await createController(config).listCalendars(
+      await createController(config).listEvents(
         userContext,
         openIdCredential,
         roomId,
+        calendarId,
+        '2026-09-24T00:00:00Z',
+        '2026-09-25T00:00:00Z',
       );
-      throw new Error('Expected discovery to require RADICALE_URL');
+      throw new Error('Expected event access to require RADICALE_URL');
     } catch (error) {
       expect(error).toBeInstanceOf(ServiceUnavailableException);
       expect((error as ServiceUnavailableException).getResponse()).toEqual({
         code: 'radicale-not-configured',
-        message: 'RADICALE_URL is required for calendar discovery',
+        message: 'RADICALE_URL is required for calendar access',
       });
     }
   });
 });
-
-function principalResponse(href: string): string {
-  return multistatus(`
-    <d:response>
-      <d:propstat>
-        <d:prop>
-          <d:current-user-principal><d:href>${href}</d:href></d:current-user-principal>
-        </d:prop>
-        <d:status>HTTP/1.1 200 OK</d:status>
-      </d:propstat>
-    </d:response>
-  `);
-}
-
-function homeResponse(href: string): string {
-  return multistatus(`
-    <d:response>
-      <d:propstat>
-        <d:prop>
-          <c:calendar-home-set><d:href>${href}</d:href></c:calendar-home-set>
-        </d:prop>
-        <d:status>HTTP/1.1 200 OK</d:status>
-      </d:propstat>
-    </d:response>
-  `);
-}
-
-function calendarCollectionResponse(
-  components?: readonly string[],
-  writable = true,
-  href = '/alice/team/',
-): string {
-  const componentSet = components
-    ? `
-        <c:supported-calendar-component-set>
-          ${components
-            .map((component) => `<c:comp name="${component}"/>`)
-            .join('')}
-        </c:supported-calendar-component-set>`
-    : '';
-
-  return multistatus(`
-    <d:response>
-      <d:href>${href}</d:href>
-      <d:propstat>
-        <d:prop>
-          <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
-          <d:displayname>Team events</d:displayname>
-          ${componentSet}
-          <d:current-user-privilege-set>
-            <d:privilege><d:read/></d:privilege>
-            ${writable ? '<d:privilege><d:write/></d:privilege>' : ''}
-          </d:current-user-privilege-set>
-        </d:prop>
-        <d:status>HTTP/1.1 200 OK</d:status>
-      </d:propstat>
-    </d:response>
-  `);
-}
-
-function diagnosticCalendarCollectionResponse(
-  href: string,
-  displayName: string,
-): string {
-  return `
-    <d:response>
-      <d:href>${href}</d:href>
-      <d:propstat>
-        <d:prop>
-          <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
-          <d:displayname>${displayName}</d:displayname>
-          <c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set>
-        </d:prop>
-        <d:status>HTTP/1.1 200 OK</d:status>
-      </d:propstat>
-    </d:response>`;
-}
 
 function simpleEventIcs(
   title = 'Team planning',
