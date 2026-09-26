@@ -24,8 +24,15 @@ export {
   calendarEventPatchFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
+  hasInvalidCalendarEventRecurrenceFormValues,
+  recurrenceDateValueFromForm,
 } from './calendarEventForm';
-export type { CalendarEventFormValues } from './calendarEventForm';
+export type {
+  CalendarEventFormValues,
+  CalendarEventRecurrenceDateMode,
+  CalendarEventRecurrenceDateValue,
+  CalendarEventRecurrenceFormValues,
+} from './calendarEventForm';
 export {
   calendarEventKey,
   calendarEventStartDate,

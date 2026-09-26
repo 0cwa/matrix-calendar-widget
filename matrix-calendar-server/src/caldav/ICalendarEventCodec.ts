@@ -32,6 +32,7 @@ import {
   CalendarTimeRange,
   ZonedCalendarDateTime,
   expandCalendarEvent,
+  isCalendarEventRecurrenceRuleSupported,
 } from '@matrix-calendar-widget/calendar';
 import ICAL from 'ical.js';
 import { createCalDavTimezoneResolver } from './CalDavTimezoneResolver';
@@ -89,13 +90,6 @@ export class ParsedICalendarEvent {
   }
 
   applyPatch(patch: CalendarEventPatch): EncodedICalendarEvent {
-    if (hasOwn(patch, 'recurrence')) {
-      throw new ICalendarEventCodecError(
-        'unsupported-patch',
-        'Recurrence editing is not part of the basic VEVENT codec',
-      );
-    }
-
     const calendar = ICAL.Component.fromString(this.calendar.toString());
     const vevent = findMasterEvent(calendar, this.event.uid);
     if (!vevent) {
@@ -140,6 +134,14 @@ export class ParsedICalendarEvent {
     if (hasOwn(patch, 'priority')) {
       setOptionalProperty(vevent, 'priority', patch.priority);
     }
+    if (hasOwn(patch, 'recurrence')) {
+      setRecurrence(
+        vevent,
+        patch.recurrence,
+        this.event.recurrence,
+        patch.timing ?? this.event.timing,
+      );
+    }
 
     return {
       event: {
@@ -159,13 +161,6 @@ export class ICalendarEventCodec {
     eventId: CalendarEventId,
     input: CalendarEventInput,
   ): EncodedICalendarEvent {
-    if (input.recurrence) {
-      throw new ICalendarEventCodecError(
-        'unsupported-patch',
-        'Recurrence creation is not part of the basic VEVENT codec',
-      );
-    }
-
     const calendar = new ICAL.Component('vcalendar');
     calendar.addPropertyWithValue('version', '2.0');
     calendar.addPropertyWithValue('prodid', '-//Matrix Calendar Widget//EN');
@@ -191,6 +186,9 @@ export class ICalendarEventCodec {
     setOptionalProperty(vevent, 'url', input.url);
     setCategories(vevent, input.categories);
     setOptionalProperty(vevent, 'priority', input.priority);
+    if (input.recurrence) {
+      setRecurrence(vevent, input.recurrence, undefined, input.timing);
+    }
 
     return {
       event: {
@@ -663,6 +661,160 @@ function setCategories(
   const property = new ICAL.Property('categories');
   property.setValues(categories);
   component.addProperty(property);
+}
+
+function setRecurrence(
+  component: ICAL.Component,
+  recurrence: CalendarEventRecurrence | undefined,
+  previous?: CalendarEventRecurrence,
+  timing?: CalendarEventTiming,
+): void {
+  if (recurrence === undefined) {
+    component.removeAllProperties('rrule');
+    component.removeAllProperties('rdate');
+    component.removeAllProperties('exdate');
+    return;
+  }
+
+  if (recurrence.rrule !== previous?.rrule) {
+    component.removeAllProperties('rrule');
+    if (recurrence.rrule !== undefined) {
+      const timingType = timing?.type ?? 'timed';
+      const timezone = timing?.type === 'timed' ? timing.start.timezone : 'UTC';
+      if (
+        !isCalendarEventRecurrenceRuleSupported(
+          recurrence.rrule,
+          timingType,
+          timezone,
+        )
+      ) {
+        throw new ICalendarEventCodecError(
+          'unsupported-patch',
+          'The recurrence rule uses options that the calendar form cannot edit',
+        );
+      }
+      try {
+        const property = new ICAL.Property('rrule');
+        property.setValue(ICAL.Recur.fromString(recurrence.rrule));
+        component.addProperty(property);
+      } catch {
+        throw new ICalendarEventCodecError(
+          'invalid-recurrence',
+          'The recurrence rule is invalid',
+        );
+      }
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(recurrence, 'rdates')) {
+    updateDateTimeProperties(
+      component,
+      'rdate',
+      recurrence.rdates ?? [],
+      previous?.rdates ?? [],
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(recurrence, 'exdates')) {
+    updateDateTimeProperties(
+      component,
+      'exdate',
+      recurrence.exdates ?? [],
+      previous?.exdates ?? [],
+    );
+  }
+}
+
+function updateDateTimeProperties(
+  component: ICAL.Component,
+  name: 'rdate' | 'exdate',
+  nextValues: CalendarEventDateTime[],
+  previousValues: CalendarEventDateTime[],
+): void {
+  if (sameDateTimeValues(nextValues, previousValues)) {
+    return;
+  }
+
+  const remaining = new Map<string, number>();
+  for (const value of nextValues) {
+    const key = dateTimeValueKey(value);
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+
+  for (const property of component.getAllProperties(name)) {
+    const values = property.getValues();
+    // Keep PERIOD-valued RDATEs and any form this adapter cannot edit intact.
+    if (values.some((value) => !(value instanceof ICAL.Time))) {
+      continue;
+    }
+
+    const retained = values.filter((value) => {
+      const key = dateTimeValueKey(
+        readDateTimeValue(value as ICAL.Time, property),
+      );
+      const count = remaining.get(key) ?? 0;
+      if (count === 0) {
+        return false;
+      }
+      remaining.set(key, count - 1);
+      return true;
+    });
+
+    if (retained.length === 0) {
+      component.removeProperty(property);
+    } else if (retained.length !== values.length) {
+      property.setValues(retained);
+    }
+  }
+
+  for (const [key, count] of remaining) {
+    for (let index = 0; index < count; index += 1) {
+      const value = nextValues.find(
+        (candidate) => dateTimeValueKey(candidate) === key,
+      );
+      if (value) {
+        component.addProperty(dateTimeProperty(name, value));
+      }
+    }
+  }
+}
+
+function dateTimeProperty(
+  name: 'rdate' | 'exdate',
+  value: CalendarEventDateTime,
+): ICAL.Property {
+  const property = new ICAL.Property(name);
+  if (value.type === 'date') {
+    property.setValue(ICAL.Time.fromDateString(value.value));
+    return property;
+  }
+
+  property.setValue(
+    timedValue(value.value.local, value.value.timezone, value.value.mode),
+  );
+  if (dateTimeMode(value.value) === 'tzid') {
+    property.setParameter('tzid', value.value.timezone);
+  }
+  return property;
+}
+
+function sameDateTimeValues(
+  left: CalendarEventDateTime[],
+  right: CalendarEventDateTime[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (value, index) =>
+        dateTimeValueKey(value) === dateTimeValueKey(right[index]),
+    )
+  );
+}
+
+function dateTimeValueKey(value: CalendarEventDateTime): string {
+  if (value.type === 'date') {
+    return `DATE:${value.value}`;
+  }
+  return `DATE-TIME:${dateTimeMode(value.value)}:${value.value.timezone}:${value.value.local}`;
 }
 
 function setTiming(

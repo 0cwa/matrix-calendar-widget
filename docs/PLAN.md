@@ -76,8 +76,8 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 
 ## M5 — Recurrence and iCalendar completeness
 
-- [ ] RRULE editor based on inherited NeoDateFix recurrence UI.
-- [ ] RDATE / EXDATE.
+- [x] Supported RRULE series editor based on inherited NeoDateFix recurrence UI; unsupported loaded rules are preserved until explicitly replaced.
+- [x] RDATE / EXDATE series editing with explicit DATE, floating, UTC, and TZID values.
 - [ ] RECURRENCE-ID instance overrides.
 - [x] Add range-bounded read expansion for resource RRULE/RDATE/EXDATE sets, RDATE PERIOD durations, and same-resource exceptions (local backend slice; `RANGE=THISANDFUTURE` remains preserved and fails visibly).
 - [ ] “this event / this and following / series” edit semantics where representable.
@@ -86,6 +86,8 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [ ] SEQUENCE / DTSTAMP / CREATED / LAST-MODIFIED handling.
 - [ ] Organizer/attendee round-trip.
 - [ ] Attachments/conference properties where safely interoperable.
+
+The current series editor locks timed/all-day conversion while recurrence data is present. Instance and following-instance edit scopes remain separate work.
 
 **Exit:** common recurring calendars round-trip with mainstream CalDAV clients.
 

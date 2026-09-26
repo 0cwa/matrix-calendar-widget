@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
-import { Calendar, CalendarEvent } from '@matrix-calendar-widget/calendar';
+import {
+  Calendar,
+  CalendarEvent,
+  isCalendarEventRecurrenceRuleSupported,
+} from '@matrix-calendar-widget/calendar';
 import { DateTime } from 'luxon';
 import {
   calendarEventInputFromForm,
@@ -27,6 +31,16 @@ const calendar: Calendar = {
   id: 'team',
   name: 'Team calendar',
   timezone: 'Europe/Stockholm',
+};
+
+const emptyRecurrence = {
+  ruleEditable: true,
+  ruleEdited: false,
+  ruleValid: true,
+  rdates: [],
+  rdatesEdited: false,
+  exdates: [],
+  exdatesEdited: false,
 };
 
 describe('calendar event form adapter', () => {
@@ -47,6 +61,15 @@ describe('calendar event form adapter', () => {
       start: '2026-09-23T09:00',
       end: '2026-09-23T10:00',
       timezone: 'Europe/Stockholm',
+      recurrence: {
+        ruleEditable: true,
+        ruleEdited: false,
+        ruleValid: true,
+        rdates: [],
+        rdatesEdited: false,
+        exdates: [],
+        exdatesEdited: false,
+      },
     });
   });
 
@@ -62,6 +85,7 @@ describe('calendar event form adapter', () => {
           start: '2026-09-23T09:00',
           end: '2026-09-23T10:00',
           timezone: 'Europe/Stockholm',
+          recurrence: emptyRecurrence,
         },
         'uid@example.test',
       ),
@@ -96,6 +120,7 @@ describe('calendar event form adapter', () => {
           start: '2026-10-05',
           end: '2026-10-07',
           timezone: 'Europe/Stockholm',
+          recurrence: emptyRecurrence,
         },
         'all-day@example.test',
       ).timing,
@@ -137,6 +162,7 @@ describe('calendar event form adapter', () => {
         start: '2026-09-23T11:00',
         end: '2026-09-23T12:00',
         timezone: 'Europe/Stockholm',
+        recurrence: emptyRecurrence,
       }),
     ).toEqual({
       title: 'Updated',
@@ -154,5 +180,139 @@ describe('calendar event form adapter', () => {
         },
       },
     });
+  });
+
+  it('creates recurring input with explicit date, floating, UTC, and TZID values', () => {
+    const values = createCalendarEventFormValues(
+      calendar,
+      DateTime.fromISO('2026-09-23T09:37:00', { zone: 'Europe/Stockholm' }),
+    );
+    values.recurrence = {
+      ...values.recurrence,
+      rule: 'FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4',
+      ruleEdited: true,
+      rdates: [
+        { mode: 'date', value: '2026-10-01', timezone: '' },
+        {
+          mode: 'floating',
+          value: '2026-10-02T09:30',
+          timezone: '',
+        },
+        { mode: 'utc', value: '2026-10-03T10:00:00', timezone: '' },
+        {
+          mode: 'tzid',
+          value: '2026-10-04T11:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      ],
+      rdatesEdited: true,
+      exdates: [{ mode: 'date', value: '2026-10-05', timezone: '' }],
+      exdatesEdited: true,
+    };
+
+    expect(
+      calendarEventInputFromForm(values, 'series@example.test'),
+    ).toMatchObject({
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4',
+        rdates: [
+          { type: 'date', value: '2026-10-01' },
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-02T09:30:00',
+              timezone: 'floating',
+              mode: 'floating',
+            },
+          },
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-03T10:00:00',
+              timezone: 'UTC',
+              mode: 'utc',
+            },
+          },
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-04T11:00:00',
+              timezone: 'Europe/Stockholm',
+              mode: 'tzid',
+            },
+          },
+        ],
+        exdates: [{ type: 'date', value: '2026-10-05' }],
+      },
+    });
+  });
+
+  it('omits recurrence from a no-op patch so the raw rule stays untouched', () => {
+    const eventWithUnsupportedRule: CalendarEvent = {
+      id: 'event',
+      calendarId: 'team',
+      uid: 'event@example.test',
+      title: 'Event',
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-09-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+        end: {
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=DAILY;BYHOUR=9,17',
+        exdates: [
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-09-24T09:00:00',
+              timezone: 'Europe/Stockholm',
+              mode: 'tzid',
+            },
+          },
+        ],
+      },
+    };
+    const values = calendarEventToFormValues(
+      eventWithUnsupportedRule,
+      calendar,
+    );
+
+    expect(values.recurrence.ruleEditable).toBe(false);
+    expect(values.recurrence.original).toEqual(
+      eventWithUnsupportedRule.recurrence,
+    );
+    expect(calendarEventPatchFromForm(values)).not.toHaveProperty('recurrence');
+  });
+
+  it('recognizes only recurrence rules the editor can represent safely', () => {
+    expect(
+      isCalendarEventRecurrenceRuleSupported(
+        'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=8',
+        'timed',
+        'Europe/Stockholm',
+      ),
+    ).toBe(true);
+    expect(
+      isCalendarEventRecurrenceRuleSupported(
+        'FREQ=DAILY;BYHOUR=9,17',
+        'timed',
+        'Europe/Stockholm',
+      ),
+    ).toBe(false);
+    expect(
+      isCalendarEventRecurrenceRuleSupported(
+        'FREQ=DAILY;UNTIL=20261231T235959Z',
+        'timed',
+        'floating',
+      ),
+    ).toBe(false);
   });
 });

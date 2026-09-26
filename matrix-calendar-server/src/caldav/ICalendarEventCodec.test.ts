@@ -682,43 +682,136 @@ END:VCALENDAR`,
     expect(reparsed.event).toEqual(encoded.event);
   });
 
-  it('rejects recurrence creation until recurrence semantics land in M5', () => {
+  it('creates, reloads, and edits supported recurrence sets', () => {
+    const created = codec.create('team', 'new.ics', {
+      uid: 'new@example.test',
+      title: 'Recurring',
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-09-28T09:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+        end: {
+          local: '2026-09-28T10:00:00',
+          timezone: 'Europe/Stockholm',
+          mode: 'tzid',
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4',
+        rdates: [
+          { type: 'date', value: '2026-10-01' },
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-02T09:30:00',
+              timezone: 'Europe/Stockholm',
+              mode: 'tzid',
+            },
+          },
+        ],
+        exdates: [
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-05T09:00:00',
+              timezone: 'UTC',
+              mode: 'utc',
+            },
+          },
+        ],
+      },
+    });
+    const parsed = codec.parse('team', 'new.ics', created.icalendar);
+    expect(parsed.event.recurrence).toMatchObject({
+      ...created.event.recurrence,
+      rrule: 'FREQ=WEEKLY;COUNT=4;BYDAY=MO,WE',
+    });
+
+    const edited = parsed.applyPatch({
+      recurrence: {
+        ...parsed.event.recurrence,
+        rdates: [
+          ...(parsed.event.recurrence?.rdates ?? []),
+          { type: 'date', value: '2026-10-06' },
+        ],
+      },
+    });
+    expect(
+      codec.parse('team', 'new.ics', edited.icalendar).event.recurrence,
+    ).toMatchObject({
+      rrule: 'FREQ=WEEKLY;COUNT=4;BYDAY=MO,WE',
+      rdates: [
+        { type: 'date', value: '2026-10-01' },
+        expect.objectContaining({ type: 'date-time' }),
+        { type: 'date', value: '2026-10-06' },
+      ],
+      exdates: [expect.objectContaining({ type: 'date-time' })],
+    });
+  });
+
+  it('preserves unsupported loaded rules on unrelated and RDATE edits', () => {
+    const source = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Test//EN
+BEGIN:VEVENT
+UID:unsupported@example.test
+DTSTART;TZID=Europe/Stockholm:20260928T090000
+DTEND;TZID=Europe/Stockholm:20260928T100000
+RRULE:FREQ=DAILY;BYHOUR=9,17
+RDATE;TZID=Europe/Stockholm;X-KEEP=1:20260929T090000,20260930T090000
+SUMMARY:Unsupported rule
+X-PRESERVE:unknown property
+END:VEVENT
+END:VCALENDAR`;
+    const parsed = codec.parse('team', 'unsupported.ics', source);
+
+    expect(parsed.applyPatch({ title: 'Edited title' }).icalendar).toContain(
+      'RRULE:FREQ=DAILY;BYHOUR=9,17',
+    );
+    const edited = parsed.applyPatch({
+      recurrence: {
+        ...parsed.event.recurrence,
+        rdates: [
+          ...(parsed.event.recurrence?.rdates ?? []).slice(0, 1),
+          { type: 'date', value: '2026-10-02' },
+        ],
+      },
+    }).icalendar;
+
+    expect(edited).toContain('RRULE:FREQ=DAILY;BYHOUR=9,17');
+    expect(edited).toContain('X-PRESERVE:unknown property');
+    expect(edited).toContain('X-KEEP=1');
+    expect(edited).toContain(
+      'RDATE;TZID=Europe/Stockholm;X-KEEP=1:20260929T090000',
+    );
+    expect(edited).toContain('RDATE;VALUE=DATE:20261002');
+  });
+
+  it('rejects a changed rule outside the editor supported subset', () => {
     expect(() =>
       codec.create('team', 'new.ics', {
         uid: 'new@example.test',
         title: 'Recurring',
         timing: {
-          type: 'all-day',
-          startDate: '2026-09-28',
-          endDate: '2026-09-29',
+          type: 'timed',
+          start: {
+            local: '2026-09-28T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+          end: {
+            local: '2026-09-28T10:00:00',
+            timezone: 'Europe/Stockholm',
+          },
         },
-        recurrence: { rrule: 'FREQ=DAILY' },
+        recurrence: { rrule: 'FREQ=DAILY;BYHOUR=9,17' },
       }),
     ).toThrow(
       new ICalendarEventCodecError(
         'unsupported-patch',
-        'Recurrence creation is not part of the basic VEVENT codec',
-      ),
-    );
-  });
-
-  it('rejects recurrence edits until recurrence semantics land in M5', () => {
-    const parsed = codec.parse(
-      'team',
-      'simple-timed.ics',
-      fixture('simple-timed.ics'),
-    );
-
-    expect(() =>
-      parsed.applyPatch({
-        recurrence: {
-          rrule: 'FREQ=WEEKLY',
-        },
-      }),
-    ).toThrow(
-      new ICalendarEventCodecError(
-        'unsupported-patch',
-        'Recurrence editing is not part of the basic VEVENT codec',
+        'The recurrence rule uses options that the calendar form cannot edit',
       ),
     );
   });

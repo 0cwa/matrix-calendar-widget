@@ -17,13 +17,41 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarEventDateTime,
   CalendarEventInput,
   CalendarEventPatch,
+  CalendarEventRecurrence,
   CalendarId,
   isAllDayCalendarEvent,
+  isCalendarEventRecurrenceRuleSupported,
   isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
 import { DateTime } from 'luxon';
+
+export type CalendarEventRecurrenceDateMode =
+  | 'date'
+  | 'floating'
+  | 'utc'
+  | 'tzid';
+
+export type CalendarEventRecurrenceDateValue = {
+  mode: CalendarEventRecurrenceDateMode;
+  value: string;
+  timezone: string;
+};
+
+export type CalendarEventRecurrenceFormValues = {
+  /** Original domain value is retained until a user changes recurrence. */
+  original?: CalendarEventRecurrence;
+  rule?: string;
+  ruleEditable: boolean;
+  ruleEdited: boolean;
+  ruleValid: boolean;
+  rdates: CalendarEventRecurrenceDateValue[];
+  rdatesEdited: boolean;
+  exdates: CalendarEventRecurrenceDateValue[];
+  exdatesEdited: boolean;
+};
 
 export type CalendarEventFormValues = {
   calendarId: CalendarId;
@@ -34,6 +62,7 @@ export type CalendarEventFormValues = {
   start: string;
   end: string;
   timezone: string;
+  recurrence: CalendarEventRecurrenceFormValues;
 };
 
 export function createCalendarEventFormValues(
@@ -53,6 +82,7 @@ export function createCalendarEventFormValues(
     start: start.toFormat("yyyy-MM-dd'T'HH:mm"),
     end: end.toFormat("yyyy-MM-dd'T'HH:mm"),
     timezone,
+    recurrence: recurrenceFormValuesFromDomain(undefined, 'timed', timezone),
   };
 }
 
@@ -72,6 +102,11 @@ export function calendarEventToFormValues(
         DateTime.fromISO(event.timing.endDate).minus({ days: 1 }).toISODate() ??
         event.timing.startDate,
       timezone: calendar.timezone ?? DateTime.local().zoneName,
+      recurrence: recurrenceFormValuesFromDomain(
+        event.recurrence,
+        'all-day',
+        calendar.timezone ?? DateTime.local().zoneName,
+      ),
     };
   }
 
@@ -88,6 +123,11 @@ export function calendarEventToFormValues(
     start: event.timing.start.local.slice(0, 16),
     end: event.timing.end.local.slice(0, 16),
     timezone: event.timing.start.timezone,
+    recurrence: recurrenceFormValuesFromDomain(
+      event.recurrence,
+      'timed',
+      event.timing.start.timezone,
+    ),
   };
 }
 
@@ -95,20 +135,184 @@ export function calendarEventInputFromForm(
   values: CalendarEventFormValues,
   uid: string,
 ): CalendarEventInput {
+  const recurrence = calendarEventRecurrenceFromForm(
+    values.recurrence,
+    values.timingType,
+    values.timezone,
+  );
   return {
     uid,
     ...calendarEventEditableFieldsFromForm(values),
+    ...(recurrence ? { recurrence } : {}),
   };
 }
 
 export function calendarEventPatchFromForm(
   values: CalendarEventFormValues,
 ): CalendarEventPatch {
+  const recurrence = calendarEventRecurrenceFromForm(
+    values.recurrence,
+    values.timingType,
+    values.timezone,
+  );
   return {
     ...calendarEventEditableFieldsFromForm(values),
     description: normalizeOptional(values.description),
     location: normalizeOptional(values.location),
+    ...(recurrence !== undefined ? { recurrence } : {}),
   };
+}
+
+export function recurrenceDateValueFromForm(
+  value: CalendarEventRecurrenceDateValue,
+): CalendarEventDateTime | undefined {
+  if (value.mode === 'date') {
+    const date = DateTime.fromISO(value.value);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value.value) || !date.isValid) {
+      return undefined;
+    }
+    return { type: 'date', value: value.value };
+  }
+
+  const zone =
+    value.mode === 'tzid'
+      ? value.timezone
+      : value.mode === 'utc'
+        ? 'UTC'
+        : 'floating';
+  const dateTime = DateTime.fromISO(value.value, {
+    zone: zone === 'floating' ? 'UTC' : zone,
+  });
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(value.value) ||
+    !dateTime.isValid ||
+    (value.mode === 'tzid' && !DateTime.local().setZone(value.timezone).isValid)
+  ) {
+    return undefined;
+  }
+
+  return {
+    type: 'date-time',
+    value: {
+      local: value.value.length === 16 ? `${value.value}:00` : value.value,
+      timezone: zone,
+      mode: value.mode === 'tzid' ? 'tzid' : value.mode,
+    },
+  };
+}
+
+export function hasInvalidCalendarEventRecurrenceFormValues(
+  values: CalendarEventRecurrenceFormValues,
+  timingType: CalendarEventFormValues['timingType'],
+  timezone: string,
+): boolean {
+  if (
+    values.ruleEdited &&
+    (!values.ruleValid ||
+      (values.rule &&
+        !isCalendarEventRecurrenceRuleSupported(
+          values.rule,
+          timingType,
+          timezone,
+        )))
+  ) {
+    return true;
+  }
+
+  return [
+    ...(values.rdatesEdited ? values.rdates : []),
+    ...(values.exdatesEdited ? values.exdates : []),
+  ].some((value) => recurrenceDateValueFromForm(value) === undefined);
+}
+
+function recurrenceFormValuesFromDomain(
+  recurrence?: CalendarEventRecurrence,
+  timingType: CalendarEventFormValues['timingType'] = 'timed',
+  timezone = 'UTC',
+): CalendarEventRecurrenceFormValues {
+  const ruleEditable = isCalendarEventRecurrenceRuleSupported(
+    recurrence?.rrule,
+    timingType,
+    timezone,
+  );
+  return {
+    original: recurrence,
+    rule: ruleEditable ? recurrence?.rrule : undefined,
+    ruleEditable,
+    ruleEdited: false,
+    ruleValid: true,
+    rdates: (recurrence?.rdates ?? []).map(recurrenceDateValueToForm),
+    rdatesEdited: false,
+    exdates: (recurrence?.exdates ?? []).map(recurrenceDateValueToForm),
+    exdatesEdited: false,
+  };
+}
+
+function recurrenceDateValueToForm(
+  value: CalendarEventDateTime,
+): CalendarEventRecurrenceDateValue {
+  if (value.type === 'date') {
+    return { mode: 'date', value: value.value, timezone: '' };
+  }
+
+  const mode =
+    value.value.mode ??
+    (value.value.timezone === 'UTC'
+      ? 'utc'
+      : value.value.timezone === 'floating'
+        ? 'floating'
+        : 'tzid');
+  return {
+    mode,
+    value: value.value.local,
+    timezone: mode === 'tzid' ? value.value.timezone : '',
+  };
+}
+
+function calendarEventRecurrenceFromForm(
+  values: CalendarEventRecurrenceFormValues,
+  timingType: CalendarEventFormValues['timingType'],
+  timezone: string,
+): CalendarEventRecurrence | undefined {
+  if (!values.ruleEdited && !values.rdatesEdited && !values.exdatesEdited) {
+    return undefined;
+  }
+
+  if (
+    hasInvalidCalendarEventRecurrenceFormValues(values, timingType, timezone)
+  ) {
+    throw new Error('Invalid recurrence values');
+  }
+
+  const recurrence: CalendarEventRecurrence = { ...values.original };
+  if (values.ruleEdited) {
+    if (values.rule) {
+      recurrence.rrule = values.rule;
+    } else {
+      delete recurrence.rrule;
+    }
+  }
+  if (values.rdatesEdited) {
+    recurrence.rdates = values.rdates
+      .map(recurrenceDateValueFromForm)
+      .map(requireRecurrenceDateValue);
+  }
+  if (values.exdatesEdited) {
+    recurrence.exdates = values.exdates
+      .map(recurrenceDateValueFromForm)
+      .map(requireRecurrenceDateValue);
+  }
+
+  return recurrence;
+}
+
+function requireRecurrenceDateValue(
+  value: CalendarEventDateTime | undefined,
+): CalendarEventDateTime {
+  if (!value) {
+    throw new Error('Invalid recurrence date value');
+  }
+  return value;
 }
 
 function calendarEventEditableFieldsFromForm(
