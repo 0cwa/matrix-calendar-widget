@@ -139,9 +139,12 @@ The gated recurring-resource CalDAV contract is defined in `matrix-calendar-serv
       event, recurrence instance, or VALARM exists in CalDAV.
 - [ ] Wire the widget's reminder controls to the authenticated configuration
       API.
-- [ ] Resolve the configured event, recurrence identity, and RFC 9074 VALARM
-      UID against the current CalDAV resource before enabling reminder use.
-      Fail closed if an identity is absent, changed, or ambiguous (ADR020).
+- [x] Add a pure resolver that checks persisted event UID, canonical recurrence
+      identity, and RFC 9074 VALARM UID against supplied canonical CalDAV data.
+      It fails closed for absent, malformed, changed, or ambiguous identities
+      and does not fetch resources or send notifications (ADR020).
+- [ ] Fetch the current canonical CalDAV resource and invoke the resolver
+      before enabling reminder use; recheck room authorization at delivery time.
 - [x] Implement the optional app-owned PostgreSQL reminder-state store and
       atomic durable delivery claims (ADR019). The store has local unit coverage
       and a PostgreSQL integration contract wired into CI; the API persists
@@ -168,7 +171,9 @@ sub-slices do not enable live room-principal CalDAV access and do not complete
 M6 or issue #7. Widget reminder controls, CalDAV event/alarm resolution,
 scheduling, delivery-time permission rechecks, Matrix delivery, and event
 attendee email semantics remain open; the authenticated API currently stores
-inert intent only.
+inert intent only. A pure canonical event/recurrence/alarm identity resolver is
+implemented and fixture-tested, but current-resource lookup and reminder use
+remain pending.
 Live room delivery still depends on #48/#45 and ADR014's trusted-domain isolation gate; the M5 pinned
 Radicale recurring-resource run remains a separate open interoperability gate.
 

@@ -93,8 +93,10 @@ Complete on `main`:
   Matrix recipients or trigger delivery. The authenticated room reminder
   configuration API stores inert intent after room membership, binding, and
   event-write policy checks. It does not prove the event, recurrence instance,
-  or VALARM UID exists in CalDAV. Widget controls and wiring, current CalDAV
-  existence/UID resolution, scheduling, delivery-time `@room` permission
+  or VALARM UID exists in CalDAV. A pure fixture-tested resolver now checks
+  those identities against canonical resource data supplied by a future caller;
+  it performs no resource lookup or delivery. Widget controls and wiring,
+  current CalDAV resource lookup, scheduling, delivery-time `@room` permission
   rechecks, and Matrix sends remain incomplete. The server chart projects
   `MATRIX_CALENDAR_REMINDER_DATABASE_URL` only from an external Secret when
   reminders are enabled; no database is provisioned by the chart. Do not use
