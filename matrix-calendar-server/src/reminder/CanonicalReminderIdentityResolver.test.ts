@@ -19,8 +19,8 @@ import path from 'path';
 import {
   CanonicalReminderIdentity,
   CanonicalReminderLookupIdentity,
-  CanonicalReminderResourceData,
   CanonicalReminderResolutionError,
+  CanonicalReminderResourceData,
   resolveCanonicalReminderIdentity,
   resolveCanonicalReminderIdentityFromResource,
 } from './CanonicalReminderIdentityResolver';
@@ -289,10 +289,10 @@ describe('resolveCanonicalReminderIdentityFromResource', () => {
       ),
     ).toBeUndefined();
     expect(
-      resolveCanonicalReminderIdentityFromResource(
-        overrideIdentity,
-        { ...canonicalResource, calendarId: 'other-calendar' },
-      ),
+      resolveCanonicalReminderIdentityFromResource(overrideIdentity, {
+        ...canonicalResource,
+        calendarId: 'other-calendar',
+      }),
     ).toBeUndefined();
   });
 
@@ -302,10 +302,10 @@ describe('resolveCanonicalReminderIdentityFromResource', () => {
       'BEGIN:VEVENT\nUID:team-planning@example.test\nDTSTAMP:20260926T120000Z\nRECURRENCE-ID;TZID=Europe/Stockholm:20261012T090000\nDTSTART;TZID=Europe/Stockholm:20261012T130000\nDTEND;TZID=Europe/Stockholm:20261012T140000\nBEGIN:VALARM\nUID:override-alarm@example.test\nACTION:DISPLAY\nTRIGGER:-PT5M\nEND:VALARM\nEND:VEVENT\nBEGIN:VEVENT\nUID:unrelated@example.test',
     );
     expect(
-      resolveCanonicalReminderIdentityFromResource(
-        overrideIdentity,
-        { ...canonicalResource, icalendar: duplicateOverride },
-      ),
+      resolveCanonicalReminderIdentityFromResource(overrideIdentity, {
+        ...canonicalResource,
+        icalendar: duplicateOverride,
+      }),
     ).toBeUndefined();
 
     const duplicateAlarm = resource.replace(
@@ -313,10 +313,10 @@ describe('resolveCanonicalReminderIdentityFromResource', () => {
       'END:VALARM\nBEGIN:VALARM\nUID:master-alarm@example.test\nACTION:DISPLAY\nTRIGGER:-PT5M\nEND:VALARM\nEND:VEVENT',
     );
     expect(
-      resolveCanonicalReminderIdentityFromResource(
-        masterIdentity,
-        { ...canonicalResource, icalendar: duplicateAlarm },
-      ),
+      resolveCanonicalReminderIdentityFromResource(masterIdentity, {
+        ...canonicalResource,
+        icalendar: duplicateAlarm,
+      }),
     ).toBeUndefined();
   });
 

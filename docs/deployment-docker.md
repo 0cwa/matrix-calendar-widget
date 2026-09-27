@@ -32,22 +32,22 @@ These package scripts tag the images `0cwa/matrix-calendar-server` and
 registry. A deployment needs images built and made available through an
 operator-approved registry or host-local image workflow.
 
-| Container | Internal port | Current behavior |
-| --- | ---: | --- |
-| Calendar server | `3000` by default; set `PORT` to override | Node/NestJS gateway and bot. Route the gateway URL to this listener. |
-| Widget | `8080` | Static files served by the nginx-based widget image. The package's local run command maps host port `3000` to container port `8080`. |
+| Container       |                             Internal port | Current behavior                                                                                                                     |
+| --------------- | ----------------------------------------: | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Calendar server | `3000` by default; set `PORT` to override | Node/NestJS gateway and bot. Route the gateway URL to this listener.                                                                 |
+| Widget          |                                    `8080` | Static files served by the nginx-based widget image. The package's local run command maps host port `3000` to container port `8080`. |
 
 ## Runtime configuration and storage
 
 The server reads these required environment variables:
 
-| Variable | Purpose |
-| --- | --- |
-| `ACCESS_TOKEN` | Matrix bot credential; provide through the operator's secret mechanism. |
-| `HOMESERVER_URL` | Matrix homeserver base URL. The server must be able to reach it. |
-| `MEETINGWIDGET_URL` | Widget URL used by the bot. |
-| `BREAKOUT_SESSION_WIDGET_URL` | Breakout widget URL used by the bot. |
-| `MEETINGWIDGET_COCKPIT_URL` | Cockpit widget URL used by the bot. |
+| Variable                      | Purpose                                                                 |
+| ----------------------------- | ----------------------------------------------------------------------- |
+| `ACCESS_TOKEN`                | Matrix bot credential; provide through the operator's secret mechanism. |
+| `HOMESERVER_URL`              | Matrix homeserver base URL. The server must be able to reach it.        |
+| `MEETINGWIDGET_URL`           | Widget URL used by the bot.                                             |
+| `BREAKOUT_SESSION_WIDGET_URL` | Breakout widget URL used by the bot.                                    |
+| `MEETINGWIDGET_COCKPIT_URL`   | Cockpit widget URL used by the bot.                                     |
 
 `RADICALE_URL` is optional in the configuration schema and is required for
 configured CalDAV discovery and access. `ROOM_CALENDAR_BINDINGS` supplies the

@@ -20,12 +20,12 @@ export {
   resolveCanonicalReminderIdentityFromResource,
 } from './CanonicalReminderIdentityResolver';
 export type {
+  CanonicalReminderDeliveryResolution,
   CanonicalReminderIdentity,
   CanonicalReminderLookupIdentity,
-  CanonicalReminderDeliveryResolution,
-  CanonicalReminderResourceData,
   CanonicalReminderResolution,
   CanonicalReminderResolutionErrorCode,
+  CanonicalReminderResourceData,
 } from './CanonicalReminderIdentityResolver';
 export {
   PostgresRoomReminderStore,
