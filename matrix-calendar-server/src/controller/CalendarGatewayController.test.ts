@@ -257,6 +257,192 @@ describe('CalendarGatewayController', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('deletes an authorized explicitly VEVENT-only calendar', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch.mockResponses(
+      [principalResponse('/principals/alice/'), { status: 207 }],
+      [homeResponse('/alice/'), { status: 207 }],
+      [calendarCollectionResponse(['VEVENT']), { status: 207 }],
+      ['', { status: 204 }],
+    );
+
+    await expect(
+      createController().deleteCalendar(
+        userContext,
+        openIdCredential,
+        roomId,
+        calendarId,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'manage-calendar',
+      calendarId,
+    });
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch.mock.calls[3][0]).toBe(calendarId);
+    expect(fetch.mock.calls[3][1]?.method).toBe('DELETE');
+  });
+
+  it('denies calendar deletion when room policy rejects manage-calendar', async () => {
+    isAllowed.mockResolvedValue(false);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+
+    await expect(
+      createController().deleteCalendar(
+        userContext,
+        openIdCredential,
+        roomId,
+        calendarId,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects calendar deletion targets outside the configured Radicale service', async () => {
+    isAllowed.mockResolvedValue(true);
+
+    await expect(
+      createController().deleteCalendar(
+        userContext,
+        openIdCredential,
+        roomId,
+        'https://attacker.example.test/calendar/',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['mixed', ['VEVENT', 'VTODO'], true],
+    ['unknown', undefined, true],
+    ['read-only', ['VEVENT'], false],
+  ] as const)(
+    'refuses to delete a %s calendar collection before DELETE',
+    async (_kind, components, writable) => {
+      isAllowed.mockResolvedValue(true);
+      const calendarId = 'https://radicale.example.test/alice/team/';
+      fetch.mockResponses(
+        [principalResponse('/principals/alice/'), { status: 207 }],
+        [homeResponse('/alice/'), { status: 207 }],
+        [calendarCollectionResponse(components, writable), { status: 207 }],
+      );
+
+      try {
+        await createController().deleteCalendar(
+          userContext,
+          openIdCredential,
+          roomId,
+          calendarId,
+        );
+        throw new Error('Expected unsafe calendar deletion to be rejected');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConflictException);
+        expect((error as ConflictException).getResponse()).toEqual({
+          code: 'calendar-delete-unsafe',
+          message:
+            'Calendar deletion is only allowed for explicitly VEVENT-only collections',
+        });
+      }
+
+      expect(fetch).toHaveBeenCalledTimes(3);
+      expect(
+        fetch.mock.calls.every(([, init]) => init?.method !== 'DELETE'),
+      ).toBe(true);
+    },
+  );
+
+  it('refuses deletion when a PROPFIND safety property has a failed status', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch.mockResponses(
+      [principalResponse('/principals/alice/'), { status: 207 }],
+      [homeResponse('/alice/'), { status: 207 }],
+      [
+        multistatus(`
+          <d:response>
+            <d:href>/alice/team/</d:href>
+            <d:propstat>
+              <d:prop>
+                <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+                <d:displayname>Team events</d:displayname>
+              </d:prop>
+              <d:status>HTTP/1.1 200 OK</d:status>
+            </d:propstat>
+            <d:propstat>
+              <d:prop>
+                <c:supported-calendar-component-set>
+                  <c:comp name="VEVENT"/>
+                </c:supported-calendar-component-set>
+              </d:prop>
+              <d:status>HTTP/1.1 403 Forbidden</d:status>
+            </d:propstat>
+            <d:propstat>
+              <d:prop>
+                <d:current-user-privilege-set>
+                  <d:privilege><d:read/></d:privilege>
+                  <d:privilege><d:write/></d:privilege>
+                </d:current-user-privilege-set>
+              </d:prop>
+              <d:status>HTTP/1.1 200 OK</d:status>
+            </d:propstat>
+          </d:response>
+        `),
+        { status: 207 },
+      ],
+    );
+
+    await expect(
+      createController().deleteCalendar(
+        userContext,
+        openIdCredential,
+        roomId,
+        calendarId,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'calendar-delete-unsafe',
+      },
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(
+      fetch.mock.calls.every(([, init]) => init?.method !== 'DELETE'),
+    ).toBe(true);
+  });
+
+  it('refuses deletion when the requested collection is not discoverable', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch.mockResponses(
+      [principalResponse('/principals/alice/'), { status: 207 }],
+      [homeResponse('/alice/'), { status: 207 }],
+      [
+        calendarCollectionResponse(['VEVENT'], true, '/alice/other/'),
+        {
+          status: 207,
+        },
+      ],
+    );
+
+    await expect(
+      createController().deleteCalendar(
+        userContext,
+        openIdCredential,
+        roomId,
+        calendarId,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(
+      fetch.mock.calls.every(([, init]) => init?.method !== 'DELETE'),
+    ).toBe(true);
+  });
+
   it('denies calendar creation when room policy rejects it', async () => {
     isAllowed.mockResolvedValue(false);
 
@@ -597,6 +783,39 @@ function homeResponse(href: string): string {
       <d:propstat>
         <d:prop>
           <c:calendar-home-set><d:href>${href}</d:href></c:calendar-home-set>
+        </d:prop>
+        <d:status>HTTP/1.1 200 OK</d:status>
+      </d:propstat>
+    </d:response>
+  `);
+}
+
+function calendarCollectionResponse(
+  components?: readonly string[],
+  writable = true,
+  href = '/alice/team/',
+): string {
+  const componentSet = components
+    ? `
+        <c:supported-calendar-component-set>
+          ${components
+            .map((component) => `<c:comp name="${component}"/>`)
+            .join('')}
+        </c:supported-calendar-component-set>`
+    : '';
+
+  return multistatus(`
+    <d:response>
+      <d:href>${href}</d:href>
+      <d:propstat>
+        <d:prop>
+          <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+          <d:displayname>Team events</d:displayname>
+          ${componentSet}
+          <d:current-user-privilege-set>
+            <d:privilege><d:read/></d:privilege>
+            ${writable ? '<d:privilege><d:write/></d:privilege>' : ''}
+          </d:current-user-privilege-set>
         </d:prop>
         <d:status>HTTP/1.1 200 OK</d:status>
       </d:propstat>

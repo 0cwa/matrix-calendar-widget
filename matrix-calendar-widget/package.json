@@ -91,7 +91,7 @@
     "docker:inspect": "docker inspect 0cwa/matrix-calendar-widget",
     "depcheck": "depcheck --ignores=@vitest/coverage-v8",
     "test": "vitest",
-    "test:all": "vitest #legacy command",
+    "test:all": "vitest run --maxWorkers=2",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint . --max-warnings=0",
     "translate": "i18next-cli extract --sync-primary",

@@ -1,6 +1,6 @@
 # Project status
 
-_Last updated: 2026-09-25_
+_Last updated: 2026-09-27_
 
 This file is the short-lived execution snapshot. `docs/PLAN.md` is the durable milestone plan; GitHub issues contain acceptance criteria.
 
@@ -48,9 +48,11 @@ Landed on `main`:
 - writable-calendar rename via `DAV:displayname` only (#98 / PR #99),
 - small create/rename dialogs that keep request errors visible.
 
-Active:
+Represented by an open PR, not merged:
 
-- safe VEVENT-only calendar deletion (#100 / PR #101). The implementation already fails closed for mixed, component-unknown, and read-only collections and rejects DELETE `207 Multi-Status`; the branch currently needs synchronization with `main` after the rename merge.
+- safe VEVENT-only calendar deletion (#100 / PR #101). It fails closed before `DELETE` for mixed, component-unknown, read-only, or undiscoverable calendars and for failed or incomplete safety-property responses. The focused server tests and full local `yarn ci` passed on 2026-09-27 before the latest PR follow-up; check GitHub for current results.
+
+PR #101 remains open and unmerged. Check GitHub directly for its current review and check status.
 
 ### M3 — VEVENT CRUD
 
@@ -69,15 +71,15 @@ Complete on `main`:
 
 - #48 — external `radicale-auth-matrix` OpenID delegation. No writable `0cwa/radicale-auth-matrix` fork exists and the available GitHub connector cannot create/fork repositories.
 - #45 — final delegated gateway/OpenID real-container contract, blocked on #48.
-- #100 / PR #101 — M4 safe calendar deletion; implementation is present, but the branch currently diverges from `main` after #99 merged and must be synced before merge.
+- #100 / PR #101 — M4 safe calendar deletion is represented by the open PR; check GitHub directly for current review and check status.
 - #29 — enable main-branch protection once repository-rules administration is available.
 
 ## Highest-priority next steps
 
 1. Implement #48 in a writable upstream/forked `radicale-auth-matrix` repository; do not copy GPL/LGPL-family plugin code into this Apache-licensed repository.
 2. Land #45's final gateway/OpenID/non-member real-container contract and close M2.
-3. In parallel while #48 is blocked, synchronize and finish #100 / PR #101: safe VEVENT-only calendar deletion through the existing repository/gateway seams.
-4. After delete lands, reassess the next smallest M4 slice (description, color, timezone, compatibility notice, or diagnostics) rather than pre-building generic WebDAV administration.
+3. In parallel while #48 is blocked, continue review of #100 / PR #101 and merge the safe-deletion slice after required checks and review pass.
+4. After deletion lands, reassess the next smallest M4 slice (description, color, timezone, compatibility notice, or diagnostics) rather than pre-building generic WebDAV administration.
 
 ## Working rules
 
