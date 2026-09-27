@@ -24,12 +24,49 @@ const describeWithDatabase = databaseUrl ? describe : describe.skip;
 async function requireIsolatedTestDatabase(
   sql: ReturnType<typeof postgres>,
 ): Promise<void> {
-  const [database] = await sql<{ name: string }[]>`
-    SELECT current_database() AS name
+  const [database] = await sql<
+    {
+      name: string;
+      role: string;
+      owner: string;
+      is_superuser: boolean;
+      can_create_database: boolean;
+      can_create_role: boolean;
+      can_connect_current_database: boolean;
+      can_connect_postgres: boolean;
+      can_connect_template1: boolean;
+    }[]
+  >`
+    SELECT current_database() AS name,
+           current_user AS role,
+           pg_get_userbyid(database.datdba) AS owner,
+           current_role_row.rolsuper AS is_superuser,
+           current_role_row.rolcreatedb AS can_create_database,
+           current_role_row.rolcreaterole AS can_create_role,
+           has_database_privilege(current_user, current_database(), 'CONNECT') AS can_connect_current_database,
+           has_database_privilege(current_user, 'postgres', 'CONNECT') AS can_connect_postgres,
+           has_database_privilege(current_user, 'template1', 'CONNECT') AS can_connect_template1
+    FROM pg_database AS database
+    JOIN pg_roles AS current_role_row
+      ON current_role_row.rolname = current_user
+    WHERE database.datname = current_database()
   `;
   if (database.name !== 'matrix_calendar_test') {
     throw new Error(
       'The PostgreSQL reminder contract requires the isolated matrix_calendar_test database',
+    );
+  }
+  if (
+    database.owner !== database.role ||
+    database.is_superuser ||
+    database.can_create_database ||
+    database.can_create_role ||
+    !database.can_connect_current_database ||
+    database.can_connect_postgres ||
+    database.can_connect_template1
+  ) {
+    throw new Error(
+      'The PostgreSQL reminder contract requires a database-owning role without elevated PostgreSQL privileges',
     );
   }
 }
