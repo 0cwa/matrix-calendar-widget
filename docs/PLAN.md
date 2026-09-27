@@ -103,13 +103,13 @@ Calendar creation (#94), lightweight visibility controls (#96), rename (#99), an
 
 ## M7 — Non-widget fallback
 
-- [ ] `!calendar help`
+- [x] `!calendar help`
 - [ ] `!calendar upcoming`
 - [ ] `!calendar event <id>`
 - [ ] constrained event creation command
 - [ ] constrained delete/cancel command
 - [ ] normal Matrix fallback messages for important widget-created calendar actions
-- [ ] help text directing capable clients to the widget
+- [x] help text directing capable clients to the widget
 
 **Exit:** users on non-widget clients can inspect and perform essential calendar actions without duplicating the entire UI.
 
