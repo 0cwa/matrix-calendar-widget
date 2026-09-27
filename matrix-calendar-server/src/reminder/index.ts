@@ -31,6 +31,8 @@ export {
   PostgresRoomReminderStore,
   createReminderDeliveryKey,
 } from './PostgresRoomReminderStore';
+export { calculateDisplayReminderDueAt } from './ReminderTrigger';
+export type { ResolvedReminderOccurrenceTiming } from './ReminderTrigger';
 export { RoomReminderMatrixDelivery } from './RoomReminderMatrixDelivery';
 export {
   DisabledRoomReminderStore,

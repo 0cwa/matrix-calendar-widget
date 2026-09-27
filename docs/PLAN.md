@@ -146,6 +146,12 @@ The gated recurring-resource CalDAV contract is defined in `matrix-calendar-serv
       identity, and RFC 9074 VALARM UID against supplied canonical CalDAV data.
       It fails closed for absent, malformed, changed, or ambiguous identities
       and does not fetch resources or send notifications (ADR020).
+- [x] Add a pure DISPLAY VALARM trigger evaluator for already-resolved
+      timezone-aware occurrences. It requires DISPLAY descriptions, supports
+      relative DURATION triggers and exact repeat intervals, and validates
+      original duration/repeat text before ical.js parsing can normalize it.
+      Absolute triggers, floating/date-only anchors (no user timezone), and
+      nominal repeat intervals fail closed.
 - [ ] Fetch the current canonical CalDAV resource and invoke the resolver
       before enabling reminder use; recheck room authorization at delivery time.
 - [x] Implement the optional app-owned PostgreSQL reminder-state store and
