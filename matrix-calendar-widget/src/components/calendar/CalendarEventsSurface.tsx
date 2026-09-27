@@ -70,6 +70,11 @@ export function CalendarEventsSurface({
     [filters.filterText, visibleEvents],
   );
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent>();
+  const hasMixedSupportedComponents = calendars.data.some(
+    (calendar) =>
+      calendar.supportedComponents?.includes('VEVENT') &&
+      calendar.supportedComponents.some((component) => component !== 'VEVENT'),
+  );
 
   if (calendars.loading || events.loading) {
     return <PageLoader />;
@@ -90,6 +95,16 @@ export function CalendarEventsSurface({
 
   return (
     <>
+      {hasMixedSupportedComponents && (
+        <Box px={1} pb={1}>
+          <Alert severity="info">
+            {t(
+              'calendarEvents.mixedCompatibilityNotice',
+              'One or more calendars support additional item types. The widget displays and edits VEVENT entries only.',
+            )}
+          </Alert>
+        </Box>
+      )}
       {calendars.data.length > 1 && (
         <Box px={1} pb={1}>
           <FormGroup

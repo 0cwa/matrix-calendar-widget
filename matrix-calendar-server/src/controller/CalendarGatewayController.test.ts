@@ -107,6 +107,7 @@ describe('CalendarGatewayController', () => {
                 <a:calendar-color>#336699ff</a:calendar-color>
                 <c:supported-calendar-component-set>
                   <c:comp name="VEVENT"/>
+                  <c:comp name="VTODO"/>
                 </c:supported-calendar-component-set>
                 <d:current-user-privilege-set>
                   <d:privilege><d:read/></d:privilege>
@@ -130,6 +131,7 @@ describe('CalendarGatewayController', () => {
         description: 'Planning & review',
         color: '#336699ff',
         readOnly: false,
+        supportedComponents: ['VEVENT', 'VTODO'],
       },
     ]);
 

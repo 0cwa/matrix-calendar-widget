@@ -76,6 +76,96 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventsSurface />', () => {
+  it('keeps a generic compatibility notice when a mixed calendar is hidden', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [
+        {
+          id: 'team',
+          name: 'Team calendar',
+          supportedComponents: ['VEVENT', 'VTODO'],
+        },
+        {
+          id: 'personal',
+          name: 'Personal calendar',
+          supportedComponents: ['VEVENT'],
+        },
+      ],
+      events,
+    });
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const notice = await screen.findByRole('alert');
+    expect(notice).toHaveTextContent(
+      'One or more calendars support additional item types. The widget displays and edits VEVENT entries only.',
+    );
+    expect(notice).not.toHaveTextContent('Team calendar');
+    expect(screen.getByText('Team planning')).toBeInTheDocument();
+    expect(screen.getByText('Dentist')).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: 'Team calendar' }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByText('Team planning')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText('Dentist')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'One or more calendars support additional item types.',
+    );
+  });
+
+  it.each([
+    {
+      label: 'VEVENT-only',
+      supportedComponents: ['VEVENT'],
+    },
+    {
+      label: 'unknown component set',
+      supportedComponents: undefined,
+    },
+  ])(
+    'does not show a compatibility notice for $label calendars',
+    async (calendar) => {
+      const repository = new InMemoryCalendarRepository({
+        calendars: [
+          {
+            id: 'team',
+            name: 'Team calendar',
+            supportedComponents: calendar.supportedComponents,
+          },
+        ],
+        events: [events[0]],
+      });
+
+      render(
+        <CalendarEventsSurface
+          filters={{
+            startDate: '2026-09-25T00:00:00Z',
+            endDate: '2026-09-25T23:59:59Z',
+          }}
+          onShowMore={() => undefined}
+          view="list"
+        />,
+        { wrapper: createWrapper(repository) },
+      );
+
+      expect(await screen.findByText('Team planning')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    },
+  );
+
   it('hides and shows events with lightweight calendar visibility controls', async () => {
     const repository = new InMemoryCalendarRepository({ calendars, events });
 

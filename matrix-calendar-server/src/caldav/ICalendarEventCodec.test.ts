@@ -152,6 +152,37 @@ describe('ICalendarEventCodec', () => {
     );
   });
 
+  it('preserves a sibling VTODO component when patching a VEVENT', () => {
+    const parsed = codec.parse(
+      'team',
+      'mixed-components.ics',
+      `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Matrix Calendar Widget//EN
+BEGIN:VEVENT
+UID:event@example.test
+DTSTART:20260923T090000Z
+DTEND:20260923T100000Z
+SUMMARY:Team planning
+END:VEVENT
+BEGIN:VTODO
+UID:task@example.test
+DTSTAMP:20260920T120000Z
+DUE:20260924T120000Z
+SUMMARY:Prepare agenda
+END:VTODO
+END:VCALENDAR`,
+    );
+
+    const encoded = parsed.applyPatch({ title: 'Updated team planning' });
+    const calendar = ICAL.Component.fromString(encoded.icalendar);
+    const todo = calendar.getFirstSubcomponent('vtodo');
+
+    expect(calendar.getAllSubcomponents('vevent')).toHaveLength(1);
+    expect(todo?.getFirstPropertyValue('uid')).toBe('task@example.test');
+    expect(todo?.getFirstPropertyValue('summary')).toBe('Prepare agenda');
+  });
+
   it('preserves organizer and attendee data on patch', () => {
     const parsed = codec.parse(
       'team',

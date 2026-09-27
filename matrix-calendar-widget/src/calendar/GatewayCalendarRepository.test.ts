@@ -42,13 +42,14 @@ const event: CalendarEvent = {
 };
 
 describe('GatewayCalendarRepository', () => {
-  it('returns calendar descriptions from the gateway DTO', async () => {
+  it('returns supported component metadata from the gateway DTO', async () => {
     const calendars = [
       {
         id: calendarId,
         name: 'Team calendar',
         description: 'Planning and review',
         readOnly: false,
+        supportedComponents: ['VEVENT', 'VTODO'],
       },
     ];
     const repository = createRepository(mockFetch(jsonResponse(calendars)));
