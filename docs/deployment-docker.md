@@ -88,22 +88,33 @@ are for separate Synapse rate-limit tooling, not reminder storage.
 ### etke-managed servers
 
 etke distinguishes its managed Hosting service, which runs on a VPS rented by
-etke, from On-Premises service on the customer's infrastructure. etke's public
-pages describe different access and responsibility models for these options;
-confirm the specific plan's control model before treating it as a self-managed
-MDAD inventory. The [service overview](https://etke.cc/services/) describes
-the hosting types and setup and maintenance responsibilities. The [Hosting
-details](https://etke.cc/services/hosting/) say customers may run other
-services on a hosted server when they request root SSH access, while manually
-modifying Matrix configuration is not allowed.
+etke, from On-Premises service on the customer's infrastructure. etke's
+[Hosting details](https://etke.cc/services/hosting/) say a customer may request
+root SSH access to a hosted server and run other services there, while manually
+modifying Matrix configuration is not allowed. Its [FAQ](https://etke.cc/help/faq/)
+also says customer-run services alongside its stack are allowed, but may disrupt
+the managed Matrix stack, may be broken by upgrades without warning, and are
+not supported by etke. These statements were checked on 2026-09-27.
 
-Those public pages do not confirm whether this operator's plan supports
-deploying this third-party container, or provide application-specific image
-delivery, network, proxy, database, secret, persistent-storage, upgrade, or
-maintenance arrangements. Confirm those points with the operator and etke
+Treat a separately managed Matrix Calendar container as an operator-owned,
+unsupported adjacent service, not as an officially supported etke service. A
+first-class MDAD component is a separate integration: MDAD's [contributor
+guidance](https://github.com/spantaleev/matrix-docker-ansible-deploy/blob/master/AGENTS.md)
+requires new components to be registered in the playbook, group variables,
+documentation indexes, container-image documentation, and changelog. That
+guidance describes the first-class component path; it does not establish a
+generic custom-container interface. Whether the operator can add a separately
+managed service remains deployment-specific. This repository contains no such
+MDAD component or etke integration.
+
+The public information does not establish this operator's Hosting or
+On-Premises plan, access to the host or MDAD inventory, or approval to operate
+this particular adjacent service. It also does not provide application-specific
+image delivery, network, proxy, database, secret, persistent-storage, upgrade,
+or maintenance arrangements. Confirm those points with the operator and etke
 before writing an account-specific deployment. The MDAD references below
-describe upstream patterns for operators with access to their MDAD checkout;
-they do not establish access to or control of an etke-managed deployment.
+describe upstream patterns; they do not establish access to or control of this
+operator's deployment.
 
 At a generic level, an Ansible-managed Docker deployment must:
 
