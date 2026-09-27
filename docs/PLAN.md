@@ -229,6 +229,9 @@ and explicit target-calendar authorization are available.
   - [x] Document the current Docker runtime contract for an etke/MDAD-first
         deployment ([docs/deployment-docker.md](./deployment-docker.md)); the
         exact MDAD integration, image publication, and pilot gates remain open.
+  - [ ] Confirm pull-request CI builds both images from their declared Docker
+        contexts without publishing; the smoke job is added locally, but
+        successful runner evidence is pending.
 - [ ] Upgrade/migration story.
 - [ ] Compatibility matrix: Element Web/Desktop and other tested clients.
 - [ ] Performance testing with large calendars and recurrence.
