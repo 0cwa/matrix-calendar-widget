@@ -103,6 +103,7 @@ describe('CalendarGatewayController', () => {
               <d:prop>
                 <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
                 <d:displayname>Team events</d:displayname>
+                <c:calendar-description>Planning &amp; review</c:calendar-description>
                 <a:calendar-color>#336699ff</a:calendar-color>
                 <c:supported-calendar-component-set>
                   <c:comp name="VEVENT"/>
@@ -126,6 +127,7 @@ describe('CalendarGatewayController', () => {
       {
         id: 'https://radicale.example.test/alice/team/',
         name: 'Team events',
+        description: 'Planning & review',
         color: '#336699ff',
         readOnly: false,
       },
@@ -224,6 +226,120 @@ describe('CalendarGatewayController', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
 
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('updates only the calendar description after manage-calendar authorization', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch.mockResponseOnce(
+      multistatus(`
+        <d:response>
+          <d:href>/alice/team/</d:href>
+          <d:propstat>
+            <d:prop><c:calendar-description/></d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
+      `),
+      { status: 207 },
+    );
+
+    await expect(
+      createController().updateCalendarDescription(
+        userContext,
+        openIdCredential,
+        { description: 'Plan <Q&A>' },
+        roomId,
+        calendarId,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(forRoom).toHaveBeenCalledWith(userContext.userId, roomId);
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'manage-calendar',
+      calendarId,
+    });
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe(calendarId);
+    expect(init?.method).toBe('PROPPATCH');
+    expect(init?.body).toContain(
+      '<C:calendar-description>Plan &lt;Q&amp;A&gt;</C:calendar-description>',
+    );
+    expect(init?.body).not.toContain('displayname');
+    expect(init?.body).not.toContain('calendar-color');
+  });
+
+  it('denies description updates when manage-calendar is not allowed', async () => {
+    isAllowed.mockResolvedValue(false);
+
+    await expect(
+      createController().updateCalendarDescription(
+        userContext,
+        openIdCredential,
+        { description: 'Not allowed' },
+        roomId,
+        'https://radicale.example.test/alice/team/',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'manage-calendar',
+      calendarId: 'https://radicale.example.test/alice/team/',
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects description writes with missing or unrelated properties', async () => {
+    await expect(
+      createController().updateCalendarDescription(
+        userContext,
+        openIdCredential,
+        {},
+        roomId,
+        'https://radicale.example.test/alice/team/',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    await expect(
+      createController().updateCalendarDescription(
+        userContext,
+        openIdCredential,
+        { description: 'text', color: '#ffffff' } as { description?: unknown },
+        roomId,
+        'https://radicale.example.test/alice/team/',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(forRoom).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('accepts an empty description as a clear operation', async () => {
+    isAllowed.mockResolvedValue(true);
+    fetch.mockResponseOnce(
+      multistatus(`
+        <d:response>
+          <d:href>/alice/team/</d:href>
+          <d:propstat>
+            <d:prop><c:calendar-description/></d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
+      `),
+      { status: 207 },
+    );
+
+    await createController().updateCalendarDescription(
+      userContext,
+      openIdCredential,
+      { description: '' },
+      roomId,
+      'https://radicale.example.test/alice/team/',
+    );
+
+    expect(fetch.mock.calls[0][1]?.body).toContain(
+      '<D:remove><D:prop><C:calendar-description/></D:prop></D:remove>',
+    );
   });
 
   it('rejects an empty calendar rename before CalDAV access', async () => {

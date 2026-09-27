@@ -33,6 +33,7 @@ import {
   useDeleteCalendar,
   useDeleteCalendarEvent,
   useRenameCalendar,
+  useUpdateCalendarDescription,
   useUpdateCalendarEvent,
 } from './useCalendarMutations';
 import { useCalendarEvents, useCalendars } from './useCalendarQueries';
@@ -130,6 +131,28 @@ describe('calendar repository mutation hooks', () => {
     });
   });
 
+  it('refreshes active calendar queries after updating the description', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [{ ...calendar, description: 'Old description' }],
+    });
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        calendars: useCalendars(),
+        updateDescription: useUpdateCalendarDescription(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.calendars.loading);
+    await result.current.updateDescription('team', 'New description');
+
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([
+        { ...calendar, description: 'New description' },
+      ]);
+    });
+  });
+
   it('refreshes active calendar queries after delete', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
@@ -160,6 +183,7 @@ describe('calendar repository mutation hooks', () => {
       listCalendars: vi.fn().mockImplementation(async () => calendars),
       createCalendar: vi.fn().mockResolvedValue(calendar),
       renameCalendar: vi.fn().mockResolvedValue(undefined),
+      updateCalendarDescription: vi.fn().mockResolvedValue(undefined),
       deleteCalendar: vi.fn().mockImplementation(async () => {
         calendars = [];
         events = [];
@@ -273,6 +297,7 @@ describe('calendar repository mutation hooks', () => {
       listCalendars: vi.fn().mockResolvedValue([calendar]),
       createCalendar: vi.fn().mockResolvedValue(calendar),
       renameCalendar: vi.fn().mockResolvedValue(undefined),
+      updateCalendarDescription: vi.fn().mockResolvedValue(undefined),
       deleteCalendar: vi.fn().mockResolvedValue(undefined),
       listEvents,
       getEvent: vi.fn().mockResolvedValue(event),

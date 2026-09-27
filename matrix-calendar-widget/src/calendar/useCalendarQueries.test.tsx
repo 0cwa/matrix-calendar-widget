@@ -64,6 +64,9 @@ function createRepository(
     listCalendars: vi.fn().mockResolvedValue([]),
     createCalendar: vi.fn().mockRejectedValue(new Error('not configured')),
     renameCalendar: vi.fn().mockRejectedValue(new Error('not configured')),
+    updateCalendarDescription: vi
+      .fn()
+      .mockRejectedValue(new Error('not configured')),
     deleteCalendar: vi.fn().mockRejectedValue(new Error('not configured')),
     listEvents: vi.fn().mockResolvedValue([]),
     getEvent: vi.fn().mockRejectedValue(new Error('not configured')),

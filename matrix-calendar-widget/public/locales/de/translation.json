@@ -71,6 +71,14 @@
       "submit": "Kalender löschen",
       "title": "Kalender löschen"
     },
+    "description": {
+      "action": "Kalenderbeschreibung bearbeiten",
+      "calendar": "Kalender",
+      "error": "Die Kalenderbeschreibung konnte nicht gespeichert werden.",
+      "label": "Beschreibung",
+      "submit": "Beschreibung speichern",
+      "title": "Kalenderbeschreibung bearbeiten"
+    },
     "rename": {
       "action": "Kalender umbenennen",
       "calendar": "Kalender",

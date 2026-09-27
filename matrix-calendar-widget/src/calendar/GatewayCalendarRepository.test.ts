@@ -42,6 +42,20 @@ const event: CalendarEvent = {
 };
 
 describe('GatewayCalendarRepository', () => {
+  it('returns calendar descriptions from the gateway DTO', async () => {
+    const calendars = [
+      {
+        id: calendarId,
+        name: 'Team calendar',
+        description: 'Planning and review',
+        readOnly: false,
+      },
+    ];
+    const repository = createRepository(mockFetch(jsonResponse(calendars)));
+
+    await expect(repository.listCalendars()).resolves.toEqual(calendars);
+  });
+
   it('creates a calendar through the authenticated gateway', async () => {
     const createdCalendar = {
       id: 'https://radicale.example.test/alice/calendar-1/',
@@ -87,6 +101,37 @@ describe('GatewayCalendarRepository', () => {
       'MX-Identity delegated',
     );
     expect(init?.body).toBe(JSON.stringify({ name: 'Product calendar' }));
+  });
+
+  it('sends description-only updates through the authenticated gateway', async () => {
+    const fetchMock = mockFetch(new Response(null, { status: 204 }));
+    const repository = createRepository(fetchMock);
+
+    await expect(
+      repository.updateCalendarDescription(calendarId, 'Project planning'),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/v1/calendar/calendars/description?');
+    expect(url).toContain(`calendarId=${encodeURIComponent(calendarId)}`);
+    expect(init?.method).toBe('PATCH');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+    expect(init?.body).toBe(
+      JSON.stringify({ description: 'Project planning' }),
+    );
+  });
+
+  it('sends an empty description to clear the calendar property', async () => {
+    const fetchMock = mockFetch(new Response(null, { status: 204 }));
+    const repository = createRepository(fetchMock);
+
+    await repository.updateCalendarDescription(calendarId, '');
+
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({ description: '' }),
+    );
   });
 
   it('deletes a calendar through the authenticated gateway', async () => {

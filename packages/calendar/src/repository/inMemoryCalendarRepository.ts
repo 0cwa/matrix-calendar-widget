@@ -119,6 +119,22 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     });
   }
 
+  async updateCalendarDescription(
+    calendarId: CalendarId,
+    description: string,
+  ): Promise<void> {
+    const calendar = this.getWritableCalendar(calendarId);
+    const updated = { ...calendar };
+
+    if (description.length === 0) {
+      delete updated.description;
+    } else {
+      updated.description = description;
+    }
+
+    this.calendars.set(calendarId, updated);
+  }
+
   async deleteCalendar(calendarId: CalendarId): Promise<void> {
     this.getWritableCalendar(calendarId);
     this.calendars.delete(calendarId);

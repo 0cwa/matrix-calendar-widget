@@ -51,6 +51,11 @@ export interface CalendarRepository {
 
   renameCalendar(calendarId: CalendarId, name: string): Promise<void>;
 
+  updateCalendarDescription(
+    calendarId: CalendarId,
+    description: string,
+  ): Promise<void>;
+
   deleteCalendar(calendarId: CalendarId): Promise<void>;
 
   listEvents(

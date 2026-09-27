@@ -27,6 +27,7 @@ import { MeetingsToolbarDatePicker } from '../meetings/MeetingsToolbar/MeetingsT
 import { MeetingsToolbarSearch } from '../meetings/MeetingsToolbar/MeetingsToolbarSearch';
 import { CalendarCreateDialog } from './CalendarCreateDialog';
 import { CalendarDeleteDialog } from './CalendarDeleteDialog';
+import { CalendarDescriptionDialog } from './CalendarDescriptionDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 import { CalendarRenameDialog } from './CalendarRenameDialog';
 
@@ -53,6 +54,7 @@ export function CalendarToolbar({
   const [deleteCalendarOpen, setDeleteCalendarOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [descriptionOpen, setDescriptionOpen] = useState(false);
   const writableCalendars = calendars.data.filter(
     (calendar) => calendar.readOnly === false,
   );
@@ -94,6 +96,14 @@ export function CalendarToolbar({
           variant="outlined"
         >
           {t('calendars.rename.action', 'Rename calendar')}
+        </Button>
+
+        <Button
+          disabled={calendars.loading || writableCalendars.length === 0}
+          onClick={() => setDescriptionOpen(true)}
+          variant="outlined"
+        >
+          {t('calendars.description.action', 'Edit calendar description')}
         </Button>
 
         {showToolbarButtons && (
@@ -138,6 +148,12 @@ export function CalendarToolbar({
         calendars={calendars.data}
         onClose={() => setRenameOpen(false)}
         open={renameOpen}
+      />
+
+      <CalendarDescriptionDialog
+        calendars={calendars.data}
+        onClose={() => setDescriptionOpen(false)}
+        open={descriptionOpen}
       />
 
       <CalendarDeleteDialog

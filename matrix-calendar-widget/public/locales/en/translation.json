@@ -71,6 +71,14 @@
       "submit": "Delete calendar",
       "title": "Delete calendar"
     },
+    "description": {
+      "action": "Edit calendar description",
+      "calendar": "Calendar",
+      "error": "The calendar description could not be saved.",
+      "label": "Description",
+      "submit": "Save description",
+      "title": "Edit calendar description"
+    },
     "rename": {
       "action": "Rename calendar",
       "calendar": "Calendar",
