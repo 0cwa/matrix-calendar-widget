@@ -122,7 +122,7 @@ Calendar creation (#94), lightweight visibility controls (#96), and rename (#99)
 - [ ] Backup/recovery documentation.
 - [ ] Container images and deployment docs under fork-owned names.
   - [x] Document the current Docker build/runtime contracts and the generic operator-run etke/MDAD compatibility boundary.
-  - [x] Add non-publishing CI image-build smoke checks with fork-owned local tags; hosted build execution remains to be observed.
+  - [x] Add non-publishing CI image-build smoke checks with fork-owned local tags; PR #102 run 36316604092 passed both image build steps at `0da7f3345e603e808231a24cc2ed6d979bea987a` without publishing.
 - [ ] Upgrade/migration story.
 - [ ] Compatibility matrix: Element Web/Desktop and other tested clients.
 - [ ] Performance testing with large calendars and recurrence.
