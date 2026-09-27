@@ -223,6 +223,9 @@ and explicit target-calendar authorization are available.
       backup. This documentation does not configure backups or close other M8
       pilot gates.
 - [ ] Container images and deployment docs under fork-owned names.
+  - [x] Document the current Docker runtime contract for an etke/MDAD-first
+        deployment ([docs/deployment-docker.md](./deployment-docker.md)); the
+        exact MDAD integration, image publication, and pilot gates remain open.
 - [ ] Upgrade/migration story.
 - [ ] Compatibility matrix: Element Web/Desktop and other tested clients.
 - [ ] Performance testing with large calendars and recurrence.
