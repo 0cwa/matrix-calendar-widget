@@ -161,6 +161,36 @@ describe('InMemoryCalendarRepository', () => {
     });
   });
 
+  it('updates a writable calendar description while preserving other properties', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [{ ...calendars[0], description: 'Old description' }],
+    });
+
+    await repository.updateCalendarDescription('team', 'New description');
+
+    await expect(repository.listCalendars()).resolves.toEqual([
+      { ...calendars[0], description: 'New description' },
+    ]);
+  });
+
+  it('clears a writable calendar description when the input is empty', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [{ ...calendars[0], description: 'Old description' }],
+    });
+
+    await repository.updateCalendarDescription('team', '');
+
+    await expect(repository.listCalendars()).resolves.toEqual([calendars[0]]);
+  });
+
+  it('rejects updating a read-only calendar description', async () => {
+    const repository = createRepository();
+
+    await expect(
+      repository.updateCalendarDescription('readonly', 'Nope'),
+    ).rejects.toMatchObject({ code: 'calendar-read-only' });
+  });
+
   it('deletes a writable calendar and its events', async () => {
     const repository = createRepository();
 

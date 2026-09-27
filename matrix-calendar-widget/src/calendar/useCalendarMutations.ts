@@ -58,6 +58,22 @@ export function useRenameCalendar(): (
   );
 }
 
+export function useUpdateCalendarDescription(): (
+  calendarId: CalendarId,
+  description: string,
+) => Promise<void> {
+  const repository = useCalendarRepository();
+  const invalidate = useInvalidateCalendarRepository();
+
+  return useCallback(
+    async (calendarId: CalendarId, description: string) => {
+      await repository.updateCalendarDescription(calendarId, description);
+      invalidate();
+    },
+    [invalidate, repository],
+  );
+}
+
 export function useDeleteCalendar(): (calendarId: CalendarId) => Promise<void> {
   const repository = useCalendarRepository();
   const invalidate = useInvalidateCalendarRepository();

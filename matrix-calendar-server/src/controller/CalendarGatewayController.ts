@@ -117,6 +117,7 @@ export class CalendarGatewayController {
             calendar.displayName ?? calendar.href,
             calendar.color,
             calendar.readOnly,
+            calendar.description,
           ),
       );
     });
@@ -162,7 +163,65 @@ export class CalendarGatewayController {
         calendar.displayName ?? name,
         calendar.color,
         calendar.readOnly,
+        calendar.description,
       );
+    });
+  }
+
+  @Patch('calendars/description')
+  async updateCalendarDescription(
+    @UserContextParam() userContext: IUserContext,
+    @MatrixOpenIdCredentialParam()
+    openIdCredential: IMatrixOpenIdCredential | undefined,
+    @Body() input: { description?: unknown } | undefined,
+    @Query('roomId') roomId?: string,
+    @Query('calendarId') calendarId?: string,
+  ): Promise<void> {
+    if (!input || Object.keys(input).length !== 1) {
+      throw new BadRequestException(
+        'calendar description must be the only string property',
+      );
+    }
+    const description = input.description;
+    if (
+      !Object.prototype.hasOwnProperty.call(input, 'description') ||
+      typeof description !== 'string'
+    ) {
+      throw new BadRequestException(
+        'calendar description must be the only string property',
+      );
+    }
+
+    const requiredRoomId = this.requireQuery(roomId, 'roomId');
+    const normalizedCalendarId = this.normalizeRadicaleUrl(
+      this.requireQuery(calendarId, 'calendarId'),
+      'calendarId',
+    );
+    const authorization = this.authorizationFactory.forRoom(
+      userContext.userId,
+      requiredRoomId,
+    );
+    if (
+      !(await authorization.isAllowed({
+        action: 'manage-calendar',
+        calendarId: normalizedCalendarId,
+      }))
+    ) {
+      throw new ForbiddenException(
+        'Not allowed to manage calendars for this Matrix room',
+      );
+    }
+
+    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+      userContext,
+      openIdCredential,
+    );
+
+    await this.runCalDav(async () => {
+      await new CalDavDiscoveryClient(
+        this.requireRadicaleBaseUrl(),
+        credentialProvider,
+      ).updateCalendarDescription(normalizedCalendarId, description);
     });
   }
 

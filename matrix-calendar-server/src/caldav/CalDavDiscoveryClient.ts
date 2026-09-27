@@ -20,6 +20,7 @@ import { CalDavCredentialProvider } from './CalDavCredentialProvider';
 export type DiscoveredCalDavCalendar = {
   href: string;
   displayName?: string;
+  description?: string;
   color?: string;
   components?: string[];
   readOnly?: boolean;
@@ -76,6 +77,7 @@ const CALENDARS_BODY = `<?xml version="1.0" encoding="utf-8" ?>
   <D:prop>
     <D:resourcetype/>
     <D:displayname/>
+    <C:calendar-description/>
     <D:current-user-privilege-set/>
     <C:supported-calendar-component-set/>
     <A:calendar-color/>
@@ -104,6 +106,18 @@ function renameCalendarBody(displayName: string): string {
       <D:displayname>${escapeXmlText(displayName)}</D:displayname>
     </D:prop>
   </D:set>
+</D:propertyupdate>`;
+}
+
+function updateCalendarDescriptionBody(description: string): string {
+  const property =
+    description.length === 0
+      ? `<D:remove><D:prop><C:calendar-description/></D:prop></D:remove>`
+      : `<D:set><D:prop><C:calendar-description>${escapeXmlText(description)}</C:calendar-description></D:prop></D:set>`;
+
+  return `<?xml version="1.0" encoding="utf-8" ?>
+<D:propertyupdate xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  ${property}
 </D:propertyupdate>`;
 }
 
@@ -210,6 +224,49 @@ export class CalDavDiscoveryClient {
     }
   }
 
+  async updateCalendarDescription(
+    calendarUrl: string,
+    description: string,
+  ): Promise<void> {
+    const credentialHeaders = await this.credentialProvider.getRequestHeaders();
+    const headers = new Headers(credentialHeaders);
+    headers.set('Content-Type', 'application/xml; charset=utf-8');
+
+    const response = await this.fetchImpl(calendarUrl, {
+      method: 'PROPPATCH',
+      headers,
+      body: updateCalendarDescriptionBody(description),
+    });
+
+    if (!response.ok) {
+      throw new CalDavDiscoveryError(
+        `CalDAV PROPPATCH failed with status ${response.status}`,
+        response.status,
+        calendarUrl,
+      );
+    }
+
+    if (response.status === 207) {
+      const propertyStatus = propPatchPropertyStatus(
+        await response.text(),
+        'calendar-description',
+      );
+      if (
+        propertyStatus === undefined ||
+        propertyStatus < 200 ||
+        propertyStatus >= 300
+      ) {
+        throw new CalDavDiscoveryError(
+          propertyStatus === undefined
+            ? 'CalDAV PROPPATCH did not report calendar-description status'
+            : `CalDAV PROPPATCH failed for calendar-description with status ${propertyStatus}`,
+          propertyStatus ?? response.status,
+          calendarUrl,
+        );
+      }
+    }
+  }
+
   async deleteCalendar(calendarUrl: string): Promise<void> {
     const credentialHeaders = await this.credentialProvider.getRequestHeaders();
     const response = await this.fetchImpl(calendarUrl, {
@@ -255,6 +312,7 @@ export class CalDavDiscoveryClient {
         {
           href: new URL(href, calendarHomeUrl).toString(),
           displayName: textValue(properties.displayname),
+          description: textValue(properties['calendar-description']),
           color: textValue(properties['calendar-color']),
           components,
           readOnly: readOnlyValue(properties['current-user-privilege-set']),

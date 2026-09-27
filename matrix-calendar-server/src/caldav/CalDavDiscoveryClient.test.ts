@@ -65,6 +65,7 @@ describe('CalDavDiscoveryClient', () => {
             <d:prop>
               <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
               <d:displayname>Team events</d:displayname>
+              <c:calendar-description>Planning &amp; review</c:calendar-description>
               <a:calendar-color>#336699ff</a:calendar-color>
               <c:supported-calendar-component-set>
                 <c:comp name="VEVENT"/>
@@ -107,6 +108,7 @@ describe('CalDavDiscoveryClient', () => {
         {
           href: 'https://radicale.example.test/alice/events/',
           displayName: 'Team events',
+          description: 'Planning & review',
           color: '#336699ff',
           components: ['VEVENT', 'VTODO'],
           readOnly: false,
@@ -159,6 +161,7 @@ describe('CalDavDiscoveryClient', () => {
         {
           href: 'https://radicale.example.test/home/alice/default/',
           displayName: undefined,
+          description: undefined,
           color: undefined,
           components: undefined,
           readOnly: undefined,
@@ -198,6 +201,10 @@ describe('CalDavDiscoveryClient', () => {
             </d:prop>
             <d:status>HTTP/1.1 403 Forbidden</d:status>
           </d:propstat>
+          <d:propstat>
+            <d:prop><c:calendar-description/></d:prop>
+            <d:status>HTTP/1.1 403 Forbidden</d:status>
+          </d:propstat>
         </d:response>
       `),
     );
@@ -212,6 +219,7 @@ describe('CalDavDiscoveryClient', () => {
       {
         href: 'https://radicale.example.test/home/alice/team/',
         displayName: 'Team events',
+        description: undefined,
         color: undefined,
         components: undefined,
         readOnly: undefined,
@@ -384,6 +392,122 @@ describe('CalDavDiscoveryClient', () => {
     ).rejects.toEqual(
       new CalDavDiscoveryError(
         'CalDAV PROPPATCH failed for displayname with status 403',
+        403,
+        'https://radicale.example.test/alice/team/',
+      ),
+    );
+  });
+
+  it('sets only the calendar description and escapes XML text', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/</d:href>
+              <d:propstat>
+                <d:prop><c:calendar-description/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).updateCalendarDescription(
+        'https://radicale.example.test/alice/team/',
+        'Plan <Q&A>',
+      ),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://radicale.example.test/alice/team/');
+    expect(init?.method).toBe('PROPPATCH');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'Basic delegated',
+    );
+    expect(init?.body).toContain(
+      '<C:calendar-description>Plan &lt;Q&amp;A&gt;</C:calendar-description>',
+    );
+    expect(init?.body).not.toContain('displayname');
+    expect(init?.body).not.toContain('calendar-color');
+    expect(init?.body).not.toContain('timezone');
+  });
+
+  it('removes calendar-description when the submitted description is empty', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/</d:href>
+              <d:propstat>
+                <d:prop><c:calendar-description/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await new CalDavDiscoveryClient(
+      'https://radicale.example.test/',
+      credentialProvider,
+      fetchMock,
+    ).updateCalendarDescription(
+      'https://radicale.example.test/alice/team/',
+      '',
+    );
+
+    expect(fetchMock.mock.calls[0][1]?.body).toContain(
+      '<D:remove><D:prop><C:calendar-description/></D:prop></D:remove>',
+    );
+    expect(fetchMock.mock.calls[0][1]?.body).not.toContain('<D:set>');
+  });
+
+  it('rejects a 207 response when calendar-description alone failed', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/</d:href>
+              <d:propstat>
+                <d:prop><d:displayname/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+              <d:propstat>
+                <d:prop><c:calendar-description/></d:prop>
+                <d:status>HTTP/1.1 403 Forbidden</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).updateCalendarDescription(
+        'https://radicale.example.test/alice/team/',
+        'Updated description',
+      ),
+    ).rejects.toEqual(
+      new CalDavDiscoveryError(
+        'CalDAV PROPPATCH failed for calendar-description with status 403',
         403,
         'https://radicale.example.test/alice/team/',
       ),
