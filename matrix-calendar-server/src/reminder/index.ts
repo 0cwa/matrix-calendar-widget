@@ -17,9 +17,13 @@
 export {
   CanonicalReminderResolutionError,
   resolveCanonicalReminderIdentity,
+  resolveCanonicalReminderIdentityFromResource,
 } from './CanonicalReminderIdentityResolver';
 export type {
   CanonicalReminderIdentity,
+  CanonicalReminderLookupIdentity,
+  CanonicalReminderDeliveryResolution,
+  CanonicalReminderResourceData,
   CanonicalReminderResolution,
   CanonicalReminderResolutionErrorCode,
 } from './CanonicalReminderIdentityResolver';

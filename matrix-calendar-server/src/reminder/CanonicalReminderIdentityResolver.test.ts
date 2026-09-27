@@ -18,8 +18,11 @@ import fs from 'fs';
 import path from 'path';
 import {
   CanonicalReminderIdentity,
+  CanonicalReminderLookupIdentity,
+  CanonicalReminderResourceData,
   CanonicalReminderResolutionError,
   resolveCanonicalReminderIdentity,
+  resolveCanonicalReminderIdentityFromResource,
 } from './CanonicalReminderIdentityResolver';
 
 const resource = fs.readFileSync(
@@ -29,6 +32,11 @@ const resource = fs.readFileSync(
   ),
   'utf8',
 );
+
+const canonicalResource: CanonicalReminderResourceData = {
+  calendarId: 'team-calendar',
+  icalendar: resource,
+};
 
 const masterIdentity: CanonicalReminderIdentity = {
   calendarId: 'team-calendar',
@@ -239,6 +247,111 @@ describe('resolveCanonicalReminderIdentity', () => {
       expect(JSON.stringify(error)).not.toContain('Private');
       expect((error as Error).message).not.toContain('Private');
     }
+  });
+});
+
+describe('resolveCanonicalReminderIdentityFromResource', () => {
+  it('resolves the exact alarm on a detached recurrence component', () => {
+    const deliveryIdentity: CanonicalReminderLookupIdentity = {
+      ...overrideIdentity,
+      triggerOrdinal: 0,
+    };
+
+    expect(
+      resolveCanonicalReminderIdentityFromResource(
+        deliveryIdentity,
+        canonicalResource,
+      ),
+    ).toEqual({
+      resolved: true,
+      identity: overrideIdentity,
+      triggerOrdinal: 0,
+    });
+  });
+
+  it('returns unresolved when the resource identity does not match exactly', () => {
+    expect(
+      resolveCanonicalReminderIdentityFromResource(
+        { ...overrideIdentity, recurrenceId: masterIdentity.recurrenceId },
+        canonicalResource,
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveCanonicalReminderIdentityFromResource(
+        { ...overrideIdentity, eventUid: 'missing@example.test' },
+        canonicalResource,
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveCanonicalReminderIdentityFromResource(
+        { ...overrideIdentity, alarmUid: 'missing-alarm@example.test' },
+        canonicalResource,
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveCanonicalReminderIdentityFromResource(
+        overrideIdentity,
+        { ...canonicalResource, calendarId: 'other-calendar' },
+      ),
+    ).toBeUndefined();
+  });
+
+  it('returns unresolved when event or alarm matches are ambiguous', () => {
+    const duplicateOverride = resource.replace(
+      'BEGIN:VEVENT\nUID:unrelated@example.test',
+      'BEGIN:VEVENT\nUID:team-planning@example.test\nDTSTAMP:20260926T120000Z\nRECURRENCE-ID;TZID=Europe/Stockholm:20261012T090000\nDTSTART;TZID=Europe/Stockholm:20261012T130000\nDTEND;TZID=Europe/Stockholm:20261012T140000\nBEGIN:VALARM\nUID:override-alarm@example.test\nACTION:DISPLAY\nTRIGGER:-PT5M\nEND:VALARM\nEND:VEVENT\nBEGIN:VEVENT\nUID:unrelated@example.test',
+    );
+    expect(
+      resolveCanonicalReminderIdentityFromResource(
+        overrideIdentity,
+        { ...canonicalResource, icalendar: duplicateOverride },
+      ),
+    ).toBeUndefined();
+
+    const duplicateAlarm = resource.replace(
+      'END:VALARM\nEND:VEVENT',
+      'END:VALARM\nBEGIN:VALARM\nUID:master-alarm@example.test\nACTION:DISPLAY\nTRIGGER:-PT5M\nEND:VALARM\nEND:VEVENT',
+    );
+    expect(
+      resolveCanonicalReminderIdentityFromResource(
+        masterIdentity,
+        { ...canonicalResource, icalendar: duplicateAlarm },
+      ),
+    ).toBeUndefined();
+  });
+
+  it('matches only trigger ordinals present in VALARM REPEAT and DURATION', () => {
+    const repeatedAlarmResource = resource.replace(
+      'TRIGGER:-PT15M',
+      'TRIGGER:-PT15M\nREPEAT:1\nDURATION:PT5M',
+    );
+    const repeatedResource = {
+      ...canonicalResource,
+      icalendar: repeatedAlarmResource,
+    };
+
+    expect(
+      resolveCanonicalReminderIdentityFromResource(
+        { ...masterIdentity, triggerOrdinal: 1 },
+        repeatedResource,
+      ),
+    ).toEqual({
+      resolved: true,
+      identity: masterIdentity,
+      triggerOrdinal: 1,
+    });
+    expect(
+      resolveCanonicalReminderIdentityFromResource(
+        { ...masterIdentity, triggerOrdinal: 2 },
+        repeatedResource,
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveCanonicalReminderIdentityFromResource(
+        { ...masterIdentity, triggerOrdinal: 1 },
+        canonicalResource,
+      ),
+    ).toBeUndefined();
   });
 });
 

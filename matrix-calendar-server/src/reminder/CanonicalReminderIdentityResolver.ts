@@ -17,7 +17,10 @@
 import { CalendarEventDateTime } from '@matrix-calendar-widget/calendar';
 import ICAL from 'ical.js';
 import { ICalendarEventCodec } from '../caldav/ICalendarEventCodec';
-import { RoomReminderConfiguration } from './RoomReminderStore';
+import {
+  ReminderDeliveryIdentity,
+  RoomReminderConfiguration,
+} from './RoomReminderStore';
 
 export type CanonicalReminderIdentity = Pick<
   RoomReminderConfiguration,
@@ -27,6 +30,22 @@ export type CanonicalReminderIdentity = Pick<
 export type CanonicalReminderResolution = {
   resolved: true;
   identity: CanonicalReminderIdentity;
+};
+
+/** A stored configuration may omit the delivery-specific trigger ordinal. */
+export type CanonicalReminderLookupIdentity = CanonicalReminderIdentity &
+  Partial<Pick<ReminderDeliveryIdentity, 'triggerOrdinal'>>;
+
+/** Raw CalDAV resource data and the collection it was read from. */
+export type CanonicalReminderResourceData = {
+  calendarId: string;
+  icalendar: string;
+};
+
+export type CanonicalReminderDeliveryResolution = {
+  resolved: true;
+  identity: CanonicalReminderIdentity;
+  triggerOrdinal: number;
 };
 
 export type CanonicalReminderResolutionErrorCode =
@@ -49,6 +68,52 @@ export class CanonicalReminderResolutionError extends Error {
 }
 
 /**
+ * Resolves one alarm firing against an already-fetched raw CalDAV resource.
+ * The collection ID is checked separately because it is not present in ICS.
+ * This function performs no IO and returns undefined unless exactly one
+ * event, recurrence component, and DISPLAY alarm match.
+ * It verifies identity only; callers must confirm the alarm has a usable
+ * TRIGGER and is schedulable (including `triggerEditable`) before scheduling.
+ */
+export function resolveCanonicalReminderIdentityFromResource(
+  identity: CanonicalReminderLookupIdentity,
+  resource: CanonicalReminderResourceData,
+): CanonicalReminderDeliveryResolution | undefined {
+  const triggerOrdinal = identity.triggerOrdinal ?? 0;
+  if (
+    resource.calendarId !== identity.calendarId ||
+    !Number.isSafeInteger(triggerOrdinal) ||
+    triggerOrdinal < 0
+  ) {
+    return undefined;
+  }
+
+  let alarm: ICAL.Component;
+  try {
+    ({ alarm } = resolveCanonicalReminderComponents(
+      identity,
+      resource.icalendar,
+    ));
+  } catch {
+    return undefined;
+  }
+  if (!alarmSupportsTriggerOrdinal(alarm, triggerOrdinal)) {
+    return undefined;
+  }
+
+  return {
+    resolved: true,
+    identity: {
+      calendarId: identity.calendarId,
+      eventUid: identity.eventUid,
+      recurrenceId: identity.recurrenceId,
+      alarmUid: identity.alarmUid,
+    },
+    triggerOrdinal,
+  };
+}
+
+/**
  * Confirms an inert reminder identity against one already-fetched canonical
  * CalDAV resource. The function performs no IO and returns only identity data;
  * callers must still authorize delivery at send time.
@@ -57,6 +122,17 @@ export function resolveCanonicalReminderIdentity(
   identity: CanonicalReminderIdentity,
   canonicalCalendarData: string,
 ): CanonicalReminderResolution {
+  resolveCanonicalReminderComponents(identity, canonicalCalendarData);
+  return {
+    resolved: true,
+    identity: { ...identity },
+  };
+}
+
+function resolveCanonicalReminderComponents(
+  identity: CanonicalReminderIdentity,
+  canonicalCalendarData: string,
+): { event: ICAL.Component; alarm: ICAL.Component } {
   let calendar: ICAL.Component;
   try {
     calendar = ICAL.Component.fromString(canonicalCalendarData);
@@ -86,13 +162,11 @@ export function resolveCanonicalReminderIdentity(
   }
 
   const event = selectEvent(matchingEvents, identity.recurrenceId);
-  if (!selectDisplayAlarm(event, identity.alarmUid)) {
+  const alarm = selectDisplayAlarm(event, identity.alarmUid);
+  if (!alarm) {
     throw new CanonicalReminderResolutionError('alarm-not-found');
   }
-  return {
-    resolved: true,
-    identity: { ...identity },
-  };
+  return { event, alarm };
 }
 
 function readEventUid(event: ICAL.Component): string | undefined {
@@ -185,6 +259,36 @@ function selectDisplayAlarm(
     throw new CanonicalReminderResolutionError('ambiguous-alarm');
   }
   return matches[0];
+}
+
+function alarmSupportsTriggerOrdinal(
+  alarm: ICAL.Component,
+  triggerOrdinal: number,
+): boolean {
+  const repeats = alarm.getAllProperties('repeat');
+  const durations = alarm.getAllProperties('duration');
+  if (repeats.length === 0 && durations.length === 0) {
+    return triggerOrdinal === 0;
+  }
+  if (repeats.length !== 1 || durations.length !== 1) {
+    return false;
+  }
+
+  const repeatCount = Number(repeats[0].getFirstValue());
+  const duration = durations[0].getFirstValue();
+  if (
+    !Number.isSafeInteger(repeatCount) ||
+    repeatCount < 1 ||
+    !(duration instanceof ICAL.Duration)
+  ) {
+    return false;
+  }
+  const durationSeconds = duration.toSeconds();
+  return (
+    Number.isSafeInteger(durationSeconds) &&
+    durationSeconds > 0 &&
+    triggerOrdinal <= repeatCount
+  );
 }
 
 function readRecurrenceIdentity(
