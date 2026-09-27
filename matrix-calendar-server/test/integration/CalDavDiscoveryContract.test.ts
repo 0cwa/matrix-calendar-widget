@@ -36,12 +36,11 @@ describeContract('CalDAV discovery contract', () => {
   const baseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
   const username = process.env.CALDAV_USERNAME ?? 'calendar';
   const password = process.env.CALDAV_PASSWORD ?? 'calendar-dev-password';
+  const credentials = basicCredentialProvider(username, password);
+  const discoveryClient = new CalDavDiscoveryClient(baseUrl, credentials);
 
   it('discovers a real VEVENT collection', async () => {
-    const result = await new CalDavDiscoveryClient(
-      baseUrl,
-      basicCredentialProvider(username, password),
-    ).discover();
+    const result = await discoveryClient.discover();
 
     expect(result.calendars).toEqual(
       expect.arrayContaining([
@@ -51,6 +50,38 @@ describeContract('CalDAV discovery contract', () => {
         }),
       ]),
     );
+  });
+
+  it('sets, reads, and clears calendar-description on a real collection', async () => {
+    const calendarUrl = new URL(
+      `${encodeURIComponent(username)}/contract-calendar/`,
+      baseUrl,
+    ).toString();
+    const description = '  Planning <Q&A> & follow-up  ';
+    let cleared = false;
+
+    try {
+      await discoveryClient.updateCalendarDescription(calendarUrl, description);
+
+      const afterSet = await discoveryClient.discover();
+      expect(
+        afterSet.calendars.find((calendar) => calendar.href === calendarUrl)
+          ?.description,
+      ).toBe(description);
+
+      await discoveryClient.updateCalendarDescription(calendarUrl, '');
+      cleared = true;
+
+      const afterClear = await discoveryClient.discover();
+      expect(
+        afterClear.calendars.find((calendar) => calendar.href === calendarUrl)
+          ?.description,
+      ).toBeUndefined();
+    } finally {
+      if (!cleared) {
+        await discoveryClient.updateCalendarDescription(calendarUrl, '');
+      }
+    }
   });
 
   it('fails closed for invalid Radicale credentials', async () => {
