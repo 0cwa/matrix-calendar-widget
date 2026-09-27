@@ -14,6 +14,13 @@
       }
     }
   },
+  "calendarCommandHelp": [
+    "<p>Kalenderbefehle:</p>",
+    "<ul>",
+    "<li><code>!calendar help</code> (Diese Hilfe anzeigen.)</li>",
+    "</ul>",
+    "<p>Für die vollständige Kalenderverwaltung nutze das Matrix Calendar Widget in Clients, die Widgets unterstützen.</p>"
+  ],
   "commandErrors": {
     "badCommand": "Der Hilfe-Befehl ist leider nicht richtig. Schreibe <code>{{trigger}} help</code>",
     "badLanguageCode": "Die ausgewählte Sprache wird nicht unterstützt",
@@ -28,13 +35,6 @@
     "<li><code>!meeting setup</code> (Fügt den Kalender zum Raum hinzu.)</li>",
     "<li><code>!meeting status</code> (Überprüft die Fähigkeit, den Kalender hinzufügen zu können.)</li>",
     "</ul>"
-  ],
-  "calendarCommandHelp": [
-    "<p>Kalenderbefehle:</p>",
-    "<ul>",
-    "<li><code>!calendar help</code> (Diese Hilfe anzeigen.)</li>",
-    "</ul>",
-    "<p>Für die vollständige Kalenderverwaltung nutze das Matrix Calendar Widget in Clients, die Widgets unterstützen.</p>"
   ],
   "meeting": {
     "invite": {

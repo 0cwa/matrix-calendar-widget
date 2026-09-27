@@ -14,6 +14,13 @@
       }
     }
   },
+  "calendarCommandHelp": [
+    "<p>Calendar commands:</p>",
+    "<ul>",
+    "<li><code>!calendar help</code> (Show this help.)</li>",
+    "</ul>",
+    "<p>For full calendar management, use the Matrix Calendar widget in clients that support widgets.</p>"
+  ],
   "commandErrors": {
     "badCommand": "Bad command, try <code>{{trigger}} help</code>",
     "badLanguageCode": "Language code is not supported",
@@ -28,13 +35,6 @@
     "<li><code>!meeting setup</code> (Adds the calendar to the room.)</li>",
     "<li><code>!meeting status</code> (Checks the ability to add the calendar.)</li>",
     "</ul>"
-  ],
-  "calendarCommandHelp": [
-    "<p>Calendar commands:</p>",
-    "<ul>",
-    "<li><code>!calendar help</code> (Show this help.)</li>",
-    "</ul>",
-    "<p>For full calendar management, use the Matrix Calendar widget in clients that support widgets.</p>"
   ],
   "meeting": {
     "invite": {
