@@ -6,7 +6,7 @@ This is the short-lived execution snapshot. `docs/PLAN.md` is the durable milest
 
 ## Current phase
 
-**M3 is complete. M4 color editing has merged; the next in-repository slices are mixed-collection compatibility and administrator CalDAV URL diagnostics. M5 recurrence work can proceed in bounded slices.**
+**M3 is complete. M4 color editing and mixed-collection compatibility are complete; administrator CalDAV URL diagnostics remain open, and timezone editing remains deferred. M5 recurrence work can proceed in bounded slices.**
 
 ADR010 / PR #104 selected a mixed principal model: widget calendars remain user-scoped, while the bot MVP uses room-owned calendars under an application principal. Room-owned reads and writes remain blocked until a non-password server-to-Radicale authentication path for that principal is defined and tested. ADR009's user OpenID delegation does not provide application-principal credentials. No etke-managed host deployment has been verified.
 
@@ -49,9 +49,10 @@ Merged on `main`:
 - calendar visibility, VEVENT-only creation, and writable-calendar rename (PRs #94, #96, #99),
 - safe VEVENT-only calendar deletion (issue #100 closed by PR #101),
 - description discovery and description-only editing through the user-scoped gateway (PR #106),
-- calendar color editing through the user-scoped gateway (PR #108).
+- calendar color editing through the user-scoped gateway (PR #108),
+- mixed-collection compatibility notice and non-destructive VEVENT use (PR #109).
 
-Calendar timezone editing is deferred. The mixed-collection compatibility notice and administrator CalDAV URL/copy diagnostics remain open under #5. Discovery currently omits collections whose advertised component set excludes VEVENT; verify the unsupported-only behavior and its contract coverage before marking the related plan criteria complete. Issue #5 remains open and stale: it still lists PR #101 as active and leaves description, color, timezone, and deletion unchecked, although PRs #101, #106, and #108 have merged.
+Calendar timezone editing is deferred. PR #109 verifies mixed-collection notice behavior, preserves sibling VTODO data during VEVENT edits, and keeps known collections without VEVENT out of discovery. The separate VJOURNAL-only and VTODO-only plan criteria remain unchecked. Administrator CalDAV URL/copy diagnostics are the remaining M4 item under #5. Issue #5 remains open with a stale checklist: it still lists PR #101 as active and leaves merged description, color, mixed-notice, and deletion work unchecked.
 
 ### M7 — Non-widget fallback
 
@@ -94,7 +95,7 @@ Issue #29 remains open for a repository administrator to enable and verify the d
 
 ## Highest-priority next steps
 
-1. Continue M4 with the mixed-collection compatibility notice, then administrator CalDAV URL/copy diagnostics; keep timezone editing deferred.
+1. Continue M4 with administrator CalDAV URL/copy diagnostics; keep timezone editing deferred and the separate VJOURNAL-only/VTODO-only plan criteria unchecked until explicitly completed.
 2. Advance M5 through bounded recurrence and round-trip slices, adding DST and named-timezone regressions with each relevant behavior.
 3. In parallel, establish a writable source/release path for #48, then complete #45 against the tested user-delegation mode.
 4. Separately define/test application-principal Radicale authentication and implement the ADR010 room binding and membership/power checks for M6.
