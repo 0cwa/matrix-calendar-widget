@@ -86,6 +86,38 @@ describeContract('CalDAV discovery contract', () => {
     }
   });
 
+  it('sets, reads, and clears Apple calendar-color on a real collection', async () => {
+    const calendarUrl = new URL(
+      `${encodeURIComponent(username)}/contract-calendar/`,
+      baseUrl,
+    ).toString();
+    const color = '#A1b2C3';
+    let cleared = false;
+
+    try {
+      await discoveryClient.updateCalendarColor(calendarUrl, color);
+
+      const afterSet = await discoveryClient.discover();
+      expect(
+        afterSet.calendars.find((calendar) => calendar.href === calendarUrl)
+          ?.color,
+      ).toBe(color);
+
+      await discoveryClient.updateCalendarColor(calendarUrl, '');
+
+      const afterClear = await discoveryClient.discover();
+      expect(
+        afterClear.calendars.find((calendar) => calendar.href === calendarUrl)
+          ?.color,
+      ).toBeUndefined();
+      cleared = true;
+    } finally {
+      if (!cleared) {
+        await discoveryClient.updateCalendarColor(calendarUrl, '');
+      }
+    }
+  });
+
   it('fails closed for invalid Radicale credentials', async () => {
     await expect(
       new CalDavDiscoveryClient(

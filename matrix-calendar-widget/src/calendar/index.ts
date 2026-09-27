@@ -44,6 +44,7 @@ export {
   useDeleteCalendar,
   useDeleteCalendarEvent,
   useRenameCalendar,
+  useUpdateCalendarColor,
   useUpdateCalendarDescription,
   useUpdateCalendarEvent,
 } from './useCalendarMutations';

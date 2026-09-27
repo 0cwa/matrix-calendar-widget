@@ -576,6 +576,173 @@ describe('CalDavDiscoveryClient', () => {
     );
   });
 
+  it('sets only calendar-color and escapes XML text', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/</d:href>
+              <d:propstat>
+                <d:prop><a:calendar-color/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).updateCalendarColor(
+        'https://radicale.example.test/alice/team/',
+        '#Ab12cD',
+      ),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://radicale.example.test/alice/team/');
+    expect(init?.method).toBe('PROPPATCH');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'Basic delegated',
+    );
+    expect(init?.body).toContain(
+      '<A:calendar-color>#Ab12cD</A:calendar-color>',
+    );
+    expect(init?.body).not.toContain('calendar-description');
+    expect(init?.body).not.toContain('displayname');
+    expect(init?.body).not.toContain('timezone');
+  });
+
+  it('removes calendar-color on explicit clear and rejects other new values', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/</d:href>
+              <d:propstat>
+                <d:prop><a:calendar-color/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+    const client = new CalDavDiscoveryClient(
+      'https://radicale.example.test/',
+      credentialProvider,
+      fetchMock,
+    );
+
+    await client.updateCalendarColor(
+      'https://radicale.example.test/alice/team/',
+      '',
+    );
+    expect(fetchMock.mock.calls[0][1]?.body).toContain(
+      '<D:remove><D:prop><A:calendar-color/></D:prop></D:remove>',
+    );
+
+    for (const color of ['red', '#12345678', '#12345G', ' #123456']) {
+      await expect(
+        client.updateCalendarColor(
+          'https://radicale.example.test/alice/team/',
+          color,
+        ),
+      ).rejects.toMatchObject({
+        name: 'CalDavDiscoveryError',
+        message: 'Calendar color must be a six-digit hex color',
+      });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks calendar-color property status in a 207 response', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/</d:href>
+              <d:propstat>
+                <d:prop><d:displayname/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+              <d:propstat>
+                <d:prop><a:calendar-color/></d:prop>
+                <d:status>HTTP/1.1 403 Forbidden</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).updateCalendarColor(
+        'https://radicale.example.test/alice/team/',
+        '#123456',
+      ),
+    ).rejects.toEqual(
+      new CalDavDiscoveryError(
+        'CalDAV PROPPATCH failed for calendar-color with status 403',
+        403,
+        'https://radicale.example.test/alice/team/',
+      ),
+    );
+  });
+
+  it('matches the Apple calendar-color QName when other namespaces use the same local name', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:propstat>
+                <d:prop><x:calendar-color/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+              <d:propstat>
+                <d:prop><a:calendar-color/></d:prop>
+                <d:status>HTTP/1.1 403 Forbidden</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).updateCalendarColor(
+        'https://radicale.example.test/alice/team/',
+        '#123456',
+      ),
+    ).rejects.toEqual(
+      new CalDavDiscoveryError(
+        'CalDAV PROPPATCH failed for calendar-color with status 403',
+        403,
+        'https://radicale.example.test/alice/team/',
+      ),
+    );
+  });
+
   it('deletes a calendar collection with delegated credentials', async () => {
     const fetchMock = jest
       .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
@@ -714,6 +881,7 @@ function multistatus(body: string, davPrefix = 'd'): string {
   xmlns:${davPrefix}="DAV:"
   xmlns:c="urn:ietf:params:xml:ns:caldav"
   xmlns:a="http://apple.com/ns/ical/"
+  xmlns:x="urn:example:other"
 >
   ${body}
 </${davPrefix}:multistatus>`;

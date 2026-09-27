@@ -134,6 +134,35 @@ describe('GatewayCalendarRepository', () => {
     );
   });
 
+  it('sends color-only updates through the authenticated gateway', async () => {
+    const fetchMock = mockFetch(new Response(null, { status: 204 }));
+    const repository = createRepository(fetchMock);
+
+    await expect(
+      repository.updateCalendarColor(calendarId, '#Ab12cD'),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/v1/calendar/calendars/color?');
+    expect(url).toContain(`calendarId=${encodeURIComponent(calendarId)}`);
+    expect(init?.method).toBe('PATCH');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+    expect(init?.body).toBe(JSON.stringify({ color: '#Ab12cD' }));
+  });
+
+  it('sends an empty color as an explicit clear', async () => {
+    const fetchMock = mockFetch(new Response(null, { status: 204 }));
+    const repository = createRepository(fetchMock);
+
+    await repository.updateCalendarColor(calendarId, '');
+
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({ color: '' }),
+    );
+  });
+
   it('deletes a calendar through the authenticated gateway', async () => {
     const fetchMock = mockFetch(new Response(null, { status: 204 }));
     const repository = createRepository(fetchMock);

@@ -55,6 +55,17 @@
     "label": "{{date, datetime}}"
   },
   "calendars": {
+    "color": {
+      "action": "Kalenderfarbe bearbeiten",
+      "calendar": "Kalender",
+      "clear": "Farbe entfernen",
+      "error": "Die Kalenderfarbe konnte nicht gespeichert werden.",
+      "hint": "Gib eine sechsstellige Hex-Farbe ein, zum Beispiel #336699.",
+      "invalid": "Verwende eine sechsstellige Hex-Farbe im Format #RRGGBB.",
+      "label": "Farbe",
+      "submit": "Farbe speichern",
+      "title": "Kalenderfarbe bearbeiten"
+    },
     "create": {
       "action": "Kalender erstellen",
       "error": "Der Kalender konnte nicht erstellt werden.",

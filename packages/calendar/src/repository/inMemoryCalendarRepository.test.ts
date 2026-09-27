@@ -191,6 +191,58 @@ describe('InMemoryCalendarRepository', () => {
     ).rejects.toMatchObject({ code: 'calendar-read-only' });
   });
 
+  it('updates and clears color only for explicitly writable calendars', async () => {
+    const writable: Calendar = {
+      ...calendars[0],
+      color: '#123456',
+      readOnly: false,
+    };
+    const unknownPermission: Calendar = {
+      id: 'unknown',
+      name: 'Unknown permission',
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [writable, unknownPermission, calendars[1]],
+    });
+
+    await repository.updateCalendarColor('team', '#ABCDEF');
+    await expect(repository.listCalendars()).resolves.toEqual([
+      { ...writable, color: '#ABCDEF' },
+      unknownPermission,
+      calendars[1],
+    ]);
+
+    await repository.updateCalendarColor('team', '');
+    await expect(repository.listCalendars()).resolves.toEqual([
+      { ...calendars[0], readOnly: false },
+      unknownPermission,
+      calendars[1],
+    ]);
+  });
+
+  it('rejects invalid color values and unknown or read-only permissions', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [{ ...calendars[0], readOnly: false }, ...calendars.slice(1)],
+    });
+
+    await expect(
+      repository.updateCalendarColor('team', 'red'),
+    ).rejects.toMatchObject({ code: 'invalid-calendar-color' });
+    await expect(
+      repository.updateCalendarColor('team', '#12345678'),
+    ).rejects.toMatchObject({ code: 'invalid-calendar-color' });
+    await expect(
+      repository.updateCalendarColor('team', '#12345G'),
+    ).rejects.toMatchObject({ code: 'invalid-calendar-color' });
+    await expect(
+      repository.updateCalendarColor('readonly', '#123456'),
+    ).rejects.toMatchObject({ code: 'calendar-read-only' });
+    const unknownPermissionRepository = createRepository();
+    await expect(
+      unknownPermissionRepository.updateCalendarColor('team', '#123456'),
+    ).rejects.toMatchObject({ code: 'calendar-read-only' });
+  });
+
   it('deletes a writable calendar and its events', async () => {
     const repository = createRepository();
 
