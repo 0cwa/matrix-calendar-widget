@@ -24,8 +24,11 @@ const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
 
 describeContract('CalDAV discovery contract', () => {
+  let discoveryClient: CalDavDiscoveryClient;
+
   beforeAll(() => {
     fetchMock.disableMocks();
+    discoveryClient = new CalDavDiscoveryClient(baseUrl, credentials);
   });
 
   afterAll(() => {
@@ -37,7 +40,6 @@ describeContract('CalDAV discovery contract', () => {
   const username = process.env.CALDAV_USERNAME ?? 'calendar';
   const password = process.env.CALDAV_PASSWORD ?? 'calendar-dev-password';
   const credentials = basicCredentialProvider(username, password);
-  const discoveryClient = new CalDavDiscoveryClient(baseUrl, credentials);
 
   it('discovers a real VEVENT collection', async () => {
     const result = await discoveryClient.discover();
