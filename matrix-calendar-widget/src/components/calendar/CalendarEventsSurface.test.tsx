@@ -76,7 +76,7 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventsSurface />', () => {
-  it('shows a compatibility notice while rendering events from a mixed supported set', async () => {
+  it('keeps a generic compatibility notice when a mixed calendar is hidden', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [
         {
@@ -84,8 +84,13 @@ describe('<CalendarEventsSurface />', () => {
           name: 'Team calendar',
           supportedComponents: ['VEVENT', 'VTODO'],
         },
+        {
+          id: 'personal',
+          name: 'Personal calendar',
+          supportedComponents: ['VEVENT'],
+        },
       ],
-      events: [events[0]],
+      events,
     });
 
     render(
@@ -100,10 +105,25 @@ describe('<CalendarEventsSurface />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'This calendar supports other item types. The widget displays and edits VEVENT entries only.',
+    const notice = await screen.findByRole('alert');
+    expect(notice).toHaveTextContent(
+      'One or more calendars support additional item types. The widget displays and edits VEVENT entries only.',
     );
+    expect(notice).not.toHaveTextContent('Team calendar');
     expect(screen.getByText('Team planning')).toBeInTheDocument();
+    expect(screen.getByText('Dentist')).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: 'Team calendar' }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByText('Team planning')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText('Dentist')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'One or more calendars support additional item types.',
+    );
   });
 
   it.each([

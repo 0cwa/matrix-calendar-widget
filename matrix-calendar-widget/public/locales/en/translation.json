@@ -48,7 +48,7 @@
     },
     "empty": "No events scheduled that match the selected filters.",
     "loadError": "Calendar events could not be loaded.",
-    "mixedCompatibilityNotice": "This calendar supports other item types. The widget displays and edits VEVENT entries only.",
+    "mixedCompatibilityNotice": "One or more calendars support additional item types. The widget displays and edits VEVENT entries only.",
     "title": "Calendar events"
   },
   "calendarMonthPicker": {

@@ -100,7 +100,7 @@ export function CalendarEventsSurface({
           <Alert severity="info">
             {t(
               'calendarEvents.mixedCompatibilityNotice',
-              'This calendar supports other item types. The widget displays and edits VEVENT entries only.',
+              'One or more calendars support additional item types. The widget displays and edits VEVENT entries only.',
             )}
           </Alert>
         </Box>
