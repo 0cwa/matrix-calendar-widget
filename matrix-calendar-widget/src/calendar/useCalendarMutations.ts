@@ -58,6 +58,24 @@ export function useRenameCalendar(): (
   );
 }
 
+export function useDeleteCalendar(): (calendarId: CalendarId) => Promise<void> {
+  const repository = useCalendarRepository();
+  const invalidate = useInvalidateCalendarRepository();
+
+  return useCallback(
+    async (calendarId: CalendarId) => {
+      try {
+        await repository.deleteCalendar(calendarId);
+      } finally {
+        // A failed DELETE can still have changed the server before its response
+        // was lost or reported partial collection failures.
+        invalidate();
+      }
+    },
+    [invalidate, repository],
+  );
+}
+
 export function useCreateCalendarEvent(): (
   calendarId: CalendarId,
   input: CalendarEventInput,

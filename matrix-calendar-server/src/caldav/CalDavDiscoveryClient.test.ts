@@ -167,6 +167,58 @@ describe('CalDavDiscoveryClient', () => {
     });
   });
 
+  it('leaves calendar safety metadata unavailable when its propstats fail', async () => {
+    const fetchMock = createFetchMock(
+      principalResponse('/p/alice/'),
+      homeResponse('/home/alice/'),
+      multistatus(`
+        <d:response>
+          <d:href>/home/alice/team/</d:href>
+          <d:propstat>
+            <d:prop>
+              <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+              <d:displayname>Team events</d:displayname>
+            </d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+          <d:propstat>
+            <d:prop>
+              <c:supported-calendar-component-set>
+                <c:comp name="VEVENT"/>
+              </c:supported-calendar-component-set>
+            </d:prop>
+            <d:status>HTTP/1.1 403 Forbidden</d:status>
+          </d:propstat>
+          <d:propstat>
+            <d:prop>
+              <d:current-user-privilege-set>
+                <d:privilege><d:read/></d:privilege>
+                <d:privilege><d:write/></d:privilege>
+              </d:current-user-privilege-set>
+            </d:prop>
+            <d:status>HTTP/1.1 403 Forbidden</d:status>
+          </d:propstat>
+        </d:response>
+      `),
+    );
+
+    const result = await new CalDavDiscoveryClient(
+      'https://radicale.example.test/',
+      credentialProvider,
+      fetchMock,
+    ).discover();
+
+    expect(result.calendars).toEqual([
+      {
+        href: 'https://radicale.example.test/home/alice/team/',
+        displayName: 'Team events',
+        color: undefined,
+        components: undefined,
+        readOnly: undefined,
+      },
+    ]);
+  });
+
   it('marks collections read-only when DAV write privileges are absent', async () => {
     const fetchMock = createFetchMock(
       principalResponse('/p/alice/'),
@@ -333,6 +385,77 @@ describe('CalDavDiscoveryClient', () => {
       new CalDavDiscoveryError(
         'CalDAV PROPPATCH failed for displayname with status 403',
         403,
+        'https://radicale.example.test/alice/team/',
+      ),
+    );
+  });
+
+  it('deletes a calendar collection with delegated credentials', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(new Response('', { status: 204 }));
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).deleteCalendar('https://radicale.example.test/alice/team/'),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://radicale.example.test/alice/team/');
+    expect(init?.method).toBe('DELETE');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'Basic delegated',
+    );
+  });
+
+  it('fails with status and URL when DELETE is rejected', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(new Response('Forbidden', { status: 403 }));
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).deleteCalendar('https://radicale.example.test/alice/team/'),
+    ).rejects.toEqual(
+      new CalDavDiscoveryError(
+        'CalDAV DELETE failed with status 403',
+        403,
+        'https://radicale.example.test/alice/team/',
+      ),
+    );
+  });
+
+  it('rejects a DELETE multistatus because it reports member failures', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/locked.ics</d:href>
+              <d:status>HTTP/1.1 423 Locked</d:status>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).deleteCalendar('https://radicale.example.test/alice/team/'),
+    ).rejects.toEqual(
+      new CalDavDiscoveryError(
+        'CalDAV DELETE reported member failures',
+        207,
         'https://radicale.example.test/alice/team/',
       ),
     );
