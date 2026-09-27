@@ -22,11 +22,11 @@ Collection management is part of the product, but DAV vocabulary should stay mos
 
 ## Near-term priorities
 
-1. Close #48's external ADR009 OpenID-capable `radicale-auth-matrix` gap.
-2. Use that plugin in #45's real gateway/OpenID/non-member contract and close M2.
-3. While #48 is externally blocked, synchronize and finish #100 / PR #101: safe VEVENT-only calendar deletion through the existing repository/gateway seams. Calendar creation (#94), visibility controls (#96), and rename (#99) are merged.
-4. Reassess after safe delete before the next metadata/compatibility slice. Avoid broad generic WebDAV administration.
-5. Keep M3 regression coverage green; M3 is complete on `main` through PRs #70, #89, and #90.
+1. Add ADR009's Matrix OpenID credential mode to `radicale-auth-matrix`, preserving its existing password mode. First establish a writable upstream/fork/plugin source target; keep this LGPL-family plugin work outside the Apache application repository.
+2. Prove both auth modes in a minimal plugin-owned Synapse + locally built Radicale container stack. This focused contract requires no MAS, widget, or gateway.
+3. Pin the tested plugin artifact in this repository's `dev/compose.yaml`, then close #45 with the real gateway/OpenID/non-member contract and complete M2.
+4. In parallel, synchronize and finish #100 / PR #101: safe VEVENT-only calendar deletion through the existing repository/gateway seams. Calendar creation (#94), visibility controls (#96), and rename (#99) are merged.
+5. Reassess after safe delete before the next metadata/compatibility slice. Avoid broad generic WebDAV administration, and keep M3 regression coverage green (complete on `main` through PRs #70, #89, and #90).
 
 See [STATUS.md](./STATUS.md) for transient PR/CI details.
 

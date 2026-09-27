@@ -10,7 +10,7 @@ This file is the short-lived execution snapshot. `docs/PLAN.md` is the durable m
 
 The local review branch assembles M4 calendar management, M5 recurrence work, M6 room-binding/auth preflight and static-target widget UI, M7 `!calendar help`, and M8 free/busy privacy and chart-default preparation. This work is local only; it has not been pushed or merged to GitHub `main`, and it does not close the corresponding issues.
 
-The widget now has a real gateway-backed `CalendarRepository`, preservation-first VEVENT CRUD, visible conflict recovery, and a real two-client Radicale interoperability contract. The remaining M2 blocker is external: the pinned `etkecc/radicale-auth-matrix` plugin still only accepts Matrix passwords, while ADR009 requires short-lived Matrix OpenID delegation from the gateway.
+The widget now has a real gateway-backed `CalendarRepository`, preservation-first VEVENT CRUD, visible conflict recovery, and a real two-client Radicale interoperability contract. The pinned `etkecc/radicale-auth-matrix` plugin still only accepts Matrix passwords, while ADR009 requires short-lived Matrix OpenID delegation from the gateway. The next M2 slice is planned as a dual-mode plugin change plus a minimal Synapse/Radicale contract stack; this does not require MAS.
 
 M5 recurrence editing, same-resource instance/following overrides, recurrence-set safety, occurrence presentation, property preservation, and DISPLAY alarm editing/addition/removal are locally implemented. New DISPLAY alarms receive one RFC 9074 VALARM UID, a localized description, and a default trigger 15 minutes before start; adding an alarm is explicit, and new events remain alarm-free by default. Existing UID-less alarms and unsupported alarm actions remain preserved. The remaining M5 gate is an end-to-end recurring-resource create/read/patch against the pinned Radicale 3.8.0.0 harness. The contract test is added, but local execution is blocked: `bash dev/up.sh` exited 1 because `/var/run/docker.sock` is absent, and the approved Podman Compose path rejected the pinned Synapse v1.161.0 image before any service started. Radicale alone cannot authenticate this harness because `radicale-auth-matrix` delegates password checks to Synapse. The test remains unverified against a server and M5 stays open; no image substitution or live service was used.
 
@@ -40,8 +40,8 @@ Merged in-repo:
 
 Still external/blocking:
 
-- #48 — add ADR009-compatible OpenID mode to `radicale-auth-matrix`,
-- #45 — final real gateway/OpenID/non-member contract after #48.
+- #48 — establish a writable source target, add ADR009-compatible OpenID mode while preserving password auth, and prove both modes in the plugin's minimal container stack.
+- #45 — final real gateway/OpenID/non-member contract after a tested plugin artifact is available.
 
 ### M4 — Calendar management
 
@@ -75,7 +75,7 @@ Complete on `main`:
 
 ## Active
 
-- #48 — external `radicale-auth-matrix` OpenID delegation. No writable `0cwa/radicale-auth-matrix` fork exists and the available GitHub connector cannot create/fork repositories.
+- #48 — dual-mode `radicale-auth-matrix` OpenID delegation. No writable `0cwa/radicale-auth-matrix` fork currently exists; first resolve the source/release path, then implement and container-test the plugin outside this Apache-licensed repo.
 - #45 — final delegated gateway/OpenID real-container contract, blocked on #48.
 - #100 / PR #101 — deletion is implemented and locally validated on its M4 branch; remote synchronization, review, and fresh checks remain pending.
 - #6 / M5 — the pinned Radicale recurring-resource create/read/patch contract remains unverified until the supported container runtime is available.
@@ -117,11 +117,12 @@ Complete on `main`:
 
 ## Highest-priority next steps
 
-1. Implement #48 in a writable upstream/forked `radicale-auth-matrix` repository; do not copy GPL/LGPL-family plugin code into this Apache-licensed repository.
-2. Land #45's final gateway/OpenID/non-member real-container contract and close M2.
-3. In parallel while #48 is blocked, synchronize the public #100 / PR #101 branch with current `main`, then merge the reviewed M4 sequence; its local assembly does not change GitHub state.
-4. Keep the M5 pinned Radicale recurring-resource round-trip and M6 live room-principal access gated until their server/runtime and OpenID prerequisites pass. Collection timezone editing remains deferred beyond M4 until query/client semantics and property round-trip behavior are verified.
-5. For future reminder implementation, first provision an app-owned PostgreSQL database/role and external Secret under ADR019; retain disabled-by-default chart behavior and the one-replica setting until scheduler, bot-state, and authentication validation passes.
+1. Establish a writable upstream/fork/plugin source and release path for #48.
+2. Add the tagged OpenID credential mode without changing password-mode behavior; unit-test identity binding, invalid proofs, no caching, and log redaction.
+3. Provide a minimal plugin-owned Synapse + locally built Radicale container contract for both credential modes; then pin the tested plugin artifact in this repo's dev stack.
+4. Land #45's final gateway/OpenID/non-member real-container contract and close M2.
+5. In parallel, synchronize the public #100 / PR #101 branch with current `main`, then merge the reviewed M4 sequence. Keep the M5 pinned Radicale recurring-resource round-trip and M6 live room-principal access gated until their server/runtime and OpenID prerequisites pass. Collection timezone editing remains deferred beyond M4 until query/client semantics and property round-trip behavior are verified.
+6. For future reminder implementation, first provision an app-owned PostgreSQL database/role and external Secret under ADR019; retain disabled-by-default chart behavior and the one-replica setting until scheduler, bot-state, and authentication validation passes.
 
 ## Working rules
 
