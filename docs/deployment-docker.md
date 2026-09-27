@@ -38,3 +38,24 @@ The inherited toolkit base image name is an implementation dependency, not a pub
 An operator may choose to run these Docker-compatible images alongside an etke/MDAD-managed Matrix deployment, provided the operator supplies the required configuration, networking, and persistent storage. This is generic operator-run container compatibility only. The repository contains no MDAD-native service definition, etke role/module, inventory integration, generated deployment variables, or automated rollout support, and no such deployment has been validated here. Helm and Kubernetes packaging are also outside this slice.
 
 The local `dev/compose.yaml` stack is for development and integration services; it does not define a production deployment for the server and widget. Do not treat it as an MDAD deployment contract.
+
+## Optional reminder PostgreSQL database
+
+The server can persist Matrix reminder sidecar state in a separate
+application-owned PostgreSQL database through the optional
+`MATRIX_CALENDAR_REMINDER_DATABASE_URL` setting. Omit the setting to keep the
+store disabled. When configured, the server applies its versioned migrations
+at startup and will not start if the database or migrations are unavailable.
+Provide the URL through the operator's secret mechanism; do not reuse Synapse's
+database, schema, role, or credentials. The application does not create the
+database or role.
+
+Connections require verified TLS by default. Use a certificate whose DNS name
+or IP subject alternative name matches the configured endpoint; the driver uses
+Node.js's system trust store. A TLS or certificate error prevents startup and
+does not fall back to plaintext. The only opt-out is
+`MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE=trusted-private-network`, for an
+operator-controlled isolated database network. It disables TLS explicitly and
+must not be used across an untrusted network. The CI localhost PostgreSQL
+contract sets this exception only for its disposable test database. No
+production database TLS connection or etke host deployment has been validated.

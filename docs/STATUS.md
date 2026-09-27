@@ -1,6 +1,6 @@
 # Project status
 
-_Last updated: 2026-09-27_
+_Last updated: 2026-09-28_
 
 This is the short-lived execution snapshot. `docs/PLAN.md` is the durable milestone plan; GitHub issues contain acceptance criteria.
 
@@ -67,6 +67,18 @@ PR #102 merged Docker build/runtime documentation and a non-publishing CI image-
 ### M5 — Recurrence and iCalendar completeness
 
 Issue #6 remains open. Continue with small recurrence and round-trip slices using the existing domain, repository, codec, and fixture seams. These in-repository slices can proceed independently of the external authentication work; end-to-end use with a user's real CalDAV principal still depends on the M2 delegation path.
+
+### M6 — PostgreSQL reminder persistence
+
+The optional app-owned PostgreSQL store, transactional claim layer, verified-TLS
+default, and restricted-role PostgreSQL 16 CI contract are implemented in the
+current development slice. Focused local tests and full project CI pass; the
+local PostgreSQL integration suite was skipped because no database URL was
+configured. The hosted PostgreSQL contract and independent review remain
+required before this unit is complete. Persistence provides at-most-once
+database claim/completion state; it does not enable the reminder scheduler or
+guarantee exactly-once Matrix message delivery. Production TLS and etke-specific
+database wiring remain unverified.
 
 ## Active blockers
 
