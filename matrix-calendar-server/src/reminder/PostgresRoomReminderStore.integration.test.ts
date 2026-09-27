@@ -133,4 +133,35 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
       ),
     ).toBe(true);
   });
+
+  it('persists reminder configuration and delivery state across repository restart', async () => {
+    const config = {
+      roomId,
+      calendarId,
+      eventUid: 'restart-planning',
+      recurrenceId: null,
+      alarmUid: 'alarm-uid',
+    };
+    const identity = {
+      ...config,
+      triggerOrdinal: 0,
+    };
+
+    await store.upsertConfiguration(config);
+    const claim = await store.claimDelivery(identity, 60_000);
+    expect(claim).toBeDefined();
+    expect(
+      await store.markDeliverySent(claim!.deliveryKey, claim!.claimToken),
+    ).toBe(true);
+
+    await store.onModuleDestroy();
+    sql = postgres(databaseUrl as string, { max: 3, connect_timeout: 5 });
+    store = new PostgresRoomReminderStore(sql);
+    await store.migrate();
+
+    expect(await store.listConfigurations(roomId, calendarId)).toContainEqual(
+      config,
+    );
+    expect(await store.claimDelivery(identity, 60_000)).toBeUndefined();
+  });
 });
