@@ -55,6 +55,16 @@ HOMESERVER_URL=https://synapse.example.com
 # the base URL of the Radicale/CalDAV service
 RADICALE_URL=https://calendar.example.com
 
+# optional - enables durable Matrix reminder state in an app-owned PostgreSQL database
+# use a database and least-privilege role dedicated to Matrix Calendar; never use Synapse's database
+# migrations run at server startup; omit this setting to keep reminders disabled
+# supply this URL through deployment secret management and do not log it
+MATRIX_CALENDAR_REMINDER_DATABASE_URL='postgresql://matrix_calendar:password@postgres.example.com:5432/matrix_calendar'
+
+# defaults to verified certificate-chain and hostname checks
+# only disable TLS on an operator-controlled isolated database network
+# MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE=trusted-private-network
+
 # the access token of the matrix user of the bot
 ACCESS_TOKEN=syt_...
 

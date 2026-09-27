@@ -20,6 +20,8 @@ export interface IAppConfiguration {
   access_token: string;
   homeserver_url: string;
   radicale_url?: string;
+  reminder_database_url?: string;
+  reminder_database_tls_mode?: 'verify-full' | 'trusted-private-network';
 
   meetingwidget_url: string;
   meetingwidget_name: string;

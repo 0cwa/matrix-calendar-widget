@@ -86,6 +86,20 @@ jobs:
     name: Server and bot
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16.15-alpine3.23
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: reminder_bootstrap
+          POSTGRES_PASSWORD: reminder_bootstrap_password
+        options: >-
+          --health-cmd "pg_isready -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -105,6 +119,22 @@ jobs:
 
       - name: Test server
         run: yarn workspace @matrix-calendar-widget/server test:all
+
+      - name: Provision restricted reminder test role
+        run: |
+          container_id="$(docker ps --filter 'ancestor=postgres:16.15-alpine3.23' --format '{{.ID}}')"
+          test -n "$container_id"
+          test "$(printf '%s\n' "$container_id" | wc -l)" -eq 1
+          docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE ROLE matrix_calendar_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD 'matrix_calendar_test_password';"
+          docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;"
+          docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;"
+          docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_test OWNER matrix_calendar_app;"
+
+      - name: Test PostgreSQL reminder store
+        env:
+          MATRIX_CALENDAR_REMINDER_DATABASE_URL: postgresql://matrix_calendar_app:matrix_calendar_test_password@localhost:5432/matrix_calendar_test
+          MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE: trusted-private-network
+        run: yarn workspace @matrix-calendar-widget/server test:postgres-contract
 
       - name: Build server
         run: yarn workspace @matrix-calendar-widget/server build

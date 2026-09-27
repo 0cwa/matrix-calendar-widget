@@ -101,6 +101,15 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [ ] Per-alarm Matrix recipient sidecar metadata.
 - [ ] Selected-user mentions.
 - [ ] Optional `@room` reminder with permission checks.
+- [ ] Complete the app-owned PostgreSQL reminder store and durable claim
+      contract (ADR019). The store, migration path, and restricted-role
+      PostgreSQL 16 integration job are implemented; this remains open until
+      the hosted database contract passes. Claims provide at-most-once database
+      claim/completion semantics, not exactly-once Matrix message delivery.
+- [x] Default optional reminder database connections to verified TLS; allow
+      plaintext only with explicit `trusted-private-network` mode for an
+      operator-controlled isolated network (ADR021). Production TLS remains
+      unvalidated.
 - [ ] Durable scheduler and idempotent delivery log.
 - [ ] Event detail action to link/open a Matrix room or MatrixRTC conference.
 - [ ] Audit-friendly event creation/edit messages where appropriate.
