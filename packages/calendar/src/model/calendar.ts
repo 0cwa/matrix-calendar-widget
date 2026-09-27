@@ -91,6 +91,8 @@ export type Calendar = {
   color?: string;
   timezone?: string;
   readOnly?: boolean;
+  /** Component types advertised by CalDAV, when the server reports them. */
+  supportedComponents?: string[];
 };
 
 export type CalendarEvent = {

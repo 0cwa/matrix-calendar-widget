@@ -101,6 +101,26 @@ describe('InMemoryCalendarRepository', () => {
     expect((await repository.listCalendars())[0].name).toBe('Team calendar');
   });
 
+  it('returns defensive copies of supported component metadata', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [
+        {
+          id: 'mixed',
+          name: 'Mixed calendar',
+          supportedComponents: ['VEVENT', 'VTODO'],
+        },
+      ],
+    });
+
+    const listed = await repository.listCalendars();
+    listed[0].supportedComponents?.push('VJOURNAL');
+
+    expect((await repository.listCalendars())[0].supportedComponents).toEqual([
+      'VEVENT',
+      'VTODO',
+    ]);
+  });
+
   it('creates a named calendar with deterministic identity', async () => {
     const repository = createRepository();
 

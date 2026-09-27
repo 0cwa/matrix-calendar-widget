@@ -66,7 +66,7 @@ Password-auth real-container discovery is already covered by #59 / PR #60. The o
 - [x] Update calendar color.
 - [ ] Update calendar timezone.
 - [x] Implement safe VEVENT-only calendar deletion (M4.4; issue #100 closed, PR #101 merged in `6faa1d1`).
-- [ ] Detect mixed collections and expose an advanced compatibility notice.
+- [x] Detect mixed collections and expose an advanced compatibility notice.
 - [ ] Hide VJOURNAL-only collections.
 - [ ] Leave VTODO-only collections untouched and hidden from the main calendar UI.
 - [ ] Add CalDAV URL/copy diagnostics for administrators.

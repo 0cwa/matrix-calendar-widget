@@ -367,7 +367,12 @@ function timedInterval(timing: TimedCalendarEventTiming): ParsedRange {
 }
 
 function cloneCalendar(calendar: Calendar): Calendar {
-  return { ...calendar };
+  return {
+    ...calendar,
+    supportedComponents: calendar.supportedComponents
+      ? [...calendar.supportedComponents]
+      : undefined,
+  };
 }
 
 function cloneCalendarEventDateTime(

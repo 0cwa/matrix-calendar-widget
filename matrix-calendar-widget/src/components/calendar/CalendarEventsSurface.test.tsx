@@ -76,6 +76,76 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventsSurface />', () => {
+  it('shows a compatibility notice while rendering events from a mixed supported set', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [
+        {
+          id: 'team',
+          name: 'Team calendar',
+          supportedComponents: ['VEVENT', 'VTODO'],
+        },
+      ],
+      events: [events[0]],
+    });
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This calendar supports other item types. The widget displays and edits VEVENT entries only.',
+    );
+    expect(screen.getByText('Team planning')).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      label: 'VEVENT-only',
+      supportedComponents: ['VEVENT'],
+    },
+    {
+      label: 'unknown component set',
+      supportedComponents: undefined,
+    },
+  ])(
+    'does not show a compatibility notice for $label calendars',
+    async (calendar) => {
+      const repository = new InMemoryCalendarRepository({
+        calendars: [
+          {
+            id: 'team',
+            name: 'Team calendar',
+            supportedComponents: calendar.supportedComponents,
+          },
+        ],
+        events: [events[0]],
+      });
+
+      render(
+        <CalendarEventsSurface
+          filters={{
+            startDate: '2026-09-25T00:00:00Z',
+            endDate: '2026-09-25T23:59:59Z',
+          }}
+          onShowMore={() => undefined}
+          view="list"
+        />,
+        { wrapper: createWrapper(repository) },
+      );
+
+      expect(await screen.findByText('Team planning')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    },
+  );
+
   it('hides and shows events with lightweight calendar visibility controls', async () => {
     const repository = new InMemoryCalendarRepository({ calendars, events });
 
