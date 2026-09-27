@@ -225,6 +225,61 @@ export class CalendarGatewayController {
     });
   }
 
+  @Patch('calendars/color')
+  async updateCalendarColor(
+    @UserContextParam() userContext: IUserContext,
+    @MatrixOpenIdCredentialParam()
+    openIdCredential: IMatrixOpenIdCredential | undefined,
+    @Body() input: { color?: unknown } | undefined,
+    @Query('roomId') roomId?: string,
+    @Query('calendarId') calendarId?: string,
+  ): Promise<void> {
+    if (
+      !input ||
+      Object.keys(input).length !== 1 ||
+      !Object.prototype.hasOwnProperty.call(input, 'color') ||
+      typeof input.color !== 'string' ||
+      (input.color !== '' && !/^#[\da-fA-F]{6}$/.test(input.color))
+    ) {
+      throw new BadRequestException(
+        'calendar color must be empty or a six-digit hex color',
+      );
+    }
+    const color = input.color;
+
+    const requiredRoomId = this.requireQuery(roomId, 'roomId');
+    const normalizedCalendarId = this.normalizeRadicaleUrl(
+      this.requireQuery(calendarId, 'calendarId'),
+      'calendarId',
+    );
+    const authorization = this.authorizationFactory.forRoom(
+      userContext.userId,
+      requiredRoomId,
+    );
+    if (
+      !(await authorization.isAllowed({
+        action: 'manage-calendar',
+        calendarId: normalizedCalendarId,
+      }))
+    ) {
+      throw new ForbiddenException(
+        'Not allowed to manage calendars for this Matrix room',
+      );
+    }
+
+    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+      userContext,
+      openIdCredential,
+    );
+
+    await this.runCalDav(async () => {
+      await new CalDavDiscoveryClient(
+        this.requireRadicaleBaseUrl(),
+        credentialProvider,
+      ).updateCalendarColor(normalizedCalendarId, color);
+    });
+  }
+
   @Patch('calendars')
   async renameCalendar(
     @UserContextParam() userContext: IUserContext,

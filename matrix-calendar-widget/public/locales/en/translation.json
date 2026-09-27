@@ -55,6 +55,17 @@
     "label": "{{date, datetime}}"
   },
   "calendars": {
+    "color": {
+      "action": "Edit calendar color",
+      "calendar": "Calendar",
+      "clear": "Clear color",
+      "error": "The calendar color could not be saved.",
+      "hint": "Enter a six-digit hex color, such as #336699.",
+      "invalid": "Use a six-digit hex color in the form #RRGGBB.",
+      "label": "Color",
+      "submit": "Save color",
+      "title": "Edit calendar color"
+    },
     "create": {
       "action": "Create calendar",
       "error": "The calendar could not be created.",

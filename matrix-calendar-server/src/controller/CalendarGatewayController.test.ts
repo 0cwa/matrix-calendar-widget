@@ -342,6 +342,122 @@ describe('CalendarGatewayController', () => {
     );
   });
 
+  it('updates only calendar-color after manage-calendar authorization', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch.mockResponseOnce(
+      multistatus(`
+        <d:response>
+          <d:href>/alice/team/</d:href>
+          <d:propstat>
+            <d:prop><a:calendar-color/></d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
+      `),
+      { status: 207 },
+    );
+
+    await expect(
+      createController().updateCalendarColor(
+        userContext,
+        openIdCredential,
+        { color: '#Ab12cD' },
+        roomId,
+        calendarId,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(forRoom).toHaveBeenCalledWith(userContext.userId, roomId);
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'manage-calendar',
+      calendarId,
+    });
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe(calendarId);
+    expect(init?.method).toBe('PROPPATCH');
+    expect(init?.body).toContain(
+      '<A:calendar-color>#Ab12cD</A:calendar-color>',
+    );
+    expect(init?.body).not.toContain('calendar-description');
+    expect(init?.body).not.toContain('displayname');
+  });
+
+  it('denies calendar-color updates without manage-calendar permission', async () => {
+    isAllowed.mockResolvedValue(false);
+
+    await expect(
+      createController().updateCalendarColor(
+        userContext,
+        openIdCredential,
+        { color: '#123456' },
+        roomId,
+        'https://radicale.example.test/alice/team/',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'manage-calendar',
+      calendarId: 'https://radicale.example.test/alice/team/',
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid or mixed calendar-color writes before CalDAV access', async () => {
+    const controller = createController();
+    const calendarId = 'https://radicale.example.test/alice/team/';
+
+    for (const body of [
+      undefined,
+      {},
+      { color: 'red' },
+      { color: '#12345678' },
+      { color: '#12345G' },
+      { color: '#123456', description: 'also update description' },
+    ]) {
+      await expect(
+        controller.updateCalendarColor(
+          userContext,
+          openIdCredential,
+          body,
+          roomId,
+          calendarId,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    }
+
+    expect(forRoom).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('accepts empty calendar-color as an explicit clear', async () => {
+    isAllowed.mockResolvedValue(true);
+    fetch.mockResponseOnce(
+      multistatus(`
+        <d:response>
+          <d:href>/alice/team/</d:href>
+          <d:propstat>
+            <d:prop><a:calendar-color/></d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
+      `),
+      { status: 207 },
+    );
+
+    await createController().updateCalendarColor(
+      userContext,
+      openIdCredential,
+      { color: '' },
+      roomId,
+      'https://radicale.example.test/alice/team/',
+    );
+
+    expect(fetch.mock.calls[0][1]?.body).toContain(
+      '<D:remove><D:prop><A:calendar-color/></D:prop></D:remove>',
+    );
+  });
+
   it('rejects an empty calendar rename before CalDAV access', async () => {
     await expect(
       createController().renameCalendar(

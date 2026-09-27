@@ -25,6 +25,7 @@ import { MeetingsNavigation, ViewType } from '../meetings/MeetingsNavigation';
 import { MeetingsToolbarButtons } from '../meetings/MeetingsToolbar/MeetingsToolbarButtons';
 import { MeetingsToolbarDatePicker } from '../meetings/MeetingsToolbar/MeetingsToolbarDatePicker';
 import { MeetingsToolbarSearch } from '../meetings/MeetingsToolbar/MeetingsToolbarSearch';
+import { CalendarColorDialog } from './CalendarColorDialog';
 import { CalendarCreateDialog } from './CalendarCreateDialog';
 import { CalendarDeleteDialog } from './CalendarDeleteDialog';
 import { CalendarDescriptionDialog } from './CalendarDescriptionDialog';
@@ -55,6 +56,7 @@ export function CalendarToolbar({
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [descriptionOpen, setDescriptionOpen] = useState(false);
+  const [colorOpen, setColorOpen] = useState(false);
   const writableCalendars = calendars.data.filter(
     (calendar) => calendar.readOnly === false,
   );
@@ -106,6 +108,14 @@ export function CalendarToolbar({
           {t('calendars.description.action', 'Edit calendar description')}
         </Button>
 
+        <Button
+          disabled={calendars.loading || writableCalendars.length === 0}
+          onClick={() => setColorOpen(true)}
+          variant="outlined"
+        >
+          {t('calendars.color.action', 'Edit calendar color')}
+        </Button>
+
         {showToolbarButtons && (
           <Box>
             <MeetingsToolbarButtons
@@ -154,6 +164,12 @@ export function CalendarToolbar({
         calendars={calendars.data}
         onClose={() => setDescriptionOpen(false)}
         open={descriptionOpen}
+      />
+
+      <CalendarColorDialog
+        calendars={calendars.data}
+        onClose={() => setColorOpen(false)}
+        open={colorOpen}
       />
 
       <CalendarDeleteDialog

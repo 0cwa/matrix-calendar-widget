@@ -33,6 +33,7 @@ import {
   useDeleteCalendar,
   useDeleteCalendarEvent,
   useRenameCalendar,
+  useUpdateCalendarColor,
   useUpdateCalendarDescription,
   useUpdateCalendarEvent,
 } from './useCalendarMutations';
@@ -153,6 +154,28 @@ describe('calendar repository mutation hooks', () => {
     });
   });
 
+  it('refreshes active calendar queries after updating the color', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [{ ...calendar, color: '#123456', readOnly: false }],
+    });
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        calendars: useCalendars(),
+        updateColor: useUpdateCalendarColor(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.calendars.loading);
+    await result.current.updateColor('team', '#ABCDEF');
+
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([
+        { ...calendar, color: '#ABCDEF', readOnly: false },
+      ]);
+    });
+  });
+
   it('refreshes active calendar queries after delete', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
@@ -184,6 +207,7 @@ describe('calendar repository mutation hooks', () => {
       createCalendar: vi.fn().mockResolvedValue(calendar),
       renameCalendar: vi.fn().mockResolvedValue(undefined),
       updateCalendarDescription: vi.fn().mockResolvedValue(undefined),
+      updateCalendarColor: vi.fn().mockResolvedValue(undefined),
       deleteCalendar: vi.fn().mockImplementation(async () => {
         calendars = [];
         events = [];
@@ -298,6 +322,7 @@ describe('calendar repository mutation hooks', () => {
       createCalendar: vi.fn().mockResolvedValue(calendar),
       renameCalendar: vi.fn().mockResolvedValue(undefined),
       updateCalendarDescription: vi.fn().mockResolvedValue(undefined),
+      updateCalendarColor: vi.fn().mockResolvedValue(undefined),
       deleteCalendar: vi.fn().mockResolvedValue(undefined),
       listEvents,
       getEvent: vi.fn().mockResolvedValue(event),

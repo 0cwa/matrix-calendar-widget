@@ -121,6 +121,18 @@ function updateCalendarDescriptionBody(description: string): string {
 </D:propertyupdate>`;
 }
 
+function updateCalendarColorBody(color: string): string {
+  const property =
+    color.length === 0
+      ? `<D:remove><D:prop><A:calendar-color/></D:prop></D:remove>`
+      : `<D:set><D:prop><A:calendar-color>${escapeXmlText(color)}</A:calendar-color></D:prop></D:set>`;
+
+  return `<?xml version="1.0" encoding="utf-8" ?>
+<D:propertyupdate xmlns:D="DAV:" xmlns:A="http://apple.com/ns/ical/">
+  ${property}
+</D:propertyupdate>`;
+}
+
 export class CalDavDiscoveryClient {
   constructor(
     private readonly baseUrl: string,
@@ -260,6 +272,52 @@ export class CalDavDiscoveryClient {
           propertyStatus === undefined
             ? 'CalDAV PROPPATCH did not report calendar-description status'
             : `CalDAV PROPPATCH failed for calendar-description with status ${propertyStatus}`,
+          propertyStatus ?? response.status,
+          calendarUrl,
+        );
+      }
+    }
+  }
+
+  async updateCalendarColor(calendarUrl: string, color: string): Promise<void> {
+    if (color !== '' && !/^#[\da-fA-F]{6}$/.test(color)) {
+      throw new CalDavDiscoveryError(
+        'Calendar color must be a six-digit hex color',
+      );
+    }
+
+    const credentialHeaders = await this.credentialProvider.getRequestHeaders();
+    const headers = new Headers(credentialHeaders);
+    headers.set('Content-Type', 'application/xml; charset=utf-8');
+
+    const response = await this.fetchImpl(calendarUrl, {
+      method: 'PROPPATCH',
+      headers,
+      body: updateCalendarColorBody(color),
+    });
+
+    if (!response.ok) {
+      throw new CalDavDiscoveryError(
+        `CalDAV PROPPATCH failed with status ${response.status}`,
+        response.status,
+        calendarUrl,
+      );
+    }
+
+    if (response.status === 207) {
+      const propertyStatus = propPatchPropertyStatus(
+        await response.text(),
+        'calendar-color',
+      );
+      if (
+        propertyStatus === undefined ||
+        propertyStatus < 200 ||
+        propertyStatus >= 300
+      ) {
+        throw new CalDavDiscoveryError(
+          propertyStatus === undefined
+            ? 'CalDAV PROPPATCH did not report calendar-color status'
+            : `CalDAV PROPPATCH failed for calendar-color with status ${propertyStatus}`,
           propertyStatus ?? response.status,
           calendarUrl,
         );

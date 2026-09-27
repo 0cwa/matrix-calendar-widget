@@ -95,6 +95,22 @@ export class GatewayCalendarRepository implements CalendarRepository {
     );
   }
 
+  async updateCalendarColor(
+    calendarId: CalendarId,
+    color: string,
+  ): Promise<void> {
+    await this.requestVoid(
+      this.url('/v1/calendar/calendars/color', {
+        roomId: this.options.roomId,
+        calendarId,
+      }),
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ color }),
+      },
+    );
+  }
+
   async deleteCalendar(calendarId: CalendarId): Promise<void> {
     try {
       await this.requestVoid(

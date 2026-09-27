@@ -95,6 +95,37 @@ describe('<CalendarToolbar />', () => {
     ).toBeInTheDocument();
   });
 
+  it('opens the calendar color editor', async () => {
+    const repository = new InMemoryCalendarRepository({ calendars });
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: 'Edit calendar color' }),
+      ).toBeEnabled();
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Edit calendar color' }),
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: 'Edit calendar color' }),
+    ).toBeInTheDocument();
+  });
+
   it('offers only explicitly writable calendars for deletion', async () => {
     const repository = new InMemoryCalendarRepository({ calendars });
 

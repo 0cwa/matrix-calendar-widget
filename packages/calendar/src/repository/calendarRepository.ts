@@ -29,6 +29,7 @@ export type CalendarRepositoryErrorCode =
   | 'event-not-found'
   | 'calendar-read-only'
   | 'invalid-calendar-name'
+  | 'invalid-calendar-color'
   | 'invalid-range'
   | 'event-conflict'
   | 'authentication-required'
@@ -55,6 +56,8 @@ export interface CalendarRepository {
     calendarId: CalendarId,
     description: string,
   ): Promise<void>;
+
+  updateCalendarColor(calendarId: CalendarId, color: string): Promise<void>;
 
   deleteCalendar(calendarId: CalendarId): Promise<void>;
 

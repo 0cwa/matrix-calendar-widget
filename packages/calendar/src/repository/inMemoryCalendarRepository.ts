@@ -135,6 +135,33 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     this.calendars.set(calendarId, updated);
   }
 
+  async updateCalendarColor(
+    calendarId: CalendarId,
+    color: string,
+  ): Promise<void> {
+    const calendar = this.getCalendar(calendarId);
+    if (calendar.readOnly !== false) {
+      throw new CalendarRepositoryError(
+        'calendar-read-only',
+        `Calendar ${calendarId} is not explicitly writable`,
+      );
+    }
+    if (color !== '' && !/^#[\da-fA-F]{6}$/.test(color)) {
+      throw new CalendarRepositoryError(
+        'invalid-calendar-color',
+        'Calendar color must be a six-digit hex color',
+      );
+    }
+
+    const updated = { ...calendar };
+    if (color === '') {
+      delete updated.color;
+    } else {
+      updated.color = color;
+    }
+    this.calendars.set(calendarId, updated);
+  }
+
   async deleteCalendar(calendarId: CalendarId): Promise<void> {
     this.getWritableCalendar(calendarId);
     this.calendars.delete(calendarId);
