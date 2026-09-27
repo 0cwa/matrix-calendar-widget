@@ -54,6 +54,15 @@ const parser = new XMLParser({
   trimValues: false,
 });
 
+const namespaceAwareParser = new XMLParser({
+  ignoreAttributes: false,
+  removeNSPrefix: false,
+  attributeNamePrefix: '@_',
+  parseTagValue: false,
+  parseAttributeValue: false,
+  trimValues: false,
+});
+
 const PRINCIPAL_BODY = `<?xml version="1.0" encoding="utf-8" ?>
 <D:propfind xmlns:D="DAV:">
   <D:prop>
@@ -552,26 +561,153 @@ function propPatchPropertyStatus(
   xml: string,
   propertyName: string,
 ): number | undefined {
-  const document = asNode(parser.parse(xml));
-  const multistatus = asNode(document?.multistatus);
+  const document = namespaceAwareParser.parse(xml);
+  const targetNamespace =
+    propertyName === 'displayname'
+      ? 'DAV:'
+      : propertyName === 'calendar-description'
+        ? 'urn:ietf:params:xml:ns:caldav'
+        : 'http://apple.com/ns/ical/';
+  return findPropertyStatus(document, {}, targetNamespace, propertyName);
+}
 
-  for (const responseValue of asArray(multistatus?.response)) {
-    const response = asNode(responseValue);
-    for (const propstatValue of asArray(response?.propstat)) {
-      const propstat = asNode(propstatValue);
-      const properties = asNode(propstat?.prop);
-      if (
-        properties &&
-        Object.prototype.hasOwnProperty.call(properties, propertyName)
-      ) {
-        const status = textValue(propstat?.status);
-        const match = status?.match(/\s(\d{3})\s/);
-        if (match) {
-          return Number(match[1]);
-        }
-      }
+function findPropertyStatus(
+  value: unknown,
+  inheritedNamespaces: Record<string, string>,
+  targetNamespace: string,
+  targetLocalName: string,
+): number | undefined {
+  const node = asNode(value);
+  if (!node) return undefined;
+
+  const namespaces = { ...inheritedNamespaces };
+  for (const [name, attribute] of Object.entries(node)) {
+    if (name === '@_xmlns' && typeof attribute === 'string') {
+      namespaces[''] = attribute;
+    } else if (name.startsWith('@_xmlns:') && typeof attribute === 'string') {
+      namespaces[name.slice('@_xmlns:'.length)] = attribute;
     }
   }
 
+  for (const [qualifiedName, childValue] of Object.entries(node)) {
+    if (qualifiedName.startsWith('@_') || qualifiedName === '#text') continue;
+    for (const child of asArray(childValue)) {
+      const childNode = asNode(child);
+      const childNamespaces = namespaceDeclarations(childNode, namespaces);
+      const resolved = resolveQName(qualifiedName, childNamespaces);
+      if (resolved?.namespace === 'DAV:' && resolved.localName === 'propstat') {
+        const property = directElement(
+          childNode,
+          childNamespaces,
+          'DAV:',
+          'prop',
+        );
+        if (property?.node) {
+          const matchesProperty = Object.entries(property.node).some(
+            ([name, propertyValue]) => {
+              if (name.startsWith('@_') || name === '#text') return false;
+              return asArray(propertyValue).some((item) => {
+                const itemNamespaces = namespaceDeclarations(
+                  asNode(item),
+                  property.namespaces,
+                );
+                const itemName = resolveQName(name, itemNamespaces);
+                return (
+                  itemName?.namespace === targetNamespace &&
+                  itemName.localName === targetLocalName
+                );
+              });
+            },
+          );
+          if (matchesProperty) {
+            const statusElement = directElement(
+              childNode,
+              childNamespaces,
+              'DAV:',
+              'status',
+            );
+            const statusNode = statusElement && asNode(statusElement.value);
+            const status = textValue(
+              statusNode?.['#text'] ?? statusElement?.value,
+            );
+            const match = status?.match(/\s(\d{3})\s/);
+            if (match) return Number(match[1]);
+          }
+        }
+      }
+
+      const nested = findPropertyStatus(
+        child,
+        childNamespaces,
+        targetNamespace,
+        targetLocalName,
+      );
+      if (nested !== undefined) return nested;
+    }
+  }
+
+  return undefined;
+}
+
+function namespaceDeclarations(
+  node: DavNode | undefined,
+  inherited: Record<string, string>,
+): Record<string, string> {
+  const namespaces = { ...inherited };
+  for (const [name, value] of Object.entries(node ?? {})) {
+    if (name === '@_xmlns' && typeof value === 'string') {
+      namespaces[''] = value;
+    } else if (name.startsWith('@_xmlns:') && typeof value === 'string') {
+      namespaces[name.slice('@_xmlns:'.length)] = value;
+    }
+  }
+  return namespaces;
+}
+
+function resolveQName(
+  qualifiedName: string,
+  namespaces: Record<string, string>,
+): { namespace?: string; localName: string } | undefined {
+  const separator = qualifiedName.indexOf(':');
+  if (separator < 0) {
+    return { namespace: namespaces[''], localName: qualifiedName };
+  }
+  const prefix = qualifiedName.slice(0, separator);
+  const namespace = namespaces[prefix];
+  return namespace
+    ? { namespace, localName: qualifiedName.slice(separator + 1) }
+    : undefined;
+}
+
+function directElement(
+  node: DavNode | undefined,
+  namespaces: Record<string, string>,
+  targetNamespace: string,
+  targetLocalName: string,
+):
+  | {
+      value: unknown;
+      node: DavNode | undefined;
+      namespaces: Record<string, string>;
+    }
+  | undefined {
+  if (!node) return undefined;
+  for (const [name, value] of Object.entries(node)) {
+    if (name.startsWith('@_') || name === '#text') continue;
+    for (const child of asArray(value)) {
+      const childNamespaces = namespaceDeclarations(asNode(child), namespaces);
+      const resolved = resolveQName(name, childNamespaces);
+      if (
+        resolved?.namespace === targetNamespace &&
+        resolved.localName === targetLocalName
+      ) {
+        return {
+          value: child,
+          node: asNode(child),
+          namespaces: childNamespaces,
+        };
+      }
+    }
+  }
   return undefined;
 }

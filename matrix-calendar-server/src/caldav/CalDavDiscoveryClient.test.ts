@@ -704,6 +704,45 @@ describe('CalDavDiscoveryClient', () => {
     );
   });
 
+  it('matches the Apple calendar-color QName when other namespaces use the same local name', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:propstat>
+                <d:prop><x:calendar-color/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+              <d:propstat>
+                <d:prop><a:calendar-color/></d:prop>
+                <d:status>HTTP/1.1 403 Forbidden</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/',
+        credentialProvider,
+        fetchMock,
+      ).updateCalendarColor(
+        'https://radicale.example.test/alice/team/',
+        '#123456',
+      ),
+    ).rejects.toEqual(
+      new CalDavDiscoveryError(
+        'CalDAV PROPPATCH failed for calendar-color with status 403',
+        403,
+        'https://radicale.example.test/alice/team/',
+      ),
+    );
+  });
+
   it('deletes a calendar collection with delegated credentials', async () => {
     const fetchMock = jest
       .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
@@ -842,6 +881,7 @@ function multistatus(body: string, davPrefix = 'd'): string {
   xmlns:${davPrefix}="DAV:"
   xmlns:c="urn:ietf:params:xml:ns:caldav"
   xmlns:a="http://apple.com/ns/ical/"
+  xmlns:x="urn:example:other"
 >
   ${body}
 </${davPrefix}:multistatus>`;
