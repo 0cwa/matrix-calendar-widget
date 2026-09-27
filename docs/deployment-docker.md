@@ -85,6 +85,26 @@ are for separate Synapse rate-limit tooling, not reminder storage.
 
 ## MDAD integration boundary
 
+### etke-managed servers
+
+etke distinguishes its managed Hosting service, which runs on a VPS rented by
+etke, from On-Premises service on the customer's infrastructure. etke's public
+pages describe different access and responsibility models for these options;
+confirm the specific plan's control model before treating it as a self-managed
+MDAD inventory. The [service overview](https://etke.cc/services/) describes
+the hosting types and setup and maintenance responsibilities. The [Hosting
+details](https://etke.cc/services/hosting/) say customers may run other
+services on a hosted server when they request root SSH access, while manually
+modifying Matrix configuration is not allowed.
+
+Those public pages do not confirm whether this operator's plan supports
+deploying this third-party container, or provide application-specific image
+delivery, network, proxy, database, secret, persistent-storage, upgrade, or
+maintenance arrangements. Confirm those points with the operator and etke
+before writing an account-specific deployment. The MDAD references below
+describe upstream patterns for operators with access to their MDAD checkout;
+they do not establish access to or control of an etke-managed deployment.
+
 At a generic level, an Ansible-managed Docker deployment must:
 
 - connect the server container to networks where it can reach the configured
@@ -98,15 +118,16 @@ At a generic level, an Ansible-managed Docker deployment must:
   replica for the current deployment target; the reminder database alone does
   not establish safety for multiple server replicas.
 
-The following upstream MDAD references are pinned to commit `c8087f4` for
+The following upstream MDAD references point to commit
+`c8087f4f2065052ac81f680cb72f7a9b3ea6e5f6` for
 background on its network, proxy, configuration, and external-database
 patterns. They do not describe or verify the operator's exact deployed MDAD
 checkout or inventory, and they do not configure this application:
 
-- [MDAD addon-network defaults at `c8087f4`](https://github.com/spantaleev/matrix-docker-ansible-deploy/blob/c8087f4/roles/custom/matrix-base/defaults/main.yml#L62-L73)
-- [MDAD reverse-proxy defaults at `c8087f4`](https://github.com/spantaleev/matrix-docker-ansible-deploy/blob/c8087f4/roles/custom/matrix-base/defaults/main.yml#L261-L296)
-- [MDAD configuration guide at `c8087f4`](https://github.com/spantaleev/matrix-docker-ansible-deploy/blob/c8087f4/docs/configuring-playbook.md)
-- [MDAD bridge external-database notes at `c8087f4`](https://github.com/spantaleev/matrix-docker-ansible-deploy/blob/c8087f4/docs/configuring-playbook-bridge-mautrix-signal.md)
+- [MDAD addon-network defaults](https://github.com/spantaleev/matrix-docker-ansible-deploy/blob/c8087f4f2065052ac81f680cb72f7a9b3ea6e5f6/roles/custom/matrix-base/defaults/main.yml#L62-L73)
+- [MDAD reverse-proxy defaults](https://github.com/spantaleev/matrix-docker-ansible-deploy/blob/c8087f4f2065052ac81f680cb72f7a9b3ea6e5f6/roles/custom/matrix-base/defaults/main.yml#L261-L296)
+- [MDAD configuration guide](https://github.com/spantaleev/matrix-docker-ansible-deploy/blob/c8087f4f2065052ac81f680cb72f7a9b3ea6e5f6/docs/configuring-playbook.md)
+- [MDAD bridge external-database notes](https://github.com/spantaleev/matrix-docker-ansible-deploy/blob/c8087f4f2065052ac81f680cb72f7a9b3ea6e5f6/docs/configuring-playbook-bridge-mautrix-signal.md)
 
 Implementing and validating the exact Ansible service, proxy routing, network
 attachments, secret source, database route, image publication, and upgrade
