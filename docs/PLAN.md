@@ -75,7 +75,7 @@ Calendar creation (#94), lightweight visibility controls (#96), rename (#99), an
 
 The description and color slices use dedicated CalDAV gateway operations; keep timezone editing as separate work.
 
-Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor extension. Compatibility with pinned Radicale 3.8.0.0 remains conditional on the hosted set/read/clear contract passing; this does not establish universal CalDAV or server support. Timezone editing remains separate and unchecked.
+Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor extension. The hosted set/read/clear contract passed against pinned Radicale 3.8.0.0, confirming compatibility with that release only; it does not establish universal CalDAV support or support by other servers. Timezone editing remains separate and unchecked.
 
 **Exit:** normal users no longer need Radicale's web UI to manage team event calendars.
 
