@@ -118,29 +118,50 @@ export function getReminderDatabaseTlsOptions(
   mode: ReminderDatabaseTlsMode,
   databaseUrl: string,
 ): ReminderDatabaseTlsOptions {
+  const authority = databaseUrl.match(/^[a-z][a-z\d+.-]*:\/\/([^/?#]*)/i)?.[1];
+  const urlHostList = authority?.slice(authority.lastIndexOf('@') + 1);
+  const inspectHosts = mode === 'verify-full' || urlHostList?.includes('[');
+  let ipTarget: { hostname: string; port: number } | undefined;
+
+  if (inspectHosts) {
+    const hosts = getUrlHosts(databaseUrl);
+    const ipHosts = hosts.filter((host) => isIP(host.hostname) !== 0);
+    if (ipHosts.length > 0) {
+      if (hosts.length !== 1) {
+        throw new Error(
+          mode === 'verify-full'
+            ? 'Verified PostgreSQL TLS for IP addresses requires a single database host'
+            : 'PostgreSQL IP database targets require a single database host',
+        );
+      }
+
+      ipTarget = {
+        hostname: hosts[0].hostname,
+        port: hosts[0].port ?? parseDatabasePort(undefined),
+      };
+    }
+  }
+
   if (mode === 'trusted-private-network') {
-    return { ssl: false };
+    return ipTarget
+      ? {
+          host: [ipTarget.hostname],
+          port: [ipTarget.port],
+          ssl: false,
+        }
+      : { ssl: false };
   }
 
-  const hosts = getUrlHosts(databaseUrl);
-  const ipHosts = hosts.filter((host) => isIP(host.hostname) !== 0);
-  if (ipHosts.length === 0) {
+  if (!ipTarget) {
     return { ssl: 'verify-full' };
-  }
-
-  if (hosts.length !== 1) {
-    throw new Error(
-      'Verified PostgreSQL TLS for IP addresses requires a single database host',
-    );
   }
 
   // Postgres.js 3.4.5 splits host strings on colons, including bracketed IPv6
   // literals. Supply its supported host/port arrays to preserve the socket
   // target, and pass the same IP to Node TLS for certificate identity checks.
-  const host = hosts[0];
   return {
-    host: [host.hostname],
-    port: [host.port ?? parseDatabasePort(undefined)],
-    ssl: { host: host.hostname, rejectUnauthorized: true },
+    host: [ipTarget.hostname],
+    port: [ipTarget.port],
+    ssl: { host: ipTarget.hostname, rejectUnauthorized: true },
   };
 }

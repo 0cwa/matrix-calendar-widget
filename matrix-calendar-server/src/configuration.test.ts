@@ -175,6 +175,31 @@ describe('reminder database configuration', () => {
     await sql.end({ timeout: 0 });
   });
 
+  it('preserves IPv6 URL targets in the pinned client with private-network TLS disabled', async () => {
+    const databaseUrl =
+      'postgresql://reminder:secret@[2001:db8::15]:6432/matrix_calendar';
+    const options = getReminderDatabaseTlsOptions(
+      'trusted-private-network',
+      databaseUrl,
+    );
+    expect(options).toEqual({
+      host: ['2001:db8::15'],
+      port: [6432],
+      ssl: false,
+    });
+
+    // Construct the pinned client without issuing a query or opening a socket.
+    const postgresOptions = {
+      ...options,
+      max: 1,
+    } as unknown as Parameters<typeof postgres>[1];
+    const sql = postgres(databaseUrl, postgresOptions);
+    expect(sql.options.host).toEqual(['2001:db8::15']);
+    expect(sql.options.port).toEqual([6432]);
+    expect(sql.options.ssl).toBe(false);
+    await sql.end({ timeout: 0 });
+  });
+
   it('uses PGPORT when an IP-literal URL omits its port', () => {
     process.env.PGPORT = '6543';
 

@@ -16,12 +16,14 @@ driver is version 3.4.5.
    certificate chain through its system trust store and checks the endpoint
    name. A TLS or verification error prevents startup; do not retry without
    TLS.
-2. For a single IP-literal URL host, pass that IP as the Node TLS verification
-   host with `rejectUnauthorized: true`. Postgres.js omits SNI for IP literals;
-   Node still verifies the certificate against the supplied IP. Its URL parser
-   splits host strings on colons, so pass single-entry `host` and `port` arrays
-   to preserve bracketed IPv6 targets. Reject multi-host URLs containing an IP
-   literal until per-host verification is defined.
+2. For a single IP-literal URL host in `verify-full` mode, pass that IP as the
+   Node TLS verification host with `rejectUnauthorized: true`. Postgres.js
+   omits SNI for IP literals; Node still verifies the certificate against the
+   supplied IP. Its URL parser splits host strings on colons, so pass
+   single-entry `host` and `port` arrays for bracketed IPv6 targets in either
+   TLS mode, preserving the socket target even when TLS is explicitly disabled.
+   Reject multi-host URLs containing an IP literal in `verify-full` mode until
+   per-host verification is defined.
 3. Permit plaintext only when the operator explicitly sets
    `MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE=trusted-private-network`. This
    mode is for an operator-controlled, isolated database network and sets
