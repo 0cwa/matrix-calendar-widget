@@ -213,7 +213,7 @@ and explicit target-calendar authorization are available.
 ## M8 — Hardening and release
 
 - [ ] Responsive/a11y pass across narrow Element panels and full-screen widget.
-- [ ] Threat model and security review.
+- [x] Threat model and security review ([docs/threat-model.md](./threat-model.md)).
 - [ ] Rate limits and abuse controls.
 - [x] Document the initial free/busy privacy boundary; no aggregate availability surface is provided yet ([docs/FREE_BUSY_PRIVACY.md](./FREE_BUSY_PRIVACY.md)).
 - [x] Document operator backup/recovery boundaries and procedures for the
