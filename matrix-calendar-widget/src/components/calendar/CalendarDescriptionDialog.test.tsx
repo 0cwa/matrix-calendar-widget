@@ -37,6 +37,11 @@ const readOnly: Calendar = {
   description: 'Preserved description',
   readOnly: true,
 };
+const unknownPermission: Calendar = {
+  id: 'unknown-permission',
+  name: 'Permission unknown',
+  description: 'Must remain unavailable',
+};
 
 function createWrapper(repository: InMemoryCalendarRepository) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
@@ -51,13 +56,13 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 describe('<CalendarDescriptionDialog />', () => {
   it('clears the selected writable calendar description when saved empty', async () => {
     const repository = new InMemoryCalendarRepository({
-      calendars: [writable, readOnly],
+      calendars: [writable, readOnly, unknownPermission],
     });
     const onClose = vi.fn();
 
     render(
       <CalendarDescriptionDialog
-        calendars={[writable, readOnly]}
+        calendars={[writable, readOnly, unknownPermission]}
         onClose={onClose}
         open
       />,
@@ -65,6 +70,9 @@ describe('<CalendarDescriptionDialog />', () => {
     );
 
     expect(screen.queryByRole('option', { name: 'Read only' })).toBeNull();
+    expect(
+      screen.queryByRole('option', { name: 'Permission unknown' }),
+    ).toBeNull();
     const description = screen.getByRole('textbox', { name: 'Description' });
     expect(description).toHaveValue('Old description');
     await userEvent.clear(description);
@@ -76,6 +84,7 @@ describe('<CalendarDescriptionDialog />', () => {
     await expect(repository.listCalendars()).resolves.toEqual([
       { id: 'team', name: 'Team calendar', readOnly: false },
       readOnly,
+      unknownPermission,
     ]);
   });
 

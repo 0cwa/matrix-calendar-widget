@@ -441,6 +441,68 @@ describe('CalDavDiscoveryClient', () => {
     expect(init?.body).not.toContain('timezone');
   });
 
+  it('round-trips calendar-description whitespace without trimming other DAV values', async () => {
+    const description = '  Plan <Q&A>  ';
+    const writeFetch = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/</d:href>
+              <d:propstat>
+                <d:prop><c:calendar-description/></d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+
+    await new CalDavDiscoveryClient(
+      'https://radicale.example.test/',
+      credentialProvider,
+      writeFetch,
+    ).updateCalendarDescription(
+      'https://radicale.example.test/alice/team/',
+      description,
+    );
+
+    expect(writeFetch.mock.calls[0][1]?.body).toContain(
+      '<C:calendar-description>  Plan &lt;Q&amp;A&gt;  </C:calendar-description>',
+    );
+
+    const readFetch = createFetchMock(
+      principalResponse('/principals/alice/'),
+      homeResponse('/alice/'),
+      multistatus(`
+        <d:response>
+          <d:href>  /alice/team/  </d:href>
+          <d:propstat>
+            <d:prop>
+              <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+              <d:displayname>  Team calendar  </d:displayname>
+              <c:calendar-description>  Plan &lt;Q&amp;A&gt;  </c:calendar-description>
+            </d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
+      `),
+    );
+    const result = await new CalDavDiscoveryClient(
+      'https://radicale.example.test/',
+      credentialProvider,
+      readFetch,
+    ).discover();
+
+    expect(result.calendars[0]).toMatchObject({
+      href: 'https://radicale.example.test/alice/team/',
+      displayName: 'Team calendar',
+      description,
+    });
+  });
+
   it('removes calendar-description when the submitted description is empty', async () => {
     const fetchMock = jest
       .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()

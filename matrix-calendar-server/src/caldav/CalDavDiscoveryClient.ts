@@ -51,7 +51,7 @@ const parser = new XMLParser({
   attributeNamePrefix: '@_',
   parseTagValue: false,
   parseAttributeValue: false,
-  trimValues: true,
+  trimValues: false,
 });
 
 const PRINCIPAL_BODY = `<?xml version="1.0" encoding="utf-8" ?>
@@ -312,7 +312,7 @@ export class CalDavDiscoveryClient {
         {
           href: new URL(href, calendarHomeUrl).toString(),
           displayName: textValue(properties.displayname),
-          description: textValue(properties['calendar-description']),
+          description: preservedTextValue(properties['calendar-description']),
           color: textValue(properties['calendar-color']),
           components,
           readOnly: readOnlyValue(properties['current-user-privilege-set']),
@@ -471,6 +471,15 @@ function asNode(value: unknown): DavNode | undefined {
 }
 
 function textValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function preservedTextValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 

@@ -42,7 +42,7 @@ export function CalendarDescriptionDialog({
   const { t } = useTranslation();
   const updateDescription = useUpdateCalendarDescription();
   const writableCalendars = useMemo(
-    () => calendars.filter((calendar) => !calendar.readOnly),
+    () => calendars.filter((calendar) => calendar.readOnly === false),
     [calendars],
   );
   const [calendarId, setCalendarId] = useState('');
