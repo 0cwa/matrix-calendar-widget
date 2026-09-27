@@ -70,13 +70,13 @@ describeContract('CalDAV discovery contract', () => {
       ).toBe(description);
 
       await discoveryClient.updateCalendarDescription(calendarUrl, '');
-      cleared = true;
 
       const afterClear = await discoveryClient.discover();
       expect(
         afterClear.calendars.find((calendar) => calendar.href === calendarUrl)
           ?.description,
       ).toBeUndefined();
+      cleared = true;
     } finally {
       if (!cleared) {
         await discoveryClient.updateCalendarDescription(calendarUrl, '');
