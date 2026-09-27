@@ -92,12 +92,13 @@ Complete on `main`:
   RFC 9074 VALARM UID for future sidecar identity. This does not configure
   Matrix recipients or trigger delivery. The authenticated room reminder
   configuration API stores inert intent after room membership, binding, and
-  event-write policy checks. It does not prove the event, recurrence instance,
-  or VALARM UID exists in CalDAV. A pure fixture-tested resolver now checks
-  those identities against canonical resource data supplied by a future caller;
-  it performs no resource lookup or delivery. Widget controls and wiring,
-  current CalDAV resource lookup, scheduling, delivery-time `@room` permission
-  rechecks, and Matrix sends remain incomplete. The server chart projects
+  event-write policy checks. Commit `e685506` adds a pure exact matcher for an
+  already-fetched raw CalDAV resource: it checks the calendar, event,
+  recurrence, alarm UID, and trigger ordinal, but performs no fetch or send.
+  There is no production fetch caller, scheduler, or delivery path. Widget
+  controls and wiring, trusted current-resource lookup, scheduling,
+  delivery-time `@room` permission rechecks, and Matrix sends remain
+  incomplete. The server chart projects
   `MATRIX_CALENDAR_REMINDER_DATABASE_URL` only from an external Secret when
   reminders are enabled; no database is provisioned by the chart. Do not use
   Synapse's database/schema or `pg-credentials` secret. Email attendee fields,
