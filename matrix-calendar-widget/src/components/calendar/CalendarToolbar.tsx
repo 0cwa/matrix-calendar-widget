@@ -54,7 +54,7 @@ export function CalendarToolbar({
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const writableCalendars = calendars.data.filter(
-    (calendar) => !calendar.readOnly,
+    (calendar) => calendar.readOnly === false,
   );
 
   return (
