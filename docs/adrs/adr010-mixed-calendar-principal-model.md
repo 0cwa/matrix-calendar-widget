@@ -30,19 +30,35 @@ Use a mixed principal model with separate personal and room-owned paths:
    bound to a Matrix room. The bot uses that principal for room-owned calendar
    operations; it does not create or claim per-user calendars on a user's
    behalf.
-3. **Room-scoped widget operations** may use the application principal only
-   after the gateway has independently established all of the following for
-   the request: a validated widget OpenID identity, current room membership,
-   the required room power under configured policy, and an explicit binding
-   between the requested calendar and that room. The gateway must authorize
-   the requested operation under that room's policy before performing it.
-4. **Matrix event sender identity is authorization context, not OpenID proof.**
+3. **Room-principal access is blocked until its CalDAV authentication path is
+   defined and tested.** Neither room-owned calendar reads nor writes—whether
+   initiated by the bot or a room-scoped widget request—may use the application
+   principal until a non-password server-to-Radicale authentication path for
+   that principal has been specified and tested. ADR009 defines an intended
+   delegated OpenID path for a validated user principal; it does not provide
+   credentials or an authentication contract for the application principal.
+   This ADR does not presume that Radicale, its auth plugin, or an etke
+   deployment supports such a path.
+4. **Room-scoped widget operations** may use the application principal only
+   after the authentication prerequisite above is met and the gateway has
+   independently established all of the following for the request: a
+   validated widget OpenID identity, current room membership, the required
+   room power under configured policy, and an explicit binding between the
+   requested calendar and that room. The gateway must authorize the requested
+   operation under that room's policy before performing it.
+5. **Bot commands** that read or mutate a room-owned calendar must, for every
+   command, validate the sender's current room membership and required power,
+   resolve the explicit room-to-calendar binding, and authorize the requested
+   operation under that room's policy. These checks do not satisfy the
+   application-principal CalDAV authentication prerequisite above.
+6. **Matrix event sender identity is authorization context, not OpenID proof or
+   CalDAV identity proof.**
    A sender may be used to resolve room membership/power and to record the
-   actor in an audit trail. A sender value alone does not authenticate the
-   widget requester or establish that the requester owns a Matrix identity.
-   The gateway must validate the OpenID assertion separately and must not
-   infer its subject from an event sender.
-5. **Per-user bot calendars are deferred.** Do not make the bot create or
+   actor in an audit trail. A sender value alone does not authenticate a
+   widget requester, establish that the requester owns a Matrix identity, or
+   prove a CalDAV principal. The gateway must validate the widget's OpenID
+   assertion separately and must not infer its subject from an event sender.
+7. **Per-user bot calendars are deferred.** Do not make the bot create or
    mutate personal calendars until a separately reviewed, tested contract
    establishes a trusted actor-token path that binds the requested Matrix
    actor to the CalDAV operation. ADR009's intended gateway delegation does
@@ -55,6 +71,14 @@ Use a mixed principal model with separate personal and room-owned paths:
 - Every widget request is authenticated from a homeserver-validated OpenID
   assertion; room membership, power, and binding checks are separate
   authorization checks.
+- Every bot command that accesses a room-owned calendar rechecks the sender's
+  current membership and required power, and resolves the explicit
+  room-to-calendar binding. Sender identity is authorization/audit context,
+  never proof of CalDAV identity.
+- Room-principal reads and writes remain disabled until a non-password
+  server-to-Radicale authentication path for the application principal is
+  defined and tested. ADR009's user-delegation contract does not satisfy this
+  prerequisite.
 - The room-to-calendar binding is explicit server-side state. A caller cannot
   select an unbound room calendar by supplying a calendar ID alone.
 - Application-principal access is limited to the room-owned calendar selected
