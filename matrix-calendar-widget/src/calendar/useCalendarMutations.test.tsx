@@ -153,6 +153,51 @@ describe('calendar repository mutation hooks', () => {
     });
   });
 
+  it('refreshes calendar and event queries when a delete fails after changing server state', async () => {
+    let calendars = [calendar];
+    let events = [event];
+    const repository: CalendarRepository = {
+      listCalendars: vi.fn().mockImplementation(async () => calendars),
+      createCalendar: vi.fn().mockResolvedValue(calendar),
+      renameCalendar: vi.fn().mockResolvedValue(undefined),
+      deleteCalendar: vi.fn().mockImplementation(async () => {
+        calendars = [];
+        events = [];
+        throw new Error('partial delete');
+      }),
+      listEvents: vi.fn().mockImplementation(async () => events),
+      getEvent: vi.fn().mockResolvedValue(event),
+      createEvent: vi.fn().mockResolvedValue(event),
+      updateEvent: vi.fn().mockResolvedValue(event),
+      deleteEvent: vi.fn().mockResolvedValue(undefined),
+    };
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        calendars: useCalendars(),
+        events: useCalendarEvents(['team'], range),
+        deleteCalendar: useDeleteCalendar(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(
+      () => result.current.calendars.loading || result.current.events.loading,
+    );
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([calendar]);
+      expect(result.current.events.data).toEqual([event]);
+    });
+
+    await expect(result.current.deleteCalendar('team')).rejects.toMatchObject({
+      message: 'partial delete',
+    });
+
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([]);
+      expect(result.current.events.data).toEqual([]);
+    });
+  });
+
   it('refreshes active event queries after create', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],

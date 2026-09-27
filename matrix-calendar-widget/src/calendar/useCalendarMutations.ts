@@ -64,8 +64,13 @@ export function useDeleteCalendar(): (calendarId: CalendarId) => Promise<void> {
 
   return useCallback(
     async (calendarId: CalendarId) => {
-      await repository.deleteCalendar(calendarId);
-      invalidate();
+      try {
+        await repository.deleteCalendar(calendarId);
+      } finally {
+        // A failed DELETE can still have changed the server before its response
+        // was lost or reported partial collection failures.
+        invalidate();
+      }
     },
     [invalidate, repository],
   );
