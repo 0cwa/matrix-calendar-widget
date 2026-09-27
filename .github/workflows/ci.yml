@@ -108,3 +108,39 @@ jobs:
 
       - name: Build server
         run: yarn workspace @matrix-calendar-widget/server build
+
+  container-images:
+    name: Container image build smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build calendar package
+        run: yarn workspace @matrix-calendar-widget/calendar build
+
+      - name: Build server workspace
+        run: yarn workspace @matrix-calendar-widget/server build
+
+      - name: Build widget workspace
+        run: yarn workspace @matrix-calendar-widget/widget build
+
+      - name: Build server image (local only)
+        run: docker build -t matrix-calendar-widget/server:ci -f matrix-calendar-server/Dockerfile .
+
+      - name: Build widget image (local only)
+        run: >-
+          docker build --build-context root=.
+          -t matrix-calendar-widget/widget:ci
+          -f matrix-calendar-widget/Dockerfile
+          matrix-calendar-widget
