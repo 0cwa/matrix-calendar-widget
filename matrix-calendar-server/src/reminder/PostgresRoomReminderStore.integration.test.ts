@@ -21,6 +21,19 @@ import { PostgresRoomReminderStore } from './PostgresRoomReminderStore';
 const databaseUrl = process.env.MATRIX_CALENDAR_REMINDER_DATABASE_URL;
 const describeWithDatabase = databaseUrl ? describe : describe.skip;
 
+async function requireIsolatedTestDatabase(
+  sql: ReturnType<typeof postgres>,
+): Promise<void> {
+  const [database] = await sql<{ name: string }[]>`
+    SELECT current_database() AS name
+  `;
+  if (database.name !== 'matrix_calendar_test') {
+    throw new Error(
+      'The PostgreSQL reminder contract requires the isolated matrix_calendar_test database',
+    );
+  }
+}
+
 describeWithDatabase('PostgresRoomReminderStore integration', () => {
   const roomId = `!reminder-store-${randomUUID()}:example.test`;
   const calendarId = 'room-calendar';
@@ -30,6 +43,7 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
 
   beforeAll(async () => {
     sql = postgres(databaseUrl as string, { max: 3, connect_timeout: 5 });
+    await requireIsolatedTestDatabase(sql);
     store = new PostgresRoomReminderStore(sql);
     await store.migrate();
     initialized = true;
@@ -72,6 +86,38 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
 
     await store.deleteConfiguration(config);
     expect(await store.listConfigurations(roomId, calendarId)).toEqual([]);
+  });
+
+  it('refuses a schema version newer than this server supports', async () => {
+    await requireIsolatedTestDatabase(sql);
+
+    const [latestApplied] = await sql<{ version: number }[]>`
+      SELECT COALESCE(MAX(version), 0)::integer AS version
+      FROM matrix_calendar.schema_migrations
+    `;
+    const futureVersion = latestApplied.version + 1;
+    const [insertedVersion] = await sql<{ version: number }[]>`
+      INSERT INTO matrix_calendar.schema_migrations (version)
+      VALUES (${futureVersion})
+      ON CONFLICT (version) DO NOTHING
+      RETURNING version
+    `;
+
+    if (!insertedVersion) {
+      throw new Error('Could not insert the synthetic future schema version');
+    }
+
+    try {
+      expect(insertedVersion.version).toBe(futureVersion);
+      await expect(store.migrate()).rejects.toThrow(
+        `Reminder store schema version ${futureVersion} is newer than the supported version`,
+      );
+    } finally {
+      await sql`
+        DELETE FROM matrix_calendar.schema_migrations
+        WHERE version = ${futureVersion}
+      `;
+    }
   });
 
   it('atomically grants one concurrent claim and prevents a second send after completion', async () => {

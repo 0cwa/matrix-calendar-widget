@@ -87,6 +87,9 @@ const reminderStoreMigrations = [
     `,
   },
 ];
+const latestReminderStoreMigrationVersion = Math.max(
+  ...reminderStoreMigrations.map(({ version }) => version),
+);
 
 /**
  * PostgreSQL adapter for Matrix-specific reminder metadata and delivery
@@ -115,6 +118,19 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
           applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
       `;
+
+      const [newerMigration] = await transaction<{ version: number }[]>`
+        SELECT version
+        FROM matrix_calendar.schema_migrations
+        WHERE version > ${latestReminderStoreMigrationVersion}
+        ORDER BY version DESC
+        LIMIT 1
+      `;
+      if (newerMigration) {
+        throw new Error(
+          `Reminder store schema version ${newerMigration.version} is newer than the supported version ${latestReminderStoreMigrationVersion}`,
+        );
+      }
 
       for (const migration of reminderStoreMigrations) {
         const [applied] = await transaction<{ version: number }[]>`
