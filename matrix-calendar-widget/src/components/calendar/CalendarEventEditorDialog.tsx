@@ -42,10 +42,10 @@ import {
   calendarEventPatchFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
-  validateCalendarEventForm,
   useCalendarRepository,
   useCreateCalendarEvent,
   useUpdateCalendarEvent,
+  validateCalendarEventForm,
 } from '../../calendar';
 
 export function CalendarEventEditorDialog({

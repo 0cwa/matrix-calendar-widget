@@ -202,8 +202,8 @@ describe('<CalendarEventEditorDialog />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    const start = screen.getByLabelText('Start');
-    const end = screen.getByLabelText('End');
+    const start = await screen.findByLabelText('Start');
+    const end = await screen.findByLabelText('End');
     fireEvent.change(start, { target: { value: '2026-09-23T11:30' } });
     fireEvent.change(end, { target: { value: '2026-09-23T12:15' } });
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));

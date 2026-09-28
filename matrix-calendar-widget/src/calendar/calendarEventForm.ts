@@ -20,9 +20,9 @@ import {
   CalendarEventInput,
   CalendarEventPatch,
   CalendarId,
-  TimedCalendarEventTiming,
   isAllDayCalendarEvent,
   isTimedCalendarEvent,
+  TimedCalendarEventTiming,
 } from '@matrix-calendar-widget/calendar';
 import { DateTime } from 'luxon';
 
