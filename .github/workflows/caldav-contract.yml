@@ -7,8 +7,11 @@ on:
       - '.github/workflows/caldav-contract.yml'
       - 'dev/**'
       - 'matrix-calendar-server/src/caldav/**'
+      - 'matrix-calendar-server/src/controller/CalendarGatewayController.ts'
+      - 'matrix-calendar-server/src/app.module.ts'
       - 'matrix-calendar-server/test/integration/CalDavDiscoveryContract.test.ts'
       - 'matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts'
+      - 'matrix-calendar-server/test/integration/CalendarDiagnosticsContract.test.ts'
       - 'matrix-calendar-server/package.json'
       - 'yarn.lock'
 
@@ -63,6 +66,7 @@ jobs:
           jest
           test/integration/CalDavDiscoveryContract.test.ts
           test/integration/CalDavEventRoundTripContract.test.ts
+          test/integration/CalendarDiagnosticsContract.test.ts
           --runInBand
 
       - name: Dump service logs on failure

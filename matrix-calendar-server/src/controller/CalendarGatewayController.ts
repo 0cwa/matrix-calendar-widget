@@ -47,7 +47,7 @@ import {
   CalDavEventTransportError,
   ICalendarEventCodec,
   MatrixOpenIdCalDavCredentialError,
-  MatrixOpenIdCalDavCredentialProvider,
+  MatrixOpenIdCalDavCredentialProviderFactory,
 } from '../caldav';
 import { MatrixOpenIdCredentialParam } from '../decorator/MatrixOpenIdCredentialParam';
 import { UserContextParam } from '../decorator/UserContextParam';
@@ -71,6 +71,8 @@ export class CalendarGatewayController {
     @Inject(ModuleProviderToken.APP_CONFIGURATION)
     private readonly appConfig: IAppConfiguration,
     private readonly authorizationFactory: MatrixCalendarAuthorizationFactory,
+    private readonly credentialProviderFactory:
+      MatrixOpenIdCalDavCredentialProviderFactory,
   ) {}
 
   @Get('context')
@@ -100,7 +102,7 @@ export class CalendarGatewayController {
     }
 
     const radicaleUrl = this.requireRadicaleBaseUrl();
-    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+    const credentialProvider = this.credentialProviderFactory.forRequest(
       userContext,
       openIdCredential,
     );
@@ -151,7 +153,7 @@ export class CalendarGatewayController {
       throw calendarDiagnosticsUnavailable();
     }
 
-    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+    const credentialProvider = this.credentialProviderFactory.forRequest(
       userContext,
       openIdCredential,
     );
@@ -213,7 +215,7 @@ export class CalendarGatewayController {
       );
     }
 
-    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+    const credentialProvider = this.credentialProviderFactory.forRequest(
       userContext,
       openIdCredential,
     );
@@ -278,7 +280,7 @@ export class CalendarGatewayController {
       );
     }
 
-    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+    const credentialProvider = this.credentialProviderFactory.forRequest(
       userContext,
       openIdCredential,
     );
@@ -333,7 +335,7 @@ export class CalendarGatewayController {
       );
     }
 
-    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+    const credentialProvider = this.credentialProviderFactory.forRequest(
       userContext,
       openIdCredential,
     );
@@ -380,7 +382,7 @@ export class CalendarGatewayController {
       );
     }
 
-    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+    const credentialProvider = this.credentialProviderFactory.forRequest(
       userContext,
       openIdCredential,
     );
@@ -413,7 +415,7 @@ export class CalendarGatewayController {
     );
     const client = new CalDavDiscoveryClient(
       this.requireRadicaleBaseUrl(),
-      new MatrixOpenIdCalDavCredentialProvider(userContext, openIdCredential),
+      this.credentialProviderFactory.forRequest(userContext, openIdCredential),
     );
 
     await this.runCalDav(async () => {
@@ -693,7 +695,7 @@ export class CalendarGatewayController {
     openIdCredential: IMatrixOpenIdCredential | undefined,
   ): CalDavEventClient {
     return new CalDavEventClient(
-      new MatrixOpenIdCalDavCredentialProvider(userContext, openIdCredential),
+      this.credentialProviderFactory.forRequest(userContext, openIdCredential),
     );
   }
 
