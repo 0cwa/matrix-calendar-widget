@@ -22,7 +22,7 @@ import {
   CalendarId,
   isAllDayCalendarEvent,
   isTimedCalendarEvent,
-  TimedCalendarEventTiming,
+  type TimedCalendarEventTiming,
 } from '@matrix-calendar-widget/calendar';
 import { DateTime } from 'luxon';
 
