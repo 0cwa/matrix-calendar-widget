@@ -16,6 +16,7 @@ case "$*" in
       network) exit 7 ;;
       http) printf '%s\n403' '{"errcode":"M_FORBIDDEN","error":"credential response canary","access_token":"access-token-canary"}' ;;
       malformed) printf '%s\n200' 'malformed response canary' ;;
+      malformed-with-token) printf '%s\n200' 'not-json {"access_token":"access-token-canary"}' ;;
       missing) printf '%s\n200' '{"user_id":"@bot:example.org"}' ;;
       success) printf '%s\n200' '{"access_token":"access-token-canary","device_id":"device-canary"}' ;;
       *) exit 2 ;;
@@ -49,11 +50,14 @@ assert_no_credentials "$success_output"
 grep -Fx 'Login successful.' <<EOF >/dev/null
 $success_output
 EOF
-grep -Fx 'ACCESS_TOKEN=access-token-canary' "$temp_dir/work/.env" >/dev/null
+if ! printf 'ACCESS_TOKEN=%s\n' 'access-token-canary' | cmp - "$temp_dir/work/.env"; then
+  printf 'successful login wrote an unexpected env file\n' >&2
+  exit 1
+fi
 
 run_login_failure() {
   login_case=$1
-  rm -f "$temp_dir/work/.env"
+  printf '%s\n' 'ACCESS_TOKEN=stale-token-canary' > "$temp_dir/work/.env"
   if failure_output=$(PATH="$temp_dir/bin:$PATH" WORK_DIR="$temp_dir/work" LOGIN_CASE="$login_case" \
     USERTOCREATE=bot HOMESERVER=https://matrix.example BOT_PASSWORD=password-canary \
     sh "$chart_dir/files/shell-tools/get_meetings_bot_token.sh" 2>&1); then
@@ -73,6 +77,7 @@ EOF
 run_login_failure network
 run_login_failure http
 run_login_failure malformed
+run_login_failure malformed-with-token
 run_login_failure missing
 
 account_output=$(PATH="$temp_dir/bin:$PATH" USERTOCREATE=bot HOMESERVER=https://matrix.example \
