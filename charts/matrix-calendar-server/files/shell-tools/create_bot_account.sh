@@ -7,6 +7,9 @@ if [ "$response" = 400 ]; then
     echo "Bot user already exists"
 else
   echo "Will create User $USERTOCREATE on $HOMESERVER"
-  register_new_matrix_user -a -u "$USERTOCREATE" -p "$BOT_PASSWORD" -c /data/homeserver.yaml "$HOMESERVER"
+  if ! register_new_matrix_user -a -u "$USERTOCREATE" -p "$BOT_PASSWORD" -c /data/homeserver.yaml "$HOMESERVER" >/dev/null 2>&1; then
+    echo "Failed to create Matrix bot account" >&2
+    exit 1
+  fi
 fi
 exit 0
