@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import * as ICAL from 'ical.js';
 
 const env = process.env;
 const requiredEnvironment = [
@@ -10,6 +11,7 @@ const requiredEnvironment = [
   'TZDB_SHA512',
   'TIMEZONE_LIBRARY_COMMIT',
   'TIMEZONE_LIBRARY_ROOT',
+  'TIMEZONE_RAW_DATA_ROOT',
   'IANA_ARCHIVE',
   'IANA_SOURCE_ROOT',
   'TIMEZONE_ARTIFACT_DIR',
@@ -30,6 +32,7 @@ if (archiveSha512 !== env.TZDB_SHA512) {
 }
 
 const upstreamRoot = path.resolve(env.TIMEZONE_LIBRARY_ROOT);
+const rawDataRoot = path.resolve(env.TIMEZONE_RAW_DATA_ROOT);
 const upstreamCommit = run('git', ['-C', upstreamRoot, 'rev-parse', 'HEAD']);
 if (upstreamCommit !== env.TIMEZONE_LIBRARY_COMMIT) {
   throw new Error(`Unexpected timezone generator commit: ${upstreamCommit}`);
@@ -54,7 +57,10 @@ const timezoneIds = [...new Set(rawTimezones)]
   .sort();
 const validTimezoneId = /^[A-Za-z0-9._+-]+(?:\/[A-Za-z0-9._+-]+)*$/;
 for (const id of timezoneIds) {
-  if (!validTimezoneId.test(id)) {
+  if (
+    !validTimezoneId.test(id) ||
+    id.split('/').some((segment) => segment === '.' || segment === '..')
+  ) {
     throw new Error(`Generator returned an unsafe timezone identifier: ${id}`);
   }
 }
@@ -70,34 +76,68 @@ for (const knownZone of [
   }
 }
 
+const blocks = Object.create(null);
+for (const id of timezoneIds) {
+  const rawBlock = await readFile(path.join(rawDataRoot, `${id}.ics`), 'utf8');
+  const block = rawBlock
+    .trimEnd()
+    // IANA Link identifiers share the target zone's rules. Give each copied
+    // VTIMEZONE the requested identifier so consumers can match TZID exactly.
+    .replace(/^TZID:[^\r\n]*/m, `TZID:${id}`)
+    .replace(/^X-LIC-LOCATION:[^\r\n]*/m, `X-LIC-LOCATION:${id}`);
+
+  if (
+    !block.startsWith(`BEGIN:VTIMEZONE\r\nTZID:${id}\r\n`) ||
+    !block.endsWith('END:VTIMEZONE')
+  ) {
+    throw new Error(`Malformed raw VTIMEZONE block for ${id}`);
+  }
+  blocks[id] = block;
+}
+
+function assertSerializedInuvikOffsets(block) {
+  const timezone = new ICAL.Timezone({
+    component: block,
+    tzid: 'America/Inuvik',
+  });
+  const offsetChecks = [
+    { localTime: '1970-01-15T12:00:00', expected: -8 * 60 * 60 },
+    { localTime: '1970-07-15T12:00:00', expected: -8 * 60 * 60 },
+    { localTime: '1972-01-15T12:00:00', expected: -8 * 60 * 60 },
+    { localTime: '1972-07-15T12:00:00', expected: -7 * 60 * 60 },
+    { localTime: '2026-01-15T12:00:00', expected: -7 * 60 * 60 },
+    { localTime: '2026-11-01T01:59:00', expected: -6 * 60 * 60 },
+    { localTime: '2026-11-01T02:01:00', expected: -6 * 60 * 60 },
+    { localTime: '2026-12-15T12:00:00', expected: -6 * 60 * 60 },
+  ];
+
+  const actualOffsets = {};
+  for (const { localTime, expected } of offsetChecks) {
+    const actual = timezone.utcOffset(ICAL.Time.fromString(localTime));
+    if (actual !== expected) {
+      throw new Error(
+        `Serialized America/Inuvik VTIMEZONE gives ${actual} seconds at ${localTime}; expected ${expected}`,
+      );
+    }
+    actualOffsets[localTime] = actual;
+  }
+  return actualOffsets;
+}
+
+// Evaluate the emitted RFC 5545 component itself, rather than relying on the
+// generator's offset helper or the host's potentially stale time zone data.
+const serializedInuvikOffsets = assertSerializedInuvikOffsets(
+  blocks['America/Inuvik'],
+);
 const inuvikOffset = upstreamModule.tzlib_get_offset(
   'America/Inuvik',
   '2026-12-01',
   '12:00',
 );
 if (inuvikOffset !== '-0600') {
-  throw new Error(`America/Inuvik must be -0600 after the 2026d change; got ${inuvikOffset}`);
-}
-
-const blocks = {};
-for (const id of timezoneIds) {
-  const result = upstreamModule.tzlib_get_ical_block(id);
-  if (!Array.isArray(result) || typeof result[0] !== 'string') {
-    throw new Error(`Generator returned no VTIMEZONE block for ${id}`);
-  }
-
-  // IANA Link identifiers share the target zone's rules. Give each returned
-  // block the requested identifier so consumers can match TZID exactly.
-  const block = result[0]
-    .replace(/^TZID:[^\r\n]*/m, `TZID:${id}`)
-    .replace(/^X-LIC-LOCATION:[^\r\n]*/m, `X-LIC-LOCATION:${id}`);
-  if (
-    !block.startsWith(`BEGIN:VTIMEZONE\r\nTZID:${id}\r\n`) ||
-    !block.endsWith('END:VTIMEZONE')
-  ) {
-    throw new Error(`Malformed VTIMEZONE block for ${id}`);
-  }
-  blocks[id] = block;
+  throw new Error(
+    `America/Inuvik must be -0600 after the 2026d change; got ${inuvikOffset}`,
+  );
 }
 
 const artifactDirectory = path.resolve(env.TIMEZONE_ARTIFACT_DIR);
@@ -156,6 +196,7 @@ const manifest = {
     packageVersion: upstreamVersion,
     license: upstreamPackage.license,
     licenseNotice: 'licenses/timezones-ical-library-LICENSE',
+    vtimezoneMode: 'VZIC --pure',
     upstreamConvenienceAliasesExcluded: [...upstreamOnlyAliases].sort(),
   },
   tools: {
@@ -169,6 +210,7 @@ const manifest = {
   validation: {
     ianaTimezoneCount: timezoneIds.length,
     inuvikOffsetOn2026_12_01: inuvikOffset,
+    serializedInuvikOffsets,
     knownZones: [
       'America/Inuvik',
       'America/Edmonton',
@@ -186,5 +228,5 @@ await writeFile(
 
 console.log(
   `Generated ${timezoneIds.length} IANA VTIMEZONE blocks from ${env.TZDB_VERSION}; ` +
-    `America/Inuvik offset is ${inuvikOffset}.`,
+    `serialized America/Inuvik offsets pass historical and 2026d checks.`,
 );
