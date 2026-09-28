@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from '@jest/globals';
 import ICAL from 'ical.js';
 import provenance from './data/provenance.json';
+import timezoneBlocks from './data/vtimezones.json';
 import { getVTimezoneBlock } from './index';
 
 function timezoneOffset(timezoneId: string, localTime: string): number {
@@ -120,5 +121,10 @@ describe('getVTimezoneBlock', () => {
 
     expect(dataHash).toBe(provenance.outputs['vtimezones.json']);
     expect(provenance.iana.version).toBe('2026d');
+    expect(
+      Object.values(timezoneBlocks).some((block) =>
+        block.includes('LAST-MODIFIED:'),
+      ),
+    ).toBe(false);
   });
 });

@@ -32,6 +32,12 @@ database and re-tagged with the requested identifier. The manifest records
 these IDs. The upstream convenience aliases `CT`, `ET`, `MT`, and `PT` are
 excluded because they are not IANA identifiers.
 
+VZIC writes the current build time to each component's optional `LAST-MODIFIED`
+property. The generator removes that property while retaining all timezone
+observances, so repeated builds from the same pinned inputs produce identical
+runtime VTIMEZONE data. RFC 5545 §3.6.5 defines this VTIMEZONE property as
+optional: [RFC 5545](https://www.rfc-editor.org/rfc/rfc5545#section-3.6.5).
+
 ## Regression evidence
 
 The hosted generator run was `36410576491`; artifact ID `10963623739` had ZIP

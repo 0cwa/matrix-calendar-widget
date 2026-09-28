@@ -96,12 +96,19 @@ for (const id of timezoneIds) {
     libraryExpandedAliases.push(id);
   }
 
+  // VZIC stamps the current build time into an optional property. Drop it so
+  // identical pinned inputs produce byte-stable runtime data.
   const block = rawBlock
     .trimEnd()
+    .replace(/^LAST-MODIFIED:[^\r\n]*\r\n/m, '')
     // IANA Link identifiers share the target zone's rules. Give each copied
     // VTIMEZONE the requested identifier so consumers can match TZID exactly.
     .replace(/^TZID:[^\r\n]*/m, `TZID:${id}`)
     .replace(/^X-LIC-LOCATION:[^\r\n]*/m, `X-LIC-LOCATION:${id}`);
+
+  if (block.includes('LAST-MODIFIED:')) {
+    throw new Error(`Volatile LAST-MODIFIED property remains in ${id}`);
+  }
 
   if (
     !block.startsWith(`BEGIN:VTIMEZONE\r\nTZID:${id}\r\n`) ||
