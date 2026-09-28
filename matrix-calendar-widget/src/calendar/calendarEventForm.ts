@@ -42,7 +42,9 @@ export type CalendarEventFormValues = {
 };
 
 export type CalendarEventValidationError =
-  'title-required' | 'invalid-range' | 'invalid-timezone';
+  | 'title-required'
+  | 'invalid-range'
+  | 'invalid-timezone';
 
 export function createCalendarEventFormValues(
   calendar: Calendar,
