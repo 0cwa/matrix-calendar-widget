@@ -216,7 +216,6 @@ const aptPackages = run('dpkg-query', [
 ]);
 const manifest = {
   schemaVersion: 1,
-  generatedAt: new Date().toISOString(),
   iana: {
     version: env.TZDB_VERSION,
     releaseUrl: `https://data.iana.org/time-zones/releases/tzdata${env.TZDB_VERSION}.tar.gz`,

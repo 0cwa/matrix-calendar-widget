@@ -121,6 +121,7 @@ describe('getVTimezoneBlock', () => {
 
     expect(dataHash).toBe(provenance.outputs['vtimezones.json']);
     expect(provenance.iana.version).toBe('2026d');
+    expect(provenance).not.toHaveProperty('generatedAt');
     expect(
       Object.values(timezoneBlocks).some((block) =>
         block.includes('LAST-MODIFIED:'),

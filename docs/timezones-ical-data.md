@@ -34,9 +34,11 @@ excluded because they are not IANA identifiers.
 
 VZIC writes the current build time to each component's optional `LAST-MODIFIED`
 property. The generator removes that property while retaining all timezone
-observances, so repeated builds from the same pinned inputs produce identical
-runtime VTIMEZONE data. RFC 5545 §3.6.5 defines this VTIMEZONE property as
-optional: [RFC 5545](https://www.rfc-editor.org/rfc/rfc5545#section-3.6.5).
+observances. The manifest also omits a generation timestamp; it records the
+pinned source and actual tool versions instead. Those choices make runtime data
+and provenance hashes repeatable for the same inputs and toolchain. RFC 5545
+§3.6.5 defines VTIMEZONE `LAST-MODIFIED` as optional:
+[RFC 5545](https://www.rfc-editor.org/rfc/rfc5545#section-3.6.5).
 
 ## Regression evidence
 
