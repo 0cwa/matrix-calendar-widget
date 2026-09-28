@@ -123,6 +123,10 @@ Ordinary master-field patches preserve all VEVENT components, VTIMEZONE, and
 unknown properties. The codec continues to reject master events without
 DTEND. Recurrence editing and mainstream-client interoperability remain open.
 
+The generated IANA 2026d VTIMEZONE lookup package is available for downstream
+timezone-aware consumers. Its presence alone does not complete the named-zone
+DST regression or recurrence-expansion criteria above.
+
 **Exit:** common recurring calendars round-trip with mainstream CalDAV clients.
 
 ## M6 — Matrix team features and reminders

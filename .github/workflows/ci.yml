@@ -67,6 +67,9 @@ jobs:
       - name: Test calendar package
         run: yarn workspace @matrix-calendar-widget/calendar test:all
 
+      - name: Test timezone data package
+        run: yarn workspace @matrix-calendar-widget/ical-timezones test:all
+
       - name: Build calendar package
         run: yarn workspace @matrix-calendar-widget/calendar build
 

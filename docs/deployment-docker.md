@@ -33,11 +33,83 @@ The widget image extends the pinned `ghcr.io/nordeck/matrix-widget-toolkit/widge
 
 The inherited toolkit base image name is an implementation dependency, not a publishing target. Project-built images and CI tags use the `matrix-calendar-widget` name. The existing workspace Docker scripts retain their own defaults; this guide's `:local` tags are explicit examples for local builds.
 
-## etke/MDAD deployment boundary
+## etke and Matrix Docker Ansible deployment
 
-An operator may choose to run these Docker-compatible images alongside an etke/MDAD-managed Matrix deployment, provided the operator supplies the required configuration, networking, and persistent storage. This is generic operator-run container compatibility only. The repository contains no MDAD-native service definition, etke role/module, inventory integration, generated deployment variables, or automated rollout support, and no such deployment has been validated here. Helm and Kubernetes packaging are also outside this slice.
+The Docker images in this repository can be run as separate operator-managed
+containers alongside Matrix. This documents a possible deployment boundary; it
+does not verify a live etke host, its networks, proxy, or authentication setup.
 
-The local `dev/compose.yaml` stack is for development and integration services; it does not define a production deployment for the server and widget. Do not treat it as an MDAD deployment contract.
+There are two different operating models:
+
+- **Hosted etke.cc:** etke's [FAQ](https://etke.cc/help/faq/) permits customer-run
+  services alongside its stack, but says those services are unsupported, may
+  break the stack, and may be broken by upgrades without warning. Do not hand-edit
+  etke-managed Matrix configuration: etke says maintenance can replace it.
+  Treat the calendar containers, their configuration, updates, and recovery as
+  the operator's responsibility.
+- **Self-managed `etkecc/ansible`:** this public Ansible repository is an etke
+  wrapper around
+  [`spantaleev/matrix-docker-ansible-deploy`](https://github.com/spantaleev/matrix-docker-ansible-deploy),
+  with additional service roles and playbooks. The stable `main` snapshot reviewed
+  here is commit
+  [`cd28f0b`](https://github.com/etkecc/ansible/tree/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622)
+  (2026-09-24); the [README](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/README.md)
+  describes `fresh` as its testing branch. Its
+  [`play/all.yml` custom section](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/play/all.yml#L83-L99)
+  is a curated list of named roles. **Inference from this wiring:** the reviewed
+  tree provides no generic Compose override or arbitrary-service variable hook;
+  first-class Ansible lifecycle management for this app would require an explicit
+  custom role and playbook integration that the operator maintains.
+
+The stable etke tree includes the MASH Radicale role, pinned there as
+[`v3.8.0.0-1`](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/requirements.yml#L31-L33).
+That **Radicale role only** provides variables for host data/config paths, its
+base Docker network, pre-existing additional networks, and Radicale's own Traefik
+labels ([role defaults](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/defaults/main.yml#L11-L18),
+[networks](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/defaults/main.yml#L54-L73),
+[Traefik labels](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/defaults/main.yml#L75-L124)).
+The role creates Radicale under systemd with `docker create`, bind-mounting its
+config read-only and its data directory for persistence; additional networks
+must already exist ([service template](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/templates/systemd/radicale.service.j2#L23-L50)).
+These role settings do not configure routing for the calendar gateway or widget.
+
+Before deploying, agree with the operator on the calendar hostname and who owns
+DNS, TLS, and reverse-proxy routing; the private Docker network that will allow
+the gateway to reach Radicale; how server-only secrets will be supplied; which
+paths or databases need persistence and backup; and who owns image updates and
+recovery. Keep CalDAV access on a private network where possible and expose only
+the required application endpoint through an operator-approved ingress. Do not
+assume the managed Traefik instance discovers or routes an arbitrary sidecar.
+The current Dockerfiles do not supply production volumes, credentials, or a
+deployment lifecycle. Persist and back up configured app storage and databases;
+inject server-only secrets through an operator-approved secret mechanism.
+
+### Radicale authentication
+
+Do not use the current
+[`etkecc/radicale-auth-matrix` source](https://github.com/etkecc/radicale-auth-matrix/blob/0f07e8ba32cf595e744403f70dd4ff81db3886b6/radicale_auth_matrix/__init__.py#L24-L39)
+for this product: it builds a Matrix `m.login.password` request from the
+Radicale-supplied username and password, then sends it to the homeserver
+([login request](https://github.com/etkecc/radicale-auth-matrix/blob/0f07e8ba32cf595e744403f70dd4ff81db3886b6/radicale_auth_matrix/__init__.py#L61-L79)).
+That conflicts with this repository's rule never to ask for, store, proxy, log,
+or derive a user's Matrix password. Use only a non-password authentication
+arrangement accepted by the operator and compatible with
+[ADR009](./adrs/adr009-radicale-openid-delegation.md). This page does not claim
+that an ADR009-compatible plugin image or etke deployment has been implemented
+or validated. The role exposes `radicale_auth_type` and
+`radicale_auth_matrix_server` variables ([role defaults](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/defaults/main.yml#L238-L242)),
+but those variables do not establish that the configured image contains an
+OpenID-capable plugin. The operator must confirm the pinned Radicale image and
+authentication mode before rollout.
+
+Sources above were checked on **2026-09-28**. The etke source links pin the
+stable `main` snapshot at `cd28f0bd94c0d15dbb3db7ad4718c7df62f49622`; the
+auth-plugin links pin `0f07e8ba32cf595e744403f70dd4ff81db3886b6` (2026-07-26).
+The etke FAQ is live documentation reviewed on that date.
+
+The local `dev/compose.yaml` stack is for development and integration services;
+it does not define a production deployment or an etke/MDAD deployment contract.
+Helm and Kubernetes packaging are outside this slice.
 
 ## Optional reminder PostgreSQL database
 
