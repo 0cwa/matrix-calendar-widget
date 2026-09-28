@@ -71,14 +71,17 @@ Issue #6 remains open. Continue with small recurrence and round-trip slices usin
 ### M6 — PostgreSQL reminder persistence
 
 The optional app-owned PostgreSQL store, transactional claim layer, verified-TLS
-default, and restricted-role PostgreSQL 16 CI contract are implemented in the
-current development slice. Focused local tests and full project CI pass; the
-local PostgreSQL integration suite was skipped because no database URL was
-configured. The hosted PostgreSQL contract and independent review remain
-required before this unit is complete. Persistence provides at-most-once
-database claim/completion state; it does not enable the reminder scheduler or
-guarantee exactly-once Matrix message delivery. Production TLS and etke-specific
-database wiring remain unverified.
+default, and restricted-role PostgreSQL 16 CI contract are implemented. The
+hosted restricted-role contract passed all five integration tests in run
+36358734009, and independent review passed. Full local project CI also passed;
+its PostgreSQL integration suite was skipped because no database URL was
+configured. The only remaining runtime gate for this store slice is verifying a
+default verified-TLS connection to an operator-controlled production PostgreSQL
+endpoint using its CA/certificate details. No endpoint or certificate
+configuration has been supplied, and etke-specific database wiring remains
+unverified. Persistence provides at-most-once database claim/completion state;
+it does not enable the reminder scheduler or guarantee exactly-once Matrix
+message delivery.
 
 ## Active blockers
 
