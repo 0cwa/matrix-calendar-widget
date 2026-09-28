@@ -92,6 +92,19 @@ describe('CalDavDiscoveryClient', () => {
             <d:status>HTTP/1.1 200 OK</d:status>
           </d:propstat>
         </d:response>
+        <d:response>
+          <d:href>/alice/journal/</d:href>
+          <d:propstat>
+            <d:prop>
+              <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+              <d:displayname>Journal only</d:displayname>
+              <c:supported-calendar-component-set>
+                <c:comp name="VJOURNAL"/>
+              </c:supported-calendar-component-set>
+            </d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
       `),
     );
 
@@ -116,6 +129,14 @@ describe('CalDavDiscoveryClient', () => {
         },
       ],
     });
+
+    const discoveredHrefs = result.calendars.map((calendar) => calendar.href);
+    expect(discoveredHrefs).not.toContain(
+      'https://radicale.example.test/alice/tasks/',
+    );
+    expect(discoveredHrefs).not.toContain(
+      'https://radicale.example.test/alice/journal/',
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     for (const [, init] of fetchMock.mock.calls) {

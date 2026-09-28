@@ -67,13 +67,18 @@ Password-auth real-container discovery is already covered by #59 / PR #60. The o
 - [ ] Update calendar timezone.
 - [x] Implement safe VEVENT-only calendar deletion (M4.4; issue #100 closed, PR #101 merged in `6faa1d1`).
 - [x] Detect mixed collections and expose an advanced compatibility notice.
-- [ ] Hide VJOURNAL-only collections.
-- [ ] Leave VTODO-only collections untouched and hidden from the main calendar UI.
+- [x] Hide VJOURNAL-only collections.
+- [x] Leave VTODO-only collections untouched and hidden from the main calendar UI.
 - [x] Add manager-only CalDAV URL/copy diagnostics (#5; ADR022; PR #113).
 
 Calendar creation (#94), lightweight visibility controls (#96), rename (#99), and safe deletion of explicitly writable VEVENT-only calendars (#100 / PR #101) are merged. Issue #100 is closed; the M4.4 deletion slice merged in `6faa1d1fdc773aa50798f3678ef77ae61a786144`. Description is implemented through its own operation; continue to avoid a generic metadata patch framework, and keep color and timezone as separate work.
 
 The description and color slices use dedicated CalDAV gateway operations; keep timezone editing as separate work.
+
+When a collection explicitly reports a supported-component set without
+VEVENT, CalDAV discovery keeps it out of the main calendar list. Regression
+coverage verifies both VJOURNAL-only and VTODO-only collections stay untouched
+and hidden; mixed collections that support VEVENT remain available.
 
 CalDAV URL diagnostics require validated widget identity, joined-room
 membership, and manager power before Radicale discovery. The gateway returns
