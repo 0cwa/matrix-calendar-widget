@@ -240,6 +240,8 @@ function recurringCalendar(uid: string): string {
     `UID:${uid}`,
     'DTSTAMP:20260922T120000Z',
     'RECURRENCE-ID;TZID=Europe/Stockholm:20261019T140000',
+    'DTSTART;TZID=Europe/Stockholm:20261019T140000',
+    'DTEND;TZID=Europe/Stockholm:20261019T150000',
     'STATUS:CANCELLED',
     'X-OVERRIDE-MARKER;X-ORIGIN=external:preserve-cancellation',
     'END:VEVENT',
@@ -266,6 +268,12 @@ function expectRecurringResourceProperties(
   );
   expect(icalendar).toContain(
     'RECURRENCE-ID;TZID=Europe/Stockholm:20261019T140000',
+  );
+  expect(icalendar).toContain(
+    'DTSTART;TZID=Europe/Stockholm:20261019T140000',
+  );
+  expect(icalendar).toContain(
+    'DTEND;TZID=Europe/Stockholm:20261019T150000',
   );
   expect(icalendar).toContain('STATUS:CANCELLED');
   expect(icalendar).toContain('BEGIN:VTIMEZONE');
