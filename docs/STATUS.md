@@ -6,7 +6,7 @@ This is the short-lived execution snapshot. `docs/PLAN.md` is the durable milest
 
 ## Current phase
 
-**M3 is complete. M4 color editing, mixed-collection compatibility, and manager-only CalDAV URL/copy diagnostics are implemented; timezone editing and VJOURNAL-only/VTODO-only visibility remain open. M5 recurrence work can proceed in bounded slices.**
+**M3 is complete. M4 color editing, mixed-collection compatibility, manager-only CalDAV URL/copy diagnostics, and hiding of VJOURNAL-only/VTODO-only collections are implemented; timezone editing remains open. M5 recurrence work can proceed in bounded slices.**
 
 ADR010 / PR #104 selected a mixed principal model: widget calendars remain user-scoped, while the bot MVP uses room-owned calendars under an application principal. Room-owned reads and writes remain blocked until a non-password server-to-Radicale authentication path for that principal is defined and tested. ADR009's user OpenID delegation does not provide application-principal credentials. No etke-managed host deployment has been verified.
 
@@ -52,7 +52,7 @@ Merged on `main`:
 - calendar color editing through the user-scoped gateway (PR #108),
 - mixed-collection compatibility notice and non-destructive VEVENT use (PR #109).
 
-Calendar timezone editing is deferred. PR #109 verifies mixed-collection notice behavior, preserves sibling VTODO data during VEVENT edits, and keeps known collections without VEVENT out of discovery. The separate VJOURNAL-only and VTODO-only plan criteria remain unchecked. PR #113 implements and validates the manager-only CalDAV URL/copy diagnostics under ADR022. Issue #5 remains open with a stale checklist: it still lists PR #101 as active and leaves merged description, color, mixed-notice, deletion, and PR #113 diagnostics work unchecked. No issue edit is included.
+Calendar timezone editing is deferred. PR #109 verifies mixed-collection notice behavior, preserves sibling VTODO data during VEVENT edits, and keeps known collections without VEVENT out of discovery. The CalDAV discovery regression now verifies both VJOURNAL-only and VTODO-only collections remain untouched and hidden. PR #113 implements and validates the manager-only CalDAV URL/copy diagnostics under ADR022. Issue #5 remains open with a stale checklist: it still lists PR #101 as active and leaves merged description, color, mixed-notice, deletion, and PR #113 diagnostics work unchecked. No issue edit is included.
 
 ### M7 — Non-widget fallback
 
@@ -110,7 +110,7 @@ Issue #29 remains open for a repository administrator to enable and verify the d
 
 ## Highest-priority next steps
 
-1. Continue M4 with the separate VJOURNAL-only/VTODO-only visibility criteria; keep timezone editing deferred.
+1. Keep M4 timezone editing deferred until its CalDAV compatibility boundary is established.
 2. Advance M5 through bounded recurrence and round-trip slices, adding DST and named-timezone regressions with each relevant behavior.
 3. In parallel, establish a writable source/release path for #48, then complete #45 against the tested user-delegation mode.
 4. Separately define/test application-principal Radicale authentication and implement the ADR010 room binding and membership/power checks for M6.
