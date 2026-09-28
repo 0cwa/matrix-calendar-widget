@@ -42,6 +42,34 @@ const event: CalendarEvent = {
 };
 
 describe('GatewayCalendarRepository', () => {
+  it('loads safe calendar diagnostics through the authenticated gateway', async () => {
+    const diagnostics = {
+      calendars: [
+        {
+          name: 'Team calendar',
+          url: 'https://radicale.example.test/alice/team/',
+        },
+      ],
+    };
+    const fetchMock = mockFetch(jsonResponse(diagnostics));
+    const repository = createRepository(fetchMock);
+
+    await expect(repository.getCalendarDiagnostics()).resolves.toEqual(
+      diagnostics,
+    );
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(typeof url).toBe('string');
+    if (typeof url !== 'string') {
+      throw new Error('Expected the gateway request URL to be a string');
+    }
+    expect(new URL(url).pathname).toBe('/v1/calendar/calendars/diagnostics');
+    expect(new URL(url).searchParams.get('roomId')).toBe('!team:example.test');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+  });
+
   it('returns supported component metadata from the gateway DTO', async () => {
     const calendars = [
       {

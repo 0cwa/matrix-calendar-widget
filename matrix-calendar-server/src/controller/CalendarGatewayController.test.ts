@@ -47,8 +47,10 @@ describe('CalendarGatewayController', () => {
     radicale_url: 'https://radicale.example.test/',
   } as IAppConfiguration;
   const isAllowed = jest.fn();
+  const canManageCalendars = jest.fn();
   const forRoom = jest.fn(() => ({ isAllowed }));
   const authorizationFactory = {
+    canManageCalendars,
     forRoom,
   } as unknown as MatrixCalendarAuthorizationFactory;
 
@@ -56,6 +58,7 @@ describe('CalendarGatewayController', () => {
     fetch.resetMocks();
     fetch.enableMocks();
     isAllowed.mockReset();
+    canManageCalendars.mockReset();
     forRoom.mockReset();
     forRoom.mockImplementation(() => ({ isAllowed }));
   });
@@ -137,6 +140,137 @@ describe('CalendarGatewayController', () => {
 
     expect(forRoom).toHaveBeenCalledWith(userContext.userId, roomId);
     expect(isAllowed).toHaveBeenCalledWith({ action: 'list-calendars' });
+  });
+
+  it('returns only safe in-base collection URLs to calendar managers', async () => {
+    canManageCalendars.mockResolvedValue(true);
+    const config = {
+      ...appConfig,
+      radicale_url: 'https://radicale.example.test/radicale/',
+    } as IAppConfiguration;
+    fetch.mockResponses(
+      [principalResponse('/radicale/principals/alice/'), { status: 207 }],
+      [homeResponse('/radicale/alice/'), { status: 207 }],
+      [
+        multistatus(
+          [
+            diagnosticCalendarCollectionResponse('/radicale/', 'Service root'),
+            diagnosticCalendarCollectionResponse(
+              '/radicale/principals/alice/',
+              'Principal root',
+            ),
+            diagnosticCalendarCollectionResponse(
+              '/radicale/alice/',
+              'Calendar home',
+            ),
+            diagnosticCalendarCollectionResponse(
+              '/radicale/alice/team/',
+              'Team events',
+            ),
+            diagnosticCalendarCollectionResponse(
+              '/radicale/alice/query/?access_token=secret',
+              'Query URL',
+            ),
+            diagnosticCalendarCollectionResponse(
+              '/radicale/alice/fragment/#secret-token',
+              'Fragment URL',
+            ),
+            diagnosticCalendarCollectionResponse(
+              '/radicale/alice/empty-query/?',
+              'Empty query URL',
+            ),
+            diagnosticCalendarCollectionResponse(
+              '/radicale/alice/empty-fragment/#',
+              'Empty fragment URL',
+            ),
+            diagnosticCalendarCollectionResponse(
+              'https://@radicale.example.test/radicale/alice/empty-userinfo/',
+              'Empty userinfo URL',
+            ),
+            diagnosticCalendarCollectionResponse(
+              'https://alice:password@radicale.example.test/radicale/alice/credential/',
+              'Credential URL',
+            ),
+            diagnosticCalendarCollectionResponse(
+              'https://external.example.test/calendar/',
+              'External collection',
+            ),
+            diagnosticCalendarCollectionResponse(
+              '/radicale-evil/alice/calendar/',
+              'Off-base collection',
+            ),
+            diagnosticCalendarCollectionResponse(
+              '/radicale/alice/%2e%2e/outside/',
+              'Encoded traversal',
+            ),
+          ].join(''),
+        ),
+        { status: 207 },
+      ],
+    );
+
+    const result = await createController(config).getCalendarDiagnostics(
+      userContext,
+      openIdCredential,
+      roomId,
+    );
+
+    expect(result).toEqual({
+      calendars: [
+        {
+          name: 'Team events',
+          url: 'https://radicale.example.test/radicale/alice/team/',
+        },
+      ],
+    });
+    expect(result).not.toHaveProperty('principalUrl');
+    expect(result).not.toHaveProperty('calendarHomeUrl');
+    expect(JSON.stringify(result)).not.toContain('secret');
+    expect(JSON.stringify(result)).not.toContain('password');
+    expect(canManageCalendars).toHaveBeenCalledWith(userContext.userId, roomId);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('denies diagnostics before CalDAV discovery when manager permission is absent', async () => {
+    canManageCalendars.mockResolvedValue(false);
+
+    await expect(
+      createController().getCalendarDiagnostics(
+        userContext,
+        openIdCredential,
+        roomId,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(canManageCalendars).toHaveBeenCalledWith(userContext.userId, roomId);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not return CalDAV request details when diagnostics discovery fails', async () => {
+    canManageCalendars.mockResolvedValue(true);
+    fetch.mockResponseOnce(
+      'Unavailable at https://radicale.example.test/private',
+      {
+        status: 503,
+      },
+    );
+
+    try {
+      await createController().getCalendarDiagnostics(
+        userContext,
+        openIdCredential,
+        roomId,
+      );
+      throw new Error('Expected diagnostics discovery to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ServiceUnavailableException);
+      expect((error as ServiceUnavailableException).getResponse()).toEqual({
+        code: 'calendar-diagnostics-unavailable',
+        message: 'CalDAV diagnostics are unavailable',
+      });
+      expect(JSON.stringify(error)).not.toContain('radicale.example.test');
+      expect(JSON.stringify(error)).not.toContain('openid-token');
+    }
   });
 
   it('creates an authorized VEVENT-only Radicale calendar', async () => {
@@ -1055,6 +1189,24 @@ function calendarCollectionResponse(
       </d:propstat>
     </d:response>
   `);
+}
+
+function diagnosticCalendarCollectionResponse(
+  href: string,
+  displayName: string,
+): string {
+  return `
+    <d:response>
+      <d:href>${href}</d:href>
+      <d:propstat>
+        <d:prop>
+          <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+          <d:displayname>${displayName}</d:displayname>
+          <c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set>
+        </d:prop>
+        <d:status>HTTP/1.1 200 OK</d:status>
+      </d:propstat>
+    </d:response>`;
 }
 
 function simpleEventIcs(

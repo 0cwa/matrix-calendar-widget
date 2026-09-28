@@ -20,12 +20,18 @@ import EditIcon from '@mui/icons-material/Edit';
 import { Box, Button, Stack, useMediaQuery, useTheme } from '@mui/material';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CalendarFilters, useCalendars } from '../../calendar';
+import {
+  CalendarFilters,
+  isCalendarDiagnosticsRepository,
+  useCalendarRepository,
+  useCalendars,
+} from '../../calendar';
 import { MeetingsNavigation, ViewType } from '../meetings/MeetingsNavigation';
 import { MeetingsToolbarButtons } from '../meetings/MeetingsToolbar/MeetingsToolbarButtons';
 import { MeetingsToolbarDatePicker } from '../meetings/MeetingsToolbar/MeetingsToolbarDatePicker';
 import { MeetingsToolbarSearch } from '../meetings/MeetingsToolbar/MeetingsToolbarSearch';
 import { CalendarColorDialog } from './CalendarColorDialog';
+import { CalendarDiagnosticsDialog } from './CalendarDiagnosticsDialog';
 import { CalendarCreateDialog } from './CalendarCreateDialog';
 import { CalendarDeleteDialog } from './CalendarDeleteDialog';
 import { CalendarDescriptionDialog } from './CalendarDescriptionDialog';
@@ -51,12 +57,15 @@ export function CalendarToolbar({
   const theme = useTheme();
   const showToolbarButtons = useMediaQuery(theme.breakpoints.up('md'));
   const calendars = useCalendars();
+  const repository = useCalendarRepository();
   const [createCalendarOpen, setCreateCalendarOpen] = useState(false);
   const [deleteCalendarOpen, setDeleteCalendarOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const supportsDiagnostics = isCalendarDiagnosticsRepository(repository);
   const writableCalendars = calendars.data.filter(
     (calendar) => calendar.readOnly === false,
   );
@@ -116,6 +125,12 @@ export function CalendarToolbar({
           {t('calendars.color.action', 'Edit calendar color')}
         </Button>
 
+        {supportsDiagnostics && (
+          <Button onClick={() => setDiagnosticsOpen(true)} variant="outlined">
+            {t('calendars.diagnostics.action', 'CalDAV collection URLs')}
+          </Button>
+        )}
+
         {showToolbarButtons && (
           <Box>
             <MeetingsToolbarButtons
@@ -171,6 +186,13 @@ export function CalendarToolbar({
         onClose={() => setColorOpen(false)}
         open={colorOpen}
       />
+
+      {supportsDiagnostics && (
+        <CalendarDiagnosticsDialog
+          onClose={() => setDiagnosticsOpen(false)}
+          open={diagnosticsOpen}
+        />
+      )}
 
       <CalendarDeleteDialog
         calendars={writableCalendars}

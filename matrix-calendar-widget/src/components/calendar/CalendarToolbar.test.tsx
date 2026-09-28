@@ -25,6 +25,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
 import { CalendarRepositoryProvider } from '../../calendar';
 import { CalendarToolbar } from './CalendarToolbar';
@@ -124,6 +125,49 @@ describe('<CalendarToolbar />', () => {
     expect(
       await screen.findByRole('heading', { name: 'Edit calendar color' }),
     ).toBeInTheDocument();
+  });
+
+  it('shows diagnostics as non-navigating text with an explicit copy action', async () => {
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        getCalendarDiagnostics: vi.fn().mockResolvedValue({
+          calendars: [
+            {
+              name: 'Team calendar',
+              url: 'https://radicale.example.test/alice/team/',
+            },
+          ],
+        }),
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'CalDAV collection URLs' }),
+    );
+
+    expect(
+      await screen.findByText('https://radicale.example.test/alice/team/'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Copy URL' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(repository.getCalendarDiagnostics).toHaveBeenCalledOnce();
   });
 
   it('offers only explicitly writable calendars for deletion', async () => {
