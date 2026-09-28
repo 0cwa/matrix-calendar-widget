@@ -242,8 +242,7 @@ function editableTimedEndpoint(
 
   if (
     original?.type === 'zoned' &&
-    !values.timezoneChanged &&
-    values.timedKind !== 'floating'
+    !values.timezoneChanged
   ) {
     return { ...original, local };
   }
