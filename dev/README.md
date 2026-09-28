@@ -42,4 +42,13 @@ Reset removes the named Docker volumes and all local Matrix/Radicale data.
 
 ## Scope
 
-The gateway and widget are not included in this compose file yet because M2 will define their final authentication/API configuration. The services here are the stable external integration targets for contract tests and manual development.
+The gateway and widget are not included in this compose file. M2 established
+their API and authentication configuration, but the final
+OpenID-to-Radicale contract still depends on the external auth-plugin work
+tracked in `docs/STATUS.md`. The local Radicale service remains useful for
+password-authenticated CalDAV contract tests. Run the gateway and widget
+separately with their documented configuration.
+
+Chart dev values use non-routable `.invalid` Matrix and Element hostnames as
+placeholders. Replace them with operator-owned endpoints before rendering or
+deploying those values; the defaults are not a working deployment profile.
