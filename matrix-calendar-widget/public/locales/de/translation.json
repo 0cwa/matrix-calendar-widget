@@ -15,6 +15,7 @@
       "conflict": "Dieser Termin wurde an anderer Stelle geändert. Die neueste Version wurde geladen; prüfe sie und versuche das Löschen erneut, wenn du fortfahren möchtest.",
       "description": "„{{title}}“ löschen? Dies kann nicht rückgängig gemacht werden.",
       "error": "Der Termin konnte nicht gelöscht werden.",
+      "recurringDescription": "„{{title}}“ löschen? Dadurch wird die gesamte Terminserie einschließlich aller Termine gelöscht. Dieser Vorgang kann nicht rückgängig gemacht werden.",
       "title": "Termin löschen"
     },
     "details": {
@@ -53,6 +54,8 @@
     "loadError": "Kalendertermine konnten nicht geladen werden.",
     "mixedCompatibilityNotice": "Mindestens ein Kalender unterstützt weitere Elementtypen. Das Widget zeigt und bearbeitet ausschließlich VEVENT-Termine.",
     "title": "Kalendertermine",
+    "unsupportedOccurrenceProjection_one": "Einige Ereignisse enthalten Wiederholungs- oder Zeitzonenangaben, die die aktuelle Darstellung nicht sicher anzeigen kann. Betroffene Ereignisse: {{count}}.",
+    "unsupportedOccurrenceProjection_other": "Einige Ereignisse enthalten Wiederholungs- oder Zeitzonenangaben, die die aktuelle Darstellung nicht sicher anzeigen kann. Betroffene Ereignisse: {{count}}.",
     "unsupportedRangeRecurrence_one": "Die aktuelle Darstellung kann Terminserien mit THISANDFUTURE-Bereichsausnahmen nicht sicher anzeigen. Betroffene Serien: {{count}}.",
     "unsupportedRangeRecurrence_other": "Die aktuelle Darstellung kann Terminserien mit THISANDFUTURE-Bereichsausnahmen nicht sicher anzeigen. Betroffene Serien: {{count}}."
   },

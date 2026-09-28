@@ -15,6 +15,7 @@
       "conflict": "This event changed elsewhere. The latest version was reloaded; review it and retry if you still want to delete it.",
       "description": "Delete “{{title}}”? This cannot be undone.",
       "error": "The event could not be deleted.",
+      "recurringDescription": "Delete “{{title}}”? This removes the entire recurring series, including every occurrence. This cannot be undone.",
       "title": "Delete event"
     },
     "details": {
@@ -53,6 +54,8 @@
     "loadError": "Calendar events could not be loaded.",
     "mixedCompatibilityNotice": "One or more calendars support additional item types. The widget displays and edits VEVENT entries only.",
     "title": "Calendar events",
+    "unsupportedOccurrenceProjection_one": "Some events have recurrence or timezone data that the current renderer cannot safely display. Affected events: {{count}}.",
+    "unsupportedOccurrenceProjection_other": "Some events have recurrence or timezone data that the current renderer cannot safely display. Affected events: {{count}}.",
     "unsupportedRangeRecurrence_one": "The current renderer cannot safely display series with THISANDFUTURE range overrides. Affected series: {{count}}.",
     "unsupportedRangeRecurrence_other": "The current renderer cannot safely display series with THISANDFUTURE range overrides. Affected series: {{count}}."
   },

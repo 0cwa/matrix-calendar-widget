@@ -6,3 +6,5 @@
 !/matrix-calendar-server/lib
 !/packages/calendar/package.json
 !/packages/calendar/lib
+!/packages/ical-timezones/package.json
+!/packages/ical-timezones/lib

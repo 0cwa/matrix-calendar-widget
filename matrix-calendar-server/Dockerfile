@@ -12,6 +12,8 @@ COPY package.json yarn.lock ./
 COPY matrix-calendar-server/package.json ./matrix-calendar-server/
 COPY packages/calendar/package.json ./packages/calendar/package.json
 COPY packages/calendar/lib ./packages/calendar/lib
+COPY packages/ical-timezones/package.json ./packages/ical-timezones/package.json
+COPY packages/ical-timezones/lib ./packages/ical-timezones/lib
 RUN yarn install --production --frozen-lockfile --network-timeout 1000000
 
 # Runtime image
@@ -33,6 +35,7 @@ RUN set -x\
 USER 101
 COPY --from=builder /build/node_modules/ ./node_modules
 COPY --from=builder /build/packages/calendar/ ./packages/calendar/
+COPY --from=builder /build/packages/ical-timezones/ ./packages/ical-timezones/
 COPY matrix-calendar-server/conf ./conf
 COPY matrix-calendar-server/lib ./lib
 CMD ["node", "./lib/index.js"]
