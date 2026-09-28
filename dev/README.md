@@ -56,3 +56,9 @@ The values also set the server's widget URL to
 `https://matrix-calendar-widget.example.invalid` and derive widget homeserver
 and API hostnames from `settings.hostname: matrix.example.invalid`; override
 these values too when configuring a deployment.
+
+When widget ingress is enabled, its host is rendered as
+`<fullname>.<settings.hostname>`; the umbrella chart sets the fullname to
+`matrix-calendar-widget`. The server's `settings.widgetUrl` is the public URL
+it embeds when registering the widget. Set it to the rendered ingress URL, or
+deliberately point it at an operator-managed alias serving that widget.
