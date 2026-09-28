@@ -37,7 +37,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
   const credentials = basicCredentialProvider(username, password);
   const codec = new ICalendarEventCodec();
   let client: CalDavEventClient;
-  let cleanupResourceUrl: string | undefined;
+  let cleanupResourceUrls: string[] = [];
 
   beforeAll(() => {
     fetchMock.disableMocks();
@@ -45,18 +45,20 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
   });
 
   afterEach(async () => {
-    if (!cleanupResourceUrl) {
+    if (cleanupResourceUrls.length === 0) {
       return;
     }
 
-    const resourceUrl = cleanupResourceUrl;
-    cleanupResourceUrl = undefined;
+    const resourceUrls = cleanupResourceUrls;
+    cleanupResourceUrls = [];
 
-    try {
-      const resource = await client.getEvent(resourceUrl);
-      await client.deleteEvent(resourceUrl, resource.etag);
-    } catch {
-      // Cleanup is best-effort and targets only this test's unique resource.
+    for (const resourceUrl of resourceUrls) {
+      try {
+        const resource = await client.getEvent(resourceUrl);
+        await client.deleteEvent(resourceUrl, resource.etag);
+      } catch {
+        // Cleanup is best-effort and targets only this test's unique resource.
+      }
     }
   });
 
@@ -148,7 +150,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     const source = recurringCalendar(uid);
 
     await client.createEvent(resourceUrl, source);
-    cleanupResourceUrl = resourceUrl;
+    cleanupResourceUrls = [resourceUrl];
 
     const createdResource = await client.getEvent(resourceUrl);
     expect(createdResource.href).toBe(resourceUrl);
@@ -193,7 +195,76 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       },
     });
   });
+
+  it('overfetches floating and DATE boundary candidates without modifying their resources', async () => {
+    const floatingUrl = new URL(
+      `${randomUUID()}-floating.ics`,
+      calendarUrl,
+    ).toString();
+    const dateUrl = new URL(`${randomUUID()}-date.ics`, calendarUrl).toString();
+    cleanupResourceUrls = [floatingUrl, dateUrl];
+
+    await client.createEvent(
+      floatingUrl,
+      candidateCalendar(
+        `floating-${randomUUID()}@matrix-calendar-widget`,
+        'DTSTART:20300115T003000',
+        'DTEND:20300115T013000',
+      ),
+    );
+    await client.createEvent(
+      dateUrl,
+      candidateCalendar(
+        `date-${randomUUID()}@matrix-calendar-widget`,
+        'DTSTART;VALUE=DATE:20300117',
+        'DTEND;VALUE=DATE:20300118',
+      ),
+    );
+
+    const snapshots = await Promise.all(
+      cleanupResourceUrls.map((resourceUrl) => client.getEvent(resourceUrl)),
+    );
+    const candidates = await client.listEvents(calendarUrl, {
+      start: '2030-01-15T08:00:00Z',
+      end: '2030-01-16T08:00:00Z',
+    });
+
+    expect(candidates.map(({ href }) => href)).toEqual(
+      expect.arrayContaining(cleanupResourceUrls),
+    );
+
+    const afterQuery = await Promise.all(
+      cleanupResourceUrls.map((resourceUrl) => client.getEvent(resourceUrl)),
+    );
+    expect(afterQuery.map(({ etag }) => etag)).toEqual(
+      snapshots.map(({ etag }) => etag),
+    );
+    expect(afterQuery.map(({ icalendar }) => icalendar)).toEqual(
+      snapshots.map(({ icalendar }) => icalendar),
+    );
+  });
 });
+
+function candidateCalendar(
+  uid: string,
+  dtstart: string,
+  dtend: string,
+): string {
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Matrix Calendar Widget//Candidate Range Contract//EN',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    'DTSTAMP:20260928T120000Z',
+    dtstart,
+    dtend,
+    'SUMMARY:Candidate range boundary',
+    'END:VEVENT',
+    'END:VCALENDAR',
+    '',
+  ].join('\r\n');
+}
 
 function recurringCalendar(uid: string): string {
   return [

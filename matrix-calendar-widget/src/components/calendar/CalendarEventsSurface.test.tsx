@@ -19,7 +19,7 @@ import {
   CalendarEvent,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
@@ -200,6 +200,89 @@ describe('<CalendarEventsSurface />', () => {
     await userEvent.click(personalCalendar);
 
     expect(await screen.findByText('Dentist')).toBeInTheDocument();
+  });
+
+  it.each(['list', 'month'] as const)(
+    'clips query-padded-only recurrence from the %s view',
+    async (view) => {
+      const paddedEvent: CalendarEvent = {
+        ...events[0],
+        id: 'padded-source-resource',
+        uid: 'padded-source-resource@example.test',
+        title: 'Padded only event',
+        timing: {
+          type: 'all-day',
+          startDate: view === 'list' ? '2026-08-30' : '2026-08-29',
+          endDate: view === 'list' ? '2026-08-31' : '2026-08-30',
+        },
+        recurrence: { rrule: 'FREQ=DAILY;COUNT=1' },
+      };
+      const repository = new InMemoryCalendarRepository({
+        calendars: [calendars[0]],
+        events: [paddedEvent],
+      });
+      vi.spyOn(repository, 'listEvents').mockResolvedValue([paddedEvent]);
+
+      render(
+        <CalendarEventsSurface
+          filters={{
+            startDate: '2026-09-01T00:00:00Z',
+            endDate: '2026-09-30T23:59:59.999Z',
+          }}
+          onShowMore={() => undefined}
+          view={view}
+        />,
+        { wrapper: createWrapper(repository) },
+      );
+
+      await waitFor(() =>
+        expect(screen.queryByText('Padded only event')).not.toBeInTheDocument(),
+      );
+    },
+  );
+
+  it('opens the source resource when a projected recurrence is selected', async () => {
+    const recurringEvent: CalendarEvent = {
+      ...events[0],
+      id: 'https://radicale.example.test/team/planning.ics',
+      uid: 'planning-series@example.test',
+      title: 'Planning series',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=2' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [{ ...calendars[0], readOnly: false }],
+      events: [recurringEvent],
+    });
+    const deleteEvent = vi.spyOn(repository, 'deleteEvent');
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59.999Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(await screen.findByText('Planning series'));
+    const details = screen.getByRole('dialog');
+    await userEvent.click(
+      within(details).getByRole('button', { name: 'Delete' }),
+    );
+    const confirmation = screen.getByRole('dialog', { name: 'Delete event' });
+    await userEvent.click(
+      within(confirmation).getByRole('button', { name: 'Delete' }),
+    );
+
+    await waitFor(() =>
+      expect(deleteEvent).toHaveBeenCalledWith(
+        'team',
+        'https://radicale.example.test/team/planning.ics',
+      ),
+    );
   });
 
   it.each([

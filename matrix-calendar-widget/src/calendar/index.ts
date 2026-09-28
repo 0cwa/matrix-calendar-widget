@@ -38,6 +38,7 @@ export {
   filterCalendarEvents,
   groupCalendarEventsByDay,
   repositoryRangeForView,
+  visibleRangeForView,
 } from './calendarEventPresentation';
 export {
   CalendarRepositoryProvider,

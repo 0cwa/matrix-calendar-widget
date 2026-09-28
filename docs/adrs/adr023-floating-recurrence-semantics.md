@@ -38,11 +38,21 @@ fields and has no timezone until an application interprets it.
    Editing a title or other non-timing field preserves the original iCalendar
    resource; a timing update serializes floating endpoints without `TZID` or a
    UTC marker. Mixed floating and zoned endpoints retain their individual
-   kinds. Recurrence expansion also interprets floating values in the viewer's
-   local timezone, with RFC duration and timezone-transition handling owned by
-   downstream expansion.
-4. Recurrence editing, `RANGE` handling, and recurrence expansion remain out
-   of scope.
+   kinds. Recurrence projection interprets floating values in the viewer's local
+   timezone and keeps RFC duration week/day units distinct from exact
+   hour/minute/second units across timezone transitions.
+4. The widget may expand a bounded, read-only occurrence projection from the
+   typed event model for display. Occurrences keep a distinct view identity and
+   map actions back to the source CalDAV resource. Malformed or unsupported
+   recurrence remains opaque with a diagnostic; `RANGE=THISANDFUTURE` series
+   stay hidden and diagnosed. CalDAV candidate REPORT bounds may be widened by
+   32 hours on each side for supported IANA zones in the 2026d data set, then
+   clipped to the exact viewer-local half-open interval in the widget. Do not
+   rely on Radicale honoring `CALDAV:timezone` or claim arbitrary custom
+   VTIMEZONE offsets. Projection never writes resources or collection timezone
+   metadata.
+5. Recurrence editing and mainstream-client recurrence interoperability remain
+   out of scope.
 
 ## Implementation status and boundaries
 
@@ -52,13 +62,21 @@ visible-range filter. The in-memory filter applies only to events already
 returned by the repository; it does not establish viewer-local filtering by a
 CalDAV server.
 
-The current CalDAV `calendar-query` sends UTC range bounds without a viewer-zone
-context. The pinned Radicale 3.8.0.0 server ignores `CALDAV:timezone`, so
-viewer-local floating-event selection at the server query boundary remains
-unimplemented. Do not add that unsupported query child for this server. A
-supported, tested server-query strategy remains separate work. Viewer-local
-recurrence occurrence projection and duration expansion also remain
-unimplemented.
+The widget now expands RRULE/RDATE candidates, applies EXDATE and same-resource
+detached timing/status overrides, and clips occurrences to the exact
+viewer-local half-open interval before either list or grid rendering. Expansion
+is bounded to 512 displayed occurrences per resource; malformed or unsupported
+rules remain hidden with a diagnostic. View IDs are synthetic and selection
+maps back to the source resource ID. `RANGE=THISANDFUTURE` remains hidden and
+diagnosed; recurrence editing is not implemented.
+
+The pinned Radicale 3.8.0.0 server ignores `CALDAV:timezone`. CalDAV candidate
+REPORT bounds are widened by 32 hours on each side without adding that
+unsupported query child; exact clipping remains in the widget. The window is
+sized for supported IANA 2026d zones and does not establish support for
+arbitrary custom VTIMEZONE offsets. The hosted Radicale contract includes
+floating and DATE boundary candidates and checks that the read-only query
+leaves resource ETags and bodies unchanged.
 
 PR #121 adds the `@matrix-calendar-widget/ical-timezones` package generated
 from IANA Time Zone Database 2026d. Its source and output provenance is recorded
@@ -79,7 +97,8 @@ event interpretation does not read or write that collection property.
   timezone, resolves floating values there, and filters already-loaded events
   by their interpreted instants in memory while preserving source zones and
   floating values on writes.
-- Duration-based recurrence timing retains enough information for a later
-  expander to distinguish nominal calendar weeks/days from exact time units
-  and account for timezone transitions.
-- This decision does not implement recurrence expansion or recurrence edits.
+- Duration-based recurrence timing distinguishes nominal calendar weeks/days
+  from exact time units and accounts for timezone transitions in the bounded
+  display projection.
+- The projection is read-only and bounded; it does not implement recurrence
+  edits, `RANGE=THISANDFUTURE`, or arbitrary custom VTIMEZONE offsets.

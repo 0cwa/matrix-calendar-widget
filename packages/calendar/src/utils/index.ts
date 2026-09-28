@@ -14,6 +14,16 @@
  * limitations under the License.
  */
 
+export {
+  MAX_PROJECTED_OCCURRENCES_PER_EVENT,
+  projectCalendarEventOccurrences,
+} from './calendarEventOccurrenceProjection';
+export type {
+  CalendarEventProjection,
+  CalendarEventProjectionDiagnostic,
+  CalendarEventProjectionDiagnosticReason,
+  ProjectedCalendarEventOccurrence,
+} from './calendarEventOccurrenceProjection';
 export { calendarEventTimedDateTimeToDateTime } from './calendarEventTimedDateTime';
 export * from './calendarUtils';
 export { formatICalDate, parseICalDate, toISOString } from './dateTimeUtils';

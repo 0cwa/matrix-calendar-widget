@@ -61,6 +61,11 @@ const parser = new XMLParser({
   trimValues: true,
 });
 
+// Radicale's pinned release ignores CALDAV:timezone. Fetch a conservative
+// candidate window for supported IANA offsets, then let the widget interpret
+// floating values in the viewer's timezone and clip the exact interval.
+const candidateRangeOverfetchMs = 32 * 60 * 60 * 1000;
+
 export class CalDavEventClient {
   constructor(
     private readonly credentialProvider: CalDavCredentialProvider,
@@ -82,6 +87,11 @@ export class CalDavEventClient {
       );
     }
 
+    const candidateStart = new Date(
+      start.getTime() - candidateRangeOverfetchMs,
+    );
+    const candidateEnd = new Date(end.getTime() + candidateRangeOverfetchMs);
+
     const headers = await this.requestHeaders();
     headers.set('Content-Type', 'application/xml; charset=utf-8');
     headers.set('Depth', '1');
@@ -89,7 +99,7 @@ export class CalDavEventClient {
     const response = await this.fetchImpl(url, {
       method: 'REPORT',
       headers,
-      body: calendarQueryBody(start, end),
+      body: calendarQueryBody(candidateStart, candidateEnd),
     });
 
     if (!response.ok) {

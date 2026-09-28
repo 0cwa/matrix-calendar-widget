@@ -96,12 +96,18 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
       (ADR023; PR #120).
 - [x] Bundle generated IANA 2026d VTIMEZONE data with pinned provenance and
       lookup regressions (PR #121).
-- [ ] Make server-side CalDAV visible-range queries select floating events
-      according to the viewer's timezone. The pinned Radicale 3.8.0.0 ignores
-      `CALDAV:timezone`; do not send that unsupported query child.
+- [x] Widen CalDAV candidate REPORT bounds by 32 hours on each side, then clip
+      to the exact viewer-local half-open interval in the widget. The pinned
+      Radicale 3.8.0.0 ignores `CALDAV:timezone`; do not send that unsupported
+      query child or claim custom VTIMEZONE offsets.
+- [x] Add bounded, read-only RRULE/RDATE/EXDATE and detached timing/status
+      override projection before both list and grid rendering. Keep occurrence
+      view IDs distinct and map selection back to the source resource; leave
+      malformed/unsupported data opaque with diagnostics and keep
+      `RANGE=THISANDFUTURE` hidden.
 - [ ] RRULE editor based on inherited NeoDateFix recurrence UI.
-- [ ] RDATE / EXDATE.
-- [ ] RECURRENCE-ID instance overrides.
+- [ ] RDATE / EXDATE editing.
+- [ ] RECURRENCE-ID instance override editing.
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
 - [ ] VALARM preservation and editor.
@@ -118,38 +124,45 @@ The CalDAV codec exposes a read-only domain view of master RRULE, RDATE
 detached instances with their original RECURRENCE-ID, explicit DTEND or
 preserved RFC DURATION components, and status. Recurrence DATE-TIME values
 retain their DATE, named-TZID, UTC, or floating kind and exact local wall time;
-viewer-local recurrence occurrence projection and duration arithmetic remain
-downstream work (ADR023). PR #120 implements master floating DTSTART and DTEND
-as independent endpoint tags, preserving local wall time without TZID or UTC
-conversion. The widget displays timed events in the viewer's local timezone:
+PR #120 implements master floating DTSTART and DTEND as independent endpoint
+tags, preserving local wall time without TZID or UTC conversion. The widget
+projects bounded read-only occurrences from the typed model, applies detached
+timing/status overrides, and clips the result before rendering either view.
+The widget displays timed events in the viewer's local timezone:
 floating times are interpreted there, while named-TZID and UTC times keep their
 instant and are converted from their saved zone. This covers details, lists,
 visible and accessible calendar-cell labels, grid sorting, and the in-memory
-range filter. The editor preserves each endpoint's local value and kind on
-timing edits; non-timing edits preserve the original resource, and floating
-timing edits serialize without TZID or a UTC marker.
+range filter. Projection occurrence IDs map selection back to their source
+resource; unsupported or malformed recurrence is hidden with a diagnostic.
+The editor preserves each endpoint's local value and kind on timing edits;
+non-timing edits preserve the original resource, and floating timing edits
+serialize without TZID or a UTC marker.
 
-The in-memory filter is distinct from CalDAV query filtering. The current
-server query sends UTC time-range bounds, and pinned Radicale 3.8.0.0 ignores
-`CALDAV:timezone`; viewer-local floating-event selection at that query boundary
-remains pending. Do not send the unsupported query child. Collection
-`Calendar.timezone` editing remains deferred under M4; this event-level behavior
-does not read or write collection timezone metadata.
+The CalDAV client widens UTC candidate REPORT bounds by 32 hours on both sides
+because pinned Radicale 3.8.0.0 ignores `CALDAV:timezone`; it does not send that
+unsupported query child. Exact viewer-local half-open clipping then removes
+padding-only resources before list or grid display. The bound is for supported
+IANA 2026d zones and does not establish support for custom VTIMEZONE offsets.
+The hosted contract checks floating/DATE boundary retrieval and unchanged
+resource ETags/bodies across the read-only query. Collection
+`Calendar.timezone` editing remains deferred under M4; projection does not read
+or write collection timezone metadata.
 
 PR #121 adds the `@matrix-calendar-widget/ical-timezones` lookup package from
 IANA Time Zone Database 2026d. See
 [`docs/timezones-ical-data.md`](timezones-ical-data.md) and
 `packages/ical-timezones/src/data/provenance.json` for the source checksum and
 generator inputs. Package tests verify the committed data hash and selected
-historical and current offsets. This verifies the bundle, not the broader
-application DST suite or recurrence expansion.
+historical and current offsets. Focused projector tests cover RFC duration
+week/day versus exact time units across DST; this does not complete the broader
+application named-timezone regression suite.
 Ordinary master-field patches preserve all VEVENT components, VTIMEZONE, and
 unknown properties. The codec continues to reject master events without
 DTEND. Recurrence editing and mainstream-client interoperability remain open.
 
 The generated IANA 2026d VTIMEZONE lookup package is available for downstream
 timezone-aware consumers. Its presence alone does not complete the named-zone
-DST regression or recurrence-expansion criteria above.
+DST regression or recurrence-editing criteria above.
 
 **Exit:** common recurring calendars round-trip with mainstream CalDAV clients.
 
