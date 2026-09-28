@@ -119,7 +119,10 @@ export function CalendarDiagnosticsDialog({
           )}
           {loading && (
             <CircularProgress
-              aria-label={t('calendars.diagnostics.loading', 'Loading')}
+              aria-label={t(
+                'calendars.diagnostics.loading',
+                'Loading calendar diagnostics',
+              )}
               size={24}
             />
           )}
