@@ -31,10 +31,10 @@ import { MeetingsToolbarButtons } from '../meetings/MeetingsToolbar/MeetingsTool
 import { MeetingsToolbarDatePicker } from '../meetings/MeetingsToolbar/MeetingsToolbarDatePicker';
 import { MeetingsToolbarSearch } from '../meetings/MeetingsToolbar/MeetingsToolbarSearch';
 import { CalendarColorDialog } from './CalendarColorDialog';
-import { CalendarDiagnosticsDialog } from './CalendarDiagnosticsDialog';
 import { CalendarCreateDialog } from './CalendarCreateDialog';
 import { CalendarDeleteDialog } from './CalendarDeleteDialog';
 import { CalendarDescriptionDialog } from './CalendarDescriptionDialog';
+import { CalendarDiagnosticsDialog } from './CalendarDiagnosticsDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 import { CalendarRenameDialog } from './CalendarRenameDialog';
 

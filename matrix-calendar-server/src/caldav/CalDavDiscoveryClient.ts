@@ -19,6 +19,7 @@ import { CalDavCredentialProvider } from './CalDavCredentialProvider';
 
 export type DiscoveredCalDavCalendar = {
   href: string;
+  rawHref?: string;
   displayName?: string;
   description?: string;
   color?: string;
@@ -378,6 +379,7 @@ export class CalDavDiscoveryClient {
       return [
         {
           href: new URL(href, calendarHomeUrl).toString(),
+          rawHref: href,
           displayName: textValue(properties.displayname),
           description: preservedTextValue(properties['calendar-description']),
           color: textValue(properties['calendar-color']),

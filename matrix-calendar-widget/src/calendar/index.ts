@@ -15,18 +15,18 @@
  */
 
 export {
+  isCalendarDiagnosticsRepository,
+  type CalendarDiagnosticCollection,
+  type CalendarDiagnostics,
+  type CalendarDiagnosticsRepository,
+} from './CalendarDiagnosticsRepository';
+export {
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
 } from './calendarEventForm';
 export type { CalendarEventFormValues } from './calendarEventForm';
-export {
-  isCalendarDiagnosticsRepository,
-  type CalendarDiagnosticCollection,
-  type CalendarDiagnostics,
-  type CalendarDiagnosticsRepository,
-} from './CalendarDiagnosticsRepository';
 export {
   calendarEventKey,
   calendarEventStartDate,

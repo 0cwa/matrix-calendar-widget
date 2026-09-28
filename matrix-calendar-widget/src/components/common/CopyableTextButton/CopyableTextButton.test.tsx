@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, vi } from 'vitest';
 import { axe } from 'vitest-axe';
@@ -42,9 +42,7 @@ describe('<CopyableTextButton/>', () => {
     await userEvent.click(copyButton);
 
     expect(navigator.clipboard.writeText).toBeCalledWith('Hallo world');
-    await waitFor(() =>
-      expect(screen.getByTestId('CheckOutlinedIcon')).toBeInTheDocument(),
-    );
+    await screen.findByTestId('CheckOutlinedIcon');
 
     await userEvent.tab();
     expect(screen.getByTestId('ContentCopyOutlinedIcon')).toBeInTheDocument();

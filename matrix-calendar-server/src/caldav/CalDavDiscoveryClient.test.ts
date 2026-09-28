@@ -107,6 +107,7 @@ describe('CalDavDiscoveryClient', () => {
       calendars: [
         {
           href: 'https://radicale.example.test/alice/events/',
+          rawHref: '/alice/events/',
           displayName: 'Team events',
           description: 'Planning & review',
           color: '#336699ff',
@@ -160,6 +161,7 @@ describe('CalDavDiscoveryClient', () => {
       calendars: [
         {
           href: 'https://radicale.example.test/home/alice/default/',
+          rawHref: '/home/alice/default/',
           displayName: undefined,
           description: undefined,
           color: undefined,
@@ -168,6 +170,48 @@ describe('CalDavDiscoveryClient', () => {
         },
       ],
     });
+  });
+
+  it('preserves the raw DAV href beside its normalized URL', async () => {
+    const fetchMock = createFetchMock(
+      principalResponse('/principals/alice/'),
+      homeResponse('/alice/'),
+      multistatus(`
+        <d:response>
+          <d:href>https://@radicale.example.test/alice/empty-userinfo/</d:href>
+          <d:propstat>
+            <d:prop><d:resourcetype><d:collection/><c:calendar/></d:resourcetype></d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
+        <d:response>
+          <d:href>/alice/%2e%2e/outside/</d:href>
+          <d:propstat>
+            <d:prop><d:resourcetype><d:collection/><c:calendar/></d:resourcetype></d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
+      `),
+    );
+
+    const result = await new CalDavDiscoveryClient(
+      'https://radicale.example.test/',
+      credentialProvider,
+      fetchMock,
+    ).discover();
+
+    expect(
+      result.calendars.map(({ href, rawHref }) => ({ href, rawHref })),
+    ).toEqual([
+      {
+        href: 'https://radicale.example.test/alice/empty-userinfo/',
+        rawHref: 'https://@radicale.example.test/alice/empty-userinfo/',
+      },
+      {
+        href: 'https://radicale.example.test/outside/',
+        rawHref: '/alice/%2e%2e/outside/',
+      },
+    ]);
   });
 
   it('leaves calendar safety metadata unavailable when its propstats fail', async () => {
@@ -218,6 +262,7 @@ describe('CalDavDiscoveryClient', () => {
     expect(result.calendars).toEqual([
       {
         href: 'https://radicale.example.test/home/alice/team/',
+        rawHref: '/home/alice/team/',
         displayName: 'Team events',
         description: undefined,
         color: undefined,

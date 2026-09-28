@@ -188,6 +188,10 @@ describe('CalendarGatewayController', () => {
               'Empty userinfo URL',
             ),
             diagnosticCalendarCollectionResponse(
+              'https:\\\\@radicale.example.test/radicale/alice/backslash-userinfo/',
+              'Backslash userinfo URL',
+            ),
+            diagnosticCalendarCollectionResponse(
               'https://alice:password@radicale.example.test/radicale/alice/credential/',
               'Credential URL',
             ),

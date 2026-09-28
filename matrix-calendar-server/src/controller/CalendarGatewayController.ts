@@ -171,6 +171,7 @@ export class CalendarGatewayController {
         return new CalendarGatewayDiagnosticsDto(
           discovery.calendars.flatMap((calendar) => {
             const url = safeCalendarCollectionUrl(
+              calendar.rawHref ?? calendar.href,
               calendar.href,
               radicaleUrl,
               excludedRoots,
@@ -818,15 +819,17 @@ function calendarDiagnosticsUnavailable(): ServiceUnavailableException {
 }
 
 function safeCalendarCollectionUrl(
-  value: string,
+  rawHref: string,
+  resolvedHref: string,
   radicaleUrl: string,
   excludedRoots: Set<string>,
 ): string | undefined {
   let url: URL;
   let serviceUrl: URL;
-  const trimmedValue = value.trim();
+  const trimmedRawHref = rawHref.trim();
+  const rawPath = rawDavHrefPath(trimmedRawHref);
   try {
-    url = new URL(trimmedValue);
+    url = new URL(resolvedHref);
     serviceUrl = new URL(radicaleUrl);
   } catch {
     return undefined;
@@ -847,26 +850,64 @@ function safeCalendarCollectionUrl(
   const hasDotSegment = collectionPath
     .split('/')
     .some((segment) => segment === '.' || segment === '..');
+  const hasUnsafeRawHref =
+    !rawPath ||
+    trimmedRawHref.includes('\\') ||
+    /%(?:2f|5c)/i.test(rawPath) ||
+    rawPath.split('/').some((segment) => {
+      try {
+        const decodedSegment = decodeURIComponent(segment);
+        return decodedSegment === '.' || decodedSegment === '..';
+      } catch {
+        return true;
+      }
+    });
 
   if (
     (serviceUrl.protocol !== 'http:' && serviceUrl.protocol !== 'https:') ||
     url.username ||
     url.password ||
-    /^https?:\/\/[^/?#]*@/i.test(trimmedValue) ||
+    rawHrefHasUserInfo(trimmedRawHref) ||
+    /[?#]/.test(trimmedRawHref) ||
     url.search ||
     url.hash ||
-    /[?#]/.test(value) ||
     url.origin !== serviceUrl.origin ||
     !url.pathname.startsWith(servicePath) ||
     !collectionPath.startsWith(decodedServicePath) ||
     hasEncodedPathSeparator ||
     hasDotSegment ||
+    hasUnsafeRawHref ||
     excludedRoots.has(normalizeUrlForComparison(url.toString()))
   ) {
     return undefined;
   }
 
   return url.toString();
+}
+
+function rawDavHrefPath(value: string): string | undefined {
+  const authorityPrefix = /^(?:[a-z][a-z\d+.-]*:)?\/\//i.exec(value)?.[0];
+  if (authorityPrefix) {
+    const afterAuthorityPrefix = value.slice(authorityPrefix.length);
+    const pathStart = afterAuthorityPrefix.search(/[/?#]/);
+    if (pathStart < 0 || afterAuthorityPrefix[pathStart] !== '/') {
+      return '/';
+    }
+
+    return afterAuthorityPrefix.slice(pathStart).split(/[?#]/, 1)[0];
+  }
+
+  return value.split(/[?#]/, 1)[0];
+}
+
+function rawHrefHasUserInfo(value: string): boolean {
+  const authorityPrefix = /^(?:[a-z][a-z\d+.-]*:)?\/\//i.exec(value)?.[0];
+  if (!authorityPrefix) {
+    return false;
+  }
+
+  const authority = value.slice(authorityPrefix.length).split(/[/?#]/, 1)[0];
+  return authority.includes('@');
 }
 
 function normalizeUrlForComparison(value: string): string {

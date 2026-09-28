@@ -28,11 +28,11 @@ import {
 } from '@mui/material';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { CalendarDiagnostics } from '../../calendar';
 import {
   isCalendarDiagnosticsRepository,
   useCalendarRepository,
 } from '../../calendar';
-import type { CalendarDiagnostics } from '../../calendar';
 import { CopyableTextButton } from '../common/CopyableTextButton';
 
 export function CalendarDiagnosticsDialog({
@@ -60,31 +60,28 @@ export function CalendarDiagnosticsDialog({
     setLoadError(false);
     setCopyError(false);
 
-    if (!isCalendarDiagnosticsRepository(repository)) {
-      setLoadError(true);
-      setLoading(false);
-      return () => {
-        current = false;
-      };
-    }
+    const loadDiagnostics = async () => {
+      try {
+        if (!isCalendarDiagnosticsRepository(repository)) {
+          throw new Error('Calendar diagnostics are not supported');
+        }
 
-    repository
-      .getCalendarDiagnostics()
-      .then((result) => {
+        const result = await repository.getCalendarDiagnostics();
         if (current) {
           setDiagnostics(result);
         }
-      })
-      .catch(() => {
+      } catch {
         if (current) {
           setLoadError(true);
         }
-      })
-      .finally(() => {
+      } finally {
         if (current) {
           setLoading(false);
         }
-      });
+      }
+    };
+
+    void loadDiagnostics();
 
     return () => {
       current = false;
