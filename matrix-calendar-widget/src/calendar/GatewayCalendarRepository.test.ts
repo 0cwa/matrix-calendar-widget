@@ -269,6 +269,28 @@ describe('GatewayCalendarRepository', () => {
     );
   });
 
+  it('passes unsupported recurrence markers through from the gateway', async () => {
+    const unsupportedEvent: CalendarEvent = {
+      ...event,
+      recurrence: { rrule: 'FREQ=WEEKLY' },
+      unsupportedRecurrence: 'range-this-and-future',
+    };
+    const repository = createRepository(
+      mockFetch(
+        jsonResponse([
+          { event: unsupportedEvent, etag: '"range-etag"' },
+        ]),
+      ),
+    );
+
+    await expect(
+      repository.listEvents([calendarId], {
+        start: '2026-09-24T00:00:00Z',
+        end: '2026-10-01T00:00:00Z',
+      }),
+    ).resolves.toEqual([unsupportedEvent]);
+  });
+
   it('fetches an ETag before a mutation when the event was not loaded', async () => {
     const fetchMock = mockFetch(
       jsonResponse({ event, etag: '"fresh-etag"' }),

@@ -22,6 +22,7 @@ import {
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
+import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from '../../calendar';
 import { CalendarEventsSurface } from './CalendarEventsSurface';
 
@@ -200,4 +201,45 @@ describe('<CalendarEventsSurface />', () => {
 
     expect(await screen.findByText('Dentist')).toBeInTheDocument();
   });
+
+  it.each(['list', 'month'] as const)(
+    'warns and omits THISANDFUTURE series from the %s renderer without mutation',
+    async (view) => {
+      const unsupportedSeries: CalendarEvent = {
+        ...events[0],
+        id: 'range-series',
+        uid: 'range-series@example.test',
+        title: 'Shifted planning series',
+        recurrence: { rrule: 'FREQ=WEEKLY' },
+        unsupportedRecurrence: 'range-this-and-future',
+      };
+      const repository = new InMemoryCalendarRepository({
+        calendars: [calendars[0]],
+        events: [events[0], unsupportedSeries],
+      });
+      const updateEvent = vi.spyOn(repository, 'updateEvent');
+      const deleteEvent = vi.spyOn(repository, 'deleteEvent');
+
+      render(
+        <CalendarEventsSurface
+          filters={{
+            startDate: '2026-09-25T00:00:00Z',
+            endDate: '2026-09-25T23:59:59Z',
+          }}
+          onShowMore={() => undefined}
+          view={view}
+        />,
+        { wrapper: createWrapper(repository) },
+      );
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        '1 recurring series contain a THISANDFUTURE range override that the current renderer cannot safely display.',
+      );
+      expect(
+        screen.queryByText('Shifted planning series'),
+      ).not.toBeInTheDocument();
+      expect(updateEvent).not.toHaveBeenCalled();
+      expect(deleteEvent).not.toHaveBeenCalled();
+    },
+  );
 });

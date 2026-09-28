@@ -60,9 +60,18 @@ export function CalendarEventsSurface({
     [filters, view],
   );
   const events = useCalendarEvents(calendarIds, repositoryRange);
+  const unsupportedSeriesCount = events.data.filter(
+    (event) =>
+      event.unsupportedRecurrence === 'range-this-and-future' &&
+      !hiddenCalendarIds.has(event.calendarId),
+  ).length;
   const visibleEvents = useMemo(
     () =>
-      events.data.filter((event) => !hiddenCalendarIds.has(event.calendarId)),
+      events.data.filter(
+        (event) =>
+          !hiddenCalendarIds.has(event.calendarId) &&
+          event.unsupportedRecurrence !== 'range-this-and-future',
+      ),
     [events.data, hiddenCalendarIds],
   );
   const filteredEvents = useMemo(
@@ -101,6 +110,17 @@ export function CalendarEventsSurface({
             {t(
               'calendarEvents.mixedCompatibilityNotice',
               'One or more calendars support additional item types. The widget displays and edits VEVENT entries only.',
+            )}
+          </Alert>
+        </Box>
+      )}
+      {unsupportedSeriesCount > 0 && (
+        <Box px={1} pb={1}>
+          <Alert severity="warning">
+            {t(
+              'calendarEvents.unsupportedRangeRecurrence',
+              '{{count}} recurring series contain a THISANDFUTURE range override that the current renderer cannot safely display.',
+              { count: unsupportedSeriesCount },
             )}
           </Alert>
         </Box>

@@ -129,6 +129,9 @@ export type CalendarEventRecurrence = {
   overrides?: CalendarEventRecurrenceOverride[];
 };
 
+/** Recurrence semantics retained by CalDAV but not safely projected by UI. */
+export type CalendarEventUnsupportedRecurrence = 'range-this-and-future';
+
 export type Calendar = {
   id: CalendarId;
   name: string;
@@ -159,16 +162,24 @@ export type CalendarEvent = {
   priority?: number;
 
   recurrence?: CalendarEventRecurrence;
+  /** Read-only warning marker derived from recurrence data in the resource. */
+  unsupportedRecurrence?: CalendarEventUnsupportedRecurrence;
 };
 
-export type CalendarEventInput = Omit<CalendarEvent, 'id' | 'calendarId'>;
+export type CalendarEventInput = Omit<
+  CalendarEvent,
+  'id' | 'calendarId' | 'unsupportedRecurrence'
+>;
 
 /**
  * Fields editable without changing resource identity, calendar ownership, or
  * the stable iCalendar UID.
  */
 export type CalendarEventPatch = Partial<
-  Omit<CalendarEvent, 'id' | 'calendarId' | 'uid'>
+  Omit<
+    CalendarEvent,
+    'id' | 'calendarId' | 'uid' | 'unsupportedRecurrence'
+  >
 >;
 
 export type CalendarTimeRange = {

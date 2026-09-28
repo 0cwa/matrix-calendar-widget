@@ -52,6 +52,7 @@
     "empty": "Keine Termine gefunden, die den ausgewählten Filtern entsprechen.",
     "loadError": "Kalendertermine konnten nicht geladen werden.",
     "mixedCompatibilityNotice": "Mindestens ein Kalender unterstützt weitere Elementtypen. Das Widget zeigt und bearbeitet ausschließlich VEVENT-Termine.",
+    "unsupportedRangeRecurrence": "{{count}} Terminserien enthalten eine THISANDFUTURE-Bereichsausnahme, die die aktuelle Darstellung nicht sicher anzeigen kann.",
     "title": "Kalendertermine"
   },
   "calendarMonthPicker": {
