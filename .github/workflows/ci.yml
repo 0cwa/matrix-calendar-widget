@@ -27,24 +27,61 @@ jobs:
           cache: yarn
 
       - name: Install dependencies
+        id: install
         run: yarn install --frozen-lockfile
 
       - name: Check formatting
+        id: formatting
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
         run: yarn prettier:check
 
       - name: Check fork identity
+        id: fork_identity
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
         run: bash scripts/check-fork-identity.sh
 
       - name: Validate local integration stack
+        id: integration_stack
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
         run: |
           bash -n dev/up.sh
           docker compose -f dev/compose.yaml config >/dev/null
 
       - name: Check dependencies
+        id: dependencies
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
         run: yarn depcheck
 
       - name: Type check
+        id: type_check
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
         run: yarn tsc
+
+      - name: Report quality checks
+        if: ${{ !cancelled() }}
+        env:
+          INSTALL: ${{ steps.install.outcome }}
+          FORMATTING: ${{ steps.formatting.outcome }}
+          FORK_IDENTITY: ${{ steps.fork_identity.outcome }}
+          INTEGRATION_STACK: ${{ steps.integration_stack.outcome }}
+          DEPENDENCIES: ${{ steps.dependencies.outcome }}
+          TYPE_CHECK: ${{ steps.type_check.outcome }}
+        run: |
+          failed=0
+          for check in install formatting fork_identity integration_stack dependencies type_check; do
+            variable="${check^^}"
+            result="${!variable:-skipped}"
+            printf '%-20s %s\n' "$check" "$result"
+            if [[ "$result" != success ]]; then
+              failed=1
+            fi
+          done
+          exit "$failed"
 
   widget:
     name: Widget

@@ -39,7 +39,14 @@ The inherited ADR001-ADR003 documents describe NeoDateFix's original meeting arc
 - Work from a GitHub issue or a clearly scoped item in `docs/PLAN.md`.
 - Prefer vertical slices over broad rewrites.
 - Keep PRs reviewable. Do not combine package renames, architecture changes, and product features unless the task requires it.
+- Start feature work from the current remote `main`; record the exact base commit and keep changes on a feature branch. Open a draft PR for substantial work so CI runs before the change is treated as ready.
+- Keep the PR diff limited to its stated scope. Preserve published branch history with normal forward-only pushes; do not force-push unless the user explicitly authorizes rewriting that exact ref.
+- Re-read the remote base, PR head, changed paths, and required checks immediately before a GitHub mutation. Afterward, verify the remote state against the intended change.
+- Treat `read-only` or `no edits` as scoped to the assigned task and files unless the instruction explicitly says it applies repo-wide. A later explicit user instruction may supersede a task-local limit; record the new scope and proceed within it.
 - Add or update tests with behavior changes.
+- When adding a workspace package, declare each direct source and test import in the package that uses it, and add every applicable lint, type-check, test, dependency-check, and build command to CI in the same change.
+- Before another CI run, inspect all completed independent failures and fix the confirmed issues together in one focused follow-up. Run checks that can fail independently even when an earlier check fails; the `Quality` job does this and reports each outcome.
+- Use the repository-locked formatter. If its local binary is unavailable, obtain exact output from a hosted run using the locked version; do not substitute a different formatter version.
 - Update `docs/PLAN.md` when completing or materially changing a planned task.
 - Update `docs/STATUS.md` when the active phase, dependency order, or important PR blocker materially changes.
 - Add an ADR for decisions that change a persistence boundary, authentication model, public API, calendar semantics, permission model, or deployment topology.
@@ -67,11 +74,19 @@ yarn ci
 Also verify:
 
 - user-visible behavior has tests,
+- every new workspace package has its applicable tests and checks wired into CI,
 - calendar serialization changes have round-trip fixtures,
 - authorization is enforced server-side rather than only hidden in the UI,
 - errors do not expose secrets,
 - docs/ADR changes are included when architecture changed,
 - no inherited Nordeck publishing target was used.
+
+## Agent coordination
+
+- Keep scouting read-only and state its exact assignment scope. Give implementation work to one branch owner at a time.
+- Have a separate reviewer inspect the exact candidate commit or PR head. Ask for another review when a follow-up materially changes behavior, security, data, or scope.
+- Report progress as a concise checkpoint with the branch/head, changed paths, checks passed or failed, blocker, and next action. Group unchanged waiting periods instead of sending repeated polling updates.
+- Prefer event-driven waits over repeated status polling. Do not claim a gate passed until its result is tied to the exact commit being reviewed.
 
 ## Fork hygiene
 
