@@ -14,17 +14,17 @@ This repository begins as a hard fork of NeoDateFix. NeoDateFix stores meeting m
 │  React + Matrix Widget Toolkit + MUI       │
 │  FullCalendar as a view layer              │
 └───────────────────┬────────────────────────┘
-                    │ Matrix OpenID / widget identity
+                    │ short-lived Matrix OpenID / widget identity
                     │ application API
                     ▼
 ┌────────────────────────────────────────────┐
 │ Calendar gateway + bot                     │
 │                                            │
-│ • validates Matrix identity                │
-│ • checks room membership / calendar policy │
+│ • validates widget OpenID identity         │
+│ • separates personal and room-owned paths  │
+│ • checks room binding, membership, power   │
 │ • CalDAV repository                        │
-│ • reminder scheduler                       │
-│ • Matrix-specific sidecar metadata         │
+│ • optional app-owned reminder state        │
 │ • fallback command handler                 │
 └───────────────────┬───────────────┬────────┘
                     │ CalDAV        │ Matrix
@@ -35,22 +35,31 @@ This repository begins as a hard fork of NeoDateFix. NeoDateFix stores meeting m
           └─────────────────┘   └───────────────┘
 ```
 
-The gateway and bot are initially one deployable service. Split them only when scaling, isolation, or operational requirements justify another network boundary.
+The gateway and bot are initially one deployable service. Split them only when scaling, isolation, or operational requirements justify another network boundary. PostgreSQL is an optional app-owned store for reminder configuration and claim primitives; it is separate from CalDAV and Synapse. The current store does not enable reminder scheduling or Matrix delivery.
+
+## Principal and authorization boundary
+
+[ADR010](./adrs/adr010-mixed-calendar-principal-model.md) defines two distinct ownership paths:
+
+- **Personal widget calendars** remain associated with the authenticated Matrix user. The gateway validates that user's short-lived OpenID assertion and, once the external plugin work in [#48](https://github.com/0cwa/matrix-calendar-widget/issues/48) and final real-server contract in [#45](https://github.com/0cwa/matrix-calendar-widget/issues/45) are complete, uses only the corresponding user-scoped CalDAV delegation contract.
+- **Room-owned bot calendars** belong to the application principal and require an explicit server-side room-to-calendar binding. Room-owned reads and writes remain blocked until the application principal's non-password Radicale authentication path is defined and tested and explicit binding and per-operation authorization checks are implemented. ADR009's user-scoped OpenID delegation does not provide these application-principal credentials.
+
+When the room-owned path is enabled, identity proof and authorization are separate. Widget requests require validated OpenID, current room membership, configured power policy, and a binding for the requested calendar. Bot commands recheck the sender's membership/power and the same explicit binding for each operation. A Matrix sender is authorization and audit context; it does not prove OpenID identity or CalDAV identity. Per-user bot calendars remain deferred.
 
 ## Source-of-truth boundaries
 
-| Concern                        | Canonical store                       |
-| ------------------------------ | ------------------------------------- |
-| calendar collection            | CalDAV/Radicale                       |
-| VEVENT fields                  | iCalendar object in Radicale          |
-| UID, SEQUENCE, recurrence      | iCalendar object                      |
-| organizer/attendees            | iCalendar object                      |
-| VALARM                         | iCalendar object                      |
-| calendar display properties    | CalDAV properties where supported     |
-| Matrix room ↔ calendar binding | Matrix/gateway configuration          |
-| Matrix reminder recipients     | gateway sidecar store                 |
-| reminder delivery history      | gateway store                         |
-| Matrix permissions             | Matrix room state + configured policy |
+| Concern                        | Canonical store                                                     |
+| ------------------------------ | ------------------------------------------------------------------- |
+| calendar collection            | CalDAV/Radicale                                                     |
+| VEVENT fields                  | iCalendar object in Radicale                                        |
+| UID, SEQUENCE, recurrence      | iCalendar object                                                    |
+| organizer/attendees            | iCalendar object                                                    |
+| VALARM                         | iCalendar object                                                    |
+| calendar display properties    | CalDAV properties where supported                                   |
+| Matrix room ↔ calendar binding | explicit server-side gateway state; M6 work remains open            |
+| Matrix reminder recipients     | planned gateway sidecar state, separate from iCalendar              |
+| reminder delivery history      | app-owned PostgreSQL store when enabled                             |
+| Matrix permissions             | room state plus configured gateway policy for room-owned operations |
 
 ## Collection profile
 
@@ -95,26 +104,18 @@ interface CalendarRepository {
 
 The exact TypeScript API is not frozen by this document. The important rule is that UI components do not speak CalDAV directly and server business logic does not depend on FullCalendar models.
 
-## Authentication flow
+## Intended personal widget authentication flow
 
 1. Widget asks the host client for Matrix identity/OpenID credentials.
 2. Widget exchanges the short-lived assertion with the calendar gateway.
 3. Gateway validates the assertion against the Matrix homeserver.
-4. Gateway resolves Matrix user, room, membership, and calendar policy.
-5. Gateway performs permitted CalDAV operations server-side.
+4. Gateway resolves the asserted Matrix user. Once ADR009-compatible plugin support is available, it performs the user's personal CalDAV operation server-side through user-scoped delegation.
+5. For room-scoped operations, the gateway separately checks current room membership, configured power policy, and the explicit room-to-calendar binding. This room-owned path is not enabled until its application-principal authentication prerequisite is complete.
 6. Browser never handles the user's Matrix password or long-lived CalDAV credentials.
 
 ## Permissions
 
-Start with Matrix room membership plus a small configurable policy mapped to power levels. Example policy:
-
-- room member: view calendar,
-- configured minimum PL: create events,
-- event creator or configured minimum PL: edit/delete,
-- configured minimum PL: manage calendars,
-- configured minimum PL and Matrix room permission: schedule `@room` mentions.
-
-Exact defaults require implementation validation and may become a dedicated ADR.
+Personal widget ownership is user-scoped. Room-owned operations require an explicit room-to-calendar binding and current membership plus the configured power-level policy for every operation. The binding and room-owned authorization path remain M6 work; exact policy defaults require implementation validation. The UI is never the authorization boundary.
 
 ## Reminder delivery
 
@@ -125,7 +126,7 @@ Delivery uses Matrix messages with:
 - `m.mentions.user_ids` for selected users,
 - `m.mentions.room: true` for `@room`, only when the bot/user has permission.
 
-The scheduler must be idempotent and keep delivery state so restarts do not duplicate reminders.
+The planned scheduler must be idempotent and keep delivery state across restarts. The persistence primitives are present, but scheduling, recipient configuration, delivery-time authorization, and Matrix sends remain future work.
 
 ## MSC4496
 
