@@ -240,8 +240,8 @@ describe('<CalendarEventsSurface />', () => {
 
       expect(await screen.findByRole('alert')).toHaveTextContent(
         count === 1
-          ? '1 recurring series contains a THISANDFUTURE range override that the current renderer cannot safely display.'
-          : '2 recurring series contain a THISANDFUTURE range override that the current renderer cannot safely display.',
+          ? 'The current renderer cannot safely display series with THISANDFUTURE range overrides. Affected series: 1.'
+          : 'The current renderer cannot safely display series with THISANDFUTURE range overrides. Affected series: 2.',
       );
       expect(
         screen.queryByText('Shifted planning series'),

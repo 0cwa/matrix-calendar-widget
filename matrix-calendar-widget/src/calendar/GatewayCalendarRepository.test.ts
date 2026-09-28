@@ -277,9 +277,7 @@ describe('GatewayCalendarRepository', () => {
     };
     const repository = createRepository(
       mockFetch(
-        jsonResponse([
-          { event: unsupportedEvent, etag: '"range-etag"' },
-        ]),
+        jsonResponse([{ event: unsupportedEvent, etag: '"range-etag"' }]),
       ),
     );
 

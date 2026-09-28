@@ -556,9 +556,7 @@ describe('ICalendarEventCodec', () => {
     expect(override.getFirstPropertyValue('dtstart')?.toString()).toBe(
       '2026-10-08T11:00:00Z',
     );
-    expect(override.getFirstPropertyValue('summary')).toBe(
-      'Planning shifted',
-    );
+    expect(override.getFirstPropertyValue('summary')).toBe('Planning shifted');
     expect(override.getFirstPropertyValue('x-override-marker')).toBe(
       'preserve-range-semantics',
     );

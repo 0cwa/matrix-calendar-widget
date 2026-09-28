@@ -119,7 +119,7 @@ export function CalendarEventsSurface({
           <Alert severity="warning">
             {t(
               'calendarEvents.unsupportedRangeRecurrence',
-              'The current renderer cannot safely display recurring series with THISANDFUTURE range overrides ({{count}} affected).',
+              'The current renderer cannot safely display series with THISANDFUTURE range overrides. Affected series: {{count}}.',
               { count: unsupportedSeriesCount },
             )}
           </Alert>

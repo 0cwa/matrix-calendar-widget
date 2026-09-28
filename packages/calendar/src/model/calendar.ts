@@ -176,10 +176,7 @@ export type CalendarEventInput = Omit<
  * the stable iCalendar UID.
  */
 export type CalendarEventPatch = Partial<
-  Omit<
-    CalendarEvent,
-    'id' | 'calendarId' | 'uid' | 'unsupportedRecurrence'
-  >
+  Omit<CalendarEvent, 'id' | 'calendarId' | 'uid' | 'unsupportedRecurrence'>
 >;
 
 export type CalendarTimeRange = {
