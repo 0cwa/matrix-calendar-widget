@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import * as ICAL from 'ical.js';
+import ICAL from 'ical.js';
 
 const env = process.env;
 const requiredEnvironment = [
