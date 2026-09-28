@@ -26,6 +26,7 @@ import deLocale from '@fullcalendar/core/locales/de';
 import FullCalendar from '@fullcalendar/react';
 import {
   CalendarEvent,
+  calendarEventTimedDateTimeToDateTime,
   isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
 import EventRepeatIcon from '@mui/icons-material/EventRepeat';
@@ -206,9 +207,9 @@ function CalendarEventCell({
             >
               {view === 'month' && isTimedCalendarEvent(event) && (
                 <Typography component="span" variant="body2">
-                  {DateTime.fromISO(event.timing.start.local, {
-                    zone: event.timing.start.timezone,
-                  }).toLocaleString(DateTime.TIME_SIMPLE)}{' '}
+                  {calendarEventTimedDateTimeToDateTime(
+                    event.timing.start,
+                  ).toLocaleString(DateTime.TIME_SIMPLE)}{' '}
                 </Typography>
               )}
               <Typography component="span" fontWeight="bold" variant="body2">

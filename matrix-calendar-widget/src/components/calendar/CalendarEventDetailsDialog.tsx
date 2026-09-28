@@ -17,6 +17,7 @@
 import {
   CalendarEvent,
   CalendarRepositoryError,
+  calendarEventTimedDateTimeToDateTime,
   isAllDayCalendarEvent,
   isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
@@ -242,12 +243,12 @@ export function formatCalendarEventTime(
     return '';
   }
 
-  const start = DateTime.fromISO(event.timing.start.local, {
-    zone: event.timing.start.timezone,
-  }).setLocale(locale);
-  const end = DateTime.fromISO(event.timing.end.local, {
-    zone: event.timing.end.timezone,
-  }).setLocale(locale);
+  const start = calendarEventTimedDateTimeToDateTime(
+    event.timing.start,
+  ).setLocale(locale);
+  const end = calendarEventTimedDateTimeToDateTime(
+    event.timing.end,
+  ).setLocale(locale);
 
   if (start.hasSame(end, 'day')) {
     return `${start.toLocaleString(DateTime.DATE_FULL)} · ${start.toLocaleString(

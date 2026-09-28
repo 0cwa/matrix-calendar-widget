@@ -22,10 +22,14 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Settings } from 'luxon';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from '../../calendar';
-import { CalendarEventDetailsDialog } from './CalendarEventDetailsDialog';
+import {
+  CalendarEventDetailsDialog,
+  formatCalendarEventTime,
+} from './CalendarEventDetailsDialog';
 
 const calendar: Calendar = {
   id: 'team',
@@ -41,13 +45,27 @@ const event: CalendarEvent = {
   timing: {
     type: 'timed',
     start: {
+      type: 'zoned',
       local: '2026-09-23T09:00',
       timezone: 'Europe/Stockholm',
     },
     end: {
+      type: 'zoned',
       local: '2026-09-23T10:00',
       timezone: 'Europe/Stockholm',
     },
+  },
+};
+
+const floatingEvent: CalendarEvent = {
+  id: 'floating',
+  calendarId: 'team',
+  uid: 'floating@example.test',
+  title: 'Floating planning',
+  timing: {
+    type: 'timed',
+    start: { type: 'floating', local: '2026-09-23T09:00:00' },
+    end: { type: 'floating', local: '2026-09-23T10:00:00' },
   },
 };
 
@@ -62,6 +80,19 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventDetailsDialog />', () => {
+  it('formats floating detail times in the viewer local zone', () => {
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'Europe/Stockholm';
+
+    try {
+      expect(formatCalendarEventTime(floatingEvent, 'en', 'All day')).toBe(
+        'September 23, 2026 · 9:00 AM–10:00 AM',
+      );
+    } finally {
+      Settings.defaultZone = originalZone;
+    }
+  });
+
   it('deletes an event after confirmation', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],

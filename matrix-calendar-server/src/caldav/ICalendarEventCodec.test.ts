@@ -41,10 +41,12 @@ describe('ICalendarEventCodec', () => {
       timing: {
         type: 'timed',
         start: {
+          type: 'zoned',
           local: '2026-09-23T09:00:00',
           timezone: 'Europe/Stockholm',
         },
         end: {
+          type: 'zoned',
           local: '2026-09-23T10:00:00',
           timezone: 'Europe/Stockholm',
         },
@@ -88,10 +90,12 @@ describe('ICalendarEventCodec', () => {
     expect(parsed.event.timing).toEqual({
       type: 'timed',
       start: {
+        type: 'zoned',
         local: '2026-10-26T09:00:00',
         timezone: 'Europe/Stockholm',
       },
       end: {
+        type: 'zoned',
         local: '2026-10-26T10:00:00',
         timezone: 'Europe/Stockholm',
       },
@@ -107,6 +111,237 @@ describe('ICalendarEventCodec', () => {
 
     const reparsed = codec.parse('team', 'vtimezone.ics', encoded.icalendar);
     expect(reparsed.event.timing).toEqual(parsed.event.timing);
+  });
+
+  it('reads and preserves master floating DATE-TIME values on a non-timing patch', () => {
+    const parsed = codec.parse(
+      'team',
+      'floating-timed.ics',
+      fixture('floating-timed.ics'),
+    );
+
+    expect(parsed.event.timing).toEqual({
+      type: 'timed',
+      start: { type: 'floating', local: '2026-09-23T09:00:00' },
+      end: { type: 'floating', local: '2026-09-23T10:00:00' },
+    });
+
+    const encoded = parsed.applyPatch({ title: 'Updated floating planning' });
+    const calendar = ICAL.Component.fromString(encoded.icalendar);
+    const vevent = calendar.getFirstSubcomponent('vevent')!;
+    const start = vevent.getFirstProperty('dtstart')!;
+    const end = vevent.getFirstProperty('dtend')!;
+
+    expect(start.getFirstParameter('tzid')).toBeNull();
+    expect(end.getFirstParameter('tzid')).toBeNull();
+    expect(start.getFirstValue().toString()).toBe('2026-09-23T09:00:00');
+    expect(end.getFirstValue().toString()).toBe('2026-09-23T10:00:00');
+    expect(vevent.getFirstPropertyValue('x-client-marker')).toBe(
+      'preserve-floating',
+    );
+    expect(
+      codec.parse('team', 'floating-timed.ics', encoded.icalendar).event
+        .timing,
+    ).toEqual(parsed.event.timing);
+  });
+
+  it('writes and reparses floating timing patches without TZID or UTC markers', () => {
+    const parsed = codec.parse(
+      'team',
+      'simple-timed.ics',
+      fixture('simple-timed.ics'),
+    );
+
+    const encoded = parsed.applyPatch({
+      timing: {
+        type: 'timed',
+        start: { type: 'floating', local: '2026-09-24T11:30:00' },
+        end: { type: 'floating', local: '2026-09-24T12:15:00' },
+      },
+    });
+    const vevent = ICAL.Component.fromString(encoded.icalendar).getFirstSubcomponent(
+      'vevent',
+    )!;
+    const start = vevent.getFirstProperty('dtstart')!;
+    const end = vevent.getFirstProperty('dtend')!;
+
+    expect(start.getFirstParameter('tzid')).toBeNull();
+    expect(end.getFirstParameter('tzid')).toBeNull();
+    expect(start.getFirstValue().toString()).toBe('2026-09-24T11:30:00');
+    expect(end.getFirstValue().toString()).toBe('2026-09-24T12:15:00');
+    expect(encoded.icalendar).not.toContain('TZID=');
+    expect(encoded.icalendar).not.toMatch(/DTSTART[^\r\n]*Z/);
+    expect(encoded.icalendar).not.toMatch(/DTEND[^\r\n]*Z/);
+    expect(
+      codec.parse('team', 'simple-timed.ics', encoded.icalendar).event.timing,
+    ).toEqual(encoded.event.timing);
+  });
+
+  it('keeps UTC master DATE-TIME endpoints tagged as zoned UTC', () => {
+    const icalendar = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Matrix Calendar Widget//Tests//EN',
+      'BEGIN:VEVENT',
+      'UID:utc-master@example.test',
+      'DTSTAMP:20260922T120000Z',
+      'DTSTART:20260923T090000Z',
+      'DTEND:20260923T100000Z',
+      'SUMMARY:UTC event',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+    const parsed = codec.parse('team', 'utc-master.ics', icalendar);
+
+    expect(parsed.event.timing).toEqual({
+      type: 'timed',
+      start: {
+        type: 'zoned',
+        local: '2026-09-23T09:00:00',
+        timezone: 'UTC',
+      },
+      end: {
+        type: 'zoned',
+        local: '2026-09-23T10:00:00',
+        timezone: 'UTC',
+      },
+    });
+  });
+
+  it('preserves floating and zoned master endpoints independently', () => {
+    const icalendar = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Matrix Calendar Widget//Tests//EN',
+      'BEGIN:VEVENT',
+      'UID:mixed-master@example.test',
+      'DTSTAMP:20260922T120000Z',
+      'DTSTART:20260923T090000',
+      'DTEND;TZID=Europe/Stockholm:20260923T100000',
+      'SUMMARY:Mixed endpoint event',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+    const parsed = codec.parse('team', 'mixed-master.ics', icalendar);
+
+    expect(parsed.event.timing).toEqual({
+      type: 'timed',
+      start: { type: 'floating', local: '2026-09-23T09:00:00' },
+      end: {
+        type: 'zoned',
+        local: '2026-09-23T10:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    });
+
+    const patched = codec.parse(
+      'team',
+      'mixed-master.ics',
+      parsed.applyPatch({ title: 'Renamed mixed endpoint event' }).icalendar,
+    );
+    expect(patched.event.timing).toEqual(parsed.event.timing);
+
+    const timingPatch = parsed.applyPatch({
+      timing: {
+        type: 'timed',
+        start: { type: 'floating', local: '2026-09-23T11:00:00' },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T12:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    });
+    const vevent = ICAL.Component.fromString(
+      timingPatch.icalendar,
+    ).getFirstSubcomponent('vevent')!;
+    expect(vevent.getFirstProperty('dtstart')?.getFirstParameter('tzid')).toBe(
+      null,
+    );
+    expect(
+      vevent.getFirstProperty('dtend')?.getFirstParameter('tzid'),
+    ).toBe('Europe/Stockholm');
+    expect(
+      codec.parse('team', 'mixed-master.ics', timingPatch.icalendar).event
+        .timing,
+    ).toEqual(timingPatch.event.timing);
+  });
+
+  it('preserves different endpoint TZIDs through title and timing patches', () => {
+    const icalendar = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Matrix Calendar Widget//Tests//EN',
+      'BEGIN:VEVENT',
+      'UID:two-zones@example.test',
+      'DTSTAMP:20260922T120000Z',
+      'DTSTART;TZID=Europe/Stockholm:20260923T100000',
+      'DTEND;TZID=America/New_York:20260923T053000',
+      'SUMMARY:Two-zone event',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+    const parsed = codec.parse('team', 'two-zones.ics', icalendar);
+
+    expect(parsed.event.timing).toEqual({
+      type: 'timed',
+      start: {
+        type: 'zoned',
+        local: '2026-09-23T10:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+      end: {
+        type: 'zoned',
+        local: '2026-09-23T05:30:00',
+        timezone: 'America/New_York',
+      },
+    });
+
+    const titlePatch = parsed.applyPatch({ title: 'Renamed two-zone event' });
+    expect(titlePatch.icalendar).toContain(
+      'DTSTART;TZID=Europe/Stockholm:20260923T100000',
+    );
+    expect(titlePatch.icalendar).toContain(
+      'DTEND;TZID=America/New_York:20260923T053000',
+    );
+
+    const timingPatch = parsed.applyPatch({
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-09-23T10:15:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T05:45:00',
+          timezone: 'America/New_York',
+        },
+      },
+    });
+    expect(
+      codec.parse('team', 'two-zones.ics', timingPatch.icalendar).event.timing,
+    ).toEqual(timingPatch.event.timing);
+  });
+
+  it('rejects a master VEVENT with missing DTEND rather than inferring timing', () => {
+    const withoutEnd = fixture('simple-timed.ics').replace(
+      /DTEND;TZID=Europe\/Stockholm:20260923T100000\r?\n/,
+      '',
+    );
+
+    let thrown: unknown;
+    try {
+      codec.parse('team', 'missing-end.ics', withoutEnd);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      code: 'missing-timing',
+      message: 'VEVENT must contain DTSTART and DTEND',
+    });
   });
 
   it('reads recurrence data and preserves a complete recurring resource on master patch', () => {
@@ -695,10 +930,12 @@ END:VCALENDAR`,
       timing: {
         type: 'timed',
         start: {
+          type: 'zoned',
           local: '2026-09-28T09:00:00',
           timezone: 'Europe/Stockholm',
         },
         end: {
+          type: 'zoned',
           local: '2026-09-28T10:30:00',
           timezone: 'Europe/Stockholm',
         },

@@ -94,8 +94,8 @@ const testCalendarEvent: CalendarEvent = {
   description: 'A brief description',
   timing: {
     type: 'timed',
-    start: { local: '2022-03-01T10:00:00', timezone: 'UTC' },
-    end: { local: '2022-03-01T14:00:00', timezone: 'UTC' },
+    start: { type: 'zoned', local: '2022-03-01T10:00:00', timezone: 'UTC' },
+    end: { type: 'zoned', local: '2022-03-01T14:00:00', timezone: 'UTC' },
   },
 };
 
@@ -475,8 +475,8 @@ describe('<MeetingsPanel/>', () => {
       title: 'Meeting 1',
       timing: {
         type: 'timed',
-        start: { local: '2022-03-01T11:00:00', timezone: 'UTC' },
-        end: { local: '2022-03-01T12:00:00', timezone: 'UTC' },
+        start: { type: 'zoned', local: '2022-03-01T11:00:00', timezone: 'UTC' },
+        end: { type: 'zoned', local: '2022-03-01T12:00:00', timezone: 'UTC' },
       },
     });
     await calendarRepository.createEvent('team', {
@@ -484,8 +484,8 @@ describe('<MeetingsPanel/>', () => {
       title: 'Meeting 2',
       timing: {
         type: 'timed',
-        start: { local: '2022-03-01T13:00:00', timezone: 'UTC' },
-        end: { local: '2022-03-01T14:00:00', timezone: 'UTC' },
+        start: { type: 'zoned', local: '2022-03-01T13:00:00', timezone: 'UTC' },
+        end: { type: 'zoned', local: '2022-03-01T14:00:00', timezone: 'UTC' },
       },
     });
     await calendarRepository.createEvent('team', {
@@ -493,8 +493,8 @@ describe('<MeetingsPanel/>', () => {
       title: 'Meeting 3',
       timing: {
         type: 'timed',
-        start: { local: '2022-03-01T14:00:00', timezone: 'UTC' },
-        end: { local: '2022-03-01T15:00:00', timezone: 'UTC' },
+        start: { type: 'zoned', local: '2022-03-01T14:00:00', timezone: 'UTC' },
+        end: { type: 'zoned', local: '2022-03-01T15:00:00', timezone: 'UTC' },
       },
     });
 

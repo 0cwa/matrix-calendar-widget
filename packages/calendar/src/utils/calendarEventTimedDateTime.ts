@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Nordeck IT + Consulting GmbH
+ * Copyright 2026 Matrix Calendar Widget contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,15 +14,18 @@
  * limitations under the License.
  */
 
-export * from './calendarUtils';
-export {
-  calendarEventTimedDateTimeToDateTime,
-} from './calendarEventTimedDateTime';
-export { formatICalDate, parseICalDate, toISOString } from './dateTimeUtils';
-export { formatRRuleText, getOrdinalLabel, parseRRule } from './format';
-export {
-  isWeekdays,
-  normalizeByWeekday,
-  normalizeNumeric,
-  normalizeWeekday,
-} from './helpers';
+import { DateTime } from 'luxon';
+import type { CalendarEventTimedDateTime } from '../model';
+
+/**
+ * Interprets floating event times in the viewer's local zone. Zoned event
+ * times keep their iCalendar timezone.
+ */
+export function calendarEventTimedDateTimeToDateTime(
+  value: CalendarEventTimedDateTime,
+  viewerTimezone = DateTime.local().zoneName ?? 'UTC',
+): DateTime {
+  return DateTime.fromISO(value.local, {
+    zone: value.type === 'floating' ? viewerTimezone : value.timezone,
+  });
+}

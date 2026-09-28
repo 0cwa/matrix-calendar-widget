@@ -18,6 +18,7 @@ import { EventInput } from '@fullcalendar/core';
 import {
   CalendarEvent,
   CalendarTimeRange,
+  calendarEventTimedDateTimeToDateTime,
   isAllDayCalendarEvent,
   isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
@@ -55,11 +56,12 @@ export function calendarEventToFullCalendarEvent(
   return {
     id: calendarEventKey(event),
     title: event.title,
-    start: zonedDateTimeToIso(
+    start:
+      calendarEventTimedDateTimeToDateTime(event.timing.start).toISO() ??
       event.timing.start.local,
-      event.timing.start.timezone,
-    ),
-    end: zonedDateTimeToIso(event.timing.end.local, event.timing.end.timezone),
+    end:
+      calendarEventTimedDateTimeToDateTime(event.timing.end).toISO() ??
+      event.timing.end.local,
     allDay: false,
     extendedProps: {
       calendarId: event.calendarId,
@@ -79,9 +81,8 @@ export function calendarEventStartDate(event: CalendarEvent): string {
   }
 
   return (
-    DateTime.fromISO(event.timing.start.local, {
-      zone: event.timing.start.timezone,
-    }).toISODate() ?? event.timing.start.local.slice(0, 10)
+    calendarEventTimedDateTimeToDateTime(event.timing.start).toISODate() ??
+    event.timing.start.local.slice(0, 10)
   );
 }
 
@@ -145,10 +146,6 @@ export function repositoryRangeForView(
   };
 }
 
-function zonedDateTimeToIso(local: string, timezone: string): string {
-  return DateTime.fromISO(local, { zone: timezone }).toISO() ?? local;
-}
-
 function compareCalendarEvents(a: CalendarEvent, b: CalendarEvent): number {
   const startComparison = eventStartMillis(a) - eventStartMillis(b);
   if (startComparison !== 0) {
@@ -167,7 +164,7 @@ function eventStartMillis(event: CalendarEvent): number {
     throw new Error('Unsupported calendar event timing');
   }
 
-  return DateTime.fromISO(event.timing.start.local, {
-    zone: event.timing.start.timezone,
-  }).toMillis();
+  return calendarEventTimedDateTimeToDateTime(
+    event.timing.start,
+  ).toMillis();
 }

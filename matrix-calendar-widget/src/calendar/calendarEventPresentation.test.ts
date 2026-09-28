@@ -15,6 +15,7 @@
  */
 
 import { CalendarEvent } from '@matrix-calendar-widget/calendar';
+import { Settings } from 'luxon';
 import {
   calendarEventToFullCalendarEvent,
   filterCalendarEvents,
@@ -33,10 +34,12 @@ const timedEvent: CalendarEvent = {
   timing: {
     type: 'timed',
     start: {
+      type: 'zoned',
       local: '2026-09-23T09:00:00',
       timezone: 'Europe/Stockholm',
     },
     end: {
+      type: 'zoned',
       local: '2026-09-23T10:00:00',
       timezone: 'Europe/Stockholm',
     },
@@ -52,6 +55,18 @@ const allDayEvent: CalendarEvent = {
     type: 'all-day',
     startDate: '2026-09-24',
     endDate: '2026-09-25',
+  },
+};
+
+const floatingEvent: CalendarEvent = {
+  id: 'floating',
+  calendarId: 'team',
+  uid: 'floating@example.test',
+  title: 'Floating planning',
+  timing: {
+    type: 'timed',
+    start: { type: 'floating', local: '2026-09-23T08:30:00' },
+    end: { type: 'floating', local: '2026-09-23T09:30:00' },
   },
 };
 
@@ -81,6 +96,26 @@ describe('calendar event presentation', () => {
       end: '2026-09-25',
       allDay: true,
     });
+  });
+
+  it('maps floating event values in the viewer local timezone', () => {
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'Europe/Stockholm';
+
+    try {
+      expect(
+        calendarEventToFullCalendarEvent(floatingEvent, 'label-floating'),
+      ).toMatchObject({
+        start: '2026-09-23T08:30:00.000+02:00',
+        end: '2026-09-23T09:30:00.000+02:00',
+        allDay: false,
+      });
+      expect(groupCalendarEventsByDay([timedEvent, floatingEvent])[0].events).toEqual(
+        [floatingEvent, timedEvent],
+      );
+    } finally {
+      Settings.defaultZone = originalZone;
+    }
   });
 
   it('filters by title, description, location, or category', () => {

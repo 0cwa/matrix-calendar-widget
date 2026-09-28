@@ -73,10 +73,12 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       timing: {
         type: 'timed',
         start: {
+          type: 'zoned',
           local: '2030-01-15T10:00:00',
           timezone: 'UTC',
         },
         end: {
+          type: 'zoned',
           local: '2030-01-15T11:00:00',
           timezone: 'UTC',
         },
@@ -184,6 +186,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       timing: {
         type: 'timed',
         start: {
+          type: 'zoned',
           local: '2026-10-05T14:00:00',
           timezone: 'Europe/Stockholm',
         },

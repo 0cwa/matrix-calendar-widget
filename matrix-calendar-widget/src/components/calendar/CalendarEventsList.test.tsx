@@ -17,6 +17,7 @@
 import { CalendarEvent } from '@matrix-calendar-widget/calendar';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Settings } from 'luxon';
 import { vi } from 'vitest';
 import { axe } from 'vitest-axe';
 import { CalendarEventsList } from './CalendarEventsList';
@@ -30,17 +31,48 @@ const event: CalendarEvent = {
   timing: {
     type: 'timed',
     start: {
+      type: 'zoned',
       local: '2026-09-23T09:00:00',
       timezone: 'Europe/Stockholm',
     },
     end: {
+      type: 'zoned',
       local: '2026-09-23T10:00:00',
       timezone: 'Europe/Stockholm',
     },
   },
 };
 
+const floatingEvent: CalendarEvent = {
+  id: 'floating',
+  calendarId: 'team',
+  uid: 'floating@example.test',
+  title: 'Floating planning',
+  timing: {
+    type: 'timed',
+    start: { type: 'floating', local: '2026-09-23T09:00:00' },
+    end: { type: 'floating', local: '2026-09-23T10:00:00' },
+  },
+};
+
 describe('<CalendarEventsList />', () => {
+  it('shows floating times in the viewer local zone', () => {
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'Europe/Stockholm';
+
+    try {
+      render(
+        <CalendarEventsList events={[floatingEvent]} onSelectEvent={vi.fn()} />,
+      );
+
+      expect(
+        screen.getByText('September 23, 2026 · 9:00 AM–10:00 AM'),
+      ).toBeInTheDocument();
+    } finally {
+      Settings.defaultZone = originalZone;
+    }
+  });
+
   it('renders domain events and selects them without a Meeting adapter', async () => {
     const onSelectEvent = vi.fn();
     render(

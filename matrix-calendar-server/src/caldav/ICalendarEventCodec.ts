@@ -26,6 +26,7 @@ import {
   CalendarEventRecurrenceOverride,
   CalendarEventRecurrenceTiming,
   CalendarEventStatus,
+  CalendarEventTimedDateTime,
   CalendarEventTiming,
   CalendarEventTransparency,
   CalendarId,
@@ -538,24 +539,26 @@ function readTiming(vevent: ICAL.Component): CalendarEventTiming {
 
   return {
     type: 'timed',
-    start: {
-      local: formatLocalDateTime(start),
-      timezone: readTimezone(startProperty, start),
-    },
-    end: {
-      local: formatLocalDateTime(end),
-      timezone: readTimezone(endProperty, end),
-    },
+    start: readMasterDateTimeValue(start, startProperty),
+    end: readMasterDateTimeValue(end, endProperty),
   };
 }
 
-function readTimezone(property: ICAL.Property, time: ICAL.Time): string {
+function readMasterDateTimeValue(
+  time: ICAL.Time,
+  property: ICAL.Property,
+): CalendarEventTimedDateTime {
+  const local = formatLocalDateTime(time);
   const tzid = property.getFirstParameter('tzid');
   if (typeof tzid === 'string' && tzid.length > 0) {
-    return tzid;
+    return { type: 'zoned', local, timezone: tzid };
   }
 
-  return time.zone?.tzid === 'Z' ? 'UTC' : time.zone?.tzid || 'UTC';
+  if (time.zone === ICAL.Timezone.utcTimezone) {
+    return { type: 'zoned', local, timezone: 'UTC' };
+  }
+
+  return { type: 'floating', local };
 }
 
 function formatDate(time: ICAL.Time): string {
@@ -690,15 +693,23 @@ function setTiming(
   setTimeProperty(
     component,
     'dtstart',
-    timedValue(timing.start.local, timing.start.timezone),
-    timing.start.timezone,
+    timedValueForEventEndpoint(timing.start),
+    timing.start.type === 'zoned' ? timing.start.timezone : undefined,
   );
   setTimeProperty(
     component,
     'dtend',
-    timedValue(timing.end.local, timing.end.timezone),
-    timing.end.timezone,
+    timedValueForEventEndpoint(timing.end),
+    timing.end.type === 'zoned' ? timing.end.timezone : undefined,
   );
+}
+
+function timedValueForEventEndpoint(
+  value: CalendarEventTimedDateTime,
+): ICAL.Time {
+  return value.type === 'floating'
+    ? ICAL.Time.fromDateTimeString(normalizeLocalDateTime(value.local))
+    : timedValue(value.local, value.timezone);
 }
 
 function setTimeProperty(

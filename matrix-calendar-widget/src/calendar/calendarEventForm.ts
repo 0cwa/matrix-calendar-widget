@@ -22,6 +22,7 @@ import {
   CalendarId,
   isAllDayCalendarEvent,
   isTimedCalendarEvent,
+  TimedCalendarEventTiming,
 } from '@matrix-calendar-widget/calendar';
 import { DateTime } from 'luxon';
 
@@ -31,9 +32,13 @@ export type CalendarEventFormValues = {
   description: string;
   location: string;
   timingType: 'timed' | 'all-day';
+  timedKind?: 'floating' | 'zoned' | 'mixed';
   start: string;
   end: string;
   timezone: string;
+  timingChanged?: boolean;
+  timezoneChanged?: boolean;
+  originalTiming?: TimedCalendarEventTiming;
 };
 
 export function createCalendarEventFormValues(
@@ -50,9 +55,12 @@ export function createCalendarEventFormValues(
     description: '',
     location: '',
     timingType: 'timed',
+    timedKind: 'zoned',
     start: start.toFormat("yyyy-MM-dd'T'HH:mm"),
     end: end.toFormat("yyyy-MM-dd'T'HH:mm"),
     timezone,
+    timingChanged: false,
+    timezoneChanged: false,
   };
 }
 
@@ -67,11 +75,14 @@ export function calendarEventToFormValues(
       description: event.description ?? '',
       location: event.location ?? '',
       timingType: 'all-day',
+      timedKind: 'zoned',
       start: event.timing.startDate,
       end:
         DateTime.fromISO(event.timing.endDate).minus({ days: 1 }).toISODate() ??
         event.timing.startDate,
-      timezone: calendar.timezone ?? DateTime.local().zoneName,
+      timezone: calendar.timezone ?? DateTime.local().zoneName ?? 'UTC',
+      timingChanged: false,
+      timezoneChanged: false,
     };
   }
 
@@ -85,10 +96,38 @@ export function calendarEventToFormValues(
     description: event.description ?? '',
     location: event.location ?? '',
     timingType: 'timed',
+    timedKind: timedKindForTiming(event.timing),
     start: event.timing.start.local.slice(0, 16),
     end: event.timing.end.local.slice(0, 16),
-    timezone: event.timing.start.timezone,
+    timezone:
+      event.timing.start.type === 'zoned'
+        ? event.timing.start.timezone
+        : (calendar.timezone ?? DateTime.local().zoneName ?? 'UTC'),
+    timingChanged: false,
+    timezoneChanged: false,
+    originalTiming: event.timing,
   };
+}
+
+function timedKindForTiming(
+  timing: TimedCalendarEventTiming,
+): NonNullable<CalendarEventFormValues['timedKind']> {
+  if (
+    timing.start.type === 'floating' &&
+    timing.end.type === 'floating'
+  ) {
+    return 'floating';
+  }
+
+  if (
+    timing.start.type === 'zoned' &&
+    timing.end.type === 'zoned' &&
+    timing.start.timezone === timing.end.timezone
+  ) {
+    return 'zoned';
+  }
+
+  return 'mixed';
 }
 
 export function calendarEventInputFromForm(
@@ -104,8 +143,12 @@ export function calendarEventInputFromForm(
 export function calendarEventPatchFromForm(
   values: CalendarEventFormValues,
 ): CalendarEventPatch {
+  const editableFields = calendarEventEditableFieldsFromForm(values);
+  const { timing, ...fields } = editableFields;
+
   return {
-    ...calendarEventEditableFieldsFromForm(values),
+    ...fields,
+    ...(values.timingChanged === false ? {} : { timing }),
     description: normalizeOptional(values.description),
     location: normalizeOptional(values.location),
   };
@@ -132,16 +175,36 @@ function calendarEventEditableFieldsFromForm(
           }
         : {
             type: 'timed',
-            start: {
-              local: values.start,
-              timezone: values.timezone,
-            },
-            end: {
-              local: values.end,
-              timezone: values.timezone,
-            },
+            start: editableTimedEndpoint(values, 'start'),
+            end: editableTimedEndpoint(values, 'end'),
           },
   };
+}
+
+function editableTimedEndpoint(
+  values: CalendarEventFormValues,
+  endpoint: 'start' | 'end',
+) {
+  const original = values.originalTiming?.[endpoint];
+  const local = values[endpoint];
+
+  if (values.timedKind === 'floating') {
+    return { type: 'floating' as const, local };
+  }
+
+  if (original && values.timedKind === 'mixed') {
+    return { ...original, local };
+  }
+
+  if (
+    original?.type === 'zoned' &&
+    !values.timezoneChanged &&
+    values.timedKind !== 'floating'
+  ) {
+    return { ...original, local };
+  }
+
+  return { type: 'zoned' as const, local, timezone: values.timezone };
 }
 
 function normalizeOptional(value: string): string | undefined {
