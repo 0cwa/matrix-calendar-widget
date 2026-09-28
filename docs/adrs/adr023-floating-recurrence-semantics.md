@@ -84,9 +84,10 @@ in `docs/timezones-ical-data.md` and
 `packages/ical-timezones/src/data/provenance.json`; package tests verify the
 data hash and selected historical/current timezone offsets. The bounded
 projector resolves named source and viewer zones only when their exact IDs
-exist in that bundle, through pinned `ical.js` transition data. Other TZIDs and
-arbitrary custom VTIMEZONE definitions remain opaque with a diagnostic. This
-does not make CalDAV queries viewer-local.
+exist in that bundle, using pinned `ical.js` recurrence expansion reconciled to
+the exact source observance offsets. Historical offset seconds are preserved
+through the full encoded history, including Asia/Kolkata's `+05:53:20` offset in 1855. Other TZIDs and arbitrary custom VTIMEZONE definitions remain opaque with
+a diagnostic. This does not make CalDAV queries viewer-local.
 
 Collection `Calendar.timezone` editing remains deferred under M4. Viewer-local
 event interpretation does not read or write that collection property.

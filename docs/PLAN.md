@@ -156,9 +156,12 @@ IANA Time Zone Database 2026d. See
 [`docs/timezones-ical-data.md`](timezones-ical-data.md) and
 `packages/ical-timezones/src/data/provenance.json` for the source checksum and
 generator inputs. Package tests verify the committed data hash and selected
-historical and current offsets. Projector conversion uses this pinned dataset
-through `ical.js`; this scope does not cover arbitrary embedded custom
-VTIMEZONE definitions or establish mainstream-client recurrence interoperability.
+historical and current offsets. Projector conversion uses pinned `ical.js`
+recurrence expansion reconciled with the bundle's source observances, preserving
+historical timezone offset seconds (for example, Asia/Kolkata local noon in
+1855 is `06:06:40Z`). This scope does not cover arbitrary embedded custom
+VTIMEZONE definitions or establish mainstream-client recurrence
+interoperability.
 Ordinary master-field patches preserve all VEVENT components, VTIMEZONE, and
 unknown properties. The codec continues to reject master events without
 DTEND. Recurrence editing and mainstream-client interoperability remain open.

@@ -42,6 +42,15 @@ and provenance hashes repeatable for the same inputs and toolchain. RFC 5545
 
 ## Regression evidence
 
+Calendar projection uses pinned `ical.js` to expand the bundled observance
+rules, then reconciles each generated transition with its source VTIMEZONE
+observance. This preserves second-resolution `TZOFFSETFROM` and `TZOFFSETTO`
+values that `ical.js` 2.2.1's offset type does not retain. For example,
+`Asia/Kolkata` local noon in 1855 converts to `06:06:40Z` using its bundled
+`+05:53:20` offset. The conversion follows bundled observances across their
+full encoded history; it adds no historical-year cutoff. Arbitrary embedded
+custom VTIMEZONE definitions remain unsupported.
+
 The hosted generator run was `36413953822`; artifact ID `10966906625` had ZIP
 SHA-256
 `a5edaed6b9dde10e96eb29831c58680fac9c11ad17c2bbcfedb400d934769961`. The

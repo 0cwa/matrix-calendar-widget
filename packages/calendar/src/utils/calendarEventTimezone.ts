@@ -27,6 +27,29 @@ type ZoneChange = {
   second: number;
   utcOffset: number;
   prevUtcOffset: number;
+  is_daylight: boolean;
+};
+
+type ExactZoneOffsets = {
+  fromOffset: number;
+  toOffset: number;
+};
+
+type TimezoneObservance = {
+  name: 'STANDARD' | 'DAYLIGHT';
+  component: ICAL.Component;
+  fromOffset: number;
+  toOffset: number;
+};
+
+type CalendarTimezone = {
+  timezone: ICAL.Timezone;
+  observances: TimezoneObservance[];
+  initialOffset: number;
+  exactTransitions?: ZoneChange[];
+  transitionsThroughYear: number;
+  exactOffsetsByTransition?: Map<string, ExactZoneOffsets>;
+  indexedThroughYear: number;
 };
 
 const localDateTimePattern = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::(\d{2}))?$/;
@@ -37,14 +60,17 @@ const localDateTimePattern = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::(\d{2}))?$/;
  */
 export class CalendarEventTimezoneError extends Error {
   constructor(
-    public readonly code: 'unsupported-timezone' | 'invalid-local-time',
+    public readonly code:
+      | 'unsupported-timezone'
+      | 'invalid-local-time'
+      | 'invalid-timezone-data',
   ) {
     super(code);
     this.name = 'CalendarEventTimezoneError';
   }
 }
 
-const timezones = new Map<string, ICAL.Timezone>();
+const timezones = new Map<string, CalendarTimezone>();
 
 export function isCalendarTimezoneSupported(timezoneId: string): boolean {
   return Boolean(getVTimezoneBlock(timezoneId));
@@ -71,9 +97,16 @@ export function calendarLocalDateTimeToUnixMillis(
     return wallMillis - nearbyTransition.change.prevUtcOffset * 1000;
   }
 
-  const wallTime = ICAL.Time.fromJSDate(new Date(wallMillis), true);
-  const instant = wallMillis - timezone.utcOffset(wallTime) * 1000;
-  if (instantToWallMillis(instant, transitions, timezone) !== wallMillis) {
+  const offset = offsetAtWallTime(
+    wallMillis,
+    transitions,
+    transitions[0]?.prevUtcOffset ?? timezone.initialOffset,
+  );
+  const instant = wallMillis - offset * 1000;
+  if (
+    instantToWallMillis(instant, transitions, timezone.initialOffset) !==
+    wallMillis
+  ) {
     throw new CalendarEventTimezoneError('invalid-local-time');
   }
   return instant;
@@ -95,7 +128,11 @@ export function calendarUnixMillisToLocalDateTime(
 ): string {
   const timezone = timezoneFor(timezoneId);
   const transitions = getTransitions(timezone, instantMillis);
-  const offset = offsetAtInstant(instantMillis, transitions, timezone);
+  const offset = offsetAtInstant(
+    instantMillis,
+    transitions,
+    timezone.initialOffset,
+  );
   const local = DateTime.fromMillis(instantMillis + offset * 1000, {
     zone: 'UTC',
   });
@@ -108,7 +145,11 @@ export function calendarUnixMillisToLocalDateTime(
 function timezoneContext(
   local: string,
   timezoneId: string,
-): { wallMillis: number; timezone: ICAL.Timezone; transitions: ZoneChange[] } {
+): {
+  wallMillis: number;
+  timezone: CalendarTimezone;
+  transitions: ZoneChange[];
+} {
   const localMatch = local.match(localDateTimePattern);
   const wall = DateTime.fromISO(local, { zone: 'UTC' });
   if (
@@ -128,7 +169,7 @@ function timezoneContext(
   };
 }
 
-function timezoneFor(timezoneId: string): ICAL.Timezone {
+function timezoneFor(timezoneId: string): CalendarTimezone {
   const cached = timezones.get(timezoneId);
   if (cached) {
     return cached;
@@ -139,21 +180,233 @@ function timezoneFor(timezoneId: string): ICAL.Timezone {
     throw new CalendarEventTimezoneError('unsupported-timezone');
   }
 
+  const timezoneComponent = ICAL.Component.fromString(component);
+  const observances = parseTimezoneObservances(component, timezoneComponent);
   const timezone = new ICAL.Timezone({
-    component: ICAL.Component.fromString(component),
+    component: timezoneComponent,
     tzid: timezoneId,
   });
-  timezones.set(timezoneId, timezone);
-  return timezone;
+  const adapter: CalendarTimezone = {
+    timezone,
+    observances,
+    initialOffset: observances[0].fromOffset,
+    transitionsThroughYear: Number.NEGATIVE_INFINITY,
+    indexedThroughYear: Number.NEGATIVE_INFINITY,
+  };
+  timezones.set(timezoneId, adapter);
+  return adapter;
 }
 
 function getTransitions(
-  timezone: ICAL.Timezone,
+  adapter: CalendarTimezone,
   instantMillis: number,
 ): ZoneChange[] {
   const year = DateTime.fromMillis(instantMillis, { zone: 'UTC' }).year;
-  timezone._ensureCoverage(year + 1);
-  return timezone.changes as ZoneChange[];
+  adapter.timezone._ensureCoverage(year + 1);
+  const changes = adapter.timezone.changes as ZoneChange[];
+  const throughYear =
+    Math.max(year, ...changes.map((change) => change.year)) + 1;
+  if (
+    adapter.exactTransitions &&
+    adapter.transitionsThroughYear >= throughYear
+  ) {
+    return adapter.exactTransitions;
+  }
+  const exactOffsets = exactOffsetsByTransition(adapter, throughYear);
+
+  const transitions = changes
+    .map((change) => {
+      // ical.js 2.2.1 stores UTC offsets only to the minute. Recover the local
+      // transition wall value using its generated offset, then restore the exact
+      // source offset from the corresponding bundled VTIMEZONE observance.
+      const localMillis =
+        transitionMillis(change) + change.prevUtcOffset * 1000;
+      const key = transitionKey(
+        localMillis,
+        change.is_daylight ? 'DAYLIGHT' : 'STANDARD',
+      );
+      const offsets = exactOffsets.get(key);
+      if (!offsets) {
+        throw new CalendarEventTimezoneError('invalid-timezone-data');
+      }
+
+      const exactTransitionMillis = localMillis - offsets.fromOffset * 1000;
+      const date = new Date(exactTransitionMillis);
+      return {
+        year: date.getUTCFullYear(),
+        month: date.getUTCMonth() + 1,
+        day: date.getUTCDate(),
+        hour: date.getUTCHours(),
+        minute: date.getUTCMinutes(),
+        second: date.getUTCSeconds(),
+        utcOffset: offsets.toOffset,
+        prevUtcOffset: offsets.fromOffset,
+        is_daylight: change.is_daylight,
+      };
+    })
+    .sort((left, right) => transitionMillis(left) - transitionMillis(right));
+  adapter.exactTransitions = transitions;
+  adapter.transitionsThroughYear = throughYear;
+  return transitions;
+}
+
+function exactOffsetsByTransition(
+  adapter: CalendarTimezone,
+  throughYear: number,
+): Map<string, ExactZoneOffsets> {
+  if (
+    adapter.exactOffsetsByTransition &&
+    adapter.indexedThroughYear >= throughYear
+  ) {
+    return adapter.exactOffsetsByTransition;
+  }
+
+  const offsetsByTransition = new Map<string, ExactZoneOffsets>();
+  for (const observance of adapter.observances) {
+    const start = observance.component.getFirstPropertyValue('dtstart');
+    if (!(start instanceof ICAL.Time)) {
+      throw new CalendarEventTimezoneError('invalid-timezone-data');
+    }
+
+    const add = (time: ICAL.Time): void => {
+      const key = transitionKey(wallTimeMillis(time), observance.name);
+      const offsets = {
+        fromOffset: observance.fromOffset,
+        toOffset: observance.toOffset,
+      };
+      const existing = offsetsByTransition.get(key);
+      if (
+        existing &&
+        (existing.fromOffset !== offsets.fromOffset ||
+          existing.toOffset !== offsets.toOffset)
+      ) {
+        throw new CalendarEventTimezoneError('invalid-timezone-data');
+      }
+      offsetsByTransition.set(key, offsets);
+    };
+
+    const recurrence = observance.component.getFirstPropertyValue('rrule');
+    const rdates = observance.component.getAllProperties('rdate');
+    if (!recurrence && rdates.length === 0) {
+      add(start);
+      continue;
+    }
+
+    for (const rdate of rdates) {
+      for (const value of rdate.getValues()) {
+        if (!(value instanceof ICAL.Time)) {
+          throw new CalendarEventTimezoneError('invalid-timezone-data');
+        }
+        add(value.isDate ? start : value);
+      }
+    }
+
+    if (recurrence) {
+      if (!(recurrence instanceof ICAL.Recur)) {
+        throw new CalendarEventTimezoneError('invalid-timezone-data');
+      }
+      const iterator = recurrence.iterator(start);
+      let occurrence: ICAL.Time | null;
+      while ((occurrence = iterator.next())) {
+        if (occurrence.year > throughYear) {
+          break;
+        }
+        add(occurrence);
+      }
+    }
+  }
+
+  adapter.exactOffsetsByTransition = offsetsByTransition;
+  adapter.indexedThroughYear = throughYear;
+  return offsetsByTransition;
+}
+
+function parseTimezoneObservances(
+  rawTimezone: string,
+  component: ICAL.Component,
+): TimezoneObservance[] {
+  const lines = rawTimezone.replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
+  const rawObservances: { name: 'STANDARD' | 'DAYLIGHT'; body: string[] }[] =
+    [];
+  let current: { name: 'STANDARD' | 'DAYLIGHT'; body: string[] } | undefined;
+
+  for (const line of lines) {
+    const begin = line.match(/^BEGIN:(STANDARD|DAYLIGHT)$/);
+    if (begin) {
+      if (current) {
+        throw new CalendarEventTimezoneError('invalid-timezone-data');
+      }
+      current = { name: begin[1] as 'STANDARD' | 'DAYLIGHT', body: [] };
+      continue;
+    }
+    if (current && line === `END:${current.name}`) {
+      rawObservances.push(current);
+      current = undefined;
+      continue;
+    }
+    if (current) {
+      current.body.push(line);
+    }
+  }
+  if (current) {
+    throw new CalendarEventTimezoneError('invalid-timezone-data');
+  }
+
+  const subcomponents = component.getAllSubcomponents();
+  if (
+    rawObservances.length === 0 ||
+    rawObservances.length !== subcomponents.length
+  ) {
+    throw new CalendarEventTimezoneError('invalid-timezone-data');
+  }
+
+  return rawObservances.map(({ name, body }, index) => {
+    const subcomponent = subcomponents[index];
+    if (subcomponent.name.toUpperCase() !== name) {
+      throw new CalendarEventTimezoneError('invalid-timezone-data');
+    }
+    return {
+      name,
+      component: subcomponent,
+      fromOffset: parseRawOffset(body, 'TZOFFSETFROM'),
+      toOffset: parseRawOffset(body, 'TZOFFSETTO'),
+    };
+  });
+}
+
+function parseRawOffset(lines: string[], propertyName: string): number {
+  const values = lines
+    .filter((line) => line.startsWith(`${propertyName}:`))
+    .map((line) => line.slice(propertyName.length + 1));
+  if (values.length !== 1) {
+    throw new CalendarEventTimezoneError('invalid-timezone-data');
+  }
+  const match = values[0].match(/^([+-])(\d{2})(\d{2})(\d{2})?$/);
+  if (!match) {
+    throw new CalendarEventTimezoneError('invalid-timezone-data');
+  }
+  const hours = Number(match[2]);
+  const minutes = Number(match[3]);
+  const seconds = Number(match[4] ?? '0');
+  if (hours > 23 || minutes > 59 || seconds > 59) {
+    throw new CalendarEventTimezoneError('invalid-timezone-data');
+  }
+  const magnitude = hours * 3600 + minutes * 60 + seconds;
+  return match[1] === '-' ? -magnitude : magnitude;
+}
+
+function transitionKey(
+  localMillis: number,
+  name: 'STANDARD' | 'DAYLIGHT',
+): string {
+  return `${localMillis}|${name}`;
+}
+
+function wallTimeMillis(time: ICAL.Time): number {
+  const date = new Date(0);
+  date.setUTCFullYear(time.year, time.month - 1, time.day);
+  date.setUTCHours(time.hour, time.minute, time.second, 0);
+  return date.getTime();
 }
 
 function transitionMillis(change: ZoneChange): number {
@@ -189,15 +442,28 @@ function findLocalTransition(
   return undefined;
 }
 
+function offsetAtWallTime(
+  wallMillis: number,
+  transitions: ZoneChange[],
+  initialOffset: number,
+): number {
+  let offset = initialOffset;
+  for (const change of transitions) {
+    if (transitionMillis(change) + change.utcOffset * 1000 > wallMillis) {
+      break;
+    }
+    offset = change.utcOffset;
+  }
+  return offset;
+}
+
 function offsetAtInstant(
   instantMillis: number,
   transitions: ZoneChange[],
-  timezone: ICAL.Timezone,
+  initialOffset: number,
 ): number {
   const first = transitions[0];
-  let offset = first
-    ? first.prevUtcOffset
-    : timezone.utcOffset(ICAL.Time.fromJSDate(new Date(instantMillis), true));
+  let offset = first ? first.prevUtcOffset : initialOffset;
 
   for (const change of transitions) {
     if (transitionMillis(change) > instantMillis) {
@@ -211,9 +477,10 @@ function offsetAtInstant(
 function instantToWallMillis(
   instantMillis: number,
   transitions: ZoneChange[],
-  timezone: ICAL.Timezone,
+  initialOffset: number,
 ): number {
   return (
-    instantMillis + offsetAtInstant(instantMillis, transitions, timezone) * 1000
+    instantMillis +
+    offsetAtInstant(instantMillis, transitions, initialOffset) * 1000
   );
 }
