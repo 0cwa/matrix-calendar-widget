@@ -96,6 +96,10 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [ ] Organizer/attendee round-trip.
 - [ ] Attachments/conference properties where safely interoperable.
 
+The recurring-resource contract uses the hosted CI stack pinned to Synapse
+v1.161.0 and Radicale 3.8.0.0 with `radicale_auth_matrix`. A passing result
+validates this stack only; the broader issue #6 criteria and M5 exit remain open.
+
 **Exit:** common recurring calendars round-trip with mainstream CalDAV clients.
 
 ## M6 — Matrix team features and reminders
