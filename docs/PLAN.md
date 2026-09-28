@@ -91,9 +91,14 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 
 ## M5 — Recurrence and iCalendar completeness
 
-- [ ] Preserve master floating DATE-TIME endpoints through codec, editor, and
-      viewer-local display/filtering (ADR023); PR review and hosted validation
-      pending.
+- [x] Preserve master floating DATE-TIME endpoints through codec parsing and
+      round trips, editor, viewer-local display, and in-memory range filtering
+      (ADR023; PR #120).
+- [x] Bundle generated IANA 2026d VTIMEZONE data with pinned provenance and
+      lookup regressions (PR #121).
+- [ ] Make server-side CalDAV visible-range queries select floating events
+      according to the viewer's timezone. The pinned Radicale 3.8.0.0 ignores
+      `CALDAV:timezone`; do not send that unsupported query child.
 - [ ] RRULE editor based on inherited NeoDateFix recurrence UI.
 - [ ] RDATE / EXDATE.
 - [ ] RECURRENCE-ID instance overrides.
@@ -113,17 +118,31 @@ The CalDAV codec exposes a read-only domain view of master RRULE, RDATE
 detached instances with their original RECURRENCE-ID, explicit DTEND or
 preserved RFC DURATION components, and status. Recurrence DATE-TIME values
 retain their DATE, named-TZID, UTC, or floating kind and exact local wall time;
-viewer-local occurrence expansion and duration arithmetic remain downstream
-work (ADR023). Master floating DTSTART and DTEND values use explicit per-endpoint
-tags and preserve their local wall time without TZID or UTC conversion. The
-widget displays all timed events in the viewer's local timezone: floating times
-are interpreted there, while named-TZID and UTC times keep their instant and
-are converted from their saved zone. This applies to details, lists, visible
-and accessible calendar-cell labels, grid sorting, and in-memory range
-filtering. The editor shows each endpoint's local wall time and preserves
-differing endpoint kinds/zones on timing edits; non-timing edits preserve the
-original resource and floating timing edits serialize endpoints without TZID
-or a UTC marker.
+viewer-local recurrence occurrence projection and duration arithmetic remain
+downstream work (ADR023). PR #120 implements master floating DTSTART and DTEND
+as independent endpoint tags, preserving local wall time without TZID or UTC
+conversion. The widget displays timed events in the viewer's local timezone:
+floating times are interpreted there, while named-TZID and UTC times keep their
+instant and are converted from their saved zone. This covers details, lists,
+visible and accessible calendar-cell labels, grid sorting, and the in-memory
+range filter. The editor preserves each endpoint's local value and kind on
+timing edits; non-timing edits preserve the original resource, and floating
+timing edits serialize without TZID or a UTC marker.
+
+The in-memory filter is distinct from CalDAV query filtering. The current
+server query sends UTC time-range bounds, and pinned Radicale 3.8.0.0 ignores
+`CALDAV:timezone`; viewer-local floating-event selection at that query boundary
+remains pending. Do not send the unsupported query child. Collection
+`Calendar.timezone` editing remains deferred under M4; this event-level behavior
+does not read or write collection timezone metadata.
+
+PR #121 adds the `@matrix-calendar-widget/ical-timezones` lookup package from
+IANA Time Zone Database 2026d. See
+[`docs/timezones-ical-data.md`](timezones-ical-data.md) and
+`packages/ical-timezones/src/data/provenance.json` for the source checksum and
+generator inputs. Package tests verify the committed data hash and selected
+historical and current offsets. This verifies the bundle, not the broader
+application DST suite or recurrence expansion.
 Ordinary master-field patches preserve all VEVENT components, VTIMEZONE, and
 unknown properties. The codec continues to reject master events without
 DTEND. Recurrence editing and mainstream-client interoperability remain open.

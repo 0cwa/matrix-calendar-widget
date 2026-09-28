@@ -44,13 +44,41 @@ fields and has no timezone until an application interprets it.
 4. Recurrence editing, `RANGE` handling, and recurrence expansion remain out
    of scope.
 
+## Implementation status and boundaries
+
+PR #120 implements master floating parsing, exact local wall-time round trips,
+title-only and timing edits, viewer-local presentation, and the in-memory
+visible-range filter. The in-memory filter applies only to events already
+returned by the repository; it does not establish viewer-local filtering by a
+CalDAV server.
+
+The current CalDAV `calendar-query` sends UTC range bounds without a viewer-zone
+context. The pinned Radicale 3.8.0.0 server ignores `CALDAV:timezone`, so
+viewer-local floating-event selection at the server query boundary remains
+unimplemented. Do not add that unsupported query child for this server. A
+supported, tested server-query strategy remains separate work. Viewer-local
+recurrence occurrence projection and duration expansion also remain
+unimplemented.
+
+PR #121 adds the `@matrix-calendar-widget/ical-timezones` package generated
+from IANA Time Zone Database 2026d. Its source and output provenance is recorded
+in `docs/timezones-ical-data.md` and
+`packages/ical-timezones/src/data/provenance.json`; package tests verify the
+data hash and selected historical/current timezone offsets. This data evidence
+does not complete the broader application DST and named-timezone regression
+suite or make CalDAV queries viewer-local.
+
+Collection `Calendar.timezone` editing remains deferred under M4. Viewer-local
+event interpretation does not read or write that collection property.
+
 ## Consequences
 
 - Master and recurrence readers preserve floating wall time without binding
   it to the server's timezone or replacing it with a UTC value.
 - The typed master-event widget shows timed values in the viewer's local
-  timezone, resolves floating values there, and filters by their interpreted
-  instants while preserving source zones and floating values on writes.
+  timezone, resolves floating values there, and filters already-loaded events
+  by their interpreted instants in memory while preserving source zones and
+  floating values on writes.
 - Duration-based recurrence timing retains enough information for a later
   expander to distinguish nominal calendar weeks/days from exact time units
   and account for timezone transitions.
