@@ -1,4 +1,8 @@
 #!/bin/sh
+unset PASSWORD_INPUT
+PASSWORD_INPUT=${BOT_PASSWORD-}
+unset BOT_PASSWORD
+
 while [ "$(curl -k -sw '%{http_code}' "$HOMESERVER"/_matrix/client/versions -o /dev/null)" -ne 200 ]; do
   sleep 1;
 done
@@ -6,16 +10,16 @@ response=$(curl -k --write-out '%{http_code}' --silent --output /dev/null -X GET
 if [ "$response" = 400 ]; then
     echo "Bot user already exists"
 else
-  case "$BOT_PASSWORD" in
-    *[![:space:]]*) ;;
-    *)
+  case "$PASSWORD_INPUT" in
+    ''|[[:space:]]*|*[[:space:]])
+      unset PASSWORD_INPUT
       echo "Failed to create Matrix bot account" >&2
       exit 1
       ;;
+    *)
+      ;;
   esac
   echo "Will create User $USERTOCREATE on $HOMESERVER"
-  PASSWORD_INPUT=$BOT_PASSWORD
-  unset BOT_PASSWORD
   if ! printf '%s' "$PASSWORD_INPUT" | register_new_matrix_user -a -u "$USERTOCREATE" --password-file /dev/stdin -c /data/homeserver.yaml "$HOMESERVER" >/dev/null 2>&1; then
     unset PASSWORD_INPUT
     echo "Failed to create Matrix bot account" >&2
@@ -23,4 +27,5 @@ else
   fi
   unset PASSWORD_INPUT
 fi
+unset PASSWORD_INPUT
 exit 0

@@ -10,6 +10,9 @@ trap 'rm -rf "$temp_dir"' EXIT HUP INT TERM
 mkdir -p "$temp_dir/bin" "$temp_dir/work"
 cat > "$temp_dir/bin/curl" <<'EOF'
 #!/bin/sh
+if [ "${BOT_PASSWORD+x}" = x ] || env | grep -F 'password-canary' >/dev/null; then
+  : > "$TEST_CAPTURE_DIR/curl-has-password-env"
+fi
 case "$*" in
   *"/_matrix/client/versions"*) printf 200 ;;
   *"/_matrix/client/r0/register/available"*) printf 200 ;;
@@ -38,11 +41,16 @@ EOF
 cat > "$temp_dir/bin/python3" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "$TEST_CAPTURE_DIR/python-args"
+if [ "${BOT_PASSWORD+x}" = x ] || env | grep -F 'password-canary' >/dev/null; then
+  : > "$TEST_CAPTURE_DIR/python-has-password-env"
+fi
 case "$*" in
   *json.dumps*)
     if [ "${JSON_SERIALIZATION_FAILURE:-0}" = 1 ]; then
       exit 1
     fi
+    cat > "$TEST_CAPTURE_DIR/python-serializer-input"
+    exec "$REAL_PYTHON" "$@" < "$TEST_CAPTURE_DIR/python-serializer-input"
     ;;
 esac
 exec "$REAL_PYTHON" "$@"
@@ -107,8 +115,12 @@ if grep -F 'password-canary' "$temp_dir/curl-args" "$temp_dir/python-args" >/dev
   printf 'login password appeared in a child command argument\n' >&2
   exit 1
 fi
-if [ -e "$temp_dir/curl-has-password-env" ]; then
-  printf 'login password remained in the curl environment\n' >&2
+if [ -e "$temp_dir/curl-has-password-env" ] || [ -e "$temp_dir/python-has-password-env" ]; then
+  printf 'login password remained in a child environment\n' >&2
+  exit 1
+fi
+if ! printf '%s' 'password-canary' | cmp - "$temp_dir/python-serializer-input"; then
+  printf 'Python serializer did not receive the password on stdin\n' >&2
   exit 1
 fi
 if [ "$(stat -c '%a' "$temp_dir/work/.env")" != 600 ]; then
@@ -158,7 +170,7 @@ assert_no_credentials "$serialization_failure"
 grep -Fx 'Login failed. Check your credentials and try again.' <<EOF >/dev/null
 $serialization_failure
 EOF
-if [ -e "$temp_dir/work/.env" ] || [ -e "$temp_dir/curl-args" ]; then
+if [ -e "$temp_dir/work/.env" ] || [ -e "$temp_dir/curl-args" ] || [ -e "$temp_dir/python-has-password-env" ]; then
   printf 'serialization failure left credentials or invoked curl\n' >&2
   exit 1
 fi
@@ -197,18 +209,32 @@ if [ -e "$temp_dir/registration-has-password-env" ]; then
   printf 'registration password remained in the child environment\n' >&2
   exit 1
 fi
+if [ -e "$temp_dir/curl-has-password-env" ]; then
+  printf 'registration password remained in the curl environment\n' >&2
+  exit 1
+fi
 
-rm -f "$temp_dir/registration-args"
-if whitespace_failure=$(PATH="$temp_dir/bin:$PATH" TEST_CAPTURE_DIR="$temp_dir" USERTOCREATE=bot HOMESERVER=https://matrix.example \
-  BOT_PASSWORD='   ' sh "$chart_dir/files/shell-tools/create_bot_account.sh" 2>&1); then
-  printf 'whitespace-only registration password unexpectedly succeeded\n' >&2
-  exit 1
-fi
-assert_no_credentials "$whitespace_failure"
-if [ -e "$temp_dir/registration-args" ]; then
-  printf 'registration command ran with a whitespace-only password\n' >&2
-  exit 1
-fi
+run_invalid_registration_password() {
+  invalid_password=$1
+  rm -f "$temp_dir/registration-args"
+  if invalid_output=$(PATH="$temp_dir/bin:$PATH" TEST_CAPTURE_DIR="$temp_dir" USERTOCREATE=bot HOMESERVER=https://matrix.example \
+    BOT_PASSWORD="$invalid_password" sh "$chart_dir/files/shell-tools/create_bot_account.sh" 2>&1); then
+    printf 'invalid registration password unexpectedly succeeded\n' >&2
+    return 1
+  fi
+  assert_no_credentials "$invalid_output"
+  grep -Fx 'Failed to create Matrix bot account' <<EOF >/dev/null
+$invalid_output
+EOF
+  if [ -e "$temp_dir/registration-args" ]; then
+    printf 'registration command ran with an invalid password\n' >&2
+    return 1
+  fi
+}
+
+run_invalid_registration_password '   '
+run_invalid_registration_password ' password-canary'
+run_invalid_registration_password 'password-canary '
 
 if account_failure=$(PATH="$temp_dir/bin:$PATH" TEST_CAPTURE_DIR="$temp_dir" REGISTRATION_FAILURE=1 USERTOCREATE=bot HOMESERVER=https://matrix.example \
   BOT_PASSWORD=password-canary sh "$chart_dir/files/shell-tools/create_bot_account.sh" 2>&1); then

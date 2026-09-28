@@ -1,5 +1,9 @@
 #!/bin/sh
 
+unset PASSWORD_INPUT
+PASSWORD_INPUT=${BOT_PASSWORD-}
+unset BOT_PASSWORD
+
 ENV_FILE="${WORK_DIR:-/work-dir}/.env"
 umask 077
 TEMP_ENV_FILE=
@@ -17,12 +21,13 @@ if ! rm -f "$ENV_FILE" 2>/dev/null; then
 fi
 
 # Serialize the body before the curl pipeline so POSIX sh can check Python's
-# status independently of curl's status.
-if ! LOGIN_PAYLOAD=$(python3 -c 'import json, os, sys; sys.stdout.write(json.dumps({"type": "m.login.password", "user": os.environ["USERTOCREATE"], "password": os.environ["BOT_PASSWORD"]}))' 2>/dev/null); then
+# status independently of curl's status. The password reaches Python on stdin.
+if ! LOGIN_PAYLOAD=$(printf '%s' "$PASSWORD_INPUT" | USERTOCREATE="$USERTOCREATE" python3 -c 'import json, os, sys; sys.stdout.write(json.dumps({"type": "m.login.password", "user": os.environ["USERTOCREATE"], "password": sys.stdin.read()}))' 2>/dev/null); then
+    unset PASSWORD_INPUT
     echo "Login failed. Check your credentials and try again." >&2
     exit 1
 fi
-unset BOT_PASSWORD
+unset PASSWORD_INPUT
 
 # Get the login token. The JSON body travels on stdin, not in curl's argv.
 if ! LOGIN_RESPONSE=$(printf '%s' "$LOGIN_PAYLOAD" | curl -s -w '\n%{http_code}' -X POST -H "Content-Type: application/json" --data-binary @- "${HOMESERVER}/_matrix/client/r0/login"); then
