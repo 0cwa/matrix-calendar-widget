@@ -83,7 +83,7 @@ jobs:
 
           if [[ "$translation_status" -ne 0 ]]; then
             echo "Widget translation extraction failed; showing generated locale diff."
-            git status --short --untracked-files=all
+            git status --short --untracked-files=all -- matrix-calendar-widget/public/locales
             git diff --no-ext-diff -- matrix-calendar-widget/public/locales
 
             mapfile -d '' untracked_locale_paths < <(
