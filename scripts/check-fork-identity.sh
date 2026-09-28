@@ -17,6 +17,15 @@ then
   failed=1
 fi
 
+# Development chart defaults must not target the inherited Nordeck tenant.
+# Keep this check scoped to deployment inputs; provenance and history docs may
+# legitimately mention upstream names and URLs.
+if grep -RInE 'nordeck\.io' charts dev
+then
+  echo "inherited Nordeck tenant hostname found in chart or dev configuration" >&2
+  failed=1
+fi
+
 if grep -RIn 'NeoDateFix'   matrix-calendar-widget matrix-calendar-server e2e charts   --exclude='CHANGELOG.md'   --exclude='NOTICE'
 then
   echo "legacy NeoDateFix branding found in active runtime/test/deployment files" >&2
