@@ -520,6 +520,55 @@ describe('ICalendarEventCodec', () => {
     ]);
   });
 
+  it('preserves UTC recurrence dates and detached identities', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-utc.ics',
+      fixture('recurrence-utc.ics'),
+    );
+
+    expect(parsed.event.recurrence).toEqual({
+      rrule: 'FREQ=WEEKLY;COUNT=2',
+      rdates: [
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-11-01T14:00:00',
+            timezone: 'UTC',
+          },
+        },
+      ],
+      overrides: [
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-11-01T14:00:00',
+              timezone: 'UTC',
+            },
+          },
+          timing: {
+            type: 'end',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-11-01T16:00:00',
+                timezone: 'UTC',
+              },
+            },
+            end: {
+              type: 'date-time',
+              value: {
+                local: '2026-11-01T17:00:00',
+                timezone: 'UTC',
+              },
+            },
+          },
+        },
+      ],
+    });
+  });
+
   it('preserves unknown calendar and VEVENT properties on patch', () => {
     const parsed = codec.parse(
       'team',

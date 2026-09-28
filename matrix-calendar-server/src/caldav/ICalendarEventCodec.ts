@@ -416,7 +416,7 @@ function readDateTimeValue(
     };
   }
 
-  if (value.zone?.tzid === 'Z') {
+  if (value.zone === ICAL.Timezone.utcTimezone) {
     return {
       type: 'date-time',
       value: { local: formatLocalDateTime(value), timezone: 'UTC' },

@@ -10,6 +10,7 @@ These fixtures are deliberately small and human-readable. They define interopera
 | `recurrence-override.ics`          | RRULE/RDATE/EXDATE and moved/cancelled instances         |
 | `recurrence-floating-duration.ics` | Floating recurrence values and duration units across DST |
 | `recurrence-floating-override.ics` | Floating RECURRENCE-ID and detached DTSTART duration     |
+| `recurrence-utc.ics`               | UTC RDATE and detached RECURRENCE-ID values              |
 | `alarm.ics`                        | standard VALARM                                          |
 | `attendees.ics`                    | organizer, attendee roles and PARTSTAT                   |
 | `unknown-properties.ics`           | unknown/vendor properties that must survive round-trip   |
