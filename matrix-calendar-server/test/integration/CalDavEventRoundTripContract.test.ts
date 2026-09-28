@@ -269,12 +269,8 @@ function expectRecurringResourceProperties(
   expect(icalendar).toContain(
     'RECURRENCE-ID;TZID=Europe/Stockholm:20261019T140000',
   );
-  expect(icalendar).toContain(
-    'DTSTART;TZID=Europe/Stockholm:20261019T140000',
-  );
-  expect(icalendar).toContain(
-    'DTEND;TZID=Europe/Stockholm:20261019T150000',
-  );
+  expect(icalendar).toContain('DTSTART;TZID=Europe/Stockholm:20261019T140000');
+  expect(icalendar).toContain('DTEND;TZID=Europe/Stockholm:20261019T150000');
   expect(icalendar).toContain('STATUS:CANCELLED');
   expect(icalendar).toContain('BEGIN:VTIMEZONE');
   expect(icalendar).toContain(
