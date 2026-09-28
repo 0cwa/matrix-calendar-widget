@@ -74,41 +74,7 @@ jobs:
         run: yarn workspace @matrix-calendar-widget/widget lint
 
       - name: Check widget translations
-        shell: bash
-        run: |
-          set +e
-          yarn workspace @matrix-calendar-widget/widget translate --ci
-          translation_status=$?
-          set -e
-
-          if [[ "$translation_status" -ne 0 ]]; then
-            echo "Widget translation extraction failed; showing generated locale diff."
-            git status --short --untracked-files=all -- matrix-calendar-widget/public/locales
-            git diff --no-ext-diff -- matrix-calendar-widget/public/locales
-
-            mapfile -d '' untracked_locale_paths < <(
-              git ls-files --others --exclude-standard -z -- matrix-calendar-widget/public/locales
-            )
-            for locale_path in "${untracked_locale_paths[@]}"; do
-              git diff --no-index -- /dev/null "$locale_path" || true
-            done
-          fi
-
-          mapfile -d '' changed_locale_paths < <(
-            git diff --name-only -z -- matrix-calendar-widget/public/locales
-          )
-          if ((${#changed_locale_paths[@]} > 0)); then
-            git restore --worktree -- "${changed_locale_paths[@]}"
-          fi
-
-          mapfile -d '' untracked_locale_paths < <(
-            git ls-files --others --exclude-standard -z -- matrix-calendar-widget/public/locales
-          )
-          if ((${#untracked_locale_paths[@]} > 0)); then
-            rm -- "${untracked_locale_paths[@]}"
-          fi
-
-          exit "$translation_status"
+        run: yarn workspace @matrix-calendar-widget/widget translate --ci --dry-run
 
       - name: Test widget
         run: yarn workspace @matrix-calendar-widget/widget test:all
