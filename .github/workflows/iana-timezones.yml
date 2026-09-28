@@ -26,7 +26,7 @@ jobs:
   generate:
     name: Generate verified IANA 2026d data
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       TZDB_VERSION: 2026d
       TZDB_SHA512: 1a27de5af50bbc28a2f64c506ab3678b09d9e5ab6c118f39eb38bb823aa8f57069bf5e465848e71df8274c6b8bcd0fc736a88107e5792d816a1db5d867cbc219
@@ -35,22 +35,25 @@ jobs:
 
     steps:
       - name: Check out this repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Node.js 22
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
       - name: Check out pinned timezone generator
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: add2cal/timezones-ical-library
           ref: 07ada5679043d60c58d7f5c8ea5825154e0282e2
           path: upstream-timezones-ical-library
           persist-credentials: false
+
+      - name: Install locked workspace dependencies for VTIMEZONE validation
+        run: yarn install --frozen-lockfile --ignore-scripts --non-interactive
 
       - name: Verify source pin and fetch IANA archive
         env:
@@ -70,6 +73,17 @@ jobs:
           VERIFIED_TZDATA_ARCHIVE: ${{ runner.temp }}/tzdata2026d.tar.gz
         working-directory: upstream-timezones-ical-library
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          updater = Path("scripts/update-tzdata.sh")
+          source = updater.read_text()
+          default_call = "  sudo ./vzic --olson-dir tzdata --output-dir output"
+          pure_call = "  sudo ./vzic --pure --olson-dir tzdata --output-dir output"
+          if source.count(default_call) != 1:
+              raise SystemExit("pinned updater no longer has the expected VZIC call")
+          updater.write_text(source.replace(default_call, pure_call))
+          PY
           sudo apt-get update
           mkdir -p "$RUNNER_TEMP/verified-bin"
           cat > "$RUNNER_TEMP/verified-bin/wget" <<'SH'
@@ -94,11 +108,12 @@ jobs:
           IANA_ARCHIVE: ${{ runner.temp }}/tzdata2026d.tar.gz
           IANA_SOURCE_ROOT: ${{ runner.temp }}/iana-source
           TIMEZONE_LIBRARY_ROOT: ${{ github.workspace }}/upstream-timezones-ical-library
+          TIMEZONE_RAW_DATA_ROOT: ${{ github.workspace }}/upstream-timezones-ical-library/demo/public/api
           TIMEZONE_ARTIFACT_DIR: ${{ runner.temp }}/iana-timezone-artifact
         run: node scripts/generate-iana-vtimezones.mjs
 
       - name: Upload generated runtime data and provenance
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: iana-vtimezones-2026d
           path: ${{ runner.temp }}/iana-timezone-artifact/
