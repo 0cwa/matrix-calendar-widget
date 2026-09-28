@@ -48,6 +48,9 @@ describe('calendar event form adapter', () => {
       start: '2026-09-23T09:00',
       end: '2026-09-23T10:00',
       timezone: 'Europe/Stockholm',
+      timedKind: 'zoned',
+      timingChanged: false,
+      timezoneChanged: false,
     });
   });
 
@@ -153,9 +156,9 @@ describe('calendar event form adapter', () => {
     expect(
       validateCalendarEventForm({ ...values, timezone: 'not-an-iana-zone' }),
     ).toBeUndefined();
-    expect(calendarEventPatchFromForm({ ...values, title: 'Renamed' })).not.toHaveProperty(
-      'timing',
-    );
+    expect(
+      calendarEventPatchFromForm({ ...values, title: 'Renamed' }),
+    ).not.toHaveProperty('timing');
 
     const timingPatch = calendarEventPatchFromForm({
       ...values,
@@ -233,7 +236,10 @@ describe('calendar event form adapter', () => {
     expect(values.timedKind).toBe('mixed');
     expect(validateCalendarEventForm(values)).toBeUndefined();
     expect(
-      calendarEventPatchFromForm({ ...values, title: 'Renamed two-zone event' }),
+      calendarEventPatchFromForm({
+        ...values,
+        title: 'Renamed two-zone event',
+      }),
     ).not.toHaveProperty('timing');
     expect(
       calendarEventPatchFromForm({

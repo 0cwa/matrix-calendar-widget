@@ -15,9 +15,7 @@
  */
 
 export * from './calendarUtils';
-export {
-  calendarEventTimedDateTimeToDateTime,
-} from './calendarEventTimedDateTime';
+export { calendarEventTimedDateTimeToDateTime } from './calendarEventTimedDateTime';
 export { formatICalDate, parseICalDate, toISOString } from './dateTimeUtils';
 export { formatRRuleText, getOrdinalLabel, parseRRule } from './format';
 export {

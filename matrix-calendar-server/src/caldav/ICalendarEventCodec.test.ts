@@ -134,14 +134,13 @@ describe('ICalendarEventCodec', () => {
 
     expect(start.getFirstParameter('tzid')).toBeNull();
     expect(end.getFirstParameter('tzid')).toBeNull();
-    expect(start.getFirstValue().toString()).toBe('2026-09-23T09:00:00');
-    expect(end.getFirstValue().toString()).toBe('2026-09-23T10:00:00');
+    expect(start.getFirstValue()?.toString()).toBe('2026-09-23T09:00:00');
+    expect(end.getFirstValue()?.toString()).toBe('2026-09-23T10:00:00');
     expect(vevent.getFirstPropertyValue('x-client-marker')).toBe(
       'preserve-floating',
     );
     expect(
-      codec.parse('team', 'floating-timed.ics', encoded.icalendar).event
-        .timing,
+      codec.parse('team', 'floating-timed.ics', encoded.icalendar).event.timing,
     ).toEqual(parsed.event.timing);
   });
 
@@ -159,16 +158,16 @@ describe('ICalendarEventCodec', () => {
         end: { type: 'floating', local: '2026-09-24T12:15:00' },
       },
     });
-    const vevent = ICAL.Component.fromString(encoded.icalendar).getFirstSubcomponent(
-      'vevent',
-    )!;
+    const vevent = ICAL.Component.fromString(
+      encoded.icalendar,
+    ).getFirstSubcomponent('vevent')!;
     const start = vevent.getFirstProperty('dtstart')!;
     const end = vevent.getFirstProperty('dtend')!;
 
     expect(start.getFirstParameter('tzid')).toBeNull();
     expect(end.getFirstParameter('tzid')).toBeNull();
-    expect(start.getFirstValue().toString()).toBe('2026-09-24T11:30:00');
-    expect(end.getFirstValue().toString()).toBe('2026-09-24T12:15:00');
+    expect(start.getFirstValue()?.toString()).toBe('2026-09-24T11:30:00');
+    expect(end.getFirstValue()?.toString()).toBe('2026-09-24T12:15:00');
     expect(encoded.icalendar).not.toContain('TZID=');
     expect(encoded.icalendar).not.toMatch(/DTSTART[^\r\n]*Z/);
     expect(encoded.icalendar).not.toMatch(/DTEND[^\r\n]*Z/);
@@ -258,9 +257,9 @@ describe('ICalendarEventCodec', () => {
     expect(vevent.getFirstProperty('dtstart')?.getFirstParameter('tzid')).toBe(
       null,
     );
-    expect(
-      vevent.getFirstProperty('dtend')?.getFirstParameter('tzid'),
-    ).toBe('Europe/Stockholm');
+    expect(vevent.getFirstProperty('dtend')?.getFirstParameter('tzid')).toBe(
+      'Europe/Stockholm',
+    );
     expect(
       codec.parse('team', 'mixed-master.ics', timingPatch.icalendar).event
         .timing,

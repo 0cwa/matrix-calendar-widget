@@ -147,18 +147,20 @@ describe('<CalendarEventEditorDialog />', () => {
     });
   });
 
-  it('saves floating events through title-only and timing edits without adding a zone', async () => {
+  it('preserves floating timing on a title-only save', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
       events: [floatingEvent],
     });
     const onClose = vi.fn();
+    const onSaved = vi.fn();
 
-    const { rerender } = render(
+    render(
       <CalendarEventEditorDialog
         calendars={[calendar]}
         event={floatingEvent}
         onClose={onClose}
+        onSaved={onSaved}
         open
       />,
       { wrapper: createWrapper(repository) },
@@ -172,38 +174,51 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.type(title, 'Floating planning renamed');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
-    await expect(repository.getEvent('team', 'floating')).resolves.toMatchObject(
-      {
-        title: 'Floating planning renamed',
-        timing: floatingEvent.timing,
-      },
-    );
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(onClose).toHaveBeenCalled();
+    await expect(
+      repository.getEvent('team', 'floating'),
+    ).resolves.toMatchObject({
+      title: 'Floating planning renamed',
+      timing: floatingEvent.timing,
+    });
+  });
 
-    rerender(
+  it('saves floating timing edits without adding a zone', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [floatingEvent],
+    });
+    const onSaved = vi.fn();
+
+    render(
       <CalendarEventEditorDialog
         calendars={[calendar]}
         event={floatingEvent}
-        onClose={onClose}
+        onClose={vi.fn()}
+        onSaved={onSaved}
         open
       />,
+      { wrapper: createWrapper(repository) },
     );
-    const start = screen.getByRole('textbox', { name: 'Start' });
-    const end = screen.getByRole('textbox', { name: 'End' });
+
+    const start = await screen.findByRole('textbox', { name: /^Start/ });
+    const end = screen.getByRole('textbox', { name: /^End/ });
     fireEvent.change(start, { target: { value: '2026-09-23T11:30' } });
     fireEvent.change(end, { target: { value: '2026-09-23T12:15' } });
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(async () => {
-      await expect(repository.getEvent('team', 'floating')).resolves.toMatchObject(
-        {
-          timing: {
-            type: 'timed',
-            start: { type: 'floating', local: '2026-09-23T11:30' },
-            end: { type: 'floating', local: '2026-09-23T12:15' },
-          },
+      expect(onSaved).toHaveBeenCalled();
+      await expect(
+        repository.getEvent('team', 'floating'),
+      ).resolves.toMatchObject({
+        timing: {
+          type: 'timed',
+          start: { type: 'floating', local: '2026-09-23T11:30' },
+          end: { type: 'floating', local: '2026-09-23T12:15' },
         },
-      );
+      });
     });
   });
 

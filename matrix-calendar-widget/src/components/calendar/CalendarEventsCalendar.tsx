@@ -70,6 +70,7 @@ export function CalendarEventsCalendar({
       : undefined;
   const ref = useRef<FullCalendar>(null);
   const buttonsId = useId();
+  const viewerTimezone = DateTime.local().zoneName ?? 'UTC';
 
   const eventMap = useMemo(
     () => new Map(events.map((event) => [calendarEventKey(event), event])),
@@ -82,9 +83,10 @@ export function CalendarEventsCalendar({
         calendarEventToFullCalendarEvent(
           event,
           `${buttonsId}-${normalizeId(calendarEventKey(event))}`,
+          viewerTimezone,
         ),
       ),
-    [buttonsId, events],
+    [buttonsId, events, viewerTimezone],
   );
 
   useEffect(() => {
@@ -113,11 +115,12 @@ export function CalendarEventsCalendar({
         <CalendarEventCell
           buttonLabelId={arg.event.extendedProps['buttonLabelId']}
           event={event}
+          viewerTimezone={viewerTimezone}
           view={view}
         />
       );
     },
-    [eventMap, view],
+    [eventMap, viewerTimezone, view],
   );
 
   const handleEventClick = useCallback(
@@ -175,10 +178,12 @@ export function CalendarEventsCalendar({
 function CalendarEventCell({
   buttonLabelId,
   event,
+  viewerTimezone,
   view,
 }: {
   buttonLabelId: string;
   event: CalendarEvent;
+  viewerTimezone: string;
   view: CalendarViewType;
 }) {
   const { i18n, t } = useTranslation();
@@ -191,6 +196,7 @@ function CalendarEventCell({
     event,
     i18n.language,
     t('calendarEvents.details.allDay', 'All day'),
+    viewerTimezone,
   )}`;
 
   return (
@@ -209,6 +215,7 @@ function CalendarEventCell({
                 <Typography component="span" variant="body2">
                   {calendarEventTimedDateTimeToDateTime(
                     event.timing.start,
+                    viewerTimezone,
                   ).toLocaleString(DateTime.TIME_SIMPLE)}{' '}
                 </Typography>
               )}

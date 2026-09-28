@@ -15,7 +15,7 @@
  */
 
 import { CalendarEvent } from '@matrix-calendar-widget/calendar';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { Settings } from 'luxon';
 import { vi } from 'vitest';
 import { CalendarEventsCalendar } from './CalendarEventsCalendar';
@@ -52,6 +52,26 @@ const zonedEvent: CalendarEvent = {
   },
 };
 
+const newYorkEvent: CalendarEvent = {
+  id: 'new-york',
+  calendarId: 'team',
+  uid: 'new-york@example.test',
+  title: 'New York planning',
+  timing: {
+    type: 'timed',
+    start: {
+      type: 'zoned',
+      local: '2026-09-23T09:00:00',
+      timezone: 'America/New_York',
+    },
+    end: {
+      type: 'zoned',
+      local: '2026-09-23T10:00:00',
+      timezone: 'America/New_York',
+    },
+  },
+};
+
 describe('<CalendarEventsCalendar />', () => {
   it('uses viewer-local floating time for the cell, accessible name, and grid order', async () => {
     const originalZone = Settings.defaultZone;
@@ -77,7 +97,7 @@ describe('<CalendarEventsCalendar />', () => {
     try {
       render(
         <CalendarEventsCalendar
-          events={[zonedEvent, floatingEvent]}
+          events={[zonedEvent, floatingEvent, newYorkEvent]}
           filters={{
             startDate: '2026-09-23T00:00:00+02:00',
             endDate: '2026-09-24T00:00:00+02:00',
@@ -88,15 +108,23 @@ describe('<CalendarEventsCalendar />', () => {
         />,
       );
 
-      expect(await screen.findByText('8:30 AM')).toBeInTheDocument();
+      expect(await screen.findByText(/9:00\sAM/)).toBeInTheDocument();
       const floatingButton = await screen.findByRole('button', {
-        name: 'Floating planning: September 23, 2026 · 8:30 AM–9:30 AM',
+        name: /Floating planning: September 23, 2026 · 9:00\sAM–10:00\sAM/,
       });
       const zonedButton = await screen.findByRole('button', {
-        name: 'Zoned planning: September 23, 2026 · 9:00 AM–10:00 AM',
+        name: /Zoned planning: September 23, 2026 · 9:00\sAM–10:00\sAM/,
       });
+      const newYorkButton = await screen.findByRole('button', {
+        name: /New York planning: September 23, 2026 · 3:00\sPM–4:00\sPM/,
+      });
+      expect(within(newYorkButton).getByText(/^3:00\sPM\s*$/)).toBeVisible();
       expect(
         floatingButton.compareDocumentPosition(zonedButton) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(
+        zonedButton.compareDocumentPosition(newYorkButton) &
           Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
     } finally {

@@ -69,6 +69,26 @@ const floatingEvent: CalendarEvent = {
   },
 };
 
+const newYorkEvent: CalendarEvent = {
+  ...event,
+  id: 'new-york',
+  uid: 'new-york@example.test',
+  title: 'New York planning',
+  timing: {
+    type: 'timed',
+    start: {
+      type: 'zoned',
+      local: '2026-09-23T09:00:00',
+      timezone: 'America/New_York',
+    },
+    end: {
+      type: 'zoned',
+      local: '2026-09-23T10:00:00',
+      timezone: 'America/New_York',
+    },
+  },
+};
+
 function createWrapper(repository: InMemoryCalendarRepository) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
     return (
@@ -85,12 +105,28 @@ describe('<CalendarEventDetailsDialog />', () => {
     Settings.defaultZone = 'Europe/Stockholm';
 
     try {
-      expect(formatCalendarEventTime(floatingEvent, 'en', 'All day')).toBe(
-        'September 23, 2026 · 9:00 AM–10:00 AM',
-      );
+      expect(
+        formatCalendarEventTime(
+          floatingEvent,
+          'en',
+          'All day',
+          'Europe/Stockholm',
+        ).replace(/\u202f/g, ' '),
+      ).toBe('September 23, 2026 · 9:00 AM–10:00 AM');
     } finally {
       Settings.defaultZone = originalZone;
     }
+  });
+
+  it('formats named-zone detail times in the viewer local zone', () => {
+    expect(
+      formatCalendarEventTime(
+        newYorkEvent,
+        'en',
+        'All day',
+        'Europe/Stockholm',
+      ).replace(/\u202f/g, ' '),
+    ).toBe('September 23, 2026 · 3:00 PM–4:00 PM');
   });
 
   it('deletes an event after confirmation', async () => {

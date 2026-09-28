@@ -87,8 +87,8 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 ## M5 — Recurrence and iCalendar completeness
 
 - [ ] Preserve master floating DATE-TIME endpoints through codec, editor, and
-  viewer-local display/filtering (ADR023); PR review and hosted validation
-  pending.
+      viewer-local display/filtering (ADR023); PR review and hosted validation
+      pending.
 - [ ] RRULE editor based on inherited NeoDateFix recurrence UI.
 - [ ] RDATE / EXDATE.
 - [ ] RECURRENCE-ID instance overrides.
@@ -111,11 +111,14 @@ retain their DATE, named-TZID, UTC, or floating kind and exact local wall time;
 viewer-local occurrence expansion and duration arithmetic remain downstream
 work (ADR023). Master floating DTSTART and DTEND values use explicit per-endpoint
 tags and preserve their local wall time without TZID or UTC conversion. The
-widget interprets them in the viewer's local timezone for display, sorting, and
-in-memory range filtering. The editor displays each endpoint's local wall time
-and preserves differing endpoint kinds/zones on timing edits; non-timing edits
-preserve the original resource and floating timing edits serialize endpoints
-without TZID or a UTC marker.
+widget displays all timed events in the viewer's local timezone: floating times
+are interpreted there, while named-TZID and UTC times keep their instant and
+are converted from their saved zone. This applies to details, lists, visible
+and accessible calendar-cell labels, grid sorting, and in-memory range
+filtering. The editor shows each endpoint's local wall time and preserves
+differing endpoint kinds/zones on timing edits; non-timing edits preserve the
+original resource and floating timing edits serialize endpoints without TZID
+or a UTC marker.
 Ordinary master-field patches preserve all VEVENT components, VTIMEZONE, and
 unknown properties. The codec continues to reject master events without
 DTEND. Recurrence editing and mainstream-client interoperability remain open.

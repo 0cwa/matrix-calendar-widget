@@ -18,14 +18,18 @@ import { DateTime } from 'luxon';
 import type { CalendarEventTimedDateTime } from '../model';
 
 /**
- * Interprets floating event times in the viewer's local zone. Zoned event
- * times keep their iCalendar timezone.
+ * Returns the event time in the viewer's local zone. Floating wall times are
+ * interpreted there; zoned values keep their instant and are converted from
+ * their stored iCalendar timezone.
  */
 export function calendarEventTimedDateTimeToDateTime(
   value: CalendarEventTimedDateTime,
   viewerTimezone = DateTime.local().zoneName ?? 'UTC',
 ): DateTime {
-  return DateTime.fromISO(value.local, {
-    zone: value.type === 'floating' ? viewerTimezone : value.timezone,
-  });
+  const storedTimezone =
+    value.type === 'floating' ? viewerTimezone : value.timezone;
+
+  return DateTime.fromISO(value.local, { zone: storedTimezone }).setZone(
+    viewerTimezone,
+  );
 }

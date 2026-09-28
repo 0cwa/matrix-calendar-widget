@@ -73,7 +73,11 @@ const floatingEvent: CalendarEvent = {
 describe('calendar event presentation', () => {
   it('maps timed events to explicit-offset FullCalendar input', () => {
     expect(
-      calendarEventToFullCalendarEvent(timedEvent, 'label-planning'),
+      calendarEventToFullCalendarEvent(
+        timedEvent,
+        'label-planning',
+        'Europe/Stockholm',
+      ),
     ).toMatchObject({
       id: 'team:planning',
       title: 'Team planning',
@@ -104,15 +108,19 @@ describe('calendar event presentation', () => {
 
     try {
       expect(
-        calendarEventToFullCalendarEvent(floatingEvent, 'label-floating'),
+        calendarEventToFullCalendarEvent(
+          floatingEvent,
+          'label-floating',
+          'Europe/Stockholm',
+        ),
       ).toMatchObject({
         start: '2026-09-23T08:30:00.000+02:00',
         end: '2026-09-23T09:30:00.000+02:00',
         allDay: false,
       });
-      expect(groupCalendarEventsByDay([timedEvent, floatingEvent])[0].events).toEqual(
-        [floatingEvent, timedEvent],
-      );
+      expect(
+        groupCalendarEventsByDay([timedEvent, floatingEvent])[0].events,
+      ).toEqual([floatingEvent, timedEvent]);
     } finally {
       Settings.defaultZone = originalZone;
     }
@@ -127,7 +135,7 @@ describe('calendar event presentation', () => {
     expect(filterCalendarEvents([timedEvent], 'missing')).toEqual([]);
   });
 
-  it('groups and sorts events by their calendar-local start day', () => {
+  it('groups and sorts events by their viewer-local start day', () => {
     const groups = groupCalendarEventsByDay([allDayEvent, timedEvent]);
 
     expect(groups.map(({ day }) => day)).toEqual(['2026-09-23', '2026-09-24']);

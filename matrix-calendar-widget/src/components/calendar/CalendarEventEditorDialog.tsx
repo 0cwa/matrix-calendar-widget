@@ -34,7 +34,6 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { DateTime } from 'luxon';
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -43,6 +42,7 @@ import {
   calendarEventPatchFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
+  validateCalendarEventForm,
   useCalendarRepository,
   useCreateCalendarEvent,
   useUpdateCalendarEvent,
@@ -131,9 +131,7 @@ export function CalendarEventEditorDialog({
           ? {
               ...current,
               [field]: change.target.value,
-              ...(field === 'start' ||
-              field === 'end' ||
-              field === 'timezone'
+              ...(field === 'start' || field === 'end' || field === 'timezone'
                 ? { timingChanged: true }
                 : {}),
               ...(field === 'timezone' ? { timezoneChanged: true } : {}),
@@ -442,78 +440,6 @@ export function CalendarEventEditorDialog({
       </form>
     </Dialog>
   );
-}
-
-export type CalendarEventValidationError =
-  | 'title-required'
-  | 'invalid-range'
-  | 'invalid-timezone';
-
-export function validateCalendarEventForm(
-  values: CalendarEventFormValues,
-): CalendarEventValidationError | undefined {
-  if (!values.title.trim()) {
-    return 'title-required';
-  }
-
-  if (values.timingType === 'all-day') {
-    const start = DateTime.fromISO(values.start);
-    const end = DateTime.fromISO(values.end);
-
-    if (!start.isValid || !end.isValid || end < start) {
-      return 'invalid-range';
-    }
-
-    return undefined;
-  }
-
-  const timedKind = values.timedKind ?? 'zoned';
-  if (
-    timedKind === 'zoned' &&
-    (!values.timezone.trim() ||
-      !DateTime.local().setZone(values.timezone).isValid)
-  ) {
-    return 'invalid-timezone';
-  }
-
-  const viewerTimezone = DateTime.local().zoneName ?? 'UTC';
-  const startTimezone = formEndpointTimezone(
-    values,
-    'start',
-    viewerTimezone,
-  );
-  const endTimezone = formEndpointTimezone(values, 'end', viewerTimezone);
-  const start = DateTime.fromISO(values.start, { zone: startTimezone });
-  const end = DateTime.fromISO(values.end, { zone: endTimezone });
-
-  if (!start.isValid || !end.isValid || end <= start) {
-    return 'invalid-range';
-  }
-
-  return undefined;
-}
-
-function formEndpointTimezone(
-  values: CalendarEventFormValues,
-  endpoint: 'start' | 'end',
-  viewerTimezone: string,
-): string {
-  const timedKind = values.timedKind ?? 'zoned';
-  if (timedKind === 'floating') {
-    return viewerTimezone;
-  }
-
-  const original = values.originalTiming?.[endpoint];
-  if (timedKind === 'mixed') {
-    if (original?.type === 'floating') {
-      return viewerTimezone;
-    }
-    if (original?.type === 'zoned') {
-      return original.timezone;
-    }
-  }
-
-  return values.timezone;
 }
 
 function createEventUid(): string {

@@ -25,12 +25,16 @@ fields and has no timezone until an application interprets it.
    alongside DTSTART. Week, day, hour, minute, and second components remain
    distinct. The codec does not calculate an end from a duration.
 3. The approved application behavior interprets floating master values in the
-   viewer's local timezone for display, sorting, and in-memory range filtering.
-   Editor fields show each endpoint's stored local wall-clock text: floating
-   endpoints are interpreted in the viewer's local timezone, while zoned
-   endpoints keep their own timezone. When the endpoints have different kinds
-   or zones, the editor hides its single shared timezone field and retains each
-   endpoint's original kind and zone when timing changes.
+   viewer's local timezone. All timed-event displays use the viewer's local
+   timezone: floating wall times are interpreted there, and named-TZID/UTC
+   values are converted from their saved timezone to the same instant in the
+   viewer's timezone. Details, lists, visible calendar-cell times, accessible
+   event labels, grid sorting, and in-memory range filtering use that behavior.
+   Editor fields keep each endpoint's stored local wall-clock text: floating
+   endpoints are interpreted in the viewer's local timezone for validation,
+   while zoned endpoints are validated in their own timezone. When endpoints
+   have different kinds or zones, the editor hides its single shared timezone
+   field and retains each endpoint's original kind and zone when timing changes.
    Editing a title or other non-timing field preserves the original iCalendar
    resource; a timing update serializes floating endpoints without `TZID` or a
    UTC marker. Mixed floating and zoned endpoints retain their individual
@@ -44,8 +48,9 @@ fields and has no timezone until an application interprets it.
 
 - Master and recurrence readers preserve floating wall time without binding
   it to the server's timezone or replacing it with a UTC value.
-- The typed master-event widget shows and filters floating times using the
-  viewer's local timezone while preserving their floating form on writes.
+- The typed master-event widget shows timed values in the viewer's local
+  timezone, resolves floating values there, and filters by their interpreted
+  instants while preserving source zones and floating values on writes.
 - Duration-based recurrence timing retains enough information for a later
   expander to distinguish nominal calendar weeks/days from exact time units
   and account for timezone transitions.

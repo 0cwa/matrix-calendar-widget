@@ -222,6 +222,7 @@ export function formatCalendarEventTime(
   event: CalendarEvent,
   locale: string,
   allDayLabel: string,
+  viewerTimezone = DateTime.local().zoneName ?? 'UTC',
 ): string {
   if (isAllDayCalendarEvent(event)) {
     const start = DateTime.fromISO(event.timing.startDate).setLocale(locale);
@@ -245,9 +246,11 @@ export function formatCalendarEventTime(
 
   const start = calendarEventTimedDateTimeToDateTime(
     event.timing.start,
+    viewerTimezone,
   ).setLocale(locale);
   const end = calendarEventTimedDateTimeToDateTime(
     event.timing.end,
+    viewerTimezone,
   ).setLocale(locale);
 
   if (start.hasSame(end, 'day')) {

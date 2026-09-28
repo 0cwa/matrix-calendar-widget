@@ -30,9 +30,7 @@ import {
   CalendarTimeRange,
   TimedCalendarEventTiming,
 } from '../model';
-import {
-  calendarEventTimedDateTimeToDateTime,
-} from '../utils/calendarEventTimedDateTime';
+import { calendarEventTimedDateTimeToDateTime } from '../utils/calendarEventTimedDateTime';
 import {
   CalendarRepository,
   CalendarRepositoryError,

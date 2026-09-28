@@ -41,6 +41,9 @@ export type CalendarEventFormValues = {
   originalTiming?: TimedCalendarEventTiming;
 };
 
+export type CalendarEventValidationError =
+  'title-required' | 'invalid-range' | 'invalid-timezone';
+
 export function createCalendarEventFormValues(
   calendar: Calendar,
   now: DateTime = DateTime.local(),
@@ -112,10 +115,7 @@ export function calendarEventToFormValues(
 function timedKindForTiming(
   timing: TimedCalendarEventTiming,
 ): NonNullable<CalendarEventFormValues['timedKind']> {
-  if (
-    timing.start.type === 'floating' &&
-    timing.end.type === 'floating'
-  ) {
+  if (timing.start.type === 'floating' && timing.end.type === 'floating') {
     return 'floating';
   }
 
@@ -152,6 +152,48 @@ export function calendarEventPatchFromForm(
     description: normalizeOptional(values.description),
     location: normalizeOptional(values.location),
   };
+}
+
+export function validateCalendarEventForm(
+  values: CalendarEventFormValues,
+): CalendarEventValidationError | undefined {
+  if (!values.title.trim()) {
+    return 'title-required';
+  }
+
+  if (values.timingType === 'all-day') {
+    const start = DateTime.fromISO(values.start);
+    const end = DateTime.fromISO(values.end);
+
+    if (!start.isValid || !end.isValid || end < start) {
+      return 'invalid-range';
+    }
+
+    return undefined;
+  }
+
+  const timedKind = values.timedKind ?? 'zoned';
+  if (
+    timedKind === 'zoned' &&
+    (!values.timezone.trim() ||
+      !DateTime.local().setZone(values.timezone).isValid)
+  ) {
+    return 'invalid-timezone';
+  }
+
+  const viewerTimezone = DateTime.local().zoneName ?? 'UTC';
+  const start = DateTime.fromISO(values.start, {
+    zone: formEndpointTimezone(values, 'start', viewerTimezone),
+  });
+  const end = DateTime.fromISO(values.end, {
+    zone: formEndpointTimezone(values, 'end', viewerTimezone),
+  });
+
+  if (!start.isValid || !end.isValid || end <= start) {
+    return 'invalid-range';
+  }
+
+  return undefined;
 }
 
 function calendarEventEditableFieldsFromForm(
@@ -205,6 +247,29 @@ function editableTimedEndpoint(
   }
 
   return { type: 'zoned' as const, local, timezone: values.timezone };
+}
+
+function formEndpointTimezone(
+  values: CalendarEventFormValues,
+  endpoint: 'start' | 'end',
+  viewerTimezone: string,
+): string {
+  const timedKind = values.timedKind ?? 'zoned';
+  if (timedKind === 'floating') {
+    return viewerTimezone;
+  }
+
+  const original = values.originalTiming?.[endpoint];
+  if (timedKind === 'mixed') {
+    if (original?.type === 'floating') {
+      return viewerTimezone;
+    }
+    if (original?.type === 'zoned') {
+      return original.timezone;
+    }
+  }
+
+  return values.timezone;
 }
 
 function normalizeOptional(value: string): string | undefined {

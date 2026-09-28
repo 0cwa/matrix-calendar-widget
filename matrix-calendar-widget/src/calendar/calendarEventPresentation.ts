@@ -33,6 +33,7 @@ export function calendarEventKey(event: CalendarEvent): string {
 export function calendarEventToFullCalendarEvent(
   event: CalendarEvent,
   buttonLabelId: string,
+  viewerTimezone = DateTime.local().zoneName ?? 'UTC',
 ): EventInput {
   if (isAllDayCalendarEvent(event)) {
     return {
@@ -57,11 +58,15 @@ export function calendarEventToFullCalendarEvent(
     id: calendarEventKey(event),
     title: event.title,
     start:
-      calendarEventTimedDateTimeToDateTime(event.timing.start).toISO() ??
-      event.timing.start.local,
+      calendarEventTimedDateTimeToDateTime(
+        event.timing.start,
+        viewerTimezone,
+      ).toISO() ?? event.timing.start.local,
     end:
-      calendarEventTimedDateTimeToDateTime(event.timing.end).toISO() ??
-      event.timing.end.local,
+      calendarEventTimedDateTimeToDateTime(
+        event.timing.end,
+        viewerTimezone,
+      ).toISO() ?? event.timing.end.local,
     allDay: false,
     extendedProps: {
       calendarId: event.calendarId,
@@ -71,7 +76,10 @@ export function calendarEventToFullCalendarEvent(
   };
 }
 
-export function calendarEventStartDate(event: CalendarEvent): string {
+export function calendarEventStartDate(
+  event: CalendarEvent,
+  viewerTimezone = DateTime.local().zoneName ?? 'UTC',
+): string {
   if (isAllDayCalendarEvent(event)) {
     return event.timing.startDate;
   }
@@ -81,8 +89,10 @@ export function calendarEventStartDate(event: CalendarEvent): string {
   }
 
   return (
-    calendarEventTimedDateTimeToDateTime(event.timing.start).toISODate() ??
-    event.timing.start.local.slice(0, 10)
+    calendarEventTimedDateTimeToDateTime(
+      event.timing.start,
+      viewerTimezone,
+    ).toISODate() ?? event.timing.start.local.slice(0, 10)
   );
 }
 
@@ -111,9 +121,12 @@ export function groupCalendarEventsByDay(
   events: CalendarEvent[],
 ): Array<{ day: string; events: CalendarEvent[] }> {
   const groups = new Map<string, CalendarEvent[]>();
+  const viewerTimezone = DateTime.local().zoneName ?? 'UTC';
 
-  for (const event of [...events].sort(compareCalendarEvents)) {
-    const day = calendarEventStartDate(event);
+  for (const event of [...events].sort((a, b) =>
+    compareCalendarEvents(a, b, viewerTimezone),
+  )) {
+    const day = calendarEventStartDate(event, viewerTimezone);
     const group = groups.get(day);
     if (group) {
       group.push(event);
@@ -146,8 +159,13 @@ export function repositoryRangeForView(
   };
 }
 
-function compareCalendarEvents(a: CalendarEvent, b: CalendarEvent): number {
-  const startComparison = eventStartMillis(a) - eventStartMillis(b);
+function compareCalendarEvents(
+  a: CalendarEvent,
+  b: CalendarEvent,
+  viewerTimezone: string,
+): number {
+  const startComparison =
+    eventStartMillis(a, viewerTimezone) - eventStartMillis(b, viewerTimezone);
   if (startComparison !== 0) {
     return startComparison;
   }
@@ -155,7 +173,10 @@ function compareCalendarEvents(a: CalendarEvent, b: CalendarEvent): number {
   return a.title.localeCompare(b.title);
 }
 
-function eventStartMillis(event: CalendarEvent): number {
+function eventStartMillis(
+  event: CalendarEvent,
+  viewerTimezone: string,
+): number {
   if (isAllDayCalendarEvent(event)) {
     return DateTime.fromISO(event.timing.startDate, { zone: 'utc' }).toMillis();
   }
@@ -166,5 +187,6 @@ function eventStartMillis(event: CalendarEvent): number {
 
   return calendarEventTimedDateTimeToDateTime(
     event.timing.start,
+    viewerTimezone,
   ).toMillis();
 }
