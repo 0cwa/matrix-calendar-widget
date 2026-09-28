@@ -77,8 +77,25 @@ for (const knownZone of [
 }
 
 const blocks = Object.create(null);
+const libraryExpandedAliases = [];
 for (const id of timezoneIds) {
-  const rawBlock = await readFile(path.join(rawDataRoot, `${id}.ics`), 'utf8');
+  let rawBlock;
+  try {
+    rawBlock = await readFile(path.join(rawDataRoot, `${id}.ics`), 'utf8');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+
+    // VZIC's raw directory omits some IANA Link aliases. The pinned library's
+    // database was generated from the same --pure VZIC output, so expand its
+    // canonical block for those IDs and retain the requested identifier.
+    const expanded = upstreamModule.tzlib_get_ical_block(id);
+    if (!Array.isArray(expanded) || typeof expanded[0] !== 'string') {
+      throw new Error(`No raw or expanded VTIMEZONE is available for ${id}`);
+    }
+    rawBlock = expanded[0];
+    libraryExpandedAliases.push(id);
+  }
+
   const block = rawBlock
     .trimEnd()
     // IANA Link identifiers share the target zone's rules. Give each copied
@@ -96,27 +113,30 @@ for (const id of timezoneIds) {
 }
 
 function assertSerializedInuvikOffsets(block) {
-  const timezone = new ICAL.Timezone({
-    component: block,
-    tzid: 'America/Inuvik',
-  });
-  const offsetChecks = [
-    { localTime: '1970-01-15T12:00:00', expected: -8 * 60 * 60 },
-    { localTime: '1970-07-15T12:00:00', expected: -8 * 60 * 60 },
-    { localTime: '1972-01-15T12:00:00', expected: -8 * 60 * 60 },
-    { localTime: '1972-07-15T12:00:00', expected: -7 * 60 * 60 },
-    { localTime: '2026-01-15T12:00:00', expected: -7 * 60 * 60 },
-    { localTime: '2026-11-01T01:59:00', expected: -6 * 60 * 60 },
-    { localTime: '2026-11-01T02:01:00', expected: -6 * 60 * 60 },
-    { localTime: '2026-12-15T12:00:00', expected: -6 * 60 * 60 },
-  ];
+  return assertSerializedTimezoneOffsets(
+    block,
+    'America/Inuvik',
+    [
+      { localTime: '1970-01-15T12:00:00', expected: -8 * 60 * 60 },
+      { localTime: '1970-07-15T12:00:00', expected: -8 * 60 * 60 },
+      { localTime: '1972-01-15T12:00:00', expected: -8 * 60 * 60 },
+      { localTime: '1972-07-15T12:00:00', expected: -7 * 60 * 60 },
+      { localTime: '2026-01-15T12:00:00', expected: -7 * 60 * 60 },
+      { localTime: '2026-11-01T01:59:00', expected: -6 * 60 * 60 },
+      { localTime: '2026-11-01T02:01:00', expected: -6 * 60 * 60 },
+      { localTime: '2026-12-15T12:00:00', expected: -6 * 60 * 60 },
+    ],
+  );
+}
 
+function assertSerializedTimezoneOffsets(block, tzid, offsetChecks) {
+  const timezone = new ICAL.Timezone({ component: block, tzid });
   const actualOffsets = {};
   for (const { localTime, expected } of offsetChecks) {
     const actual = timezone.utcOffset(ICAL.Time.fromString(localTime));
     if (actual !== expected) {
       throw new Error(
-        `Serialized America/Inuvik VTIMEZONE gives ${actual} seconds at ${localTime}; expected ${expected}`,
+        `Serialized ${tzid} VTIMEZONE gives ${actual} seconds at ${localTime}; expected ${expected}`,
       );
     }
     actualOffsets[localTime] = actual;
@@ -128,6 +148,14 @@ function assertSerializedInuvikOffsets(block) {
 // generator's offset helper or the host's potentially stale time zone data.
 const serializedInuvikOffsets = assertSerializedInuvikOffsets(
   blocks['America/Inuvik'],
+);
+const serializedCETOffsets = assertSerializedTimezoneOffsets(
+  blocks.CET,
+  'CET',
+  [
+    { localTime: '2026-01-15T12:00:00', expected: 60 * 60 },
+    { localTime: '2026-07-15T12:00:00', expected: 2 * 60 * 60 },
+  ],
 );
 const inuvikOffset = upstreamModule.tzlib_get_offset(
   'America/Inuvik',
@@ -198,6 +226,7 @@ const manifest = {
     licenseNotice: 'licenses/timezones-ical-library-LICENSE',
     vtimezoneMode: 'VZIC --pure',
     upstreamConvenienceAliasesExcluded: [...upstreamOnlyAliases].sort(),
+    libraryExpandedAliases,
   },
   tools: {
     runner: 'ubuntu-24.04',
@@ -211,6 +240,7 @@ const manifest = {
     ianaTimezoneCount: timezoneIds.length,
     inuvikOffsetOn2026_12_01: inuvikOffset,
     serializedInuvikOffsets,
+    serializedCETOffsets,
     knownZones: [
       'America/Inuvik',
       'America/Edmonton',
