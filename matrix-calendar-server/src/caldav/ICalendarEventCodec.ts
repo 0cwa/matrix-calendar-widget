@@ -429,16 +429,6 @@ function readDateTimeValue(
   };
 }
 
-function readZonedDateTime(
-  value: ICAL.Time,
-  property: ICAL.Property,
-): { local: string; timezone: string } {
-  return {
-    local: formatLocalDateTime(value),
-    timezone: readTimezone(property, value),
-  };
-}
-
 function readRecurrenceTimingWithDuration(
   vevent: ICAL.Component,
 ): CalendarEventRecurrenceTiming {

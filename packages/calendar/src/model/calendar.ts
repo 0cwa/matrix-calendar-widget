@@ -58,7 +58,8 @@ export type AllDayCalendarEventTiming = {
 };
 
 export type CalendarEventTiming =
-  TimedCalendarEventTiming | AllDayCalendarEventTiming;
+  | TimedCalendarEventTiming
+  | AllDayCalendarEventTiming;
 
 export type CalendarEventDateTime =
   | { type: 'date-time'; value: ZonedCalendarDateTime }
