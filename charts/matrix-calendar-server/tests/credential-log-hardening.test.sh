@@ -65,7 +65,7 @@ EOF
 cat > "$temp_dir/bin/register_new_matrix_user" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" > "$TEST_CAPTURE_DIR/registration-args"
-if [ "${BOT_PASSWORD+x}" = x ]; then
+if [ "${BOT_PASSWORD+x}" = x ] || env | grep -F 'password-canary' >/dev/null; then
   : > "$TEST_CAPTURE_DIR/registration-has-password-env"
 fi
 cat > "$TEST_CAPTURE_DIR/registration-password"
@@ -156,6 +156,30 @@ run_login_failure malformed
 run_login_failure malformed-with-token
 run_login_failure missing
 run_login_failure null-token
+
+run_login_whitespace_failure() {
+  invalid_password=$1
+  printf '%s\n' 'ACCESS_TOKEN=stale-token-canary' > "$temp_dir/work/.env"
+  rm -f "$temp_dir/curl-args" "$temp_dir/python-args"
+  if whitespace_failure=$(PATH="$temp_dir/bin:$PATH" REAL_CHMOD="$real_chmod" REAL_PYTHON="$real_python" \
+    TEST_CAPTURE_DIR="$temp_dir" WORK_DIR="$temp_dir/work" USERTOCREATE=bot HOMESERVER=https://matrix.example \
+    BOT_PASSWORD="$invalid_password" sh "$chart_dir/files/shell-tools/get_meetings_bot_token.sh" 2>&1); then
+    printf 'whitespace-padded login password unexpectedly succeeded\n' >&2
+    return 1
+  fi
+  assert_no_credentials "$whitespace_failure"
+  grep -Fx 'Login failed. Check your credentials and try again.' <<EOF >/dev/null
+$whitespace_failure
+EOF
+  if [ -e "$temp_dir/work/.env" ] || [ -e "$temp_dir/curl-args" ] || [ -e "$temp_dir/python-args" ]; then
+    printf 'whitespace-padded login reached a child or left credentials\n' >&2
+    return 1
+  fi
+  assert_no_temp_files
+}
+
+run_login_whitespace_failure ' password-canary'
+run_login_whitespace_failure 'password-canary '
 
 printf '%s\n' 'ACCESS_TOKEN=stale-token-canary' > "$temp_dir/work/.env"
 rm -f "$temp_dir/curl-args"

@@ -20,6 +20,14 @@ if ! rm -f "$ENV_FILE" 2>/dev/null; then
     exit 1
 fi
 
+case "$PASSWORD_INPUT" in
+    ''|[[:space:]]*|*[[:space:]])
+        unset PASSWORD_INPUT
+        echo "Login failed. Check your credentials and try again." >&2
+        exit 1
+        ;;
+esac
+
 # Serialize the body before the curl pipeline so POSIX sh can check Python's
 # status independently of curl's status. The password reaches Python on stdin.
 if ! LOGIN_PAYLOAD=$(printf '%s' "$PASSWORD_INPUT" | USERTOCREATE="$USERTOCREATE" python3 -c 'import json, os, sys; sys.stdout.write(json.dumps({"type": "m.login.password", "user": os.environ["USERTOCREATE"], "password": sys.stdin.read()}))' 2>/dev/null); then
