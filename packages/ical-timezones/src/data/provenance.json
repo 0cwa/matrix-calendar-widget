@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-28T10:36:51.888Z",
+  "iana": {
+    "version": "2026d",
+    "releaseUrl": "https://data.iana.org/time-zones/releases/tzdata2026d.tar.gz",
+    "sha512": "1a27de5af50bbc28a2f64c506ab3678b09d9e5ab6c118f39eb38bb823aa8f57069bf5e465848e71df8274c6b8bcd0fc736a88107e5792d816a1db5d867cbc219",
+    "sourceLicenseNotice": "licenses/IANA-theory.html"
+  },
+  "generator": {
+    "repository": "https://github.com/add2cal/timezones-ical-library",
+    "commit": "07ada5679043d60c58d7f5c8ea5825154e0282e2",
+    "packageVersion": "2.3.2",
+    "license": "Apache-2.0",
+    "licenseNotice": "licenses/timezones-ical-library-LICENSE",
+    "vtimezoneMode": "VZIC --pure",
+    "upstreamConvenienceAliasesExcluded": [
+      "CT",
+      "ET",
+      "MT",
+      "PT"
+    ],
+    "libraryExpandedAliases": [
+      "CET",
+      "Cuba",
+      "EET",
+      "EST",
+      "Egypt",
+      "Eire",
+      "GB",
+      "GB-Eire",
+      "GMT",
+      "GMT+0",
+      "GMT-0",
+      "GMT0",
+      "Greenwich",
+      "HST",
+      "Hongkong",
+      "Iceland",
+      "Iran",
+      "Israel",
+      "Jamaica",
+      "Japan",
+      "Kwajalein",
+      "Libya",
+      "MET",
+      "MST",
+      "NZ",
+      "NZ-CHAT",
+      "Navajo",
+      "PRC",
+      "Poland",
+      "Portugal",
+      "ROC",
+      "ROK",
+      "Singapore",
+      "Turkey",
+      "UCT",
+      "UTC",
+      "Universal",
+      "W-SU",
+      "WET",
+      "Zulu"
+    ]
+  },
+  "tools": {
+    "runner": "ubuntu-24.04",
+    "node": "v22.23.2",
+    "npm": "10.9.8",
+    "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "libical": "3.0.17",
+    "aptPackages": "gcc=4:13.2.0-7ubuntu1\nlibglib2.0-dev=2.80.0-6ubuntu3.9\nlibical-dev=3.0.17-1.1build3\nmake=4.3-4.1build2\npkg-config=1.8.1-2build1"
+  },
+  "validation": {
+    "ianaTimezoneCount": 597,
+    "serializedInuvikOffsets": {
+      "1970-01-15T12:00:00": -28800,
+      "1970-07-15T12:00:00": -28800,
+      "1972-01-15T12:00:00": -28800,
+      "1972-07-15T12:00:00": -25200,
+      "2026-01-15T12:00:00": -25200,
+      "2026-11-01T01:59:00": -21600,
+      "2026-11-01T02:01:00": -21600,
+      "2026-12-15T12:00:00": -21600
+    },
+    "serializedCETOffsets": {
+      "2026-01-15T12:00:00": 3600,
+      "2026-07-15T12:00:00": 7200
+    },
+    "knownZones": [
+      "America/Inuvik",
+      "America/Edmonton",
+      "Etc/UTC",
+      "Europe/Stockholm"
+    ]
+  },
+  "outputs": {
+    "vtimezones.json": "3bb759866d313a28006273a133d732bb0c7b6a9b203a24bf1d6abe9d125595c3",
+    "licenses/timezones-ical-library-LICENSE": "5899dbe0bfc6533ff55fa14869b01c4d8f36de258e6db722c8e284eaa546cce4",
+    "licenses/IANA-theory.html": "3f821678362a806a8547a3de08c5ba1d4832ffa70e0c0328572504bcfc9cf334"
+  }
+}

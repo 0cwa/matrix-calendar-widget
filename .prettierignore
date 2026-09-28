@@ -3,6 +3,10 @@
 matrix-calendar-server/lib/
 matrix-calendar-server/storage
 packages/calendar/lib
+packages/ical-timezones/lib/
+packages/ical-timezones/src/data/vtimezones.json
+packages/ical-timezones/src/data/provenance.json
+packages/ical-timezones/src/data/licenses/
 
 # Ignore the helm chart
 charts/
