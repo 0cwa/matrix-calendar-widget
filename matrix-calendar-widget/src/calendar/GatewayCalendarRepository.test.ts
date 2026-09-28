@@ -31,10 +31,12 @@ const event: CalendarEvent = {
   timing: {
     type: 'timed',
     start: {
+      type: 'zoned',
       local: '2026-09-24T08:00:00',
       timezone: 'UTC',
     },
     end: {
+      type: 'zoned',
       local: '2026-09-24T09:00:00',
       timezone: 'UTC',
     },

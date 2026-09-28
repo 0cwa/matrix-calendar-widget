@@ -15,6 +15,7 @@
  */
 
 import { CalendarEvent } from '@matrix-calendar-widget/calendar';
+import { Settings } from 'luxon';
 import {
   calendarEventToFullCalendarEvent,
   filterCalendarEvents,
@@ -33,10 +34,12 @@ const timedEvent: CalendarEvent = {
   timing: {
     type: 'timed',
     start: {
+      type: 'zoned',
       local: '2026-09-23T09:00:00',
       timezone: 'Europe/Stockholm',
     },
     end: {
+      type: 'zoned',
       local: '2026-09-23T10:00:00',
       timezone: 'Europe/Stockholm',
     },
@@ -55,10 +58,26 @@ const allDayEvent: CalendarEvent = {
   },
 };
 
+const floatingEvent: CalendarEvent = {
+  id: 'floating',
+  calendarId: 'team',
+  uid: 'floating@example.test',
+  title: 'Floating planning',
+  timing: {
+    type: 'timed',
+    start: { type: 'floating', local: '2026-09-23T08:30:00' },
+    end: { type: 'floating', local: '2026-09-23T09:30:00' },
+  },
+};
+
 describe('calendar event presentation', () => {
   it('maps timed events to explicit-offset FullCalendar input', () => {
     expect(
-      calendarEventToFullCalendarEvent(timedEvent, 'label-planning'),
+      calendarEventToFullCalendarEvent(
+        timedEvent,
+        'label-planning',
+        'Europe/Stockholm',
+      ),
     ).toMatchObject({
       id: 'team:planning',
       title: 'Team planning',
@@ -83,6 +102,30 @@ describe('calendar event presentation', () => {
     });
   });
 
+  it('maps floating event values in the viewer local timezone', () => {
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'Europe/Stockholm';
+
+    try {
+      expect(
+        calendarEventToFullCalendarEvent(
+          floatingEvent,
+          'label-floating',
+          'Europe/Stockholm',
+        ),
+      ).toMatchObject({
+        start: '2026-09-23T08:30:00.000+02:00',
+        end: '2026-09-23T09:30:00.000+02:00',
+        allDay: false,
+      });
+      expect(
+        groupCalendarEventsByDay([timedEvent, floatingEvent])[0].events,
+      ).toEqual([floatingEvent, timedEvent]);
+    } finally {
+      Settings.defaultZone = originalZone;
+    }
+  });
+
   it('filters by title, description, location, or category', () => {
     expect(filterCalendarEvents([timedEvent], 'quarterly')).toEqual([
       timedEvent,
@@ -92,7 +135,7 @@ describe('calendar event presentation', () => {
     expect(filterCalendarEvents([timedEvent], 'missing')).toEqual([]);
   });
 
-  it('groups and sorts events by their calendar-local start day', () => {
+  it('groups and sorts events by their viewer-local start day', () => {
     const groups = groupCalendarEventsByDay([allDayEvent, timedEvent]);
 
     expect(groups.map(({ day }) => day)).toEqual(['2026-09-23', '2026-09-24']);

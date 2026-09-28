@@ -56,10 +56,12 @@ const input: CalendarEventInput = {
   timing: {
     type: 'timed',
     start: {
+      type: 'zoned',
       local: '2026-09-23T09:00:00',
       timezone: 'Europe/Stockholm',
     },
     end: {
+      type: 'zoned',
       local: '2026-09-23T10:00:00',
       timezone: 'Europe/Stockholm',
     },

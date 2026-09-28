@@ -18,6 +18,7 @@ import { EventInput } from '@fullcalendar/core';
 import {
   CalendarEvent,
   CalendarTimeRange,
+  calendarEventTimedDateTimeToDateTime,
   isAllDayCalendarEvent,
   isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
@@ -32,6 +33,7 @@ export function calendarEventKey(event: CalendarEvent): string {
 export function calendarEventToFullCalendarEvent(
   event: CalendarEvent,
   buttonLabelId: string,
+  viewerTimezone = DateTime.local().zoneName ?? 'UTC',
 ): EventInput {
   if (isAllDayCalendarEvent(event)) {
     return {
@@ -55,11 +57,16 @@ export function calendarEventToFullCalendarEvent(
   return {
     id: calendarEventKey(event),
     title: event.title,
-    start: zonedDateTimeToIso(
-      event.timing.start.local,
-      event.timing.start.timezone,
-    ),
-    end: zonedDateTimeToIso(event.timing.end.local, event.timing.end.timezone),
+    start:
+      calendarEventTimedDateTimeToDateTime(
+        event.timing.start,
+        viewerTimezone,
+      ).toISO() ?? event.timing.start.local,
+    end:
+      calendarEventTimedDateTimeToDateTime(
+        event.timing.end,
+        viewerTimezone,
+      ).toISO() ?? event.timing.end.local,
     allDay: false,
     extendedProps: {
       calendarId: event.calendarId,
@@ -69,7 +76,10 @@ export function calendarEventToFullCalendarEvent(
   };
 }
 
-export function calendarEventStartDate(event: CalendarEvent): string {
+export function calendarEventStartDate(
+  event: CalendarEvent,
+  viewerTimezone = DateTime.local().zoneName ?? 'UTC',
+): string {
   if (isAllDayCalendarEvent(event)) {
     return event.timing.startDate;
   }
@@ -79,9 +89,10 @@ export function calendarEventStartDate(event: CalendarEvent): string {
   }
 
   return (
-    DateTime.fromISO(event.timing.start.local, {
-      zone: event.timing.start.timezone,
-    }).toISODate() ?? event.timing.start.local.slice(0, 10)
+    calendarEventTimedDateTimeToDateTime(
+      event.timing.start,
+      viewerTimezone,
+    ).toISODate() ?? event.timing.start.local.slice(0, 10)
   );
 }
 
@@ -110,9 +121,12 @@ export function groupCalendarEventsByDay(
   events: CalendarEvent[],
 ): Array<{ day: string; events: CalendarEvent[] }> {
   const groups = new Map<string, CalendarEvent[]>();
+  const viewerTimezone = DateTime.local().zoneName ?? 'UTC';
 
-  for (const event of [...events].sort(compareCalendarEvents)) {
-    const day = calendarEventStartDate(event);
+  for (const event of [...events].sort((a, b) =>
+    compareCalendarEvents(a, b, viewerTimezone),
+  )) {
+    const day = calendarEventStartDate(event, viewerTimezone);
     const group = groups.get(day);
     if (group) {
       group.push(event);
@@ -145,12 +159,13 @@ export function repositoryRangeForView(
   };
 }
 
-function zonedDateTimeToIso(local: string, timezone: string): string {
-  return DateTime.fromISO(local, { zone: timezone }).toISO() ?? local;
-}
-
-function compareCalendarEvents(a: CalendarEvent, b: CalendarEvent): number {
-  const startComparison = eventStartMillis(a) - eventStartMillis(b);
+function compareCalendarEvents(
+  a: CalendarEvent,
+  b: CalendarEvent,
+  viewerTimezone: string,
+): number {
+  const startComparison =
+    eventStartMillis(a, viewerTimezone) - eventStartMillis(b, viewerTimezone);
   if (startComparison !== 0) {
     return startComparison;
   }
@@ -158,7 +173,10 @@ function compareCalendarEvents(a: CalendarEvent, b: CalendarEvent): number {
   return a.title.localeCompare(b.title);
 }
 
-function eventStartMillis(event: CalendarEvent): number {
+function eventStartMillis(
+  event: CalendarEvent,
+  viewerTimezone: string,
+): number {
   if (isAllDayCalendarEvent(event)) {
     return DateTime.fromISO(event.timing.startDate, { zone: 'utc' }).toMillis();
   }
@@ -167,7 +185,8 @@ function eventStartMillis(event: CalendarEvent): number {
     throw new Error('Unsupported calendar event timing');
   }
 
-  return DateTime.fromISO(event.timing.start.local, {
-    zone: event.timing.start.timezone,
-  }).toMillis();
+  return calendarEventTimedDateTimeToDateTime(
+    event.timing.start,
+    viewerTimezone,
+  ).toMillis();
 }

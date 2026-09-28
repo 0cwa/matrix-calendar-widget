@@ -21,6 +21,7 @@ import {
   calendarEventPatchFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
+  validateCalendarEventForm,
 } from './calendarEventForm';
 
 const calendar: Calendar = {
@@ -47,6 +48,9 @@ describe('calendar event form adapter', () => {
       start: '2026-09-23T09:00',
       end: '2026-09-23T10:00',
       timezone: 'Europe/Stockholm',
+      timedKind: 'zoned',
+      timingChanged: false,
+      timezoneChanged: false,
     });
   });
 
@@ -73,10 +77,12 @@ describe('calendar event form adapter', () => {
       timing: {
         type: 'timed',
         start: {
+          type: 'zoned',
           local: '2026-09-23T09:00',
           timezone: 'Europe/Stockholm',
         },
         end: {
+          type: 'zoned',
           local: '2026-09-23T10:00',
           timezone: 'Europe/Stockholm',
         },
@@ -126,6 +132,137 @@ describe('calendar event form adapter', () => {
     });
   });
 
+  it('keeps floating event times local through form validation and timing updates', () => {
+    const event: CalendarEvent = {
+      id: 'floating',
+      calendarId: 'team',
+      uid: 'floating@example.test',
+      title: 'Floating event',
+      timing: {
+        type: 'timed',
+        start: { type: 'floating', local: '2026-09-23T09:00:00' },
+        end: { type: 'floating', local: '2026-09-23T10:00:00' },
+      },
+    };
+    const values = calendarEventToFormValues(event, calendar);
+
+    expect(values).toMatchObject({
+      timingType: 'timed',
+      timedKind: 'floating',
+      start: '2026-09-23T09:00',
+      end: '2026-09-23T10:00',
+      timingChanged: false,
+    });
+    expect(
+      validateCalendarEventForm({ ...values, timezone: 'not-an-iana-zone' }),
+    ).toBeUndefined();
+    expect(
+      calendarEventPatchFromForm({ ...values, title: 'Renamed' }),
+    ).not.toHaveProperty('timing');
+
+    const timingPatch = calendarEventPatchFromForm({
+      ...values,
+      start: '2026-09-23T11:30',
+      end: '2026-09-23T12:15',
+      timingChanged: true,
+    });
+
+    expect(timingPatch.timing).toEqual({
+      type: 'timed',
+      start: { type: 'floating', local: '2026-09-23T11:30' },
+      end: { type: 'floating', local: '2026-09-23T12:15' },
+    });
+  });
+
+  it('keeps each endpoint kind when editing a mixed floating and zoned event', () => {
+    const event: CalendarEvent = {
+      id: 'mixed',
+      calendarId: 'team',
+      uid: 'mixed@example.test',
+      title: 'Mixed event',
+      timing: {
+        type: 'timed',
+        start: { type: 'floating', local: '2026-09-23T09:00:00' },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    };
+    const values = calendarEventToFormValues(event, calendar);
+
+    expect(values.timedKind).toBe('mixed');
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        start: '2026-09-23T09:30',
+        end: '2026-09-23T10:30',
+        timingChanged: true,
+      }).timing,
+    ).toEqual({
+      type: 'timed',
+      start: { type: 'floating', local: '2026-09-23T09:30' },
+      end: {
+        type: 'zoned',
+        local: '2026-09-23T10:30',
+        timezone: 'Europe/Stockholm',
+      },
+    });
+  });
+
+  it('validates and preserves distinct endpoint time zones', () => {
+    const event: CalendarEvent = {
+      id: 'two-zones',
+      calendarId: 'team',
+      uid: 'two-zones@example.test',
+      title: 'Two zones',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T05:30:00',
+          timezone: 'America/New_York',
+        },
+      },
+    };
+    const values = calendarEventToFormValues(event, calendar);
+
+    expect(values.timedKind).toBe('mixed');
+    expect(validateCalendarEventForm(values)).toBeUndefined();
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        title: 'Renamed two-zone event',
+      }),
+    ).not.toHaveProperty('timing');
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        start: '2026-09-23T10:15',
+        end: '2026-09-23T05:45',
+        timingChanged: true,
+      }).timing,
+    ).toEqual({
+      type: 'timed',
+      start: {
+        type: 'zoned',
+        local: '2026-09-23T10:15',
+        timezone: 'Europe/Stockholm',
+      },
+      end: {
+        type: 'zoned',
+        local: '2026-09-23T05:45',
+        timezone: 'America/New_York',
+      },
+    });
+  });
+
   it('creates an edit patch without resource identity or UID', () => {
     expect(
       calendarEventPatchFromForm({
@@ -145,10 +282,12 @@ describe('calendar event form adapter', () => {
       timing: {
         type: 'timed',
         start: {
+          type: 'zoned',
           local: '2026-09-23T11:00',
           timezone: 'Europe/Stockholm',
         },
         end: {
+          type: 'zoned',
           local: '2026-09-23T12:00',
           timezone: 'Europe/Stockholm',
         },

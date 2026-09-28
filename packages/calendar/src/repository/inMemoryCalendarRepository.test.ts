@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { Settings } from 'luxon';
 import {
   Calendar,
   CalendarEvent,
@@ -47,10 +48,12 @@ const events: CalendarEvent[] = [
     timing: {
       type: 'timed',
       start: {
+        type: 'zoned',
         local: '2026-09-23T09:00:00',
         timezone: 'Europe/Stockholm',
       },
       end: {
+        type: 'zoned',
         local: '2026-09-23T10:00:00',
         timezone: 'Europe/Stockholm',
       },
@@ -75,10 +78,12 @@ const events: CalendarEvent[] = [
     timing: {
       type: 'timed',
       start: {
+        type: 'zoned',
         local: '2026-01-05T09:00:00',
         timezone: 'Europe/Stockholm',
       },
       end: {
+        type: 'zoned',
         local: '2026-01-05T09:30:00',
         timezone: 'Europe/Stockholm',
       },
@@ -378,6 +383,40 @@ describe('InMemoryCalendarRepository', () => {
     );
   });
 
+  it('filters floating timed events using the viewer local timezone', async () => {
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'Europe/Stockholm';
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [
+        {
+          id: 'floating-planning',
+          calendarId: 'team',
+          uid: 'floating-planning@example.test',
+          title: 'Floating planning',
+          timing: {
+            type: 'timed',
+            start: { type: 'floating', local: '2026-09-23T09:00:00' },
+            end: { type: 'floating', local: '2026-09-23T10:00:00' },
+          },
+        },
+      ],
+    });
+
+    try {
+      await expect(
+        repository.listEvents(['team'], {
+          start: '2026-09-23T07:30:00Z',
+          end: '2026-09-23T08:30:00Z',
+        }),
+      ).resolves.toEqual([
+        expect.objectContaining({ id: 'floating-planning' }),
+      ]);
+    } finally {
+      Settings.defaultZone = originalZone;
+    }
+  });
+
   it('rejects invalid time ranges', async () => {
     const repository = createRepository();
 
@@ -397,10 +436,12 @@ describe('InMemoryCalendarRepository', () => {
       timing: {
         type: 'timed',
         start: {
+          type: 'zoned',
           local: '2026-09-25T09:00:00',
           timezone: 'Europe/Stockholm',
         },
         end: {
+          type: 'zoned',
           local: '2026-09-25T10:00:00',
           timezone: 'Europe/Stockholm',
         },

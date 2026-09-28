@@ -20,7 +20,7 @@ import {
   CalendarRepositoryError,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
@@ -42,13 +42,27 @@ const event: CalendarEvent = {
   timing: {
     type: 'timed',
     start: {
+      type: 'zoned',
       local: '2026-09-23T09:00',
       timezone: 'Europe/Stockholm',
     },
     end: {
+      type: 'zoned',
       local: '2026-09-23T10:00',
       timezone: 'Europe/Stockholm',
     },
+  },
+};
+
+const floatingEvent: CalendarEvent = {
+  id: 'floating',
+  calendarId: 'team',
+  uid: 'floating@example.test',
+  title: 'Floating planning',
+  timing: {
+    type: 'timed',
+    start: { type: 'floating', local: '2026-09-23T09:00:00' },
+    end: { type: 'floating', local: '2026-09-23T10:00:00' },
   },
 };
 
@@ -130,6 +144,81 @@ describe('<CalendarEventEditorDialog />', () => {
     ).resolves.toMatchObject({
       title: 'Updated planning',
       description: undefined,
+    });
+  });
+
+  it('preserves floating timing on a title-only save', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [floatingEvent],
+    });
+    const onClose = vi.fn();
+    const onSaved = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={floatingEvent}
+        onClose={onClose}
+        onSaved={onSaved}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByText('Floating time (shown in your local time zone)'),
+    ).toBeInTheDocument();
+    const title = screen.getByRole('textbox', { name: /Title/i });
+    await userEvent.clear(title);
+    await userEvent.type(title, 'Floating planning renamed');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(onClose).toHaveBeenCalled();
+    await expect(
+      repository.getEvent('team', 'floating'),
+    ).resolves.toMatchObject({
+      title: 'Floating planning renamed',
+      timing: floatingEvent.timing,
+    });
+  });
+
+  it('saves floating timing edits without adding a zone', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [floatingEvent],
+    });
+    const onSaved = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={floatingEvent}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const start = await screen.findByLabelText(/^Start/);
+    const end = await screen.findByLabelText(/^End/);
+    fireEvent.change(start, { target: { value: '2026-09-23T11:30' } });
+    fireEvent.change(end, { target: { value: '2026-09-23T12:15' } });
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(async () => {
+      expect(onSaved).toHaveBeenCalled();
+      await expect(
+        repository.getEvent('team', 'floating'),
+      ).resolves.toMatchObject({
+        timing: {
+          type: 'timed',
+          start: { type: 'floating', local: '2026-09-23T11:30' },
+          end: { type: 'floating', local: '2026-09-23T12:15' },
+        },
+      });
     });
   });
 

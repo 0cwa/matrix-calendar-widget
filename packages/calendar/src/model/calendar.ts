@@ -28,8 +28,8 @@ export type CalendarEventId = string;
 export type CalendarDate = string;
 
 /**
- * Local wall-clock date/time in ISO form without a numeric UTC offset. A
- * recurrence value may keep it floating or pair it with a named IANA zone.
+ * Local wall-clock date/time in ISO form without a numeric UTC offset. Master
+ * and recurrence values may keep it floating or pair it with a named zone.
  */
 export type LocalCalendarDateTime = string;
 
@@ -38,14 +38,19 @@ export type ZonedCalendarDateTime = {
   timezone: string;
 };
 
+/** A master-event time endpoint keeps its own floating or zoned value kind. */
+export type CalendarEventTimedDateTime =
+  | { type: 'floating'; local: LocalCalendarDateTime }
+  | { type: 'zoned'; local: LocalCalendarDateTime; timezone: string };
+
 /**
- * Timed events retain their named timezone instead of normalizing the domain
- * model to UTC. Adapters may derive UTC instants for querying/rendering.
+ * Timed events preserve each endpoint's iCalendar value kind. Floating values
+ * keep only their local wall time; zoned values keep the local time and zone.
  */
 export type TimedCalendarEventTiming = {
   type: 'timed';
-  start: ZonedCalendarDateTime;
-  end: ZonedCalendarDateTime;
+  start: CalendarEventTimedDateTime;
+  end: CalendarEventTimedDateTime;
 };
 
 /**

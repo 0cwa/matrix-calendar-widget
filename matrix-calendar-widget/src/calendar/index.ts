@@ -25,8 +25,12 @@ export {
   calendarEventPatchFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
+  validateCalendarEventForm,
 } from './calendarEventForm';
-export type { CalendarEventFormValues } from './calendarEventForm';
+export type {
+  CalendarEventFormValues,
+  CalendarEventValidationError,
+} from './calendarEventForm';
 export {
   calendarEventKey,
   calendarEventStartDate,

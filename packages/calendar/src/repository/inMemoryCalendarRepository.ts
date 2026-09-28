@@ -30,6 +30,7 @@ import {
   CalendarTimeRange,
   TimedCalendarEventTiming,
 } from '../model';
+import { calendarEventTimedDateTimeToDateTime } from '../utils/calendarEventTimedDateTime';
 import {
   CalendarRepository,
   CalendarRepositoryError,
@@ -360,12 +361,8 @@ function eventInterval(event: CalendarEvent, calendar: Calendar): ParsedRange {
 
 function timedInterval(timing: TimedCalendarEventTiming): ParsedRange {
   return {
-    start: DateTime.fromISO(timing.start.local, {
-      zone: timing.start.timezone,
-    }).toMillis(),
-    end: DateTime.fromISO(timing.end.local, {
-      zone: timing.end.timezone,
-    }).toMillis(),
+    start: calendarEventTimedDateTimeToDateTime(timing.start).toMillis(),
+    end: calendarEventTimedDateTimeToDateTime(timing.end).toMillis(),
   };
 }
 

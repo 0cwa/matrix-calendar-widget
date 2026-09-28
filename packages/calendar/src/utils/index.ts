@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+export { calendarEventTimedDateTimeToDateTime } from './calendarEventTimedDateTime';
 export * from './calendarUtils';
 export { formatICalDate, parseICalDate, toISOString } from './dateTimeUtils';
 export { formatRRuleText, getOrdinalLabel, parseRRule } from './format';

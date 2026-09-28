@@ -33,10 +33,12 @@ describe('calendar domain', () => {
       timing: {
         type: 'timed',
         start: {
+          type: 'zoned',
           local: '2026-09-23T09:00:00',
           timezone: 'Europe/Stockholm',
         },
         end: {
+          type: 'zoned',
           local: '2026-09-23T10:00:00',
           timezone: 'Europe/Stockholm',
         },
@@ -53,8 +55,16 @@ describe('calendar domain', () => {
     expect(isAllDayCalendarEvent(event)).toBe(false);
 
     if (isTimedCalendarEvent(event)) {
-      expect(event.timing.start.timezone).toBe('Europe/Stockholm');
-      expect(event.timing.end.local).toBe('2026-09-23T10:00:00');
+      expect(event.timing.start).toEqual({
+        type: 'zoned',
+        local: '2026-09-23T09:00:00',
+        timezone: 'Europe/Stockholm',
+      });
+      expect(event.timing.end).toEqual({
+        type: 'zoned',
+        local: '2026-09-23T10:00:00',
+        timezone: 'Europe/Stockholm',
+      });
     }
   });
 
