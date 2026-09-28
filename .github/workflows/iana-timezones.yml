@@ -1,0 +1,107 @@
+name: IANA time zone data
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/iana-timezones.yml
+      - scripts/generate-iana-vtimezones.mjs
+      - packages/ical-timezones/**
+      - docs/timezones-ical-data.md
+  push:
+    paths:
+      - .github/workflows/iana-timezones.yml
+      - scripts/generate-iana-vtimezones.mjs
+      - packages/ical-timezones/**
+      - docs/timezones-ical-data.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iana-timezones-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    name: Generate verified IANA 2026d data
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TZDB_VERSION: 2026d
+      TZDB_SHA512: 1a27de5af50bbc28a2f64c506ab3678b09d9e5ab6c118f39eb38bb823aa8f57069bf5e465848e71df8274c6b8bcd0fc736a88107e5792d816a1db5d867cbc219
+      TIMEZONE_LIBRARY_COMMIT: 07ada5679043d60c58d7f5c8ea5825154e0282e2
+      TZ: UTC
+
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Check out pinned timezone generator
+        uses: actions/checkout@v7
+        with:
+          repository: add2cal/timezones-ical-library
+          ref: 07ada5679043d60c58d7f5c8ea5825154e0282e2
+          path: upstream-timezones-ical-library
+          persist-credentials: false
+
+      - name: Verify source pin and fetch IANA archive
+        env:
+          IANA_ARCHIVE: ${{ runner.temp }}/tzdata2026d.tar.gz
+        run: |
+          test "$(git -C upstream-timezones-ical-library rev-parse HEAD)" = "$TIMEZONE_LIBRARY_COMMIT"
+          curl --fail --location --silent --show-error --retry 3 \
+            "https://data.iana.org/time-zones/releases/tzdata${TZDB_VERSION}.tar.gz" \
+            --output "$IANA_ARCHIVE"
+          printf '%s  %s\n' "$TZDB_SHA512" "$IANA_ARCHIVE" | sha512sum --check
+          mkdir -p "$RUNNER_TEMP/iana-source"
+          tar -xzf "$IANA_ARCHIVE" -C "$RUNNER_TEMP/iana-source" theory.html
+          test -s "$RUNNER_TEMP/iana-source/theory.html"
+
+      - name: Run the pinned upstream generator with the verified archive
+        env:
+          VERIFIED_TZDATA_ARCHIVE: ${{ runner.temp }}/tzdata2026d.tar.gz
+        working-directory: upstream-timezones-ical-library
+        run: |
+          sudo apt-get update
+          mkdir -p "$RUNNER_TEMP/verified-bin"
+          cat > "$RUNNER_TEMP/verified-bin/wget" <<'SH'
+          #!/bin/sh
+          set -eu
+          [ "$#" -eq 1 ] || { echo "unexpected wget arguments" >&2; exit 2; }
+          [ "$1" = "https://data.iana.org/time-zones/releases/tzdata2026d.tar.gz" ] || {
+            echo "refusing an unverified download URL" >&2
+            exit 2
+          }
+          cp -- "$VERIFIED_TZDATA_ARCHIVE" tzdata2026d.tar.gz
+          SH
+          chmod +x "$RUNNER_TEMP/verified-bin/wget"
+          sudo env \
+            "PATH=$RUNNER_TEMP/verified-bin:$PATH" \
+            "VERIFIED_TZDATA_ARCHIVE=$VERIFIED_TZDATA_ARCHIVE" \
+            sh scripts/update-tzdata.sh "$TZDB_VERSION" false
+          npm run build:lib-only
+
+      - name: Generate runtime lookup data and provenance
+        env:
+          IANA_ARCHIVE: ${{ runner.temp }}/tzdata2026d.tar.gz
+          IANA_SOURCE_ROOT: ${{ runner.temp }}/iana-source
+          TIMEZONE_LIBRARY_ROOT: ${{ github.workspace }}/upstream-timezones-ical-library
+          TIMEZONE_ARTIFACT_DIR: ${{ runner.temp }}/iana-timezone-artifact
+        run: node scripts/generate-iana-vtimezones.mjs
+
+      - name: Upload generated runtime data and provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: iana-vtimezones-2026d
+          path: ${{ runner.temp }}/iana-timezone-artifact/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
