@@ -109,6 +109,127 @@ describe('ICalendarEventCodec', () => {
     expect(reparsed.event.timing).toEqual(parsed.event.timing);
   });
 
+  it(
+    'reads recurrence data and preserves a complete recurring resource on master patch',
+    () => {
+      const parsed = codec.parse(
+        'team',
+        'recurrence-override.ics',
+        fixture('recurrence-override.ics'),
+      );
+
+      expect(parsed.event.recurrence).toEqual({
+        rrule: 'FREQ=WEEKLY;COUNT=4',
+        rdates: [
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-26T14:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        ],
+        exdates: [
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-11-02T14:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        ],
+        overrides: [
+          {
+            recurrenceId: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-12T14:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            timing: {
+              type: 'timed',
+              start: {
+                local: '2026-10-12T16:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+              end: {
+                local: '2026-10-12T17:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
+          {
+            recurrenceId: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-19T14:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            timing: {
+              type: 'timed',
+              start: {
+                local: '2026-10-19T14:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+              end: {
+                local: '2026-10-19T15:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            status: 'cancelled',
+          },
+        ],
+      });
+
+      const encoded = parsed.applyPatch({ title: 'Updated weekly review' });
+      const calendar = ICAL.Component.fromString(encoded.icalendar);
+      const events = calendar.getAllSubcomponents('vevent');
+
+      expect(events).toHaveLength(3);
+      expect(calendar.getFirstSubcomponent('vtimezone')).not.toBeNull();
+      expect(
+        calendar.getFirstSubcomponent('vtimezone')?.getFirstPropertyValue('tzid'),
+      ).toBe('Europe/Stockholm');
+      expect(
+        calendar.getFirstPropertyValue('x-custom-calendar-property'),
+      ).toBe('preserve-resource-value');
+      expect(events[0].getFirstPropertyValue('summary')).toBe(
+        'Updated weekly review',
+      );
+      expect(
+        events[0].getFirstProperty('x-client-metadata')?.getFirstValue(),
+      ).toBe('preserve-value');
+      expect(
+        events[1].getFirstPropertyValue('recurrence-id')?.toString(),
+      ).toBe('2026-10-12T14:00:00');
+      expect(events[1].getFirstPropertyValue('dtstart')?.toString()).toBe(
+        '2026-10-12T16:00:00',
+      );
+      expect(events[1].getFirstPropertyValue('summary')).toBe(
+        'Weekly review - moved',
+      );
+      expect(
+        events[1].getFirstProperty('x-override-marker')?.getFirstValue(),
+      ).toBe('preserve-exception');
+      expect(
+        events[2].getFirstPropertyValue('recurrence-id')?.toString(),
+      ).toBe('2026-10-19T14:00:00');
+      expect(events[2].getFirstPropertyValue('status')).toBe('CANCELLED');
+      expect(
+        events[2].getFirstProperty('x-override-marker')?.getFirstValue(),
+      ).toBe('preserve-cancellation');
+
+      const reparsed = codec.parse(
+        'team',
+        'recurrence-override.ics',
+        encoded.icalendar,
+      );
+      expect(reparsed.event.recurrence).toEqual(parsed.event.recurrence);
+    },
+  );
+
   it('preserves unknown calendar and VEVENT properties on patch', () => {
     const parsed = codec.parse(
       'team',

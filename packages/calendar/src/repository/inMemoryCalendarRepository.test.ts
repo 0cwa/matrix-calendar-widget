@@ -14,7 +14,13 @@
  * limitations under the License.
  */
 
-import { Calendar, CalendarEvent, CalendarEventInput } from '../model';
+import {
+  Calendar,
+  CalendarEvent,
+  CalendarEventInput,
+  CalendarEventPatch,
+  CalendarEventRecurrenceOverride,
+} from '../model';
 import { CalendarRepositoryError, InMemoryCalendarRepository } from './index';
 
 const calendars: Calendar[] = [
@@ -119,6 +125,53 @@ describe('InMemoryCalendarRepository', () => {
       'VEVENT',
       'VTODO',
     ]);
+  });
+
+  it('defensively clones recurrence override identity and timing', async () => {
+    const inputOverride = recurrenceOverride();
+    const inputEvent: CalendarEvent = {
+      ...events[2],
+      id: 'recurring-with-override',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY',
+        overrides: [inputOverride],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [inputEvent],
+    });
+
+    mutateRecurrenceOverride(inputOverride);
+    const afterConstruction = await repository.getEvent(
+      'team',
+      'recurring-with-override',
+    );
+    expect(afterConstruction.recurrence?.overrides?.[0]).toMatchObject(
+      expectedRecurrenceOverride(),
+    );
+
+    const patchOverride = recurrenceOverride();
+    const patch: CalendarEventPatch = {
+      recurrence: {
+        overrides: [patchOverride],
+      },
+    };
+    const updated = await repository.updateEvent(
+      'team',
+      'recurring-with-override',
+      patch,
+    );
+    mutateRecurrenceOverride(patchOverride);
+    mutateRecurrenceOverride(updated.recurrence!.overrides![0]);
+
+    const afterUpdate = await repository.getEvent(
+      'team',
+      'recurring-with-override',
+    );
+    expect(afterUpdate.recurrence?.overrides?.[0]).toMatchObject(
+      expectedRecurrenceOverride(),
+    );
   });
 
   it('creates a named calendar with deterministic identity', async () => {
@@ -423,3 +476,62 @@ describe('InMemoryCalendarRepository', () => {
     ).rejects.toMatchObject({ code: 'calendar-not-found' });
   });
 });
+
+function recurrenceOverride(): CalendarEventRecurrenceOverride {
+  return {
+    recurrenceId: {
+      type: 'date-time',
+      value: {
+        local: '2026-10-12T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    },
+    timing: {
+      type: 'timed',
+      start: {
+        local: '2026-10-12T11:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+      end: {
+        local: '2026-10-12T11:30:00',
+        timezone: 'Europe/Stockholm',
+      },
+    },
+    status: 'cancelled',
+  };
+}
+
+function mutateRecurrenceOverride(
+  override: CalendarEventRecurrenceOverride,
+): void {
+  if (override.recurrenceId.type === 'date-time') {
+    override.recurrenceId.value.local = '2099-01-01T00:00:00';
+  }
+  if (override.timing?.type === 'timed') {
+    override.timing.start.local = '2099-01-01T01:00:00';
+  }
+}
+
+function expectedRecurrenceOverride() {
+  return {
+    recurrenceId: {
+      type: 'date-time',
+      value: {
+        local: '2026-10-12T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    },
+    timing: {
+      type: 'timed',
+      start: {
+        local: '2026-10-12T11:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+      end: {
+        local: '2026-10-12T11:30:00',
+        timezone: 'Europe/Stockholm',
+      },
+    },
+    status: 'cancelled',
+  };
+}

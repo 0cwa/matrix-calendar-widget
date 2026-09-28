@@ -16,9 +16,12 @@
 
 import {
   CalendarEvent,
+  CalendarEventDateTime,
   CalendarEventId,
   CalendarEventInput,
   CalendarEventPatch,
+  CalendarEventRecurrence,
+  CalendarEventRecurrenceOverride,
   CalendarEventStatus,
   CalendarEventTiming,
   CalendarEventTransparency,
@@ -212,6 +215,7 @@ export class ICalendarEventCodec {
     }
 
     const timing = readTiming(vevent);
+    const recurrence = readRecurrence(calendar, vevent, uid);
 
     const event: CalendarEvent = {
       id: eventId,
@@ -226,6 +230,7 @@ export class ICalendarEventCodec {
       url: textValue(vevent.getFirstPropertyValue('url')),
       categories: readCategories(vevent),
       priority: numberValue(vevent.getFirstPropertyValue('priority')),
+      recurrence,
     };
 
     return new ParsedICalendarEvent(calendar, event);
@@ -246,6 +251,121 @@ function findMasterEvent(
   return (
     matching.find((event) => !event.hasProperty('recurrence-id')) ?? matching[0]
   );
+}
+
+function readRecurrence(
+  calendar: ICAL.Component,
+  master: ICAL.Component,
+  uid: string,
+): CalendarEventRecurrence | undefined {
+  const recurrence: CalendarEventRecurrence = {};
+  const rule = master.getFirstPropertyValue('rrule');
+  if (rule !== null && rule !== undefined) {
+    recurrence.rrule = String(rule);
+  }
+
+  const rdates = readDateTimeProperties(master, 'rdate');
+  const exdates = readDateTimeProperties(master, 'exdate');
+  if (rdates.length > 0) {
+    recurrence.rdates = rdates;
+  }
+  if (exdates.length > 0) {
+    recurrence.exdates = exdates;
+  }
+
+  const masterRecurrenceId = master.getFirstProperty('recurrence-id');
+  if (masterRecurrenceId) {
+    recurrence.recurrenceId = readDateTimeProperty(masterRecurrenceId);
+  }
+
+  const overrides = calendar
+    .getAllSubcomponents('vevent')
+    .filter(
+      (event) =>
+        event !== master &&
+        textValue(event.getFirstPropertyValue('uid')) === uid &&
+        event.hasProperty('recurrence-id'),
+    )
+    .map(readRecurrenceOverride);
+  if (overrides.length > 0) {
+    recurrence.overrides = overrides;
+  }
+
+  return Object.keys(recurrence).length > 0 ? recurrence : undefined;
+}
+
+function readRecurrenceOverride(
+  vevent: ICAL.Component,
+): CalendarEventRecurrenceOverride {
+  const recurrenceId = vevent.getFirstProperty('recurrence-id');
+  if (!recurrenceId) {
+    throw new ICalendarEventCodecError(
+      'invalid-timing',
+      'Recurrence override VEVENT must contain RECURRENCE-ID',
+    );
+  }
+
+  const hasStart = vevent.hasProperty('dtstart');
+  const hasEnd = vevent.hasProperty('dtend');
+
+  const override: CalendarEventRecurrenceOverride = {
+    recurrenceId: readDateTimeProperty(recurrenceId),
+  };
+  // Keep unsupported or incomplete exception timing in the raw resource, but
+  // do not let it block decoding the recurrence identity and status.
+  if (hasStart && hasEnd) {
+    override.timing = readTiming(vevent);
+  }
+
+  const status = readStatus(vevent.getFirstPropertyValue('status'));
+  if (status) {
+    override.status = status;
+  }
+
+  return override;
+}
+
+function readDateTimeProperties(
+  component: ICAL.Component,
+  name: 'rdate' | 'exdate',
+): CalendarEventDateTime[] {
+  return component.getAllProperties(name).flatMap((property) =>
+    property.getValues().flatMap((value) => {
+      if (!(value instanceof ICAL.Time)) {
+        return [];
+      }
+      return [readDateTimeValue(value, property)];
+    }),
+  );
+}
+
+function readDateTimeProperty(property: ICAL.Property): CalendarEventDateTime {
+  const value = property.getFirstValue();
+  if (!(value instanceof ICAL.Time)) {
+    throw new ICalendarEventCodecError(
+      'invalid-timing',
+      `${property.name.toUpperCase()} must be a date or date-time value`,
+    );
+  }
+
+  return readDateTimeValue(value, property);
+}
+
+function readDateTimeValue(
+  value: ICAL.Time,
+  property: ICAL.Property,
+): CalendarEventDateTime {
+  if (value.isDate) {
+    return { type: 'date', value: formatDate(value) };
+  }
+
+  return {
+    type: 'date-time',
+    value: {
+      local: formatLocalDateTime(value),
+      timezone: readTimezone(property, value),
+    },
+  };
 }
 
 function readTiming(vevent: ICAL.Component): CalendarEventTiming {
