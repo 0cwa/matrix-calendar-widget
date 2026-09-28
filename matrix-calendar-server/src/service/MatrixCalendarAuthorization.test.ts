@@ -16,7 +16,7 @@
 
 import { CalendarAuthorization } from '@matrix-calendar-widget/calendar';
 import { MatrixClient, PowerLevelsEventContent } from 'matrix-bot-sdk';
-import { instance, mock, when } from 'ts-mockito';
+import { instance, mock, verify, when } from 'ts-mockito';
 import { StateEventName } from '../model/StateEventName';
 import {
   MATRIX_CALENDAR_EVENT_WRITE_POLICY,
@@ -121,6 +121,54 @@ describe('MatrixCalendarAuthorizationFactory', () => {
     await expect(
       authorization.isAllowed({ action: 'create-calendar' }),
     ).resolves.toBe(false);
+  });
+
+  it('requires joined membership before checking calendar manager power', async () => {
+    when(matrixClientMock.getJoinedRoomMembers(roomId)).thenResolve([
+      '@someone-else:example.test',
+    ]);
+
+    const factory = new MatrixCalendarAuthorizationFactory(
+      instance(matrixClientMock),
+    );
+
+    await expect(factory.canManageCalendars(userId, roomId)).resolves.toBe(
+      false,
+    );
+    verify(
+      matrixClientMock.getRoomStateEvent(
+        roomId,
+        StateEventName.M_ROOM_POWER_LEVELS_EVENT,
+        '',
+      ),
+    ).never();
+  });
+
+  it('allows joined calendar managers to access diagnostics', async () => {
+    const factory = new MatrixCalendarAuthorizationFactory(
+      instance(matrixClientMock),
+    );
+    setPowerLevels({
+      users: { [userId]: 50 },
+      state_default: 50,
+    });
+
+    await expect(factory.canManageCalendars(userId, roomId)).resolves.toBe(
+      true,
+    );
+  });
+
+  it('denies diagnostics to joined members below manager power', async () => {
+    const factory = new MatrixCalendarAuthorizationFactory(
+      instance(matrixClientMock),
+    );
+    setPowerLevels({
+      users: { [userId]: 49 },
+      state_default: 50,
+    });
+    await expect(factory.canManageCalendars(userId, roomId)).resolves.toBe(
+      false,
+    );
   });
 
   it('supports dedicated Matrix power-level overrides', async () => {

@@ -15,6 +15,12 @@
  */
 
 export {
+  isCalendarDiagnosticsRepository,
+  type CalendarDiagnosticCollection,
+  type CalendarDiagnostics,
+  type CalendarDiagnosticsRepository,
+} from './CalendarDiagnosticsRepository';
+export {
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
   calendarEventToFormValues,

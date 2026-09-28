@@ -53,6 +53,7 @@ import { MatrixOpenIdCredentialParam } from '../decorator/MatrixOpenIdCredential
 import { UserContextParam } from '../decorator/UserContextParam';
 import { CalendarGatewayCalendarDto } from '../dto/CalendarGatewayCalendarDto';
 import { CalendarGatewayContextDto } from '../dto/CalendarGatewayContextDto';
+import { CalendarGatewayDiagnosticsDto } from '../dto/CalendarGatewayDiagnosticsDto';
 import { CalendarGatewayEventDto } from '../dto/CalendarGatewayEventDto';
 import { MatrixAuthGuard } from '../guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
@@ -121,6 +122,70 @@ export class CalendarGatewayController {
             calendar.components,
           ),
       );
+    });
+  }
+
+  @Get('calendars/diagnostics')
+  async getCalendarDiagnostics(
+    @UserContextParam() userContext: IUserContext,
+    @MatrixOpenIdCredentialParam()
+    openIdCredential: IMatrixOpenIdCredential | undefined,
+    @Query('roomId') roomId?: string,
+  ): Promise<CalendarGatewayDiagnosticsDto> {
+    const requiredRoomId = this.requireQuery(roomId, 'roomId');
+    if (
+      !(await this.authorizationFactory.canManageCalendars(
+        userContext.userId,
+        requiredRoomId,
+      ))
+    ) {
+      throw new ForbiddenException(
+        'Not allowed to view CalDAV diagnostics for this Matrix room',
+      );
+    }
+
+    let radicaleUrl: string;
+    try {
+      radicaleUrl = this.requireRadicaleBaseUrl();
+    } catch {
+      throw calendarDiagnosticsUnavailable();
+    }
+
+    const credentialProvider = new MatrixOpenIdCalDavCredentialProvider(
+      userContext,
+      openIdCredential,
+    );
+
+    return this.runCalDav(async () => {
+      try {
+        const discovery = await new CalDavDiscoveryClient(
+          radicaleUrl,
+          credentialProvider,
+        ).discover();
+        const excludedRoots = new Set(
+          [radicaleUrl, discovery.principalUrl, discovery.calendarHomeUrl].map(
+            normalizeUrlForComparison,
+          ),
+        );
+
+        return new CalendarGatewayDiagnosticsDto(
+          discovery.calendars.flatMap((calendar) => {
+            const url = safeCalendarCollectionUrl(
+              calendar.rawHref ?? calendar.href,
+              calendar.href,
+              radicaleUrl,
+              excludedRoots,
+            );
+            return url ? [{ name: calendar.displayName, url }] : [];
+          }),
+        );
+      } catch (error) {
+        if (error instanceof MatrixOpenIdCalDavCredentialError) {
+          throw error;
+        }
+
+        throw calendarDiagnosticsUnavailable();
+      }
     });
   }
 
@@ -744,4 +809,109 @@ export class CalendarGatewayController {
       throw error;
     }
   }
+}
+
+function calendarDiagnosticsUnavailable(): ServiceUnavailableException {
+  return new ServiceUnavailableException({
+    code: 'calendar-diagnostics-unavailable',
+    message: 'CalDAV diagnostics are unavailable',
+  });
+}
+
+function safeCalendarCollectionUrl(
+  rawHref: string,
+  resolvedHref: string,
+  radicaleUrl: string,
+  excludedRoots: Set<string>,
+): string | undefined {
+  let url: URL;
+  let serviceUrl: URL;
+  const trimmedRawHref = rawHref.trim();
+  const rawPath = rawDavHrefPath(trimmedRawHref);
+  try {
+    url = new URL(resolvedHref);
+    serviceUrl = new URL(radicaleUrl);
+  } catch {
+    return undefined;
+  }
+
+  const servicePath = serviceUrl.pathname.endsWith('/')
+    ? serviceUrl.pathname
+    : `${serviceUrl.pathname}/`;
+  let collectionPath: string;
+  let decodedServicePath: string;
+  try {
+    collectionPath = decodeURIComponent(url.pathname);
+    decodedServicePath = decodeURIComponent(servicePath);
+  } catch {
+    return undefined;
+  }
+  const hasEncodedPathSeparator = /%(?:2f|5c)/i.test(url.pathname);
+  const hasDotSegment = collectionPath
+    .split('/')
+    .some((segment) => segment === '.' || segment === '..');
+  const hasUnsafeRawHref =
+    !rawPath ||
+    trimmedRawHref.includes('\\') ||
+    /%(?:2f|5c)/i.test(rawPath) ||
+    rawPath.split('/').some((segment) => {
+      try {
+        const decodedSegment = decodeURIComponent(segment);
+        return decodedSegment === '.' || decodedSegment === '..';
+      } catch {
+        return true;
+      }
+    });
+
+  if (
+    (serviceUrl.protocol !== 'http:' && serviceUrl.protocol !== 'https:') ||
+    url.username ||
+    url.password ||
+    rawHrefHasUserInfo(trimmedRawHref) ||
+    /[?#]/.test(trimmedRawHref) ||
+    url.search ||
+    url.hash ||
+    url.origin !== serviceUrl.origin ||
+    !url.pathname.startsWith(servicePath) ||
+    !collectionPath.startsWith(decodedServicePath) ||
+    hasEncodedPathSeparator ||
+    hasDotSegment ||
+    hasUnsafeRawHref ||
+    excludedRoots.has(normalizeUrlForComparison(url.toString()))
+  ) {
+    return undefined;
+  }
+
+  return url.toString();
+}
+
+function rawDavHrefPath(value: string): string | undefined {
+  const authorityPrefix = /^(?:[a-z][a-z\d+.-]*:)?\/\//i.exec(value)?.[0];
+  if (authorityPrefix) {
+    const afterAuthorityPrefix = value.slice(authorityPrefix.length);
+    const pathStart = afterAuthorityPrefix.search(/[/?#]/);
+    if (pathStart < 0 || afterAuthorityPrefix[pathStart] !== '/') {
+      return '/';
+    }
+
+    return afterAuthorityPrefix.slice(pathStart).split(/[?#]/, 1)[0];
+  }
+
+  return value.split(/[?#]/, 1)[0];
+}
+
+function rawHrefHasUserInfo(value: string): boolean {
+  const authorityPrefix = /^(?:[a-z][a-z\d+.-]*:)?\/\//i.exec(value)?.[0];
+  if (!authorityPrefix) {
+    return false;
+  }
+
+  const authority = value.slice(authorityPrefix.length).split(/[/?#]/, 1)[0];
+  return authority.includes('@');
+}
+
+function normalizeUrlForComparison(value: string): string {
+  const url = new URL(value);
+  const path = url.pathname.replace(/\/+$/, '') || '/';
+  return `${url.origin}${path}`;
 }

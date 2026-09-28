@@ -91,6 +91,17 @@
       "submit": "Save description",
       "title": "Edit calendar description"
     },
+    "diagnostics": {
+      "action": "CalDAV collection URLs",
+      "copied": "Copied",
+      "copy": "Copy URL",
+      "copyError": "The collection URL could not be copied. Check clipboard permissions and try again.",
+      "description": "Copy a collection URL when helping an administrator diagnose calendar access. URLs are shown as text and will not open when selected.",
+      "empty": "No calendar collection URLs are available.",
+      "loadError": "CalDAV diagnostics are unavailable for this room.",
+      "loading": "Loading calendar diagnostics",
+      "title": "CalDAV collection diagnostics"
+    },
     "rename": {
       "action": "Rename calendar",
       "calendar": "Calendar",
@@ -115,6 +126,7 @@
     "toParentRoom": "Back to parent room"
   },
   "copyableTextButton": {
+    "copied": "Copied",
     "copy-to-clipboard": "Copy to clipboard"
   },
   "dateRangePicker": {

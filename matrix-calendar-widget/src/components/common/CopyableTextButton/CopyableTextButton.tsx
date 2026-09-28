@@ -16,26 +16,65 @@
 
 import CheckOutlinedIcon from '@mui/icons-material/CheckOutlined';
 import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined';
-import { IconButton, Tooltip } from '@mui/material';
+import { Button, IconButton, Tooltip } from '@mui/material';
 import { ReactElement, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-export function CopyableTextButton({ text }: { text: string }): ReactElement {
+export function CopyableTextButton({
+  text,
+  label,
+  copiedLabel,
+  onCopy,
+  onCopyError,
+}: {
+  text: string;
+  label?: string;
+  copiedLabel?: string;
+  onCopy?: () => void;
+  onCopyError?: () => void;
+}): ReactElement {
   const { t } = useTranslation();
   const [hasCopied, setHasCopied] = useState(false);
 
-  const handleOnClick = useCallback(() => {
-    navigator.clipboard.writeText(text);
-    setHasCopied(true);
-  }, [text]);
+  const handleOnClick = useCallback(async () => {
+    setHasCopied(false);
+    try {
+      await navigator.clipboard.writeText(text);
+      setHasCopied(true);
+      onCopy?.();
+    } catch {
+      onCopyError?.();
+    }
+  }, [onCopy, onCopyError, text]);
 
   const handleOnBlur = useCallback(() => setHasCopied(false), []);
 
-  return (
+  return label ? (
+    <Button
+      aria-live="polite"
+      onBlur={handleOnBlur}
+      onClick={handleOnClick}
+      size="small"
+      startIcon={
+        hasCopied ? <CheckOutlinedIcon /> : <ContentCopyOutlinedIcon />
+      }
+    >
+      {hasCopied
+        ? (copiedLabel ?? t('copyableTextButton.copied', 'Copied'))
+        : label}
+    </Button>
+  ) : (
     <Tooltip
       title={t('copyableTextButton.copy-to-clipboard', 'Copy to clipboard')}
     >
-      <IconButton onBlur={handleOnBlur} onClick={handleOnClick}>
+      <IconButton
+        aria-label={t(
+          'copyableTextButton.copy-to-clipboard',
+          'Copy to clipboard',
+        )}
+        onBlur={handleOnBlur}
+        onClick={handleOnClick}
+      >
         {hasCopied ? (
           <CheckOutlinedIcon fontSize="inherit" />
         ) : (
