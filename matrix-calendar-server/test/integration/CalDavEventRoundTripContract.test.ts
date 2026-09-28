@@ -15,6 +15,7 @@
  */
 
 import fetchMock from 'jest-fetch-mock';
+import { randomUUID } from 'node:crypto';
 import {
   CalDavCredentialProvider,
   CalDavEventClient,
@@ -36,10 +37,27 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
   const credentials = basicCredentialProvider(username, password);
   const codec = new ICalendarEventCodec();
   let client: CalDavEventClient;
+  let cleanupResourceUrl: string | undefined;
 
   beforeAll(() => {
     fetchMock.disableMocks();
     client = new CalDavEventClient(credentials);
+  });
+
+  afterEach(async () => {
+    if (!cleanupResourceUrl) {
+      return;
+    }
+
+    const resourceUrl = cleanupResourceUrl;
+    cleanupResourceUrl = undefined;
+
+    try {
+      const resource = await client.getEvent(resourceUrl);
+      await client.deleteEvent(resourceUrl, resource.etag);
+    } catch {
+      // Cleanup is best-effort and targets only this test's unique resource.
+    }
   });
 
   afterAll(() => {
@@ -118,7 +136,152 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       status: expect.any(Number),
     });
   });
+
+  it('round-trips a recurring master and detached overrides in one CalDAV resource', async () => {
+    const uid = `radicale-${randomUUID()}@matrix-calendar-widget`;
+    const resourceUrl = new URL(
+      `${randomUUID()}-recurrence.ics`,
+      calendarUrl,
+    ).toString();
+    const source = recurringCalendar(uid);
+
+    await client.createEvent(resourceUrl, source);
+    cleanupResourceUrl = resourceUrl;
+
+    const createdResource = await client.getEvent(resourceUrl);
+    expect(createdResource.href).toBe(resourceUrl);
+    expect(createdResource.etag).toBeTruthy();
+    expect(createdResource.icalendar.match(/BEGIN:VEVENT/g)).toHaveLength(3);
+    expectRecurringResourceProperties(createdResource.icalendar, uid);
+
+    const initial = codec.parse(
+      calendarUrl,
+      resourceUrl,
+      createdResource.icalendar,
+    );
+    expect(initial.event.uid).toBe(uid);
+
+    const patched = initial.applyPatch({ location: 'Interoperability room' });
+    await client.updateEvent(
+      resourceUrl,
+      createdResource.etag,
+      patched.icalendar,
+    );
+
+    const afterPatch = await client.getEvent(resourceUrl);
+    const verified = codec.parse(
+      calendarUrl,
+      resourceUrl,
+      afterPatch.icalendar,
+    );
+    expect(afterPatch.href).toBe(resourceUrl);
+    expect(afterPatch.etag).toBeTruthy();
+    expect(afterPatch.icalendar.match(/BEGIN:VEVENT/g)).toHaveLength(3);
+    expectRecurringResourceProperties(afterPatch.icalendar, uid);
+    expect(verified.event).toMatchObject({
+      uid,
+      location: 'Interoperability room',
+      timing: {
+        type: 'timed',
+        start: {
+          local: '2026-10-05T14:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    });
+  });
 });
+
+function recurringCalendar(uid: string): string {
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Matrix Calendar Widget//Contract//EN',
+    'X-CUSTOM-CALENDAR-PROPERTY:preserve-resource-value',
+    'BEGIN:VTIMEZONE',
+    'TZID:Europe/Stockholm',
+    'X-LIC-LOCATION:Europe/Stockholm',
+    'BEGIN:DAYLIGHT',
+    'TZOFFSETFROM:+0100',
+    'TZOFFSETTO:+0200',
+    'TZNAME:CEST',
+    'DTSTART:19700329T020000',
+    'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU',
+    'END:DAYLIGHT',
+    'BEGIN:STANDARD',
+    'TZOFFSETFROM:+0200',
+    'TZOFFSETTO:+0100',
+    'TZNAME:CET',
+    'DTSTART:19701025T030000',
+    'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
+    'END:STANDARD',
+    'END:VTIMEZONE',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    'DTSTAMP:20260922T120000Z',
+    'DTSTART;TZID=Europe/Stockholm:20261005T140000',
+    'DTEND;TZID=Europe/Stockholm:20261005T150000',
+    'SUMMARY:Weekly review',
+    'RRULE:FREQ=WEEKLY;COUNT=4',
+    'RDATE;TZID=Europe/Stockholm:20261026T140000',
+    'EXDATE;TZID=Europe/Stockholm:20261102T140000',
+    'X-CLIENT-METADATA;X-PARAM=preserve-param:preserve-value',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    'DTSTAMP:20260922T120000Z',
+    'RECURRENCE-ID;TZID=Europe/Stockholm:20261012T140000',
+    'DTSTART;TZID=Europe/Stockholm:20261012T160000',
+    'DTEND;TZID=Europe/Stockholm:20261012T170000',
+    'SUMMARY:Weekly review - moved',
+    'X-OVERRIDE-MARKER;X-ORIGIN=external:preserve-exception',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    'DTSTAMP:20260922T120000Z',
+    'RECURRENCE-ID;TZID=Europe/Stockholm:20261019T140000',
+    'STATUS:CANCELLED',
+    'X-OVERRIDE-MARKER;X-ORIGIN=external:preserve-cancellation',
+    'END:VEVENT',
+    'END:VCALENDAR',
+    '',
+  ].join('\r\n');
+}
+
+function expectRecurringResourceProperties(
+  icalendar: string,
+  uid: string,
+): void {
+  expect(
+    Array.from(
+      icalendar.matchAll(/^UID:([^\r\n]+)\r?$/gm),
+      ([, value]) => value,
+    ),
+  ).toEqual([uid, uid, uid]);
+  expect(icalendar).toContain('RRULE:FREQ=WEEKLY;COUNT=4');
+  expect(icalendar).toContain('RDATE;TZID=Europe/Stockholm:20261026T140000');
+  expect(icalendar).toContain('EXDATE;TZID=Europe/Stockholm:20261102T140000');
+  expect(icalendar).toContain(
+    'RECURRENCE-ID;TZID=Europe/Stockholm:20261012T140000',
+  );
+  expect(icalendar).toContain(
+    'RECURRENCE-ID;TZID=Europe/Stockholm:20261019T140000',
+  );
+  expect(icalendar).toContain('STATUS:CANCELLED');
+  expect(icalendar).toContain('BEGIN:VTIMEZONE');
+  expect(icalendar).toContain(
+    'X-CUSTOM-CALENDAR-PROPERTY:preserve-resource-value',
+  );
+  expect(icalendar).toContain(
+    'X-CLIENT-METADATA;X-PARAM=preserve-param:preserve-value',
+  );
+  expect(icalendar).toContain(
+    'X-OVERRIDE-MARKER;X-ORIGIN=external:preserve-exception',
+  );
+  expect(icalendar).toContain(
+    'X-OVERRIDE-MARKER;X-ORIGIN=external:preserve-cancellation',
+  );
+}
 
 async function directGet(
   url: string,
