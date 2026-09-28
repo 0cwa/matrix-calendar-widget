@@ -24,7 +24,10 @@ import {
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import fetch from 'jest-fetch-mock';
 import { IAppConfiguration } from '../IAppConfiguration';
-import { CalDavDiscoveryError } from '../caldav';
+import {
+  CalDavDiscoveryError,
+  MatrixOpenIdCalDavCredentialProviderFactory,
+} from '../caldav';
 import { MatrixAuthGuard } from '../guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
@@ -66,7 +69,11 @@ describe('CalendarGatewayController', () => {
   function createController(
     config: IAppConfiguration = appConfig,
   ): CalendarGatewayController {
-    return new CalendarGatewayController(config, authorizationFactory);
+    return new CalendarGatewayController(
+      config,
+      authorizationFactory,
+      new MatrixOpenIdCalDavCredentialProviderFactory(),
+    );
   }
 
   it('returns the server-validated Matrix user identity', () => {

@@ -47,3 +47,4 @@ export {
   MatrixOpenIdCalDavCredentialProvider,
 } from './MatrixOpenIdCalDavCredentialProvider';
 export type { MatrixOpenIdCalDavCredentialErrorCode } from './MatrixOpenIdCalDavCredentialProvider';
+export { MatrixOpenIdCalDavCredentialProviderFactory } from './MatrixOpenIdCalDavCredentialProviderFactory';

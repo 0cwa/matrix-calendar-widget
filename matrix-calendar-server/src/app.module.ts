@@ -38,6 +38,7 @@ import path from 'path';
 import postgres from 'postgres';
 import { v4 as uuiv4 } from 'uuid';
 import { AppRuntimeContext } from './AppRuntimeContext';
+import { MatrixOpenIdCalDavCredentialProviderFactory } from './caldav/MatrixOpenIdCalDavCredentialProviderFactory';
 import { JitsiClient } from './client/JitsiClient';
 import { MatrixClientAdapter } from './client/MatrixClientAdapter';
 import { MeetingClient } from './client/MeetingClient';
@@ -307,6 +308,7 @@ const i18nFactory: FactoryProvider<void> = {
     JitsiClient,
     MeetingClient,
     MatrixCalendarAuthorizationFactory,
+    MatrixOpenIdCalDavCredentialProviderFactory,
     MatrixClientAdapter,
     ReactionClient,
     WidgetClient,
