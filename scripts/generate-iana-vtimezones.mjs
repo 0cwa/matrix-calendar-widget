@@ -113,6 +113,14 @@ for (const id of timezoneIds) {
 }
 
 function assertSerializedInuvikOffsets(block) {
+  for (const observance of ['DAYLIGHT', 'STANDARD']) {
+    if (!block.includes(`BEGIN:${observance}\r\n`)) {
+      throw new Error(
+        `Serialized America/Inuvik VTIMEZONE is missing its ${observance} component`,
+      );
+    }
+  }
+
   return assertSerializedTimezoneOffsets(
     block,
     'America/Inuvik',
@@ -157,16 +165,6 @@ const serializedCETOffsets = assertSerializedTimezoneOffsets(
     { localTime: '2026-07-15T12:00:00', expected: 2 * 60 * 60 },
   ],
 );
-const inuvikOffset = upstreamModule.tzlib_get_offset(
-  'America/Inuvik',
-  '2026-12-01',
-  '12:00',
-);
-if (inuvikOffset !== '-0600') {
-  throw new Error(
-    `America/Inuvik must be -0600 after the 2026d change; got ${inuvikOffset}`,
-  );
-}
 
 const artifactDirectory = path.resolve(env.TIMEZONE_ARTIFACT_DIR);
 const licensesDirectory = path.join(artifactDirectory, 'licenses');
@@ -238,7 +236,6 @@ const manifest = {
   },
   validation: {
     ianaTimezoneCount: timezoneIds.length,
-    inuvikOffsetOn2026_12_01: inuvikOffset,
     serializedInuvikOffsets,
     serializedCETOffsets,
     knownZones: [
