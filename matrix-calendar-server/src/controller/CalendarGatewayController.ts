@@ -71,8 +71,7 @@ export class CalendarGatewayController {
     @Inject(ModuleProviderToken.APP_CONFIGURATION)
     private readonly appConfig: IAppConfiguration,
     private readonly authorizationFactory: MatrixCalendarAuthorizationFactory,
-    private readonly credentialProviderFactory:
-      MatrixOpenIdCalDavCredentialProviderFactory,
+    private readonly credentialProviderFactory: MatrixOpenIdCalDavCredentialProviderFactory,
   ) {}
 
   @Get('context')

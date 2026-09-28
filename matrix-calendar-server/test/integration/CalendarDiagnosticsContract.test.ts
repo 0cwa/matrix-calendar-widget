@@ -25,15 +25,14 @@ import {
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NextFunction, Request, Response } from 'express';
+import { request as httpRequest } from 'http';
 import fetchMock from 'jest-fetch-mock';
 import { MatrixClient } from 'matrix-bot-sdk';
 import { AddressInfo } from 'net';
 import { IAppConfiguration } from '../../src/IAppConfiguration';
 import { ModuleProviderToken } from '../../src/ModuleProviderToken';
 import { CalDavCredentialProvider } from '../../src/caldav';
-import {
-  MatrixOpenIdCalDavCredentialProviderFactory,
-} from '../../src/caldav/MatrixOpenIdCalDavCredentialProviderFactory';
+import { MatrixOpenIdCalDavCredentialProviderFactory } from '../../src/caldav/MatrixOpenIdCalDavCredentialProviderFactory';
 import { CalendarGatewayController } from '../../src/controller/CalendarGatewayController';
 import { NET_NORDECK_CONTEXT } from '../../src/decorator/IParamExtractor';
 import { MatrixAuthGuard } from '../../src/guard/MatrixAuthGuard';
@@ -140,9 +139,11 @@ describeContract('Calendar diagnostics composed Radicale contract', () => {
   let app: INestApplication | undefined;
   let baseAddress: string;
   let fetchSpy: jest.SpyInstance | undefined;
+  let nativeFetch: typeof fetch;
 
   beforeAll(async () => {
     fetchMock.disableMocks();
+    nativeFetch = global.fetch.bind(global);
     app = await NestFactory.create(CalendarDiagnosticsContractModule, {
       logger: false,
     });
@@ -151,6 +152,11 @@ describeContract('Calendar diagnostics composed Radicale contract', () => {
     const address = app.getHttpServer().address() as AddressInfo;
     baseAddress = `http://127.0.0.1:${address.port}`;
     fetchSpy = jest.spyOn(global, 'fetch');
+  });
+
+  beforeEach(() => {
+    fetchSpy?.mockImplementation(nativeFetch);
+    fetchSpy?.mockClear();
   });
 
   afterAll(async () => {
@@ -163,22 +169,22 @@ describeContract('Calendar diagnostics composed Radicale contract', () => {
   });
 
   it('denies a joined non-manager before making any Radicale request', async () => {
-    const response = await fetch(diagnosticsUrl(), {
-      headers: { 'x-contract-actor': 'member' },
+    const response = await getJson(diagnosticsUrl(), {
+      'x-contract-actor': 'member',
     });
 
     expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({ statusCode: 403 });
+    expect(JSON.parse(response.body)).toMatchObject({ statusCode: 403 });
     expect(radicaleRequests()).toHaveLength(0);
   });
 
   it('returns only the valid in-base collection from real Radicale discovery', async () => {
-    const response = await fetch(diagnosticsUrl(), {
-      headers: { 'x-contract-actor': 'manager' },
+    const response = await getJson(diagnosticsUrl(), {
+      'x-contract-actor': 'manager',
     });
 
     expect(response.status).toBe(200);
-    const result = (await response.json()) as {
+    const result = JSON.parse(response.body) as {
       calendars: Array<{ name?: string; url: string }>;
     };
     const expectedCalendarUrl = new URL(
@@ -192,9 +198,9 @@ describeContract('Calendar diagnostics composed Radicale contract', () => {
     for (const calendar of result.calendars) {
       const parsed = new URL(calendar.url);
       expect(parsed.origin).toBe(new URL(radicaleBaseUrl).origin);
-      expect(parsed.pathname.startsWith(new URL(radicaleBaseUrl).pathname)).toBe(
-        true,
-      );
+      expect(
+        parsed.pathname.startsWith(new URL(radicaleBaseUrl).pathname),
+      ).toBe(true);
       expect(parsed.username).toBe('');
       expect(parsed.password).toBe('');
       expect(parsed.search).toBe('');
@@ -206,6 +212,28 @@ describeContract('Calendar diagnostics composed Radicale contract', () => {
   function diagnosticsUrl(): string {
     const query = new URLSearchParams({ roomId });
     return `${baseAddress}/v1/calendar/calendars/diagnostics?${query}`;
+  }
+
+  function getJson(
+    url: string,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<{ status: number; body: string }> {
+    return new Promise((resolve, reject) => {
+      const request = httpRequest(url, { headers }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer | string) => {
+          chunks.push(Buffer.from(chunk));
+        });
+        response.on('end', () => {
+          resolve({
+            status: response.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString('utf8'),
+          });
+        });
+      });
+      request.on('error', reject);
+      request.end();
+    });
   }
 
   function radicaleRequests(): string[] {
