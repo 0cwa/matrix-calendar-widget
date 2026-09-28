@@ -1,5 +1,4 @@
 #!/bin/sh
-set -x;
 while [ "$(curl -k -sw '%{http_code}' "$HOMESERVER"/_matrix/client/versions -o /dev/null)" -ne 200 ]; do
   sleep 1;
 done

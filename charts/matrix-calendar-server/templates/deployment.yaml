@@ -99,7 +99,6 @@ spec:
           image: {{ .Values.init.synapse.image }}
           command:
             - sh
-            - -x
             - /scripts/get_meetings_bot_token.sh
           volumeMounts:
             - name: workdir
