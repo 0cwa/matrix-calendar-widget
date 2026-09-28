@@ -6,10 +6,21 @@ response=$(curl -k --write-out '%{http_code}' --silent --output /dev/null -X GET
 if [ "$response" = 400 ]; then
     echo "Bot user already exists"
 else
+  case "$BOT_PASSWORD" in
+    *[![:space:]]*) ;;
+    *)
+      echo "Failed to create Matrix bot account" >&2
+      exit 1
+      ;;
+  esac
   echo "Will create User $USERTOCREATE on $HOMESERVER"
-  if ! register_new_matrix_user -a -u "$USERTOCREATE" -p "$BOT_PASSWORD" -c /data/homeserver.yaml "$HOMESERVER" >/dev/null 2>&1; then
+  PASSWORD_INPUT=$BOT_PASSWORD
+  unset BOT_PASSWORD
+  if ! printf '%s' "$PASSWORD_INPUT" | register_new_matrix_user -a -u "$USERTOCREATE" --password-file /dev/stdin -c /data/homeserver.yaml "$HOMESERVER" >/dev/null 2>&1; then
+    unset PASSWORD_INPUT
     echo "Failed to create Matrix bot account" >&2
     exit 1
   fi
+  unset PASSWORD_INPUT
 fi
 exit 0
