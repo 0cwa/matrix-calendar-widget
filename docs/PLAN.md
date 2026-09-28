@@ -108,9 +108,12 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [ ] Optional `@room` reminder with permission checks.
 - [ ] Complete the app-owned PostgreSQL reminder store and durable claim
       contract (ADR019). The store, migration path, and restricted-role
-      PostgreSQL 16 integration job are implemented; this remains open until
-      the hosted database contract passes. Claims provide at-most-once database
-      claim/completion semantics, not exactly-once Matrix message delivery.
+      PostgreSQL 16 integration job are implemented; all five hosted contract
+      tests passed in PR #111 (run 36358734009). The remaining store gate is
+      verified-TLS validation against an operator-controlled production
+      endpoint using its CA/certificate details. Claims provide at-most-once
+      database claim/completion semantics, not exactly-once Matrix message
+      delivery.
 - [x] Default optional reminder database connections to verified TLS; allow
       plaintext only with explicit `trusted-private-network` mode for an
       operator-controlled isolated network (ADR021). Production TLS remains
