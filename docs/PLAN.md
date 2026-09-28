@@ -69,7 +69,7 @@ Password-auth real-container discovery is already covered by #59 / PR #60. The o
 - [x] Detect mixed collections and expose an advanced compatibility notice.
 - [ ] Hide VJOURNAL-only collections.
 - [ ] Leave VTODO-only collections untouched and hidden from the main calendar UI.
-- [ ] Add manager-only CalDAV URL/copy diagnostics (#5; ADR022).
+- [x] Add manager-only CalDAV URL/copy diagnostics (#5; ADR022; PR #113).
 
 Calendar creation (#94), lightweight visibility controls (#96), rename (#99), and safe deletion of explicitly writable VEVENT-only calendars (#100 / PR #101) are merged. Issue #100 is closed; the M4.4 deletion slice merged in `6faa1d1fdc773aa50798f3678ef77ae61a786144`. Description is implemented through its own operation; continue to avoid a generic metadata patch framework, and keep color and timezone as separate work.
 
