@@ -14,7 +14,14 @@
  * limitations under the License.
  */
 
-import { Calendar, CalendarEvent, CalendarEventInput } from '../model';
+import {
+  Calendar,
+  CalendarEvent,
+  CalendarEventInput,
+  CalendarEventPatch,
+  CalendarEventRecurrenceDate,
+  CalendarEventRecurrenceOverride,
+} from '../model';
 import { CalendarRepositoryError, InMemoryCalendarRepository } from './index';
 
 const calendars: Calendar[] = [
@@ -119,6 +126,66 @@ describe('InMemoryCalendarRepository', () => {
       'VEVENT',
       'VTODO',
     ]);
+  });
+
+  it('defensively clones recurrence override identity and timing', async () => {
+    const inputOverride = recurrenceOverride();
+    const inputRdate = recurrencePeriod();
+    const inputEvent: CalendarEvent = {
+      ...events[2],
+      id: 'recurring-with-override',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY',
+        rdates: [inputRdate],
+        overrides: [inputOverride],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [inputEvent],
+    });
+
+    mutateRecurrenceOverride(inputOverride);
+    mutateRecurrencePeriod(inputRdate);
+    const afterConstruction = await repository.getEvent(
+      'team',
+      'recurring-with-override',
+    );
+    expect(afterConstruction.recurrence?.overrides?.[0]).toMatchObject(
+      expectedRecurrenceOverride(),
+    );
+    expect(afterConstruction.recurrence?.rdates?.[0]).toMatchObject(
+      expectedRecurrencePeriod(),
+    );
+
+    const patchOverride = recurrenceOverride();
+    const patchRdate = recurrencePeriod();
+    const patch: CalendarEventPatch = {
+      recurrence: {
+        rdates: [patchRdate],
+        overrides: [patchOverride],
+      },
+    };
+    const updated = await repository.updateEvent(
+      'team',
+      'recurring-with-override',
+      patch,
+    );
+    mutateRecurrenceOverride(patchOverride);
+    mutateRecurrencePeriod(patchRdate);
+    mutateRecurrenceOverride(updated.recurrence!.overrides![0]);
+    mutateRecurrencePeriod(updated.recurrence!.rdates![0]);
+
+    const afterUpdate = await repository.getEvent(
+      'team',
+      'recurring-with-override',
+    );
+    expect(afterUpdate.recurrence?.overrides?.[0]).toMatchObject(
+      expectedRecurrenceOverride(),
+    );
+    expect(afterUpdate.recurrence?.rdates?.[0]).toMatchObject(
+      expectedRecurrencePeriod(),
+    );
   });
 
   it('creates a named calendar with deterministic identity', async () => {
@@ -423,3 +490,132 @@ describe('InMemoryCalendarRepository', () => {
     ).rejects.toMatchObject({ code: 'calendar-not-found' });
   });
 });
+
+function recurrenceOverride(): CalendarEventRecurrenceOverride {
+  return {
+    recurrenceId: {
+      type: 'floating-date-time',
+      value: '2026-10-12T09:00:00',
+    },
+    timing: {
+      type: 'end',
+      start: {
+        type: 'date-time',
+        value: {
+          local: '2026-10-12T11:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      end: {
+        type: 'date-time',
+        value: {
+          local: '2026-10-12T11:30:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    },
+    status: 'cancelled',
+  };
+}
+
+function recurrencePeriod(): CalendarEventRecurrenceDate {
+  return {
+    type: 'period',
+    timing: {
+      type: 'duration',
+      start: {
+        type: 'date-time',
+        value: {
+          local: '2026-10-12T11:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      duration: {
+        weeks: 0,
+        days: 1,
+        hours: 0,
+        minutes: 0,
+        seconds: 0,
+        isNegative: false,
+      },
+    },
+  };
+}
+
+function mutateRecurrencePeriod(value: CalendarEventRecurrenceDate): void {
+  if (value.type === 'period') {
+    if (value.timing.start.type === 'date-time') {
+      value.timing.start.value.local = '2099-01-01T00:00:00';
+    }
+    if (value.timing.type === 'duration') {
+      value.timing.duration.days = 99;
+    }
+  }
+}
+
+function expectedRecurrencePeriod() {
+  return {
+    type: 'period',
+    timing: {
+      type: 'duration',
+      start: {
+        type: 'date-time',
+        value: {
+          local: '2026-10-12T11:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      duration: {
+        weeks: 0,
+        days: 1,
+        hours: 0,
+        minutes: 0,
+        seconds: 0,
+        isNegative: false,
+      },
+    },
+  };
+}
+
+function mutateRecurrenceOverride(
+  override: CalendarEventRecurrenceOverride,
+): void {
+  if (override.recurrenceId.type === 'floating-date-time') {
+    override.recurrenceId.value = '2099-01-01T00:00:00';
+  } else if (override.recurrenceId.type === 'date-time') {
+    override.recurrenceId.value.local = '2099-01-01T00:00:00';
+  }
+  if (override.timing?.type === 'end') {
+    const start = override.timing.start;
+    if (start.type === 'date-time') {
+      start.value.local = '2099-01-01T01:00:00';
+    }
+  }
+}
+
+function expectedRecurrenceOverride() {
+  return {
+    recurrenceId: {
+      type: 'floating-date-time',
+      value: '2026-10-12T09:00:00',
+    },
+    timing: {
+      type: 'end',
+      start: {
+        type: 'date-time',
+        value: {
+          local: '2026-10-12T11:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      end: {
+        type: 'date-time',
+        value: {
+          local: '2026-10-12T11:30:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    },
+    status: 'cancelled',
+  };
+}

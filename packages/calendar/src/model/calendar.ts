@@ -28,10 +28,8 @@ export type CalendarEventId = string;
 export type CalendarDate = string;
 
 /**
- * Local wall-clock date/time in ISO form without a numeric UTC offset.
- *
- * The named IANA timezone on {@link ZonedCalendarDateTime} defines how the
- * value is interpreted.
+ * Local wall-clock date/time in ISO form without a numeric UTC offset. A
+ * recurrence value may keep it floating or pair it with a named IANA zone.
  */
 export type LocalCalendarDateTime = string;
 
@@ -65,11 +63,51 @@ export type CalendarEventTiming =
 
 export type CalendarEventDateTime =
   | { type: 'date-time'; value: ZonedCalendarDateTime }
+  | { type: 'floating-date-time'; value: LocalCalendarDateTime }
   | { type: 'date'; value: CalendarDate };
+
+/** RFC 5545 DURATION components; week/day units stay distinct from time units. */
+export type CalendarEventDuration = {
+  weeks: number;
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+  isNegative: boolean;
+};
+
+/** Recurrence timing keeps an explicit end separate from an RFC duration. */
+export type CalendarEventRecurrenceTiming =
+  | {
+      type: 'end';
+      start: CalendarEventDateTime;
+      end: CalendarEventDateTime;
+    }
+  | {
+      type: 'duration';
+      start: CalendarEventDateTime;
+      duration: CalendarEventDuration;
+    };
+
+/** A PERIOD-valued RDATE with its explicit end or RFC duration. */
+export type CalendarEventRecurrenceDate =
+  | CalendarEventDateTime
+  | { type: 'period'; timing: CalendarEventRecurrenceTiming };
 
 export type CalendarEventStatus = 'confirmed' | 'tentative' | 'cancelled';
 
 export type CalendarEventTransparency = 'opaque' | 'transparent';
+
+/**
+ * Supported timing and cancellation data from one detached VEVENT in a
+ * recurring CalDAV resource.
+ */
+export type CalendarEventRecurrenceOverride = {
+  /** Original occurrence identity, even when the instance has moved. */
+  recurrenceId: CalendarEventDateTime;
+  timing?: CalendarEventRecurrenceTiming;
+  status?: CalendarEventStatus;
+};
 
 /**
  * Recurrence source metadata.
@@ -79,9 +117,11 @@ export type CalendarEventTransparency = 'opaque' | 'transparent';
  */
 export type CalendarEventRecurrence = {
   rrule?: string;
-  rdates?: CalendarEventDateTime[];
+  rdates?: CalendarEventRecurrenceDate[];
   exdates?: CalendarEventDateTime[];
   recurrenceId?: CalendarEventDateTime;
+  /** Same-UID detached VEVENTs stored in this CalDAV resource. */
+  overrides?: CalendarEventRecurrenceOverride[];
 };
 
 export type Calendar = {

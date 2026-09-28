@@ -100,6 +100,16 @@ The recurring-resource contract uses the hosted CI stack pinned to Synapse
 v1.161.0 and Radicale 3.8.0.0 with `radicale_auth_matrix`. A passing result
 validates this stack only; the broader issue #6 criteria and M5 exit remain open.
 
+The CalDAV codec exposes a read-only domain view of master RRULE, RDATE
+(including PERIOD values), and EXDATE values plus same-resource, same-UID
+detached instances with their original RECURRENCE-ID, explicit DTEND or
+preserved RFC DURATION components, and status. Recurrence DATE-TIME values
+retain their DATE, named-TZID, UTC, or floating kind and exact local wall time;
+viewer-local interpretation and duration expansion remain downstream work
+(ADR023). Ordinary master-field patches preserve all VEVENT components,
+VTIMEZONE, and unknown properties. Recurrence editing and mainstream-client
+interoperability remain open.
+
 **Exit:** common recurring calendars round-trip with mainstream CalDAV clients.
 
 ## M6 — Matrix team features and reminders

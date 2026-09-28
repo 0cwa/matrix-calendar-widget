@@ -109,6 +109,466 @@ describe('ICalendarEventCodec', () => {
     expect(reparsed.event.timing).toEqual(parsed.event.timing);
   });
 
+  it('reads recurrence data and preserves a complete recurring resource on master patch', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-override.ics',
+      fixture('recurrence-override.ics'),
+    );
+
+    expect(parsed.event.recurrence).toEqual({
+      rrule: 'FREQ=WEEKLY;COUNT=4',
+      rdates: [
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-10-26T14:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        {
+          type: 'period',
+          timing: {
+            type: 'end',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-28T14:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            end: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-28T15:30:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
+        },
+        {
+          type: 'period',
+          timing: {
+            type: 'duration',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-29T14:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            duration: {
+              weeks: 0,
+              days: 0,
+              hours: 1,
+              minutes: 30,
+              seconds: 0,
+              isNegative: false,
+            },
+          },
+        },
+      ],
+      exdates: [
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-11-02T14:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      ],
+      overrides: [
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-12T14:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          timing: {
+            type: 'duration',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-12T16:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            duration: {
+              weeks: 0,
+              days: 0,
+              hours: 1,
+              minutes: 0,
+              seconds: 0,
+              isNegative: false,
+            },
+          },
+        },
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-19T14:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          timing: {
+            type: 'end',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-19T14:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            end: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-19T15:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
+          status: 'cancelled',
+        },
+      ],
+    });
+
+    const encoded = parsed.applyPatch({ title: 'Updated weekly review' });
+    const calendar = ICAL.Component.fromString(encoded.icalendar);
+    const events = calendar.getAllSubcomponents('vevent');
+    const timezone = calendar.getFirstSubcomponent('vtimezone');
+
+    expect(events).toHaveLength(3);
+    expect(timezone).not.toBeNull();
+    expect(timezone?.getFirstPropertyValue('tzid')).toBe('Europe/Stockholm');
+    expect(calendar.getFirstPropertyValue('x-custom-calendar-property')).toBe(
+      'preserve-resource-value',
+    );
+    expect(events[0].getFirstPropertyValue('summary')).toBe(
+      'Updated weekly review',
+    );
+    expect(
+      events[0].getFirstProperty('x-client-metadata')?.getFirstValue(),
+    ).toBe('preserve-value');
+    expect(events[1].getFirstPropertyValue('recurrence-id')?.toString()).toBe(
+      '2026-10-12T14:00:00',
+    );
+    expect(events[1].getFirstPropertyValue('dtstart')?.toString()).toBe(
+      '2026-10-12T16:00:00',
+    );
+    expect(events[1].getFirstPropertyValue('duration')?.toString()).toBe(
+      'PT1H',
+    );
+    expect(events[1].getFirstProperty('dtend')).toBeNull();
+    expect(events[1].getFirstPropertyValue('summary')).toBe(
+      'Weekly review - moved',
+    );
+    expect(
+      events[1].getFirstProperty('x-override-marker')?.getFirstValue(),
+    ).toBe('preserve-exception');
+    expect(events[2].getFirstPropertyValue('recurrence-id')?.toString()).toBe(
+      '2026-10-19T14:00:00',
+    );
+    expect(events[2].getFirstPropertyValue('status')).toBe('CANCELLED');
+    expect(
+      events[2].getFirstProperty('x-override-marker')?.getFirstValue(),
+    ).toBe('preserve-cancellation');
+
+    const reparsed = codec.parse(
+      'team',
+      'recurrence-override.ics',
+      encoded.icalendar,
+    );
+    expect(reparsed.event.recurrence).toEqual(parsed.event.recurrence);
+  });
+
+  it('preserves floating recurrence wall time and RFC duration units', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-floating-duration.ics',
+      fixture('recurrence-floating-duration.ics'),
+    );
+
+    expect(parsed.event.recurrence).toMatchObject({
+      rdates: [
+        {
+          type: 'period',
+          timing: {
+            type: 'duration',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-03-29T01:30:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            duration: {
+              weeks: 0,
+              days: 0,
+              hours: 1,
+              minutes: 0,
+              seconds: 0,
+              isNegative: false,
+            },
+          },
+        },
+        {
+          type: 'period',
+          timing: {
+            type: 'duration',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-03-28T01:30:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            duration: {
+              weeks: 0,
+              days: 1,
+              hours: 0,
+              minutes: 0,
+              seconds: 0,
+              isNegative: false,
+            },
+          },
+        },
+        {
+          type: 'period',
+          timing: {
+            type: 'duration',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-03-22T01:30:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            duration: {
+              weeks: 1,
+              days: 0,
+              hours: 0,
+              minutes: 0,
+              seconds: 0,
+              isNegative: false,
+            },
+          },
+        },
+        {
+          type: 'period',
+          timing: {
+            type: 'duration',
+            start: {
+              type: 'floating-date-time',
+              value: '2026-03-29T01:30:00',
+            },
+            duration: {
+              weeks: 0,
+              days: 0,
+              hours: 1,
+              minutes: 0,
+              seconds: 0,
+              isNegative: false,
+            },
+          },
+        },
+      ],
+      exdates: [
+        {
+          type: 'floating-date-time',
+          value: '2026-03-29T01:30:00',
+        },
+      ],
+      overrides: [
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-03-29T01:30:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          timing: {
+            type: 'duration',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-03-29T01:30:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            duration: {
+              weeks: 0,
+              days: 0,
+              hours: 1,
+              minutes: 0,
+              seconds: 0,
+              isNegative: false,
+            },
+          },
+        },
+      ],
+    });
+
+    const periodTimings = parsed.event.recurrence?.rdates?.flatMap((date) =>
+      date.type === 'period' ? [date.timing] : [],
+    );
+    expect(periodTimings).toEqual([
+      {
+        type: 'duration',
+        start: {
+          type: 'date-time',
+          value: {
+            local: '2026-03-29T01:30:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        duration: {
+          weeks: 0,
+          days: 0,
+          hours: 1,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+      {
+        type: 'duration',
+        start: {
+          type: 'date-time',
+          value: {
+            local: '2026-03-28T01:30:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        duration: {
+          weeks: 0,
+          days: 1,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+      {
+        type: 'duration',
+        start: {
+          type: 'date-time',
+          value: {
+            local: '2026-03-22T01:30:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        duration: {
+          weeks: 1,
+          days: 0,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+      {
+        type: 'duration',
+        start: {
+          type: 'floating-date-time',
+          value: '2026-03-29T01:30:00',
+        },
+        duration: {
+          weeks: 0,
+          days: 0,
+          hours: 1,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    ]);
+  });
+
+  it('preserves floating RECURRENCE-ID and detached duration wall time', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-floating-override.ics',
+      fixture('recurrence-floating-override.ics'),
+    );
+
+    expect(parsed.event.recurrence?.overrides).toEqual([
+      {
+        recurrenceId: {
+          type: 'floating-date-time',
+          value: '2026-10-12T14:00:00',
+        },
+        timing: {
+          type: 'duration',
+          start: {
+            type: 'floating-date-time',
+            value: '2026-10-12T16:00:00',
+          },
+          duration: {
+            weeks: 0,
+            days: 0,
+            hours: 1,
+            minutes: 0,
+            seconds: 0,
+            isNegative: false,
+          },
+        },
+      },
+    ]);
+  });
+
+  it('preserves UTC recurrence dates and detached identities', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-utc.ics',
+      fixture('recurrence-utc.ics'),
+    );
+
+    expect(parsed.event.recurrence).toEqual({
+      rrule: 'FREQ=WEEKLY;COUNT=2',
+      rdates: [
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-11-01T14:00:00',
+            timezone: 'UTC',
+          },
+        },
+      ],
+      overrides: [
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-11-01T14:00:00',
+              timezone: 'UTC',
+            },
+          },
+          timing: {
+            type: 'end',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-11-01T16:00:00',
+                timezone: 'UTC',
+              },
+            },
+            end: {
+              type: 'date-time',
+              value: {
+                local: '2026-11-01T17:00:00',
+                timezone: 'UTC',
+              },
+            },
+          },
+        },
+      ],
+    });
+  });
+
   it('preserves unknown calendar and VEVENT properties on patch', () => {
     const parsed = codec.parse(
       'team',

@@ -23,6 +23,9 @@ import {
   CalendarEventId,
   CalendarEventInput,
   CalendarEventPatch,
+  CalendarEventRecurrenceDate,
+  CalendarEventRecurrenceOverride,
+  CalendarEventRecurrenceTiming,
   CalendarId,
   CalendarTimeRange,
   TimedCalendarEventTiming,
@@ -378,9 +381,44 @@ function cloneCalendar(calendar: Calendar): Calendar {
 function cloneCalendarEventDateTime(
   value: CalendarEventDateTime,
 ): CalendarEventDateTime {
-  return value.type === 'date'
-    ? { ...value }
-    : { type: 'date-time', value: { ...value.value } };
+  switch (value.type) {
+    case 'date':
+    case 'floating-date-time':
+      return { ...value };
+    case 'date-time':
+      return { type: 'date-time', value: { ...value.value } };
+  }
+}
+
+function cloneRecurrenceDate(
+  value: CalendarEventRecurrenceDate,
+): CalendarEventRecurrenceDate {
+  if (value.type !== 'period') {
+    return cloneCalendarEventDateTime(value);
+  }
+
+  return {
+    type: 'period',
+    timing: cloneRecurrenceTiming(value.timing),
+  };
+}
+
+function cloneRecurrenceTiming(
+  timing: CalendarEventRecurrenceTiming,
+): CalendarEventRecurrenceTiming {
+  if (timing.type === 'end') {
+    return {
+      type: 'end',
+      start: cloneCalendarEventDateTime(timing.start),
+      end: cloneCalendarEventDateTime(timing.end),
+    };
+  }
+
+  return {
+    type: 'duration',
+    start: cloneCalendarEventDateTime(timing.start),
+    duration: { ...timing.duration },
+  };
 }
 
 function cloneTimedTiming(
@@ -431,13 +469,26 @@ function cloneRecurrence(
   return recurrence
     ? {
         ...recurrence,
-        rdates: recurrence.rdates?.map(cloneCalendarEventDateTime),
+        rdates: recurrence.rdates?.map(cloneRecurrenceDate),
         exdates: recurrence.exdates?.map(cloneCalendarEventDateTime),
         recurrenceId: recurrence.recurrenceId
           ? cloneCalendarEventDateTime(recurrence.recurrenceId)
           : undefined,
+        overrides: recurrence.overrides?.map(cloneRecurrenceOverride),
       }
     : undefined;
+}
+
+function cloneRecurrenceOverride(
+  override: CalendarEventRecurrenceOverride,
+): CalendarEventRecurrenceOverride {
+  return {
+    ...override,
+    recurrenceId: cloneCalendarEventDateTime(override.recurrenceId),
+    timing: override.timing
+      ? cloneRecurrenceTiming(override.timing)
+      : undefined,
+  };
 }
 
 function cloneCalendarEventPatch(
