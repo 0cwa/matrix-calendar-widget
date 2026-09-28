@@ -52,7 +52,9 @@
     "empty": "No events scheduled that match the selected filters.",
     "loadError": "Calendar events could not be loaded.",
     "mixedCompatibilityNotice": "One or more calendars support additional item types. The widget displays and edits VEVENT entries only.",
-    "title": "Calendar events"
+    "title": "Calendar events",
+    "unsupportedRangeRecurrence_one": "The current renderer cannot safely display series with THISANDFUTURE range overrides. Affected series: {{count}}.",
+    "unsupportedRangeRecurrence_other": "The current renderer cannot safely display series with THISANDFUTURE range overrides. Affected series: {{count}}."
   },
   "calendarMonthPicker": {
     "chooseMonth": "Choose month, selected month is {{date, datetime}}",

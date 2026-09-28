@@ -518,6 +518,54 @@ describe('ICalendarEventCodec', () => {
     expect(reparsed.event.recurrence).toEqual(parsed.event.recurrence);
   });
 
+  it('marks THISANDFUTURE ranges and preserves them on a title-only round-trip', () => {
+    const source = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Matrix Calendar Widget//Tests//EN',
+      'BEGIN:VEVENT',
+      'UID:series@example.test',
+      'DTSTAMP:20260922T120000Z',
+      'DTSTART:20261001T090000Z',
+      'DTEND:20261001T100000Z',
+      'RRULE:FREQ=WEEKLY;COUNT=4',
+      'SUMMARY:Planning',
+      'END:VEVENT',
+      'BEGIN:VEVENT',
+      'UID:series@example.test',
+      'DTSTAMP:20260922T120000Z',
+      'RECURRENCE-ID;RANGE=THISANDFUTURE:20261008T090000Z',
+      'DTSTART:20261008T110000Z',
+      'DTEND:20261008T120000Z',
+      'SUMMARY:Planning shifted',
+      'X-OVERRIDE-MARKER:preserve-range-semantics',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+    const parsed = codec.parse('team', 'series.ics', source);
+
+    expect(parsed.event.unsupportedRecurrence).toBe('range-this-and-future');
+    expect(parsed.event.recurrence?.overrides).toHaveLength(1);
+
+    const patched = parsed.applyPatch({ title: 'Renamed planning' });
+    const calendar = ICAL.Component.fromString(patched.icalendar);
+    const override = calendar.getAllSubcomponents('vevent')[1];
+    const recurrenceId = override.getFirstProperty('recurrence-id');
+
+    expect(recurrenceId?.getFirstParameter('range')).toBe('THISANDFUTURE');
+    expect(override.getFirstPropertyValue('dtstart')?.toString()).toBe(
+      '2026-10-08T11:00:00Z',
+    );
+    expect(override.getFirstPropertyValue('summary')).toBe('Planning shifted');
+    expect(override.getFirstPropertyValue('x-override-marker')).toBe(
+      'preserve-range-semantics',
+    );
+    expect(
+      codec.parse('team', 'series.ics', patched.icalendar).event
+        .unsupportedRecurrence,
+    ).toBe('range-this-and-future');
+  });
+
   it('preserves floating recurrence wall time and RFC duration units', () => {
     const parsed = codec.parse(
       'team',

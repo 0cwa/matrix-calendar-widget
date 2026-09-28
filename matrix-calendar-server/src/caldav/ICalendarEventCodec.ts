@@ -220,6 +220,7 @@ export class ICalendarEventCodec {
 
     const timing = readTiming(vevent);
     const recurrence = readRecurrence(calendar, vevent, uid);
+    const unsupportedRecurrence = readUnsupportedRecurrence(calendar, uid);
 
     const event: CalendarEvent = {
       id: eventId,
@@ -235,10 +236,35 @@ export class ICalendarEventCodec {
       categories: readCategories(vevent),
       priority: numberValue(vevent.getFirstPropertyValue('priority')),
       recurrence,
+      ...(unsupportedRecurrence ? { unsupportedRecurrence } : {}),
     };
 
     return new ParsedICalendarEvent(calendar, event);
   }
+}
+
+function readUnsupportedRecurrence(
+  calendar: ICAL.Component,
+  uid: string,
+): CalendarEvent['unsupportedRecurrence'] {
+  const hasThisAndFutureOverride = calendar
+    .getAllSubcomponents('vevent')
+    .some((vevent) => {
+      const recurrenceId = vevent.getFirstProperty('recurrence-id');
+      if (
+        textValue(vevent.getFirstPropertyValue('uid')) !== uid ||
+        !recurrenceId
+      ) {
+        return false;
+      }
+
+      return (
+        recurrenceId.getFirstParameter('range')?.toUpperCase() ===
+        'THISANDFUTURE'
+      );
+    });
+
+  return hasThisAndFutureOverride ? 'range-this-and-future' : undefined;
 }
 
 function findMasterEvent(

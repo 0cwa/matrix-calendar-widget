@@ -946,6 +946,41 @@ describe('CalendarGatewayController', () => {
     expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
   });
 
+  it('returns an unsupported marker for THISANDFUTURE range overrides', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch.mockResponseOnce(
+      multistatus(`
+        <d:response>
+          <d:href>/alice/team/range-series.ics</d:href>
+          <d:propstat>
+            <d:prop>
+              <d:getetag>"range-etag"</d:getetag>
+              <c:calendar-data>${rangeOverrideEventIcs()}</c:calendar-data>
+            </d:prop>
+            <d:status>HTTP/1.1 200 OK</d:status>
+          </d:propstat>
+        </d:response>
+      `),
+      { status: 207 },
+    );
+
+    const response = await createController().listEvents(
+      userContext,
+      openIdCredential,
+      roomId,
+      calendarId,
+      '2026-10-01T00:00:00Z',
+      '2026-10-15T00:00:00Z',
+    );
+
+    expect(response[0].event.unsupportedRecurrence).toBe(
+      'range-this-and-future',
+    );
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
+  });
+
   it('creates a basic VEVENT and returns the server resource state', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';
@@ -1235,6 +1270,27 @@ DTSTART:20260924T080000Z
 DTEND:20260924T090000Z
 SUMMARY:${title}
 ${extraProperty ? `${extraProperty}\n` : ''}END:VEVENT
+END:VCALENDAR`;
+}
+
+function rangeOverrideEventIcs(): string {
+  return `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Matrix Calendar Widget Tests//EN
+BEGIN:VEVENT
+UID:range-series@example.test
+DTSTART:20261001T090000Z
+DTEND:20261001T100000Z
+RRULE:FREQ=WEEKLY;COUNT=4
+SUMMARY:Planning
+END:VEVENT
+BEGIN:VEVENT
+UID:range-series@example.test
+RECURRENCE-ID;RANGE=THISANDFUTURE:20261008T090000Z
+DTSTART:20261008T110000Z
+DTEND:20261008T120000Z
+SUMMARY:Planning shifted
+END:VEVENT
 END:VCALENDAR`;
 }
 
