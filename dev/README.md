@@ -52,3 +52,7 @@ separately with their documented configuration.
 Chart dev values use non-routable `.invalid` Matrix and Element hostnames as
 placeholders. Replace them with operator-owned endpoints before rendering or
 deploying those values; the defaults are not a working deployment profile.
+The values also set the server's widget URL to
+`https://matrix-calendar-widget.example.invalid` and derive widget homeserver
+and API hostnames from `settings.hostname: matrix.example.invalid`; override
+these values too when configuring a deployment.
