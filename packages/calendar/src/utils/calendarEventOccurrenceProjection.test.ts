@@ -21,6 +21,10 @@ import type {
   CalendarTimeRange,
 } from '../model';
 import { projectCalendarEventOccurrences } from './calendarEventOccurrenceProjection';
+import {
+  calendarLocalDateTimeToUnixMillis,
+  calendarUnixMillisToLocalDateTime,
+} from './calendarEventTimezone';
 
 const stockholmRange: CalendarTimeRange = {
   start: '2026-10-23T00:00:00Z',
@@ -203,6 +207,47 @@ describe('projectCalendarEventOccurrences', () => {
     ).toHaveLength(0);
   });
 
+  it('accepts minute-precision local values and matches second-precision recurrence exceptions', () => {
+    const event: CalendarEvent = {
+      id: 'minute-precision',
+      calendarId: 'team',
+      uid: 'minute-precision@example.test',
+      title: 'Minute precision',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-23T09:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-23T10:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=DAILY;COUNT=2',
+        exdates: [zoned('2026-10-24T09:00:00')],
+      },
+    };
+
+    const result = projectCalendarEventOccurrences(
+      [event],
+      {
+        start: '2026-10-23T00:00:00Z',
+        end: '2026-10-26T00:00:00Z',
+      },
+      'Europe/Stockholm',
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.occurrences).toHaveLength(1);
+    expect(result.occurrences[0].event.timing).toMatchObject({
+      start: { local: '2026-10-23T09:00:00' },
+    });
+  });
+
   it('keeps explicit DTEND exact while RFC day and hour duration units follow DST rules', () => {
     const event = timedEvent({
       id: 'dst-series',
@@ -275,6 +320,185 @@ describe('projectCalendarEventOccurrences', () => {
     expect(exactEnd.diff(exactStart, 'hours').hours).toBe(24);
   });
 
+  it('uses pinned IANA rules for named-zone recurrence across an Inuvik transition', () => {
+    const event: CalendarEvent = {
+      id: 'inuvik',
+      calendarId: 'team',
+      uid: 'inuvik@example.test',
+      title: 'Inuvik planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-03-06T09:00:00',
+          timezone: 'America/Inuvik',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-03-06T10:00:00',
+          timezone: 'America/Inuvik',
+        },
+      },
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=4' },
+    };
+
+    const result = projectCalendarEventOccurrences(
+      [event],
+      {
+        start: '2026-03-06T00:00:00Z',
+        end: '2026-03-10T00:00:00Z',
+      },
+      'America/Inuvik',
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(
+      result.occurrences.map(({ event: occurrence }) =>
+        occurrence.timing.type === 'timed'
+          ? occurrence.timing.start.local
+          : undefined,
+      ),
+    ).toEqual([
+      '2026-03-06T09:00:00',
+      '2026-03-07T09:00:00',
+      '2026-03-08T09:00:00',
+      '2026-03-09T09:00:00',
+    ]);
+    expect(
+      new Date(
+        calendarLocalDateTimeToUnixMillis(
+          '2026-03-08T09:00:00',
+          'America/Inuvik',
+        ),
+      ).toISOString(),
+    ).toBe('2026-03-08T15:00:00.000Z');
+  });
+
+  it('omits RRULE gap instances without consuming COUNT and resolves overlaps to the first instant', () => {
+    const event = timedEvent({
+      id: 'stockholm-gap',
+      start: '2026-03-28T02:30:00',
+      end: '2026-03-28T03:30:00',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=4' },
+    });
+    const result = projectCalendarEventOccurrences(
+      [event],
+      {
+        start: '2026-03-27T00:00:00Z',
+        end: '2026-04-03T00:00:00Z',
+      },
+      'Europe/Stockholm',
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(
+      result.occurrences.map(({ event: occurrence }) =>
+        occurrence.timing.type === 'timed'
+          ? occurrence.timing.start.local
+          : undefined,
+      ),
+    ).toEqual([
+      '2026-03-28T02:30:00',
+      '2026-03-30T02:30:00',
+      '2026-03-31T02:30:00',
+      '2026-04-01T02:30:00',
+    ]);
+    expect(
+      new Date(
+        calendarLocalDateTimeToUnixMillis(
+          '2026-10-25T02:30:00',
+          'Europe/Stockholm',
+        ),
+      ).toISOString(),
+    ).toBe('2026-10-25T00:30:00.000Z');
+    expect(
+      calendarUnixMillisToLocalDateTime(
+        Date.parse('2026-10-25T01:30:00Z'),
+        'Europe/Stockholm',
+      ),
+    ).toBe('2026-10-25T02:30:00');
+    expect(
+      new Date(
+        calendarLocalDateTimeToUnixMillis(
+          '2026-03-29T02:30:00',
+          'Europe/Stockholm',
+        ),
+      ).toISOString(),
+    ).toBe('2026-03-29T01:30:00.000Z');
+  });
+
+  it('rejects malformed COUNT and calendar-invalid DATE UNTIL values', () => {
+    const malformedCount = timedEvent({
+      id: 'malformed-count',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=0x10' },
+    });
+    const malformedUntil: CalendarEvent = {
+      id: 'malformed-until',
+      calendarId: 'team',
+      uid: 'malformed-until@example.test',
+      title: 'Malformed until',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-09-01',
+        endDate: '2026-09-02',
+      },
+      recurrence: { rrule: 'FREQ=DAILY;UNTIL=20260932' },
+    };
+
+    const result = projectCalendarEventOccurrences(
+      [malformedCount, malformedUntil],
+      stockholmRange,
+      'Europe/Stockholm',
+    );
+
+    expect(result.occurrences).toEqual([]);
+    expect(result.diagnostics).toEqual([
+      { sourceEvent: malformedCount, reason: 'invalid-recurrence' },
+      { sourceEvent: malformedUntil, reason: 'invalid-recurrence' },
+    ]);
+  });
+
+  it('diagnoses oversized recurrence arrays before traversing their members', () => {
+    const blocked = <T>(items: T[]) =>
+      new Proxy(items, {
+        get(target, property, receiver) {
+          if (property === Symbol.iterator || property === 'map') {
+            throw new Error('oversized recurrence array was traversed');
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      });
+    const recurrence = {
+      rdates: blocked(
+        Array.from({ length: 2_000 }, () => zoned('2026-11-01T09:00:00')),
+      ),
+      exdates: blocked(
+        Array.from({ length: 2_000 }, () => zoned('2026-11-02T09:00:00')),
+      ),
+      overrides: blocked(
+        Array.from({ length: 97 }, () => ({
+          recurrenceId: zoned('2026-11-03T09:00:00'),
+          status: 'cancelled' as const,
+        })),
+      ),
+    };
+    const event = timedEvent({
+      id: 'oversized-rdates',
+      recurrence,
+    });
+
+    const result = projectCalendarEventOccurrences(
+      [event],
+      stockholmRange,
+      'Europe/Stockholm',
+    );
+
+    expect(result.occurrences).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].sourceEvent).toBe(event);
+    expect(result.diagnostics[0].reason).toBe('recurrence-input-limit');
+  });
+
   it('keeps unsupported range overrides and malformed rules opaque with diagnostics', () => {
     const unsupported = timedEvent({
       id: 'this-and-future',
@@ -285,9 +509,28 @@ describe('projectCalendarEventOccurrences', () => {
       id: 'malformed',
       recurrence: { rrule: 'FREQ=DAILY;RSCALE=GREGORIAN' },
     });
+    const unsupportedTimezone: CalendarEvent = {
+      id: 'unsupported-timezone',
+      calendarId: 'team',
+      uid: 'unsupported-timezone@example.test',
+      title: 'Unsupported timezone',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-23T09:00:00',
+          timezone: 'Custom/Unbundled',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-23T10:00:00',
+          timezone: 'Custom/Unbundled',
+        },
+      },
+    };
 
     const result = projectCalendarEventOccurrences(
-      [unsupported, malformed],
+      [unsupported, malformed, unsupportedTimezone],
       stockholmRange,
       'Europe/Stockholm',
     );
@@ -296,6 +539,7 @@ describe('projectCalendarEventOccurrences', () => {
     expect(result.diagnostics).toEqual([
       { sourceEvent: unsupported, reason: 'invalid-recurrence' },
       { sourceEvent: malformed, reason: 'invalid-recurrence' },
+      { sourceEvent: unsupportedTimezone, reason: 'unsupported-timezone' },
     ]);
   });
 });

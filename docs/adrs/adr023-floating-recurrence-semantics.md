@@ -82,9 +82,11 @@ PR #121 adds the `@matrix-calendar-widget/ical-timezones` package generated
 from IANA Time Zone Database 2026d. Its source and output provenance is recorded
 in `docs/timezones-ical-data.md` and
 `packages/ical-timezones/src/data/provenance.json`; package tests verify the
-data hash and selected historical/current timezone offsets. This data evidence
-does not complete the broader application DST and named-timezone regression
-suite or make CalDAV queries viewer-local.
+data hash and selected historical/current timezone offsets. The bounded
+projector resolves named source and viewer zones only when their exact IDs
+exist in that bundle, through pinned `ical.js` transition data. Other TZIDs and
+arbitrary custom VTIMEZONE definitions remain opaque with a diagnostic. This
+does not make CalDAV queries viewer-local.
 
 Collection `Calendar.timezone` editing remains deferred under M4. Viewer-local
 event interpretation does not read or write that collection property.

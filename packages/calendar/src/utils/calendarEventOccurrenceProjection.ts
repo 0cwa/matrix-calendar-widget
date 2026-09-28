@@ -31,12 +31,21 @@ import type {
 } from '../model';
 import { isAllDayCalendarEvent, isTimedCalendarEvent } from '../model';
 import { calendarEventTimedDateTimeToDateTime } from './calendarEventTimedDateTime';
+import {
+  CalendarEventTimezoneError,
+  calendarLocalDateTimeToUnixMillis,
+  calendarUnixMillisToLocalDateTime,
+  isCalendarRecurrenceWallTimeValid,
+  isCalendarTimezoneSupported,
+} from './calendarEventTimezone';
 
 /** Maximum RRULE candidates returned for one resource in one projection. */
 export const MAX_PROJECTED_OCCURRENCES_PER_EVENT = 512;
 
 /** Bounds historical work when an old high-frequency RRULE is queried. */
 const MAX_RRULE_SCAN_STEPS = 100_000;
+/** Bounds exception/additional-date work before recurrence arrays are traversed. */
+const MAX_RECURRENCE_INPUT_MEMBERS = 4_096;
 
 const supportedRRuleParts = new Set([
   'BYDAY',
@@ -59,6 +68,7 @@ export type CalendarEventProjectionDiagnosticReason =
   | 'invalid-recurrence'
   | 'invalid-timing'
   | 'occurrence-limit'
+  | 'recurrence-input-limit'
   | 'unsupported-timezone';
 
 export type CalendarEventProjectionDiagnostic = {
@@ -128,7 +138,7 @@ export function projectCalendarEventOccurrences(
     } catch (error) {
       diagnostics.push({
         sourceEvent,
-        reason: isProjectionError(error) ? error.reason : 'invalid-recurrence',
+        reason: projectionErrorReason(error),
       });
     }
   }
@@ -147,6 +157,7 @@ function projectEvent(
   }
 
   const recurrence = sourceEvent.recurrence;
+  assertRecurrenceInputLimit(recurrence);
   if (!recurrenceHasProjectionData(recurrence)) {
     const interval = eventInterval(sourceEvent, viewerTimezone);
     return intersects(interval, rangeStart, rangeEnd)
@@ -188,6 +199,18 @@ function projectEvent(
   throw projectionError('invalid-timing');
 }
 
+function assertRecurrenceInputLimit(
+  recurrence: CalendarEvent['recurrence'],
+): void {
+  const memberCount =
+    (recurrence?.rdates?.length ?? 0) +
+    (recurrence?.exdates?.length ?? 0) +
+    (recurrence?.overrides?.length ?? 0);
+  if (memberCount > MAX_RECURRENCE_INPUT_MEMBERS) {
+    throw projectionError('recurrence-input-limit');
+  }
+}
+
 function projectAllDaySeries(
   sourceEvent: CalendarEvent & { timing: AllDayCalendarEventTiming },
   rangeStart: DateTime,
@@ -213,11 +236,18 @@ function projectAllDaySeries(
   }
 
   const rule = buildRule(recurrence?.rrule, anchor);
-  const lowerDate = rangeStart
-    .setZone(viewerTimezone)
-    .minus({ days: baseDurationDays })
+  const localRangeStart = calendarUnixMillisToLocalDateTime(
+    rangeStart.toMillis(),
+    viewerTimezone,
+  );
+  const localRangeEnd = calendarUnixMillisToLocalDateTime(
+    rangeEnd.toMillis(),
+    viewerTimezone,
+  );
+  const lowerDate = parseDate(localRangeStart.slice(0, 10))
+    ?.minus({ days: baseDurationDays })
     .toISODate();
-  const upperDate = rangeEnd.setZone(viewerTimezone).toISODate();
+  const upperDate = parseDate(localRangeEnd.slice(0, 10))?.toISODate();
   if (!lowerDate || !upperDate) {
     throw projectionError('invalid-timing');
   }
@@ -276,17 +306,17 @@ function projectTimedSeries(
 
   const rule = buildRule(recurrence?.rrule, anchor);
   const anchorTimezone = dateTimeTimezone(anchor, viewerTimezone);
-  const lowerWall = DateTime.fromMillis(
-    rangeStart.toMillis() - baseDurationMillis,
-    { zone: anchorTimezone },
+  const lowerValue = dateTimeValueFromWallString(
+    calendarUnixMillisToLocalDateTime(
+      rangeStart.toMillis() - baseDurationMillis,
+      anchorTimezone,
+    ),
+    anchor,
   );
-  const upperWall = rangeEnd.setZone(anchorTimezone);
-  if (!lowerWall.isValid || !upperWall.isValid) {
-    throw projectionError('invalid-timing');
-  }
-
-  const lowerValue = dateTimeValueFromWallDateTime(lowerWall, anchor);
-  const upperValue = dateTimeValueFromWallDateTime(upperWall, anchor);
+  const upperValue = dateTimeValueFromWallString(
+    calendarUnixMillisToLocalDateTime(rangeEnd.toMillis(), anchorTimezone),
+    anchor,
+  );
   addRuleCandidates(candidates, rule, anchor, lowerValue, upperValue, {
     rangeStart,
     rangeEnd,
@@ -310,11 +340,8 @@ function projectTimedSeries(
 
       const startValue = dateTimeValueToTimedDateTime(candidate.recurrenceId);
       const start = timedValueToDateTime(startValue, viewerTimezone);
-      const end = DateTime.fromMillis(start.toMillis() + baseDurationMillis, {
-        zone: viewerTimezone,
-      });
       const endValue = timedDateTimeAtInstant(
-        end,
+        start.toMillis() + baseDurationMillis,
         sourceEvent.timing.end,
         viewerTimezone,
       );
@@ -583,6 +610,9 @@ function buildRule(
   }
 
   const countText = parts.get('COUNT');
+  if (countText !== undefined && !/^\d+$/.test(countText)) {
+    throw projectionError('invalid-recurrence');
+  }
   const count = countText === undefined ? undefined : Number(countText);
   if (
     (count !== undefined && (!Number.isSafeInteger(count) || count <= 0)) ||
@@ -640,7 +670,11 @@ function parseUntil(
     if (anchor.type !== 'date') {
       throw projectionError('invalid-recurrence');
     }
-    return { type: 'date', value: compactDate(rawValue) };
+    const value = compactDate(rawValue);
+    if (!parseDate(value)) {
+      throw projectionError('invalid-recurrence');
+    }
+    return { type: 'date', value };
   }
 
   const dateTimeMatch = rawValue.match(/^(\d{8}T\d{6})(Z?)$/i);
@@ -876,40 +910,64 @@ function timedTimingFromRecurrenceTiming(
     return { type: 'timed', start, end };
   }
 
-  const endDateTime = addRfcDuration(
-    startDateTime,
+  const endValue = addRfcDuration(
+    timing.start,
     timing.duration,
     viewerTimezone,
   );
+  const endDateTime = recurrenceValueToDateTime(endValue, viewerTimezone);
   if (endDateTime.toMillis() <= startDateTime.toMillis()) {
     throw projectionError('invalid-timing');
   }
   return {
     type: 'timed',
     start,
-    end: timedDateTimeAtInstant(endDateTime, start, viewerTimezone),
+    end: dateTimeValueToTimedDateTime(endValue),
   };
 }
 
 function addRfcDuration(
-  start: DateTime,
+  start: CalendarEventDateTime,
   duration: CalendarEventDuration,
   viewerTimezone: string,
-): DateTime {
+): CalendarEventDateTime {
   validateDuration(duration, false);
-  assertTimezone(viewerTimezone);
-  const direction = duration.isNegative ? -1 : 1;
-  const calendarDays = direction * (duration.weeks * 7 + duration.days);
-  const endOfCalendarUnits = start.plus({ days: calendarDays });
-  const end = endOfCalendarUnits.plus({
-    hours: direction * duration.hours,
-    minutes: direction * duration.minutes,
-    seconds: direction * duration.seconds,
-  });
-  if (!end.isValid) {
+  const timezone = dateTimeTimezone(start, viewerTimezone);
+  const localStart = recurrenceLocalValue(start);
+  const wallStart = DateTime.fromISO(localStart, { zone: 'UTC' });
+  if (!wallStart.isValid) {
     throw projectionError('invalid-timing');
   }
-  return end;
+
+  const calendarDays = duration.weeks > 0 ? duration.weeks * 7 : duration.days;
+  const localAfterCalendarUnits = wallStart
+    .plus({ days: calendarDays })
+    .toFormat("yyyy-MM-dd'T'HH:mm:ss");
+  const instantAfterCalendarUnits = assertLocalDateTime(
+    localAfterCalendarUnits,
+    timezone,
+  );
+  const exactMillis =
+    ((duration.hours * 60 + duration.minutes) * 60 + duration.seconds) * 1000;
+
+  // Pure calendar units retain their nominal wall value, including an
+  // explicit value that falls in a DST gap. Exact units continue from the
+  // instant selected by the pinned timezone rules.
+  const localEnd =
+    exactMillis === 0
+      ? localAfterCalendarUnits
+      : calendarUnixMillisToLocalDateTime(
+          instantAfterCalendarUnits + exactMillis,
+          timezone,
+        );
+  if (
+    exactMillis !== 0 &&
+    assertLocalDateTime(localEnd, timezone) !==
+      instantAfterCalendarUnits + exactMillis
+  ) {
+    throw projectionError('invalid-timing');
+  }
+  return recurrenceValueWithLocal(start, localEnd);
 }
 
 function eventInterval(
@@ -918,23 +976,21 @@ function eventInterval(
 ): { start: number; end: number } {
   if (isAllDayCalendarEvent(event)) {
     assertTimezone(viewerTimezone);
-    const start = DateTime.fromISO(event.timing.startDate, {
-      zone: viewerTimezone,
-    });
-    const end = DateTime.fromISO(event.timing.endDate, {
-      zone: viewerTimezone,
-    });
     if (
-      !start.isValid ||
-      !end.isValid ||
-      start.toISODate() !== event.timing.startDate ||
-      end.toISODate() !== event.timing.endDate
+      !parseDate(event.timing.startDate) ||
+      !parseDate(event.timing.endDate)
     ) {
       throw projectionError('invalid-timing');
     }
     return {
-      start: start.startOf('day').toMillis(),
-      end: end.startOf('day').toMillis(),
+      start: assertLocalDateTime(
+        `${event.timing.startDate}T00:00:00`,
+        viewerTimezone,
+      ),
+      end: assertLocalDateTime(
+        `${event.timing.endDate}T00:00:00`,
+        viewerTimezone,
+      ),
     };
   }
 
@@ -994,10 +1050,18 @@ function recurrenceIdentity(value: CalendarEventDateTime): string {
     case 'date':
       return `date:${value.value}`;
     case 'floating-date-time':
-      return `floating:${value.value}`;
+      return `floating:${canonicalRecurrenceLocal(value.value)}`;
     case 'date-time':
-      return `zoned:${value.value.timezone}:${value.value.local}`;
+      return `zoned:${value.value.timezone}:${canonicalRecurrenceLocal(value.value.local)}`;
   }
+}
+
+function canonicalRecurrenceLocal(value: string): string {
+  const local = DateTime.fromISO(value, { zone: 'UTC' });
+  if (!local.isValid) {
+    throw projectionError('invalid-recurrence');
+  }
+  return local.toFormat("yyyy-MM-dd'T'HH:mm:ss");
 }
 
 function recurrenceValueToDateTime(
@@ -1011,8 +1075,7 @@ function recurrenceValueToDateTime(
     value.type === 'floating-date-time' ? viewerTimezone : value.value.timezone;
   const local =
     value.type === 'floating-date-time' ? value.value : value.value.local;
-  assertTimezone(zone);
-  return assertLocalDateTime(local, zone);
+  return DateTime.fromMillis(assertLocalDateTime(local, zone), { zone: 'UTC' });
 }
 
 function dateTimeValueToTimedDateTime(
@@ -1039,27 +1102,22 @@ function timedValueToDateTime(
 }
 
 function timedDateTimeAtInstant(
-  instant: DateTime,
-  template: CalendarEventTimedDateTime | DateTime,
+  instantMillis: number,
+  template: CalendarEventTimedDateTime,
   viewerTimezone: string,
 ): CalendarEventTimedDateTime {
-  if (template instanceof DateTime) {
-    return {
-      type: 'floating',
-      local: instant.setZone(viewerTimezone).toFormat("yyyy-MM-dd'T'HH:mm:ss"),
-    };
+  const timezone =
+    template.type === 'floating' ? viewerTimezone : template.timezone;
+  const local = calendarUnixMillisToLocalDateTime(instantMillis, timezone);
+  if (assertLocalDateTime(local, timezone) !== instantMillis) {
+    // The typed model cannot encode which side of an overlap an instant uses.
+    throw projectionError('invalid-timing');
   }
+
   if (template.type === 'floating') {
-    return {
-      type: 'floating',
-      local: instant.setZone(viewerTimezone).toFormat("yyyy-MM-dd'T'HH:mm:ss"),
-    };
+    return { type: 'floating', local };
   }
-  return {
-    type: 'zoned',
-    local: instant.setZone(template.timezone).toFormat("yyyy-MM-dd'T'HH:mm:ss"),
-    timezone: template.timezone,
-  };
+  return { type: 'zoned', local, timezone: template.timezone };
 }
 
 function assertTimedTimezone(
@@ -1074,36 +1132,24 @@ function assertTimedTimezone(
 }
 
 function assertTimezone(timezone: string): void {
-  try {
-    if (!DateTime.local().setZone(timezone).isValid) {
-      throw new Error('invalid timezone');
-    }
-  } catch {
+  if (!isCalendarTimezoneSupported(timezone)) {
     throw projectionError('unsupported-timezone');
   }
 }
 
-function assertLocalDateTime(value: string, timezone: string): DateTime {
-  const wall = DateTime.fromISO(value, { zone: 'UTC' });
-  const local = DateTime.fromISO(value, { zone: timezone });
-  if (!wall.isValid || !local.isValid) {
-    throw projectionError('invalid-timing');
+function assertLocalDateTime(value: string, timezone: string): number {
+  try {
+    return calendarLocalDateTimeToUnixMillis(value, timezone);
+  } catch (error) {
+    if (error instanceof CalendarEventTimezoneError) {
+      throw projectionError(
+        error.code === 'unsupported-timezone'
+          ? 'unsupported-timezone'
+          : 'invalid-timing',
+      );
+    }
+    throw error;
   }
-
-  // Luxon normalizes nonexistent spring-forward wall times. Do not silently
-  // turn a saved recurrence time into a different local time.
-  if (
-    wall.year !== local.year ||
-    wall.month !== local.month ||
-    wall.day !== local.day ||
-    wall.hour !== local.hour ||
-    wall.minute !== local.minute ||
-    wall.second !== local.second ||
-    wall.millisecond !== local.millisecond
-  ) {
-    throw projectionError('invalid-timing');
-  }
-  return local;
 }
 
 function parseDate(value: string): DateTime | undefined {
@@ -1132,19 +1178,13 @@ function dateTimeTimezone(
     : value.value.timezone;
 }
 
-function dateTimeValueFromWallDateTime(
-  value: DateTime,
+function dateTimeValueFromWallString(
+  local: string,
   anchor: CalendarEventDateTime,
 ): CalendarEventDateTime {
   if (anchor.type === 'date') {
-    const date = value.toISODate();
-    if (!date) {
-      throw projectionError('invalid-recurrence');
-    }
-    return { type: 'date', value: date };
+    throw projectionError('invalid-recurrence');
   }
-
-  const local = value.toFormat("yyyy-MM-dd'T'HH:mm:ss");
   return anchor.type === 'floating-date-time'
     ? { type: 'floating-date-time', value: local }
     : {
@@ -1224,16 +1264,34 @@ function isValidRecurrenceStart(
   if (value.type === 'date') {
     return Boolean(parseDate(value.value));
   }
-  try {
-    recurrenceValueToDateTime(value, viewerTimezone);
-    return true;
-  } catch (error) {
-    if (isProjectionError(error) && error.reason === 'invalid-timing') {
-      // RFC 5545 excludes recurrence instances that land in a local time gap.
-      return false;
-    }
-    throw error;
+  // RFC 5545 excludes RRULE instances in a local time gap without consuming
+  // COUNT. This check occurs before addRuleCandidates increments validCount.
+  return isCalendarRecurrenceWallTimeValid(
+    recurrenceLocalValue(value),
+    dateTimeTimezone(value, viewerTimezone),
+  );
+}
+
+function recurrenceLocalValue(value: CalendarEventDateTime): string {
+  if (value.type === 'date') {
+    throw projectionError('invalid-recurrence');
   }
+  return value.type === 'floating-date-time' ? value.value : value.value.local;
+}
+
+function recurrenceValueWithLocal(
+  template: CalendarEventDateTime,
+  local: string,
+): CalendarEventDateTime {
+  if (template.type === 'date') {
+    throw projectionError('invalid-recurrence');
+  }
+  return template.type === 'floating-date-time'
+    ? { type: 'floating-date-time', value: local }
+    : {
+        type: 'date-time',
+        value: { local, timezone: template.value.timezone },
+      };
 }
 
 function estimatedRulePeriods(
@@ -1305,6 +1363,20 @@ function isProjectionError(error: unknown): error is ProjectionError {
     'reason' in error &&
     typeof error.reason === 'string',
   );
+}
+
+function projectionErrorReason(
+  error: unknown,
+): CalendarEventProjectionDiagnosticReason {
+  if (isProjectionError(error)) {
+    return error.reason;
+  }
+  if (error instanceof CalendarEventTimezoneError) {
+    return error.code === 'unsupported-timezone'
+      ? 'unsupported-timezone'
+      : 'invalid-timing';
+  }
+  return 'invalid-recurrence';
 }
 
 function projectionError(

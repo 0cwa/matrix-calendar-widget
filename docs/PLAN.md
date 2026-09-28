@@ -134,6 +134,9 @@ instant and are converted from their saved zone. This covers details, lists,
 visible and accessible calendar-cell labels, grid sorting, and the in-memory
 range filter. Projection occurrence IDs map selection back to their source
 resource; unsupported or malformed recurrence is hidden with a diagnostic.
+The bounded projector resolves source and viewer IANA timezones only when their
+exact identifiers exist in the bundled 2026d VTIMEZONE data; unsupported TZIDs
+and arbitrary custom VTIMEZONE definitions remain opaque with a diagnostic.
 The editor preserves each endpoint's local value and kind on timing edits;
 non-timing edits preserve the original resource, and floating timing edits
 serialize without TZID or a UTC marker.
@@ -153,9 +156,9 @@ IANA Time Zone Database 2026d. See
 [`docs/timezones-ical-data.md`](timezones-ical-data.md) and
 `packages/ical-timezones/src/data/provenance.json` for the source checksum and
 generator inputs. Package tests verify the committed data hash and selected
-historical and current offsets. Focused projector tests cover RFC duration
-week/day versus exact time units across DST; this does not complete the broader
-application named-timezone regression suite.
+historical and current offsets. Projector conversion uses this pinned dataset
+through `ical.js`; this scope does not cover arbitrary embedded custom
+VTIMEZONE definitions or establish mainstream-client recurrence interoperability.
 Ordinary master-field patches preserve all VEVENT components, VTIMEZONE, and
 unknown properties. The codec continues to reject master events without
 DTEND. Recurrence editing and mainstream-client interoperability remain open.

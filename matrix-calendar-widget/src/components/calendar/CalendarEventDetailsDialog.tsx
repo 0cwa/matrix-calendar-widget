@@ -73,6 +73,12 @@ export function CalendarEventDetailsDialog({
     ? calendars.data.find((calendar) => calendar.id === currentEvent.calendarId)
     : undefined;
   const canMutate = Boolean(eventCalendar && !eventCalendar.readOnly);
+  const deletesRecurringSeries = Boolean(
+    currentEvent?.recurrence?.rrule ||
+    currentEvent?.recurrence?.rdates?.length ||
+    currentEvent?.recurrence?.exdates?.length ||
+    currentEvent?.recurrence?.overrides?.length,
+  );
 
   const handleDelete = async () => {
     if (!currentEvent || !canMutate) {
@@ -185,11 +191,19 @@ export function CalendarEventDetailsDialog({
       {currentEvent && (
         <ConfirmDeleteDialog
           confirmTitle={t('calendarEvents.delete.confirm', 'Delete')}
-          description={t(
-            'calendarEvents.delete.description',
-            'Delete “{{title}}”? This cannot be undone.',
-            { title: currentEvent.title },
-          )}
+          description={
+            deletesRecurringSeries
+              ? t(
+                  'calendarEvents.delete.recurringDescription',
+                  'Delete “{{title}}”? This removes the entire recurring series, including every occurrence. This cannot be undone.',
+                  { title: currentEvent.title },
+                )
+              : t(
+                  'calendarEvents.delete.description',
+                  'Delete “{{title}}”? This cannot be undone.',
+                  { title: currentEvent.title },
+                )
+          }
           loading={deleteLoading}
           onCancel={() => {
             setDeleteOpen(false);

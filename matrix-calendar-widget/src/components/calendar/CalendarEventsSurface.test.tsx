@@ -273,6 +273,9 @@ describe('<CalendarEventsSurface />', () => {
       within(details).getByRole('button', { name: 'Delete' }),
     );
     const confirmation = screen.getByRole('dialog', { name: 'Delete event' });
+    expect(confirmation).toHaveTextContent(
+      'This removes the entire recurring series, including every occurrence.',
+    );
     await userEvent.click(
       within(confirmation).getByRole('button', { name: 'Delete' }),
     );
