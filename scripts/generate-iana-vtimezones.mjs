@@ -1,9 +1,9 @@
-import { createHash } from 'node:crypto';
+import ICAL from 'ical.js';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import ICAL from 'ical.js';
 
 const env = process.env;
 const requiredEnvironment = [
@@ -18,11 +18,14 @@ const requiredEnvironment = [
 ];
 
 for (const name of requiredEnvironment) {
-  if (!env[name]) throw new Error(`Missing required environment variable: ${name}`);
+  if (!env[name])
+    throw new Error(`Missing required environment variable: ${name}`);
 }
 
 const readHash = async (file, algorithm) =>
-  createHash(algorithm).update(await readFile(file)).digest('hex');
+  createHash(algorithm)
+    .update(await readFile(file))
+    .digest('hex');
 const run = (command, args) =>
   execFileSync(command, args, { encoding: 'utf8' }).trim();
 
@@ -42,7 +45,7 @@ const upstreamPackage = JSON.parse(
   await readFile(path.join(upstreamRoot, 'package.json'), 'utf8'),
 );
 const upstreamModule = await import(
-  pathToFileURL(path.join(upstreamRoot, 'dist/mjs/index.js')).href,
+  pathToFileURL(path.join(upstreamRoot, 'dist/mjs/index.js')).href
 );
 const rawTimezones = upstreamModule.tzlib_get_timezones();
 if (!Array.isArray(rawTimezones)) {
@@ -128,20 +131,16 @@ function assertSerializedInuvikOffsets(block) {
     }
   }
 
-  return assertSerializedTimezoneOffsets(
-    block,
-    'America/Inuvik',
-    [
-      { localTime: '1970-01-15T12:00:00', expected: -8 * 60 * 60 },
-      { localTime: '1970-07-15T12:00:00', expected: -8 * 60 * 60 },
-      { localTime: '1972-01-15T12:00:00', expected: -8 * 60 * 60 },
-      { localTime: '1972-07-15T12:00:00', expected: -7 * 60 * 60 },
-      { localTime: '2026-01-15T12:00:00', expected: -7 * 60 * 60 },
-      { localTime: '2026-11-01T01:59:00', expected: -6 * 60 * 60 },
-      { localTime: '2026-11-01T02:01:00', expected: -6 * 60 * 60 },
-      { localTime: '2026-12-15T12:00:00', expected: -6 * 60 * 60 },
-    ],
-  );
+  return assertSerializedTimezoneOffsets(block, 'America/Inuvik', [
+    { localTime: '1970-01-15T12:00:00', expected: -8 * 60 * 60 },
+    { localTime: '1970-07-15T12:00:00', expected: -8 * 60 * 60 },
+    { localTime: '1972-01-15T12:00:00', expected: -8 * 60 * 60 },
+    { localTime: '1972-07-15T12:00:00', expected: -7 * 60 * 60 },
+    { localTime: '2026-01-15T12:00:00', expected: -7 * 60 * 60 },
+    { localTime: '2026-11-01T01:59:00', expected: -6 * 60 * 60 },
+    { localTime: '2026-11-01T02:01:00', expected: -6 * 60 * 60 },
+    { localTime: '2026-12-15T12:00:00', expected: -6 * 60 * 60 },
+  ]);
 }
 
 function assertSerializedTimezoneOffsets(block, tzid, offsetChecks) {

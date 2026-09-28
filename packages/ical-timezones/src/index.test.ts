@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
+import { describe, expect, it } from '@jest/globals';
+import ICAL from 'ical.js';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from '@jest/globals';
-import ICAL from 'ical.js';
 import provenance from './data/provenance.json';
 import timezoneBlocks from './data/vtimezones.json';
 import { getVTimezoneBlock } from './index';
