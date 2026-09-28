@@ -240,10 +240,7 @@ function editableTimedEndpoint(
     return { ...original, local };
   }
 
-  if (
-    original?.type === 'zoned' &&
-    !values.timezoneChanged
-  ) {
+  if (original?.type === 'zoned' && !values.timezoneChanged) {
     return { ...original, local };
   }
 
