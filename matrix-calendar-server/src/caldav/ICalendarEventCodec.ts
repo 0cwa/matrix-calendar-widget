@@ -17,12 +17,14 @@
 import {
   CalendarEvent,
   CalendarEventDateTime,
+  CalendarEventDuration,
   CalendarEventId,
   CalendarEventInput,
   CalendarEventPatch,
   CalendarEventRecurrence,
   CalendarEventRecurrenceDate,
   CalendarEventRecurrenceOverride,
+  CalendarEventRecurrenceTiming,
   CalendarEventStatus,
   CalendarEventTiming,
   CalendarEventTransparency,
@@ -316,9 +318,9 @@ function readRecurrenceOverride(
   // Keep unsupported or incomplete exception timing in the raw resource, but
   // do not let it block decoding the recurrence identity and status.
   if (hasStart && hasEnd) {
-    override.timing = readTiming(vevent);
+    override.timing = readRecurrenceTimingWithEnd(vevent);
   } else if (hasStart && hasDuration) {
-    override.timing = readTimingWithDuration(vevent);
+    override.timing = readRecurrenceTimingWithDuration(vevent);
   }
 
   const status = readStatus(vevent.getFirstPropertyValue('status'));
@@ -342,27 +344,39 @@ function readRecurrenceDates(
   name: 'rdate' | 'exdate',
 ): CalendarEventRecurrenceDate[] {
   return component.getAllProperties(name).flatMap((property) =>
-    property.getValues().flatMap((value) => {
+    property.getValues().flatMap<CalendarEventRecurrenceDate>((value) => {
       if (value instanceof ICAL.Time) {
         return [readDateTimeValue(value, property)];
       }
 
       if (name === 'rdate' && value instanceof ICAL.Period) {
         const start = value.start;
-        const end = value.getEnd();
-        if (
-          start instanceof ICAL.Time &&
-          end instanceof ICAL.Time &&
-          !start.isDate &&
-          !end.isDate
-        ) {
+        const end = value.end;
+        if (!(start instanceof ICAL.Time) || start.isDate) {
+          return [];
+        }
+
+        if (end instanceof ICAL.Time && !end.isDate) {
           return [
             {
               type: 'period',
               timing: {
-                type: 'timed',
-                start: readZonedDateTime(start, property),
-                end: readZonedDateTime(end, property),
+                type: 'end',
+                start: readDateTimeValue(start, property),
+                end: readDateTimeValue(end, property),
+              },
+            },
+          ];
+        }
+
+        if (value.duration instanceof ICAL.Duration) {
+          return [
+            {
+              type: 'period',
+              timing: {
+                type: 'duration',
+                start: readDateTimeValue(start, property),
+                duration: readDuration(value.duration),
               },
             },
           ];
@@ -394,9 +408,24 @@ function readDateTimeValue(
     return { type: 'date', value: formatDate(value) };
   }
 
+  const tzid = property.getFirstParameter('tzid');
+  if (typeof tzid === 'string' && tzid.length > 0) {
+    return {
+      type: 'date-time',
+      value: { local: formatLocalDateTime(value), timezone: tzid },
+    };
+  }
+
+  if (value.zone?.tzid === 'Z') {
+    return {
+      type: 'date-time',
+      value: { local: formatLocalDateTime(value), timezone: 'UTC' },
+    };
+  }
+
   return {
-    type: 'date-time',
-    value: readZonedDateTime(value, property),
+    type: 'floating-date-time',
+    value: formatLocalDateTime(value),
   };
 }
 
@@ -410,7 +439,9 @@ function readZonedDateTime(
   };
 }
 
-function readTimingWithDuration(vevent: ICAL.Component): CalendarEventTiming {
+function readRecurrenceTimingWithDuration(
+  vevent: ICAL.Component,
+): CalendarEventRecurrenceTiming {
   const startProperty = vevent.getFirstProperty('dtstart');
   const durationProperty = vevent.getFirstProperty('duration');
   const start = startProperty?.getFirstValue();
@@ -427,28 +458,55 @@ function readTimingWithDuration(vevent: ICAL.Component): CalendarEventTiming {
     );
   }
 
-  const end = start.clone();
-  end.addDuration(duration);
+  return {
+    type: 'duration',
+    start: readDateTimeValue(start, startProperty),
+    duration: readDuration(duration),
+  };
+}
+
+function readRecurrenceTimingWithEnd(
+  vevent: ICAL.Component,
+): CalendarEventRecurrenceTiming {
+  const startProperty = vevent.getFirstProperty('dtstart');
+  const endProperty = vevent.getFirstProperty('dtend');
+  const start = startProperty?.getFirstValue();
+  const end = endProperty?.getFirstValue();
+
+  if (
+    !startProperty ||
+    !endProperty ||
+    !(start instanceof ICAL.Time) ||
+    !(end instanceof ICAL.Time)
+  ) {
+    throw new ICalendarEventCodecError(
+      'invalid-timing',
+      'Recurrence override DTSTART and DTEND must be date or date-time values',
+    );
+  }
 
   if (start.isDate !== end.isDate) {
     throw new ICalendarEventCodecError(
       'invalid-timing',
-      'Recurrence override DTSTART and DURATION must use compatible value types',
+      'Recurrence override DTSTART and DTEND must use the same value type',
     );
   }
 
-  if (start.isDate) {
-    return {
-      type: 'all-day',
-      startDate: formatDate(start),
-      endDate: formatDate(end),
-    };
-  }
-
   return {
-    type: 'timed',
-    start: readZonedDateTime(start, startProperty),
-    end: readZonedDateTime(end, startProperty),
+    type: 'end',
+    start: readDateTimeValue(start, startProperty),
+    end: readDateTimeValue(end, endProperty),
+  };
+}
+
+function readDuration(duration: ICAL.Duration): CalendarEventDuration {
+  return {
+    weeks: duration.weeks,
+    days: duration.days,
+    hours: duration.hours,
+    minutes: duration.minutes,
+    seconds: duration.seconds,
+    isNegative: duration.isNegative,
   };
 }
 

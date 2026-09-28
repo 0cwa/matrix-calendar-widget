@@ -494,21 +494,24 @@ describe('InMemoryCalendarRepository', () => {
 function recurrenceOverride(): CalendarEventRecurrenceOverride {
   return {
     recurrenceId: {
-      type: 'date-time',
-      value: {
-        local: '2026-10-12T09:00:00',
-        timezone: 'Europe/Stockholm',
-      },
+      type: 'floating-date-time',
+      value: '2026-10-12T09:00:00',
     },
     timing: {
-      type: 'timed',
+      type: 'end',
       start: {
-        local: '2026-10-12T11:00:00',
-        timezone: 'Europe/Stockholm',
+        type: 'date-time',
+        value: {
+          local: '2026-10-12T11:00:00',
+          timezone: 'Europe/Stockholm',
+        },
       },
       end: {
-        local: '2026-10-12T11:30:00',
-        timezone: 'Europe/Stockholm',
+        type: 'date-time',
+        value: {
+          local: '2026-10-12T11:30:00',
+          timezone: 'Europe/Stockholm',
+        },
       },
     },
     status: 'cancelled',
@@ -519,14 +522,21 @@ function recurrencePeriod(): CalendarEventRecurrenceDate {
   return {
     type: 'period',
     timing: {
-      type: 'timed',
+      type: 'duration',
       start: {
-        local: '2026-10-12T11:00:00',
-        timezone: 'Europe/Stockholm',
+        type: 'date-time',
+        value: {
+          local: '2026-10-12T11:00:00',
+          timezone: 'Europe/Stockholm',
+        },
       },
-      end: {
-        local: '2026-10-12T12:00:00',
-        timezone: 'Europe/Stockholm',
+      duration: {
+        weeks: 0,
+        days: 1,
+        hours: 0,
+        minutes: 0,
+        seconds: 0,
+        isNegative: false,
       },
     },
   };
@@ -534,7 +544,12 @@ function recurrencePeriod(): CalendarEventRecurrenceDate {
 
 function mutateRecurrencePeriod(value: CalendarEventRecurrenceDate): void {
   if (value.type === 'period') {
-    value.timing.start.local = '2099-01-01T00:00:00';
+    if (value.timing.start.type === 'date-time') {
+      value.timing.start.value.local = '2099-01-01T00:00:00';
+    }
+    if (value.timing.type === 'duration') {
+      value.timing.duration.days = 99;
+    }
   }
 }
 
@@ -542,14 +557,21 @@ function expectedRecurrencePeriod() {
   return {
     type: 'period',
     timing: {
-      type: 'timed',
+      type: 'duration',
       start: {
-        local: '2026-10-12T11:00:00',
-        timezone: 'Europe/Stockholm',
+        type: 'date-time',
+        value: {
+          local: '2026-10-12T11:00:00',
+          timezone: 'Europe/Stockholm',
+        },
       },
-      end: {
-        local: '2026-10-12T12:00:00',
-        timezone: 'Europe/Stockholm',
+      duration: {
+        weeks: 0,
+        days: 1,
+        hours: 0,
+        minutes: 0,
+        seconds: 0,
+        isNegative: false,
       },
     },
   };
@@ -558,32 +580,40 @@ function expectedRecurrencePeriod() {
 function mutateRecurrenceOverride(
   override: CalendarEventRecurrenceOverride,
 ): void {
-  if (override.recurrenceId.type === 'date-time') {
+  if (override.recurrenceId.type === 'floating-date-time') {
+    override.recurrenceId.value = '2099-01-01T00:00:00';
+  } else if (override.recurrenceId.type === 'date-time') {
     override.recurrenceId.value.local = '2099-01-01T00:00:00';
   }
-  if (override.timing?.type === 'timed') {
-    override.timing.start.local = '2099-01-01T01:00:00';
+  if (override.timing?.type === 'end') {
+    const start = override.timing.start;
+    if (start.type === 'date-time') {
+      start.value.local = '2099-01-01T01:00:00';
+    }
   }
 }
 
 function expectedRecurrenceOverride() {
   return {
     recurrenceId: {
-      type: 'date-time',
-      value: {
-        local: '2026-10-12T09:00:00',
-        timezone: 'Europe/Stockholm',
-      },
+      type: 'floating-date-time',
+      value: '2026-10-12T09:00:00',
     },
     timing: {
-      type: 'timed',
+      type: 'end',
       start: {
-        local: '2026-10-12T11:00:00',
-        timezone: 'Europe/Stockholm',
+        type: 'date-time',
+        value: {
+          local: '2026-10-12T11:00:00',
+          timezone: 'Europe/Stockholm',
+        },
       },
       end: {
-        local: '2026-10-12T11:30:00',
-        timezone: 'Europe/Stockholm',
+        type: 'date-time',
+        value: {
+          local: '2026-10-12T11:30:00',
+          timezone: 'Europe/Stockholm',
+        },
       },
     },
     status: 'cancelled',

@@ -25,6 +25,7 @@ import {
   CalendarEventPatch,
   CalendarEventRecurrenceDate,
   CalendarEventRecurrenceOverride,
+  CalendarEventRecurrenceTiming,
   CalendarId,
   CalendarTimeRange,
   TimedCalendarEventTiming,
@@ -380,9 +381,13 @@ function cloneCalendar(calendar: Calendar): Calendar {
 function cloneCalendarEventDateTime(
   value: CalendarEventDateTime,
 ): CalendarEventDateTime {
-  return value.type === 'date'
-    ? { ...value }
-    : { type: 'date-time', value: { ...value.value } };
+  switch (value.type) {
+    case 'date':
+    case 'floating-date-time':
+      return { ...value };
+    case 'date-time':
+      return { type: 'date-time', value: { ...value.value } };
+  }
 }
 
 function cloneRecurrenceDate(
@@ -394,7 +399,25 @@ function cloneRecurrenceDate(
 
   return {
     type: 'period',
-    timing: cloneTimedTiming(value.timing),
+    timing: cloneRecurrenceTiming(value.timing),
+  };
+}
+
+function cloneRecurrenceTiming(
+  timing: CalendarEventRecurrenceTiming,
+): CalendarEventRecurrenceTiming {
+  if (timing.type === 'end') {
+    return {
+      type: 'end',
+      start: cloneCalendarEventDateTime(timing.start),
+      end: cloneCalendarEventDateTime(timing.end),
+    };
+  }
+
+  return {
+    type: 'duration',
+    start: cloneCalendarEventDateTime(timing.start),
+    duration: { ...timing.duration },
   };
 }
 
@@ -463,9 +486,7 @@ function cloneRecurrenceOverride(
     ...override,
     recurrenceId: cloneCalendarEventDateTime(override.recurrenceId),
     timing: override.timing
-      ? override.timing.type === 'timed'
-        ? cloneTimedTiming(override.timing)
-        : cloneAllDayTiming(override.timing)
+      ? cloneRecurrenceTiming(override.timing)
       : undefined,
   };
 }

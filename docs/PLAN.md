@@ -102,10 +102,13 @@ validates this stack only; the broader issue #6 criteria and M5 exit remain open
 
 The CalDAV codec exposes a read-only domain view of master RRULE, RDATE
 (including PERIOD values), and EXDATE values plus same-resource, same-UID
-detached instances with their original RECURRENCE-ID, timing from DTEND or
-DURATION, and status. Ordinary master-field patches preserve all VEVENT
-components, VTIMEZONE, and unknown properties. Recurrence editing and
-mainstream-client interoperability remain open.
+detached instances with their original RECURRENCE-ID, explicit DTEND or
+preserved RFC DURATION components, and status. Recurrence DATE-TIME values
+retain their DATE, named-TZID, UTC, or floating kind and exact local wall time;
+viewer-local interpretation and duration expansion remain downstream work
+(ADR023). Ordinary master-field patches preserve all VEVENT components,
+VTIMEZONE, and unknown properties. Recurrence editing and mainstream-client
+interoperability remain open.
 
 **Exit:** common recurring calendars round-trip with mainstream CalDAV clients.
 
