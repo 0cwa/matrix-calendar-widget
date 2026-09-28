@@ -202,20 +202,26 @@ describe('<CalendarEventsSurface />', () => {
     expect(await screen.findByText('Dentist')).toBeInTheDocument();
   });
 
-  it.each(['list', 'month'] as const)(
-    'warns and omits THISANDFUTURE series from the %s renderer without mutation',
-    async (view) => {
-      const unsupportedSeries: CalendarEvent = {
-        ...events[0],
-        id: 'range-series',
-        uid: 'range-series@example.test',
-        title: 'Shifted planning series',
-        recurrence: { rrule: 'FREQ=WEEKLY' },
-        unsupportedRecurrence: 'range-this-and-future',
-      };
+  it.each([
+    { view: 'list' as const, count: 1 },
+    { view: 'month' as const, count: 2 },
+  ])(
+    'warns and omits $count THISANDFUTURE series from the $view renderer without mutation',
+    async ({ view, count }) => {
+      const unsupportedSeries: CalendarEvent[] = Array.from(
+        { length: count },
+        (_, index) => ({
+          ...events[0],
+          id: `range-series-${index}`,
+          uid: `range-series-${index}@example.test`,
+          title: 'Shifted planning series',
+          recurrence: { rrule: 'FREQ=WEEKLY' },
+          unsupportedRecurrence: 'range-this-and-future',
+        }),
+      );
       const repository = new InMemoryCalendarRepository({
         calendars: [calendars[0]],
-        events: [events[0], unsupportedSeries],
+        events: [events[0], ...unsupportedSeries],
       });
       const updateEvent = vi.spyOn(repository, 'updateEvent');
       const deleteEvent = vi.spyOn(repository, 'deleteEvent');
@@ -233,7 +239,9 @@ describe('<CalendarEventsSurface />', () => {
       );
 
       expect(await screen.findByRole('alert')).toHaveTextContent(
-        '1 recurring series contain a THISANDFUTURE range override that the current renderer cannot safely display.',
+        count === 1
+          ? '1 recurring series contains a THISANDFUTURE range override that the current renderer cannot safely display.'
+          : '2 recurring series contain a THISANDFUTURE range override that the current renderer cannot safely display.',
       );
       expect(
         screen.queryByText('Shifted planning series'),
