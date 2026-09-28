@@ -75,10 +75,10 @@ Calendar creation (#94), lightweight visibility controls (#96), rename (#99), an
 
 The description and color slices use dedicated CalDAV gateway operations; keep timezone editing as separate work.
 
-CalDAV discovery keeps collections with no declared VEVENT component out of
-the main calendar list. Regression coverage verifies both VJOURNAL-only and
-VTODO-only collections stay untouched and hidden; mixed collections that
-support VEVENT remain available.
+When a collection explicitly reports a supported-component set without
+VEVENT, CalDAV discovery keeps it out of the main calendar list. Regression
+coverage verifies both VJOURNAL-only and VTODO-only collections stay untouched
+and hidden; mixed collections that support VEVENT remain available.
 
 CalDAV URL diagnostics require validated widget identity, joined-room
 membership, and manager power before Radicale discovery. The gateway returns

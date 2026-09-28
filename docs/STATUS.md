@@ -52,7 +52,7 @@ Merged on `main`:
 - calendar color editing through the user-scoped gateway (PR #108),
 - mixed-collection compatibility notice and non-destructive VEVENT use (PR #109).
 
-Calendar timezone editing is deferred. PR #109 verifies mixed-collection notice behavior, preserves sibling VTODO data during VEVENT edits, and keeps known collections without VEVENT out of discovery. The CalDAV discovery regression now verifies both VJOURNAL-only and VTODO-only collections remain untouched and hidden. PR #113 implements and validates the manager-only CalDAV URL/copy diagnostics under ADR022. Issue #5 remains open with a stale checklist: it still lists PR #101 as active and leaves merged description, color, mixed-notice, deletion, and PR #113 diagnostics work unchecked. No issue edit is included.
+Calendar timezone editing is deferred. PR #109 verifies mixed-collection notice behavior, preserves sibling VTODO data during VEVENT edits, and excludes collections from discovery when they explicitly report a supported-component set without VEVENT. The CalDAV discovery regression now verifies both VJOURNAL-only and VTODO-only collections remain untouched and hidden. PR #113 implements and validates the manager-only CalDAV URL/copy diagnostics under ADR022. Issue #5 remains open with a stale checklist: it still lists PR #101 as active and leaves merged description, color, mixed-notice, deletion, and PR #113 diagnostics work unchecked. No issue edit is included.
 
 ### M7 — Non-widget fallback
 
