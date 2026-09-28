@@ -132,8 +132,8 @@ describe('ICalendarEventCodec', () => {
     const start = vevent.getFirstProperty('dtstart')!;
     const end = vevent.getFirstProperty('dtend')!;
 
-    expect(start.getFirstParameter('tzid')).toBeNull();
-    expect(end.getFirstParameter('tzid')).toBeNull();
+    expect(start.getFirstParameter('tzid')).toBeUndefined();
+    expect(end.getFirstParameter('tzid')).toBeUndefined();
     expect(start.getFirstValue()?.toString()).toBe('2026-09-23T09:00:00');
     expect(end.getFirstValue()?.toString()).toBe('2026-09-23T10:00:00');
     expect(vevent.getFirstPropertyValue('x-client-marker')).toBe(
@@ -164,8 +164,8 @@ describe('ICalendarEventCodec', () => {
     const start = vevent.getFirstProperty('dtstart')!;
     const end = vevent.getFirstProperty('dtend')!;
 
-    expect(start.getFirstParameter('tzid')).toBeNull();
-    expect(end.getFirstParameter('tzid')).toBeNull();
+    expect(start.getFirstParameter('tzid')).toBeUndefined();
+    expect(end.getFirstParameter('tzid')).toBeUndefined();
     expect(start.getFirstValue()?.toString()).toBe('2026-09-24T11:30:00');
     expect(end.getFirstValue()?.toString()).toBe('2026-09-24T12:15:00');
     expect(encoded.icalendar).not.toContain('TZID=');
@@ -254,9 +254,9 @@ describe('ICalendarEventCodec', () => {
     const vevent = ICAL.Component.fromString(
       timingPatch.icalendar,
     ).getFirstSubcomponent('vevent')!;
-    expect(vevent.getFirstProperty('dtstart')?.getFirstParameter('tzid')).toBe(
-      null,
-    );
+    expect(
+      vevent.getFirstProperty('dtstart')?.getFirstParameter('tzid'),
+    ).toBeUndefined();
     expect(vevent.getFirstProperty('dtend')?.getFirstParameter('tzid')).toBe(
       'Europe/Stockholm',
     );

@@ -108,10 +108,10 @@ describe('<CalendarEventsCalendar />', () => {
         />,
       );
 
-      expect(await screen.findByText(/9:00\sAM/)).toBeInTheDocument();
       const floatingButton = await screen.findByRole('button', {
         name: /Floating planning: September 23, 2026 · 9:00\sAM–10:00\sAM/,
       });
+      expect(within(floatingButton).getByText(/^9:00\sAM\s*$/)).toBeVisible();
       const zonedButton = await screen.findByRole('button', {
         name: /Zoned planning: September 23, 2026 · 9:00\sAM–10:00\sAM/,
       });
