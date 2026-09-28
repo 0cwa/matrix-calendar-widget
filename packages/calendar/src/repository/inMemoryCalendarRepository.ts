@@ -23,6 +23,7 @@ import {
   CalendarEventId,
   CalendarEventInput,
   CalendarEventPatch,
+  CalendarEventRecurrenceDate,
   CalendarEventRecurrenceOverride,
   CalendarId,
   CalendarTimeRange,
@@ -384,6 +385,19 @@ function cloneCalendarEventDateTime(
     : { type: 'date-time', value: { ...value.value } };
 }
 
+function cloneRecurrenceDate(
+  value: CalendarEventRecurrenceDate,
+): CalendarEventRecurrenceDate {
+  if (value.type !== 'period') {
+    return cloneCalendarEventDateTime(value);
+  }
+
+  return {
+    type: 'period',
+    timing: cloneTimedTiming(value.timing),
+  };
+}
+
 function cloneTimedTiming(
   timing: TimedCalendarEventTiming,
 ): TimedCalendarEventTiming {
@@ -432,7 +446,7 @@ function cloneRecurrence(
   return recurrence
     ? {
         ...recurrence,
-        rdates: recurrence.rdates?.map(cloneCalendarEventDateTime),
+        rdates: recurrence.rdates?.map(cloneRecurrenceDate),
         exdates: recurrence.exdates?.map(cloneCalendarEventDateTime),
         recurrenceId: recurrence.recurrenceId
           ? cloneCalendarEventDateTime(recurrence.recurrenceId)

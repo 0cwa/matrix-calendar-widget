@@ -21,6 +21,7 @@ import {
   CalendarEventInput,
   CalendarEventPatch,
   CalendarEventRecurrence,
+  CalendarEventRecurrenceDate,
   CalendarEventRecurrenceOverride,
   CalendarEventStatus,
   CalendarEventTiming,
@@ -264,8 +265,8 @@ function readRecurrence(
     recurrence.rrule = String(rule);
   }
 
-  const rdates = readDateTimeProperties(master, 'rdate');
-  const exdates = readDateTimeProperties(master, 'exdate');
+  const rdates = readRecurrenceDates(master, 'rdate');
+  const exdates = readRecurrenceDates(master, 'exdate');
   if (rdates.length > 0) {
     recurrence.rdates = rdates;
   }
@@ -307,6 +308,7 @@ function readRecurrenceOverride(
 
   const hasStart = vevent.hasProperty('dtstart');
   const hasEnd = vevent.hasProperty('dtend');
+  const hasDuration = vevent.hasProperty('duration');
 
   const override: CalendarEventRecurrenceOverride = {
     recurrenceId: readDateTimeProperty(recurrenceId),
@@ -315,6 +317,8 @@ function readRecurrenceOverride(
   // do not let it block decoding the recurrence identity and status.
   if (hasStart && hasEnd) {
     override.timing = readTiming(vevent);
+  } else if (hasStart && hasDuration) {
+    override.timing = readTimingWithDuration(vevent);
   }
 
   const status = readStatus(vevent.getFirstPropertyValue('status'));
@@ -325,16 +329,47 @@ function readRecurrenceOverride(
   return override;
 }
 
-function readDateTimeProperties(
+function readRecurrenceDates(
+  component: ICAL.Component,
+  name: 'rdate',
+): CalendarEventRecurrenceDate[];
+function readRecurrenceDates(
+  component: ICAL.Component,
+  name: 'exdate',
+): CalendarEventDateTime[];
+function readRecurrenceDates(
   component: ICAL.Component,
   name: 'rdate' | 'exdate',
-): CalendarEventDateTime[] {
+): CalendarEventRecurrenceDate[] {
   return component.getAllProperties(name).flatMap((property) =>
     property.getValues().flatMap((value) => {
-      if (!(value instanceof ICAL.Time)) {
-        return [];
+      if (value instanceof ICAL.Time) {
+        return [readDateTimeValue(value, property)];
       }
-      return [readDateTimeValue(value, property)];
+
+      if (name === 'rdate' && value instanceof ICAL.Period) {
+        const start = value.start;
+        const end = value.getEnd();
+        if (
+          start instanceof ICAL.Time &&
+          end instanceof ICAL.Time &&
+          !start.isDate &&
+          !end.isDate
+        ) {
+          return [
+            {
+              type: 'period',
+              timing: {
+                type: 'timed',
+                start: readZonedDateTime(start, property),
+                end: readZonedDateTime(end, property),
+              },
+            },
+          ];
+        }
+      }
+
+      return [];
     }),
   );
 }
@@ -361,10 +396,59 @@ function readDateTimeValue(
 
   return {
     type: 'date-time',
-    value: {
-      local: formatLocalDateTime(value),
-      timezone: readTimezone(property, value),
-    },
+    value: readZonedDateTime(value, property),
+  };
+}
+
+function readZonedDateTime(
+  value: ICAL.Time,
+  property: ICAL.Property,
+): { local: string; timezone: string } {
+  return {
+    local: formatLocalDateTime(value),
+    timezone: readTimezone(property, value),
+  };
+}
+
+function readTimingWithDuration(vevent: ICAL.Component): CalendarEventTiming {
+  const startProperty = vevent.getFirstProperty('dtstart');
+  const durationProperty = vevent.getFirstProperty('duration');
+  const start = startProperty?.getFirstValue();
+  const duration = durationProperty?.getFirstValue();
+
+  if (
+    !startProperty ||
+    !(start instanceof ICAL.Time) ||
+    !(duration instanceof ICAL.Duration)
+  ) {
+    throw new ICalendarEventCodecError(
+      'invalid-timing',
+      'Recurrence override DTSTART and DURATION must be date or date-time values',
+    );
+  }
+
+  const end = start.clone();
+  end.addDuration(duration);
+
+  if (start.isDate !== end.isDate) {
+    throw new ICalendarEventCodecError(
+      'invalid-timing',
+      'Recurrence override DTSTART and DURATION must use compatible value types',
+    );
+  }
+
+  if (start.isDate) {
+    return {
+      type: 'all-day',
+      startDate: formatDate(start),
+      endDate: formatDate(end),
+    };
+  }
+
+  return {
+    type: 'timed',
+    start: readZonedDateTime(start, startProperty),
+    end: readZonedDateTime(end, startProperty),
   };
 }
 

@@ -19,6 +19,7 @@ import {
   CalendarEvent,
   CalendarEventInput,
   CalendarEventPatch,
+  CalendarEventRecurrenceDate,
   CalendarEventRecurrenceOverride,
 } from '../model';
 import { CalendarRepositoryError, InMemoryCalendarRepository } from './index';
@@ -129,11 +130,13 @@ describe('InMemoryCalendarRepository', () => {
 
   it('defensively clones recurrence override identity and timing', async () => {
     const inputOverride = recurrenceOverride();
+    const inputRdate = recurrencePeriod();
     const inputEvent: CalendarEvent = {
       ...events[2],
       id: 'recurring-with-override',
       recurrence: {
         rrule: 'FREQ=WEEKLY',
+        rdates: [inputRdate],
         overrides: [inputOverride],
       },
     };
@@ -143,6 +146,7 @@ describe('InMemoryCalendarRepository', () => {
     });
 
     mutateRecurrenceOverride(inputOverride);
+    mutateRecurrencePeriod(inputRdate);
     const afterConstruction = await repository.getEvent(
       'team',
       'recurring-with-override',
@@ -150,10 +154,15 @@ describe('InMemoryCalendarRepository', () => {
     expect(afterConstruction.recurrence?.overrides?.[0]).toMatchObject(
       expectedRecurrenceOverride(),
     );
+    expect(afterConstruction.recurrence?.rdates?.[0]).toMatchObject(
+      expectedRecurrencePeriod(),
+    );
 
     const patchOverride = recurrenceOverride();
+    const patchRdate = recurrencePeriod();
     const patch: CalendarEventPatch = {
       recurrence: {
+        rdates: [patchRdate],
         overrides: [patchOverride],
       },
     };
@@ -163,7 +172,9 @@ describe('InMemoryCalendarRepository', () => {
       patch,
     );
     mutateRecurrenceOverride(patchOverride);
+    mutateRecurrencePeriod(patchRdate);
     mutateRecurrenceOverride(updated.recurrence!.overrides![0]);
+    mutateRecurrencePeriod(updated.recurrence!.rdates![0]);
 
     const afterUpdate = await repository.getEvent(
       'team',
@@ -171,6 +182,9 @@ describe('InMemoryCalendarRepository', () => {
     );
     expect(afterUpdate.recurrence?.overrides?.[0]).toMatchObject(
       expectedRecurrenceOverride(),
+    );
+    expect(afterUpdate.recurrence?.rdates?.[0]).toMatchObject(
+      expectedRecurrencePeriod(),
     );
   });
 
@@ -498,6 +512,46 @@ function recurrenceOverride(): CalendarEventRecurrenceOverride {
       },
     },
     status: 'cancelled',
+  };
+}
+
+function recurrencePeriod(): CalendarEventRecurrenceDate {
+  return {
+    type: 'period',
+    timing: {
+      type: 'timed',
+      start: {
+        local: '2026-10-12T11:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+      end: {
+        local: '2026-10-12T12:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    },
+  };
+}
+
+function mutateRecurrencePeriod(value: CalendarEventRecurrenceDate): void {
+  if (value.type === 'period') {
+    value.timing.start.local = '2099-01-01T00:00:00';
+  }
+}
+
+function expectedRecurrencePeriod() {
+  return {
+    type: 'period',
+    timing: {
+      type: 'timed',
+      start: {
+        local: '2026-10-12T11:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+      end: {
+        local: '2026-10-12T12:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    },
   };
 }
 

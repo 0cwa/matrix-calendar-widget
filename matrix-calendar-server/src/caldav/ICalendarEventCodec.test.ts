@@ -128,6 +128,34 @@ describe('ICalendarEventCodec', () => {
               timezone: 'Europe/Stockholm',
             },
           },
+          {
+            type: 'period',
+            timing: {
+              type: 'timed',
+              start: {
+                local: '2026-10-28T14:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+              end: {
+                local: '2026-10-28T15:30:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
+          {
+            type: 'period',
+            timing: {
+              type: 'timed',
+              start: {
+                local: '2026-10-29T14:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+              end: {
+                local: '2026-10-29T15:30:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
         ],
         exdates: [
           {
@@ -186,12 +214,11 @@ describe('ICalendarEventCodec', () => {
       const encoded = parsed.applyPatch({ title: 'Updated weekly review' });
       const calendar = ICAL.Component.fromString(encoded.icalendar);
       const events = calendar.getAllSubcomponents('vevent');
+      const timezone = calendar.getFirstSubcomponent('vtimezone');
 
       expect(events).toHaveLength(3);
-      expect(calendar.getFirstSubcomponent('vtimezone')).not.toBeNull();
-      expect(
-        calendar.getFirstSubcomponent('vtimezone')?.getFirstPropertyValue('tzid'),
-      ).toBe('Europe/Stockholm');
+      expect(timezone).not.toBeNull();
+      expect(timezone?.getFirstPropertyValue('tzid')).toBe('Europe/Stockholm');
       expect(
         calendar.getFirstPropertyValue('x-custom-calendar-property'),
       ).toBe('preserve-resource-value');
@@ -207,6 +234,10 @@ describe('ICalendarEventCodec', () => {
       expect(events[1].getFirstPropertyValue('dtstart')?.toString()).toBe(
         '2026-10-12T16:00:00',
       );
+      expect(events[1].getFirstPropertyValue('duration')?.toString()).toBe(
+        'PT1H',
+      );
+      expect(events[1].getFirstProperty('dtend')).toBeNull();
       expect(events[1].getFirstPropertyValue('summary')).toBe(
         'Weekly review - moved',
       );

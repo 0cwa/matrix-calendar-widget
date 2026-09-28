@@ -67,6 +67,11 @@ export type CalendarEventDateTime =
   | { type: 'date-time'; value: ZonedCalendarDateTime }
   | { type: 'date'; value: CalendarDate };
 
+/** A PERIOD-valued RDATE with its calculated timed interval. */
+export type CalendarEventRecurrenceDate =
+  | CalendarEventDateTime
+  | { type: 'period'; timing: TimedCalendarEventTiming };
+
 export type CalendarEventStatus = 'confirmed' | 'tentative' | 'cancelled';
 
 export type CalendarEventTransparency = 'opaque' | 'transparent';
@@ -90,7 +95,7 @@ export type CalendarEventRecurrenceOverride = {
  */
 export type CalendarEventRecurrence = {
   rrule?: string;
-  rdates?: CalendarEventDateTime[];
+  rdates?: CalendarEventRecurrenceDate[];
   exdates?: CalendarEventDateTime[];
   recurrenceId?: CalendarEventDateTime;
   /** Same-UID detached VEVENTs stored in this CalDAV resource. */
