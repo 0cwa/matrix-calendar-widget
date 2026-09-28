@@ -42,12 +42,19 @@ and provenance hashes repeatable for the same inputs and toolchain. RFC 5545
 
 ## Regression evidence
 
-The hosted generator run was `36410576491`; artifact ID `10963623739` had ZIP
+The hosted generator run was `36413953822`; artifact ID `10966906625` had ZIP
 SHA-256
-`5e2f9a6ca13899367c8e811fb4c92899dfe554ed36fb53cb08b9cd138831009d`. The
-downloaded artifact matched that digest and its internal hashes. The
-manifest's `vtimezones.json` SHA-256 is
-`3bb759866d313a28006273a133d732bb0c7b6a9b203a24bf1d6abe9d125595c3`.
+`a5edaed6b9dde10e96eb29831c58680fac9c11ad17c2bbcfedb400d934769961`. The
+downloaded ZIP matched GitHub's digest. Its inner file hashes are:
+
+- `vtimezones.json`: `0e436433d2064275ffd13f303ed6d5b3aeb7ce4f8df016f5f75a50c10d2f2d2e`
+- `provenance.json`: `3bb1fab27dc90ff5641ccf8e9eb9fad25c1d871572e409f7ad5c7f52d854d9ba`
+- `licenses/timezones-ical-library-LICENSE`: `5899dbe0bfc6533ff55fa14869b01c4d8f36de258e6db722c8e284eaa546cce4`
+- `licenses/IANA-theory.html`: `3f821678362a806a8547a3de08c5ba1d4832ffa70e0c0328572504bcfc9cf334`
+
+The manifest has no wall-clock generation field, and none of the 597
+VTIMEZONE blocks has a generated `LAST-MODIFIED` property. Repeated runs from
+the same pinned inputs and toolchain produce the same inner file hashes.
 
 The serialized `America/Inuvik` component includes historical STANDARD and
 DAYLIGHT observances, a 2026-03 transition to UTC−06, and a final

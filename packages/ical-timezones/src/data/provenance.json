@@ -1,6 +1,5 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-28T10:36:51.888Z",
   "iana": {
     "version": "2026d",
     "releaseUrl": "https://data.iana.org/time-zones/releases/tzdata2026d.tar.gz",
@@ -95,7 +94,7 @@
     ]
   },
   "outputs": {
-    "vtimezones.json": "3bb759866d313a28006273a133d732bb0c7b6a9b203a24bf1d6abe9d125595c3",
+    "vtimezones.json": "0e436433d2064275ffd13f303ed6d5b3aeb7ce4f8df016f5f75a50c10d2f2d2e",
     "licenses/timezones-ical-library-LICENSE": "5899dbe0bfc6533ff55fa14869b01c4d8f36de258e6db722c8e284eaa546cce4",
     "licenses/IANA-theory.html": "3f821678362a806a8547a3de08c5ba1d4832ffa70e0c0328572504bcfc9cf334"
   }
