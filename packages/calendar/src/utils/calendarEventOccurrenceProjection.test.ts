@@ -207,6 +207,44 @@ describe('projectCalendarEventOccurrences', () => {
     ).toHaveLength(0);
   });
 
+  it('keeps floating RRULE wall time in the viewer zone across a DST change', () => {
+    const event: CalendarEvent = {
+      id: 'floating-daily',
+      calendarId: 'team',
+      uid: 'floating-daily@example.test',
+      title: 'Floating daily event',
+      timing: {
+        type: 'timed',
+        start: { type: 'floating', local: '2026-03-28T09:00:00' },
+        end: { type: 'floating', local: '2026-03-28T10:00:00' },
+      },
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=3' },
+    };
+
+    const result = projectCalendarEventOccurrences(
+      [event],
+      {
+        start: '2026-03-28T00:00:00Z',
+        end: '2026-03-31T00:00:00Z',
+      },
+      'Europe/Stockholm',
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(
+      result.occurrences.map(({ event: occurrence }) => {
+        if (occurrence.timing.type !== 'timed') {
+          throw new Error('Expected a timed occurrence');
+        }
+        return [occurrence.timing.start.local, occurrence.timing.end.local];
+      }),
+    ).toEqual([
+      ['2026-03-28T09:00:00', '2026-03-28T10:00:00'],
+      ['2026-03-29T09:00:00', '2026-03-29T10:00:00'],
+      ['2026-03-30T09:00:00', '2026-03-30T10:00:00'],
+    ]);
+  });
+
   it('accepts minute-precision local values and matches second-precision recurrence exceptions', () => {
     const event: CalendarEvent = {
       id: 'minute-precision',
@@ -456,6 +494,49 @@ describe('projectCalendarEventOccurrences', () => {
       { sourceEvent: malformedCount, reason: 'invalid-recurrence' },
       { sourceEvent: malformedUntil, reason: 'invalid-recurrence' },
     ]);
+  });
+
+  it('rejects RRULE BY values outside the supported ranges with diagnostics', () => {
+    const malformed = ['BYHOUR=99', 'BYMONTH=13', 'BYSECOND=61'].map((byPart) =>
+      timedEvent({
+        id: `malformed-${byPart.toLowerCase()}`,
+        recurrence: { rrule: `FREQ=DAILY;${byPart}` },
+      }),
+    );
+
+    const result = projectCalendarEventOccurrences(
+      malformed,
+      stockholmRange,
+      'Europe/Stockholm',
+    );
+
+    expect(result.occurrences).toEqual([]);
+    expect(result.diagnostics).toEqual(
+      malformed.map((sourceEvent) => ({
+        sourceEvent,
+        reason: 'invalid-recurrence',
+      })),
+    );
+  });
+
+  it('reports RFC-valid leap-second BYSECOND=60 as unsupported without changing the source', () => {
+    const event = timedEvent({
+      id: 'leap-second',
+      recurrence: { rrule: 'FREQ=DAILY;BYSECOND=60' },
+    });
+    const original = structuredClone(event);
+
+    const result = projectCalendarEventOccurrences(
+      [event],
+      stockholmRange,
+      'Europe/Stockholm',
+    );
+
+    expect(result.occurrences).toEqual([]);
+    expect(result.diagnostics).toEqual([
+      { sourceEvent: event, reason: 'unsupported-recurrence' },
+    ]);
+    expect(event).toEqual(original);
   });
 
   it('diagnoses oversized recurrence arrays before traversing their members', () => {

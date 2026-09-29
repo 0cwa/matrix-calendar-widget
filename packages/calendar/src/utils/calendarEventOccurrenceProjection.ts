@@ -64,11 +64,26 @@ const supportedRRuleParts = new Set([
   'WKST',
 ]);
 
+const numericByPartRanges: Record<
+  string,
+  { min: number; max: number; allowZero?: boolean }
+> = {
+  BYHOUR: { min: 0, max: 23 },
+  BYMINUTE: { min: 0, max: 59 },
+  BYMONTH: { min: 1, max: 12 },
+  BYMONTHDAY: { min: -31, max: 31, allowZero: false },
+  BYSECOND: { min: 0, max: 60 },
+  BYSETPOS: { min: -366, max: 366, allowZero: false },
+  BYYEARDAY: { min: -366, max: 366, allowZero: false },
+  BYWEEKNO: { min: -53, max: 53, allowZero: false },
+};
+
 export type CalendarEventProjectionDiagnosticReason =
   | 'invalid-recurrence'
   | 'invalid-timing'
   | 'occurrence-limit'
   | 'recurrence-input-limit'
+  | 'unsupported-recurrence'
   | 'unsupported-timezone';
 
 export type CalendarEventProjectionDiagnostic = {
@@ -621,6 +636,8 @@ function buildRule(
     throw projectionError('invalid-recurrence');
   }
 
+  validateByParts(parts);
+
   const optionsText = [...parts.entries()]
     .filter(([key]) => key !== 'UNTIL' && key !== 'COUNT')
     .map(([key, value]) => `${key}=${value}`)
@@ -653,6 +670,96 @@ function buildRule(
     };
   } catch {
     throw projectionError('invalid-recurrence');
+  }
+}
+
+function validateByParts(parts: Map<string, string>): void {
+  const frequency = parts.get('FREQ')?.toUpperCase();
+
+  for (const [part, { min, max, allowZero = true }] of Object.entries(
+    numericByPartRanges,
+  )) {
+    const value = parts.get(part);
+    if (value === undefined) {
+      continue;
+    }
+
+    const numbers: number[] = [];
+    for (const item of value.split(',')) {
+      if (!/^[+-]?\d+$/.test(item)) {
+        throw projectionError('invalid-recurrence');
+      }
+      const number = Number(item);
+      if (
+        !Number.isSafeInteger(number) ||
+        number < min ||
+        number > max ||
+        (!allowZero && number === 0)
+      ) {
+        throw projectionError('invalid-recurrence');
+      }
+      numbers.push(number);
+    }
+    if (part === 'BYSECOND' && numbers.includes(60)) {
+      // BYSECOND=60 is valid iCalendar syntax for a leap second, but the
+      // JavaScript Date/calendar model cannot represent :60 exactly.
+      throw projectionError('unsupported-recurrence');
+    }
+  }
+
+  if (parts.has('BYMONTHDAY') && frequency === 'WEEKLY') {
+    throw projectionError('invalid-recurrence');
+  }
+  if (
+    parts.has('BYYEARDAY') &&
+    ['DAILY', 'WEEKLY', 'MONTHLY'].includes(frequency ?? '')
+  ) {
+    throw projectionError('invalid-recurrence');
+  }
+  if (parts.has('BYWEEKNO') && frequency !== 'YEARLY') {
+    throw projectionError('invalid-recurrence');
+  }
+  if (
+    parts.has('BYSETPOS') &&
+    ![
+      'BYDAY',
+      'BYHOUR',
+      'BYMINUTE',
+      'BYMONTH',
+      'BYMONTHDAY',
+      'BYSECOND',
+      'BYYEARDAY',
+      'BYWEEKNO',
+    ].some((part) => parts.has(part))
+  ) {
+    throw projectionError('invalid-recurrence');
+  }
+
+  const byDay = parts.get('BYDAY');
+  if (byDay === undefined) {
+    return;
+  }
+
+  for (const day of byDay.split(',')) {
+    const match = day.match(/^([+-]?\d{1,2})?(MO|TU|WE|TH|FR|SA|SU)$/i);
+    if (!match) {
+      throw projectionError('invalid-recurrence');
+    }
+    if (match[1] === undefined) {
+      continue;
+    }
+
+    const ordinal = Number(match[1]);
+    if (
+      !Number.isSafeInteger(ordinal) ||
+      ordinal === 0 ||
+      ordinal < -53 ||
+      ordinal > 53 ||
+      !['MONTHLY', 'YEARLY'].includes(frequency ?? '') ||
+      (frequency === 'YEARLY' && parts.has('BYWEEKNO'))
+    ) {
+      throw projectionError('invalid-recurrence');
+    }
   }
 }
 
