@@ -1,6 +1,6 @@
 # Project status
 
-_Last updated: 2026-09-29_
+_Last updated: 2026-09-30_
 
 This is the short-lived execution snapshot. `docs/PLAN.md` is the durable milestone plan; GitHub issues contain acceptance criteria.
 
@@ -52,7 +52,7 @@ Merged on `main`:
 - calendar color editing through the user-scoped gateway (PR #108),
 - mixed-collection compatibility notice and non-destructive VEVENT use (PR #109).
 
-Calendar timezone editing is deferred. PR #109 verifies mixed-collection notice behavior, preserves sibling VTODO data during VEVENT edits, and excludes collections from discovery when they explicitly report a supported-component set without VEVENT. The CalDAV discovery regression now verifies both VJOURNAL-only and VTODO-only collections remain untouched and hidden. PR #113 implements and validates the manager-only CalDAV URL/copy diagnostics under ADR022. Issue #5 remains open for remaining collection-management acceptance work. Its description and color requests are implemented, as are safe deletion, diagnostics, and mixed-collection handling. No issue edit is included.
+Calendar timezone editing is deferred. PR #109 verifies mixed-collection notice behavior, preserves sibling VTODO data during VEVENT edits, and excludes collections from discovery when they explicitly report a supported-component set without VEVENT. The CalDAV discovery regression now verifies both VJOURNAL-only and VTODO-only collections remain untouched and hidden. PR #113 implements and validates the manager-only CalDAV URL/copy diagnostics under ADR022. Issue #5 remains open for remaining collection-management acceptance work. Its body has been reconciled to record description and color editing, safe deletion, diagnostics, and mixed-collection handling as complete; collection-timezone editing remains deferred.
 
 ### M7 — Non-widget fallback
 
@@ -70,18 +70,18 @@ Issue #6 remains open. PR #128 completed bounded read-only projection and exact 
 
 ### M6 — PostgreSQL reminder persistence
 
-The optional app-owned PostgreSQL store, transactional claim layer, verified-TLS
-default, and restricted-role PostgreSQL 16 CI contract are implemented. The
-hosted restricted-role contract passed all five integration tests in run
-36358734009, and independent review passed. Full local project CI also passed;
-its PostgreSQL integration suite was skipped because no database URL was
-configured. The only remaining runtime gate for this store slice is verifying a
-default verified-TLS connection to an operator-controlled production PostgreSQL
-endpoint using its CA/certificate details. No endpoint or certificate
-configuration has been supplied, and etke-specific database wiring remains
-unverified. Persistence provides at-most-once database claim/completion state;
-it does not enable the reminder scheduler or guarantee exactly-once Matrix
-message delivery.
+The optional app-owned PostgreSQL store, schema migrations, transactional
+claim/completion contract, verified-TLS default, and restricted-role PostgreSQL
+16 CI contract are implemented. The hosted restricted-role contract passed all
+five integration tests in run 36358734009, and independent review passed. Full
+local project CI also passed; its PostgreSQL integration suite was skipped
+because no database URL was configured. Production validation remains open: no
+operator-controlled PostgreSQL endpoint or CA/certificate configuration has
+been supplied, so production TLS/CA validation and runtime validation against
+that endpoint have not been performed. etke-specific database wiring also
+remains unverified. Persistence provides at-most-once database
+claim/completion state; it does not enable the reminder scheduler or guarantee
+exactly-once Matrix message delivery.
 
 ## Active blockers
 
@@ -94,7 +94,7 @@ These are the user's delegated CalDAV identity path. They do not establish crede
 
 ### M6 — Room-owned application principal
 
-ADR014 / ADR015 select the room-owned application-principal model and operator-managed static room binding. This slice adds binding validation/resolution and a fail-closed membership/power policy service. Existing user-principal room-context routes remain active, enforce joined-membership/power checks, and make CalDAV requests as the authenticated user; the static-binding/application-principal gateway and CalDAV path remains unwired. Room-principal access still requires a non-password server-to-Radicale authentication path and deployment isolation. Matrix event sender data is authorization/audit context, not OpenID or CalDAV identity proof. Issue #7 remains open. Start reminder recipients with permission-checked room-wide notifications using standard `m.mentions.room: true`; defer email attendee registration until members can verify and consent to share an address. Per-user bot calendars are deferred until a trusted actor-token path is independently defined and tested.
+ADR014 / ADR015 select the room-owned application-principal model and operator-managed static room binding. This slice adds binding validation/resolution and a fail-closed membership/power policy service. Existing user-principal room-context routes remain active, enforce joined-membership/power checks, and make CalDAV requests as the authenticated user; the static-binding/application-principal gateway and CalDAV path remains unwired. Room-principal access still requires a non-password server-to-Radicale authentication path and deployment isolation. Matrix event sender data is authorization/audit context, not OpenID or CalDAV identity proof. Issue #7 remains open. Start reminder delivery with permission-checked room-wide notifications using standard `m.mentions.room: true`; defer individual Matrix recipients and email attendee/recipient collection until members explicitly verify and consent to share their addresses. Per-user bot calendars are deferred until a trusted actor-token path is independently defined and tested.
 
 ### M7 — Data commands
 
