@@ -133,6 +133,124 @@ type ParsedUntil =
   | { type: 'floating-date-time'; value: string }
   | { type: 'utc-date-time'; value: string; instant: number };
 
+export type SupportedCalendarEventRecurrenceFrequency =
+  | 'DAILY'
+  | 'WEEKLY'
+  | 'MONTHLY'
+  | 'YEARLY';
+
+export type SupportedCalendarEventRecurrenceEnd =
+  | { type: 'never' }
+  | { type: 'count'; count: number }
+  | { type: 'until'; value: string };
+
+export type SupportedCalendarEventRecurrenceRule = {
+  frequency: SupportedCalendarEventRecurrenceFrequency;
+  interval: number;
+  end: SupportedCalendarEventRecurrenceEnd;
+};
+
+const editorFrequencies = new Set<SupportedCalendarEventRecurrenceFrequency>([
+  'DAILY',
+  'WEEKLY',
+  'MONTHLY',
+  'YEARLY',
+]);
+
+/**
+ * Parse only the recurrence subset exposed by the first series editor. The
+ * existing projection parser remains authoritative for anchor and UNTIL
+ * semantics, while the editor deliberately excludes BY* and other RRULE parts.
+ */
+export function parseSupportedCalendarEventRecurrenceRule(
+  rawRule: string | undefined,
+  anchor: CalendarEventDateTime,
+): SupportedCalendarEventRecurrenceRule | undefined {
+  if (rawRule === undefined) {
+    return undefined;
+  }
+
+  const ruleText = rawRule.trim().replace(/^RRULE:/i, '');
+  const parts = new Map<string, string>();
+  for (const component of ruleText.split(';')) {
+    const separator = component.indexOf('=');
+    if (separator <= 0) {
+      throw new Error('Unsupported recurrence rule');
+    }
+    const key = component.slice(0, separator).toUpperCase();
+    const value = component.slice(separator + 1);
+    if (
+      !['FREQ', 'INTERVAL', 'COUNT', 'UNTIL'].includes(key) ||
+      !value ||
+      parts.has(key)
+    ) {
+      throw new Error('Unsupported recurrence rule');
+    }
+    parts.set(key, value);
+  }
+
+  const frequency = parts.get('FREQ')?.toUpperCase();
+  const intervalText = parts.get('INTERVAL') ?? '1';
+  const countText = parts.get('COUNT');
+  const until = parts.get('UNTIL');
+  const interval = Number(intervalText);
+  const count = countText === undefined ? undefined : Number(countText);
+  if (
+    !frequency ||
+    !editorFrequencies.has(
+      frequency as SupportedCalendarEventRecurrenceFrequency,
+    ) ||
+    !/^\d+$/.test(intervalText) ||
+    !Number.isSafeInteger(interval) ||
+    interval <= 0 ||
+    (countText !== undefined &&
+      (!/^\d+$/.test(countText) ||
+        !Number.isSafeInteger(count) ||
+        (count ?? 0) <= 0)) ||
+    (countText !== undefined && until !== undefined)
+  ) {
+    throw new Error('Unsupported recurrence rule');
+  }
+
+  try {
+    buildRule(ruleText, anchor);
+    parseUntil(ruleText, anchor);
+  } catch {
+    throw new Error('Unsupported recurrence rule');
+  }
+
+  return {
+    frequency: frequency as SupportedCalendarEventRecurrenceFrequency,
+    interval,
+    end:
+      count !== undefined
+        ? { type: 'count', count }
+        : until !== undefined
+          ? { type: 'until', value: until }
+          : { type: 'never' },
+  };
+}
+
+/** Serialize and validate the editor's limited rule against its DTSTART kind. */
+export function formatSupportedCalendarEventRecurrenceRule(
+  rule: SupportedCalendarEventRecurrenceRule,
+  anchor: CalendarEventDateTime,
+): string {
+  const components = [`FREQ=${rule.frequency}`];
+  if (rule.interval !== 1) {
+    components.push(`INTERVAL=${rule.interval}`);
+  }
+  if (rule.end.type === 'count') {
+    components.push(`COUNT=${rule.end.count}`);
+  } else if (rule.end.type === 'until') {
+    components.push(`UNTIL=${rule.end.value}`);
+  }
+
+  const result = components.join(';');
+  parseSupportedCalendarEventRecurrenceRule(result, anchor);
+  return result;
+}
+
 /**
  * Expand canonical typed events into a bounded, read-only view projection.
  * Invalid or unsupported recurrence is omitted as one opaque resource and
@@ -184,7 +302,6 @@ function projectEvent(
   if (sourceEvent.unsupportedRecurrence === 'range-this-and-future') {
     throw projectionError('invalid-recurrence');
   }
-
   const recurrence = sourceEvent.recurrence;
   assertRecurrenceInputLimit(recurrence);
   if (!recurrenceHasProjectionData(recurrence)) {

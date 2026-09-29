@@ -1092,45 +1092,116 @@ END:VCALENDAR`,
     expect(reparsed.event).toEqual(encoded.event);
   });
 
-  it('rejects recurrence creation until recurrence semantics land in M5', () => {
+  it('creates and round-trips a supported all-day RRULE', () => {
+    const encoded = codec.create('team', 'new.ics', {
+      uid: 'new@example.test',
+      title: 'Recurring',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-09-28',
+        endDate: '2026-09-29',
+      },
+      recurrence: { rrule: 'FREQ=DAILY;INTERVAL=2;COUNT=5' },
+    });
+
+    expect(encoded.event.recurrence).toEqual({
+      rrule: 'FREQ=DAILY;COUNT=5;INTERVAL=2',
+    });
+    expect(codec.parse('team', 'new.ics', encoded.icalendar).event).toEqual(
+      encoded.event,
+    );
+  });
+
+  it('updates and clears only the master RRULE in a complete resource', () => {
+    const parsed = codec.parse(
+      'team',
+      'series.ics',
+      fixture('recurrence-simple-series.ics'),
+    );
+
+    const encoded = parsed.applyPatch({
+      recurrence: { rrule: 'FREQ=MONTHLY;COUNT=6;INTERVAL=2' },
+    });
+    const calendar = ICAL.Component.fromString(encoded.icalendar);
+    const vevent = calendar.getFirstSubcomponent('vevent');
+    const reparsed = codec.parse('team', 'series.ics', encoded.icalendar);
+
+    expect(encoded.event).toMatchObject({
+      id: 'series.ics',
+      uid: 'series@example.test',
+      recurrence: { rrule: 'FREQ=MONTHLY;COUNT=6;INTERVAL=2' },
+    });
+    expect(reparsed.event.recurrence).toEqual(encoded.event.recurrence);
+    expect(calendar.getFirstPropertyValue('x-custom-calendar-property')).toBe(
+      'keep-this',
+    );
+    expect(vevent?.getFirstPropertyValue('x-custom-event-property')).toBe(
+      'keep-event',
+    );
+    expect(vevent?.getFirstSubcomponent('valarm')).not.toBeNull();
+    expect(calendar.getFirstSubcomponent('vtimezone')).not.toBeNull();
+
+    const cleared = parsed.applyPatch({ recurrence: {} });
+    const clearedCalendar = ICAL.Component.fromString(cleared.icalendar);
+    const clearedEvent = clearedCalendar.getFirstSubcomponent('vevent');
+    expect(cleared.event.recurrence).toBeUndefined();
+    expect(clearedEvent?.getFirstProperty('rrule')).toBeNull();
+    expect(
+      clearedEvent?.getFirstProperty('x-custom-event-property'),
+    ).not.toBeNull();
+    expect(clearedEvent?.getFirstSubcomponent('valarm')).not.toBeNull();
+    expect(clearedCalendar.getFirstSubcomponent('vtimezone')).not.toBeNull();
+  });
+
+  it('keeps complex recurrence readable and rejects recurrence changes', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-override.ics',
+      fixture('recurrence-override.ics'),
+    );
+
     expect(() =>
-      codec.create('team', 'new.ics', {
-        uid: 'new@example.test',
-        title: 'Recurring',
-        timing: {
-          type: 'all-day',
-          startDate: '2026-09-28',
-          endDate: '2026-09-29',
-        },
-        recurrence: { rrule: 'FREQ=DAILY' },
-      }),
+      parsed.applyPatch({ recurrence: { rrule: 'FREQ=WEEKLY;COUNT=8' } }),
     ).toThrow(
       new ICalendarEventCodecError(
         'unsupported-patch',
-        'Recurrence creation is not part of the basic VEVENT codec',
+        'Only simple whole-series RRULE changes are supported',
       ),
     );
   });
 
-  it('rejects recurrence edits until recurrence semantics land in M5', () => {
+  it('keeps multiple master RRULEs readable and untouched', () => {
     const parsed = codec.parse(
       'team',
-      'simple-timed.ics',
-      fixture('simple-timed.ics'),
+      'multi-rule.ics',
+      fixture('recurrence-multiple-master-rules.ics'),
     );
 
+    expect(parsed.listProjectionDiagnostic).toBe('unsupported-recurrence');
+    expect(parsed.event.unsupportedRecurrence).toBeUndefined();
     expect(() =>
-      parsed.applyPatch({
-        recurrence: {
-          rrule: 'FREQ=WEEKLY',
-        },
-      }),
+      parsed.applyPatch({ recurrence: { rrule: 'FREQ=DAILY;COUNT=5' } }),
     ).toThrow(
       new ICalendarEventCodecError(
         'unsupported-patch',
-        'Recurrence editing is not part of the basic VEVENT codec',
+        'Only simple whole-series RRULE changes are supported',
       ),
     );
+
+    const titlePatch = parsed.applyPatch({ title: 'Renamed multi-rule event' });
+    const calendar = ICAL.Component.fromString(titlePatch.icalendar);
+    const event = calendar.getFirstSubcomponent('vevent');
+    expect(event?.getAllProperties('rrule')).toHaveLength(2);
+    expect(titlePatch.icalendar).toContain('RRULE:FREQ=WEEKLY;COUNT=4');
+    expect(titlePatch.icalendar).toContain('RRULE:FREQ=MONTHLY;COUNT=2');
+    expect(calendar.getFirstPropertyValue('x-custom-calendar-property')).toBe(
+      'keep-calendar',
+    );
+    expect(event?.getFirstPropertyValue('x-custom-event-property')).toBe(
+      'keep-event',
+    );
+    expect(event?.getFirstSubcomponent('valarm')).not.toBeNull();
+    expect(calendar.getAllSubcomponents('vtodo')).toHaveLength(1);
   });
 });
 

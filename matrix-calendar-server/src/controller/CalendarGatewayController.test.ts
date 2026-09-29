@@ -1056,6 +1056,42 @@ describe('CalendarGatewayController', () => {
     expect(responseText).not.toContain('VTIMEZONE');
   });
 
+  it('suppresses multiple master RRULEs and returns only a count diagnostic', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch.mockResponseOnce(
+      multistatus(
+        eventResourceResponse(
+          '/alice/team/multiple-rules.ics',
+          '"multiple-rules-etag"',
+          readFixture('recurrence-multiple-master-rules.ics'),
+        ),
+      ),
+      { status: 207 },
+    );
+
+    const response = await createController().listEvents(
+      userContext,
+      openIdCredential,
+      roomId,
+      calendarId,
+      '2026-09-24T09:00:00Z',
+      '2026-09-24T10:00:00Z',
+      'UTC',
+    );
+
+    expect(response).toEqual({
+      events: [],
+      diagnostics: [{ reason: 'unsupported-recurrence', count: 1 }],
+    });
+    const responseText = JSON.stringify(response);
+    expect(responseText).not.toContain('Private multiple-rule event');
+    expect(responseText).not.toContain('multiple-rules-etag');
+    expect(responseText).not.toContain('multiple-rules@example.test');
+    expect(responseText).not.toContain('RRULE');
+    expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
+  });
+
   it('keeps a recurring source resource when only an occurrence intersects', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';

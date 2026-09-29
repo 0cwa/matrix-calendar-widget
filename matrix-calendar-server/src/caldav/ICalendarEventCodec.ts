@@ -30,6 +30,7 @@ import {
   CalendarEventTiming,
   CalendarEventTransparency,
   CalendarId,
+  parseSupportedCalendarEventRecurrenceRule,
 } from '@matrix-calendar-widget/calendar';
 import ICAL from 'ical.js';
 import { hasUnsupportedTimezoneRules } from './ICalendarTimezoneProjectionSafety';
@@ -61,6 +62,8 @@ export class ParsedICalendarEvent {
   constructor(
     private readonly calendar: ICAL.Component,
     public readonly event: CalendarEvent,
+    /** Internal marker for count-only list diagnostics, not event payloads. */
+    public readonly listProjectionDiagnostic?: 'unsupported-recurrence',
   ) {}
 
   applyPatch(patch: CalendarEventPatch): EncodedICalendarEvent {
@@ -70,11 +73,22 @@ export class ParsedICalendarEvent {
         'Timing edits are not supported for events with unsupported timezone rules',
       );
     }
-    if (hasOwn(patch, 'recurrence')) {
-      throw new ICalendarEventCodecError(
-        'unsupported-patch',
-        'Recurrence editing is not part of the basic VEVENT codec',
-      );
+    const hasRecurrencePatch = hasOwn(patch, 'recurrence');
+    const recurrenceWrite = hasRecurrencePatch
+      ? recurrenceWriteFromUnknown(patch.recurrence)
+      : undefined;
+    if (hasRecurrencePatch) {
+      if (this.listProjectionDiagnostic === 'unsupported-recurrence') {
+        throw unsupportedRecurrencePatch();
+      }
+      assertSimpleRecurrenceCanBeEdited(this.event);
+      const nextRule = recurrenceWrite?.rrule;
+      if (nextRule !== undefined) {
+        validateRecurrenceRule(
+          nextRule,
+          timingStartAsDateTime(patch.timing ?? this.event.timing),
+        );
+      }
     }
 
     const calendar = ICAL.Component.fromString(this.calendar.toString());
@@ -121,6 +135,15 @@ export class ParsedICalendarEvent {
     if (hasOwn(patch, 'priority')) {
       setOptionalProperty(vevent, 'priority', patch.priority);
     }
+    if (hasRecurrencePatch) {
+      setRecurrenceRule(vevent, recurrenceWrite?.rrule);
+    }
+
+    const recurrence = hasRecurrencePatch
+      ? recurrenceWrite?.rrule
+        ? { rrule: canonicalizeRecurrenceRule(recurrenceWrite.rrule) }
+        : undefined
+      : this.event.recurrence;
 
     return {
       event: {
@@ -128,7 +151,7 @@ export class ParsedICalendarEvent {
         ...patch,
         title: patch.title ?? this.event.title,
         timing: patch.timing ?? this.event.timing,
-        recurrence: this.event.recurrence,
+        recurrence,
       },
       icalendar: calendar.toString(),
     };
@@ -141,10 +164,14 @@ export class ICalendarEventCodec {
     eventId: CalendarEventId,
     input: CalendarEventInput,
   ): EncodedICalendarEvent {
+    const recurrenceWrite = recurrenceWriteFromUnknown(input.recurrence);
     if (input.recurrence) {
-      throw new ICalendarEventCodecError(
-        'unsupported-patch',
-        'Recurrence creation is not part of the basic VEVENT codec',
+      if (!recurrenceWrite?.rrule) {
+        throw unsupportedRecurrencePatch();
+      }
+      validateRecurrenceRule(
+        recurrenceWrite.rrule,
+        timingStartAsDateTime(input.timing),
       );
     }
 
@@ -173,12 +200,16 @@ export class ICalendarEventCodec {
     setOptionalProperty(vevent, 'url', input.url);
     setCategories(vevent, input.categories);
     setOptionalProperty(vevent, 'priority', input.priority);
+    setRecurrenceRule(vevent, recurrenceWrite?.rrule);
 
     return {
       event: {
         ...input,
         id: eventId,
         calendarId,
+        recurrence: recurrenceWrite?.rrule
+          ? { rrule: canonicalizeRecurrenceRule(recurrenceWrite.rrule) }
+          : undefined,
       },
       icalendar: calendar.toString(),
     };
@@ -228,6 +259,7 @@ export class ICalendarEventCodec {
     const timing = readTiming(vevent);
     const recurrence = readRecurrence(calendar, vevent, uid);
     const unsupportedRecurrence = readUnsupportedRecurrence(calendar, uid);
+    const hasMultipleMasterRules = vevent.getAllProperties('rrule').length > 1;
     const unsupportedTimezone = hasUnsupportedTimezoneRules(calendar, uid);
 
     const event: CalendarEvent = {
@@ -248,8 +280,112 @@ export class ICalendarEventCodec {
       ...(unsupportedTimezone ? { unsupportedTimezone: true } : {}),
     };
 
-    return new ParsedICalendarEvent(calendar, event);
+    return new ParsedICalendarEvent(
+      calendar,
+      event,
+      hasMultipleMasterRules ? 'unsupported-recurrence' : undefined,
+    );
   }
+}
+
+function recurrenceWriteFromUnknown(
+  value: unknown,
+): { rrule?: string } | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw unsupportedRecurrencePatch();
+  }
+
+  const fields = value as Record<string, unknown>;
+  if (
+    Object.keys(fields).some((key) => key !== 'rrule') ||
+    (fields.rrule !== undefined && typeof fields.rrule !== 'string')
+  ) {
+    throw unsupportedRecurrencePatch();
+  }
+
+  return { rrule: fields.rrule as string | undefined };
+}
+
+function assertSimpleRecurrenceCanBeEdited(event: CalendarEvent): void {
+  const recurrence = event.recurrence;
+  if (
+    event.unsupportedTimezone ||
+    event.unsupportedRecurrence ||
+    recurrence?.rdates?.length ||
+    recurrence?.exdates?.length ||
+    recurrence?.recurrenceId ||
+    recurrence?.overrides?.length
+  ) {
+    throw unsupportedRecurrencePatch();
+  }
+
+  if (recurrence && Object.prototype.hasOwnProperty.call(recurrence, 'rrule')) {
+    if (typeof recurrence.rrule !== 'string') {
+      throw unsupportedRecurrencePatch();
+    }
+    validateRecurrenceRule(
+      recurrence.rrule,
+      timingStartAsDateTime(event.timing),
+    );
+  }
+}
+
+function validateRecurrenceRule(
+  rule: string,
+  anchor: CalendarEventDateTime,
+): void {
+  try {
+    if (!rule.trim()) {
+      throw new Error('empty recurrence rule');
+    }
+    parseSupportedCalendarEventRecurrenceRule(rule, anchor);
+  } catch {
+    throw unsupportedRecurrencePatch();
+  }
+}
+
+function timingStartAsDateTime(
+  timing: CalendarEventTiming,
+): CalendarEventDateTime {
+  if (timing.type === 'all-day') {
+    return { type: 'date', value: timing.startDate };
+  }
+
+  return timing.start.type === 'floating'
+    ? { type: 'floating-date-time', value: timing.start.local }
+    : {
+        type: 'date-time',
+        value: {
+          local: timing.start.local,
+          timezone: timing.start.timezone,
+        },
+      };
+}
+
+function setRecurrenceRule(
+  vevent: ICAL.Component,
+  rule: string | undefined,
+): void {
+  vevent.removeAllProperties('rrule');
+  if (rule) {
+    const ruleText = rule.trim().replace(/^RRULE:/i, '');
+    vevent.addPropertyWithValue('rrule', ICAL.Recur.fromString(ruleText));
+  }
+}
+
+function canonicalizeRecurrenceRule(rule: string): string {
+  const ruleText = rule.trim().replace(/^RRULE:/i, '');
+  return String(ICAL.Recur.fromString(ruleText));
+}
+
+function unsupportedRecurrencePatch(): ICalendarEventCodecError {
+  return new ICalendarEventCodecError(
+    'unsupported-patch',
+    'Only simple whole-series RRULE changes are supported',
+  );
 }
 
 function readUnsupportedRecurrence(

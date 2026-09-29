@@ -19,7 +19,6 @@ import {
   Calendar,
   CalendarEvent,
   CalendarEventInput,
-  CalendarEventPatch,
   CalendarEventRecurrenceDate,
   CalendarEventRecurrenceOverride,
 } from '../model';
@@ -163,21 +162,11 @@ describe('InMemoryCalendarRepository', () => {
       expectedRecurrencePeriod(),
     );
 
-    const patchOverride = recurrenceOverride();
-    const patchRdate = recurrencePeriod();
-    const patch: CalendarEventPatch = {
-      recurrence: {
-        rdates: [patchRdate],
-        overrides: [patchOverride],
-      },
-    };
     const updated = await repository.updateEvent(
       'team',
       'recurring-with-override',
-      patch,
+      { title: 'Updated series title' },
     );
-    mutateRecurrenceOverride(patchOverride);
-    mutateRecurrencePeriod(patchRdate);
     mutateRecurrenceOverride(updated.recurrence!.overrides![0]);
     mutateRecurrencePeriod(updated.recurrence!.rdates![0]);
 

@@ -51,6 +51,14 @@ describe('calendar event form adapter', () => {
       timedKind: 'zoned',
       timingChanged: false,
       timezoneChanged: false,
+      repeats: false,
+      recurrenceFrequency: 'DAILY',
+      recurrenceInterval: '1',
+      recurrenceEnd: 'never',
+      recurrenceCount: '2',
+      recurrenceUntil: '2026-09-23',
+      recurrenceEditable: true,
+      recurrenceChanged: false,
     });
   });
 
@@ -294,4 +302,252 @@ describe('calendar event form adapter', () => {
       },
     });
   });
+
+  it('loads and edits only the simple master RRULE', () => {
+    const recurringEvent: CalendarEvent = {
+      id: 'series',
+      calendarId: 'team',
+      uid: 'series@example.test',
+      title: 'Weekly planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-09-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;INTERVAL=2;COUNT=8' },
+    };
+    const values = calendarEventToFormValues(recurringEvent, calendar);
+
+    expect(values).toMatchObject({
+      repeats: true,
+      recurrenceFrequency: 'WEEKLY',
+      recurrenceInterval: '2',
+      recurrenceEnd: 'count',
+      recurrenceCount: '8',
+      recurrenceEditable: true,
+    });
+    expect(
+      calendarEventPatchFromForm({ ...values, title: 'Renamed series' }),
+    ).not.toHaveProperty('recurrence');
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        recurrenceFrequency: 'MONTHLY',
+        recurrenceChanged: true,
+      }).recurrence,
+    ).toEqual({ rrule: 'FREQ=MONTHLY;INTERVAL=2;COUNT=8' });
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        repeats: false,
+        recurrenceChanged: true,
+      }).recurrence,
+    ).toEqual({});
+  });
+
+  it('keeps complex recurrence controls disabled and preserves the source data', () => {
+    const complexEvent: CalendarEvent = {
+      id: 'complex',
+      calendarId: 'team',
+      uid: 'complex@example.test',
+      title: 'Complex series',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-10-05',
+        endDate: '2026-10-06',
+      },
+      recurrence: {
+        rrule: 'FREQ=DAILY;COUNT=3',
+        rdates: [{ type: 'date', value: '2026-10-09' }],
+      },
+    };
+    const values = calendarEventToFormValues(complexEvent, calendar);
+
+    expect(values.recurrenceEditable).toBe(false);
+    expect(values.recurrenceDisabledReason).toBe('complex');
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        title: 'Renamed complex series',
+      }),
+    ).not.toHaveProperty('recurrence');
+  });
+
+  it('writes the UNTIL value in the event start value kind', () => {
+    const base = createCalendarEventFormValues(
+      calendar,
+      DateTime.fromISO('2026-10-25T09:00:00', { zone: 'Europe/Stockholm' }),
+    );
+    const untilValues = {
+      ...base,
+      repeats: true,
+      recurrenceEnd: 'until' as const,
+      recurrenceUntil: '2026-10-25',
+    };
+
+    expect(
+      calendarEventInputFromForm(untilValues, 'zoned@example.test').recurrence,
+    ).toEqual({ rrule: 'FREQ=DAILY;UNTIL=20261025T225959Z' });
+    expect(
+      calendarEventInputFromForm(
+        {
+          ...untilValues,
+          timedKind: 'floating',
+        },
+        'floating@example.test',
+      ).recurrence,
+    ).toEqual({ rrule: 'FREQ=DAILY;UNTIL=20261025T235959' });
+    expect(
+      calendarEventInputFromForm(
+        {
+          ...untilValues,
+          timingType: 'all-day',
+          start: '2026-10-25',
+          end: '2026-10-25',
+        },
+        'date@example.test',
+      ).recurrence,
+    ).toEqual({ rrule: 'FREQ=DAILY;UNTIL=20261025' });
+  });
+
+  it('displays a zoned UTC UNTIL date in the DTSTART timezone without patching it', () => {
+    const event: CalendarEvent = {
+      id: 'negative-offset-series',
+      calendarId: 'team',
+      uid: 'negative-offset@example.test',
+      title: 'Los Angeles series',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-25T09:00:00',
+          timezone: 'America/Los_Angeles',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-25T10:00:00',
+          timezone: 'America/Los_Angeles',
+        },
+      },
+      recurrence: { rrule: 'FREQ=DAILY;UNTIL=20261026T065959Z' },
+    };
+    const values = calendarEventToFormValues(event, calendar);
+
+    expect(values.recurrenceUntil).toBe('2026-10-25');
+    expect(values.recurrenceChanged).toBe(false);
+    expect(
+      calendarEventPatchFromForm({ ...values, title: 'Renamed' }),
+    ).not.toHaveProperty('recurrence');
+  });
+
+  it('reconciles an inclusive DATE UNTIL when DTSTART becomes timed', () => {
+    const event: CalendarEvent = {
+      id: 'all-day-series',
+      calendarId: 'team',
+      uid: 'all-day@example.test',
+      title: 'All-day series',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-10-25',
+        endDate: '2026-10-26',
+      },
+      recurrence: { rrule: 'FREQ=DAILY;UNTIL=20261025' },
+    };
+    const values = calendarEventToFormValues(event, calendar);
+    const patch = calendarEventPatchFromForm({
+      ...values,
+      timingType: 'timed',
+      start: '2026-10-25T09:00',
+      end: '2026-10-25T10:00',
+      timingChanged: true,
+    });
+
+    expect(patch.timing?.type).toBe('timed');
+    expect(patch.recurrence).toEqual({
+      rrule: 'FREQ=DAILY;UNTIL=20261025T225959Z',
+    });
+  });
+
+  it('reconciles negative-offset zoned UNTIL to DATE and a new zone', () => {
+    const event: CalendarEvent = {
+      id: 'negative-offset-series',
+      calendarId: 'team',
+      uid: 'negative-offset@example.test',
+      title: 'Los Angeles series',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-25T09:00:00',
+          timezone: 'America/Los_Angeles',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-25T10:00:00',
+          timezone: 'America/Los_Angeles',
+        },
+      },
+      recurrence: { rrule: 'FREQ=DAILY;UNTIL=20261026T065959Z' },
+    };
+    const values = calendarEventToFormValues(event, calendar);
+
+    const datePatch = calendarEventPatchFromForm({
+      ...values,
+      timingType: 'all-day',
+      start: '2026-10-25',
+      end: '2026-10-25',
+      timingChanged: true,
+    });
+    expect(datePatch.timing?.type).toBe('all-day');
+    expect(datePatch.recurrence).toEqual({
+      rrule: 'FREQ=DAILY;UNTIL=20261025',
+    });
+
+    const timezonePatch = calendarEventPatchFromForm({
+      ...values,
+      timezone: 'Europe/Stockholm',
+      timingChanged: true,
+      timezoneChanged: true,
+    });
+    expect(timezonePatch.recurrence).toEqual({
+      rrule: 'FREQ=DAILY;UNTIL=20261025T225959Z',
+    });
+  });
+
+  it.each(['FREQ=DAILY;COUNT=4', 'FREQ=DAILY'])(
+    'keeps count/never rule stable on DTSTART kind changes: %s',
+    (rrule) => {
+      const event: CalendarEvent = {
+        id: 'bounded-series',
+        calendarId: 'team',
+        uid: 'bounded@example.test',
+        title: 'Bounded series',
+        timing: {
+          type: 'all-day',
+          startDate: '2026-10-25',
+          endDate: '2026-10-26',
+        },
+        recurrence: { rrule },
+      };
+      const values = calendarEventToFormValues(event, calendar);
+
+      expect(
+        calendarEventPatchFromForm({
+          ...values,
+          timingType: 'timed',
+          start: '2026-10-25T09:00',
+          end: '2026-10-25T10:00',
+          timingChanged: true,
+        }),
+      ).not.toHaveProperty('recurrence');
+    },
+  );
 });

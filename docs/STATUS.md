@@ -1,12 +1,12 @@
 # Project status
 
-_Last updated: 2026-09-28_
+_Last updated: 2026-09-29_
 
 This is the short-lived execution snapshot. `docs/PLAN.md` is the durable milestone plan; GitHub issues contain acceptance criteria.
 
 ## Current phase
 
-**M3 is complete. M4 color editing, mixed-collection compatibility, manager-only CalDAV URL/copy diagnostics, and hiding of VJOURNAL-only/VTODO-only collections are implemented; timezone editing remains open. M5 recurrence work can proceed in bounded slices.**
+**M3 is complete. M4 color editing, mixed-collection compatibility, manager-only CalDAV URL/copy diagnostics, and hiding of VJOURNAL-only/VTODO-only collections are implemented; timezone editing remains open. PR #128 merged bounded read-only recurrence projection and exact range clipping. M5 recurrence editing continues in bounded slices.**
 
 ADR010 / PR #104 selected a mixed principal model: widget calendars remain user-scoped, while the bot MVP uses room-owned calendars under an application principal. Room-owned reads and writes remain blocked until a non-password server-to-Radicale authentication path for that principal is defined and tested. ADR009's user OpenID delegation does not provide application-principal credentials. No etke-managed host deployment has been verified.
 
@@ -52,11 +52,11 @@ Merged on `main`:
 - calendar color editing through the user-scoped gateway (PR #108),
 - mixed-collection compatibility notice and non-destructive VEVENT use (PR #109).
 
-Calendar timezone editing is deferred. PR #109 verifies mixed-collection notice behavior, preserves sibling VTODO data during VEVENT edits, and excludes collections from discovery when they explicitly report a supported-component set without VEVENT. The CalDAV discovery regression now verifies both VJOURNAL-only and VTODO-only collections remain untouched and hidden. PR #113 implements and validates the manager-only CalDAV URL/copy diagnostics under ADR022. Issue #5 remains open with a stale checklist: it still lists PR #101 as active and leaves merged description, color, mixed-notice, deletion, and PR #113 diagnostics work unchecked. No issue edit is included.
+Calendar timezone editing is deferred. PR #109 verifies mixed-collection notice behavior, preserves sibling VTODO data during VEVENT edits, and excludes collections from discovery when they explicitly report a supported-component set without VEVENT. The CalDAV discovery regression now verifies both VJOURNAL-only and VTODO-only collections remain untouched and hidden. PR #113 implements and validates the manager-only CalDAV URL/copy diagnostics under ADR022. Issue #5 remains open for remaining collection-management acceptance work; safe deletion, diagnostics, description, color, and mixed-collection handling are implemented. No issue edit is included.
 
 ### M7 — Non-widget fallback
 
-PR #105 merged `!calendar help` and guidance directing capable clients to the widget. Issue #8 remains open and still shows help as unchecked. Upcoming/event queries and data-changing commands remain unfinished and depend on the M6 room-calendar binding and authorization path.
+PR #105 merged `!calendar help` and guidance directing capable clients to the widget; both help criteria are complete. Issue #8 remains open for upcoming/event queries and data-changing commands, which depend on the M6 room-calendar binding and authorization path.
 
 ### M8 — Docker build and deployment groundwork
 
@@ -66,7 +66,7 @@ PR #102 merged Docker build/runtime documentation and a non-publishing CI image-
 
 ### M5 — Recurrence and iCalendar completeness
 
-Issue #6 remains open. Continue with small recurrence and round-trip slices using the existing domain, repository, codec, and fixture seams. These in-repository slices can proceed independently of the external authentication work; end-to-end use with a user's real CalDAV principal still depends on the M2 delegation path.
+Issue #6 remains open. PR #128 completed bounded read-only projection and exact viewer-local range clipping. Continue with small recurrence and round-trip slices using the existing domain, repository, codec, and fixture seams; the current slice adds simple whole-series RRULE create/edit. These in-repository slices can proceed independently of the external authentication work; end-to-end use with a user's real CalDAV principal still depends on the M2 delegation path.
 
 ### M6 — PostgreSQL reminder persistence
 

@@ -108,7 +108,9 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
       retaining source resource identity for series-level reads and mutations;
       leave malformed/unsupported data opaque with diagnostics and keep
       `RANGE=THISANDFUTURE` hidden.
-- [ ] RRULE editor based on inherited NeoDateFix recurrence UI.
+- [x] Create and edit simple whole-series RRULEs with DAILY, WEEKLY, MONTHLY,
+      or YEARLY frequency, positive interval, and never/count/date end controls.
+- [ ] Extend RRULE editing to additional recurrence rule parts and patterns.
 - [ ] RDATE / EXDATE editing.
 - [ ] RECURRENCE-ID instance override editing.
 - [ ] “this event / this and following / series” edit semantics where representable.
@@ -121,6 +123,13 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 The recurring-resource contract uses the hosted CI stack pinned to Synapse
 v1.161.0 and Radicale 3.8.0.0 with `radicale_auth_matrix`. A passing result
 validates this stack only; the broader issue #6 criteria and M5 exit remain open.
+
+The first write slice limits recurrence controls to four frequencies, interval,
+and an optional count or inclusive end date. Writes replace or clear only the
+master RRULE and use the existing source resource ID and ETag. Resources with
+RDATE, EXDATE, detached instances, multiple master RRULEs, unsupported RRULE
+parts, or unsupported timezone rules remain readable; recurrence controls stay
+disabled, and ordinary field edits preserve the complete source resource.
 
 The CalDAV codec exposes a read-only domain view of master RRULE, RDATE
 (including PERIOD values), and EXDATE values plus same-resource, same-UID
@@ -179,7 +188,8 @@ VTIMEZONE definitions or establish mainstream-client recurrence
 interoperability.
 Ordinary master-field patches preserve all VEVENT components, VTIMEZONE, and
 unknown properties. The codec continues to reject master events without
-DTEND. Recurrence editing and mainstream-client interoperability remain open.
+DTEND. Simple whole-series RRULE create/edit is implemented; broader recurrence
+editing and mainstream-client interoperability remain open.
 
 The generated IANA 2026d VTIMEZONE lookup package is available for downstream
 timezone-aware consumers. Its presence alone does not complete the named-zone

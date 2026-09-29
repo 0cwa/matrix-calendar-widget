@@ -20,7 +20,11 @@ import type {
   CalendarEventDateTime,
   CalendarTimeRange,
 } from '../model';
-import { projectCalendarEventOccurrences } from './calendarEventOccurrenceProjection';
+import {
+  formatSupportedCalendarEventRecurrenceRule,
+  parseSupportedCalendarEventRecurrenceRule,
+  projectCalendarEventOccurrences,
+} from './calendarEventOccurrenceProjection';
 import {
   calendarLocalDateTimeToUnixMillis,
   calendarUnixMillisToLocalDateTime,
@@ -30,6 +34,68 @@ const stockholmRange: CalendarTimeRange = {
   start: '2026-10-23T00:00:00Z',
   end: '2026-11-07T00:00:00Z',
 };
+
+describe('supported series recurrence rules', () => {
+  const zonedAnchor: CalendarEventDateTime = {
+    type: 'date-time',
+    value: { local: '2026-10-26T09:00:00', timezone: 'Europe/Stockholm' },
+  };
+
+  it.each(['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'] as const)(
+    'parses the %s frequency and serializes a bounded rule',
+    (frequency) => {
+      const rule = {
+        frequency,
+        interval: 2,
+        end: { type: 'count' as const, count: 5 },
+      };
+
+      expect(
+        formatSupportedCalendarEventRecurrenceRule(rule, zonedAnchor),
+      ).toBe(`FREQ=${frequency};INTERVAL=2;COUNT=5`);
+      expect(
+        parseSupportedCalendarEventRecurrenceRule(
+          `FREQ=${frequency};INTERVAL=2;COUNT=5`,
+          zonedAnchor,
+        ),
+      ).toEqual(rule);
+    },
+  );
+
+  it('validates date, floating, and zoned UNTIL value kinds', () => {
+    expect(
+      parseSupportedCalendarEventRecurrenceRule(
+        'FREQ=DAILY;UNTIL=20261231T225959Z',
+        zonedAnchor,
+      ),
+    ).toMatchObject({ end: { type: 'until', value: '20261231T225959Z' } });
+    expect(
+      parseSupportedCalendarEventRecurrenceRule('FREQ=DAILY;UNTIL=20261231', {
+        type: 'date',
+        value: '2026-10-26',
+      }),
+    ).toMatchObject({ end: { type: 'until', value: '20261231' } });
+    expect(
+      parseSupportedCalendarEventRecurrenceRule(
+        'FREQ=DAILY;UNTIL=20261231T235959',
+        { type: 'floating-date-time', value: '2026-10-26T09:00:00' },
+      ),
+    ).toMatchObject({ end: { type: 'until', value: '20261231T235959' } });
+  });
+
+  it.each([
+    'FREQ=WEEKLY;BYDAY=MO',
+    'FREQ=HOURLY',
+    'FREQ=DAILY;INTERVAL=0',
+    'FREQ=DAILY;COUNT=2;UNTIL=20261231T225959Z',
+    'FREQ=DAILY;UNTIL=20261231',
+    'FREQ=DAILY;UNTIL=20261231T235959',
+  ])('rejects unsupported or anchor-incompatible rule %s', (rule) => {
+    expect(() =>
+      parseSupportedCalendarEventRecurrenceRule(rule, zonedAnchor),
+    ).toThrow('Unsupported recurrence rule');
+  });
+});
 
 describe('projectCalendarEventOccurrences', () => {
   it('keeps RRULE, RDATE, EXDATE, moved overrides, and cancellation identities distinct', () => {

@@ -239,7 +239,7 @@ describe('GatewayCalendarRepository', () => {
         diagnostics: [],
       }),
       jsonResponse({
-        event: { ...event, title: 'Updated' },
+        event: { ...event, recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' } },
         etag: '"updated-etag"',
       }),
     );
@@ -252,9 +252,12 @@ describe('GatewayCalendarRepository', () => {
       }),
     ).resolves.toEqual([event]);
 
+    const recurrencePatch = {
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' },
+    };
     await expect(
-      repository.updateEvent(calendarId, eventId, { title: 'Updated' }),
-    ).resolves.toMatchObject({ title: 'Updated' });
+      repository.updateEvent(calendarId, eventId, recurrencePatch),
+    ).resolves.toMatchObject({ recurrence: recurrencePatch.recurrence });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0][0]).toContain('/v1/calendar/events?');
@@ -275,6 +278,7 @@ describe('GatewayCalendarRepository', () => {
     expect(new Headers(updateInit?.headers).get('Authorization')).toBe(
       'MX-Identity delegated',
     );
+    expect(updateInit?.body).toBe(JSON.stringify(recurrencePatch));
   });
 
   it('passes count-only projection diagnostics through from the gateway', async () => {
