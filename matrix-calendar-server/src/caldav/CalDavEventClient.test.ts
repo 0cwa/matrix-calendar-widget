@@ -27,7 +27,7 @@ const credentialProvider: CalDavCredentialProvider = {
 };
 
 describe('CalDavEventClient', () => {
-  it('queries VEVENT resources in a UTC visible range across arbitrary namespace prefixes', async () => {
+  it('overfetches VEVENT candidates by 32 hours without changing the caller range', async () => {
     const fetchMock = jest
       .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
       .mockResolvedValue(
@@ -76,12 +76,16 @@ END:VCALENDAR</c:calendar-data>
         ),
       );
 
+    const callerRange = {
+      start: '2026-09-24T08:00:00+02:00',
+      end: '2026-09-24T10:30:00+02:00',
+    };
+    const originalCallerRange = { ...callerRange };
     const result = await new CalDavEventClient(
       credentialProvider,
       fetchMock,
     ).listEvents('https://radicale.example.test/alice/events/', {
-      start: '2026-09-24T08:00:00+02:00',
-      end: '2026-09-24T10:30:00+02:00',
+      ...callerRange,
     });
 
     expect(result).toEqual([
@@ -106,8 +110,9 @@ END:VCALENDAR</c:calendar-data>
     );
     expect(new Headers(init?.headers).get('Depth')).toBe('1');
     expect(init?.body).toContain('name="VEVENT"');
-    expect(init?.body).toContain('start="20260924T060000Z"');
-    expect(init?.body).toContain('end="20260924T083000Z"');
+    expect(init?.body).toContain('start="20260922T220000Z"');
+    expect(init?.body).toContain('end="20260925T163000Z"');
+    expect(callerRange).toEqual(originalCallerRange);
   });
 
   it.each([

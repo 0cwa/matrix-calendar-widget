@@ -16,6 +16,10 @@
 
 import { DateTime } from 'luxon';
 import type { CalendarEventTimedDateTime } from '../model';
+import {
+  calendarLocalDateTimeToUnixMillis,
+  isCalendarTimezoneSupported,
+} from './calendarEventTimezone';
 
 /**
  * Returns the event time in the viewer's local zone. Floating wall times are
@@ -28,8 +32,18 @@ export function calendarEventTimedDateTimeToDateTime(
 ): DateTime {
   const storedTimezone =
     value.type === 'floating' ? viewerTimezone : value.timezone;
+  if (!isCalendarTimezoneSupported(storedTimezone)) {
+    // Keep non-projection consumers compatible. The occurrence projector
+    // checks bundle support first and diagnoses unsupported zones as opaque.
+    return DateTime.fromISO(value.local, { zone: storedTimezone }).setZone(
+      viewerTimezone,
+    );
+  }
 
-  return DateTime.fromISO(value.local, { zone: storedTimezone }).setZone(
-    viewerTimezone,
+  const instant = calendarLocalDateTimeToUnixMillis(
+    value.local,
+    storedTimezone,
   );
+
+  return DateTime.fromMillis(instant, { zone: viewerTimezone });
 }

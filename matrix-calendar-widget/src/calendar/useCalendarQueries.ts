@@ -18,10 +18,13 @@ import {
   Calendar,
   CalendarEvent,
   CalendarEventId,
+  CalendarEventListDiagnostic,
+  CalendarEventListResult,
   CalendarId,
   CalendarTimeRange,
 } from '@matrix-calendar-widget/calendar';
 import { useEffect, useState } from 'react';
+import { isCalendarEventDiagnosticsRepository } from './CalendarEventListDiagnosticsRepository';
 import {
   useCalendarRepository,
   useCalendarRepositoryRevision,
@@ -31,6 +34,10 @@ export type CalendarQueryState<T> = {
   data: T;
   loading: boolean;
   error?: Error;
+};
+
+export type CalendarEventsQueryState = CalendarQueryState<CalendarEvent[]> & {
+  diagnostics: CalendarEventListDiagnostic[];
 };
 
 function asError(error: unknown): Error {
@@ -76,12 +83,13 @@ export function useCalendars(): CalendarQueryState<Calendar[]> {
 export function useCalendarEvents(
   calendarIds: CalendarId[],
   range: CalendarTimeRange,
-): CalendarQueryState<CalendarEvent[]> {
+): CalendarEventsQueryState {
   const repository = useCalendarRepository();
   const revision = useCalendarRepositoryRevision();
   const calendarIdsKey = JSON.stringify(calendarIds);
-  const [state, setState] = useState<CalendarQueryState<CalendarEvent[]>>({
+  const [state, setState] = useState<CalendarEventsQueryState>({
     data: [],
+    diagnostics: [],
     loading: true,
   });
 
@@ -97,16 +105,34 @@ export function useCalendarEvents(
 
     async function loadEvents() {
       try {
-        const data = await repository.listEvents(
-          requestedCalendarIds,
-          requestedRange,
-        );
+        const result: CalendarEventListResult =
+          isCalendarEventDiagnosticsRepository(repository)
+            ? await repository.listEventsWithDiagnostics(
+                requestedCalendarIds,
+                requestedRange,
+              )
+            : {
+                events: await repository.listEvents(
+                  requestedCalendarIds,
+                  requestedRange,
+                ),
+                diagnostics: [],
+              };
         if (!ignore) {
-          setState({ data, loading: false });
+          setState({
+            data: result.events,
+            diagnostics: result.diagnostics,
+            loading: false,
+          });
         }
       } catch (error: unknown) {
         if (!ignore) {
-          setState({ data: [], loading: false, error: asError(error) });
+          setState({
+            data: [],
+            diagnostics: [],
+            loading: false,
+            error: asError(error),
+          });
         }
       }
     }

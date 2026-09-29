@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
-import { CalendarEvent, CalendarId } from '@matrix-calendar-widget/calendar';
+import {
+  CalendarEvent,
+  CalendarId,
+  projectCalendarEventOccurrences,
+} from '@matrix-calendar-widget/calendar';
 import {
   Alert,
   Box,
@@ -22,14 +26,17 @@ import {
   FormControlLabel,
   FormGroup,
 } from '@mui/material';
+import { DateTime } from 'luxon';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarFilters,
+  calendarEventKey,
   filterCalendarEvents,
   repositoryRangeForView,
   useCalendarEvents,
   useCalendars,
+  visibleRangeForView,
 } from '../../calendar';
 import { PageLoader } from '../common/PageLoader';
 import { ViewType } from '../meetings/MeetingsNavigation';
@@ -55,17 +62,29 @@ export function CalendarEventsSurface({
   const [hiddenCalendarIds, setHiddenCalendarIds] = useState<Set<CalendarId>>(
     () => new Set(),
   );
+  const viewerTimezone = DateTime.local().zoneName ?? 'UTC';
   const repositoryRange = useMemo(
     () => repositoryRangeForView(filters, view),
     [filters, view],
   );
   const events = useCalendarEvents(calendarIds, repositoryRange);
-  const unsupportedSeriesCount = events.data.filter(
-    (event) =>
-      event.unsupportedRecurrence === 'range-this-and-future' &&
-      !hiddenCalendarIds.has(event.calendarId),
-  ).length;
-  const visibleEvents = useMemo(
+  const visibleRange = useMemo(
+    () => visibleRangeForView(filters, view, viewerTimezone),
+    [filters, view, viewerTimezone],
+  );
+  const visibleServerDiagnostics = events.diagnostics.filter(
+    (diagnostic) => !hiddenCalendarIds.has(diagnostic.calendarId),
+  );
+  const unsupportedSeriesCount =
+    events.data.filter(
+      (event) =>
+        event.unsupportedRecurrence === 'range-this-and-future' &&
+        !hiddenCalendarIds.has(event.calendarId),
+    ).length +
+    visibleServerDiagnostics
+      .filter(({ reason }) => reason === 'range-this-and-future')
+      .reduce((total, diagnostic) => total + diagnostic.count, 0);
+  const sourceEvents = useMemo(
     () =>
       events.data.filter(
         (event) =>
@@ -74,11 +93,51 @@ export function CalendarEventsSurface({
       ),
     [events.data, hiddenCalendarIds],
   );
-  const filteredEvents = useMemo(
-    () => filterCalendarEvents(visibleEvents, filters.filterText),
-    [filters.filterText, visibleEvents],
+  const projection = useMemo(
+    () =>
+      projectCalendarEventOccurrences(
+        sourceEvents,
+        visibleRange,
+        viewerTimezone,
+      ),
+    [sourceEvents, viewerTimezone, visibleRange],
   );
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent>();
+  const projectionDiagnosticCount =
+    visibleServerDiagnostics
+      .filter(({ reason }) => reason !== 'range-this-and-future')
+      .reduce((total, diagnostic) => total + diagnostic.count, 0) +
+    projection.diagnostics.filter(
+      ({ sourceEvent }) =>
+        sourceEvent.unsupportedRecurrence !== 'range-this-and-future',
+    ).length;
+  const sourceEventByOccurrenceKey = useMemo(
+    () =>
+      new Map(
+        projection.occurrences.map(({ event, sourceEvent }) => [
+          calendarEventKey(event),
+          sourceEvent,
+        ]),
+      ),
+    [projection.occurrences],
+  );
+  const filteredEvents = useMemo(
+    () =>
+      filterCalendarEvents(
+        projection.occurrences.map(({ event }) => event),
+        filters.filterText,
+      ),
+    [filters.filterText, projection.occurrences],
+  );
+  const [selectedEvent, setSelectedEvent] = useState<
+    { event: CalendarEvent; sourceEvent: CalendarEvent } | undefined
+  >();
+  const selectEvent = (event: CalendarEvent) => {
+    setSelectedEvent({
+      event,
+      sourceEvent:
+        sourceEventByOccurrenceKey.get(calendarEventKey(event)) ?? event,
+    });
+  };
   const hasMixedSupportedComponents = calendars.data.some(
     (calendar) =>
       calendar.supportedComponents?.includes('VEVENT') &&
@@ -121,6 +180,17 @@ export function CalendarEventsSurface({
               'calendarEvents.unsupportedRangeRecurrence',
               'The current renderer cannot safely display series with THISANDFUTURE range overrides. Affected series: {{count}}.',
               { count: unsupportedSeriesCount },
+            )}
+          </Alert>
+        </Box>
+      )}
+      {projectionDiagnosticCount > 0 && (
+        <Box px={1} pb={1}>
+          <Alert severity="warning">
+            {t(
+              'calendarEvents.unsupportedOccurrenceProjection',
+              'Some events have recurrence or timezone data that the current renderer cannot safely display. Affected events: {{count}}.',
+              { count: projectionDiagnosticCount },
             )}
           </Alert>
         </Box>
@@ -179,21 +249,22 @@ export function CalendarEventsSurface({
         <Box height="100%" overflow="auto">
           <CalendarEventsList
             events={filteredEvents}
-            onSelectEvent={setSelectedEvent}
+            onSelectEvent={selectEvent}
           />
         </Box>
       ) : (
         <CalendarEventsCalendar
           events={filteredEvents}
           filters={filters}
-          onSelectEvent={setSelectedEvent}
+          onSelectEvent={selectEvent}
           onShowMore={onShowMore}
           view={view}
         />
       )}
 
       <CalendarEventDetailsDialog
-        event={selectedEvent}
+        event={selectedEvent?.event}
+        sourceEvent={selectedEvent?.sourceEvent}
         onClose={() => setSelectedEvent(undefined)}
       />
     </>

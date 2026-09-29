@@ -19,7 +19,7 @@ import {
   CalendarEvent,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
@@ -127,6 +127,53 @@ describe('<CalendarEventsSurface />', () => {
     );
   });
 
+  it('shows gateway projection warnings without requiring event payloads', async () => {
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({
+        calendars,
+        events,
+      }),
+      {
+        listEventsWithDiagnostics: vi.fn().mockResolvedValue({
+          events,
+          diagnostics: [
+            {
+              calendarId: 'team',
+              reason: 'unsupported-timezone',
+              count: 1,
+            },
+          ],
+        }),
+      },
+    );
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'One event has recurrence or timezone data that the current renderer cannot safely display.',
+    );
+    expect(screen.getByText('Team planning')).toBeInTheDocument();
+    expect(screen.getByText('Dentist')).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: 'Team calendar' }),
+    );
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('Team planning')).not.toBeInTheDocument();
+    expect(screen.getByText('Dentist')).toBeInTheDocument();
+  });
+
   it.each([
     {
       label: 'VEVENT-only',
@@ -200,6 +247,119 @@ describe('<CalendarEventsSurface />', () => {
     await userEvent.click(personalCalendar);
 
     expect(await screen.findByText('Dentist')).toBeInTheDocument();
+  });
+
+  it.each(['list', 'month'] as const)(
+    'clips query-padded-only recurrence from the %s view',
+    async (view) => {
+      const paddedEvent: CalendarEvent = {
+        ...events[0],
+        id: 'padded-source-resource',
+        uid: 'padded-source-resource@example.test',
+        title: 'Padded only event',
+        timing: {
+          type: 'all-day',
+          startDate: view === 'list' ? '2026-08-30' : '2026-08-29',
+          endDate: view === 'list' ? '2026-08-31' : '2026-08-30',
+        },
+        recurrence: { rrule: 'FREQ=DAILY;COUNT=1' },
+      };
+      const repository = new InMemoryCalendarRepository({
+        calendars: [calendars[0]],
+        events: [paddedEvent],
+      });
+      vi.spyOn(repository, 'listEvents').mockResolvedValue([paddedEvent]);
+
+      render(
+        <CalendarEventsSurface
+          filters={{
+            startDate: '2026-09-01T00:00:00Z',
+            endDate: '2026-09-30T23:59:59.999Z',
+          }}
+          onShowMore={() => undefined}
+          view={view}
+        />,
+        { wrapper: createWrapper(repository) },
+      );
+
+      await waitFor(() =>
+        expect(screen.queryByText('Padded only event')).not.toBeInTheDocument(),
+      );
+    },
+  );
+
+  it('shows the selected recurrence time while editing and deleting its source series', async () => {
+    const recurringEvent: CalendarEvent = {
+      ...events[0],
+      id: 'https://radicale.example.test/team/planning.ics',
+      uid: 'planning-series@example.test',
+      title: 'Planning series',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=2' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [{ ...calendars[0], readOnly: false }],
+      events: [recurringEvent],
+    });
+    const updateEvent = vi.spyOn(repository, 'updateEvent');
+    const deleteEvent = vi.spyOn(repository, 'deleteEvent');
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-26T23:59:59.999Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const occurrences = await screen.findAllByText('Planning series');
+    expect(occurrences).toHaveLength(2);
+    await userEvent.click(occurrences[1]);
+    const details = screen.getByRole('dialog');
+    expect(details).toHaveTextContent('September 26, 2026 · All day');
+    expect(details).toHaveTextContent(
+      'This is one occurrence of a recurring series. Editing or deleting applies to the whole series.',
+    );
+
+    await userEvent.click(
+      within(details).getByRole('button', { name: 'Edit' }),
+    );
+    const editor = screen.getByRole('dialog', { name: 'Edit event' });
+    const titleInput = within(editor).getByLabelText(/^Title/);
+    await userEvent.clear(titleInput);
+    await userEvent.type(titleInput, 'Updated planning series');
+    await userEvent.click(within(editor).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(updateEvent).toHaveBeenCalledWith(
+        'team',
+        'https://radicale.example.test/team/planning.ics',
+        expect.objectContaining({ title: 'Updated planning series' }),
+      ),
+    );
+
+    await userEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', {
+        name: 'Delete',
+      }),
+    );
+    const confirmation = screen.getByRole('dialog', { name: 'Delete event' });
+    expect(confirmation).toHaveTextContent(
+      'This removes the entire recurring series, including every occurrence.',
+    );
+    await userEvent.click(
+      within(confirmation).getByRole('button', { name: 'Delete' }),
+    );
+
+    await waitFor(() =>
+      expect(deleteEvent).toHaveBeenCalledWith(
+        'team',
+        'https://radicale.example.test/team/planning.ics',
+      ),
+    );
   });
 
   it.each([

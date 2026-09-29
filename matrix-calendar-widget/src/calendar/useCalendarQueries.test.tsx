@@ -186,10 +186,51 @@ describe('calendar repository hooks', () => {
 
     expect(result.current).toEqual({
       data: [event],
+      diagnostics: [],
       loading: false,
       error: undefined,
     });
     expect(listEvents).toHaveBeenNthCalledWith(2, ['team'], secondRange);
+  });
+
+  it('loads privacy-safe event diagnostics from capable repositories', async () => {
+    const listEventsWithDiagnostics = vi.fn().mockResolvedValue({
+      events: [event],
+      diagnostics: [
+        {
+          calendarId: 'team',
+          reason: 'unsupported-timezone',
+          count: 1,
+        },
+      ],
+    });
+    const repository = Object.assign(createRepository(), {
+      listEventsWithDiagnostics,
+    });
+    const { result, waitForValueToChange } = renderHook(
+      () =>
+        useCalendarEvents(['team'], {
+          start: '2026-09-01T00:00:00Z',
+          end: '2026-10-01T00:00:00Z',
+        }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.loading);
+
+    expect(result.current).toEqual({
+      data: [event],
+      diagnostics: [
+        {
+          calendarId: 'team',
+          reason: 'unsupported-timezone',
+          count: 1,
+        },
+      ],
+      loading: false,
+      error: undefined,
+    });
+    expect(listEventsWithDiagnostics).toHaveBeenCalledTimes(1);
   });
 
   it('loads an event by calendar and event id', async () => {

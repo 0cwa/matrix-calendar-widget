@@ -31,6 +31,7 @@ export type {
   CalendarEventFormValues,
   CalendarEventValidationError,
 } from './calendarEventForm';
+export { isCalendarEventDiagnosticsRepository } from './CalendarEventListDiagnosticsRepository';
 export {
   calendarEventKey,
   calendarEventStartDate,
@@ -38,6 +39,7 @@ export {
   filterCalendarEvents,
   groupCalendarEventsByDay,
   repositoryRangeForView,
+  visibleRangeForView,
 } from './calendarEventPresentation';
 export {
   CalendarRepositoryProvider,
@@ -63,4 +65,7 @@ export {
   useCalendarEvents,
   useCalendars,
 } from './useCalendarQueries';
-export type { CalendarQueryState } from './useCalendarQueries';
+export type {
+  CalendarEventsQueryState,
+  CalendarQueryState,
+} from './useCalendarQueries';

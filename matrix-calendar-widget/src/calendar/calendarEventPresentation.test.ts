@@ -21,6 +21,7 @@ import {
   filterCalendarEvents,
   groupCalendarEventsByDay,
   repositoryRangeForView,
+  visibleRangeForView,
 } from './calendarEventPresentation';
 
 const timedEvent: CalendarEvent = {
@@ -156,4 +157,38 @@ describe('calendar event presentation', () => {
       end: '2026-10-07T22:00:00.000Z',
     });
   });
+
+  it.each([
+    {
+      locale: 'en',
+      start: '2026-08-29T22:00:00.000Z',
+      end: '2026-10-03T22:00:00.000Z',
+    },
+    {
+      locale: 'de',
+      start: '2026-08-30T22:00:00.000Z',
+      end: '2026-10-04T22:00:00.000Z',
+    },
+  ])(
+    'uses the exact $locale month-grid interval for occurrence clipping',
+    ({ locale, start, end }) => {
+      const previousLocale = Settings.defaultLocale;
+      Settings.defaultLocale = locale;
+
+      try {
+        expect(
+          visibleRangeForView(
+            {
+              startDate: '2026-09-01T00:00:00+02:00',
+              endDate: '2026-09-30T23:59:59.999+02:00',
+            },
+            'month',
+            'Europe/Stockholm',
+          ),
+        ).toEqual({ start, end });
+      } finally {
+        Settings.defaultLocale = previousLocale;
+      }
+    },
+  );
 });

@@ -24,6 +24,7 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import { DateTime } from 'luxon';
 import { CalendarViewType } from '../lib/utils';
+import { getWeekdayShift } from '../lib/utils/getWeekdayShift';
 import { CalendarFilters } from './types';
 
 export function calendarEventKey(event: CalendarEvent): string {
@@ -156,6 +157,42 @@ export function repositoryRangeForView(
   return {
     start: start.toUTC().toISO() ?? filters.startDate,
     end: end.toUTC().toISO() ?? filters.endDate,
+  };
+}
+
+export function visibleRangeForView(
+  filters: CalendarFilters,
+  view: CalendarViewType | 'list',
+  viewerTimezone = DateTime.local().zoneName ?? 'UTC',
+): CalendarTimeRange {
+  const start = DateTime.fromISO(filters.startDate, { zone: viewerTimezone });
+  const endExclusive = DateTime.fromISO(filters.endDate, {
+    zone: viewerTimezone,
+  }).plus({ milliseconds: 1 });
+
+  if (view !== 'month') {
+    return {
+      start: start.toUTC().toISO() ?? filters.startDate,
+      end: endExclusive.toUTC().toISO() ?? filters.endDate,
+    };
+  }
+
+  const weekdayShift = getWeekdayShift();
+  const visibleStart = start
+    .plus({ days: weekdayShift })
+    .startOf('week')
+    .minus({ days: weekdayShift });
+  const visibleEnd = endExclusive
+    .minus({ milliseconds: 1 })
+    .plus({ days: weekdayShift })
+    .startOf('week')
+    .plus({ weeks: 1 })
+    .minus({ days: weekdayShift })
+    .startOf('day');
+
+  return {
+    start: visibleStart.toUTC().toISO() ?? filters.startDate,
+    end: visibleEnd.toUTC().toISO() ?? filters.endDate,
   };
 }
 

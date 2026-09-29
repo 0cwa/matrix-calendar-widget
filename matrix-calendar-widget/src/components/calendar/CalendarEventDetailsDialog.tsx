@@ -44,9 +44,12 @@ import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 
 export function CalendarEventDetailsDialog({
   event,
+  sourceEvent = event,
   onClose,
 }: {
   event?: CalendarEvent;
+  /** The CalDAV resource used for series-level reads and mutations. */
+  sourceEvent?: CalendarEvent;
   onClose: () => void;
 }) {
   const { i18n, t } = useTranslation();
@@ -54,6 +57,7 @@ export function CalendarEventDetailsDialog({
   const repository = useCalendarRepository();
   const deleteEvent = useDeleteCalendarEvent();
   const [currentEvent, setCurrentEvent] = useState(event);
+  const [currentSourceEvent, setCurrentSourceEvent] = useState(sourceEvent);
   const [editing, setEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -63,19 +67,28 @@ export function CalendarEventDetailsDialog({
 
   useEffect(() => {
     setCurrentEvent(event);
+    setCurrentSourceEvent(sourceEvent);
     setEditing(false);
     setDeleteOpen(false);
     setDeleteLoading(false);
     setDeleteError(undefined);
-  }, [event]);
+  }, [event, sourceEvent]);
 
-  const eventCalendar = currentEvent
-    ? calendars.data.find((calendar) => calendar.id === currentEvent.calendarId)
+  const eventCalendar = currentSourceEvent
+    ? calendars.data.find(
+        (calendar) => calendar.id === currentSourceEvent.calendarId,
+      )
     : undefined;
   const canMutate = Boolean(eventCalendar && !eventCalendar.readOnly);
+  const deletesRecurringSeries = Boolean(
+    currentSourceEvent?.recurrence?.rrule ||
+    currentSourceEvent?.recurrence?.rdates?.length ||
+    currentSourceEvent?.recurrence?.exdates?.length ||
+    currentSourceEvent?.recurrence?.overrides?.length,
+  );
 
   const handleDelete = async () => {
-    if (!currentEvent || !canMutate) {
+    if (!currentEvent || !currentSourceEvent || !canMutate) {
       return;
     }
 
@@ -83,7 +96,7 @@ export function CalendarEventDetailsDialog({
     setDeleteError(undefined);
 
     try {
-      await deleteEvent(currentEvent.calendarId, currentEvent.id);
+      await deleteEvent(currentSourceEvent.calendarId, currentSourceEvent.id);
       setDeleteOpen(false);
       onClose();
     } catch (error) {
@@ -93,10 +106,11 @@ export function CalendarEventDetailsDialog({
       ) {
         try {
           const latest = await repository.getEvent(
-            currentEvent.calendarId,
-            currentEvent.id,
+            currentSourceEvent.calendarId,
+            currentSourceEvent.id,
           );
           setCurrentEvent(latest);
+          setCurrentSourceEvent(latest);
           setDeleteError('conflict');
         } catch {
           setDeleteError('generic');
@@ -130,6 +144,16 @@ export function CalendarEventDetailsDialog({
                     )}
                   </Alert>
                 )}
+
+                {currentEvent.id !== currentSourceEvent?.id &&
+                  deletesRecurringSeries && (
+                    <Alert severity="info">
+                      {t(
+                        'calendarEvents.details.seriesOccurrenceActions',
+                        'This is one occurrence of a recurring series. Editing or deleting applies to the whole series.',
+                      )}
+                    </Alert>
+                  )}
 
                 <Typography>
                   {formatCalendarEventTime(
@@ -175,9 +199,12 @@ export function CalendarEventDetailsDialog({
       {currentEvent && (
         <CalendarEventEditorDialog
           calendars={calendars.data}
-          event={currentEvent}
+          event={currentSourceEvent}
           onClose={() => setEditing(false)}
-          onSaved={setCurrentEvent}
+          onSaved={(savedEvent) => {
+            setCurrentEvent(savedEvent);
+            setCurrentSourceEvent(savedEvent);
+          }}
           open={editing}
         />
       )}
@@ -185,11 +212,19 @@ export function CalendarEventDetailsDialog({
       {currentEvent && (
         <ConfirmDeleteDialog
           confirmTitle={t('calendarEvents.delete.confirm', 'Delete')}
-          description={t(
-            'calendarEvents.delete.description',
-            'Delete “{{title}}”? This cannot be undone.',
-            { title: currentEvent.title },
-          )}
+          description={
+            deletesRecurringSeries
+              ? t(
+                  'calendarEvents.delete.recurringDescription',
+                  'Delete “{{title}}”? This removes the entire recurring series, including every occurrence. This cannot be undone.',
+                  { title: currentEvent.title },
+                )
+              : t(
+                  'calendarEvents.delete.description',
+                  'Delete “{{title}}”? This cannot be undone.',
+                  { title: currentEvent.title },
+                )
+          }
           loading={deleteLoading}
           onCancel={() => {
             setDeleteOpen(false);

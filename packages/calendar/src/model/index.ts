@@ -38,6 +38,7 @@ export type {
   CalendarEventTiming,
   CalendarEventTransparency,
   CalendarEventUnsupportedRecurrence,
+  CalendarEventUnsupportedTimezone,
   CalendarId,
   CalendarTimeRange,
   LocalCalendarDateTime,

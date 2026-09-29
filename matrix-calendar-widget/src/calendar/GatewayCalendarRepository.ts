@@ -17,14 +17,18 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarEventDiagnosticsRepository,
   CalendarEventId,
   CalendarEventInput,
+  CalendarEventListResult,
   CalendarEventPatch,
   CalendarId,
   CalendarRepository,
   CalendarRepositoryError,
   CalendarTimeRange,
+  type CalendarEventProjectionDiagnosticSummary,
 } from '@matrix-calendar-widget/calendar';
+import { DateTime } from 'luxon';
 import type { CalendarDiagnostics } from './CalendarDiagnosticsRepository';
 
 type CalendarGatewayEventResource = {
@@ -32,14 +36,22 @@ type CalendarGatewayEventResource = {
   etag: string;
 };
 
+type CalendarGatewayEventListResource = {
+  events: CalendarGatewayEventResource[];
+  diagnostics: CalendarEventProjectionDiagnosticSummary[];
+};
+
 export type GatewayCalendarRepositoryOptions = {
   baseUrl: string;
   roomId: string;
   getAuthorizationHeader: () => Promise<string | undefined>;
+  getViewerTimezone?: () => string;
   fetchImpl?: typeof fetch;
 };
 
-export class GatewayCalendarRepository implements CalendarRepository {
+export class GatewayCalendarRepository
+  implements CalendarRepository, CalendarEventDiagnosticsRepository
+{
   private readonly etags = new Map<CalendarEventId, string>();
   private readonly fetchImpl: typeof fetch;
 
@@ -147,20 +159,46 @@ export class GatewayCalendarRepository implements CalendarRepository {
     calendarIds: CalendarId[],
     range: CalendarTimeRange,
   ): Promise<CalendarEvent[]> {
-    const resources = await Promise.all(
+    return (await this.listEventsWithDiagnostics(calendarIds, range)).events;
+  }
+
+  async listEventsWithDiagnostics(
+    calendarIds: CalendarId[],
+    range: CalendarTimeRange,
+  ): Promise<CalendarEventListResult> {
+    const viewerTimezone =
+      this.options.getViewerTimezone?.() ?? DateTime.local().zoneName ?? 'UTC';
+    const results = await Promise.all(
       calendarIds.map((calendarId) =>
-        this.requestJson<CalendarGatewayEventResource[]>(
+        this.requestJson<CalendarGatewayEventListResource>(
           this.url('/v1/calendar/events', {
             roomId: this.options.roomId,
             calendarId,
             start: range.start,
             end: range.end,
+            timezone: viewerTimezone,
           }),
         ),
       ),
     );
 
-    return resources.flat().map((resource) => this.remember(resource));
+    return {
+      events: results
+        .flatMap(({ events }) => events)
+        .map((resource) => this.remember(resource)),
+      diagnostics: results
+        .flatMap(({ diagnostics }, index) =>
+          diagnostics.map((diagnostic) => ({
+            ...diagnostic,
+            calendarId: calendarIds[index],
+          })),
+        )
+        .sort(
+          (left, right) =>
+            left.calendarId.localeCompare(right.calendarId) ||
+            left.reason.localeCompare(right.reason),
+        ),
+    };
   }
 
   async getEvent(
