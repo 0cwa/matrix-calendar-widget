@@ -17,12 +17,18 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarEventDateTime,
   CalendarEventInput,
   CalendarEventPatch,
+  CalendarEventTiming,
   CalendarId,
-  type TimedCalendarEventTiming,
+  SupportedCalendarEventRecurrenceFrequency,
+  calendarLocalDateTimeToUnixMillis,
+  formatSupportedCalendarEventRecurrenceRule,
   isAllDayCalendarEvent,
   isTimedCalendarEvent,
+  parseSupportedCalendarEventRecurrenceRule,
+  type TimedCalendarEventTiming,
 } from '@matrix-calendar-widget/calendar';
 import { DateTime } from 'luxon';
 
@@ -39,12 +45,22 @@ export type CalendarEventFormValues = {
   timingChanged?: boolean;
   timezoneChanged?: boolean;
   originalTiming?: TimedCalendarEventTiming;
+  repeats?: boolean;
+  recurrenceFrequency?: SupportedCalendarEventRecurrenceFrequency;
+  recurrenceInterval?: string;
+  recurrenceEnd?: 'never' | 'count' | 'until';
+  recurrenceCount?: string;
+  recurrenceUntil?: string;
+  recurrenceEditable?: boolean;
+  recurrenceDisabledReason?: 'complex' | 'unsupported';
+  recurrenceChanged?: boolean;
 };
 
 export type CalendarEventValidationError =
   | 'title-required'
   | 'invalid-range'
-  | 'invalid-timezone';
+  | 'invalid-timezone'
+  | 'invalid-recurrence';
 
 export function createCalendarEventFormValues(
   calendar: Calendar,
@@ -66,6 +82,14 @@ export function createCalendarEventFormValues(
     timezone,
     timingChanged: false,
     timezoneChanged: false,
+    repeats: false,
+    recurrenceFrequency: 'DAILY',
+    recurrenceInterval: '1',
+    recurrenceEnd: 'never',
+    recurrenceCount: '2',
+    recurrenceUntil: start.toISODate() ?? '',
+    recurrenceEditable: true,
+    recurrenceChanged: false,
   };
 }
 
@@ -88,6 +112,7 @@ export function calendarEventToFormValues(
       timezone: calendar.timezone ?? DateTime.local().zoneName ?? 'UTC',
       timingChanged: false,
       timezoneChanged: false,
+      ...recurrenceFormValues(event),
     };
   }
 
@@ -111,6 +136,7 @@ export function calendarEventToFormValues(
     timingChanged: false,
     timezoneChanged: false,
     originalTiming: event.timing,
+    ...recurrenceFormValues(event),
   };
 }
 
@@ -136,9 +162,17 @@ export function calendarEventInputFromForm(
   values: CalendarEventFormValues,
   uid: string,
 ): CalendarEventInput {
+  const editableFields = calendarEventEditableFieldsFromForm(values);
   return {
     uid,
-    ...calendarEventEditableFieldsFromForm(values),
+    ...editableFields,
+    ...(values.repeats
+      ? {
+          recurrence: {
+            rrule: recurrenceRuleFromForm(values, editableFields.timing),
+          },
+        }
+      : {}),
   };
 }
 
@@ -153,6 +187,13 @@ export function calendarEventPatchFromForm(
     ...(values.timingChanged === false ? {} : { timing }),
     description: normalizeOptional(values.description),
     location: normalizeOptional(values.location),
+    ...(values.recurrenceChanged
+      ? {
+          recurrence: values.repeats
+            ? { rrule: recurrenceRuleFromForm(values, timing) }
+            : {},
+        }
+      : {}),
   };
 }
 
@@ -171,7 +212,10 @@ export function validateCalendarEventForm(
       return 'invalid-range';
     }
 
-    return undefined;
+    return validateRecurrence(
+      values,
+      calendarEventEditableFieldsFromForm(values).timing,
+    );
   }
 
   const timedKind = values.timedKind ?? 'zoned';
@@ -195,7 +239,215 @@ export function validateCalendarEventForm(
     return 'invalid-range';
   }
 
-  return undefined;
+  return validateRecurrence(
+    values,
+    calendarEventEditableFieldsFromForm(values).timing,
+  );
+}
+
+function recurrenceFormValues(
+  event: CalendarEvent,
+): Pick<
+  CalendarEventFormValues,
+  | 'repeats'
+  | 'recurrenceFrequency'
+  | 'recurrenceInterval'
+  | 'recurrenceEnd'
+  | 'recurrenceCount'
+  | 'recurrenceUntil'
+  | 'recurrenceEditable'
+  | 'recurrenceDisabledReason'
+  | 'recurrenceChanged'
+> {
+  const recurrence = event.recurrence;
+  const hasComplexData = Boolean(
+    recurrence?.rdates?.length ||
+    recurrence?.exdates?.length ||
+    recurrence?.recurrenceId ||
+    recurrence?.overrides?.length,
+  );
+  let parsed:
+    | ReturnType<typeof parseSupportedCalendarEventRecurrenceRule>
+    | undefined;
+  let unsupportedRule = false;
+  const hasRRule = Boolean(
+    recurrence && Object.prototype.hasOwnProperty.call(recurrence, 'rrule'),
+  );
+  if (hasRRule) {
+    if (typeof recurrence?.rrule !== 'string') {
+      unsupportedRule = true;
+    } else {
+      try {
+        parsed = parseSupportedCalendarEventRecurrenceRule(
+          recurrence.rrule,
+          timingStartAsDateTime(event.timing),
+        );
+      } catch {
+        unsupportedRule = true;
+      }
+    }
+  }
+
+  const unsupported = Boolean(
+    event.unsupportedTimezone || event.unsupportedRecurrence || unsupportedRule,
+  );
+  const end = parsed?.end;
+
+  return {
+    repeats: hasRRule,
+    recurrenceFrequency: parsed?.frequency ?? 'DAILY',
+    recurrenceInterval: String(parsed?.interval ?? 1),
+    recurrenceEnd:
+      end?.type === 'count'
+        ? 'count'
+        : end?.type === 'until'
+          ? 'until'
+          : 'never',
+    recurrenceCount: end?.type === 'count' ? String(end.count) : '2',
+    recurrenceUntil:
+      end?.type === 'until'
+        ? recurrenceUntilDate(end.value, event.timing)
+        : eventDate(event),
+    recurrenceEditable: !hasComplexData && !unsupported,
+    recurrenceDisabledReason: hasComplexData
+      ? 'complex'
+      : unsupported
+        ? 'unsupported'
+        : undefined,
+    recurrenceChanged: false,
+  };
+}
+
+function validateRecurrence(
+  values: CalendarEventFormValues,
+  timing: CalendarEventTiming,
+): CalendarEventValidationError | undefined {
+  if (!values.repeats || values.recurrenceEditable === false) {
+    return undefined;
+  }
+
+  if (
+    !/^\d+$/.test(values.recurrenceInterval ?? '') ||
+    !Number.isSafeInteger(Number(values.recurrenceInterval ?? '')) ||
+    Number(values.recurrenceInterval ?? '') <= 0 ||
+    ((values.recurrenceEnd ?? 'never') === 'count' &&
+      (!/^\d+$/.test(values.recurrenceCount ?? '') ||
+        !Number.isSafeInteger(Number(values.recurrenceCount ?? '')) ||
+        Number(values.recurrenceCount ?? '') <= 0))
+  ) {
+    return 'invalid-recurrence';
+  }
+
+  try {
+    recurrenceRuleFromForm(values, timing);
+    return undefined;
+  } catch {
+    return 'invalid-recurrence';
+  }
+}
+
+function recurrenceRuleFromForm(
+  values: CalendarEventFormValues,
+  timing: CalendarEventTiming,
+): string {
+  const end =
+    (values.recurrenceEnd ?? 'never') === 'count'
+      ? { type: 'count' as const, count: Number(values.recurrenceCount ?? '2') }
+      : (values.recurrenceEnd ?? 'never') === 'until'
+        ? {
+            type: 'until' as const,
+            value: recurrenceUntilValue(values, timing),
+          }
+        : { type: 'never' as const };
+
+  return formatSupportedCalendarEventRecurrenceRule(
+    {
+      frequency: values.recurrenceFrequency ?? 'DAILY',
+      interval: Number(values.recurrenceInterval ?? '1'),
+      end,
+    },
+    timingStartAsDateTime(timing),
+  );
+}
+
+function recurrenceUntilValue(
+  values: CalendarEventFormValues,
+  timing: CalendarEventTiming,
+): string {
+  const untilDate = values.recurrenceUntil ?? '';
+  const date = DateTime.fromISO(untilDate, { zone: 'UTC' });
+  if (!date.isValid || date.toISODate() !== untilDate) {
+    throw new Error('Invalid recurrence end date');
+  }
+
+  if (timing.type === 'all-day') {
+    return date.toFormat('yyyyLLdd');
+  }
+
+  const start = timing.start;
+  const localEnd = `${untilDate}T23:59:59`;
+  if (start.type === 'floating') {
+    return localEnd.replace(/[-:]/g, '');
+  }
+
+  const instant = calendarLocalDateTimeToUnixMillis(localEnd, start.timezone);
+  return DateTime.fromMillis(instant, { zone: 'UTC' }).toFormat(
+    "yyyyLLdd'T'HHmmss'Z'",
+  );
+}
+
+function timingStartAsDateTime(
+  timing: CalendarEventTiming,
+): CalendarEventDateTime {
+  if (timing.type === 'all-day') {
+    return { type: 'date', value: timing.startDate };
+  }
+
+  return timing.start.type === 'floating'
+    ? { type: 'floating-date-time', value: timing.start.local }
+    : {
+        type: 'date-time',
+        value: {
+          local: timing.start.local,
+          timezone: timing.start.timezone,
+        },
+      };
+}
+
+function recurrenceUntilDate(
+  value: string,
+  timing: CalendarEventTiming,
+): string {
+  const match = value.match(
+    /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z?))?$/,
+  );
+  if (!match) {
+    return '';
+  }
+
+  const date = `${match[1]}-${match[2]}-${match[3]}`;
+  if (timing.type === 'all-day' || timing.start.type === 'floating') {
+    return date;
+  }
+
+  if (!match[4] || match[7] !== 'Z') {
+    return '';
+  }
+
+  const utc = DateTime.fromFormat(
+    `${date}T${match[4]}:${match[5]}:${match[6]}Z`,
+    "yyyy-MM-dd'T'HH:mm:ss'Z'",
+    { zone: 'UTC' },
+  );
+  return utc.isValid
+    ? (utc.setZone(timing.start.timezone).toISODate() ?? '')
+    : '';
+}
+
+function eventDate(event: CalendarEvent): string {
+  return event.timing.type === 'all-day'
+    ? event.timing.startDate
+    : event.timing.start.local.slice(0, 10);
 }
 
 function calendarEventEditableFieldsFromForm(

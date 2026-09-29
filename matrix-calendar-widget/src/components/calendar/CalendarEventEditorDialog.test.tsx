@@ -66,6 +66,28 @@ const floatingEvent: CalendarEvent = {
   },
 };
 
+const recurringEvent: CalendarEvent = {
+  ...event,
+  id: 'series-resource',
+  uid: 'series@example.test',
+  title: 'Weekly planning',
+  recurrence: { rrule: 'FREQ=WEEKLY;INTERVAL=2;COUNT=8' },
+};
+
+const complexRecurringEvent: CalendarEvent = {
+  ...recurringEvent,
+  id: 'complex-series-resource',
+  recurrence: {
+    rrule: 'FREQ=WEEKLY;COUNT=8',
+    exdates: [
+      {
+        type: 'date-time',
+        value: { local: '2026-10-07T09:00:00', timezone: 'Europe/Stockholm' },
+      },
+    ],
+  },
+};
+
 function createWrapper(repository: InMemoryCalendarRepository) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
     return (
@@ -109,6 +131,125 @@ describe('<CalendarEventEditorDialog />', () => {
         calendarId: 'team',
       },
     );
+  });
+
+  it('creates a supported recurring event through CalendarRepository', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      idFactory: () => 'created-series',
+    });
+    const onClose = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        onClose={onClose}
+        open
+        uidFactory={() => 'created-series@example.test'}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.type(
+      await screen.findByRole('textbox', { name: /Title/i }),
+      'Created series',
+    );
+    await userEvent.click(screen.getByLabelText('Repeats'));
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Frequency' }),
+      'WEEKLY',
+    );
+    fireEvent.change(screen.getByLabelText(/^Repeat every/), {
+      target: { value: '2' },
+    });
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Ends' }),
+      'count',
+    );
+    fireEvent.change(screen.getByLabelText(/^Number of occurrences/), {
+      target: { value: '5' },
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await expect(
+      repository.getEvent('team', 'created-series'),
+    ).resolves.toMatchObject({
+      uid: 'created-series@example.test',
+      recurrence: { rrule: 'FREQ=WEEKLY;INTERVAL=2;COUNT=5' },
+    });
+  });
+
+  it('updates the entire selected source series with its current UID and resource id', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringEvent],
+    });
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={recurringEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByText('Changes apply to the entire series.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Frequency' })).toHaveValue(
+      'WEEKLY',
+    );
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Frequency' }),
+      'MONTHLY',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await expect(
+      repository.getEvent('team', 'series-resource'),
+    ).resolves.toMatchObject({
+      id: 'series-resource',
+      uid: 'series@example.test',
+      recurrence: { rrule: 'FREQ=MONTHLY;INTERVAL=2;COUNT=8' },
+    });
+  });
+
+  it('disables recurrence editing for complex sources and preserves them on other edits', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [complexRecurringEvent],
+    });
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={complexRecurringEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByText(
+        'This event includes additional dates or exceptions. Recurrence editing is disabled, and other changes will preserve them.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Repeats')).toBeDisabled();
+    const title = screen.getByRole('textbox', { name: /Title/i });
+    await userEvent.clear(title);
+    await userEvent.type(title, 'Updated complex series');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await expect(
+      repository.getEvent('team', 'complex-series-resource'),
+    ).resolves.toMatchObject({
+      title: 'Updated complex series',
+      recurrence: complexRecurringEvent.recurrence,
+    });
   });
 
   it('edits an event through CalendarRepository', async () => {

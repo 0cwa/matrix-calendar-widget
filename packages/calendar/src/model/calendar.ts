@@ -129,8 +129,20 @@ export type CalendarEventRecurrence = {
   overrides?: CalendarEventRecurrenceOverride[];
 };
 
+/**
+ * Recurrence fields accepted by create/update operations in the supported
+ * series-only editor. RDATE, EXDATE, and detached instances remain read-only
+ * resource data and are preserved by omission from a patch.
+ */
+export type CalendarEventRecurrenceWrite = {
+  /** An empty object on a patch clears only the master RRULE. */
+  rrule?: string;
+};
+
 /** Recurrence semantics retained by CalDAV but not safely projected by UI. */
-export type CalendarEventUnsupportedRecurrence = 'range-this-and-future';
+export type CalendarEventUnsupportedRecurrence =
+  | 'range-this-and-future'
+  | 'multiple-rrules';
 
 /** Read-only marker for timezone semantics that are unsafe to project. */
 export type CalendarEventUnsupportedTimezone = true;
@@ -173,8 +185,12 @@ export type CalendarEvent = {
 
 export type CalendarEventInput = Omit<
   CalendarEvent,
-  'id' | 'calendarId' | 'unsupportedRecurrence' | 'unsupportedTimezone'
->;
+  | 'id'
+  | 'calendarId'
+  | 'recurrence'
+  | 'unsupportedRecurrence'
+  | 'unsupportedTimezone'
+> & { recurrence?: CalendarEventRecurrenceWrite };
 
 /**
  * Fields editable without changing resource identity, calendar ownership, or
@@ -186,10 +202,11 @@ export type CalendarEventPatch = Partial<
     | 'id'
     | 'calendarId'
     | 'uid'
+    | 'recurrence'
     | 'unsupportedRecurrence'
     | 'unsupportedTimezone'
   >
->;
+> & { recurrence?: CalendarEventRecurrenceWrite };
 
 export type CalendarTimeRange = {
   /** Inclusive ISO instant. */

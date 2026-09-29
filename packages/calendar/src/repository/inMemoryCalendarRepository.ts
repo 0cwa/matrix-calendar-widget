@@ -226,13 +226,20 @@ export class InMemoryCalendarRepository implements CalendarRepository {
   ): Promise<CalendarEvent> {
     this.getWritableCalendar(calendarId);
     const current = this.getStoredEvent(calendarId, eventId);
+    const clonedPatch = cloneCalendarEventPatch(patch);
+    const recurrence = Object.prototype.hasOwnProperty.call(patch, 'recurrence')
+      ? clonedPatch.recurrence?.rrule
+        ? { rrule: clonedPatch.recurrence.rrule }
+        : undefined
+      : current.recurrence;
 
     const updated: CalendarEvent = {
       ...current,
-      ...cloneCalendarEventPatch(patch),
+      ...clonedPatch,
       id: current.id,
       calendarId: current.calendarId,
       uid: current.uid,
+      recurrence,
     };
 
     this.events.get(calendarId)!.set(eventId, updated);
@@ -456,7 +463,7 @@ function cloneCalendarEventInput(
         ? cloneTimedTiming(input.timing)
         : cloneAllDayTiming(input.timing),
     categories: input.categories ? [...input.categories] : undefined,
-    recurrence: cloneRecurrence(input.recurrence),
+    recurrence: input.recurrence ? { ...input.recurrence } : undefined,
   };
 }
 
@@ -505,7 +512,7 @@ function cloneCalendarEventPatch(
   }
 
   if (patch.recurrence) {
-    cloned.recurrence = cloneRecurrence(patch.recurrence);
+    cloned.recurrence = { ...patch.recurrence };
   }
 
   return cloned;

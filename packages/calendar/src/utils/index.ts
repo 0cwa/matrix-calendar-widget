@@ -16,6 +16,8 @@
 
 export {
   MAX_PROJECTED_OCCURRENCES_PER_EVENT,
+  formatSupportedCalendarEventRecurrenceRule,
+  parseSupportedCalendarEventRecurrenceRule,
   projectCalendarEventOccurrences,
 } from './calendarEventOccurrenceProjection';
 export type {
@@ -23,9 +25,15 @@ export type {
   CalendarEventProjectionDiagnostic,
   CalendarEventProjectionDiagnosticReason,
   ProjectedCalendarEventOccurrence,
+  SupportedCalendarEventRecurrenceEnd,
+  SupportedCalendarEventRecurrenceFrequency,
+  SupportedCalendarEventRecurrenceRule,
 } from './calendarEventOccurrenceProjection';
 export { calendarEventTimedDateTimeToDateTime } from './calendarEventTimedDateTime';
-export { isCalendarTimezoneSupported } from './calendarEventTimezone';
+export {
+  calendarLocalDateTimeToUnixMillis,
+  isCalendarTimezoneSupported,
+} from './calendarEventTimezone';
 export * from './calendarUtils';
 export { formatICalDate, parseICalDate, toISOString } from './dateTimeUtils';
 export { formatRRuleText, getOrdinalLabel, parseRRule } from './format';

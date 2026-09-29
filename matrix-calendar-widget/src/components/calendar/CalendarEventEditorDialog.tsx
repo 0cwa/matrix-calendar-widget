@@ -135,6 +135,9 @@ export function CalendarEventEditorDialog({
                 ? { timingChanged: true }
                 : {}),
               ...(field === 'timezone' ? { timezoneChanged: true } : {}),
+              ...(field.startsWith('recurrence')
+                ? { recurrenceChanged: true }
+                : {}),
             }
           : current,
       );
@@ -152,6 +155,18 @@ export function CalendarEventEditorDialog({
             timezone: calendar?.timezone ?? current.timezone,
             timingChanged: true,
             timezoneChanged: true,
+          }
+        : current,
+    );
+  };
+
+  const handleRecurrenceToggle = (change: ChangeEvent<HTMLInputElement>) => {
+    setValues((current) =>
+      current
+        ? {
+            ...current,
+            repeats: change.target.checked,
+            recurrenceChanged: true,
           }
         : current,
     );
@@ -201,7 +216,12 @@ export function CalendarEventEditorDialog({
                 ? 'The end must be on or after the start.'
                 : 'The end must be after the start.',
             )
-          : undefined;
+          : validationErrorCode === 'invalid-recurrence'
+            ? t(
+                'calendarEvents.editor.invalidRecurrence',
+                'Check the recurrence frequency, interval, and end date or count.',
+              )
+            : undefined;
 
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
@@ -407,6 +427,115 @@ export function CalendarEventEditorDialog({
               onChange={handleChange('description')}
               value={values.description}
             />
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={Boolean(values.repeats)}
+                  disabled={!values.recurrenceEditable}
+                  onChange={handleRecurrenceToggle}
+                />
+              }
+              label={t('calendarEvents.editor.repeats', 'Repeats')}
+            />
+
+            {values.recurrenceDisabledReason && (
+              <Alert severity="info">
+                {values.recurrenceDisabledReason === 'complex'
+                  ? t(
+                      'calendarEvents.editor.complexRecurrenceReadOnly',
+                      'This event includes additional dates or exceptions. Recurrence editing is disabled, and other changes will preserve them.',
+                    )
+                  : t(
+                      'calendarEvents.editor.unsupportedRecurrenceReadOnly',
+                      'This recurrence rule or time zone is not supported for editing. Other changes will preserve it.',
+                    )}
+              </Alert>
+            )}
+
+            {values.repeats && values.recurrenceEditable && (
+              <>
+                <TextField
+                  label={t('calendarEvents.editor.frequency', 'Frequency')}
+                  onChange={handleChange('recurrenceFrequency')}
+                  select
+                  SelectProps={{ native: true }}
+                  value={values.recurrenceFrequency ?? 'DAILY'}
+                >
+                  <option value="DAILY">
+                    {t('calendarEvents.editor.daily', 'Daily')}
+                  </option>
+                  <option value="WEEKLY">
+                    {t('calendarEvents.editor.weekly', 'Weekly')}
+                  </option>
+                  <option value="MONTHLY">
+                    {t('calendarEvents.editor.monthly', 'Monthly')}
+                  </option>
+                  <option value="YEARLY">
+                    {t('calendarEvents.editor.yearly', 'Yearly')}
+                  </option>
+                </TextField>
+
+                <TextField
+                  inputProps={{ min: 1, step: 1 }}
+                  label={t('calendarEvents.editor.interval', 'Repeat every')}
+                  onChange={handleChange('recurrenceInterval')}
+                  required
+                  type="number"
+                  value={values.recurrenceInterval ?? '1'}
+                />
+
+                <TextField
+                  label={t('calendarEvents.editor.ends', 'Ends')}
+                  onChange={handleChange('recurrenceEnd')}
+                  select
+                  SelectProps={{ native: true }}
+                  value={values.recurrenceEnd ?? 'never'}
+                >
+                  <option value="never">
+                    {t('calendarEvents.editor.never', 'Never')}
+                  </option>
+                  <option value="count">
+                    {t('calendarEvents.editor.afterCount', 'After occurrences')}
+                  </option>
+                  <option value="until">
+                    {t('calendarEvents.editor.onDate', 'On date')}
+                  </option>
+                </TextField>
+
+                {values.recurrenceEnd === 'count' && (
+                  <TextField
+                    inputProps={{ min: 1, step: 1 }}
+                    label={t(
+                      'calendarEvents.editor.occurrenceCount',
+                      'Number of occurrences',
+                    )}
+                    onChange={handleChange('recurrenceCount')}
+                    required
+                    type="number"
+                    value={values.recurrenceCount ?? '2'}
+                  />
+                )}
+
+                {values.recurrenceEnd === 'until' && (
+                  <TextField
+                    InputLabelProps={{ shrink: true }}
+                    label={t('calendarEvents.editor.untilDate', 'Until date')}
+                    onChange={handleChange('recurrenceUntil')}
+                    required
+                    type="date"
+                    value={values.recurrenceUntil ?? ''}
+                  />
+                )}
+
+                <Typography color="text.secondary" variant="body2">
+                  {t(
+                    'calendarEvents.editor.seriesOnly',
+                    'Changes apply to the entire series.',
+                  )}
+                </Typography>
+              </>
+            )}
 
             {validationError && (
               <Alert severity="warning">{validationError}</Alert>
