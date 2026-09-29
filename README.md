@@ -2,7 +2,7 @@
 
 > **Status: pre-alpha.** This repository is a hard fork of Nordeck's NeoDateFix / `matrix-meetings` project and is being converted into a Matrix-first team calendar backed by CalDAV/Radicale.
 
-The primary product is a responsive Matrix widget for Element and other widget-capable clients. It should let teams manage shared calendars, events, recurrence, attendees, alarms, and calendar collections without falling back to Radicale's generic collection UI. A Matrix bot provides notifications and a command fallback for clients that cannot render widgets.
+The primary product is a responsive Matrix widget for Element and other widget-capable clients. It should let teams manage shared calendars, events, recurrence, attendees, alarms, and calendar collections without falling back to Radicale's generic collection UI. A Matrix bot is the intended fallback for commands and reminders when widget support is unavailable.
 
 ## Product principles
 
@@ -17,11 +17,15 @@ The primary product is a responsive Matrix widget for Element and other widget-c
 
 ## Current state
 
-M0 fork hygiene and M1's calendar-domain seam are complete. M3 is also complete on `main`: the widget has a gateway-backed `CalendarRepository`, preservation-first VEVENT create/edit/delete, ETag conflict recovery, and real Radicale interoperability coverage.
+M0 fork hygiene, M1's calendar-domain seam, and M3's VEVENT create/edit/delete flow are complete on `main`, including ETag conflict recovery and real Radicale interoperability coverage.
 
 The in-repository M2 identity and CalDAV discovery spine is implemented. The remaining M2 gap is external: `radicale-auth-matrix` still needs the ADR009-compatible short-lived Matrix OpenID authentication mode (#48), after which the final delegated gateway/OpenID real-container contract (#45) can close M2.
 
-Calendar management is now advancing as small M4 vertical slices using the existing repository and gateway seams rather than a generic WebDAV administration framework. Inherited NeoDateFix meeting-room paths remain only where migration has not yet reached them. Historical changelogs, NOTICE files, and upstream provenance intentionally retain NeoDateFix/Nordeck names. See [docs/STATUS.md](./docs/STATUS.md) for transient execution order and active PR blockers.
+M4 on `main` includes calendar creation, visibility, rename, deletion, description and color editing, mixed-collection safeguards, and manager-only CalDAV diagnostics. Collection-timezone editing remains deferred. M7 currently provides localized `!calendar help` and directs capable clients to the widget; event queries and data-changing commands remain open.
+
+[ADR010](./docs/adrs/adr010-mixed-calendar-principal-model.md) keeps personal widget calendars user-scoped and separates them from room-owned bot calendars under an application principal. Room-owned reads and writes remain blocked until a non-password CalDAV authentication path for that principal is defined and tested, with explicit room binding and authorization checks. ADR009's user OpenID delegation does not establish application-principal access. M5 remains active; M6 reminder storage primitives do not enable scheduling or delivery; and M8 build checks and deployment documentation do not verify an operator-hosted deployment.
+
+Inherited NeoDateFix meeting-room paths remain only where migration has not yet reached them. Historical changelogs, NOTICE files, and upstream provenance intentionally retain NeoDateFix/Nordeck names. See [docs/STATUS.md](./docs/STATUS.md) for transient execution order and active PR blockers.
 
 ## Start here
 

@@ -22,11 +22,12 @@ Collection management is part of the product, but DAV vocabulary should stay mos
 
 ## Near-term priorities
 
-1. Close #48's external ADR009 OpenID-capable `radicale-auth-matrix` gap.
-2. Use that plugin in #45's real gateway/OpenID/non-member contract and close M2.
-3. While #48 is externally blocked, synchronize and finish #100 / PR #101: safe VEVENT-only calendar deletion through the existing repository/gateway seams. Calendar creation (#94), visibility controls (#96), and rename (#99) are merged.
-4. Reassess after safe delete before the next metadata/compatibility slice. Avoid broad generic WebDAV administration.
-5. Keep M3 regression coverage green; M3 is complete on `main` through PRs #70, #89, and #90.
+1. Keep M4 collection-timezone editing deferred until a compatible CalDAV behavior is established. Calendar creation, visibility, rename, deletion, description/color editing, mixed-collection safeguards, and manager-only diagnostics are already on `main`.
+2. Continue bounded M5 recurrence and iCalendar slices with focused round-trip and timezone regressions. The pinned Radicale server ignores `CALDAV:timezone`; do not send that unsupported query element.
+3. Resolve #48's external ADR009 OpenID-capable `radicale-auth-matrix` gap, then use it in #45's real gateway/OpenID/non-member contract for the user-scoped path.
+4. Separately define and test non-password Radicale authentication for the ADR010 application principal, then implement explicit room-to-calendar binding and per-operation membership/power checks. Keep room-owned reads and writes disabled until the principal-authentication prerequisite passes.
+5. M7 has localized `!calendar help` and widget guidance. Add event queries and data-changing commands only after the M6 room-owned calendar authorization path is ready.
+6. Treat Docker build smoke and deployment documentation as groundwork, not deployment verification. Verify the operator's host-specific service and database contract before claiming an etke-managed deployment.
 
 See [STATUS.md](./STATUS.md) for transient PR/CI details.
 
