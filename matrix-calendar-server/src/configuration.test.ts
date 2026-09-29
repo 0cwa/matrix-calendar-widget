@@ -229,3 +229,31 @@ describe('reminder database configuration', () => {
     ).toThrow('requires a single database host');
   });
 });
+
+describe('room calendar binding configuration', () => {
+  const originalValue = process.env.ROOM_CALENDAR_BINDINGS;
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env.ROOM_CALENDAR_BINDINGS;
+    } else {
+      process.env.ROOM_CALENDAR_BINDINGS = originalValue;
+    }
+  });
+
+  it('loads a typed list from the server-only JSON setting', () => {
+    process.env.ROOM_CALENDAR_BINDINGS = JSON.stringify([
+      { roomId: '!room-id:example.org', calendarId: 'team-calendar' },
+    ]);
+
+    expect(configuration().config.room_calendar_bindings).toEqual([
+      { roomId: '!room-id:example.org', calendarId: 'team-calendar' },
+    ]);
+  });
+
+  it('defaults to no room bindings', () => {
+    delete process.env.ROOM_CALENDAR_BINDINGS;
+
+    expect(configuration().config.room_calendar_bindings).toEqual([]);
+  });
+});

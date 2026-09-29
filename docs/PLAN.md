@@ -201,8 +201,14 @@ DST regression or recurrence-editing criteria above.
 
 ## M6 — Matrix team features and reminders
 
-- [ ] Matrix room ↔ calendar binding.
-- [ ] Configurable Matrix power-level calendar policy.
+- [ ] Wire room-target binding and authorization into calendar operations after
+      the non-password application-principal Radicale path and isolation gates
+      pass.
+  - [x] Define the operator-managed static room-to-calendar contract (ADR014/
+        ADR015) and validate bindings in server configuration before lookup.
+  - [x] Add a pure room-binding resolver and joined-membership/power policy
+        service that denies on lookup errors; no gateway or CalDAV path is
+        enabled by this foundation.
 - [ ] Team/member selector using the widget user directory/member APIs.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
 - [ ] Selected-user mentions.
@@ -228,7 +234,7 @@ Room-wide reminders are the first recipient flow. Defer email attendee
 registration until members can explicitly verify and consent to share an email
 address; do not infer attendee email addresses from Matrix room membership.
 
-**Exit:** teams can manage the calendar entirely from the widget and receive reliable Matrix reminders.
+**Exit:** teams can manage events in the configured room calendar from the widget and receive reliable Matrix reminders. Collection lifecycle and room bindings remain operator-managed under ADR015.
 
 ## M7 — Non-widget fallback
 
