@@ -35,6 +35,10 @@ import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
+import {
+  RoomCalendarCalDavAccess,
+  RoomCalendarTarget,
+} from '../service/RoomCalendarCalDavAccess';
 import { CalendarGatewayController } from './CalendarGatewayController';
 
 describe('CalendarGatewayController', () => {
@@ -50,7 +54,8 @@ describe('CalendarGatewayController', () => {
   const roomId = '!team:example.test';
   const appConfig = {
     radicale_url: 'https://radicale.example.test/',
-  } as IAppConfiguration;
+    room_calendar_bindings: [{ roomId, calendarId: 'team-calendar' }],
+  } as unknown as IAppConfiguration;
   const isAllowed = jest.fn();
   const canManageCalendars = jest.fn();
   const forRoom = jest.fn(() => ({ isAllowed }));
@@ -58,6 +63,13 @@ describe('CalendarGatewayController', () => {
     canManageCalendars,
     forRoom,
   } as unknown as MatrixCalendarAuthorizationFactory;
+  const disabledAccess = new RoomCalendarCalDavAccess();
+  const assertDisabled = jest.fn((target: RoomCalendarTarget) =>
+    disabledAccess.assertDisabled(target),
+  );
+  const roomCalendarCalDavAccess = {
+    assertDisabled,
+  } as unknown as RoomCalendarCalDavAccess;
 
   beforeEach(() => {
     fetch.resetMocks();
@@ -66,16 +78,42 @@ describe('CalendarGatewayController', () => {
     canManageCalendars.mockReset();
     forRoom.mockReset();
     forRoom.mockImplementation(() => ({ isAllowed }));
+    assertDisabled.mockReset();
+    assertDisabled.mockImplementation((target) =>
+      disabledAccess.assertDisabled(target),
+    );
   });
 
   function createController(
     config: IAppConfiguration = appConfig,
+    roomAccess: RoomCalendarCalDavAccess = roomCalendarCalDavAccess,
+    credentialProviderFactory: MatrixOpenIdCalDavCredentialProviderFactory = new MatrixOpenIdCalDavCredentialProviderFactory(),
   ): CalendarGatewayController {
     return new CalendarGatewayController(
       config,
       authorizationFactory,
-      new MatrixOpenIdCalDavCredentialProviderFactory(),
+      credentialProviderFactory,
+      roomAccess,
     );
+  }
+
+  function createRoomTargetController(config: IAppConfiguration = appConfig): {
+    controller: CalendarGatewayController;
+    forRequest: jest.Mock;
+  } {
+    const forRequest = jest.fn();
+    const credentialProviderFactory = {
+      forRequest,
+    } as unknown as MatrixOpenIdCalDavCredentialProviderFactory;
+
+    return {
+      controller: createController(
+        config,
+        roomCalendarCalDavAccess,
+        credentialProviderFactory,
+      ),
+      forRequest,
+    };
   }
 
   it('returns the server-validated Matrix user identity', () => {
@@ -100,6 +138,166 @@ describe('CalendarGatewayController', () => {
     expect(
       Reflect.getMetadata(GUARDS_METADATA, CalendarGatewayController),
     ).toEqual([MatrixAuthGuard, MatrixRoomMembershipGuard]);
+  });
+
+  it('lists only the configured room calendar without user-principal discovery', async () => {
+    isAllowed.mockResolvedValue(true);
+    const { controller, forRequest } = createRoomTargetController();
+
+    const calendars = await controller.listCalendars(
+      userContext,
+      openIdCredential,
+      roomId,
+      'room',
+    );
+
+    expect(calendars).toHaveLength(1);
+    expect(calendars[0]).toMatchObject({
+      id: 'team-calendar',
+      name: 'team-calendar',
+      readOnly: true,
+    });
+    expect(forRoom).toHaveBeenCalledWith(userContext.userId, roomId);
+    expect(isAllowed).toHaveBeenCalledWith({ action: 'list-calendars' });
+    expect(forRequest).not.toHaveBeenCalled();
+    expect(assertDisabled).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('denies a room event request before resolving binding or touching CalDAV', async () => {
+    isAllowed.mockResolvedValue(false);
+    const invalidConfig = {
+      ...appConfig,
+      room_calendar_bindings: [
+        { roomId: 'not-canonical', calendarId: 'bad id' },
+      ],
+    } as unknown as IAppConfiguration;
+    const { controller, forRequest } =
+      createRoomTargetController(invalidConfig);
+
+    await expect(
+      controller.listEvents(
+        userContext,
+        openIdCredential,
+        roomId,
+        'team-calendar',
+        '2026-10-01T00:00:00Z',
+        '2026-10-02T00:00:00Z',
+        'Europe/Stockholm',
+        'room',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'read-events',
+      calendarId: 'team-calendar',
+    });
+    expect(assertDisabled).not.toHaveBeenCalled();
+    expect(forRequest).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on a missing room binding before the disabled access gate', async () => {
+    isAllowed.mockResolvedValue(true);
+    const configWithoutBindings = {
+      ...appConfig,
+      room_calendar_bindings: [],
+    } as unknown as IAppConfiguration;
+    const { controller, forRequest } = createRoomTargetController(
+      configWithoutBindings,
+    );
+
+    await expect(
+      controller.listEvents(
+        userContext,
+        openIdCredential,
+        roomId,
+        undefined,
+        '2026-10-01T00:00:00Z',
+        '2026-10-02T00:00:00Z',
+        'Europe/Stockholm',
+        'room',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-binding-missing' },
+    });
+
+    expect(assertDisabled).not.toHaveBeenCalled();
+    expect(forRequest).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a caller-selected collection URL before room CalDAV access', async () => {
+    isAllowed.mockResolvedValue(true);
+    const { controller, forRequest } = createRoomTargetController();
+
+    await expect(
+      controller.listEvents(
+        userContext,
+        openIdCredential,
+        roomId,
+        'https://radicale.example.test/alice/team/',
+        '2026-10-01T00:00:00Z',
+        '2026-10-02T00:00:00Z',
+        'Europe/Stockholm',
+        'room',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-target-mismatch' },
+    });
+
+    expect(assertDisabled).not.toHaveBeenCalled();
+    expect(forRequest).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps the room principal disabled after an authorized binding preflight', async () => {
+    isAllowed.mockResolvedValue(true);
+    const { controller, forRequest } = createRoomTargetController();
+
+    await expect(
+      controller.listEvents(
+        userContext,
+        openIdCredential,
+        roomId,
+        undefined,
+        '2026-10-01T00:00:00Z',
+        '2026-10-02T00:00:00Z',
+        'Europe/Stockholm',
+        'room',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-caldav-disabled' },
+    });
+
+    expect(assertDisabled).toHaveBeenCalledWith({
+      roomId,
+      calendarId: 'team-calendar',
+      principal: { kind: 'service' },
+    });
+    expect(forRequest).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps room calendar collection lifecycle operator-managed', async () => {
+    isAllowed.mockResolvedValue(true);
+    const { controller, forRequest } = createRoomTargetController();
+
+    await expect(
+      controller.createCalendar(
+        userContext,
+        openIdCredential,
+        { name: 'Events' },
+        roomId,
+        'room',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-collection-operator-managed' },
+    });
+
+    expect(assertDisabled).not.toHaveBeenCalled();
+    expect(forRequest).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('discovers and maps authorized Radicale calendars', async () => {

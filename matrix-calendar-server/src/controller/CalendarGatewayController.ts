@@ -33,6 +33,7 @@ import {
   Get,
   Headers,
   Inject,
+  NotFoundException,
   Patch,
   Post,
   Query,
@@ -64,6 +65,14 @@ import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
+import {
+  resolveRoomCalendarBinding,
+  RoomCalendarBindingError,
+} from '../service/RoomCalendarBindingResolver';
+import {
+  RoomCalendarCalDavAccess,
+  RoomCalendarTarget,
+} from '../service/RoomCalendarCalDavAccess';
 
 @Controller({
   path: 'calendar',
@@ -76,6 +85,8 @@ export class CalendarGatewayController {
     private readonly appConfig: IAppConfiguration,
     private readonly authorizationFactory: MatrixCalendarAuthorizationFactory,
     private readonly credentialProviderFactory: MatrixOpenIdCalDavCredentialProviderFactory,
+    @Inject(ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS)
+    private readonly roomCalendarCalDavAccess: RoomCalendarCalDavAccess,
   ) {}
 
   @Get('context')
@@ -92,7 +103,25 @@ export class CalendarGatewayController {
     @MatrixOpenIdCredentialParam()
     openIdCredential: IMatrixOpenIdCredential | undefined,
     @Query('roomId') roomId?: string,
+    @Query('target') target?: string,
   ): Promise<CalendarGatewayCalendarDto[]> {
+    if (this.isRoomTarget(target)) {
+      const roomTarget = await this.authorizeRoomCalendarTarget(
+        userContext,
+        roomId,
+        undefined,
+        { action: 'list-calendars' },
+      );
+      return [
+        new CalendarGatewayCalendarDto(
+          roomTarget.calendarId,
+          roomTarget.calendarId,
+          undefined,
+          true,
+        ),
+      ];
+    }
+
     const requiredRoomId = this.requireQuery(roomId, 'roomId');
     const authorization = this.authorizationFactory.forRoom(
       userContext.userId,
@@ -136,7 +165,18 @@ export class CalendarGatewayController {
     @MatrixOpenIdCredentialParam()
     openIdCredential: IMatrixOpenIdCredential | undefined,
     @Query('roomId') roomId?: string,
+    @Query('target') target?: string,
   ): Promise<CalendarGatewayDiagnosticsDto> {
+    if (this.isRoomTarget(target)) {
+      const roomTarget = await this.authorizeRoomCalendarTarget(
+        userContext,
+        roomId,
+        undefined,
+        { action: 'manage-calendar', calendarId: '' },
+      );
+      return this.roomCalendarCalDavAccess.assertDisabled(roomTarget);
+    }
+
     const requiredRoomId = this.requireQuery(roomId, 'roomId');
     if (
       !(await this.authorizationFactory.canManageCalendars(
@@ -201,11 +241,19 @@ export class CalendarGatewayController {
     openIdCredential: IMatrixOpenIdCredential | undefined,
     @Body() input: { name?: string },
     @Query('roomId') roomId?: string,
+    @Query('target') target?: string,
   ): Promise<CalendarGatewayCalendarDto> {
     const requiredRoomId = this.requireQuery(roomId, 'roomId');
     const name = input?.name?.trim();
     if (!name) {
       throw new BadRequestException('calendar name is required');
+    }
+
+    if (this.isRoomTarget(target)) {
+      await this.authorizeRoomCalendarTarget(userContext, roomId, undefined, {
+        action: 'create-calendar',
+      });
+      throw this.operatorManagedCollectionError();
     }
 
     const authorization = this.authorizationFactory.forRoom(
@@ -247,6 +295,7 @@ export class CalendarGatewayController {
     @Body() input: { description?: unknown } | undefined,
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
+    @Query('target') target?: string,
   ): Promise<void> {
     if (!input || Object.keys(input).length !== 1) {
       throw new BadRequestException(
@@ -261,6 +310,14 @@ export class CalendarGatewayController {
       throw new BadRequestException(
         'calendar description must be the only string property',
       );
+    }
+
+    if (this.isRoomTarget(target)) {
+      await this.authorizeRoomCalendarTarget(userContext, roomId, calendarId, {
+        action: 'manage-calendar',
+        calendarId: calendarId ?? '',
+      });
+      throw this.operatorManagedCollectionError();
     }
 
     const requiredRoomId = this.requireQuery(roomId, 'roomId');
@@ -304,6 +361,7 @@ export class CalendarGatewayController {
     @Body() input: { color?: unknown } | undefined,
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
+    @Query('target') target?: string,
   ): Promise<void> {
     if (
       !input ||
@@ -317,6 +375,14 @@ export class CalendarGatewayController {
       );
     }
     const color = input.color;
+
+    if (this.isRoomTarget(target)) {
+      await this.authorizeRoomCalendarTarget(userContext, roomId, calendarId, {
+        action: 'manage-calendar',
+        calendarId: calendarId ?? '',
+      });
+      throw this.operatorManagedCollectionError();
+    }
 
     const requiredRoomId = this.requireQuery(roomId, 'roomId');
     const normalizedCalendarId = this.normalizeRadicaleUrl(
@@ -359,11 +425,20 @@ export class CalendarGatewayController {
     @Body() input: { name?: string },
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
+    @Query('target') target?: string,
   ): Promise<void> {
     const requiredRoomId = this.requireQuery(roomId, 'roomId');
     const name = input?.name?.trim();
     if (!name) {
       throw new BadRequestException('calendar name is required');
+    }
+
+    if (this.isRoomTarget(target)) {
+      await this.authorizeRoomCalendarTarget(userContext, roomId, calendarId, {
+        action: 'manage-calendar',
+        calendarId: calendarId ?? '',
+      });
+      throw this.operatorManagedCollectionError();
     }
 
     const normalizedCalendarId = this.normalizeRadicaleUrl(
@@ -405,7 +480,16 @@ export class CalendarGatewayController {
     openIdCredential: IMatrixOpenIdCredential | undefined,
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
+    @Query('target') target?: string,
   ): Promise<void> {
+    if (this.isRoomTarget(target)) {
+      await this.authorizeRoomCalendarTarget(userContext, roomId, calendarId, {
+        action: 'manage-calendar',
+        calendarId: calendarId ?? '',
+      });
+      throw this.operatorManagedCollectionError();
+    }
+
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
     const scope = await this.eventScope(
       userContext,
@@ -453,7 +537,27 @@ export class CalendarGatewayController {
     @Query('start') start?: string,
     @Query('end') end?: string,
     @Query('timezone') timezone?: string,
+    @Query('target') target?: string,
   ): Promise<CalendarGatewayEventListDto> {
+    if (this.isRoomTarget(target)) {
+      const viewerTimezone = this.requireQuery(timezone, 'timezone');
+      if (!isCalendarTimezoneSupported(viewerTimezone)) {
+        throw new BadRequestException({
+          code: 'unsupported-timezone',
+          message: 'timezone must be a supported IANA time zone',
+        });
+      }
+      const roomTarget = await this.authorizeRoomCalendarTarget(
+        userContext,
+        roomId,
+        calendarId,
+        { action: 'read-events', calendarId: calendarId ?? '' },
+      );
+      this.requireQuery(start, 'start');
+      this.requireQuery(end, 'end');
+      return this.roomCalendarCalDavAccess.assertDisabled(roomTarget);
+    }
+
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
     const viewerTimezone = this.requireQuery(timezone, 'timezone');
     if (!isCalendarTimezoneSupported(viewerTimezone)) {
@@ -553,7 +657,19 @@ export class CalendarGatewayController {
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
     @Query('eventId') eventId?: string,
+    @Query('target') target?: string,
   ): Promise<CalendarGatewayEventDto> {
+    if (this.isRoomTarget(target)) {
+      const roomTarget = await this.authorizeRoomCalendarTarget(
+        userContext,
+        roomId,
+        calendarId,
+        { action: 'read-events', calendarId: calendarId ?? '' },
+      );
+      this.requireQuery(eventId, 'eventId');
+      return this.roomCalendarCalDavAccess.assertDisabled(roomTarget);
+    }
+
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
     const scope = await this.eventScope(
       userContext,
@@ -588,7 +704,21 @@ export class CalendarGatewayController {
     @Body() input: CalendarEventInput,
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
+    @Query('target') target?: string,
   ): Promise<CalendarGatewayEventDto> {
+    if (this.isRoomTarget(target)) {
+      const roomTarget = await this.authorizeRoomCalendarTarget(
+        userContext,
+        roomId,
+        calendarId,
+        { action: 'create-event', calendarId: calendarId ?? '' },
+      );
+      if (!input || typeof input.uid !== 'string' || input.uid.length === 0) {
+        throw new BadRequestException('event uid is required');
+      }
+      return this.roomCalendarCalDavAccess.assertDisabled(roomTarget);
+    }
+
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
     const scope = await this.eventScope(
       userContext,
@@ -632,7 +762,24 @@ export class CalendarGatewayController {
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
     @Query('eventId') eventId?: string,
+    @Query('target') target?: string,
   ): Promise<CalendarGatewayEventDto> {
+    if (this.isRoomTarget(target)) {
+      const roomTarget = await this.authorizeRoomCalendarTarget(
+        userContext,
+        roomId,
+        calendarId,
+        {
+          action: 'update-event',
+          calendarId: calendarId ?? '',
+          eventId: eventId ?? '',
+        },
+      );
+      this.requireQuery(eventId, 'eventId');
+      this.requireQuery(ifMatch, 'If-Match');
+      return this.roomCalendarCalDavAccess.assertDisabled(roomTarget);
+    }
+
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
     const normalizedCalendarId = this.normalizeRadicaleUrl(
       requestedCalendarId,
@@ -681,7 +828,24 @@ export class CalendarGatewayController {
     @Query('roomId') roomId?: string,
     @Query('calendarId') calendarId?: string,
     @Query('eventId') eventId?: string,
+    @Query('target') target?: string,
   ): Promise<void> {
+    if (this.isRoomTarget(target)) {
+      const roomTarget = await this.authorizeRoomCalendarTarget(
+        userContext,
+        roomId,
+        calendarId,
+        {
+          action: 'delete-event',
+          calendarId: calendarId ?? '',
+          eventId: eventId ?? '',
+        },
+      );
+      this.requireQuery(eventId, 'eventId');
+      this.requireQuery(ifMatch, 'If-Match');
+      return this.roomCalendarCalDavAccess.assertDisabled(roomTarget);
+    }
+
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
     const normalizedCalendarId = this.normalizeRadicaleUrl(
       requestedCalendarId,
@@ -703,6 +867,96 @@ export class CalendarGatewayController {
         normalizedEventId,
         etag,
       );
+    });
+  }
+
+  private isRoomTarget(target: string | undefined): boolean {
+    if (target === undefined || target === 'personal') {
+      return false;
+    }
+    if (target === 'room') {
+      return true;
+    }
+
+    throw new BadRequestException({
+      code: 'invalid-calendar-target',
+      message: 'target must be personal or room',
+    });
+  }
+
+  private async authorizeRoomCalendarTarget(
+    userContext: IUserContext,
+    roomId: string | undefined,
+    requestedCalendarId: string | undefined,
+    request: CalendarAuthorizationRequest,
+  ): Promise<RoomCalendarTarget> {
+    const requiredRoomId = this.requireQuery(roomId, 'roomId');
+    const authorization = this.authorizationFactory.forRoom(
+      userContext.userId,
+      requiredRoomId,
+    );
+
+    if (!(await authorization.isAllowed(request))) {
+      throw new ForbiddenException(
+        `Not allowed to ${request.action} for this Matrix room`,
+      );
+    }
+
+    return this.resolveRoomTarget(requiredRoomId, requestedCalendarId);
+  }
+
+  private resolveRoomTarget(
+    roomId: string,
+    requestedCalendarId?: string,
+  ): RoomCalendarTarget {
+    try {
+      const binding = resolveRoomCalendarBinding(
+        this.appConfig.room_calendar_bindings,
+        roomId,
+        requestedCalendarId,
+      );
+      return {
+        roomId: binding.roomId,
+        calendarId: binding.calendarId,
+        principal: { kind: 'service' },
+      };
+    } catch (error) {
+      if (!(error instanceof RoomCalendarBindingError)) {
+        throw new ServiceUnavailableException({
+          code: 'room-calendar-binding-invalid',
+          message: 'Room calendar configuration is unavailable',
+        });
+      }
+
+      switch (error.code) {
+        case 'invalid_room_id':
+          throw new BadRequestException({
+            code: 'invalid-room-id',
+            message: 'Matrix room identifier is invalid',
+          });
+        case 'missing_binding':
+          throw new NotFoundException({
+            code: 'room-calendar-binding-missing',
+            message: 'No calendar is configured for this Matrix room',
+          });
+        case 'request_calendar_mismatch':
+          throw new BadRequestException({
+            code: 'room-calendar-target-mismatch',
+            message: 'Requested calendar is not the configured room calendar',
+          });
+        default:
+          throw new ServiceUnavailableException({
+            code: 'room-calendar-binding-invalid',
+            message: 'Room calendar configuration is unavailable',
+          });
+      }
+    }
+  }
+
+  private operatorManagedCollectionError(): ForbiddenException {
+    return new ForbiddenException({
+      code: 'room-calendar-collection-operator-managed',
+      message: 'Room calendar collection changes are managed by the operator',
     });
   }
 

@@ -39,6 +39,7 @@ import { MatrixAuthGuard } from '../../src/guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../../src/guard/MatrixRoomMembershipGuard';
 import { IUserContext } from '../../src/model/IUserContext';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
+import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 
 const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
@@ -123,6 +124,10 @@ const radicaleBaseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
     MatrixAuthGuard,
     MatrixRoomMembershipGuard,
     MatrixCalendarAuthorizationFactory,
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
+      useClass: RoomCalendarCalDavAccess,
+    },
     {
       provide: MatrixOpenIdCalDavCredentialProviderFactory,
       useClass: ContractCalDavCredentialProviderFactory,
