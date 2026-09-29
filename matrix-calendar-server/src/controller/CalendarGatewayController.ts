@@ -480,16 +480,24 @@ export class CalendarGatewayController {
       const client = this.eventClient(userContext, openIdCredential);
       const codec = new ICalendarEventCodec();
       const resources = await client.listEvents(scope.calendarId, range);
-      const parsedResources = resources.map((resource) => ({
-        resource,
-        event: codec.parse(scope.calendarId, resource.href, resource.icalendar)
-          .event,
-      }));
-      const unsupportedResources = parsedResources.filter(
+      const parsedResources = resources.map((resource) => {
+        const parsed = codec.parse(
+          scope.calendarId,
+          resource.href,
+          resource.icalendar,
+        );
+        return { resource, parsed, event: parsed.event };
+      });
+      const rangeUnsupportedResources = parsedResources.filter(
         ({ event }) => event.unsupportedRecurrence === 'range-this-and-future',
       );
+      const projectionUnsupportedResources = parsedResources.filter(
+        ({ parsed }) => parsed.listProjectionDiagnostic !== undefined,
+      );
       const projectableResources = parsedResources.filter(
-        ({ event }) => event.unsupportedRecurrence !== 'range-this-and-future',
+        ({ event, parsed }) =>
+          event.unsupportedRecurrence !== 'range-this-and-future' &&
+          parsed.listProjectionDiagnostic === undefined,
       );
       const projection = projectCalendarEventOccurrences(
         projectableResources.map(({ event }) => event),
@@ -507,10 +515,16 @@ export class CalendarGatewayController {
         diagnosticCounts.set(reason, (diagnosticCounts.get(reason) ?? 0) + 1);
       };
 
-      if (unsupportedResources.length > 0) {
+      if (rangeUnsupportedResources.length > 0) {
         diagnosticCounts.set(
           'range-this-and-future',
-          unsupportedResources.length,
+          rangeUnsupportedResources.length,
+        );
+      }
+      if (projectionUnsupportedResources.length > 0) {
+        diagnosticCounts.set(
+          'unsupported-recurrence',
+          projectionUnsupportedResources.length,
         );
       }
       for (const diagnostic of projection.diagnostics) {

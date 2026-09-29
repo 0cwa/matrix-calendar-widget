@@ -140,9 +140,7 @@ export type CalendarEventRecurrenceWrite = {
 };
 
 /** Recurrence semantics retained by CalDAV but not safely projected by UI. */
-export type CalendarEventUnsupportedRecurrence =
-  | 'range-this-and-future'
-  | 'multiple-rrules';
+export type CalendarEventUnsupportedRecurrence = 'range-this-and-future';
 
 /** Read-only marker for timezone semantics that are unsafe to project. */
 export type CalendarEventUnsupportedTimezone = true;

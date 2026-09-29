@@ -102,10 +102,12 @@ export function CalendarEventEditorDialog({
     calendars.find((calendar) => calendar.id === values.calendarId) ??
     initialCalendar;
   const readOnly = Boolean(selectedCalendar.readOnly);
+  const originalTimedTiming =
+    values.originalTiming?.type === 'timed' ? values.originalTiming : undefined;
   const hasFloatingEndpoint =
     values.timedKind === 'floating' ||
-    values.originalTiming?.start.type === 'floating' ||
-    values.originalTiming?.end.type === 'floating';
+    originalTimedTiming?.start.type === 'floating' ||
+    originalTimedTiming?.end.type === 'floating';
   const timingHelpText = hasFloatingEndpoint
     ? values.timedKind === 'mixed'
       ? t(

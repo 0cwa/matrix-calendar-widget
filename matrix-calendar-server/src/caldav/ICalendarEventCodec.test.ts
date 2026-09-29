@@ -1171,13 +1171,14 @@ END:VCALENDAR`,
   });
 
   it('keeps multiple master RRULEs readable and untouched', () => {
-    const source = fixture('recurrence-simple-series.ics').replace(
-      'RRULE:FREQ=WEEKLY;COUNT=4',
-      'RRULE:FREQ=WEEKLY;COUNT=4\nRRULE:FREQ=MONTHLY;COUNT=2',
+    const parsed = codec.parse(
+      'team',
+      'multi-rule.ics',
+      fixture('recurrence-multiple-master-rules.ics'),
     );
-    const parsed = codec.parse('team', 'multi-rule.ics', source);
 
-    expect(parsed.event.unsupportedRecurrence).toBe('multiple-rrules');
+    expect(parsed.listProjectionDiagnostic).toBe('unsupported-recurrence');
+    expect(parsed.event.unsupportedRecurrence).toBeUndefined();
     expect(() =>
       parsed.applyPatch({ recurrence: { rrule: 'FREQ=DAILY;COUNT=5' } }),
     ).toThrow(
@@ -1188,8 +1189,19 @@ END:VCALENDAR`,
     );
 
     const titlePatch = parsed.applyPatch({ title: 'Renamed multi-rule event' });
+    const calendar = ICAL.Component.fromString(titlePatch.icalendar);
+    const event = calendar.getFirstSubcomponent('vevent');
+    expect(event?.getAllProperties('rrule')).toHaveLength(2);
     expect(titlePatch.icalendar).toContain('RRULE:FREQ=WEEKLY;COUNT=4');
     expect(titlePatch.icalendar).toContain('RRULE:FREQ=MONTHLY;COUNT=2');
+    expect(calendar.getFirstPropertyValue('x-custom-calendar-property')).toBe(
+      'keep-calendar',
+    );
+    expect(event?.getFirstPropertyValue('x-custom-event-property')).toBe(
+      'keep-event',
+    );
+    expect(event?.getFirstSubcomponent('valarm')).not.toBeNull();
+    expect(calendar.getAllSubcomponents('vtodo')).toHaveLength(1);
   });
 });
 

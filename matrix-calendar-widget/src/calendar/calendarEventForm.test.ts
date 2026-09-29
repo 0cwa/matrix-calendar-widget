@@ -447,4 +447,107 @@ describe('calendar event form adapter', () => {
       calendarEventPatchFromForm({ ...values, title: 'Renamed' }),
     ).not.toHaveProperty('recurrence');
   });
+
+  it('reconciles an inclusive DATE UNTIL when DTSTART becomes timed', () => {
+    const event: CalendarEvent = {
+      id: 'all-day-series',
+      calendarId: 'team',
+      uid: 'all-day@example.test',
+      title: 'All-day series',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-10-25',
+        endDate: '2026-10-26',
+      },
+      recurrence: { rrule: 'FREQ=DAILY;UNTIL=20261025' },
+    };
+    const values = calendarEventToFormValues(event, calendar);
+    const patch = calendarEventPatchFromForm({
+      ...values,
+      timingType: 'timed',
+      start: '2026-10-25T09:00',
+      end: '2026-10-25T10:00',
+      timingChanged: true,
+    });
+
+    expect(patch.timing?.type).toBe('timed');
+    expect(patch.recurrence).toEqual({
+      rrule: 'FREQ=DAILY;UNTIL=20261025T225959Z',
+    });
+  });
+
+  it('reconciles negative-offset zoned UNTIL to DATE and a new zone', () => {
+    const event: CalendarEvent = {
+      id: 'negative-offset-series',
+      calendarId: 'team',
+      uid: 'negative-offset@example.test',
+      title: 'Los Angeles series',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-25T09:00:00',
+          timezone: 'America/Los_Angeles',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-25T10:00:00',
+          timezone: 'America/Los_Angeles',
+        },
+      },
+      recurrence: { rrule: 'FREQ=DAILY;UNTIL=20261026T065959Z' },
+    };
+    const values = calendarEventToFormValues(event, calendar);
+
+    const datePatch = calendarEventPatchFromForm({
+      ...values,
+      timingType: 'all-day',
+      start: '2026-10-25',
+      end: '2026-10-25',
+      timingChanged: true,
+    });
+    expect(datePatch.timing?.type).toBe('all-day');
+    expect(datePatch.recurrence).toEqual({
+      rrule: 'FREQ=DAILY;UNTIL=20261025',
+    });
+
+    const timezonePatch = calendarEventPatchFromForm({
+      ...values,
+      timezone: 'Europe/Stockholm',
+      timingChanged: true,
+      timezoneChanged: true,
+    });
+    expect(timezonePatch.recurrence).toEqual({
+      rrule: 'FREQ=DAILY;UNTIL=20261025T225959Z',
+    });
+  });
+
+  it.each(['FREQ=DAILY;COUNT=4', 'FREQ=DAILY'])(
+    'keeps count/never rule stable on DTSTART kind changes: %s',
+    (rrule) => {
+      const event: CalendarEvent = {
+        id: 'bounded-series',
+        calendarId: 'team',
+        uid: 'bounded@example.test',
+        title: 'Bounded series',
+        timing: {
+          type: 'all-day',
+          startDate: '2026-10-25',
+          endDate: '2026-10-26',
+        },
+        recurrence: { rrule },
+      };
+      const values = calendarEventToFormValues(event, calendar);
+
+      expect(
+        calendarEventPatchFromForm({
+          ...values,
+          timingType: 'timed',
+          start: '2026-10-25T09:00',
+          end: '2026-10-25T10:00',
+          timingChanged: true,
+        }),
+      ).not.toHaveProperty('recurrence');
+    },
+  );
 });

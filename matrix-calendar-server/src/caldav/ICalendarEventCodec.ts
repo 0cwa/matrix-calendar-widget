@@ -62,6 +62,8 @@ export class ParsedICalendarEvent {
   constructor(
     private readonly calendar: ICAL.Component,
     public readonly event: CalendarEvent,
+    /** Internal marker for count-only list diagnostics, not event payloads. */
+    public readonly listProjectionDiagnostic?: 'unsupported-recurrence',
   ) {}
 
   applyPatch(patch: CalendarEventPatch): EncodedICalendarEvent {
@@ -76,6 +78,9 @@ export class ParsedICalendarEvent {
       ? recurrenceWriteFromUnknown(patch.recurrence)
       : undefined;
     if (hasRecurrencePatch) {
+      if (this.listProjectionDiagnostic === 'unsupported-recurrence') {
+        throw unsupportedRecurrencePatch();
+      }
       assertSimpleRecurrenceCanBeEdited(this.event);
       const nextRule = recurrenceWrite?.rrule;
       if (nextRule !== undefined) {
@@ -254,6 +259,7 @@ export class ICalendarEventCodec {
     const timing = readTiming(vevent);
     const recurrence = readRecurrence(calendar, vevent, uid);
     const unsupportedRecurrence = readUnsupportedRecurrence(calendar, uid);
+    const hasMultipleMasterRules = vevent.getAllProperties('rrule').length > 1;
     const unsupportedTimezone = hasUnsupportedTimezoneRules(calendar, uid);
 
     const event: CalendarEvent = {
@@ -274,7 +280,11 @@ export class ICalendarEventCodec {
       ...(unsupportedTimezone ? { unsupportedTimezone: true } : {}),
     };
 
-    return new ParsedICalendarEvent(calendar, event);
+    return new ParsedICalendarEvent(
+      calendar,
+      event,
+      hasMultipleMasterRules ? 'unsupported-recurrence' : undefined,
+    );
   }
 }
 
@@ -382,11 +392,6 @@ function readUnsupportedRecurrence(
   calendar: ICAL.Component,
   uid: string,
 ): CalendarEvent['unsupportedRecurrence'] {
-  const master = findMasterEvent(calendar, uid);
-  if (master && master.getAllProperties('rrule').length > 1) {
-    return 'multiple-rrules';
-  }
-
   const hasThisAndFutureOverride = calendar
     .getAllSubcomponents('vevent')
     .some((vevent) => {

@@ -302,7 +302,6 @@ function projectEvent(
   if (sourceEvent.unsupportedRecurrence === 'range-this-and-future') {
     throw projectionError('invalid-recurrence');
   }
-
   const recurrence = sourceEvent.recurrence;
   assertRecurrenceInputLimit(recurrence);
   if (!recurrenceHasProjectionData(recurrence)) {

@@ -127,9 +127,9 @@ validates this stack only; the broader issue #6 criteria and M5 exit remain open
 The first write slice limits recurrence controls to four frequencies, interval,
 and an optional count or inclusive end date. Writes replace or clear only the
 master RRULE and use the existing source resource ID and ETag. Resources with
-RDATE, EXDATE, detached instances, unsupported RRULE parts, or unsupported
-timezone rules remain readable; recurrence controls stay disabled, and
-ordinary field edits preserve the complete source resource.
+RDATE, EXDATE, detached instances, multiple master RRULEs, unsupported RRULE
+parts, or unsupported timezone rules remain readable; recurrence controls stay
+disabled, and ordinary field edits preserve the complete source resource.
 
 The CalDAV codec exposes a read-only domain view of master RRULE, RDATE
 (including PERIOD values), and EXDATE values plus same-resource, same-UID

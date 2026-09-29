@@ -44,7 +44,7 @@ export type CalendarEventFormValues = {
   timezone: string;
   timingChanged?: boolean;
   timezoneChanged?: boolean;
-  originalTiming?: TimedCalendarEventTiming;
+  originalTiming?: CalendarEventTiming;
   repeats?: boolean;
   recurrenceFrequency?: SupportedCalendarEventRecurrenceFrequency;
   recurrenceInterval?: string;
@@ -112,6 +112,7 @@ export function calendarEventToFormValues(
       timezone: calendar.timezone ?? DateTime.local().zoneName ?? 'UTC',
       timingChanged: false,
       timezoneChanged: false,
+      originalTiming: event.timing,
       ...recurrenceFormValues(event),
     };
   }
@@ -181,13 +182,17 @@ export function calendarEventPatchFromForm(
 ): CalendarEventPatch {
   const editableFields = calendarEventEditableFieldsFromForm(values);
   const { timing, ...fields } = editableFields;
+  const recurrenceNeedsAnchorUpdate = recurrenceUntilNeedsAnchorUpdate(
+    values,
+    timing,
+  );
 
   return {
     ...fields,
     ...(values.timingChanged === false ? {} : { timing }),
     description: normalizeOptional(values.description),
     location: normalizeOptional(values.location),
-    ...(values.recurrenceChanged
+    ...(values.recurrenceChanged || recurrenceNeedsAnchorUpdate
       ? {
           recurrence: values.repeats
             ? { rrule: recurrenceRuleFromForm(values, timing) }
@@ -195,6 +200,32 @@ export function calendarEventPatchFromForm(
         }
       : {}),
   };
+}
+
+function recurrenceUntilNeedsAnchorUpdate(
+  values: CalendarEventFormValues,
+  nextTiming: CalendarEventTiming,
+): boolean {
+  if (
+    !values.repeats ||
+    values.recurrenceEnd !== 'until' ||
+    values.recurrenceEditable === false ||
+    !values.originalTiming
+  ) {
+    return false;
+  }
+
+  const previousStart = timingStartAsDateTime(values.originalTiming);
+  const nextStart = timingStartAsDateTime(nextTiming);
+  if (previousStart.type !== nextStart.type) {
+    return true;
+  }
+
+  return (
+    previousStart.type === 'date-time' &&
+    nextStart.type === 'date-time' &&
+    previousStart.value.timezone !== nextStart.value.timezone
+  );
 }
 
 export function validateCalendarEventForm(
@@ -481,7 +512,10 @@ function editableTimedEndpoint(
   values: CalendarEventFormValues,
   endpoint: 'start' | 'end',
 ) {
-  const original = values.originalTiming?.[endpoint];
+  const original =
+    values.originalTiming?.type === 'timed'
+      ? values.originalTiming[endpoint]
+      : undefined;
   const local = values[endpoint];
 
   if (values.timedKind === 'floating') {
@@ -509,7 +543,10 @@ function formEndpointTimezone(
     return viewerTimezone;
   }
 
-  const original = values.originalTiming?.[endpoint];
+  const original =
+    values.originalTiming?.type === 'timed'
+      ? values.originalTiming[endpoint]
+      : undefined;
   if (timedKind === 'mixed') {
     if (original?.type === 'floating') {
       return viewerTimezone;
