@@ -1,8 +1,8 @@
 # Main branch protection
 
-M0 leaves one repository-admin action that the connected GitHub integration cannot perform because it does not have Administration write permission.
+Issue #29 tracks the remaining repository-admin configuration for `main`.
 
-Configure a branch rule or repository ruleset targeting `main` with these settings after PR #24 is merged.
+Configure a branch rule or repository ruleset targeting `main` with these settings.
 
 ## Required pull-request behavior
 
@@ -16,14 +16,17 @@ For a single-maintainer repository, requiring zero approving reviews is acceptab
 
 ## Required checks
 
-Require these stable job names:
+Require these five stable job names:
 
 - `Quality`
 - `Widget`
 - `Server and bot`
+- `Container image build smoke`
 - `Analyze JavaScript/TypeScript`
 
-The first three come from `.github/workflows/ci.yml`; the final check is CodeQL.
+The first four come from `.github/workflows/ci.yml`; `Analyze JavaScript/TypeScript` comes from `.github/workflows/codeql.yml`.
+
+Keep `Real Radicale contract` non-required for now. Its workflow uses pull-request path filters, so unrelated pull requests can skip the workflow without a deterministic successful skipped-path check. Reconsider this only after skipped paths report a stable result that satisfies branch protection.
 
 Prefer strict/up-to-date required checks once the project has multiple concurrent feature branches. A loose rule is acceptable during the early pre-alpha phase if strict rebases create excessive CI churn.
 
@@ -34,6 +37,8 @@ Prefer strict/up-to-date required checks once the project has multiple concurren
 `Widget` covers the shared calendar package plus widget lint, translations, unit tests, and build.
 
 `Server and bot` covers the gateway/bot lint, translations, tests, and build.
+
+`Container image build smoke` builds both workspace images locally in CI without publishing them.
 
 `Analyze JavaScript/TypeScript` provides CodeQL scanning.
 
