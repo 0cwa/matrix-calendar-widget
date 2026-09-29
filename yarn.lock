@@ -972,10 +972,37 @@
     protobufjs "^7.5.3"
     yargs "^17.7.2"
 
+"@hapi/address@^5.1.1":
+  version "5.1.1"
+  resolved "https://registry.yarnpkg.com/@hapi/address/-/address-5.1.1.tgz#e9925fc1b65f5cc3fbea821f2b980e4652e84cb6"
+  integrity sha512-A+po2d/dVoY7cYajycYI43ZbYMXukuopIsqCjh5QzsBCipDtdofHntljDlpccMjIfTy6UOkg+5KPriwYch2bXA==
+  dependencies:
+    "@hapi/hoek" "^11.0.2"
+
+"@hapi/formula@^3.0.2":
+  version "3.0.2"
+  resolved "https://registry.yarnpkg.com/@hapi/formula/-/formula-3.0.2.tgz#81b538060ee079481c906f599906d163c4badeaf"
+  integrity sha512-hY5YPNXzw1He7s0iqkRQi+uMGh383CGdyyIGYtB+W5N3KHPXoqychklvHhKCC9M3Xtv0OCs/IHw+r4dcHtBYWw==
+
+"@hapi/hoek@^11.0.2", "@hapi/hoek@^11.0.7":
+  version "11.0.7"
+  resolved "https://registry.yarnpkg.com/@hapi/hoek/-/hoek-11.0.7.tgz#56a920793e0a42d10e530da9a64cc0d3919c4002"
+  integrity sha512-HV5undWkKzcB4RZUusqOpcgxOaq6VOAH7zhhIr2g3G8NF/MlFO75SjOr2NfuSx0Mh40+1FqCkagKLJRykUWoFQ==
+
 "@hapi/hoek@^9.0.0", "@hapi/hoek@^9.3.0":
   version "9.3.0"
   resolved "https://registry.yarnpkg.com/@hapi/hoek/-/hoek-9.3.0.tgz#8368869dcb735be2e7f5cb7647de78e167a251fb"
   integrity sha512-/c6rf4UJlmHlC9b5BaNvzAcFv7HZ2QHaV0D4/HNlBdvFnvQq8RI4kYdhyPCl7Xj+oWvTWQ8ujhqS53LIgAe6KQ==
+
+"@hapi/pinpoint@^2.0.1":
+  version "2.0.1"
+  resolved "https://registry.yarnpkg.com/@hapi/pinpoint/-/pinpoint-2.0.1.tgz#32077e715655fc00ab8df74b6b416114287d6513"
+  integrity sha512-EKQmr16tM8s16vTT3cA5L0kZZcTMU5DUOZTuvpnY738m+jyP3JIUj+Mm1xc1rsLkGBQ/gVnfKYPwOmPg1tUR4Q==
+
+"@hapi/tlds@^1.1.1":
+  version "1.1.7"
+  resolved "https://registry.yarnpkg.com/@hapi/tlds/-/tlds-1.1.7.tgz#005d10761e7a946aedae32a418b8f1dafd3f998e"
+  integrity sha512-MgNjRwy9Ti92yVAixLmDc8dd1bJIKwO9qlWCfFQRwRmUEDPQHYn4G6hwPFvFGUTzAa0FsS+inMjLin7GnyBRhA==
 
 "@hapi/topo@^5.1.0":
   version "5.1.0"
@@ -983,6 +1010,13 @@
   integrity sha512-foQZKJig7Ob0BMAYBfcJk8d77QtOe7Wo4ox7ff1lQYoNNAb6jwcY1ncdoy2e9wQZzvNy7ODZCYJkK8kzmcAnAg==
   dependencies:
     "@hapi/hoek" "^9.0.0"
+
+"@hapi/topo@^6.0.2":
+  version "6.0.2"
+  resolved "https://registry.yarnpkg.com/@hapi/topo/-/topo-6.0.2.tgz#f219c1c60da8430228af4c1f2e40c32a0d84bbb4"
+  integrity sha512-KR3rD5inZbGMrHmgPxsJ9dbi6zEK+C3ZwUwTa+eMwWLz7oijWUTWD2pMSNNYJAU6Qq+65NkxXjqHr/7LM2Xkqg==
+  dependencies:
+    "@hapi/hoek" "^11.0.2"
 
 "@humanfs/core@^0.19.1":
   version "0.19.1"
@@ -2148,6 +2182,11 @@
   integrity sha512-V4BG07kuYSUkTCSBHG8G8TNhM+F19jXFWnQtzj+we8DrkpSBCee9Z3Ms8yiGer/dlmhe35/Xdgyo3/0rQKg7YA==
   dependencies:
     "@sinonjs/commons" "^3.0.0"
+
+"@standard-schema/spec@^1.1.0":
+  version "1.1.0"
+  resolved "https://registry.yarnpkg.com/@standard-schema/spec/-/spec-1.1.0.tgz#a79b55dbaf8604812f52d140b2c9ab41bc150bb8"
+  integrity sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==
 
 "@supercharge/promise-pool@^3.3.0":
   version "3.3.0"
@@ -3663,7 +3702,7 @@ baseline-browser-mapping@^2.10.42:
   resolved "https://registry.yarnpkg.com/baseline-browser-mapping/-/baseline-browser-mapping-2.10.43.tgz#7b5d11590ce5acdbe4859443e3c940e81ce8c02d"
   integrity sha512-AjYpR78kDWAY3Efj+cDTFH9t9SCoL7OoTp1BOb0mQV7S+6CiLwnWM3FyxhJtdPufDFKzmCSFoUncKjWgJEZTCQ==
 
-baseline-browser-mapping@^2.11.25:
+baseline-browser-mapping@^2.11.26:
   version "2.11.26"
   resolved "https://registry.yarnpkg.com/baseline-browser-mapping/-/baseline-browser-mapping-2.11.26.tgz#01bf6774efb3fbb9de20afc6b923ab85c7d230a6"
   integrity sha512-GLQdD3y6UF8iVuMJl5fHgE4jdn/ua7n+toKfLgNlg3BqQtOZjpy68T8Tup8/wGWZCDlm7KMg7tPb4MPn7oN0TQ==
@@ -3772,13 +3811,13 @@ browserslist@^4.24.0:
     update-browserslist-db "^1.2.3"
 
 browserslist@^4.28.1:
-  version "4.29.1"
-  resolved "https://registry.yarnpkg.com/browserslist/-/browserslist-4.29.1.tgz#f723071987a4f094177d94e01f6dc6e7493b972c"
-  integrity sha512-AUdjuRyCNGUYtqpqfTmWyM4fXay8yIQhmLnvYe/THMGfT9B/34X7xQd3ifKxwyNPPpowVBjLb+64BN9Rn1mizw==
+  version "4.29.2"
+  resolved "https://registry.yarnpkg.com/browserslist/-/browserslist-4.29.2.tgz#652374dd6ad03dfcc66d63dad56aaaba9705b075"
+  integrity sha512-/u9r8k8ue4ZhHCw9ovDtltpWdXeXzjhdxCGj6vm1RGLPXb8lu33EMdoCHF5Sx8oYBS+Q/FYYNmAqlHncxR3RmA==
   dependencies:
-    baseline-browser-mapping "^2.11.25"
-    caniuse-lite "^1.0.30001810"
-    electron-to-chromium "^1.5.438"
+    baseline-browser-mapping "^2.11.26"
+    caniuse-lite "^1.0.30001812"
+    electron-to-chromium "^1.5.439"
     node-releases "^2.0.57"
     update-browserslist-db "^1.3.3"
 
@@ -3895,10 +3934,10 @@ caniuse-lite@^1.0.30001803:
   resolved "https://registry.yarnpkg.com/caniuse-lite/-/caniuse-lite-1.0.30001805.tgz#78d5d5968a69b7ff81af87a96d7ddc7ea6670b1e"
   integrity sha512-52noaS3DubycKSXaU30TwPGIp+POyQSUVa5jBEq3vkRkY0kjyb3LQgvhU6WGyCcyXqVLWO0Cw0Q6BSdD0kUfVA==
 
-caniuse-lite@^1.0.30001810:
-  version "1.0.30001812"
-  resolved "https://registry.yarnpkg.com/caniuse-lite/-/caniuse-lite-1.0.30001812.tgz#55b32ed819d120b384149a4f9fd59d179ce008f9"
-  integrity sha512-qN+QNNBr93TCmFrmte0bBCjSDMuRvt78VlHT99qIGPszm4QsqCX8lnyWUFkHi8B7ZBAPq8SH+UqyXNy/odMdng==
+caniuse-lite@^1.0.30001812:
+  version "1.0.30001813"
+  resolved "https://registry.yarnpkg.com/caniuse-lite/-/caniuse-lite-1.0.30001813.tgz#acc16d52a011b87873b14e3c62040bb273c270eb"
+  integrity sha512-zfjJo4rM0+fUomGDBW/xcDjhIwz/210DGvip2MAMDZ8KHcRPnOHmEgHPZP0UHlZoxr8fYKVJOqcORhYQcG4FKQ==
 
 caseless@~0.12.0:
   version "0.12.0"
@@ -4654,10 +4693,10 @@ electron-to-chromium@^1.5.389:
   resolved "https://registry.yarnpkg.com/electron-to-chromium/-/electron-to-chromium-1.5.389.tgz#538be9ebec78026d4daba6be321ab854dfac2a8f"
   integrity sha512-cEto7aeOqBfU1D+c5py5pE+ooscKE75JifxLBdFUZsqAxRS6y7kebtxAZvICszSl05gPjYHDTjY+lXpyGvpJbg==
 
-electron-to-chromium@^1.5.438:
-  version "1.5.439"
-  resolved "https://registry.yarnpkg.com/electron-to-chromium/-/electron-to-chromium-1.5.439.tgz#d14ad21f157ee83b77d1e46fc031776eec9013c9"
-  integrity sha512-qu6QIPXhsb+CRcAiTMNjR4A1y/7tCYKkKjr5CZXRVih6qkDf79peZ2BpEU3qoDBNCRrcy3Mra3X9nG5oruuA7Q==
+electron-to-chromium@^1.5.439:
+  version "1.5.440"
+  resolved "https://registry.yarnpkg.com/electron-to-chromium/-/electron-to-chromium-1.5.440.tgz#c669c8a6ac7416de937632a895f4a9feca7b8c97"
+  integrity sha512-SghDzqdJokdz8zP8YNlvS74+CwLRoUPDGvP/gFA+HrKVw+pOshUAgx8pXR37xl/u16zGae746rFNWvZ/22kU2Q==
 
 emittery@^0.13.1:
   version "0.13.1"
@@ -4687,9 +4726,9 @@ end-of-stream@^1.1.0, end-of-stream@^1.4.1:
     once "^1.4.0"
 
 enhanced-resolve@^5.25.0:
-  version "5.25.1"
-  resolved "https://registry.yarnpkg.com/enhanced-resolve/-/enhanced-resolve-5.25.1.tgz#9d919bfa898b116e58f20e95127c047693158771"
-  integrity sha512-nGXts5znJzmWPu+mIE9izCOzdg63oJca2mDzGWWTth7sr4aCToKcoyFVBQwN75Ij5Pf6p510EwkTqViTRzDV+w==
+  version "5.26.0"
+  resolved "https://registry.yarnpkg.com/enhanced-resolve/-/enhanced-resolve-5.26.0.tgz#9dfb47d050ed6c87f2c6d43b4d7e30f8c0a91ed7"
+  integrity sha512-9vhedylFonb2YGogzUKX6+Ja72gOJbN1QHAqdrvqLwhdl/QWbKopzoUC9EbQNVsAns/bx/4uyqalrQAoy1IByw==
   dependencies:
     graceful-fs "^4.2.4"
     tapable "^2.3.3"
@@ -6094,7 +6133,6 @@ i18next@^25.10.10:
   dependencies:
     "@babel/runtime" "^7.29.2"
 
-
 ical.js@2.2.1, ical.js@^2.2.1:
   version "2.2.1"
   resolved "https://registry.yarnpkg.com/ical.js/-/ical.js-2.2.1.tgz"
@@ -7022,7 +7060,7 @@ jiti@^2.6.1:
   resolved "https://registry.yarnpkg.com/jiti/-/jiti-2.6.1.tgz#178ef2fc9a1a594248c20627cd820187a4d78d92"
   integrity sha512-ekilCSN1jwRvIbgeg/57YFh8qQDNbwDb9xT/qu2DAHbFFZUicIl4ygVaAvzveMhMVr3LnpSKTNnwt8PoOfmKhQ==
 
-joi@^17.13.3, joi@^17.13.4:
+joi@^17.13.4:
   version "17.13.7"
   resolved "https://registry.yarnpkg.com/joi/-/joi-17.13.7.tgz#92e212c50dbbbcb1a1592424f84083eb265cc778"
   integrity sha512-MF80Dm5Y2veNy8QWVx9Bj3ui4mo7+VPSPsR1M+oaHXV0Gx6zGX9a2F+OZG3Blby9tOlzU9Rs5FUimlEhbKtfnQ==
@@ -7032,6 +7070,19 @@ joi@^17.13.3, joi@^17.13.4:
     "@sideway/address" "^4.1.5"
     "@sideway/formula" "^3.0.1"
     "@sideway/pinpoint" "^2.0.0"
+
+joi@^18.2.9:
+  version "18.2.9"
+  resolved "https://registry.yarnpkg.com/joi/-/joi-18.2.9.tgz#8f489aebefab85cfa9979ea4471e3eea022787b1"
+  integrity sha512-2mD929bUVKUhOLQQEVhlf6EZ0Mlo0DeRb5MO7cViR9AXLtBauuccEtB1py9Ocxpo/P7ucnh442iY/iOwrh3IQw==
+  dependencies:
+    "@hapi/address" "^5.1.1"
+    "@hapi/formula" "^3.0.2"
+    "@hapi/hoek" "^11.0.7"
+    "@hapi/pinpoint" "^2.0.1"
+    "@hapi/tlds" "^1.1.1"
+    "@hapi/topo" "^6.0.2"
+    "@standard-schema/spec" "^1.1.0"
 
 js-cookie@^3.0.0:
   version "3.0.8"
@@ -10403,9 +10454,9 @@ webpack-node-externals@3.0.0:
   integrity sha512-LnL6Z3GGDPht/AigwRh2dvL9PQPFQ8skEpVrWZXLWBYmqcaojHNN0onvHzie6rq7EWKrrBfPYqNEzTJgiwEQDQ==
 
 webpack-sources@^3.5.1:
-  version "3.5.3"
-  resolved "https://registry.yarnpkg.com/webpack-sources/-/webpack-sources-3.5.3.tgz#35e2bec56951011bbaaffb450936222113bac031"
-  integrity sha512-F/zS5rEcCKxS6hrhxkLjOzblTsuv89rkuDyP+vToquds6KfPJ3fDqg9UNzbtJcA2AgXZOLMYLQqZpuyE5zDfxg==
+  version "3.6.0"
+  resolved "https://registry.yarnpkg.com/webpack-sources/-/webpack-sources-3.6.0.tgz#b2e4a4f1aef1a0d60f3011eb47736c5bf7f1ed7f"
+  integrity sha512-EIMmPVvNI0CYXyRPp34F2Qk7W37/BZVZIofS6LAUnrNjCVahS+hO4mxwFJDjQjODTGZDtVzLYoN2+1dYkhk9qA==
 
 webpack@5.97.1, webpack@^5.97.1:
   version "5.111.1"
