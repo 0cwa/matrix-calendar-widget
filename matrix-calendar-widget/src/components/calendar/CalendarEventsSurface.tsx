@@ -72,11 +72,18 @@ export function CalendarEventsSurface({
     () => visibleRangeForView(filters, view, viewerTimezone),
     [filters, view, viewerTimezone],
   );
-  const unsupportedSeriesCount = events.data.filter(
-    (event) =>
-      event.unsupportedRecurrence === 'range-this-and-future' &&
-      !hiddenCalendarIds.has(event.calendarId),
-  ).length;
+  const visibleServerDiagnostics = events.diagnostics.filter(
+    (diagnostic) => !hiddenCalendarIds.has(diagnostic.calendarId),
+  );
+  const unsupportedSeriesCount =
+    events.data.filter(
+      (event) =>
+        event.unsupportedRecurrence === 'range-this-and-future' &&
+        !hiddenCalendarIds.has(event.calendarId),
+    ).length +
+    visibleServerDiagnostics
+      .filter(({ reason }) => reason === 'range-this-and-future')
+      .reduce((total, diagnostic) => total + diagnostic.count, 0);
   const sourceEvents = useMemo(
     () =>
       events.data.filter(
@@ -95,6 +102,14 @@ export function CalendarEventsSurface({
       ),
     [sourceEvents, viewerTimezone, visibleRange],
   );
+  const projectionDiagnosticCount =
+    visibleServerDiagnostics
+      .filter(({ reason }) => reason !== 'range-this-and-future')
+      .reduce((total, diagnostic) => total + diagnostic.count, 0) +
+    projection.diagnostics.filter(
+      ({ sourceEvent }) =>
+        sourceEvent.unsupportedRecurrence !== 'range-this-and-future',
+    ).length;
   const sourceEventByOccurrenceKey = useMemo(
     () =>
       new Map(
@@ -160,13 +175,13 @@ export function CalendarEventsSurface({
           </Alert>
         </Box>
       )}
-      {projection.diagnostics.length > 0 && (
+      {projectionDiagnosticCount > 0 && (
         <Box px={1} pb={1}>
           <Alert severity="warning">
             {t(
               'calendarEvents.unsupportedOccurrenceProjection',
               'Some events have recurrence or timezone data that the current renderer cannot safely display. Affected events: {{count}}.',
-              { count: projection.diagnostics.length },
+              { count: projectionDiagnosticCount },
             )}
           </Alert>
         </Box>

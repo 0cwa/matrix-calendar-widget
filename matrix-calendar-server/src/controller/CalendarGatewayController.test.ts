@@ -926,18 +926,22 @@ describe('CalendarGatewayController', () => {
         calendarId,
         '2026-09-24T00:00:00Z',
         '2026-09-25T00:00:00Z',
+        'UTC',
       ),
-    ).resolves.toEqual([
-      {
-        event: expect.objectContaining({
-          id: 'https://radicale.example.test/alice/team/event.ics',
-          calendarId,
-          uid: 'event@example.test',
-          title: 'Team planning',
-        }),
-        etag: '"event-etag"',
-      },
-    ]);
+    ).resolves.toEqual({
+      events: [
+        {
+          event: expect.objectContaining({
+            id: 'https://radicale.example.test/alice/team/event.ics',
+            calendarId,
+            uid: 'event@example.test',
+            title: 'Team planning',
+          }),
+          etag: '"event-etag"',
+        },
+      ],
+      diagnostics: [],
+    });
 
     expect(isAllowed).toHaveBeenCalledWith({
       action: 'read-events',
@@ -946,7 +950,154 @@ describe('CalendarGatewayController', () => {
     expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
   });
 
-  it('returns an unsupported marker for THISANDFUTURE range overrides', async () => {
+  it('suppresses ordinary CalDAV candidates outside the requested range', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch.mockResponseOnce(
+      multistatus(
+        eventResourceResponse(
+          '/alice/team/outside.ics',
+          '"outside-etag"',
+          simpleEventIcs('Private outside event'),
+        ),
+      ),
+      { status: 207 },
+    );
+
+    const response = await createController().listEvents(
+      userContext,
+      openIdCredential,
+      roomId,
+      calendarId,
+      '2026-09-24T10:00:00Z',
+      '2026-09-24T11:00:00Z',
+      'UTC',
+    );
+
+    expect(response).toEqual({ events: [], diagnostics: [] });
+    expect(JSON.stringify(response)).not.toContain('Private outside event');
+    expect(JSON.stringify(response)).not.toContain('outside-etag');
+    expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
+  });
+
+  it('keeps a recurring source resource when only an occurrence intersects', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const href = '/alice/team/daily.ics';
+    const etag = '"daily-etag"';
+    const icalendar = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Matrix Calendar Widget Tests//EN
+BEGIN:VEVENT
+UID:daily@example.test
+DTSTART:20260920T080000Z
+DTEND:20260920T090000Z
+RRULE:FREQ=DAILY;COUNT=10
+SUMMARY:Daily planning
+END:VEVENT
+END:VCALENDAR`;
+    fetch.mockResponseOnce(
+      multistatus(eventResourceResponse(href, etag, icalendar)),
+      { status: 207 },
+    );
+
+    const response = await createController().listEvents(
+      userContext,
+      openIdCredential,
+      roomId,
+      calendarId,
+      '2026-09-24T08:30:00Z',
+      '2026-09-24T09:30:00Z',
+      'UTC',
+    );
+
+    expect(response).toEqual({
+      events: [
+        {
+          event: expect.objectContaining({
+            id: 'https://radicale.example.test/alice/team/daily.ics',
+            calendarId,
+            uid: 'daily@example.test',
+            title: 'Daily planning',
+          }),
+          etag,
+        },
+      ],
+      diagnostics: [],
+    });
+  });
+
+  it('uses the explicit viewer timezone for DATE and floating range boundaries', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const resources = [
+      eventResourceResponse(
+        '/alice/team/all-day.ics',
+        '"date-etag"',
+        `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Matrix Calendar Widget Tests//EN
+BEGIN:VEVENT
+UID:date@example.test
+DTSTART;VALUE=DATE:20260924
+DTEND;VALUE=DATE:20260925
+SUMMARY:Local date boundary
+END:VEVENT
+END:VCALENDAR`,
+      ),
+      eventResourceResponse(
+        '/alice/team/floating.ics',
+        '"floating-etag"',
+        `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Matrix Calendar Widget Tests//EN
+BEGIN:VEVENT
+UID:floating@example.test
+DTSTART:20260924T003000
+DTEND:20260924T013000
+SUMMARY:Floating boundary
+END:VEVENT
+END:VCALENDAR`,
+      ),
+    ].join('');
+    fetch.mockResponses(
+      [multistatus(resources), { status: 207 }],
+      [multistatus(resources), { status: 207 }],
+    );
+
+    const range = {
+      start: '2026-09-23T22:15:00Z',
+      end: '2026-09-23T22:45:00Z',
+    };
+    const utcResponse = await createController().listEvents(
+      userContext,
+      openIdCredential,
+      roomId,
+      calendarId,
+      range.start,
+      range.end,
+      'UTC',
+    );
+    const stockholmResponse = await createController().listEvents(
+      userContext,
+      openIdCredential,
+      roomId,
+      calendarId,
+      range.start,
+      range.end,
+      'Europe/Stockholm',
+    );
+
+    expect(utcResponse.events).toEqual([]);
+    expect(stockholmResponse.events.map(({ event }) => event.uid)).toEqual([
+      'date@example.test',
+      'floating@example.test',
+    ]);
+    expect(utcResponse.diagnostics).toEqual([]);
+    expect(stockholmResponse.diagnostics).toEqual([]);
+  });
+
+  it('returns only a count diagnostic for THISANDFUTURE range overrides', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';
     fetch.mockResponseOnce(
@@ -972,11 +1123,15 @@ describe('CalendarGatewayController', () => {
       calendarId,
       '2026-10-01T00:00:00Z',
       '2026-10-15T00:00:00Z',
+      'UTC',
     );
 
-    expect(response[0].event.unsupportedRecurrence).toBe(
-      'range-this-and-future',
-    );
+    expect(response).toEqual({
+      events: [],
+      diagnostics: [{ reason: 'range-this-and-future', count: 1 }],
+    });
+    expect(JSON.stringify(response)).not.toContain('Planning');
+    expect(JSON.stringify(response)).not.toContain('range-etag');
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
   });
@@ -1153,11 +1308,33 @@ describe('CalendarGatewayController', () => {
         'https://attacker.example.test/calendar/',
         '2026-09-24T00:00:00Z',
         '2026-09-25T00:00:00Z',
+        'UTC',
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it.each([undefined, 'Custom/Unbundled'])(
+    'rejects absent or unsupported viewer timezones before CalDAV access',
+    async (timezone) => {
+      isAllowed.mockResolvedValue(true);
+
+      await expect(
+        createController().listEvents(
+          userContext,
+          openIdCredential,
+          roomId,
+          'https://radicale.example.test/alice/team/',
+          '2026-09-24T00:00:00Z',
+          '2026-09-25T00:00:00Z',
+          timezone,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
 
   it('fails closed when Radicale is not configured', async () => {
     isAllowed.mockResolvedValue(true);
@@ -1251,6 +1428,24 @@ function diagnosticCalendarCollectionResponse(
           <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
           <d:displayname>${displayName}</d:displayname>
           <c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set>
+        </d:prop>
+        <d:status>HTTP/1.1 200 OK</d:status>
+      </d:propstat>
+    </d:response>`;
+}
+
+function eventResourceResponse(
+  href: string,
+  etag: string,
+  icalendar: string,
+): string {
+  return `
+    <d:response>
+      <d:href>${href}</d:href>
+      <d:propstat>
+        <d:prop>
+          <d:getetag>${etag}</d:getetag>
+          <c:calendar-data>${icalendar}</c:calendar-data>
         </d:prop>
         <d:status>HTTP/1.1 200 OK</d:status>
       </d:propstat>

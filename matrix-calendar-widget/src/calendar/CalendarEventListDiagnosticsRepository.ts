@@ -14,23 +14,16 @@
  * limitations under the License.
  */
 
-export {
-  CalendarAuthorizationError,
-  requireCalendarAuthorization,
-} from './calendarAuthorization';
-export type {
-  CalendarAuthorization,
-  CalendarAuthorizationRequest,
-} from './calendarAuthorization';
-export { CalendarRepositoryError } from './calendarRepository';
-export type {
+import type {
   CalendarEventDiagnosticsRepository,
-  CalendarEventListDiagnostic,
-  CalendarEventListDiagnosticReason,
-  CalendarEventListResult,
-  CalendarEventProjectionDiagnosticSummary,
   CalendarRepository,
-  CalendarRepositoryErrorCode,
-} from './calendarRepository';
-export { InMemoryCalendarRepository } from './inMemoryCalendarRepository';
-export type { InMemoryCalendarRepositoryOptions } from './inMemoryCalendarRepository';
+} from '@matrix-calendar-widget/calendar';
+
+export function isCalendarEventDiagnosticsRepository(
+  repository: CalendarRepository,
+): repository is CalendarRepository & CalendarEventDiagnosticsRepository {
+  return (
+    'listEventsWithDiagnostics' in repository &&
+    typeof repository.listEventsWithDiagnostics === 'function'
+  );
+}

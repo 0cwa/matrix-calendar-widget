@@ -46,9 +46,13 @@ fields and has no timezone until an application interprets it.
    map actions back to the source CalDAV resource. Malformed or unsupported
    recurrence remains opaque with a diagnostic; `RANGE=THISANDFUTURE` series
    stay hidden and diagnosed. CalDAV candidate REPORT bounds may be widened by
-   32 hours on each side for supported IANA zones in the 2026d data set, then
-   clipped to the exact viewer-local half-open interval in the widget. Do not
-   rely on Radicale honoring `CALDAV:timezone` or claim arbitrary custom
+   32 hours on each side for supported IANA zones in the 2026d data set. The
+   authenticated gateway receives the explicit viewer IANA timezone, projects
+   the candidates, and returns event details only for source resources with a
+   supported occurrence intersecting the requested half-open interval. It
+   returns count-and-reason diagnostics for opaque resources without their
+   event details or ETags. The widget may keep defensive clipping for display.
+   Do not rely on Radicale honoring `CALDAV:timezone` or claim arbitrary custom
    VTIMEZONE offsets. Projection never writes resources or collection timezone
    metadata.
 5. Recurrence editing and mainstream-client recurrence interoperability remain
@@ -72,9 +76,13 @@ diagnosed; recurrence editing is not implemented.
 
 The pinned Radicale 3.8.0.0 server ignores `CALDAV:timezone`. CalDAV candidate
 REPORT bounds are widened by 32 hours on each side without adding that
-unsupported query child; exact clipping remains in the widget. The window is
-sized for supported IANA 2026d zones and does not establish support for
-arbitrary custom VTIMEZONE offsets. The hosted Radicale contract includes
+unsupported query child. The authenticated gateway then clips decoded source
+resources against the requested interval using the explicit viewer timezone,
+and returns ETags only for resources with supported intersecting occurrences.
+Opaque resources contribute count-and-reason diagnostics without event
+details or ETags. The widget retains defensive clipping before rendering. The
+window is sized for supported IANA 2026d zones and does not establish support
+for arbitrary custom VTIMEZONE offsets. The hosted Radicale contract includes
 floating and DATE boundary candidates and checks that the read-only query
 leaves resource ETags and bodies unchanged.
 
@@ -96,10 +104,11 @@ event interpretation does not read or write that collection property.
 
 - Master and recurrence readers preserve floating wall time without binding
   it to the server's timezone or replacing it with a UTC value.
-- The typed master-event widget shows timed values in the viewer's local
-  timezone, resolves floating values there, and filters already-loaded events
-  by their interpreted instants in memory while preserving source zones and
-  floating values on writes.
+- The gateway returns only source resources with supported occurrences in the
+  explicitly requested viewer-local interval. The typed master-event widget
+  shows timed values in the viewer's local timezone, resolves floating values
+  there, and defensively filters returned events by their interpreted instants
+  while preserving source zones and floating values on writes.
 - Duration-based recurrence timing distinguishes nominal calendar weeks/days
   from exact time units and accounts for timezone transitions in the bounded
   display projection.

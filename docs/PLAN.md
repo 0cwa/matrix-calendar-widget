@@ -97,9 +97,11 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [x] Bundle generated IANA 2026d VTIMEZONE data with pinned provenance and
       lookup regressions (PR #121).
 - [x] Widen CalDAV candidate REPORT bounds by 32 hours on each side, then clip
-      to the exact viewer-local half-open interval in the widget. The pinned
-      Radicale 3.8.0.0 ignores `CALDAV:timezone`; do not send that unsupported
-      query child or claim custom VTIMEZONE offsets.
+      to the exact requested viewer-local half-open interval in the
+      authenticated gateway using the explicit viewer timezone. Keep defensive
+      widget clipping. The pinned Radicale 3.8.0.0 ignores `CALDAV:timezone`;
+      do not send that unsupported query child or claim custom VTIMEZONE
+      offsets.
 - [x] Add bounded, read-only RRULE/RDATE/EXDATE and detached timing/status
       override projection before both list and grid rendering. Keep occurrence
       view IDs distinct and map selection back to the source resource; leave
@@ -143,8 +145,12 @@ serialize without TZID or a UTC marker.
 
 The CalDAV client widens UTC candidate REPORT bounds by 32 hours on both sides
 because pinned Radicale 3.8.0.0 ignores `CALDAV:timezone`; it does not send that
-unsupported query child. Exact viewer-local half-open clipping then removes
-padding-only resources before list or grid display. The bound is for supported
+unsupported query child. The authenticated gateway receives the explicit
+viewer IANA timezone, projects the candidate resources against the requested
+half-open interval, and returns full event details and ETags only for supported
+intersecting resources. Opaque resources contribute count-and-reason
+diagnostics without event details or ETags. The widget keeps defensive
+viewer-local clipping before list or grid display. The bound is for supported
 IANA 2026d zones and does not establish support for custom VTIMEZONE offsets.
 The hosted contract checks floating/DATE boundary retrieval and unchanged
 resource ETags/bodies across the read-only query. Collection

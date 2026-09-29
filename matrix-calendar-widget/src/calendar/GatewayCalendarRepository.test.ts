@@ -234,13 +234,16 @@ describe('GatewayCalendarRepository', () => {
 
   it('loads visible events and reuses their ETag for updates', async () => {
     const fetchMock = mockFetch(
-      jsonResponse([{ event, etag: '"event-etag"' }]),
+      jsonResponse({
+        events: [{ event, etag: '"event-etag"' }],
+        diagnostics: [],
+      }),
       jsonResponse({
         event: { ...event, title: 'Updated' },
         etag: '"updated-etag"',
       }),
     );
-    const repository = createRepository(fetchMock);
+    const repository = createRepository(fetchMock, 'Europe/Stockholm');
 
     await expect(
       repository.listEvents([calendarId], {
@@ -258,6 +261,11 @@ describe('GatewayCalendarRepository', () => {
     expect(fetchMock.mock.calls[0][0]).toContain(
       `calendarId=${encodeURIComponent(calendarId)}`,
     );
+    expect(
+      new URL(fetchMock.mock.calls[0][0] as string).searchParams.get(
+        'timezone',
+      ),
+    ).toBe('Europe/Stockholm');
 
     const [, updateInit] = fetchMock.mock.calls[1];
     expect(updateInit?.method).toBe('PATCH');
@@ -269,24 +277,31 @@ describe('GatewayCalendarRepository', () => {
     );
   });
 
-  it('passes unsupported recurrence markers through from the gateway', async () => {
-    const unsupportedEvent: CalendarEvent = {
-      ...event,
-      recurrence: { rrule: 'FREQ=WEEKLY' },
-      unsupportedRecurrence: 'range-this-and-future',
-    };
+  it('passes count-only projection diagnostics through from the gateway', async () => {
     const repository = createRepository(
       mockFetch(
-        jsonResponse([{ event: unsupportedEvent, etag: '"range-etag"' }]),
+        jsonResponse({
+          events: [],
+          diagnostics: [{ reason: 'range-this-and-future', count: 1 }],
+        }),
       ),
     );
 
     await expect(
-      repository.listEvents([calendarId], {
+      repository.listEventsWithDiagnostics([calendarId], {
         start: '2026-09-24T00:00:00Z',
         end: '2026-10-01T00:00:00Z',
       }),
-    ).resolves.toEqual([unsupportedEvent]);
+    ).resolves.toEqual({
+      events: [],
+      diagnostics: [
+        {
+          calendarId,
+          reason: 'range-this-and-future',
+          count: 1,
+        },
+      ],
+    });
   });
 
   it('fetches an ETag before a mutation when the event was not loaded', async () => {
@@ -310,7 +325,10 @@ describe('GatewayCalendarRepository', () => {
 
   it('clears a stale ETag after conflict so a retry reloads current state', async () => {
     const fetchMock = mockFetch(
-      jsonResponse([{ event, etag: '"stale-etag"' }]),
+      jsonResponse({
+        events: [{ event, etag: '"stale-etag"' }],
+        diagnostics: [],
+      }),
       new Response('', { status: 409 }),
       jsonResponse({ event, etag: '"fresh-etag"' }),
       jsonResponse({
@@ -386,11 +404,15 @@ describe('GatewayCalendarRepository', () => {
   });
 });
 
-function createRepository(fetchImpl: typeof fetch): GatewayCalendarRepository {
+function createRepository(
+  fetchImpl: typeof fetch,
+  timezone = 'UTC',
+): GatewayCalendarRepository {
   return new GatewayCalendarRepository({
     baseUrl: 'https://widget-api.example.test',
     roomId: '!team:example.test',
     getAuthorizationHeader: async () => 'MX-Identity delegated',
+    getViewerTimezone: () => timezone,
     fetchImpl,
   });
 }

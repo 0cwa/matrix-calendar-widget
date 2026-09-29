@@ -20,6 +20,7 @@ export {
   type CalendarDiagnostics,
   type CalendarDiagnosticsRepository,
 } from './CalendarDiagnosticsRepository';
+export { isCalendarEventDiagnosticsRepository } from './CalendarEventListDiagnosticsRepository';
 export {
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
@@ -64,4 +65,7 @@ export {
   useCalendarEvents,
   useCalendars,
 } from './useCalendarQueries';
-export type { CalendarQueryState } from './useCalendarQueries';
+export type {
+  CalendarEventsQueryState,
+  CalendarQueryState,
+} from './useCalendarQueries';

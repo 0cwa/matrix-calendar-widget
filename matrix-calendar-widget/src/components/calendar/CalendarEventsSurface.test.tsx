@@ -127,6 +127,53 @@ describe('<CalendarEventsSurface />', () => {
     );
   });
 
+  it('shows gateway projection warnings without requiring event payloads', async () => {
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({
+        calendars,
+        events,
+      }),
+      {
+        listEventsWithDiagnostics: vi.fn().mockResolvedValue({
+          events,
+          diagnostics: [
+            {
+              calendarId: 'team',
+              reason: 'unsupported-timezone',
+              count: 1,
+            },
+          ],
+        }),
+      },
+    );
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Some events have recurrence or timezone data that the current renderer cannot safely display. Affected events: 1.',
+    );
+    expect(screen.getByText('Team planning')).toBeInTheDocument();
+    expect(screen.getByText('Dentist')).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: 'Team calendar' }),
+    );
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('Team planning')).not.toBeInTheDocument();
+    expect(screen.getByText('Dentist')).toBeInTheDocument();
+  });
+
   it.each([
     {
       label: 'VEVENT-only',

@@ -19,6 +19,9 @@ import {
   CalendarEventInput,
   CalendarEventPatch,
   CalendarTimeRange,
+  isCalendarTimezoneSupported,
+  projectCalendarEventOccurrences,
+  type CalendarEventListDiagnosticReason,
 } from '@matrix-calendar-widget/calendar';
 import {
   BadRequestException,
@@ -55,6 +58,7 @@ import { CalendarGatewayCalendarDto } from '../dto/CalendarGatewayCalendarDto';
 import { CalendarGatewayContextDto } from '../dto/CalendarGatewayContextDto';
 import { CalendarGatewayDiagnosticsDto } from '../dto/CalendarGatewayDiagnosticsDto';
 import { CalendarGatewayEventDto } from '../dto/CalendarGatewayEventDto';
+import { CalendarGatewayEventListDto } from '../dto/CalendarGatewayEventListDto';
 import { MatrixAuthGuard } from '../guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
@@ -448,8 +452,16 @@ export class CalendarGatewayController {
     @Query('calendarId') calendarId?: string,
     @Query('start') start?: string,
     @Query('end') end?: string,
-  ): Promise<CalendarGatewayEventDto[]> {
+    @Query('timezone') timezone?: string,
+  ): Promise<CalendarGatewayEventListDto> {
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
+    const viewerTimezone = this.requireQuery(timezone, 'timezone');
+    if (!isCalendarTimezoneSupported(viewerTimezone)) {
+      throw new BadRequestException({
+        code: 'unsupported-timezone',
+        message: 'timezone must be a supported IANA time zone',
+      });
+    }
     const scope = await this.eventScope(
       userContext,
       roomId,
@@ -468,8 +480,55 @@ export class CalendarGatewayController {
       const client = this.eventClient(userContext, openIdCredential);
       const codec = new ICalendarEventCodec();
       const resources = await client.listEvents(scope.calendarId, range);
-      return resources.map((resource) =>
-        this.eventDto(codec, scope.calendarId, resource),
+      const parsedResources = resources.map((resource) => ({
+        resource,
+        event: codec.parse(scope.calendarId, resource.href, resource.icalendar)
+          .event,
+      }));
+      const unsupportedResources = parsedResources.filter(
+        ({ event }) =>
+          event.unsupportedRecurrence === 'range-this-and-future',
+      );
+      const projectableResources = parsedResources.filter(
+        ({ event }) =>
+          event.unsupportedRecurrence !== 'range-this-and-future',
+      );
+      const projection = projectCalendarEventOccurrences(
+        projectableResources.map(({ event }) => event),
+        range,
+        viewerTimezone,
+      );
+      const inRangeResourceIds = new Set(
+        projection.occurrences.map(({ sourceEvent }) => sourceEvent.id),
+      );
+      const diagnosticCounts = new Map<
+        CalendarEventListDiagnosticReason,
+        number
+      >();
+      const addDiagnostic = (reason: CalendarEventListDiagnosticReason) => {
+        diagnosticCounts.set(reason, (diagnosticCounts.get(reason) ?? 0) + 1);
+      };
+
+      if (unsupportedResources.length > 0) {
+        diagnosticCounts.set(
+          'range-this-and-future',
+          unsupportedResources.length,
+        );
+      }
+      for (const diagnostic of projection.diagnostics) {
+        addDiagnostic(diagnostic.reason);
+      }
+
+      return new CalendarGatewayEventListDto(
+        parsedResources
+          .filter(({ event }) => inRangeResourceIds.has(event.id))
+          .map(
+            ({ resource, event }) =>
+              new CalendarGatewayEventDto(event, resource.etag),
+          ),
+        [...diagnosticCounts.entries()]
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([reason, count]) => ({ reason, count })),
       );
     });
   }

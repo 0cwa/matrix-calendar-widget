@@ -23,6 +23,34 @@ import {
   CalendarId,
   CalendarTimeRange,
 } from '../model';
+import type { CalendarEventProjectionDiagnosticReason } from '../utils/calendarEventOccurrenceProjection';
+
+export type CalendarEventListDiagnosticReason =
+  | CalendarEventProjectionDiagnosticReason
+  | 'range-this-and-future';
+
+/** A count-only warning that does not identify or expose a source event. */
+export type CalendarEventProjectionDiagnosticSummary = {
+  reason: CalendarEventListDiagnosticReason;
+  count: number;
+};
+
+export type CalendarEventListDiagnostic = CalendarEventProjectionDiagnosticSummary & {
+  calendarId: CalendarId;
+};
+
+export type CalendarEventListResult = {
+  events: CalendarEvent[];
+  diagnostics: CalendarEventListDiagnostic[];
+};
+
+/** Optional repository capability for APIs that suppress opaque resources. */
+export interface CalendarEventDiagnosticsRepository {
+  listEventsWithDiagnostics(
+    calendarIds: CalendarId[],
+    range: CalendarTimeRange,
+  ): Promise<CalendarEventListResult>;
+}
 
 export type CalendarRepositoryErrorCode =
   | 'calendar-not-found'
