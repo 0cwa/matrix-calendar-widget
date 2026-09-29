@@ -8,7 +8,7 @@ This is the short-lived execution snapshot. `docs/PLAN.md` is the durable milest
 
 **M3 is complete. M4 description and color editing, mixed-collection compatibility, manager-only CalDAV URL/copy diagnostics, and hiding of VJOURNAL-only/VTODO-only collections are implemented; issue #5 remains open for other collection-management work, and collection timezone editing is deferred. PRs #128 and #130 merged bounded read-only recurrence projection/range clipping and the first supported whole-series RRULE create/edit slice. M5 recurrence work continues in bounded slices.**
 
-ADR010 / PR #104 selected a mixed principal model: widget calendars remain user-scoped, while the bot MVP uses room-owned calendars under an application principal. Room-owned reads and writes remain blocked until a non-password server-to-Radicale authentication path for that principal is defined and tested. ADR009's user OpenID delegation does not provide application-principal credentials. No etke-managed host deployment has been verified.
+ADR014/ADR015 define the mixed principal and static room-binding contracts. This M6 foundation validates server-configured bindings and provides fail-closed membership/power policy. Existing user-principal room-context gateway routes remain active and enforce membership/power checks while making CalDAV requests as the authenticated user. The new static-binding/application-principal path is not wired to the gateway or CalDAV; room-owned reads and writes remain blocked until its non-password Radicale path and deployment isolation are defined and tested. ADR009's user OpenID delegation does not provide application-principal credentials. No etke-managed host deployment has been verified.
 
 ## Landed
 
@@ -94,7 +94,7 @@ These are the user's delegated CalDAV identity path. They do not establish crede
 
 ### M6 — Room-owned application principal
 
-ADR010 / PR #104 selects the room-owned application-principal model, but room-principal access is not ready to use. Define and test a non-password server-to-Radicale authentication path for the application principal. Then implement explicit room-to-calendar binding and per-operation membership, power, and policy checks. Matrix event sender data is authorization/audit context, not OpenID or CalDAV identity proof. Issue #7 remains open. Start reminder recipients with permission-checked room-wide notifications using standard `m.mentions.room: true`; defer email attendee registration until members can verify and consent to share an address. Per-user bot calendars are deferred until a trusted actor-token path is independently defined and tested.
+ADR014 / ADR015 select the room-owned application-principal model and operator-managed static room binding. This slice adds binding validation/resolution and a fail-closed membership/power policy service. Existing user-principal room-context routes remain active, enforce joined-membership/power checks, and make CalDAV requests as the authenticated user; the static-binding/application-principal gateway and CalDAV path remains unwired. Room-principal access still requires a non-password server-to-Radicale authentication path and deployment isolation. Matrix event sender data is authorization/audit context, not OpenID or CalDAV identity proof. Issue #7 remains open. Start reminder recipients with permission-checked room-wide notifications using standard `m.mentions.room: true`; defer email attendee registration until members can verify and consent to share an address. Per-user bot calendars are deferred until a trusted actor-token path is independently defined and tested.
 
 ### M7 — Data commands
 
@@ -113,7 +113,7 @@ Issue #29 remains open for a repository administrator to enable and verify the d
 1. Keep M4 timezone editing deferred until its CalDAV compatibility boundary is established.
 2. Advance M5 through bounded recurrence and round-trip slices, adding DST and named-timezone regressions with each relevant behavior.
 3. In parallel, establish a writable source/release path for #48, then complete #45 against the tested user-delegation mode.
-4. Separately define/test application-principal Radicale authentication and implement the ADR010 room binding and membership/power checks for M6.
+4. Separately define/test application-principal Radicale authentication and deployment isolation, then wire the ADR014/ADR015 binding and membership/power foundation into room operations.
 5. Build M7 data commands on those M6 authorization contracts; help is already available.
 6. Verify an operator-run deployment on the etke-managed host after the host-specific runtime contract is known.
 7. Ask a repository administrator to complete #29 branch protection.

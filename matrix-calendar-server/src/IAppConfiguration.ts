@@ -14,12 +14,15 @@
  * limitations under the License.
  */
 
+import { RoomCalendarBinding } from './model/IRoomCalendarBinding';
+
 export interface IAppConfiguration {
   port?: string | number;
 
   access_token: string;
   homeserver_url: string;
   radicale_url?: string;
+  room_calendar_bindings: readonly RoomCalendarBinding[];
   reminder_database_url?: string;
   reminder_database_tls_mode?: 'verify-full' | 'trusted-private-network';
 

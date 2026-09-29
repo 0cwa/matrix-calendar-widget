@@ -39,12 +39,38 @@ The gateway and bot are initially one deployable service. Split them only when s
 
 ## Principal and authorization boundary
 
-[ADR010](./adrs/adr010-mixed-calendar-principal-model.md) defines two distinct ownership paths:
+[ADR014](./adrs/adr014-split-widget-and-bot-calendar-principals.md) and
+[ADR015](./adrs/adr015-server-managed-room-calendar-bindings.md) define two
+distinct ownership paths and the initial room-target contract:
 
-- **Personal widget calendars** remain associated with the authenticated Matrix user. The gateway validates that user's short-lived OpenID assertion and, once the external plugin work in [#48](https://github.com/0cwa/matrix-calendar-widget/issues/48) and final real-server contract in [#45](https://github.com/0cwa/matrix-calendar-widget/issues/45) are complete, uses only the corresponding user-scoped CalDAV delegation contract.
-- **Room-owned bot calendars** belong to the application principal and require an explicit server-side room-to-calendar binding. Room-owned reads and writes remain blocked until the application principal's non-password Radicale authentication path is defined and tested and explicit binding and per-operation authorization checks are implemented. ADR009's user-scoped OpenID delegation does not provide these application-principal credentials.
+- **Personal widget calendars** remain associated with the authenticated Matrix
+  user. The gateway validates that user's short-lived OpenID assertion and,
+  after the external plugin work in [#48](https://github.com/0cwa/matrix-calendar-widget/issues/48)
+  and final real-server contract in [#45](https://github.com/0cwa/matrix-calendar-widget/issues/45),
+  uses the corresponding user-scoped CalDAV delegation contract.
+- **Room-owned calendars** are planned to belong to the application principal.
+  Their path will resolve a canonical Matrix room ID through an
+  operator-managed static binding. The binding resolver and application-
+  principal room path are foundations only; that static-binding path is not
+  wired to the gateway or CalDAV until the application's non-password Radicale
+  authentication path and real-server contract are defined and tested.
+  ADR009's user-scoped OpenID delegation does not provide application-principal
+  credentials.
 
-When the room-owned path is enabled, identity proof and authorization are separate. Widget requests require validated OpenID, current room membership, configured power policy, and a binding for the requested calendar. Bot commands recheck the sender's membership/power and the same explicit binding for each operation. A Matrix sender is authorization and audit context; it does not prove OpenID identity or CalDAV identity. Per-user bot calendars remain deferred.
+Existing room-context gateway routes remain active and make CalDAV requests
+under the authenticated requesting user's principal. They enforce current
+joined-room membership and action-specific power through
+`MatrixCalendarAuthorizationFactory`; authorization lookup failures deny the
+request. The policy foundation in this slice makes those checks fail closed.
+
+Identity proof and authorization are separate. Existing widget room-context
+requests validate the requesting user's identity and separately check current
+room membership and action-specific power. Future application-principal widget
+requests must also check the static binding for the requested calendar. Bot
+commands must recheck sender membership/power and that binding for each
+operation. A Matrix sender is authorization and audit context; it does not
+prove OpenID identity or CalDAV identity. Per-user bot calendars remain
+deferred.
 
 ## Source-of-truth boundaries
 
@@ -56,7 +82,7 @@ When the room-owned path is enabled, identity proof and authorization are separa
 | organizer/attendees            | iCalendar object                                                    |
 | VALARM                         | iCalendar object                                                    |
 | calendar display properties    | CalDAV properties where supported                                   |
-| Matrix room ↔ calendar binding | explicit server-side gateway state; M6 work remains open            |
+| Matrix room ↔ calendar binding | operator-managed server configuration (ADR015)                      |
 | Matrix reminder recipients     | planned gateway sidecar state, separate from iCalendar              |
 | reminder delivery history      | app-owned PostgreSQL store when enabled                             |
 | Matrix permissions             | room state plus configured gateway policy for room-owned operations |
@@ -104,18 +130,49 @@ interface CalendarRepository {
 
 The exact TypeScript API is not frozen by this document. The important rule is that UI components do not speak CalDAV directly and server business logic does not depend on FullCalendar models.
 
-## Intended personal widget authentication flow
+## Authentication and room-target authorization
 
 1. Widget asks the host client for Matrix identity/OpenID credentials.
 2. Widget exchanges the short-lived assertion with the calendar gateway.
 3. Gateway validates the assertion against the Matrix homeserver.
-4. Gateway resolves the asserted Matrix user. Once ADR009-compatible plugin support is available, it performs the user's personal CalDAV operation server-side through user-scoped delegation.
-5. For room-scoped operations, the gateway separately checks current room membership, configured power policy, and the explicit room-to-calendar binding. This room-owned path is not enabled until its application-principal authentication prerequisite is complete.
-6. Browser never handles the user's Matrix password or long-lived CalDAV credentials.
+4. Personal operations use only the asserted user's server-side delegation
+   after ADR009-compatible plugin support is available.
+5. A future room-target operation separately checks current membership,
+   action-specific power, and the configured room-to-calendar binding before
+   any CalDAV discovery or access.
+6. Browser never handles Matrix passwords, bot credentials, or long-lived
+   CalDAV credentials.
 
 ## Permissions
 
-Personal widget ownership is user-scoped. Room-owned operations require an explicit room-to-calendar binding and current membership plus the configured power-level policy for every operation. The binding and room-owned authorization path remain M6 work; exact policy defaults require implementation validation. The UI is never the authorization boundary.
+Personal widget ownership is user-scoped. Room policy requires current joined
+membership for all actions. Joined members may list/read; event create/update/
+delete requires the dedicated calendar event-write power, then `events_default`,
+then Matrix's default of 0. Calendar-management actions require the dedicated
+calendar-manage power, then `state_default`, then Matrix's default of 50.
+Only a genuine missing power-level event (`M_NOT_FOUND`) uses Matrix defaults;
+permission, network, server, or other lookup failures deny the action. The
+membership/power policy is used by existing user-principal room-context routes;
+the static-binding/application-principal route is not wired to CalDAV. The UI
+is never the authorization boundary.
+
+## Room/calendar binding
+
+The initial binding source is the server-only `ROOM_CALENDAR_BINDINGS` JSON
+array. Each entry maps one canonical Matrix room ID to one app-owned calendar
+identifier, and each calendar identifier can map to only one room. The server
+validates the entire array before resolution so duplicate entries cannot be
+silently overwritten. Missing, malformed, duplicate, ambiguous, or
+request-mismatched bindings fail with opaque errors. A browser-supplied href or
+URL cannot select or create a binding. Room members cannot change bindings;
+collection create/delete/rename and room rebinding remain operator-managed.
+
+The resolver is a pure in-memory function and performs no network or CalDAV
+I/O. Application-principal room-owned access remains blocked on #48/#45 and
+deployment isolation: Radicale `owner_only` grants the application principal
+access to its whole home, so that home must stay within one trusted
+organizational boundary or use equivalent per-room isolation. Existing
+user-principal room-context routes are separate and remain active.
 
 ## Reminder delivery
 
