@@ -48,21 +48,29 @@ distinct ownership paths and the initial room-target contract:
   after the external plugin work in [#48](https://github.com/0cwa/matrix-calendar-widget/issues/48)
   and final real-server contract in [#45](https://github.com/0cwa/matrix-calendar-widget/issues/45),
   uses the corresponding user-scoped CalDAV delegation contract.
-- **Room-owned calendars** belong to the application principal. The server
-  resolves a canonical Matrix room ID through an operator-managed static
-  binding and authorizes the current room member for the requested action.
-  The binding resolver and membership/power policy are foundations only;
-  gateway/controller wiring and room CalDAV access remain disabled until the
-  application's non-password Radicale authentication path and real-server
-  contract are defined and tested. ADR009's user-scoped OpenID delegation does
-  not provide application-principal credentials.
+- **Room-owned calendars** are planned to belong to the application principal.
+  Their path will resolve a canonical Matrix room ID through an
+  operator-managed static binding. The binding resolver and application-
+  principal room path are foundations only; that static-binding path is not
+  wired to the gateway or CalDAV until the application's non-password Radicale
+  authentication path and real-server contract are defined and tested.
+  ADR009's user-scoped OpenID delegation does not provide application-principal
+  credentials.
 
-Identity proof and authorization are separate. Future widget room requests
-must validate OpenID, current room membership, action-specific power, and the
-binding for the requested calendar. Bot commands must recheck sender
-membership/power and the same binding for each operation. A Matrix sender is
-authorization and audit context; it does not prove OpenID identity or CalDAV
-identity. Per-user bot calendars remain deferred.
+Existing room-context gateway routes remain active and make CalDAV requests
+under the authenticated requesting user's principal. They enforce current
+joined-room membership and action-specific power through
+`MatrixCalendarAuthorizationFactory`; authorization lookup failures deny the
+request. The policy foundation in this slice makes those checks fail closed.
+
+Identity proof and authorization are separate. Existing widget room-context
+requests validate the requesting user's identity and separately check current
+room membership and action-specific power. Future application-principal widget
+requests must also check the static binding for the requested calendar. Bot
+commands must recheck sender membership/power and that binding for each
+operation. A Matrix sender is authorization and audit context; it does not
+prove OpenID identity or CalDAV identity. Per-user bot calendars remain
+deferred.
 
 ## Source-of-truth boundaries
 
@@ -144,8 +152,9 @@ then Matrix's default of 0. Calendar-management actions require the dedicated
 calendar-manage power, then `state_default`, then Matrix's default of 50.
 Only a genuine missing power-level event (`M_NOT_FOUND`) uses Matrix defaults;
 permission, network, server, or other lookup failures deny the action. The
-policy service is not yet wired to a room CalDAV route. The UI is never the
-authorization boundary.
+membership/power policy is used by existing user-principal room-context routes;
+the static-binding/application-principal route is not wired to CalDAV. The UI
+is never the authorization boundary.
 
 ## Room/calendar binding
 
@@ -159,10 +168,11 @@ URL cannot select or create a binding. Room members cannot change bindings;
 collection create/delete/rename and room rebinding remain operator-managed.
 
 The resolver is a pure in-memory function and performs no network or CalDAV
-I/O. Actual room-target access remains blocked on #48/#45 and deployment
-isolation: Radicale `owner_only` grants the application principal access to its
-whole home, so that home must stay within one trusted organizational boundary
-or use equivalent per-room isolation.
+I/O. Application-principal room-owned access remains blocked on #48/#45 and
+deployment isolation: Radicale `owner_only` grants the application principal
+access to its whole home, so that home must stay within one trusted
+organizational boundary or use equivalent per-room isolation. Existing
+user-principal room-context routes are separate and remain active.
 
 ## Reminder delivery
 

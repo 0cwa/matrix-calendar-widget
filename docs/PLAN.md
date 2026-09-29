@@ -207,8 +207,10 @@ DST regression or recurrence-editing criteria above.
   - [x] Define the operator-managed static room-to-calendar contract (ADR014/
         ADR015) and validate bindings in server configuration before lookup.
   - [x] Add a pure room-binding resolver and joined-membership/power policy
-        service that denies on lookup errors; no gateway or CalDAV path is
-        enabled by this foundation.
+        service that denies on lookup errors. Existing user-principal room-
+        context routes remain active and enforce these checks; this foundation
+        does not wire the static-binding/application-principal path to the
+        gateway or CalDAV.
 - [ ] Team/member selector using the widget user directory/member APIs.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
 - [ ] Selected-user mentions.
