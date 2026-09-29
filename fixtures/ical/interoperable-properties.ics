@@ -1,0 +1,60 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Matrix Calendar Widget//Interoperable property fixture//EN
+BEGIN:VEVENT
+UID:interoperable-properties@example.test
+DTSTAMP:20260920T120000Z
+CREATED:20260919T080000Z
+LAST-MODIFIED:20260921T101500Z
+SEQUENCE:7
+DTSTART;TZID=Europe/Stockholm:20260923T090000
+DTEND;TZID=Europe/Stockholm:20260923T100000
+RRULE:FREQ=DAILY;COUNT=3
+SUMMARY:Property preservation fixture
+ORGANIZER;CN=Organizer Example;LANGUAGE=en;DIR="https://directory.example.t
+ est/users/organizer";SENT-BY="mailto:assistant@example.test":mailto:organi
+ zer@example.test
+ATTENDEE;CN=Alice Example;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE;
+ CUTYPE=INDIVIDUAL:mailto:alice@example.test
+ATTENDEE;CN=Planning Group;ROLE=OPT-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=
+ FALSE;MEMBER="mailto:planning@example.test":mailto:bob@example.test
+ATTACH;VALUE=URI;FMTTYPE=application/pdf:https://files.example.test/agenda.
+ pdf
+ATTACH;VALUE=BINARY;ENCODING=BASE64;FMTTYPE=application/octet-stream:YWJjMT
+ Iz
+CONFERENCE;VALUE=URI;FEATURE=AUDIO;LABEL=Main%20room;LANGUAGE=en:https://me
+ et.example.test/room/42
+CONFERENCE;VALUE=URI;FEATURE=CHAT;LABEL=Text%20room;LANGUAGE=sv:im:matrix.o
+ rg/#room:example.org
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER;RELATED=START:-PT15M
+DESCRIPTION;LANGUAGE=en:First reminder
+REPEAT:2
+DURATION:PT5M
+X-ALARM-METADATA;X-SOURCE=client-a:keep-first
+END:VALARM
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER:-PT1H
+DESCRIPTION:Second reminder
+X-ALARM-METADATA;X-SOURCE=client-b:keep-second
+END:VALARM
+BEGIN:VALARM
+ACTION:EMAIL
+TRIGGER:-PT30M
+SUMMARY:Email reminder
+DESCRIPTION:This action is preserved but never executed
+ATTENDEE;CN=Alice Example:mailto:alice@example.test
+ATTENDEE;CN=Bob Example:mailto:bob@example.test
+ATTACH;VALUE=URI;FMTTYPE=application/pdf:https://files.example.test/reminde
+ r.pdf
+END:VALARM
+BEGIN:VALARM
+ACTION:AUDIO
+TRIGGER:-PT10M
+ATTACH;VALUE=URI;FMTTYPE=audio/mpeg:https://files.example.test/reminder.mp3
+X-ALARM-METADATA;X-SOURCE=client-d:unsupported-action
+END:VALARM
+END:VEVENT
+END:VCALENDAR
