@@ -23,7 +23,8 @@
       "close": "Close",
       "delete": "Delete",
       "edit": "Edit",
-      "location": "Location"
+      "location": "Location",
+      "seriesOccurrenceActions": "This is one occurrence of a recurring series. Editing or deleting applies to the whole series."
     },
     "editor": {
       "allDay": "All day",

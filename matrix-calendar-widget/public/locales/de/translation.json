@@ -23,7 +23,8 @@
       "close": "Schließen",
       "delete": "Löschen",
       "edit": "Bearbeiten",
-      "location": "Ort"
+      "location": "Ort",
+      "seriesOccurrenceActions": "Dies ist ein einzelner Termin einer Terminserie. Wenn du ihn bearbeitest oder löschst, betrifft das die gesamte Serie."
     },
     "editor": {
       "allDay": "Ganztägig",
