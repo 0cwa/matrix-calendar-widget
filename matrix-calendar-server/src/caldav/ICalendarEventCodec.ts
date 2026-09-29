@@ -32,6 +32,7 @@ import {
   CalendarId,
 } from '@matrix-calendar-widget/calendar';
 import ICAL from 'ical.js';
+import { hasUnsupportedTimezoneRules } from './ICalendarTimezoneProjectionSafety';
 
 export type EncodedICalendarEvent = {
   event: CalendarEvent;
@@ -63,6 +64,12 @@ export class ParsedICalendarEvent {
   ) {}
 
   applyPatch(patch: CalendarEventPatch): EncodedICalendarEvent {
+    if (this.event.unsupportedTimezone && hasOwn(patch, 'timing')) {
+      throw new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Timing edits are not supported for events with unsupported timezone rules',
+      );
+    }
     if (hasOwn(patch, 'recurrence')) {
       throw new ICalendarEventCodecError(
         'unsupported-patch',
@@ -221,6 +228,7 @@ export class ICalendarEventCodec {
     const timing = readTiming(vevent);
     const recurrence = readRecurrence(calendar, vevent, uid);
     const unsupportedRecurrence = readUnsupportedRecurrence(calendar, uid);
+    const unsupportedTimezone = hasUnsupportedTimezoneRules(calendar, uid);
 
     const event: CalendarEvent = {
       id: eventId,
@@ -237,6 +245,7 @@ export class ICalendarEventCodec {
       priority: numberValue(vevent.getFirstPropertyValue('priority')),
       recurrence,
       ...(unsupportedRecurrence ? { unsupportedRecurrence } : {}),
+      ...(unsupportedTimezone ? { unsupportedTimezone: true } : {}),
     };
 
     return new ParsedICalendarEvent(calendar, event);

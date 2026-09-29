@@ -288,7 +288,7 @@ describe('<CalendarEventsSurface />', () => {
     },
   );
 
-  it('opens the source resource when a projected recurrence is selected', async () => {
+  it('shows the selected recurrence time while editing and deleting its source series', async () => {
     const recurringEvent: CalendarEvent = {
       ...events[0],
       id: 'https://radicale.example.test/team/planning.ics',
@@ -300,13 +300,14 @@ describe('<CalendarEventsSurface />', () => {
       calendars: [{ ...calendars[0], readOnly: false }],
       events: [recurringEvent],
     });
+    const updateEvent = vi.spyOn(repository, 'updateEvent');
     const deleteEvent = vi.spyOn(repository, 'deleteEvent');
 
     render(
       <CalendarEventsSurface
         filters={{
           startDate: '2026-09-25T00:00:00Z',
-          endDate: '2026-09-25T23:59:59.999Z',
+          endDate: '2026-09-26T23:59:59.999Z',
         }}
         onShowMore={() => undefined}
         view="list"
@@ -314,10 +315,38 @@ describe('<CalendarEventsSurface />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    await userEvent.click(await screen.findByText('Planning series'));
+    const occurrences = await screen.findAllByText('Planning series');
+    expect(occurrences).toHaveLength(2);
+    await userEvent.click(occurrences[1]);
     const details = screen.getByRole('dialog');
+    expect(details).toHaveTextContent('September 26, 2026 · All day');
+    expect(details).toHaveTextContent(
+      'This is one occurrence of a recurring series. Editing or deleting applies to the whole series.',
+    );
+
     await userEvent.click(
-      within(details).getByRole('button', { name: 'Delete' }),
+      within(details).getByRole('button', { name: 'Edit' }),
+    );
+    const editor = screen.getByRole('dialog', { name: 'Edit event' });
+    await userEvent.clear(within(editor).getByLabelText('Title'));
+    await userEvent.type(
+      within(editor).getByLabelText('Title'),
+      'Updated planning series',
+    );
+    await userEvent.click(within(editor).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(updateEvent).toHaveBeenCalledWith(
+        'team',
+        'https://radicale.example.test/team/planning.ics',
+        expect.objectContaining({ title: 'Updated planning series' }),
+      ),
+    );
+
+    await userEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', {
+        name: 'Delete',
+      }),
     );
     const confirmation = screen.getByRole('dialog', { name: 'Delete event' });
     expect(confirmation).toHaveTextContent(

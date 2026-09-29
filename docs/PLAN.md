@@ -104,8 +104,9 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
       offsets.
 - [x] Add bounded, read-only RRULE/RDATE/EXDATE and detached timing/status
       override projection before both list and grid rendering. Keep occurrence
-      view IDs distinct and map selection back to the source resource; leave
-      malformed/unsupported data opaque with diagnostics and keep
+      view IDs distinct and show the selected occurrence's timing while
+      retaining source resource identity for series-level reads and mutations;
+      leave malformed/unsupported data opaque with diagnostics and keep
       `RANGE=THISANDFUTURE` hidden.
 - [ ] RRULE editor based on inherited NeoDateFix recurrence UI.
 - [ ] RDATE / EXDATE editing.
@@ -134,12 +135,20 @@ The widget displays timed events in the viewer's local timezone:
 floating times are interpreted there, while named-TZID and UTC times keep their
 instant and are converted from their saved zone. This covers details, lists,
 visible and accessible calendar-cell labels, grid sorting, and the in-memory
-range filter. Projection occurrence IDs map selection back to their source
-resource; unsupported or malformed recurrence is hidden with a diagnostic.
-The bounded projector resolves source and viewer IANA timezones only when their
-exact identifiers exist in the bundled 2026d VTIMEZONE data; unsupported TZIDs
-and arbitrary custom VTIMEZONE definitions remain opaque with a diagnostic.
-The editor preserves each endpoint's local value and kind on timing edits;
+range filter. Projection occurrence IDs keep selected detail timing separate
+from their source resource; edit and delete actions remain series-level until
+instance-edit semantics are implemented. Unsupported or malformed recurrence
+is hidden with a diagnostic. The bounded projector resolves source and viewer
+IANA timezones only when their exact identifiers exist in the bundled 2026d
+VTIMEZONE data. Any embedded definition used by the master or a same-UID
+override must match the bundle's ordered STANDARD/DAYLIGHT transition rules,
+DTSTART, exact-second offsets, RRULE, and RDATE; known non-transition metadata
+is ignored. Missing definitions retain the project's bundled-ID fallback.
+Unknown, duplicate, malformed, divergent, or unprovable definitions stay
+opaque before projection and contribute count-and-reason diagnostics only,
+with no event details or ETags. The original resource remains available for
+round-trip preservation, and timing edits are rejected while timezone rules
+are unsupported. The editor preserves each endpoint's local value and kind on timing edits;
 non-timing edits preserve the original resource, and floating timing edits
 serialize without TZID or a UTC marker.
 

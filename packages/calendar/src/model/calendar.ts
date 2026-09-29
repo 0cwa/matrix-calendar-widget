@@ -132,6 +132,9 @@ export type CalendarEventRecurrence = {
 /** Recurrence semantics retained by CalDAV but not safely projected by UI. */
 export type CalendarEventUnsupportedRecurrence = 'range-this-and-future';
 
+/** Read-only marker for timezone semantics that are unsafe to project. */
+export type CalendarEventUnsupportedTimezone = true;
+
 export type Calendar = {
   id: CalendarId;
   name: string;
@@ -164,11 +167,13 @@ export type CalendarEvent = {
   recurrence?: CalendarEventRecurrence;
   /** Read-only warning marker derived from recurrence data in the resource. */
   unsupportedRecurrence?: CalendarEventUnsupportedRecurrence;
+  /** Read-only marker for an unknown or conflicting embedded VTIMEZONE. */
+  unsupportedTimezone?: CalendarEventUnsupportedTimezone;
 };
 
 export type CalendarEventInput = Omit<
   CalendarEvent,
-  'id' | 'calendarId' | 'unsupportedRecurrence'
+  'id' | 'calendarId' | 'unsupportedRecurrence' | 'unsupportedTimezone'
 >;
 
 /**
@@ -176,7 +181,14 @@ export type CalendarEventInput = Omit<
  * the stable iCalendar UID.
  */
 export type CalendarEventPatch = Partial<
-  Omit<CalendarEvent, 'id' | 'calendarId' | 'uid' | 'unsupportedRecurrence'>
+  Omit<
+    CalendarEvent,
+    | 'id'
+    | 'calendarId'
+    | 'uid'
+    | 'unsupportedRecurrence'
+    | 'unsupportedTimezone'
+  >
 >;
 
 export type CalendarTimeRange = {

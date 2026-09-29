@@ -669,6 +669,12 @@ describe('projectCalendarEventOccurrences', () => {
       id: 'malformed',
       recurrence: { rrule: 'FREQ=DAILY;RSCALE=GREGORIAN' },
     });
+    const divergentTimezone = timedEvent({
+      id: 'divergent-timezone',
+      start: '2026-10-25T03:15:00',
+      end: '2026-10-25T03:45:00',
+      unsupportedTimezone: true,
+    });
     const unsupportedTimezone: CalendarEvent = {
       id: 'unsupported-timezone',
       calendarId: 'team',
@@ -690,7 +696,7 @@ describe('projectCalendarEventOccurrences', () => {
     };
 
     const result = projectCalendarEventOccurrences(
-      [unsupported, malformed, unsupportedTimezone],
+      [unsupported, malformed, unsupportedTimezone, divergentTimezone],
       stockholmRange,
       'Europe/Stockholm',
     );
@@ -700,6 +706,7 @@ describe('projectCalendarEventOccurrences', () => {
       { sourceEvent: unsupported, reason: 'invalid-recurrence' },
       { sourceEvent: malformed, reason: 'invalid-recurrence' },
       { sourceEvent: unsupportedTimezone, reason: 'unsupported-timezone' },
+      { sourceEvent: divergentTimezone, reason: 'unsupported-timezone' },
     ]);
   });
 });
@@ -710,12 +717,14 @@ function timedEvent({
   end = '2026-10-23T10:00:00',
   recurrence,
   unsupportedRecurrence,
+  unsupportedTimezone,
 }: {
   id?: string;
   start?: string;
   end?: string;
   recurrence?: CalendarEvent['recurrence'];
   unsupportedRecurrence?: CalendarEvent['unsupportedRecurrence'];
+  unsupportedTimezone?: CalendarEvent['unsupportedTimezone'];
 } = {}): CalendarEvent {
   return {
     id,
@@ -729,6 +738,7 @@ function timedEvent({
     },
     recurrence,
     unsupportedRecurrence,
+    unsupportedTimezone,
   };
 }
 

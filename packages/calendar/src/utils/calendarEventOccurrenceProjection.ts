@@ -178,6 +178,9 @@ function projectEvent(
   rangeEnd: DateTime,
   viewerTimezone: string,
 ): ProjectedCalendarEventOccurrence[] {
+  if (sourceEvent.unsupportedTimezone) {
+    throw projectionError('unsupported-timezone');
+  }
   if (sourceEvent.unsupportedRecurrence === 'range-this-and-future') {
     throw projectionError('invalid-recurrence');
   }

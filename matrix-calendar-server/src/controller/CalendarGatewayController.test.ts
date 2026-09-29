@@ -22,7 +22,9 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
+import fs from 'fs';
 import fetch from 'jest-fetch-mock';
+import path from 'path';
 import { IAppConfiguration } from '../IAppConfiguration';
 import {
   CalDavDiscoveryError,
@@ -980,6 +982,80 @@ describe('CalendarGatewayController', () => {
     expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
   });
 
+  it('projects an embedded VTIMEZONE that exactly matches bundled IANA rules', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const etag = '"bundled-timezone-etag"';
+    fetch.mockResponseOnce(
+      multistatus(
+        eventResourceResponse(
+          '/alice/team/bundled-timezone.ics',
+          etag,
+          readFixture('vtimezone-stockholm-bundled-transition.ics'),
+        ),
+      ),
+      { status: 207 },
+    );
+
+    const response = await createController().listEvents(
+      userContext,
+      openIdCredential,
+      roomId,
+      calendarId,
+      '2026-10-25T02:00:00Z',
+      '2026-10-25T03:00:00Z',
+      'UTC',
+    );
+
+    expect(response.events).toEqual([
+      {
+        event: expect.objectContaining({
+          id: 'https://radicale.example.test/alice/team/bundled-timezone.ics',
+          title: 'Stockholm transition projection fixture',
+        }),
+        etag,
+      },
+    ]);
+    expect(response.diagnostics).toEqual([]);
+  });
+
+  it('returns only a count diagnostic for a divergent recognized VTIMEZONE near its transition', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    fetch.mockResponseOnce(
+      multistatus(
+        eventResourceResponse(
+          '/alice/team/divergent-timezone.ics',
+          '"divergent-timezone-etag"',
+          readFixture('vtimezone-stockholm-divergent-transition.ics'),
+        ),
+      ),
+      { status: 207 },
+    );
+
+    const response = await createController().listEvents(
+      userContext,
+      openIdCredential,
+      roomId,
+      calendarId,
+      '2026-10-25T01:00:00Z',
+      '2026-10-25T02:00:00Z',
+      'UTC',
+    );
+
+    expect(response).toEqual({
+      events: [],
+      diagnostics: [{ reason: 'unsupported-timezone', count: 1 }],
+    });
+    const responseText = JSON.stringify(response);
+    expect(responseText).not.toContain(
+      'Stockholm transition projection fixture',
+    );
+    expect(responseText).not.toContain('divergent-timezone-etag');
+    expect(responseText).not.toContain('Europe/Stockholm');
+    expect(responseText).not.toContain('VTIMEZONE');
+  });
+
   it('keeps a recurring source resource when only an occurrence intersects', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';
@@ -1466,6 +1542,13 @@ DTEND:20260924T090000Z
 SUMMARY:${title}
 ${extraProperty ? `${extraProperty}\n` : ''}END:VEVENT
 END:VCALENDAR`;
+}
+
+function readFixture(name: string): string {
+  return fs.readFileSync(
+    path.resolve(__dirname, '../../../fixtures/ical', name),
+    'utf8',
+  );
 }
 
 function rangeOverrideEventIcs(): string {

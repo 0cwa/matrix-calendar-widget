@@ -58,6 +58,7 @@ describe('ICalendarEventCodec', () => {
       categories: ['TEAM', 'PLANNING'],
       priority: 5,
     });
+    expect(parsed.event.unsupportedTimezone).toBeUndefined();
   });
 
   it('round-trips all-day DATE timing while patching supported fields', () => {
@@ -111,6 +112,91 @@ describe('ICalendarEventCodec', () => {
 
     const reparsed = codec.parse('team', 'vtimezone.ics', encoded.icalendar);
     expect(reparsed.event.timing).toEqual(parsed.event.timing);
+  });
+
+  it('accepts an embedded VTIMEZONE that matches bundled IANA transition rules', () => {
+    const parsed = codec.parse(
+      'team',
+      'vtimezone-stockholm-bundled-transition.ics',
+      fixture('vtimezone-stockholm-bundled-transition.ics'),
+    );
+
+    expect(parsed.event.unsupportedTimezone).toBeUndefined();
+  });
+
+  it('keeps a divergent recognized VTIMEZONE opaque and preserves its source rules', () => {
+    const source = fixture('vtimezone-stockholm-divergent-transition.ics');
+    const parsed = codec.parse(
+      'team',
+      'vtimezone-stockholm-divergent-transition.ics',
+      source,
+    );
+
+    expect(parsed.event.unsupportedTimezone).toBe(true);
+    expect(() =>
+      parsed.applyPatch({
+        timing: parsed.event.timing,
+      }),
+    ).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Timing edits are not supported for events with unsupported timezone rules',
+      ),
+    );
+
+    const patched = parsed.applyPatch({ title: 'Renamed opaque event' });
+    expect(patched.icalendar).toContain('DTSTART:19701025T040000');
+    expect(patched.icalendar).toContain('SUMMARY:Renamed opaque event');
+    expect(
+      codec.parse(
+        'team',
+        'vtimezone-stockholm-divergent-transition.ics',
+        patched.icalendar,
+      ).event.unsupportedTimezone,
+    ).toBe(true);
+  });
+
+  it('checks timezone IDs referenced only by RDATE values and detached overrides', () => {
+    const base = fixture(
+      'vtimezone-stockholm-divergent-transition.ics',
+    ).replace(/\r\n/g, '\n');
+    const utcMaster = base
+      .replace(
+        'DTSTART;TZID=Europe/Stockholm:20261025T031500',
+        'DTSTART:20261025T011500Z',
+      )
+      .replace(
+        'DTEND;TZID=Europe/Stockholm:20261025T034500',
+        'DTEND:20261025T014500Z',
+      );
+    const rdateSource = utcMaster.replace(
+      'RRULE:FREQ=YEARLY;COUNT=2',
+      'RRULE:FREQ=YEARLY;COUNT=2\nRDATE;TZID=Europe/Stockholm:20261025T031500',
+    );
+    const overrideSource = utcMaster.replace(
+      'END:VEVENT\nEND:VCALENDAR',
+      [
+        'END:VEVENT',
+        'BEGIN:VEVENT',
+        'UID:stockholm-transition@example.test',
+        'DTSTAMP:20260922T120000Z',
+        'RECURRENCE-ID;TZID=Europe/Stockholm:20271031T031500',
+        'DTSTART;TZID=Europe/Stockholm:20271031T041500',
+        'DTEND;TZID=Europe/Stockholm:20271031T044500',
+        'SUMMARY:Detached transition occurrence',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\n'),
+    );
+
+    expect(
+      codec.parse('team', 'rdate-zone.ics', rdateSource).event
+        .unsupportedTimezone,
+    ).toBe(true);
+    expect(
+      codec.parse('team', 'override-zone.ics', overrideSource).event
+        .unsupportedTimezone,
+    ).toBe(true);
   });
 
   it('reads and preserves master floating DATE-TIME values on a non-timing patch', () => {

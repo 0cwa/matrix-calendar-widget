@@ -128,7 +128,16 @@ export function CalendarEventsSurface({
       ),
     [filters.filterText, projection.occurrences],
   );
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent>();
+  const [selectedEvent, setSelectedEvent] = useState<
+    { event: CalendarEvent; sourceEvent: CalendarEvent } | undefined
+  >();
+  const selectEvent = (event: CalendarEvent) => {
+    setSelectedEvent({
+      event,
+      sourceEvent:
+        sourceEventByOccurrenceKey.get(calendarEventKey(event)) ?? event,
+    });
+  };
   const hasMixedSupportedComponents = calendars.data.some(
     (calendar) =>
       calendar.supportedComponents?.includes('VEVENT') &&
@@ -240,30 +249,22 @@ export function CalendarEventsSurface({
         <Box height="100%" overflow="auto">
           <CalendarEventsList
             events={filteredEvents}
-            onSelectEvent={(event) =>
-              setSelectedEvent(
-                sourceEventByOccurrenceKey.get(calendarEventKey(event)) ??
-                  event,
-              )
-            }
+            onSelectEvent={selectEvent}
           />
         </Box>
       ) : (
         <CalendarEventsCalendar
           events={filteredEvents}
           filters={filters}
-          onSelectEvent={(event) =>
-            setSelectedEvent(
-              sourceEventByOccurrenceKey.get(calendarEventKey(event)) ?? event,
-            )
-          }
+          onSelectEvent={selectEvent}
           onShowMore={onShowMore}
           view={view}
         />
       )}
 
       <CalendarEventDetailsDialog
-        event={selectedEvent}
+        event={selectedEvent?.event}
+        sourceEvent={selectedEvent?.sourceEvent}
         onClose={() => setSelectedEvent(undefined)}
       />
     </>
