@@ -212,9 +212,13 @@ DST regression or recurrence-editing criteria above.
         context routes remain active and use the authenticated user's
         principal.
 - [ ] Enable live room-calendar data access and room-target diagnostics only
-      after the M2 non-password application-principal Radicale path and
-      cross-room isolation are validated. Keep issue #7 open for real room
-      calendar operations.
+      after the M2 OpenID-capable Radicale plugin and same-user delegation
+      contract are validated, and M6 separately validates application-principal
+      credential provisioning, authorization, a Radicale contract under that
+      principal, and cross-room isolation. M2's user-scoped contract does not
+      validate application-principal credentials, and closing M2 does not
+      prove those M6 gates. Keep issue #7 open for real room calendar
+      operations.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
 - [ ] First reminder delivery target: permission-checked room-wide
       notifications using standard `m.mentions.room: true`; check room-mention
