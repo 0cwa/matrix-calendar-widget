@@ -147,13 +147,13 @@ export function CalendarEventDetailsDialog({
 
                 {currentEvent.id !== currentSourceEvent?.id &&
                   deletesRecurringSeries && (
-                  <Alert severity="info">
-                    {t(
-                      'calendarEvents.details.seriesOccurrenceActions',
-                      'This is one occurrence of a recurring series. Editing or deleting applies to the whole series.',
-                    )}
-                  </Alert>
-                )}
+                    <Alert severity="info">
+                      {t(
+                        'calendarEvents.details.seriesOccurrenceActions',
+                        'This is one occurrence of a recurring series. Editing or deleting applies to the whole series.',
+                      )}
+                    </Alert>
+                  )}
 
                 <Typography>
                   {formatCalendarEventTime(
