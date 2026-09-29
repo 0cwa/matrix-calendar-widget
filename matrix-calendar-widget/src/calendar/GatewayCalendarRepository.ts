@@ -19,8 +19,8 @@ import {
   CalendarEvent,
   CalendarEventDiagnosticsRepository,
   CalendarEventId,
-  CalendarEventListResult,
   CalendarEventInput,
+  CalendarEventListResult,
   CalendarEventPatch,
   CalendarId,
   CalendarRepository,
@@ -167,9 +167,7 @@ export class GatewayCalendarRepository
     range: CalendarTimeRange,
   ): Promise<CalendarEventListResult> {
     const viewerTimezone =
-      this.options.getViewerTimezone?.() ??
-      DateTime.local().zoneName ??
-      'UTC';
+      this.options.getViewerTimezone?.() ?? DateTime.local().zoneName ?? 'UTC';
     const results = await Promise.all(
       calendarIds.map((calendarId) =>
         this.requestJson<CalendarGatewayEventListResource>(

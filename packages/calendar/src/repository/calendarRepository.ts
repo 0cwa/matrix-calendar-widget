@@ -35,9 +35,10 @@ export type CalendarEventProjectionDiagnosticSummary = {
   count: number;
 };
 
-export type CalendarEventListDiagnostic = CalendarEventProjectionDiagnosticSummary & {
-  calendarId: CalendarId;
-};
+export type CalendarEventListDiagnostic =
+  CalendarEventProjectionDiagnosticSummary & {
+    calendarId: CalendarId;
+  };
 
 export type CalendarEventListResult = {
   events: CalendarEvent[];

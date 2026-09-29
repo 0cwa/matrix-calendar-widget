@@ -486,12 +486,10 @@ export class CalendarGatewayController {
           .event,
       }));
       const unsupportedResources = parsedResources.filter(
-        ({ event }) =>
-          event.unsupportedRecurrence === 'range-this-and-future',
+        ({ event }) => event.unsupportedRecurrence === 'range-this-and-future',
       );
       const projectableResources = parsedResources.filter(
-        ({ event }) =>
-          event.unsupportedRecurrence !== 'range-this-and-future',
+        ({ event }) => event.unsupportedRecurrence !== 'range-this-and-future',
       );
       const projection = projectCalendarEventOccurrences(
         projectableResources.map(({ event }) => event),

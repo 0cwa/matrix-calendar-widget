@@ -160,7 +160,7 @@ describe('<CalendarEventsSurface />', () => {
     );
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Some events have recurrence or timezone data that the current renderer cannot safely display. Affected events: 1.',
+      'One event has recurrence or timezone data that the current renderer cannot safely display.',
     );
     expect(screen.getByText('Team planning')).toBeInTheDocument();
     expect(screen.getByText('Dentist')).toBeInTheDocument();

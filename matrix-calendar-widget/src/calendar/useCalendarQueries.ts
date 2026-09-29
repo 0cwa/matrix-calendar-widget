@@ -24,11 +24,11 @@ import {
   CalendarTimeRange,
 } from '@matrix-calendar-widget/calendar';
 import { useEffect, useState } from 'react';
+import { isCalendarEventDiagnosticsRepository } from './CalendarEventListDiagnosticsRepository';
 import {
   useCalendarRepository,
   useCalendarRepositoryRevision,
 } from './CalendarRepositoryProvider';
-import { isCalendarEventDiagnosticsRepository } from './CalendarEventListDiagnosticsRepository';
 
 export type CalendarQueryState<T> = {
   data: T;

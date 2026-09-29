@@ -20,7 +20,6 @@ export {
   type CalendarDiagnostics,
   type CalendarDiagnosticsRepository,
 } from './CalendarDiagnosticsRepository';
-export { isCalendarEventDiagnosticsRepository } from './CalendarEventListDiagnosticsRepository';
 export {
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
@@ -32,6 +31,7 @@ export type {
   CalendarEventFormValues,
   CalendarEventValidationError,
 } from './calendarEventForm';
+export { isCalendarEventDiagnosticsRepository } from './CalendarEventListDiagnosticsRepository';
 export {
   calendarEventKey,
   calendarEventStartDate,
