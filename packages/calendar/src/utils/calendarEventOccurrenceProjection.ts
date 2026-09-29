@@ -78,6 +78,17 @@ const numericByPartRanges: Record<
   BYWEEKNO: { min: -53, max: 53, allowZero: false },
 };
 
+const numericByPartPatterns: Record<string, RegExp> = {
+  BYHOUR: /^\d{1,2}$/,
+  BYMINUTE: /^\d{1,2}$/,
+  BYMONTH: /^\d{1,2}$/,
+  BYMONTHDAY: /^[+-]?\d{1,2}$/,
+  BYSECOND: /^\d{1,2}$/,
+  BYSETPOS: /^[+-]?\d{1,3}$/,
+  BYYEARDAY: /^[+-]?\d{1,3}$/,
+  BYWEEKNO: /^[+-]?\d{1,2}$/,
+};
+
 export type CalendarEventProjectionDiagnosticReason =
   | 'invalid-recurrence'
   | 'invalid-timing'
@@ -686,7 +697,7 @@ function validateByParts(parts: Map<string, string>): void {
 
     const numbers: number[] = [];
     for (const item of value.split(',')) {
-      if (!/^[+-]?\d+$/.test(item)) {
+      if (!numericByPartPatterns[part].test(item)) {
         throw projectionError('invalid-recurrence');
       }
       const number = Number(item);

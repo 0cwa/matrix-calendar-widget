@@ -519,6 +519,85 @@ describe('projectCalendarEventOccurrences', () => {
     );
   });
 
+  it('enforces BY-part lexical grammar while accepting valid hours and signed month days', () => {
+    const malformed = ['BYHOUR=+9', 'BYHOUR=0009'].map((byPart) =>
+      timedEvent({
+        id: `malformed-${byPart.toLowerCase()}`,
+        recurrence: { rrule: `FREQ=DAILY;COUNT=2;${byPart}` },
+      }),
+    );
+    const invalidResult = projectCalendarEventOccurrences(
+      malformed,
+      stockholmRange,
+      'Europe/Stockholm',
+    );
+
+    expect(invalidResult.occurrences).toEqual([]);
+    expect(invalidResult.diagnostics).toEqual(
+      malformed.map((sourceEvent) => ({
+        sourceEvent,
+        reason: 'invalid-recurrence',
+      })),
+    );
+
+    const valid = [
+      timedEvent({
+        id: 'hour-single-digit',
+        recurrence: { rrule: 'FREQ=DAILY;COUNT=2;BYHOUR=9' },
+      }),
+      timedEvent({
+        id: 'hour-zero-padded',
+        recurrence: { rrule: 'FREQ=DAILY;COUNT=2;BYHOUR=09' },
+      }),
+      timedEvent({
+        id: 'last-day-of-month',
+        start: '2026-10-31T09:00:00',
+        end: '2026-10-31T10:00:00',
+        recurrence: { rrule: 'FREQ=MONTHLY;COUNT=2;BYMONTHDAY=-1' },
+      }),
+    ];
+    const validResult = projectCalendarEventOccurrences(
+      valid,
+      {
+        start: '2026-10-23T00:00:00Z',
+        end: '2026-12-01T00:00:00Z',
+      },
+      'Europe/Stockholm',
+    );
+
+    expect(validResult.diagnostics).toEqual([]);
+    expect(
+      validResult.occurrences
+        .filter(({ sourceEvent }) => sourceEvent.id === 'hour-single-digit')
+        .map(({ event }) => {
+          if (event.timing.type !== 'timed') {
+            throw new Error('Expected a timed occurrence');
+          }
+          return event.timing.start.local;
+        }),
+    ).toEqual(['2026-10-23T09:00:00', '2026-10-24T09:00:00']);
+    expect(
+      validResult.occurrences
+        .filter(({ sourceEvent }) => sourceEvent.id === 'hour-zero-padded')
+        .map(({ event }) => {
+          if (event.timing.type !== 'timed') {
+            throw new Error('Expected a timed occurrence');
+          }
+          return event.timing.start.local;
+        }),
+    ).toEqual(['2026-10-23T09:00:00', '2026-10-24T09:00:00']);
+    expect(
+      validResult.occurrences
+        .filter(({ sourceEvent }) => sourceEvent.id === 'last-day-of-month')
+        .map(({ event }) => {
+          if (event.timing.type !== 'timed') {
+            throw new Error('Expected a timed occurrence');
+          }
+          return event.timing.start.local;
+        }),
+    ).toEqual(['2026-10-31T09:00:00', '2026-11-30T09:00:00']);
+  });
+
   it('reports RFC-valid leap-second BYSECOND=60 as unsupported without changing the source', () => {
     const event = timedEvent({
       id: 'leap-second',
