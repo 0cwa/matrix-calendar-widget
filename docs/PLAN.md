@@ -109,7 +109,8 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
       leave malformed/unsupported data opaque with diagnostics and keep
       `RANGE=THISANDFUTURE` hidden.
 - [x] Create and edit simple whole-series RRULEs with DAILY, WEEKLY, MONTHLY,
-      or YEARLY frequency, positive interval, and never/count/date end controls.
+      or YEARLY frequency, positive interval, and never/count/date end controls
+      (PR #130).
 - [ ] Extend RRULE editing to additional recurrence rule parts and patterns.
 - [ ] RDATE / EXDATE editing.
 - [ ] RECURRENCE-ID instance override editing.
@@ -124,9 +125,10 @@ The recurring-resource contract uses the hosted CI stack pinned to Synapse
 v1.161.0 and Radicale 3.8.0.0 with `radicale_auth_matrix`. A passing result
 validates this stack only; the broader issue #6 criteria and M5 exit remain open.
 
-The first write slice limits recurrence controls to four frequencies, interval,
-and an optional count or inclusive end date. Writes replace or clear only the
-master RRULE and use the existing source resource ID and ETag. Resources with
+PR #130 completes the first write slice: recurrence controls are limited to
+four frequencies, interval, and an optional count or inclusive end date.
+Writes replace or clear only the master RRULE and use the existing source
+resource ID and ETag. Resources with
 RDATE, EXDATE, detached instances, multiple master RRULEs, unsupported RRULE
 parts, or unsupported timezone rules remain readable; recurrence controls stay
 disabled, and ordinary field edits preserve the complete source resource.
@@ -204,7 +206,8 @@ DST regression or recurrence-editing criteria above.
 - [ ] Team/member selector using the widget user directory/member APIs.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
 - [ ] Selected-user mentions.
-- [ ] Optional `@room` reminder with permission checks.
+- [ ] First reminder target: permission-checked room-wide notifications using
+      standard `m.mentions.room: true` (ADR007/ADR019).
 - [ ] Complete the app-owned PostgreSQL reminder store and durable claim
       contract (ADR019). The store, migration path, and restricted-role
       PostgreSQL 16 integration job are implemented; all five hosted contract
@@ -220,6 +223,10 @@ DST regression or recurrence-editing criteria above.
 - [ ] Durable scheduler and idempotent delivery log.
 - [ ] Event detail action to link/open a Matrix room or MatrixRTC conference.
 - [ ] Audit-friendly event creation/edit messages where appropriate.
+
+Room-wide reminders are the first recipient flow. Defer email attendee
+registration until members can explicitly verify and consent to share an email
+address; do not infer attendee email addresses from Matrix room membership.
 
 **Exit:** teams can manage the calendar entirely from the widget and receive reliable Matrix reminders.
 
