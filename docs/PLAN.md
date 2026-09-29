@@ -201,16 +201,20 @@ DST regression or recurrence-editing criteria above.
 
 ## M6 — Matrix team features and reminders
 
-- [ ] Wire room-target binding and authorization into calendar operations after
-      the non-password application-principal Radicale path and isolation gates
-      pass.
+- [x] Wire the zero-I/O `target=room` authorization preflight into calendar
+      operations: check joined membership and power before resolving the
+      operator-managed static binding. The room access gate stays disabled and
+      performs no CalDAV I/O.
   - [x] Define the operator-managed static room-to-calendar contract (ADR014/
         ADR015) and validate bindings in server configuration before lookup.
   - [x] Add a pure room-binding resolver and joined-membership/power policy
         service that denies on lookup errors. Existing user-principal room-
-        context routes remain active and enforce these checks; this foundation
-        does not wire the static-binding/application-principal path to the
-        gateway or CalDAV.
+        context routes remain active and use the authenticated user's
+        principal.
+- [ ] Enable live room-calendar data access and room-target diagnostics only
+      after the M2 non-password application-principal Radicale path and
+      cross-room isolation are validated. Keep issue #7 open for real room
+      calendar operations.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
 - [ ] First reminder delivery target: permission-checked room-wide
       notifications using standard `m.mentions.room: true`; check room-mention
@@ -232,8 +236,11 @@ DST regression or recurrence-editing criteria above.
 - [ ] Event detail action to link/open a Matrix room or MatrixRTC conference.
 - [ ] Audit-friendly event creation/edit messages where appropriate.
 
-Room-wide reminders are the v1 recipient flow. Defer individual Matrix
-recipient selection and email attendee/recipient collection until members can
+Room-wide reminders are the accepted v1 recipient flow: send only
+permission-checked `m.mentions.room: true` notifications and recheck permission
+at delivery time. Individual Matrix-recipient selection is outside the
+accepted v1 scope and requires a later explicit scope decision. Email
+attendee/address collection is separately deferred until members can
 explicitly verify and consent to share an address; do not infer email
 addresses from Matrix room membership.
 
