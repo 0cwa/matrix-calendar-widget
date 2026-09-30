@@ -17,6 +17,7 @@
 import type {
   CalendarEvent,
   CalendarEventDateTime,
+  CalendarEventPatch,
 } from '@matrix-calendar-widget/calendar';
 import fs from 'fs';
 import ICAL from 'ical.js';
@@ -1730,7 +1731,11 @@ END:VCALENDAR`,
     const reparsed = codec.parse('team', 'alarm.ics', changed.icalendar);
     expect(reparsed.event.alarm?.trigger.minutes).toBe(30);
 
-    const removed = reparsed.applyPatch({ alarm: undefined });
+    const removePatch = JSON.parse(
+      JSON.stringify({ alarm: { operation: 'remove' } }),
+    ) as CalendarEventPatch;
+    expect(removePatch).toEqual({ alarm: { operation: 'remove' } });
+    const removed = reparsed.applyPatch(removePatch);
     expect(removed.event.alarm).toBeUndefined();
     expect(
       ICAL.Component.fromString(removed.icalendar)
@@ -1784,7 +1789,10 @@ END:VCALENDAR`,
         ?.trigger.minutes,
     ).toBe(20);
 
-    const removed = parsed.applyPatch({ alarm: undefined });
+    const removePatch = JSON.parse(
+      JSON.stringify({ alarm: { operation: 'remove' } }),
+    ) as CalendarEventPatch;
+    const removed = parsed.applyPatch(removePatch);
     const removedCalendar = ICAL.Component.fromString(removed.icalendar);
     expect(removedCalendar.getAllSubcomponents('vevent')).toHaveLength(3);
     expect(
@@ -1796,6 +1804,26 @@ END:VCALENDAR`,
     expect(
       removedCalendar.getFirstPropertyValue('x-custom-calendar-property'),
     ).toBe('preserve-resource-value');
+  });
+
+  it('rejects malformed JSON alarm removal operations for supported alarms', () => {
+    const parsed = codec.parse('team', 'alarm.ics', fixture('alarm.ics'));
+
+    for (const alarm of [
+      { operation: 'clear' },
+      { operation: 'remove', unexpected: true },
+      null,
+    ]) {
+      const malformedPatch = JSON.parse(
+        JSON.stringify({ alarm }),
+      ) as CalendarEventPatch;
+      expect(() => parsed.applyPatch(malformedPatch)).toThrow(
+        new ICalendarEventCodecError(
+          'unsupported-patch',
+          'Only one negative relative DISPLAY alarm from DTSTART is supported',
+        ),
+      );
+    }
   });
 
   it.each<readonly [string, (source: string) => string]>([
@@ -1862,7 +1890,7 @@ END:VCALENDAR`,
         'Only one negative relative DISPLAY alarm from DTSTART is supported',
       ),
     );
-    expect(() => parsed.applyPatch({ alarm: undefined })).toThrow(
+    expect(() => parsed.applyPatch({ alarm: { operation: 'remove' } })).toThrow(
       new ICalendarEventCodecError(
         'unsupported-patch',
         'Only one negative relative DISPLAY alarm from DTSTART is supported',

@@ -207,7 +207,11 @@ export function calendarEventPatchFromForm(
     ...fields,
     ...(values.timingChanged === false ? {} : { timing }),
     ...(values.alarmChanged
-      ? { alarm: values.alarmEnabled ? alarmFromForm(values) : undefined }
+      ? {
+          alarm: values.alarmEnabled
+            ? alarmFromForm(values)
+            : { operation: 'remove' },
+        }
       : {}),
     description: normalizeOptional(values.description),
     location: normalizeOptional(values.location),

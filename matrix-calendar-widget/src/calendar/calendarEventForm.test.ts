@@ -204,7 +204,7 @@ describe('calendar event form adapter', () => {
         alarmEnabled: false,
         alarmChanged: true,
       }),
-    ).toHaveProperty('alarm', undefined);
+    ).toHaveProperty('alarm', { operation: 'remove' });
   });
 
   it('keeps unsupported alarms opaque and validates positive lead times', () => {

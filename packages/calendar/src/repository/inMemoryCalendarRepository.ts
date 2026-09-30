@@ -29,6 +29,7 @@ import {
   CalendarId,
   CalendarTimeRange,
   TimedCalendarEventTiming,
+  isCalendarEventAlarmRemoval,
 } from '../model';
 import { calendarEventRecurrenceIdentity } from '../utils/calendarEventOccurrenceProjection';
 import { calendarEventTimedDateTimeToDateTime } from '../utils/calendarEventTimedDateTime';
@@ -227,19 +228,34 @@ export class InMemoryCalendarRepository implements CalendarRepository {
   ): Promise<CalendarEvent> {
     this.getWritableCalendar(calendarId);
     const current = this.getStoredEvent(calendarId, eventId);
+    if (
+      current.unsupportedAlarm &&
+      Object.prototype.hasOwnProperty.call(patch, 'alarm')
+    ) {
+      throw new CalendarRepositoryError(
+        'unsupported-patch',
+        'Alarm edits are not supported for this event',
+      );
+    }
     const clonedPatch = cloneCalendarEventPatch(patch);
+    const { alarm: alarmPatch, ...mutablePatch } = clonedPatch;
     const recurrence = Object.prototype.hasOwnProperty.call(patch, 'recurrence')
       ? applyRecurrenceWrite(current.recurrence, clonedPatch.recurrence)
       : current.recurrence;
 
     const updated: CalendarEvent = {
       ...current,
-      ...clonedPatch,
+      ...mutablePatch,
       id: current.id,
       calendarId: current.calendarId,
       uid: current.uid,
       recurrence,
     };
+    if (isCalendarEventAlarmRemoval(alarmPatch)) {
+      delete updated.alarm;
+    } else if (alarmPatch) {
+      updated.alarm = alarmPatch;
+    }
 
     this.events.get(calendarId)!.set(eventId, updated);
     return cloneCalendarEvent(updated);
@@ -517,10 +533,12 @@ function cloneCalendarEventPatch(
   }
 
   if (patch.alarm) {
-    cloned.alarm = {
-      ...patch.alarm,
-      trigger: { ...patch.alarm.trigger },
-    };
+    cloned.alarm = isCalendarEventAlarmRemoval(patch.alarm)
+      ? { ...patch.alarm }
+      : {
+          ...patch.alarm,
+          trigger: { ...patch.alarm.trigger },
+        };
   }
 
   if (patch.recurrence) {

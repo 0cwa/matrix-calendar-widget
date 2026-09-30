@@ -96,6 +96,14 @@ export type CalendarEventDisplayAlarm = {
   trigger: CalendarEventAlarmLeadTime;
 };
 
+/** Explicit serializable operation that removes an existing display alarm. */
+export type CalendarEventAlarmRemoval = { operation: 'remove' };
+
+/** Alarm value accepted by an event patch, including its remove operation. */
+export type CalendarEventAlarmPatch =
+  | CalendarEventDisplayAlarm
+  | CalendarEventAlarmRemoval;
+
 /** Alarm data retained by CalDAV but outside the editor's supported shape. */
 export type CalendarEventUnsupportedAlarm = true;
 
@@ -242,11 +250,15 @@ export type CalendarEventPatch = Partial<
     | 'calendarId'
     | 'uid'
     | 'recurrence'
+    | 'alarm'
     | 'unsupportedAlarm'
     | 'unsupportedRecurrence'
     | 'unsupportedTimezone'
   >
-> & { recurrence?: CalendarEventRecurrenceWrite };
+> & {
+  alarm?: CalendarEventAlarmPatch;
+  recurrence?: CalendarEventRecurrenceWrite;
+};
 
 export type CalendarTimeRange = {
   /** Inclusive ISO instant. */
@@ -265,4 +277,16 @@ export function isAllDayCalendarEvent(
   event: CalendarEvent,
 ): event is CalendarEvent & { timing: AllDayCalendarEventTiming } {
   return event.timing.type === 'all-day';
+}
+
+export function isCalendarEventAlarmRemoval(
+  value: unknown,
+): value is CalendarEventAlarmRemoval {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 1 &&
+    (value as Record<string, unknown>).operation === 'remove'
+  );
 }

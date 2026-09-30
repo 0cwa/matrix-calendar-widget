@@ -327,6 +327,35 @@ describe('GatewayCalendarRepository', () => {
     ).toBe('"fresh-etag"');
   });
 
+  it('serializes the explicit alarm removal operation through the gateway', async () => {
+    const eventWithAlarm: CalendarEvent = {
+      ...event,
+      alarm: {
+        action: 'display',
+        trigger: { weeks: 0, days: 0, hours: 0, minutes: 15, seconds: 0 },
+      },
+    };
+    const fetchMock = mockFetch(
+      jsonResponse({ event: eventWithAlarm, etag: '"old-etag"' }),
+      jsonResponse({ event, etag: '"new-etag"' }),
+    );
+    const repository = createRepository(fetchMock);
+
+    await expect(
+      repository.updateEvent(calendarId, eventId, {
+        alarm: { operation: 'remove' },
+      }),
+    ).resolves.toEqual(event);
+
+    const requestBody = fetchMock.mock.calls[1][1]?.body;
+    expect(requestBody).toBe(
+      JSON.stringify({ alarm: { operation: 'remove' } }),
+    );
+    expect(JSON.parse(requestBody as string)).toEqual({
+      alarm: { operation: 'remove' },
+    });
+  });
+
   it('clears a stale ETag after conflict so a retry reloads current state', async () => {
     const fetchMock = mockFetch(
       jsonResponse({

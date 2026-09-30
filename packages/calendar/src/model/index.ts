@@ -18,13 +18,19 @@
 export { calendarEntrySchema, dateTimeEntrySchema } from './calendarEntry';
 export type { CalendarEntry, DateTimeEntry } from './calendarEntry';
 
-export { isAllDayCalendarEvent, isTimedCalendarEvent } from './calendar';
+export {
+  isAllDayCalendarEvent,
+  isCalendarEventAlarmRemoval,
+  isTimedCalendarEvent,
+} from './calendar';
 export type {
   AllDayCalendarEventTiming,
   Calendar,
   CalendarDate,
   CalendarEvent,
   CalendarEventAlarmLeadTime,
+  CalendarEventAlarmPatch,
+  CalendarEventAlarmRemoval,
   CalendarEventDateTime,
   CalendarEventDisplayAlarm,
   CalendarEventDuration,

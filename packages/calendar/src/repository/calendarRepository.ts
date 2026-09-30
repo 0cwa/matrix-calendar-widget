@@ -61,6 +61,7 @@ export type CalendarRepositoryErrorCode =
   | 'invalid-calendar-color'
   | 'invalid-range'
   | 'event-conflict'
+  | 'unsupported-patch'
   | 'authentication-required'
   | 'request-failed';
 

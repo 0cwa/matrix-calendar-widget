@@ -16,6 +16,7 @@
 
 import {
   CalendarEvent,
+  CalendarEventAlarmPatch,
   CalendarEventDateTime,
   CalendarEventDisplayAlarm,
   CalendarEventDuration,
@@ -33,6 +34,7 @@ import {
   CalendarEventTransparency,
   CalendarId,
   calendarEventRecurrenceIdentity,
+  isCalendarEventAlarmRemoval,
   isSupportedCalendarEventOccurrenceExclusion,
   parseSupportedCalendarEventRecurrenceRule,
 } from '@matrix-calendar-widget/calendar';
@@ -82,7 +84,7 @@ export class ParsedICalendarEvent {
     if (hasAlarmPatch && this.event.unsupportedAlarm) {
       throw unsupportedAlarmPatch();
     }
-    if (hasAlarmPatch && patch.alarm !== undefined) {
+    if (hasAlarmPatch && !isCalendarEventAlarmRemoval(patch.alarm)) {
       validateDisplayAlarm(patch.alarm);
     }
     const recurrenceWrite = hasRecurrencePatch
@@ -180,18 +182,19 @@ export class ParsedICalendarEvent {
           : undefined
       : this.event.recurrence;
 
+    const { alarm: alarmPatch, ...eventPatch } = patch;
     const event: CalendarEvent = {
       ...this.event,
-      ...patch,
+      ...eventPatch,
       title: patch.title ?? this.event.title,
       timing: patch.timing ?? this.event.timing,
       recurrence,
     };
     if (hasAlarmPatch) {
-      if (patch.alarm) {
-        event.alarm = patch.alarm;
-      } else {
+      if (isCalendarEventAlarmRemoval(alarmPatch)) {
         delete event.alarm;
+      } else {
+        event.alarm = alarmPatch as CalendarEventDisplayAlarm;
       }
       delete event.unsupportedAlarm;
     }
@@ -521,11 +524,11 @@ function isValidAlarmLeadTime(
 
 function setDisplayAlarm(
   vevent: ICAL.Component,
-  alarm: CalendarEventDisplayAlarm | undefined,
+  alarm: CalendarEventAlarmPatch | undefined,
   description: string,
 ): void {
   const existing = vevent.getAllSubcomponents('valarm');
-  if (!alarm) {
+  if (alarm === undefined || isCalendarEventAlarmRemoval(alarm)) {
     existing.forEach((component) => vevent.removeSubcomponent(component));
     return;
   }

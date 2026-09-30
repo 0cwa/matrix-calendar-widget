@@ -19,6 +19,7 @@ import {
   Calendar,
   CalendarEvent,
   CalendarEventInput,
+  CalendarEventPatch,
   CalendarEventRecurrenceDate,
   CalendarEventRecurrenceOverride,
 } from '../model';
@@ -461,6 +462,42 @@ describe('InMemoryCalendarRepository', () => {
         categories: ['TEAM'],
       }),
     );
+  });
+
+  it('applies the serializable alarm removal operation to supported events', async () => {
+    const eventWithAlarm: CalendarEvent = {
+      ...events[0],
+      alarm: {
+        action: 'display',
+        trigger: { weeks: 0, days: 0, hours: 0, minutes: 15, seconds: 0 },
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendars[0]],
+      events: [eventWithAlarm],
+    });
+    const removal = JSON.parse(
+      JSON.stringify({ alarm: { operation: 'remove' } }),
+    ) as CalendarEventPatch;
+
+    await expect(
+      repository.updateEvent('team', eventWithAlarm.id, removal),
+    ).resolves.toMatchObject({ title: eventWithAlarm.title });
+    const updated = await repository.getEvent('team', eventWithAlarm.id);
+    expect(updated.alarm).toBeUndefined();
+  });
+
+  it('rejects alarm writes for opaque alarms', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendars[0]],
+      events: [{ ...events[0], unsupportedAlarm: true }],
+    });
+
+    await expect(
+      repository.updateEvent('team', events[0].id, {
+        alarm: { operation: 'remove' },
+      }),
+    ).rejects.toMatchObject({ code: 'unsupported-patch' });
   });
 
   it('deletes an event', async () => {
