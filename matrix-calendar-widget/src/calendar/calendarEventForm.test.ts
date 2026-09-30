@@ -353,6 +353,103 @@ describe('calendar event form adapter', () => {
     ).toEqual({});
   });
 
+  it('loads, edits, and preserves the constrained weekly BYDAY rule', () => {
+    const weeklyEvent: CalendarEvent = {
+      id: 'weekly-days',
+      calendarId: 'team',
+      uid: 'weekly-days@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-26T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-26T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,WE' },
+    };
+    const values = calendarEventToFormValues(weeklyEvent, calendar);
+
+    expect(values).toMatchObject({
+      recurrenceFrequency: 'WEEKLY',
+      recurrenceInterval: '1',
+      recurrenceEnd: 'never',
+      recurrenceWeekdays: ['MO', 'WE'],
+      recurrenceEditable: true,
+    });
+    expect(
+      calendarEventPatchFromForm({ ...values, title: 'Renamed' }),
+    ).not.toHaveProperty('recurrence');
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        recurrenceWeekdays: ['MO', 'WE', 'FR'],
+        recurrenceChanged: true,
+      }).recurrence,
+    ).toEqual({ rrule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR' });
+  });
+
+  it('adds a new DTSTART weekday when editing a weekly BYDAY series start', () => {
+    const weeklyEvent: CalendarEvent = {
+      id: 'weekly-days',
+      calendarId: 'team',
+      uid: 'weekly-days@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-26T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-26T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,WE' },
+    };
+    const values = calendarEventToFormValues(weeklyEvent, calendar);
+
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        start: '2026-10-30T09:00',
+        end: '2026-10-30T10:00',
+        timingChanged: true,
+      }).recurrence,
+    ).toEqual({ rrule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR' });
+  });
+
+  it('keeps unsupported weekly BYDAY rules read-only and out of unrelated patches', () => {
+    const unsupportedEvent: CalendarEvent = {
+      id: 'unsupported-weekly',
+      calendarId: 'team',
+      uid: 'unsupported-weekly@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-10-26',
+        endDate: '2026-10-27',
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,WE;INTERVAL=2' },
+    };
+    const values = calendarEventToFormValues(unsupportedEvent, calendar);
+
+    expect(values.recurrenceEditable).toBe(false);
+    expect(values.recurrenceDisabledReason).toBe('unsupported');
+    expect(
+      calendarEventPatchFromForm({ ...values, title: 'Renamed' }),
+    ).not.toHaveProperty('recurrence');
+  });
+
   it('keeps complex recurrence controls disabled and preserves the source data', () => {
     const complexEvent: CalendarEvent = {
       id: 'complex',

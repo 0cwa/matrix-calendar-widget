@@ -1446,6 +1446,108 @@ END:VCALENDAR`,
     );
   });
 
+  it('creates, updates, and reloads a supported weekly BYDAY rule', () => {
+    const created = codec.create('team', 'weekly.ics', {
+      uid: 'weekly@example.test',
+      title: 'Weekly planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-26T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-26T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,WE' },
+    });
+
+    expect(created.event.recurrence).toEqual({
+      rrule: 'FREQ=WEEKLY;BYDAY=MO,WE',
+    });
+    const reparsed = codec.parse('team', 'weekly.ics', created.icalendar);
+    expect(reparsed.event.recurrence).toEqual(created.event.recurrence);
+
+    const updated = reparsed.applyPatch({
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR' },
+    });
+    expect(
+      codec.parse('team', 'weekly.ics', updated.icalendar).event.recurrence,
+    ).toEqual({ rrule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR' });
+  });
+
+  it.each([
+    'FREQ=WEEKLY;BYDAY=MO,WE;INTERVAL=2',
+    'FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4',
+    'FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261102T080000Z',
+    'FREQ=WEEKLY;BYDAY=MO,WE;WKST=SU',
+    'FREQ=WEEKLY;BYDAY=1MO,WE',
+    'FREQ=WEEKLY;BYDAY=MO,WE;BYHOUR=9',
+    'FREQ=WEEKLY;BYDAY=TU,WE',
+  ])('rejects writes outside the weekly BYDAY subset: %s', (rrule) => {
+    expect(() =>
+      codec.create('team', 'invalid-weekly.ics', {
+        uid: 'invalid-weekly@example.test',
+        title: 'Invalid weekly rule',
+        timing: {
+          type: 'all-day',
+          startDate: '2026-10-26',
+          endDate: '2026-10-27',
+        },
+        recurrence: { rrule },
+      }),
+    ).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Only simple whole-series RRULE changes are supported',
+      ),
+    );
+  });
+
+  it('preserves unsupported weekly RRULEs and unrelated resource data on other edits', () => {
+    const rrule = 'FREQ=WEEKLY;BYDAY=MO,FR;INTERVAL=2;WKST=SU';
+    const source = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Test//Calendar//EN',
+      'BEGIN:VEVENT',
+      'UID:unsupported-weekly@example.test',
+      'DTSTAMP:20260901T000000Z',
+      'DTSTART:20261023T090000',
+      'DTEND:20261023T100000',
+      'SUMMARY:Unsupported weekly rule',
+      `RRULE:${rrule}`,
+      'X-KEEP-ME:resource-data',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+    const parsed = codec.parse('team', 'unsupported-weekly.ics', source);
+    const canonicalRrule = ICAL.Recur.fromString(rrule).toString();
+
+    expect(parsed.event.recurrence?.rrule).toBe(canonicalRrule);
+    expect(() =>
+      parsed.applyPatch({ recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,FR' } }),
+    ).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Only simple whole-series RRULE changes are supported',
+      ),
+    );
+
+    const edited = parsed.applyPatch({ title: 'Updated title' });
+    const vevent = ICAL.Component.fromString(
+      edited.icalendar,
+    ).getFirstSubcomponent('vevent');
+    expect(vevent?.getFirstPropertyValue('rrule')?.toString()).toBe(
+      canonicalRrule,
+    );
+    expect(vevent?.getFirstPropertyValue('x-keep-me')).toBe('resource-data');
+  });
+
   it('updates and clears only the master RRULE in a complete resource', () => {
     const parsed = codec.parse(
       'team',

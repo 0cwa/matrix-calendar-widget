@@ -21,6 +21,7 @@ export {
   type CalendarDiagnosticsRepository,
 } from './CalendarDiagnosticsRepository';
 export {
+  calendarEventFormStartWeekday,
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
   calendarEventToFormValues,

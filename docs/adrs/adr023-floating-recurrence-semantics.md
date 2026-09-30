@@ -68,8 +68,13 @@ fields and has no timezone until an application interprets it.
    original components on non-timing edits and reject timing edits while their
    timezone rules are unsupported. Projection never writes resources or
    collection timezone metadata.
-5. Recurrence editing and mainstream-client recurrence interoperability remain
-   out of scope.
+5. Full recurrence editing, instance-edit semantics, and mainstream-client
+   recurrence interoperability remain out of scope. The bounded editor may
+   support the existing simple frequency rules and this additional weekly
+   BYDAY subset: plain weekday tokens including DTSTART's weekday, omitted or
+   `INTERVAL=1`, no `COUNT` or `UNTIL`, no other rule parts, and omitted or
+   default `WKST=MO`. Other weekly BYDAY combinations remain opaque and
+   preserved.
 
 ## Implementation status and boundaries
 
@@ -121,6 +126,12 @@ preservation. This does not make CalDAV queries viewer-local.
 Collection `Calendar.timezone` editing remains deferred under M4. Viewer-local
 event interpretation does not read or write that collection property.
 
+The bounded recurrence editor and codec support weekly BYDAY only for plain
+weekday tokens that include DTSTART's weekday, with omitted or `INTERVAL=1`, no
+`COUNT` or `UNTIL`, no additional RRULE parts, and omitted or default
+`WKST=MO`. The projector leaves other weekly BYDAY combinations opaque. An
+unrelated event edit preserves the source RRULE and resource data.
+
 ## Consequences
 
 - Master and recurrence readers preserve floating wall time without binding
@@ -133,5 +144,7 @@ event interpretation does not read or write that collection property.
 - Duration-based recurrence timing distinguishes nominal calendar weeks/days
   from exact time units and accounts for timezone transitions in the bounded
   display projection.
-- The projection is read-only and bounded; it does not implement recurrence
-  edits, `RANGE=THISANDFUTURE`, or arbitrary custom VTIMEZONE offsets.
+- The projection is read-only and bounded. The editor supports only the
+  documented simple whole-series RRULE subset and weekly BYDAY subset; it does
+  not implement instance edits, `RANGE=THISANDFUTURE`, or arbitrary custom
+  VTIMEZONE offsets.

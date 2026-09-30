@@ -21,6 +21,7 @@ import {
   CalendarEventInput,
   CalendarEventPatch,
   CalendarEventTiming,
+  CalendarEventWeekday,
   CalendarId,
   SupportedCalendarEventRecurrenceFrequency,
   calendarLocalDateTimeToUnixMillis,
@@ -51,6 +52,7 @@ export type CalendarEventFormValues = {
   recurrenceEnd?: 'never' | 'count' | 'until';
   recurrenceCount?: string;
   recurrenceUntil?: string;
+  recurrenceWeekdays?: CalendarEventWeekday[];
   recurrenceEditable?: boolean;
   recurrenceDisabledReason?: 'complex' | 'unsupported';
   recurrenceChanged?: boolean;
@@ -182,10 +184,9 @@ export function calendarEventPatchFromForm(
 ): CalendarEventPatch {
   const editableFields = calendarEventEditableFieldsFromForm(values);
   const { timing, ...fields } = editableFields;
-  const recurrenceNeedsAnchorUpdate = recurrenceUntilNeedsAnchorUpdate(
-    values,
-    timing,
-  );
+  const recurrenceNeedsAnchorUpdate =
+    recurrenceUntilNeedsAnchorUpdate(values, timing) ||
+    recurrenceWeekdayNeedsAnchorUpdate(values, timing);
 
   return {
     ...fields,
@@ -225,6 +226,26 @@ function recurrenceUntilNeedsAnchorUpdate(
     previousStart.type === 'date-time' &&
     nextStart.type === 'date-time' &&
     previousStart.value.timezone !== nextStart.value.timezone
+  );
+}
+
+function recurrenceWeekdayNeedsAnchorUpdate(
+  values: CalendarEventFormValues,
+  nextTiming: CalendarEventTiming,
+): boolean {
+  if (
+    !values.repeats ||
+    values.recurrenceEditable === false ||
+    values.recurrenceFrequency !== 'WEEKLY' ||
+    values.recurrenceWeekdays === undefined ||
+    !values.originalTiming
+  ) {
+    return false;
+  }
+
+  return (
+    startWeekdayForTiming(values.originalTiming) !==
+    startWeekdayForTiming(nextTiming)
   );
 }
 
@@ -286,6 +307,7 @@ function recurrenceFormValues(
   | 'recurrenceEnd'
   | 'recurrenceCount'
   | 'recurrenceUntil'
+  | 'recurrenceWeekdays'
   | 'recurrenceEditable'
   | 'recurrenceDisabledReason'
   | 'recurrenceChanged'
@@ -339,6 +361,7 @@ function recurrenceFormValues(
       end?.type === 'until'
         ? recurrenceUntilDate(end.value, event.timing)
         : eventDate(event),
+    recurrenceWeekdays: parsed?.weekdays,
     recurrenceEditable: !hasComplexData && !unsupported,
     recurrenceDisabledReason: hasComplexData
       ? 'complex'
@@ -396,9 +419,56 @@ function recurrenceRuleFromForm(
       frequency: values.recurrenceFrequency ?? 'DAILY',
       interval: Number(values.recurrenceInterval ?? '1'),
       end,
+      ...(values.recurrenceWeekdays !== undefined &&
+      (values.recurrenceFrequency ?? 'DAILY') === 'WEEKLY'
+        ? {
+            weekdays: normalizeFormWeekdays(values.recurrenceWeekdays, timing),
+          }
+        : {}),
     },
     timingStartAsDateTime(timing),
   );
+}
+
+const WEEKDAY_TOKENS: CalendarEventWeekday[] = [
+  'MO',
+  'TU',
+  'WE',
+  'TH',
+  'FR',
+  'SA',
+  'SU',
+];
+
+function normalizeFormWeekdays(
+  weekdays: CalendarEventWeekday[],
+  timing: CalendarEventTiming,
+): CalendarEventWeekday[] {
+  return Array.from(new Set([...weekdays, startWeekdayForTiming(timing)])).sort(
+    (left, right) =>
+      WEEKDAY_TOKENS.indexOf(left) - WEEKDAY_TOKENS.indexOf(right),
+  );
+}
+
+export function calendarEventFormStartWeekday(
+  values: CalendarEventFormValues,
+): CalendarEventWeekday {
+  return startWeekdayForTiming(
+    calendarEventEditableFieldsFromForm(values).timing,
+  );
+}
+
+function startWeekdayForTiming(
+  timing: CalendarEventTiming,
+): CalendarEventWeekday {
+  const start =
+    timing.type === 'all-day' ? timing.startDate : timing.start.local;
+  const date = DateTime.fromISO(start, { zone: 'UTC' });
+  const weekday = WEEKDAY_TOKENS[date.weekday - 1];
+  if (!date.isValid || !weekday) {
+    throw new Error('Invalid DTSTART weekday');
+  }
+  return weekday;
 }
 
 function recurrenceUntilValue(

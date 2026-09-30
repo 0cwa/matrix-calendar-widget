@@ -40,6 +40,7 @@ export type {
   CalendarEventTransparency,
   CalendarEventUnsupportedRecurrence,
   CalendarEventUnsupportedTimezone,
+  CalendarEventWeekday,
   CalendarId,
   CalendarTimeRange,
   LocalCalendarDateTime,

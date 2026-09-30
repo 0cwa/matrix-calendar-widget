@@ -111,6 +111,10 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [x] Create and edit simple whole-series RRULEs with DAILY, WEEKLY, MONTHLY,
       or YEARLY frequency, positive interval, and never/count/date end controls
       (PR #130).
+- [x] Add weekly BYDAY creation/editing and projection for plain weekday
+      tokens when DTSTART's weekday is included, INTERVAL is omitted or 1,
+      COUNT/UNTIL and other rule parts are absent, and WKST is omitted or its
+      default MO. Unsupported combinations remain opaque and preserved.
 - [ ] Extend RRULE editing to additional recurrence rule parts and patterns.
 - [x] Skip and restore one projected supported occurrence by adding or
       removing only its matching EXDATE. Use the original recurrence identity
@@ -136,6 +140,14 @@ resource ID and ETag. Resources with
 RDATE, EXDATE, detached instances, multiple master RRULEs, unsupported RRULE
 parts, or unsupported timezone rules remain readable; recurrence controls stay
 disabled, and ordinary field edits preserve the complete source resource.
+
+The bounded weekly BYDAY slice extends the editor with a weekday set for
+every-week rules. Plain weekday tokens are accepted only when DTSTART's
+weekday is included, INTERVAL is absent or 1, COUNT and UNTIL are absent, no
+other RRULE parts are present, and WKST is absent or the default MO. A weekly
+rule outside this shape stays opaque in the projector and is not editable;
+unrelated event edits preserve its original RRULE and resource data. Full
+recurrence editing and client interoperability remain open.
 
 The CalDAV codec exposes a read-only domain view of master RRULE, RDATE
 (including PERIOD values), and EXDATE values plus same-resource, same-UID
