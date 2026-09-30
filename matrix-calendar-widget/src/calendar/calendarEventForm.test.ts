@@ -59,6 +59,14 @@ describe('calendar event form adapter', () => {
       recurrenceUntil: '2026-09-23',
       recurrenceEditable: true,
       recurrenceChanged: false,
+      alarmEnabled: false,
+      alarmWeeks: '0',
+      alarmDays: '0',
+      alarmHours: '0',
+      alarmMinutes: '15',
+      alarmSeconds: '0',
+      alarmEditable: true,
+      alarmChanged: false,
     });
   });
 
@@ -138,6 +146,121 @@ describe('calendar event form adapter', () => {
       start: '2026-10-05',
       end: '2026-10-07',
     });
+  });
+
+  it('keeps alarm data unchanged on ordinary edits and emits explicit alarm writes', () => {
+    const event: CalendarEvent = {
+      id: 'alarm',
+      calendarId: 'team',
+      uid: 'alarm@example.test',
+      title: 'Alarm event',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-09-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      alarm: {
+        action: 'display',
+        trigger: { weeks: 0, days: 1, hours: 2, minutes: 30, seconds: 0 },
+      },
+    };
+    const values = calendarEventToFormValues(event, calendar);
+
+    expect(values).toMatchObject({
+      alarmEnabled: true,
+      alarmWeeks: '0',
+      alarmDays: '1',
+      alarmHours: '2',
+      alarmMinutes: '30',
+      alarmSeconds: '0',
+      alarmEditable: true,
+      alarmChanged: false,
+    });
+    expect(
+      calendarEventPatchFromForm({ ...values, title: 'Renamed' }),
+    ).not.toHaveProperty('alarm');
+
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        alarmMinutes: '45',
+        alarmChanged: true,
+      }).alarm,
+    ).toEqual({
+      action: 'display',
+      trigger: { weeks: 0, days: 1, hours: 2, minutes: 45, seconds: 0 },
+    });
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        alarmEnabled: false,
+        alarmChanged: true,
+      }),
+    ).toHaveProperty('alarm', undefined);
+  });
+
+  it('keeps unsupported alarms opaque and validates positive lead times', () => {
+    const event: CalendarEvent = {
+      id: 'opaque-alarm',
+      calendarId: 'team',
+      uid: 'opaque-alarm@example.test',
+      title: 'Opaque alarm event',
+      timing: {
+        type: 'timed',
+        start: { type: 'floating', local: '2026-09-23T09:00:00' },
+        end: { type: 'floating', local: '2026-09-23T10:00:00' },
+      },
+      unsupportedAlarm: true,
+    };
+    const values = calendarEventToFormValues(event, calendar);
+    expect(values).toMatchObject({
+      alarmEnabled: false,
+      alarmEditable: false,
+      alarmDisabledReason: 'unsupported',
+      alarmChanged: false,
+    });
+    expect(
+      calendarEventPatchFromForm({ ...values, title: 'Renamed' }),
+    ).not.toHaveProperty('alarm');
+
+    const valid = createCalendarEventFormValues(
+      calendar,
+      DateTime.fromISO('2026-09-23T09:00:00', {
+        zone: 'Europe/Stockholm',
+      }),
+    );
+    expect(
+      validateCalendarEventForm({
+        ...valid,
+        title: 'Alarm',
+        alarmEnabled: true,
+      }),
+    ).toBeUndefined();
+    expect(
+      validateCalendarEventForm({
+        ...valid,
+        title: 'Alarm',
+        alarmEnabled: true,
+        alarmMinutes: '0',
+      }),
+    ).toBe('invalid-alarm');
+    expect(
+      validateCalendarEventForm({
+        ...valid,
+        title: 'Alarm',
+        alarmEnabled: true,
+        alarmWeeks: '1',
+        alarmDays: '1',
+      }),
+    ).toBe('invalid-alarm');
   });
 
   it('keeps floating event times local through form validation and timing updates', () => {
