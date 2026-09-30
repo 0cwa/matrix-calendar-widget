@@ -194,6 +194,35 @@ describe('projectCalendarEventOccurrences', () => {
     expect(startInstants[1] - startInstants[0]).toBe(73 * 60 * 60 * 1000);
   });
 
+  it.each(['MONTHLY', 'YEARLY'] as const)(
+    'continues projecting plain %s BYDAY rules',
+    (frequency) => {
+      const event = timedEvent({
+        recurrence: { rrule: `FREQ=${frequency};BYDAY=FR` },
+      });
+
+      const result = projectCalendarEventOccurrences(
+        [event],
+        stockholmRange,
+        'Europe/Stockholm',
+      );
+
+      expect(result.diagnostics).toEqual([]);
+      expect(
+        result.occurrences.map(({ event: occurrence }) => {
+          if (occurrence.timing.type !== 'timed') {
+            throw new Error('Expected a timed occurrence');
+          }
+          return occurrence.timing.start.local;
+        }),
+      ).toEqual([
+        '2026-10-23T09:00:00',
+        '2026-10-30T09:00:00',
+        '2026-11-06T09:00:00',
+      ]);
+    },
+  );
+
   it.each([
     'FREQ=WEEKLY;BYDAY=MO,FR;INTERVAL=2',
     'FREQ=WEEKLY;BYDAY=MO,FR;COUNT=4',

@@ -878,7 +878,7 @@ function buildRule(
   }
 
   validateByParts(parts);
-  if (parts.has('BYDAY')) {
+  if (parts.get('FREQ')?.toUpperCase() === 'WEEKLY' && parts.has('BYDAY')) {
     try {
       parseSimpleWeeklyByDay(parts, anchor);
     } catch {
