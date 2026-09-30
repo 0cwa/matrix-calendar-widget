@@ -1,6 +1,6 @@
 # Project status
 
-_Last updated: 2026-09-29_
+_Last updated: 2026-09-30_
 
 This is the short-lived execution snapshot. `docs/PLAN.md` is the durable milestone plan; GitHub issues contain acceptance criteria.
 
@@ -8,7 +8,7 @@ This is the short-lived execution snapshot. `docs/PLAN.md` is the durable milest
 
 **M3 is complete. M4 description and color editing, mixed-collection compatibility, manager-only CalDAV URL/copy diagnostics, and hiding of VJOURNAL-only/VTODO-only collections are implemented; issue #5 remains open for other collection-management work, and collection timezone editing is deferred. PRs #128 and #130 merged bounded read-only recurrence projection/range clipping and the first supported whole-series RRULE create/edit slice. M5 recurrence work continues in bounded slices.**
 
-ADR014/ADR015 define the mixed principal and static room-binding contracts. This M6 foundation validates server-configured bindings and provides fail-closed membership/power policy. Existing user-principal room-context gateway routes remain active and enforce membership/power checks while making CalDAV requests as the authenticated user. The new static-binding/application-principal path is not wired to the gateway or CalDAV; room-owned reads and writes remain blocked until its non-password Radicale path and deployment isolation are defined and tested. ADR009's user OpenID delegation does not provide application-principal credentials. No etke-managed host deployment has been verified.
+ADR014/ADR015 define the mixed-principal and static room-binding contracts. PR #132 adds binding validation and fail-closed membership/power policy; PR #133 wires the opt-in `target=room` authorization preflight, which checks membership and power before resolving the static binding and stops before CalDAV I/O. Existing user-principal room-context routes remain active and make CalDAV requests as the authenticated user. Live room-calendar data and room-target diagnostics remain disabled. M2's #48→#45→#3 path validates the same user's OpenID delegation to Radicale; it does not provide or validate bot/application-principal credentials. M6 still requires separate application-principal credential provisioning and validation, actor/membership/power/binding authorization, a Radicale contract under that principal, and cross-room isolation. Closing M2 does not satisfy these M6 gates. No etke-managed host deployment has been verified.
 
 ## Landed
 
@@ -52,7 +52,7 @@ Merged on `main`:
 - calendar color editing through the user-scoped gateway (PR #108),
 - mixed-collection compatibility notice and non-destructive VEVENT use (PR #109).
 
-Calendar timezone editing is deferred. PR #109 verifies mixed-collection notice behavior, preserves sibling VTODO data during VEVENT edits, and excludes collections from discovery when they explicitly report a supported-component set without VEVENT. The CalDAV discovery regression now verifies both VJOURNAL-only and VTODO-only collections remain untouched and hidden. PR #113 implements and validates the manager-only CalDAV URL/copy diagnostics under ADR022. Issue #5 remains open for remaining collection-management acceptance work. Its description and color requests are implemented, as are safe deletion, diagnostics, and mixed-collection handling. No issue edit is included.
+Calendar timezone editing is deferred. PR #109 verifies mixed-collection notice behavior, preserves sibling VTODO data during VEVENT edits, and excludes collections from discovery when they explicitly report a supported-component set without VEVENT. The CalDAV discovery regression now verifies both VJOURNAL-only and VTODO-only collections remain untouched and hidden. PR #113 implements and validates the manager-only CalDAV URL/copy diagnostics under ADR022. Issue #5 remains open for remaining collection-management acceptance work. Its body has been reconciled to record description and color editing, safe deletion, diagnostics, and mixed-collection handling as complete; collection-timezone editing remains deferred.
 
 ### M7 — Non-widget fallback
 
@@ -70,18 +70,18 @@ Issue #6 remains open. PR #128 completed bounded read-only projection and exact 
 
 ### M6 — PostgreSQL reminder persistence
 
-The optional app-owned PostgreSQL store, transactional claim layer, verified-TLS
-default, and restricted-role PostgreSQL 16 CI contract are implemented. The
-hosted restricted-role contract passed all five integration tests in run
-36358734009, and independent review passed. Full local project CI also passed;
-its PostgreSQL integration suite was skipped because no database URL was
-configured. The only remaining runtime gate for this store slice is verifying a
-default verified-TLS connection to an operator-controlled production PostgreSQL
-endpoint using its CA/certificate details. No endpoint or certificate
-configuration has been supplied, and etke-specific database wiring remains
-unverified. Persistence provides at-most-once database claim/completion state;
-it does not enable the reminder scheduler or guarantee exactly-once Matrix
-message delivery.
+The optional app-owned PostgreSQL store, schema migrations, transactional
+claim/completion contract, verified-TLS default, and restricted-role PostgreSQL
+16 CI contract are implemented. The hosted restricted-role contract passed all
+five integration tests in run 36358734009, and independent review passed. Full
+local project CI also passed; its PostgreSQL integration suite was skipped
+because no database URL was configured. Production validation remains open: no
+operator-controlled PostgreSQL endpoint or CA/certificate configuration has
+been supplied, so production TLS/CA validation and runtime validation against
+that endpoint have not been performed. etke-specific database wiring also
+remains unverified. Persistence provides at-most-once database
+claim/completion state; it does not enable the reminder scheduler or guarantee
+exactly-once Matrix message delivery.
 
 ## Active blockers
 
@@ -94,7 +94,7 @@ These are the user's delegated CalDAV identity path. They do not establish crede
 
 ### M6 — Room-owned application principal
 
-ADR014 / ADR015 select the room-owned application-principal model and operator-managed static room binding. This slice adds binding validation/resolution and a fail-closed membership/power policy service. Existing user-principal room-context routes remain active, enforce joined-membership/power checks, and make CalDAV requests as the authenticated user; the static-binding/application-principal gateway and CalDAV path remains unwired. Room-principal access still requires a non-password server-to-Radicale authentication path and deployment isolation. Matrix event sender data is authorization/audit context, not OpenID or CalDAV identity proof. Issue #7 remains open. Start reminder recipients with permission-checked room-wide notifications using standard `m.mentions.room: true`; defer email attendee registration until members can verify and consent to share an address. Per-user bot calendars are deferred until a trusted actor-token path is independently defined and tested.
+ADR014 / ADR015 select the room-owned application-principal model and operator-managed static room binding. PR #132 adds binding validation/resolution and a fail-closed membership/power policy service. PR #133 wires the opt-in `target=room` zero-I/O preflight: it checks current joined membership and power before resolving the static binding, then stops at the disabled access gate without CalDAV I/O. Existing user-principal room-context routes remain active and make CalDAV requests as the authenticated user. ADR014/015 retain the M2 OpenID-capable Radicale plugin as a prerequisite, but M2's #48→#45→#3 delegation contract validates the same user's OpenID identity and does not validate application-principal credentials. M6 separately requires bot/application-principal credential provisioning and validation, actor/membership/power/binding checks, a Radicale contract under that principal, and cross-room isolation. Closing M2 does not satisfy these M6 gates; until the M6 gates pass, live room-calendar data access and room-target diagnostics remain disabled. Matrix event sender data is authorization/audit context, not OpenID or CalDAV identity proof. Issue #7 remains open for real room-calendar operations. Start reminder delivery with permission-checked room-wide notifications using standard `m.mentions.room: true`, rechecking permission at delivery time. Individual Matrix-recipient selection is outside the accepted v1 scope and requires a later explicit scope decision. Email attendee/address collection is separately deferred until members explicitly verify and consent to share an address. Per-user bot calendars are deferred until a trusted actor-token path is independently defined and tested.
 
 ### M7 — Data commands
 
@@ -113,7 +113,7 @@ Issue #29 remains open for a repository administrator to enable and verify the d
 1. Keep M4 timezone editing deferred until its CalDAV compatibility boundary is established.
 2. Advance M5 through bounded recurrence and round-trip slices, adding DST and named-timezone regressions with each relevant behavior.
 3. In parallel, establish a writable source/release path for #48, then complete #45 against the tested user-delegation mode.
-4. Separately define/test application-principal Radicale authentication and deployment isolation, then wire the ADR014/ADR015 binding and membership/power foundation into room operations.
+4. Separately validate application-principal credential provisioning, a real-Radicale contract under that principal, actor/membership/power/binding checks, and cross-room isolation. M2's same-user OpenID delegation path remains a plugin-capability prerequisite, not proof that the application principal works or that its gates pass; the `target=room` preflight is already wired and stops before CalDAV.
 5. Build M7 data commands on those M6 authorization contracts; help is already available.
 6. Verify an operator-run deployment on the etke-managed host after the host-specific runtime contract is known.
 7. Ask a repository administrator to complete #29 branch protection.

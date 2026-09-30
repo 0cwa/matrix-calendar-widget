@@ -201,40 +201,52 @@ DST regression or recurrence-editing criteria above.
 
 ## M6 — Matrix team features and reminders
 
-- [ ] Wire room-target binding and authorization into calendar operations after
-      the non-password application-principal Radicale path and isolation gates
-      pass.
+- [x] Wire the zero-I/O `target=room` authorization preflight into calendar
+      operations: check joined membership and power before resolving the
+      operator-managed static binding. The room access gate stays disabled and
+      performs no CalDAV I/O.
   - [x] Define the operator-managed static room-to-calendar contract (ADR014/
         ADR015) and validate bindings in server configuration before lookup.
   - [x] Add a pure room-binding resolver and joined-membership/power policy
         service that denies on lookup errors. Existing user-principal room-
-        context routes remain active and enforce these checks; this foundation
-        does not wire the static-binding/application-principal path to the
-        gateway or CalDAV.
-- [ ] Team/member selector using the widget user directory/member APIs.
+        context routes remain active and use the authenticated user's
+        principal.
+- [ ] Enable live room-calendar data access and room-target diagnostics only
+      after the M2 OpenID-capable Radicale plugin and same-user delegation
+      contract are validated, and M6 separately validates application-principal
+      credential provisioning, authorization, a Radicale contract under that
+      principal, and cross-room isolation. M2's user-scoped contract does not
+      validate application-principal credentials, and closing M2 does not
+      prove those M6 gates. Keep issue #7 open for real room calendar
+      operations.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
-- [ ] Selected-user mentions.
-- [ ] First reminder target: permission-checked room-wide notifications using
-      standard `m.mentions.room: true` (ADR007/ADR019).
-- [ ] Complete the app-owned PostgreSQL reminder store and durable claim
-      contract (ADR019). The store, migration path, and restricted-role
-      PostgreSQL 16 integration job are implemented; all five hosted contract
-      tests passed in PR #111 (run 36358734009). The remaining store gate is
-      verified-TLS validation against an operator-controlled production
-      endpoint using its CA/certificate details. Claims provide at-most-once
-      database claim/completion semantics, not exactly-once Matrix message
-      delivery.
+- [ ] First reminder delivery target: permission-checked room-wide
+      notifications using standard `m.mentions.room: true`; check room-mention
+      permission again at delivery time (ADR007/ADR019).
+- [x] App-owned PostgreSQL reminder persistence, schema migrations, and
+      transactional claim/completion contract are implemented (ADR019). The
+      restricted-role PostgreSQL 16 integration job passed all five hosted
+      contract tests in PR #111 (run 36358734009). Database claims provide
+      at-most-once claim/completion state, not exactly-once Matrix message
+      delivery, and do not enable the scheduler or message delivery.
 - [x] Default optional reminder database connections to verified TLS; allow
       plaintext only with explicit `trusted-private-network` mode for an
-      operator-controlled isolated network (ADR021). Production TLS remains
-      unvalidated.
+      operator-controlled isolated network (ADR021).
+- [ ] Validate the production connection against an operator-controlled
+      PostgreSQL endpoint and its trusted CA/certificate configuration. No
+      endpoint or CA/certificate configuration has been supplied; production
+      TLS/CA and runtime validation therefore remain open.
 - [ ] Durable scheduler and idempotent delivery log.
 - [ ] Event detail action to link/open a Matrix room or MatrixRTC conference.
 - [ ] Audit-friendly event creation/edit messages where appropriate.
 
-Room-wide reminders are the first recipient flow. Defer email attendee
-registration until members can explicitly verify and consent to share an email
-address; do not infer attendee email addresses from Matrix room membership.
+Room-wide reminders are the accepted v1 recipient flow: send only
+permission-checked `m.mentions.room: true` notifications and recheck permission
+at delivery time. Individual Matrix-recipient selection is outside the
+accepted v1 scope and requires a later explicit scope decision. Email
+attendee/address collection is separately deferred until members can
+explicitly verify and consent to share an address; do not infer email
+addresses from Matrix room membership.
 
 **Exit:** teams can manage events in the configured room calendar from the widget and receive reliable Matrix reminders. Collection lifecycle and room bindings remain operator-managed under ADR015.
 
