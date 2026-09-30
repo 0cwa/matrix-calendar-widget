@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { CalendarEventPatch } from '@matrix-calendar-widget/calendar';
 import {
   BadRequestException,
   ConflictException,
@@ -1547,6 +1548,61 @@ END:VCALENDAR`,
     expect(putHeaders.get('If-Match')).toBe('"old-etag"');
     expect(putInit?.body).toContain('SUMMARY:After update');
     expect(putInit?.body).toContain('X-CUSTOM:preserve');
+  });
+
+  it('removes a VALARM from persisted CalDAV data after JSON serialization', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/alarm.ics';
+    const originalIcs = readFixture('alarm.ics')
+      .replace(
+        'PRODID:-//Matrix Calendar Widget//Fixtures//EN',
+        'PRODID:-//Matrix Calendar Widget//Fixtures//EN\nX-RESOURCE-METADATA:preserve',
+      )
+      .replace(
+        'SUMMARY:Release checkpoint',
+        'SUMMARY:Release checkpoint\nX-EVENT-METADATA:preserve',
+      );
+    const persistedIcs = originalIcs.replace(
+      'BEGIN:VALARM\nACTION:DISPLAY\nTRIGGER:-PT15M\nDESCRIPTION:Release checkpoint starts in 15 minutes\nEND:VALARM\n',
+      '',
+    );
+    const removePatch = JSON.parse(
+      JSON.stringify({ alarm: { operation: 'remove' } }),
+    ) as CalendarEventPatch;
+
+    fetch
+      .mockResponseOnce(originalIcs, {
+        status: 200,
+        headers: { ETag: '"old-etag"' },
+      })
+      .mockResponseOnce('', {
+        status: 200,
+        headers: { ETag: '"new-etag"' },
+      })
+      .mockResponseOnce(persistedIcs, {
+        status: 200,
+        headers: { ETag: '"new-etag"' },
+      });
+
+    const result = await createController().updateEvent(
+      userContext,
+      openIdCredential,
+      removePatch,
+      '"old-etag"',
+      roomId,
+      calendarId,
+      eventId,
+    );
+
+    expect(result.event.alarm).toBeUndefined();
+    expect(result.etag).toBe('"new-etag"');
+    const [, putInit] = fetch.mock.calls[1];
+    const writtenIcs = putInit?.body as string;
+    expect(writtenIcs).not.toContain('BEGIN:VALARM');
+    expect(writtenIcs).toContain('X-RESOURCE-METADATA:preserve');
+    expect(writtenIcs).toContain('X-EVENT-METADATA:preserve');
+    expect(persistedIcs).not.toContain('BEGIN:VALARM');
   });
 
   it('maps stale event updates to a stable conflict response', async () => {

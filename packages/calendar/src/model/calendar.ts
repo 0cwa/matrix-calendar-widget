@@ -81,6 +81,32 @@ export type CalendarEventDuration = {
   isNegative: boolean;
 };
 
+/**
+ * A relative display alarm's positive lead time before DTSTART. The CalDAV
+ * codec serializes this magnitude as a negative RFC 5545 TRIGGER duration.
+ */
+export type CalendarEventAlarmLeadTime = Omit<
+  CalendarEventDuration,
+  'isNegative'
+>;
+
+/** One editable RFC 5545 ACTION:DISPLAY alarm relative to DTSTART. */
+export type CalendarEventDisplayAlarm = {
+  action: 'display';
+  trigger: CalendarEventAlarmLeadTime;
+};
+
+/** Explicit serializable operation that removes an existing display alarm. */
+export type CalendarEventAlarmRemoval = { operation: 'remove' };
+
+/** Alarm value accepted by an event patch, including its remove operation. */
+export type CalendarEventAlarmPatch =
+  | CalendarEventDisplayAlarm
+  | CalendarEventAlarmRemoval;
+
+/** Alarm data retained by CalDAV but outside the editor's supported shape. */
+export type CalendarEventUnsupportedAlarm = true;
+
 /** Recurrence timing keeps an explicit end separate from an RFC duration. */
 export type CalendarEventRecurrenceTiming =
   | {
@@ -193,6 +219,10 @@ export type CalendarEvent = {
   priority?: number;
 
   recurrence?: CalendarEventRecurrence;
+  /** One supported DISPLAY alarm, when the resource contains one. */
+  alarm?: CalendarEventDisplayAlarm;
+  /** An existing alarm shape is retained but cannot safely be edited. */
+  unsupportedAlarm?: CalendarEventUnsupportedAlarm;
   /** Read-only warning marker derived from recurrence data in the resource. */
   unsupportedRecurrence?: CalendarEventUnsupportedRecurrence;
   /** Read-only marker for an unknown or conflicting embedded VTIMEZONE. */
@@ -205,6 +235,7 @@ export type CalendarEventInput = Omit<
   | 'calendarId'
   | 'recurrence'
   | 'unsupportedRecurrence'
+  | 'unsupportedAlarm'
   | 'unsupportedTimezone'
 > & { recurrence?: { rrule?: string } };
 
@@ -219,10 +250,15 @@ export type CalendarEventPatch = Partial<
     | 'calendarId'
     | 'uid'
     | 'recurrence'
+    | 'alarm'
+    | 'unsupportedAlarm'
     | 'unsupportedRecurrence'
     | 'unsupportedTimezone'
   >
-> & { recurrence?: CalendarEventRecurrenceWrite };
+> & {
+  alarm?: CalendarEventAlarmPatch;
+  recurrence?: CalendarEventRecurrenceWrite;
+};
 
 export type CalendarTimeRange = {
   /** Inclusive ISO instant. */
@@ -241,4 +277,16 @@ export function isAllDayCalendarEvent(
   event: CalendarEvent,
 ): event is CalendarEvent & { timing: AllDayCalendarEventTiming } {
   return event.timing.type === 'all-day';
+}
+
+export function isCalendarEventAlarmRemoval(
+  value: unknown,
+): value is CalendarEventAlarmRemoval {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 1 &&
+    (value as Record<string, unknown>).operation === 'remove'
+  );
 }

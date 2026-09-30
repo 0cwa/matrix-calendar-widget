@@ -124,7 +124,9 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [ ] RECURRENCE-ID instance override editing.
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
-- [ ] VALARM preservation and editor.
+- [x] Preserve existing VALARM data on ordinary event edits and add/edit/remove
+      one supported relative DISPLAY alarm whose negative DURATION trigger is
+      measured from DTSTART.
 - [ ] SEQUENCE / DTSTAMP / CREATED / LAST-MODIFIED handling.
 - [ ] Organizer/attendee round-trip.
 - [ ] Attachments/conference properties where safely interoperable.
@@ -148,6 +150,15 @@ other RRULE parts are present, and WKST is absent or the default MO. A weekly
 rule outside this shape stays opaque in the projector and is not editable;
 unrelated event edits preserve its original RRULE and resource data. Full
 recurrence editing and client interoperability remain open.
+
+The widget can add, edit, or remove one `ACTION:DISPLAY` VALARM with a single
+negative relative DURATION trigger from DTSTART. It preserves the existing
+alarm description and unknown alarm properties when changing the trigger.
+Multiple alarms, other actions, absolute or non-START triggers, and repeating
+alarms remain opaque: only alarm controls are disabled, while ordinary event
+fields stay editable and preserve the resource. This edits CalDAV alarm
+metadata for clients that honor it; Matrix reminder recipients, scheduling,
+and delivery remain separate M6 work under ADR007.
 
 The CalDAV codec exposes a read-only domain view of master RRULE, RDATE
 (including PERIOD values), and EXDATE values plus same-resource, same-UID

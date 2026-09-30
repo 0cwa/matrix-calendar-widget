@@ -529,4 +529,96 @@ describe('<CalendarEventEditorDialog />', () => {
       await screen.findByText('The event could not be saved.'),
     ).toBeInTheDocument();
   });
+
+  it('creates, edits, reloads, and removes one CalDAV DISPLAY alarm', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      idFactory: () => 'alarm-event',
+    });
+    const props = {
+      calendars: [calendar],
+      onClose: vi.fn(),
+      open: true,
+      uidFactory: () => 'alarm-event@example.test',
+    };
+    const view = render(<CalendarEventEditorDialog {...props} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    await userEvent.type(
+      await screen.findByRole('textbox', { name: /Title/i }),
+      'Alarm event',
+    );
+    await userEvent.click(screen.getByLabelText('CalDAV reminder'));
+    fireEvent.change(screen.getByLabelText('Minutes before'), {
+      target: { value: '25' },
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
+
+    const created = await repository.getEvent('team', 'alarm-event');
+    expect(created.alarm).toEqual({
+      action: 'display',
+      trigger: { weeks: 0, days: 0, hours: 0, minutes: 25, seconds: 0 },
+    });
+
+    view.rerender(<CalendarEventEditorDialog {...props} event={created} />);
+    expect(await screen.findByLabelText('CalDAV reminder')).toBeChecked();
+    expect(screen.getByLabelText('Minutes before')).toHaveValue(25);
+    fireEvent.change(screen.getByLabelText('Minutes before'), {
+      target: { value: '40' },
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const updated = await repository.getEvent('team', 'alarm-event');
+    expect(updated.alarm?.trigger.minutes).toBe(40);
+
+    view.rerender(<CalendarEventEditorDialog {...props} event={updated} />);
+    await userEvent.click(await screen.findByLabelText('CalDAV reminder'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await expect(
+      repository.getEvent('team', 'alarm-event'),
+    ).resolves.toMatchObject({ alarm: undefined });
+  });
+
+  it('leaves opaque alarms disabled while ordinary event fields remain editable', async () => {
+    const opaqueAlarmEvent: CalendarEvent = {
+      ...event,
+      id: 'opaque-alarm',
+      unsupportedAlarm: true,
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [opaqueAlarmEvent],
+    });
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={opaqueAlarmEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByText(
+        'This event contains alarm data this editor cannot safely change. Other event edits will preserve it.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('CalDAV reminder')).toBeDisabled();
+    const title = screen.getByRole('textbox', { name: /Title/i });
+    expect(title).toBeEnabled();
+    await userEvent.clear(title);
+    await userEvent.type(title, 'Renamed opaque alarm event');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await expect(
+      repository.getEvent('team', 'opaque-alarm'),
+    ).resolves.toMatchObject({
+      title: 'Renamed opaque alarm event',
+      unsupportedAlarm: true,
+    });
+  });
 });

@@ -190,6 +190,32 @@ export function CalendarEventEditorDialog({
     );
   };
 
+  const handleAlarmToggle = (change: ChangeEvent<HTMLInputElement>) => {
+    setValues((current) =>
+      current
+        ? {
+            ...current,
+            alarmEnabled: change.target.checked,
+            alarmChanged: true,
+          }
+        : current,
+    );
+  };
+
+  const handleAlarmDurationChange =
+    (field: keyof CalendarEventFormValues) =>
+    (change: ChangeEvent<HTMLInputElement>) => {
+      setValues((current) =>
+        current
+          ? {
+              ...current,
+              [field]: change.target.value,
+              alarmChanged: true,
+            }
+          : current,
+      );
+    };
+
   const handleWeekdayModeChange = (change: ChangeEvent<HTMLInputElement>) => {
     setValues((current) =>
       current
@@ -284,7 +310,12 @@ export function CalendarEventEditorDialog({
                 'calendarEvents.editor.invalidRecurrence',
                 'Check the recurrence frequency, interval, and end date or count.',
               )
-            : undefined;
+            : validationErrorCode === 'invalid-alarm'
+              ? t(
+                  'calendarEvents.editor.invalidAlarm',
+                  'Enter a positive lead time using whole-number duration units. Weeks cannot be combined with other units.',
+                )
+              : undefined;
 
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
@@ -490,6 +521,66 @@ export function CalendarEventEditorDialog({
               onChange={handleChange('description')}
               value={values.description}
             />
+
+            <FormControl component="fieldset">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={Boolean(values.alarmEnabled)}
+                    disabled={values.alarmEditable === false}
+                    onChange={handleAlarmToggle}
+                  />
+                }
+                label={t(
+                  'calendarEvents.editor.caldavAlarm',
+                  'CalDAV reminder',
+                )}
+              />
+              {values.alarmDisabledReason && (
+                <Alert severity="info">
+                  {t(
+                    'calendarEvents.editor.unsupportedAlarmReadOnly',
+                    'This event contains alarm data this editor cannot safely change. Other event edits will preserve it.',
+                  )}
+                </Alert>
+              )}
+              {values.alarmEnabled && values.alarmEditable !== false && (
+                <Stack spacing={1}>
+                  <FormLabel component="legend">
+                    {t(
+                      'calendarEvents.editor.alarmLeadTime',
+                      'Time before the event starts',
+                    )}
+                  </FormLabel>
+                  <Stack direction={{ sm: 'row', xs: 'column' }} spacing={1}>
+                    {(
+                      [
+                        ['alarmWeeks', 'alarmWeeks', 'Weeks before'],
+                        ['alarmDays', 'alarmDays', 'Days before'],
+                        ['alarmHours', 'alarmHours', 'Hours before'],
+                        ['alarmMinutes', 'alarmMinutes', 'Minutes before'],
+                        ['alarmSeconds', 'alarmSeconds', 'Seconds before'],
+                      ] as const
+                    ).map(([field, key, fallback]) => (
+                      <TextField
+                        inputProps={{ min: 0, step: 1 }}
+                        key={field}
+                        label={t(`calendarEvents.editor.${key}`, fallback)}
+                        onChange={handleAlarmDurationChange(field)}
+                        type="number"
+                        value={values[field] ?? '0'}
+                      />
+                    ))}
+                  </Stack>
+                  <Typography color="text.secondary" variant="body2">
+                    {t(
+                      'calendarEvents.editor.alarmBoundary',
+                      'This stores a CalDAV display alarm for clients that support it. Matrix reminder delivery is separate.',
+                    )}
+                  </Typography>
+                </Stack>
+              )}
+            </FormControl>
 
             <FormControlLabel
               control={

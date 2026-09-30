@@ -29,6 +29,7 @@ import {
   CalendarId,
   CalendarTimeRange,
   TimedCalendarEventTiming,
+  isCalendarEventAlarmRemoval,
 } from '../model';
 import { calendarEventRecurrenceIdentity } from '../utils/calendarEventOccurrenceProjection';
 import { calendarEventTimedDateTimeToDateTime } from '../utils/calendarEventTimedDateTime';
@@ -227,19 +228,34 @@ export class InMemoryCalendarRepository implements CalendarRepository {
   ): Promise<CalendarEvent> {
     this.getWritableCalendar(calendarId);
     const current = this.getStoredEvent(calendarId, eventId);
+    if (
+      current.unsupportedAlarm &&
+      Object.prototype.hasOwnProperty.call(patch, 'alarm')
+    ) {
+      throw new CalendarRepositoryError(
+        'unsupported-patch',
+        'Alarm edits are not supported for this event',
+      );
+    }
     const clonedPatch = cloneCalendarEventPatch(patch);
+    const { alarm: alarmPatch, ...mutablePatch } = clonedPatch;
     const recurrence = Object.prototype.hasOwnProperty.call(patch, 'recurrence')
       ? applyRecurrenceWrite(current.recurrence, clonedPatch.recurrence)
       : current.recurrence;
 
     const updated: CalendarEvent = {
       ...current,
-      ...clonedPatch,
+      ...mutablePatch,
       id: current.id,
       calendarId: current.calendarId,
       uid: current.uid,
       recurrence,
     };
+    if (isCalendarEventAlarmRemoval(alarmPatch)) {
+      delete updated.alarm;
+    } else if (alarmPatch) {
+      updated.alarm = alarmPatch;
+    }
 
     this.events.get(calendarId)!.set(eventId, updated);
     return cloneCalendarEvent(updated);
@@ -448,6 +464,9 @@ function cloneCalendarEvent(event: CalendarEvent): CalendarEvent {
         ? cloneTimedTiming(event.timing)
         : cloneAllDayTiming(event.timing),
     categories: event.categories ? [...event.categories] : undefined,
+    alarm: event.alarm
+      ? { ...event.alarm, trigger: { ...event.alarm.trigger } }
+      : undefined,
     recurrence: cloneRecurrence(event.recurrence),
   };
 }
@@ -462,6 +481,9 @@ function cloneCalendarEventInput(
         ? cloneTimedTiming(input.timing)
         : cloneAllDayTiming(input.timing),
     categories: input.categories ? [...input.categories] : undefined,
+    alarm: input.alarm
+      ? { ...input.alarm, trigger: { ...input.alarm.trigger } }
+      : undefined,
     recurrence: input.recurrence ? { ...input.recurrence } : undefined,
   };
 }
@@ -508,6 +530,15 @@ function cloneCalendarEventPatch(
 
   if (patch.categories) {
     cloned.categories = [...patch.categories];
+  }
+
+  if (patch.alarm) {
+    cloned.alarm = isCalendarEventAlarmRemoval(patch.alarm)
+      ? { ...patch.alarm }
+      : {
+          ...patch.alarm,
+          trigger: { ...patch.alarm.trigger },
+        };
   }
 
   if (patch.recurrence) {

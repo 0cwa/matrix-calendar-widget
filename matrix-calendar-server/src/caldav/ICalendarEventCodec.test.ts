@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
-import type { CalendarEventDateTime } from '@matrix-calendar-widget/calendar';
+import type {
+  CalendarEvent,
+  CalendarEventDateTime,
+  CalendarEventPatch,
+} from '@matrix-calendar-widget/calendar';
 import fs from 'fs';
 import ICAL from 'ical.js';
 import path from 'path';
@@ -1660,7 +1664,313 @@ END:VCALENDAR`,
     expect(event?.getFirstSubcomponent('valarm')).not.toBeNull();
     expect(calendar.getAllSubcomponents('vtodo')).toHaveLength(1);
   });
+
+  it('reads, creates, edits, and removes one negative relative DISPLAY alarm', () => {
+    const parsed = codec.parse('team', 'alarm.ics', fixture('alarm.ics'));
+    expect(parsed.event.alarm).toEqual({
+      action: 'display',
+      trigger: { weeks: 0, days: 0, hours: 0, minutes: 15, seconds: 0 },
+    });
+    expect(parsed.event.unsupportedAlarm).toBeUndefined();
+
+    const alarm: NonNullable<CalendarEvent['alarm']> = {
+      action: 'display',
+      trigger: { weeks: 0, days: 1, hours: 2, minutes: 30, seconds: 0 },
+    };
+    const plain = codec.parse('team', 'plain.ics', fixture('simple-timed.ics'));
+    const added = plain.applyPatch({ alarm });
+    expect(
+      codec.parse('team', 'plain.ics', added.icalendar).event.alarm,
+    ).toEqual(alarm);
+
+    const explicitStart = codec.parse(
+      'team',
+      'start-related.ics',
+      alarmEventSource().replace(
+        'TRIGGER:-PT15M',
+        'TRIGGER;RELATED=START:-PT15M',
+      ),
+    );
+    expect(explicitStart.event.unsupportedAlarm).toBeUndefined();
+    expect(explicitStart.applyPatch({ alarm }).icalendar).toContain(
+      'TRIGGER;RELATED=START:-P1DT2H30M',
+    );
+
+    const created = codec.create('team', 'created.ics', {
+      uid: 'created-alarm@example.test',
+      title: 'Created with a CalDAV reminder',
+      timing: {
+        type: 'timed',
+        start: { type: 'floating', local: '2026-09-23T09:00:00' },
+        end: { type: 'floating', local: '2026-09-23T10:00:00' },
+      },
+      alarm,
+    });
+    const createdCalendar = ICAL.Component.fromString(created.icalendar);
+    const createdAlarm = createdCalendar
+      .getFirstSubcomponent('vevent')
+      ?.getFirstSubcomponent('valarm');
+    expect(createdAlarm?.getFirstPropertyValue('action')).toBe('DISPLAY');
+    expect(createdAlarm?.getFirstPropertyValue('description')).toBe(
+      'Created with a CalDAV reminder',
+    );
+    expect(createdAlarm?.getFirstPropertyValue('trigger')?.toString()).toBe(
+      '-P1DT2H30M',
+    );
+    expect(
+      codec.parse('team', 'created.ics', created.icalendar).event.alarm,
+    ).toEqual(alarm);
+
+    const changed = parsed.applyPatch({
+      alarm: {
+        action: 'display',
+        trigger: { weeks: 0, days: 0, hours: 0, minutes: 30, seconds: 0 },
+      },
+    });
+    expect(changed.event.alarm?.trigger.minutes).toBe(30);
+    const reparsed = codec.parse('team', 'alarm.ics', changed.icalendar);
+    expect(reparsed.event.alarm?.trigger.minutes).toBe(30);
+
+    const removePatch = JSON.parse(
+      JSON.stringify({ alarm: { operation: 'remove' } }),
+    ) as CalendarEventPatch;
+    expect(removePatch).toEqual({ alarm: { operation: 'remove' } });
+    const removed = reparsed.applyPatch(removePatch);
+    expect(removed.event.alarm).toBeUndefined();
+    expect(
+      ICAL.Component.fromString(removed.icalendar)
+        .getFirstSubcomponent('vevent')
+        ?.getAllSubcomponents('valarm'),
+    ).toHaveLength(0);
+  });
+
+  it('changes a supported alarm without rewriting unrelated resource data', () => {
+    const source = fixture('recurrence-override.ics');
+    const parsed = codec.parse('team', 'recurring-alarm.ics', source);
+    expect(parsed.event.alarm?.trigger.minutes).toBe(10);
+
+    const changed = parsed.applyPatch({
+      alarm: {
+        action: 'display',
+        trigger: { weeks: 0, days: 0, hours: 0, minutes: 20, seconds: 0 },
+      },
+    });
+    const calendar = ICAL.Component.fromString(changed.icalendar);
+    const events = calendar.getAllSubcomponents('vevent');
+    const master = events[0];
+    const valarm = master.getFirstSubcomponent('valarm');
+
+    expect(events).toHaveLength(3);
+    expect(calendar.getFirstSubcomponent('vtimezone')).not.toBeNull();
+    expect(calendar.getFirstPropertyValue('x-custom-calendar-property')).toBe(
+      'preserve-resource-value',
+    );
+    expect(master.getFirstPropertyValue('rrule')?.toString()).toBe(
+      'FREQ=WEEKLY;COUNT=4',
+    );
+    expect(master.getFirstPropertyValue('x-client-metadata')).toBe(
+      'preserve-value',
+    );
+    expect(valarm?.getFirstPropertyValue('description')).toBe(
+      'Preserve the series reminder',
+    );
+    expect(valarm?.getFirstPropertyValue('trigger')?.toString()).toBe('-PT20M');
+    expect(valarm?.getFirstPropertyValue('x-alarm-metadata')).toBe(
+      'preserve-alarm-property',
+    );
+    expect(events[1].getFirstPropertyValue('x-override-marker')).toBe(
+      'preserve-exception',
+    );
+    expect(events[2].getFirstPropertyValue('x-override-marker')).toBe(
+      'preserve-cancellation',
+    );
+    expect(
+      codec.parse('team', 'recurring-alarm.ics', changed.icalendar).event.alarm
+        ?.trigger.minutes,
+    ).toBe(20);
+
+    const removePatch = JSON.parse(
+      JSON.stringify({ alarm: { operation: 'remove' } }),
+    ) as CalendarEventPatch;
+    const removed = parsed.applyPatch(removePatch);
+    const removedCalendar = ICAL.Component.fromString(removed.icalendar);
+    expect(removedCalendar.getAllSubcomponents('vevent')).toHaveLength(3);
+    expect(
+      removedCalendar
+        .getFirstSubcomponent('vevent')
+        ?.getFirstSubcomponent('valarm'),
+    ).toBeNull();
+    expect(removedCalendar.getFirstSubcomponent('vtimezone')).not.toBeNull();
+    expect(
+      removedCalendar.getFirstPropertyValue('x-custom-calendar-property'),
+    ).toBe('preserve-resource-value');
+  });
+
+  it('rejects malformed JSON alarm removal operations for supported alarms', () => {
+    const parsed = codec.parse('team', 'alarm.ics', fixture('alarm.ics'));
+
+    for (const alarm of [
+      { operation: 'clear' },
+      { operation: 'remove', unexpected: true },
+      null,
+    ]) {
+      const malformedPatch = JSON.parse(
+        JSON.stringify({ alarm }),
+      ) as CalendarEventPatch;
+      expect(() => parsed.applyPatch(malformedPatch)).toThrow(
+        new ICalendarEventCodecError(
+          'unsupported-patch',
+          'Only one negative relative DISPLAY alarm from DTSTART is supported',
+        ),
+      );
+    }
+  });
+
+  it.each<readonly [string, (source: string) => string]>([
+    [
+      'a non-DISPLAY action',
+      (source) => source.replace('ACTION:DISPLAY', 'ACTION:EMAIL'),
+    ],
+    [
+      'an absolute DATE-TIME trigger',
+      (source) =>
+        source.replace(
+          'TRIGGER:-PT15M',
+          'TRIGGER;VALUE=DATE-TIME:20260923T084500Z',
+        ),
+    ],
+    [
+      'a positive duration trigger',
+      (source) => source.replace('-PT15M', 'PT15M'),
+    ],
+    [
+      'a trigger related to the event end',
+      (source) =>
+        source.replace('TRIGGER:-PT15M', 'TRIGGER;RELATED=END:-PT15M'),
+    ],
+    [
+      'an unknown trigger parameter',
+      (source) =>
+        source.replace('TRIGGER:-PT15M', 'TRIGGER;X-MODE=custom:-PT15M'),
+    ],
+    [
+      'a repeating alarm',
+      (source) =>
+        source.replace('END:VALARM', 'REPEAT:2\r\nDURATION:PT5M\r\nEND:VALARM'),
+    ],
+    [
+      'multiple alarms in one event',
+      (source) =>
+        source.replace(
+          'END:VEVENT',
+          'BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Second\r\nTRIGGER:-PT5M\r\nEND:VALARM\r\nEND:VEVENT',
+        ),
+    ],
+    [
+      'an alarm on a detached event',
+      (source) =>
+        source.replace(
+          'END:VCALENDAR',
+          'BEGIN:VEVENT\r\nUID:other@example.test\r\nDTSTAMP:20260922T120000Z\r\nDTSTART:20260923T090000Z\r\nDTEND:20260923T100000Z\r\nSUMMARY:Other event\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Other\r\nTRIGGER:-PT5M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR',
+        ),
+    ],
+  ])('keeps %s opaque and permits unrelated edits', (_shape, mutate) => {
+    const source = mutate(alarmEventSource());
+    const parsed = codec.parse('team', 'opaque-alarm.ics', source);
+    expect(parsed.event.alarm).toBeUndefined();
+    expect(parsed.event.unsupportedAlarm).toBe(true);
+
+    const alarm = {
+      action: 'display' as const,
+      trigger: { weeks: 0, days: 0, hours: 0, minutes: 10, seconds: 0 },
+    };
+    expect(() => parsed.applyPatch({ alarm })).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Only one negative relative DISPLAY alarm from DTSTART is supported',
+      ),
+    );
+    expect(() => parsed.applyPatch({ alarm: { operation: 'remove' } })).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Only one negative relative DISPLAY alarm from DTSTART is supported',
+      ),
+    );
+
+    const renamed = parsed.applyPatch({
+      title: 'Renamed while keeping opaque alarm',
+    });
+    const calendar = ICAL.Component.fromString(renamed.icalendar);
+    expect(calendar.toString()).toContain(
+      'X-ALARM-METADATA:preserve-alarm-property',
+    );
+    expect(calendar.getAllSubcomponents('vevent')).toHaveLength(
+      ICAL.Component.fromString(source).getAllSubcomponents('vevent').length,
+    );
+    expect(renamed.event.unsupportedAlarm).toBe(true);
+  });
+
+  it('rejects malformed alarm writes without partially changing an event', () => {
+    const parsed = codec.parse(
+      'team',
+      'no-alarm.ics',
+      fixture('simple-timed.ics'),
+    );
+    expect(parsed.event.alarm).toBeUndefined();
+    expect(parsed.event.unsupportedAlarm).toBeUndefined();
+
+    expect(() =>
+      parsed.applyPatch({
+        alarm: {
+          action: 'display',
+          trigger: { weeks: 0, days: 0, hours: 0, minutes: 0, seconds: 0 },
+        },
+      }),
+    ).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Only one negative relative DISPLAY alarm from DTSTART is supported',
+      ),
+    );
+    expect(() =>
+      parsed.applyPatch({
+        alarm: {
+          action: 'display',
+          trigger: { weeks: 1, days: 1, hours: 0, minutes: 0, seconds: 0 },
+        },
+      }),
+    ).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Only one negative relative DISPLAY alarm from DTSTART is supported',
+      ),
+    );
+  });
 });
+
+function alarmEventSource(): string {
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Matrix Calendar Widget//Tests//EN',
+    'X-CUSTOM-CALENDAR-PROPERTY:preserve-resource-value',
+    'BEGIN:VEVENT',
+    'UID:alarm-test@example.test',
+    'DTSTAMP:20260922T120000Z',
+    'DTSTART:20260923T090000Z',
+    'DTEND:20260923T100000Z',
+    'SUMMARY:Alarm test',
+    'X-CUSTOM-EVENT-PROPERTY:preserve-event-value',
+    'BEGIN:VALARM',
+    'ACTION:DISPLAY',
+    'DESCRIPTION:Alarm description',
+    'TRIGGER:-PT15M',
+    'X-ALARM-METADATA:preserve-alarm-property',
+    'END:VALARM',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+}
 
 function fixture(name: string): string {
   return fs.readFileSync(

@@ -18,6 +18,7 @@ import {
   Calendar,
   CalendarEvent,
   CalendarEventDateTime,
+  CalendarEventDisplayAlarm,
   CalendarEventInput,
   CalendarEventPatch,
   CalendarEventTiming,
@@ -56,13 +57,23 @@ export type CalendarEventFormValues = {
   recurrenceEditable?: boolean;
   recurrenceDisabledReason?: 'complex' | 'unsupported';
   recurrenceChanged?: boolean;
+  alarmEnabled?: boolean;
+  alarmWeeks?: string;
+  alarmDays?: string;
+  alarmHours?: string;
+  alarmMinutes?: string;
+  alarmSeconds?: string;
+  alarmEditable?: boolean;
+  alarmDisabledReason?: 'unsupported';
+  alarmChanged?: boolean;
 };
 
 export type CalendarEventValidationError =
   | 'title-required'
   | 'invalid-range'
   | 'invalid-timezone'
-  | 'invalid-recurrence';
+  | 'invalid-recurrence'
+  | 'invalid-alarm';
 
 export function createCalendarEventFormValues(
   calendar: Calendar,
@@ -92,6 +103,7 @@ export function createCalendarEventFormValues(
     recurrenceUntil: start.toISODate() ?? '',
     recurrenceEditable: true,
     recurrenceChanged: false,
+    ...emptyAlarmFormValues(),
   };
 }
 
@@ -116,6 +128,7 @@ export function calendarEventToFormValues(
       timezoneChanged: false,
       originalTiming: event.timing,
       ...recurrenceFormValues(event),
+      ...alarmFormValues(event),
     };
   }
 
@@ -140,6 +153,7 @@ export function calendarEventToFormValues(
     timezoneChanged: false,
     originalTiming: event.timing,
     ...recurrenceFormValues(event),
+    ...alarmFormValues(event),
   };
 }
 
@@ -169,6 +183,7 @@ export function calendarEventInputFromForm(
   return {
     uid,
     ...editableFields,
+    ...(values.alarmEnabled ? { alarm: alarmFromForm(values) } : {}),
     ...(values.repeats
       ? {
           recurrence: {
@@ -191,6 +206,13 @@ export function calendarEventPatchFromForm(
   return {
     ...fields,
     ...(values.timingChanged === false ? {} : { timing }),
+    ...(values.alarmChanged
+      ? {
+          alarm: values.alarmEnabled
+            ? alarmFromForm(values)
+            : { operation: 'remove' },
+        }
+      : {}),
     description: normalizeOptional(values.description),
     location: normalizeOptional(values.location),
     ...(values.recurrenceChanged || recurrenceNeedsAnchorUpdate
@@ -256,6 +278,11 @@ export function validateCalendarEventForm(
     return 'title-required';
   }
 
+  const alarmError = validateAlarm(values);
+  if (alarmError) {
+    return alarmError;
+  }
+
   if (values.timingType === 'all-day') {
     const start = DateTime.fromISO(values.start);
     const end = DateTime.fromISO(values.end);
@@ -295,6 +322,107 @@ export function validateCalendarEventForm(
     values,
     calendarEventEditableFieldsFromForm(values).timing,
   );
+}
+
+function emptyAlarmFormValues(): Pick<
+  CalendarEventFormValues,
+  | 'alarmEnabled'
+  | 'alarmWeeks'
+  | 'alarmDays'
+  | 'alarmHours'
+  | 'alarmMinutes'
+  | 'alarmSeconds'
+  | 'alarmEditable'
+  | 'alarmChanged'
+> {
+  return {
+    alarmEnabled: false,
+    alarmWeeks: '0',
+    alarmDays: '0',
+    alarmHours: '0',
+    alarmMinutes: '15',
+    alarmSeconds: '0',
+    alarmEditable: true,
+    alarmChanged: false,
+  };
+}
+
+function alarmFormValues(
+  event: CalendarEvent,
+): Pick<
+  CalendarEventFormValues,
+  | 'alarmEnabled'
+  | 'alarmWeeks'
+  | 'alarmDays'
+  | 'alarmHours'
+  | 'alarmMinutes'
+  | 'alarmSeconds'
+  | 'alarmEditable'
+  | 'alarmDisabledReason'
+  | 'alarmChanged'
+> {
+  if (event.unsupportedAlarm) {
+    return {
+      ...emptyAlarmFormValues(),
+      alarmEditable: false,
+      alarmDisabledReason: 'unsupported',
+    };
+  }
+
+  const trigger = event.alarm?.trigger;
+  return {
+    ...emptyAlarmFormValues(),
+    alarmEnabled: trigger !== undefined,
+    alarmWeeks: String(trigger?.weeks ?? 0),
+    alarmDays: String(trigger?.days ?? 0),
+    alarmHours: String(trigger?.hours ?? 0),
+    alarmMinutes: String(trigger?.minutes ?? 0),
+    alarmSeconds: String(trigger?.seconds ?? 0),
+  };
+}
+
+function alarmFromForm(
+  values: CalendarEventFormValues,
+): CalendarEventDisplayAlarm {
+  return {
+    action: 'display',
+    trigger: {
+      weeks: Number(values.alarmWeeks ?? '0'),
+      days: Number(values.alarmDays ?? '0'),
+      hours: Number(values.alarmHours ?? '0'),
+      minutes: Number(values.alarmMinutes ?? '0'),
+      seconds: Number(values.alarmSeconds ?? '0'),
+    },
+  };
+}
+
+function validateAlarm(
+  values: CalendarEventFormValues,
+): CalendarEventValidationError | undefined {
+  if (!values.alarmEnabled || values.alarmEditable === false) {
+    return undefined;
+  }
+
+  const units = [
+    values.alarmWeeks ?? '0',
+    values.alarmDays ?? '0',
+    values.alarmHours ?? '0',
+    values.alarmMinutes ?? '0',
+    values.alarmSeconds ?? '0',
+  ];
+  const parsed = units.map((value) => Number(value));
+  if (
+    units.some(
+      (value, index) =>
+        !/^\d+$/.test(value) || !Number.isSafeInteger(parsed[index]),
+    ) ||
+    parsed.every((value) => value === 0) ||
+    (parsed[0] > 0 && parsed.slice(1).some((value) => value > 0))
+  ) {
+    return 'invalid-alarm';
+  }
+
+  return undefined;
 }
 
 function recurrenceFormValues(
