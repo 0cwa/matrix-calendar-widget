@@ -24,7 +24,13 @@
       "delete": "Delete",
       "edit": "Edit",
       "location": "Location",
-      "seriesOccurrenceActions": "This is one occurrence of a recurring series. Editing or deleting applies to the whole series."
+      "occurrenceConflict": "This event changed elsewhere. Reload the calendar and retry.",
+      "occurrenceError": "The occurrence could not be updated.",
+      "restoreOccurrence": "Restore this occurrence",
+      "restoreSkippedOccurrence": "Restore",
+      "seriesOccurrenceActions": "This is one occurrence of a recurring series. Editing or deleting applies to the whole series.",
+      "skipOccurrence": "Skip this occurrence",
+      "skippedOccurrences": "Skipped occurrences"
     },
     "editor": {
       "afterCount": "After occurrences",

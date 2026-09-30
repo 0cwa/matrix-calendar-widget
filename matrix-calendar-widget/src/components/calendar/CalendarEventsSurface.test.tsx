@@ -362,6 +362,247 @@ describe('<CalendarEventsSurface />', () => {
     );
   });
 
+  it('skips and restores a moved occurrence using its original recurrence identity', async () => {
+    const originalRecurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-10-02T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const recurringEvent: CalendarEvent = {
+      id: 'https://radicale.example.test/team/moved.ics',
+      calendarId: 'team',
+      uid: 'moved-series@example.test',
+      title: 'Moved planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-01T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-01T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=DAILY;COUNT=3',
+        overrides: [
+          {
+            recurrenceId: originalRecurrenceId,
+            timing: {
+              type: 'end',
+              start: {
+                type: 'date-time',
+                value: {
+                  local: '2026-10-01T12:00:00',
+                  timezone: 'Europe/Stockholm',
+                },
+              },
+              end: {
+                type: 'date-time',
+                value: {
+                  local: '2026-10-01T13:00:00',
+                  timezone: 'Europe/Stockholm',
+                },
+              },
+            },
+          },
+        ],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [{ ...calendars[0], readOnly: false }],
+      events: [recurringEvent],
+    });
+    const updateEvent = vi.spyOn(repository, 'updateEvent');
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-10-01T00:00:00Z',
+          endDate: '2026-10-01T23:59:59.999Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const occurrences = await screen.findAllByRole('listitem', {
+      name: 'Moved planning',
+    });
+    expect(occurrences).toHaveLength(2);
+    await userEvent.click(within(occurrences[1]).getByRole('button'));
+
+    const details = screen.getByRole('dialog');
+    await userEvent.click(
+      within(details).getByRole('button', { name: 'Skip this occurrence' }),
+    );
+    await waitFor(() =>
+      expect(updateEvent).toHaveBeenCalledWith('team', recurringEvent.id, {
+        recurrence: {
+          exdate: {
+            action: 'add',
+            recurrenceId: originalRecurrenceId,
+          },
+        },
+      }),
+    );
+    expect(
+      (await repository.getEvent('team', recurringEvent.id)).recurrence
+        ?.exdates,
+    ).toEqual([originalRecurrenceId]);
+    await userEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', {
+        name: 'Close',
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole('listitem', { name: 'Moved planning' }),
+      ).toHaveLength(1),
+    );
+    await userEvent.click(
+      within(
+        (await screen.findAllByRole('listitem', { name: 'Moved planning' }))[0],
+      ).getByRole('button'),
+    );
+    const remainingOccurrenceDetails = screen.getByRole('dialog');
+    expect(
+      within(remainingOccurrenceDetails).getByText('Skipped occurrences'),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      within(remainingOccurrenceDetails).getByRole('button', {
+        name: 'Restore',
+      }),
+    );
+    await waitFor(() => expect(updateEvent).toHaveBeenCalledTimes(2));
+    expect(updateEvent).toHaveBeenLastCalledWith('team', recurringEvent.id, {
+      recurrence: {
+        exdate: {
+          action: 'remove',
+          recurrenceId: originalRecurrenceId,
+        },
+      },
+    });
+    expect(
+      (await repository.getEvent('team', recurringEvent.id)).recurrence
+        ?.exdates,
+    ).toBeUndefined();
+    await userEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole('listitem', { name: 'Moved planning' }),
+      ).toHaveLength(2),
+    );
+  });
+
+  it('shows duplicate skipped dates once and restores only the selected recurrence identity', async () => {
+    const skippedDate = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-10-02T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const otherSkippedDate = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-10-03T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const recurringEvent: CalendarEvent = {
+      id: 'https://radicale.example.test/team/skipped.ics',
+      calendarId: 'team',
+      uid: 'skipped-series@example.test',
+      title: 'Skipped dates',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-01T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-01T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=DAILY;COUNT=4',
+        exdates: [skippedDate, skippedDate, otherSkippedDate],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [{ ...calendars[0], readOnly: false }],
+      events: [recurringEvent],
+    });
+    const updateEvent = vi.spyOn(repository, 'updateEvent');
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-10-01T00:00:00Z',
+          endDate: '2026-10-04T23:59:59.999Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const occurrences = await screen.findAllByText('Skipped dates');
+    expect(occurrences).toHaveLength(2);
+    await userEvent.click(occurrences[0]);
+
+    const details = screen.getByRole('dialog');
+    const restoreButtons = within(details).getAllByRole('button', {
+      name: 'Restore',
+    });
+    expect(restoreButtons).toHaveLength(2);
+    await userEvent.click(restoreButtons[0]);
+
+    await waitFor(() => expect(updateEvent).toHaveBeenCalledTimes(1));
+    expect(updateEvent).toHaveBeenCalledWith('team', recurringEvent.id, {
+      recurrence: {
+        exdate: { action: 'remove', recurrenceId: skippedDate },
+      },
+    });
+    expect(
+      (await repository.getEvent('team', recurringEvent.id)).recurrence
+        ?.exdates,
+    ).toEqual([otherSkippedDate]);
+    await userEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole('listitem', { name: 'Skipped dates' }),
+      ).toHaveLength(3),
+    );
+    await userEvent.click(
+      within(
+        screen.getAllByRole('listitem', { name: 'Skipped dates' })[0],
+      ).getByRole('button'),
+    );
+    expect(
+      within(screen.getByRole('dialog')).getAllByRole('button', {
+        name: 'Restore',
+      }),
+    ).toHaveLength(1);
+  });
+
   it.each([
     { view: 'list' as const, count: 1 },
     { view: 'month' as const, count: 2 },

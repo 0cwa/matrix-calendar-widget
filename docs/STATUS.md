@@ -66,7 +66,7 @@ PR #102 merged Docker build/runtime documentation and a non-publishing CI image-
 
 ### M5 — Recurrence and iCalendar completeness
 
-Issue #6 remains open. PR #128 completed bounded read-only projection and exact viewer-local range clipping. PR #130 adds whole-series RRULE creation/editing for DAILY, WEEKLY, MONTHLY, or YEARLY rules with a positive interval and never/count/inclusive-date endings. Additional rule patterns, exception editing, instance-edit semantics, and broader recurrence interoperability remain open. These in-repository slices can proceed independently of the external authentication work; end-to-end use with a user's real CalDAV principal still depends on the M2 delegation path.
+Issue #6 remains open. PR #128 completed bounded read-only projection and exact viewer-local range clipping. PR #130 adds whole-series RRULE creation/editing for DAILY, WEEKLY, MONTHLY, or YEARLY rules with a positive interval and never/count/inclusive-date endings. The widget now skips and restores one projected supported occurrence by adding or removing only its matching EXDATE, including when a detached override moved the display time. Codec regressions preserve recurrence value kind and wall time plus sibling EXDATEs, RDATE PERIODs, detached VEVENTs, VALARMs, and unknown resource data. General RDATE/EXDATE editing, additional rule patterns, instance-edit semantics, and broader recurrence interoperability remain open. These in-repository slices can proceed independently of the external authentication work; end-to-end use with a user's real CalDAV principal still depends on the M2 delegation path.
 
 ### M6 — PostgreSQL reminder persistence
 

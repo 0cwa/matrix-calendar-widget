@@ -16,7 +16,9 @@
 
 export {
   MAX_PROJECTED_OCCURRENCES_PER_EVENT,
+  calendarEventRecurrenceIdentity,
   formatSupportedCalendarEventRecurrenceRule,
+  isSupportedCalendarEventOccurrenceExclusion,
   parseSupportedCalendarEventRecurrenceRule,
   projectCalendarEventOccurrences,
 } from './calendarEventOccurrenceProjection';

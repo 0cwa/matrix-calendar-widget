@@ -33,6 +33,7 @@ export type {
   CalendarEventRecurrenceDate,
   CalendarEventRecurrenceOverride,
   CalendarEventRecurrenceTiming,
+  CalendarEventRecurrenceWrite,
   CalendarEventStatus,
   CalendarEventTimedDateTime,
   CalendarEventTiming,

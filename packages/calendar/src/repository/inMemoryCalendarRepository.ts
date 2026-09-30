@@ -30,6 +30,7 @@ import {
   CalendarTimeRange,
   TimedCalendarEventTiming,
 } from '../model';
+import { calendarEventRecurrenceIdentity } from '../utils/calendarEventOccurrenceProjection';
 import { calendarEventTimedDateTimeToDateTime } from '../utils/calendarEventTimedDateTime';
 import {
   CalendarRepository,
@@ -228,9 +229,7 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     const current = this.getStoredEvent(calendarId, eventId);
     const clonedPatch = cloneCalendarEventPatch(patch);
     const recurrence = Object.prototype.hasOwnProperty.call(patch, 'recurrence')
-      ? clonedPatch.recurrence?.rrule
-        ? { rrule: clonedPatch.recurrence.rrule }
-        : undefined
+      ? applyRecurrenceWrite(current.recurrence, clonedPatch.recurrence)
       : current.recurrence;
 
     const updated: CalendarEvent = {
@@ -512,8 +511,50 @@ function cloneCalendarEventPatch(
   }
 
   if (patch.recurrence) {
-    cloned.recurrence = { ...patch.recurrence };
+    cloned.recurrence =
+      'exdate' in patch.recurrence
+        ? {
+            exdate: {
+              ...patch.recurrence.exdate,
+              recurrenceId: cloneCalendarEventDateTime(
+                patch.recurrence.exdate.recurrenceId,
+              ),
+            },
+          }
+        : { ...patch.recurrence };
   }
 
   return cloned;
+}
+
+function applyRecurrenceWrite(
+  current: CalendarEvent['recurrence'],
+  write: CalendarEventPatch['recurrence'],
+): CalendarEvent['recurrence'] {
+  if (!write || !('exdate' in write)) {
+    return write?.rrule ? { rrule: write.rrule } : undefined;
+  }
+
+  const identity = calendarEventRecurrenceIdentity(write.exdate.recurrenceId);
+  const exdates = current?.exdates ?? [];
+  const nextExdates =
+    write.exdate.action === 'add'
+      ? exdates.some(
+          (value) => calendarEventRecurrenceIdentity(value) === identity,
+        )
+        ? exdates
+        : [...exdates, write.exdate.recurrenceId]
+      : exdates.filter(
+          (value) => calendarEventRecurrenceIdentity(value) !== identity,
+        );
+  const next: NonNullable<CalendarEvent['recurrence']> = {
+    ...current,
+    exdates: nextExdates,
+  };
+
+  if (next.exdates?.length === 0) {
+    delete next.exdates;
+  }
+
+  return Object.keys(next).length > 0 ? next : undefined;
 }

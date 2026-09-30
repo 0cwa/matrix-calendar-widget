@@ -22,6 +22,7 @@ import type {
 } from '../model';
 import {
   formatSupportedCalendarEventRecurrenceRule,
+  isSupportedCalendarEventOccurrenceExclusion,
   parseSupportedCalendarEventRecurrenceRule,
   projectCalendarEventOccurrences,
 } from './calendarEventOccurrenceProjection';
@@ -156,6 +157,37 @@ describe('projectCalendarEventOccurrences', () => {
     expect(movedOccurrence).toBeDefined();
     expect(movedOccurrence?.event.id).not.toBe(event.id);
     expect(movedOccurrence?.event.status).toBe('tentative');
+    expect(movedOccurrence?.recurrenceId).toEqual(zoned('2026-10-30T09:00:00'));
+    expect(
+      isSupportedCalendarEventOccurrenceExclusion(
+        event,
+        zoned('2026-10-30T09:00:00'),
+      ),
+    ).toBe(true);
+
+    const skippedMovedInstance = projectCalendarEventOccurrences(
+      [
+        {
+          ...event,
+          recurrence: {
+            ...event.recurrence,
+            exdates: [
+              ...(event.recurrence?.exdates ?? []),
+              zoned('2026-10-30T09:00:00'),
+            ],
+          },
+        },
+      ],
+      stockholmRange,
+      'Europe/Stockholm',
+    );
+    expect(
+      skippedMovedInstance.occurrences.some(
+        ({ recurrenceId }) =>
+          recurrenceId?.type === 'date-time' &&
+          recurrenceId.value.local === '2026-10-30T09:00:00',
+      ),
+    ).toBe(false);
     expect(event).toEqual(original);
   });
 
@@ -774,6 +806,18 @@ describe('projectCalendarEventOccurrences', () => {
       { sourceEvent: unsupportedTimezone, reason: 'unsupported-timezone' },
       { sourceEvent: divergentTimezone, reason: 'unsupported-timezone' },
     ]);
+    expect(
+      isSupportedCalendarEventOccurrenceExclusion(
+        unsupported,
+        zoned('2026-10-30T09:00:00'),
+      ),
+    ).toBe(false);
+    expect(
+      isSupportedCalendarEventOccurrenceExclusion(
+        malformed,
+        zoned('2026-10-30T09:00:00'),
+      ),
+    ).toBe(false);
   });
 });
 

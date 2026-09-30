@@ -16,9 +16,12 @@
 
 import {
   CalendarEvent,
+  CalendarEventDateTime,
   CalendarRepositoryError,
+  calendarEventRecurrenceIdentity,
   calendarEventTimedDateTimeToDateTime,
   isAllDayCalendarEvent,
+  isSupportedCalendarEventOccurrenceExclusion,
   isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
 import {
@@ -38,6 +41,7 @@ import {
   useCalendarRepository,
   useCalendars,
   useDeleteCalendarEvent,
+  useUpdateCalendarEvent,
 } from '../../calendar';
 import { ConfirmDeleteDialog } from '../common/ConfirmDeleteDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
@@ -45,34 +49,48 @@ import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 export function CalendarEventDetailsDialog({
   event,
   sourceEvent = event,
+  recurrenceId,
+  onSourceEventChange,
   onClose,
 }: {
   event?: CalendarEvent;
   /** The CalDAV resource used for series-level reads and mutations. */
   sourceEvent?: CalendarEvent;
+  /** Original recurrence identity for the selected projected occurrence. */
+  recurrenceId?: CalendarEventDateTime;
+  onSourceEventChange?: (sourceEvent: CalendarEvent) => void;
   onClose: () => void;
 }) {
   const { i18n, t } = useTranslation();
   const calendars = useCalendars();
   const repository = useCalendarRepository();
   const deleteEvent = useDeleteCalendarEvent();
+  const updateEvent = useUpdateCalendarEvent();
   const [currentEvent, setCurrentEvent] = useState(event);
   const [currentSourceEvent, setCurrentSourceEvent] = useState(sourceEvent);
+  const [currentRecurrenceId, setCurrentRecurrenceId] = useState(recurrenceId);
   const [editing, setEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<
     'conflict' | 'generic' | undefined
   >();
+  const [occurrenceLoading, setOccurrenceLoading] = useState(false);
+  const [occurrenceError, setOccurrenceError] = useState<
+    'conflict' | 'generic' | undefined
+  >();
 
   useEffect(() => {
     setCurrentEvent(event);
     setCurrentSourceEvent(sourceEvent);
+    setCurrentRecurrenceId(recurrenceId);
     setEditing(false);
     setDeleteOpen(false);
     setDeleteLoading(false);
     setDeleteError(undefined);
-  }, [event, sourceEvent]);
+    setOccurrenceLoading(false);
+    setOccurrenceError(undefined);
+  }, [event, recurrenceId, sourceEvent]);
 
   const eventCalendar = currentSourceEvent
     ? calendars.data.find(
@@ -86,6 +104,68 @@ export function CalendarEventDetailsDialog({
     currentSourceEvent?.recurrence?.exdates?.length ||
     currentSourceEvent?.recurrence?.overrides?.length,
   );
+  const canChangeCurrentOccurrence = Boolean(
+    canMutate &&
+    currentRecurrenceId &&
+    currentSourceEvent &&
+    isSupportedCalendarEventOccurrenceExclusion(
+      currentSourceEvent,
+      currentRecurrenceId,
+    ),
+  );
+  const currentOccurrenceExcluded = Boolean(
+    canChangeCurrentOccurrence &&
+    currentRecurrenceId &&
+    currentSourceEvent?.recurrence?.exdates?.some(
+      (exdate) =>
+        calendarEventRecurrenceIdentity(exdate) ===
+        calendarEventRecurrenceIdentity(currentRecurrenceId),
+    ),
+  );
+  const otherSkippedOccurrences =
+    canChangeCurrentOccurrence && currentRecurrenceId
+      ? uniqueRecurrenceIds(
+          currentSourceEvent?.recurrence?.exdates ?? [],
+        ).filter(
+          (exdate) =>
+            calendarEventRecurrenceIdentity(exdate) !==
+            calendarEventRecurrenceIdentity(currentRecurrenceId),
+        )
+      : [];
+
+  const changeOccurrenceException = async (
+    action: 'add' | 'remove',
+    targetRecurrenceId: CalendarEventDateTime,
+  ) => {
+    if (!currentSourceEvent || !canMutate) {
+      return;
+    }
+
+    setOccurrenceLoading(true);
+    setOccurrenceError(undefined);
+    try {
+      const updated = await updateEvent(
+        currentSourceEvent.calendarId,
+        currentSourceEvent.id,
+        {
+          recurrence: {
+            exdate: { action, recurrenceId: targetRecurrenceId },
+          },
+        },
+      );
+      setCurrentSourceEvent(updated);
+      onSourceEventChange?.(updated);
+    } catch (error) {
+      setOccurrenceError(
+        error instanceof CalendarRepositoryError &&
+          error.code === 'event-conflict'
+          ? 'conflict'
+          : 'generic',
+      );
+    } finally {
+      setOccurrenceLoading(false);
+    }
+  };
 
   const handleDelete = async () => {
     if (!currentEvent || !currentSourceEvent || !canMutate) {
@@ -154,6 +234,82 @@ export function CalendarEventDetailsDialog({
                       )}
                     </Alert>
                   )}
+
+                {canChangeCurrentOccurrence && currentRecurrenceId && (
+                  <Stack spacing={1}>
+                    <Button
+                      disabled={occurrenceLoading}
+                      onClick={() =>
+                        void changeOccurrenceException(
+                          currentOccurrenceExcluded ? 'remove' : 'add',
+                          currentRecurrenceId,
+                        )
+                      }
+                    >
+                      {currentOccurrenceExcluded
+                        ? t(
+                            'calendarEvents.details.restoreOccurrence',
+                            'Restore this occurrence',
+                          )
+                        : t(
+                            'calendarEvents.details.skipOccurrence',
+                            'Skip this occurrence',
+                          )}
+                    </Button>
+
+                    {otherSkippedOccurrences.length > 0 && (
+                      <Stack spacing={0.5}>
+                        <Typography>
+                          {t(
+                            'calendarEvents.details.skippedOccurrences',
+                            'Skipped occurrences',
+                          )}
+                        </Typography>
+                        {otherSkippedOccurrences.map((exdate) => (
+                          <Stack
+                            alignItems="center"
+                            direction="row"
+                            key={calendarEventRecurrenceIdentity(exdate)}
+                            justifyContent="space-between"
+                          >
+                            <Typography>
+                              {formatRecurrenceIdentity(exdate, i18n.language)}
+                            </Typography>
+                            <Button
+                              disabled={occurrenceLoading}
+                              onClick={() =>
+                                void changeOccurrenceException('remove', exdate)
+                              }
+                            >
+                              {t(
+                                'calendarEvents.details.restoreSkippedOccurrence',
+                                'Restore',
+                              )}
+                            </Button>
+                          </Stack>
+                        ))}
+                      </Stack>
+                    )}
+
+                    {occurrenceError && (
+                      <Alert
+                        severity={
+                          occurrenceError === 'conflict' ? 'warning' : 'error'
+                        }
+                      >
+                        {occurrenceError === 'conflict'
+                          ? t(
+                              'calendarEvents.details.occurrenceConflict',
+                              'This event changed elsewhere. Reload the calendar and retry.',
+                            )
+                          : t(
+                              'calendarEvents.details.occurrenceError',
+                              'The occurrence could not be updated.',
+                            )}
+                      </Alert>
+                    )}
+                  </Stack>
+                )}
 
                 <Typography>
                   {formatCalendarEventTime(
@@ -251,6 +407,45 @@ export function CalendarEventDetailsDialog({
       )}
     </>
   );
+}
+
+function uniqueRecurrenceIds(
+  recurrenceIds: CalendarEventDateTime[],
+): CalendarEventDateTime[] {
+  const seen = new Set<string>();
+  return recurrenceIds.filter((recurrenceId) => {
+    const identity = calendarEventRecurrenceIdentity(recurrenceId);
+    if (seen.has(identity)) {
+      return false;
+    }
+    seen.add(identity);
+    return true;
+  });
+}
+
+function formatRecurrenceIdentity(
+  recurrenceId: CalendarEventDateTime,
+  locale: string,
+  viewerTimezone = DateTime.local().zoneName ?? 'UTC',
+): string {
+  if (recurrenceId.type === 'date') {
+    return DateTime.fromISO(recurrenceId.value, { zone: 'UTC' })
+      .setLocale(locale)
+      .toLocaleString(DateTime.DATE_MED);
+  }
+
+  const sourceTimezone =
+    recurrenceId.type === 'floating-date-time'
+      ? viewerTimezone
+      : recurrenceId.value.timezone;
+  const local =
+    recurrenceId.type === 'floating-date-time'
+      ? recurrenceId.value
+      : recurrenceId.value.local;
+  return DateTime.fromISO(local, { zone: sourceTimezone })
+    .setZone(viewerTimezone)
+    .setLocale(locale)
+    .toLocaleString(DateTime.DATETIME_MED);
 }
 
 export function formatCalendarEventTime(

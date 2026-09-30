@@ -112,7 +112,11 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
       or YEARLY frequency, positive interval, and never/count/date end controls
       (PR #130).
 - [ ] Extend RRULE editing to additional recurrence rule parts and patterns.
-- [ ] RDATE / EXDATE editing.
+- [x] Skip and restore one projected supported occurrence by adding or
+      removing only its matching EXDATE. Use the original recurrence identity
+      even when a detached override moves the displayed instance, and preserve
+      the DATE/floating/UTC/TZID value kind and local wall time.
+- [ ] General RDATE / EXDATE editing.
 - [ ] RECURRENCE-ID instance override editing.
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
@@ -146,10 +150,12 @@ The widget displays timed events in the viewer's local timezone:
 floating times are interpreted there, while named-TZID and UTC times keep their
 instant and are converted from their saved zone. This covers details, lists,
 visible and accessible calendar-cell labels, grid sorting, and the in-memory
-range filter. Projection occurrence IDs keep selected detail timing separate
-from their source resource; edit and delete actions remain series-level until
-instance-edit semantics are implemented. Unsupported or malformed recurrence
-is hidden with a diagnostic. The bounded projector resolves source and viewer
+range filter. Projection occurrence IDs keep selected detail timing and
+recurrence identity separate from their source resource. Ordinary edit and
+delete actions remain series-level; skip/restore changes only the matching
+EXDATE for one projected occurrence. A moved override is identified by its
+original RECURRENCE-ID. Unsupported or malformed recurrence is hidden with a
+diagnostic. The bounded projector resolves source and viewer
 IANA timezones only when their exact identifiers exist in the bundled 2026d
 VTIMEZONE data. Any embedded definition used by the master or a same-UID
 override must match the bundle's ordered STANDARD/DAYLIGHT transition rules,
@@ -189,9 +195,14 @@ historical timezone offset seconds (for example, Asia/Kolkata local noon in
 VTIMEZONE definitions or establish mainstream-client recurrence
 interoperability.
 Ordinary master-field patches preserve all VEVENT components, VTIMEZONE, and
-unknown properties. The codec continues to reject master events without
-DTEND. Simple whole-series RRULE create/edit is implemented; broader recurrence
-editing and mainstream-client interoperability remain open.
+unknown properties. Occurrence skip/restore uses an add/remove-one EXDATE patch
+and preserves other EXDATEs, RDATE PERIOD values, detached VEVENTs, VALARMs,
+and unknown properties. EXDATE values keep the projected identity's DATE,
+floating, UTC, or named-TZID form and local wall time. `RANGE=THISANDFUTURE`,
+malformed, and otherwise unsupported recurrence remains read-only. The codec
+continues to reject master events without DTEND. Simple whole-series RRULE
+create/edit is implemented; general exception editing and mainstream-client
+interoperability remain open.
 
 The generated IANA 2026d VTIMEZONE lookup package is available for downstream
 timezone-aware consumers. Its presence alone does not complete the named-zone

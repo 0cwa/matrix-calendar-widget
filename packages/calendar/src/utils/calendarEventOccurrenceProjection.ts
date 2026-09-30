@@ -110,6 +110,8 @@ export type CalendarEventProjectionDiagnostic = {
 export type ProjectedCalendarEventOccurrence = {
   event: CalendarEvent;
   sourceEvent: CalendarEvent;
+  /** Original recurrence identity, independent of a moved override's timing. */
+  recurrenceId?: CalendarEventDateTime;
   recurrenceIdentity?: string;
 };
 
@@ -288,6 +290,80 @@ export function projectCalendarEventOccurrences(
   }
 
   return { occurrences, diagnostics };
+}
+
+/**
+ * Return whether one recurrence identity belongs to a recurrence that this
+ * projector can safely edit by adding or removing a single EXDATE.
+ */
+export function isSupportedCalendarEventOccurrenceExclusion(
+  event: CalendarEvent,
+  recurrenceId: CalendarEventDateTime,
+): boolean {
+  const recurrence = event.recurrence;
+  if (
+    event.unsupportedTimezone ||
+    event.unsupportedRecurrence ||
+    !recurrence ||
+    (!recurrence.rrule && !recurrence.rdates?.length)
+  ) {
+    return false;
+  }
+
+  try {
+    const anchor = isAllDayCalendarEvent(event)
+      ? dateValue(event.timing.startDate)
+      : isTimedCalendarEvent(event)
+        ? timedValue(event.timing.start)
+        : undefined;
+    if (!anchor) {
+      return false;
+    }
+    assertCompatibleValue(anchor, recurrenceId);
+    assertRecurrenceValue(recurrenceId);
+    assertRecurrenceInputLimit(recurrence);
+
+    const candidates = makeCandidates(anchor, recurrence.rdates);
+    const overrides = recurrence.overrides ?? [];
+    addOverrideCandidates(candidates, overrides);
+    validateRecurrenceValues(
+      anchor,
+      candidates,
+      recurrence.exdates ?? [],
+      overrides,
+    );
+
+    const rule = buildRule(recurrence.rrule, anchor);
+    const until = parseUntil(recurrence.rrule, anchor);
+    if (rule) {
+      const targetWallTime = fakeWallDate(recurrenceId);
+      if (!targetWallTime) {
+        return false;
+      }
+      const targetRangeStart = DateTime.fromJSDate(targetWallTime, {
+        zone: 'UTC',
+      });
+      addRuleCandidates(candidates, rule, anchor, recurrenceId, recurrenceId, {
+        rangeStart: targetRangeStart,
+        rangeEnd: targetRangeStart.plus({ milliseconds: 1 }),
+        viewerTimezone:
+          recurrenceId.type === 'date-time'
+            ? recurrenceId.value.timezone
+            : 'UTC',
+        until,
+      });
+    }
+
+    const identity = calendarEventRecurrenceIdentity(recurrenceId);
+    return (
+      candidates.has(identity) ||
+      (recurrence.exdates ?? []).some(
+        (exdate) => calendarEventRecurrenceIdentity(exdate) === identity,
+      )
+    );
+  } catch {
+    return false;
+  }
 }
 
 function projectEvent(
@@ -515,10 +591,10 @@ function materializeCandidates(
   viewerTimezone: string,
   timingFor: (candidate: MaterializedCandidate) => CalendarEventTiming,
 ): ProjectedCalendarEventOccurrence[] {
-  const excluded = new Set(exclusions.map(recurrenceIdentity));
+  const excluded = new Set(exclusions.map(calendarEventRecurrenceIdentity));
   const overrideMap = new Map(
     overrides.map((override) => [
-      recurrenceIdentity(override.recurrenceId),
+      calendarEventRecurrenceIdentity(override.recurrenceId),
       override,
     ]),
   );
@@ -532,7 +608,7 @@ function materializeCandidates(
     if (override?.status === 'cancelled') {
       continue;
     }
-    if (excluded.has(identity) && !override) {
+    if (excluded.has(identity)) {
       continue;
     }
     if (override && !override.timing && !candidate.fromRuleOrRdate) {
@@ -578,7 +654,7 @@ function makeOccurrence(
     };
   }
 
-  const identity = recurrenceIdentity(recurrenceId);
+  const identity = calendarEventRecurrenceIdentity(recurrenceId);
   return {
     event: {
       ...sourceEvent,
@@ -587,6 +663,7 @@ function makeOccurrence(
       timing,
     },
     sourceEvent,
+    recurrenceId,
     recurrenceIdentity: identity,
   };
 }
@@ -596,7 +673,7 @@ function makeCandidates(
   rdates?: CalendarEventRecurrenceDate[],
 ): Map<string, Candidate> {
   const candidates = new Map<string, Candidate>();
-  const anchorIdentity = recurrenceIdentity(anchor);
+  const anchorIdentity = calendarEventRecurrenceIdentity(anchor);
   candidates.set(anchorIdentity, {
     recurrenceId: anchor,
     fromRuleOrRdate: true,
@@ -604,7 +681,7 @@ function makeCandidates(
 
   for (const rdate of rdates ?? []) {
     const recurrenceId = rdate.type === 'period' ? rdate.timing.start : rdate;
-    const identity = recurrenceIdentity(recurrenceId);
+    const identity = calendarEventRecurrenceIdentity(recurrenceId);
     const existing = candidates.get(identity);
     const rdateTiming = rdate.type === 'period' ? rdate.timing : undefined;
     if (existing?.rdateTiming && rdateTiming) {
@@ -625,7 +702,7 @@ function addOverrideCandidates(
   overrides: CalendarEventRecurrenceOverride[],
 ): void {
   for (const override of overrides) {
-    const identity = recurrenceIdentity(override.recurrenceId);
+    const identity = calendarEventRecurrenceIdentity(override.recurrenceId);
     if (!candidates.has(identity)) {
       candidates.set(identity, {
         recurrenceId: override.recurrenceId,
@@ -704,7 +781,7 @@ function addRuleCandidates(
       date.getTime() >= lowerDate.getTime() &&
       date.getTime() <= upperDate.getTime()
     ) {
-      const identity = recurrenceIdentity(recurrenceId);
+      const identity = calendarEventRecurrenceIdentity(recurrenceId);
       const current = candidates.get(identity);
       candidates.set(identity, {
         recurrenceId,
@@ -998,7 +1075,7 @@ function validateRecurrenceValues(
   const seenOverrides = new Set<string>();
   for (const override of overrides) {
     assertCompatibleValue(anchor, override.recurrenceId);
-    const identity = recurrenceIdentity(override.recurrenceId);
+    const identity = calendarEventRecurrenceIdentity(override.recurrenceId);
     if (seenOverrides.has(identity)) {
       throw projectionError('invalid-recurrence');
     }
@@ -1283,7 +1360,9 @@ function timedValue(value: CalendarEventTimedDateTime): CalendarEventDateTime {
       };
 }
 
-function recurrenceIdentity(value: CalendarEventDateTime): string {
+export function calendarEventRecurrenceIdentity(
+  value: CalendarEventDateTime,
+): string {
   switch (value.type) {
     case 'date':
       return `date:${value.value}`;

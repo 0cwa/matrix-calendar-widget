@@ -16,6 +16,7 @@
 
 import {
   CalendarEvent,
+  CalendarEventDateTime,
   CalendarId,
   projectCalendarEventOccurrences,
 } from '@matrix-calendar-widget/calendar';
@@ -113,9 +114,9 @@ export function CalendarEventsSurface({
   const sourceEventByOccurrenceKey = useMemo(
     () =>
       new Map(
-        projection.occurrences.map(({ event, sourceEvent }) => [
+        projection.occurrences.map(({ event, sourceEvent, recurrenceId }) => [
           calendarEventKey(event),
-          sourceEvent,
+          { sourceEvent, recurrenceId },
         ]),
       ),
     [projection.occurrences],
@@ -129,13 +130,19 @@ export function CalendarEventsSurface({
     [filters.filterText, projection.occurrences],
   );
   const [selectedEvent, setSelectedEvent] = useState<
-    { event: CalendarEvent; sourceEvent: CalendarEvent } | undefined
+    | {
+        event: CalendarEvent;
+        sourceEvent: CalendarEvent;
+        recurrenceId?: CalendarEventDateTime;
+      }
+    | undefined
   >();
   const selectEvent = (event: CalendarEvent) => {
+    const occurrence = sourceEventByOccurrenceKey.get(calendarEventKey(event));
     setSelectedEvent({
       event,
-      sourceEvent:
-        sourceEventByOccurrenceKey.get(calendarEventKey(event)) ?? event,
+      sourceEvent: occurrence?.sourceEvent ?? event,
+      recurrenceId: occurrence?.recurrenceId,
     });
   };
   const hasMixedSupportedComponents = calendars.data.some(
@@ -264,7 +271,17 @@ export function CalendarEventsSurface({
 
       <CalendarEventDetailsDialog
         event={selectedEvent?.event}
+        recurrenceId={selectedEvent?.recurrenceId}
         sourceEvent={selectedEvent?.sourceEvent}
+        onSourceEventChange={(sourceEvent) =>
+          setSelectedEvent((current) =>
+            current &&
+            current.sourceEvent.id === sourceEvent.id &&
+            current.sourceEvent.calendarId === sourceEvent.calendarId
+              ? { ...current, sourceEvent }
+              : current,
+          )
+        }
         onClose={() => setSelectedEvent(undefined)}
       />
     </>
