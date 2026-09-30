@@ -25,11 +25,14 @@ import {
   CalendarEventRecurrenceDate,
   CalendarEventRecurrenceOverride,
   CalendarEventRecurrenceTiming,
+  CalendarEventRecurrenceWrite,
   CalendarEventStatus,
   CalendarEventTimedDateTime,
   CalendarEventTiming,
   CalendarEventTransparency,
   CalendarId,
+  calendarEventRecurrenceIdentity,
+  isSupportedCalendarEventOccurrenceExclusion,
   parseSupportedCalendarEventRecurrenceRule,
 } from '@matrix-calendar-widget/calendar';
 import ICAL from 'ical.js';
@@ -78,16 +81,24 @@ export class ParsedICalendarEvent {
       ? recurrenceWriteFromUnknown(patch.recurrence)
       : undefined;
     if (hasRecurrencePatch) {
-      if (this.listProjectionDiagnostic === 'unsupported-recurrence') {
-        throw unsupportedRecurrencePatch();
-      }
-      assertSimpleRecurrenceCanBeEdited(this.event);
-      const nextRule = recurrenceWrite?.rrule;
-      if (nextRule !== undefined) {
-        validateRecurrenceRule(
-          nextRule,
-          timingStartAsDateTime(patch.timing ?? this.event.timing),
+      if (recurrenceWrite && 'exdate' in recurrenceWrite) {
+        assertOccurrenceExdateCanBeEdited(
+          this.event,
+          recurrenceWrite.exdate.recurrenceId,
+          this.listProjectionDiagnostic,
         );
+      } else {
+        if (this.listProjectionDiagnostic === 'unsupported-recurrence') {
+          throw unsupportedRecurrencePatch();
+        }
+        assertSimpleRecurrenceCanBeEdited(this.event);
+        const nextRule = recurrenceWrite?.rrule;
+        if (nextRule !== undefined) {
+          validateRecurrenceRule(
+            nextRule,
+            timingStartAsDateTime(patch.timing ?? this.event.timing),
+          );
+        }
       }
     }
 
@@ -136,13 +147,19 @@ export class ParsedICalendarEvent {
       setOptionalProperty(vevent, 'priority', patch.priority);
     }
     if (hasRecurrencePatch) {
-      setRecurrenceRule(vevent, recurrenceWrite?.rrule);
+      if (recurrenceWrite && 'exdate' in recurrenceWrite) {
+        applyOccurrenceExdate(vevent, recurrenceWrite.exdate);
+      } else {
+        setRecurrenceRule(vevent, recurrenceWrite?.rrule);
+      }
     }
 
     const recurrence = hasRecurrencePatch
-      ? recurrenceWrite?.rrule
-        ? { rrule: canonicalizeRecurrenceRule(recurrenceWrite.rrule) }
-        : undefined
+      ? recurrenceWrite && 'exdate' in recurrenceWrite
+        ? readRecurrence(calendar, vevent, this.event.uid)
+        : recurrenceWrite?.rrule
+          ? { rrule: canonicalizeRecurrenceRule(recurrenceWrite.rrule) }
+          : undefined
       : this.event.recurrence;
 
     return {
@@ -166,7 +183,11 @@ export class ICalendarEventCodec {
   ): EncodedICalendarEvent {
     const recurrenceWrite = recurrenceWriteFromUnknown(input.recurrence);
     if (input.recurrence) {
-      if (!recurrenceWrite?.rrule) {
+      if (
+        !recurrenceWrite ||
+        !('rrule' in recurrenceWrite) ||
+        !recurrenceWrite.rrule
+      ) {
         throw unsupportedRecurrencePatch();
       }
       validateRecurrenceRule(
@@ -200,15 +221,19 @@ export class ICalendarEventCodec {
     setOptionalProperty(vevent, 'url', input.url);
     setCategories(vevent, input.categories);
     setOptionalProperty(vevent, 'priority', input.priority);
-    setRecurrenceRule(vevent, recurrenceWrite?.rrule);
+    const recurrenceRule =
+      recurrenceWrite && 'rrule' in recurrenceWrite
+        ? recurrenceWrite.rrule
+        : undefined;
+    setRecurrenceRule(vevent, recurrenceRule);
 
     return {
       event: {
         ...input,
         id: eventId,
         calendarId,
-        recurrence: recurrenceWrite?.rrule
-          ? { rrule: canonicalizeRecurrenceRule(recurrenceWrite.rrule) }
+        recurrence: recurrenceRule
+          ? { rrule: canonicalizeRecurrenceRule(recurrenceRule) }
           : undefined,
       },
       icalendar: calendar.toString(),
@@ -290,7 +315,7 @@ export class ICalendarEventCodec {
 
 function recurrenceWriteFromUnknown(
   value: unknown,
-): { rrule?: string } | undefined {
+): CalendarEventRecurrenceWrite | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -299,6 +324,36 @@ function recurrenceWriteFromUnknown(
   }
 
   const fields = value as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(fields, 'exdate')) {
+    const operation = fields.exdate;
+    if (
+      Object.keys(fields).length !== 1 ||
+      !operation ||
+      typeof operation !== 'object' ||
+      Array.isArray(operation)
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+
+    const exdate = operation as Record<string, unknown>;
+    if (
+      Object.keys(exdate).length !== 2 ||
+      !['action', 'recurrenceId'].every((key) =>
+        Object.prototype.hasOwnProperty.call(exdate, key),
+      ) ||
+      (exdate.action !== 'add' && exdate.action !== 'remove')
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+
+    return {
+      exdate: {
+        action: exdate.action,
+        recurrenceId: exdate.recurrenceId as CalendarEventDateTime,
+      },
+    };
+  }
+
   if (
     Object.keys(fields).some((key) => key !== 'rrule') ||
     (fields.rrule !== undefined && typeof fields.rrule !== 'string')
@@ -307,6 +362,113 @@ function recurrenceWriteFromUnknown(
   }
 
   return { rrule: fields.rrule as string | undefined };
+}
+
+function assertOccurrenceExdateCanBeEdited(
+  event: CalendarEvent,
+  recurrenceId: CalendarEventDateTime,
+  listProjectionDiagnostic?: 'unsupported-recurrence',
+): void {
+  if (
+    listProjectionDiagnostic === 'unsupported-recurrence' ||
+    !isSupportedCalendarEventOccurrenceExclusion(event, recurrenceId)
+  ) {
+    throw new ICalendarEventCodecError(
+      'unsupported-patch',
+      'Occurrence exceptions are not supported for this recurrence',
+    );
+  }
+}
+
+function applyOccurrenceExdate(
+  vevent: ICAL.Component,
+  operation: Extract<
+    CalendarEventRecurrenceWrite,
+    { exdate: unknown }
+  >['exdate'],
+): void {
+  const targetIdentity = calendarEventRecurrenceIdentity(
+    operation.recurrenceId,
+  );
+  const properties = vevent.getAllProperties('exdate');
+
+  if (operation.action === 'add') {
+    const alreadyExcluded = properties.some((property) =>
+      property
+        .getValues()
+        .some(
+          (value) =>
+            value instanceof ICAL.Time &&
+            calendarEventRecurrenceIdentity(
+              readDateTimeValue(value, property),
+            ) === targetIdentity,
+        ),
+    );
+    if (alreadyExcluded) {
+      return;
+    }
+
+    const property = new ICAL.Property('exdate');
+    const { value, timezone } = recurrenceIdAsIcalTime(operation.recurrenceId);
+    property.setValue(value);
+    if (timezone) {
+      property.setParameter('tzid', timezone);
+    }
+    vevent.addProperty(property);
+    return;
+  }
+
+  for (const property of properties) {
+    const values = property.getValues();
+    let removed = false;
+    const remaining = values.filter((value) => {
+      const matches =
+        value instanceof ICAL.Time &&
+        calendarEventRecurrenceIdentity(readDateTimeValue(value, property)) ===
+          targetIdentity;
+      if (matches) {
+        removed = true;
+      }
+      return !matches;
+    });
+
+    if (!removed) {
+      continue;
+    }
+    if (remaining.length === 0) {
+      vevent.removeProperty(property);
+    } else {
+      property.setValues(remaining);
+    }
+  }
+}
+
+function recurrenceIdAsIcalTime(recurrenceId: CalendarEventDateTime): {
+  value: ICAL.Time;
+  timezone?: string;
+} {
+  switch (recurrenceId.type) {
+    case 'date':
+      return { value: ICAL.Time.fromDateString(recurrenceId.value) };
+    case 'floating-date-time':
+      return {
+        value: ICAL.Time.fromDateTimeString(
+          normalizeLocalDateTime(recurrenceId.value),
+        ),
+      };
+    case 'date-time':
+      return {
+        value: ICAL.Time.fromDateTimeString(
+          recurrenceId.value.timezone === 'UTC'
+            ? `${normalizeLocalDateTime(recurrenceId.value.local)}Z`
+            : normalizeLocalDateTime(recurrenceId.value.local),
+        ),
+        timezone:
+          recurrenceId.value.timezone === 'UTC'
+            ? undefined
+            : recurrenceId.value.timezone,
+      };
+  }
 }
 
 function assertSimpleRecurrenceCanBeEdited(event: CalendarEvent): void {

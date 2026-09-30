@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { CalendarEventDateTime } from '@matrix-calendar-widget/calendar';
 import fs from 'fs';
 import ICAL from 'ical.js';
 import path from 'path';
@@ -496,6 +497,13 @@ describe('ICalendarEventCodec', () => {
             timezone: 'Europe/Stockholm',
           },
         },
+        {
+          type: 'date-time',
+          value: {
+            local: '2026-11-09T14:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
       ],
       overrides: [
         {
@@ -570,6 +578,9 @@ describe('ICalendarEventCodec', () => {
       'Updated weekly review',
     );
     expect(
+      events[0].getFirstSubcomponent('valarm')?.getFirstPropertyValue('action'),
+    ).toBe('DISPLAY');
+    expect(
       events[0].getFirstProperty('x-client-metadata')?.getFirstValue(),
     ).toBe('preserve-value');
     expect(events[1].getFirstPropertyValue('recurrence-id')?.toString()).toBe(
@@ -604,6 +615,239 @@ describe('ICalendarEventCodec', () => {
     expect(reparsed.event.recurrence).toEqual(parsed.event.recurrence);
   });
 
+  it('adds and removes only one EXDATE while preserving the complete resource', () => {
+    const parsed = codec.parse(
+      'team',
+      'recurrence-override.ics',
+      fixture('recurrence-override.ics'),
+    );
+    const movedOccurrenceId: CalendarEventDateTime = {
+      type: 'date-time',
+      value: {
+        local: '2026-10-12T14:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const added = parsed.applyPatch({
+      recurrence: {
+        exdate: { action: 'add', recurrenceId: movedOccurrenceId },
+      },
+    });
+    expect(added.event.recurrence?.exdates).toEqual([
+      {
+        type: 'date-time',
+        value: {
+          local: '2026-11-02T14:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      {
+        type: 'date-time',
+        value: {
+          local: '2026-11-09T14:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      movedOccurrenceId,
+    ]);
+    expect(added.icalendar).toContain(
+      'EXDATE;TZID=Europe/Stockholm:20261012T140000',
+    );
+
+    const calendar = ICAL.Component.fromString(added.icalendar);
+    const events = calendar.getAllSubcomponents('vevent');
+    const master = events[0];
+    expect(events).toHaveLength(3);
+    expect(calendar.getFirstSubcomponent('vtimezone')).not.toBeNull();
+    expect(calendar.getFirstPropertyValue('x-custom-calendar-property')).toBe(
+      'preserve-resource-value',
+    );
+    expect(master.getAllProperties('rdate')).toHaveLength(2);
+    expect(
+      master
+        .getFirstProperty('x-client-metadata')
+        ?.getFirstParameter('x-param'),
+    ).toBe('preserve-param');
+    expect(
+      master.getFirstSubcomponent('valarm')?.getFirstPropertyValue('action'),
+    ).toBe('DISPLAY');
+    expect(events[1].getFirstPropertyValue('recurrence-id')?.toString()).toBe(
+      '2026-10-12T14:00:00',
+    );
+    expect(events[1].getFirstPropertyValue('dtstart')?.toString()).toBe(
+      '2026-10-12T16:00:00',
+    );
+    expect(
+      events[1].getFirstProperty('x-override-marker')?.getFirstValue(),
+    ).toBe('preserve-exception');
+    expect(events[2].getFirstPropertyValue('status')).toBe('CANCELLED');
+
+    const idempotentAdd = codec
+      .parse('team', 'recurrence-override.ics', added.icalendar)
+      .applyPatch({
+        recurrence: {
+          exdate: { action: 'add', recurrenceId: movedOccurrenceId },
+        },
+      });
+    expect(
+      codec.parse('team', 'recurrence-override.ics', idempotentAdd.icalendar)
+        .event.recurrence?.exdates,
+    ).toHaveLength(3);
+
+    const removed = codec
+      .parse('team', 'recurrence-override.ics', added.icalendar)
+      .applyPatch({
+        recurrence: {
+          exdate: {
+            action: 'remove',
+            recurrenceId: {
+              type: 'date-time',
+              value: {
+                local: '2026-11-02T14:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
+        },
+      });
+    expect(removed.event.recurrence?.exdates).toEqual([
+      {
+        type: 'date-time',
+        value: {
+          local: '2026-11-09T14:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      movedOccurrenceId,
+    ]);
+    const removedCalendar = ICAL.Component.fromString(removed.icalendar);
+    expect(removedCalendar.getFirstSubcomponent('vtimezone')).not.toBeNull();
+    expect(removedCalendar.getAllSubcomponents('vevent')).toHaveLength(3);
+    expect(
+      removedCalendar
+        .getAllSubcomponents('vevent')[0]
+        .getFirstSubcomponent('valarm'),
+    ).not.toBeNull();
+  });
+
+  it('removes every duplicate of one EXDATE while preserving sibling values and parameters', () => {
+    const source = fixture('recurrence-override.ics')
+      .replace(
+        'EXDATE;TZID=Europe/Stockholm:20261102T140000',
+        'EXDATE;X-KEEP=property-parameter;TZID=Europe/Stockholm:20261102T140000,20261109T140000',
+      )
+      .replace(
+        'EXDATE;TZID=Europe/Stockholm:20261109T140000',
+        'EXDATE;TZID=Europe/Stockholm:20261102T140000,20261102T140000',
+      );
+    const parsed = codec.parse('team', 'duplicate-exdates.ics', source);
+    const removed = parsed.applyPatch({
+      recurrence: {
+        exdate: {
+          action: 'remove',
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-11-02T14:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        },
+      },
+    });
+
+    expect(removed.event.recurrence?.exdates).toEqual([
+      {
+        type: 'date-time',
+        value: {
+          local: '2026-11-09T14:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    ]);
+    const master = ICAL.Component.fromString(
+      removed.icalendar,
+    ).getAllSubcomponents('vevent')[0];
+    expect(master.getAllProperties('exdate')).toHaveLength(1);
+    expect(master.getFirstProperty('exdate')?.getFirstParameter('tzid')).toBe(
+      'Europe/Stockholm',
+    );
+    expect(master.getFirstProperty('exdate')?.getFirstParameter('x-keep')).toBe(
+      'property-parameter',
+    );
+    expect(master.getFirstProperty('exdate')?.getValues()).toHaveLength(1);
+    expect(master.getFirstPropertyValue('exdate')?.toString()).toBe(
+      '2026-11-09T14:00:00',
+    );
+  });
+
+  it.each([
+    {
+      label: 'DATE',
+      dtstart: 'DTSTART;VALUE=DATE:20261001',
+      dtend: 'DTEND;VALUE=DATE:20261002',
+      recurrenceId: { type: 'date', value: '2026-10-02' },
+      expected: 'EXDATE;VALUE=DATE:20261002',
+    },
+    {
+      label: 'floating DATE-TIME',
+      dtstart: 'DTSTART:20261001T090000',
+      dtend: 'DTEND:20261001T100000',
+      recurrenceId: {
+        type: 'floating-date-time',
+        value: '2026-10-02T09:00:00',
+      },
+      expected: 'EXDATE:20261002T090000',
+    },
+    {
+      label: 'UTC DATE-TIME',
+      dtstart: 'DTSTART:20261001T090000Z',
+      dtend: 'DTEND:20261001T100000Z',
+      recurrenceId: {
+        type: 'date-time',
+        value: { local: '2026-10-02T09:00:00', timezone: 'UTC' },
+      },
+      expected: 'EXDATE:20261002T090000Z',
+    },
+  ] satisfies Array<{
+    label: string;
+    dtstart: string;
+    dtend: string;
+    recurrenceId: CalendarEventDateTime;
+    expected: string;
+  }>)(
+    'writes an EXDATE with the original $label value kind',
+    ({ dtstart, dtend, recurrenceId, expected }) => {
+      const source = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Matrix Calendar Widget//Tests//EN',
+        'BEGIN:VEVENT',
+        'UID:recurrence-kind@example.test',
+        'DTSTAMP:20260922T120000Z',
+        dtstart,
+        dtend,
+        'RRULE:FREQ=DAILY;COUNT=2',
+        'SUMMARY:Recurrence kind',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n');
+      const encoded = codec
+        .parse('team', 'recurrence-kind.ics', source)
+        .applyPatch({
+          recurrence: {
+            exdate: { action: 'add', recurrenceId },
+          },
+        });
+
+      expect(encoded.icalendar).toContain(expected);
+      expect(
+        codec.parse('team', 'recurrence-kind.ics', encoded.icalendar).event
+          .recurrence?.exdates,
+      ).toEqual([recurrenceId]);
+    },
+  );
+
   it('marks THISANDFUTURE ranges and preserves them on a title-only round-trip', () => {
     const source = [
       'BEGIN:VCALENDAR',
@@ -632,6 +876,24 @@ describe('ICalendarEventCodec', () => {
 
     expect(parsed.event.unsupportedRecurrence).toBe('range-this-and-future');
     expect(parsed.event.recurrence?.overrides).toHaveLength(1);
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          exdate: {
+            action: 'add',
+            recurrenceId: {
+              type: 'date-time',
+              value: { local: '2026-10-08T09:00:00', timezone: 'UTC' },
+            },
+          },
+        },
+      }),
+    ).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Occurrence exceptions are not supported for this recurrence',
+      ),
+    );
 
     const patched = parsed.applyPatch({ title: 'Renamed planning' });
     const calendar = ICAL.Component.fromString(patched.icalendar);
@@ -1257,6 +1519,27 @@ END:VCALENDAR`,
       new ICalendarEventCodecError(
         'unsupported-patch',
         'Only simple whole-series RRULE changes are supported',
+      ),
+    );
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          exdate: {
+            action: 'add',
+            recurrenceId: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-08T09:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Occurrence exceptions are not supported for this recurrence',
       ),
     );
 

@@ -24,7 +24,13 @@
       "delete": "Löschen",
       "edit": "Bearbeiten",
       "location": "Ort",
-      "seriesOccurrenceActions": "Dies ist ein einzelner Termin einer Terminserie. Wenn du ihn bearbeitest oder löschst, betrifft das die gesamte Serie."
+      "occurrenceConflict": "Dieser Termin wurde an anderer Stelle geändert. Lade den Kalender neu und versuche es erneut.",
+      "occurrenceError": "Der einzelne Termin konnte nicht aktualisiert werden.",
+      "restoreOccurrence": "Diesen Termin wiederherstellen",
+      "restoreSkippedOccurrence": "Wiederherstellen",
+      "seriesOccurrenceActions": "Dies ist ein einzelner Termin einer Terminserie. Wenn du ihn bearbeitest oder löschst, betrifft das die gesamte Serie.",
+      "skipOccurrence": "Diesen Termin auslassen",
+      "skippedOccurrences": "Ausgelassene Termine"
     },
     "editor": {
       "afterCount": "Nach Anzahl der Termine",
