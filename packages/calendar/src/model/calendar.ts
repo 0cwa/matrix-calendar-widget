@@ -101,6 +101,16 @@ export type CalendarEventRecurrenceDate =
 
 export type CalendarEventStatus = 'confirmed' | 'tentative' | 'cancelled';
 
+/** RFC 5545 weekday tokens used by the bounded weekly recurrence editor. */
+export type CalendarEventWeekday =
+  | 'MO'
+  | 'TU'
+  | 'WE'
+  | 'TH'
+  | 'FR'
+  | 'SA'
+  | 'SU';
+
 export type CalendarEventTransparency = 'opaque' | 'transparent';
 
 /**

@@ -26,6 +26,7 @@ import type {
   CalendarEventRecurrenceTiming,
   CalendarEventTimedDateTime,
   CalendarEventTiming,
+  CalendarEventWeekday,
   CalendarTimeRange,
   TimedCalendarEventTiming,
 } from '../model';
@@ -150,7 +151,19 @@ export type SupportedCalendarEventRecurrenceRule = {
   frequency: SupportedCalendarEventRecurrenceFrequency;
   interval: number;
   end: SupportedCalendarEventRecurrenceEnd;
+  /** Plain weekday tokens for the supported weekly BYDAY subset. */
+  weekdays?: CalendarEventWeekday[];
 };
+
+const recurrenceWeekdays: CalendarEventWeekday[] = [
+  'MO',
+  'TU',
+  'WE',
+  'TH',
+  'FR',
+  'SA',
+  'SU',
+];
 
 const editorFrequencies = new Set<SupportedCalendarEventRecurrenceFrequency>([
   'DAILY',
@@ -162,7 +175,8 @@ const editorFrequencies = new Set<SupportedCalendarEventRecurrenceFrequency>([
 /**
  * Parse only the recurrence subset exposed by the first series editor. The
  * existing projection parser remains authoritative for anchor and UNTIL
- * semantics, while the editor deliberately excludes BY* and other RRULE parts.
+ * semantics. The only BY* part exposed for editing is the bounded weekly
+ * plain-weekday subset.
  */
 export function parseSupportedCalendarEventRecurrenceRule(
   rawRule: string | undefined,
@@ -182,7 +196,7 @@ export function parseSupportedCalendarEventRecurrenceRule(
     const key = component.slice(0, separator).toUpperCase();
     const value = component.slice(separator + 1);
     if (
-      !['FREQ', 'INTERVAL', 'COUNT', 'UNTIL'].includes(key) ||
+      !['FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'BYDAY', 'WKST'].includes(key) ||
       !value ||
       parts.has(key)
     ) {
@@ -197,6 +211,7 @@ export function parseSupportedCalendarEventRecurrenceRule(
   const until = parts.get('UNTIL');
   const interval = Number(intervalText);
   const count = countText === undefined ? undefined : Number(countText);
+  let weekdays: CalendarEventWeekday[] | undefined;
   if (
     !frequency ||
     !editorFrequencies.has(
@@ -215,6 +230,12 @@ export function parseSupportedCalendarEventRecurrenceRule(
   }
 
   try {
+    weekdays = parseSimpleWeeklyByDay(parts, anchor);
+  } catch {
+    throw new Error('Unsupported recurrence rule');
+  }
+
+  try {
     buildRule(ruleText, anchor);
     parseUntil(ruleText, anchor);
   } catch {
@@ -224,6 +245,7 @@ export function parseSupportedCalendarEventRecurrenceRule(
   return {
     frequency: frequency as SupportedCalendarEventRecurrenceFrequency,
     interval,
+    ...(weekdays ? { weekdays } : {}),
     end:
       count !== undefined
         ? { type: 'count', count }
@@ -241,6 +263,17 @@ export function formatSupportedCalendarEventRecurrenceRule(
   const components = [`FREQ=${rule.frequency}`];
   if (rule.interval !== 1) {
     components.push(`INTERVAL=${rule.interval}`);
+  }
+  if (rule.weekdays !== undefined) {
+    if (
+      rule.frequency !== 'WEEKLY' ||
+      rule.interval !== 1 ||
+      rule.end.type !== 'never'
+    ) {
+      throw new Error('Unsupported recurrence rule');
+    }
+    const weekdays = normalizeSelectedWeekdays(rule.weekdays, anchor);
+    components.push(`BYDAY=${weekdays.join(',')}`);
   }
   if (rule.end.type === 'count') {
     components.push(`COUNT=${rule.end.count}`);
@@ -845,6 +878,13 @@ function buildRule(
   }
 
   validateByParts(parts);
+  if (parts.has('BYDAY')) {
+    try {
+      parseSimpleWeeklyByDay(parts, anchor);
+    } catch {
+      throw projectionError('unsupported-recurrence');
+    }
+  }
 
   const optionsText = [...parts.entries()]
     .filter(([key]) => key !== 'UNTIL' && key !== 'COUNT')
@@ -969,6 +1009,93 @@ function validateByParts(parts: Map<string, string>): void {
       throw projectionError('invalid-recurrence');
     }
   }
+}
+
+function parseSimpleWeeklyByDay(
+  parts: Map<string, string>,
+  anchor: CalendarEventDateTime,
+): CalendarEventWeekday[] | undefined {
+  const byDay = parts.get('BYDAY');
+  if (byDay === undefined) {
+    if (parts.has('WKST')) {
+      throw new Error('WKST is outside the supported editor subset');
+    }
+    return undefined;
+  }
+
+  const allowedParts = new Set(['FREQ', 'INTERVAL', 'BYDAY', 'WKST']);
+  const intervalText = parts.get('INTERVAL') ?? '1';
+  const interval = /^\d+$/.test(intervalText)
+    ? Number(intervalText)
+    : Number.NaN;
+  const weekStart = parts.get('WKST')?.toUpperCase();
+  if (
+    [...parts.keys()].some((part) => !allowedParts.has(part)) ||
+    parts.get('FREQ')?.toUpperCase() !== 'WEEKLY' ||
+    interval !== 1 ||
+    parts.has('COUNT') ||
+    parts.has('UNTIL') ||
+    (weekStart !== undefined && weekStart !== 'MO')
+  ) {
+    throw new Error('Unsupported weekly BYDAY rule');
+  }
+
+  const tokens = byDay.split(',').map((token) => token.toUpperCase());
+  if (
+    tokens.length === 0 ||
+    tokens.some(
+      (token) => !recurrenceWeekdays.includes(token as CalendarEventWeekday),
+    ) ||
+    new Set(tokens).size !== tokens.length
+  ) {
+    throw new Error('Unsupported weekly BYDAY value');
+  }
+
+  const weekdays = recurrenceWeekdays.filter((weekday) =>
+    tokens.includes(weekday),
+  );
+  if (!weekdays.includes(calendarEventStartWeekday(anchor))) {
+    throw new Error('DTSTART does not match the weekly BYDAY rule');
+  }
+  return weekdays;
+}
+
+function normalizeSelectedWeekdays(
+  weekdays: CalendarEventWeekday[],
+  anchor: CalendarEventDateTime,
+): CalendarEventWeekday[] {
+  if (
+    !Array.isArray(weekdays) ||
+    weekdays.length === 0 ||
+    weekdays.some((weekday) => !recurrenceWeekdays.includes(weekday)) ||
+    new Set(weekdays).size !== weekdays.length
+  ) {
+    throw new Error('Unsupported weekly BYDAY value');
+  }
+  const normalized = recurrenceWeekdays.filter((weekday) =>
+    weekdays.includes(weekday),
+  );
+  if (!normalized.includes(calendarEventStartWeekday(anchor))) {
+    throw new Error('DTSTART does not match the weekly BYDAY rule');
+  }
+  return normalized;
+}
+
+function calendarEventStartWeekday(
+  anchor: CalendarEventDateTime,
+): CalendarEventWeekday {
+  const local =
+    anchor.type === 'date'
+      ? anchor.value
+      : anchor.type === 'floating-date-time'
+        ? anchor.value
+        : anchor.value.local;
+  const date = DateTime.fromISO(local, { zone: 'UTC' });
+  const weekday = recurrenceWeekdays[date.weekday - 1];
+  if (!date.isValid || !weekday) {
+    throw new Error('Invalid DTSTART weekday');
+  }
+  return weekday;
 }
 
 function parseUntil(

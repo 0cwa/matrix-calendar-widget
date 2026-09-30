@@ -180,6 +180,71 @@ describe('<CalendarEventEditorDialog />', () => {
     });
   });
 
+  it('creates, edits, and reloads a weekly weekday set', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      idFactory: () => 'weekly-days',
+    });
+    const onClose = vi.fn();
+    const props = {
+      calendars: [calendar],
+      onClose,
+      open: true,
+      uidFactory: () => 'weekly-days@example.test',
+    };
+    const view = render(<CalendarEventEditorDialog {...props} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    await userEvent.type(
+      await screen.findByRole('textbox', { name: /Title/i }),
+      'Weekly planning',
+    );
+    fireEvent.change(screen.getByLabelText(/^Start/), {
+      target: { value: '2026-10-23T09:00' },
+    });
+    fireEvent.change(screen.getByLabelText(/^End/), {
+      target: { value: '2026-10-23T10:00' },
+    });
+    await userEvent.click(screen.getByLabelText('Repeats'));
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Frequency' }),
+      'WEEKLY',
+    );
+    await userEvent.click(screen.getByLabelText('Choose weekdays'));
+    expect(screen.getByRole('checkbox', { name: 'Friday' })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: 'Friday' })).toBeChecked();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Monday' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    const created = await repository.getEvent('team', 'weekly-days');
+    expect(created.recurrence).toEqual({
+      rrule: 'FREQ=WEEKLY;BYDAY=MO,FR',
+    });
+
+    view.rerender(<CalendarEventEditorDialog {...props} event={created} />);
+    expect(
+      await screen.findByRole('checkbox', { name: 'Choose weekdays' }),
+    ).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Monday' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Friday' })).toBeChecked();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Tuesday' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await expect(
+      repository.getEvent('team', 'weekly-days'),
+    ).resolves.toMatchObject({
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,FR' },
+    });
+    const updated = await repository.getEvent('team', 'weekly-days');
+    view.rerender(<CalendarEventEditorDialog {...props} event={updated} />);
+    expect(
+      await screen.findByRole('checkbox', { name: 'Choose weekdays' }),
+    ).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Tuesday' })).toBeChecked();
+  });
+
   it('updates the entire selected source series with its current UID and resource id', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { CalendarEventWeekday } from '@matrix-calendar-widget/calendar';
 import {
   Calendar,
   CalendarEvent,
@@ -24,11 +25,15 @@ import { LoadingButton } from '@mui/lab';
 import {
   Alert,
   Button,
+  Checkbox,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControl,
   FormControlLabel,
+  FormGroup,
+  FormLabel,
   Stack,
   Switch,
   TextField,
@@ -38,6 +43,7 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarEventFormValues,
+  calendarEventFormStartWeekday,
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
   calendarEventToFormValues,
@@ -47,6 +53,16 @@ import {
   useUpdateCalendarEvent,
   validateCalendarEventForm,
 } from '../../calendar';
+
+const WEEKDAYS: CalendarEventWeekday[] = [
+  'MO',
+  'TU',
+  'WE',
+  'TH',
+  'FR',
+  'SA',
+  'SU',
+];
 
 export function CalendarEventEditorDialog({
   calendars,
@@ -174,6 +190,46 @@ export function CalendarEventEditorDialog({
     );
   };
 
+  const handleWeekdayModeChange = (change: ChangeEvent<HTMLInputElement>) => {
+    setValues((current) =>
+      current
+        ? {
+            ...current,
+            recurrenceWeekdays: change.target.checked
+              ? [calendarEventFormStartWeekday(current)]
+              : undefined,
+            recurrenceChanged: true,
+          }
+        : current,
+    );
+  };
+
+  const handleWeekdayChange = (weekday: CalendarEventWeekday) => {
+    setValues((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const requiredWeekday = calendarEventFormStartWeekday(current);
+      const selected = new Set(current.recurrenceWeekdays ?? [requiredWeekday]);
+      selected.add(requiredWeekday);
+      if (selected.has(weekday)) {
+        selected.delete(weekday);
+      } else {
+        selected.add(weekday);
+      }
+      selected.add(requiredWeekday);
+      const nextWeekdays = WEEKDAYS.filter((day) => selected.has(day));
+
+      return {
+        ...current,
+        recurrenceWeekdays:
+          nextWeekdays.length === 1 ? undefined : nextWeekdays,
+        recurrenceChanged: true,
+      };
+    });
+  };
+
   const handleTimingTypeChange = (change: ChangeEvent<HTMLInputElement>) => {
     const timingType = change.target.checked ? 'all-day' : 'timed';
 
@@ -203,6 +259,11 @@ export function CalendarEventEditorDialog({
   };
 
   const validationErrorCode = validateCalendarEventForm(values);
+  const weeklyByDayEnabled =
+    values.recurrenceFrequency === 'WEEKLY' &&
+    values.recurrenceWeekdays !== undefined;
+  const canChooseWeekdays =
+    values.recurrenceInterval === '1' && values.recurrenceEnd === 'never';
   const validationError =
     validationErrorCode === 'title-required'
       ? t('calendarEvents.editor.titleRequired', 'A title is required.')
@@ -479,6 +540,7 @@ export function CalendarEventEditorDialog({
                 </TextField>
 
                 <TextField
+                  disabled={weeklyByDayEnabled}
                   inputProps={{ min: 1, step: 1 }}
                   label={t('calendarEvents.editor.interval', 'Repeat every')}
                   onChange={handleChange('recurrenceInterval')}
@@ -488,6 +550,7 @@ export function CalendarEventEditorDialog({
                 />
 
                 <TextField
+                  disabled={weeklyByDayEnabled}
                   label={t('calendarEvents.editor.ends', 'Ends')}
                   onChange={handleChange('recurrenceEnd')}
                   select
@@ -504,6 +567,74 @@ export function CalendarEventEditorDialog({
                     {t('calendarEvents.editor.onDate', 'On date')}
                   </option>
                 </TextField>
+
+                {values.recurrenceFrequency === 'WEEKLY' && (
+                  <>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={values.recurrenceWeekdays !== undefined}
+                          disabled={!weeklyByDayEnabled && !canChooseWeekdays}
+                          onChange={handleWeekdayModeChange}
+                        />
+                      }
+                      label={t(
+                        'calendarEvents.editor.chooseWeekdays',
+                        'Choose weekdays',
+                      )}
+                    />
+                    {!weeklyByDayEnabled && !canChooseWeekdays && (
+                      <Typography color="text.secondary" variant="body2">
+                        {t(
+                          'calendarEvents.editor.weekdayRuleLimit',
+                          'Weekday selection requires every week with no end date or count.',
+                        )}
+                      </Typography>
+                    )}
+                    {weeklyByDayEnabled && (
+                      <FormControl component="fieldset">
+                        <FormLabel component="legend">
+                          {t('calendarEvents.editor.repeatOn', 'Repeat on')}
+                        </FormLabel>
+                        <FormGroup row sx={{ flexWrap: 'wrap' }}>
+                          {WEEKDAYS.map((weekday) => {
+                            const startWeekday =
+                              calendarEventFormStartWeekday(values);
+                            return (
+                              <FormControlLabel
+                                control={
+                                  <Checkbox
+                                    checked={
+                                      weekday === startWeekday ||
+                                      values.recurrenceWeekdays?.includes(
+                                        weekday,
+                                      ) === true
+                                    }
+                                    disabled={weekday === startWeekday}
+                                    onChange={() =>
+                                      handleWeekdayChange(weekday)
+                                    }
+                                  />
+                                }
+                                key={weekday}
+                                label={t(
+                                  `calendarEvents.editor.weekday${weekday}`,
+                                  weekday,
+                                )}
+                              />
+                            );
+                          })}
+                        </FormGroup>
+                        <Typography color="text.secondary" variant="body2">
+                          {t(
+                            'calendarEvents.editor.startWeekdayRequired',
+                            'The start date’s weekday is always included.',
+                          )}
+                        </Typography>
+                      </FormControl>
+                    )}
+                  </>
+                )}
 
                 {values.recurrenceEnd === 'count' && (
                   <TextField
