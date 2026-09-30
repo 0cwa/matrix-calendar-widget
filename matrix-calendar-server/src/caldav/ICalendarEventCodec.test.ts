@@ -1031,6 +1031,78 @@ END:VCALENDAR`,
     expect(event?.getFirstPropertyValue('status')).toBe('TENTATIVE');
   });
 
+  it('preserves repeated interoperable properties and alarms without fetching stored URIs', () => {
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('Unexpected fetch while handling stored iCalendar URIs');
+    });
+
+    try {
+      const source = fixture('interoperable-properties.ics');
+      const parsed = codec.parse(
+        'team',
+        'interoperable-properties.ics',
+        source,
+      );
+      const sourceEvent =
+        ICAL.Component.fromString(source).getFirstSubcomponent('vevent');
+      const sourceAlarms = sourceEvent?.getAllSubcomponents('valarm') ?? [];
+      const ordinary = parsed.applyPatch({ location: 'Updated room' });
+      const recurrence = parsed.applyPatch({
+        recurrence: {
+          ...parsed.event.recurrence,
+          rrule: 'FREQ=DAILY;COUNT=5',
+        },
+      });
+
+      for (const encoded of [ordinary, recurrence]) {
+        const calendar = ICAL.Component.fromString(encoded.icalendar);
+        const event = calendar.getFirstSubcomponent('vevent');
+        const alarms = event?.getAllSubcomponents('valarm') ?? [];
+
+        expect(alarms.map((alarm) => alarm.toString())).toEqual(
+          sourceAlarms.map((alarm) => alarm.toString()),
+        );
+        expect(
+          alarms.map((alarm) => alarm.getFirstPropertyValue('action')),
+        ).toEqual(['DISPLAY', 'DISPLAY', 'EMAIL', 'AUDIO']);
+
+        for (const propertyName of [
+          'created',
+          'dtstamp',
+          'last-modified',
+          'sequence',
+          'organizer',
+          'attendee',
+          'attach',
+          'conference',
+        ]) {
+          expect(
+            event
+              ?.getAllProperties(propertyName)
+              .map((property) => property.toICALString()),
+          ).toEqual(
+            sourceEvent
+              ?.getAllProperties(propertyName)
+              .map((property) => property.toICALString()),
+          );
+        }
+
+        expect(event?.getAllProperties('attendee')).toHaveLength(2);
+        expect(event?.getAllProperties('attach')).toHaveLength(2);
+        expect(
+          event?.getAllProperties('attach').map((property) => property.type),
+        ).toEqual(['uri', 'binary']);
+        expect(event?.getAllProperties('conference')).toHaveLength(2);
+      }
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(parsed.event).not.toHaveProperty('attachments');
+      expect(parsed.event).not.toHaveProperty('conference');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('decodes folded and escaped text without destructive re-encoding', () => {
     const parsed = codec.parse(
       'team',
