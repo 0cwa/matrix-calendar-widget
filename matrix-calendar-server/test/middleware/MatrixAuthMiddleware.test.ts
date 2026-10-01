@@ -14,10 +14,13 @@
  * limitations under the License.
  */
 
+import { Logger } from '@nestjs/common';
 import base64url from 'base64url';
 import { Request } from 'express';
 import fetch from 'jest-fetch-mock';
 import { MatrixClient } from 'matrix-bot-sdk';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { mock, resetCalls } from 'ts-mockito';
 import { IAppConfiguration } from '../../src/IAppConfiguration';
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
@@ -32,6 +35,18 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
     fetch.resetMocks();
     fetch.enableMocks();
     resetCalls(clientMock);
+  });
+
+  test('production module registers MatrixAuthMiddleware for bootstrap', () => {
+    const appModuleSource = readFileSync(
+      resolve(__dirname, '../../src/app.module.ts'),
+      'utf8',
+    );
+    const providers = appModuleSource.match(
+      /@Module\(\{[\s\S]*?providers:\s*\[([\s\S]*?)\n\s*\],\s*\n\}\)\s*export class AppModule/,
+    )?.[1];
+
+    expect(providers).toContain('MatrixAuthMiddleware');
   });
 
   test('with missing header', async () => {
@@ -66,10 +81,10 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
       },
     } as Request;
 
-    fetch.mockResponseOnce(JSON.stringify({ sub: 4711 }));
+    fetch.mockResponseOnce(JSON.stringify({ sub: '@user:server' }));
     const result = await matrixAuth.extractUserContext(mockRequest);
 
-    expect(result?.userId).toEqual(4711);
+    expect(result?.userId).toEqual('@user:server');
     expect(
       (mockRequest as Request & Record<string, unknown>)[
         MATRIX_OPENID_CREDENTIAL_CONTEXT
@@ -117,13 +132,64 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
     fetch.mockResponseOnce('Unauthorized', { status: 401 });
 
     await expect(matrixAuth.extractUserContext(mockRequest)).rejects.toThrow(
-      /Could not verify user by token/,
+      'Matrix identity verification failed',
     );
     expect(
       (mockRequest as Request & Record<string, unknown>)[
         MATRIX_OPENID_CREDENTIAL_CONTEXT
       ],
     ).toBeUndefined();
+  });
+
+  test('MX-Identity server name must match the verified Matrix user', async () => {
+    appConfig.homeserver_url = 'abc';
+    const matrixAuth = new MatrixAuthMiddleware(appConfig);
+    const auth = `MX-Identity ${base64url(
+      JSON.stringify({
+        access_token: 'valid-token',
+        matrix_server_name: 'other-server',
+      }),
+    )}`;
+    const mockRequest = {
+      headers: { authorization: auth },
+    } as Request;
+
+    fetch.mockResponseOnce(JSON.stringify({ sub: '@user:server' }));
+
+    await expect(matrixAuth.extractUserContext(mockRequest)).rejects.toThrow(
+      'Matrix identity verification failed',
+    );
+    expect(
+      (mockRequest as Request & Record<string, unknown>)[
+        MATRIX_OPENID_CREDENTIAL_CONTEXT
+      ],
+    ).toBeUndefined();
+  });
+
+  test('does not log a rejected OpenID proof or homeserver error details', async () => {
+    appConfig.homeserver_url = 'abc';
+    const accessToken = 'private-proof-sentinel';
+    const authorization = `MX-Identity ${base64url(
+      JSON.stringify({
+        access_token: accessToken,
+        matrix_server_name: 'server',
+      }),
+    )}`;
+    const logger = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const matrixAuth = new MatrixAuthMiddleware(appConfig);
+    const mockRequest = {
+      headers: { authorization },
+    } as Request;
+    fetch.mockResponseOnce(`Unauthorized ${accessToken}`, { status: 401 });
+
+    await matrixAuth.use(mockRequest, {} as never, jest.fn());
+
+    expect(logger).toHaveBeenCalledWith('Matrix authentication failed');
+    expect(JSON.stringify(logger.mock.calls)).not.toContain(accessToken);
+    expect(JSON.stringify(logger.mock.calls)).not.toContain(authorization);
+    logger.mockRestore();
   });
 
   test('Bearer authorization-header', async () => {

@@ -26,6 +26,7 @@ import { Logger } from 'nestjs-pino';
 import { IAppConfiguration } from './IAppConfiguration';
 import { StubMatrixBotLogger } from './StubMatrixBotLogger';
 import { AppModule } from './app.module';
+import { MatrixAuthMiddleware } from './middleware/MatrixAuthMiddleware';
 import { MatrixServer } from './rpc/MatrixServer';
 
 // disables any logging in matrix bot sdk
@@ -36,6 +37,8 @@ LogService.setLogger(new StubMatrixBotLogger());
     bufferLogs: true,
     cors: true,
   });
+  const matrixAuthMiddleware = app.get(MatrixAuthMiddleware);
+  app.use(matrixAuthMiddleware.use.bind(matrixAuthMiddleware));
 
   app.enableShutdownHooks();
   useContainer(app.select(AppModule), { fallbackOnErrors: true }); // enables injection in validators

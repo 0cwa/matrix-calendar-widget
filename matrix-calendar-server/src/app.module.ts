@@ -14,13 +14,7 @@
  * limitations under the License.
  */
 
-import {
-  FactoryProvider,
-  Logger,
-  MiddlewareConsumer,
-  Module,
-  NestModule,
-} from '@nestjs/common';
+import { FactoryProvider, Logger, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import i18next from 'i18next';
 import i18nextFsBackend from 'i18next-fs-backend';
@@ -85,6 +79,16 @@ import { WidgetLayoutService } from './service/WidgetLayoutService';
 import { DoesWidgetWithIdExistConstraint } from './validator/DoesWidgetWithIdExist';
 
 const logger = new Logger('app.module');
+const appControllers = [
+  CalendarGatewayController,
+  CommandController,
+  ConfigurationController,
+  HealthCheckController,
+  MeetingController,
+  WelcomeWorkflowController,
+  WidgetController,
+  GuestMemberController,
+];
 
 const appConfigurationFactory: FactoryProvider<IAppConfiguration> = {
   provide: ModuleProviderToken.APP_CONFIGURATION,
@@ -286,16 +290,7 @@ const i18nFactory: FactoryProvider<void> = {
       },
     }),
   ],
-  controllers: [
-    CalendarGatewayController,
-    CommandController,
-    ConfigurationController,
-    HealthCheckController,
-    MeetingController,
-    WelcomeWorkflowController,
-    WidgetController,
-    GuestMemberController,
-  ],
+  controllers: appControllers,
 
   providers: [
     appConfigurationFactory,
@@ -309,6 +304,7 @@ const i18nFactory: FactoryProvider<void> = {
     JitsiClient,
     MeetingClient,
     MatrixCalendarAuthorizationFactory,
+    MatrixAuthMiddleware,
     {
       provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
       useClass: RoomCalendarCalDavAccess,
@@ -328,8 +324,4 @@ const i18nFactory: FactoryProvider<void> = {
     GuestMemberService,
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer.apply(MatrixAuthMiddleware).forRoutes('*');
-  }
-}
+export class AppModule {}

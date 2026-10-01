@@ -54,8 +54,9 @@ export class MatrixRoomMembershipGuard implements CanActivate {
           );
           return false;
         }
-      } catch (err) {
-        this.logger.error(err, 'Failed getJoinedRoomMembers');
+      } catch {
+        // SDK errors may include request headers; never include them in logs.
+        this.logger.error('Failed to verify Matrix room membership');
         return false;
       }
       return true;
