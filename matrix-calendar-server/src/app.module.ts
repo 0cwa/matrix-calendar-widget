@@ -304,6 +304,7 @@ const i18nFactory: FactoryProvider<void> = {
     JitsiClient,
     MeetingClient,
     MatrixCalendarAuthorizationFactory,
+    MatrixAuthMiddleware,
     {
       provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
       useClass: RoomCalendarCalDavAccess,

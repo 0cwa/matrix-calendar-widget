@@ -135,11 +135,11 @@ if (failedSuites.length === 0) {
       );
     }
     const stageDiagnostic = failureText.match(
-      /SAFE_CALDAV_CONTRACT_DIAGNOSTIC gateway_status=(\d{3}) identity=(not-observed|actor|other|absent|rejected) userinfo_status=(none|(?:\d{3})(?:,\d{3})*) membership=(none|(?:yes|no)(?:,(?:yes|no))*) provider_calls=(\d+) caldav_status=(none|(?:\d{3})(?:,\d{3})*)/,
+      /SAFE_CALDAV_CONTRACT_DIAGNOSTIC gateway_status=(\d{3}) middleware_calls=(\d+) authorization=(not-observed|present|absent) identity=(not-observed|actor|other|absent|rejected) userinfo_status=(none|(?:\d{3})(?:,\d{3})*) membership=(none|(?:yes|no)(?:,(?:yes|no))*) provider_calls=(\d+) caldav_status=(none|(?:\d{3})(?:,\d{3})*)/,
     );
     if (stageDiagnostic) {
       process.stdout.write(
-        `Safe contract stages: gateway_status=${stageDiagnostic[1]}, identity=${stageDiagnostic[2]}, userinfo_status=${stageDiagnostic[3]}, membership=${stageDiagnostic[4]}, provider_calls=${stageDiagnostic[5]}, caldav_status=${stageDiagnostic[6]}\n`,
+        `Safe contract stages: gateway_status=${stageDiagnostic[1]}, middleware_calls=${stageDiagnostic[2]}, authorization=${stageDiagnostic[3]}, identity=${stageDiagnostic[4]}, userinfo_status=${stageDiagnostic[5]}, membership=${stageDiagnostic[6]}, provider_calls=${stageDiagnostic[7]}, caldav_status=${stageDiagnostic[8]}\n`,
       );
     }
   }

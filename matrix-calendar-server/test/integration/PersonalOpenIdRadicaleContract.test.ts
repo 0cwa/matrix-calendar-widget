@@ -58,6 +58,8 @@ let gatewayBaseUrl: string;
 let countCalDavRequests: () => number;
 const gatewayLogLines: string[] = [];
 type ContractStageDiagnostics = {
+  middlewareCalls: number;
+  authorizationHeader: 'not-observed' | 'present' | 'absent';
   identity: 'not-observed' | 'actor' | 'other' | 'absent' | 'rejected';
   userInfoStatuses: number[];
   membershipResults: boolean[];
@@ -199,13 +201,17 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     );
     nonmemberIdentityHeader = identityHeader(nonmemberIdentity);
 
+    app = await NestFactory.create(PersonalOpenIdGatewayContractModule, {
+      logger: gatewayLogger,
+    });
+    const authMiddleware = app.get(MatrixAuthMiddleware);
     const extractUserContext =
-      MatrixAuthMiddleware.prototype.extractUserContext;
+      authMiddleware.extractUserContext.bind(authMiddleware);
     jest
-      .spyOn(MatrixAuthMiddleware.prototype, 'extractUserContext')
-      .mockImplementation(async function (this: MatrixAuthMiddleware, request) {
+      .spyOn(authMiddleware, 'extractUserContext')
+      .mockImplementation(async (request) => {
         try {
-          const context = await extractUserContext.call(this, request);
+          const context = await extractUserContext(request);
           if (activeStageDiagnostics) {
             activeStageDiagnostics.identity = context
               ? context.userId === actorUserId
@@ -221,12 +227,14 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
           throw error;
         }
       });
-
-    app = await NestFactory.create(PersonalOpenIdGatewayContractModule, {
-      logger: gatewayLogger,
+    app.use((request, response, next) => {
+      if (activeStageDiagnostics) {
+        activeStageDiagnostics.middlewareCalls += 1;
+        activeStageDiagnostics.authorizationHeader =
+          request.headers.authorization === undefined ? 'absent' : 'present';
+      }
+      return authMiddleware.use(request, response, next);
     });
-    const authMiddleware = app.get(MatrixAuthMiddleware);
-    app.use(authMiddleware.use.bind(authMiddleware));
     app.enableVersioning({ type: VersioningType.URI });
     await app.listen(0, '127.0.0.1');
     const address = app.getHttpServer().address() as AddressInfo;
@@ -244,6 +252,8 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
   it('uses the actor proof and returns only the actor personal calendar', async () => {
     const providerCallsBefore = credentialProviderFactorySpy.mock.calls.length;
     const stages: ContractStageDiagnostics = {
+      middlewareCalls: 0,
+      authorizationHeader: 'not-observed',
       identity: 'not-observed',
       userInfoStatuses: [],
       membershipResults: [],
@@ -269,7 +279,7 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
           ? 'none'
           : stages.userInfoStatuses.join(',');
       throw new Error(
-        `SAFE_CALDAV_CONTRACT_DIAGNOSTIC gateway_status=${response.status} identity=${stages.identity} userinfo_status=${userInfoStatus} membership=${membership} provider_calls=${credentialProviderFactorySpy.mock.calls.length - providerCallsBefore} caldav_status=${caldavStatus}`,
+        `SAFE_CALDAV_CONTRACT_DIAGNOSTIC gateway_status=${response.status} middleware_calls=${stages.middlewareCalls} authorization=${stages.authorizationHeader} identity=${stages.identity} userinfo_status=${userInfoStatus} membership=${membership} provider_calls=${credentialProviderFactorySpy.mock.calls.length - providerCallsBefore} caldav_status=${caldavStatus}`,
       );
     }
 
