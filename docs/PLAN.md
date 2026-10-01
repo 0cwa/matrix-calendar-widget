@@ -36,12 +36,12 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 - [x] Resolve room membership and authorization context.
 - [x] Implement CalDAV service discovery and calendar enumeration against Radicale (#44/#49/#55/#56).
 - [x] Define the server-side Radicale credential/delegation strategy without handling user Matrix passwords (ADR009 / #54).
-- [ ] Add OpenID-capable Radicale auth support while preserving password-based CalDAV clients (#48).
-- [ ] Add the final delegated gateway/OpenID contract against a real Radicale container (#45).
+- [ ] Implement the clean-room Radicale 3.8.0.0 Auth module and pinned project-owned image (ADR024 / #48). Preserve conventional Matrix-password CalDAV login and add request-scoped OpenID modes for the validated personal actor and dedicated appservice principal.
+- [ ] Add the final delegated gateway/OpenID contract against a real Radicale container for both principal modes (#45).
 
-Password-auth real-container discovery is already covered by #59 / PR #60. The only remaining M2 path is the external ADR009 plugin change (#48), then the final delegated gateway contract (#45).
+Password-auth real-container discovery is already covered by #59 / PR #60. The remaining M2 path is now in-repository work: implement and test the ADR024 adapter and pinned image in #48, then validate both OpenID principal modes and authorization ordering in the final contract for #45. The actual etke-host image override and preservation of its existing `/data` volume remain unverified deployment gates; do not enable room access until those gates pass.
 
-**Exit:** an authenticated widget can list the Radicale calendars it is authorized to see through delegated Matrix OpenID without handling user Matrix passwords.
+**Exit:** the gateway can authenticate personal access with the validated actor's Matrix OpenID proof and appservice-owned room access with a request-scoped appservice proof minted only after M6 authorization. Conventional password-authenticated CalDAV clients still work; the gateway never handles Matrix passwords. Real-Radicale tests prove both proof modes and authorization ordering.
 
 ## M3 — VEVENT CRUD vertical slice
 
@@ -268,13 +268,13 @@ DST regression or recurrence-editing criteria above.
         context routes remain active and use the authenticated user's
         principal.
 - [ ] Enable live room-calendar data access and room-target diagnostics only
-      after the M2 OpenID-capable Radicale plugin and same-user delegation
-      contract are validated, and M6 separately validates application-principal
-      credential provisioning, authorization, a Radicale contract under that
-      principal, and cross-room isolation. M2's user-scoped contract does not
-      validate application-principal credentials, and closing M2 does not
-      prove those M6 gates. Keep issue #7 open for real room calendar
-      operations.
+      after #48 implements both OpenID modes and #45 validates them against
+      real Radicale, and after M6 validates actor identity, current membership,
+      action power, exact binding, the appservice principal's `owner_only`
+      home boundary, and cross-room isolation. The authentication adapter does
+      not itself authorize room operations. Verify that the operator's etke
+      image override keeps the existing `/data` store before rollout. Keep
+      issue #7 open for real room calendar operations.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
 - [ ] First reminder delivery target: permission-checked room-wide
       notifications using standard `m.mentions.room: true`; check room-mention

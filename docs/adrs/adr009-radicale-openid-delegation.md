@@ -3,6 +3,15 @@
 - Status: Accepted
 - Date: 2026-09-23
 
+> **Supersession notice (ADR024, 2026-10-01):** ADR024 supersedes this ADR's
+> requirement that the OpenID-capable Radicale authentication implementation
+> live only in a separate plugin repository. It selects a clean-room
+> in-repository Radicale 3.8 Auth module and a pinned project-owned image.
+> This changes implementation location and packaging only. The credential
+> semantics, password-client compatibility, identity checks, and security
+> requirements recorded below remain in force as narrowed by ADR024. No source
+> from `radicale-auth-matrix` is copied or modified by this decision.
+
 ## Context
 
 ADR006 requires the widget to authenticate to the calendar gateway with Matrix

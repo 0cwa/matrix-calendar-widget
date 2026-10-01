@@ -48,8 +48,9 @@ target, independently of which channel made the request:
    authenticated Matrix client. The CalDAV identity is the bot service
    principal, never the command sender. This is the narrow room-target
    extension to ADR009; its per-user credential contract remains unchanged
-   for personal targets. The room path requires the OpenID-capable Radicale plugin tracked
-   by M2 issue #48; it must not substitute a Matrix password.
+   for personal targets. The room path requires the OpenID-capable Radicale
+   auth module tracked by M2 issue #48 and selected in ADR024; it must not
+   substitute a Matrix password.
 4. **Authorize the actor and resolve the target before CalDAV.** For every
    room-bound widget or bot operation, validate the caller identity (widget
    OpenID or an event received over the authenticated homeserver connection),
@@ -87,10 +88,11 @@ target, independently of which channel made the request:
    mechanism may not use the bot's own OpenID token as proof of the sender.
 
 Room-bound widget access and M7 data commands depend on the M2 OpenID-capable
-Radicale support and final delegation contract (#48 and #45), plus the M6
-room-to-calendar binding and server-side actor, membership, and power checks.
+Radicale support selected by ADR024 and final delegation contract (#48 and
+#45), plus the M6 room-to-calendar binding and server-side actor, membership,
+and power checks.
 This ADR defines the identity and ownership boundary; it does not implement
-commands, bindings, or the external Radicale plugin.
+commands, bindings, or the Radicale auth module.
 
 ## Consequences
 
@@ -108,9 +110,9 @@ commands, bindings, or the external Radicale plugin.
   security requirement for multiple trust domains.
 - Per-user command targets remain unavailable until trusted actor proof and
   target-calendar authorization are designed and implemented.
-- The OpenID plugin change remains external to this repository under its own
-  license. Password-authenticated CalDAV clients retain ADR009's existing
-  compatibility path.
+- ADR024 selects a clean-room Radicale auth module in this repository and
+  does not change the external plugin's source or license. Password-
+  authenticated CalDAV clients retain ADR009's compatibility path.
 
 ## Acceptance gates for room-bound widget and bot access
 

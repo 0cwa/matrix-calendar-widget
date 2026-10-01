@@ -64,8 +64,9 @@ but does not isolate rooms from a compromised gateway or service principal.
    principal or collection selector.
 7. **Retain the M2 and deployment gates.** This decision does not make room
    CalDAV access available. Actual room-target CalDAV I/O still requires the
-   OpenID-capable Radicale plugin and delegated real-Radicale contract (#48
-   and #45). With `owner_only`, the app principal can access its whole home;
+   ADR024's OpenID-capable Radicale auth module and delegated real-Radicale
+   contract (#48 and #45). With `owner_only`, the app principal can access its
+   whole home;
    only app-owned room calendars may be placed there, and deployments must
    constrain that home to one trusted organizational boundary or validate
    equivalent per-room isolation before serving mutually untrusted rooms.
@@ -93,7 +94,7 @@ but does not isolate rooms from a compromised gateway or service principal.
 - Personal calendar access and the deferred per-user bot-target policy remain
   unchanged.
 - ADR014's whole-home service-principal isolation requirement and the #48/#45
-  OpenID plugin/contract prerequisites remain in force.
+  OpenID auth-module/contract prerequisites remain in force.
 
 ## Acceptance gates for a future implementation
 
