@@ -17,9 +17,7 @@
 import {
   INestApplication,
   LoggerService,
-  MiddlewareConsumer,
   Module,
-  NestModule,
   VersioningType,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -146,11 +144,7 @@ const matrixClient = {
     MatrixRoomMembershipGuard,
   ],
 })
-class PersonalOpenIdGatewayContractModule implements NestModule {
-  configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(MatrixAuthMiddleware).forRoutes(CalendarGatewayController);
-  }
-}
+class PersonalOpenIdGatewayContractModule {}
 
 describeContract('personal Matrix OpenID gateway against real Radicale', () => {
   beforeAll(async () => {
@@ -231,6 +225,8 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     app = await NestFactory.create(PersonalOpenIdGatewayContractModule, {
       logger: gatewayLogger,
     });
+    const authMiddleware = app.get(MatrixAuthMiddleware);
+    app.use(authMiddleware.use.bind(authMiddleware));
     app.enableVersioning({ type: VersioningType.URI });
     await app.listen(0, '127.0.0.1');
     const address = app.getHttpServer().address() as AddressInfo;

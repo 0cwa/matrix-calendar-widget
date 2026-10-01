@@ -14,13 +14,7 @@
  * limitations under the License.
  */
 
-import {
-  FactoryProvider,
-  Logger,
-  MiddlewareConsumer,
-  Module,
-  NestModule,
-} from '@nestjs/common';
+import { FactoryProvider, Logger, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import i18next from 'i18next';
 import i18nextFsBackend from 'i18next-fs-backend';
@@ -329,8 +323,4 @@ const i18nFactory: FactoryProvider<void> = {
     GuestMemberService,
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer.apply(MatrixAuthMiddleware).forRoutes(...appControllers);
-  }
-}
+export class AppModule {}
