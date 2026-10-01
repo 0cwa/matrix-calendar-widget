@@ -19,6 +19,7 @@ import type {
   CalendarEventDateTime,
   CalendarEventPatch,
 } from '@matrix-calendar-widget/calendar';
+import { getVTimezoneBlock } from '@matrix-calendar-widget/ical-timezones';
 import fs from 'fs';
 import ICAL from 'ical.js';
 import path from 'path';
@@ -741,7 +742,7 @@ describe('ICalendarEventCodec', () => {
       type: 'date-time',
       value: {
         local: '2026-10-27T09:30:00',
-        timezone: 'America/New_York',
+        timezone: 'Europe/Stockholm',
       },
     };
 
@@ -768,7 +769,7 @@ describe('ICalendarEventCodec', () => {
       'FREQ=WEEKLY;COUNT=4',
     );
     expect(added.icalendar).toContain(
-      'RDATE;TZID=America/New_York:20261027T093000',
+      'RDATE;TZID=Europe/Stockholm:20261027T093000',
     );
     expect(master.getAllProperties('exdate')).toHaveLength(2);
     expect(master.getAllProperties('rdate')).toHaveLength(3);
@@ -794,7 +795,7 @@ describe('ICalendarEventCodec', () => {
       parsed.event.recurrence?.exdates,
     );
     expect(removed.icalendar).not.toContain(
-      'RDATE;TZID=America/New_York:20261027T093000',
+      'RDATE;TZID=Europe/Stockholm:20261027T093000',
     );
     expect(
       ICAL.Component.fromString(removed.icalendar).getAllSubcomponents(
@@ -839,15 +840,16 @@ describe('ICalendarEventCodec', () => {
         type: 'date-time' as const,
         value: { local: '2026-10-09T11:30:00', timezone: 'America/New_York' },
       },
+      timezoneDefinitions: ['Europe/Stockholm', 'America/New_York'],
       expected: 'RDATE;TZID=America/New_York:20261009T113000',
     },
   ])(
     'round-trips a point RDATE as $label',
-    ({ dtstart, dtend, value, expected }) => {
+    ({ dtstart, dtend, value, expected, timezoneDefinitions = [] }) => {
       const parsed = codec.parse(
         'team',
         'typed-rdate.ics',
-        simpleRecurringSource(dtstart, dtend),
+        simpleRecurringSource(dtstart, dtend, [], timezoneDefinitions),
       );
       const added = parsed.applyPatch({
         recurrence: { rdate: { action: 'add', value } },
@@ -859,6 +861,36 @@ describe('ICalendarEventCodec', () => {
       ).toContainEqual(value);
     },
   );
+
+  it('rejects adding a TZID RDATE without a matching source VTIMEZONE', () => {
+    const parsed = codec.parse(
+      'team',
+      'rdate-missing-timezone-definition.ics',
+      simpleRecurringSource(
+        'DTSTART;TZID=Europe/Stockholm:20261005T090000',
+        'DTEND;TZID=Europe/Stockholm:20261005T100000',
+        [],
+        ['Europe/Stockholm'],
+      ),
+    );
+
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          rdate: {
+            action: 'add',
+            value: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-09T11:30:00',
+                timezone: 'America/New_York',
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(ICalendarEventCodecError);
+  });
 
   it('treats exact DTSTART, RRULE, and existing RDATE additions as no-ops', () => {
     const parsed = codec.parse(
@@ -2271,12 +2303,22 @@ function simpleRecurringSource(
   dtstart: string,
   dtend: string,
   additionalLines: string[] = [],
+  timezoneDefinitions: string[] = [],
 ): string {
+  const timezoneComponents = timezoneDefinitions.map((timezoneId) => {
+    const definition = getVTimezoneBlock(timezoneId);
+    if (!definition) {
+      throw new Error(`Missing bundled VTIMEZONE definition: ${timezoneId}`);
+    }
+    return definition;
+  });
+
   return [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
     'PRODID:-//Matrix Calendar Widget//Tests//EN',
     'X-CUSTOM-CALENDAR-PROPERTY:preserve-resource-value',
+    ...timezoneComponents,
     'BEGIN:VEVENT',
     'UID:simple-recurring@example.test',
     'DTSTAMP:20260922T120000Z',

@@ -1565,7 +1565,7 @@ END:VCALENDAR`,
               type: 'date-time',
               value: {
                 local: '2026-10-27T09:30:00',
-                timezone: 'America/New_York',
+                timezone: 'Europe/Stockholm',
               },
             },
           },
@@ -1604,7 +1604,7 @@ END:VCALENDAR`,
       type: 'date-time',
       value: {
         local: '2026-10-27T09:30:00',
-        timezone: 'America/New_York',
+        timezone: 'Europe/Stockholm',
       },
     });
     expect(result.event.recurrence?.exdates).toHaveLength(2);
@@ -1612,7 +1612,7 @@ END:VCALENDAR`,
     expect(putInit?.method).toBe('PUT');
     expect(new Headers(putInit?.headers).get('If-Match')).toBe('"old-etag"');
     expect(putInit?.body).toContain(
-      'RDATE;TZID=America/New_York:20261027T093000',
+      'RDATE;TZID=Europe/Stockholm:20261027T093000',
     );
     expect(putInit?.body).toContain(
       'EXDATE;TZID=Europe/Stockholm:20261102T140000',

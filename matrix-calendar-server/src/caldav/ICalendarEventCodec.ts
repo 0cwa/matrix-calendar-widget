@@ -176,7 +176,7 @@ export class ParsedICalendarEvent {
         applyOccurrenceExdate(vevent, recurrenceWrite.exdate);
       } else if (recurrenceWrite && 'rdate' in recurrenceWrite) {
         assertPointRdatePropertiesCanBeEdited(vevent, this.event);
-        applyPointRdate(vevent, recurrenceWrite.rdate, this.event);
+        applyPointRdate(calendar, vevent, recurrenceWrite.rdate, this.event);
         if (hasUnsupportedTimezoneRules(calendar, this.event.uid)) {
           throw unsupportedRecurrencePatch();
         }
@@ -839,6 +839,7 @@ function isValidLocalDateTime(value: string): boolean {
 }
 
 function applyPointRdate(
+  calendar: ICAL.Component,
   vevent: ICAL.Component,
   operation: Extract<CalendarEventRecurrenceWrite, { rdate: unknown }>['rdate'],
   event: CalendarEvent,
@@ -859,6 +860,20 @@ function applyPointRdate(
       )
     ) {
       return;
+    }
+
+    if (operation.value.type === 'date-time') {
+      const timezoneId = operation.value.value.timezone;
+      if (
+        timezoneId !== 'UTC' &&
+        !calendar
+          .getAllSubcomponents('vtimezone')
+          .some(
+            (timezone) => timezone.getFirstPropertyValue('tzid') === timezoneId,
+          )
+      ) {
+        throw unsupportedRecurrencePatch();
+      }
     }
 
     const property = new ICAL.Property('rdate');

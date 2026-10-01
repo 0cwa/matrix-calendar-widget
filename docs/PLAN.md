@@ -123,7 +123,8 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [ ] General RDATE / EXDATE editing.
   - [x] Add or remove one point-valued RDATE on a supported recurring event.
         Preserve DATE vs DATE-TIME, floating/UTC/TZID form and local wall time;
-        leave PERIOD values opaque and keep EXDATE precedence unchanged.
+        require a source VTIMEZONE for new TZID values, leave PERIOD values
+        opaque and keep EXDATE precedence unchanged.
 - [ ] RECURRENCE-ID instance override editing.
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
@@ -150,13 +151,15 @@ RDATE operation below is a separate bounded edit path.
 The point RDATE slice adds or removes one DATE or DATE-TIME value on a supported
 recurring master. DATE and DATE-TIME must match DTSTART's value type; DATE-TIME
 values keep their own floating, UTC, or TZID form and wall time, and their TZID
-does not have to match DTSTART's. Each new value uses a separate homogeneous
-RDATE property. Exact duplicates already supplied by DTSTART, RRULE, or RDATE
-are no-ops; EXDATE values remain untouched and authoritative. Removal compares
-the full typed identity, including TZID. PERIOD values, malformed or unsupported
-RDATE properties, detached VEVENTs, VALARM, VTIMEZONE, unknown properties,
-siblings, and ETag conditional updates remain preserved. General EXDATE editing,
-PERIOD editing, arbitrary RRULEs, and broad M5 completion remain open.
+does not have to match DTSTART's, but a new TZID value requires a matching
+VTIMEZONE already present in the source VCALENDAR. Each new value uses a
+separate homogeneous RDATE property. Exact duplicates already supplied by
+DTSTART, RRULE, or RDATE are no-ops; EXDATE values remain untouched and
+authoritative. Removal compares the full typed identity, including TZID. PERIOD
+values, malformed or unsupported RDATE properties, detached VEVENTs, VALARM,
+VTIMEZONE, unknown properties, siblings, and ETag conditional updates remain
+preserved. General EXDATE editing, PERIOD editing, arbitrary RRULEs, and broad
+M5 completion remain open.
 
 The bounded weekly BYDAY slice extends the editor with a weekday set for
 every-week rules. Plain weekday tokens are accepted only when DTSTART's
@@ -236,7 +239,9 @@ Ordinary master-field patches preserve all VEVENT components, VTIMEZONE, and
 unknown properties. Occurrence skip/restore uses an add/remove-one EXDATE patch
 and preserves other EXDATEs, RDATE PERIOD values, detached VEVENTs, VALARMs,
 and unknown properties. Point RDATE writes likewise preserve sibling values and
-all unrelated resource data; they do not edit or clear EXDATE. EXDATE values
+all unrelated resource data; new TZID RDATE values are accepted only when the
+source VCALENDAR already has their VTIMEZONE definition, and writes do not edit
+or clear EXDATE. EXDATE values
 keep the projected identity's DATE,
 floating, UTC, or named-TZID form and local wall time. `RANGE=THISANDFUTURE`,
 malformed, and otherwise unsupported recurrence remains read-only. The codec
