@@ -32,7 +32,6 @@ jobs:
     timeout-minutes: 15
     env:
       MATRIX_CALENDAR_DEV_USER: calendar
-      MATRIX_CALENDAR_DEV_PASSWORD: calendar-dev-password
       CALDAV_CONTRACT: '1'
       CALDAV_BASE_URL: http://localhost:5232/
       CALDAV_USERNAME: calendar
@@ -43,6 +42,12 @@ jobs:
         with:
           node-version: '22'
           cache: yarn
+
+      - name: Create and mask isolated Synapse fixture password
+        run: |
+          fixture_password="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')"
+          echo "::add-mask::$fixture_password"
+          echo "MATRIX_CALENDAR_DEV_PASSWORD=$fixture_password" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
@@ -82,17 +87,26 @@ jobs:
         run: |
           set +e
           contract_log="$RUNNER_TEMP/caldav-contract-output.log"
+          contract_report="$RUNNER_TEMP/caldav-contract-results.json"
           yarn workspace @matrix-calendar-widget/server jest \
             test/CalendarGatewayMembershipGuard.test.ts \
             test/integration/PersonalOpenIdRadicaleContract.test.ts \
             test/integration/CalDavDiscoveryContract.test.ts \
             test/integration/CalDavEventRoundTripContract.test.ts \
             test/integration/CalendarDiagnosticsContract.test.ts \
-            --runInBand > "$contract_log" 2>&1
+            --runInBand --json --outputFile="$contract_report" \
+            > "$contract_log" 2>&1
           test_status=$?
           set -e
-          node dev/assert-caldav-contract-logs.mjs "$contract_log"
-          rm -f "$contract_log"
+          set +e
+          node dev/assert-caldav-contract-logs.mjs \
+            "$contract_log" "$contract_report"
+          scan_status=$?
+          rm -f "$contract_log" "$contract_report"
+          set -e
+          if [ "$scan_status" -ne 0 ]; then
+            exit "$scan_status"
+          fi
           exit "$test_status"
 
       - name: Stop services

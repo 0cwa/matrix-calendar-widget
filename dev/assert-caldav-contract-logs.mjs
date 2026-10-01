@@ -21,7 +21,8 @@ const credential = process.env.CALDAV_OPENID_CREDENTIAL ?? '';
 const username = process.env.CALDAV_USERNAME ?? 'calendar';
 const fixturePassword = process.env.MATRIX_CALENDAR_DEV_PASSWORD ?? '';
 const logFile = process.argv[2];
-if (!credential.startsWith('matrix-openid:') || !logFile) {
+const reportFile = process.argv[3];
+if (!credential.startsWith('matrix-openid:') || !logFile || !reportFile) {
   process.stderr.write('Unable to verify CalDAV contract log redaction.\n');
   process.exit(1);
 }
@@ -79,15 +80,17 @@ try {
 }
 
 let testLogs;
+let testReportText;
 try {
   testLogs = readFileSync(logFile, 'utf8');
+  testReportText = readFileSync(reportFile, 'utf8');
 } catch {
   process.stderr.write('Unable to inspect CalDAV contract test output.\n');
   process.exit(1);
 }
 
 if (
-  [testLogs, serviceLogs].some((logs) =>
+  [testLogs, testReportText, serviceLogs].some((logs) =>
     protectedValues.some((value) => logs.includes(value)),
   )
 ) {
@@ -97,6 +100,54 @@ if (
   process.exit(1);
 }
 
-process.stdout.write(
-  'CalDAV contract test and service logs contain no protected authentication material.\n',
+let testReport;
+try {
+  testReport = JSON.parse(testReportText);
+} catch {
+  process.stderr.write('Unable to inspect CalDAV contract test results.\n');
+  process.exit(1);
+}
+
+const failedSuites = (testReport.testResults ?? []).filter(
+  (suite) => suite.status === 'failed',
 );
+if (failedSuites.length === 0) {
+  process.stdout.write(
+    'CalDAV contract test and service logs contain no protected authentication material.\n',
+  );
+} else {
+  process.stdout.write(
+    'CalDAV contract tests failed; sensitive failure details are withheld.\n',
+  );
+  for (const suite of failedSuites) {
+    const suiteName = suite.name.split('/').slice(-3).join('/');
+    process.stdout.write(`Failed suite: ${suiteName}\n`);
+    const failedTests = (suite.assertionResults ?? []).filter(
+      (test) => test.status === 'failed',
+    );
+    for (const test of failedTests) {
+      process.stdout.write(
+        `Failed test: ${[...test.ancestorTitles, test.title].join(' > ')}\n`,
+      );
+    }
+
+    const failureText = [
+      suite.message,
+      ...(suite.assertionResults ?? []).flatMap(
+        (test) => test.failureMessages ?? [],
+      ),
+    ].join('\n');
+    const locations = [
+      ...failureText.matchAll(/([\w./-]+\.(?:ts|tsx|js):\d+:\d+)/g),
+    ]
+      .map((match) => match[1])
+      .filter(
+        (location) => location.includes('test/') || location.includes('src/'),
+      );
+    for (const location of [...new Set(locations)]) {
+      process.stdout.write(
+        `Failure location: ${location.split('/').slice(-3).join('/')}\n`,
+      );
+    }
+  }
+}
