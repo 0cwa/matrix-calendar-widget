@@ -137,6 +137,14 @@ if (failedSuites.length === 0) {
         (test) => test.failureMessages ?? [],
       ),
     ].join('\n');
+    const statusAssertion = failureText.match(
+      /Expected: (\d{3})\s+Received: (\d{3})/,
+    );
+    if (statusAssertion) {
+      process.stdout.write(
+        `HTTP status assertion: expected ${statusAssertion[1]}, received ${statusAssertion[2]}\n`,
+      );
+    }
     const locations = [
       ...failureText.matchAll(/([\w./-]+\.(?:ts|tsx|js):\d+:\d+)/g),
     ]

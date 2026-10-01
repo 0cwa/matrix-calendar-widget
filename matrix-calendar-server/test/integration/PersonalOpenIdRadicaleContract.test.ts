@@ -28,6 +28,7 @@ import { MatrixClient } from 'matrix-bot-sdk';
 import { execFileSync } from 'node:child_process';
 import { request as httpRequest } from 'node:http';
 import { AddressInfo } from 'node:net';
+import { resolve } from 'node:path';
 import { IAppConfiguration } from '../../src/IAppConfiguration';
 import { ModuleProviderToken } from '../../src/ModuleProviderToken';
 import { MatrixOpenIdCalDavCredentialProviderFactory } from '../../src/caldav/MatrixOpenIdCalDavCredentialProviderFactory';
@@ -381,7 +382,7 @@ function assertServiceLogsOmit(...secrets: string[]): void {
       [
         'compose',
         '-f',
-        'dev/compose.yaml',
+        resolve(__dirname, '../../../dev/compose.yaml'),
         'logs',
         '--no-color',
         '--no-log-prefix',
