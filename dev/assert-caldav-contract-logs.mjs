@@ -145,6 +145,14 @@ if (failedSuites.length === 0) {
         `HTTP status assertion: expected ${statusAssertion[1]}, received ${statusAssertion[2]}\n`,
       );
     }
+    const stageDiagnostic = failureText.match(
+      /SAFE_CALDAV_CONTRACT_DIAGNOSTIC identity=(not-observed|accepted|rejected) membership=(none|(?:yes|no)(?:,(?:yes|no))*) provider_calls=(\d+) caldav_status=(none|(?:\d{3})(?:,\d{3})*)/,
+    );
+    if (stageDiagnostic) {
+      process.stdout.write(
+        `Safe contract stages: identity=${stageDiagnostic[1]}, membership=${stageDiagnostic[2]}, provider_calls=${stageDiagnostic[3]}, caldav_status=${stageDiagnostic[4]}\n`,
+      );
+    }
     const locations = [
       ...failureText.matchAll(/([\w./-]+\.(?:ts|tsx|js):\d+:\d+)/g),
     ]

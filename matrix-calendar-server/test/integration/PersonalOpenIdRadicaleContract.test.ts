@@ -59,6 +59,12 @@ let app: INestApplication;
 let gatewayBaseUrl: string;
 let countCalDavRequests: () => number;
 const gatewayLogLines: string[] = [];
+type ContractStageDiagnostics = {
+  identity: 'not-observed' | 'accepted' | 'rejected';
+  membershipResults: boolean[];
+  caldavStatuses: number[];
+};
+let activeStageDiagnostics: ContractStageDiagnostics | undefined;
 
 function captureGatewayLog(...values: unknown[]): void {
   gatewayLogLines.push(
@@ -109,7 +115,11 @@ const matrixClient = {
     const result = (await response.json()) as {
       joined?: Record<string, unknown>;
     };
-    return Object.keys(result.joined ?? {});
+    const members = Object.keys(result.joined ?? {});
+    activeStageDiagnostics?.membershipResults.push(
+      members.includes(actorUserId),
+    );
+    return members;
   },
 } as unknown as MatrixClient;
 
@@ -197,6 +207,28 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     app = await NestFactory.create(PersonalOpenIdGatewayContractModule, {
       logger: gatewayLogger,
     });
+    const authMiddleware = app.get(MatrixAuthMiddleware);
+    const extractUserContext = authMiddleware.extractUserContext.bind(
+      authMiddleware,
+    );
+    jest
+      .spyOn(authMiddleware, 'extractUserContext')
+      .mockImplementation(async (request) => {
+        try {
+          const context = await extractUserContext(request);
+          if (activeStageDiagnostics) {
+            activeStageDiagnostics.identity = context
+              ? 'accepted'
+              : 'rejected';
+          }
+          return context;
+        } catch (error) {
+          if (activeStageDiagnostics) {
+            activeStageDiagnostics.identity = 'rejected';
+          }
+          throw error;
+        }
+      });
     app.enableVersioning({ type: VersioningType.URI });
     await app.listen(0, '127.0.0.1');
     const address = app.getHttpServer().address() as AddressInfo;
@@ -212,7 +244,31 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
   });
 
   it('uses the actor proof and returns only the actor personal calendar', async () => {
+    const providerCallsBefore = credentialProviderFactorySpy.mock.calls.length;
+    const stages: ContractStageDiagnostics = {
+      identity: 'not-observed',
+      membershipResults: [],
+      caldavStatuses: [],
+    };
+    activeStageDiagnostics = stages;
     const response = await gatewayRequest(identityHeader(actorIdentity));
+    activeStageDiagnostics = undefined;
+
+    if (response.status !== 200) {
+      const membership =
+        stages.membershipResults.length === 0
+          ? 'none'
+          : stages.membershipResults
+              .map((joined) => (joined ? 'yes' : 'no'))
+              .join(',');
+      const caldavStatus =
+        stages.caldavStatuses.length === 0
+          ? 'none'
+          : stages.caldavStatuses.join(',');
+      throw new Error(
+        `SAFE_CALDAV_CONTRACT_DIAGNOSTIC identity=${stages.identity} membership=${membership} provider_calls=${credentialProviderFactorySpy.mock.calls.length - providerCallsBefore} caldav_status=${caldavStatus}`,
+      );
+    }
 
     expect(response.status).toBe(200);
     const calendars = JSON.parse(response.body) as Array<{
@@ -469,7 +525,15 @@ function instrumentCalDavRequests(): () => number {
     if (new URL(url, radicaleBaseUrl).origin === caldavOrigin) {
       requestCount += 1;
     }
-    return originalFetch(input, init);
+    return originalFetch(input, init).then((response) => {
+      if (
+        activeStageDiagnostics &&
+        new URL(url, radicaleBaseUrl).origin === caldavOrigin
+      ) {
+        activeStageDiagnostics.caldavStatuses.push(response.status);
+      }
+      return response;
+    });
   });
   return () => requestCount;
 }
