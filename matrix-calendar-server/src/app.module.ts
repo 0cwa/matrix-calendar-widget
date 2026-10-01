@@ -20,6 +20,7 @@ import {
   MiddlewareConsumer,
   Module,
   NestModule,
+  RequestMethod,
 } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import i18next from 'i18next';
@@ -330,6 +331,8 @@ const i18nFactory: FactoryProvider<void> = {
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(MatrixAuthMiddleware).forRoutes('*');
+    consumer
+      .apply(MatrixAuthMiddleware)
+      .forRoutes({ path: '*', method: RequestMethod.ALL });
   }
 }

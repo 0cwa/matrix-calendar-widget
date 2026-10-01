@@ -20,6 +20,7 @@ import {
   MiddlewareConsumer,
   Module,
   NestModule,
+  RequestMethod,
   VersioningType,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -148,7 +149,9 @@ const matrixClient = {
 })
 class PersonalOpenIdGatewayContractModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(MatrixAuthMiddleware).forRoutes('*');
+    consumer
+      .apply(MatrixAuthMiddleware)
+      .forRoutes({ path: '*', method: RequestMethod.ALL });
   }
 }
 
@@ -209,26 +212,24 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
       MatrixAuthMiddleware.prototype.extractUserContext;
     jest
       .spyOn(MatrixAuthMiddleware.prototype, 'extractUserContext')
-      .mockImplementation(
-        async function (this: MatrixAuthMiddleware, request) {
-          try {
-            const context = await extractUserContext.call(this, request);
-            if (activeStageDiagnostics) {
-              activeStageDiagnostics.identity = context
-                ? context.userId === actorUserId
-                  ? 'actor'
-                  : 'other'
-                : 'absent';
-            }
-            return context;
-          } catch (error) {
-            if (activeStageDiagnostics) {
-              activeStageDiagnostics.identity = 'rejected';
-            }
-            throw error;
+      .mockImplementation(async function (this: MatrixAuthMiddleware, request) {
+        try {
+          const context = await extractUserContext.call(this, request);
+          if (activeStageDiagnostics) {
+            activeStageDiagnostics.identity = context
+              ? context.userId === actorUserId
+                ? 'actor'
+                : 'other'
+              : 'absent';
           }
-        },
-      );
+          return context;
+        } catch (error) {
+          if (activeStageDiagnostics) {
+            activeStageDiagnostics.identity = 'rejected';
+          }
+          throw error;
+        }
+      });
 
     app = await NestFactory.create(PersonalOpenIdGatewayContractModule, {
       logger: gatewayLogger,
