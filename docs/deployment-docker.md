@@ -100,8 +100,9 @@ image have not been implemented or deployed. The checked etke role exposes
 `radicale_auth_type` and `radicale_auth_matrix_server` variables
 ([role defaults](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/defaults/main.yml#L238-L242)),
 but public role documentation does not establish that the actual managed host
-accepts a custom image override. Confirm that override, preserve the existing
-`/data` volume, and rehearse config, network, service lifecycle, and rollback
+accepts a custom image override. This repository now contains the adapter and
+image build, but neither is deployed here. Confirm that override, preserve the
+existing `/data` volume, and rehearse config, network, service lifecycle, and rollback
 before rollout. Do not install a floating auth module or create a second
 Radicale store.
 

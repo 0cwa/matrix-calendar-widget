@@ -44,10 +44,10 @@ The gateway and bot are initially one deployable service. Split them only when s
 distinct ownership paths and the initial room-target contract:
 
 - **Personal widget calendars** remain associated with the authenticated Matrix
-  user. The gateway validates that user's short-lived OpenID assertion. Once
-  the in-repository Radicale Auth module in ADR024 is implemented for
-  [#48](https://github.com/0cwa/matrix-calendar-widget/issues/48) and M2's
-  real-server contract in
+  user. The gateway validates that user's short-lived OpenID assertion. This
+  change implements the in-repository Radicale Auth module selected by ADR024
+  for [#48](https://github.com/0cwa/matrix-calendar-widget/issues/48). After
+  #48 passes review and M2's real-server contract in
   [#45](https://github.com/0cwa/matrix-calendar-widget/issues/45) proves
   same-user enumeration and fail-closed denial for non-members or failed
   authorization lookups before CalDAV I/O, the gateway will use the

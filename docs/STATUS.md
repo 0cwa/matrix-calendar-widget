@@ -8,7 +8,7 @@ This is the short-lived execution snapshot. `docs/PLAN.md` is the durable milest
 
 **M3 is complete. M4 description and color editing, mixed-collection compatibility, manager-only CalDAV URL/copy diagnostics, and hiding of VJOURNAL-only/VTODO-only collections are implemented; issue #5 remains open for other collection-management work, and collection timezone editing is deferred. PRs #128 and #130 merged bounded read-only recurrence projection/range clipping and the first supported whole-series RRULE create/edit slice. M5 recurrence work continues in bounded slices.**
 
-ADR024 selects a clean-room, OpenID-only in-repository Radicale 3.8.0.0 Auth module and pinned project-owned image for #48; implementation is not complete. The owned backend rejects untagged credentials, and Matrix-password CalDAV compatibility is intentionally unsupported and deferred in this pre-alpha. M2 #48/#45 validate personal actor proof and same-user enumeration, with nonmember and failed authorization lookups denied before CalDAV I/O. M6 issue #7 owns appservice proof issuance after actor, membership, power, and exact binding checks, plus cross-room isolation. PR #132 adds binding validation and fail-closed membership/power policy; PR #133 wires the opt-in `target=room` preflight and stops before CalDAV I/O. Existing user-principal room-context routes remain active and make CalDAV requests as the authenticated user. Live room-calendar data and room-target diagnostics remain disabled until the M2 and M6 gates pass. The actual etke-host image override and `/data` replacement path have not been verified.
+ADR024 selects a clean-room, OpenID-only in-repository Radicale 3.8.0.0 Auth module and pinned project-owned image for #48. This change implements the adapter, image, focused tests, and direct real-Radicale authentication contract. The owned backend rejects untagged credentials, and Matrix-password CalDAV compatibility is intentionally unsupported and deferred in this pre-alpha. #45 remains open for the personal gateway's same-user enumeration and nonmember/failed-authorization denial before CalDAV I/O. M6 issue #7 owns appservice proof issuance after actor, membership, power, and exact binding checks, plus cross-room isolation. PR #132 adds binding validation and fail-closed membership/power policy; PR #133 wires the opt-in `target=room` preflight and stops before CalDAV I/O. Existing user-principal room-context routes remain active and make CalDAV requests as the authenticated user. Live room-calendar data and room-target diagnostics remain disabled until the M2 and M6 gates pass. The actual etke-host image override and `/data` replacement path have not been verified.
 
 ## Landed
 
@@ -31,9 +31,9 @@ Merged in-repo:
 - a historical password-authenticated real-Radicale discovery contract for the
   prior deployment (this does not grant password support to the owned image).
 
-The personal OpenID-to-Radicale path remains incomplete. ADR024 moves #48 into
-this repository; see **Active blockers**. The prior password-authenticated
-contract records legacy deployment behavior only.
+The in-repository personal OpenID-to-Radicale adapter and owned image are under
+implementation/review in #48; see **Active blockers**. The prior
+password-authenticated contract records legacy deployment behavior only.
 
 ### M3 — VEVENT CRUD
 
@@ -90,7 +90,7 @@ exactly-once Matrix message delivery.
 
 ### M2 — Radicale OpenID authentication and delegation
 
-- #48 remains open for the clean-room in-repository Radicale 3.8.0.0 Auth module and pinned project-owned image under ADR024. It accepts tagged short-lived OpenID credentials only and rejects untagged password credentials; the external auth package is not included or invoked. Matrix-password CalDAV compatibility is unsupported and deferred in this pre-alpha. The current GitHub issue acceptance still asks for the superseded external-plugin/Matrix-password scope and must be updated before implementation. No adapter code or custom image has landed yet.
+- #48 remains open for implementation/review of the clean-room in-repository Radicale 3.8.0.0 Auth module and pinned project-owned image under ADR024. Its current acceptance requires tagged short-lived OpenID credentials only, rejection of untagged credentials before homeserver I/O, focused validation/cache/log tests, and use of the owned image in dev/contract CI. Matrix-password CalDAV compatibility is unsupported and deferred in this pre-alpha; no external auth package is included or invoked.
 - #45 remains open for the M2 real-Radicale personal actor contract: same-user calendar enumeration and denial of non-members or failed authorization lookups before CalDAV I/O, after #48.
 
 The selected implementation is in-repository; it does not depend on a change to or copied source from `radicale-auth-matrix`. Whether the actual etke-managed host accepts a custom image override while preserving its current `/data` store, configuration, and service lifecycle remains unconfirmed and must be verified before rollout.

@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/caldav-contract.yml'
       - 'dev/**'
+      - 'radicale-auth/**'
       - 'matrix-calendar-server/src/caldav/**'
       - 'matrix-calendar-server/src/controller/CalendarGatewayController.ts'
       - 'matrix-calendar-server/src/app.module.ts'
@@ -32,7 +33,6 @@ jobs:
       CALDAV_CONTRACT: '1'
       CALDAV_BASE_URL: http://localhost:5232/
       CALDAV_USERNAME: calendar
-      CALDAV_PASSWORD: calendar-dev-password
     steps:
       - uses: actions/checkout@v7
 
@@ -47,9 +47,21 @@ jobs:
       - name: Start pinned Matrix and Radicale services
         run: bash dev/up.sh
 
+      - name: Mint and mask the short-lived Synapse fixture proof
+        run: |
+          echo "::add-mask::$MATRIX_CALENDAR_DEV_PASSWORD"
+          credential="$(node dev/mint-openid-credential.mjs)"
+          echo "::add-mask::$credential"
+          echo "CALDAV_OPENID_CREDENTIAL=$credential" >> "$GITHUB_ENV"
+
       - name: Provision VEVENT calendar collection
         run: |
-          curl --fail-with-body             --user "$CALDAV_USERNAME:$CALDAV_PASSWORD"             --request MKCALENDAR             --header 'Content-Type: application/xml; charset=utf-8'             --data-binary @-             "http://localhost:5232/$CALDAV_USERNAME/contract-calendar/" <<'XML'
+          curl --fail-with-body \
+            --user "$CALDAV_USERNAME:$CALDAV_OPENID_CREDENTIAL" \
+            --request MKCALENDAR \
+            --header 'Content-Type: application/xml; charset=utf-8' \
+            --data-binary @- \
+            "http://localhost:5232/$CALDAV_USERNAME/contract-calendar/" <<'XML'
           <?xml version="1.0" encoding="utf-8" ?>
           <C:mkcalendar xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:D="DAV:">
             <D:set>
@@ -71,10 +83,6 @@ jobs:
           test/integration/CalDavEventRoundTripContract.test.ts
           test/integration/CalendarDiagnosticsContract.test.ts
           --runInBand
-
-      - name: Dump service logs on failure
-        if: failure()
-        run: docker compose -f dev/compose.yaml logs --no-color
 
       - name: Stop services
         if: always()
