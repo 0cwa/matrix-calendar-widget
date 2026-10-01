@@ -86,10 +86,11 @@ const credentialProviderFactorySpy = jest.spyOn(
   'forRequest',
 );
 
+const radicaleBaseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
 const testConfiguration = {
   homeserver_url:
     process.env.MATRIX_CALENDAR_DEV_HOMESERVER_URL ?? 'http://localhost:8008',
-  radicale_url: process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/',
+  radicale_url: radicaleBaseUrl,
 } as IAppConfiguration;
 
 const matrixClient = {
@@ -221,7 +222,7 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     expect(calendars[0]).toMatchObject({
       id: new URL(
         `${encodeURIComponent(actorUserId.split(':')[0].slice(1))}/contract-calendar/`,
-        testConfiguration.radicale_url,
+        radicaleBaseUrl,
       ).toString(),
       name: 'Contract Calendar',
     });
@@ -265,6 +266,22 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     );
     expectResponseToOmitCredentials(invalid.body, invalidOpenIdToken);
     expectGatewayLogsToOmitCredentials(invalidOpenIdToken);
+
+    const mismatchedServerHeader = identityHeader({
+      ...actorIdentity,
+      matrix_server_name: 'different-server.example',
+    });
+    const mismatchedServer = await gatewayRequest(mismatchedServerHeader);
+    expect(mismatchedServer.status).toBe(403);
+    expect(countCalDavRequests()).toBe(initialCount);
+    expect(credentialProviderFactorySpy).toHaveBeenCalledTimes(
+      initialProviderCalls,
+    );
+    expectResponseToOmitCredentials(
+      mismatchedServer.body,
+      actorIdentity.access_token,
+    );
+    expectGatewayLogsToOmitCredentials(mismatchedServerHeader);
   });
 
   it('denies a valid nonmember identity before any CalDAV request', async () => {
@@ -443,12 +460,12 @@ function identityHeader(identity: MatrixIdentity): string {
 
 function instrumentCalDavRequests(): () => number {
   const originalFetch = globalThis.fetch.bind(globalThis);
-  const caldavOrigin = new URL(testConfiguration.radicale_url).origin;
+  const caldavOrigin = new URL(radicaleBaseUrl).origin;
   let requestCount = 0;
   jest.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
     const url =
       typeof input === 'string' || input instanceof URL ? input : input.url;
-    if (new URL(url, testConfiguration.radicale_url).origin === caldavOrigin) {
+    if (new URL(url, radicaleBaseUrl).origin === caldavOrigin) {
       requestCount += 1;
     }
     return originalFetch(input, init);

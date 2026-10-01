@@ -17,6 +17,7 @@
 import { Inject, Injectable, Logger, NestMiddleware } from '@nestjs/common';
 import base64url from 'base64url';
 import { NextFunction, Request, Response } from 'express';
+import { UserID } from 'matrix-bot-sdk';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { MatrixEndpoint } from '../MatrixEndpoint';
 import { ModuleProviderToken } from '../ModuleProviderToken';
@@ -140,7 +141,20 @@ export class MatrixAuthMiddleware implements NestMiddleware {
 
     if (response.ok) {
       const result = await response.json();
-      return (result as any).sub; // user id
+      const userId = (result as any).sub;
+      if (typeof userId !== 'string') {
+        throw new Error('Matrix identity verification failed');
+      }
+      let userServerName: string;
+      try {
+        userServerName = new UserID(userId).domain;
+      } catch {
+        throw new Error('Matrix identity verification failed');
+      }
+      if (userServerName !== openIdTokenFromWidget.matrix_server_name) {
+        throw new Error('Matrix identity verification failed');
+      }
+      return userId;
     } else {
       throw new Error('Matrix identity verification failed');
     }

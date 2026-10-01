@@ -67,10 +67,10 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
       },
     } as Request;
 
-    fetch.mockResponseOnce(JSON.stringify({ sub: 4711 }));
+    fetch.mockResponseOnce(JSON.stringify({ sub: '@user:server' }));
     const result = await matrixAuth.extractUserContext(mockRequest);
 
-    expect(result?.userId).toEqual(4711);
+    expect(result?.userId).toEqual('@user:server');
     expect(
       (mockRequest as Request & Record<string, unknown>)[
         MATRIX_OPENID_CREDENTIAL_CONTEXT
@@ -116,6 +116,31 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
     } as Request;
 
     fetch.mockResponseOnce('Unauthorized', { status: 401 });
+
+    await expect(matrixAuth.extractUserContext(mockRequest)).rejects.toThrow(
+      'Matrix identity verification failed',
+    );
+    expect(
+      (mockRequest as Request & Record<string, unknown>)[
+        MATRIX_OPENID_CREDENTIAL_CONTEXT
+      ],
+    ).toBeUndefined();
+  });
+
+  test('MX-Identity server name must match the verified Matrix user', async () => {
+    appConfig.homeserver_url = 'abc';
+    const matrixAuth = new MatrixAuthMiddleware(appConfig);
+    const auth = `MX-Identity ${base64url(
+      JSON.stringify({
+        access_token: 'valid-token',
+        matrix_server_name: 'other-server',
+      }),
+    )}`;
+    const mockRequest = {
+      headers: { authorization: auth },
+    } as Request;
+
+    fetch.mockResponseOnce(JSON.stringify({ sub: '@user:server' }));
 
     await expect(matrixAuth.extractUserContext(mockRequest)).rejects.toThrow(
       'Matrix identity verification failed',
