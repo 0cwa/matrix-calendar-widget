@@ -86,26 +86,29 @@ inject server-only secrets through an operator-approved secret mechanism.
 
 ### Radicale authentication
 
-Do not use the current
-[`etkecc/radicale-auth-matrix` source](https://github.com/etkecc/radicale-auth-matrix/blob/0f07e8ba32cf595e744403f70dd4ff81db3886b6/radicale_auth_matrix/__init__.py#L24-L39)
-for this product: it builds a Matrix `m.login.password` request from the
-Radicale-supplied username and password, then sends it to the homeserver
-([login request](https://github.com/etkecc/radicale-auth-matrix/blob/0f07e8ba32cf595e744403f70dd4ff81db3886b6/radicale_auth_matrix/__init__.py#L61-L79)).
-That conflicts with this repository's rule never to ask for, store, proxy, log,
-or derive a user's Matrix password. Use only a non-password authentication
-arrangement accepted by the operator and compatible with
-[ADR009](./adrs/adr009-radicale-openid-delegation.md). This page does not claim
-that an ADR009-compatible plugin image or etke deployment has been implemented
-or validated. The role exposes `radicale_auth_type` and
-`radicale_auth_matrix_server` variables ([role defaults](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/defaults/main.yml#L238-L242)),
-but those variables do not establish that the configured image contains an
-OpenID-capable plugin. The operator must confirm the pinned Radicale image and
-authentication mode before rollout.
+The [etke Radicale service documentation](https://etke.cc/help/extras/radicale/)
+describes Matrix credentials for its managed service. That mode conflicts with
+this repository's rule never to ask for, store, proxy, log, or derive a user's
+Matrix password. [ADR024](./adrs/adr024-in-repo-radicale-openid-auth.md) selects
+a clean-room in-repository Radicale 3.8 Auth module in a pinned, project-owned
+image. The image will not include or invoke an external auth package; the owned
+backend accepts only explicitly tagged short-lived OpenID credentials and
+rejects untagged credentials. Conventional Matrix-password CalDAV login is
+intentionally unsupported and deferred in this pre-alpha. A separate
+Radicale-native credential mode would require a future ADR. The module and
+image have not been implemented or deployed. The checked etke role exposes
+`radicale_auth_type` and `radicale_auth_matrix_server` variables
+([role defaults](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/defaults/main.yml#L238-L242)),
+but public role documentation does not establish that the actual managed host
+accepts a custom image override. This repository now contains the adapter and
+image build, but neither is deployed here. Confirm that override, preserve the
+existing `/data` volume, and rehearse config, network, service lifecycle, and rollback
+before rollout. Do not install a floating auth module or create a second
+Radicale store.
 
 Sources above were checked on **2026-09-28**. The etke source links pin the
-stable `main` snapshot at `cd28f0bd94c0d15dbb3db7ad4718c7df62f49622`; the
-auth-plugin links pin `0f07e8ba32cf595e744403f70dd4ff81db3886b6` (2026-07-26).
-The etke FAQ is live documentation reviewed on that date.
+stable `main` snapshot at `cd28f0bd94c0d15dbb3db7ad4718c7df62f49622`. The
+etke FAQ is live documentation reviewed on that date.
 
 The local `dev/compose.yaml` stack is for development and integration services;
 it does not define a production deployment or an etke/MDAD deployment contract.

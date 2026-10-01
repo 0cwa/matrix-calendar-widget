@@ -1,0 +1,16 @@
+[server]
+hosts = 0.0.0.0:5232,[::]:5232
+
+[auth]
+type = matrix_calendar_radicale_auth
+cache_logins = False
+lc_username = False
+uc_username = False
+strip_domain = False
+urldecode_username = False
+
+[rights]
+type = owner_only
+
+[storage]
+filesystem_folder = /data/collections

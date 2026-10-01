@@ -183,3 +183,8 @@ jobs:
           -t matrix-calendar-widget/widget:ci
           -f matrix-calendar-widget/Dockerfile
           matrix-calendar-widget
+
+      - name: Test and build project-owned Radicale image (local only)
+        run: |
+          docker build --target test -t matrix-calendar-widget/radicale-openid:test -f radicale-auth/Dockerfile radicale-auth
+          docker build --target runtime -t matrix-calendar-widget/radicale-openid:ci -f radicale-auth/Dockerfile radicale-auth

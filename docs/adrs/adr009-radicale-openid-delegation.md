@@ -3,6 +3,17 @@
 - Status: Accepted
 - Date: 2026-09-23
 
+> **Supersession notice (ADR024, 2026-10-01):** ADR024 supersedes this ADR's
+> external-only implementation requirement and its conventional Matrix-
+> password CalDAV compatibility path. The owned Radicale backend accepts only
+> ADR009's explicitly tagged short-lived OpenID credential and rejects
+> untagged credentials; the pre-alpha does not support conventional CalDAV
+> login with Matrix passwords. No `radicale-auth-matrix` source or package is
+> included or invoked by the project-owned image. The tagged credential
+> format, identity checks, and security requirements below remain in force as
+> narrowed by ADR024. Any independent Radicale-native credential mode needs a
+> separate future ADR.
+
 ## Context
 
 ADR006 requires the widget to authenticate to the calendar gateway with Matrix
@@ -90,15 +101,13 @@ The homeserver remains authoritative for each delegated credential's validity.
 - Ordinary password-based CalDAV clients remain compatible.
 - Request/authorization logging must redact the delegated credential.
 
-## Deployment
+## Deployment (historical; superseded by ADR024)
 
-The development Radicale image must eventually pin a plugin commit/release that
-implements this contract rather than installing `radicale-auth-matrix` from a
-floating `main` branch.
-
-Until that plugin build exists, the current development Radicale service remains
-useful for conventional password-authenticated CalDAV contract tests, while
-gateway OpenID delegation is intentionally incomplete.
+This section records the deployment proposal made when ADR009 was accepted.
+ADR024 supersedes it: the project now implements the Radicale auth module in
+this repository and builds an owned image; the current dev and contract stacks
+use that image. The etke-host override and data-volume compatibility remain
+unverified.
 
 ## Consequences
 
@@ -106,6 +115,5 @@ The gateway can use the same Matrix OpenID proof already validated by
 `MatrixAuthMiddleware` for CalDAV delegation without introducing Matrix
 password handling.
 
-This requires a small upstream/forked change to `radicale-auth-matrix`. That
-change should live in the plugin repository under its existing license rather
-than copying the plugin implementation into this Apache-licensed repository.
+This was the earlier proposal. ADR024 supersedes it with a clean-room module in
+this repository; no third-party auth package is copied, installed, or invoked.

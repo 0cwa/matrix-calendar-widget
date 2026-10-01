@@ -38,8 +38,8 @@ describeContract('CalDAV discovery contract', () => {
 
   const baseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
   const username = process.env.CALDAV_USERNAME ?? 'calendar';
-  const password = process.env.CALDAV_PASSWORD ?? 'calendar-dev-password';
-  const credentials = basicCredentialProvider(username, password);
+  const openIdCredential = process.env.CALDAV_OPENID_CREDENTIAL ?? '';
+  const credentials = basicCredentialProvider(username, openIdCredential);
 
   it('discovers a real VEVENT collection', async () => {
     const result = await discoveryClient.discover();
@@ -122,7 +122,7 @@ describeContract('CalDAV discovery contract', () => {
     await expect(
       new CalDavDiscoveryClient(
         baseUrl,
-        basicCredentialProvider(username, 'not-the-password'),
+        basicCredentialProvider(username, 'not-a-tagged-openid-proof'),
       ).discover(),
     ).rejects.toMatchObject({
       name: 'CalDavDiscoveryError',
@@ -133,12 +133,12 @@ describeContract('CalDAV discovery contract', () => {
 
 function basicCredentialProvider(
   username: string,
-  password: string,
+  credential: string,
 ): CalDavCredentialProvider {
   return {
     async getRequestHeaders() {
       const authorization = Buffer.from(
-        `${username}:${password}`,
+        `${username}:${credential}`,
         'utf8',
       ).toString('base64');
 
