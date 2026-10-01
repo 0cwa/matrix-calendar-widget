@@ -21,6 +21,7 @@ import {
   CalendarEventDisplayAlarm,
   CalendarEventInput,
   CalendarEventPatch,
+  CalendarEventRecurrenceDate,
   CalendarEventTiming,
   CalendarEventWeekday,
   CalendarId,
@@ -57,6 +58,15 @@ export type CalendarEventFormValues = {
   recurrenceEditable?: boolean;
   recurrenceDisabledReason?: 'complex' | 'unsupported';
   recurrenceChanged?: boolean;
+  rdateEditable?: boolean;
+  rdateDraft?: string;
+  rdateValues?: CalendarEventDateTime[];
+  rdatePeriodCount?: number;
+  rdateChanged?: boolean;
+  rdateOperation?: {
+    action: 'add' | 'remove';
+    value: CalendarEventDateTime;
+  };
   alarmEnabled?: boolean;
   alarmWeeks?: string;
   alarmDays?: string;
@@ -128,6 +138,7 @@ export function calendarEventToFormValues(
       timezoneChanged: false,
       originalTiming: event.timing,
       ...recurrenceFormValues(event),
+      ...recurrenceRdateFormValues(event),
       ...alarmFormValues(event),
     };
   }
@@ -153,6 +164,7 @@ export function calendarEventToFormValues(
     timezoneChanged: false,
     originalTiming: event.timing,
     ...recurrenceFormValues(event),
+    ...recurrenceRdateFormValues(event),
     ...alarmFormValues(event),
   };
 }
@@ -215,13 +227,15 @@ export function calendarEventPatchFromForm(
       : {}),
     description: normalizeOptional(values.description),
     location: normalizeOptional(values.location),
-    ...(values.recurrenceChanged || recurrenceNeedsAnchorUpdate
-      ? {
-          recurrence: values.repeats
-            ? { rrule: recurrenceRuleFromForm(values, timing) }
-            : {},
-        }
-      : {}),
+    ...(values.rdateChanged && values.rdateOperation
+      ? { recurrence: { rdate: values.rdateOperation } }
+      : values.recurrenceChanged || recurrenceNeedsAnchorUpdate
+        ? {
+            recurrence: values.repeats
+              ? { rrule: recurrenceRuleFromForm(values, timing) }
+              : {},
+          }
+        : {}),
   };
 }
 
@@ -291,9 +305,11 @@ export function validateCalendarEventForm(
       return 'invalid-range';
     }
 
-    return validateRecurrence(
-      values,
-      calendarEventEditableFieldsFromForm(values).timing,
+    return (
+      validateRecurrence(
+        values,
+        calendarEventEditableFieldsFromForm(values).timing,
+      ) ?? validateRdateOperation(values)
     );
   }
 
@@ -318,10 +334,29 @@ export function validateCalendarEventForm(
     return 'invalid-range';
   }
 
-  return validateRecurrence(
-    values,
-    calendarEventEditableFieldsFromForm(values).timing,
+  return (
+    validateRecurrence(
+      values,
+      calendarEventEditableFieldsFromForm(values).timing,
+    ) ?? validateRdateOperation(values)
   );
+}
+
+function validateRdateOperation(
+  values: CalendarEventFormValues,
+): CalendarEventValidationError | undefined {
+  if (!values.rdateChanged) {
+    return undefined;
+  }
+
+  if (
+    !values.rdateOperation ||
+    values.recurrenceChanged ||
+    values.timingChanged === true ||
+    values.timezoneChanged === true
+  ) {
+    return 'invalid-recurrence';
+  }
 }
 
 function emptyAlarmFormValues(): Pick<
@@ -498,6 +533,91 @@ function recurrenceFormValues(
         : undefined,
     recurrenceChanged: false,
   };
+}
+
+function recurrenceRdateFormValues(
+  event: CalendarEvent,
+): Pick<
+  CalendarEventFormValues,
+  | 'rdateEditable'
+  | 'rdateDraft'
+  | 'rdateValues'
+  | 'rdatePeriodCount'
+  | 'rdateChanged'
+> {
+  const recurrence = event.recurrence;
+  const recurrenceDates = recurrence?.rdates ?? [];
+  let supportedRule = recurrence?.rrule === undefined;
+  if (recurrence?.rrule !== undefined) {
+    try {
+      parseSupportedCalendarEventRecurrenceRule(
+        recurrence.rrule,
+        timingStartAsDateTime(event.timing),
+      );
+      supportedRule = true;
+    } catch {
+      supportedRule = false;
+    }
+  }
+
+  const anchor = timingStartAsDateTime(event.timing);
+  return {
+    rdateEditable: Boolean(
+      recurrence &&
+      (recurrence.rrule !== undefined || recurrenceDates.length > 0) &&
+      !recurrence.recurrenceId &&
+      !event.unsupportedRecurrence &&
+      !event.unsupportedTimezone &&
+      supportedRule,
+    ),
+    rdateDraft:
+      anchor.type === 'date'
+        ? anchor.value
+        : anchor.type === 'date-time'
+          ? anchor.value.local.slice(0, 16)
+          : anchor.value.slice(0, 16),
+    rdateValues: recurrenceDates.filter(
+      (value): value is CalendarEventDateTime => value.type !== 'period',
+    ),
+    rdatePeriodCount: recurrenceDates.filter(isPeriodRdate).length,
+    rdateChanged: false,
+  };
+}
+
+function isPeriodRdate(
+  value: CalendarEventRecurrenceDate,
+): value is Extract<CalendarEventRecurrenceDate, { type: 'period' }> {
+  return value.type === 'period';
+}
+
+export function calendarEventRdateValueFromForm(
+  values: CalendarEventFormValues,
+): CalendarEventDateTime | undefined {
+  const draft = values.rdateDraft?.trim();
+  if (!draft) {
+    return undefined;
+  }
+
+  const anchor = values.originalTiming
+    ? timingStartAsDateTime(values.originalTiming)
+    : undefined;
+  if (values.timingType === 'all-day' || anchor?.type === 'date') {
+    return { type: 'date', value: draft };
+  }
+
+  const local = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(draft)
+    ? `${draft}:00`
+    : draft;
+  if (anchor?.type === 'floating-date-time') {
+    return { type: 'floating-date-time', value: local };
+  }
+  if (anchor?.type === 'date-time') {
+    return {
+      type: 'date-time',
+      value: { local, timezone: anchor.value.timezone },
+    };
+  }
+  return undefined;
 }
 
 function validateRecurrence(

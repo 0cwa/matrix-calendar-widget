@@ -282,6 +282,126 @@ describe('<CalendarEventEditorDialog />', () => {
     });
   });
 
+  it('adds one typed RDATE while keeping PERIOD values intact', async () => {
+    const rdateEvent: CalendarEvent = {
+      ...recurringEvent,
+      id: 'rdate-series-resource',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;COUNT=8',
+        rdates: [
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-26T14:00:00',
+              timezone: 'America/New_York',
+            },
+          },
+          {
+            type: 'period',
+            timing: {
+              type: 'duration',
+              start: {
+                type: 'date-time',
+                value: {
+                  local: '2026-10-28T14:00:00',
+                  timezone: 'Europe/Stockholm',
+                },
+              },
+              duration: {
+                weeks: 0,
+                days: 0,
+                hours: 1,
+                minutes: 0,
+                seconds: 0,
+                isNegative: false,
+              },
+            },
+          },
+        ],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [rdateEvent],
+    });
+
+    const view = render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={rdateEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByText('Period-valued dates are kept unchanged.'),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('rdate-draft'), {
+      target: { value: '2026-10-05T09:00' },
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Add date' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const added = await repository.getEvent('team', 'rdate-series-resource');
+    expect(added).toMatchObject({
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;COUNT=8',
+        rdates: [
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-26T14:00:00',
+              timezone: 'America/New_York',
+            },
+          },
+          { type: 'period' },
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-05T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        ],
+      },
+    });
+
+    view.rerender(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={added}
+        onClose={vi.fn()}
+        open
+      />,
+    );
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Remove additional date: 2026-10-05T09:00:00 Europe/Stockholm',
+      }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await expect(
+      repository.getEvent('team', 'rdate-series-resource'),
+    ).resolves.toMatchObject({
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;COUNT=8',
+        rdates: [
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-26T14:00:00',
+              timezone: 'America/New_York',
+            },
+          },
+          { type: 'period' },
+        ],
+      },
+    });
+  });
+
   it('disables recurrence editing for complex sources and preserves them on other edits', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],

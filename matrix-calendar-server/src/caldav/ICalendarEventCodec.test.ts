@@ -734,6 +734,294 @@ describe('ICalendarEventCodec', () => {
     ).not.toBeNull();
   });
 
+  it('adds and removes one point RDATE while preserving recurrence siblings', () => {
+    const source = fixture('recurrence-override.ics');
+    const parsed = codec.parse('team', 'rdate-preservation.ics', source);
+    const value: CalendarEventDateTime = {
+      type: 'date-time',
+      value: {
+        local: '2026-10-27T09:30:00',
+        timezone: 'America/New_York',
+      },
+    };
+
+    const added = parsed.applyPatch({
+      recurrence: { rdate: { action: 'add', value } },
+    });
+    expect(added.event.recurrence?.rdates).toEqual([
+      ...(parsed.event.recurrence?.rdates ?? []),
+      value,
+    ]);
+    expect(added.event.recurrence?.exdates).toEqual(
+      parsed.event.recurrence?.exdates,
+    );
+
+    const calendar = ICAL.Component.fromString(added.icalendar);
+    const events = calendar.getAllSubcomponents('vevent');
+    const master = events[0];
+    expect(events).toHaveLength(3);
+    expect(calendar.getFirstSubcomponent('vtimezone')).not.toBeNull();
+    expect(calendar.getFirstPropertyValue('x-custom-calendar-property')).toBe(
+      'preserve-resource-value',
+    );
+    expect(master.getFirstProperty('rrule')?.getFirstValue()?.toString()).toBe(
+      'FREQ=WEEKLY;COUNT=4',
+    );
+    expect(added.icalendar).toContain(
+      'RDATE;TZID=America/New_York:20261027T093000',
+    );
+    expect(master.getAllProperties('exdate')).toHaveLength(2);
+    expect(master.getAllProperties('rdate')).toHaveLength(3);
+    expect(
+      master
+        .getFirstProperty('x-client-metadata')
+        ?.getFirstParameter('x-param'),
+    ).toBe('preserve-param');
+    expect(master.getFirstSubcomponent('valarm')).not.toBeNull();
+    expect(events[1].getFirstProperty('recurrence-id')).not.toBeNull();
+    expect(events[2].getFirstProperty('recurrence-id')).not.toBeNull();
+    expect(added.icalendar).toContain('X-OVERRIDE-MARKER;X-ORIGIN=external');
+
+    const removed = codec
+      .parse('team', 'rdate-preservation.ics', added.icalendar)
+      .applyPatch({
+        recurrence: { rdate: { action: 'remove', value } },
+      });
+    expect(removed.event.recurrence?.rdates).toEqual(
+      parsed.event.recurrence?.rdates,
+    );
+    expect(removed.event.recurrence?.exdates).toEqual(
+      parsed.event.recurrence?.exdates,
+    );
+    expect(removed.icalendar).not.toContain(
+      'RDATE;TZID=America/New_York:20261027T093000',
+    );
+    expect(
+      ICAL.Component.fromString(removed.icalendar).getAllSubcomponents(
+        'vevent',
+      ),
+    ).toHaveLength(3);
+  });
+
+  it.each([
+    {
+      label: 'DATE',
+      dtstart: 'DTSTART;VALUE=DATE:20261005',
+      dtend: 'DTEND;VALUE=DATE:20261006',
+      value: { type: 'date' as const, value: '2026-10-09' },
+      expected: 'RDATE;VALUE=DATE:20261009',
+    },
+    {
+      label: 'floating DATE-TIME',
+      dtstart: 'DTSTART:20261005T090000',
+      dtend: 'DTEND:20261005T100000',
+      value: {
+        type: 'floating-date-time' as const,
+        value: '2026-10-09T09:00:00',
+      },
+      expected: 'RDATE:20261009T090000',
+    },
+    {
+      label: 'UTC DATE-TIME',
+      dtstart: 'DTSTART:20261005T090000Z',
+      dtend: 'DTEND:20261005T100000Z',
+      value: {
+        type: 'date-time' as const,
+        value: { local: '2026-10-09T09:00:00', timezone: 'UTC' },
+      },
+      expected: 'RDATE:20261009T090000Z',
+    },
+    {
+      label: 'TZID DATE-TIME with a different TZID than DTSTART',
+      dtstart: 'DTSTART;TZID=Europe/Stockholm:20261005T090000',
+      dtend: 'DTEND;TZID=Europe/Stockholm:20261005T100000',
+      value: {
+        type: 'date-time' as const,
+        value: { local: '2026-10-09T11:30:00', timezone: 'America/New_York' },
+      },
+      expected: 'RDATE;TZID=America/New_York:20261009T113000',
+    },
+  ])(
+    'round-trips a point RDATE as $label',
+    ({ dtstart, dtend, value, expected }) => {
+      const parsed = codec.parse(
+        'team',
+        'typed-rdate.ics',
+        simpleRecurringSource(dtstart, dtend),
+      );
+      const added = parsed.applyPatch({
+        recurrence: { rdate: { action: 'add', value } },
+      });
+      expect(added.icalendar).toContain(expected);
+      expect(
+        codec.parse('team', 'typed-rdate.ics', added.icalendar).event.recurrence
+          ?.rdates,
+      ).toContainEqual(value);
+    },
+  );
+
+  it('treats exact DTSTART, RRULE, and existing RDATE additions as no-ops', () => {
+    const parsed = codec.parse(
+      'team',
+      'rdate-noop.ics',
+      simpleRecurringSource(
+        'DTSTART;TZID=Europe/Stockholm:20261005T090000',
+        'DTEND;TZID=Europe/Stockholm:20261005T100000',
+        ['RDATE;TZID=Europe/Stockholm:20261007T090000'],
+      ),
+    );
+    const dates: CalendarEventDateTime[] = [
+      {
+        type: 'date-time',
+        value: { local: '2026-10-05T09:00:00', timezone: 'Europe/Stockholm' },
+      },
+      {
+        type: 'date-time',
+        value: { local: '2026-10-06T09:00:00', timezone: 'Europe/Stockholm' },
+      },
+      {
+        type: 'date-time',
+        value: { local: '2026-10-07T09:00:00', timezone: 'Europe/Stockholm' },
+      },
+    ];
+
+    for (const value of dates) {
+      const added = parsed.applyPatch({
+        recurrence: { rdate: { action: 'add', value } },
+      });
+      expect(added.event.recurrence?.rdates).toEqual(
+        parsed.event.recurrence?.rdates,
+      );
+      expect(
+        ICAL.Component.fromString(added.icalendar)
+          .getAllSubcomponents('vevent')[0]
+          .getAllProperties('rdate'),
+      ).toHaveLength(1);
+    }
+  });
+
+  it('removes only an exact typed RDATE and leaves same-instant sibling forms and EXDATE intact', () => {
+    const source = simpleRecurringSource(
+      'DTSTART;TZID=Europe/Stockholm:20261005T090000',
+      'DTEND;TZID=Europe/Stockholm:20261005T100000',
+      [
+        'RDATE:20261007T070000Z',
+        'RDATE;TZID=America/New_York:20261007T030000',
+        'EXDATE;TZID=Europe/Stockholm:20261008T090000',
+      ],
+    );
+    const parsed = codec.parse('team', 'rdate-exact-remove.ics', source);
+    const removed = parsed.applyPatch({
+      recurrence: {
+        rdate: {
+          action: 'remove',
+          value: {
+            type: 'date-time',
+            value: { local: '2026-10-07T07:00:00', timezone: 'UTC' },
+          },
+        },
+      },
+    });
+
+    expect(removed.event.recurrence?.rdates).toEqual([
+      {
+        type: 'date-time',
+        value: {
+          local: '2026-10-07T03:00:00',
+          timezone: 'America/New_York',
+        },
+      },
+    ]);
+    expect(removed.event.recurrence?.exdates).toEqual(
+      parsed.event.recurrence?.exdates,
+    );
+    expect(removed.icalendar).toContain(
+      'RDATE;TZID=America/New_York:20261007T030000',
+    );
+    expect(removed.icalendar).not.toContain('RDATE:20261007T070000Z');
+    expect(removed.icalendar).toContain(
+      'EXDATE;TZID=Europe/Stockholm:20261008T090000',
+    );
+  });
+
+  it('rejects incompatible, PERIOD, malformed, and unsupported RDATE writes', () => {
+    const dateTimeEvent = codec.parse(
+      'team',
+      'date-time-rdate.ics',
+      simpleRecurringSource('DTSTART:20261005T090000', 'DTEND:20261005T100000'),
+    );
+    const dateEvent = codec.parse(
+      'team',
+      'date-rdate.ics',
+      simpleRecurringSource(
+        'DTSTART;VALUE=DATE:20261005',
+        'DTEND;VALUE=DATE:20261006',
+      ),
+    );
+    expect(() =>
+      dateTimeEvent.applyPatch({
+        recurrence: {
+          rdate: {
+            action: 'add',
+            value: { type: 'date', value: '2026-10-07' },
+          },
+        },
+      }),
+    ).toThrow(ICalendarEventCodecError);
+    expect(() =>
+      dateEvent.applyPatch({
+        recurrence: {
+          rdate: {
+            action: 'add',
+            value: {
+              type: 'floating-date-time',
+              value: '2026-10-07T09:00:00',
+            },
+          },
+        },
+      }),
+    ).toThrow(ICalendarEventCodecError);
+    expect(() =>
+      dateTimeEvent.applyPatch({
+        recurrence: {
+          rdate: {
+            action: 'add',
+            value: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-07T09:00:00',
+                timezone: 'Custom/Not-Bundled',
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(ICalendarEventCodecError);
+
+    const malformed = codec.parse(
+      'team',
+      'malformed-rdate.ics',
+      simpleRecurringSource(
+        'DTSTART:20261005T090000',
+        'DTEND:20261005T100000',
+        ['RDATE;VALUE=TEXT:unsupported'],
+      ),
+    );
+    expect(() =>
+      malformed.applyPatch({
+        recurrence: {
+          rdate: {
+            action: 'add',
+            value: {
+              type: 'floating-date-time',
+              value: '2026-10-07T09:00:00',
+            },
+          },
+        },
+      }),
+    ).toThrow(ICalendarEventCodecError);
+  });
+
   it('removes every duplicate of one EXDATE while preserving sibling values and parameters', () => {
     const source = fixture('recurrence-override.ics')
       .replace(
@@ -1977,4 +2265,28 @@ function fixture(name: string): string {
     path.resolve(__dirname, '../../../fixtures/ical', name),
     'utf8',
   );
+}
+
+function simpleRecurringSource(
+  dtstart: string,
+  dtend: string,
+  additionalLines: string[] = [],
+): string {
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Matrix Calendar Widget//Tests//EN',
+    'X-CUSTOM-CALENDAR-PROPERTY:preserve-resource-value',
+    'BEGIN:VEVENT',
+    'UID:simple-recurring@example.test',
+    'DTSTAMP:20260922T120000Z',
+    dtstart,
+    dtend,
+    'SUMMARY:Simple recurring event',
+    'RRULE:FREQ=DAILY;COUNT=3',
+    ...additionalLines,
+    'X-CUSTOM-EVENT-PROPERTY:preserve-event-value',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
 }

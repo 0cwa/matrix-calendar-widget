@@ -344,6 +344,42 @@ describe('projectCalendarEventOccurrences', () => {
     expect(event).toEqual(original);
   });
 
+  it('projects a DATE-TIME RDATE with a TZID different from DTSTART', () => {
+    const rdate: CalendarEventDateTime = {
+      type: 'date-time',
+      value: {
+        local: '2026-10-30T09:00:00',
+        timezone: 'America/New_York',
+      },
+    };
+    const event = timedEvent({
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;COUNT=2',
+        rdates: [rdate],
+      },
+    });
+
+    const result = projectCalendarEventOccurrences(
+      [event],
+      {
+        start: '2026-10-30T12:00:00Z',
+        end: '2026-10-30T15:00:00Z',
+      },
+      'UTC',
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.occurrences).toHaveLength(1);
+    expect(result.occurrences[0].recurrenceId).toEqual(rdate);
+    expect(result.occurrences[0].event.timing).toMatchObject({
+      start: {
+        type: 'zoned',
+        local: '2026-10-30T09:00:00',
+        timezone: 'America/New_York',
+      },
+    });
+  });
+
   it('keeps an override moved into the range when its original recurrence identity is outside it', () => {
     const event = timedEvent({
       recurrence: {

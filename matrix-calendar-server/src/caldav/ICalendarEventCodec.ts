@@ -35,10 +35,12 @@ import {
   CalendarId,
   calendarEventRecurrenceIdentity,
   isCalendarEventAlarmRemoval,
+  isCalendarTimezoneSupported,
   isSupportedCalendarEventOccurrenceExclusion,
   parseSupportedCalendarEventRecurrenceRule,
 } from '@matrix-calendar-widget/calendar';
 import ICAL from 'ical.js';
+import { DateTime } from 'luxon';
 import { hasUnsupportedTimezoneRules } from './ICalendarTimezoneProjectionSafety';
 
 export type EncodedICalendarEvent = {
@@ -95,6 +97,12 @@ export class ParsedICalendarEvent {
         assertOccurrenceExdateCanBeEdited(
           this.event,
           recurrenceWrite.exdate.recurrenceId,
+          this.listProjectionDiagnostic,
+        );
+      } else if (recurrenceWrite && 'rdate' in recurrenceWrite) {
+        assertPointRdateCanBeEdited(
+          this.event,
+          recurrenceWrite.rdate.value,
           this.listProjectionDiagnostic,
         );
       } else {
@@ -166,6 +174,12 @@ export class ParsedICalendarEvent {
     if (hasRecurrencePatch) {
       if (recurrenceWrite && 'exdate' in recurrenceWrite) {
         applyOccurrenceExdate(vevent, recurrenceWrite.exdate);
+      } else if (recurrenceWrite && 'rdate' in recurrenceWrite) {
+        assertPointRdatePropertiesCanBeEdited(vevent, this.event);
+        applyPointRdate(vevent, recurrenceWrite.rdate, this.event);
+        if (hasUnsupportedTimezoneRules(calendar, this.event.uid)) {
+          throw unsupportedRecurrencePatch();
+        }
       } else {
         setRecurrenceRule(vevent, recurrenceWrite?.rrule);
       }
@@ -177,9 +191,11 @@ export class ParsedICalendarEvent {
     const recurrence = hasRecurrencePatch
       ? recurrenceWrite && 'exdate' in recurrenceWrite
         ? readRecurrence(calendar, vevent, this.event.uid)
-        : recurrenceWrite?.rrule
-          ? { rrule: canonicalizeRecurrenceRule(recurrenceWrite.rrule) }
-          : undefined
+        : recurrenceWrite && 'rdate' in recurrenceWrite
+          ? readRecurrence(calendar, vevent, this.event.uid)
+          : recurrenceWrite?.rrule
+            ? { rrule: canonicalizeRecurrenceRule(recurrenceWrite.rrule) }
+            : undefined
       : this.event.recurrence;
 
     const { alarm: alarmPatch, ...eventPatch } = patch;
@@ -390,6 +406,36 @@ function recurrenceWriteFromUnknown(
       exdate: {
         action: exdate.action,
         recurrenceId: exdate.recurrenceId as CalendarEventDateTime,
+      },
+    };
+  }
+
+  if (Object.prototype.hasOwnProperty.call(fields, 'rdate')) {
+    const operation = fields.rdate;
+    if (
+      Object.keys(fields).length !== 1 ||
+      !operation ||
+      typeof operation !== 'object' ||
+      Array.isArray(operation)
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+
+    const rdate = operation as Record<string, unknown>;
+    if (
+      Object.keys(rdate).length !== 2 ||
+      !['action', 'value'].every((key) =>
+        Object.prototype.hasOwnProperty.call(rdate, key),
+      ) ||
+      (rdate.action !== 'add' && rdate.action !== 'remove')
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+
+    return {
+      rdate: {
+        action: rdate.action,
+        value: recurrenceDateTimeFromUnknown(rdate.value),
       },
     };
   }
@@ -644,6 +690,272 @@ function applyOccurrenceExdate(
   }
 }
 
+function assertPointRdateCanBeEdited(
+  event: CalendarEvent,
+  value: CalendarEventDateTime,
+  listProjectionDiagnostic?: 'unsupported-recurrence',
+): void {
+  const recurrence = event.recurrence;
+  if (
+    listProjectionDiagnostic === 'unsupported-recurrence' ||
+    event.unsupportedTimezone ||
+    event.unsupportedRecurrence ||
+    !recurrence ||
+    (!recurrence.rrule && !recurrence.rdates?.length)
+  ) {
+    throw unsupportedRecurrencePatch();
+  }
+
+  if (recurrence.rrule !== undefined) {
+    validateRecurrenceRule(
+      recurrence.rrule,
+      timingStartAsDateTime(event.timing),
+    );
+  }
+
+  validatePointRdateValue(value, timingStartAsDateTime(event.timing));
+}
+
+function assertPointRdatePropertiesCanBeEdited(
+  vevent: ICAL.Component,
+  event: CalendarEvent,
+): void {
+  const anchor = timingStartAsDateTime(event.timing);
+  for (const property of vevent.getAllProperties('rdate')) {
+    let values: ReturnType<ICAL.Property['getValues']>;
+    try {
+      values = property.getValues();
+    } catch {
+      throw unsupportedRecurrencePatch();
+    }
+    if (values.length === 0) {
+      throw unsupportedRecurrencePatch();
+    }
+
+    const valueKind = values.map((value) =>
+      value instanceof ICAL.Period
+        ? 'period'
+        : value instanceof ICAL.Time
+          ? value.isDate
+            ? 'date'
+            : 'date-time'
+          : 'unsupported',
+    );
+    if (
+      valueKind.includes('unsupported') ||
+      valueKind.some((kind) => kind !== valueKind[0])
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+
+    // PERIOD values remain opaque and are never combined with point values.
+    if (valueKind[0] === 'period') {
+      continue;
+    }
+
+    const explicitValueType = property.getFirstParameter('value');
+    if (
+      (valueKind[0] === 'date' &&
+        (typeof explicitValueType !== 'string' ||
+          explicitValueType.toUpperCase() !== 'DATE')) ||
+      (valueKind[0] === 'date-time' &&
+        explicitValueType !== null &&
+        explicitValueType !== undefined &&
+        (typeof explicitValueType !== 'string' ||
+          explicitValueType.toUpperCase() !== 'DATE-TIME'))
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+
+    for (const value of values) {
+      if (!(value instanceof ICAL.Time)) {
+        throw unsupportedRecurrencePatch();
+      }
+      const tzid = property.getFirstParameter('tzid');
+      if (
+        (tzid !== null &&
+          tzid !== undefined &&
+          (typeof tzid !== 'string' || !tzid.trim())) ||
+        (typeof tzid === 'string' &&
+          (value.isDate || value.zone === ICAL.Timezone.utcTimezone))
+      ) {
+        throw unsupportedRecurrencePatch();
+      }
+      validatePointRdateValue(readDateTimeValue(value, property), anchor);
+    }
+  }
+}
+
+function validatePointRdateValue(
+  value: CalendarEventDateTime,
+  anchor: CalendarEventDateTime,
+): void {
+  if ((anchor.type === 'date') !== (value.type === 'date')) {
+    throw unsupportedRecurrencePatch();
+  }
+
+  switch (value.type) {
+    case 'date':
+      if (!isValidCalendarDate(value.value)) {
+        throw unsupportedRecurrencePatch();
+      }
+      return;
+    case 'floating-date-time':
+      if (anchor.type === 'date' || !isValidLocalDateTime(value.value)) {
+        throw unsupportedRecurrencePatch();
+      }
+      return;
+    case 'date-time':
+      if (
+        anchor.type === 'date' ||
+        !isValidLocalDateTime(value.value.local) ||
+        (value.value.timezone !== 'UTC' &&
+          !isCalendarTimezoneSupported(value.value.timezone))
+      ) {
+        throw unsupportedRecurrencePatch();
+      }
+      return;
+  }
+}
+
+function isValidCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const date = DateTime.fromISO(value, { zone: 'UTC' });
+  return date.isValid && date.toISODate() === value;
+}
+
+function isValidLocalDateTime(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const dateTime = DateTime.fromISO(value, { zone: 'UTC' });
+  return (
+    dateTime.isValid && dateTime.toFormat("yyyy-MM-dd'T'HH:mm:ss") === value
+  );
+}
+
+function applyPointRdate(
+  vevent: ICAL.Component,
+  operation: Extract<CalendarEventRecurrenceWrite, { rdate: unknown }>['rdate'],
+  event: CalendarEvent,
+): void {
+  const targetIdentity = calendarEventRecurrenceIdentity(operation.value);
+  const properties = vevent.getAllProperties('rdate');
+
+  if (operation.action === 'add') {
+    // DTSTART, RRULE, RDATE, and detached instances form one recurrence set.
+    // An exact existing identity is already represented and must stay unique.
+    const recurrenceWithoutExdates = event.recurrence
+      ? { ...event, recurrence: { ...event.recurrence, exdates: [] } }
+      : event;
+    if (
+      isSupportedCalendarEventOccurrenceExclusion(
+        recurrenceWithoutExdates,
+        operation.value,
+      )
+    ) {
+      return;
+    }
+
+    const property = new ICAL.Property('rdate');
+    const { value, timezone } = recurrenceIdAsIcalTime(operation.value);
+    if (timezone) {
+      property.setParameter('tzid', timezone);
+    }
+    property.setValue(value);
+    vevent.addProperty(property);
+    return;
+  }
+
+  for (const property of properties) {
+    const values = property.getValues();
+    let removed = false;
+    const remaining = values.filter((value) => {
+      const matches =
+        value instanceof ICAL.Time &&
+        calendarEventRecurrenceIdentity(readDateTimeValue(value, property)) ===
+          targetIdentity;
+      if (matches) {
+        removed = true;
+      }
+      return !matches;
+    });
+
+    if (!removed) {
+      continue;
+    }
+    if (remaining.length === 0) {
+      vevent.removeProperty(property);
+    } else {
+      property.setValues(remaining);
+    }
+  }
+}
+
+function recurrenceDateTimeFromUnknown(value: unknown): CalendarEventDateTime {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw unsupportedRecurrencePatch();
+  }
+
+  const dateTime = value as Record<string, unknown>;
+  if (dateTime.type === 'date') {
+    if (
+      Object.keys(dateTime).length !== 2 ||
+      !Object.prototype.hasOwnProperty.call(dateTime, 'value') ||
+      typeof dateTime.value !== 'string' ||
+      !isValidCalendarDate(dateTime.value)
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+    return { type: 'date', value: dateTime.value };
+  }
+
+  if (dateTime.type === 'floating-date-time') {
+    if (
+      Object.keys(dateTime).length !== 2 ||
+      !Object.prototype.hasOwnProperty.call(dateTime, 'value') ||
+      typeof dateTime.value !== 'string' ||
+      !isValidLocalDateTime(dateTime.value)
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+    return { type: 'floating-date-time', value: dateTime.value };
+  }
+
+  if (dateTime.type === 'date-time') {
+    const zonedValue = dateTime.value;
+    if (
+      Object.keys(dateTime).length !== 2 ||
+      !zonedValue ||
+      typeof zonedValue !== 'object' ||
+      Array.isArray(zonedValue)
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+
+    const zoned = zonedValue as Record<string, unknown>;
+    if (
+      Object.keys(zoned).length !== 2 ||
+      typeof zoned.local !== 'string' ||
+      !isValidLocalDateTime(zoned.local) ||
+      typeof zoned.timezone !== 'string' ||
+      !zoned.timezone.trim()
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+    return {
+      type: 'date-time',
+      value: { local: zoned.local, timezone: zoned.timezone },
+    };
+  }
+
+  throw unsupportedRecurrencePatch();
+}
+
 function recurrenceIdAsIcalTime(recurrenceId: CalendarEventDateTime): {
   value: ICAL.Time;
   timezone?: string;
@@ -878,8 +1190,16 @@ function readRecurrenceDates(
   component: ICAL.Component,
   name: 'rdate' | 'exdate',
 ): CalendarEventRecurrenceDate[] {
-  return component.getAllProperties(name).flatMap((property) =>
-    property.getValues().flatMap<CalendarEventRecurrenceDate>((value) => {
+  return component.getAllProperties(name).flatMap((property) => {
+    let values: ReturnType<ICAL.Property['getValues']>;
+    try {
+      values = property.getValues();
+    } catch {
+      // Keep malformed source data opaque in the parsed VCALENDAR. Point-RDATE
+      // writes preflight the raw property and fail closed before changing it.
+      return [];
+    }
+    return values.flatMap<CalendarEventRecurrenceDate>((value) => {
       if (value instanceof ICAL.Time) {
         return [readDateTimeValue(value, property)];
       }
@@ -919,8 +1239,8 @@ function readRecurrenceDates(
       }
 
       return [];
-    }),
-  );
+    });
+  });
 }
 
 function readDateTimeProperty(property: ICAL.Property): CalendarEventDateTime {

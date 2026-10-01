@@ -31,7 +31,10 @@ import {
   TimedCalendarEventTiming,
   isCalendarEventAlarmRemoval,
 } from '../model';
-import { calendarEventRecurrenceIdentity } from '../utils/calendarEventOccurrenceProjection';
+import {
+  calendarEventRecurrenceIdentity,
+  isSupportedCalendarEventOccurrenceExclusion,
+} from '../utils/calendarEventOccurrenceProjection';
 import { calendarEventTimedDateTimeToDateTime } from '../utils/calendarEventTimedDateTime';
 import {
   CalendarRepository,
@@ -240,7 +243,7 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     const clonedPatch = cloneCalendarEventPatch(patch);
     const { alarm: alarmPatch, ...mutablePatch } = clonedPatch;
     const recurrence = Object.prototype.hasOwnProperty.call(patch, 'recurrence')
-      ? applyRecurrenceWrite(current.recurrence, clonedPatch.recurrence)
+      ? applyRecurrenceWrite(current, clonedPatch.recurrence)
       : current.recurrence;
 
     const updated: CalendarEvent = {
@@ -552,18 +555,64 @@ function cloneCalendarEventPatch(
               ),
             },
           }
-        : { ...patch.recurrence };
+        : 'rdate' in patch.recurrence
+          ? {
+              rdate: {
+                ...patch.recurrence.rdate,
+                value: cloneCalendarEventDateTime(patch.recurrence.rdate.value),
+              },
+            }
+          : { ...patch.recurrence };
   }
 
   return cloned;
 }
 
 function applyRecurrenceWrite(
-  current: CalendarEvent['recurrence'],
+  currentEvent: CalendarEvent,
   write: CalendarEventPatch['recurrence'],
 ): CalendarEvent['recurrence'] {
-  if (!write || !('exdate' in write)) {
+  const current = currentEvent.recurrence;
+  if (!write || (!('exdate' in write) && !('rdate' in write))) {
     return write?.rrule ? { rrule: write.rrule } : undefined;
+  }
+
+  if ('rdate' in write) {
+    const identity = calendarEventRecurrenceIdentity(write.rdate.value);
+    const rdates = current?.rdates ?? [];
+    if (write.rdate.action === 'add') {
+      const recurrenceWithoutExdates = current
+        ? { ...currentEvent, recurrence: { ...current, exdates: [] } }
+        : currentEvent;
+      if (
+        isSupportedCalendarEventOccurrenceExclusion(
+          recurrenceWithoutExdates,
+          write.rdate.value,
+        )
+      ) {
+        return current;
+      }
+
+      const next: NonNullable<CalendarEvent['recurrence']> = {
+        ...current,
+        rdates: [...rdates, write.rdate.value],
+      };
+      return next;
+    }
+
+    const nextRdates = rdates.filter(
+      (value) =>
+        value.type === 'period' ||
+        calendarEventRecurrenceIdentity(value) !== identity,
+    );
+    const next: NonNullable<CalendarEvent['recurrence']> = {
+      ...current,
+      rdates: nextRdates,
+    };
+    if (nextRdates.length === 0) {
+      delete next.rdates;
+    }
+    return Object.keys(next).length > 0 ? next : undefined;
   }
 
   const identity = calendarEventRecurrenceIdentity(write.exdate.recurrenceId);
