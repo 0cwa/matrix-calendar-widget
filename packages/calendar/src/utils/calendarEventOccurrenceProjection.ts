@@ -1233,11 +1233,9 @@ function assertCompatibleValue(
   anchor: CalendarEventDateTime,
   value: CalendarEventDateTime,
 ): void {
-  const compatible =
-    anchor.type === value.type &&
-    (anchor.type !== 'date-time' ||
-      value.type !== 'date-time' ||
-      anchor.value.timezone === value.value.timezone);
+  // RFC 5545 ties DTSTART and recurrence-set entries to the same VALUE-TYPE,
+  // but DATE-TIME values may independently be floating, UTC, or TZID-local.
+  const compatible = (anchor.type === 'date') === (value.type === 'date');
   if (!compatible) {
     throw projectionError('invalid-recurrence');
   }

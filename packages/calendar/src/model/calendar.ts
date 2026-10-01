@@ -168,7 +168,8 @@ export type CalendarEventRecurrence = {
 /**
  * Recurrence fields accepted by supported write operations. RRULE edits change
  * only the master rule; EXDATE operations target one original occurrence
- * identity. RDATE and detached instances remain read-only resource data.
+ * identity; RDATE operations target one exact point-valued recurrence date.
+ * PERIOD values and detached instances remain read-only resource data.
  */
 export type CalendarEventRecurrenceWrite =
   | {
@@ -180,6 +181,13 @@ export type CalendarEventRecurrenceWrite =
       exdate: {
         action: 'add' | 'remove';
         recurrenceId: CalendarEventDateTime;
+      };
+    }
+  | {
+      /** Add or remove one exact DATE or DATE-TIME RDATE value. */
+      rdate: {
+        action: 'add' | 'remove';
+        value: CalendarEventDateTime;
       };
     };
 

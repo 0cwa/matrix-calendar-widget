@@ -281,6 +281,62 @@ describe('GatewayCalendarRepository', () => {
     expect(updateInit?.body).toBe(JSON.stringify(recurrencePatch));
   });
 
+  it('serializes one typed point RDATE and preserves the loaded ETag', async () => {
+    const recurringEvent: CalendarEvent = {
+      ...event,
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' },
+    };
+    const fetchMock = mockFetch(
+      jsonResponse({ event: recurringEvent, etag: '"rdate-etag"' }),
+      jsonResponse({
+        event: {
+          ...recurringEvent,
+          recurrence: {
+            ...recurringEvent.recurrence,
+            rdates: [
+              {
+                type: 'date-time',
+                value: {
+                  local: '2026-10-30T09:00:00',
+                  timezone: 'America/New_York',
+                },
+              },
+            ],
+          },
+        },
+        etag: '"updated-rdate-etag"',
+      }),
+    );
+    const repository = createRepository(fetchMock);
+    const rdatePatch = {
+      recurrence: {
+        rdate: {
+          action: 'add' as const,
+          value: {
+            type: 'date-time' as const,
+            value: {
+              local: '2026-10-30T09:00:00',
+              timezone: 'America/New_York',
+            },
+          },
+        },
+      },
+    };
+
+    await expect(
+      repository.updateEvent(calendarId, eventId, rdatePatch),
+    ).resolves.toMatchObject({
+      recurrence: { rdates: [rdatePatch.recurrence.rdate.value] },
+    });
+
+    const [, updateInit] = fetchMock.mock.calls[1];
+    expect(updateInit?.method).toBe('PATCH');
+    expect(new Headers(updateInit?.headers).get('If-Match')).toBe(
+      '"rdate-etag"',
+    );
+    expect(updateInit?.body).toBe(JSON.stringify(rdatePatch));
+  });
+
   it('passes count-only projection diagnostics through from the gateway', async () => {
     const repository = createRepository(
       mockFetch(

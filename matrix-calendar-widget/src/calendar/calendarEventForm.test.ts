@@ -19,6 +19,7 @@ import { DateTime } from 'luxon';
 import {
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
+  calendarEventRdateValueFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
   validateCalendarEventForm,
@@ -599,6 +600,157 @@ describe('calendar event form adapter', () => {
         title: 'Renamed complex series',
       }),
     ).not.toHaveProperty('recurrence');
+  });
+
+  it('serializes one typed point RDATE operation for the widget patch', () => {
+    const rdateEvent: CalendarEvent = {
+      id: 'rdate-series',
+      calendarId: 'team',
+      uid: 'rdate-series@example.test',
+      title: 'RDATE series',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-09-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;COUNT=4',
+        rdates: [
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-30T09:00:00',
+              timezone: 'America/New_York',
+            },
+          },
+          {
+            type: 'period',
+            timing: {
+              type: 'duration',
+              start: {
+                type: 'date-time',
+                value: {
+                  local: '2026-11-01T09:00:00',
+                  timezone: 'Europe/Stockholm',
+                },
+              },
+              duration: {
+                weeks: 0,
+                days: 0,
+                hours: 1,
+                minutes: 0,
+                seconds: 0,
+                isNegative: false,
+              },
+            },
+          },
+        ],
+      },
+    };
+    const values = calendarEventToFormValues(rdateEvent, calendar);
+    const addValue = calendarEventRdateValueFromForm(values);
+
+    expect(values.rdateValues).toEqual([
+      {
+        type: 'date-time',
+        value: {
+          local: '2026-10-30T09:00:00',
+          timezone: 'America/New_York',
+        },
+      },
+    ]);
+    expect(values.rdatePeriodCount).toBe(1);
+    expect(addValue).toEqual({
+      type: 'date-time',
+      value: {
+        local: '2026-09-23T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    });
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        rdateChanged: true,
+        rdateOperation: { action: 'add', value: addValue! },
+      }).recurrence,
+    ).toEqual({
+      rdate: {
+        action: 'add',
+        value: {
+          type: 'date-time',
+          value: {
+            local: '2026-09-23T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      },
+    });
+    expect(
+      validateCalendarEventForm({
+        ...values,
+        title: 'RDATE',
+        rdateChanged: true,
+        rdateOperation: { action: 'add', value: addValue! },
+      }),
+    ).toBeUndefined();
+    expect(
+      validateCalendarEventForm({
+        ...values,
+        title: 'RDATE',
+        rdateChanged: true,
+        rdateOperation: { action: 'add', value: addValue! },
+        recurrenceChanged: true,
+      }),
+    ).toBe('invalid-recurrence');
+  });
+
+  it('builds DATE and floating RDATE values in DTSTART form', () => {
+    const allDayEvent: CalendarEvent = {
+      id: 'all-day-rdate',
+      calendarId: 'team',
+      uid: 'all-day-rdate@example.test',
+      title: 'All-day series',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-10-05',
+        endDate: '2026-10-06',
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=3' },
+    };
+    const floatingEvent: CalendarEvent = {
+      id: 'floating-rdate',
+      calendarId: 'team',
+      uid: 'floating-rdate@example.test',
+      title: 'Floating series',
+      timing: {
+        type: 'timed',
+        start: { type: 'floating', local: '2026-10-05T09:00:00' },
+        end: { type: 'floating', local: '2026-10-05T10:00:00' },
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=3' },
+    };
+
+    expect(
+      calendarEventRdateValueFromForm(
+        calendarEventToFormValues(allDayEvent, calendar),
+      ),
+    ).toEqual({ type: 'date', value: '2026-10-05' });
+    expect(
+      calendarEventRdateValueFromForm(
+        calendarEventToFormValues(floatingEvent, calendar),
+      ),
+    ).toEqual({
+      type: 'floating-date-time',
+      value: '2026-10-05T09:00:00',
+    });
   });
 
   it('writes the UNTIL value in the event start value kind', () => {

@@ -29,6 +29,7 @@ import path from 'path';
 import { IAppConfiguration } from '../IAppConfiguration';
 import {
   CalDavDiscoveryError,
+  ICalendarEventCodec,
   MatrixOpenIdCalDavCredentialProviderFactory,
 } from '../caldav';
 import { MatrixAuthGuard } from '../guard/MatrixAuthGuard';
@@ -1548,6 +1549,77 @@ END:VCALENDAR`,
     expect(putHeaders.get('If-Match')).toBe('"old-etag"');
     expect(putInit?.body).toContain('SUMMARY:After update');
     expect(putInit?.body).toContain('X-CUSTOM:preserve');
+  });
+
+  it('round-trips a serialized RDATE patch through the gateway with If-Match', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/recurrence.ics';
+    const originalIcs = readFixture('recurrence-override.ics');
+    const patch = JSON.parse(
+      JSON.stringify({
+        recurrence: {
+          rdate: {
+            action: 'add',
+            value: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-27T09:30:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
+        },
+      }),
+    ) as CalendarEventPatch;
+    const updatedIcs = new ICalendarEventCodec()
+      .parse(calendarId, eventId, originalIcs)
+      .applyPatch(patch).icalendar;
+    fetch
+      .mockResponseOnce(originalIcs, {
+        status: 200,
+        headers: { ETag: '"old-etag"' },
+      })
+      .mockResponseOnce('', {
+        status: 200,
+        headers: { ETag: '"new-etag"' },
+      })
+      .mockResponseOnce(updatedIcs, {
+        status: 200,
+        headers: { ETag: '"new-etag"' },
+      });
+
+    const result = await createController().updateEvent(
+      userContext,
+      openIdCredential,
+      patch,
+      '"old-etag"',
+      roomId,
+      calendarId,
+      eventId,
+    );
+
+    expect(result.etag).toBe('"new-etag"');
+    expect(result.event.recurrence?.rdates).toContainEqual({
+      type: 'date-time',
+      value: {
+        local: '2026-10-27T09:30:00',
+        timezone: 'Europe/Stockholm',
+      },
+    });
+    expect(result.event.recurrence?.exdates).toHaveLength(2);
+    const [, putInit] = fetch.mock.calls[1];
+    expect(putInit?.method).toBe('PUT');
+    expect(new Headers(putInit?.headers).get('If-Match')).toBe('"old-etag"');
+    expect(putInit?.body).toContain(
+      'RDATE;TZID=Europe/Stockholm:20261027T093000',
+    );
+    expect(putInit?.body).toContain(
+      'EXDATE;TZID=Europe/Stockholm:20261102T140000',
+    );
+    expect(putInit?.body).toContain('X-CLIENT-METADATA;X-PARAM=preserve-param');
+    expect(putInit?.body).toContain('BEGIN:VALARM');
+    expect(putInit?.body).toContain('RECURRENCE-ID;TZID=Europe/Stockholm');
   });
 
   it('removes a VALARM from persisted CalDAV data after JSON serialization', async () => {

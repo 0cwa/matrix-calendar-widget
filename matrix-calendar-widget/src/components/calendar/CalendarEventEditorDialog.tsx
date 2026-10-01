@@ -46,6 +46,7 @@ import {
   calendarEventFormStartWeekday,
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
+  calendarEventRdateValueFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
   useCalendarRepository,
@@ -215,6 +216,50 @@ export function CalendarEventEditorDialog({
           : current,
       );
     };
+
+  const handleRdateDraftChange = (change: ChangeEvent<HTMLInputElement>) => {
+    setValues((current) =>
+      current ? { ...current, rdateDraft: change.target.value } : current,
+    );
+  };
+
+  const handleAddRdate = () => {
+    const value = calendarEventRdateValueFromForm(values);
+    if (!value) {
+      return;
+    }
+    setValues((current) =>
+      current
+        ? {
+            ...current,
+            rdateChanged: true,
+            rdateOperation: { action: 'add', value },
+          }
+        : current,
+    );
+  };
+
+  const handleRemoveRdate = (
+    value: NonNullable<CalendarEventFormValues['rdateValues']>[number],
+  ) => {
+    setValues((current) =>
+      current
+        ? {
+            ...current,
+            rdateChanged: true,
+            rdateOperation: { action: 'remove', value },
+          }
+        : current,
+    );
+  };
+
+  const handleCancelRdate = () => {
+    setValues((current) =>
+      current
+        ? { ...current, rdateChanged: false, rdateOperation: undefined }
+        : current,
+    );
+  };
 
   const handleWeekdayModeChange = (change: ChangeEvent<HTMLInputElement>) => {
     setValues((current) =>
@@ -761,6 +806,119 @@ export function CalendarEventEditorDialog({
               </>
             )}
 
+            {event && values.rdateEditable && (
+              <FormControl component="fieldset">
+                <FormLabel component="legend">
+                  {t(
+                    'calendarEvents.editor.additionalDates',
+                    'Additional recurrence dates',
+                  )}
+                </FormLabel>
+                <Stack spacing={1}>
+                  {(values.rdateValues ?? []).map((value, index) => {
+                    const label = formatRdateValue(value);
+                    return (
+                      <Stack
+                        alignItems="center"
+                        direction="row"
+                        justifyContent="space-between"
+                        key={`${label}-${index}`}
+                      >
+                        <Typography variant="body2">{label}</Typography>
+                        <Button
+                          aria-label={t(
+                            'calendarEvents.editor.removeAdditionalDate',
+                            'Remove additional date',
+                          ).concat(`: ${label}`)}
+                          disabled={
+                            Boolean(values.rdateOperation) ||
+                            values.timingChanged === true ||
+                            saving
+                          }
+                          onClick={() => handleRemoveRdate(value)}
+                          type="button"
+                        >
+                          {t('calendarEvents.editor.remove', 'Remove')}
+                        </Button>
+                      </Stack>
+                    );
+                  })}
+                  {(values.rdatePeriodCount ?? 0) > 0 && (
+                    <Typography color="text.secondary" variant="body2">
+                      {t(
+                        'calendarEvents.editor.periodDatesPreserved',
+                        'Period-valued dates are kept unchanged.',
+                      )}
+                    </Typography>
+                  )}
+                  <TextField
+                    disabled={
+                      Boolean(values.rdateOperation) ||
+                      values.timingChanged === true ||
+                      saving
+                    }
+                    inputProps={
+                      values.originalTiming?.type === 'all-day'
+                        ? { 'data-testid': 'rdate-draft' }
+                        : { 'data-testid': 'rdate-draft', step: 60 }
+                    }
+                    InputLabelProps={{ shrink: true }}
+                    label={t(
+                      'calendarEvents.editor.additionalDate',
+                      'Additional date',
+                    )}
+                    onChange={handleRdateDraftChange}
+                    required
+                    type={
+                      values.originalTiming?.type === 'all-day'
+                        ? 'date'
+                        : 'datetime-local'
+                    }
+                    value={values.rdateDraft ?? ''}
+                  />
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      disabled={
+                        Boolean(values.rdateOperation) ||
+                        values.timingChanged === true ||
+                        values.rdateDraft?.trim() === '' ||
+                        saving
+                      }
+                      onClick={handleAddRdate}
+                      type="button"
+                    >
+                      {t('calendarEvents.editor.addAdditionalDate', 'Add date')}
+                    </Button>
+                    {values.rdateOperation && (
+                      <Button
+                        disabled={saving}
+                        onClick={handleCancelRdate}
+                        type="button"
+                      >
+                        {t(
+                          'calendarEvents.editor.cancelDateChange',
+                          'Cancel date change',
+                        )}
+                      </Button>
+                    )}
+                  </Stack>
+                  {values.rdateOperation && (
+                    <Typography color="text.secondary" variant="body2">
+                      {values.rdateOperation.action === 'add'
+                        ? t(
+                            'calendarEvents.editor.dateWillBeAdded',
+                            'The date will be added when you save.',
+                          )
+                        : t(
+                            'calendarEvents.editor.dateWillBeRemoved',
+                            'The date will be removed when you save.',
+                          )}
+                    </Typography>
+                  )}
+                </Stack>
+              </FormControl>
+            )}
+
             {validationError && (
               <Alert severity="warning">{validationError}</Alert>
             )}
@@ -793,6 +951,19 @@ export function CalendarEventEditorDialog({
       </form>
     </Dialog>
   );
+}
+
+function formatRdateValue(
+  value: import('@matrix-calendar-widget/calendar').CalendarEventDateTime,
+): string {
+  switch (value.type) {
+    case 'date':
+      return value.value;
+    case 'floating-date-time':
+      return value.value;
+    case 'date-time':
+      return `${value.value.local} ${value.value.timezone}`;
+  }
 }
 
 function createEventUid(): string {
