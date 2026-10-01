@@ -36,6 +36,10 @@ The inherited ADR001-ADR003 documents describe NeoDateFix's original meeting arc
 
 ## How to work
 
+### Standing same-repository authorization
+
+For routine pre-alpha work in this repository, the user has granted agents standing authorization to perform scoped implementation and documentation work without separate conversational confirmation. This includes normal commits, forward-only pushes, creating and updating pull requests, marking pull requests ready, and merging after the stated review and check gates pass. Preserve exact repository, branch, base, head, changed-path, check, and review preflight, then verify the remote state after each mutation. This authorization does not permit force-pushes or changes to other repositories without explicit approval, and it does not bypass branch protection, repository rules, or platform and sandbox controls.
+
 - Work from a GitHub issue or a clearly scoped item in `docs/PLAN.md`.
 - Prefer vertical slices over broad rewrites.
 - Keep PRs reviewable. Do not combine package renames, architecture changes, and product features unless the task requires it.
