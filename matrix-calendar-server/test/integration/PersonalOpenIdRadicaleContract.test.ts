@@ -21,6 +21,7 @@ import {
   VersioningType,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { NextFunction, Request, Response } from 'express';
 import fetchMock from 'jest-fetch-mock';
 import { MatrixClient } from 'matrix-bot-sdk';
 import { execFileSync } from 'node:child_process';
@@ -227,7 +228,7 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
           throw error;
         }
       });
-    app.use((request, response, next) => {
+    app.use((request: Request, response: Response, next: NextFunction) => {
       if (activeStageDiagnostics) {
         activeStageDiagnostics.middlewareCalls += 1;
         activeStageDiagnostics.authorizationHeader =
