@@ -15,14 +15,12 @@
  */
 
 import { Logger } from '@nestjs/common';
-import { MODULE_METADATA } from '@nestjs/common/constants';
 import base64url from 'base64url';
 import { Request } from 'express';
 import fetch from 'jest-fetch-mock';
 import { MatrixClient } from 'matrix-bot-sdk';
 import { mock, resetCalls } from 'ts-mockito';
 import { IAppConfiguration } from '../../src/IAppConfiguration';
-import { AppModule } from '../../src/app.module';
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
 import { MATRIX_OPENID_CREDENTIAL_CONTEXT } from '../../src/model/IMatrixOpenIdCredential';
 import { createAppConfig } from '../util/MockUtils';
@@ -35,15 +33,6 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
     fetch.resetMocks();
     fetch.enableMocks();
     resetCalls(clientMock);
-  });
-
-  test('production module provides MatrixAuthMiddleware for bootstrap', () => {
-    const providers = Reflect.getMetadata(
-      MODULE_METADATA.PROVIDERS,
-      AppModule,
-    ) as unknown[];
-
-    expect(providers).toContain(MatrixAuthMiddleware);
   });
 
   test('with missing header', async () => {

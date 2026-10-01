@@ -55,6 +55,9 @@ let nonmemberIdentity: MatrixIdentity;
 let nonmemberIdentityHeader: string;
 let actorTaggedCredential: string;
 let app: INestApplication;
+let authMiddleware: MatrixAuthMiddleware;
+let originalExtractUserContext: MatrixAuthMiddleware['extractUserContext'];
+let nativeFetch: typeof fetch;
 let gatewayBaseUrl: string;
 let countCalDavRequests: () => number;
 const gatewayLogLines: string[] = [];
@@ -90,6 +93,9 @@ const gatewayLogger: LoggerService = {
 };
 const credentialProviderFactory =
   new MatrixOpenIdCalDavCredentialProviderFactory();
+const createCredentialProvider = credentialProviderFactory.forRequest.bind(
+  credentialProviderFactory,
+);
 const credentialProviderFactorySpy = jest.spyOn(
   credentialProviderFactory,
   'forRequest',
@@ -152,6 +158,7 @@ class PersonalOpenIdGatewayContractModule {}
 describeContract('personal Matrix OpenID gateway against real Radicale', () => {
   beforeAll(async () => {
     fetchMock.disableMocks();
+    nativeFetch = globalThis.fetch.bind(globalThis);
     homeserverUrl = testConfiguration.homeserver_url;
     matrixServerName =
       process.env.MATRIX_CALENDAR_DEV_SERVER_NAME ?? 'localhost';
@@ -205,29 +212,9 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     app = await NestFactory.create(PersonalOpenIdGatewayContractModule, {
       logger: gatewayLogger,
     });
-    const authMiddleware = app.get(MatrixAuthMiddleware);
-    const extractUserContext =
+    authMiddleware = app.get(MatrixAuthMiddleware);
+    originalExtractUserContext =
       authMiddleware.extractUserContext.bind(authMiddleware);
-    jest
-      .spyOn(authMiddleware, 'extractUserContext')
-      .mockImplementation(async (request) => {
-        try {
-          const context = await extractUserContext(request);
-          if (activeStageDiagnostics) {
-            activeStageDiagnostics.identity = context
-              ? context.userId === actorUserId
-                ? 'actor'
-                : 'other'
-              : 'absent';
-          }
-          return context;
-        } catch (error) {
-          if (activeStageDiagnostics) {
-            activeStageDiagnostics.identity = 'rejected';
-          }
-          throw error;
-        }
-      });
     app.use((request: Request, response: Response, next: NextFunction) => {
       if (activeStageDiagnostics) {
         activeStageDiagnostics.middlewareCalls += 1;
@@ -240,8 +227,32 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     await app.listen(0, '127.0.0.1');
     const address = app.getHttpServer().address() as AddressInfo;
     gatewayBaseUrl = `http://127.0.0.1:${address.port}`;
-    countCalDavRequests = instrumentCalDavRequests();
   }, 30000);
+
+  beforeEach(() => {
+    credentialProviderFactorySpy.mockImplementation(createCredentialProvider);
+    jest
+      .spyOn(authMiddleware, 'extractUserContext')
+      .mockImplementation(async (request) => {
+        try {
+          const context = await originalExtractUserContext(request);
+          if (activeStageDiagnostics) {
+            activeStageDiagnostics.identity = context
+              ? context.userId === actorUserId
+                ? 'actor'
+                : 'other'
+              : 'absent';
+          }
+          return context;
+        } catch {
+          if (activeStageDiagnostics) {
+            activeStageDiagnostics.identity = 'rejected';
+          }
+          throw new Error('Matrix identity verification failed');
+        }
+      });
+    countCalDavRequests = instrumentCalDavRequests(nativeFetch);
+  });
 
   afterAll(async () => {
     if (app) await app.close();
@@ -529,8 +540,7 @@ function identityHeader(identity: MatrixIdentity): string {
   return `MX-Identity ${encodedPayload}`;
 }
 
-function instrumentCalDavRequests(): () => number {
-  const originalFetch = globalThis.fetch.bind(globalThis);
+function instrumentCalDavRequests(originalFetch: typeof fetch): () => number {
   const caldavOrigin = new URL(radicaleBaseUrl).origin;
   let requestCount = 0;
   jest.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
