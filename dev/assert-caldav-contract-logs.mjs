@@ -120,17 +120,6 @@ if (failedSuites.length === 0) {
     'CalDAV contract tests failed; sensitive failure details are withheld.\n',
   );
   for (const suite of failedSuites) {
-    const suiteName = suite.name.split('/').slice(-3).join('/');
-    process.stdout.write(`Failed suite: ${suiteName}\n`);
-    const failedTests = (suite.assertionResults ?? []).filter(
-      (test) => test.status === 'failed',
-    );
-    for (const test of failedTests) {
-      process.stdout.write(
-        `Failed test: ${[...test.ancestorTitles, test.title].join(' > ')}\n`,
-      );
-    }
-
     const failureText = [
       suite.message,
       ...(suite.assertionResults ?? []).flatMap(
@@ -146,23 +135,11 @@ if (failedSuites.length === 0) {
       );
     }
     const stageDiagnostic = failureText.match(
-      /SAFE_CALDAV_CONTRACT_DIAGNOSTIC identity=(not-observed|accepted|rejected) membership=(none|(?:yes|no)(?:,(?:yes|no))*) provider_calls=(\d+) caldav_status=(none|(?:\d{3})(?:,\d{3})*)/,
+      /SAFE_CALDAV_CONTRACT_DIAGNOSTIC gateway_status=(\d{3}) identity=(not-observed|actor|other|absent|rejected) userinfo_status=(none|(?:\d{3})(?:,\d{3})*) membership=(none|(?:yes|no)(?:,(?:yes|no))*) provider_calls=(\d+) caldav_status=(none|(?:\d{3})(?:,\d{3})*)/,
     );
     if (stageDiagnostic) {
       process.stdout.write(
-        `Safe contract stages: identity=${stageDiagnostic[1]}, membership=${stageDiagnostic[2]}, provider_calls=${stageDiagnostic[3]}, caldav_status=${stageDiagnostic[4]}\n`,
-      );
-    }
-    const locations = [
-      ...failureText.matchAll(/([\w./-]+\.(?:ts|tsx|js):\d+:\d+)/g),
-    ]
-      .map((match) => match[1])
-      .filter(
-        (location) => location.includes('test/') || location.includes('src/'),
-      );
-    for (const location of [...new Set(locations)]) {
-      process.stdout.write(
-        `Failure location: ${location.split('/').slice(-3).join('/')}\n`,
+        `Safe contract stages: gateway_status=${stageDiagnostic[1]}, identity=${stageDiagnostic[2]}, userinfo_status=${stageDiagnostic[3]}, membership=${stageDiagnostic[4]}, provider_calls=${stageDiagnostic[5]}, caldav_status=${stageDiagnostic[6]}\n`,
       );
     }
   }

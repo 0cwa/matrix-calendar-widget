@@ -60,7 +60,8 @@ let gatewayBaseUrl: string;
 let countCalDavRequests: () => number;
 const gatewayLogLines: string[] = [];
 type ContractStageDiagnostics = {
-  identity: 'not-observed' | 'accepted' | 'rejected';
+  identity: 'not-observed' | 'actor' | 'other' | 'absent' | 'rejected';
+  userInfoStatuses: number[];
   membershipResults: boolean[];
   caldavStatuses: number[];
 };
@@ -204,31 +205,34 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     );
     nonmemberIdentityHeader = identityHeader(nonmemberIdentity);
 
+    const extractUserContext =
+      MatrixAuthMiddleware.prototype.extractUserContext;
+    jest
+      .spyOn(MatrixAuthMiddleware.prototype, 'extractUserContext')
+      .mockImplementation(
+        async function (this: MatrixAuthMiddleware, request) {
+          try {
+            const context = await extractUserContext.call(this, request);
+            if (activeStageDiagnostics) {
+              activeStageDiagnostics.identity = context
+                ? context.userId === actorUserId
+                  ? 'actor'
+                  : 'other'
+                : 'absent';
+            }
+            return context;
+          } catch (error) {
+            if (activeStageDiagnostics) {
+              activeStageDiagnostics.identity = 'rejected';
+            }
+            throw error;
+          }
+        },
+      );
+
     app = await NestFactory.create(PersonalOpenIdGatewayContractModule, {
       logger: gatewayLogger,
     });
-    const authMiddleware = app.get(MatrixAuthMiddleware);
-    const extractUserContext = authMiddleware.extractUserContext.bind(
-      authMiddleware,
-    );
-    jest
-      .spyOn(authMiddleware, 'extractUserContext')
-      .mockImplementation(async (request) => {
-        try {
-          const context = await extractUserContext(request);
-          if (activeStageDiagnostics) {
-            activeStageDiagnostics.identity = context
-              ? 'accepted'
-              : 'rejected';
-          }
-          return context;
-        } catch (error) {
-          if (activeStageDiagnostics) {
-            activeStageDiagnostics.identity = 'rejected';
-          }
-          throw error;
-        }
-      });
     app.enableVersioning({ type: VersioningType.URI });
     await app.listen(0, '127.0.0.1');
     const address = app.getHttpServer().address() as AddressInfo;
@@ -247,6 +251,7 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     const providerCallsBefore = credentialProviderFactorySpy.mock.calls.length;
     const stages: ContractStageDiagnostics = {
       identity: 'not-observed',
+      userInfoStatuses: [],
       membershipResults: [],
       caldavStatuses: [],
     };
@@ -265,8 +270,12 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
         stages.caldavStatuses.length === 0
           ? 'none'
           : stages.caldavStatuses.join(',');
+      const userInfoStatus =
+        stages.userInfoStatuses.length === 0
+          ? 'none'
+          : stages.userInfoStatuses.join(',');
       throw new Error(
-        `SAFE_CALDAV_CONTRACT_DIAGNOSTIC identity=${stages.identity} membership=${membership} provider_calls=${credentialProviderFactorySpy.mock.calls.length - providerCallsBefore} caldav_status=${caldavStatus}`,
+        `SAFE_CALDAV_CONTRACT_DIAGNOSTIC gateway_status=${response.status} identity=${stages.identity} userinfo_status=${userInfoStatus} membership=${membership} provider_calls=${credentialProviderFactorySpy.mock.calls.length - providerCallsBefore} caldav_status=${caldavStatus}`,
       );
     }
 
@@ -526,10 +535,14 @@ function instrumentCalDavRequests(): () => number {
       requestCount += 1;
     }
     return originalFetch(input, init).then((response) => {
+      const parsedUrl = new URL(url, radicaleBaseUrl);
       if (
         activeStageDiagnostics &&
-        new URL(url, radicaleBaseUrl).origin === caldavOrigin
+        parsedUrl.pathname === '/_matrix/federation/v1/openid/userinfo'
       ) {
+        activeStageDiagnostics.userInfoStatuses.push(response.status);
+      }
+      if (activeStageDiagnostics && parsedUrl.origin === caldavOrigin) {
         activeStageDiagnostics.caldavStatuses.push(response.status);
       }
       return response;
