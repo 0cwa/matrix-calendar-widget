@@ -11,9 +11,12 @@ on:
       - 'matrix-calendar-server/src/controller/CalendarGatewayController.ts'
       - 'matrix-calendar-server/src/app.module.ts'
       - 'matrix-calendar-server/src/guard/**'
+      - 'matrix-calendar-server/src/middleware/**'
       - 'matrix-calendar-server/src/service/MatrixCalendarAuthorization.ts'
       - 'matrix-calendar-server/src/service/MatrixCalendarAuthorization.test.ts'
+      - 'matrix-calendar-server/test/CalendarGatewayMembershipGuard.test.ts'
       - 'matrix-calendar-server/test/integration/CalDavDiscoveryContract.test.ts'
+      - 'matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts'
       - 'matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts'
       - 'matrix-calendar-server/test/integration/CalendarDiagnosticsContract.test.ts'
       - 'matrix-calendar-server/package.json'
@@ -75,14 +78,22 @@ jobs:
           </C:mkcalendar>
           XML
 
-      - name: Run real CalDAV contracts
-        run: >
-          yarn workspace @matrix-calendar-widget/server
-          jest
-          test/integration/CalDavDiscoveryContract.test.ts
-          test/integration/CalDavEventRoundTripContract.test.ts
-          test/integration/CalendarDiagnosticsContract.test.ts
-          --runInBand
+      - name: Run gateway and real CalDAV contracts
+        run: |
+          set +e
+          contract_log="$RUNNER_TEMP/caldav-contract-output.log"
+          yarn workspace @matrix-calendar-widget/server jest \
+            test/CalendarGatewayMembershipGuard.test.ts \
+            test/integration/PersonalOpenIdRadicaleContract.test.ts \
+            test/integration/CalDavDiscoveryContract.test.ts \
+            test/integration/CalDavEventRoundTripContract.test.ts \
+            test/integration/CalendarDiagnosticsContract.test.ts \
+            --runInBand > "$contract_log" 2>&1
+          test_status=$?
+          set -e
+          node dev/assert-caldav-contract-logs.mjs "$contract_log"
+          rm -f "$contract_log"
+          exit "$test_status"
 
       - name: Stop services
         if: always()

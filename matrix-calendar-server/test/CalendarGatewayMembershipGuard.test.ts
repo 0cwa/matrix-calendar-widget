@@ -171,6 +171,20 @@ describe('GET /v1/calendar/calendars room membership guard', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('denies a failed authorization decision before credential or CalDAV I/O', async () => {
+    getJoinedRoomMembers.mockResolvedValue([userId]);
+    isAllowed.mockResolvedValue(false);
+
+    const response = await getJson(calendarsUrl());
+
+    expect(response.status).toBe(403);
+    expect(forRoom).toHaveBeenCalledWith(userId, roomId);
+    expect(isAllowed).toHaveBeenCalledWith({ action: 'list-calendars' });
+    expect(forRequest).not.toHaveBeenCalled();
+    expect(getRequestHeaders).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('allows a joined member to reach authorized calendar discovery', async () => {
     getJoinedRoomMembers.mockResolvedValue([userId]);
     fetch.mockResponses(

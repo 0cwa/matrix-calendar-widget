@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { Logger } from '@nestjs/common';
 import base64url from 'base64url';
 import { Request } from 'express';
 import fetch from 'jest-fetch-mock';
@@ -117,13 +118,39 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
     fetch.mockResponseOnce('Unauthorized', { status: 401 });
 
     await expect(matrixAuth.extractUserContext(mockRequest)).rejects.toThrow(
-      /Could not verify user by token/,
+      'Matrix identity verification failed',
     );
     expect(
       (mockRequest as Request & Record<string, unknown>)[
         MATRIX_OPENID_CREDENTIAL_CONTEXT
       ],
     ).toBeUndefined();
+  });
+
+  test('does not log a rejected OpenID proof or homeserver error details', async () => {
+    appConfig.homeserver_url = 'abc';
+    const accessToken = 'private-proof-sentinel';
+    const authorization = `MX-Identity ${base64url(
+      JSON.stringify({
+        access_token: accessToken,
+        matrix_server_name: 'server',
+      }),
+    )}`;
+    const logger = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const matrixAuth = new MatrixAuthMiddleware(appConfig);
+    const mockRequest = {
+      headers: { authorization },
+    } as Request;
+    fetch.mockResponseOnce(`Unauthorized ${accessToken}`, { status: 401 });
+
+    await matrixAuth.use(mockRequest, {} as never, jest.fn());
+
+    expect(logger).toHaveBeenCalledWith('Matrix authentication failed');
+    expect(JSON.stringify(logger.mock.calls)).not.toContain(accessToken);
+    expect(JSON.stringify(logger.mock.calls)).not.toContain(authorization);
+    logger.mockRestore();
   });
 
   test('Bearer authorization-header', async () => {

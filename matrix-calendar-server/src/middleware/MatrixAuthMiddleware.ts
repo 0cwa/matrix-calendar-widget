@@ -52,8 +52,10 @@ export class MatrixAuthMiddleware implements NestMiddleware {
     let userContext: IUserContext | undefined;
     try {
       userContext = await this.extractUserContext(request);
-    } catch (err) {
-      this.logger.warn(`Matrix authentication fails: ${err}`);
+    } catch {
+      // Authentication errors can contain the MX-Identity value or the
+      // homeserver request URL, which carries the OpenID token in its query.
+      this.logger.warn('Matrix authentication failed');
     }
     if (userContext) {
       (request as any)[NET_NORDECK_CONTEXT] = userContext;
@@ -132,20 +134,15 @@ export class MatrixAuthMiddleware implements NestMiddleware {
     let response;
     try {
       response = await fetch(fetchUrl);
-    } catch (err) {
-      const ex: any = err;
-      throw new Error(
-        `Client was not able to connect to the needed address: ${ex.code} ${ex.message}`,
-      );
+    } catch {
+      throw new Error('Unable to verify Matrix identity');
     }
 
     if (response.ok) {
       const result = await response.json();
       return (result as any).sub; // user id
     } else {
-      const text = await response.text();
-      const status = response.status;
-      throw new Error(`Could not verify user by token:  ${status} ${text}`);
+      throw new Error('Matrix identity verification failed');
     }
   }
 
@@ -161,19 +158,14 @@ export class MatrixAuthMiddleware implements NestMiddleware {
           },
         },
       );
-    } catch (err) {
-      const ex: any = err;
-      throw new Error(
-        `Client was not able to connect to the needed address ${ex.code} ${ex.message}`,
-      );
+    } catch {
+      throw new Error('Unable to verify Matrix identity');
     }
     if (response.ok) {
       const json = await response.json();
       return (json as any).user_id;
     } else {
-      const text = await response.text();
-      const status = response.status;
-      throw new Error(`Could not verify user by token: ${status} ${text}`);
+      throw new Error('Matrix identity verification failed');
     }
   }
 }
