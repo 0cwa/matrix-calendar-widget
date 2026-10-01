@@ -27,7 +27,11 @@ done
 curl --silent --fail http://localhost:8008/_matrix/client/versions >/dev/null
 
 login_payload="$(printf '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"%s"},"password":"%s"}' "$MATRIX_USER" "$MATRIX_PASSWORD")"
-if ! curl --silent --fail -H 'Content-Type: application/json' -d "$login_payload" http://localhost:8008/_matrix/client/v3/login >/dev/null; then
+if ! printf '%s' "$login_payload" |
+  curl --silent --fail \
+    -H 'Content-Type: application/json' \
+    --data-binary @- \
+    http://localhost:8008/_matrix/client/v3/login >/dev/null; then
   echo "==> Registering dev Matrix user @$MATRIX_USER:localhost"
   printf '%s' "$MATRIX_PASSWORD" |
     "${COMPOSE[@]}" exec -T synapse register_new_matrix_user \

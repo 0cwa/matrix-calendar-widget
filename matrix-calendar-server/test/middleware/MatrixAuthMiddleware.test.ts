@@ -19,6 +19,8 @@ import base64url from 'base64url';
 import { Request } from 'express';
 import fetch from 'jest-fetch-mock';
 import { MatrixClient } from 'matrix-bot-sdk';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { mock, resetCalls } from 'ts-mockito';
 import { IAppConfiguration } from '../../src/IAppConfiguration';
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
@@ -33,6 +35,18 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
     fetch.resetMocks();
     fetch.enableMocks();
     resetCalls(clientMock);
+  });
+
+  test('production module registers MatrixAuthMiddleware for bootstrap', () => {
+    const appModuleSource = readFileSync(
+      resolve(__dirname, '../../src/app.module.ts'),
+      'utf8',
+    );
+    const providers = appModuleSource.match(
+      /@Module\(\{[\s\S]*?providers:\s*\[([\s\S]*?)\n\s*\],\s*\n\}\)\s*export class AppModule/,
+    )?.[1];
+
+    expect(providers).toContain('MatrixAuthMiddleware');
   });
 
   test('with missing header', async () => {
