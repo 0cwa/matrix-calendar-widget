@@ -17,11 +17,13 @@ for that sender. The bot's configured Matrix client authenticates as the bot
 account and can request an OpenID token for that account. It cannot use that
 credential to prove the identity of `event.sender`.
 
-The development Radicale deployment uses the `radicale_auth_matrix` backend
-and `owner_only` rights (`dev/compose.yaml`). With one bot principal, those
-rights apply to the bot principal's whole calendar home. A room-to-calendar
-mapping enforced by the gateway therefore provides application-level scoping;
-it does not create a Radicale permission boundary between rooms.
+The current development Radicale deployment uses an external Matrix-password
+backend and `owner_only` rights (`dev/compose.yaml`). With one bot principal,
+those rights apply to the bot principal's whole calendar home. The project-
+owned image will not include or invoke that external backend; its Matrix-
+password compatibility remains unsupported under ADR024. A room-to-calendar
+mapping enforced by the gateway provides application-level scoping; it does
+not create a Radicale permission boundary between rooms.
 
 The project needs both the user-owned calendar behavior of the widget and a
 safe fallback for room-owned team calendars. It must not infer a CalDAV
@@ -47,10 +49,11 @@ target, independently of which channel made the request:
    a short-lived Matrix OpenID token for the bot itself using its
    authenticated Matrix client. The CalDAV identity is the bot service
    principal, never the command sender. This is the narrow room-target
-   extension to ADR009; its per-user credential contract remains unchanged
-   for personal targets. The room path requires the OpenID-capable Radicale
-   auth module tracked by M2 issue #48 and selected in ADR024; it must not
-   substitute a Matrix password.
+   extension to ADR009; its personal credential contract remains separate.
+   The room path requires the OpenID-capable Radicale auth module selected in
+   ADR024, while appservice proof issuance and room-access validation belong
+   to M6 issue #7, not the M2 #45 contract. It must not substitute a Matrix
+   password.
 4. **Authorize the actor and resolve the target before CalDAV.** For every
    room-bound widget or bot operation, validate the caller identity (widget
    OpenID or an event received over the authenticated homeserver connection),
@@ -87,10 +90,10 @@ target, independently of which channel made the request:
    and the gateway has explicit authorization for the target calendar. That
    mechanism may not use the bot's own OpenID token as proof of the sender.
 
-Room-bound widget access and M7 data commands depend on the M2 OpenID-capable
-Radicale support selected by ADR024 and final delegation contract (#48 and
-#45), plus the M6 room-to-calendar binding and server-side actor, membership,
-and power checks.
+Room-bound widget access and M7 data commands depend on the M2 personal actor
+OpenID contract (#48 and #45), plus M6 issue #7's appservice proof, room-to-
+calendar binding, server-side actor, membership, power, and cross-room
+isolation checks.
 This ADR defines the identity and ownership boundary; it does not implement
 commands, bindings, or the Radicale auth module.
 
@@ -110,11 +113,15 @@ commands, bindings, or the Radicale auth module.
   security requirement for multiple trust domains.
 - Per-user command targets remain unavailable until trusted actor proof and
   target-calendar authorization are designed and implemented.
-- ADR024 selects a clean-room Radicale auth module in this repository and
-  does not change the external plugin's source or license. Password-
-  authenticated CalDAV clients retain ADR009's compatibility path.
+- ADR024 selects a clean-room Radicale auth module in this repository. The
+  project-owned image does not include or invoke the external Matrix-password
+  plugin, and conventional Matrix-password CalDAV login is unsupported and
+  deferred for this pre-alpha.
 
-## Acceptance gates for room-bound widget and bot access
+## M6 issue #7 acceptance gates for room-bound widget and bot access
+
+These gates are separate from M2 issue #45, which validates only personal
+actor OpenID delegation and fail-closed denial.
 
 - For personal widget targets, the CalDAV OpenID credential identifies the
   validated user. For room-bound widget or bot targets, it identifies the

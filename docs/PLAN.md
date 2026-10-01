@@ -36,12 +36,12 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 - [x] Resolve room membership and authorization context.
 - [x] Implement CalDAV service discovery and calendar enumeration against Radicale (#44/#49/#55/#56).
 - [x] Define the server-side Radicale credential/delegation strategy without handling user Matrix passwords (ADR009 / #54).
-- [ ] Implement the clean-room Radicale 3.8.0.0 Auth module and pinned project-owned image (ADR024 / #48). Preserve conventional Matrix-password CalDAV login and add request-scoped OpenID modes for the validated personal actor and dedicated appservice principal.
-- [ ] Add the final delegated gateway/OpenID contract against a real Radicale container for both principal modes (#45).
+- [ ] After #48's old external-plugin/Matrix-password acceptance is replaced, implement the clean-room Radicale 3.8.0.0 Auth module and pinned project-owned image (ADR024 / #48) for the validated personal actor's tagged, request-scoped OpenID proof. Reject untagged password credentials; do not include or invoke an external auth package.
+- [ ] Add the final personal actor OpenID gateway contract against a real Radicale container (#45): same-user calendar enumeration plus denial of non-members and failed authorization lookups before CalDAV I/O.
 
-Password-auth real-container discovery is already covered by #59 / PR #60. The remaining M2 path is now in-repository work: implement and test the ADR024 adapter and pinned image in #48, then validate both OpenID principal modes and authorization ordering in the final contract for #45. The actual etke-host image override and preservation of its existing `/data` volume remain unverified deployment gates; do not enable room access until those gates pass.
+PR #60's password-authenticated discovery contract is historical evidence about the prior deployment and does not make Matrix-password CalDAV login supported in the owned pre-alpha image. The current #48 issue acceptance still reflects the superseded external-plugin/Matrix-password scope and must be rewritten before implementation. After that issue update, the remaining M2 path is in-repository work: implement the personal OpenID adapter and pinned image in #48, then validate same-user enumeration and fail-closed denial in #45. The actual etke-host image override and preservation of its existing `/data` volume remain unverified deployment gates.
 
-**Exit:** the gateway can authenticate personal access with the validated actor's Matrix OpenID proof and appservice-owned room access with a request-scoped appservice proof minted only after M6 authorization. Conventional password-authenticated CalDAV clients still work; the gateway never handles Matrix passwords. Real-Radicale tests prove both proof modes and authorization ordering.
+**Exit:** the gateway can authenticate personal access with the validated actor's tagged Matrix OpenID proof, enumerate only that actor's calendars, and deny non-members or failed authorization lookups before CalDAV I/O. The owned backend rejects untagged Matrix-password credentials; support for any separate Radicale-native credential mode requires a future ADR.
 
 ## M3 — VEVENT CRUD vertical slice
 
@@ -268,13 +268,13 @@ DST regression or recurrence-editing criteria above.
         context routes remain active and use the authenticated user's
         principal.
 - [ ] Enable live room-calendar data access and room-target diagnostics only
-      after #48 implements both OpenID modes and #45 validates them against
-      real Radicale, and after M6 validates actor identity, current membership,
-      action power, exact binding, the appservice principal's `owner_only`
-      home boundary, and cross-room isolation. The authentication adapter does
-      not itself authorize room operations. Verify that the operator's etke
-      image override keeps the existing `/data` store before rollout. Keep
-      issue #7 open for real room calendar operations.
+      after M2 #48/#45 validate personal actor authentication, and M6 issue #7
+      validates the appservice proof minted only after actor identity,
+      membership, power, and exact binding checks; real Radicale access under
+      the appservice principal; and cross-room isolation. The authentication
+      adapter does not itself authorize room operations. Verify that the
+      operator's etke image override keeps the existing `/data` store before
+      rollout. Keep issue #7 open until its room-calendar acceptance passes.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
 - [ ] First reminder delivery target: permission-checked room-wide
       notifications using standard `m.mentions.room: true`; check room-mention

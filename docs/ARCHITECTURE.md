@@ -44,19 +44,23 @@ The gateway and bot are initially one deployable service. Split them only when s
 distinct ownership paths and the initial room-target contract:
 
 - **Personal widget calendars** remain associated with the authenticated Matrix
-  user. The gateway validates that user's short-lived OpenID assertion and,
-  after the in-repository Radicale Auth module in ADR024 is implemented for
-  [#48](https://github.com/0cwa/matrix-calendar-widget/issues/48)
-  and final real-server contract in [#45](https://github.com/0cwa/matrix-calendar-widget/issues/45),
-  uses the corresponding user-scoped CalDAV delegation contract.
+  user. The gateway validates that user's short-lived OpenID assertion. Once
+  the in-repository Radicale Auth module in ADR024 is implemented for
+  [#48](https://github.com/0cwa/matrix-calendar-widget/issues/48) and M2's
+  real-server contract in
+  [#45](https://github.com/0cwa/matrix-calendar-widget/issues/45) proves
+  same-user enumeration and fail-closed denial for non-members or failed
+  authorization lookups before CalDAV I/O, the gateway will use the
+  corresponding user-scoped CalDAV delegation contract.
 - **Room-owned calendars** are planned to belong to the application principal.
   Their path will resolve a canonical Matrix room ID through an
   operator-managed static binding. The binding resolver and application-
   principal room path are foundations only; that static-binding path is not
-  wired to CalDAV until ADR024's appservice OpenID mode is implemented and
-  #45 validates it against real Radicale. The user's proof authenticates the
-  widget actor; the separate appservice proof identifies the room calendar's
-  CalDAV principal.
+  wired to CalDAV until M6 issue #7 implements and validates ADR024's
+  appservice OpenID mode, authorization-before-mint ordering, and cross-room
+  isolation against real Radicale. The user's proof authenticates the widget
+  actor; the separate appservice proof identifies the room calendar's CalDAV
+  principal.
 
 Existing room-context gateway routes remain active and make CalDAV requests
 under the authenticated requesting user's principal. They enforce current
@@ -170,13 +174,15 @@ URL cannot select or create a binding. Room members cannot change bindings;
 collection create/delete/rename and room rebinding remain operator-managed.
 
 The resolver is a pure in-memory function and performs no network or CalDAV
-I/O. Application-principal room-owned access remains blocked on #48/#45 and
-deployment isolation: Radicale `owner_only` grants the application principal
-access to its whole home, so that home must stay within one trusted
-organizational boundary or use equivalent per-room isolation. The actual
-etke-host custom-image override and preservation of its `/data` store remain
-unverified deployment gates. Existing user-principal room-context routes are
-separate and remain active.
+I/O. Application-principal room-owned access remains blocked on M6 issue #7
+and deployment isolation: Radicale `owner_only` grants the application
+principal access to its whole home, so that home must stay within one trusted
+organizational boundary or use equivalent per-room isolation. M2 #48/#45
+validate personal actor authentication and same-user enumeration; they do not
+accept appservice proof or prove room isolation. The actual etke-host
+custom-image override and preservation of its `/data` store remain unverified
+deployment gates. Existing user-principal room-context routes are separate and
+remain active.
 
 ## Reminder delivery
 

@@ -2,7 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-01
-- Supersedes: ADR009's external-only implementation-location requirement
+- Supersedes: ADR009's external-only implementation-location requirement and
+  conventional Matrix-password compatibility path
 - Preserves: ADR006, ADR010, ADR014, and ADR015 identity, principal, and
   authorization decisions
 
@@ -10,34 +11,34 @@
 
 ADR006 requires server-side Matrix OpenID validation and forbids the widget
 gateway from asking for, storing, or proxying Matrix passwords. ADR009 defines
-the tagged OpenID delegation contract for personal calendars, but requires its
-Radicale authentication code to live in a separate plugin repository. ADR010,
-ADR014, and ADR015 separately select per-user personal calendars and one
-appservice-owned principal for explicitly bound room calendars, with actor,
-membership, power, and binding checks before CalDAV access.
+the tagged OpenID delegation contract for personal calendars, but places its
+Radicale authentication code in a separate plugin repository and records a
+conventional Matrix-password login path. ADR024 supersedes both decisions for
+the owned pre-alpha backend. ADR010, ADR014, and ADR015 separately select
+per-user personal calendars and one appservice-owned principal for explicitly
+bound room calendars, with actor, membership, power, and binding checks before
+CalDAV access.
 
-The pinned development service uses Radicale 3.8.0.0 with
-`radicale-auth-matrix` and `owner_only`. Its current password mode sends the
-supplied username and password to Matrix `m.login.password`; it has no OpenID
-credential mode. The project needs an OpenID path for personal widget access
-and for the dedicated application principal while keeping conventional
-Matrix-password CalDAV clients working.
+The currently documented etke service uses an external auth plugin that sends
+supplied usernames and passwords to Matrix `m.login.password`. That behavior
+conflicts with the repository's password prohibition and must not be carried
+into the project-owned service. The owned Radicale backend accepts only the
+explicitly tagged short-lived OpenID credential; it rejects untagged or other
+password credentials. Conventional CalDAV clients that authenticate with
+Matrix passwords are intentionally unsupported and deferred in this pre-alpha.
+Any independent Radicale-native credential mode requires a separate future
+decision.
 
 The primary-source audit found a supported Radicale Auth extension interface,
-but no existing native mode that provides the required split. Radicale's
-OAuth2 backend uses a password grant. Its `http_x_remote_user` backend trusts a
-proxy-supplied identity and disables internal authentication. Neither option,
-by itself, preserves the current password clients while safely validating both
-OpenID principals. Radicale collection sharing is per-collection, disabled by
-default, and requires an authenticated collection owner to provision tokens;
-it does not provide the selected service-principal path. The external
-`radicale-auth-matrix` source is LGPL-3.0, so copying it into this Apache-2.0
-repository would create a separate licensing obligation.
-ADR014's boundary against changing that external package remains in force:
-this decision adds a separately authored module and does not fork or copy the
-external implementation. If the pinned custom image keeps that package for its
-password-login mode, its LGPL-3.0 source, license, and notices remain separate
-and must accompany image distribution as required.
+but no existing native mode that performs the required OpenID proof checks.
+Radicale's OAuth2 backend uses a password grant, which is outside the selected
+credential boundary. Its `http_x_remote_user` backend trusts a proxy-supplied
+identity and disables internal authentication. Collection sharing is
+per-collection, disabled by default, and requires an authenticated collection
+owner to provision tokens; it does not provide the selected service-principal
+path. The selected project-owned image will use only the clean-room
+in-repository OpenID module; it will not include or invoke
+`radicale-auth-matrix` or compose it with another backend.
 
 The operator's managed host is etke-based. A fork-owned custom image is the
 selected packaging target for an etke Radicale image override, but support for
@@ -50,10 +51,10 @@ canonical calendar store.
 1. **Implement a clean-room Radicale Auth module in this repository.** Target
    the Radicale 3.8.0.0 interface used by the pinned development and hosted
    contract stacks. Write the module from the Radicale interface and protocol
-   requirements; do not copy, vendor, or modify `radicale-auth-matrix` source.
-   License the clean-room module with this repository. If the custom image
-   includes the external package for conventional password login, preserve its
-   LGPL-3.0 source, license, notices, and distribution obligations separately.
+   requirements. The project-owned image contains and invokes only this
+   in-repository backend; it does not include or invoke `radicale-auth-matrix`
+   or compose it with another auth backend. License the clean-room module with
+   this repository.
 2. **Build and pin a project-owned custom image.** The image must pin its
    Radicale base version and module dependencies; never install a floating
    plugin branch at startup. The intended deployment replaces the etke
@@ -66,23 +67,22 @@ canonical calendar store.
    CalDAV store canonical and intact. Do not claim etke-host compatibility
    until the image replacement path is confirmed and a deployment rehearsal
    verifies the actual volume, network, config, and service lifecycle.
-3. **Keep the two Basic Auth modes explicit.** An untagged password retains
-   the existing conventional-client Matrix-password login behavior. The
-   gateway must never use that mode. A value with the ADR009
-   `matrix-openid:` tag is parsed strictly as a short-lived OpenID delegation;
-   the adapter verifies it against only the configured Matrix homeserver's
-   `/_matrix/federation/v1/openid/userinfo` endpoint and rejects malformed,
-   expired, unknown, or mismatched proofs. Require the returned Matrix user
-   ID's localpart to match the Basic Auth username and its server name to
-   match both the payload and configured Matrix homeserver. Do not accept a
-   caller-selected homeserver URL or use the proof as an authorization
+3. **Accept tagged OpenID credentials only.** The CalDAV Basic Auth password
+   must use ADR009's `matrix-openid:` tag and carry a short-lived OpenID proof.
+   Reject untagged values and all other password credentials before any
+   homeserver request. Verify the proof against only the configured Matrix
+   homeserver's `/_matrix/federation/v1/openid/userinfo` endpoint and reject
+   malformed, expired, unknown, or mismatched proofs. Require the returned
+   Matrix user ID's localpart to match the Basic Auth username and its server
+   name to match both the payload and configured Matrix homeserver. Do not
+   accept a caller-selected homeserver URL or use the proof as an authorization
    decision.
 4. **Use the actor's validated proof for personal calendars.** For personal
    widget access, the gateway passes the same request-scoped OpenID proof it
    has validated for the actor, using ADR009's tagged payload and the actor's
    Matrix localpart. The adapter verifies the proof subject independently.
    Do not mint a different user's proof or infer a user from a room event.
-5. **Use a dedicated appservice-owned principal for room calendars.** For a
+5. **Use a dedicated appservice-owned principal for room calendars under M6.** For a
    room-target operation, the gateway authenticates the widget actor with its
    validated OpenID proof or accepts the bot actor only from an authenticated
    homeserver event. It then checks current joined membership,
@@ -100,6 +100,8 @@ canonical calendar store.
    appservice Matrix ID. The room actor's proof is never presented as the
    CalDAV principal, and the appservice proof never substitutes for actor
    authorization.
+   Implement and validate this room-principal exchange under M6 issue #7, not
+   as part of M2's #48/#45 personal delegation contract.
 6. **Keep proofs transient.** The gateway and adapter hold issued OpenID
    proofs only for the authorized operation. Do not cache, persist, return to
    the widget, place in the reminder database, or log them. Do not log Basic
@@ -107,7 +109,8 @@ canonical calendar store.
    query strings, or full iCalendar bodies. The appservice token is a
    deployment secret: keep it out of the repository, database, browser,
    Matrix events, and logs. Never ask for, store, derive, or proxy a user's
-   Matrix password in gateway or room-target flows.
+   Matrix password in the gateway or owned Radicale backend. Any future
+   Radicale-native credential mode needs its own ADR.
 7. **Treat `owner_only` as whole-home access.** Radicale grants the appservice
    principal access to its entire home. Only app-owned room calendars may live
    there. The gateway must resolve and authorize the exact ADR015 binding
@@ -128,29 +131,32 @@ canonical calendar store.
    the homeserver ingress. Before room access is enabled, a contract check
    must use a sentinel proof and confirm that it appears in none of the
    gateway, Radicale, Synapse, or Traefik logs.
-9. **Keep access disabled until the contracts pass.** Issue #48 is now
-   in-repository work to implement the module, image, and dual-mode tests.
-   Issue #45 remains the real-Radicale gateway contract for both the personal
-   actor proof and the authorized appservice proof, including denial before
-   downstream I/O. Room-target access remains disabled until #48 and #45 pass,
-   the ADR014/ADR015 checks and cross-room isolation are validated, and the
-   operator's custom-image `/data` replacement path is verified.
+9. **Keep access disabled until the contracts pass.** This decision assigns
+   the in-repository module and image to #48 for personal actor OpenID
+   delegation, but the current issue acceptance still reflects the prior
+   external-plugin/Matrix-password scope and must be updated before
+   implementation. Issue #45 remains the M2 real-Radicale contract for
+   same-user calendar enumeration and denial of non-members or failed
+   authorization lookups before downstream I/O. M6 issue #7 owns the
+   appservice-principal proof exchange and cross-room isolation acceptance.
+   Room-target access remains disabled until #48/#45 and #7 pass, the
+   ADR014/ADR015 authorization gates pass, and the operator's custom-image
+   `/data` replacement path is verified.
 
 ## Alternatives considered
 
-### Wait for or extend `radicale-auth-matrix`
+### Include a Matrix-password auth backend for conventional clients
 
-This leaves the work dependent on an external release and does not resolve the
-repository's code-location requirement. The project will not open changes in
-that repository without separate authorization. The owned clean-room module
-keeps the same Radicale extension boundary without taking external source.
+This would make the owned service proxy Matrix passwords and violate the
+repository boundary. The pre-alpha intentionally defers Matrix-password
+CalDAV compatibility; no external auth package is included or invoked.
 
 ### Use Radicale's built-in OAuth2 or remote-user backends alone
 
 The audited OAuth2 implementation relays a username/password grant. The
 remote-user backend trusts a proxy-provided user and turns off Radicale's own
-authentication. Neither alone supplies both explicit credential modes while
-preserving conventional Matrix-password clients.
+authentication. Neither is selected; the owned backend verifies only the
+tagged OpenID proof.
 
 ### Use Radicale collection-sharing tokens
 
@@ -171,11 +177,12 @@ supported Auth interface and does not add a new proxy identity protocol.
 - The project owns the OpenID adapter and image release lifecycle and must
   maintain the Radicale 3.8 compatibility contract as Radicale versions
   change.
-- If the image includes `radicale-auth-matrix` for password compatibility, the
-  project must preserve that package's LGPL-3.0 notices and source obligations
-  when distributing the image.
-- Existing conventional CalDAV clients retain their Matrix-password login;
-  the widget gateway and room-target code use OpenID proofs only.
+- The owned backend rejects untagged credentials. Conventional CalDAV clients
+  that rely on Matrix-password login are intentionally unsupported and
+  deferred in this pre-alpha. A separate Radicale-native credential mode would
+  require a future ADR.
+- The widget gateway and owned Radicale backend use tagged OpenID proofs only;
+  no external auth package or dual-backend composition is part of the image.
 - The etke-managed production path is not verified by this decision. If the
   actual host cannot replace the Radicale image while preserving its
   configuration, network, service lifecycle, and `/data` volume, room access
@@ -192,9 +199,6 @@ supported Auth interface and does not add a new proxy identity protocol.
 
 - [Radicale v3 authentication and plugin interfaces](https://radicale.org/v3.html#auth)
   and [collection sharing](https://radicale.org/v3.html#sharing).
-- The pinned [`radicale-auth-matrix` source](https://github.com/etkecc/radicale-auth-matrix/tree/0f07e8ba32cf595e744403f70dd4ff81db3886b6)
-  and its LGPL-3.0 license govern that separate package if it remains in the
-  image.
 - Matrix Client-Server API for
   [requesting an OpenID token](https://spec.matrix.org/v1.16/client-server-api/#post_matrixclientv3useruseridopenidrequest_token)
   and the Application Service API's
@@ -216,16 +220,16 @@ supported Auth interface and does not add a new proxy identity protocol.
 
 - The custom image pins Radicale 3.8.0.0 and has a reproducible build; the
   adapter is clean-room code and no upstream plugin source is copied.
-- Tests prove legacy Matrix-password CalDAV clients still authenticate and
-  that personal OpenID proofs are accepted only for their exact Matrix
-  subject.
-- Tests prove appservice OpenID proofs identify only the configured
-  appservice MXID; malformed, expired, unknown, wrong-user, and wrong-server
-  proofs fail closed.
-- Gateway tests prove room membership, power, and exact binding are checked
-  before the appservice OpenID request and before every CalDAV operation.
-- Real Radicale tests prove the same `/data` collection store remains visible
-  after replacing the image and that room-bound operations cannot select a
+- Tests prove that tagged personal OpenID proofs are accepted only for their
+  exact Matrix subject and that untagged/other password credentials are
+  rejected before any homeserver request.
+- M2 issue #45 tests same-user personal calendar enumeration and denial of
+  non-members or failed authorization lookups before CalDAV I/O.
+- M6 issue #7 tests that actor, membership, power, and exact binding checks
+  precede appservice proof minting and CalDAV operations, and validates
+  cross-room isolation under the appservice principal.
+- M6 issue #7 real-Radicale tests prove the same `/data` collection store
+  remains visible after image replacement and room operations cannot select a
   different room's collection.
 - A sentinel-token log test covers gateway, Radicale, Synapse, and Traefik.
 - The actual etke host's image override, `/data` persistence, network, config,
