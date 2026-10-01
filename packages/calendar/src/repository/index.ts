@@ -24,6 +24,11 @@ export type {
 } from './calendarAuthorization';
 export { CalendarRepositoryError } from './calendarRepository';
 export type {
+  CalendarEventDiagnosticsRepository,
+  CalendarEventListDiagnostic,
+  CalendarEventListDiagnosticReason,
+  CalendarEventListResult,
+  CalendarEventProjectionDiagnosticSummary,
   CalendarRepository,
   CalendarRepositoryErrorCode,
 } from './calendarRepository';

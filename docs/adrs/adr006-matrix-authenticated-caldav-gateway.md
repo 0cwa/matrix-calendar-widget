@@ -3,9 +3,20 @@
 - Status: Accepted
 - Date: 2026-09-22
 
+> **Implementation note (ADR024, 2026-10-01):** The following plugin sentence
+> records the development deployment's earlier behavior. ADR024 selects a
+> project-owned Radicale backend that accepts only explicitly tagged,
+> short-lived OpenID credentials and rejects untagged credentials; ordinary
+> Matrix-password CalDAV login is unsupported and deferred in this pre-alpha.
+> The selected backend and image are not implemented or deployed yet.
+
 ## Context
 
-The Radicale Matrix auth plugin authenticates conventional CalDAV clients using Matrix credentials. A Matrix widget does not and should not receive the user's Matrix password. Direct browser-to-Radicale access would also complicate CORS, credential storage, authorization, reminders, and command fallback.
+The development Radicale setup at the time of this ADR used a Matrix auth
+plugin to authenticate conventional CalDAV clients with Matrix credentials. A
+Matrix widget does not and should not receive the user's Matrix password.
+Direct browser-to-Radicale access would also complicate CORS, credential
+storage, authorization, reminders, and command fallback.
 
 ## Decision
 

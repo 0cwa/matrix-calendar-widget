@@ -28,11 +28,16 @@ import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from './CalendarRepositoryProvider';
 import {
+  useCreateCalendar,
   useCreateCalendarEvent,
+  useDeleteCalendar,
   useDeleteCalendarEvent,
+  useRenameCalendar,
+  useUpdateCalendarColor,
+  useUpdateCalendarDescription,
   useUpdateCalendarEvent,
 } from './useCalendarMutations';
-import { useCalendarEvents } from './useCalendarQueries';
+import { useCalendarEvents, useCalendars } from './useCalendarQueries';
 
 const calendar: Calendar = {
   id: 'team',
@@ -51,10 +56,12 @@ const input: CalendarEventInput = {
   timing: {
     type: 'timed',
     start: {
+      type: 'zoned',
       local: '2026-09-23T09:00:00',
       timezone: 'Europe/Stockholm',
     },
     end: {
+      type: 'zoned',
       local: '2026-09-23T10:00:00',
       timezone: 'Europe/Stockholm',
     },
@@ -78,6 +85,169 @@ function createWrapper(repository: CalendarRepository) {
 }
 
 describe('calendar repository mutation hooks', () => {
+  it('refreshes active calendar queries after create', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      calendarIdFactory: () => 'project-alpha',
+    });
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        calendars: useCalendars(),
+        createCalendar: useCreateCalendar(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.calendars.loading);
+    expect(result.current.calendars.data).toEqual([calendar]);
+
+    await result.current.createCalendar('Project Alpha');
+
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([
+        calendar,
+        { id: 'project-alpha', name: 'Project Alpha' },
+      ]);
+    });
+  });
+
+  it('refreshes active calendar queries after rename', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+    });
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        calendars: useCalendars(),
+        renameCalendar: useRenameCalendar(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.calendars.loading);
+
+    await result.current.renameCalendar('team', 'Product calendar');
+
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([
+        { ...calendar, name: 'Product calendar' },
+      ]);
+    });
+  });
+
+  it('refreshes active calendar queries after updating the description', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [{ ...calendar, description: 'Old description' }],
+    });
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        calendars: useCalendars(),
+        updateDescription: useUpdateCalendarDescription(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.calendars.loading);
+    await result.current.updateDescription('team', 'New description');
+
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([
+        { ...calendar, description: 'New description' },
+      ]);
+    });
+  });
+
+  it('refreshes active calendar queries after updating the color', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [{ ...calendar, color: '#123456', readOnly: false }],
+    });
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        calendars: useCalendars(),
+        updateColor: useUpdateCalendarColor(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.calendars.loading);
+    await result.current.updateColor('team', '#ABCDEF');
+
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([
+        { ...calendar, color: '#ABCDEF', readOnly: false },
+      ]);
+    });
+  });
+
+  it('refreshes active calendar queries after delete', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [event],
+    });
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        calendars: useCalendars(),
+        deleteCalendar: useDeleteCalendar(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.calendars.loading);
+    expect(result.current.calendars.data).toEqual([calendar]);
+
+    await result.current.deleteCalendar('team');
+
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([]);
+    });
+  });
+
+  it('refreshes calendar and event queries when a delete fails after changing server state', async () => {
+    let calendars = [calendar];
+    let events = [event];
+    const repository: CalendarRepository = {
+      listCalendars: vi.fn().mockImplementation(async () => calendars),
+      createCalendar: vi.fn().mockResolvedValue(calendar),
+      renameCalendar: vi.fn().mockResolvedValue(undefined),
+      updateCalendarDescription: vi.fn().mockResolvedValue(undefined),
+      updateCalendarColor: vi.fn().mockResolvedValue(undefined),
+      deleteCalendar: vi.fn().mockImplementation(async () => {
+        calendars = [];
+        events = [];
+        throw new Error('partial delete');
+      }),
+      listEvents: vi.fn().mockImplementation(async () => events),
+      getEvent: vi.fn().mockResolvedValue(event),
+      createEvent: vi.fn().mockResolvedValue(event),
+      updateEvent: vi.fn().mockResolvedValue(event),
+      deleteEvent: vi.fn().mockResolvedValue(undefined),
+    };
+    const { result, waitForValueToChange } = renderHook(
+      () => ({
+        calendars: useCalendars(),
+        events: useCalendarEvents(['team'], range),
+        deleteCalendar: useDeleteCalendar(),
+      }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(
+      () => result.current.calendars.loading || result.current.events.loading,
+    );
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([calendar]);
+      expect(result.current.events.data).toEqual([event]);
+    });
+
+    await expect(result.current.deleteCalendar('team')).rejects.toMatchObject({
+      message: 'partial delete',
+    });
+
+    await waitFor(() => {
+      expect(result.current.calendars.data).toEqual([]);
+      expect(result.current.events.data).toEqual([]);
+    });
+  });
+
   it('refreshes active event queries after create', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
@@ -151,6 +321,11 @@ describe('calendar repository mutation hooks', () => {
     const listEvents = vi.fn().mockResolvedValue([]);
     const repository: CalendarRepository = {
       listCalendars: vi.fn().mockResolvedValue([calendar]),
+      createCalendar: vi.fn().mockResolvedValue(calendar),
+      renameCalendar: vi.fn().mockResolvedValue(undefined),
+      updateCalendarDescription: vi.fn().mockResolvedValue(undefined),
+      updateCalendarColor: vi.fn().mockResolvedValue(undefined),
+      deleteCalendar: vi.fn().mockResolvedValue(undefined),
       listEvents,
       getEvent: vi.fn().mockResolvedValue(event),
       createEvent: vi.fn().mockRejectedValue(new Error('write failed')),

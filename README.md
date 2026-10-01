@@ -2,7 +2,7 @@
 
 > **Status: pre-alpha.** This repository is a hard fork of Nordeck's NeoDateFix / `matrix-meetings` project and is being converted into a Matrix-first team calendar backed by CalDAV/Radicale.
 
-The primary product is a responsive Matrix widget for Element and other widget-capable clients. It should let teams manage shared calendars, events, recurrence, attendees, alarms, and calendar collections without falling back to Radicale's generic collection UI. A Matrix bot provides notifications and a command fallback for clients that cannot render widgets.
+The primary product is a responsive Matrix widget for Element and other widget-capable clients. It should let teams manage shared calendars, events, recurrence, attendees, alarms, and calendar collections without falling back to Radicale's generic collection UI. A Matrix bot is the intended fallback for commands and reminders when widget support is unavailable.
 
 ## Product principles
 
@@ -17,11 +17,15 @@ The primary product is a responsive Matrix widget for Element and other widget-c
 
 ## Current state
 
-M0 fork hygiene is merged. On `main`, the calendar domain and repository seam, repository-backed calendar/list read paths, mutation hooks, Matrix-authenticated calendar gateway context, Matrix room authorization policy, and the Radicale OpenID delegation contract are implemented.
+M0 fork hygiene, M1's calendar-domain seam, and M3's VEVENT create/edit/delete flow are complete on `main`, including ETag conflict recovery and real Radicale interoperability coverage.
 
-The primary repository-backed event create/edit/delete UI is implemented in PR #40 and is the remaining M1 slice. M2 is active: PR #52 retains validated OpenID credentials request-locally and PR #53 adds the CalDAV discovery client. The end-to-end Radicale path still needs the credential bridge (#55), configured discovery endpoint (#56), OpenID-capable `radicale-auth-matrix` support (#48), and real-container contract tests (#45).
+The in-repository M2 identity and CalDAV discovery spine is implemented. Issue #48 now tracks ADR024's clean-room Radicale 3.8.0.0 OpenID-only auth module and pinned project-owned image. The owned backend rejects untagged credentials; conventional Matrix-password CalDAV login is intentionally unsupported and deferred in this pre-alpha. This change adds the adapter, image, and direct Radicale OpenID contract coverage. The M2 real-Radicale #45 gateway contract remains open. The actual etke-host image override and `/data` replacement path also remain unverified.
 
-Inherited NeoDateFix meeting-room paths remain only where migration has not yet reached them. Historical changelogs, NOTICE files, and upstream provenance intentionally retain NeoDateFix/Nordeck names. See [docs/STATUS.md](./docs/STATUS.md) for the current execution order and active PR blockers.
+M4 on `main` includes calendar creation, visibility, rename, deletion, description and color editing, mixed-collection safeguards, and manager-only CalDAV diagnostics. Collection-timezone editing remains deferred. M7 currently provides localized `!calendar help` and directs capable clients to the widget; event queries and data-changing commands remain open.
+
+[ADR010](./docs/adrs/adr010-mixed-calendar-principal-model.md) keeps personal widget calendars user-scoped and separates them from room-owned bot calendars under an application principal. M2 #48/#45 covers personal actor OpenID delegation, same-user enumeration, and fail-closed denial. ADR024 defines a separate appservice OpenID proof for the room principal; M6 issue #7 owns its authorized issuance and cross-room isolation acceptance. The personal actor proof is never used as the room calendar's CalDAV identity. Room-owned reads and writes remain blocked until M2 #48/#45 and M6 issue #7 pass and the operator's image/data path are validated. M5 remains active; M6 reminder storage primitives do not enable scheduling or delivery; and M8 build checks and deployment documentation do not verify an operator-hosted deployment.
+
+Inherited NeoDateFix meeting-room paths remain only where migration has not yet reached them. Historical changelogs, NOTICE files, and upstream provenance intentionally retain NeoDateFix/Nordeck names. See [docs/STATUS.md](./docs/STATUS.md) for transient execution order and active PR blockers.
 
 ## Start here
 

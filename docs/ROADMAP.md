@@ -22,11 +22,12 @@ Collection management is part of the product, but DAV vocabulary should stay mos
 
 ## Near-term priorities
 
-1. Land PR #40 to finish the repository-backed M1 create/edit/delete path.
-2. Refresh and land PR #52 (request-scoped OpenID credential) and PR #53 (CalDAV discovery client).
-3. Implement #55 and #56 to connect validated Matrix identity, authorization, delegated credentials, and configured Radicale discovery.
-4. Complete #48's OpenID-capable `radicale-auth-matrix` path and #45's real-container discovery contract tests.
-5. Start M3's real VEVENT CRUD vertical slice only after the authenticated discovery spine is proven.
+1. Keep M4 collection-timezone editing deferred until a compatible CalDAV behavior is established. Calendar creation, visibility, rename, deletion, description/color editing, mixed-collection safeguards, and manager-only diagnostics are already on `main`.
+2. Continue bounded M5 recurrence and iCalendar slices with focused round-trip and timezone regressions. The pinned Radicale server ignores `CALDAV:timezone`; do not send that unsupported query element.
+3. Implement the in-repository clean-room Radicale 3.8.0.0 OpenID-only auth module and pinned project-owned image for #48, then validate same-user personal calendar enumeration and nonmember/fail-closed denial in #45. Matrix-password CalDAV login is deferred; the owned backend rejects untagged credentials.
+4. Complete M6 issue #7's appservice-principal proof exchange and actor, membership, power, exact binding, and cross-room isolation checks. Keep room-owned reads and writes disabled until those pass and the etke image override preserves the existing `/data` store.
+5. M7 has localized `!calendar help` and widget guidance. Add event queries and data-changing commands only after the M6 room-owned calendar authorization path is ready.
+6. Treat Docker build smoke and deployment documentation as groundwork, not deployment verification. Verify the operator's host-specific service and database contract before claiming an etke-managed deployment.
 
 See [STATUS.md](./STATUS.md) for transient PR/CI details.
 

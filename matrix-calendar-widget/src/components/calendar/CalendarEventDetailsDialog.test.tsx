@@ -17,14 +17,19 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarRepositoryError,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Settings } from 'luxon';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from '../../calendar';
-import { CalendarEventDetailsDialog } from './CalendarEventDetailsDialog';
+import {
+  CalendarEventDetailsDialog,
+  formatCalendarEventTime,
+} from './CalendarEventDetailsDialog';
 
 const calendar: Calendar = {
   id: 'team',
@@ -40,12 +45,46 @@ const event: CalendarEvent = {
   timing: {
     type: 'timed',
     start: {
+      type: 'zoned',
       local: '2026-09-23T09:00',
       timezone: 'Europe/Stockholm',
     },
     end: {
+      type: 'zoned',
       local: '2026-09-23T10:00',
       timezone: 'Europe/Stockholm',
+    },
+  },
+};
+
+const floatingEvent: CalendarEvent = {
+  id: 'floating',
+  calendarId: 'team',
+  uid: 'floating@example.test',
+  title: 'Floating planning',
+  timing: {
+    type: 'timed',
+    start: { type: 'floating', local: '2026-09-23T09:00:00' },
+    end: { type: 'floating', local: '2026-09-23T10:00:00' },
+  },
+};
+
+const newYorkEvent: CalendarEvent = {
+  ...event,
+  id: 'new-york',
+  uid: 'new-york@example.test',
+  title: 'New York planning',
+  timing: {
+    type: 'timed',
+    start: {
+      type: 'zoned',
+      local: '2026-09-23T09:00:00',
+      timezone: 'America/New_York',
+    },
+    end: {
+      type: 'zoned',
+      local: '2026-09-23T10:00:00',
+      timezone: 'America/New_York',
     },
   },
 };
@@ -61,6 +100,35 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventDetailsDialog />', () => {
+  it('formats floating detail times in the viewer local zone', () => {
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'Europe/Stockholm';
+
+    try {
+      expect(
+        formatCalendarEventTime(
+          floatingEvent,
+          'en',
+          'All day',
+          'Europe/Stockholm',
+        ).replace(/\u202f/g, ' '),
+      ).toBe('September 23, 2026 · 9:00 AM–10:00 AM');
+    } finally {
+      Settings.defaultZone = originalZone;
+    }
+  });
+
+  it('formats named-zone detail times in the viewer local zone', () => {
+    expect(
+      formatCalendarEventTime(
+        newYorkEvent,
+        'en',
+        'All day',
+        'Europe/Stockholm',
+      ).replace(/\u202f/g, ' '),
+    ).toBe('September 23, 2026 · 3:00 PM–4:00 PM');
+  });
+
   it('deletes an event after confirmation', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
@@ -90,6 +158,52 @@ describe('<CalendarEventDetailsDialog />', () => {
         code: 'event-not-found',
       },
     );
+  });
+
+  it('reloads a stale event and allows delete retry after a conflict', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [event],
+    });
+    const latestEvent: CalendarEvent = {
+      ...event,
+      title: 'Planning changed elsewhere',
+    };
+    vi.spyOn(repository, 'deleteEvent').mockRejectedValueOnce(
+      new CalendarRepositoryError(
+        'event-conflict',
+        'The event changed on the server',
+      ),
+    );
+    vi.spyOn(repository, 'getEvent').mockResolvedValueOnce(latestEvent);
+    const onClose = vi.fn();
+
+    render(<CalendarEventDetailsDialog event={event} onClose={onClose} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    const deleteButton = screen.getByRole('button', { name: 'Delete' });
+    await waitFor(() => expect(deleteButton).toBeEnabled());
+    await userEvent.click(deleteButton);
+
+    const confirmDialog = screen.getByRole('dialog', {
+      name: 'Delete event',
+    });
+    const confirmDelete = within(confirmDialog).getByRole('button', {
+      name: 'Delete',
+    });
+    await userEvent.click(confirmDelete);
+
+    expect(
+      await within(confirmDialog).findByText(
+        'This event changed elsewhere. The latest version was reloaded; review it and retry if you still want to delete it.',
+      ),
+    ).toBeInTheDocument();
+
+    await userEvent.click(confirmDelete);
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+
+    expect(repository.deleteEvent).toHaveBeenCalledTimes(2);
   });
 
   it('disables edit and delete for a read-only calendar', async () => {

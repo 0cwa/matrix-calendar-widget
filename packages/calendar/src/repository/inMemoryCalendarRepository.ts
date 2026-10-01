@@ -23,10 +23,19 @@ import {
   CalendarEventId,
   CalendarEventInput,
   CalendarEventPatch,
+  CalendarEventRecurrenceDate,
+  CalendarEventRecurrenceOverride,
+  CalendarEventRecurrenceTiming,
   CalendarId,
   CalendarTimeRange,
   TimedCalendarEventTiming,
+  isCalendarEventAlarmRemoval,
 } from '../model';
+import {
+  calendarEventRecurrenceIdentity,
+  isSupportedCalendarEventOccurrenceExclusion,
+} from '../utils/calendarEventOccurrenceProjection';
+import { calendarEventTimedDateTimeToDateTime } from '../utils/calendarEventTimedDateTime';
 import {
   CalendarRepository,
   CalendarRepositoryError,
@@ -35,6 +44,7 @@ import {
 export type InMemoryCalendarRepositoryOptions = {
   calendars?: Calendar[];
   events?: CalendarEvent[];
+  calendarIdFactory?: (sequence: number) => CalendarId;
   idFactory?: (sequence: number) => CalendarEventId;
 };
 
@@ -44,10 +54,15 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     CalendarId,
     Map<CalendarEventId, CalendarEvent>
   >();
+  private readonly calendarIdFactory: (sequence: number) => CalendarId;
   private readonly idFactory: (sequence: number) => CalendarEventId;
+  private calendarSequence = 1;
   private sequence = 1;
 
   constructor(options: InMemoryCalendarRepositoryOptions = {}) {
+    this.calendarIdFactory =
+      options.calendarIdFactory ??
+      ((sequence) => `memory-calendar-${sequence}`);
     this.idFactory =
       options.idFactory ?? ((sequence) => `memory-event-${sequence}`);
 
@@ -72,6 +87,94 @@ export class InMemoryCalendarRepository implements CalendarRepository {
 
   async listCalendars(): Promise<Calendar[]> {
     return [...this.calendars.values()].map(cloneCalendar);
+  }
+
+  async createCalendar(name: string): Promise<Calendar> {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      throw new CalendarRepositoryError(
+        'invalid-calendar-name',
+        'Calendar name must not be empty',
+      );
+    }
+
+    let id: CalendarId;
+    do {
+      id = this.calendarIdFactory(this.calendarSequence++);
+    } while (this.calendars.has(id));
+
+    const calendar: Calendar = {
+      id,
+      name: trimmedName,
+    };
+    this.calendars.set(id, calendar);
+    this.events.set(id, new Map());
+    return cloneCalendar(calendar);
+  }
+
+  async renameCalendar(calendarId: CalendarId, name: string): Promise<void> {
+    const calendar = this.getWritableCalendar(calendarId);
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      throw new CalendarRepositoryError(
+        'invalid-calendar-name',
+        'Calendar name must not be empty',
+      );
+    }
+
+    this.calendars.set(calendarId, {
+      ...calendar,
+      name: trimmedName,
+    });
+  }
+
+  async updateCalendarDescription(
+    calendarId: CalendarId,
+    description: string,
+  ): Promise<void> {
+    const calendar = this.getWritableCalendar(calendarId);
+    const updated = { ...calendar };
+
+    if (description.length === 0) {
+      delete updated.description;
+    } else {
+      updated.description = description;
+    }
+
+    this.calendars.set(calendarId, updated);
+  }
+
+  async updateCalendarColor(
+    calendarId: CalendarId,
+    color: string,
+  ): Promise<void> {
+    const calendar = this.getCalendar(calendarId);
+    if (calendar.readOnly !== false) {
+      throw new CalendarRepositoryError(
+        'calendar-read-only',
+        `Calendar ${calendarId} is not explicitly writable`,
+      );
+    }
+    if (color !== '' && !/^#[\da-fA-F]{6}$/.test(color)) {
+      throw new CalendarRepositoryError(
+        'invalid-calendar-color',
+        'Calendar color must be a six-digit hex color',
+      );
+    }
+
+    const updated = { ...calendar };
+    if (color === '') {
+      delete updated.color;
+    } else {
+      updated.color = color;
+    }
+    this.calendars.set(calendarId, updated);
+  }
+
+  async deleteCalendar(calendarId: CalendarId): Promise<void> {
+    this.getWritableCalendar(calendarId);
+    this.calendars.delete(calendarId);
+    this.events.delete(calendarId);
   }
 
   async listEvents(
@@ -128,14 +231,34 @@ export class InMemoryCalendarRepository implements CalendarRepository {
   ): Promise<CalendarEvent> {
     this.getWritableCalendar(calendarId);
     const current = this.getStoredEvent(calendarId, eventId);
+    if (
+      current.unsupportedAlarm &&
+      Object.prototype.hasOwnProperty.call(patch, 'alarm')
+    ) {
+      throw new CalendarRepositoryError(
+        'unsupported-patch',
+        'Alarm edits are not supported for this event',
+      );
+    }
+    const clonedPatch = cloneCalendarEventPatch(patch);
+    const { alarm: alarmPatch, ...mutablePatch } = clonedPatch;
+    const recurrence = Object.prototype.hasOwnProperty.call(patch, 'recurrence')
+      ? applyRecurrenceWrite(current, clonedPatch.recurrence)
+      : current.recurrence;
 
     const updated: CalendarEvent = {
       ...current,
-      ...cloneCalendarEventPatch(patch),
+      ...mutablePatch,
       id: current.id,
       calendarId: current.calendarId,
       uid: current.uid,
+      recurrence,
     };
+    if (isCalendarEventAlarmRemoval(alarmPatch)) {
+      delete updated.alarm;
+    } else if (alarmPatch) {
+      updated.alarm = alarmPatch;
+    }
 
     this.events.get(calendarId)!.set(eventId, updated);
     return cloneCalendarEvent(updated);
@@ -263,25 +386,61 @@ function eventInterval(event: CalendarEvent, calendar: Calendar): ParsedRange {
 
 function timedInterval(timing: TimedCalendarEventTiming): ParsedRange {
   return {
-    start: DateTime.fromISO(timing.start.local, {
-      zone: timing.start.timezone,
-    }).toMillis(),
-    end: DateTime.fromISO(timing.end.local, {
-      zone: timing.end.timezone,
-    }).toMillis(),
+    start: calendarEventTimedDateTimeToDateTime(timing.start).toMillis(),
+    end: calendarEventTimedDateTimeToDateTime(timing.end).toMillis(),
   };
 }
 
 function cloneCalendar(calendar: Calendar): Calendar {
-  return { ...calendar };
+  return {
+    ...calendar,
+    supportedComponents: calendar.supportedComponents
+      ? [...calendar.supportedComponents]
+      : undefined,
+  };
 }
 
 function cloneCalendarEventDateTime(
   value: CalendarEventDateTime,
 ): CalendarEventDateTime {
-  return value.type === 'date'
-    ? { ...value }
-    : { type: 'date-time', value: { ...value.value } };
+  switch (value.type) {
+    case 'date':
+    case 'floating-date-time':
+      return { ...value };
+    case 'date-time':
+      return { type: 'date-time', value: { ...value.value } };
+  }
+}
+
+function cloneRecurrenceDate(
+  value: CalendarEventRecurrenceDate,
+): CalendarEventRecurrenceDate {
+  if (value.type !== 'period') {
+    return cloneCalendarEventDateTime(value);
+  }
+
+  return {
+    type: 'period',
+    timing: cloneRecurrenceTiming(value.timing),
+  };
+}
+
+function cloneRecurrenceTiming(
+  timing: CalendarEventRecurrenceTiming,
+): CalendarEventRecurrenceTiming {
+  if (timing.type === 'end') {
+    return {
+      type: 'end',
+      start: cloneCalendarEventDateTime(timing.start),
+      end: cloneCalendarEventDateTime(timing.end),
+    };
+  }
+
+  return {
+    type: 'duration',
+    start: cloneCalendarEventDateTime(timing.start),
+    duration: { ...timing.duration },
+  };
 }
 
 function cloneTimedTiming(
@@ -308,6 +467,9 @@ function cloneCalendarEvent(event: CalendarEvent): CalendarEvent {
         ? cloneTimedTiming(event.timing)
         : cloneAllDayTiming(event.timing),
     categories: event.categories ? [...event.categories] : undefined,
+    alarm: event.alarm
+      ? { ...event.alarm, trigger: { ...event.alarm.trigger } }
+      : undefined,
     recurrence: cloneRecurrence(event.recurrence),
   };
 }
@@ -322,7 +484,10 @@ function cloneCalendarEventInput(
         ? cloneTimedTiming(input.timing)
         : cloneAllDayTiming(input.timing),
     categories: input.categories ? [...input.categories] : undefined,
-    recurrence: cloneRecurrence(input.recurrence),
+    alarm: input.alarm
+      ? { ...input.alarm, trigger: { ...input.alarm.trigger } }
+      : undefined,
+    recurrence: input.recurrence ? { ...input.recurrence } : undefined,
   };
 }
 
@@ -332,13 +497,26 @@ function cloneRecurrence(
   return recurrence
     ? {
         ...recurrence,
-        rdates: recurrence.rdates?.map(cloneCalendarEventDateTime),
+        rdates: recurrence.rdates?.map(cloneRecurrenceDate),
         exdates: recurrence.exdates?.map(cloneCalendarEventDateTime),
         recurrenceId: recurrence.recurrenceId
           ? cloneCalendarEventDateTime(recurrence.recurrenceId)
           : undefined,
+        overrides: recurrence.overrides?.map(cloneRecurrenceOverride),
       }
     : undefined;
+}
+
+function cloneRecurrenceOverride(
+  override: CalendarEventRecurrenceOverride,
+): CalendarEventRecurrenceOverride {
+  return {
+    ...override,
+    recurrenceId: cloneCalendarEventDateTime(override.recurrenceId),
+    timing: override.timing
+      ? cloneRecurrenceTiming(override.timing)
+      : undefined,
+  };
 }
 
 function cloneCalendarEventPatch(
@@ -357,9 +535,106 @@ function cloneCalendarEventPatch(
     cloned.categories = [...patch.categories];
   }
 
+  if (patch.alarm) {
+    cloned.alarm = isCalendarEventAlarmRemoval(patch.alarm)
+      ? { ...patch.alarm }
+      : {
+          ...patch.alarm,
+          trigger: { ...patch.alarm.trigger },
+        };
+  }
+
   if (patch.recurrence) {
-    cloned.recurrence = cloneRecurrence(patch.recurrence);
+    cloned.recurrence =
+      'exdate' in patch.recurrence
+        ? {
+            exdate: {
+              ...patch.recurrence.exdate,
+              recurrenceId: cloneCalendarEventDateTime(
+                patch.recurrence.exdate.recurrenceId,
+              ),
+            },
+          }
+        : 'rdate' in patch.recurrence
+          ? {
+              rdate: {
+                ...patch.recurrence.rdate,
+                value: cloneCalendarEventDateTime(patch.recurrence.rdate.value),
+              },
+            }
+          : { ...patch.recurrence };
   }
 
   return cloned;
+}
+
+function applyRecurrenceWrite(
+  currentEvent: CalendarEvent,
+  write: CalendarEventPatch['recurrence'],
+): CalendarEvent['recurrence'] {
+  const current = currentEvent.recurrence;
+  if (!write || (!('exdate' in write) && !('rdate' in write))) {
+    return write?.rrule ? { rrule: write.rrule } : undefined;
+  }
+
+  if ('rdate' in write) {
+    const identity = calendarEventRecurrenceIdentity(write.rdate.value);
+    const rdates = current?.rdates ?? [];
+    if (write.rdate.action === 'add') {
+      const recurrenceWithoutExdates = current
+        ? { ...currentEvent, recurrence: { ...current, exdates: [] } }
+        : currentEvent;
+      if (
+        isSupportedCalendarEventOccurrenceExclusion(
+          recurrenceWithoutExdates,
+          write.rdate.value,
+        )
+      ) {
+        return current;
+      }
+
+      const next: NonNullable<CalendarEvent['recurrence']> = {
+        ...current,
+        rdates: [...rdates, write.rdate.value],
+      };
+      return next;
+    }
+
+    const nextRdates = rdates.filter(
+      (value) =>
+        value.type === 'period' ||
+        calendarEventRecurrenceIdentity(value) !== identity,
+    );
+    const next: NonNullable<CalendarEvent['recurrence']> = {
+      ...current,
+      rdates: nextRdates,
+    };
+    if (nextRdates.length === 0) {
+      delete next.rdates;
+    }
+    return Object.keys(next).length > 0 ? next : undefined;
+  }
+
+  const identity = calendarEventRecurrenceIdentity(write.exdate.recurrenceId);
+  const exdates = current?.exdates ?? [];
+  const nextExdates =
+    write.exdate.action === 'add'
+      ? exdates.some(
+          (value) => calendarEventRecurrenceIdentity(value) === identity,
+        )
+        ? exdates
+        : [...exdates, write.exdate.recurrenceId]
+      : exdates.filter(
+          (value) => calendarEventRecurrenceIdentity(value) !== identity,
+        );
+  const next: NonNullable<CalendarEvent['recurrence']> = {
+    ...current,
+    exdates: nextExdates,
+  };
+
+  if (next.exdates?.length === 0) {
+    delete next.exdates;
+  }
+
+  return Object.keys(next).length > 0 ? next : undefined;
 }

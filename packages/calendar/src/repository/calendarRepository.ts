@@ -23,12 +23,47 @@ import {
   CalendarId,
   CalendarTimeRange,
 } from '../model';
+import type { CalendarEventProjectionDiagnosticReason } from '../utils/calendarEventOccurrenceProjection';
+
+export type CalendarEventListDiagnosticReason =
+  | CalendarEventProjectionDiagnosticReason
+  | 'range-this-and-future';
+
+/** A count-only warning that does not identify or expose a source event. */
+export type CalendarEventProjectionDiagnosticSummary = {
+  reason: CalendarEventListDiagnosticReason;
+  count: number;
+};
+
+export type CalendarEventListDiagnostic =
+  CalendarEventProjectionDiagnosticSummary & {
+    calendarId: CalendarId;
+  };
+
+export type CalendarEventListResult = {
+  events: CalendarEvent[];
+  diagnostics: CalendarEventListDiagnostic[];
+};
+
+/** Optional repository capability for APIs that suppress opaque resources. */
+export interface CalendarEventDiagnosticsRepository {
+  listEventsWithDiagnostics(
+    calendarIds: CalendarId[],
+    range: CalendarTimeRange,
+  ): Promise<CalendarEventListResult>;
+}
 
 export type CalendarRepositoryErrorCode =
   | 'calendar-not-found'
   | 'event-not-found'
   | 'calendar-read-only'
-  | 'invalid-range';
+  | 'invalid-calendar-name'
+  | 'invalid-calendar-color'
+  | 'invalid-range'
+  | 'event-conflict'
+  | 'unsupported-patch'
+  | 'authentication-required'
+  | 'request-failed';
 
 export class CalendarRepositoryError extends Error {
   constructor(
@@ -42,6 +77,19 @@ export class CalendarRepositoryError extends Error {
 
 export interface CalendarRepository {
   listCalendars(): Promise<Calendar[]>;
+
+  createCalendar(name: string): Promise<Calendar>;
+
+  renameCalendar(calendarId: CalendarId, name: string): Promise<void>;
+
+  updateCalendarDescription(
+    calendarId: CalendarId,
+    description: string,
+  ): Promise<void>;
+
+  updateCalendarColor(calendarId: CalendarId, color: string): Promise<void>;
+
+  deleteCalendar(calendarId: CalendarId): Promise<void>;
 
   listEvents(
     calendarIds: CalendarId[],

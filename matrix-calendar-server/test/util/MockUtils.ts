@@ -40,6 +40,7 @@ export function createAppConfig(): IAppConfiguration {
     crypto_data_path: '',
     homeserver_url: '',
     radicale_url: 'https://calendar.example.com',
+    room_calendar_bindings: [],
     matrix_link_share: '',
     matrix_server_event_max_age_minutes: 0,
     auto_deletion_offset: 0,

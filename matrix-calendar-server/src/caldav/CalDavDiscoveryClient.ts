@@ -19,7 +19,9 @@ import { CalDavCredentialProvider } from './CalDavCredentialProvider';
 
 export type DiscoveredCalDavCalendar = {
   href: string;
+  rawHref?: string;
   displayName?: string;
+  description?: string;
   color?: string;
   components?: string[];
   readOnly?: boolean;
@@ -50,7 +52,16 @@ const parser = new XMLParser({
   attributeNamePrefix: '@_',
   parseTagValue: false,
   parseAttributeValue: false,
-  trimValues: true,
+  trimValues: false,
+});
+
+const namespaceAwareParser = new XMLParser({
+  ignoreAttributes: false,
+  removeNSPrefix: false,
+  attributeNamePrefix: '@_',
+  parseTagValue: false,
+  parseAttributeValue: false,
+  trimValues: false,
 });
 
 const PRINCIPAL_BODY = `<?xml version="1.0" encoding="utf-8" ?>
@@ -76,11 +87,61 @@ const CALENDARS_BODY = `<?xml version="1.0" encoding="utf-8" ?>
   <D:prop>
     <D:resourcetype/>
     <D:displayname/>
+    <C:calendar-description/>
     <D:current-user-privilege-set/>
     <C:supported-calendar-component-set/>
     <A:calendar-color/>
   </D:prop>
 </D:propfind>`;
+
+function createCalendarBody(displayName: string): string {
+  return `<?xml version="1.0" encoding="utf-8" ?>
+<C:mkcalendar xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:D="DAV:">
+  <D:set>
+    <D:prop>
+      <D:displayname>${escapeXmlText(displayName)}</D:displayname>
+      <C:supported-calendar-component-set>
+        <C:comp name="VEVENT"/>
+      </C:supported-calendar-component-set>
+    </D:prop>
+  </D:set>
+</C:mkcalendar>`;
+}
+
+function renameCalendarBody(displayName: string): string {
+  return `<?xml version="1.0" encoding="utf-8" ?>
+<D:propertyupdate xmlns:D="DAV:">
+  <D:set>
+    <D:prop>
+      <D:displayname>${escapeXmlText(displayName)}</D:displayname>
+    </D:prop>
+  </D:set>
+</D:propertyupdate>`;
+}
+
+function updateCalendarDescriptionBody(description: string): string {
+  const property =
+    description.length === 0
+      ? `<D:remove><D:prop><C:calendar-description/></D:prop></D:remove>`
+      : `<D:set><D:prop><C:calendar-description>${escapeXmlText(description)}</C:calendar-description></D:prop></D:set>`;
+
+  return `<?xml version="1.0" encoding="utf-8" ?>
+<D:propertyupdate xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  ${property}
+</D:propertyupdate>`;
+}
+
+function updateCalendarColorBody(color: string): string {
+  const property =
+    color.length === 0
+      ? `<D:remove><D:prop><A:calendar-color/></D:prop></D:remove>`
+      : `<D:set><D:prop><A:calendar-color>${escapeXmlText(color)}</A:calendar-color></D:prop></D:set>`;
+
+  return `<?xml version="1.0" encoding="utf-8" ?>
+<D:propertyupdate xmlns:D="DAV:" xmlns:A="http://apple.com/ns/ical/">
+  ${property}
+</D:propertyupdate>`;
+}
 
 export class CalDavDiscoveryClient {
   constructor(
@@ -89,22 +150,211 @@ export class CalDavDiscoveryClient {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
+  async createCalendar(
+    displayName: string,
+    collectionName: string,
+  ): Promise<DiscoveredCalDavCalendar> {
+    const name = displayName.trim();
+    if (!name) {
+      throw new CalDavDiscoveryError('Calendar display name must not be empty');
+    }
+    if (!/^[A-Za-z0-9._-]+$/.test(collectionName)) {
+      throw new CalDavDiscoveryError('Calendar collection name is invalid');
+    }
+
+    const { calendarHomeUrl } = await this.discoverHome();
+    const collectionBase = new URL(calendarHomeUrl);
+    if (!collectionBase.pathname.endsWith('/')) {
+      collectionBase.pathname = `${collectionBase.pathname}/`;
+    }
+    const collectionUrl = new URL(
+      `${collectionName}/`,
+      collectionBase,
+    ).toString();
+
+    const credentialHeaders = await this.credentialProvider.getRequestHeaders();
+    const headers = new Headers(credentialHeaders);
+    headers.set('Content-Type', 'application/xml; charset=utf-8');
+
+    const response = await this.fetchImpl(collectionUrl, {
+      method: 'MKCALENDAR',
+      headers,
+      body: createCalendarBody(name),
+    });
+
+    if (!response.ok) {
+      throw new CalDavDiscoveryError(
+        `CalDAV MKCALENDAR failed with status ${response.status}`,
+        response.status,
+        collectionUrl,
+      );
+    }
+
+    return {
+      href: collectionUrl,
+      displayName: name,
+      components: ['VEVENT'],
+      readOnly: false,
+    };
+  }
+
+  async renameCalendar(
+    calendarUrl: string,
+    displayName: string,
+  ): Promise<void> {
+    const name = displayName.trim();
+    if (!name) {
+      throw new CalDavDiscoveryError('Calendar display name must not be empty');
+    }
+
+    const credentialHeaders = await this.credentialProvider.getRequestHeaders();
+    const headers = new Headers(credentialHeaders);
+    headers.set('Content-Type', 'application/xml; charset=utf-8');
+
+    const response = await this.fetchImpl(calendarUrl, {
+      method: 'PROPPATCH',
+      headers,
+      body: renameCalendarBody(name),
+    });
+
+    if (!response.ok) {
+      throw new CalDavDiscoveryError(
+        `CalDAV PROPPATCH failed with status ${response.status}`,
+        response.status,
+        calendarUrl,
+      );
+    }
+
+    if (response.status === 207) {
+      const propertyStatus = propPatchPropertyStatus(
+        await response.text(),
+        'displayname',
+      );
+      if (
+        propertyStatus === undefined ||
+        propertyStatus < 200 ||
+        propertyStatus >= 300
+      ) {
+        throw new CalDavDiscoveryError(
+          propertyStatus === undefined
+            ? 'CalDAV PROPPATCH did not report displayname status'
+            : `CalDAV PROPPATCH failed for displayname with status ${propertyStatus}`,
+          propertyStatus ?? response.status,
+          calendarUrl,
+        );
+      }
+    }
+  }
+
+  async updateCalendarDescription(
+    calendarUrl: string,
+    description: string,
+  ): Promise<void> {
+    const credentialHeaders = await this.credentialProvider.getRequestHeaders();
+    const headers = new Headers(credentialHeaders);
+    headers.set('Content-Type', 'application/xml; charset=utf-8');
+
+    const response = await this.fetchImpl(calendarUrl, {
+      method: 'PROPPATCH',
+      headers,
+      body: updateCalendarDescriptionBody(description),
+    });
+
+    if (!response.ok) {
+      throw new CalDavDiscoveryError(
+        `CalDAV PROPPATCH failed with status ${response.status}`,
+        response.status,
+        calendarUrl,
+      );
+    }
+
+    if (response.status === 207) {
+      const propertyStatus = propPatchPropertyStatus(
+        await response.text(),
+        'calendar-description',
+      );
+      if (
+        propertyStatus === undefined ||
+        propertyStatus < 200 ||
+        propertyStatus >= 300
+      ) {
+        throw new CalDavDiscoveryError(
+          propertyStatus === undefined
+            ? 'CalDAV PROPPATCH did not report calendar-description status'
+            : `CalDAV PROPPATCH failed for calendar-description with status ${propertyStatus}`,
+          propertyStatus ?? response.status,
+          calendarUrl,
+        );
+      }
+    }
+  }
+
+  async updateCalendarColor(calendarUrl: string, color: string): Promise<void> {
+    if (color !== '' && !/^#[\da-fA-F]{6}$/.test(color)) {
+      throw new CalDavDiscoveryError(
+        'Calendar color must be a six-digit hex color',
+      );
+    }
+
+    const credentialHeaders = await this.credentialProvider.getRequestHeaders();
+    const headers = new Headers(credentialHeaders);
+    headers.set('Content-Type', 'application/xml; charset=utf-8');
+
+    const response = await this.fetchImpl(calendarUrl, {
+      method: 'PROPPATCH',
+      headers,
+      body: updateCalendarColorBody(color),
+    });
+
+    if (!response.ok) {
+      throw new CalDavDiscoveryError(
+        `CalDAV PROPPATCH failed with status ${response.status}`,
+        response.status,
+        calendarUrl,
+      );
+    }
+
+    if (response.status === 207) {
+      const propertyStatus = propPatchPropertyStatus(
+        await response.text(),
+        'calendar-color',
+      );
+      if (
+        propertyStatus === undefined ||
+        propertyStatus < 200 ||
+        propertyStatus >= 300
+      ) {
+        throw new CalDavDiscoveryError(
+          propertyStatus === undefined
+            ? 'CalDAV PROPPATCH did not report calendar-color status'
+            : `CalDAV PROPPATCH failed for calendar-color with status ${propertyStatus}`,
+          propertyStatus ?? response.status,
+          calendarUrl,
+        );
+      }
+    }
+  }
+
+  async deleteCalendar(calendarUrl: string): Promise<void> {
+    const credentialHeaders = await this.credentialProvider.getRequestHeaders();
+    const response = await this.fetchImpl(calendarUrl, {
+      method: 'DELETE',
+      headers: credentialHeaders,
+    });
+
+    if (!response.ok || response.status === 207) {
+      throw new CalDavDiscoveryError(
+        response.status === 207
+          ? 'CalDAV DELETE reported member failures'
+          : `CalDAV DELETE failed with status ${response.status}`,
+        response.status,
+        calendarUrl,
+      );
+    }
+  }
+
   async discover(): Promise<CalDavDiscoveryResult> {
-    const serviceUrl = new URL(this.baseUrl).toString();
-    const principalHref = await this.discoverHref(
-      serviceUrl,
-      PRINCIPAL_BODY,
-      'current-user-principal',
-    );
-    const principalUrl = new URL(principalHref, serviceUrl).toString();
-
-    const calendarHomeHref = await this.discoverHref(
-      principalUrl,
-      HOME_BODY,
-      'calendar-home-set',
-    );
-    const calendarHomeUrl = new URL(calendarHomeHref, principalUrl).toString();
-
+    const { principalUrl, calendarHomeUrl } = await this.discoverHome();
     const responses = await this.propfind(calendarHomeUrl, '1', CALENDARS_BODY);
     const calendars = responses.flatMap((response) => {
       const properties = successfulProperties(response);
@@ -129,7 +379,9 @@ export class CalDavDiscoveryClient {
       return [
         {
           href: new URL(href, calendarHomeUrl).toString(),
+          rawHref: href,
           displayName: textValue(properties.displayname),
+          description: preservedTextValue(properties['calendar-description']),
           color: textValue(properties['calendar-color']),
           components,
           readOnly: readOnlyValue(properties['current-user-privilege-set']),
@@ -141,6 +393,30 @@ export class CalDavDiscoveryClient {
       principalUrl,
       calendarHomeUrl,
       calendars,
+    };
+  }
+
+  private async discoverHome(): Promise<{
+    principalUrl: string;
+    calendarHomeUrl: string;
+  }> {
+    const serviceUrl = new URL(this.baseUrl).toString();
+    const principalHref = await this.discoverHref(
+      serviceUrl,
+      PRINCIPAL_BODY,
+      'current-user-principal',
+    );
+    const principalUrl = new URL(principalHref, serviceUrl).toString();
+
+    const calendarHomeHref = await this.discoverHref(
+      principalUrl,
+      HOME_BODY,
+      'calendar-home-set',
+    );
+
+    return {
+      principalUrl,
+      calendarHomeUrl: new URL(calendarHomeHref, principalUrl).toString(),
     };
   }
 
@@ -264,5 +540,176 @@ function asNode(value: unknown): DavNode | undefined {
 }
 
 function textValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function preservedTextValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function escapeXmlText(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+function propPatchPropertyStatus(
+  xml: string,
+  propertyName: string,
+): number | undefined {
+  const document = namespaceAwareParser.parse(xml);
+  const targetNamespace =
+    propertyName === 'displayname'
+      ? 'DAV:'
+      : propertyName === 'calendar-description'
+        ? 'urn:ietf:params:xml:ns:caldav'
+        : 'http://apple.com/ns/ical/';
+  return findPropertyStatus(document, {}, targetNamespace, propertyName);
+}
+
+function findPropertyStatus(
+  value: unknown,
+  inheritedNamespaces: Record<string, string>,
+  targetNamespace: string,
+  targetLocalName: string,
+): number | undefined {
+  const node = asNode(value);
+  if (!node) return undefined;
+
+  const namespaces = { ...inheritedNamespaces };
+  for (const [name, attribute] of Object.entries(node)) {
+    if (name === '@_xmlns' && typeof attribute === 'string') {
+      namespaces[''] = attribute;
+    } else if (name.startsWith('@_xmlns:') && typeof attribute === 'string') {
+      namespaces[name.slice('@_xmlns:'.length)] = attribute;
+    }
+  }
+
+  for (const [qualifiedName, childValue] of Object.entries(node)) {
+    if (qualifiedName.startsWith('@_') || qualifiedName === '#text') continue;
+    for (const child of asArray(childValue)) {
+      const childNode = asNode(child);
+      const childNamespaces = namespaceDeclarations(childNode, namespaces);
+      const resolved = resolveQName(qualifiedName, childNamespaces);
+      if (resolved?.namespace === 'DAV:' && resolved.localName === 'propstat') {
+        const property = directElement(
+          childNode,
+          childNamespaces,
+          'DAV:',
+          'prop',
+        );
+        if (property?.node) {
+          const matchesProperty = Object.entries(property.node).some(
+            ([name, propertyValue]) => {
+              if (name.startsWith('@_') || name === '#text') return false;
+              return asArray(propertyValue).some((item) => {
+                const itemNamespaces = namespaceDeclarations(
+                  asNode(item),
+                  property.namespaces,
+                );
+                const itemName = resolveQName(name, itemNamespaces);
+                return (
+                  itemName?.namespace === targetNamespace &&
+                  itemName.localName === targetLocalName
+                );
+              });
+            },
+          );
+          if (matchesProperty) {
+            const statusElement = directElement(
+              childNode,
+              childNamespaces,
+              'DAV:',
+              'status',
+            );
+            const statusNode = statusElement && asNode(statusElement.value);
+            const status = textValue(
+              statusNode?.['#text'] ?? statusElement?.value,
+            );
+            const match = status?.match(/\s(\d{3})\s/);
+            if (match) return Number(match[1]);
+          }
+        }
+      }
+
+      const nested = findPropertyStatus(
+        child,
+        childNamespaces,
+        targetNamespace,
+        targetLocalName,
+      );
+      if (nested !== undefined) return nested;
+    }
+  }
+
+  return undefined;
+}
+
+function namespaceDeclarations(
+  node: DavNode | undefined,
+  inherited: Record<string, string>,
+): Record<string, string> {
+  const namespaces = { ...inherited };
+  for (const [name, value] of Object.entries(node ?? {})) {
+    if (name === '@_xmlns' && typeof value === 'string') {
+      namespaces[''] = value;
+    } else if (name.startsWith('@_xmlns:') && typeof value === 'string') {
+      namespaces[name.slice('@_xmlns:'.length)] = value;
+    }
+  }
+  return namespaces;
+}
+
+function resolveQName(
+  qualifiedName: string,
+  namespaces: Record<string, string>,
+): { namespace?: string; localName: string } | undefined {
+  const separator = qualifiedName.indexOf(':');
+  if (separator < 0) {
+    return { namespace: namespaces[''], localName: qualifiedName };
+  }
+  const prefix = qualifiedName.slice(0, separator);
+  const namespace = namespaces[prefix];
+  return namespace
+    ? { namespace, localName: qualifiedName.slice(separator + 1) }
+    : undefined;
+}
+
+function directElement(
+  node: DavNode | undefined,
+  namespaces: Record<string, string>,
+  targetNamespace: string,
+  targetLocalName: string,
+):
+  | {
+      value: unknown;
+      node: DavNode | undefined;
+      namespaces: Record<string, string>;
+    }
+  | undefined {
+  if (!node) return undefined;
+  for (const [name, value] of Object.entries(node)) {
+    if (name.startsWith('@_') || name === '#text') continue;
+    for (const child of asArray(value)) {
+      const childNamespaces = namespaceDeclarations(asNode(child), namespaces);
+      const resolved = resolveQName(name, childNamespaces);
+      if (
+        resolved?.namespace === targetNamespace &&
+        resolved.localName === targetLocalName
+      ) {
+        return {
+          value: child,
+          node: asNode(child),
+          namespaces: childNamespaces,
+        };
+      }
+    }
+  }
+  return undefined;
 }

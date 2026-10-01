@@ -15,12 +15,25 @@
  */
 
 export {
+  isCalendarDiagnosticsRepository,
+  type CalendarDiagnosticCollection,
+  type CalendarDiagnostics,
+  type CalendarDiagnosticsRepository,
+} from './CalendarDiagnosticsRepository';
+export {
+  calendarEventFormStartWeekday,
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
+  calendarEventRdateValueFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
+  validateCalendarEventForm,
 } from './calendarEventForm';
-export type { CalendarEventFormValues } from './calendarEventForm';
+export type {
+  CalendarEventFormValues,
+  CalendarEventValidationError,
+} from './calendarEventForm';
+export { isCalendarEventDiagnosticsRepository } from './CalendarEventListDiagnosticsRepository';
 export {
   calendarEventKey,
   calendarEventStartDate,
@@ -28,6 +41,7 @@ export {
   filterCalendarEvents,
   groupCalendarEventsByDay,
   repositoryRangeForView,
+  visibleRangeForView,
 } from './calendarEventPresentation';
 export {
   CalendarRepositoryProvider,
@@ -35,10 +49,17 @@ export {
   useCalendarRepositoryRevision,
   useInvalidateCalendarRepository,
 } from './CalendarRepositoryProvider';
+export { GatewayCalendarRepository } from './GatewayCalendarRepository';
+export type { GatewayCalendarRepositoryOptions } from './GatewayCalendarRepository';
 export type { CalendarFilters } from './types';
 export {
+  useCreateCalendar,
   useCreateCalendarEvent,
+  useDeleteCalendar,
   useDeleteCalendarEvent,
+  useRenameCalendar,
+  useUpdateCalendarColor,
+  useUpdateCalendarDescription,
   useUpdateCalendarEvent,
 } from './useCalendarMutations';
 export {
@@ -46,4 +67,7 @@ export {
   useCalendarEvents,
   useCalendars,
 } from './useCalendarQueries';
-export type { CalendarQueryState } from './useCalendarQueries';
+export type {
+  CalendarEventsQueryState,
+  CalendarQueryState,
+} from './useCalendarQueries';

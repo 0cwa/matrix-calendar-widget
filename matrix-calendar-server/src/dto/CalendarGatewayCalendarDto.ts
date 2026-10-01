@@ -22,5 +22,7 @@ export class CalendarGatewayCalendarDto implements Calendar {
     public readonly name: string,
     public readonly color?: string,
     public readonly readOnly?: boolean,
+    public readonly description?: string,
+    public readonly supportedComponents?: string[],
   ) {}
 }

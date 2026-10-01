@@ -14,6 +14,28 @@
  * limitations under the License.
  */
 
+export {
+  MAX_PROJECTED_OCCURRENCES_PER_EVENT,
+  calendarEventRecurrenceIdentity,
+  formatSupportedCalendarEventRecurrenceRule,
+  isSupportedCalendarEventOccurrenceExclusion,
+  parseSupportedCalendarEventRecurrenceRule,
+  projectCalendarEventOccurrences,
+} from './calendarEventOccurrenceProjection';
+export type {
+  CalendarEventProjection,
+  CalendarEventProjectionDiagnostic,
+  CalendarEventProjectionDiagnosticReason,
+  ProjectedCalendarEventOccurrence,
+  SupportedCalendarEventRecurrenceEnd,
+  SupportedCalendarEventRecurrenceFrequency,
+  SupportedCalendarEventRecurrenceRule,
+} from './calendarEventOccurrenceProjection';
+export { calendarEventTimedDateTimeToDateTime } from './calendarEventTimedDateTime';
+export {
+  calendarLocalDateTimeToUnixMillis,
+  isCalendarTimezoneSupported,
+} from './calendarEventTimezone';
 export * from './calendarUtils';
 export { formatICalDate, parseICalDate, toISOString } from './dateTimeUtils';
 export { formatRRuleText, getOrdinalLabel, parseRRule } from './format';

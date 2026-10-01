@@ -1,19 +1,25 @@
-# Use this file to add configurations for the dev environment and the PR deployments
+# Example values for dev and PR deployments. Replace the non-routable Matrix and
+# Element placeholders with endpoints owned by the deployment operator.
 
 matrix-calendar-widget:
+  settings:
+    hostname: matrix.example.invalid
+
   env:
     - name: REACT_APP_BOT_USER_ID
-      value: '@meetings-bot:synapse.dev.nordeck.io'
+      value: '@calendar:matrix.example.invalid'
     - name: REACT_APP_DISPLAY_ALL_MEETINGS
       value: 'true'
 
 matrix-calendar-server:
   settings:
+    widgetUrl: https://matrix-calendar-widget.example.invalid
+
     additionalEnv:
       - name: HOMESERVER_URL
-        value: 'https://synapse.dev.nordeck.io'
+        value: 'https://matrix.example.invalid'
       - name: MATRIX_LINK_SHARE
-        value: 'https://element.dev.nordeck.io/#/'
+        value: 'https://element.example.invalid/#/'
       - name: BOT_DISPLAYNAME
         value: 'Matrix Calendar Bot${PR_SUFFIX}'
       - name: CALENDAR_ROOM_NAME

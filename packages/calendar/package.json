@@ -19,8 +19,10 @@
     "generate-disclaimer": "echo \"Nothing to generate\""
   },
   "dependencies": {
-    "i18next": "^25.10.10",
-    "joi": "^17.13.3",
+    "@matrix-calendar-widget/ical-timezones": "0.0.0",
+    "ical.js": "2.2.1",
+    "i18next": "^26.4.2",
+    "joi": "^18.2.9",
     "lodash": "^4.18.1",
     "luxon": "3.3.0",
     "rrule": "^2.8.1"
@@ -43,7 +45,10 @@
     ],
     "setupFilesAfterEnv": [
       "<rootDir>/setupTests.ts"
-    ]
+    ],
+    "moduleNameMapper": {
+      "^@matrix-calendar-widget/ical-timezones$": "<rootDir>/../ical-timezones/src/index.ts"
+    }
   },
   "repository": {
     "type": "git",

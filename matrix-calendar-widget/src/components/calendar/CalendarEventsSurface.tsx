@@ -14,16 +14,30 @@
  * limitations under the License.
  */
 
-import { CalendarEvent } from '@matrix-calendar-widget/calendar';
-import { Alert, Box } from '@mui/material';
+import {
+  CalendarEvent,
+  CalendarEventDateTime,
+  CalendarId,
+  projectCalendarEventOccurrences,
+} from '@matrix-calendar-widget/calendar';
+import {
+  Alert,
+  Box,
+  Checkbox,
+  FormControlLabel,
+  FormGroup,
+} from '@mui/material';
+import { DateTime } from 'luxon';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarFilters,
+  calendarEventKey,
   filterCalendarEvents,
   repositoryRangeForView,
   useCalendarEvents,
   useCalendars,
+  visibleRangeForView,
 } from '../../calendar';
 import { PageLoader } from '../common/PageLoader';
 import { ViewType } from '../meetings/MeetingsNavigation';
@@ -46,16 +60,96 @@ export function CalendarEventsSurface({
     () => calendars.data.map((calendar) => calendar.id),
     [calendars.data],
   );
+  const [hiddenCalendarIds, setHiddenCalendarIds] = useState<Set<CalendarId>>(
+    () => new Set(),
+  );
+  const viewerTimezone = DateTime.local().zoneName ?? 'UTC';
   const repositoryRange = useMemo(
     () => repositoryRangeForView(filters, view),
     [filters, view],
   );
   const events = useCalendarEvents(calendarIds, repositoryRange);
-  const filteredEvents = useMemo(
-    () => filterCalendarEvents(events.data, filters.filterText),
-    [events.data, filters.filterText],
+  const visibleRange = useMemo(
+    () => visibleRangeForView(filters, view, viewerTimezone),
+    [filters, view, viewerTimezone],
   );
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent>();
+  const visibleServerDiagnostics = events.diagnostics.filter(
+    (diagnostic) => !hiddenCalendarIds.has(diagnostic.calendarId),
+  );
+  const unsupportedSeriesCount =
+    events.data.filter(
+      (event) =>
+        event.unsupportedRecurrence === 'range-this-and-future' &&
+        !hiddenCalendarIds.has(event.calendarId),
+    ).length +
+    visibleServerDiagnostics
+      .filter(({ reason }) => reason === 'range-this-and-future')
+      .reduce((total, diagnostic) => total + diagnostic.count, 0);
+  const sourceEvents = useMemo(
+    () =>
+      events.data.filter(
+        (event) =>
+          !hiddenCalendarIds.has(event.calendarId) &&
+          event.unsupportedRecurrence !== 'range-this-and-future',
+      ),
+    [events.data, hiddenCalendarIds],
+  );
+  const projection = useMemo(
+    () =>
+      projectCalendarEventOccurrences(
+        sourceEvents,
+        visibleRange,
+        viewerTimezone,
+      ),
+    [sourceEvents, viewerTimezone, visibleRange],
+  );
+  const projectionDiagnosticCount =
+    visibleServerDiagnostics
+      .filter(({ reason }) => reason !== 'range-this-and-future')
+      .reduce((total, diagnostic) => total + diagnostic.count, 0) +
+    projection.diagnostics.filter(
+      ({ sourceEvent }) =>
+        sourceEvent.unsupportedRecurrence !== 'range-this-and-future',
+    ).length;
+  const sourceEventByOccurrenceKey = useMemo(
+    () =>
+      new Map(
+        projection.occurrences.map(({ event, sourceEvent, recurrenceId }) => [
+          calendarEventKey(event),
+          { sourceEvent, recurrenceId },
+        ]),
+      ),
+    [projection.occurrences],
+  );
+  const filteredEvents = useMemo(
+    () =>
+      filterCalendarEvents(
+        projection.occurrences.map(({ event }) => event),
+        filters.filterText,
+      ),
+    [filters.filterText, projection.occurrences],
+  );
+  const [selectedEvent, setSelectedEvent] = useState<
+    | {
+        event: CalendarEvent;
+        sourceEvent: CalendarEvent;
+        recurrenceId?: CalendarEventDateTime;
+      }
+    | undefined
+  >();
+  const selectEvent = (event: CalendarEvent) => {
+    const occurrence = sourceEventByOccurrenceKey.get(calendarEventKey(event));
+    setSelectedEvent({
+      event,
+      sourceEvent: occurrence?.sourceEvent ?? event,
+      recurrenceId: occurrence?.recurrenceId,
+    });
+  };
+  const hasMixedSupportedComponents = calendars.data.some(
+    (calendar) =>
+      calendar.supportedComponents?.includes('VEVENT') &&
+      calendar.supportedComponents.some((component) => component !== 'VEVENT'),
+  );
 
   if (calendars.loading || events.loading) {
     return <PageLoader />;
@@ -76,25 +170,118 @@ export function CalendarEventsSurface({
 
   return (
     <>
+      {hasMixedSupportedComponents && (
+        <Box px={1} pb={1}>
+          <Alert severity="info">
+            {t(
+              'calendarEvents.mixedCompatibilityNotice',
+              'One or more calendars support additional item types. The widget displays and edits VEVENT entries only.',
+            )}
+          </Alert>
+        </Box>
+      )}
+      {unsupportedSeriesCount > 0 && (
+        <Box px={1} pb={1}>
+          <Alert severity="warning">
+            {t(
+              'calendarEvents.unsupportedRangeRecurrence',
+              'The current renderer cannot safely display series with THISANDFUTURE range overrides. Affected series: {{count}}.',
+              { count: unsupportedSeriesCount },
+            )}
+          </Alert>
+        </Box>
+      )}
+      {projectionDiagnosticCount > 0 && (
+        <Box px={1} pb={1}>
+          <Alert severity="warning">
+            {t(
+              'calendarEvents.unsupportedOccurrenceProjection',
+              'Some events have recurrence or timezone data that the current renderer cannot safely display. Affected events: {{count}}.',
+              { count: projectionDiagnosticCount },
+            )}
+          </Alert>
+        </Box>
+      )}
+      {calendars.data.length > 1 && (
+        <Box px={1} pb={1}>
+          <FormGroup
+            aria-label={t('calendarEvents.editor.calendar', 'Calendar')}
+            row
+          >
+            {calendars.data.map((calendar) => (
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={!hiddenCalendarIds.has(calendar.id)}
+                    onChange={(_, checked) => {
+                      setHiddenCalendarIds((current) => {
+                        const next = new Set(current);
+                        if (checked) {
+                          next.delete(calendar.id);
+                        } else {
+                          next.add(calendar.id);
+                        }
+                        return next;
+                      });
+                    }}
+                    size="small"
+                  />
+                }
+                key={calendar.id}
+                label={
+                  <>
+                    {calendar.color && (
+                      <Box
+                        component="span"
+                        sx={{
+                          backgroundColor: calendar.color,
+                          borderRadius: '50%',
+                          display: 'inline-block',
+                          height: 10,
+                          mr: 0.75,
+                          width: 10,
+                        }}
+                      />
+                    )}
+                    {calendar.name}
+                  </>
+                }
+              />
+            ))}
+          </FormGroup>
+        </Box>
+      )}
+
       {view === 'list' ? (
         <Box height="100%" overflow="auto">
           <CalendarEventsList
             events={filteredEvents}
-            onSelectEvent={setSelectedEvent}
+            onSelectEvent={selectEvent}
           />
         </Box>
       ) : (
         <CalendarEventsCalendar
           events={filteredEvents}
           filters={filters}
-          onSelectEvent={setSelectedEvent}
+          onSelectEvent={selectEvent}
           onShowMore={onShowMore}
           view={view}
         />
       )}
 
       <CalendarEventDetailsDialog
-        event={selectedEvent}
+        event={selectedEvent?.event}
+        recurrenceId={selectedEvent?.recurrenceId}
+        sourceEvent={selectedEvent?.sourceEvent}
+        onSourceEventChange={(sourceEvent) =>
+          setSelectedEvent((current) =>
+            current &&
+            current.sourceEvent.id === sourceEvent.id &&
+            current.sourceEvent.calendarId === sourceEvent.calendarId
+              ? { ...current, sourceEvent }
+              : current,
+          )
+        }
         onClose={() => setSelectedEvent(undefined)}
       />
     </>

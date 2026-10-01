@@ -28,10 +28,8 @@ export type CalendarEventId = string;
 export type CalendarDate = string;
 
 /**
- * Local wall-clock date/time in ISO form without a numeric UTC offset.
- *
- * The named IANA timezone on {@link ZonedCalendarDateTime} defines how the
- * value is interpreted.
+ * Local wall-clock date/time in ISO form without a numeric UTC offset. Master
+ * and recurrence values may keep it floating or pair it with a named zone.
  */
 export type LocalCalendarDateTime = string;
 
@@ -40,14 +38,19 @@ export type ZonedCalendarDateTime = {
   timezone: string;
 };
 
+/** A master-event time endpoint keeps its own floating or zoned value kind. */
+export type CalendarEventTimedDateTime =
+  | { type: 'floating'; local: LocalCalendarDateTime }
+  | { type: 'zoned'; local: LocalCalendarDateTime; timezone: string };
+
 /**
- * Timed events retain their named timezone instead of normalizing the domain
- * model to UTC. Adapters may derive UTC instants for querying/rendering.
+ * Timed events preserve each endpoint's iCalendar value kind. Floating values
+ * keep only their local wall time; zoned values keep the local time and zone.
  */
 export type TimedCalendarEventTiming = {
   type: 'timed';
-  start: ZonedCalendarDateTime;
-  end: ZonedCalendarDateTime;
+  start: CalendarEventTimedDateTime;
+  end: CalendarEventTimedDateTime;
 };
 
 /**
@@ -65,11 +68,87 @@ export type CalendarEventTiming =
 
 export type CalendarEventDateTime =
   | { type: 'date-time'; value: ZonedCalendarDateTime }
+  | { type: 'floating-date-time'; value: LocalCalendarDateTime }
   | { type: 'date'; value: CalendarDate };
+
+/** RFC 5545 DURATION components; week/day units stay distinct from time units. */
+export type CalendarEventDuration = {
+  weeks: number;
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+  isNegative: boolean;
+};
+
+/**
+ * A relative display alarm's positive lead time before DTSTART. The CalDAV
+ * codec serializes this magnitude as a negative RFC 5545 TRIGGER duration.
+ */
+export type CalendarEventAlarmLeadTime = Omit<
+  CalendarEventDuration,
+  'isNegative'
+>;
+
+/** One editable RFC 5545 ACTION:DISPLAY alarm relative to DTSTART. */
+export type CalendarEventDisplayAlarm = {
+  action: 'display';
+  trigger: CalendarEventAlarmLeadTime;
+};
+
+/** Explicit serializable operation that removes an existing display alarm. */
+export type CalendarEventAlarmRemoval = { operation: 'remove' };
+
+/** Alarm value accepted by an event patch, including its remove operation. */
+export type CalendarEventAlarmPatch =
+  | CalendarEventDisplayAlarm
+  | CalendarEventAlarmRemoval;
+
+/** Alarm data retained by CalDAV but outside the editor's supported shape. */
+export type CalendarEventUnsupportedAlarm = true;
+
+/** Recurrence timing keeps an explicit end separate from an RFC duration. */
+export type CalendarEventRecurrenceTiming =
+  | {
+      type: 'end';
+      start: CalendarEventDateTime;
+      end: CalendarEventDateTime;
+    }
+  | {
+      type: 'duration';
+      start: CalendarEventDateTime;
+      duration: CalendarEventDuration;
+    };
+
+/** A PERIOD-valued RDATE with its explicit end or RFC duration. */
+export type CalendarEventRecurrenceDate =
+  | CalendarEventDateTime
+  | { type: 'period'; timing: CalendarEventRecurrenceTiming };
 
 export type CalendarEventStatus = 'confirmed' | 'tentative' | 'cancelled';
 
+/** RFC 5545 weekday tokens used by the bounded weekly recurrence editor. */
+export type CalendarEventWeekday =
+  | 'MO'
+  | 'TU'
+  | 'WE'
+  | 'TH'
+  | 'FR'
+  | 'SA'
+  | 'SU';
+
 export type CalendarEventTransparency = 'opaque' | 'transparent';
+
+/**
+ * Supported timing and cancellation data from one detached VEVENT in a
+ * recurring CalDAV resource.
+ */
+export type CalendarEventRecurrenceOverride = {
+  /** Original occurrence identity, even when the instance has moved. */
+  recurrenceId: CalendarEventDateTime;
+  timing?: CalendarEventRecurrenceTiming;
+  status?: CalendarEventStatus;
+};
 
 /**
  * Recurrence source metadata.
@@ -79,10 +158,44 @@ export type CalendarEventTransparency = 'opaque' | 'transparent';
  */
 export type CalendarEventRecurrence = {
   rrule?: string;
-  rdates?: CalendarEventDateTime[];
+  rdates?: CalendarEventRecurrenceDate[];
   exdates?: CalendarEventDateTime[];
   recurrenceId?: CalendarEventDateTime;
+  /** Same-UID detached VEVENTs stored in this CalDAV resource. */
+  overrides?: CalendarEventRecurrenceOverride[];
 };
+
+/**
+ * Recurrence fields accepted by supported write operations. RRULE edits change
+ * only the master rule; EXDATE operations target one original occurrence
+ * identity; RDATE operations target one exact point-valued recurrence date.
+ * PERIOD values and detached instances remain read-only resource data.
+ */
+export type CalendarEventRecurrenceWrite =
+  | {
+      /** An empty object on a patch clears only the master RRULE. */
+      rrule?: string;
+    }
+  | {
+      /** Add or remove only the EXDATE matching this original recurrence ID. */
+      exdate: {
+        action: 'add' | 'remove';
+        recurrenceId: CalendarEventDateTime;
+      };
+    }
+  | {
+      /** Add or remove one exact DATE or DATE-TIME RDATE value. */
+      rdate: {
+        action: 'add' | 'remove';
+        value: CalendarEventDateTime;
+      };
+    };
+
+/** Recurrence semantics retained by CalDAV but not safely projected by UI. */
+export type CalendarEventUnsupportedRecurrence = 'range-this-and-future';
+
+/** Read-only marker for timezone semantics that are unsafe to project. */
+export type CalendarEventUnsupportedTimezone = true;
 
 export type Calendar = {
   id: CalendarId;
@@ -91,6 +204,8 @@ export type Calendar = {
   color?: string;
   timezone?: string;
   readOnly?: boolean;
+  /** Component types advertised by CalDAV, when the server reports them. */
+  supportedComponents?: string[];
 };
 
 export type CalendarEvent = {
@@ -112,17 +227,46 @@ export type CalendarEvent = {
   priority?: number;
 
   recurrence?: CalendarEventRecurrence;
+  /** One supported DISPLAY alarm, when the resource contains one. */
+  alarm?: CalendarEventDisplayAlarm;
+  /** An existing alarm shape is retained but cannot safely be edited. */
+  unsupportedAlarm?: CalendarEventUnsupportedAlarm;
+  /** Read-only warning marker derived from recurrence data in the resource. */
+  unsupportedRecurrence?: CalendarEventUnsupportedRecurrence;
+  /** Read-only marker for an unknown or conflicting embedded VTIMEZONE. */
+  unsupportedTimezone?: CalendarEventUnsupportedTimezone;
 };
 
-export type CalendarEventInput = Omit<CalendarEvent, 'id' | 'calendarId'>;
+export type CalendarEventInput = Omit<
+  CalendarEvent,
+  | 'id'
+  | 'calendarId'
+  | 'recurrence'
+  | 'unsupportedRecurrence'
+  | 'unsupportedAlarm'
+  | 'unsupportedTimezone'
+> & { recurrence?: { rrule?: string } };
 
 /**
  * Fields editable without changing resource identity, calendar ownership, or
  * the stable iCalendar UID.
  */
 export type CalendarEventPatch = Partial<
-  Omit<CalendarEvent, 'id' | 'calendarId' | 'uid'>
->;
+  Omit<
+    CalendarEvent,
+    | 'id'
+    | 'calendarId'
+    | 'uid'
+    | 'recurrence'
+    | 'alarm'
+    | 'unsupportedAlarm'
+    | 'unsupportedRecurrence'
+    | 'unsupportedTimezone'
+  >
+> & {
+  alarm?: CalendarEventAlarmPatch;
+  recurrence?: CalendarEventRecurrenceWrite;
+};
 
 export type CalendarTimeRange = {
   /** Inclusive ISO instant. */
@@ -141,4 +285,16 @@ export function isAllDayCalendarEvent(
   event: CalendarEvent,
 ): event is CalendarEvent & { timing: AllDayCalendarEventTiming } {
   return event.timing.type === 'all-day';
+}
+
+export function isCalendarEventAlarmRemoval(
+  value: unknown,
+): value is CalendarEventAlarmRemoval {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 1 &&
+    (value as Record<string, unknown>).operation === 'remove'
+  );
 }

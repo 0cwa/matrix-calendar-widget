@@ -35,11 +35,10 @@ import {
 } from 'matrix-bot-sdk';
 import { LoggerModule } from 'nestjs-pino';
 import path from 'path';
+import postgres from 'postgres';
 import { v4 as uuiv4 } from 'uuid';
 import { AppRuntimeContext } from './AppRuntimeContext';
-import { EventContentRenderer } from './EventContentRenderer';
-import { IAppConfiguration } from './IAppConfiguration';
-import { ModuleProviderToken } from './ModuleProviderToken';
+import { MatrixOpenIdCalDavCredentialProviderFactory } from './caldav/MatrixOpenIdCalDavCredentialProviderFactory';
 import { JitsiClient } from './client/JitsiClient';
 import { MatrixClientAdapter } from './client/MatrixClientAdapter';
 import { MeetingClient } from './client/MeetingClient';
@@ -55,6 +54,8 @@ import { MeetingController } from './controller/MeetingController';
 import { WelcomeWorkflowController } from './controller/WelcomeWorkflowController';
 import { WidgetController } from './controller/WidgetController';
 import { registerDateRangeFormatter } from './dateRangeFormatter';
+import { EventContentRenderer } from './EventContentRenderer';
+import { IAppConfiguration } from './IAppConfiguration';
 import { RoomMatrixEventsReader } from './io/RoomMatrixEventsReader';
 import { WidgetLayoutConfigReader } from './io/WidgetLayoutConfigReader';
 import { MatrixClientProxyHandler } from './matrix/MatrixClientProxyHandler';
@@ -64,12 +65,20 @@ import {
 } from './matrix/mixins';
 import { MatrixAuthMiddleware } from './middleware/MatrixAuthMiddleware';
 import { IRoomMatrixEvents } from './model/IRoomMatrixEvents';
+import { ModuleProviderToken } from './ModuleProviderToken';
+import {
+  DisabledRoomReminderStore,
+  PostgresRoomReminderStore,
+  RoomReminderStore,
+} from './reminder';
+import { getReminderDatabaseTlsOptions } from './reminder/ReminderDatabaseConnection';
 import { MatrixServer } from './rpc/MatrixServer';
 import { CommandService } from './service/CommandService';
 import { ControlRoomMigrationService } from './service/ControlRoomMigrationService';
 import { GuestMemberService } from './service/GuestMemberService';
 import { MatrixCalendarAuthorizationFactory } from './service/MatrixCalendarAuthorization';
 import { MeetingService } from './service/MeetingService';
+import { RoomCalendarCalDavAccess } from './service/RoomCalendarCalDavAccess';
 import { RoomMessageService } from './service/RoomMessageService';
 import { WelcomeWorkflowService } from './service/WelcomeWorkflowService';
 import { WidgetLayoutService } from './service/WidgetLayoutService';
@@ -106,6 +115,38 @@ const widgetLayoutConfigFactory: FactoryProvider = {
     return new WidgetLayoutConfigReader(
       appConfiguration.default_widget_layouts_config,
     ).read();
+  },
+  inject: [ModuleProviderToken.APP_CONFIGURATION],
+};
+
+const roomReminderStoreFactory: FactoryProvider<Promise<RoomReminderStore>> = {
+  provide: ModuleProviderToken.ROOM_REMINDER_STORE,
+  useFactory: async (appConfig: IAppConfiguration) => {
+    if (!appConfig.reminder_database_url) {
+      return new DisabledRoomReminderStore();
+    }
+
+    // Postgres.js 3.4.5 supports host/port arrays at runtime for single IP
+    // endpoints, although its public Options type omits those arrays.
+    const postgresOptions = {
+      ...getReminderDatabaseTlsOptions(
+        appConfig.reminder_database_tls_mode ?? 'verify-full',
+        appConfig.reminder_database_url,
+      ),
+      max: 5,
+      connect_timeout: 5,
+      idle_timeout: 20,
+      connection: { application_name: 'matrix-calendar-reminders' },
+    } as unknown as Parameters<typeof postgres>[1];
+    const sql = postgres(appConfig.reminder_database_url, postgresOptions);
+    const store = new PostgresRoomReminderStore(sql);
+    try {
+      await store.migrate();
+      return store;
+    } catch (error) {
+      await store.onModuleDestroy();
+      throw error;
+    }
   },
   inject: [ModuleProviderToken.APP_CONFIGURATION],
 };
@@ -258,6 +299,7 @@ const i18nFactory: FactoryProvider<void> = {
 
   providers: [
     appConfigurationFactory,
+    roomReminderStoreFactory,
     roomMatrixEventsFactory,
     widgetLayoutConfigFactory,
     matrixClientFactory,
@@ -267,6 +309,11 @@ const i18nFactory: FactoryProvider<void> = {
     JitsiClient,
     MeetingClient,
     MatrixCalendarAuthorizationFactory,
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
+      useClass: RoomCalendarCalDavAccess,
+    },
+    MatrixOpenIdCalDavCredentialProviderFactory,
     MatrixClientAdapter,
     ReactionClient,
     WidgetClient,

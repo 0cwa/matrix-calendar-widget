@@ -47,10 +47,12 @@ const event: CalendarEvent = {
   timing: {
     type: 'timed',
     start: {
+      type: 'zoned',
       local: '2026-09-23T09:00:00',
       timezone: 'Europe/Stockholm',
     },
     end: {
+      type: 'zoned',
       local: '2026-09-23T10:00:00',
       timezone: 'Europe/Stockholm',
     },
@@ -62,6 +64,13 @@ function createRepository(
 ): CalendarRepository {
   return {
     listCalendars: vi.fn().mockResolvedValue([]),
+    createCalendar: vi.fn().mockRejectedValue(new Error('not configured')),
+    renameCalendar: vi.fn().mockRejectedValue(new Error('not configured')),
+    updateCalendarDescription: vi
+      .fn()
+      .mockRejectedValue(new Error('not configured')),
+    updateCalendarColor: vi.fn().mockRejectedValue(new Error('not configured')),
+    deleteCalendar: vi.fn().mockRejectedValue(new Error('not configured')),
     listEvents: vi.fn().mockResolvedValue([]),
     getEvent: vi.fn().mockRejectedValue(new Error('not configured')),
     createEvent: vi.fn().mockRejectedValue(new Error('not configured')),
@@ -177,10 +186,51 @@ describe('calendar repository hooks', () => {
 
     expect(result.current).toEqual({
       data: [event],
+      diagnostics: [],
       loading: false,
       error: undefined,
     });
     expect(listEvents).toHaveBeenNthCalledWith(2, ['team'], secondRange);
+  });
+
+  it('loads privacy-safe event diagnostics from capable repositories', async () => {
+    const listEventsWithDiagnostics = vi.fn().mockResolvedValue({
+      events: [event],
+      diagnostics: [
+        {
+          calendarId: 'team',
+          reason: 'unsupported-timezone',
+          count: 1,
+        },
+      ],
+    });
+    const repository = Object.assign(createRepository(), {
+      listEventsWithDiagnostics,
+    });
+    const { result, waitForValueToChange } = renderHook(
+      () =>
+        useCalendarEvents(['team'], {
+          start: '2026-09-01T00:00:00Z',
+          end: '2026-10-01T00:00:00Z',
+        }),
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() => result.current.loading);
+
+    expect(result.current).toEqual({
+      data: [event],
+      diagnostics: [
+        {
+          calendarId: 'team',
+          reason: 'unsupported-timezone',
+          count: 1,
+        },
+      ],
+      loading: false,
+      error: undefined,
+    });
+    expect(listEventsWithDiagnostics).toHaveBeenCalledTimes(1);
   });
 
   it('loads an event by calendar and event id', async () => {

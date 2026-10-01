@@ -1,0 +1,522 @@
+/*
+ * Copyright 2026 Matrix Calendar Widget contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import {
+  CalendarEvent,
+  CalendarRepositoryError,
+} from '@matrix-calendar-widget/calendar';
+import { vi } from 'vitest';
+import { GatewayCalendarRepository } from './GatewayCalendarRepository';
+
+const calendarId = 'https://radicale.example.test/alice/team/';
+const eventId = 'https://radicale.example.test/alice/team/event.ics';
+const event: CalendarEvent = {
+  id: eventId,
+  calendarId,
+  uid: 'event@example.test',
+  title: 'Team planning',
+  timing: {
+    type: 'timed',
+    start: {
+      type: 'zoned',
+      local: '2026-09-24T08:00:00',
+      timezone: 'UTC',
+    },
+    end: {
+      type: 'zoned',
+      local: '2026-09-24T09:00:00',
+      timezone: 'UTC',
+    },
+  },
+};
+
+describe('GatewayCalendarRepository', () => {
+  it('loads safe calendar diagnostics through the authenticated gateway', async () => {
+    const diagnostics = {
+      calendars: [
+        {
+          name: 'Team calendar',
+          url: 'https://radicale.example.test/alice/team/',
+        },
+      ],
+    };
+    const fetchMock = mockFetch(jsonResponse(diagnostics));
+    const repository = createRepository(fetchMock);
+
+    await expect(repository.getCalendarDiagnostics()).resolves.toEqual(
+      diagnostics,
+    );
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(typeof url).toBe('string');
+    if (typeof url !== 'string') {
+      throw new Error('Expected the gateway request URL to be a string');
+    }
+    expect(new URL(url).pathname).toBe('/v1/calendar/calendars/diagnostics');
+    expect(new URL(url).searchParams.get('roomId')).toBe('!team:example.test');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+  });
+
+  it('returns supported component metadata from the gateway DTO', async () => {
+    const calendars = [
+      {
+        id: calendarId,
+        name: 'Team calendar',
+        description: 'Planning and review',
+        readOnly: false,
+        supportedComponents: ['VEVENT', 'VTODO'],
+      },
+    ];
+    const repository = createRepository(mockFetch(jsonResponse(calendars)));
+
+    await expect(repository.listCalendars()).resolves.toEqual(calendars);
+  });
+
+  it('creates a calendar through the authenticated gateway', async () => {
+    const createdCalendar = {
+      id: 'https://radicale.example.test/alice/calendar-1/',
+      name: 'Project Alpha',
+      readOnly: false,
+    };
+    const fetchMock = mockFetch(jsonResponse(createdCalendar));
+    const repository = createRepository(fetchMock);
+
+    await expect(repository.createCalendar('Project Alpha')).resolves.toEqual(
+      createdCalendar,
+    );
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/v1/calendar/calendars?');
+    if (typeof url !== 'string') {
+      throw new Error('Expected the gateway request URL to be a string');
+    }
+    expect(new URL(url).searchParams.get('roomId')).toBe('!team:example.test');
+    expect(init?.method).toBe('POST');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+    expect(new Headers(init?.headers).get('Content-Type')).toBe(
+      'application/json',
+    );
+    expect(init?.body).toBe(JSON.stringify({ name: 'Project Alpha' }));
+  });
+
+  it('renames a calendar through the authenticated gateway', async () => {
+    const fetchMock = mockFetch(new Response(null, { status: 204 }));
+    const repository = createRepository(fetchMock);
+
+    await expect(
+      repository.renameCalendar(calendarId, 'Product calendar'),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/v1/calendar/calendars?');
+    expect(url).toContain(`calendarId=${encodeURIComponent(calendarId)}`);
+    expect(init?.method).toBe('PATCH');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+    expect(init?.body).toBe(JSON.stringify({ name: 'Product calendar' }));
+  });
+
+  it('sends description-only updates through the authenticated gateway', async () => {
+    const fetchMock = mockFetch(new Response(null, { status: 204 }));
+    const repository = createRepository(fetchMock);
+
+    await expect(
+      repository.updateCalendarDescription(calendarId, 'Project planning'),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/v1/calendar/calendars/description?');
+    expect(url).toContain(`calendarId=${encodeURIComponent(calendarId)}`);
+    expect(init?.method).toBe('PATCH');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+    expect(init?.body).toBe(
+      JSON.stringify({ description: 'Project planning' }),
+    );
+  });
+
+  it('sends an empty description to clear the calendar property', async () => {
+    const fetchMock = mockFetch(new Response(null, { status: 204 }));
+    const repository = createRepository(fetchMock);
+
+    await repository.updateCalendarDescription(calendarId, '');
+
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({ description: '' }),
+    );
+  });
+
+  it('sends color-only updates through the authenticated gateway', async () => {
+    const fetchMock = mockFetch(new Response(null, { status: 204 }));
+    const repository = createRepository(fetchMock);
+
+    await expect(
+      repository.updateCalendarColor(calendarId, '#Ab12cD'),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/v1/calendar/calendars/color?');
+    expect(url).toContain(`calendarId=${encodeURIComponent(calendarId)}`);
+    expect(init?.method).toBe('PATCH');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+    expect(init?.body).toBe(JSON.stringify({ color: '#Ab12cD' }));
+  });
+
+  it('sends an empty color as an explicit clear', async () => {
+    const fetchMock = mockFetch(new Response(null, { status: 204 }));
+    const repository = createRepository(fetchMock);
+
+    await repository.updateCalendarColor(calendarId, '');
+
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({ color: '' }),
+    );
+  });
+
+  it('deletes a calendar through the authenticated gateway', async () => {
+    const fetchMock = mockFetch(new Response(null, { status: 204 }));
+    const repository = createRepository(fetchMock);
+
+    await expect(
+      repository.deleteCalendar(calendarId),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    if (typeof url !== 'string') {
+      throw new Error('Expected the gateway request URL to be a string');
+    }
+    const requestUrl = new URL(url);
+    expect(requestUrl.pathname).toBe('/v1/calendar/calendars');
+    expect(requestUrl.searchParams.get('roomId')).toBe('!team:example.test');
+    expect(requestUrl.searchParams.get('calendarId')).toBe(calendarId);
+    expect(init?.method).toBe('DELETE');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+  });
+
+  it('does not expose calendar deletion conflicts as event conflicts', async () => {
+    const repository = createRepository(
+      mockFetch(
+        new Response(JSON.stringify({ code: 'calendar-delete-unsafe' }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    await expect(repository.deleteCalendar(calendarId)).rejects.toMatchObject({
+      code: 'request-failed',
+      message: 'Calendar deletion was rejected by the gateway',
+    });
+  });
+
+  it('loads visible events and reuses their ETag for updates', async () => {
+    const fetchMock = mockFetch(
+      jsonResponse({
+        events: [{ event, etag: '"event-etag"' }],
+        diagnostics: [],
+      }),
+      jsonResponse({
+        event: { ...event, recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' } },
+        etag: '"updated-etag"',
+      }),
+    );
+    const repository = createRepository(fetchMock, 'Europe/Stockholm');
+
+    await expect(
+      repository.listEvents([calendarId], {
+        start: '2026-09-24T00:00:00Z',
+        end: '2026-09-25T00:00:00Z',
+      }),
+    ).resolves.toEqual([event]);
+
+    const recurrencePatch = {
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' },
+    };
+    await expect(
+      repository.updateEvent(calendarId, eventId, recurrencePatch),
+    ).resolves.toMatchObject({ recurrence: recurrencePatch.recurrence });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toContain('/v1/calendar/events?');
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `calendarId=${encodeURIComponent(calendarId)}`,
+    );
+    expect(
+      new URL(fetchMock.mock.calls[0][0] as string).searchParams.get(
+        'timezone',
+      ),
+    ).toBe('Europe/Stockholm');
+
+    const [, updateInit] = fetchMock.mock.calls[1];
+    expect(updateInit?.method).toBe('PATCH');
+    expect(new Headers(updateInit?.headers).get('If-Match')).toBe(
+      '"event-etag"',
+    );
+    expect(new Headers(updateInit?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+    expect(updateInit?.body).toBe(JSON.stringify(recurrencePatch));
+  });
+
+  it('serializes one typed point RDATE and preserves the loaded ETag', async () => {
+    const recurringEvent: CalendarEvent = {
+      ...event,
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' },
+    };
+    const fetchMock = mockFetch(
+      jsonResponse({ event: recurringEvent, etag: '"rdate-etag"' }),
+      jsonResponse({
+        event: {
+          ...recurringEvent,
+          recurrence: {
+            ...recurringEvent.recurrence,
+            rdates: [
+              {
+                type: 'date-time',
+                value: {
+                  local: '2026-10-30T09:00:00',
+                  timezone: 'America/New_York',
+                },
+              },
+            ],
+          },
+        },
+        etag: '"updated-rdate-etag"',
+      }),
+    );
+    const repository = createRepository(fetchMock);
+    const rdatePatch = {
+      recurrence: {
+        rdate: {
+          action: 'add' as const,
+          value: {
+            type: 'date-time' as const,
+            value: {
+              local: '2026-10-30T09:00:00',
+              timezone: 'America/New_York',
+            },
+          },
+        },
+      },
+    };
+
+    await expect(
+      repository.updateEvent(calendarId, eventId, rdatePatch),
+    ).resolves.toMatchObject({
+      recurrence: { rdates: [rdatePatch.recurrence.rdate.value] },
+    });
+
+    const [, updateInit] = fetchMock.mock.calls[1];
+    expect(updateInit?.method).toBe('PATCH');
+    expect(new Headers(updateInit?.headers).get('If-Match')).toBe(
+      '"rdate-etag"',
+    );
+    expect(updateInit?.body).toBe(JSON.stringify(rdatePatch));
+  });
+
+  it('passes count-only projection diagnostics through from the gateway', async () => {
+    const repository = createRepository(
+      mockFetch(
+        jsonResponse({
+          events: [],
+          diagnostics: [{ reason: 'range-this-and-future', count: 1 }],
+        }),
+      ),
+    );
+
+    await expect(
+      repository.listEventsWithDiagnostics([calendarId], {
+        start: '2026-09-24T00:00:00Z',
+        end: '2026-10-01T00:00:00Z',
+      }),
+    ).resolves.toEqual({
+      events: [],
+      diagnostics: [
+        {
+          calendarId,
+          reason: 'range-this-and-future',
+          count: 1,
+        },
+      ],
+    });
+  });
+
+  it('fetches an ETag before a mutation when the event was not loaded', async () => {
+    const fetchMock = mockFetch(
+      jsonResponse({ event, etag: '"fresh-etag"' }),
+      jsonResponse({
+        event: { ...event, title: 'Updated' },
+        etag: '"updated-etag"',
+      }),
+    );
+    const repository = createRepository(fetchMock);
+
+    await repository.updateEvent(calendarId, eventId, { title: 'Updated' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toContain('/v1/calendar/event?');
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).get('If-Match'),
+    ).toBe('"fresh-etag"');
+  });
+
+  it('serializes the explicit alarm removal operation through the gateway', async () => {
+    const eventWithAlarm: CalendarEvent = {
+      ...event,
+      alarm: {
+        action: 'display',
+        trigger: { weeks: 0, days: 0, hours: 0, minutes: 15, seconds: 0 },
+      },
+    };
+    const fetchMock = mockFetch(
+      jsonResponse({ event: eventWithAlarm, etag: '"old-etag"' }),
+      jsonResponse({ event, etag: '"new-etag"' }),
+    );
+    const repository = createRepository(fetchMock);
+
+    await expect(
+      repository.updateEvent(calendarId, eventId, {
+        alarm: { operation: 'remove' },
+      }),
+    ).resolves.toEqual(event);
+
+    const requestBody = fetchMock.mock.calls[1][1]?.body;
+    expect(requestBody).toBe(
+      JSON.stringify({ alarm: { operation: 'remove' } }),
+    );
+    expect(JSON.parse(requestBody as string)).toEqual({
+      alarm: { operation: 'remove' },
+    });
+  });
+
+  it('clears a stale ETag after conflict so a retry reloads current state', async () => {
+    const fetchMock = mockFetch(
+      jsonResponse({
+        events: [{ event, etag: '"stale-etag"' }],
+        diagnostics: [],
+      }),
+      new Response('', { status: 409 }),
+      jsonResponse({ event, etag: '"fresh-etag"' }),
+      jsonResponse({
+        event: { ...event, title: 'Retry' },
+        etag: '"retry-etag"',
+      }),
+    );
+    const repository = createRepository(fetchMock);
+
+    await repository.listEvents([calendarId], {
+      start: '2026-09-24T00:00:00Z',
+      end: '2026-09-25T00:00:00Z',
+    });
+
+    await expect(
+      repository.updateEvent(calendarId, eventId, { title: 'Conflict' }),
+    ).rejects.toMatchObject({ code: 'event-conflict' });
+
+    await expect(
+      repository.updateEvent(calendarId, eventId, { title: 'Retry' }),
+    ).resolves.toMatchObject({ title: 'Retry' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[2][0]).toContain('/v1/calendar/event?');
+    expect(
+      new Headers(fetchMock.mock.calls[3][1]?.headers).get('If-Match'),
+    ).toBe('"fresh-etag"');
+  });
+
+  it('maps a gateway authentication failure to the repository contract', async () => {
+    const repository = createRepository(
+      mockFetch(new Response('', { status: 401 })),
+    );
+
+    await expect(repository.listCalendars()).rejects.toEqual(
+      new CalendarRepositoryError(
+        'authentication-required',
+        'Calendar gateway authentication is required',
+      ),
+    );
+  });
+
+  it('creates and deletes through the gateway', async () => {
+    const created = {
+      ...event,
+      id: 'https://radicale.example.test/alice/team/new.ics',
+      uid: 'new@example.test',
+      title: 'New event',
+    };
+    const fetchMock = mockFetch(
+      jsonResponse({ event: created, etag: '"created-etag"' }),
+      new Response(null, { status: 204 }),
+    );
+    const repository = createRepository(fetchMock);
+
+    await expect(
+      repository.createEvent(calendarId, {
+        uid: created.uid,
+        title: created.title,
+        timing: created.timing,
+      }),
+    ).resolves.toEqual(created);
+
+    await expect(
+      repository.deleteEvent(calendarId, created.id),
+    ).resolves.toBeUndefined();
+
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('DELETE');
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).get('If-Match'),
+    ).toBe('"created-etag"');
+  });
+});
+
+function createRepository(
+  fetchImpl: typeof fetch,
+  timezone = 'UTC',
+): GatewayCalendarRepository {
+  return new GatewayCalendarRepository({
+    baseUrl: 'https://widget-api.example.test',
+    roomId: '!team:example.test',
+    getAuthorizationHeader: async () => 'MX-Identity delegated',
+    getViewerTimezone: () => timezone,
+    fetchImpl,
+  });
+}
+
+function mockFetch(...responses: Response[]) {
+  const mock = vi.fn<typeof fetch>();
+  for (const response of responses) {
+    mock.mockResolvedValueOnce(response);
+  }
+  return mock;
+}
+
+function jsonResponse(value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}

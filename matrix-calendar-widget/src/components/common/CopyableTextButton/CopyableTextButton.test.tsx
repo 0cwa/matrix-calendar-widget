@@ -16,7 +16,7 @@
 
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { expect } from 'vitest';
+import { expect, vi } from 'vitest';
 import { axe } from 'vitest-axe';
 import { CopyableTextButton } from './CopyableTextButton';
 
@@ -42,10 +42,48 @@ describe('<CopyableTextButton/>', () => {
     await userEvent.click(copyButton);
 
     expect(navigator.clipboard.writeText).toBeCalledWith('Hallo world');
-    expect(screen.getByTestId('CheckOutlinedIcon')).toBeInTheDocument();
+    await screen.findByTestId('CheckOutlinedIcon');
 
     await userEvent.tab();
     expect(screen.getByTestId('ContentCopyOutlinedIcon')).toBeInTheDocument();
+  });
+
+  it('shows copy success only after the clipboard write resolves', async () => {
+    const writeText = vi
+      .spyOn(navigator.clipboard, 'writeText')
+      .mockReturnValueOnce(new Promise<void>(() => undefined));
+    render(<CopyableTextButton text="Calendar URL" label="Copy URL" />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy URL' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Copy URL' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copied' })).toBeNull();
+    writeText.mockRestore();
+  });
+
+  it('does not show success when clipboard writing rejects', async () => {
+    const onCopyError = vi.fn();
+    const writeText = vi
+      .spyOn(navigator.clipboard, 'writeText')
+      .mockRejectedValueOnce(new Error('Clipboard unavailable'));
+    render(
+      <CopyableTextButton
+        label="Copy URL"
+        onCopyError={onCopyError}
+        text="Calendar URL"
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy URL' }));
+
+    expect(onCopyError).toHaveBeenCalledOnce();
+    expect(
+      screen.getByRole('button', { name: 'Copy URL' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copied' })).toBeNull();
+    writeText.mockRestore();
   });
 
   it('should have no accessibility violations', async () => {

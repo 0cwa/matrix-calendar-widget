@@ -12,8 +12,10 @@
   "calendarEvents": {
     "delete": {
       "confirm": "Löschen",
+      "conflict": "Dieser Termin wurde an anderer Stelle geändert. Die neueste Version wurde geladen; prüfe sie und versuche das Löschen erneut, wenn du fortfahren möchtest.",
       "description": "„{{title}}“ löschen? Dies kann nicht rückgängig gemacht werden.",
       "error": "Der Termin konnte nicht gelöscht werden.",
+      "recurringDescription": "„{{title}}“ löschen? Dadurch wird die gesamte Terminserie einschließlich aller Termine gelöscht. Dieser Vorgang kann nicht rückgängig gemacht werden.",
       "title": "Termin löschen"
     },
     "details": {
@@ -21,34 +23,151 @@
       "close": "Schließen",
       "delete": "Löschen",
       "edit": "Bearbeiten",
-      "location": "Ort"
+      "location": "Ort",
+      "occurrenceConflict": "Dieser Termin wurde an anderer Stelle geändert. Lade den Kalender neu und versuche es erneut.",
+      "occurrenceError": "Der einzelne Termin konnte nicht aktualisiert werden.",
+      "restoreOccurrence": "Diesen Termin wiederherstellen",
+      "restoreSkippedOccurrence": "Wiederherstellen",
+      "seriesOccurrenceActions": "Dies ist ein einzelner Termin einer Terminserie. Wenn du ihn bearbeitest oder löschst, betrifft das die gesamte Serie.",
+      "skipOccurrence": "Diesen Termin auslassen",
+      "skippedOccurrences": "Ausgelassene Termine"
     },
     "editor": {
+      "addAdditionalDate": "Termin hinzufügen",
+      "additionalDate": "Zusätzlicher Termin",
+      "additionalDates": "Zusätzliche Wiederholungstermine",
+      "afterCount": "Nach Anzahl der Termine",
+      "alarmBoundary": "Hier wird ein CalDAV-Anzeigealarm gespeichert, sofern der Client ihn unterstützt. Matrix-Erinnerungen werden davon getrennt zugestellt.",
+      "alarmLeadTime": "Zeit vor Beginn des Termins",
       "allDay": "Ganztägig",
+      "caldavAlarm": "CalDAV-Erinnerung",
       "calendar": "Kalender",
+      "cancelDateChange": "Terminänderung abbrechen",
+      "chooseWeekdays": "Wochentage auswählen",
+      "complexRecurrenceReadOnly": "Dieser Termin enthält zusätzliche Termine oder Ausnahmen. Die Wiederholung kann nicht bearbeitet werden; andere Änderungen erhalten diese Daten.",
+      "conflict": "Dieser Termin wurde an anderer Stelle geändert. Lade die neueste Version, bevor du es erneut versuchst.",
       "create": "Termin erstellen",
       "createTitle": "Termin erstellen",
+      "daily": "Täglich",
+      "dateWillBeAdded": "Der Termin wird beim Speichern hinzugefügt.",
+      "dateWillBeRemoved": "Der Termin wird beim Speichern entfernt.",
       "description": "Beschreibung",
       "editTitle": "Termin bearbeiten",
       "end": "Ende",
+      "ends": "Endet",
+      "floatingTime": "Zeit ohne Zeitzone (Anzeige in deiner lokalen Zeitzone)",
+      "frequency": "Häufigkeit",
+      "interval": "Wiederholen alle",
+      "invalidAlarm": "Gib eine positive Vorlaufzeit mit ganzzahligen Zeiteinheiten ein. Wochen können nicht mit anderen Einheiten kombiniert werden.",
       "invalidRange": "Das Ende muss nach dem Beginn liegen.",
+      "invalidRecurrence": "Prüfe die Wiederholungshäufigkeit, das Intervall und das Enddatum oder die Anzahl.",
       "invalidTimezone": "Gib eine gültige IANA-Zeitzone ein.",
       "location": "Ort",
+      "mixedFloatingTime": "Zeitpunkte ohne Zeitzone nutzen deine lokale Zeitzone; zonierte Zeitpunkte behalten ihre Zeitzone.",
+      "mixedTimezoneTime": "Jeder Zeitpunkt behält seine gespeicherte Zeitzone.",
+      "monthly": "Monatlich",
+      "never": "Nie",
+      "occurrenceCount": "Anzahl der Termine",
+      "onDate": "An einem Datum",
+      "periodDatesPreserved": "Termine mit Zeitraum bleiben unverändert.",
       "readOnly": "Dieser Kalender ist schreibgeschützt.",
+      "reloadError": "Die neueste Version des Termins konnte nicht geladen werden.",
+      "reloadLatest": "Neueste Version laden",
+      "remove": "Entfernen",
+      "removeAdditionalDate": "Zusätzlichen Termin entfernen",
+      "repeatOn": "Wiederholen an",
+      "repeats": "Wiederholt sich",
       "save": "Speichern",
       "saveError": "Der Termin konnte nicht gespeichert werden.",
+      "seriesOnly": "Änderungen gelten für die gesamte Terminserie.",
       "start": "Beginn",
+      "startWeekdayRequired": "Der Wochentag des Startdatums ist immer enthalten.",
       "timezone": "Zeitzone",
       "title": "Titel",
-      "titleRequired": "Ein Titel ist erforderlich."
+      "titleRequired": "Ein Titel ist erforderlich.",
+      "unsupportedAlarmReadOnly": "Dieser Termin enthält Alarmdaten, die dieser Editor nicht sicher ändern kann. Andere Änderungen erhalten sie.",
+      "unsupportedRecurrenceReadOnly": "Diese Wiederholungsregel oder Zeitzone wird nicht zur Bearbeitung unterstützt. Andere Änderungen erhalten die vorhandenen Daten.",
+      "untilDate": "Enddatum",
+      "weekdayFR": "Freitag",
+      "weekdayMO": "Montag",
+      "weekdayRuleLimit": "Wochentage lassen sich nur bei wöchentlicher Wiederholung ohne Enddatum oder Anzahl auswählen.",
+      "weekdaySA": "Samstag",
+      "weekdaySU": "Sonntag",
+      "weekdayTH": "Donnerstag",
+      "weekdayTU": "Dienstag",
+      "weekdayWE": "Mittwoch",
+      "weekly": "Wöchentlich",
+      "yearly": "Jährlich"
     },
     "empty": "Keine Termine gefunden, die den ausgewählten Filtern entsprechen.",
     "loadError": "Kalendertermine konnten nicht geladen werden.",
-    "title": "Kalendertermine"
+    "mixedCompatibilityNotice": "Mindestens ein Kalender unterstützt weitere Elementtypen. Das Widget zeigt und bearbeitet ausschließlich VEVENT-Termine.",
+    "title": "Kalendertermine",
+    "unsupportedOccurrenceProjection_one": "Ein Ereignis enthält Wiederholungs- oder Zeitzonenangaben, die die aktuelle Darstellung nicht sicher anzeigen kann.",
+    "unsupportedOccurrenceProjection_other": "Einige Ereignisse enthalten Wiederholungs- oder Zeitzonenangaben, die die aktuelle Darstellung nicht sicher anzeigen kann. Betroffene Ereignisse: {{count}}.",
+    "unsupportedRangeRecurrence_one": "Die aktuelle Darstellung kann Terminserien mit THISANDFUTURE-Bereichsausnahmen nicht sicher anzeigen. Betroffene Serien: {{count}}.",
+    "unsupportedRangeRecurrence_other": "Die aktuelle Darstellung kann Terminserien mit THISANDFUTURE-Bereichsausnahmen nicht sicher anzeigen. Betroffene Serien: {{count}}."
   },
   "calendarMonthPicker": {
     "chooseMonth": "Wähle einen Monat, der gewählte Monat ist {{date, datetime}}",
     "label": "{{date, datetime}}"
+  },
+  "calendars": {
+    "color": {
+      "action": "Kalenderfarbe bearbeiten",
+      "calendar": "Kalender",
+      "clear": "Farbe entfernen",
+      "error": "Die Kalenderfarbe konnte nicht gespeichert werden.",
+      "hint": "Gib eine sechsstellige Hex-Farbe ein, zum Beispiel #336699.",
+      "invalid": "Verwende eine sechsstellige Hex-Farbe im Format #RRGGBB.",
+      "label": "Farbe",
+      "submit": "Farbe speichern",
+      "title": "Kalenderfarbe bearbeiten"
+    },
+    "create": {
+      "action": "Kalender erstellen",
+      "error": "Der Kalender konnte nicht erstellt werden.",
+      "name": "Kalendername",
+      "submit": "Kalender erstellen",
+      "title": "Kalender erstellen"
+    },
+    "delete": {
+      "action": "Kalender löschen",
+      "calendar": "Kalender",
+      "description": "„{{name}}“ und alle enthaltenen Termine löschen? Dies kann nicht rückgängig gemacht werden.",
+      "error": "Der Kalender konnte nicht gelöscht werden.",
+      "safeguard": "Kalender mit nicht unterstützten oder unbekannten Daten sind geschützt und können hier nicht gelöscht werden.",
+      "submit": "Kalender löschen",
+      "title": "Kalender löschen"
+    },
+    "description": {
+      "action": "Kalenderbeschreibung bearbeiten",
+      "calendar": "Kalender",
+      "error": "Die Kalenderbeschreibung konnte nicht gespeichert werden.",
+      "label": "Beschreibung",
+      "submit": "Beschreibung speichern",
+      "title": "Kalenderbeschreibung bearbeiten"
+    },
+    "diagnostics": {
+      "action": "CalDAV-Sammlungs-URLs",
+      "copied": "Kopiert",
+      "copy": "URL kopieren",
+      "copyError": "Die Sammlungs-URL konnte nicht kopiert werden. Prüfe die Zwischenablage-Berechtigung und versuche es erneut.",
+      "description": "Kopiere eine Sammlungs-URL, wenn du Administratoren bei der Diagnose des Kalenderzugriffs hilfst. URLs werden als Text angezeigt und beim Auswählen nicht geöffnet.",
+      "empty": "Es sind keine Kalender-Sammlungs-URLs verfügbar.",
+      "loadError": "CalDAV-Diagnosedaten sind für diesen Raum nicht verfügbar.",
+      "loading": "Kalenderdiagnose wird geladen",
+      "title": "CalDAV-Sammlungsdiagnose"
+    },
+    "rename": {
+      "action": "Kalender umbenennen",
+      "calendar": "Kalender",
+      "error": "Der Kalender konnte nicht umbenannt werden.",
+      "name": "Kalendername",
+      "nameRequired": "Ein Kalendername ist erforderlich.",
+      "submit": "Kalender umbenennen",
+      "title": "Kalender umbenennen"
+    }
   },
   "calendarWeekPicker": {
     "chooseWeek": "Wähle eine Woche, die gewählte Woche ist {{range, daterange}}",
@@ -64,6 +183,7 @@
     "toParentRoom": "Zum übergeordneten Raum"
   },
   "copyableTextButton": {
+    "copied": "Kopiert",
     "copy-to-clipboard": "In die Zwischenablage kopieren"
   },
   "dateRangePicker": {
@@ -388,7 +508,7 @@
       "weekly_some_one": "Jede Woche am {{weekdays, list}}$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
       "weekly_some_other": "Jede {{count}}. Woche am {{weekdays, list}}$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
       "weekly_weekdays_one": "Jeden Montag bis Freitag$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
-      "weekly_weekdays_other": "Jede {{count}}. Woche von Montag bis Freitag{{weekdays, list}}$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
+      "weekly_weekdays_other": "Jede {{count}}. Woche von Montag bis Freitag$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
       "yearly_bymonthday_one": "Jeden {{monthLabel}} am $t(recurrenceEditor.ruleText.ordinal, {\"count\": {{bymonthday}}, \"ordinal\": true })$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
       "yearly_bymonthday_other": "Jedes {{count}}. Jahr am $t(recurrenceEditor.ruleText.ordinal, {\"count\": {{bymonthday}}, \"ordinal\": true }) {{monthLabel}}$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",
       "yearly_byweekday_one": "Jeden {{monthLabel}} am {{ordinalLabel}} {{byweekday}}$t(recurrenceEditor.ruleText.recurrenceEnd, {\"context\": \"{{recurrenceEnd}}\" })",

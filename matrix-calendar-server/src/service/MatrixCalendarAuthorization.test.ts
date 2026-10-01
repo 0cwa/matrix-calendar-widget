@@ -15,8 +15,12 @@
  */
 
 import { CalendarAuthorization } from '@matrix-calendar-widget/calendar';
-import { MatrixClient, PowerLevelsEventContent } from 'matrix-bot-sdk';
-import { instance, mock, when } from 'ts-mockito';
+import {
+  MatrixClient,
+  MatrixError,
+  PowerLevelsEventContent,
+} from 'matrix-bot-sdk';
+import { instance, mock, verify, when } from 'ts-mockito';
 import { StateEventName } from '../model/StateEventName';
 import {
   MATRIX_CALENDAR_EVENT_WRITE_POLICY,
@@ -62,6 +66,39 @@ describe('MatrixCalendarAuthorizationFactory', () => {
         action: 'read-events',
         calendarId: 'team',
       }),
+    ).resolves.toBe(false);
+    await expect(
+      authorization.isAllowed({
+        action: 'create-event',
+        calendarId: 'team',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it.each(['left', 'banned'])(
+    'denies calendar access to a %s user absent from the joined-member list',
+    async () => {
+      when(matrixClientMock.getJoinedRoomMembers(roomId)).thenResolve([]);
+
+      await expect(
+        authorization.isAllowed({ action: 'list-calendars' }),
+      ).resolves.toBe(false);
+      await expect(
+        authorization.isAllowed({
+          action: 'manage-calendar',
+          calendarId: 'team',
+        }),
+      ).resolves.toBe(false);
+    },
+  );
+
+  it('denies access when joined-member lookup fails', async () => {
+    when(matrixClientMock.getJoinedRoomMembers(roomId)).thenReject(
+      new Error('membership lookup failed'),
+    );
+
+    await expect(
+      authorization.isAllowed({ action: 'list-calendars' }),
     ).resolves.toBe(false);
     await expect(
       authorization.isAllowed({
@@ -123,6 +160,54 @@ describe('MatrixCalendarAuthorizationFactory', () => {
     ).resolves.toBe(false);
   });
 
+  it('requires joined membership before checking calendar manager power', async () => {
+    when(matrixClientMock.getJoinedRoomMembers(roomId)).thenResolve([
+      '@someone-else:example.test',
+    ]);
+
+    const factory = new MatrixCalendarAuthorizationFactory(
+      instance(matrixClientMock),
+    );
+
+    await expect(factory.canManageCalendars(userId, roomId)).resolves.toBe(
+      false,
+    );
+    verify(
+      matrixClientMock.getRoomStateEvent(
+        roomId,
+        StateEventName.M_ROOM_POWER_LEVELS_EVENT,
+        '',
+      ),
+    ).never();
+  });
+
+  it('allows joined calendar managers to access diagnostics', async () => {
+    const factory = new MatrixCalendarAuthorizationFactory(
+      instance(matrixClientMock),
+    );
+    setPowerLevels({
+      users: { [userId]: 50 },
+      state_default: 50,
+    });
+
+    await expect(factory.canManageCalendars(userId, roomId)).resolves.toBe(
+      true,
+    );
+  });
+
+  it('denies diagnostics to joined members below manager power', async () => {
+    const factory = new MatrixCalendarAuthorizationFactory(
+      instance(matrixClientMock),
+    );
+    setPowerLevels({
+      users: { [userId]: 49 },
+      state_default: 50,
+    });
+    await expect(factory.canManageCalendars(userId, roomId)).resolves.toBe(
+      false,
+    );
+  });
+
   it('supports dedicated Matrix power-level overrides', async () => {
     setPowerLevels({
       users: { [userId]: 50 },
@@ -149,14 +234,19 @@ describe('MatrixCalendarAuthorizationFactory', () => {
     ).resolves.toBe(false);
   });
 
-  it('falls back to Matrix defaults if no power-level event exists', async () => {
+  it('uses Matrix defaults only when the power-level event is missing', async () => {
     when(
       matrixClientMock.getRoomStateEvent(
         roomId,
         StateEventName.M_ROOM_POWER_LEVELS_EVENT,
         '',
       ),
-    ).thenReject(new Error('missing'));
+    ).thenReject(
+      new MatrixError(
+        { errcode: 'M_NOT_FOUND', error: 'State event not found' },
+        404,
+      ),
+    );
 
     await expect(
       authorization.isAllowed({
@@ -168,6 +258,42 @@ describe('MatrixCalendarAuthorizationFactory', () => {
       authorization.isAllowed({ action: 'create-calendar' }),
     ).resolves.toBe(false);
   });
+
+  it.each([
+    [
+      'a permission error',
+      new MatrixError({ errcode: 'M_FORBIDDEN', error: 'Forbidden' }, 403),
+    ],
+    ['a server error', new Error('homeserver unavailable')],
+    [
+      'an unrelated 404',
+      new MatrixError({ errcode: 'M_UNKNOWN', error: 'Unknown' }, 404),
+    ],
+  ])(
+    'denies writes and management when power-level lookup has %s',
+    async (_label, error) => {
+      when(
+        matrixClientMock.getRoomStateEvent(
+          roomId,
+          StateEventName.M_ROOM_POWER_LEVELS_EVENT,
+          '',
+        ),
+      ).thenReject(error);
+
+      await expect(
+        authorization.isAllowed({
+          action: 'create-event',
+          calendarId: 'team',
+        }),
+      ).resolves.toBe(false);
+      await expect(
+        authorization.isAllowed({
+          action: 'manage-calendar',
+          calendarId: 'team',
+        }),
+      ).resolves.toBe(false);
+    },
+  );
 
   function setPowerLevels(content: Partial<PowerLevelsEventContent>): void {
     when(

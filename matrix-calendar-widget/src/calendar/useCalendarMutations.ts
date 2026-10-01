@@ -15,6 +15,7 @@
  */
 
 import {
+  Calendar,
   CalendarEvent,
   CalendarEventId,
   CalendarEventInput,
@@ -26,6 +27,86 @@ import {
   useCalendarRepository,
   useInvalidateCalendarRepository,
 } from './CalendarRepositoryProvider';
+
+export function useCreateCalendar(): (name: string) => Promise<Calendar> {
+  const repository = useCalendarRepository();
+  const invalidate = useInvalidateCalendarRepository();
+
+  return useCallback(
+    async (name: string) => {
+      const calendar = await repository.createCalendar(name);
+      invalidate();
+      return calendar;
+    },
+    [invalidate, repository],
+  );
+}
+
+export function useRenameCalendar(): (
+  calendarId: CalendarId,
+  name: string,
+) => Promise<void> {
+  const repository = useCalendarRepository();
+  const invalidate = useInvalidateCalendarRepository();
+
+  return useCallback(
+    async (calendarId: CalendarId, name: string) => {
+      await repository.renameCalendar(calendarId, name);
+      invalidate();
+    },
+    [invalidate, repository],
+  );
+}
+
+export function useUpdateCalendarDescription(): (
+  calendarId: CalendarId,
+  description: string,
+) => Promise<void> {
+  const repository = useCalendarRepository();
+  const invalidate = useInvalidateCalendarRepository();
+
+  return useCallback(
+    async (calendarId: CalendarId, description: string) => {
+      await repository.updateCalendarDescription(calendarId, description);
+      invalidate();
+    },
+    [invalidate, repository],
+  );
+}
+
+export function useUpdateCalendarColor(): (
+  calendarId: CalendarId,
+  color: string,
+) => Promise<void> {
+  const repository = useCalendarRepository();
+  const invalidate = useInvalidateCalendarRepository();
+
+  return useCallback(
+    async (calendarId: CalendarId, color: string) => {
+      await repository.updateCalendarColor(calendarId, color);
+      invalidate();
+    },
+    [invalidate, repository],
+  );
+}
+
+export function useDeleteCalendar(): (calendarId: CalendarId) => Promise<void> {
+  const repository = useCalendarRepository();
+  const invalidate = useInvalidateCalendarRepository();
+
+  return useCallback(
+    async (calendarId: CalendarId) => {
+      try {
+        await repository.deleteCalendar(calendarId);
+      } finally {
+        // A failed DELETE can still have changed the server before its response
+        // was lost or reported partial collection failures.
+        invalidate();
+      }
+    },
+    [invalidate, repository],
+  );
+}
 
 export function useCreateCalendarEvent(): (
   calendarId: CalendarId,

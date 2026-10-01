@@ -17,6 +17,7 @@
 
 import Joi from 'joi';
 import { IAppConfiguration } from './IAppConfiguration';
+import { parseRoomCalendarBindings } from './service/RoomCalendarBindingResolver';
 
 const toBoolean = (
   value: string | undefined,
@@ -49,6 +50,15 @@ function createConfiguration() {
     access_token: process.env.ACCESS_TOKEN as string,
     homeserver_url: process.env.HOMESERVER_URL as string,
     radicale_url: process.env.RADICALE_URL,
+    room_calendar_bindings: parseRoomCalendarBindings(
+      process.env.ROOM_CALENDAR_BINDINGS,
+    ),
+    reminder_database_url: process.env.MATRIX_CALENDAR_REMINDER_DATABASE_URL,
+    reminder_database_tls_mode: process.env
+      .MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE as
+      | 'verify-full'
+      | 'trusted-private-network'
+      | undefined,
 
     meetingwidget_url: process.env.MEETINGWIDGET_URL as string,
     meetingwidget_name: process.env.MEETINGWIDGET_NAME ?? 'Matrix Calendar',
@@ -134,6 +144,14 @@ export const ValidationSchema = Joi.object({
   ACCESS_TOKEN: Joi.string().required(),
   HOMESERVER_URL: Joi.string().required().uri(),
   RADICALE_URL: Joi.string().uri(),
+  ROOM_CALENDAR_BINDINGS: Joi.string(),
+  MATRIX_CALENDAR_REMINDER_DATABASE_URL: Joi.string().uri({
+    scheme: ['postgres', 'postgresql'],
+  }),
+  MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE: Joi.string().valid(
+    'verify-full',
+    'trusted-private-network',
+  ),
 
   MEETINGWIDGET_URL: Joi.string().required().uri(),
   MEETINGWIDGET_NAME: Joi.string(),

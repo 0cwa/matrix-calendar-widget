@@ -12,8 +12,10 @@
   "calendarEvents": {
     "delete": {
       "confirm": "Delete",
+      "conflict": "This event changed elsewhere. The latest version was reloaded; review it and retry if you still want to delete it.",
       "description": "Delete “{{title}}”? This cannot be undone.",
       "error": "The event could not be deleted.",
+      "recurringDescription": "Delete “{{title}}”? This removes the entire recurring series, including every occurrence. This cannot be undone.",
       "title": "Delete event"
     },
     "details": {
@@ -21,34 +23,151 @@
       "close": "Close",
       "delete": "Delete",
       "edit": "Edit",
-      "location": "Location"
+      "location": "Location",
+      "occurrenceConflict": "This event changed elsewhere. Reload the calendar and retry.",
+      "occurrenceError": "The occurrence could not be updated.",
+      "restoreOccurrence": "Restore this occurrence",
+      "restoreSkippedOccurrence": "Restore",
+      "seriesOccurrenceActions": "This is one occurrence of a recurring series. Editing or deleting applies to the whole series.",
+      "skipOccurrence": "Skip this occurrence",
+      "skippedOccurrences": "Skipped occurrences"
     },
     "editor": {
+      "addAdditionalDate": "Add date",
+      "additionalDate": "Additional date",
+      "additionalDates": "Additional recurrence dates",
+      "afterCount": "After occurrences",
+      "alarmBoundary": "This stores a CalDAV display alarm for clients that support it. Matrix reminder delivery is separate.",
+      "alarmLeadTime": "Time before the event starts",
       "allDay": "All day",
+      "caldavAlarm": "CalDAV reminder",
       "calendar": "Calendar",
+      "cancelDateChange": "Cancel date change",
+      "chooseWeekdays": "Choose weekdays",
+      "complexRecurrenceReadOnly": "This event includes additional dates or exceptions. Recurrence editing is disabled, and other changes will preserve them.",
+      "conflict": "This event changed elsewhere. Reload the latest version before retrying.",
       "create": "Create event",
       "createTitle": "Create event",
+      "daily": "Daily",
+      "dateWillBeAdded": "The date will be added when you save.",
+      "dateWillBeRemoved": "The date will be removed when you save.",
       "description": "Description",
       "editTitle": "Edit event",
       "end": "End",
+      "ends": "Ends",
+      "floatingTime": "Floating time (shown in your local time zone)",
+      "frequency": "Frequency",
+      "interval": "Repeat every",
+      "invalidAlarm": "Enter a positive lead time using whole-number duration units. Weeks cannot be combined with other units.",
       "invalidRange": "The end must be after the start.",
+      "invalidRecurrence": "Check the recurrence frequency, interval, and end date or count.",
       "invalidTimezone": "Enter a valid IANA time zone.",
       "location": "Location",
+      "mixedFloatingTime": "Floating endpoints use your local time zone; zoned endpoints keep their saved time zone.",
+      "mixedTimezoneTime": "Each endpoint keeps its saved time zone.",
+      "monthly": "Monthly",
+      "never": "Never",
+      "occurrenceCount": "Number of occurrences",
+      "onDate": "On date",
+      "periodDatesPreserved": "Period-valued dates are kept unchanged.",
       "readOnly": "This calendar is read-only.",
+      "reloadError": "The latest event could not be loaded.",
+      "reloadLatest": "Reload latest",
+      "remove": "Remove",
+      "removeAdditionalDate": "Remove additional date",
+      "repeatOn": "Repeat on",
+      "repeats": "Repeats",
       "save": "Save",
       "saveError": "The event could not be saved.",
+      "seriesOnly": "Changes apply to the entire series.",
       "start": "Start",
+      "startWeekdayRequired": "The start date’s weekday is always included.",
       "timezone": "Time zone",
       "title": "Title",
-      "titleRequired": "A title is required."
+      "titleRequired": "A title is required.",
+      "unsupportedAlarmReadOnly": "This event contains alarm data this editor cannot safely change. Other event edits will preserve it.",
+      "unsupportedRecurrenceReadOnly": "This recurrence rule or time zone is not supported for editing. Other changes will preserve it.",
+      "untilDate": "Until date",
+      "weekdayFR": "Friday",
+      "weekdayMO": "Monday",
+      "weekdayRuleLimit": "Weekday selection requires every week with no end date or count.",
+      "weekdaySA": "Saturday",
+      "weekdaySU": "Sunday",
+      "weekdayTH": "Thursday",
+      "weekdayTU": "Tuesday",
+      "weekdayWE": "Wednesday",
+      "weekly": "Weekly",
+      "yearly": "Yearly"
     },
     "empty": "No events scheduled that match the selected filters.",
     "loadError": "Calendar events could not be loaded.",
-    "title": "Calendar events"
+    "mixedCompatibilityNotice": "One or more calendars support additional item types. The widget displays and edits VEVENT entries only.",
+    "title": "Calendar events",
+    "unsupportedOccurrenceProjection_one": "One event has recurrence or timezone data that the current renderer cannot safely display.",
+    "unsupportedOccurrenceProjection_other": "Some events have recurrence or timezone data that the current renderer cannot safely display. Affected events: {{count}}.",
+    "unsupportedRangeRecurrence_one": "The current renderer cannot safely display series with THISANDFUTURE range overrides. Affected series: {{count}}.",
+    "unsupportedRangeRecurrence_other": "The current renderer cannot safely display series with THISANDFUTURE range overrides. Affected series: {{count}}."
   },
   "calendarMonthPicker": {
     "chooseMonth": "Choose month, selected month is {{date, datetime}}",
     "label": "{{date, datetime}}"
+  },
+  "calendars": {
+    "color": {
+      "action": "Edit calendar color",
+      "calendar": "Calendar",
+      "clear": "Clear color",
+      "error": "The calendar color could not be saved.",
+      "hint": "Enter a six-digit hex color, such as #336699.",
+      "invalid": "Use a six-digit hex color in the form #RRGGBB.",
+      "label": "Color",
+      "submit": "Save color",
+      "title": "Edit calendar color"
+    },
+    "create": {
+      "action": "Create calendar",
+      "error": "The calendar could not be created.",
+      "name": "Calendar name",
+      "submit": "Create calendar",
+      "title": "Create calendar"
+    },
+    "delete": {
+      "action": "Delete calendar",
+      "calendar": "Calendar",
+      "description": "Delete “{{name}}” and all of its events? This cannot be undone.",
+      "error": "The calendar could not be deleted.",
+      "safeguard": "Calendars containing unsupported or unknown data are protected and cannot be deleted here.",
+      "submit": "Delete calendar",
+      "title": "Delete calendar"
+    },
+    "description": {
+      "action": "Edit calendar description",
+      "calendar": "Calendar",
+      "error": "The calendar description could not be saved.",
+      "label": "Description",
+      "submit": "Save description",
+      "title": "Edit calendar description"
+    },
+    "diagnostics": {
+      "action": "CalDAV collection URLs",
+      "copied": "Copied",
+      "copy": "Copy URL",
+      "copyError": "The collection URL could not be copied. Check clipboard permissions and try again.",
+      "description": "Copy a collection URL when helping an administrator diagnose calendar access. URLs are shown as text and will not open when selected.",
+      "empty": "No calendar collection URLs are available.",
+      "loadError": "CalDAV diagnostics are unavailable for this room.",
+      "loading": "Loading calendar diagnostics",
+      "title": "CalDAV collection diagnostics"
+    },
+    "rename": {
+      "action": "Rename calendar",
+      "calendar": "Calendar",
+      "error": "The calendar could not be renamed.",
+      "name": "Calendar name",
+      "nameRequired": "A calendar name is required.",
+      "submit": "Rename calendar",
+      "title": "Rename calendar"
+    }
   },
   "calendarWeekPicker": {
     "chooseWeek": "Choose week, selected week is {{range, daterange}}",
@@ -64,6 +183,7 @@
     "toParentRoom": "Back to parent room"
   },
   "copyableTextButton": {
+    "copied": "Copied",
     "copy-to-clipboard": "Copy to clipboard"
   },
   "dateRangePicker": {
