@@ -20,7 +20,6 @@ import {
   MiddlewareConsumer,
   Module,
   NestModule,
-  RequestMethod,
   VersioningType,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -149,9 +148,7 @@ const matrixClient = {
 })
 class PersonalOpenIdGatewayContractModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer
-      .apply(MatrixAuthMiddleware)
-      .forRoutes({ path: '*', method: RequestMethod.ALL });
+    consumer.apply(MatrixAuthMiddleware).forRoutes(CalendarGatewayController);
   }
 }
 

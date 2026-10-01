@@ -20,7 +20,6 @@ import {
   MiddlewareConsumer,
   Module,
   NestModule,
-  RequestMethod,
 } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import i18next from 'i18next';
@@ -86,6 +85,16 @@ import { WidgetLayoutService } from './service/WidgetLayoutService';
 import { DoesWidgetWithIdExistConstraint } from './validator/DoesWidgetWithIdExist';
 
 const logger = new Logger('app.module');
+const appControllers = [
+  CalendarGatewayController,
+  CommandController,
+  ConfigurationController,
+  HealthCheckController,
+  MeetingController,
+  WelcomeWorkflowController,
+  WidgetController,
+  GuestMemberController,
+];
 
 const appConfigurationFactory: FactoryProvider<IAppConfiguration> = {
   provide: ModuleProviderToken.APP_CONFIGURATION,
@@ -287,16 +296,7 @@ const i18nFactory: FactoryProvider<void> = {
       },
     }),
   ],
-  controllers: [
-    CalendarGatewayController,
-    CommandController,
-    ConfigurationController,
-    HealthCheckController,
-    MeetingController,
-    WelcomeWorkflowController,
-    WidgetController,
-    GuestMemberController,
-  ],
+  controllers: appControllers,
 
   providers: [
     appConfigurationFactory,
@@ -331,8 +331,6 @@ const i18nFactory: FactoryProvider<void> = {
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer
-      .apply(MatrixAuthMiddleware)
-      .forRoutes({ path: '*', method: RequestMethod.ALL });
+    consumer.apply(MatrixAuthMiddleware).forRoutes(...appControllers);
   }
 }
