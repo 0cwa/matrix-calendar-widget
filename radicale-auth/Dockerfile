@@ -12,6 +12,6 @@ USER radicale
 
 FROM runtime-base AS test
 COPY --chown=radicale:radicale tests /opt/radicale-auth/tests
-RUN python -m unittest discover -s /opt/radicale-auth/tests -v
+RUN /app/bin/python -m unittest discover -s /opt/radicale-auth/tests -v
 
 FROM runtime-base AS runtime
