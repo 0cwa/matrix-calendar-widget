@@ -28,13 +28,13 @@ const describeContract =
 describeContract('CalDAV VEVENT round-trip contract', () => {
   const baseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
   const username = process.env.CALDAV_USERNAME ?? 'calendar';
-  const password = process.env.CALDAV_PASSWORD ?? 'calendar-dev-password';
+  const openIdCredential = process.env.CALDAV_OPENID_CREDENTIAL ?? '';
   const calendarUrl = new URL(
     `${encodeURIComponent(username)}/contract-calendar/`,
     baseUrl,
   ).toString();
   const eventUrl = new URL('round-trip.ics', calendarUrl).toString();
-  const credentials = basicCredentialProvider(username, password);
+  const credentials = basicCredentialProvider(username, openIdCredential);
   const codec = new ICalendarEventCodec();
   let client: CalDavEventClient;
   let cleanupResourceUrls: string[] = [];
@@ -400,13 +400,13 @@ async function directPut(
 
 function basicCredentialProvider(
   username: string,
-  password: string,
+  credential: string,
 ): CalDavCredentialProvider {
   return {
     async getRequestHeaders() {
       return {
         Authorization: `Basic ${Buffer.from(
-          `${username}:${password}`,
+          `${username}:${credential}`,
           'utf8',
         ).toString('base64')}`,
       };

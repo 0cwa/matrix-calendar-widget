@@ -51,9 +51,10 @@ const memberId = '@contract-member:localhost';
 /**
  * This test-only middleware stands in for the Matrix identity proof boundary.
  * It sets the same request context consumed by the production guards and
- * controller; it does not claim to validate OpenID or exercise ADR009 token
- * delegation. The real Radicale service is reached with its supported local
- * password test account through ContractCalDavCredentialProviderFactory.
+ * controller; it does not claim to validate the gateway's incoming OpenID
+ * assertion. The real Radicale service is authenticated with the tagged proof
+ * minted by the local Synapse fixture and supplied through
+ * CALDAV_OPENID_CREDENTIAL.
  */
 @Injectable()
 class ContractIdentityMiddleware implements NestMiddleware {
@@ -84,9 +85,9 @@ class ContractIdentityMiddleware implements NestMiddleware {
 class ContractCalDavCredentialProviderFactory {
   forRequest(): CalDavCredentialProvider {
     const username = process.env.CALDAV_USERNAME ?? 'calendar';
-    const password = process.env.CALDAV_PASSWORD ?? 'calendar-dev-password';
+    const openIdCredential = process.env.CALDAV_OPENID_CREDENTIAL ?? '';
     const authorization = Buffer.from(
-      `${username}:${password}`,
+      `${username}:${openIdCredential}`,
       'utf8',
     ).toString('base64');
 

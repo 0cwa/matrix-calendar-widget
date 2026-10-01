@@ -34,28 +34,35 @@ else
   echo "==> Dev Matrix user already exists"
 fi
 
-echo "==> Starting Matrix-authenticated Radicale"
+echo "==> Building the project-owned OpenID-only Radicale image"
+"${COMPOSE[@]}" build radicale
+
+echo "==> Starting OpenID-authenticated Radicale"
 "${COMPOSE[@]}" up -d radicale
+
+echo "==> Minting a short-lived OpenID proof for the local Synapse fixture"
+OPENID_CREDENTIAL="$(node "$ROOT_DIR/dev/mint-openid-credential.mjs")"
 
 echo "==> Waiting for Radicale"
 for _ in $(seq 1 60); do
-  if curl --silent --fail -u "$MATRIX_USER:$MATRIX_PASSWORD" http://localhost:5232/ >/dev/null; then
+  if curl --silent --fail --max-time 3 -u "$MATRIX_USER:$OPENID_CREDENTIAL" http://localhost:5232/ >/dev/null; then
     break
   fi
   sleep 1
 done
-curl --silent --fail -u "$MATRIX_USER:$MATRIX_PASSWORD" http://localhost:5232/ >/dev/null
+curl --silent --fail --max-time 3 -u "$MATRIX_USER:$OPENID_CREDENTIAL" http://localhost:5232/ >/dev/null
 
 cat <<EOF
 Development services are ready.
 
 Matrix homeserver: http://localhost:8008
 Matrix user:       @$MATRIX_USER:localhost
-Matrix password:   $MATRIX_PASSWORD
 
 Radicale:          http://localhost:5232
 CalDAV username:   $MATRIX_USER
-CalDAV password:   $MATRIX_PASSWORD
+CalDAV auth:       short-lived Matrix OpenID proof
 
-These credentials are for local development only.
+The local fixture password is used only to create/sign in the development
+Synapse account and mint that proof. It is never sent to Radicale or the
+calendar gateway, and the script does not print it or the proof.
 EOF

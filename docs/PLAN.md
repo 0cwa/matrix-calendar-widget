@@ -36,10 +36,10 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 - [x] Resolve room membership and authorization context.
 - [x] Implement CalDAV service discovery and calendar enumeration against Radicale (#44/#49/#55/#56).
 - [x] Define the server-side Radicale credential/delegation strategy without handling user Matrix passwords (ADR009 / #54).
-- [ ] After #48's old external-plugin/Matrix-password acceptance is replaced, implement the clean-room Radicale 3.8.0.0 Auth module and pinned project-owned image (ADR024 / #48) for the validated personal actor's tagged, request-scoped OpenID proof. Reject untagged password credentials; do not include or invoke an external auth package.
+- [x] Implement the clean-room Radicale 3.8.0.0 Auth module and pinned project-owned image (ADR024 / #48) for the validated personal actor's tagged, request-scoped OpenID proof. Reject untagged credentials before homeserver I/O; do not include or invoke an external auth package.
 - [ ] Add the final personal actor OpenID gateway contract against a real Radicale container (#45): same-user calendar enumeration plus denial of non-members and failed authorization lookups before CalDAV I/O.
 
-PR #60's password-authenticated discovery contract is historical evidence about the prior deployment and does not make Matrix-password CalDAV login supported in the owned pre-alpha image. The current #48 issue acceptance still reflects the superseded external-plugin/Matrix-password scope and must be rewritten before implementation. After that issue update, the remaining M2 path is in-repository work: implement the personal OpenID adapter and pinned image in #48, then validate same-user enumeration and fail-closed denial in #45. The actual etke-host image override and preservation of its existing `/data` volume remain unverified deployment gates.
+PR #60's password-authenticated discovery contract is historical evidence about the prior deployment and does not make Matrix-password CalDAV login supported in the owned pre-alpha image. Issue #48 now has the ADR024 scope and owns the first-party adapter, image, tests, and dev/contract integration. The remaining M2 gateway path is #45: validate same-user enumeration and fail-closed denial for non-members and failed authorization lookup before CalDAV I/O. The actual etke-host image override and preservation of its existing `/data` volume remain unverified deployment gates.
 
 **Exit:** the gateway can authenticate personal access with the validated actor's tagged Matrix OpenID proof, enumerate only that actor's calendars, and deny non-members or failed authorization lookups before CalDAV I/O. The owned backend rejects untagged Matrix-password credentials; support for any separate Radicale-native credential mode requires a future ADR.
 
@@ -136,8 +136,9 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [ ] Attachments/conference properties where safely interoperable.
 
 The recurring-resource contract uses the hosted CI stack pinned to Synapse
-v1.161.0 and Radicale 3.8.0.0 with `radicale_auth_matrix`. A passing result
-validates this stack only; the broader issue #6 criteria and M5 exit remain open.
+v1.161.0 and the project-owned Radicale 3.8.0.0 OpenID-only image. A passing
+result validates this stack only; the broader issue #6 criteria and M5 exit
+remain open.
 
 PR #130 completes the first write slice: recurrence controls are limited to
 four frequencies, interval, and an optional count or inclusive end date.

@@ -133,9 +133,8 @@ canonical calendar store.
    gateway, Radicale, Synapse, or Traefik logs.
 9. **Keep access disabled until the contracts pass.** This decision assigns
    the in-repository module and image to #48 for personal actor OpenID
-   delegation, but the current issue acceptance still reflects the prior
-   external-plugin/Matrix-password scope and must be updated before
-   implementation. Issue #45 remains the M2 real-Radicale contract for
+   delegation. Issue #48 now reflects this in-repository OpenID-only scope.
+   Issue #45 remains the M2 real-Radicale contract for
    same-user calendar enumeration and denial of non-members or failed
    authorization lookups before downstream I/O. M6 issue #7 owns the
    appservice-principal proof exchange and cross-room isolation acceptance.
