@@ -3,6 +3,17 @@
 - Status: Accepted
 - Date: 2026-09-23
 
+> **Supersession notice (ADR024, 2026-10-01):** ADR024 supersedes this ADR's
+> external-only implementation requirement and its conventional Matrix-
+> password CalDAV compatibility path. The owned Radicale backend accepts only
+> ADR009's explicitly tagged short-lived OpenID credential and rejects
+> untagged credentials; the pre-alpha does not support conventional CalDAV
+> login with Matrix passwords. No `radicale-auth-matrix` source or package is
+> included or invoked by the project-owned image. The tagged credential
+> format, identity checks, and security requirements below remain in force as
+> narrowed by ADR024. Any independent Radicale-native credential mode needs a
+> separate future ADR.
+
 ## Context
 
 ADR006 requires the widget to authenticate to the calendar gateway with Matrix

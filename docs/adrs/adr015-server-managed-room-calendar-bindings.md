@@ -62,10 +62,12 @@ but does not isolate rooms from a compromised gateway or service principal.
    server-side app-owned room principal. Credentials and short-lived OpenID
    assertions remain server-side. A Matrix sender ID is never a CalDAV
    principal or collection selector.
-7. **Retain the M2 and deployment gates.** This decision does not make room
-   CalDAV access available. Actual room-target CalDAV I/O still requires the
-   OpenID-capable Radicale plugin and delegated real-Radicale contract (#48
-   and #45). With `owner_only`, the app principal can access its whole home;
+7. **Retain the M2, M6, and deployment gates.** This decision does not make
+   room CalDAV access available. The M2 personal actor OpenID implementation
+   and real-Radicale contract (#48 and #45) are prerequisites for authenticated
+   widget requests. M6 issue #7 owns appservice proof issuance, room-target
+   authorization, and cross-room isolation acceptance. With `owner_only`, the
+   app principal can access its whole home;
    only app-owned room calendars may be placed there, and deployments must
    constrain that home to one trusted organizational boundary or validate
    equivalent per-room isolation before serving mutually untrusted rooms.
@@ -92,8 +94,9 @@ but does not isolate rooms from a compromised gateway or service principal.
   resume.
 - Personal calendar access and the deferred per-user bot-target policy remain
   unchanged.
-- ADR014's whole-home service-principal isolation requirement and the #48/#45
-  OpenID plugin/contract prerequisites remain in force.
+- ADR014's whole-home service-principal isolation requirement remains in
+  force. M2 #48/#45 cover personal actor authentication; M6 issue #7 owns the
+  appservice proof and room-isolation gates.
 
 ## Acceptance gates for a future implementation
 
@@ -109,5 +112,5 @@ but does not isolate rooms from a compromised gateway or service principal.
 - Widget and bot room operations retain ADR014 actor identity, current
   membership, action-power, credential-redaction, and owner-only isolation
   requirements.
-- End-to-end room CalDAV operations remain disabled until #48/#45 and the
-  deployment trust-domain gate pass.
+- End-to-end room CalDAV operations remain disabled until M2 #48/#45, M6
+  issue #7, and the deployment trust-domain gate pass.
