@@ -20,6 +20,7 @@ import { appendFileSync } from 'node:fs';
 import {
   CalDavCredentialProvider,
   CalDavEventClient,
+  CalDavEventTransportError,
   ICalendarEventCodec,
 } from '../../src/caldav';
 
@@ -36,6 +37,24 @@ function markPeriodRemovalStage(stage: string): void {
     appendFileSync(stageFile, `${stage}\n`, 'utf8');
   } catch {
     // Diagnostics must not change contract-test behavior.
+  }
+}
+
+function markSeedPutFailure(error: unknown): void {
+  if (!(error instanceof CalDavEventTransportError)) {
+    markPeriodRemovalStage('seed-put-transport');
+    return;
+  }
+
+  const status = error.status;
+  if (status !== undefined && status >= 400 && status < 500) {
+    markPeriodRemovalStage('seed-put-4xx');
+  } else if (status !== undefined && status >= 500 && status < 600) {
+    markPeriodRemovalStage('seed-put-5xx');
+  } else if (status !== undefined) {
+    markPeriodRemovalStage('seed-put-other-status');
+  } else {
+    markPeriodRemovalStage('seed-put-transport');
   }
 }
 
@@ -227,7 +246,12 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     );
     cleanupResourceUrls = [resourceUrl];
 
-    await client.createEvent(resourceUrl, source);
+    try {
+      await client.createEvent(resourceUrl, source);
+    } catch (error) {
+      markSeedPutFailure(error);
+      throw error;
+    }
     markPeriodRemovalStage('period-resource-created');
     const before = await client.getEvent(resourceUrl);
     markPeriodRemovalStage('period-resource-read');

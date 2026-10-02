@@ -22,6 +22,10 @@ const periodRemoveTestTitle =
   'removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag';
 const safePeriodStages = new Set([
   'period-test-start',
+  'seed-put-4xx',
+  'seed-put-5xx',
+  'seed-put-transport',
+  'seed-put-other-status',
   'period-resource-created',
   'period-resource-read',
   'period-resource-parsed',
