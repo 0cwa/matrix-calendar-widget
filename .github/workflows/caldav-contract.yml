@@ -58,6 +58,7 @@ jobs:
           dev/caldav-contract-diagnostics.test.mjs
           dev/caldav-contract-diagnostics.mjs
           dev/assert-caldav-contract-logs.mjs
+          docs/STATUS.md
           matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts
 
       - name: Upload locked formatter output (temporary)
@@ -68,6 +69,7 @@ jobs:
             dev/caldav-contract-diagnostics.test.mjs
             dev/caldav-contract-diagnostics.mjs
             dev/assert-caldav-contract-logs.mjs
+            docs/STATUS.md
             matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts
           if-no-files-found: error
           retention-days: 1

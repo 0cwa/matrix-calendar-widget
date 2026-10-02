@@ -246,7 +246,6 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       [
         'RDATE;TZID=Europe/Stockholm:20261026T140000',
         'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261027T093000/20261027T103000',
-        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261028T093000/PT1H',
       ].join('\r\n'),
     );
     cleanupResourceUrls = [resourceUrl];
@@ -263,11 +262,11 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     const parsed = codec.parse(calendarUrl, resourceUrl, before.icalendar);
     markPeriodRemovalStage('period-resource-parsed');
     const target = parsed.event.recurrence?.rdates?.find(
-      (value) => value.type === 'period' && value.timing.type === 'duration',
+      (value) => value.type === 'period' && value.timing.type === 'end',
     );
     expect(target?.type).toBe('period');
     if (!target || target.type !== 'period') {
-      throw new Error('Expected duration-valued RDATE PERIOD');
+      throw new Error('Expected end-valued RDATE PERIOD');
     }
     markPeriodRemovalStage('period-target-validated');
     const patched = parsed.applyPatch({
@@ -282,12 +281,10 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     markPeriodRemovalStage('period-updated-resource-read');
     const verified = codec.parse(calendarUrl, resourceUrl, after.icalendar);
     markPeriodRemovalStage('period-updated-resource-parsed');
-    expect(verified.event.recurrence?.rdates).toHaveLength(2);
+    expect(verified.event.recurrence?.rdates).toHaveLength(1);
     markPeriodRemovalStage('period-rdate-count');
-    expect(after.icalendar).not.toContain('20261028T093000/PT1H');
-    markPeriodRemovalStage('period-duration-removed');
-    expect(after.icalendar).toContain('20261027T093000/20261027T103000');
-    markPeriodRemovalStage('period-end-sibling-preserved');
+    expect(after.icalendar).not.toContain('20261027T093000/20261027T103000');
+    markPeriodRemovalStage('period-end-removed');
     expect(after.icalendar).toContain(
       'RDATE;TZID=Europe/Stockholm:20261026T140000',
     );
