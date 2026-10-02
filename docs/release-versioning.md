@@ -7,12 +7,19 @@ the applicable M8 and operator gates are met.
 
 ## What the repository does today
 
-The workspace manifests currently use `0.0.0`; the application and library
-workspaces are private. The root manifest includes Changesets, and
+The named workspaces currently use version `0.0.0`. The root, widget, calendar,
+timezone-data, and E2E manifests are marked private. The server workspace
+manifest does not set `private`, so it lacks the package-level publish guard
+present on the other workspaces. The root manifest includes Changesets, and
 `.changeset/config.json` is present, but the repository has no release workflow
 or package-publishing workflow. The Changesets configuration uses restricted
 access and enables version/tag handling for private packages; that configuration
 alone does not publish releases.
+
+Before enabling any package-publishing workflow, either add an explicit private
+guard to the server workspace or separately decide and document its package
+release, API, and compatibility policy. The absence of a publish workflow does
+not replace that package-level release gate.
 
 The standalone Helm chart versions currently are `0.1.1` for the server,
 `0.2.0` for the widget, and `0.3.0` for the umbrella chart. Each chart's
@@ -36,15 +43,15 @@ container images, and charts are built. Do not treat workspace placeholder
 versions, chart metadata, or a mutable image tag as a substitute for that source
 tag.
 
-| Artifact                 | Version source and release mapping                                                                                                                                                                                                                              |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Source release           | Git tag `vX.Y.Z` on the reviewed release commit, with notes describing included components and known limits.                                                                                                                                                    |
-| Server image             | The server image built from that commit, tagged `X.Y.Z`; record the registry digest in the release notes. The current chart default repository is `ghcr.io/0cwa/matrix-calendar-server`.                                                                        |
-| Widget image             | The widget image built from that commit, tagged `X.Y.Z`; record the registry digest in the release notes. The current chart default repository is `ghcr.io/0cwa/matrix-calendar-widget`.                                                                        |
-| Radicale image           | The project-owned Radicale image built from that commit, tagged `X.Y.Z`; choose and document its registry destination before enabling publication. CI currently builds it locally as `matrix-calendar-widget/radicale-openid:ci`.                               |
-| Server and widget charts | Keep each chart's `version` as the SemVer version of that chart package. Set its `appVersion` to the corresponding application image version. Record the exact image digest in the deployment values or release record where the deployment system supports it. |
-| Umbrella chart           | Keep its `version` as the SemVer version of the chart package. Set child-chart dependencies to exact chart versions when packaging a release; wildcard local dependencies are not a release lock.                                                               |
-| Workspace packages       | Keep calendar and timezone libraries bundled as implementation dependencies of the application images. Do not publish them as standalone npm packages unless a separate package-support decision defines their public API and compatibility policy.             |
+| Artifact                 | Version source and release mapping                                                                                                                                                                                                                                                                                                             |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source release           | Git tag `vX.Y.Z` on the reviewed release commit, with notes describing included components and known limits.                                                                                                                                                                                                                                   |
+| Server image             | The server image built from that commit, tagged `X.Y.Z`; record the registry digest in the release notes. The current chart default repository is `ghcr.io/0cwa/matrix-calendar-server`.                                                                                                                                                       |
+| Widget image             | The widget image built from that commit, tagged `X.Y.Z`; record the registry digest in the release notes. The current chart default repository is `ghcr.io/0cwa/matrix-calendar-widget`.                                                                                                                                                       |
+| Radicale image           | The project-owned Radicale image built from that commit, tagged `X.Y.Z`; choose and document its registry destination before enabling publication. CI currently builds it locally as `matrix-calendar-widget/radicale-openid:ci`.                                                                                                              |
+| Server and widget charts | Keep each chart's `version` as the SemVer version of that chart package. Set its `appVersion` to the corresponding application image version. Record the exact image digest in the deployment values or release record where the deployment system supports it.                                                                                |
+| Umbrella chart           | Keep its `version` as the SemVer version of the chart package. Set child-chart dependencies to exact chart versions when packaging a release; wildcard local dependencies are not a release lock.                                                                                                                                              |
+| Workspace packages       | Keep calendar and timezone libraries bundled as implementation dependencies of the application images. Do not publish them as standalone npm packages unless a separate package-support decision defines their public API and compatibility policy. Resolve the server workspace's missing `private` flag before enabling package publication. |
 
 The source release tag is coordinated across the images in a release, but each
 chart package has its own chart `version`: a chart may change without changing
