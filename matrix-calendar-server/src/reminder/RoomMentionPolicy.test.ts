@@ -43,6 +43,7 @@ describe('authorizeRoomMentionScheduling', () => {
         users: { [actorUserId]: 50 },
         state_default: 50,
       }),
+      getRoomVersion: jest.fn().mockResolvedValue('10'),
     };
   });
 
@@ -74,6 +75,45 @@ describe('authorizeRoomMentionScheduling', () => {
     ).resolves.toBeUndefined();
   });
 
+  it.each([
+    ['1', ' +00050 ', '00050', 50],
+    ['3', ' +00050 ', '00050', 50],
+    ['9', ' +00050 ', '00050', 50],
+    ['9', ' -0001 ', '-0002', 0],
+  ])(
+    'accepts legacy room v%s signed integer strings with padding',
+    async (
+      roomVersion: string,
+      actorPower: string,
+      managePower: string,
+      fallback: number,
+    ) => {
+      state.getRoomVersion.mockResolvedValue(roomVersion);
+      state.getPowerLevels.mockResolvedValue({
+        users: { [actorUserId]: actorPower },
+        events: { [MATRIX_CALENDAR_MANAGE_POLICY]: managePower },
+        state_default: fallback,
+      });
+
+      await expect(
+        authorizeRoomMentionScheduling(request, state),
+      ).resolves.toEqual({ roomId, calendarId });
+    },
+  );
+
+  it('truncates room v3 fractional power levels before comparing', async () => {
+    state.getRoomVersion.mockResolvedValue('3');
+    state.getPowerLevels.mockResolvedValue({
+      users: { [actorUserId]: 50.9 },
+      events: { [MATRIX_CALENDAR_MANAGE_POLICY]: 50.1 },
+    });
+
+    await expect(authorizeRoomMentionScheduling(request, state)).resolves.toEqual({
+      roomId,
+      calendarId,
+    });
+  });
+
   it('uses the configured app action power override', async () => {
     state.getPowerLevels.mockResolvedValue({
       users: { [actorUserId]: 40 },
@@ -96,15 +136,17 @@ describe('authorizeRoomMentionScheduling', () => {
     ).resolves.toBeUndefined();
   });
 
-  it.each(['membership', 'power levels'])(
+  it.each(['membership', 'power levels', 'room version'])(
     'fails closed on a %s lookup error',
     async (lookup) => {
       if (lookup === 'membership') {
         state.getJoinedRoomMembers.mockRejectedValue(
           new Error('state unavailable'),
         );
-      } else {
+      } else if (lookup === 'power levels') {
         state.getPowerLevels.mockRejectedValue(new Error('state unavailable'));
+      } else {
+        state.getRoomVersion.mockRejectedValue(new Error('state unavailable'));
       }
 
       await expect(
@@ -130,6 +172,7 @@ describe('authorizeRoomMentionDelivery', () => {
         users: { [senderUserId]: 50 },
         events_default: 0,
       }),
+      getRoomVersion: jest.fn().mockResolvedValue('10'),
     };
   });
 
@@ -138,6 +181,78 @@ describe('authorizeRoomMentionDelivery', () => {
       roomId,
       calendarId,
     });
+  });
+
+  it('accepts legacy room v3 signed integer strings with padding', async () => {
+    state.getRoomVersion.mockResolvedValue('3');
+    state.getPowerLevels.mockResolvedValue({
+      users: { [senderUserId]: ' +00050 ' },
+      events: { 'm.room.message': '0000' },
+      notifications: { room: '+00050' },
+    });
+
+    await expect(authorizeRoomMentionDelivery(request, state)).resolves.toEqual({
+      roomId,
+      calendarId,
+    });
+  });
+
+  it('truncates room v3 fractional power levels before comparing', async () => {
+    state.getRoomVersion.mockResolvedValue('3');
+    state.getPowerLevels.mockResolvedValue({
+      users: { [senderUserId]: 50.9 },
+      events: { 'm.room.message': 50.1 },
+      notifications: { room: 50.9 },
+    });
+
+    await expect(authorizeRoomMentionDelivery(request, state)).resolves.toEqual({
+      roomId,
+      calendarId,
+    });
+  });
+
+  it.each([
+    ['10', '50'],
+    ['10', 50.9],
+    [undefined, '50'],
+    ['unknown', 50.9],
+  ])('rejects non-integer encodings for room version %s', async (version: string | undefined, power: string | number) => {
+    state.getRoomVersion.mockResolvedValue(version);
+    state.getPowerLevels.mockResolvedValue({
+      users: { [senderUserId]: power },
+      users_default: 100,
+      events_default: 0,
+      notifications: { room: 0 },
+    });
+
+    await expect(
+      authorizeRoomMentionDelivery(request, state),
+    ).resolves.toBeUndefined();
+  });
+
+  it.each([
+    '50.0',
+    '1e2',
+    '',
+    '9007199254740992',
+    '-9007199254740992',
+    9007199254740992,
+    -9007199254740992,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    null,
+  ])('fails closed on malformed or out-of-range legacy values: %p', async (power) => {
+    state.getRoomVersion.mockResolvedValue('9');
+    state.getPowerLevels.mockResolvedValue({
+      users: { [senderUserId]: power as never },
+      users_default: 100,
+      events_default: 0,
+      notifications: { room: 0 },
+    });
+
+    await expect(
+      authorizeRoomMentionDelivery(request, state),
+    ).resolves.toBeUndefined();
   });
 
   it('denies a sender who is not currently joined', async () => {
@@ -219,17 +334,24 @@ describe('authorizeRoomMentionDelivery', () => {
     expect(state.getPowerLevels).toHaveBeenCalledTimes(2);
   });
 
-  it.each(['membership', 'power levels'])('fails closed on a %s lookup error', async (lookup) => {
-    if (lookup === 'membership') {
-      state.getJoinedRoomMembers.mockRejectedValue(new Error('state unavailable'));
-    } else {
-      state.getPowerLevels.mockRejectedValue(new Error('state unavailable'));
-    }
+  it.each(['membership', 'power levels', 'room version'])(
+    'fails closed on a %s lookup error',
+    async (lookup) => {
+      if (lookup === 'membership') {
+        state.getJoinedRoomMembers.mockRejectedValue(
+          new Error('state unavailable'),
+        );
+      } else if (lookup === 'power levels') {
+        state.getPowerLevels.mockRejectedValue(new Error('state unavailable'));
+      } else {
+        state.getRoomVersion.mockRejectedValue(new Error('state unavailable'));
+      }
 
-    await expect(
-      authorizeRoomMentionDelivery(request, state),
-    ).resolves.toBeUndefined();
-  });
+      await expect(
+        authorizeRoomMentionDelivery(request, state),
+      ).resolves.toBeUndefined();
+    },
+  );
 
   it('uses Matrix default power when no power-level state event exists', async () => {
     state.getPowerLevels.mockResolvedValue(undefined);

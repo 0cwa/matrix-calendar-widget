@@ -18,13 +18,15 @@ import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
 import { MATRIX_CALENDAR_MANAGE_POLICY } from '../service/MatrixCalendarAuthorization';
 import { resolveRoomCalendarBinding } from '../service/RoomCalendarBindingResolver';
 
+export type RoomMentionPowerLevel = number | string;
+
 export interface RoomMentionPowerLevels {
-  readonly users?: Readonly<Record<string, number>>;
-  readonly users_default?: number;
-  readonly events?: Readonly<Record<string, number>>;
-  readonly events_default?: number;
-  readonly state_default?: number;
-  readonly notifications?: Readonly<Record<string, number>>;
+  readonly users?: Readonly<Record<string, RoomMentionPowerLevel>>;
+  readonly users_default?: RoomMentionPowerLevel;
+  readonly events?: Readonly<Record<string, RoomMentionPowerLevel>>;
+  readonly events_default?: RoomMentionPowerLevel;
+  readonly state_default?: RoomMentionPowerLevel;
+  readonly notifications?: Readonly<Record<string, RoomMentionPowerLevel>>;
 }
 
 /**
@@ -33,7 +35,13 @@ export interface RoomMentionPowerLevels {
  */
 export interface RoomMentionMatrixState {
   getJoinedRoomMembers(roomId: string): Promise<readonly string[]>;
+  /** Preserve raw string/number fields; do not coerce before policy evaluation. */
   getPowerLevels(roomId: string): Promise<RoomMentionPowerLevels | undefined>;
+  /**
+   * Resolve from m.room.create. Return "1" when an older create event omits
+   * content.room_version. Undefined means unknown; reject on lookup errors.
+   */
+  getRoomVersion(roomId: string): Promise<string | undefined>;
 }
 
 export interface RoomMentionScheduleRequest {
@@ -61,17 +69,24 @@ export async function authorizeRoomMentionScheduling(
     if (!members.includes(request.authenticatedActorUserId)) {
       return undefined;
     }
-    const powerLevels = await state.getPowerLevels(request.roomId);
+    const [powerLevels, roomVersion] = await Promise.all([
+      state.getPowerLevels(request.roomId),
+      state.getRoomVersion(request.roomId),
+    ]);
 
-    const actorPower =
-      powerLevels?.users?.[request.authenticatedActorUserId] ??
-      powerLevels?.users_default ??
-      0;
-    const managePower =
-      powerLevels?.events?.[MATRIX_CALENDAR_MANAGE_POLICY] ??
-      powerLevels?.state_default ??
-      50;
-    if (!isPowerLevel(actorPower) || !isPowerLevel(managePower)) {
+    const actorPower = effectivePowerLevel(
+      powerLevels?.users?.[request.authenticatedActorUserId],
+      powerLevels?.users_default,
+      0,
+      roomVersion,
+    );
+    const managePower = effectivePowerLevel(
+      powerLevels?.events?.[MATRIX_CALENDAR_MANAGE_POLICY],
+      powerLevels?.state_default,
+      50,
+      roomVersion,
+    );
+    if (actorPower === undefined || managePower === undefined) {
       return undefined;
     }
     if (actorPower < managePower) {
@@ -117,28 +132,38 @@ export async function authorizeRoomMentionDelivery(
   }
 
   try {
-    const [members, powerLevels] = await Promise.all([
+    const [members, powerLevels, roomVersion] = await Promise.all([
       state.getJoinedRoomMembers(request.roomId),
       state.getPowerLevels(request.roomId),
+      state.getRoomVersion(request.roomId),
     ]);
     if (!members.includes(request.applicationServiceSenderUserId)) {
       return undefined;
     }
 
-    const senderPower =
-      powerLevels?.users?.[request.applicationServiceSenderUserId] ??
-      powerLevels?.users_default ??
-      0;
-    const messagePower =
-      powerLevels?.events?.['m.room.message'] ??
-      powerLevels?.events_default ??
-      0;
-    const roomMentionPower = powerLevels?.notifications?.room ?? 50;
+    const senderPower = effectivePowerLevel(
+      powerLevels?.users?.[request.applicationServiceSenderUserId],
+      powerLevels?.users_default,
+      0,
+      roomVersion,
+    );
+    const messagePower = effectivePowerLevel(
+      powerLevels?.events?.['m.room.message'],
+      powerLevels?.events_default,
+      0,
+      roomVersion,
+    );
+    const roomMentionPower = effectivePowerLevel(
+      powerLevels?.notifications?.room,
+      undefined,
+      50,
+      roomVersion,
+    );
 
     if (
-      !isPowerLevel(senderPower) ||
-      !isPowerLevel(messagePower) ||
-      !isPowerLevel(roomMentionPower) ||
+      senderPower === undefined ||
+      messagePower === undefined ||
+      roomMentionPower === undefined ||
       senderPower < messagePower ||
       senderPower < roomMentionPower
     ) {
@@ -151,6 +176,58 @@ export async function authorizeRoomMentionDelivery(
   }
 }
 
-function isPowerLevel(value: number): boolean {
-  return Number.isInteger(value);
+/**
+ * Room versions 1–9 retain deprecated string and float encodings for power
+ * levels. Version 10 and later require integers. Since the injected state port
+ * supplies the room version, tolerate legacy encodings only for those versions.
+ */
+function normalizePowerLevel(
+  value: unknown,
+  roomVersion: string | undefined,
+): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value)) {
+    return value;
+  }
+
+  if (!supportsLegacyPowerLevelEncoding(roomVersion)) {
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!/^[+-]?[0-9]+$/.test(trimmed)) {
+      return undefined;
+    }
+    const parsed = Number(trimmed);
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
+  }
+
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  const truncated = Math.trunc(value);
+  return Number.isSafeInteger(truncated) ? truncated : undefined;
+}
+
+function supportsLegacyPowerLevelEncoding(
+  roomVersion: string | undefined,
+): boolean {
+  return roomVersion !== undefined && /^[1-9]$/.test(roomVersion);
+}
+
+/** Undefined means absent and may use the fallback; malformed is denied. */
+function effectivePowerLevel(
+  value: unknown,
+  fallback: unknown,
+  defaultValue: number,
+  roomVersion: string | undefined,
+): number | undefined {
+  if (value !== undefined) {
+    return normalizePowerLevel(value, roomVersion);
+  }
+  if (fallback !== undefined) {
+    return normalizePowerLevel(fallback, roomVersion);
+  }
+  return defaultValue;
 }
