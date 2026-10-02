@@ -559,7 +559,10 @@ function cloneCalendarEventPatch(
           ? {
               rdate: {
                 ...patch.recurrence.rdate,
-                value: cloneCalendarEventDateTime(patch.recurrence.rdate.value),
+                value:
+                  patch.recurrence.rdate.action === 'remove-period'
+                    ? cloneRecurrenceDate(patch.recurrence.rdate.value)
+                    : cloneCalendarEventDateTime(patch.recurrence.rdate.value),
               },
             }
           : { ...patch.recurrence };
@@ -578,8 +581,31 @@ function applyRecurrenceWrite(
   }
 
   if ('rdate' in write) {
-    const identity = calendarEventRecurrenceIdentity(write.rdate.value);
     const rdates = current?.rdates ?? [];
+    if (write.rdate.action === 'remove-period') {
+      const identity = recurrencePeriodIdentity(write.rdate.value);
+      let removed = false;
+      const nextRdates = rdates.filter((value) => {
+        if (removed || value.type !== 'period') {
+          return true;
+        }
+        if (recurrencePeriodIdentity(value) !== identity) {
+          return true;
+        }
+        removed = true;
+        return false;
+      });
+      const next: NonNullable<CalendarEvent['recurrence']> = {
+        ...current,
+        rdates: nextRdates,
+      };
+      if (nextRdates.length === 0) {
+        delete next.rdates;
+      }
+      return Object.keys(next).length > 0 ? next : undefined;
+    }
+
+    const identity = calendarEventRecurrenceIdentity(write.rdate.value);
     if (write.rdate.action === 'add') {
       const recurrenceWithoutExdates = current
         ? { ...currentEvent, recurrence: { ...current, exdates: [] } }
@@ -637,4 +663,12 @@ function applyRecurrenceWrite(
   }
 
   return Object.keys(next).length > 0 ? next : undefined;
+}
+
+function recurrencePeriodIdentity(
+  value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+): string {
+  return value.timing.type === 'end'
+    ? `period:end:${calendarEventRecurrenceIdentity(value.timing.start)}:${calendarEventRecurrenceIdentity(value.timing.end)}`
+    : `period:duration:${calendarEventRecurrenceIdentity(value.timing.start)}:${value.timing.duration.weeks}:${value.timing.duration.days}:${value.timing.duration.hours}:${value.timing.duration.minutes}:${value.timing.duration.seconds}:${value.timing.duration.isNegative}`;
 }

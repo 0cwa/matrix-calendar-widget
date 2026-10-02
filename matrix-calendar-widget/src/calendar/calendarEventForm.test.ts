@@ -786,13 +786,27 @@ describe('calendar event form adapter', () => {
         },
       },
     };
-    const values = calendarEventToFormValues(
-      {
-        ...event,
-        recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4', rdates: [period] },
+    const periodEvent: CalendarEvent = {
+      id: 'period-rdate-series',
+      calendarId: 'team',
+      uid: 'period-rdate-series@example.test',
+      title: 'Period RDATE series',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-09-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
       },
-      calendar,
-    );
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4', rdates: [period] },
+    };
+    const values = calendarEventToFormValues(periodEvent, calendar);
     expect(values.rdateValues).toEqual([period]);
     expect(
       calendarEventPatchFromForm({
