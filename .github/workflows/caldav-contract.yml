@@ -52,6 +52,9 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Test CalDAV report status sanitizer
+        run: node --test dev/caldav-contract-status.test.mjs
+
       - name: Start pinned Matrix and Radicale services
         run: bash dev/up.sh
 

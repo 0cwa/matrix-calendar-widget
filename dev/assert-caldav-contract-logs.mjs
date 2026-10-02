@@ -16,6 +16,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { safeContractCaseStatusLines } from './caldav-contract-status.mjs';
 
 const credential = process.env.CALDAV_OPENID_CREDENTIAL ?? '';
 const username = process.env.CALDAV_USERNAME ?? 'calendar';
@@ -119,28 +120,7 @@ if (failedSuites.length === 0) {
   process.stdout.write(
     'CalDAV contract tests failed; sensitive failure details are withheld.\n',
   );
-  for (const suite of failedSuites) {
-    const failureText = [
-      suite.message,
-      ...(suite.assertionResults ?? []).flatMap(
-        (test) => test.failureMessages ?? [],
-      ),
-    ].join('\n');
-    const statusAssertion = failureText.match(
-      /Expected: (\d{3})\s+Received: (\d{3})/,
-    );
-    if (statusAssertion) {
-      process.stdout.write(
-        `HTTP status assertion: expected ${statusAssertion[1]}, received ${statusAssertion[2]}\n`,
-      );
-    }
-    const stageDiagnostic = failureText.match(
-      /SAFE_CALDAV_CONTRACT_DIAGNOSTIC gateway_status=(\d{3}) middleware_calls=(\d+) authorization=(not-observed|present|absent) identity=(not-observed|actor|other|absent|rejected) userinfo_status=(none|(?:\d{3})(?:,\d{3})*) membership=(none|(?:yes|no)(?:,(?:yes|no))*) provider_calls=(\d+) caldav_status=(none|(?:\d{3})(?:,\d{3})*)/,
-    );
-    if (stageDiagnostic) {
-      process.stdout.write(
-        `Safe contract stages: gateway_status=${stageDiagnostic[1]}, middleware_calls=${stageDiagnostic[2]}, authorization=${stageDiagnostic[3]}, identity=${stageDiagnostic[4]}, userinfo_status=${stageDiagnostic[5]}, membership=${stageDiagnostic[6]}, provider_calls=${stageDiagnostic[7]}, caldav_status=${stageDiagnostic[8]}\n`,
-      );
-    }
+  for (const line of safeContractCaseStatusLines(testReport)) {
+    process.stdout.write(`${line}\n`);
   }
 }
