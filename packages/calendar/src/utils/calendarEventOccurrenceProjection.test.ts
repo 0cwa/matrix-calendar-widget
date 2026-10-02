@@ -699,6 +699,69 @@ describe('projectCalendarEventOccurrences', () => {
     ).toBe('2026-03-08T15:00:00.000Z');
   });
 
+  it('splits named-zone recurrence across viewer-local days', () => {
+    const event = timedEvent({
+      id: 'cross-zone-dst',
+      start: '2026-03-28T09:00:00',
+      end: '2026-03-28T10:00:00',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=3' },
+    });
+    const viewerDayWindows: CalendarTimeRange[] = [
+      {
+        start: '2026-03-28T07:00:00Z',
+        end: '2026-03-29T07:00:00Z',
+      },
+      {
+        start: '2026-03-29T07:00:00Z',
+        end: '2026-03-30T07:00:00Z',
+      },
+    ];
+
+    const results = viewerDayWindows.map((range) =>
+      projectCalendarEventOccurrences(
+        [event],
+        range,
+        'America/Los_Angeles',
+      ),
+    );
+
+    expect(results.map(({ diagnostics }) => diagnostics)).toEqual([[], []]);
+    expect(results[0].occurrences).toHaveLength(1);
+    expect(results[1].occurrences).toHaveLength(1);
+
+    const starts = results.flatMap(({ occurrences }) =>
+      occurrences.map(({ event: occurrence }) => {
+        if (
+          occurrence.timing.type !== 'timed' ||
+          occurrence.timing.start.type !== 'zoned'
+        ) {
+          throw new Error('Expected a named-zone timed occurrence');
+        }
+        return occurrence.timing.start;
+      }),
+    );
+
+    expect(starts).toEqual([
+      {
+        type: 'zoned',
+        local: '2026-03-28T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+      {
+        type: 'zoned',
+        local: '2026-03-29T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    ]);
+    expect(
+      starts.map(({ local, timezone }) =>
+        new Date(
+          calendarLocalDateTimeToUnixMillis(local, timezone),
+        ).toISOString(),
+      ),
+    ).toEqual(['2026-03-28T08:00:00.000Z', '2026-03-29T07:00:00.000Z']);
+  });
+
   it('omits RRULE gap instances without consuming COUNT and resolves overlaps to the first instant', () => {
     const event = timedEvent({
       id: 'stockholm-gap',
