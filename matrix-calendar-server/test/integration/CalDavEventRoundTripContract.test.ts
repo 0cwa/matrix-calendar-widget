@@ -245,7 +245,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       'RDATE;TZID=Europe/Stockholm:20261026T140000',
       [
         'RDATE;TZID=Europe/Stockholm:20261026T140000',
-        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261027T093000/20261027T103000',
+        'RDATE;VALUE=PERIOD:20261027T093000/20261027T103000',
       ].join('\r\n'),
     );
     cleanupResourceUrls = [resourceUrl];
