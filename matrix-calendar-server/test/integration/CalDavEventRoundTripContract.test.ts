@@ -245,8 +245,8 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       'RDATE;TZID=Europe/Stockholm:20261026T140000',
       [
         'RDATE;TZID=Europe/Stockholm:20261026T140000',
-        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm;X-KEEP=end:20261027T093000/20261027T103000',
-        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm;X-KEEP=duration:20261028T093000/PT1H',
+        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261027T093000/20261027T103000',
+        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261028T093000/PT1H',
       ].join('\r\n'),
     );
     cleanupResourceUrls = [resourceUrl];
@@ -284,9 +284,9 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     markPeriodRemovalStage('period-updated-resource-parsed');
     expect(verified.event.recurrence?.rdates).toHaveLength(2);
     markPeriodRemovalStage('period-rdate-count');
-    expect(after.icalendar).not.toContain('X-KEEP=duration');
+    expect(after.icalendar).not.toContain('20261028T093000/PT1H');
     markPeriodRemovalStage('period-duration-removed');
-    expect(after.icalendar).toContain('X-KEEP=end');
+    expect(after.icalendar).toContain('20261027T093000/20261027T103000');
     markPeriodRemovalStage('period-end-sibling-preserved');
     expect(after.icalendar).toContain(
       'RDATE;TZID=Europe/Stockholm:20261026T140000',
