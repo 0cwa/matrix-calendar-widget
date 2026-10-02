@@ -196,6 +196,57 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     });
   });
 
+  it('removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag', async () => {
+    const uid = `period-remove-${randomUUID()}@matrix-calendar-widget`;
+    const resourceUrl = new URL(
+      `${randomUUID()}-period.ics`,
+      calendarUrl,
+    ).toString();
+    const source = recurringCalendar(uid).replace(
+      'RDATE;TZID=Europe/Stockholm:20261026T140000',
+      [
+        'RDATE;TZID=Europe/Stockholm:20261026T140000',
+        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm;X-KEEP=end:20261027T093000/20261027T103000',
+        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm;X-KEEP=duration:20261028T093000/PT1H',
+      ].join('\r\n'),
+    );
+    cleanupResourceUrls = [resourceUrl];
+
+    await client.createEvent(resourceUrl, source);
+    const before = await client.getEvent(resourceUrl);
+    const parsed = codec.parse(calendarUrl, resourceUrl, before.icalendar);
+    const target = parsed.event.recurrence?.rdates?.find(
+      (value) => value.type === 'period' && value.timing.type === 'duration',
+    );
+    expect(target?.type).toBe('period');
+    if (!target || target.type !== 'period') {
+      throw new Error('Expected duration-valued RDATE PERIOD');
+    }
+    const patched = parsed.applyPatch({
+      recurrence: { rdate: { action: 'remove-period', value: target } },
+    });
+
+    await client.updateEvent(resourceUrl, before.etag, patched.icalendar);
+
+    const after = await client.getEvent(resourceUrl);
+    const verified = codec.parse(calendarUrl, resourceUrl, after.icalendar);
+    expect(verified.event.recurrence?.rdates).toHaveLength(2);
+    expect(after.icalendar).not.toContain('X-KEEP=duration');
+    expect(after.icalendar).toContain('X-KEEP=end');
+    expect(after.icalendar).toContain(
+      'RDATE;TZID=Europe/Stockholm:20261026T140000',
+    );
+    expect(after.icalendar).toContain('BEGIN:VTIMEZONE');
+    expect(after.icalendar).toContain(
+      'EXDATE;TZID=Europe/Stockholm:20261102T140000',
+    );
+    expect(after.icalendar).toContain('RECURRENCE-ID;TZID=Europe/Stockholm');
+    expect(after.icalendar).toContain(
+      'X-CLIENT-METADATA;X-PARAM=preserve-param',
+    );
+    expect(after.icalendar).toContain('X-OVERRIDE-MARKER;X-ORIGIN=external');
+  });
+
   it('overfetches floating and DATE boundary candidates without modifying their resources', async () => {
     const floatingUrl = new URL(
       `${randomUUID()}-floating.ics`,

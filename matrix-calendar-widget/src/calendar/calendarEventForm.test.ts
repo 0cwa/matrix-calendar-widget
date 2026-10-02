@@ -705,8 +705,28 @@ describe('calendar event form adapter', () => {
           timezone: 'America/New_York',
         },
       },
+      {
+        type: 'period',
+        timing: {
+          type: 'duration',
+          start: {
+            type: 'date-time',
+            value: {
+              local: '2026-11-01T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          duration: {
+            weeks: 0,
+            days: 0,
+            hours: 1,
+            minutes: 0,
+            seconds: 0,
+            isNegative: false,
+          },
+        },
+      },
     ]);
-    expect(values.rdatePeriodCount).toBe(1);
     expect(addValue).toEqual({
       type: 'date-time',
       value: {
@@ -749,6 +769,38 @@ describe('calendar event form adapter', () => {
         recurrenceChanged: true,
       }),
     ).toBe('invalid-recurrence');
+  });
+
+  it('serializes removal of an exact PERIOD RDATE', () => {
+    const period = {
+      type: 'period' as const,
+      timing: {
+        type: 'end' as const,
+        start: {
+          type: 'date-time' as const,
+          value: { local: '2026-11-01T09:00:00', timezone: 'Europe/Stockholm' },
+        },
+        end: {
+          type: 'date-time' as const,
+          value: { local: '2026-11-01T10:00:00', timezone: 'Europe/Stockholm' },
+        },
+      },
+    };
+    const values = calendarEventToFormValues(
+      {
+        ...event,
+        recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4', rdates: [period] },
+      },
+      calendar,
+    );
+    expect(values.rdateValues).toEqual([period]);
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        rdateChanged: true,
+        rdateOperation: { action: 'remove-period', value: period },
+      }).recurrence,
+    ).toEqual({ rdate: { action: 'remove-period', value: period } });
   });
 
   it('builds DATE and floating RDATE values in DTSTART form', () => {

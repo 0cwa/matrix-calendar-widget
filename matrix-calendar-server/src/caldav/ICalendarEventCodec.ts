@@ -100,11 +100,19 @@ export class ParsedICalendarEvent {
           this.listProjectionDiagnostic,
         );
       } else if (recurrenceWrite && 'rdate' in recurrenceWrite) {
-        assertPointRdateCanBeEdited(
-          this.event,
-          recurrenceWrite.rdate.value,
-          this.listProjectionDiagnostic,
-        );
+        if (recurrenceWrite.rdate.action === 'remove-period') {
+          assertPeriodRdateCanBeRemoved(
+            this.event,
+            recurrenceWrite.rdate.value,
+            this.listProjectionDiagnostic,
+          );
+        } else {
+          assertPointRdateCanBeEdited(
+            this.event,
+            recurrenceWrite.rdate.value,
+            this.listProjectionDiagnostic,
+          );
+        }
       } else {
         if (this.listProjectionDiagnostic === 'unsupported-recurrence') {
           throw unsupportedRecurrencePatch();
@@ -175,8 +183,13 @@ export class ParsedICalendarEvent {
       if (recurrenceWrite && 'exdate' in recurrenceWrite) {
         applyOccurrenceExdate(vevent, recurrenceWrite.exdate);
       } else if (recurrenceWrite && 'rdate' in recurrenceWrite) {
-        assertPointRdatePropertiesCanBeEdited(vevent, this.event);
-        applyPointRdate(calendar, vevent, recurrenceWrite.rdate, this.event);
+        if (recurrenceWrite.rdate.action === 'remove-period') {
+          assertRdatePropertiesCanBeEdited(vevent, this.event);
+          applyPeriodRdate(vevent, recurrenceWrite.rdate.value);
+        } else {
+          assertRdatePropertiesCanBeEdited(vevent, this.event);
+          applyPointRdate(calendar, vevent, recurrenceWrite.rdate, this.event);
+        }
         if (hasUnsupportedTimezoneRules(calendar, this.event.uid)) {
           throw unsupportedRecurrencePatch();
         }
@@ -427,9 +440,20 @@ function recurrenceWriteFromUnknown(
       !['action', 'value'].every((key) =>
         Object.prototype.hasOwnProperty.call(rdate, key),
       ) ||
-      (rdate.action !== 'add' && rdate.action !== 'remove')
+      (rdate.action !== 'add' &&
+        rdate.action !== 'remove' &&
+        rdate.action !== 'remove-period')
     ) {
       throw unsupportedRecurrencePatch();
+    }
+
+    if (rdate.action === 'remove-period') {
+      return {
+        rdate: {
+          action: 'remove-period',
+          value: recurrencePeriodFromUnknown(rdate.value),
+        },
+      };
     }
 
     return {
@@ -448,6 +472,84 @@ function recurrenceWriteFromUnknown(
   }
 
   return { rrule: fields.rrule as string | undefined };
+}
+
+function recurrencePeriodFromUnknown(
+  value: unknown,
+): Extract<CalendarEventRecurrenceDate, { type: 'period' }> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw unsupportedRecurrencePatch();
+  }
+  const period = value as Record<string, unknown>;
+  if (
+    Object.keys(period).length !== 2 ||
+    period.type !== 'period' ||
+    !Object.prototype.hasOwnProperty.call(period, 'timing') ||
+    !period.timing ||
+    typeof period.timing !== 'object' ||
+    Array.isArray(period.timing)
+  ) {
+    throw unsupportedRecurrencePatch();
+  }
+  const timing = period.timing as Record<string, unknown>;
+  if (timing.type === 'end') {
+    if (
+      Object.keys(timing).length !== 3 ||
+      !Object.prototype.hasOwnProperty.call(timing, 'start') ||
+      !Object.prototype.hasOwnProperty.call(timing, 'end')
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+    const start = recurrenceDateTimeFromUnknown(timing.start);
+    const end = recurrenceDateTimeFromUnknown(timing.end);
+    if (start.type === 'date' || end.type === 'date') {
+      throw unsupportedRecurrencePatch();
+    }
+    return { type: 'period', timing: { type: 'end', start, end } };
+  }
+  if (timing.type === 'duration') {
+    if (
+      Object.keys(timing).length !== 3 ||
+      !Object.prototype.hasOwnProperty.call(timing, 'start') ||
+      !Object.prototype.hasOwnProperty.call(timing, 'duration')
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+    const start = recurrenceDateTimeFromUnknown(timing.start);
+    const rawDuration = timing.duration;
+    if (
+      start.type === 'date' ||
+      !rawDuration ||
+      typeof rawDuration !== 'object' ||
+      Array.isArray(rawDuration)
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+    const duration = rawDuration as Record<string, unknown>;
+    const units = ['weeks', 'days', 'hours', 'minutes', 'seconds'] as const;
+    if (
+      Object.keys(duration).length !== 6 ||
+      units.some(
+        (unit) =>
+          !Number.isSafeInteger(duration[unit]) ||
+          (duration[unit] as number) < 0,
+      ) ||
+      typeof duration.isNegative !== 'boolean' ||
+      duration.isNegative ||
+      !units.some((unit) => (duration[unit] as number) > 0)
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
+    return {
+      type: 'period',
+      timing: {
+        type: 'duration',
+        start,
+        duration: duration as unknown as CalendarEventDuration,
+      },
+    };
+  }
+  throw unsupportedRecurrencePatch();
 }
 
 function readResourceAlarm(
@@ -716,7 +818,7 @@ function assertPointRdateCanBeEdited(
   validatePointRdateValue(value, timingStartAsDateTime(event.timing));
 }
 
-function assertPointRdatePropertiesCanBeEdited(
+function assertRdatePropertiesCanBeEdited(
   vevent: ICAL.Component,
   event: CalendarEvent,
 ): void {
@@ -748,8 +850,37 @@ function assertPointRdatePropertiesCanBeEdited(
       throw unsupportedRecurrencePatch();
     }
 
-    // PERIOD values remain opaque and are never combined with point values.
+    // PERIOD values are editable only through the remove-only operation below.
     if (valueKind[0] === 'period') {
+      const explicitValueType = property.getFirstParameter('value');
+      const tzid = property.getFirstParameter('tzid');
+      if (
+        (explicitValueType !== null &&
+          explicitValueType !== undefined &&
+          (typeof explicitValueType !== 'string' ||
+            explicitValueType.toUpperCase() !== 'PERIOD')) ||
+        (tzid !== null &&
+          tzid !== undefined &&
+          (typeof tzid !== 'string' || !tzid.trim()))
+      ) {
+        throw unsupportedRecurrencePatch();
+      }
+      for (const value of values) {
+        if (!(value instanceof ICAL.Period)) {
+          throw unsupportedRecurrencePatch();
+        }
+        const start = value.start;
+        const end = value.end;
+        if (
+          typeof tzid === 'string' &&
+          (start.zone === ICAL.Timezone.utcTimezone ||
+            (end instanceof ICAL.Time &&
+              end.zone === ICAL.Timezone.utcTimezone))
+        ) {
+          throw unsupportedRecurrencePatch();
+        }
+        readPeriodRdateValue(value, property);
+      }
       continue;
     }
 
@@ -783,6 +914,32 @@ function assertPointRdatePropertiesCanBeEdited(
       }
       validatePointRdateValue(readDateTimeValue(value, property), anchor);
     }
+  }
+}
+
+function assertPeriodRdateCanBeRemoved(
+  event: CalendarEvent,
+  value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+  listProjectionDiagnostic?: 'unsupported-recurrence',
+): void {
+  const recurrence = event.recurrence;
+  if (
+    listProjectionDiagnostic === 'unsupported-recurrence' ||
+    event.unsupportedTimezone ||
+    event.unsupportedRecurrence ||
+    !recurrence ||
+    !recurrence.rdates?.some(
+      (candidate) =>
+        recurrenceRdateIdentity(candidate) === recurrenceRdateIdentity(value),
+    )
+  ) {
+    throw unsupportedRecurrencePatch();
+  }
+  if (recurrence.rrule !== undefined) {
+    validateRecurrenceRule(
+      recurrence.rrule,
+      timingStartAsDateTime(event.timing),
+    );
   }
 }
 
@@ -841,7 +998,10 @@ function isValidLocalDateTime(value: string): boolean {
 function applyPointRdate(
   calendar: ICAL.Component,
   vevent: ICAL.Component,
-  operation: Extract<CalendarEventRecurrenceWrite, { rdate: unknown }>['rdate'],
+  operation: {
+    action: 'add' | 'remove';
+    value: CalendarEventDateTime;
+  },
   event: CalendarEvent,
 ): void {
   const targetIdentity = calendarEventRecurrenceIdentity(operation.value);
@@ -908,6 +1068,49 @@ function applyPointRdate(
     } else {
       property.setValues(remaining);
     }
+  }
+}
+
+function recurrenceRdateIdentity(value: CalendarEventRecurrenceDate): string {
+  if (value.type !== 'period') {
+    return `point:${calendarEventRecurrenceIdentity(value)}`;
+  }
+  const { timing } = value;
+  return timing.type === 'end'
+    ? `period:end:${calendarEventRecurrenceIdentity(timing.start)}:${calendarEventRecurrenceIdentity(timing.end)}`
+    : `period:duration:${calendarEventRecurrenceIdentity(timing.start)}:${timing.duration.weeks}:${timing.duration.days}:${timing.duration.hours}:${timing.duration.minutes}:${timing.duration.seconds}:${timing.duration.isNegative}`;
+}
+
+function applyPeriodRdate(
+  vevent: ICAL.Component,
+  target: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+): void {
+  const targetIdentity = recurrenceRdateIdentity(target);
+  for (const property of vevent.getAllProperties('rdate')) {
+    const values = property.getValues();
+    let removed = false;
+    const remaining = values.filter((value) => {
+      if (removed || !(value instanceof ICAL.Period)) {
+        return true;
+      }
+      if (
+        recurrenceRdateIdentity(readPeriodRdateValue(value, property)) !==
+        targetIdentity
+      ) {
+        return true;
+      }
+      removed = true;
+      return false;
+    });
+    if (!removed) {
+      continue;
+    }
+    if (remaining.length === 0) {
+      vevent.removeProperty(property);
+    } else {
+      property.setValues(remaining);
+    }
+    return;
   }
 }
 
@@ -1210,8 +1413,8 @@ function readRecurrenceDates(
     try {
       values = property.getValues();
     } catch {
-      // Keep malformed source data opaque in the parsed VCALENDAR. Point-RDATE
-      // writes preflight the raw property and fail closed before changing it.
+      // Keep malformed source data opaque in the parsed VCALENDAR. RDATE writes
+      // preflight the raw property and fail closed before changing it.
       return [];
     }
     return values.flatMap<CalendarEventRecurrenceDate>((value) => {
@@ -1220,42 +1423,48 @@ function readRecurrenceDates(
       }
 
       if (name === 'rdate' && value instanceof ICAL.Period) {
-        const start = value.start;
-        const end = value.end;
-        if (!(start instanceof ICAL.Time) || start.isDate) {
+        try {
+          return [readPeriodRdateValue(value, property)];
+        } catch {
           return [];
-        }
-
-        if (end instanceof ICAL.Time && !end.isDate) {
-          return [
-            {
-              type: 'period',
-              timing: {
-                type: 'end',
-                start: readDateTimeValue(start, property),
-                end: readDateTimeValue(end, property),
-              },
-            },
-          ];
-        }
-
-        if (value.duration instanceof ICAL.Duration) {
-          return [
-            {
-              type: 'period',
-              timing: {
-                type: 'duration',
-                start: readDateTimeValue(start, property),
-                duration: readDuration(value.duration),
-              },
-            },
-          ];
         }
       }
 
       return [];
     });
   });
+}
+
+function readPeriodRdateValue(
+  value: ICAL.Period,
+  property: ICAL.Property,
+): Extract<CalendarEventRecurrenceDate, { type: 'period' }> {
+  const start = value.start;
+  const end = value.end;
+  if (!(start instanceof ICAL.Time) || start.isDate) {
+    throw unsupportedRecurrencePatch();
+  }
+  if (end instanceof ICAL.Time && !end.isDate) {
+    return {
+      type: 'period',
+      timing: {
+        type: 'end',
+        start: readDateTimeValue(start, property),
+        end: readDateTimeValue(end, property),
+      },
+    };
+  }
+  if (value.duration instanceof ICAL.Duration) {
+    return {
+      type: 'period',
+      timing: {
+        type: 'duration',
+        start: readDateTimeValue(start, property),
+        duration: readDuration(value.duration),
+      },
+    };
+  }
+  throw unsupportedRecurrencePatch();
 }
 
 function readDateTimeProperty(property: ICAL.Property): CalendarEventDateTime {

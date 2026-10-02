@@ -247,7 +247,10 @@ export function CalendarEventEditorDialog({
         ? {
             ...current,
             rdateChanged: true,
-            rdateOperation: { action: 'remove', value },
+            rdateOperation:
+              value.type === 'period'
+                ? { action: 'remove-period', value }
+                : { action: 'remove', value },
           }
         : current,
     );
@@ -828,8 +831,12 @@ export function CalendarEventEditorDialog({
                         <Typography variant="body2">{label}</Typography>
                         <Button
                           aria-label={t(
-                            'calendarEvents.editor.removeAdditionalDate',
-                            'Remove additional date',
+                            value.type === 'period'
+                              ? 'calendarEvents.editor.removePeriodDate'
+                              : 'calendarEvents.editor.removeAdditionalDate',
+                            value.type === 'period'
+                              ? 'Remove period date'
+                              : 'Remove additional date',
                           ).concat(`: ${label}`)}
                           disabled={
                             Boolean(values.rdateOperation) ||
@@ -844,14 +851,6 @@ export function CalendarEventEditorDialog({
                       </Stack>
                     );
                   })}
-                  {(values.rdatePeriodCount ?? 0) > 0 && (
-                    <Typography color="text.secondary" variant="body2">
-                      {t(
-                        'calendarEvents.editor.periodDatesPreserved',
-                        'Period-valued dates are kept unchanged.',
-                      )}
-                    </Typography>
-                  )}
                   <TextField
                     disabled={
                       Boolean(values.rdateOperation) ||
@@ -955,6 +954,18 @@ export function CalendarEventEditorDialog({
 }
 
 function formatRdateValue(
+  value: import('@matrix-calendar-widget/calendar').CalendarEventRecurrenceDate,
+): string {
+  if (value.type === 'period') {
+    const { timing } = value;
+    return timing.type === 'end'
+      ? `${formatRdateDateTime(timing.start)} – ${formatRdateDateTime(timing.end)}`
+      : `${formatRdateDateTime(timing.start)} (${formatRdateDuration(timing.duration)})`;
+  }
+  return formatRdateDateTime(value);
+}
+
+function formatRdateDateTime(
   value: import('@matrix-calendar-widget/calendar').CalendarEventDateTime,
 ): string {
   switch (value.type) {
@@ -965,6 +976,19 @@ function formatRdateValue(
     case 'date-time':
       return `${value.value.local} ${value.value.timezone}`;
   }
+}
+
+function formatRdateDuration(
+  duration: import('@matrix-calendar-widget/calendar').CalendarEventDuration,
+): string {
+  const parts = [
+    duration.weeks && `${duration.weeks}w`,
+    duration.days && `${duration.days}d`,
+    duration.hours && `${duration.hours}h`,
+    duration.minutes && `${duration.minutes}m`,
+    duration.seconds && `${duration.seconds}s`,
+  ].filter(Boolean);
+  return `${duration.isNegative ? '−' : ''}${parts.join(' ') || '0s'}`;
 }
 
 function createEventUid(): string {
