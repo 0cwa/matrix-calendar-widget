@@ -26,7 +26,17 @@ export const PERIOD_CONTRACT_SUITE_PATH = fileURLToPath(
   ),
 );
 
-const PERIOD_FAILURE_CASES = [
+const CONTRACT_CASES = [
+  {
+    title:
+      'round-trips through the gateway core and a direct CalDAV client without data loss',
+    id: 'gateway-direct-client-round-trip',
+  },
+  {
+    title:
+      'round-trips a recurring master and detached overrides in one CalDAV resource',
+    id: 'recurring-master-detached-overrides',
+  },
   {
     title:
       'round-trips a TZID PERIOD RDATE with an explicit end through Radicale',
@@ -36,7 +46,16 @@ const PERIOD_FAILURE_CASES = [
     title: 'round-trips a TZID PERIOD RDATE with a duration through Radicale',
     id: 'period-duration',
   },
+  {
+    title:
+      'overfetches floating and DATE boundary candidates without modifying their resources',
+    id: 'floating-date-boundary-candidates',
+  },
 ];
+
+const PERIOD_CASES = CONTRACT_CASES.filter(({ id }) =>
+  id.startsWith('period-'),
+);
 
 const PERIOD_STAGES = [
   'put-start',
@@ -48,18 +67,18 @@ const PERIOD_STAGES = [
 ];
 
 export function safePeriodFailureLines(testReport) {
-  return collectPeriodCaseStatuses(testReport)
-    .filter(({ status }) => status === 'failed')
+  return collectContractCaseStatuses(testReport)
+    .filter(({ id, status }) => id.startsWith('period-') && status === 'failed')
     .map(({ id }) => `Known failed PERIOD contract case: ${id}`);
 }
 
-export function safePeriodCaseStatusLines(testReport) {
-  return collectPeriodCaseStatuses(testReport).map(
-    ({ id, status }) => `Known PERIOD case status: ${id}:${status}`,
+export function safeContractCaseStatusLines(testReport) {
+  return collectContractCaseStatuses(testReport).map(
+    ({ id, status }) => `Known contract case status: ${id}:${status}`,
   );
 }
 
-function collectPeriodCaseStatuses(testReport) {
+function collectContractCaseStatuses(testReport) {
   if (!testReport || !Array.isArray(testReport.testResults)) {
     return [];
   }
@@ -77,20 +96,20 @@ function collectPeriodCaseStatuses(testReport) {
       if (assertion?.status !== 'passed' && assertion?.status !== 'failed') {
         continue;
       }
-      for (const periodCase of PERIOD_FAILURE_CASES) {
-        if (assertion.title !== periodCase.title) {
+      for (const contractCase of CONTRACT_CASES) {
+        if (assertion.title !== contractCase.title) {
           continue;
         }
 
-        const currentStatus = statusByTitle.get(periodCase.title);
+        const currentStatus = statusByTitle.get(contractCase.title);
         if (assertion.status === 'failed' || !currentStatus) {
-          statusByTitle.set(periodCase.title, assertion.status);
+          statusByTitle.set(contractCase.title, assertion.status);
         }
       }
     }
   }
 
-  return PERIOD_FAILURE_CASES.map(({ title, id }) => ({
+  return CONTRACT_CASES.map(({ title, id }) => ({
     id,
     status: statusByTitle.get(title) ?? 'case-not-seen',
   }));
@@ -101,7 +120,7 @@ export function safePeriodStageLines(stageText, failedCaseIds) {
     return [];
   }
 
-  const knownCaseIds = new Set(PERIOD_FAILURE_CASES.map(({ id }) => id));
+  const knownCaseIds = new Set(PERIOD_CASES.map(({ id }) => id));
   const failedCases = new Set(
     failedCaseIds.filter((caseId) => knownCaseIds.has(caseId)),
   );
@@ -122,7 +141,7 @@ export function safePeriodStageLines(stageText, failedCaseIds) {
     }
   }
 
-  return PERIOD_FAILURE_CASES.filter(({ id }) => lastStageByCase.has(id)).map(
+  return PERIOD_CASES.filter(({ id }) => lastStageByCase.has(id)).map(
     ({ id }) => `Known PERIOD contract stage: ${id}:${lastStageByCase.get(id)}`,
   );
 }
@@ -232,9 +251,9 @@ function main() {
   const failedSuites = (testReport.testResults ?? []).filter(
     (suite) => suite?.status === 'failed',
   );
-  const caseStatusLines = safePeriodCaseStatusLines(testReport);
-  const failedCaseIds = PERIOD_FAILURE_CASES.filter(({ id }) =>
-    caseStatusLines.includes(`Known PERIOD case status: ${id}:failed`),
+  const caseStatusLines = safeContractCaseStatusLines(testReport);
+  const failedCaseIds = PERIOD_CASES.filter(({ id }) =>
+    caseStatusLines.includes(`Known contract case status: ${id}:failed`),
   ).map(({ id }) => id);
 
   if (failedSuites.length === 0) {

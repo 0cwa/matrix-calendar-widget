@@ -28,7 +28,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   PERIOD_CONTRACT_SUITE_PATH,
-  safePeriodCaseStatusLines,
+  safeContractCaseStatusLines,
   safePeriodFailureLines,
   safePeriodStageLines,
 } from './assert-caldav-contract-logs.mjs';
@@ -40,6 +40,12 @@ const EXPLICIT_END_TITLE =
   'round-trips a TZID PERIOD RDATE with an explicit end through Radicale';
 const DURATION_TITLE =
   'round-trips a TZID PERIOD RDATE with a duration through Radicale';
+const GATEWAY_ROUND_TRIP_TITLE =
+  'round-trips through the gateway core and a direct CalDAV client without data loss';
+const RECURRING_OVERRIDES_TITLE =
+  'round-trips a recurring master and detached overrides in one CalDAV resource';
+const FLOATING_DATE_TITLE =
+  'overfetches floating and DATE boundary candidates without modifying their resources';
 
 test('maps only exact failed PERIOD suite and source-title pairs', () => {
   const report = {
@@ -59,6 +65,42 @@ test('maps only exact failed PERIOD suite and source-title pairs', () => {
     'Known failed PERIOD contract case: period-explicit-end',
     'Known failed PERIOD contract case: period-duration',
   ]);
+});
+
+test('maps every fixed CalDAV contract title to a hardcoded ID', () => {
+  const report = {
+    testResults: [
+      {
+        name: PERIOD_CONTRACT_SUITE_PATH,
+        status: 'failed',
+        assertionResults: [
+          GATEWAY_ROUND_TRIP_TITLE,
+          RECURRING_OVERRIDES_TITLE,
+          EXPLICIT_END_TITLE,
+          DURATION_TITLE,
+          FLOATING_DATE_TITLE,
+        ].map((title) => ({
+          title,
+          status: 'failed',
+          failureMessages: ['private assertion sentinel'],
+        })),
+      },
+    ],
+  };
+
+  assert.deepEqual(safeContractCaseStatusLines(report), [
+    'Known contract case status: gateway-direct-client-round-trip:failed',
+    'Known contract case status: recurring-master-detached-overrides:failed',
+    'Known contract case status: period-explicit-end:failed',
+    'Known contract case status: period-duration:failed',
+    'Known contract case status: floating-date-boundary-candidates:failed',
+  ]);
+  assert.equal(
+    safeContractCaseStatusLines(report)
+      .join('\n')
+      .includes('private assertion sentinel'),
+    false,
+  );
 });
 
 test('reports exact PERIOD pass, fail, and case-not-seen statuses only', () => {
@@ -84,20 +126,26 @@ test('reports exact PERIOD pass, fail, and case-not-seen statuses only', () => {
     ],
   };
 
-  assert.deepEqual(safePeriodCaseStatusLines(report), [
-    'Known PERIOD case status: period-explicit-end:passed',
-    'Known PERIOD case status: period-duration:failed',
+  assert.deepEqual(safeContractCaseStatusLines(report), [
+    'Known contract case status: gateway-direct-client-round-trip:case-not-seen',
+    'Known contract case status: recurring-master-detached-overrides:case-not-seen',
+    'Known contract case status: period-explicit-end:passed',
+    'Known contract case status: period-duration:failed',
+    'Known contract case status: floating-date-boundary-candidates:case-not-seen',
   ]);
   assert.deepEqual(
-    safePeriodCaseStatusLines({
+    safeContractCaseStatusLines({
       testResults: [failedSuite('/untrusted/path', EXPLICIT_END_TITLE)],
     }),
     [
-      'Known PERIOD case status: period-explicit-end:case-not-seen',
-      'Known PERIOD case status: period-duration:case-not-seen',
+      'Known contract case status: gateway-direct-client-round-trip:case-not-seen',
+      'Known contract case status: recurring-master-detached-overrides:case-not-seen',
+      'Known contract case status: period-explicit-end:case-not-seen',
+      'Known contract case status: period-duration:case-not-seen',
+      'Known contract case status: floating-date-boundary-candidates:case-not-seen',
     ],
   );
-  const output = safePeriodCaseStatusLines(report).join('\n');
+  const output = safeContractCaseStatusLines(report).join('\n');
   for (const sentinel of sentinels) {
     assert.equal(output.includes(sentinel), false);
   }
@@ -266,8 +314,11 @@ test('prints only the fixed ID for a matching failed case', () => {
   assert.equal(
     result.stdout,
     'CalDAV contract tests failed; sensitive failure details are withheld.\n' +
-      'Known PERIOD case status: period-explicit-end:case-not-seen\n' +
-      'Known PERIOD case status: period-duration:failed\n',
+      'Known contract case status: gateway-direct-client-round-trip:case-not-seen\n' +
+      'Known contract case status: recurring-master-detached-overrides:case-not-seen\n' +
+      'Known contract case status: period-explicit-end:case-not-seen\n' +
+      'Known contract case status: period-duration:failed\n' +
+      'Known contract case status: floating-date-boundary-candidates:case-not-seen\n',
   );
   assert.equal(result.status, 0);
   assert.equal(result.stderr, '');
@@ -296,8 +347,11 @@ test('prints fixed passed and case-not-seen statuses without report details', ()
   assert.equal(
     result.stdout,
     'CalDAV contract test and service logs contain no protected authentication material.\n' +
-      'Known PERIOD case status: period-explicit-end:passed\n' +
-      'Known PERIOD case status: period-duration:case-not-seen\n',
+      'Known contract case status: gateway-direct-client-round-trip:case-not-seen\n' +
+      'Known contract case status: recurring-master-detached-overrides:case-not-seen\n' +
+      'Known contract case status: period-explicit-end:passed\n' +
+      'Known contract case status: period-duration:case-not-seen\n' +
+      'Known contract case status: floating-date-boundary-candidates:case-not-seen\n',
   );
   assert.equal(result.stdout.includes('private event sentinel'), false);
 });
@@ -324,8 +378,11 @@ test('prints only fixed stages from an exact runner-local sidecar', () => {
   assert.equal(
     result.stdout,
     'CalDAV contract tests failed; sensitive failure details are withheld.\n' +
-      'Known PERIOD case status: period-explicit-end:failed\n' +
-      'Known PERIOD case status: period-duration:case-not-seen\n' +
+      'Known contract case status: gateway-direct-client-round-trip:case-not-seen\n' +
+      'Known contract case status: recurring-master-detached-overrides:case-not-seen\n' +
+      'Known contract case status: period-explicit-end:failed\n' +
+      'Known contract case status: period-duration:case-not-seen\n' +
+      'Known contract case status: floating-date-boundary-candidates:case-not-seen\n' +
       'Known PERIOD contract stage: period-explicit-end:get-start\n',
   );
   assert.equal(result.stderr, '');
@@ -357,8 +414,11 @@ test('reports case-not-seen for path or title mismatches', () => {
   assert.equal(
     result.stdout,
     'CalDAV contract tests failed; sensitive failure details are withheld.\n' +
-      'Known PERIOD case status: period-explicit-end:case-not-seen\n' +
-      'Known PERIOD case status: period-duration:case-not-seen\n',
+      'Known contract case status: gateway-direct-client-round-trip:case-not-seen\n' +
+      'Known contract case status: recurring-master-detached-overrides:case-not-seen\n' +
+      'Known contract case status: period-explicit-end:case-not-seen\n' +
+      'Known contract case status: period-duration:case-not-seen\n' +
+      'Known contract case status: floating-date-boundary-candidates:case-not-seen\n',
   );
   assert.equal(result.status, 0);
   assert.equal(result.stdout.includes('sentinel'), false);
