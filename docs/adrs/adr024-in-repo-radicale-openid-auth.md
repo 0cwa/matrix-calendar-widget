@@ -12,10 +12,12 @@
 The personal OpenID backend and gateway contract are complete on the pinned
 development stack. PR #146 closed #48 with the clean-room Radicale 3.8.0.0 Auth
 module, project-owned image, tests, and dev/contract integration. PR #147
-closed #45 with the real-container contract for same-user calendar enumeration
-and denial of unauthorized, nonmember, and failed-authorization cases before
-CalDAV I/O. These results do not verify compatibility with the operator's
-etke-managed host or its image-override and `/data` replacement path.
+closed #45 with the real-container contract for same-user calendar enumeration,
+invalid-identity rejection, and nonmember denial before CalDAV I/O. A separate
+focused mocked `CalendarGatewayMembershipGuard` test covers membership and
+authorization lookup failures before downstream provider/fetch I/O. These
+results do not verify compatibility with the operator's etke-managed host or
+its image-override and `/data` replacement path.
 
 M6 issue #7 remains a separate gate for appservice-principal proof issuance,
 room authorization, and cross-room isolation. Room-target access remains
@@ -149,8 +151,10 @@ canonical calendar store.
 9. **Keep room-target access disabled until its contracts pass.** This decision
    assigned the in-repository module and image to #48 for personal actor
    OpenID delegation; PR #146 completed that work. PR #147 completed #45's
-   real-Radicale contract for same-user enumeration and denial of non-members
-   or failed authorization lookups before downstream I/O. M6 issue #7 owns the
+   real-Radicale contract for same-user enumeration, invalid-identity
+   rejection, and nonmember denial before CalDAV I/O. A focused mocked
+   `CalendarGatewayMembershipGuard` test covers membership/authorization
+   lookup failures before downstream provider/fetch I/O. M6 issue #7 owns the
    separate appservice-principal proof exchange and cross-room isolation
    acceptance. Room-target access remains disabled until #7 and the
    ADR014/ADR015 authorization gates pass and the operator's custom-image
@@ -236,8 +240,11 @@ supported Auth interface and does not add a new proxy identity protocol.
 - Tests prove that tagged personal OpenID proofs are accepted only for their
   exact Matrix subject and that untagged/other password credentials are
   rejected before any homeserver request.
-- M2 issue #45 tests same-user personal calendar enumeration and denial of
-  non-members or failed authorization lookups before CalDAV I/O.
+- M2 issue #45's real-container contract covers same-user enumeration,
+  invalid-identity rejection, and nonmember denial before CalDAV I/O. A
+  separate focused mocked `CalendarGatewayMembershipGuard` test covers
+  membership/authorization lookup failures before downstream provider/fetch
+  I/O.
 - M6 issue #7 tests that actor, membership, power, and exact binding checks
   precede appservice proof minting and CalDAV operations, and validates
   cross-room isolation under the appservice principal.

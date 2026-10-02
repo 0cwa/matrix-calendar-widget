@@ -49,11 +49,12 @@ distinct ownership paths and the initial room-target contract:
   selected by ADR024. PR #146 completed the OpenID-only backend and image for
   [#48](https://github.com/0cwa/matrix-calendar-widget/issues/48); PR #147
   completed the real-container gateway contract for
-  [#45](https://github.com/0cwa/matrix-calendar-widget/issues/45), including
-  same-user enumeration and fail-closed denial for non-members and failed
-  authorization lookups before CalDAV I/O. This validates the pinned
-  development stack only; the etke image override and `/data` host rehearsal
-  remain unverified deployment gates.
+  [#45](https://github.com/0cwa/matrix-calendar-widget/issues/45): same-user
+  enumeration, invalid-identity rejection, and nonmember denial before CalDAV
+  I/O. A separate focused mocked `CalendarGatewayMembershipGuard` test covers
+  membership/authorization lookup failures before downstream provider/fetch
+  I/O. This validates the pinned development stack only; the etke image
+  override and `/data` host rehearsal remain unverified deployment gates.
 - **Room-owned calendars** are planned to belong to the application principal.
   Their path will resolve a canonical Matrix room ID through an
   operator-managed static binding. The binding resolver and application-
