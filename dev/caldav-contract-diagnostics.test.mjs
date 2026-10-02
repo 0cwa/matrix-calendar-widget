@@ -51,6 +51,11 @@ test('reports static failed test identity without failure details', () => {
             location: { line: 222, column: 5 },
             failureMessages: ['private response body'],
           },
+          {
+            title: 'failure without test coordinates',
+            status: 'failed',
+            failureMessages: ['private response body without location'],
+          },
         ],
       },
     ],
@@ -68,6 +73,6 @@ test('reports static failed test identity without failure details', () => {
   );
   assert.doesNotMatch(
     output,
-    /secret-token|BEGIN:VCALENDAR|private title|response body/,
+    /secret-token|BEGIN:VCALENDAR|private title|response body|coordinates/,
   );
 });
