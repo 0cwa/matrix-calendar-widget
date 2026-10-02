@@ -144,7 +144,7 @@ describe('room calendar event listing', () => {
         'UTC',
         'room',
       ),
-    ).rejects.toMatchObject({ status: 400 });
+    ).rejects.toMatchObject({ status: 403 });
 
     expect(forAuthorizedTarget).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();

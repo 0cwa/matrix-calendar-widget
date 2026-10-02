@@ -302,7 +302,23 @@ describeContract('room appservice proof against real Radicale', () => {
     assertLogsOmitSecrets();
   });
 
-  it('rejects a mismatched room calendar before appservice proof or CalDAV I/O', async () => {
+  it('binds the Radicale OpenID subject to the configured service user, not the room sender', async () => {
+    const serviceProof = serviceOpenIdTokens[0];
+    if (serviceProof === undefined) {
+      throw new Error('Synthetic appservice OpenID proof is missing');
+    }
+
+    const [serviceSubject, roomSender] = await Promise.all([
+      matrixOpenIdSubject(serviceProof),
+      matrixUserIdForAccessToken(actorAccessToken),
+    ]);
+
+    expect(serviceSubject).toBe(serviceUserId);
+    expect(serviceSubject).not.toBe(roomSender);
+    assertLogsOmitSecrets();
+  });
+
+  it('forbids a cross-room calendar before appservice proof or CalDAV I/O', async () => {
     const proofCountBefore = serviceOpenIdTokens.length;
     const response = await gatewayRequest({
       roomId: roomIds[0],
@@ -441,6 +457,33 @@ async function matrixJson<T>(
   });
   if (!response.ok) throw new Error('Matrix contract fixture request failed');
   return (await response.json()) as T;
+}
+
+async function matrixOpenIdSubject(accessToken: string): Promise<string> {
+  const url = new URL('/_matrix/federation/v1/openid/userinfo', homeserverUrl);
+  url.searchParams.set('access_token', accessToken);
+  const response = await nativeFetch(url);
+  if (!response.ok) throw new Error('Synthetic OpenID subject is unavailable');
+  const result = (await response.json()) as { sub?: unknown };
+  if (typeof result.sub !== 'string') {
+    throw new Error('Synthetic OpenID subject is malformed');
+  }
+  return result.sub;
+}
+
+async function matrixUserIdForAccessToken(
+  accessToken: string,
+): Promise<string> {
+  const response = await nativeFetch(
+    new URL('/_matrix/client/v3/account/whoami', homeserverUrl),
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!response.ok) throw new Error('Synthetic room sender is unavailable');
+  const result = (await response.json()) as { user_id?: unknown };
+  if (typeof result.user_id !== 'string') {
+    throw new Error('Synthetic room sender is malformed');
+  }
+  return result.user_id;
 }
 
 function decodeIdentity(credential: string): {

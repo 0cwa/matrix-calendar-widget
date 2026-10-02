@@ -893,7 +893,7 @@ export class CalendarGatewayController {
             message: 'No calendar is configured for this Matrix room',
           });
         case 'request_calendar_mismatch':
-          throw new BadRequestException({
+          throw new ForbiddenException({
             code: 'room-calendar-target-mismatch',
             message: 'Requested calendar is not the configured room calendar',
           });
