@@ -759,7 +759,10 @@ describe('projectCalendarEventOccurrences', () => {
           calendarLocalDateTimeToUnixMillis(local, timezone),
         ).toISOString(),
       ),
-    ).toEqual(['2026-03-28T08:00:00.000Z', '2026-03-29T07:00:00.000Z']);
+    ).toEqual([
+      '2026-03-28T08:00:00.000Z',
+      '2026-03-29T07:00:00.000Z',
+    ]);
   });
 
   it('omits RRULE gap instances without consuming COUNT and resolves overlaps to the first instant', () => {
