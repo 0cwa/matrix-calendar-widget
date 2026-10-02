@@ -1,0 +1,2 @@
+vobject==0.9.9 \
+    --hash=sha256:0fbdb982065cf4d1843a5d5950c88510041c6de026bda49c3502721de1c6ac3d

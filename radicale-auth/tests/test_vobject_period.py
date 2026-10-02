@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime
 import unittest
+from importlib.metadata import version
 
 import vobject
 from radicale import utils
@@ -58,19 +59,24 @@ PERIOD_CALENDAR = "\r\n".join(
 
 
 class VObjectPeriodImageTests(unittest.TestCase):
+    def test_image_uses_the_released_vobject_version(self) -> None:
+        self.assertEqual(version("vobject"), "0.9.9")
+
     def test_radicale_reports_period_support(self) -> None:
         self.assertTrue(utils.vobject_supports_period())
 
     def test_tzid_period_end_and_duration_survive_parse_and_serialize(self) -> None:
         parsed = vobject.readOne(PERIOD_CALENDAR)
         periods = _period_values(parsed)
+        serialized = parsed.serialize()
 
         self.assertIsInstance(periods[0][0], datetime.datetime)
         self.assertIsInstance(periods[0][1], datetime.datetime)
         self.assertIsInstance(periods[1][0], datetime.datetime)
         self.assertIsInstance(periods[1][1], datetime.timedelta)
+        self.assertIn("TZID=Europe/Stockholm", serialized)
 
-        reparsed = vobject.readOne(parsed.serialize())
+        reparsed = vobject.readOne(serialized)
         self.assertEqual(_period_values(reparsed), periods)
 
 

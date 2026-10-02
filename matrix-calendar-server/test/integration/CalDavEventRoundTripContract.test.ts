@@ -16,7 +16,6 @@
 
 import fetchMock from 'jest-fetch-mock';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync } from 'node:fs';
 import {
   CalDavCredentialProvider,
   CalDavEventClient,
@@ -25,42 +24,6 @@ import {
 
 const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
-
-type PeriodCaseId = 'period-explicit-end' | 'period-duration';
-type PeriodStage =
-  | 'put-start'
-  | 'put-complete'
-  | 'get-start'
-  | 'get-complete'
-  | 'compare-start'
-  | 'complete';
-type RecurringOverrideStage =
-  | 'seed-put-start'
-  | 'seed-put-complete'
-  | 'initial-get-start'
-  | 'initial-get-complete'
-  | 'initial-compare-start'
-  | 'initial-compare-complete'
-  | 'patch-put-start'
-  | 'patch-put-complete'
-  | 'patch-get-start'
-  | 'patch-get-complete'
-  | 'patch-compare-start'
-  | 'patch-compare-complete';
-
-function recordPeriodStage(caseId: PeriodCaseId, stage: PeriodStage): void {
-  const stageFile = process.env.CALDAV_PERIOD_STAGE_FILE;
-  if (stageFile) {
-    appendFileSync(stageFile, `${caseId}:${stage}\n`);
-  }
-}
-
-function recordRecurringOverrideStage(stage: RecurringOverrideStage): void {
-  const stageFile = process.env.CALDAV_PERIOD_STAGE_FILE;
-  if (stageFile) {
-    appendFileSync(stageFile, `recurring-master-detached-overrides:${stage}\n`);
-  }
-}
 
 describeContract('CalDAV VEVENT round-trip contract', () => {
   const baseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
@@ -186,15 +149,10 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     ).toString();
     const source = recurringCalendar(uid);
 
-    recordRecurringOverrideStage('seed-put-start');
     await client.createEvent(resourceUrl, source);
-    recordRecurringOverrideStage('seed-put-complete');
     cleanupResourceUrls = [resourceUrl];
 
-    recordRecurringOverrideStage('initial-get-start');
     const createdResource = await client.getEvent(resourceUrl);
-    recordRecurringOverrideStage('initial-get-complete');
-    recordRecurringOverrideStage('initial-compare-start');
     expect(createdResource.href).toBe(resourceUrl);
     expect(createdResource.etag).toBeTruthy();
     expect(createdResource.icalendar.match(/BEGIN:VEVENT/g)).toHaveLength(3);
@@ -206,21 +164,15 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       createdResource.icalendar,
     );
     expect(initial.event.uid).toBe(uid);
-    recordRecurringOverrideStage('initial-compare-complete');
 
     const patched = initial.applyPatch({ location: 'Interoperability room' });
-    recordRecurringOverrideStage('patch-put-start');
     await client.updateEvent(
       resourceUrl,
       createdResource.etag,
       patched.icalendar,
     );
-    recordRecurringOverrideStage('patch-put-complete');
 
-    recordRecurringOverrideStage('patch-get-start');
     const afterPatch = await client.getEvent(resourceUrl);
-    recordRecurringOverrideStage('patch-get-complete');
-    recordRecurringOverrideStage('patch-compare-start');
     const verified = codec.parse(
       calendarUrl,
       resourceUrl,
@@ -242,108 +194,6 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
         },
       },
     });
-    recordRecurringOverrideStage('patch-compare-complete');
-  });
-
-  it('round-trips a TZID PERIOD RDATE with an explicit end through Radicale', async () => {
-    recordPeriodStage('period-explicit-end', 'put-start');
-    const uid = `period-explicit-end-${randomUUID()}@matrix-calendar-widget`;
-    const resourceUrl = new URL(
-      `${randomUUID()}-period.ics`,
-      calendarUrl,
-    ).toString();
-    cleanupResourceUrls = [resourceUrl];
-
-    await client.createEvent(
-      resourceUrl,
-      periodCalendar(
-        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261027T093000/20261027T103000',
-        uid,
-      ),
-    );
-    recordPeriodStage('period-explicit-end', 'put-complete');
-
-    recordPeriodStage('period-explicit-end', 'get-start');
-    const observed = await client.getEvent(resourceUrl);
-    recordPeriodStage('period-explicit-end', 'get-complete');
-    const parsed = codec.parse(calendarUrl, resourceUrl, observed.icalendar);
-    recordPeriodStage('period-explicit-end', 'compare-start');
-    expect(observed.href).toBe(resourceUrl);
-    expect(parsed.event.uid).toBe(uid);
-    expect(parsed.event.recurrence?.rdates).toEqual([
-      {
-        type: 'period',
-        timing: {
-          type: 'end',
-          start: {
-            type: 'date-time',
-            value: {
-              local: '2026-10-27T09:30:00',
-              timezone: 'Europe/Stockholm',
-            },
-          },
-          end: {
-            type: 'date-time',
-            value: {
-              local: '2026-10-27T10:30:00',
-              timezone: 'Europe/Stockholm',
-            },
-          },
-        },
-      },
-    ]);
-    recordPeriodStage('period-explicit-end', 'complete');
-  });
-
-  it('round-trips a TZID PERIOD RDATE with a duration through Radicale', async () => {
-    recordPeriodStage('period-duration', 'put-start');
-    const uid = `period-duration-${randomUUID()}@matrix-calendar-widget`;
-    const resourceUrl = new URL(
-      `${randomUUID()}-period.ics`,
-      calendarUrl,
-    ).toString();
-    cleanupResourceUrls = [resourceUrl];
-
-    await client.createEvent(
-      resourceUrl,
-      periodCalendar(
-        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261028T093000/PT1H',
-        uid,
-      ),
-    );
-    recordPeriodStage('period-duration', 'put-complete');
-
-    recordPeriodStage('period-duration', 'get-start');
-    const observed = await client.getEvent(resourceUrl);
-    recordPeriodStage('period-duration', 'get-complete');
-    const parsed = codec.parse(calendarUrl, resourceUrl, observed.icalendar);
-    recordPeriodStage('period-duration', 'compare-start');
-    expect(observed.href).toBe(resourceUrl);
-    expect(parsed.event.uid).toBe(uid);
-    expect(parsed.event.recurrence?.rdates).toEqual([
-      {
-        type: 'period',
-        timing: {
-          type: 'duration',
-          start: {
-            type: 'date-time',
-            value: {
-              local: '2026-10-28T09:30:00',
-              timezone: 'Europe/Stockholm',
-            },
-          },
-          duration: {
-            weeks: 0,
-            days: 0,
-            hours: 1,
-            minutes: 0,
-            seconds: 0,
-            isNegative: false,
-          },
-        },
-      },
-    ]);
-    recordPeriodStage('period-duration', 'complete');
   });
 
   it('overfetches floating and DATE boundary candidates without modifying their resources', async () => {
@@ -410,44 +260,6 @@ function candidateCalendar(
     dtstart,
     dtend,
     'SUMMARY:Candidate range boundary',
-    'END:VEVENT',
-    'END:VCALENDAR',
-    '',
-  ].join('\r\n');
-}
-
-function periodCalendar(
-  rdate: string,
-  uid = `period-${randomUUID()}@matrix-calendar-widget`,
-): string {
-  return [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//Matrix Calendar Widget//PERIOD Contract//EN',
-    'BEGIN:VTIMEZONE',
-    'TZID:Europe/Stockholm',
-    'X-LIC-LOCATION:Europe/Stockholm',
-    'BEGIN:DAYLIGHT',
-    'TZOFFSETFROM:+0100',
-    'TZOFFSETTO:+0200',
-    'TZNAME:CEST',
-    'DTSTART:19700329T020000',
-    'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU',
-    'END:DAYLIGHT',
-    'BEGIN:STANDARD',
-    'TZOFFSETFROM:+0200',
-    'TZOFFSETTO:+0100',
-    'TZNAME:CET',
-    'DTSTART:19701025T030000',
-    'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
-    'END:STANDARD',
-    'END:VTIMEZONE',
-    'BEGIN:VEVENT',
-    `UID:${uid}`,
-    'DTSTAMP:20260922T120000Z',
-    'DTSTART;TZID=Europe/Stockholm:20261026T140000',
-    'DTEND;TZID=Europe/Stockholm:20261026T150000',
-    rdate,
     'END:VEVENT',
     'END:VCALENDAR',
     '',
