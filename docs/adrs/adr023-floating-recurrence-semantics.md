@@ -74,7 +74,12 @@ fields and has no timezone until an application interprets it.
    BYDAY subset: plain weekday tokens including DTSTART's weekday, omitted or
    `INTERVAL=1`, no `COUNT` or `UNTIL`, no other rule parts, and omitted or
    default `WKST=MO`. Other weekly BYDAY combinations remain opaque and
-   preserved.
+   preserved. For an existing PERIOD-valued RDATE, the editor may remove one
+   selected value by matching its complete start and either explicit end or
+   original RFC DURATION components. It must preserve sibling RDATE values,
+   property parameters, and all other resource data. PERIOD creation and
+   changes to a PERIOD's start, end, or duration remain unsupported; malformed
+   or unsupported source values remain opaque and cannot be removed.
 
 ## Implementation status and boundaries
 

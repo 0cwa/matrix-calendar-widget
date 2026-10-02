@@ -4,14 +4,20 @@ USER root
 RUN mkdir -p /etc/radicale /data/collections \
     && chown -R radicale:radicale /etc/radicale /data
 
+COPY apply_vobject_period_patch.py /tmp/apply_vobject_period_patch.py
+RUN /app/bin/python /tmp/apply_vobject_period_patch.py \
+    && rm /tmp/apply_vobject_period_patch.py
+
+FROM runtime-base AS image-base
+
 COPY --chown=radicale:radicale config /etc/radicale/config
 COPY --chown=radicale:radicale src/matrix_calendar_radicale_auth /opt/radicale-auth/src/matrix_calendar_radicale_auth
 
 ENV PYTHONPATH=/opt/radicale-auth/src
 USER radicale
 
-FROM runtime-base AS test
+FROM image-base AS test
 COPY --chown=radicale:radicale tests /opt/radicale-auth/tests
 RUN /app/bin/python -m unittest discover -s /opt/radicale-auth/tests -v
 
-FROM runtime-base AS runtime
+FROM image-base AS runtime

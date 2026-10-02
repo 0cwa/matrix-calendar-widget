@@ -60,13 +60,14 @@ export type CalendarEventFormValues = {
   recurrenceChanged?: boolean;
   rdateEditable?: boolean;
   rdateDraft?: string;
-  rdateValues?: CalendarEventDateTime[];
-  rdatePeriodCount?: number;
+  rdateValues?: CalendarEventRecurrenceDate[];
   rdateChanged?: boolean;
-  rdateOperation?: {
-    action: 'add' | 'remove';
-    value: CalendarEventDateTime;
-  };
+  rdateOperation?:
+    | { action: 'add' | 'remove'; value: CalendarEventDateTime }
+    | {
+        action: 'remove-period';
+        value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>;
+      };
   alarmEnabled?: boolean;
   alarmWeeks?: string;
   alarmDays?: string;
@@ -539,11 +540,7 @@ function recurrenceRdateFormValues(
   event: CalendarEvent,
 ): Pick<
   CalendarEventFormValues,
-  | 'rdateEditable'
-  | 'rdateDraft'
-  | 'rdateValues'
-  | 'rdatePeriodCount'
-  | 'rdateChanged'
+  'rdateEditable' | 'rdateDraft' | 'rdateValues' | 'rdateChanged'
 > {
   const recurrence = event.recurrence;
   const recurrenceDates = recurrence?.rdates ?? [];
@@ -576,18 +573,9 @@ function recurrenceRdateFormValues(
         : anchor.type === 'date-time'
           ? anchor.value.local.slice(0, 16)
           : anchor.value.slice(0, 16),
-    rdateValues: recurrenceDates.filter(
-      (value): value is CalendarEventDateTime => value.type !== 'period',
-    ),
-    rdatePeriodCount: recurrenceDates.filter(isPeriodRdate).length,
+    rdateValues: recurrenceDates,
     rdateChanged: false,
   };
-}
-
-function isPeriodRdate(
-  value: CalendarEventRecurrenceDate,
-): value is Extract<CalendarEventRecurrenceDate, { type: 'period' }> {
-  return value.type === 'period';
 }
 
 export function calendarEventRdateValueFromForm(

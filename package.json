@@ -9,6 +9,8 @@
   ],
   "resolutions": {
     "**/cross-spawn": "^7.0.5",
+    "**/@mui/material/react-is": "18.3.1",
+    "**/@mui/utils/react-is": "18.3.1",
     "msw/cookie": "^0.7.2",
     "**/form-data": "^4.0.4",
     "**/ip": "https://registry.npmjs.org/neoip/-/neoip-2.1.0.tgz",

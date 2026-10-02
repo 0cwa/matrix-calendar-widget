@@ -339,7 +339,9 @@ describe('<CalendarEventEditorDialog />', () => {
     );
 
     expect(
-      await screen.findByText('Period-valued dates are kept unchanged.'),
+      await screen.findByRole('button', {
+        name: 'Remove period date: 2026-10-28T14:00:00 Europe/Stockholm (1h)',
+      }),
     ).toBeInTheDocument();
     fireEvent.change(screen.getByTestId('rdate-draft'), {
       target: { value: '2026-10-05T09:00' },
@@ -402,6 +404,97 @@ describe('<CalendarEventEditorDialog />', () => {
           { type: 'period' },
         ],
       },
+    });
+  });
+
+  it('offers accessible removal of one existing PERIOD and preserves its siblings', async () => {
+    const point = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-10-30T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const byEnd = {
+      type: 'period' as const,
+      timing: {
+        type: 'end' as const,
+        start: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-11-01T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        end: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-11-01T10:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      },
+    };
+    const byDuration = {
+      type: 'period' as const,
+      timing: {
+        type: 'duration' as const,
+        start: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-11-08T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        duration: {
+          weeks: 0,
+          days: 0,
+          hours: 1,
+          minutes: 30,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    const periodEvent: CalendarEvent = {
+      ...recurringEvent,
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;COUNT=8',
+        rdates: [point, byEnd, byDuration],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [periodEvent],
+    });
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={periodEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'Remove period date: 2026-11-01T09:00:00 Europe/Stockholm – 2026-11-01T10:00:00 Europe/Stockholm',
+      }),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Remove period date: 2026-11-08T09:00:00 Europe/Stockholm (1h 30m)',
+      }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(async () => {
+      await expect(
+        repository.getEvent('team', periodEvent.id),
+      ).resolves.toMatchObject({
+        recurrence: { rdates: [point, byEnd] },
+      });
     });
   });
 

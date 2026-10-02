@@ -14,16 +14,55 @@
  * limitations under the License.
  */
 
+import { getVTimezoneBlock } from '@matrix-calendar-widget/ical-timezones';
 import fetchMock from 'jest-fetch-mock';
 import { randomUUID } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import {
   CalDavCredentialProvider,
   CalDavEventClient,
+  CalDavEventTransportError,
   ICalendarEventCodec,
 } from '../../src/caldav';
 
 const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
+
+function markPeriodRemovalStage(stage: string): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+    return;
+  }
+
+  try {
+    appendFileSync(stageFile, `${stage}\n`, 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
+
+function markSeedPutFailure(error: unknown): void {
+  if (!(error instanceof CalDavEventTransportError)) {
+    markPeriodRemovalStage('seed-put-transport');
+    return;
+  }
+
+  const status = error.status;
+  if (
+    Number.isInteger(status) &&
+    status !== undefined &&
+    status >= 400 &&
+    status < 500
+  ) {
+    markPeriodRemovalStage(`seed-put-http-${status}`);
+  } else if (status !== undefined && status >= 500 && status < 600) {
+    markPeriodRemovalStage('seed-put-5xx');
+  } else if (status !== undefined) {
+    markPeriodRemovalStage('seed-put-other-status');
+  } else {
+    markPeriodRemovalStage('seed-put-transport');
+  }
+}
 
 describeContract('CalDAV VEVENT round-trip contract', () => {
   const baseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
@@ -196,6 +235,79 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     });
   });
 
+  it('removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag', async () => {
+    markPeriodRemovalStage('period-test-start');
+    const uid = `period-remove-${randomUUID()}@matrix-calendar-widget`;
+    const resourceUrl = new URL(
+      `${randomUUID()}-period.ics`,
+      calendarUrl,
+    ).toString();
+    const source = withBundledStockholmTimezone(recurringCalendar(uid)).replace(
+      'RDATE;TZID=Europe/Stockholm:20261026T140000',
+      [
+        'RDATE;TZID=Europe/Stockholm:20261026T140000',
+        'RDATE;VALUE=PERIOD:20261027T093000/20261027T103000',
+      ].join('\r\n'),
+    );
+    cleanupResourceUrls = [resourceUrl];
+
+    try {
+      await client.createEvent(resourceUrl, source);
+    } catch (error) {
+      markSeedPutFailure(error);
+      throw error;
+    }
+    markPeriodRemovalStage('period-resource-created');
+    const before = await client.getEvent(resourceUrl);
+    markPeriodRemovalStage('period-resource-read');
+    const parsed = codec.parse(calendarUrl, resourceUrl, before.icalendar);
+    expect(parsed.event.unsupportedTimezone).toBeUndefined();
+    markPeriodRemovalStage('period-resource-parsed');
+    const target = parsed.event.recurrence?.rdates?.find(
+      (value) => value.type === 'period' && value.timing.type === 'end',
+    );
+    expect(target?.type).toBe('period');
+    if (!target || target.type !== 'period') {
+      throw new Error('Expected end-valued RDATE PERIOD');
+    }
+    markPeriodRemovalStage('period-target-validated');
+    const patched = parsed.applyPatch({
+      recurrence: { rdate: { action: 'remove-period', value: target } },
+    });
+    markPeriodRemovalStage('period-patch-applied');
+
+    markPeriodRemovalStage('period-update-started');
+    await client.updateEvent(resourceUrl, before.etag, patched.icalendar);
+    markPeriodRemovalStage('period-update-accepted');
+
+    const after = await client.getEvent(resourceUrl);
+    markPeriodRemovalStage('period-resource-reread');
+    const verified = codec.parse(calendarUrl, resourceUrl, after.icalendar);
+    markPeriodRemovalStage('period-updated-resource-parsed');
+    expect(verified.event.recurrence?.rdates).toHaveLength(1);
+    markPeriodRemovalStage('period-rdate-count');
+    expect(after.icalendar).not.toContain('20261027T093000/20261027T103000');
+    markPeriodRemovalStage('period-end-removed');
+    expect(after.icalendar).toContain(
+      'RDATE;TZID=Europe/Stockholm:20261026T140000',
+    );
+    markPeriodRemovalStage('period-point-sibling-preserved');
+    expect(after.icalendar).toContain('BEGIN:VTIMEZONE');
+    markPeriodRemovalStage('period-vtimezone-preserved');
+    expect(after.icalendar).toContain(
+      'EXDATE;TZID=Europe/Stockholm:20261102T140000',
+    );
+    markPeriodRemovalStage('period-exdate-preserved');
+    expect(after.icalendar).toContain('RECURRENCE-ID;TZID=Europe/Stockholm');
+    markPeriodRemovalStage('period-detached-member-preserved');
+    expect(after.icalendar).toContain(
+      'X-CLIENT-METADATA;X-PARAM=preserve-param',
+    );
+    expect(after.icalendar).toContain('X-OVERRIDE-MARKER;X-ORIGIN=external');
+    markPeriodRemovalStage('period-unknown-properties-preserved');
+    markPeriodRemovalStage('period-removal-verified');
+  });
+
   it('overfetches floating and DATE boundary candidates without modifying their resources', async () => {
     const floatingUrl = new URL(
       `${randomUUID()}-floating.ics`,
@@ -322,6 +434,20 @@ function recurringCalendar(uid: string): string {
     'END:VCALENDAR',
     '',
   ].join('\r\n');
+}
+
+function withBundledStockholmTimezone(source: string): string {
+  const timezone = getVTimezoneBlock('Europe/Stockholm');
+  if (!timezone) {
+    throw new Error('Bundled Stockholm timezone fixture is unavailable');
+  }
+
+  const timezoneBlock = /BEGIN:VTIMEZONE\r?\n[\s\S]*?END:VTIMEZONE/;
+  if (!timezoneBlock.test(source)) {
+    throw new Error('Recurring calendar fixture has no VTIMEZONE block');
+  }
+
+  return source.replace(timezoneBlock, timezone.trim());
 }
 
 function expectRecurringResourceProperties(

@@ -104,6 +104,10 @@ const CASE_IDS = new Map([
     'event-recurring-master-detached-overrides',
   ],
   [
+    'caldav-event-round-trip-contract\0removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag',
+    'event-period-rdate-removal',
+  ],
+  [
     'caldav-event-round-trip-contract\0overfetches floating and DATE boundary candidates without modifying their resources',
     'event-floating-date-boundary-candidates',
   ],

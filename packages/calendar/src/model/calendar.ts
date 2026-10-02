@@ -168,8 +168,8 @@ export type CalendarEventRecurrence = {
 /**
  * Recurrence fields accepted by supported write operations. RRULE edits change
  * only the master rule; EXDATE operations target one original occurrence
- * identity; RDATE operations target one exact point-valued recurrence date.
- * PERIOD values and detached instances remain read-only resource data.
+ * identity; RDATE operations add/remove point values or remove one exact
+ * PERIOD value. PERIOD creation and timing edits remain unsupported.
  */
 export type CalendarEventRecurrenceWrite =
   | {
@@ -185,10 +185,16 @@ export type CalendarEventRecurrenceWrite =
     }
   | {
       /** Add or remove one exact DATE or DATE-TIME RDATE value. */
-      rdate: {
-        action: 'add' | 'remove';
-        value: CalendarEventDateTime;
-      };
+      rdate:
+        | {
+            action: 'add' | 'remove';
+            value: CalendarEventDateTime;
+          }
+        | {
+            /** Remove one exact existing PERIOD; PERIOD creation is unsupported. */
+            action: 'remove-period';
+            value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>;
+          };
     };
 
 /** Recurrence semantics retained by CalDAV but not safely projected by UI. */
