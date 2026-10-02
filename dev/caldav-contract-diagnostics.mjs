@@ -18,6 +18,7 @@ import path from 'node:path';
 const safeSuiteBasename =
   /^[A-Za-z0-9][A-Za-z0-9._-]*\.test\.(?:js|mjs|ts|tsx)$/;
 const safeStaticTitle = /^[A-Za-z0-9][A-Za-z0-9 _.,:()/'+-]{0,159}$/;
+const safeAssertionFrame = /(?:^|[ (])(?:.*[\\/])?(?:matrix-calendar-server[\\/])?test[\\/]integration[\\/]CalDavEventRoundTripContract\.test\.ts:(\d+):(\d+)\)?(?=\s|$)/;
 
 function hasStaticTitle(source, title) {
   const singleQuoted = `'${title.replaceAll("'", "\\'")}'`;
@@ -77,7 +78,51 @@ export function formatFailedCalDavTestIdentities(
         hasStaticTitle(suiteSource, title)
           ? title
           : '(static title withheld)';
-      identities.push(`${suiteBasename}:${line}:${column} ${staticTitle}`);
+      const assertionLocations = new Set();
+      if (
+        pathParts.join(path.sep) ===
+        path.join(
+          'matrix-calendar-server',
+          'test',
+          'integration',
+          'CalDavEventRoundTripContract.test.ts',
+        )
+      ) {
+        for (const message of test.failureMessages ?? []) {
+          if (typeof message !== 'string') {
+            continue;
+          }
+          for (const stackLine of message.split(/\r?\n/)) {
+            if (!/^\s*at\s/.test(stackLine)) {
+              continue;
+            }
+            const match = stackLine.match(safeAssertionFrame);
+            if (!match) {
+              continue;
+            }
+            const assertionLine = Number(match[1]);
+            const assertionColumn = Number(match[2]);
+            const sourceLine = suiteSource.split(/\r?\n/)[assertionLine - 1];
+            if (
+              Number.isInteger(assertionLine) &&
+              assertionLine > 0 &&
+              Number.isInteger(assertionColumn) &&
+              assertionColumn > 0 &&
+              typeof sourceLine === 'string' &&
+              assertionColumn <= sourceLine.length + 1
+            ) {
+              assertionLocations.add(`${assertionLine}:${assertionColumn}`);
+            }
+          }
+        }
+      }
+      identities.push({
+        suiteBasename,
+        line,
+        column,
+        staticTitle,
+        assertionLocations: [...assertionLocations],
+      });
     }
   }
 

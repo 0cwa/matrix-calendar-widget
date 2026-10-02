@@ -13,8 +13,8 @@
 // limitations under the License.
 
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 import path from 'node:path';
+import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { formatFailedCalDavTestIdentities } from './caldav-contract-diagnostics.mjs';
 
@@ -41,8 +41,9 @@ test('reports static failed test identity without failure details', () => {
             status: 'failed',
             location: { line: 199, column: 3 },
             failureMessages: [
-              'CALDAV_OPENID_CREDENTIAL=matrix-openid:secret-token',
+              'CALDAV_OPENID_CREDENTIAL=matrix-openid:secret-token\n at Object.<anonymous> (test/integration/CalDavEventRoundTripContract.test.ts:233:5)',
               'BEGIN:VCALENDAR\nSUMMARY:private title\nEND:VCALENDAR',
+              'at Object.<anonymous> (/untrusted/path/NotAllowed.test.ts:123:45)',
             ],
           },
           {
@@ -61,18 +62,20 @@ test('reports static failed test identity without failure details', () => {
     ],
   };
 
-  const output = formatFailedCalDavTestIdentities(report, repoRoot).join('\n');
+  const identities = formatFailedCalDavTestIdentities(report, repoRoot);
+  const output = JSON.stringify(identities);
 
   assert.match(
     output,
-    /CalDavEventRoundTripContract\.test\.ts:199:3 removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag/,
+    /CalDavEventRoundTripContract\.test\.ts.*199.*3.*removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag/,
   );
   assert.match(
     output,
-    /CalDavEventRoundTripContract\.test\.ts:222:5 \(static title withheld\)/,
+    /222.*5.*static title withheld/,
   );
+  assert.deepEqual(identities[0]?.assertionLocations, ['233:5']);
   assert.doesNotMatch(
     output,
-    /secret-token|BEGIN:VCALENDAR|private title|response body|coordinates/,
+    /secret-token|BEGIN:VCALENDAR|private title|response body|coordinates|NotAllowed|untrusted|CALDAV_OPENID|SUMMARY/,
   );
 });

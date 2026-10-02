@@ -121,7 +121,14 @@ if (failedSuites.length === 0) {
     'CalDAV contract tests failed; sensitive failure details are withheld.\n',
   );
   for (const identity of formatFailedCalDavTestIdentities(testReport)) {
-    process.stdout.write(`Failed contract test: ${identity}\n`);
+    process.stdout.write(
+      `Failed contract test: ${identity.suiteBasename}:${identity.line}:${identity.column} ${identity.staticTitle}\n`,
+    );
+    for (const location of identity.assertionLocations) {
+      process.stdout.write(
+        `Safe assertion location: CalDavEventRoundTripContract.test.ts:${location}\n`,
+      );
+    }
   }
   for (const suite of failedSuites) {
     const failureText = [

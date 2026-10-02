@@ -53,13 +53,20 @@ jobs:
         run: yarn install --frozen-lockfile
 
       - name: Recover locked format for diagnostic test (temporary)
-        run: yarn prettier --write dev/caldav-contract-diagnostics.test.mjs
+        run: >-
+          yarn prettier --write
+          dev/caldav-contract-diagnostics.test.mjs
+          dev/caldav-contract-diagnostics.mjs
+          dev/assert-caldav-contract-logs.mjs
 
       - name: Upload locked formatter output (temporary)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: m5-period-prettier-${{ github.run_id }}
-          path: dev/caldav-contract-diagnostics.test.mjs
+          path: |
+            dev/caldav-contract-diagnostics.test.mjs
+            dev/caldav-contract-diagnostics.mjs
+            dev/assert-caldav-contract-logs.mjs
           if-no-files-found: error
           retention-days: 1
 
