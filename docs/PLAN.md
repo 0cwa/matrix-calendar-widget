@@ -16,8 +16,9 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
       resolution required, the five documented CI checks required, force pushes
       disabled, and branch deletion disabled (confirmed through the GitHub
       branch-protection API on 2026-10-02).
-- [ ] Verify the configured rules behave as documented with a trivial PR
-      (#29 remains open for this check).
+- [x] Verify the configured rules behave as documented with trivial PR #150
+      (#29): GitHub reported `mergeable_state=blocked` while required checks
+      were pending and `clean` after all five required checks passed.
 
 **Exit:** a contributor can clone the fork, run the inherited tests/build, understand the target architecture, and cannot accidentally publish under Nordeck names.
 
@@ -42,11 +43,11 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 - [x] Implement CalDAV service discovery and calendar enumeration against Radicale (#44/#49/#55/#56).
 - [x] Define the server-side Radicale credential/delegation strategy without handling user Matrix passwords (ADR009 / #54).
 - [x] Implement the clean-room Radicale 3.8.0.0 Auth module and pinned project-owned image (ADR024 / #48) for the validated personal actor's tagged, request-scoped OpenID proof. Reject untagged credentials before homeserver I/O; do not include or invoke an external auth package.
-- [x] Add the final personal actor OpenID gateway contract against a real Radicale container (#45): same-user calendar enumeration plus denial of non-members and failed authorization lookups before CalDAV I/O (PR #147).
+- [x] Add the final personal actor OpenID gateway contract against a real Radicale container (#45): same-user enumeration, invalid-identity rejection, and nonmember denial before CalDAV I/O (PR #147). A focused mocked `CalendarGatewayMembershipGuard` test directly verifies a thrown membership lookup and an `isAllowed=false` decision deny before provider/CalDAV I/O.
 
-PR #60's password-authenticated discovery contract is historical evidence about the prior deployment and does not make Matrix-password CalDAV login supported in the owned pre-alpha image. PR #146 completed issue #48's ADR024-scoped first-party adapter, owned image, tests, and dev/contract integration; PR #147 completed #45's real-container same-user enumeration and fail-closed denial before CalDAV I/O. M2 is complete against the pinned development Synapse and project-owned Radicale image. The actual etke-host image override and preservation of its existing `/data` volume remain unverified deployment gates.
+PR #60's password-authenticated discovery contract is historical evidence about the prior deployment and does not make Matrix-password CalDAV login supported in the owned pre-alpha image. PR #146 completed issue #48's ADR024-scoped first-party adapter, owned image, tests, and dev/contract integration; PR #147 completed #45's real-container same-user enumeration, invalid-identity rejection, and nonmember denial before CalDAV I/O. The focused mocked `CalendarGatewayMembershipGuard` test directly verifies that a thrown membership lookup and an `isAllowed=false` decision stop before provider/CalDAV I/O. M2 is complete against the pinned development Synapse and project-owned Radicale image. The actual etke-host image override and preservation of its existing `/data` volume remain unverified deployment gates.
 
-**Exit:** the gateway can authenticate personal access with the validated actor's tagged Matrix OpenID proof, enumerate only that actor's calendars, and deny non-members or failed authorization lookups before CalDAV I/O. The owned backend rejects untagged Matrix-password credentials; support for any separate Radicale-native credential mode requires a future ADR.
+**Exit:** the gateway can authenticate personal access with the validated actor's tagged Matrix OpenID proof, enumerate only that actor's calendars, and deny invalid identities and non-members before CalDAV I/O. The real-container contract covers those identity and membership cases; the focused mocked guard test directly covers a thrown membership lookup and an `isAllowed=false` denial before provider/CalDAV I/O. The owned backend rejects untagged Matrix-password credentials; support for any separate Radicale-native credential mode requires a future ADR.
 
 ## M3 — VEVENT CRUD vertical slice
 

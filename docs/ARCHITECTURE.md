@@ -44,14 +44,18 @@ The gateway and bot are initially one deployable service. Split them only when s
 distinct ownership paths and the initial room-target contract:
 
 - **Personal widget calendars** remain associated with the authenticated Matrix
-  user. The gateway validates that user's short-lived OpenID assertion. This
-  change implements the in-repository Radicale Auth module selected by ADR024
-  for [#48](https://github.com/0cwa/matrix-calendar-widget/issues/48). After
-  #48 passes review and M2's real-server contract in
-  [#45](https://github.com/0cwa/matrix-calendar-widget/issues/45) proves
-  same-user enumeration and fail-closed denial for non-members or failed
-  authorization lookups before CalDAV I/O, the gateway will use the
-  corresponding user-scoped CalDAV delegation contract.
+  user. The gateway validates that user's short-lived OpenID assertion and
+  delegates the same actor proof to the project-owned Radicale Auth module
+  selected by ADR024. PR #146 completed the OpenID-only backend and image for
+  [#48](https://github.com/0cwa/matrix-calendar-widget/issues/48); PR #147
+  completed the real-container gateway contract for
+  [#45](https://github.com/0cwa/matrix-calendar-widget/issues/45): same-user
+  enumeration, invalid-identity rejection, and nonmember denial before CalDAV
+  I/O. A focused mocked `CalendarGatewayMembershipGuard` test directly covers
+  a thrown membership lookup and an `isAllowed=false` denial before
+  provider/CalDAV I/O. This validates the pinned development stack only; the
+  etke image override and `/data` host rehearsal remain unverified deployment
+  gates.
 - **Room-owned calendars** are planned to belong to the application principal.
   Their path will resolve a canonical Matrix room ID through an
   operator-managed static binding. The binding resolver and application-
@@ -177,9 +181,9 @@ The resolver is a pure in-memory function and performs no network or CalDAV
 I/O. Application-principal room-owned access remains blocked on M6 issue #7
 and deployment isolation: Radicale `owner_only` grants the application
 principal access to its whole home, so that home must stay within one trusted
-organizational boundary or use equivalent per-room isolation. M2 #48/#45
-validate personal actor authentication and same-user enumeration; they do not
-accept appservice proof or prove room isolation. The actual etke-host
+organizational boundary or use equivalent per-room isolation. M2 #48/#45 are
+complete for personal actor authentication and same-user enumeration; they do
+not accept appservice proof or prove room isolation. The actual etke-host
 custom-image override and preservation of its `/data` store remain unverified
 deployment gates. Existing user-principal room-context routes are separate and
 remain active.
