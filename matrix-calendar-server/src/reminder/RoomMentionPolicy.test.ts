@@ -57,7 +57,9 @@ describe('authorizeRoomMentionScheduling', () => {
   });
 
   it('denies an actor who is not currently joined', async () => {
-    state.getJoinedRoomMembers.mockResolvedValue(['@someone-else:example.test']);
+    state.getJoinedRoomMembers.mockResolvedValue([
+      '@someone-else:example.test',
+    ]);
 
     await expect(
       authorizeRoomMentionScheduling(request, state),
@@ -108,7 +110,9 @@ describe('authorizeRoomMentionScheduling', () => {
       events: { [MATRIX_CALENDAR_MANAGE_POLICY]: 50.1 },
     });
 
-    await expect(authorizeRoomMentionScheduling(request, state)).resolves.toEqual({
+    await expect(
+      authorizeRoomMentionScheduling(request, state),
+    ).resolves.toEqual({
       roomId,
       calendarId,
     });
@@ -121,7 +125,9 @@ describe('authorizeRoomMentionScheduling', () => {
       state_default: 50,
     });
 
-    await expect(authorizeRoomMentionScheduling(request, state)).resolves.toEqual({
+    await expect(
+      authorizeRoomMentionScheduling(request, state),
+    ).resolves.toEqual({
       roomId,
       calendarId,
     });
@@ -177,10 +183,12 @@ describe('authorizeRoomMentionDelivery', () => {
   });
 
   it('allows the joined sender when message and default room mention thresholds are met', async () => {
-    await expect(authorizeRoomMentionDelivery(request, state)).resolves.toEqual({
-      roomId,
-      calendarId,
-    });
+    await expect(authorizeRoomMentionDelivery(request, state)).resolves.toEqual(
+      {
+        roomId,
+        calendarId,
+      },
+    );
   });
 
   it('accepts legacy room v3 signed integer strings with padding', async () => {
@@ -191,10 +199,12 @@ describe('authorizeRoomMentionDelivery', () => {
       notifications: { room: '+00050' },
     });
 
-    await expect(authorizeRoomMentionDelivery(request, state)).resolves.toEqual({
-      roomId,
-      calendarId,
-    });
+    await expect(authorizeRoomMentionDelivery(request, state)).resolves.toEqual(
+      {
+        roomId,
+        calendarId,
+      },
+    );
   });
 
   it('truncates room v3 fractional power levels before comparing', async () => {
@@ -205,10 +215,12 @@ describe('authorizeRoomMentionDelivery', () => {
       notifications: { room: 50.9 },
     });
 
-    await expect(authorizeRoomMentionDelivery(request, state)).resolves.toEqual({
-      roomId,
-      calendarId,
-    });
+    await expect(authorizeRoomMentionDelivery(request, state)).resolves.toEqual(
+      {
+        roomId,
+        calendarId,
+      },
+    );
   });
 
   it.each([
@@ -216,19 +228,22 @@ describe('authorizeRoomMentionDelivery', () => {
     ['10', 50.9],
     [undefined, '50'],
     ['unknown', 50.9],
-  ])('rejects non-integer encodings for room version %s', async (version: string | undefined, power: string | number) => {
-    state.getRoomVersion.mockResolvedValue(version);
-    state.getPowerLevels.mockResolvedValue({
-      users: { [senderUserId]: power },
-      users_default: 100,
-      events_default: 0,
-      notifications: { room: 0 },
-    });
+  ])(
+    'rejects non-integer encodings for room version %s',
+    async (version: string | undefined, power: string | number) => {
+      state.getRoomVersion.mockResolvedValue(version);
+      state.getPowerLevels.mockResolvedValue({
+        users: { [senderUserId]: power },
+        users_default: 100,
+        events_default: 0,
+        notifications: { room: 0 },
+      });
 
-    await expect(
-      authorizeRoomMentionDelivery(request, state),
-    ).resolves.toBeUndefined();
-  });
+      await expect(
+        authorizeRoomMentionDelivery(request, state),
+      ).resolves.toBeUndefined();
+    },
+  );
 
   it.each([
     '50.0',
@@ -241,22 +256,27 @@ describe('authorizeRoomMentionDelivery', () => {
     Number.NaN,
     Number.POSITIVE_INFINITY,
     null,
-  ])('fails closed on malformed or out-of-range legacy values: %p', async (power) => {
-    state.getRoomVersion.mockResolvedValue('9');
-    state.getPowerLevels.mockResolvedValue({
-      users: { [senderUserId]: power as never },
-      users_default: 100,
-      events_default: 0,
-      notifications: { room: 0 },
-    });
+  ])(
+    'fails closed on malformed or out-of-range legacy values: %p',
+    async (power) => {
+      state.getRoomVersion.mockResolvedValue('9');
+      state.getPowerLevels.mockResolvedValue({
+        users: { [senderUserId]: power as never },
+        users_default: 100,
+        events_default: 0,
+        notifications: { room: 0 },
+      });
 
-    await expect(
-      authorizeRoomMentionDelivery(request, state),
-    ).resolves.toBeUndefined();
-  });
+      await expect(
+        authorizeRoomMentionDelivery(request, state),
+      ).resolves.toBeUndefined();
+    },
+  );
 
   it('denies a sender who is not currently joined', async () => {
-    state.getJoinedRoomMembers.mockResolvedValue(['@someone-else:example.test']);
+    state.getJoinedRoomMembers.mockResolvedValue([
+      '@someone-else:example.test',
+    ]);
 
     await expect(
       authorizeRoomMentionDelivery(request, state),
@@ -305,16 +325,21 @@ describe('authorizeRoomMentionDelivery', () => {
       notifications: { room: 60 },
     });
 
-    await expect(authorizeRoomMentionDelivery(request, state)).resolves.toEqual({
-      roomId,
-      calendarId,
-    });
+    await expect(authorizeRoomMentionDelivery(request, state)).resolves.toEqual(
+      {
+        roomId,
+        calendarId,
+      },
+    );
   });
 
   it('denies if the binding changed after scheduling', async () => {
     await expect(
       authorizeRoomMentionDelivery(
-        { ...request, configuredBindings: [{ roomId, calendarId: 'new-team' }] },
+        {
+          ...request,
+          configuredBindings: [{ roomId, calendarId: 'new-team' }],
+        },
         state,
       ),
     ).resolves.toBeUndefined();
@@ -322,10 +347,12 @@ describe('authorizeRoomMentionDelivery', () => {
   });
 
   it('rechecks membership and power state on each delivery', async () => {
-    await expect(authorizeRoomMentionDelivery(request, state)).resolves.toEqual({
-      roomId,
-      calendarId,
-    });
+    await expect(authorizeRoomMentionDelivery(request, state)).resolves.toEqual(
+      {
+        roomId,
+        calendarId,
+      },
+    );
     state.getJoinedRoomMembers.mockResolvedValue([]);
     await expect(
       authorizeRoomMentionDelivery(request, state),
