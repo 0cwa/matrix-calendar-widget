@@ -19,7 +19,7 @@ const safeSuiteBasename =
   /^[A-Za-z0-9][A-Za-z0-9._-]*\.test\.(?:js|mjs|ts|tsx)$/;
 const safeStaticTitle = /^[A-Za-z0-9][A-Za-z0-9 _.,:()/'+-]{0,159}$/;
 const safeAssertionFrame =
-  /^\s*at\b.*CalDavEventRoundTripContract\.test\.ts:(\d+):(\d+)\)?\s*$/;
+  /CalDavEventRoundTripContract\.test\.ts:(\d+):(\d+)/;
 
 function hasStaticTitle(source, title) {
   const singleQuoted = `'${title.replaceAll("'", "\\'")}'`;

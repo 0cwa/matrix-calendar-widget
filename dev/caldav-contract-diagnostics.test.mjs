@@ -41,7 +41,9 @@ test('reports static failed test identity without failure details', () => {
             status: 'failed',
             location: { line: 199, column: 3 },
             failureMessages: [
-              'CALDAV_OPENID_CREDENTIAL=matrix-openid:secret-token\n at Object.<anonymous> (test/integration/CalDavEventRoundTripContract.test.ts:233:5)',
+              'CALDAV_OPENID_CREDENTIAL=matrix-openid:secret-token\n at Object.<anonymous> (/runner/test/integration/CalDavEventRoundTripContract.test.ts:233:5)',
+              ' at /runner/test/integration/CalDavEventRoundTripContract.test.ts:234:7',
+              ' at Object.<anonymous> (test/integration/Other.test.ts:99:2)',
               'BEGIN:VCALENDAR\nSUMMARY:private title\nEND:VCALENDAR',
               'at Object.<anonymous> (/untrusted/path/NotAllowed.test.ts:123:45)',
             ],
@@ -70,7 +72,7 @@ test('reports static failed test identity without failure details', () => {
     /CalDavEventRoundTripContract\.test\.ts.*199.*3.*removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag/,
   );
   assert.match(output, /222.*5.*static title withheld/);
-  assert.deepEqual(identities[0]?.assertionLocations, ['233:5']);
+  assert.deepEqual(identities[0]?.assertionLocations, ['233:5', '234:7']);
   assert.doesNotMatch(
     output,
     /secret-token|BEGIN:VCALENDAR|private title|response body|coordinates|NotAllowed|untrusted|CALDAV_OPENID|SUMMARY/,
