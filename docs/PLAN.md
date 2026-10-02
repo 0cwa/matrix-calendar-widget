@@ -134,6 +134,10 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [ ] RECURRENCE-ID instance override editing.
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
+  - [x] Verify daily `Europe/Stockholm` recurrence viewed in
+        `America/Los_Angeles` across the 2026-03-29 spring transition, including
+        adjacent viewer-local half-open day windows, preserved 09:00 source
+        wall time, and the expected 08:00Z-to-07:00Z instant shift.
 - [x] Preserve existing VALARM data on ordinary event edits and add/edit/remove
       one supported relative DISPLAY alarm whose negative DURATION trigger is
       measured from DTSTART.
