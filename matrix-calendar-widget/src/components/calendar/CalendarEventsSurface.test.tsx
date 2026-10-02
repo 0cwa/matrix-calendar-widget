@@ -232,6 +232,13 @@ describe('<CalendarEventsSurface />', () => {
     expect(await screen.findByText('Team planning')).toBeInTheDocument();
     expect(screen.getByText('Dentist')).toBeInTheDocument();
 
+    const calendarGroup = screen.getByRole('group', { name: 'Calendar' });
+    expect(
+      within(calendarGroup).getByRole('checkbox', {
+        name: 'Team calendar',
+      }),
+    ).toBeChecked();
+
     const personalCalendar = screen.getByRole('checkbox', {
       name: 'Personal calendar',
     });

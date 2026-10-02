@@ -207,6 +207,7 @@ export function CalendarEventsSurface({
           <FormGroup
             aria-label={t('calendarEvents.editor.calendar', 'Calendar')}
             row
+            role="group"
           >
             {calendars.data.map((calendar) => (
               <FormControlLabel
