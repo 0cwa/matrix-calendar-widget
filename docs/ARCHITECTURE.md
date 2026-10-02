@@ -51,10 +51,11 @@ distinct ownership paths and the initial room-target contract:
   completed the real-container gateway contract for
   [#45](https://github.com/0cwa/matrix-calendar-widget/issues/45): same-user
   enumeration, invalid-identity rejection, and nonmember denial before CalDAV
-  I/O. A separate focused mocked `CalendarGatewayMembershipGuard` test covers
-  membership/authorization lookup failures before downstream provider/fetch
-  I/O. This validates the pinned development stack only; the etke image
-  override and `/data` host rehearsal remain unverified deployment gates.
+  I/O. A focused mocked `CalendarGatewayMembershipGuard` test directly covers
+  a thrown membership lookup and an `isAllowed=false` denial before
+  provider/CalDAV I/O. This validates the pinned development stack only; the
+  etke image override and `/data` host rehearsal remain unverified deployment
+  gates.
 - **Room-owned calendars** are planned to belong to the application principal.
   Their path will resolve a canonical Matrix room ID through an
   operator-managed static binding. The binding resolver and application-
