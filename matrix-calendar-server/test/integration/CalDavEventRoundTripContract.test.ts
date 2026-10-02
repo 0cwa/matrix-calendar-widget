@@ -211,6 +211,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
   });
 
   it('removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag', async () => {
+    markPeriodRemovalStage('period-test-start');
     const uid = `period-remove-${randomUUID()}@matrix-calendar-widget`;
     const resourceUrl = new URL(
       `${randomUUID()}-period.ics`,
@@ -235,12 +236,11 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     const target = parsed.event.recurrence?.rdates?.find(
       (value) => value.type === 'period' && value.timing.type === 'duration',
     );
-    markPeriodRemovalStage('period-target-found');
     expect(target?.type).toBe('period');
     if (!target || target.type !== 'period') {
       throw new Error('Expected duration-valued RDATE PERIOD');
     }
-    markPeriodRemovalStage('period-target-is-duration');
+    markPeriodRemovalStage('period-target-validated');
     const patched = parsed.applyPatch({
       recurrence: { rdate: { action: 'remove-period', value: target } },
     });

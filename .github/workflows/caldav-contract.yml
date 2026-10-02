@@ -113,8 +113,8 @@ jobs:
           contract_report="$RUNNER_TEMP/caldav-contract-results.json"
           contract_stages="$RUNNER_TEMP/caldav-contract-stages.log"
           : > "$contract_stages"
-          export CALDAV_CONTRACT_STAGE_FILE="$contract_stages"
-          yarn workspace @matrix-calendar-widget/server jest \
+          CALDAV_CONTRACT_STAGE_FILE="$contract_stages" \
+            yarn workspace @matrix-calendar-widget/server jest \
             test/CalendarGatewayMembershipGuard.test.ts \
             test/integration/PersonalOpenIdRadicaleContract.test.ts \
             test/integration/CalDavDiscoveryContract.test.ts \

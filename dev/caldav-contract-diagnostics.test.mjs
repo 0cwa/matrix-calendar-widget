@@ -68,10 +68,11 @@ test('reports static failed test identity without failure details', () => {
     report,
     repoRoot,
     [
+      'period-test-start',
       'period-resource-read',
       'untrusted-stage-secret-token',
       'SAFE_CALDAV_PERIOD_STAGE=period-duration-removed',
-      'period-update-accepted',
+      'period-target-validated',
     ].join('\n'),
   );
   const output = JSON.stringify(identities);
@@ -81,7 +82,7 @@ test('reports static failed test identity without failure details', () => {
     /CalDavEventRoundTripContract\.test\.ts.*199.*3.*removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag/,
   );
   assert.match(output, /222.*5.*static title withheld/);
-  assert.equal(identities[0]?.safePeriodStage, 'period-update-accepted');
+  assert.equal(identities[0]?.safePeriodStage, 'period-target-validated');
   assert.equal(identities[1]?.safePeriodStage, null);
   assert.doesNotMatch(
     output,

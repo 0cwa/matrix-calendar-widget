@@ -21,10 +21,11 @@ const safeStaticTitle = /^[A-Za-z0-9][A-Za-z0-9 _.,:()/'+-]{0,159}$/;
 const periodRemoveTestTitle =
   'removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag';
 const safePeriodStages = new Set([
+  'period-test-start',
   'period-resource-created',
   'period-resource-read',
   'period-resource-parsed',
-  'period-target-found',
+  'period-target-validated',
   'period-target-is-duration',
   'period-patch-applied',
   'period-update-accepted',
@@ -102,12 +103,13 @@ export function formatFailedCalDavTestIdentities(
       let safePeriodStage = null;
       if (
         pathParts.join(path.sep) ===
-        path.join(
-          'matrix-calendar-server',
-          'test',
-          'integration',
-          'CalDavEventRoundTripContract.test.ts',
-        ) && title === periodRemoveTestTitle
+          path.join(
+            'matrix-calendar-server',
+            'test',
+            'integration',
+            'CalDavEventRoundTripContract.test.ts',
+          ) &&
+        title === periodRemoveTestTitle
       ) {
         for (const stageLine of stageReport.split(/\r?\n/)) {
           if (safePeriodStages.has(stageLine)) {
