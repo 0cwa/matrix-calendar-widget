@@ -291,6 +291,12 @@ DST regression or recurrence-editing criteria above.
 - [ ] First reminder delivery target: permission-checked room-wide
       notifications using standard `m.mentions.room: true`; check room-mention
       permission again at delivery time (ADR007/ADR019).
+  - [x] Add policy-only helpers for the standard message shape, scheduling-time
+        actor membership/app action power/exact binding, and delivery-time
+        binding/current sender membership/message power/room-mention threshold.
+        Fake-state tests cover denial and state lookup failures. These helpers
+        are not wired to a sender or scheduler; live delivery remains disabled
+        until the M6 appservice authorization and room access contracts pass.
 - [x] App-owned PostgreSQL reminder persistence, schema migrations, and
       transactional claim/completion contract are implemented (ADR019). The
       restricted-role PostgreSQL 16 integration job passed all five hosted
