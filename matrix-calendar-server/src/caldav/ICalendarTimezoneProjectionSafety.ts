@@ -259,6 +259,12 @@ function normalizeTimezone(
     ]);
   }
 
+  observances.sort((left, right) => {
+    const leftKey = stableJson(left);
+    const rightKey = stableJson(right);
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+  });
+
   return [timezoneId, observances];
 }
 
