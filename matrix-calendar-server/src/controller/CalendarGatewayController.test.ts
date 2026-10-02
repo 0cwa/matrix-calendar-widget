@@ -1622,6 +1622,135 @@ END:VCALENDAR`,
     expect(putInit?.body).toContain('RECURRENCE-ID;TZID=Europe/Stockholm');
   });
 
+  it('removes one PERIOD RDATE through the gateway with If-Match', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/period.ics';
+    const originalIcs = readFixture('recurrence-override.ics').replace(
+      'RDATE;TZID=Europe/Stockholm:20261026T140000',
+      [
+        'RDATE;TZID=Europe/Stockholm:20261026T140000',
+        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm;X-KEEP=period:20261027T093000/PT1H',
+      ].join('\r\n'),
+    );
+    const patch = JSON.parse(
+      JSON.stringify({
+        recurrence: {
+          rdate: {
+            action: 'remove-period',
+            value: {
+              type: 'period',
+              timing: {
+                type: 'duration',
+                start: {
+                  type: 'date-time',
+                  value: {
+                    local: '2026-10-27T09:30:00',
+                    timezone: 'Europe/Stockholm',
+                  },
+                },
+                duration: {
+                  weeks: 0,
+                  days: 0,
+                  hours: 1,
+                  minutes: 0,
+                  seconds: 0,
+                  isNegative: false,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ) as CalendarEventPatch;
+    const updatedIcs = new ICalendarEventCodec()
+      .parse(calendarId, eventId, originalIcs)
+      .applyPatch(patch).icalendar;
+    fetch
+      .mockResponseOnce(originalIcs, {
+        status: 200,
+        headers: { ETag: '"old-etag"' },
+      })
+      .mockResponseOnce('', {
+        status: 200,
+        headers: { ETag: '"new-etag"' },
+      })
+      .mockResponseOnce(updatedIcs, {
+        status: 200,
+        headers: { ETag: '"new-etag"' },
+      });
+
+    const result = await createController().updateEvent(
+      userContext,
+      openIdCredential,
+      patch,
+      '"old-etag"',
+      roomId,
+      calendarId,
+      eventId,
+    );
+
+    expect(result.event.recurrence?.rdates).toHaveLength(3);
+    expect(result.event.recurrence?.rdates).toContainEqual({
+      type: 'date-time',
+      value: {
+        local: '2026-10-26T14:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    });
+    expect(result.event.recurrence?.rdates).toContainEqual({
+      type: 'period',
+      timing: {
+        type: 'end',
+        start: {
+          type: 'date-time',
+          value: {
+            local: '2026-10-28T14:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        end: {
+          type: 'date-time',
+          value: {
+            local: '2026-10-28T15:30:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      },
+    });
+    expect(result.event.recurrence?.rdates).toContainEqual({
+      type: 'period',
+      timing: {
+        type: 'duration',
+        start: {
+          type: 'date-time',
+          value: {
+            local: '2026-10-29T14:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        duration: {
+          weeks: 0,
+          days: 0,
+          hours: 1,
+          minutes: 30,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    });
+    const [, putInit] = fetch.mock.calls[1];
+    expect(new Headers(putInit?.headers).get('If-Match')).toBe('"old-etag"');
+    expect(putInit?.body).not.toContain('X-KEEP=period');
+    expect(putInit?.body).toContain('VALUE=PERIOD');
+    expect(putInit?.body).toContain('20261028T140000/20261028T153000');
+    expect(putInit?.body).toContain(
+      'RDATE;TZID=Europe/Stockholm:20261026T140000',
+    );
+    expect(putInit?.body).toContain('BEGIN:VTIMEZONE');
+    expect(putInit?.body).toContain('RECURRENCE-ID;TZID=Europe/Stockholm');
+  });
+
   it('removes a VALARM from persisted CalDAV data after JSON serialization', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';

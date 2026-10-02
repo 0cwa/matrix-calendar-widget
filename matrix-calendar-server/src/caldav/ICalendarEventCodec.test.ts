@@ -862,6 +862,140 @@ describe('ICalendarEventCodec', () => {
     },
   );
 
+  it('preserves a shared PERIOD property and its parameters when removing one list member', () => {
+    const source = fixture('recurrence-override.ics').replace(
+      'RDATE;TZID=Europe/Stockholm:20261026T140000',
+      [
+        'RDATE;TZID=Europe/Stockholm:20261026T140000',
+        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm;X-KEEP=shared:20261027T093000/PT1H,20261028T093000/PT2H',
+      ].join('\r\n'),
+    );
+    const parsed = codec.parse('team', 'period-shared-property.ics', source);
+    expect(parsed.event.unsupportedTimezone).toBeUndefined();
+    const target = parsed.event.recurrence?.rdates?.find(
+      (value) =>
+        value.type === 'period' &&
+        value.timing.type === 'duration' &&
+        value.timing.start.type === 'date-time' &&
+        value.timing.start.value.local === '2026-10-27T09:30:00',
+    );
+    expect(target?.type).toBe('period');
+    if (!target || target.type !== 'period') {
+      throw new Error('Expected selected PERIOD RDATE');
+    }
+
+    const removed = parsed.applyPatch({
+      recurrence: { rdate: { action: 'remove-period', value: target } },
+    });
+    const master = ICAL.Component.fromString(
+      removed.icalendar,
+    ).getAllSubcomponents('vevent')[0];
+    const remainingProperty = master
+      .getAllProperties('rdate')
+      .find((property) => property.getFirstParameter('x-keep') === 'shared');
+
+    expect(remainingProperty).toBeDefined();
+    expect(remainingProperty?.getFirstParameter('tzid')).toBe(
+      'Europe/Stockholm',
+    );
+    expect(remainingProperty?.getValues()).toHaveLength(1);
+    expect(removed.icalendar).toContain('X-KEEP=shared');
+    expect(removed.icalendar).toContain('20261028T093000/PT2H');
+    expect(removed.icalendar).not.toContain('20261027T093000/PT1H');
+  });
+
+  it.each([
+    {
+      label: 'equal explicit end',
+      value: '20261027T093000/20261027T093000',
+    },
+    {
+      label: 'reversed explicit end',
+      value: '20261027T103000/20261027T093000',
+    },
+    { label: 'zero duration', value: '20261027T093000/PT0S' },
+    { label: 'negative duration', value: '20261027T093000/-PT1H' },
+  ])('keeps PERIOD RDATE with $label opaque', ({ value }) => {
+    const source = simpleRecurringSource(
+      'DTSTART:20261026T093000Z',
+      'DTEND:20261026T103000Z',
+      ['RDATE;VALUE=PERIOD:' + value],
+    );
+    const parsed = codec.parse('team', 'invalid-period-rdate.ics', source);
+
+    expect(
+      parsed.event.recurrence?.rdates?.some(
+        (rdate) => rdate.type === 'period',
+      ) ?? false,
+    ).toBe(false);
+  });
+
+  it('fails closed for stale PERIOD removal, PERIOD creation, and malformed siblings', () => {
+    const source = fixture('recurrence-override.ics').replace(
+      'RDATE;TZID=Europe/Stockholm:20261026T140000',
+      [
+        'RDATE;TZID=Europe/Stockholm:20261026T140000',
+        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261027T093000/PT1H',
+      ].join('\r\n'),
+    );
+    const parsed = codec.parse('team', 'period-rdate-fail-closed.ics', source);
+    const period = parsed.event.recurrence?.rdates?.find(
+      (value) => value.type === 'period',
+    );
+    expect(period?.type).toBe('period');
+    if (!period || period.type !== 'period') {
+      throw new Error('Expected PERIOD-valued RDATE');
+    }
+    const changedStart = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-10-27T09:31:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const stalePeriod =
+      period.timing.type === 'end'
+        ? {
+            type: 'period' as const,
+            timing: { ...period.timing, start: changedStart },
+          }
+        : {
+            type: 'period' as const,
+            timing: { ...period.timing, start: changedStart },
+          };
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          rdate: {
+            action: 'remove-period',
+            value: stalePeriod,
+          },
+        },
+      }),
+    ).toThrow(ICalendarEventCodecError);
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          rdate: { action: 'add', value: period },
+        },
+      } as unknown as CalendarEventPatch),
+    ).toThrow(ICalendarEventCodecError);
+
+    const malformed = codec.parse(
+      'team',
+      'period-rdate-malformed.ics',
+      source.replace(
+        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261027T093000/PT1H',
+        'RDATE;VALUE=TEXT:unsupported',
+      ),
+    );
+    expect(() =>
+      malformed.applyPatch({
+        recurrence: { rdate: { action: 'remove-period', value: period } },
+      }),
+    ).toThrow(ICalendarEventCodecError);
+  });
+
   it('rejects adding a TZID RDATE without a matching source VTIMEZONE', () => {
     const parsed = codec.parse(
       'team',
@@ -975,6 +1109,118 @@ describe('ICalendarEventCodec', () => {
       'EXDATE;TZID=Europe/Stockholm:20261008T090000',
     );
   });
+
+  it.each([
+    {
+      label: 'explicit end',
+      value: {
+        type: 'period' as const,
+        timing: {
+          type: 'end' as const,
+          start: {
+            type: 'date-time' as const,
+            value: {
+              local: '2026-10-27T09:30:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          end: {
+            type: 'date-time' as const,
+            value: {
+              local: '2026-10-27T10:30:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        },
+      },
+      removedParameter: 'X-KEEP=end',
+      removedValue: '20261027T093000/20261027T103000',
+      siblingParameter: 'X-KEEP=duration',
+      siblingValue: '20261028T093000/PT1H',
+    },
+    {
+      label: 'RFC duration',
+      value: {
+        type: 'period' as const,
+        timing: {
+          type: 'duration' as const,
+          start: {
+            type: 'date-time' as const,
+            value: {
+              local: '2026-10-28T09:30:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          duration: {
+            weeks: 0,
+            days: 0,
+            hours: 1,
+            minutes: 0,
+            seconds: 0,
+            isNegative: false,
+          },
+        },
+      },
+      removedParameter: 'X-KEEP=duration',
+      removedValue: '20261028T093000/PT1H',
+      siblingParameter: 'X-KEEP=end',
+      siblingValue: '20261027T093000/20261027T103000',
+    },
+  ])(
+    'removes one PERIOD RDATE with $label and preserves resource data',
+    ({
+      value,
+      removedParameter,
+      removedValue,
+      siblingParameter,
+      siblingValue,
+    }) => {
+      const source = fixture('recurrence-override.ics').replace(
+        'RDATE;TZID=Europe/Stockholm:20261026T140000',
+        [
+          'RDATE;TZID=Europe/Stockholm:20261026T140000',
+          'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm;X-KEEP=end:20261027T093000/20261027T103000',
+          'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm;X-KEEP=duration:20261028T093000/PT1H',
+        ].join('\r\n'),
+      );
+      const parsed = codec.parse('team', 'period-rdate.ics', source);
+      const removed = parsed.applyPatch({
+        recurrence: { rdate: { action: 'remove-period', value } },
+      });
+      const siblingPeriod = parsed.event.recurrence?.rdates?.find(
+        (candidate) =>
+          candidate.type === 'period' &&
+          candidate.timing.type !== value.timing.type,
+      );
+      const reparsed = codec.parse(
+        'team',
+        'period-rdate.ics',
+        removed.icalendar,
+      );
+      const unfoldedIcs = removed.icalendar.replace(/\r\n[ \t]/g, '');
+
+      expect(siblingPeriod).toBeDefined();
+      expect(reparsed.event.recurrence?.rdates).toContainEqual(siblingPeriod);
+      expect(reparsed.event.recurrence?.rdates).not.toContainEqual(value);
+      expect(unfoldedIcs).not.toContain(removedParameter);
+      expect(unfoldedIcs).not.toContain(removedValue);
+      expect(unfoldedIcs).toContain(siblingParameter);
+      expect(unfoldedIcs).toContain(siblingValue);
+      expect(removed.icalendar).toContain(
+        'RDATE;TZID=Europe/Stockholm:20261026T140000',
+      );
+      expect(removed.icalendar).toContain('BEGIN:VTIMEZONE');
+      expect(removed.icalendar).toContain(
+        'EXDATE;TZID=Europe/Stockholm:20261102T140000',
+      );
+      expect(removed.icalendar).toContain(
+        'X-CLIENT-METADATA;X-PARAM=preserve-param',
+      );
+      expect(removed.icalendar).toContain(
+        'X-OVERRIDE-MARKER;X-ORIGIN=external',
+      );
+    },
+  );
 
   it('rejects incompatible, PERIOD, malformed, and unsupported RDATE writes', () => {
     const dateTimeEvent = codec.parse(

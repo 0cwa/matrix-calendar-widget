@@ -131,8 +131,12 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [ ] General RDATE / EXDATE editing.
   - [x] Add or remove one point-valued RDATE on a supported recurring event.
         Preserve DATE vs DATE-TIME, floating/UTC/TZID form and local wall time;
-        require a source VTIMEZONE for new TZID values, leave PERIOD values
-        opaque and keep EXDATE precedence unchanged.
+        require a source VTIMEZONE for new TZID values and keep EXDATE
+        precedence unchanged.
+  - [x] Remove one selected existing PERIOD-valued RDATE by its exact start
+        and explicit end or RFC duration; preserve all point/period siblings,
+        parameters, timezone definitions, detached members, and ETag checks.
+        PERIOD creation and timing edits remain unsupported.
 - [ ] RECURRENCE-ID instance override editing.
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
@@ -168,11 +172,13 @@ does not have to match DTSTART's, but a new TZID value requires a matching
 VTIMEZONE already present in the source VCALENDAR. Each new value uses a
 separate homogeneous RDATE property. Exact duplicates already supplied by
 DTSTART, RRULE, or RDATE are no-ops; EXDATE values remain untouched and
-authoritative. Removal compares the full typed identity, including TZID. PERIOD
-values, malformed or unsupported RDATE properties, detached VEVENTs, VALARM,
-VTIMEZONE, unknown properties, siblings, and ETag conditional updates remain
-preserved. General EXDATE editing, PERIOD editing, arbitrary RRULEs, and broad
-M5 completion remain open.
+authoritative. Point removal compares the full typed identity, including TZID.
+A separate remove-only PERIOD operation matches the full start plus explicit
+end or original RFC duration; it never creates or changes a PERIOD. Malformed
+or unsupported RDATE properties, detached VEVENTs, VALARM, VTIMEZONE, unknown
+properties, siblings, and ETag conditional updates remain preserved. General
+EXDATE editing, PERIOD creation/timing edits, arbitrary RRULEs, and broad M5
+completion remain open.
 
 The bounded weekly BYDAY slice extends the editor with a weekday set for
 every-week rules. Plain weekday tokens are accepted only when DTSTART's
