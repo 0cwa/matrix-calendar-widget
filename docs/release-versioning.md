@@ -36,15 +36,15 @@ container images, and charts are built. Do not treat workspace placeholder
 versions, chart metadata, or a mutable image tag as a substitute for that source
 tag.
 
-| Artifact | Version source and release mapping |
-| --- | --- |
-| Source release | Git tag `vX.Y.Z` on the reviewed release commit, with notes describing included components and known limits. |
-| Server image | The server image built from that commit, tagged `X.Y.Z`; record the registry digest in the release notes. The current chart default repository is `ghcr.io/0cwa/matrix-calendar-server`. |
-| Widget image | The widget image built from that commit, tagged `X.Y.Z`; record the registry digest in the release notes. The current chart default repository is `ghcr.io/0cwa/matrix-calendar-widget`. |
-| Radicale image | The project-owned Radicale image built from that commit, tagged `X.Y.Z`; choose and document its registry destination before enabling publication. CI currently builds it locally as `matrix-calendar-widget/radicale-openid:ci`. |
+| Artifact                 | Version source and release mapping                                                                                                                                                                                                                              |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source release           | Git tag `vX.Y.Z` on the reviewed release commit, with notes describing included components and known limits.                                                                                                                                                    |
+| Server image             | The server image built from that commit, tagged `X.Y.Z`; record the registry digest in the release notes. The current chart default repository is `ghcr.io/0cwa/matrix-calendar-server`.                                                                        |
+| Widget image             | The widget image built from that commit, tagged `X.Y.Z`; record the registry digest in the release notes. The current chart default repository is `ghcr.io/0cwa/matrix-calendar-widget`.                                                                        |
+| Radicale image           | The project-owned Radicale image built from that commit, tagged `X.Y.Z`; choose and document its registry destination before enabling publication. CI currently builds it locally as `matrix-calendar-widget/radicale-openid:ci`.                               |
 | Server and widget charts | Keep each chart's `version` as the SemVer version of that chart package. Set its `appVersion` to the corresponding application image version. Record the exact image digest in the deployment values or release record where the deployment system supports it. |
-| Umbrella chart | Keep its `version` as the SemVer version of the chart package. Set child-chart dependencies to exact chart versions when packaging a release; wildcard local dependencies are not a release lock. |
-| Workspace packages | Keep calendar and timezone libraries bundled as implementation dependencies of the application images. Do not publish them as standalone npm packages unless a separate package-support decision defines their public API and compatibility policy. |
+| Umbrella chart           | Keep its `version` as the SemVer version of the chart package. Set child-chart dependencies to exact chart versions when packaging a release; wildcard local dependencies are not a release lock.                                                               |
+| Workspace packages       | Keep calendar and timezone libraries bundled as implementation dependencies of the application images. Do not publish them as standalone npm packages unless a separate package-support decision defines their public API and compatibility policy.             |
 
 The source release tag is coordinated across the images in a release, but each
 chart package has its own chart `version`: a chart may change without changing
