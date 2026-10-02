@@ -278,7 +278,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     markPeriodRemovalStage('period-update-accepted');
 
     const after = await client.getEvent(resourceUrl);
-    markPeriodRemovalStage('period-updated-resource-read');
+    markPeriodRemovalStage('period-resource-reread');
     const verified = codec.parse(calendarUrl, resourceUrl, after.icalendar);
     markPeriodRemovalStage('period-updated-resource-parsed');
     expect(verified.event.recurrence?.rdates).toHaveLength(1);
@@ -302,6 +302,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     );
     expect(after.icalendar).toContain('X-OVERRIDE-MARKER;X-ORIGIN=external');
     markPeriodRemovalStage('period-unknown-properties-preserved');
+    markPeriodRemovalStage('period-removal-verified');
   });
 
   it('overfetches floating and DATE boundary candidates without modifying their resources', async () => {
