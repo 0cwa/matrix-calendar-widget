@@ -65,6 +65,25 @@ const PERIOD_STAGES = [
   'compare-start',
   'complete',
 ];
+const RECURRING_OVERRIDE_CASE_ID = 'recurring-master-detached-overrides';
+const RECURRING_OVERRIDE_STAGES = [
+  'seed-put-start',
+  'seed-put-complete',
+  'initial-get-start',
+  'initial-get-complete',
+  'initial-compare-start',
+  'initial-compare-complete',
+  'patch-put-start',
+  'patch-put-complete',
+  'patch-get-start',
+  'patch-get-complete',
+  'patch-compare-start',
+  'patch-compare-complete',
+];
+const STAGES_BY_CASE = new Map([
+  ...PERIOD_CASES.map(({ id }) => [id, PERIOD_STAGES]),
+  [RECURRING_OVERRIDE_CASE_ID, RECURRING_OVERRIDE_STAGES],
+]);
 
 export function safePeriodFailureLines(testReport) {
   return collectContractCaseStatuses(testReport)
@@ -115,19 +134,19 @@ function collectContractCaseStatuses(testReport) {
   }));
 }
 
-export function safePeriodStageLines(stageText, failedCaseIds) {
+export function safeContractStageLines(stageText, failedCaseIds) {
   if (typeof stageText !== 'string' || !Array.isArray(failedCaseIds)) {
     return [];
   }
 
-  const knownCaseIds = new Set(PERIOD_CASES.map(({ id }) => id));
+  const knownCaseIds = new Set(STAGES_BY_CASE.keys());
   const failedCases = new Set(
     failedCaseIds.filter((caseId) => knownCaseIds.has(caseId)),
   );
   const lastStageByCase = new Map();
   const allowedTokens = new Set(
-    [...knownCaseIds].flatMap((caseId) =>
-      PERIOD_STAGES.map((stage) => `${caseId}:${stage}`),
+    [...STAGES_BY_CASE].flatMap(([caseId, stages]) =>
+      stages.map((stage) => `${caseId}:${stage}`),
     ),
   );
 
@@ -141,8 +160,9 @@ export function safePeriodStageLines(stageText, failedCaseIds) {
     }
   }
 
-  return PERIOD_CASES.filter(({ id }) => lastStageByCase.has(id)).map(
-    ({ id }) => `Known PERIOD contract stage: ${id}:${lastStageByCase.get(id)}`,
+  return CONTRACT_CASES.filter(({ id }) => lastStageByCase.has(id)).map(
+    ({ id }) =>
+      `${id.startsWith('period-') ? 'Known PERIOD contract stage' : 'Known contract stage'}: ${id}:${lastStageByCase.get(id)}`,
   );
 }
 
@@ -252,7 +272,7 @@ function main() {
     (suite) => suite?.status === 'failed',
   );
   const caseStatusLines = safeContractCaseStatusLines(testReport);
-  const failedCaseIds = PERIOD_CASES.filter(({ id }) =>
+  const failedCaseIds = CONTRACT_CASES.filter(({ id }) =>
     caseStatusLines.includes(`Known contract case status: ${id}:failed`),
   ).map(({ id }) => id);
 
@@ -270,7 +290,7 @@ function main() {
     process.stdout.write(`${line}\n`);
   }
   if (stageFile && failedCaseIds.length > 0) {
-    for (const line of safePeriodStageLines(stageText, failedCaseIds)) {
+    for (const line of safeContractStageLines(stageText, failedCaseIds)) {
       process.stdout.write(`${line}\n`);
     }
   }

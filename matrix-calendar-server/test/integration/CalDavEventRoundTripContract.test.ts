@@ -34,11 +34,31 @@ type PeriodStage =
   | 'get-complete'
   | 'compare-start'
   | 'complete';
+type RecurringOverrideStage =
+  | 'seed-put-start'
+  | 'seed-put-complete'
+  | 'initial-get-start'
+  | 'initial-get-complete'
+  | 'initial-compare-start'
+  | 'initial-compare-complete'
+  | 'patch-put-start'
+  | 'patch-put-complete'
+  | 'patch-get-start'
+  | 'patch-get-complete'
+  | 'patch-compare-start'
+  | 'patch-compare-complete';
 
 function recordPeriodStage(caseId: PeriodCaseId, stage: PeriodStage): void {
   const stageFile = process.env.CALDAV_PERIOD_STAGE_FILE;
   if (stageFile) {
     appendFileSync(stageFile, `${caseId}:${stage}\n`);
+  }
+}
+
+function recordRecurringOverrideStage(stage: RecurringOverrideStage): void {
+  const stageFile = process.env.CALDAV_PERIOD_STAGE_FILE;
+  if (stageFile) {
+    appendFileSync(stageFile, `recurring-master-detached-overrides:${stage}\n`);
   }
 }
 
@@ -166,10 +186,15 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     ).toString();
     const source = recurringCalendar(uid);
 
+    recordRecurringOverrideStage('seed-put-start');
     await client.createEvent(resourceUrl, source);
+    recordRecurringOverrideStage('seed-put-complete');
     cleanupResourceUrls = [resourceUrl];
 
+    recordRecurringOverrideStage('initial-get-start');
     const createdResource = await client.getEvent(resourceUrl);
+    recordRecurringOverrideStage('initial-get-complete');
+    recordRecurringOverrideStage('initial-compare-start');
     expect(createdResource.href).toBe(resourceUrl);
     expect(createdResource.etag).toBeTruthy();
     expect(createdResource.icalendar.match(/BEGIN:VEVENT/g)).toHaveLength(3);
@@ -181,15 +206,21 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       createdResource.icalendar,
     );
     expect(initial.event.uid).toBe(uid);
+    recordRecurringOverrideStage('initial-compare-complete');
 
     const patched = initial.applyPatch({ location: 'Interoperability room' });
+    recordRecurringOverrideStage('patch-put-start');
     await client.updateEvent(
       resourceUrl,
       createdResource.etag,
       patched.icalendar,
     );
+    recordRecurringOverrideStage('patch-put-complete');
 
+    recordRecurringOverrideStage('patch-get-start');
     const afterPatch = await client.getEvent(resourceUrl);
+    recordRecurringOverrideStage('patch-get-complete');
+    recordRecurringOverrideStage('patch-compare-start');
     const verified = codec.parse(
       calendarUrl,
       resourceUrl,
@@ -211,6 +242,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
         },
       },
     });
+    recordRecurringOverrideStage('patch-compare-complete');
   });
 
   it('round-trips a TZID PERIOD RDATE with an explicit end through Radicale', async () => {

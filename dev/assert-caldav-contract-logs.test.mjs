@@ -29,8 +29,8 @@ import { fileURLToPath } from 'node:url';
 import {
   PERIOD_CONTRACT_SUITE_PATH,
   safeContractCaseStatusLines,
+  safeContractStageLines,
   safePeriodFailureLines,
-  safePeriodStageLines,
 } from './assert-caldav-contract-logs.mjs';
 
 const SCRIPT_PATH = fileURLToPath(
@@ -163,17 +163,34 @@ test('maps every fixed PERIOD stage token and keeps the last stage per case', ()
   const stageText = [
     ...stages.map((stage) => `period-explicit-end:${stage}`),
     ...stages.map((stage) => `period-duration:${stage}`),
+    'recurring-master-detached-overrides:seed-put-start',
+    'recurring-master-detached-overrides:seed-put-complete',
+    'recurring-master-detached-overrides:initial-get-start',
+    'recurring-master-detached-overrides:initial-get-complete',
+    'recurring-master-detached-overrides:initial-compare-start',
+    'recurring-master-detached-overrides:initial-compare-complete',
+    'recurring-master-detached-overrides:patch-put-start',
+    'recurring-master-detached-overrides:patch-put-complete',
+    'recurring-master-detached-overrides:patch-get-start',
+    'recurring-master-detached-overrides:patch-get-complete',
+    'recurring-master-detached-overrides:patch-compare-start',
+    'recurring-master-detached-overrides:patch-compare-complete',
   ].join('\n');
 
   assert.deepEqual(
-    safePeriodStageLines(stageText, ['period-explicit-end', 'period-duration']),
+    safeContractStageLines(stageText, [
+      'period-explicit-end',
+      'period-duration',
+      'recurring-master-detached-overrides',
+    ]),
     [
+      'Known contract stage: recurring-master-detached-overrides:patch-compare-complete',
       'Known PERIOD contract stage: period-explicit-end:complete',
       'Known PERIOD contract stage: period-duration:complete',
     ],
   );
   assert.deepEqual(
-    safePeriodStageLines(
+    safeContractStageLines(
       'period-explicit-end:put-start\nperiod-explicit-end:get-start',
       ['period-explicit-end'],
     ),
@@ -189,18 +206,19 @@ test('ignores malformed, unknown, and injected sidecar values', () => {
     '../period-duration:complete',
     'period-duration:unknown-stage',
   ];
-  const output = safePeriodStageLines(sentinels.join('\n'), [
+  const output = safeContractStageLines(sentinels.join('\n'), [
     'period-explicit-end',
     'period-duration',
+    'recurring-master-detached-overrides',
   ]).join('\n');
 
   assert.equal(output, '');
   for (const sentinel of sentinels) {
     assert.equal(output.includes(sentinel), false);
   }
-  assert.deepEqual(safePeriodStageLines(null, ['period-explicit-end']), []);
+  assert.deepEqual(safeContractStageLines(null, ['period-explicit-end']), []);
   assert.deepEqual(
-    safePeriodStageLines('period-explicit-end:get-start', []),
+    safeContractStageLines('period-explicit-end:get-start', []),
     [],
   );
 });
@@ -394,6 +412,39 @@ test('prints only fixed stages from an exact runner-local sidecar', () => {
   ]) {
     assert.equal(result.stdout.includes(sentinel), false);
   }
+});
+
+test('prints only an allowlisted recurring case phase', () => {
+  const report = {
+    testResults: [
+      failedSuite(PERIOD_CONTRACT_SUITE_PATH, RECURRING_OVERRIDES_TITLE, [
+        'private event and error sentinel',
+      ]),
+    ],
+  };
+  const result = runScanner(JSON.stringify(report), {
+    sidecar: [
+      'recurring-master-detached-overrides:seed-put-start',
+      'recurring-master-detached-overrides:seed-put-complete',
+      'recurring-master-detached-overrides:initial-get-start',
+      'private event sentinel',
+      'recurring-master-detached-overrides:patch-put-start injected-sentinel',
+    ].join('\n'),
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(
+    result.stdout,
+    'CalDAV contract tests failed; sensitive failure details are withheld.\n' +
+      'Known contract case status: gateway-direct-client-round-trip:case-not-seen\n' +
+      'Known contract case status: recurring-master-detached-overrides:failed\n' +
+      'Known contract case status: period-explicit-end:case-not-seen\n' +
+      'Known contract case status: period-duration:case-not-seen\n' +
+      'Known contract case status: floating-date-boundary-candidates:case-not-seen\n' +
+      'Known contract stage: recurring-master-detached-overrides:initial-get-start\n',
+  );
+  assert.equal(result.stdout.includes('sentinel'), false);
+  assert.equal(result.stdout.includes('private event'), false);
 });
 
 test('reports case-not-seen for path or title mismatches', () => {
