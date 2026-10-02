@@ -69,10 +69,7 @@ test('reports static failed test identity without failure details', () => {
     output,
     /CalDavEventRoundTripContract\.test\.ts.*199.*3.*removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag/,
   );
-  assert.match(
-    output,
-    /222.*5.*static title withheld/,
-  );
+  assert.match(output, /222.*5.*static title withheld/);
   assert.deepEqual(identities[0]?.assertionLocations, ['233:5']);
   assert.doesNotMatch(
     output,
