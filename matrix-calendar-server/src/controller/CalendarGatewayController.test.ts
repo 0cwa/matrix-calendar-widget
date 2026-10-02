@@ -1690,7 +1690,7 @@ END:VCALENDAR`,
       eventId,
     );
 
-    expect(result.event.recurrence?.rdates).toHaveLength(1);
+    expect(result.event.recurrence?.rdates).toHaveLength(3);
     expect(result.event.recurrence?.rdates).toContainEqual({
       type: 'date-time',
       value: {
@@ -1698,9 +1698,52 @@ END:VCALENDAR`,
         timezone: 'Europe/Stockholm',
       },
     });
+    expect(result.event.recurrence?.rdates).toContainEqual({
+      type: 'period',
+      timing: {
+        type: 'end',
+        start: {
+          type: 'date-time',
+          value: {
+            local: '2026-10-28T14:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        end: {
+          type: 'date-time',
+          value: {
+            local: '2026-10-28T15:30:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      },
+    });
+    expect(result.event.recurrence?.rdates).toContainEqual({
+      type: 'period',
+      timing: {
+        type: 'duration',
+        start: {
+          type: 'date-time',
+          value: {
+            local: '2026-10-29T14:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        duration: {
+          weeks: 0,
+          days: 0,
+          hours: 1,
+          minutes: 30,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    });
     const [, putInit] = fetch.mock.calls[1];
     expect(new Headers(putInit?.headers).get('If-Match')).toBe('"old-etag"');
-    expect(putInit?.body).not.toContain('VALUE=PERIOD');
+    expect(putInit?.body).not.toContain('X-KEEP=period');
+    expect(putInit?.body).toContain('VALUE=PERIOD');
+    expect(putInit?.body).toContain('20261028T140000/20261028T153000');
     expect(putInit?.body).toContain(
       'RDATE;TZID=Europe/Stockholm:20261026T140000',
     );

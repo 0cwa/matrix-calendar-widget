@@ -1106,10 +1106,10 @@ describe('ICalendarEventCodec', () => {
           },
         },
       },
-      removedLine:
-        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm;X-KEEP=end:20261027T093000/20261027T103000',
-      siblingLine:
-        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm;X-KEEP=duration:20261028T093000/PT1H',
+      removedParameter: 'X-KEEP=end',
+      removedValue: '20261027T093000/20261027T103000',
+      siblingParameter: 'X-KEEP=duration',
+      siblingValue: '20261028T093000/PT1H',
     },
     {
       label: 'RFC duration',
@@ -1134,14 +1134,20 @@ describe('ICalendarEventCodec', () => {
           },
         },
       },
-      removedLine:
-        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm;X-KEEP=duration:20261028T093000/PT1H',
-      siblingLine:
-        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm;X-KEEP=end:20261027T093000/20261027T103000',
+      removedParameter: 'X-KEEP=duration',
+      removedValue: '20261028T093000/PT1H',
+      siblingParameter: 'X-KEEP=end',
+      siblingValue: '20261027T093000/20261027T103000',
     },
   ])(
     'removes one PERIOD RDATE with $label and preserves resource data',
-    ({ value, removedLine, siblingLine }) => {
+    ({
+      value,
+      removedParameter,
+      removedValue,
+      siblingParameter,
+      siblingValue,
+    }) => {
       const source = fixture('recurrence-override.ics').replace(
         'RDATE;TZID=Europe/Stockholm:20261026T140000',
         [
@@ -1164,11 +1170,15 @@ describe('ICalendarEventCodec', () => {
         'period-rdate.ics',
         removed.icalendar,
       );
+      const unfoldedIcs = removed.icalendar.replace(/\r\n[ \t]/g, '');
 
       expect(siblingPeriod).toBeDefined();
       expect(reparsed.event.recurrence?.rdates).toContainEqual(siblingPeriod);
-      expect(removed.icalendar).not.toContain(removedLine);
-      expect(removed.icalendar).toContain(siblingLine);
+      expect(reparsed.event.recurrence?.rdates).not.toContainEqual(value);
+      expect(unfoldedIcs).not.toContain(removedParameter);
+      expect(unfoldedIcs).not.toContain(removedValue);
+      expect(unfoldedIcs).toContain(siblingParameter);
+      expect(unfoldedIcs).toContain(siblingValue);
       expect(removed.icalendar).toContain(
         'RDATE;TZID=Europe/Stockholm:20261026T140000',
       );
