@@ -89,7 +89,9 @@ describe('MeetingClient', () => {
           ],
         ]);
 
-        expect(jest.mocked(MatrixClient).prototype.createRoom).toBeCalledWith({
+        expect(
+          jest.mocked(MatrixClient).prototype.createRoom,
+        ).toHaveBeenCalledWith({
           name: 'My Meeting',
           topic: 'My Description',
           visibility: 'private',
@@ -187,7 +189,9 @@ describe('MeetingClient', () => {
         ],
       ]);
 
-      expect(jest.mocked(MatrixClient).prototype.createRoom).toBeCalledWith({
+      expect(
+        jest.mocked(MatrixClient).prototype.createRoom,
+      ).toHaveBeenCalledWith({
         name: 'My Meeting',
         topic: 'My Description',
         visibility: 'private',
@@ -276,7 +280,9 @@ describe('MeetingClient', () => {
         ],
       ]);
 
-      expect(jest.mocked(MatrixClient).prototype.createRoom).toBeCalledWith({
+      expect(
+        jest.mocked(MatrixClient).prototype.createRoom,
+      ).toHaveBeenCalledWith({
         name: 'My Meeting',
         topic: 'My Description',
         visibility: 'private',
