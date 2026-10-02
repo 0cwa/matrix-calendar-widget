@@ -57,7 +57,49 @@ PERIOD_CALENDAR = "\r\n".join(
 )
 
 
+ORDINARY_RECURRENCE_CALENDAR = "\r\n".join(
+    [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Matrix Calendar Widget//Ordinary Recurrence Test//EN",
+        "BEGIN:VEVENT",
+        "UID:ordinary-rdate-detached-override",
+        "DTSTAMP:20260922T120000Z",
+        "DTSTART:20261026T093000Z",
+        "DTEND:20261026T103000Z",
+        "RRULE:FREQ=WEEKLY;COUNT=3",
+        "RDATE:20261116T093000Z",
+        "SUMMARY:synthetic master",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:ordinary-rdate-detached-override",
+        "DTSTAMP:20260922T120000Z",
+        "RECURRENCE-ID:20261102T093000Z",
+        "DTSTART:20261102T110000Z",
+        "DTEND:20261102T120000Z",
+        "SUMMARY:synthetic override",
+        "END:VEVENT",
+        "END:VCALENDAR",
+        "",
+    ]
+)
+
+
 class VObjectPeriodImageTests(unittest.TestCase):
+    def test_ordinary_rdate_and_detached_override_round_trip(self) -> None:
+        parsed = vobject.readOne(ORDINARY_RECURRENCE_CALENDAR)
+        serialized = parsed.serialize()
+        reparsed = vobject.readOne(serialized)
+
+        events = reparsed.contents["vevent"]
+        self.assertEqual(len(events), 2)
+
+        master = next(event for event in events if "rrule" in event.contents)
+        detached = next(event for event in events if "recurrence-id" in event.contents)
+        self.assertEqual(len(master.contents["rdate"]), 1)
+        self.assertIsInstance(master.contents["rdate"][0].value[0], datetime.datetime)
+        self.assertIn("recurrence-id", detached.contents)
+
     def test_radicale_reports_period_support(self) -> None:
         self.assertTrue(utils.vobject_supports_period())
 
