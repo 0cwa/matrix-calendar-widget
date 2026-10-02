@@ -27,13 +27,13 @@ RUN /app/bin/python -m pip install \
 
 FROM runtime-base AS image-base
 
-COPY --from=vobject-builder /tmp/vobject-wheels/vobject-1.0.0-py3-none-any.whl /tmp/vobject.whl
+COPY --from=vobject-builder /tmp/vobject-wheels/vobject-1.0.0-py3-none-any.whl /tmp/vobject-1.0.0-py3-none-any.whl
 RUN /app/bin/python -m pip install \
     --no-cache-dir \
     --no-deps \
     --force-reinstall \
-    /tmp/vobject.whl \
-    && rm /tmp/vobject.whl
+    /tmp/vobject-1.0.0-py3-none-any.whl \
+    && rm /tmp/vobject-1.0.0-py3-none-any.whl
 
 COPY --chown=radicale:radicale config /etc/radicale/config
 COPY --chown=radicale:radicale src/matrix_calendar_radicale_auth /opt/radicale-auth/src/matrix_calendar_radicale_auth
