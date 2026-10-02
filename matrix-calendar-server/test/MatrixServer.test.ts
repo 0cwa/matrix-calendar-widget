@@ -308,7 +308,7 @@ describe('MatrixServer suite', () => {
     };
     await expect(
       matrixServer.processEvent(pattern1.botEventType, roomId, roomEvent11),
-    ).rejects.toThrowError();
+    ).rejects.toThrow();
   });
 
   test('listen/close test', async () => {
