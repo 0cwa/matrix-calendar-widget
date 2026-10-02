@@ -7,14 +7,24 @@ test('emits only the latest fixed phase from the closed allowlist', () => {
   const content = [
     'unrecognized phase with arbitrary diagnostic data',
     'period-resource-created',
-    'period-resource-reread',
+    'period-target-validated',
+    'period-patch-applied',
+    'period-update-started',
     'period-removal-verified extra text',
   ].join('\n');
 
   assert.equal(
     formatContractPhase(content),
-    'contract-phase period-resource-reread\n',
+    'contract-phase period-update-started\n',
   );
+
+  for (const phase of [
+    'period-target-validated',
+    'period-patch-applied',
+    'period-update-started',
+  ]) {
+    assert.equal(formatContractPhase(phase), `contract-phase ${phase}\n`);
+  }
 });
 
 test('does not emit arbitrary phase names or data', () => {

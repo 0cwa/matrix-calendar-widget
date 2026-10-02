@@ -274,6 +274,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     });
     markPeriodRemovalStage('period-patch-applied');
 
+    markPeriodRemovalStage('period-update-started');
     await client.updateEvent(resourceUrl, before.etag, patched.icalendar);
     markPeriodRemovalStage('period-update-accepted');
 
