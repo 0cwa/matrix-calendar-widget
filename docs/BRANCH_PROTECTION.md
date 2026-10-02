@@ -2,9 +2,9 @@
 
 GitHub's current protection settings for `main` are configured as described
 below and were confirmed through the repository API on 2026-10-02. Issue #29
-remains open for the final behavior check: verify with a trivial documentation
-PR that GitHub blocks merging while a required check is pending and allows
-merging only after all five required checks pass.
+records a trivial documentation-PR check for verifying that GitHub blocks
+merging while a required check is pending and allows merging only after all
+five required checks pass.
 
 The configured branch rule or repository ruleset targeting `main` has these
 settings.
