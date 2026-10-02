@@ -121,6 +121,15 @@ describe('MatrixServer suite', () => {
     verify(matrixClientMock.stop()).once();
   });
 
+  test('on and unwrap expose the underlying Matrix transport', () => {
+    const callback = jest.fn();
+
+    matrixServer.on('custom-event', callback);
+
+    verify(matrixClientMock.on('custom-event', callback)).once();
+    expect(matrixServer.unwrap<MatrixClient>()).toBe(matrixClient);
+  });
+
   test('addHandler/processEvent Bot NIC custom room event test', async () => {
     await matrixServer.onModuleInit();
 
