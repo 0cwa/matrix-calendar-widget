@@ -58,6 +58,7 @@ jobs:
           dev/caldav-contract-diagnostics.test.mjs
           dev/caldav-contract-diagnostics.mjs
           dev/assert-caldav-contract-logs.mjs
+          matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts
 
       - name: Upload locked formatter output (temporary)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -67,6 +68,7 @@ jobs:
             dev/caldav-contract-diagnostics.test.mjs
             dev/caldav-contract-diagnostics.mjs
             dev/assert-caldav-contract-logs.mjs
+            matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts
           if-no-files-found: error
           retention-days: 1
 
@@ -109,6 +111,9 @@ jobs:
           set +e
           contract_log="$RUNNER_TEMP/caldav-contract-output.log"
           contract_report="$RUNNER_TEMP/caldav-contract-results.json"
+          contract_stages="$RUNNER_TEMP/caldav-contract-stages.log"
+          : > "$contract_stages"
+          export CALDAV_CONTRACT_STAGE_FILE="$contract_stages"
           yarn workspace @matrix-calendar-widget/server jest \
             test/CalendarGatewayMembershipGuard.test.ts \
             test/integration/PersonalOpenIdRadicaleContract.test.ts \
@@ -122,9 +127,9 @@ jobs:
           set -e
           set +e
           node dev/assert-caldav-contract-logs.mjs \
-            "$contract_log" "$contract_report"
+            "$contract_log" "$contract_report" "$contract_stages"
           scan_status=$?
-          rm -f "$contract_log" "$contract_report"
+          rm -f "$contract_log" "$contract_report" "$contract_stages"
           set -e
           if [ "$scan_status" -ne 0 ]; then
             exit "$scan_status"

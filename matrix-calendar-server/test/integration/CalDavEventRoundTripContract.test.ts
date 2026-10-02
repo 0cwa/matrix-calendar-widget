@@ -16,6 +16,7 @@
 
 import fetchMock from 'jest-fetch-mock';
 import { randomUUID } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import {
   CalDavCredentialProvider,
   CalDavEventClient,
@@ -24,6 +25,19 @@ import {
 
 const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
+
+function markPeriodRemovalStage(stage: string): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+    return;
+  }
+
+  try {
+    appendFileSync(stageFile, `${stage}\n`, 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
 
 describeContract('CalDAV VEVENT round-trip contract', () => {
   const baseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
@@ -213,38 +227,55 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     cleanupResourceUrls = [resourceUrl];
 
     await client.createEvent(resourceUrl, source);
+    markPeriodRemovalStage('period-resource-created');
     const before = await client.getEvent(resourceUrl);
+    markPeriodRemovalStage('period-resource-read');
     const parsed = codec.parse(calendarUrl, resourceUrl, before.icalendar);
+    markPeriodRemovalStage('period-resource-parsed');
     const target = parsed.event.recurrence?.rdates?.find(
       (value) => value.type === 'period' && value.timing.type === 'duration',
     );
+    markPeriodRemovalStage('period-target-found');
     expect(target?.type).toBe('period');
     if (!target || target.type !== 'period') {
       throw new Error('Expected duration-valued RDATE PERIOD');
     }
+    markPeriodRemovalStage('period-target-is-duration');
     const patched = parsed.applyPatch({
       recurrence: { rdate: { action: 'remove-period', value: target } },
     });
+    markPeriodRemovalStage('period-patch-applied');
 
     await client.updateEvent(resourceUrl, before.etag, patched.icalendar);
+    markPeriodRemovalStage('period-update-accepted');
 
     const after = await client.getEvent(resourceUrl);
+    markPeriodRemovalStage('period-updated-resource-read');
     const verified = codec.parse(calendarUrl, resourceUrl, after.icalendar);
+    markPeriodRemovalStage('period-updated-resource-parsed');
     expect(verified.event.recurrence?.rdates).toHaveLength(2);
+    markPeriodRemovalStage('period-rdate-count');
     expect(after.icalendar).not.toContain('X-KEEP=duration');
+    markPeriodRemovalStage('period-duration-removed');
     expect(after.icalendar).toContain('X-KEEP=end');
+    markPeriodRemovalStage('period-end-sibling-preserved');
     expect(after.icalendar).toContain(
       'RDATE;TZID=Europe/Stockholm:20261026T140000',
     );
+    markPeriodRemovalStage('period-point-sibling-preserved');
     expect(after.icalendar).toContain('BEGIN:VTIMEZONE');
+    markPeriodRemovalStage('period-vtimezone-preserved');
     expect(after.icalendar).toContain(
       'EXDATE;TZID=Europe/Stockholm:20261102T140000',
     );
+    markPeriodRemovalStage('period-exdate-preserved');
     expect(after.icalendar).toContain('RECURRENCE-ID;TZID=Europe/Stockholm');
+    markPeriodRemovalStage('period-detached-member-preserved');
     expect(after.icalendar).toContain(
       'X-CLIENT-METADATA;X-PARAM=preserve-param',
     );
     expect(after.icalendar).toContain('X-OVERRIDE-MARKER;X-ORIGIN=external');
+    markPeriodRemovalStage('period-unknown-properties-preserved');
   });
 
   it('overfetches floating and DATE boundary candidates without modifying their resources', async () => {

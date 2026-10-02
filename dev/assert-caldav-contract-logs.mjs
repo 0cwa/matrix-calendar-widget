@@ -23,6 +23,7 @@ const username = process.env.CALDAV_USERNAME ?? 'calendar';
 const fixturePassword = process.env.MATRIX_CALENDAR_DEV_PASSWORD ?? '';
 const logFile = process.argv[2];
 const reportFile = process.argv[3];
+const stageFile = process.argv[4];
 if (!credential.startsWith('matrix-openid:') || !logFile || !reportFile) {
   process.stderr.write('Unable to verify CalDAV contract log redaction.\n');
   process.exit(1);
@@ -82,9 +83,13 @@ try {
 
 let testLogs;
 let testReportText;
+let stageReport = '';
 try {
   testLogs = readFileSync(logFile, 'utf8');
   testReportText = readFileSync(reportFile, 'utf8');
+  if (stageFile) {
+    stageReport = readFileSync(stageFile, 'utf8');
+  }
 } catch {
   process.stderr.write('Unable to inspect CalDAV contract test output.\n');
   process.exit(1);
@@ -120,13 +125,17 @@ if (failedSuites.length === 0) {
   process.stdout.write(
     'CalDAV contract tests failed; sensitive failure details are withheld.\n',
   );
-  for (const identity of formatFailedCalDavTestIdentities(testReport)) {
+  for (const identity of formatFailedCalDavTestIdentities(
+    testReport,
+    process.cwd(),
+    stageReport,
+  )) {
     process.stdout.write(
       `Failed contract test: ${identity.suiteBasename}:${identity.line}:${identity.column} ${identity.staticTitle}\n`,
     );
-    for (const location of identity.assertionLocations) {
+    if (identity.safePeriodStage) {
       process.stdout.write(
-        `Safe assertion location: CalDavEventRoundTripContract.test.ts:${location}\n`,
+        `Safe CalDAV contract stage: ${identity.safePeriodStage}\n`,
       );
     }
   }

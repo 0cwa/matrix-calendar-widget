@@ -18,8 +18,27 @@ import path from 'node:path';
 const safeSuiteBasename =
   /^[A-Za-z0-9][A-Za-z0-9._-]*\.test\.(?:js|mjs|ts|tsx)$/;
 const safeStaticTitle = /^[A-Za-z0-9][A-Za-z0-9 _.,:()/'+-]{0,159}$/;
-const safeAssertionFrame =
-  /CalDavEventRoundTripContract\.test\.ts:(\d+):(\d+)/;
+const periodRemoveTestTitle =
+  'removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag';
+const safePeriodStages = new Set([
+  'period-resource-created',
+  'period-resource-read',
+  'period-resource-parsed',
+  'period-target-found',
+  'period-target-is-duration',
+  'period-patch-applied',
+  'period-update-accepted',
+  'period-updated-resource-read',
+  'period-updated-resource-parsed',
+  'period-rdate-count',
+  'period-duration-removed',
+  'period-end-sibling-preserved',
+  'period-point-sibling-preserved',
+  'period-vtimezone-preserved',
+  'period-exdate-preserved',
+  'period-detached-member-preserved',
+  'period-unknown-properties-preserved',
+]);
 
 function hasStaticTitle(source, title) {
   const singleQuoted = `'${title.replaceAll("'", "\\'")}'`;
@@ -31,6 +50,7 @@ function hasStaticTitle(source, title) {
 export function formatFailedCalDavTestIdentities(
   testReport,
   repoRoot = process.cwd(),
+  stageReport = '',
 ) {
   const identities = [];
 
@@ -79,7 +99,7 @@ export function formatFailedCalDavTestIdentities(
         hasStaticTitle(suiteSource, title)
           ? title
           : '(static title withheld)';
-      const assertionLocations = new Set();
+      let safePeriodStage = null;
       if (
         pathParts.join(path.sep) ===
         path.join(
@@ -87,33 +107,11 @@ export function formatFailedCalDavTestIdentities(
           'test',
           'integration',
           'CalDavEventRoundTripContract.test.ts',
-        )
+        ) && title === periodRemoveTestTitle
       ) {
-        for (const message of test.failureMessages ?? []) {
-          if (typeof message !== 'string') {
-            continue;
-          }
-          for (const stackLine of message.split(/\r?\n/)) {
-            if (!/^\s*at\s/.test(stackLine)) {
-              continue;
-            }
-            const match = stackLine.match(safeAssertionFrame);
-            if (!match) {
-              continue;
-            }
-            const assertionLine = Number(match[1]);
-            const assertionColumn = Number(match[2]);
-            const sourceLine = suiteSource.split(/\r?\n/)[assertionLine - 1];
-            if (
-              Number.isInteger(assertionLine) &&
-              assertionLine > 0 &&
-              Number.isInteger(assertionColumn) &&
-              assertionColumn > 0 &&
-              typeof sourceLine === 'string' &&
-              assertionColumn <= sourceLine.length + 1
-            ) {
-              assertionLocations.add(`${assertionLine}:${assertionColumn}`);
-            }
+        for (const stageLine of stageReport.split(/\r?\n/)) {
+          if (safePeriodStages.has(stageLine)) {
+            safePeriodStage = stageLine;
           }
         }
       }
@@ -122,7 +120,7 @@ export function formatFailedCalDavTestIdentities(
         line,
         column,
         staticTitle,
-        assertionLocations: [...assertionLocations],
+        safePeriodStage,
       });
     }
   }
