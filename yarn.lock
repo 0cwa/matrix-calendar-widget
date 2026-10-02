@@ -2147,10 +2147,10 @@
     dotenv-expand "10.0.0"
     lodash "4.17.21"
 
-"@nestjs/core@^11.1.28":
-  version "11.1.28"
-  resolved "https://registry.yarnpkg.com/@nestjs/core/-/core-11.1.28.tgz#366ce726211358d5022520cead7a84830bbca7af"
-  integrity sha512-06m63xIRj8+l8uOeh/8LnYupGubkyu4f+bPKIadaSui6vK9KpXgoz7HveT1yOVLcEt0M0oCOEW5EuEXZkEmBBQ==
+"@nestjs/core@^12.1.1":
+  version "12.1.1"
+  resolved "https://registry.yarnpkg.com/@nestjs/core/-/core-12.1.1.tgz#e1925fa7fe72efd503e6f6a0802f622ece4243cc"
+  integrity sha512-wI6zlO7sfoL4532/XXVkdPSiiXPAUsFdUkK42bTxVKoaEj60x8y8k95HtxOy5q/tUcXcB2Q4HIFKwVjgMamHeg==
   dependencies:
     uid "2.0.2"
     fast-safe-stringify "2.1.1"
