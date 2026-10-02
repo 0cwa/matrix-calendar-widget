@@ -16,6 +16,7 @@
 
 import fetchMock from 'jest-fetch-mock';
 import { randomUUID } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import {
   CalDavCredentialProvider,
   CalDavEventClient,
@@ -24,6 +25,22 @@ import {
 
 const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
+
+type PeriodCaseId = 'period-explicit-end' | 'period-duration';
+type PeriodStage =
+  | 'put-start'
+  | 'put-complete'
+  | 'get-start'
+  | 'get-complete'
+  | 'compare-start'
+  | 'complete';
+
+function recordPeriodStage(caseId: PeriodCaseId, stage: PeriodStage): void {
+  const stageFile = process.env.CALDAV_PERIOD_STAGE_FILE;
+  if (stageFile) {
+    appendFileSync(stageFile, `${caseId}:${stage}\n`);
+  }
+}
 
 describeContract('CalDAV VEVENT round-trip contract', () => {
   const baseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
@@ -197,6 +214,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
   });
 
   it('round-trips a TZID PERIOD RDATE with an explicit end through Radicale', async () => {
+    recordPeriodStage('period-explicit-end', 'put-start');
     const resourceUrl = new URL(
       `${randomUUID()}-period.ics`,
       calendarUrl,
@@ -209,15 +227,21 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
         'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261027T093000/20261027T103000',
       ),
     );
+    recordPeriodStage('period-explicit-end', 'put-complete');
 
+    recordPeriodStage('period-explicit-end', 'get-start');
     const observed = await client.getEvent(resourceUrl);
+    recordPeriodStage('period-explicit-end', 'get-complete');
     const unfolded = observed.icalendar.replace(/\r\n[ \t]/g, '');
+    recordPeriodStage('period-explicit-end', 'compare-start');
     expect(unfolded).toContain(
       'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261027T093000/20261027T103000',
     );
+    recordPeriodStage('period-explicit-end', 'complete');
   });
 
   it('round-trips a TZID PERIOD RDATE with a duration through Radicale', async () => {
+    recordPeriodStage('period-duration', 'put-start');
     const resourceUrl = new URL(
       `${randomUUID()}-period.ics`,
       calendarUrl,
@@ -230,12 +254,17 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
         'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261028T093000/PT1H',
       ),
     );
+    recordPeriodStage('period-duration', 'put-complete');
 
+    recordPeriodStage('period-duration', 'get-start');
     const observed = await client.getEvent(resourceUrl);
+    recordPeriodStage('period-duration', 'get-complete');
     const unfolded = observed.icalendar.replace(/\r\n[ \t]/g, '');
+    recordPeriodStage('period-duration', 'compare-start');
     expect(unfolded).toContain(
       'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261028T093000/PT1H',
     );
+    recordPeriodStage('period-duration', 'complete');
   });
 
   it('overfetches floating and DATE boundary candidates without modifying their resources', async () => {

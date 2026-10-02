@@ -38,6 +38,15 @@ const PERIOD_FAILURE_CASES = [
   },
 ];
 
+const PERIOD_STAGES = [
+  'put-start',
+  'put-complete',
+  'get-start',
+  'get-complete',
+  'compare-start',
+  'complete',
+];
+
 export function safePeriodFailureLines(testReport) {
   if (!testReport || !Array.isArray(testReport.testResults)) {
     return [];
@@ -70,12 +79,44 @@ export function safePeriodFailureLines(testReport) {
   ).map(({ id }) => `Known failed PERIOD contract case: ${id}`);
 }
 
+export function safePeriodStageLines(stageText, failedCaseIds) {
+  if (typeof stageText !== 'string' || !Array.isArray(failedCaseIds)) {
+    return [];
+  }
+
+  const knownCaseIds = new Set(PERIOD_FAILURE_CASES.map(({ id }) => id));
+  const failedCases = new Set(
+    failedCaseIds.filter((caseId) => knownCaseIds.has(caseId)),
+  );
+  const lastStageByCase = new Map();
+  const allowedTokens = new Set(
+    [...knownCaseIds].flatMap((caseId) =>
+      PERIOD_STAGES.map((stage) => `${caseId}:${stage}`),
+    ),
+  );
+
+  for (const token of stageText.split(/\r?\n/)) {
+    if (!allowedTokens.has(token)) {
+      continue;
+    }
+    const [caseId, stage] = token.split(':');
+    if (failedCases.has(caseId)) {
+      lastStageByCase.set(caseId, stage);
+    }
+  }
+
+  return PERIOD_FAILURE_CASES.filter(({ id }) => lastStageByCase.has(id)).map(
+    ({ id }) => `Known PERIOD contract stage: ${id}:${lastStageByCase.get(id)}`,
+  );
+}
+
 function main() {
   const credential = process.env.CALDAV_OPENID_CREDENTIAL ?? '';
   const username = process.env.CALDAV_USERNAME ?? 'calendar';
   const fixturePassword = process.env.MATRIX_CALENDAR_DEV_PASSWORD ?? '';
   const logFile = process.argv[2];
   const reportFile = process.argv[3];
+  const stageFile = process.argv[4];
   if (!credential.startsWith('matrix-openid:') || !logFile || !reportFile) {
     process.stderr.write('Unable to verify CalDAV contract log redaction.\n');
     process.exit(1);
@@ -135,16 +176,20 @@ function main() {
 
   let testLogs;
   let testReportText;
+  let stageText = '';
   try {
     testLogs = readFileSync(logFile, 'utf8');
     testReportText = readFileSync(reportFile, 'utf8');
+    if (stageFile) {
+      stageText = readFileSync(stageFile, 'utf8');
+    }
   } catch {
     process.stderr.write('Unable to inspect CalDAV contract test output.\n');
     process.exit(1);
   }
 
   if (
-    [testLogs, testReportText, serviceLogs].some((logs) =>
+    [testLogs, testReportText, serviceLogs, stageText].some((logs) =>
       protectedValues.some((value) => logs.includes(value)),
     )
   ) {
@@ -180,6 +225,14 @@ function main() {
     );
     for (const line of safePeriodFailureLines(testReport)) {
       process.stdout.write(`${line}\n`);
+    }
+    const failedCaseIds = safePeriodFailureLines(testReport).map((line) =>
+      line.slice('Known failed PERIOD contract case: '.length),
+    );
+    if (stageFile && failedCaseIds.length > 0) {
+      for (const line of safePeriodStageLines(stageText, failedCaseIds)) {
+        process.stdout.write(`${line}\n`);
+      }
     }
   }
 }

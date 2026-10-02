@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import {
   PERIOD_CONTRACT_SUITE_PATH,
   safePeriodFailureLines,
+  safePeriodStageLines,
 } from './assert-caldav-contract-logs.mjs';
 
 const SCRIPT_PATH = fileURLToPath(
@@ -57,6 +58,60 @@ test('maps only exact failed PERIOD suite and source-title pairs', () => {
     'Known failed PERIOD contract case: period-explicit-end',
     'Known failed PERIOD contract case: period-duration',
   ]);
+});
+
+test('maps every fixed PERIOD stage token and keeps the last stage per case', () => {
+  const stages = [
+    'put-start',
+    'put-complete',
+    'get-start',
+    'get-complete',
+    'compare-start',
+    'complete',
+  ];
+  const stageText = [
+    ...stages.map((stage) => `period-explicit-end:${stage}`),
+    ...stages.map((stage) => `period-duration:${stage}`),
+  ].join('\n');
+
+  assert.deepEqual(
+    safePeriodStageLines(stageText, ['period-explicit-end', 'period-duration']),
+    [
+      'Known PERIOD contract stage: period-explicit-end:complete',
+      'Known PERIOD contract stage: period-duration:complete',
+    ],
+  );
+  assert.deepEqual(
+    safePeriodStageLines(
+      'period-explicit-end:put-start\nperiod-explicit-end:get-start',
+      ['period-explicit-end'],
+    ),
+    ['Known PERIOD contract stage: period-explicit-end:get-start'],
+  );
+});
+
+test('ignores malformed, unknown, and injected sidecar values', () => {
+  const sentinels = [
+    'private event sentinel',
+    'Bearer credential-sentinel',
+    'period-explicit-end:get-start injected-sentinel',
+    '../period-duration:complete',
+    'period-duration:unknown-stage',
+  ];
+  const output = safePeriodStageLines(sentinels.join('\n'), [
+    'period-explicit-end',
+    'period-duration',
+  ]).join('\n');
+
+  assert.equal(output, '');
+  for (const sentinel of sentinels) {
+    assert.equal(output.includes(sentinel), false);
+  }
+  assert.deepEqual(safePeriodStageLines(null, ['period-explicit-end']), []);
+  assert.deepEqual(
+    safePeriodStageLines('period-explicit-end:get-start', []),
+    [],
+  );
 });
 
 test('does not reflect failureMessages or arbitrary report data in diagnostics', () => {
@@ -140,6 +195,20 @@ test('keeps malformed reports and setup failures generic', () => {
   );
 });
 
+test('does not emit sidecar stages when scanner setup fails', () => {
+  const result = runScanner(JSON.stringify({ testResults: [] }), {
+    credential: '',
+    sidecar: 'period-explicit-end:complete',
+  });
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(
+    result.stderr,
+    'Unable to verify CalDAV contract log redaction.\n',
+  );
+});
+
 test('prints only the fixed ID for a matching failed case', () => {
   const report = {
     testResults: [
@@ -159,6 +228,42 @@ test('prints only the fixed ID for a matching failed case', () => {
   assert.equal(result.status, 0);
   assert.equal(result.stderr, '');
   assert.equal(result.stdout.includes('sentinel'), false);
+});
+
+test('prints only fixed stages from an exact runner-local sidecar', () => {
+  const report = {
+    testResults: [
+      failedSuite(PERIOD_CONTRACT_SUITE_PATH, EXPLICIT_END_TITLE, [
+        'private event sentinel',
+        'assertion detail sentinel',
+      ]),
+    ],
+  };
+  const sidecar = [
+    'period-explicit-end:put-start',
+    'period-explicit-end:put-complete',
+    'period-explicit-end:get-start',
+    'private ICS sentinel',
+    'period-duration:complete injected-token-sentinel',
+  ].join('\n');
+  const result = runScanner(JSON.stringify(report), { sidecar });
+
+  assert.equal(result.status, 0);
+  assert.equal(
+    result.stdout,
+    'CalDAV contract tests failed; sensitive failure details are withheld.\n' +
+      'Known failed PERIOD contract case: period-explicit-end\n' +
+      'Known PERIOD contract stage: period-explicit-end:get-start\n',
+  );
+  assert.equal(result.stderr, '');
+  for (const sentinel of [
+    'private event sentinel',
+    'assertion detail sentinel',
+    'private ICS sentinel',
+    'injected-token-sentinel',
+  ]) {
+    assert.equal(result.stdout.includes(sentinel), false);
+  }
 });
 
 test('does not print a PERIOD ID for a path or title mismatch', () => {
@@ -262,8 +367,12 @@ function runScanner(reportText, overrides = {}) {
 
     const logPath = join(scratchDirectory, 'contract.log');
     const reportPath = join(scratchDirectory, 'report.json');
+    const stagePath = join(scratchDirectory, 'stages.txt');
     writeFileSync(logPath, '');
     writeFileSync(reportPath, reportText);
+    if (typeof overrides.sidecar === 'string') {
+      writeFileSync(stagePath, overrides.sidecar);
+    }
 
     const accessToken = 'openid-access-token-sentinel';
     const credential = `matrix-openid:${Buffer.from(
@@ -274,7 +383,12 @@ function runScanner(reportText, overrides = {}) {
     ).toString('base64url')}`;
     const result = spawnSync(
       process.execPath,
-      [SCRIPT_PATH, logPath, reportPath],
+      [
+        SCRIPT_PATH,
+        logPath,
+        reportPath,
+        ...(overrides.sidecar === undefined ? [] : [stagePath]),
+      ],
       {
         encoding: 'utf8',
         env: {
