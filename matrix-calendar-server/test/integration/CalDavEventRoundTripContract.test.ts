@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { getVTimezoneBlock } from '@matrix-calendar-widget/ical-timezones';
 import fetchMock from 'jest-fetch-mock';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
@@ -241,7 +242,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       `${randomUUID()}-period.ics`,
       calendarUrl,
     ).toString();
-    const source = recurringCalendar(uid).replace(
+    const source = withBundledStockholmTimezone(recurringCalendar(uid)).replace(
       'RDATE;TZID=Europe/Stockholm:20261026T140000',
       [
         'RDATE;TZID=Europe/Stockholm:20261026T140000',
@@ -260,6 +261,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     const before = await client.getEvent(resourceUrl);
     markPeriodRemovalStage('period-resource-read');
     const parsed = codec.parse(calendarUrl, resourceUrl, before.icalendar);
+    expect(parsed.event.unsupportedTimezone).toBeUndefined();
     markPeriodRemovalStage('period-resource-parsed');
     const target = parsed.event.recurrence?.rdates?.find(
       (value) => value.type === 'period' && value.timing.type === 'end',
@@ -432,6 +434,20 @@ function recurringCalendar(uid: string): string {
     'END:VCALENDAR',
     '',
   ].join('\r\n');
+}
+
+function withBundledStockholmTimezone(source: string): string {
+  const timezone = getVTimezoneBlock('Europe/Stockholm');
+  if (!timezone) {
+    throw new Error('Bundled Stockholm timezone fixture is unavailable');
+  }
+
+  const timezoneBlock = /BEGIN:VTIMEZONE\r?\n[\s\S]*?END:VTIMEZONE/;
+  if (!timezoneBlock.test(source)) {
+    throw new Error('Recurring calendar fixture has no VTIMEZONE block');
+  }
+
+  return source.replace(timezoneBlock, timezone.trim());
 }
 
 function expectRecurringResourceProperties(

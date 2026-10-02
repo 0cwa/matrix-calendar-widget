@@ -871,6 +871,7 @@ describe('ICalendarEventCodec', () => {
       ].join('\r\n'),
     );
     const parsed = codec.parse('team', 'period-shared-property.ics', source);
+    expect(parsed.event.unsupportedTimezone).toBeUndefined();
     const target = parsed.event.recurrence?.rdates?.find(
       (value) =>
         value.type === 'period' &&
