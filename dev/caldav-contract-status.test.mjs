@@ -13,8 +13,8 @@
 // limitations under the License.
 
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { safeContractCaseStatusLines } from './caldav-contract-status.mjs';
 
