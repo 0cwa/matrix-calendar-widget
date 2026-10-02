@@ -83,7 +83,7 @@ jobs:
       - name: Probe PERIOD support in the running Radicale service (temporary)
         run: |
           docker compose -f dev/compose.yaml exec -T radicale \
-            python3 -c 'from radicale import utils; print(bool(utils.vobject_supports_period()))'
+            /app/bin/python -c 'from radicale import utils; print(bool(utils.vobject_supports_period()))'
 
       - name: Mint and mask the short-lived Synapse fixture proof
         run: |
