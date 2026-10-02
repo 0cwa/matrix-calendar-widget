@@ -22,7 +22,6 @@ const periodRemoveTestTitle =
   'removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag';
 const safePeriodStages = new Set([
   'period-test-start',
-  'seed-put-4xx',
   'seed-put-5xx',
   'seed-put-transport',
   'seed-put-other-status',
@@ -118,6 +117,18 @@ export function formatFailedCalDavTestIdentities(
         for (const stageLine of stageReport.split(/\r?\n/)) {
           if (safePeriodStages.has(stageLine)) {
             safePeriodStage = stageLine;
+            continue;
+          }
+
+          const statusMatch = stageLine.match(/^seed-put-http-(\d{3})$/);
+          const status = Number(statusMatch?.[1]);
+          if (
+            statusMatch &&
+            Number.isInteger(status) &&
+            status >= 400 &&
+            status < 500
+          ) {
+            safePeriodStage = `seed-put-http-${status}`;
           }
         }
       }

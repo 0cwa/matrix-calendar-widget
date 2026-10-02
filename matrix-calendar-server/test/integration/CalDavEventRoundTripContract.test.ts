@@ -47,8 +47,13 @@ function markSeedPutFailure(error: unknown): void {
   }
 
   const status = error.status;
-  if (status !== undefined && status >= 400 && status < 500) {
-    markPeriodRemovalStage('seed-put-4xx');
+  if (
+    Number.isInteger(status) &&
+    status !== undefined &&
+    status >= 400 &&
+    status < 500
+  ) {
+    markPeriodRemovalStage(`seed-put-http-${status}`);
   } else if (status !== undefined && status >= 500 && status < 600) {
     markPeriodRemovalStage('seed-put-5xx');
   } else if (status !== undefined) {

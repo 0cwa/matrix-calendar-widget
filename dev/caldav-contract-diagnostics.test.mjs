@@ -73,7 +73,10 @@ test('reports static failed test identity without failure details', () => {
       'untrusted-stage-secret-token',
       'SAFE_CALDAV_PERIOD_STAGE=period-duration-removed',
       'period-target-validated',
-      'seed-put-4xx',
+      'seed-put-http-399',
+      'seed-put-http-400',
+      'seed-put-http-500',
+      'seed-put-http-499',
     ].join('\n'),
   );
   const output = JSON.stringify(identities);
@@ -83,10 +86,10 @@ test('reports static failed test identity without failure details', () => {
     /CalDavEventRoundTripContract\.test\.ts.*199.*3.*removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag/,
   );
   assert.match(output, /222.*5.*static title withheld/);
-  assert.equal(identities[0]?.safePeriodStage, 'seed-put-4xx');
+  assert.equal(identities[0]?.safePeriodStage, 'seed-put-http-499');
   assert.equal(identities[1]?.safePeriodStage, null);
   assert.doesNotMatch(
     output,
-    /secret-token|BEGIN:VCALENDAR|private title|response body|coordinates|NotAllowed|untrusted|CALDAV_OPENID|SUMMARY|SAFE_CALDAV_PERIOD_STAGE=/,
+    /secret-token|BEGIN:VCALENDAR|private title|response body|coordinates|NotAllowed|untrusted|CALDAV_OPENID|SUMMARY|SAFE_CALDAV_PERIOD_STAGE=|seed-put-http-(?:399|500)/,
   );
 });
