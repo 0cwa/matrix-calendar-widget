@@ -2,7 +2,10 @@
 
 This directory builds the project's Radicale 3.8.0.0 image and contains its
 clean-room `Auth` plugin. The image extends the official Radicale image pinned
-by digest in `Dockerfile`; the plugin uses only Python's standard library and
+by digest in `Dockerfile`. Its build replaces the base image's `vobject` with
+the exact py-vobject commit pinned there, which enables Radicale's PERIOD
+serialization support; a builder-only, hash-pinned `flit_core` wheel is used
+to build the package. The plugin uses only Python's standard library and
 Radicale's supported authentication interface.
 
 Radicale Basic Auth uses the Matrix localpart as the username and this tagged
@@ -34,6 +37,8 @@ Run the focused tests with the official Radicale package installed:
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-The CI image smoke builds both the `test` and `runtime` targets. The isolated
+The CI image smoke builds both the `test` and `runtime` targets. The image test
+target checks Radicale's PERIOD capability and round-trips explicit-end and
+duration PERIOD values with a TZID. The isolated
 development and CalDAV contract stacks build this Dockerfile and obtain their
 short-lived proof from the Synapse fixture.

@@ -196,6 +196,25 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     });
   });
 
+  it('round-trips TZID PERIOD RDATE values through the pinned Radicale image', async () => {
+    const resourceUrl = new URL(
+      `${randomUUID()}-period.ics`,
+      calendarUrl,
+    ).toString();
+    cleanupResourceUrls = [resourceUrl];
+
+    await client.createEvent(resourceUrl, periodCalendar());
+
+    const observed = await client.getEvent(resourceUrl);
+    const unfolded = observed.icalendar.replace(/\r\n[ \t]/g, '');
+    expect(unfolded).toContain(
+      'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261027T093000/20261027T103000',
+    );
+    expect(unfolded).toContain(
+      'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261028T093000/PT1H',
+    );
+  });
+
   it('overfetches floating and DATE boundary candidates without modifying their resources', async () => {
     const floatingUrl = new URL(
       `${randomUUID()}-floating.ics`,
@@ -260,6 +279,42 @@ function candidateCalendar(
     dtstart,
     dtend,
     'SUMMARY:Candidate range boundary',
+    'END:VEVENT',
+    'END:VCALENDAR',
+    '',
+  ].join('\r\n');
+}
+
+function periodCalendar(): string {
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Matrix Calendar Widget//PERIOD Contract//EN',
+    'BEGIN:VTIMEZONE',
+    'TZID:Europe/Stockholm',
+    'X-LIC-LOCATION:Europe/Stockholm',
+    'BEGIN:DAYLIGHT',
+    'TZOFFSETFROM:+0100',
+    'TZOFFSETTO:+0200',
+    'TZNAME:CEST',
+    'DTSTART:19700329T020000',
+    'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU',
+    'END:DAYLIGHT',
+    'BEGIN:STANDARD',
+    'TZOFFSETFROM:+0200',
+    'TZOFFSETTO:+0100',
+    'TZNAME:CET',
+    'DTSTART:19701025T030000',
+    'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
+    'END:STANDARD',
+    'END:VTIMEZONE',
+    'BEGIN:VEVENT',
+    `UID:period-${randomUUID()}@matrix-calendar-widget`,
+    'DTSTAMP:20260922T120000Z',
+    'DTSTART;TZID=Europe/Stockholm:20261026T140000',
+    'DTEND;TZID=Europe/Stockholm:20261026T150000',
+    'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261027T093000/20261027T103000',
+    'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261028T093000/PT1H',
     'END:VEVENT',
     'END:VCALENDAR',
     '',
