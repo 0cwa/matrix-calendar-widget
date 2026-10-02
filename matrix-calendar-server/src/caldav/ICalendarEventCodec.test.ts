@@ -903,6 +903,32 @@ describe('ICalendarEventCodec', () => {
     expect(removed.icalendar).not.toContain('20261027T093000/PT1H');
   });
 
+  it.each([
+    {
+      label: 'equal explicit end',
+      value: '20261027T093000/20261027T093000',
+    },
+    {
+      label: 'reversed explicit end',
+      value: '20261027T103000/20261027T093000',
+    },
+    { label: 'zero duration', value: '20261027T093000/PT0S' },
+    { label: 'negative duration', value: '20261027T093000/-PT1H' },
+  ])('keeps PERIOD RDATE with $label opaque', ({ value }) => {
+    const source = simpleRecurringSource(
+      'DTSTART:20261026T093000Z',
+      'DTEND:20261026T103000Z',
+      ['RDATE;VALUE=PERIOD:' + value],
+    );
+    const parsed = codec.parse('team', 'invalid-period-rdate.ics', source);
+
+    expect(
+      parsed.event.recurrence?.rdates?.some(
+        (rdate) => rdate.type === 'period',
+      ) ?? false,
+    ).toBe(false);
+  });
+
   it('fails closed for stale PERIOD removal, PERIOD creation, and malformed siblings', () => {
     const source = fixture('recurrence-override.ics').replace(
       'RDATE;TZID=Europe/Stockholm:20261026T140000',

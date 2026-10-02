@@ -1445,6 +1445,9 @@ function readPeriodRdateValue(
     throw unsupportedRecurrencePatch();
   }
   if (end instanceof ICAL.Time && !end.isDate) {
+    if (start.compare(end) >= 0) {
+      throw unsupportedRecurrencePatch();
+    }
     return {
       type: 'period',
       timing: {
@@ -1455,12 +1458,29 @@ function readPeriodRdateValue(
     };
   }
   if (value.duration instanceof ICAL.Duration) {
+    const duration = value.duration;
+    const components = [
+      duration.weeks,
+      duration.days,
+      duration.hours,
+      duration.minutes,
+      duration.seconds,
+    ];
+    if (
+      duration.isNegative ||
+      components.some(
+        (component) => !Number.isSafeInteger(component) || component < 0,
+      ) ||
+      components.every((component) => component === 0)
+    ) {
+      throw unsupportedRecurrencePatch();
+    }
     return {
       type: 'period',
       timing: {
         type: 'duration',
         start: readDateTimeValue(start, property),
-        duration: readDuration(value.duration),
+        duration: readDuration(duration),
       },
     };
   }

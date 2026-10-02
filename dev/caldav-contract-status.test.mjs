@@ -89,6 +89,11 @@ const knownCases = [
   ],
   [
     'matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts',
+    'removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag',
+    'event-period-rdate-removal',
+  ],
+  [
+    'matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts',
     'overfetches floating and DATE boundary candidates without modifying their resources',
     'event-floating-date-boundary-candidates',
   ],
