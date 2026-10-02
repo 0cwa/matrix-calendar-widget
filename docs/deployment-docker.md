@@ -96,15 +96,16 @@ backend accepts only explicitly tagged short-lived OpenID credentials and
 rejects untagged credentials. Conventional Matrix-password CalDAV login is
 intentionally unsupported and deferred in this pre-alpha. A separate
 Radicale-native credential mode would require a future ADR. The module and
-image have not been implemented or deployed. The checked etke role exposes
+image build are implemented in this repository and exercised by its container
+contract, but no deployment on an etke-managed host has been verified. The
+checked etke role exposes
 `radicale_auth_type` and `radicale_auth_matrix_server` variables
 ([role defaults](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/defaults/main.yml#L238-L242)),
 but public role documentation does not establish that the actual managed host
-accepts a custom image override. This repository now contains the adapter and
-image build, but neither is deployed here. Confirm that override, preserve the
-existing `/data` volume, and rehearse config, network, service lifecycle, and rollback
-before rollout. Do not install a floating auth module or create a second
-Radicale store.
+accepts a custom image override. A replacement of the managed image would need
+operator confirmation and a rehearsed config, network, service lifecycle, data
+migration, and rollback plan. Do not install a floating auth module or attach
+the managed `/data` volume to the separate sidecar example below.
 
 Sources above were checked on **2026-09-28**. The etke source links pin the
 stable `main` snapshot at `cd28f0bd94c0d15dbb3db7ad4718c7df62f49622`. The
@@ -113,6 +114,87 @@ etke FAQ is live documentation reviewed on that date.
 The local `dev/compose.yaml` stack is for development and integration services;
 it does not define a production deployment or an etke/MDAD deployment contract.
 Helm and Kubernetes packaging are outside this slice.
+
+### Operator-run Compose sidecar example
+
+[`deploy/etke-sidecar.compose.yaml`](../deploy/etke-sidecar.compose.yaml) is a
+reference for an operator who already manages a Matrix homeserver with etke's
+Ansible playbook or `matrix-docker-ansible-deploy` and wants to run Matrix
+Calendar as a separate Compose project. It does not install an Ansible role,
+change the managed Matrix stack, or connect to an existing etke Radicale store.
+The example starts the calendar gateway, widget, and this project's
+OpenID-authenticated Radicale image with its own named data volumes. Do not
+point it at a Matrix-password-authenticated Radicale service: the gateway
+delegates a short-lived Matrix OpenID proof, and the project-owned image
+accepts only that tagged credential.
+
+The existing etke Radicale deployment and `/data` store are not a drop-in
+backend for this sidecar: the authentication configuration and data reuse path
+have not been validated together. The example creates an independent Radicale
+service and empty store; it does not mount, read, convert, or migrate the etke
+`/data` volume. Keep the existing service and its data untouched. Reusing or
+moving existing calendars requires a separately planned, verified CalDAV
+migration with a recoverable backup; this example does not provide that
+migration.
+
+This is an operator-configured sidecar pattern, not a verified etke deployment.
+Before using it, the operator must provide:
+
+- an existing Docker network that the chosen reverse proxy can reach; its
+  actual name is supplied as `MATRIX_PROXY_NETWORK` and is deliberately not
+  guessed here;
+- an HTTPS URL routed to `widget:8080` and a separate HTTPS API URL routed to
+  `server:3000`, with both services attached to that operator-selected network;
+- a homeserver URL reachable from the server and Radicale containers, plus
+  the exact Matrix server name used by Matrix user IDs;
+- a dedicated Matrix bot access token supplied through the operator's secret
+  store, or a local ignored mode-600 env file; never commit or print the
+  resolved Compose configuration containing that token;
+- stable storage and a backup/restore procedure for the `radicale-data` and
+  `server-data` volumes.
+
+The proxy should expose only the widget and gateway hostnames. Radicale has no
+published host port and is reachable only from the Compose backend network.
+The homeserver and any reverse proxy that handles Matrix OpenID userinfo
+requests must follow the token-log redaction requirements in
+[ADR024](./adrs/adr024-in-repo-radicale-openid-auth.md). This example does not
+configure proxy labels, DNS, TLS, firewall rules, rate limits, Matrix widget
+registration, or log redaction; those remain operator tasks.
+
+Build the local images from a checkout of the pinned source, from the
+repository root:
+
+```bash
+yarn workspace @matrix-calendar-widget/ical-timezones build
+yarn workspace @matrix-calendar-widget/calendar build
+yarn workspace @matrix-calendar-widget/server build
+yarn workspace @matrix-calendar-widget/widget build
+docker build -t matrix-calendar-widget/server:local -f matrix-calendar-server/Dockerfile .
+docker build --target runtime -t matrix-calendar-widget/radicale-openid:local -f radicale-auth/Dockerfile radicale-auth
+docker build --build-context root=. -t matrix-calendar-widget/widget:local -f matrix-calendar-widget/Dockerfile matrix-calendar-widget
+```
+
+Copy [`deploy/etke-sidecar.env.example`](../deploy/etke-sidecar.env.example)
+to the ignored `deploy/.env.local` and replace the example URLs and
+network name. The Matrix widget URL templates use single-quoted env values so
+Compose passes Matrix's `$matrix_*` placeholders through literally. Set the
+bot token in the secret-injection environment when available; Compose uses a
+shell-provided value ahead of the example env file.
+
+Validate the example with only placeholder secrets, then start it with the
+same project name on every deployment so Compose reuses its named volumes:
+
+```bash
+docker compose --project-name matrix-calendar-sidecar --env-file deploy/.env.local -f deploy/etke-sidecar.compose.yaml config
+docker compose --project-name matrix-calendar-sidecar --env-file deploy/.env.local -f deploy/etke-sidecar.compose.yaml up -d
+```
+
+Route the public API URL without stripping the `/v1` path used by the gateway.
+The browser must be able to reach both HTTPS hostnames. Confirm widget loading,
+Matrix OpenID authentication, and personal-calendar access with a test account
+before inviting users. This example does not enable room-calendar access, move
+existing calendars, or validate a live etke-managed host. Rehearse image
+updates and volume recovery with disposable data before relying on it.
 
 ## Optional reminder PostgreSQL database
 

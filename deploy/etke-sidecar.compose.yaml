@@ -1,0 +1,52 @@
+services:
+  radicale:
+    image: matrix-calendar-widget/radicale-openid:local
+    restart: unless-stopped
+    environment:
+      RADICALE_MATRIX_HOMESERVER_URL: ${MATRIX_HOMESERVER_URL:?Set the homeserver URL}
+      RADICALE_MATRIX_SERVER_NAME: ${MATRIX_SERVER_NAME:?Set the Matrix server name}
+    volumes:
+      - radicale-data:/data
+    networks:
+      - calendar-backend
+
+  server:
+    image: matrix-calendar-widget/server:local
+    restart: unless-stopped
+    environment:
+      ACCESS_TOKEN: ${MATRIX_CALENDAR_BOT_ACCESS_TOKEN:?Supply the bot access token}
+      HOMESERVER_URL: ${MATRIX_HOMESERVER_URL:?Set the homeserver URL}
+      RADICALE_URL: http://radicale:5232
+      PORT: '3000'
+      STORAGE_FILE_DATA_PATH: /app/storage
+      MEETINGWIDGET_URL: ${MATRIX_CALENDAR_WIDGET_URL:?Set the widget URL template}
+      MEETINGWIDGET_COCKPIT_URL: ${MATRIX_CALENDAR_COCKPIT_URL:?Set the cockpit URL template}
+      BREAKOUT_SESSION_WIDGET_URL: ${MATRIX_CALENDAR_BREAKOUT_URL:?Set the breakout URL template}
+    expose:
+      - '3000'
+    volumes:
+      - server-data:/app/storage
+    networks:
+      - calendar-backend
+      - operator-proxy
+
+  widget:
+    image: matrix-calendar-widget/widget:local
+    restart: unless-stopped
+    environment:
+      REACT_APP_API_BASE_URL: ${MATRIX_CALENDAR_API_URL:?Set the public API URL}
+      REACT_APP_HOME_SERVER_URL: ${MATRIX_HOMESERVER_URL:?Set the homeserver URL}
+    expose:
+      - '8080'
+    networks:
+      - operator-proxy
+
+networks:
+  calendar-backend: {}
+  operator-proxy:
+    external: true
+    name: ${MATRIX_PROXY_NETWORK:?Set the existing proxy network name}
+
+volumes:
+  radicale-data:
+  server-data:
