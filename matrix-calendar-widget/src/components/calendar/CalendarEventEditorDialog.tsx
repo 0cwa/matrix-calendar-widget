@@ -334,7 +334,8 @@ export function CalendarEventEditorDialog({
     values.recurrenceFrequency === 'WEEKLY' &&
     values.recurrenceWeekdays !== undefined;
   const canChooseWeekdays =
-    values.recurrenceInterval === '1' && values.recurrenceEnd === 'never';
+    ['1', '2'].includes(values.recurrenceInterval ?? '1') &&
+    values.recurrenceEnd === 'never';
   const validationError =
     validationErrorCode === 'title-required'
       ? t('calendarEvents.editor.titleRequired', 'A title is required.')
@@ -723,7 +724,7 @@ export function CalendarEventEditorDialog({
                       <Typography color="text.secondary" variant="body2">
                         {t(
                           'calendarEvents.editor.weekdayRuleLimit',
-                          'Weekday selection requires every week with no end date or count.',
+                          'Weekday selection requires a one- or two-week interval with no end date or count.',
                         )}
                       </Typography>
                     )}

@@ -118,9 +118,11 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
       or YEARLY frequency, positive interval, and never/count/date end controls
       (PR #130).
 - [x] Add weekly BYDAY creation/editing and projection for plain weekday
-      tokens when DTSTART's weekday is included, INTERVAL is omitted or 1,
+      tokens when DTSTART's weekday is included, INTERVAL is omitted, 1, or 2,
       COUNT/UNTIL and other rule parts are absent, and WKST is omitted or its
       default MO. Unsupported combinations remain opaque and preserved.
+  - [x] Extend the same plain weekday subset to an open-ended INTERVAL=2
+        (every-other-week) rule; preserve all other unsupported combinations.
 - [ ] Extend RRULE editing to additional recurrence rule parts and patterns.
 - [x] Skip and restore one projected supported occurrence by adding or
       removing only its matching EXDATE. Use the original recurrence identity

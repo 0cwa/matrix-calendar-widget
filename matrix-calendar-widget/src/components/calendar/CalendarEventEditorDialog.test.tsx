@@ -180,7 +180,7 @@ describe('<CalendarEventEditorDialog />', () => {
     });
   });
 
-  it('creates, edits, and reloads a weekly weekday set', async () => {
+  it('creates, edits, and reloads an every-other-week weekday set', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
       idFactory: () => 'weekly-days',
@@ -211,6 +211,9 @@ describe('<CalendarEventEditorDialog />', () => {
       screen.getByRole('combobox', { name: 'Frequency' }),
       'WEEKLY',
     );
+    const interval = screen.getByRole('spinbutton', { name: 'Repeat every' });
+    expect(interval).toBeEnabled();
+    fireEvent.change(interval, { target: { value: '2' } });
     await userEvent.click(screen.getByLabelText('Choose weekdays'));
     expect(screen.getByRole('checkbox', { name: 'Friday' })).toBeDisabled();
     expect(screen.getByRole('checkbox', { name: 'Friday' })).toBeChecked();
@@ -220,7 +223,7 @@ describe('<CalendarEventEditorDialog />', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     const created = await repository.getEvent('team', 'weekly-days');
     expect(created.recurrence).toEqual({
-      rrule: 'FREQ=WEEKLY;BYDAY=MO,FR',
+      rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR',
     });
 
     view.rerender(<CalendarEventEditorDialog {...props} event={created} />);
@@ -235,7 +238,7 @@ describe('<CalendarEventEditorDialog />', () => {
     await expect(
       repository.getEvent('team', 'weekly-days'),
     ).resolves.toMatchObject({
-      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,FR' },
+      recurrence: { rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TU,FR' },
     });
     const updated = await repository.getEvent('team', 'weekly-days');
     view.rerender(<CalendarEventEditorDialog {...props} event={updated} />);

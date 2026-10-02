@@ -1770,7 +1770,7 @@ END:VCALENDAR`,
     );
   });
 
-  it('creates, updates, and reloads a supported weekly BYDAY rule', () => {
+  it('creates, updates, and reloads a supported every-other-week BYDAY rule', () => {
     const created = codec.create('team', 'weekly.ics', {
       uid: 'weekly@example.test',
       title: 'Weekly planning',
@@ -1787,25 +1787,25 @@ END:VCALENDAR`,
           timezone: 'Europe/Stockholm',
         },
       },
-      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,WE' },
+      recurrence: { rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE' },
     });
 
     expect(created.event.recurrence).toEqual({
-      rrule: 'FREQ=WEEKLY;BYDAY=MO,WE',
+      rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE',
     });
     const reparsed = codec.parse('team', 'weekly.ics', created.icalendar);
     expect(reparsed.event.recurrence).toEqual(created.event.recurrence);
 
     const updated = reparsed.applyPatch({
-      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR' },
+      recurrence: { rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR' },
     });
     expect(
       codec.parse('team', 'weekly.ics', updated.icalendar).event.recurrence,
-    ).toEqual({ rrule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR' });
+    ).toEqual({ rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR' });
   });
 
   it.each([
-    'FREQ=WEEKLY;BYDAY=MO,WE;INTERVAL=2',
+    'FREQ=WEEKLY;BYDAY=MO,WE;INTERVAL=3',
     'FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4',
     'FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261102T080000Z',
     'FREQ=WEEKLY;BYDAY=MO,WE;WKST=SU',

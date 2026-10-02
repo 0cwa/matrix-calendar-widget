@@ -267,7 +267,7 @@ export function formatSupportedCalendarEventRecurrenceRule(
   if (rule.weekdays !== undefined) {
     if (
       rule.frequency !== 'WEEKLY' ||
-      rule.interval !== 1 ||
+      ![1, 2].includes(rule.interval) ||
       rule.end.type !== 'never'
     ) {
       throw new Error('Unsupported recurrence rule');
@@ -1032,7 +1032,7 @@ function parseSimpleWeeklyByDay(
   if (
     [...parts.keys()].some((part) => !allowedParts.has(part)) ||
     parts.get('FREQ')?.toUpperCase() !== 'WEEKLY' ||
-    interval !== 1 ||
+    ![1, 2].includes(interval) ||
     parts.has('COUNT') ||
     parts.has('UNTIL') ||
     (weekStart !== undefined && weekStart !== 'MO')
