@@ -54,6 +54,8 @@ To verify the configured rule's behavior:
 For both observations, record the UTC timestamp, `mergeStateStatus`, `mergeable`
 state, and each required check's exact name and status: once while at least one
 check is pending, and again after all five required checks pass.
+For the pending observation, record the pull request API's `mergeable_state`
+and expect `blocked` while any required check is pending.
 
 1. open a trivial documentation PR,
 2. while any required check is pending, inspect the PR's merge state in GitHub
