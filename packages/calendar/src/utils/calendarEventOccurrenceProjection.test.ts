@@ -750,6 +750,59 @@ describe('projectCalendarEventOccurrences', () => {
     ).toBe('2026-03-08T15:00:00.000Z');
   });
 
+  it('keeps named-zone recurrence wall time across a 30-minute DST transition', () => {
+    const event: CalendarEvent = {
+      id: 'lord-howe',
+      calendarId: 'team',
+      uid: 'lord-howe@example.test',
+      title: 'Lord Howe planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-02T09:00:00',
+          timezone: 'Australia/Lord_Howe',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-02T10:00:00',
+          timezone: 'Australia/Lord_Howe',
+        },
+      },
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=4' },
+    };
+
+    const result = projectCalendarEventOccurrences(
+      [event],
+      {
+        start: '2026-10-01T00:00:00Z',
+        end: '2026-10-06T00:00:00Z',
+      },
+      'Australia/Lord_Howe',
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    const starts = result.occurrences.map(({ event: occurrence }) => {
+      if (occurrence.timing.type !== 'timed') {
+        throw new Error('Expected a timed occurrence');
+      }
+      return occurrence.timing.start.local;
+    });
+    expect(starts).toEqual([
+      '2026-10-02T09:00:00',
+      '2026-10-03T09:00:00',
+      '2026-10-04T09:00:00',
+      '2026-10-05T09:00:00',
+    ]);
+
+    const instants = starts.map((local) =>
+      calendarLocalDateTimeToUnixMillis(local, 'Australia/Lord_Howe'),
+    );
+    expect(instants[1] - instants[0]).toBe(24 * 60 * 60 * 1000);
+    expect(instants[2] - instants[1]).toBe(23.5 * 60 * 60 * 1000);
+    expect(instants[3] - instants[2]).toBe(24 * 60 * 60 * 1000);
+  });
+
   it('splits named-zone recurrence across viewer-local days', () => {
     const event = timedEvent({
       id: 'cross-zone-dst',
