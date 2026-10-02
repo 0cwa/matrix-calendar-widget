@@ -180,14 +180,16 @@ describe('supported series recurrence rules', () => {
 describe('projectCalendarEventOccurrences', () => {
   it('projects every-other-week BYDAY rules without duplicates at local wall time', () => {
     const event = timedEvent({
-      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,FR;INTERVAL=2' },
+      start: '2026-10-20T09:00:00',
+      end: '2026-10-20T10:00:00',
+      recurrence: { rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH' },
     });
 
     const result = projectCalendarEventOccurrences(
       [event],
       {
-        start: '2026-10-23T00:00:00Z',
-        end: '2026-11-16T00:00:00Z',
+        start: '2026-10-20T00:00:00Z',
+        end: '2026-11-09T00:00:00Z',
       },
       'Europe/Stockholm',
     );
@@ -200,9 +202,10 @@ describe('projectCalendarEventOccurrences', () => {
       return occurrence.timing.start.local;
     });
     expect(localStarts).toEqual([
-      '2026-10-23T09:00:00',
-      '2026-11-02T09:00:00',
-      '2026-11-06T09:00:00',
+      '2026-10-20T09:00:00',
+      '2026-10-22T09:00:00',
+      '2026-11-03T09:00:00',
+      '2026-11-05T09:00:00',
     ]);
     expect(new Set(localStarts).size).toBe(localStarts.length);
   });
