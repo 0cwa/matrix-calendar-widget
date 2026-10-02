@@ -2,11 +2,12 @@
 
 This directory builds the project's Radicale 3.8.0.0 image and contains its
 clean-room `Auth` plugin. The image extends the official Radicale image pinned
-by digest in `Dockerfile`. Its build pins the released py-vobject 0.9.9 wheel
-by SHA-256 and applies only the PERIOD serializer change from upstream commit
-`952210e1d1c3a6f17dac1c29c3be24bf3be9bc3f`; the upstream Apache-2.0 license
-and notices remain in the installed distribution. The plugin uses only
-Python's standard library and Radicale's supported authentication interface.
+by digest in `Dockerfile`. The build preserves the base image's installed
+py-vobject package and version, then applies only the PERIOD serializer change
+from upstream commit `952210e1d1c3a6f17dac1c29c3be24bf3be9bc3f`. The patch
+requires the expected upstream serializer source shape and fails the image
+build if that shape changes. The plugin uses only Python's standard library
+and Radicale's supported authentication interface.
 
 Radicale Basic Auth uses the Matrix localpart as the username and this tagged
 password format:

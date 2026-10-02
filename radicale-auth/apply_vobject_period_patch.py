@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Apply py-vobject's isolated PERIOD serializer change to released 0.9.9.
+"""Apply py-vobject's isolated PERIOD serializer change to the base image.
 
 The code change follows py-vobject commit
-952210e1d1c3a6f17dac1c29c3be24bf3be9bc3f. The installed distribution retains
-its upstream Apache-2.0 license and notices.
+952210e1d1c3a6f17dac1c29c3be24bf3be9bc3f. The pinned Radicale base image's
+vobject distribution and version are preserved; only its serializer source is
+patched.
 """
 
 from importlib.metadata import version
@@ -25,9 +26,7 @@ from pathlib import Path
 import vobject.icalendar
 
 
-if version("vobject") != "0.9.9":
-    raise RuntimeError("the PERIOD compatibility patch requires vobject 0.9.9")
-
+base_version = version("vobject")
 source_path = Path(vobject.icalendar.__file__)
 source = source_path.read_text(encoding="utf-8")
 old = """                for val in obj.value:
@@ -44,7 +43,19 @@ new = """                for val in obj.value:
                     if tzid is None and type(val) == datetime.datetime:
 """
 
-if source.count(old) != 1 or "# Fixme: handle PERIOD case" not in source:
-    raise RuntimeError("the expected unpatched vobject 0.9.9 source was not found")
+if source.count(new) == 1:
+    raise SystemExit(0)
+
+required_helpers = ("periodToString(", "dateTimeToString(")
+if (
+    source.count(old) != 1
+    or "# Fixme: handle PERIOD case" not in source
+    or any(helper not in source for helper in required_helpers)
+):
+    raise RuntimeError(
+        "the inherited vobject serializer does not match the supported source shape"
+    )
 
 source_path.write_text(source.replace(old, new, 1), encoding="utf-8")
+if version("vobject") != base_version:
+    raise RuntimeError("the PERIOD serializer patch changed the vobject version")

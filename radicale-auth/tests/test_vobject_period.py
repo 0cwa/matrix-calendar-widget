@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import datetime
 import unittest
-from importlib.metadata import version
 
 import vobject
 from radicale import utils
@@ -59,9 +58,6 @@ PERIOD_CALENDAR = "\r\n".join(
 
 
 class VObjectPeriodImageTests(unittest.TestCase):
-    def test_image_uses_the_released_vobject_version(self) -> None:
-        self.assertEqual(version("vobject"), "0.9.9")
-
     def test_radicale_reports_period_support(self) -> None:
         self.assertTrue(utils.vobject_supports_period())
 
