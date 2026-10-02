@@ -16,8 +16,9 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
       resolution required, the five documented CI checks required, force pushes
       disabled, and branch deletion disabled (confirmed through the GitHub
       branch-protection API on 2026-10-02).
-- [ ] Verify the configured rules behave as documented with a trivial PR
-      (#29 remains open for this check).
+- [x] Verify the configured rules behave as documented with trivial PR #150
+      (#29): GitHub reported `mergeable_state=blocked` while required checks
+      were pending and `clean` after all five required checks passed.
 
 **Exit:** a contributor can clone the fork, run the inherited tests/build, understand the target architecture, and cannot accidentally publish under Nordeck names.
 

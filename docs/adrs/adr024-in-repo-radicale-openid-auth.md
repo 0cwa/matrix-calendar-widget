@@ -7,6 +7,21 @@
 - Preserves: ADR006, ADR010, ADR014, and ADR015 identity, principal, and
   authorization decisions
 
+## Implementation status (2026-10-02)
+
+The personal OpenID backend and gateway contract are complete on the pinned
+development stack. PR #146 closed #48 with the clean-room Radicale 3.8.0.0 Auth
+module, project-owned image, tests, and dev/contract integration. PR #147
+closed #45 with the real-container contract for same-user calendar enumeration
+and denial of unauthorized, nonmember, and failed-authorization cases before
+CalDAV I/O. These results do not verify compatibility with the operator's
+etke-managed host or its image-override and `/data` replacement path.
+
+M6 issue #7 remains a separate gate for appservice-principal proof issuance,
+room authorization, and cross-room isolation. Room-target access remains
+disabled until that contract and the required authorization gates pass and an
+operator rehearses the custom image and existing `/data` store on the host.
+
 ## Context
 
 ADR006 requires server-side Matrix OpenID validation and forbids the widget
@@ -131,15 +146,14 @@ canonical calendar store.
    the homeserver ingress. Before room access is enabled, a contract check
    must use a sentinel proof and confirm that it appears in none of the
    gateway, Radicale, Synapse, or Traefik logs.
-9. **Keep access disabled until the contracts pass.** This decision assigns
-   the in-repository module and image to #48 for personal actor OpenID
-   delegation. Issue #48 now reflects this in-repository OpenID-only scope.
-   Issue #45 remains the M2 real-Radicale contract for
-   same-user calendar enumeration and denial of non-members or failed
-   authorization lookups before downstream I/O. M6 issue #7 owns the
-   appservice-principal proof exchange and cross-room isolation acceptance.
-   Room-target access remains disabled until #48/#45 and #7 pass, the
-   ADR014/ADR015 authorization gates pass, and the operator's custom-image
+9. **Keep room-target access disabled until its contracts pass.** This decision
+   assigned the in-repository module and image to #48 for personal actor
+   OpenID delegation; PR #146 completed that work. PR #147 completed #45's
+   real-Radicale contract for same-user enumeration and denial of non-members
+   or failed authorization lookups before downstream I/O. M6 issue #7 owns the
+   separate appservice-principal proof exchange and cross-room isolation
+   acceptance. Room-target access remains disabled until #7 and the
+   ADR014/ADR015 authorization gates pass and the operator's custom-image
    `/data` replacement path is verified.
 
 ## Alternatives considered

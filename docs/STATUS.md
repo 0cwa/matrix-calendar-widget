@@ -103,7 +103,7 @@ After authentication and runtime configuration are defined, verify the Docker-co
 
 ### Repository administration
 
-The GitHub branch-protection API currently confirms that `main` requires pull requests, conversation resolution, the five documented CI checks, and disallows force pushes and deletion. Issue #29 remains open only for the stated trivial-PR behavior verification; configuration presence alone does not close that acceptance criterion.
+The GitHub branch-protection API confirms that `main` requires pull requests, conversation resolution, the five documented CI checks, and disallows force pushes and deletion; administrator enforcement is enabled. Issue #29 is closed after PR #150 verified the behavior: GitHub reported `mergeable_state=blocked` while four required checks were pending and `clean` after all five passed.
 
 ## Highest-priority next steps
 
@@ -112,7 +112,6 @@ The GitHub branch-protection API currently confirms that `main` requires pull re
 3. Complete M6 issue #7's appservice proof exchange, room authorization, real-Radicale access, and cross-room isolation, then verify the etke image override preserves `/data`. The `target=room` preflight is wired and stops before CalDAV; keep it disabled until all gates pass.
 4. Build M7 data commands on those M6 authorization contracts; help is already available.
 5. Verify an operator-run deployment on the etke-managed host after the host-specific runtime contract is known.
-6. Complete #29's trivial-PR behavior verification for the configured `main` branch-protection rules.
 
 ## Working rules
 
