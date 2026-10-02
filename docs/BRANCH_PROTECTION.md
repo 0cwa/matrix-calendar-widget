@@ -1,8 +1,13 @@
 # Main branch protection
 
-Issue #29 tracks the remaining repository-admin configuration for `main`.
+GitHub's current protection settings for `main` are configured as described
+below and were confirmed through the repository API on 2026-10-02. Issue #29
+remains open for the final behavior check: verify with a trivial documentation
+PR that GitHub blocks merging while a required check is pending and allows
+merging only after all five required checks pass.
 
-Configure a branch rule or repository ruleset targeting `main` with these settings.
+The configured branch rule or repository ruleset targeting `main` has these
+settings.
 
 ## Required pull-request behavior
 
@@ -44,9 +49,11 @@ Prefer strict/up-to-date required checks once the project has multiple concurren
 
 ## Verification
 
-After enabling the rule:
+To verify the configured rule's behavior:
 
 1. open a trivial documentation PR,
-2. confirm GitHub blocks merging while any required check is pending,
-3. confirm merging becomes available only after all required checks pass,
+2. while any required check is pending, inspect the PR's merge state in GitHub
+   and confirm merging is blocked,
+3. after all five required checks pass, inspect the merge state again and
+   confirm merging is available,
 4. confirm direct force-push/deletion of `main` is blocked according to the configured rule.
