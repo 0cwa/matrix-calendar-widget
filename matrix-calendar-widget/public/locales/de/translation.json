@@ -90,7 +90,7 @@
       "untilDate": "Enddatum",
       "weekdayFR": "Freitag",
       "weekdayMO": "Montag",
-      "weekdayRuleLimit": "Wochentage lassen sich nur bei wöchentlicher Wiederholung ohne Enddatum oder Anzahl auswählen.",
+      "weekdayRuleLimit": "Wochentage lassen sich nur bei wöchentlicher Wiederholung alle ein oder zwei Wochen ohne Enddatum oder Anzahl auswählen.",
       "weekdaySA": "Samstag",
       "weekdaySU": "Sonntag",
       "weekdayTH": "Donnerstag",
