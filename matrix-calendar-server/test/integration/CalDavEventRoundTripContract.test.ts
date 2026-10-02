@@ -215,6 +215,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
 
   it('round-trips a TZID PERIOD RDATE with an explicit end through Radicale', async () => {
     recordPeriodStage('period-explicit-end', 'put-start');
+    const uid = `period-explicit-end-${randomUUID()}@matrix-calendar-widget`;
     const resourceUrl = new URL(
       `${randomUUID()}-period.ics`,
       calendarUrl,
@@ -225,6 +226,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       resourceUrl,
       periodCalendar(
         'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261027T093000/20261027T103000',
+        uid,
       ),
     );
     recordPeriodStage('period-explicit-end', 'put-complete');
@@ -232,16 +234,38 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     recordPeriodStage('period-explicit-end', 'get-start');
     const observed = await client.getEvent(resourceUrl);
     recordPeriodStage('period-explicit-end', 'get-complete');
-    const unfolded = observed.icalendar.replace(/\r\n[ \t]/g, '');
+    const parsed = codec.parse(calendarUrl, resourceUrl, observed.icalendar);
     recordPeriodStage('period-explicit-end', 'compare-start');
-    expect(unfolded).toContain(
-      'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261027T093000/20261027T103000',
-    );
+    expect(observed.href).toBe(resourceUrl);
+    expect(parsed.event.uid).toBe(uid);
+    expect(parsed.event.recurrence?.rdates).toEqual([
+      {
+        type: 'period',
+        timing: {
+          type: 'end',
+          start: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-27T09:30:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          end: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-27T10:30:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        },
+      },
+    ]);
     recordPeriodStage('period-explicit-end', 'complete');
   });
 
   it('round-trips a TZID PERIOD RDATE with a duration through Radicale', async () => {
     recordPeriodStage('period-duration', 'put-start');
+    const uid = `period-duration-${randomUUID()}@matrix-calendar-widget`;
     const resourceUrl = new URL(
       `${randomUUID()}-period.ics`,
       calendarUrl,
@@ -252,6 +276,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       resourceUrl,
       periodCalendar(
         'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261028T093000/PT1H',
+        uid,
       ),
     );
     recordPeriodStage('period-duration', 'put-complete');
@@ -259,11 +284,33 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     recordPeriodStage('period-duration', 'get-start');
     const observed = await client.getEvent(resourceUrl);
     recordPeriodStage('period-duration', 'get-complete');
-    const unfolded = observed.icalendar.replace(/\r\n[ \t]/g, '');
+    const parsed = codec.parse(calendarUrl, resourceUrl, observed.icalendar);
     recordPeriodStage('period-duration', 'compare-start');
-    expect(unfolded).toContain(
-      'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm:20261028T093000/PT1H',
-    );
+    expect(observed.href).toBe(resourceUrl);
+    expect(parsed.event.uid).toBe(uid);
+    expect(parsed.event.recurrence?.rdates).toEqual([
+      {
+        type: 'period',
+        timing: {
+          type: 'duration',
+          start: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-28T09:30:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          duration: {
+            weeks: 0,
+            days: 0,
+            hours: 1,
+            minutes: 0,
+            seconds: 0,
+            isNegative: false,
+          },
+        },
+      },
+    ]);
     recordPeriodStage('period-duration', 'complete');
   });
 
@@ -337,7 +384,10 @@ function candidateCalendar(
   ].join('\r\n');
 }
 
-function periodCalendar(rdate: string): string {
+function periodCalendar(
+  rdate: string,
+  uid = `period-${randomUUID()}@matrix-calendar-widget`,
+): string {
   return [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
@@ -361,7 +411,7 @@ function periodCalendar(rdate: string): string {
     'END:STANDARD',
     'END:VTIMEZONE',
     'BEGIN:VEVENT',
-    `UID:period-${randomUUID()}@matrix-calendar-widget`,
+    `UID:${uid}`,
     'DTSTAMP:20260922T120000Z',
     'DTSTART;TZID=Europe/Stockholm:20261026T140000',
     'DTEND;TZID=Europe/Stockholm:20261026T150000',
