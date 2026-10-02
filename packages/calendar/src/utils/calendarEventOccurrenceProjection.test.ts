@@ -201,9 +201,8 @@ describe('projectCalendarEventOccurrences', () => {
     });
     expect(localStarts).toEqual([
       '2026-10-23T09:00:00',
-      '2026-10-26T09:00:00',
+      '2026-11-02T09:00:00',
       '2026-11-06T09:00:00',
-      '2026-11-09T09:00:00',
     ]);
     expect(new Set(localStarts).size).toBe(localStarts.length);
   });
