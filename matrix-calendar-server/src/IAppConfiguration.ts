@@ -23,6 +23,9 @@ export interface IAppConfiguration {
   homeserver_url: string;
   radicale_url?: string;
   room_calendar_bindings: readonly RoomCalendarBinding[];
+  room_calendar_access_enabled: boolean;
+  application_service_token?: string;
+  application_service_user_id?: string;
   reminder_database_url?: string;
   reminder_database_tls_mode?: 'verify-full' | 'trusted-private-network';
 

@@ -41,6 +41,7 @@ export function createAppConfig(): IAppConfiguration {
     homeserver_url: '',
     radicale_url: 'https://calendar.example.com',
     room_calendar_bindings: [],
+    room_calendar_access_enabled: false,
     matrix_link_share: '',
     matrix_server_event_max_age_minutes: 0,
     auto_deletion_offset: 0,

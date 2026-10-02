@@ -53,6 +53,12 @@ function createConfiguration() {
     room_calendar_bindings: parseRoomCalendarBindings(
       process.env.ROOM_CALENDAR_BINDINGS,
     ),
+    room_calendar_access_enabled: toBoolean(
+      process.env.ROOM_CALENDAR_ACCESS_ENABLED,
+      false,
+    ),
+    application_service_token: process.env.MATRIX_APPLICATION_SERVICE_TOKEN,
+    application_service_user_id: process.env.MATRIX_APPLICATION_SERVICE_USER_ID,
     reminder_database_url: process.env.MATRIX_CALENDAR_REMINDER_DATABASE_URL,
     reminder_database_tls_mode: process.env
       .MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE as
@@ -145,6 +151,9 @@ export const ValidationSchema = Joi.object({
   HOMESERVER_URL: Joi.string().required().uri(),
   RADICALE_URL: Joi.string().uri(),
   ROOM_CALENDAR_BINDINGS: Joi.string(),
+  ROOM_CALENDAR_ACCESS_ENABLED: Joi.boolean(),
+  MATRIX_APPLICATION_SERVICE_TOKEN: Joi.string(),
+  MATRIX_APPLICATION_SERVICE_USER_ID: Joi.string(),
   MATRIX_CALENDAR_REMINDER_DATABASE_URL: Joi.string().uri({
     scheme: ['postgres', 'postgresql'],
   }),

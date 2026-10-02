@@ -14,8 +14,30 @@ if ! "${COMPOSE[@]}" run --rm --entrypoint sh synapse -c 'test -f /data/homeserv
   "${COMPOSE[@]}" run --rm synapse generate
 fi
 
+echo "==> Registering the synthetic local application service"
+"${COMPOSE[@]}" run --rm --entrypoint python synapse -c '
+import os
+import tempfile
+import yaml
+
+config_path = "/data/homeserver.yaml"
+registration = "/data/appservice-calendar-contract.yaml"
+with open(config_path, encoding="utf-8") as config_file:
+    config = yaml.safe_load(config_file)
+if not os.path.isfile(registration):
+    raise SystemExit("synthetic application-service registration is missing")
+registrations = config.setdefault("app_service_config_files", [])
+if registration not in registrations:
+    registrations.append(registration)
+directory = os.path.dirname(config_path)
+with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=False) as output:
+    yaml.safe_dump(config, output, sort_keys=False)
+    temporary_path = output.name
+os.replace(temporary_path, config_path)
+'
+
 echo "==> Starting Synapse"
-"${COMPOSE[@]}" up -d synapse
+"${COMPOSE[@]}" up -d --force-recreate synapse
 
 echo "==> Waiting for Synapse"
 for _ in $(seq 1 90); do

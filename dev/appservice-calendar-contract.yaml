@@ -1,0 +1,12 @@
+# Synthetic local/CI registration only. Never use this token in a deployment.
+id: matrix-calendar-contract
+url: null
+as_token: matrix-calendar-contract-as-token
+hs_token: matrix-calendar-contract-hs-token
+sender_localpart: _matrix_calendar_service
+namespaces:
+  users:
+    - exclusive: true
+      regex: '^@_matrix_calendar_service:localhost$'
+  aliases: []
+  rooms: []
