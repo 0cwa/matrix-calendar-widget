@@ -126,7 +126,7 @@ describe('MatrixServer suite', () => {
 
     matrixServer.on('custom-event', callback);
 
-    verify(matrixClientMock.on('custom-event', anything())).once();
+    verify(matrixClientMock.on('custom-event', callback)).once();
     expect(matrixServer.unwrap<MatrixClient>()).toBe(matrixClient);
   });
 
