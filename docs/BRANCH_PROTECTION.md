@@ -1,8 +1,13 @@
 # Main branch protection
 
-Issue #29 tracks the remaining repository-admin configuration for `main`.
+GitHub's current protection settings for `main` are configured as described
+below and were confirmed through the repository API on 2026-10-02. Issue #29
+records a trivial documentation-PR check for verifying that GitHub blocks
+merging while a required check is pending and allows merging only after all
+five required checks pass.
 
-Configure a branch rule or repository ruleset targeting `main` with these settings.
+The configured branch rule or repository ruleset targeting `main` has these
+settings.
 
 ## Required pull-request behavior
 
@@ -10,7 +15,7 @@ Configure a branch rule or repository ruleset targeting `main` with these settin
 - Require conversation resolution before merging.
 - Do not allow force pushes.
 - Do not allow branch deletion.
-- Apply the rule to administrators as well if you want the repository owner to use the same workflow as agents.
+- Enforce the rule for administrators; administrator enforcement is enabled on `main`.
 
 For a single-maintainer repository, requiring zero approving reviews is acceptable initially; increase this when additional maintainers join.
 
@@ -44,9 +49,17 @@ Prefer strict/up-to-date required checks once the project has multiple concurren
 
 ## Verification
 
-After enabling the rule:
+To verify the configured rule's behavior:
+
+For both observations, record the UTC timestamp, `mergeStateStatus`, `mergeable`
+state, and each required check's exact name and status: once while at least one
+check is pending, and again after all five required checks pass.
+For the pending observation, record the pull request API's `mergeable_state`
+and expect `blocked` while any required check is pending.
 
 1. open a trivial documentation PR,
-2. confirm GitHub blocks merging while any required check is pending,
-3. confirm merging becomes available only after all required checks pass,
+2. while any required check is pending, inspect the PR's merge state in GitHub
+   and confirm merging is blocked,
+3. after all five required checks pass, inspect the merge state again and
+   confirm merging is available,
 4. confirm direct force-push/deletion of `main` is blocked according to the configured rule.
