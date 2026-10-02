@@ -109,6 +109,25 @@ describe('supported series recurrence rules', () => {
     });
   });
 
+  it('parses and serializes an open-ended every-other-week weekday rule', () => {
+    const rule: SupportedCalendarEventRecurrenceRule = {
+      frequency: 'WEEKLY',
+      interval: 2,
+      end: { type: 'never' },
+      weekdays: ['MO', 'WE'],
+    };
+
+    expect(formatSupportedCalendarEventRecurrenceRule(rule, zonedAnchor)).toBe(
+      'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE',
+    );
+    expect(
+      parseSupportedCalendarEventRecurrenceRule(
+        'FREQ=WEEKLY;BYDAY=WE,MO;INTERVAL=2',
+        zonedAnchor,
+      ),
+    ).toEqual(rule);
+  });
+
   it.each([
     'FREQ=HOURLY',
     'FREQ=DAILY;INTERVAL=0',
@@ -116,7 +135,7 @@ describe('supported series recurrence rules', () => {
     'FREQ=DAILY;UNTIL=20261231',
     'FREQ=DAILY;UNTIL=20261231T235959',
     'FREQ=WEEKLY;BYDAY=TU,WE',
-    'FREQ=WEEKLY;BYDAY=MO;INTERVAL=2',
+    'FREQ=WEEKLY;BYDAY=MO;INTERVAL=3',
     'FREQ=WEEKLY;BYDAY=MO;COUNT=2',
     'FREQ=WEEKLY;BYDAY=MO;UNTIL=20261102T080000Z',
     'FREQ=WEEKLY;BYDAY=MO;WKST=SU',
@@ -136,7 +155,7 @@ describe('supported series recurrence rules', () => {
       formatSupportedCalendarEventRecurrenceRule(
         {
           frequency: 'WEEKLY',
-          interval: 2,
+          interval: 3,
           end: { type: 'never' },
           weekdays: ['MO', 'WE'],
         },
@@ -159,6 +178,38 @@ describe('supported series recurrence rules', () => {
 });
 
 describe('projectCalendarEventOccurrences', () => {
+  it('projects every-other-week BYDAY rules without duplicates at local wall time', () => {
+    const event = timedEvent({
+      start: '2026-10-20T09:00:00',
+      end: '2026-10-20T10:00:00',
+      recurrence: { rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH' },
+    });
+
+    const result = projectCalendarEventOccurrences(
+      [event],
+      {
+        start: '2026-10-20T00:00:00Z',
+        end: '2026-11-09T00:00:00Z',
+      },
+      'Europe/Stockholm',
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    const localStarts = result.occurrences.map(({ event: occurrence }) => {
+      if (occurrence.timing.type !== 'timed') {
+        throw new Error('Expected a timed occurrence');
+      }
+      return occurrence.timing.start.local;
+    });
+    expect(localStarts).toEqual([
+      '2026-10-20T09:00:00',
+      '2026-10-22T09:00:00',
+      '2026-11-03T09:00:00',
+      '2026-11-05T09:00:00',
+    ]);
+    expect(new Set(localStarts).size).toBe(localStarts.length);
+  });
+
   it('projects selected weekly weekdays at local wall time across DST', () => {
     const event = timedEvent({
       recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=FR,MO' },
@@ -224,7 +275,7 @@ describe('projectCalendarEventOccurrences', () => {
   );
 
   it.each([
-    'FREQ=WEEKLY;BYDAY=MO,FR;INTERVAL=2',
+    'FREQ=WEEKLY;BYDAY=MO,FR;INTERVAL=3',
     'FREQ=WEEKLY;BYDAY=MO,FR;COUNT=4',
     'FREQ=WEEKLY;BYDAY=MO,FR;UNTIL=20261106T080000Z',
     'FREQ=WEEKLY;BYDAY=MO,FR;WKST=SU',
@@ -697,6 +748,65 @@ describe('projectCalendarEventOccurrences', () => {
         ),
       ).toISOString(),
     ).toBe('2026-03-08T15:00:00.000Z');
+  });
+
+  it('splits named-zone recurrence across viewer-local days', () => {
+    const event = timedEvent({
+      id: 'cross-zone-dst',
+      start: '2026-03-28T09:00:00',
+      end: '2026-03-28T10:00:00',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=3' },
+    });
+    const viewerDayWindows: CalendarTimeRange[] = [
+      {
+        start: '2026-03-28T07:00:00Z',
+        end: '2026-03-29T07:00:00Z',
+      },
+      {
+        start: '2026-03-29T07:00:00Z',
+        end: '2026-03-30T07:00:00Z',
+      },
+    ];
+
+    const results = viewerDayWindows.map((range) =>
+      projectCalendarEventOccurrences([event], range, 'America/Los_Angeles'),
+    );
+
+    expect(results.map(({ diagnostics }) => diagnostics)).toEqual([[], []]);
+    expect(results[0].occurrences).toHaveLength(1);
+    expect(results[1].occurrences).toHaveLength(1);
+
+    const starts = results.flatMap(({ occurrences }) =>
+      occurrences.map(({ event: occurrence }) => {
+        if (
+          occurrence.timing.type !== 'timed' ||
+          occurrence.timing.start.type !== 'zoned'
+        ) {
+          throw new Error('Expected a named-zone timed occurrence');
+        }
+        return occurrence.timing.start;
+      }),
+    );
+
+    expect(starts).toEqual([
+      {
+        type: 'zoned',
+        local: '2026-03-28T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+      {
+        type: 'zoned',
+        local: '2026-03-29T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    ]);
+    expect(
+      starts.map(({ local, timezone }) =>
+        new Date(
+          calendarLocalDateTimeToUnixMillis(local, timezone),
+        ).toISOString(),
+      ),
+    ).toEqual(['2026-03-28T08:00:00.000Z', '2026-03-29T07:00:00.000Z']);
   });
 
   it('omits RRULE gap instances without consuming COUNT and resolves overlaps to the first instant', () => {

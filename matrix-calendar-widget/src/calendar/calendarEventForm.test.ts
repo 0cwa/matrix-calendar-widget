@@ -519,6 +519,45 @@ describe('calendar event form adapter', () => {
     ).toEqual({ rrule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR' });
   });
 
+  it('loads and edits the open-ended every-other-week BYDAY subset', () => {
+    const biweeklyEvent: CalendarEvent = {
+      id: 'biweekly-days',
+      calendarId: 'team',
+      uid: 'biweekly-days@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-26T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-26T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=WE,MO;INTERVAL=2' },
+    };
+    const values = calendarEventToFormValues(biweeklyEvent, calendar);
+
+    expect(values).toMatchObject({
+      recurrenceFrequency: 'WEEKLY',
+      recurrenceInterval: '2',
+      recurrenceEnd: 'never',
+      recurrenceWeekdays: ['MO', 'WE'],
+      recurrenceEditable: true,
+    });
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        recurrenceWeekdays: ['MO', 'WE', 'FR'],
+        recurrenceChanged: true,
+      }).recurrence,
+    ).toEqual({ rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR' });
+  });
+
   it('adds a new DTSTART weekday when editing a weekly BYDAY series start', () => {
     const weeklyEvent: CalendarEvent = {
       id: 'weekly-days',
@@ -563,7 +602,7 @@ describe('calendar event form adapter', () => {
         startDate: '2026-10-26',
         endDate: '2026-10-27',
       },
-      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,WE;INTERVAL=2' },
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,WE;INTERVAL=3' },
     };
     const values = calendarEventToFormValues(unsupportedEvent, calendar);
 

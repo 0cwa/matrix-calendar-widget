@@ -118,9 +118,11 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
       or YEARLY frequency, positive interval, and never/count/date end controls
       (PR #130).
 - [x] Add weekly BYDAY creation/editing and projection for plain weekday
-      tokens when DTSTART's weekday is included, INTERVAL is omitted or 1,
+      tokens when DTSTART's weekday is included, INTERVAL is omitted, 1, or 2,
       COUNT/UNTIL and other rule parts are absent, and WKST is omitted or its
       default MO. Unsupported combinations remain opaque and preserved.
+  - [x] Extend the same plain weekday subset to an open-ended INTERVAL=2
+        (every-other-week) rule; preserve all other unsupported combinations.
 - [ ] Extend RRULE editing to additional recurrence rule parts and patterns.
 - [x] Skip and restore one projected supported occurrence by adding or
       removing only its matching EXDATE. Use the original recurrence identity
@@ -134,6 +136,10 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [ ] RECURRENCE-ID instance override editing.
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
+  - [x] Verify daily `Europe/Stockholm` recurrence viewed in
+        `America/Los_Angeles` across the 2026-03-29 spring transition, including
+        adjacent viewer-local half-open day windows, preserved 09:00 source
+        wall time, and the expected 08:00Z-to-07:00Z instant shift.
 - [x] Preserve existing VALARM data on ordinary event edits and add/edit/remove
       one supported relative DISPLAY alarm whose negative DURATION trigger is
       measured from DTSTART.
@@ -287,6 +293,12 @@ DST regression or recurrence-editing criteria above.
 - [ ] First reminder delivery target: permission-checked room-wide
       notifications using standard `m.mentions.room: true`; check room-mention
       permission again at delivery time (ADR007/ADR019).
+  - [x] Add policy-only helpers for the standard message shape, scheduling-time
+        actor membership/app action power/exact binding, and delivery-time
+        binding/current sender membership/message power/room-mention threshold.
+        Fake-state tests cover denial and state lookup failures. These helpers
+        are not wired to a sender or scheduler; live delivery remains disabled
+        until the M6 appservice authorization and room access contracts pass.
 - [x] App-owned PostgreSQL reminder persistence, schema migrations, and
       transactional claim/completion contract are implemented (ADR019). The
       restricted-role PostgreSQL 16 integration job passed all five hosted
