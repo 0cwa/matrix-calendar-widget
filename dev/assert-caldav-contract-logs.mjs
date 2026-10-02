@@ -16,6 +16,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { formatFailedCalDavTestIdentities } from './caldav-contract-diagnostics.mjs';
 
 const credential = process.env.CALDAV_OPENID_CREDENTIAL ?? '';
 const username = process.env.CALDAV_USERNAME ?? 'calendar';
@@ -119,6 +120,9 @@ if (failedSuites.length === 0) {
   process.stdout.write(
     'CalDAV contract tests failed; sensitive failure details are withheld.\n',
   );
+  for (const identity of formatFailedCalDavTestIdentities(testReport)) {
+    process.stdout.write(`Failed contract test: ${identity}\n`);
+  }
   for (const suite of failedSuites) {
     const failureText = [
       suite.message,
