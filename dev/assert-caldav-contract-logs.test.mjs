@@ -28,6 +28,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   PERIOD_CONTRACT_SUITE_PATH,
+  safePeriodCaseStatusLines,
   safePeriodFailureLines,
   safePeriodStageLines,
 } from './assert-caldav-contract-logs.mjs';
@@ -58,6 +59,48 @@ test('maps only exact failed PERIOD suite and source-title pairs', () => {
     'Known failed PERIOD contract case: period-explicit-end',
     'Known failed PERIOD contract case: period-duration',
   ]);
+});
+
+test('reports exact PERIOD pass, fail, and case-not-seen statuses only', () => {
+  const sentinels = ['private assertion sentinel', 'Bearer token sentinel'];
+  const report = {
+    testResults: [
+      {
+        name: PERIOD_CONTRACT_SUITE_PATH,
+        status: 'failed',
+        assertionResults: [
+          {
+            title: EXPLICIT_END_TITLE,
+            status: 'passed',
+            failureMessages: sentinels,
+          },
+          {
+            title: DURATION_TITLE,
+            status: 'failed',
+            failureMessages: sentinels,
+          },
+        ],
+      },
+    ],
+  };
+
+  assert.deepEqual(safePeriodCaseStatusLines(report), [
+    'Known PERIOD case status: period-explicit-end:passed',
+    'Known PERIOD case status: period-duration:failed',
+  ]);
+  assert.deepEqual(
+    safePeriodCaseStatusLines({
+      testResults: [failedSuite('/untrusted/path', EXPLICIT_END_TITLE)],
+    }),
+    [
+      'Known PERIOD case status: period-explicit-end:case-not-seen',
+      'Known PERIOD case status: period-duration:case-not-seen',
+    ],
+  );
+  const output = safePeriodCaseStatusLines(report).join('\n');
+  for (const sentinel of sentinels) {
+    assert.equal(output.includes(sentinel), false);
+  }
 });
 
 test('maps every fixed PERIOD stage token and keeps the last stage per case', () => {
@@ -223,11 +266,40 @@ test('prints only the fixed ID for a matching failed case', () => {
   assert.equal(
     result.stdout,
     'CalDAV contract tests failed; sensitive failure details are withheld.\n' +
-      'Known failed PERIOD contract case: period-duration\n',
+      'Known PERIOD case status: period-explicit-end:case-not-seen\n' +
+      'Known PERIOD case status: period-duration:failed\n',
   );
   assert.equal(result.status, 0);
   assert.equal(result.stderr, '');
   assert.equal(result.stdout.includes('sentinel'), false);
+});
+
+test('prints fixed passed and case-not-seen statuses without report details', () => {
+  const report = {
+    testResults: [
+      {
+        name: PERIOD_CONTRACT_SUITE_PATH,
+        status: 'passed',
+        assertionResults: [
+          {
+            title: EXPLICIT_END_TITLE,
+            status: 'passed',
+            failureMessages: ['private event sentinel'],
+          },
+        ],
+      },
+    ],
+  };
+  const result = runScanner(JSON.stringify(report));
+
+  assert.equal(result.status, 0);
+  assert.equal(
+    result.stdout,
+    'CalDAV contract test and service logs contain no protected authentication material.\n' +
+      'Known PERIOD case status: period-explicit-end:passed\n' +
+      'Known PERIOD case status: period-duration:case-not-seen\n',
+  );
+  assert.equal(result.stdout.includes('private event sentinel'), false);
 });
 
 test('prints only fixed stages from an exact runner-local sidecar', () => {
@@ -252,7 +324,8 @@ test('prints only fixed stages from an exact runner-local sidecar', () => {
   assert.equal(
     result.stdout,
     'CalDAV contract tests failed; sensitive failure details are withheld.\n' +
-      'Known failed PERIOD contract case: period-explicit-end\n' +
+      'Known PERIOD case status: period-explicit-end:failed\n' +
+      'Known PERIOD case status: period-duration:case-not-seen\n' +
       'Known PERIOD contract stage: period-explicit-end:get-start\n',
   );
   assert.equal(result.stderr, '');
@@ -266,7 +339,7 @@ test('prints only fixed stages from an exact runner-local sidecar', () => {
   }
 });
 
-test('does not print a PERIOD ID for a path or title mismatch', () => {
+test('reports case-not-seen for path or title mismatches', () => {
   const report = {
     testResults: [
       failedSuite(
@@ -283,11 +356,13 @@ test('does not print a PERIOD ID for a path or title mismatch', () => {
 
   assert.equal(
     result.stdout,
-    'CalDAV contract tests failed; sensitive failure details are withheld.\n',
+    'CalDAV contract tests failed; sensitive failure details are withheld.\n' +
+      'Known PERIOD case status: period-explicit-end:case-not-seen\n' +
+      'Known PERIOD case status: period-duration:case-not-seen\n',
   );
   assert.equal(result.status, 0);
   assert.equal(result.stdout.includes('sentinel'), false);
-  assert.equal(result.stdout.includes('period-'), false);
+  assert.equal(result.stdout.includes('untrusted/path'), false);
 });
 
 test('keeps malformed report data generic', () => {

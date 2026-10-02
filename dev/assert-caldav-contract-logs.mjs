@@ -48,35 +48,52 @@ const PERIOD_STAGES = [
 ];
 
 export function safePeriodFailureLines(testReport) {
+  return collectPeriodCaseStatuses(testReport)
+    .filter(({ status }) => status === 'failed')
+    .map(({ id }) => `Known failed PERIOD contract case: ${id}`);
+}
+
+export function safePeriodCaseStatusLines(testReport) {
+  return collectPeriodCaseStatuses(testReport).map(
+    ({ id, status }) => `Known PERIOD case status: ${id}:${status}`,
+  );
+}
+
+function collectPeriodCaseStatuses(testReport) {
   if (!testReport || !Array.isArray(testReport.testResults)) {
     return [];
   }
 
-  const failedTitles = new Set();
+  const statusByTitle = new Map();
   for (const suite of testReport.testResults) {
     if (
-      suite?.status !== 'failed' ||
-      suite.name !== PERIOD_CONTRACT_SUITE_PATH ||
+      suite?.name !== PERIOD_CONTRACT_SUITE_PATH ||
       !Array.isArray(suite.assertionResults)
     ) {
       continue;
     }
 
     for (const assertion of suite.assertionResults) {
-      if (assertion?.status !== 'failed') {
+      if (assertion?.status !== 'passed' && assertion?.status !== 'failed') {
         continue;
       }
       for (const periodCase of PERIOD_FAILURE_CASES) {
-        if (assertion.title === periodCase.title) {
-          failedTitles.add(periodCase.title);
+        if (assertion.title !== periodCase.title) {
+          continue;
+        }
+
+        const currentStatus = statusByTitle.get(periodCase.title);
+        if (assertion.status === 'failed' || !currentStatus) {
+          statusByTitle.set(periodCase.title, assertion.status);
         }
       }
     }
   }
 
-  return PERIOD_FAILURE_CASES.filter(({ title }) =>
-    failedTitles.has(title),
-  ).map(({ id }) => `Known failed PERIOD contract case: ${id}`);
+  return PERIOD_FAILURE_CASES.map(({ title, id }) => ({
+    id,
+    status: statusByTitle.get(title) ?? 'case-not-seen',
+  }));
 }
 
 export function safePeriodStageLines(stageText, failedCaseIds) {
@@ -215,6 +232,11 @@ function main() {
   const failedSuites = (testReport.testResults ?? []).filter(
     (suite) => suite?.status === 'failed',
   );
+  const caseStatusLines = safePeriodCaseStatusLines(testReport);
+  const failedCaseIds = PERIOD_FAILURE_CASES.filter(({ id }) =>
+    caseStatusLines.includes(`Known PERIOD case status: ${id}:failed`),
+  ).map(({ id }) => id);
+
   if (failedSuites.length === 0) {
     process.stdout.write(
       'CalDAV contract test and service logs contain no protected authentication material.\n',
@@ -223,16 +245,14 @@ function main() {
     process.stdout.write(
       'CalDAV contract tests failed; sensitive failure details are withheld.\n',
     );
-    for (const line of safePeriodFailureLines(testReport)) {
+  }
+
+  for (const line of caseStatusLines) {
+    process.stdout.write(`${line}\n`);
+  }
+  if (stageFile && failedCaseIds.length > 0) {
+    for (const line of safePeriodStageLines(stageText, failedCaseIds)) {
       process.stdout.write(`${line}\n`);
-    }
-    const failedCaseIds = safePeriodFailureLines(testReport).map((line) =>
-      line.slice('Known failed PERIOD contract case: '.length),
-    );
-    if (stageFile && failedCaseIds.length > 0) {
-      for (const line of safePeriodStageLines(stageText, failedCaseIds)) {
-        process.stdout.write(`${line}\n`);
-      }
     }
   }
 }
