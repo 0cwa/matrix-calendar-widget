@@ -545,27 +545,37 @@ function cloneCalendarEventPatch(
   }
 
   if (patch.recurrence) {
-    cloned.recurrence =
-      'exdate' in patch.recurrence
-        ? {
-            exdate: {
-              ...patch.recurrence.exdate,
-              recurrenceId: cloneCalendarEventDateTime(
-                patch.recurrence.exdate.recurrenceId,
-              ),
-            },
-          }
-        : 'rdate' in patch.recurrence
+    if ('exdate' in patch.recurrence) {
+      cloned.recurrence = {
+        exdate: {
+          ...patch.recurrence.exdate,
+          recurrenceId: cloneCalendarEventDateTime(
+            patch.recurrence.exdate.recurrenceId,
+          ),
+        },
+      };
+    } else if ('rdate' in patch.recurrence) {
+      const rdate = patch.recurrence.rdate;
+      cloned.recurrence =
+        rdate.action === 'remove-period'
           ? {
               rdate: {
-                ...patch.recurrence.rdate,
-                value:
-                  patch.recurrence.rdate.action === 'remove-period'
-                    ? cloneRecurrenceDate(patch.recurrence.rdate.value)
-                    : cloneCalendarEventDateTime(patch.recurrence.rdate.value),
+                action: 'remove-period',
+                value: {
+                  type: 'period',
+                  timing: cloneRecurrenceTiming(rdate.value.timing),
+                },
               },
             }
-          : { ...patch.recurrence };
+          : {
+              rdate: {
+                action: rdate.action,
+                value: cloneCalendarEventDateTime(rdate.value),
+              },
+            };
+    } else {
+      cloned.recurrence = { ...patch.recurrence };
+    }
   }
 
   return cloned;
