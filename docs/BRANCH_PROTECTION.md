@@ -15,7 +15,7 @@ settings.
 - Require conversation resolution before merging.
 - Do not allow force pushes.
 - Do not allow branch deletion.
-- Apply the rule to administrators as well if you want the repository owner to use the same workflow as agents.
+- Enforce the rule for administrators; administrator enforcement is enabled on `main`.
 
 For a single-maintainer repository, requiring zero approving reviews is acceptable initially; increase this when additional maintainers join.
 
