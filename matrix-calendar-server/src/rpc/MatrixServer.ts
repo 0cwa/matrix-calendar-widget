@@ -80,6 +80,22 @@ export class MatrixServer
 {
   protected logger = new Logger(MatrixServer.name);
 
+  on<
+    EventKey extends string = string,
+    // Nest's Server contract defines event callbacks with the broad Function type.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+    EventCallback extends Function = Function,
+  >(event: EventKey, callback: EventCallback): any {
+    return this.matrixClient.on(
+      event,
+      callback as unknown as (...args: any[]) => void,
+    );
+  }
+
+  unwrap<T>(): T {
+    return this.matrixClient as unknown as T;
+  }
+
   private pinoLoggerRoot: pino.Logger = undefined as unknown as pino.Logger;
 
   private readonly botEventTypes = Object.values(BotEventType);

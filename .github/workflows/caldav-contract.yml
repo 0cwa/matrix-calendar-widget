@@ -52,8 +52,8 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
-      - name: Test redacted contract diagnostics
-        run: node --test dev/caldav-contract-diagnostics.test.mjs
+      - name: Test CalDAV report status sanitizer
+        run: node --test dev/caldav-contract-status.test.mjs
 
       - name: Start pinned Matrix and Radicale services
         run: bash dev/up.sh
@@ -91,25 +91,21 @@ jobs:
           set +e
           contract_log="$RUNNER_TEMP/caldav-contract-output.log"
           contract_report="$RUNNER_TEMP/caldav-contract-results.json"
-          contract_stages="$RUNNER_TEMP/caldav-contract-stages.log"
-          : > "$contract_stages"
-          CALDAV_CONTRACT_STAGE_FILE="$contract_stages" \
-            yarn workspace @matrix-calendar-widget/server jest \
+          yarn workspace @matrix-calendar-widget/server jest \
             test/CalendarGatewayMembershipGuard.test.ts \
             test/integration/PersonalOpenIdRadicaleContract.test.ts \
             test/integration/CalDavDiscoveryContract.test.ts \
             test/integration/CalDavEventRoundTripContract.test.ts \
             test/integration/CalendarDiagnosticsContract.test.ts \
-            --runInBand --testLocationInResults --json \
-            --outputFile="$contract_report" \
+            --runInBand --json --outputFile="$contract_report" \
             > "$contract_log" 2>&1
           test_status=$?
           set -e
           set +e
           node dev/assert-caldav-contract-logs.mjs \
-            "$contract_log" "$contract_report" "$contract_stages"
+            "$contract_log" "$contract_report"
           scan_status=$?
-          rm -f "$contract_log" "$contract_report" "$contract_stages"
+          rm -f "$contract_log" "$contract_report"
           set -e
           if [ "$scan_status" -ne 0 ]; then
             exit "$scan_status"
