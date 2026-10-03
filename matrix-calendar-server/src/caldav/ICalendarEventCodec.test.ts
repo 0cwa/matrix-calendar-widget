@@ -915,6 +915,10 @@ describe('ICalendarEventCodec', () => {
     },
     { label: 'zero duration', value: '20261027T093000/PT0S' },
     { label: 'negative duration', value: '20261027T093000/-PT1H' },
+    {
+      label: 'weeks combined with time units',
+      value: '20261027T093000/P1WT1H',
+    },
   ])('keeps PERIOD RDATE with $label opaque', ({ value }) => {
     const source = simpleRecurringSource(
       'DTSTART:20261026T093000Z',
@@ -930,7 +934,7 @@ describe('ICalendarEventCodec', () => {
     ).toBe(false);
   });
 
-  it('fails closed for stale PERIOD removal, PERIOD creation, and malformed siblings', () => {
+  it('fails closed for stale PERIOD removal, point-only PERIOD writes, and malformed siblings', () => {
     const source = fixture('recurrence-override.ics').replace(
       'RDATE;TZID=Europe/Stockholm:20261026T140000',
       [
@@ -980,13 +984,18 @@ describe('ICalendarEventCodec', () => {
         },
       } as unknown as CalendarEventPatch),
     ).toThrow(ICalendarEventCodecError);
-    expect(() =>
-      parsed.applyPatch({
-        recurrence: {
-          rdate: { action: 'add-period', value: period },
-        },
-      } as unknown as CalendarEventPatch),
-    ).toThrow(ICalendarEventCodecError);
+    const duplicatePeriod = parsed.applyPatch({
+      recurrence: {
+        rdate: { action: 'add-period', value: period },
+      },
+    });
+    expect(
+      codec.parse(
+        'team',
+        'period-rdate-fail-closed.ics',
+        duplicatePeriod.icalendar,
+      ).event.recurrence?.rdates,
+    ).toEqual(parsed.event.recurrence?.rdates);
 
     const malformed = codec.parse(
       'team',
@@ -1284,6 +1293,270 @@ describe('ICalendarEventCodec', () => {
     expect(unfolded).toContain(
       'X-KEEP=sibling;VALUE=PERIOD:20261027T093000/PT1H',
     );
+  });
+
+  it('adds a duration-form PERIOD RDATE and preserves DTSTART, siblings, and resource data', () => {
+    const parsed = codec.parse(
+      'team',
+      'period-rdate-duration-add.ics',
+      fixture('recurrence-override.ics'),
+    );
+    const value = {
+      type: 'period' as const,
+      timing: {
+        type: 'duration' as const,
+        start: {
+          type: 'date-time' as const,
+          value: { local: '2026-10-30T09:30:00', timezone: 'Europe/Stockholm' },
+        },
+        duration: {
+          weeks: 0,
+          days: 1,
+          hours: 2,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    const added = parsed.applyPatch({
+      recurrence: { rdate: { action: 'add-period', value } },
+    });
+    const replayed = codec
+      .parse('team', 'period-rdate-duration-add.ics', added.icalendar)
+      .applyPatch({
+        recurrence: { rdate: { action: 'add-period', value } },
+      });
+    const unfolded = replayed.icalendar.replace(/\r\n[ \t]/g, '');
+    const reparsed = codec.parse(
+      'team',
+      'period-rdate-duration-add.ics',
+      replayed.icalendar,
+    );
+
+    expect(replayed.icalendar).toBe(added.icalendar);
+    expect(reparsed.event.recurrence?.rdates).toContainEqual(value);
+    expect(
+      unfolded.match(
+        /RDATE;TZID=Europe\/Stockholm;VALUE=PERIOD:20261030T093000\/P1DT2H/g,
+      ),
+    ).toHaveLength(1);
+    expect(unfolded).toContain('DTSTART;TZID=Europe/Stockholm:20261005T140000');
+    expect(unfolded).toContain(
+      'RDATE;TZID=Europe/Stockholm;VALUE=PERIOD:20261028T140000/20261028T153000',
+    );
+    expect(unfolded).toContain('20261029T140000/PT1H30M');
+    expect(unfolded).toContain(
+      'X-CLIENT-METADATA;X-PARAM=preserve-param:preserve-value',
+    );
+    expect(unfolded).toContain('X-OVERRIDE-MARKER;X-ORIGIN=external');
+    expect(unfolded).toContain('BEGIN:VTIMEZONE');
+  });
+
+  it('adds a floating duration-form PERIOD without binding it to a timezone', () => {
+    const parsed = codec.parse(
+      'team',
+      'floating-period-rdate-add.ics',
+      fixture('recurrence-floating-override.ics'),
+    );
+    const value = {
+      type: 'period' as const,
+      timing: {
+        type: 'duration' as const,
+        start: {
+          type: 'floating-date-time' as const,
+          value: '2026-10-19T14:00:00',
+        },
+        duration: {
+          weeks: 1,
+          days: 0,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    const added = parsed.applyPatch({
+      recurrence: { rdate: { action: 'add-period', value } },
+    });
+    const reparsed = codec.parse(
+      'team',
+      'floating-period-rdate-add.ics',
+      added.icalendar,
+    );
+    const unfolded = added.icalendar.replace(/\r\n[ \t]/g, '');
+
+    expect(reparsed.event.recurrence?.rdates).toContainEqual(value);
+    expect(unfolded).toContain('RDATE;VALUE=PERIOD:20261019T140000/P1W');
+    expect(unfolded).not.toContain('RDATE;TZID=');
+    expect(unfolded).not.toMatch(/RDATE[^\r\n]*Z/);
+  });
+
+  it('adds a UTC duration-form PERIOD while retaining the UTC marker', () => {
+    const parsed = codec.parse(
+      'team',
+      'utc-period-rdate-add.ics',
+      fixture('recurrence-utc.ics'),
+    );
+    const value = {
+      type: 'period' as const,
+      timing: {
+        type: 'duration' as const,
+        start: {
+          type: 'date-time' as const,
+          value: { local: '2026-10-08T09:00:00', timezone: 'UTC' },
+        },
+        duration: {
+          weeks: 0,
+          days: 0,
+          hours: 1,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    const added = parsed.applyPatch({
+      recurrence: { rdate: { action: 'add-period', value } },
+    });
+    const reparsed = codec.parse(
+      'team',
+      'utc-period-rdate-add.ics',
+      added.icalendar,
+    );
+    const unfolded = added.icalendar.replace(/\r\n[ \t]/g, '');
+
+    expect(reparsed.event.recurrence?.rdates).toContainEqual(value);
+    expect(unfolded).toContain('RDATE;VALUE=PERIOD:20261008T090000Z/PT1H');
+    expect(unfolded).not.toContain('TZID=');
+  });
+
+  it.each([
+    {
+      label: 'zero duration',
+      duration: {
+        weeks: 0,
+        days: 0,
+        hours: 0,
+        minutes: 0,
+        seconds: 0,
+        isNegative: false,
+      },
+    },
+    {
+      label: 'negative duration',
+      duration: {
+        weeks: 0,
+        days: 0,
+        hours: 1,
+        minutes: 0,
+        seconds: 0,
+        isNegative: true,
+      },
+    },
+    {
+      label: 'fractional duration unit',
+      duration: {
+        weeks: 0,
+        days: 0,
+        hours: 0.5,
+        minutes: 0,
+        seconds: 0,
+        isNegative: false,
+      },
+    },
+    {
+      label: 'weeks combined with time units',
+      duration: {
+        weeks: 1,
+        days: 0,
+        hours: 1,
+        minutes: 0,
+        seconds: 0,
+        isNegative: false,
+      },
+    },
+    {
+      label: 'unknown duration unit',
+      duration: {
+        weeks: 0,
+        days: 0,
+        hours: 1,
+        minutes: 0,
+        seconds: 0,
+        isNegative: false,
+        milliseconds: 1,
+      },
+    },
+  ])('rejects a duration-form PERIOD RDATE with $label', ({ duration }) => {
+    const parsed = codec.parse(
+      'team',
+      'period-rdate-invalid-duration.ics',
+      fixture('recurrence-override.ics'),
+    );
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          rdate: {
+            action: 'add-period',
+            value: {
+              type: 'period',
+              timing: {
+                type: 'duration',
+                start: {
+                  type: 'date-time',
+                  value: {
+                    local: '2026-10-30T09:30:00',
+                    timezone: 'Europe/Stockholm',
+                  },
+                },
+                duration,
+              },
+            },
+          },
+        },
+      } as unknown as CalendarEventPatch),
+    ).toThrow(ICalendarEventCodecError);
+  });
+
+  it('requires a source VTIMEZONE for a new PERIOD start TZID', () => {
+    const parsed = codec.parse(
+      'team',
+      'period-rdate-new-timezone.ics',
+      fixture('recurrence-override.ics'),
+    );
+
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          rdate: {
+            action: 'add-period',
+            value: {
+              type: 'period',
+              timing: {
+                type: 'duration',
+                start: {
+                  type: 'date-time',
+                  value: {
+                    local: '2026-10-30T09:30:00',
+                    timezone: 'America/New_York',
+                  },
+                },
+                duration: {
+                  weeks: 0,
+                  days: 0,
+                  hours: 1,
+                  minutes: 0,
+                  seconds: 0,
+                  isNegative: false,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(ICalendarEventCodecError);
   });
 
   it.each([

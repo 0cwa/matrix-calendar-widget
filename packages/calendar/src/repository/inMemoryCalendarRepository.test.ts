@@ -226,6 +226,70 @@ describe('InMemoryCalendarRepository', () => {
     expect(fetched.recurrence?.rdates).toEqual([value]);
   });
 
+  it('adds duration-form PERIOD recurrence dates idempotently and defensively', async () => {
+    const event: CalendarEvent = {
+      ...events[2],
+      id: 'period-duration-add',
+      recurrence: { rrule: 'FREQ=WEEKLY' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+    const value = {
+      type: 'period' as const,
+      timing: {
+        type: 'duration' as const,
+        start: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-10-29T09:30:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        duration: {
+          weeks: 0,
+          days: 1,
+          hours: 2,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    const patch: CalendarEventPatch = {
+      recurrence: { rdate: { action: 'add-period', value } },
+    };
+
+    const updated = await repository.updateEvent(
+      'team',
+      'period-duration-add',
+      patch,
+    );
+    const replayed = await repository.updateEvent(
+      'team',
+      'period-duration-add',
+      patch,
+    );
+    expect(updated.recurrence?.rdates).toEqual([value]);
+    expect(replayed.recurrence?.rdates).toEqual([value]);
+
+    const returned = updated.recurrence?.rdates?.[0];
+    if (
+      !returned ||
+      returned.type !== 'period' ||
+      returned.timing.type !== 'duration' ||
+      returned.timing.start.type !== 'date-time'
+    ) {
+      throw new Error('Expected cloned duration-form PERIOD RDATE');
+    }
+    returned.timing.start.value.local = '2099-01-01T00:00:00';
+    returned.timing.duration.days = 99;
+
+    const fetched = await repository.getEvent('team', 'period-duration-add');
+    expect(fetched.recurrence?.rdates).toEqual([value]);
+  });
+
   it('creates a named calendar with deterministic identity', async () => {
     const repository = createRepository();
 

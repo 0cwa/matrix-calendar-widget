@@ -178,6 +178,74 @@ describe('supported series recurrence rules', () => {
 });
 
 describe('projectCalendarEventOccurrences', () => {
+  it('projects DATE recurrence across viewer-local DST windows with half-open overlap', () => {
+    const event: CalendarEvent = {
+      id: 'multi-day-date-series',
+      calendarId: 'team',
+      uid: 'multi-day-date-series@example.test',
+      title: 'Multi-day series',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-10-23',
+        endDate: '2026-10-26',
+      },
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=5' },
+    };
+    const stockholmWindows: CalendarTimeRange[] = [
+      {
+        start: '2026-10-24T22:00:00Z',
+        end: '2026-10-25T23:00:00Z',
+      },
+      {
+        start: '2026-10-25T23:00:00Z',
+        end: '2026-10-26T23:00:00Z',
+      },
+    ];
+
+    const results = stockholmWindows.map((range) =>
+      projectCalendarEventOccurrences([event], range, 'Europe/Stockholm'),
+    );
+
+    expect(results.map(({ diagnostics }) => diagnostics)).toEqual([[], []]);
+    expect(
+      results.map(({ occurrences }) =>
+        occurrences.map(({ recurrenceId }) => recurrenceId),
+      ),
+    ).toEqual([
+      [
+        { type: 'date', value: '2026-10-23' },
+        { type: 'date', value: '2026-10-24' },
+        { type: 'date', value: '2026-10-25' },
+      ],
+      [
+        { type: 'date', value: '2026-10-24' },
+        { type: 'date', value: '2026-10-25' },
+        { type: 'date', value: '2026-10-26' },
+      ],
+    ]);
+    expect(
+      results.map(({ occurrences }) =>
+        occurrences.map(({ event: occurrence }) => {
+          if (occurrence.timing.type !== 'all-day') {
+            throw new Error('Expected a DATE occurrence');
+          }
+          return [occurrence.timing.startDate, occurrence.timing.endDate];
+        }),
+      ),
+    ).toEqual([
+      [
+        ['2026-10-23', '2026-10-26'],
+        ['2026-10-24', '2026-10-27'],
+        ['2026-10-25', '2026-10-28'],
+      ],
+      [
+        ['2026-10-24', '2026-10-27'],
+        ['2026-10-25', '2026-10-28'],
+        ['2026-10-26', '2026-10-29'],
+      ],
+    ]);
+  });
+
   it('projects every-other-week BYDAY rules without duplicates at local wall time', () => {
     const event = timedEvent({
       start: '2026-10-20T09:00:00',
