@@ -375,6 +375,9 @@ addresses from Matrix room membership.
 - [x] Source-based threat model and independent security review of its current
       boundary claims. Residual risks and deployment acceptance gates remain
       tracked in `docs/threat-model.md`; this is not a penetration test.
+- [x] Confine discovered CalDAV principal/home/collection hrefs and refuse
+      discovery PROPFIND redirects before credential-bearing follow-up I/O.
+      Other CalDAV transports remain outside this focused boundary.
 - [ ] Rate limits and abuse controls.
 - [ ] Free/busy privacy model.
 - [x] Add a cold-backup and isolated-restore runbook for the project-owned
