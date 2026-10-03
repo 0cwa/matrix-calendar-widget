@@ -245,12 +245,12 @@ jobs:
           yarn workspace @matrix-calendar-widget/calendar build
       - name: Type check the synthetic calendar fixture
         run: |
-          yarn exec tsc -p matrix-calendar-widget/browser-tests/tsconfig.json --noEmit
-          yarn exec tsc -p e2e/calendar-tests/tsconfig.json --noEmit
+          yarn exec -- tsc -p matrix-calendar-widget/browser-tests/tsconfig.json --noEmit
+          yarn exec -- tsc -p e2e/calendar-tests/tsconfig.json --noEmit
       - name: Install Chromium
-        run: yarn workspace e2e exec playwright install --with-deps chromium --only-shell
+        run: yarn workspace e2e exec -- playwright install --with-deps chromium --only-shell
       - name: Measure calendar component layouts and accessibility
-        run: yarn workspace e2e exec playwright test --config playwright.calendar.config.ts
+        run: yarn workspace e2e exec -- playwright test --config playwright.calendar.config.ts
       - name: Retain synthetic browser diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

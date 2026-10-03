@@ -15,7 +15,7 @@
  */
 
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const viewports = [
   { width: 320, height: 640 },
@@ -66,7 +66,9 @@ for (const viewport of viewports) {
             ({ width, scrollWidth }) => scrollWidth <= width + 1,
           ),
         ).toBe(true);
-        await event.focus();
+        await page.getByRole('button', { name: view, exact: true }).focus();
+        await tabToEvent(page, event);
+        await expect(event).toBeFocused();
         await page.keyboard.press('Enter');
         const dialog = page.getByRole('dialog', {
           name: 'Synthetic planning',
@@ -115,5 +117,14 @@ for (const viewport of viewports) {
         await expect(event).toBeFocused();
       },
     );
+  }
+}
+
+async function tabToEvent(page: Page, event: Locator): Promise<void> {
+  for (let tab = 0; tab < 32; tab += 1) {
+    await page.keyboard.press('Tab');
+    if (await event.evaluate((element) => element === document.activeElement)) {
+      return;
+    }
   }
 }

@@ -36,7 +36,7 @@ export default defineConfig({
   outputDir: './calendar-test-results',
   webServer: {
     command:
-      'yarn workspace @matrix-calendar-widget/widget exec vite --host 127.0.0.1 --port 4174 --strictPort',
+      'yarn workspace @matrix-calendar-widget/widget exec -- vite --host 127.0.0.1 --port 4174 --strictPort',
     cwd: path.resolve(__dirname, '..'),
     url: 'http://127.0.0.1:4174/browser-tests/index.html',
     timeout: 30_000,

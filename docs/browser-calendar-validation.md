@@ -9,7 +9,7 @@ data, credential, or notification delivery in this fixture.
 The eight cases cover list and month views at 320 × 640, 390 × 844,
 768 × 1024, and 1280 × 800 CSS pixels. They measure document and calendar
 surface widths, check long text for clipping, open event details with the
-keyboard, measure dialog widths, run axe, close with Escape, and verify focus
+keyboard after verifying Tab reachability, measure dialog widths, run axe, close with Escape, and verify focus
 returns to the event. Dimensions and failure screenshots are retained as
 synthetic CI diagnostics for seven days. Browser traces and video are disabled.
 
@@ -26,10 +26,10 @@ Run the checks from a clean checkout:
 yarn install --frozen-lockfile
 yarn workspace @matrix-calendar-widget/ical-timezones build
 yarn workspace @matrix-calendar-widget/calendar build
-yarn exec tsc -p matrix-calendar-widget/browser-tests/tsconfig.json --noEmit
-yarn exec tsc -p e2e/calendar-tests/tsconfig.json --noEmit
-yarn workspace e2e exec playwright install --with-deps chromium --only-shell
-yarn workspace e2e exec playwright test --config playwright.calendar.config.ts
+yarn exec -- tsc -p matrix-calendar-widget/browser-tests/tsconfig.json --noEmit
+yarn exec -- tsc -p e2e/calendar-tests/tsconfig.json --noEmit
+yarn workspace e2e exec -- playwright install --with-deps chromium --only-shell
+yarn workspace e2e exec -- playwright test --config playwright.calendar.config.ts
 ```
 
 The local validation environment could not download the Chromium executable.
