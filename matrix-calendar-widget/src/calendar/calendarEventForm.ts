@@ -19,6 +19,7 @@ import {
   CalendarEvent,
   CalendarEventDateTime,
   CalendarEventDisplayAlarm,
+  CalendarEventDuration,
   CalendarEventInput,
   CalendarEventPatch,
   CalendarEventRecurrenceDate,
@@ -61,12 +62,21 @@ export type CalendarEventFormValues = {
   recurrenceChanged?: boolean;
   rdateEditable?: boolean;
   rdateDraft?: string;
+  rdatePeriodWeeks?: string;
+  rdatePeriodDays?: string;
+  rdatePeriodHours?: string;
+  rdatePeriodMinutes?: string;
+  rdatePeriodSeconds?: string;
   rdateValues?: CalendarEventRecurrenceDate[];
   rdateChanged?: boolean;
   rdateOperation?:
     | { action: 'add' | 'remove'; value: CalendarEventDateTime }
     | {
         action: 'remove-period';
+        value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>;
+      }
+    | {
+        action: 'add-period';
         value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>;
       };
   exdateEditable?: boolean;
@@ -89,6 +99,7 @@ export type CalendarEventValidationError =
   | 'invalid-range'
   | 'invalid-timezone'
   | 'invalid-recurrence'
+  | 'invalid-rdate'
   | 'invalid-alarm';
 
 export function createCalendarEventFormValues(
@@ -370,6 +381,21 @@ function validateRdateOperation(
     values.timezoneChanged === true
   ) {
     return 'invalid-recurrence';
+  }
+
+  if (values.rdateOperation.action === 'add-period') {
+    const period = values.rdateOperation.value;
+    if (
+      values.timingType !== 'timed' ||
+      values.originalTiming?.type !== 'timed' ||
+      values.rdateEditable === false ||
+      period.type !== 'period' ||
+      period.timing.type !== 'duration' ||
+      period.timing.start.type === 'date' ||
+      !isPositiveRfcDuration(period.timing.duration)
+    ) {
+      return 'invalid-rdate';
+    }
   }
 }
 
@@ -660,6 +686,86 @@ export function calendarEventRdateValueFromForm(
     };
   }
   return undefined;
+}
+
+export function calendarEventRdatePeriodDurationFromForm(
+  values: CalendarEventFormValues,
+): CalendarEventDuration | undefined {
+  const rawUnits = [
+    values.rdatePeriodWeeks,
+    values.rdatePeriodDays,
+    values.rdatePeriodHours,
+    values.rdatePeriodMinutes,
+    values.rdatePeriodSeconds,
+  ].map((value) => (value === undefined || value === '' ? '0' : value));
+  const parsedUnits = rawUnits.map(Number);
+
+  if (
+    rawUnits.some(
+      (value, index) =>
+        !/^\d+$/.test(value) || !Number.isSafeInteger(parsedUnits[index]),
+    ) ||
+    parsedUnits.every((value) => value === 0) ||
+    (parsedUnits[0] > 0 && parsedUnits.slice(1).some((value) => value > 0))
+  ) {
+    return undefined;
+  }
+
+  return {
+    weeks: parsedUnits[0],
+    days: parsedUnits[1],
+    hours: parsedUnits[2],
+    minutes: parsedUnits[3],
+    seconds: parsedUnits[4],
+    isNegative: false,
+  };
+}
+
+export function calendarEventRdatePeriodValueFromForm(
+  values: CalendarEventFormValues,
+): Extract<CalendarEventRecurrenceDate, { type: 'period' }> | undefined {
+  if (
+    values.timingType !== 'timed' ||
+    values.originalTiming?.type !== 'timed' ||
+    values.rdateEditable === false
+  ) {
+    return undefined;
+  }
+
+  const start = calendarEventRdateValueFromForm(values);
+  const duration = calendarEventRdatePeriodDurationFromForm(values);
+  if (!start || start.type === 'date' || !duration) {
+    return undefined;
+  }
+
+  return { type: 'period', timing: { type: 'duration', start, duration } };
+}
+
+function isPositiveRfcDuration(value: unknown): value is CalendarEventDuration {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const duration = value as Record<string, unknown>;
+  const units = ['weeks', 'days', 'hours', 'minutes', 'seconds'] as const;
+  if (
+    Object.keys(duration).length !== units.length + 1 ||
+    units.some(
+      (unit) =>
+        !Number.isSafeInteger(duration[unit]) || (duration[unit] as number) < 0,
+    ) ||
+    typeof duration.isNegative !== 'boolean' ||
+    duration.isNegative ||
+    !units.some((unit) => (duration[unit] as number) > 0)
+  ) {
+    return false;
+  }
+
+  const hasWeeks = (duration.weeks as number) > 0;
+  const hasOtherUnits = units
+    .slice(1)
+    .some((unit) => (duration[unit] as number) > 0);
+  return !(hasWeeks && hasOtherUnits);
 }
 
 function validateRecurrence(

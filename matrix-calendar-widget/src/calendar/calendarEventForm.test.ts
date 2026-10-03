@@ -19,6 +19,8 @@ import { DateTime } from 'luxon';
 import {
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
+  calendarEventRdatePeriodDurationFromForm,
+  calendarEventRdatePeriodValueFromForm,
   calendarEventRdateValueFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
@@ -771,6 +773,190 @@ describe('calendar event form adapter', () => {
     ).toBe('invalid-recurrence');
   });
 
+  it('builds positive duration PERIOD RDATEs and preserves their start kind', () => {
+    const timedSeries: CalendarEvent = {
+      id: 'period-entry-series',
+      calendarId: 'team',
+      uid: 'period-entry-series@example.test',
+      title: 'PERIOD entry series',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-05T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-05T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' },
+    };
+    const values = {
+      ...calendarEventToFormValues(timedSeries, calendar),
+      rdateDraft: '2026-10-12T11:30',
+      rdatePeriodDays: '1',
+      rdatePeriodHours: '2',
+    };
+    const period = calendarEventRdatePeriodValueFromForm(values);
+
+    expect(period).toEqual({
+      type: 'period',
+      timing: {
+        type: 'duration',
+        start: {
+          type: 'date-time',
+          value: {
+            local: '2026-10-12T11:30:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        duration: {
+          weeks: 0,
+          days: 1,
+          hours: 2,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    });
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        rdateChanged: true,
+        rdateOperation: { action: 'add-period', value: period! },
+      }).recurrence,
+    ).toEqual({ rdate: { action: 'add-period', value: period } });
+    expect(
+      validateCalendarEventForm({
+        ...values,
+        rdateChanged: true,
+        rdateOperation: { action: 'add-period', value: period! },
+      }),
+    ).toBeUndefined();
+
+    expect(
+      calendarEventRdatePeriodDurationFromForm({
+        ...values,
+        rdatePeriodWeeks: '2',
+        rdatePeriodDays: '',
+        rdatePeriodHours: '',
+      }),
+    ).toEqual({
+      weeks: 2,
+      days: 0,
+      hours: 0,
+      minutes: 0,
+      seconds: 0,
+      isNegative: false,
+    });
+
+    const utcSeries: CalendarEvent = {
+      ...timedSeries,
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-05T09:00:00',
+          timezone: 'UTC',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-05T10:00:00',
+          timezone: 'UTC',
+        },
+      },
+    };
+    expect(
+      calendarEventRdatePeriodValueFromForm({
+        ...calendarEventToFormValues(utcSeries, calendar),
+        rdateDraft: '2026-10-12T11:30',
+        rdatePeriodHours: '1',
+      })?.timing.start,
+    ).toEqual({
+      type: 'date-time',
+      value: { local: '2026-10-12T11:30:00', timezone: 'UTC' },
+    });
+  });
+
+  it('rejects zero, mixed-week, malformed, and unsafe PERIOD durations', () => {
+    const base = {
+      ...calendarEventToFormValues(
+        {
+          id: 'invalid-period-series',
+          calendarId: 'team',
+          uid: 'invalid-period-series@example.test',
+          title: 'Invalid PERIOD series',
+          timing: {
+            type: 'timed' as const,
+            start: {
+              type: 'zoned' as const,
+              local: '2026-10-05T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+            end: {
+              type: 'zoned' as const,
+              local: '2026-10-05T10:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' },
+        },
+        calendar,
+      ),
+      rdateDraft: '2026-10-12T11:30',
+    };
+    const invalidValues = [
+      { rdatePeriodDays: '0' },
+      { rdatePeriodDays: '-1' },
+      { rdatePeriodDays: '1.5' },
+      { rdatePeriodHours: 'abc' },
+      { rdatePeriodSeconds: '9007199254740992' },
+      { rdatePeriodWeeks: '1', rdatePeriodDays: '1' },
+    ];
+
+    for (const durationFields of invalidValues) {
+      expect(
+        calendarEventRdatePeriodDurationFromForm({
+          ...base,
+          ...durationFields,
+        }),
+      ).toBeUndefined();
+    }
+
+    const invalidPeriod = {
+      type: 'period' as const,
+      timing: {
+        type: 'duration' as const,
+        start: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-10-12T11:30:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        duration: {
+          weeks: 0,
+          days: 0,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    expect(
+      validateCalendarEventForm({
+        ...base,
+        rdateChanged: true,
+        rdateOperation: { action: 'add-period', value: invalidPeriod },
+      }),
+    ).toBe('invalid-rdate');
+  });
+
   it('serializes removal of one existing EXDATE with its exact value form', () => {
     const exdates = [
       { type: 'floating-date-time' as const, value: '2026-10-02T09:00:00' },
@@ -1017,14 +1203,27 @@ describe('calendar event form adapter', () => {
         calendarEventToFormValues(allDayEvent, calendar),
       ),
     ).toEqual({ type: 'date', value: '2026-10-05' });
-    expect(
-      calendarEventRdateValueFromForm(
-        calendarEventToFormValues(floatingEvent, calendar),
-      ),
-    ).toEqual({
+    const floatingValues = calendarEventToFormValues(floatingEvent, calendar);
+    expect(calendarEventRdateValueFromForm(floatingValues)).toEqual({
       type: 'floating-date-time',
       value: '2026-10-05T09:00:00',
     });
+    expect(
+      calendarEventRdatePeriodValueFromForm({
+        ...floatingValues,
+        rdateDraft: '2026-10-12T11:30',
+        rdatePeriodHours: '1',
+      })?.timing.start,
+    ).toEqual({
+      type: 'floating-date-time',
+      value: '2026-10-12T11:30:00',
+    });
+    expect(
+      calendarEventRdatePeriodValueFromForm({
+        ...calendarEventToFormValues(allDayEvent, calendar),
+        rdatePeriodDays: '1',
+      }),
+    ).toBeUndefined();
   });
 
   it('writes the UNTIL value in the event start value kind', () => {
