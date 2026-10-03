@@ -32,16 +32,27 @@ export interface RoomMentionPowerLevels {
 /**
  * This port must return undefined only when m.room.power_levels is genuinely
  * absent. Transport and state lookup errors must reject so policy fails closed.
+ * When a signal is supplied, implementations must observe abort and
+ * stop/settle outstanding lookups.
  */
 export interface RoomMentionMatrixState {
-  getJoinedRoomMembers(roomId: string): Promise<readonly string[]>;
+  getJoinedRoomMembers(
+    roomId: string,
+    signal?: AbortSignal,
+  ): Promise<readonly string[]>;
   /** Preserve raw string/number fields; do not coerce before policy evaluation. */
-  getPowerLevels(roomId: string): Promise<RoomMentionPowerLevels | undefined>;
+  getPowerLevels(
+    roomId: string,
+    signal?: AbortSignal,
+  ): Promise<RoomMentionPowerLevels | undefined>;
   /**
    * Resolve from m.room.create. Return "1" when an older create event omits
    * content.room_version. Undefined means unknown; reject on lookup errors.
    */
-  getRoomVersion(roomId: string): Promise<string | undefined>;
+  getRoomVersion(
+    roomId: string,
+    signal?: AbortSignal,
+  ): Promise<string | undefined>;
 }
 
 export interface RoomMentionScheduleRequest {
@@ -59,19 +70,20 @@ export interface RoomMentionScheduleRequest {
 export async function authorizeRoomMentionScheduling(
   request: RoomMentionScheduleRequest,
   state: RoomMentionMatrixState,
+  signal?: AbortSignal,
 ): Promise<RoomCalendarBinding | undefined> {
-  if (request.authenticatedActorUserId.length === 0) {
+  if (signal?.aborted || request.authenticatedActorUserId.length === 0) {
     return undefined;
   }
 
   try {
-    const members = await state.getJoinedRoomMembers(request.roomId);
+    const members = await getJoinedRoomMembers(state, request.roomId, signal);
     if (!members.includes(request.authenticatedActorUserId)) {
       return undefined;
     }
     const [powerLevels, roomVersion] = await Promise.all([
-      state.getPowerLevels(request.roomId),
-      state.getRoomVersion(request.roomId),
+      getPowerLevels(state, request.roomId, signal),
+      getRoomVersion(state, request.roomId, signal),
     ]);
 
     const actorPower = effectivePowerLevel(
@@ -115,8 +127,9 @@ export interface RoomMentionDeliveryRequest {
 export async function authorizeRoomMentionDelivery(
   request: RoomMentionDeliveryRequest,
   state: RoomMentionMatrixState,
+  signal?: AbortSignal,
 ): Promise<RoomCalendarBinding | undefined> {
-  if (request.applicationServiceSenderUserId.length === 0) {
+  if (signal?.aborted || request.applicationServiceSenderUserId.length === 0) {
     return undefined;
   }
 
@@ -133,9 +146,9 @@ export async function authorizeRoomMentionDelivery(
 
   try {
     const [members, powerLevels, roomVersion] = await Promise.all([
-      state.getJoinedRoomMembers(request.roomId),
-      state.getPowerLevels(request.roomId),
-      state.getRoomVersion(request.roomId),
+      getJoinedRoomMembers(state, request.roomId, signal),
+      getPowerLevels(state, request.roomId, signal),
+      getRoomVersion(state, request.roomId, signal),
     ]);
     if (!members.includes(request.applicationServiceSenderUserId)) {
       return undefined;
@@ -174,6 +187,36 @@ export async function authorizeRoomMentionDelivery(
   } catch {
     return undefined;
   }
+}
+
+function getJoinedRoomMembers(
+  state: RoomMentionMatrixState,
+  roomId: string,
+  signal: AbortSignal | undefined,
+): Promise<readonly string[]> {
+  return signal === undefined
+    ? state.getJoinedRoomMembers(roomId)
+    : state.getJoinedRoomMembers(roomId, signal);
+}
+
+function getPowerLevels(
+  state: RoomMentionMatrixState,
+  roomId: string,
+  signal: AbortSignal | undefined,
+): Promise<RoomMentionPowerLevels | undefined> {
+  return signal === undefined
+    ? state.getPowerLevels(roomId)
+    : state.getPowerLevels(roomId, signal);
+}
+
+function getRoomVersion(
+  state: RoomMentionMatrixState,
+  roomId: string,
+  signal: AbortSignal | undefined,
+): Promise<string | undefined> {
+  return signal === undefined
+    ? state.getRoomVersion(roomId)
+    : state.getRoomVersion(roomId, signal);
 }
 
 /**
