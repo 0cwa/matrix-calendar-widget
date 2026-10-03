@@ -419,6 +419,11 @@ access and event writes stay disabled by default.
 
 ## M8 — Hardening and release
 
+- [x] Wire a separate Chromium calendar-component fixture at 320, 390, 768, and
+      1280 CSS pixels, with measured overflow, keyboard focus, and axe checks.
+      Hosted passing evidence is required; actual Matrix clients remain a
+      separate release gate (docs/browser-calendar-validation.md).
+
 - [ ] Responsive/a11y pass across narrow Element panels and full-screen widget.
   - [x] Add current calendar grid/list/details keyboard, focus, accessible-name,
         and axe regressions. Actual browser layout and client embedding remain
