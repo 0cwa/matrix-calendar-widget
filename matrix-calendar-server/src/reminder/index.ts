@@ -15,6 +15,16 @@
  */
 
 export {
+  CanonicalReminderResolutionError,
+  resolveCanonicalReminderIdentity,
+} from './CanonicalReminderIdentityResolver';
+export type {
+  CanonicalReminderIdentity,
+  CanonicalReminderResolution,
+  CanonicalReminderResolutionErrorCode,
+  CanonicalReminderResourceData,
+} from './CanonicalReminderIdentityResolver';
+export {
   PostgresRoomReminderStore,
   createReminderDeliveryKey,
 } from './PostgresRoomReminderStore';
