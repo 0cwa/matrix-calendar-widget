@@ -25,6 +25,7 @@ import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from '../../calendar';
+import i18n from '../../i18n';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 
 const calendar: Calendar = {
@@ -467,6 +468,210 @@ describe('<CalendarEventEditorDialog />', () => {
           },
           { type: 'period' },
         ],
+      },
+    });
+  });
+
+  it('adds a duration PERIOD from the selected start and validates its units', async () => {
+    const periodEvent: CalendarEvent = {
+      ...recurringEvent,
+      id: 'duration-rdate-resource',
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=8' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [periodEvent],
+    });
+
+    const view = render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={periodEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByRole('group', {
+        name: 'Additional recurrence dates',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('group', { name: 'Duration of added period' }),
+    ).toBeInTheDocument();
+
+    const addPeriod = screen.getByRole('button', { name: 'Add period' });
+    const weeks = screen.getByRole('spinbutton', { name: 'Weeks' });
+    const days = screen.getByRole('spinbutton', { name: 'Days' });
+    const hours = screen.getByRole('spinbutton', { name: 'Hours' });
+    expect(addPeriod).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId('rdate-draft'), {
+      target: { value: '2026-10-12T11:30' },
+    });
+    await userEvent.type(weeks, '1');
+    await userEvent.type(days, '1');
+    expect(addPeriod).toBeDisabled();
+    expect(
+      screen.getByText(
+        'Enter a positive duration using whole-number units. Weeks cannot be combined with other units.',
+      ),
+    ).toBeInTheDocument();
+
+    await userEvent.clear(weeks);
+    await userEvent.type(hours, '2');
+    expect(addPeriod).toBeEnabled();
+    await userEvent.click(addPeriod);
+    expect(
+      await screen.findByText('The period will be added when you save.'),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await expect(
+      repository.getEvent('team', 'duration-rdate-resource'),
+    ).resolves.toMatchObject({
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;COUNT=8',
+        rdates: [
+          {
+            type: 'period',
+            timing: {
+              type: 'duration',
+              start: {
+                type: 'date-time',
+                value: {
+                  local: '2026-10-12T11:30:00',
+                  timezone: 'Europe/Stockholm',
+                },
+              },
+              duration: {
+                weeks: 0,
+                days: 1,
+                hours: 2,
+                minutes: 0,
+                seconds: 0,
+                isNegative: false,
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    const savedPeriod = await repository.getEvent(
+      'team',
+      'duration-rdate-resource',
+    );
+    view.rerender(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={savedPeriod}
+        onClose={vi.fn()}
+        open
+      />,
+    );
+    expect(
+      await screen.findByRole('button', {
+        name: 'Remove period date: 2026-10-12T11:30:00 Europe/Stockholm (1d 2h)',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('translates all PERIOD duration units in English and German', async () => {
+    try {
+      await i18n.changeLanguage('en');
+      const periodEvent: CalendarEvent = {
+        ...recurringEvent,
+        id: 'localized-duration-rdate-resource',
+        recurrence: { rrule: 'FREQ=WEEKLY;COUNT=8' },
+      };
+      const repository = new InMemoryCalendarRepository({
+        calendars: [calendar],
+        events: [periodEvent],
+      });
+
+      render(
+        <CalendarEventEditorDialog
+          calendars={[calendar]}
+          event={periodEvent}
+          onClose={vi.fn()}
+          open
+        />,
+        { wrapper: createWrapper(repository) },
+      );
+
+      for (const label of ['Weeks', 'Days', 'Hours', 'Minutes', 'Seconds']) {
+        expect(
+          await screen.findByRole('spinbutton', { name: label }),
+        ).toBeInTheDocument();
+      }
+
+      await i18n.changeLanguage('de');
+      for (const label of [
+        'Wochen',
+        'Tage',
+        'Stunden',
+        'Minuten',
+        'Sekunden',
+      ]) {
+        expect(
+          await screen.findByRole('spinbutton', { name: label }),
+        ).toBeInTheDocument();
+      }
+    } finally {
+      await i18n.changeLanguage('en');
+    }
+  });
+
+  it('keeps all-day RDATE entry as a point date without period controls', async () => {
+    const allDayEvent: CalendarEvent = {
+      id: 'all-day-rdate-resource',
+      calendarId: 'team',
+      uid: 'all-day-rdate@example.test',
+      title: 'All-day series',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-10-05',
+        endDate: '2026-10-06',
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [allDayEvent],
+    });
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={allDayEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByRole('button', { name: 'Add date' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('group', { name: 'Duration of added period' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add period' })).toBeNull();
+
+    fireEvent.change(screen.getByTestId('rdate-draft'), {
+      target: { value: '2026-10-13' },
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Add date' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await expect(
+      repository.getEvent('team', 'all-day-rdate-resource'),
+    ).resolves.toMatchObject({
+      recurrence: {
+        rdates: [{ type: 'date', value: '2026-10-13' }],
       },
     });
   });

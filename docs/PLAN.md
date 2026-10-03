@@ -146,7 +146,9 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
         make an exact repeated addition of the same PERIOD a no-op. Preserve
         point/period siblings, parameters, timezone definitions, detached
         members, and ETag checks.
-  - [ ] Add widget entry for duration-form PERIOD RDATEs.
+  - [x] Add a timed recurring PERIOD from the selected date/time with a
+        positive duration in whole weeks or days/time units, preserving the
+        source DATE-TIME form and the point-date entry flow.
   - [ ] Edit the start, end, or duration of an existing PERIOD RDATE.
 - [ ] RECURRENCE-ID instance override editing.
 - [ ] “this event / this and following / series” edit semantics where representable.
@@ -155,6 +157,9 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
         `America/Los_Angeles` across the 2026-03-29 spring transition, including
         adjacent viewer-local half-open day windows, preserved 09:00 source
         wall time, and the expected 08:00Z-to-07:00Z instant shift.
+  - [x] Verify multi-day all-day DATE recurrence across adjacent
+        `Europe/Stockholm` viewer-local half-open day windows around the
+        2026-10-25 DST transition (PR #167).
 - [x] Preserve existing VALARM data on ordinary event edits and add/edit/remove
       one supported relative DISPLAY alarm whose negative DURATION trigger is
       measured from DTSTART.
@@ -194,10 +199,11 @@ Duration writes require positive RFC duration components represented by
 supported integers; zero, negative, fractional, malformed, unknown, and mixed
 week-and-time values are rejected. An exact repeated addition of the same
 PERIOD is a no-op. Point/period siblings, parameters, timezone definitions,
-detached members, and ETag conditional updates remain preserved. Widget
-duration-form entry and changes to an existing PERIOD's start, end, or duration
-remain open. General EXDATE editing, arbitrary RRULEs, and broad M5 completion
-also remain open.
+detached members, and ETag conditional updates remain preserved. The widget can
+add a positive duration PERIOD from the selected start of a timed recurring
+master, preserving its floating, UTC, or named-TZID form. Changes to an existing
+PERIOD's start, end, or duration remain open. General EXDATE editing, arbitrary
+RRULEs, and broad M5 completion also remain open.
 
 The bounded weekly BYDAY slice extends the editor with a weekday set for
 every-week rules. Plain weekday tokens are accepted only when DTSTART's
@@ -369,6 +375,9 @@ addresses from Matrix room membership.
 - [x] Source-based threat model and independent security review of its current
       boundary claims. Residual risks and deployment acceptance gates remain
       tracked in `docs/threat-model.md`; this is not a penetration test.
+- [x] Confine discovered CalDAV principal/home/collection hrefs and refuse
+      discovery PROPFIND redirects before credential-bearing follow-up I/O.
+      Other CalDAV transports remain outside this focused boundary.
 - [ ] Rate limits and abuse controls.
 - [ ] Free/busy privacy model.
 - [x] Add a cold-backup and isolated-restore runbook for the project-owned

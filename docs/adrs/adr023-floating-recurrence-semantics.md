@@ -153,8 +153,9 @@ start requires its VTIMEZONE in the source VCALENDAR. Writes accept positive
 RFC durations with supported integer components and reject zero, negative,
 fractional, malformed, unknown, or mixed week-and-time components. An exact
 repeated addition of the same PERIOD is a no-op; sibling recurrence values and
-other resource data remain preserved. Widget duration-form entry is still
-pending, as are edits to an existing PERIOD's start, end, or duration.
+other resource data remain preserved. The widget supports duration-form entry
+for timed recurring masters. Editing an existing PERIOD's start, end, or
+duration remains pending.
 
 ## Consequences
 
