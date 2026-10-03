@@ -481,6 +481,8 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
   }
 });
 
+markPersonalOpenIdSuiteRegistered();
+
 function markPersonalOpenIdSetupComplete(): void {
   const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
   if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
@@ -515,6 +517,19 @@ function markPersonalOpenIdSuiteLoaded(): void {
 
   try {
     appendFileSync(stageFile, 'personal-openid-suite-loaded\n', 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
+
+function markPersonalOpenIdSuiteRegistered(): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+    return;
+  }
+
+  try {
+    appendFileSync(stageFile, 'personal-openid-suite-registered\n', 'utf8');
   } catch {
     // Diagnostics must not change contract-test behavior.
   }

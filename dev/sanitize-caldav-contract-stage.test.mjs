@@ -9,6 +9,7 @@ import {
   formatPersonalOpenIdSetupStart,
   formatPersonalOpenIdSetupStatus,
   formatPersonalOpenIdSuiteLoaded,
+  formatPersonalOpenIdSuiteRegistration,
   formatRoomAppServiceListingCheckpoint,
   formatRoomAppServiceSetupStatus,
 } from './sanitize-caldav-contract-stage.mjs';
@@ -100,6 +101,25 @@ test('reports only whether the personal OpenID suite module loaded', () => {
       'personal-openid-suite-loaded\npersonal-openid-setup-start\n',
     ),
     'personal-openid-suite loaded\n',
+  );
+});
+
+test('reports only whether Personal OpenID suite registration completed', () => {
+  assert.equal(
+    formatPersonalOpenIdSuiteRegistration('personal-openid-suite-loaded\n'),
+    'personal-openid-suite-registration not-reached\n',
+  );
+  assert.equal(
+    formatPersonalOpenIdSuiteRegistration(
+      'personal-openid-suite-registered\nprivate-event-data',
+    ),
+    'personal-openid-suite-registration registered\n',
+  );
+  assert.equal(
+    formatPersonalOpenIdSuiteRegistration(
+      'personal-openid-suite-registered private-event-data',
+    ),
+    'personal-openid-suite-registration not-reached\n',
   );
 });
 

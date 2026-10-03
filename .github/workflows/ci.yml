@@ -123,8 +123,27 @@ jobs:
       - name: Check server translations
         run: yarn workspace @matrix-calendar-widget/server translate --ci --dry-run
 
+      - name: Test server Jest report sanitizer
+        run: node --test dev/sanitize-server-test-report.test.mjs
+
       - name: Test server
-        run: yarn workspace @matrix-calendar-widget/server test:all
+        run: |
+          report="$RUNNER_TEMP/server-test-results.json"
+          trap 'rm -f "$report"' EXIT
+          set +e
+          yarn workspace @matrix-calendar-widget/server test:all \
+            --json --outputFile="$report" \
+            >/dev/null 2>&1
+          test_status=$?
+          set -e
+          set +e
+          node dev/sanitize-server-test-report.mjs "$report"
+          summary_status=$?
+          set -e
+          if [ "$summary_status" -ne 0 ]; then
+            exit "$summary_status"
+          fi
+          exit "$test_status"
 
       - name: Provision restricted reminder test role
         run: |

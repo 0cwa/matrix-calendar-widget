@@ -60,6 +60,9 @@ jobs:
       - name: Test CalDAV report status sanitizer
         run: node --test dev/caldav-contract-status.test.mjs
 
+      - name: Test server Jest report sanitizer
+        run: node --test dev/sanitize-server-test-report.test.mjs
+
       - name: Test fixed CalDAV contract phase sanitizer
         run: node --test dev/sanitize-caldav-contract-stage.test.mjs
 
