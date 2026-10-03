@@ -15,6 +15,7 @@ const allowedPhases = new Set([
 ]);
 const ROOM_APPSERVICE_SETUP_COMPLETE = 'room-appservice-setup-complete';
 const PERSONAL_OPENID_SETUP_START = 'personal-openid-setup-start';
+const PERSONAL_OPENID_SUITE_LOADED = 'personal-openid-suite-loaded';
 const PERSONAL_OPENID_SETUP_COMPLETE = 'personal-openid-setup-complete';
 const PERSONAL_OPENID_SETUP_STAGES = new Set([
   'fixture-input-check',
@@ -91,6 +92,15 @@ export function formatPersonalOpenIdSetupStart(stageContent) {
   return `personal-openid-setup-start ${started ? 'reached' : 'not-reached'}\n`;
 }
 
+export function formatPersonalOpenIdSuiteLoaded(stageContent) {
+  const loaded =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === PERSONAL_OPENID_SUITE_LOADED);
+  return `personal-openid-suite ${loaded ? 'loaded' : 'not-reached'}\n`;
+}
+
 export function formatPersonalOpenIdSetupStage(stageContent) {
   let latestStage;
   if (typeof stageContent === 'string') {
@@ -146,6 +156,7 @@ function emitContractPhase(stagePath) {
   try {
     const stageContent = readFileSync(stagePath, 'utf8');
     process.stdout.write(formatContractPhase(stageContent));
+    process.stdout.write(formatPersonalOpenIdSuiteLoaded(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupStart(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupStatus(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupStage(stageContent));

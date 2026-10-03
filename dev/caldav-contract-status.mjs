@@ -152,6 +152,7 @@ export function safeContractCaseStatusLines(testReport) {
 
   const statusByCaseId = new Map();
   let unmappedFailures = 0;
+  let personalOpenIdSuiteFailure = false;
 
   for (const suite of testReport.testResults) {
     const suiteId = SUITE_IDS.get(suite?.name);
@@ -181,6 +182,9 @@ export function safeContractCaseStatusLines(testReport) {
     }
 
     if (suite.status === 'failed' && !hasFailedAssertion) {
+      if (suiteId === 'personal-openid-contract') {
+        personalOpenIdSuiteFailure = true;
+      }
       unmappedFailures += 1;
     }
   }
@@ -188,6 +192,9 @@ export function safeContractCaseStatusLines(testReport) {
   const lines = [...statusByCaseId]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([caseId, status]) => `contract-case ${caseId} ${status}`);
+  if (personalOpenIdSuiteFailure) {
+    lines.push('contract-suite personal-openid-contract failed');
+  }
   if (unmappedFailures > 0) {
     lines.push(`unmapped-failure count=${unmappedFailures}`);
   }

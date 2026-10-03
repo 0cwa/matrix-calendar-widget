@@ -39,6 +39,8 @@ import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware'
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 
+markPersonalOpenIdSuiteLoaded();
+
 const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
 const CALDAV_OPENID_PREFIX = 'matrix-openid:';
@@ -495,6 +497,19 @@ function markPersonalOpenIdSetupStart(): void {
 
   try {
     appendFileSync(stageFile, 'personal-openid-setup-start\n', 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
+
+function markPersonalOpenIdSuiteLoaded(): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+    return;
+  }
+
+  try {
+    appendFileSync(stageFile, 'personal-openid-suite-loaded\n', 'utf8');
   } catch {
     // Diagnostics must not change contract-test behavior.
   }

@@ -174,6 +174,25 @@ test('maps pending and unknown status values to the closed pending category', ()
   ]);
 });
 
+test('maps PersonalOpenId suite-level failure without assertion details', () => {
+  const testReport = {
+    testResults: [
+      {
+        name: suitePath(
+          'matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts',
+        ),
+        status: 'failed',
+        assertionResults: [],
+      },
+    ],
+  };
+
+  assert.deepEqual(safeContractCaseStatusLines(testReport), [
+    'contract-suite personal-openid-contract failed',
+    'unmapped-failure count=1',
+  ]);
+});
+
 test('hides unknown case names, assertion details, values, and locations', () => {
   const privateSentinels = [
     'private-test-title-sentinel',
