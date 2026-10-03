@@ -334,12 +334,7 @@ export function isSupportedCalendarEventOccurrenceExclusion(
   recurrenceId: CalendarEventDateTime,
 ): boolean {
   const recurrence = event.recurrence;
-  if (
-    event.unsupportedTimezone ||
-    event.unsupportedRecurrence ||
-    !recurrence ||
-    (!recurrence.rrule && !recurrence.rdates?.length)
-  ) {
+  if (event.unsupportedTimezone || event.unsupportedRecurrence || !recurrence) {
     return false;
   }
 

@@ -878,6 +878,37 @@ describe('calendar event form adapter', () => {
     ).toBe('invalid-recurrence');
   });
 
+  it('allows removing an EXDATE from a DTSTART-only recurrence set', () => {
+    const exdate = { type: 'date' as const, value: '2026-10-01' };
+    const event: CalendarEvent = {
+      id: 'single-exdate-event',
+      calendarId: 'team',
+      uid: 'single-exdate-event@example.test',
+      title: 'Single excluded event',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-10-01',
+        endDate: '2026-10-02',
+      },
+      recurrence: { exdates: [exdate] },
+    };
+    const values = calendarEventToFormValues(event, calendar);
+    const removal = {
+      ...values,
+      exdateChanged: true,
+      exdateOperation: { action: 'remove' as const, recurrenceId: exdate },
+    };
+
+    expect(values.exdateEditable).toBe(true);
+    expect(
+      validateCalendarEventForm({ ...removal, title: 'Single excluded event' }),
+    ).toBeUndefined();
+    expect(
+      calendarEventPatchFromForm({ ...removal, title: 'Single excluded event' })
+        .recurrence,
+    ).toEqual({ exdate: { action: 'remove', recurrenceId: exdate } });
+  });
+
   it('serializes removal of an exact PERIOD RDATE', () => {
     const period = {
       type: 'period' as const,

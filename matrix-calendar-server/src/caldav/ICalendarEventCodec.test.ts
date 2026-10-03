@@ -1300,6 +1300,26 @@ describe('ICalendarEventCodec', () => {
     ).toThrow(ICalendarEventCodecError);
   });
 
+  it('removes an EXDATE from a DTSTART-only event', () => {
+    const source = simpleRecurringSource(
+      'DTSTART;VALUE=DATE:20261001',
+      'DTEND;VALUE=DATE:20261002',
+      ['EXDATE;VALUE=DATE:20261001'],
+    ).replace('RRULE:FREQ=DAILY;COUNT=3\r\n', '');
+    const parsed = codec.parse('team', 'single-exdate.ics', source);
+    const removed = parsed.applyPatch({
+      recurrence: {
+        exdate: {
+          action: 'remove',
+          recurrenceId: { type: 'date', value: '2026-10-01' },
+        },
+      },
+    });
+
+    expect(removed.event.recurrence).toBeUndefined();
+    expect(removed.icalendar).not.toContain('EXDATE');
+  });
+
   it('removes every duplicate of one EXDATE while preserving sibling values and parameters', () => {
     const source = fixture('recurrence-override.ics')
       .replace(
