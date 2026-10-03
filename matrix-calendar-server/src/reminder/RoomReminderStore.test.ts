@@ -14,10 +14,13 @@
  * limitations under the License.
  */
 
+import { InMemoryRoomReminderStore } from '../../test/util/InMemoryRoomReminderStore';
 import { createReminderDeliveryKey } from './PostgresRoomReminderStore';
 import {
   DisabledRoomReminderStore,
   ReminderStoreDisabledError,
+  validateReminderDeliveryIdentity,
+  validateRoomReminderConfiguration,
 } from './RoomReminderStore';
 
 describe('DisabledRoomReminderStore', () => {
@@ -34,6 +37,55 @@ describe('DisabledRoomReminderStore', () => {
         alarmUid: 'alarm-1',
       }),
     ).rejects.toBeInstanceOf(ReminderStoreDisabledError);
+    await expect(
+      store.listConfigurationPage('!team:example.org', 'team', undefined, 10),
+    ).rejects.toBeInstanceOf(ReminderStoreDisabledError);
+    await expect(
+      store.hasConfiguration({
+        roomId: '!team:example.org',
+        calendarId: 'team',
+        eventUid: 'planning',
+        recurrenceId: null,
+        alarmUid: 'alarm-1',
+      }),
+    ).rejects.toBeInstanceOf(ReminderStoreDisabledError);
+  });
+});
+
+describe('InMemoryRoomReminderStore configuration paging', () => {
+  it('orders a master null recurrence before instances and advances exclusively', async () => {
+    const store = new InMemoryRoomReminderStore();
+    const master = {
+      roomId: '!team:example.org',
+      calendarId: 'team',
+      eventUid: 'planning',
+      recurrenceId: null,
+      alarmUid: 'alarm-1',
+    };
+    const occurrence = { ...master, recurrenceId: '20261001T090000Z' };
+
+    await store.upsertConfiguration(occurrence);
+    await store.upsertConfiguration(master);
+
+    const firstPage = await store.listConfigurationPage(
+      master.roomId,
+      master.calendarId,
+      undefined,
+      1,
+    );
+    expect(firstPage).toEqual([master]);
+
+    const secondPage = await store.listConfigurationPage(
+      master.roomId,
+      master.calendarId,
+      {
+        eventUid: master.eventUid,
+        recurrenceId: firstPage[0].recurrenceId,
+        alarmUid: firstPage[0].alarmUid,
+      },
+      1,
+    );
+    expect(secondPage).toEqual([occurrence]);
   });
 });
 
@@ -69,5 +121,34 @@ describe('createReminderDeliveryKey', () => {
     expect(() =>
       createReminderDeliveryKey({ ...identity, triggerOrdinal: -1 }),
     ).toThrow('Invalid reminder delivery identity: triggerOrdinal');
+  });
+
+  it('rejects delivery identities with missing or extra keys', () => {
+    expect(() =>
+      validateReminderDeliveryIdentity({
+        roomId: identity.roomId,
+        calendarId: identity.calendarId,
+        eventUid: identity.eventUid,
+        recurrenceId: identity.recurrenceId,
+        alarmUid: identity.alarmUid,
+      } as any),
+    ).toThrow('Invalid reminder delivery identity: shape');
+    expect(() =>
+      validateReminderDeliveryIdentity({
+        ...identity,
+        extra: 'value',
+      } as any),
+    ).toThrow('Invalid reminder delivery identity: shape');
+  });
+
+  it('rejects missing configuration fields before they reach persistence', () => {
+    expect(() =>
+      validateRoomReminderConfiguration({
+        roomId: '!team:example.org',
+        calendarId: 'team',
+        eventUid: 'planning',
+        recurrenceId: null,
+      } as any),
+    ).toThrow('Invalid room reminder configuration: shape');
   });
 });

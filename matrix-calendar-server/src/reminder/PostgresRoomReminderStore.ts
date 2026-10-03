@@ -14,15 +14,22 @@
  * limitations under the License.
  */
 
-import { createHash, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import postgres from 'postgres';
 import {
+  createReminderDeliveryKey,
+  ReminderConfigurationCursor,
   ReminderDeliveryClaim,
   ReminderDeliveryIdentity,
   RoomReminderConfiguration,
   RoomReminderStore,
+  validateReminderConfigurationCursorShape,
+  validateReminderConfigurationPageLimit,
   validateReminderDeliveryIdentity,
+  validateRoomReminderConfiguration,
 } from './RoomReminderStore';
+
+export { createReminderDeliveryKey } from './RoomReminderStore';
 
 type Sql = ReturnType<typeof postgres>;
 
@@ -40,6 +47,38 @@ type DatabaseDeliveryClaim = {
   attempt_count: number;
   lease_expires_at: Date;
 };
+
+type CancellableQuery<T> = Promise<T> & { cancel(): void };
+
+/**
+ * Request cancellation of queued/in-flight PostgreSQL work when a deadline
+ * expires. PostgreSQL cancellation is best effort; the caller must remain
+ * safe if the statement completes despite the abort.
+ */
+function awaitCancellableQuery<T>(
+  query: CancellableQuery<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (signal === undefined) return query;
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      query.cancel();
+      reject(new Error('Reminder store operation aborted'));
+    };
+    if (signal.aborted) {
+      onAbort();
+      void query.catch(() => undefined);
+      return;
+    }
+
+    signal.addEventListener('abort', onAbort, { once: true });
+    void query
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', onAbort))
+      .catch(reject);
+  });
+}
 
 const reminderStoreMigrations = [
   {
@@ -90,6 +129,33 @@ const reminderStoreMigrations = [
 const latestReminderStoreMigrationVersion = Math.max(
   ...reminderStoreMigrations.map(({ version }) => version),
 );
+
+function readConfigurationRow(
+  row: DatabaseRoomReminderConfiguration,
+): RoomReminderConfiguration {
+  if (
+    typeof row.room_id !== 'string' ||
+    typeof row.calendar_id !== 'string' ||
+    typeof row.event_uid !== 'string' ||
+    typeof row.recurrence_id !== 'string' ||
+    typeof row.alarm_uid !== 'string'
+  ) {
+    throw new Error('Invalid room reminder configuration in store');
+  }
+  const configuration: RoomReminderConfiguration = {
+    roomId: row.room_id,
+    calendarId: row.calendar_id,
+    eventUid: row.event_uid,
+    recurrenceId: row.recurrence_id || null,
+    alarmUid: row.alarm_uid,
+  };
+  try {
+    validateRoomReminderConfiguration(configuration);
+  } catch {
+    throw new Error('Invalid room reminder configuration in store');
+  }
+  return configuration;
+}
 
 /**
  * PostgreSQL adapter for Matrix-specific reminder metadata and delivery
@@ -152,6 +218,7 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
   async upsertConfiguration(
     configuration: RoomReminderConfiguration,
   ): Promise<void> {
+    validateRoomReminderConfiguration(configuration);
     await this.sql`
       INSERT INTO matrix_calendar.room_reminder_configurations (
         room_id, calendar_id, event_uid, recurrence_id, alarm_uid
@@ -178,18 +245,69 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
       ORDER BY event_uid, recurrence_id, alarm_uid
     `;
 
-    return rows.map((row) => ({
-      roomId: row.room_id,
-      calendarId: row.calendar_id,
-      eventUid: row.event_uid,
-      recurrenceId: row.recurrence_id || null,
-      alarmUid: row.alarm_uid,
-    }));
+    return rows.map(readConfigurationRow);
+  }
+
+  async listConfigurationPage(
+    roomId: string,
+    calendarId: string,
+    after: ReminderConfigurationCursor | undefined,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<RoomReminderConfiguration[]> {
+    validateReminderConfigurationPageLimit(limit);
+    if (after !== undefined) {
+      validateReminderConfigurationCursorShape(after);
+    }
+
+    const query = after
+      ? this.sql<DatabaseRoomReminderConfiguration[]>`
+          SELECT room_id, calendar_id, event_uid, recurrence_id, alarm_uid
+          FROM matrix_calendar.room_reminder_configurations
+          WHERE room_id = ${roomId}
+            AND calendar_id = ${calendarId}
+            AND (event_uid, recurrence_id, alarm_uid) > (
+              ${after.eventUid}, ${after.recurrenceId ?? ''}, ${after.alarmUid}
+            )
+          ORDER BY event_uid, recurrence_id, alarm_uid
+          LIMIT ${limit}
+        `
+      : this.sql<DatabaseRoomReminderConfiguration[]>`
+          SELECT room_id, calendar_id, event_uid, recurrence_id, alarm_uid
+          FROM matrix_calendar.room_reminder_configurations
+          WHERE room_id = ${roomId} AND calendar_id = ${calendarId}
+          ORDER BY event_uid, recurrence_id, alarm_uid
+          LIMIT ${limit}
+        `;
+    const rows = await awaitCancellableQuery(query, signal);
+
+    return rows.map(readConfigurationRow);
+  }
+
+  async hasConfiguration(
+    configuration: RoomReminderConfiguration,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    validateRoomReminderConfiguration(configuration);
+    const query = this.sql<{ configuration_exists: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM matrix_calendar.room_reminder_configurations
+        WHERE room_id = ${configuration.roomId}
+          AND calendar_id = ${configuration.calendarId}
+          AND event_uid = ${configuration.eventUid}
+          AND recurrence_id = ${configuration.recurrenceId ?? ''}
+          AND alarm_uid = ${configuration.alarmUid}
+      ) AS configuration_exists
+    `;
+    const [row] = await awaitCancellableQuery(query, signal);
+    return row.configuration_exists;
   }
 
   async deleteConfiguration(
     configuration: RoomReminderConfiguration,
   ): Promise<void> {
+    validateRoomReminderConfiguration(configuration);
     await this.sql`
       DELETE FROM matrix_calendar.room_reminder_configurations
       WHERE room_id = ${configuration.roomId}
@@ -220,6 +338,7 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
   async claimDelivery(
     identity: ReminderDeliveryIdentity,
     leaseDurationMs: number,
+    signal?: AbortSignal,
   ): Promise<ReminderDeliveryClaim | undefined> {
     validateReminderDeliveryIdentity(identity);
     if (!Number.isSafeInteger(leaseDurationMs) || leaseDurationMs <= 0) {
@@ -228,7 +347,7 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
 
     const deliveryKey = createReminderDeliveryKey(identity);
     const claimToken = randomUUID();
-    const [row] = await this.sql<DatabaseDeliveryClaim[]>`
+    const query = this.sql<DatabaseDeliveryClaim[]>`
       INSERT INTO matrix_calendar.reminder_deliveries (
         delivery_key, room_id, calendar_id, event_uid, recurrence_id,
         alarm_uid, trigger_ordinal, state, claim_token, lease_expires_at,
@@ -256,6 +375,7 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
          OR matrix_calendar.reminder_deliveries.lease_expires_at <= clock_timestamp()
       RETURNING delivery_key, claim_token, attempt_count, lease_expires_at
     `;
+    const [row] = await awaitCancellableQuery(query, signal);
 
     if (!row) {
       return undefined;
@@ -272,8 +392,9 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
   async markDeliverySent(
     deliveryKey: string,
     claimToken: string,
+    signal?: AbortSignal,
   ): Promise<boolean> {
-    const updated = await this.sql<{ delivery_key: string }[]>`
+    const query = this.sql<{ delivery_key: string }[]>`
       UPDATE matrix_calendar.reminder_deliveries
       SET state = 'sent',
           claim_token = NULL,
@@ -285,14 +406,16 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
         AND claim_token = ${claimToken}
       RETURNING delivery_key
     `;
+    const updated = await awaitCancellableQuery(query, signal);
     return updated.length === 1;
   }
 
   async releaseDeliveryClaim(
     deliveryKey: string,
     claimToken: string,
+    signal?: AbortSignal,
   ): Promise<boolean> {
-    const updated = await this.sql<{ delivery_key: string }[]>`
+    const query = this.sql<{ delivery_key: string }[]>`
       UPDATE matrix_calendar.reminder_deliveries
       SET state = 'pending',
           claim_token = NULL,
@@ -303,21 +426,7 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
         AND claim_token = ${claimToken}
       RETURNING delivery_key
     `;
+    const updated = await awaitCancellableQuery(query, signal);
     return updated.length === 1;
   }
-}
-
-export function createReminderDeliveryKey(
-  identity: ReminderDeliveryIdentity,
-): string {
-  validateReminderDeliveryIdentity(identity);
-  const stableParts = [
-    identity.roomId,
-    identity.calendarId,
-    identity.eventUid,
-    identity.recurrenceId,
-    identity.alarmUid,
-    identity.triggerOrdinal,
-  ];
-  return createHash('sha256').update(JSON.stringify(stableParts)).digest('hex');
 }
