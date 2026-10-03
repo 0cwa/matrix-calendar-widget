@@ -15,6 +15,7 @@ if ! "${COMPOSE[@]}" run --rm --entrypoint sh synapse -c 'test -f /data/homeserv
 fi
 
 echo "==> Registering the synthetic local application service"
+chmod 0644 "$ROOT_DIR/dev/appservice-calendar-contract.yaml"
 "${COMPOSE[@]}" run --rm --entrypoint python synapse -c '
 import os
 import tempfile

@@ -60,7 +60,9 @@ export function classifySynapseStartupLines(lines) {
       }
     }
   }
-  return CATEGORIES.find((category) => observed.has(category)) ?? 'unclassified';
+  return (
+    CATEGORIES.find((category) => observed.has(category)) ?? 'unclassified'
+  );
 }
 
 export function parseContainerState(output) {
@@ -110,7 +112,12 @@ function readContainerState(composeFile) {
     }
     const inspected = spawnSync(
       'docker',
-      ['inspect', '--format', '{{.State.ExitCode}} {{.State.OOMKilled}}', containerId],
+      [
+        'inspect',
+        '--format',
+        '{{.State.ExitCode}} {{.State.OOMKilled}}',
+        containerId,
+      ],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
     );
     if (inspected.error || inspected.status !== 0) {
@@ -145,6 +152,8 @@ if (
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
   run().catch(() => {
-    process.stdout.write('category=unclassified exit_code=unavailable oom=unavailable\n');
+    process.stdout.write(
+      'category=unclassified exit_code=unavailable oom=unavailable\n',
+    );
   });
 }

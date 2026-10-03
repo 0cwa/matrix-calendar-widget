@@ -40,7 +40,10 @@ test('keeps ambiguous and arbitrary log content unclassified', () => {
 });
 
 test('accepts only numeric exit code and boolean OOM state from inspect output', () => {
-  assert.deepEqual(parseContainerState('1 false\n'), { exitCode: 1, oom: 'false' });
+  assert.deepEqual(parseContainerState('1 false\n'), {
+    exitCode: 1,
+    oom: 'false',
+  });
   assert.deepEqual(parseContainerState('0 true'), { exitCode: 0, oom: 'true' });
   assert.deepEqual(parseContainerState('1 false extra'), {
     exitCode: 'unavailable',
