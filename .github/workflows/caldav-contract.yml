@@ -126,14 +126,21 @@ jobs:
           probe_status=$?
           set -e
           if [ "$probe_status" -eq 0 ]; then
-            printf '%s\n' 'personal-openid-module-probe passed'
+            probe_result=passed
           else
-            printf '%s\n' 'personal-openid-module-probe failed'
+            probe_result=failed
           fi
-          node dev/sanitize-caldav-contract-stage.mjs "$probe_stage_file"
+          printf '%s\n' "personal-openid-module-probe $probe_result"
+          probe_summary="$(node dev/sanitize-caldav-contract-stage.mjs "$probe_stage_file")"
+          printf '%s\n' "$probe_summary"
+          {
+            printf '%s\n' 'Personal OpenID module probe'
+            printf '%s\n' "personal-openid-module-probe $probe_result"
+            printf '%s\n' "$probe_summary"
+          } >> "$GITHUB_STEP_SUMMARY"
           rm -f "$probe_stage_file"
           if [ "$probe_status" -ne 0 ]; then
-            exit 1
+            exit "$probe_status"
           fi
 
       - name: Start pinned Matrix and Radicale services
@@ -193,7 +200,12 @@ jobs:
           node dev/assert-caldav-contract-logs.mjs \
             "$contract_log" "$contract_report"
           scan_status=$?
-          node dev/sanitize-caldav-contract-stage.mjs "$contract_stage_file"
+          contract_summary="$(node dev/sanitize-caldav-contract-stage.mjs "$contract_stage_file")"
+          printf '%s\n' "$contract_summary"
+          {
+            printf '%s\n' 'Real CalDAV contract stages'
+            printf '%s\n' "$contract_summary"
+          } >> "$GITHUB_STEP_SUMMARY"
           rm -f "$contract_log" "$contract_report"
           rm -f "$contract_stage_file"
           set -e
