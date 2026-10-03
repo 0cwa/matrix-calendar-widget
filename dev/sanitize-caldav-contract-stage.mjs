@@ -13,6 +13,7 @@ const allowedPhases = new Set([
   'period-resource-reread',
   'period-removal-verified',
 ]);
+const ROOM_APPSERVICE_SETUP_COMPLETE = 'room-appservice-setup-complete';
 
 export function formatContractPhase(stageContent) {
   let latestAllowedPhase;
@@ -27,13 +28,24 @@ export function formatContractPhase(stageContent) {
   return latestAllowedPhase ? `contract-phase ${latestAllowedPhase}\n` : '';
 }
 
+export function formatRoomAppServiceSetupStatus(stageContent) {
+  const completed =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === ROOM_APPSERVICE_SETUP_COMPLETE);
+  return `room-appservice-setup ${completed ? 'complete' : 'not-reached'}\n`;
+}
+
 function emitContractPhase(stagePath) {
   if (!stagePath) {
     return;
   }
 
   try {
-    process.stdout.write(formatContractPhase(readFileSync(stagePath, 'utf8')));
+    const stageContent = readFileSync(stagePath, 'utf8');
+    process.stdout.write(formatContractPhase(stageContent));
+    process.stdout.write(formatRoomAppServiceSetupStatus(stageContent));
   } catch {
     // Missing or unreadable diagnostics must not print untrusted file content.
   }

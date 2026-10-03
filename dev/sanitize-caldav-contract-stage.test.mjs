@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { formatContractPhase } from './sanitize-caldav-contract-stage.mjs';
+import {
+  formatContractPhase,
+  formatRoomAppServiceSetupStatus,
+} from './sanitize-caldav-contract-stage.mjs';
 
 test('emits only the latest fixed phase from the closed allowlist', () => {
   const content = [
@@ -41,4 +44,25 @@ test('does not emit arbitrary phase names or data', () => {
     output,
     /response body|seed-put-http|unexpected-dynamic-phase/,
   );
+});
+
+test('reports only whether RoomAppService beforeAll completed', () => {
+  assert.equal(
+    formatRoomAppServiceSetupStatus('period-removal-verified\n'),
+    'room-appservice-setup not-reached\n',
+  );
+  assert.equal(
+    formatRoomAppServiceSetupStatus(
+      'room-appservice-setup-complete\nperiod-removal-verified\n',
+    ),
+    'room-appservice-setup complete\n',
+  );
+});
+
+test('does not expose unknown stage data or accept a partial setup marker', () => {
+  const privateSentinel = 'room-appservice-setup-complete private-event-data';
+  const output = formatRoomAppServiceSetupStatus(privateSentinel);
+
+  assert.equal(output, 'room-appservice-setup not-reached\n');
+  assert.equal(output.includes(privateSentinel), false);
 });
