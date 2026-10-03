@@ -133,6 +133,28 @@ describe('InMemoryCalendarRepository', () => {
     ]);
   });
 
+  it('defensively clones read-only event revision metadata', async () => {
+    const revision = {
+      dtstamp: '2026-10-03T15:16:17Z',
+      created: '2026-10-02T09:00:00Z',
+      lastModified: '2026-10-03T15:16:17Z',
+      sequence: 4,
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [{ ...events[0], id: 'revised', revision }],
+    });
+
+    revision.sequence = 99;
+    const returned = await repository.getEvent('team', 'revised');
+    expect(returned.revision?.sequence).toBe(4);
+
+    Object.assign(returned.revision!, { sequence: 100 });
+    expect(
+      (await repository.getEvent('team', 'revised')).revision?.sequence,
+    ).toBe(4);
+  });
+
   it('defensively clones recurrence override identity and timing', async () => {
     const inputOverride = recurrenceOverride();
     const inputRdate = recurrencePeriod();

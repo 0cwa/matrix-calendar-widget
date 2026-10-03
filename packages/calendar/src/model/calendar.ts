@@ -127,6 +127,18 @@ export type CalendarEventRecurrenceDate =
 
 export type CalendarEventStatus = 'confirmed' | 'tentative' | 'cancelled';
 
+/**
+ * Read-only RFC 5545 revision metadata projected from a VEVENT.
+ * Timestamp values use whole-second ISO 8601 UTC form.
+ */
+export type CalendarEventRevision = Readonly<{
+  dtstamp?: string;
+  created?: string;
+  lastModified?: string;
+  /** Supported RFC 5545 SEQUENCE INTEGER range is 0 through 2147483647. */
+  sequence?: number;
+}>;
+
 /** RFC 5545 weekday tokens used by the bounded weekly recurrence editor. */
 export type CalendarEventWeekday =
   | 'MO'
@@ -231,6 +243,9 @@ export type CalendarEvent = {
   description?: string;
   timing: CalendarEventTiming;
 
+  /** Read-only revision metadata; writes are managed by the iCalendar codec. */
+  readonly revision?: CalendarEventRevision;
+
   status?: CalendarEventStatus;
   transparency?: CalendarEventTransparency;
   location?: string;
@@ -257,6 +272,7 @@ export type CalendarEventInput = Omit<
   | 'unsupportedRecurrence'
   | 'unsupportedAlarm'
   | 'unsupportedTimezone'
+  | 'revision'
 > & { recurrence?: { rrule?: string } };
 
 /**
@@ -274,6 +290,7 @@ export type CalendarEventPatch = Partial<
     | 'unsupportedAlarm'
     | 'unsupportedRecurrence'
     | 'unsupportedTimezone'
+    | 'revision'
   >
 > & {
   alarm?: CalendarEventAlarmPatch;
