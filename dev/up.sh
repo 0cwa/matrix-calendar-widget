@@ -5,17 +5,38 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE=(docker compose -f "$ROOT_DIR/dev/compose.yaml")
 MATRIX_USER="${MATRIX_CALENDAR_DEV_USER:-calendar}"
 MATRIX_PASSWORD="${MATRIX_CALENDAR_DEV_PASSWORD:-calendar-dev-password}"
+startup_failure_stage=untracked
 
+emit_startup_failure_marker() {
+  local exit_code="$1"
+  if [[ "$exit_code" == 0 ]]; then
+    return 0
+  fi
+  case "$startup_failure_stage" in
+    docker-preflight|curl-preflight|homeserver-probe|homeserver-generate|fixture-permission|registration-update|uid991-access-assertion|synapse-compose-start)
+      node "$ROOT_DIR/dev/synapse-startup-diagnostic.mjs" \
+        --stage-failure "$startup_failure_stage" "$exit_code" 2>/dev/null || true
+      ;;
+  esac
+}
+trap 'emit_startup_failure_marker "$?"' EXIT
+
+startup_failure_stage=docker-preflight
 command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 1; }
+startup_failure_stage=curl-preflight
 command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
 
 echo "==> Preparing Synapse configuration"
+startup_failure_stage=homeserver-probe
 if ! "${COMPOSE[@]}" run --rm --entrypoint sh synapse -c 'test -f /data/homeserver.yaml' >/dev/null 2>&1; then
-  "${COMPOSE[@]}" run --rm synapse generate
+  startup_failure_stage=homeserver-generate
+  "${COMPOSE[@]}" run --rm synapse generate >/dev/null 2>&1
 fi
 
 echo "==> Registering the synthetic local application service"
-chmod 0644 "$ROOT_DIR/dev/appservice-calendar-contract.yaml"
+startup_failure_stage=fixture-permission
+chmod 0644 "$ROOT_DIR/dev/appservice-calendar-contract.yaml" >/dev/null 2>&1
+startup_failure_stage=registration-update
 "${COMPOSE[@]}" run --rm --entrypoint python synapse -c '
 import os
 import tempfile
@@ -36,16 +57,20 @@ with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=Fa
     temporary_path = output.name
 os.chown(temporary_path, 991, 991)
 os.replace(temporary_path, config_path)
-'
+' >/dev/null 2>&1
 
 echo "==> Verifying Synapse can read its config and registration"
+startup_failure_stage=uid991-access-assertion
 "${COMPOSE[@]}" run --rm --user 991:991 --entrypoint sh synapse -c \
-  'test -r /data/homeserver.yaml && test -w /data/homeserver.yaml && test -w /data && test -r /data/appservice-calendar-contract.yaml'
+  'test -r /data/homeserver.yaml && test -w /data/homeserver.yaml && test -w /data && test -r /data/appservice-calendar-contract.yaml' \
+  >/dev/null 2>&1
 
 echo "==> Starting Synapse"
-"${COMPOSE[@]}" up -d --force-recreate synapse
+startup_failure_stage=synapse-compose-start
+"${COMPOSE[@]}" up -d --force-recreate synapse >/dev/null 2>&1
 
 echo "==> Waiting for Synapse"
+startup_failure_stage=readiness
 for _ in $(seq 1 90); do
   if curl --silent --fail http://localhost:8008/_matrix/client/versions >/dev/null; then
     break

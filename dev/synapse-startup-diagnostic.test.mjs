@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   classifySynapseStartupLines,
   formatStartupDiagnostic,
+  formatStartupStageFailure,
   parseContainerInspectResult,
   parseContainerListResult,
   parseContainerState,
@@ -144,4 +145,38 @@ test('formats only fixed diagnostic enums and validated scalar values', () => {
     }),
     'category=permission inspect_result=ok state=exited health=not-reported exit_code=3 oom=false',
   );
+});
+
+test('formats only allowlisted startup stages and bounded exit codes', () => {
+  const stages = [
+    'docker-preflight',
+    'curl-preflight',
+    'homeserver-probe',
+    'homeserver-generate',
+    'fixture-permission',
+    'registration-update',
+    'uid991-access-assertion',
+    'synapse-compose-start',
+  ];
+  for (const stage of stages) {
+    assert.equal(
+      formatStartupStageFailure(stage, 0),
+      `stage=${stage} exit_code=0`,
+    );
+    assert.equal(
+      formatStartupStageFailure(stage, '255'),
+      `stage=${stage} exit_code=255`,
+    );
+  }
+
+  const invalidInputs = [
+    ['private-stage arbitrary-sentinel', '1'],
+    ['uid991-access-assertion', '1 arbitrary-sentinel'],
+    ['uid991-access-assertion', '-1'],
+    ['uid991-access-assertion', '256'],
+    ['uid991-access-assertion', Number.NaN],
+  ];
+  for (const [stage, exitCode] of invalidInputs) {
+    assert.equal(formatStartupStageFailure(stage, exitCode), undefined);
+  }
 });

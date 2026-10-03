@@ -77,6 +77,36 @@ const HEALTH_STATES = [
   'not-reported',
   'unavailable',
 ];
+const STARTUP_FAILURE_STAGES = [
+  'docker-preflight',
+  'curl-preflight',
+  'homeserver-probe',
+  'homeserver-generate',
+  'fixture-permission',
+  'registration-update',
+  'uid991-access-assertion',
+  'synapse-compose-start',
+];
+
+export function formatStartupStageFailure(stage, exitCode) {
+  if (!STARTUP_FAILURE_STAGES.includes(stage)) {
+    return undefined;
+  }
+  const parsedExitCode =
+    typeof exitCode === 'number'
+      ? exitCode
+      : typeof exitCode === 'string' && /^(0|[1-9]\d{0,2})$/.test(exitCode)
+        ? Number(exitCode)
+        : NaN;
+  if (
+    !Number.isInteger(parsedExitCode) ||
+    parsedExitCode < 0 ||
+    parsedExitCode > 255
+  ) {
+    return undefined;
+  }
+  return `stage=${stage} exit_code=${parsedExitCode}`;
+}
 
 export function classifySynapseStartupLines(lines) {
   const observed = new Set();
@@ -223,6 +253,14 @@ function readContainerState(composeFile) {
 }
 
 async function run() {
+  if (process.argv[2] === '--stage-failure') {
+    const marker = formatStartupStageFailure(process.argv[3], process.argv[4]);
+    if (marker) {
+      process.stdout.write(`${marker}\n`);
+    }
+    return;
+  }
+
   const composeFile = process.argv[2];
   const observed = new Set();
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
