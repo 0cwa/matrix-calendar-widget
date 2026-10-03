@@ -194,6 +194,8 @@ describe('test CommandService', () => {
     expect(txt).toContain('!calendar help');
     expect(txt).toContain('!calendar upcoming [count] [--tz IANA]');
     expect(txt).toContain('server write gate');
+    expect(txt).not.toContain('<li>');
+    expect(txt).toContain('!calendar event <resource-id>');
     expect(captureCalendarMessage().formatted_body).toBeUndefined();
     expect(captureCalendarMessage()['m.mentions']).toEqual({});
   });

@@ -15,7 +15,6 @@
  */
 
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { decode } from 'html-entities';
 import i18next from 'i18next';
 import { MatrixClient, MatrixError, MessageEventContent } from 'matrix-bot-sdk';
 import { AppRuntimeContext } from '../AppRuntimeContext';
@@ -155,11 +154,11 @@ export class CommandService {
     const [commandName, ...extraArgs] = commandText.split(/\s+/);
     if (commandName === 'help' && extraArgs.length === 0) {
       const lng: string = await this.detectLocale(roomId);
-      const html: string = i18next.t('calendarCommandHelp', {
+      const text: string = i18next.t('calendarCommandHelp', {
         lng,
-        joinArrays: '',
+        joinArrays: '\n',
       });
-      await this.sendCalendarReply(roomId, event, htmlToPlainText(html));
+      await this.sendCalendarReply(roomId, event, text);
       return;
     }
     if (commandName === 'help') {
@@ -283,7 +282,7 @@ export class CommandService {
       lng,
     }) as unknown as string;
     this.logger.debug(`Replying with calendar error category: ${errorKey}`);
-    await this.sendCalendarReply(roomId, event, htmlToPlainText(text));
+    await this.sendCalendarReply(roomId, event, text);
   }
 
   private async sendCalendarReply(
@@ -376,20 +375,4 @@ function isMissingEncryptionState(error: unknown): boolean {
     error.statusCode === 404 &&
     error.errcode === 'M_NOT_FOUND'
   );
-}
-
-function htmlToPlainText(html: string): string {
-  return decode(
-    html
-      .replace(/<br\s*\/?\s*>/giu, '\n')
-      .replace(/<li(?:\s[^>]*)?>/giu, '• ')
-      .replace(/<\/li\s*>/giu, '\n')
-      .replace(/<\/p\s*>/giu, '\n')
-      .replace(/<\/(?:ul|ol)\s*>/giu, '\n')
-      .replace(/<[^>]*>/gu, ''),
-  )
-    .replace(/[\t ]+\n/gu, '\n')
-    .replace(/\n[\t ]+/gu, '\n')
-    .replace(/\n{3,}/gu, '\n\n')
-    .trim();
 }
