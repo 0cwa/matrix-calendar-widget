@@ -632,6 +632,7 @@ function recurrenceExdateFormValues(
   return {
     exdateEditable: Boolean(
       recurrence &&
+      (recurrence.rrule || recurrence.rdates?.length) &&
       exdateValues.length > 0 &&
       !recurrence.recurrenceId &&
       !event.unsupportedRecurrence &&

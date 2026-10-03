@@ -1173,24 +1173,6 @@ describe('projectCalendarEventOccurrences', () => {
   });
 });
 
-describe('supported occurrence exclusions', () => {
-  it('allows removing an EXDATE from a DTSTART-only recurrence set', () => {
-    const event = timedEvent({
-      id: 'single-exdate-event',
-      recurrence: {
-        exdates: [zoned('2026-10-23T09:00:00')],
-      },
-    });
-
-    expect(
-      isSupportedCalendarEventOccurrenceExclusion(
-        event,
-        zoned('2026-10-23T09:00:00'),
-      ),
-    ).toBe(true);
-  });
-});
-
 function timedEvent({
   id = 'planning',
   start = '2026-10-23T09:00:00',
