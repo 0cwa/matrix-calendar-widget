@@ -28,6 +28,7 @@ import {
   CalendarEventRecurrenceOverride,
   CalendarEventRecurrenceTiming,
   CalendarEventRecurrenceWrite,
+  CalendarEventRevision,
   CalendarEventStatus,
   CalendarEventTimedDateTime,
   CalendarEventTiming,
@@ -42,6 +43,24 @@ import {
 import ICAL from 'ical.js';
 import { DateTime } from 'luxon';
 import { hasUnsupportedTimezoneRules } from './ICalendarTimezoneProjectionSafety';
+
+type RevisionPropertyState<T> =
+  | { kind: 'missing' }
+  | { kind: 'valid'; value: T }
+  | { kind: 'invalid' };
+
+type ICalendarContentLine = {
+  value: string;
+  physicalLines: string[];
+};
+
+type RawRevisionProperty = ICalendarContentLine & {
+  name: 'dtstamp' | 'created' | 'last-modified' | 'sequence';
+};
+
+const systemClock = (): Date => new Date();
+// RFC 5545 INTEGER is a signed 32-bit value; SEQUENCE uses its nonnegative range.
+const MAX_ICALENDAR_SEQUENCE = 2_147_483_647;
 
 export type EncodedICalendarEvent = {
   event: CalendarEvent;
@@ -72,6 +91,8 @@ export class ParsedICalendarEvent {
     public readonly event: CalendarEvent,
     /** Internal marker for count-only list diagnostics, not event payloads. */
     public readonly listProjectionDiagnostic?: 'unsupported-recurrence',
+    private readonly clock: () => Date = systemClock,
+    private readonly sourceRevisionProperties?: RawRevisionProperty[],
   ) {}
 
   applyPatch(patch: CalendarEventPatch): EncodedICalendarEvent {
@@ -149,6 +170,7 @@ export class ParsedICalendarEvent {
     ) {
       throw unsupportedAlarmPatch();
     }
+    const eventSourceBeforePatch = vevent.toString();
 
     if (hasOwn(patch, 'title')) {
       setTextProperty(vevent, 'summary', patch.title ?? '');
@@ -210,6 +232,14 @@ export class ParsedICalendarEvent {
       setDisplayAlarm(vevent, patch.alarm, patch.title ?? this.event.title);
     }
 
+    const revisionUpdated =
+      vevent.toString() !== eventSourceBeforePatch &&
+      updateRevisionMetadata(
+        vevent,
+        this.clock(),
+        this.sourceRevisionProperties,
+      );
+
     const recurrence = hasRecurrencePatch
       ? recurrenceWrite && 'exdate' in recurrenceWrite
         ? readRecurrence(calendar, vevent, this.event.uid)
@@ -227,6 +257,12 @@ export class ParsedICalendarEvent {
       title: patch.title ?? this.event.title,
       timing: patch.timing ?? this.event.timing,
       recurrence,
+      revision: revisionUpdated
+        ? readUpdatedCalendarEventRevision(
+            vevent,
+            this.sourceRevisionProperties,
+          )
+        : this.event.revision,
     };
     if (hasAlarmPatch) {
       if (isCalendarEventAlarmRemoval(alarmPatch)) {
@@ -237,14 +273,24 @@ export class ParsedICalendarEvent {
       delete event.unsupportedAlarm;
     }
 
+    const preservedRevisionProperties = restoreRevisionProperties(
+      calendar.toString(),
+      this.sourceRevisionProperties,
+      revisionUpdated
+        ? ['created']
+        : ['dtstamp', 'created', 'last-modified', 'sequence'],
+    );
+
     return {
       event,
-      icalendar: calendar.toString(),
+      icalendar: preservedRevisionProperties,
     };
   }
 }
 
 export class ICalendarEventCodec {
+  constructor(private readonly clock: () => Date = systemClock) {}
+
   create(
     calendarId: CalendarId,
     eventId: CalendarEventId,
@@ -276,6 +322,7 @@ export class ICalendarEventCodec {
     calendar.addSubcomponent(vevent);
 
     setTextProperty(vevent, 'uid', input.uid);
+    setInitialRevisionMetadata(vevent, this.clock());
     setTextProperty(vevent, 'summary', input.title);
     setTiming(vevent, input.timing);
     setOptionalProperty(vevent, 'description', input.description);
@@ -307,6 +354,7 @@ export class ICalendarEventCodec {
         ...input,
         id: eventId,
         calendarId,
+        revision: readCalendarEventRevision(vevent),
         recurrence: recurrenceRule
           ? { rrule: canonicalizeRecurrenceRule(recurrenceRule) }
           : undefined,
@@ -356,6 +404,7 @@ export class ICalendarEventCodec {
       );
     }
 
+    const sourceRevisionProperties = readMasterRevisionProperties(source);
     const timing = readTiming(vevent);
     const recurrence = readRecurrence(calendar, vevent, uid);
     const unsupportedRecurrence = readUnsupportedRecurrence(calendar, uid);
@@ -377,6 +426,7 @@ export class ICalendarEventCodec {
       categories: readCategories(vevent),
       priority: numberValue(vevent.getFirstPropertyValue('priority')),
       recurrence,
+      revision: readCalendarEventRevision(vevent, sourceRevisionProperties),
       ...(alarmState.alarm ? { alarm: alarmState.alarm } : {}),
       ...(alarmState.unsupported ? { unsupportedAlarm: true } : {}),
       ...(unsupportedRecurrence ? { unsupportedRecurrence } : {}),
@@ -387,6 +437,8 @@ export class ICalendarEventCodec {
       calendar,
       event,
       hasMultipleMasterRules ? 'unsupported-recurrence' : undefined,
+      this.clock,
+      sourceRevisionProperties,
     );
   }
 }
@@ -1887,6 +1939,605 @@ function numberValue(value: unknown): number | undefined {
   }
 
   return undefined;
+}
+
+function readCalendarEventRevision(
+  vevent: ICAL.Component,
+  sourceProperties?: RawRevisionProperty[],
+): CalendarEventRevision | undefined {
+  const revision: {
+    dtstamp?: string;
+    created?: string;
+    lastModified?: string;
+    sequence?: number;
+  } = {};
+  const dtstamp = sourceProperties
+    ? inspectSourceUtcTimestamp(vevent, sourceProperties, 'dtstamp')
+    : inspectUtcTimestamp(vevent, 'dtstamp');
+  const created = sourceProperties
+    ? inspectSourceUtcTimestamp(vevent, sourceProperties, 'created')
+    : inspectUtcTimestamp(vevent, 'created');
+  const lastModified = sourceProperties
+    ? inspectSourceUtcTimestamp(vevent, sourceProperties, 'last-modified')
+    : inspectUtcTimestamp(vevent, 'last-modified');
+  const sequence = sourceProperties
+    ? inspectSourceSequence(vevent, sourceProperties)
+    : inspectSequence(vevent);
+
+  if (dtstamp.kind === 'valid') {
+    revision.dtstamp = dtstamp.value;
+  }
+  if (created.kind === 'valid') {
+    revision.created = created.value;
+  }
+  if (lastModified.kind === 'valid') {
+    revision.lastModified = lastModified.value;
+  }
+  if (sequence.kind === 'valid') {
+    revision.sequence = sequence.value;
+  }
+
+  return Object.keys(revision).length > 0 ? revision : undefined;
+}
+
+function readUpdatedCalendarEventRevision(
+  vevent: ICAL.Component,
+  sourceProperties?: RawRevisionProperty[],
+): CalendarEventRevision | undefined {
+  const revision = readCalendarEventRevision(vevent);
+  if (!revision || !sourceProperties) {
+    return revision;
+  }
+
+  const updatedRevision = { ...revision };
+  const created = inspectSourceUtcTimestamp(
+    vevent,
+    sourceProperties,
+    'created',
+  );
+  if (created.kind === 'valid') {
+    updatedRevision.created = created.value;
+  } else {
+    delete updatedRevision.created;
+  }
+
+  return Object.keys(updatedRevision).length > 0 ? updatedRevision : undefined;
+}
+
+function inspectSourceUtcTimestamp(
+  vevent: ICAL.Component,
+  sourceProperties: RawRevisionProperty[],
+  name: 'dtstamp' | 'created' | 'last-modified',
+): RevisionPropertyState<string> {
+  const source = inspectRawUtcTimestamp(sourceProperties, name);
+  if (source.kind !== 'valid') {
+    return source;
+  }
+
+  const parsed = inspectUtcTimestamp(vevent, name);
+  return parsed.kind === 'valid' ? source : { kind: 'invalid' };
+}
+
+function inspectSourceSequence(
+  vevent: ICAL.Component,
+  sourceProperties: RawRevisionProperty[],
+): RevisionPropertyState<number> {
+  const source = inspectRawSequence(sourceProperties);
+  if (source.kind !== 'valid') {
+    return source;
+  }
+
+  const parsed = inspectSequence(vevent);
+  return parsed.kind === 'valid' ? source : { kind: 'invalid' };
+}
+
+function inspectRawUtcTimestamp(
+  sourceProperties: RawRevisionProperty[],
+  name: 'dtstamp' | 'created' | 'last-modified',
+): RevisionPropertyState<string> {
+  const properties = sourceProperties.filter(
+    (property) => property.name === name,
+  );
+  if (properties.length === 0) {
+    return { kind: 'missing' };
+  }
+  if (properties.length !== 1) {
+    return { kind: 'invalid' };
+  }
+
+  const parts = parseContentLine(properties[0].value);
+  if (
+    !parts ||
+    hasCalendarParameter(parts.header, 'tzid') ||
+    !isValidCompactUtcDateTime(parts.value) ||
+    (calendarParameterValue(parts.header, 'value') !== undefined &&
+      calendarParameterValue(parts.header, 'value')?.toUpperCase() !==
+        'DATE-TIME') ||
+    !/^\d{8}T\d{6}Z$/.test(parts.value)
+  ) {
+    return { kind: 'invalid' };
+  }
+
+  return { kind: 'valid', value: compactUtcTimestampToIso(parts.value) };
+}
+
+function inspectRawSequence(
+  sourceProperties: RawRevisionProperty[],
+): RevisionPropertyState<number> {
+  const properties = sourceProperties.filter(
+    (property) => property.name === 'sequence',
+  );
+  if (properties.length === 0) {
+    return { kind: 'missing' };
+  }
+  if (properties.length !== 1) {
+    return { kind: 'invalid' };
+  }
+
+  const parts = parseContentLine(properties[0].value);
+  if (
+    !parts ||
+    (calendarParameterValue(parts.header, 'value') !== undefined &&
+      calendarParameterValue(parts.header, 'value')?.toUpperCase() !==
+        'INTEGER') ||
+    !/^\+?\d+$/.test(parts.value)
+  ) {
+    return { kind: 'invalid' };
+  }
+
+  const value = Number(parts.value);
+  return Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= MAX_ICALENDAR_SEQUENCE
+    ? { kind: 'valid', value }
+    : { kind: 'invalid' };
+}
+
+function readMasterRevisionProperties(
+  source: string,
+): RawRevisionProperty[] | undefined {
+  const lines = readContentLines(source);
+  const range = findMasterVeventRange(lines);
+  if (!range) {
+    return undefined;
+  }
+
+  const properties: RawRevisionProperty[] = [];
+  let nestedComponents = 0;
+  for (let index = range.start + 1; index < range.end; index += 1) {
+    const line = lines[index];
+    const marker = line.value.toUpperCase();
+    if (marker.startsWith('BEGIN:')) {
+      nestedComponents += 1;
+      continue;
+    }
+    if (marker.startsWith('END:')) {
+      nestedComponents = Math.max(0, nestedComponents - 1);
+      continue;
+    }
+    if (nestedComponents > 0) {
+      continue;
+    }
+
+    const parsed = parseContentLine(line.value);
+    if (parsed && isRevisionPropertyName(parsed.name)) {
+      properties.push({
+        ...line,
+        name: parsed.name,
+      });
+    }
+  }
+
+  return properties;
+}
+
+function findMasterVeventRange(
+  lines: ICalendarContentLine[],
+): { start: number; end: number } | undefined {
+  let start: number | undefined;
+  let hasRecurrenceId = false;
+  let nestedComponents = 0;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const marker = lines[index].value.toUpperCase();
+    if (start === undefined) {
+      if (marker === 'BEGIN:VEVENT') {
+        start = index;
+        hasRecurrenceId = false;
+        nestedComponents = 0;
+      }
+      continue;
+    }
+
+    if (marker === 'END:VEVENT' && nestedComponents === 0) {
+      if (!hasRecurrenceId) {
+        return { start, end: index };
+      }
+      start = undefined;
+      continue;
+    }
+    if (marker.startsWith('BEGIN:')) {
+      nestedComponents += 1;
+      continue;
+    }
+    if (marker.startsWith('END:')) {
+      nestedComponents = Math.max(0, nestedComponents - 1);
+      continue;
+    }
+    if (nestedComponents === 0) {
+      hasRecurrenceId ||=
+        contentLinePropertyName(lines[index].value) === 'recurrence-id';
+    }
+  }
+
+  return undefined;
+}
+
+function restoreRevisionProperties(
+  serialized: string,
+  sourceProperties: RawRevisionProperty[] | undefined,
+  names: Array<RawRevisionProperty['name']>,
+): string {
+  if (!sourceProperties) {
+    return serialized;
+  }
+
+  const lines = readContentLines(serialized);
+  const range = findMasterVeventRange(lines);
+  if (!range) {
+    return serialized;
+  }
+
+  const selectedNames = new Set(names);
+  const sourceByName = new Map<
+    RawRevisionProperty['name'],
+    RawRevisionProperty[]
+  >();
+  for (const property of sourceProperties) {
+    if (!selectedNames.has(property.name)) {
+      continue;
+    }
+    const matching = sourceByName.get(property.name) ?? [];
+    matching.push(property);
+    sourceByName.set(property.name, matching);
+  }
+  const body: ICalendarContentLine[] = [];
+  const outputCounts = new Map<RawRevisionProperty['name'], number>();
+  const matchedSource = new Set<RawRevisionProperty>();
+  let nestedComponents = 0;
+
+  for (let index = range.start + 1; index < range.end; index += 1) {
+    const line = lines[index];
+    const marker = line.value.toUpperCase();
+    if (marker.startsWith('BEGIN:')) {
+      nestedComponents += 1;
+      body.push(line);
+      continue;
+    }
+    if (marker.startsWith('END:')) {
+      nestedComponents = Math.max(0, nestedComponents - 1);
+      body.push(line);
+      continue;
+    }
+
+    const propertyName =
+      nestedComponents === 0 ? contentLinePropertyName(line.value) : undefined;
+    if (
+      propertyName &&
+      isRevisionPropertyName(propertyName) &&
+      selectedNames.has(propertyName)
+    ) {
+      const occurrence = outputCounts.get(propertyName) ?? 0;
+      outputCounts.set(propertyName, occurrence + 1);
+      const replacement = sourceByName.get(propertyName)?.[occurrence];
+      if (replacement) {
+        body.push(replacement);
+        matchedSource.add(replacement);
+      }
+      continue;
+    }
+    body.push(line);
+  }
+
+  const unmatchedSource = sourceProperties.filter(
+    (property) =>
+      selectedNames.has(property.name) && !matchedSource.has(property),
+  );
+  if (unmatchedSource.length > 0) {
+    const uidIndex = body.findIndex(
+      (line) => contentLinePropertyName(line.value) === 'uid',
+    );
+    body.splice(uidIndex < 0 ? 0 : uidIndex + 1, 0, ...unmatchedSource);
+  }
+  lines.splice(range.start + 1, range.end - range.start - 1, ...body);
+
+  const physicalLines = lines.flatMap((line) => line.physicalLines);
+  const hasFinalLineEnding = /(?:\r\n|\n|\r)$/.test(serialized);
+  return `${physicalLines.join('\r\n')}${hasFinalLineEnding ? '\r\n' : ''}`;
+}
+
+function readContentLines(source: string): ICalendarContentLine[] {
+  const physicalLines = source.split(/\r\n|\n|\r/);
+  if (physicalLines.at(-1) === '') {
+    physicalLines.pop();
+  }
+
+  const lines: ICalendarContentLine[] = [];
+  for (const physicalLine of physicalLines) {
+    if (/^[ \t]/.test(physicalLine) && lines.length > 0) {
+      const previous = lines[lines.length - 1];
+      previous.value += physicalLine.slice(1);
+      previous.physicalLines.push(physicalLine);
+    } else {
+      lines.push({ value: physicalLine, physicalLines: [physicalLine] });
+    }
+  }
+  return lines;
+}
+
+function parseContentLine(
+  line: string,
+): { name: string; header: string; value: string } | undefined {
+  const colonIndex = contentLineColonIndex(line);
+  if (colonIndex < 0) {
+    return undefined;
+  }
+
+  const header = line.slice(0, colonIndex);
+  const separator = header.indexOf(';');
+  const name = (separator < 0 ? header : header.slice(0, separator))
+    .trim()
+    .toLowerCase();
+  return name ? { name, header, value: line.slice(colonIndex + 1) } : undefined;
+}
+
+function contentLineColonIndex(line: string): number {
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    if (line[index] === '"' && line[index - 1] !== '^') {
+      quoted = !quoted;
+    } else if (line[index] === ':' && !quoted) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function contentLinePropertyName(line: string): string | undefined {
+  return parseContentLine(line)?.name;
+}
+
+function calendarParameterValue(
+  header: string,
+  parameterName: string,
+): string | undefined {
+  const parameters = header.split(';').slice(1);
+  const parameter = parameters.find(
+    (item) => item.split('=', 1)[0].trim().toLowerCase() === parameterName,
+  );
+  return parameter?.includes('=')
+    ? parameter.slice(parameter.indexOf('=') + 1).replace(/^"|"$/g, '')
+    : undefined;
+}
+
+function hasCalendarParameter(header: string, parameterName: string): boolean {
+  return header
+    .split(';')
+    .slice(1)
+    .some(
+      (item) => item.split('=', 1)[0].trim().toLowerCase() === parameterName,
+    );
+}
+
+function isRevisionPropertyName(
+  name: string,
+): name is RawRevisionProperty['name'] {
+  return (
+    name === 'dtstamp' ||
+    name === 'created' ||
+    name === 'last-modified' ||
+    name === 'sequence'
+  );
+}
+
+function compactUtcTimestampToIso(value: string): string {
+  return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(
+    6,
+    8,
+  )}T${value.slice(9, 11)}:${value.slice(11, 13)}:${value.slice(13, 15)}Z`;
+}
+
+function isValidCompactUtcDateTime(value: string): boolean {
+  const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(value);
+  if (!match) {
+    return false;
+  }
+
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText] =
+    match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const daysInMonth = [
+    31,
+    isGregorianLeapYear(year) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ][month - 1];
+
+  return (
+    daysInMonth !== undefined &&
+    day >= 1 &&
+    day <= daysInMonth &&
+    hour <= 23 &&
+    minute <= 59 &&
+    second <= 59
+  );
+}
+
+function isGregorianLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function inspectUtcTimestamp(
+  component: ICAL.Component,
+  name: 'dtstamp' | 'created' | 'last-modified',
+): RevisionPropertyState<string> {
+  const properties = component.getAllProperties(name);
+  if (properties.length === 0) {
+    return { kind: 'missing' };
+  }
+  if (properties.length !== 1) {
+    return { kind: 'invalid' };
+  }
+
+  const property = properties[0];
+  const value = property.getFirstValue();
+  const tzid = property.getFirstParameter('tzid');
+  if (
+    !(value instanceof ICAL.Time) ||
+    value.isDate ||
+    value.zone !== ICAL.Timezone.utcTimezone ||
+    (tzid !== undefined && tzid !== null) ||
+    !/^\d{8}T\d{6}Z$/.test(value.toICALString())
+  ) {
+    return { kind: 'invalid' };
+  }
+
+  return { kind: 'valid', value: `${formatLocalDateTime(value)}Z` };
+}
+
+function inspectSequence(
+  vevent: ICAL.Component,
+): RevisionPropertyState<number> {
+  const properties = vevent.getAllProperties('sequence');
+  if (properties.length === 0) {
+    return { kind: 'missing' };
+  }
+  if (properties.length !== 1) {
+    return { kind: 'invalid' };
+  }
+
+  const value = properties[0].getFirstValue();
+  if (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= MAX_ICALENDAR_SEQUENCE
+  ) {
+    return { kind: 'valid', value };
+  }
+
+  if (typeof value === 'string' && /^\+?\d+$/.test(value)) {
+    const parsed = Number(value);
+    if (
+      Number.isSafeInteger(parsed) &&
+      parsed >= 0 &&
+      parsed <= MAX_ICALENDAR_SEQUENCE
+    ) {
+      return { kind: 'valid', value: parsed };
+    }
+  }
+
+  return { kind: 'invalid' };
+}
+
+function setInitialRevisionMetadata(vevent: ICAL.Component, now: Date): void {
+  setUtcTimestamp(vevent, 'dtstamp', now);
+  setUtcTimestamp(vevent, 'created', now);
+  setUtcTimestamp(vevent, 'last-modified', now);
+  vevent.updatePropertyWithValue('sequence', 0);
+}
+
+function updateRevisionMetadata(
+  vevent: ICAL.Component,
+  now: Date,
+  sourceProperties?: RawRevisionProperty[],
+): boolean {
+  const sequence = inspectSequence(vevent);
+  const dtstamp = inspectUtcTimestamp(vevent, 'dtstamp');
+  const lastModified = inspectUtcTimestamp(vevent, 'last-modified');
+  if (
+    sequence.kind === 'invalid' ||
+    dtstamp.kind === 'invalid' ||
+    lastModified.kind === 'invalid'
+  ) {
+    return false;
+  }
+  if (
+    sourceProperties &&
+    (!revisionStatesAgree(inspectRawSequence(sourceProperties), sequence) ||
+      !revisionStatesAgree(
+        inspectRawUtcTimestamp(sourceProperties, 'dtstamp'),
+        dtstamp,
+      ) ||
+      !revisionStatesAgree(
+        inspectRawUtcTimestamp(sourceProperties, 'last-modified'),
+        lastModified,
+      ))
+  ) {
+    return false;
+  }
+
+  const previousSequence = sequence.kind === 'valid' ? sequence.value : 0;
+  const nextSequence = previousSequence + 1;
+  if (
+    !Number.isSafeInteger(nextSequence) ||
+    nextSequence > MAX_ICALENDAR_SEQUENCE
+  ) {
+    return false;
+  }
+
+  setUtcTimestamp(vevent, 'dtstamp', now);
+  setUtcTimestamp(vevent, 'last-modified', now);
+  vevent.updatePropertyWithValue('sequence', nextSequence);
+  return true;
+}
+
+/** Parsed normalization must never turn malformed raw metadata into absence. */
+function revisionStatesAgree<T extends string | number>(
+  source: RevisionPropertyState<T>,
+  parsed: RevisionPropertyState<T>,
+): boolean {
+  if (source.kind === 'missing') return parsed.kind === 'missing';
+  return (
+    source.kind === 'valid' &&
+    parsed.kind === 'valid' &&
+    source.value === parsed.value
+  );
+}
+
+function setUtcTimestamp(
+  vevent: ICAL.Component,
+  name: 'dtstamp' | 'created' | 'last-modified',
+  value: Date,
+): void {
+  vevent.updatePropertyWithValue(
+    name,
+    ICAL.Time.fromDateTimeString(toICalendarUtcDateTime(value)),
+  );
+}
+
+function toICalendarUtcDateTime(value: Date): string {
+  const iso = value.toISOString();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(iso)) {
+    throw new RangeError(
+      'Timestamp year must be in the four-digit RFC 5545 range',
+    );
+  }
+
+  return `${iso.slice(0, 19)}Z`;
 }
 
 function hasOwn(

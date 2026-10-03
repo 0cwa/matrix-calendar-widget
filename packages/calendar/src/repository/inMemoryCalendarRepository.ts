@@ -462,6 +462,7 @@ function cloneAllDayTiming(
 function cloneCalendarEvent(event: CalendarEvent): CalendarEvent {
   return {
     ...event,
+    revision: event.revision ? { ...event.revision } : undefined,
     timing:
       event.timing.type === 'timed'
         ? cloneTimedTiming(event.timing)

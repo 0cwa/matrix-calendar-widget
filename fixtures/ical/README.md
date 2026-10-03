@@ -13,7 +13,7 @@ These fixtures are deliberately small and human-readable. They define interopera
 | `recurrence-utc.ics`                           | UTC RDATE and detached RECURRENCE-ID values               |
 | `alarm.ics`                                    | standard VALARM                                           |
 | `attendees.ics`                                | organizer, attendee roles and PARTSTAT                    |
-| `interoperable-properties.ics`                 | repeated properties, alarms, and inert URI values         |
+| `interoperable-properties.ics`                 | revision metadata and interoperable properties            |
 | `unknown-properties.ics`                       | unknown/vendor properties that must survive round-trip    |
 | `mixed-components.ics`                         | VEVENT with VTODO/VJOURNAL preservation case              |
 | `vtimezone.ics`                                | embedded VTIMEZONE preservation across DST                |
