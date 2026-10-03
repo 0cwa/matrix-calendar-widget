@@ -3,7 +3,7 @@
 ## Scope and status
 
 This source-based model was checked against `main` at
-`f24a4979a052b2a293144b3192eeee0cc2e17fa6` on 2026-10-03. It describes the
+`9afadbe83dd28943dfc88440816528f564081190` on 2026-10-03. It describes the
 checked-in pre-alpha system; it is not a penetration test, a deployment
 approval, or evidence that an operator-hosted service has the same
 configuration. It records existing boundaries and residual risks without
@@ -14,11 +14,13 @@ Radicale as that user. Existing room-context gateway routes also authorize the
 current user against Matrix room membership and power, then access that user's
 CalDAV principal. They do not use the room service principal. The room-target
 path resolves an exact server-configured binding after actor and room checks,
-but `RoomCalendarCalDavAccess` still denies before CalDAV I/O. Room collection
-lifecycle remains operator-managed.
+but `RoomCalendarCalDavAccess` still denies before CalDAV I/O. Listing room
+calendars returns only a read-only descriptor of the configured calendar ID,
+without CalDAV I/O. Room collection lifecycle remains operator-managed.
 
-PR #164 is a separate read-only `target=room` event-listing change under
-repair and review. It does not enable room CalDAV access: the default access
+PR #164 is an unmerged draft read-only `target=room` event-listing candidate
+outside this source snapshot. Its real-container contract has not passed.
+It does not enable room CalDAV access: the default access
 gate remains closed, and room-target event mutations remain unavailable. Its
 behavior must not be described as deployed or as proof of cross-room
 isolation.
@@ -289,6 +291,8 @@ evidence before the stated behavior is available:
 - Reminder delivery: authorized configuration endpoints, a scheduler,
   delivery-time permission checks, and delivery logging are not wired.
 
-No live deployment, beta support, or complete security review is implied by
-this document. Track milestone completion in [docs/PLAN.md](./PLAN.md) and
+An independent source review checked this model's claims against the recorded
+main snapshot. That review is not a penetration test or evidence that the
+remaining security gates have passed. No live deployment or beta support is
+implied by this document. Track milestone completion in [docs/PLAN.md](./PLAN.md) and
 deployment blockers in [docs/STATUS.md](./STATUS.md).
