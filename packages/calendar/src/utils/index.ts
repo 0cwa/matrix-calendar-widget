@@ -27,6 +27,7 @@ export {
   formatSupportedCalendarEventRecurrenceRule,
   isSupportedCalendarEventOccurrenceExclusion,
   parseSupportedCalendarEventRecurrenceRule,
+  projectCalendarEventOccurrenceByRecurrenceId,
   projectCalendarEventOccurrences,
 } from './calendarEventOccurrenceProjection';
 export type {

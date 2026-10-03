@@ -26,6 +26,23 @@ require both the room access and event-write gates. Deletes read current data
 and use its ETag; mixed or otherwise unsafe resources are refused. A conflict
 requires reloading before retrying.
 
+The command service applies a process-local bound to `m.text` bodies beginning
+with `!calendar`, including help and malformed command prefixes. It admits at
+most eight calendar commands at once across the process, two in one room, and
+one for a sender in a room. Each canonical room/sender pair may start six
+commands in a rolling 60 seconds. The in-memory pair table is capped at 1,000
+entries; only inactive entries whose window has expired are evicted. When the
+table is full, a new pair is denied. Denied commands are silently dropped
+before Matrix state lookups, authorization or proof work, CalDAV access, or
+replies, so denials do not create reply traffic. The limiter retains only the
+bounded pair, timestamps, and in-flight count in memory, never command text,
+and produces no logs or identity-bearing metrics. Legacy `!meeting` commands
+do not use this calendar-command limiter.
+
+These limits are local to one server process. They reset on restart and each
+replica has an independent quota; they are not a distributed abuse or DDoS
+control.
+
 Calendar replies use plain `m.text`, empty `m.mentions`, and an optional reply
 relation containing only the original event ID. They do not quote the command
 or render event HTML. An encrypted room is served only when encryption is

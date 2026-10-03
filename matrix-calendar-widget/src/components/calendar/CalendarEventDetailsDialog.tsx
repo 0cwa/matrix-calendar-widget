@@ -27,6 +27,7 @@ import {
   isSupportedCalendarEventOccurrenceExclusion,
   isTimedCalendarEvent,
   MAX_CALENDAR_EVENT_EXTERNAL_LINKS,
+  projectCalendarEventOccurrenceByRecurrenceId,
 } from '@matrix-calendar-widget/calendar';
 import {
   Alert,
@@ -40,7 +41,7 @@ import {
   Typography,
 } from '@mui/material';
 import { DateTime } from 'luxon';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useCalendarRepository,
@@ -84,18 +85,74 @@ export function CalendarEventDetailsDialog({
   const [occurrenceError, setOccurrenceError] = useState<
     'conflict' | 'generic' | undefined
   >();
+  const [missingOccurrenceSelectionKey, setMissingOccurrenceSelectionKey] =
+    useState<string>();
+  const selectedIdentityRef = useRef<string>();
+  const sourceEventPropRef = useRef(sourceEvent);
+  const missingOccurrenceSourceRef = useRef<CalendarEvent>();
+  const viewerTimezone = DateTime.local().zoneName ?? 'UTC';
 
   useEffect(() => {
-    setCurrentEvent(event);
+    const sourceEventPropChanged = sourceEventPropRef.current !== sourceEvent;
+    sourceEventPropRef.current = sourceEvent;
+    const selectionKey = calendarEventSelectionKey(event, recurrenceId);
+    const selectionChanged = selectedIdentityRef.current !== selectionKey;
+    selectedIdentityRef.current = selectionKey;
+
+    if (
+      missingOccurrenceSelectionKey &&
+      selectionKey === missingOccurrenceSelectionKey
+    ) {
+      if (sourceEventPropChanged) {
+        missingOccurrenceSourceRef.current = sourceEvent;
+      }
+      const latestSourceEvent =
+        missingOccurrenceSourceRef.current ?? sourceEvent;
+      setCurrentSourceEvent(latestSourceEvent);
+      setCurrentEvent((current) =>
+        current && latestSourceEvent
+          ? {
+              ...latestSourceEvent,
+              id: current.id,
+              timing: current.timing,
+            }
+          : current,
+      );
+      return;
+    }
+
+    missingOccurrenceSourceRef.current = undefined;
+    setMissingOccurrenceSelectionKey(undefined);
+    const projectedOccurrence =
+      sourceEvent && recurrenceId
+        ? projectCalendarEventOccurrenceByRecurrenceId(
+            sourceEvent,
+            recurrenceId,
+            viewerTimezone,
+          )?.event
+        : undefined;
+    setCurrentEvent(projectedOccurrence ?? event);
     setCurrentSourceEvent(sourceEvent);
     setCurrentRecurrenceId(recurrenceId);
-    setEditing(false);
-    setDeleteOpen(false);
-    setDeleteLoading(false);
-    setDeleteError(undefined);
-    setOccurrenceLoading(false);
-    setOccurrenceError(undefined);
-  }, [event, recurrenceId, sourceEvent]);
+    if (sourceEvent && recurrenceId && !projectedOccurrence && event) {
+      setMissingOccurrenceSelectionKey(selectionKey);
+    }
+
+    if (selectionChanged) {
+      setEditing(false);
+      setDeleteOpen(false);
+      setDeleteLoading(false);
+      setDeleteError(undefined);
+      setOccurrenceLoading(false);
+      setOccurrenceError(undefined);
+    }
+  }, [
+    event,
+    missingOccurrenceSelectionKey,
+    recurrenceId,
+    sourceEvent,
+    viewerTimezone,
+  ]);
 
   const eventCalendar = currentSourceEvent
     ? calendars.data.find(
@@ -111,6 +168,7 @@ export function CalendarEventDetailsDialog({
   );
   const canChangeCurrentOccurrence = Boolean(
     canMutate &&
+    !missingOccurrenceSelectionKey &&
     currentRecurrenceId &&
     currentSourceEvent &&
     isSupportedCalendarEventOccurrenceExclusion(
@@ -221,14 +279,32 @@ export function CalendarEventDetailsDialog({
       >
         {currentEvent && (
           <>
-            <DialogTitle>{currentEvent.title}</DialogTitle>
-            <DialogContent>
-              <Stack spacing={1}>
+            <DialogTitle sx={{ overflowWrap: 'anywhere' }}>
+              {currentEvent.title}
+            </DialogTitle>
+            <DialogContent tabIndex={0}>
+              <Stack spacing={1} sx={{ overflowWrap: 'anywhere' }}>
                 {eventCalendar?.readOnly && (
                   <Alert severity="info">
                     {t(
                       'calendarEvents.editor.readOnly',
                       'This calendar is read-only.',
+                    )}
+                  </Alert>
+                )}
+
+                {missingOccurrenceSelectionKey && (
+                  <Alert
+                    action={
+                      <Button color="inherit" onClick={onClose} size="small">
+                        {t('calendarEvents.details.close', 'Close')}
+                      </Button>
+                    }
+                    severity="warning"
+                  >
+                    {t(
+                      'calendarEvents.details.occurrenceReloadRequired',
+                      'This occurrence no longer matches the latest series. Close and select a current occurrence before editing.',
                     )}
                   </Alert>
                 )}
@@ -361,12 +437,15 @@ export function CalendarEventDetailsDialog({
               </Stack>
             </DialogContent>
             <DialogActions>
-              <Button disabled={!canMutate} onClick={() => setEditing(true)}>
+              <Button
+                disabled={!canMutate || Boolean(missingOccurrenceSelectionKey)}
+                onClick={() => setEditing(true)}
+              >
                 {t('calendarEvents.details.edit', 'Edit')}
               </Button>
               <Button
                 color="error"
-                disabled={!canMutate}
+                disabled={!canMutate || Boolean(missingOccurrenceSelectionKey)}
                 onClick={() => setDeleteOpen(true)}
               >
                 {t('calendarEvents.details.delete', 'Delete')}
@@ -394,7 +473,16 @@ export function CalendarEventDetailsDialog({
             setCurrentEvent(occurrenceEvent ?? savedEvent);
             onSourceEventChange?.(savedEvent);
           }}
+          onOccurrenceReloadRequired={(latestSourceEvent) => {
+            setCurrentSourceEvent(latestSourceEvent);
+            missingOccurrenceSourceRef.current = latestSourceEvent;
+            setMissingOccurrenceSelectionKey(
+              calendarEventSelectionKey(event, currentRecurrenceId),
+            );
+            onSourceEventChange?.(latestSourceEvent);
+          }}
           open={editing}
+          viewerTimezone={viewerTimezone}
         />
       )}
 
@@ -440,6 +528,20 @@ export function CalendarEventDetailsDialog({
       )}
     </>
   );
+}
+
+function calendarEventSelectionKey(
+  event: CalendarEvent | undefined,
+  recurrenceId: CalendarEventDateTime | undefined,
+): string | undefined {
+  if (!event) {
+    return undefined;
+  }
+
+  const recurrenceIdentity = recurrenceId
+    ? calendarEventRecurrenceIdentity(recurrenceId)
+    : '';
+  return JSON.stringify([event.calendarId, event.id, recurrenceIdentity]);
 }
 
 type VisibleCalendarEventExternalLink = {

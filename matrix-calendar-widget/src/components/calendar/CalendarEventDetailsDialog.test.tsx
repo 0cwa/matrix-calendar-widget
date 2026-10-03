@@ -265,6 +265,217 @@ describe('<CalendarEventDetailsDialog />', () => {
     }
   });
 
+  it('reprojects the selected occurrence after reloading a conflict', async () => {
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'Europe/Stockholm';
+
+    try {
+      const sourceEvent: CalendarEvent = {
+        ...event,
+        id: 'reload-series',
+        uid: 'reload-series@example.test',
+        title: 'Reload planning',
+        recurrence: { rrule: 'FREQ=DAILY;COUNT=4' },
+      };
+      const recurrenceId = {
+        type: 'date-time' as const,
+        value: {
+          local: '2026-09-24T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      };
+      const occurrence: CalendarEvent = {
+        ...sourceEvent,
+        id: 'reload-series::occurrence::2026-09-24',
+        timing: {
+          type: 'timed',
+          start: {
+            type: 'zoned',
+            local: '2026-09-24T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+          end: {
+            type: 'zoned',
+            local: '2026-09-24T10:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      };
+      const latestSourceEvent: CalendarEvent = {
+        ...sourceEvent,
+        title: 'Reload planning changed',
+        timing: {
+          type: 'timed',
+          start: {
+            type: 'zoned',
+            local: '2026-09-23T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+          end: {
+            type: 'zoned',
+            local: '2026-09-23T10:30:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      };
+      const repository = new InMemoryCalendarRepository({
+        calendars: [calendar],
+        events: [sourceEvent],
+      });
+      vi.spyOn(repository, 'updateEvent').mockRejectedValueOnce(
+        new CalendarRepositoryError('event-conflict', 'Conflict'),
+      );
+      vi.spyOn(repository, 'getEvent').mockResolvedValueOnce(latestSourceEvent);
+
+      render(
+        <CalendarEventDetailsDialog
+          event={occurrence}
+          onClose={vi.fn()}
+          recurrenceId={recurrenceId}
+          sourceEvent={sourceEvent}
+        />,
+        { wrapper: createWrapper(repository) },
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      await userEvent.click(
+        await screen.findByRole('button', { name: 'This occurrence only' }),
+      );
+      fireEvent.change(screen.getByLabelText(/^End/), {
+        target: { value: '2026-09-24T11:00' },
+      });
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await userEvent.click(
+        await screen.findByRole('button', { name: 'Reload latest' }),
+      );
+
+      const chooseOccurrence = await screen.findByRole('button', {
+        name: 'This occurrence only',
+      });
+      await userEvent.click(chooseOccurrence);
+      expect(screen.getByLabelText(/^End/)).toHaveValue('2026-09-24T10:30');
+    } finally {
+      Settings.defaultZone = originalZone;
+    }
+  });
+
+  it('blocks editing when the selected occurrence disappears during reload', async () => {
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'Europe/Stockholm';
+
+    try {
+      const sourceEvent: CalendarEvent = {
+        ...event,
+        id: 'removed-series',
+        uid: 'removed-series@example.test',
+        title: 'Removed planning',
+        recurrence: { rrule: 'FREQ=DAILY;COUNT=4' },
+      };
+      const recurrenceId = {
+        type: 'date-time' as const,
+        value: {
+          local: '2026-09-24T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      };
+      const occurrence: CalendarEvent = {
+        ...sourceEvent,
+        id: 'removed-series::occurrence::2026-09-24',
+        timing: {
+          type: 'timed',
+          start: {
+            type: 'zoned',
+            local: '2026-09-24T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+          end: {
+            type: 'zoned',
+            local: '2026-09-24T10:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      };
+      const latestSourceEvent: CalendarEvent = {
+        ...sourceEvent,
+        title: 'Latest removed planning',
+        timing: {
+          type: 'timed',
+          start: {
+            type: 'zoned',
+            local: '2026-09-23T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+          end: {
+            type: 'zoned',
+            local: '2026-09-23T10:30:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        recurrence: { rrule: 'FREQ=DAILY;COUNT=1' },
+      };
+      const repository = new InMemoryCalendarRepository({
+        calendars: [calendar],
+        events: [sourceEvent],
+      });
+      vi.spyOn(repository, 'updateEvent').mockRejectedValueOnce(
+        new CalendarRepositoryError('event-conflict', 'Conflict'),
+      );
+      vi.spyOn(repository, 'getEvent').mockResolvedValueOnce(latestSourceEvent);
+
+      render(
+        <CalendarEventDetailsDialog
+          event={occurrence}
+          onClose={vi.fn()}
+          recurrenceId={recurrenceId}
+          sourceEvent={sourceEvent}
+        />,
+        { wrapper: createWrapper(repository) },
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      await userEvent.click(
+        await screen.findByRole('button', { name: 'This occurrence only' }),
+      );
+      fireEvent.change(screen.getByLabelText(/^End/), {
+        target: { value: '2026-09-24T11:00' },
+      });
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await userEvent.click(
+        await screen.findByRole('button', { name: 'Reload latest' }),
+      );
+
+      const editor = await screen.findByRole('dialog', { name: 'Edit event' });
+      expect(
+        await within(editor).findByText(
+          'The selected occurrence is no longer available or cannot be safely projected after reload. Close the editor and select a current occurrence before editing.',
+        ),
+      ).toBeVisible();
+      expect(screen.getByLabelText(/^End/)).toHaveValue('2026-09-24T11:00');
+      expect(
+        within(editor).getByRole('button', { name: 'Save' }),
+      ).toBeDisabled();
+
+      await userEvent.click(
+        within(editor).getByRole('button', { name: 'Close' }),
+      );
+      expect(
+        await screen.findByText(
+          'This occurrence no longer matches the latest series. Close and select a current occurrence before editing.',
+        ),
+      ).toBeVisible();
+      expect(
+        screen.getByRole('heading', { name: 'Latest removed planning' }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+      expect(
+        screen.queryByRole('button', { name: 'Skip this occurrence' }),
+      ).toBeNull();
+    } finally {
+      Settings.defaultZone = originalZone;
+    }
+  });
+
   it('names the dialog after the event and has no accessibility violations', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],

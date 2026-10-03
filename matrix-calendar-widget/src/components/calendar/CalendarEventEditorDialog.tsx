@@ -26,6 +26,7 @@ import {
   CalendarEventRecurrenceTiming,
   CalendarEventTiming,
   CalendarRepositoryError,
+  projectCalendarEventOccurrenceByRecurrenceId,
 } from '@matrix-calendar-widget/calendar';
 import { LoadingButton } from '@mui/lab';
 import {
@@ -88,8 +89,10 @@ export function CalendarEventEditorDialog({
   event,
   onClose,
   onSaved,
+  onOccurrenceReloadRequired,
   occurrence,
   open,
+  viewerTimezone = DateTime.local().zoneName ?? 'UTC',
   uidFactory = createEventUid,
 }: {
   calendars: Calendar[];
@@ -100,6 +103,9 @@ export function CalendarEventEditorDialog({
   };
   onClose: () => void;
   onSaved?: (event: CalendarEvent, occurrence?: CalendarEvent) => void;
+  onOccurrenceReloadRequired?: (sourceEvent: CalendarEvent) => void;
+  /** Time zone used to project the selected recurrence identity for display. */
+  viewerTimezone?: string;
   open: boolean;
   uidFactory?: () => string;
 }) {
@@ -117,13 +123,18 @@ export function CalendarEventEditorDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<Error>();
   const [conflict, setConflict] = useState(false);
+  const [missingOccurrence, setMissingOccurrence] = useState(false);
   const [editScope, setEditScope] = useState<'occurrence' | 'series'>();
   const repository = useCalendarRepository();
   const createEvent = useCreateCalendarEvent();
   const updateEvent = useUpdateCalendarEvent();
 
   useEffect(() => {
-    if (!open || !initialCalendar) {
+    if (!open) {
+      setMissingOccurrence(false);
+      return;
+    }
+    if (!initialCalendar || missingOccurrence) {
       return;
     }
 
@@ -134,10 +145,12 @@ export function CalendarEventEditorDialog({
     );
     setError(undefined);
     setConflict(false);
+    setMissingOccurrence(false);
     setEditScope(undefined);
   }, [
     event,
     initialCalendar,
+    missingOccurrence,
     occurrence?.event,
     occurrence?.recurrenceId,
     open,
@@ -593,7 +606,7 @@ export function CalendarEventEditorDialog({
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
 
-    if (validationError || readOnly || chooseScope) {
+    if (validationError || readOnly || chooseScope || missingOccurrence) {
       return;
     }
 
@@ -615,7 +628,7 @@ export function CalendarEventEditorDialog({
                 action: 'set-timing',
                 recurrenceId: occurrence.recurrenceId,
                 timing: recurrenceTimingFromEventTiming(timing),
-                viewerTimezone: DateTime.local().zoneName ?? 'UTC',
+                viewerTimezone,
               },
             },
           });
@@ -681,14 +694,40 @@ export function CalendarEventEditorDialog({
     setSaving(true);
     try {
       const latest = await repository.getEvent(event.calendarId, event.id);
+      const latestOccurrence = occurrence
+        ? projectCalendarEventOccurrenceByRecurrenceId(
+            latest,
+            occurrence.recurrenceId,
+            viewerTimezone,
+          )?.event
+        : undefined;
+      if (occurrence && !latestOccurrence) {
+        setMissingOccurrence(true);
+        setConflict(false);
+        setError(
+          new Error(
+            t(
+              'calendarEvents.editor.occurrenceReloadRequired',
+              'The selected occurrence is no longer available or cannot be safely projected after reload. Close the editor and select a current occurrence before editing.',
+            ),
+          ),
+        );
+        onOccurrenceReloadRequired?.(latest);
+        return;
+      }
       const latestCalendar =
         calendars.find((calendar) => calendar.id === latest.calendarId) ??
         initialCalendar;
       setValues(calendarEventToFormValues(latest, latestCalendar));
       setEditScope(undefined);
       setConflict(false);
+      setMissingOccurrence(false);
       setError(undefined);
-      onSaved?.(latest);
+      if (latestOccurrence) {
+        onSaved?.(latest, latestOccurrence);
+      } else {
+        onSaved?.(latest);
+      }
     } catch {
       setError(
         new Error(
@@ -747,6 +786,10 @@ export function CalendarEventEditorDialog({
                     size="small"
                   >
                     {t('calendarEvents.editor.reloadLatest', 'Reload latest')}
+                  </Button>
+                ) : missingOccurrence ? (
+                  <Button color="inherit" onClick={onClose} size="small">
+                    {t('calendarEvents.details.close', 'Close')}
                   </Button>
                 ) : undefined
               }
@@ -1562,7 +1605,12 @@ export function CalendarEventEditorDialog({
             {t('cancel', 'Cancel')}
           </Button>
           <LoadingButton
-            disabled={Boolean(validationError) || readOnly || chooseScope}
+            disabled={
+              Boolean(validationError) ||
+              readOnly ||
+              chooseScope ||
+              missingOccurrence
+            }
             loading={saving}
             type="submit"
             variant="contained"

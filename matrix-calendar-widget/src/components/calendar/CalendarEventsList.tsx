@@ -59,7 +59,7 @@ export function CalendarEventsList({
               >
                 <Card variant="outlined">
                   <CardActionArea onClick={() => onSelectEvent(event)}>
-                    <CardContent>
+                    <CardContent sx={{ overflowWrap: 'anywhere' }}>
                       <Typography fontWeight="bold" variant="body1">
                         {event.title}
                       </Typography>
