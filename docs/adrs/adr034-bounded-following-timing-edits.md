@@ -72,10 +72,10 @@ operations. Actual calendar-client interoperability remains a release gate.
 
 ## Validation
 
-Targeted tests cover finite-count membership and bounds, first/last selected
-members, DATE/floating/named timing, DST gaps and folds, cancelled and malformed
-STATUS, noncanonical raw timezone typing, unknown sibling/source preservation,
-revision updates, exact retry no-ops, stale and wildcard/weak/list ETags, and
-codec/configured pre-PUT byte limits. Widget tests cover scope selection and
+Targeted tests cover finite-count membership and bounds, a middle-of-series
+selection, named timing, cancelled and malformed STATUS, noncanonical raw
+timezone typing, source/master property preservation, revision updates, exact
+retry no-ops, stale and wildcard/weak/list ETags, and configured pre-PUT byte
+limits. Widget tests cover scope selection and
 fresh occurrence timing after conflict reload. Hosted checks remain required
 for the exact candidate head before merge.
