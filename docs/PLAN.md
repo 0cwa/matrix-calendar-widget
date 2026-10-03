@@ -334,6 +334,10 @@ DST regression or recurrence-editing criteria above.
         an explicit successful-login burst allowance; production limits are
         unchanged. Mutations, room diagnostics, and delivery remain disabled.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
+  - [x] Give newly created or explicitly edited DISPLAY alarms stable UUID
+        UIDs; preserve existing UIDs and untouched UID-less legacy alarms.
+        Malformed, duplicate, or resource-colliding UIDs disable alarm controls.
+        This identity foundation does not enable settings or delivery.
   - [x] Resolve stable DISPLAY alarm identity against already-fetched canonical
         iCalendar data, with typed DATE/floating/UTC/TZID recurrence keys and
         fail-closed malformed/duplicate identity checks. This pure helper does

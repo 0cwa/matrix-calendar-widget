@@ -17,6 +17,7 @@
 import type {
   CalendarEvent,
   CalendarEventDateTime,
+  CalendarEventInput,
   CalendarEventPatch,
 } from '@matrix-calendar-widget/calendar';
 import { getVTimezoneBlock } from '@matrix-calendar-widget/ical-timezones';
@@ -2876,9 +2877,16 @@ END:VCALENDAR`,
     };
     const plain = codec.parse('team', 'plain.ics', fixture('simple-timed.ics'));
     const added = plain.applyPatch({ alarm });
+    const addedAlarmUid = added.event.alarm?.uid;
+    expect(addedAlarmUid).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
     expect(
       codec.parse('team', 'plain.ics', added.icalendar).event.alarm,
-    ).toEqual(alarm);
+    ).toMatchObject(alarm);
+    expect(
+      codec.parse('team', 'plain.ics', added.icalendar).event.alarm?.uid,
+    ).toBe(addedAlarmUid);
 
     const explicitStart = codec.parse(
       'team',
@@ -2907,6 +2915,11 @@ END:VCALENDAR`,
     const createdAlarm = createdCalendar
       .getFirstSubcomponent('vevent')
       ?.getFirstSubcomponent('valarm');
+    const createdAlarmUid = createdAlarm?.getFirstPropertyValue('uid');
+    expect(createdAlarmUid).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(created.event.alarm?.uid).toBe(createdAlarmUid);
     expect(createdAlarm?.getFirstPropertyValue('action')).toBe('DISPLAY');
     expect(createdAlarm?.getFirstPropertyValue('description')).toBe(
       'Created with a CalDAV reminder',
@@ -2916,7 +2929,10 @@ END:VCALENDAR`,
     );
     expect(
       codec.parse('team', 'created.ics', created.icalendar).event.alarm,
-    ).toEqual(alarm);
+    ).toMatchObject(alarm);
+    expect(
+      codec.parse('team', 'created.ics', created.icalendar).event.alarm?.uid,
+    ).toBe(createdAlarmUid);
 
     const changed = parsed.applyPatch({
       alarm: {
@@ -2927,6 +2943,7 @@ END:VCALENDAR`,
     expect(changed.event.alarm?.trigger.minutes).toBe(30);
     const reparsed = codec.parse('team', 'alarm.ics', changed.icalendar);
     expect(reparsed.event.alarm?.trigger.minutes).toBe(30);
+    expect(reparsed.event.alarm?.uid).toBe(changed.event.alarm?.uid);
 
     const removePatch = JSON.parse(
       JSON.stringify({ alarm: { operation: 'remove' } }),
@@ -2939,6 +2956,73 @@ END:VCALENDAR`,
         .getFirstSubcomponent('vevent')
         ?.getAllSubcomponents('valarm'),
     ).toHaveLength(0);
+  });
+
+  it('preserves an existing VALARM UID across supported and ordinary edits', () => {
+    const parsed = codec.parse(
+      'team',
+      'alarm-uid.ics',
+      fixture('alarm-uid.ics'),
+    );
+    const uid = 'alarm-one@example.test';
+    expect(parsed.event.alarm?.uid).toBe(uid);
+
+    const ordinaryEdit = parsed.applyPatch({ title: 'Retitled event' });
+    expect(
+      codec.parse('team', 'alarm-uid.ics', ordinaryEdit.icalendar).event.alarm
+        ?.uid,
+    ).toBe(uid);
+
+    const alarmEdit = parsed.applyPatch({
+      alarm: {
+        action: 'display',
+        trigger: { weeks: 0, days: 0, hours: 0, minutes: 30, seconds: 0 },
+      },
+    });
+    expect(alarmEdit.event.alarm?.uid).toBe(uid);
+    expect(
+      codec.parse('team', 'alarm-uid.ics', alarmEdit.icalendar).event.alarm
+        ?.uid,
+    ).toBe(uid);
+    const alarm = ICAL.Component.fromString(alarmEdit.icalendar)
+      .getFirstSubcomponent('vevent')
+      ?.getFirstSubcomponent('valarm');
+    expect(alarm?.getFirstPropertyValue('uid')).toBe(uid);
+    expect(alarm?.getFirstPropertyValue('x-alarm-metadata')).toBe(
+      'preserve-value',
+    );
+  });
+
+  it('keeps legacy UID-less alarms unchanged until an explicit alarm write', () => {
+    const legacy = codec.parse('team', 'alarm.ics', fixture('alarm.ics'));
+    expect(legacy.event.alarm?.uid).toBeUndefined();
+
+    const ordinaryEdit = legacy.applyPatch({ title: 'Legacy event retitled' });
+    const untouchedAlarm = ICAL.Component.fromString(ordinaryEdit.icalendar)
+      .getFirstSubcomponent('vevent')
+      ?.getFirstSubcomponent('valarm');
+    expect(untouchedAlarm?.getAllProperties('uid')).toHaveLength(0);
+
+    const explicitWrite = legacy.applyPatch({
+      alarm: {
+        action: 'display',
+        trigger: { weeks: 0, days: 0, hours: 0, minutes: 20, seconds: 0 },
+      },
+    });
+    const uid = explicitWrite.event.alarm?.uid;
+    expect(uid).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    const reparsed = codec.parse('team', 'alarm.ics', explicitWrite.icalendar);
+    expect(reparsed.event.alarm?.uid).toBe(uid);
+
+    const laterEdit = reparsed.applyPatch({
+      alarm: {
+        action: 'display',
+        trigger: { weeks: 0, days: 0, hours: 0, minutes: 25, seconds: 0 },
+      },
+    });
+    expect(laterEdit.event.alarm?.uid).toBe(uid);
   });
 
   it('changes a supported alarm without rewriting unrelated resource data', () => {
@@ -3027,6 +3111,36 @@ END:VCALENDAR`,
     [
       'a non-DISPLAY action',
       (source) => source.replace('ACTION:DISPLAY', 'ACTION:EMAIL'),
+    ],
+    [
+      'a VALARM with duplicate UID properties',
+      (source) =>
+        source.replace(
+          'BEGIN:VALARM',
+          'BEGIN:VALARM\r\nUID:first-alarm@example.test\r\nUID:second-alarm@example.test',
+        ),
+    ],
+    [
+      'a VALARM UID that collides with the VEVENT UID',
+      (source) =>
+        source.replace(
+          'BEGIN:VALARM',
+          'BEGIN:VALARM\r\nUID:alarm-test@example.test',
+        ),
+    ],
+    [
+      'a VALARM UID that collides with a VFREEBUSY UID',
+      (source) =>
+        source
+          .replace('BEGIN:VALARM', 'BEGIN:VALARM\r\nUID:busy@example.test')
+          .replace(
+            'END:VCALENDAR',
+            'BEGIN:VFREEBUSY\r\nUID:busy@example.test\r\nDTSTAMP:20260922T120000Z\r\nDTSTART:20260923T090000Z\r\nDTEND:20260923T100000Z\r\nEND:VFREEBUSY\r\nEND:VCALENDAR',
+          ),
+    ],
+    [
+      'a blank VALARM UID',
+      (source) => source.replace('BEGIN:VALARM', 'BEGIN:VALARM\r\nUID:'),
     ],
     [
       'an absolute DATE-TIME trigger',
@@ -3137,6 +3251,40 @@ END:VCALENDAR`,
         },
       }),
     ).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Only one negative relative DISPLAY alarm from DTSTART is supported',
+      ),
+    );
+
+    const spoofedAlarm = {
+      action: 'display',
+      uid: 'operator-chosen@example.test',
+      trigger: { weeks: 0, days: 0, hours: 0, minutes: 15, seconds: 0 },
+    };
+    const spoofedPatch = JSON.parse(
+      JSON.stringify({ alarm: spoofedAlarm }),
+    ) as CalendarEventPatch;
+    expect(() => parsed.applyPatch(spoofedPatch)).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Only one negative relative DISPLAY alarm from DTSTART is supported',
+      ),
+    );
+
+    const spoofedInput = JSON.parse(
+      JSON.stringify({
+        uid: 'spoofed-input@example.test',
+        title: 'Spoofed alarm UID',
+        timing: {
+          type: 'timed',
+          start: { type: 'floating', local: '2026-09-23T09:00:00' },
+          end: { type: 'floating', local: '2026-09-23T10:00:00' },
+        },
+        alarm: spoofedAlarm,
+      }),
+    ) as CalendarEventInput;
+    expect(() => codec.create('team', 'spoofed.ics', spoofedInput)).toThrow(
       new ICalendarEventCodecError(
         'unsupported-patch',
         'Only one negative relative DISPLAY alarm from DTSTART is supported',

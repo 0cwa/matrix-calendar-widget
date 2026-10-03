@@ -19,6 +19,7 @@ import {
   CalendarEventAlarmPatch,
   CalendarEventDateTime,
   CalendarEventDisplayAlarm,
+  CalendarEventDisplayAlarmInput,
   CalendarEventDuration,
   CalendarEventId,
   CalendarEventInput,
@@ -40,6 +41,7 @@ import {
   isSupportedCalendarEventOccurrenceExclusion,
   parseSupportedCalendarEventRecurrenceRule,
 } from '@matrix-calendar-widget/calendar';
+import { randomUUID } from 'crypto';
 import ICAL from 'ical.js';
 import { DateTime } from 'luxon';
 import { hasUnsupportedTimezoneRules } from './ICalendarTimezoneProjectionSafety';
@@ -228,9 +230,14 @@ export class ParsedICalendarEvent {
         setRecurrenceRule(vevent, recurrenceWrite?.rrule);
       }
     }
-    if (hasAlarmPatch) {
-      setDisplayAlarm(vevent, patch.alarm, patch.title ?? this.event.title);
-    }
+    const writtenAlarmUid = hasAlarmPatch
+      ? setDisplayAlarm(
+          calendar,
+          vevent,
+          patch.alarm,
+          patch.title ?? this.event.title,
+        )
+      : undefined;
 
     const revisionUpdated =
       vevent.toString() !== eventSourceBeforePatch &&
@@ -268,7 +275,10 @@ export class ParsedICalendarEvent {
       if (isCalendarEventAlarmRemoval(alarmPatch)) {
         delete event.alarm;
       } else {
-        event.alarm = alarmPatch as CalendarEventDisplayAlarm;
+        event.alarm = {
+          ...(alarmPatch as CalendarEventDisplayAlarmInput),
+          uid: writtenAlarmUid,
+        };
       }
       delete event.unsupportedAlarm;
     }
@@ -345,9 +355,9 @@ export class ICalendarEventCodec {
         ? recurrenceWrite.rrule
         : undefined;
     setRecurrenceRule(vevent, recurrenceRule);
-    if (input.alarm) {
-      setDisplayAlarm(vevent, input.alarm, input.title);
-    }
+    const alarmUid = input.alarm
+      ? setDisplayAlarm(calendar, vevent, input.alarm, input.title)
+      : undefined;
 
     return {
       event: {
@@ -355,6 +365,7 @@ export class ICalendarEventCodec {
         id: eventId,
         calendarId,
         revision: readCalendarEventRevision(vevent),
+        ...(input.alarm ? { alarm: { ...input.alarm, uid: alarmUid } } : {}),
         recurrence: recurrenceRule
           ? { rrule: canonicalizeRecurrenceRule(recurrenceRule) }
           : undefined,
@@ -652,16 +663,30 @@ function readResourceAlarm(
   }
 
   const alarm = readDisplayAlarm(alarms[0].alarm);
+  if (
+    alarm?.uid &&
+    resourceHasComponentUid(calendar, alarm.uid, alarms[0].alarm)
+  ) {
+    return { unsupported: true };
+  }
   return alarm ? { alarm } : { unsupported: true };
 }
 
 function readDisplayAlarm(
   component: ICAL.Component,
 ): CalendarEventDisplayAlarm | undefined {
+  const uidProperties = component.getAllProperties('uid');
+  const uid =
+    uidProperties.length === 1
+      ? textValue(uidProperties[0].getFirstValue())
+      : undefined;
   const actionProperties = component.getAllProperties('action');
   const triggerProperties = component.getAllProperties('trigger');
   const descriptions = component.getAllProperties('description');
   if (
+    uidProperties.length > 1 ||
+    (uidProperties.length === 1 &&
+      (uid === undefined || !isValidAlarmUid(uid))) ||
     actionProperties.length !== 1 ||
     triggerProperties.length !== 1 ||
     descriptions.length !== 1 ||
@@ -702,12 +727,16 @@ function readDisplayAlarm(
     return undefined;
   }
 
-  return { action: 'display', trigger: leadTime };
+  return {
+    action: 'display',
+    ...(uid !== undefined ? { uid } : {}),
+    trigger: leadTime,
+  };
 }
 
 function validateDisplayAlarm(
   value: unknown,
-): asserts value is CalendarEventDisplayAlarm {
+): asserts value is CalendarEventDisplayAlarmInput {
   if (
     !value ||
     typeof value !== 'object' ||
@@ -752,14 +781,15 @@ function isValidAlarmLeadTime(
 }
 
 function setDisplayAlarm(
+  calendar: ICAL.Component,
   vevent: ICAL.Component,
   alarm: CalendarEventAlarmPatch | undefined,
   description: string,
-): void {
+): string | undefined {
   const existing = vevent.getAllSubcomponents('valarm');
   if (alarm === undefined || isCalendarEventAlarmRemoval(alarm)) {
     existing.forEach((component) => vevent.removeSubcomponent(component));
-    return;
+    return undefined;
   }
 
   const trigger = ICAL.Duration.fromData({
@@ -767,30 +797,91 @@ function setDisplayAlarm(
     isNegative: true,
   });
   if (existing.length === 1) {
-    const triggerProperty = existing[0].getFirstProperty('trigger');
-    if (!triggerProperty || !readDisplayAlarm(existing[0])) {
+    const component = existing[0];
+    const triggerProperty = component.getFirstProperty('trigger');
+    const supportedAlarm = readDisplayAlarm(component);
+    if (!triggerProperty || !supportedAlarm) {
       throw unsupportedAlarmPatch();
     }
     triggerProperty.setValue(trigger);
-    return;
+    const uid = supportedAlarm.uid ?? createAlarmUid(calendar);
+    if (!supportedAlarm.uid) {
+      component.addPropertyWithValue('uid', uid);
+    }
+    return uid;
   }
   if (existing.length > 1) {
     throw unsupportedAlarmPatch();
   }
 
   const component = new ICAL.Component('valarm');
+  const uid = createAlarmUid(calendar);
+  component.addPropertyWithValue('uid', uid);
   component.addPropertyWithValue('action', 'DISPLAY');
   component.addPropertyWithValue('description', description);
   const triggerProperty = new ICAL.Property('trigger');
   triggerProperty.setValue(trigger);
   component.addProperty(triggerProperty);
   vevent.addSubcomponent(component);
+  return uid;
 }
 
 function unsupportedAlarmPatch(): ICalendarEventCodecError {
   return new ICalendarEventCodecError(
     'unsupported-patch',
     'Only one negative relative DISPLAY alarm from DTSTART is supported',
+  );
+}
+
+function isValidAlarmUid(value: string): boolean {
+  return (
+    value.trim() === value &&
+    value.length > 0 &&
+    value.length <= 255 &&
+    !containsControlCharacters(value)
+  );
+}
+
+function containsControlCharacters(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code <= 0x1f || code === 0x7f;
+  });
+}
+
+function createAlarmUid(calendar: ICAL.Component): string {
+  const uid = randomUUID();
+  if (resourceHasComponentUid(calendar, uid)) {
+    throw unsupportedAlarmPatch();
+  }
+  return uid;
+}
+
+function resourceHasComponentUid(
+  calendar: ICAL.Component,
+  uid: string,
+  exceptAlarm?: ICAL.Component,
+): boolean {
+  return ['vevent', 'vtodo', 'vjournal', 'vfreebusy'].some((componentName) =>
+    calendar
+      .getAllSubcomponents(componentName)
+      .some(
+        (component) =>
+          component
+            .getAllProperties('uid')
+            .some((property) => textValue(property.getFirstValue()) === uid) ||
+          component
+            .getAllSubcomponents('valarm')
+            .some(
+              (alarm) =>
+                alarm !== exceptAlarm &&
+                alarm
+                  .getAllProperties('uid')
+                  .some(
+                    (property) => textValue(property.getFirstValue()) === uid,
+                  ),
+            ),
+      ),
   );
 }
 
