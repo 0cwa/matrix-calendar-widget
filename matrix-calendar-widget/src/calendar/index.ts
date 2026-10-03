@@ -25,6 +25,7 @@ export {
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
   calendarEventRdatePeriodDurationFromForm,
+  calendarEventRdatePeriodIsEditable,
   calendarEventRdatePeriodValueFromForm,
   calendarEventRdateValueFromForm,
   calendarEventToFormValues,
