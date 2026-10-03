@@ -25,6 +25,7 @@ export interface IAppConfiguration {
   caldav_max_event_response_bytes?: number;
   room_calendar_bindings: readonly RoomCalendarBinding[];
   room_calendar_access_enabled: boolean;
+  room_calendar_event_writes_enabled: boolean;
   application_service_token?: string;
   application_service_user_id?: string;
   calendar_gateway_rate_limit_requests: number;

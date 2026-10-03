@@ -94,11 +94,10 @@ describe('room calendar event listing', () => {
       action: 'read-events',
       calendarId,
     });
-    expect(forAuthorizedTarget).toHaveBeenCalledWith({
-      roomId,
-      calendarId,
-      principal: { kind: 'service' },
-    });
+    expect(forAuthorizedTarget).toHaveBeenCalledWith(
+      { roomId, calendarId, principal: { kind: 'service' } },
+      'read',
+    );
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][0]).toBe(
       'https://radicale.example.test/matrix_calendar_service/room-calendar/',

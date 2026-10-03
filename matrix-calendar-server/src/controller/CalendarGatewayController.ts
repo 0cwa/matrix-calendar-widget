@@ -35,6 +35,7 @@ import {
   Headers,
   Inject,
   NotFoundException,
+  Optional,
   Patch,
   Post,
   Query,
@@ -54,6 +55,7 @@ import {
   MatrixOpenIdCalDavCredentialError,
   MatrixOpenIdCalDavCredentialProviderFactory,
 } from '../caldav';
+import { isSafeSingleVeventSeries } from '../caldav/ICalendarDeletionSafety';
 import { MatrixOpenIdCredentialParam } from '../decorator/MatrixOpenIdCredentialParam';
 import { UserContextParam } from '../decorator/UserContextParam';
 import { CalendarGatewayCalendarDto } from '../dto/CalendarGatewayCalendarDto';
@@ -74,6 +76,10 @@ import {
   RoomCalendarCalDavAccess,
   RoomCalendarTarget,
 } from '../service/RoomCalendarCalDavAccess';
+import {
+  RoomCalendarEventOperationError,
+  RoomCalendarEventOperations,
+} from '../service/RoomCalendarEventOperations';
 
 @Controller({
   path: 'calendar',
@@ -88,6 +94,9 @@ export class CalendarGatewayController {
     private readonly credentialProviderFactory: MatrixOpenIdCalDavCredentialProviderFactory,
     @Inject(ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS)
     private readonly roomCalendarCalDavAccess: RoomCalendarCalDavAccess,
+    @Optional()
+    @Inject(RoomCalendarEventOperations)
+    private readonly roomCalendarEventOperations: RoomCalendarEventOperations = new RoomCalendarEventOperations(),
   ) {}
 
   @Get('context')
@@ -561,7 +570,10 @@ export class CalendarGatewayController {
 
       return this.runCalDav(async () => {
         const principal =
-          await this.roomCalendarCalDavAccess.forAuthorizedTarget(roomTarget);
+          await this.roomCalendarCalDavAccess.forAuthorizedTarget(
+            roomTarget,
+            'read',
+          );
         return this.listCalendarEvents(
           this.eventClientForPrincipal(principal.userId, principal.credential),
           principal.calendarUrl,
@@ -620,8 +632,18 @@ export class CalendarGatewayController {
         calendarId,
         { action: 'read-events', calendarId: calendarId ?? '' },
       );
-      this.requireQuery(eventId, 'eventId');
-      return this.roomCalendarCalDavAccess.assertDisabled(roomTarget);
+      const requiredEventId = this.requireQuery(eventId, 'eventId');
+      const principal = await this.roomCalendarCalDavAccess.forAuthorizedTarget(
+        roomTarget,
+        'read',
+      );
+      const result = await this.runCalDav(() =>
+        this.roomCalendarEventOperations.getEvent(
+          { target: roomTarget, servicePrincipal: principal },
+          requiredEventId,
+        ),
+      );
+      return new CalendarGatewayEventDto(result.event, result.etag);
     }
 
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
@@ -667,10 +689,24 @@ export class CalendarGatewayController {
         calendarId,
         { action: 'create-event', calendarId: calendarId ?? '' },
       );
-      if (!input || typeof input.uid !== 'string' || input.uid.length === 0) {
+      if (
+        !input ||
+        typeof input.uid !== 'string' ||
+        !isSafeRoomCalendarEventUid(input.uid)
+      ) {
         throw new BadRequestException('event uid is required');
       }
-      return this.roomCalendarCalDavAccess.assertDisabled(roomTarget);
+      const principal = await this.roomCalendarCalDavAccess.forAuthorizedTarget(
+        roomTarget,
+        'write',
+      );
+      const result = await this.runCalDav(() =>
+        this.roomCalendarEventOperations.createEvent(
+          { target: roomTarget, servicePrincipal: principal },
+          input,
+        ),
+      );
+      return new CalendarGatewayEventDto(result.event, result.etag);
     }
 
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
@@ -729,9 +765,21 @@ export class CalendarGatewayController {
           eventId: eventId ?? '',
         },
       );
-      this.requireQuery(eventId, 'eventId');
-      this.requireQuery(ifMatch, 'If-Match');
-      return this.roomCalendarCalDavAccess.assertDisabled(roomTarget);
+      const requiredEventId = this.requireQuery(eventId, 'eventId');
+      const expectedEtag = this.requireQuery(ifMatch, 'If-Match');
+      const principal = await this.roomCalendarCalDavAccess.forAuthorizedTarget(
+        roomTarget,
+        'write',
+      );
+      const result = await this.runCalDav(() =>
+        this.roomCalendarEventOperations.updateEvent(
+          { target: roomTarget, servicePrincipal: principal },
+          requiredEventId,
+          expectedEtag,
+          patch ?? {},
+        ),
+      );
+      return new CalendarGatewayEventDto(result.event, result.etag);
     }
 
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
@@ -795,9 +843,20 @@ export class CalendarGatewayController {
           eventId: eventId ?? '',
         },
       );
-      this.requireQuery(eventId, 'eventId');
-      this.requireQuery(ifMatch, 'If-Match');
-      return this.roomCalendarCalDavAccess.assertDisabled(roomTarget);
+      const requiredEventId = this.requireQuery(eventId, 'eventId');
+      const expectedEtag = this.requireQuery(ifMatch, 'If-Match');
+      const principal = await this.roomCalendarCalDavAccess.forAuthorizedTarget(
+        roomTarget,
+        'write',
+      );
+      await this.runCalDav(() =>
+        this.roomCalendarEventOperations.deleteEvent(
+          { target: roomTarget, servicePrincipal: principal },
+          requiredEventId,
+          expectedEtag,
+        ),
+      );
+      return;
     }
 
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
@@ -815,12 +874,29 @@ export class CalendarGatewayController {
       eventId: normalizedEventId,
     });
     const etag = this.requireQuery(ifMatch, 'If-Match');
+    if (!isConcreteStrongEtag(etag)) {
+      throw new BadRequestException({
+        code: 'invalid-event-etag',
+        message: 'If-Match must contain one strong ETag',
+      });
+    }
 
     await this.runCalDav(async () => {
-      await this.eventClient(userContext, openIdCredential).deleteEvent(
-        normalizedEventId,
-        etag,
-      );
+      const client = this.eventClient(userContext, openIdCredential);
+      const current = await client.getEvent(normalizedEventId);
+      if (current.etag !== etag) {
+        throw new ConflictException({
+          code: 'etag-conflict',
+          message: 'Calendar event changed; reload before retrying',
+        });
+      }
+      if (!isSafeSingleVeventSeries(current.icalendar)) {
+        throw new ConflictException({
+          code: 'unsafe-event-resource',
+          message: 'Calendar event contains data that cannot be safely deleted',
+        });
+      }
+      await client.deleteEvent(normalizedEventId, etag);
     });
   }
 
@@ -1179,6 +1255,35 @@ export class CalendarGatewayController {
         });
       }
 
+      if (error instanceof RoomCalendarEventOperationError) {
+        switch (error.code) {
+          case 'invalid-event-url':
+          case 'invalid-event-etag':
+          case 'invalid-event-input':
+            throw new BadRequestException({
+              code: error.code,
+              message: 'Room calendar event request is invalid',
+            });
+          case 'etag-conflict':
+            throw new ConflictException({
+              code: error.code,
+              message: 'Room calendar event changed; reload before retrying',
+            });
+          case 'unsafe-event-resource':
+            throw new ConflictException({
+              code: error.code,
+              message:
+                'Room calendar event contains data that cannot be safely deleted',
+            });
+          case 'event-write-disabled':
+          case 'invalid-room-access':
+            throw new ServiceUnavailableException({
+              code: 'room-calendar-caldav-disabled',
+              message: 'Room calendar CalDAV access is not enabled',
+            });
+        }
+      }
+
       throw error;
     }
   }
@@ -1189,6 +1294,43 @@ function calendarDiagnosticsUnavailable(): ServiceUnavailableException {
     code: 'calendar-diagnostics-unavailable',
     message: 'CalDAV diagnostics are unavailable',
   });
+}
+
+function isSafeRoomCalendarEventUid(value: string): boolean {
+  if (
+    value.length === 0 ||
+    Buffer.byteLength(value, 'utf8') > 251 ||
+    /%[0-9a-f]{2}/i.test(value) ||
+    containsSlashOrControlCharacters(value)
+  ) {
+    return false;
+  }
+
+  try {
+    encodeURIComponent(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function containsSlashOrControlCharacters(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (
+      value[index] === '/' ||
+      value[index] === '\\' ||
+      code <= 0x1f ||
+      code === 0x7f
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isConcreteStrongEtag(value: string): boolean {
+  return value.trim() === value && /^"[\x21\x23-\x7e]*"$/.test(value);
 }
 
 function safeCalendarCollectionUrl(

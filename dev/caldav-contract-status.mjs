@@ -70,6 +70,18 @@ const SUITE_IDS = new Map([
 
 const CASE_IDS = new Map([
   [
+    'personal-openid-contract\0keeps personal event create, read, and safe conditional delete working',
+    'personal-openid-event-write',
+  ],
+  [
+    'room-appservice-radicale-contract\0creates, reads, updates, and conditionally deletes a room event',
+    'room-appservice-event-write',
+  ],
+  [
+    'room-appservice-radicale-contract\0denies cross-room and nonmember writes before proof or CalDAV I/O',
+    'room-appservice-unauthorized-write',
+  ],
+  [
     'membership-guard\0denies a nonmember before authorization, credential construction, or CalDAV',
     'membership-nonmember-denial',
   ],
