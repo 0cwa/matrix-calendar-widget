@@ -136,7 +136,13 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
   - [x] Remove one selected existing PERIOD-valued RDATE by its exact start
         and explicit end or RFC duration; preserve all point/period siblings,
         parameters, timezone definitions, detached members, and ETag checks.
-        PERIOD creation and timing edits remain unsupported.
+  - [x] Add one explicit-end PERIOD-valued RDATE to a supported timed
+        recurring master. Require matching DATE-TIME value kinds and timezone,
+        a source VTIMEZONE for a new TZID, and a positive interval; treat an
+        exact repeated addition as a no-op. Preserve point/period siblings,
+        parameters, timezone definitions, detached members, and ETag checks.
+        Duration-form creation and changes to an existing PERIOD's timing
+        remain unsupported.
 - [ ] RECURRENCE-ID instance override editing.
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
@@ -174,11 +180,14 @@ separate homogeneous RDATE property. Exact duplicates already supplied by
 DTSTART, RRULE, or RDATE are no-ops; EXDATE values remain untouched and
 authoritative. Point removal compares the full typed identity, including TZID.
 A separate remove-only PERIOD operation matches the full start plus explicit
-end or original RFC duration; it never creates or changes a PERIOD. Malformed
-or unsupported RDATE properties, detached VEVENTs, VALARM, VTIMEZONE, unknown
-properties, siblings, and ETag conditional updates remain preserved. General
-EXDATE editing, PERIOD creation/timing edits, arbitrary RRULEs, and broad M5
-completion remain open.
+end or original RFC duration. A separate add operation creates one explicit-end
+PERIOD RDATE on a supported timed recurring master, preserves its typed start
+and end and source timezone definition, and makes an exact repeated addition a
+no-op. Duration-form creation and changes to an existing PERIOD's timing remain
+unsupported. Malformed or unsupported RDATE properties, detached VEVENTs,
+VALARM, VTIMEZONE, unknown properties, siblings, and ETag conditional updates
+remain preserved. General EXDATE editing, duration-form PERIOD creation,
+PERIOD timing edits, arbitrary RRULEs, and broad M5 completion remain open.
 
 The bounded weekly BYDAY slice extends the editor with a weekday set for
 every-week rules. Plain weekday tokens are accepted only when DTSTART's
@@ -350,14 +359,20 @@ addresses from Matrix room membership.
 - [ ] Threat model and security review.
 - [ ] Rate limits and abuse controls.
 - [ ] Free/busy privacy model.
-- [ ] Backup/recovery documentation.
-- [ ] Container images and deployment docs under fork-owned names.
+- [x] Add a cold-backup and isolated-restore runbook for the project-owned
+      Compose `radicale-data` and `server-data` volumes, with separate external
+      PostgreSQL guidance; etke-managed `/data` remains unverified (PR #170).
+- [x] Container images and deployment docs use fork-owned names. This covers
+      repository-owned image builds and documented operator-run deployment
+      boundaries, not a live etke-host deployment or recovery validation.
   - [x] Document the current Docker build/runtime contracts and the generic operator-run etke/MDAD compatibility boundary.
   - [x] Add non-publishing CI image-build smoke checks with fork-owned local tags; PR #102 run 36316604092 passed both image build steps at `0da7f3345e603e808231a24cc2ed6d979bea987a` without publishing.
 - [ ] Upgrade/migration story.
 - [ ] Compatibility matrix: Element Web/Desktop and other tested clients.
 - [ ] Performance testing with large calendars and recurrence.
-- [ ] Release/versioning policy.
+- [x] Adopt a pre-alpha release/versioning policy: no live deployment or
+      publication is authorized, and breaking changes are allowed. Future
+      controlled-beta and public-release gates remain explicit.
 
 **Exit:** documented deployable beta suitable for a controlled organizational pilot.
 

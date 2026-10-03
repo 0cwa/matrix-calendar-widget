@@ -556,23 +556,38 @@ function cloneCalendarEventPatch(
       };
     } else if ('rdate' in patch.recurrence) {
       const rdate = patch.recurrence.rdate;
-      cloned.recurrence =
-        rdate.action === 'remove-period'
-          ? {
-              rdate: {
-                action: 'remove-period',
-                value: {
-                  type: 'period',
-                  timing: cloneRecurrenceTiming(rdate.value.timing),
-                },
+      if (rdate.action === 'remove-period') {
+        cloned.recurrence = {
+          rdate: {
+            action: 'remove-period',
+            value: {
+              type: 'period',
+              timing: cloneRecurrenceTiming(rdate.value.timing),
+            },
+          },
+        };
+      } else if (rdate.action === 'add-period') {
+        cloned.recurrence = {
+          rdate: {
+            action: 'add-period',
+            value: {
+              type: 'period',
+              timing: {
+                type: 'end',
+                start: cloneCalendarEventDateTime(rdate.value.timing.start),
+                end: cloneCalendarEventDateTime(rdate.value.timing.end),
               },
-            }
-          : {
-              rdate: {
-                action: rdate.action,
-                value: cloneCalendarEventDateTime(rdate.value),
-              },
-            };
+            },
+          },
+        };
+      } else {
+        cloned.recurrence = {
+          rdate: {
+            action: rdate.action,
+            value: cloneCalendarEventDateTime(rdate.value),
+          },
+        };
+      }
     } else {
       cloned.recurrence = { ...patch.recurrence };
     }
@@ -613,6 +628,20 @@ function applyRecurrenceWrite(
         delete next.rdates;
       }
       return Object.keys(next).length > 0 ? next : undefined;
+    }
+
+    if (write.rdate.action === 'add-period') {
+      const identity = recurrencePeriodIdentity(write.rdate.value);
+      if (
+        rdates.some(
+          (value) =>
+            value.type === 'period' &&
+            recurrencePeriodIdentity(value) === identity,
+        )
+      ) {
+        return current;
+      }
+      return { ...current, rdates: [...rdates, write.rdate.value] };
     }
 
     const identity = calendarEventRecurrenceIdentity(write.rdate.value);

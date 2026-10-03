@@ -1,6 +1,6 @@
 # Project status
 
-_Last updated: 2026-10-02_
+_Last updated: 2026-10-03_
 
 This is the short-lived execution snapshot. `docs/PLAN.md` is the durable milestone plan; GitHub issues contain acceptance criteria.
 
@@ -64,7 +64,7 @@ PR #105 merged `!calendar help` and guidance directing capable clients to the wi
 
 ### M8 — Docker build and deployment groundwork
 
-PR #102 merged Docker build/runtime documentation and a non-publishing CI image-build smoke. The smoke validates image builds, not deployment. The docs describe generic operator-run etke/MDAD compatibility only; the repository has no MDAD-native service definition or rollout integration, and no etke-managed host deployment has been verified. Helm/Kubernetes packaging remains optional later work.
+PR #102 merged Docker build/runtime documentation and a non-publishing CI image-build smoke. PR #170 adds cold backup and isolated restore instructions for the project-owned Compose volumes and separate external PostgreSQL guidance; it does not cover etke-managed `/data`. PR #172 records the generic operator-run etke/MDAD compatibility boundary. The adopted pre-alpha release policy permits breaking changes and authorizes neither live deployment nor publication; future release gates remain. These documents and build smoke do not verify a live etke-managed host. The repository has no MDAD-native service definition or rollout integration. Helm/Kubernetes packaging remains optional later work.
 
 ## Active work
 
