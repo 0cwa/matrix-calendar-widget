@@ -21,6 +21,7 @@ on:
       - 'matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts'
       - 'matrix-calendar-server/test/integration/CalendarDiagnosticsContract.test.ts'
       - 'matrix-calendar-server/test/util/PersonalOpenIdImportProbe.test.ts'
+      - 'matrix-calendar-server/test/util/PersonalOpenIdContractProbe.test.ts'
       - 'matrix-calendar-server/package.json'
       - 'yarn.lock'
 
@@ -68,6 +69,9 @@ jobs:
       - name: Test Personal OpenID import probe sanitizer
         run: node --test dev/sanitize-personal-openid-import-probe.test.mjs
 
+      - name: Test Personal OpenID contract probe gates
+        run: yarn workspace @matrix-calendar-widget/server jest test/util/PersonalOpenIdContractProbe.test.ts --runInBand
+
       - name: Probe Personal OpenID Jest runner and runtime imports
         run: |
           set +e
@@ -101,6 +105,31 @@ jobs:
           fi
           rm -f "$import_stage_file"
           if [ "$runner_status" -ne 0 ] || [ "$import_status" -ne 0 ] || [ "$sanitizer_status" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Probe Personal OpenID contract module load
+        run: |
+          probe_stage_file="$RUNNER_TEMP/personal-openid-module-stages.txt"
+          : > "$probe_stage_file"
+          set +e
+          CALDAV_CONTRACT=0 \
+          CALDAV_CONTRACT_IMPORT_PROBE=1 \
+          CALDAV_CONTRACT_STAGE_FILE="$probe_stage_file" \
+          yarn workspace @matrix-calendar-widget/server jest \
+            test/integration/PersonalOpenIdRadicaleContract.test.ts \
+            --runInBand \
+            >/dev/null 2>&1
+          probe_status=$?
+          set -e
+          if [ "$probe_status" -eq 0 ]; then
+            printf '%s\n' 'personal-openid-module-probe passed'
+          else
+            printf '%s\n' 'personal-openid-module-probe failed'
+          fi
+          node dev/sanitize-caldav-contract-stage.mjs "$probe_stage_file"
+          rm -f "$probe_stage_file"
+          if [ "$probe_status" -ne 0 ]; then
             exit 1
           fi
 
