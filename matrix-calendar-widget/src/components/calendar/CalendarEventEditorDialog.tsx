@@ -532,9 +532,11 @@ export function CalendarEventEditorDialog({
   const weeklyByDayEnabled =
     values.recurrenceFrequency === 'WEEKLY' &&
     values.recurrenceWeekdays !== undefined;
+  const recurrenceInterval = values.recurrenceInterval ?? '1';
   const canChooseWeekdays =
-    ['1', '2'].includes(values.recurrenceInterval ?? '1') &&
-    values.recurrenceEnd === 'never';
+    /^\d+$/.test(recurrenceInterval) &&
+    Number.isSafeInteger(Number(recurrenceInterval)) &&
+    Number(recurrenceInterval) > 0;
   const validationError =
     validationErrorCode === 'title-required'
       ? t('calendarEvents.editor.titleRequired', 'A title is required.')
@@ -881,7 +883,6 @@ export function CalendarEventEditorDialog({
                 </TextField>
 
                 <TextField
-                  disabled={weeklyByDayEnabled}
                   inputProps={{ min: 1, step: 1 }}
                   label={t('calendarEvents.editor.interval', 'Repeat every')}
                   onChange={handleChange('recurrenceInterval')}
@@ -891,7 +892,6 @@ export function CalendarEventEditorDialog({
                 />
 
                 <TextField
-                  disabled={weeklyByDayEnabled}
                   label={t('calendarEvents.editor.ends', 'Ends')}
                   onChange={handleChange('recurrenceEnd')}
                   select
@@ -928,7 +928,7 @@ export function CalendarEventEditorDialog({
                       <Typography color="text.secondary" variant="body2">
                         {t(
                           'calendarEvents.editor.weekdayRuleLimit',
-                          'Weekday selection requires a one- or two-week interval with no end date or count.',
+                          'Weekday selection requires a positive whole-number interval.',
                         )}
                       </Typography>
                     )}

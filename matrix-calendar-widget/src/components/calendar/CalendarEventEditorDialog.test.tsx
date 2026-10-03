@@ -249,6 +249,61 @@ describe('<CalendarEventEditorDialog />', () => {
     expect(screen.getByRole('checkbox', { name: 'Tuesday' })).toBeChecked();
   });
 
+  it('creates a bounded weekly weekday rule with an interval and occurrence count', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      idFactory: () => 'bounded-weekly-days',
+    });
+    const onClose = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        onClose={onClose}
+        open
+        uidFactory={() => 'bounded-weekly-days@example.test'}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.change(screen.getByRole('textbox', { name: /Title/i }), {
+      target: { value: 'Weekly planning' },
+    });
+    fireEvent.change(screen.getByLabelText(/^Start/), {
+      target: { value: '2026-10-23T09:00' },
+    });
+    fireEvent.change(screen.getByLabelText(/^End/), {
+      target: { value: '2026-10-23T10:00' },
+    });
+    fireEvent.click(screen.getByLabelText('Repeats'));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Frequency' }), {
+      target: { value: 'WEEKLY' },
+    });
+
+    const interval = screen.getByRole('spinbutton', { name: 'Repeat every' });
+    fireEvent.change(interval, { target: { value: '3' } });
+    fireEvent.click(screen.getByLabelText('Choose weekdays'));
+    expect(interval).toBeEnabled();
+    const ends = screen.getByRole('combobox', { name: 'Ends' });
+    expect(ends).toBeEnabled();
+    fireEvent.change(ends, { target: { value: 'count' } });
+    fireEvent.change(
+      screen.getByRole('spinbutton', { name: 'Number of occurrences' }),
+      { target: { value: '5' } },
+    );
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Monday' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create event' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await expect(
+      repository.getEvent('team', 'bounded-weekly-days'),
+    ).resolves.toMatchObject({
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;INTERVAL=3;BYDAY=MO,FR;COUNT=5',
+      },
+    });
+  });
+
   it('updates the entire selected source series with its current UID and resource id', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],

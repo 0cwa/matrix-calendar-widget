@@ -117,12 +117,13 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [x] Create and edit simple whole-series RRULEs with DAILY, WEEKLY, MONTHLY,
       or YEARLY frequency, positive interval, and never/count/date end controls
       (PR #130).
-- [x] Add weekly BYDAY creation/editing and projection for plain weekday
-      tokens when DTSTART's weekday is included, INTERVAL is omitted, 1, or 2,
-      COUNT/UNTIL and other rule parts are absent, and WKST is omitted or its
-      default MO. Unsupported combinations remain opaque and preserved.
-  - [x] Extend the same plain weekday subset to an open-ended INTERVAL=2
-        (every-other-week) rule; preserve all other unsupported combinations.
+- [x] Add weekly BYDAY creation/editing and projection for unique plain
+      weekday tokens when DTSTART's weekday is included, INTERVAL is omitted
+      or a positive safe integer, and the end is never, a positive COUNT, or a
+      compatible inclusive UNTIL. WKST is omitted or MO; additional rule parts,
+      ordinals, and duplicate parts remain opaque and preserved.
+  - [x] Extend the same plain weekday subset beyond INTERVAL=2 to bounded
+        interval/count/typed-UNTIL controls, with DST and count-order coverage.
 - [ ] Extend RRULE editing to additional recurrence rule parts and patterns.
 - [x] Skip and restore one projected supported occurrence by adding or
       removing only its matching EXDATE. Use the original recurrence identity
@@ -219,13 +220,13 @@ data fail closed; a supported exact no-op preserves the original resource and
 revision metadata. General EXDATE editing, arbitrary RRULEs, and broad M5
 completion also remain open.
 
-The bounded weekly BYDAY slice extends the editor with a weekday set for
-every-week rules. Plain weekday tokens are accepted only when DTSTART's
-weekday is included, INTERVAL is absent or 1, COUNT and UNTIL are absent, no
-other RRULE parts are present, and WKST is absent or the default MO. A weekly
-rule outside this shape stays opaque in the projector and is not editable;
-unrelated event edits preserve its original RRULE and resource data. Full
-recurrence editing and client interoperability remain open.
+The bounded weekly BYDAY slice accepts unique plain weekday tokens including
+DTSTART's weekday, a positive safe integer interval, and never/count/compatible
+inclusive UNTIL ends. COUNT counts occurrences across the selected weekday set,
+not weeks. DATE and floating UNTIL keep their value kind; UTC and named-TZID
+anchors require UTC UNTIL. Additional rule parts and ordinal weekdays remain
+opaque; unrelated event edits preserve their original RRULE and resource data.
+Full recurrence editing and client interoperability remain open.
 
 The widget can add, edit, or remove one `ACTION:DISPLAY` VALARM with a single
 negative relative DURATION trigger from DTSTART. It preserves the existing
