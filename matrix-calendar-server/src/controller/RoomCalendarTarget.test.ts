@@ -53,7 +53,9 @@ describe('room calendar event listing', () => {
     fetch.resetMocks();
     fetch.enableMocks();
     isAllowed.mockReset();
-    forRoom.mockClear();
+    isAllowed.mockResolvedValue(false);
+    forRoom.mockReset();
+    forRoom.mockImplementation(() => ({ isAllowed }));
     forAuthorizedTarget.mockReset();
   });
 

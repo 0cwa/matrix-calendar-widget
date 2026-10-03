@@ -48,21 +48,51 @@ for _ in $(seq 1 90); do
 done
 if ! curl --silent --fail http://localhost:8008/_matrix/client/versions >/dev/null; then
   synapse_status="$(
-    "${COMPOSE[@]}" ps --format json synapse 2>/dev/null |
-      node -e '
+    node -e '
+        const { spawnSync } = require("node:child_process");
+        const compose = spawnSync(
+          "docker",
+          ["compose", "-f", process.argv[1], "ps", "--all", "--format", "json", "synapse"],
+          { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+        );
         const states = new Set(["created", "running", "paused", "restarting", "removing", "exited", "dead"]);
         const healthStates = new Set(["starting", "healthy", "unhealthy"]);
-        try {
-          const parsed = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
-          const entries = Array.isArray(parsed) ? parsed : [parsed];
-          const service = entries.find((entry) => entry?.Service === "synapse");
-          const state = states.has(service?.State) ? service.State : "unavailable";
-          const health = healthStates.has(service?.Health) ? service.Health : service?.Health ? "unavailable" : "not-reported";
-          process.stdout.write(`state=${state} health=${health}`);
-        } catch {
-          process.stdout.write("state=unavailable health=unavailable");
+        const emit = (reason, state = "unavailable", health = "unavailable") => {
+          process.stdout.write(`reason=${reason} state=${state} health=${health}`);
+        };
+        if (compose.error || compose.status !== 0) {
+          emit("compose-query-failed");
+          process.exit(0);
         }
-      ' 2>/dev/null || printf 'state=unavailable health=unavailable'
+        try {
+          const output = compose.stdout.trim();
+          const entries = output
+            ? output.split(/\r?\n/).flatMap((line) => {
+                const parsed = JSON.parse(line);
+                return Array.isArray(parsed) ? parsed : [parsed];
+              })
+            : [];
+          const service = entries.find((entry) => entry?.Service === "synapse");
+          if (!service) {
+            emit("synapse-not-listed");
+            process.exit(0);
+          }
+          if (!states.has(service.State)) {
+            emit("state-unrecognized");
+            process.exit(0);
+          }
+          const health = service.Health
+            ? healthStates.has(service.Health) ? service.Health : "unavailable"
+            : "not-reported";
+          if (service.Health && health === "unavailable") {
+            emit("health-unrecognized", service.State);
+            process.exit(0);
+          }
+          emit("status-valid", service.State, health);
+        } catch {
+          emit("status-json-invalid");
+        }
+      ' "$ROOT_DIR/dev/compose.yaml" 2>/dev/null || printf 'reason=compose-query-failed state=unavailable health=unavailable'
   )"
   echo "Synapse readiness failed; service state/health: $synapse_status" >&2
   exit 1
