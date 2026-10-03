@@ -22,6 +22,7 @@ export interface IAppConfiguration {
   access_token: string;
   homeserver_url: string;
   radicale_url?: string;
+  caldav_max_event_response_bytes?: number;
   room_calendar_bindings: readonly RoomCalendarBinding[];
   room_calendar_access_enabled: boolean;
   application_service_token?: string;

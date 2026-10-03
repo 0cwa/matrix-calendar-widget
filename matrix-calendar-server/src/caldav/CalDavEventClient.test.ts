@@ -180,10 +180,281 @@ END:VCALENDAR</c:calendar-data>
 
     const [, init] = fetchMock.mock.calls[0];
     expect(init?.method).toBe('GET');
+    expect(init?.redirect).toBe('manual');
     expect(new Headers(init?.headers).get('Authorization')).toBe(
       'Basic delegated',
     );
     expect(new Headers(init?.headers).get('Accept')).toBe('text/calendar');
+  });
+
+  it.each([
+    ['REPORT', 'https://radicale.example.test/alice/events/'] as const,
+    ['GET', 'https://radicale.example.test/alice/events/event.ics'] as const,
+    ['PUT', 'https://radicale.example.test/alice/events/event.ics'] as const,
+    ['DELETE', 'https://radicale.example.test/alice/events/event.ics'] as const,
+  ])(
+    'rejects %s redirects without following or exposing their Location',
+    async (method, url) => {
+      const redirectResponse = new Response('secret response body', {
+        status: 302,
+        headers: {
+          Location: 'https://redirect.example.test/steal?token=secret-value',
+        },
+      });
+      const responseText = jest.spyOn(redirectResponse, 'text');
+      const headerGet = jest.spyOn(redirectResponse.headers, 'get');
+      const fetchMock = jest
+        .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+        .mockResolvedValue(redirectResponse);
+      const client = new CalDavEventClient(credentialProvider, fetchMock);
+      const promise =
+        method === 'REPORT'
+          ? client.listEvents(url, {
+              start: '2026-09-24T00:00:00Z',
+              end: '2026-09-25T00:00:00Z',
+            })
+          : method === 'GET'
+            ? client.getEvent(url)
+            : method === 'PUT'
+              ? client.createEvent(url, 'BEGIN:VCALENDAR\nEND:VCALENDAR')
+              : client.deleteEvent(url, '"etag"');
+
+      await expect(promise).rejects.toEqual(
+        new CalDavEventTransportError(
+          'redirected',
+          'CalDAV event request was redirected',
+          method,
+          302,
+        ),
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][1]?.redirect).toBe('manual');
+      expect(responseText).not.toHaveBeenCalled();
+      expect(headerGet).not.toHaveBeenCalledWith('Location');
+    },
+  );
+
+  it.each([
+    [
+      'a same-origin path change',
+      'https://radicale.example.test/alice/other-events/event.ics',
+    ],
+    [
+      'the exact same resource',
+      'https://radicale.example.test/alice/events/event.ics',
+    ],
+  ])(
+    'rejects redirects to %s without inspecting Location',
+    async (_case, location) => {
+      const redirectResponse = new Response('', {
+        status: 307,
+        headers: { Location: location },
+      });
+      const headerGet = jest.spyOn(redirectResponse.headers, 'get');
+      const fetchMock = jest
+        .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+        .mockResolvedValue(redirectResponse);
+
+      await expect(
+        new CalDavEventClient(credentialProvider, fetchMock).getEvent(
+          'https://radicale.example.test/alice/events/event.ics',
+        ),
+      ).rejects.toMatchObject({
+        code: 'redirected',
+        message: 'CalDAV event request was redirected',
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(headerGet).not.toHaveBeenCalledWith('Location');
+    },
+  );
+
+  it('decodes a multibyte character split across response chunks at the byte limit', async () => {
+    const icalendar = 'BEGIN:VCALENDAR\nSUMMARY:Café\nEND:VCALENDAR';
+    const encoded = new TextEncoder().encode(icalendar);
+    const cafeByte = encoded.findIndex((byte) => byte === 0xc3);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoded.slice(0, cafeByte + 1));
+        controller.enqueue(encoded.slice(cafeByte + 1));
+        controller.close();
+      },
+    });
+    const response = {
+      status: 200,
+      ok: true,
+      headers: new Headers({ ETag: '"etag"', 'Content-Length': '1' }),
+      body: stream,
+    } as Response;
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(response);
+
+    await expect(
+      new CalDavEventClient(
+        credentialProvider,
+        fetchMock,
+        encoded.byteLength,
+      ).getEvent('https://radicale.example.test/alice/events/event.ics'),
+    ).resolves.toEqual({
+      href: 'https://radicale.example.test/alice/events/event.ics',
+      etag: '"etag"',
+      icalendar,
+    });
+  });
+
+  it.each(['REPORT', 'GET'] as const)(
+    'enforces the response byte limit for %s with a misleading Content-Length and split UTF-8 chunks',
+    async (method) => {
+      const responseBody =
+        method === 'REPORT'
+          ? multistatus(`
+            <d:response>
+              <d:href>/alice/events/event.ics</d:href>
+              <d:propstat>
+                <d:prop>
+                  <d:getetag>"etag"</d:getetag>
+                  <c:calendar-data>BEGIN:VCALENDAR\nSUMMARY:Café\nEND:VCALENDAR</c:calendar-data>
+                </d:prop>
+                <d:status>HTTP/1.1 200 OK</d:status>
+              </d:propstat>
+            </d:response>
+          `)
+          : 'BEGIN:VCALENDAR\nSUMMARY:Café\nEND:VCALENDAR';
+      const encoded = new TextEncoder().encode(responseBody);
+      const cafeByte = encoded.findIndex((byte) => byte === 0xc3);
+      const cancel = jest.fn();
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoded.slice(0, cafeByte + 1));
+          controller.enqueue(encoded.slice(cafeByte + 1));
+        },
+        cancel,
+      });
+      const response = {
+        status: method === 'REPORT' ? 207 : 200,
+        ok: true,
+        headers: new Headers({
+          'Content-Length': '1',
+          ...(method === 'GET' ? { ETag: '"etag"' } : {}),
+        }),
+        body: stream,
+      } as Response;
+      const fetchMock = jest
+        .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+        .mockResolvedValue(response);
+      const client = new CalDavEventClient(
+        credentialProvider,
+        fetchMock,
+        encoded.byteLength - 1,
+      );
+      const promise =
+        method === 'REPORT'
+          ? client.listEvents('https://radicale.example.test/alice/events/', {
+              start: '2026-09-24T00:00:00Z',
+              end: '2026-09-25T00:00:00Z',
+            })
+          : client.getEvent(
+              'https://radicale.example.test/alice/events/event.ics',
+            );
+
+      await expect(promise).rejects.toMatchObject({
+        code: 'response-too-large',
+        message: 'CalDAV event response exceeded the configured size limit',
+        method,
+        status: method === 'REPORT' ? 207 : 200,
+        url: undefined,
+      });
+      expect(cancel).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('maps response stream errors to a fixed message without returning body or URL data', async () => {
+    const response = {
+      status: 200,
+      ok: true,
+      headers: new Headers({ ETag: '"etag"' }),
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new Error('secret body content'));
+        },
+      }),
+    } as Response;
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(response);
+    const secretUrl =
+      'https://radicale.example.test/alice/events/event.ics?access_token=secret';
+
+    await expect(
+      new CalDavEventClient(credentialProvider, fetchMock).getEvent(secretUrl),
+    ).rejects.toEqual(
+      new CalDavEventTransportError(
+        'response-read-failed',
+        'CalDAV event response could not be read',
+        'GET',
+        200,
+      ),
+    );
+  });
+
+  it('maps a response reader acquisition error to a fixed message and attempts cancellation', async () => {
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    const response = {
+      status: 200,
+      ok: true,
+      headers: new Headers({ ETag: '"etag"' }),
+      body: {
+        getReader: () => {
+          throw new Error('private stream sentinel');
+        },
+        cancel,
+      },
+    } as unknown as Response;
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(response);
+    const secretUrl =
+      'https://radicale.example.test/alice/events/event.ics?access_token=secret';
+
+    await expect(
+      new CalDavEventClient(credentialProvider, fetchMock).getEvent(secretUrl),
+    ).rejects.toEqual(
+      new CalDavEventTransportError(
+        'response-read-failed',
+        'CalDAV event response could not be read',
+        'GET',
+        200,
+      ),
+    );
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps a response body accessor error to a fixed message without leaking its detail', async () => {
+    const response = new Response('private body sentinel', {
+      status: 200,
+      headers: { ETag: '"etag"' },
+    });
+    Object.defineProperty(response, 'body', {
+      get() {
+        throw new Error('private body accessor sentinel');
+      },
+    });
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(response);
+    const secretUrl =
+      'https://radicale.example.test/alice/events/event.ics?access_token=secret';
+
+    await expect(
+      new CalDavEventClient(credentialProvider, fetchMock).getEvent(secretUrl),
+    ).rejects.toEqual(
+      new CalDavEventTransportError(
+        'response-read-failed',
+        'CalDAV event response could not be read',
+        'GET',
+        200,
+      ),
+    );
   });
 
   it('rejects a GET response without an ETag or calendar body', async () => {
@@ -290,6 +561,35 @@ END:VCALENDAR</c:calendar-data>
     expect(headers.get('If-None-Match')).toBe('*');
     expect(headers.get('If-Match')).toBeNull();
     expect(init?.body).toBe('BEGIN:VCALENDAR\nEND:VCALENDAR');
+  });
+
+  it('cancels unused write response bodies after extracting the ETag', async () => {
+    const cancel = jest.fn();
+    const response = {
+      status: 201,
+      ok: true,
+      headers: new Headers({ ETag: '"created-etag"' }),
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('ignored body'));
+        },
+        cancel,
+      }),
+    } as Response;
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(response);
+
+    await expect(
+      new CalDavEventClient(credentialProvider, fetchMock).createEvent(
+        'https://radicale.example.test/alice/events/new.ics',
+        'BEGIN:VCALENDAR\nEND:VCALENDAR',
+      ),
+    ).resolves.toEqual({
+      href: 'https://radicale.example.test/alice/events/new.ics',
+      etag: '"created-etag"',
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 
   it('updates an event with If-Match and returns the latest ETag when present', async () => {

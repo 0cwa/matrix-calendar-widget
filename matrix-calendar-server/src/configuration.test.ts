@@ -298,6 +298,40 @@ describe('reminder database configuration', () => {
   });
 });
 
+describe('CalDAV event response limit configuration', () => {
+  const responseLimitVariable =
+    'MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES';
+  const originalResponseLimit = process.env[responseLimitVariable];
+
+  afterEach(() => {
+    if (originalResponseLimit === undefined) {
+      delete process.env[responseLimitVariable];
+    } else {
+      process.env[responseLimitVariable] = originalResponseLimit;
+    }
+  });
+
+  it('defaults to 16 MiB and accepts a bounded positive integer override', () => {
+    delete process.env[responseLimitVariable];
+    expect(configuration().config.caldav_max_event_response_bytes).toBe(
+      16 * 1024 * 1024,
+    );
+
+    process.env[responseLimitVariable] = '1048576';
+    expect(configuration().config.caldav_max_event_response_bytes).toBe(
+      1024 * 1024,
+    );
+  });
+
+  it('rejects non-integer, non-positive, and over-64-MiB values', () => {
+    const schema = ValidationSchema.extract(responseLimitVariable);
+    for (const value of ['0', '-1', '1.5', '67108865']) {
+      expect(schema.validate(value).error).toBeDefined();
+    }
+    expect(schema.validate('67108864').error).toBeUndefined();
+  });
+});
+
 describe('room calendar binding configuration', () => {
   const originalValue = process.env.ROOM_CALENDAR_BINDINGS;
 
