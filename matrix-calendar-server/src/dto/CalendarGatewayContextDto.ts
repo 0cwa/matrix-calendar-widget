@@ -14,7 +14,33 @@
  * limitations under the License.
  */
 
-import { IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsOptional, IsString } from 'class-validator';
+
+export class CalendarGatewayRoomCapabilityDto {
+  @IsString()
+  calendarId: string;
+
+  @IsBoolean()
+  canReadEvents: boolean;
+
+  @IsBoolean()
+  canWriteEvents: boolean;
+
+  @IsBoolean()
+  canManageReminders: boolean;
+
+  constructor(
+    calendarId: string,
+    canReadEvents: boolean,
+    canWriteEvents: boolean,
+    canManageReminders: boolean,
+  ) {
+    this.calendarId = calendarId;
+    this.canReadEvents = canReadEvents;
+    this.canWriteEvents = canWriteEvents;
+    this.canManageReminders = canManageReminders;
+  }
+}
 
 export class CalendarGatewayContextDto {
   @IsString()
@@ -24,8 +50,16 @@ export class CalendarGatewayContextDto {
   @IsString()
   roomId?: string;
 
-  constructor(userId: string, roomId?: string) {
+  @IsOptional()
+  roomCalendar?: CalendarGatewayRoomCapabilityDto;
+
+  constructor(
+    userId: string,
+    roomId?: string,
+    roomCalendar?: CalendarGatewayRoomCapabilityDto,
+  ) {
     this.userId = userId;
     this.roomId = roomId;
+    this.roomCalendar = roomCalendar;
   }
 }

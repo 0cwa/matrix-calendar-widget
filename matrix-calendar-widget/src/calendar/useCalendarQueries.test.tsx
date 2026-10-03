@@ -113,6 +113,8 @@ describe('calendar repository hooks', () => {
       data: [],
       loading: true,
       error: undefined,
+      partialAvailability: false,
+      canManageCalendarCollections: false,
     });
 
     await waitForValueToChange(() => result.current.loading);
@@ -121,6 +123,9 @@ describe('calendar repository hooks', () => {
       data: [calendar],
       loading: false,
       error: undefined,
+      partialAvailability: false,
+      canManageCalendarCollections: true,
+      roomCapabilities: undefined,
     });
   });
 
@@ -138,6 +143,9 @@ describe('calendar repository hooks', () => {
       data: [],
       loading: false,
       error: expect.objectContaining({ message: 'calendar failure' }),
+      partialAvailability: false,
+      canManageCalendarCollections: false,
+      roomCapabilities: undefined,
     });
   });
 
@@ -189,6 +197,7 @@ describe('calendar repository hooks', () => {
       diagnostics: [],
       loading: false,
       error: undefined,
+      partialAvailability: false,
     });
     expect(listEvents).toHaveBeenNthCalledWith(2, ['team'], secondRange);
   });
@@ -229,6 +238,7 @@ describe('calendar repository hooks', () => {
       ],
       loading: false,
       error: undefined,
+      partialAvailability: false,
     });
     expect(listEventsWithDiagnostics).toHaveBeenCalledTimes(1);
   });

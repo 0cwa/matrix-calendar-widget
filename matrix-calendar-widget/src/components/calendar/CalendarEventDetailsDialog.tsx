@@ -51,6 +51,7 @@ import {
 } from '../../calendar';
 import { ConfirmDeleteDialog } from '../common/ConfirmDeleteDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
+import { CalendarRoomReminderControl } from './CalendarRoomReminderControl';
 
 export function CalendarEventDetailsDialog({
   event,
@@ -228,6 +229,12 @@ export function CalendarEventDetailsDialog({
   const visibleExternalLinks = currentEvent
     ? getVisibleCalendarExternalLinks(currentEvent, t)
     : [];
+  const matrixRoomHref =
+    currentSourceEvent &&
+    eventCalendar?.operatorManaged === true &&
+    calendars.roomCapabilities?.canReadEvents
+      ? getMatrixRoomHref(calendars.roomCapabilities.roomId)
+      : undefined;
 
   const changeOccurrenceException = async (
     action: 'add' | 'remove',
@@ -457,6 +464,20 @@ export function CalendarEventDetailsDialog({
                   </Typography>
                 )}
 
+                {matrixRoomHref && (
+                  <Link
+                    href={matrixRoomHref}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                    underline="hover"
+                  >
+                    {t(
+                      'calendarEvents.details.openMatrixRoom',
+                      'Open Matrix room',
+                    )}
+                  </Link>
+                )}
+
                 {visibleExternalLinks.length > 0 && (
                   <Stack spacing={0.5}>
                     <Typography>
@@ -475,6 +496,17 @@ export function CalendarEventDetailsDialog({
                     ))}
                   </Stack>
                 )}
+
+                {currentSourceEvent &&
+                  eventCalendar?.operatorManaged === true &&
+                  calendars.roomCapabilities?.canManageReminders && (
+                    <CalendarRoomReminderControl
+                      calendarId={currentSourceEvent.calendarId}
+                      canManageReminders
+                      eventId={currentSourceEvent.id}
+                      eventUid={currentEvent.uid}
+                    />
+                  )}
               </Stack>
             </DialogContent>
             <DialogActions>
@@ -639,6 +671,58 @@ function getVisibleCalendarExternalLinks(
         return [];
       }
     });
+}
+
+function getMatrixRoomHref(roomId: unknown): string | undefined {
+  if (!isSafeMatrixRoomId(roomId)) {
+    return undefined;
+  }
+  const encodedRoomId = encodeURIComponent(roomId).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return canonicalizeCalendarExternalUrl(
+    `https://matrix.to/#/${encodedRoomId}`,
+  );
+}
+
+function isSafeMatrixRoomId(value: unknown): value is string {
+  if (
+    typeof value !== 'string' ||
+    value.length < 4 ||
+    value.length > 255 ||
+    value.trim() !== value ||
+    !value.startsWith('!') ||
+    value.includes('/') ||
+    value.includes('\\') ||
+    value.includes('?') ||
+    value.includes('#')
+  ) {
+    return false;
+  }
+  const separatorIndex = value.indexOf(':');
+  if (separatorIndex === -1) {
+    return /^![A-Za-z0-9_-]{43}$/u.test(value);
+  }
+  if (separatorIndex < 2 || separatorIndex === value.length - 1) {
+    return false;
+  }
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (
+      codePoint === undefined ||
+      codePoint <= 0x1f ||
+      (codePoint >= 0x7f && codePoint <= 0x9f) ||
+      codePoint === 0x061c ||
+      codePoint === 0x200e ||
+      codePoint === 0x200f ||
+      (codePoint >= 0x202a && codePoint <= 0x202e) ||
+      (codePoint >= 0x2066 && codePoint <= 0x2069)
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function uniqueRecurrenceIds(

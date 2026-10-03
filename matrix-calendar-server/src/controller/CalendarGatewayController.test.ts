@@ -68,6 +68,9 @@ describe('CalendarGatewayController', () => {
   const appConfig = {
     radicale_url: 'https://radicale.example.test/',
     room_calendar_bindings: [{ roomId, calendarId: 'team-calendar' }],
+    room_calendar_access_enabled: false,
+    room_calendar_event_writes_enabled: false,
+    room_reminder_configuration_enabled: false,
   } as unknown as IAppConfiguration;
   const isAllowed = jest.fn();
   const canManageCalendars = jest.fn();
@@ -142,22 +145,100 @@ describe('CalendarGatewayController', () => {
     };
   }
 
-  it('returns the server-validated Matrix user identity', () => {
+  it('returns the server-validated Matrix user identity without room context', async () => {
     const controller = createController();
 
-    expect(controller.getContext(userContext)).toEqual({
+    await expect(controller.getContext(userContext)).resolves.toEqual({
       userId: '@alice:example.test',
       roomId: undefined,
+      roomCalendar: undefined,
     });
   });
 
-  it('echoes a room id only after guard processing', () => {
-    const controller = createController();
+  it('returns room capabilities only after membership and exact binding checks', async () => {
+    isAllowed.mockResolvedValue(true);
+    canManageCalendars.mockResolvedValue(true);
+    const config = {
+      ...appConfig,
+      room_calendar_access_enabled: true,
+      room_calendar_event_writes_enabled: true,
+      room_reminder_configuration_enabled: true,
+      reminder_database_url: 'postgres://configured',
+    } as IAppConfiguration;
+    const { controller, forRequest } = createRoomTargetController(config);
 
-    expect(controller.getContext(userContext, roomId)).toEqual({
+    await expect(controller.getContext(userContext, roomId)).resolves.toEqual({
       userId: '@alice:example.test',
       roomId,
+      roomCalendar: {
+        calendarId: 'team-calendar',
+        canReadEvents: true,
+        canWriteEvents: true,
+        canManageReminders: true,
+      },
     });
+
+    expect(isAllowed).toHaveBeenCalledWith({ action: 'list-calendars' });
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'read-events',
+      calendarId: 'team-calendar',
+    });
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'create-event',
+      calendarId: 'team-calendar',
+    });
+    expect(canManageCalendars).toHaveBeenCalledWith(userContext.userId, roomId);
+    expect(forRequest).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the actor lacks event-write or reminder-management power', async () => {
+    isAllowed.mockImplementation(
+      async (request) => request.action !== 'create-event',
+    );
+    canManageCalendars.mockResolvedValue(false);
+    const config = {
+      ...appConfig,
+      room_calendar_access_enabled: true,
+      room_calendar_event_writes_enabled: true,
+      room_reminder_configuration_enabled: true,
+      reminder_database_url: 'postgres://configured',
+    } as IAppConfiguration;
+
+    await expect(
+      createController(config).getContext(userContext, roomId),
+    ).resolves.toMatchObject({
+      roomCalendar: {
+        calendarId: 'team-calendar',
+        canReadEvents: true,
+        canWriteEvents: false,
+        canManageReminders: false,
+      },
+    });
+  });
+
+  it('keeps reminder management disabled when the configuration feature flag is off', async () => {
+    isAllowed.mockResolvedValue(true);
+    canManageCalendars.mockResolvedValue(true);
+    const config = {
+      ...appConfig,
+      room_calendar_access_enabled: true,
+      room_calendar_event_writes_enabled: true,
+      room_reminder_configuration_enabled: false,
+      reminder_database_url: 'postgres://configured',
+    } as IAppConfiguration;
+
+    await expect(
+      createController(config).getContext(userContext, roomId),
+    ).resolves.toMatchObject({
+      roomCalendar: {
+        calendarId: 'team-calendar',
+        canReadEvents: true,
+        canWriteEvents: true,
+        canManageReminders: false,
+      },
+    });
+    expect(canManageCalendars).not.toHaveBeenCalled();
   });
 
   it('requires Matrix authentication and optional room membership', () => {
@@ -180,14 +261,36 @@ describe('CalendarGatewayController', () => {
     expect(calendars).toHaveLength(1);
     expect(calendars[0]).toMatchObject({
       id: 'team-calendar',
-      name: 'team-calendar',
+      name: 'Room calendar',
       readOnly: true,
+      operatorManaged: true,
+      supportedComponents: ['VEVENT'],
     });
     expect(forRoom).toHaveBeenCalledWith(userContext.userId, roomId);
     expect(isAllowed).toHaveBeenCalledWith({ action: 'list-calendars' });
     expect(forRequest).not.toHaveBeenCalled();
     expect(assertDisabled).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('advertises room event writes only when the feature gate and actor power allow them', async () => {
+    isAllowed.mockResolvedValue(true);
+    const config = {
+      ...appConfig,
+      room_calendar_access_enabled: true,
+      room_calendar_event_writes_enabled: true,
+    } as IAppConfiguration;
+
+    await expect(
+      createController(config).listCalendars(
+        userContext,
+        openIdCredential,
+        roomId,
+        'room',
+      ),
+    ).resolves.toMatchObject([
+      { id: 'team-calendar', readOnly: false, operatorManaged: true },
+    ]);
   });
 
   it('denies a room event request before resolving binding or touching CalDAV', async () => {

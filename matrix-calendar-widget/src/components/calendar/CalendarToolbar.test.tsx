@@ -156,6 +156,9 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
+    expect(
+      await screen.findByRole('button', { name: 'CalDAV collection URLs' }),
+    ).toBeInTheDocument();
     await userEvent.click(
       screen.getByRole('button', { name: 'CalDAV collection URLs' }),
     );
@@ -199,5 +202,75 @@ describe('<CalendarToolbar />', () => {
     expect(
       options.map((option) => (option as HTMLOptionElement).value),
     ).toEqual(['writable']);
+  });
+
+  it('allows room event creation but hides collection lifecycle controls', async () => {
+    const roomCalendar: Calendar = {
+      id: 'room-target',
+      name: 'Room calendar',
+      readOnly: false,
+      operatorManaged: true,
+      supportedComponents: ['VEVENT'],
+    };
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars: [roomCalendar] }),
+      {
+        getRoomCalendarCapabilities: vi.fn().mockResolvedValue({
+          calendarId: 'room-target',
+          canReadEvents: true,
+          canWriteEvents: true,
+          canManageReminders: false,
+        }),
+        listCalendarsWithAvailability: vi.fn().mockResolvedValue({
+          calendars: [roomCalendar],
+          partialAvailability: false,
+          canManageCalendarCollections: false,
+          roomCapabilities: {
+            calendarId: 'room-target',
+            canReadEvents: true,
+            canWriteEvents: true,
+            canManageReminders: false,
+          },
+        }),
+        listEventsWithAvailability: vi.fn().mockResolvedValue({
+          events: [],
+          diagnostics: [],
+          partialAvailability: false,
+        }),
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByRole('button', { name: 'Create event' }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByRole('button', { name: 'Create calendar' }),
+    ).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Delete calendar' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Rename calendar' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Edit calendar description' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Edit calendar color' }),
+    ).toBeDisabled();
   });
 });

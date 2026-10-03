@@ -29,6 +29,10 @@ import {
   useCalendarRepository,
   useCalendarRepositoryRevision,
 } from './CalendarRepositoryProvider';
+import {
+  isCalendarTargetAvailabilityRepository,
+  type CalendarRoomCapabilities,
+} from './CalendarTargetAvailabilityRepository';
 
 export type CalendarQueryState<T> = {
   data: T;
@@ -36,20 +40,29 @@ export type CalendarQueryState<T> = {
   error?: Error;
 };
 
+export type CalendarListQueryState = CalendarQueryState<Calendar[]> & {
+  partialAvailability: boolean;
+  canManageCalendarCollections: boolean;
+  roomCapabilities?: CalendarRoomCapabilities;
+};
+
 export type CalendarEventsQueryState = CalendarQueryState<CalendarEvent[]> & {
   diagnostics: CalendarEventListDiagnostic[];
+  partialAvailability: boolean;
 };
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-export function useCalendars(): CalendarQueryState<Calendar[]> {
+export function useCalendars(): CalendarListQueryState {
   const repository = useCalendarRepository();
   const revision = useCalendarRepositoryRevision();
-  const [state, setState] = useState<CalendarQueryState<Calendar[]>>({
+  const [state, setState] = useState<CalendarListQueryState>({
     data: [],
     loading: true,
+    partialAvailability: false,
+    canManageCalendarCollections: false,
   });
 
   useEffect(() => {
@@ -59,13 +72,32 @@ export function useCalendars(): CalendarQueryState<Calendar[]> {
 
     async function loadCalendars() {
       try {
-        const data = await repository.listCalendars();
+        const result = isCalendarTargetAvailabilityRepository(repository)
+          ? await repository.listCalendarsWithAvailability()
+          : {
+              calendars: await repository.listCalendars(),
+              partialAvailability: false,
+              canManageCalendarCollections: true,
+            };
         if (!ignore) {
-          setState({ data, loading: false });
+          setState({
+            data: result.calendars,
+            loading: false,
+            partialAvailability: result.partialAvailability,
+            canManageCalendarCollections: result.canManageCalendarCollections,
+            roomCapabilities: result.roomCapabilities,
+          });
         }
       } catch (error: unknown) {
         if (!ignore) {
-          setState({ data: [], loading: false, error: asError(error) });
+          setState({
+            data: [],
+            loading: false,
+            error: asError(error),
+            partialAvailability: false,
+            canManageCalendarCollections: false,
+            roomCapabilities: undefined,
+          });
         }
       }
     }
@@ -91,6 +123,7 @@ export function useCalendarEvents(
     data: [],
     diagnostics: [],
     loading: true,
+    partialAvailability: false,
   });
 
   useEffect(() => {
@@ -105,24 +138,35 @@ export function useCalendarEvents(
 
     async function loadEvents() {
       try {
-        const result: CalendarEventListResult =
-          isCalendarEventDiagnosticsRepository(repository)
-            ? await repository.listEventsWithDiagnostics(
-                requestedCalendarIds,
-                requestedRange,
-              )
+        const result: CalendarEventListResult & {
+          partialAvailability: boolean;
+        } = isCalendarTargetAvailabilityRepository(repository)
+          ? await repository.listEventsWithAvailability(
+              requestedCalendarIds,
+              requestedRange,
+            )
+          : isCalendarEventDiagnosticsRepository(repository)
+            ? {
+                ...(await repository.listEventsWithDiagnostics(
+                  requestedCalendarIds,
+                  requestedRange,
+                )),
+                partialAvailability: false,
+              }
             : {
                 events: await repository.listEvents(
                   requestedCalendarIds,
                   requestedRange,
                 ),
                 diagnostics: [],
+                partialAvailability: false,
               };
         if (!ignore) {
           setState({
             data: result.events,
             diagnostics: result.diagnostics,
             loading: false,
+            partialAvailability: result.partialAvailability,
           });
         }
       } catch (error: unknown) {
@@ -132,6 +176,7 @@ export function useCalendarEvents(
             diagnostics: [],
             loading: false,
             error: asError(error),
+            partialAvailability: false,
           });
         }
       }

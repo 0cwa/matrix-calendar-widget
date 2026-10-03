@@ -214,6 +214,43 @@ describe('<CalendarEventsSurface />', () => {
     },
   );
 
+  it('keeps available calendars visible with a generic partial-source warning', async () => {
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars, events }),
+      {
+        getRoomCalendarCapabilities: vi.fn().mockResolvedValue(undefined),
+        listCalendarsWithAvailability: vi.fn().mockResolvedValue({
+          calendars,
+          partialAvailability: true,
+          canManageCalendarCollections: true,
+        }),
+        listEventsWithAvailability: vi.fn().mockResolvedValue({
+          events,
+          diagnostics: [],
+          partialAvailability: false,
+        }),
+      },
+    );
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByText('Team planning')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Some calendars or events could not be loaded. Available calendars are still shown.',
+    );
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Room');
+  });
+
   it('hides and shows events with lightweight calendar visibility controls', async () => {
     const repository = new InMemoryCalendarRepository({ calendars, events });
 

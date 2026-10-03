@@ -63,7 +63,10 @@ import { isSafeSingleVeventSeries } from '../caldav/ICalendarDeletionSafety';
 import { MatrixOpenIdCredentialParam } from '../decorator/MatrixOpenIdCredentialParam';
 import { UserContextParam } from '../decorator/UserContextParam';
 import { CalendarGatewayCalendarDto } from '../dto/CalendarGatewayCalendarDto';
-import { CalendarGatewayContextDto } from '../dto/CalendarGatewayContextDto';
+import {
+  CalendarGatewayContextDto,
+  CalendarGatewayRoomCapabilityDto,
+} from '../dto/CalendarGatewayContextDto';
 import { CalendarGatewayDiagnosticsDto } from '../dto/CalendarGatewayDiagnosticsDto';
 import { CalendarGatewayEventDto } from '../dto/CalendarGatewayEventDto';
 import { CalendarGatewayEventListDto } from '../dto/CalendarGatewayEventListDto';
@@ -113,11 +116,56 @@ export class CalendarGatewayController {
   ) {}
 
   @Get('context')
-  getContext(
+  async getContext(
     @UserContextParam() userContext: IUserContext,
     @Query('roomId') roomId?: string,
-  ): CalendarGatewayContextDto {
-    return new CalendarGatewayContextDto(userContext.userId, roomId);
+  ): Promise<CalendarGatewayContextDto> {
+    if (roomId === undefined) {
+      return new CalendarGatewayContextDto(userContext.userId);
+    }
+
+    const roomTarget = await this.authorizeRoomCalendarTarget(
+      userContext,
+      roomId,
+      undefined,
+      { action: 'list-calendars' },
+    );
+    const authorization = this.authorizationFactory.forRoom(
+      userContext.userId,
+      roomTarget.roomId,
+    );
+    const canReadEvents =
+      this.appConfig.room_calendar_access_enabled === true &&
+      (await authorization.isAllowed({
+        action: 'read-events',
+        calendarId: roomTarget.calendarId,
+      }));
+    const canWriteEvents =
+      canReadEvents &&
+      this.appConfig.room_calendar_event_writes_enabled === true &&
+      (await authorization.isAllowed({
+        action: 'create-event',
+        calendarId: roomTarget.calendarId,
+      }));
+    const canManageReminders =
+      this.appConfig.room_calendar_access_enabled === true &&
+      this.appConfig.room_reminder_configuration_enabled === true &&
+      Boolean(this.appConfig.reminder_database_url) &&
+      (await this.authorizationFactory.canManageCalendars(
+        userContext.userId,
+        roomTarget.roomId,
+      ));
+
+    return new CalendarGatewayContextDto(
+      userContext.userId,
+      roomTarget.roomId,
+      new CalendarGatewayRoomCapabilityDto(
+        roomTarget.calendarId,
+        canReadEvents,
+        canWriteEvents,
+        canManageReminders,
+      ),
+    );
   }
 
   @Get('calendars')
@@ -135,11 +183,25 @@ export class CalendarGatewayController {
         undefined,
         { action: 'list-calendars' },
       );
+      const authorization = this.authorizationFactory.forRoom(
+        userContext.userId,
+        roomTarget.roomId,
+      );
+      const canWriteEvents =
+        this.appConfig.room_calendar_access_enabled === true &&
+        this.appConfig.room_calendar_event_writes_enabled === true &&
+        (await authorization.isAllowed({
+          action: 'create-event',
+          calendarId: roomTarget.calendarId,
+        }));
       return [
         new CalendarGatewayCalendarDto(
           roomTarget.calendarId,
-          roomTarget.calendarId,
+          'Room calendar',
           undefined,
+          !canWriteEvents,
+          undefined,
+          ['VEVENT'],
           true,
         ),
       ];
