@@ -164,18 +164,22 @@ export class RoomCalendarCalDavAccess {
       throw this.authorizationUnavailableError();
     }
 
+    if (result === null || typeof result !== 'object') {
+      throw this.authorizationUnavailableError();
+    }
+
+    const credential = result as Record<string, unknown>;
+    const accessToken = credential.access_token;
     if (
-      result === null ||
-      typeof result !== 'object' ||
-      typeof (result as Record<string, unknown>).access_token !== 'string' ||
-      (result as Record<string, unknown>).access_token.length === 0 ||
-      (result as Record<string, unknown>).matrix_server_name !== serverName
+      typeof accessToken !== 'string' ||
+      accessToken.length === 0 ||
+      credential.matrix_server_name !== serverName
     ) {
       throw this.authorizationUnavailableError();
     }
 
     return {
-      accessToken: (result as { access_token: string }).access_token,
+      accessToken,
       matrixServerName: serverName,
     };
   }

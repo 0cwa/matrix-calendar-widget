@@ -69,8 +69,8 @@ let calendarIds: string[];
 let activeCalDavRequests:
   | Array<{ method: string; pathname: string }>
   | undefined;
-let serviceOpenIdTokens: string[] = [];
-let serviceUserAccessTokens: string[] = [];
+const serviceOpenIdTokens: string[] = [];
+const serviceUserAccessTokens: string[] = [];
 const gatewayLogLines: string[] = [];
 
 function captureGatewayLog(...values: unknown[]): void {
@@ -343,7 +343,7 @@ describeContract('room appservice proof against real Radicale', () => {
       timezone: 'UTC',
     });
     const authorization = identityHeader(actorIdentity);
-    return new Promise((resolveRequest, reject) => {
+    return new Promise((resolve, reject) => {
       const request = httpRequest(
         `${gatewayUrl}/v1/calendar/events?${query}`,
         { headers: { Authorization: authorization } },
@@ -353,7 +353,7 @@ describeContract('room appservice proof against real Radicale', () => {
             chunks.push(Buffer.from(chunk)),
           );
           response.on('end', () =>
-            resolveRequest({
+            resolve({
               status: response.statusCode ?? 0,
               body: Buffer.concat(chunks).toString('utf8'),
             }),

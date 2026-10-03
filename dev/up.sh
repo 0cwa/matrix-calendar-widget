@@ -46,7 +46,27 @@ for _ in $(seq 1 90); do
   fi
   sleep 1
 done
-curl --silent --fail http://localhost:8008/_matrix/client/versions >/dev/null
+if ! curl --silent --fail http://localhost:8008/_matrix/client/versions >/dev/null; then
+  synapse_status="$(
+    "${COMPOSE[@]}" ps --format json synapse 2>/dev/null |
+      node -e '
+        const states = new Set(["created", "running", "paused", "restarting", "removing", "exited", "dead"]);
+        const healthStates = new Set(["starting", "healthy", "unhealthy"]);
+        try {
+          const parsed = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+          const entries = Array.isArray(parsed) ? parsed : [parsed];
+          const service = entries.find((entry) => entry?.Service === "synapse");
+          const state = states.has(service?.State) ? service.State : "unavailable";
+          const health = healthStates.has(service?.Health) ? service.Health : service?.Health ? "unavailable" : "not-reported";
+          process.stdout.write(`state=${state} health=${health}`);
+        } catch {
+          process.stdout.write("state=unavailable health=unavailable");
+        }
+      ' 2>/dev/null || printf 'state=unavailable health=unavailable'
+  )"
+  echo "Synapse readiness failed; service state/health: $synapse_status" >&2
+  exit 1
+fi
 
 login_payload="$(printf '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"%s"},"password":"%s"}' "$MATRIX_USER" "$MATRIX_PASSWORD")"
 if ! printf '%s' "$login_payload" |
