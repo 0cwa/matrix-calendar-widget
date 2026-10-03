@@ -139,7 +139,7 @@ jobs:
           test_status=$?
           set -e
           set +e
-          server_summary="$(node dev/sanitize-server-test-report.mjs "$report" "$test_status")"
+          server_summary="$(node dev/sanitize-server-test-report.mjs "$report" "$test_status" 2>/dev/null)"
           summary_status=$?
           set -e
           printf '%s\n' "$server_summary" >> "$safe_summary"

@@ -17,7 +17,10 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { safeContractCaseStatusLines } from './caldav-contract-status.mjs';
+import {
+  safeContractCaseStatusLines,
+  safeContractSuiteFailureCategoryLines,
+} from './caldav-contract-status.mjs';
 
 export function formatServerTestFailureSummary(testReport, testExitCode = 0) {
   if (
@@ -35,9 +38,11 @@ export function formatServerTestFailureSummary(testReport, testExitCode = 0) {
       line.startsWith('contract-suite ') ||
       (line.startsWith('contract-case ') && line.endsWith(' failed')),
   );
+  const suiteFailureCategories =
+    safeContractSuiteFailureCategoryLines(testReport);
 
   if (failures.length > 0) {
-    return failures;
+    return [...failures, ...suiteFailureCategories];
   }
 
   return [

@@ -187,6 +187,19 @@ const CASE_IDS = new Map([
   ],
 ]);
 
+const EXECUTION_ERROR_CATEGORY_BY_TYPE = new Map([
+  ['SyntaxError', 'transform-syntax'],
+  ['TSError', 'transform-syntax'],
+  ['TransformError', 'transform-syntax'],
+  ['TypeError', 'suite-execution-error'],
+  ['ReferenceError', 'suite-execution-error'],
+]);
+const MODULE_RESOLUTION_ERROR_CODES = new Set([
+  'MODULE_NOT_FOUND',
+  'ERR_MODULE_NOT_FOUND',
+]);
+const MODULE_RESOLUTION_ERROR_TYPES = new Set(['ModuleNotFoundError']);
+
 function closedStatus(status) {
   if (status === 'passed') return 'passed';
   if (status === 'failed') return 'failed';
@@ -248,4 +261,52 @@ export function safeContractCaseStatusLines(testReport) {
     lines.push(`unmapped-failure count=${unmappedFailures}`);
   }
   return lines;
+}
+
+export function safeContractSuiteFailureCategoryLines(testReport) {
+  if (!Array.isArray(testReport?.testResults)) {
+    return [];
+  }
+
+  const lines = [];
+  for (const suite of testReport.testResults) {
+    if (suite?.status !== 'failed') {
+      continue;
+    }
+
+    const suiteId = SUITE_IDS.get(suite?.name);
+    if (!suiteId) {
+      continue;
+    }
+
+    const assertions = Array.isArray(suite.assertionResults)
+      ? suite.assertionResults
+      : [];
+    if (assertions.some((assertion) => assertion?.status === 'failed')) {
+      continue;
+    }
+
+    const error = suite.testExecError;
+    let category = 'unknown';
+    if (error && typeof error === 'object') {
+      if (
+        typeof error.code === 'string' &&
+        MODULE_RESOLUTION_ERROR_CODES.has(error.code)
+      ) {
+        category = 'module-resolution';
+      } else if (
+        typeof error.type === 'string' &&
+        MODULE_RESOLUTION_ERROR_TYPES.has(error.type)
+      ) {
+        category = 'module-resolution';
+      } else if (typeof error.type === 'string') {
+        category =
+          EXECUTION_ERROR_CATEGORY_BY_TYPE.get(error.type) ?? 'unknown';
+      }
+    }
+
+    lines.push(`contract-suite-category ${suiteId} ${category}`);
+  }
+
+  return lines.sort();
 }
