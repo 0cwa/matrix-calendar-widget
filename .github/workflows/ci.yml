@@ -76,6 +76,9 @@ jobs:
       - name: Build calendar package
         run: yarn workspace @matrix-calendar-widget/calendar build
 
+      - name: Measure synthetic calendar projection
+        run: node scripts/benchmark-calendar-projection.cjs
+
       - name: Lint widget
         run: yarn workspace @matrix-calendar-widget/widget lint
 

@@ -453,6 +453,9 @@ addresses from Matrix room membership.
       the project-owned stack; live operator rehearsal remains unverified.
 - [ ] Compatibility matrix: Element Web/Desktop and other tested clients.
 - [ ] Performance testing with large calendars and recurrence.
+  - [x] Measure synthetic large-calendar domain projection with a reproducible
+        benchmark and exact occurrence-count assertions; browser rendering,
+        CalDAV latency, memory peaks, and deployment capacity remain unmeasured.
   - [x] Reuse exact timezone transition instants and local boundaries during
         projection; preserve gap/overlap and historical-second semantics with
         regressions and before/after synthetic measurements. Synchronous large
