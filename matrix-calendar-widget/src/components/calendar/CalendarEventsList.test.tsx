@@ -155,6 +155,7 @@ describe('<CalendarEventsList />', () => {
       name: 'Team planning',
     });
     await userEvent.tab();
+    await userEvent.tab();
     expect(within(dialog).getByRole('button', { name: 'Edit' })).toHaveFocus();
 
     await userEvent.keyboard('{Escape}');

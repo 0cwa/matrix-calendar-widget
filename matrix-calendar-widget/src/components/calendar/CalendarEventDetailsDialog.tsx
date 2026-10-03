@@ -213,9 +213,11 @@ export function CalendarEventDetailsDialog({
       >
         {currentEvent && (
           <>
-            <DialogTitle>{currentEvent.title}</DialogTitle>
-            <DialogContent>
-              <Stack spacing={1}>
+            <DialogTitle sx={{ overflowWrap: 'anywhere' }}>
+              {currentEvent.title}
+            </DialogTitle>
+            <DialogContent tabIndex={0}>
+              <Stack spacing={1} sx={{ overflowWrap: 'anywhere' }}>
                 {eventCalendar?.readOnly && (
                   <Alert severity="info">
                     {t(

@@ -229,3 +229,36 @@ jobs:
         run: |
           docker build --target test -t matrix-calendar-widget/radicale-openid:test -f radicale-auth/Dockerfile radicale-auth
           docker build --target runtime -t matrix-calendar-widget/radicale-openid:ci -f radicale-auth/Dockerfile radicale-auth
+
+  calendar-browser-layout:
+    name: Calendar browser layout
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: yarn
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+      - name: Build calendar prerequisites
+        run: |
+          yarn workspace @matrix-calendar-widget/ical-timezones build
+          yarn workspace @matrix-calendar-widget/calendar build
+      - name: Type check the synthetic calendar fixture
+        run: |
+          yarn exec -- tsc -p matrix-calendar-widget/browser-tests/tsconfig.json --noEmit
+          yarn exec -- tsc -p e2e/calendar-tests/tsconfig.json --noEmit
+      - name: Install Chromium
+        run: yarn workspace e2e playwright install --with-deps chromium --only-shell
+      - name: Measure calendar component layouts and accessibility
+        run: yarn workspace e2e playwright test --config playwright.calendar.config.ts
+      - name: Retain synthetic browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: calendar-browser-layout
+          path: e2e/calendar-test-results
+          if-no-files-found: ignore
+          retention-days: 7
