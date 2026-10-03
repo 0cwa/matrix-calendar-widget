@@ -547,15 +547,27 @@ export class CalendarGatewayController {
           message: 'timezone must be a supported IANA time zone',
         });
       }
+      const range: CalendarTimeRange = {
+        start: this.requireQuery(start, 'start'),
+        end: this.requireQuery(end, 'end'),
+      };
       const roomTarget = await this.authorizeRoomCalendarTarget(
         userContext,
         roomId,
         calendarId,
         { action: 'read-events', calendarId: calendarId ?? '' },
       );
-      this.requireQuery(start, 'start');
-      this.requireQuery(end, 'end');
-      return this.roomCalendarCalDavAccess.assertDisabled(roomTarget);
+
+      return this.runCalDav(async () => {
+        const principal =
+          await this.roomCalendarCalDavAccess.forAuthorizedTarget(roomTarget);
+        return this.listCalendarEvents(
+          this.eventClientForPrincipal(principal.userId, principal.credential),
+          principal.calendarUrl,
+          range,
+          viewerTimezone,
+        );
+      });
     }
 
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
@@ -580,73 +592,14 @@ export class CalendarGatewayController {
       end: this.requireQuery(end, 'end'),
     };
 
-    return this.runCalDav(async () => {
-      const client = this.eventClient(userContext, openIdCredential);
-      const codec = new ICalendarEventCodec();
-      const resources = await client.listEvents(scope.calendarId, range);
-      const parsedResources = resources.map((resource) => {
-        const parsed = codec.parse(
-          scope.calendarId,
-          resource.href,
-          resource.icalendar,
-        );
-        return { resource, parsed, event: parsed.event };
-      });
-      const rangeUnsupportedResources = parsedResources.filter(
-        ({ event }) => event.unsupportedRecurrence === 'range-this-and-future',
-      );
-      const projectionUnsupportedResources = parsedResources.filter(
-        ({ parsed }) => parsed.listProjectionDiagnostic !== undefined,
-      );
-      const projectableResources = parsedResources.filter(
-        ({ event, parsed }) =>
-          event.unsupportedRecurrence !== 'range-this-and-future' &&
-          parsed.listProjectionDiagnostic === undefined,
-      );
-      const projection = projectCalendarEventOccurrences(
-        projectableResources.map(({ event }) => event),
+    return this.runCalDav(() =>
+      this.listCalendarEvents(
+        this.eventClient(userContext, openIdCredential),
+        scope.calendarId,
         range,
         viewerTimezone,
-      );
-      const inRangeResourceIds = new Set(
-        projection.occurrences.map(({ sourceEvent }) => sourceEvent.id),
-      );
-      const diagnosticCounts = new Map<
-        CalendarEventListDiagnosticReason,
-        number
-      >();
-      const addDiagnostic = (reason: CalendarEventListDiagnosticReason) => {
-        diagnosticCounts.set(reason, (diagnosticCounts.get(reason) ?? 0) + 1);
-      };
-
-      if (rangeUnsupportedResources.length > 0) {
-        diagnosticCounts.set(
-          'range-this-and-future',
-          rangeUnsupportedResources.length,
-        );
-      }
-      if (projectionUnsupportedResources.length > 0) {
-        diagnosticCounts.set(
-          'unsupported-recurrence',
-          projectionUnsupportedResources.length,
-        );
-      }
-      for (const diagnostic of projection.diagnostics) {
-        addDiagnostic(diagnostic.reason);
-      }
-
-      return new CalendarGatewayEventListDto(
-        parsedResources
-          .filter(({ event }) => inRangeResourceIds.has(event.id))
-          .map(
-            ({ resource, event }) =>
-              new CalendarGatewayEventDto(event, resource.etag),
-          ),
-        [...diagnosticCounts.entries()]
-          .sort(([left], [right]) => left.localeCompare(right))
-          .map(([reason, count]) => ({ reason, count })),
-      );
-    });
+      ),
+    );
   }
 
   @Get('event')
@@ -940,7 +893,7 @@ export class CalendarGatewayController {
             message: 'No calendar is configured for this Matrix room',
           });
         case 'request_calendar_mismatch':
-          throw new BadRequestException({
+          throw new ForbiddenException({
             code: 'room-calendar-target-mismatch',
             message: 'Requested calendar is not the configured room calendar',
           });
@@ -1020,6 +973,83 @@ export class CalendarGatewayController {
   ): CalDavEventClient {
     return new CalDavEventClient(
       this.credentialProviderFactory.forRequest(userContext, openIdCredential),
+    );
+  }
+
+  private eventClientForPrincipal(
+    userId: string,
+    openIdCredential: IMatrixOpenIdCredential,
+  ): CalDavEventClient {
+    return new CalDavEventClient(
+      this.credentialProviderFactory.forPrincipal(userId, openIdCredential),
+    );
+  }
+
+  private async listCalendarEvents(
+    client: CalDavEventClient,
+    calendarId: string,
+    range: CalendarTimeRange,
+    viewerTimezone: string,
+  ): Promise<CalendarGatewayEventListDto> {
+    const codec = new ICalendarEventCodec();
+    const resources = await client.listEvents(calendarId, range);
+    const parsedResources = resources.map((resource) => {
+      const parsed = codec.parse(calendarId, resource.href, resource.icalendar);
+      return { resource, parsed, event: parsed.event };
+    });
+    const rangeUnsupportedResources = parsedResources.filter(
+      ({ event }) => event.unsupportedRecurrence === 'range-this-and-future',
+    );
+    const projectionUnsupportedResources = parsedResources.filter(
+      ({ parsed }) => parsed.listProjectionDiagnostic !== undefined,
+    );
+    const projectableResources = parsedResources.filter(
+      ({ event, parsed }) =>
+        event.unsupportedRecurrence !== 'range-this-and-future' &&
+        parsed.listProjectionDiagnostic === undefined,
+    );
+    const projection = projectCalendarEventOccurrences(
+      projectableResources.map(({ event }) => event),
+      range,
+      viewerTimezone,
+    );
+    const inRangeResourceIds = new Set(
+      projection.occurrences.map(({ sourceEvent }) => sourceEvent.id),
+    );
+    const diagnosticCounts = new Map<
+      CalendarEventListDiagnosticReason,
+      number
+    >();
+    const addDiagnostic = (reason: CalendarEventListDiagnosticReason) => {
+      diagnosticCounts.set(reason, (diagnosticCounts.get(reason) ?? 0) + 1);
+    };
+
+    if (rangeUnsupportedResources.length > 0) {
+      diagnosticCounts.set(
+        'range-this-and-future',
+        rangeUnsupportedResources.length,
+      );
+    }
+    if (projectionUnsupportedResources.length > 0) {
+      diagnosticCounts.set(
+        'unsupported-recurrence',
+        projectionUnsupportedResources.length,
+      );
+    }
+    for (const diagnostic of projection.diagnostics) {
+      addDiagnostic(diagnostic.reason);
+    }
+
+    return new CalendarGatewayEventListDto(
+      parsedResources
+        .filter(({ event }) => inRangeResourceIds.has(event.id))
+        .map(
+          ({ resource, event }) =>
+            new CalendarGatewayEventDto(event, resource.etag),
+        ),
+      [...diagnosticCounts.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([reason, count]) => ({ reason, count })),
     );
   }
 

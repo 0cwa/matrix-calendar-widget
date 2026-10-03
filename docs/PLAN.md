@@ -310,8 +310,9 @@ DST regression or recurrence-editing criteria above.
 
 - [x] Wire the zero-I/O `target=room` authorization preflight into calendar
       operations: check joined membership and power before resolving the
-      operator-managed static binding. The room access gate stays disabled and
-      performs no CalDAV I/O.
+      operator-managed static binding. Room data access defaults disabled;
+      enabled listEvents uses the proven application-principal read path, while
+      room mutations remain disabled.
   - [x] Define the operator-managed static room-to-calendar contract (ADR014/
         ADR015) and validate bindings in server configuration before lookup.
   - [x] Add a pure room-binding resolver and joined-membership/power policy
@@ -327,6 +328,11 @@ DST regression or recurrence-editing criteria above.
       establish appservice identity or room isolation. Verify that the
       operator's etke image override keeps the existing `/data` store before
       rollout. Keep issue #7 open until its room-calendar acceptance passes.
+  - [x] Implement gated application-principal listEvents and prove personal,
+        room subject binding, and cross-room isolation against pinned Synapse
+        and project-owned Radicale (PR #164). The shared dev login fixture has
+        an explicit successful-login burst allowance; production limits are
+        unchanged. Mutations, room diagnostics, and delivery remain disabled.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
 - [ ] First reminder delivery target: permission-checked room-wide
       notifications using standard `m.mentions.room: true`; check room-mention

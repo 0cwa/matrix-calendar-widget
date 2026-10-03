@@ -48,6 +48,24 @@ const SUITE_IDS = new Map([
     ),
     'calendar-diagnostics-contract',
   ],
+  [
+    suitePath(
+      'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+    ),
+    'room-appservice-radicale-contract',
+  ],
+  [
+    suitePath(
+      'matrix-calendar-server/src/controller/RoomCalendarTarget.test.ts',
+    ),
+    'room-calendar-target',
+  ],
+  [
+    suitePath(
+      'matrix-calendar-server/src/service/RoomCalendarCalDavAccess.test.ts',
+    ),
+    'room-calendar-caldav-access',
+  ],
 ]);
 
 const CASE_IDS = new Map([
@@ -119,6 +137,54 @@ const CASE_IDS = new Map([
     'calendar-diagnostics-contract\0returns only the valid in-base collection from real Radicale discovery',
     'calendar-diagnostics-safe-collection-discovery',
   ],
+  [
+    'room-appservice-radicale-contract\0lists only the exact room binding through the appservice principal',
+    'room-appservice-exact-binding',
+  ],
+  [
+    'room-appservice-radicale-contract\0binds the Radicale OpenID subject to the configured service user, not the room sender',
+    'room-appservice-subject-binding',
+  ],
+  [
+    'room-appservice-radicale-contract\0forbids a cross-room calendar before appservice proof or CalDAV I/O',
+    'room-appservice-cross-room-denial',
+  ],
+  [
+    'room-calendar-target\0authorizes and resolves the exact binding before requesting a proof or CalDAV',
+    'room-calendar-target-exact-binding',
+  ],
+  [
+    'room-calendar-target\0denies a nonmember before requesting the appservice proof',
+    'room-calendar-target-nonmember-denial',
+  ],
+  [
+    'room-calendar-target\0denies a mismatched room/calendar binding before proof or CalDAV',
+    'room-calendar-target-mismatch-denial',
+  ],
+  [
+    'room-calendar-caldav-access\0requests a transient proof for the configured principal and exact binding',
+    'room-calendar-proof-exact-principal',
+  ],
+  [
+    'room-calendar-caldav-access\0never mints a proof when the access feature is disabled',
+    'room-calendar-proof-disabled-gate',
+  ],
+  [
+    'room-calendar-caldav-access\0rejects a changed or unbound target before requesting a proof',
+    'room-calendar-proof-target-rejection',
+  ],
+  [
+    'room-calendar-caldav-access\0fails closed when the homeserver cannot mint the configured proof',
+    'room-calendar-proof-fail-closed',
+  ],
+  [
+    'room-calendar-caldav-access\0rejects a proof whose homeserver does not match the configured principal',
+    'room-calendar-proof-subject-rejection',
+  ],
+  [
+    'room-calendar-caldav-access\0does not expose the application-service token in an error',
+    'room-calendar-proof-error-redaction',
+  ],
 ]);
 
 function closedStatus(status) {
@@ -133,6 +199,7 @@ export function safeContractCaseStatusLines(testReport) {
   }
 
   const statusByCaseId = new Map();
+  const failedSuiteIds = new Set();
   let unmappedFailures = 0;
 
   for (const suite of testReport.testResults) {
@@ -162,7 +229,11 @@ export function safeContractCaseStatusLines(testReport) {
       }
     }
 
-    if (suite.status === 'failed' && !hasFailedAssertion) {
+    if (suite.status === 'failed') {
+      failedSuiteIds.add(suiteId);
+    }
+
+    if (suite.status === 'failed' && !hasFailedAssertion && !suiteId) {
       unmappedFailures += 1;
     }
   }
@@ -170,6 +241,9 @@ export function safeContractCaseStatusLines(testReport) {
   const lines = [...statusByCaseId]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([caseId, status]) => `contract-case ${caseId} ${status}`);
+  for (const suiteId of [...failedSuiteIds].sort()) {
+    lines.push(`contract-suite ${suiteId} failed`);
+  }
   if (unmappedFailures > 0) {
     lines.push(`unmapped-failure count=${unmappedFailures}`);
   }

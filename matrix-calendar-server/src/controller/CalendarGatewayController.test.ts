@@ -69,8 +69,12 @@ describe('CalendarGatewayController', () => {
   const assertDisabled = jest.fn((target: RoomCalendarTarget) =>
     disabledAccess.assertDisabled(target),
   );
+  const forAuthorizedTarget = jest.fn((target: RoomCalendarTarget) =>
+    disabledAccess.forAuthorizedTarget(target),
+  );
   const roomCalendarCalDavAccess = {
     assertDisabled,
+    forAuthorizedTarget,
   } as unknown as RoomCalendarCalDavAccess;
 
   beforeEach(() => {
@@ -83,6 +87,10 @@ describe('CalendarGatewayController', () => {
     assertDisabled.mockReset();
     assertDisabled.mockImplementation((target) =>
       disabledAccess.assertDisabled(target),
+    );
+    forAuthorizedTarget.mockReset();
+    forAuthorizedTarget.mockImplementation((target) =>
+      disabledAccess.forAuthorizedTarget(target),
     );
   });
 
@@ -272,7 +280,7 @@ describe('CalendarGatewayController', () => {
       response: { code: 'room-calendar-caldav-disabled' },
     });
 
-    expect(assertDisabled).toHaveBeenCalledWith({
+    expect(forAuthorizedTarget).toHaveBeenCalledWith({
       roomId,
       calendarId: 'team-calendar',
       principal: { kind: 'service' },

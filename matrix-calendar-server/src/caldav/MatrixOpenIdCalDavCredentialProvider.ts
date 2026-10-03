@@ -17,7 +17,6 @@
 import base64url from 'base64url';
 import { UserID } from 'matrix-bot-sdk';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
-import { IUserContext } from '../model/IUserContext';
 import { CalDavCredentialProvider } from './CalDavCredentialProvider';
 
 export type MatrixOpenIdCalDavCredentialErrorCode = 'missing-openid-credential';
@@ -34,7 +33,7 @@ export class MatrixOpenIdCalDavCredentialError extends Error {
 
 export class MatrixOpenIdCalDavCredentialProvider implements CalDavCredentialProvider {
   constructor(
-    private readonly userContext: IUserContext,
+    private readonly userId: string,
     private readonly openIdCredential?: IMatrixOpenIdCredential,
   ) {}
 
@@ -46,7 +45,7 @@ export class MatrixOpenIdCalDavCredentialProvider implements CalDavCredentialPro
       );
     }
 
-    const username = new UserID(this.userContext.userId).localpart;
+    const username = new UserID(this.userId).localpart;
     const delegatedCredential = `matrix-openid:${base64url(
       JSON.stringify({
         access_token: this.openIdCredential.accessToken,
