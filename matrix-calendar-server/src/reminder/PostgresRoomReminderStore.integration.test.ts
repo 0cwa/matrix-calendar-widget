@@ -302,27 +302,29 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
   });
 
   it('atomically grants one concurrent claim and prevents a second send after completion', async () => {
-    const identity = {
-      roomId,
-      calendarId,
-      eventUid: 'concurrent-planning',
-      recurrenceId: '20261001T090000Z',
-      alarmUid: 'alarm-uid',
-      triggerOrdinal: 0,
-    };
-    const claims = await Promise.all([
-      store.claimDelivery(identity, 60_000),
-      store.claimDelivery(identity, 60_000),
-    ]);
-    const claim = claims.find((candidate) => candidate !== undefined);
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const identity = {
+        roomId,
+        calendarId,
+        eventUid: `concurrent-planning-${attempt}`,
+        recurrenceId: '20261001T090000Z',
+        alarmUid: 'alarm-uid',
+        triggerOrdinal: 0,
+      };
+      const claims = await Promise.all([
+        store.claimDelivery(identity, 60_000),
+        store.claimDelivery(identity, 60_000),
+      ]);
+      const claim = claims.find((candidate) => candidate !== undefined);
 
-    expect(claims.filter(Boolean)).toHaveLength(1);
-    expect(claim?.attemptCount).toBe(1);
-    expect(await store.claimDelivery(identity, 60_000)).toBeUndefined();
-    expect(
-      await store.markDeliverySent(claim!.deliveryKey, claim!.claimToken),
-    ).toBe(true);
-    expect(await store.claimDelivery(identity, 60_000)).toBeUndefined();
+      expect(claims.filter(Boolean)).toHaveLength(1);
+      expect(claim?.attemptCount).toBe(1);
+      expect(await store.claimDelivery(identity, 60_000)).toBeUndefined();
+      expect(
+        await store.markDeliverySent(claim!.deliveryKey, claim!.claimToken),
+      ).toBe(true);
+      expect(await store.claimDelivery(identity, 60_000)).toBeUndefined();
+    }
   });
 
   it('allows a stale lease to be reclaimed and rejects updates from the prior worker', async () => {
@@ -381,7 +383,7 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
       await store.markDeliverySent(claim!.deliveryKey, claim!.claimToken),
     ).toBe(true);
 
-    await store.onModuleDestroy();
+    await store.onApplicationShutdown();
     sql = createTestPostgresClient();
     store = new PostgresRoomReminderStore(sql);
     await store.migrate();

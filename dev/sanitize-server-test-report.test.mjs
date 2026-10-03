@@ -24,6 +24,12 @@ const suitePath = fileURLToPath(
     import.meta.url,
   ),
 );
+const reminderDeliverySuitePath = fileURLToPath(
+  new URL(
+    '../matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts',
+    import.meta.url,
+  ),
+);
 test('emits only allowlisted static suite and case IDs with failed status', () => {
   const report = {
     testResults: [
@@ -144,4 +150,35 @@ test('fails closed for an invalid runner exit code', () => {
   assert.deepEqual(formatServerTestFailureSummary({ testResults: [] }, 256), [
     'server-test-report unavailable',
   ]);
+});
+
+test('only reports the closed reminder delivery case ID on failure', () => {
+  const privateSentinel = 'private transaction ID, event body, and token';
+  const report = {
+    testResults: [
+      {
+        name: reminderDeliverySuitePath,
+        status: 'failed',
+        assertionResults: [
+          {
+            title:
+              'claims a canonical due alarm, sends it, and deduplicates repeated stable transactions',
+            status: 'failed',
+            failureMessages: [privateSentinel],
+          },
+        ],
+        failureMessage: privateSentinel,
+      },
+    ],
+  };
+
+  const output = formatServerTestFailureSummary(report, 1).join('\n');
+  assert.equal(
+    output,
+    [
+      'contract-case room-reminder-live-idempotent-delivery failed',
+      'contract-suite room-reminder-delivery-contract failed',
+    ].join('\n'),
+  );
+  assert.equal(output.includes(privateSentinel), false);
 });

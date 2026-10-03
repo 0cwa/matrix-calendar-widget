@@ -26,6 +26,7 @@ export interface IAppConfiguration {
   room_calendar_bindings: readonly RoomCalendarBinding[];
   room_calendar_access_enabled: boolean;
   room_calendar_event_writes_enabled: boolean;
+  room_reminder_delivery_enabled: boolean;
   application_service_token?: string;
   application_service_user_id?: string;
   calendar_gateway_rate_limit_requests: number;
@@ -33,6 +34,8 @@ export interface IAppConfiguration {
   calendar_gateway_rate_limit_max_keys: number;
   reminder_database_url?: string;
   reminder_database_tls_mode?: 'verify-full' | 'trusted-private-network';
+  room_reminder_configuration_enabled: boolean;
+  room_calendar_action_messages_enabled: boolean;
 
   meetingwidget_url: string;
   meetingwidget_name: string;

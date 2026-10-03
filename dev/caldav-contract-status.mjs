@@ -56,6 +56,12 @@ const SUITE_IDS = new Map([
   ],
   [
     suitePath(
+      'matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts',
+    ),
+    'room-reminder-delivery-contract',
+  ],
+  [
+    suitePath(
       'matrix-calendar-server/src/controller/RoomCalendarTarget.test.ts',
     ),
     'room-calendar-target',
@@ -88,6 +94,18 @@ const CASE_IDS = new Map([
   [
     'room-appservice-radicale-contract\0denies an unauthorized room bot command before proof or CalDAV I/O',
     'room-appservice-bot-command-denial',
+  ],
+  [
+    'room-reminder-delivery-contract\0claims a canonical due alarm, sends it, and deduplicates repeated stable transactions',
+    'room-reminder-live-idempotent-delivery',
+  ],
+  [
+    'room-reminder-delivery-contract\0denies a changed room binding before making a UID REPORT request',
+    'room-reminder-changed-binding-denial',
+  ],
+  [
+    'room-reminder-delivery-contract\0denies an encrypted room before making a UID REPORT request',
+    'room-reminder-encrypted-room-denial',
   ],
   [
     'membership-guard\0denies a nonmember before authorization, credential construction, or CalDAV',

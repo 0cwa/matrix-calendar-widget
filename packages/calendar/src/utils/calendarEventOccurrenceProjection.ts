@@ -121,6 +121,14 @@ export type CalendarEventProjection = {
   diagnostics: CalendarEventProjectionDiagnostic[];
 };
 
+/** Raised only when the optional projection cancellation signal is aborted. */
+export class CalendarEventProjectionAbortedError extends Error {
+  constructor() {
+    super('Calendar event projection was aborted');
+    this.name = 'AbortError';
+  }
+}
+
 type ProjectionError = {
   reason: CalendarEventProjectionDiagnosticReason;
 };
@@ -291,7 +299,9 @@ export function projectCalendarEventOccurrences(
   events: CalendarEvent[],
   range: CalendarTimeRange,
   viewerTimezone: string,
+  signal?: AbortSignal,
 ): CalendarEventProjection {
+  throwIfProjectionAborted(signal);
   const rangeStart = DateTime.fromISO(range.start, { setZone: true });
   const rangeEnd = DateTime.fromISO(range.end, { setZone: true });
   if (!rangeStart.isValid || !rangeEnd.isValid || rangeEnd <= rangeStart) {
@@ -302,15 +312,18 @@ export function projectCalendarEventOccurrences(
   const diagnostics: CalendarEventProjectionDiagnostic[] = [];
 
   for (const sourceEvent of events) {
+    throwIfProjectionAborted(signal);
     try {
       const projected = projectEvent(
         sourceEvent,
         rangeStart,
         rangeEnd,
         viewerTimezone,
+        signal,
       );
       occurrences.push(...projected);
     } catch (error) {
+      if (error instanceof CalendarEventProjectionAbortedError) throw error;
       diagnostics.push({
         sourceEvent,
         reason: projectionErrorReason(error),
@@ -400,7 +413,9 @@ function projectEvent(
   rangeStart: DateTime,
   rangeEnd: DateTime,
   viewerTimezone: string,
+  signal?: AbortSignal,
 ): ProjectedCalendarEventOccurrence[] {
+  throwIfProjectionAborted(signal);
   if (sourceEvent.unsupportedTimezone) {
     throw projectionError('unsupported-timezone');
   }
@@ -435,6 +450,7 @@ function projectEvent(
       rangeStart,
       rangeEnd,
       viewerTimezone,
+      signal,
     );
   }
 
@@ -444,6 +460,7 @@ function projectEvent(
       rangeStart,
       rangeEnd,
       viewerTimezone,
+      signal,
     );
   }
 
@@ -467,14 +484,16 @@ function projectAllDaySeries(
   rangeStart: DateTime,
   rangeEnd: DateTime,
   viewerTimezone: string,
+  signal?: AbortSignal,
 ): ProjectedCalendarEventOccurrence[] {
+  throwIfProjectionAborted(signal);
   assertTimezone(viewerTimezone);
   const recurrence = sourceEvent.recurrence;
   const anchor = dateValue(sourceEvent.timing.startDate);
-  const candidates = makeCandidates(anchor, recurrence?.rdates);
+  const candidates = makeCandidates(anchor, recurrence?.rdates, signal);
   const exclusions = recurrence?.exdates ?? [];
   const overrides = recurrence?.overrides ?? [];
-  addOverrideCandidates(candidates, overrides);
+  addOverrideCandidates(candidates, overrides, signal);
 
   validateRecurrenceValues(anchor, candidates, exclusions, overrides);
 
@@ -514,6 +533,7 @@ function projectAllDaySeries(
       rangeEnd,
       viewerTimezone,
       until: parseUntil(recurrence?.rrule, anchor),
+      signal,
     },
   );
 
@@ -532,6 +552,7 @@ function projectAllDaySeries(
         : allDayTimingForStart(candidate.recurrenceId, baseDurationDays);
       return timing;
     },
+    signal,
   );
 }
 
@@ -540,13 +561,15 @@ function projectTimedSeries(
   rangeStart: DateTime,
   rangeEnd: DateTime,
   viewerTimezone: string,
+  signal?: AbortSignal,
 ): ProjectedCalendarEventOccurrence[] {
+  throwIfProjectionAborted(signal);
   const recurrence = sourceEvent.recurrence;
   const anchor = timedValue(sourceEvent.timing.start);
-  const candidates = makeCandidates(anchor, recurrence?.rdates);
+  const candidates = makeCandidates(anchor, recurrence?.rdates, signal);
   const exclusions = recurrence?.exdates ?? [];
   const overrides = recurrence?.overrides ?? [];
-  addOverrideCandidates(candidates, overrides);
+  addOverrideCandidates(candidates, overrides, signal);
 
   validateRecurrenceValues(anchor, candidates, exclusions, overrides);
   const baseInterval = timedInterval(sourceEvent.timing, viewerTimezone);
@@ -573,6 +596,7 @@ function projectTimedSeries(
     rangeEnd,
     viewerTimezone,
     until: parseUntil(recurrence?.rrule, anchor),
+    signal,
   });
 
   return materializeCandidates(
@@ -603,6 +627,7 @@ function projectTimedSeries(
         end: endValue,
       };
     },
+    signal,
   );
 }
 
@@ -619,6 +644,7 @@ function materializeCandidates(
   rangeEnd: DateTime,
   viewerTimezone: string,
   timingFor: (candidate: MaterializedCandidate) => CalendarEventTiming,
+  signal?: AbortSignal,
 ): ProjectedCalendarEventOccurrence[] {
   const excluded = new Set(exclusions.map(calendarEventRecurrenceIdentity));
   const overrideMap = new Map(
@@ -632,7 +658,9 @@ function materializeCandidates(
   }
   const result: ProjectedCalendarEventOccurrence[] = [];
 
+  let visited = 0;
   for (const [identity, candidate] of candidates) {
+    if ((visited++ & 63) === 0) throwIfProjectionAborted(signal);
     const override = overrideMap.get(identity);
     if (override?.status === 'cancelled') {
       continue;
@@ -700,6 +728,7 @@ function makeOccurrence(
 function makeCandidates(
   anchor: CalendarEventDateTime,
   rdates?: CalendarEventRecurrenceDate[],
+  signal?: AbortSignal,
 ): Map<string, Candidate> {
   const candidates = new Map<string, Candidate>();
   const anchorIdentity = calendarEventRecurrenceIdentity(anchor);
@@ -708,7 +737,9 @@ function makeCandidates(
     fromRuleOrRdate: true,
   });
 
+  let visited = 0;
   for (const rdate of rdates ?? []) {
+    if ((visited++ & 63) === 0) throwIfProjectionAborted(signal);
     const recurrenceId = rdate.type === 'period' ? rdate.timing.start : rdate;
     const identity = calendarEventRecurrenceIdentity(recurrenceId);
     const existing = candidates.get(identity);
@@ -729,8 +760,11 @@ function makeCandidates(
 function addOverrideCandidates(
   candidates: Map<string, Candidate>,
   overrides: CalendarEventRecurrenceOverride[],
+  signal?: AbortSignal,
 ): void {
+  let visited = 0;
   for (const override of overrides) {
+    if ((visited++ & 63) === 0) throwIfProjectionAborted(signal);
     const identity = calendarEventRecurrenceIdentity(override.recurrenceId);
     if (!candidates.has(identity)) {
       candidates.set(identity, {
@@ -752,6 +786,7 @@ function addRuleCandidates(
     rangeEnd: DateTime;
     viewerTimezone: string;
     until?: ParsedUntil;
+    signal?: AbortSignal;
   },
 ): void {
   if (!rule) {
@@ -784,6 +819,7 @@ function addRuleCandidates(
   const ruleStart = rule.hasCount ? startDate : lowerDate;
   const matches = rule.rule.between(ruleStart, upperDate, true, (date) => {
     seen += 1;
+    if ((seen & 63) === 0 && context.signal?.aborted) return false;
     if (seen > MAX_RRULE_SCAN_STEPS) {
       scanExceeded = true;
       return false;
@@ -826,9 +862,15 @@ function addRuleCandidates(
     return true;
   });
 
+  throwIfProjectionAborted(context.signal);
+
   if (scanExceeded || outputExceeded || matches.length > MAX_RRULE_SCAN_STEPS) {
     throw projectionError('occurrence-limit');
   }
+}
+
+function throwIfProjectionAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new CalendarEventProjectionAbortedError();
 }
 
 type RuleExpansion = {

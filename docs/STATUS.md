@@ -8,7 +8,7 @@ This is the short-lived execution snapshot. `docs/PLAN.md` is the durable milest
 
 **M3 is complete. M4 description and color editing, mixed-collection compatibility, manager-only CalDAV URL/copy diagnostics, and hiding of VJOURNAL-only/VTODO-only collections are implemented; issue #5 remains open for other collection-management work, and collection timezone editing is deferred. PRs #128 and #130 merged bounded read-only recurrence projection/range clipping and the first supported whole-series RRULE create/edit slice. M5 recurrence work continues in bounded slices.**
 
-M2 personal OpenID access is complete on the pinned development stack (PRs #146/#147). PR #164 now proves the gated application-principal room `listEvents` path against pinned Synapse and project-owned Radicale, including subject binding and cross-room denial. All seven hosted checks passed at its independently reviewed final head. Actor membership, action power, and exact static binding are checked before application-principal proof or CalDAV I/O. Room mutations, room diagnostics, and reminder delivery remain disabled; their repository-side integration is the next M6 work. The actual etke image override, `/data` preservation, production PostgreSQL TLS/CA, and restore rehearsal still require operator evidence and are separate from repository development.
+M2 personal OpenID access is complete on the pinned development stack (PRs #146/#147). PR #164 proves the gated application-principal room `listEvents` path against pinned Synapse and project-owned Radicale, including subject binding and cross-room denial. All seven hosted checks passed at its independently reviewed final head. Actor membership, action power, and exact static binding are checked before application-principal proof or CalDAV I/O. Room writes, reminder configuration/options, the bounded scheduler, native Matrix delivery, and action notices are now implemented behind separate default-off gates. The final integrated hosted contract still needs to validate the repeated concurrent PostgreSQL claim race before delivery is treated as ready to enable. The actual etke image override, `/data` preservation, production PostgreSQL TLS/CA, and restore rehearsal still require operator evidence and are separate from repository development.
 
 ## Landed
 
@@ -80,16 +80,18 @@ The widget edits one supported negative relative DISPLAY alarm. Other alarm acti
 
 The optional app-owned PostgreSQL store, schema migrations, transactional
 claim/completion contract, verified-TLS default, and restricted-role PostgreSQL
-16 CI contract are implemented. The hosted restricted-role contract passed all
-five integration tests in run 36358734009, and independent review passed. Full
-local project CI also passed; its PostgreSQL integration suite was skipped
-because no database URL was configured. Production validation remains open: no
+16 CI contract are implemented. The earlier hosted restricted-role contract
+passed all five integration tests in run 36358734009. A follow-up repair now
+uses conflict-safe insert/reclaim statements for the delivery key and tuple
+uniqueness constraints, with 20 repeated concurrent claim pairs in the hosted
+contract. The repair's local SQL-contract tests pass; its PostgreSQL-backed
+hosted run remains pending. Production validation remains open: no
 operator-controlled PostgreSQL endpoint or CA/certificate configuration has
 been supplied, so production TLS/CA validation and runtime validation against
 that endpoint have not been performed. etke-specific database wiring also
 remains unverified. Persistence provides at-most-once database
-claim/completion state; it does not enable the reminder scheduler or guarantee
-exactly-once Matrix message delivery.
+claim/completion state; scheduler and delivery are separately gated and do not
+guarantee exactly-once Matrix message delivery.
 
 ## Active blockers
 
@@ -99,7 +101,7 @@ ADR014/ADR015 select the configured application principal and operator-managed s
 
 Radicale `owner_only` trusts the principal's whole home: gateway bindings enforce cross-room isolation, not backend per-collection ACLs. The configured service home is an operator trust boundary. A Matrix event sender remains authorization/audit identity and never becomes OpenID proof. User-principal room-context routes continue to use the authenticated user's principal.
 
-Authorized room event writes and durable reminder settings/scans/claims/retries are the remaining repository work. PR #187 adds pure canonical event/recurrence/alarm identity validation; it performs no I/O and enables no settings or delivery. Reuse the existing PostgreSQL store and permission helpers. Whole-room reminders use standard `m.mentions.room: true` and current send-time checks. Individual recipients, email consent, and per-user bot proof remain outside the accepted initial scope. Room diagnostics and collection lifecycle remain operator-managed. External etke and production database evidence does not block this repository-side implementation.
+Reminder configuration and alarm options revalidate the current canonical source and require a joined manager, exact binding, and known unencrypted room before service-principal proof, CalDAV, or store I/O. The scheduler freshly rechecks the binding, configuration, canonical alarm and occurrence, encryption, and `m.mentions.room` power before a send; Matrix transaction IDs are stable across retries. The scheduler and native transport remain default-off. Individual recipients, email consent, and per-user bot proof remain outside the accepted initial scope. Room diagnostics and collection lifecycle remain operator-managed. External etke and production database evidence does not block this repository-side implementation.
 
 ### M7 — Data commands
 
@@ -117,7 +119,7 @@ The GitHub branch-protection API confirms that `main` requires pull requests, co
 
 1. Keep M4 timezone editing deferred until its CalDAV compatibility boundary is established.
 2. Advance M5 through bounded recurrence and round-trip slices, adding DST and named-timezone regressions with each relevant behavior.
-3. Build authorized room writes and durable reminders on #164's proven application-principal read boundary. Keep new capabilities gated until their exact-head authorization and real-service contracts pass.
+3. Run the final hosted authorization, Matrix/CalDAV, and repeated concurrent PostgreSQL claim contracts for room writes and reminders. Keep the default-off gates closed until those exact-head checks pass.
 4. Build M7 data commands on those M6 authorization contracts; help is already available.
 5. Verify an operator-run deployment on the etke-managed host after the host-specific runtime contract is known.
 

@@ -298,6 +298,43 @@ describe('reminder database configuration', () => {
   });
 });
 
+describe('room reminder configuration API gate', () => {
+  const variable = 'MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED';
+  const originalValue = process.env[variable];
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env[variable];
+    } else {
+      process.env[variable] = originalValue;
+    }
+  });
+
+  it('defaults to disabled and loads only the explicit server-side setting', () => {
+    delete process.env[variable];
+    expect(configuration().config.room_reminder_configuration_enabled).toBe(
+      false,
+    );
+
+    process.env[variable] = 'true';
+    expect(configuration().config.room_reminder_configuration_enabled).toBe(
+      true,
+    );
+
+    process.env[variable] = 'false';
+    expect(configuration().config.room_reminder_configuration_enabled).toBe(
+      false,
+    );
+  });
+
+  it('rejects non-boolean gate values', () => {
+    const schema = ValidationSchema.extract(variable);
+    expect(schema.validate('true').error).toBeUndefined();
+    expect(schema.validate('false').error).toBeUndefined();
+    expect(schema.validate('enabled').error).toBeDefined();
+  });
+});
+
 describe('CalDAV event response limit configuration', () => {
   const responseLimitVariable =
     'MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES';
@@ -329,6 +366,78 @@ describe('CalDAV event response limit configuration', () => {
       expect(schema.validate(value).error).toBeDefined();
     }
     expect(schema.validate('67108864').error).toBeUndefined();
+  });
+});
+
+describe('room reminder configuration API gate', () => {
+  const variable = 'MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED';
+  const originalValue = process.env[variable];
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env[variable];
+    } else {
+      process.env[variable] = originalValue;
+    }
+  });
+
+  it('defaults to disabled and loads only the explicit server-side setting', () => {
+    delete process.env[variable];
+    expect(configuration().config.room_reminder_configuration_enabled).toBe(
+      false,
+    );
+
+    process.env[variable] = 'true';
+    expect(configuration().config.room_reminder_configuration_enabled).toBe(
+      true,
+    );
+
+    process.env[variable] = 'false';
+    expect(configuration().config.room_reminder_configuration_enabled).toBe(
+      false,
+    );
+  });
+
+  it('rejects non-boolean gate values', () => {
+    const schema = ValidationSchema.extract(variable);
+    expect(schema.validate('true').error).toBeUndefined();
+    expect(schema.validate('false').error).toBeUndefined();
+    expect(schema.validate('enabled').error).toBeDefined();
+  });
+});
+
+describe('room calendar action-message configuration gate', () => {
+  const variable = 'ROOM_CALENDAR_ACTION_MESSAGES_ENABLED';
+  const originalValue = process.env[variable];
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env[variable];
+    } else {
+      process.env[variable] = originalValue;
+    }
+  });
+
+  it('defaults to disabled and accepts only explicit boolean values', () => {
+    delete process.env[variable];
+    expect(configuration().config.room_calendar_action_messages_enabled).toBe(
+      false,
+    );
+
+    process.env[variable] = 'true';
+    expect(configuration().config.room_calendar_action_messages_enabled).toBe(
+      true,
+    );
+
+    process.env[variable] = 'false';
+    expect(configuration().config.room_calendar_action_messages_enabled).toBe(
+      false,
+    );
+
+    const schema = ValidationSchema.extract(variable);
+    expect(schema.validate('true').error).toBeUndefined();
+    expect(schema.validate('false').error).toBeUndefined();
+    expect(schema.validate('enabled').error).toBeDefined();
   });
 });
 
@@ -364,6 +473,7 @@ describe('room calendar application-service configuration', () => {
   const variables = [
     'ROOM_CALENDAR_ACCESS_ENABLED',
     'ROOM_CALENDAR_EVENT_WRITES_ENABLED',
+    'ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED',
     'MATRIX_APPLICATION_SERVICE_TOKEN',
     'MATRIX_APPLICATION_SERVICE_USER_ID',
   ] as const;
@@ -389,11 +499,13 @@ describe('room calendar application-service configuration', () => {
     expect(configuration().config.room_calendar_event_writes_enabled).toBe(
       false,
     );
+    expect(configuration().config.room_reminder_delivery_enabled).toBe(false);
   });
 
   it('loads the explicit gate and server-held application-service identity', () => {
     process.env.ROOM_CALENDAR_ACCESS_ENABLED = 'true';
     process.env.ROOM_CALENDAR_EVENT_WRITES_ENABLED = 'true';
+    process.env.ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED = 'true';
     process.env.MATRIX_APPLICATION_SERVICE_TOKEN = 'synthetic-as-token';
     process.env.MATRIX_APPLICATION_SERVICE_USER_ID =
       '@_matrix_calendar_service:example.test';
@@ -401,6 +513,7 @@ describe('room calendar application-service configuration', () => {
     expect(configuration().config).toMatchObject({
       room_calendar_access_enabled: true,
       room_calendar_event_writes_enabled: true,
+      room_reminder_delivery_enabled: true,
       application_service_token: 'synthetic-as-token',
       application_service_user_id: '@_matrix_calendar_service:example.test',
     });
