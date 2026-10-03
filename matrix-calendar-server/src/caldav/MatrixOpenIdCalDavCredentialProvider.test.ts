@@ -36,7 +36,7 @@ const credential: IMatrixOpenIdCredential = {
 describe('MatrixOpenIdCalDavCredentialProvider', () => {
   it('encodes the Matrix localpart and exact ADR009 delegated payload', async () => {
     const provider = new MatrixOpenIdCalDavCredentialProvider(
-      userContext,
+      userContext.userId,
       credential,
     );
 
@@ -69,7 +69,9 @@ describe('MatrixOpenIdCalDavCredentialProvider', () => {
   });
 
   it('fails closed when request-scoped OpenID delegation is absent', async () => {
-    const provider = new MatrixOpenIdCalDavCredentialProvider(userContext);
+    const provider = new MatrixOpenIdCalDavCredentialProvider(
+      userContext.userId,
+    );
 
     await expect(provider.getRequestHeaders()).rejects.toEqual(
       new MatrixOpenIdCalDavCredentialError(

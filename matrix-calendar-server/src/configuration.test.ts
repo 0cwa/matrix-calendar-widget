@@ -325,3 +325,44 @@ describe('room calendar binding configuration', () => {
     expect(configuration().config.room_calendar_bindings).toEqual([]);
   });
 });
+
+describe('room calendar application-service configuration', () => {
+  const variables = [
+    'ROOM_CALENDAR_ACCESS_ENABLED',
+    'MATRIX_APPLICATION_SERVICE_TOKEN',
+    'MATRIX_APPLICATION_SERVICE_USER_ID',
+  ] as const;
+  const originalValues = new Map(
+    variables.map((name) => [name, process.env[name]]),
+  );
+
+  afterEach(() => {
+    for (const name of variables) {
+      const value = originalValues.get(name);
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  });
+
+  it('keeps room-principal access disabled by default', () => {
+    for (const name of variables) delete process.env[name];
+
+    expect(configuration().config.room_calendar_access_enabled).toBe(false);
+  });
+
+  it('loads the explicit gate and server-held application-service identity', () => {
+    process.env.ROOM_CALENDAR_ACCESS_ENABLED = 'true';
+    process.env.MATRIX_APPLICATION_SERVICE_TOKEN = 'synthetic-as-token';
+    process.env.MATRIX_APPLICATION_SERVICE_USER_ID =
+      '@_matrix_calendar_service:example.test';
+
+    expect(configuration().config).toMatchObject({
+      room_calendar_access_enabled: true,
+      application_service_token: 'synthetic-as-token',
+      application_service_user_id: '@_matrix_calendar_service:example.test',
+    });
+  });
+});

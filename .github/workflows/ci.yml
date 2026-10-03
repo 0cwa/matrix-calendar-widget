@@ -123,8 +123,46 @@ jobs:
       - name: Check server translations
         run: yarn workspace @matrix-calendar-widget/server translate --ci --dry-run
 
+      - name: Test server Jest report sanitizer
+        run: node --test dev/sanitize-server-test-report.test.mjs
+
       - name: Test server
-        run: yarn workspace @matrix-calendar-widget/server test:all
+        run: |
+          report="$RUNNER_TEMP/server-test-results.json"
+          safe_summary="$RUNNER_TEMP/server-safe-test-summary.txt"
+          : > "$safe_summary"
+          trap 'rm -f "$report"' EXIT
+          set +e
+          yarn workspace @matrix-calendar-widget/server test:all \
+            --json --outputFile="$report" \
+            >/dev/null 2>&1
+          test_status=$?
+          set -e
+          set +e
+          server_summary="$(node dev/sanitize-server-test-report.mjs "$report" "$test_status" 2>/dev/null)"
+          summary_status=$?
+          set -e
+          printf '%s\n' "$server_summary" >> "$safe_summary"
+          {
+            printf '%s\n' 'Server and bot test summary'
+            printf '%s\n' "$server_summary"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$test_status" -ne 0 ]; then
+            exit "$test_status"
+          fi
+          if [ "$summary_status" -ne 0 ]; then
+            exit "$summary_status"
+          fi
+          exit "$test_status"
+
+      - name: Upload sanitized server test diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: server-safe-test-diagnostics
+          path: ${{ runner.temp }}/server-safe-test-summary.txt
+          if-no-files-found: ignore
+          retention-days: 1
 
       - name: Provision restricted reminder test role
         run: |
