@@ -23,7 +23,10 @@ import {
   Calendar,
   CalendarEvent,
   CalendarEventInput,
+  CalendarEventRecurrenceTiming,
+  CalendarEventTiming,
   CalendarRepositoryError,
+  projectCalendarEventOccurrenceByRecurrenceId,
 } from '@matrix-calendar-widget/calendar';
 import { LoadingButton } from '@mui/lab';
 import {
@@ -44,6 +47,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import { DateTime } from 'luxon';
 import {
   ChangeEvent,
   FormEvent,
@@ -85,13 +89,23 @@ export function CalendarEventEditorDialog({
   event,
   onClose,
   onSaved,
+  onOccurrenceReloadRequired,
+  occurrence,
   open,
+  viewerTimezone = DateTime.local().zoneName ?? 'UTC',
   uidFactory = createEventUid,
 }: {
   calendars: Calendar[];
   event?: CalendarEvent;
+  occurrence?: {
+    recurrenceId: CalendarEventDateTime;
+    event: CalendarEvent;
+  };
   onClose: () => void;
-  onSaved?: (event: CalendarEvent) => void;
+  onSaved?: (event: CalendarEvent, occurrence?: CalendarEvent) => void;
+  onOccurrenceReloadRequired?: (sourceEvent: CalendarEvent) => void;
+  /** Time zone used to project the selected recurrence identity for display. */
+  viewerTimezone?: string;
   open: boolean;
   uidFactory?: () => string;
 }) {
@@ -109,12 +123,18 @@ export function CalendarEventEditorDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<Error>();
   const [conflict, setConflict] = useState(false);
+  const [missingOccurrence, setMissingOccurrence] = useState(false);
+  const [editScope, setEditScope] = useState<'occurrence' | 'series'>();
   const repository = useCalendarRepository();
   const createEvent = useCreateCalendarEvent();
   const updateEvent = useUpdateCalendarEvent();
 
   useEffect(() => {
-    if (!open || !initialCalendar) {
+    if (!open) {
+      setMissingOccurrence(false);
+      return;
+    }
+    if (!initialCalendar || missingOccurrence) {
       return;
     }
 
@@ -125,7 +145,16 @@ export function CalendarEventEditorDialog({
     );
     setError(undefined);
     setConflict(false);
-  }, [event, initialCalendar, open]);
+    setMissingOccurrence(false);
+    setEditScope(undefined);
+  }, [
+    event,
+    initialCalendar,
+    missingOccurrence,
+    occurrence?.event,
+    occurrence?.recurrenceId,
+    open,
+  ]);
 
   if (!values || !initialCalendar) {
     return null;
@@ -135,6 +164,11 @@ export function CalendarEventEditorDialog({
     calendars.find((calendar) => calendar.id === values.calendarId) ??
     initialCalendar;
   const readOnly = Boolean(selectedCalendar.readOnly);
+  const chooseScope = Boolean(event && occurrence && editScope === undefined);
+  const editingOccurrence = Boolean(
+    event && occurrence && editScope === 'occurrence',
+  );
+  const occurrenceHasAlarm = Boolean(event?.alarm || event?.unsupportedAlarm);
   const periodDuration = calendarEventRdatePeriodDurationFromForm(values);
   const periodValue = calendarEventRdatePeriodValueFromForm(values);
   const editingEndPeriod = values.rdateEditSource?.timing.type === 'end';
@@ -572,7 +606,7 @@ export function CalendarEventEditorDialog({
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
 
-    if (validationError || readOnly) {
+    if (validationError || readOnly || chooseScope || missingOccurrence) {
       return;
     }
 
@@ -584,6 +618,24 @@ export function CalendarEventEditorDialog({
       let saved: CalendarEvent;
 
       if (event) {
+        if (editingOccurrence && occurrence) {
+          const timing =
+            calendarEventPatchFromForm(values).timing ??
+            occurrence.event.timing;
+          saved = await updateEvent(event.calendarId, event.id, {
+            recurrence: {
+              occurrence: {
+                action: 'set-timing',
+                recurrenceId: occurrence.recurrenceId,
+                timing: recurrenceTimingFromEventTiming(timing),
+                viewerTimezone,
+              },
+            },
+          });
+          onSaved?.(saved, { ...occurrence.event, timing });
+          onClose();
+          return;
+        }
         saved = await updateEvent(
           event.calendarId,
           event.id,
@@ -614,6 +666,11 @@ export function CalendarEventEditorDialog({
             ),
           ),
         );
+      } else if (
+        caught instanceof CalendarRepositoryError &&
+        caught.code === 'unsupported-patch'
+      ) {
+        setError(new Error(caught.message));
       } else {
         setError(
           new Error(
@@ -637,13 +694,40 @@ export function CalendarEventEditorDialog({
     setSaving(true);
     try {
       const latest = await repository.getEvent(event.calendarId, event.id);
+      const latestOccurrence = occurrence
+        ? projectCalendarEventOccurrenceByRecurrenceId(
+            latest,
+            occurrence.recurrenceId,
+            viewerTimezone,
+          )?.event
+        : undefined;
+      if (occurrence && !latestOccurrence) {
+        setMissingOccurrence(true);
+        setConflict(false);
+        setError(
+          new Error(
+            t(
+              'calendarEvents.editor.occurrenceReloadRequired',
+              'The selected occurrence is no longer available or cannot be safely projected after reload. Close the editor and select a current occurrence before editing.',
+            ),
+          ),
+        );
+        onOccurrenceReloadRequired?.(latest);
+        return;
+      }
       const latestCalendar =
         calendars.find((calendar) => calendar.id === latest.calendarId) ??
         initialCalendar;
       setValues(calendarEventToFormValues(latest, latestCalendar));
+      setEditScope(undefined);
       setConflict(false);
+      setMissingOccurrence(false);
       setError(undefined);
-      onSaved?.(latest);
+      if (latestOccurrence) {
+        onSaved?.(latest, latestOccurrence);
+      } else {
+        onSaved?.(latest);
+      }
     } catch {
       setError(
         new Error(
@@ -656,6 +740,24 @@ export function CalendarEventEditorDialog({
     } finally {
       setSaving(false);
     }
+  };
+
+  const chooseOccurrenceScope = () => {
+    if (!event || !occurrence) {
+      return;
+    }
+    setValues(calendarEventToFormValues(occurrence.event, initialCalendar));
+    setEditScope('occurrence');
+    setError(undefined);
+  };
+
+  const chooseSeriesScope = () => {
+    if (!event) {
+      return;
+    }
+    setValues(calendarEventToFormValues(event, initialCalendar));
+    setEditScope('series');
+    setError(undefined);
   };
 
   return (
@@ -673,714 +775,829 @@ export function CalendarEventEditorDialog({
         </DialogTitle>
 
         <DialogContent>
-          <Stack mt={1} spacing={2}>
-            {error && (
-              <Alert
-                action={
-                  conflict ? (
-                    <Button
-                      color="inherit"
-                      disabled={saving}
-                      onClick={handleReloadLatest}
-                      size="small"
-                    >
-                      {t('calendarEvents.editor.reloadLatest', 'Reload latest')}
-                    </Button>
-                  ) : undefined
-                }
-                severity="error"
-              >
-                {error.message}
-              </Alert>
-            )}
-
-            <TextField
-              disabled={Boolean(event)}
-              label={t('calendarEvents.editor.calendar', 'Calendar')}
-              onChange={handleCalendarChange}
-              select
-              SelectProps={{ native: true }}
-              value={values.calendarId}
-            >
-              {(event ? calendars : writableCalendars).map((calendar) => (
-                <option key={calendar.id} value={calendar.id}>
-                  {calendar.name}
-                </option>
-              ))}
-            </TextField>
-
-            <TextField
-              autoFocus
-              label={t('calendarEvents.editor.title', 'Title')}
-              onChange={handleChange('title')}
-              required
-              value={values.title}
-            />
-
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={values.timingType === 'all-day'}
-                  onChange={handleTimingTypeChange}
-                />
+          {error && (
+            <Alert
+              action={
+                conflict ? (
+                  <Button
+                    color="inherit"
+                    disabled={saving}
+                    onClick={handleReloadLatest}
+                    size="small"
+                  >
+                    {t('calendarEvents.editor.reloadLatest', 'Reload latest')}
+                  </Button>
+                ) : missingOccurrence ? (
+                  <Button color="inherit" onClick={onClose} size="small">
+                    {t('calendarEvents.details.close', 'Close')}
+                  </Button>
+                ) : undefined
               }
-              label={t('calendarEvents.editor.allDay', 'All day')}
-            />
-
-            <TextField
-              InputLabelProps={{ shrink: true }}
-              label={t('calendarEvents.editor.start', 'Start')}
-              onChange={handleChange('start')}
-              required
-              type={values.timingType === 'all-day' ? 'date' : 'datetime-local'}
-              value={values.start}
-            />
-
-            <TextField
-              InputLabelProps={{ shrink: true }}
-              label={t('calendarEvents.editor.end', 'End')}
-              onChange={handleChange('end')}
-              required
-              type={values.timingType === 'all-day' ? 'date' : 'datetime-local'}
-              value={values.end}
-            />
-
-            {values.timingType === 'timed' &&
-              (values.timedKind ?? 'zoned') === 'zoned' && (
-                <TextField
-                  label={t('calendarEvents.editor.timezone', 'Time zone')}
-                  onChange={handleChange('timezone')}
-                  required
-                  value={values.timezone}
-                />
-              )}
-            {values.timingType === 'timed' && timingHelpText && (
-              <Typography color="text.secondary" variant="body2">
-                {timingHelpText}
-              </Typography>
-            )}
-
-            <TextField
-              label={t('calendarEvents.editor.location', 'Location')}
-              onChange={handleChange('location')}
-              value={values.location}
-            />
-
-            <TextField
-              label={t('calendarEvents.editor.description', 'Description')}
-              multiline
-              minRows={3}
-              onChange={handleChange('description')}
-              value={values.description}
-            />
-
-            <FormControl component="fieldset">
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={Boolean(values.alarmEnabled)}
-                    disabled={values.alarmEditable === false}
-                    onChange={handleAlarmToggle}
-                  />
-                }
-                label={t(
-                  'calendarEvents.editor.caldavAlarm',
-                  'CalDAV reminder',
+              severity="error"
+            >
+              {error.message}
+            </Alert>
+          )}
+          {chooseScope ? (
+            <Stack mt={1} spacing={2}>
+              <Typography>
+                {t(
+                  'calendarEvents.editor.chooseEditScope',
+                  'Choose what to edit',
                 )}
-              />
-              {values.alarmDisabledReason && (
+              </Typography>
+              {occurrenceHasAlarm && (
                 <Alert severity="info">
                   {t(
-                    'calendarEvents.editor.unsupportedAlarmReadOnly',
-                    'This event contains alarm data this editor cannot safely change. Other event edits will preserve it.',
+                    'calendarEvents.editor.instanceAlarmBlocked',
+                    'This series contains reminder data, so occurrence timing edits are unavailable. Edit the entire series instead.',
                   )}
                 </Alert>
               )}
-              {values.alarmEnabled && values.alarmEditable !== false && (
-                <Stack spacing={1}>
-                  <FormLabel component="legend">
-                    {t(
-                      'calendarEvents.editor.alarmLeadTime',
-                      'Time before the event starts',
-                    )}
-                  </FormLabel>
-                  <Stack direction={{ sm: 'row', xs: 'column' }} spacing={1}>
-                    {(
-                      [
-                        ['alarmWeeks', 'alarmWeeks', 'Weeks before'],
-                        ['alarmDays', 'alarmDays', 'Days before'],
-                        ['alarmHours', 'alarmHours', 'Hours before'],
-                        ['alarmMinutes', 'alarmMinutes', 'Minutes before'],
-                        ['alarmSeconds', 'alarmSeconds', 'Seconds before'],
-                      ] as const
-                    ).map(([field, key, fallback]) => (
-                      <TextField
-                        inputProps={{ min: 0, step: 1 }}
-                        key={field}
-                        label={t(`calendarEvents.editor.${key}`, fallback)}
-                        onChange={handleAlarmDurationChange(field)}
-                        type="number"
-                        value={values[field] ?? '0'}
-                      />
-                    ))}
-                  </Stack>
-                  <Typography color="text.secondary" variant="body2">
-                    {t(
-                      'calendarEvents.editor.alarmBoundary',
-                      'This stores a CalDAV display alarm for clients that support it. Matrix reminder delivery is separate.',
-                    )}
-                  </Typography>
-                </Stack>
-              )}
-            </FormControl>
-
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={Boolean(values.repeats)}
-                  disabled={!values.recurrenceEditable}
-                  onChange={handleRecurrenceToggle}
-                />
-              }
-              label={t('calendarEvents.editor.repeats', 'Repeats')}
-            />
-
-            {values.recurrenceDisabledReason && (
+              <Stack direction={{ sm: 'row', xs: 'column' }} spacing={1}>
+                <Button
+                  disabled={readOnly || occurrenceHasAlarm}
+                  onClick={chooseOccurrenceScope}
+                  variant="outlined"
+                >
+                  {t(
+                    'calendarEvents.editor.instanceScope',
+                    'This occurrence only',
+                  )}
+                </Button>
+                <Button onClick={chooseSeriesScope} variant="outlined">
+                  {t('calendarEvents.editor.seriesScope', 'Entire series')}
+                </Button>
+              </Stack>
+            </Stack>
+          ) : editingOccurrence ? (
+            <Stack mt={1} spacing={2}>
               <Alert severity="info">
-                {values.recurrenceDisabledReason === 'complex'
-                  ? t(
-                      'calendarEvents.editor.complexRecurrenceReadOnly',
-                      'This event includes additional dates or exceptions. Recurrence editing is disabled, and other changes will preserve them.',
-                    )
-                  : t(
-                      'calendarEvents.editor.unsupportedRecurrenceReadOnly',
-                      'This recurrence rule or time zone is not supported for editing. Other changes will preserve it.',
-                    )}
-              </Alert>
-            )}
-
-            {values.repeats && values.recurrenceEditable && (
-              <>
-                <TextField
-                  label={t('calendarEvents.editor.frequency', 'Frequency')}
-                  onChange={handleChange('recurrenceFrequency')}
-                  select
-                  SelectProps={{ native: true }}
-                  value={values.recurrenceFrequency ?? 'DAILY'}
-                >
-                  <option value="DAILY">
-                    {t('calendarEvents.editor.daily', 'Daily')}
-                  </option>
-                  <option value="WEEKLY">
-                    {t('calendarEvents.editor.weekly', 'Weekly')}
-                  </option>
-                  <option value="MONTHLY">
-                    {t('calendarEvents.editor.monthly', 'Monthly')}
-                  </option>
-                  <option value="YEARLY">
-                    {t('calendarEvents.editor.yearly', 'Yearly')}
-                  </option>
-                </TextField>
-
-                <TextField
-                  inputProps={{ min: 1, step: 1 }}
-                  label={t('calendarEvents.editor.interval', 'Repeat every')}
-                  onChange={handleChange('recurrenceInterval')}
-                  required
-                  type="number"
-                  value={values.recurrenceInterval ?? '1'}
-                />
-
-                <TextField
-                  label={t('calendarEvents.editor.ends', 'Ends')}
-                  onChange={handleChange('recurrenceEnd')}
-                  select
-                  SelectProps={{ native: true }}
-                  value={values.recurrenceEnd ?? 'never'}
-                >
-                  <option value="never">
-                    {t('calendarEvents.editor.never', 'Never')}
-                  </option>
-                  <option value="count">
-                    {t('calendarEvents.editor.afterCount', 'After occurrences')}
-                  </option>
-                  <option value="until">
-                    {t('calendarEvents.editor.onDate', 'On date')}
-                  </option>
-                </TextField>
-
-                {values.recurrenceFrequency === 'WEEKLY' && (
-                  <>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          checked={values.recurrenceWeekdays !== undefined}
-                          disabled={!weeklyByDayEnabled && !canChooseWeekdays}
-                          onChange={handleWeekdayModeChange}
-                        />
-                      }
-                      label={t(
-                        'calendarEvents.editor.chooseWeekdays',
-                        'Choose weekdays',
-                      )}
-                    />
-                    {!weeklyByDayEnabled && !canChooseWeekdays && (
-                      <Typography color="text.secondary" variant="body2">
-                        {t(
-                          'calendarEvents.editor.weekdayRuleLimit',
-                          'Weekday selection requires a positive whole-number interval.',
-                        )}
-                      </Typography>
-                    )}
-                    {weeklyByDayEnabled && (
-                      <FormControl component="fieldset">
-                        <FormLabel component="legend">
-                          {t('calendarEvents.editor.repeatOn', 'Repeat on')}
-                        </FormLabel>
-                        <FormGroup row sx={{ flexWrap: 'wrap' }}>
-                          {WEEKDAYS.map((weekday) => {
-                            const startWeekday =
-                              calendarEventFormStartWeekday(values);
-                            return (
-                              <FormControlLabel
-                                control={
-                                  <Checkbox
-                                    checked={
-                                      weekday === startWeekday ||
-                                      values.recurrenceWeekdays?.includes(
-                                        weekday,
-                                      ) === true
-                                    }
-                                    disabled={weekday === startWeekday}
-                                    onChange={() =>
-                                      handleWeekdayChange(weekday)
-                                    }
-                                  />
-                                }
-                                key={weekday}
-                                label={t(
-                                  `calendarEvents.editor.weekday${weekday}`,
-                                  weekday,
-                                )}
-                              />
-                            );
-                          })}
-                        </FormGroup>
-                        <Typography color="text.secondary" variant="body2">
-                          {t(
-                            'calendarEvents.editor.startWeekdayRequired',
-                            'The start date’s weekday is always included.',
-                          )}
-                        </Typography>
-                      </FormControl>
-                    )}
-                  </>
+                {t(
+                  'calendarEvents.editor.instanceTimingOnly',
+                  'Only this occurrence’s start and end time will change.',
                 )}
+              </Alert>
+              <TextField
+                InputLabelProps={{ shrink: true }}
+                label={t('calendarEvents.editor.start', 'Start')}
+                onChange={handleChange('start')}
+                required
+                type={
+                  values.timingType === 'all-day' ? 'date' : 'datetime-local'
+                }
+                value={values.start}
+              />
+              <TextField
+                InputLabelProps={{ shrink: true }}
+                label={t('calendarEvents.editor.end', 'End')}
+                onChange={handleChange('end')}
+                required
+                type={
+                  values.timingType === 'all-day' ? 'date' : 'datetime-local'
+                }
+                value={values.end}
+              />
+              {values.timingType === 'timed' &&
+                (values.timedKind ?? 'zoned') === 'zoned' && (
+                  <TextField
+                    label={t('calendarEvents.editor.timezone', 'Time zone')}
+                    onChange={handleChange('timezone')}
+                    required
+                    value={values.timezone}
+                  />
+                )}
+              {timingHelpText && (
+                <Typography color="text.secondary" variant="body2">
+                  {timingHelpText}
+                </Typography>
+              )}
+              {validationError && (
+                <Alert severity="warning">{validationError}</Alert>
+              )}
+              {readOnly && (
+                <Alert severity="warning">
+                  {t(
+                    'calendarEvents.editor.readOnly',
+                    'This calendar is read-only.',
+                  )}
+                </Alert>
+              )}
+            </Stack>
+          ) : (
+            <Stack mt={1} spacing={2}>
+              <TextField
+                disabled={Boolean(event)}
+                label={t('calendarEvents.editor.calendar', 'Calendar')}
+                onChange={handleCalendarChange}
+                select
+                SelectProps={{ native: true }}
+                value={values.calendarId}
+              >
+                {(event ? calendars : writableCalendars).map((calendar) => (
+                  <option key={calendar.id} value={calendar.id}>
+                    {calendar.name}
+                  </option>
+                ))}
+              </TextField>
 
-                {values.recurrenceEnd === 'count' && (
+              <TextField
+                autoFocus
+                label={t('calendarEvents.editor.title', 'Title')}
+                onChange={handleChange('title')}
+                required
+                value={values.title}
+              />
+
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={values.timingType === 'all-day'}
+                    onChange={handleTimingTypeChange}
+                  />
+                }
+                label={t('calendarEvents.editor.allDay', 'All day')}
+              />
+
+              <TextField
+                InputLabelProps={{ shrink: true }}
+                label={t('calendarEvents.editor.start', 'Start')}
+                onChange={handleChange('start')}
+                required
+                type={
+                  values.timingType === 'all-day' ? 'date' : 'datetime-local'
+                }
+                value={values.start}
+              />
+
+              <TextField
+                InputLabelProps={{ shrink: true }}
+                label={t('calendarEvents.editor.end', 'End')}
+                onChange={handleChange('end')}
+                required
+                type={
+                  values.timingType === 'all-day' ? 'date' : 'datetime-local'
+                }
+                value={values.end}
+              />
+
+              {values.timingType === 'timed' &&
+                (values.timedKind ?? 'zoned') === 'zoned' && (
+                  <TextField
+                    label={t('calendarEvents.editor.timezone', 'Time zone')}
+                    onChange={handleChange('timezone')}
+                    required
+                    value={values.timezone}
+                  />
+                )}
+              {values.timingType === 'timed' && timingHelpText && (
+                <Typography color="text.secondary" variant="body2">
+                  {timingHelpText}
+                </Typography>
+              )}
+
+              <TextField
+                label={t('calendarEvents.editor.location', 'Location')}
+                onChange={handleChange('location')}
+                value={values.location}
+              />
+
+              <TextField
+                label={t('calendarEvents.editor.description', 'Description')}
+                multiline
+                minRows={3}
+                onChange={handleChange('description')}
+                value={values.description}
+              />
+
+              <FormControl component="fieldset">
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={Boolean(values.alarmEnabled)}
+                      disabled={values.alarmEditable === false}
+                      onChange={handleAlarmToggle}
+                    />
+                  }
+                  label={t(
+                    'calendarEvents.editor.caldavAlarm',
+                    'CalDAV reminder',
+                  )}
+                />
+                {values.alarmDisabledReason && (
+                  <Alert severity="info">
+                    {t(
+                      'calendarEvents.editor.unsupportedAlarmReadOnly',
+                      'This event contains alarm data this editor cannot safely change. Other event edits will preserve it.',
+                    )}
+                  </Alert>
+                )}
+                {values.alarmEnabled && values.alarmEditable !== false && (
+                  <Stack spacing={1}>
+                    <FormLabel component="legend">
+                      {t(
+                        'calendarEvents.editor.alarmLeadTime',
+                        'Time before the event starts',
+                      )}
+                    </FormLabel>
+                    <Stack direction={{ sm: 'row', xs: 'column' }} spacing={1}>
+                      {(
+                        [
+                          ['alarmWeeks', 'alarmWeeks', 'Weeks before'],
+                          ['alarmDays', 'alarmDays', 'Days before'],
+                          ['alarmHours', 'alarmHours', 'Hours before'],
+                          ['alarmMinutes', 'alarmMinutes', 'Minutes before'],
+                          ['alarmSeconds', 'alarmSeconds', 'Seconds before'],
+                        ] as const
+                      ).map(([field, key, fallback]) => (
+                        <TextField
+                          inputProps={{ min: 0, step: 1 }}
+                          key={field}
+                          label={t(`calendarEvents.editor.${key}`, fallback)}
+                          onChange={handleAlarmDurationChange(field)}
+                          type="number"
+                          value={values[field] ?? '0'}
+                        />
+                      ))}
+                    </Stack>
+                    <Typography color="text.secondary" variant="body2">
+                      {t(
+                        'calendarEvents.editor.alarmBoundary',
+                        'This stores a CalDAV display alarm for clients that support it. Matrix reminder delivery is separate.',
+                      )}
+                    </Typography>
+                  </Stack>
+                )}
+              </FormControl>
+
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={Boolean(values.repeats)}
+                    disabled={!values.recurrenceEditable}
+                    onChange={handleRecurrenceToggle}
+                  />
+                }
+                label={t('calendarEvents.editor.repeats', 'Repeats')}
+              />
+
+              {values.recurrenceDisabledReason && (
+                <Alert severity="info">
+                  {values.recurrenceDisabledReason === 'complex'
+                    ? t(
+                        'calendarEvents.editor.complexRecurrenceReadOnly',
+                        'This event includes additional dates or exceptions. Recurrence editing is disabled, and other changes will preserve them.',
+                      )
+                    : t(
+                        'calendarEvents.editor.unsupportedRecurrenceReadOnly',
+                        'This recurrence rule or time zone is not supported for editing. Other changes will preserve it.',
+                      )}
+                </Alert>
+              )}
+
+              {values.repeats && values.recurrenceEditable && (
+                <>
+                  <TextField
+                    label={t('calendarEvents.editor.frequency', 'Frequency')}
+                    onChange={handleChange('recurrenceFrequency')}
+                    select
+                    SelectProps={{ native: true }}
+                    value={values.recurrenceFrequency ?? 'DAILY'}
+                  >
+                    <option value="DAILY">
+                      {t('calendarEvents.editor.daily', 'Daily')}
+                    </option>
+                    <option value="WEEKLY">
+                      {t('calendarEvents.editor.weekly', 'Weekly')}
+                    </option>
+                    <option value="MONTHLY">
+                      {t('calendarEvents.editor.monthly', 'Monthly')}
+                    </option>
+                    <option value="YEARLY">
+                      {t('calendarEvents.editor.yearly', 'Yearly')}
+                    </option>
+                  </TextField>
+
                   <TextField
                     inputProps={{ min: 1, step: 1 }}
-                    label={t(
-                      'calendarEvents.editor.occurrenceCount',
-                      'Number of occurrences',
-                    )}
-                    onChange={handleChange('recurrenceCount')}
+                    label={t('calendarEvents.editor.interval', 'Repeat every')}
+                    onChange={handleChange('recurrenceInterval')}
                     required
                     type="number"
-                    value={values.recurrenceCount ?? '2'}
+                    value={values.recurrenceInterval ?? '1'}
                   />
-                )}
 
-                {values.recurrenceEnd === 'until' && (
                   <TextField
-                    InputLabelProps={{ shrink: true }}
-                    label={t('calendarEvents.editor.untilDate', 'Until date')}
-                    onChange={handleChange('recurrenceUntil')}
-                    required
-                    type="date"
-                    value={values.recurrenceUntil ?? ''}
-                  />
-                )}
+                    label={t('calendarEvents.editor.ends', 'Ends')}
+                    onChange={handleChange('recurrenceEnd')}
+                    select
+                    SelectProps={{ native: true }}
+                    value={values.recurrenceEnd ?? 'never'}
+                  >
+                    <option value="never">
+                      {t('calendarEvents.editor.never', 'Never')}
+                    </option>
+                    <option value="count">
+                      {t(
+                        'calendarEvents.editor.afterCount',
+                        'After occurrences',
+                      )}
+                    </option>
+                    <option value="until">
+                      {t('calendarEvents.editor.onDate', 'On date')}
+                    </option>
+                  </TextField>
 
-                <Typography color="text.secondary" variant="body2">
-                  {t(
-                    'calendarEvents.editor.seriesOnly',
-                    'Changes apply to the entire series.',
-                  )}
-                </Typography>
-              </>
-            )}
-
-            {event && values.rdateEditable && (
-              <FormControl component="fieldset">
-                <FormLabel component="legend">
-                  {t(
-                    'calendarEvents.editor.additionalDates',
-                    'Additional recurrence dates',
-                  )}
-                </FormLabel>
-                <Stack spacing={1}>
-                  {(values.rdateValues ?? []).map((value, index) => {
-                    const label = formatRdateValue(value);
-                    return (
-                      <Stack
-                        alignItems="center"
-                        direction="row"
-                        justifyContent="space-between"
-                        key={`${label}-${index}`}
-                      >
-                        <Typography variant="body2">{label}</Typography>
-                        {value.type === 'period' &&
-                          calendarEventRdatePeriodIsEditable(value) && (
-                            <Button
-                              aria-label={t(
-                                'calendarEvents.editor.editPeriodDate',
-                                'Edit period',
-                              ).concat(`: ${label}`)}
-                              disabled={
-                                Boolean(values.rdateOperation) ||
-                                Boolean(values.rdateEditSource) ||
-                                values.exdateChanged === true ||
-                                values.timingChanged === true ||
-                                saving
-                              }
-                              onClick={() => handleEditPeriodRdate(value)}
-                              type="button"
-                            >
-                              {t('calendarEvents.editor.editPeriod', 'Edit')}
-                            </Button>
-                          )}
-                        <Button
-                          aria-label={t(
-                            value.type === 'period'
-                              ? 'calendarEvents.editor.removePeriodDate'
-                              : 'calendarEvents.editor.removeAdditionalDate',
-                            value.type === 'period'
-                              ? 'Remove period date'
-                              : 'Remove additional date',
-                          ).concat(`: ${label}`)}
-                          disabled={
-                            Boolean(values.rdateOperation) ||
-                            Boolean(values.rdateEditSource) ||
-                            values.exdateChanged === true ||
-                            values.timingChanged === true ||
-                            saving
-                          }
-                          onClick={() => handleRemoveRdate(value)}
-                          type="button"
-                        >
-                          {t('calendarEvents.editor.remove', 'Remove')}
-                        </Button>
-                      </Stack>
-                    );
-                  })}
-                  <TextField
-                    disabled={
-                      Boolean(values.rdateOperation) ||
-                      values.exdateChanged === true ||
-                      values.timingChanged === true ||
-                      saving
-                    }
-                    inputProps={
-                      values.originalTiming?.type === 'all-day'
-                        ? { 'data-testid': 'rdate-draft' }
-                        : {
-                            'data-testid': 'rdate-draft',
-                            step: values.rdateEditSource ? 1 : 60,
-                          }
-                    }
-                    InputLabelProps={{ shrink: true }}
-                    label={
-                      values.rdateEditSource
-                        ? t('calendarEvents.editor.periodStart', 'Period start')
-                        : t(
-                            'calendarEvents.editor.additionalDate',
-                            'Additional date',
-                          )
-                    }
-                    onChange={handleRdateDraftChange}
-                    required
-                    type={
-                      values.originalTiming?.type === 'all-day'
-                        ? 'date'
-                        : 'datetime-local'
-                    }
-                    value={values.rdateDraft ?? ''}
-                  />
-                  {values.originalTiming?.type === 'timed' && (
-                    <FormHelperText>
-                      {values.rdateEditSource
-                        ? t(
-                            'calendarEvents.editor.periodStartEditHelp',
-                            'Update the start while keeping its saved time zone and date-time kind.',
-                          )
-                        : t(
-                            'calendarEvents.editor.periodStartHelp',
-                            'For an added period, the date and time above are its start.',
-                          )}
-                    </FormHelperText>
-                  )}
-                  {values.originalTiming?.type === 'timed' &&
-                    values.timingType === 'timed' && (
-                      <FormControl
-                        component="fieldset"
-                        disabled={periodFormDisabled}
-                      >
-                        <FormLabel component="legend">
-                          {editingEndPeriod
-                            ? t(
-                                'calendarEvents.editor.periodEndGroup',
-                                'Explicit end of period',
-                              )
-                            : values.rdateEditSource
-                              ? t(
-                                  'calendarEvents.editor.existingPeriodDuration',
-                                  'Duration of period',
-                                )
-                              : t(
-                                  'calendarEvents.editor.periodDuration',
-                                  'Duration of added period',
-                                )}
-                        </FormLabel>
-                        {editingEndPeriod ? (
-                          <>
-                            <TextField
-                              inputProps={{
-                                'aria-describedby': periodDurationHelperId,
-                                'data-testid': 'rdate-period-end',
-                                step: 1,
-                              }}
-                              InputLabelProps={{ shrink: true }}
-                              label={t(
-                                'calendarEvents.editor.periodEnd',
-                                'Period end',
-                              )}
-                              onChange={handleRdatePeriodEndChange}
-                              required
-                              type="datetime-local"
-                              value={values.rdateEndDraft ?? ''}
-                            />
-                            <FormHelperText
-                              error={invalidPeriodEnd}
-                              id={periodDurationHelperId}
-                            >
-                              {invalidPeriodEnd
-                                ? t(
-                                    'calendarEvents.editor.invalidPeriodEnd',
-                                    'The end must be later than the start and keep its saved date-time kind and time zone.',
-                                  )
-                                : t(
-                                    'calendarEvents.editor.periodEndHelp',
-                                    'The explicit end keeps its saved date-time kind and time zone.',
-                                  )}
-                            </FormHelperText>
-                          </>
-                        ) : (
-                          <>
-                            <Stack
-                              direction="row"
-                              spacing={1}
-                              sx={{ flexWrap: 'wrap', rowGap: 1 }}
-                            >
-                              {periodDurationFields.map(({ field, label }) => (
-                                <TextField
-                                  inputProps={{
-                                    'aria-describedby': periodDurationHelperId,
-                                    min: 0,
-                                    step: 1,
-                                  }}
-                                  key={field}
-                                  label={label}
-                                  onChange={handleRdatePeriodDurationChange(
-                                    field,
-                                  )}
-                                  size="small"
-                                  sx={{
-                                    flex: '1 1 84px',
-                                    minWidth: 82,
-                                    maxWidth: 116,
-                                  }}
-                                  type="number"
-                                  value={values[field] ?? ''}
-                                />
-                              ))}
-                            </Stack>
-                            <FormHelperText
-                              error={invalidPeriodDuration}
-                              id={periodDurationHelperId}
-                            >
-                              {invalidPeriodDuration
-                                ? t(
-                                    'calendarEvents.editor.invalidRdateDuration',
-                                    'Enter a positive duration using whole-number units. Weeks cannot be combined with other units.',
-                                  )
-                                : t(
-                                    'calendarEvents.editor.periodDurationHelp',
-                                    'Use positive whole numbers. Weeks cannot be combined with days or time units.',
-                                  )}
-                            </FormHelperText>
-                          </>
+                  {values.recurrenceFrequency === 'WEEKLY' && (
+                    <>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={values.recurrenceWeekdays !== undefined}
+                            disabled={!weeklyByDayEnabled && !canChooseWeekdays}
+                            onChange={handleWeekdayModeChange}
+                          />
+                        }
+                        label={t(
+                          'calendarEvents.editor.chooseWeekdays',
+                          'Choose weekdays',
                         )}
-                      </FormControl>
+                      />
+                      {!weeklyByDayEnabled && !canChooseWeekdays && (
+                        <Typography color="text.secondary" variant="body2">
+                          {t(
+                            'calendarEvents.editor.weekdayRuleLimit',
+                            'Weekday selection requires a positive whole-number interval.',
+                          )}
+                        </Typography>
+                      )}
+                      {weeklyByDayEnabled && (
+                        <FormControl component="fieldset">
+                          <FormLabel component="legend">
+                            {t('calendarEvents.editor.repeatOn', 'Repeat on')}
+                          </FormLabel>
+                          <FormGroup row sx={{ flexWrap: 'wrap' }}>
+                            {WEEKDAYS.map((weekday) => {
+                              const startWeekday =
+                                calendarEventFormStartWeekday(values);
+                              return (
+                                <FormControlLabel
+                                  control={
+                                    <Checkbox
+                                      checked={
+                                        weekday === startWeekday ||
+                                        values.recurrenceWeekdays?.includes(
+                                          weekday,
+                                        ) === true
+                                      }
+                                      disabled={weekday === startWeekday}
+                                      onChange={() =>
+                                        handleWeekdayChange(weekday)
+                                      }
+                                    />
+                                  }
+                                  key={weekday}
+                                  label={t(
+                                    `calendarEvents.editor.weekday${weekday}`,
+                                    weekday,
+                                  )}
+                                />
+                              );
+                            })}
+                          </FormGroup>
+                          <Typography color="text.secondary" variant="body2">
+                            {t(
+                              'calendarEvents.editor.startWeekdayRequired',
+                              'The start date’s weekday is always included.',
+                            )}
+                          </Typography>
+                        </FormControl>
+                      )}
+                    </>
+                  )}
+
+                  {values.recurrenceEnd === 'count' && (
+                    <TextField
+                      inputProps={{ min: 1, step: 1 }}
+                      label={t(
+                        'calendarEvents.editor.occurrenceCount',
+                        'Number of occurrences',
+                      )}
+                      onChange={handleChange('recurrenceCount')}
+                      required
+                      type="number"
+                      value={values.recurrenceCount ?? '2'}
+                    />
+                  )}
+
+                  {values.recurrenceEnd === 'until' && (
+                    <TextField
+                      InputLabelProps={{ shrink: true }}
+                      label={t('calendarEvents.editor.untilDate', 'Until date')}
+                      onChange={handleChange('recurrenceUntil')}
+                      required
+                      type="date"
+                      value={values.recurrenceUntil ?? ''}
+                    />
+                  )}
+
+                  <Typography color="text.secondary" variant="body2">
+                    {t(
+                      'calendarEvents.editor.seriesOnly',
+                      'Changes apply to the entire series.',
                     )}
-                  <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
-                    <Button
+                  </Typography>
+                </>
+              )}
+
+              {event && values.rdateEditable && (
+                <FormControl component="fieldset">
+                  <FormLabel component="legend">
+                    {t(
+                      'calendarEvents.editor.additionalDates',
+                      'Additional recurrence dates',
+                    )}
+                  </FormLabel>
+                  <Stack spacing={1}>
+                    {(values.rdateValues ?? []).map((value, index) => {
+                      const label = formatRdateValue(value);
+                      return (
+                        <Stack
+                          alignItems="center"
+                          direction="row"
+                          justifyContent="space-between"
+                          key={`${label}-${index}`}
+                        >
+                          <Typography variant="body2">{label}</Typography>
+                          {value.type === 'period' &&
+                            calendarEventRdatePeriodIsEditable(value) && (
+                              <Button
+                                aria-label={t(
+                                  'calendarEvents.editor.editPeriodDate',
+                                  'Edit period',
+                                ).concat(`: ${label}`)}
+                                disabled={
+                                  Boolean(values.rdateOperation) ||
+                                  Boolean(values.rdateEditSource) ||
+                                  values.exdateChanged === true ||
+                                  values.timingChanged === true ||
+                                  saving
+                                }
+                                onClick={() => handleEditPeriodRdate(value)}
+                                type="button"
+                              >
+                                {t('calendarEvents.editor.editPeriod', 'Edit')}
+                              </Button>
+                            )}
+                          <Button
+                            aria-label={t(
+                              value.type === 'period'
+                                ? 'calendarEvents.editor.removePeriodDate'
+                                : 'calendarEvents.editor.removeAdditionalDate',
+                              value.type === 'period'
+                                ? 'Remove period date'
+                                : 'Remove additional date',
+                            ).concat(`: ${label}`)}
+                            disabled={
+                              Boolean(values.rdateOperation) ||
+                              Boolean(values.rdateEditSource) ||
+                              values.exdateChanged === true ||
+                              values.timingChanged === true ||
+                              saving
+                            }
+                            onClick={() => handleRemoveRdate(value)}
+                            type="button"
+                          >
+                            {t('calendarEvents.editor.remove', 'Remove')}
+                          </Button>
+                        </Stack>
+                      );
+                    })}
+                    <TextField
                       disabled={
                         Boolean(values.rdateOperation) ||
-                        Boolean(values.rdateEditSource) ||
                         values.exdateChanged === true ||
                         values.timingChanged === true ||
-                        values.rdateDraft?.trim() === '' ||
                         saving
                       }
-                      onClick={handleAddRdate}
-                      type="button"
+                      inputProps={
+                        values.originalTiming?.type === 'all-day'
+                          ? { 'data-testid': 'rdate-draft' }
+                          : {
+                              'data-testid': 'rdate-draft',
+                              step: values.rdateEditSource ? 1 : 60,
+                            }
+                      }
+                      InputLabelProps={{ shrink: true }}
+                      label={
+                        values.rdateEditSource
+                          ? t(
+                              'calendarEvents.editor.periodStart',
+                              'Period start',
+                            )
+                          : t(
+                              'calendarEvents.editor.additionalDate',
+                              'Additional date',
+                            )
+                      }
+                      onChange={handleRdateDraftChange}
+                      required
+                      type={
+                        values.originalTiming?.type === 'all-day'
+                          ? 'date'
+                          : 'datetime-local'
+                      }
+                      value={values.rdateDraft ?? ''}
+                    />
+                    {values.originalTiming?.type === 'timed' && (
+                      <FormHelperText>
+                        {values.rdateEditSource
+                          ? t(
+                              'calendarEvents.editor.periodStartEditHelp',
+                              'Update the start while keeping its saved time zone and date-time kind.',
+                            )
+                          : t(
+                              'calendarEvents.editor.periodStartHelp',
+                              'For an added period, the date and time above are its start.',
+                            )}
+                      </FormHelperText>
+                    )}
+                    {values.originalTiming?.type === 'timed' &&
+                      values.timingType === 'timed' && (
+                        <FormControl
+                          component="fieldset"
+                          disabled={periodFormDisabled}
+                        >
+                          <FormLabel component="legend">
+                            {editingEndPeriod
+                              ? t(
+                                  'calendarEvents.editor.periodEndGroup',
+                                  'Explicit end of period',
+                                )
+                              : values.rdateEditSource
+                                ? t(
+                                    'calendarEvents.editor.existingPeriodDuration',
+                                    'Duration of period',
+                                  )
+                                : t(
+                                    'calendarEvents.editor.periodDuration',
+                                    'Duration of added period',
+                                  )}
+                          </FormLabel>
+                          {editingEndPeriod ? (
+                            <>
+                              <TextField
+                                inputProps={{
+                                  'aria-describedby': periodDurationHelperId,
+                                  'data-testid': 'rdate-period-end',
+                                  step: 1,
+                                }}
+                                InputLabelProps={{ shrink: true }}
+                                label={t(
+                                  'calendarEvents.editor.periodEnd',
+                                  'Period end',
+                                )}
+                                onChange={handleRdatePeriodEndChange}
+                                required
+                                type="datetime-local"
+                                value={values.rdateEndDraft ?? ''}
+                              />
+                              <FormHelperText
+                                error={invalidPeriodEnd}
+                                id={periodDurationHelperId}
+                              >
+                                {invalidPeriodEnd
+                                  ? t(
+                                      'calendarEvents.editor.invalidPeriodEnd',
+                                      'The end must be later than the start and keep its saved date-time kind and time zone.',
+                                    )
+                                  : t(
+                                      'calendarEvents.editor.periodEndHelp',
+                                      'The explicit end keeps its saved date-time kind and time zone.',
+                                    )}
+                              </FormHelperText>
+                            </>
+                          ) : (
+                            <>
+                              <Stack
+                                direction="row"
+                                spacing={1}
+                                sx={{ flexWrap: 'wrap', rowGap: 1 }}
+                              >
+                                {periodDurationFields.map(
+                                  ({ field, label }) => (
+                                    <TextField
+                                      inputProps={{
+                                        'aria-describedby':
+                                          periodDurationHelperId,
+                                        min: 0,
+                                        step: 1,
+                                      }}
+                                      key={field}
+                                      label={label}
+                                      onChange={handleRdatePeriodDurationChange(
+                                        field,
+                                      )}
+                                      size="small"
+                                      sx={{
+                                        flex: '1 1 84px',
+                                        minWidth: 82,
+                                        maxWidth: 116,
+                                      }}
+                                      type="number"
+                                      value={values[field] ?? ''}
+                                    />
+                                  ),
+                                )}
+                              </Stack>
+                              <FormHelperText
+                                error={invalidPeriodDuration}
+                                id={periodDurationHelperId}
+                              >
+                                {invalidPeriodDuration
+                                  ? t(
+                                      'calendarEvents.editor.invalidRdateDuration',
+                                      'Enter a positive duration using whole-number units. Weeks cannot be combined with other units.',
+                                    )
+                                  : t(
+                                      'calendarEvents.editor.periodDurationHelp',
+                                      'Use positive whole numbers. Weeks cannot be combined with days or time units.',
+                                    )}
+                              </FormHelperText>
+                            </>
+                          )}
+                        </FormControl>
+                      )}
+                    <Stack
+                      direction="row"
+                      spacing={1}
+                      sx={{ flexWrap: 'wrap' }}
                     >
-                      {t('calendarEvents.editor.addAdditionalDate', 'Add date')}
-                    </Button>
-                    {values.rdateEditSource ? (
                       <Button
-                        aria-describedby={
-                          editingEndPeriod ? undefined : periodDurationHelperId
-                        }
                         disabled={
-                          periodFormDisabled || !periodValue || invalidPeriodEnd
+                          Boolean(values.rdateOperation) ||
+                          Boolean(values.rdateEditSource) ||
+                          values.exdateChanged === true ||
+                          values.timingChanged === true ||
+                          values.rdateDraft?.trim() === '' ||
+                          saving
                         }
-                        onClick={handleSavePeriodEdit}
+                        onClick={handleAddRdate}
                         type="button"
                       >
                         {t(
-                          'calendarEvents.editor.savePeriodChanges',
-                          'Save period changes',
+                          'calendarEvents.editor.addAdditionalDate',
+                          'Add date',
                         )}
                       </Button>
-                    ) : (
-                      values.originalTiming?.type === 'timed' &&
-                      values.timingType === 'timed' && (
+                      {values.rdateEditSource ? (
                         <Button
-                          aria-describedby={periodDurationHelperId}
-                          disabled={periodFormDisabled || !periodValue}
-                          onClick={handleAddPeriodRdate}
+                          aria-describedby={
+                            editingEndPeriod
+                              ? undefined
+                              : periodDurationHelperId
+                          }
+                          disabled={
+                            periodFormDisabled ||
+                            !periodValue ||
+                            invalidPeriodEnd
+                          }
+                          onClick={handleSavePeriodEdit}
                           type="button"
                         >
                           {t(
-                            'calendarEvents.editor.addPeriodDate',
-                            'Add period',
+                            'calendarEvents.editor.savePeriodChanges',
+                            'Save period changes',
                           )}
                         </Button>
-                      )
-                    )}
-                    {(values.rdateOperation || values.rdateEditSource) && (
-                      <Button
-                        disabled={saving}
-                        onClick={handleCancelRdate}
-                        type="button"
-                      >
-                        {t(
-                          'calendarEvents.editor.cancelDateChange',
-                          'Cancel date change',
-                        )}
-                      </Button>
-                    )}
-                  </Stack>
-                  {values.rdateOperation && (
-                    <Typography color="text.secondary" variant="body2">
-                      {values.rdateOperation.action === 'add'
-                        ? t(
-                            'calendarEvents.editor.dateWillBeAdded',
-                            'The date will be added when you save.',
-                          )
-                        : values.rdateOperation.action === 'add-period'
-                          ? t(
-                              'calendarEvents.editor.periodWillBeAdded',
-                              'The period will be added when you save.',
-                            )
-                          : values.rdateOperation.action === 'replace-period'
-                            ? t(
-                                'calendarEvents.editor.periodWillBeUpdated',
-                                'The period will be updated when you save.',
-                              )
-                            : t(
-                                'calendarEvents.editor.dateWillBeRemoved',
-                                'The date will be removed when you save.',
-                              )}
-                    </Typography>
-                  )}
-                </Stack>
-              </FormControl>
-            )}
-
-            {event && values.exdateEditable && (
-              <FormControl component="fieldset">
-                <FormLabel component="legend">
-                  {t('calendarEvents.editor.excludedDates', 'Excluded dates')}
-                </FormLabel>
-                <Stack spacing={1}>
-                  {(values.exdateValues ?? []).map((value, index) => {
-                    const label = formatRdateDateTime(value);
-                    return (
-                      <Stack
-                        alignItems="center"
-                        direction="row"
-                        justifyContent="space-between"
-                        key={`${label}-${index}`}
-                      >
-                        <Typography variant="body2">{label}</Typography>
+                      ) : (
+                        values.originalTiming?.type === 'timed' &&
+                        values.timingType === 'timed' && (
+                          <Button
+                            aria-describedby={periodDurationHelperId}
+                            disabled={periodFormDisabled || !periodValue}
+                            onClick={handleAddPeriodRdate}
+                            type="button"
+                          >
+                            {t(
+                              'calendarEvents.editor.addPeriodDate',
+                              'Add period',
+                            )}
+                          </Button>
+                        )
+                      )}
+                      {(values.rdateOperation || values.rdateEditSource) && (
                         <Button
-                          aria-label={t(
-                            'calendarEvents.editor.removeExcludedDate',
-                            'Remove excluded date',
-                          ).concat(`: ${label}`)}
-                          disabled={
-                            Boolean(values.exdateOperation) ||
-                            Boolean(values.rdateOperation) ||
-                            values.timingChanged === true ||
-                            saving
-                          }
-                          onClick={() => handleRemoveExdate(value)}
+                          disabled={saving}
+                          onClick={handleCancelRdate}
                           type="button"
                         >
-                          {t('calendarEvents.editor.remove', 'Remove')}
+                          {t(
+                            'calendarEvents.editor.cancelDateChange',
+                            'Cancel date change',
+                          )}
                         </Button>
-                      </Stack>
-                    );
-                  })}
-                  {values.exdateOperation && (
-                    <Stack direction="row" spacing={1}>
-                      <Button
-                        disabled={saving}
-                        onClick={handleCancelExdate}
-                        type="button"
-                      >
-                        {t(
-                          'calendarEvents.editor.cancelDateChange',
-                          'Cancel date change',
-                        )}
-                      </Button>
-                      <Typography color="text.secondary" variant="body2">
-                        {t(
-                          'calendarEvents.editor.excludedDateWillBeRemoved',
-                          'The excluded date will be removed when you save.',
-                        )}
-                      </Typography>
+                      )}
                     </Stack>
-                  )}
-                </Stack>
-              </FormControl>
-            )}
+                    {values.rdateOperation && (
+                      <Typography color="text.secondary" variant="body2">
+                        {values.rdateOperation.action === 'add'
+                          ? t(
+                              'calendarEvents.editor.dateWillBeAdded',
+                              'The date will be added when you save.',
+                            )
+                          : values.rdateOperation.action === 'add-period'
+                            ? t(
+                                'calendarEvents.editor.periodWillBeAdded',
+                                'The period will be added when you save.',
+                              )
+                            : values.rdateOperation.action === 'replace-period'
+                              ? t(
+                                  'calendarEvents.editor.periodWillBeUpdated',
+                                  'The period will be updated when you save.',
+                                )
+                              : t(
+                                  'calendarEvents.editor.dateWillBeRemoved',
+                                  'The date will be removed when you save.',
+                                )}
+                      </Typography>
+                    )}
+                  </Stack>
+                </FormControl>
+              )}
 
-            {validationError && (
-              <Alert severity="warning">{validationError}</Alert>
-            )}
-            {readOnly && (
-              <Alert severity="warning">
-                {t(
-                  'calendarEvents.editor.readOnly',
-                  'This calendar is read-only.',
-                )}
-              </Alert>
-            )}
-          </Stack>
+              {event && values.exdateEditable && (
+                <FormControl component="fieldset">
+                  <FormLabel component="legend">
+                    {t('calendarEvents.editor.excludedDates', 'Excluded dates')}
+                  </FormLabel>
+                  <Stack spacing={1}>
+                    {(values.exdateValues ?? []).map((value, index) => {
+                      const label = formatRdateDateTime(value);
+                      return (
+                        <Stack
+                          alignItems="center"
+                          direction="row"
+                          justifyContent="space-between"
+                          key={`${label}-${index}`}
+                        >
+                          <Typography variant="body2">{label}</Typography>
+                          <Button
+                            aria-label={t(
+                              'calendarEvents.editor.removeExcludedDate',
+                              'Remove excluded date',
+                            ).concat(`: ${label}`)}
+                            disabled={
+                              Boolean(values.exdateOperation) ||
+                              Boolean(values.rdateOperation) ||
+                              values.timingChanged === true ||
+                              saving
+                            }
+                            onClick={() => handleRemoveExdate(value)}
+                            type="button"
+                          >
+                            {t('calendarEvents.editor.remove', 'Remove')}
+                          </Button>
+                        </Stack>
+                      );
+                    })}
+                    {values.exdateOperation && (
+                      <Stack direction="row" spacing={1}>
+                        <Button
+                          disabled={saving}
+                          onClick={handleCancelExdate}
+                          type="button"
+                        >
+                          {t(
+                            'calendarEvents.editor.cancelDateChange',
+                            'Cancel date change',
+                          )}
+                        </Button>
+                        <Typography color="text.secondary" variant="body2">
+                          {t(
+                            'calendarEvents.editor.excludedDateWillBeRemoved',
+                            'The excluded date will be removed when you save.',
+                          )}
+                        </Typography>
+                      </Stack>
+                    )}
+                  </Stack>
+                </FormControl>
+              )}
+
+              {validationError && (
+                <Alert severity="warning">{validationError}</Alert>
+              )}
+              {readOnly && (
+                <Alert severity="warning">
+                  {t(
+                    'calendarEvents.editor.readOnly',
+                    'This calendar is read-only.',
+                  )}
+                </Alert>
+              )}
+            </Stack>
+          )}
         </DialogContent>
 
         <DialogActions>
@@ -1388,7 +1605,12 @@ export function CalendarEventEditorDialog({
             {t('cancel', 'Cancel')}
           </Button>
           <LoadingButton
-            disabled={Boolean(validationError) || readOnly}
+            disabled={
+              Boolean(validationError) ||
+              readOnly ||
+              chooseScope ||
+              missingOccurrence
+            }
             loading={saving}
             type="submit"
             variant="contained"
@@ -1413,6 +1635,42 @@ function formatRdateValue(
       : `${formatRdateDateTime(timing.start)} (${formatRdateDuration(timing.duration)})`;
   }
   return formatRdateDateTime(value);
+}
+
+function recurrenceTimingFromEventTiming(
+  timing: CalendarEventTiming,
+): CalendarEventRecurrenceTiming {
+  if (timing.type === 'all-day') {
+    return {
+      type: 'end',
+      start: { type: 'date', value: timing.startDate },
+      end: { type: 'date', value: timing.endDate },
+    };
+  }
+
+  const endpoint = (value: (typeof timing)['start']): CalendarEventDateTime =>
+    value.type === 'floating'
+      ? {
+          type: 'floating-date-time',
+          value: localDateTimeWithSeconds(value.local),
+        }
+      : {
+          type: 'date-time',
+          value: {
+            local: localDateTimeWithSeconds(value.local),
+            timezone: value.timezone,
+          },
+        };
+
+  return {
+    type: 'end',
+    start: endpoint(timing.start),
+    end: endpoint(timing.end),
+  };
+}
+
+function localDateTimeWithSeconds(local: string): string {
+  return local.length === 16 ? `${local}:00` : local;
 }
 
 function formatRdateDateTime(

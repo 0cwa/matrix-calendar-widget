@@ -52,6 +52,7 @@ import {
   CalDavEventResource,
   CalDavEventTransportError,
   ICalendarEventCodec,
+  ICalendarEventCodecError,
   MatrixOpenIdCalDavCredentialError,
   MatrixOpenIdCalDavCredentialProviderFactory,
 } from '../caldav';
@@ -811,6 +812,15 @@ export class CalendarGatewayController {
         .parse(scope.calendarId, normalizedEventId, current.icalendar)
         .applyPatch(patch ?? {});
 
+      if (
+        patch?.recurrence &&
+        'occurrence' in patch.recurrence &&
+        encoded.icalendar === current.icalendar &&
+        etag === current.etag
+      ) {
+        return this.eventDto(codec, scope.calendarId, current);
+      }
+
       await client.updateEvent(normalizedEventId, etag, encoded.icalendar);
 
       return this.eventDto(
@@ -1252,6 +1262,13 @@ export class CalendarGatewayController {
         throw new BadGatewayException({
           code: 'caldav-upstream-error',
           message: 'CalDAV event request failed',
+        });
+      }
+
+      if (error instanceof ICalendarEventCodecError) {
+        throw new BadRequestException({
+          code: error.code,
+          message: error.message,
         });
       }
 

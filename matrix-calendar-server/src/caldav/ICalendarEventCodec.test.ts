@@ -25,11 +25,573 @@ import fs from 'fs';
 import ICAL from 'ical.js';
 import path from 'path';
 import {
+  applyOccurrenceTimingOverride,
   ICalendarEventCodec,
   ICalendarEventCodecError,
 } from './ICalendarEventCodec';
 
 const codec = new ICalendarEventCodec();
+
+describe('applyOccurrenceTimingOverride', () => {
+  const now = new Date('2026-10-03T15:16:17.987Z');
+
+  it('creates one detached override from an actual recurrence candidate', () => {
+    const source = simpleRecurringSource(
+      'DTSTART;TZID=Europe/Stockholm:20261001T090000',
+      'DTEND;TZID=Europe/Stockholm:20261001T100000',
+      ['CREATED:20260921T100000Z'],
+      ['Europe/Stockholm'],
+    );
+    const parsed = codec.parse('team', 'instance.ics', source);
+    const calendar = ICAL.Component.fromString(source);
+    const calendarBefore = calendar.toString();
+    const result = applyOccurrenceTimingOverride(
+      calendar,
+      parsed.event,
+      {
+        recurrenceId: {
+          type: 'date-time',
+          value: {
+            local: '2026-10-02T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        timing: {
+          type: 'end',
+          start: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-02T11:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          end: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-02T12:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        },
+      },
+      {
+        source,
+        now,
+        viewerTimezone: 'America/Los_Angeles',
+      },
+    );
+
+    expect(result.action).toBe('created');
+    expect(result.revisionUpdated).toBe(true);
+    expect(result.component.getFirstPropertyValue('uid')).toBe(
+      'simple-recurring@example.test',
+    );
+    expect(result.component.getAllProperties('rrule')).toHaveLength(0);
+    expect(result.component.getAllProperties('rdate')).toHaveLength(0);
+    expect(result.component.getAllProperties('exdate')).toHaveLength(0);
+    expect(
+      result.component.getFirstProperty('recurrence-id')?.toICALString(),
+    ).toBe('RECURRENCE-ID;TZID=Europe/Stockholm:20261002T090000');
+    expect(
+      result.component
+        .getFirstProperty('x-custom-event-property')
+        ?.getFirstValue(),
+    ).toBe('preserve-event-value');
+    expect(result.component.getFirstProperty('x-instance-marker')).toBeNull();
+    expect(revisionPropertyLines(result.component)).toEqual([
+      'DTSTAMP:20261003T151617Z',
+      'CREATED:20260921T100000Z',
+      'LAST-MODIFIED:20261003T151617Z',
+      'SEQUENCE:1',
+    ]);
+    expect(calendar.toString()).toBe(calendarBefore);
+  });
+
+  it('updates a moved override by original identity and keeps its parameters', () => {
+    const source = withDetachedEvents(
+      simpleRecurringSource(
+        'DTSTART;TZID=Europe/Stockholm:20261001T090000',
+        'DTEND;TZID=Europe/Stockholm:20261001T100000',
+        [],
+        ['Europe/Stockholm'],
+      ),
+      [
+        [
+          'BEGIN:VEVENT',
+          'UID:simple-recurring@example.test',
+          'DTSTAMP:20260922T120000Z',
+          'RECURRENCE-ID;TZID=Europe/Stockholm;X-CLIENT=keep:20261002T090000',
+          'DTSTART;TZID=Europe/Stockholm:20261002T150000',
+          'DTEND;TZID=Europe/Stockholm:20261002T160000',
+          'X-OVERRIDE-MARKER;X-PARAM=keep:moved',
+          'END:VEVENT',
+        ].join('\r\n'),
+        [
+          'BEGIN:VEVENT',
+          'UID:simple-recurring@example.test',
+          'DTSTAMP:20260922T120000Z',
+          'RECURRENCE-ID;TZID=Europe/Stockholm:20261003T090000',
+          'DTSTART;TZID=Europe/Stockholm:20261003T090000',
+          'DTEND;TZID=Europe/Stockholm:20261003T100000',
+          'X-OVERRIDE-MARKER;X-PARAM=keep:sibling',
+          'END:VEVENT',
+        ].join('\r\n'),
+      ],
+    );
+    const parsed = codec.parse('team', 'moved-instance.ics', source);
+    const sourceCalendar = ICAL.Component.fromString(source);
+    const sourceEvents = sourceCalendar.getAllSubcomponents('vevent');
+    const originalRecurrenceId = sourceEvents[1]
+      .getFirstProperty('recurrence-id')
+      ?.toICALString();
+    const sourceBefore = sourceCalendar.toString();
+    const result = applyOccurrenceTimingOverride(
+      sourceCalendar,
+      parsed.event,
+      {
+        recurrenceId: parsed.event.recurrence!.overrides![0].recurrenceId,
+        timing: {
+          type: 'end',
+          start: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-02T16:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          end: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-02T17:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        },
+      },
+      {
+        source,
+        now,
+        viewerTimezone: 'Europe/Stockholm',
+      },
+    );
+
+    expect(result.action).toBe('updated');
+    expect(result.revisionUpdated).toBe(true);
+    expect(
+      result.component.getFirstProperty('recurrence-id')?.toICALString(),
+    ).toBe(originalRecurrenceId);
+    expect(result.component.getFirstPropertyValue('dtstart')?.toString()).toBe(
+      '2026-10-02T16:00:00',
+    );
+    expect(
+      result.component.getFirstProperty('x-override-marker')?.toICALString(),
+    ).toBe('X-OVERRIDE-MARKER;X-PARAM=keep:moved');
+    expect(revisionPropertyLines(result.component)).toEqual([
+      'DTSTAMP:20261003T151617Z',
+      'LAST-MODIFIED:20261003T151617Z',
+      'SEQUENCE:1',
+    ]);
+    expect(sourceCalendar.toString()).toBe(sourceBefore);
+    expect(
+      sourceEvents[2].getFirstProperty('x-override-marker')?.toICALString(),
+    ).toBe('X-OVERRIDE-MARKER;X-PARAM=keep:sibling');
+  });
+
+  it('preserves DATE and floating values while validating the viewer-local interval', () => {
+    const dateSource = simpleRecurringSource(
+      'DTSTART;VALUE=DATE:20261001',
+      'DTEND;VALUE=DATE:20261002',
+    );
+    const dateEvent = codec.parse(
+      'team',
+      'date-instance.ics',
+      dateSource,
+    ).event;
+    const dateResult = applyOccurrenceTimingOverride(
+      ICAL.Component.fromString(dateSource),
+      dateEvent,
+      {
+        recurrenceId: { type: 'date', value: '2026-10-02' },
+        timing: {
+          type: 'end',
+          start: { type: 'date', value: '2026-10-02' },
+          end: { type: 'date', value: '2026-10-04' },
+        },
+      },
+      {
+        source: dateSource,
+        now,
+        viewerTimezone: 'Europe/Stockholm',
+      },
+    );
+    expect(dateResult.component.getFirstPropertyValue('dtstart')).toMatchObject(
+      {
+        isDate: true,
+        day: 2,
+      },
+    );
+
+    const floatingSource = simpleRecurringSource(
+      'DTSTART:20261001T090000',
+      'DTEND:20261001T100000',
+    );
+    const floatingEvent = codec.parse(
+      'team',
+      'floating-instance.ics',
+      floatingSource,
+    ).event;
+    const floatingResult = applyOccurrenceTimingOverride(
+      ICAL.Component.fromString(floatingSource),
+      floatingEvent,
+      {
+        recurrenceId: {
+          type: 'floating-date-time',
+          value: '2026-10-02T09:00:00',
+        },
+        timing: {
+          type: 'end',
+          start: {
+            type: 'floating-date-time',
+            value: '2026-10-02T10:00:00',
+          },
+          end: {
+            type: 'floating-date-time',
+            value: '2026-10-02T11:00:00',
+          },
+        },
+      },
+      {
+        source: floatingSource,
+        now,
+        viewerTimezone: 'America/Los_Angeles',
+      },
+    );
+    expect(
+      floatingResult.component.getFirstProperty('dtstart')?.toICALString(),
+    ).toBe('DTSTART:20261002T100000');
+    expect(
+      floatingResult.component.getFirstProperty('dtend')?.toICALString(),
+    ).toBe('DTEND:20261002T110000');
+  });
+
+  it('uses bundled timezone rules across a DST boundary and rejects a gap', () => {
+    const source = simpleRecurringSource(
+      'DTSTART;TZID=Europe/Stockholm:20260328T013000',
+      'DTEND;TZID=Europe/Stockholm:20260328T023000',
+      [],
+      ['Europe/Stockholm'],
+    );
+    const event = codec.parse('team', 'dst-instance.ics', source).event;
+    const accepted = applyOccurrenceTimingOverride(
+      ICAL.Component.fromString(source),
+      event,
+      {
+        recurrenceId: {
+          type: 'date-time',
+          value: {
+            local: '2026-03-29T01:30:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        timing: {
+          type: 'end',
+          start: {
+            type: 'date-time',
+            value: {
+              local: '2026-03-29T01:30:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          end: {
+            type: 'date-time',
+            value: {
+              local: '2026-03-29T03:30:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        },
+      },
+      {
+        source,
+        now,
+        viewerTimezone: 'America/Los_Angeles',
+      },
+    );
+    expect(accepted.action).toBe('created');
+
+    expect(() =>
+      applyOccurrenceTimingOverride(
+        ICAL.Component.fromString(source),
+        event,
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-03-29T01:30:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          timing: {
+            type: 'end',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-03-29T02:30:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            end: {
+              type: 'date-time',
+              value: {
+                local: '2026-03-29T03:30:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
+        },
+        {
+          source,
+          now,
+          viewerTimezone: 'Europe/Stockholm',
+        },
+      ),
+    ).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'This occurrence cannot be timed safely because its recurrence identity or source data is unsupported or ambiguous.',
+      ),
+    );
+  });
+
+  it.each([
+    ['not an actual recurrence candidate', [], '20261009T090000'],
+    [
+      'excluded by EXDATE',
+      ['EXDATE;TZID=Europe/Stockholm:20261002T090000'],
+      '20261002T090000',
+    ],
+  ])('rejects %s', (_label, extraLines, targetCompact) => {
+    const source = simpleRecurringSource(
+      'DTSTART;TZID=Europe/Stockholm:20261001T090000',
+      'DTEND;TZID=Europe/Stockholm:20261001T100000',
+      extraLines,
+      ['Europe/Stockholm'],
+    );
+    const event = codec.parse('team', 'not-an-instance.ics', source).event;
+    expect(() =>
+      applyOccurrenceTimingOverride(
+        ICAL.Component.fromString(source),
+        event,
+        {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: `2026-10-${targetCompact.slice(6, 8)}T09:00:00`,
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          timing: {
+            type: 'end',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-02T11:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            end: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-02T12:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
+        },
+        {
+          source,
+          now,
+          viewerTimezone: 'Europe/Stockholm',
+        },
+      ),
+    ).toThrow(ICalendarEventCodecError);
+  });
+
+  it('rejects same-resource alarms, ambiguous target IDs, and unsafe intervals', () => {
+    const base = simpleRecurringSource(
+      'DTSTART;TZID=Europe/Stockholm:20261001T090000',
+      'DTEND;TZID=Europe/Stockholm:20261001T100000',
+      [],
+      ['Europe/Stockholm'],
+    );
+    const withAlarm = simpleRecurringSource(
+      'DTSTART;TZID=Europe/Stockholm:20261001T090000',
+      'DTEND;TZID=Europe/Stockholm:20261001T100000',
+      [
+        'BEGIN:VALARM',
+        'ACTION:DISPLAY',
+        'DESCRIPTION:keep alarm',
+        'TRIGGER:-PT5M',
+        'END:VALARM',
+      ],
+      ['Europe/Stockholm'],
+    );
+    const operation = {
+      recurrenceId: {
+        type: 'date-time' as const,
+        value: {
+          local: '2026-10-02T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      timing: {
+        type: 'end' as const,
+        start: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-10-02T11:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        end: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-10-02T12:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      },
+    };
+
+    const alarmEvent = codec.parse('team', 'alarm-series.ics', withAlarm).event;
+    expect(() =>
+      applyOccurrenceTimingOverride(
+        ICAL.Component.fromString(withAlarm),
+        alarmEvent,
+        operation,
+        { source: withAlarm, now, viewerTimezone: 'Europe/Stockholm' },
+      ),
+    ).toThrow(
+      new ICalendarEventCodecError(
+        'unsupported-patch',
+        'Occurrence timing edits are unavailable for recurrence resources with VALARM data; alarms are preserved unchanged.',
+      ),
+    );
+
+    const duplicateTarget = withDetachedEvents(base, [
+      ...[1, 2].map((index) =>
+        [
+          'BEGIN:VEVENT',
+          'UID:simple-recurring@example.test',
+          'RECURRENCE-ID;TZID=Europe/Stockholm:20261002T090000',
+          `DTSTART;TZID=Europe/Stockholm:20261002T1${index}0000`,
+          `DTEND;TZID=Europe/Stockholm:20261002T1${index}3000`,
+          'END:VEVENT',
+        ].join('\r\n'),
+      ),
+    ]);
+    const duplicateEvent = codec.parse(
+      'team',
+      'duplicate-instance.ics',
+      duplicateTarget,
+    ).event;
+    expect(() =>
+      applyOccurrenceTimingOverride(
+        ICAL.Component.fromString(duplicateTarget),
+        duplicateEvent,
+        operation,
+        {
+          source: duplicateTarget,
+          now,
+          viewerTimezone: 'Europe/Stockholm',
+        },
+      ),
+    ).toThrow(ICalendarEventCodecError);
+
+    const event = codec.parse('team', 'unsafe-end.ics', base).event;
+    expect(() =>
+      applyOccurrenceTimingOverride(
+        ICAL.Component.fromString(base),
+        event,
+        {
+          ...operation,
+          timing: {
+            ...operation.timing,
+            end: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-02T10:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
+        },
+        { source: base, now, viewerTimezone: 'Europe/Stockholm' },
+      ),
+    ).toThrow(ICalendarEventCodecError);
+  });
+
+  it('keeps malformed target revision properties available for exact restoration', () => {
+    const source = withDetachedEvents(
+      simpleRecurringSource(
+        'DTSTART;TZID=Europe/Stockholm:20261001T090000',
+        'DTEND;TZID=Europe/Stockholm:20261001T100000',
+        [],
+        ['Europe/Stockholm'],
+      ),
+      [
+        [
+          'BEGIN:VEVENT',
+          'UID:simple-recurring@example.test',
+          'DTSTAMP:20260922T120000Z',
+          'LAST-MODIFIED :20260922T120000Z',
+          'RECURRENCE-ID;TZID=Europe/Stockholm:20261002T090000',
+          'DTSTART;TZID=Europe/Stockholm:20261002T110000',
+          'DTEND;TZID=Europe/Stockholm:20261002T120000',
+          'END:VEVENT',
+        ].join('\r\n'),
+      ],
+    );
+    const parsed = codec.parse('team', 'opaque-override-revision.ics', source);
+    const result = applyOccurrenceTimingOverride(
+      ICAL.Component.fromString(source),
+      parsed.event,
+      {
+        recurrenceId: parsed.event.recurrence!.overrides![0].recurrenceId,
+        timing: {
+          type: 'end',
+          start: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-02T13:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          end: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-02T14:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        },
+      },
+      {
+        source,
+        now,
+        viewerTimezone: 'Europe/Stockholm',
+      },
+    );
+
+    expect(result.revisionUpdated).toBe(false);
+    expect(
+      result.sourceRevisionProperties.map((property) => property.physicalLines),
+    ).toEqual([
+      ['DTSTAMP:20260922T120000Z'],
+      ['LAST-MODIFIED :20260922T120000Z'],
+    ]);
+  });
+});
 
 describe('ICalendarEventCodec', () => {
   it('decodes supported VEVENT fields into the calendar domain', () => {
@@ -66,6 +628,370 @@ describe('ICalendarEventCodec', () => {
       priority: 5,
     });
     expect(parsed.event.unsupportedTimezone).toBeUndefined();
+  });
+
+  it('serializes a one-occurrence timing write without changing the master', () => {
+    const source = simpleRecurringSource(
+      'DTSTART;TZID=Europe/Stockholm:20261001T090000',
+      'DTEND;TZID=Europe/Stockholm:20261001T100000',
+      ['CREATED:20260921T100000Z', 'SEQUENCE:4'],
+      ['Europe/Stockholm'],
+    );
+    const fixedCodec = new ICalendarEventCodec(
+      () => new Date('2026-10-03T15:16:17.987Z'),
+    );
+    const parsed = fixedCodec.parse('team', 'instance-write.ics', source);
+    const patch = {
+      recurrence: {
+        occurrence: {
+          action: 'set-timing',
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-02T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          timing: {
+            type: 'end',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-02T11:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            end: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-02T12:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
+          viewerTimezone: 'America/Los_Angeles',
+        },
+      },
+    } as unknown as CalendarEventPatch;
+    const updated = parsed.applyPatch(patch);
+    const output = ICAL.Component.fromString(updated.icalendar);
+    const events = output.getAllSubcomponents('vevent');
+
+    expect(events).toHaveLength(2);
+    expect(events[0].getFirstPropertyValue('rrule')?.toString()).toBe(
+      'FREQ=DAILY;COUNT=3',
+    );
+    expect(events[0].getFirstPropertyValue('dtstart')?.toString()).toBe(
+      '2026-10-01T09:00:00',
+    );
+    expect(revisionPropertyLines(events[0])).toEqual([
+      'DTSTAMP:20260922T120000Z',
+      'CREATED:20260921T100000Z',
+      'SEQUENCE:4',
+    ]);
+    expect(events[1].getFirstProperty('recurrence-id')?.toICALString()).toBe(
+      'RECURRENCE-ID;TZID=Europe/Stockholm:20261002T090000',
+    );
+    expect(events[1].getFirstPropertyValue('dtstart')?.toString()).toBe(
+      '2026-10-02T11:00:00',
+    );
+    expect(events[1].getFirstPropertyValue('dtend')?.toString()).toBe(
+      '2026-10-02T12:00:00',
+    );
+    expect(revisionPropertyLines(events[1])).toEqual([
+      'DTSTAMP:20261003T151617Z',
+      'CREATED:20260921T100000Z',
+      'LAST-MODIFIED:20261003T151617Z',
+      'SEQUENCE:5',
+    ]);
+    expect(updated.event.revision).toEqual(parsed.event.revision);
+    expect(updated.event.recurrence?.overrides).toContainEqual({
+      recurrenceId: {
+        type: 'date-time',
+        value: {
+          local: '2026-10-02T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      timing: {
+        type: 'end',
+        start: {
+          type: 'date-time',
+          value: {
+            local: '2026-10-02T11:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        end: {
+          type: 'date-time',
+          value: {
+            local: '2026-10-02T12:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      },
+    });
+  });
+
+  it('preserves raw revision lines for the untouched master and sibling overrides', () => {
+    const master = simpleRecurringSource(
+      'DTSTART:20261001T090000',
+      'DTEND:20261001T100000',
+      [
+        'SEQUENCE:4junk',
+        'LAST-MODIFIED:20260920T101112Z',
+        'LAST-MODIFIED:duplicate-master-value',
+      ],
+    );
+    const sibling = [
+      'BEGIN:VEVENT',
+      'UID:simple-recurring@example.test',
+      'DTSTAMP:20260922T120000Z',
+      'SEQUENCE:0004',
+      'SEQUENCE:4junk',
+      'RECURRENCE-ID:20261003T090000',
+      'DTSTART:20261003T090000',
+      'DTEND:20261003T100000',
+      'X-OVERRIDE-MARKER:untouched',
+      'END:VEVENT',
+    ].join('\r\n');
+    const source = withDetachedEvents(master, [sibling]);
+    const parsed = codec.parse('team', 'raw-revisions.ics', source);
+    const result = parsed.applyPatch({
+      recurrence: {
+        occurrence: {
+          action: 'set-timing',
+          recurrenceId: {
+            type: 'floating-date-time',
+            value: '2026-10-02T09:00:00',
+          },
+          timing: {
+            type: 'end',
+            start: {
+              type: 'floating-date-time',
+              value: '2026-10-02T11:00:00',
+            },
+            end: {
+              type: 'floating-date-time',
+              value: '2026-10-02T12:00:00',
+            },
+          },
+          viewerTimezone: 'UTC',
+        },
+      },
+    });
+
+    const sourceBlocks = rawVeventBlocks(source);
+    const outputBlocks = rawVeventBlocks(result.icalendar);
+    expect(outputBlocks).toHaveLength(3);
+    expect(rawRevisionLines(outputBlocks[0])).toEqual(
+      rawRevisionLines(sourceBlocks[0]),
+    );
+    expect(rawRevisionLines(outputBlocks[1])).toEqual(
+      rawRevisionLines(sourceBlocks[1]),
+    );
+  });
+
+  it('returns the original bytes for an exact existing override timing', () => {
+    const source = withDetachedEvents(
+      simpleRecurringSource(
+        'DTSTART:20261001T090000',
+        'DTEND:20261001T100000',
+        ['SEQUENCE:4'],
+      ),
+      [
+        [
+          'BEGIN:VEVENT',
+          'UID:simple-recurring@example.test',
+          'DTSTAMP:20260922T120000Z',
+          'CREATED:20260921T100000Z',
+          'LAST-MODIFIED:20260922T120000Z',
+          'SEQUENCE:2',
+          'RECURRENCE-ID:20261002T090000',
+          'DTSTART:20261002T110000',
+          'DTEND:20261002T120000',
+          'END:VEVENT',
+        ].join('\r\n'),
+      ],
+    );
+    const patch: CalendarEventPatch = {
+      recurrence: {
+        occurrence: {
+          action: 'set-timing',
+          recurrenceId: {
+            type: 'floating-date-time',
+            value: '2026-10-02T09:00:00',
+          },
+          timing: {
+            type: 'end',
+            start: {
+              type: 'floating-date-time',
+              value: '2026-10-02T11:00:00',
+            },
+            end: {
+              type: 'floating-date-time',
+              value: '2026-10-02T12:00:00',
+            },
+          },
+          viewerTimezone: 'UTC',
+        },
+      },
+    };
+
+    const parsed = codec.parse('team', 'exact-override.ics', source);
+    const result = parsed.applyPatch(patch);
+
+    expect(result.icalendar).toBe(source);
+    expect(result.event.revision).toEqual(parsed.event.revision);
+  });
+
+  it('rejects a raw RECURRENCE-ID that duplicates TZID parameters', () => {
+    const source = withDetachedEvents(
+      simpleRecurringSource(
+        'DTSTART;TZID=Europe/Stockholm:20261001T090000',
+        'DTEND;TZID=Europe/Stockholm:20261001T100000',
+        [],
+        ['Europe/Stockholm', 'America/Los_Angeles'],
+      ),
+      [
+        [
+          'BEGIN:VEVENT',
+          'UID:simple-recurring@example.test',
+          'DTSTAMP:20260922T120000Z',
+          'RECURRENCE-ID;TZID=Europe/Stockholm;TZID=America/Los_Angeles:20261002T090000',
+          'DTSTART;TZID=Europe/Stockholm:20261002T110000',
+          'DTEND;TZID=Europe/Stockholm:20261002T120000',
+          'END:VEVENT',
+        ].join('\r\n'),
+      ],
+    );
+
+    expect(() => {
+      codec.parse('team', 'ambiguous-identity.ics', source).applyPatch({
+        recurrence: {
+          occurrence: {
+            action: 'set-timing',
+            recurrenceId: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-02T09:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            timing: {
+              type: 'end',
+              start: {
+                type: 'date-time',
+                value: {
+                  local: '2026-10-02T11:00:00',
+                  timezone: 'Europe/Stockholm',
+                },
+              },
+              end: {
+                type: 'date-time',
+                value: {
+                  local: '2026-10-02T12:00:00',
+                  timezone: 'Europe/Stockholm',
+                },
+              },
+            },
+            viewerTimezone: 'Europe/Stockholm',
+          },
+        },
+      });
+    }).toThrow(ICalendarEventCodecError);
+  });
+
+  it.each([
+    {
+      recurrenceId: 'RECURRENCE-ID:20261032T090000',
+      start: 'DTSTART:20261101T110000',
+      end: 'DTEND:20261101T120000',
+    },
+    {
+      recurrenceId: 'RECURRENCE-ID:20261101T090000',
+      start: 'DTSTART:20261032T110000',
+      end: 'DTEND:20261101T120000',
+    },
+  ])(
+    'rejects a non-canonical raw occurrence identity or DTSTART ($recurrenceId)',
+    ({ recurrenceId, start, end }) => {
+      const master = simpleRecurringSource(
+        'DTSTART:20261001T090000',
+        'DTEND:20261001T100000',
+      ).replace('RRULE:FREQ=DAILY;COUNT=3', 'RRULE:FREQ=DAILY;COUNT=40');
+      const source = withDetachedEvents(master, [
+        [
+          'BEGIN:VEVENT',
+          'UID:simple-recurring@example.test',
+          'DTSTAMP:20260922T120000Z',
+          recurrenceId,
+          start,
+          end,
+          'END:VEVENT',
+        ].join('\r\n'),
+      ]);
+
+      expect(() =>
+        codec.parse('team', 'normalized-date.ics', source).applyPatch({
+          recurrence: {
+            occurrence: {
+              action: 'set-timing',
+              recurrenceId: {
+                type: 'floating-date-time',
+                value: '2026-11-01T09:00:00',
+              },
+              timing: {
+                type: 'end',
+                start: {
+                  type: 'floating-date-time',
+                  value: '2026-11-01T13:00:00',
+                },
+                end: {
+                  type: 'floating-date-time',
+                  value: '2026-11-01T14:00:00',
+                },
+              },
+              viewerTimezone: 'UTC',
+            },
+          },
+        }),
+      ).toThrow(ICalendarEventCodecError);
+    },
+  );
+
+  it('rejects unrelated fields in an occurrence timing write', () => {
+    const parsed = codec.parse(
+      'team',
+      'instance-write-extra.ics',
+      simpleRecurringSource('DTSTART:20261001T090000', 'DTEND:20261001T100000'),
+    );
+
+    const patch = {
+      title: 'Must stay a series edit',
+      recurrence: {
+        occurrence: {
+          action: 'set-timing',
+          recurrenceId: {
+            type: 'floating-date-time',
+            value: '2026-10-02T09:00:00',
+          },
+          timing: {
+            type: 'end',
+            start: {
+              type: 'floating-date-time',
+              value: '2026-10-02T11:00:00',
+            },
+            end: {
+              type: 'floating-date-time',
+              value: '2026-10-02T12:00:00',
+            },
+          },
+          viewerTimezone: 'UTC',
+        },
+      },
+    } as unknown as CalendarEventPatch;
+    expect(() => parsed.applyPatch(patch)).toThrow(ICalendarEventCodecError);
   });
 
   it('creates UTC whole-second revision metadata from one clock instant', () => {
@@ -3336,6 +4262,29 @@ function revisionPropertyLines(vevent: ICAL.Component): string[] {
   );
 }
 
+function rawVeventBlocks(source: string): string[][] {
+  const blocks: string[][] = [];
+  let current: string[] | undefined;
+  for (const line of source.split(/\r\n|\n|\r/)) {
+    if (/^BEGIN:VEVENT$/i.test(line)) {
+      current = [line];
+    } else if (current) {
+      current.push(line);
+      if (/^END:VEVENT$/i.test(line)) {
+        blocks.push(current);
+        current = undefined;
+      }
+    }
+  }
+  return blocks;
+}
+
+function rawRevisionLines(block: string[]): string[] {
+  return block.filter((line) =>
+    /^(DTSTAMP|CREATED|LAST-MODIFIED|SEQUENCE)(?:;|:)/i.test(line),
+  );
+}
+
 function simpleRecurringSource(
   dtstart: string,
   dtend: string,
@@ -3368,4 +4317,13 @@ function simpleRecurringSource(
     'END:VEVENT',
     'END:VCALENDAR',
   ].join('\r\n');
+}
+
+function withDetachedEvents(source: string, events: string[]): string {
+  const endIndex = source.lastIndexOf('END:VCALENDAR');
+  if (endIndex < 0) {
+    throw new Error('Source calendar is missing END:VCALENDAR');
+  }
+  const prefix = source.slice(0, endIndex).replace(/(?:\r\n|\n|\r)$/, '');
+  return `${prefix}\r\n${events.join('\r\n')}\r\nEND:VCALENDAR`;
 }

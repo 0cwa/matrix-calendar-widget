@@ -155,6 +155,31 @@ describe('InMemoryCalendarRepository', () => {
     ).toBe(4);
   });
 
+  it('defensively clones projected external links', async () => {
+    const sourceLink = {
+      kind: 'event' as const,
+      href: 'https://example.test/original',
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [{ ...events[0], id: 'linked', externalLinks: [sourceLink] }],
+    });
+
+    sourceLink.href = 'https://example.test/source-mutated';
+    const returned = await repository.getEvent('team', 'linked');
+    expect(returned.externalLinks?.[0].href).toBe(
+      'https://example.test/original',
+    );
+
+    Object.assign(returned.externalLinks![0], {
+      href: 'https://example.test/returned-mutated',
+    });
+    const fetched = await repository.getEvent('team', 'linked');
+    expect(fetched.externalLinks?.[0].href).toBe(
+      'https://example.test/original',
+    );
+  });
+
   it('defensively clones recurrence override identity and timing', async () => {
     const inputOverride = recurrenceOverride();
     const inputRdate = recurrencePeriod();
@@ -246,6 +271,265 @@ describe('InMemoryCalendarRepository', () => {
     returned.timing.start.value = '2099-01-01T00:00:00';
     const fetched = await repository.getEvent('team', 'period-add');
     expect(fetched.recurrence?.rdates).toEqual([value]);
+  });
+
+  it('stores occurrence timing overrides without changing the series timing', async () => {
+    const event: CalendarEvent = {
+      ...events[2],
+      id: 'occurrence-timing',
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-01-12T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const timing = {
+      type: 'end' as const,
+      start: {
+        type: 'date-time' as const,
+        value: {
+          local: '2026-01-12T11:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      end: {
+        type: 'date-time' as const,
+        value: {
+          local: '2026-01-12T12:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    };
+
+    const updated = await repository.updateEvent('team', event.id, {
+      recurrence: {
+        occurrence: {
+          action: 'set-timing',
+          recurrenceId,
+          timing,
+          viewerTimezone: 'Europe/Stockholm',
+        },
+      },
+    });
+
+    expect(updated.timing).toEqual(event.timing);
+    expect(updated.recurrence?.overrides).toEqual([{ recurrenceId, timing }]);
+    const fetched = await repository.getEvent('team', event.id);
+    expect(fetched.recurrence?.overrides).toEqual([{ recurrenceId, timing }]);
+  });
+
+  it('rejects malformed occurrence operations and durations before mutation', async () => {
+    const event: CalendarEvent = {
+      ...events[2],
+      id: 'invalid-occurrence-timing',
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+    const recurrenceId = {
+      type: 'date-time',
+      value: {
+        local: '2026-01-12T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const start = {
+      type: 'date-time',
+      value: {
+        local: '2026-01-12T11:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const validDuration = {
+      weeks: 0,
+      days: 0,
+      hours: 1,
+      minutes: 0,
+      seconds: 0,
+      isNegative: false,
+    };
+    const operation = (overrides: Record<string, unknown> = {}) => ({
+      action: 'set-timing',
+      recurrenceId,
+      timing: { type: 'duration', start, duration: validDuration },
+      viewerTimezone: 'Europe/Stockholm',
+      ...overrides,
+    });
+    const invalidOperations = [
+      operation({ action: 'remove' }),
+      operation({
+        recurrenceId: {
+          type: 'date-time',
+          value: {
+            local: '2026-01-32T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      }),
+      operation({
+        timing: {
+          type: 'duration',
+          start,
+          duration: { ...validDuration, hours: -1 },
+        },
+      }),
+      operation({
+        timing: {
+          type: 'duration',
+          start,
+          duration: { ...validDuration, minutes: 0.5 },
+        },
+      }),
+      operation({
+        timing: {
+          type: 'duration',
+          start,
+          duration: {
+            ...validDuration,
+            seconds: Number.MAX_SAFE_INTEGER + 1,
+          },
+        },
+      }),
+      operation({
+        timing: {
+          type: 'duration',
+          start,
+          duration: { ...validDuration, weeks: 1 },
+        },
+      }),
+      operation({ unexpected: true }),
+    ];
+
+    for (const invalidOperation of invalidOperations) {
+      await expect(
+        repository.updateEvent('team', event.id, {
+          recurrence: { occurrence: invalidOperation },
+        } as unknown as CalendarEventPatch),
+      ).rejects.toMatchObject({ code: 'unsupported-patch' });
+      expect(await repository.getEvent('team', event.id)).toEqual(event);
+    }
+
+    await expect(
+      repository.updateEvent('team', event.id, {
+        title: 'Should not apply beside occurrence timing',
+        recurrence: { occurrence: operation() },
+      } as unknown as CalendarEventPatch),
+    ).rejects.toMatchObject({ code: 'unsupported-patch' });
+    expect(await repository.getEvent('team', event.id)).toEqual(event);
+  });
+
+  it('rejects DATE duration overrides and leaves the all-day series unchanged', async () => {
+    const event: CalendarEvent = {
+      ...events[1],
+      id: 'date-duration-occurrence',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=3' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+
+    await expect(
+      repository.updateEvent('team', event.id, {
+        recurrence: {
+          occurrence: {
+            action: 'set-timing',
+            recurrenceId: { type: 'date', value: '2026-10-06' },
+            timing: {
+              type: 'duration',
+              start: { type: 'date', value: '2026-10-06' },
+              duration: {
+                weeks: 0,
+                days: 1,
+                hours: 0,
+                minutes: 0,
+                seconds: 0,
+                isNegative: false,
+              },
+            },
+            viewerTimezone: 'Europe/Stockholm',
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'unsupported-patch' });
+    expect(await repository.getEvent('team', event.id)).toEqual(event);
+  });
+
+  it('rejects occurrence timing edits for alarm-bearing instances', async () => {
+    const recurring: CalendarEvent = {
+      ...events[2],
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;COUNT=4',
+        exdates: [
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-01-12T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        ],
+      },
+      alarm: {
+        action: 'display',
+        trigger: {
+          weeks: 0,
+          days: 0,
+          hours: 0,
+          minutes: 15,
+          seconds: 0,
+        },
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [{ ...recurring, id: 'alarm-occurrence' }],
+    });
+    const write: CalendarEventPatch = {
+      recurrence: {
+        occurrence: {
+          action: 'set-timing',
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-01-12T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          timing: {
+            type: 'end',
+            start: {
+              type: 'date-time',
+              value: {
+                local: '2026-01-12T11:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            end: {
+              type: 'date-time',
+              value: {
+                local: '2026-01-12T12:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
+          viewerTimezone: 'Europe/Stockholm',
+        },
+      },
+    };
+
+    await expect(
+      repository.updateEvent('team', 'alarm-occurrence', write),
+    ).rejects.toMatchObject({ code: 'unsupported-patch' });
   });
 
   it('adds duration-form PERIOD recurrence dates idempotently and defensively', async () => {

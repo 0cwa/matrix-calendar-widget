@@ -460,6 +460,28 @@ describe('GatewayCalendarRepository', () => {
     );
   });
 
+  it('retains safe occurrence preflight messages from the gateway', async () => {
+    const failedRepository = createRepository(
+      mockFetch(
+        new Response(
+          JSON.stringify({
+            code: 'unsupported-patch',
+            message:
+              'Occurrence timing edits are unavailable for recurrence resources with VALARM data; alarms are preserved unchanged.',
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    await expect(failedRepository.getCalendarDiagnostics()).rejects.toEqual(
+      new CalendarRepositoryError(
+        'unsupported-patch',
+        'Occurrence timing edits are unavailable for recurrence resources with VALARM data; alarms are preserved unchanged.',
+      ),
+    );
+  });
+
   it('creates and deletes through the gateway', async () => {
     const created = {
       ...event,

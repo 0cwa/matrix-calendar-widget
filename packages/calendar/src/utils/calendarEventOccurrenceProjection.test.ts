@@ -25,6 +25,7 @@ import {
   formatSupportedCalendarEventRecurrenceRule,
   isSupportedCalendarEventOccurrenceExclusion,
   parseSupportedCalendarEventRecurrenceRule,
+  projectCalendarEventOccurrenceByRecurrenceId,
   projectCalendarEventOccurrences,
 } from './calendarEventOccurrenceProjection';
 import {
@@ -1465,6 +1466,149 @@ describe('projectCalendarEventOccurrences', () => {
         zoned('2026-10-30T09:00:00'),
       ),
     ).toBe(false);
+  });
+
+  it('reprojects a selected recurrence identity from the latest source', () => {
+    const recurrenceId = zoned('2026-10-02T09:00:00');
+    const original = timedEvent({
+      start: '2026-10-01T09:00:00',
+      end: '2026-10-01T10:00:00',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=4' },
+    });
+    const latest: CalendarEvent = {
+      ...original,
+      title: 'Latest series title',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-01T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-01T10:30:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    };
+
+    const projected = projectCalendarEventOccurrenceByRecurrenceId(
+      latest,
+      recurrenceId,
+      'Europe/Stockholm',
+    );
+    expect(projected?.event).toMatchObject({
+      title: 'Latest series title',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-02T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-02T10:30:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    });
+    expect(projected?.recurrenceId).toEqual(recurrenceId);
+
+    const moved = projectCalendarEventOccurrenceByRecurrenceId(
+      {
+        ...latest,
+        recurrence: {
+          ...latest.recurrence,
+          overrides: [
+            {
+              recurrenceId,
+              timing: {
+                type: 'end',
+                start: zoned('2026-10-02T11:00:00'),
+                end: zoned('2026-10-02T12:00:00'),
+              },
+            },
+          ],
+        },
+      },
+      recurrenceId,
+      'Europe/Stockholm',
+    );
+    expect(moved?.event.timing).toEqual({
+      type: 'timed',
+      start: {
+        type: 'zoned',
+        local: '2026-10-02T11:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+      end: {
+        type: 'zoned',
+        local: '2026-10-02T12:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    });
+
+    expect(
+      projectCalendarEventOccurrenceByRecurrenceId(
+        {
+          ...latest,
+          recurrence: { ...latest.recurrence, exdates: [recurrenceId] },
+        },
+        recurrenceId,
+        'Europe/Stockholm',
+      ),
+    ).toBeUndefined();
+    expect(
+      projectCalendarEventOccurrenceByRecurrenceId(
+        {
+          ...latest,
+          recurrence: {
+            ...latest.recurrence,
+            overrides: [{ recurrenceId, status: 'cancelled' }],
+          },
+        },
+        recurrenceId,
+        'Europe/Stockholm',
+      ),
+    ).toBeUndefined();
+    expect(
+      projectCalendarEventOccurrenceByRecurrenceId(
+        {
+          ...latest,
+          recurrence: {
+            ...latest.recurrence,
+            overrides: [
+              {
+                recurrenceId: zoned('2026-10-20T09:00:00'),
+                timing: {
+                  type: 'end',
+                  start: zoned('2026-10-20T11:00:00'),
+                  end: zoned('2026-10-20T12:00:00'),
+                },
+              },
+            ],
+          },
+        },
+        zoned('2026-10-20T09:00:00'),
+        'Europe/Stockholm',
+      ),
+    ).toBeUndefined();
+    expect(
+      projectCalendarEventOccurrenceByRecurrenceId(
+        { ...latest, unsupportedTimezone: true },
+        recurrenceId,
+        'Europe/Stockholm',
+      ),
+    ).toBeUndefined();
+    expect(
+      projectCalendarEventOccurrenceByRecurrenceId(
+        { ...latest, status: 'cancelled' },
+        recurrenceId,
+        'Europe/Stockholm',
+      ),
+    ).toBeUndefined();
   });
 });
 

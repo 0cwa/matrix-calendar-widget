@@ -335,6 +335,9 @@ describe('<CalendarEventsSurface />', () => {
       within(details).getByRole('button', { name: 'Edit' }),
     );
     const editor = screen.getByRole('dialog', { name: 'Edit event' });
+    await userEvent.click(
+      within(editor).getByRole('button', { name: 'Entire series' }),
+    );
     const titleInput = within(editor).getByLabelText(/^Title/);
     await userEvent.clear(titleInput);
     await userEvent.type(titleInput, 'Updated planning series');

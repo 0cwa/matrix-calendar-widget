@@ -15,11 +15,19 @@
  */
 
 export {
+  MAX_CALENDAR_EVENT_EXTERNAL_LINKS,
+  MAX_CALENDAR_EVENT_EXTERNAL_LINK_LABEL_LENGTH,
+  MAX_CALENDAR_EVENT_EXTERNAL_LINK_URI_LENGTH,
+  boundCalendarEventExternalLinkLabel,
+  canonicalizeCalendarExternalUrl,
+} from './calendarEventExternalLinks';
+export {
   MAX_PROJECTED_OCCURRENCES_PER_EVENT,
   calendarEventRecurrenceIdentity,
   formatSupportedCalendarEventRecurrenceRule,
   isSupportedCalendarEventOccurrenceExclusion,
   parseSupportedCalendarEventRecurrenceRule,
+  projectCalendarEventOccurrenceByRecurrenceId,
   projectCalendarEventOccurrences,
 } from './calendarEventOccurrenceProjection';
 export type {

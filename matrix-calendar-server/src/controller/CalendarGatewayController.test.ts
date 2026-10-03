@@ -1828,6 +1828,146 @@ END:VCALENDAR`,
     expect(putInit?.body).toContain('X-CUSTOM:preserve');
   });
 
+  it('returns occurrence preflight failures as actionable bad requests', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/event.ics';
+    fetch.mockResponseOnce(simpleEventIcs('Before update'), {
+      status: 200,
+      headers: { ETag: '"old-etag"' },
+    });
+
+    let error: unknown;
+    try {
+      await createController().updateEvent(
+        userContext,
+        openIdCredential,
+        {
+          recurrence: {
+            occurrence: {
+              action: 'set-timing',
+              recurrenceId: {
+                type: 'date-time',
+                value: {
+                  local: '2026-10-02T09:00:00',
+                  timezone: 'Europe/Stockholm',
+                },
+              },
+              timing: {
+                type: 'end',
+                start: {
+                  type: 'date-time',
+                  value: {
+                    local: '2026-10-02T11:00:00',
+                    timezone: 'Europe/Stockholm',
+                  },
+                },
+                end: {
+                  type: 'date-time',
+                  value: {
+                    local: '2026-10-02T12:00:00',
+                    timezone: 'Europe/Stockholm',
+                  },
+                },
+              },
+              viewerTimezone: 'Europe/Stockholm',
+            },
+          },
+        } as CalendarEventPatch,
+        '"old-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      );
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    if (!(error instanceof BadRequestException)) {
+      throw new Error('Expected an occurrence preflight bad request');
+    }
+    expect(error.getStatus()).toBe(400);
+    expect(error.getResponse()).toMatchObject({
+      code: 'unsupported-patch',
+      message: expect.stringContaining('occurrence'),
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the current ETag for an exact repeated occurrence timing write', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/recurring.ics';
+    const originalIcs = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Matrix Calendar Widget//Tests//EN',
+      'BEGIN:VEVENT',
+      'UID:repeat-occurrence@example.test',
+      'DTSTAMP:20260922T120000Z',
+      'SEQUENCE:4',
+      'DTSTART:20261001T090000',
+      'DTEND:20261001T100000',
+      'RRULE:FREQ=DAILY;COUNT=3',
+      'END:VEVENT',
+      'BEGIN:VEVENT',
+      'UID:repeat-occurrence@example.test',
+      'DTSTAMP:20260922T120000Z',
+      'CREATED:20260921T100000Z',
+      'LAST-MODIFIED:20260922T120000Z',
+      'SEQUENCE:2',
+      'RECURRENCE-ID:20261002T090000',
+      'DTSTART:20261002T110000',
+      'DTEND:20261002T120000',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+    fetch.mockResponseOnce(originalIcs, {
+      status: 200,
+      headers: { ETag: '"current-etag"' },
+    });
+
+    const result = await createController().updateEvent(
+      userContext,
+      openIdCredential,
+      {
+        recurrence: {
+          occurrence: {
+            action: 'set-timing',
+            recurrenceId: {
+              type: 'floating-date-time',
+              value: '2026-10-02T09:00:00',
+            },
+            timing: {
+              type: 'end',
+              start: {
+                type: 'floating-date-time',
+                value: '2026-10-02T11:00:00',
+              },
+              end: {
+                type: 'floating-date-time',
+                value: '2026-10-02T12:00:00',
+              },
+            },
+            viewerTimezone: 'UTC',
+          },
+        },
+      },
+      '"current-etag"',
+      roomId,
+      calendarId,
+      eventId,
+    );
+
+    expect(result.etag).toBe('"current-etag"');
+    expect(result.event.recurrence?.overrides).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(
+      false,
+    );
+  });
+
   it('round-trips a serialized RDATE patch through the gateway with If-Match', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';
