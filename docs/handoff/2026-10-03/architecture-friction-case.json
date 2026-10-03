@@ -1,0 +1,143 @@
+{
+  "contract_version": "1.0.0",
+  "case_id": "technical-debt-audit-20261003",
+  "objective": "Decide whether current source and PR delivery evidence justify a structural refactor.",
+  "status": "complete",
+  "trigger": {
+    "observation": "The requested audit considered the large calendar gateway, iCalendar codec, and recurrence projector alongside current PR delivery state. Exact main source and current PR checks were inspected.",
+    "evidence_refs": [
+      "main:8bf300f45798a2e88a7596f2a5959150f6d0da8a",
+      "merge:pr166:8bf300f45798a2e88a7596f2a5959150f6d0da8a",
+      "source:CalendarGatewayController.ts:82-1104",
+      "source:ICalendarEventCodec.ts:247-1971",
+      "source:calendarEventOccurrenceProjection.ts:181-1824",
+      "pr:164:prior-base-d1cd5f0-failed-checks"
+    ],
+    "recurrence": "unknown"
+  },
+  "scope": {
+    "includes": [
+      "Assess observed architectural friction and current repair trigger."
+    ],
+    "excludes": [
+      "Product source changes",
+      "Broad cleanup based on file size",
+      "Changes to open GitHub PRs"
+    ],
+    "constraints": [
+      "Preserve existing authorization, CalDAV, recurrence, and serialization contracts."
+    ]
+  },
+  "options": [
+    {
+      "id": "defer",
+      "summary": "Keep cohesive modules intact; repair the concrete PR #164 check failure separately.",
+      "expected_value": "high",
+      "effort": "small",
+      "risk": "low",
+      "reversibility": "easy",
+      "tradeoffs": [
+        "Module size remains, but no unsupported churn is introduced."
+      ]
+    },
+    {
+      "id": "extract-small",
+      "summary": "Extract the gated room-target authorization helper from CalendarGatewayController.",
+      "expected_value": "unknown",
+      "effort": "medium",
+      "risk": "medium",
+      "reversibility": "easy",
+      "tradeoffs": [
+        "Adds a seam before repeated controller friction has been demonstrated."
+      ]
+    },
+    {
+      "id": "refactor-large",
+      "summary": "Split controller, codec, or projector by internal responsibilities now.",
+      "expected_value": "low",
+      "effort": "large",
+      "risk": "high",
+      "reversibility": "moderate",
+      "tradeoffs": [
+        "Broad behavior-sensitive diff with no evidenced delivery benefit."
+      ]
+    }
+  ],
+  "decision": {
+    "outcome": "no-change",
+    "option_id": null,
+    "rationale": "The inspected modules have cohesive responsibilities and behavior-specific test coverage. PR #164 failed on its prior merge ref before the room contract, but latest main has advanced; current validation requires synchronization and rerun, not an architectural refactor."
+  },
+  "blast_radius": {
+    "files": [
+      "matrix-calendar-server/src/controller/CalendarGatewayController.ts",
+      "matrix-calendar-server/src/caldav/ICalendarEventCodec.ts",
+      "packages/calendar/src/utils/calendarEventOccurrenceProjection.ts"
+    ],
+    "interfaces": [
+      "Calendar gateway HTTP operations",
+      "VEVENT/VCALENDAR serialization",
+      "recurrence projection API"
+    ],
+    "data": [
+      "iCalendar source resources and unknown-property preservation"
+    ],
+    "users": [
+      "calendar widget users",
+      "Matrix room users"
+    ],
+    "unknowns": [
+      "PR #164 room contract behavior until CI reaches it"
+    ]
+  },
+  "preservation_gates": [
+    {
+      "id": "behavior",
+      "criterion": "No production behavior is changed by this assessment.",
+      "status": "not-applicable",
+      "evidence_refs": [
+        "audit:read-only"
+      ]
+    }
+  ],
+  "validation": [
+    {
+      "id": "evidence",
+      "criterion": "Exact main SHA, current PR heads, issue states, and PR #164 failed job steps are captured.",
+      "status": "passed",
+      "command": "GitHub API/CLI read-only queries and exact-SHA source inspection",
+      "evidence_refs": [
+        "evidence:technical-debt-evidence.json",
+        "github:main:8bf300f45798a2e88a7596f2a5959150f6d0da8a",
+        "review:pr167-pass",
+        "review:pr171-pass",
+        "review:pr175-pass",
+        "review:pr176-pass",
+        "github:pr164-old-base-failures"
+      ]
+    }
+  ],
+  "deferrals": [
+    {
+      "id": "room-target-extraction",
+      "item": "Extract room-target authorization from CalendarGatewayController.",
+      "reason": "PR #164 is the first observed room-target change and its integration tests have not reached the room behavior.",
+      "upgrade_seam": "Reassess if a second room-target route duplicates policy or room authorization edits become broad/repeated."
+    },
+    {
+      "id": "codec-split",
+      "item": "Split iCalendar codec by recurrence/alarm handling.",
+      "reason": "No repeated change failure or testability friction was demonstrated; the shared round-trip boundary is valuable.",
+      "upgrade_seam": "Reassess if recurrence/alarm changes repeatedly destabilize unrelated basic field round trips."
+    }
+  ],
+  "blockers": [],
+  "next_action": "Refresh PR #164 to main 8bf300f, diagnose its first failing server test/module-load probe with sanitized output, and rerun room access and cross-room assertions; revalidate the behind PRs against current main.",
+  "extensions": {
+    "development-quality.architecture-friction": {
+      "classification": "no-confirmed-structural-friction",
+      "confirmed_debt_findings": 0,
+      "confirmed_delivery_blockers": 1
+    }
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "contract_version": "1.0.0",
+  "work_id": "ready-pr-integration-20261003",
+  "objective": "Integrate reviewed PRs166,167,171,175,176 through normal GitHub merge paths.",
+  "scope": {
+    "workspaces": [
+      "/var/home/x/Dev/matrix-calendar-widget"
+    ],
+    "includes": [],
+    "excludes": []
+  },
+  "authority": {
+    "read": "allowed",
+    "write": "allowed",
+    "external": "allowed",
+    "live": "forbidden",
+    "destructive": "forbidden",
+    "commit": "allowed",
+    "push": "allowed",
+    "approval_state": "not-needed"
+  },
+  "owner": "/root/ready_pr_integration_20261003",
+  "status": "planned",
+  "dependencies": [],
+  "acceptance_gates": [
+    {
+      "id": "gate-1",
+      "criterion": "Remote head/base/paths/checks and independent review verified immediately before each mutation.",
+      "status": "pending",
+      "evidence_refs": []
+    },
+    {
+      "id": "gate-2",
+      "criterion": "Merged main and remote PR outcomes match intended scope; forward updates preserve history.",
+      "status": "pending",
+      "evidence_refs": []
+    }
+  ],
+  "deliverables": [],
+  "evidence_refs": [
+    {
+      "id": "user-resume-20261003",
+      "kind": "decision",
+      "location": "current user message and standing same-repository authority",
+      "summary": "User explicitly resumes project completion, requests debt audit/repair, and renews authority after prior merge rejection; normal tool approval controls remain binding."
+    }
+  ],
+  "blockers": [],
+  "next_action": {
+    "action": "Revalidate PR166 and retry normal merge using renewed user authorization.",
+    "owner": "/root/ready_pr_integration_20261003",
+    "requires_approval": false
+  },
+  "extensions": {
+    "staged-workflows.orchestration": {
+      "extension_version": "1.0.0",
+      "phase": "Project completion and debt repairs",
+      "lane": "ready-pr-integration-20261003",
+      "integration_owner": "/root",
+      "validation_depth": "broad",
+      "mutation_surface": [
+        "assigned repository paths and same-repository PRs"
+      ],
+      "source_exposure": {
+        "mode": "task-context",
+        "boundary_ref": "AGENTS.md and user instructions",
+        "allowed_inputs": [
+          "current repository",
+          "GitHub issues PRs checks",
+          "sanitized failure evidence"
+        ],
+        "restricted_inputs": [
+          "secret output",
+          "other-repository PR mutations",
+          "live deployment"
+        ]
+      }
+    }
+  }
+}

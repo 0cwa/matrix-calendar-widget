@@ -1,0 +1,35 @@
+{
+  "evidence_refs": [
+    {
+      "id": "user-resume-20261003",
+      "kind": "decision",
+      "location": "current user message and standing same-repository authority",
+      "summary": "User explicitly resumes project completion, requests debt audit/repair, and renews authority after prior merge rejection; normal tool approval controls remain binding."
+    },
+    {
+      "id": "backend175-merged",
+      "kind": "external",
+      "location": ".agent-work/orchestration-20261003/integration-evidence.md",
+      "summary": "Backend175 independently reviewed exact9b7848c and all required+real Radicale checks passed; normal mergefd55c1ce16727fcccf10486576ca5caf2241b25b enables widget duration implementation."
+    },
+    {
+      "id": "widget177-candidate",
+      "kind": "test",
+      "location": ".agent-work/orchestration-20261003/m5-duration-widget-evidence.md",
+      "summary": "Draft177 head316c388e0e85eb210de1d49ab92b7b1c91693744 basef24; tested feature code unchanged from1d3b635, only formatted ADR023 status followup.49 focused tests, locked formatter, lint/types/translations/diff and impeccable detector[] pass. Hosted checks+independent review pending."
+    }
+  ],
+  "deliverables": [
+    {
+      "id": "duration-widget-pr",
+      "location": "https://github.com/0cwa/matrix-calendar-widget/pull/177",
+      "status": "created",
+      "summary": "Draft exact316c388 basef24 with focused local gates passed, awaiting full CI and independent review."
+    }
+  ],
+  "next_action": {
+    "action": "Independently review177 source/UI and follow exact-head full CI; serialize integration after164.",
+    "owner": "/root/ready_pr_integration_20261003",
+    "requires_approval": false
+  }
+}

@@ -1,0 +1,231 @@
+{
+  "audit_date": "2026-10-03",
+  "scope": "Read-only technical debt and delivery-friction audit against exact GitHub main and open PRs; no product source or GitHub state changed.",
+  "main": {
+    "sha": "8bf300f45798a2e88a7596f2a5959150f6d0da8a",
+    "commit_date_utc": "2026-10-03T12:07:33Z",
+    "source_checkout": "/tmp/mcw-debt-audit-20261003/main"
+  },
+  "live_issues": {
+    "open": [
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "closed_recent_reconciled": [
+      29,
+      45,
+      48,
+      100,
+      166
+    ],
+    "notes": {
+      "5": "M4 remaining timezone edit is explicitly deferred; other listed collection slices are complete.",
+      "6": "M5 recurrence remains open; narrow RDATE/EXDATE, PERIOD, alarm, and RRULE slices are documented as completed.",
+      "7": "M6 room binding, appservice proof/access, cross-room isolation, and reminders remain; PR #164 is one gated read-only slice.",
+      "8": "M7 data commands remain dependent on M6 authorization.",
+      "9": "M8 host validation and beta gates remain; no live etke deployment proof."
+    }
+  },
+  "pull_requests": [
+    {
+      "number": 166,
+      "head": "884c4c2e9030ec19c911072b24f820b278a5459c",
+      "state": "merged",
+      "merge": "merged as 8bf300f45798a2e88a7596f2a5959150f6d0da8a",
+      "checks": "passed before merge"
+    },
+    {
+      "number": 167,
+      "head": "55abf37135644a1f2295becf925cbe69cd5ecd53",
+      "base": "8bf300f45798a2e88a7596f2a5959150f6d0da8a",
+      "state": "open-checks-in-progress",
+      "checks": {
+        "Quality": "passed",
+        "Analyze JavaScript/TypeScript": "passed",
+        "Server and bot": "passed",
+        "Container image build smoke": "passed",
+        "Widget": "in progress"
+      },
+      "review": "PASS; only projection test file, +68 lines; stable patch-id identical to old 434a9ae (`701ae71f5508e7c11fff9ab82ba91439399a0582`); no source behavior changes."
+    },
+    {
+      "number": 171,
+      "head": "e61fa356ea499e6394a592e0decccd5d5be2b877",
+      "base": "8bf300f45798a2e88a7596f2a5959150f6d0da8a",
+      "state": "open-checks-in-progress",
+      "checks": {
+        "Quality": "passed",
+        "Analyze JavaScript/TypeScript": "passed",
+        "Server and bot": "passed",
+        "Container image build smoke": "passed",
+        "Widget": "in progress"
+      },
+      "review": "PASS; exact three expected trigger paths, 584 insertions; stable patch-id identical to old dc658a8 (`0be12c5bd7c78dcb505fd0ce721f2ec3a189fac1`). Review only, no local tests."
+    },
+    {
+      "number": 175,
+      "head": "c376b056184ae368d145ee7666c7644c166a8dd5",
+      "base": "8bf300f45798a2e88a7596f2a5959150f6d0da8a",
+      "state": "open-checks-in-progress",
+      "checks": {
+        "Quality": "passed",
+        "Real Radicale contract": "passed",
+        "Analyze JavaScript/TypeScript": "passed",
+        "Container image build smoke": "passed",
+        "Widget": "in progress",
+        "Server and bot": "in progress"
+      },
+      "review": "PASS; exactly seven expected files; stable patch-id identical to old 5abaf5b (`7e1c140e2c534ddc102bd3a07791ef89`). PLAN already marks EXDATE skip/restore complete and general EXDATE editing open; PR adds duration PERIOD domain/codec/in-memory support while leaving widget entry and timing edits open."
+    },
+    {
+      "number": 176,
+      "head": "dbc5f2d153a85bb55f91b5fc3ad0442f2a22b532",
+      "base": "8bf300f45798a2e88a7596f2a5959150f6d0da8a",
+      "state": "open-checks-in-progress",
+      "checks": {
+        "Analyze JavaScript/TypeScript": "passed",
+        "Quality": "in progress",
+        "Widget": "in progress",
+        "Server and bot": "in progress",
+        "Container image build smoke": "in progress"
+      },
+      "review": "PASS; exact two expected CommandContext paths, 142 additions; patch-id matches old 8545e1c (`679c30fe42aed4b2ea62c8c0a7037caf1ebba4f4`). Reviewed UTC default, one --tz value parsing, invalid/duplicate/offset rejection, and argument preservation. No local tests."
+    },
+    {
+      "number": 164,
+      "head": "a46f885984e7a7ba2e9f576fbe974122f4e30758",
+      "base": "d1cd5f026198b55c1fdf0eb34fa96ee480a5d3b0",
+      "state": "draft-behind-main",
+      "checks": "prior merge-ref failures remain; no checks against current main 8bf300f",
+      "failure": "Server and bot failed at Test server; Real Radicale contract failed at Personal OpenID module-load probe; later room-contract steps skipped."
+    }
+  ],
+  "branch_protection": {
+    "configured": true,
+    "required_checks": [
+      "Quality",
+      "Widget",
+      "Server and bot",
+      "Container image build smoke",
+      "Analyze JavaScript/TypeScript"
+    ],
+    "pull_requests_required": true,
+    "conversation_resolution_required": true,
+    "force_push_disabled": true,
+    "deletion_disabled": true,
+    "issue_29": "closed; PR #150 behavior verification recorded"
+  },
+  "confirmed_findings": [
+    {
+      "id": "ci-pr164-blocker",
+      "classification": "delivery blocker (not confirmed architectural debt)",
+      "priority": "P1 before merge",
+      "evidence": [
+        "https://github.com/0cwa/matrix-calendar-widget/pull/164",
+        "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37106403742",
+        "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37106403786"
+      ],
+      "impact": "Room access and cross-room isolation remain unproven. The failure is a confirmed old-ref delivery blocker, not evidence that current main fails.",
+      "smallest_fix": "Repair the first failing server Jest suite and module-load probe on PR #164, then rerun the pinned contract and inspect exact failing tests before extending scope.",
+      "acceptance": [
+        "Server and bot passes on PR #164 head",
+        "Real Radicale contract reaches and passes the room contract and cross-room denial assertions",
+        "No secrets or complete ICS bodies exposed in logs"
+      ],
+      "finding": "PR #164 is unvalidated against latest main. On its prior merge ref against d1cd5f0, Server and bot failed at Test server and Real Radicale contract failed at module-load probe before room contract execution."
+    }
+  ],
+  "architecture_assessment": {
+    "confirmed_structural_debt": [],
+    "examined_not_confirmed": [
+      "CalendarGatewayController groups authenticated calendar, event, and gated room-target operations; methods share the same authorization and CalDAV request path, and PR #164 is the first observed room-target extension. No repeated change failure or unsafe broad diff is evidenced yet.",
+      "ICalendarEventCodec combines iCalendar parse/create/patch and recurrence/alarm preservation; those operations share a single serialization boundary with round-trip coverage. Size alone does not justify extraction.",
+      "calendarEventOccurrenceProjection combines recurrence parsing and bounded viewer-local projection; DST regressions are directly exercised. No independent responsibility causing delivery friction was demonstrated."
+    ],
+    "decision": "No structural refactor recommended. Defer extraction until a repeated change requires unrelated edits or causes review/test failures. Treat PR #164 CI failures as a focused blocker, not proof of a code-architecture defect."
+  },
+  "deferred_or_unclear": [
+    {
+      "item": "M6 room-principal Radicale permissions and cross-room isolation",
+      "reason": "The appservice principal has owner_only access to its whole Radicale home; gateway-level binding must be proven to prevent cross-room access. PR #164 checks did not reach the real room contract."
+    },
+    {
+      "item": "etke operator deployment, image override, and /data preservation",
+      "reason": "No operator-host rehearsal was observed; keep as M8 external gate."
+    },
+    {
+      "item": "Whether PR #164 diagnostic helpers should become reusable shared tooling",
+      "reason": "Current helpers were added in response to a real early-failure diagnosis need, but this is one observed integration episode; recurrence is not established."
+    }
+  ],
+  "next_lane": "Close current PR checks; once PR175 merges, assign a non-stacked M5 widget-only duration-form PERIOD RDATE slice in calendarEventForm + CalendarEventEditorDialog + focused tests/locales/docs. It does not depend on PR164 and does not overlap PR175 codec/model paths.",
+  "pull_request_snapshot_note": "Final snapshot at 2026-10-03 ~12:13 UTC: main 8bf300f. PRs 167/171/175 are on current base with Widget still running (175 also Server and bot running); #176 checks are running except CodeQL. PR164 remains based on d1cd5f0 and has no current-main rerun.",
+  "tracking_observations": [
+    {
+      "id": "stale-exdate-work-unit-gate",
+      "classification": "tracking debt observed and dispositioned",
+      "evidence": "The M5 EXDATE-removal work unit had a stale dependency phrased as a PLAN update after PR #164 before PR #166 could merge. Current docs/PLAN.md already marks occurrence skip/restore via exact EXDATE complete and general EXDATE editing open. PR #175 preserves these statements. The orchestration owner has marked the stale PR #164 ownership blocker resolved; no product docs gap remains."
+    }
+  ],
+  "review_dispositions": {
+    "PR167": "PASS; byte-equivalent prior test-only patch; expected local half-open date overlap across Stockholm DST boundary.",
+    "PR171": "PASS; byte-equivalent three-file patch; reviewed RFC duration parsing/arithmetic and fail-closed conditions; no local tests.",
+    "PR175": "PASS; byte-equivalent seven-file patch; source/domain/test/docs scope coherent; verified EXDATE completion retained, broader EXDATE edit still open; no local tests.",
+    "PR176": "PASS; byte-equivalent two-file parser/test patch; validates strict flag behavior and deterministic UTC default; no local tests."
+  },
+  "recommended_project_order": [
+    {
+      "order": 1,
+      "slice": "Finish current-base CI/review for #167/#171/#175/#176; keep decisions tied to exact heads.",
+      "dependency": "none among these four; independent of #164"
+    },
+    {
+      "order": 2,
+      "slice": "M5 first user-facing next slice after #175 merges: add widget entry for duration-form PERIOD RDATEs.",
+      "dependency": "#175 domain/model/codec/in-memory write support must land; no #164 dependency. Start from then-current main to avoid stacking.",
+      "ownership_paths": [
+        "matrix-calendar-widget/src/calendar/calendarEventForm.ts",
+        "matrix-calendar-widget/src/calendar/calendarEventForm.test.ts",
+        "matrix-calendar-widget/src/components/calendar/CalendarEventEditorDialog.tsx",
+        "matrix-calendar-widget/src/components/calendar/CalendarEventEditorDialog.test.tsx",
+        "matrix-calendar-widget/public/locales/en/translation.json",
+        "matrix-calendar-widget/public/locales/de/translation.json",
+        "docs/PLAN.md"
+      ],
+      "acceptance": "Form creates a typed positive-duration PERIOD add operation using event DTSTART value kind/TZID; invalid/all-day/zero/negative/fractional or invalid RFC duration is rejected; save preserves existing recurrence and ETag semantics; test form conversion and dialog save/error flow."
+    },
+    {
+      "order": 3,
+      "slice": "M5 add/edit one existing PERIOD RDATE timing (start/end/duration) as a separate codec/API/editor vertical slice.",
+      "dependency": "duration-form add slice and shared codec/domain contract; unsupported today."
+    },
+    {
+      "order": 4,
+      "slice": "M5 broaden supported RRULE parts/patterns, then RECURRENCE-ID override edits and explicit this-event/this-and-following/series scopes.",
+      "dependency": "Bound each pattern and recurrence scope; preserve unsupported forms opaquely and add recurrence/timezone regression for each."
+    },
+    {
+      "order": 5,
+      "slice": "M5 remaining interoperability: complete DST/named-timezone matrix; SEQUENCE/timestamp semantics; organizer/attendee round-trip; safe attachment/conference handling; alarms beyond relative DISPLAY.",
+      "dependency": "Separate per behavior; require round-trip preservation evidence before adapter changes."
+    },
+    {
+      "order": 6,
+      "slice": "M6 room principal/appservice proof, auth-before-CalDAV, real Radicale room access, cross-room isolation; reminder sidecar and durable delivery after authorization.",
+      "dependency": "#164 current-main sync and contract; keep room operations/reminders disabled until principal scope isolation passes."
+    },
+    {
+      "order": 7,
+      "slice": "M7 data commands use the M6 room policy and authorized room calendar; continue independent parser/help work meanwhile.",
+      "dependency": "M6 room binding and authorization contract."
+    },
+    {
+      "order": 8,
+      "slice": "M8 repository hardening can progress in parallel; reserve live etke image override and /data preservation rehearsal for after runtime/auth contract is settled.",
+      "dependency": "Host rehearsal is an external readiness gate, not a blocker to repository-side M5/M7/M8 implementation."
+    }
+  ]
+}

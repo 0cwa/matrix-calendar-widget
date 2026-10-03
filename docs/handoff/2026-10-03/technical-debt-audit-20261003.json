@@ -1,0 +1,80 @@
+{
+  "contract_version": "1.0.0",
+  "work_id": "technical-debt-audit-20261003",
+  "objective": "Audit confirmed delivery and architectural debt against current remote main and PRs.",
+  "scope": {
+    "workspaces": [
+      "/var/home/x/Dev/matrix-calendar-widget"
+    ],
+    "includes": [],
+    "excludes": []
+  },
+  "authority": {
+    "read": "allowed",
+    "write": "allowed",
+    "external": "allowed",
+    "live": "forbidden",
+    "destructive": "forbidden",
+    "commit": "allowed",
+    "push": "allowed",
+    "approval_state": "not-needed"
+  },
+  "owner": "/root/technical_debt_audit_20261003",
+  "status": "planned",
+  "dependencies": [],
+  "acceptance_gates": [
+    {
+      "id": "gate-1",
+      "criterion": "Evidence grounded in current source, CI, issues and PRs; stale report claims dispositioned.",
+      "status": "pending",
+      "evidence_refs": []
+    },
+    {
+      "id": "gate-2",
+      "criterion": "Visual report and validated quality cases identify precise repair scopes and project dependencies.",
+      "status": "pending",
+      "evidence_refs": []
+    }
+  ],
+  "deliverables": [],
+  "evidence_refs": [
+    {
+      "id": "user-resume-20261003",
+      "kind": "decision",
+      "location": "current user message and standing same-repository authority",
+      "summary": "User explicitly resumes project completion, requests debt audit/repair, and renews authority after prior merge rejection; normal tool approval controls remain binding."
+    }
+  ],
+  "blockers": [],
+  "next_action": {
+    "action": "Run the current-state debt audit and publish the refreshed report.",
+    "owner": "/root/technical_debt_audit_20261003",
+    "requires_approval": false
+  },
+  "extensions": {
+    "staged-workflows.orchestration": {
+      "extension_version": "1.0.0",
+      "phase": "Project completion and debt repairs",
+      "lane": "technical-debt-audit-20261003",
+      "integration_owner": "/root",
+      "validation_depth": "inspection",
+      "mutation_surface": [
+        "assigned repository paths and same-repository PRs"
+      ],
+      "source_exposure": {
+        "mode": "task-context",
+        "boundary_ref": "AGENTS.md and user instructions",
+        "allowed_inputs": [
+          "current repository",
+          "GitHub issues PRs checks",
+          "sanitized failure evidence"
+        ],
+        "restricted_inputs": [
+          "secret output",
+          "other-repository PR mutations",
+          "live deployment"
+        ]
+      }
+    }
+  }
+}
