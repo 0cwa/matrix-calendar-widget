@@ -20,6 +20,7 @@ on:
       - 'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts'
       - 'matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts'
       - 'matrix-calendar-server/test/integration/CalendarDiagnosticsContract.test.ts'
+      - 'matrix-calendar-server/test/util/PersonalOpenIdImportProbe.test.ts'
       - 'matrix-calendar-server/package.json'
       - 'yarn.lock'
 
@@ -64,19 +65,42 @@ jobs:
       - name: Test Synapse startup diagnostic sanitizer
         run: node --test dev/synapse-startup-diagnostic.test.mjs
 
-      - name: Probe personal OpenID contract imports without services
+      - name: Test Personal OpenID import probe sanitizer
+        run: node --test dev/sanitize-personal-openid-import-probe.test.mjs
+
+      - name: Probe Personal OpenID Jest runner and runtime imports
         run: |
           set +e
           CALDAV_CONTRACT=0 yarn workspace @matrix-calendar-widget/server jest \
-            test/integration/PersonalOpenIdRadicaleContract.test.ts \
+            test/util/PersonalOpenIdRunnerMarker.test.ts \
             --runInBand \
             >/dev/null 2>&1
-          probe_status=$?
+          runner_status=$?
           set -e
-          if [ "$probe_status" -eq 0 ]; then
-            printf '%s\n' 'personal-openid-import-probe passed'
+          if [ "$runner_status" -eq 0 ]; then
+            printf '%s\n' 'personal-openid-runner-baseline passed'
           else
-            printf '%s\n' 'personal-openid-import-probe failed'
+            printf '%s\n' 'personal-openid-runner-baseline failed'
+          fi
+
+          import_stage_file="$RUNNER_TEMP/personal-openid-import-stages.txt"
+          : > "$import_stage_file"
+          set +e
+          CALDAV_CONTRACT=0 \
+          CALDAV_IMPORT_PROBE_FILE="$import_stage_file" \
+          yarn workspace @matrix-calendar-widget/server jest \
+            test/util/PersonalOpenIdImportProbe.test.ts \
+            --runInBand \
+            >/dev/null 2>&1
+          import_status=$?
+          set -e
+          if node dev/sanitize-personal-openid-import-probe.mjs "$import_stage_file"; then
+            sanitizer_status=0
+          else
+            sanitizer_status=$?
+          fi
+          rm -f "$import_stage_file"
+          if [ "$runner_status" -ne 0 ] || [ "$import_status" -ne 0 ] || [ "$sanitizer_status" -ne 0 ]; then
             exit 1
           fi
 
