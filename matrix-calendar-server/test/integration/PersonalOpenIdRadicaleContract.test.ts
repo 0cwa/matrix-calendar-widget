@@ -173,6 +173,7 @@ class PersonalOpenIdGatewayContractModule {}
 
 describeContract('personal Matrix OpenID gateway against real Radicale', () => {
   beforeAll(async () => {
+    markPersonalOpenIdSetupStart();
     markPersonalOpenIdSetupStage('fixture-input-check');
     fetchMock.disableMocks();
     nativeFetch = globalThis.fetch.bind(globalThis);
@@ -192,7 +193,19 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     actorUserId = `@${username}:${matrixServerName}`;
     actorTaggedCredential = taggedCredential;
     markPersonalOpenIdSetupStage('actor-login');
-    const actorLogin = await login(username, password);
+    let actorLoginFailureReported = false;
+    let actorLogin: { access_token: string };
+    try {
+      actorLogin = await login(username, password, (category) => {
+        markPersonalOpenIdSetupFailure(category);
+        actorLoginFailureReported = true;
+      });
+    } catch (error) {
+      if (!actorLoginFailureReported) {
+        markPersonalOpenIdSetupFailure('other');
+      }
+      throw error;
+    }
     actorAccessToken = actorLogin.access_token;
     markPersonalOpenIdSetupStage('actor-proof-validation');
     actorIdentity = decodeTaggedCredential(taggedCredential);
@@ -469,6 +482,19 @@ function markPersonalOpenIdSetupComplete(): void {
 
   try {
     appendFileSync(stageFile, 'personal-openid-setup-complete\n', 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
+
+function markPersonalOpenIdSetupStart(): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+    return;
+  }
+
+  try {
+    appendFileSync(stageFile, 'personal-openid-setup-start\n', 'utf8');
   } catch {
     // Diagnostics must not change contract-test behavior.
   }

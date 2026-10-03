@@ -5,6 +5,7 @@ import {
   formatContractPhase,
   formatPersonalOpenIdSetupFailure,
   formatPersonalOpenIdSetupStage,
+  formatPersonalOpenIdSetupStart,
   formatPersonalOpenIdSetupStatus,
   formatRoomAppServiceListingCheckpoint,
   formatRoomAppServiceSetupStatus,
@@ -71,6 +72,19 @@ test('reports only whether the personal OpenID beforeAll completed', () => {
   assert.equal(
     formatPersonalOpenIdSetupStatus('personal-openid-setup-complete\n'),
     'personal-openid-setup complete\n',
+  );
+});
+
+test('reports only whether the personal OpenID beforeAll started', () => {
+  assert.equal(
+    formatPersonalOpenIdSetupStart('period-removal-verified\n'),
+    'personal-openid-setup-start not-reached\n',
+  );
+  assert.equal(
+    formatPersonalOpenIdSetupStart(
+      'personal-openid-setup-start\npersonal-openid-setup-complete\n',
+    ),
+    'personal-openid-setup-start reached\n',
   );
 });
 
