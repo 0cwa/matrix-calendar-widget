@@ -17,6 +17,12 @@ import {
   formatRoomAppServiceSetupStage,
   formatRoomAppServiceSetupStart,
   formatRoomAppServiceSetupStatus,
+  formatRoomReminderSetupFailure,
+  formatRoomReminderSetupHttpStatus,
+  formatRoomReminderSetupMatrixErrorCode,
+  formatRoomReminderSetupStage,
+  formatRoomReminderSetupStart,
+  formatRoomReminderSetupStatus,
 } from './sanitize-caldav-contract-stage.mjs';
 
 test('emits only the latest fixed phase from the closed allowlist', () => {
@@ -131,6 +137,60 @@ test('reports only bounded Room AppService HTTP status and Matrix codes', () => 
     ),
     'room-appservice-matrix-error M_FORBIDDEN\n',
   );
+});
+
+test('reports only bounded reminder setup stages, causes, and Matrix metadata', () => {
+  const stageContent = [
+    'room-reminder-setup-start',
+    'room-reminder-setup-stage-register-service-user',
+    'room-reminder-setup-failure-http-status',
+    'room-reminder-http-status-429',
+    'room-reminder-matrix-error-M_USER_IN_USE',
+  ].join('\n');
+
+  assert.equal(
+    formatRoomReminderSetupStart(stageContent),
+    'room-reminder-setup-start reached\n',
+  );
+  assert.equal(
+    formatRoomReminderSetupStatus(stageContent),
+    'room-reminder-setup not-reached\n',
+  );
+  assert.equal(
+    formatRoomReminderSetupStage(stageContent),
+    'room-reminder-setup-stage register-service-user\n',
+  );
+  assert.equal(
+    formatRoomReminderSetupFailure(stageContent),
+    'room-reminder-setup-failure http-status\n',
+  );
+  assert.equal(
+    formatRoomReminderSetupHttpStatus(stageContent),
+    'room-reminder-http-status 429\n',
+  );
+  assert.equal(
+    formatRoomReminderSetupMatrixErrorCode(stageContent),
+    'room-reminder-matrix-error M_USER_IN_USE\n',
+  );
+});
+
+test('rejects hostile reminder setup markers and emits no attached values', () => {
+  const privateSentinel = 'private-user-token-and-response';
+  const stageContent = [
+    `room-reminder-setup-stage-create-room ${privateSentinel}`,
+    `room-reminder-setup-failure-http-status ${privateSentinel}`,
+    `room-reminder-http-status-429-${privateSentinel}`,
+    `room-reminder-matrix-error-M_PRIVATE_${privateSentinel}`,
+  ].join('\n');
+
+  const output = [
+    formatRoomReminderSetupStage(stageContent),
+    formatRoomReminderSetupFailure(stageContent),
+    formatRoomReminderSetupHttpStatus(stageContent),
+    formatRoomReminderSetupMatrixErrorCode(stageContent),
+  ].join('');
+  assert.equal(output, '');
+  assert.equal(output.includes(privateSentinel), false);
 });
 
 test('reports only whether the personal OpenID beforeAll completed', () => {

@@ -172,7 +172,7 @@ jobs:
             printf '%s\n' "$contract_summary"
             printf '%s\n' 'Real CalDAV test summary'
             printf '%s\n' "$contract_report_summary"
-            printf '%s\n' 'Personal and Room setup diagnosis'
+            printf '%s\n' 'Personal, Room, and reminder setup diagnosis'
             printf '%s\n' "$contract_setup_summary"
           } >> "$GITHUB_STEP_SUMMARY"
           {
@@ -180,7 +180,7 @@ jobs:
             printf '%s\n' "$contract_summary"
             printf '%s\n' 'Real CalDAV test summary'
             printf '%s\n' "$contract_report_summary"
-            printf '%s\n' 'Personal and Room setup diagnosis'
+            printf '%s\n' 'Personal, Room, and reminder setup diagnosis'
             printf '%s\n' "$contract_setup_summary"
           } >> "$RUNNER_TEMP/caldav-safe-contract-summary.txt"
           rm -f "$contract_log" "$contract_report"

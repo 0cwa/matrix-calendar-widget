@@ -24,6 +24,10 @@ import {
   formatPersonalOpenIdSetupStage,
   formatRoomAppServiceSetupHttpStatus,
   formatRoomAppServiceSetupMatrixErrorCode,
+  formatRoomReminderSetupFailure,
+  formatRoomReminderSetupHttpStatus,
+  formatRoomReminderSetupMatrixErrorCode,
+  formatRoomReminderSetupStage,
   getRoomAppServiceSetupStage,
 } from './sanitize-caldav-contract-stage.mjs';
 
@@ -43,6 +47,14 @@ const ROOM_SUITE_REPO_PATH =
   'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts';
 const PERSONAL_OPENID_SUITE_REPO_PATH =
   'matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts';
+const ROOM_REMINDER_SUITE_PATH = fileURLToPath(
+  new URL(
+    '../matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts',
+    import.meta.url,
+  ),
+);
+const ROOM_REMINDER_SUITE_REPO_PATH =
+  'matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts';
 const ROOM_CASES = new Set([
   'exact-binding',
   'subject-binding',
@@ -82,7 +94,12 @@ function readStartedCases(stageContent) {
 }
 
 function reportText(suite) {
-  const values = [suite?.message, suite?.failureMessage];
+  const values = [
+    suite?.message,
+    suite?.failureMessage,
+    suite?.testExecError?.message,
+    suite?.testExecError?.stack,
+  ];
   if (Array.isArray(suite?.assertionResults)) {
     for (const assertion of suite.assertionResults) {
       if (Array.isArray(assertion?.failureMessages)) {
@@ -289,6 +306,65 @@ export function formatPersonalOpenIdSetupDiagnostic(testReport, stageContent) {
   ].join('\n');
 }
 
+export function formatRoomReminderSetupDiagnostic(testReport, stageContent) {
+  const setupStarted =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === 'room-reminder-setup-start');
+  const setupCompleted =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === 'room-reminder-setup-complete');
+  if (setupCompleted) {
+    return 'room-reminder-setup-diagnostic setup-completed';
+  }
+
+  const suite = Array.isArray(testReport?.testResults)
+    ? testReport.testResults.find(
+        (result) => result?.name === ROOM_REMINDER_SUITE_PATH,
+      )
+    : undefined;
+  if (!suite) {
+    return `room-reminder-setup-diagnostic suite-not-found setup-start=${setupStarted}`;
+  }
+
+  const suiteStatus = ['pending', 'passed', 'failed'].includes(suite.status)
+    ? suite.status
+    : 'unknown';
+  if (suiteStatus !== 'failed') {
+    return `room-reminder-setup-diagnostic suite-status-${suiteStatus} setup-start=${setupStarted}`;
+  }
+
+  const stage =
+    formatRoomReminderSetupStage(stageContent).match(
+      /^room-reminder-setup-stage ([a-z-]+)\n$/,
+    )?.[1] ?? 'unavailable';
+  const failure =
+    formatRoomReminderSetupFailure(stageContent).match(
+      /^room-reminder-setup-failure ([a-z-]+)\n$/,
+    )?.[1] ?? 'unavailable';
+  const httpStatus =
+    formatRoomReminderSetupHttpStatus(stageContent).match(
+      /^room-reminder-http-status (\d{3})\n$/,
+    )?.[1] ?? 'unavailable';
+  const matrixErrorCode =
+    formatRoomReminderSetupMatrixErrorCode(stageContent).match(
+      /^room-reminder-matrix-error (M_[A-Z0-9_]+)\n$/,
+    )?.[1] ?? 'unavailable';
+  const counts = caseResultCounts(suite);
+  const error = summarizeException(
+    reportText(suite),
+    ROOM_REMINDER_SUITE_REPO_PATH,
+  );
+  const failurePhase = setupStarted ? 'setup' : 'suite-load';
+  return [
+    `room-reminder-${failurePhase}-diagnostic stage=${stage} category=${failure} http-status=${httpStatus} matrix-errcode=${matrixErrorCode} failed-case-results=${counts.failed}/${counts.total}`,
+    `room-reminder-${failurePhase}-exception class=${error.name} message=${JSON.stringify(error.message)} source=${error.source}`,
+  ].join('\n');
+}
+
 function emitDiagnostic(reportPath, stagePath) {
   try {
     const report = JSON.parse(readFileSync(reportPath, 'utf8'));
@@ -298,6 +374,9 @@ function emitDiagnostic(reportPath, stagePath) {
     );
     process.stdout.write(
       `${formatRoomAppServiceSetupDiagnostic(report, stageContent)}\n`,
+    );
+    process.stdout.write(
+      `${formatRoomReminderSetupDiagnostic(report, stageContent)}\n`,
     );
   } catch {
     process.stdout.write('room-appservice-setup-diagnostic unavailable\n');

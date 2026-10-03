@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import {
   formatPersonalOpenIdSetupDiagnostic,
   formatRoomAppServiceSetupDiagnostic,
+  formatRoomReminderSetupDiagnostic,
 } from './sanitize-room-appservice-setup.mjs';
 
 const roomSuitePath = fileURLToPath(
@@ -30,6 +31,12 @@ const roomSuitePath = fileURLToPath(
 const personalSuitePath = fileURLToPath(
   new URL(
     '../matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts',
+    import.meta.url,
+  ),
+);
+const reminderSuitePath = fileURLToPath(
+  new URL(
+    '../matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts',
     import.meta.url,
   ),
 );
@@ -311,6 +318,102 @@ test('reports only safe Personal OpenID status, Matrix code, class, and source',
   );
   assert.equal(diagnostic.includes('private-room-detail'), false);
   assert.equal(diagnostic.includes('/home/runner'), false);
+});
+
+test('reports the sanitized reminder setup stage, Matrix cause, and source frame', () => {
+  const source =
+    '/home/runner/work/matrix-calendar-widget/matrix-calendar-widget/matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts:586:11';
+  const privateSentinel = 'private-token-event-and-response';
+  const diagnostic = formatRoomReminderSetupDiagnostic(
+    {
+      testResults: [
+        {
+          name: reminderSuitePath,
+          status: 'failed',
+          assertionResults: [
+            { status: 'failed' },
+            { status: 'failed' },
+            { status: 'failed' },
+          ],
+          testExecError: {
+            message: `Error: Matrix contract fixture request failed (429) ${privateSentinel}`,
+            stack: `Error: Matrix contract fixture request failed (429) ${privateSentinel}\n    at matrixRequest (${source})`,
+          },
+        },
+      ],
+    },
+    [
+      'room-reminder-setup-start',
+      'room-reminder-setup-stage-register-service-user',
+      'room-reminder-setup-failure-http-status',
+      'room-reminder-http-status-429',
+      'room-reminder-matrix-error-M_USER_IN_USE',
+    ].join('\n'),
+  );
+
+  assert.equal(
+    diagnostic,
+    [
+      'room-reminder-setup-diagnostic stage=register-service-user category=http-status http-status=429 matrix-errcode=M_USER_IN_USE failed-case-results=3/3',
+      'room-reminder-setup-exception class=Error message="Matrix fixture HTTP status 429" source=matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts:586:11',
+    ].join('\n'),
+  );
+  assert.equal(diagnostic.includes(privateSentinel), false);
+  assert.equal(diagnostic.includes('/home/runner'), false);
+});
+
+test('reminder setup diagnosis ignores hostile stage, status, error, and source data', () => {
+  const privateSentinel = 'private-user@host.example/token';
+  const diagnostic = formatRoomReminderSetupDiagnostic(
+    {
+      testResults: [
+        {
+          name: reminderSuitePath,
+          status: 'failed',
+          failureMessage: `Error: rejected ${privateSentinel}\n at fake (/workspace/${privateSentinel}/RoomReminderDeliveryContract.test.ts:1:1)`,
+          assertionResults: [{ status: 'failed' }],
+        },
+      ],
+    },
+    [
+      'room-reminder-setup-start',
+      `room-reminder-setup-stage-private-${privateSentinel}`,
+      `room-reminder-setup-failure-http-status ${privateSentinel}`,
+      `room-reminder-http-status-429-${privateSentinel}`,
+      `room-reminder-matrix-error-M_PRIVATE_${privateSentinel}`,
+    ].join('\n'),
+  );
+
+  assert.match(
+    diagnostic,
+    /stage=unavailable category=unavailable http-status=unavailable matrix-errcode=unavailable/,
+  );
+  assert.match(
+    diagnostic,
+    /class=Error message="unclassified" source=unavailable/,
+  );
+  assert.equal(diagnostic.includes(privateSentinel), false);
+  assert.equal(diagnostic.includes('host.example'), false);
+  assert.equal(diagnostic.includes('/workspace/'), false);
+});
+
+test('does not report later reminder case failures as setup failures', () => {
+  const diagnostic = formatRoomReminderSetupDiagnostic(
+    {
+      testResults: [
+        {
+          name: reminderSuitePath,
+          status: 'failed',
+          failureMessage: 'private case failure',
+          assertionResults: [{ status: 'failed' }],
+        },
+      ],
+    },
+    'room-reminder-setup-start\nroom-reminder-setup-complete\n',
+  );
+
+  assert.equal(diagnostic, 'room-reminder-setup-diagnostic setup-completed');
+  assert.equal(diagnostic.includes('private case failure'), false);
 });
 
 test('Personal OpenID diagnosis rejects injected HTTP status and Matrix code markers', () => {

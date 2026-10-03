@@ -649,7 +649,7 @@ function resolveDirectCollectionResource(
     decodedSuffix.includes('\\') ||
     decodedSuffix === '.' ||
     decodedSuffix === '..' ||
-    /[\u0000-\u001f\u007f]/.test(decodedSuffix)
+    containsControlCharacters(decodedSuffix)
   ) {
     throw invalidUidHref(collection);
   }
@@ -671,8 +671,15 @@ function isSafeCalendarUid(value: string): boolean {
     typeof value === 'string' &&
     value.length > 0 &&
     value.length <= 1024 &&
-    !/[\u0000-\u001f\u007f]/.test(value)
+    !containsControlCharacters(value)
   );
+}
+
+function containsControlCharacters(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code <= 0x1f || code === 0x7f;
+  });
 }
 
 function escapeXml(value: string): string {

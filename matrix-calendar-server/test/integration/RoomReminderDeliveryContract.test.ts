@@ -16,6 +16,7 @@
 
 import fetchMock from 'jest-fetch-mock';
 import { randomUUID } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import { IAppConfiguration } from '../../src/IAppConfiguration';
 import { CalDavEventClient } from '../../src/caldav/CalDavEventClient';
 import { MatrixOpenIdCalDavCredentialProviderFactory } from '../../src/caldav/MatrixOpenIdCalDavCredentialProviderFactory';
@@ -63,6 +64,39 @@ type MatrixEvent = {
   content?: Record<string, unknown>;
 };
 
+type ReminderSetupStage =
+  | 'fixture-input-check'
+  | 'register-service-user'
+  | 'create-room'
+  | 'configure-calendar-target'
+  | 'mint-service-proof'
+  | 'create-calendar'
+  | 'seed-event'
+  | 'initialize-scheduler';
+
+type ReminderSetupFailure =
+  | 'transport'
+  | 'http-status'
+  | 'invalid-response'
+  | 'other';
+
+const REMINDER_MATRIX_ERROR_CODES = new Set([
+  'M_BAD_JSON',
+  'M_FORBIDDEN',
+  'M_INVALID_PARAM',
+  'M_INVALID_PASSWORD',
+  'M_INVALID_USERNAME',
+  'M_LIMIT_EXCEEDED',
+  'M_MISSING_PARAM',
+  'M_NOT_FOUND',
+  'M_THREEPID_AUTH_FAILED',
+  'M_UNAUTHORIZED',
+  'M_UNKNOWN',
+  'M_UNKNOWN_TOKEN',
+  'M_USER_DEACTIVATED',
+  'M_USER_IN_USE',
+]);
+
 let nativeFetch: typeof fetch;
 let serviceUserAccessToken: string;
 let roomId: string;
@@ -77,6 +111,8 @@ let credentialFactory: MatrixOpenIdCalDavCredentialProviderFactory;
 let canonicalSource: CanonicalRoomReminderSchedulerSource;
 let matrixTransport: MatrixAppServiceReminderTransport;
 let runtime: ConfiguredReminderSchedulerRuntimeSource;
+let reminderSetupActive = false;
+let reminderSetupFailureRecorded = false;
 let uidReportCount = 0;
 let uidQueryIncludedExpectedValue = false;
 let transactionIds: string[] = [];
@@ -86,115 +122,144 @@ describeContract(
   'room reminder delivery against real Synapse and Radicale',
   () => {
     beforeAll(async () => {
-      fetchMock.disableMocks();
-      nativeFetch = globalThis.fetch.bind(globalThis);
-      if (!serviceToken) {
-        throw new Error('Synthetic application-service fixture is unavailable');
-      }
+      appendReminderSetupMarker('room-reminder-setup-start');
+      reminderSetupActive = true;
+      reminderSetupFailureRecorded = false;
+      markReminderSetupStage('fixture-input-check');
+      try {
+        fetchMock.disableMocks();
+        nativeFetch = globalThis.fetch.bind(globalThis);
+        if (!serviceToken) {
+          throw new Error(
+            'Synthetic application-service fixture is unavailable',
+          );
+        }
 
-      const registration = await matrixRequest<{
-        user_id?: unknown;
-        access_token?: unknown;
-      }>('/_matrix/client/v3/register', {
-        method: 'POST',
-        token: serviceToken,
-        body: {
-          type: 'm.login.application_service',
-          username: serviceUserId.slice(1).split(':')[0],
-        },
-      });
-      if (
-        registration.user_id !== serviceUserId ||
-        typeof registration.access_token !== 'string'
-      ) {
-        throw new Error('Synthetic application-service fixture is unavailable');
-      }
-      serviceUserAccessToken = registration.access_token;
-
-      const createdRoom = await matrixRequest<{ room_id?: unknown }>(
-        '/_matrix/client/v3/createRoom',
-        {
+        markReminderSetupStage('register-service-user');
+        const registration = await matrixRequest<{
+          user_id?: unknown;
+          access_token?: unknown;
+        }>('/_matrix/client/v3/register', {
           method: 'POST',
-          token: serviceUserAccessToken,
+          token: serviceToken,
           body: {
-            name: 'M6 room reminder delivery contract',
-            preset: 'private_chat',
+            type: 'm.login.application_service',
+            username: serviceUserId.slice(1).split(':')[0],
           },
-        },
-      );
-      if (typeof createdRoom.room_id !== 'string') {
-        throw new Error('Synthetic reminder room is unavailable');
+        });
+        if (
+          registration.user_id !== serviceUserId ||
+          typeof registration.access_token !== 'string'
+        ) {
+          throw new Error(
+            'Synthetic application-service fixture is unavailable',
+          );
+        }
+        serviceUserAccessToken = registration.access_token;
+
+        markReminderSetupStage('create-room');
+        const createdRoom = await matrixRequest<{ room_id?: unknown }>(
+          '/_matrix/client/v3/createRoom',
+          {
+            method: 'POST',
+            token: serviceUserAccessToken,
+            body: {
+              name: 'M6 room reminder delivery contract',
+              preset: 'private_chat',
+            },
+          },
+        );
+        if (typeof createdRoom.room_id !== 'string') {
+          throw new Error('Synthetic reminder room is unavailable');
+        }
+        roomId = createdRoom.room_id;
+        calendarId = `reminder-contract-${randomUUID()}`;
+        eventUid = `reminder-${randomUUID()}@example.test`;
+        alarmUid = `alarm-${randomUUID()}@example.test`;
+        scanNow = new Date(Math.floor(Date.now() / 1_000) * 1_000);
+
+        markReminderSetupStage('configure-calendar-target');
+        const binding = { roomId, calendarId };
+        testConfiguration.room_calendar_bindings = [binding];
+        access = new RoomCalendarCalDavAccess(testConfiguration, nativeFetch);
+        credentialFactory = new MatrixOpenIdCalDavCredentialProviderFactory();
+        markReminderSetupStage('mint-service-proof');
+        const principal = await access.forAuthorizedTarget(
+          { roomId, calendarId, principal: { kind: 'service' } },
+          'write',
+        );
+        const credentialProvider = credentialFactory.forPrincipal(
+          principal.userId,
+          principal.credential,
+        );
+        const credentials = await credentialProvider.getRequestHeaders();
+        markReminderSetupStage('create-calendar');
+        const createdCalendar = await nativeFetch(principal.calendarUrl, {
+          method: 'MKCALENDAR',
+          headers: {
+            ...credentials,
+            'Content-Type': 'application/xml; charset=utf-8',
+          },
+          body: '<C:mkcalendar xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:D="DAV:"><D:set><D:prop><D:displayname>Reminder contract</D:displayname><C:supported-calendar-component-set><C:comp name="VEVENT"/></C:supported-calendar-component-set></D:prop></D:set></C:mkcalendar>',
+        });
+        if (!createdCalendar.ok) {
+          markReminderSetupFailure('http-status', createdCalendar.status);
+          throw new Error('Synthetic reminder calendar is unavailable');
+        }
+
+        markReminderSetupStage('seed-event');
+        const eventStart = new Date(scanNow.getTime() + 10 * 60 * 1_000);
+        const eventEnd = new Date(eventStart.getTime() + 60 * 60 * 1_000);
+        const eventResourceUrl = new URL(
+          'reminder.ics',
+          principal.calendarUrl,
+        ).toString();
+        await new CalDavEventClient(
+          credentialProvider,
+          nativeFetch,
+        ).createEvent(
+          eventResourceUrl,
+          reminderCalendar(eventUid, alarmUid, scanNow, eventStart, eventEnd),
+        );
+
+        markReminderSetupStage('initialize-scheduler');
+        configuration = {
+          roomId,
+          calendarId,
+          eventUid,
+          recurrenceId: null,
+          alarmUid,
+        };
+        store = new InMemoryRoomReminderStore();
+        await store.upsertConfiguration(configuration);
+        runtime = new ConfiguredReminderSchedulerRuntimeSource(
+          testConfiguration,
+          store,
+        );
+        canonicalSource = new CanonicalRoomReminderSchedulerSource(
+          testConfiguration,
+          access,
+          credentialFactory,
+          { fetchImpl: recordCalDavRequest },
+        );
+        matrixTransport = new MatrixAppServiceReminderTransport(
+          {
+            homeserverUrl,
+            applicationServiceToken: serviceToken,
+            applicationServiceSenderUserId: serviceUserId,
+          },
+          runtime,
+          recordMatrixRequest,
+        );
+        appendReminderSetupMarker('room-reminder-setup-complete');
+      } catch (error) {
+        if (!reminderSetupFailureRecorded) {
+          markReminderSetupFailure('other');
+        }
+        throw error;
+      } finally {
+        reminderSetupActive = false;
       }
-      roomId = createdRoom.room_id;
-      calendarId = `reminder-contract-${randomUUID()}`;
-      eventUid = `reminder-${randomUUID()}@example.test`;
-      alarmUid = `alarm-${randomUUID()}@example.test`;
-      scanNow = new Date(Math.floor(Date.now() / 1_000) * 1_000);
-
-      const binding = { roomId, calendarId };
-      testConfiguration.room_calendar_bindings = [binding];
-      access = new RoomCalendarCalDavAccess(testConfiguration, nativeFetch);
-      credentialFactory = new MatrixOpenIdCalDavCredentialProviderFactory();
-      const principal = await access.forAuthorizedTarget(
-        { roomId, calendarId, principal: { kind: 'service' } },
-        'write',
-      );
-      const credentialProvider = credentialFactory.forPrincipal(
-        principal.userId,
-        principal.credential,
-      );
-      const credentials = await credentialProvider.getRequestHeaders();
-      const createdCalendar = await nativeFetch(principal.calendarUrl, {
-        method: 'MKCALENDAR',
-        headers: {
-          ...credentials,
-          'Content-Type': 'application/xml; charset=utf-8',
-        },
-        body: '<C:mkcalendar xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:D="DAV:"><D:set><D:prop><D:displayname>Reminder contract</D:displayname><C:supported-calendar-component-set><C:comp name="VEVENT"/></C:supported-calendar-component-set></D:prop></D:set></C:mkcalendar>',
-      });
-      if (!createdCalendar.ok) {
-        throw new Error('Synthetic reminder calendar is unavailable');
-      }
-
-      const eventStart = new Date(scanNow.getTime() + 10 * 60 * 1_000);
-      const eventEnd = new Date(eventStart.getTime() + 60 * 60 * 1_000);
-      const eventResourceUrl = new URL(
-        'reminder.ics',
-        principal.calendarUrl,
-      ).toString();
-      await new CalDavEventClient(credentialProvider, nativeFetch).createEvent(
-        eventResourceUrl,
-        reminderCalendar(eventUid, alarmUid, scanNow, eventStart, eventEnd),
-      );
-
-      configuration = {
-        roomId,
-        calendarId,
-        eventUid,
-        recurrenceId: null,
-        alarmUid,
-      };
-      store = new InMemoryRoomReminderStore();
-      await store.upsertConfiguration(configuration);
-      runtime = new ConfiguredReminderSchedulerRuntimeSource(
-        testConfiguration,
-        store,
-      );
-      canonicalSource = new CanonicalRoomReminderSchedulerSource(
-        testConfiguration,
-        access,
-        credentialFactory,
-        { fetchImpl: recordCalDavRequest },
-      );
-      matrixTransport = new MatrixAppServiceReminderTransport(
-        {
-          homeserverUrl,
-          applicationServiceToken: serviceToken,
-          applicationServiceSenderUserId: serviceUserId,
-        },
-        runtime,
-        recordMatrixRequest,
-      );
     }, 30_000);
 
     beforeEach(() => {
@@ -432,26 +497,88 @@ async function recordMatrixRequest(
   return response;
 }
 
+function appendReminderSetupMarker(marker: string): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) return;
+
+  try {
+    appendFileSync(stageFile, `${marker}\n`, 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
+
+function markReminderSetupStage(stage: ReminderSetupStage): void {
+  appendReminderSetupMarker(`room-reminder-setup-stage-${stage}`);
+}
+
+function markReminderSetupFailure(
+  category: ReminderSetupFailure,
+  status?: number,
+  matrixErrorCode?: unknown,
+): void {
+  const markers = [`room-reminder-setup-failure-${category}`];
+  if (
+    typeof status === 'number' &&
+    Number.isInteger(status) &&
+    status >= 400 &&
+    status <= 599
+  ) {
+    markers.push(`room-reminder-http-status-${status}`);
+  }
+  if (
+    typeof matrixErrorCode === 'string' &&
+    REMINDER_MATRIX_ERROR_CODES.has(matrixErrorCode)
+  ) {
+    markers.push(`room-reminder-matrix-error-${matrixErrorCode}`);
+  }
+  for (const marker of markers) appendReminderSetupMarker(marker);
+  reminderSetupFailureRecorded = true;
+}
+
 async function matrixRequest<T = unknown>(
   path: string,
   options: { method: string; token?: string; body?: unknown },
 ): Promise<T> {
-  const response = await nativeFetch(new URL(path, homeserverUrl), {
-    method: options.method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
-    },
-    ...(options.body === undefined
-      ? {}
-      : { body: JSON.stringify(options.body) }),
-  });
+  let response: Response;
+  try {
+    response = await nativeFetch(new URL(path, homeserverUrl), {
+      method: options.method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+      },
+      ...(options.body === undefined
+        ? {}
+        : { body: JSON.stringify(options.body) }),
+    });
+  } catch (error) {
+    if (reminderSetupActive) markReminderSetupFailure('transport');
+    throw error;
+  }
   if (!response.ok) {
-    throw new Error('Synthetic reminder Matrix request failed');
+    if (reminderSetupActive) {
+      let matrixErrorCode: unknown;
+      try {
+        const body = (await response.clone().json()) as {
+          errcode?: unknown;
+        };
+        matrixErrorCode = body?.errcode;
+      } catch {
+        matrixErrorCode = undefined;
+      }
+      markReminderSetupFailure('http-status', response.status, matrixErrorCode);
+    }
+    throw new Error(
+      `Matrix contract fixture request failed (${response.status})`,
+    );
   }
   try {
     return (await response.json()) as T;
   } catch {
+    if (reminderSetupActive) {
+      markReminderSetupFailure('invalid-response');
+    }
     throw new Error('Synthetic reminder Matrix response is invalid');
   }
 }
