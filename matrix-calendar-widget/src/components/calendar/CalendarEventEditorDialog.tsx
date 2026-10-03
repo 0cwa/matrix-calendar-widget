@@ -33,19 +33,29 @@ import {
   FormControl,
   FormControlLabel,
   FormGroup,
+  FormHelperText,
   FormLabel,
   Stack,
   Switch,
   TextField,
   Typography,
 } from '@mui/material';
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import {
+  ChangeEvent,
+  FormEvent,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarEventFormValues,
   calendarEventFormStartWeekday,
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
+  calendarEventRdatePeriodDurationFromForm,
+  calendarEventRdatePeriodValueFromForm,
   calendarEventRdateValueFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
@@ -81,6 +91,7 @@ export function CalendarEventEditorDialog({
   uidFactory?: () => string;
 }) {
   const { t } = useTranslation();
+  const periodDurationHelperId = useId();
   const writableCalendars = useMemo(
     () => calendars.filter((calendar) => !calendar.readOnly),
     [calendars],
@@ -119,6 +130,45 @@ export function CalendarEventEditorDialog({
     calendars.find((calendar) => calendar.id === values.calendarId) ??
     initialCalendar;
   const readOnly = Boolean(selectedCalendar.readOnly);
+  const periodDuration = calendarEventRdatePeriodDurationFromForm(values);
+  const periodValue = calendarEventRdatePeriodValueFromForm(values);
+  const hasPeriodDurationInput = [
+    values.rdatePeriodWeeks,
+    values.rdatePeriodDays,
+    values.rdatePeriodHours,
+    values.rdatePeriodMinutes,
+    values.rdatePeriodSeconds,
+  ].some((value) => value !== undefined && value !== '');
+  const invalidPeriodDuration = hasPeriodDurationInput && !periodDuration;
+  const periodFormDisabled =
+    Boolean(values.rdateOperation) ||
+    values.exdateChanged === true ||
+    values.recurrenceChanged === true ||
+    values.timingChanged === true ||
+    values.timezoneChanged === true ||
+    saving;
+  const periodDurationFields = [
+    {
+      field: 'rdatePeriodWeeks',
+      label: t('calendarEvents.editor.durationWeeks', 'Weeks'),
+    },
+    {
+      field: 'rdatePeriodDays',
+      label: t('calendarEvents.editor.durationDays', 'Days'),
+    },
+    {
+      field: 'rdatePeriodHours',
+      label: t('calendarEvents.editor.durationHours', 'Hours'),
+    },
+    {
+      field: 'rdatePeriodMinutes',
+      label: t('calendarEvents.editor.durationMinutes', 'Minutes'),
+    },
+    {
+      field: 'rdatePeriodSeconds',
+      label: t('calendarEvents.editor.durationSeconds', 'Seconds'),
+    },
+  ] as const;
   const originalTimedTiming =
     values.originalTiming?.type === 'timed' ? values.originalTiming : undefined;
   const hasFloatingEndpoint =
@@ -223,6 +273,14 @@ export function CalendarEventEditorDialog({
     );
   };
 
+  const handleRdatePeriodDurationChange =
+    (field: keyof CalendarEventFormValues) =>
+    (change: ChangeEvent<HTMLInputElement>) => {
+      setValues((current) =>
+        current ? { ...current, [field]: change.target.value } : current,
+      );
+    };
+
   const handleAddRdate = () => {
     const value = calendarEventRdateValueFromForm(values);
     if (!value) {
@@ -234,6 +292,22 @@ export function CalendarEventEditorDialog({
             ...current,
             rdateChanged: true,
             rdateOperation: { action: 'add', value },
+          }
+        : current,
+    );
+  };
+
+  const handleAddPeriodRdate = () => {
+    const value = calendarEventRdatePeriodValueFromForm(values);
+    if (!value) {
+      return;
+    }
+    setValues((current) =>
+      current
+        ? {
+            ...current,
+            rdateChanged: true,
+            rdateOperation: { action: 'add-period', value },
           }
         : current,
     );
@@ -386,7 +460,12 @@ export function CalendarEventEditorDialog({
                   'calendarEvents.editor.invalidAlarm',
                   'Enter a positive lead time using whole-number duration units. Weeks cannot be combined with other units.',
                 )
-              : undefined;
+              : validationErrorCode === 'invalid-rdate'
+                ? t(
+                    'calendarEvents.editor.invalidRdateDuration',
+                    'Enter a positive duration using whole-number units. Weeks cannot be combined with other units.',
+                  )
+                : undefined;
 
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
@@ -900,7 +979,69 @@ export function CalendarEventEditorDialog({
                     }
                     value={values.rdateDraft ?? ''}
                   />
-                  <Stack direction="row" spacing={1}>
+                  {values.originalTiming?.type === 'timed' && (
+                    <FormHelperText>
+                      {t(
+                        'calendarEvents.editor.periodStartHelp',
+                        'For an added period, the date and time above are its start.',
+                      )}
+                    </FormHelperText>
+                  )}
+                  {values.originalTiming?.type === 'timed' &&
+                    values.timingType === 'timed' && (
+                      <FormControl
+                        component="fieldset"
+                        disabled={periodFormDisabled}
+                      >
+                        <FormLabel component="legend">
+                          {t(
+                            'calendarEvents.editor.periodDuration',
+                            'Duration of added period',
+                          )}
+                        </FormLabel>
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          sx={{ flexWrap: 'wrap', rowGap: 1 }}
+                        >
+                          {periodDurationFields.map(({ field, label }) => (
+                            <TextField
+                              inputProps={{
+                                'aria-describedby': periodDurationHelperId,
+                                min: 0,
+                                step: 1,
+                              }}
+                              key={field}
+                              label={label}
+                              onChange={handleRdatePeriodDurationChange(field)}
+                              size="small"
+                              sx={{
+                                flex: '1 1 84px',
+                                minWidth: 82,
+                                maxWidth: 116,
+                              }}
+                              type="number"
+                              value={values[field] ?? ''}
+                            />
+                          ))}
+                        </Stack>
+                        <FormHelperText
+                          error={invalidPeriodDuration}
+                          id={periodDurationHelperId}
+                        >
+                          {invalidPeriodDuration
+                            ? t(
+                                'calendarEvents.editor.invalidRdateDuration',
+                                'Enter a positive duration using whole-number units. Weeks cannot be combined with other units.',
+                              )
+                            : t(
+                                'calendarEvents.editor.periodDurationHelp',
+                                'Use positive whole numbers. Weeks cannot be combined with days or time units.',
+                              )}
+                        </FormHelperText>
+                      </FormControl>
+                    )}
+                  <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
                     <Button
                       disabled={
                         Boolean(values.rdateOperation) ||
@@ -914,6 +1055,20 @@ export function CalendarEventEditorDialog({
                     >
                       {t('calendarEvents.editor.addAdditionalDate', 'Add date')}
                     </Button>
+                    {values.originalTiming?.type === 'timed' &&
+                      values.timingType === 'timed' && (
+                        <Button
+                          aria-describedby={periodDurationHelperId}
+                          disabled={periodFormDisabled || !periodValue}
+                          onClick={handleAddPeriodRdate}
+                          type="button"
+                        >
+                          {t(
+                            'calendarEvents.editor.addPeriodDate',
+                            'Add period',
+                          )}
+                        </Button>
+                      )}
                     {values.rdateOperation && (
                       <Button
                         disabled={saving}
@@ -934,10 +1089,15 @@ export function CalendarEventEditorDialog({
                             'calendarEvents.editor.dateWillBeAdded',
                             'The date will be added when you save.',
                           )
-                        : t(
-                            'calendarEvents.editor.dateWillBeRemoved',
-                            'The date will be removed when you save.',
-                          )}
+                        : values.rdateOperation.action === 'add-period'
+                          ? t(
+                              'calendarEvents.editor.periodWillBeAdded',
+                              'The period will be added when you save.',
+                            )
+                          : t(
+                              'calendarEvents.editor.dateWillBeRemoved',
+                              'The date will be removed when you save.',
+                            )}
                     </Typography>
                   )}
                 </Stack>
