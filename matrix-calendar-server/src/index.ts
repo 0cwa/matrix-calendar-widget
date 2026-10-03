@@ -19,6 +19,7 @@ import { VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions } from '@nestjs/microservices';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { useContainer } from 'class-validator';
 import { LogService } from 'matrix-bot-sdk';
@@ -26,6 +27,7 @@ import { Logger } from 'nestjs-pino';
 import { IAppConfiguration } from './IAppConfiguration';
 import { StubMatrixBotLogger } from './StubMatrixBotLogger';
 import { AppModule } from './app.module';
+import { configureRequestBodyLimits } from './http/RequestBodyLimits';
 import {
   BoundedFixedWindowSourceRateLimiter,
   CalendarGatewayRateLimitMiddleware,
@@ -37,10 +39,12 @@ import { MatrixServer } from './rpc/MatrixServer';
 LogService.setLogger(new StubMatrixBotLogger());
 
 (async function () {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
+    bodyParser: false,
     cors: true,
   });
+  configureRequestBodyLimits(app);
   const appConfig = app
     .get(ConfigService)
     .getOrThrow<IAppConfiguration>('config');

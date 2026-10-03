@@ -396,10 +396,15 @@ addresses from Matrix room membership.
 - [x] Confine discovered CalDAV principal/home/collection hrefs and refuse
       discovery PROPFIND redirects before credential-bearing follow-up I/O.
       Other CalDAV transports remain outside this focused boundary.
+  - [x] Reject redirects for event REPORT/GET/PUT/DELETE and stream-bound
+        REPORT/GET response bytes with a configurable 16 MiB default (maximum
+        64 MiB), mapping failures to fixed upstream errors.
 - [ ] Rate limits and abuse controls.
   - [x] Bound calendar-gateway requests by socket peer before Matrix identity
         validation, with capped process-local state and generic retry feedback.
         Shared-proxy, restart, and replica limitations remain explicit.
+  - [x] Make the existing 100kb JSON/urlencoded ingress limit explicit and
+        verify oversized bodies stop before identity validation.
 - [x] Define the free/busy disclosure and authorization policy in ADR027.
       Availability endpoints, sharing, and UI remain unimplemented.
 - [x] Add a cold-backup and isolated-restore runbook for the project-owned

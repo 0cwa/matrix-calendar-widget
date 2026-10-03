@@ -132,6 +132,46 @@ describe('room calendar event listing', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('enforces the configured response cap on application-principal room reads', async () => {
+    isAllowed.mockResolvedValue(true);
+    forAuthorizedTarget.mockResolvedValue({
+      userId: '@_matrix_calendar_service:example.test',
+      calendarUrl:
+        'https://radicale.example.test/matrix_calendar_service/room-calendar/',
+      credential: {
+        accessToken: 'synthetic-openid-proof',
+        matrixServerName: 'example.test',
+      },
+    });
+    fetch.mockResponseOnce('oversized response', {
+      status: 207,
+      headers: { 'Content-Length': '100' },
+    });
+    const controller = new CalendarGatewayController(
+      { ...configuration, caldav_max_event_response_bytes: 10 },
+      authorizationFactory,
+      new MatrixOpenIdCalDavCredentialProviderFactory(),
+      roomAccess,
+    );
+
+    await expect(
+      controller.listEvents(
+        userContext,
+        undefined,
+        roomId,
+        calendarId,
+        '2026-01-01T00:00:00.000Z',
+        '2026-01-02T00:00:00.000Z',
+        'UTC',
+        'room',
+      ),
+    ).rejects.toMatchObject({
+      status: 502,
+      response: { code: 'caldav-upstream-error' },
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('denies a mismatched room/calendar binding before proof or CalDAV', async () => {
     isAllowed.mockResolvedValue(true);
 
