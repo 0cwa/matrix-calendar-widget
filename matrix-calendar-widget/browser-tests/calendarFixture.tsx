@@ -53,12 +53,12 @@ const events: CalendarEvent[] = Array.from({ length: 8 }, (_, index) => ({
     type: 'timed',
     start: {
       type: 'zoned',
-      local: '2026-10-05T09:00:00',
+      local: index === 0 ? '2026-10-05T08:00:00' : '2026-10-05T09:00:00',
       timezone: 'Europe/Stockholm',
     },
     end: {
       type: 'zoned',
-      local: '2026-10-05T10:00:00',
+      local: index === 0 ? '2026-10-05T09:00:00' : '2026-10-05T10:00:00',
       timezone: 'Europe/Stockholm',
     },
   },
