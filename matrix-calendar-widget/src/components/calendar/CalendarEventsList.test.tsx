@@ -14,13 +14,25 @@
  * limitations under the License.
  */
 
-import { CalendarEvent } from '@matrix-calendar-widget/calendar';
-import { render, screen } from '@testing-library/react';
+import {
+  Calendar,
+  CalendarEvent,
+  InMemoryCalendarRepository,
+} from '@matrix-calendar-widget/calendar';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Settings } from 'luxon';
+import { PropsWithChildren, useState } from 'react';
 import { vi } from 'vitest';
 import { axe } from 'vitest-axe';
+import { CalendarRepositoryProvider } from '../../calendar';
+import { CalendarEventDetailsDialog } from './CalendarEventDetailsDialog';
 import { CalendarEventsList } from './CalendarEventsList';
+
+const calendar: Calendar = {
+  id: 'team',
+  name: 'Team calendar',
+};
 
 const event: CalendarEvent = {
   id: 'planning',
@@ -54,6 +66,33 @@ const floatingEvent: CalendarEvent = {
     end: { type: 'floating', local: '2026-09-23T10:00:00' },
   },
 };
+
+function createWrapper(repository: InMemoryCalendarRepository) {
+  return function Wrapper({ children }: PropsWithChildren<{}>) {
+    return (
+      <CalendarRepositoryProvider repository={repository}>
+        {children}
+      </CalendarRepositoryProvider>
+    );
+  };
+}
+
+function EventDetailsHarness() {
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent>();
+
+  return (
+    <>
+      <CalendarEventsList
+        events={[event]}
+        onSelectEvent={(selected) => setSelectedEvent(selected)}
+      />
+      <CalendarEventDetailsDialog
+        event={selectedEvent}
+        onClose={() => setSelectedEvent(undefined)}
+      />
+    </>
+  );
+}
 
 describe('<CalendarEventsList />', () => {
   it('shows floating times in the viewer local zone', () => {
@@ -95,6 +134,36 @@ describe('<CalendarEventsList />', () => {
     expect(
       screen.getByText('No events scheduled that match the selected filters.'),
     ).toBeInTheDocument();
+  });
+
+  it('opens event details with Enter and restores focus after Escape', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [event],
+    });
+
+    render(<EventDetailsHarness />, {
+      wrapper: createWrapper(repository),
+    });
+
+    const eventAction = screen.getByRole('button', { name: /Team planning/i });
+    await userEvent.tab();
+    expect(eventAction).toHaveFocus();
+
+    await userEvent.keyboard('{Enter}');
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Team planning',
+    });
+    await userEvent.tab();
+    expect(within(dialog).getByRole('button', { name: 'Edit' })).toHaveFocus();
+
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'Team planning' }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(eventAction).toHaveFocus();
   });
 
   it('has no accessibility violations', async () => {
