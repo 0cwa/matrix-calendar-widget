@@ -137,9 +137,12 @@ jobs:
           test_status=$?
           set -e
           set +e
-          node dev/sanitize-server-test-report.mjs "$report"
+          node dev/sanitize-server-test-report.mjs "$report" "$test_status"
           summary_status=$?
           set -e
+          if [ "$test_status" -ne 0 ]; then
+            exit "$test_status"
+          fi
           if [ "$summary_status" -ne 0 ]; then
             exit "$summary_status"
           fi

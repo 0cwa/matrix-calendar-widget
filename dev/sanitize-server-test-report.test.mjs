@@ -113,3 +113,36 @@ test('emits only a fixed no-failures marker for passing mapped cases', () => {
     'server-test-report no-failures',
   ]);
 });
+
+test('classifies nonzero runner exit without failed cases without exposing report data', () => {
+  const privateSentinel =
+    'private coverage failure with event values and stack details';
+  const report = {
+    testResults: [
+      {
+        name: suitePath,
+        status: 'passed',
+        assertionResults: [
+          {
+            title:
+              'removes one PERIOD RDATE from a serialized CalDAV resource with its current ETag',
+            status: 'passed',
+            failureMessages: [],
+          },
+        ],
+        failureMessage: privateSentinel,
+      },
+    ],
+    coverageMap: { details: privateSentinel },
+  };
+
+  const output = formatServerTestFailureSummary(report, 23).join('\n');
+  assert.equal(output, 'server-test-report runner-failure-no-case-details');
+  assert.equal(output.includes(privateSentinel), false);
+});
+
+test('fails closed for an invalid runner exit code', () => {
+  assert.deepEqual(formatServerTestFailureSummary({ testResults: [] }, 256), [
+    'server-test-report unavailable',
+  ]);
+});

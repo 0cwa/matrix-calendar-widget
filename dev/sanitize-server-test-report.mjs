@@ -19,7 +19,15 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { safeContractCaseStatusLines } from './caldav-contract-status.mjs';
 
-export function formatServerTestFailureSummary(testReport) {
+export function formatServerTestFailureSummary(testReport, testExitCode = 0) {
+  if (
+    !Number.isInteger(testExitCode) ||
+    testExitCode < 0 ||
+    testExitCode > 255
+  ) {
+    return ['server-test-report unavailable'];
+  }
+
   const safeLines = safeContractCaseStatusLines(testReport);
   const failures = safeLines.filter(
     (line) =>
@@ -28,10 +36,18 @@ export function formatServerTestFailureSummary(testReport) {
       (line.startsWith('contract-case ') && line.endsWith(' failed')),
   );
 
-  return failures.length > 0 ? failures : ['server-test-report no-failures'];
+  if (failures.length > 0) {
+    return failures;
+  }
+
+  return [
+    testExitCode === 0
+      ? 'server-test-report no-failures'
+      : 'server-test-report runner-failure-no-case-details',
+  ];
 }
 
-function emitServerTestFailureSummary(reportPath) {
+function emitServerTestFailureSummary(reportPath, testExitCode) {
   let report;
   try {
     report = JSON.parse(readFileSync(reportPath, 'utf8'));
@@ -41,7 +57,7 @@ function emitServerTestFailureSummary(reportPath) {
     return;
   }
 
-  for (const line of formatServerTestFailureSummary(report)) {
+  for (const line of formatServerTestFailureSummary(report, testExitCode)) {
     process.stdout.write(`${line}\n`);
   }
 }
@@ -51,10 +67,14 @@ if (
   fileURLToPath(import.meta.url) === resolve(process.argv[1])
 ) {
   const reportPath = process.argv[2];
-  if (!reportPath) {
+  const testExitCodeText = process.argv[3] ?? '';
+  const testExitCode = /^(0|[1-9][0-9]{0,2})$/.test(testExitCodeText)
+    ? Number(testExitCodeText)
+    : Number.NaN;
+  if (!reportPath || !Number.isInteger(testExitCode) || testExitCode > 255) {
     process.stdout.write('server-test-report unavailable\n');
     process.exitCode = 1;
   } else {
-    emitServerTestFailureSummary(reportPath);
+    emitServerTestFailureSummary(reportPath, testExitCode);
   }
 }
