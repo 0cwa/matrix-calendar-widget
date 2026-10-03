@@ -15,6 +15,10 @@
  */
 
 import { XMLParser } from 'fast-xml-parser';
+import {
+  cancelDavResponse,
+  readBoundedDavResponse,
+} from './BoundedDavResponse';
 import { CalDavCredentialProvider } from './CalDavCredentialProvider';
 
 export type DiscoveredCalDavCalendar = {
@@ -165,7 +169,11 @@ export class CalDavDiscoveryClient {
     if (!name) {
       throw new CalDavDiscoveryError('Calendar display name must not be empty');
     }
-    if (!/^[A-Za-z0-9._-]+$/.test(collectionName)) {
+    if (
+      !/^[A-Za-z0-9._-]{1,255}$/.test(collectionName) ||
+      collectionName === '.' ||
+      collectionName === '..'
+    ) {
       throw new CalDavDiscoveryError('Calendar collection name is invalid');
     }
 
@@ -183,7 +191,7 @@ export class CalDavDiscoveryClient {
     const headers = new Headers(credentialHeaders);
     headers.set('Content-Type', 'application/xml; charset=utf-8');
 
-    const response = await this.fetchImpl(collectionUrl, {
+    const response = await this.sendRequest(collectionUrl, {
       method: 'MKCALENDAR',
       headers,
       body: createCalendarBody(name),
@@ -214,11 +222,15 @@ export class CalDavDiscoveryClient {
       throw new CalDavDiscoveryError('Calendar display name must not be empty');
     }
 
+    calendarUrl = this.resolveScopedHref(
+      calendarUrl,
+      this.scopeBase.toString(),
+    );
     const credentialHeaders = await this.credentialProvider.getRequestHeaders();
     const headers = new Headers(credentialHeaders);
     headers.set('Content-Type', 'application/xml; charset=utf-8');
 
-    const response = await this.fetchImpl(calendarUrl, {
+    const response = await this.sendRequest(calendarUrl, {
       method: 'PROPPATCH',
       headers,
       body: renameCalendarBody(name),
@@ -234,7 +246,7 @@ export class CalDavDiscoveryClient {
 
     if (response.status === 207) {
       const propertyStatus = propPatchPropertyStatus(
-        await response.text(),
+        await this.readXml(response),
         'displayname',
       );
       if (
@@ -257,11 +269,15 @@ export class CalDavDiscoveryClient {
     calendarUrl: string,
     description: string,
   ): Promise<void> {
+    calendarUrl = this.resolveScopedHref(
+      calendarUrl,
+      this.scopeBase.toString(),
+    );
     const credentialHeaders = await this.credentialProvider.getRequestHeaders();
     const headers = new Headers(credentialHeaders);
     headers.set('Content-Type', 'application/xml; charset=utf-8');
 
-    const response = await this.fetchImpl(calendarUrl, {
+    const response = await this.sendRequest(calendarUrl, {
       method: 'PROPPATCH',
       headers,
       body: updateCalendarDescriptionBody(description),
@@ -277,7 +293,7 @@ export class CalDavDiscoveryClient {
 
     if (response.status === 207) {
       const propertyStatus = propPatchPropertyStatus(
-        await response.text(),
+        await this.readXml(response),
         'calendar-description',
       );
       if (
@@ -303,11 +319,15 @@ export class CalDavDiscoveryClient {
       );
     }
 
+    calendarUrl = this.resolveScopedHref(
+      calendarUrl,
+      this.scopeBase.toString(),
+    );
     const credentialHeaders = await this.credentialProvider.getRequestHeaders();
     const headers = new Headers(credentialHeaders);
     headers.set('Content-Type', 'application/xml; charset=utf-8');
 
-    const response = await this.fetchImpl(calendarUrl, {
+    const response = await this.sendRequest(calendarUrl, {
       method: 'PROPPATCH',
       headers,
       body: updateCalendarColorBody(color),
@@ -323,7 +343,7 @@ export class CalDavDiscoveryClient {
 
     if (response.status === 207) {
       const propertyStatus = propPatchPropertyStatus(
-        await response.text(),
+        await this.readXml(response),
         'calendar-color',
       );
       if (
@@ -343,8 +363,12 @@ export class CalDavDiscoveryClient {
   }
 
   async deleteCalendar(calendarUrl: string): Promise<void> {
+    calendarUrl = this.resolveScopedHref(
+      calendarUrl,
+      this.scopeBase.toString(),
+    );
     const credentialHeaders = await this.credentialProvider.getRequestHeaders();
-    const response = await this.fetchImpl(calendarUrl, {
+    const response = await this.sendRequest(calendarUrl, {
       method: 'DELETE',
       headers: credentialHeaders,
     });
@@ -474,6 +498,37 @@ export class CalDavDiscoveryClient {
     );
   }
 
+  private async sendRequest(url: string, init: RequestInit): Promise<Response> {
+    const response = await this.fetchImpl(url, { ...init, redirect: 'manual' });
+    if (response.status >= 300 && response.status < 400) {
+      await cancelDavResponse(response);
+      throw new CalDavDiscoveryError(DISCOVERY_REDIRECT_ERROR);
+    }
+    if (
+      !response.ok ||
+      init.method === 'MKCALENDAR' ||
+      init.method === 'DELETE' ||
+      (init.method === 'PROPPATCH' && response.status !== 207)
+    ) {
+      await cancelDavResponse(response);
+    }
+    return response;
+  }
+
+  private async readXml(response: Response): Promise<string> {
+    try {
+      const xml = await readBoundedDavResponse(response);
+      if (/<!DOCTYPE\b/i.test(xml)) {
+        throw new Error('Unsupported DAV document type declaration');
+      }
+      return xml;
+    } catch {
+      throw new CalDavDiscoveryError(
+        'CalDAV XML response could not be read within the size limit',
+      );
+    }
+  }
+
   private async propfind(
     url: string,
     depth: '0' | '1',
@@ -485,16 +540,12 @@ export class CalDavDiscoveryClient {
     headers.set('Content-Type', 'application/xml; charset=utf-8');
     headers.set('Depth', depth);
 
-    const response = await this.fetchImpl(requestUrl, {
+    const response = await this.sendRequest(requestUrl, {
       method: 'PROPFIND',
       headers,
       body,
       redirect: 'manual',
     });
-
-    if (response.status >= 300 && response.status < 400) {
-      throw new CalDavDiscoveryError(DISCOVERY_REDIRECT_ERROR);
-    }
 
     if (!response.ok) {
       throw new CalDavDiscoveryError(
@@ -504,7 +555,7 @@ export class CalDavDiscoveryClient {
       );
     }
 
-    const xml = await response.text();
+    const xml = await this.readXml(response);
     const document = asNode(parser.parse(xml));
     const multistatus = asNode(document?.multistatus);
     return asArray(multistatus?.response).flatMap((value) => {

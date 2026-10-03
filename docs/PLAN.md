@@ -394,7 +394,9 @@ addresses from Matrix room membership.
       tracked in `docs/threat-model.md`; this is not a penetration test.
 - [x] Confine discovered CalDAV principal/home/collection hrefs and refuse
       discovery PROPFIND redirects before credential-bearing follow-up I/O.
-      Other CalDAV transports remain outside this focused boundary.
+  - [x] Apply confinement and redirect refusal to collection mutations, bound
+        discovery/property XML bodies to 16 MiB before parsing, and reject
+        document type declarations. Preserve ordinary XML entity round trips.
   - [x] Reject redirects for event REPORT/GET/PUT/DELETE and stream-bound
         REPORT/GET response bytes with a configurable 16 MiB default (maximum
         64 MiB), mapping failures to fixed upstream errors.
