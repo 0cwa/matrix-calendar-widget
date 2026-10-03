@@ -264,6 +264,28 @@ export function CalendarEventEditorDialog({
     );
   };
 
+  const handleRemoveExdate = (
+    recurrenceId: NonNullable<CalendarEventFormValues['exdateValues']>[number],
+  ) => {
+    setValues((current) =>
+      current
+        ? {
+            ...current,
+            exdateChanged: true,
+            exdateOperation: { action: 'remove', recurrenceId },
+          }
+        : current,
+    );
+  };
+
+  const handleCancelExdate = () => {
+    setValues((current) =>
+      current
+        ? { ...current, exdateChanged: false, exdateOperation: undefined }
+        : current,
+    );
+  };
+
   const handleWeekdayModeChange = (change: ChangeEvent<HTMLInputElement>) => {
     setValues((current) =>
       current
@@ -840,6 +862,7 @@ export function CalendarEventEditorDialog({
                           ).concat(`: ${label}`)}
                           disabled={
                             Boolean(values.rdateOperation) ||
+                            values.exdateChanged === true ||
                             values.timingChanged === true ||
                             saving
                           }
@@ -854,6 +877,7 @@ export function CalendarEventEditorDialog({
                   <TextField
                     disabled={
                       Boolean(values.rdateOperation) ||
+                      values.exdateChanged === true ||
                       values.timingChanged === true ||
                       saving
                     }
@@ -880,6 +904,7 @@ export function CalendarEventEditorDialog({
                     <Button
                       disabled={
                         Boolean(values.rdateOperation) ||
+                        values.exdateChanged === true ||
                         values.timingChanged === true ||
                         values.rdateDraft?.trim() === '' ||
                         saving
@@ -914,6 +939,65 @@ export function CalendarEventEditorDialog({
                             'The date will be removed when you save.',
                           )}
                     </Typography>
+                  )}
+                </Stack>
+              </FormControl>
+            )}
+
+            {event && values.exdateEditable && (
+              <FormControl component="fieldset">
+                <FormLabel component="legend">
+                  {t('calendarEvents.editor.excludedDates', 'Excluded dates')}
+                </FormLabel>
+                <Stack spacing={1}>
+                  {(values.exdateValues ?? []).map((value, index) => {
+                    const label = formatRdateDateTime(value);
+                    return (
+                      <Stack
+                        alignItems="center"
+                        direction="row"
+                        justifyContent="space-between"
+                        key={`${label}-${index}`}
+                      >
+                        <Typography variant="body2">{label}</Typography>
+                        <Button
+                          aria-label={t(
+                            'calendarEvents.editor.removeExcludedDate',
+                            'Remove excluded date',
+                          ).concat(`: ${label}`)}
+                          disabled={
+                            Boolean(values.exdateOperation) ||
+                            Boolean(values.rdateOperation) ||
+                            values.timingChanged === true ||
+                            saving
+                          }
+                          onClick={() => handleRemoveExdate(value)}
+                          type="button"
+                        >
+                          {t('calendarEvents.editor.remove', 'Remove')}
+                        </Button>
+                      </Stack>
+                    );
+                  })}
+                  {values.exdateOperation && (
+                    <Stack direction="row" spacing={1}>
+                      <Button
+                        disabled={saving}
+                        onClick={handleCancelExdate}
+                        type="button"
+                      >
+                        {t(
+                          'calendarEvents.editor.cancelDateChange',
+                          'Cancel date change',
+                        )}
+                      </Button>
+                      <Typography color="text.secondary" variant="body2">
+                        {t(
+                          'calendarEvents.editor.excludedDateWillBeRemoved',
+                          'The excluded date will be removed when you save.',
+                        )}
+                      </Typography>
+                    </Stack>
                   )}
                 </Stack>
               </FormControl>

@@ -771,6 +771,58 @@ describe('calendar event form adapter', () => {
     ).toBe('invalid-recurrence');
   });
 
+  it('serializes removal of one existing EXDATE with its exact value form', () => {
+    const exdates = [
+      { type: 'date' as const, value: '2026-10-01' },
+      { type: 'floating-date-time' as const, value: '2026-10-02T09:00:00' },
+      {
+        type: 'date-time' as const,
+        value: { local: '2026-10-03T09:00:00', timezone: 'Europe/Stockholm' },
+      },
+    ];
+    const exdateEvent: CalendarEvent = {
+      id: 'exdate-series',
+      calendarId: 'team',
+      uid: 'exdate-series@example.test',
+      title: 'EXDATE series',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-09-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4', exdates },
+    };
+    const values = calendarEventToFormValues(exdateEvent, calendar);
+
+    expect(values.exdateEditable).toBe(true);
+    expect(values.exdateValues).toEqual(exdates);
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        exdateChanged: true,
+        exdateOperation: { action: 'remove', recurrenceId: exdates[2]! },
+      }).recurrence,
+    ).toEqual({
+      exdate: { action: 'remove', recurrenceId: exdates[2] },
+    });
+    expect(
+      validateCalendarEventForm({
+        ...values,
+        title: 'EXDATE series',
+        exdateChanged: true,
+        exdateOperation: { action: 'remove', recurrenceId: exdates[2]! },
+      }),
+    ).toBeUndefined();
+  });
+
   it('serializes removal of an exact PERIOD RDATE', () => {
     const period = {
       type: 'period' as const,

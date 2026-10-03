@@ -285,6 +285,56 @@ describe('<CalendarEventEditorDialog />', () => {
     });
   });
 
+  it('removes one existing EXDATE identity and preserves its siblings', async () => {
+    const exdateEvent: CalendarEvent = {
+      ...recurringEvent,
+      id: 'exdate-series-resource',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;COUNT=8',
+        exdates: [
+          { type: 'date', value: '2026-10-05' },
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-07T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        ],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [exdateEvent],
+    });
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={exdateEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Remove excluded date: 2026-10-07T09:00:00 Europe/Stockholm',
+      }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await expect(
+      repository.getEvent('team', 'exdate-series-resource'),
+    ).resolves.toMatchObject({
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;COUNT=8',
+        exdates: [{ type: 'date', value: '2026-10-05' }],
+      },
+    });
+  });
+
   it('adds one typed RDATE while keeping PERIOD values intact', async () => {
     const rdateEvent: CalendarEvent = {
       ...recurringEvent,
