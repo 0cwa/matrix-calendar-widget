@@ -183,6 +183,49 @@ describe('InMemoryCalendarRepository', () => {
     );
   });
 
+  it('adds and defensively returns an explicit-end PERIOD recurrence date', async () => {
+    const event: CalendarEvent = {
+      ...events[2],
+      id: 'period-add',
+      recurrence: { rrule: 'FREQ=WEEKLY' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+    const value = {
+      type: 'period' as const,
+      timing: {
+        type: 'end' as const,
+        start: {
+          type: 'floating-date-time' as const,
+          value: '2026-10-29T09:30:00',
+        },
+        end: {
+          type: 'floating-date-time' as const,
+          value: '2026-10-29T10:30:00',
+        },
+      },
+    };
+
+    const updated = await repository.updateEvent('team', 'period-add', {
+      recurrence: { rdate: { action: 'add-period', value } },
+    });
+    expect(updated.recurrence?.rdates).toEqual([value]);
+    const returned = updated.recurrence?.rdates?.[0];
+    if (
+      !returned ||
+      returned.type !== 'period' ||
+      returned.timing.type !== 'end' ||
+      returned.timing.start.type !== 'floating-date-time'
+    ) {
+      throw new Error('Expected cloned explicit-end PERIOD RDATE');
+    }
+    returned.timing.start.value = '2099-01-01T00:00:00';
+    const fetched = await repository.getEvent('team', 'period-add');
+    expect(fetched.recurrence?.rdates).toEqual([value]);
+  });
+
   it('creates a named calendar with deterministic identity', async () => {
     const repository = createRepository();
 

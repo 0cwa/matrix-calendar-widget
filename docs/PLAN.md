@@ -136,7 +136,13 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
   - [x] Remove one selected existing PERIOD-valued RDATE by its exact start
         and explicit end or RFC duration; preserve all point/period siblings,
         parameters, timezone definitions, detached members, and ETag checks.
-        PERIOD creation and timing edits remain unsupported.
+  - [x] Add one explicit-end PERIOD-valued RDATE to a supported timed
+        recurring master. Require matching DATE-TIME value kinds and timezone,
+        a source VTIMEZONE for a new TZID, and a positive interval; treat an
+        exact repeated addition as a no-op. Preserve point/period siblings,
+        parameters, timezone definitions, detached members, and ETag checks.
+        Duration-form creation and changes to an existing PERIOD's timing
+        remain unsupported.
 - [ ] RECURRENCE-ID instance override editing.
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
@@ -174,11 +180,14 @@ separate homogeneous RDATE property. Exact duplicates already supplied by
 DTSTART, RRULE, or RDATE are no-ops; EXDATE values remain untouched and
 authoritative. Point removal compares the full typed identity, including TZID.
 A separate remove-only PERIOD operation matches the full start plus explicit
-end or original RFC duration; it never creates or changes a PERIOD. Malformed
-or unsupported RDATE properties, detached VEVENTs, VALARM, VTIMEZONE, unknown
-properties, siblings, and ETag conditional updates remain preserved. General
-EXDATE editing, PERIOD creation/timing edits, arbitrary RRULEs, and broad M5
-completion remain open.
+end or original RFC duration. A separate add operation creates one explicit-end
+PERIOD RDATE on a supported timed recurring master, preserves its typed start
+and end and source timezone definition, and makes an exact repeated addition a
+no-op. Duration-form creation and changes to an existing PERIOD's timing remain
+unsupported. Malformed or unsupported RDATE properties, detached VEVENTs,
+VALARM, VTIMEZONE, unknown properties, siblings, and ETag conditional updates
+remain preserved. General EXDATE editing, duration-form PERIOD creation,
+PERIOD timing edits, arbitrary RRULEs, and broad M5 completion remain open.
 
 The bounded weekly BYDAY slice extends the editor with a weekday set for
 every-week rules. Plain weekday tokens are accepted only when DTSTART's
