@@ -17,6 +17,10 @@
 
 import Joi from 'joi';
 import { IAppConfiguration } from './IAppConfiguration';
+import {
+  DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
+  MAX_CALDAV_EVENT_RESPONSE_MAX_BYTES,
+} from './caldav/CalDavTransportLimits';
 import { parseRoomCalendarBindings } from './service/RoomCalendarBindingResolver';
 
 const toBoolean = (
@@ -50,6 +54,10 @@ function createConfiguration() {
     access_token: process.env.ACCESS_TOKEN as string,
     homeserver_url: process.env.HOMESERVER_URL as string,
     radicale_url: process.env.RADICALE_URL,
+    caldav_max_event_response_bytes: toNumber(
+      process.env.MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES,
+      DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
+    ),
     room_calendar_bindings: parseRoomCalendarBindings(
       process.env.ROOM_CALENDAR_BINDINGS,
     ),
@@ -162,6 +170,10 @@ export const ValidationSchema = Joi.object({
   ACCESS_TOKEN: Joi.string().required(),
   HOMESERVER_URL: Joi.string().required().uri(),
   RADICALE_URL: Joi.string().uri(),
+  MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES: Joi.number()
+    .integer()
+    .min(1)
+    .max(MAX_CALDAV_EVENT_RESPONSE_MAX_BYTES),
   ROOM_CALENDAR_BINDINGS: Joi.string(),
   ROOM_CALENDAR_ACCESS_ENABLED: Joi.boolean(),
   MATRIX_APPLICATION_SERVICE_TOKEN: Joi.string(),
