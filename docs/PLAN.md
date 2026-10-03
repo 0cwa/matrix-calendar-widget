@@ -448,6 +448,10 @@ addresses from Matrix room membership.
       the project-owned stack; live operator rehearsal remains unverified.
 - [ ] Compatibility matrix: Element Web/Desktop and other tested clients.
 - [ ] Performance testing with large calendars and recurrence.
+  - [x] Reuse exact timezone transition instants and local boundaries during
+        projection; preserve gap/overlap and historical-second semantics with
+        regressions and before/after synthetic measurements. Synchronous large
+        calendars still need UI and capacity validation.
 - [x] Adopt a pre-alpha release/versioning policy: no live deployment or
       publication is authorized, and breaking changes are allowed. Future
       controlled-beta and public-release gates remain explicit.
