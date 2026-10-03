@@ -16,8 +16,10 @@
 
 import { CalendarEvent } from '@matrix-calendar-widget/calendar';
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Settings } from 'luxon';
 import { vi } from 'vitest';
+import { axe } from 'vitest-axe';
 import { CalendarEventsCalendar } from './CalendarEventsCalendar';
 
 const floatingEvent: CalendarEvent = {
@@ -73,6 +75,101 @@ const newYorkEvent: CalendarEvent = {
 };
 
 describe('<CalendarEventsCalendar />', () => {
+  it('activates a named calendar event from the keyboard', async () => {
+    const onSelectEvent = vi.fn();
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'Europe/Stockholm';
+
+    const offsetHeight = vi
+      .spyOn(HTMLElement.prototype, 'offsetHeight', 'get')
+      .mockImplementation(() => 10);
+    const boundingClientRect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({
+        bottom: 1,
+        height: 1,
+        left: 1,
+        right: 1,
+        top: 1,
+        width: 1,
+        x: 1,
+        y: 1,
+        toJSON: vi.fn(),
+      });
+
+    try {
+      render(
+        <CalendarEventsCalendar
+          events={[floatingEvent]}
+          filters={{
+            startDate: '2026-09-23T00:00:00+02:00',
+            endDate: '2026-09-24T00:00:00+02:00',
+          }}
+          onSelectEvent={onSelectEvent}
+          onShowMore={vi.fn()}
+          view="month"
+        />,
+      );
+
+      const eventButton = await screen.findByRole('button', {
+        name: /Floating planning: September 23, 2026 · 9:00\sAM–10:00\sAM/,
+      });
+      expect(eventButton).toHaveAttribute('tabindex', '0');
+      eventButton.focus();
+      expect(eventButton).toHaveFocus();
+      await userEvent.keyboard('{Enter}');
+
+      expect(onSelectEvent).toHaveBeenCalledWith(floatingEvent);
+    } finally {
+      offsetHeight.mockRestore();
+      boundingClientRect.mockRestore();
+      Settings.defaultZone = originalZone;
+    }
+  });
+
+  it('has no accessibility violations for calendar events', async () => {
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'Europe/Stockholm';
+
+    const offsetHeight = vi
+      .spyOn(HTMLElement.prototype, 'offsetHeight', 'get')
+      .mockImplementation(() => 10);
+    const boundingClientRect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({
+        bottom: 1,
+        height: 1,
+        left: 1,
+        right: 1,
+        top: 1,
+        width: 1,
+        x: 1,
+        y: 1,
+        toJSON: vi.fn(),
+      });
+
+    try {
+      const { container } = render(
+        <CalendarEventsCalendar
+          events={[floatingEvent]}
+          filters={{
+            startDate: '2026-09-23T00:00:00+02:00',
+            endDate: '2026-09-24T00:00:00+02:00',
+          }}
+          onSelectEvent={vi.fn()}
+          onShowMore={vi.fn()}
+          view="month"
+        />,
+      );
+
+      expect(await axe(container)).toHaveNoViolations();
+    } finally {
+      offsetHeight.mockRestore();
+      boundingClientRect.mockRestore();
+      Settings.defaultZone = originalZone;
+    }
+  });
+
   it('uses viewer-local floating time for the cell, accessible name, and grid order', async () => {
     const originalZone = Settings.defaultZone;
     Settings.defaultZone = 'Europe/Stockholm';
