@@ -382,7 +382,8 @@ addresses from Matrix room membership.
   - [x] Bound calendar-gateway requests by socket peer before Matrix identity
         validation, with capped process-local state and generic retry feedback.
         Shared-proxy, restart, and replica limitations remain explicit.
-- [ ] Free/busy privacy model.
+- [x] Define the free/busy disclosure and authorization policy in ADR027.
+      Availability endpoints, sharing, and UI remain unimplemented.
 - [x] Add a cold-backup and isolated-restore runbook for the project-owned
       Compose `radicale-data` and `server-data` volumes, with separate external
       PostgreSQL guidance; etke-managed `/data` remains unverified (PR #170).
@@ -391,7 +392,8 @@ addresses from Matrix room membership.
       boundaries, not a live etke-host deployment or recovery validation.
   - [x] Document the current Docker build/runtime contracts and the generic operator-run etke/MDAD compatibility boundary.
   - [x] Add non-publishing CI image-build smoke checks with fork-owned local tags; PR #102 run 36316604092 passed both image build steps at `0da7f3345e603e808231a24cc2ed6d979bea987a` without publishing.
-- [ ] Upgrade/migration story.
+- [x] Document upgrade/migration, schema compatibility, and safe rollback for
+      the project-owned stack; live operator rehearsal remains unverified.
 - [ ] Compatibility matrix: Element Web/Desktop and other tested clients.
 - [ ] Performance testing with large calendars and recurrence.
 - [x] Adopt a pre-alpha release/versioning policy: no live deployment or
