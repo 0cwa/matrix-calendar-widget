@@ -122,6 +122,16 @@ for (const viewport of viewports) {
         await expect(
           page.getByRole('button', { name: 'Close', exact: true }),
         ).toBeVisible();
+        const detailContent = dialog.locator('.MuiDialogContent-root');
+        await detailContent.focus();
+        await expect(detailContent).toBeFocused();
+        const scrollDistance = await detailContent.evaluate((element) =>
+          Math.max(0, element.scrollHeight - element.clientHeight),
+        );
+        await page.keyboard.press('PageDown');
+        await expect
+          .poll(() => detailContent.evaluate((element) => element.scrollTop))
+          .toBeGreaterThanOrEqual(Math.min(scrollDistance, 1));
         const accessibility = await new AxeBuilder({ page }).analyze();
         expect(accessibility.violations).toEqual([]);
         await page.keyboard.press('Escape');
