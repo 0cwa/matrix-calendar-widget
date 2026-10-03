@@ -34,8 +34,13 @@ directory = os.path.dirname(config_path)
 with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=False) as output:
     yaml.safe_dump(config, output, sort_keys=False)
     temporary_path = output.name
+os.chown(temporary_path, 991, 991)
 os.replace(temporary_path, config_path)
 '
+
+echo "==> Verifying Synapse can read its config and registration"
+"${COMPOSE[@]}" run --rm --user 991:991 --entrypoint sh synapse -c \
+  'test -r /data/homeserver.yaml && test -w /data/homeserver.yaml && test -w /data && test -r /data/appservice-calendar-contract.yaml'
 
 echo "==> Starting Synapse"
 "${COMPOSE[@]}" up -d --force-recreate synapse
