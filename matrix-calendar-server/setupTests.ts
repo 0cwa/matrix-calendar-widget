@@ -19,12 +19,22 @@ import i18nextBackend from 'i18next-fs-backend';
 import { Settings } from 'luxon';
 import 'reflect-metadata';
 import { registerDateRangeFormatter } from './src/dateRangeFormatter';
-import { markPersonalOpenIdRunnerReady } from './test/util/PersonalOpenIdRunnerMarker';
+import {
+  markPersonalOpenIdJestSetupLoaded,
+  markPersonalOpenIdRunnerReady,
+} from './test/util/PersonalOpenIdRunnerMarker';
 
 // @ts-ignore Ignore error. TypeScript complains, even if 'resolveJsonModule' is enabled.
 import translationDe from './src/static/locales/de/translation.json';
 // @ts-ignore Ignore error. TypeScript complains, even if 'resolveJsonModule' is enabled.
 import translationEn from './src/static/locales/en/translation.json';
+
+markPersonalOpenIdJestSetupLoaded(
+  expect.getState().testPath,
+  process.env.CALDAV_CONTRACT,
+  process.env.CALDAV_CONTRACT_IMPORT_PROBE,
+  process.env.CALDAV_CONTRACT_STAGE_FILE,
+);
 
 markPersonalOpenIdRunnerReady(
   expect.getState().testPath,

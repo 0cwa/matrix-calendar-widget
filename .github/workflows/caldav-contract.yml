@@ -119,6 +119,7 @@ jobs:
         run: |
           probe_stage_file="$RUNNER_TEMP/personal-openid-module-stages.txt"
           : > "$probe_stage_file"
+          printf '%s\n' 'personal-openid-probe-launched' >> "$probe_stage_file"
           set +e
           CALDAV_CONTRACT=0 \
           CALDAV_CONTRACT_IMPORT_PROBE=1 \

@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import {
   formatContractPhase,
+  formatPersonalOpenIdJestSetup,
+  formatPersonalOpenIdProbeLaunch,
   formatPersonalOpenIdRunnerReady,
   formatPersonalOpenIdSetupFailure,
   formatPersonalOpenIdSetupStage,
@@ -131,6 +133,30 @@ test('reports only whether the Personal OpenID Jest runner reached setupFilesAft
   assert.equal(
     formatPersonalOpenIdRunnerReady('personal-openid-runner-ready\n'),
     'personal-openid-runner ready\n',
+  );
+});
+
+test('reports only whether the probe command launched', () => {
+  assert.equal(
+    formatPersonalOpenIdProbeLaunch('personal-openid-suite-loaded\n'),
+    'personal-openid-probe not-launched\n',
+  );
+  assert.equal(
+    formatPersonalOpenIdProbeLaunch('personal-openid-probe-launched\n'),
+    'personal-openid-probe launched\n',
+  );
+});
+
+test('reports only whether Jest setupFilesAfterEnv loaded for the probe', () => {
+  assert.equal(
+    formatPersonalOpenIdJestSetup('personal-openid-probe-launched\n'),
+    'personal-openid-jest-setup not-reached\n',
+  );
+  assert.equal(
+    formatPersonalOpenIdJestSetup(
+      'personal-openid-jest-setup-loaded\nprivate-diagnostic-data',
+    ),
+    'personal-openid-jest-setup loaded\n',
   );
 });
 

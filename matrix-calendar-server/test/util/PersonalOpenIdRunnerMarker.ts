@@ -22,6 +22,7 @@ const PERSONAL_OPENID_TEST_PATH = resolve(
   '../integration/PersonalOpenIdRadicaleContract.test.ts',
 );
 const PERSONAL_OPENID_RUNNER_READY = 'personal-openid-runner-ready\n';
+const PERSONAL_OPENID_JEST_SETUP_LOADED = 'personal-openid-jest-setup-loaded\n';
 
 export function isPersonalOpenIdTestPath(
   testPath: string | undefined,
@@ -45,6 +46,28 @@ export function markPersonalOpenIdRunnerReady(
 
   try {
     append(stageFile, PERSONAL_OPENID_RUNNER_READY, 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
+
+export function markPersonalOpenIdJestSetupLoaded(
+  testPath: string | undefined,
+  contractEnabled: string | undefined,
+  importProbeEnabled: string | undefined,
+  stageFile: string | undefined,
+  append = appendFileSync,
+): void {
+  if (
+    !isPersonalOpenIdTestPath(testPath) ||
+    (contractEnabled !== '1' && importProbeEnabled !== '1') ||
+    !stageFile
+  ) {
+    return;
+  }
+
+  try {
+    append(stageFile, PERSONAL_OPENID_JEST_SETUP_LOADED, 'utf8');
   } catch {
     // Diagnostics must not change contract-test behavior.
   }

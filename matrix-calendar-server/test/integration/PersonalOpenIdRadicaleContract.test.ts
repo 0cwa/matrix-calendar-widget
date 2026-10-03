@@ -524,7 +524,7 @@ function markPersonalOpenIdSuiteLoaded(): void {
 
 function markPersonalOpenIdSuiteRegistered(): void {
   const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
-  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+  if (!shouldMarkPersonalOpenIdSuiteLoaded(process.env) || !stageFile) {
     return;
   }
 

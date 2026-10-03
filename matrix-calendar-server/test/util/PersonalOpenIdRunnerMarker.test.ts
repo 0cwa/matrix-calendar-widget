@@ -17,6 +17,7 @@
 import { resolve } from 'node:path';
 import {
   isPersonalOpenIdTestPath,
+  markPersonalOpenIdJestSetupLoaded,
   markPersonalOpenIdRunnerReady,
 } from './PersonalOpenIdRunnerMarker';
 
@@ -64,6 +65,55 @@ describe('Personal OpenID runner marker', () => {
       append,
     );
     markPersonalOpenIdRunnerReady(personalPath, '1', undefined, append);
+
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it('marks setup only for the exact probe or contract test path', () => {
+    const append = jest.fn();
+    const personalPath = getPersonalOpenIdTestPath();
+
+    markPersonalOpenIdJestSetupLoaded(
+      personalPath,
+      '0',
+      '1',
+      '/private/stage-file-path',
+      append,
+    );
+
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(append).toHaveBeenCalledWith(
+      '/private/stage-file-path',
+      'personal-openid-jest-setup-loaded\n',
+      'utf8',
+    );
+  });
+
+  it('does not mark setup for another path or without probe/contract controls', () => {
+    const append = jest.fn();
+    const personalPath = getPersonalOpenIdTestPath();
+
+    markPersonalOpenIdJestSetupLoaded(
+      `${personalPath}.other`,
+      '0',
+      '1',
+      '/private/stage-file-path',
+      append,
+    );
+    markPersonalOpenIdJestSetupLoaded(
+      personalPath,
+      '0',
+      '0',
+      '/private/stage-file-path',
+      append,
+    );
+    markPersonalOpenIdJestSetupLoaded(
+      personalPath,
+      '0',
+      '1',
+      undefined,
+      append,
+    );
 
     expect(append).not.toHaveBeenCalled();
   });

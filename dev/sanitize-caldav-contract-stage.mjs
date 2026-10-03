@@ -17,6 +17,8 @@ const ROOM_APPSERVICE_SETUP_COMPLETE = 'room-appservice-setup-complete';
 const PERSONAL_OPENID_SETUP_START = 'personal-openid-setup-start';
 const PERSONAL_OPENID_SUITE_LOADED = 'personal-openid-suite-loaded';
 const PERSONAL_OPENID_SUITE_REGISTERED = 'personal-openid-suite-registered';
+const PERSONAL_OPENID_JEST_SETUP_LOADED = 'personal-openid-jest-setup-loaded';
+const PERSONAL_OPENID_PROBE_LAUNCHED = 'personal-openid-probe-launched';
 const PERSONAL_OPENID_RUNNER_READY = 'personal-openid-runner-ready';
 const PERSONAL_OPENID_SETUP_COMPLETE = 'personal-openid-setup-complete';
 const PERSONAL_OPENID_SETUP_STAGES = new Set([
@@ -103,6 +105,24 @@ export function formatPersonalOpenIdSuiteLoaded(stageContent) {
   return `personal-openid-suite ${loaded ? 'loaded' : 'not-reached'}\n`;
 }
 
+export function formatPersonalOpenIdJestSetup(stageContent) {
+  const loaded =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === PERSONAL_OPENID_JEST_SETUP_LOADED);
+  return `personal-openid-jest-setup ${loaded ? 'loaded' : 'not-reached'}\n`;
+}
+
+export function formatPersonalOpenIdProbeLaunch(stageContent) {
+  const launched =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === PERSONAL_OPENID_PROBE_LAUNCHED);
+  return `personal-openid-probe ${launched ? 'launched' : 'not-launched'}\n`;
+}
+
 export function formatPersonalOpenIdSuiteRegistration(stageContent) {
   const registered =
     typeof stageContent === 'string' &&
@@ -176,9 +196,11 @@ function emitContractPhase(stagePath) {
   try {
     const stageContent = readFileSync(stagePath, 'utf8');
     process.stdout.write(formatContractPhase(stageContent));
-    process.stdout.write(formatPersonalOpenIdRunnerReady(stageContent));
+    process.stdout.write(formatPersonalOpenIdProbeLaunch(stageContent));
+    process.stdout.write(formatPersonalOpenIdJestSetup(stageContent));
     process.stdout.write(formatPersonalOpenIdSuiteLoaded(stageContent));
     process.stdout.write(formatPersonalOpenIdSuiteRegistration(stageContent));
+    process.stdout.write(formatPersonalOpenIdRunnerReady(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupStart(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupStatus(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupStage(stageContent));
