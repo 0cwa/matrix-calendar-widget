@@ -439,12 +439,18 @@ access and event writes stay disabled by default.
   - [x] Reject redirects for event REPORT/GET/PUT/DELETE and stream-bound
         REPORT/GET response bytes with a configurable 16 MiB default (maximum
         64 MiB), mapping failures to fixed upstream errors.
-- [ ] Rate limits and abuse controls.
+- [x] Process-local rate and concurrency bounds for calendar gateway and bot
+      traffic; distributed and deployment ingress controls remain operator work.
   - [x] Bound calendar-gateway requests by socket peer before Matrix identity
         validation, with capped process-local state and generic retry feedback.
         Shared-proxy, restart, and replica limitations remain explicit.
   - [x] Make the existing 100kb JSON/urlencoded ingress limit explicit and
         verify oversized bodies stop before identity validation.
+  - [x] Bound all `!calendar` text, including help and malformed prefixes,
+        before Matrix state, proof, CalDAV, or reply work. Cap accepted-window
+        traffic, global/room/actor concurrency, and retained identity pairs;
+        drop denials silently and retain slots through reply completion.
+        Restart and replica limitations remain explicit in `docs/bot-calendar.md`.
 - [x] Define the free/busy disclosure and authorization policy in ADR027.
       Availability endpoints, sharing, and UI remain unimplemented.
 - [x] Add a cold-backup and isolated-restore runbook for the project-owned

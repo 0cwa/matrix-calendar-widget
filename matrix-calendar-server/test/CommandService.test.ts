@@ -36,7 +36,7 @@ import { WelcomeWorkflowService } from '../src/service/WelcomeWorkflowService';
 import { createAppConfig } from './util/MockUtils';
 
 describe('test CommandService', () => {
-  const ROOM_ID = 'roomId';
+  const ROOM_ID = '!room:matrix.org';
   const USER_ID = 'userId';
   const BOT_ID = '@bot:matrix.com';
 
@@ -63,7 +63,7 @@ describe('test CommandService', () => {
   const createEvent = () =>
     ({
       event_id: 'some_event_id',
-      sender: 'sender@matrix.org',
+      sender: '@sender:matrix.org',
       content: {
         body: '!meeting help',
         msgtype: 'm.text',
@@ -200,6 +200,182 @@ describe('test CommandService', () => {
     expect(captureCalendarMessage()['m.mentions']).toEqual({});
   });
 
+  test('silently drops burst-limited help and malformed commands for v12 and legacy IDs before Matrix or calendar work', async () => {
+    const matrix = makeCalendarMatrixClient(async () => {
+      throw new MatrixError(
+        { errcode: 'M_NOT_FOUND', error: 'not encrypted' },
+        404,
+      );
+    });
+    const calendarRunner = {
+      execute: jest.fn().mockResolvedValue('Upcoming events'),
+    } as unknown as CalendarCommandService;
+    const service = new CommandService(
+      matrix.client,
+      instance(welcomeWorkflowService),
+      appConfig,
+      appRuntimeContext,
+      calendarRunner,
+    );
+
+    const roomActors = [
+      {
+        roomId: '!Nhcu5BS-UMnFX7hBVfVSoXiD7OgH6iRT-xyIuqDnpYQ',
+        sender: '@alice:matrix.org',
+      },
+      {
+        roomId: '!🗓~archive:example.org',
+        sender: '@legacy~ actor:example.org',
+      },
+    ];
+    for (const { roomId, sender } of roomActors) {
+      for (let index = 0; index < 5; index += 1) {
+        const event = createEvent();
+        event.sender = sender;
+        event.content.body = '!calendar help';
+        await service.handleRoomMessage(roomId, event);
+      }
+      const acceptedCommand = createEvent();
+      acceptedCommand.sender = sender;
+      acceptedCommand.content.body = '!calendar upcoming';
+      await service.handleRoomMessage(roomId, acceptedCommand);
+    }
+    expect(calendarRunner.execute).toHaveBeenCalledTimes(2);
+
+    const stateLookupCount = matrix.getRoomStateEvent.mock.calls.length;
+    const replyCount = matrix.sendMessage.mock.calls.length;
+    const rejectedBodies = ['!calendarhelp', '!calendar help'];
+    for (const { roomId, sender } of roomActors) {
+      for (const body of rejectedBodies) {
+        const event = createEvent();
+        event.sender = sender;
+        event.content.body = body;
+        await service.handleRoomMessage(roomId, event);
+      }
+    }
+
+    expect(matrix.getRoomStateEvent).toHaveBeenCalledTimes(stateLookupCount);
+    expect(matrix.sendMessage).toHaveBeenCalledTimes(replyCount);
+    expect(calendarRunner.execute).toHaveBeenCalledTimes(2);
+  });
+
+  test('holds the actor slot through reply I/O and releases it afterward', async () => {
+    const matrix = makeCalendarMatrixClient(async () => {
+      throw new MatrixError(
+        { errcode: 'M_NOT_FOUND', error: 'not encrypted' },
+        404,
+      );
+    });
+    let finishSend!: () => void;
+    let notifySendStarted!: () => void;
+    const sendGate = new Promise<void>((resolve) => {
+      finishSend = resolve;
+    });
+    const sendStarted = new Promise<void>((resolve) => {
+      notifySendStarted = resolve;
+    });
+    matrix.sendMessage.mockImplementation(async () => {
+      notifySendStarted();
+      await sendGate;
+      return '$calendar-reply';
+    });
+    const calendarRunner = {
+      execute: jest.fn().mockResolvedValue('Upcoming events'),
+    } as unknown as CalendarCommandService;
+    const service = new CommandService(
+      matrix.client,
+      instance(welcomeWorkflowService),
+      appConfig,
+      appRuntimeContext,
+      calendarRunner,
+    );
+    const firstEvent = createEvent();
+    firstEvent.content.body = '!calendar upcoming';
+    const firstCommand = service.handleRoomMessage(ROOM_ID, firstEvent);
+    await sendStarted;
+
+    const stateLookupCount = matrix.getRoomStateEvent.mock.calls.length;
+    const secondEvent = createEvent();
+    secondEvent.content.body = '!calendar help';
+    await service.handleRoomMessage(ROOM_ID, secondEvent);
+    expect(matrix.getRoomStateEvent).toHaveBeenCalledTimes(stateLookupCount);
+    expect(calendarRunner.execute).toHaveBeenCalledTimes(1);
+
+    finishSend();
+    await firstCommand;
+
+    const thirdEvent = createEvent();
+    thirdEvent.content.body = '!calendar upcoming';
+    await service.handleRoomMessage(ROOM_ID, thirdEvent);
+    expect(calendarRunner.execute).toHaveBeenCalledTimes(2);
+  });
+
+  test('releases the actor slot after an exceptional calendar operation', async () => {
+    const matrix = makeCalendarMatrixClient(async () => {
+      throw new MatrixError(
+        { errcode: 'M_NOT_FOUND', error: 'not encrypted' },
+        404,
+      );
+    });
+    const calendarRunner = {
+      execute: jest
+        .fn()
+        .mockRejectedValueOnce(new Error('private operation details'))
+        .mockResolvedValue('Upcoming events'),
+    } as unknown as CalendarCommandService;
+    const service = new CommandService(
+      matrix.client,
+      instance(welcomeWorkflowService),
+      appConfig,
+      appRuntimeContext,
+      calendarRunner,
+    );
+
+    for (let index = 0; index < 2; index += 1) {
+      const event = createEvent();
+      event.content.body = '!calendar upcoming';
+      await service.handleRoomMessage(ROOM_ID, event);
+    }
+
+    expect(calendarRunner.execute).toHaveBeenCalledTimes(2);
+    expect(matrix.sendMessage).toHaveBeenCalledTimes(2);
+    const replies = matrix.sendMessage.mock.calls.map(
+      ([, message]) => (message as { body: string }).body,
+    );
+    expect(replies).toContain('Upcoming events');
+    expect(
+      replies.some((reply) => reply.includes('private operation details')),
+    ).toBe(false);
+  });
+
+  test('silently rejects untrusted or unbounded room and sender identifiers', async () => {
+    const matrix = makeCalendarMatrixClient(async () => {
+      throw new MatrixError(
+        { errcode: 'M_NOT_FOUND', error: 'not encrypted' },
+        404,
+      );
+    });
+    const calendarRunner = {
+      execute: jest.fn().mockResolvedValue('Upcoming events'),
+    } as unknown as CalendarCommandService;
+    const service = new CommandService(
+      matrix.client,
+      instance(welcomeWorkflowService),
+      appConfig,
+      appRuntimeContext,
+      calendarRunner,
+    );
+    const event = createEvent();
+    event.content.body = '!calendar help';
+    event.sender = 'not-a-matrix-user';
+
+    await service.handleRoomMessage(ROOM_ID, event);
+
+    expect(matrix.getRoomStateEvent).not.toHaveBeenCalled();
+    expect(matrix.sendMessage).not.toHaveBeenCalled();
+    expect(calendarRunner.execute).not.toHaveBeenCalled();
+  });
+
   test('calendar help remains available when the welcome workflow is disabled', async () => {
     makeRoomPrivate();
     const event = createEvent();
@@ -298,7 +474,7 @@ describe('test CommandService', () => {
     verify(
       calendarCommandServiceMock.execute(
         ROOM_ID,
-        'sender@matrix.org',
+        '@sender:matrix.org',
         'unknown',
         anything(),
       ),
@@ -488,7 +664,7 @@ describe('test CommandService', () => {
     verify(
       calendarCommandServiceMock.execute(
         ROOM_ID,
-        'sender@matrix.org',
+        '@sender:matrix.org',
         'create 2026-10-04T13:00 2026-10-04T14:00 "Planning meeting" --description "Bring the draft"',
         anything(),
       ),
