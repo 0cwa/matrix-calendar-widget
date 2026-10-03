@@ -104,10 +104,11 @@ test('reports whether room contract test bodies started', () => {
       [
         'room-appservice-case-start-exact-binding',
         'room-appservice-case-start-cross-room-denial',
+        'room-appservice-case-start-bot-command-write',
         'room-appservice-case-start-unknown-private-value',
       ].join('\n'),
     ),
-    'room-appservice-test-bodies started=2/5\n',
+    'room-appservice-test-bodies started=3/7\n',
   );
 });
 
