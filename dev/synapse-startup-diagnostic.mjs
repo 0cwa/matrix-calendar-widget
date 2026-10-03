@@ -50,6 +50,33 @@ const CATEGORY_PATTERNS = [
 ];
 
 const CATEGORIES = CATEGORY_PATTERNS.map(([category]) => category);
+const INSPECT_RESULTS = [
+  'compose-list-failed',
+  'container-id-missing',
+  'container-id-malformed',
+  'inspect-failed',
+  'inspect-data-invalid',
+  'ok',
+  'not-attempted',
+  'unavailable',
+];
+const CONTAINER_STATES = [
+  'created',
+  'running',
+  'paused',
+  'restarting',
+  'removing',
+  'exited',
+  'dead',
+  'unavailable',
+];
+const HEALTH_STATES = [
+  'starting',
+  'healthy',
+  'unhealthy',
+  'not-reported',
+  'unavailable',
+];
 
 export function classifySynapseStartupLines(lines) {
   const observed = new Set();
@@ -67,13 +94,69 @@ export function classifySynapseStartupLines(lines) {
 
 export function parseContainerState(output) {
   if (typeof output !== 'string') {
-    return { exitCode: 'unavailable', oom: 'unavailable' };
+    return unavailableContainerState('inspect-data-invalid');
   }
-  const match = output.trim().match(/^(\d{1,3})\s+(true|false)$/);
-  if (!match || Number(match[1]) > 255) {
-    return { exitCode: 'unavailable', oom: 'unavailable' };
+  const fields = output.trim().split(/\s+/);
+  if (fields.length !== 4) {
+    return unavailableContainerState('inspect-data-invalid');
   }
-  return { exitCode: Number(match[1]), oom: match[2] };
+  const [state, rawExitCode, rawOom, rawHealth] = fields;
+  const exitCode = /^(0|[1-9]\d{0,2})$/.test(rawExitCode)
+    ? Number(rawExitCode)
+    : NaN;
+  const health = rawHealth === 'none' ? 'not-reported' : rawHealth;
+  if (
+    !CONTAINER_STATES.includes(state) ||
+    state === 'unavailable' ||
+    !Number.isInteger(exitCode) ||
+    exitCode > 255 ||
+    !['true', 'false'].includes(rawOom) ||
+    !HEALTH_STATES.includes(health) ||
+    health === 'unavailable'
+  ) {
+    return unavailableContainerState('inspect-data-invalid');
+  }
+  return {
+    inspectResult: 'ok',
+    state,
+    health,
+    exitCode,
+    oom: rawOom,
+  };
+}
+
+function unavailableContainerState(inspectResult) {
+  return {
+    inspectResult,
+    state: 'unavailable',
+    health: 'unavailable',
+    exitCode: 'unavailable',
+    oom: 'unavailable',
+  };
+}
+
+export function parseContainerListResult(result) {
+  if (result?.error || result?.status !== 0) {
+    return unavailableContainerState('compose-list-failed');
+  }
+  if (typeof result.stdout !== 'string') {
+    return unavailableContainerState('container-id-malformed');
+  }
+  const output = result.stdout.trim();
+  if (!output) {
+    return unavailableContainerState('container-id-missing');
+  }
+  if (!/^[a-f\d]{12,64}$/i.test(output)) {
+    return unavailableContainerState('container-id-malformed');
+  }
+  return { inspectResult: 'ok', containerId: output };
+}
+
+export function parseContainerInspectResult(result) {
+  if (result?.error || result?.status !== 0) {
+    return unavailableContainerState('inspect-failed');
+  }
+  return parseContainerState(result.stdout);
 }
 
 export function formatStartupDiagnostic(category, state) {
@@ -93,40 +176,50 @@ export function formatStartupDiagnostic(category, state) {
       : state?.oom === 'false' || state?.oom === false
         ? 'false'
         : 'unavailable';
-  return `category=${safeCategory} exit_code=${exitCode} oom=${oom}`;
+  const inspectResult = INSPECT_RESULTS.includes(state?.inspectResult)
+    ? state.inspectResult
+    : 'unavailable';
+  const containerState = CONTAINER_STATES.includes(state?.state)
+    ? state.state
+    : 'unavailable';
+  const health = HEALTH_STATES.includes(state?.health)
+    ? state.health
+    : 'unavailable';
+  return `category=${safeCategory} inspect_result=${inspectResult} state=${containerState} health=${health} exit_code=${exitCode} oom=${oom}`;
 }
 
 function readContainerState(composeFile) {
+  let listed;
   try {
-    const listed = spawnSync(
+    listed = spawnSync(
       'docker',
       ['compose', '-f', composeFile, 'ps', '--all', '-q', 'synapse'],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
     );
-    if (listed.error || listed.status !== 0) {
-      return { exitCode: 'unavailable', oom: 'unavailable' };
-    }
-    const containerId = listed.stdout.trim().split(/\s+/)[0];
-    if (!/^[a-f\d]{12,64}$/i.test(containerId ?? '')) {
-      return { exitCode: 'unavailable', oom: 'unavailable' };
-    }
-    const inspected = spawnSync(
+  } catch {
+    return unavailableContainerState('compose-list-failed');
+  }
+  const container = parseContainerListResult(listed);
+  if (container.inspectResult !== 'ok') {
+    return container;
+  }
+
+  let inspected;
+  try {
+    inspected = spawnSync(
       'docker',
       [
         'inspect',
         '--format',
-        '{{.State.ExitCode}} {{.State.OOMKilled}}',
-        containerId,
+        '{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}',
+        container.containerId,
       ],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
     );
-    if (inspected.error || inspected.status !== 0) {
-      return { exitCode: 'unavailable', oom: 'unavailable' };
-    }
-    return parseContainerState(inspected.stdout);
   } catch {
-    return { exitCode: 'unavailable', oom: 'unavailable' };
+    return unavailableContainerState('inspect-failed');
   }
+  return parseContainerInspectResult(inspected);
 }
 
 async function run() {
@@ -143,7 +236,7 @@ async function run() {
     CATEGORIES.find((candidate) => observed.has(candidate)) ?? 'unclassified';
   const state = composeFile
     ? readContainerState(composeFile)
-    : { exitCode: 'unavailable', oom: 'unavailable' };
+    : unavailableContainerState('not-attempted');
   process.stdout.write(`${formatStartupDiagnostic(category, state)}\n`);
 }
 
@@ -153,7 +246,7 @@ if (
 ) {
   run().catch(() => {
     process.stdout.write(
-      'category=unclassified exit_code=unavailable oom=unavailable\n',
+      'category=unclassified inspect_result=unavailable state=unavailable health=unavailable exit_code=unavailable oom=unavailable\n',
     );
   });
 }
