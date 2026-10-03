@@ -191,14 +191,32 @@ const EXECUTION_ERROR_CATEGORY_BY_TYPE = new Map([
   ['SyntaxError', 'transform-syntax'],
   ['TSError', 'transform-syntax'],
   ['TransformError', 'transform-syntax'],
-  ['TypeError', 'suite-execution-error'],
-  ['ReferenceError', 'suite-execution-error'],
+  ['TypeError', 'module-evaluation'],
+  ['ReferenceError', 'module-evaluation'],
 ]);
 const MODULE_RESOLUTION_ERROR_CODES = new Set([
   'MODULE_NOT_FOUND',
   'ERR_MODULE_NOT_FOUND',
 ]);
 const MODULE_RESOLUTION_ERROR_TYPES = new Set(['ModuleNotFoundError']);
+const EXECUTION_ERROR_MESSAGE_PATTERNS = [
+  [
+    /\bCannot find (?:module|package)\b|\b(?:MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND)\b/i,
+    'module-resolution',
+  ],
+  [
+    /\bJest encountered an unexpected token\b|\bSyntaxError\b|\bTSError\b|\bTS\d{4,5}\b/i,
+    'transform-syntax',
+  ],
+  [
+    /\b(?:Error while running globalSetup|Error in (?:globalSetup|setupFiles(?:AfterEnv)?)|Failed to (?:load|execute) (?:the )?(?:global )?setup)\b/i,
+    'setup',
+  ],
+  [
+    /\bCannot access .+ before initialization\b|\bCannot read properties of\b|\bis not a function\b|\bReferenceError\b/i,
+    'module-evaluation',
+  ],
+];
 
 function closedStatus(status) {
   if (status === 'passed') return 'passed';
@@ -286,27 +304,38 @@ export function safeContractSuiteFailureCategoryLines(testReport) {
       continue;
     }
 
-    const error = suite.testExecError;
-    let category = 'unknown';
-    if (error && typeof error === 'object') {
-      if (
-        typeof error.code === 'string' &&
-        MODULE_RESOLUTION_ERROR_CODES.has(error.code)
-      ) {
-        category = 'module-resolution';
-      } else if (
-        typeof error.type === 'string' &&
-        MODULE_RESOLUTION_ERROR_TYPES.has(error.type)
-      ) {
-        category = 'module-resolution';
-      } else if (typeof error.type === 'string') {
-        category =
-          EXECUTION_ERROR_CATEGORY_BY_TYPE.get(error.type) ?? 'unknown';
-      }
-    }
+    const category = executionErrorCategory(suite.testExecError);
 
     lines.push(`contract-suite-category ${suiteId} ${category}`);
   }
 
   return lines.sort();
+}
+
+function executionErrorCategory(error) {
+  if (!error || typeof error !== 'object') {
+    return 'unknown';
+  }
+
+  if (
+    typeof error.code === 'string' &&
+    MODULE_RESOLUTION_ERROR_CODES.has(error.code)
+  ) {
+    return 'module-resolution';
+  }
+  if (
+    typeof error.type === 'string' &&
+    MODULE_RESOLUTION_ERROR_TYPES.has(error.type)
+  ) {
+    return 'module-resolution';
+  }
+
+  const message = typeof error.message === 'string' ? error.message : '';
+  for (const [pattern, category] of EXECUTION_ERROR_MESSAGE_PATTERNS) {
+    if (pattern.test(message)) {
+      return category;
+    }
+  }
+
+  return EXECUTION_ERROR_CATEGORY_BY_TYPE.get(error.type) ?? 'unknown';
 }

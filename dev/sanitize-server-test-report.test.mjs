@@ -96,8 +96,24 @@ test('maps only allowlisted Jest execution error fields to fixed categories', ()
     'private event data, token, message, stack, and worktree path';
   const cases = [
     [
+      {
+        type: 'Error',
+        message: `Jest encountered an unexpected token at ${privateSentinel}`,
+        stack: privateSentinel,
+      },
+      'transform-syntax',
+    ],
+    [
       { type: 'TSError', message: privateSentinel, stack: privateSentinel },
       'transform-syntax',
+    ],
+    [
+      {
+        type: 'Error',
+        message: `Cannot find module '${privateSentinel}' from '${privateSentinel}'`,
+        stack: privateSentinel,
+      },
+      'module-resolution',
     ],
     [
       {
@@ -108,8 +124,16 @@ test('maps only allowlisted Jest execution error fields to fixed categories', ()
       'module-resolution',
     ],
     [
+      {
+        type: 'Error',
+        message: `Error while running globalSetup: ${privateSentinel}`,
+        stack: privateSentinel,
+      },
+      'setup',
+    ],
+    [
       { type: 'TypeError', message: privateSentinel, stack: privateSentinel },
-      'suite-execution-error',
+      'module-evaluation',
     ],
     [
       {
@@ -139,6 +163,12 @@ test('maps only allowlisted Jest execution error fields to fixed categories', ()
       'contract-suite personal-openid-contract failed',
       `contract-suite-category personal-openid-contract ${expectedCategory}`,
     ]);
+    assert.equal(
+      formatServerTestFailureSummary(report, 1)
+        .join('\n')
+        .includes(privateSentinel),
+      false,
+    );
   }
 });
 
