@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   formatContractPhase,
+  formatPersonalOpenIdSetupFailure,
   formatPersonalOpenIdSetupStage,
   formatPersonalOpenIdSetupStatus,
   formatRoomAppServiceListingCheckpoint,
@@ -90,6 +91,33 @@ test('does not emit arbitrary personal OpenID setup stages or values', () => {
   const privateSentinel =
     'personal-openid-setup-stage-private-user-id-and-event-data';
   const output = formatPersonalOpenIdSetupStage(privateSentinel);
+
+  assert.equal(output, '');
+  assert.equal(output.includes(privateSentinel), false);
+});
+
+test('emits only a closed nonmember login failure category', () => {
+  for (const category of [
+    'transport',
+    'http-status',
+    'json-or-token-parse',
+    'other',
+  ]) {
+    assert.equal(
+      formatPersonalOpenIdSetupFailure(
+        `personal-openid-setup-failure-${category}\n`,
+      ),
+      `personal-openid-setup-failure ${category}\n`,
+    );
+  }
+});
+
+test('fails closed for unknown login failure categories and attached data', () => {
+  const privateSentinel =
+    'personal-openid-setup-failure-http-status-401-private-response';
+  const output = formatPersonalOpenIdSetupFailure(
+    `${privateSentinel}\npersonal-openid-setup-failure-unknown-token\n`,
+  );
 
   assert.equal(output, '');
   assert.equal(output.includes(privateSentinel), false);
