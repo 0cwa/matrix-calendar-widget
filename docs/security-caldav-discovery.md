@@ -15,13 +15,25 @@ before it asks the credential provider for headers or sends a follow-up
 request. Safe relative hrefs are resolved against the service, principal, or
 calendar-home URL as appropriate, retaining a reverse-proxy base path.
 
-Every discovery `PROPFIND` uses manual redirect handling. Any 3xx response is
+Every discovery `PROPFIND` and collection `MKCALENDAR`, `PROPPATCH`, or `DELETE`
+uses manual redirect handling. Any 3xx response is
 rejected with a fixed generic error; the client does not read the response
 body or follow the `Location`, including for same-origin redirects. Configure
 the service URL to point directly at the canonical CalDAV endpoint rather
 than relying on redirects.
 
-This boundary covers `CalDavDiscoveryClient` discovery `PROPFIND` requests.
-It does not claim that event-resource fetches or other CalDAV adapters have
-the same URL or redirect policy, and it does not change the gateway's existing
-caller authentication or authorization rules.
+Collection mutation URLs receive the same origin/base-path confinement before
+credential headers are requested. Creation names are bounded to 255 ASCII
+characters and reject `.` and `..` before home discovery.
+
+Discovery and property-update XML responses are streamed under a fixed 16 MiB
+byte limit before parsing. Actual bytes count even when Content-Length is
+absent or false; an excessive advertised length is rejected without reading.
+Document type declarations are rejected before entity processing. Reader and
+limit errors have fixed messages, and unused/error response bodies are cancelled
+when the transport supports it. These bounds do not provide a network deadline
+or a total process-memory guarantee.
+
+This boundary covers `CalDavDiscoveryClient` discovery and collection requests.
+Event-resource transport has its own documented bounds. Caller authentication
+and authorization remain enforced by the gateway and are unchanged here.
