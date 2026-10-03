@@ -362,13 +362,17 @@ addresses from Matrix room membership.
 - [x] Add a cold-backup and isolated-restore runbook for the project-owned
       Compose `radicale-data` and `server-data` volumes, with separate external
       PostgreSQL guidance; etke-managed `/data` remains unverified (PR #170).
-- [ ] Container images and deployment docs under fork-owned names.
+- [x] Container images and deployment docs use fork-owned names. This covers
+      repository-owned image builds and documented operator-run deployment
+      boundaries, not a live etke-host deployment or recovery validation.
   - [x] Document the current Docker build/runtime contracts and the generic operator-run etke/MDAD compatibility boundary.
   - [x] Add non-publishing CI image-build smoke checks with fork-owned local tags; PR #102 run 36316604092 passed both image build steps at `0da7f3345e603e808231a24cc2ed6d979bea987a` without publishing.
 - [ ] Upgrade/migration story.
 - [ ] Compatibility matrix: Element Web/Desktop and other tested clients.
 - [ ] Performance testing with large calendars and recurrence.
-- [ ] Release/versioning policy.
+- [x] Adopt a pre-alpha release/versioning policy: no live deployment or
+      publication is authorized, and breaking changes are allowed. Future
+      controlled-beta and public-release gates remain explicit.
 
 **Exit:** documented deployable beta suitable for a controlled organizational pilot.
 
