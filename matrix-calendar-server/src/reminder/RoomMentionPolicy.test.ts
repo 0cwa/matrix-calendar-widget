@@ -38,6 +38,7 @@ describe('authorizeRoomMentionScheduling', () => {
 
   beforeEach(() => {
     state = {
+      isRoomEncrypted: jest.fn().mockResolvedValue(false),
       getJoinedRoomMembers: jest.fn().mockResolvedValue([actorUserId]),
       getPowerLevels: jest.fn().mockResolvedValue({
         users: { [actorUserId]: 50 },
@@ -50,6 +51,7 @@ describe('authorizeRoomMentionScheduling', () => {
   it('allows the current actor when joined with app action power and an exact binding', async () => {
     const binding = await authorizeRoomMentionScheduling(request, state);
 
+    expect(state.isRoomEncrypted).toHaveBeenCalledWith(roomId);
     expect(state.getJoinedRoomMembers).toHaveBeenCalledWith(roomId);
     expect(state.getPowerLevels).toHaveBeenCalledWith(roomId);
     expect(binding).toEqual({ roomId, calendarId });
@@ -64,6 +66,18 @@ describe('authorizeRoomMentionScheduling', () => {
     await expect(
       authorizeRoomMentionScheduling(request, state),
     ).resolves.toBeUndefined();
+  });
+
+  it('denies an encrypted room before loading members or powers', async () => {
+    state.isRoomEncrypted.mockResolvedValue(true);
+
+    await expect(
+      authorizeRoomMentionScheduling(request, state),
+    ).resolves.toBeUndefined();
+    expect(state.isRoomEncrypted).toHaveBeenCalledWith(roomId);
+    expect(state.getJoinedRoomMembers).not.toHaveBeenCalled();
+    expect(state.getPowerLevels).not.toHaveBeenCalled();
+    expect(state.getRoomVersion).not.toHaveBeenCalled();
   });
 
   it('denies an actor below the default app action power', async () => {
@@ -142,10 +156,12 @@ describe('authorizeRoomMentionScheduling', () => {
     ).resolves.toBeUndefined();
   });
 
-  it.each(['membership', 'power levels', 'room version'])(
+  it.each(['encryption', 'membership', 'power levels', 'room version'])(
     'fails closed on a %s lookup error',
     async (lookup) => {
-      if (lookup === 'membership') {
+      if (lookup === 'encryption') {
+        state.isRoomEncrypted.mockRejectedValue(new Error('state unavailable'));
+      } else if (lookup === 'membership') {
         state.getJoinedRoomMembers.mockRejectedValue(
           new Error('state unavailable'),
         );
@@ -173,6 +189,7 @@ describe('authorizeRoomMentionDelivery', () => {
 
   beforeEach(() => {
     state = {
+      isRoomEncrypted: jest.fn().mockResolvedValue(false),
       getJoinedRoomMembers: jest.fn().mockResolvedValue([senderUserId]),
       getPowerLevels: jest.fn().mockResolvedValue({
         users: { [senderUserId]: 50 },
@@ -189,6 +206,17 @@ describe('authorizeRoomMentionDelivery', () => {
         calendarId,
       },
     );
+  });
+
+  it('denies encrypted rooms before loading members or sender power', async () => {
+    state.isRoomEncrypted.mockResolvedValue(true);
+
+    await expect(
+      authorizeRoomMentionDelivery(request, state),
+    ).resolves.toBeUndefined();
+    expect(state.getJoinedRoomMembers).not.toHaveBeenCalled();
+    expect(state.getPowerLevels).not.toHaveBeenCalled();
+    expect(state.getRoomVersion).not.toHaveBeenCalled();
   });
 
   it('accepts legacy room v3 signed integer strings with padding', async () => {

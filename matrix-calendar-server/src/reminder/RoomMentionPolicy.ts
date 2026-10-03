@@ -36,6 +36,8 @@ export interface RoomMentionPowerLevels {
  * stop/settle outstanding lookups.
  */
 export interface RoomMentionMatrixState {
+  /** Return true for an m.room.encryption state event; absence means false. */
+  isRoomEncrypted(roomId: string, signal?: AbortSignal): Promise<boolean>;
   getJoinedRoomMembers(
     roomId: string,
     signal?: AbortSignal,
@@ -77,6 +79,9 @@ export async function authorizeRoomMentionScheduling(
   }
 
   try {
+    if (await getRoomEncryption(state, request.roomId, signal)) {
+      return undefined;
+    }
     const members = await getJoinedRoomMembers(state, request.roomId, signal);
     if (!members.includes(request.authenticatedActorUserId)) {
       return undefined;
@@ -145,6 +150,9 @@ export async function authorizeRoomMentionDelivery(
   }
 
   try {
+    if (await getRoomEncryption(state, request.roomId, signal)) {
+      return undefined;
+    }
     const [members, powerLevels, roomVersion] = await Promise.all([
       getJoinedRoomMembers(state, request.roomId, signal),
       getPowerLevels(state, request.roomId, signal),
@@ -197,6 +205,16 @@ function getJoinedRoomMembers(
   return signal === undefined
     ? state.getJoinedRoomMembers(roomId)
     : state.getJoinedRoomMembers(roomId, signal);
+}
+
+function getRoomEncryption(
+  state: RoomMentionMatrixState,
+  roomId: string,
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
+  return signal === undefined
+    ? state.isRoomEncrypted(roomId)
+    : state.isRoomEncrypted(roomId, signal);
 }
 
 function getPowerLevels(

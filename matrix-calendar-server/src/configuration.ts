@@ -69,6 +69,10 @@ function createConfiguration() {
       process.env.ROOM_CALENDAR_EVENT_WRITES_ENABLED,
       false,
     ),
+    room_reminder_delivery_enabled: toBoolean(
+      process.env.ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED,
+      false,
+    ),
     application_service_token: process.env.MATRIX_APPLICATION_SERVICE_TOKEN,
     application_service_user_id: process.env.MATRIX_APPLICATION_SERVICE_USER_ID,
     calendar_gateway_rate_limit_requests: toNumber(
@@ -89,6 +93,14 @@ function createConfiguration() {
       | 'verify-full'
       | 'trusted-private-network'
       | undefined,
+    room_reminder_configuration_enabled: toBoolean(
+      process.env.MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED,
+      false,
+    ),
+    room_calendar_action_messages_enabled: toBoolean(
+      process.env.ROOM_CALENDAR_ACTION_MESSAGES_ENABLED,
+      false,
+    ),
 
     meetingwidget_url: process.env.MEETINGWIDGET_URL as string,
     meetingwidget_name: process.env.MEETINGWIDGET_NAME ?? 'Matrix Calendar',
@@ -181,6 +193,7 @@ export const ValidationSchema = Joi.object({
   ROOM_CALENDAR_BINDINGS: Joi.string(),
   ROOM_CALENDAR_ACCESS_ENABLED: Joi.boolean(),
   ROOM_CALENDAR_EVENT_WRITES_ENABLED: Joi.boolean(),
+  ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED: Joi.boolean(),
   MATRIX_APPLICATION_SERVICE_TOKEN: Joi.string(),
   MATRIX_APPLICATION_SERVICE_USER_ID: Joi.string(),
   MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS: Joi.number()
@@ -202,6 +215,8 @@ export const ValidationSchema = Joi.object({
     'verify-full',
     'trusted-private-network',
   ),
+  MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED: Joi.boolean(),
+  ROOM_CALENDAR_ACTION_MESSAGES_ENABLED: Joi.boolean(),
 
   MEETINGWIDGET_URL: Joi.string().required().uri(),
   MEETINGWIDGET_NAME: Joi.string(),

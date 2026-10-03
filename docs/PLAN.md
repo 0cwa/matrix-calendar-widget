@@ -248,8 +248,9 @@ alarm description and unknown alarm properties when changing the trigger.
 Multiple alarms, other actions, absolute or non-START triggers, and repeating
 alarms remain opaque: only alarm controls are disabled, while ordinary event
 fields stay editable and preserve the resource. This edits CalDAV alarm
-metadata for clients that honor it; Matrix reminder recipients, scheduling,
-and delivery remain separate M6 work under ADR007.
+metadata for clients that honor it; room reminder settings are stored in
+gateway sidecar state, separate from iCalendar, and scheduling/delivery use
+their own authorization and default-off runtime gates under ADR007.
 
 The CalDAV codec exposes a read-only domain view of master RRULE, RDATE
 (including PERIOD values), and EXDATE values plus same-resource, same-UID
@@ -363,11 +364,15 @@ DST regression or recurrence-editing criteria above.
         safe VEVENT series, including nested-component checks. Real hosted
         write, nonmember, cross-room, and personal contracts are required before
         merge; operator enablement remains separate.
-- [ ] Per-alarm Matrix recipient sidecar metadata.
+- [x] Bounded room reminder configuration and alarm-options APIs, stored as
+      Matrix sidecar metadata separately from canonical iCalendar. Both require
+      current actor membership/action power, exact binding, and known
+      unencrypted room state before source/store access; configuration and
+      delivery gates default off.
   - [x] Give newly created or explicitly edited DISPLAY alarms stable UUID
         UIDs; preserve existing UIDs and untouched UID-less legacy alarms.
         Malformed, duplicate, or resource-colliding UIDs disable alarm controls.
-        This identity foundation does not enable settings or delivery.
+        This identity foundation alone does not enable settings or delivery.
   - [x] Resolve stable DISPLAY alarm identity against already-fetched canonical
         iCalendar data, with typed DATE/floating/UTC/TZID recurrence keys and
         fail-closed malformed/duplicate identity checks. This pure helper does
@@ -378,15 +383,17 @@ DST regression or recurrence-editing criteria above.
   - [x] Add policy-only helpers for the standard message shape, scheduling-time
         actor membership/app action power/exact binding, and delivery-time
         binding/current sender membership/message power/room-mention threshold.
-        Fake-state tests cover denial and state lookup failures. These helpers
-        are not wired to a sender or scheduler; live delivery remains disabled
-        until the M6 appservice authorization and room access contracts pass.
+        Fake-state tests cover denial and state lookup failures. These checks
+        are wired into the native Matrix transport and scheduler runtime.
+        Delivery remains disabled by default; final hosted PostgreSQL
+        concurrent-claim and combined live-service gates are still required
+        before treating delivery as ready to enable.
 - [x] App-owned PostgreSQL reminder persistence, schema migrations, and
       transactional claim/completion contract are implemented (ADR019). The
       restricted-role PostgreSQL 16 integration job passed all five hosted
       contract tests in PR #111 (run 36358734009). Database claims provide
       at-most-once claim/completion state, not exactly-once Matrix message
-      delivery, and do not enable the scheduler or message delivery.
+      delivery. The store does not activate the separately gated scheduler.
 - [x] Default optional reminder database connections to verified TLS; allow
       plaintext only with explicit `trusted-private-network` mode for an
       operator-controlled isolated network (ADR021).
@@ -394,14 +401,18 @@ DST regression or recurrence-editing criteria above.
       PostgreSQL endpoint and its trusted CA/certificate configuration. No
       endpoint or CA/certificate configuration has been supplied; production
       TLS/CA and runtime validation therefore remain open.
-- [ ] Durable scheduler and idempotent delivery log.
-  - [x] Add an unbootstrapped, bounded scheduler core with keyset store paging,
+- [x] Durable scheduler and idempotent delivery log are integrated behind a
+      separate default-off delivery gate.
+  - [x] Add a bounded scheduler core and native runtime with keyset store paging,
         current binding/configuration/canonical-source rechecks after claims,
         stable per-firing Matrix transaction IDs, cooperative abort deadlines,
-        and a lease release reserve. Runtime adapters, lifecycle, and live
-        delivery remain open; real PostgreSQL contracts are required in CI.
+        and a lease release reserve. Repeated concurrent first-claim pairs are
+        included in the hosted PostgreSQL contract; the final hosted run remains
+        outstanding. OpenID proof acquisition may not stop promptly on abort,
+        so the operation deadline is best effort while claim fencing protects
+        delivery state.
 - [ ] Event detail action to link/open a Matrix room or MatrixRTC conference.
-- [ ] Audit-friendly event creation/edit messages where appropriate.
+- [x] Add default-off, best-effort room event action notices under ADR032.
 
 Room-wide reminders are the accepted v1 recipient flow: send only
 permission-checked `m.mentions.room: true` notifications and recheck permission

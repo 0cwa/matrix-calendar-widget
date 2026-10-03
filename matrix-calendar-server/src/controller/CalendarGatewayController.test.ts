@@ -15,6 +15,7 @@
  */
 
 import type {
+  CalendarEvent,
   CalendarEventFollowingTimingWrite,
   CalendarEventInput,
   CalendarEventPatch,
@@ -49,6 +50,7 @@ import {
   RoomCalendarCalDavPrincipal,
   RoomCalendarTarget,
 } from '../service/RoomCalendarCalDavAccess';
+import { RoomCalendarEventAuditService } from '../service/RoomCalendarEventAuditService';
 import { RoomCalendarEventOperations } from '../service/RoomCalendarEventOperations';
 import { CalendarGatewayController } from './CalendarGatewayController';
 
@@ -109,6 +111,7 @@ describe('CalendarGatewayController', () => {
     roomAccess: RoomCalendarCalDavAccess = roomCalendarCalDavAccess,
     credentialProviderFactory: MatrixOpenIdCalDavCredentialProviderFactory = new MatrixOpenIdCalDavCredentialProviderFactory(),
     roomEventOperations: RoomCalendarEventOperations = new RoomCalendarEventOperations(),
+    roomEventAuditService?: RoomCalendarEventAuditService,
   ): CalendarGatewayController {
     return new CalendarGatewayController(
       config,
@@ -116,6 +119,7 @@ describe('CalendarGatewayController', () => {
       credentialProviderFactory,
       roomAccess,
       roomEventOperations,
+      roomEventAuditService,
     );
   }
 
@@ -487,6 +491,257 @@ describe('CalendarGatewayController', () => {
       },
       input,
     );
+  });
+
+  it('sends actor-attributed opaque audit context only after room CalDAV writes succeed', async () => {
+    isAllowed.mockResolvedValue(true);
+    const collectionUrl =
+      'https://radicale.example.test/_matrix_calendar_service/team-calendar/';
+    const eventHref = `${collectionUrl}event.ics`;
+    const principal: RoomCalendarCalDavPrincipal = {
+      userId: '@_matrix_calendar_service:example.test',
+      calendarUrl: collectionUrl,
+      credential: {
+        accessToken: 'service-openid-proof',
+        matrixServerName: 'example.test',
+      },
+    };
+    forAuthorizedTarget.mockResolvedValue(principal);
+
+    const event: CalendarEvent = {
+      id: eventHref,
+      calendarId: 'team-calendar',
+      uid: 'private-event-uid@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-03T12:00:00',
+          timezone: 'UTC',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-03T13:00:00',
+          timezone: 'UTC',
+        },
+      },
+    };
+    const order: string[] = [];
+    const operations = {
+      createEvent: jest.fn(async () => {
+        order.push('caldav:create');
+        return { event, etag: '"event-v1"' };
+      }),
+      updateEvent: jest.fn(async () => {
+        order.push('caldav:update');
+        return { event, etag: '"event-v2"' };
+      }),
+      deleteEvent: jest.fn(async () => {
+        order.push('caldav:delete');
+      }),
+    } as unknown as RoomCalendarEventOperations;
+    const record = jest.fn(async (context) => {
+      order.push(`audit:${context.action}`);
+    });
+    const auditService = {
+      record,
+    } as unknown as RoomCalendarEventAuditService;
+    const controller = createController(
+      appConfig,
+      roomCalendarCalDavAccess,
+      new MatrixOpenIdCalDavCredentialProviderFactory(),
+      operations,
+      auditService,
+    );
+    const input: CalendarEventInput = {
+      uid: 'event-uid@example.test',
+      title: 'Planning',
+      timing: event.timing,
+    };
+
+    await controller.createEvent(
+      userContext,
+      openIdCredential,
+      input,
+      roomId,
+      'team-calendar',
+      'room',
+    );
+    await controller.updateEvent(
+      userContext,
+      openIdCredential,
+      { title: 'Planning' },
+      '"event-v1"',
+      roomId,
+      'team-calendar',
+      eventHref,
+      'room',
+    );
+    await controller.deleteEvent(
+      userContext,
+      openIdCredential,
+      '"event-v2"',
+      roomId,
+      'team-calendar',
+      eventHref,
+      'room',
+    );
+
+    expect(order).toEqual([
+      'caldav:create',
+      'audit:created',
+      'caldav:update',
+      'audit:updated',
+      'caldav:delete',
+      'audit:deleted',
+    ]);
+    expect(record).toHaveBeenNthCalledWith(1, {
+      roomId,
+      calendarId: 'team-calendar',
+      actorUserId: userContext.userId,
+      action: 'created',
+      resourceId: 'event.ics',
+      title: 'Planning',
+    });
+    expect(record).toHaveBeenNthCalledWith(2, {
+      roomId,
+      calendarId: 'team-calendar',
+      actorUserId: userContext.userId,
+      action: 'updated',
+      resourceId: 'event.ics',
+      title: 'Planning',
+    });
+    expect(record).toHaveBeenNthCalledWith(3, {
+      roomId,
+      calendarId: 'team-calendar',
+      actorUserId: userContext.userId,
+      action: 'deleted',
+      resourceId: 'event.ics',
+    });
+    expect(JSON.stringify(record.mock.calls)).not.toContain(eventHref);
+    expect(JSON.stringify(record.mock.calls)).not.toContain(
+      'private-event-uid',
+    );
+    expect(JSON.stringify(record.mock.calls)).not.toContain(
+      'service-openid-proof',
+    );
+  });
+
+  it('preserves a successful CalDAV result when Matrix audit delivery fails', async () => {
+    isAllowed.mockResolvedValue(true);
+    const collectionUrl =
+      'https://radicale.example.test/_matrix_calendar_service/team-calendar/';
+    const event: CalendarEvent = {
+      id: `${collectionUrl}event.ics`,
+      calendarId: 'team-calendar',
+      uid: 'event-uid@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-03T12:00:00',
+          timezone: 'UTC',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-03T13:00:00',
+          timezone: 'UTC',
+        },
+      },
+    };
+    const operations = {
+      createEvent: jest.fn().mockResolvedValue({ event, etag: '"event-v1"' }),
+    } as unknown as RoomCalendarEventOperations;
+    const auditService = {
+      record: jest.fn().mockRejectedValue(new Error('private Matrix failure')),
+    } as unknown as RoomCalendarEventAuditService;
+    forAuthorizedTarget.mockResolvedValue({
+      userId: '@_matrix_calendar_service:example.test',
+      calendarUrl: collectionUrl,
+      credential: {
+        accessToken: 'service-openid-proof',
+        matrixServerName: 'example.test',
+      },
+    });
+    const controller = createController(
+      appConfig,
+      roomCalendarCalDavAccess,
+      new MatrixOpenIdCalDavCredentialProviderFactory(),
+      operations,
+      auditService,
+    );
+
+    await expect(
+      controller.createEvent(
+        userContext,
+        openIdCredential,
+        {
+          uid: 'event-uid@example.test',
+          title: 'Planning',
+          timing: event.timing,
+        },
+        roomId,
+        'team-calendar',
+        'room',
+      ),
+    ).resolves.toMatchObject({ event, etag: '"event-v1"' });
+  });
+
+  it('does not send an audit notice when the room CalDAV mutation fails', async () => {
+    isAllowed.mockResolvedValue(true);
+    const record = jest.fn();
+    const auditService = {
+      record,
+    } as unknown as RoomCalendarEventAuditService;
+    const operations = {
+      createEvent: jest.fn().mockRejectedValue(new Error('CalDAV failure')),
+    } as unknown as RoomCalendarEventOperations;
+    forAuthorizedTarget.mockResolvedValue({
+      userId: '@_matrix_calendar_service:example.test',
+      calendarUrl:
+        'https://radicale.example.test/_matrix_calendar_service/team-calendar/',
+      credential: {
+        accessToken: 'service-openid-proof',
+        matrixServerName: 'example.test',
+      },
+    });
+    const controller = createController(
+      appConfig,
+      roomCalendarCalDavAccess,
+      new MatrixOpenIdCalDavCredentialProviderFactory(),
+      operations,
+      auditService,
+    );
+
+    await expect(
+      controller.createEvent(
+        userContext,
+        openIdCredential,
+        {
+          uid: 'event-uid@example.test',
+          title: 'Planning',
+          timing: {
+            type: 'timed',
+            start: {
+              type: 'zoned',
+              local: '2026-10-03T12:00:00',
+              timezone: 'UTC',
+            },
+            end: {
+              type: 'zoned',
+              local: '2026-10-03T13:00:00',
+              timezone: 'UTC',
+            },
+          },
+        },
+        roomId,
+        'team-calendar',
+        'room',
+      ),
+    ).rejects.toThrow('CalDAV failure');
+    expect(record).not.toHaveBeenCalled();
   });
 
   it('rejects unsafe room event IDs before requesting an appservice proof', async () => {

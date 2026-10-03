@@ -35,7 +35,7 @@ This repository begins as a hard fork of NeoDateFix. NeoDateFix stores meeting m
           └─────────────────┘   └───────────────┘
 ```
 
-The gateway and bot are initially one deployable service. Split them only when scaling, isolation, or operational requirements justify another network boundary. PostgreSQL is an optional app-owned store for reminder configuration and claim primitives; it is separate from CalDAV and Synapse. The current store does not enable reminder scheduling or Matrix delivery.
+The gateway and bot are initially one deployable service. Split them only when scaling, isolation, or operational requirements justify another network boundary. PostgreSQL is an optional app-owned store for reminder configuration and claim primitives; it is separate from CalDAV and Synapse. The reminder configuration API and scheduler runtime are wired behind separate default-off gates; a database store by itself does not enable Matrix delivery.
 
 ## Principal and authorization boundary
 
@@ -92,7 +92,7 @@ deferred.
 | VALARM                         | iCalendar object                                                    |
 | calendar display properties    | CalDAV properties where supported                                   |
 | Matrix room ↔ calendar binding | operator-managed server configuration (ADR015)                      |
-| Matrix reminder recipients     | planned gateway sidecar state, separate from iCalendar              |
+| Matrix reminder configuration  | gateway sidecar state, separate from iCalendar                      |
 | reminder delivery history      | app-owned PostgreSQL store when enabled                             |
 | Matrix permissions             | room state plus configured gateway policy for room-owned operations |
 
@@ -192,12 +192,11 @@ remain active.
 
 VALARM expresses _when_ a reminder is due. Matrix recipient targeting is gateway sidecar metadata keyed to a stable event/alarm identity.
 
-Delivery uses Matrix messages with:
+The initial delivery target is a Matrix room-wide mention using
+`m.mentions.room: true`, only when the current room state grants the bot
+permission. Individual Matrix recipients remain out of scope.
 
-- `m.mentions.user_ids` for selected users,
-- `m.mentions.room: true` for `@room`, only when the bot/user has permission.
-
-The planned scheduler must be idempotent and keep delivery state across restarts. The persistence primitives are present, but scheduling, recipient configuration, delivery-time authorization, and Matrix sends remain future work.
+The bounded scheduler uses persistent claim state and stable Matrix transaction IDs across retries. Configuration and delivery each require an operator gate; delivery also rechecks current room binding, encryption state, and mention permission before resolving the canonical alarm and sending. The feature remains disabled by default, and production database/host validation remains open.
 
 ## MSC4496
 

@@ -45,6 +45,10 @@ import {
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventOperations } from '../../src/service/RoomCalendarEventOperations';
+import {
+  MatrixApplicationServiceFixtureError,
+  obtainMatrixApplicationServiceFixtureUserToken,
+} from '../util/MatrixApplicationServiceFixtureUser';
 
 const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
@@ -862,32 +866,25 @@ function markRoomAppServiceListingCheckpoint(
 }
 
 async function registerServiceUser(): Promise<void> {
-  const response = await nativeFetch(
-    new URL('/_matrix/client/v3/register', homeserverUrl),
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${serviceToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        type: 'm.login.application_service',
-        username: serviceUserId.slice(1).split(':')[0],
-      }),
-    },
-  );
-  if (!response.ok)
-    throw new Error('Application-service fixture registration failed');
-  const result = (await response.json()) as {
-    user_id?: string;
-    access_token?: string;
-  };
-  if (result.user_id !== serviceUserId) {
-    throw new Error(
-      'Application-service fixture user did not match configuration',
-    );
+  try {
+    const token = await obtainMatrixApplicationServiceFixtureUserToken({
+      fetchImpl: nativeFetch,
+      homeserverUrl,
+      applicationServiceToken: serviceToken,
+      userId: serviceUserId,
+    });
+    serviceUserAccessTokens.push(token);
+  } catch (error) {
+    if (error instanceof MatrixApplicationServiceFixtureError) {
+      if (error.status !== undefined) {
+        markRoomAppServiceSetupHttpStatus(error.status);
+      }
+      if (error.matrixErrcode) {
+        markRoomAppServiceSetupMatrixErrorCode(error.matrixErrcode);
+      }
+    }
+    throw error;
   }
-  if (result.access_token) serviceUserAccessTokens.push(result.access_token);
 }
 
 async function createRoom(

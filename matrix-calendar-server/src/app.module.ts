@@ -45,6 +45,8 @@ import { ConfigurationController } from './controller/ConfigurationController';
 import { GuestMemberController } from './controller/GuestMemberController';
 import { HealthCheckController } from './controller/HealthCheckController';
 import { MeetingController } from './controller/MeetingController';
+import { RoomReminderAlarmOptionsController } from './controller/RoomReminderAlarmOptionsController';
+import { RoomReminderConfigurationController } from './controller/RoomReminderConfigurationController';
 import { WelcomeWorkflowController } from './controller/WelcomeWorkflowController';
 import { WidgetController } from './controller/WidgetController';
 import { registerDateRangeFormatter } from './dateRangeFormatter';
@@ -66,6 +68,7 @@ import {
   RoomReminderStore,
 } from './reminder';
 import { getReminderDatabaseTlsOptions } from './reminder/ReminderDatabaseConnection';
+import { createRoomReminderModuleProviders } from './reminder/RoomReminderModuleProviders';
 import { MatrixServer } from './rpc/MatrixServer';
 import { CalendarCommandService } from './service/CalendarCommandService';
 import { CommandService } from './service/CommandService';
@@ -74,6 +77,7 @@ import { GuestMemberService } from './service/GuestMemberService';
 import { MatrixCalendarAuthorizationFactory } from './service/MatrixCalendarAuthorization';
 import { MeetingService } from './service/MeetingService';
 import { RoomCalendarCalDavAccess } from './service/RoomCalendarCalDavAccess';
+import { RoomCalendarEventAuditService } from './service/RoomCalendarEventAuditService';
 import { RoomCalendarEventOperations } from './service/RoomCalendarEventOperations';
 import { RoomMessageService } from './service/RoomMessageService';
 import { WelcomeWorkflowService } from './service/WelcomeWorkflowService';
@@ -87,6 +91,8 @@ const appControllers = [
   ConfigurationController,
   HealthCheckController,
   MeetingController,
+  RoomReminderConfigurationController,
+  RoomReminderAlarmOptionsController,
   WelcomeWorkflowController,
   WidgetController,
   GuestMemberController,
@@ -150,7 +156,7 @@ const roomReminderStoreFactory: FactoryProvider<Promise<RoomReminderStore>> = {
       await store.migrate();
       return store;
     } catch (error) {
-      await store.onModuleDestroy();
+      await store.onApplicationShutdown();
       throw error;
     }
   },
@@ -297,6 +303,7 @@ const i18nFactory: FactoryProvider<void> = {
   providers: [
     appConfigurationFactory,
     roomReminderStoreFactory,
+    ...createRoomReminderModuleProviders(),
     roomMatrixEventsFactory,
     widgetLayoutConfigFactory,
     matrixClientFactory,
@@ -312,6 +319,10 @@ const i18nFactory: FactoryProvider<void> = {
       useClass: RoomCalendarCalDavAccess,
     },
     {
+      provide: ModuleProviderToken.NATIVE_FETCH,
+      useValue: fetch,
+    },
+    {
       provide: RoomCalendarEventOperations,
       useFactory: (appConfig: IAppConfiguration) =>
         new RoomCalendarEventOperations(fetch, {
@@ -322,6 +333,16 @@ const i18nFactory: FactoryProvider<void> = {
           servicePrincipalUserId: appConfig.application_service_user_id,
         }),
       inject: [ModuleProviderToken.APP_CONFIGURATION],
+    },
+    {
+      provide: RoomCalendarEventAuditService,
+      useFactory: (matrixClient: MatrixClient, appConfig: IAppConfiguration) =>
+        new RoomCalendarEventAuditService(matrixClient, {
+          enabled: appConfig.room_calendar_action_messages_enabled,
+          roomCalendarBindings: appConfig.room_calendar_bindings,
+          encryptionEnabled: appConfig.enable_crypto,
+        }),
+      inject: [MatrixClient, ModuleProviderToken.APP_CONFIGURATION],
     },
     {
       provide: CalendarCommandService,

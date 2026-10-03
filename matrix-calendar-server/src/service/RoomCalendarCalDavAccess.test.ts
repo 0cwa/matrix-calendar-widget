@@ -101,6 +101,34 @@ describe('RoomCalendarCalDavAccess', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('propagates an already-aborted caller signal without proof I/O', async () => {
+    const access = new RoomCalendarCalDavAccess(configuration());
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      access.forAuthorizedTarget(target, 'read', controller.signal),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('passes the caller signal to the homeserver proof request', async () => {
+    fetch.mockResponseOnce(
+      JSON.stringify({
+        access_token: 'synthetic-test-openid-proof',
+        matrix_server_name: 'example.test',
+      }),
+      { status: 200 },
+    );
+    const access = new RoomCalendarCalDavAccess(configuration());
+    const controller = new AbortController();
+
+    await access.forAuthorizedTarget(target, 'read', controller.signal);
+
+    expect(fetch.mock.calls[0][1]?.signal).not.toBeUndefined();
+    expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(false);
+  });
+
   it('never mints a proof for writes when the separate write gate is disabled', async () => {
     const access = new RoomCalendarCalDavAccess(
       configuration({

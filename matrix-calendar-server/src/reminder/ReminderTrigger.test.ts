@@ -15,7 +15,10 @@
  */
 
 import ICAL from 'ical.js';
-import { calculateDisplayReminderDueAt } from './ReminderTrigger';
+import {
+  calculateDisplayReminderDueAt,
+  isReminderScheduleWithinLimits,
+} from './ReminderTrigger';
 
 const stockholmTimezone = `
   BEGIN:VTIMEZONE
@@ -100,6 +103,43 @@ describe('calculateDisplayReminderDueAt', () => {
     );
   });
 
+  it.each([
+    ['CRLF', '\r\n'],
+    ['LF', '\n'],
+  ])(
+    'accepts one final %s line ending in raw VALARM source',
+    (_name, lineEnding) => {
+      const { alarm, occurrence } = parsedEvent(
+        'BEGIN:VEVENT\nUID:meeting\nDTSTART:20261001T090000Z',
+        'ACTION:DISPLAY\nTRIGGER:-PT15M',
+      );
+      const source = alarm.replace(/\n/g, lineEnding) + lineEnding;
+
+      expect(calculateDisplayReminderDueAt(source, occurrence)).toEqual(
+        new Date('2026-10-01T08:45:00.000Z'),
+      );
+      expect(isReminderScheduleWithinLimits(source, occurrence)).toBe(true);
+    },
+  );
+
+  it.each([
+    ['leading blank line', '\n', ''],
+    ['extra trailing blank line', '', '\n\n'],
+    ['bare carriage return', '', '\r'],
+  ])(
+    'continues to reject VALARM source with a malformed %s boundary',
+    (_name, prefix, suffix) => {
+      const { alarm, occurrence } = parsedEvent(
+        'BEGIN:VEVENT\nUID:meeting\nDTSTART:20261001T090000Z',
+        'ACTION:DISPLAY\nTRIGGER:-PT15M',
+      );
+      const source = `${prefix}${alarm}${suffix}`;
+
+      expect(calculateDisplayReminderDueAt(source, occurrence)).toBeUndefined();
+      expect(isReminderScheduleWithinLimits(source, occurrence)).toBe(false);
+    },
+  );
+
   it('applies RELATED=END and positive durations to the occurrence end', () => {
     const { alarm, occurrence } = parsedEvent(
       'BEGIN:VEVENT\nUID:meeting\nDTSTART:20261001T090000Z\nDTEND:20261001T100000Z',
@@ -166,11 +206,32 @@ describe('calculateDisplayReminderDueAt', () => {
     ['absolute UTC trigger', 'TRIGGER;VALUE=DATE-TIME:20261001T084500Z'],
     ['fractional trigger duration', 'TRIGGER:-P1.5D'],
     ['invalid RELATED value', 'TRIGGER;RELATED=NEXT:-PT5M'],
+    ['duplicate RELATED parameters', 'TRIGGER;RELATED=START;RELATED=END:-PT5M'],
+    [
+      'duplicate VALUE parameters',
+      'TRIGGER;VALUE=DURATION;VALUE=DURATION:-PT5M',
+    ],
+    [
+      'contradictory duplicate RELATED parameters',
+      'TRIGGER;RELATED=BOGUS;RELATED=START:-PT5M',
+    ],
     ['missing trigger', ''],
     ['duplicate triggers', 'TRIGGER:-PT5M\nTRIGGER:-PT10M'],
+    [
+      'duplicate ACTION properties',
+      'ACTION:DISPLAY\nACTION:DISPLAY\nTRIGGER:-PT5M',
+    ],
+    [
+      'duplicate DESCRIPTION properties',
+      'ACTION:DISPLAY\nDESCRIPTION:One\nDESCRIPTION:Two\nTRIGGER:-PT5M',
+    ],
     ['unsupported action', 'ACTION:EMAIL\nTRIGGER:-PT5M'],
     ['repeat without duration', 'TRIGGER:-PT5M\nREPEAT:2'],
     ['duration without repeat', 'TRIGGER:-PT5M\nDURATION:PT5M'],
+    [
+      'duplicate REPEAT properties',
+      'TRIGGER:-PT5M\nREPEAT:1\nREPEAT:1\nDURATION:PT5M',
+    ],
     [
       'REPEAT with an invalid TEXT value type',
       'TRIGGER:-PT5M\nREPEAT;VALUE=TEXT:1\nDURATION:PT5M',
@@ -204,6 +265,38 @@ describe('calculateDisplayReminderDueAt', () => {
     );
 
     expect(calculateDisplayReminderDueAt(alarm, occurrence)).toBeUndefined();
+  });
+
+  it('accepts an opaque extension parameter without weakening known parameter checks', () => {
+    const { alarm, occurrence } = parsedEvent(
+      'BEGIN:VEVENT\nUID:meeting\nDTSTART:20261001T090000Z',
+      'ACTION:DISPLAY\nTRIGGER;X-ORIGIN=client:-PT5M',
+    );
+
+    expect(calculateDisplayReminderDueAt(alarm, occurrence)).toEqual(
+      new Date('2026-10-01T08:55:00.000Z'),
+    );
+  });
+
+  it('rejects nested components inside a VALARM source', () => {
+    const { occurrence } = parsedEvent(
+      'BEGIN:VEVENT\nUID:meeting\nDTSTART:20261001T090000Z',
+      'ACTION:DISPLAY\nTRIGGER:-PT5M',
+    );
+    const nestedAlarm = [
+      'BEGIN:VALARM',
+      'ACTION:DISPLAY',
+      'DESCRIPTION:Reminder',
+      'TRIGGER:-PT5M',
+      'BEGIN:VENDOR',
+      'X-SECRET:ignored',
+      'END:VENDOR',
+      'END:VALARM',
+    ].join('\n');
+
+    expect(
+      calculateDisplayReminderDueAt(nestedAlarm, occurrence),
+    ).toBeUndefined();
   });
 
   it('rejects malformed source lexemes that ical.js normalizes with parseInt', () => {
@@ -268,5 +361,78 @@ describe('calculateDisplayReminderDueAt', () => {
     expect(
       calculateDisplayReminderDueAt(dateOnly.alarm, dateOnly.occurrence),
     ).toBeUndefined();
+  });
+});
+
+describe('isReminderScheduleWithinLimits', () => {
+  it('accepts firing horizons through 366 days in either direction', () => {
+    const early = parsedEvent(
+      'BEGIN:VEVENT\nUID:meeting\nDTSTART:20261001T090000Z',
+      'ACTION:DISPLAY\nTRIGGER:-PT8784H',
+    );
+    const late = parsedEvent(
+      'BEGIN:VEVENT\nUID:meeting\nDTSTART:20261001T090000Z',
+      'ACTION:DISPLAY\nTRIGGER:PT8784H',
+    );
+
+    expect(isReminderScheduleWithinLimits(early.alarm, early.occurrence)).toBe(
+      true,
+    );
+    expect(isReminderScheduleWithinLimits(late.alarm, late.occurrence)).toBe(
+      true,
+    );
+  });
+
+  it('rejects trigger offsets and repeat tails beyond the 366-day horizon', () => {
+    const distantTrigger = parsedEvent(
+      'BEGIN:VEVENT\nUID:meeting\nDTSTART:20261001T090000Z',
+      'ACTION:DISPLAY\nTRIGGER:PT8784H1S',
+    );
+    const distantRepeat = parsedEvent(
+      'BEGIN:VEVENT\nUID:meeting\nDTSTART:20261001T090000Z',
+      'ACTION:DISPLAY\nTRIGGER:PT0S\nREPEAT:100\nDURATION:PT100H',
+    );
+
+    expect(
+      isReminderScheduleWithinLimits(
+        distantTrigger.alarm,
+        distantTrigger.occurrence,
+      ),
+    ).toBe(false);
+    expect(
+      isReminderScheduleWithinLimits(
+        distantRepeat.alarm,
+        distantRepeat.occurrence,
+      ),
+    ).toBe(false);
+  });
+
+  it('bounds RELATED=END event duration but does not cap START-relative events', () => {
+    const longEvent =
+      'BEGIN:VEVENT\nUID:meeting\nDTSTART:20260101T090000Z\nDTEND:20270103T090000Z';
+    const endAlarm = parsedEvent(
+      longEvent,
+      'ACTION:DISPLAY\nTRIGGER;RELATED=END:PT0S',
+    );
+    const startAlarm = parsedEvent(longEvent, 'ACTION:DISPLAY\nTRIGGER:PT0S');
+
+    expect(
+      isReminderScheduleWithinLimits(endAlarm.alarm, endAlarm.occurrence),
+    ).toBe(false);
+    expect(
+      isReminderScheduleWithinLimits(startAlarm.alarm, startAlarm.occurrence),
+    ).toBe(true);
+  });
+
+  it('rejects repeat counts above the bounded policy while retaining RFC calculation', () => {
+    const { alarm, occurrence } = parsedEvent(
+      'BEGIN:VEVENT\nUID:meeting\nDTSTART:20261001T090000Z',
+      'ACTION:DISPLAY\nTRIGGER:PT0S\nREPEAT:101\nDURATION:PT1M',
+    );
+
+    expect(calculateDisplayReminderDueAt(alarm, occurrence, 101)).toEqual(
+      new Date('2026-10-01T10:41:00.000Z'),
+    );
+    expect(isReminderScheduleWithinLimits(alarm, occurrence)).toBe(false);
   });
 });

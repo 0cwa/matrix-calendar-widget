@@ -82,6 +82,18 @@ RADICALE_URL=https://calendar.example.com
 # MATRIX_APPLICATION_SERVICE_USER_ID=@_matrix_calendar_service:example.org
 # MATRIX_APPLICATION_SERVICE_TOKEN=<secret>
 
+# Optional, defaults to false. The room reminder settings API additionally
+# requires ROOM_CALENDAR_ACCESS_ENABLED and MATRIX_CALENDAR_REMINDER_DATABASE_URL.
+# Keep this off until the settings API authorization and CalDAV contracts are
+# accepted. Enabling it does not enable reminder scheduling or delivery.
+# MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED=false
+
+# Optional, defaults to false. Send best-effort Matrix notices after successful
+# room-calendar create, update, and delete operations. This is independent of
+# the room access and event-write gates. Encrypted rooms require the bot's
+# encryption-aware Matrix sender to confirm room encryption.
+# ROOM_CALENDAR_ACTION_MESSAGES_ENABLED=false
+
 # optional - maximum calendar gateway requests allowed from one TCP source
 # per fixed window. Defaults to 120 requests per 60000 ms.
 MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS=120

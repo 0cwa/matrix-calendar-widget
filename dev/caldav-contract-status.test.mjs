@@ -133,6 +133,21 @@ const knownCases = [
     'room-appservice-bot-command-denial',
   ],
   [
+    'matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts',
+    'claims a canonical due alarm, sends it, and deduplicates repeated stable transactions',
+    'room-reminder-live-idempotent-delivery',
+  ],
+  [
+    'matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts',
+    'denies a changed room binding before making a UID REPORT request',
+    'room-reminder-changed-binding-denial',
+  ],
+  [
+    'matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts',
+    'denies an encrypted room before making a UID REPORT request',
+    'room-reminder-encrypted-room-denial',
+  ],
+  [
     'matrix-calendar-server/src/controller/RoomCalendarTarget.test.ts',
     'authorizes and resolves the exact binding before requesting a proof or CalDAV',
     'room-calendar-target-exact-binding',
@@ -395,6 +410,57 @@ test('fails closed for an unknown RoomAppService assertion without exposing it',
   );
   assert.equal(output.includes('private-room-contract-title'), false);
   assert.equal(output.includes('private-room-contract-detail'), false);
+});
+
+test('sanitizes live reminder delivery contract failures to closed case IDs', () => {
+  const testReport = {
+    testResults: [
+      {
+        name: suitePath(
+          'matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts',
+        ),
+        status: 'failed',
+        assertionResults: [
+          {
+            title:
+              'denies a changed room binding before making a UID REPORT request',
+            status: 'passed',
+            failureMessages: [],
+          },
+          {
+            title:
+              'denies an encrypted room before making a UID REPORT request',
+            status: 'passed',
+            failureMessages: [],
+          },
+          {
+            title:
+              'claims a canonical due alarm, sends it, and deduplicates repeated stable transactions',
+            status: 'failed',
+            fullName: 'private room, event and transaction data',
+            failureMessages: ['private token and event content'],
+          },
+        ],
+        testExecError: {
+          message: 'private homeserver response and credentials',
+          stack: 'private stack',
+        },
+        failureMessage: 'private failure report',
+      },
+    ],
+  };
+
+  const output = safeContractCaseStatusLines(testReport).join('\n');
+  assert.equal(
+    output,
+    [
+      'contract-case room-reminder-changed-binding-denial passed',
+      'contract-case room-reminder-encrypted-room-denial passed',
+      'contract-case room-reminder-live-idempotent-delivery failed',
+      'contract-suite room-reminder-delivery-contract failed',
+    ].join('\n'),
+  );
+  assert.doesNotMatch(output, /private|credentials|event content|stack/);
 });
 
 test('fails closed when the Jest report has no test results array', () => {

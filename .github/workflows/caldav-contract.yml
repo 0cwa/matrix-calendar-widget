@@ -10,14 +10,22 @@ on:
       - 'matrix-calendar-server/src/caldav/**'
       - 'matrix-calendar-server/src/controller/CalendarGatewayController.ts'
       - 'matrix-calendar-server/src/app.module.ts'
+      - 'matrix-calendar-server/src/controller/RoomReminderConfigurationController.ts'
+      - 'matrix-calendar-server/src/controller/RoomReminderConfigurationController.test.ts'
+      - 'matrix-calendar-server/src/controller/RoomReminderAlarmOptionsController.ts'
+      - 'matrix-calendar-server/src/controller/RoomReminderAlarmOptionsController.test.ts'
       - 'matrix-calendar-server/src/guard/**'
       - 'matrix-calendar-server/src/middleware/**'
+      - 'matrix-calendar-server/src/reminder/**'
       - 'matrix-calendar-server/src/service/MatrixCalendarAuthorization.ts'
       - 'matrix-calendar-server/src/service/MatrixCalendarAuthorization.test.ts'
       - 'matrix-calendar-server/test/CalendarGatewayMembershipGuard.test.ts'
       - 'matrix-calendar-server/test/integration/CalDavDiscoveryContract.test.ts'
       - 'matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts'
       - 'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts'
+      - 'matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts'
+      - 'packages/calendar/src/utils/calendarEventTimezone.ts'
+      - 'packages/calendar/src/utils/calendarEventTimezone.test.ts'
       - 'matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts'
       - 'matrix-calendar-server/test/integration/CalendarDiagnosticsContract.test.ts'
       - 'matrix-calendar-server/package.json'
@@ -84,6 +92,13 @@ jobs:
             test/integration/PersonalOpenIdRadicaleContract.test.ts \
             --runInBand
 
+      - name: Preflight room reminder delivery contract import
+        run: |
+          CALDAV_CONTRACT=0 \
+          yarn workspace @matrix-calendar-widget/server jest \
+            test/integration/RoomReminderDeliveryContract.test.ts \
+            --runInBand
+
       - name: Start pinned Matrix and Radicale services
         run: bash dev/up.sh
 
@@ -130,6 +145,7 @@ jobs:
             test/CalendarGatewayMembershipGuard.test.ts \
             test/integration/PersonalOpenIdRadicaleContract.test.ts \
             test/integration/RoomAppServiceRadicaleContract.test.ts \
+            test/integration/RoomReminderDeliveryContract.test.ts \
             test/integration/CalDavDiscoveryContract.test.ts \
             test/integration/CalDavEventRoundTripContract.test.ts \
             test/integration/CalendarDiagnosticsContract.test.ts \
@@ -156,7 +172,7 @@ jobs:
             printf '%s\n' "$contract_summary"
             printf '%s\n' 'Real CalDAV test summary'
             printf '%s\n' "$contract_report_summary"
-            printf '%s\n' 'Personal and Room setup diagnosis'
+            printf '%s\n' 'Personal, Room, and reminder setup diagnosis'
             printf '%s\n' "$contract_setup_summary"
           } >> "$GITHUB_STEP_SUMMARY"
           {
@@ -164,7 +180,7 @@ jobs:
             printf '%s\n' "$contract_summary"
             printf '%s\n' 'Real CalDAV test summary'
             printf '%s\n' "$contract_report_summary"
-            printf '%s\n' 'Personal and Room setup diagnosis'
+            printf '%s\n' 'Personal, Room, and reminder setup diagnosis'
             printf '%s\n' "$contract_setup_summary"
           } >> "$RUNNER_TEMP/caldav-safe-contract-summary.txt"
           rm -f "$contract_log" "$contract_report"

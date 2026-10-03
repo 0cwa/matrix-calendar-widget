@@ -166,11 +166,12 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
 
   constructor(private readonly sql: Sql) {}
 
-  async onModuleInit(): Promise<void> {
-    await this.migrate();
-  }
-
-  async onModuleDestroy(): Promise<void> {
+  /**
+   * Close only after module-destroy hooks have drained the reminder scheduler.
+   * Nest invokes `onModuleDestroy` hooks concurrently, so closing the pool in
+   * this adapter's module-destroy phase can race an in-flight scheduler scan.
+   */
+  async onApplicationShutdown(): Promise<void> {
     await this.sql.end({ timeout: 5 });
   }
 
@@ -347,7 +348,7 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
 
     const deliveryKey = createReminderDeliveryKey(identity);
     const claimToken = randomUUID();
-    const query = this.sql<DatabaseDeliveryClaim[]>`
+    const insertQuery = this.sql<DatabaseDeliveryClaim[]>`
       INSERT INTO matrix_calendar.reminder_deliveries (
         delivery_key, room_id, calendar_id, event_uid, recurrence_id,
         alarm_uid, trigger_ordinal, state, claim_token, lease_expires_at,
@@ -365,17 +366,39 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
         clock_timestamp() + (${leaseDurationMs} * interval '1 millisecond'),
         1
       )
-      ON CONFLICT (delivery_key) DO UPDATE SET
-        state = 'claimed',
-        claim_token = EXCLUDED.claim_token,
-        lease_expires_at = EXCLUDED.lease_expires_at,
-        attempt_count = matrix_calendar.reminder_deliveries.attempt_count + 1,
-        updated_at = clock_timestamp()
-      WHERE matrix_calendar.reminder_deliveries.state = 'pending'
-         OR matrix_calendar.reminder_deliveries.lease_expires_at <= clock_timestamp()
+      ON CONFLICT DO NOTHING
       RETURNING delivery_key, claim_token, attempt_count, lease_expires_at
     `;
-    const [row] = await awaitCancellableQuery(query, signal);
+    let [row] = await awaitCancellableQuery(insertQuery, signal);
+
+    if (!row) {
+      // Both delivery_key and the full firing tuple are unique. During
+      // concurrent first claims PostgreSQL can report the tuple constraint
+      // even though the deterministic delivery_key is identical. Treat any
+      // unique conflict as a signal to try the exact existing row, while
+      // allowing unrelated database errors to propagate from the INSERT.
+      const reclaimQuery = this.sql<DatabaseDeliveryClaim[]>`
+        UPDATE matrix_calendar.reminder_deliveries
+        SET state = 'claimed',
+            claim_token = ${claimToken},
+            lease_expires_at = clock_timestamp() + (${leaseDurationMs} * interval '1 millisecond'),
+            attempt_count = matrix_calendar.reminder_deliveries.attempt_count + 1,
+            updated_at = clock_timestamp()
+        WHERE delivery_key = ${deliveryKey}
+          AND room_id = ${identity.roomId}
+          AND calendar_id = ${identity.calendarId}
+          AND event_uid = ${identity.eventUid}
+          AND recurrence_id = ${identity.recurrenceId ?? ''}
+          AND alarm_uid = ${identity.alarmUid}
+          AND trigger_ordinal = ${identity.triggerOrdinal}
+          AND (
+            state = 'pending'
+            OR lease_expires_at <= clock_timestamp()
+          )
+        RETURNING delivery_key, claim_token, attempt_count, lease_expires_at
+      `;
+      [row] = await awaitCancellableQuery(reclaimQuery, signal);
+    }
 
     if (!row) {
       return undefined;

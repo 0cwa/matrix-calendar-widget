@@ -132,17 +132,23 @@ function createHarness(
     transactionId: string;
   }> = [];
   const sender: RoomReminderSchedulerSender = {
-    sendRoomMention: jest.fn(async (target, message, transactionId) => {
-      sent.push({ roomId: target, message, transactionId });
-    }),
+    sendRoomMention: jest.fn(
+      async (target, _calendarId, message, transactionId) => {
+        sent.push({ roomId: target, message, transactionId });
+      },
+    ),
   };
   const runtime = {
     getCurrentConfiguration: jest.fn(async () => ({
       roomCalendarBindings: [binding],
       applicationServiceSenderUserId: senderUserId,
+      roomCalendarAccessEnabled: true,
+      roomReminderDeliveryEnabled: true,
+      reminderStoreEnabled: true,
     })),
   };
   const matrixState = {
+    isRoomEncrypted: jest.fn(async () => false),
     getJoinedRoomMembers: jest.fn(async () => [senderUserId]),
     getPowerLevels: jest.fn(async () => ({
       users: { [senderUserId]: 100 },
@@ -214,7 +220,7 @@ describe('RoomReminderScheduler', () => {
     harness.candidates.set(config.eventUid, [firing]);
     let calls = 0;
     harness.sender.sendRoomMention = jest.fn(
-      async (target, message, transactionId) => {
+      async (target, _calendarId, message, transactionId) => {
         calls += 1;
         harness.sent.push({ roomId: target, message, transactionId });
         if (calls === 1) {
@@ -232,6 +238,20 @@ describe('RoomReminderScheduler', () => {
       `mcal-reminder-${createReminderDeliveryKey(firing.identity)}`,
       `mcal-reminder-${createReminderDeliveryKey(firing.identity)}`,
     ]);
+  });
+
+  it('does not read canonical calendar content for an encrypted room', async () => {
+    const harness = createHarness();
+    const config = configuration('encrypted-room');
+    await harness.store.upsertConfiguration(config);
+    harness.matrixState.isRoomEncrypted.mockResolvedValue(true);
+
+    const report = await harness.scheduler.runOnce();
+
+    expect(report.deliveriesDenied).toBe(1);
+    expect(harness.canonical.listDueCandidates).not.toHaveBeenCalled();
+    expect(harness.canonical.resolveCurrentDelivery).not.toHaveBeenCalled();
+    expect(harness.sent).toHaveLength(0);
   });
 
   it('aborts stalled canonical work and releases its claim before the lease expires', async () => {
@@ -289,6 +309,51 @@ describe('RoomReminderScheduler', () => {
     }
   });
 
+  it('propagates lifecycle cancellation and releases an in-flight claim', async () => {
+    const harness = createHarness();
+    const config = configuration('cancel-from-lifecycle');
+    const firing = candidate(config, '20261002T100000Z');
+    await harness.store.upsertConfiguration(config);
+    harness.candidates.set(config.eventUid, [firing]);
+
+    let resolveStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
+    let observedAbort = false;
+    harness.canonical.resolveCurrentDelivery = jest.fn(
+      async (_configuration, _identity, _window, signal) => {
+        resolveStarted();
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              observedAbort = true;
+              reject(new Error('canonical lookup aborted'));
+            },
+            { once: true },
+          );
+        });
+      },
+    );
+    const release = jest.spyOn(harness.store, 'releaseDeliveryClaim');
+    const markSent = jest.spyOn(harness.store, 'markDeliverySent');
+    const controller = new AbortController();
+
+    const scan = harness.scheduler.runOnce(controller.signal);
+    await started;
+    controller.abort();
+    const report = await scan;
+
+    expect(observedAbort).toBe(true);
+    expect(report.deliveryClaimsAcquired).toBe(1);
+    expect(report.deliveryClaimsReleased).toBe(1);
+    expect(report.deliveriesSent).toBe(0);
+    expect(harness.sent).toHaveLength(0);
+    expect(markSent).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it('round-robins firing identities so a claim cap does not starve later configs or occurrences', async () => {
     const harness = createHarness({ maxDeliveryClaimsPerRun: 1 });
     const firstConfig = configuration('alpha');
@@ -332,10 +397,16 @@ describe('RoomReminderScheduler', () => {
       .mockResolvedValueOnce({
         roomCalendarBindings: [binding],
         applicationServiceSenderUserId: senderUserId,
+        roomCalendarAccessEnabled: true,
+        roomReminderDeliveryEnabled: true,
+        reminderStoreEnabled: true,
       })
       .mockResolvedValueOnce({
         roomCalendarBindings: [],
         applicationServiceSenderUserId: senderUserId,
+        roomCalendarAccessEnabled: true,
+        roomReminderDeliveryEnabled: true,
+        reminderStoreEnabled: true,
       });
 
     const report = await harness.scheduler.runOnce();
@@ -343,7 +414,40 @@ describe('RoomReminderScheduler', () => {
     expect(report.deliveriesStale).toBe(1);
     expect(report.deliveryClaimsReleased).toBe(1);
     expect(harness.sent).toHaveLength(0);
-    expect(harness.matrixState.getJoinedRoomMembers).not.toHaveBeenCalled();
+    expect(harness.matrixState.getJoinedRoomMembers).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases a claim when the delivery gate is disabled after claim', async () => {
+    const harness = createHarness();
+    const config = configuration('gate-disabled-after-claim');
+    await harness.store.upsertConfiguration(config);
+    harness.candidates.set(config.eventUid, [
+      candidate(config, '20261002T100000Z'),
+    ]);
+    harness.runtime.getCurrentConfiguration = jest
+      .fn()
+      .mockResolvedValueOnce({
+        roomCalendarBindings: [binding],
+        applicationServiceSenderUserId: senderUserId,
+        roomCalendarAccessEnabled: true,
+        roomReminderDeliveryEnabled: true,
+        reminderStoreEnabled: true,
+      })
+      .mockResolvedValueOnce({
+        roomCalendarBindings: [],
+        applicationServiceSenderUserId: senderUserId,
+        roomCalendarAccessEnabled: true,
+        roomReminderDeliveryEnabled: false,
+        reminderStoreEnabled: true,
+      });
+
+    const report = await harness.scheduler.runOnce();
+
+    expect(report.deliveryClaimsAcquired).toBe(1);
+    expect(report.deliveriesDenied).toBe(1);
+    expect(report.deliveryClaimsReleased).toBe(1);
+    expect(harness.canonical.resolveCurrentDelivery).not.toHaveBeenCalled();
+    expect(harness.sent).toHaveLength(0);
   });
 
   it('releases a claim when the exact configuration was deleted after claiming', async () => {
@@ -374,7 +478,8 @@ describe('RoomReminderScheduler', () => {
     const report = await harness.scheduler.runOnce();
 
     expect(report.deliveriesDenied).toBe(1);
-    expect(report.deliveryClaimsReleased).toBe(1);
+    expect(report.deliveryClaimAttempts).toBe(0);
+    expect(harness.canonical.listDueCandidates).not.toHaveBeenCalled();
     expect(harness.sent).toHaveLength(0);
   });
 
@@ -469,6 +574,9 @@ describe('RoomReminderScheduler', () => {
         { roomId: '!other:example.org', calendarId: 'other' },
       ],
       applicationServiceSenderUserId: senderUserId,
+      roomCalendarAccessEnabled: true,
+      roomReminderDeliveryEnabled: true,
+      reminderStoreEnabled: true,
     }));
 
     const report = await harness.scheduler.runOnce();

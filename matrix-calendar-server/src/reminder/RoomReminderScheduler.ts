@@ -89,6 +89,9 @@ export type ResolvedReminderDelivery = Readonly<{
 export type ReminderSchedulerRuntimeConfiguration = Readonly<{
   roomCalendarBindings: unknown;
   applicationServiceSenderUserId?: string;
+  roomCalendarAccessEnabled: boolean;
+  roomReminderDeliveryEnabled: boolean;
+  reminderStoreEnabled: boolean;
 }>;
 
 export interface ReminderSchedulerRuntimeSource {
@@ -139,6 +142,7 @@ export interface RoomReminderSchedulerSender {
    */
   sendRoomMention(
     roomId: string,
+    calendarId: string,
     message: RoomMentionMessage,
     transactionId: string,
     signal: AbortSignal,
@@ -229,8 +233,9 @@ export class RoomReminderScheduler {
     this.options = validateOptions(options);
   }
 
-  async runOnce(): Promise<RoomReminderSchedulerReport> {
+  async runOnce(signal?: AbortSignal): Promise<RoomReminderSchedulerReport> {
     const report = createEmptyReport();
+    if (signal?.aborted) return report;
     if (this.running) {
       report.overlappingRunSkipped = 1;
       return report;
@@ -238,16 +243,19 @@ export class RoomReminderScheduler {
 
     this.running = true;
     try {
-      await this.scan(report);
+      await this.scan(report, signal);
     } catch {
-      report.schedulerFailures += 1;
+      if (!signal?.aborted) report.schedulerFailures += 1;
     } finally {
       this.running = false;
     }
     return report;
   }
 
-  private async scan(report: RoomReminderSchedulerReport): Promise<void> {
+  private async scan(
+    report: RoomReminderSchedulerReport,
+    signal?: AbortSignal,
+  ): Promise<void> {
     if (!this.dependencies.store.enabled) {
       report.storeDisabled = 1;
       return;
@@ -257,15 +265,27 @@ export class RoomReminderScheduler {
       performance.now() + ROOM_REMINDER_SCHEDULER_LIMITS.scanDeadlineMs;
     let initialRuntime: ReminderSchedulerRuntimeConfiguration;
     try {
-      initialRuntime = await this.runPreClaimOperation(scanDeadline, (signal) =>
-        this.dependencies.runtime.getCurrentConfiguration(signal),
+      initialRuntime = await this.runPreClaimOperation(
+        scanDeadline,
+        (signal) => this.dependencies.runtime.getCurrentConfiguration(signal),
+        signal,
       );
     } catch (error) {
+      if (signal?.aborted) return;
       if (error instanceof ReminderScanDeadline) {
         report.scanDeadlineReached = 1;
       } else {
         report.invalidRuntimeConfiguration = 1;
       }
+      return;
+    }
+
+    if (
+      initialRuntime.roomReminderDeliveryEnabled !== true ||
+      initialRuntime.roomCalendarAccessEnabled !== true ||
+      initialRuntime.reminderStoreEnabled !== true
+    ) {
+      report.deliveriesDenied += 1;
       return;
     }
 
@@ -322,6 +342,7 @@ export class RoomReminderScheduler {
     const configurations: RoomReminderConfiguration[] = [];
 
     for (const binding of orderedBindings) {
+      if (signal?.aborted) return;
       if (configurations.length >= this.options.maxConfigurationsPerRun) break;
       if (this.preClaimBudgetEnded(scanDeadline)) {
         report.scanDeadlineReached = 1;
@@ -333,18 +354,59 @@ export class RoomReminderScheduler {
       const after = this.configurationCursors.get(bindingKey);
       report.bindingsVisited += 1;
 
+      const senderUserId = initialRuntime.applicationServiceSenderUserId;
+      if (
+        typeof senderUserId !== 'string' ||
+        senderUserId.trim().length === 0
+      ) {
+        report.deliveriesDenied += 1;
+        continue;
+      }
       try {
-        const page = await this.runPreClaimOperation(scanDeadline, (signal) =>
-          this.dependencies.store.listConfigurationPage(
-            binding.roomId,
-            binding.calendarId,
-            after,
-            Math.min(
-              perBindingPageLimit,
-              this.options.maxConfigurationsPerRun - configurations.length,
+        const bindingAuthorized = await this.runPreClaimOperation(
+          scanDeadline,
+          async (signal) =>
+            (await authorizeRoomMentionDelivery(
+              {
+                roomId: binding.roomId,
+                calendarId: binding.calendarId,
+                applicationServiceSenderUserId: senderUserId,
+                configuredBindings: initialRuntime.roomCalendarBindings,
+              },
+              this.dependencies.matrixState,
+              signal,
+            )) !== undefined,
+          signal,
+        );
+        if (!bindingAuthorized) {
+          report.deliveriesDenied += 1;
+          continue;
+        }
+      } catch (error) {
+        if (signal?.aborted) return;
+        if (error instanceof ReminderScanDeadline) {
+          report.scanDeadlineReached = 1;
+          break;
+        }
+        report.deliveriesDenied += 1;
+        continue;
+      }
+
+      try {
+        const page = await this.runPreClaimOperation(
+          scanDeadline,
+          (signal) =>
+            this.dependencies.store.listConfigurationPage(
+              binding.roomId,
+              binding.calendarId,
+              after,
+              Math.min(
+                perBindingPageLimit,
+                this.options.maxConfigurationsPerRun - configurations.length,
+              ),
+              signal,
             ),
-            signal,
-          ),
+          signal,
         );
         const pageLimit = Math.min(
           perBindingPageLimit,
@@ -376,6 +438,7 @@ export class RoomReminderScheduler {
           });
         }
       } catch (error) {
+        if (signal?.aborted) return;
         if (error instanceof ReminderScanDeadline) {
           report.scanDeadlineReached = 1;
           break;
@@ -409,8 +472,10 @@ export class RoomReminderScheduler {
       report.deliveryClaimAttempts < this.options.maxDeliveryClaimsPerRun &&
       candidatePageCalls < MAX_CANDIDATE_PAGE_CALLS_PER_RUN
     ) {
+      if (signal?.aborted) return;
       let didWork = false;
       for (const state of orderedCandidateStates) {
+        if (signal?.aborted) return;
         if (
           report.candidatesInspected >= this.options.maxDueCandidatesPerRun ||
           report.deliveryClaimAttempts >=
@@ -434,16 +499,20 @@ export class RoomReminderScheduler {
         report.candidatePagesRead += 1;
         let page: readonly ReminderDueCandidate[];
         try {
-          page = await this.runPreClaimOperation(scanDeadline, (signal) =>
-            this.dependencies.canonical.listDueCandidates(
-              state.configuration,
-              window,
-              state.after,
-              1,
-              signal,
-            ),
+          page = await this.runPreClaimOperation(
+            scanDeadline,
+            (signal) =>
+              this.dependencies.canonical.listDueCandidates(
+                state.configuration,
+                window,
+                state.after,
+                1,
+                signal,
+              ),
+            signal,
           );
         } catch (error) {
+          if (signal?.aborted) return;
           state.exhausted = true;
           if (error instanceof ReminderScanDeadline) {
             report.scanDeadlineReached = 1;
@@ -484,14 +553,18 @@ export class RoomReminderScheduler {
         report.deliveryClaimAttempts += 1;
         let claim: ReminderDeliveryClaim | undefined;
         try {
-          claim = await this.runPreClaimOperation(scanDeadline, (signal) =>
-            this.dependencies.store.claimDelivery(
-              candidate.identity,
-              ROOM_REMINDER_SCHEDULER_LIMITS.deliveryLeaseMs,
-              signal,
-            ),
+          claim = await this.runPreClaimOperation(
+            scanDeadline,
+            (signal) =>
+              this.dependencies.store.claimDelivery(
+                candidate.identity,
+                ROOM_REMINDER_SCHEDULER_LIMITS.deliveryLeaseMs,
+                signal,
+              ),
+            signal,
           );
         } catch (error) {
+          if (signal?.aborted) return;
           if (error instanceof ReminderScanDeadline) {
             report.scanDeadlineReached = 1;
             break;
@@ -509,6 +582,7 @@ export class RoomReminderScheduler {
           window,
           scanDeadline,
           report,
+          signal,
         );
       }
 
@@ -526,6 +600,7 @@ export class RoomReminderScheduler {
     window: ReminderSchedulerWindow,
     scanDeadline: number,
     report: RoomReminderSchedulerReport,
+    signal?: AbortSignal,
   ): Promise<void> {
     const startedAt = performance.now();
     const workDeadline =
@@ -540,7 +615,16 @@ export class RoomReminderScheduler {
       const currentRuntime = await this.runPostClaimOperation(
         workDeadline,
         (signal) => this.dependencies.runtime.getCurrentConfiguration(signal),
+        signal,
       );
+      if (
+        currentRuntime.roomReminderDeliveryEnabled !== true ||
+        currentRuntime.roomCalendarAccessEnabled !== true ||
+        currentRuntime.reminderStoreEnabled !== true
+      ) {
+        report.deliveriesDenied += 1;
+        return;
+      }
       const binding = findCurrentBinding(
         currentRuntime,
         configuration.roomId,
@@ -555,29 +639,10 @@ export class RoomReminderScheduler {
         workDeadline,
         (signal) =>
           this.dependencies.store.hasConfiguration(configuration, signal),
+        signal,
       );
       if (!stillConfigured) {
         this.candidateCursors.delete(getConfigurationKey(configuration));
-        report.deliveriesStale += 1;
-        return;
-      }
-
-      const current = await this.runPostClaimOperation(workDeadline, (signal) =>
-        this.dependencies.canonical.resolveCurrentDelivery(
-          configuration,
-          candidate.identity,
-          window,
-          signal,
-        ),
-      );
-      if (
-        !current ||
-        !isDueAt(current.dueAt, window) ||
-        typeof current.body !== 'string' ||
-        current.body.trim().length === 0 ||
-        Buffer.byteLength(current.body, 'utf8') >
-          ROOM_REMINDER_SCHEDULER_LIMITS.maxMessageBytes
-      ) {
         report.deliveriesStale += 1;
         return;
       }
@@ -603,9 +668,36 @@ export class RoomReminderScheduler {
             this.dependencies.matrixState,
             signal,
           )) !== undefined,
+        signal,
       );
       if (!allowed) {
         report.deliveriesDenied += 1;
+        return;
+      }
+
+      // Room encryption and current sender permissions are checked before
+      // reading canonical event content. The sender adapter rechecks state
+      // immediately before its stable-transaction PUT.
+      const current = await this.runPostClaimOperation(
+        workDeadline,
+        (signal) =>
+          this.dependencies.canonical.resolveCurrentDelivery(
+            configuration,
+            candidate.identity,
+            window,
+            signal,
+          ),
+        signal,
+      );
+      if (
+        !current ||
+        !isDueAt(current.dueAt, window) ||
+        typeof current.body !== 'string' ||
+        current.body.trim().length === 0 ||
+        Buffer.byteLength(current.body, 'utf8') >
+          ROOM_REMINDER_SCHEDULER_LIMITS.maxMessageBytes
+      ) {
+        report.deliveriesStale += 1;
         return;
       }
 
@@ -618,13 +710,17 @@ export class RoomReminderScheduler {
         return;
       }
       const message = buildRoomMentionMessage(current.body);
-      await this.runPostClaimOperation(workDeadline, (signal) =>
-        this.dependencies.sender.sendRoomMention(
-          configuration.roomId,
-          message,
-          `mcal-reminder-${claim.deliveryKey}`,
-          signal,
-        ),
+      await this.runPostClaimOperation(
+        workDeadline,
+        (signal) =>
+          this.dependencies.sender.sendRoomMention(
+            configuration.roomId,
+            configuration.calendarId,
+            message,
+            `mcal-reminder-${claim.deliveryKey}`,
+            signal,
+          ),
+        signal,
       );
 
       const markedSent = await this.runPostClaimOperation(
@@ -635,6 +731,7 @@ export class RoomReminderScheduler {
             claim.claimToken,
             signal,
           ),
+        signal,
       );
       if (markedSent) {
         shouldRelease = false;
@@ -644,7 +741,7 @@ export class RoomReminderScheduler {
         report.deliveryFailures += 1;
       }
     } catch {
-      report.deliveryFailures += 1;
+      if (!signal?.aborted) report.deliveryFailures += 1;
     } finally {
       if (shouldRelease) {
         try {
@@ -679,22 +776,26 @@ export class RoomReminderScheduler {
   private async runPreClaimOperation<T>(
     scanDeadline: number,
     operation: (signal: AbortSignal) => Promise<T>,
+    parentSignal?: AbortSignal,
   ): Promise<T> {
     return runWithDeadline(
       scanDeadline,
       ROOM_REMINDER_SCHEDULER_LIMITS.operationTimeoutMs,
       operation,
+      parentSignal,
     );
   }
 
   private async runPostClaimOperation<T>(
     workDeadline: number,
     operation: (signal: AbortSignal) => Promise<T>,
+    parentSignal?: AbortSignal,
   ): Promise<T> {
     return runWithDeadline(
       workDeadline,
       ROOM_REMINDER_SCHEDULER_LIMITS.operationTimeoutMs,
       operation,
+      parentSignal,
     );
   }
 
@@ -983,7 +1084,9 @@ async function runWithDeadline<T>(
   deadline: number,
   operationMaximumMs: number,
   operation: (signal: AbortSignal) => Promise<T>,
+  parentSignal?: AbortSignal,
 ): Promise<T> {
+  if (parentSignal?.aborted) throw abortError();
   const remaining = deadline - performance.now();
   if (remaining <= 0) throw new ReminderScanDeadline();
 
@@ -991,6 +1094,7 @@ async function runWithDeadline<T>(
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
   let timedOut = false;
+  let parentAbortListener: (() => void) | undefined;
   const work = Promise.resolve().then(() => operation(controller.signal));
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
@@ -1003,9 +1107,23 @@ async function runWithDeadline<T>(
       );
     }, timeoutMs);
   });
+  const cancelled = parentSignal
+    ? new Promise<never>((_resolve, reject) => {
+        parentAbortListener = () => {
+          controller.abort();
+          reject(abortError());
+        };
+        parentSignal.addEventListener('abort', parentAbortListener, {
+          once: true,
+        });
+        if (parentSignal.aborted) parentAbortListener();
+      })
+    : undefined;
 
   try {
-    return await Promise.race([work, timeout]);
+    return await Promise.race(
+      cancelled ? [work, timeout, cancelled] : [work, timeout],
+    );
   } catch (error) {
     if (timedOut) {
       throw timeoutMs < remaining
@@ -1015,5 +1133,12 @@ async function runWithDeadline<T>(
     throw error;
   } finally {
     if (timer) clearTimeout(timer);
+    if (parentSignal && parentAbortListener) {
+      parentSignal.removeEventListener('abort', parentAbortListener);
+    }
   }
+}
+
+function abortError(): Error {
+  return new DOMException('The operation was aborted', 'AbortError');
 }

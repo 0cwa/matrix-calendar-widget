@@ -89,6 +89,38 @@ const PERSONAL_OPENID_MATRIX_ERROR_CODES = new Set([
   'M_USER_DEACTIVATED',
   'M_USER_IN_USE',
 ]);
+const ROOM_REMINDER_SETUP_STAGES = new Set([
+  'fixture-input-check',
+  'register-service-user',
+  'create-room',
+  'configure-calendar-target',
+  'mint-service-proof',
+  'create-calendar',
+  'seed-event',
+  'initialize-scheduler',
+]);
+const ROOM_REMINDER_SETUP_FAILURE_CATEGORIES = new Set([
+  'transport',
+  'http-status',
+  'invalid-response',
+  'other',
+]);
+const ROOM_REMINDER_MATRIX_ERROR_CODES = new Set([
+  'M_BAD_JSON',
+  'M_FORBIDDEN',
+  'M_INVALID_PARAM',
+  'M_INVALID_PASSWORD',
+  'M_INVALID_USERNAME',
+  'M_LIMIT_EXCEEDED',
+  'M_MISSING_PARAM',
+  'M_NOT_FOUND',
+  'M_THREEPID_AUTH_FAILED',
+  'M_UNAUTHORIZED',
+  'M_UNKNOWN',
+  'M_UNKNOWN_TOKEN',
+  'M_USER_DEACTIVATED',
+  'M_USER_IN_USE',
+]);
 const ROOM_APPSERVICE_LISTING_CHECKPOINTS = new Set([
   'room-one-response-status',
   'room-one-response-json-parsed',
@@ -277,6 +309,78 @@ export function formatPersonalOpenIdSetupMatrixErrorCode(stageContent) {
   return latestCode ? `personal-openid-matrix-error ${latestCode}\n` : '';
 }
 
+export function formatRoomReminderSetupStart(stageContent) {
+  const started =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === 'room-reminder-setup-start');
+  return `room-reminder-setup-start ${started ? 'reached' : 'not-reached'}\n`;
+}
+
+export function formatRoomReminderSetupStatus(stageContent) {
+  const completed =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === 'room-reminder-setup-complete');
+  return `room-reminder-setup ${completed ? 'complete' : 'not-reached'}\n`;
+}
+
+export function formatRoomReminderSetupStage(stageContent) {
+  let latestStage;
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const candidate = line.trim().replace(/^room-reminder-setup-stage-/, '');
+      if (ROOM_REMINDER_SETUP_STAGES.has(candidate)) latestStage = candidate;
+    }
+  }
+  return latestStage ? `room-reminder-setup-stage ${latestStage}\n` : '';
+}
+
+export function formatRoomReminderSetupFailure(stageContent) {
+  let latestCategory;
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const candidate = line
+        .trim()
+        .replace(/^room-reminder-setup-failure-/, '');
+      if (ROOM_REMINDER_SETUP_FAILURE_CATEGORIES.has(candidate)) {
+        latestCategory = candidate;
+      }
+    }
+  }
+  return latestCategory
+    ? `room-reminder-setup-failure ${latestCategory}\n`
+    : '';
+}
+
+export function formatRoomReminderSetupHttpStatus(stageContent) {
+  let latestStatus;
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const match = line.trim().match(/^room-reminder-http-status-(\d{3})$/);
+      if (match && Number(match[1]) >= 400 && Number(match[1]) <= 599) {
+        latestStatus = match[1];
+      }
+    }
+  }
+  return latestStatus ? `room-reminder-http-status ${latestStatus}\n` : '';
+}
+
+export function formatRoomReminderSetupMatrixErrorCode(stageContent) {
+  let latestCode;
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const candidate = line.trim().replace(/^room-reminder-matrix-error-/, '');
+      if (ROOM_REMINDER_MATRIX_ERROR_CODES.has(candidate) && candidate) {
+        latestCode = candidate;
+      }
+    }
+  }
+  return latestCode ? `room-reminder-matrix-error ${latestCode}\n` : '';
+}
+
 export function formatRoomAppServiceListingCheckpoint(stageContent) {
   let latestCheckpoint;
   if (typeof stageContent === 'string') {
@@ -326,6 +430,12 @@ function emitContractPhase(stagePath) {
     process.stdout.write(
       formatPersonalOpenIdSetupMatrixErrorCode(stageContent),
     );
+    process.stdout.write(formatRoomReminderSetupStart(stageContent));
+    process.stdout.write(formatRoomReminderSetupStatus(stageContent));
+    process.stdout.write(formatRoomReminderSetupStage(stageContent));
+    process.stdout.write(formatRoomReminderSetupFailure(stageContent));
+    process.stdout.write(formatRoomReminderSetupHttpStatus(stageContent));
+    process.stdout.write(formatRoomReminderSetupMatrixErrorCode(stageContent));
     process.stdout.write(formatRoomAppServiceSetupStart(stageContent));
     process.stdout.write(formatRoomAppServiceSetupStatus(stageContent));
     process.stdout.write(formatRoomAppServiceSetupStage(stageContent));

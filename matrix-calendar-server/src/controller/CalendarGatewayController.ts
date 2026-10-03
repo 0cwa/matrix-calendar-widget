@@ -71,6 +71,7 @@ import { MatrixAuthGuard } from '../guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
+import { calendarResourceIdFromHref } from '../service/CalendarCommandParser';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
 import {
   resolveRoomCalendarBinding,
@@ -80,6 +81,11 @@ import {
   RoomCalendarCalDavAccess,
   RoomCalendarTarget,
 } from '../service/RoomCalendarCalDavAccess';
+import {
+  RoomCalendarEventAuditAction,
+  RoomCalendarEventAuditContext,
+  RoomCalendarEventAuditService,
+} from '../service/RoomCalendarEventAuditService';
 import {
   RoomCalendarEventOperationError,
   RoomCalendarEventOperations,
@@ -101,6 +107,9 @@ export class CalendarGatewayController {
     @Optional()
     @Inject(RoomCalendarEventOperations)
     private readonly roomCalendarEventOperations: RoomCalendarEventOperations = new RoomCalendarEventOperations(),
+    @Optional()
+    @Inject(RoomCalendarEventAuditService)
+    private readonly roomCalendarEventAuditService?: RoomCalendarEventAuditService,
   ) {}
 
   @Get('context')
@@ -710,6 +719,14 @@ export class CalendarGatewayController {
           input,
         ),
       );
+      await this.recordRoomCalendarAction(
+        userContext,
+        roomTarget,
+        principal.calendarUrl,
+        result.event.id,
+        'created',
+        result.event.title,
+      );
       return new CalendarGatewayEventDto(result.event, result.etag);
     }
 
@@ -782,6 +799,14 @@ export class CalendarGatewayController {
           expectedEtag,
           patch ?? {},
         ),
+      );
+      await this.recordRoomCalendarAction(
+        userContext,
+        roomTarget,
+        principal.calendarUrl,
+        result.event.id,
+        'updated',
+        result.event.title,
       );
       return new CalendarGatewayEventDto(result.event, result.etag);
     }
@@ -892,6 +917,13 @@ export class CalendarGatewayController {
           expectedEtag,
         ),
       );
+      await this.recordRoomCalendarAction(
+        userContext,
+        roomTarget,
+        principal.calendarUrl,
+        requiredEventId,
+        'deleted',
+      );
       return;
     }
 
@@ -969,6 +1001,39 @@ export class CalendarGatewayController {
     }
 
     return this.resolveRoomTarget(requiredRoomId, requestedCalendarId);
+  }
+
+  private async recordRoomCalendarAction(
+    userContext: IUserContext,
+    target: RoomCalendarTarget,
+    collectionHref: string,
+    eventHref: string,
+    action: RoomCalendarEventAuditAction,
+    title?: string,
+  ): Promise<void> {
+    const auditService = this.roomCalendarEventAuditService;
+    if (!auditService) {
+      return;
+    }
+
+    const resourceId = calendarResourceIdFromHref(eventHref, collectionHref);
+    if (!resourceId) {
+      return;
+    }
+
+    const context: RoomCalendarEventAuditContext = {
+      roomId: target.roomId,
+      calendarId: target.calendarId,
+      actorUserId: userContext.userId,
+      action,
+      resourceId,
+      ...(title === undefined ? {} : { title }),
+    };
+    try {
+      await auditService.record(context);
+    } catch {
+      // CalDAV already committed. Matrix audit delivery is best effort.
+    }
   }
 
   private resolveRoomTarget(

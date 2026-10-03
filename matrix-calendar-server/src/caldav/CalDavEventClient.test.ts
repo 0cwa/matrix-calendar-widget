@@ -115,6 +115,99 @@ END:VCALENDAR</c:calendar-data>
     expect(callerRange).toEqual(originalCallerRange);
   });
 
+  it('uses a collection-scoped exact UID query and bounds ambiguity results', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(
+        new Response(
+          multistatus(`
+            <d:response>
+              <d:href>/alice/team/event%201.ics</d:href>
+              <d:propstat><d:prop><d:getetag>"one"</d:getetag><c:calendar-data>BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:event&amp;one@example.test
+END:VEVENT
+END:VCALENDAR</c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+            </d:response>
+          `),
+          { status: 207 },
+        ),
+      );
+    const controller = new AbortController();
+    const result = await new CalDavEventClient(
+      credentialProvider,
+      fetchMock,
+    ).listEventsByUid(
+      'https://radicale.example.test/alice/team/',
+      'event&one@example.test',
+      controller.signal,
+    );
+
+    expect(result).toEqual([
+      {
+        href: 'https://radicale.example.test/alice/team/event%201.ics',
+        etag: '"one"',
+        icalendar: expect.stringContaining('UID:event&one@example.test'),
+      },
+    ]);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://radicale.example.test/alice/team/');
+    expect(init?.method).toBe('REPORT');
+    expect(init?.signal).toBe(controller.signal);
+    expect(new Headers(init?.headers).get('Depth')).toBe('1');
+    expect(init?.body).toContain('<C:prop-filter name="UID">');
+    expect(init?.body).toContain('collation="i;octet" match-type="equals"');
+    expect(init?.body).toContain('event&amp;one@example.test');
+    expect(init?.body).not.toContain('time-range');
+  });
+
+  it.each([
+    [
+      'a resource outside the collection',
+      '<d:href>/alice/private/event.ics</d:href>',
+      'invalid-response',
+    ],
+    [
+      'a response with a document type declaration',
+      '<!DOCTYPE multistatus [<!ENTITY leaked "secret">]><d:href>/alice/team/event.ics</d:href>',
+      'invalid-response',
+    ],
+  ])('rejects %s', async (_case, responseFragment, code) => {
+    const responseBody = responseFragment.startsWith('<!DOCTYPE')
+      ? `<?xml version="1.0"?>\n${responseFragment}<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:propstat><d:prop><d:getetag>"etag"</d:getetag><c:calendar-data>BEGIN:VCALENDAR\nEND:VCALENDAR</c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>`
+      : multistatus(
+          `<d:response>${responseFragment}<d:propstat><d:prop><d:getetag>"etag"</d:getetag><c:calendar-data>BEGIN:VCALENDAR\nEND:VCALENDAR</c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`,
+        );
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValue(new Response(responseBody, { status: 207 }));
+
+    await expect(
+      new CalDavEventClient(credentialProvider, fetchMock).listEventsByUid(
+        'https://radicale.example.test/alice/team/',
+        'event@example.test',
+      ),
+    ).rejects.toMatchObject({ code, method: 'REPORT' });
+  });
+
+  it('does not start a CalDAV request for an already aborted operation', async () => {
+    const fetchMock = jest.fn<
+      ReturnType<typeof fetch>,
+      Parameters<typeof fetch>
+    >();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      new CalDavEventClient(credentialProvider, fetchMock).listEventsByUid(
+        'https://radicale.example.test/alice/team/',
+        'event@example.test',
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       'ETag',
