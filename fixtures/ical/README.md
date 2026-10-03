@@ -12,6 +12,7 @@ These fixtures are deliberately small and human-readable. They define interopera
 | `recurrence-floating-override.ics`             | Floating RECURRENCE-ID and detached DTSTART duration      |
 | `recurrence-utc.ics`                           | UTC RDATE and detached RECURRENCE-ID values               |
 | `alarm.ics`                                    | standard VALARM                                           |
+| `alarm-uid.ics`                                | stable RFC 9074 VALARM UID preservation                   |
 | `attendees.ics`                                | organizer, attendee roles and PARTSTAT                    |
 | `interoperable-properties.ics`                 | revision metadata and interoperable properties            |
 | `unknown-properties.ics`                       | unknown/vendor properties that must survive round-trip    |

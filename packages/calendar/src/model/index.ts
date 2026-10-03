@@ -33,6 +33,7 @@ export type {
   CalendarEventAlarmRemoval,
   CalendarEventDateTime,
   CalendarEventDisplayAlarm,
+  CalendarEventDisplayAlarmInput,
   CalendarEventDuration,
   CalendarEventId,
   CalendarEventInput,
