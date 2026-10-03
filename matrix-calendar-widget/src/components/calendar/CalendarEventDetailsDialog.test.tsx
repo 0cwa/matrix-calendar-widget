@@ -25,6 +25,7 @@ import userEvent from '@testing-library/user-event';
 import { Settings } from 'luxon';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
+import { axe } from 'vitest-axe';
 import { CalendarRepositoryProvider } from '../../calendar';
 import {
   CalendarEventDetailsDialog,
@@ -100,6 +101,22 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventDetailsDialog />', () => {
+  it('names the dialog after the event and has no accessibility violations', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [event],
+    });
+
+    render(<CalendarEventDetailsDialog event={event} onClose={vi.fn()} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    expect(
+      screen.getByRole('dialog', { name: 'Planning' }),
+    ).toBeInTheDocument();
+    expect(await axe(document.body)).toHaveNoViolations();
+  });
+
   it('formats floating detail times in the viewer local zone', () => {
     const originalZone = Settings.defaultZone;
     Settings.defaultZone = 'Europe/Stockholm';

@@ -414,6 +414,9 @@ addresses from Matrix room membership.
 ## M8 — Hardening and release
 
 - [ ] Responsive/a11y pass across narrow Element panels and full-screen widget.
+  - [x] Add current calendar grid/list/details keyboard, focus, accessible-name,
+        and axe regressions. Actual browser layout and client embedding remain
+        unverified; see `docs/calendar-client-validation.md`.
 - [x] Source-based threat model and independent security review of its current
       boundary claims. Residual risks and deployment acceptance gates remain
       tracked in `docs/threat-model.md`; this is not a penetration test.
