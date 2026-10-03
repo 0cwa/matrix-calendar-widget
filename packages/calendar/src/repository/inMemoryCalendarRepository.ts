@@ -572,11 +572,7 @@ function cloneCalendarEventPatch(
             action: 'add-period',
             value: {
               type: 'period',
-              timing: {
-                type: 'end',
-                start: cloneCalendarEventDateTime(rdate.value.timing.start),
-                end: cloneCalendarEventDateTime(rdate.value.timing.end),
-              },
+              timing: cloneRecurrenceTiming(rdate.value.timing),
             },
           },
         };
