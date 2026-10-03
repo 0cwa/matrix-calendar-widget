@@ -107,6 +107,21 @@ const knownCases = [
     'returns only the valid in-base collection from real Radicale discovery',
     'calendar-diagnostics-safe-collection-discovery',
   ],
+  [
+    'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+    'lists only the exact room binding through the appservice principal',
+    'room-appservice-exact-binding',
+  ],
+  [
+    'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+    'binds the Radicale OpenID subject to the configured service user, not the room sender',
+    'room-appservice-subject-binding',
+  ],
+  [
+    'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+    'forbids a cross-room calendar before appservice proof or CalDAV I/O',
+    'room-appservice-cross-room-denial',
+  ],
 ];
 
 test('reports only constant IDs and closed statuses for allowlisted cases', () => {
@@ -209,6 +224,32 @@ test('counts a failing suite at an unknown path without exposing the path', () =
   assert.deepEqual(safeContractCaseStatusLines(testReport), [
     'unmapped-failure count=1',
   ]);
+});
+
+test('fails closed for an unknown RoomAppService assertion without exposing it', () => {
+  const testReport = {
+    testResults: [
+      {
+        name: suitePath(
+          'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+        ),
+        status: 'failed',
+        assertionResults: [
+          {
+            title: 'private-room-contract-title',
+            status: 'failed',
+            failureMessages: ['private-room-contract-detail'],
+          },
+        ],
+      },
+    ],
+  };
+
+  const output = safeContractCaseStatusLines(testReport).join('\n');
+
+  assert.equal(output, 'unmapped-failure count=1');
+  assert.equal(output.includes('private-room-contract-title'), false);
+  assert.equal(output.includes('private-room-contract-detail'), false);
 });
 
 test('fails closed when the Jest report has no test results array', () => {
