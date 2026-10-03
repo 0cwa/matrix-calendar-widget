@@ -38,6 +38,10 @@ import { CalendarGatewayController } from '../../src/controller/CalendarGatewayC
 import { MatrixAuthGuard } from '../../src/guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../../src/guard/MatrixRoomMembershipGuard';
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
+import {
+  CalendarCommandService,
+  CalendarCommandTranslation,
+} from '../../src/service/CalendarCommandService';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventOperations } from '../../src/service/RoomCalendarEventOperations';
@@ -72,7 +76,7 @@ let roomIds: string[];
 let calendarIds: string[];
 let nonmemberRoomId: string;
 let activeCalDavRequests:
-  | Array<{ method: string; pathname: string }>
+  | Array<{ method: string; pathname: string; hasIfMatch: boolean }>
   | undefined;
 const serviceOpenIdTokens: string[] = [];
 const serviceUserAccessTokens: string[] = [];
@@ -127,7 +131,9 @@ type RoomAppServiceCase =
   | 'subject-binding'
   | 'cross-room-denial'
   | 'event-write'
-  | 'unauthorized-write';
+  | 'unauthorized-write'
+  | 'bot-command-write'
+  | 'bot-command-denial';
 
 function captureGatewayLog(...values: unknown[]): void {
   gatewayLogLines.push(values.map(String).join(' '));
@@ -203,6 +209,27 @@ const matrixClient = {
           roomCalendarBindings: testConfiguration.room_calendar_bindings,
           servicePrincipalUserId: serviceUserId,
         }),
+    },
+    {
+      provide: CalendarCommandService,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        authorizationFactory: MatrixCalendarAuthorizationFactory,
+        access: RoomCalendarCalDavAccess,
+        operations: RoomCalendarEventOperations,
+      ) =>
+        new CalendarCommandService(
+          appConfig,
+          authorizationFactory,
+          access,
+          operations,
+        ),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        MatrixCalendarAuthorizationFactory,
+        ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
+        RoomCalendarEventOperations,
+      ],
     },
     MatrixAuthMiddleware,
     MatrixAuthGuard,
@@ -337,6 +364,7 @@ describeContract('room appservice proof against real Radicale', () => {
         activeCalDavRequests?.push({
           method: init?.method ?? 'GET',
           pathname: parsedUrl.pathname,
+          hasIfMatch: new Headers(init?.headers).has('If-Match'),
         });
       }
       const response = await nativeFetch(input, init);
@@ -595,6 +623,99 @@ describeContract('room appservice proof against real Radicale', () => {
     assertLogsOmitSecrets();
   });
 
+  it('creates, lists, reads, and deletes an event through the room bot commands', async () => {
+    markRoomAppServiceCaseStarted('bot-command-write');
+    const commandService = app.get(CalendarCommandService);
+    const sender = await matrixUserIdForAccessToken(actorAccessToken);
+    const start = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 16);
+    const end = new Date(Date.now() + 25 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 16);
+    const title = 'Bot room contract event';
+    const createdText = await commandService.execute(
+      roomIds[0],
+      sender,
+      `create ${start} ${end} "${title}" --tz UTC`,
+      translateCalendarCommand,
+    );
+    const resourceIdMatch = createdText.match(
+      /^Created event ([A-Za-z0-9._@+-]+\.ics)\.$/,
+    );
+    expect(resourceIdMatch).not.toBeNull();
+    const resourceId = resourceIdMatch?.[1];
+    if (!resourceId) throw new Error('Bot command did not create an event');
+    expect(activeCalDavRequests?.some(({ method }) => method === 'PUT')).toBe(
+      true,
+    );
+
+    activeCalDavRequests = [];
+    const upcomingText = await commandService.execute(
+      roomIds[0],
+      sender,
+      'upcoming 10 --tz UTC',
+      translateCalendarCommand,
+    );
+    expect(upcomingText).toContain(resourceId);
+    expect(upcomingText).toContain(title);
+    expect(
+      activeCalDavRequests?.some(({ method }) => method === 'REPORT'),
+    ).toBe(true);
+
+    activeCalDavRequests = [];
+    const eventText = await commandService.execute(
+      roomIds[0],
+      sender,
+      `event ${resourceId} --tz UTC`,
+      translateCalendarCommand,
+    );
+    expect(eventText).toContain(resourceId);
+    expect(eventText).toContain(title);
+    expect(eventText).not.toContain('BEGIN:VCALENDAR');
+    expect(activeCalDavRequests?.some(({ method }) => method === 'GET')).toBe(
+      true,
+    );
+
+    activeCalDavRequests = [];
+    const deletedText = await commandService.execute(
+      roomIds[0],
+      sender,
+      `delete ${resourceId}`,
+      translateCalendarCommand,
+    );
+    expect(deletedText).toBe(`Deleted event ${resourceId}.`);
+    expect(
+      activeCalDavRequests?.some(
+        ({ method, hasIfMatch }) => method === 'DELETE' && hasIfMatch,
+      ),
+    ).toBe(true);
+    expect(
+      activeCalDavRequests?.every(({ pathname }) =>
+        pathname.startsWith('/_matrix_calendar_service/contract-room-one/'),
+      ),
+    ).toBe(true);
+    assertLogsOmitSecrets();
+  }, 30000);
+
+  it('denies an unauthorized room bot command before proof or CalDAV I/O', async () => {
+    markRoomAppServiceCaseStarted('bot-command-denial');
+    const commandService = app.get(CalendarCommandService);
+    const sender = await matrixUserIdForAccessToken(actorAccessToken);
+    activeCalDavRequests = [];
+    const proofCountBefore = serviceOpenIdTokens.length;
+    const response = await commandService.execute(
+      nonmemberRoomId,
+      sender,
+      'create 2026-10-04T12:00 2026-10-04T13:00 "Must not be written" --tz UTC',
+      translateCalendarCommand,
+    );
+    expect(response).toBe('Not allowed.');
+    expect(activeCalDavRequests).toEqual([]);
+    expect(serviceOpenIdTokens).toHaveLength(proofCountBefore);
+    assertLogsOmitSecrets();
+  });
+
   async function gatewayRequest(target: {
     roomId: string;
     calendarId: string;
@@ -819,6 +940,33 @@ function eventCalendar(uid: string, summary: string): string {
     '',
   ].join('\r\n');
 }
+
+const calendarCommandTranslations: Record<string, string> = {
+  'calendarCommandErrors.notAllowed': 'Not allowed.',
+  'calendarCommandReplies.descriptionLabel': 'Description',
+  'calendarCommandReplies.eventDetails': 'Calendar event:',
+  'calendarCommandReplies.idLabel': 'Resource ID',
+  'calendarCommandReplies.noUpcoming': 'No upcoming events.',
+  'calendarCommandReplies.timeUnavailable': 'Time unavailable',
+  'calendarCommandReplies.titleLabel': 'Title',
+  'calendarCommandReplies.untitled': '(untitled)',
+  'calendarCommandReplies.upcoming': 'Upcoming events:',
+  'calendarCommandReplies.upcomingPartial': 'Some events are unavailable.',
+  'calendarCommandReplies.whenLabel': 'When',
+};
+
+const translateCalendarCommand: CalendarCommandTranslation = (
+  key,
+  parameters,
+) => {
+  if (key === 'calendarCommandReplies.eventCreated') {
+    return `Created event ${String(parameters?.resourceId)}.`;
+  }
+  if (key === 'calendarCommandReplies.eventDeleted') {
+    return `Deleted event ${String(parameters?.resourceId)}.`;
+  }
+  return calendarCommandTranslations[key] ?? key;
+};
 
 async function matrixJson<T>(
   path: string,

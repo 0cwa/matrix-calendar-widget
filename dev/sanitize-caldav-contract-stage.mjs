@@ -35,6 +35,8 @@ const ROOM_APPSERVICE_CASES = new Set([
   'cross-room-denial',
   'event-write',
   'unauthorized-write',
+  'bot-command-write',
+  'bot-command-denial',
 ]);
 const ROOM_APPSERVICE_MATRIX_ERROR_CODES = new Set([
   'M_BAD_JSON',

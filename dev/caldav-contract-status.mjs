@@ -82,6 +82,14 @@ const CASE_IDS = new Map([
     'room-appservice-unauthorized-write',
   ],
   [
+    'room-appservice-radicale-contract\0creates, lists, reads, and deletes an event through the room bot commands',
+    'room-appservice-bot-command-write',
+  ],
+  [
+    'room-appservice-radicale-contract\0denies an unauthorized room bot command before proof or CalDAV I/O',
+    'room-appservice-bot-command-denial',
+  ],
+  [
     'membership-guard\0denies a nonmember before authorization, credential construction, or CalDAV',
     'membership-nonmember-denial',
   ],

@@ -123,6 +123,16 @@ const knownCases = [
     'room-appservice-cross-room-denial',
   ],
   [
+    'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+    'creates, lists, reads, and deletes an event through the room bot commands',
+    'room-appservice-bot-command-write',
+  ],
+  [
+    'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+    'denies an unauthorized room bot command before proof or CalDAV I/O',
+    'room-appservice-bot-command-denial',
+  ],
+  [
     'matrix-calendar-server/src/controller/RoomCalendarTarget.test.ts',
     'authorizes and resolves the exact binding before requesting a proof or CalDAV',
     'room-calendar-target-exact-binding',

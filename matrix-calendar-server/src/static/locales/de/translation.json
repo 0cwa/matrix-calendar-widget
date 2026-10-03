@@ -14,13 +14,41 @@
       }
     }
   },
+  "calendarCommandErrors": {
+    "badSyntax": "Dieser Kalenderbefehl wird nicht unterstützt. Nutze !calendar help.",
+    "conflict": "Der Termin wurde geändert, bevor der Befehl abgeschlossen war. Führe !calendar upcoming aus und versuche es erneut.",
+    "disabled": "Der Raumkalenderzugriff ist für diesen Raum nicht aktiviert.",
+    "failed": "Der Kalenderbefehl konnte nicht abgeschlossen werden. Versuche es später erneut.",
+    "notAllowed": "Deine aktuelle Mitgliedschaft oder Berechtigungsstufe erlaubt diesen Kalenderbefehl nicht.",
+    "notFound": "Es wurde kein passender Kalendertermin gefunden.",
+    "unsafe": "Diese Kalenderressource kann nicht sicher geändert werden.",
+    "writesDisabled": "Das Erstellen und Löschen von Kalenderterminen ist auf diesem Server nicht aktiviert."
+  },
   "calendarCommandHelp": [
-    "<p>Kalenderbefehle:</p>",
+    "<p>Raumkalender-Befehle (sofern der Server sie für diesen Raum aktiviert hat):</p>",
     "<ul>",
     "<li><code>!calendar help</code> (Diese Hilfe anzeigen.)</li>",
+    "<li><code>!calendar upcoming [count] [--tz IANA]</code> (Bis zu 10 Termine der nächsten 30 Tage anzeigen; Standard: 5. Zeitzone standardmäßig UTC.)</li>",
+    "<li><code>!calendar event &lt;resource-id&gt; [--tz IANA]</code> (Einen Termin anzeigen. Die Ressourcen-ID wird von <code>upcoming</code> angezeigt.)</li>",
+    "<li><code>!calendar create &lt;YYYY-MM-DDTHH:mm&gt; &lt;YYYY-MM-DDTHH:mm&gt; &quot;&lt;title&gt;&quot; [--description &quot;&lt;text&gt;&quot;] [--tz IANA]</code> (Einen einzelnen Termin mit lokaler Uhrzeit erstellen; Titel und optionale Beschreibung in Anführungszeichen setzen. Standardzeitzone ist UTC. Nicht existierende oder doppeldeutige Uhrzeiten bei der Zeitumstellung werden abgelehnt.)</li>",
+    "<li><code>!calendar delete &lt;resource-id&gt;</code> (Den gesamten Termin samt Serie löschen; <code>cancel</code> ist ein Alias. Erfordert Schreibrechte für Kalendertermine im Raum.)</li>",
     "</ul>",
-    "<p>Für die vollständige Kalenderverwaltung nutze das Matrix Calendar Widget in Clients, die Widgets unterstützen.</p>"
+    "<p>Die Befehle benötigen einen serverseitig konfigurierten Raumkalender. Erstellen und Löschen benötigen zusätzlich die serverseitige Schreibfreigabe und aktuelle Schreibrechte im Raum. Für weitere Kalenderfunktionen nutze das Matrix Calendar Widget in Clients, die Widgets unterstützen.</p>"
   ],
+  "calendarCommandReplies": {
+    "descriptionLabel": "Beschreibung",
+    "eventCreated": "Termin {{resourceId}} wurde erstellt.",
+    "eventDeleted": "Termin {{resourceId}} samt vollständiger Serie wurde gelöscht.",
+    "eventDetails": "Kalendertermin:",
+    "idLabel": "Ressourcen-ID",
+    "noUpcoming": "In den nächsten 30 Tagen wurden keine bevorstehenden Termine gefunden.",
+    "timeUnavailable": "Uhrzeit nicht verfügbar",
+    "titleLabel": "Titel",
+    "untitled": "(ohne Titel)",
+    "upcoming": "Bevorstehende Termine der nächsten 30 Tage:",
+    "upcomingPartial": "Einige Termine konnten nicht angezeigt werden. Prüfe alle Ergebnisse im Kalender-Widget.",
+    "whenLabel": "Wann"
+  },
   "commandErrors": {
     "badCommand": "Der Hilfe-Befehl ist leider nicht richtig. Schreibe <code>{{trigger}} help</code>",
     "badLanguageCode": "Die ausgewählte Sprache wird nicht unterstützt",
