@@ -53,8 +53,6 @@ export class CommandService {
     roomId: string,
     event: IRoomEvent<MessageEventContent>,
   ) {
-    if (!this.appConfig.enable_welcome_workflow) return;
-
     const { content: { msgtype = '' } = {} } = event;
     if (msgtype !== 'm.text') return;
 
@@ -73,6 +71,12 @@ export class CommandService {
 
     const triggered = triggers.find((trigger) => body.startsWith(trigger));
     if (!triggered) return;
+    if (
+      !this.appConfig.enable_welcome_workflow &&
+      triggered !== CALENDAR_TRIGGER
+    ) {
+      return;
+    }
 
     const withoutTrigger = body.substring(triggered.length).trim();
     const args: string[] =
