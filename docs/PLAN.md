@@ -335,6 +335,10 @@ DST regression or recurrence-editing criteria above.
         an explicit successful-login burst allowance; production limits are
         unchanged. Mutations, room diagnostics, and delivery remain disabled.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
+  - [x] Resolve stable DISPLAY alarm identity against already-fetched canonical
+        iCalendar data, with typed DATE/floating/UTC/TZID recurrence keys and
+        fail-closed malformed/duplicate identity checks. This pure helper does
+        no I/O and does not enable settings, scheduling, or delivery.
 - [ ] First reminder delivery target: permission-checked room-wide
       notifications using standard `m.mentions.room: true`; check room-mention
       permission again at delivery time (ADR007/ADR019).
