@@ -24,6 +24,7 @@ import {
   type CalendarEventListDiagnosticReason,
 } from '@matrix-calendar-widget/calendar';
 import {
+  BadGatewayException,
   BadRequestException,
   Body,
   ConflictException,
@@ -973,6 +974,8 @@ export class CalendarGatewayController {
   ): CalDavEventClient {
     return new CalDavEventClient(
       this.credentialProviderFactory.forRequest(userContext, openIdCredential),
+      fetch,
+      this.appConfig.caldav_max_event_response_bytes,
     );
   }
 
@@ -982,6 +985,8 @@ export class CalendarGatewayController {
   ): CalDavEventClient {
     return new CalDavEventClient(
       this.credentialProviderFactory.forPrincipal(userId, openIdCredential),
+      fetch,
+      this.appConfig.caldav_max_event_response_bytes,
     );
   }
 
@@ -1159,6 +1164,18 @@ export class CalendarGatewayController {
         throw new BadRequestException({
           code: 'invalid-range',
           message: error.message,
+        });
+      }
+
+      if (
+        error instanceof CalDavEventTransportError &&
+        ['redirected', 'response-read-failed', 'response-too-large'].includes(
+          error.code,
+        )
+      ) {
+        throw new BadGatewayException({
+          code: 'caldav-upstream-error',
+          message: 'CalDAV event request failed',
         });
       }
 

@@ -55,6 +55,13 @@ HOMESERVER_URL=https://synapse.example.com
 # the base URL of the Radicale/CalDAV service
 RADICALE_URL=https://calendar.example.com
 
+# optional - maximum streamed REPORT/GET response size for CalDAV event requests
+# defaults to 16777216 bytes (16 MiB); valid range is 1 through 67108864 bytes (64 MiB)
+# MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES=16777216
+
+# The gateway's JSON and urlencoded HTTP request bodies are capped at 100kb.
+# This is fixed to the existing Express parser default and is not configurable.
+
 # optional server-managed room-to-calendar bindings (JSON array)
 # Each room ID and app-owned calendar ID must be canonical and unique.
 # ROOM_CALENDAR_BINDINGS='[{"roomId":"!room-hash:example.org","calendarId":"team-calendar"}]'
