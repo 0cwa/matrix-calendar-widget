@@ -124,6 +124,11 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
       ordinals, and duplicate parts remain opaque and preserved.
   - [x] Extend the same plain weekday subset beyond INTERVAL=2 to bounded
         interval/count/typed-UNTIL controls, with DST and count-order coverage.
+- [x] Edit start/end timing for one supported selected occurrence using its
+      original typed RECURRENCE-ID and one ETag-protected resource update.
+      Preserve master and sibling metadata; reject ambiguous recurrence and
+      any same-event VALARM. The editor requires an explicit instance/series
+      choice and displays preflight or conflict feedback (ADR029).
 - [ ] Extend RRULE editing to additional recurrence rule parts and patterns.
 - [x] Skip and restore one projected supported occurrence by adding or
       removing only its matching EXDATE. Use the original recurrence identity
@@ -154,7 +159,7 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
         duration atomically, preserving its representation and endpoint type/
         timezone. Reject stale, duplicate, malformed, or colliding values;
         preserve siblings and exact-source supported no-ops.
-- [ ] RECURRENCE-ID instance override editing.
+- [ ] Broader RECURRENCE-ID instance property editing beyond timing.
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
   - [x] Verify daily `Europe/Stockholm` recurrence viewed in
@@ -176,7 +181,10 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
       outside the supported editor.
 - [ ] Attachments/conference properties where safely interoperable.
   - [x] Preserve opaque attachment and conference properties on ordinary edits;
-        safe link handling and authoring remain open.
+        authoring remains open.
+  - [x] Display bounded, revalidated HTTP(S) URL, URI ATTACH, and CONFERENCE
+        links as explicit safe anchors, with no previews, uploads, or fetches
+        (ADR031).
 
 The recurring-resource contract uses the hosted CI stack pinned to Synapse
 v1.161.0 and the project-owned Radicale 3.8.0.0 OpenID-only image. A passing

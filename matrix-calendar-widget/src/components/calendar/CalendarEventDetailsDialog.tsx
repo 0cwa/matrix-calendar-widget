@@ -15,14 +15,18 @@
  */
 
 import {
+  boundCalendarEventExternalLinkLabel,
   CalendarEvent,
   CalendarEventDateTime,
-  CalendarRepositoryError,
+  CalendarEventExternalLink,
   calendarEventRecurrenceIdentity,
   calendarEventTimedDateTimeToDateTime,
+  CalendarRepositoryError,
+  canonicalizeCalendarExternalUrl,
   isAllDayCalendarEvent,
   isSupportedCalendarEventOccurrenceExclusion,
   isTimedCalendarEvent,
+  MAX_CALENDAR_EVENT_EXTERNAL_LINKS,
 } from '@matrix-calendar-widget/calendar';
 import {
   Alert,
@@ -31,6 +35,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Link,
   Stack,
   Typography,
 } from '@mui/material';
@@ -132,6 +137,9 @@ export function CalendarEventDetailsDialog({
             calendarEventRecurrenceIdentity(currentRecurrenceId),
         )
       : [];
+  const visibleExternalLinks = currentEvent
+    ? getVisibleCalendarExternalLinks(currentEvent, t)
+    : [];
 
   const changeOccurrenceException = async (
     action: 'add' | 'remove',
@@ -331,6 +339,25 @@ export function CalendarEventDetailsDialog({
                     {currentEvent.description}
                   </Typography>
                 )}
+
+                {visibleExternalLinks.length > 0 && (
+                  <Stack spacing={0.5}>
+                    <Typography>
+                      {t('calendarEvents.details.links', 'Links')}
+                    </Typography>
+                    {visibleExternalLinks.map((link, index) => (
+                      <Link
+                        href={link.href}
+                        key={`${link.kind}:${link.href}:${index}`}
+                        rel="noopener noreferrer"
+                        target="_blank"
+                        underline="hover"
+                      >
+                        {link.label}
+                      </Link>
+                    ))}
+                  </Stack>
+                )}
               </Stack>
             </DialogContent>
             <DialogActions>
@@ -356,10 +383,16 @@ export function CalendarEventDetailsDialog({
         <CalendarEventEditorDialog
           calendars={calendars.data}
           event={currentSourceEvent}
+          occurrence={
+            currentRecurrenceId && currentEvent
+              ? { recurrenceId: currentRecurrenceId, event: currentEvent }
+              : undefined
+          }
           onClose={() => setEditing(false)}
-          onSaved={(savedEvent) => {
-            setCurrentEvent(savedEvent);
+          onSaved={(savedEvent, occurrenceEvent) => {
             setCurrentSourceEvent(savedEvent);
+            setCurrentEvent(occurrenceEvent ?? savedEvent);
+            onSourceEventChange?.(savedEvent);
           }}
           open={editing}
         />
@@ -407,6 +440,58 @@ export function CalendarEventDetailsDialog({
       )}
     </>
   );
+}
+
+type VisibleCalendarEventExternalLink = {
+  kind: CalendarEventExternalLink['kind'];
+  href: string;
+  label: string;
+};
+
+function getVisibleCalendarExternalLinks(
+  event: CalendarEvent,
+  t: (key: string, defaultValue: string) => string,
+): VisibleCalendarEventExternalLink[] {
+  if (!Array.isArray(event.externalLinks)) {
+    return [];
+  }
+
+  return event.externalLinks
+    .slice(0, MAX_CALENDAR_EVENT_EXTERNAL_LINKS)
+    .flatMap((candidate) => {
+      try {
+        if (!candidate || typeof candidate !== 'object') {
+          return [];
+        }
+
+        const href = canonicalizeCalendarExternalUrl(candidate.href);
+        if (!href) {
+          return [];
+        }
+
+        let label: string;
+        switch (candidate.kind) {
+          case 'event':
+            label = t('calendarEvents.details.eventWebsite', 'Event website');
+            break;
+          case 'attachment':
+            label = t('calendarEvents.details.attachment', 'Attachment');
+            break;
+          case 'conference':
+            label =
+              boundCalendarEventExternalLinkLabel(candidate.label) ??
+              t('calendarEvents.details.conference', 'Conference');
+            break;
+          default:
+            return [];
+        }
+
+        return [{ kind: candidate.kind, href, label }];
+      } catch {
+        // An in-memory producer may supply malformed link objects.
+        return [];
+      }
+    });
 }
 
 function uniqueRecurrenceIds(

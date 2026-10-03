@@ -1,0 +1,31 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Matrix Calendar Widget//External link fixture//EN
+BEGIN:VEVENT
+UID:external-links@example.test
+DTSTAMP:20261003T120000Z
+DTSTART:20261005T090000Z
+DTEND:20261005T100000Z
+SUMMARY:External link preservation
+URL;X-SOURCE=calendar:https://events.example.test/agenda
+URL;X-UNSAFE=javascript:javascript:alert(1)
+ATTACH;FMTTYPE=application/pdf;X-PROVIDER=kept:https://files.example.test/
+ agenda.pdf
+ATTACH;VALUE=URI;FMTTYPE=text/plain;
+ X-PROVIDER=kept:https://files.example.test/notes.txt
+ATTACH;VALUE=BINARY;ENCODING=BASE64;FMTTYPE=application/octet-stream;
+ X-PROVIDER=kept:SGVsbG8gd29ybGQ=
+ATTACH;VALUE=URI;X-UNSAFE=kept:javascript:alert(2)
+CONFERENCE;VALUE=URI;FEATURE=AUDIO;LABEL="Main room";
+ X-PROVIDER=kept:https://meet.example.test/room/42
+CONFERENCE;VALUE=URI;FEATURE=CHAT;LABEL="Text <room>";
+ X-PROVIDER=kept:im:matrix.org/#room:example.org
+CONFERENCE;VALUE=URI;FEATURE=VIDEO;LABEL="Unsafe conference";
+ X-PROVIDER=kept:javascript:alert(3)
+ORGANIZER;CN="Organizer Example";
+ X-CLIENT=kept:mailto:organizer@example.test
+ATTENDEE;CN="Alice Example";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;
+ X-CLIENT=kept:mailto:alice@example.test
+X-UNKNOWN-PROPERTY;X-PARAM=kept:source-value
+END:VEVENT
+END:VCALENDAR

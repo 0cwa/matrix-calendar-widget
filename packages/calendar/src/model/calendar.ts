@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import type { CalendarEventExternalLink } from './calendarEventExternalLink';
+
 /**
  * Opaque identifier for a calendar collection.
  *
@@ -189,7 +191,9 @@ export type CalendarEventRecurrence = {
  * Recurrence fields accepted by supported write operations. RRULE edits change
  * only the master rule; EXDATE operations target one original occurrence
  * identity; RDATE operations add/remove point values or remove one exact
- * PERIOD value, or atomically replace one exact existing PERIOD value.
+ * PERIOD value, add one positive-duration or explicit-end PERIOD, or
+ * atomically replace one exact existing PERIOD value. Occurrence timing writes
+ * change one original recurrence identity without changing the master event.
  */
 export type CalendarEventRecurrenceWrite =
   | {
@@ -201,6 +205,16 @@ export type CalendarEventRecurrenceWrite =
       exdate: {
         action: 'add' | 'remove';
         recurrenceId: CalendarEventDateTime;
+      };
+    }
+  | {
+      /** Change timing for exactly one supported original recurrence identity. */
+      occurrence: {
+        action: 'set-timing';
+        recurrenceId: CalendarEventDateTime;
+        timing: CalendarEventRecurrenceTiming;
+        /** Required projection context for validating DATE/floating intervals. */
+        viewerTimezone: string;
       };
     }
   | {
@@ -261,6 +275,8 @@ export type CalendarEvent = {
 
   /** Read-only revision metadata; writes are managed by the iCalendar codec. */
   readonly revision?: CalendarEventRevision;
+  /** Safe external links projected from the resource by the iCalendar codec. */
+  readonly externalLinks?: readonly CalendarEventExternalLink[];
 
   status?: CalendarEventStatus;
   transparency?: CalendarEventTransparency;
@@ -290,6 +306,7 @@ export type CalendarEventInput = Omit<
   | 'unsupportedAlarm'
   | 'unsupportedTimezone'
   | 'revision'
+  | 'externalLinks'
 > & {
   alarm?: CalendarEventDisplayAlarmInput;
   recurrence?: { rrule?: string };
@@ -311,6 +328,7 @@ export type CalendarEventPatch = Partial<
     | 'unsupportedRecurrence'
     | 'unsupportedTimezone'
     | 'revision'
+    | 'externalLinks'
   >
 > & {
   alarm?: CalendarEventAlarmPatch;
