@@ -147,6 +147,28 @@ export function CalendarEventEditorDialog({
     values.timingChanged === true ||
     values.timezoneChanged === true ||
     saving;
+  const periodDurationFields = [
+    {
+      field: 'rdatePeriodWeeks',
+      label: t('calendarEvents.editor.durationWeeks', 'Weeks'),
+    },
+    {
+      field: 'rdatePeriodDays',
+      label: t('calendarEvents.editor.durationDays', 'Days'),
+    },
+    {
+      field: 'rdatePeriodHours',
+      label: t('calendarEvents.editor.durationHours', 'Hours'),
+    },
+    {
+      field: 'rdatePeriodMinutes',
+      label: t('calendarEvents.editor.durationMinutes', 'Minutes'),
+    },
+    {
+      field: 'rdatePeriodSeconds',
+      label: t('calendarEvents.editor.durationSeconds', 'Seconds'),
+    },
+  ] as const;
   const originalTimedTiming =
     values.originalTiming?.type === 'timed' ? values.originalTiming : undefined;
   const hasFloatingEndpoint =
@@ -982,15 +1004,7 @@ export function CalendarEventEditorDialog({
                           spacing={1}
                           sx={{ flexWrap: 'wrap', rowGap: 1 }}
                         >
-                          {(
-                            [
-                              ['rdatePeriodWeeks', 'weeks'],
-                              ['rdatePeriodDays', 'days'],
-                              ['rdatePeriodHours', 'hours'],
-                              ['rdatePeriodMinutes', 'minutes'],
-                              ['rdatePeriodSeconds', 'seconds'],
-                            ] as const
-                          ).map(([field, unit]) => (
+                          {periodDurationFields.map(({ field, label }) => (
                             <TextField
                               inputProps={{
                                 'aria-describedby': periodDurationHelperId,
@@ -998,10 +1012,7 @@ export function CalendarEventEditorDialog({
                                 step: 1,
                               }}
                               key={field}
-                              label={t(
-                                `calendarEvents.editor.duration${unit[0].toUpperCase()}${unit.slice(1)}`,
-                                unit[0].toUpperCase() + unit.slice(1),
-                              )}
+                              label={label}
                               onChange={handleRdatePeriodDurationChange(field)}
                               size="small"
                               sx={{

@@ -25,6 +25,7 @@ import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from '../../calendar';
+import i18n from '../../i18n';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 
 const calendar: Calendar = {
@@ -576,6 +577,52 @@ describe('<CalendarEventEditorDialog />', () => {
         name: 'Remove period date: 2026-10-12T11:30:00 Europe/Stockholm (1d 2h)',
       }),
     ).toBeInTheDocument();
+  });
+
+  it('translates all PERIOD duration units in English and German', async () => {
+    try {
+      await i18n.changeLanguage('en');
+      const periodEvent: CalendarEvent = {
+        ...recurringEvent,
+        id: 'localized-duration-rdate-resource',
+        recurrence: { rrule: 'FREQ=WEEKLY;COUNT=8' },
+      };
+      const repository = new InMemoryCalendarRepository({
+        calendars: [calendar],
+        events: [periodEvent],
+      });
+
+      render(
+        <CalendarEventEditorDialog
+          calendars={[calendar]}
+          event={periodEvent}
+          onClose={vi.fn()}
+          open
+        />,
+        { wrapper: createWrapper(repository) },
+      );
+
+      for (const label of ['Weeks', 'Days', 'Hours', 'Minutes', 'Seconds']) {
+        expect(
+          await screen.findByRole('spinbutton', { name: label }),
+        ).toBeInTheDocument();
+      }
+
+      await i18n.changeLanguage('de');
+      for (const label of [
+        'Wochen',
+        'Tage',
+        'Stunden',
+        'Minuten',
+        'Sekunden',
+      ]) {
+        expect(
+          await screen.findByRole('spinbutton', { name: label }),
+        ).toBeInTheDocument();
+      }
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 
   it('keeps all-day RDATE entry as a point date without period controls', async () => {
