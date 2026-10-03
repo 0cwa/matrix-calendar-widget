@@ -37,6 +37,7 @@ import {
   NotFoundException,
   Optional,
   Patch,
+  PayloadTooLargeException,
   Post,
   Query,
   ServiceUnavailableException,
@@ -51,10 +52,12 @@ import {
   CalDavEventClient,
   CalDavEventResource,
   CalDavEventTransportError,
+  DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
   ICalendarEventCodec,
   ICalendarEventCodecError,
   MatrixOpenIdCalDavCredentialError,
   MatrixOpenIdCalDavCredentialProviderFactory,
+  MAX_FOLLOWING_RESOURCE_BYTES,
 } from '../caldav';
 import { isSafeSingleVeventSeries } from '../caldav/ICalendarDeletionSafety';
 import { MatrixOpenIdCredentialParam } from '../decorator/MatrixOpenIdCredentialParam';
@@ -803,6 +806,12 @@ export class CalendarGatewayController {
       },
     );
     const etag = this.requireQuery(ifMatch, 'If-Match');
+    if (!isConcreteStrongEtag(etag)) {
+      throw new BadRequestException({
+        code: 'invalid-event-etag',
+        message: 'If-Match must contain one strong ETag',
+      });
+    }
 
     return this.runCalDav(async () => {
       const client = this.eventClient(userContext, openIdCredential);
@@ -814,7 +823,24 @@ export class CalendarGatewayController {
 
       if (
         patch?.recurrence &&
-        'occurrence' in patch.recurrence &&
+        'following' in patch.recurrence &&
+        Buffer.byteLength(encoded.icalendar, 'utf8') >
+          Math.min(
+            MAX_FOLLOWING_RESOURCE_BYTES,
+            this.appConfig.caldav_max_event_response_bytes ??
+              DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
+          )
+      ) {
+        throw new PayloadTooLargeException({
+          code: 'event-too-large',
+          message:
+            'This and following edit would exceed the supported calendar resource size.',
+        });
+      }
+
+      if (
+        patch?.recurrence &&
+        ('occurrence' in patch.recurrence || 'following' in patch.recurrence) &&
         encoded.icalendar === current.icalendar &&
         etag === current.etag
       ) {
@@ -1266,6 +1292,12 @@ export class CalendarGatewayController {
       }
 
       if (error instanceof ICalendarEventCodecError) {
+        if (error.code === 'event-too-large') {
+          throw new PayloadTooLargeException({
+            code: error.code,
+            message: error.message,
+          });
+        }
         throw new BadRequestException({
           code: error.code,
           message: error.message,
@@ -1291,6 +1323,12 @@ export class CalendarGatewayController {
               code: error.code,
               message:
                 'Room calendar event contains data that cannot be safely deleted',
+            });
+          case 'event-too-large':
+            throw new PayloadTooLargeException({
+              code: error.code,
+              message:
+                'This and following edit would exceed the supported calendar resource size.',
             });
           case 'event-write-disabled':
           case 'invalid-room-access':

@@ -75,12 +75,11 @@ or timezone data remain opaque.
    current whole-series behavior; the instance option is available only for
    the supported timing-only operation above and displays its failure reason
    when a preflight rejects it.
-7. This decision does not define “this and following” semantics. That work
-   remains an open design question: evaluate a bounded, single-resource
-   `RANGE=THISANDFUTURE` update against supported RFC behavior and evaluate
-   finite-series materialization into detached overrides against the existing
-   one-resource conditional-write boundary. Do not implement a generic RRULE
-   split or claim following-scope completion from this decision.
+7. ADR034 separately defines the initial “this and following” timing scope:
+   bounded finite-series materialization into detached overrides within the
+   existing one-resource conditional-write boundary. It does not use
+   `RANGE=THISANDFUTURE` or a generic RRULE/resource split. This decision remains
+   the contract for one-occurrence timing edits.
 
 ## Consequences
 
@@ -88,8 +87,8 @@ Supported instance timing edits remain within one canonical CalDAV resource
 and use one ETag-protected update. Unsupported or ambiguous cases retain their
 source components and return a fail-closed result. The user can distinguish
 one-occurrence timing changes from existing whole-series edits, while alarm
-behavior stays explicitly unsupported for this phase. “This and following”
-still needs its own evidence-backed semantics decision.
+behavior stays explicitly unsupported for this phase. ADR034 defines the
+separate bounded following-timing phase.
 
 ## Validation
 

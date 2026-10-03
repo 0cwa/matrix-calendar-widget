@@ -21,6 +21,7 @@ import {
   CalendarEventDisplayAlarm,
   CalendarEventDisplayAlarmInput,
   CalendarEventDuration,
+  CalendarEventFollowingTimingWrite,
   CalendarEventId,
   CalendarEventInput,
   CalendarEventPatch,
@@ -35,6 +36,7 @@ import {
   CalendarEventTiming,
   CalendarEventTransparency,
   CalendarId,
+  calendarEventFollowingTimingOverrides,
   calendarEventRecurrenceIdentity,
   calendarEventTimedDateTimeToDateTime,
   calendarLocalDateTimeToUnixMillis,
@@ -72,6 +74,8 @@ type RawVeventProperty = {
 const systemClock = (): Date => new Date();
 // RFC 5545 INTEGER is a signed 32-bit value; SEQUENCE uses its nonnegative range.
 const MAX_ICALENDAR_SEQUENCE = 2_147_483_647;
+/** Fixed cap for finite suffix materialization before cloning or transport. */
+export const MAX_FOLLOWING_RESOURCE_BYTES = 4 * 1024 * 1024;
 
 export type EncodedICalendarEvent = {
   event: CalendarEvent;
@@ -99,6 +103,7 @@ export type ICalendarEventCodecErrorCode =
   | 'missing-uid'
   | 'missing-timing'
   | 'invalid-timing'
+  | 'event-too-large'
   | 'unsupported-patch';
 
 export class ICalendarEventCodecError extends Error {
@@ -149,6 +154,12 @@ export class ParsedICalendarEvent {
           viewerTimezone: string;
         },
       );
+    }
+    if (recurrenceWrite && 'following' in recurrenceWrite) {
+      if (Object.keys(patch).some((key) => key !== 'recurrence')) {
+        throw unsupportedFollowingTimingPatch();
+      }
+      return this.applyFollowingPatch(recurrenceWrite.following);
     }
     if (hasRecurrencePatch) {
       if (recurrenceWrite && 'exdate' in recurrenceWrite) {
@@ -462,6 +473,217 @@ export class ParsedICalendarEvent {
       event: {
         ...this.event,
         recurrence: readRecurrence(calendar, master, this.event.uid),
+      },
+      icalendar,
+    };
+  }
+
+  private applyFollowingPatch(
+    operation: CalendarEventFollowingTimingWrite,
+  ): EncodedICalendarEvent {
+    if (
+      !this.event.uid ||
+      this.event.status === 'cancelled' ||
+      this.event.unsupportedTimezone ||
+      this.event.unsupportedRecurrence ||
+      this.event.unsupportedAlarm ||
+      this.event.alarm ||
+      this.listProjectionDiagnostic ||
+      !isCalendarTimezoneSupported(operation.viewerTimezone)
+    ) {
+      throw unsupportedFollowingTimingPatch();
+    }
+
+    const calendar = ICAL.Component.fromString(this.sourceICalendar);
+    if (calendar.name !== 'vcalendar') {
+      throw unsupportedFollowingTimingPatch();
+    }
+    const events = calendar.getAllSubcomponents('vevent');
+    const rawEventProperties = readRawVeventProperties(this.sourceICalendar);
+    const rawRevisionProperties = readVeventRevisionProperties(
+      this.sourceICalendar,
+    );
+    if (
+      !rawEventProperties ||
+      rawEventProperties.length !== events.length ||
+      !rawRevisionProperties ||
+      rawRevisionProperties.length !== events.length ||
+      hasUnsupportedTimezoneRules(calendar, this.event.uid)
+    ) {
+      throw unsupportedFollowingTimingPatch();
+    }
+
+    const matching: Array<{ component: ICAL.Component; index: number }> = [];
+    for (const [index, component] of events.entries()) {
+      const uidProperties = component.getAllProperties('uid');
+      const uidValues = uidProperties.map((property) =>
+        textValue(property.getFirstValue()),
+      );
+      if (!uidValues.includes(this.event.uid)) {
+        continue;
+      }
+      if (
+        uidProperties.length !== 1 ||
+        uidValues[0] !== this.event.uid ||
+        rawEventProperties[index].filter((property) => property.name === 'uid')
+          .length !== 1
+      ) {
+        throw unsupportedFollowingTimingPatch();
+      }
+      validateRawOccurrenceTimingProperties(
+        rawEventProperties[index],
+        component,
+      );
+      assertFollowingRawTimingParameters(rawEventProperties[index]);
+      matching.push({ component, index });
+    }
+
+    const masters = matching.filter(
+      ({ component }) =>
+        component.getAllProperties('recurrence-id').length === 0,
+    );
+    if (masters.length !== 1) {
+      throw unsupportedFollowingTimingPatch();
+    }
+    const { component: master, index: masterIndex } = masters[0];
+    const rawMasterProperties = rawEventProperties[masterIndex];
+    assertFollowingMasterStatus(master, rawMasterProperties);
+    const rawRules = rawMasterProperties.filter(
+      (property) => property.name === 'rrule',
+    );
+    if (
+      master.getAllProperties('rrule').length !== 1 ||
+      rawRules.length !== 1 ||
+      contentLineParameters(rawRules[0].header).length > 0 ||
+      master.hasProperty('rdate') ||
+      master.hasProperty('exdate') ||
+      master.hasProperty('exrule') ||
+      master.getAllSubcomponents('valarm').length > 0
+    ) {
+      throw unsupportedFollowingTimingPatch();
+    }
+
+    const sameUidOverrides = matching.filter(
+      ({ component }) => component !== master,
+    );
+    const seenIdentities = new Set<string>();
+    for (const { component } of sameUidOverrides) {
+      const recurrenceIds = component.getAllProperties('recurrence-id');
+      if (
+        recurrenceIds.length !== 1 ||
+        component.hasProperty('rrule') ||
+        component.hasProperty('rdate') ||
+        component.hasProperty('exdate') ||
+        component.hasProperty('exrule') ||
+        component.getAllSubcomponents('valarm').length > 0
+      ) {
+        throw unsupportedFollowingTimingPatch();
+      }
+      const property = recurrenceIds[0];
+      if (
+        property.getValues().length !== 1 ||
+        (property.getFirstParameter('range') !== null &&
+          property.getFirstParameter('range') !== undefined)
+      ) {
+        throw unsupportedFollowingTimingPatch();
+      }
+      let identity: string;
+      try {
+        identity = calendarEventRecurrenceIdentity(
+          readDateTimeProperty(property),
+        );
+      } catch {
+        throw unsupportedFollowingTimingPatch();
+      }
+      if (seenIdentities.has(identity)) {
+        throw unsupportedFollowingTimingPatch();
+      }
+      seenIdentities.add(identity);
+      if (
+        followingComponentShape(component) !== followingComponentShape(master)
+      ) {
+        throw unsupportedFollowingTimingPatch();
+      }
+    }
+
+    let plan: ReturnType<typeof calendarEventFollowingTimingOverrides>;
+    try {
+      plan = calendarEventFollowingTimingOverrides(this.event, operation);
+    } catch {
+      throw unsupportedFollowingTimingPatch();
+    }
+    if (sameUidOverrides.length > 0) {
+      if (plan.noOp) {
+        return { event: this.event, icalendar: this.sourceICalendar };
+      }
+      throw unsupportedFollowingTimingPatch();
+    }
+    if (plan.noOp) {
+      return { event: this.event, icalendar: this.sourceICalendar };
+    }
+
+    const masterRawBytes = rawVeventByteLength(
+      this.sourceICalendar,
+      masterIndex,
+    );
+    if (
+      masterRawBytes === undefined ||
+      Buffer.byteLength(this.sourceICalendar, 'utf8') +
+        plan.suffix.length * (masterRawBytes + 1_024) >
+        MAX_FOLLOWING_RESOURCE_BYTES
+    ) {
+      throw followingResourceTooLarge();
+    }
+    const now = this.clock();
+    if (!Number.isFinite(now.getTime())) {
+      throw unsupportedFollowingTimingPatch();
+    }
+    const masterRevision = rawRevisionProperties[masterIndex];
+    const detached: ICAL.Component[] = [];
+    for (const override of plan.suffix) {
+      if (!override.timing || override.timing.type !== 'end') {
+        throw unsupportedFollowingTimingPatch();
+      }
+      const component = ICAL.Component.fromString(master.toString());
+      component.removeAllProperties('rrule');
+      component.removeAllProperties('rdate');
+      component.removeAllProperties('exdate');
+      component.removeAllProperties('exrule');
+      component.removeAllProperties('recurrence-id');
+      const recurrenceIdProperty = new ICAL.Property('recurrence-id');
+      const recurrenceId = recurrenceIdAsIcalTime(override.recurrenceId);
+      recurrenceIdProperty.setValue(recurrenceId.value);
+      if (recurrenceId.timezone) {
+        recurrenceIdProperty.setParameter('tzid', recurrenceId.timezone);
+      }
+      component.addProperty(recurrenceIdProperty);
+      setOccurrenceTiming(component, override.timing);
+      if (!updateRevisionMetadata(component, now, masterRevision)) {
+        throw unsupportedFollowingTimingPatch();
+      }
+      detached.push(component);
+    }
+
+    const icalendar = appendVeventsBeforeCalendarEnd(
+      this.sourceICalendar,
+      detached,
+    );
+    if (Buffer.byteLength(icalendar, 'utf8') > MAX_FOLLOWING_RESOURCE_BYTES) {
+      throw followingResourceTooLarge();
+    }
+    const updatedCalendar = ICAL.Component.fromString(icalendar);
+    const updatedMaster = findMasterEvent(updatedCalendar, this.event.uid);
+    if (!updatedMaster) {
+      throw unsupportedFollowingTimingPatch();
+    }
+    return {
+      event: {
+        ...this.event,
+        recurrence: readRecurrence(
+          updatedCalendar,
+          updatedMaster,
+          this.event.uid,
+        ),
       },
       icalendar,
     };
@@ -846,6 +1068,40 @@ function recurrenceWriteFromUnknown(
   }
 
   const fields = value as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(fields, 'following')) {
+    const operation = fields.following;
+    if (
+      Object.keys(fields).length !== 1 ||
+      !operation ||
+      typeof operation !== 'object' ||
+      Array.isArray(operation)
+    ) {
+      throw unsupportedFollowingTimingPatch();
+    }
+    const following = operation as Record<string, unknown>;
+    if (
+      Object.keys(following).length !== 4 ||
+      !['action', 'recurrenceId', 'timing', 'viewerTimezone'].every((key) =>
+        Object.prototype.hasOwnProperty.call(following, key),
+      ) ||
+      following.action !== 'set-timing' ||
+      typeof following.viewerTimezone !== 'string'
+    ) {
+      throw unsupportedFollowingTimingPatch();
+    }
+    const timing = recurrenceTimingFromUnknown(following.timing);
+    if (timing.type !== 'end') {
+      throw unsupportedFollowingTimingPatch();
+    }
+    return {
+      following: {
+        action: 'set-timing',
+        recurrenceId: recurrenceDateTimeFromUnknown(following.recurrenceId),
+        timing,
+        viewerTimezone: following.viewerTimezone,
+      },
+    };
+  }
   if (Object.prototype.hasOwnProperty.call(fields, 'occurrence')) {
     const operation = fields.occurrence;
     if (
@@ -1334,6 +1590,20 @@ function unsupportedOccurrenceTimingPatch(): ICalendarEventCodecError {
   return new ICalendarEventCodecError(
     'unsupported-patch',
     'This occurrence cannot be timed safely because its recurrence identity or source data is unsupported or ambiguous.',
+  );
+}
+
+function unsupportedFollowingTimingPatch(): ICalendarEventCodecError {
+  return new ICalendarEventCodecError(
+    'unsupported-patch',
+    'This and following timing edit is unavailable because the recurrence or source data is unsupported or ambiguous.',
+  );
+}
+
+function followingResourceTooLarge(): ICalendarEventCodecError {
+  return new ICalendarEventCodecError(
+    'event-too-large',
+    'This and following edit would exceed the supported calendar resource size.',
   );
 }
 
@@ -3618,6 +3888,131 @@ function readContentLines(source: string): ICalendarContentLine[] {
     }
   }
   return lines;
+}
+
+function assertFollowingRawTimingParameters(
+  rawProperties: RawVeventProperty[],
+): void {
+  for (const property of rawProperties) {
+    if (
+      !['dtstart', 'dtend', 'duration', 'recurrence-id'].includes(property.name)
+    ) {
+      continue;
+    }
+    const allowed =
+      property.name === 'duration'
+        ? new Set<string>()
+        : new Set(['value', 'tzid']);
+    const parameters = contentLineParameters(property.header);
+    if (
+      parameters.some((parameter) => !allowed.has(parameter.name)) ||
+      (property.name === 'duration' && parameters.length > 0)
+    ) {
+      throw unsupportedFollowingTimingPatch();
+    }
+  }
+}
+
+function assertFollowingMasterStatus(
+  master: ICAL.Component,
+  rawProperties: RawVeventProperty[],
+): void {
+  const rawStatuses = rawProperties.filter(
+    (property) => property.name === 'status',
+  );
+  const parsedStatuses = master.getAllProperties('status');
+  if (rawStatuses.length !== parsedStatuses.length || rawStatuses.length > 1) {
+    throw unsupportedFollowingTimingPatch();
+  }
+  if (rawStatuses.length === 0) {
+    return;
+  }
+
+  const status = rawStatuses[0];
+  const value = status.value.toUpperCase();
+  if (
+    contentLineParameters(status.header).length > 0 ||
+    !['CONFIRMED', 'TENTATIVE'].includes(value)
+  ) {
+    throw unsupportedFollowingTimingPatch();
+  }
+}
+
+function followingComponentShape(component: ICAL.Component): string {
+  const clone = ICAL.Component.fromString(component.toString());
+  for (const property of [
+    'rrule',
+    'rdate',
+    'exdate',
+    'exrule',
+    'recurrence-id',
+    'dtstart',
+    'dtend',
+    'duration',
+    'dtstamp',
+    'last-modified',
+    'sequence',
+  ]) {
+    clone.removeAllProperties(property);
+  }
+  return JSON.stringify(clone.toJSON());
+}
+
+function rawVeventByteLength(
+  source: string,
+  veventIndex: number,
+): number | undefined {
+  const lines = readContentLines(source);
+  const ranges = findVeventRanges(lines);
+  const range = ranges?.[veventIndex];
+  if (!range) {
+    return undefined;
+  }
+  const physical = lines
+    .slice(range.start, range.end + 1)
+    .flatMap((line) => line.physicalLines);
+  // CRLF is the largest common iCalendar line separator; this intentionally
+  // overestimates LF and CR resources for the pre-clone guard.
+  return (
+    physical.reduce(
+      (total, line) => total + Buffer.byteLength(line, 'utf8'),
+      0,
+    ) +
+    physical.length * 2
+  );
+}
+
+function appendVeventsBeforeCalendarEnd(
+  source: string,
+  components: ICAL.Component[],
+): string {
+  const endMarker = source.toUpperCase().lastIndexOf('END:VCALENDAR');
+  if (endMarker < 0) {
+    throw unsupportedFollowingTimingPatch();
+  }
+  const lineFeeds = [
+    source.lastIndexOf('\n', endMarker),
+    source.lastIndexOf('\r', endMarker),
+  ];
+  const previousLineBreak = Math.max(...lineFeeds);
+  const insertion = previousLineBreak < 0 ? 0 : previousLineBreak + 1;
+  const newline = source.includes('\r\n')
+    ? '\r\n'
+    : source.includes('\r')
+      ? '\r'
+      : '\n';
+  const serialized = components
+    .map((component) =>
+      component
+        .toString()
+        .split(/\r\n|\n|\r/)
+        .filter(
+          (line, index, lines) => !(line === '' && index === lines.length - 1),
+        )
+        .join(newline),
+    )
+    .join(newline);
+  return `${source.slice(0, insertion)}${serialized}${newline}${source.slice(insertion)}`;
 }
 
 function parseContentLine(

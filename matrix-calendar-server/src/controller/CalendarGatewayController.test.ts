@@ -15,6 +15,7 @@
  */
 
 import type {
+  CalendarEventFollowingTimingWrite,
   CalendarEventInput,
   CalendarEventPatch,
 } from '@matrix-calendar-widget/calendar';
@@ -23,6 +24,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  PayloadTooLargeException,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -1828,6 +1830,30 @@ END:VCALENDAR`,
     expect(putInit?.body).toContain('X-CUSTOM:preserve');
   });
 
+  it.each(['*', 'W/"weak-etag"', '"first", "second"'])(
+    'rejects nonconcrete strong If-Match validator %s before a CalDAV read',
+    async (ifMatch) => {
+      isAllowed.mockResolvedValue(true);
+      const calendarId = 'https://radicale.example.test/alice/team/';
+      const eventId = 'https://radicale.example.test/alice/team/event.ics';
+
+      await expect(
+        createController().updateEvent(
+          userContext,
+          openIdCredential,
+          { title: 'After update' },
+          ifMatch,
+          roomId,
+          calendarId,
+          eventId,
+        ),
+      ).rejects.toMatchObject({
+        response: { code: 'invalid-event-etag' },
+      });
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
   it('returns occurrence preflight failures as actionable bad requests', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';
@@ -1966,6 +1992,94 @@ END:VCALENDAR`,
     expect(fetch.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(
       false,
     );
+  });
+
+  it('keeps the current ETag and skips PUT for an identical following suffix', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/following.ics';
+    const operation = followingOperation();
+    const originalIcs = new ICalendarEventCodec()
+      .parse(calendarId, eventId, followingCalendar())
+      .applyPatch({ recurrence: { following: operation } }).icalendar;
+    fetch.mockResponseOnce(originalIcs, {
+      status: 200,
+      headers: { ETag: '"current-etag"' },
+    });
+
+    const result = await createController().updateEvent(
+      userContext,
+      openIdCredential,
+      { recurrence: { following: operation } },
+      '"current-etag"',
+      roomId,
+      calendarId,
+      eventId,
+    );
+
+    expect(result.etag).toBe('"current-etag"');
+    expect(result.event.recurrence?.overrides).toHaveLength(2);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(
+      false,
+    );
+  });
+
+  it('rejects a following resource above the configured cap before PUT', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/following.ics';
+    const originalIcs = followingCalendar();
+    const config = {
+      ...appConfig,
+      caldav_max_event_response_bytes:
+        Buffer.byteLength(originalIcs, 'utf8') + 64,
+    } as IAppConfiguration;
+    fetch.mockResponseOnce(originalIcs, {
+      status: 200,
+      headers: { ETag: '"current-etag"' },
+    });
+
+    await expect(
+      createController(config).updateEvent(
+        userContext,
+        openIdCredential,
+        { recurrence: { following: followingOperation() } },
+        '"current-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      ),
+    ).rejects.toBeInstanceOf(PayloadTooLargeException);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it('rejects a TZID=UTC following source before PUT', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/following.ics';
+    const originalIcs = followingCalendar()
+      .replace('DTSTART:20261001T090000Z', 'DTSTART;TZID=UTC:20261001T090000')
+      .replace('DTEND:20261001T100000Z', 'DTEND;TZID=UTC:20261001T100000');
+    fetch.mockResponseOnce(originalIcs, {
+      status: 200,
+      headers: { ETag: '"current-etag"' },
+    });
+
+    await expect(
+      createController().updateEvent(
+        userContext,
+        openIdCredential,
+        { recurrence: { following: followingOperation() } },
+        '"current-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
   });
 
   it('round-trips a serialized RDATE patch through the gateway with If-Match', async () => {
@@ -2616,6 +2730,45 @@ DTEND:20261008T120000Z
 SUMMARY:Planning shifted
 END:VEVENT
 END:VCALENDAR`;
+}
+
+function followingCalendar(): string {
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Matrix Calendar Widget Tests//EN',
+    'BEGIN:VEVENT',
+    'UID:following@example.test',
+    'DTSTAMP:20260922T120000Z',
+    'DTSTART:20261001T090000Z',
+    'DTEND:20261001T100000Z',
+    'SUMMARY:Following event',
+    'RRULE:FREQ=DAILY;COUNT=3',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+}
+
+function followingOperation(): CalendarEventFollowingTimingWrite {
+  return {
+    action: 'set-timing',
+    recurrenceId: {
+      type: 'date-time',
+      value: { local: '2026-10-02T09:00:00', timezone: 'UTC' },
+    },
+    timing: {
+      type: 'end',
+      start: {
+        type: 'date-time',
+        value: { local: '2026-10-02T11:00:00', timezone: 'UTC' },
+      },
+      end: {
+        type: 'date-time',
+        value: { local: '2026-10-02T12:00:00', timezone: 'UTC' },
+      },
+    },
+    viewerTimezone: 'UTC',
+  };
 }
 
 function multistatus(body: string): string {

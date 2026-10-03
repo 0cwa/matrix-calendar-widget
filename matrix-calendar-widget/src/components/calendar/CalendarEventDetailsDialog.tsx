@@ -58,6 +58,7 @@ export function CalendarEventDetailsDialog({
   recurrenceId,
   onSourceEventChange,
   onClose,
+  viewerTimezone = DateTime.local().zoneName ?? 'UTC',
 }: {
   event?: CalendarEvent;
   /** The CalDAV resource used for series-level reads and mutations. */
@@ -66,6 +67,7 @@ export function CalendarEventDetailsDialog({
   recurrenceId?: CalendarEventDateTime;
   onSourceEventChange?: (sourceEvent: CalendarEvent) => void;
   onClose: () => void;
+  viewerTimezone?: string;
 }) {
   const { i18n, t } = useTranslation();
   const calendars = useCalendars();
@@ -93,7 +95,6 @@ export function CalendarEventDetailsDialog({
   const localOccurrenceExclusionRef = useRef<
     { selectionKey: string; recurrenceIdentity: string } | undefined
   >();
-  const viewerTimezone = DateTime.local().zoneName ?? 'UTC';
 
   useEffect(() => {
     const sourceEventPropChanged = sourceEventPropRef.current !== sourceEvent;

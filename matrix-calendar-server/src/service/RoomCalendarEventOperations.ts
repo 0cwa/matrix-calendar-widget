@@ -22,9 +22,17 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import { Injectable } from '@nestjs/common';
 import { UserID } from 'matrix-bot-sdk';
-import { CalDavEventClient, CalDavEventResource } from '../caldav';
+import {
+  CalDavEventClient,
+  CalDavEventResource,
+  DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
+  MAX_FOLLOWING_RESOURCE_BYTES,
+} from '../caldav';
 import { isSafeSingleVeventSeries } from '../caldav/ICalendarDeletionSafety';
-import { ICalendarEventCodec } from '../caldav/ICalendarEventCodec';
+import {
+  ICalendarEventCodec,
+  ICalendarEventCodecError,
+} from '../caldav/ICalendarEventCodec';
 import { MatrixOpenIdCalDavCredentialProvider } from '../caldav/MatrixOpenIdCalDavCredentialProvider';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
@@ -72,6 +80,7 @@ export type RoomCalendarEventOperationErrorCode =
   | 'invalid-event-input'
   | 'event-write-disabled'
   | 'unsafe-event-resource'
+  | 'event-too-large'
   | 'etag-conflict';
 
 export interface RoomCalendarEventOperationOptions {
@@ -216,9 +225,42 @@ export class RoomCalendarEventOperations {
     const client = this.client(scope.servicePrincipal);
     const codec = new ICalendarEventCodec();
     const current = await client.getEvent(eventUrl);
-    const encoded = codec
-      .parse(scope.calendarId, eventUrl, current.icalendar)
-      .applyPatch(patch ?? {});
+    let encoded;
+    try {
+      encoded = codec
+        .parse(scope.calendarId, eventUrl, current.icalendar)
+        .applyPatch(patch ?? {});
+    } catch (error) {
+      if (
+        error instanceof ICalendarEventCodecError &&
+        error.code === 'event-too-large'
+      ) {
+        throw new RoomCalendarEventOperationError('event-too-large');
+      }
+      throw error;
+    }
+
+    if (
+      patch?.recurrence &&
+      'following' in patch.recurrence &&
+      Buffer.byteLength(encoded.icalendar, 'utf8') >
+        Math.min(
+          MAX_FOLLOWING_RESOURCE_BYTES,
+          this.options.maxResponseBytes ??
+            DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
+        )
+    ) {
+      throw new RoomCalendarEventOperationError('event-too-large');
+    }
+
+    if (
+      patch?.recurrence &&
+      ('occurrence' in patch.recurrence || 'following' in patch.recurrence) &&
+      encoded.icalendar === current.icalendar &&
+      etag === current.etag
+    ) {
+      return resolveResource(scope.calendarId, current);
+    }
 
     // Keep the caller's validator. A stale edit must fail with 412 rather
     // than silently applying the patch to the newly read resource version.

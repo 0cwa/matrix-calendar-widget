@@ -22,7 +22,9 @@ import type {
 } from '../model';
 import type { SupportedCalendarEventRecurrenceRule } from './calendarEventOccurrenceProjection';
 import {
+  calendarEventFollowingTimingOverrides,
   formatSupportedCalendarEventRecurrenceRule,
+  isSupportedCalendarEventFollowingTimingEdit,
   isSupportedCalendarEventOccurrenceExclusion,
   parseSupportedCalendarEventRecurrenceRule,
   projectCalendarEventOccurrenceByRecurrenceId,
@@ -1609,6 +1611,274 @@ describe('projectCalendarEventOccurrences', () => {
         'Europe/Stockholm',
       ),
     ).toBeUndefined();
+  });
+});
+
+describe('bounded following timing edits', () => {
+  const viewerTimezone = 'Europe/Stockholm';
+
+  it('reprojects the latest selected identity and gates removed occurrences', () => {
+    const recurrenceId = zoned('2026-10-02T09:00:00');
+    const event = timedEvent({
+      start: '2026-10-01T09:00:00',
+      end: '2026-10-01T10:00:00',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=4' },
+    });
+    const latest = {
+      ...event,
+      title: 'Latest title',
+      timing: {
+        ...event.timing,
+        end: {
+          type: 'zoned' as const,
+          local: '2026-10-01T10:30:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    };
+
+    const projected = projectCalendarEventOccurrenceByRecurrenceId(
+      latest,
+      recurrenceId,
+      viewerTimezone,
+    );
+    expect(projected?.event).toMatchObject({
+      title: 'Latest title',
+      id: expect.stringContaining('::occurrence::'),
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-02T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-02T10:30:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    });
+    expect(projected?.recurrenceId).toEqual(recurrenceId);
+
+    expect(
+      projectCalendarEventOccurrenceByRecurrenceId(
+        {
+          ...latest,
+          recurrence: {
+            ...latest.recurrence,
+            exdates: [recurrenceId],
+          },
+        },
+        recurrenceId,
+        viewerTimezone,
+      ),
+    ).toBeUndefined();
+    expect(
+      projectCalendarEventOccurrenceByRecurrenceId(
+        {
+          ...latest,
+          recurrence: {
+            ...latest.recurrence,
+            overrides: [{ recurrenceId, status: 'cancelled' }],
+          },
+        },
+        recurrenceId,
+        viewerTimezone,
+      ),
+    ).toBeUndefined();
+    expect(
+      projectCalendarEventOccurrenceByRecurrenceId(
+        { ...latest, unsupportedTimezone: true },
+        recurrenceId,
+        viewerTimezone,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('materializes a typed zoned suffix while preserving original identities', () => {
+    const event = timedEvent({
+      start: '2026-10-01T09:00:00',
+      end: '2026-10-01T10:00:00',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=4' },
+    });
+    const operation = {
+      action: 'set-timing' as const,
+      recurrenceId: zoned('2026-10-02T09:00:00'),
+      timing: {
+        type: 'end' as const,
+        start: zoned('2026-10-02T10:30:00'),
+        end: zoned('2026-10-02T11:45:00'),
+      },
+      viewerTimezone,
+    };
+
+    expect(
+      isSupportedCalendarEventFollowingTimingEdit(
+        event,
+        operation.recurrenceId,
+        viewerTimezone,
+      ),
+    ).toBe(true);
+    const plan = calendarEventFollowingTimingOverrides(event, operation);
+    expect(plan.noOp).toBe(false);
+    expect(plan.suffix).toEqual([
+      {
+        recurrenceId: zoned('2026-10-02T09:00:00'),
+        timing: {
+          type: 'end',
+          start: zoned('2026-10-02T10:30:00'),
+          end: zoned('2026-10-02T11:45:00'),
+        },
+      },
+      {
+        recurrenceId: zoned('2026-10-03T09:00:00'),
+        timing: {
+          type: 'end',
+          start: zoned('2026-10-03T10:30:00'),
+          end: zoned('2026-10-03T11:45:00'),
+        },
+      },
+      {
+        recurrenceId: zoned('2026-10-04T09:00:00'),
+        timing: {
+          type: 'end',
+          start: zoned('2026-10-04T10:30:00'),
+          end: zoned('2026-10-04T11:45:00'),
+        },
+      },
+    ]);
+
+    const repeated = calendarEventFollowingTimingOverrides(
+      {
+        ...event,
+        recurrence: { ...event.recurrence, overrides: plan.overrides },
+      },
+      operation,
+    );
+    expect(repeated.noOp).toBe(true);
+    expect(repeated.overrides).toEqual(plan.overrides);
+  });
+
+  it('rejects timing edits on a cancelled master series', () => {
+    const event = {
+      ...timedEvent({
+        start: '2026-10-01T09:00:00',
+        end: '2026-10-01T10:00:00',
+        recurrence: { rrule: 'FREQ=DAILY;COUNT=3' },
+      }),
+      status: 'cancelled' as const,
+    };
+    const operation = {
+      action: 'set-timing' as const,
+      recurrenceId: zoned('2026-10-02T09:00:00'),
+      timing: {
+        type: 'end' as const,
+        start: zoned('2026-10-02T10:00:00'),
+        end: zoned('2026-10-02T11:00:00'),
+      },
+      viewerTimezone,
+    };
+
+    expect(
+      isSupportedCalendarEventFollowingTimingEdit(
+        event,
+        operation.recurrenceId,
+        viewerTimezone,
+      ),
+    ).toBe(false);
+    expect(() =>
+      calendarEventFollowingTimingOverrides(event, operation),
+    ).toThrow();
+  });
+
+  it('uses DATE day durations and rejects unsupported recurrence shapes', () => {
+    const event: CalendarEvent = {
+      id: 'date-series',
+      calendarId: 'team',
+      uid: 'date-series@example.test',
+      title: 'Date series',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-10-01',
+        endDate: '2026-10-02',
+      },
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=3' },
+    };
+    const operation = {
+      action: 'set-timing' as const,
+      recurrenceId: { type: 'date' as const, value: '2026-10-02' },
+      timing: {
+        type: 'end' as const,
+        start: { type: 'date' as const, value: '2026-10-03' },
+        end: { type: 'date' as const, value: '2026-10-05' },
+      },
+      viewerTimezone,
+    };
+
+    const plan = calendarEventFollowingTimingOverrides(event, operation);
+    expect(plan.suffix).toEqual([
+      {
+        recurrenceId: { type: 'date', value: '2026-10-02' },
+        timing: {
+          type: 'end',
+          start: { type: 'date', value: '2026-10-03' },
+          end: { type: 'date', value: '2026-10-05' },
+        },
+      },
+      {
+        recurrenceId: { type: 'date', value: '2026-10-03' },
+        timing: {
+          type: 'end',
+          start: { type: 'date', value: '2026-10-04' },
+          end: { type: 'date', value: '2026-10-06' },
+        },
+      },
+    ]);
+
+    for (const unsupported of [
+      { ...event, recurrence: { rrule: 'FREQ=DAILY;COUNT=129' } },
+      { ...event, recurrence: { rrule: 'FREQ=DAILY;UNTIL=20261031' } },
+      {
+        ...event,
+        recurrence: {
+          rrule: 'FREQ=DAILY;COUNT=3',
+          exdates: [operation.recurrenceId],
+        },
+      },
+      {
+        ...event,
+        recurrence: {
+          rrule: 'FREQ=DAILY;COUNT=3',
+          rdates: [operation.recurrenceId],
+        },
+      },
+    ]) {
+      expect(() =>
+        calendarEventFollowingTimingOverrides(unsupported, operation),
+      ).toThrow();
+    }
+  });
+
+  it('rejects a suffix whose generated wall time is ambiguous', () => {
+    const event = timedEvent({
+      start: '2026-10-23T02:30:00',
+      end: '2026-10-23T03:00:00',
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=4' },
+    });
+    const operation = {
+      action: 'set-timing' as const,
+      recurrenceId: zoned('2026-10-23T02:30:00'),
+      timing: {
+        type: 'end' as const,
+        start: zoned('2026-10-23T02:30:00'),
+        end: zoned('2026-10-23T03:00:00'),
+      },
+      viewerTimezone,
+    };
+    expect(() =>
+      calendarEventFollowingTimingOverrides(event, operation),
+    ).toThrow(/ambiguous or nonexistent/);
   });
 });
 

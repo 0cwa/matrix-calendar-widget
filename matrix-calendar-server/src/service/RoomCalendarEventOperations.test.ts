@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
-import { CalendarEventInput } from '@matrix-calendar-widget/calendar';
+import type {
+  CalendarEventFollowingTimingWrite,
+  CalendarEventInput,
+} from '@matrix-calendar-widget/calendar';
 import fs from 'fs';
 import path from 'path';
 import { ICalendarEventCodec } from '../caldav';
@@ -507,6 +510,59 @@ describe('RoomCalendarEventOperations', () => {
     expect(basicUsername(putInit)).toBe('_matrix_calendar_service');
   });
 
+  it('skips DAV writes for an identical following-suffix ETag retry', async () => {
+    const eventUrl = `${collectionUrl}following.ics`;
+    const sourceCalendar = followingCalendar();
+    const following = followingOperation();
+    const generated = new ICalendarEventCodec()
+      .parse(calendarId, eventUrl, sourceCalendar)
+      .applyPatch({ recurrence: { following } });
+    fetchMock.mockResolvedValueOnce(
+      new Response(generated.icalendar, {
+        status: 200,
+        headers: { ETag: '"following-v1"' },
+      }),
+    );
+
+    await expect(
+      operations.updateEvent(access(), eventUrl, '"following-v1"', {
+        recurrence: { following },
+      }),
+    ).resolves.toMatchObject({
+      etag: '"following-v1"',
+      event: { recurrence: { overrides: [{}, {}] } },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it('enforces the configured response cap before a following write', async () => {
+    const eventUrl = `${collectionUrl}following.ics`;
+    const sourceCalendar = followingCalendar();
+    const byteLength = Buffer.byteLength(sourceCalendar, 'utf8');
+    const cappedOperations = new RoomCalendarEventOperations(fetchMock, {
+      eventWritesEnabled: true,
+      maxResponseBytes: byteLength + 64,
+      radicaleBaseUrl: 'https://radicale.example.test/caldav/',
+      roomCalendarBindings,
+      servicePrincipalUserId: serviceUserId,
+    });
+    fetchMock.mockResolvedValueOnce(
+      new Response(sourceCalendar, {
+        status: 200,
+        headers: { ETag: '"following-v1"' },
+      }),
+    );
+
+    await expect(
+      cappedOperations.updateEvent(access(), eventUrl, '"following-v1"', {
+        recurrence: { following: followingOperation() },
+      }),
+    ).rejects.toMatchObject({ code: 'event-too-large' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+  });
+
   it('sends the caller ETag unchanged and surfaces stale update conflicts', async () => {
     const eventUrl = `${collectionUrl}event.ics`;
     fetchMock
@@ -829,4 +885,43 @@ function escapeXml(value: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function followingCalendar(): string {
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Matrix Calendar Widget//Tests//EN',
+    'BEGIN:VEVENT',
+    'UID:following-room@example.test',
+    'DTSTAMP:20260922T120000Z',
+    'DTSTART:20261001T090000Z',
+    'DTEND:20261001T100000Z',
+    'SUMMARY:Following room event',
+    'RRULE:FREQ=DAILY;COUNT=3',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+}
+
+function followingOperation(): CalendarEventFollowingTimingWrite {
+  return {
+    action: 'set-timing',
+    recurrenceId: {
+      type: 'date-time',
+      value: { local: '2026-10-02T09:00:00', timezone: 'UTC' },
+    },
+    timing: {
+      type: 'end',
+      start: {
+        type: 'date-time',
+        value: { local: '2026-10-02T11:00:00', timezone: 'UTC' },
+      },
+      end: {
+        type: 'date-time',
+        value: { local: '2026-10-02T12:00:00', timezone: 'UTC' },
+      },
+    },
+    viewerTimezone: 'UTC',
+  };
 }

@@ -26,6 +26,7 @@ import {
   CalendarEventRecurrenceTiming,
   CalendarEventTiming,
   CalendarRepositoryError,
+  isSupportedCalendarEventFollowingTimingEdit,
   projectCalendarEventOccurrenceByRecurrenceId,
 } from '@matrix-calendar-widget/calendar';
 import { LoadingButton } from '@mui/lab';
@@ -104,9 +105,8 @@ export function CalendarEventEditorDialog({
   onClose: () => void;
   onSaved?: (event: CalendarEvent, occurrence?: CalendarEvent) => void;
   onOccurrenceReloadRequired?: (sourceEvent: CalendarEvent) => void;
-  /** Time zone used to project the selected recurrence identity for display. */
-  viewerTimezone?: string;
   open: boolean;
+  viewerTimezone?: string;
   uidFactory?: () => string;
 }) {
   const { t } = useTranslation();
@@ -124,7 +124,9 @@ export function CalendarEventEditorDialog({
   const [error, setError] = useState<Error>();
   const [conflict, setConflict] = useState(false);
   const [missingOccurrence, setMissingOccurrence] = useState(false);
-  const [editScope, setEditScope] = useState<'occurrence' | 'series'>();
+  const [editScope, setEditScope] = useState<
+    'occurrence' | 'following' | 'series'
+  >();
   const repository = useCalendarRepository();
   const createEvent = useCreateCalendarEvent();
   const updateEvent = useUpdateCalendarEvent();
@@ -168,7 +170,19 @@ export function CalendarEventEditorDialog({
   const editingOccurrence = Boolean(
     event && occurrence && editScope === 'occurrence',
   );
+  const editingFollowing = Boolean(
+    event && occurrence && editScope === 'following',
+  );
   const occurrenceHasAlarm = Boolean(event?.alarm || event?.unsupportedAlarm);
+  const followingSupported = Boolean(
+    event &&
+    occurrence &&
+    isSupportedCalendarEventFollowingTimingEdit(
+      event,
+      occurrence.recurrenceId,
+      viewerTimezone,
+    ),
+  );
   const periodDuration = calendarEventRdatePeriodDurationFromForm(values);
   const periodValue = calendarEventRdatePeriodValueFromForm(values);
   const editingEndPeriod = values.rdateEditSource?.timing.type === 'end';
@@ -185,6 +199,8 @@ export function CalendarEventEditorDialog({
       values.rdatePeriodSeconds,
     ].some((value) => value !== undefined && value !== '');
   const invalidPeriodDuration = hasPeriodDurationInput && !periodDuration;
+  const followingTimingUnchanged =
+    editingFollowing && values.timingChanged === false;
   const periodFormDisabled =
     Boolean(values.rdateOperation) ||
     values.exdateChanged === true ||
@@ -618,6 +634,24 @@ export function CalendarEventEditorDialog({
       let saved: CalendarEvent;
 
       if (event) {
+        if (editingFollowing && occurrence) {
+          const timing =
+            calendarEventPatchFromForm(values).timing ??
+            occurrence.event.timing;
+          saved = await updateEvent(event.calendarId, event.id, {
+            recurrence: {
+              following: {
+                action: 'set-timing',
+                recurrenceId: occurrence.recurrenceId,
+                timing: recurrenceTimingFromEventTiming(timing),
+                viewerTimezone,
+              },
+            },
+          });
+          onSaved?.(saved, { ...occurrence.event, timing });
+          onClose();
+          return;
+        }
         if (editingOccurrence && occurrence) {
           const timing =
             calendarEventPatchFromForm(values).timing ??
@@ -751,6 +785,15 @@ export function CalendarEventEditorDialog({
     setError(undefined);
   };
 
+  const chooseFollowingScope = () => {
+    if (!event || !occurrence || !followingSupported || occurrenceHasAlarm) {
+      return;
+    }
+    setValues(calendarEventToFormValues(occurrence.event, initialCalendar));
+    setEditScope('following');
+    setError(undefined);
+  };
+
   const chooseSeriesScope = () => {
     if (!event) {
       return;
@@ -810,7 +853,15 @@ export function CalendarEventEditorDialog({
                 <Alert severity="info">
                   {t(
                     'calendarEvents.editor.instanceAlarmBlocked',
-                    'This series contains reminder data, so occurrence timing edits are unavailable. Edit the entire series instead.',
+                    'This series contains reminder data, so occurrence and following timing edits are unavailable. Edit the entire series instead.',
+                  )}
+                </Alert>
+              )}
+              {!occurrenceHasAlarm && !followingSupported && (
+                <Alert severity="info">
+                  {t(
+                    'calendarEvents.editor.unsupportedFollowingTiming',
+                    'This series cannot use a following timing edit because its recurrence data is outside the bounded rules this editor can safely write.',
                   )}
                 </Alert>
               )}
@@ -825,18 +876,35 @@ export function CalendarEventEditorDialog({
                     'This occurrence only',
                   )}
                 </Button>
+                <Button
+                  disabled={
+                    readOnly || occurrenceHasAlarm || !followingSupported
+                  }
+                  onClick={chooseFollowingScope}
+                  variant="outlined"
+                >
+                  {t(
+                    'calendarEvents.editor.followingScope',
+                    'This and following',
+                  )}
+                </Button>
                 <Button onClick={chooseSeriesScope} variant="outlined">
                   {t('calendarEvents.editor.seriesScope', 'Entire series')}
                 </Button>
               </Stack>
             </Stack>
-          ) : editingOccurrence ? (
+          ) : editingOccurrence || editingFollowing ? (
             <Stack mt={1} spacing={2}>
               <Alert severity="info">
-                {t(
-                  'calendarEvents.editor.instanceTimingOnly',
-                  'Only this occurrence’s start and end time will change.',
-                )}
+                {editingFollowing
+                  ? t(
+                      'calendarEvents.editor.followingTimingOnly',
+                      'This occurrence and every later occurrence will use the start and end below. Original recurrence dates and time zone stay unchanged. Timed events keep the entered elapsed duration; all-day events keep the entered whole-day duration.',
+                    )
+                  : t(
+                      'calendarEvents.editor.instanceTimingOnly',
+                      'Only this occurrence’s start and end time will change.',
+                    )}
               </Alert>
               <TextField
                 InputLabelProps={{ shrink: true }}
@@ -870,6 +938,14 @@ export function CalendarEventEditorDialog({
               {timingHelpText && (
                 <Typography color="text.secondary" variant="body2">
                   {timingHelpText}
+                </Typography>
+              )}
+              {followingTimingUnchanged && (
+                <Typography color="text.secondary" variant="body2">
+                  {t(
+                    'calendarEvents.editor.followingChangeRequired',
+                    'Change the start or end before saving this and following occurrences.',
+                  )}
                 </Typography>
               )}
               {validationError && (
@@ -1609,7 +1685,8 @@ export function CalendarEventEditorDialog({
               Boolean(validationError) ||
               readOnly ||
               chooseScope ||
-              missingOccurrence
+              missingOccurrence ||
+              followingTimingUnchanged
             }
             loading={saving}
             type="submit"
