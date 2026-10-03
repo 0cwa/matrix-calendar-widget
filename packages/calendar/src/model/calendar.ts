@@ -169,7 +169,8 @@ export type CalendarEventRecurrence = {
  * Recurrence fields accepted by supported write operations. RRULE edits change
  * only the master rule; EXDATE operations target one original occurrence
  * identity; RDATE operations add/remove point values or remove one exact
- * PERIOD value. PERIOD creation and timing edits remain unsupported.
+ * PERIOD value or add an explicit-end PERIOD. Duration-form PERIOD creation
+ * and timing edits remain unsupported.
  */
 export type CalendarEventRecurrenceWrite =
   | {
@@ -191,7 +192,19 @@ export type CalendarEventRecurrenceWrite =
             value: CalendarEventDateTime;
           }
         | {
-            /** Remove one exact existing PERIOD; PERIOD creation is unsupported. */
+            /** Add one explicit-end PERIOD RDATE; duration-form creation is unsupported. */
+            action: 'add-period';
+            value: {
+              type: 'period';
+              timing: {
+                type: 'end';
+                start: CalendarEventDateTime;
+                end: CalendarEventDateTime;
+              };
+            };
+          }
+        | {
+            /** Remove one exact existing PERIOD value. */
             action: 'remove-period';
             value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>;
           };

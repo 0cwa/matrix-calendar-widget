@@ -980,6 +980,13 @@ describe('ICalendarEventCodec', () => {
         },
       } as unknown as CalendarEventPatch),
     ).toThrow(ICalendarEventCodecError);
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          rdate: { action: 'add-period', value: period },
+        },
+      } as unknown as CalendarEventPatch),
+    ).toThrow(ICalendarEventCodecError);
 
     const malformed = codec.parse(
       'team',
@@ -1221,6 +1228,91 @@ describe('ICalendarEventCodec', () => {
       );
     },
   );
+
+  it('adds an explicit-end PERIOD RDATE without changing point or PERIOD siblings', () => {
+    const source = fixture('recurrence-override.ics').replace(
+      'RDATE;TZID=Europe/Stockholm:20261026T140000',
+      [
+        'RDATE;TZID=Europe/Stockholm:20261026T140000',
+        'RDATE;VALUE=PERIOD;TZID=Europe/Stockholm;X-KEEP=sibling:20261027T093000/PT1H',
+      ].join('\r\n'),
+    );
+    const parsed = codec.parse('team', 'period-rdate-add.ics', source);
+    const value = {
+      type: 'period' as const,
+      timing: {
+        type: 'end' as const,
+        start: {
+          type: 'date-time' as const,
+          value: { local: '2026-10-29T09:30:00', timezone: 'Europe/Stockholm' },
+        },
+        end: {
+          type: 'date-time' as const,
+          value: { local: '2026-10-29T10:30:00', timezone: 'Europe/Stockholm' },
+        },
+      },
+    };
+    const added = parsed.applyPatch({
+      recurrence: { rdate: { action: 'add-period', value } },
+    });
+    const reparsed = codec.parse(
+      'team',
+      'period-rdate-add.ics',
+      added.icalendar,
+    );
+    const unfolded = added.icalendar.replace(/\r\n[ \t]/g, '');
+
+    expect(reparsed.event.recurrence?.rdates).toContainEqual(value);
+    expect(unfolded).toContain(
+      'RDATE;TZID=Europe/Stockholm;VALUE=PERIOD:20261029T093000/20261029T103000',
+    );
+    expect(unfolded).toContain('20261026T140000');
+    expect(unfolded).toContain(
+      'X-KEEP=sibling;VALUE=PERIOD:20261027T093000/PT1H',
+    );
+  });
+
+  it.each([
+    {
+      label: 'equal end',
+      start: '2026-10-29T09:30:00',
+      end: '2026-10-29T09:30:00',
+    },
+    {
+      label: 'earlier end',
+      start: '2026-10-29T10:30:00',
+      end: '2026-10-29T09:30:00',
+    },
+  ])('rejects an explicit-end PERIOD RDATE with $label', ({ start, end }) => {
+    const parsed = codec.parse(
+      'team',
+      'period-rdate-invalid-add.ics',
+      fixture('recurrence-override.ics'),
+    );
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          rdate: {
+            action: 'add-period',
+            value: {
+              type: 'period',
+              timing: {
+                type: 'end',
+                start: {
+                  type: 'date-time',
+                  value: { local: start, timezone: 'Europe/Stockholm' },
+                },
+                end: {
+                  type: 'date-time',
+                  value: { local: end, timezone: 'Europe/Stockholm' },
+                },
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(ICalendarEventCodecError);
+  });
 
   it('rejects incompatible, PERIOD, malformed, and unsupported RDATE writes', () => {
     const dateTimeEvent = codec.parse(
