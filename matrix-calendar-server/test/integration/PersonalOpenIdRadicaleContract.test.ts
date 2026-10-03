@@ -25,6 +25,7 @@ import { NextFunction, Request, Response } from 'express';
 import fetchMock from 'jest-fetch-mock';
 import { MatrixClient } from 'matrix-bot-sdk';
 import { execFileSync } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
@@ -227,6 +228,7 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     await app.listen(0, '127.0.0.1');
     const address = app.getHttpServer().address() as AddressInfo;
     gatewayBaseUrl = `http://127.0.0.1:${address.port}`;
+    markPersonalOpenIdSetupComplete();
   }, 30000);
 
   beforeEach(() => {
@@ -418,6 +420,19 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     });
   }
 });
+
+function markPersonalOpenIdSetupComplete(): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+    return;
+  }
+
+  try {
+    appendFileSync(stageFile, 'personal-openid-setup-complete\n', 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
 
 function expectGatewayLogsToOmitCredentials(
   ...additionalSecrets: string[]

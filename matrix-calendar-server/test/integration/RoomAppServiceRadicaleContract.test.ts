@@ -75,12 +75,14 @@ const serviceUserAccessTokens: string[] = [];
 const gatewayLogLines: string[] = [];
 type RoomAppServiceListingCheckpoint =
   | 'room-one-response-status'
+  | 'room-one-response-json-parsed'
   | 'room-one-event-summary'
   | 'room-one-caldav-requests'
   | 'room-one-target-path'
   | 'room-one-no-root-discovery'
   | 'room-one-no-response-secret'
   | 'room-two-response-status'
+  | 'room-two-response-json-parsed'
   | 'room-two-event-summary'
   | 'room-two-caldav-requests'
   | 'room-two-target-path'
@@ -290,6 +292,9 @@ describeContract('room appservice proof against real Radicale', () => {
       const body = JSON.parse(response.body) as {
         events: Array<{ event: { id: string; summary: string } }>;
       };
+      markRoomAppServiceListingCheckpoint(
+        `${checkpointRoom}-response-json-parsed`,
+      );
       expect(body.events.map(({ event }) => event.summary)).toEqual([
         `Room event ${index + 1}`,
       ]);

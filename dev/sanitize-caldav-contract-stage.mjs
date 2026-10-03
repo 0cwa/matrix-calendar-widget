@@ -14,14 +14,17 @@ const allowedPhases = new Set([
   'period-removal-verified',
 ]);
 const ROOM_APPSERVICE_SETUP_COMPLETE = 'room-appservice-setup-complete';
+const PERSONAL_OPENID_SETUP_COMPLETE = 'personal-openid-setup-complete';
 const ROOM_APPSERVICE_LISTING_CHECKPOINTS = new Set([
   'room-one-response-status',
+  'room-one-response-json-parsed',
   'room-one-event-summary',
   'room-one-caldav-requests',
   'room-one-target-path',
   'room-one-no-root-discovery',
   'room-one-no-response-secret',
   'room-two-response-status',
+  'room-two-response-json-parsed',
   'room-two-event-summary',
   'room-two-caldav-requests',
   'room-two-target-path',
@@ -52,6 +55,15 @@ export function formatRoomAppServiceSetupStatus(stageContent) {
   return `room-appservice-setup ${completed ? 'complete' : 'not-reached'}\n`;
 }
 
+export function formatPersonalOpenIdSetupStatus(stageContent) {
+  const completed =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === PERSONAL_OPENID_SETUP_COMPLETE);
+  return `personal-openid-setup ${completed ? 'complete' : 'not-reached'}\n`;
+}
+
 export function formatRoomAppServiceListingCheckpoint(stageContent) {
   let latestCheckpoint;
   if (typeof stageContent === 'string') {
@@ -75,6 +87,7 @@ function emitContractPhase(stagePath) {
   try {
     const stageContent = readFileSync(stagePath, 'utf8');
     process.stdout.write(formatContractPhase(stageContent));
+    process.stdout.write(formatPersonalOpenIdSetupStatus(stageContent));
     process.stdout.write(formatRoomAppServiceSetupStatus(stageContent));
     process.stdout.write(formatRoomAppServiceListingCheckpoint(stageContent));
   } catch {

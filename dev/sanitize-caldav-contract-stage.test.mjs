@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   formatContractPhase,
+  formatPersonalOpenIdSetupStatus,
   formatRoomAppServiceListingCheckpoint,
   formatRoomAppServiceSetupStatus,
 } from './sanitize-caldav-contract-stage.mjs';
@@ -60,6 +61,17 @@ test('reports only whether RoomAppService beforeAll completed', () => {
   );
 });
 
+test('reports only whether the personal OpenID beforeAll completed', () => {
+  assert.equal(
+    formatPersonalOpenIdSetupStatus('period-removal-verified\n'),
+    'personal-openid-setup not-reached\n',
+  );
+  assert.equal(
+    formatPersonalOpenIdSetupStatus('personal-openid-setup-complete\n'),
+    'personal-openid-setup complete\n',
+  );
+});
+
 test('does not expose unknown stage data or accept a partial setup marker', () => {
   const privateSentinel = 'room-appservice-setup-complete private-event-data';
   const output = formatRoomAppServiceSetupStatus(privateSentinel);
@@ -74,10 +86,10 @@ test('emits only the latest fixed RoomAppService listing checkpoint', () => {
       [
         'room-appservice-listing-room-one-response-status',
         'room-appservice-listing-room-one-event-summary',
-        'room-appservice-listing-room-two-target-path',
+        'room-appservice-listing-room-two-response-json-parsed',
       ].join('\n'),
     ),
-    'room-appservice-listing room-two-target-path\n',
+    'room-appservice-listing room-two-response-json-parsed\n',
   );
 });
 
