@@ -33,10 +33,12 @@ export type {
   CalDavEventTransportMethod,
   CalDavEventWriteResult,
 } from './CalDavEventClient';
+export { DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES } from './CalDavTransportLimits';
 export { isSafeSingleVeventSeries } from './ICalendarDeletionSafety';
 export {
   ICalendarEventCodec,
   ICalendarEventCodecError,
+  MAX_FOLLOWING_RESOURCE_BYTES,
   ParsedICalendarEvent,
 } from './ICalendarEventCodec';
 export type {

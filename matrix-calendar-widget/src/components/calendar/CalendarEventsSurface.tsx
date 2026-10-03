@@ -274,6 +274,7 @@ export function CalendarEventsSurface({
         event={selectedEvent?.event}
         recurrenceId={selectedEvent?.recurrenceId}
         sourceEvent={selectedEvent?.sourceEvent}
+        viewerTimezone={viewerTimezone}
         onSourceEventChange={(sourceEvent) =>
           setSelectedEvent((current) =>
             current &&

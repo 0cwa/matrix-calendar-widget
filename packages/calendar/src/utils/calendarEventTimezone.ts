@@ -127,6 +127,15 @@ export function isCalendarRecurrenceWallTimeValid(
   return findLocalTransition(wallMillis, transitions)?.kind !== 'gap';
 }
 
+/** Return false when a local wall time falls in a DST gap or overlap. */
+export function isCalendarLocalDateTimeUnambiguous(
+  local: string,
+  timezoneId: string,
+): boolean {
+  const { wallMillis, transitions } = timezoneContext(local, timezoneId);
+  return findLocalTransition(wallMillis, transitions) === undefined;
+}
+
 /** Convert an instant to a local iCalendar value without host tzdata. */
 export function calendarUnixMillisToLocalDateTime(
   instantMillis: number,

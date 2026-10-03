@@ -325,6 +325,147 @@ describe('InMemoryCalendarRepository', () => {
     expect(fetched.recurrence?.overrides).toEqual([{ recurrenceId, timing }]);
   });
 
+  it('stores a bounded following suffix and treats an exact repeat as a no-op', async () => {
+    const event: CalendarEvent = {
+      ...events[2],
+      id: 'following-timing',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-01-05T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-01-05T09:30:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+    const operation = {
+      action: 'set-timing' as const,
+      recurrenceId: {
+        type: 'date-time' as const,
+        value: {
+          local: '2026-01-12T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      timing: {
+        type: 'end' as const,
+        start: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-01-12T11:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        end: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-01-12T12:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      },
+      viewerTimezone: 'Europe/Stockholm',
+    };
+
+    const updated = await repository.updateEvent('team', event.id, {
+      recurrence: { following: operation },
+    });
+    expect(updated.timing).toEqual(event.timing);
+    expect(updated.recurrence?.overrides).toHaveLength(3);
+    expect(
+      updated.recurrence?.overrides?.map(({ recurrenceId }) => recurrenceId),
+    ).toEqual([
+      operation.recurrenceId,
+      {
+        type: 'date-time',
+        value: {
+          local: '2026-01-19T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      {
+        type: 'date-time',
+        value: {
+          local: '2026-01-26T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    ]);
+    expect(
+      updated.recurrence?.overrides?.every(
+        ({ timing }) =>
+          timing?.type === 'end' &&
+          timing.start.type === 'date-time' &&
+          timing.end.type === 'date-time' &&
+          timing.start.value.local.endsWith('11:00:00') &&
+          timing.end.value.local.endsWith('12:00:00'),
+      ),
+    ).toBe(true);
+
+    const repeated = await repository.updateEvent('team', event.id, {
+      recurrence: { following: operation },
+    });
+    expect(repeated.recurrence).toEqual(updated.recurrence);
+  });
+
+  it('rejects malformed following writes before mutating the source event', async () => {
+    const event: CalendarEvent = {
+      ...events[2],
+      id: 'invalid-following-timing',
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+    const operation = {
+      action: 'set-timing' as const,
+      recurrenceId: {
+        type: 'date-time' as const,
+        value: {
+          local: '2026-01-12T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      timing: {
+        type: 'end' as const,
+        start: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-01-12T11:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        end: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-01-12T12:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      },
+      viewerTimezone: 'Europe/Stockholm',
+    };
+
+    await expect(
+      repository.updateEvent('team', event.id, {
+        title: 'Must not be applied',
+        recurrence: { following: operation },
+      } as CalendarEventPatch),
+    ).rejects.toMatchObject({ code: 'unsupported-patch' });
+    expect(await repository.getEvent('team', event.id)).toEqual(event);
+  });
+
   it('rejects malformed occurrence operations and durations before mutation', async () => {
     const event: CalendarEvent = {
       ...events[2],

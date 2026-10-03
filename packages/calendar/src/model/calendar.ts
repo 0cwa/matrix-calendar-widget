@@ -130,6 +130,15 @@ export type CalendarEventRecurrenceTiming =
       duration: CalendarEventDuration;
     };
 
+/** Timing requested for a bounded "this and following" recurrence edit. */
+export type CalendarEventFollowingTimingWrite = {
+  action: 'set-timing';
+  recurrenceId: CalendarEventDateTime;
+  timing: CalendarEventRecurrenceTiming;
+  /** Required projection context for DATE/floating interval validation. */
+  viewerTimezone: string;
+};
+
 /** A PERIOD-valued RDATE with its explicit end or RFC duration. */
 export type CalendarEventRecurrenceDate =
   | CalendarEventDateTime
@@ -193,7 +202,9 @@ export type CalendarEventRecurrence = {
  * identity; RDATE operations add/remove point values or remove one exact
  * PERIOD value, add one positive-duration or explicit-end PERIOD, or
  * atomically replace one exact existing PERIOD value. Occurrence timing writes
- * change one original recurrence identity without changing the master event.
+ * change one original recurrence identity without changing the master event;
+ * following timing writes materialize a bounded finite suffix in the same
+ * resource.
  */
 export type CalendarEventRecurrenceWrite =
   | {
@@ -216,6 +227,10 @@ export type CalendarEventRecurrenceWrite =
         /** Required projection context for validating DATE/floating intervals. */
         viewerTimezone: string;
       };
+    }
+  | {
+      /** Apply timing to one supported finite recurrence suffix. */
+      following: CalendarEventFollowingTimingWrite;
     }
   | {
       /** Add or remove one exact DATE or DATE-TIME RDATE value. */
