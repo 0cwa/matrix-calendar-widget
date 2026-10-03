@@ -318,7 +318,9 @@ export function validateCalendarEventForm(
       validateRecurrence(
         values,
         calendarEventEditableFieldsFromForm(values).timing,
-      ) ?? validateRdateOperation(values)
+      ) ??
+      validateRdateOperation(values) ??
+      validateExdateOperation(values)
     );
   }
 

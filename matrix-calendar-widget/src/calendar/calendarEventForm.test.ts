@@ -823,6 +823,57 @@ describe('calendar event form adapter', () => {
     ).toBeUndefined();
   });
 
+  it('rejects conflicting all-day EXDATE removal changes', () => {
+    const exdate = { type: 'date' as const, value: '2026-10-01' };
+    const event: CalendarEvent = {
+      id: 'all-day-exdate-series',
+      calendarId: 'team',
+      uid: 'all-day-exdate-series@example.test',
+      title: 'All-day EXDATE series',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-09-23',
+        endDate: '2026-09-24',
+      },
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=4', exdates: [exdate] },
+    };
+    const values = calendarEventToFormValues(event, calendar);
+    const removal = {
+      ...values,
+      exdateChanged: true,
+      exdateOperation: { action: 'remove' as const, recurrenceId: exdate },
+    };
+
+    expect(
+      validateCalendarEventForm({ ...removal, title: 'All-day EXDATE series' }),
+    ).toBeUndefined();
+    expect(
+      validateCalendarEventForm({
+        ...removal,
+        title: 'All-day EXDATE series',
+        recurrenceChanged: true,
+      }),
+    ).toBe('invalid-recurrence');
+    expect(
+      validateCalendarEventForm({
+        ...removal,
+        title: 'All-day EXDATE series',
+        timingChanged: true,
+      }),
+    ).toBe('invalid-recurrence');
+    expect(
+      validateCalendarEventForm({
+        ...removal,
+        title: 'All-day EXDATE series',
+        rdateChanged: true,
+        rdateOperation: {
+          action: 'remove',
+          value: { type: 'date', value: '2026-10-02' },
+        },
+      }),
+    ).toBe('invalid-recurrence');
+  });
+
   it('serializes removal of an exact PERIOD RDATE', () => {
     const period = {
       type: 'period' as const,
