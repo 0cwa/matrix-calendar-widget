@@ -1,137 +1,60 @@
 # Project status
 
-_Last updated: 2026-10-03_
+_Last updated: 2026-10-03._
 
-This is the short-lived execution snapshot. `docs/PLAN.md` is the durable milestone plan; GitHub issues contain acceptance criteria.
+_Source snapshot: `main` at `f49acee71280944ad6ae351111947ff01c00031d` (PR #201)._
 
 ## Current phase
 
-**M3 is complete. M4 description and color editing, mixed-collection compatibility, manager-only CalDAV URL/copy diagnostics, and hiding of VJOURNAL-only/VTODO-only collections are implemented; issue #5 remains open for other collection-management work, and collection timezone editing is deferred. PRs #128 and #130 merged bounded read-only recurrence projection/range clipping and the first supported whole-series RRULE create/edit slice. M5 recurrence work continues in bounded slices.**
+**Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; actual-client and operator acceptance remain open. M7 has bounded bot commands and post-success room-target event notices. M8 has source-level gateway and CalDAV limits plus a hosted synthetic Chromium fixture; actual-client, screen-reader, capacity, and operator acceptance remain open.
 
-M2 personal OpenID access is complete on the pinned development stack (PRs #146/#147). PR #164 proves the gated application-principal room `listEvents` path against pinned Synapse and project-owned Radicale, including subject binding and cross-room denial. All seven hosted checks passed at its independently reviewed final head. Actor membership, action power, and exact static binding are checked before application-principal proof or CalDAV I/O. Room writes, reminder configuration/options, the bounded scheduler, native Matrix delivery, and action notices are now implemented behind separate default-off gates. The final integrated hosted contract still needs to validate the repeated concurrent PostgreSQL claim race before delivery is treated as ready to enable. The actual etke image override, `/data` preservation, production PostgreSQL TLS/CA, and restore rehearsal still require operator evidence and are separate from repository development.
+This is source status, not release or deployment approval. The [repository and operator readiness matrix](./repository-readiness.md) separates tested repository behavior from evidence that still requires a real operator or Matrix client.
 
-## Landed
+## Landed on `main`
 
-### M1 — Calendar domain seam
+### M0–M3 — fork, domain seam, identity, and basic events
 
-Complete on `main`:
+The repository has the calendar domain and repository seam, widget CRUD, user-scoped Matrix OpenID access, an owned OpenID-only Radicale image, conditional ETag writes, and pinned real-service coverage for personal access and event round trips. These contracts exercise the project-owned test stack; they do not validate a production or etke-managed host.
 
-- calendar/event domain model and repository seam,
-- in-memory repository,
-- repository-backed calendar/list/editor UI,
-- create/edit/delete mutation hooks and invalidation.
+### M4 — calendar management
 
-### M2 — Gateway identity and Radicale discovery
+Calendar visibility, VEVENT-only creation, rename, safe deletion, description and color operations, mixed-collection safeguards, and manager-only CalDAV diagnostics are implemented. Existing VTODO/VJOURNAL data is not promoted to a first-class UI and mixed resources are preserved by supported edits. Collection `Calendar.timezone` editing remains deferred; issue #5 remains open for broader collection-management acceptance.
 
-Complete on `main` for the pinned development stack (PRs #146 and #147):
+### M5 — bounded recurrence and iCalendar support
 
-- authenticated calendar gateway context and room membership/power authorization,
-- request-scoped Matrix OpenID validation and user-scoped CalDAV credential provider,
-- principal/home/calendar discovery and same-user personal calendar enumeration,
-- denial of unauthorized, nonmember, and membership/authorization failure cases before CalDAV I/O,
-- an OpenID-only owned Radicale image and real-container gateway contract.
+The codec and widget support a documented bounded RRULE/RDATE/EXDATE subset, PERIOD values, supported relative DISPLAY VALARM metadata, revision metadata, bundled-timezone projection, selected-occurrence timing edits, typed EXDATE skip/restore, and bounded safe event links. PR #197 adds selected-occurrence timing and link behavior; its exact merged tree `f532c628a227ad6c97ceeaa557feff58d3139dc6` passed all eight required repository checks. PR #200 adds timing-only this-and-following edits for supported finite COUNT rules of at most 128 members within one resource; its exact tree `9d1ce37f2457bbdeef4835ad26a8b28beac438ee` passed all eight checks. It rejects alarms, RDATE/EXDATE, unsafe detached suffixes, unsupported status/timing, and oversized results. Unsupported data remains opaque where supported edits allow it. Issue #6 remains open for broader recurrence authoring and actual client/server interoperability, including additional RRULE parts, general RECURRENCE-ID property editing, arbitrary rule splitting, attendee/email, individual reminder, and attachment/conference authoring.
 
-The earlier password-authenticated real-Radicale discovery contract records
-legacy deployment behavior only; it does not grant password support to the
-owned image. These results validate the pinned Synapse and project-owned
-Radicale stack, not the actual etke-managed host or its `/data` migration path.
+### M6 — room calendars and reminders
 
-### M3 — VEVENT CRUD
+PR #164 established the gated application-service room-read path; PR #193 added separately gated event mutations, strong conditional validators, and refusal of unsafe mixed-resource deletion. `ROOM_CALENDAR_ACCESS_ENABLED` and `ROOM_CALENDAR_EVENT_WRITES_ENABLED` default to `false`. The application-service principal's Radicale `owner_only` access spans its whole home; exact gateway bindings provide application-level room scoping, not backend per-room ACLs.
 
-Complete on `main`:
+PR #199 adds manager-authorized reminder configuration and alarm-options APIs, bounded scheduler lifecycle, the native Matrix reminder transport, post-success notices for room-target widget event create/update/delete, and hosted contracts. Its integrated hosted checks passed at tree `9fdc592e770a98a1012cbacbc293cbda75ee726a`; the live Radicale contract completed setup and all three cases, including binding revalidation, and the restricted-role PostgreSQL contract passed 7/7 tests with 20 concurrent claim pairs.
 
-- preservation-first `ical.js` codec (#61 / PR #70),
-- visible-range transport with ETags and conditional create/update/delete,
-- authenticated room-authorized gateway CRUD and gateway-backed widget repository,
-- visible conflict recovery,
-- real Radicale two-client round-trip and stale-ETag contract (#66 / PR #90).
+PR #201 connects the primary widget to the gateway-authorized room calendar. It consumes the current room capability response, shows the authorized bound room calendar and its read/write capabilities, displays a safe link to the current Matrix room in event details, and exposes reminder controls for supported alarms to authorized managers. All eight hosted checks passed at exact source tree `a65811903363397ea0883f4e32a98ace7dfdb9a8`; independent review passed on the same tree, merged as `f49acee71280944ad6ae351111947ff01c00031d`. Issue #7's bounded repository criteria are complete. The complete local check set passed with the server Jest suite rerun serially after the parallel `yarn ci` invocation exited 1 when Jest workers were terminated by SIGKILL; the serial server run, remaining calendar/timezone suites, static checks, and production build passed. The hosted checks ran on Node 22. These checks do not establish actual Element client or operator-host acceptance.
 
-### M4 — Calendar management
+Room access, event writes, reminder settings, reminder delivery, and action notices retain independent default-off gates. Delivery requires the app-owned PostgreSQL store and room-access gate, and is controlled by `ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED`. Reminder configuration uses `MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED`; room-target action notices use `ROOM_CALENDAR_ACTION_MESSAGES_ENABLED`. A database URL alone does not enable any capability.
 
-Merged on `main`:
+The initial reminder target is a whole-room `m.mentions.room` notice in an unencrypted room. The native appservice transport refuses encrypted or unknown room state; it does not provide end-to-end encrypted scheduled reminders. Stable transaction IDs and database claims support bounded retries but do not guarantee exactly-once delivery. Scheduler work and PostgreSQL coordination are designed for one server replica. Operator acceptance is separate.
 
-- calendar visibility, VEVENT-only creation, and writable-calendar rename (PRs #94, #96, #99),
-- safe VEVENT-only calendar deletion (issue #100 closed by PR #101),
-- description discovery and description-only editing through the user-scoped gateway (PR #106),
-- calendar color editing through the user-scoped gateway (PR #108),
-- mixed-collection compatibility notice and non-destructive VEVENT use (PR #109).
+### M7 — bot fallback and room-target action notices
 
-Calendar timezone editing is deferred. PR #109 verifies mixed-collection notice behavior, preserves sibling VTODO data during VEVENT edits, and excludes collections from discovery when they explicitly report a supported-component set without VEVENT. The CalDAV discovery regression now verifies both VJOURNAL-only and VTODO-only collections remain untouched and hidden. PR #113 implements and validates the manager-only CalDAV URL/copy diagnostics under ADR022. Issue #5 remains open for remaining collection-management acceptance work. Its body has been reconciled to record description and color editing, safe deletion, diagnostics, and mixed-collection handling as complete; collection-timezone editing remains deferred.
+PR #196 implements bounded `!calendar upcoming`, `event`, `create`, and `delete`/`cancel` commands. Creation is a single timed event; deletion is whole-series only for a supported VEVENT resource. The Matrix sender is actor context and attribution, never the CalDAV identity. Commands recheck current membership, action power, and exact binding before appservice proof or CalDAV I/O. PR #198 adds a process-local command limiter before state lookups and calendar work. PR #199 adds opt-in best-effort notices after successful room-target widget create/update/delete; Matrix failure cannot roll back the CalDAV change. Notices use a sanitized title and opaque resource ID, suppress automatic mentions, and fail closed for encrypted rooms unless the SDK confirms encryption. SDK requests use their default 60-second timeout; the notice service does not override it or provide an abort adapter. Issue #8 is complete for the repository fallback scope; this does not establish actual-client or operator acceptance.
 
-### M7 — Non-widget fallback
+### M8 — gateway and transport controls
 
-PR #105 merged `!calendar help` and guidance directing capable clients to the widget; issue #8's help criteria are complete. Issue #8 remains open for upcoming/event queries and data-changing commands, which depend on the M6 room-calendar binding and authorization path.
+PR #181 limits `/v1/calendar` before OpenID validation to 120 requests per 60 seconds per TCP peer by default, with at most 10,000 in-memory source entries and a generic 429 with `Retry-After`. It ignores forwarded-address headers and resets on restart. PR #189 bounds event responses (16 MiB default, configurable up to 64 MiB) and refuses redirects; PR #191 bounds discovery XML and confines resource paths. Express JSON and urlencoded request bodies remain capped at 100 KiB.
 
-### M8 — Docker build and deployment groundwork
+PR #184 adds a synthetic projection benchmark, not a production latency or capacity guarantee. PR #186 adds keyboard and automated accessibility coverage. PR #195 adds a production-preview Chromium fixture; the hosted job passed all eight list/month cases at four viewport sizes on tested tree `c368aacfb32a5b9b57bcb964cb119bdacd20b243`. This validates the standalone component fixture only. Actual Element Web/Desktop/mobile, screen-reader, and production layout results are not claimed.
 
-PR #102 merged Docker build/runtime documentation and a non-publishing CI image-build smoke. PR #170 adds cold backup and isolated restore instructions for the project-owned Compose volumes and separate external PostgreSQL guidance; it does not cover etke-managed `/data`. PR #172 records the generic operator-run etke/MDAD compatibility boundary. The adopted pre-alpha release policy permits breaking changes and authorizes neither live deployment nor publication; future release gates remain. These documents and build smoke do not verify a live etke-managed host. The repository has no MDAD-native service definition or rollout integration. Helm/Kubernetes packaging remains optional later work.
+## Open scope and acceptance blockers
 
-## Active work
+- **M4:** collection-timezone editing and remaining issue #5 acceptance work.
+- **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, additional RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, and attachment/conference authoring are not part of the implemented editor.
+- **M6:** issue #7 bounded repository criteria are complete. Keep room access, event writes, settings, delivery, and action notices off until the operator accepts each capability and its trust boundary. A passing pinned stack is not an etke-host or production proof.
+- **M8:** record actual Element Web/Desktop/mobile and screen-reader evidence separately; issue #9 remains open for beta, capacity, and client/operator acceptance. Gateway and bot quotas are process-local. Callers behind one reverse proxy share the gateway's TCP-peer quota; use one server replica or add a trusted upstream/distributed control.
+- **Operator readiness:** production homeserver/proxy behavior, OpenID query-token log redaction, actual Radicale image/configuration and `/data` preservation, PostgreSQL endpoint TLS/CA and role, backups/restores, secrets, network exposure, and rollback remain to be verified. The Compose sidecar creates its own Radicale store and is not a migration of etke data.
+- **Release/deployment:** the project remains pre-alpha. Build and contract evidence do not authorize image/chart publication or a live deployment.
 
-### M5 — Recurrence and iCalendar completeness
+## Documentation note
 
-Issue #6 remains open. The domain projects bounded recurrence into exact viewer-local windows, and the editor supports the documented whole-series RRULE subset plus point RDATE and one-occurrence EXDATE skip/restore operations. Unsupported rules, timezone definitions, and mixed members remain opaque and preserved; see PLAN and ADR023 for the precise supported rule boundary.
-
-PRs #169/#175/#177 add explicit-end and positive-duration PERIOD RDATEs through the codec/domain and localized widget duration entry. Floating, UTC, and named-TZID forms remain distinct. Existing PERIOD timing edits, broader weekly combinations, and scoped instance/following editing are under review or implementation and are not claimed complete on main. PR #183 defines supported SEQUENCE/timestamp revision updates while preserving unsupported metadata. Named-timezone/DST and half-open all-day regressions are merged.
-
-The widget edits one supported negative relative DISPLAY alarm. Other alarm actions/forms remain preserved with disabled controls. This is CalDAV alarm metadata, not Matrix delivery. General recurrence interoperability, scoped edits, safe attachment/conference display, and broader alarms remain M5 work.
-
-### M6 — PostgreSQL reminder persistence
-
-The optional app-owned PostgreSQL store, schema migrations, transactional
-claim/completion contract, verified-TLS default, and restricted-role PostgreSQL
-16 CI contract are implemented. The earlier hosted restricted-role contract
-passed all five integration tests in run 36358734009. A follow-up repair now
-uses conflict-safe insert/reclaim statements for the delivery key and tuple
-uniqueness constraints, with 20 repeated concurrent claim pairs in the hosted
-contract. The repair's local SQL-contract tests pass; its PostgreSQL-backed
-hosted run remains pending. Production validation remains open: no
-operator-controlled PostgreSQL endpoint or CA/certificate configuration has
-been supplied, so production TLS/CA validation and runtime validation against
-that endpoint have not been performed. etke-specific database wiring also
-remains unverified. Persistence provides at-most-once database
-claim/completion state; scheduler and delivery are separately gated and do not
-guarantee exactly-once Matrix message delivery.
-
-## Active blockers
-
-### M6 — Room-owned application principal
-
-ADR014/ADR015 select the configured application principal and operator-managed static bindings. PR #164 has passed the real personal/room/cross-room contract and independent final source review. `target=room` listing can issue an application-principal proof only after current actor membership, power, and exact binding checks; its feature gate defaults disabled. The development contract's synthetic login accounts use a dev-only successful-login burst allowance, leaving production limits unchanged.
-
-Radicale `owner_only` trusts the principal's whole home: gateway bindings enforce cross-room isolation, not backend per-collection ACLs. The configured service home is an operator trust boundary. A Matrix event sender remains authorization/audit identity and never becomes OpenID proof. User-principal room-context routes continue to use the authenticated user's principal.
-
-Reminder configuration and alarm options revalidate the current canonical source and require a joined manager, exact binding, and known unencrypted room before service-principal proof, CalDAV, or store I/O. The scheduler freshly rechecks the binding, configuration, canonical alarm and occurrence, encryption, and `m.mentions.room` power before a send; Matrix transaction IDs are stable across retries. The scheduler and native transport remain default-off. Individual recipients, email consent, and per-user bot proof remain outside the accepted initial scope. Room diagnostics and collection lifecycle remain operator-managed. External etke and production database evidence does not block this repository-side implementation.
-
-### M7 — Data commands
-
-Issue #8 remains open after the help-only PR #105. `upcoming`, `event`, create, and delete/cancel commands depend on the M6 room-owned calendar binding and authorization contracts; do not implement them by treating a room sender as CalDAV identity.
-
-### M8 — Deployment verification
-
-After authentication and runtime configuration are defined, verify the Docker-compatible services on the operator's etke-managed host. In particular, the custom Radicale image override and preservation of the existing `/data` collection store remain unverified and are not implied by the passing owned-image CI contract. The deployment profile still needs host-specific service ownership/lifecycle, playbook or host interface, network and proxy/TLS/public URL, secrets, persistent storage, and PostgreSQL access for reminder state. Build-smoke success and deployment documentation are not deployment evidence. Issue #9 remains open.
-
-### Repository administration
-
-The GitHub branch-protection API confirms that `main` requires pull requests, conversation resolution, the five documented CI checks, and disallows force pushes and deletion; administrator enforcement is enabled. Issue #29 is closed after PR #150 verified the behavior: GitHub reported `mergeable_state=blocked` while four required checks were pending and `clean` after all five passed.
-
-## Highest-priority next steps
-
-1. Keep M4 timezone editing deferred until its CalDAV compatibility boundary is established.
-2. Advance M5 through bounded recurrence and round-trip slices, adding DST and named-timezone regressions with each relevant behavior.
-3. Run the final hosted authorization, Matrix/CalDAV, and repeated concurrent PostgreSQL claim contracts for room writes and reminders. Keep the default-off gates closed until those exact-head checks pass.
-4. Build M7 data commands on those M6 authorization contracts; help is already available.
-5. Verify an operator-run deployment on the etke-managed host after the host-specific runtime contract is known.
-
-## Working rules
-
-- Prefer short-lived branches directly from current `main`; avoid stacked PR chains unless a dependency requires them.
-- Keep vertical slices small and tested; do not build a generic WebDAV administration framework.
-- Keep CalDAV credentials server-side and do not expose them in the widget or logs.
-- Treat the Matrix sender as authorization context and audit data, never as proof of OpenID or CalDAV identity.
-
-## Baseline and tracking
-
-- NeoDateFix upstream: `nordeck/matrix-meetings@2d3011f665af04c3cd376c388f7ae3bcb06bba25`
-- milestone trackers: #1 (M0), #2 (M1), #3 (M2), #4–#9 (M3–M8)
-- M3 implementation slices: #61–#66 — complete
+The [readiness matrix](./repository-readiness.md), [README](../README.md), [client validation](./calendar-client-validation.md), [browser validation](./browser-calendar-validation.md), and [threat model](./threat-model.md) describe the source and evidence boundaries. They distinguish pinned service contracts and synthetic browser evidence from actual client, operator-host, and production acceptance.

@@ -2,35 +2,35 @@
 
 ## Scope and status
 
-This source-based model was checked against `main` at
-`9afadbe83dd28943dfc88440816528f564081190` on 2026-10-03. It describes the
-checked-in pre-alpha system; it is not a penetration test, a deployment
-approval, or evidence that an operator-hosted service has the same
-configuration. It records existing boundaries and residual risks without
-adding a permission rule.
+This source-based model records the repository boundary at `main` commit
+`f49acee71280944ad6ae351111947ff01c00031d` on 2026-10-03. It is not a
+penetration test, a deployment approval, or evidence that an operator-hosted
+service has the same configuration.
 
-The personal widget path validates a Matrix OpenID assertion and accesses
-Radicale as that user. Existing room-context gateway routes also authorize the
-current user against Matrix room membership and power, then access that user's
-CalDAV principal. They do not use the room service principal. The room-target
-path resolves an exact server-configured binding after actor and room checks,
-but `RoomCalendarCalDavAccess` still denies before CalDAV I/O. Listing room
-calendars returns only a read-only descriptor of the configured calendar ID,
-without CalDAV I/O. Room collection lifecycle remains operator-managed.
+The personal widget path validates Matrix OpenID identity and accesses
+Radicale as that user. Room-owned calendar reads (#164) and event mutations
+(#193) use the configured application-service principal after current actor,
+membership, action-power, and exact room/calendar-binding checks. PR #201
+connects the primary widget to the room capabilities and the one authorized
+bound calendar; its detail view displays a safe link to the current Matrix
+room, and authorized managers can configure supported alarm reminders. Read
+and write features are separately default-off. The service principal's
+Radicale `owner_only` access spans its whole home; room bindings provide
+application scoping, not backend per-room ACLs. Pinned Synapse/Radicale and
+widget contracts cover these repository paths, not an etke-managed host or
+production deployment.
 
-PR #164 is an unmerged draft read-only `target=room` event-listing candidate
-outside this source snapshot. Its real-container contract has not passed.
-It does not enable room CalDAV access: the default access
-gate remains closed, and room-target event mutations remain unavailable. Its
-behavior must not be described as deployed or as proof of cross-room
-isolation.
-
-The bot fallback currently provides `!calendar help`; event-query and
-data-changing commands remain open. PostgreSQL reminder persistence is
-optional. Its scheduling and Matrix delivery helpers are not wired to a
-sender or scheduler. The actual etke-managed Radicale image override, `/data`
-preservation, proxy logging, and production PostgreSQL connection have not
-been verified.
+The fallback bot has bounded room-calendar data commands (#196); its process-
+local traffic limiter (#198) denies excess commands before Matrix state or
+CalDAV work. Command replies use the SDK's encryption-aware send path and fail
+closed when encrypted-room state cannot be confirmed. PR #199 wires separately
+gated reminder configuration and delivery plus best-effort notices after
+room-target widget event create/update/delete. Scheduled reminders use a native
+appservice sender and are refused for encrypted or unknown room state;
+room-target widget action notices use the SDK crypto-aware path and send only
+after successful room-target widget create/update/delete operations. Neither
+path is enabled by default. The actual etke image override, `/data` continuity, proxy logging, and
+production PostgreSQL connection remain unverified.
 
 ## Assets and actors
 
@@ -38,7 +38,7 @@ been verified.
   attendee identities, meeting URLs, recurrence, alarms, and resource metadata
   can reveal private plans and relationships. Radicale is canonical.
 - **Matrix identity assertions and access tokens:** OpenID proofs and Matrix
-  bearer tokens authenticate users. The bot `ACCESS_TOKEN` and any future
+  bearer tokens authenticate users. The bot `ACCESS_TOKEN` and configured
   appservice token can act with server-side authority.
 - **CalDAV authorization headers:** the tagged OpenID proof is carried in a
   server-generated Basic Authorization header. A leaked header can be replayed
@@ -104,25 +104,36 @@ See
 
 ### Gateway to room-owned CalDAV
 
-Main validates current membership, action power, and the exact static
-room/calendar binding. The access service then returns unavailable without
-network or CalDAV I/O. Existing user-principal room-context routes are
-separate. See [CalendarGatewayController.ts](../matrix-calendar-server/src/controller/CalendarGatewayController.ts),
+Room-target operations check current actor membership, action-specific power,
+the exact configured room/calendar binding, and any requested calendar before
+creating appservice access. Read and write capabilities have independent
+default-off settings: `ROOM_CALENDAR_ACCESS_ENABLED` and
+`ROOM_CALENDAR_EVENT_WRITES_ENABLED`. The write flag cannot enable room reads.
+The pinned Synapse/Radicale room contract exercises reads and event mutations,
+including cross-room and nonmember denial before proof or CalDAV I/O. See
+[CalendarGatewayController.ts](../matrix-calendar-server/src/controller/CalendarGatewayController.ts),
 [MatrixCalendarAuthorization.ts](../matrix-calendar-server/src/service/MatrixCalendarAuthorization.ts),
-[RoomCalendarBindingResolver.ts](../matrix-calendar-server/src/service/RoomCalendarBindingResolver.ts),
-[RoomCalendarCalDavAccess.ts](../matrix-calendar-server/src/service/RoomCalendarCalDavAccess.ts),
-and
-[authorization tests](../matrix-calendar-server/src/service/MatrixCalendarAuthorization.test.ts).
+[RoomCalendarEventOperations.ts](../matrix-calendar-server/src/service/RoomCalendarEventOperations.ts),
+and [RoomAppServiceRadicaleContract.test.ts](../matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts).
+
+The room-target path is distinct from user-principal room-context routes, which
+continue to use the authenticated user's CalDAV identity.
 
 ### Gateway to optional PostgreSQL
 
 Reminder persistence is disabled when `MATRIX_CALENDAR_REMINDER_DATABASE_URL`
 is absent. If configured, the store uses verified TLS by default; plaintext
-requires the explicit `trusted-private-network` mode. The store is persistence
-only, not a running reminder sender. No production database endpoint has been
-tested. See [app.module.ts](../matrix-calendar-server/src/app.module.ts),
+requires the explicit `trusted-private-network` mode. PR #199 wires the
+bounded scheduler and native sender, but delivery also requires
+`ROOM_CALENDAR_ACCESS_ENABLED`, a valid binding and service configuration, and
+the default-off `ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED` gate. The separate
+settings API gate is `MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED`. Native
+scheduled delivery is limited to unencrypted rooms and checks current room
+state and mention permission before sending. No production database endpoint
+has been tested. See [app.module.ts](../matrix-calendar-server/src/app.module.ts),
 [ReminderDatabaseConnection.ts](../matrix-calendar-server/src/reminder/ReminderDatabaseConnection.ts),
-and [ADR019](./adrs/adr019-postgresql-reminder-sidecar-store.md).
+[ADR019](./adrs/adr019-postgresql-reminder-sidecar-store.md), and
+[ADR028](./adrs/adr028-room-reminder-configuration-and-delivery.md).
 
 The project never asks for or stores a user's Matrix password. The browser
 does not receive CalDAV credentials or the bot service principal's credential.
@@ -150,89 +161,71 @@ and power checks for each operation.
 
 ### Cross-room access through the service principal
 
-**Current control.** The main room-target path checks the actor, action power,
-exact `ROOM_CALENDAR_BINDINGS` entry, and any requested calendar ID before
-reaching a gate that always denies.
+**Current control.** Before application-service proof or DAV I/O, the gateway
+checks the actor, membership, action power, exact `ROOM_CALENDAR_BINDINGS`
+entry, and requested calendar. The room access and write feature gates remain
+independently disabled by default. Pinned real-service contracts exercise
+allowed room access and negative cross-room attempts.
 
 **Residual risk and owner.** Radicale `owner_only` still grants the appservice
 principal whole-home access. Gateway binding checks are application-level
-scoping, not backend isolation. Before enabling room CalDAV, the gateway owner
-must validate href confinement and appservice proof ordering; the operator
-must prove the service-principal home contains only one trusted boundary or
-provide equivalent per-room isolation. Issue #7 needs negative cross-room
-tests against real Radicale.
+scoping, not backend isolation. Keep the service-principal home within one
+operator-trusted boundary and keep the feature gates off until the target
+installation's home contents, proxy, and service identity are accepted.
 
 ### Credential leakage through responses or logs
 
-**Current control.** Authentication failures log a constant message. Pino
-redacts request Authorization headers and `matrix_event.content`. The
-personal OpenID contract checks that protected proofs are absent from gateway
-responses/logs and inspected Synapse/Radicale test-service logs. See
+**Current control.** Authentication failures and sensitive transport errors use
+fixed or sanitized messages. Pino redacts request Authorization headers and
+`matrix_event.content`. OpenID proofs stay server-side and CalDAV event
+transports refuse redirects, so credentials are not forwarded through a
+redirect response. The pinned personal OpenID contract checks that proofs are
+absent from gateway responses and inspected test-service logs. See
 [MatrixAuthMiddleware tests](../matrix-calendar-server/test/middleware/MatrixAuthMiddleware.test.ts),
 [PersonalOpenIdRadicaleContract.test.ts](../matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts),
 and [app.module.ts](../matrix-calendar-server/src/app.module.ts).
 
-**Residual risk and owner.** The OpenID token appears in a query parameter
-sent to the homeserver. The contract does not verify the operator's Synapse,
-Traefik, or other production access-log configuration. The operator must
-configure query redaction and run a sentinel-token test across the deployed
-gateway, Radicale, homeserver, and reverse proxy before room access is
-enabled.
+**Residual risk and owner.** OpenID validation calls the configured homeserver
+with an `access_token` query parameter. The repository contract does not verify
+the operator's Synapse, reverse-proxy, or other production access-log
+configuration. The operator must configure query redaction and run a sentinel-
+token test across the deployed gateway, homeserver, Radicale, and reverse proxy
+before enabling room access.
 
 ### Server-side requests reach an unintended host (SSRF or credential forwarding)
 
-**Current control.** Caller-supplied calendar and event URLs are constrained
-to the configured Radicale origin and base path by `normalizeRadicaleUrl`; a
-regression test rejects a caller-supplied URL on another origin
-([CalendarGatewayController.ts#L1048-L1086](../matrix-calendar-server/src/controller/CalendarGatewayController.ts#L1048-L1086),
-[test at #L1867-L1883](../matrix-calendar-server/src/controller/CalendarGatewayController.test.ts#L1867-L1883)).
-Diagnostics additionally filter returned collection URLs
-([safe diagnostics URL filtering at #L1147-L1185](../matrix-calendar-server/src/controller/CalendarGatewayController.ts#L1147-L1185)).
-The homeserver verification origin comes from `HOMESERVER_URL`, not from the
-request.
+**Current control.** Discovery hrefs are validated against the configured
+Radicale origin and base path before follow-up requests; discovery requests use
+manual redirect handling and reject redirects. Event requests also reject
+redirects and cap streamed response bytes (16 MiB by default, configurable up
+to 64 MiB). Room event operations constrain resource URLs to a child of the
+exact authorized collection. These controls prevent an untrusted DAV response
+or redirect from sending delegated credentials to a different host. See
+[CalDavDiscoveryClient.ts](../matrix-calendar-server/src/caldav/CalDavDiscoveryClient.ts),
+[CalDavEventClient.ts](../matrix-calendar-server/src/caldav/CalDavEventClient.ts),
+and [RoomCalendarEventOperations.ts](../matrix-calendar-server/src/service/RoomCalendarEventOperations.ts).
 
-**Residual risk and owner.** Keep caller-controlled targets distinct from a
-compromised or malicious configured peer. `CalDavDiscoveryClient.discoverHome`
-resolves `current-user-principal` and `calendar-home-set` hrefs from Radicale
-responses at [lines 399–420](../matrix-calendar-server/src/caldav/CalDavDiscoveryClient.ts#L399-L420),
-then makes follow-up requests with the delegated Authorization header at
-[lines 445–459](../matrix-calendar-server/src/caldav/CalDavDiscoveryClient.ts#L445-L459).
-Those response-derived URLs are not checked against the configured origin or
-base before the next request. The fetch dependency defaults to global `fetch`
-([constructor at #L146-L151](../matrix-calendar-server/src/caldav/CalDavDiscoveryClient.ts#L146-L151));
-request calls set no explicit redirect option
-([PROPFIND at #L455-L459](../matrix-calendar-server/src/caldav/CalDavDiscoveryClient.ts#L455-L459)).
-I found no test asserting a foreign principal/home href or redirect behavior,
-so whether a redirect forwards Authorization is unverified here. Gateway
-maintainers should add origin/path validation for every discovered href and
-tests for foreign `current-user-principal`, `calendar-home-set`, and collection
-hrefs plus cross-origin redirects; assert that no credential is sent outside
-the configured service.
+**Residual risk and owner.** The configured homeserver and Radicale endpoints
+remain trusted peers. Review their DNS, TLS, network egress, and proxy paths in
+the target deployment. Source-level origin and path checks do not verify those
+operator-controlled networks.
 
 ### Malformed or large iCalendar data consumes resources or changes visible content
 
-**Current control.** The gateway only projects a bounded recurrence subset.
-The projector caps results at 512 occurrences per event, RRULE scanning at
-100,000 steps, and recurrence input members at 4,096. Unsupported
-timezone/recurrence inputs produce count-and-reason diagnostics without event
-details. The calendar details view renders title, location, and description
-as React text. See [occurrence projection limits](../packages/calendar/src/utils/calendarEventOccurrenceProjection.ts#L43-L49),
-[ICalendarEventCodec.ts](../matrix-calendar-server/src/caldav/ICalendarEventCodec.ts),
-and [CalendarEventDetailsDialog.tsx](../matrix-calendar-widget/src/components/calendar/CalendarEventDetailsDialog.tsx).
+**Current control.** The projector caps occurrences at 512 per event, RRULE
+scanning at 100,000 steps, and recurrence input members at 4,096. Unsupported
+recurrence/timezone inputs produce count-and-reason diagnostics without event
+details. CalDAV event REPORT/GET responses are streamed under the configured
+byte cap; discovery XML is separately bounded. Express JSON and urlencoded
+request bodies are limited to 100 KiB. The widget renders event text as React
+text; supported HTTP(S), ATTACH, and CONFERENCE links are bounded and
+revalidated before rendering as anchors, with no preview or fetch.
 
-**Residual risk and owner.** These recurrence limits do not cap CalDAV REPORT
-bytes, event-resource bytes, or total returned resources.
-`CalDavEventClient.listEvents` materializes the full response text and every
-returned resource before projection
-([transport at #L109-L139](../matrix-calendar-server/src/caldav/CalDavEventClient.ts#L109-L139),
-[gateway parsing at #L583-L594](../matrix-calendar-server/src/controller/CalendarGatewayController.ts#L583-L594)).
-No gateway rate limiter or explicit request/response byte limits were found in
-these paths; rate limits and large-calendar performance are open M8 work
-([implementation plan at #L368-L384](./PLAN.md#L368-L384)). Security and
-performance owners should define limits and add oversized-response and
-recurrence-abuse tests. A safe URL-scheme policy for any future clickable
-iCalendar URL field also remains to be reviewed; the event `URL` property is
-currently preserved as calendar data.
+**Residual risk and owner.** These caps bound individual inputs and projected
+work; they are not a production capacity guarantee. PR #184's projection
+benchmark is synthetic. Large calendars, concurrent workloads, and behavior
+against the operator's actual Radicale version still require acceptance tests.
+The response and request caps do not define upstream proxy limits.
 
 ### Calendar details or availability are exposed too broadly
 
@@ -249,23 +242,50 @@ sharing calendar data across trust boundaries.
 
 ### API abuse or reminder mention spam
 
-**Current control.** Room membership and power are checked for the current
-gateway operations. Reminder store identities and lease claims have database
-constraints. `m.mentions` policy helpers check scheduling and delivery
-conditions in unit tests.
+**Current control.** The calendar HTTP limiter runs before OpenID validation.
+It allows 120 requests per fixed 60-second window per TCP peer by default, caps
+its in-memory map at 10,000 keys, ignores forwarded-address headers, and emits
+a generic 429 with `Retry-After`. Cleanup is bounded. The bot command limiter
+accepts only a bounded number of `!calendar` commands per room/sender and
+process: at most six per room/sender per rolling minute, one in flight per
+room/sender, two per room, and eight process-wide. Its key table is capped at
+1,000 entries. Denials are silent and retain no command text or logs. Legacy
+`!meeting` commands do not use this limiter. See
+[CalendarGatewayRateLimitMiddleware.ts](../matrix-calendar-server/src/middleware/CalendarGatewayRateLimitMiddleware.ts)
+and [CalendarCommandTrafficLimiter.ts](../matrix-calendar-server/src/service/CalendarCommandTrafficLimiter.ts).
 
-**Residual risk and owner.** No route rate limiter is configured in the
-inspected gateway, and bootstrap sets `cors: true` without a repository-
-configured origin allowlist ([index.ts#L35-L41](../matrix-calendar-server/src/index.ts#L35-L41)).
-Room event text is untrusted input; a sender string or event body does not
-establish OpenID identity. The `m.mentions` scheduling/delivery policy is
-covered by helper tests but is not wired to a scheduler or sender
-([RoomMentionPolicy.ts](../matrix-calendar-server/src/reminder/RoomMentionPolicy.ts),
-[RoomMentionPolicy.test.ts](../matrix-calendar-server/src/reminder/RoomMentionPolicy.test.ts)).
-It therefore provides no live delivery protection. M8 rate limits/abuse
-controls and reminder delivery acceptance remain open; service owners should
-add request limits and keep delivery disabled until live permission rechecks
-are tested.
+Room commands also require current membership, action power, and exact binding
+before proof or DAV access. Replies use plain `m.text`, empty `m.mentions`, and
+the SDK's encryption-aware sender; they do not fall back to plaintext when an
+encrypted room cannot be confirmed.
+
+PR #199 wires scheduled whole-room reminders behind
+`ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED`. The bounded scheduler rechecks the
+current binding, canonical event/alarm, encryption state, and room-mention
+power before sending; its native transport refuses encrypted or unknown room
+state. Stable Matrix transaction IDs and PostgreSQL claims support retry
+coordination but do not guarantee exactly-once delivery. The scheduler assumes
+a single service replica; its limits are not a distributed quota or production
+capacity proof.
+
+Room-target widget create/update/delete notices are separately gated by
+`ROOM_CALENDAR_ACTION_MESSAGES_ENABLED`. They run only after a successful
+CalDAV create/update/delete, contain a sanitized title and opaque resource ID,
+and set empty `m.mentions`. The service rechecks binding and bot membership/
+power; it skips encrypted rooms unless the SDK confirms crypto is active. A
+notice failure never rolls back a committed CalDAV mutation. The Matrix bot SDK request timeout for these notices is 60 seconds by default
+and is not overridden here; scheduled reminders use a separate native
+transport with a two-second request timeout. Neither
+notice behavior nor scheduled delivery is enabled by default, and native
+scheduled reminders do not support encrypted rooms.
+
+**Residual risk and owner.** Both limiters are process-local, reset on restart,
+and enforce independent limits per replica. The calendar HTTP limiter sees
+only `socket.remoteAddress`; behind a reverse proxy its callers share one
+quota. Use one server replica or add an appropriate trusted upstream or
+distributed control. The HTTP gateway bootstrap enables CORS without a
+repository-configured origin allowlist; the operator must verify ingress and
+proxy policy.
 
 ### Deployment, backup, or database configuration exposes secrets or data
 
@@ -280,19 +300,32 @@ The operator owns those checks; repository CI is not deployment evidence.
 ## Deferred security gates
 
 The following remain open in the implementation plan or require deployment
-evidence before the stated behavior is available:
+proof before the stated behavior is available:
 
-- M6 issue #7: appservice proof issuance after actor, membership, power, and
-  exact-binding checks; real-Radicale room access and cross-room isolation.
-- M8: rate limits and abuse controls, free/busy privacy, upgrade/migration,
-  tested-client compatibility, and large-calendar/recurrence performance.
+- M4/M5: collection-timezone editing and recurrence support beyond the bounded
+  implemented slice remain unfinished. PRs #197/#200 support selected-occurrence
+  and constrained this-and-following timing edits plus typed EXDATE skip/restore.
+  General RECURRENCE-ID property editing, additional RRULE parts, arbitrary rule
+  splitting, and actual client/server interoperability remain open; arbitrary
+  RRULE and broader authoring are unsupported.
+- M6: the bounded repository scope, including the primary room-calendar
+  widget workflow, reminder controls, and action notices, is implemented and
+  passed hosted checks. Operator deployment acceptance remains open. Reminder
+  configuration, bounded scheduler, native unencrypted-room delivery, and
+  room-target action notices are wired behind separate default-off gates.
+  Keep room access, writes, configuration, delivery, and notices disabled
+  until the operator accepts each capability and the service-principal home
+  boundary.
+- M8: free/busy disclosure policy, actual-client and screen-reader validation,
+  large-calendar capacity, and trusted upstream rate control remain open.
 - Production: etke image/data rehearsal, proxy query-log redaction, external
-  PostgreSQL TLS/CA validation, and restore rehearsal.
-- Reminder delivery: authorized configuration endpoints, a scheduler,
-  delivery-time permission checks, and delivery logging are not wired.
+  PostgreSQL TLS/CA validation, and isolated restore rehearsal remain operator
+  responsibilities.
 
-An independent source review checked this model's claims against the recorded
-main snapshot. That review is not a penetration test or evidence that the
-remaining security gates have passed. No live deployment or beta support is
-implied by this document. Track milestone completion in [docs/PLAN.md](./PLAN.md) and
+The hosted browser check is standalone synthetic component evidence. The
+pinned Synapse/Radicale contracts are not evidence of an actual Element client,
+etke deployment, or production network.
+
+This model is not a penetration test and does not imply live deployment or
+beta support. Track milestone completion in [docs/PLAN.md](./PLAN.md) and
 deployment blockers in [docs/STATUS.md](./STATUS.md).

@@ -5,13 +5,17 @@ calendar list, month grid, and event details in Chromium with a synthetic,
 in-memory repository. It uses the repository-locked Playwright and axe
 dependencies and a separate production build served by Vite preview.
 There is no Matrix client, gateway connection, real calendar
-data, credential, or notification delivery in this fixture.
+data, credential, or notification delivery in this fixture. The hosted
+Chromium job passed all eight cases at the exact tested source tree
+`c368aacfb32a5b9b57bcb964cb119bdacd20b243` (PR #195; merged as
+`c9153aab54f139aa68ad9ebae028c073c9458841`).
 
 The eight cases cover list and month views at 320 × 640, 390 × 844,
 768 × 1024, and 1280 × 800 CSS pixels. They measure document and calendar
 surface widths, check long text for clipping, open event details with the
-keyboard after verifying Tab reachability, measure dialog widths, run axe, close with Escape, and verify focus
-returns to the event. Dimensions and failure screenshots are retained as
+keyboard after verifying Tab reachability, measure dialog widths, run axe,
+verify keyboard scrolling in the details content, close with Escape, and confirm
+focus returns to the event. Dimensions and failure screenshots are retained as
 synthetic CI diagnostics for seven days. Browser traces and video are disabled.
 
 The fixture uses a default MUI theme, English text, a fixed Stockholm timezone,
@@ -34,5 +38,7 @@ yarn workspace e2e playwright test --config playwright.calendar.config.ts
 ```
 
 The local validation environment could not download the Chromium executable.
-Source type checks, lint, and test discovery are local prerequisites; the
-hosted browser job must pass before this change is accepted as layout evidence.
+Source type checks, lint, and test discovery were run locally; the hosted
+Chromium result above supplies standalone component-layout evidence only. It
+does not replace the actual-client and screen-reader checks in the client
+validation record.
