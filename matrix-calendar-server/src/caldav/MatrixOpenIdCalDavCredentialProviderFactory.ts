@@ -31,9 +31,13 @@ export class MatrixOpenIdCalDavCredentialProviderFactory {
     userContext: IUserContext,
     openIdCredential?: IMatrixOpenIdCredential,
   ): CalDavCredentialProvider {
-    return new MatrixOpenIdCalDavCredentialProvider(
-      userContext,
-      openIdCredential,
-    );
+    return this.forPrincipal(userContext.userId, openIdCredential);
+  }
+
+  forPrincipal(
+    userId: string,
+    openIdCredential?: IMatrixOpenIdCredential,
+  ): CalDavCredentialProvider {
+    return new MatrixOpenIdCalDavCredentialProvider(userId, openIdCredential);
   }
 }

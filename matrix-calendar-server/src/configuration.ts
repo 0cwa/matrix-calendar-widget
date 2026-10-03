@@ -53,6 +53,12 @@ function createConfiguration() {
     room_calendar_bindings: parseRoomCalendarBindings(
       process.env.ROOM_CALENDAR_BINDINGS,
     ),
+    room_calendar_access_enabled: toBoolean(
+      process.env.ROOM_CALENDAR_ACCESS_ENABLED,
+      false,
+    ),
+    application_service_token: process.env.MATRIX_APPLICATION_SERVICE_TOKEN,
+    application_service_user_id: process.env.MATRIX_APPLICATION_SERVICE_USER_ID,
     calendar_gateway_rate_limit_requests: toNumber(
       process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS,
       120,
@@ -157,6 +163,9 @@ export const ValidationSchema = Joi.object({
   HOMESERVER_URL: Joi.string().required().uri(),
   RADICALE_URL: Joi.string().uri(),
   ROOM_CALENDAR_BINDINGS: Joi.string(),
+  ROOM_CALENDAR_ACCESS_ENABLED: Joi.boolean(),
+  MATRIX_APPLICATION_SERVICE_TOKEN: Joi.string(),
+  MATRIX_APPLICATION_SERVICE_USER_ID: Joi.string(),
   MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS: Joi.number()
     .integer()
     .min(1)
