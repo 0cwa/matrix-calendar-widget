@@ -28,8 +28,8 @@ yarn workspace @matrix-calendar-widget/ical-timezones build
 yarn workspace @matrix-calendar-widget/calendar build
 yarn exec -- tsc -p matrix-calendar-widget/browser-tests/tsconfig.json --noEmit
 yarn exec -- tsc -p e2e/calendar-tests/tsconfig.json --noEmit
-yarn workspace e2e exec -- playwright install --with-deps chromium --only-shell
-yarn workspace e2e exec -- playwright test --config playwright.calendar.config.ts
+yarn workspace e2e playwright install --with-deps chromium --only-shell
+yarn workspace e2e playwright test --config playwright.calendar.config.ts
 ```
 
 The local validation environment could not download the Chromium executable.
