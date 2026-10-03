@@ -56,9 +56,18 @@ HOMESERVER_URL=https://synapse.example.com
 RADICALE_URL=https://calendar.example.com
 
 # optional server-managed room-to-calendar bindings (JSON array)
-# Foundation only: gateway/controller room access is not enabled by this setting.
 # Each room ID and app-owned calendar ID must be canonical and unique.
 # ROOM_CALENDAR_BINDINGS='[{"roomId":"!room-hash:example.org","calendarId":"team-calendar"}]'
+
+# Application-service identity for explicitly bound room-calendar reads.
+# Room access remains disabled unless explicitly enabled, and must stay off
+# until the M6 authorization and deployment-isolation gates are accepted.
+# Store the token using deployment secret management; never put it in a widget.
+# ROOM_CALENDAR_ACCESS_ENABLED=false
+# Its localpart must be one literal CalDAV home segment: 1..255 ASCII
+# letters, digits, dot, underscore, equals, or hyphen; dot segments are denied.
+# MATRIX_APPLICATION_SERVICE_USER_ID=@_matrix_calendar_service:example.org
+# MATRIX_APPLICATION_SERVICE_TOKEN=<secret>
 
 # optional - maximum calendar gateway requests allowed from one TCP source
 # per fixed window. Defaults to 120 requests per 60000 ms.

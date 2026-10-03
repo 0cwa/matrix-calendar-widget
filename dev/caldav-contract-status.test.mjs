@@ -107,6 +107,66 @@ const knownCases = [
     'returns only the valid in-base collection from real Radicale discovery',
     'calendar-diagnostics-safe-collection-discovery',
   ],
+  [
+    'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+    'lists only the exact room binding through the appservice principal',
+    'room-appservice-exact-binding',
+  ],
+  [
+    'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+    'binds the Radicale OpenID subject to the configured service user, not the room sender',
+    'room-appservice-subject-binding',
+  ],
+  [
+    'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+    'forbids a cross-room calendar before appservice proof or CalDAV I/O',
+    'room-appservice-cross-room-denial',
+  ],
+  [
+    'matrix-calendar-server/src/controller/RoomCalendarTarget.test.ts',
+    'authorizes and resolves the exact binding before requesting a proof or CalDAV',
+    'room-calendar-target-exact-binding',
+  ],
+  [
+    'matrix-calendar-server/src/controller/RoomCalendarTarget.test.ts',
+    'denies a nonmember before requesting the appservice proof',
+    'room-calendar-target-nonmember-denial',
+  ],
+  [
+    'matrix-calendar-server/src/controller/RoomCalendarTarget.test.ts',
+    'denies a mismatched room/calendar binding before proof or CalDAV',
+    'room-calendar-target-mismatch-denial',
+  ],
+  [
+    'matrix-calendar-server/src/service/RoomCalendarCalDavAccess.test.ts',
+    'requests a transient proof for the configured principal and exact binding',
+    'room-calendar-proof-exact-principal',
+  ],
+  [
+    'matrix-calendar-server/src/service/RoomCalendarCalDavAccess.test.ts',
+    'never mints a proof when the access feature is disabled',
+    'room-calendar-proof-disabled-gate',
+  ],
+  [
+    'matrix-calendar-server/src/service/RoomCalendarCalDavAccess.test.ts',
+    'rejects a changed or unbound target before requesting a proof',
+    'room-calendar-proof-target-rejection',
+  ],
+  [
+    'matrix-calendar-server/src/service/RoomCalendarCalDavAccess.test.ts',
+    'fails closed when the homeserver cannot mint the configured proof',
+    'room-calendar-proof-fail-closed',
+  ],
+  [
+    'matrix-calendar-server/src/service/RoomCalendarCalDavAccess.test.ts',
+    'rejects a proof whose homeserver does not match the configured principal',
+    'room-calendar-proof-subject-rejection',
+  ],
+  [
+    'matrix-calendar-server/src/service/RoomCalendarCalDavAccess.test.ts',
+    'does not expose the application-service token in an error',
+    'room-calendar-proof-error-redaction',
+  ],
 ];
 
 test('reports only constant IDs and closed statuses for allowlisted cases', () => {
@@ -129,12 +189,13 @@ test('reports only constant IDs and closed statuses for allowlisted cases', () =
 
   assert.deepEqual(
     lines,
-    knownCases
-      .map(
+    [
+      ...knownCases.map(
         ([, , caseId], index) =>
           `contract-case ${caseId} ${index === 0 ? 'failed' : 'passed'}`,
-      )
-      .sort(),
+      ),
+      'contract-suite membership-guard failed',
+    ].sort(),
   );
 });
 
@@ -155,7 +216,90 @@ test('maps pending and unknown status values to the closed pending category', ()
   assert.deepEqual(safeContractCaseStatusLines(testReport), [
     'contract-case membership-lookup-fail-closed pending',
     'contract-case membership-nonmember-denial pending',
-    'unmapped-failure count=1',
+    'contract-suite membership-guard failed',
+  ]);
+});
+
+test('maps suite execution failures without exposing error details', () => {
+  const testReport = {
+    testResults: [
+      {
+        name: suitePath(
+          'matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts',
+        ),
+        status: 'failed',
+        assertionResults: [],
+        testExecError: {
+          name: 'Error',
+          message: 'private module path, token, event body',
+          stack: 'private stack text',
+        },
+        failureMessage: 'private failure message',
+      },
+    ],
+  };
+
+  const output = safeContractCaseStatusLines(testReport).join('\n');
+  assert.equal(output, 'contract-suite personal-openid-contract failed');
+  assert.doesNotMatch(
+    output,
+    /private module path|token|event body|stack text|failure message/,
+  );
+});
+
+test('maps PersonalOpenId assertion failures with fixed suite and case statuses', () => {
+  const testReport = {
+    testResults: [
+      {
+        name: suitePath(
+          'matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts',
+        ),
+        status: 'failed',
+        assertionResults: [
+          {
+            title:
+              'uses the actor proof and returns only the actor personal calendar',
+            status: 'failed',
+            failureMessages: [
+              'private event body, user ID, and exception text',
+            ],
+          },
+        ],
+        failureMessage: 'private stack and credential text',
+      },
+    ],
+  };
+
+  const output = safeContractCaseStatusLines(testReport).join('\n');
+  assert.equal(
+    output,
+    [
+      'contract-case personal-openid-actor-enumeration failed',
+      'contract-suite personal-openid-contract failed',
+    ].join('\n'),
+  );
+  assert.doesNotMatch(
+    output,
+    /private event body|user ID|exception text|stack|credential text/,
+  );
+});
+
+test('maps PersonalOpenId beforeAll failures without classifying their cause', () => {
+  const testReport = {
+    testResults: [
+      {
+        name: suitePath(
+          'matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts',
+        ),
+        status: 'failed',
+        assertionResults: [],
+        failureMessage: 'untrusted details do not classify this failure',
+      },
+    ],
+  };
+
+  assert.deepEqual(safeContractCaseStatusLines(testReport), [
+    'contract-suite personal-openid-contract failed',
   ]);
 });
 
@@ -189,7 +333,10 @@ test('hides unknown case names, assertion details, values, and locations', () =>
 
   const output = safeContractCaseStatusLines(testReport).join('\n');
 
-  assert.equal(output, 'unmapped-failure count=1');
+  assert.equal(
+    output,
+    'contract-suite membership-guard failed\nunmapped-failure count=1',
+  );
   for (const sentinel of privateSentinels) {
     assert.equal(output.includes(sentinel), false);
   }
@@ -209,6 +356,35 @@ test('counts a failing suite at an unknown path without exposing the path', () =
   assert.deepEqual(safeContractCaseStatusLines(testReport), [
     'unmapped-failure count=1',
   ]);
+});
+
+test('fails closed for an unknown RoomAppService assertion without exposing it', () => {
+  const testReport = {
+    testResults: [
+      {
+        name: suitePath(
+          'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+        ),
+        status: 'failed',
+        assertionResults: [
+          {
+            title: 'private-room-contract-title',
+            status: 'failed',
+            failureMessages: ['private-room-contract-detail'],
+          },
+        ],
+      },
+    ],
+  };
+
+  const output = safeContractCaseStatusLines(testReport).join('\n');
+
+  assert.equal(
+    output,
+    'contract-suite room-appservice-radicale-contract failed\nunmapped-failure count=1',
+  );
+  assert.equal(output.includes('private-room-contract-title'), false);
+  assert.equal(output.includes('private-room-contract-detail'), false);
 });
 
 test('fails closed when the Jest report has no test results array', () => {

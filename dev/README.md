@@ -31,6 +31,10 @@ bash dev/up.sh
 
 The fixture password is used only by `dev/mint-openid-credential.mjs` to sign in to the isolated Synapse service and request a short-lived OpenID proof. It is never sent to Radicale or the calendar gateway. `dev/up.sh` does not print either the fixture password or the proof. Radicale Basic Auth uses the Matrix **localpart** (`calendar`) and the tagged OpenID proof as its password field.
 
+The stack also registers the synthetic `_matrix_calendar_service` application-service user from `dev/appservice-calendar-contract.yaml`. Its static tokens are test fixtures only; they are not production credentials. The room-principal contract uses the application-service token to request a short-lived proof for that user, then accesses only collections named by the test's explicit room bindings. Room access remains disabled by default in gateway configuration.
+
+The isolated Synapse fixture raises only the login address and account burst counts to 20 so the sequential contract sign-ins fit within one run. It leaves login refill rates and the failed-attempt limiter unchanged; this override is applied only to the local/CI fixture.
+
 ## Stop or reset
 
 ```bash
@@ -43,10 +47,11 @@ Reset removes the named Docker volumes and all local Matrix/Radicale data.
 ## Scope
 
 The gateway and widget are not included in this compose file. The CalDAV
-contract workflow uses the same image and a valid tagged OpenID proof to test
-Radicale authentication directly. The complete gateway enumeration and
-non-member/failed-authorization contract remains tracked by issue #45. Run the
-gateway and widget separately with their documented configuration.
+contract workflow uses the same image and real Synapse fixture to test both
+personal OpenID access and the gated appservice room-principal path. These
+synthetic bindings and credentials are local/CI fixtures, not deployment
+configuration. Run the gateway and widget separately with their documented
+configuration.
 
 The image reads `RADICALE_MATRIX_HOMESERVER_URL` and
 `RADICALE_MATRIX_SERVER_NAME` as operator configuration. Keep the endpoint URL

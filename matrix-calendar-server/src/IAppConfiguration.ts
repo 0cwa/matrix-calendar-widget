@@ -23,6 +23,9 @@ export interface IAppConfiguration {
   homeserver_url: string;
   radicale_url?: string;
   room_calendar_bindings: readonly RoomCalendarBinding[];
+  room_calendar_access_enabled: boolean;
+  application_service_token?: string;
+  application_service_user_id?: string;
   calendar_gateway_rate_limit_requests: number;
   calendar_gateway_rate_limit_window_ms: number;
   calendar_gateway_rate_limit_max_keys: number;

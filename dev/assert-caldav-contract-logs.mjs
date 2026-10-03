@@ -21,6 +21,8 @@ import { safeContractCaseStatusLines } from './caldav-contract-status.mjs';
 const credential = process.env.CALDAV_OPENID_CREDENTIAL ?? '';
 const username = process.env.CALDAV_USERNAME ?? 'calendar';
 const fixturePassword = process.env.MATRIX_CALENDAR_DEV_PASSWORD ?? '';
+const applicationServiceToken =
+  process.env.MATRIX_APPLICATION_SERVICE_TOKEN ?? '';
 const logFile = process.argv[2];
 const reportFile = process.argv[3];
 if (!credential.startsWith('matrix-openid:') || !logFile || !reportFile) {
@@ -48,6 +50,7 @@ const mxIdentityHeader = `MX-Identity ${mxIdentityPayload}`;
 const basicHeader = `Basic ${Buffer.from(`${username}:${credential}`).toString('base64')}`;
 const protectedValues = [
   identity.access_token,
+  applicationServiceToken,
   fixturePassword,
   'invalid-openid-token-sentinel',
   credential,

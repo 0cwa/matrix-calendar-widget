@@ -21,10 +21,15 @@ import {
   VersioningType,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { NextFunction, Request, Response } from 'express';
+import type {
+  Response as ExpressResponse,
+  NextFunction,
+  Request,
+} from 'express';
 import fetchMock from 'jest-fetch-mock';
 import { MatrixClient } from 'matrix-bot-sdk';
 import { execFileSync } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
@@ -37,7 +42,6 @@ import { MatrixRoomMembershipGuard } from '../../src/guard/MatrixRoomMembershipG
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
-
 const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
 const CALDAV_OPENID_PREFIX = 'matrix-openid:';
@@ -61,6 +65,37 @@ let nativeFetch: typeof fetch;
 let gatewayBaseUrl: string;
 let countCalDavRequests: () => number;
 const gatewayLogLines: string[] = [];
+type PersonalOpenIdSetupStage =
+  | 'fixture-input-check'
+  | 'actor-login'
+  | 'actor-proof-validation'
+  | 'create-personal-room'
+  | 'create-nonmember'
+  | 'nonmember-login'
+  | 'nonmember-openid-proof'
+  | 'gateway-init'
+  | 'gateway-listen';
+type PersonalOpenIdFailureCategory =
+  | 'transport'
+  | 'http-status'
+  | 'json-or-token-parse'
+  | 'other';
+const PERSONAL_OPENID_MATRIX_ERROR_CODES = new Set([
+  'M_BAD_JSON',
+  'M_FORBIDDEN',
+  'M_INVALID_PARAM',
+  'M_INVALID_PASSWORD',
+  'M_INVALID_USERNAME',
+  'M_LIMIT_EXCEEDED',
+  'M_MISSING_PARAM',
+  'M_NOT_FOUND',
+  'M_THREEPID_AUTH_FAILED',
+  'M_UNAUTHORIZED',
+  'M_UNKNOWN',
+  'M_UNKNOWN_TOKEN',
+  'M_USER_DEACTIVATED',
+  'M_USER_IN_USE',
+]);
 type ContractStageDiagnostics = {
   middlewareCalls: number;
   authorizationHeader: 'not-observed' | 'present' | 'absent';
@@ -157,6 +192,8 @@ class PersonalOpenIdGatewayContractModule {}
 
 describeContract('personal Matrix OpenID gateway against real Radicale', () => {
   beforeAll(async () => {
+    markPersonalOpenIdSetupStart();
+    markPersonalOpenIdSetupStage('fixture-input-check');
     fetchMock.disableMocks();
     nativeFetch = globalThis.fetch.bind(globalThis);
     homeserverUrl = testConfiguration.homeserver_url;
@@ -174,13 +211,28 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
 
     actorUserId = `@${username}:${matrixServerName}`;
     actorTaggedCredential = taggedCredential;
-    const actorLogin = await login(username, password);
+    markPersonalOpenIdSetupStage('actor-login');
+    let actorLoginFailureReported = false;
+    let actorLogin: { access_token: string };
+    try {
+      actorLogin = await login(username, password, (category, status, code) => {
+        markPersonalOpenIdSetupFailure(category, status, code);
+        actorLoginFailureReported = true;
+      });
+    } catch (error) {
+      if (!actorLoginFailureReported) {
+        markPersonalOpenIdSetupFailure('other');
+      }
+      throw error;
+    }
     actorAccessToken = actorLogin.access_token;
+    markPersonalOpenIdSetupStage('actor-proof-validation');
     actorIdentity = decodeTaggedCredential(taggedCredential);
     if (actorIdentity.matrix_server_name !== matrixServerName) {
       throw new Error('Fixture proof has an unexpected Matrix server name');
     }
 
+    markPersonalOpenIdSetupStage('create-personal-room');
     const createdRoom = await matrixJson<{ room_id: string }>(
       '/_matrix/client/v3/createRoom',
       {
@@ -193,6 +245,7 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
 
     const nonmemberName = 'calendar-contract-nonmember';
     const nonmemberPassword = password;
+    markPersonalOpenIdSetupStage('create-nonmember');
     await matrixJson(
       `/_synapse/admin/v2/users/${encodeURIComponent(`@${nonmemberName}:${matrixServerName}`)}`,
       {
@@ -201,32 +254,55 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
         body: { password: nonmemberPassword, admin: false },
       },
     );
-    const nonmemberLogin = await login(nonmemberName, nonmemberPassword);
+    markPersonalOpenIdSetupStage('nonmember-login');
+    let nonmemberLoginFailureReported = false;
+    let nonmemberLogin: { access_token: string };
+    try {
+      nonmemberLogin = await login(
+        nonmemberName,
+        nonmemberPassword,
+        (category, status, code) => {
+          markPersonalOpenIdSetupFailure(category, status, code);
+          nonmemberLoginFailureReported = true;
+        },
+      );
+    } catch (error) {
+      if (!nonmemberLoginFailureReported) {
+        markPersonalOpenIdSetupFailure('other');
+      }
+      throw error;
+    }
     nonmemberLoginAccessToken = nonmemberLogin.access_token;
+    markPersonalOpenIdSetupStage('nonmember-openid-proof');
     nonmemberIdentity = await matrixJson<MatrixIdentity>(
       `/_matrix/client/v3/user/${encodeURIComponent(`@${nonmemberName}:${matrixServerName}`)}/openid/request_token`,
       { method: 'POST', token: nonmemberLoginAccessToken, body: {} },
     );
     nonmemberIdentityHeader = identityHeader(nonmemberIdentity);
 
+    markPersonalOpenIdSetupStage('gateway-init');
     app = await NestFactory.create(PersonalOpenIdGatewayContractModule, {
       logger: gatewayLogger,
     });
     authMiddleware = app.get(MatrixAuthMiddleware);
     originalExtractUserContext =
       authMiddleware.extractUserContext.bind(authMiddleware);
-    app.use((request: Request, response: Response, next: NextFunction) => {
-      if (activeStageDiagnostics) {
-        activeStageDiagnostics.middlewareCalls += 1;
-        activeStageDiagnostics.authorizationHeader =
-          request.headers.authorization === undefined ? 'absent' : 'present';
-      }
-      return authMiddleware.use(request, response, next);
-    });
+    app.use(
+      (request: Request, response: ExpressResponse, next: NextFunction) => {
+        if (activeStageDiagnostics) {
+          activeStageDiagnostics.middlewareCalls += 1;
+          activeStageDiagnostics.authorizationHeader =
+            request.headers.authorization === undefined ? 'absent' : 'present';
+        }
+        return authMiddleware.use(request, response, next);
+      },
+    );
     app.enableVersioning({ type: VersioningType.URI });
+    markPersonalOpenIdSetupStage('gateway-listen');
     await app.listen(0, '127.0.0.1');
     const address = app.getHttpServer().address() as AddressInfo;
     gatewayBaseUrl = `http://127.0.0.1:${address.port}`;
+    markPersonalOpenIdSetupComplete();
   }, 30000);
 
   beforeEach(() => {
@@ -419,6 +495,77 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
   }
 });
 
+function markPersonalOpenIdSetupComplete(): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+    return;
+  }
+
+  try {
+    appendFileSync(stageFile, 'personal-openid-setup-complete\n', 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
+
+function markPersonalOpenIdSetupStart(): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+    return;
+  }
+
+  try {
+    appendFileSync(stageFile, 'personal-openid-setup-start\n', 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
+
+function markPersonalOpenIdSetupStage(stage: PersonalOpenIdSetupStage): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+    return;
+  }
+
+  try {
+    appendFileSync(stageFile, `personal-openid-setup-stage-${stage}\n`, 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
+
+function markPersonalOpenIdSetupFailure(
+  category: PersonalOpenIdFailureCategory,
+  status?: number,
+  matrixErrorCode?: string,
+): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+    return;
+  }
+
+  try {
+    const markers = [`personal-openid-setup-failure-${category}`];
+    if (
+      typeof status === 'number' &&
+      Number.isInteger(status) &&
+      status >= 400 &&
+      status <= 599
+    ) {
+      markers.push(`personal-openid-http-status-${status}`);
+    }
+    if (
+      matrixErrorCode &&
+      PERSONAL_OPENID_MATRIX_ERROR_CODES.has(matrixErrorCode)
+    ) {
+      markers.push(`personal-openid-matrix-error-${matrixErrorCode}`);
+    }
+    appendFileSync(stageFile, `${markers.join('\n')}\n`, 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
+
 function expectGatewayLogsToOmitCredentials(
   ...additionalSecrets: string[]
 ): void {
@@ -485,6 +632,11 @@ function assertServiceLogsOmit(...secrets: string[]): void {
 async function login(
   username: string,
   password: string,
+  onFailureCategory?: (
+    category: PersonalOpenIdFailureCategory,
+    status?: number,
+    matrixErrorCode?: string,
+  ) => void,
 ): Promise<{ access_token: string }> {
   return matrixJson('/_matrix/client/v3/login', {
     method: 'POST',
@@ -493,6 +645,7 @@ async function login(
       identifier: { type: 'm.id.user', user: username },
       password,
     },
+    onFailureCategory,
   });
 }
 
@@ -502,22 +655,67 @@ async function matrixJson<T = Record<string, unknown>>(
     method: string;
     token?: string;
     body: unknown;
+    onFailureCategory?: (
+      category: PersonalOpenIdFailureCategory,
+      status?: number,
+      matrixErrorCode?: string,
+    ) => void;
   },
 ): Promise<T> {
-  const response = await fetch(new URL(path, homeserverUrl), {
-    method: options.method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
-    },
-    body: JSON.stringify(options.body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(new URL(path, homeserverUrl), {
+      method: options.method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+      },
+      body: JSON.stringify(options.body),
+    });
+  } catch (error) {
+    options.onFailureCategory?.('transport');
+    throw error;
+  }
   if (!response.ok) {
+    const matrixErrorCode = options.onFailureCategory
+      ? await readMatrixErrorCode(response)
+      : undefined;
+    options.onFailureCategory?.(
+      'http-status',
+      response.status,
+      matrixErrorCode,
+    );
     throw new Error(
       `Matrix contract fixture request failed (${response.status})`,
     );
   }
-  return (await response.json()) as T;
+  try {
+    return (await response.json()) as T;
+  } catch (error) {
+    options.onFailureCategory?.('json-or-token-parse');
+    throw error;
+  }
+}
+
+async function readMatrixErrorCode(
+  response: Response,
+): Promise<string | undefined> {
+  try {
+    const body: unknown = await response.clone().json();
+    if (
+      body !== null &&
+      typeof body === 'object' &&
+      !Array.isArray(body) &&
+      'errcode' in body &&
+      typeof body.errcode === 'string' &&
+      PERSONAL_OPENID_MATRIX_ERROR_CODES.has(body.errcode)
+    ) {
+      return body.errcode;
+    }
+  } catch {
+    // Error response details must not affect the contract failure path.
+  }
+  return undefined;
 }
 
 function decodeTaggedCredential(credential: string): MatrixIdentity {

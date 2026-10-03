@@ -17,6 +17,7 @@ on:
       - 'matrix-calendar-server/test/CalendarGatewayMembershipGuard.test.ts'
       - 'matrix-calendar-server/test/integration/CalDavDiscoveryContract.test.ts'
       - 'matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts'
+      - 'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts'
       - 'matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts'
       - 'matrix-calendar-server/test/integration/CalendarDiagnosticsContract.test.ts'
       - 'matrix-calendar-server/package.json'
@@ -35,6 +36,8 @@ jobs:
       CALDAV_CONTRACT: '1'
       CALDAV_BASE_URL: http://localhost:5232/
       CALDAV_USERNAME: calendar
+      MATRIX_APPLICATION_SERVICE_TOKEN: matrix-calendar-contract-as-token
+      MATRIX_APPLICATION_SERVICE_USER_ID: '@_matrix_calendar_service:localhost'
     steps:
       - uses: actions/checkout@v7
 
@@ -52,14 +55,40 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Initialize sanitized contract summary
+        run: |
+          : > "$RUNNER_TEMP/caldav-safe-contract-summary.txt"
+
       - name: Test CalDAV report status sanitizer
         run: node --test dev/caldav-contract-status.test.mjs
+
+      - name: Test server Jest report sanitizer
+        run: node --test dev/sanitize-server-test-report.test.mjs
 
       - name: Test fixed CalDAV contract phase sanitizer
         run: node --test dev/sanitize-caldav-contract-stage.test.mjs
 
+      - name: Test Room AppService setup error sanitizer
+        run: node --test dev/sanitize-room-appservice-setup.test.mjs
+
+      - name: Test Synapse startup diagnostic sanitizer
+        run: node --test dev/synapse-startup-diagnostic.test.mjs
+
+      - name: Test isolated Synapse contract login limits
+        run: python3 dev/test_synapse_contract_config.py
+
+      - name: Preflight Personal OpenID contract suite import
+        run: |
+          CALDAV_CONTRACT=0 \
+          yarn workspace @matrix-calendar-widget/server jest \
+            test/integration/PersonalOpenIdRadicaleContract.test.ts \
+            --runInBand
+
       - name: Start pinned Matrix and Radicale services
         run: bash dev/up.sh
+
+      - name: Mask synthetic application-service token
+        run: echo "::add-mask::$MATRIX_APPLICATION_SERVICE_TOKEN"
 
       - name: Mint and mask the short-lived Synapse fixture proof
         run: |
@@ -100,6 +129,7 @@ jobs:
           yarn workspace @matrix-calendar-widget/server jest \
             test/CalendarGatewayMembershipGuard.test.ts \
             test/integration/PersonalOpenIdRadicaleContract.test.ts \
+            test/integration/RoomAppServiceRadicaleContract.test.ts \
             test/integration/CalDavDiscoveryContract.test.ts \
             test/integration/CalDavEventRoundTripContract.test.ts \
             test/integration/CalendarDiagnosticsContract.test.ts \
@@ -111,15 +141,55 @@ jobs:
           node dev/assert-caldav-contract-logs.mjs \
             "$contract_log" "$contract_report"
           scan_status=$?
-          node dev/sanitize-caldav-contract-stage.mjs "$contract_stage_file"
+          contract_report_summary="$(node dev/sanitize-server-test-report.mjs \
+            "$contract_report" "$test_status" 2>/dev/null)"
+          report_summary_status=$?
+          contract_setup_summary="$(node dev/sanitize-room-appservice-setup.mjs \
+            "$contract_report" "$contract_stage_file" 2>/dev/null)"
+          contract_setup_summary_status=$?
+          contract_summary="$(node dev/sanitize-caldav-contract-stage.mjs "$contract_stage_file")"
+          printf '%s\n' "$contract_summary"
+          printf '%s\n' "$contract_report_summary"
+          printf '%s\n' "$contract_setup_summary"
+          {
+            printf '%s\n' 'Real CalDAV contract stages'
+            printf '%s\n' "$contract_summary"
+            printf '%s\n' 'Real CalDAV test summary'
+            printf '%s\n' "$contract_report_summary"
+            printf '%s\n' 'Personal and Room setup diagnosis'
+            printf '%s\n' "$contract_setup_summary"
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            printf '%s\n' 'Real CalDAV contract stages'
+            printf '%s\n' "$contract_summary"
+            printf '%s\n' 'Real CalDAV test summary'
+            printf '%s\n' "$contract_report_summary"
+            printf '%s\n' 'Personal and Room setup diagnosis'
+            printf '%s\n' "$contract_setup_summary"
+          } >> "$RUNNER_TEMP/caldav-safe-contract-summary.txt"
           rm -f "$contract_log" "$contract_report"
           rm -f "$contract_stage_file"
           set -e
           if [ "$scan_status" -ne 0 ]; then
             exit "$scan_status"
           fi
+          if [ "$report_summary_status" -ne 0 ]; then
+            exit "$report_summary_status"
+          fi
+          if [ "$contract_setup_summary_status" -ne 0 ]; then
+            exit "$contract_setup_summary_status"
+          fi
           exit "$test_status"
 
       - name: Stop services
         if: always()
         run: docker compose -f dev/compose.yaml down -v --remove-orphans
+
+      - name: Upload sanitized contract diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: caldav-safe-contract-diagnostics
+          path: ${{ runner.temp }}/caldav-safe-contract-summary.txt
+          if-no-files-found: ignore
+          retention-days: 1
