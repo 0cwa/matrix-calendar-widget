@@ -402,12 +402,18 @@ addresses from Matrix room membership.
 ## M7 — Non-widget fallback
 
 - [x] `!calendar help`
-- [ ] `!calendar upcoming`
-- [ ] `!calendar event <id>`
-- [ ] constrained event creation command
-- [ ] constrained delete/cancel command
+- [x] `!calendar upcoming`
+- [x] `!calendar event <id>`
+- [x] constrained event creation command
+- [x] constrained delete/cancel command
 - [ ] normal Matrix fallback messages for important widget-created calendar actions
 - [x] help text directing capable clients to the widget
+
+Command syntax, limits, permission gates, plaintext reply handling, and the
+separate hosted real-stack acceptance contract are documented in
+`docs/bot-calendar.md`. The contract invokes the command service with isolated
+Synapse/Radicale adapters; actual client command entry remains untested. Room
+access and event writes stay disabled by default.
 
 **Exit:** users on non-widget clients can inspect and perform essential calendar actions without duplicating the entire UI.
 
