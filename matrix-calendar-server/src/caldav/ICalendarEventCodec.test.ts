@@ -67,6 +67,232 @@ describe('ICalendarEventCodec', () => {
     expect(parsed.event.unsupportedTimezone).toBeUndefined();
   });
 
+  it('creates UTC whole-second revision metadata from one clock instant', () => {
+    let clockCalls = 0;
+    const fixedClock = () => {
+      clockCalls += 1;
+      return new Date(
+        `2026-10-03T15:16:${String(16 + clockCalls).padStart(2, '0')}.987Z`,
+      );
+    };
+    const fixedCodec = new ICalendarEventCodec(fixedClock);
+    const created = fixedCodec.create('team', 'created.ics', {
+      uid: 'created@example.test',
+      title: 'New event',
+      timing: {
+        type: 'timed',
+        start: { type: 'floating', local: '2026-10-04T09:00:00' },
+        end: { type: 'floating', local: '2026-10-04T10:00:00' },
+      },
+    });
+    const vevent = ICAL.Component.fromString(
+      created.icalendar,
+    ).getFirstSubcomponent('vevent')!;
+
+    expect(revisionPropertyLines(vevent)).toEqual([
+      'DTSTAMP:20261003T151617Z',
+      'CREATED:20261003T151617Z',
+      'LAST-MODIFIED:20261003T151617Z',
+      'SEQUENCE:0',
+    ]);
+    expect(created.event.revision).toEqual({
+      dtstamp: '2026-10-03T15:16:17Z',
+      created: '2026-10-03T15:16:17Z',
+      lastModified: '2026-10-03T15:16:17Z',
+      sequence: 0,
+    });
+    expect(clockCalls).toBe(1);
+    expect(
+      fixedCodec.parse('team', 'created.ics', created.icalendar).event.revision,
+    ).toEqual(created.event.revision);
+  });
+
+  it('revises an edited event once while preserving CREATED and scheduling data', () => {
+    let clockCalls = 0;
+    const fixedCodec = new ICalendarEventCodec(() => {
+      clockCalls += 1;
+      return new Date(
+        `2026-10-03T15:16:${String(16 + clockCalls).padStart(2, '0')}.987Z`,
+      );
+    });
+    const source = fixture('interoperable-properties.ics');
+    const sourceVevent =
+      ICAL.Component.fromString(source).getFirstSubcomponent('vevent')!;
+    const parsed = fixedCodec.parse('team', 'interoperable.ics', source);
+    expect(parsed.event.revision).toEqual({
+      dtstamp: '2026-09-20T12:00:00Z',
+      created: '2026-09-19T08:00:00Z',
+      lastModified: '2026-09-21T10:15:00Z',
+      sequence: 7,
+    });
+
+    const edited = parsed.applyPatch({ title: 'Renamed property fixture' });
+    const editedVevent = ICAL.Component.fromString(
+      edited.icalendar,
+    ).getFirstSubcomponent('vevent')!;
+
+    expect(revisionPropertyLines(editedVevent)).toEqual([
+      'DTSTAMP:20261003T151617Z',
+      'CREATED:20260919T080000Z',
+      'LAST-MODIFIED:20261003T151617Z',
+      'SEQUENCE:8',
+    ]);
+    expect(clockCalls).toBe(1);
+    for (const propertyName of [
+      'organizer',
+      'attendee',
+      'attach',
+      'conference',
+    ]) {
+      expect(propertyLines(editedVevent, propertyName)).toEqual(
+        propertyLines(sourceVevent, propertyName),
+      );
+    }
+    expect(
+      editedVevent
+        .getAllSubcomponents('valarm')
+        .map((alarm) => alarm.toString()),
+    ).toEqual(
+      sourceVevent
+        .getAllSubcomponents('valarm')
+        .map((alarm) => alarm.toString()),
+    );
+    expect(
+      fixedCodec.parse('team', 'interoperable.ics', edited.icalendar).event
+        .revision,
+    ).toEqual({
+      dtstamp: '2026-10-03T15:16:17Z',
+      created: '2026-09-19T08:00:00Z',
+      lastModified: '2026-10-03T15:16:17Z',
+      sequence: 8,
+    });
+  });
+
+  it.each([
+    ['negative sequence', 'SEQUENCE:-1', undefined],
+    ['malformed sequence', 'SEQUENCE:not-a-number', undefined],
+    ['malformed sequence property name', 'SEQUENCE :7', undefined],
+    ['sequence above RFC INTEGER range', 'SEQUENCE:2147483648', undefined],
+    ['duplicate sequence', 'SEQUENCE:7\r\nSEQUENCE:8', undefined],
+    ['sequence at RFC INTEGER maximum', 'SEQUENCE:2147483647', 2147483647],
+  ])(
+    'preserves revision metadata on an edit with %s',
+    (_label, sequence, projectedSequence) => {
+      const source = fixture('interoperable-properties.ics').replace(
+        'SEQUENCE:7',
+        sequence,
+      );
+      const fixedCodec = new ICalendarEventCodec(
+        () => new Date('2026-10-03T15:16:17Z'),
+      );
+      const sourceVevent =
+        ICAL.Component.fromString(source).getFirstSubcomponent('vevent')!;
+      const edited = fixedCodec
+        .parse('team', 'opaque-sequence.ics', source)
+        .applyPatch({ title: 'Updated despite opaque sequence' });
+      const editedVevent = ICAL.Component.fromString(
+        edited.icalendar,
+      ).getFirstSubcomponent('vevent')!;
+
+      expect(edited.icalendar).toContain(sequence);
+      expect(edited.event.revision?.sequence).toBe(projectedSequence);
+      expect(revisionPropertyLines(editedVevent)).toEqual(
+        revisionPropertyLines(sourceVevent),
+      );
+      expect(editedVevent.getFirstPropertyValue('summary')).toBe(
+        'Updated despite opaque sequence',
+      );
+    },
+  );
+
+  it.each([
+    ['TZID on UTC', 'DTSTAMP;TZID=UTC:20260920T120000Z'],
+    ['impossible date', 'DTSTAMP:20260230T120000Z'],
+    ['out-of-range time', 'DTSTAMP:20260920T236000Z'],
+    ['malformed property name', 'DTSTAMP :20260920T120000Z'],
+  ])(
+    'preserves an invalid timestamp block with %s on edit',
+    (_label, dtstamp) => {
+      const source = fixture('interoperable-properties.ics').replace(
+        'DTSTAMP:20260920T120000Z',
+        dtstamp,
+      );
+      const fixedCodec = new ICalendarEventCodec(
+        () => new Date('2026-10-03T15:16:17Z'),
+      );
+      const parsed = fixedCodec.parse('team', 'invalid-stamp.ics', source);
+
+      expect(parsed.event.revision?.dtstamp).toBeUndefined();
+      const edited = parsed.applyPatch({ title: 'Keep the timestamp opaque' });
+
+      expect(edited.icalendar).toContain(dtstamp);
+      expect(edited.icalendar).toContain('CREATED:20260919T080000Z');
+      expect(edited.icalendar).toContain('LAST-MODIFIED:20260921T101500Z');
+      expect(edited.icalendar).toContain('SEQUENCE:7');
+    },
+  );
+
+  it('preserves the full revision block when LAST-MODIFIED has a malformed name', () => {
+    const source = fixture('interoperable-properties.ics').replace(
+      'LAST-MODIFIED:20260921T101500Z',
+      'LAST-MODIFIED :20260921T101500Z',
+    );
+    const fixedCodec = new ICalendarEventCodec(
+      () => new Date('2026-10-03T15:16:17Z'),
+    );
+    const parsed = fixedCodec.parse('team', 'opaque-modified.ics', source);
+    expect(parsed.event.revision?.lastModified).toBeUndefined();
+    const edited = parsed.applyPatch({
+      title: 'Keep revision metadata opaque',
+    });
+    expect(edited.icalendar).toContain('LAST-MODIFIED :20260921T101500Z');
+    expect(edited.icalendar).toContain('DTSTAMP:20260920T120000Z');
+    expect(edited.icalendar).toContain('SEQUENCE:7');
+    expect(edited.icalendar).not.toContain('20261003T151617Z');
+  });
+
+  it('keeps a malformed CREATED name opaque when other metadata advances', () => {
+    const source = fixture('interoperable-properties.ics').replace(
+      'CREATED:20260919T080000Z',
+      'CREATED :20260919T080000Z',
+    );
+    const fixedCodec = new ICalendarEventCodec(
+      () => new Date('2026-10-03T15:16:17Z'),
+    );
+    const parsed = fixedCodec.parse('team', 'opaque-created.ics', source);
+    expect(parsed.event.revision?.created).toBeUndefined();
+    const edited = parsed.applyPatch({ title: 'Advance valid metadata' });
+    expect(edited.event.revision?.created).toBeUndefined();
+    expect(edited.event.revision?.sequence).toBe(8);
+    expect(edited.icalendar).toContain('CREATED :20260919T080000Z');
+    expect(edited.icalendar).toContain('DTSTAMP:20261003T151617Z');
+    expect(
+      fixedCodec.parse('team', 'opaque-created.ics', edited.icalendar).event
+        .revision?.created,
+    ).toBeUndefined();
+  });
+
+  it('keeps an invalid CREATED opaque in the projection when other metadata advances', () => {
+    const source = fixture('interoperable-properties.ics').replace(
+      'CREATED:20260919T080000Z',
+      'CREATED:20260230T080000Z',
+    );
+    const fixedCodec = new ICalendarEventCodec(
+      () => new Date('2026-10-03T15:16:17Z'),
+    );
+
+    const edited = fixedCodec
+      .parse('team', 'invalid-created.ics', source)
+      .applyPatch({ title: 'Advance a valid event revision' });
+
+    expect(edited.icalendar).toContain('CREATED:20260230T080000Z');
+    expect(edited.event.revision).toEqual({
+      dtstamp: '2026-10-03T15:16:17Z',
+      lastModified: '2026-10-03T15:16:17Z',
+      sequence: 8,
+    });
+  });
+
   it('round-trips all-day DATE timing while patching supported fields', () => {
     const parsed = codec.parse('team', 'all-day.ics', fixture('all-day.ics'));
 
@@ -621,7 +847,12 @@ describe('ICalendarEventCodec', () => {
   });
 
   it('adds and removes only one EXDATE while preserving the complete resource', () => {
-    const parsed = codec.parse(
+    let revisionClockCalls = 0;
+    const revisionCodec = new ICalendarEventCodec(() => {
+      revisionClockCalls += 1;
+      return new Date('2026-10-03T15:16:17Z');
+    });
+    const parsed = revisionCodec.parse(
       'team',
       'recurrence-override.ics',
       fixture('recurrence-override.ics'),
@@ -687,13 +918,28 @@ describe('ICalendarEventCodec', () => {
     ).toBe('preserve-exception');
     expect(events[2].getFirstPropertyValue('status')).toBe('CANCELLED');
 
-    const idempotentAdd = codec
+    const idempotentAdd = revisionCodec
       .parse('team', 'recurrence-override.ics', added.icalendar)
       .applyPatch({
         recurrence: {
           exdate: { action: 'add', recurrenceId: movedOccurrenceId },
         },
       });
+    expect(revisionClockCalls).toBe(1);
+    const addedMaster = ICAL.Component.fromString(
+      added.icalendar,
+    ).getFirstSubcomponent('vevent')!;
+    const idempotentMaster = ICAL.Component.fromString(
+      idempotentAdd.icalendar,
+    ).getFirstSubcomponent('vevent')!;
+    expect(revisionPropertyLines(addedMaster)).toEqual([
+      expect.stringMatching(/^DTSTAMP:/),
+      expect.stringMatching(/^LAST-MODIFIED:/),
+      'SEQUENCE:1',
+    ]);
+    expect(revisionPropertyLines(idempotentMaster)).toEqual(
+      revisionPropertyLines(addedMaster),
+    );
     expect(
       codec.parse('team', 'recurrence-override.ics', idempotentAdd.icalendar)
         .event.recurrence?.exdates,
@@ -2238,7 +2484,7 @@ END:VCALENDAR`,
       'Alice Example',
     );
     expect(event?.getAllProperties('attendee')).toHaveLength(2);
-    expect(event?.getFirstPropertyValue('sequence')).toBe(2);
+    expect(event?.getFirstPropertyValue('sequence')).toBe(3);
     expect(event?.getFirstPropertyValue('status')).toBe('TENTATIVE');
   });
 
@@ -2249,7 +2495,10 @@ END:VCALENDAR`,
 
     try {
       const source = fixture('interoperable-properties.ics');
-      const parsed = codec.parse(
+      const fixedCodec = new ICalendarEventCodec(
+        () => new Date('2026-10-03T15:16:17Z'),
+      );
+      const parsed = fixedCodec.parse(
         'team',
         'interoperable-properties.ics',
         source,
@@ -2277,11 +2526,14 @@ END:VCALENDAR`,
           alarms.map((alarm) => alarm.getFirstPropertyValue('action')),
         ).toEqual(['DISPLAY', 'DISPLAY', 'EMAIL', 'AUDIO']);
 
+        expect(revisionPropertyLines(event!)).toEqual([
+          'DTSTAMP:20261003T151617Z',
+          'CREATED:20260919T080000Z',
+          'LAST-MODIFIED:20261003T151617Z',
+          'SEQUENCE:8',
+        ]);
+
         for (const propertyName of [
-          'created',
-          'dtstamp',
-          'last-modified',
-          'sequence',
           'organizer',
           'attendee',
           'attach',
@@ -2921,6 +3173,18 @@ function fixture(name: string): string {
   return fs.readFileSync(
     path.resolve(__dirname, '../../../fixtures/ical', name),
     'utf8',
+  );
+}
+
+function propertyLines(component: ICAL.Component, name: string): string[] {
+  return component
+    .getAllProperties(name)
+    .map((property) => property.toICALString());
+}
+
+function revisionPropertyLines(vevent: ICAL.Component): string[] {
+  return ['dtstamp', 'created', 'last-modified', 'sequence'].flatMap((name) =>
+    propertyLines(vevent, name),
   );
 }
 
