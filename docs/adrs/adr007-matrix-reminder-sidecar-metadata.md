@@ -13,6 +13,17 @@ Keep standard alarm timing in iCalendar/VALARM.
 
 Store Matrix-specific reminder configuration as gateway sidecar metadata keyed to a stable calendar/event/recurrence/alarm identity.
 
+Use the standard VALARM UID as the alarm identity. Newly created DISPLAY alarms
+and explicit edits to legacy alarms without a UID receive a generated UUID.
+An ordinary event edit leaves UID-less legacy alarms untouched, and an existing
+valid alarm UID survives timing edits. The write API accepts alarm timing and
+description, not a caller-selected UID. Malformed, duplicate, or resource-colliding
+UIDs make alarm controls unavailable while preserving the imported data.
+
+This stable identity is a prerequisite for Matrix settings; generating an alarm
+UID does not register recipients, schedule work, or enable delivery. Canonical
+event and recurrence identity rules remain defined in ADR019.
+
 Deliver reminders as normal Matrix messages using standard `m.mentions` fields:
 
 - selected users -> `m.mentions.user_ids`

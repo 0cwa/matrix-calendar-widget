@@ -93,15 +93,23 @@ export type CalendarEventAlarmLeadTime = Omit<
 /** One editable RFC 5545 ACTION:DISPLAY alarm relative to DTSTART. */
 export type CalendarEventDisplayAlarm = {
   action: 'display';
+  /** RFC 9074 identity retained when present; legacy VALARMs may omit it. */
+  uid?: string;
   trigger: CalendarEventAlarmLeadTime;
 };
+
+/** Alarm values accepted on writes; the server owns and generates the UID. */
+export type CalendarEventDisplayAlarmInput = Omit<
+  CalendarEventDisplayAlarm,
+  'uid'
+>;
 
 /** Explicit serializable operation that removes an existing display alarm. */
 export type CalendarEventAlarmRemoval = { operation: 'remove' };
 
 /** Alarm value accepted by an event patch, including its remove operation. */
 export type CalendarEventAlarmPatch =
-  | CalendarEventDisplayAlarm
+  | CalendarEventDisplayAlarmInput
   | CalendarEventAlarmRemoval;
 
 /** Alarm data retained by CalDAV but outside the editor's supported shape. */
@@ -276,12 +284,16 @@ export type CalendarEventInput = Omit<
   CalendarEvent,
   | 'id'
   | 'calendarId'
+  | 'alarm'
   | 'recurrence'
   | 'unsupportedRecurrence'
   | 'unsupportedAlarm'
   | 'unsupportedTimezone'
   | 'revision'
-> & { recurrence?: { rrule?: string } };
+> & {
+  alarm?: CalendarEventDisplayAlarmInput;
+  recurrence?: { rrule?: string };
+};
 
 /**
  * Fields editable without changing resource identity, calendar ownership, or
