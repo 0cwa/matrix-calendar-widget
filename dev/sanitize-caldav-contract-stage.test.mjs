@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   formatContractPhase,
+  formatEventHttpStatuses,
   formatPersonalOpenIdSetupFailure,
   formatPersonalOpenIdSetupHttpStatus,
   formatPersonalOpenIdSetupMatrixErrorCode,
@@ -252,4 +253,21 @@ test('does not emit unknown RoomAppService checkpoint text', () => {
 
   assert.equal(output, '');
   assert.equal(output.includes(privateSentinel), false);
+});
+
+test('event diagnostics emit only complete fixed-method HTTP status markers', () => {
+  const input = [
+    'room-appservice-event-http-POST-201',
+    'room-appservice-event-http-POST-201',
+    'personal-openid-event-http-GET-400',
+    'room-appservice-event-http-SECRET-400',
+    'room-appservice-event-http-POST-201 private-event-title',
+    'room-appservice-event-http-POST-999',
+    'personal-openid-event-http-DELETE-500\nraw-secret-body',
+  ].join('\n');
+  assert.equal(
+    formatEventHttpStatuses(input),
+    'personal-openid-event-http DELETE 500\npersonal-openid-event-http GET 400\nroom-appservice-event-http POST 201\n',
+  );
+  assert.equal(formatEventHttpStatuses(undefined), '');
 });

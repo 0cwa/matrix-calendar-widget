@@ -590,12 +590,22 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
           response.on('data', (chunk: Buffer | string) =>
             chunks.push(Buffer.from(chunk)),
           );
-          response.on('end', () =>
-            resolve({
-              status: response.statusCode ?? 0,
-              body: Buffer.concat(chunks).toString('utf8'),
-            }),
-          );
+          response.on('end', () => {
+            const status = response.statusCode ?? 0;
+            const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+            if (stageFile && status >= 100 && status <= 599) {
+              try {
+                appendFileSync(
+                  stageFile,
+                  `personal-openid-event-http-${method}-${status}\n`,
+                  'utf8',
+                );
+              } catch {
+                // Optional diagnostics contain only fixed methods and status codes.
+              }
+            }
+            resolve({ status, body: Buffer.concat(chunks).toString('utf8') });
+          });
         },
       );
       request.on('error', reject);
