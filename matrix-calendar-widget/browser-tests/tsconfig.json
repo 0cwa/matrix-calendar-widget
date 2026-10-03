@@ -1,4 +1,4 @@
 {
   "extends": "../tsconfig.json",
-  "include": ["./calendarFixture.tsx"]
+  "include": ["./calendarFixture.tsx", "./vite.config.ts"]
 }

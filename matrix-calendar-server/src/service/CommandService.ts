@@ -16,13 +16,14 @@
 
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import i18next from 'i18next';
-import { MatrixClient, MessageEventContent } from 'matrix-bot-sdk';
+import { MatrixClient, MatrixError, MessageEventContent } from 'matrix-bot-sdk';
 import { AppRuntimeContext } from '../AppRuntimeContext';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
 import { TranslatableError } from '../error/TranslatableError';
 import { IRoomEvent } from '../matrix/event/IRoomEvent';
 import { StateEventName } from '../model/StateEventName';
+import { CalendarCommandService } from './CalendarCommandService';
 import { WelcomeWorkflowService } from './WelcomeWorkflowService';
 
 const TRIGGER = '!meeting';
@@ -45,6 +46,8 @@ export class CommandService {
     @Inject(ModuleProviderToken.APP_CONFIGURATION)
     private readonly appConfig: IAppConfiguration,
     appRuntimeContext: AppRuntimeContext,
+    @Inject(CalendarCommandService)
+    private readonly calendarCommandService: CalendarCommandService,
   ) {
     this.botUserId = appRuntimeContext.botUserId;
   }
@@ -64,9 +67,7 @@ export class CommandService {
       body.length > CALENDAR_TRIGGER.length &&
       !/\s/.test(body.charAt(CALENDAR_TRIGGER.length));
     if (malformedCalendarTrigger) {
-      return this.replyWithError(roomId, event, 'commandErrors.badCommand', {
-        trigger: CALENDAR_TRIGGER,
-      });
+      return this.replyCalendarError(roomId, event, 'badSyntax');
     }
 
     const triggered = triggers.find((trigger) => body.startsWith(trigger));
@@ -79,12 +80,11 @@ export class CommandService {
     }
 
     const withoutTrigger = body.substring(triggered.length).trim();
-    const args: string[] =
-      triggered === CALENDAR_TRIGGER
-        ? withoutTrigger.split(/\s+/)
-        : withoutTrigger.split(' ');
 
     if (withoutTrigger.length === 0) {
+      if (triggered === CALENDAR_TRIGGER) {
+        return this.replyCalendarError(roomId, event, 'badSyntax');
+      }
       this.logger.verbose(
         `commandErrors.noCommandProvided triggered: ${triggered}`,
       );
@@ -98,16 +98,22 @@ export class CommandService {
       );
     }
 
-    const commandName = args[0];
-    const cmdArgs = args.slice(1);
+    const commandName = (withoutTrigger.match(/^\S+/)?.[0] ?? '').slice(0, 32);
+    const cmdArgs =
+      triggered === CALENDAR_TRIGGER ? [] : withoutTrigger.split(' ').slice(1);
 
     try {
       if (triggered === CALENDAR_TRIGGER) {
-        await this.processCalendarCommand(commandName, cmdArgs, roomId, event);
+        await this.processCalendarCommand(withoutTrigger, roomId, event);
       } else {
         await this.processCommand(commandName, roomId, event, cmdArgs);
       }
     } catch (e) {
+      if (triggered === CALENDAR_TRIGGER) {
+        this.logger.debug('calendar command failed with an internal error');
+        await this.replyCalendarError(roomId, event, 'failed');
+        return;
+      }
       if (e instanceof TranslatableError) {
         this.logger.debug(
           `TranslatableError errorKey: ${e.errorKey} commandName: ${commandName}`,
@@ -137,27 +143,54 @@ export class CommandService {
   }
 
   private async processCalendarCommand(
-    commandName: string,
-    cmdArgs: string[],
+    commandText: string,
     roomId: string,
     event: IRoomEvent<MessageEventContent>,
   ) {
-    if (commandName !== 'help' || cmdArgs.length > 0) {
-      this.logger.verbose(
-        `commandErrors.badCommand commandName: ${commandName}`,
-      );
-      await this.replyWithError(roomId, event, 'commandErrors.badCommand', {
-        trigger: CALENDAR_TRIGGER,
+    if (!(await this.isCalendarRoomSafeToSend(roomId))) {
+      return;
+    }
+
+    const [commandName, ...extraArgs] = commandText.split(/\s+/);
+    if (commandName === 'help' && extraArgs.length === 0) {
+      const lng: string = await this.detectLocale(roomId);
+      const text: string = i18next.t('calendarCommandHelp', {
+        lng,
+        joinArrays: '\n',
       });
+      await this.sendCalendarReply(roomId, event, text);
+      return;
+    }
+    if (commandName === 'help') {
+      await this.replyCalendarError(roomId, event, 'badSyntax');
       return;
     }
 
     const lng: string = await this.detectLocale(roomId);
-    const html: string = i18next.t('calendarCommandHelp', {
-      lng,
-      joinArrays: '',
-    });
-    await this.matrixClient.sendHtmlText(roomId, html);
+    /*
+     * IMPORTANT: These keys are translated by CalendarCommandService and are
+     * listed here for i18next-cli extraction.
+     * t('calendarCommandReplies.upcoming')
+     * t('calendarCommandReplies.noUpcoming')
+     * t('calendarCommandReplies.upcomingPartial')
+     * t('calendarCommandReplies.eventDetails')
+     * t('calendarCommandReplies.eventCreated', { resourceId })
+     * t('calendarCommandReplies.eventDeleted', { resourceId })
+     * t('calendarCommandReplies.idLabel')
+     * t('calendarCommandReplies.titleLabel')
+     * t('calendarCommandReplies.whenLabel')
+     * t('calendarCommandReplies.descriptionLabel')
+     * t('calendarCommandReplies.untitled')
+     * t('calendarCommandReplies.timeUnavailable')
+     */
+    const text = await this.calendarCommandService.execute(
+      roomId,
+      event.sender,
+      commandText,
+      (key, parameters) =>
+        i18next.t(key, { lng, ...parameters }) as unknown as string,
+    );
+    await this.sendCalendarReply(roomId, event, text);
   }
 
   private async processCommand(
@@ -216,8 +249,104 @@ export class CommandService {
       lng,
       ...params,
     }) as unknown as string;
-    this.logger.debug(`Replying with error: ${roomId} ${event} ${text}`);
+    this.logger.debug(`Replying with command error category: ${errorKey}`);
     await this.matrixClient.replyText(roomId, event, text, text);
+  }
+
+  private async replyCalendarError(
+    roomId: string,
+    event: IRoomEvent<MessageEventContent>,
+    errorKey:
+      | 'badSyntax'
+      | 'notAllowed'
+      | 'disabled'
+      | 'writesDisabled'
+      | 'notFound'
+      | 'conflict'
+      | 'unsafe'
+      | 'failed',
+  ) {
+    const lng = await this.detectLocale(roomId);
+    /*
+     * IMPORTANT: These static keys are extracted by i18next-cli.
+     * t('calendarCommandErrors.badSyntax')
+     * t('calendarCommandErrors.notAllowed')
+     * t('calendarCommandErrors.disabled')
+     * t('calendarCommandErrors.writesDisabled')
+     * t('calendarCommandErrors.notFound')
+     * t('calendarCommandErrors.conflict')
+     * t('calendarCommandErrors.unsafe')
+     * t('calendarCommandErrors.failed')
+     */
+    const text = i18next.t(`calendarCommandErrors.${errorKey}`, {
+      lng,
+    }) as unknown as string;
+    this.logger.debug(`Replying with calendar error category: ${errorKey}`);
+    await this.sendCalendarReply(roomId, event, text);
+  }
+
+  private async sendCalendarReply(
+    roomId: string,
+    event: IRoomEvent<MessageEventContent>,
+    text: string,
+  ): Promise<void> {
+    // The room can become encrypted while CalDAV work is in flight. Recheck
+    // current state immediately before sending, then keep the SDK's encrypted
+    // send path and emit plain text with explicit empty mention metadata.
+    if (!(await this.isCalendarRoomSafeToSend(roomId))) {
+      return;
+    }
+
+    const replyRelation =
+      typeof event.event_id === 'string' && event.event_id.length > 0
+        ? {
+            'm.relates_to': {
+              'm.in_reply_to': { event_id: event.event_id },
+            },
+          }
+        : {};
+    await this.matrixClient.sendMessage(roomId, {
+      msgtype: 'm.text',
+      body: text,
+      'm.mentions': {},
+      ...replyRelation,
+    });
+  }
+
+  private async isCalendarRoomSafeToSend(roomId: string): Promise<boolean> {
+    let encryptionEvent: unknown;
+    try {
+      encryptionEvent = await this.matrixClient.getRoomStateEvent(
+        roomId,
+        'm.room.encryption',
+        '',
+      );
+    } catch (error) {
+      // Only the homeserver's exact not-found response proves this room has no
+      // encryption state. Any other lookup failure is unknown and fails closed.
+      return isMissingEncryptionState(error);
+    }
+
+    if (
+      encryptionEvent === null ||
+      typeof encryptionEvent !== 'object' ||
+      typeof (encryptionEvent as { algorithm?: unknown }).algorithm !==
+        'string' ||
+      !(encryptionEvent as { algorithm: string }).algorithm
+    ) {
+      return false;
+    }
+
+    if (this.appConfig.enable_crypto !== true) {
+      return false;
+    }
+
+    try {
+      const crypto = this.matrixClient.crypto;
+      return crypto ? await crypto.isRoomEncrypted(roomId) : false;
+    } catch {
+      return false;
+    }
   }
 
   // detects the locale in the private room, or returns default
@@ -238,4 +367,12 @@ export class CommandService {
     // default
     return this.appConfig.welcome_workflow_default_locale;
   }
+}
+
+function isMissingEncryptionState(error: unknown): boolean {
+  return (
+    error instanceof MatrixError &&
+    error.statusCode === 404 &&
+    error.errcode === 'M_NOT_FOUND'
+  );
 }

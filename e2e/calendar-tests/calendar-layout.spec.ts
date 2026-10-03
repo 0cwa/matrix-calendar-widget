@@ -29,8 +29,20 @@ for (const viewport of viewports) {
     test(
       view + ' at ' + viewport.width + ' CSS pixels',
       async ({ page }, testInfo) => {
+        const pageErrors: string[] = [];
+        page.on('pageerror', (error) =>
+          pageErrors.push(error.message.slice(0, 2000)),
+        );
         await page.setViewportSize(viewport);
         await page.goto('/browser-tests/index.html');
+        await expect
+          .poll(async () => ({
+            pageErrors,
+            rendered: await page
+              .getByRole('heading', { name: 'Calendar component validation' })
+              .isVisible(),
+          }))
+          .toEqual({ pageErrors: [], rendered: true });
         await page.getByRole('button', { name: view, exact: true }).click();
         const event = page.getByRole('button', { name: /^Synthetic planning/ });
         await expect(event).toBeVisible();

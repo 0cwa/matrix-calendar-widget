@@ -3,7 +3,8 @@
 The separate **Calendar browser layout** CI job exercises the production
 calendar list, month grid, and event details in Chromium with a synthetic,
 in-memory repository. It uses the repository-locked Playwright and axe
-dependencies. There is no Matrix client, gateway connection, real calendar
+dependencies and a separate production build served by Vite preview.
+There is no Matrix client, gateway connection, real calendar
 data, credential, or notification delivery in this fixture.
 
 The eight cases cover list and month views at 320 × 640, 390 × 844,

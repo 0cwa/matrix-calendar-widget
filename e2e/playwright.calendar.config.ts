@@ -36,10 +36,10 @@ export default defineConfig({
   outputDir: './calendar-test-results',
   webServer: {
     command:
-      'yarn workspace @matrix-calendar-widget/widget vite --host 127.0.0.1 --port 4174 --strictPort',
+      'yarn workspace @matrix-calendar-widget/widget vite build --config browser-tests/vite.config.ts && yarn workspace @matrix-calendar-widget/widget vite preview --outDir browser-test-dist --host 127.0.0.1 --port 4174 --strictPort',
     cwd: path.resolve(__dirname, '..'),
     url: 'http://127.0.0.1:4174/browser-tests/index.html',
-    timeout: 30_000,
+    timeout: 120_000,
     reuseExistingServer: false,
   },
 });

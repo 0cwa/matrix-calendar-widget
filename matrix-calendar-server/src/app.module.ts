@@ -67,6 +67,7 @@ import {
 } from './reminder';
 import { getReminderDatabaseTlsOptions } from './reminder/ReminderDatabaseConnection';
 import { MatrixServer } from './rpc/MatrixServer';
+import { CalendarCommandService } from './service/CalendarCommandService';
 import { CommandService } from './service/CommandService';
 import { ControlRoomMigrationService } from './service/ControlRoomMigrationService';
 import { GuestMemberService } from './service/GuestMemberService';
@@ -321,6 +322,27 @@ const i18nFactory: FactoryProvider<void> = {
           servicePrincipalUserId: appConfig.application_service_user_id,
         }),
       inject: [ModuleProviderToken.APP_CONFIGURATION],
+    },
+    {
+      provide: CalendarCommandService,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        authorizationFactory: MatrixCalendarAuthorizationFactory,
+        roomCalendarAccess: RoomCalendarCalDavAccess,
+        eventOperations: RoomCalendarEventOperations,
+      ) =>
+        new CalendarCommandService(
+          appConfig,
+          authorizationFactory,
+          roomCalendarAccess,
+          eventOperations,
+        ),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        MatrixCalendarAuthorizationFactory,
+        ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
+        RoomCalendarEventOperations,
+      ],
     },
     MatrixOpenIdCalDavCredentialProviderFactory,
     MatrixClientAdapter,

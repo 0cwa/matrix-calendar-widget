@@ -14,13 +14,39 @@
       }
     }
   },
+  "calendarCommandErrors": {
+    "badSyntax": "That calendar command is not supported. Use !calendar help.",
+    "conflict": "The event changed before the command completed. Run !calendar upcoming and retry.",
+    "disabled": "Room calendar access is not enabled for this room.",
+    "failed": "The calendar command could not be completed. Try again later.",
+    "notAllowed": "Your current room membership or power level does not allow this calendar command.",
+    "notFound": "No matching calendar event was found.",
+    "unsafe": "This calendar resource cannot be changed safely.",
+    "writesDisabled": "Calendar event creation and deletion are not enabled on this server."
+  },
   "calendarCommandHelp": [
-    "<p>Calendar commands:</p>",
-    "<ul>",
-    "<li><code>!calendar help</code> (Show this help.)</li>",
-    "</ul>",
-    "<p>For full calendar management, use the Matrix Calendar widget in clients that support widgets.</p>"
+    "Room calendar commands (when enabled by the server for this room):",
+    "!calendar help (Show this help.)",
+    "!calendar upcoming [count] [--tz IANA] (Show up to 10 events in the next 30 days; default 5. Times default to UTC.)",
+    "!calendar event <resource-id> [--tz IANA] (Show one event. Use the resource ID shown by upcoming.)",
+    "!calendar create <YYYY-MM-DDTHH:mm> <YYYY-MM-DDTHH:mm> \"<title>\" [--description \"<text>\"] [--tz IANA] (Create a single event using local wall times; quote the title and optional description. UTC is the default timezone. Ambiguous or nonexistent daylight-saving times are rejected.)",
+    "!calendar delete <resource-id> (Delete the whole event series; cancel is an alias. Requires room event-write permission.)",
+    "Commands require a server-configured room calendar. Creates and deletes also require the server write gate and current room event-write permission. For other calendar management, use the Matrix Calendar widget in clients that support widgets."
   ],
+  "calendarCommandReplies": {
+    "descriptionLabel": "Description",
+    "eventCreated": "Created event {{resourceId}}.",
+    "eventDeleted": "Deleted event {{resourceId}} and its entire recurrence series.",
+    "eventDetails": "Calendar event:",
+    "idLabel": "Resource ID",
+    "noUpcoming": "No upcoming events were found in the next 30 days.",
+    "timeUnavailable": "Time unavailable",
+    "titleLabel": "Title",
+    "untitled": "(untitled)",
+    "upcoming": "Upcoming events in the next 30 days:",
+    "upcomingPartial": "Some events could not be shown. Review the calendar widget for complete results.",
+    "whenLabel": "When"
+  },
   "commandErrors": {
     "badCommand": "Bad command, try <code>{{trigger}} help</code>",
     "badLanguageCode": "Language code is not supported",
