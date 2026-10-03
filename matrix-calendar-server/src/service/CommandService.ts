@@ -24,6 +24,7 @@ import { TranslatableError } from '../error/TranslatableError';
 import { IRoomEvent } from '../matrix/event/IRoomEvent';
 import { StateEventName } from '../model/StateEventName';
 import { CalendarCommandService } from './CalendarCommandService';
+import { CalendarCommandTrafficLimiter } from './CalendarCommandTrafficLimiter';
 import { WelcomeWorkflowService } from './WelcomeWorkflowService';
 
 const TRIGGER = '!meeting';
@@ -39,6 +40,9 @@ export class CommandService {
   private logger = new Logger(CommandService.name);
 
   private readonly botUserId: string;
+
+  private readonly calendarCommandTrafficLimiter =
+    new CalendarCommandTrafficLimiter();
 
   constructor(
     private readonly matrixClient: MatrixClient,
@@ -59,32 +63,21 @@ export class CommandService {
     const { content: { msgtype = '' } = {} } = event;
     if (msgtype !== 'm.text') return;
 
-    const triggers: string[] = [TRIGGER, CALENDAR_TRIGGER, this.botUserId];
-    const body: string = event.content.body;
+    const body = event.content.body;
+    if (typeof body !== 'string') return;
 
-    const malformedCalendarTrigger =
-      body.startsWith(CALENDAR_TRIGGER) &&
-      body.length > CALENDAR_TRIGGER.length &&
-      !/\s/.test(body.charAt(CALENDAR_TRIGGER.length));
-    if (malformedCalendarTrigger) {
-      return this.replyCalendarError(roomId, event, 'badSyntax');
+    if (body.startsWith(CALENDAR_TRIGGER)) {
+      return this.handleCalendarMessage(roomId, event, body);
     }
 
+    const triggers: string[] = [TRIGGER, this.botUserId];
     const triggered = triggers.find((trigger) => body.startsWith(trigger));
     if (!triggered) return;
-    if (
-      !this.appConfig.enable_welcome_workflow &&
-      triggered !== CALENDAR_TRIGGER
-    ) {
-      return;
-    }
+    if (!this.appConfig.enable_welcome_workflow) return;
 
     const withoutTrigger = body.substring(triggered.length).trim();
 
     if (withoutTrigger.length === 0) {
-      if (triggered === CALENDAR_TRIGGER) {
-        return this.replyCalendarError(roomId, event, 'badSyntax');
-      }
       this.logger.verbose(
         `commandErrors.noCommandProvided triggered: ${triggered}`,
       );
@@ -93,27 +86,17 @@ export class CommandService {
         event,
         'commandErrors.noCommandProvided',
         {
-          trigger: triggered === CALENDAR_TRIGGER ? CALENDAR_TRIGGER : TRIGGER,
+          trigger: TRIGGER,
         },
       );
     }
 
     const commandName = (withoutTrigger.match(/^\S+/)?.[0] ?? '').slice(0, 32);
-    const cmdArgs =
-      triggered === CALENDAR_TRIGGER ? [] : withoutTrigger.split(' ').slice(1);
+    const cmdArgs = withoutTrigger.split(' ').slice(1);
 
     try {
-      if (triggered === CALENDAR_TRIGGER) {
-        await this.processCalendarCommand(withoutTrigger, roomId, event);
-      } else {
-        await this.processCommand(commandName, roomId, event, cmdArgs);
-      }
+      await this.processCommand(commandName, roomId, event, cmdArgs);
     } catch (e) {
-      if (triggered === CALENDAR_TRIGGER) {
-        this.logger.debug('calendar command failed with an internal error');
-        await this.replyCalendarError(roomId, event, 'failed');
-        return;
-      }
       if (e instanceof TranslatableError) {
         this.logger.debug(
           `TranslatableError errorKey: ${e.errorKey} commandName: ${commandName}`,
@@ -139,6 +122,43 @@ export class CommandService {
           message: 'internal error',
         });
       }
+    }
+  }
+
+  private async handleCalendarMessage(
+    roomId: string,
+    event: IRoomEvent<MessageEventContent>,
+    body: string,
+  ): Promise<void> {
+    const release = this.calendarCommandTrafficLimiter.tryAcquire(
+      roomId,
+      event.sender,
+    );
+    if (!release) return;
+
+    try {
+      const malformedCalendarTrigger =
+        body.length > CALENDAR_TRIGGER.length &&
+        !/\s/.test(body.charAt(CALENDAR_TRIGGER.length));
+      if (malformedCalendarTrigger) {
+        await this.replyCalendarError(roomId, event, 'badSyntax');
+        return;
+      }
+
+      const commandText = body.substring(CALENDAR_TRIGGER.length).trim();
+      if (commandText.length === 0) {
+        await this.replyCalendarError(roomId, event, 'badSyntax');
+        return;
+      }
+
+      try {
+        await this.processCalendarCommand(commandText, roomId, event);
+      } catch {
+        this.logger.debug('calendar command failed with an internal error');
+        await this.replyCalendarError(roomId, event, 'failed');
+      }
+    } finally {
+      release();
     }
   }
 

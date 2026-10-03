@@ -150,7 +150,7 @@ function isAppOwnedCalendarId(value: unknown): value is string {
   return typeof value === 'string' && CALENDAR_ID_PATTERN.test(value);
 }
 
-function isCanonicalMatrixRoomId(value: unknown): value is string {
+export function isCanonicalMatrixRoomId(value: unknown): value is string {
   if (typeof value !== 'string' || !value.startsWith('!')) {
     return false;
   }
