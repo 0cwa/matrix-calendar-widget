@@ -33,6 +33,8 @@ const ROOM_APPSERVICE_CASES = new Set([
   'exact-binding',
   'subject-binding',
   'cross-room-denial',
+  'event-write',
+  'unauthorized-write',
 ]);
 const ROOM_APPSERVICE_MATRIX_ERROR_CODES = new Set([
   'M_BAD_JSON',
@@ -288,6 +290,23 @@ export function formatRoomAppServiceListingCheckpoint(stageContent) {
     : '';
 }
 
+export function formatEventHttpStatuses(stageContent) {
+  const statuses = new Set();
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const match =
+        /^(room-appservice|personal-openid)-event-http-(GET|POST|PATCH|DELETE)-([1-5]\d\d)$/.exec(
+          line.trim(),
+        );
+      if (match) statuses.add(`${match[1]}-event-http ${match[2]} ${match[3]}`);
+    }
+  }
+  return [...statuses]
+    .sort()
+    .map((line) => `${line}\n`)
+    .join('');
+}
+
 function emitContractPhase(stagePath) {
   if (!stagePath) {
     return;
@@ -296,6 +315,7 @@ function emitContractPhase(stagePath) {
   try {
     const stageContent = readFileSync(stagePath, 'utf8');
     process.stdout.write(formatContractPhase(stageContent));
+    process.stdout.write(formatEventHttpStatuses(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupStart(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupStatus(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupStage(stageContent));

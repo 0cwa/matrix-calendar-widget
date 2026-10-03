@@ -320,7 +320,7 @@ DST regression or recurrence-editing criteria above.
       operations: check joined membership and power before resolving the
       operator-managed static binding. Room data access defaults disabled;
       enabled listEvents uses the proven application-principal read path, while
-      room mutations remain disabled.
+      room event operations have a separate default-off write gate.
   - [x] Define the operator-managed static room-to-calendar contract (ADR014/
         ADR015) and validate bindings in server configuration before lookup.
   - [x] Add a pure room-binding resolver and joined-membership/power policy
@@ -340,7 +340,15 @@ DST regression or recurrence-editing criteria above.
         room subject binding, and cross-room isolation against pinned Synapse
         and project-owned Radicale (PR #164). The shared dev login fixture has
         an explicit successful-login burst allowance; production limits are
-        unchanged. Mutations, room diagnostics, and delivery remain disabled.
+        unchanged. Room event operations have a separate write gate; room
+        diagnostics and delivery remain disabled.
+  - [x] Implement separately gated room event get/create/update/delete, with
+        current actor/action/binding authorization before service proof and
+        collection/resource checks at the CalDAV boundary. Conditional writes
+        preserve unsupported content; room and personal deletes require one
+        safe VEVENT series, including nested-component checks. Real hosted
+        write, nonmember, cross-room, and personal contracts are required before
+        merge; operator enablement remains separate.
 - [ ] Per-alarm Matrix recipient sidecar metadata.
   - [x] Give newly created or explicitly edited DISPLAY alarms stable UUID
         UIDs; preserve existing UIDs and untouched UID-less legacy alarms.

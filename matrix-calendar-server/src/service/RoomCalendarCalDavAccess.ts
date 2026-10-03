@@ -40,6 +40,18 @@ export interface RoomCalendarCalDavPrincipal {
   readonly credential: IMatrixOpenIdCredential;
 }
 
+export type RoomCalendarAccessMode = 'read' | 'write';
+
+export function isSafeRoomCalendarServiceUserLocalpart(
+  localpart: string,
+): boolean {
+  return (
+    /^[A-Za-z0-9._=-]{1,255}$/.test(localpart) &&
+    localpart !== '.' &&
+    localpart !== '..'
+  );
+}
+
 /**
  * Room-target CalDAV uses only a server-configured application principal and
  * exact room binding. Deployment must keep the explicit access gate disabled
@@ -63,9 +75,14 @@ export class RoomCalendarCalDavAccess {
    */
   async forAuthorizedTarget(
     target: RoomCalendarTarget,
+    mode: RoomCalendarAccessMode,
   ): Promise<RoomCalendarCalDavPrincipal> {
     const config = this.appConfig;
-    if (!config?.room_calendar_access_enabled) {
+    if (
+      (mode !== 'read' && mode !== 'write') ||
+      !config?.room_calendar_access_enabled ||
+      (mode === 'write' && !config.room_calendar_event_writes_enabled)
+    ) {
       throw this.disabledError();
     }
 
@@ -207,11 +224,7 @@ function roomCalendarCollectionUrl(
   try {
     // Service principals use one literal, unambiguous CalDAV home segment.
     // Dot segments normalize away before percent encoding can confine them.
-    if (
-      !/^[A-Za-z0-9._=-]{1,255}$/.test(localpart) ||
-      localpart === '.' ||
-      localpart === '..'
-    ) {
+    if (!isSafeRoomCalendarServiceUserLocalpart(localpart)) {
       throw new Error('invalid application-service home segment');
     }
     const base = new URL(radicaleUrl);

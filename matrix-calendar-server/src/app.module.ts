@@ -73,6 +73,7 @@ import { GuestMemberService } from './service/GuestMemberService';
 import { MatrixCalendarAuthorizationFactory } from './service/MatrixCalendarAuthorization';
 import { MeetingService } from './service/MeetingService';
 import { RoomCalendarCalDavAccess } from './service/RoomCalendarCalDavAccess';
+import { RoomCalendarEventOperations } from './service/RoomCalendarEventOperations';
 import { RoomMessageService } from './service/RoomMessageService';
 import { WelcomeWorkflowService } from './service/WelcomeWorkflowService';
 import { WidgetLayoutService } from './service/WidgetLayoutService';
@@ -308,6 +309,18 @@ const i18nFactory: FactoryProvider<void> = {
     {
       provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
       useClass: RoomCalendarCalDavAccess,
+    },
+    {
+      provide: RoomCalendarEventOperations,
+      useFactory: (appConfig: IAppConfiguration) =>
+        new RoomCalendarEventOperations(fetch, {
+          eventWritesEnabled: appConfig.room_calendar_event_writes_enabled,
+          maxResponseBytes: appConfig.caldav_max_event_response_bytes,
+          radicaleBaseUrl: appConfig.radicale_url,
+          roomCalendarBindings: appConfig.room_calendar_bindings,
+          servicePrincipalUserId: appConfig.application_service_user_id,
+        }),
+      inject: [ModuleProviderToken.APP_CONFIGURATION],
     },
     MatrixOpenIdCalDavCredentialProviderFactory,
     MatrixClientAdapter,
