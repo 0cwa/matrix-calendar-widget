@@ -178,6 +178,24 @@ describe('test CommandService', () => {
     verify(welcomeWorkflowService.handleAddWidgetCommand(ROOM_ID)).never();
   });
 
+  test('legacy meeting help remains disabled with the welcome workflow', async () => {
+    const event = createEvent();
+    event.content.body = '!meeting help';
+    const disabledService = new CommandService(
+      instance(matrixClientMock),
+      instance(welcomeWorkflowService),
+      { ...appConfig, enable_welcome_workflow: false },
+      appRuntimeContext,
+    );
+
+    await disabledService.handleRoomMessage(ROOM_ID, event);
+
+    verify(matrixClientMock.sendHtmlText(ROOM_ID, anyString())).never();
+    verify(welcomeWorkflowService.handleAddWidgetCommand(ROOM_ID)).never();
+    verify(welcomeWorkflowService.handleStatusCommand(ROOM_ID)).never();
+    verify(welcomeWorkflowService.handleLanguageChange(ROOM_ID, [])).never();
+  });
+
   test('calendar help uses the default locale when no room locale exists', async () => {
     makeRoomPublic();
     const event = createEvent();
