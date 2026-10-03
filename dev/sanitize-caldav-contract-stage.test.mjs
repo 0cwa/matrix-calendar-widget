@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   formatContractPhase,
+  formatPersonalOpenIdRunnerReady,
   formatPersonalOpenIdSetupFailure,
   formatPersonalOpenIdSetupStage,
   formatPersonalOpenIdSetupStart,
@@ -99,6 +100,17 @@ test('reports only whether the personal OpenID suite module loaded', () => {
       'personal-openid-suite-loaded\npersonal-openid-setup-start\n',
     ),
     'personal-openid-suite loaded\n',
+  );
+});
+
+test('reports only whether the Personal OpenID Jest runner reached setupFilesAfterEnv', () => {
+  assert.equal(
+    formatPersonalOpenIdRunnerReady('personal-openid-suite-loaded\n'),
+    'personal-openid-runner not-reached\n',
+  );
+  assert.equal(
+    formatPersonalOpenIdRunnerReady('personal-openid-runner-ready\n'),
+    'personal-openid-runner ready\n',
   );
 });
 
