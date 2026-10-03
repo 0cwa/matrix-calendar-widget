@@ -21,7 +21,11 @@ import {
   VersioningType,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { NextFunction, Request, Response } from 'express';
+import type {
+  Response as ExpressResponse,
+  NextFunction,
+  Request,
+} from 'express';
 import fetchMock from 'jest-fetch-mock';
 import { MatrixClient } from 'matrix-bot-sdk';
 import { execFileSync } from 'node:child_process';
@@ -275,14 +279,16 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     authMiddleware = app.get(MatrixAuthMiddleware);
     originalExtractUserContext =
       authMiddleware.extractUserContext.bind(authMiddleware);
-    app.use((request: Request, response: Response, next: NextFunction) => {
-      if (activeStageDiagnostics) {
-        activeStageDiagnostics.middlewareCalls += 1;
-        activeStageDiagnostics.authorizationHeader =
-          request.headers.authorization === undefined ? 'absent' : 'present';
-      }
-      return authMiddleware.use(request, response, next);
-    });
+    app.use(
+      (request: Request, response: ExpressResponse, next: NextFunction) => {
+        if (activeStageDiagnostics) {
+          activeStageDiagnostics.middlewareCalls += 1;
+          activeStageDiagnostics.authorizationHeader =
+            request.headers.authorization === undefined ? 'absent' : 'present';
+        }
+        return authMiddleware.use(request, response, next);
+      },
+    );
     app.enableVersioning({ type: VersioningType.URI });
     markPersonalOpenIdSetupStage('gateway-listen');
     await app.listen(0, '127.0.0.1');
