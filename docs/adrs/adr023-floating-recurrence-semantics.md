@@ -77,12 +77,17 @@ fields and has no timezone until an application interprets it.
    preserved. For an existing PERIOD-valued RDATE, the editor may remove one
    selected value by matching its complete start and either explicit end or
    original RFC DURATION components. It must preserve sibling RDATE values,
-   property parameters, and all other resource data. The editor may add one
-   explicit-end PERIOD-valued RDATE to a supported timed recurring master,
-   preserving the start/end value kind and source VTIMEZONE and making exact
-   repeated additions no-ops. Duration-form PERIOD creation and changes to an
-   existing PERIOD's start, end, or duration remain unsupported; malformed or
-   unsupported source values remain opaque and cannot be changed.
+   property parameters, and all other resource data. The calendar write model
+   and codec may add one explicit-end or duration-form PERIOD-valued RDATE to a
+   supported timed recurring master without changing DTSTART. The PERIOD start
+   retains its floating, UTC, or named-TZID identity and exact local value, and
+   a TZID start requires its VTIMEZONE in the source VCALENDAR. Duration-form
+   writes require a positive RFC duration using supported integer components;
+   zero, negative, fractional, malformed, unknown, or mixed week-and-time
+   components are rejected. An exact repeated addition of the same PERIOD is
+   a no-op. Changes to an existing PERIOD's start, end, or duration remain
+   unsupported; malformed or unsupported source values remain opaque and
+   cannot be changed.
 
 ## Implementation status and boundaries
 
@@ -140,11 +145,16 @@ weekday tokens that include DTSTART's weekday, with omitted or `INTERVAL=1`, no
 `WKST=MO`. The projector leaves other weekly BYDAY combinations opaque. An
 unrelated event edit preserves the source RRULE and resource data.
 
-The codec can add one explicit-end PERIOD-valued RDATE to a supported timed
-recurring master. It preserves the exact typed endpoints, source timezone
-definition, sibling values, and resource data; repeating the same addition is
-a no-op. Duration-form creation and changes to an existing PERIOD's timing
-remain unsupported.
+PR #175 adds explicit-end and positive-duration PERIOD RDATE writes to the
+calendar domain, codec, and in-memory adapter for supported timed recurring
+masters, without changing DTSTART. Duration-form writes preserve the PERIOD
+start's floating, UTC, or named-TZID identity and exact local value; a TZID
+start requires its VTIMEZONE in the source VCALENDAR. Writes accept positive
+RFC durations with supported integer components and reject zero, negative,
+fractional, malformed, unknown, or mixed week-and-time components. An exact
+repeated addition of the same PERIOD is a no-op; sibling recurrence values and
+other resource data remain preserved. Widget duration-form entry is still
+pending, as are edits to an existing PERIOD's start, end, or duration.
 
 ## Consequences
 
