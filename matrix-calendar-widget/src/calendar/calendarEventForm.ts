@@ -29,6 +29,7 @@ import {
   calendarLocalDateTimeToUnixMillis,
   formatSupportedCalendarEventRecurrenceRule,
   isAllDayCalendarEvent,
+  isSupportedCalendarEventOccurrenceExclusion,
   isTimedCalendarEvent,
   parseSupportedCalendarEventRecurrenceRule,
   type TimedCalendarEventTiming,
@@ -616,28 +617,15 @@ function recurrenceExdateFormValues(
 > {
   const recurrence = event.recurrence;
   const exdateValues = recurrence?.exdates ?? [];
-  let supportedRule = recurrence?.rrule === undefined;
-  if (recurrence?.rrule !== undefined) {
-    try {
-      parseSupportedCalendarEventRecurrenceRule(
-        recurrence.rrule,
-        timingStartAsDateTime(event.timing),
-      );
-      supportedRule = true;
-    } catch {
-      supportedRule = false;
-    }
-  }
 
   return {
     exdateEditable: Boolean(
       recurrence &&
-      (recurrence.rrule || recurrence.rdates?.length) &&
       exdateValues.length > 0 &&
       !recurrence.recurrenceId &&
-      !event.unsupportedRecurrence &&
-      !event.unsupportedTimezone &&
-      supportedRule,
+      exdateValues.every((recurrenceId) =>
+        isSupportedCalendarEventOccurrenceExclusion(event, recurrenceId),
+      ),
     ),
     exdateValues,
     exdateChanged: false,

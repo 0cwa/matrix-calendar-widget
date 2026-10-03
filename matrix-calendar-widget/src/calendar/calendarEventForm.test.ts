@@ -823,6 +823,50 @@ describe('calendar event form adapter', () => {
     ).toBeUndefined();
   });
 
+  it('allows removing stored EXDATEs from projectable monthly BYDAY rules', () => {
+    const exdate = {
+      type: 'date-time' as const,
+      value: { local: '2026-10-30T09:00:00', timezone: 'Europe/Stockholm' },
+    };
+    const monthlyEvent: CalendarEvent = {
+      id: 'monthly-byday-exdate',
+      calendarId: 'team',
+      uid: 'monthly-byday-exdate@example.test',
+      title: 'Monthly Friday series',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-26T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-26T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=MONTHLY;BYDAY=FR', exdates: [exdate] },
+    };
+    const values = calendarEventToFormValues(monthlyEvent, calendar);
+
+    expect(values.recurrenceEditable).toBe(false);
+    expect(values.recurrenceDisabledReason).toBe('unsupported');
+    expect(values.exdateEditable).toBe(true);
+    expect(values.exdateValues).toEqual([exdate]);
+
+    const removal = {
+      ...values,
+      title: 'Monthly Friday series',
+      exdateChanged: true,
+      exdateOperation: { action: 'remove' as const, recurrenceId: exdate },
+    };
+    expect(calendarEventPatchFromForm(removal).recurrence).toEqual({
+      exdate: { action: 'remove', recurrenceId: exdate },
+    });
+    expect(validateCalendarEventForm(removal)).toBeUndefined();
+  });
+
   it('rejects conflicting all-day EXDATE removal changes', () => {
     const exdate = { type: 'date' as const, value: '2026-10-01' };
     const event: CalendarEvent = {
