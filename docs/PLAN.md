@@ -163,9 +163,16 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [x] Preserve existing VALARM data on ordinary event edits and add/edit/remove
       one supported relative DISPLAY alarm whose negative DURATION trigger is
       measured from DTSTART.
-- [ ] SEQUENCE / DTSTAMP / CREATED / LAST-MODIFIED handling.
-- [ ] Organizer/attendee round-trip.
+- [x] Preserve revision metadata and update supported master edits with one
+      whole-second UTC clock snapshot and a bounded SEQUENCE increment (ADR025).
+      Malformed, duplicate, and exhausted revision metadata stays opaque;
+      no-op edits retain their original metadata.
+- [x] Preserve existing organizer and attendee properties on ordinary event
+      edits, with rich-fixture round-trip coverage. Attendee authoring remains
+      outside the supported editor.
 - [ ] Attachments/conference properties where safely interoperable.
+  - [x] Preserve opaque attachment and conference properties on ordinary edits;
+        safe link handling and authoring remain open.
 
 The recurring-resource contract uses the hosted CI stack pinned to Synapse
 v1.161.0 and the project-owned Radicale 3.8.0.0 OpenID-only image. A passing
