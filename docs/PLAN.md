@@ -413,6 +413,11 @@ addresses from Matrix room membership.
 
 ## M8 — Hardening and release
 
+- [x] Wire a separate Chromium calendar-component fixture at 320, 390, 768, and
+      1280 CSS pixels, with measured overflow, keyboard focus, and axe checks.
+      Hosted passing evidence is required; actual Matrix clients remain a
+      separate release gate (docs/browser-calendar-validation.md).
+
 - [ ] Responsive/a11y pass across narrow Element panels and full-screen widget.
 - [x] Source-based threat model and independent security review of its current
       boundary claims. Residual risks and deployment acceptance gates remain
