@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   formatContractPhase,
+  formatRoomAppServiceListingCheckpoint,
   formatRoomAppServiceSetupStatus,
 } from './sanitize-caldav-contract-stage.mjs';
 
@@ -64,5 +65,26 @@ test('does not expose unknown stage data or accept a partial setup marker', () =
   const output = formatRoomAppServiceSetupStatus(privateSentinel);
 
   assert.equal(output, 'room-appservice-setup not-reached\n');
+  assert.equal(output.includes(privateSentinel), false);
+});
+
+test('emits only the latest fixed RoomAppService listing checkpoint', () => {
+  assert.equal(
+    formatRoomAppServiceListingCheckpoint(
+      [
+        'room-appservice-listing-room-one-response-status',
+        'room-appservice-listing-room-one-event-summary',
+        'room-appservice-listing-room-two-target-path',
+      ].join('\n'),
+    ),
+    'room-appservice-listing room-two-target-path\n',
+  );
+});
+
+test('does not emit unknown RoomAppService checkpoint text', () => {
+  const privateSentinel = 'room-appservice-listing-private-user-event-details';
+  const output = formatRoomAppServiceListingCheckpoint(privateSentinel);
+
+  assert.equal(output, '');
   assert.equal(output.includes(privateSentinel), false);
 });

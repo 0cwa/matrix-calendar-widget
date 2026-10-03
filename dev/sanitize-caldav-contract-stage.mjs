@@ -14,6 +14,21 @@ const allowedPhases = new Set([
   'period-removal-verified',
 ]);
 const ROOM_APPSERVICE_SETUP_COMPLETE = 'room-appservice-setup-complete';
+const ROOM_APPSERVICE_LISTING_CHECKPOINTS = new Set([
+  'room-one-response-status',
+  'room-one-event-summary',
+  'room-one-caldav-requests',
+  'room-one-target-path',
+  'room-one-no-root-discovery',
+  'room-one-no-response-secret',
+  'room-two-response-status',
+  'room-two-event-summary',
+  'room-two-caldav-requests',
+  'room-two-target-path',
+  'room-two-no-root-discovery',
+  'room-two-no-response-secret',
+  'logs-secret-free',
+]);
 
 export function formatContractPhase(stageContent) {
   let latestAllowedPhase;
@@ -37,6 +52,21 @@ export function formatRoomAppServiceSetupStatus(stageContent) {
   return `room-appservice-setup ${completed ? 'complete' : 'not-reached'}\n`;
 }
 
+export function formatRoomAppServiceListingCheckpoint(stageContent) {
+  let latestCheckpoint;
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const candidate = line.trim().replace(/^room-appservice-listing-/, '');
+      if (ROOM_APPSERVICE_LISTING_CHECKPOINTS.has(candidate)) {
+        latestCheckpoint = candidate;
+      }
+    }
+  }
+  return latestCheckpoint
+    ? `room-appservice-listing ${latestCheckpoint}\n`
+    : '';
+}
+
 function emitContractPhase(stagePath) {
   if (!stagePath) {
     return;
@@ -46,6 +76,7 @@ function emitContractPhase(stagePath) {
     const stageContent = readFileSync(stagePath, 'utf8');
     process.stdout.write(formatContractPhase(stageContent));
     process.stdout.write(formatRoomAppServiceSetupStatus(stageContent));
+    process.stdout.write(formatRoomAppServiceListingCheckpoint(stageContent));
   } catch {
     // Missing or unreadable diagnostics must not print untrusted file content.
   }

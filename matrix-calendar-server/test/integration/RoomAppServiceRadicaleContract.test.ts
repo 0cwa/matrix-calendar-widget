@@ -73,6 +73,20 @@ let activeCalDavRequests:
 const serviceOpenIdTokens: string[] = [];
 const serviceUserAccessTokens: string[] = [];
 const gatewayLogLines: string[] = [];
+type RoomAppServiceListingCheckpoint =
+  | 'room-one-response-status'
+  | 'room-one-event-summary'
+  | 'room-one-caldav-requests'
+  | 'room-one-target-path'
+  | 'room-one-no-root-discovery'
+  | 'room-one-no-response-secret'
+  | 'room-two-response-status'
+  | 'room-two-event-summary'
+  | 'room-two-caldav-requests'
+  | 'room-two-target-path'
+  | 'room-two-no-root-discovery'
+  | 'room-two-no-response-secret'
+  | 'logs-secret-free';
 
 function captureGatewayLog(...values: unknown[]): void {
   gatewayLogLines.push(values.map(String).join(' '));
@@ -271,13 +285,17 @@ describeContract('room appservice proof against real Radicale', () => {
         calendarId: calendarIds[index],
       });
       expect(response.status).toBe(200);
+      const checkpointRoom = index === 0 ? 'room-one' : 'room-two';
+      markRoomAppServiceListingCheckpoint(`${checkpointRoom}-response-status`);
       const body = JSON.parse(response.body) as {
         events: Array<{ event: { id: string; summary: string } }>;
       };
       expect(body.events.map(({ event }) => event.summary)).toEqual([
         `Room event ${index + 1}`,
       ]);
+      markRoomAppServiceListingCheckpoint(`${checkpointRoom}-event-summary`);
       expect(activeCalDavRequests?.length).toBeGreaterThan(0);
+      markRoomAppServiceListingCheckpoint(`${checkpointRoom}-caldav-requests`);
       expect(
         activeCalDavRequests?.every(({ pathname }) =>
           pathname.startsWith(
@@ -285,12 +303,16 @@ describeContract('room appservice proof against real Radicale', () => {
           ),
         ),
       ).toBe(true);
+      markRoomAppServiceListingCheckpoint(`${checkpointRoom}-target-path`);
       expect(
         activeCalDavRequests?.some(
           ({ method, pathname }) =>
             method === 'PROPFIND' && pathname === '/_matrix_calendar_service/',
         ),
       ).toBe(false);
+      markRoomAppServiceListingCheckpoint(
+        `${checkpointRoom}-no-root-discovery`,
+      );
       const responseSecrets = [
         serviceToken,
         actorAccessToken,
@@ -300,8 +322,12 @@ describeContract('room appservice proof against real Radicale', () => {
       expect(
         responseSecrets.some((secret) => response.body.includes(secret)),
       ).toBe(false);
+      markRoomAppServiceListingCheckpoint(
+        `${checkpointRoom}-no-response-secret`,
+      );
     }
     assertLogsOmitSecrets();
+    markRoomAppServiceListingCheckpoint('logs-secret-free');
   });
 
   it('binds the Radicale OpenID subject to the configured service user, not the room sender', async () => {
@@ -376,6 +402,25 @@ function markRoomAppServiceSetupComplete(): void {
 
   try {
     appendFileSync(stageFile, 'room-appservice-setup-complete\n', 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
+
+function markRoomAppServiceListingCheckpoint(
+  checkpoint: RoomAppServiceListingCheckpoint,
+): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+    return;
+  }
+
+  try {
+    appendFileSync(
+      stageFile,
+      `room-appservice-listing-${checkpoint}\n`,
+      'utf8',
+    );
   } catch {
     // Diagnostics must not change contract-test behavior.
   }
