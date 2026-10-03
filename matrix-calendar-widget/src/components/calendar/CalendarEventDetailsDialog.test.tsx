@@ -521,6 +521,89 @@ describe('<CalendarEventDetailsDialog />', () => {
     ).toBe('September 23, 2026 · 3:00 PM–4:00 PM');
   });
 
+  it('passes the selected occurrence and viewer zone into timing scope edits', async () => {
+    const recurringEvent: CalendarEvent = {
+      ...event,
+      id: 'series-resource',
+      uid: 'series@example.test',
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=3' },
+    };
+    const occurrence: CalendarEvent = {
+      ...recurringEvent,
+      id: 'series-resource::occurrence::2026-10-07',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-07T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-07T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    };
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-10-07T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringEvent],
+    });
+    const updateEvent = vi.spyOn(repository, 'updateEvent');
+    const onSourceEventChange = vi.fn();
+
+    render(
+      <CalendarEventDetailsDialog
+        event={occurrence}
+        sourceEvent={recurringEvent}
+        recurrenceId={recurrenceId}
+        onSourceEventChange={onSourceEventChange}
+        onClose={vi.fn()}
+        viewerTimezone="America/Los_Angeles"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'This and following' }),
+    );
+    fireEvent.change(screen.getByLabelText(/^Start/), {
+      target: { value: '2026-10-07T11:00' },
+    });
+    fireEvent.change(screen.getByLabelText(/^End/), {
+      target: { value: '2026-10-07T12:00' },
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(updateEvent).toHaveBeenCalled());
+    expect(updateEvent).toHaveBeenCalledWith(
+      'team',
+      recurringEvent.id,
+      expect.objectContaining({
+        recurrence: {
+          following: expect.objectContaining({
+            recurrenceId,
+            viewerTimezone: 'America/Los_Angeles',
+          }),
+        },
+      }),
+    );
+    await waitFor(() => expect(onSourceEventChange).toHaveBeenCalled());
+    expect(onSourceEventChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recurrence: expect.objectContaining({ overrides: expect.any(Array) }),
+      }),
+    );
+  });
+
   it('deletes an event after confirmation', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],

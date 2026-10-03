@@ -22,9 +22,12 @@ export {
   canonicalizeCalendarExternalUrl,
 } from './calendarEventExternalLinks';
 export {
+  MAX_FOLLOWING_OCCURRENCES_PER_EVENT,
   MAX_PROJECTED_OCCURRENCES_PER_EVENT,
+  calendarEventFollowingTimingOverrides,
   calendarEventRecurrenceIdentity,
   formatSupportedCalendarEventRecurrenceRule,
+  isSupportedCalendarEventFollowingTimingEdit,
   isSupportedCalendarEventOccurrenceExclusion,
   parseSupportedCalendarEventRecurrenceRule,
   projectCalendarEventOccurrenceByRecurrenceId,
@@ -42,6 +45,7 @@ export type {
 export { calendarEventTimedDateTimeToDateTime } from './calendarEventTimedDateTime';
 export {
   calendarLocalDateTimeToUnixMillis,
+  isCalendarLocalDateTimeUnambiguous,
   isCalendarTimezoneSupported,
 } from './calendarEventTimezone';
 export * from './calendarUtils';

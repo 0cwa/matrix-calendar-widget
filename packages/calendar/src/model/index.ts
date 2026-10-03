@@ -36,6 +36,7 @@ export type {
   CalendarEventDisplayAlarm,
   CalendarEventDisplayAlarmInput,
   CalendarEventDuration,
+  CalendarEventFollowingTimingWrite,
   CalendarEventId,
   CalendarEventInput,
   CalendarEventPatch,

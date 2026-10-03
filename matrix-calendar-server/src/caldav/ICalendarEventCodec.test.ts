@@ -593,6 +593,258 @@ describe('applyOccurrenceTimingOverride', () => {
   });
 });
 
+describe('bounded following timing codec writes', () => {
+  const now = new Date('2026-10-03T15:16:17.987Z');
+  const operation = {
+    action: 'set-timing' as const,
+    recurrenceId: {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-10-02T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    },
+    timing: {
+      type: 'end' as const,
+      start: {
+        type: 'date-time' as const,
+        value: {
+          local: '2026-10-02T11:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      end: {
+        type: 'date-time' as const,
+        value: {
+          local: '2026-10-02T12:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    },
+    viewerTimezone: 'Europe/Stockholm',
+  };
+
+  it('appends complete same-resource overrides and retains the raw master', () => {
+    const source = simpleRecurringSource(
+      'DTSTART;TZID=Europe/Stockholm:20261001T090000',
+      'DTEND;TZID=Europe/Stockholm:20261001T100000',
+      [
+        'CREATED:20260921T100000Z',
+        'SEQUENCE:4',
+        'X-OPAQUE-MASTER-PROPERTY:keep-exactly',
+      ],
+      ['Europe/Stockholm'],
+    );
+    const deterministicCodec = new ICalendarEventCodec(() => now);
+    const parsed = deterministicCodec.parse('team', 'following.ics', source);
+    const result = parsed.applyPatch({
+      recurrence: { following: operation },
+    });
+    const sourceBlocks = rawVeventBlocks(source);
+    const resultBlocks = rawVeventBlocks(result.icalendar);
+
+    expect(resultBlocks).toHaveLength(3);
+    expect(resultBlocks[0]).toEqual(sourceBlocks[0]);
+    expect(result.icalendar).toContain(
+      'X-CUSTOM-CALENDAR-PROPERTY:preserve-resource-value',
+    );
+    expect(result.event.recurrence?.overrides).toHaveLength(2);
+    expect(
+      result.event.recurrence?.overrides?.map(
+        ({ recurrenceId }) => recurrenceId,
+      ),
+    ).toEqual([
+      operation.recurrenceId,
+      {
+        type: 'date-time',
+        value: {
+          local: '2026-10-03T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    ]);
+    for (const block of resultBlocks.slice(1)) {
+      expect(block).toContain('X-OPAQUE-MASTER-PROPERTY:keep-exactly');
+      expect(block).not.toContain('RRULE:FREQ=DAILY;COUNT=3');
+      expect(block).toContain('DTSTAMP:20261003T151617Z');
+      expect(block).toContain('LAST-MODIFIED:20261003T151617Z');
+      expect(block).toContain('SEQUENCE:5');
+      expect(block).toContain('CREATED:20260921T100000Z');
+    }
+    expect(resultBlocks[1]).toContain(
+      'DTSTART;TZID=Europe/Stockholm:20261002T110000',
+    );
+    expect(resultBlocks[1]).toContain(
+      'DTEND;TZID=Europe/Stockholm:20261002T120000',
+    );
+    expect(resultBlocks[2]).toContain(
+      'DTSTART;TZID=Europe/Stockholm:20261003T110000',
+    );
+    expect(resultBlocks[2]).toContain(
+      'DTEND;TZID=Europe/Stockholm:20261003T120000',
+    );
+    expect(resultBlocks[1]).toContain(
+      'RECURRENCE-ID;TZID=Europe/Stockholm:20261002T090000',
+    );
+    expect(resultBlocks[2]).toContain(
+      'RECURRENCE-ID;TZID=Europe/Stockholm:20261003T090000',
+    );
+  });
+
+  it('returns the exact original resource for an identical repeated operation', () => {
+    const source = simpleRecurringSource(
+      'DTSTART;TZID=Europe/Stockholm:20261001T090000',
+      'DTEND;TZID=Europe/Stockholm:20261001T100000',
+      ['STATUS:CONFIRMED'],
+      ['Europe/Stockholm'],
+    );
+    const deterministicCodec = new ICalendarEventCodec(() => now);
+    const first = deterministicCodec
+      .parse('team', 'following.ics', source)
+      .applyPatch({ recurrence: { following: operation } });
+    const second = deterministicCodec
+      .parse('team', 'following.ics', first.icalendar)
+      .applyPatch({ recurrence: { following: operation } });
+
+    expect(second.icalendar).toBe(first.icalendar);
+    expect(rawVeventBlocks(second.icalendar)).toHaveLength(3);
+  });
+
+  it('fails closed for a noncanonical TZID=UTC recurring master', () => {
+    const source = simpleRecurringSource(
+      'DTSTART;TZID=UTC:20261001T090000',
+      'DTEND;TZID=UTC:20261001T100000',
+    );
+    const utcOperation = {
+      ...operation,
+      recurrenceId: {
+        type: 'date-time' as const,
+        value: { local: '2026-10-02T09:00:00', timezone: 'UTC' },
+      },
+      timing: {
+        type: 'end' as const,
+        start: {
+          type: 'date-time' as const,
+          value: { local: '2026-10-02T11:00:00', timezone: 'UTC' },
+        },
+        end: {
+          type: 'date-time' as const,
+          value: { local: '2026-10-02T12:00:00', timezone: 'UTC' },
+        },
+      },
+    };
+    const deterministicCodec = new ICalendarEventCodec(() => now);
+    const parsed = deterministicCodec.parse(
+      'team',
+      'utc-following.ics',
+      source,
+    );
+
+    expect(parsed.event.timing.type).toBe('timed');
+    if (parsed.event.timing.type !== 'timed') {
+      throw new Error('Expected a timed source event');
+    }
+    expect(parsed.event.timing.start).toMatchObject({ timezone: 'UTC' });
+    expect(parsed.event.timing.end).toMatchObject({ timezone: 'UTC' });
+    expect(() =>
+      parsed.applyPatch({ recurrence: { following: utcOperation } }),
+    ).toThrow(ICalendarEventCodecError);
+  });
+
+  it('rejects a following timing write on a cancelled master series', () => {
+    const source = simpleRecurringSource(
+      'DTSTART;TZID=Europe/Stockholm:20261001T090000',
+      'DTEND;TZID=Europe/Stockholm:20261001T100000',
+      ['STATUS:CANCELLED'],
+      ['Europe/Stockholm'],
+    );
+    const parsed = new ICalendarEventCodec(() => now).parse(
+      'team',
+      'cancelled-following.ics',
+      source,
+    );
+
+    expect(parsed.event.status).toBe('cancelled');
+    expect(() =>
+      parsed.applyPatch({ recurrence: { following: operation } }),
+    ).toThrow(ICalendarEventCodecError);
+  });
+
+  it.each([
+    [
+      'duplicate mixed master statuses',
+      ['STATUS:CONFIRMED', 'STATUS:CANCELLED'],
+    ],
+    ['an unknown master status', ['STATUS:BUSY']],
+  ])('rejects %s before following planning', (_label, statusLines) => {
+    const source = simpleRecurringSource(
+      'DTSTART;TZID=Europe/Stockholm:20261001T090000',
+      'DTEND;TZID=Europe/Stockholm:20261001T100000',
+      statusLines,
+      ['Europe/Stockholm'],
+    );
+    const parsed = new ICalendarEventCodec(() => now).parse(
+      'team',
+      'invalid-status-following.ics',
+      source,
+    );
+
+    expect(() =>
+      parsed.applyPatch({ recurrence: { following: operation } }),
+    ).toThrow(ICalendarEventCodecError);
+  });
+
+  it('rejects alarms, arbitrary overrides, and extra event patches', () => {
+    const simple = simpleRecurringSource(
+      'DTSTART;TZID=Europe/Stockholm:20261001T090000',
+      'DTEND;TZID=Europe/Stockholm:20261001T100000',
+      [],
+      ['Europe/Stockholm'],
+    );
+    const deterministicCodec = new ICalendarEventCodec(() => now);
+    // Put the VALARM inside the master rather than a detached component.
+    const alarmSource = simple.replace(
+      'END:VEVENT',
+      [
+        'BEGIN:VALARM',
+        'ACTION:DISPLAY',
+        'DESCRIPTION:Reminder',
+        'TRIGGER:-PT5M',
+        'END:VALARM',
+        'END:VEVENT',
+      ].join('\r\n'),
+    );
+    expect(() =>
+      deterministicCodec
+        .parse('team', 'alarm.ics', alarmSource)
+        .applyPatch({ recurrence: { following: operation } }),
+    ).toThrow(ICalendarEventCodecError);
+
+    const arbitraryOverride = withDetachedEvents(simple, [
+      [
+        'BEGIN:VEVENT',
+        'UID:simple-recurring@example.test',
+        'RECURRENCE-ID;TZID=Europe/Stockholm:20261002T090000',
+        'DTSTART;TZID=Europe/Stockholm:20261002T110000',
+        'DTEND;TZID=Europe/Stockholm:20261002T120000',
+        'SUMMARY:Different title',
+        'END:VEVENT',
+      ].join('\r\n'),
+    ]);
+    expect(() =>
+      deterministicCodec
+        .parse('team', 'arbitrary.ics', arbitraryOverride)
+        .applyPatch({ recurrence: { following: operation } }),
+    ).toThrow(ICalendarEventCodecError);
+
+    expect(() =>
+      deterministicCodec
+        .parse('team', 'extra-patch.ics', simple)
+        .applyPatch({ title: 'Changed', recurrence: { following: operation } }),
+    ).toThrow(ICalendarEventCodecError);
+  });
+});
+
 describe('ICalendarEventCodec', () => {
   it('decodes supported VEVENT fields into the calendar domain', () => {
     const parsed = codec.parse(

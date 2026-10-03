@@ -33,6 +33,7 @@ import {
   isCalendarEventAlarmRemoval,
 } from '../model';
 import {
+  calendarEventFollowingTimingOverrides,
   calendarEventRecurrenceIdentity,
   isSupportedCalendarEventOccurrenceExclusion,
 } from '../utils/calendarEventOccurrenceProjection';
@@ -237,6 +238,7 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     this.getWritableCalendar(calendarId);
     const current = this.getStoredEvent(calendarId, eventId);
     validateOccurrenceTimingPatchShape(patch);
+    validateFollowingTimingPatchShape(patch);
     if (
       current.unsupportedAlarm &&
       Object.prototype.hasOwnProperty.call(patch, 'alarm')
@@ -562,6 +564,15 @@ function cloneCalendarEventPatch(
           timing: cloneRecurrenceTiming(operation.timing),
         },
       };
+    } else if ('following' in patch.recurrence) {
+      const operation = patch.recurrence.following;
+      cloned.recurrence = {
+        following: {
+          ...operation,
+          recurrenceId: cloneCalendarEventDateTime(operation.recurrenceId),
+          timing: cloneRecurrenceTiming(operation.timing),
+        },
+      };
     } else if ('exdate' in patch.recurrence) {
       cloned.recurrence = {
         exdate: {
@@ -633,6 +644,29 @@ function applyRecurrenceWrite(
   }
   if ('occurrence' in write) {
     return applyOccurrenceTimingWrite(currentEvent, write.occurrence);
+  }
+  if ('following' in write) {
+    try {
+      const plan = calendarEventFollowingTimingOverrides(
+        currentEvent,
+        write.following,
+      );
+      if (plan.noOp) {
+        return current;
+      }
+      return {
+        ...current,
+        overrides: plan.overrides.map((override) => ({
+          recurrenceId: cloneCalendarEventDateTime(override.recurrenceId),
+          timing: override.timing
+            ? cloneRecurrenceTiming(override.timing)
+            : undefined,
+          ...(override.status ? { status: override.status } : {}),
+        })),
+      };
+    } catch {
+      throw invalidFollowingTiming();
+    }
   }
   if (!('exdate' in write) && !('rdate' in write)) {
     return write?.rrule ? { rrule: write.rrule } : undefined;
@@ -1003,6 +1037,34 @@ function validateOccurrenceTimingPatchShape(patch: unknown): void {
   }
 }
 
+function validateFollowingTimingPatchShape(patch: unknown): void {
+  if (!isRecord(patch) || !isRecord(patch.recurrence)) {
+    return;
+  }
+  const recurrence = patch.recurrence;
+  if (!Object.prototype.hasOwnProperty.call(recurrence, 'following')) {
+    return;
+  }
+  const operation = recurrence.following;
+  if (
+    Object.keys(patch).length !== 1 ||
+    Object.keys(recurrence).length !== 1 ||
+    !isRecord(operation) ||
+    Object.keys(operation).length !== 4 ||
+    !['action', 'recurrenceId', 'timing', 'viewerTimezone'].every((key) =>
+      Object.prototype.hasOwnProperty.call(operation, key),
+    ) ||
+    operation.action !== 'set-timing' ||
+    typeof operation.viewerTimezone !== 'string' ||
+    !isCalendarTimezoneSupported(operation.viewerTimezone) ||
+    !isOccurrenceDateTime(operation.recurrenceId) ||
+    !isOccurrenceTiming(operation.timing) ||
+    operation.timing.type !== 'end'
+  ) {
+    throw invalidFollowingTiming();
+  }
+}
+
 function isOccurrenceDateTime(value: unknown): value is CalendarEventDateTime {
   if (
     !isRecord(value) ||
@@ -1122,6 +1184,13 @@ function invalidOccurrenceTiming(): CalendarRepositoryError {
   return new CalendarRepositoryError(
     'unsupported-patch',
     'The occurrence timing has an invalid type, time zone, or end before its start.',
+  );
+}
+
+function invalidFollowingTiming(): CalendarRepositoryError {
+  return new CalendarRepositoryError(
+    'unsupported-patch',
+    'This following timing edit cannot be applied safely to the current recurrence.',
   );
 }
 

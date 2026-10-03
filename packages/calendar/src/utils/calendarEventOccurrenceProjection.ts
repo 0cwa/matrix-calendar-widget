@@ -21,6 +21,7 @@ import type {
   CalendarEvent,
   CalendarEventDateTime,
   CalendarEventDuration,
+  CalendarEventFollowingTimingWrite,
   CalendarEventRecurrenceDate,
   CalendarEventRecurrenceOverride,
   CalendarEventRecurrenceTiming,
@@ -36,12 +37,16 @@ import {
   CalendarEventTimezoneError,
   calendarLocalDateTimeToUnixMillis,
   calendarUnixMillisToLocalDateTime,
+  isCalendarLocalDateTimeUnambiguous,
   isCalendarRecurrenceWallTimeValid,
   isCalendarTimezoneSupported,
 } from './calendarEventTimezone';
 
 /** Maximum RRULE candidates returned for one resource in one projection. */
 export const MAX_PROJECTED_OCCURRENCES_PER_EVENT = 512;
+
+/** Maximum finite RRULE members accepted by a following timing edit. */
+export const MAX_FOLLOWING_OCCURRENCES_PER_EVENT = 128;
 
 /** Bounds historical work when an old high-frequency RRULE is queried. */
 const MAX_RRULE_SCAN_STEPS = 100_000;
@@ -261,6 +266,579 @@ export function parseSupportedCalendarEventRecurrenceRule(
           ? { type: 'until', value: until }
           : { type: 'never' },
   };
+}
+
+export type CalendarEventFollowingTimingPlan = {
+  /** Full detached override set after the requested suffix edit. */
+  overrides: CalendarEventRecurrenceOverride[];
+  /** Detached overrides affected by this operation. */
+  suffix: CalendarEventRecurrenceOverride[];
+  /** True only when the source already contains the complete exact result. */
+  noOp: boolean;
+};
+
+/**
+ * Return whether a selected original recurrence identity can use the bounded
+ * following-time operation. This is a UI affordance only; the write planner
+ * below repeats every validation at the repository/server boundary.
+ */
+export function isSupportedCalendarEventFollowingTimingEdit(
+  event: CalendarEvent,
+  recurrenceId: CalendarEventDateTime,
+  viewerTimezone: string,
+): boolean {
+  try {
+    const candidates = followingCandidates(event, viewerTimezone);
+    return candidates.some(
+      (candidate) =>
+        calendarEventRecurrenceIdentity(candidate) ===
+        calendarEventRecurrenceIdentity(recurrenceId),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Materialize the bounded RRULE suffix as detached timing overrides in the
+ * same resource. The source master and recurrence identities remain intact.
+ */
+export function calendarEventFollowingTimingOverrides(
+  event: CalendarEvent,
+  operation: CalendarEventFollowingTimingWrite,
+): CalendarEventFollowingTimingPlan {
+  const candidates = followingCandidates(event, operation.viewerTimezone, true);
+  const selectedIdentity = calendarEventRecurrenceIdentity(
+    operation.recurrenceId,
+  );
+  const selectedIndex = candidates.findIndex(
+    (candidate) =>
+      calendarEventRecurrenceIdentity(candidate) === selectedIdentity,
+  );
+  if (selectedIndex < 0) {
+    throw new Error('Unsupported following recurrence identity');
+  }
+
+  const requested = validateFollowingTiming(
+    event,
+    operation.timing,
+    operation.viewerTimezone,
+  );
+  const existingOverrides = event.recurrence?.overrides ?? [];
+  const existingByIdentity = new Map<string, CalendarEventRecurrenceOverride>();
+  for (const override of existingOverrides) {
+    const identity = calendarEventRecurrenceIdentity(override.recurrenceId);
+    if (existingByIdentity.has(identity)) {
+      throw new Error('Ambiguous existing following overrides');
+    }
+    existingByIdentity.set(identity, override);
+  }
+
+  const existingIndexes = existingOverrides.map((override) => {
+    const index = candidates.findIndex(
+      (candidate) =>
+        calendarEventRecurrenceIdentity(candidate) ===
+        calendarEventRecurrenceIdentity(override.recurrenceId),
+    );
+    if (index < 0) {
+      throw new Error('Unrelated existing recurrence override');
+    }
+    if (
+      override.status !== event.status ||
+      !override.timing ||
+      override.timing.type !== 'end'
+    ) {
+      throw new Error('Unsupported existing recurrence override');
+    }
+    validateFollowingTiming(event, override.timing, operation.viewerTimezone);
+    return index;
+  });
+
+  let previousSuffixStart = candidates.length;
+  if (existingIndexes.length > 0) {
+    previousSuffixStart = Math.min(...existingIndexes);
+    const sortedIndexes = [...existingIndexes].sort(
+      (left, right) => left - right,
+    );
+    if (
+      sortedIndexes.length !== candidates.length - previousSuffixStart ||
+      sortedIndexes.some(
+        (index, offset) => index !== previousSuffixStart + offset,
+      )
+    ) {
+      throw new Error(
+        'Existing overrides are not one complete recurrence suffix',
+      );
+    }
+    validateUniformFollowingSuffix(
+      candidates.slice(previousSuffixStart),
+      existingOverrides,
+      event,
+      operation.viewerTimezone,
+    );
+  }
+
+  const selectedCurrentStart =
+    existingByIdentity.get(selectedIdentity)?.timing?.start ??
+    candidates[selectedIndex];
+  const wallShift = wallTimeDifference(selectedCurrentStart, requested.start);
+  const startIndexes = new Map(
+    existingOverrides.map((override) => [
+      calendarEventRecurrenceIdentity(override.recurrenceId),
+      override.timing!.start,
+    ]),
+  );
+  const suffix: CalendarEventRecurrenceOverride[] = [];
+  for (let index = selectedIndex; index < candidates.length; index += 1) {
+    const recurrenceId = candidates[index];
+    const effectiveStart =
+      startIndexes.get(calendarEventRecurrenceIdentity(recurrenceId)) ??
+      recurrenceId;
+    const start = shiftFollowingStart(
+      effectiveStart,
+      wallShift,
+      operation.viewerTimezone,
+    );
+    const timing = buildFollowingTiming(
+      start,
+      requested,
+      event,
+      operation.viewerTimezone,
+    );
+    suffix.push({
+      recurrenceId: cloneRecurrenceDateTime(recurrenceId),
+      timing,
+      ...(event.status ? { status: event.status } : {}),
+    });
+  }
+
+  const preservedPrefix = existingOverrides.filter((override) => {
+    const index = candidates.findIndex(
+      (candidate) =>
+        calendarEventRecurrenceIdentity(candidate) ===
+        calendarEventRecurrenceIdentity(override.recurrenceId),
+    );
+    return index < selectedIndex;
+  });
+  const overrides = [...preservedPrefix, ...suffix];
+  const noOp =
+    existingOverrides.length === overrides.length &&
+    existingOverrides.every((override) => {
+      const next = overrides.find(
+        (candidate) =>
+          calendarEventRecurrenceIdentity(candidate.recurrenceId) ===
+          calendarEventRecurrenceIdentity(override.recurrenceId),
+      );
+      return Boolean(next && sameFollowingOverride(override, next));
+    });
+
+  if (existingOverrides.length > 0 && !noOp) {
+    throw new Error(
+      'A following timing edit cannot rewrite an existing detached suffix',
+    );
+  }
+
+  return { overrides, suffix, noOp };
+}
+
+type FollowingCandidates = CalendarEventDateTime[];
+
+function followingCandidates(
+  event: CalendarEvent,
+  viewerTimezone: string,
+  allowExistingOverrides = false,
+): FollowingCandidates {
+  const recurrence = event.recurrence;
+  if (
+    !isCalendarTimezoneSupported(viewerTimezone) ||
+    event.status === 'cancelled' ||
+    event.unsupportedTimezone ||
+    event.unsupportedRecurrence ||
+    event.unsupportedAlarm ||
+    event.alarm ||
+    !recurrence?.rrule ||
+    recurrence.recurrenceId ||
+    (recurrence.rdates?.length ?? 0) > 0 ||
+    (recurrence.exdates?.length ?? 0) > 0
+  ) {
+    throw new Error('Unsupported following recurrence source');
+  }
+  if (!allowExistingOverrides && recurrence.overrides?.length) {
+    throw new Error(
+      'Following edits do not accept existing detached overrides',
+    );
+  }
+  if (event.timing.type === 'timed') {
+    const interval = timedInterval(event.timing, viewerTimezone);
+    if (interval.end <= interval.start) {
+      throw new Error('Invalid master event timing');
+    }
+  } else {
+    const interval = eventInterval(event, viewerTimezone);
+    if (interval.end <= interval.start) {
+      throw new Error('Invalid master event timing');
+    }
+  }
+
+  const anchor =
+    event.timing.type === 'all-day'
+      ? { type: 'date' as const, value: event.timing.startDate }
+      : timedValue(event.timing.start);
+  const rule = parseSupportedCalendarEventRecurrenceRule(
+    recurrence.rrule,
+    anchor,
+  );
+  if (
+    !rule ||
+    rule.end.type !== 'count' ||
+    rule.end.count > MAX_FOLLOWING_OCCURRENCES_PER_EVENT
+  ) {
+    throw new Error('Following edits require a bounded COUNT recurrence');
+  }
+  if (anchor.type !== 'date') {
+    assertTimezone(dateTimeTimezone(anchor, viewerTimezone));
+  }
+
+  const expansion = buildRule(recurrence.rrule, anchor);
+  if (!expansion) {
+    throw new Error('Unsupported following recurrence source');
+  }
+  const count = rule.end.count;
+  const result: CalendarEventDateTime[] = [];
+  let validCount = 0;
+  let scanned = 0;
+  let exceeded = false;
+  expansion.rule.all((date) => {
+    scanned += 1;
+    if (scanned > MAX_RRULE_SCAN_STEPS) {
+      exceeded = true;
+      return false;
+    }
+    const recurrenceId = recurrenceValueFromWallDate(date, anchor);
+    if (!isValidRecurrenceStart(recurrenceId, viewerTimezone)) {
+      return true;
+    }
+    validCount += 1;
+    if (validCount > count) {
+      return false;
+    }
+    result.push(recurrenceId);
+    return validCount < count;
+  });
+  if (
+    exceeded ||
+    result.length !== count ||
+    result.length === 0 ||
+    calendarEventRecurrenceIdentity(result[0]) !==
+      calendarEventRecurrenceIdentity(anchor)
+  ) {
+    throw new Error('Unable to expand the bounded recurrence safely');
+  }
+  return result;
+}
+
+type ValidatedFollowingTiming = {
+  start: CalendarEventDateTime;
+  end: CalendarEventDateTime;
+  dateDays?: number;
+  elapsedMillis?: number;
+};
+
+function validateFollowingTiming(
+  event: CalendarEvent,
+  timing: CalendarEventRecurrenceTiming,
+  viewerTimezone: string,
+): ValidatedFollowingTiming {
+  if (timing.type !== 'end') {
+    throw new Error('Following timing requires explicit endpoints');
+  }
+  const anchor =
+    event.timing.type === 'all-day'
+      ? { type: 'date' as const, value: event.timing.startDate }
+      : timedValue(event.timing.start);
+  assertSameFollowingValueKind(anchor, timing.start);
+  assertSameFollowingValueKind(anchor, timing.end);
+  assertFollowingValueValid(timing.start, viewerTimezone);
+  assertFollowingValueValid(timing.end, viewerTimezone);
+  const start = followingValueInstant(timing.start, viewerTimezone);
+  const end = followingValueInstant(timing.end, viewerTimezone);
+  if (end <= start) {
+    throw new Error('Following timing must have a positive interval');
+  }
+  if (anchor.type === 'date') {
+    const startDate = parseDate((timing.start as { value: string }).value);
+    const endDate = parseDate((timing.end as { value: string }).value);
+    const dateDays =
+      startDate && endDate ? endDate.diff(startDate, 'days').days : 0;
+    if (!Number.isSafeInteger(dateDays) || dateDays <= 0) {
+      throw new Error('Following DATE timing requires a positive day duration');
+    }
+    return { start: timing.start, end: timing.end, dateDays };
+  }
+  return {
+    start: timing.start,
+    end: timing.end,
+    elapsedMillis: end - start,
+  };
+}
+
+function assertSameFollowingValueKind(
+  anchor: CalendarEventDateTime,
+  value: CalendarEventDateTime,
+): void {
+  if (anchor.type !== value.type) {
+    throw new Error('Following timing must preserve the event value type');
+  }
+  if (
+    anchor.type === 'date-time' &&
+    value.type === 'date-time' &&
+    anchor.value.timezone !== value.value.timezone
+  ) {
+    throw new Error('Following timing must preserve the event timezone');
+  }
+}
+
+function assertFollowingValueValid(
+  value: CalendarEventDateTime,
+  viewerTimezone: string,
+): void {
+  if (value.type === 'date') {
+    if (!parseDate(value.value)) {
+      throw new Error('Invalid following DATE value');
+    }
+    return;
+  }
+  const local = value.type === 'date-time' ? value.value.local : value.value;
+  const timezone =
+    value.type === 'date-time' ? value.value.timezone : viewerTimezone;
+  assertTimezone(timezone);
+  if (
+    !isValidLocalDateTime(local) ||
+    !isCalendarLocalDateTimeUnambiguous(local, timezone)
+  ) {
+    throw new Error('Following DATE-TIME endpoints must be unambiguous');
+  }
+}
+
+function isValidLocalDateTime(local: string): boolean {
+  const parsed = DateTime.fromISO(local, { zone: 'UTC' });
+  return parsed.isValid && parsed.toFormat("yyyy-MM-dd'T'HH:mm:ss") === local;
+}
+
+function followingValueInstant(
+  value: CalendarEventDateTime,
+  viewerTimezone: string,
+): number {
+  if (value.type === 'date') {
+    return assertLocalDateTime(`${value.value}T00:00:00`, viewerTimezone);
+  }
+  const local = value.type === 'date-time' ? value.value.local : value.value;
+  const timezone =
+    value.type === 'date-time' ? value.value.timezone : viewerTimezone;
+  return assertLocalDateTime(local, timezone);
+}
+
+function wallTimeDifference(
+  from: CalendarEventDateTime,
+  to: CalendarEventDateTime,
+): number {
+  if (from.type !== to.type) {
+    throw new Error('Following timing must preserve the event value type');
+  }
+  if (from.type === 'date' && to.type === 'date') {
+    return dateDifference(from.value, to.value);
+  }
+  if (
+    from.type === 'date-time' &&
+    to.type === 'date-time' &&
+    from.value.timezone !== to.value.timezone
+  ) {
+    throw new Error('Following timing must preserve the event timezone');
+  }
+  const fromLocal = recurrenceLocalValue(from);
+  const toLocal = recurrenceLocalValue(to);
+  const fromWall = DateTime.fromISO(fromLocal, { zone: 'UTC' });
+  const toWall = DateTime.fromISO(toLocal, { zone: 'UTC' });
+  if (!fromWall.isValid || !toWall.isValid) {
+    throw new Error('Invalid following wall time');
+  }
+  return toWall.toMillis() - fromWall.toMillis();
+}
+
+function shiftFollowingStart(
+  start: CalendarEventDateTime,
+  shift: number,
+  viewerTimezone: string,
+): CalendarEventDateTime {
+  if (start.type === 'date') {
+    const shifted = parseDate(start.value)?.plus({ days: shift });
+    if (!shifted?.isValid || !shifted.toISODate()) {
+      throw new Error('Following DATE shift is out of range');
+    }
+    return { type: 'date', value: shifted.toISODate()! };
+  }
+  const localDateTime = DateTime.fromISO(recurrenceLocalValue(start), {
+    zone: 'UTC',
+  }).plus({ milliseconds: shift });
+  if (!localDateTime.isValid) {
+    throw new Error('Following DATE-TIME shift is out of range');
+  }
+  const local = localDateTime.toFormat("yyyy-MM-dd'T'HH:mm:ss");
+  const timezone = dateTimeTimezone(start, viewerTimezone);
+  if (!isCalendarLocalDateTimeUnambiguous(local, timezone)) {
+    throw new Error('Following shift creates an ambiguous or nonexistent time');
+  }
+  return recurrenceValueWithLocal(start, local);
+}
+
+function buildFollowingTiming(
+  start: CalendarEventDateTime,
+  requested: ValidatedFollowingTiming,
+  event: CalendarEvent,
+  viewerTimezone: string,
+): CalendarEventRecurrenceTiming {
+  if (start.type === 'date') {
+    const end = parseDate(start.value)?.plus({ days: requested.dateDays });
+    if (!end?.isValid || !end.toISODate()) {
+      throw new Error('Following DATE end is out of range');
+    }
+    return {
+      type: 'end',
+      start,
+      end: { type: 'date', value: end.toISODate()! },
+    };
+  }
+
+  const timezone = dateTimeTimezone(start, viewerTimezone);
+  const startInstant = followingValueInstant(start, viewerTimezone);
+  const endLocal = calendarUnixMillisToLocalDateTime(
+    startInstant + requested.elapsedMillis!,
+    timezone,
+  );
+  if (
+    !isCalendarLocalDateTimeUnambiguous(endLocal, timezone) ||
+    assertLocalDateTime(endLocal, timezone) !==
+      startInstant + requested.elapsedMillis!
+  ) {
+    throw new Error('Following end becomes ambiguous or nonexistent');
+  }
+  if (event.timing.type !== 'timed') {
+    throw new Error('Following timing changed event value type');
+  }
+  return {
+    type: 'end',
+    start,
+    end: recurrenceValueWithLocal(start, endLocal),
+  };
+}
+
+function validateUniformFollowingSuffix(
+  candidates: CalendarEventDateTime[],
+  overrides: CalendarEventRecurrenceOverride[],
+  event: CalendarEvent,
+  viewerTimezone: string,
+): void {
+  let wallShift: number | undefined;
+  let elapsedMillis: number | undefined;
+  let dateDays: number | undefined;
+  const byIdentity = new Map(
+    overrides.map((override) => [
+      calendarEventRecurrenceIdentity(override.recurrenceId),
+      override,
+    ]),
+  );
+  for (const candidate of candidates) {
+    const override = byIdentity.get(calendarEventRecurrenceIdentity(candidate));
+    if (!override?.timing || override.timing.type !== 'end') {
+      throw new Error('Existing suffix is incomplete');
+    }
+    const validated = validateFollowingTiming(
+      event,
+      override.timing,
+      viewerTimezone,
+    );
+    const offset = wallTimeDifference(candidate, override.timing.start);
+    if (wallShift === undefined) {
+      wallShift = offset;
+    } else if (wallShift !== offset) {
+      throw new Error('Existing overrides are not one following timing suffix');
+    }
+    if (candidate.type === 'date') {
+      if (dateDays === undefined) {
+        dateDays = validated.dateDays;
+      } else if (dateDays !== validated.dateDays) {
+        throw new Error('Existing DATE overrides have different durations');
+      }
+    } else {
+      if (elapsedMillis === undefined) {
+        elapsedMillis = validated.elapsedMillis;
+      } else if (elapsedMillis !== validated.elapsedMillis) {
+        throw new Error('Existing timed overrides have different durations');
+      }
+    }
+  }
+}
+
+function sameFollowingOverride(
+  left: CalendarEventRecurrenceOverride,
+  right: CalendarEventRecurrenceOverride,
+): boolean {
+  return (
+    calendarEventRecurrenceIdentity(left.recurrenceId) ===
+      calendarEventRecurrenceIdentity(right.recurrenceId) &&
+    left.status === right.status &&
+    Boolean(
+      left.timing && right.timing && sameTiming(left.timing, right.timing),
+    )
+  );
+}
+
+function sameTiming(
+  left: CalendarEventRecurrenceTiming,
+  right: CalendarEventRecurrenceTiming,
+): boolean {
+  if (left.type !== right.type) {
+    return false;
+  }
+  if (left.type === 'end' && right.type === 'end') {
+    return (
+      calendarEventRecurrenceIdentity(left.start) ===
+        calendarEventRecurrenceIdentity(right.start) &&
+      calendarEventRecurrenceIdentity(left.end) ===
+        calendarEventRecurrenceIdentity(right.end)
+    );
+  }
+  if (left.type === 'duration' && right.type === 'duration') {
+    return (
+      calendarEventRecurrenceIdentity(left.start) ===
+        calendarEventRecurrenceIdentity(right.start) &&
+      sameDuration(left.duration, right.duration)
+    );
+  }
+  return false;
+}
+
+function sameDuration(
+  left: CalendarEventDuration,
+  right: CalendarEventDuration,
+): boolean {
+  return (
+    left.weeks === right.weeks &&
+    left.days === right.days &&
+    left.hours === right.hours &&
+    left.minutes === right.minutes &&
+    left.seconds === right.seconds &&
+    left.isNegative === right.isNegative
+  );
+}
+
+function cloneRecurrenceDateTime(
+  value: CalendarEventDateTime,
+): CalendarEventDateTime {
+  if (value.type === 'date-time') {
+    return { type: 'date-time', value: { ...value.value } };
+  }
+  return { ...value };
 }
 
 /** Serialize and validate the editor's limited rule against its DTSTART kind. */

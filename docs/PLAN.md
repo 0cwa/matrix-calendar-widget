@@ -160,7 +160,13 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
         timezone. Reject stale, duplicate, malformed, or colliding values;
         preserve siblings and exact-source supported no-ops.
 - [ ] Broader RECURRENCE-ID instance property editing beyond timing.
-- [ ] “this event / this and following / series” edit semantics where representable.
+- [x] Offer occurrence, this-and-following, and entire-series edit scopes for
+      supported timing operations. ADR034 bounds following edits to one
+      resource and a supported COUNT series of at most 128 members, with no
+      alarms or RDATE/EXDATE data. Preserve original typed identities and
+      source master bytes; reject unsafe status, DST ambiguity, arbitrary
+      detached suffixes, and oversized results. Broader property/rule splitting
+      remains unsupported.
 - [ ] DST and named-timezone regression suite.
   - [x] Verify daily `Europe/Stockholm` recurrence viewed in
         `America/Los_Angeles` across the 2026-03-29 spring transition, including

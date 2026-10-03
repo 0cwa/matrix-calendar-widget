@@ -119,6 +119,7 @@ let reminderSetupActive = false;
 let reminderSetupFailureRecorded = false;
 let uidReportCount = 0;
 let uidQueryIncludedExpectedValue = false;
+let openIdRequestCount = 0;
 let transactionIds: string[] = [];
 let transactionEventIds: string[] = [];
 
@@ -172,7 +173,10 @@ describeContract(
         markReminderSetupStage('configure-calendar-target');
         const binding = { roomId, calendarId };
         testConfiguration.room_calendar_bindings = [binding];
-        access = new RoomCalendarCalDavAccess(testConfiguration, nativeFetch);
+        access = new RoomCalendarCalDavAccess(
+          testConfiguration,
+          recordOpenIdCredentialRequest,
+        );
         credentialFactory = new MatrixOpenIdCalDavCredentialProviderFactory();
         markReminderSetupStage('mint-service-proof');
         const principal = await access.forAuthorizedTarget(
@@ -263,8 +267,15 @@ describeContract(
       testConfiguration.room_calendar_bindings = [{ roomId, calendarId }];
       uidReportCount = 0;
       uidQueryIncludedExpectedValue = false;
+      openIdRequestCount = 0;
       transactionIds = [];
       transactionEventIds = [];
+      canonicalSource = new CanonicalRoomReminderSchedulerSource(
+        testConfiguration,
+        access,
+        credentialFactory,
+        { fetchImpl: recordCalDavRequest },
+      );
     });
 
     afterAll(() => {
@@ -354,14 +365,50 @@ describeContract(
     }, 30_000);
 
     it('denies a changed room binding before making a UID REPORT request', async () => {
-      testConfiguration.room_calendar_bindings = [
-        { roomId, calendarId: `${calendarId}-different` },
-      ];
-      const report = await createScheduler().runOnce();
+      const currentBinding = { roomId, calendarId };
+      const changedBinding = {
+        roomId,
+        calendarId: `${calendarId}-different`,
+      };
 
-      expect(report.deliveriesDenied).toBeGreaterThan(0);
-      expect(report.candidatePagesRead).toBe(0);
+      // A binding that changed before the scheduler snapshots runtime config
+      // selects no saved settings for the old collection.
+      testConfiguration.room_calendar_bindings = [changedBinding];
+      const emptyScan = await createScheduler().runOnce();
+
+      expect(emptyScan.configurationsVisited).toBe(0);
+      expect(emptyScan.candidatePagesRead).toBe(0);
+      expect(emptyScan.deliveryClaimAttempts).toBe(0);
+      expect(emptyScan.deliveriesSent).toBe(0);
+      expect(openIdRequestCount).toBe(0);
       expect(uidReportCount).toBe(0);
+
+      // A binding changed only after the old setting page was discovered is
+      // rejected by the canonical CalDAV access check, before proof or REPORT.
+      testConfiguration.room_calendar_bindings = [currentBinding];
+      const listConfigurationPage = store.listConfigurationPage.bind(store);
+      const pageSpy = jest
+        .spyOn(store, 'listConfigurationPage')
+        .mockImplementation(async (...args) => {
+          const page = await listConfigurationPage(...args);
+          testConfiguration.room_calendar_bindings = [changedBinding];
+          return page;
+        });
+      try {
+        const changedDuringScan = await createScheduler().runOnce();
+
+        expect(changedDuringScan.configurationsVisited).toBe(1);
+        expect(changedDuringScan.candidatePagesRead).toBe(1);
+        expect(changedDuringScan.candidatesInspected).toBe(0);
+        expect(changedDuringScan.candidateSourceFailures).toBe(1);
+        expect(changedDuringScan.deliveryClaimAttempts).toBe(0);
+        expect(changedDuringScan.deliveriesSent).toBe(0);
+        expect(openIdRequestCount).toBe(0);
+        expect(uidReportCount).toBe(0);
+      } finally {
+        pageSpy.mockRestore();
+        testConfiguration.room_calendar_bindings = [currentBinding];
+      }
     }, 30_000);
 
     it('denies an encrypted room before making a UID REPORT request', async () => {
@@ -463,6 +510,21 @@ async function recordCalDavRequest(
     ) {
       uidQueryIncludedExpectedValue = true;
     }
+  }
+  return nativeFetch(input, init);
+}
+
+async function recordOpenIdCredentialRequest(
+  input: Parameters<typeof fetch>[0],
+  init?: RequestInit,
+): Promise<Response> {
+  const url =
+    typeof input === 'string' ? new URL(input) : new URL(input.toString());
+  if (
+    url.origin === new URL(homeserverUrl).origin &&
+    url.pathname.endsWith('/openid/request_token')
+  ) {
+    openIdRequestCount += 1;
   }
   return nativeFetch(input, init);
 }
