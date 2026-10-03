@@ -47,6 +47,8 @@ const ROOM_CASES = new Set([
   'exact-binding',
   'subject-binding',
   'cross-room-denial',
+  'event-write',
+  'unauthorized-write',
 ]);
 const ALLOWED_ERROR_NAMES = new Set([
   'AbortError',

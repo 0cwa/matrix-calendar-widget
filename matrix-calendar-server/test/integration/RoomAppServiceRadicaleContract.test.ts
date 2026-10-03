@@ -25,6 +25,7 @@ import { NextFunction, Request, Response } from 'express';
 import fetchMock from 'jest-fetch-mock';
 import { MatrixClient } from 'matrix-bot-sdk';
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { AddressInfo } from 'node:net';
@@ -39,6 +40,7 @@ import { MatrixRoomMembershipGuard } from '../../src/guard/MatrixRoomMembershipG
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
+import { RoomCalendarEventOperations } from '../../src/service/RoomCalendarEventOperations';
 
 const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
@@ -55,6 +57,7 @@ const testConfiguration = {
   homeserver_url: homeserverUrl,
   radicale_url: radicaleBaseUrl,
   room_calendar_access_enabled: true,
+  room_calendar_event_writes_enabled: true,
   application_service_token: serviceToken,
   application_service_user_id: serviceUserId,
   room_calendar_bindings: [],
@@ -67,6 +70,7 @@ let nativeFetch: typeof fetch;
 let gatewayUrl: string;
 let roomIds: string[];
 let calendarIds: string[];
+let nonmemberRoomId: string;
 let activeCalDavRequests:
   | Array<{ method: string; pathname: string }>
   | undefined;
@@ -121,7 +125,9 @@ type RoomAppServiceSetupStage =
 type RoomAppServiceCase =
   | 'exact-binding'
   | 'subject-binding'
-  | 'cross-room-denial';
+  | 'cross-room-denial'
+  | 'event-write'
+  | 'unauthorized-write';
 
 function captureGatewayLog(...values: unknown[]): void {
   gatewayLogLines.push(values.map(String).join(' '));
@@ -187,6 +193,17 @@ const matrixClient = {
       provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
       useClass: RoomCalendarCalDavAccess,
     },
+    {
+      provide: RoomCalendarEventOperations,
+      useFactory: () =>
+        new RoomCalendarEventOperations(fetch, {
+          eventWritesEnabled: true,
+          maxResponseBytes: testConfiguration.caldav_max_event_response_bytes,
+          radicaleBaseUrl,
+          roomCalendarBindings: testConfiguration.room_calendar_bindings,
+          servicePrincipalUserId: serviceUserId,
+        }),
+    },
     MatrixAuthMiddleware,
     MatrixAuthGuard,
     MatrixRoomMembershipGuard,
@@ -229,11 +246,23 @@ describeContract('room appservice proof against real Radicale', () => {
     const secondRoom = await createRoom('M6 room calendar contract two');
     roomIds = [firstRoom, secondRoom];
     calendarIds = ['contract-room-one', 'contract-room-two'];
+    const serviceUserAccessToken = serviceUserAccessTokens[0];
+    if (!serviceUserAccessToken) {
+      throw new Error('Synthetic service-user access token is missing');
+    }
+    nonmemberRoomId = await createRoom(
+      'M6 room calendar nonmember contract',
+      serviceUserAccessToken,
+    );
     markRoomAppServiceSetupStage('configure-room-bindings');
-    testConfiguration.room_calendar_bindings = roomIds.map((roomId, index) => ({
-      roomId,
-      calendarId: calendarIds[index],
-    }));
+    const nonmemberCalendarId = 'contract-nonmember';
+    testConfiguration.room_calendar_bindings = [
+      ...roomIds.map((roomId, index) => ({
+        roomId,
+        calendarId: calendarIds[index],
+      })),
+      { roomId: nonmemberRoomId, calendarId: nonmemberCalendarId },
+    ];
 
     const access = new RoomCalendarCalDavAccess(testConfiguration);
     for (let index = 0; index < roomIds.length; index += 1) {
@@ -242,11 +271,14 @@ describeContract('room appservice proof against real Radicale', () => {
           ? 'room-one-proof-and-calendar'
           : 'room-two-proof-and-calendar',
       );
-      const principal = await access.forAuthorizedTarget({
-        roomId: roomIds[index],
-        calendarId: calendarIds[index],
-        principal: { kind: 'service' },
-      });
+      const principal = await access.forAuthorizedTarget(
+        {
+          roomId: roomIds[index],
+          calendarId: calendarIds[index],
+          principal: { kind: 'service' },
+        },
+        'read',
+      );
       serviceOpenIdTokens.push(principal.credential.accessToken);
       await createServiceCalendar(
         principal.calendarUrl,
@@ -263,6 +295,20 @@ describeContract('room appservice proof against real Radicale', () => {
         eventCalendar(`room-${index + 1}`, `Room event ${index + 1}`),
       );
     }
+    const nonmemberPrincipal = await access.forAuthorizedTarget(
+      {
+        roomId: nonmemberRoomId,
+        calendarId: nonmemberCalendarId,
+        principal: { kind: 'service' },
+      },
+      'read',
+    );
+    serviceOpenIdTokens.push(nonmemberPrincipal.credential.accessToken);
+    await createServiceCalendar(
+      nonmemberPrincipal.calendarUrl,
+      nonmemberPrincipal.userId,
+      nonmemberPrincipal.credential,
+    );
 
     markRoomAppServiceSetupStage('gateway-create');
     app = await NestFactory.create(RoomAppServiceGatewayContractModule, {
@@ -415,6 +461,120 @@ describeContract('room appservice proof against real Radicale', () => {
     assertLogsOmitSecrets();
   });
 
+  it('creates, reads, updates, and conditionally deletes a room event', async () => {
+    markRoomAppServiceCaseStarted('event-write');
+    const target = { roomId: roomIds[0], calendarId: calendarIds[0] };
+    const createResponse = await gatewayEventRequest(
+      'POST',
+      target,
+      undefined,
+      {
+        uid: `room-write-${randomUUID()}@example.test`,
+        title: 'Created room event',
+        timing: {
+          type: 'timed',
+          start: {
+            type: 'zoned',
+            local: '2026-10-03T12:00:00',
+            timezone: 'UTC',
+          },
+          end: {
+            type: 'zoned',
+            local: '2026-10-03T13:00:00',
+            timezone: 'UTC',
+          },
+        },
+      },
+    );
+    expect(createResponse.status).toBe(201);
+    const created = JSON.parse(createResponse.body) as {
+      event: { id: string; title: string };
+      etag: string;
+    };
+    expect(created.event.title).toBe('Created room event');
+    expect(created.etag).toMatch(/^".+"$/);
+
+    const getResponse = await gatewayEventRequest(
+      'GET',
+      target,
+      created.event.id,
+    );
+    expect(getResponse.status).toBe(200);
+    const getBody = JSON.parse(getResponse.body) as Record<string, unknown>;
+    expect(getBody).toMatchObject({
+      event: { id: created.event.id, title: 'Created room event' },
+      etag: created.etag,
+    });
+    expect(Object.keys(getBody).sort()).toEqual(['etag', 'event']);
+    expect(getResponse.body).not.toContain('BEGIN:VCALENDAR');
+
+    const updateResponse = await gatewayEventRequest(
+      'PATCH',
+      target,
+      created.event.id,
+      { title: 'Updated room event' },
+      created.etag,
+    );
+    expect(updateResponse.status).toBe(200);
+    const updated = JSON.parse(updateResponse.body) as {
+      event: { id: string; title: string };
+      etag: string;
+    };
+    expect(updated.event.title).toBe('Updated room event');
+
+    const deleteResponse = await gatewayEventRequest(
+      'DELETE',
+      target,
+      updated.event.id,
+      undefined,
+      updated.etag,
+    );
+    expect(deleteResponse.status).toBe(200);
+    expect(
+      activeCalDavRequests?.some(({ method }) => method === 'DELETE'),
+    ).toBe(true);
+    assertLogsOmitSecrets();
+  }, 30000);
+
+  it('denies cross-room and nonmember writes before proof or CalDAV I/O', async () => {
+    markRoomAppServiceCaseStarted('unauthorized-write');
+    const input = {
+      uid: `unauthorized-${randomUUID()}@example.test`,
+      title: 'Must not be written',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-03T12:00:00',
+          timezone: 'UTC',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-03T13:00:00',
+          timezone: 'UTC',
+        },
+      },
+    };
+
+    for (const target of [
+      { roomId: roomIds[0], calendarId: calendarIds[1] },
+      { roomId: nonmemberRoomId, calendarId: 'contract-nonmember' },
+    ]) {
+      activeCalDavRequests = [];
+      const proofCountBefore = serviceOpenIdTokens.length;
+      const response = await gatewayEventRequest(
+        'POST',
+        target,
+        undefined,
+        input,
+      );
+      expect([403, 404]).toContain(response.status);
+      expect(activeCalDavRequests).toEqual([]);
+      expect(serviceOpenIdTokens).toHaveLength(proofCountBefore);
+    }
+    assertLogsOmitSecrets();
+  });
+
   async function gatewayRequest(target: {
     roomId: string;
     calendarId: string;
@@ -446,6 +606,48 @@ describeContract('room appservice proof against real Radicale', () => {
         },
       );
       request.on('error', reject);
+      request.end();
+    });
+  }
+
+  async function gatewayEventRequest(
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    target: { roomId: string; calendarId: string },
+    eventId?: string,
+    body?: unknown,
+    ifMatch?: string,
+  ): Promise<{ status: number; body: string }> {
+    const query = new URLSearchParams({
+      target: 'room',
+      roomId: target.roomId,
+      calendarId: target.calendarId,
+    });
+    if (eventId) query.set('eventId', eventId);
+    const endpoint = method === 'GET' ? 'event' : 'events';
+    const headers = {
+      Authorization: identityHeader(actorIdentity),
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(ifMatch === undefined ? {} : { 'If-Match': ifMatch }),
+    };
+    return new Promise((resolve, reject) => {
+      const request = httpRequest(
+        `${gatewayUrl}/v1/calendar/${endpoint}?${query}`,
+        { method, headers },
+        (response) => {
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk: Buffer | string) =>
+            chunks.push(Buffer.from(chunk)),
+          );
+          response.on('end', () =>
+            resolve({
+              status: response.statusCode ?? 0,
+              body: Buffer.concat(chunks).toString('utf8'),
+            }),
+          );
+        },
+      );
+      request.on('error', reject);
+      if (body !== undefined) request.write(JSON.stringify(body));
       request.end();
     });
   }
@@ -537,12 +739,15 @@ async function registerServiceUser(): Promise<void> {
   if (result.access_token) serviceUserAccessTokens.push(result.access_token);
 }
 
-async function createRoom(name: string): Promise<string> {
+async function createRoom(
+  name: string,
+  token: string = actorAccessToken,
+): Promise<string> {
   const result = await matrixJson<{ room_id: string }>(
     '/_matrix/client/v3/createRoom',
     {
       method: 'POST',
-      token: actorAccessToken,
+      token,
       body: { name, preset: 'private_chat' },
     },
   );

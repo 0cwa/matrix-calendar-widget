@@ -106,7 +106,7 @@ test('reports whether room contract test bodies started', () => {
         'room-appservice-case-start-unknown-private-value',
       ].join('\n'),
     ),
-    'room-appservice-test-bodies started=2/3\n',
+    'room-appservice-test-bodies started=2/5\n',
   );
 });
 

@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
-import type { CalendarEventPatch } from '@matrix-calendar-widget/calendar';
+import type {
+  CalendarEventInput,
+  CalendarEventPatch,
+} from '@matrix-calendar-widget/calendar';
 import {
   BadGatewayException,
   BadRequestException,
@@ -39,9 +42,12 @@ import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
 import {
+  RoomCalendarAccessMode,
   RoomCalendarCalDavAccess,
+  RoomCalendarCalDavPrincipal,
   RoomCalendarTarget,
 } from '../service/RoomCalendarCalDavAccess';
+import { RoomCalendarEventOperations } from '../service/RoomCalendarEventOperations';
 import { CalendarGatewayController } from './CalendarGatewayController';
 
 describe('CalendarGatewayController', () => {
@@ -70,8 +76,9 @@ describe('CalendarGatewayController', () => {
   const assertDisabled = jest.fn((target: RoomCalendarTarget) =>
     disabledAccess.assertDisabled(target),
   );
-  const forAuthorizedTarget = jest.fn((target: RoomCalendarTarget) =>
-    disabledAccess.forAuthorizedTarget(target),
+  const forAuthorizedTarget = jest.fn(
+    (target: RoomCalendarTarget, mode: RoomCalendarAccessMode) =>
+      disabledAccess.forAuthorizedTarget(target, mode),
   );
   const roomCalendarCalDavAccess = {
     assertDisabled,
@@ -90,8 +97,8 @@ describe('CalendarGatewayController', () => {
       disabledAccess.assertDisabled(target),
     );
     forAuthorizedTarget.mockReset();
-    forAuthorizedTarget.mockImplementation((target) =>
-      disabledAccess.forAuthorizedTarget(target),
+    forAuthorizedTarget.mockImplementation((target, mode) =>
+      disabledAccess.forAuthorizedTarget(target, mode),
     );
   });
 
@@ -99,12 +106,14 @@ describe('CalendarGatewayController', () => {
     config: IAppConfiguration = appConfig,
     roomAccess: RoomCalendarCalDavAccess = roomCalendarCalDavAccess,
     credentialProviderFactory: MatrixOpenIdCalDavCredentialProviderFactory = new MatrixOpenIdCalDavCredentialProviderFactory(),
+    roomEventOperations: RoomCalendarEventOperations = new RoomCalendarEventOperations(),
   ): CalendarGatewayController {
     return new CalendarGatewayController(
       config,
       authorizationFactory,
       credentialProviderFactory,
       roomAccess,
+      roomEventOperations,
     );
   }
 
@@ -281,12 +290,239 @@ describe('CalendarGatewayController', () => {
       response: { code: 'room-calendar-caldav-disabled' },
     });
 
-    expect(forAuthorizedTarget).toHaveBeenCalledWith({
-      roomId,
-      calendarId: 'team-calendar',
-      principal: { kind: 'service' },
-    });
+    expect(forAuthorizedTarget).toHaveBeenCalledWith(
+      {
+        roomId,
+        calendarId: 'team-calendar',
+        principal: { kind: 'service' },
+      },
+      'read',
+    );
     expect(forRequest).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('denies room event reads and writes before appservice proof or CalDAV I/O', async () => {
+    isAllowed.mockResolvedValue(false);
+    const operations = {
+      getEvent: jest.fn(),
+      createEvent: jest.fn(),
+      updateEvent: jest.fn(),
+      deleteEvent: jest.fn(),
+    } as unknown as RoomCalendarEventOperations;
+    const securedController = createController(
+      appConfig,
+      roomCalendarCalDavAccess,
+      new MatrixOpenIdCalDavCredentialProviderFactory(),
+      operations,
+    );
+    const eventId = 'https://radicale.example.test/team-calendar/event.ics';
+    const validInput: CalendarEventInput = {
+      uid: 'event@example.test',
+      title: 'Event',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-03T12:00:00',
+          timezone: 'UTC',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-03T13:00:00',
+          timezone: 'UTC',
+        },
+      },
+    };
+
+    await expect(
+      securedController.getEvent(
+        userContext,
+        openIdCredential,
+        roomId,
+        'team-calendar',
+        eventId,
+        'room',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      securedController.createEvent(
+        userContext,
+        openIdCredential,
+        validInput,
+        roomId,
+        'team-calendar',
+        'room',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      securedController.updateEvent(
+        userContext,
+        openIdCredential,
+        { title: 'Updated' },
+        '"event-v1"',
+        roomId,
+        'team-calendar',
+        eventId,
+        'room',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      securedController.deleteEvent(
+        userContext,
+        openIdCredential,
+        '"event-v1"',
+        roomId,
+        'team-calendar',
+        eventId,
+        'room',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(isAllowed).toHaveBeenNthCalledWith(1, {
+      action: 'read-events',
+      calendarId: 'team-calendar',
+    });
+    expect(isAllowed).toHaveBeenNthCalledWith(2, {
+      action: 'create-event',
+      calendarId: 'team-calendar',
+    });
+    expect(isAllowed).toHaveBeenNthCalledWith(3, {
+      action: 'update-event',
+      calendarId: 'team-calendar',
+      eventId,
+    });
+    expect(isAllowed).toHaveBeenNthCalledWith(4, {
+      action: 'delete-event',
+      calendarId: 'team-calendar',
+      eventId,
+    });
+    expect(forAuthorizedTarget).not.toHaveBeenCalled();
+    expect(operations.getEvent).not.toHaveBeenCalled();
+    expect(operations.createEvent).not.toHaveBeenCalled();
+    expect(operations.updateEvent).not.toHaveBeenCalled();
+    expect(operations.deleteEvent).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('uses the write mode only after room create authorization', async () => {
+    isAllowed.mockResolvedValue(true);
+    const result = {
+      event: { id: 'event.ics', calendarId: 'team-calendar', uid: 'event' },
+      etag: '"event-v1"',
+    };
+    const operations = {
+      createEvent: jest.fn().mockResolvedValue(result),
+    } as unknown as RoomCalendarEventOperations;
+    const principal: RoomCalendarCalDavPrincipal = {
+      userId: '@_matrix_calendar_service:example.test',
+      calendarUrl:
+        'https://radicale.example.test/_matrix_calendar_service/team-calendar/',
+      credential: {
+        accessToken: 'service-openid-proof',
+        matrixServerName: 'example.test',
+      },
+    };
+    forAuthorizedTarget.mockResolvedValueOnce(principal);
+    const controller = createController(
+      appConfig,
+      roomCalendarCalDavAccess,
+      new MatrixOpenIdCalDavCredentialProviderFactory(),
+      operations,
+    );
+    const input: CalendarEventInput = {
+      uid: 'event@example.test',
+      title: 'Event',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-03T12:00:00',
+          timezone: 'UTC',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-03T13:00:00',
+          timezone: 'UTC',
+        },
+      },
+    };
+
+    await expect(
+      controller.createEvent(
+        userContext,
+        openIdCredential,
+        input,
+        roomId,
+        'team-calendar',
+        'room',
+      ),
+    ).resolves.toMatchObject({ event: result.event, etag: result.etag });
+
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'create-event',
+      calendarId: 'team-calendar',
+    });
+    expect(forAuthorizedTarget).toHaveBeenCalledWith(
+      {
+        roomId,
+        calendarId: 'team-calendar',
+        principal: { kind: 'service' },
+      },
+      'write',
+    );
+    expect(isAllowed.mock.invocationCallOrder[0]).toBeLessThan(
+      forAuthorizedTarget.mock.invocationCallOrder[0],
+    );
+    expect(operations.createEvent).toHaveBeenCalledWith(
+      {
+        target: {
+          roomId,
+          calendarId: 'team-calendar',
+          principal: { kind: 'service' },
+        },
+        servicePrincipal: principal,
+      },
+      input,
+    );
+  });
+
+  it('rejects unsafe room event IDs before requesting an appservice proof', async () => {
+    isAllowed.mockResolvedValue(true);
+    const { controller } = createRoomTargetController();
+    const invalidInput: CalendarEventInput = {
+      uid: 'event%2foutside@example.test',
+      title: 'Invalid event ID',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-03T12:00:00',
+          timezone: 'UTC',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-03T13:00:00',
+          timezone: 'UTC',
+        },
+      },
+    };
+
+    await expect(
+      controller.createEvent(
+        userContext,
+        openIdCredential,
+        invalidInput,
+        roomId,
+        'team-calendar',
+        'room',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(isAllowed).toHaveBeenCalledWith({
+      action: 'create-event',
+      calendarId: 'team-calendar',
+    });
+    expect(forAuthorizedTarget).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -1882,7 +2118,12 @@ END:VCALENDAR`,
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';
     const eventId = 'https://radicale.example.test/alice/team/event.ics';
-    fetch.mockResponseOnce('', { status: 200 });
+    fetch
+      .mockResponseOnce(simpleEventIcs(), {
+        status: 200,
+        headers: { ETag: '"event-etag"' },
+      })
+      .mockResponseOnce('', { status: 200 });
 
     await expect(
       createController().deleteEvent(
@@ -1900,9 +2141,142 @@ END:VCALENDAR`,
       calendarId,
       eventId,
     });
-    const [, init] = fetch.mock.calls[0];
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+    const [, init] = fetch.mock.calls[1];
     expect(init?.method).toBe('DELETE');
     expect(new Headers(init?.headers).get('If-Match')).toBe('"event-etag"');
+  });
+
+  it('refuses to delete a mixed personal resource before DELETE', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/event.ics';
+    fetch.mockResponseOnce(readFixture('mixed-components.ics'), {
+      status: 200,
+      headers: { ETag: '"mixed-etag"' },
+    });
+
+    await expect(
+      createController().deleteEvent(
+        userContext,
+        openIdCredential,
+        '"mixed-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'unsafe-event-resource' },
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it.each([
+    [
+      'a VTODO nested in VEVENT',
+      simpleEventIcs().replace(
+        'END:VEVENT',
+        'BEGIN:VTODO\nUID:task@example.test\nEND:VTODO\nEND:VEVENT',
+      ),
+    ],
+    [
+      'an unknown component nested in VALARM',
+      simpleEventIcs().replace(
+        'END:VEVENT',
+        [
+          'BEGIN:VALARM',
+          'ACTION:DISPLAY',
+          'TRIGGER:-PT5M',
+          'BEGIN:X-UNSUPPORTED',
+          'END:X-UNSUPPORTED',
+          'END:VALARM',
+          'END:VEVENT',
+        ].join('\n'),
+      ),
+    ],
+    [
+      'an unknown component nested in a VTIMEZONE observance',
+      simpleEventIcs().replace(
+        'BEGIN:VEVENT',
+        [
+          'BEGIN:VTIMEZONE',
+          'TZID:Etc/UTC',
+          'BEGIN:STANDARD',
+          'DTSTART:19700101T000000',
+          'TZOFFSETFROM:+0000',
+          'TZOFFSETTO:+0000',
+          'BEGIN:X-UNSUPPORTED',
+          'END:X-UNSUPPORTED',
+          'END:STANDARD',
+          'END:VTIMEZONE',
+          'BEGIN:VEVENT',
+        ].join('\n'),
+      ),
+    ],
+  ])(
+    'refuses to delete personal resources containing %s',
+    async (_description, icalendar) => {
+      isAllowed.mockResolvedValue(true);
+      const calendarId = 'https://radicale.example.test/alice/team/';
+      const eventId = 'https://radicale.example.test/alice/team/event.ics';
+      fetch.mockResponseOnce(icalendar, {
+        status: 200,
+        headers: { ETag: '"nested-etag"' },
+      });
+
+      await expect(
+        createController().deleteEvent(
+          userContext,
+          openIdCredential,
+          '"nested-etag"',
+          roomId,
+          calendarId,
+          eventId,
+        ),
+      ).rejects.toMatchObject({ response: { code: 'unsafe-event-resource' } });
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+    },
+  );
+
+  it('rejects stale or wildcard personal delete validators before DELETE', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/event.ics';
+    fetch.mockResponseOnce(simpleEventIcs(), {
+      status: 200,
+      headers: { ETag: '"current-etag"' },
+    });
+
+    await expect(
+      createController().deleteEvent(
+        userContext,
+        openIdCredential,
+        '"stale-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      ),
+    ).rejects.toMatchObject({ response: { code: 'etag-conflict' } });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+
+    fetch.mockReset();
+    await expect(
+      createController().deleteEvent(
+        userContext,
+        openIdCredential,
+        '*',
+        roomId,
+        calendarId,
+        eventId,
+      ),
+    ).rejects.toMatchObject({ response: { code: 'invalid-event-etag' } });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('rejects calendar URLs outside the configured Radicale service', async () => {

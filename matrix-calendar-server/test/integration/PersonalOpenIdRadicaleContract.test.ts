@@ -29,6 +29,7 @@ import type {
 import fetchMock from 'jest-fetch-mock';
 import { MatrixClient } from 'matrix-bot-sdk';
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { AddressInfo } from 'node:net';
@@ -390,6 +391,77 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     expectGatewayLogsToOmitCredentials();
   });
 
+  it('keeps personal event create, read, and safe conditional delete working', async () => {
+    const calendarId = new URL(
+      `${encodeURIComponent(actorUserId.split(':')[0].slice(1))}/contract-calendar/`,
+      radicaleBaseUrl,
+    ).toString();
+    const providerCallsBefore = credentialProviderFactorySpy.mock.calls.length;
+    const calDavRequestsBefore = countCalDavRequests();
+    const createResponse = await gatewayEventRequest(
+      'POST',
+      calendarId,
+      undefined,
+      {
+        uid: `personal-delete-${randomUUID()}@example.test`,
+        title: 'Personal delete contract',
+        timing: {
+          type: 'timed',
+          start: {
+            type: 'zoned',
+            local: '2030-01-15T10:00:00',
+            timezone: 'UTC',
+          },
+          end: {
+            type: 'zoned',
+            local: '2030-01-15T11:00:00',
+            timezone: 'UTC',
+          },
+        },
+      },
+    );
+    expect(createResponse.status).toBe(201);
+    const created = JSON.parse(createResponse.body) as {
+      event: { id: string; title: string };
+      etag: string;
+    };
+    expect(created.event.title).toBe('Personal delete contract');
+    expect(created.etag).toMatch(/^".+"$/);
+
+    const getResponse = await gatewayEventRequest(
+      'GET',
+      calendarId,
+      created.event.id,
+    );
+    expect(getResponse.status).toBe(200);
+    expect(JSON.parse(getResponse.body)).toMatchObject({
+      event: { id: created.event.id, title: 'Personal delete contract' },
+      etag: created.etag,
+    });
+
+    const deleteResponse = await gatewayEventRequest(
+      'DELETE',
+      calendarId,
+      created.event.id,
+      undefined,
+      created.etag,
+    );
+    expect(deleteResponse.status).toBe(200);
+    expect(countCalDavRequests()).toBeGreaterThan(calDavRequestsBefore);
+    expect(
+      credentialProviderFactorySpy.mock.calls.length,
+    ).toBeGreaterThanOrEqual(providerCallsBefore + 3);
+    expectResponseToOmitCredentials(
+      createResponse.body,
+      actorIdentity.access_token,
+    );
+    expectResponseToOmitCredentials(
+      getResponse.body,
+      actorIdentity.access_token,
+    );
+    expectGatewayLogsToOmitCredentials();
+  });
+
   it('denies missing and malformed identity before any CalDAV request', async () => {
     const initialCount = countCalDavRequests();
     const initialProviderCalls = credentialProviderFactorySpy.mock.calls.length;
@@ -490,6 +562,44 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
         },
       );
       request.on('error', reject);
+      request.end();
+    });
+  }
+
+  async function gatewayEventRequest(
+    method: 'GET' | 'POST' | 'DELETE',
+    calendarId: string,
+    eventId?: string,
+    body?: unknown,
+    ifMatch?: string,
+  ): Promise<{ status: number; body: string }> {
+    const query = new URLSearchParams({ roomId, calendarId });
+    if (eventId) query.set('eventId', eventId);
+    const endpoint = method === 'GET' ? 'event' : 'events';
+    const headers = {
+      Authorization: identityHeader(actorIdentity),
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(ifMatch === undefined ? {} : { 'If-Match': ifMatch }),
+    };
+    return new Promise((resolve, reject) => {
+      const request = httpRequest(
+        `${gatewayBaseUrl}/v1/calendar/${endpoint}?${query}`,
+        { method, headers },
+        (response) => {
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk: Buffer | string) =>
+            chunks.push(Buffer.from(chunk)),
+          );
+          response.on('end', () =>
+            resolve({
+              status: response.statusCode ?? 0,
+              body: Buffer.concat(chunks).toString('utf8'),
+            }),
+          );
+        },
+      );
+      request.on('error', reject);
+      if (body !== undefined) request.write(JSON.stringify(body));
       request.end();
     });
   }

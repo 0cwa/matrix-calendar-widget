@@ -33,6 +33,8 @@ const ROOM_APPSERVICE_CASES = new Set([
   'exact-binding',
   'subject-binding',
   'cross-room-denial',
+  'event-write',
+  'unauthorized-write',
 ]);
 const ROOM_APPSERVICE_MATRIX_ERROR_CODES = new Set([
   'M_BAD_JSON',
