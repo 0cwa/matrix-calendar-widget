@@ -170,6 +170,16 @@ export function CalendarEventsSurface({
 
   return (
     <>
+      {(calendars.partialAvailability || events.partialAvailability) && (
+        <Box px={1} pb={1}>
+          <Alert severity="warning">
+            {t(
+              'calendarEvents.partialAvailability',
+              'Some calendars or events could not be loaded. Available calendars are still shown.',
+            )}
+          </Alert>
+        </Box>
+      )}
       {hasMixedSupportedComponents && (
         <Box px={1} pb={1}>
           <Alert severity="info">

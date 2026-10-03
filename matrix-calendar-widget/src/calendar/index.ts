@@ -52,6 +52,19 @@ export {
   useCalendarRepositoryRevision,
   useInvalidateCalendarRepository,
 } from './CalendarRepositoryProvider';
+export {
+  isCalendarRoomReminderRepository,
+  type CalendarRoomReminderAlarmOption,
+  type CalendarRoomReminderIdentity,
+  type CalendarRoomReminderRepository,
+} from './CalendarRoomReminderRepository';
+export {
+  isCalendarTargetAvailabilityRepository,
+  type CalendarEventsWithAvailability,
+  type CalendarListWithAvailability,
+  type CalendarRoomCapabilities,
+  type CalendarTargetAvailabilityRepository,
+} from './CalendarTargetAvailabilityRepository';
 export { GatewayCalendarRepository } from './GatewayCalendarRepository';
 export type { GatewayCalendarRepositoryOptions } from './GatewayCalendarRepository';
 export type { CalendarFilters } from './types';

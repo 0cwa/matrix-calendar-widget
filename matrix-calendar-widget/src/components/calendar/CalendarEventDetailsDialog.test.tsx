@@ -33,7 +33,10 @@ import { Settings } from 'luxon';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
 import { axe } from 'vitest-axe';
-import { CalendarRepositoryProvider } from '../../calendar';
+import {
+  CalendarRepositoryProvider,
+  type CalendarRoomCapabilities,
+} from '../../calendar';
 import {
   CalendarEventDetailsDialog,
   formatCalendarEventTime,
@@ -128,6 +131,43 @@ function createWrapper(repository: InMemoryCalendarRepository) {
   };
 }
 
+function createRoomCalendarRepository(
+  roomCapabilities?: CalendarRoomCapabilities,
+) {
+  const roomCalendar: Calendar = {
+    ...calendar,
+    id: 'room-calendar',
+    name: 'Room calendar',
+    operatorManaged: true,
+  };
+  const roomEvent: CalendarEvent = {
+    ...event,
+    id: 'room-planning',
+    calendarId: roomCalendar.id,
+  };
+  const repository = Object.assign(
+    new InMemoryCalendarRepository({
+      calendars: [roomCalendar],
+      events: [roomEvent],
+    }),
+    {
+      getRoomCalendarCapabilities: vi.fn().mockResolvedValue(roomCapabilities),
+      listCalendarsWithAvailability: vi.fn().mockResolvedValue({
+        calendars: [roomCalendar],
+        partialAvailability: false,
+        canManageCalendarCollections: false,
+        roomCapabilities,
+      }),
+      listEventsWithAvailability: vi.fn().mockResolvedValue({
+        events: [roomEvent],
+        diagnostics: [],
+        partialAvailability: false,
+      }),
+    },
+  );
+  return { repository, roomEvent };
+}
+
 describe('<CalendarEventDetailsDialog />', () => {
   it('renders only revalidated external links as explicit safe anchors', async () => {
     const repository = new InMemoryCalendarRepository({
@@ -161,10 +201,99 @@ describe('<CalendarEventDetailsDialog />', () => {
     }
     expect(screen.getAllByRole('link')).toHaveLength(2);
     expect(screen.queryByRole('img')).toBeNull();
+    expect(
+      screen.queryByRole('link', { name: 'Open Matrix room' }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /javascript/i })).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
     expect(await axe(container)).toHaveNoViolations();
     fetch.mockRestore();
+  });
+
+  it('offers the authorized current Matrix room as an explicit safe link', async () => {
+    const roomId = '!authorized-room:example.test';
+    const { repository, roomEvent } = createRoomCalendarRepository({
+      calendarId: 'room-calendar',
+      roomId,
+      canReadEvents: true,
+      canWriteEvents: true,
+      canManageReminders: false,
+    });
+
+    render(<CalendarEventDetailsDialog event={roomEvent} onClose={vi.fn()} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    const roomLink = await screen.findByRole('link', {
+      name: 'Open Matrix room',
+    });
+    expect(roomLink).toHaveAttribute(
+      'href',
+      'https://matrix.to/#/%21authorized-room%3Aexample.test',
+    );
+    expect(roomLink).toHaveAttribute('target', '_blank');
+    expect(roomLink).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('links canonical domainless room IDs used by newer Matrix rooms', async () => {
+    const roomId = `!${'A'.repeat(43)}`;
+    const { repository, roomEvent } = createRoomCalendarRepository({
+      calendarId: 'room-calendar',
+      roomId,
+      canReadEvents: true,
+      canWriteEvents: true,
+      canManageReminders: false,
+    });
+
+    render(<CalendarEventDetailsDialog event={roomEvent} onClose={vi.fn()} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    const roomLink = await screen.findByRole('link', {
+      name: 'Open Matrix room',
+    });
+    expect(roomLink).toHaveAttribute(
+      'href',
+      `https://matrix.to/#/%21${'A'.repeat(43)}`,
+    );
+  });
+
+  it.each([
+    ['unknown room context', undefined],
+    [
+      'denied room read capability',
+      {
+        calendarId: 'room-calendar',
+        roomId: '!denied-room:example.test',
+        canReadEvents: false,
+        canWriteEvents: false,
+        canManageReminders: false,
+      },
+    ],
+    [
+      'malformed room ID in a stale context',
+      {
+        calendarId: 'room-calendar',
+        roomId: 'https://example.test/room',
+        canReadEvents: true,
+        canWriteEvents: false,
+        canManageReminders: false,
+      },
+    ],
+  ])('does not offer a room link with %s', async (_caseName, capabilities) => {
+    const { repository, roomEvent } = createRoomCalendarRepository(
+      capabilities as CalendarRoomCapabilities | undefined,
+    );
+
+    render(<CalendarEventDetailsDialog event={roomEvent} onClose={vi.fn()} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('link', { name: 'Open Matrix room' }),
+      ).not.toBeInTheDocument(),
+    );
   });
 
   it('edits the selected occurrence timing and keeps the series resource separate', async () => {

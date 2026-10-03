@@ -273,6 +273,8 @@ export type Calendar = {
   color?: string;
   timezone?: string;
   readOnly?: boolean;
+  /** The collection itself is provisioned and managed outside the widget. */
+  operatorManaged?: boolean;
   /** Component types advertised by CalDAV, when the server reports them. */
   supportedComponents?: string[];
 };

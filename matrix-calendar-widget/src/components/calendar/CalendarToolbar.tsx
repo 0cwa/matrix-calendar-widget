@@ -69,21 +69,31 @@ export function CalendarToolbar({
   const writableCalendars = calendars.data.filter(
     (calendar) => calendar.readOnly === false,
   );
+  const collectionCalendars = calendars.data.filter(
+    (calendar) => calendar.operatorManaged !== true,
+  );
+  const writableCollectionCalendars = collectionCalendars.filter(
+    (calendar) => calendar.readOnly === false,
+  );
 
   return (
     <>
       <Stack direction="row" flexWrap="wrap" gap={1}>
-        <Button
-          onClick={() => setCreateCalendarOpen(true)}
-          startIcon={<AddIcon />}
-          variant="outlined"
-        >
-          {t('calendars.create.action', 'Create calendar')}
-        </Button>
+        {calendars.canManageCalendarCollections && (
+          <Button
+            onClick={() => setCreateCalendarOpen(true)}
+            startIcon={<AddIcon />}
+            variant="outlined"
+          >
+            {t('calendars.create.action', 'Create calendar')}
+          </Button>
+        )}
 
         <Button
           color="error"
-          disabled={calendars.loading || writableCalendars.length === 0}
+          disabled={
+            calendars.loading || writableCollectionCalendars.length === 0
+          }
           onClick={() => setDeleteCalendarOpen(true)}
           startIcon={<DeleteIcon />}
           variant="outlined"
@@ -101,7 +111,9 @@ export function CalendarToolbar({
         </Button>
 
         <Button
-          disabled={calendars.loading || writableCalendars.length === 0}
+          disabled={
+            calendars.loading || writableCollectionCalendars.length === 0
+          }
           onClick={() => setRenameOpen(true)}
           startIcon={<EditIcon />}
           variant="outlined"
@@ -110,7 +122,9 @@ export function CalendarToolbar({
         </Button>
 
         <Button
-          disabled={calendars.loading || writableCalendars.length === 0}
+          disabled={
+            calendars.loading || writableCollectionCalendars.length === 0
+          }
           onClick={() => setDescriptionOpen(true)}
           variant="outlined"
         >
@@ -118,14 +132,16 @@ export function CalendarToolbar({
         </Button>
 
         <Button
-          disabled={calendars.loading || writableCalendars.length === 0}
+          disabled={
+            calendars.loading || writableCollectionCalendars.length === 0
+          }
           onClick={() => setColorOpen(true)}
           variant="outlined"
         >
           {t('calendars.color.action', 'Edit calendar color')}
         </Button>
 
-        {supportsDiagnostics && (
+        {supportsDiagnostics && calendars.canManageCalendarCollections && (
           <Button onClick={() => setDiagnosticsOpen(true)} variant="outlined">
             {t('calendars.diagnostics.action', 'CalDAV collection URLs')}
           </Button>
@@ -170,19 +186,19 @@ export function CalendarToolbar({
       />
 
       <CalendarRenameDialog
-        calendars={calendars.data}
+        calendars={collectionCalendars}
         onClose={() => setRenameOpen(false)}
         open={renameOpen}
       />
 
       <CalendarDescriptionDialog
-        calendars={calendars.data}
+        calendars={collectionCalendars}
         onClose={() => setDescriptionOpen(false)}
         open={descriptionOpen}
       />
 
       <CalendarColorDialog
-        calendars={calendars.data}
+        calendars={collectionCalendars}
         onClose={() => setColorOpen(false)}
         open={colorOpen}
       />
@@ -195,7 +211,7 @@ export function CalendarToolbar({
       )}
 
       <CalendarDeleteDialog
-        calendars={writableCalendars}
+        calendars={writableCollectionCalendars}
         onClose={() => setDeleteCalendarOpen(false)}
         open={deleteCalendarOpen}
       />
