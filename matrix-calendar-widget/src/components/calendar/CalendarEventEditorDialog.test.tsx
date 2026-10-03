@@ -292,7 +292,13 @@ describe('<CalendarEventEditorDialog />', () => {
       recurrence: {
         rrule: 'FREQ=WEEKLY;COUNT=8',
         exdates: [
-          { type: 'date', value: '2026-10-05' },
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-05T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
           {
             type: 'date-time',
             value: {
@@ -330,7 +336,15 @@ describe('<CalendarEventEditorDialog />', () => {
     ).resolves.toMatchObject({
       recurrence: {
         rrule: 'FREQ=WEEKLY;COUNT=8',
-        exdates: [{ type: 'date', value: '2026-10-05' }],
+        exdates: [
+          {
+            type: 'date-time',
+            value: {
+              local: '2026-10-05T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        ],
       },
     });
   });

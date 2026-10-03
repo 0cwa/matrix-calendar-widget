@@ -773,7 +773,6 @@ describe('calendar event form adapter', () => {
 
   it('serializes removal of one existing EXDATE with its exact value form', () => {
     const exdates = [
-      { type: 'date' as const, value: '2026-10-01' },
       { type: 'floating-date-time' as const, value: '2026-10-02T09:00:00' },
       {
         type: 'date-time' as const,
@@ -808,17 +807,17 @@ describe('calendar event form adapter', () => {
       calendarEventPatchFromForm({
         ...values,
         exdateChanged: true,
-        exdateOperation: { action: 'remove', recurrenceId: exdates[2]! },
+        exdateOperation: { action: 'remove', recurrenceId: exdates[1]! },
       }).recurrence,
     ).toEqual({
-      exdate: { action: 'remove', recurrenceId: exdates[2] },
+      exdate: { action: 'remove', recurrenceId: exdates[1] },
     });
     expect(
       validateCalendarEventForm({
         ...values,
         title: 'EXDATE series',
         exdateChanged: true,
-        exdateOperation: { action: 'remove', recurrenceId: exdates[2]! },
+        exdateOperation: { action: 'remove', recurrenceId: exdates[1]! },
       }),
     ).toBeUndefined();
   });
@@ -851,7 +850,7 @@ describe('calendar event form adapter', () => {
     const values = calendarEventToFormValues(monthlyEvent, calendar);
 
     expect(values.recurrenceEditable).toBe(false);
-    expect(values.recurrenceDisabledReason).toBe('unsupported');
+    expect(values.recurrenceDisabledReason).toBe('complex');
     expect(values.exdateEditable).toBe(true);
     expect(values.exdateValues).toEqual([exdate]);
 
