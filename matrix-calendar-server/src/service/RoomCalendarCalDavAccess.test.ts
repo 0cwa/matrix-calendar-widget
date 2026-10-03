@@ -39,6 +39,7 @@ function configuration(
     radicale_url: 'https://radicale.example.test/caldav/',
     room_calendar_bindings: [{ roomId, calendarId }],
     room_calendar_access_enabled: true,
+    room_calendar_event_writes_enabled: false,
     application_service_token: 'synthetic-test-as-token',
     application_service_user_id: applicationServiceUserId,
     ...overrides,
@@ -62,7 +63,7 @@ describe('RoomCalendarCalDavAccess', () => {
     );
     const access = new RoomCalendarCalDavAccess(configuration());
 
-    await expect(access.forAuthorizedTarget(target)).resolves.toEqual({
+    await expect(access.forAuthorizedTarget(target, 'read')).resolves.toEqual({
       userId: applicationServiceUserId,
       calendarUrl:
         'https://radicale.example.test/caldav/matrix_calendar_service/team-calendar/',
@@ -92,7 +93,41 @@ describe('RoomCalendarCalDavAccess', () => {
       configuration({ room_calendar_access_enabled: false }),
     );
 
-    await expect(access.forAuthorizedTarget(target)).rejects.toMatchObject({
+    await expect(
+      access.forAuthorizedTarget(target, 'read'),
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-caldav-disabled' },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('never mints a proof for writes when the separate write gate is disabled', async () => {
+    const access = new RoomCalendarCalDavAccess(
+      configuration({
+        room_calendar_access_enabled: true,
+        room_calendar_event_writes_enabled: false,
+      }),
+    );
+
+    await expect(
+      access.forAuthorizedTarget(target, 'write'),
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-caldav-disabled' },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not let the write gate bypass the general room-access gate', async () => {
+    const access = new RoomCalendarCalDavAccess(
+      configuration({
+        room_calendar_access_enabled: false,
+        room_calendar_event_writes_enabled: true,
+      }),
+    );
+
+    await expect(
+      access.forAuthorizedTarget(target, 'write'),
+    ).rejects.toMatchObject({
       response: { code: 'room-calendar-caldav-disabled' },
     });
     expect(fetch).not.toHaveBeenCalled();
@@ -106,7 +141,9 @@ describe('RoomCalendarCalDavAccess', () => {
           application_service_user_id: `@${localpart}:example.test`,
         }),
       );
-      await expect(access.forAuthorizedTarget(target)).rejects.toMatchObject({
+      await expect(
+        access.forAuthorizedTarget(target, 'read'),
+      ).rejects.toMatchObject({
         response: { code: 'room-calendar-caldav-disabled' },
       });
       expect(fetch).not.toHaveBeenCalled();
@@ -117,7 +154,10 @@ describe('RoomCalendarCalDavAccess', () => {
     const access = new RoomCalendarCalDavAccess(configuration());
 
     await expect(
-      access.forAuthorizedTarget({ ...target, calendarId: 'another-calendar' }),
+      access.forAuthorizedTarget(
+        { ...target, calendarId: 'another-calendar' },
+        'read',
+      ),
     ).rejects.toMatchObject({
       response: { code: 'room-calendar-caldav-disabled' },
     });
@@ -128,7 +168,9 @@ describe('RoomCalendarCalDavAccess', () => {
     fetch.mockResponseOnce('unavailable', { status: 503 });
     const access = new RoomCalendarCalDavAccess(configuration());
 
-    await expect(access.forAuthorizedTarget(target)).rejects.toMatchObject({
+    await expect(
+      access.forAuthorizedTarget(target, 'read'),
+    ).rejects.toMatchObject({
       response: { code: 'room-calendar-authorization-unavailable' },
     });
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -144,7 +186,9 @@ describe('RoomCalendarCalDavAccess', () => {
     );
     const access = new RoomCalendarCalDavAccess(configuration());
 
-    await expect(access.forAuthorizedTarget(target)).rejects.toMatchObject({
+    await expect(
+      access.forAuthorizedTarget(target, 'read'),
+    ).rejects.toMatchObject({
       response: { code: 'room-calendar-authorization-unavailable' },
     });
   });
@@ -154,7 +198,7 @@ describe('RoomCalendarCalDavAccess', () => {
     const access = new RoomCalendarCalDavAccess(configuration());
 
     try {
-      await access.forAuthorizedTarget(target);
+      await access.forAuthorizedTarget(target, 'read');
       throw new Error('expected authorization failure');
     } catch (error) {
       expect(error).toBeInstanceOf(ServiceUnavailableException);

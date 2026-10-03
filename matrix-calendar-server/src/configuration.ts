@@ -65,6 +65,10 @@ function createConfiguration() {
       process.env.ROOM_CALENDAR_ACCESS_ENABLED,
       false,
     ),
+    room_calendar_event_writes_enabled: toBoolean(
+      process.env.ROOM_CALENDAR_EVENT_WRITES_ENABLED,
+      false,
+    ),
     application_service_token: process.env.MATRIX_APPLICATION_SERVICE_TOKEN,
     application_service_user_id: process.env.MATRIX_APPLICATION_SERVICE_USER_ID,
     calendar_gateway_rate_limit_requests: toNumber(
@@ -176,6 +180,7 @@ export const ValidationSchema = Joi.object({
     .max(MAX_CALDAV_EVENT_RESPONSE_MAX_BYTES),
   ROOM_CALENDAR_BINDINGS: Joi.string(),
   ROOM_CALENDAR_ACCESS_ENABLED: Joi.boolean(),
+  ROOM_CALENDAR_EVENT_WRITES_ENABLED: Joi.boolean(),
   MATRIX_APPLICATION_SERVICE_TOKEN: Joi.string(),
   MATRIX_APPLICATION_SERVICE_USER_ID: Joi.string(),
   MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS: Joi.number()

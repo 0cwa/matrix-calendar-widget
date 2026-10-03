@@ -33,6 +33,7 @@ export type {
   CalDavEventTransportMethod,
   CalDavEventWriteResult,
 } from './CalDavEventClient';
+export { isSafeSingleVeventSeries } from './ICalendarDeletionSafety';
 export {
   ICalendarEventCodec,
   ICalendarEventCodecError,
