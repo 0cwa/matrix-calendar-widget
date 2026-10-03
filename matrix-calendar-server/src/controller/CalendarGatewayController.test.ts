@@ -16,6 +16,7 @@
 
 import type { CalendarEventPatch } from '@matrix-calendar-widget/calendar';
 import {
+  BadGatewayException,
   BadRequestException,
   ConflictException,
   ForbiddenException,
@@ -1158,6 +1159,38 @@ describe('CalendarGatewayController', () => {
       calendarId,
     });
     expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
+  });
+
+  it('returns an opaque gateway error for a CalDAV event redirect', async () => {
+    isAllowed.mockResolvedValue(true);
+    fetch.mockResponseOnce('secret upstream body', {
+      status: 302,
+      headers: {
+        Location: 'https://redirect.example.test/?access_token=secret-value',
+      },
+    });
+
+    const error = await createController()
+      .listEvents(
+        userContext,
+        openIdCredential,
+        roomId,
+        'https://radicale.example.test/alice/team/',
+        '2026-09-24T00:00:00Z',
+        '2026-09-25T00:00:00Z',
+        'UTC',
+      )
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BadGatewayException);
+    expect((error as BadGatewayException).getResponse()).toEqual({
+      code: 'caldav-upstream-error',
+      message: 'CalDAV event request failed',
+    });
+    expect(
+      JSON.stringify((error as BadGatewayException).getResponse()),
+    ).not.toContain('secret-value');
+    expect(fetch.mock.calls[0][1]?.redirect).toBe('manual');
   });
 
   it('suppresses ordinary CalDAV candidates outside the requested range', async () => {
