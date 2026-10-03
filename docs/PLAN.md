@@ -448,6 +448,10 @@ addresses from Matrix room membership.
   - [x] Measure synthetic large-calendar domain projection with a reproducible
         benchmark and exact occurrence-count assertions; browser rendering,
         CalDAV latency, memory peaks, and deployment capacity remain unmeasured.
+  - [x] Reuse exact timezone transition instants and local boundaries during
+        projection; preserve gap/overlap and historical-second semantics with
+        regressions and before/after synthetic measurements. Synchronous large
+        calendars still need UI and capacity validation.
 - [x] Adopt a pre-alpha release/versioning policy: no live deployment or
       publication is authorized, and breaking changes are allowed. Future
       controlled-beta and public-release gates remain explicit.

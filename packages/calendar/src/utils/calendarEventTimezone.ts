@@ -30,6 +30,12 @@ type ZoneChange = {
   is_daylight: boolean;
 };
 
+type IndexedZoneChange = ZoneChange & {
+  instantMillis: number;
+  beforeWallMillis: number;
+  afterWallMillis: number;
+};
+
 type ExactZoneOffsets = {
   fromOffset: number;
   toOffset: number;
@@ -46,7 +52,7 @@ type CalendarTimezone = {
   timezone: ICAL.Timezone;
   observances: TimezoneObservance[];
   initialOffset: number;
-  exactTransitions?: ZoneChange[];
+  exactTransitions?: IndexedZoneChange[];
   transitionsThroughYear: number;
   exactOffsetsByTransition?: Map<string, ExactZoneOffsets>;
   indexedThroughYear: number;
@@ -148,7 +154,7 @@ function timezoneContext(
 ): {
   wallMillis: number;
   timezone: CalendarTimezone;
-  transitions: ZoneChange[];
+  transitions: IndexedZoneChange[];
 } {
   const localMatch = local.match(localDateTimePattern);
   const wall = DateTime.fromISO(local, { zone: 'UTC' });
@@ -200,7 +206,7 @@ function timezoneFor(timezoneId: string): CalendarTimezone {
 function getTransitions(
   adapter: CalendarTimezone,
   instantMillis: number,
-): ZoneChange[] {
+): IndexedZoneChange[] {
   const year = DateTime.fromMillis(instantMillis, { zone: 'UTC' }).year;
   adapter.timezone._ensureCoverage(year + 1);
   const changes = adapter.timezone.changes as ZoneChange[];
@@ -233,6 +239,9 @@ function getTransitions(
       const exactTransitionMillis = localMillis - offsets.fromOffset * 1000;
       const date = new Date(exactTransitionMillis);
       return {
+        instantMillis: exactTransitionMillis,
+        beforeWallMillis: exactTransitionMillis + offsets.fromOffset * 1000,
+        afterWallMillis: exactTransitionMillis + offsets.toOffset * 1000,
         year: date.getUTCFullYear(),
         month: date.getUTCMonth() + 1,
         day: date.getUTCDate(),
@@ -244,7 +253,7 @@ function getTransitions(
         is_daylight: change.is_daylight,
       };
     })
-    .sort((left, right) => transitionMillis(left) - transitionMillis(right));
+    .sort((left, right) => left.instantMillis - right.instantMillis);
   adapter.exactTransitions = transitions;
   adapter.transitionsThroughYear = throughYear;
   return transitions;
@@ -418,12 +427,11 @@ function transitionMillis(change: ZoneChange): number {
 
 function findLocalTransition(
   wallMillis: number,
-  transitions: ZoneChange[],
-): { kind: 'gap' | 'overlap'; change: ZoneChange } | undefined {
+  transitions: IndexedZoneChange[],
+): { kind: 'gap' | 'overlap'; change: IndexedZoneChange } | undefined {
   for (const change of transitions) {
-    const transition = transitionMillis(change);
-    const beforeWall = transition + change.prevUtcOffset * 1000;
-    const afterWall = transition + change.utcOffset * 1000;
+    const beforeWall = change.beforeWallMillis;
+    const afterWall = change.afterWallMillis;
     if (
       afterWall > beforeWall &&
       wallMillis >= beforeWall &&
@@ -444,12 +452,12 @@ function findLocalTransition(
 
 function offsetAtWallTime(
   wallMillis: number,
-  transitions: ZoneChange[],
+  transitions: IndexedZoneChange[],
   initialOffset: number,
 ): number {
   let offset = initialOffset;
   for (const change of transitions) {
-    if (transitionMillis(change) + change.utcOffset * 1000 > wallMillis) {
+    if (change.afterWallMillis > wallMillis) {
       break;
     }
     offset = change.utcOffset;
@@ -459,14 +467,14 @@ function offsetAtWallTime(
 
 function offsetAtInstant(
   instantMillis: number,
-  transitions: ZoneChange[],
+  transitions: IndexedZoneChange[],
   initialOffset: number,
 ): number {
   const first = transitions[0];
   let offset = first ? first.prevUtcOffset : initialOffset;
 
   for (const change of transitions) {
-    if (transitionMillis(change) > instantMillis) {
+    if (change.instantMillis > instantMillis) {
       break;
     }
     offset = change.utcOffset;
@@ -476,7 +484,7 @@ function offsetAtInstant(
 
 function instantToWallMillis(
   instantMillis: number,
-  transitions: ZoneChange[],
+  transitions: IndexedZoneChange[],
   initialOffset: number,
 ): number {
   return (
