@@ -26,6 +26,9 @@ export interface IAppConfiguration {
   room_calendar_access_enabled: boolean;
   application_service_token?: string;
   application_service_user_id?: string;
+  calendar_gateway_rate_limit_requests: number;
+  calendar_gateway_rate_limit_window_ms: number;
+  calendar_gateway_rate_limit_max_keys: number;
   reminder_database_url?: string;
   reminder_database_tls_mode?: 'verify-full' | 'trusted-private-network';
 

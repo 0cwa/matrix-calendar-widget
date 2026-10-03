@@ -73,6 +73,22 @@ let activeCalDavRequests:
 const serviceOpenIdTokens: string[] = [];
 const serviceUserAccessTokens: string[] = [];
 const gatewayLogLines: string[] = [];
+const matrixErrorCodes = new Set([
+  'M_BAD_JSON',
+  'M_FORBIDDEN',
+  'M_INVALID_PARAM',
+  'M_INVALID_PASSWORD',
+  'M_INVALID_USERNAME',
+  'M_LIMIT_EXCEEDED',
+  'M_MISSING_PARAM',
+  'M_NOT_FOUND',
+  'M_THREEPID_AUTH_FAILED',
+  'M_UNAUTHORIZED',
+  'M_UNKNOWN',
+  'M_UNKNOWN_TOKEN',
+  'M_USER_DEACTIVATED',
+  'M_USER_IN_USE',
+]);
 type RoomAppServiceListingCheckpoint =
   | 'room-one-response-status'
   | 'room-one-response-json-parsed'
@@ -581,8 +597,39 @@ async function matrixJson<T>(
     },
     body: JSON.stringify(options.body),
   });
-  if (!response.ok) throw new Error('Matrix contract fixture request failed');
+  if (!response.ok) {
+    markRoomAppServiceSetupHttpStatus(response.status);
+    let errorBody: { errcode?: unknown } | undefined;
+    try {
+      errorBody = (await response.clone().json()) as {
+        errcode?: unknown;
+      };
+    } catch {
+      // Error-body parsing must not change the fixture request failure.
+    }
+    if (
+      typeof errorBody?.errcode === 'string' &&
+      matrixErrorCodes.has(errorBody.errcode)
+    ) {
+      markRoomAppServiceSetupMatrixErrorCode(errorBody.errcode);
+    }
+    throw new Error(
+      `Matrix contract fixture request failed (${response.status})`,
+    );
+  }
   return (await response.json()) as T;
+}
+
+function markRoomAppServiceSetupHttpStatus(status: number): void {
+  if (Number.isInteger(status) && status >= 400 && status <= 599) {
+    appendRoomAppServiceSetupMarker(`room-appservice-http-status-${status}`);
+  }
+}
+
+function markRoomAppServiceSetupMatrixErrorCode(code: string): void {
+  if (matrixErrorCodes.has(code)) {
+    appendRoomAppServiceSetupMarker(`room-appservice-matrix-error-${code}`);
+  }
 }
 
 async function matrixOpenIdSubject(accessToken: string): Promise<string> {

@@ -34,6 +34,22 @@ const ROOM_APPSERVICE_CASES = new Set([
   'subject-binding',
   'cross-room-denial',
 ]);
+const ROOM_APPSERVICE_MATRIX_ERROR_CODES = new Set([
+  'M_BAD_JSON',
+  'M_FORBIDDEN',
+  'M_INVALID_PARAM',
+  'M_INVALID_PASSWORD',
+  'M_INVALID_USERNAME',
+  'M_LIMIT_EXCEEDED',
+  'M_MISSING_PARAM',
+  'M_NOT_FOUND',
+  'M_THREEPID_AUTH_FAILED',
+  'M_UNAUTHORIZED',
+  'M_UNKNOWN',
+  'M_UNKNOWN_TOKEN',
+  'M_USER_DEACTIVATED',
+  'M_USER_IN_USE',
+]);
 const PERSONAL_OPENID_SETUP_START = 'personal-openid-setup-start';
 const PERSONAL_OPENID_SETUP_COMPLETE = 'personal-openid-setup-complete';
 const PERSONAL_OPENID_SETUP_STAGES = new Set([
@@ -151,6 +167,34 @@ export function formatRoomAppServiceCaseBodyCount(stageContent) {
   return `room-appservice-test-bodies started=${started.size}/${ROOM_APPSERVICE_CASES.size}\n`;
 }
 
+export function formatRoomAppServiceSetupHttpStatus(stageContent) {
+  let latestStatus;
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const match = line.trim().match(/^room-appservice-http-status-(\d{3})$/);
+      if (match && Number(match[1]) >= 400 && Number(match[1]) <= 599) {
+        latestStatus = match[1];
+      }
+    }
+  }
+  return latestStatus ? `room-appservice-http-status ${latestStatus}\n` : '';
+}
+
+export function formatRoomAppServiceSetupMatrixErrorCode(stageContent) {
+  let latestCode;
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const candidate = line
+        .trim()
+        .replace(/^room-appservice-matrix-error-/, '');
+      if (ROOM_APPSERVICE_MATRIX_ERROR_CODES.has(candidate)) {
+        latestCode = candidate;
+      }
+    }
+  }
+  return latestCode ? `room-appservice-matrix-error ${latestCode}\n` : '';
+}
+
 export function formatPersonalOpenIdSetupStatus(stageContent) {
   const completed =
     typeof stageContent === 'string' &&
@@ -264,6 +308,10 @@ function emitContractPhase(stagePath) {
     process.stdout.write(formatRoomAppServiceSetupStatus(stageContent));
     process.stdout.write(formatRoomAppServiceSetupStage(stageContent));
     process.stdout.write(formatRoomAppServiceCaseBodyCount(stageContent));
+    process.stdout.write(formatRoomAppServiceSetupHttpStatus(stageContent));
+    process.stdout.write(
+      formatRoomAppServiceSetupMatrixErrorCode(stageContent),
+    );
     process.stdout.write(formatRoomAppServiceListingCheckpoint(stageContent));
   } catch {
     // Missing or unreadable diagnostics must not print untrusted file content.

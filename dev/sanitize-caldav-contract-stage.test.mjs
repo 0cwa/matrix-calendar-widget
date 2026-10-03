@@ -11,6 +11,8 @@ import {
   formatPersonalOpenIdSetupStatus,
   formatRoomAppServiceCaseBodyCount,
   formatRoomAppServiceListingCheckpoint,
+  formatRoomAppServiceSetupHttpStatus,
+  formatRoomAppServiceSetupMatrixErrorCode,
   formatRoomAppServiceSetupStage,
   formatRoomAppServiceSetupStart,
   formatRoomAppServiceSetupStatus,
@@ -105,6 +107,27 @@ test('reports whether room contract test bodies started', () => {
       ].join('\n'),
     ),
     'room-appservice-test-bodies started=2/3\n',
+  );
+});
+
+test('reports only bounded Room AppService HTTP status and Matrix codes', () => {
+  assert.equal(
+    formatRoomAppServiceSetupHttpStatus(
+      'room-appservice-http-status-403\nroom-appservice-http-status-999\n',
+    ),
+    'room-appservice-http-status 403\n',
+  );
+  assert.equal(
+    formatRoomAppServiceSetupHttpStatus(
+      'room-appservice-http-status-200-private-data',
+    ),
+    '',
+  );
+  assert.equal(
+    formatRoomAppServiceSetupMatrixErrorCode(
+      'room-appservice-matrix-error-M_FORBIDDEN\nroom-appservice-matrix-error-M_PRIVATE_TOKEN',
+    ),
+    'room-appservice-matrix-error M_FORBIDDEN\n',
   );
 });
 

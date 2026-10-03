@@ -22,6 +22,8 @@ import {
   formatPersonalOpenIdSetupHttpStatus,
   formatPersonalOpenIdSetupMatrixErrorCode,
   formatPersonalOpenIdSetupStage,
+  formatRoomAppServiceSetupHttpStatus,
+  formatRoomAppServiceSetupMatrixErrorCode,
   getRoomAppServiceSetupStage,
 } from './sanitize-caldav-contract-stage.mjs';
 
@@ -211,8 +213,16 @@ export function formatRoomAppServiceSetupDiagnostic(testReport, stageContent) {
   const error = summarizeException(reportText(suite), ROOM_SUITE_REPO_PATH);
   const failurePhase = setupStarted ? 'setup' : 'suite-load';
   const setupStage = getRoomAppServiceSetupStage(stageContent) ?? 'unavailable';
+  const httpStatus =
+    formatRoomAppServiceSetupHttpStatus(stageContent).match(
+      /^room-appservice-http-status (\d{3})\n$/,
+    )?.[1] ?? 'unavailable';
+  const matrixErrorCode =
+    formatRoomAppServiceSetupMatrixErrorCode(stageContent).match(
+      /^room-appservice-matrix-error (M_[A-Z0-9_]+)\n$/,
+    )?.[1] ?? 'unavailable';
   return [
-    `room-appservice-${failurePhase}-test-results stage=${setupStage} total=${counts.total} passed=${counts.passed} failed=${counts.failed} pending=${counts.pending} test-bodies-started=0/${ROOM_CASES.size}`,
+    `room-appservice-${failurePhase}-test-results stage=${setupStage} http-status=${httpStatus} matrix-errcode=${matrixErrorCode} total=${counts.total} passed=${counts.passed} failed=${counts.failed} pending=${counts.pending} test-bodies-started=0/${ROOM_CASES.size}`,
     `room-appservice-${failurePhase}-exception class=${error.name} message=${JSON.stringify(error.message)} source=${error.source}`,
   ].join('\n');
 }

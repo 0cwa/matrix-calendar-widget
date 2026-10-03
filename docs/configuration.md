@@ -67,6 +67,21 @@ RADICALE_URL=https://calendar.example.com
 # MATRIX_APPLICATION_SERVICE_USER_ID=@_matrix_calendar_service:example.org
 # MATRIX_APPLICATION_SERVICE_TOKEN=<secret>
 
+# optional - maximum calendar gateway requests allowed from one TCP source
+# per fixed window. Defaults to 120 requests per 60000 ms.
+MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS=120
+MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS=60000
+
+# optional - maximum distinct source keys held in the in-memory limiter
+# Defaults to 10000 and cannot be configured above 10000.
+MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS=10000
+
+# The key comes from the server-side TCP peer address. Forwarded-address
+# headers are ignored. When all configured source slots are occupied, unseen
+# sources receive a generic 429 with Retry-After until expired entries are
+# cleaned up. Behind a reverse proxy, all callers seen from that proxy share
+# one quota; tune the request limit or add an upstream per-client limit.
+
 # optional - enables durable Matrix reminder state in an app-owned PostgreSQL database
 # use a database and least-privilege role dedicated to Matrix Calendar; never use Synapse's database
 # migrations run at server startup; omit this setting to keep reminders disabled

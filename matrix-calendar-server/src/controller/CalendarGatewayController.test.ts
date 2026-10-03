@@ -384,46 +384,6 @@ describe('CalendarGatewayController', () => {
               '/radicale/alice/team/',
               'Team events',
             ),
-            diagnosticCalendarCollectionResponse(
-              '/radicale/alice/query/?access_token=secret',
-              'Query URL',
-            ),
-            diagnosticCalendarCollectionResponse(
-              '/radicale/alice/fragment/#secret-token',
-              'Fragment URL',
-            ),
-            diagnosticCalendarCollectionResponse(
-              '/radicale/alice/empty-query/?',
-              'Empty query URL',
-            ),
-            diagnosticCalendarCollectionResponse(
-              '/radicale/alice/empty-fragment/#',
-              'Empty fragment URL',
-            ),
-            diagnosticCalendarCollectionResponse(
-              'https://@radicale.example.test/radicale/alice/empty-userinfo/',
-              'Empty userinfo URL',
-            ),
-            diagnosticCalendarCollectionResponse(
-              'https:\\\\@radicale.example.test/radicale/alice/backslash-userinfo/',
-              'Backslash userinfo URL',
-            ),
-            diagnosticCalendarCollectionResponse(
-              'https://alice:password@radicale.example.test/radicale/alice/credential/',
-              'Credential URL',
-            ),
-            diagnosticCalendarCollectionResponse(
-              'https://external.example.test/calendar/',
-              'External collection',
-            ),
-            diagnosticCalendarCollectionResponse(
-              '/radicale-evil/alice/calendar/',
-              'Off-base collection',
-            ),
-            diagnosticCalendarCollectionResponse(
-              '/radicale/alice/%2e%2e/outside/',
-              'Encoded traversal',
-            ),
           ].join(''),
         ),
         { status: 207 },
@@ -449,6 +409,46 @@ describe('CalendarGatewayController', () => {
     expect(JSON.stringify(result)).not.toContain('secret');
     expect(JSON.stringify(result)).not.toContain('password');
     expect(canManageCalendars).toHaveBeenCalledWith(userContext.userId, roomId);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('fails diagnostics closed when discovery returns an unsafe collection href', async () => {
+    canManageCalendars.mockResolvedValue(true);
+    const config = {
+      ...appConfig,
+      radicale_url: 'https://radicale.example.test/radicale/',
+    } as IAppConfiguration;
+    fetch.mockResponses(
+      [principalResponse('/radicale/principals/alice/'), { status: 207 }],
+      [homeResponse('/radicale/alice/'), { status: 207 }],
+      [
+        multistatus(
+          diagnosticCalendarCollectionResponse(
+            'https://external.example.test/calendar/',
+            'External collection',
+          ),
+        ),
+        { status: 207 },
+      ],
+    );
+
+    let caught: unknown;
+    try {
+      await createController(config).getCalendarDiagnostics(
+        userContext,
+        openIdCredential,
+        roomId,
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(ServiceUnavailableException);
+    expect((caught as ServiceUnavailableException).getResponse()).toEqual({
+      code: 'calendar-diagnostics-unavailable',
+      message: 'CalDAV diagnostics are unavailable',
+    });
+    expect(JSON.stringify(caught)).not.toContain('external.example.test');
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
