@@ -20,6 +20,7 @@ import {
   Calendar,
   CalendarEvent,
   CalendarEventDateTime,
+  CalendarEventDuration,
   CalendarEventId,
   CalendarEventInput,
   CalendarEventPatch,
@@ -36,6 +37,7 @@ import {
   isSupportedCalendarEventOccurrenceExclusion,
 } from '../utils/calendarEventOccurrenceProjection';
 import { calendarEventTimedDateTimeToDateTime } from '../utils/calendarEventTimedDateTime';
+import { isCalendarTimezoneSupported } from '../utils/calendarEventTimezone';
 import {
   CalendarRepository,
   CalendarRepositoryError,
@@ -567,6 +569,20 @@ function cloneCalendarEventPatch(
             },
           },
         };
+      } else if (rdate.action === 'replace-period') {
+        cloned.recurrence = {
+          rdate: {
+            action: 'replace-period',
+            value: {
+              type: 'period',
+              timing: cloneRecurrenceTiming(rdate.value.timing),
+            },
+            replacement: {
+              type: 'period',
+              timing: cloneRecurrenceTiming(rdate.replacement.timing),
+            },
+          },
+        };
       } else if (rdate.action === 'add-period') {
         cloned.recurrence = {
           rdate: {
@@ -604,6 +620,73 @@ function applyRecurrenceWrite(
 
   if ('rdate' in write) {
     const rdates = current?.rdates ?? [];
+    if (write.rdate.action === 'replace-period') {
+      const sourceIdentity = recurrencePeriodIdentity(write.rdate.value);
+      const sourceIndexes = rdates.flatMap((value, index) =>
+        value.type === 'period' &&
+        recurrencePeriodIdentity(value) === sourceIdentity
+          ? [index]
+          : [],
+      );
+      if (sourceIndexes.length !== 1) {
+        throw new CalendarRepositoryError(
+          'unsupported-patch',
+          'PERIOD recurrence date changed while editing',
+        );
+      }
+
+      const sourceIndex = sourceIndexes[0];
+      const replacementIdentity = recurrencePeriodIdentity(
+        write.rdate.replacement,
+      );
+      if (
+        currentEvent.timing.type !== 'timed' ||
+        currentEvent.unsupportedRecurrence ||
+        currentEvent.unsupportedTimezone ||
+        !isSupportedPeriodForReplacement(write.rdate.value) ||
+        !isSupportedPeriodForReplacement(write.rdate.replacement) ||
+        !hasCompatiblePeriodReplacementIdentity(
+          write.rdate.value,
+          write.rdate.replacement,
+        ) ||
+        !rdates.every(isSupportedRdateForReplacement)
+      ) {
+        throw new CalendarRepositoryError(
+          'unsupported-patch',
+          'Unsupported recurrence data prevents PERIOD editing',
+        );
+      }
+
+      if (replacementIdentity === sourceIdentity) {
+        return current;
+      }
+
+      const replacementStartIdentity = calendarEventRecurrenceIdentity(
+        write.rdate.replacement.timing.start,
+      );
+      const replacementCollides = rdates.some((value, index) => {
+        if (index === sourceIndex) {
+          return false;
+        }
+        const siblingStart =
+          value.type === 'period' ? value.timing.start : value;
+        return (
+          calendarEventRecurrenceIdentity(siblingStart) ===
+          replacementStartIdentity
+        );
+      });
+      if (replacementCollides) {
+        throw new CalendarRepositoryError(
+          'unsupported-patch',
+          'PERIOD recurrence date conflicts with a sibling RDATE',
+        );
+      }
+
+      const nextRdates = [...rdates];
+      nextRdates[sourceIndex] = write.rdate.replacement;
+      return { ...current, rdates: nextRdates };
+    }
+
     if (write.rdate.action === 'remove-period') {
       const identity = recurrencePeriodIdentity(write.rdate.value);
       let removed = false;
@@ -707,4 +790,121 @@ function recurrencePeriodIdentity(
   return value.timing.type === 'end'
     ? `period:end:${calendarEventRecurrenceIdentity(value.timing.start)}:${calendarEventRecurrenceIdentity(value.timing.end)}`
     : `period:duration:${calendarEventRecurrenceIdentity(value.timing.start)}:${value.timing.duration.weeks}:${value.timing.duration.days}:${value.timing.duration.hours}:${value.timing.duration.minutes}:${value.timing.duration.seconds}:${value.timing.duration.isNegative}`;
+}
+
+function isSupportedRdateForReplacement(
+  value: CalendarEventRecurrenceDate,
+): boolean {
+  if (value.type === 'period') {
+    return isSupportedPeriodForReplacement(value);
+  }
+  return value.type !== 'date' && isSupportedPeriodDateTime(value);
+}
+
+function isSupportedPeriodForReplacement(
+  value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+): boolean {
+  if (!isSupportedPeriodDateTime(value.timing.start)) {
+    return false;
+  }
+  if (value.timing.type === 'duration') {
+    return isPositiveRfcDuration(value.timing.duration);
+  }
+  return (
+    samePeriodDateTimeIdentity(value.timing.start, value.timing.end) &&
+    isSupportedPeriodDateTime(value.timing.end) &&
+    periodEndIsAfterStart(value.timing.start, value.timing.end)
+  );
+}
+
+function isSupportedPeriodDateTime(value: CalendarEventDateTime): boolean {
+  if (value.type === 'date') {
+    return false;
+  }
+  if (
+    value.type === 'date-time' &&
+    value.value.timezone !== 'UTC' &&
+    !isCalendarTimezoneSupported(value.value.timezone)
+  ) {
+    return false;
+  }
+  const local = value.type === 'date-time' ? value.value.local : value.value;
+  const zone = value.type === 'date-time' ? value.value.timezone : 'UTC';
+  const dateTime = DateTime.fromISO(local, { zone });
+  return (
+    dateTime.isValid && dateTime.toFormat("yyyy-MM-dd'T'HH:mm:ss") === local
+  );
+}
+
+function hasCompatiblePeriodReplacementIdentity(
+  source: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+  replacement: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+): boolean {
+  if (
+    source.timing.type !== replacement.timing.type ||
+    !samePeriodDateTimeIdentity(source.timing.start, replacement.timing.start)
+  ) {
+    return false;
+  }
+  return (
+    source.timing.type !== 'end' ||
+    (replacement.timing.type === 'end' &&
+      samePeriodDateTimeIdentity(source.timing.end, replacement.timing.end))
+  );
+}
+
+function samePeriodDateTimeIdentity(
+  left: CalendarEventDateTime,
+  right: CalendarEventDateTime,
+): boolean {
+  return (
+    left.type === right.type &&
+    (left.type !== 'date-time' ||
+      (right.type === 'date-time' &&
+        left.value.timezone === right.value.timezone))
+  );
+}
+
+function periodEndIsAfterStart(
+  start: CalendarEventDateTime,
+  end: CalendarEventDateTime,
+): boolean {
+  if (start.type === 'date' || end.type === 'date') {
+    return false;
+  }
+  const zone = start.type === 'date-time' ? start.value.timezone : 'UTC';
+  const startLocal =
+    start.type === 'date-time' ? start.value.local : start.value;
+  const endLocal = end.type === 'date-time' ? end.value.local : end.value;
+  const startDateTime = DateTime.fromISO(startLocal, { zone });
+  const endDateTime = DateTime.fromISO(endLocal, { zone });
+  return (
+    startDateTime.isValid &&
+    endDateTime.isValid &&
+    endDateTime.toMillis() > startDateTime.toMillis()
+  );
+}
+
+function isPositiveRfcDuration(value: unknown): value is CalendarEventDuration {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const duration = value as Record<string, unknown>;
+  const units = ['weeks', 'days', 'hours', 'minutes', 'seconds'] as const;
+  if (
+    Object.keys(duration).length !== units.length + 1 ||
+    typeof duration.isNegative !== 'boolean' ||
+    duration.isNegative ||
+    units.some(
+      (unit) =>
+        !Number.isSafeInteger(duration[unit]) || (duration[unit] as number) < 0,
+    ) ||
+    !units.some((unit) => (duration[unit] as number) > 0)
+  ) {
+    return false;
+  }
+  return !(
+    (duration.weeks as number) > 0 &&
+    units.slice(1).some((unit) => (duration[unit] as number) > 0)
+  );
 }
