@@ -1,9 +1,12 @@
 # Release and versioning policy
 
-This page proposes the versioning and release rules for a future controlled
-beta. It describes policy; it does not configure a release, publish artifacts,
-or establish that any deployment is ready. The project remains pre-alpha until
-the applicable M8 and operator gates are met.
+This is the adopted policy for the current pre-alpha phase and for a possible
+future controlled beta. It does not configure a release, publish artifacts, or
+establish that any deployment is ready. The project remains pre-alpha: live
+deployment and publication are not authorized, breaking changes are allowed,
+and the project makes no compatibility or support promise. The M8 and
+operator-specific gates below must be met before a controlled beta is
+considered.
 
 ## What the repository does today
 
@@ -35,7 +38,7 @@ repositories as `ghcr.io/0cwa/matrix-calendar-server` and
 image `matrix-calendar-widget/radicale-openid`; no registry destination for
 that image is configured here.
 
-## Proposed version source and artifact map
+## Future controlled-beta version source and artifact map
 
 Use one immutable Git tag as the version source for each coordinated project
 release. The tag identifies the exact source commit from which release notes,
@@ -60,18 +63,21 @@ chart package release. Before a first published release, align manifest and
 chart metadata in a dedicated change and choose the Radicale image registry
 destination. This policy does not make those changes or enable publishing.
 
-## Tag channels and SemVer rules
+## Future controlled-beta tag channels and SemVer rules
 
-Before the first supported beta, release candidates use
+If a controlled beta is approved, release candidates use
 `v0.MINOR.PATCH-beta.N`, for example `v0.4.0-beta.1`. Final controlled-beta
 releases use `v0.MINOR.PATCH`, for example `v0.4.0`. Candidate numbers increase
 for successive candidates of the same target version. A corrected build gets a
 new candidate number; never replace an existing tag or image tag. Do not use a
-mutable `latest` tag as a deployment version.
+mutable `latest` tag as a deployment version. These future rules do not
+authorize creating or publishing a candidate now.
 
 While the project is in `0.y.z`, increment `y` for a release that may break
-compatibility and increment `z` for a backward-compatible fix. Candidate tags
-are ordered before the corresponding final version under SemVer. After a
+compatibility and increment `z` for a backward-compatible fix. During the
+current pre-alpha, breaking changes may also land without a release, and there
+is no compatibility or support commitment. Candidate tags are ordered before
+the corresponding final version under SemVer. After a
 separately approved stable `1.0.0` release, use normal SemVer: major for
 incompatible changes, minor for backward-compatible features, and patch for
 backward-compatible fixes. A stable release must not be inferred from a GitHub
@@ -81,8 +87,9 @@ Tags and image versions identify source and build inputs; they do not promise
 that different server, widget, Radicale, or chart versions can be mixed. The
 release record must state the compatible set and the tested Matrix clients,
 CalDAV/Radicale contract, and deployment configuration. Until publication is
-explicitly enabled, candidate validation may build artifacts locally or in a
-non-production CI context, but must not push them to a production registry.
+explicitly enabled by a later release decision, candidate validation may build
+artifacts locally or in a non-production CI context, but must not push them to
+a production registry. No live deployment is authorized by this policy.
 
 ## Compatibility and rollback expectations
 
@@ -104,7 +111,8 @@ application rollback. Backup and restore procedures remain a separate M8 gate.
 
 ## Maintainer release checklist
 
-Before creating a candidate or final release:
+Before creating a candidate or final release in a separately approved future
+release:
 
 - Confirm the release commit is based on reviewed `main`, the required checks
   passed for that exact commit, and required security and interoperability
@@ -133,3 +141,7 @@ Before creating a candidate or final release:
 
 No publishing automation, registry credentials, registry destination for the
 Radicale image, or operator deployment behavior is established by this policy.
+In particular, the documented Compose sidecar and backup procedure cover
+project-owned resources only; they do not verify deployment on an etke-managed
+host or access to its existing `/data` store. Those remain explicit M8 and
+operator gates.
