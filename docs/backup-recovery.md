@@ -104,40 +104,58 @@ the operator's protected backup record. Do not record secrets or event data.
 ## Restore into an isolated Compose project
 
 Never extract a recovery archive over the active production volumes. Restore on
-a separate Docker host/context when possible. On the same host, use a distinct
-Compose project name so Compose creates isolated volumes with the same logical
-names and a different project prefix:
+a separate Docker host/context when possible. For every restore attempt, choose
+a unique Compose project suffix that has never been used on that Docker daemon.
+Compose will create fresh, isolated volumes with the same logical names and
+that unique project prefix:
 
 ```bash
 set -euo pipefail
 BACKUP_ID=replace-with-backup-id
 BACKUP_DIR="/secure/off-host-backups/matrix-calendar/$BACKUP_ID"
-RESTORE_PROJECT=matrix-calendar-sidecar-restore
+RESTORE_ID=replace-with-unique-lowercase-restore-id
+RESTORE_PROJECT="matrix-calendar-sidecar-restore-$RESTORE_ID"
 ```
 
-For example, this project uses
-`matrix-calendar-sidecar-restore_radicale-data` and
-`matrix-calendar-sidecar-restore_server-data`; it does not mount either
-production volume. On a separate Docker daemon/context, you may instead use the
-original `matrix-calendar-sidecar` project name to create volumes with the
-original full names in that isolated daemon. Verify the checksum manifest
-before extraction:
+For example, a unique lowercase `RESTORE_ID` of `20261003t120000z-a81c2f`
+creates `matrix-calendar-sidecar-restore-20261003t120000z-a81c2f_radicale-data`
+and `matrix-calendar-sidecar-restore-20261003t120000z-a81c2f_server-data`. Do
+not reuse a restore project name, even on an isolated host. Verify the checksum
+manifest and prove both destination volume names are absent before creating
+them:
 
 ```bash
 set -euo pipefail
 (cd "$BACKUP_DIR" && sha256sum --check SHA256SUMS)
+for suffix in radicale-data server-data; do
+  volume="${RESTORE_PROJECT}_$suffix"
+  if docker volume inspect "$volume" >/dev/null 2>&1; then
+    echo "Refusing to reuse existing restore volume: $volume" >&2
+    exit 1
+  fi
+done
 docker volume create "${RESTORE_PROJECT}_radicale-data"
 docker volume create "${RESTORE_PROJECT}_server-data"
 
+# Each check is read-only and must succeed before extraction proceeds.
+docker run --rm \
+  --mount "type=volume,source=${RESTORE_PROJECT}_radicale-data,target=/restore" \
+  busybox:1.37.0 sh -c 'test -z "$(ls -A /restore)"'
+docker run --rm \
+  --mount "type=volume,source=${RESTORE_PROJECT}_server-data,target=/restore" \
+  busybox:1.37.0 sh -c 'test -z "$(ls -A /restore)"'
+
+# Repeat the empty-directory check in the same container immediately before
+# each extraction, so an existing file causes the restore to stop.
 docker run --rm \
   --mount "type=volume,source=${RESTORE_PROJECT}_radicale-data,target=/restore" \
   --mount "type=bind,source=$(realpath "$BACKUP_DIR"),target=/backup,readonly" \
-  busybox:1.37.0 sh -c 'cd /restore && tar -xpf /backup/radicale-data.tar'
+  busybox:1.37.0 sh -c 'test -z "$(ls -A /restore)" && cd /restore && tar -xpf /backup/radicale-data.tar'
 
 docker run --rm \
   --mount "type=volume,source=${RESTORE_PROJECT}_server-data,target=/restore" \
   --mount "type=bind,source=$(realpath "$BACKUP_DIR"),target=/backup,readonly" \
-  busybox:1.37.0 sh -c 'cd /restore && tar -xpf /backup/server-data.tar'
+  busybox:1.37.0 sh -c 'test -z "$(ls -A /restore)" && cd /restore && tar -xpf /backup/server-data.tar'
 ```
 
 Use a staging environment file, not the production one. Point the isolated
@@ -174,9 +192,18 @@ backup. At minimum:
 4. If PostgreSQL is enabled, validate its isolated restore and the reminder
    service's startup/migration behavior against that staging database. Do not
    send real Matrix reminders from a recovery test.
-5. Stop and remove only the isolated project after validation. Preserve the
-   original production volumes and verified backup until the operator accepts
-   the recovery result.
+5. After validation, remove only resources bearing the unique restore project
+   name. First stop and remove that Compose project's containers and network,
+   then remove only its two named volumes. Do not use `docker system prune` or
+   other broad cleanup commands:
+
+   ```bash
+   docker compose --project-name "$RESTORE_PROJECT" --env-file deploy/.env.restore -f deploy/etke-sidecar.compose.yaml down
+   docker volume rm "${RESTORE_PROJECT}_radicale-data" "${RESTORE_PROJECT}_server-data"
+   ```
+
+   Preserve the original production volumes and verified backup until the
+   operator accepts the recovery result.
 
 Record pass/fail, elapsed restore time, volume/archive checksums, source image
 identifiers, and any data or permission discrepancies. A successful test of
