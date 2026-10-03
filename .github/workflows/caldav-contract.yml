@@ -61,6 +61,9 @@ jobs:
       - name: Test fixed CalDAV contract phase sanitizer
         run: node --test dev/sanitize-caldav-contract-stage.test.mjs
 
+      - name: Test Synapse startup diagnostic sanitizer
+        run: node --test dev/synapse-startup-diagnostic.test.mjs
+
       - name: Start pinned Matrix and Radicale services
         run: bash dev/up.sh
 

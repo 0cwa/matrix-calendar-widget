@@ -95,6 +95,13 @@ if ! curl --silent --fail http://localhost:8008/_matrix/client/versions >/dev/nu
       ' "$ROOT_DIR/dev/compose.yaml" 2>/dev/null || printf 'reason=compose-query-failed state=unavailable health=unavailable'
   )"
   echo "Synapse readiness failed; service state/health: $synapse_status" >&2
+  if ! synapse_diagnostic="$(
+    "${COMPOSE[@]}" logs --no-color synapse 2>/dev/null |
+      node "$ROOT_DIR/dev/synapse-startup-diagnostic.mjs" "$ROOT_DIR/dev/compose.yaml" 2>/dev/null
+  )"; then
+    synapse_diagnostic='category=unclassified exit_code=unavailable oom=unavailable'
+  fi
+  echo "Synapse startup diagnostic: $synapse_diagnostic" >&2
   exit 1
 fi
 
