@@ -43,6 +43,32 @@ safe to scale horizontally.
    Backup and retention of the application database remain operator
    responsibilities.
 
+## Canonical identity resolution
+
+The pure resolver validates one already-fetched CalDAV resource before an
+identity is eligible for later sidecar use. It performs no I/O and enables no
+settings API, scheduler, or Matrix delivery. An event UID, selected component,
+and stable DISPLAY VALARM UID must each resolve unambiguously; legacy UID-less
+alarms cannot be selected. Malformed source dates/times, duplicate recurrence
+parameters, ambiguous identities, and unsupported RANGE forms fail closed
+before parser normalization can alias them to a valid identity.
+
+Use `null` for a master component. Detached component keys are JSON-serialized
+tuples that preserve the original value kind and local value:
+
+| Source kind          | Tuple                                                  |
+| -------------------- | ------------------------------------------------------ |
+| DATE                 | `["date", "YYYY-MM-DD"]`                               |
+| Floating DATE-TIME   | `["date-time", "floating", "", "YYYY-MM-DDTHH:mm:ss"]` |
+| UTC DATE-TIME        | `["date-time", "utc", "", "YYYY-MM-DDTHH:mm:ss"]`      |
+| Named TZID DATE-TIME | `["date-time", "tzid", "TZID", "YYYY-MM-DDTHH:mm:ss"]` |
+
+These canonical component keys are distinct from view-only occurrence IDs and
+must not be copied blindly from a projected UI event. The resolver preserves
+an unknown TZID structurally; scheduling must separately establish supported
+timezone and alarm-trigger semantics. This foundation does not change the
+store schema or migrate existing sidecar identities.
+
 ## Consequences
 
 - Operators who enable the store must provision an application-owned database
