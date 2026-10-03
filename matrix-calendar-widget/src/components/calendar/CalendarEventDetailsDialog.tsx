@@ -90,6 +90,9 @@ export function CalendarEventDetailsDialog({
   const selectedIdentityRef = useRef<string>();
   const sourceEventPropRef = useRef(sourceEvent);
   const missingOccurrenceSourceRef = useRef<CalendarEvent>();
+  const localOccurrenceExclusionRef = useRef<
+    { selectionKey: string; recurrenceIdentity: string } | undefined
+  >();
   const viewerTimezone = DateTime.local().zoneName ?? 'UTC';
 
   useEffect(() => {
@@ -98,6 +101,10 @@ export function CalendarEventDetailsDialog({
     const selectionKey = calendarEventSelectionKey(event, recurrenceId);
     const selectionChanged = selectedIdentityRef.current !== selectionKey;
     selectedIdentityRef.current = selectionKey;
+
+    if (localOccurrenceExclusionRef.current?.selectionKey !== selectionKey) {
+      localOccurrenceExclusionRef.current = undefined;
+    }
 
     if (
       missingOccurrenceSelectionKey &&
@@ -131,6 +138,28 @@ export function CalendarEventDetailsDialog({
             viewerTimezone,
           )?.event
         : undefined;
+    const localExclusion = localOccurrenceExclusionRef.current;
+    const locallyExcludedOccurrence = Boolean(
+      sourceEvent &&
+      recurrenceId &&
+      sourceEvent.status !== 'cancelled' &&
+      localExclusion &&
+      localExclusion.selectionKey === selectionKey &&
+      sourceEvent.recurrence?.exdates?.some(
+        (exdate) =>
+          calendarEventRecurrenceIdentity(exdate) ===
+          localExclusion.recurrenceIdentity,
+      ),
+    );
+    if (locallyExcludedOccurrence) {
+      setCurrentEvent(event);
+      setCurrentSourceEvent(sourceEvent);
+      setCurrentRecurrenceId(recurrenceId);
+      return;
+    }
+    if (localExclusion?.selectionKey === selectionKey) {
+      localOccurrenceExclusionRef.current = undefined;
+    }
     setCurrentEvent(projectedOccurrence ?? event);
     setCurrentSourceEvent(sourceEvent);
     setCurrentRecurrenceId(recurrenceId);
@@ -219,6 +248,24 @@ export function CalendarEventDetailsDialog({
           },
         },
       );
+      if (
+        currentRecurrenceId &&
+        calendarEventRecurrenceIdentity(currentRecurrenceId) ===
+          calendarEventRecurrenceIdentity(targetRecurrenceId)
+      ) {
+        const selectionKey = calendarEventSelectionKey(
+          event,
+          currentRecurrenceId,
+        );
+        localOccurrenceExclusionRef.current =
+          action === 'add' && selectionKey
+            ? {
+                selectionKey,
+                recurrenceIdentity:
+                  calendarEventRecurrenceIdentity(targetRecurrenceId),
+              }
+            : undefined;
+      }
       setCurrentSourceEvent(updated);
       onSourceEventChange?.(updated);
     } catch (error) {
@@ -294,14 +341,7 @@ export function CalendarEventDetailsDialog({
                 )}
 
                 {missingOccurrenceSelectionKey && (
-                  <Alert
-                    action={
-                      <Button color="inherit" onClick={onClose} size="small">
-                        {t('calendarEvents.details.close', 'Close')}
-                      </Button>
-                    }
-                    severity="warning"
-                  >
+                  <Alert severity="warning">
                     {t(
                       'calendarEvents.details.occurrenceReloadRequired',
                       'This occurrence no longer matches the latest series. Close and select a current occurrence before editing.',
@@ -438,7 +478,11 @@ export function CalendarEventDetailsDialog({
             </DialogContent>
             <DialogActions>
               <Button
-                disabled={!canMutate || Boolean(missingOccurrenceSelectionKey)}
+                disabled={
+                  !canMutate ||
+                  currentOccurrenceExcluded ||
+                  Boolean(missingOccurrenceSelectionKey)
+                }
                 onClick={() => setEditing(true)}
               >
                 {t('calendarEvents.details.edit', 'Edit')}
