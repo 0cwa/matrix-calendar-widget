@@ -224,7 +224,7 @@ test('reports hook failures with no assertion results using a safe category', ()
 test('reports bounded Matrix request status and code for Room fixture setup', () => {
   const diagnostic = formatRoomAppServiceSetupDiagnostic(
     report(
-      'Error: Matrix contract fixture request failed (403) response={"errcode":"M_FORBIDDEN","error":"private-room-detail"}\n    at matrixJson (/repo/matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts:612:11)',
+      'Error: Matrix contract fixture request failed (403) response={"errcode":"M_FORBIDDEN","error":"private-room-detail"}\n    at matrixJson (/repo/matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts:616:11)',
     ),
     [
       'room-appservice-setup-start',
@@ -238,7 +238,7 @@ test('reports bounded Matrix request status and code for Room fixture setup', ()
     diagnostic,
     [
       'room-appservice-setup-test-results stage=actor-login http-status=403 matrix-errcode=M_FORBIDDEN total=3 passed=0 failed=3 pending=0 test-bodies-started=0/3',
-      'room-appservice-setup-exception class=Error message="Matrix fixture HTTP status 403" source=matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts:612:11',
+      'room-appservice-setup-exception class=Error message="Matrix fixture HTTP status 403" source=matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts:616:11',
     ].join('\n'),
   );
   assert.equal(diagnostic.includes('private-room-detail'), false);
@@ -248,7 +248,7 @@ test('reports bounded Matrix request status and code for Room fixture setup', ()
 test('Room setup diagnosis rejects injected status and Matrix code markers', () => {
   const diagnostic = formatRoomAppServiceSetupDiagnostic(
     report(
-      'Error: Matrix contract fixture request failed (403)\n    at matrixJson (/repo/matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts:612:11)',
+      'Error: Matrix contract fixture request failed (403)\n    at matrixJson (/repo/matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts:616:11)',
     ),
     [
       'room-appservice-setup-stage-actor-login',

@@ -33,6 +33,8 @@ The fixture password is used only by `dev/mint-openid-credential.mjs` to sign in
 
 The stack also registers the synthetic `_matrix_calendar_service` application-service user from `dev/appservice-calendar-contract.yaml`. Its static tokens are test fixtures only; they are not production credentials. The room-principal contract uses the application-service token to request a short-lived proof for that user, then accesses only collections named by the test's explicit room bindings. Room access remains disabled by default in gateway configuration.
 
+The isolated Synapse fixture raises only the login address and account burst counts to 20 so the sequential contract sign-ins fit within one run. It leaves login refill rates and the failed-attempt limiter unchanged; this override is applied only to the local/CI fixture.
+
 ## Stop or reset
 
 ```bash

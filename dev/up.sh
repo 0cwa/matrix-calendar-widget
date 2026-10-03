@@ -39,8 +39,12 @@ chmod 0644 "$ROOT_DIR/dev/appservice-calendar-contract.yaml" >/dev/null 2>&1
 startup_failure_stage=registration-update
 "${COMPOSE[@]}" run --rm --entrypoint python synapse -c '
 import os
+import sys
 import tempfile
 import yaml
+
+sys.path.insert(0, "/data")
+from synapse_contract_config import configure_contract_login_limits
 
 config_path = "/data/homeserver.yaml"
 registration = "/data/appservice-calendar-contract.yaml"
@@ -51,6 +55,7 @@ if not os.path.isfile(registration):
 registrations = config.setdefault("app_service_config_files", [])
 if registration not in registrations:
     registrations.append(registration)
+configure_contract_login_limits(config)
 directory = os.path.dirname(config_path)
 with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=False) as output:
     yaml.safe_dump(config, output, sort_keys=False)

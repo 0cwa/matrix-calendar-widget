@@ -74,6 +74,9 @@ jobs:
       - name: Test Synapse startup diagnostic sanitizer
         run: node --test dev/synapse-startup-diagnostic.test.mjs
 
+      - name: Test isolated Synapse contract login limits
+        run: python3 dev/test_synapse_contract_config.py
+
       - name: Preflight Personal OpenID contract suite import
         run: |
           CALDAV_CONTRACT=0 \

@@ -11,6 +11,7 @@ services:
     volumes:
       - synapse-data:/data
       - ./appservice-calendar-contract.yaml:/data/appservice-calendar-contract.yaml:ro
+      - ./synapse_contract_config.py:/data/synapse_contract_config.py:ro
 
   radicale:
     image: matrix-calendar-widget/radicale-openid:3.8.0.0
