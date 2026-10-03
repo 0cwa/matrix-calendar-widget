@@ -196,7 +196,7 @@ const matrixClient = {
     {
       provide: RoomCalendarEventOperations,
       useFactory: () =>
-        new RoomCalendarEventOperations(fetch, {
+        new RoomCalendarEventOperations((input, init) => fetch(input, init), {
           eventWritesEnabled: true,
           maxResponseBytes: testConfiguration.caldav_max_event_response_bytes,
           radicaleBaseUrl,
@@ -521,6 +521,26 @@ describeContract('room appservice proof against real Radicale', () => {
       etag: string;
     };
     expect(updated.event.title).toBe('Updated room event');
+    expect(updated.etag).not.toBe(created.etag);
+    const staleUpdate = await gatewayEventRequest(
+      'PATCH',
+      target,
+      created.event.id,
+      { title: 'Must not replace the newer event' },
+      created.etag,
+    );
+    expect(staleUpdate.status).toBe(409);
+    const staleDelete = await gatewayEventRequest(
+      'DELETE',
+      target,
+      created.event.id,
+      undefined,
+      created.etag,
+    );
+    expect(staleDelete.status).toBe(409);
+    expect(
+      activeCalDavRequests?.some(({ method }) => method === 'DELETE'),
+    ).toBe(false);
 
     const deleteResponse = await gatewayEventRequest(
       'DELETE',

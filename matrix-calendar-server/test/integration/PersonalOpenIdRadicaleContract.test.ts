@@ -27,7 +27,7 @@ import type {
   Request,
 } from 'express';
 import fetchMock from 'jest-fetch-mock';
-import { MatrixClient } from 'matrix-bot-sdk';
+import { MatrixClient, MatrixError } from 'matrix-bot-sdk';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
@@ -164,6 +164,27 @@ const matrixClient = {
       members.includes(actorUserId),
     );
     return members;
+  },
+  async getRoomStateEvent(
+    requestedRoomId: string,
+    eventType: string,
+    stateKey: string,
+  ) {
+    const response = await fetch(
+      new URL(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(requestedRoomId)}/state/${encodeURIComponent(eventType)}/${encodeURIComponent(stateKey)}`,
+        homeserverUrl,
+      ),
+      { headers: { Authorization: `Bearer ${actorAccessToken}` } },
+    );
+    if (response.status === 404) {
+      throw new MatrixError(
+        { errcode: 'M_NOT_FOUND', error: 'State event not found' },
+        404,
+      );
+    }
+    if (!response.ok) throw new Error('Matrix authorization lookup failed');
+    return response.json();
   },
 } as unknown as MatrixClient;
 

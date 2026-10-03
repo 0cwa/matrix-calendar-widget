@@ -79,18 +79,25 @@ fields and has no timezone until an application interprets it.
    combinations remain opaque and preserved. For an existing PERIOD-valued
    RDATE, the editor may remove one
    selected value by matching its complete start and either explicit end or
-   original RFC DURATION components. It must preserve sibling RDATE values,
-   property parameters, and all other resource data. The calendar write model
-   and codec may add one explicit-end or duration-form PERIOD-valued RDATE to a
-   supported timed recurring master without changing DTSTART. The PERIOD start
-   retains its floating, UTC, or named-TZID identity and exact local value, and
+   original RFC DURATION components. It may also edit one supported PERIOD
+   through an atomic replace operation containing the complete source value
+   and its replacement. The source must match exactly one current PERIOD; a
+   stale or ambiguous source, unsupported sibling, or replacement start that
+   collides with another typed RDATE fails without changing the resource. A
+   semantic no-op leaves the serialized resource untouched. A replacement
+   preserves the source's explicit-end or duration representation, each
+   endpoint's floating, UTC, or named-TZID identity, sibling order, property
+   parameters, and all other resource data. Supported explicit-end values keep
+   compatible endpoint kinds and zones and require the end to remain later
+   than the start. The calendar write model and codec may add one explicit-end
+   or duration-form PERIOD-valued RDATE to a supported timed recurring master
+   without changing DTSTART. A PERIOD start retains its exact local value, and
    a TZID start requires its VTIMEZONE in the source VCALENDAR. Duration-form
-   writes require a positive RFC duration using supported integer components;
-   zero, negative, fractional, malformed, unknown, or mixed week-and-time
-   components are rejected. An exact repeated addition of the same PERIOD is
-   a no-op. Changes to an existing PERIOD's start, end, or duration remain
-   unsupported; malformed or unsupported source values remain opaque and
-   cannot be changed.
+   writes and edits require a positive RFC duration using supported integer
+   components; zero, negative, fractional, malformed, unknown, and mixed
+   week-and-time components are rejected. An exact repeated addition of the
+   same PERIOD is a no-op. Malformed or unsupported source values remain opaque
+   and cannot be changed.
 
 ## Implementation status and boundaries
 
@@ -159,8 +166,11 @@ RFC durations with supported integer components and reject zero, negative,
 fractional, malformed, unknown, or mixed week-and-time components. An exact
 repeated addition of the same PERIOD is a no-op; sibling recurrence values and
 other resource data remain preserved. The widget supports duration-form entry
-for timed recurring masters. Editing an existing PERIOD's start, end, or
-duration remains pending.
+for timed recurring masters. The editor now changes one existing PERIOD using
+an exact-match atomic replacement while preserving its explicit-end or
+duration form, endpoint identity, and sibling RDATEs. Stale, ambiguous, or
+colliding replacements fail closed; malformed and unsupported source values
+remain opaque.
 
 ## Consequences
 
@@ -174,6 +184,10 @@ duration remains pending.
 - Duration-based recurrence timing distinguishes nominal calendar weeks/days
   from exact time units and accounts for timezone transitions in the bounded
   display projection.
+- PERIOD timing edits preserve whether a value uses an explicit end or an RFC
+  duration, and leave sibling recurrence data in place. Exact source matching
+  and collision checks prevent a stale edit from aliasing another recurrence
+  value.
 - The projection is read-only and bounded. The editor supports only the
   documented simple whole-series RRULE subset and weekly BYDAY subset; it does
   not implement instance edits, `RANGE=THISANDFUTURE`, or arbitrary custom
