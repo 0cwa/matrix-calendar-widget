@@ -53,6 +53,18 @@ function createConfiguration() {
     room_calendar_bindings: parseRoomCalendarBindings(
       process.env.ROOM_CALENDAR_BINDINGS,
     ),
+    calendar_gateway_rate_limit_requests: toNumber(
+      process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS,
+      120,
+    ),
+    calendar_gateway_rate_limit_window_ms: toNumber(
+      process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS,
+      60_000,
+    ),
+    calendar_gateway_rate_limit_max_keys: toNumber(
+      process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS,
+      10_000,
+    ),
     reminder_database_url: process.env.MATRIX_CALENDAR_REMINDER_DATABASE_URL,
     reminder_database_tls_mode: process.env
       .MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE as
@@ -145,6 +157,18 @@ export const ValidationSchema = Joi.object({
   HOMESERVER_URL: Joi.string().required().uri(),
   RADICALE_URL: Joi.string().uri(),
   ROOM_CALENDAR_BINDINGS: Joi.string(),
+  MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS: Joi.number()
+    .integer()
+    .min(1)
+    .max(100_000),
+  MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS: Joi.number()
+    .integer()
+    .min(1)
+    .max(86_400_000),
+  MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS: Joi.number()
+    .integer()
+    .min(1)
+    .max(10_000),
   MATRIX_CALENDAR_REMINDER_DATABASE_URL: Joi.string().uri({
     scheme: ['postgres', 'postgresql'],
   }),

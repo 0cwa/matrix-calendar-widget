@@ -26,6 +26,10 @@ import { Logger } from 'nestjs-pino';
 import { IAppConfiguration } from './IAppConfiguration';
 import { StubMatrixBotLogger } from './StubMatrixBotLogger';
 import { AppModule } from './app.module';
+import {
+  BoundedFixedWindowSourceRateLimiter,
+  CalendarGatewayRateLimitMiddleware,
+} from './middleware/CalendarGatewayRateLimitMiddleware';
 import { MatrixAuthMiddleware } from './middleware/MatrixAuthMiddleware';
 import { MatrixServer } from './rpc/MatrixServer';
 
@@ -37,6 +41,23 @@ LogService.setLogger(new StubMatrixBotLogger());
     bufferLogs: true,
     cors: true,
   });
+  const appConfig = app
+    .get(ConfigService)
+    .getOrThrow<IAppConfiguration>('config');
+  const calendarGatewayRateLimiter = new BoundedFixedWindowSourceRateLimiter(
+    appConfig.calendar_gateway_rate_limit_requests,
+    appConfig.calendar_gateway_rate_limit_window_ms,
+    appConfig.calendar_gateway_rate_limit_max_keys,
+  );
+  const calendarGatewayRateLimitMiddleware =
+    new CalendarGatewayRateLimitMiddleware(calendarGatewayRateLimiter);
+  // Keep this before MatrixAuthMiddleware: OpenID verification is an external
+  // homeserver request and must only run for requests admitted by the limiter.
+  app.use(
+    calendarGatewayRateLimitMiddleware.use.bind(
+      calendarGatewayRateLimitMiddleware,
+    ),
+  );
   const matrixAuthMiddleware = app.get(MatrixAuthMiddleware);
   app.use(matrixAuthMiddleware.use.bind(matrixAuthMiddleware));
 
@@ -70,10 +91,6 @@ LogService.setLogger(new StubMatrixBotLogger());
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
-
-  const appConfig = app
-    .get(ConfigService)
-    .getOrThrow<IAppConfiguration>('config');
 
   const port = appConfig.port ?? 3000;
 

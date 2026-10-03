@@ -25,6 +25,12 @@ describe('reminder database configuration', () => {
   const originalDatabaseUrl = process.env.MATRIX_CALENDAR_REMINDER_DATABASE_URL;
   const originalTlsMode =
     process.env.MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE;
+  const originalRateLimitRequests =
+    process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS;
+  const originalRateLimitWindow =
+    process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS;
+  const originalRateLimitMaxKeys =
+    process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS;
   const originalPgPort = process.env.PGPORT;
 
   afterEach(() => {
@@ -38,11 +44,73 @@ describe('reminder database configuration', () => {
     } else {
       process.env.MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE = originalTlsMode;
     }
+    if (originalRateLimitRequests === undefined) {
+      delete process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS;
+    } else {
+      process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS =
+        originalRateLimitRequests;
+    }
+    if (originalRateLimitWindow === undefined) {
+      delete process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS;
+    } else {
+      process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS =
+        originalRateLimitWindow;
+    }
+    if (originalRateLimitMaxKeys === undefined) {
+      delete process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS;
+    } else {
+      process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS =
+        originalRateLimitMaxKeys;
+    }
     if (originalPgPort === undefined) {
       delete process.env.PGPORT;
     } else {
       process.env.PGPORT = originalPgPort;
     }
+  });
+
+  it('uses bounded gateway rate-limit defaults and loads overrides', () => {
+    delete process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS;
+    delete process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS;
+    delete process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS;
+
+    expect(configuration().config).toMatchObject({
+      calendar_gateway_rate_limit_requests: 120,
+      calendar_gateway_rate_limit_window_ms: 60_000,
+      calendar_gateway_rate_limit_max_keys: 10_000,
+    });
+
+    process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS = '240';
+    process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS = '30000';
+    process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS = '500';
+
+    expect(configuration().config).toMatchObject({
+      calendar_gateway_rate_limit_requests: 240,
+      calendar_gateway_rate_limit_window_ms: 30_000,
+      calendar_gateway_rate_limit_max_keys: 500,
+    });
+  });
+
+  it('requires positive finite integer gateway rate-limit settings', () => {
+    const requestLimitSchema = ValidationSchema.extract(
+      'MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS',
+    );
+    const windowSchema = ValidationSchema.extract(
+      'MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS',
+    );
+    const maxKeysSchema = ValidationSchema.extract(
+      'MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS',
+    );
+
+    expect(requestLimitSchema.validate('120').error).toBeUndefined();
+    expect(windowSchema.validate('60000').error).toBeUndefined();
+    expect(maxKeysSchema.validate('10000').error).toBeUndefined();
+    expect(requestLimitSchema.validate('0').error).toBeDefined();
+    expect(requestLimitSchema.validate('1.5').error).toBeDefined();
+    expect(requestLimitSchema.validate('Infinity').error).toBeDefined();
+    expect(requestLimitSchema.validate('100001').error).toBeDefined();
+    expect(windowSchema.validate('86400001').error).toBeDefined();
+    expect(maxKeysSchema.validate('10001').error).toBeDefined();
   });
 
   it('loads the optional database URL and TLS mode', () => {
