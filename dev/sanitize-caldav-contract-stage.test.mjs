@@ -7,7 +7,10 @@ import {
   formatPersonalOpenIdSetupStage,
   formatPersonalOpenIdSetupStart,
   formatPersonalOpenIdSetupStatus,
+  formatRoomAppServiceCaseBodyCount,
   formatRoomAppServiceListingCheckpoint,
+  formatRoomAppServiceSetupStage,
+  formatRoomAppServiceSetupStart,
   formatRoomAppServiceSetupStatus,
 } from './sanitize-caldav-contract-stage.mjs';
 
@@ -61,6 +64,45 @@ test('reports only whether RoomAppService beforeAll completed', () => {
       'room-appservice-setup-complete\nperiod-removal-verified\n',
     ),
     'room-appservice-setup complete\n',
+  );
+});
+
+test('reports the latest fixed RoomAppService setup stage', () => {
+  assert.equal(
+    formatRoomAppServiceSetupStage(
+      [
+        'room-appservice-setup-stage-register-service-user',
+        'room-appservice-setup-stage-create-room-one',
+      ].join('\n'),
+    ),
+    'room-appservice-setup-stage create-room-one\n',
+  );
+  assert.equal(
+    formatRoomAppServiceSetupStage(
+      'room-appservice-setup-stage-private-room-and-token',
+    ),
+    '',
+  );
+});
+
+test('reports whether room contract test bodies started', () => {
+  assert.equal(
+    formatRoomAppServiceSetupStart('room-appservice-setup-start\n'),
+    'room-appservice-setup-start reached\n',
+  );
+  assert.equal(
+    formatRoomAppServiceSetupStart(''),
+    'room-appservice-setup-start not-reached\n',
+  );
+  assert.equal(
+    formatRoomAppServiceCaseBodyCount(
+      [
+        'room-appservice-case-start-exact-binding',
+        'room-appservice-case-start-cross-room-denial',
+        'room-appservice-case-start-unknown-private-value',
+      ].join('\n'),
+    ),
+    'room-appservice-test-bodies started=2/3\n',
   );
 });
 

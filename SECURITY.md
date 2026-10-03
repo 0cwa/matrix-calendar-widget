@@ -32,6 +32,11 @@ Never include these in public reports:
 - complete private ICS files,
 - private room IDs or event content unless necessary and sanitized.
 
+See the [security threat model](./docs/threat-model.md) for the current
+gateway trust boundaries, implementation evidence, and unresolved risks. The
+document describes repository code and does not verify an operator-hosted
+deployment.
+
 ## Supported versions
 
 No production version is currently supported. This section will be updated before the first beta release.

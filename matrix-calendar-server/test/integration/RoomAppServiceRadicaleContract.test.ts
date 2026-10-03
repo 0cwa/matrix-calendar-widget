@@ -89,6 +89,23 @@ type RoomAppServiceListingCheckpoint =
   | 'room-two-no-root-discovery'
   | 'room-two-no-response-secret'
   | 'logs-secret-free';
+type RoomAppServiceSetupStage =
+  | 'fixture-input-check'
+  | 'decode-actor-proof'
+  | 'actor-login'
+  | 'register-service-user'
+  | 'create-room-one'
+  | 'create-room-two'
+  | 'configure-room-bindings'
+  | 'room-one-proof-and-calendar'
+  | 'room-two-proof-and-calendar'
+  | 'gateway-create'
+  | 'gateway-configure'
+  | 'gateway-listen';
+type RoomAppServiceCase =
+  | 'exact-binding'
+  | 'subject-binding'
+  | 'cross-room-denial';
 
 function captureGatewayLog(...values: unknown[]): void {
   gatewayLogLines.push(values.map(String).join(' '));
@@ -163,6 +180,8 @@ class RoomAppServiceGatewayContractModule {}
 
 describeContract('room appservice proof against real Radicale', () => {
   beforeAll(async () => {
+    markRoomAppServiceSetupStart();
+    markRoomAppServiceSetupStage('fixture-input-check');
     fetchMock.disableMocks();
     nativeFetch = globalThis.fetch.bind(globalThis);
     const username = process.env.MATRIX_CALENDAR_DEV_USER ?? 'calendar';
@@ -172,7 +191,9 @@ describeContract('room appservice proof against real Radicale', () => {
     if (!personalCredential.startsWith('matrix-openid:') || !serviceToken) {
       throw new Error('Synthetic Matrix contract credentials are missing');
     }
+    markRoomAppServiceSetupStage('decode-actor-proof');
     actorIdentity = decodeIdentity(personalCredential);
+    markRoomAppServiceSetupStage('actor-login');
     actorAccessToken = (
       await matrixJson<{ access_token: string }>('/_matrix/client/v3/login', {
         method: 'POST',
@@ -184,11 +205,15 @@ describeContract('room appservice proof against real Radicale', () => {
       })
     ).access_token;
 
+    markRoomAppServiceSetupStage('register-service-user');
     await registerServiceUser();
+    markRoomAppServiceSetupStage('create-room-one');
     const firstRoom = await createRoom('M6 room calendar contract one');
+    markRoomAppServiceSetupStage('create-room-two');
     const secondRoom = await createRoom('M6 room calendar contract two');
     roomIds = [firstRoom, secondRoom];
     calendarIds = ['contract-room-one', 'contract-room-two'];
+    markRoomAppServiceSetupStage('configure-room-bindings');
     testConfiguration.room_calendar_bindings = roomIds.map((roomId, index) => ({
       roomId,
       calendarId: calendarIds[index],
@@ -196,6 +221,11 @@ describeContract('room appservice proof against real Radicale', () => {
 
     const access = new RoomCalendarCalDavAccess(testConfiguration);
     for (let index = 0; index < roomIds.length; index += 1) {
+      markRoomAppServiceSetupStage(
+        index === 0
+          ? 'room-one-proof-and-calendar'
+          : 'room-two-proof-and-calendar',
+      );
       const principal = await access.forAuthorizedTarget({
         roomId: roomIds[index],
         calendarId: calendarIds[index],
@@ -218,14 +248,17 @@ describeContract('room appservice proof against real Radicale', () => {
       );
     }
 
+    markRoomAppServiceSetupStage('gateway-create');
     app = await NestFactory.create(RoomAppServiceGatewayContractModule, {
       logger: gatewayLogger,
     });
+    markRoomAppServiceSetupStage('gateway-configure');
     const authMiddleware = app.get(MatrixAuthMiddleware);
     app.use((request: Request, response: Response, next: NextFunction) =>
       authMiddleware.use(request, response, next),
     );
     app.enableVersioning({ type: VersioningType.URI });
+    markRoomAppServiceSetupStage('gateway-listen');
     await app.listen(0, '127.0.0.1');
     const address = app.getHttpServer().address() as AddressInfo;
     gatewayUrl = `http://127.0.0.1:${address.port}`;
@@ -280,6 +313,7 @@ describeContract('room appservice proof against real Radicale', () => {
   });
 
   it('lists only the exact room binding through the appservice principal', async () => {
+    markRoomAppServiceCaseStarted('exact-binding');
     for (let index = 0; index < roomIds.length; index += 1) {
       activeCalDavRequests = [];
       const response = await gatewayRequest({
@@ -336,6 +370,7 @@ describeContract('room appservice proof against real Radicale', () => {
   });
 
   it('binds the Radicale OpenID subject to the configured service user, not the room sender', async () => {
+    markRoomAppServiceCaseStarted('subject-binding');
     const serviceProof = serviceOpenIdTokens[0];
     if (serviceProof === undefined) {
       throw new Error('Synthetic appservice OpenID proof is missing');
@@ -352,6 +387,7 @@ describeContract('room appservice proof against real Radicale', () => {
   });
 
   it('forbids a cross-room calendar before appservice proof or CalDAV I/O', async () => {
+    markRoomAppServiceCaseStarted('cross-room-denial');
     const proofCountBefore = serviceOpenIdTokens.length;
     const response = await gatewayRequest({
       roomId: roomIds[0],
@@ -407,6 +443,31 @@ function markRoomAppServiceSetupComplete(): void {
 
   try {
     appendFileSync(stageFile, 'room-appservice-setup-complete\n', 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
+
+function markRoomAppServiceSetupStart(): void {
+  appendRoomAppServiceSetupMarker('room-appservice-setup-start');
+}
+
+function markRoomAppServiceSetupStage(stage: RoomAppServiceSetupStage): void {
+  appendRoomAppServiceSetupMarker(`room-appservice-setup-stage-${stage}`);
+}
+
+function markRoomAppServiceCaseStarted(testCase: RoomAppServiceCase): void {
+  appendRoomAppServiceSetupMarker(`room-appservice-case-start-${testCase}`);
+}
+
+function appendRoomAppServiceSetupMarker(marker: string): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+    return;
+  }
+
+  try {
+    appendFileSync(stageFile, `${marker}\n`, 'utf8');
   } catch {
     // Diagnostics must not change contract-test behavior.
   }

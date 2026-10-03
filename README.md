@@ -33,6 +33,8 @@ Inherited NeoDateFix meeting-room paths remain only where migration has not yet 
 - [Architecture](./docs/ARCHITECTURE.md)
 - [Implementation plan](./docs/PLAN.md)
 - [Current project status](./docs/STATUS.md)
+- [Security policy](./SECURITY.md)
+- [Threat model](./docs/threat-model.md) — current trust boundaries, controls, and open risks
 - [Roadmap](./docs/ROADMAP.md)
 - [Development guide](./docs/DEVELOPMENT.md)
 - [Upstream provenance](./docs/UPSTREAM.md)

@@ -14,6 +14,26 @@ const allowedPhases = new Set([
   'period-removal-verified',
 ]);
 const ROOM_APPSERVICE_SETUP_COMPLETE = 'room-appservice-setup-complete';
+const ROOM_APPSERVICE_SETUP_START = 'room-appservice-setup-start';
+const ROOM_APPSERVICE_SETUP_STAGES = new Set([
+  'fixture-input-check',
+  'decode-actor-proof',
+  'actor-login',
+  'register-service-user',
+  'create-room-one',
+  'create-room-two',
+  'configure-room-bindings',
+  'room-one-proof-and-calendar',
+  'room-two-proof-and-calendar',
+  'gateway-create',
+  'gateway-configure',
+  'gateway-listen',
+]);
+const ROOM_APPSERVICE_CASES = new Set([
+  'exact-binding',
+  'subject-binding',
+  'cross-room-denial',
+]);
 const PERSONAL_OPENID_SETUP_START = 'personal-openid-setup-start';
 const PERSONAL_OPENID_SETUP_COMPLETE = 'personal-openid-setup-complete';
 const PERSONAL_OPENID_SETUP_STAGES = new Set([
@@ -71,6 +91,48 @@ export function formatRoomAppServiceSetupStatus(stageContent) {
       .split(/\r?\n/)
       .some((line) => line.trim() === ROOM_APPSERVICE_SETUP_COMPLETE);
   return `room-appservice-setup ${completed ? 'complete' : 'not-reached'}\n`;
+}
+
+export function formatRoomAppServiceSetupStart(stageContent) {
+  const started =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === ROOM_APPSERVICE_SETUP_START);
+  return `room-appservice-setup-start ${started ? 'reached' : 'not-reached'}\n`;
+}
+
+export function getRoomAppServiceSetupStage(stageContent) {
+  let latestStage;
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const candidate = line
+        .trim()
+        .replace(/^room-appservice-setup-stage-/, '');
+      if (ROOM_APPSERVICE_SETUP_STAGES.has(candidate)) {
+        latestStage = candidate;
+      }
+    }
+  }
+  return latestStage;
+}
+
+export function formatRoomAppServiceSetupStage(stageContent) {
+  const latestStage = getRoomAppServiceSetupStage(stageContent);
+  return latestStage ? `room-appservice-setup-stage ${latestStage}\n` : '';
+}
+
+export function formatRoomAppServiceCaseBodyCount(stageContent) {
+  const started = new Set();
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const candidate = line.trim().replace(/^room-appservice-case-start-/, '');
+      if (ROOM_APPSERVICE_CASES.has(candidate)) {
+        started.add(candidate);
+      }
+    }
+  }
+  return `room-appservice-test-bodies started=${started.size}/${ROOM_APPSERVICE_CASES.size}\n`;
 }
 
 export function formatPersonalOpenIdSetupStatus(stageContent) {
@@ -150,7 +212,10 @@ function emitContractPhase(stagePath) {
     process.stdout.write(formatPersonalOpenIdSetupStatus(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupStage(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupFailure(stageContent));
+    process.stdout.write(formatRoomAppServiceSetupStart(stageContent));
     process.stdout.write(formatRoomAppServiceSetupStatus(stageContent));
+    process.stdout.write(formatRoomAppServiceSetupStage(stageContent));
+    process.stdout.write(formatRoomAppServiceCaseBodyCount(stageContent));
     process.stdout.write(formatRoomAppServiceListingCheckpoint(stageContent));
   } catch {
     // Missing or unreadable diagnostics must not print untrusted file content.
