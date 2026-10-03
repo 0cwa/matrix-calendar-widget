@@ -20,6 +20,7 @@ import {
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
   calendarEventRdatePeriodDurationFromForm,
+  calendarEventRdatePeriodIsEditable,
   calendarEventRdatePeriodValueFromForm,
   calendarEventRdateValueFromForm,
   calendarEventToFormValues,
@@ -1215,6 +1216,212 @@ describe('calendar event form adapter', () => {
         rdateOperation: { action: 'remove-period', value: period },
       }).recurrence,
     ).toEqual({ rdate: { action: 'remove-period', value: period } });
+  });
+
+  it('replaces an explicit-end PERIOD while preserving both endpoint identities', () => {
+    const period = {
+      type: 'period' as const,
+      timing: {
+        type: 'end' as const,
+        start: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-11-01T09:30:45',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        end: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-11-01T10:30:45',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      },
+    };
+    const periodEvent: CalendarEvent = {
+      ...{
+        id: 'period-edit-series',
+        calendarId: 'team',
+        uid: 'period-edit-series@example.test',
+        title: 'Period edit series',
+        timing: {
+          type: 'timed',
+          start: {
+            type: 'zoned',
+            local: '2026-09-23T09:00:00',
+            timezone: 'America/New_York',
+          },
+          end: {
+            type: 'zoned',
+            local: '2026-09-23T10:00:00',
+            timezone: 'America/New_York',
+          },
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;COUNT=4',
+        rdates: [period],
+      },
+    };
+    const values = {
+      ...calendarEventToFormValues(periodEvent, calendar),
+      rdateEditSource: period,
+      rdateDraft: '2026-11-01T11:15:30',
+      rdateEndDraft: '2026-11-01T12:45:30',
+    };
+    const replacement = calendarEventRdatePeriodValueFromForm(values);
+
+    expect(calendarEventRdatePeriodIsEditable(period)).toBe(true);
+    expect(replacement).toEqual({
+      type: 'period',
+      timing: {
+        type: 'end',
+        start: {
+          type: 'date-time',
+          value: {
+            local: '2026-11-01T11:15:30',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        end: {
+          type: 'date-time',
+          value: {
+            local: '2026-11-01T12:45:30',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      },
+    });
+    expect(
+      calendarEventRdatePeriodIsEditable({
+        type: 'period',
+        timing: {
+          type: 'end',
+          start: period.timing.start,
+          end: period.timing.start,
+        },
+      }),
+    ).toBe(false);
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        rdateChanged: true,
+        rdateOperation: {
+          action: 'replace-period',
+          value: period,
+          replacement: replacement!,
+        },
+      }).recurrence,
+    ).toEqual({
+      rdate: { action: 'replace-period', value: period, replacement },
+    });
+    expect(
+      validateCalendarEventForm({
+        ...values,
+        rdateChanged: true,
+        rdateOperation: {
+          action: 'replace-period',
+          value: period,
+          replacement: replacement!,
+        },
+      }),
+    ).toBeUndefined();
+  });
+
+  it('keeps duration-form edits as nominal RFC units and rejects incompatible replacements', () => {
+    const period = {
+      type: 'period' as const,
+      timing: {
+        type: 'duration' as const,
+        start: {
+          type: 'floating-date-time' as const,
+          value: '2026-10-24T09:00:00',
+        },
+        duration: {
+          weeks: 0,
+          days: 1,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    const periodEvent: CalendarEvent = {
+      id: 'duration-period-edit-series',
+      calendarId: 'team',
+      uid: 'duration-period-edit-series@example.test',
+      title: 'Duration period edit series',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-05T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-05T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4', rdates: [period] },
+    };
+    const values = {
+      ...calendarEventToFormValues(periodEvent, calendar),
+      rdateEditSource: period,
+      rdateDraft: '2026-10-24T09:00:00',
+      rdatePeriodWeeks: '0',
+      rdatePeriodDays: '1',
+      rdatePeriodHours: '0',
+      rdatePeriodMinutes: '0',
+      rdatePeriodSeconds: '0',
+    };
+    const replacement = calendarEventRdatePeriodValueFromForm(values);
+    expect(replacement).toEqual({
+      type: 'period',
+      timing: {
+        type: 'duration',
+        start: {
+          type: 'floating-date-time',
+          value: '2026-10-24T09:00:00',
+        },
+        duration: {
+          weeks: 0,
+          days: 1,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    });
+
+    const incompatible = {
+      ...replacement!,
+      timing: {
+        ...replacement!.timing,
+        start: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-10-24T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      },
+    };
+    expect(
+      validateCalendarEventForm({
+        ...values,
+        rdateChanged: true,
+        rdateOperation: {
+          action: 'replace-period',
+          value: period,
+          replacement: incompatible,
+        },
+      }),
+    ).toBe('invalid-rdate');
   });
 
   it('builds DATE and floating RDATE values in DTSTART form', () => {

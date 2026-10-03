@@ -95,6 +95,7 @@ export class ParsedICalendarEvent {
     public readonly listProjectionDiagnostic?: 'unsupported-recurrence',
     private readonly clock: () => Date = systemClock,
     private readonly sourceRevisionProperties?: RawRevisionProperty[],
+    private readonly sourceICalendar: string = calendar.toString(),
   ) {}
 
   applyPatch(patch: CalendarEventPatch): EncodedICalendarEvent {
@@ -135,6 +136,13 @@ export class ParsedICalendarEvent {
             recurrenceWrite.rdate.value,
             this.listProjectionDiagnostic,
           );
+        } else if (recurrenceWrite.rdate.action === 'replace-period') {
+          assertPeriodRdateCanBeReplaced(
+            this.event,
+            recurrenceWrite.rdate.value,
+            recurrenceWrite.rdate.replacement,
+            this.listProjectionDiagnostic,
+          );
         } else {
           assertPointRdateCanBeEdited(
             this.event,
@@ -173,6 +181,7 @@ export class ParsedICalendarEvent {
       throw unsupportedAlarmPatch();
     }
     const eventSourceBeforePatch = vevent.toString();
+    let periodReplacementIsNoOp = false;
 
     if (hasOwn(patch, 'title')) {
       setTextProperty(vevent, 'summary', patch.title ?? '');
@@ -219,6 +228,13 @@ export class ParsedICalendarEvent {
         } else if (recurrenceWrite.rdate.action === 'add-period') {
           assertRdatePropertiesCanBeEdited(vevent, this.event);
           applyPeriodRdate(vevent, recurrenceWrite.rdate.value, calendar);
+        } else if (recurrenceWrite.rdate.action === 'replace-period') {
+          assertRdatePropertiesCanBeEdited(vevent, this.event);
+          periodReplacementIsNoOp = !applyPeriodRdateReplacement(
+            vevent,
+            recurrenceWrite.rdate.value,
+            recurrenceWrite.rdate.replacement,
+          );
         } else {
           assertRdatePropertiesCanBeEdited(vevent, this.event);
           applyPointRdate(calendar, vevent, recurrenceWrite.rdate, this.event);
@@ -238,6 +254,14 @@ export class ParsedICalendarEvent {
           patch.title ?? this.event.title,
         )
       : undefined;
+
+    if (
+      periodReplacementIsNoOp &&
+      Object.keys(patch).length === 1 &&
+      hasRecurrencePatch
+    ) {
+      return { event: this.event, icalendar: this.sourceICalendar };
+    }
 
     const revisionUpdated =
       vevent.toString() !== eventSourceBeforePatch &&
@@ -450,6 +474,7 @@ export class ICalendarEventCodec {
       hasMultipleMasterRules ? 'unsupported-recurrence' : undefined,
       this.clock,
       sourceRevisionProperties,
+      source,
     );
   }
 }
@@ -508,18 +533,36 @@ function recurrenceWriteFromUnknown(
 
     const rdate = operation as Record<string, unknown>;
     if (
-      Object.keys(rdate).length !== 2 ||
-      !['action', 'value'].every((key) =>
-        Object.prototype.hasOwnProperty.call(rdate, key),
-      ) ||
+      !Object.prototype.hasOwnProperty.call(rdate, 'action') ||
+      !Object.prototype.hasOwnProperty.call(rdate, 'value') ||
       (rdate.action !== 'add' &&
         rdate.action !== 'remove' &&
         rdate.action !== 'add-period' &&
-        rdate.action !== 'remove-period')
+        rdate.action !== 'remove-period' &&
+        rdate.action !== 'replace-period')
     ) {
       throw unsupportedRecurrencePatch();
     }
 
+    if (rdate.action === 'replace-period') {
+      if (
+        Object.keys(rdate).length !== 3 ||
+        !Object.prototype.hasOwnProperty.call(rdate, 'replacement')
+      ) {
+        throw unsupportedRecurrencePatch();
+      }
+      return {
+        rdate: {
+          action: 'replace-period',
+          value: recurrencePeriodFromUnknown(rdate.value),
+          replacement: recurrencePeriodFromUnknown(rdate.replacement),
+        },
+      };
+    }
+
+    if (Object.keys(rdate).length !== 2) {
+      throw unsupportedRecurrencePatch();
+    }
     if (rdate.action === 'remove-period' || rdate.action === 'add-period') {
       const value = recurrencePeriodFromUnknown(rdate.value);
       if (rdate.action === 'add-period') {
@@ -1188,6 +1231,108 @@ function assertPeriodRdateCanBeAdded(
   }
 }
 
+function assertPeriodRdateCanBeReplaced(
+  event: CalendarEvent,
+  source: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+  replacement: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+  listProjectionDiagnostic?: 'unsupported-recurrence',
+): void {
+  const recurrence = event.recurrence;
+  const sourceIdentity = recurrenceRdateIdentity(source);
+  const matchingSources = recurrence?.rdates?.filter(
+    (candidate) =>
+      candidate.type === 'period' &&
+      recurrenceRdateIdentity(candidate) === sourceIdentity,
+  );
+  if (
+    listProjectionDiagnostic === 'unsupported-recurrence' ||
+    event.unsupportedTimezone ||
+    event.unsupportedRecurrence ||
+    event.timing.type !== 'timed' ||
+    !recurrence ||
+    matchingSources?.length !== 1
+  ) {
+    throw unsupportedRecurrencePatch();
+  }
+  if (recurrence.rrule !== undefined) {
+    validateRecurrenceRule(
+      recurrence.rrule,
+      timingStartAsDateTime(event.timing),
+    );
+  }
+
+  if (
+    source.timing.type !== replacement.timing.type ||
+    !samePeriodDateTimeIdentity(source.timing.start, replacement.timing.start)
+  ) {
+    throw unsupportedRecurrencePatch();
+  }
+  if (
+    source.timing.type === 'end' &&
+    (replacement.timing.type !== 'end' ||
+      !samePeriodDateTimeIdentity(source.timing.end, replacement.timing.end))
+  ) {
+    throw unsupportedRecurrencePatch();
+  }
+
+  validateEditablePeriod(source, event);
+  validateEditablePeriod(replacement, event);
+}
+
+function validateEditablePeriod(
+  value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+  event: CalendarEvent,
+): void {
+  const anchor = timingStartAsDateTime(event.timing);
+  validatePointRdateValue(value.timing.start, anchor);
+  if (value.timing.type === 'duration') {
+    if (!isPositiveRfcDuration(value.timing.duration)) {
+      throw unsupportedRecurrencePatch();
+    }
+    return;
+  }
+
+  validatePointRdateValue(value.timing.end, anchor);
+  if (
+    !samePeriodDateTimeIdentity(value.timing.start, value.timing.end) ||
+    !periodEndIsAfterStart(value.timing.start, value.timing.end)
+  ) {
+    throw unsupportedRecurrencePatch();
+  }
+}
+
+function samePeriodDateTimeIdentity(
+  left: CalendarEventDateTime,
+  right: CalendarEventDateTime,
+): boolean {
+  return (
+    left.type === right.type &&
+    (left.type !== 'date-time' ||
+      (right.type === 'date-time' &&
+        left.value.timezone === right.value.timezone))
+  );
+}
+
+function periodEndIsAfterStart(
+  start: CalendarEventDateTime,
+  end: CalendarEventDateTime,
+): boolean {
+  if (start.type === 'date' || end.type === 'date') {
+    return false;
+  }
+  const startLocal =
+    start.type === 'date-time' ? start.value.local : start.value;
+  const endLocal = end.type === 'date-time' ? end.value.local : end.value;
+  const timezone = start.type === 'date-time' ? start.value.timezone : 'UTC';
+  const startDateTime = DateTime.fromISO(startLocal, { zone: timezone });
+  const endDateTime = DateTime.fromISO(endLocal, { zone: timezone });
+  return (
+    isExactLocalDateTime(startDateTime, startLocal) &&
+    isExactLocalDateTime(endDateTime, endLocal) &&
+    endDateTime.toMillis() > startDateTime.toMillis()
+  );
+}
+
 function validatePointRdateValue(
   value: CalendarEventDateTime,
   anchor: CalendarEventDateTime,
@@ -1237,6 +1382,12 @@ function isValidLocalDateTime(value: string): boolean {
   const dateTime = DateTime.fromISO(value, { zone: 'UTC' });
   return (
     dateTime.isValid && dateTime.toFormat("yyyy-MM-dd'T'HH:mm:ss") === value
+  );
+}
+
+function isExactLocalDateTime(dateTime: DateTime, local: string): boolean {
+  return (
+    dateTime.isValid && dateTime.toFormat("yyyy-MM-dd'T'HH:mm:ss") === local
   );
 }
 
@@ -1409,6 +1560,87 @@ function applyPeriodRdate(
     }
     return;
   }
+}
+
+function applyPeriodRdateReplacement(
+  vevent: ICAL.Component,
+  source: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+  replacement: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+): boolean {
+  const sourceIdentity = recurrenceRdateIdentity(source);
+  const replacementIdentity = recurrenceRdateIdentity(replacement);
+  const matches: Array<{
+    property: ICAL.Property;
+    values: ReturnType<ICAL.Property['getValues']>;
+    index: number;
+  }> = [];
+
+  for (const property of vevent.getAllProperties('rdate')) {
+    let values: ReturnType<ICAL.Property['getValues']>;
+    try {
+      values = property.getValues();
+    } catch {
+      throw unsupportedRecurrencePatch();
+    }
+    values.forEach((value, index) => {
+      if (
+        value instanceof ICAL.Period &&
+        recurrenceRdateIdentity(readPeriodRdateValue(value, property)) ===
+          sourceIdentity
+      ) {
+        matches.push({ property, values, index });
+      }
+    });
+  }
+
+  if (matches.length !== 1) {
+    throw unsupportedRecurrencePatch();
+  }
+  if (sourceIdentity === replacementIdentity) {
+    return false;
+  }
+
+  const match = matches[0];
+  const replacementStartIdentity = calendarEventRecurrenceIdentity(
+    replacement.timing.start,
+  );
+  for (const property of vevent.getAllProperties('rdate')) {
+    const values = property.getValues();
+    for (const [index, value] of values.entries()) {
+      if (property === match.property && index === match.index) {
+        continue;
+      }
+      const siblingStart =
+        value instanceof ICAL.Period
+          ? readPeriodRdateValue(value, property).timing.start
+          : value instanceof ICAL.Time
+            ? readDateTimeValue(value, property)
+            : undefined;
+      if (
+        siblingStart &&
+        calendarEventRecurrenceIdentity(siblingStart) ===
+          replacementStartIdentity
+      ) {
+        throw unsupportedRecurrencePatch();
+      }
+    }
+  }
+
+  const replacementStart = recurrenceIdAsIcalTime(replacement.timing.start);
+  const replacementPeriod =
+    replacement.timing.type === 'end'
+      ? ICAL.Period.fromData({
+          start: replacementStart.value,
+          end: recurrenceIdAsIcalTime(replacement.timing.end).value,
+        })
+      : ICAL.Period.fromData({
+          start: replacementStart.value,
+          duration: ICAL.Duration.fromData(replacement.timing.duration),
+        });
+  const nextValues = [...match.values];
+  nextValues[match.index] = replacementPeriod;
+  match.property.setValues(nextValues);
+  return true;
 }
 
 function recurrenceDateTimeFromUnknown(value: unknown): CalendarEventDateTime {
