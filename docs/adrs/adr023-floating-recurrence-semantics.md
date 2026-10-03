@@ -77,9 +77,12 @@ fields and has no timezone until an application interprets it.
    preserved. For an existing PERIOD-valued RDATE, the editor may remove one
    selected value by matching its complete start and either explicit end or
    original RFC DURATION components. It must preserve sibling RDATE values,
-   property parameters, and all other resource data. PERIOD creation and
-   changes to a PERIOD's start, end, or duration remain unsupported; malformed
-   or unsupported source values remain opaque and cannot be removed.
+   property parameters, and all other resource data. The editor may add one
+   explicit-end PERIOD-valued RDATE to a supported timed recurring master,
+   preserving the start/end value kind and source VTIMEZONE and making exact
+   repeated additions no-ops. Duration-form PERIOD creation and changes to an
+   existing PERIOD's start, end, or duration remain unsupported; malformed or
+   unsupported source values remain opaque and cannot be changed.
 
 ## Implementation status and boundaries
 
@@ -136,6 +139,12 @@ weekday tokens that include DTSTART's weekday, with omitted or `INTERVAL=1`, no
 `COUNT` or `UNTIL`, no additional RRULE parts, and omitted or default
 `WKST=MO`. The projector leaves other weekly BYDAY combinations opaque. An
 unrelated event edit preserves the source RRULE and resource data.
+
+The codec can add one explicit-end PERIOD-valued RDATE to a supported timed
+recurring master. It preserves the exact typed endpoints, source timezone
+definition, sibling values, and resource data; repeating the same addition is
+a no-op. Duration-form creation and changes to an existing PERIOD's timing
+remain unsupported.
 
 ## Consequences
 
