@@ -1255,17 +1255,31 @@ describe('ICalendarEventCodec', () => {
     const added = parsed.applyPatch({
       recurrence: { rdate: { action: 'add-period', value } },
     });
+    const replayed = codec
+      .parse('team', 'period-rdate-add.ics', added.icalendar)
+      .applyPatch({
+        recurrence: { rdate: { action: 'add-period', value } },
+      });
     const reparsed = codec.parse(
       'team',
       'period-rdate-add.ics',
-      added.icalendar,
+      replayed.icalendar,
     );
-    const unfolded = added.icalendar.replace(/\r\n[ \t]/g, '');
+    const unfolded = replayed.icalendar.replace(/\r\n[ \t]/g, '');
 
-    expect(reparsed.event.recurrence?.rdates).toContainEqual(value);
+    expect(
+      reparsed.event.recurrence?.rdates?.filter(
+        (candidate) => JSON.stringify(candidate) === JSON.stringify(value),
+      ),
+    ).toEqual([value]);
     expect(unfolded).toContain(
       'RDATE;TZID=Europe/Stockholm;VALUE=PERIOD:20261029T093000/20261029T103000',
     );
+    expect(
+      unfolded.match(
+        /RDATE;TZID=Europe\/Stockholm;VALUE=PERIOD:20261029T093000\/20261029T103000/g,
+      ),
+    ).toHaveLength(1);
     expect(unfolded).toContain('20261026T140000');
     expect(unfolded).toContain(
       'X-KEEP=sibling;VALUE=PERIOD:20261027T093000/PT1H',

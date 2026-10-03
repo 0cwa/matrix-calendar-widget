@@ -1172,6 +1172,23 @@ function applyPeriodRdate(
   calendar?: ICAL.Component,
 ): void {
   if (target.timing.type === 'end' && calendar) {
+    const targetIdentity = recurrenceRdateIdentity(target);
+    const alreadyPresent = vevent
+      .getAllProperties('rdate')
+      .some((property) =>
+        property
+          .getValues()
+          .some(
+            (value) =>
+              value instanceof ICAL.Period &&
+              recurrenceRdateIdentity(readPeriodRdateValue(value, property)) ===
+                targetIdentity,
+          ),
+      );
+    if (alreadyPresent) {
+      return;
+    }
+
     const { start, end } = target.timing;
     const startIcal = recurrenceIdAsIcalTime(start);
     const endIcal = recurrenceIdAsIcalTime(end);
