@@ -149,7 +149,10 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
   - [x] Add a timed recurring PERIOD from the selected date/time with a
         positive duration in whole weeks or days/time units, preserving the
         source DATE-TIME form and the point-date entry flow.
-  - [ ] Edit the start, end, or duration of an existing PERIOD RDATE.
+  - [x] Edit one exact existing PERIOD RDATE start and explicit end or positive
+        duration atomically, preserving its representation and endpoint type/
+        timezone. Reject stale, duplicate, malformed, or colliding values;
+        preserve siblings and exact-source supported no-ops.
 - [ ] RECURRENCE-ID instance override editing.
 - [ ] “this event / this and following / series” edit semantics where representable.
 - [ ] DST and named-timezone regression suite.
@@ -208,9 +211,13 @@ week-and-time values are rejected. An exact repeated addition of the same
 PERIOD is a no-op. Point/period siblings, parameters, timezone definitions,
 detached members, and ETag conditional updates remain preserved. The widget can
 add a positive duration PERIOD from the selected start of a timed recurring
-master, preserving its floating, UTC, or named-TZID form. Changes to an existing
-PERIOD's start, end, or duration remain open. General EXDATE editing, arbitrary
-RRULEs, and broad M5 completion also remain open.
+master, preserving its floating, UTC, or named-TZID form. An existing PERIOD can
+be edited by matching the complete saved source value and replacing it in
+place. Its explicit-end or duration representation and endpoint type/timezone
+remain fixed. Sibling collisions, stale or duplicate sources, and unsupported
+data fail closed; a supported exact no-op preserves the original resource and
+revision metadata. General EXDATE editing, arbitrary RRULEs, and broad M5
+completion also remain open.
 
 The bounded weekly BYDAY slice extends the editor with a weekday set for
 every-week rules. Plain weekday tokens are accepted only when DTSTART's

@@ -312,6 +312,482 @@ describe('InMemoryCalendarRepository', () => {
     expect(fetched.recurrence?.rdates).toEqual([value]);
   });
 
+  it('atomically replaces one exact PERIOD while preserving ordered siblings', async () => {
+    const point: CalendarEventRecurrenceDate = {
+      type: 'date-time',
+      value: {
+        local: '2026-10-14T11:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const source: Extract<CalendarEventRecurrenceDate, { type: 'period' }> = {
+      type: 'period',
+      timing: {
+        type: 'end',
+        start: {
+          type: 'floating-date-time',
+          value: '2026-10-12T09:00:00',
+        },
+        end: {
+          type: 'floating-date-time',
+          value: '2026-10-12T10:00:00',
+        },
+      },
+    };
+    const sibling = recurrencePeriod();
+    const replacement: Extract<
+      CalendarEventRecurrenceDate,
+      { type: 'period' }
+    > = {
+      type: 'period',
+      timing: {
+        type: 'end',
+        start: {
+          type: 'floating-date-time',
+          value: '2026-10-12T09:30:00',
+        },
+        end: {
+          type: 'floating-date-time',
+          value: '2026-10-12T10:30:00',
+        },
+      },
+    };
+    const event: CalendarEvent = {
+      ...events[2],
+      id: 'period-replace',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY',
+        rdates: [point, source, sibling],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+
+    const updated = await repository.updateEvent('team', event.id, {
+      recurrence: {
+        rdate: { action: 'replace-period', value: source, replacement },
+      },
+    });
+    expect(updated.recurrence?.rdates).toEqual([point, replacement, sibling]);
+    const returned = updated.recurrence?.rdates?.[1];
+    if (
+      returned?.type !== 'period' ||
+      returned.timing.type !== 'end' ||
+      returned.timing.start.type !== 'floating-date-time'
+    ) {
+      throw new Error('Expected cloned replacement PERIOD');
+    }
+    returned.timing.start.value = '2099-01-01T00:00:00';
+    const fetched = await repository.getEvent('team', event.id);
+    expect(fetched.recurrence?.rdates).toEqual([point, replacement, sibling]);
+  });
+
+  it.each(['missing', 'duplicate'] as const)(
+    'fails closed when PERIOD replacement source is %s',
+    async (sourceState) => {
+      const source = recurrencePeriod();
+      const replacement: Extract<
+        CalendarEventRecurrenceDate,
+        { type: 'period' }
+      > = {
+        type: 'period',
+        timing: {
+          type: 'duration',
+          start: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-13T11:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          duration: {
+            weeks: 0,
+            days: 2,
+            hours: 0,
+            minutes: 0,
+            seconds: 0,
+            isNegative: false,
+          },
+        },
+      };
+      const absentSource = recurrencePeriod();
+      if (
+        absentSource.timing.type === 'duration' &&
+        absentSource.timing.start.type === 'date-time'
+      ) {
+        absentSource.timing.start.value.local = '2026-10-13T11:00:00';
+      }
+      const event: CalendarEvent = {
+        ...events[2],
+        id: `period-replace-${sourceState}`,
+        recurrence: {
+          rrule: 'FREQ=WEEKLY',
+          rdates: sourceState === 'missing' ? [absentSource] : [source, source],
+        },
+      };
+      const repository = new InMemoryCalendarRepository({
+        calendars,
+        events: [event],
+      });
+      const before = await repository.getEvent('team', event.id);
+
+      await expect(
+        repository.updateEvent('team', event.id, {
+          recurrence: {
+            rdate: { action: 'replace-period', value: source, replacement },
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'unsupported-patch' });
+      await expect(repository.getEvent('team', event.id)).resolves.toEqual(
+        before,
+      );
+    },
+  );
+
+  it('rejects PERIOD replacements that change representation or typed endpoint identity', async () => {
+    const durationSource = recurrencePeriod();
+    const duration = durationSource.timing;
+    if (duration.type !== 'duration' || duration.start.type !== 'date-time') {
+      throw new Error('Expected a named-TZID duration PERIOD');
+    }
+    const durationUnits = duration.duration;
+    const mismatches: Array<{
+      id: string;
+      source: Extract<CalendarEventRecurrenceDate, { type: 'period' }>;
+      replacement: Extract<CalendarEventRecurrenceDate, { type: 'period' }>;
+    }> = [
+      {
+        id: 'duration-to-explicit-end',
+        source: durationSource,
+        replacement: explicitZonedPeriod(
+          '2026-10-13T11:00:00',
+          '2026-10-13T12:00:00',
+          'Europe/Stockholm',
+        ),
+      },
+      {
+        id: 'named-to-floating',
+        source: durationSource,
+        replacement: {
+          type: 'period',
+          timing: {
+            type: 'duration',
+            start: {
+              type: 'floating-date-time',
+              value: duration.start.value.local,
+            },
+            duration: durationUnits,
+          },
+        },
+      },
+      {
+        id: 'named-to-utc',
+        source: durationSource,
+        replacement: {
+          type: 'period',
+          timing: {
+            type: 'duration',
+            start: {
+              type: 'date-time',
+              value: {
+                local: duration.start.value.local,
+                timezone: 'UTC',
+              },
+            },
+            duration: durationUnits,
+          },
+        },
+      },
+      {
+        id: 'explicit-end-timezone-change',
+        source: explicitZonedPeriod(
+          '2026-10-12T09:00:00',
+          '2026-10-12T10:00:00',
+          'Europe/Stockholm',
+        ),
+        replacement: explicitZonedPeriod(
+          '2026-10-12T09:30:00',
+          '2026-10-12T10:30:00',
+          'UTC',
+        ),
+      },
+    ];
+
+    for (const { id, source, replacement } of mismatches) {
+      const event: CalendarEvent = {
+        ...events[2],
+        id: `period-replace-${id}`,
+        recurrence: { rrule: 'FREQ=WEEKLY', rdates: [source] },
+      };
+      const repository = new InMemoryCalendarRepository({
+        calendars,
+        events: [event],
+      });
+      const before = await repository.getEvent('team', event.id);
+
+      await expect(
+        repository.updateEvent('team', event.id, {
+          recurrence: {
+            rdate: { action: 'replace-period', value: source, replacement },
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'unsupported-patch' });
+      await expect(repository.getEvent('team', event.id)).resolves.toEqual(
+        before,
+      );
+    }
+  });
+
+  it('keeps an exact supported PERIOD replacement as a no-op', async () => {
+    const source = recurrencePeriod();
+    const event: CalendarEvent = {
+      ...events[2],
+      id: 'period-replace-no-op',
+      recurrence: { rrule: 'FREQ=WEEKLY', rdates: [source] },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+    const before = await repository.getEvent('team', event.id);
+
+    const updated = await repository.updateEvent('team', event.id, {
+      recurrence: {
+        rdate: { action: 'replace-period', value: source, replacement: source },
+      },
+    });
+
+    expect(updated).toEqual(before);
+    await expect(repository.getEvent('team', event.id)).resolves.toEqual(
+      before,
+    );
+  });
+
+  it('rejects a PERIOD no-op when a sibling has malformed duration data', async () => {
+    const source = recurrencePeriod();
+    const malformed: CalendarEventRecurrenceDate = {
+      type: 'period',
+      timing: {
+        type: 'duration',
+        start: {
+          type: 'floating-date-time',
+          value: '2026-10-19T09:00:00',
+        },
+        duration: {
+          weeks: 1,
+          days: 1,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    const event: CalendarEvent = {
+      ...events[2],
+      id: 'period-replace-no-op-malformed-sibling',
+      recurrence: { rrule: 'FREQ=WEEKLY', rdates: [source, malformed] },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+    const before = await repository.getEvent('team', event.id);
+
+    await expect(
+      repository.updateEvent('team', event.id, {
+        recurrence: {
+          rdate: {
+            action: 'replace-period',
+            value: source,
+            replacement: source,
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'unsupported-patch' });
+    await expect(repository.getEvent('team', event.id)).resolves.toEqual(
+      before,
+    );
+  });
+
+  it.each([
+    {
+      label: 'an unsupported recurrence',
+      marker: { unsupportedRecurrence: 'range-this-and-future' as const },
+    },
+    {
+      label: 'an unsupported timezone',
+      marker: { unsupportedTimezone: true as const },
+    },
+  ])('rejects a PERIOD no-op with $label', async ({ marker }) => {
+    const source = recurrencePeriod();
+    const event: CalendarEvent = {
+      ...events[2],
+      ...marker,
+      id: `period-replace-no-op-${Object.keys(marker)[0]}`,
+      recurrence: { rrule: 'FREQ=WEEKLY', rdates: [source] },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+    const before = await repository.getEvent('team', event.id);
+
+    await expect(
+      repository.updateEvent('team', event.id, {
+        recurrence: {
+          rdate: {
+            action: 'replace-period',
+            value: source,
+            replacement: source,
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'unsupported-patch' });
+    await expect(repository.getEvent('team', event.id)).resolves.toEqual(
+      before,
+    );
+  });
+
+  it('rejects a PERIOD replacement that collides with a sibling typed RDATE', async () => {
+    const source: Extract<CalendarEventRecurrenceDate, { type: 'period' }> = {
+      type: 'period',
+      timing: {
+        type: 'duration',
+        start: {
+          type: 'floating-date-time',
+          value: '2026-10-12T11:00:00',
+        },
+        duration: {
+          weeks: 0,
+          days: 1,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    const collision: CalendarEventRecurrenceDate = {
+      type: 'floating-date-time',
+      value: '2026-10-13T11:00:00',
+    };
+    const replacement: Extract<
+      CalendarEventRecurrenceDate,
+      { type: 'period' }
+    > = {
+      type: 'period',
+      timing: {
+        type: 'duration',
+        start: {
+          type: 'floating-date-time',
+          value: '2026-10-13T11:00:00',
+        },
+        duration: {
+          weeks: 0,
+          days: 2,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    const event: CalendarEvent = {
+      ...events[2],
+      id: 'period-replace-collision',
+      recurrence: { rrule: 'FREQ=WEEKLY', rdates: [source, collision] },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+    const before = await repository.getEvent('team', event.id);
+
+    await expect(
+      repository.updateEvent('team', event.id, {
+        recurrence: {
+          rdate: { action: 'replace-period', value: source, replacement },
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'unsupported-patch' });
+    await expect(repository.getEvent('team', event.id)).resolves.toEqual(
+      before,
+    );
+  });
+
+  it('fails closed when a sibling PERIOD has malformed duration data', async () => {
+    const source = recurrencePeriod();
+    const malformed: CalendarEventRecurrenceDate = {
+      type: 'period',
+      timing: {
+        type: 'duration',
+        start: {
+          type: 'floating-date-time',
+          value: '2026-10-19T09:00:00',
+        },
+        duration: {
+          weeks: 1,
+          days: 1,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    const replacement: Extract<
+      CalendarEventRecurrenceDate,
+      { type: 'period' }
+    > = {
+      type: 'period',
+      timing: {
+        type: 'duration',
+        start: {
+          type: 'date-time',
+          value: {
+            local: '2026-10-13T11:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        duration: {
+          weeks: 0,
+          days: 2,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    const event: CalendarEvent = {
+      ...events[2],
+      id: 'period-replace-malformed-sibling',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY',
+        rdates: [source, malformed],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+    const before = await repository.getEvent('team', event.id);
+
+    await expect(
+      repository.updateEvent('team', event.id, {
+        recurrence: {
+          rdate: { action: 'replace-period', value: source, replacement },
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'unsupported-patch' });
+    await expect(repository.getEvent('team', event.id)).resolves.toEqual(
+      before,
+    );
+  });
+
   it('creates a named calendar with deterministic identity', async () => {
     const repository = createRepository();
 
@@ -714,7 +1190,10 @@ function recurrenceOverride(): CalendarEventRecurrenceOverride {
   };
 }
 
-function recurrencePeriod(): CalendarEventRecurrenceDate {
+function recurrencePeriod(): Extract<
+  CalendarEventRecurrenceDate,
+  { type: 'period' }
+> {
   return {
     type: 'period',
     timing: {
@@ -734,6 +1213,21 @@ function recurrencePeriod(): CalendarEventRecurrenceDate {
         seconds: 0,
         isNegative: false,
       },
+    },
+  };
+}
+
+function explicitZonedPeriod(
+  startLocal: string,
+  endLocal: string,
+  timezone: string,
+): Extract<CalendarEventRecurrenceDate, { type: 'period' }> {
+  return {
+    type: 'period',
+    timing: {
+      type: 'end',
+      start: { type: 'date-time', value: { local: startLocal, timezone } },
+      end: { type: 'date-time', value: { local: endLocal, timezone } },
     },
   };
 }

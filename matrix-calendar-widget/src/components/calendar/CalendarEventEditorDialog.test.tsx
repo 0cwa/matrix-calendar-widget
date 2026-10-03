@@ -767,6 +767,230 @@ describe('<CalendarEventEditorDialog />', () => {
     });
   });
 
+  it('edits an explicit-end PERIOD in place and preserves typed endpoint identities', async () => {
+    const point = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-11-03T09:00:00',
+        timezone: 'America/New_York',
+      },
+    };
+    const period = {
+      type: 'period' as const,
+      timing: {
+        type: 'end' as const,
+        start: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-11-01T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        end: {
+          type: 'date-time' as const,
+          value: {
+            local: '2026-11-01T10:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+      },
+    };
+    const byDuration = {
+      type: 'period' as const,
+      timing: {
+        type: 'duration' as const,
+        start: {
+          type: 'floating-date-time' as const,
+          value: '2026-11-08T09:00:00',
+        },
+        duration: {
+          weeks: 0,
+          days: 1,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    const periodEvent: CalendarEvent = {
+      ...recurringEvent,
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-09-23T09:00:00',
+          timezone: 'America/New_York',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T10:00:00',
+          timezone: 'America/New_York',
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;COUNT=8',
+        rdates: [point, period, byDuration],
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [periodEvent],
+    });
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={periodEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Edit period: 2026-11-01T09:00:00 Europe/Stockholm – 2026-11-01T10:00:00 Europe/Stockholm',
+      }),
+    );
+    const startDraft = screen.getByTestId('rdate-draft');
+    expect(startDraft).toBeEnabled();
+    expect(startDraft).toHaveAttribute('step', '1');
+    await userEvent.clear(startDraft);
+    await userEvent.type(startDraft, '2026-11-01T11:15:30');
+    expect(startDraft).toHaveValue('2026-11-01T11:15:30');
+    fireEvent.change(screen.getByTestId('rdate-period-end'), {
+      target: { value: '2026-11-01T11:00:00' },
+    });
+    expect(
+      screen.getByText(
+        'The end must be later than the start and keep its saved date-time kind and time zone.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Save period changes' }),
+    ).toBeDisabled();
+    fireEvent.change(screen.getByTestId('rdate-period-end'), {
+      target: { value: '2026-11-01T12:45:30' },
+    });
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Save period changes' }),
+    );
+    expect(
+      await screen.findByText('The period will be updated when you save.'),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await expect(
+      repository.getEvent('team', periodEvent.id),
+    ).resolves.toMatchObject({
+      recurrence: {
+        rdates: [
+          point,
+          {
+            type: 'period',
+            timing: {
+              type: 'end',
+              start: {
+                type: 'date-time',
+                value: {
+                  local: '2026-11-01T11:15:30',
+                  timezone: 'Europe/Stockholm',
+                },
+              },
+              end: {
+                type: 'date-time',
+                value: {
+                  local: '2026-11-01T12:45:30',
+                  timezone: 'Europe/Stockholm',
+                },
+              },
+            },
+          },
+          byDuration,
+        ],
+      },
+    });
+  });
+
+  it('edits duration PERIOD units without converting nominal days to exact hours', async () => {
+    const period = {
+      type: 'period' as const,
+      timing: {
+        type: 'duration' as const,
+        start: {
+          type: 'floating-date-time' as const,
+          value: '2026-10-24T09:00:00',
+        },
+        duration: {
+          weeks: 0,
+          days: 1,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    };
+    const periodEvent: CalendarEvent = {
+      ...recurringEvent,
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=8', rdates: [period] },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [periodEvent],
+    });
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={periodEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Edit period: 2026-10-24T09:00:00 (1d)',
+      }),
+    );
+    expect(screen.getByRole('spinbutton', { name: 'Days' })).toHaveValue(1);
+    expect(screen.getByRole('spinbutton', { name: 'Hours' })).toHaveValue(0);
+    await userEvent.clear(screen.getByRole('spinbutton', { name: 'Days' }));
+    await userEvent.type(screen.getByRole('spinbutton', { name: 'Days' }), '2');
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Save period changes' }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await expect(
+      repository.getEvent('team', periodEvent.id),
+    ).resolves.toMatchObject({
+      recurrence: {
+        rdates: [
+          {
+            type: 'period',
+            timing: {
+              type: 'duration',
+              start: {
+                type: 'floating-date-time',
+                value: '2026-10-24T09:00:00',
+              },
+              duration: {
+                weeks: 0,
+                days: 2,
+                hours: 0,
+                minutes: 0,
+                seconds: 0,
+                isNegative: false,
+              },
+            },
+          },
+        ],
+      },
+    });
+  });
+
   it('disables recurrence editing for complex sources and preserves them on other edits', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
