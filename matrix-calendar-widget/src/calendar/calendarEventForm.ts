@@ -27,6 +27,7 @@ import {
   CalendarEventWeekday,
   CalendarId,
   SupportedCalendarEventRecurrenceFrequency,
+  calendarEventRecurrenceIdentity,
   calendarLocalDateTimeToUnixMillis,
   formatSupportedCalendarEventRecurrenceRule,
   isAllDayCalendarEvent,
@@ -67,6 +68,8 @@ export type CalendarEventFormValues = {
   rdatePeriodHours?: string;
   rdatePeriodMinutes?: string;
   rdatePeriodSeconds?: string;
+  rdateEndDraft?: string;
+  rdateEditSource?: Extract<CalendarEventRecurrenceDate, { type: 'period' }>;
   rdateValues?: CalendarEventRecurrenceDate[];
   rdateChanged?: boolean;
   rdateOperation?:
@@ -78,6 +81,11 @@ export type CalendarEventFormValues = {
     | {
         action: 'add-period';
         value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>;
+      }
+    | {
+        action: 'replace-period';
+        value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>;
+        replacement: Extract<CalendarEventRecurrenceDate, { type: 'period' }>;
       };
   exdateEditable?: boolean;
   exdateValues?: CalendarEventDateTime[];
@@ -393,6 +401,25 @@ function validateRdateOperation(
       period.timing.type !== 'duration' ||
       period.timing.start.type === 'date' ||
       !isPositiveRfcDuration(period.timing.duration)
+    ) {
+      return 'invalid-rdate';
+    }
+  } else if (values.rdateOperation.action === 'replace-period') {
+    const { value, replacement } = values.rdateOperation;
+    const source = values.rdateEditSource;
+    const sourceMatches = (values.rdateValues ?? []).filter(
+      (candidate) =>
+        candidate.type === 'period' &&
+        recurrencePeriodIdentity(candidate) === recurrencePeriodIdentity(value),
+    ).length;
+    if (
+      values.timingType !== 'timed' ||
+      values.originalTiming?.type !== 'timed' ||
+      values.rdateEditable === false ||
+      !source ||
+      recurrencePeriodIdentity(source) !== recurrencePeriodIdentity(value) ||
+      sourceMatches !== 1 ||
+      !isEditablePeriodReplacement(source, replacement)
     ) {
       return 'invalid-rdate';
     }
@@ -732,6 +759,36 @@ export function calendarEventRdatePeriodValueFromForm(
     return undefined;
   }
 
+  if (values.rdateEditSource) {
+    const sourceTiming = values.rdateEditSource.timing;
+    const start = calendarEventRdateDateTimeFromDraft(
+      values.rdateDraft ?? '',
+      sourceTiming.start,
+    );
+    if (!start) {
+      return undefined;
+    }
+
+    if (sourceTiming.type === 'end') {
+      const end = calendarEventRdateDateTimeFromDraft(
+        values.rdateEndDraft ?? '',
+        sourceTiming.end,
+      );
+      if (!end) {
+        return undefined;
+      }
+      return { type: 'period', timing: { type: 'end', start, end } };
+    }
+
+    const duration = calendarEventRdatePeriodDurationFromForm(values);
+    return duration
+      ? {
+          type: 'period',
+          timing: { type: 'duration', start, duration },
+        }
+      : undefined;
+  }
+
   const start = calendarEventRdateValueFromForm(values);
   const duration = calendarEventRdatePeriodDurationFromForm(values);
   if (!start || start.type === 'date' || !duration) {
@@ -739,6 +796,138 @@ export function calendarEventRdatePeriodValueFromForm(
   }
 
   return { type: 'period', timing: { type: 'duration', start, duration } };
+}
+
+export function calendarEventRdatePeriodIsEditable(
+  value: CalendarEventRecurrenceDate,
+): value is Extract<CalendarEventRecurrenceDate, { type: 'period' }> {
+  if (value.type !== 'period' || value.timing.start.type === 'date') {
+    return false;
+  }
+  if (!isEditablePeriodDateTime(value.timing.start)) {
+    return false;
+  }
+  if (value.timing.type === 'duration') {
+    return isPositiveRfcDuration(value.timing.duration);
+  }
+
+  return (
+    sameDateTimeIdentity(value.timing.start, value.timing.end) &&
+    periodEndpointsAreOrdered(value.timing.start, value.timing.end)
+  );
+}
+
+function isEditablePeriodReplacement(
+  source: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+  replacement: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+): boolean {
+  if (
+    !calendarEventRdatePeriodIsEditable(source) ||
+    source.timing.type !== replacement.timing.type ||
+    !sameDateTimeIdentity(source.timing.start, replacement.timing.start)
+  ) {
+    return false;
+  }
+
+  if (source.timing.type === 'duration') {
+    return (
+      replacement.timing.type === 'duration' &&
+      isPositiveRfcDuration(replacement.timing.duration)
+    );
+  }
+
+  return (
+    replacement.timing.type === 'end' &&
+    sameDateTimeIdentity(source.timing.end, replacement.timing.end) &&
+    sameDateTimeIdentity(replacement.timing.start, replacement.timing.end) &&
+    periodEndpointsAreOrdered(replacement.timing.start, replacement.timing.end)
+  );
+}
+
+function recurrencePeriodIdentity(
+  value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
+): string {
+  return value.timing.type === 'end'
+    ? `period:end:${calendarEventRecurrenceIdentity(value.timing.start)}:${calendarEventRecurrenceIdentity(value.timing.end)}`
+    : `period:duration:${calendarEventRecurrenceIdentity(value.timing.start)}:${value.timing.duration.weeks}:${value.timing.duration.days}:${value.timing.duration.hours}:${value.timing.duration.minutes}:${value.timing.duration.seconds}:${value.timing.duration.isNegative}`;
+}
+
+function sameDateTimeIdentity(
+  left: CalendarEventDateTime,
+  right: CalendarEventDateTime,
+): boolean {
+  return (
+    left.type === right.type &&
+    (left.type !== 'date-time' ||
+      (right.type === 'date-time' &&
+        left.value.timezone === right.value.timezone))
+  );
+}
+
+function periodEndpointsAreOrdered(
+  start: CalendarEventDateTime,
+  end: CalendarEventDateTime,
+): boolean {
+  if (
+    start.type === 'date' ||
+    end.type === 'date' ||
+    !sameDateTimeIdentity(start, end)
+  ) {
+    return false;
+  }
+
+  const zone = start.type === 'date-time' ? start.value.timezone : 'UTC';
+  const startLocal =
+    start.type === 'date-time' ? start.value.local : start.value;
+  const endLocal = end.type === 'date-time' ? end.value.local : end.value;
+  const startDateTime = DateTime.fromISO(startLocal, { zone });
+  const endDateTime = DateTime.fromISO(endLocal, { zone });
+  return (
+    isExactLocalDateTime(startDateTime, startLocal) &&
+    isExactLocalDateTime(endDateTime, endLocal) &&
+    endDateTime.toMillis() > startDateTime.toMillis()
+  );
+}
+
+function isExactLocalDateTime(dateTime: DateTime, local: string): boolean {
+  return (
+    dateTime.isValid && dateTime.toFormat("yyyy-MM-dd'T'HH:mm:ss") === local
+  );
+}
+
+function isEditablePeriodDateTime(value: CalendarEventDateTime): boolean {
+  if (value.type === 'date') {
+    return false;
+  }
+  const local = value.type === 'date-time' ? value.value.local : value.value;
+  const zone = value.type === 'date-time' ? value.value.timezone : 'UTC';
+  return isExactLocalDateTime(DateTime.fromISO(local, { zone }), local);
+}
+
+function calendarEventRdateDateTimeFromDraft(
+  draft: string,
+  identity: CalendarEventDateTime,
+): CalendarEventDateTime | undefined {
+  if (identity.type === 'date') {
+    return undefined;
+  }
+  const trimmed = draft.trim();
+  const local = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(trimmed)
+    ? `${trimmed}:00`
+    : trimmed;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(local)) {
+    return undefined;
+  }
+  const zone = identity.type === 'date-time' ? identity.value.timezone : 'UTC';
+  if (!isExactLocalDateTime(DateTime.fromISO(local, { zone }), local)) {
+    return undefined;
+  }
+  return identity.type === 'floating-date-time'
+    ? { type: 'floating-date-time', value: local }
+    : {
+        type: 'date-time',
+        value: { local, timezone: identity.value.timezone },
+      };
 }
 
 function isPositiveRfcDuration(value: unknown): value is CalendarEventDuration {
