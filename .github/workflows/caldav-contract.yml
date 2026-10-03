@@ -64,6 +64,22 @@ jobs:
       - name: Test Synapse startup diagnostic sanitizer
         run: node --test dev/synapse-startup-diagnostic.test.mjs
 
+      - name: Probe personal OpenID contract imports without services
+        run: |
+          set +e
+          CALDAV_CONTRACT=0 yarn workspace @matrix-calendar-widget/server jest \
+            test/integration/PersonalOpenIdRadicaleContract.test.ts \
+            --runInBand \
+            >/dev/null 2>&1
+          probe_status=$?
+          set -e
+          if [ "$probe_status" -eq 0 ]; then
+            printf '%s\n' 'personal-openid-import-probe passed'
+          else
+            printf '%s\n' 'personal-openid-import-probe failed'
+            exit 1
+          fi
+
       - name: Start pinned Matrix and Radicale services
         run: bash dev/up.sh
 
