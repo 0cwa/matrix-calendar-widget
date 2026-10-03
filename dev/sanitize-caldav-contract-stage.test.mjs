@@ -3,15 +3,10 @@ import test from 'node:test';
 
 import {
   formatContractPhase,
-  formatPersonalOpenIdJestSetup,
-  formatPersonalOpenIdProbeLaunch,
-  formatPersonalOpenIdRunnerReady,
   formatPersonalOpenIdSetupFailure,
   formatPersonalOpenIdSetupStage,
   formatPersonalOpenIdSetupStart,
   formatPersonalOpenIdSetupStatus,
-  formatPersonalOpenIdSuiteLoaded,
-  formatPersonalOpenIdSuiteRegistration,
   formatRoomAppServiceListingCheckpoint,
   formatRoomAppServiceSetupStatus,
 } from './sanitize-caldav-contract-stage.mjs';
@@ -90,73 +85,6 @@ test('reports only whether the personal OpenID beforeAll started', () => {
       'personal-openid-setup-start\npersonal-openid-setup-complete\n',
     ),
     'personal-openid-setup-start reached\n',
-  );
-});
-
-test('reports only whether the personal OpenID suite module loaded', () => {
-  assert.equal(
-    formatPersonalOpenIdSuiteLoaded('personal-openid-setup-start\n'),
-    'personal-openid-suite not-reached\n',
-  );
-  assert.equal(
-    formatPersonalOpenIdSuiteLoaded(
-      'personal-openid-suite-loaded\npersonal-openid-setup-start\n',
-    ),
-    'personal-openid-suite loaded\n',
-  );
-});
-
-test('reports only whether Personal OpenID suite registration completed', () => {
-  assert.equal(
-    formatPersonalOpenIdSuiteRegistration('personal-openid-suite-loaded\n'),
-    'personal-openid-suite-registration not-reached\n',
-  );
-  assert.equal(
-    formatPersonalOpenIdSuiteRegistration(
-      'personal-openid-suite-registered\nprivate-event-data',
-    ),
-    'personal-openid-suite-registration registered\n',
-  );
-  assert.equal(
-    formatPersonalOpenIdSuiteRegistration(
-      'personal-openid-suite-registered private-event-data',
-    ),
-    'personal-openid-suite-registration not-reached\n',
-  );
-});
-
-test('reports only whether the Personal OpenID Jest runner reached setupFilesAfterEnv', () => {
-  assert.equal(
-    formatPersonalOpenIdRunnerReady('personal-openid-suite-loaded\n'),
-    'personal-openid-runner not-reached\n',
-  );
-  assert.equal(
-    formatPersonalOpenIdRunnerReady('personal-openid-runner-ready\n'),
-    'personal-openid-runner ready\n',
-  );
-});
-
-test('reports only whether the probe command launched', () => {
-  assert.equal(
-    formatPersonalOpenIdProbeLaunch('personal-openid-suite-loaded\n'),
-    'personal-openid-probe not-launched\n',
-  );
-  assert.equal(
-    formatPersonalOpenIdProbeLaunch('personal-openid-probe-launched\n'),
-    'personal-openid-probe launched\n',
-  );
-});
-
-test('reports only whether Jest setupFilesAfterEnv loaded for the probe', () => {
-  assert.equal(
-    formatPersonalOpenIdJestSetup('personal-openid-probe-launched\n'),
-    'personal-openid-jest-setup not-reached\n',
-  );
-  assert.equal(
-    formatPersonalOpenIdJestSetup(
-      'personal-openid-jest-setup-loaded\nprivate-diagnostic-data',
-    ),
-    'personal-openid-jest-setup loaded\n',
   );
 });
 

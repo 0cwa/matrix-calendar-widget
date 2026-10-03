@@ -24,13 +24,6 @@ const suitePath = fileURLToPath(
     import.meta.url,
   ),
 );
-const personalOpenIdSuitePath = fileURLToPath(
-  new URL(
-    '../matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts',
-    import.meta.url,
-  ),
-);
-
 test('emits only allowlisted static suite and case IDs with failed status', () => {
   const report = {
     testResults: [
@@ -89,115 +82,6 @@ test('emits a bounded count for unknown failing suites without their data', () =
   const output = formatServerTestFailureSummary(report).join('\n');
   assert.equal(output, 'unmapped-failure count=1');
   assert.doesNotMatch(output, /private|worktree|suite\.test|assertion/);
-});
-
-test('maps only allowlisted Jest execution error fields to fixed categories', () => {
-  const privateSentinel =
-    'private event data, token, message, stack, and worktree path';
-  const cases = [
-    [
-      {
-        type: 'Error',
-        message: `Jest encountered an unexpected token at ${privateSentinel}`,
-        stack: privateSentinel,
-      },
-      'transform-syntax',
-    ],
-    [
-      { type: 'TSError', message: privateSentinel, stack: privateSentinel },
-      'transform-syntax',
-    ],
-    [
-      {
-        type: 'Error',
-        message: `Cannot find module '${privateSentinel}' from '${privateSentinel}'`,
-        stack: privateSentinel,
-      },
-      'module-resolution',
-    ],
-    [
-      {
-        code: 'MODULE_NOT_FOUND',
-        message: privateSentinel,
-        stack: privateSentinel,
-      },
-      'module-resolution',
-    ],
-    [
-      {
-        type: 'Error',
-        message: `Error while running globalSetup: ${privateSentinel}`,
-        stack: privateSentinel,
-      },
-      'setup',
-    ],
-    [
-      { type: 'TypeError', message: privateSentinel, stack: privateSentinel },
-      'module-evaluation',
-    ],
-    [
-      {
-        type: 'PrivateErrorType',
-        code: privateSentinel,
-        message: privateSentinel,
-        stack: privateSentinel,
-      },
-      'unknown',
-    ],
-  ];
-
-  for (const [testExecError, expectedCategory] of cases) {
-    const report = {
-      testResults: [
-        {
-          name: personalOpenIdSuitePath,
-          status: 'failed',
-          assertionResults: [],
-          testExecError,
-        },
-      ],
-      failureMessage: privateSentinel,
-    };
-
-    assert.deepEqual(formatServerTestFailureSummary(report, 1), [
-      'contract-suite personal-openid-contract failed',
-      `contract-suite-category personal-openid-contract ${expectedCategory}`,
-    ]);
-    assert.equal(
-      formatServerTestFailureSummary(report, 1)
-        .join('\n')
-        .includes(privateSentinel),
-      false,
-    );
-  }
-});
-
-test('does not classify suite assertion failures from execution-error fields', () => {
-  const report = {
-    testResults: [
-      {
-        name: personalOpenIdSuitePath,
-        status: 'failed',
-        assertionResults: [
-          {
-            status: 'failed',
-            title: 'private title',
-            failureMessages: ['secret'],
-          },
-        ],
-        testExecError: {
-          type: 'TSError',
-          message: 'private message',
-          stack: 'private stack',
-        },
-      },
-    ],
-  };
-
-  assert.deepEqual(formatServerTestFailureSummary(report, 1), [
-    'contract-suite personal-openid-contract failed',
-    'unmapped-failure count=1',
-  ]);
 });
 
 test('fails closed for malformed report structure', () => {

@@ -20,8 +20,6 @@ on:
       - 'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts'
       - 'matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts'
       - 'matrix-calendar-server/test/integration/CalendarDiagnosticsContract.test.ts'
-      - 'matrix-calendar-server/test/util/PersonalOpenIdImportProbe.test.ts'
-      - 'matrix-calendar-server/test/util/PersonalOpenIdContractProbe.test.ts'
       - 'matrix-calendar-server/package.json'
       - 'yarn.lock'
 
@@ -73,96 +71,12 @@ jobs:
       - name: Test Synapse startup diagnostic sanitizer
         run: node --test dev/synapse-startup-diagnostic.test.mjs
 
-      - name: Test Personal OpenID import probe sanitizer
-        run: node --test dev/sanitize-personal-openid-import-probe.test.mjs
-
-      - name: Test Personal OpenID contract probe gates
-        run: yarn workspace @matrix-calendar-widget/server jest test/util/PersonalOpenIdContractProbe.test.ts --runInBand
-
-      - name: Probe Personal OpenID Jest runner and runtime imports
+      - name: Preflight Personal OpenID contract suite import
         run: |
-          set +e
-          CALDAV_CONTRACT=0 yarn workspace @matrix-calendar-widget/server jest \
-            test/util/PersonalOpenIdRunnerMarker.test.ts \
-            --runInBand \
-            >/dev/null 2>&1
-          runner_status=$?
-          set -e
-          if [ "$runner_status" -eq 0 ]; then
-            printf '%s\n' 'personal-openid-runner-baseline passed'
-          else
-            printf '%s\n' 'personal-openid-runner-baseline failed'
-          fi
-
-          import_stage_file="$RUNNER_TEMP/personal-openid-import-stages.txt"
-          : > "$import_stage_file"
-          set +e
           CALDAV_CONTRACT=0 \
-          CALDAV_IMPORT_PROBE_FILE="$import_stage_file" \
-          yarn workspace @matrix-calendar-widget/server jest \
-            test/util/PersonalOpenIdImportProbe.test.ts \
-            --runInBand \
-            >/dev/null 2>&1
-          import_status=$?
-          set -e
-          if node dev/sanitize-personal-openid-import-probe.mjs "$import_stage_file"; then
-            sanitizer_status=0
-          else
-            sanitizer_status=$?
-          fi
-          rm -f "$import_stage_file"
-          if [ "$runner_status" -ne 0 ] || [ "$import_status" -ne 0 ] || [ "$sanitizer_status" -ne 0 ]; then
-            exit 1
-          fi
-
-      - name: Probe Personal OpenID contract module load
-        run: |
-          probe_stage_file="$RUNNER_TEMP/personal-openid-module-stages.txt"
-          probe_report="$RUNNER_TEMP/personal-openid-module-results.json"
-          trap 'rm -f "$probe_stage_file" "$probe_report"' EXIT
-          : > "$probe_stage_file"
-          printf '%s\n' 'personal-openid-probe-launched' >> "$probe_stage_file"
-          set +e
-          CALDAV_CONTRACT=0 \
-          CALDAV_CONTRACT_IMPORT_PROBE=1 \
-          CALDAV_CONTRACT_STAGE_FILE="$probe_stage_file" \
           yarn workspace @matrix-calendar-widget/server jest \
             test/integration/PersonalOpenIdRadicaleContract.test.ts \
-            --runInBand --json --outputFile="$probe_report" \
-            >/dev/null 2>&1
-          probe_status=$?
-          set -e
-          if [ "$probe_status" -eq 0 ]; then
-            probe_result=passed
-          else
-            probe_result=failed
-          fi
-          printf '%s\n' "personal-openid-module-probe $probe_result"
-          probe_summary="$(node dev/sanitize-caldav-contract-stage.mjs "$probe_stage_file" 2>/dev/null)"
-          set +e
-          probe_report_summary="$(node dev/sanitize-server-test-report.mjs "$probe_report" "$probe_status" 2>/dev/null)"
-          report_sanitizer_status=$?
-          set -e
-          printf '%s\n' "$probe_summary"
-          printf '%s\n' "$probe_report_summary"
-          {
-            printf '%s\n' 'Personal OpenID module probe'
-            printf '%s\n' "personal-openid-module-probe $probe_result"
-            printf '%s\n' "$probe_summary"
-            printf '%s\n' "$probe_report_summary"
-          } >> "$GITHUB_STEP_SUMMARY"
-          {
-            printf '%s\n' 'Personal OpenID module probe'
-            printf '%s\n' "personal-openid-module-probe $probe_result"
-            printf '%s\n' "$probe_summary"
-            printf '%s\n' "$probe_report_summary"
-          } >> "$RUNNER_TEMP/caldav-safe-contract-summary.txt"
-          if [ "$probe_status" -ne 0 ]; then
-            exit "$probe_status"
-          fi
-          if [ "$report_sanitizer_status" -ne 0 ]; then
-            exit "$report_sanitizer_status"
-          fi
+            --runInBand
 
       - name: Start pinned Matrix and Radicale services
         run: bash dev/up.sh
@@ -221,21 +135,32 @@ jobs:
           node dev/assert-caldav-contract-logs.mjs \
             "$contract_log" "$contract_report"
           scan_status=$?
+          contract_report_summary="$(node dev/sanitize-server-test-report.mjs \
+            "$contract_report" "$test_status" 2>/dev/null)"
+          report_summary_status=$?
           contract_summary="$(node dev/sanitize-caldav-contract-stage.mjs "$contract_stage_file")"
           printf '%s\n' "$contract_summary"
+          printf '%s\n' "$contract_report_summary"
           {
             printf '%s\n' 'Real CalDAV contract stages'
             printf '%s\n' "$contract_summary"
+            printf '%s\n' 'Real CalDAV test summary'
+            printf '%s\n' "$contract_report_summary"
           } >> "$GITHUB_STEP_SUMMARY"
           {
             printf '%s\n' 'Real CalDAV contract stages'
             printf '%s\n' "$contract_summary"
+            printf '%s\n' 'Real CalDAV test summary'
+            printf '%s\n' "$contract_report_summary"
           } >> "$RUNNER_TEMP/caldav-safe-contract-summary.txt"
           rm -f "$contract_log" "$contract_report"
           rm -f "$contract_stage_file"
           set -e
           if [ "$scan_status" -ne 0 ]; then
             exit "$scan_status"
+          fi
+          if [ "$report_summary_status" -ne 0 ]; then
+            exit "$report_summary_status"
           fi
           exit "$test_status"
 

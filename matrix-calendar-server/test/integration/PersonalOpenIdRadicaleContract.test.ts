@@ -42,16 +42,8 @@ import { MatrixRoomMembershipGuard } from '../../src/guard/MatrixRoomMembershipG
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
-import {
-  isPersonalOpenIdContractEnabled,
-  shouldMarkPersonalOpenIdSuiteLoaded,
-} from '../util/PersonalOpenIdContractProbe';
-
-markPersonalOpenIdSuiteLoaded();
-
-const describeContract = isPersonalOpenIdContractEnabled(process.env)
-  ? describe
-  : describe.skip;
+const describeContract =
+  process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
 const CALDAV_OPENID_PREFIX = 'matrix-openid:';
 
 type MatrixIdentity = { access_token: string; matrix_server_name: string };
@@ -487,8 +479,6 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
   }
 });
 
-markPersonalOpenIdSuiteRegistered();
-
 function markPersonalOpenIdSetupComplete(): void {
   const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
   if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
@@ -510,32 +500,6 @@ function markPersonalOpenIdSetupStart(): void {
 
   try {
     appendFileSync(stageFile, 'personal-openid-setup-start\n', 'utf8');
-  } catch {
-    // Diagnostics must not change contract-test behavior.
-  }
-}
-
-function markPersonalOpenIdSuiteLoaded(): void {
-  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
-  if (!shouldMarkPersonalOpenIdSuiteLoaded(process.env) || !stageFile) {
-    return;
-  }
-
-  try {
-    appendFileSync(stageFile, 'personal-openid-suite-loaded\n', 'utf8');
-  } catch {
-    // Diagnostics must not change contract-test behavior.
-  }
-}
-
-function markPersonalOpenIdSuiteRegistered(): void {
-  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
-  if (!shouldMarkPersonalOpenIdSuiteLoaded(process.env) || !stageFile) {
-    return;
-  }
-
-  try {
-    appendFileSync(stageFile, 'personal-openid-suite-registered\n', 'utf8');
   } catch {
     // Diagnostics must not change contract-test behavior.
   }
