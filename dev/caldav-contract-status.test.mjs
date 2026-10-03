@@ -174,7 +174,7 @@ test('maps pending and unknown status values to the closed pending category', ()
   ]);
 });
 
-test('maps PersonalOpenId suite-level failure without assertion details', () => {
+test('maps PersonalOpenId execution errors without exposing error details', () => {
   const testReport = {
     testResults: [
       {
@@ -183,12 +183,83 @@ test('maps PersonalOpenId suite-level failure without assertion details', () => 
         ),
         status: 'failed',
         assertionResults: [],
+        testExecError: {
+          name: 'Error',
+          message: 'private module path, token, event body',
+          stack: 'private stack text',
+        },
+        failureMessage: 'private failure message',
+      },
+    ],
+  };
+
+  const output = safeContractCaseStatusLines(testReport).join('\n');
+  assert.equal(
+    output,
+    [
+      'contract-suite personal-openid-contract execution-error',
+      'unmapped-failure count=1',
+    ].join('\n'),
+  );
+  assert.doesNotMatch(
+    output,
+    /private module path|token|event body|stack text|failure message/,
+  );
+});
+
+test('classifies PersonalOpenId assertion failures with fixed status only', () => {
+  const testReport = {
+    testResults: [
+      {
+        name: suitePath(
+          'matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts',
+        ),
+        status: 'failed',
+        assertionResults: [
+          {
+            title:
+              'uses the actor proof and returns only the actor personal calendar',
+            status: 'failed',
+            failureMessages: [
+              'private event body, user ID, and exception text',
+            ],
+          },
+        ],
+        failureMessage: 'private stack and credential text',
+      },
+    ],
+  };
+
+  const output = safeContractCaseStatusLines(testReport).join('\n');
+  assert.equal(
+    output,
+    [
+      'contract-case personal-openid-actor-enumeration failed',
+      'contract-suite personal-openid-contract assertion-failure',
+    ].join('\n'),
+  );
+  assert.doesNotMatch(
+    output,
+    /private event body|user ID|exception text|stack|credential text/,
+  );
+});
+
+test('marks PersonalOpenId failures without execution data or assertions unknown', () => {
+  const testReport = {
+    testResults: [
+      {
+        name: suitePath(
+          'matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts',
+        ),
+        status: 'failed',
+        assertionResults: [],
+        failureMessage: 'untrusted details do not classify this failure',
       },
     ],
   };
 
   assert.deepEqual(safeContractCaseStatusLines(testReport), [
-    'contract-suite personal-openid-contract failed',
+    'contract-suite personal-openid-contract no-assertions-unclassified',
     'unmapped-failure count=1',
   ]);
 });

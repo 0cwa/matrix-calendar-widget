@@ -152,7 +152,7 @@ export function safeContractCaseStatusLines(testReport) {
 
   const statusByCaseId = new Map();
   let unmappedFailures = 0;
-  let personalOpenIdSuiteFailure = false;
+  const personalOpenIdFailureCategories = new Set();
 
   for (const suite of testReport.testResults) {
     const suiteId = SUITE_IDS.get(suite?.name);
@@ -181,10 +181,19 @@ export function safeContractCaseStatusLines(testReport) {
       }
     }
 
-    if (suite.status === 'failed' && !hasFailedAssertion) {
+    if (suite.status === 'failed') {
       if (suiteId === 'personal-openid-contract') {
-        personalOpenIdSuiteFailure = true;
+        personalOpenIdFailureCategories.add(
+          suite.testExecError
+            ? 'execution-error'
+            : hasFailedAssertion
+              ? 'assertion-failure'
+              : 'no-assertions-unclassified',
+        );
       }
+    }
+
+    if (suite.status === 'failed' && !hasFailedAssertion) {
       unmappedFailures += 1;
     }
   }
@@ -192,8 +201,8 @@ export function safeContractCaseStatusLines(testReport) {
   const lines = [...statusByCaseId]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([caseId, status]) => `contract-case ${caseId} ${status}`);
-  if (personalOpenIdSuiteFailure) {
-    lines.push('contract-suite personal-openid-contract failed');
+  for (const category of [...personalOpenIdFailureCategories].sort()) {
+    lines.push(`contract-suite personal-openid-contract ${category}`);
   }
   if (unmappedFailures > 0) {
     lines.push(`unmapped-failure count=${unmappedFailures}`);
