@@ -31,13 +31,34 @@ export {
 export { calculateDisplayReminderDueAt } from './ReminderTrigger';
 export type { ResolvedReminderOccurrenceTiming } from './ReminderTrigger';
 export {
+  ROOM_REMINDER_SCHEDULER_LIMITS,
+  RoomReminderScheduler,
+} from './RoomReminderScheduler';
+export type {
+  CanonicalReminderSchedulerSource,
+  ReminderCandidateCursor,
+  ReminderDueCandidate,
+  ReminderSchedulerRuntimeConfiguration,
+  ReminderSchedulerRuntimeSource,
+  ReminderSchedulerWindow,
+  ResolvedReminderDelivery,
+  RoomReminderSchedulerDependencies,
+  RoomReminderSchedulerOptions,
+  RoomReminderSchedulerReport,
+  RoomReminderSchedulerSender,
+} from './RoomReminderScheduler';
+export {
   DisabledRoomReminderStore,
   ReminderStoreDisabledError,
+  validateReminderConfigurationCursorShape,
   validateReminderDeliveryIdentity,
+  validateRoomReminderConfiguration,
 } from './RoomReminderStore';
 export type {
+  ReminderConfigurationCursor,
   ReminderDeliveryClaim,
   ReminderDeliveryIdentity,
+  ReminderFiringIdentity,
   RoomReminderConfiguration,
   RoomReminderStore,
 } from './RoomReminderStore';
