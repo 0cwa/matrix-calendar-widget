@@ -336,8 +336,8 @@ test('reports the sanitized reminder setup stage, Matrix cause, and source frame
             { status: 'failed' },
           ],
           testExecError: {
-            message: `Error: Matrix contract fixture request failed (429) ${privateSentinel}`,
-            stack: `Error: Matrix contract fixture request failed (429) ${privateSentinel}\n    at matrixRequest (${source})`,
+            message: `MatrixApplicationServiceFixtureError: Matrix contract fixture request failed (429) ${privateSentinel}`,
+            stack: `MatrixApplicationServiceFixtureError: Matrix contract fixture request failed (429) ${privateSentinel}\n    at matrixRequest (${source})`,
           },
         },
       ],
@@ -355,7 +355,7 @@ test('reports the sanitized reminder setup stage, Matrix cause, and source frame
     diagnostic,
     [
       'room-reminder-setup-diagnostic stage=register-service-user category=http-status http-status=429 matrix-errcode=M_USER_IN_USE failed-case-results=3/3',
-      'room-reminder-setup-exception class=Error message="Matrix fixture HTTP status 429" source=matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts:586:11',
+      'room-reminder-setup-exception class=MatrixApplicationServiceFixtureError message="Matrix fixture HTTP status 429" source=matrix-calendar-server/test/integration/RoomReminderDeliveryContract.test.ts:586:11',
     ].join('\n'),
   );
   assert.equal(diagnostic.includes(privateSentinel), false);

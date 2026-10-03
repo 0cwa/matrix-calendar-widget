@@ -37,7 +37,10 @@ import {
   isSupportedCalendarEventOccurrenceExclusion,
 } from '../utils/calendarEventOccurrenceProjection';
 import { calendarEventTimedDateTimeToDateTime } from '../utils/calendarEventTimedDateTime';
-import { isCalendarTimezoneSupported } from '../utils/calendarEventTimezone';
+import {
+  calendarLocalDateTimeToUnixMillis,
+  isCalendarTimezoneSupported,
+} from '../utils/calendarEventTimezone';
 import {
   CalendarRepository,
   CalendarRepositoryError,
@@ -233,6 +236,7 @@ export class InMemoryCalendarRepository implements CalendarRepository {
   ): Promise<CalendarEvent> {
     this.getWritableCalendar(calendarId);
     const current = this.getStoredEvent(calendarId, eventId);
+    validateOccurrenceTimingPatchShape(patch);
     if (
       current.unsupportedAlarm &&
       Object.prototype.hasOwnProperty.call(patch, 'alarm')
@@ -465,6 +469,7 @@ function cloneCalendarEvent(event: CalendarEvent): CalendarEvent {
   return {
     ...event,
     revision: event.revision ? { ...event.revision } : undefined,
+    externalLinks: event.externalLinks?.map((link) => ({ ...link })),
     timing:
       event.timing.type === 'timed'
         ? cloneTimedTiming(event.timing)
@@ -548,7 +553,16 @@ function cloneCalendarEventPatch(
   }
 
   if (patch.recurrence) {
-    if ('exdate' in patch.recurrence) {
+    if ('occurrence' in patch.recurrence) {
+      const operation = patch.recurrence.occurrence;
+      cloned.recurrence = {
+        occurrence: {
+          ...operation,
+          recurrenceId: cloneCalendarEventDateTime(operation.recurrenceId),
+          timing: cloneRecurrenceTiming(operation.timing),
+        },
+      };
+    } else if ('exdate' in patch.recurrence) {
       cloned.recurrence = {
         exdate: {
           ...patch.recurrence.exdate,
@@ -614,7 +628,13 @@ function applyRecurrenceWrite(
   write: CalendarEventPatch['recurrence'],
 ): CalendarEvent['recurrence'] {
   const current = currentEvent.recurrence;
-  if (!write || (!('exdate' in write) && !('rdate' in write))) {
+  if (!write) {
+    return undefined;
+  }
+  if ('occurrence' in write) {
+    return applyOccurrenceTimingWrite(currentEvent, write.occurrence);
+  }
+  if (!('exdate' in write) && !('rdate' in write)) {
     return write?.rrule ? { rrule: write.rrule } : undefined;
   }
 
@@ -784,6 +804,327 @@ function applyRecurrenceWrite(
   return Object.keys(next).length > 0 ? next : undefined;
 }
 
+function applyOccurrenceTimingWrite(
+  event: CalendarEvent,
+  operation: Extract<
+    NonNullable<CalendarEventPatch['recurrence']>,
+    { occurrence: unknown }
+  >['occurrence'],
+): CalendarEvent['recurrence'] {
+  const recurrence = event.recurrence;
+  const identity = calendarEventRecurrenceIdentity(operation.recurrenceId);
+  if (
+    !isCalendarTimezoneSupported(operation.viewerTimezone) ||
+    event.unsupportedTimezone ||
+    event.unsupportedRecurrence ||
+    event.unsupportedAlarm ||
+    event.alarm ||
+    !recurrence ||
+    (!recurrence.rrule && !recurrence.rdates?.length) ||
+    !isSupportedCalendarEventOccurrenceExclusion(
+      { ...event, recurrence: { ...recurrence, exdates: [], overrides: [] } },
+      operation.recurrenceId,
+    ) ||
+    recurrence.exdates?.some(
+      (value) => calendarEventRecurrenceIdentity(value) === identity,
+    )
+  ) {
+    throw new CalendarRepositoryError(
+      'unsupported-patch',
+      'This occurrence cannot be timed safely because its recurrence, alarms, or identity are unsupported or ambiguous.',
+    );
+  }
+
+  const matchingOverrides = (recurrence.overrides ?? []).filter(
+    (override) =>
+      calendarEventRecurrenceIdentity(override.recurrenceId) === identity,
+  );
+  if (
+    matchingOverrides.length > 1 ||
+    matchingOverrides[0]?.status === 'cancelled'
+  ) {
+    throw new CalendarRepositoryError(
+      'unsupported-patch',
+      'This occurrence has an ambiguous or cancelled override.',
+    );
+  }
+
+  validateRecurrenceTiming(operation.timing, event, operation.viewerTimezone);
+  const nextOverride: CalendarEventRecurrenceOverride = {
+    recurrenceId: cloneCalendarEventDateTime(operation.recurrenceId),
+    timing: cloneRecurrenceTiming(operation.timing),
+    ...(matchingOverrides[0]?.status
+      ? { status: matchingOverrides[0].status }
+      : {}),
+  };
+  const overrides = [...(recurrence.overrides ?? [])];
+  if (matchingOverrides.length === 1) {
+    const index = overrides.indexOf(matchingOverrides[0]);
+    overrides[index] = nextOverride;
+  } else {
+    overrides.push(nextOverride);
+  }
+  return { ...recurrence, overrides };
+}
+
+function validateRecurrenceTiming(
+  timing: CalendarEventRecurrenceTiming,
+  event: CalendarEvent,
+  viewerTimezone: string,
+): void {
+  const anchor =
+    event.timing.type === 'all-day'
+      ? { type: 'date' as const, value: event.timing.startDate }
+      : event.timing.start.type === 'floating'
+        ? {
+            type: 'floating-date-time' as const,
+            value: event.timing.start.local,
+          }
+        : {
+            type: 'date-time' as const,
+            value: {
+              local: event.timing.start.local,
+              timezone: event.timing.start.timezone,
+            },
+          };
+  const timingStart = timing.start;
+  if (
+    (anchor.type === 'date') !== (timingStart.type === 'date') ||
+    (timing.type === 'duration' && timingStart.type === 'date') ||
+    (timing.type === 'end' &&
+      (anchor.type === 'date') !== (timing.end.type === 'date'))
+  ) {
+    throw invalidOccurrenceTiming();
+  }
+
+  const start = recurrenceDateTimeMillis(timingStart, viewerTimezone);
+  const end =
+    timing.type === 'end'
+      ? recurrenceDateTimeMillis(timing.end, viewerTimezone)
+      : recurrenceDurationEndMillis(
+          timingStart,
+          timing.duration,
+          viewerTimezone,
+        );
+  if (end <= start) {
+    throw invalidOccurrenceTiming();
+  }
+}
+
+function recurrenceDateTimeMillis(
+  value: CalendarEventDateTime,
+  viewerTimezone: string,
+): number {
+  if (value.type === 'date') {
+    const instant = calendarLocalDateTimeToUnixMillis(
+      `${value.value}T00:00:00`,
+      viewerTimezone,
+    );
+    if (
+      DateTime.fromMillis(instant, { zone: viewerTimezone }).toFormat(
+        'yyyy-MM-dd',
+      ) !== value.value
+    ) {
+      throw invalidOccurrenceTiming();
+    }
+    return instant;
+  }
+
+  const zone =
+    value.type === 'date-time' ? value.value.timezone : viewerTimezone;
+  const local = value.type === 'date-time' ? value.value.local : value.value;
+  if (zone !== 'UTC' && !isCalendarTimezoneSupported(zone)) {
+    throw invalidOccurrenceTiming();
+  }
+  const instant = calendarLocalDateTimeToUnixMillis(local, zone);
+  if (
+    DateTime.fromMillis(instant, { zone }).toFormat("yyyy-MM-dd'T'HH:mm:ss") !==
+    local
+  ) {
+    throw invalidOccurrenceTiming();
+  }
+  return instant;
+}
+
+function recurrenceDurationEndMillis(
+  start: CalendarEventDateTime,
+  duration: CalendarEventDuration,
+  viewerTimezone: string,
+): number {
+  if (start.type === 'date' || !isPositiveRfcDuration(duration)) {
+    throw invalidOccurrenceTiming();
+  }
+
+  const zone =
+    start.type === 'date-time' ? start.value.timezone : viewerTimezone;
+  const local = start.type === 'date-time' ? start.value.local : start.value;
+  const calendarDays = duration.weeks > 0 ? duration.weeks * 7 : duration.days;
+  const calendarEnd = DateTime.fromISO(local, { zone: 'UTC' }).plus({
+    days: calendarDays,
+  });
+  if (!calendarEnd.isValid) {
+    throw invalidOccurrenceTiming();
+  }
+  const afterCalendar = calendarLocalDateTimeToUnixMillis(
+    calendarEnd.toFormat("yyyy-MM-dd'T'HH:mm:ss"),
+    zone,
+  );
+  return (
+    afterCalendar +
+    ((duration.hours * 60 + duration.minutes) * 60 + duration.seconds) * 1000
+  );
+}
+
+function validateOccurrenceTimingPatchShape(patch: unknown): void {
+  if (!isRecord(patch) || !isRecord(patch.recurrence)) {
+    return;
+  }
+  const recurrence = patch.recurrence;
+  if (!Object.prototype.hasOwnProperty.call(recurrence, 'occurrence')) {
+    return;
+  }
+
+  const operation = recurrence.occurrence;
+  if (
+    Object.keys(patch).length !== 1 ||
+    Object.keys(recurrence).length !== 1 ||
+    !isRecord(operation) ||
+    Object.keys(operation).length !== 4 ||
+    !['action', 'recurrenceId', 'timing', 'viewerTimezone'].every((key) =>
+      Object.prototype.hasOwnProperty.call(operation, key),
+    ) ||
+    operation.action !== 'set-timing' ||
+    typeof operation.viewerTimezone !== 'string' ||
+    !isCalendarTimezoneSupported(operation.viewerTimezone) ||
+    !isOccurrenceDateTime(operation.recurrenceId) ||
+    !isOccurrenceTiming(operation.timing)
+  ) {
+    throw invalidOccurrenceTiming();
+  }
+}
+
+function isOccurrenceDateTime(value: unknown): value is CalendarEventDateTime {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).length !== 2 ||
+    !Object.prototype.hasOwnProperty.call(value, 'type')
+  ) {
+    return false;
+  }
+  if (value.type === 'date') {
+    return (
+      Object.prototype.hasOwnProperty.call(value, 'value') &&
+      typeof value.value === 'string' &&
+      isValidCalendarDate(value.value)
+    );
+  }
+  if (value.type === 'floating-date-time') {
+    return (
+      Object.prototype.hasOwnProperty.call(value, 'value') &&
+      typeof value.value === 'string' &&
+      isValidLocalCalendarDateTime(value.value)
+    );
+  }
+  if (value.type === 'date-time' && isRecord(value.value)) {
+    return (
+      Object.keys(value.value).length === 2 &&
+      typeof value.value.local === 'string' &&
+      isValidLocalCalendarDateTime(value.value.local) &&
+      typeof value.value.timezone === 'string' &&
+      value.value.timezone.trim().length > 0 &&
+      (value.value.timezone === 'UTC' ||
+        isCalendarTimezoneSupported(value.value.timezone))
+    );
+  }
+  return false;
+}
+
+function isOccurrenceTiming(
+  value: unknown,
+): value is CalendarEventRecurrenceTiming {
+  if (
+    !isRecord(value) ||
+    !Object.prototype.hasOwnProperty.call(value, 'type') ||
+    typeof value.type !== 'string'
+  ) {
+    return false;
+  }
+  if (value.type === 'end') {
+    return (
+      Object.keys(value).length === 3 &&
+      Object.prototype.hasOwnProperty.call(value, 'start') &&
+      Object.prototype.hasOwnProperty.call(value, 'end') &&
+      isOccurrenceDateTime(value.start) &&
+      isOccurrenceDateTime(value.end) &&
+      (value.start.type === 'date') === (value.end.type === 'date')
+    );
+  }
+  if (value.type === 'duration') {
+    return (
+      Object.keys(value).length === 3 &&
+      Object.prototype.hasOwnProperty.call(value, 'start') &&
+      Object.prototype.hasOwnProperty.call(value, 'duration') &&
+      isOccurrenceDateTime(value.start) &&
+      value.start.type !== 'date' &&
+      isPositiveRfcDuration(value.duration)
+    );
+  }
+  return false;
+}
+
+function isPositiveRfcDuration(value: unknown): value is CalendarEventDuration {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const units = ['weeks', 'days', 'hours', 'minutes', 'seconds'] as const;
+  if (
+    Object.keys(value).length !== units.length + 1 ||
+    units.some(
+      (unit) =>
+        !Number.isSafeInteger(value[unit]) || (value[unit] as number) < 0,
+    ) ||
+    typeof value.isNegative !== 'boolean' ||
+    value.isNegative ||
+    !units.some((unit) => (value[unit] as number) > 0)
+  ) {
+    return false;
+  }
+  const hasWeeks = (value.weeks as number) > 0;
+  const hasOtherUnits = units
+    .slice(1)
+    .some((unit) => (value[unit] as number) > 0);
+  return !(hasWeeks && hasOtherUnits);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isValidCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const date = DateTime.fromISO(value, { zone: 'UTC' });
+  return date.isValid && date.toISODate() === value;
+}
+
+function isValidLocalCalendarDateTime(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value)) {
+    return false;
+  }
+  const dateTime = DateTime.fromISO(value, { zone: 'UTC' });
+  return (
+    dateTime.isValid && dateTime.toFormat("yyyy-MM-dd'T'HH:mm:ss") === value
+  );
+}
+
+function invalidOccurrenceTiming(): CalendarRepositoryError {
+  return new CalendarRepositoryError(
+    'unsupported-patch',
+    'The occurrence timing has an invalid type, time zone, or end before its start.',
+  );
+}
+
 function recurrencePeriodIdentity(
   value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
 ): string {
@@ -882,29 +1223,5 @@ function periodEndIsAfterStart(
     startDateTime.isValid &&
     endDateTime.isValid &&
     endDateTime.toMillis() > startDateTime.toMillis()
-  );
-}
-
-function isPositiveRfcDuration(value: unknown): value is CalendarEventDuration {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return false;
-  }
-  const duration = value as Record<string, unknown>;
-  const units = ['weeks', 'days', 'hours', 'minutes', 'seconds'] as const;
-  if (
-    Object.keys(duration).length !== units.length + 1 ||
-    typeof duration.isNegative !== 'boolean' ||
-    duration.isNegative ||
-    units.some(
-      (unit) =>
-        !Number.isSafeInteger(duration[unit]) || (duration[unit] as number) < 0,
-    ) ||
-    !units.some((unit) => (duration[unit] as number) > 0)
-  ) {
-    return false;
-  }
-  return !(
-    (duration.weeks as number) > 0 &&
-    units.slice(1).some((unit) => (duration[unit] as number) > 0)
   );
 }

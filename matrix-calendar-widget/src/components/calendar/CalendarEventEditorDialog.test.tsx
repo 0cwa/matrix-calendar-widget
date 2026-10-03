@@ -181,6 +181,246 @@ describe('<CalendarEventEditorDialog />', () => {
     });
   });
 
+  it('offers a timing-only instance scope and leaves the series timing intact', async () => {
+    const occurrence: CalendarEvent = {
+      ...recurringEvent,
+      id: 'series-resource::occurrence::2026-10-07',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-07T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-07T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    };
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-10-07T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringEvent],
+    });
+    const onSaved = vi.fn();
+    const onClose = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={recurringEvent}
+        occurrence={{ recurrenceId, event: occurrence }}
+        onClose={onClose}
+        onSaved={onSaved}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'This occurrence only' }),
+    );
+    expect(screen.queryByRole('textbox', { name: /Title/i })).toBeNull();
+    fireEvent.change(screen.getByLabelText(/^Start/), {
+      target: { value: '2026-10-07T11:00' },
+    });
+    fireEvent.change(screen.getByLabelText(/^End/), {
+      target: { value: '2026-10-07T12:00' },
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    const saved = await repository.getEvent('team', recurringEvent.id);
+    expect(saved.timing).toEqual(recurringEvent.timing);
+    expect(saved.recurrence?.overrides).toMatchObject([
+      {
+        recurrenceId,
+        timing: {
+          type: 'end',
+          start: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-07T11:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          end: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-07T12:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        },
+      },
+    ]);
+    expect(onSaved).toHaveBeenCalledWith(
+      expect.objectContaining({ recurrence: saved.recurrence }),
+      expect.objectContaining({ timing: expect.any(Object) }),
+    );
+  });
+
+  it.each(['unsupported-patch', 'event-conflict'] as const)(
+    'shows an occurrence save %s',
+    async (code) => {
+      const repository = new InMemoryCalendarRepository({
+        calendars: [calendar],
+        events: [recurringEvent],
+      });
+      vi.spyOn(repository, 'updateEvent').mockRejectedValueOnce(
+        new CalendarRepositoryError(code, 'Occurrence timing is unsupported.'),
+      );
+      const onClose = vi.fn();
+      render(
+        <CalendarEventEditorDialog
+          calendars={[calendar]}
+          event={recurringEvent}
+          occurrence={{
+            recurrenceId: {
+              type: 'date-time',
+              value: {
+                local: '2026-09-23T09:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+            event: recurringEvent,
+          }}
+          onClose={onClose}
+          open
+        />,
+        { wrapper: createWrapper(repository) },
+      );
+      await userEvent.click(
+        await screen.findByRole('button', { name: 'This occurrence only' }),
+      );
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+      expect(
+        await screen.findByText(
+          code === 'unsupported-patch'
+            ? 'Occurrence timing is unsupported.'
+            : 'This event changed elsewhere. Reload the latest version before retrying.',
+        ),
+      ).toBeVisible();
+      expect(onClose).not.toHaveBeenCalled();
+    },
+  );
+
+  it('requires a fresh scope choice after reloading an occurrence conflict', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringEvent],
+    });
+    vi.spyOn(repository, 'updateEvent').mockRejectedValueOnce(
+      new CalendarRepositoryError('event-conflict', 'Conflict'),
+    );
+    const onClose = vi.fn();
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={recurringEvent}
+        occurrence={{
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-09-23T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          event: recurringEvent,
+        }}
+        onClose={onClose}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'This occurrence only' }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Reload latest' }),
+    );
+    expect(
+      await screen.findByRole('button', { name: 'This occurrence only' }),
+    ).toBeVisible();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('explains why an alarm-bearing series cannot use occurrence timing scope', async () => {
+    const alarmSeries: CalendarEvent = {
+      ...recurringEvent,
+      alarm: {
+        action: 'display',
+        trigger: {
+          weeks: 0,
+          days: 0,
+          hours: 0,
+          minutes: 15,
+          seconds: 0,
+        },
+      },
+    };
+    const occurrence: CalendarEvent = {
+      ...alarmSeries,
+      id: 'series-resource::occurrence::2026-10-07',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-07T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-07T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [alarmSeries],
+    });
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={alarmSeries}
+        occurrence={{
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-07T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          event: occurrence,
+        }}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByText(
+        'This series contains reminder data, so occurrence timing edits are unavailable. Edit the entire series instead.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'This occurrence only' }),
+    ).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Entire series' })).toBeEnabled();
+  });
+
   it('creates, edits, and reloads an every-other-week weekday set', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],

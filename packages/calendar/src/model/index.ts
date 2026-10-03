@@ -17,6 +17,7 @@
 
 export { calendarEntrySchema, dateTimeEntrySchema } from './calendarEntry';
 export type { CalendarEntry, DateTimeEntry } from './calendarEntry';
+export type { CalendarEventExternalLink } from './calendarEventExternalLink';
 
 export {
   isAllDayCalendarEvent,

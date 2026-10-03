@@ -408,6 +408,138 @@ export function isSupportedCalendarEventOccurrenceExclusion(
   }
 }
 
+/**
+ * Reproject one selected recurrence identity after a resource reload. This
+ * returns no occurrence when the identity was removed, cancelled, excluded,
+ * or can no longer be safely represented from the latest source.
+ */
+export function projectCalendarEventOccurrenceByRecurrenceId(
+  sourceEvent: CalendarEvent,
+  recurrenceId: CalendarEventDateTime,
+  viewerTimezone: string,
+): ProjectedCalendarEventOccurrence | undefined {
+  try {
+    if (
+      !sourceEvent.recurrence ||
+      sourceEvent.status === 'cancelled' ||
+      sourceEvent.unsupportedTimezone ||
+      sourceEvent.unsupportedRecurrence ||
+      !isCalendarTimezoneSupported(viewerTimezone)
+    ) {
+      return undefined;
+    }
+
+    const anchor = isAllDayCalendarEvent(sourceEvent)
+      ? dateValue(sourceEvent.timing.startDate)
+      : isTimedCalendarEvent(sourceEvent)
+        ? timedValue(sourceEvent.timing.start)
+        : undefined;
+    if (!anchor) {
+      return undefined;
+    }
+    assertCompatibleValue(anchor, recurrenceId);
+    assertRecurrenceValue(recurrenceId);
+    assertRecurrenceInputLimit(sourceEvent.recurrence);
+
+    const recurrence = sourceEvent.recurrence;
+    const candidates = makeCandidates(anchor, recurrence.rdates);
+    const overrides = recurrence.overrides ?? [];
+    addOverrideCandidates(candidates, overrides);
+    validateRecurrenceValues(
+      anchor,
+      candidates,
+      recurrence.exdates ?? [],
+      overrides,
+    );
+
+    const identity = calendarEventRecurrenceIdentity(recurrenceId);
+    if (
+      recurrence.exdates?.some(
+        (value) => calendarEventRecurrenceIdentity(value) === identity,
+      )
+    ) {
+      return undefined;
+    }
+
+    const rule = buildRule(recurrence.rrule, anchor);
+    const until = parseUntil(recurrence.rrule, anchor);
+    const targetWallTime = fakeWallDate(recurrenceId);
+    if (rule && targetWallTime) {
+      const targetRangeStart = DateTime.fromJSDate(targetWallTime, {
+        zone: 'UTC',
+      });
+      addRuleCandidates(candidates, rule, anchor, recurrenceId, recurrenceId, {
+        rangeStart: targetRangeStart,
+        rangeEnd: targetRangeStart.plus({ milliseconds: 1 }),
+        viewerTimezone,
+        until,
+      });
+    }
+
+    const candidate = candidates.get(identity);
+    if (!candidate?.fromRuleOrRdate) {
+      return undefined;
+    }
+    const override = overrides.find(
+      (value) =>
+        calendarEventRecurrenceIdentity(value.recurrenceId) === identity,
+    );
+    if (override?.status === 'cancelled') {
+      return undefined;
+    }
+
+    const specialTiming = override?.timing ?? candidate.rdateTiming;
+    let timing: CalendarEventTiming;
+    if (isAllDayCalendarEvent(sourceEvent)) {
+      const durationDays = dateDifference(
+        sourceEvent.timing.startDate,
+        sourceEvent.timing.endDate,
+      );
+      if (durationDays <= 0) {
+        return undefined;
+      }
+      timing = specialTiming
+        ? allDayTimingFromRecurrenceTiming(specialTiming)
+        : allDayTimingForStart(candidate.recurrenceId, durationDays);
+    } else if (isTimedCalendarEvent(sourceEvent)) {
+      if (specialTiming) {
+        timing = timedTimingFromRecurrenceTiming(specialTiming, viewerTimezone);
+      } else {
+        const baseInterval = timedInterval(sourceEvent.timing, viewerTimezone);
+        const baseDurationMillis = baseInterval.end - baseInterval.start;
+        if (baseDurationMillis <= 0) {
+          return undefined;
+        }
+        const startValue = dateTimeValueToTimedDateTime(candidate.recurrenceId);
+        const start = timedValueToDateTime(startValue, viewerTimezone);
+        const endValue = timedDateTimeAtInstant(
+          start.toMillis() + baseDurationMillis,
+          sourceEvent.timing.end,
+          viewerTimezone,
+        );
+        timing = { type: 'timed', start: startValue, end: endValue };
+      }
+    } else {
+      return undefined;
+    }
+
+    const occurrenceEvent: CalendarEvent = {
+      ...sourceEvent,
+      status: override?.status ?? sourceEvent.status,
+      timing,
+    };
+    eventInterval(occurrenceEvent, viewerTimezone);
+    return makeOccurrence(
+      sourceEvent,
+      timing,
+      candidate.recurrenceId,
+      override?.status,
+    );
+  } catch {
+    return undefined;
+  }
+}
+
 function projectEvent(
   sourceEvent: CalendarEvent,
   rangeStart: DateTime,

@@ -397,6 +397,32 @@ export class GatewayCalendarRepository
       );
     }
 
+    if (response.status === 400) {
+      try {
+        const body: unknown = await response.clone().json();
+        if (
+          body &&
+          typeof body === 'object' &&
+          'code' in body &&
+          body.code === 'unsupported-patch' &&
+          'message' in body &&
+          typeof body.message === 'string'
+        ) {
+          throw new CalendarRepositoryError(
+            'unsupported-patch',
+            body.message.slice(0, 500),
+          );
+        }
+      } catch (error) {
+        if (
+          error instanceof CalendarRepositoryError &&
+          error.code === 'unsupported-patch'
+        ) {
+          throw error;
+        }
+      }
+    }
+
     throw new CalendarRepositoryError(
       'request-failed',
       `Calendar gateway request failed with status ${response.status}`,

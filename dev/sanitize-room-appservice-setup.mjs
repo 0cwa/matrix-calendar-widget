@@ -74,6 +74,7 @@ const ALLOWED_ERROR_NAMES = new Set([
   'Error',
   'FetchError',
   'HttpError',
+  'MatrixApplicationServiceFixtureError',
   'MatrixError',
   'RangeError',
   'ReferenceError',

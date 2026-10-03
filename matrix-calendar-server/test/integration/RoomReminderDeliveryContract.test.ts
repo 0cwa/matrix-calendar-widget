@@ -34,6 +34,10 @@ import {
 } from '../../src/reminder/RoomReminderStore';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 import { InMemoryRoomReminderStore } from '../util/InMemoryRoomReminderStore';
+import {
+  MatrixApplicationServiceFixtureError,
+  obtainMatrixApplicationServiceFixtureUserToken,
+} from '../util/MatrixApplicationServiceFixtureUser';
 
 const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
@@ -136,26 +140,13 @@ describeContract(
         }
 
         markReminderSetupStage('register-service-user');
-        const registration = await matrixRequest<{
-          user_id?: unknown;
-          access_token?: unknown;
-        }>('/_matrix/client/v3/register', {
-          method: 'POST',
-          token: serviceToken,
-          body: {
-            type: 'm.login.application_service',
-            username: serviceUserId.slice(1).split(':')[0],
-          },
-        });
-        if (
-          registration.user_id !== serviceUserId ||
-          typeof registration.access_token !== 'string'
-        ) {
-          throw new Error(
-            'Synthetic application-service fixture is unavailable',
-          );
-        }
-        serviceUserAccessToken = registration.access_token;
+        serviceUserAccessToken =
+          await obtainMatrixApplicationServiceFixtureUserToken({
+            fetchImpl: nativeFetch,
+            homeserverUrl,
+            applicationServiceToken: serviceToken,
+            userId: serviceUserId,
+          });
 
         markReminderSetupStage('create-room');
         const createdRoom = await matrixRequest<{ room_id?: unknown }>(
@@ -253,7 +244,13 @@ describeContract(
         );
         appendReminderSetupMarker('room-reminder-setup-complete');
       } catch (error) {
-        if (!reminderSetupFailureRecorded) {
+        if (error instanceof MatrixApplicationServiceFixtureError) {
+          markReminderSetupFailure(
+            error.category,
+            error.status,
+            error.matrixErrcode,
+          );
+        } else if (!reminderSetupFailureRecorded) {
           markReminderSetupFailure('other');
         }
         throw error;
