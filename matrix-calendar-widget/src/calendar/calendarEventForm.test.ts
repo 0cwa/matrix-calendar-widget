@@ -848,6 +848,10 @@ describe('calendar event form adapter', () => {
       validateCalendarEventForm({ ...removal, title: 'All-day EXDATE series' }),
     ).toBeUndefined();
     expect(
+      calendarEventPatchFromForm({ ...removal, title: 'All-day EXDATE series' })
+        .recurrence,
+    ).toEqual({ exdate: { action: 'remove', recurrenceId: exdate } });
+    expect(
       validateCalendarEventForm({
         ...removal,
         title: 'All-day EXDATE series',
