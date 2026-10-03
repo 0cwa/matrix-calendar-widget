@@ -52,26 +52,35 @@ There are two different operating models:
   [`spantaleev/matrix-docker-ansible-deploy`](https://github.com/spantaleev/matrix-docker-ansible-deploy),
   with additional service roles and playbooks. The stable `main` snapshot reviewed
   here is commit
-  [`cd28f0b`](https://github.com/etkecc/ansible/tree/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622)
-  (2026-09-24); the [README](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/README.md)
+  [`72039fc`](https://github.com/etkecc/ansible/tree/72039fcea112f7a001dfcf005550c4f77c536cae)
+  (2026-10-01); its [README](https://github.com/etkecc/ansible/blob/72039fcea112f7a001dfcf005550c4f77c536cae/README.md)
   describes `fresh` as its testing branch. Its
-  [`play/all.yml` custom section](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/play/all.yml#L83-L99)
-  is a curated list of named roles. **Inference from this wiring:** the reviewed
-  tree provides no generic Compose override or arbitrary-service variable hook;
-  first-class Ansible lifecycle management for this app would require an explicit
-  custom role and playbook integration that the operator maintains.
+  [`play/all.yml` custom section](https://github.com/etkecc/ansible/blob/72039fcea112f7a001dfcf005550c4f77c536cae/play/all.yml)
+  lists the roles selected for that play. **Inference from this wiring:**
+  first-class Ansible lifecycle management for this app would require a role and
+  playbook integration maintained by the operator. This does not prevent an
+  operator from running a separate Docker Compose project alongside the playbook.
 
-The stable etke tree includes the MASH Radicale role, pinned there as
-[`v3.8.0.0-1`](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/requirements.yml#L31-L33).
-That **Radicale role only** provides variables for host data/config paths, its
-base Docker network, pre-existing additional networks, and Radicale's own Traefik
-labels ([role defaults](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/defaults/main.yml#L11-L18),
-[networks](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/defaults/main.yml#L54-L73),
-[Traefik labels](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/defaults/main.yml#L75-L124)).
-The role creates Radicale under systemd with `docker create`, bind-mounting its
-config read-only and its data directory for persistence; additional networks
-must already exist ([service template](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/templates/systemd/radicale.service.j2#L23-L50)).
-These role settings do not configure routing for the calendar gateway or widget.
+At the reviewed etke commit, `requirements.yml` pins the MASH Radicale role as
+[`v3.8.1.1-0`](https://github.com/etkecc/ansible/blob/72039fcea112f7a001dfcf005550c4f77c536cae/requirements.yml).
+That role defaults to the `tomsquest/docker-radicale:3.8.1.1` image. The public
+role exposes variables for the host data/config paths, image name, Radicale auth
+type, base Docker network, additional pre-existing networks, and its Traefik
+labels; it also permits extra environment variables ([role defaults](https://github.com/mother-of-all-self-hosting/ansible-role-radicale/blob/f1a0253eb61c9fe8409cb12f9e4c526532c7e60e/defaults/main.yml),
+[configuration template](https://github.com/mother-of-all-self-hosting/ansible-role-radicale/blob/f1a0253eb61c9fe8409cb12f9e4c526532c7e60e/templates/config/config.j2),
+[environment template](https://github.com/mother-of-all-self-hosting/ansible-role-radicale/blob/f1a0253eb61c9fe8409cb12f9e4c526532c7e60e/templates/env.j2); the role tag resolves to commit [`f1a0253`](https://github.com/mother-of-all-self-hosting/ansible-role-radicale/commit/f1a0253eb61c9fe8409cb12f9e4c526532c7e60e)).
+The service template runs Radicale under systemd with `docker create`, mounts
+the generated config read-only at `/config`, and bind-mounts persistent data at
+`/data` ([service template](https://github.com/mother-of-all-self-hosting/ansible-role-radicale/blob/f1a0253eb61c9fe8409cb12f9e4c526532c7e60e/templates/systemd/radicale.service.j2)).
+The defaults place the host data under `/radicale/data` and the calendar
+collections at `/data/collections`; the role can connect Radicale to additional
+Docker networks that already exist. Those Radicale role settings do not set up
+the calendar gateway or widget.
+
+These are capabilities in the **public self-managed role**. They do not show
+that an etke-managed host lets a customer override the image, configuration,
+network, service lifecycle, or data mount. For a hosted etke server, use only an
+operator-approved extension path and do not hand-edit managed configuration.
 
 Before deploying, agree with the operator on the calendar hostname and who owns
 DNS, TLS, and reverse-proxy routing; the private Docker network that will allow
@@ -98,18 +107,24 @@ intentionally unsupported and deferred in this pre-alpha. A separate
 Radicale-native credential mode would require a future ADR. The module and
 image build are implemented in this repository and exercised by its container
 contract, but no deployment on an etke-managed host has been verified. The
-checked etke role exposes
-`radicale_auth_type` and `radicale_auth_matrix_server` variables
-([role defaults](https://github.com/etkecc/ansible/blob/cd28f0bd94c0d15dbb3db7ad4718c7df62f49622/roles/galaxy/radicale/defaults/main.yml#L238-L242)),
-but public role documentation does not establish that the actual managed host
-accepts a custom image override. A replacement of the managed image would need
-operator confirmation and a rehearsed config, network, service lifecycle, data
-migration, and rollback plan. Do not install a floating auth module or attach
-the managed `/data` volume to the separate sidecar example below.
+public role exposes an image override and an auth-type setting; its generated
+config template has special cases for `htpasswd` and `radicale_auth_matrix`,
+and its environment template supports additional variables. Those public
+self-managed role features do not establish that etke enables the same
+overrides on this managed host. The project's image currently targets Radicale
+3.8.0, while the reviewed etke role defaults to 3.8.1.1; compatibility between
+those versions and the existing store has not been verified. Any managed-image
+replacement requires operator approval and a rehearsal of the image, config,
+network, service lifecycle, data preservation, and rollback. Do not install a
+floating auth module or attach the managed `/data` volume to the separate
+sidecar example below.
 
-Sources above were checked on **2026-09-28**. The etke source links pin the
-stable `main` snapshot at `cd28f0bd94c0d15dbb3db7ad4718c7df62f49622`. The
-etke FAQ is live documentation reviewed on that date.
+The source snapshot above was checked on **2026-10-03**; the etke Ansible links
+pin commit `72039fcea112f7a001dfcf005550c4f77c536cae` (committed 2026-10-01).
+The [etke FAQ](https://etke.cc/help/faq/) and
+[Radicale v3 documentation](https://radicale.org/v3.html) are live documents
+that were checked on 2026-10-03. Host-specific support, configuration, routing,
+and data preservation remain unverified.
 
 The local `dev/compose.yaml` stack is for development and integration services;
 it does not define a production deployment or an etke/MDAD deployment contract.
