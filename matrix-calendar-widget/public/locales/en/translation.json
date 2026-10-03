@@ -104,7 +104,7 @@
       "untilDate": "Until date",
       "weekdayFR": "Friday",
       "weekdayMO": "Monday",
-      "weekdayRuleLimit": "Weekday selection requires a one- or two-week interval with no end date or count.",
+      "weekdayRuleLimit": "Weekday selection requires a positive whole-number interval.",
       "weekdaySA": "Saturday",
       "weekdaySU": "Sunday",
       "weekdayTH": "Thursday",

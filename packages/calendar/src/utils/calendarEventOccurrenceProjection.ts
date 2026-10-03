@@ -265,11 +265,7 @@ export function formatSupportedCalendarEventRecurrenceRule(
     components.push(`INTERVAL=${rule.interval}`);
   }
   if (rule.weekdays !== undefined) {
-    if (
-      rule.frequency !== 'WEEKLY' ||
-      ![1, 2].includes(rule.interval) ||
-      rule.end.type !== 'never'
-    ) {
+    if (rule.frequency !== 'WEEKLY') {
       throw new Error('Unsupported recurrence rule');
     }
     const weekdays = normalizeSelectedWeekdays(rule.weekdays, anchor);
@@ -1023,7 +1019,14 @@ function parseSimpleWeeklyByDay(
     return undefined;
   }
 
-  const allowedParts = new Set(['FREQ', 'INTERVAL', 'BYDAY', 'WKST']);
+  const allowedParts = new Set([
+    'FREQ',
+    'INTERVAL',
+    'COUNT',
+    'UNTIL',
+    'BYDAY',
+    'WKST',
+  ]);
   const intervalText = parts.get('INTERVAL') ?? '1';
   const interval = /^\d+$/.test(intervalText)
     ? Number(intervalText)
@@ -1032,9 +1035,8 @@ function parseSimpleWeeklyByDay(
   if (
     [...parts.keys()].some((part) => !allowedParts.has(part)) ||
     parts.get('FREQ')?.toUpperCase() !== 'WEEKLY' ||
-    ![1, 2].includes(interval) ||
-    parts.has('COUNT') ||
-    parts.has('UNTIL') ||
+    !Number.isSafeInteger(interval) ||
+    interval <= 0 ||
     (weekStart !== undefined && weekStart !== 'MO')
   ) {
     throw new Error('Unsupported weekly BYDAY rule');
