@@ -381,6 +381,11 @@ DST regression or recurrence-editing criteria above.
       endpoint or CA/certificate configuration has been supplied; production
       TLS/CA and runtime validation therefore remain open.
 - [ ] Durable scheduler and idempotent delivery log.
+  - [x] Add an unbootstrapped, bounded scheduler core with keyset store paging,
+        current binding/configuration/canonical-source rechecks after claims,
+        stable per-firing Matrix transaction IDs, cooperative abort deadlines,
+        and a lease release reserve. Runtime adapters, lifecycle, and live
+        delivery remain open; real PostgreSQL contracts are required in CI.
 - [ ] Event detail action to link/open a Matrix room or MatrixRTC conference.
 - [ ] Audit-friendly event creation/edit messages where appropriate.
 
