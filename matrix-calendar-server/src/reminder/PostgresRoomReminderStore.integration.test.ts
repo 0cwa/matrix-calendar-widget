@@ -89,6 +89,30 @@ function createTestPostgresClient(): ReturnType<typeof postgres> {
   return postgres(databaseUrl as string, postgresOptions);
 }
 
+async function waitForQueryActivity(
+  sql: ReturnType<typeof postgres>,
+  marker: string,
+  active: boolean,
+): Promise<boolean> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const [row] = await sql<{ active: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND pid <> pg_backend_pid()
+          AND usename = current_user
+          AND state = 'active'
+          AND query LIKE ${`%${marker}%`}
+      ) AS active
+    `;
+    if (row.active === active) return true;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return false;
+}
+
 describeWithDatabase('PostgresRoomReminderStore integration', () => {
   const roomId = `!reminder-store-${randomUUID()}:example.test`;
   const calendarId = 'room-calendar';
@@ -141,6 +165,108 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
 
     await store.deleteConfiguration(config);
     expect(await store.listConfigurations(roomId, calendarId)).toEqual([]);
+  });
+
+  it('returns bounded exclusive configuration pages and checks exact existence', async () => {
+    const configurations = [
+      {
+        roomId,
+        calendarId,
+        eventUid: 'paging-a',
+        recurrenceId: null,
+        alarmUid: 'alarm-a',
+      },
+      {
+        roomId,
+        calendarId,
+        eventUid: 'paging-a',
+        recurrenceId: '20261001T090000Z',
+        alarmUid: 'alarm-a',
+      },
+      {
+        roomId,
+        calendarId,
+        eventUid: 'paging-b',
+        recurrenceId: null,
+        alarmUid: 'alarm-a',
+      },
+    ];
+    for (const configuration of configurations) {
+      await store.upsertConfiguration(configuration);
+    }
+
+    const firstPage = await store.listConfigurationPage(
+      roomId,
+      calendarId,
+      undefined,
+      2,
+    );
+    const secondPage = await store.listConfigurationPage(
+      roomId,
+      calendarId,
+      {
+        eventUid: firstPage[1].eventUid,
+        recurrenceId: firstPage[1].recurrenceId,
+        alarmUid: firstPage[1].alarmUid,
+      },
+      2,
+    );
+
+    expect(firstPage).toEqual(configurations.slice(0, 2));
+    expect(secondPage).toEqual(configurations.slice(2));
+    expect(await store.hasConfiguration(configurations[0])).toBe(true);
+    expect(
+      await store.hasConfiguration({
+        ...configurations[0],
+        alarmUid: 'missing-alarm',
+      }),
+    ).toBe(false);
+    await expect(
+      store.listConfigurationPage(roomId, calendarId, undefined, 101),
+    ).rejects.toThrow(
+      'Reminder configuration page size must be between 1 and 100',
+    );
+
+    await sql`
+      DELETE FROM matrix_calendar.room_reminder_configurations
+      WHERE room_id = ${roomId} AND event_uid LIKE 'paging-%'
+    `;
+  });
+
+  it('cancels an in-flight PostgreSQL query and leaves store reads healthy', async () => {
+    const marker = 'reminder_cancel_contract';
+    const query = sql.unsafe(
+      `SELECT pg_sleep(10) /* ${marker} */`,
+    ) as Promise<unknown> & { cancel(): void };
+    const cancellableStore = new PostgresRoomReminderStore(
+      (() => query) as unknown as ReturnType<typeof postgres>,
+    );
+    const controller = new AbortController();
+    const pendingPage = cancellableStore.listConfigurationPage(
+      roomId,
+      calendarId,
+      undefined,
+      1,
+      controller.signal,
+    );
+    let queryStopped = false;
+
+    try {
+      expect(await waitForQueryActivity(sql, marker, true)).toBe(true);
+      controller.abort();
+      await expect(pendingPage).rejects.toThrow(
+        'Reminder store operation aborted',
+      );
+      queryStopped = await waitForQueryActivity(sql, marker, false);
+      expect(queryStopped).toBe(true);
+      expect(
+        await store.listConfigurationPage(roomId, calendarId, undefined, 1),
+      ).toEqual(expect.any(Array));
+    } finally {
+      controller.abort();
+      if (!queryStopped) query.cancel();
+      await pendingPage.catch(() => undefined);
+    }
   });
 
   it('refuses a schema version newer than this server supports', async () => {
