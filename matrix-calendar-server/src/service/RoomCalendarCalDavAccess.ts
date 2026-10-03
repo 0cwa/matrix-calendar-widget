@@ -205,6 +205,15 @@ function roomCalendarCollectionUrl(
   calendarId: string,
 ): string {
   try {
+    // Service principals use one literal, unambiguous CalDAV home segment.
+    // Dot segments normalize away before percent encoding can confine them.
+    if (
+      !/^[A-Za-z0-9._=-]{1,255}$/.test(localpart) ||
+      localpart === '.' ||
+      localpart === '..'
+    ) {
+      throw new Error('invalid application-service home segment');
+    }
     const base = new URL(radicaleUrl);
     if (
       (base.protocol !== 'http:' && base.protocol !== 'https:') ||

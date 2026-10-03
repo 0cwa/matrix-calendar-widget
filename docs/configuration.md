@@ -64,6 +64,8 @@ RADICALE_URL=https://calendar.example.com
 # until the M6 authorization and deployment-isolation gates are accepted.
 # Store the token using deployment secret management; never put it in a widget.
 # ROOM_CALENDAR_ACCESS_ENABLED=false
+# Its localpart must be one literal CalDAV home segment: 1..255 ASCII
+# letters, digits, dot, underscore, equals, or hyphen; dot segments are denied.
 # MATRIX_APPLICATION_SERVICE_USER_ID=@_matrix_calendar_service:example.org
 # MATRIX_APPLICATION_SERVICE_TOKEN=<secret>
 

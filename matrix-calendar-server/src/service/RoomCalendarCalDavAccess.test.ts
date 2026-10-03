@@ -98,6 +98,21 @@ describe('RoomCalendarCalDavAccess', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it.each(['.', '..', 'a/b', 'a\\b', 'a%2Fb', 'a space'])(
+    'rejects unsafe configured home segment %s before proof I/O',
+    async (localpart) => {
+      const access = new RoomCalendarCalDavAccess(
+        configuration({
+          application_service_user_id: `@${localpart}:example.test`,
+        }),
+      );
+      await expect(access.forAuthorizedTarget(target)).rejects.toMatchObject({
+        response: { code: 'room-calendar-caldav-disabled' },
+      });
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
   it('rejects a changed or unbound target before requesting a proof', async () => {
     const access = new RoomCalendarCalDavAccess(configuration());
 
