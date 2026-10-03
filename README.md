@@ -38,6 +38,8 @@ Inherited NeoDateFix meeting-room paths remain only where migration has not yet 
 - [Roadmap](./docs/ROADMAP.md)
 - [Development guide](./docs/DEVELOPMENT.md)
 - [Upstream provenance](./docs/UPSTREAM.md)
+- [Upgrade and migration runbook](./docs/upgrade-migration.md)
+- [Free/busy privacy policy](./docs/free-busy-privacy.md)
 - [Architecture decisions](./docs/adrs/)
 
 ## Development
