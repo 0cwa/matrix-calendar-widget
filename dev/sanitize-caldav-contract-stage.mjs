@@ -53,6 +53,22 @@ const PERSONAL_OPENID_SETUP_FAILURE_CATEGORIES = new Set([
   'json-or-token-parse',
   'other',
 ]);
+const PERSONAL_OPENID_MATRIX_ERROR_CODES = new Set([
+  'M_BAD_JSON',
+  'M_FORBIDDEN',
+  'M_INVALID_PARAM',
+  'M_INVALID_PASSWORD',
+  'M_INVALID_USERNAME',
+  'M_LIMIT_EXCEEDED',
+  'M_MISSING_PARAM',
+  'M_NOT_FOUND',
+  'M_THREEPID_AUTH_FAILED',
+  'M_UNAUTHORIZED',
+  'M_UNKNOWN',
+  'M_UNKNOWN_TOKEN',
+  'M_USER_DEACTIVATED',
+  'M_USER_IN_USE',
+]);
 const ROOM_APPSERVICE_LISTING_CHECKPOINTS = new Set([
   'room-one-response-status',
   'room-one-response-json-parsed',
@@ -185,6 +201,34 @@ export function formatPersonalOpenIdSetupFailure(stageContent) {
     : '';
 }
 
+export function formatPersonalOpenIdSetupHttpStatus(stageContent) {
+  let latestStatus;
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const match = line.trim().match(/^personal-openid-http-status-(\d{3})$/);
+      if (match && Number(match[1]) >= 400 && Number(match[1]) <= 599) {
+        latestStatus = match[1];
+      }
+    }
+  }
+  return latestStatus ? `personal-openid-http-status ${latestStatus}\n` : '';
+}
+
+export function formatPersonalOpenIdSetupMatrixErrorCode(stageContent) {
+  let latestCode;
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const candidate = line
+        .trim()
+        .replace(/^personal-openid-matrix-error-/, '');
+      if (PERSONAL_OPENID_MATRIX_ERROR_CODES.has(candidate)) {
+        latestCode = candidate;
+      }
+    }
+  }
+  return latestCode ? `personal-openid-matrix-error ${latestCode}\n` : '';
+}
+
 export function formatRoomAppServiceListingCheckpoint(stageContent) {
   let latestCheckpoint;
   if (typeof stageContent === 'string') {
@@ -212,6 +256,10 @@ function emitContractPhase(stagePath) {
     process.stdout.write(formatPersonalOpenIdSetupStatus(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupStage(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupFailure(stageContent));
+    process.stdout.write(formatPersonalOpenIdSetupHttpStatus(stageContent));
+    process.stdout.write(
+      formatPersonalOpenIdSetupMatrixErrorCode(stageContent),
+    );
     process.stdout.write(formatRoomAppServiceSetupStart(stageContent));
     process.stdout.write(formatRoomAppServiceSetupStatus(stageContent));
     process.stdout.write(formatRoomAppServiceSetupStage(stageContent));

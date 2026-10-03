@@ -4,6 +4,8 @@ import test from 'node:test';
 import {
   formatContractPhase,
   formatPersonalOpenIdSetupFailure,
+  formatPersonalOpenIdSetupHttpStatus,
+  formatPersonalOpenIdSetupMatrixErrorCode,
   formatPersonalOpenIdSetupStage,
   formatPersonalOpenIdSetupStart,
   formatPersonalOpenIdSetupStatus,
@@ -177,6 +179,27 @@ test('fails closed for unknown login failure categories and attached data', () =
 
   assert.equal(output, '');
   assert.equal(output.includes(privateSentinel), false);
+});
+
+test('reports only bounded Personal OpenID HTTP status and known Matrix codes', () => {
+  assert.equal(
+    formatPersonalOpenIdSetupHttpStatus(
+      'personal-openid-http-status-403\npersonal-openid-http-status-999\n',
+    ),
+    'personal-openid-http-status 403\n',
+  );
+  assert.equal(
+    formatPersonalOpenIdSetupHttpStatus(
+      'personal-openid-http-status-200-private-data',
+    ),
+    '',
+  );
+  assert.equal(
+    formatPersonalOpenIdSetupMatrixErrorCode(
+      'personal-openid-matrix-error-M_FORBIDDEN\npersonal-openid-matrix-error-M_PRIVATE_TOKEN',
+    ),
+    'personal-openid-matrix-error M_FORBIDDEN\n',
+  );
 });
 
 test('does not expose unknown stage data or accept a partial setup marker', () => {

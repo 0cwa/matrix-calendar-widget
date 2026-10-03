@@ -16,11 +16,20 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { formatRoomAppServiceSetupDiagnostic } from './sanitize-room-appservice-setup.mjs';
+import {
+  formatPersonalOpenIdSetupDiagnostic,
+  formatRoomAppServiceSetupDiagnostic,
+} from './sanitize-room-appservice-setup.mjs';
 
 const roomSuitePath = fileURLToPath(
   new URL(
     '../matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+    import.meta.url,
+  ),
+);
+const personalSuitePath = fileURLToPath(
+  new URL(
+    '../matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts',
     import.meta.url,
   ),
 );
@@ -220,6 +229,73 @@ test('maps a fixed Matrix error code while dropping its freeform response', () =
 
   assert.match(diagnostic, /message="Matrix response M_FORBIDDEN"/);
   assert.equal(diagnostic.includes('private room detail'), false);
+});
+
+test('reports only safe Personal OpenID status, Matrix code, class, and source', () => {
+  const source =
+    '/home/runner/work/matrix-calendar-widget/matrix-calendar-widget/matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts:701:11';
+  const diagnostic = formatPersonalOpenIdSetupDiagnostic(
+    {
+      testResults: [
+        {
+          name: personalSuitePath,
+          status: 'failed',
+          message: `Error: Matrix contract fixture request failed (403) response={"errcode":"M_FORBIDDEN","error":"private-room-detail"}\n    at matrixJson (${source})`,
+          assertionResults: [
+            { status: 'failed' },
+            { status: 'failed' },
+            { status: 'failed' },
+          ],
+        },
+      ],
+    },
+    [
+      'personal-openid-setup-start',
+      'personal-openid-setup-stage-nonmember-login',
+      'personal-openid-setup-failure-http-status',
+      'personal-openid-http-status-403',
+      'personal-openid-matrix-error-M_FORBIDDEN',
+    ].join('\n'),
+  );
+
+  assert.equal(
+    diagnostic,
+    [
+      'personal-openid-setup-failure stage=nonmember-login category=http-status http-status=403 matrix-errcode=M_FORBIDDEN failed-case-results=3/3',
+      'personal-openid-setup-exception class=Error message="Matrix fixture HTTP status 403" source=matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts:701:11',
+    ].join('\n'),
+  );
+  assert.equal(diagnostic.includes('private-room-detail'), false);
+  assert.equal(diagnostic.includes('/home/runner'), false);
+});
+
+test('Personal OpenID diagnosis rejects injected HTTP status and Matrix code markers', () => {
+  const diagnostic = formatPersonalOpenIdSetupDiagnostic(
+    {
+      testResults: [
+        {
+          name: personalSuitePath,
+          status: 'failed',
+          message:
+            'Error: Matrix contract fixture request failed (403)\n    at matrixJson (/repo/matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts:701:11)',
+          assertionResults: [],
+        },
+      ],
+    },
+    [
+      'personal-openid-setup-stage-nonmember-login',
+      'personal-openid-setup-failure-http-status',
+      'personal-openid-http-status-403 secret=hidden',
+      'personal-openid-matrix-error-M_PRIVATE_TOKEN',
+    ].join('\n'),
+  );
+
+  assert.match(
+    diagnostic,
+    /category=http-status http-status=unavailable matrix-errcode=unavailable/,
+  );
+  assert.equal(diagnostic.includes('hidden'), false);
+  assert.equal(diagnostic.includes('M_PRIVATE_TOKEN'), false);
 });
 
 test('does not emit configured workflow credentials even when their shape is short', () => {

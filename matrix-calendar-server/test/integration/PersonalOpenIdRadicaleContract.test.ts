@@ -80,6 +80,22 @@ type PersonalOpenIdFailureCategory =
   | 'http-status'
   | 'json-or-token-parse'
   | 'other';
+const PERSONAL_OPENID_MATRIX_ERROR_CODES = new Set([
+  'M_BAD_JSON',
+  'M_FORBIDDEN',
+  'M_INVALID_PARAM',
+  'M_INVALID_PASSWORD',
+  'M_INVALID_USERNAME',
+  'M_LIMIT_EXCEEDED',
+  'M_MISSING_PARAM',
+  'M_NOT_FOUND',
+  'M_THREEPID_AUTH_FAILED',
+  'M_UNAUTHORIZED',
+  'M_UNKNOWN',
+  'M_UNKNOWN_TOKEN',
+  'M_USER_DEACTIVATED',
+  'M_USER_IN_USE',
+]);
 type ContractStageDiagnostics = {
   middlewareCalls: number;
   authorizationHeader: 'not-observed' | 'present' | 'absent';
@@ -199,8 +215,8 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
     let actorLoginFailureReported = false;
     let actorLogin: { access_token: string };
     try {
-      actorLogin = await login(username, password, (category) => {
-        markPersonalOpenIdSetupFailure(category);
+      actorLogin = await login(username, password, (category, status, code) => {
+        markPersonalOpenIdSetupFailure(category, status, code);
         actorLoginFailureReported = true;
       });
     } catch (error) {
@@ -245,8 +261,8 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
       nonmemberLogin = await login(
         nonmemberName,
         nonmemberPassword,
-        (category) => {
-          markPersonalOpenIdSetupFailure(category);
+        (category, status, code) => {
+          markPersonalOpenIdSetupFailure(category, status, code);
           nonmemberLoginFailureReported = true;
         },
       );
@@ -520,6 +536,8 @@ function markPersonalOpenIdSetupStage(stage: PersonalOpenIdSetupStage): void {
 
 function markPersonalOpenIdSetupFailure(
   category: PersonalOpenIdFailureCategory,
+  status?: number,
+  matrixErrorCode?: string,
 ): void {
   const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
   if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
@@ -527,11 +545,22 @@ function markPersonalOpenIdSetupFailure(
   }
 
   try {
-    appendFileSync(
-      stageFile,
-      `personal-openid-setup-failure-${category}\n`,
-      'utf8',
-    );
+    const markers = [`personal-openid-setup-failure-${category}`];
+    if (
+      typeof status === 'number' &&
+      Number.isInteger(status) &&
+      status >= 400 &&
+      status <= 599
+    ) {
+      markers.push(`personal-openid-http-status-${status}`);
+    }
+    if (
+      matrixErrorCode &&
+      PERSONAL_OPENID_MATRIX_ERROR_CODES.has(matrixErrorCode)
+    ) {
+      markers.push(`personal-openid-matrix-error-${matrixErrorCode}`);
+    }
+    appendFileSync(stageFile, `${markers.join('\n')}\n`, 'utf8');
   } catch {
     // Diagnostics must not change contract-test behavior.
   }
@@ -603,7 +632,11 @@ function assertServiceLogsOmit(...secrets: string[]): void {
 async function login(
   username: string,
   password: string,
-  onFailureCategory?: (category: PersonalOpenIdFailureCategory) => void,
+  onFailureCategory?: (
+    category: PersonalOpenIdFailureCategory,
+    status?: number,
+    matrixErrorCode?: string,
+  ) => void,
 ): Promise<{ access_token: string }> {
   return matrixJson('/_matrix/client/v3/login', {
     method: 'POST',
@@ -622,7 +655,11 @@ async function matrixJson<T = Record<string, unknown>>(
     method: string;
     token?: string;
     body: unknown;
-    onFailureCategory?: (category: PersonalOpenIdFailureCategory) => void;
+    onFailureCategory?: (
+      category: PersonalOpenIdFailureCategory,
+      status?: number,
+      matrixErrorCode?: string,
+    ) => void;
   },
 ): Promise<T> {
   let response: Response;
@@ -640,7 +677,14 @@ async function matrixJson<T = Record<string, unknown>>(
     throw error;
   }
   if (!response.ok) {
-    options.onFailureCategory?.('http-status');
+    const matrixErrorCode = options.onFailureCategory
+      ? await readMatrixErrorCode(response)
+      : undefined;
+    options.onFailureCategory?.(
+      'http-status',
+      response.status,
+      matrixErrorCode,
+    );
     throw new Error(
       `Matrix contract fixture request failed (${response.status})`,
     );
@@ -651,6 +695,27 @@ async function matrixJson<T = Record<string, unknown>>(
     options.onFailureCategory?.('json-or-token-parse');
     throw error;
   }
+}
+
+async function readMatrixErrorCode(
+  response: Response,
+): Promise<string | undefined> {
+  try {
+    const body: unknown = await response.clone().json();
+    if (
+      body !== null &&
+      typeof body === 'object' &&
+      !Array.isArray(body) &&
+      'errcode' in body &&
+      typeof body.errcode === 'string' &&
+      PERSONAL_OPENID_MATRIX_ERROR_CODES.has(body.errcode)
+    ) {
+      return body.errcode;
+    }
+  } catch {
+    // Error response details must not affect the contract failure path.
+  }
+  return undefined;
 }
 
 function decodeTaggedCredential(credential: string): MatrixIdentity {

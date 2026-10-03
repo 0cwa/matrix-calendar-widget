@@ -141,28 +141,28 @@ jobs:
           contract_report_summary="$(node dev/sanitize-server-test-report.mjs \
             "$contract_report" "$test_status" 2>/dev/null)"
           report_summary_status=$?
-          room_setup_summary="$(node dev/sanitize-room-appservice-setup.mjs \
+          contract_setup_summary="$(node dev/sanitize-room-appservice-setup.mjs \
             "$contract_report" "$contract_stage_file" 2>/dev/null)"
-          room_setup_summary_status=$?
+          contract_setup_summary_status=$?
           contract_summary="$(node dev/sanitize-caldav-contract-stage.mjs "$contract_stage_file")"
           printf '%s\n' "$contract_summary"
           printf '%s\n' "$contract_report_summary"
-          printf '%s\n' "$room_setup_summary"
+          printf '%s\n' "$contract_setup_summary"
           {
             printf '%s\n' 'Real CalDAV contract stages'
             printf '%s\n' "$contract_summary"
             printf '%s\n' 'Real CalDAV test summary'
             printf '%s\n' "$contract_report_summary"
-            printf '%s\n' 'Room AppService setup diagnosis'
-            printf '%s\n' "$room_setup_summary"
+            printf '%s\n' 'Personal and Room setup diagnosis'
+            printf '%s\n' "$contract_setup_summary"
           } >> "$GITHUB_STEP_SUMMARY"
           {
             printf '%s\n' 'Real CalDAV contract stages'
             printf '%s\n' "$contract_summary"
             printf '%s\n' 'Real CalDAV test summary'
             printf '%s\n' "$contract_report_summary"
-            printf '%s\n' 'Room AppService setup diagnosis'
-            printf '%s\n' "$room_setup_summary"
+            printf '%s\n' 'Personal and Room setup diagnosis'
+            printf '%s\n' "$contract_setup_summary"
           } >> "$RUNNER_TEMP/caldav-safe-contract-summary.txt"
           rm -f "$contract_log" "$contract_report"
           rm -f "$contract_stage_file"
@@ -173,8 +173,8 @@ jobs:
           if [ "$report_summary_status" -ne 0 ]; then
             exit "$report_summary_status"
           fi
-          if [ "$room_setup_summary_status" -ne 0 ]; then
-            exit "$room_setup_summary_status"
+          if [ "$contract_setup_summary_status" -ne 0 ]; then
+            exit "$contract_setup_summary_status"
           fi
           exit "$test_status"
 

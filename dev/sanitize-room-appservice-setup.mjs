@@ -17,7 +17,13 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getRoomAppServiceSetupStage } from './sanitize-caldav-contract-stage.mjs';
+import {
+  formatPersonalOpenIdSetupFailure,
+  formatPersonalOpenIdSetupHttpStatus,
+  formatPersonalOpenIdSetupMatrixErrorCode,
+  formatPersonalOpenIdSetupStage,
+  getRoomAppServiceSetupStage,
+} from './sanitize-caldav-contract-stage.mjs';
 
 const ROOM_SUITE_PATH = fileURLToPath(
   new URL(
@@ -25,6 +31,16 @@ const ROOM_SUITE_PATH = fileURLToPath(
     import.meta.url,
   ),
 );
+const PERSONAL_OPENID_SUITE_PATH = fileURLToPath(
+  new URL(
+    '../matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts',
+    import.meta.url,
+  ),
+);
+const ROOM_SUITE_REPO_PATH =
+  'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts';
+const PERSONAL_OPENID_SUITE_REPO_PATH =
+  'matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts';
 const ROOM_CASES = new Set([
   'exact-binding',
   'subject-binding',
@@ -72,6 +88,13 @@ function reportText(suite) {
 }
 
 function summarizeSafeMessage(message) {
+  const matrixFixtureStatus = message.match(
+    /\bMatrix contract fixture request failed \(([1-5]\d\d)\)/i,
+  );
+  if (matrixFixtureStatus) {
+    return `Matrix fixture HTTP status ${matrixFixtureStatus[1]}`;
+  }
+
   const httpStatus = message.match(
     /\bRequest failed with status code\s+([1-5]\d\d)\b/i,
   );
@@ -109,7 +132,7 @@ function summarizeSafeMessage(message) {
   return 'unclassified';
 }
 
-function summarizeException(text) {
+function summarizeException(text, knownSourcePath) {
   const lines = text.split(/\r?\n/);
   let name = 'unavailable';
   let message = 'unavailable';
@@ -126,15 +149,13 @@ function summarizeException(text) {
     }
   }
 
-  const knownRoomSuiteFrame =
-    'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts';
   const framePattern = new RegExp(
-    `(?:^|[(/])${knownRoomSuiteFrame.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:(\\d+):(\\d+)\\)?`,
+    `(?:^|[(/])${knownSourcePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:(\\d+):(\\d+)\\)?`,
   );
   for (const line of lines) {
     const match = line.match(framePattern);
     if (match) {
-      source = `${knownRoomSuiteFrame}:${match[1]}:${match[2]}`;
+      source = `${knownSourcePath}:${match[1]}:${match[2]}`;
       break;
     }
   }
@@ -187,7 +208,7 @@ export function formatRoomAppServiceSetupDiagnostic(testReport, stageContent) {
   }
 
   const counts = caseResultCounts(suite);
-  const error = summarizeException(reportText(suite));
+  const error = summarizeException(reportText(suite), ROOM_SUITE_REPO_PATH);
   const failurePhase = setupStarted ? 'setup' : 'suite-load';
   const setupStage = getRoomAppServiceSetupStage(stageContent) ?? 'unavailable';
   return [
@@ -196,10 +217,71 @@ export function formatRoomAppServiceSetupDiagnostic(testReport, stageContent) {
   ].join('\n');
 }
 
+export function formatPersonalOpenIdSetupDiagnostic(testReport, stageContent) {
+  const setupStarted =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === 'personal-openid-setup-start');
+  const setupCompleted =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === 'personal-openid-setup-complete');
+  if (setupCompleted) {
+    return 'personal-openid-setup-diagnostic setup-completed';
+  }
+
+  const suite = Array.isArray(testReport?.testResults)
+    ? testReport.testResults.find(
+        (result) => result?.name === PERSONAL_OPENID_SUITE_PATH,
+      )
+    : undefined;
+  if (!suite) {
+    return `personal-openid-setup-diagnostic suite-not-found setup-start=${setupStarted}`;
+  }
+
+  const suiteStatus = ['pending', 'passed', 'failed'].includes(suite.status)
+    ? suite.status
+    : 'unknown';
+  if (suiteStatus !== 'failed') {
+    return `personal-openid-setup-diagnostic suite-status-${suiteStatus} setup-start=${setupStarted}`;
+  }
+
+  const stage =
+    formatPersonalOpenIdSetupStage(stageContent).match(
+      /^personal-openid-setup-stage ([a-z-]+)\n$/,
+    )?.[1] ?? 'unavailable';
+  const failure =
+    formatPersonalOpenIdSetupFailure(stageContent).match(
+      /^personal-openid-setup-failure ([a-z-]+)\n$/,
+    )?.[1] ?? 'unavailable';
+  const httpStatus =
+    formatPersonalOpenIdSetupHttpStatus(stageContent).match(
+      /^personal-openid-http-status (\d{3})\n$/,
+    )?.[1] ?? 'unavailable';
+  const matrixErrorCode =
+    formatPersonalOpenIdSetupMatrixErrorCode(stageContent).match(
+      /^personal-openid-matrix-error (M_[A-Z0-9_]+)\n$/,
+    )?.[1] ?? 'unavailable';
+  const counts = caseResultCounts(suite);
+  const error = summarizeException(
+    reportText(suite),
+    PERSONAL_OPENID_SUITE_REPO_PATH,
+  );
+  return [
+    `personal-openid-setup-failure stage=${stage} category=${failure} http-status=${httpStatus} matrix-errcode=${matrixErrorCode} failed-case-results=${counts.failed}/${counts.total}`,
+    `personal-openid-setup-exception class=${error.name} message=${JSON.stringify(error.message)} source=${error.source}`,
+  ].join('\n');
+}
+
 function emitDiagnostic(reportPath, stagePath) {
   try {
     const report = JSON.parse(readFileSync(reportPath, 'utf8'));
     const stageContent = readFileSync(stagePath, 'utf8');
+    process.stdout.write(
+      `${formatPersonalOpenIdSetupDiagnostic(report, stageContent)}\n`,
+    );
     process.stdout.write(
       `${formatRoomAppServiceSetupDiagnostic(report, stageContent)}\n`,
     );
