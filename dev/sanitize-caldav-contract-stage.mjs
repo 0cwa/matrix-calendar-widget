@@ -15,6 +15,17 @@ const allowedPhases = new Set([
 ]);
 const ROOM_APPSERVICE_SETUP_COMPLETE = 'room-appservice-setup-complete';
 const PERSONAL_OPENID_SETUP_COMPLETE = 'personal-openid-setup-complete';
+const PERSONAL_OPENID_SETUP_STAGES = new Set([
+  'fixture-input-check',
+  'actor-login',
+  'actor-proof-validation',
+  'create-personal-room',
+  'create-nonmember',
+  'nonmember-login',
+  'nonmember-openid-proof',
+  'gateway-init',
+  'gateway-listen',
+]);
 const ROOM_APPSERVICE_LISTING_CHECKPOINTS = new Set([
   'room-one-response-status',
   'room-one-response-json-parsed',
@@ -64,6 +75,21 @@ export function formatPersonalOpenIdSetupStatus(stageContent) {
   return `personal-openid-setup ${completed ? 'complete' : 'not-reached'}\n`;
 }
 
+export function formatPersonalOpenIdSetupStage(stageContent) {
+  let latestStage;
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const candidate = line
+        .trim()
+        .replace(/^personal-openid-setup-stage-/, '');
+      if (PERSONAL_OPENID_SETUP_STAGES.has(candidate)) {
+        latestStage = candidate;
+      }
+    }
+  }
+  return latestStage ? `personal-openid-setup-stage ${latestStage}\n` : '';
+}
+
 export function formatRoomAppServiceListingCheckpoint(stageContent) {
   let latestCheckpoint;
   if (typeof stageContent === 'string') {
@@ -88,6 +114,7 @@ function emitContractPhase(stagePath) {
     const stageContent = readFileSync(stagePath, 'utf8');
     process.stdout.write(formatContractPhase(stageContent));
     process.stdout.write(formatPersonalOpenIdSetupStatus(stageContent));
+    process.stdout.write(formatPersonalOpenIdSetupStage(stageContent));
     process.stdout.write(formatRoomAppServiceSetupStatus(stageContent));
     process.stdout.write(formatRoomAppServiceListingCheckpoint(stageContent));
   } catch {

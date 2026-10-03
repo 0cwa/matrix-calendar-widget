@@ -62,6 +62,16 @@ let nativeFetch: typeof fetch;
 let gatewayBaseUrl: string;
 let countCalDavRequests: () => number;
 const gatewayLogLines: string[] = [];
+type PersonalOpenIdSetupStage =
+  | 'fixture-input-check'
+  | 'actor-login'
+  | 'actor-proof-validation'
+  | 'create-personal-room'
+  | 'create-nonmember'
+  | 'nonmember-login'
+  | 'nonmember-openid-proof'
+  | 'gateway-init'
+  | 'gateway-listen';
 type ContractStageDiagnostics = {
   middlewareCalls: number;
   authorizationHeader: 'not-observed' | 'present' | 'absent';
@@ -158,6 +168,7 @@ class PersonalOpenIdGatewayContractModule {}
 
 describeContract('personal Matrix OpenID gateway against real Radicale', () => {
   beforeAll(async () => {
+    markPersonalOpenIdSetupStage('fixture-input-check');
     fetchMock.disableMocks();
     nativeFetch = globalThis.fetch.bind(globalThis);
     homeserverUrl = testConfiguration.homeserver_url;
@@ -175,13 +186,16 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
 
     actorUserId = `@${username}:${matrixServerName}`;
     actorTaggedCredential = taggedCredential;
+    markPersonalOpenIdSetupStage('actor-login');
     const actorLogin = await login(username, password);
     actorAccessToken = actorLogin.access_token;
+    markPersonalOpenIdSetupStage('actor-proof-validation');
     actorIdentity = decodeTaggedCredential(taggedCredential);
     if (actorIdentity.matrix_server_name !== matrixServerName) {
       throw new Error('Fixture proof has an unexpected Matrix server name');
     }
 
+    markPersonalOpenIdSetupStage('create-personal-room');
     const createdRoom = await matrixJson<{ room_id: string }>(
       '/_matrix/client/v3/createRoom',
       {
@@ -194,6 +208,7 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
 
     const nonmemberName = 'calendar-contract-nonmember';
     const nonmemberPassword = password;
+    markPersonalOpenIdSetupStage('create-nonmember');
     await matrixJson(
       `/_synapse/admin/v2/users/${encodeURIComponent(`@${nonmemberName}:${matrixServerName}`)}`,
       {
@@ -202,14 +217,17 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
         body: { password: nonmemberPassword, admin: false },
       },
     );
+    markPersonalOpenIdSetupStage('nonmember-login');
     const nonmemberLogin = await login(nonmemberName, nonmemberPassword);
     nonmemberLoginAccessToken = nonmemberLogin.access_token;
+    markPersonalOpenIdSetupStage('nonmember-openid-proof');
     nonmemberIdentity = await matrixJson<MatrixIdentity>(
       `/_matrix/client/v3/user/${encodeURIComponent(`@${nonmemberName}:${matrixServerName}`)}/openid/request_token`,
       { method: 'POST', token: nonmemberLoginAccessToken, body: {} },
     );
     nonmemberIdentityHeader = identityHeader(nonmemberIdentity);
 
+    markPersonalOpenIdSetupStage('gateway-init');
     app = await NestFactory.create(PersonalOpenIdGatewayContractModule, {
       logger: gatewayLogger,
     });
@@ -225,6 +243,7 @@ describeContract('personal Matrix OpenID gateway against real Radicale', () => {
       return authMiddleware.use(request, response, next);
     });
     app.enableVersioning({ type: VersioningType.URI });
+    markPersonalOpenIdSetupStage('gateway-listen');
     await app.listen(0, '127.0.0.1');
     const address = app.getHttpServer().address() as AddressInfo;
     gatewayBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -429,6 +448,19 @@ function markPersonalOpenIdSetupComplete(): void {
 
   try {
     appendFileSync(stageFile, 'personal-openid-setup-complete\n', 'utf8');
+  } catch {
+    // Diagnostics must not change contract-test behavior.
+  }
+}
+
+function markPersonalOpenIdSetupStage(stage: PersonalOpenIdSetupStage): void {
+  const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
+  if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
+    return;
+  }
+
+  try {
+    appendFileSync(stageFile, `personal-openid-setup-stage-${stage}\n`, 'utf8');
   } catch {
     // Diagnostics must not change contract-test behavior.
   }

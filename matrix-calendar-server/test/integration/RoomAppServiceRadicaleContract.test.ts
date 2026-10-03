@@ -290,12 +290,12 @@ describeContract('room appservice proof against real Radicale', () => {
       const checkpointRoom = index === 0 ? 'room-one' : 'room-two';
       markRoomAppServiceListingCheckpoint(`${checkpointRoom}-response-status`);
       const body = JSON.parse(response.body) as {
-        events: Array<{ event: { id: string; summary: string } }>;
+        events: Array<{ event: { id: string; title: string } }>;
       };
       markRoomAppServiceListingCheckpoint(
         `${checkpointRoom}-response-json-parsed`,
       );
-      expect(body.events.map(({ event }) => event.summary)).toEqual([
+      expect(body.events.map(({ event }) => event.title)).toEqual([
         `Room event ${index + 1}`,
       ]);
       markRoomAppServiceListingCheckpoint(`${checkpointRoom}-event-summary`);

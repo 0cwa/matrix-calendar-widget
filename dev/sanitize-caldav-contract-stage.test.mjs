@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   formatContractPhase,
+  formatPersonalOpenIdSetupStage,
   formatPersonalOpenIdSetupStatus,
   formatRoomAppServiceListingCheckpoint,
   formatRoomAppServiceSetupStatus,
@@ -70,6 +71,28 @@ test('reports only whether the personal OpenID beforeAll completed', () => {
     formatPersonalOpenIdSetupStatus('personal-openid-setup-complete\n'),
     'personal-openid-setup complete\n',
   );
+});
+
+test('emits only the latest fixed personal OpenID setup stage', () => {
+  assert.equal(
+    formatPersonalOpenIdSetupStage(
+      [
+        'personal-openid-setup-stage-actor-login',
+        'personal-openid-setup-stage-create-personal-room',
+        'personal-openid-setup-stage-nonmember-openid-proof',
+      ].join('\n'),
+    ),
+    'personal-openid-setup-stage nonmember-openid-proof\n',
+  );
+});
+
+test('does not emit arbitrary personal OpenID setup stages or values', () => {
+  const privateSentinel =
+    'personal-openid-setup-stage-private-user-id-and-event-data';
+  const output = formatPersonalOpenIdSetupStage(privateSentinel);
+
+  assert.equal(output, '');
+  assert.equal(output.includes(privateSentinel), false);
 });
 
 test('does not expose unknown stage data or accept a partial setup marker', () => {
