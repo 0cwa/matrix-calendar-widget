@@ -27,6 +27,25 @@ const credentialProvider: CalDavCredentialProvider = {
 };
 
 describe('CalDavDiscoveryClient', () => {
+  it.each([
+    ['credentials', 'https://user:secret@radicale.example.test/dav/'],
+    ['empty userinfo', 'https://@radicale.example.test/dav/'],
+    ['query', 'https://radicale.example.test/dav/?token=secret'],
+    ['fragment', 'https://radicale.example.test/dav/#fragment'],
+    ['encoded traversal', 'https://radicale.example.test/%2e%2e/dav/'],
+    ['encoded separator', 'https://radicale.example.test/dav%2fprivate/'],
+  ])('rejects a configured base URL with %s', (_label, baseUrl) => {
+    const fetchMock = jest.fn<
+      ReturnType<typeof fetch>,
+      Parameters<typeof fetch>
+    >();
+
+    expect(
+      () => new CalDavDiscoveryClient(baseUrl, credentialProvider, fetchMock),
+    ).toThrow(CalDavDiscoveryError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('discovers VEVENT calendars across arbitrary XML namespace prefixes', async () => {
     const fetchMock = createFetchMock(
       multistatus(
@@ -193,47 +212,232 @@ describe('CalDavDiscoveryClient', () => {
     });
   });
 
-  it('preserves the raw DAV href beside its normalized URL', async () => {
+  it.each([
+    ['empty userinfo', 'https://@radicale.example.test/alice/team/'],
+    ['another origin', 'https://outside.example.test/alice/team/'],
+    ['protocol-relative another origin', '//outside.example.test/alice/team/'],
+    ['query', '/alice/team/?token=secret'],
+    ['fragment', '/alice/team/#fragment'],
+    ['encoded traversal', '/alice/%2e%2e/outside/'],
+    ['nested encoded traversal', '/alice/%252e%252e/outside/'],
+    ['encoded slash', '/alice/%2foutside/'],
+    ['nested encoded slash', '/alice/%252foutside/'],
+    ['encoded backslash', '/alice/%5coutside/'],
+    ['literal backslash', '/alice\\outside/'],
+    ['outside base path', '/aliceish/team/'],
+  ])('rejects an unsafe collection href with %s', async (_label, href) => {
     const fetchMock = createFetchMock(
-      principalResponse('/principals/alice/'),
-      homeResponse('/alice/'),
-      multistatus(`
-        <d:response>
-          <d:href>https://@radicale.example.test/alice/empty-userinfo/</d:href>
-          <d:propstat>
-            <d:prop><d:resourcetype><d:collection/><c:calendar/></d:resourcetype></d:prop>
-            <d:status>HTTP/1.1 200 OK</d:status>
-          </d:propstat>
-        </d:response>
-        <d:response>
-          <d:href>/alice/%2e%2e/outside/</d:href>
-          <d:propstat>
-            <d:prop><d:resourcetype><d:collection/><c:calendar/></d:resourcetype></d:prop>
-            <d:status>HTTP/1.1 200 OK</d:status>
-          </d:propstat>
-        </d:response>
-      `),
+      principalResponse('/dav/principals/alice/'),
+      homeResponse('/dav/alice/'),
+      calendarResponse(href),
+    );
+    const getRequestHeaders = jest.fn(async () => ({
+      Authorization: 'Basic delegated',
+    }));
+
+    await expect(
+      new CalDavDiscoveryClient(
+        'https://radicale.example.test/dav/',
+        { getRequestHeaders },
+        fetchMock,
+      ).discover(),
+    ).rejects.toMatchObject({
+      name: 'CalDavDiscoveryError',
+      message: 'CalDAV discovery returned an unsafe URL',
+      status: undefined,
+      url: undefined,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(getRequestHeaders).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    [
+      'absolute another-origin',
+      'https://outside.example.test/principals/alice/',
+    ],
+    [
+      'protocol-relative another-origin',
+      '//outside.example.test/principals/alice/',
+    ],
+    [
+      'absolute empty userinfo',
+      'https://@radicale.example.test/dav/principals/alice/',
+    ],
+    ['query', '/dav/principals/alice/?token=secret'],
+    ['fragment', '/dav/principals/alice/#fragment'],
+    ['encoded traversal', '/dav/%2e%2e/principals/alice/'],
+    ['nested encoded traversal', '/dav/%252e%252e/principals/alice/'],
+    ['encoded slash', '/dav/principals%2falice/'],
+    ['encoded backslash', '/dav/principals%5calice/'],
+    ['outside base path', '/davish/principals/alice/'],
+  ])(
+    'rejects an unsafe principal href with %s before a follow-up request',
+    async (_label, href) => {
+      const fetchMock = createFetchMock(principalResponse(href));
+      const getRequestHeaders = jest.fn(async () => ({
+        Authorization: 'Basic delegated',
+      }));
+
+      await expect(
+        new CalDavDiscoveryClient(
+          'https://radicale.example.test/dav/',
+          { getRequestHeaders },
+          fetchMock,
+        ).discover(),
+      ).rejects.toMatchObject({
+        name: 'CalDavDiscoveryError',
+        message: 'CalDAV discovery returned an unsafe URL',
+        status: undefined,
+        url: undefined,
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(getRequestHeaders).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    ['another origin', 'https://outside.example.test/dav/alice/'],
+    ['protocol-relative another origin', '//outside.example.test/dav/alice/'],
+    ['encoded traversal', '/dav/principals/%2e%2e/home/alice/'],
+    ['query', '/dav/alice/?token=secret'],
+    ['fragment', '/dav/alice/#fragment'],
+    ['outside base path', '/davish/alice/'],
+  ])(
+    'rejects an unsafe calendar-home href with %s before collection discovery',
+    async (_label, href) => {
+      const fetchMock = createFetchMock(
+        principalResponse('/dav/principals/alice/'),
+        homeResponse(href),
+        calendarResponse('/dav/alice/team/'),
+      );
+      const getRequestHeaders = jest.fn(async () => ({
+        Authorization: 'Basic delegated',
+      }));
+
+      await expect(
+        new CalDavDiscoveryClient(
+          'https://radicale.example.test/dav/',
+          { getRequestHeaders },
+          fetchMock,
+        ).discover(),
+      ).rejects.toMatchObject({
+        name: 'CalDavDiscoveryError',
+        message: 'CalDAV discovery returned an unsafe URL',
+        status: undefined,
+        url: undefined,
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(getRequestHeaders).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each([
+    {
+      label: 'simple relative hrefs',
+      principal: 'principals/alice/',
+      home: 'home/alice/',
+      calendar: 'team/',
+      expectedPrincipal:
+        'https://radicale.example.test/proxy/caldav/principals/alice/',
+      expectedHome:
+        'https://radicale.example.test/proxy/caldav/principals/alice/home/alice/',
+      expectedCalendar:
+        'https://radicale.example.test/proxy/caldav/principals/alice/home/alice/team/',
+    },
+    {
+      label: 'root-relative hrefs beneath the configured proxy prefix',
+      principal: '/proxy/caldav/principals/alice/',
+      home: '/proxy/caldav/home/alice/',
+      calendar: '/proxy/caldav/home/alice/team/',
+      expectedPrincipal:
+        'https://radicale.example.test/proxy/caldav/principals/alice/',
+      expectedHome: 'https://radicale.example.test/proxy/caldav/home/alice/',
+      expectedCalendar:
+        'https://radicale.example.test/proxy/caldav/home/alice/team/',
+    },
+  ])('preserves $label within the configured base path', async (example) => {
+    const fetchMock = createFetchMock(
+      principalResponse(example.principal),
+      homeResponse(example.home),
+      calendarResponse(example.calendar),
     );
 
     const result = await new CalDavDiscoveryClient(
-      'https://radicale.example.test/',
+      'https://radicale.example.test/proxy/caldav',
       credentialProvider,
       fetchMock,
     ).discover();
 
-    expect(
-      result.calendars.map(({ href, rawHref }) => ({ href, rawHref })),
-    ).toEqual([
-      {
-        href: 'https://radicale.example.test/alice/empty-userinfo/',
-        rawHref: 'https://@radicale.example.test/alice/empty-userinfo/',
-      },
-      {
-        href: 'https://radicale.example.test/outside/',
-        rawHref: '/alice/%2e%2e/outside/',
-      },
+    expect(result).toEqual({
+      principalUrl: example.expectedPrincipal,
+      calendarHomeUrl: example.expectedHome,
+      calendars: [
+        expect.objectContaining({
+          href: example.expectedCalendar,
+          rawHref: example.calendar,
+        }),
+      ],
+    });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'https://radicale.example.test/proxy/caldav/',
+      example.expectedPrincipal,
+      example.expectedHome,
     ]);
   });
+
+  it.each([
+    ['cross-origin', 'https://outside.example.test/redirected/'],
+    ['same-origin', 'https://radicale.example.test/dav/redirected/'],
+  ])(
+    'does not follow a %s discovery redirect or expose it in the error',
+    async (_label, location) => {
+      const response = new Response('sensitive redirect response body', {
+        status: 302,
+        headers: { Location: location },
+      });
+      const fetchMock = jest
+        .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+        .mockResolvedValue(response);
+      const getRequestHeaders = jest.fn(async () => ({
+        Authorization: 'Basic delegated-secret',
+      }));
+
+      let caught: unknown;
+      try {
+        await new CalDavDiscoveryClient(
+          'https://radicale.example.test/dav/',
+          { getRequestHeaders },
+          fetchMock,
+        ).discover();
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toMatchObject({
+        name: 'CalDavDiscoveryError',
+        message: 'CalDAV discovery request was redirected',
+        status: undefined,
+        url: undefined,
+      });
+      expect(String(caught)).not.toContain(location);
+      expect(String(caught)).not.toContain('sensitive redirect response body');
+      expect(String(caught)).not.toContain('delegated-secret');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        'https://radicale.example.test/dav/',
+      );
+      expect(fetchMock.mock.calls[0][1]?.redirect).toBe('manual');
+      expect(
+        new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization'),
+      ).toBe('Basic delegated-secret');
+      expect(getRequestHeaders).toHaveBeenCalledTimes(1);
+      expect(response.bodyUsed).toBe(false);
+    },
+  );
 
   it('leaves calendar safety metadata unavailable when its propstats fail', async () => {
     const fetchMock = createFetchMock(
@@ -934,6 +1138,20 @@ function homeResponse(href: string): string {
       <d:propstat>
         <d:prop>
           <c:calendar-home-set><d:href>${href}</d:href></c:calendar-home-set>
+        </d:prop>
+        <d:status>HTTP/1.1 200 OK</d:status>
+      </d:propstat>
+    </d:response>
+  `);
+}
+
+function calendarResponse(href: string): string {
+  return multistatus(`
+    <d:response>
+      <d:href>${href}</d:href>
+      <d:propstat>
+        <d:prop>
+          <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
         </d:prop>
         <d:status>HTTP/1.1 200 OK</d:status>
       </d:propstat>

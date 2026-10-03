@@ -44,6 +44,9 @@ export class CalDavDiscoveryError extends Error {
   }
 }
 
+const UNSAFE_DISCOVERY_URL_ERROR = 'CalDAV discovery returned an unsafe URL';
+const DISCOVERY_REDIRECT_ERROR = 'CalDAV discovery request was redirected';
+
 type DavNode = Record<string, unknown>;
 
 const parser = new XMLParser({
@@ -144,11 +147,15 @@ function updateCalendarColorBody(color: string): string {
 }
 
 export class CalDavDiscoveryClient {
+  private readonly scopeBase: URL;
+
   constructor(
-    private readonly baseUrl: string,
+    baseUrl: string,
     private readonly credentialProvider: CalDavCredentialProvider,
     private readonly fetchImpl: typeof fetch = fetch,
-  ) {}
+  ) {
+    this.scopeBase = parseConfiguredBaseUrl(baseUrl);
+  }
 
   async createCalendar(
     displayName: string,
@@ -376,9 +383,11 @@ export class CalDavDiscoveryClient {
         return [];
       }
 
+      const calendarUrl = this.resolveScopedHref(href, calendarHomeUrl);
+
       return [
         {
-          href: new URL(href, calendarHomeUrl).toString(),
+          href: calendarUrl,
           rawHref: href,
           displayName: textValue(properties.displayname),
           description: preservedTextValue(properties['calendar-description']),
@@ -400,15 +409,14 @@ export class CalDavDiscoveryClient {
     principalUrl: string;
     calendarHomeUrl: string;
   }> {
-    const serviceUrl = new URL(this.baseUrl).toString();
-    const principalHref = await this.discoverHref(
+    const serviceUrl = this.scopeBase.toString();
+    const principalUrl = await this.discoverHref(
       serviceUrl,
       PRINCIPAL_BODY,
       'current-user-principal',
     );
-    const principalUrl = new URL(principalHref, serviceUrl).toString();
 
-    const calendarHomeHref = await this.discoverHref(
+    const calendarHomeUrl = await this.discoverHref(
       principalUrl,
       HOME_BODY,
       'calendar-home-set',
@@ -416,8 +424,32 @@ export class CalDavDiscoveryClient {
 
     return {
       principalUrl,
-      calendarHomeUrl: new URL(calendarHomeHref, principalUrl).toString(),
+      calendarHomeUrl,
     };
+  }
+
+  private resolveScopedHref(href: string, relativeTo: string): string {
+    assertSafeRawHref(href);
+
+    let resolved: URL;
+    try {
+      resolved = new URL(href, relativeTo);
+    } catch {
+      throw new CalDavDiscoveryError(UNSAFE_DISCOVERY_URL_ERROR);
+    }
+
+    if (
+      resolved.protocol !== this.scopeBase.protocol ||
+      resolved.origin !== this.scopeBase.origin ||
+      hasUrlCredentials(resolved) ||
+      resolved.search !== '' ||
+      resolved.hash !== '' ||
+      !isPathWithinScope(resolved.pathname, this.scopeBase.pathname)
+    ) {
+      throw new CalDavDiscoveryError(UNSAFE_DISCOVERY_URL_ERROR);
+    }
+
+    return resolved.toString();
   }
 
   private async discoverHref(
@@ -431,7 +463,7 @@ export class CalDavDiscoveryClient {
       const property = successfulProperties(response)[propertyName];
       const href = textValue(asNode(property)?.href);
       if (href) {
-        return href;
+        return this.resolveScopedHref(href, url);
       }
     }
 
@@ -447,22 +479,28 @@ export class CalDavDiscoveryClient {
     depth: '0' | '1',
     body: string,
   ): Promise<DavNode[]> {
+    const requestUrl = this.resolveScopedHref(url, this.scopeBase.toString());
     const credentialHeaders = await this.credentialProvider.getRequestHeaders();
     const headers = new Headers(credentialHeaders);
     headers.set('Content-Type', 'application/xml; charset=utf-8');
     headers.set('Depth', depth);
 
-    const response = await this.fetchImpl(url, {
+    const response = await this.fetchImpl(requestUrl, {
       method: 'PROPFIND',
       headers,
       body,
+      redirect: 'manual',
     });
+
+    if (response.status >= 300 && response.status < 400) {
+      throw new CalDavDiscoveryError(DISCOVERY_REDIRECT_ERROR);
+    }
 
     if (!response.ok) {
       throw new CalDavDiscoveryError(
         `CalDAV PROPFIND failed with status ${response.status}`,
         response.status,
-        url,
+        requestUrl,
       );
     }
 
@@ -474,6 +512,128 @@ export class CalDavDiscoveryClient {
       return node ? [node] : [];
     });
   }
+}
+
+function parseConfiguredBaseUrl(baseUrl: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new CalDavDiscoveryError('CalDAV base URL is invalid');
+  }
+
+  if (
+    !/^https?:\/\//i.test(baseUrl) ||
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    hasUrlCredentials(parsed)
+  ) {
+    throw new CalDavDiscoveryError('CalDAV base URL is invalid');
+  }
+
+  assertSafeRawHref(baseUrl);
+  if (!parsed.pathname.endsWith('/')) {
+    parsed.pathname = `${parsed.pathname}/`;
+  }
+  return parsed;
+}
+
+function assertSafeRawHref(href: string): void {
+  if (
+    href.length === 0 ||
+    href !== href.trim() ||
+    containsAsciiControlOrSpace(href) ||
+    href.includes('\\') ||
+    href.includes('?') ||
+    href.includes('#')
+  ) {
+    throw new CalDavDiscoveryError(UNSAFE_DISCOVERY_URL_ERROR);
+  }
+
+  const scheme = /^[a-z][a-z\d+.-]*:/i.test(href);
+  if (scheme && !/^https?:\/\//i.test(href)) {
+    throw new CalDavDiscoveryError(UNSAFE_DISCOVERY_URL_ERROR);
+  }
+
+  const authorityMatch = href.match(/^(?:https?:)?\/\/([^/?#]*)/i);
+  const authority = authorityMatch?.[1];
+  if (authorityMatch && !authority) {
+    throw new CalDavDiscoveryError(UNSAFE_DISCOVERY_URL_ERROR);
+  }
+  if (authority?.includes('@')) {
+    throw new CalDavDiscoveryError(UNSAFE_DISCOVERY_URL_ERROR);
+  }
+
+  const path = authorityMatch ? href.slice(authorityMatch[0].length) : href;
+  for (const segment of path.split('/')) {
+    assertSafePathSegment(segment);
+  }
+}
+
+function assertSafePathSegment(segment: string): void {
+  if (/%(?![\da-f]{2})/i.test(segment)) {
+    throw new CalDavDiscoveryError(UNSAFE_DISCOVERY_URL_ERROR);
+  }
+
+  let current = segment;
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (
+      current === '..' ||
+      current.includes('/') ||
+      current.includes('\\') ||
+      containsAsciiControlOrSpace(current)
+    ) {
+      throw new CalDavDiscoveryError(UNSAFE_DISCOVERY_URL_ERROR);
+    }
+
+    if (!/%[\da-f]{2}/i.test(current)) {
+      return;
+    }
+
+    try {
+      current = decodeURIComponent(current);
+    } catch {
+      throw new CalDavDiscoveryError(UNSAFE_DISCOVERY_URL_ERROR);
+    }
+  }
+
+  throw new CalDavDiscoveryError(UNSAFE_DISCOVERY_URL_ERROR);
+}
+
+function isPathWithinScope(pathname: string, scopePathname: string): boolean {
+  const requestSegments = decodedPathSegments(pathname);
+  const scopeSegments = decodedPathSegments(scopePathname);
+  return (
+    requestSegments.length >= scopeSegments.length &&
+    scopeSegments.every((segment, index) => requestSegments[index] === segment)
+  );
+}
+
+function decodedPathSegments(pathname: string): string[] {
+  const segments = pathname.split('/').slice(1);
+  if (segments[segments.length - 1] === '') {
+    segments.pop();
+  }
+  return segments.map((segment) => {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      throw new CalDavDiscoveryError(UNSAFE_DISCOVERY_URL_ERROR);
+    }
+  });
+}
+
+function hasUrlCredentials(url: URL): boolean {
+  return url.username.length > 0 || url.password.length > 0;
+}
+
+function containsAsciiControlOrSpace(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code <= 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function successfulProperties(response: DavNode): DavNode {
