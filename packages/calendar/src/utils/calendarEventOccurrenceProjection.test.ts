@@ -129,17 +129,56 @@ describe('supported series recurrence rules', () => {
   });
 
   it.each([
+    [
+      'FREQ=WEEKLY;INTERVAL=3;BYDAY=MO,FR;COUNT=5',
+      { type: 'count' as const, count: 5 },
+    ],
+    [
+      'FREQ=WEEKLY;INTERVAL=3;BYDAY=MO,FR;UNTIL=20261113T080000Z',
+      { type: 'until' as const, value: '20261113T080000Z' },
+    ],
+  ])('parses and serializes bounded weekly BYDAY rule %s', (text, end) => {
+    const rule: SupportedCalendarEventRecurrenceRule = {
+      frequency: 'WEEKLY',
+      interval: 3,
+      end,
+      weekdays: ['MO', 'FR'],
+    };
+
+    expect(formatSupportedCalendarEventRecurrenceRule(rule, zonedAnchor)).toBe(
+      text,
+    );
+    expect(
+      parseSupportedCalendarEventRecurrenceRule(text, zonedAnchor),
+    ).toEqual(rule);
+  });
+
+  it('accepts positive safe-integer weekly intervals and rejects unsafe values', () => {
+    const maxSafeInterval = Number.MAX_SAFE_INTEGER;
+    expect(
+      parseSupportedCalendarEventRecurrenceRule(
+        `FREQ=WEEKLY;INTERVAL=${maxSafeInterval};BYDAY=MO`,
+        zonedAnchor,
+      ),
+    ).toMatchObject({ interval: maxSafeInterval, weekdays: ['MO'] });
+    expect(() =>
+      parseSupportedCalendarEventRecurrenceRule(
+        'FREQ=WEEKLY;INTERVAL=9007199254740992;BYDAY=MO',
+        zonedAnchor,
+      ),
+    ).toThrow('Unsupported recurrence rule');
+  });
+
+  it.each([
     'FREQ=HOURLY',
     'FREQ=DAILY;INTERVAL=0',
     'FREQ=DAILY;COUNT=2;UNTIL=20261231T225959Z',
     'FREQ=DAILY;UNTIL=20261231',
     'FREQ=DAILY;UNTIL=20261231T235959',
     'FREQ=WEEKLY;BYDAY=TU,WE',
-    'FREQ=WEEKLY;BYDAY=MO;INTERVAL=3',
-    'FREQ=WEEKLY;BYDAY=MO;COUNT=2',
-    'FREQ=WEEKLY;BYDAY=MO;UNTIL=20261102T080000Z',
     'FREQ=WEEKLY;BYDAY=MO;WKST=SU',
     'FREQ=WEEKLY;BYDAY=1MO',
+    'FREQ=WEEKLY;BYDAY=MO,XX',
     'FREQ=WEEKLY;INTERVAL=1.0;BYDAY=FR',
     'FREQ=WEEKLY;BYDAY=MO;BYHOUR=9',
     'FREQ=WEEKLY;BYDAY=MO,MO',
@@ -154,8 +193,8 @@ describe('supported series recurrence rules', () => {
     expect(() =>
       formatSupportedCalendarEventRecurrenceRule(
         {
-          frequency: 'WEEKLY',
-          interval: 3,
+          frequency: 'DAILY',
+          interval: 1,
           end: { type: 'never' },
           weekdays: ['MO', 'WE'],
         },
@@ -167,9 +206,9 @@ describe('supported series recurrence rules', () => {
       formatSupportedCalendarEventRecurrenceRule(
         {
           frequency: 'WEEKLY',
-          interval: 1,
-          end: { type: 'count', count: 3 },
-          weekdays: ['MO', 'WE'],
+          interval: 3,
+          end: { type: 'count', count: 0 },
+          weekdays: ['MO'],
         },
         zonedAnchor,
       ),
@@ -313,6 +352,196 @@ describe('projectCalendarEventOccurrences', () => {
     expect(startInstants[1] - startInstants[0]).toBe(73 * 60 * 60 * 1000);
   });
 
+  it('counts weekly BYDAY occurrences across the series and clips half-open ranges', () => {
+    const event = timedEvent({
+      start: '2026-03-23T09:00:00',
+      end: '2026-03-23T10:00:00',
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;INTERVAL=3;BYDAY=MO,FR;COUNT=5',
+      },
+    });
+    const firstRange = projectCalendarEventOccurrences(
+      [event],
+      {
+        start: '2026-03-22T23:00:00Z',
+        end: '2026-03-27T08:00:00Z',
+      },
+      'Europe/Stockholm',
+    );
+    const followingRange = projectCalendarEventOccurrences(
+      [event],
+      {
+        start: '2026-03-27T08:00:00Z',
+        end: '2026-05-05T22:00:00Z',
+      },
+      'Europe/Stockholm',
+    );
+    const wholeRange = projectCalendarEventOccurrences(
+      [event],
+      {
+        start: '2026-03-22T23:00:00Z',
+        end: '2026-05-05T22:00:00Z',
+      },
+      'Europe/Stockholm',
+    );
+    const localStarts = wholeRange.occurrences.map(({ event: occurrence }) => {
+      if (occurrence.timing.type !== 'timed') {
+        throw new Error('Expected a timed occurrence');
+      }
+      return occurrence.timing.start.local;
+    });
+    const toLocalStarts = (projection: typeof wholeRange) =>
+      projection.occurrences.map(({ event: occurrence }) => {
+        if (occurrence.timing.type !== 'timed') {
+          throw new Error('Expected a timed occurrence');
+        }
+        return occurrence.timing.start.local;
+      });
+
+    expect(firstRange.diagnostics).toEqual([]);
+    expect(followingRange.diagnostics).toEqual([]);
+    expect(wholeRange.diagnostics).toEqual([]);
+    expect(toLocalStarts(firstRange)).toEqual(['2026-03-23T09:00:00']);
+    expect(toLocalStarts(followingRange)).toEqual([
+      '2026-03-27T09:00:00',
+      '2026-04-13T09:00:00',
+      '2026-04-17T09:00:00',
+      '2026-05-04T09:00:00',
+    ]);
+    expect(localStarts).toEqual([
+      '2026-03-23T09:00:00',
+      '2026-03-27T09:00:00',
+      '2026-04-13T09:00:00',
+      '2026-04-17T09:00:00',
+      '2026-05-04T09:00:00',
+    ]);
+    expect(
+      localStarts.map((local) =>
+        new Date(
+          calendarLocalDateTimeToUnixMillis(local, 'Europe/Stockholm'),
+        ).toISOString(),
+      ),
+    ).toEqual([
+      '2026-03-23T08:00:00.000Z',
+      '2026-03-27T08:00:00.000Z',
+      '2026-04-13T07:00:00.000Z',
+      '2026-04-17T07:00:00.000Z',
+      '2026-05-04T07:00:00.000Z',
+    ]);
+  });
+
+  it('includes the UNTIL occurrence for DATE, floating, TZID, and UTC starts', () => {
+    const event = (
+      id: string,
+      timing: CalendarEvent['timing'],
+      rrule: string,
+    ): CalendarEvent => ({
+      id,
+      calendarId: 'team',
+      uid: `${id}@example.test`,
+      title: 'Weekly planning',
+      timing,
+      recurrence: { rrule },
+    });
+    const cases: Array<{ label: string; event: CalendarEvent }> = [
+      {
+        label: 'DATE',
+        event: event(
+          'date-weekly',
+          {
+            type: 'all-day',
+            startDate: '2026-10-26',
+            endDate: '2026-10-27',
+          },
+          'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR;UNTIL=20261113',
+        ),
+      },
+      {
+        label: 'floating',
+        event: event(
+          'floating-weekly',
+          {
+            type: 'timed',
+            start: { type: 'floating', local: '2026-10-26T09:00:00' },
+            end: { type: 'floating', local: '2026-10-26T10:00:00' },
+          },
+          'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR;UNTIL=20261113T090000',
+        ),
+      },
+      {
+        label: 'TZID',
+        event: event(
+          'tzid-weekly',
+          {
+            type: 'timed',
+            start: {
+              type: 'zoned',
+              local: '2026-10-26T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+            end: {
+              type: 'zoned',
+              local: '2026-10-26T10:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR;UNTIL=20261113T080000Z',
+        ),
+      },
+      {
+        label: 'UTC',
+        event: event(
+          'utc-weekly',
+          {
+            type: 'timed',
+            start: {
+              type: 'zoned',
+              local: '2026-10-26T09:00:00',
+              timezone: 'UTC',
+            },
+            end: {
+              type: 'zoned',
+              local: '2026-10-26T10:00:00',
+              timezone: 'UTC',
+            },
+          },
+          'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR;UNTIL=20261113T090000Z',
+        ),
+      },
+    ];
+    const range = {
+      start: '2026-10-25T00:00:00Z',
+      end: '2026-11-14T00:00:00Z',
+    };
+
+    for (const { label, event: sourceEvent } of cases) {
+      const result = projectCalendarEventOccurrences(
+        [sourceEvent],
+        range,
+        'Europe/Stockholm',
+      );
+      const starts = result.occurrences.map(({ event: occurrence }) =>
+        occurrence.timing.type === 'all-day'
+          ? occurrence.timing.startDate
+          : occurrence.timing.start.type === 'floating'
+            ? occurrence.timing.start.local
+            : occurrence.timing.start.local,
+      );
+
+      expect(result.diagnostics).toEqual([]);
+      expect(starts).toEqual(
+        label === 'DATE'
+          ? ['2026-10-26', '2026-10-30', '2026-11-09', '2026-11-13']
+          : [
+              '2026-10-26T09:00:00',
+              '2026-10-30T09:00:00',
+              '2026-11-09T09:00:00',
+              '2026-11-13T09:00:00',
+            ],
+      );
+    }
+  });
+
   it.each(['MONTHLY', 'YEARLY'] as const)(
     'continues projecting plain %s BYDAY rules',
     (frequency) => {
@@ -343,12 +572,10 @@ describe('projectCalendarEventOccurrences', () => {
   );
 
   it.each([
-    'FREQ=WEEKLY;BYDAY=MO,FR;INTERVAL=3',
-    'FREQ=WEEKLY;BYDAY=MO,FR;COUNT=4',
-    'FREQ=WEEKLY;BYDAY=MO,FR;UNTIL=20261106T080000Z',
     'FREQ=WEEKLY;BYDAY=MO,FR;WKST=SU',
     'FREQ=WEEKLY;BYDAY=MO,FR;BYHOUR=9',
     'FREQ=WEEKLY;BYDAY=1FR',
+    'FREQ=WEEKLY;BYDAY=MO,XX',
     'FREQ=WEEKLY;INTERVAL=1.0;BYDAY=FR',
     'FREQ=WEEKLY;BYDAY=MO,WE',
     'FREQ=WEEKLY;BYDAY=MO,FR;X-UNSUPPORTED=1',
