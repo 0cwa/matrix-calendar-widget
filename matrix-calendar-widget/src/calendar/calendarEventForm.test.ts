@@ -560,6 +560,51 @@ describe('calendar event form adapter', () => {
     ).toEqual({ rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR' });
   });
 
+  it('loads and edits a bounded weekly BYDAY rule with a larger interval', () => {
+    const weeklyEvent: CalendarEvent = {
+      id: 'bounded-weekly-days',
+      calendarId: 'team',
+      uid: 'bounded-weekly-days@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-26T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-26T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=WEEKLY;INTERVAL=3;BYDAY=FR,MO;COUNT=5',
+      },
+    };
+    const values = calendarEventToFormValues(weeklyEvent, calendar);
+
+    expect(values).toMatchObject({
+      recurrenceFrequency: 'WEEKLY',
+      recurrenceInterval: '3',
+      recurrenceEnd: 'count',
+      recurrenceCount: '5',
+      recurrenceWeekdays: ['MO', 'FR'],
+      recurrenceEditable: true,
+    });
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        recurrenceCount: '8',
+        recurrenceWeekdays: ['MO', 'TU'],
+        recurrenceChanged: true,
+      }).recurrence,
+    ).toEqual({
+      rrule: 'FREQ=WEEKLY;INTERVAL=3;BYDAY=MO,TU;COUNT=8',
+    });
+  });
+
   it('adds a new DTSTART weekday when editing a weekly BYDAY series start', () => {
     const weeklyEvent: CalendarEvent = {
       id: 'weekly-days',
@@ -604,7 +649,7 @@ describe('calendar event form adapter', () => {
         startDate: '2026-10-26',
         endDate: '2026-10-27',
       },
-      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=MO,WE;INTERVAL=3' },
+      recurrence: { rrule: 'FREQ=WEEKLY;BYDAY=1MO;INTERVAL=3' },
     };
     const values = calendarEventToFormValues(unsupportedEvent, calendar);
 
@@ -1261,6 +1306,59 @@ describe('calendar event form adapter', () => {
         'date@example.test',
       ).recurrence,
     ).toEqual({ rrule: 'FREQ=DAILY;UNTIL=20261025' });
+  });
+
+  it('writes inclusive weekly BYDAY UNTIL dates in each DTSTART value kind', () => {
+    const base = createCalendarEventFormValues(
+      calendar,
+      DateTime.fromISO('2026-10-26T09:00:00', {
+        zone: 'Europe/Stockholm',
+      }),
+    );
+    const untilValues = {
+      ...base,
+      repeats: true,
+      recurrenceFrequency: 'WEEKLY' as const,
+      recurrenceInterval: '3',
+      recurrenceWeekdays: ['MO', 'FR'] as ['MO', 'FR'],
+      recurrenceEnd: 'until' as const,
+      recurrenceUntil: '2026-11-13',
+    };
+
+    expect(
+      calendarEventInputFromForm(untilValues, 'tzid@example.test').recurrence,
+    ).toEqual({
+      rrule: 'FREQ=WEEKLY;INTERVAL=3;BYDAY=MO,FR;UNTIL=20261113T225959Z',
+    });
+    expect(
+      calendarEventInputFromForm(
+        { ...untilValues, timedKind: 'floating' },
+        'floating@example.test',
+      ).recurrence,
+    ).toEqual({
+      rrule: 'FREQ=WEEKLY;INTERVAL=3;BYDAY=MO,FR;UNTIL=20261113T235959',
+    });
+    expect(
+      calendarEventInputFromForm(
+        {
+          ...untilValues,
+          timingType: 'all-day',
+          start: '2026-10-26',
+          end: '2026-10-26',
+        },
+        'date@example.test',
+      ).recurrence,
+    ).toEqual({
+      rrule: 'FREQ=WEEKLY;INTERVAL=3;BYDAY=MO,FR;UNTIL=20261113',
+    });
+    expect(
+      calendarEventInputFromForm(
+        { ...untilValues, timezone: 'UTC' },
+        'utc@example.test',
+      ).recurrence,
+    ).toEqual({
+      rrule: 'FREQ=WEEKLY;INTERVAL=3;BYDAY=MO,FR;UNTIL=20261113T235959Z',
+    });
   });
 
   it('displays a zoned UTC UNTIL date in the DTSTART timezone without patching it', () => {
