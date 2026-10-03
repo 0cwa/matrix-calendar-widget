@@ -71,10 +71,13 @@ fields and has no timezone until an application interprets it.
 5. Full recurrence editing, instance-edit semantics, and mainstream-client
    recurrence interoperability remain out of scope. The bounded editor may
    support the existing simple frequency rules and this additional weekly
-   BYDAY subset: plain weekday tokens including DTSTART's weekday, omitted or
-   `INTERVAL=1`, no `COUNT` or `UNTIL`, no other rule parts, and omitted or
-   default `WKST=MO`. Other weekly BYDAY combinations remain opaque and
-   preserved. For an existing PERIOD-valued RDATE, the editor may remove one
+   BYDAY subset: plain, unique weekday tokens including DTSTART's weekday, a
+   positive safe-integer `INTERVAL` (defaulting to 1), no ordinal BYDAY values,
+   and either no end, a positive `COUNT` across the whole series, or an
+   inclusive `UNTIL` compatible with DTSTART's value kind. `WKST` must be
+   omitted or `MO`, and no other rule parts are supported. Other weekly BYDAY
+   combinations remain opaque and preserved. For an existing PERIOD-valued
+   RDATE, the editor may remove one
    selected value by matching its complete start and either explicit end or
    original RFC DURATION components. It must preserve sibling RDATE values,
    property parameters, and all other resource data. The calendar write model
@@ -139,11 +142,13 @@ preservation. This does not make CalDAV queries viewer-local.
 Collection `Calendar.timezone` editing remains deferred under M4. Viewer-local
 event interpretation does not read or write that collection property.
 
-The bounded recurrence editor and codec support weekly BYDAY only for plain
-weekday tokens that include DTSTART's weekday, with omitted or `INTERVAL=1`, no
-`COUNT` or `UNTIL`, no additional RRULE parts, and omitted or default
-`WKST=MO`. The projector leaves other weekly BYDAY combinations opaque. An
-unrelated event edit preserves the source RRULE and resource data.
+The bounded recurrence editor and codec support weekly BYDAY only for unique
+plain weekday tokens that include DTSTART's weekday, a positive safe-integer
+`INTERVAL`, and no ordinal tokens. The end may be open, a positive `COUNT`
+across the whole series, or an inclusive `UNTIL` compatible with DTSTART's
+value kind. `WKST` must be omitted or `MO`, with no additional RRULE parts.
+The projector leaves other weekly BYDAY combinations opaque. An unrelated
+event edit preserves the source RRULE and resource data.
 
 PR #175 adds explicit-end and positive-duration PERIOD RDATE writes to the
 calendar domain, codec, and in-memory adapter for supported timed recurring
