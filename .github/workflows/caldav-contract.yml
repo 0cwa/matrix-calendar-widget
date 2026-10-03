@@ -57,6 +57,10 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Initialize sanitized contract summary
+        run: |
+          : > "$RUNNER_TEMP/caldav-safe-contract-summary.txt"
+
       - name: Test CalDAV report status sanitizer
         run: node --test dev/caldav-contract-status.test.mjs
 
@@ -138,6 +142,11 @@ jobs:
             printf '%s\n' "personal-openid-module-probe $probe_result"
             printf '%s\n' "$probe_summary"
           } >> "$GITHUB_STEP_SUMMARY"
+          {
+            printf '%s\n' 'Personal OpenID module probe'
+            printf '%s\n' "personal-openid-module-probe $probe_result"
+            printf '%s\n' "$probe_summary"
+          } >> "$RUNNER_TEMP/caldav-safe-contract-summary.txt"
           rm -f "$probe_stage_file"
           if [ "$probe_status" -ne 0 ]; then
             exit "$probe_status"
@@ -206,6 +215,10 @@ jobs:
             printf '%s\n' 'Real CalDAV contract stages'
             printf '%s\n' "$contract_summary"
           } >> "$GITHUB_STEP_SUMMARY"
+          {
+            printf '%s\n' 'Real CalDAV contract stages'
+            printf '%s\n' "$contract_summary"
+          } >> "$RUNNER_TEMP/caldav-safe-contract-summary.txt"
           rm -f "$contract_log" "$contract_report"
           rm -f "$contract_stage_file"
           set -e
@@ -217,3 +230,12 @@ jobs:
       - name: Stop services
         if: always()
         run: docker compose -f dev/compose.yaml down -v --remove-orphans
+
+      - name: Upload sanitized contract diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: caldav-safe-contract-diagnostics
+          path: ${{ runner.temp }}/caldav-safe-contract-summary.txt
+          if-no-files-found: ignore
+          retention-days: 1
