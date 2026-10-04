@@ -35,7 +35,7 @@ This repository begins as a hard fork of NeoDateFix. NeoDateFix stores meeting m
           └─────────────────┘   └───────────────┘
 ```
 
-The gateway and bot are initially one deployable service. Split them only when scaling, isolation, or operational requirements justify another network boundary. PostgreSQL is an optional app-owned store for reminder configuration and claim primitives; it is separate from CalDAV and Synapse. The reminder configuration API and scheduler runtime are wired behind separate default-off gates; a database store by itself does not enable Matrix delivery.
+The gateway and bot are initially one deployable service. Split them only when scaling, isolation, or operational requirements justify another network boundary. PostgreSQL is an optional app-owned store for reminder configuration and claim primitives; it is separate from CalDAV and Synapse. The reminder configuration API and scheduler runtime are wired behind separate default-off gates; a database store by itself does not enable Matrix delivery. Native scheduled delivery supports unencrypted rooms only. Room-target widget mutation notices have a third, independent gate and use the bot SDK's encryption-aware sender.
 
 ## Principal and authorization boundary
 
@@ -56,28 +56,32 @@ distinct ownership paths and the initial room-target contract:
   provider/CalDAV I/O. This validates the pinned development stack only; the
   etke image override and `/data` host rehearsal remain unverified deployment
   gates.
-- **Room-owned calendars** are planned to belong to the application principal.
-  Their path will resolve a canonical Matrix room ID through an
-  operator-managed static binding. The binding resolver and application-
-  principal room path are foundations only; that static-binding path is not
-  wired to CalDAV until M6 issue #7 implements and validates ADR024's
-  appservice OpenID mode, authorization-before-mint ordering, and cross-room
-  isolation against real Radicale. The user's proof authenticates the widget
-  actor; the separate appservice proof identifies the room calendar's CalDAV
-  principal.
+- **Room-owned calendars** belong to the configured application-service
+  principal. Room-target gateway operations resolve a canonical Matrix room ID
+  through the operator-managed `ROOM_CALENDAR_BINDINGS` map, check the current
+  actor, membership, action power, and exact binding, then obtain appservice
+  OpenID proof before CalDAV I/O. Read access and event writes use independent
+  default-off gates. The user's proof authenticates the widget actor; the
+  separate appservice proof identifies the room calendar's CalDAV principal.
+  Pinned Synapse/Radicale contracts cover room reads and conditional event
+  mutations, including denial before proof or I/O. PR #201 connects the primary
+  widget to the gateway's current room capabilities and bound calendar; it
+  builds a safe current-room Matrix link in event details and exposes controls
+  for supported alarm reminders to authorized managers. Its eight hosted
+  checks passed at source tree `a65811903363397ea0883f4e32a98ace7dfdb9a8`.
+  These contracts do not establish the operator's etke image, data store,
+  proxy, production path, or actual Element-client behavior.
 
-Existing room-context gateway routes remain active and make CalDAV requests
-under the authenticated requesting user's principal. They enforce current
-joined-room membership and action-specific power through
-`MatrixCalendarAuthorizationFactory`; authorization lookup failures deny the
-request. The policy foundation in this slice makes those checks fail closed.
+Personal room-context gateway routes remain associated with the authenticated
+requesting user's principal. They enforce current joined-room membership and
+action-specific power through `MatrixCalendarAuthorizationFactory`; lookup
+failures deny the request.
 
-Identity proof and authorization are separate. Existing widget room-context
-requests validate the requesting user's identity and separately check current
-room membership and action-specific power. Future application-principal widget
-requests must also check the static binding for the requested calendar. Bot
-commands must recheck sender membership/power and that binding for each
-operation. A Matrix sender is authorization and audit context; it does not
+Identity proof and authorization are separate. Room-target gateway requests
+validate the requesting actor and current room membership/power, then resolve
+the exact server-side binding before using the application-service principal.
+Bot commands recheck sender membership/power and that binding for each data
+command. The Matrix sender is authorization and audit context; it does not
 prove OpenID identity or CalDAV identity. Per-user bot calendars remain
 deferred.
 
@@ -162,9 +166,9 @@ then Matrix's default of 0. Calendar-management actions require the dedicated
 calendar-manage power, then `state_default`, then Matrix's default of 50.
 Only a genuine missing power-level event (`M_NOT_FOUND`) uses Matrix defaults;
 permission, network, server, or other lookup failures deny the action. The
-membership/power policy is used by existing user-principal room-context routes;
-the static-binding/application-principal route is not wired to CalDAV. The UI
-is never the authorization boundary.
+membership/power policy is used by personal-principal room-context routes and
+gated application-principal room-target operations. The UI is never the
+authorization boundary.
 
 ## Room/calendar binding
 
@@ -178,25 +182,43 @@ URL cannot select or create a binding. Room members cannot change bindings;
 collection create/delete/rename and room rebinding remain operator-managed.
 
 The resolver is a pure in-memory function and performs no network or CalDAV
-I/O. Application-principal room-owned access remains blocked on M6 issue #7
-and deployment isolation: Radicale `owner_only` grants the application
-principal access to its whole home, so that home must stay within one trusted
-organizational boundary or use equivalent per-room isolation. M2 #48/#45 are
-complete for personal actor authentication and same-user enumeration; they do
-not accept appservice proof or prove room isolation. The actual etke-host
-custom-image override and preservation of its `/data` store remain unverified
-deployment gates. Existing user-principal room-context routes are separate and
-remain active.
+I/O. The application-principal room path is implemented, but it is not enabled
+by default. Radicale `owner_only` grants the principal access to its whole
+home, so that home must stay within one trusted organizational boundary or
+use equivalent per-room isolation; gateway bindings are application-level
+scoping, not backend per-room ACLs. M2 #48/#45 cover personal actor
+authentication and same-user enumeration. M6 contracts cover the appservice
+room path and cross-room denial against pinned services, not the production
+host. The actual etke-host custom-image override and preservation of its
+`/data` store remain unverified deployment gates. Existing user-principal
+room-context routes are separate and remain active. Issue #7's bounded
+repository criteria are complete; actual Element-client and operator-host
+acceptance remain separate.
 
 ## Reminder delivery
 
 VALARM expresses _when_ a reminder is due. Matrix recipient targeting is gateway sidecar metadata keyed to a stable event/alarm identity.
 
 The initial delivery target is a Matrix room-wide mention using
-`m.mentions.room: true`, only when the current room state grants the bot
-permission. Individual Matrix recipients remain out of scope.
+`m.mentions.room: true`, only when the current room state grants the appservice
+sender permission. Individual Matrix recipients remain out of scope. Reminder
+settings use `MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED`; scheduled
+delivery uses the independent default-off
+`ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED` gate and also requires room access,
+valid bindings and service configuration, and the app-owned store.
 
-The bounded scheduler uses persistent claim state and stable Matrix transaction IDs across retries. Configuration and delivery each require an operator gate; delivery also rechecks current room binding, encryption state, and mention permission before resolving the canonical alarm and sending. The feature remains disabled by default, and production database/host validation remains open.
+The bounded scheduler uses persistent claim state and stable Matrix transaction
+IDs across retries. It rechecks current room binding, canonical event/alarm,
+encryption state, and mention permission before sending. The native appservice
+transport refuses encrypted or unknown room state; stable IDs and database
+claims do not guarantee exactly-once delivery, and scheduler coordination
+assumes one server replica. Production database/host validation remains open.
+Room-target widget event create/update/delete notices are separate best-effort
+messages after successful room-target widget create/update/delete operations.
+They are controlled by
+`ROOM_CALENDAR_ACTION_MESSAGES_ENABLED`, use sanitized summaries with empty
+`m.mentions`, and rely on the SDK encryption-aware path for encrypted rooms.
+Notice failure does not roll back a CalDAV mutation.
 
 ## MSC4496
 

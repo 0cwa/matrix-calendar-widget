@@ -88,10 +88,19 @@ RADICALE_URL=https://calendar.example.com
 # accepted. Enabling it does not enable reminder scheduling or delivery.
 # MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED=false
 
+# Optional, defaults to false. Starts bounded scheduled room reminders only
+# when ROOM_CALENDAR_ACCESS_ENABLED and the app-owned reminder store are also
+# ready. This native Matrix sender supports unencrypted rooms only; encrypted
+# or unknown room state is refused. Stable transaction IDs do not guarantee
+# exactly-once delivery. See ADR028 for the authorization, limits, and policy.
+# ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED=false
+
 # Optional, defaults to false. Send best-effort Matrix notices after successful
 # room-calendar create, update, and delete operations. This is independent of
 # the room access and event-write gates. Encrypted rooms require the bot's
-# encryption-aware Matrix sender to confirm room encryption.
+# encryption-aware Matrix sender to confirm room encryption. Failures are
+# best-effort and do not change a committed CalDAV result; the pinned SDK's
+# default request timeout is 60 seconds and is not overridden here. See ADR032.
 # ROOM_CALENDAR_ACTION_MESSAGES_ENABLED=false
 
 # optional - maximum calendar gateway requests allowed from one TCP source
@@ -114,6 +123,11 @@ MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS=10000
 # migrations run at server startup; omit this setting to keep reminders disabled
 # supply this URL through deployment secret management and do not log it
 MATRIX_CALENDAR_REMINDER_DATABASE_URL='postgresql://matrix_calendar:password@postgres.example.com:5432/matrix_calendar'
+
+# Room reminder delivery remains disabled unless all required gates, service
+# credentials, bindings, homeserver/CalDAV configuration, and the store are
+# available. Review [ADR028](./adrs/adr028-room-reminder-configuration-and-delivery.md)
+# and [deployment notes](./deployment-docker.md) before enabling it.
 
 # defaults to verified certificate-chain and hostname checks
 # only disable TLS on an operator-controlled isolated database network
@@ -219,6 +233,17 @@ GUEST_USER_DEFAULT_POWER_LEVEL=0
 GUEST_USER_DELETE_POWER_LEVEL_ON_LEAVE=true
 #
 ```
+
+`ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED` defaults to `false`. Before enabling it,
+review [ADR028](./adrs/adr028-room-reminder-configuration-and-delivery.md) and
+[deployment notes](./deployment-docker.md): delivery also requires room access,
+a valid appservice/binding configuration, and the app-owned reminder database.
+The native scheduled sender only supports unencrypted rooms and refuses
+unknown encryption state. Stable transaction IDs do not guarantee exactly-once
+Matrix delivery. `ROOM_CALENDAR_ACTION_MESSAGES_ENABLED` is a separate,
+default-off, best-effort post-success notice gate; see
+[ADR032](./adrs/adr032-room-calendar-action-messages.md). A notice failure does
+not change an already committed CalDAV mutation.
 
 #### `DEFAULT_EVENTS_CONFIG`
 

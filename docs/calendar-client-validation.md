@@ -3,21 +3,21 @@
 This checklist separates automated calendar-widget evidence from testing inside
 an actual Matrix client. The component tests do not establish that an Element
 client embeds this build correctly, forwards keyboard input, or presents it
-well at every viewport size. Client and responsive checks below remain a
-release gate until recorded against a release candidate.
+well at every viewport size. Actual-client, screen-reader, and zoom checks
+below remain a release gate until recorded against a release candidate.
 
 ## Automated evidence
 
 The calendar-view, event-list, and event-details suites run in Vitest's
 `happy-dom` environment. They cover these current surfaces:
 
-| Surface                                  | Automated check                                                                          | Current evidence                                                                      |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Calendar grid event                      | Accessible button name and keyboard `Enter` activation                                   | Covered                                                                               |
-| Event list and details                   | `Tab` to event, `Enter` to open, named dialog, `Escape` to close, focus returns to event | Covered                                                                               |
-| Calendar grid, event list, event details | `vitest-axe` automated accessibility scan                                                | Covered; no violations in the tested fixtures                                         |
-| Actual CSS layout at multiple widths     | Browser layout measurements                                                              | Not run; no Playwright browser executable was available in the validation environment |
-| Matrix client integration                | Embedded in a real client                                                                | Not run                                                                               |
+| Surface                                  | Automated check                                                                          | Current evidence                                                                |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Calendar grid event                      | Accessible button name and keyboard `Enter` activation                                   | Covered                                                                         |
+| Event list and details                   | `Tab` to event, `Enter` to open, named dialog, `Escape` to close, focus returns to event | Covered                                                                         |
+| Calendar grid, event list, event details | `vitest-axe` automated accessibility scan                                                | Covered; no violations in the tested fixtures                                   |
+| Actual CSS layout at multiple widths     | Hosted Chromium production-preview fixture at four viewports                             | Passed 8/8 list/month cases at tested tree `c368aac`; synthetic components only |
+| Matrix client integration                | Embedded in a real client                                                                | Not run                                                                         |
 
 The automated tests use synthetic events and an in-memory calendar repository.
 For this worktree, all 14 tests in the three listed suites passed on
@@ -85,18 +85,21 @@ than substituting a desktop browser emulation result.
 
 ## Evidence status
 
-No actual Element client or browser layout measurement was available for this
-revision. The rows below are deliberately marked untested; automated
-happy-dom coverage is not a substitute for them.
+The hosted Chromium component fixture passed at the exact tree recorded in
+[browser validation](./browser-calendar-validation.md). No actual Element
+client or screen-reader run is recorded. The rows below keep that distinction
+visible; automated happy-dom and standalone-browser results do not validate a
+host client.
 
-| Client target                      | Version / device | Result       | Evidence                                                         |
-| ---------------------------------- | ---------------- | ------------ | ---------------------------------------------------------------- |
-| Element Web                        | Not recorded     | **Untested** | No live client run                                               |
-| Element Desktop                    | Not recorded     | **Untested** | No live client run                                               |
-| Element for Android                | Not recorded     | **Untested** | No live client run                                               |
-| Element for iOS                    | Not recorded     | **Untested** | No live client run                                               |
-| Browser layout at listed viewports | Not recorded     | **Untested** | Playwright browser executable unavailable; no dimensions claimed |
+| Client target                      | Version / device  | Result       | Evidence                                                                                              |
+| ---------------------------------- | ----------------- | ------------ | ----------------------------------------------------------------------------------------------------- |
+| Element Web                        | Not recorded      | **Untested** | No live client run                                                                                    |
+| Element Desktop                    | Not recorded      | **Untested** | No live client run                                                                                    |
+| Element for Android                | Not recorded      | **Untested** | No live client run                                                                                    |
+| Element for iOS                    | Not recorded      | **Untested** | No live client run                                                                                    |
+| Browser layout at listed viewports | Synthetic fixture | **Passed**   | Hosted Chromium job, 8/8 list/month cases; see [browser validation](./browser-calendar-validation.md) |
 
-For each completed row, replace “Not recorded” and “Untested” with the exact
-version/device, pass/fail result, measured dimensions, and a link to retained
-evidence. Keep failed and unavailable targets visible in the release record.
+For each actual-client row, replace “Not recorded” and “Untested” with the
+exact version/device, pass/fail result, measured dimensions, and a link to
+retained evidence. Keep failed and unavailable targets visible in the release
+record.

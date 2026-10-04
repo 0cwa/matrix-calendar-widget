@@ -331,98 +331,67 @@ DST regression or recurrence-editing criteria above.
 
 ## M6 — Matrix team features and reminders
 
-- [x] Wire the zero-I/O `target=room` authorization preflight into calendar
-      operations: check joined membership and power before resolving the
-      operator-managed static binding. Room data access defaults disabled;
-      enabled listEvents uses the proven application-principal read path, while
-      room event operations have a separate default-off write gate.
-  - [x] Define the operator-managed static room-to-calendar contract (ADR014/
-        ADR015) and validate bindings in server configuration before lookup.
-  - [x] Add a pure room-binding resolver and joined-membership/power policy
-        service that denies on lookup errors. Existing user-principal room-
-        context routes remain active and use the authenticated user's
-        principal.
-- [ ] Enable live room-calendar data access and room-target diagnostics only
-      after M6 issue #7 validates the appservice proof minted only after actor identity,
-      membership, power, and exact binding checks; real Radicale access under
-      the appservice principal; and cross-room isolation. The authentication
-      adapter does not itself authorize room operations. M2 #48/#45 are
-      complete for personal actor authentication and enumeration, but do not
-      establish appservice identity or room isolation. Verify that the
-      operator's etke image override keeps the existing `/data` store before
-      rollout. Keep issue #7 open until its room-calendar acceptance passes.
-  - [x] Implement gated application-principal listEvents and prove personal,
-        room subject binding, and cross-room isolation against pinned Synapse
-        and project-owned Radicale (PR #164). The shared dev login fixture has
-        an explicit successful-login burst allowance; production limits are
-        unchanged. Room event operations have a separate write gate; room
-        diagnostics and delivery remain disabled.
-  - [x] Implement separately gated room event get/create/update/delete, with
-        current actor/action/binding authorization before service proof and
-        collection/resource checks at the CalDAV boundary. Conditional writes
-        preserve unsupported content; room and personal deletes require one
-        safe VEVENT series, including nested-component checks. Real hosted
-        write, nonmember, cross-room, and personal contracts are required before
-        merge; operator enablement remains separate.
-- [x] Bounded room reminder configuration and alarm-options APIs, stored as
-      Matrix sidecar metadata separately from canonical iCalendar. Both require
-      current actor membership/action power, exact binding, and known
-      unencrypted room state before source/store access; configuration and
-      delivery gates default off.
+- [x] Resolve server-only static room/calendar bindings under ADR014/ADR015.
+      Validate the current actor, joined membership, action power, and exact
+      binding before application-principal proof or CalDAV I/O.
+- [x] Prove gated application-principal reads, subject binding, and cross-room
+      isolation against pinned Synapse and project-owned Radicale (PR #164).
+- [x] Implement separately gated room event get/create/update/delete with
+      conditional ETag writes and canonical-content preservation. Hosted
+      personal, room-write, nonmember, and cross-room contracts pass (PR #193).
+- [x] Route the primary widget through personal and configured room calendars.
+      Capabilities are presentation hints; every backend operation rechecks
+      authorization. Collection lifecycle and bindings remain operator-managed.
+- [x] Store bounded per-alarm room-mention intent as Matrix sidecar metadata.
+      Settings and alarm-options APIs require current actor/action/binding and
+      known unencrypted room state before source/store access (ADR028/ADR033).
   - [x] Give newly created or explicitly edited DISPLAY alarms stable UUID
-        UIDs; preserve existing UIDs and untouched UID-less legacy alarms.
-        Malformed, duplicate, or resource-colliding UIDs disable alarm controls.
-        This identity foundation alone does not enable settings or delivery.
-  - [x] Resolve stable DISPLAY alarm identity against already-fetched canonical
-        iCalendar data, with typed DATE/floating/UTC/TZID recurrence keys and
-        fail-closed malformed/duplicate identity checks. This pure helper does
-        no I/O and does not enable settings, scheduling, or delivery.
-- [ ] First reminder delivery target: permission-checked room-wide
-      notifications using standard `m.mentions.room: true`; check room-mention
-      permission again at delivery time (ADR007/ADR019).
-  - [x] Add policy-only helpers for the standard message shape, scheduling-time
-        actor membership/app action power/exact binding, and delivery-time
-        binding/current sender membership/message power/room-mention threshold.
-        Fake-state tests cover denial and state lookup failures. These checks
-        are wired into the native Matrix transport and scheduler runtime.
-        Delivery remains disabled by default; final hosted PostgreSQL
-        concurrent-claim and combined live-service gates are still required
-        before treating delivery as ready to enable.
-- [x] App-owned PostgreSQL reminder persistence, schema migrations, and
-      transactional claim/completion contract are implemented (ADR019). The
-      restricted-role PostgreSQL 16 integration job passed all five hosted
-      contract tests in PR #111 (run 36358734009). Database claims provide
-      at-most-once claim/completion state, not exactly-once Matrix message
-      delivery. The store does not activate the separately gated scheduler.
-- [x] Default optional reminder database connections to verified TLS; allow
-      plaintext only with explicit `trusted-private-network` mode for an
-      operator-controlled isolated network (ADR021).
-- [ ] Validate the production connection against an operator-controlled
-      PostgreSQL endpoint and its trusted CA/certificate configuration. No
-      endpoint or CA/certificate configuration has been supplied; production
-      TLS/CA and runtime validation therefore remain open.
-- [x] Durable scheduler and idempotent delivery log are integrated behind a
-      separate default-off delivery gate.
-  - [x] Add a bounded scheduler core and native runtime with keyset store paging,
-        current binding/configuration/canonical-source rechecks after claims,
-        stable per-firing Matrix transaction IDs, cooperative abort deadlines,
-        and a lease release reserve. Repeated concurrent first-claim pairs are
-        included in the hosted PostgreSQL contract; the final hosted run remains
-        outstanding. OpenID proof acquisition may not stop promptly on abort,
-        so the operation deadline is best effort while claim fencing protects
-        delivery state.
-- [ ] Event detail action to link/open a Matrix room or MatrixRTC conference.
-- [x] Add default-off, best-effort room event action notices under ADR032.
+        UIDs, preserving untouched legacy alarms and existing identities.
+        Malformed, duplicate, or resource-colliding UIDs fail closed.
+  - [x] Resolve canonical event UID, typed recurrence identity, and alarm UID;
+        filter widget options by the current event UID and match the full tuple.
+- [x] Integrate app-owned PostgreSQL migrations, configuration, claims, leases,
+      retries, and completion state. PR #199's restricted-role PostgreSQL 16
+      job passed all seven cases, including 20 concurrent first-claim pairs.
+- [x] Default optional database connections to verified TLS; plaintext requires
+      explicit `trusted-private-network` mode (ADR021).
+- [x] Wire a bounded scheduler and native Matrix transport behind the separate
+      default-off delivery gate. Recheck current binding, settings, canonical
+      source, sender membership, message power, room-mention threshold, and
+      encryption state. Use standard `m.mentions.room: true`; encrypted or
+      unknown scheduled destinations fail closed.
+  - [x] Bound paging, candidates, scan windows, and post-claim work; propagate
+        cancellation, yield between projection chunks, fence claims, and reserve
+        lease-release time. External cancellation remains cooperative.
+  - [x] Prove canonical due delivery, repeated stable-transaction deduplication,
+        encrypted-room denial, and binding changes before and during scans
+        against pinned Synapse/Radicale (PR #199). This proves the pinned stack,
+        rather than exactly-once delivery on arbitrary homeservers.
+- [x] Offer a safe current-room link from authorized room event details and
+      display existing safe conference links. RTC creation and link authoring
+      remain future work.
+- [x] Add separately gated, best-effort action notices after successful room
+      create/update/delete operations (ADR032). The SDK request is awaited and
+      retains its timeout behavior; notice failure does not roll back CalDAV.
+- [ ] Accept operator enablement against the actual etke image, existing
+      `/data`, public ingress/URLs/TLS/secrets, production PostgreSQL endpoint
+      and trusted CA, and an isolated restore rehearsal.
+- [ ] Room-target diagnostics beyond the supported calendar/event paths.
 
-Room-wide reminders are the accepted v1 recipient flow: send only
-permission-checked `m.mentions.room: true` notifications and recheck permission
-at delivery time. Individual Matrix-recipient selection is outside the
-accepted v1 scope and requires a later explicit scope decision. Email
-attendee/address collection is separately deferred until members can
-explicitly verify and consent to share an address; do not infer email
-addresses from Matrix room membership.
+Room access, event writes, reminder configuration, reminder delivery, and
+action notices all default off. An explicitly configured reminder database can
+connect and migrate even with delivery disabled; default startup without a
+database or enabled flags does no reminder Matrix/CalDAV/timer work. One
+replica remains the supported initial topology.
 
-**Exit:** teams can manage events in the configured room calendar from the widget and receive reliable Matrix reminders. Collection lifecycle and room bindings remain operator-managed under ADR015.
+Room-wide reminders are the accepted v1 recipient flow. Individual Matrix
+recipients require a later scope decision; email attendee registration remains
+deferred until members explicitly verify and consent to sharing an address.
+Do not infer addresses from Matrix membership.
+
+**Exit:** repository v1 supports configured room event management and durable
+room-wide reminders. Actual Matrix-client and operator deployment acceptance
+remain separate; collection lifecycle and bindings stay operator-managed.
 
 ## M7 — Non-widget fallback
 
@@ -431,7 +400,7 @@ addresses from Matrix room membership.
 - [x] `!calendar event <id>`
 - [x] constrained event creation command
 - [x] constrained delete/cancel command
-- [ ] normal Matrix fallback messages for important widget-created calendar actions
+- [x] normal Matrix fallback messages for important widget-created calendar actions
 - [x] help text directing capable clients to the widget
 
 Command syntax, limits, permission gates, plaintext reply handling, and the
@@ -451,8 +420,8 @@ access and event writes stay disabled by default.
 
 - [ ] Responsive/a11y pass across narrow Element panels and full-screen widget.
   - [x] Add current calendar grid/list/details keyboard, focus, accessible-name,
-        and axe regressions. Actual browser layout and client embedding remain
-        unverified; see `docs/calendar-client-validation.md`.
+        and axe regressions. Hosted browser fixture checks pass; actual client
+        embedding remains unverified; see `docs/calendar-client-validation.md`.
 - [x] Source-based threat model and independent security review of its current
       boundary claims. Residual risks and deployment acceptance gates remain
       tracked in `docs/threat-model.md`; this is not a penetration test.
