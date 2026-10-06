@@ -2,7 +2,7 @@
 
 _Last updated: 2026-10-06._
 
-_Source snapshot: `main` at `e2c4ee1f1269545557050ac938505007028be941` (PR #215)._
+_Source snapshot: `main` at `69630543268c990605ab1936520956150f08d4c2` (PR #213)._
 
 ## Current phase
 
@@ -60,6 +60,19 @@ hosted browser cases passed on source tree
 `75169dd3f2cc3db2182026b52dbda58bc57239da`; dialog measurements wait for entry
 transitions before axe. This remains deterministic component evidence, not a
 live Matrix authorization, persistence, or client result.
+
+PR #216 adds prepared 1,000-event list/month render measurements at 1280×800.
+All twelve hosted browser cases passed at tree
+`911027044f96463a06e7d42cd2371ecf333662f7`; the real month overflow-link click
+returns all 1,000 unique expected list titles. Five measured samples per view
+have list median/max 947.30/1044.50 ms and month median/max
+2819.90/2898.70 ms. The month samples include a long task up to 2631 ms, so
+this does not establish interactivity or a capacity target. Raw measurements
+and provenance are retained in
+`docs/evidence/calendar-browser-20261006.json` and explained in
+`docs/calendar-performance.md`. The timer covers only fixture mount through
+populated DOM plus two frames; combined recurring projection/rendering,
+loading, memory, and actual clients remain unmeasured.
 
 ## Open scope and acceptance blockers
 

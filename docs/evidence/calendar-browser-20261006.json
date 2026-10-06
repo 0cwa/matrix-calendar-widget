@@ -1,0 +1,322 @@
+{
+  "measuredAt": "2026-10-06",
+  "sourceCommit": "1af82dee25e2365c7083c860e65fec94b2bffa14",
+  "sourceTree": "911027044f96463a06e7d42cd2371ecf333662f7",
+  "workflowRunId": 37481392793,
+  "browserJobId": 112330122875,
+  "artifactId": 11421332275,
+  "browserCasesPassed": 12,
+  "environment": {
+    "runner": "GitHub Actions ubuntu-latest",
+    "architecture": "Linux x64",
+    "workflowNodeMajor": 22
+  },
+  "views": {
+    "list": {
+      "mode": "list",
+      "dateRange": "2026-10-01 through 2026-11-01",
+      "generatedEventCount": 1000,
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "browserName": "chromium",
+      "environment": {
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.7827.55 Safari/537.36",
+        "viewportWidth": 1280,
+        "viewportHeight": 800
+      },
+      "warmup": {
+        "elapsedMs": 1051.6000000000058,
+        "populatedElementCount": 1000,
+        "overflow": {
+          "viewportWidth": 1280,
+          "documentWidth": 1280,
+          "surfaceWidth": 1264,
+          "surfaceScrollWidth": 1264
+        },
+        "longTasks": {
+          "supported": true,
+          "count": 4,
+          "maximumDurationMs": 591
+        },
+        "returnedListCount": 1000,
+        "uniqueReturnedTitleCount": 1000
+      },
+      "sampleCount": 5,
+      "samples": [
+        {
+          "elapsedMs": 886.3000000000175,
+          "populatedElementCount": 1000,
+          "overflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "longTasks": {
+            "supported": true,
+            "count": 3,
+            "maximumDurationMs": 525
+          },
+          "returnedListCount": 1000,
+          "uniqueReturnedTitleCount": 1000
+        },
+        {
+          "elapsedMs": 875.3000000000175,
+          "populatedElementCount": 1000,
+          "overflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "longTasks": {
+            "supported": true,
+            "count": 3,
+            "maximumDurationMs": 500
+          },
+          "returnedListCount": 1000,
+          "uniqueReturnedTitleCount": 1000
+        },
+        {
+          "elapsedMs": 977.4000000000233,
+          "populatedElementCount": 1000,
+          "overflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "longTasks": {
+            "supported": true,
+            "count": 3,
+            "maximumDurationMs": 579
+          },
+          "returnedListCount": 1000,
+          "uniqueReturnedTitleCount": 1000
+        },
+        {
+          "elapsedMs": 947.3000000000175,
+          "populatedElementCount": 1000,
+          "overflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "longTasks": {
+            "supported": true,
+            "count": 4,
+            "maximumDurationMs": 570
+          },
+          "returnedListCount": 1000,
+          "uniqueReturnedTitleCount": 1000
+        },
+        {
+          "elapsedMs": 1044.5,
+          "populatedElementCount": 1000,
+          "overflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "longTasks": {
+            "supported": true,
+            "count": 3,
+            "maximumDurationMs": 586
+          },
+          "returnedListCount": 1000,
+          "uniqueReturnedTitleCount": 1000
+        }
+      ],
+      "medianElapsedMs": 947.3000000000175,
+      "maximumElapsedMs": 1044.5,
+      "elapsedMeasurement": "fixture root render start to populated DOM and two animation frames; observational only"
+    },
+    "month": {
+      "mode": "month",
+      "dateRange": "2026-10-01 through 2026-11-01",
+      "generatedEventCount": 1000,
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "browserName": "chromium",
+      "environment": {
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.7827.55 Safari/537.36",
+        "viewportWidth": 1280,
+        "viewportHeight": 800
+      },
+      "warmup": {
+        "elapsedMs": 3046.6999999999825,
+        "populatedElementCount": 31,
+        "overflow": {
+          "viewportWidth": 1280,
+          "documentWidth": 1280,
+          "surfaceWidth": 1264,
+          "surfaceScrollWidth": 1264
+        },
+        "longTasks": {
+          "supported": true,
+          "count": 3,
+          "maximumDurationMs": 2679
+        },
+        "overflowEventCount": 938,
+        "parseableOverflowLinkCount": 31,
+        "visibleEventCount": 62,
+        "returnedListOverflow": {
+          "viewportWidth": 1280,
+          "documentWidth": 1280,
+          "surfaceWidth": 1264,
+          "surfaceScrollWidth": 1264
+        },
+        "monthOverflowLinkCount": 31,
+        "returnedListCount": 1000,
+        "uniqueReturnedTitleCount": 1000
+      },
+      "sampleCount": 5,
+      "samples": [
+        {
+          "elapsedMs": 2812.3000000000175,
+          "populatedElementCount": 31,
+          "overflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "longTasks": {
+            "supported": true,
+            "count": 2,
+            "maximumDurationMs": 2531
+          },
+          "overflowEventCount": 938,
+          "parseableOverflowLinkCount": 31,
+          "visibleEventCount": 62,
+          "returnedListOverflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "monthOverflowLinkCount": 31,
+          "returnedListCount": 1000,
+          "uniqueReturnedTitleCount": 1000
+        },
+        {
+          "elapsedMs": 2898.7000000000116,
+          "populatedElementCount": 31,
+          "overflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "longTasks": {
+            "supported": true,
+            "count": 2,
+            "maximumDurationMs": 2631
+          },
+          "overflowEventCount": 938,
+          "parseableOverflowLinkCount": 31,
+          "visibleEventCount": 62,
+          "returnedListOverflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "monthOverflowLinkCount": 31,
+          "returnedListCount": 1000,
+          "uniqueReturnedTitleCount": 1000
+        },
+        {
+          "elapsedMs": 2811.8000000000175,
+          "populatedElementCount": 31,
+          "overflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "longTasks": {
+            "supported": true,
+            "count": 2,
+            "maximumDurationMs": 2505
+          },
+          "overflowEventCount": 938,
+          "parseableOverflowLinkCount": 31,
+          "visibleEventCount": 62,
+          "returnedListOverflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "monthOverflowLinkCount": 31,
+          "returnedListCount": 1000,
+          "uniqueReturnedTitleCount": 1000
+        },
+        {
+          "elapsedMs": 2827.2000000000116,
+          "populatedElementCount": 31,
+          "overflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "longTasks": {
+            "supported": true,
+            "count": 2,
+            "maximumDurationMs": 2531
+          },
+          "overflowEventCount": 938,
+          "parseableOverflowLinkCount": 31,
+          "visibleEventCount": 62,
+          "returnedListOverflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "monthOverflowLinkCount": 31,
+          "returnedListCount": 1000,
+          "uniqueReturnedTitleCount": 1000
+        },
+        {
+          "elapsedMs": 2819.899999999994,
+          "populatedElementCount": 31,
+          "overflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "longTasks": {
+            "supported": true,
+            "count": 2,
+            "maximumDurationMs": 2533
+          },
+          "overflowEventCount": 938,
+          "parseableOverflowLinkCount": 31,
+          "visibleEventCount": 62,
+          "returnedListOverflow": {
+            "viewportWidth": 1280,
+            "documentWidth": 1280,
+            "surfaceWidth": 1264,
+            "surfaceScrollWidth": 1264
+          },
+          "monthOverflowLinkCount": 31,
+          "returnedListCount": 1000,
+          "uniqueReturnedTitleCount": 1000
+        }
+      ],
+      "medianElapsedMs": 2819.899999999994,
+      "maximumElapsedMs": 2898.7000000000116,
+      "elapsedMeasurement": "fixture root render start to populated DOM and two animation frames; observational only"
+    }
+  }
+}
