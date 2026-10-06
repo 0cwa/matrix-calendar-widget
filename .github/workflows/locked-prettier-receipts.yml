@@ -1,0 +1,58 @@
+name: Temporary locked formatter receipts
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/locked-prettier-receipts.yml
+      - scripts/locked-prettier-receipts.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: locked-prettier-receipts-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  receipts:
+    if: github.event.pull_request.head.repo.full_name == '0cwa/matrix-calendar-widget'
+    name: Format pinned candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - head: 61e606e5b8e0f69d8f1c4f3d132f5b72856d9523
+          - head: 4669e8e9cd338b984d661029ffd25e315d8e5721
+          - head: 5d2cbafa178fddd5aaa1fc39734cd027459b3dd5
+    steps:
+      - name: Checkout helper source
+        uses: actions/checkout@v7
+        with:
+          repository: 0cwa/matrix-calendar-widget
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: helper-source
+          persist-credentials: false
+          sparse-checkout: scripts/locked-prettier-receipts.mjs
+
+      - name: Copy helper into runner temp
+        run: cp helper-source/scripts/locked-prettier-receipts.mjs "$RUNNER_TEMP/locked-prettier-receipts.mjs"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Checkout immutable candidate
+        uses: actions/checkout@v7
+        with:
+          repository: 0cwa/matrix-calendar-widget
+          ref: ${{ matrix.head }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run pinned format and widget translation
+        working-directory: target
+        run: node "$RUNNER_TEMP/locked-prettier-receipts.mjs"
