@@ -9,6 +9,14 @@ const PHASES = new Set([
   'gateway-ready',
   'widget-ready',
   'element-ready',
+  'member-a-registration',
+  'member-a-login',
+  'member-b-registration',
+  'member-b-login',
+  'outsider-registration',
+  'outsider-login',
+  'bot-registration',
+  'bot-login',
   'member-a-authenticated',
   'member-b-authenticated',
   'outsider-authenticated',
@@ -26,9 +34,63 @@ const PHASES = new Set([
   'stale-etag-conflict',
   'canonical-read-after-denial',
   'browser-egress',
+  'runtime-versions',
 ]);
 const STATUSES = new Set(['started', 'passed', 'failed', 'unavailable']);
-const ALLOWED_KEYS = new Set(['phase', 'status', 'httpStatus', 'count']);
+const FAILURE_CODES = new Set([
+  'docker-command-failed',
+  'docker-process-spawn-failed',
+  'invalid-login-response',
+  'invalid-project-name',
+  'matrix-http-failed',
+  'matrix-invalid-json',
+  'matrix-transport-failed',
+]);
+const VERSION_FIELDS = new Set([
+  'elementWebVersion',
+  'synapseVersion',
+  'radicaleVersion',
+  'chromiumVersion',
+  'runnerOS',
+  'runnerOSVersion',
+  'runnerArchitecture',
+  'nodeVersion',
+]);
+const ALLOWED_KEYS = new Set([
+  'phase',
+  'status',
+  'httpStatus',
+  'count',
+  'failureCode',
+  'processExitCode',
+  ...VERSION_FIELDS,
+]);
+
+function validRuntimeVersions(record) {
+  const expectedKeys = new Set(['phase', 'status', ...VERSION_FIELDS]);
+  if (
+    Object.keys(record).length !== expectedKeys.size ||
+    Object.keys(record).some((key) => !expectedKeys.has(key)) ||
+    record.status !== 'passed' ||
+    record.elementWebVersion !== 'v1.12.30' ||
+    record.synapseVersion !== 'v1.161.0' ||
+    record.radicaleVersion !== '3.8.0.0' ||
+    typeof record.chromiumVersion !== 'string' ||
+    !/^\d{1,3}(?:\.\d{1,5}){2,3}$/u.test(record.chromiumVersion) ||
+    record.runnerOS !== 'linux' ||
+    typeof record.runnerOSVersion !== 'string' ||
+    !/^\d+(?:\.\d+){1,4}(?:-\d+(?:-(?:azure|aws|gcp|generic))?)?$/u.test(
+      record.runnerOSVersion,
+    ) ||
+    !['x64', 'arm64'].includes(record.runnerArchitecture) ||
+    typeof record.nodeVersion !== 'string' ||
+    !/^v\d{1,3}\.\d{1,3}\.\d{1,3}$/u.test(record.nodeVersion)
+  ) {
+    return false;
+  }
+
+  return true;
+}
 
 export function sanitizeElementAcceptance(input, sourceSha) {
   if (typeof sourceSha !== 'string' || !/^[a-f0-9]{40}$/i.test(sourceSha)) {
@@ -75,17 +137,76 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       throw new Error('invalid element acceptance summary');
     }
 
+    if (
+      Object.hasOwn(record, 'failureCode') &&
+      !FAILURE_CODES.has(record.failureCode)
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    if (
+      Object.hasOwn(record, 'processExitCode') &&
+      (!Number.isInteger(record.processExitCode) ||
+        record.processExitCode < 1 ||
+        record.processExitCode > 255)
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    if (
+      (record.phase === 'runtime-versions' && !validRuntimeVersions(record)) ||
+      (record.phase !== 'runtime-versions' &&
+        [...VERSION_FIELDS].some((key) => Object.hasOwn(record, key)))
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    if (
+      (record.failureCode === 'docker-command-failed' &&
+        !Object.hasOwn(record, 'processExitCode')) ||
+      (record.failureCode === 'matrix-http-failed' &&
+        !Object.hasOwn(record, 'httpStatus')) ||
+      (record.failureCode === 'matrix-invalid-json' &&
+        !Object.hasOwn(record, 'httpStatus'))
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
     phases.set(record.phase, record);
   }
 
   const lines = [`element-acceptance source_sha=${sourceSha.toLowerCase()}`];
   for (const [phase, record] of phases) {
+    if (phase === 'runtime-versions') {
+      lines.push(
+        [
+          'phase=runtime-versions',
+          'status=passed',
+          `element_web=${record.elementWebVersion}`,
+          `synapse=${record.synapseVersion}`,
+          `radicale=${record.radicaleVersion}`,
+          `chromium=${record.chromiumVersion}`,
+          `runner_os=${record.runnerOS}`,
+          `runner_os_version=${record.runnerOSVersion}`,
+          `runner_arch=${record.runnerArchitecture}`,
+          `node=${record.nodeVersion}`,
+        ].join(' '),
+      );
+      continue;
+    }
+
     const fields = [`phase=${phase}`, `status=${record.status}`];
     if (Object.hasOwn(record, 'httpStatus')) {
       fields.push(`http_status=${record.httpStatus}`);
     }
     if (Object.hasOwn(record, 'count')) {
       fields.push(`count=${record.count}`);
+    }
+    if (Object.hasOwn(record, 'failureCode')) {
+      fields.push(`failure_code=${record.failureCode}`);
+    }
+    if (Object.hasOwn(record, 'processExitCode')) {
+      fields.push(`process_exit_code=${record.processExitCode}`);
     }
     lines.push(fields.join(' '));
   }

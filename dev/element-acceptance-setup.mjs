@@ -23,13 +23,23 @@ const PHASES = new Set([
   'gateway-ready',
   'widget-ready',
   'element-ready',
+  'member-a-registration',
+  'member-a-login',
+  'member-b-registration',
+  'member-b-login',
+  'outsider-registration',
+  'outsider-login',
+  'bot-registration',
+  'bot-login',
 ]);
 
 class FixtureSetupError extends Error {
-  constructor(phase, httpStatus) {
+  constructor(phase, httpStatus, failureCode, processExitCode) {
     super('Element acceptance fixture setup failed');
     this.phase = phase;
     this.httpStatus = httpStatus;
+    this.failureCode = failureCode;
+    this.processExitCode = processExitCode;
   }
 }
 
@@ -70,14 +80,27 @@ async function runPhase(phase, operation) {
     recordStage(phase, 'passed');
     return result;
   } catch (error) {
-    const httpStatus =
-      error instanceof FixtureSetupError ? error.httpStatus : undefined;
-    recordStage(
+    const details =
+      error instanceof FixtureSetupError
+        ? {
+            ...(Number.isInteger(error.httpStatus)
+              ? { httpStatus: error.httpStatus }
+              : {}),
+            ...(Number.isInteger(error.processExitCode)
+              ? { processExitCode: error.processExitCode }
+              : {}),
+            ...(typeof error.failureCode === 'string'
+              ? { failureCode: error.failureCode }
+              : {}),
+          }
+        : {};
+    recordStage(phase, 'failed', details);
+    throw new FixtureSetupError(
       phase,
-      'failed',
-      Number.isInteger(httpStatus) ? { httpStatus } : {},
+      details.httpStatus,
+      details.failureCode,
+      details.processExitCode,
     );
-    throw new FixtureSetupError(phase, httpStatus);
   }
 }
 
@@ -99,10 +122,10 @@ function matrixUserId(localpart) {
   return `@${localpart}:localhost`;
 }
 
-function createUser(localpart, password) {
+function createUser(localpart, password, phase) {
   const projectName = requiredEnvironment('COMPOSE_PROJECT_NAME');
   if (!/^[a-z0-9][a-z0-9_-]{0,62}$/u.test(projectName)) {
-    throw new FixtureSetupError('accounts-ready');
+    throw new FixtureSetupError(phase, undefined, 'invalid-project-name');
   }
 
   try {
@@ -134,8 +157,21 @@ function createUser(localpart, password) {
         stdio: ['pipe', 'pipe', 'pipe'],
       },
     );
-  } catch {
-    throw new FixtureSetupError('accounts-ready');
+  } catch (error) {
+    const processExitCode =
+      Number.isInteger(error?.status) &&
+      error.status >= 0 &&
+      error.status <= 255
+        ? error.status
+        : undefined;
+    throw new FixtureSetupError(
+      phase,
+      undefined,
+      processExitCode === undefined
+        ? 'docker-process-spawn-failed'
+        : 'docker-command-failed',
+      processExitCode,
+    );
   }
 }
 
@@ -153,50 +189,60 @@ async function matrixJson(path, { token, method = 'GET', body } = {}, phase) {
       signal: AbortSignal.timeout(15_000),
     });
   } catch {
-    throw new FixtureSetupError(phase);
+    throw new FixtureSetupError(phase, undefined, 'matrix-transport-failed');
   }
 
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
-    throw new FixtureSetupError(phase, response.status);
+    throw new FixtureSetupError(phase, response.status, 'matrix-http-failed');
   }
 
   try {
     return await response.json();
   } catch {
-    throw new FixtureSetupError(phase, response.status);
+    throw new FixtureSetupError(phase, response.status, 'matrix-invalid-json');
   }
 }
 
-async function registerAndLogin(localpart, password, phase) {
-  createUser(localpart, password);
-  const response = await matrixJson(
-    '/_matrix/client/v3/login',
-    {
-      method: 'POST',
-      body: {
-        type: 'm.login.password',
-        identifier: { type: 'm.id.user', user: localpart },
-        password,
-      },
-    },
-    phase,
+async function registerAndLogin(localpart, password, actor) {
+  const registrationPhase = `${actor}-registration`;
+  const loginPhase = `${actor}-login`;
+  await runPhase(registrationPhase, async () =>
+    createUser(localpart, password, registrationPhase),
   );
+  return runPhase(loginPhase, async () => {
+    const response = await matrixJson(
+      '/_matrix/client/v3/login',
+      {
+        method: 'POST',
+        body: {
+          type: 'm.login.password',
+          identifier: { type: 'm.id.user', user: localpart },
+          password,
+        },
+      },
+      loginPhase,
+    );
 
-  if (
-    response.user_id !== matrixUserId(localpart) ||
-    !safeCredential(response.access_token) ||
-    !safeCredential(response.device_id)
-  ) {
-    throw new FixtureSetupError(phase);
-  }
+    if (
+      response.user_id !== matrixUserId(localpart) ||
+      !safeCredential(response.access_token) ||
+      !safeCredential(response.device_id)
+    ) {
+      throw new FixtureSetupError(
+        loginPhase,
+        undefined,
+        'invalid-login-response',
+      );
+    }
 
-  addMask(response.access_token);
-  return {
-    userId: response.user_id,
-    accessToken: response.access_token,
-    deviceId: response.device_id,
-  };
+    addMask(response.access_token);
+    return {
+      userId: response.user_id,
+      accessToken: response.access_token,
+      deviceId: response.device_id,
+    };
+  });
 }
 
 async function createRoom(token, name, invite = []) {
@@ -392,28 +438,26 @@ async function provision() {
   };
 
   const actors = await runPhase('accounts-ready', async () => {
-    const [memberA, memberB, outsider, bot] = await Promise.all([
-      registerAndLogin(
-        actorLocalparts.memberA,
-        actorPasswords.memberA,
-        'accounts-ready',
-      ),
-      registerAndLogin(
-        actorLocalparts.memberB,
-        actorPasswords.memberB,
-        'accounts-ready',
-      ),
-      registerAndLogin(
-        actorLocalparts.outsider,
-        actorPasswords.outsider,
-        'accounts-ready',
-      ),
-      registerAndLogin(
-        actorLocalparts.bot,
-        actorPasswords.bot,
-        'accounts-ready',
-      ),
-    ]);
+    const memberA = await registerAndLogin(
+      actorLocalparts.memberA,
+      actorPasswords.memberA,
+      'member-a',
+    );
+    const memberB = await registerAndLogin(
+      actorLocalparts.memberB,
+      actorPasswords.memberB,
+      'member-b',
+    );
+    const outsider = await registerAndLogin(
+      actorLocalparts.outsider,
+      actorPasswords.outsider,
+      'outsider',
+    );
+    const bot = await registerAndLogin(
+      actorLocalparts.bot,
+      actorPasswords.bot,
+      'bot',
+    );
     return { memberA, memberB, outsider, bot };
   });
 
@@ -550,18 +594,38 @@ async function main() {
       error instanceof FixtureSetupError && PHASES.has(error.phase)
         ? error.phase
         : 'accounts-ready';
-    const httpStatus = error instanceof FixtureSetupError && error.httpStatus;
+    const details =
+      error instanceof FixtureSetupError
+        ? {
+            ...(Number.isInteger(error.httpStatus)
+              ? { httpStatus: error.httpStatus }
+              : {}),
+            ...(Number.isInteger(error.processExitCode)
+              ? { processExitCode: error.processExitCode }
+              : {}),
+            ...(typeof error.failureCode === 'string'
+              ? { failureCode: error.failureCode }
+              : {}),
+          }
+        : {};
     try {
-      recordStage(
-        phase,
-        'failed',
-        Number.isInteger(httpStatus) ? { httpStatus } : {},
-      );
+      recordStage(phase, 'failed', details);
     } catch {
       // Keep failure output fixed even if the private stage file is unavailable.
     }
+    const failureDetails = [
+      ...(Number.isInteger(details.httpStatus)
+        ? [`http_status=${details.httpStatus}`]
+        : []),
+      ...(typeof details.failureCode === 'string'
+        ? [`failure_code=${details.failureCode}`]
+        : []),
+      ...(Number.isInteger(details.processExitCode)
+        ? [`process_exit_code=${details.processExitCode}`]
+        : []),
+    ];
     process.stderr.write(
-      `Element acceptance fixture failed phase=${phase}${Number.isInteger(httpStatus) ? ` http_status=${httpStatus}` : ''}\n`,
+      `Element acceptance fixture failed phase=${phase}${failureDetails.length > 0 ? ` ${failureDetails.join(' ')}` : ''}\n`,
     );
     process.exitCode = 1;
   }

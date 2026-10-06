@@ -24,6 +24,7 @@ import {
 } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync } from 'node:fs';
+import { arch, platform, release } from 'node:os';
 import { ElementWebPage } from './pages/elementWebPage';
 
 type User = {
@@ -119,6 +120,8 @@ test('Element Web members share events and enforce room authorization', async ({
   let pageC: Page | undefined;
 
   try {
+    recordRuntimeVersions(browser.version());
+
     activePhase = 'member-a-authenticated';
     contextA = await makeContext();
     pageA = await authenticateInElement(contextA, fixture.users.memberA);
@@ -447,6 +450,27 @@ function record(
       status,
       ...(httpStatus === undefined ? {} : { httpStatus }),
       ...(count === undefined ? {} : { count }),
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+}
+
+function recordRuntimeVersions(chromiumVersion: string) {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase: 'runtime-versions',
+      status: 'passed',
+      elementWebVersion: 'v1.12.30',
+      synapseVersion: 'v1.161.0',
+      radicaleVersion: '3.8.0.0',
+      chromiumVersion,
+      runnerOS: platform(),
+      runnerOSVersion: release(),
+      runnerArchitecture: arch(),
+      nodeVersion: process.version,
     })}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
