@@ -588,8 +588,7 @@ function alarmFormValues(
     alarmEnabled: trigger !== undefined,
     alarmMode: absolute ? 'absolute' : 'relative',
     alarmUtcDateTime: absolute?.value ?? '',
-    alarmWeeks:
-      trigger && !('type' in trigger) ? String(trigger.weeks) : '0',
+    alarmWeeks: trigger && !('type' in trigger) ? String(trigger.weeks) : '0',
     alarmDays: trigger && !('type' in trigger) ? String(trigger.days) : '0',
     alarmHours: trigger && !('type' in trigger) ? String(trigger.hours) : '0',
     alarmMinutes:
@@ -634,12 +633,15 @@ function validateAlarm(
   if (values.alarmMode === 'absolute') {
     const value = values.alarmUtcDateTime ?? '';
     const parsed = DateTime.fromISO(value, { setZone: true });
-    return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value) &&
-      parsed.isValid &&
-      parsed.offset === 0 &&
-      parsed.toUTC().toFormat("yyyy-MM-dd'T'HH:mm:ss'Z'") === value
-      ? undefined
-      : 'invalid-alarm';
+    if (
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value) ||
+      !parsed.isValid ||
+      parsed.offset !== 0 ||
+      parsed.toUTC().toFormat("yyyy-MM-dd'T'HH:mm:ss'Z'") !== value
+    ) {
+      return 'invalid-alarm';
+    }
+    return undefined;
   }
 
   const units = [

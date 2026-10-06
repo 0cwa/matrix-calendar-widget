@@ -636,10 +636,7 @@ export class ParsedICalendarEvent {
       icalendar,
       outputConferenceProperties,
     );
-    icalendar = restoreVeventAlarmComponents(
-      icalendar,
-      this.sourceICalendar,
-    );
+    icalendar = restoreVeventAlarmComponents(icalendar, this.sourceICalendar);
 
     return {
       event: {
@@ -1654,7 +1651,7 @@ function readDisplayAlarm(
     ) ||
     (related !== undefined && related.toUpperCase() !== 'START') ||
     (valueType !== undefined && valueType.toUpperCase() !== 'DURATION') ||
-    trigger.toString().toUpperCase() !== rawTrigger.value.toUpperCase()
+    !isValidNegativeAlarmDuration(rawTrigger.value)
   ) {
     return undefined;
   }
@@ -1719,6 +1716,32 @@ function isValidAlarmUtcDateTime(value: string): boolean {
     10,
   )}T${value.slice(11, 13)}${value.slice(14, 16)}${value.slice(17, 19)}Z`;
   return isValidCompactUtcDateTime(compact);
+}
+
+function isValidNegativeAlarmDuration(value: string): boolean {
+  if (!value.toUpperCase().startsWith('-P')) {
+    return false;
+  }
+
+  const durationValue = value.slice(2);
+  if (/^\d+W$/i.test(durationValue)) {
+    return true;
+  }
+
+  const dateDuration = /^(\d+)D(?:T(.+))?$/i.exec(durationValue);
+  if (dateDuration) {
+    return (
+      dateDuration[2] === undefined ||
+      isValidAlarmTimeDuration(dateDuration[2])
+    );
+  }
+
+  return isValidAlarmTimeDuration(durationValue);
+}
+
+function isValidAlarmTimeDuration(value: string): boolean {
+  const match = /^T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i.exec(value);
+  return Boolean(match && (match[1] || match[2] || match[3]));
 }
 
 function isValidAlarmLeadTime(

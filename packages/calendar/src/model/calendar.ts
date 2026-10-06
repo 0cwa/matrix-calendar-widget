@@ -99,19 +99,12 @@ export type CalendarEventAbsoluteAlarmTrigger = {
 };
 
 /** One editable, non-repeating RFC 5545 ACTION:DISPLAY alarm. */
-export type CalendarEventDisplayAlarm =
-  | {
-      action: 'display';
-      /** RFC 9074 identity retained when present; legacy VALARMs may omit it. */
-      uid?: string;
-      trigger: CalendarEventAlarmLeadTime;
-    }
-  | {
-      action: 'display';
-      /** RFC 9074 identity retained when present; legacy VALARMs may omit it. */
-      uid?: string;
-      trigger: CalendarEventAbsoluteAlarmTrigger;
-    };
+export type CalendarEventDisplayAlarm = {
+  action: 'display';
+  /** RFC 9074 identity retained when present; legacy VALARMs may omit it. */
+  uid?: string;
+  trigger: CalendarEventAlarmLeadTime | CalendarEventAbsoluteAlarmTrigger;
+};
 
 /** Alarm values accepted on writes; the server owns and generates the UID. */
 export type CalendarEventDisplayAlarmInput = Omit<

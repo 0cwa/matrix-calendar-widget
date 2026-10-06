@@ -2021,7 +2021,13 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     const updated = await repository.getEvent('team', 'alarm-event');
-    expect(updated.alarm?.trigger.minutes).toBe(40);
+    expect(updated.alarm?.trigger).toEqual({
+      weeks: 0,
+      days: 0,
+      hours: 0,
+      minutes: 40,
+      seconds: 0,
+    });
 
     view.rerender(<CalendarEventEditorDialog {...props} event={updated} />);
     await userEvent.click(await screen.findByLabelText('CalDAV reminder'));
@@ -2054,9 +2060,10 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.click(
       await screen.findByRole('radio', { name: 'At an exact UTC time' }),
     );
-    fireEvent.change(screen.getByRole('textbox', { name: 'Exact time (UTC)' }), {
-      target: { value: '2026-10-01T08:45:00Z' },
-    });
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Exact time (UTC)' }),
+      { target: { value: '2026-10-01T08:45:00Z' } },
+    );
     expect(
       screen.getByText(
         'This absolute alarm is saved in the calendar and is unavailable for Matrix room reminder delivery.',
@@ -2074,12 +2081,13 @@ describe('<CalendarEventEditorDialog />', () => {
     expect(
       await screen.findByRole('radio', { name: 'At an exact UTC time' }),
     ).toBeChecked();
-    expect(screen.getByRole('textbox', { name: 'Exact time (UTC)' })).toHaveValue(
-      '2026-10-01T08:45:00Z',
+    expect(
+      screen.getByRole('textbox', { name: 'Exact time (UTC)' }),
+    ).toHaveValue('2026-10-01T08:45:00Z');
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Exact time (UTC)' }),
+      { target: { value: '2026-10-01T08:30:00Z' } },
     );
-    fireEvent.change(screen.getByRole('textbox', { name: 'Exact time (UTC)' }), {
-      target: { value: '2026-10-01T08:30:00Z' },
-    });
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     const updated = await repository.getEvent('team', 'absolute-alarm-event');

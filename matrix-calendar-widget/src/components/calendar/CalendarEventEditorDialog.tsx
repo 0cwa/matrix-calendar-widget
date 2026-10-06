@@ -1187,16 +1187,18 @@ export function CalendarEventEditorDialog({
                       <Stack spacing={1}>
                         <TextField
                           fullWidth
-                          label={t(
-                            'calendarEvents.editor.alarmUtcDateTime',
-                            'Exact time (UTC)',
-                          )}
-                          onChange={handleAlarmDurationChange('alarmUtcDateTime')}
-                          placeholder="2026-10-01T08:45:00Z"
                           helperText={t(
                             'calendarEvents.editor.alarmUtcDateTimeHelp',
                             'Enter YYYY-MM-DDTHH:mm:ssZ in UTC.',
                           )}
+                          label={t(
+                            'calendarEvents.editor.alarmUtcDateTime',
+                            'Exact time (UTC)',
+                          )}
+                          onChange={handleAlarmDurationChange(
+                            'alarmUtcDateTime',
+                          )}
+                          placeholder="2026-10-01T08:45:00Z"
                           value={values.alarmUtcDateTime ?? ''}
                         />
                         <Typography color="text.secondary" variant="body2">
@@ -1223,8 +1225,16 @@ export function CalendarEventEditorDialog({
                               ['alarmWeeks', 'alarmWeeks', 'Weeks before'],
                               ['alarmDays', 'alarmDays', 'Days before'],
                               ['alarmHours', 'alarmHours', 'Hours before'],
-                              ['alarmMinutes', 'alarmMinutes', 'Minutes before'],
-                              ['alarmSeconds', 'alarmSeconds', 'Seconds before'],
+                              [
+                                'alarmMinutes',
+                                'alarmMinutes',
+                                'Minutes before',
+                              ],
+                              [
+                                'alarmSeconds',
+                                'alarmSeconds',
+                                'Seconds before',
+                              ],
                             ] as const
                           ).map(([field, key, fallback]) => (
                             <TextField

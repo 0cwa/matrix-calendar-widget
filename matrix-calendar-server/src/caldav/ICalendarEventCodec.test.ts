@@ -4118,9 +4118,9 @@ END:VCALENDAR`,
         trigger: { weeks: 0, days: 0, hours: 0, minutes: 30, seconds: 0 },
       },
     });
-    expect(changed.event.alarm?.trigger.minutes).toBe(30);
+    expect(relativeAlarmMinutes(changed.event.alarm)).toBe(30);
     const reparsed = codec.parse('team', 'alarm.ics', changed.icalendar);
-    expect(reparsed.event.alarm?.trigger.minutes).toBe(30);
+    expect(relativeAlarmMinutes(reparsed.event.alarm)).toBe(30);
     expect(reparsed.event.alarm?.uid).toBe(changed.event.alarm?.uid);
 
     const removePatch = JSON.parse(
@@ -4225,6 +4225,52 @@ END:VCALENDAR`,
     expect(removed.icalendar).not.toContain('BEGIN:VALARM');
   });
 
+  it.each([
+    ['malformed sequence', 'SEQUENCE:not-a-number'],
+    ['exhausted sequence', 'SEQUENCE:2147483647'],
+  ])(
+    'applies other edits with an unchanged alarm when revision is %s',
+    (_label, sequence) => {
+      const absoluteTrigger = {
+        type: 'absolute' as const,
+        value: '2026-09-23T08:45:00Z',
+      };
+      const source = fixture('alarm-absolute.ics').replace(
+        'UID:absolute-event@example.test',
+        `UID:absolute-event@example.test\r\n${sequence}`,
+      );
+      const parsed = codec.parse('team', 'absolute-alarm.ics', source);
+      const edited = parsed.applyPatch({
+        title: 'Retitled while retaining alarm',
+        alarm: { action: 'display', trigger: absoluteTrigger },
+      });
+
+      expect(edited.event.title).toBe('Retitled while retaining alarm');
+      expect(edited.event.alarm?.trigger).toEqual(absoluteTrigger);
+      expect(edited.event.revision).toEqual(parsed.event.revision);
+      expect(edited.icalendar).toContain(sequence);
+    },
+  );
+
+  it.each(['-P0DT15M', '-PT015M'])(
+    'retains compatible RFC duration spelling %s',
+    (trigger) => {
+      const source = alarmEventSource().replace(
+        'TRIGGER:-PT15M',
+        `TRIGGER:${trigger}`,
+      );
+      const parsed = codec.parse('team', 'equivalent-duration.ics', source);
+
+      expect(parsed.event.alarm?.trigger).toEqual({
+        weeks: 0,
+        days: 0,
+        hours: 0,
+        minutes: 15,
+        seconds: 0,
+      });
+    },
+  );
+
   it('preserves an existing VALARM UID across supported and ordinary edits', () => {
     const parsed = codec.parse(
       'team',
@@ -4295,7 +4341,7 @@ END:VCALENDAR`,
   it('changes a supported alarm without rewriting unrelated resource data', () => {
     const source = fixture('recurrence-override.ics');
     const parsed = codec.parse('team', 'recurring-alarm.ics', source);
-    expect(parsed.event.alarm?.trigger.minutes).toBe(10);
+    expect(relativeAlarmMinutes(parsed.event.alarm)).toBe(10);
 
     const changed = parsed.applyPatch({
       alarm: {
@@ -4599,6 +4645,13 @@ END:VCALENDAR`,
     );
   });
 });
+
+function relativeAlarmMinutes(
+  alarm: CalendarEvent['alarm'],
+): number | undefined {
+  const trigger = alarm?.trigger;
+  return trigger && !('type' in trigger) ? trigger.minutes : undefined;
+}
 
 function alarmEventSource(): string {
   return [
