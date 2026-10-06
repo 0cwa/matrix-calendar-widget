@@ -2,7 +2,7 @@
 
 _Last updated: 2026-10-06._
 
-_Source snapshot: `main` at `f49acee71280944ad6ae351111947ff01c00031d` (PR #201)._
+_Source snapshot: `main` at `d32dceb9bd7d1fbc17078ef986040d1940813142` (PR #214)._
 
 ## Current phase
 
@@ -46,11 +46,15 @@ PR #181 limits `/v1/calendar` before OpenID validation to 120 requests per 60 se
 
 PR #184 adds a synthetic projection benchmark, not a production latency or capacity guarantee. PR #186 adds keyboard and automated accessibility coverage. PR #195 adds a production-preview Chromium fixture; the hosted job passed all eight list/month cases at four viewport sizes on tested tree `c368aacfb32a5b9b57bcb964cb119bdacd20b243`. This validates the standalone component fixture only. Actual Element Web/Desktop/mobile, screen-reader, and production layout results are not claimed.
 
+PR #213 extends that fixture to room member/manager controls, current-room
+links, and saved reminder configuration reloads at 320 CSS pixels. All ten
+hosted browser cases passed on source tree
+`75169dd3f2cc3db2182026b52dbda58bc57239da`; dialog measurements wait for entry
+transitions before axe. This remains deterministic component evidence, not a
+live Matrix authorization, persistence, or client result.
+
 ## Open scope and acceptance blockers
 
-- **Active repository work:** PR #213 extends the synthetic Chromium fixture
-  to room member/manager controls and reminder setting reloads. Validation is
-  pending; it does not establish actual-client or gateway authorization evidence.
 - **M4:** collection-timezone editing and remaining issue #5 acceptance work.
 - **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, additional RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, and attachment/conference authoring are not part of the implemented editor.
 - **M6:** issue #7 bounded repository criteria are complete. Keep room access, event writes, settings, delivery, and action notices off until the operator accepts each capability and its trust boundary. A passing pinned stack is not an etke-host or production proof.

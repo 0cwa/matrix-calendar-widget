@@ -191,7 +191,7 @@ test('room visitor sees read-only event controls at a narrow width', async ({
   );
 
   await waitForDialogTransitions(dialog);
-  const dimensions = await readDialogMeasurements(page);
+  const dimensions = await readDialogMeasurements(dialog);
   await test.info().attach('room-visitor-layout.json', {
     body: JSON.stringify(dimensions),
     contentType: 'application/json',
@@ -279,7 +279,7 @@ test('room manager sees writable event controls at a narrow width', async ({
   await expect(reminder).not.toBeChecked();
 
   await waitForDialogTransitions(dialog);
-  const dimensions = await readDialogMeasurements(page);
+  const dimensions = await readDialogMeasurements(dialog);
   await test.info().attach('room-manager-layout.json', {
     body: JSON.stringify(dimensions),
     contentType: 'application/json',
@@ -332,15 +332,19 @@ async function waitForDialogTransitions(dialog: Locator): Promise<void> {
   });
 }
 
-async function readDialogMeasurements(page: Page) {
-  return page.evaluate(() => {
-    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
-    const dialogRoot = dialog?.closest<HTMLElement>('.MuiDialog-root');
-    const roomLink = dialog?.querySelector<HTMLElement>(
+async function readDialogMeasurements(dialogLocator: Locator) {
+  return dialogLocator.evaluate((dialogElement) => {
+    const dialog = dialogElement as HTMLElement;
+    const document = dialog.ownerDocument;
+    const dialogRoot = dialog.closest<HTMLElement>('.MuiDialog-root');
+    if (!dialogRoot) {
+      throw new Error('Expected active dialog inside .MuiDialog-root');
+    }
+    const roomLink = dialog.querySelector<HTMLElement>(
       'a[href^="https://matrix.to/"]',
     );
     let roomLinkPaintOpacity = 1;
-    if (roomLink && dialogRoot) {
+    if (roomLink) {
       let currentElement: HTMLElement | null = roomLink;
       while (currentElement) {
         roomLinkPaintOpacity *= Number.parseFloat(
@@ -353,12 +357,10 @@ async function readDialogMeasurements(page: Page) {
     return {
       viewportWidth: document.documentElement.clientWidth,
       documentWidth: document.documentElement.scrollWidth,
-      dialogWidth: dialog?.getBoundingClientRect().width ?? 0,
-      dialogClientWidth: dialog?.clientWidth ?? 0,
-      dialogScrollWidth: dialog?.scrollWidth ?? 0,
-      dialogRootOpacity: dialogRoot
-        ? window.getComputedStyle(dialogRoot).opacity
-        : undefined,
+      dialogWidth: dialog.getBoundingClientRect().width,
+      dialogClientWidth: dialog.clientWidth,
+      dialogScrollWidth: dialog.scrollWidth,
+      dialogRootOpacity: window.getComputedStyle(dialogRoot).opacity,
       roomLinkColor: roomLink
         ? window.getComputedStyle(roomLink).color
         : undefined,

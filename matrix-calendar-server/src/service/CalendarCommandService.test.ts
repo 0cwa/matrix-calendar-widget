@@ -421,6 +421,9 @@ describe('CalendarCommandService', () => {
   });
 
   test('adds a generic warning beside safe upcoming events when some entries are unavailable', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-10-04T12:00:00.000Z'));
+
     operations.listEvents.mockResolvedValue([
       {
         event: makeEvent(`${COLLECTION_URL}visible.ics`, 'Visible event'),
