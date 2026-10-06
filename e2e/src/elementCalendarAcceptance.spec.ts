@@ -152,9 +152,11 @@ test('Element Web members share events and enforce room authorization', async ({
     record(activePhase, 'passed');
 
     activePhase = 'widget-a-approved';
-    const elementA = new ElementWebPage(pageA);
-    await elementA.switchToRoom(fixture.roomName);
-    expect(elementA.getCurrentRoomId()).toBe(fixture.teamRoomId);
+    const elementA = await openFixtureRoom(
+      pageA,
+      fixture.roomName,
+      fixture.teamRoomId,
+    );
     const firstRead = waitForGatewayResponse(
       pageA,
       'GET',
@@ -190,9 +192,11 @@ test('Element Web members share events and enforce room authorization', async ({
     record(activePhase, 'passed', createResponseResult.status());
 
     activePhase = 'widget-b-approved';
-    const elementB = new ElementWebPage(pageB);
-    await elementB.switchToRoom(fixture.roomName);
-    expect(elementB.getCurrentRoomId()).toBe(fixture.teamRoomId);
+    const elementB = await openFixtureRoom(
+      pageB,
+      fixture.roomName,
+      fixture.teamRoomId,
+    );
     const memberBRead = waitForGatewayResponse(
       pageB,
       'GET',
@@ -238,9 +242,11 @@ test('Element Web members share events and enforce room authorization', async ({
     record(activePhase, 'passed', updateResponseResult.status());
 
     activePhase = 'outsider-room-context';
-    const elementC = new ElementWebPage(pageC);
-    await elementC.switchToRoom(fixture.outsiderRoomName);
-    expect(elementC.getCurrentRoomId()).toBe(fixture.outsiderRoomId);
+    const elementC = await openFixtureRoom(
+      pageC,
+      fixture.outsiderRoomName,
+      fixture.outsiderRoomId,
+    );
     expect(fixture.outsiderRoomId).not.toBe(fixture.teamRoomId);
     activePhase = 'outsider-widget-approved';
     const outsiderRead = waitForGatewayResponse(
@@ -364,6 +370,8 @@ async function authenticateInElement(
   captureMemberADiagnostics = false,
 ): Promise<Page> {
   const page = await context.newPage();
+  page.setDefaultTimeout(30_000);
+  page.setDefaultNavigationTimeout(30_000);
   if (captureMemberADiagnostics) {
     activePhase = 'member-a-origin-navigation';
   }
@@ -413,20 +421,29 @@ async function authenticateInElement(
     activePhase = 'member-a-session-observed';
   }
 
-  if (captureMemberADiagnostics) {
-    activePhase = 'member-a-navigation-ready';
-  }
-  const addButton = page
-    .getByRole('navigation')
-    .getByRole('button', { name: 'Add', exact: true });
-  if (captureMemberADiagnostics) {
-    let navigationReady = true;
-    try {
-      await addButton.waitFor({ timeout: 30_000 });
-    } catch {
-      navigationReady = false;
-    }
+  const sessionReady = await page
+    .waitForFunction(
+      (expectedUserId) => {
+        type MatrixClient = { getUserId?: () => string | null };
+        type MatrixClientPeg = { get?: () => MatrixClient | undefined };
+        try {
+          const matrixClientPeg = (
+            window as unknown as {
+              mxMatrixClientPeg?: MatrixClientPeg;
+            }
+          ).mxMatrixClientPeg;
+          return matrixClientPeg?.get?.()?.getUserId?.() === expectedUserId;
+        } catch {
+          return false;
+        }
+      },
+      user.userId,
+      { timeout: 30_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
 
+  if (captureMemberADiagnostics) {
     const sessionObservation = await page
       .evaluate((expectedUserId) => {
         type MatrixClient = {
@@ -481,16 +498,28 @@ async function authenticateInElement(
       }, user.userId)
       .catch(() => undefined);
     recordMemberASessionObservation(sessionObservation);
-
-    if (!navigationReady) {
-      throw new Error('Element navigation did not become ready');
-    }
-    record(activePhase, 'passed');
     activePhase = 'member-a-authenticated';
-  } else {
-    await addButton.waitFor();
+  }
+
+  if (!sessionReady) {
+    throw new Error('Element session did not restore the expected user');
   }
   return page;
+}
+
+async function openFixtureRoom(
+  page: Page,
+  roomName: string,
+  roomId: string,
+): Promise<ElementWebPage> {
+  const roomUrl = new URL(fixture.elementUrl);
+  roomUrl.hash = `/room/${roomId}`;
+  await page.goto(roomUrl.href);
+
+  const element = new ElementWebPage(page);
+  await expect(element.roomNameText).toHaveText(roomName);
+  expect(element.getCurrentRoomId()).toBe(roomId);
+  return element;
 }
 
 async function openCalendarWidget(
