@@ -378,21 +378,23 @@ function observeLargeCalendarRender(view: 'list' | 'month'): void {
   const expectedMinimum = view === 'list' ? 1000 : 31;
   const getCount = () => document.querySelectorAll(selector).length;
   let completed = false;
-  let observer: MutationObserver | undefined;
+  const observer = new MutationObserver(() => {
+    if (getCount() >= expectedMinimum) finishAfterTwoFrames();
+  });
   const timeout = window.setTimeout(() => {
     if (completed) return;
     completed = true;
-    observer?.disconnect();
+    observer.disconnect();
     window.__largeCalendarRenderMeasurement = {
       status: 'timeout',
       populatedElementCount: getCount(),
     };
   }, 45_000);
-  const finishAfterTwoFrames = () => {
+  function finishAfterTwoFrames() {
     if (completed) return;
     completed = true;
     window.clearTimeout(timeout);
-    observer?.disconnect();
+    observer.disconnect();
     window.requestAnimationFrame(() =>
       window.requestAnimationFrame(() => {
         const mountStart = performance
@@ -414,10 +416,7 @@ function observeLargeCalendarRender(view: 'list' | 'month'): void {
         };
       }),
     );
-  };
-  observer = new MutationObserver(() => {
-    if (getCount() >= expectedMinimum) finishAfterTwoFrames();
-  });
+  }
   observer.observe(document.documentElement, {
     childList: true,
     subtree: true,

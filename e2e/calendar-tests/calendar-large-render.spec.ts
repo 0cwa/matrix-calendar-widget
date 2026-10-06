@@ -15,6 +15,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 
 const eventCount = 1000;
 const monthOverflowLinkCount = 31;
@@ -36,6 +37,10 @@ type RenderMeasurement = {
   elapsedMs?: number;
   populatedElementCount: number;
 };
+type PageErrorCapture = {
+  count: number;
+  messages: string[];
+};
 
 declare global {
   interface Window {
@@ -50,17 +55,20 @@ for (const view of ['list', 'month'] as const) {
     browser,
   }, testInfo) => {
     test.setTimeout(120_000);
-    const pageErrorCount = { value: 0 };
-    page.on('pageerror', () => {
-      pageErrorCount.value += 1;
+    const pageErrors: PageErrorCapture = { count: 0, messages: [] };
+    page.on('pageerror', (error) => {
+      pageErrors.count += 1;
+      if (pageErrors.messages.length < 5) {
+        pageErrors.messages.push(sanitizePageErrorMessage(error.message));
+      }
     });
     await installLongTaskObserver(page);
     await page.setViewportSize(viewport);
 
-    const warmup = await runSample(page, view, pageErrorCount);
+    const warmup = await runSample(page, view, pageErrors);
     const samples = [];
     for (let sample = 0; sample < 5; sample += 1) {
-      samples.push(await runSample(page, view, pageErrorCount));
+      samples.push(await runSample(page, view, pageErrors));
     }
 
     const elapsedTimes = samples
@@ -71,41 +79,60 @@ for (const view of ['list', 'month'] as const) {
       viewportWidth: document.documentElement.clientWidth,
       viewportHeight: document.documentElement.clientHeight,
     }));
+    const measurementJson = JSON.stringify(
+      {
+        mode: view,
+        dateRange: '2026-10-01 through 2026-11-01',
+        generatedEventCount: eventCount,
+        viewport,
+        browserName: browser.browserType().name(),
+        environment,
+        warmup,
+        sampleCount: samples.length,
+        samples,
+        medianElapsedMs: elapsedTimes[2],
+        maximumElapsedMs: elapsedTimes[elapsedTimes.length - 1],
+        elapsedMeasurement:
+          'fixture root render start to populated DOM and two animation frames; observational only',
+      },
+      null,
+      2,
+    );
+    const measurementPath = testInfo.outputPath(
+      `large-calendar-${view}-measurements.json`,
+    );
+    await writeFile(measurementPath, measurementJson, 'utf8');
     await testInfo.attach(`large-calendar-${view}-measurements.json`, {
-      body: JSON.stringify(
-        {
-          mode: view,
-          dateRange: '2026-10-01 through 2026-11-01',
-          generatedEventCount: eventCount,
-          viewport,
-          browserName: browser.browserType().name(),
-          environment,
-          warmup,
-          sampleCount: samples.length,
-          samples,
-          medianElapsedMs: elapsedTimes[2],
-          maximumElapsedMs: elapsedTimes[elapsedTimes.length - 1],
-          elapsedMeasurement:
-            'fixture root render start to populated DOM and two animation frames; observational only',
-        },
-        null,
-        2,
-      ),
+      path: measurementPath,
       contentType: 'application/json',
     });
-    expect(pageErrorCount.value).toBe(0);
+    expect(
+      pageErrors.count,
+      `Sanitized browser page errors: ${JSON.stringify(pageErrors.messages)}`,
+    ).toBe(0);
   });
 }
 
 async function runSample(
   page: Page,
   view: 'list' | 'month',
-  pageErrorCount: { value: number },
+  pageErrors: PageErrorCapture,
 ) {
+  const priorPageErrorCount = pageErrors.count;
+  const priorMessageCount = pageErrors.messages.length;
   await page.goto(`/browser-tests/index.html?mode=large-calendar&view=${view}`);
-  await expect(
-    page.getByRole('heading', { name: 'Calendar component validation' }),
-  ).toBeVisible();
+  try {
+    await expect(
+      page.getByRole('heading', { name: 'Calendar component validation' }),
+    ).toBeVisible();
+  } catch {
+    const messages = pageErrors.messages.slice(priorMessageCount);
+    const newErrorCount = pageErrors.count - priorPageErrorCount;
+    throw new Error(
+      `Calendar fixture heading did not appear for ${view}; ` +
+        `${newErrorCount} page errors; sanitized messages: ${JSON.stringify(messages)}`,
+    );
+  }
 
   const readiness = await readCapturedRenderMeasurement(page, view);
   const overflow = await readAndCheckOverflow(page);
@@ -160,7 +187,10 @@ async function runSample(
     returnedListOverflow = await readAndCheckOverflow(page);
   }
 
-  expect(pageErrorCount.value).toBe(0);
+  expect(
+    pageErrors.count,
+    `Sanitized browser page errors: ${JSON.stringify(pageErrors.messages)}`,
+  ).toBe(0);
   return {
     ...readiness,
     overflow,
@@ -172,6 +202,19 @@ async function runSample(
     returnedListCount: titles.length,
     uniqueReturnedTitleCount: new Set(titles).size,
   };
+}
+
+function sanitizePageErrorMessage(message: string): string {
+  return message
+    .replace(/https?:\/\/\S+/gi, '<url>')
+    .replace(/\bBearer\s+\S+/gi, 'Bearer <redacted>')
+    .replace(
+      /\b(password|token|authorization)\b\s*[:=]\s*\S+/gi,
+      '$1=<redacted>',
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
 }
 
 async function installLongTaskObserver(page: Page): Promise<void> {
