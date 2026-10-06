@@ -26,6 +26,7 @@ export class ElementWebPage {
   private readonly sidebarRegion: Locator;
   private readonly navigationRegion: Locator;
   private readonly headerRegion: Locator;
+  private readonly roomHeaderRegion: Locator;
   private readonly sendMessageTextbox: Locator;
   public readonly noChatPermissionText: Locator;
   public readonly roomNameText: Locator;
@@ -37,11 +38,12 @@ export class ElementWebPage {
     this.navigationRegion = page.getByRole('navigation');
     this.sidebarRegion = page.getByRole('complementary');
     this.headerRegion = page.getByRole('main').locator('header');
+    this.roomHeaderRegion = page.locator('header.mx_RoomHeader');
     this.sendMessageTextbox = page.getByRole('textbox', { name: /message…/ });
     this.noChatPermissionText = page.getByText(
       'You do not have permission to post to this room',
     );
-    this.roomNameText = this.headerRegion.getByRole('heading');
+    this.roomNameText = this.roomHeaderRegion.getByRole('heading');
     this.roomTopicText = this.headerRegion.locator('.mx_RoomTopic');
     this.roomInviteHeader = this.page.getByRole('heading', {
       name: /Do you want to join/,
