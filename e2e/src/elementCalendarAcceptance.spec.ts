@@ -422,7 +422,7 @@ async function authenticateInElement(
   if (captureMemberADiagnostics) {
     let navigationReady = true;
     try {
-      await addButton.waitFor();
+      await addButton.waitFor({ timeout: 30_000 });
     } catch {
       navigationReady = false;
     }
