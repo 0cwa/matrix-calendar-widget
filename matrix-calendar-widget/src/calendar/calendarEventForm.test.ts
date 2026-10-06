@@ -522,6 +522,105 @@ describe('calendar event form adapter', () => {
     ).toEqual({ rrule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR' });
   });
 
+  it('loads and edits a bounded monthly ordinal weekday rule', () => {
+    const monthlyEvent: CalendarEvent = {
+      id: 'monthly-ordinal',
+      calendarId: 'team',
+      uid: 'monthly-ordinal@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-30T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-30T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=MONTHLY;INTERVAL=2;BYDAY=-1FR;COUNT=4',
+      },
+    };
+    const values = calendarEventToFormValues(monthlyEvent, calendar);
+
+    expect(values).toMatchObject({
+      recurrenceFrequency: 'MONTHLY',
+      recurrenceInterval: '2',
+      recurrenceEnd: 'count',
+      recurrenceCount: '4',
+      recurrenceMonthlyByDay: true,
+      recurrenceMonthlyOrdinal: '-1',
+      recurrenceMonthlyWeekday: 'FR',
+      recurrenceEditable: true,
+    });
+    expect(
+      calendarEventPatchFromForm({ ...values, title: 'Renamed' }),
+    ).not.toHaveProperty('recurrence');
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        start: '2026-11-09T09:00',
+        end: '2026-11-09T10:00',
+        timingChanged: true,
+        recurrenceMonthlyOrdinal: '2',
+        recurrenceMonthlyWeekday: 'MO',
+        recurrenceChanged: true,
+      }).recurrence,
+    ).toEqual({ rrule: 'FREQ=MONTHLY;INTERVAL=2;BYDAY=2MO;COUNT=4' });
+    expect(
+      validateCalendarEventForm({
+        ...values,
+        recurrenceMonthlyOrdinal: '6',
+        recurrenceChanged: true,
+      }),
+    ).toBe('invalid-recurrence');
+    expect(
+      validateCalendarEventForm({
+        ...values,
+        start: '2026-10-23T09:00',
+        end: '2026-10-23T10:00',
+        timingChanged: true,
+      }),
+    ).toBe('invalid-recurrence');
+  });
+
+  it('keeps unsupported monthly ordinal combinations read-only on other edits', () => {
+    const unsupportedEvent: CalendarEvent = {
+      id: 'unsupported-monthly-ordinal',
+      calendarId: 'team',
+      uid: 'unsupported-monthly-ordinal@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-26T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-26T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=MONTHLY;BYDAY=2MO,3WE' },
+    };
+    const values = calendarEventToFormValues(unsupportedEvent, calendar);
+
+    expect(values).toMatchObject({
+      repeats: true,
+      recurrenceEditable: false,
+      recurrenceDisabledReason: 'unsupported',
+    });
+    expect(
+      calendarEventPatchFromForm({ ...values, title: 'Renamed' }),
+    ).not.toHaveProperty('recurrence');
+  });
+
   it('loads and edits the open-ended every-other-week BYDAY subset', () => {
     const biweeklyEvent: CalendarEvent = {
       id: 'biweekly-days',

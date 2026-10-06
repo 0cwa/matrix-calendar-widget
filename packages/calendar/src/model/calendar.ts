@@ -168,6 +168,12 @@ export type CalendarEventWeekday =
   | 'SA'
   | 'SU';
 
+/** One bounded MONTHLY BYDAY selector supported by the recurrence editor. */
+export type CalendarEventWeekdayOrdinal = {
+  ordinal: 1 | 2 | 3 | 4 | 5 | -1;
+  weekday: CalendarEventWeekday;
+};
+
 export type CalendarEventTransparency = 'opaque' | 'transparent';
 
 /**

@@ -524,6 +524,35 @@ export function CalendarEventEditorDialog({
     );
   };
 
+  const handleMonthlyByDayChange = (change: ChangeEvent<HTMLInputElement>) => {
+    setValues((current) => {
+      if (!current) {
+        return current;
+      }
+      const startDate = DateTime.fromISO(current.start.slice(0, 10), {
+        zone: 'UTC',
+      });
+      return {
+        ...current,
+        recurrenceMonthlyByDay: change.target.checked,
+        ...(change.target.checked
+          ? {
+              recurrenceMonthlyOrdinal:
+                current.recurrenceMonthlyOrdinal ??
+                (startDate.isValid
+                  ? String(Math.ceil(startDate.day / 7))
+                  : '1'),
+              recurrenceMonthlyWeekday:
+                current.recurrenceMonthlyWeekday ??
+                WEEKDAYS[startDate.weekday - 1] ??
+                'MO',
+            }
+          : {}),
+        recurrenceChanged: true,
+      };
+    });
+  };
+
   const handleWeekdayChange = (weekday: CalendarEventWeekday) => {
     setValues((current) => {
       if (!current) {
@@ -1248,6 +1277,84 @@ export function CalendarEventEditorDialog({
                             )}
                           </Typography>
                         </FormControl>
+                      )}
+                    </>
+                  )}
+
+                  {values.recurrenceFrequency === 'MONTHLY' && (
+                    <>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={Boolean(values.recurrenceMonthlyByDay)}
+                            onChange={handleMonthlyByDayChange}
+                          />
+                        }
+                        label={t(
+                          'calendarEvents.editor.monthlyByDay',
+                          'Repeat by weekday',
+                        )}
+                      />
+                      {values.recurrenceMonthlyByDay && (
+                        <Stack
+                          direction={{ xs: 'column', sm: 'row' }}
+                          spacing={2}
+                        >
+                          <TextField
+                            label={t(
+                              'calendarEvents.editor.monthlyOrdinal',
+                              'Week of the month',
+                            )}
+                            onChange={handleChange('recurrenceMonthlyOrdinal')}
+                            select
+                            SelectProps={{ native: true }}
+                            value={values.recurrenceMonthlyOrdinal ?? '1'}
+                          >
+                            <option value="1">
+                              {t('calendarEvents.editor.ordinalFirst', 'First')}
+                            </option>
+                            <option value="2">
+                              {t(
+                                'calendarEvents.editor.ordinalSecond',
+                                'Second',
+                              )}
+                            </option>
+                            <option value="3">
+                              {t('calendarEvents.editor.ordinalThird', 'Third')}
+                            </option>
+                            <option value="4">
+                              {t(
+                                'calendarEvents.editor.ordinalFourth',
+                                'Fourth',
+                              )}
+                            </option>
+                            <option value="5">
+                              {t('calendarEvents.editor.ordinalFifth', 'Fifth')}
+                            </option>
+                            <option value="-1">
+                              {t('calendarEvents.editor.ordinalLast', 'Last')}
+                            </option>
+                          </TextField>
+                          <TextField
+                            label={t(
+                              'calendarEvents.editor.monthlyWeekday',
+                              'Weekday',
+                            )}
+                            onChange={handleChange('recurrenceMonthlyWeekday')}
+                            select
+                            SelectProps={{ native: true }}
+                            value={values.recurrenceMonthlyWeekday ?? 'MO'}
+                          >
+                            {WEEKDAYS.map((weekday) => (
+                              <option key={weekday} value={weekday}>
+                                {t(
+                                  `calendarEvents.editor.weekday${weekday}`,
+                                  weekday,
+                                )}
+                              </option>
+                            ))}
+                          </TextField>
+                        </Stack>
                       )}
                     </>
                   )}

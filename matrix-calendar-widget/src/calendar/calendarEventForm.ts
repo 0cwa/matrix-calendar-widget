@@ -25,6 +25,7 @@ import {
   CalendarEventRecurrenceDate,
   CalendarEventTiming,
   CalendarEventWeekday,
+  CalendarEventWeekdayOrdinal,
   CalendarId,
   SupportedCalendarEventRecurrenceFrequency,
   calendarEventRecurrenceIdentity,
@@ -58,6 +59,9 @@ export type CalendarEventFormValues = {
   recurrenceCount?: string;
   recurrenceUntil?: string;
   recurrenceWeekdays?: CalendarEventWeekday[];
+  recurrenceMonthlyByDay?: boolean;
+  recurrenceMonthlyOrdinal?: string;
+  recurrenceMonthlyWeekday?: string;
   recurrenceEditable?: boolean;
   recurrenceDisabledReason?: 'complex' | 'unsupported';
   recurrenceChanged?: boolean;
@@ -556,6 +560,9 @@ function recurrenceFormValues(
   | 'recurrenceCount'
   | 'recurrenceUntil'
   | 'recurrenceWeekdays'
+  | 'recurrenceMonthlyByDay'
+  | 'recurrenceMonthlyOrdinal'
+  | 'recurrenceMonthlyWeekday'
   | 'recurrenceEditable'
   | 'recurrenceDisabledReason'
   | 'recurrenceChanged'
@@ -610,6 +617,13 @@ function recurrenceFormValues(
         ? recurrenceUntilDate(end.value, event.timing)
         : eventDate(event),
     recurrenceWeekdays: parsed?.weekdays,
+    recurrenceMonthlyByDay: parsed?.weekdayOrdinal !== undefined,
+    ...(parsed?.weekdayOrdinal
+      ? {
+          recurrenceMonthlyOrdinal: String(parsed.weekdayOrdinal.ordinal),
+          recurrenceMonthlyWeekday: parsed.weekdayOrdinal.weekday,
+        }
+      : {}),
     recurrenceEditable: !hasComplexData && !unsupported,
     recurrenceDisabledReason: hasComplexData
       ? 'complex'
@@ -1010,9 +1024,49 @@ function recurrenceRuleFromForm(
             weekdays: normalizeFormWeekdays(values.recurrenceWeekdays, timing),
           }
         : {}),
+      ...(values.recurrenceMonthlyByDay &&
+      (values.recurrenceFrequency ?? 'DAILY') === 'MONTHLY'
+        ? {
+            weekdayOrdinal: {
+              ordinal: monthlyOrdinalFromForm(values.recurrenceMonthlyOrdinal),
+              weekday: monthlyWeekdayFromForm(
+                values.recurrenceMonthlyWeekday ??
+                  startWeekdayForTiming(timing),
+              ),
+            },
+          }
+        : {}),
     },
     timingStartAsDateTime(timing),
   );
+}
+
+function monthlyOrdinalFromForm(
+  value: string | undefined,
+): CalendarEventWeekdayOrdinal['ordinal'] {
+  switch (value) {
+    case '-1':
+      return -1;
+    case '1':
+      return 1;
+    case '2':
+      return 2;
+    case '3':
+      return 3;
+    case '4':
+      return 4;
+    case '5':
+      return 5;
+    default:
+      throw new Error('Unsupported monthly ordinal');
+  }
+}
+
+function monthlyWeekdayFromForm(value: string): CalendarEventWeekday {
+  if (WEEKDAY_TOKENS.includes(value as CalendarEventWeekday)) {
+    return value as CalendarEventWeekday;
+  }
+  throw new Error('Unsupported monthly weekday');
 }
 
 const WEEKDAY_TOKENS: CalendarEventWeekday[] = [

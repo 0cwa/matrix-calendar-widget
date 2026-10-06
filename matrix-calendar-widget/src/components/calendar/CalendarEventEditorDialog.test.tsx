@@ -702,6 +702,90 @@ describe('<CalendarEventEditorDialog />', () => {
     });
   });
 
+  it('creates and edits a monthly ordinal weekday rule', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      idFactory: () => 'monthly-ordinal',
+    });
+    const onClose = vi.fn();
+    const props = {
+      calendars: [calendar],
+      onClose,
+      open: true,
+      uidFactory: () => 'monthly-ordinal@example.test',
+    };
+    const view = render(<CalendarEventEditorDialog {...props} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    fireEvent.change(screen.getByRole('textbox', { name: /Title/i }), {
+      target: { value: 'Monthly planning' },
+    });
+    fireEvent.change(screen.getByLabelText(/^Start/), {
+      target: { value: '2026-10-12T09:00' },
+    });
+    fireEvent.change(screen.getByLabelText(/^End/), {
+      target: { value: '2026-10-12T10:00' },
+    });
+    fireEvent.click(screen.getByLabelText('Repeats'));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Frequency' }), {
+      target: { value: 'MONTHLY' },
+    });
+    fireEvent.click(screen.getByLabelText('Repeat by weekday'));
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Week of the month' }),
+      '2',
+    );
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Weekday' }),
+      'MO',
+    );
+    fireEvent.change(screen.getByRole('combobox', { name: 'Ends' }), {
+      target: { value: 'count' },
+    });
+    fireEvent.change(
+      screen.getByRole('spinbutton', { name: 'Number of occurrences' }),
+      { target: { value: '5' } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Create event' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    const created = await repository.getEvent('team', 'monthly-ordinal');
+    expect(created.recurrence).toEqual({
+      rrule: 'FREQ=MONTHLY;BYDAY=2MO;COUNT=5',
+    });
+
+    view.rerender(<CalendarEventEditorDialog {...props} event={created} />);
+    expect(
+      await screen.findByRole('checkbox', { name: 'Repeat by weekday' }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('combobox', { name: 'Week of the month' }),
+    ).toHaveValue('2');
+    expect(screen.getByRole('combobox', { name: 'Weekday' })).toHaveValue('MO');
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Week of the month' }),
+      '-1',
+    );
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Weekday' }),
+      'FR',
+    );
+    fireEvent.change(screen.getByLabelText(/^Start/), {
+      target: { value: '2026-10-30T09:00' },
+    });
+    fireEvent.change(screen.getByLabelText(/^End/, { selector: 'input' }), {
+      target: { value: '2026-10-30T10:00' },
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await expect(
+      repository.getEvent('team', 'monthly-ordinal'),
+    ).resolves.toMatchObject({
+      recurrence: { rrule: 'FREQ=MONTHLY;BYDAY=-1FR;COUNT=5' },
+    });
+  });
+
   it('updates the entire selected source series with its current UID and resource id', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
