@@ -106,6 +106,7 @@ type SupportedAttachmentValue = {
 
 type AttachmentSourceState = {
   editable: SupportedAttachmentValue[];
+  opaqueUriUrls: string[];
   unsupported: boolean;
 };
 
@@ -518,13 +519,21 @@ export class ParsedICalendarEvent {
             : undefined
       : this.event.recurrence;
 
-    const attachmentProjection =
+    const updatedAttachmentState =
       attachmentPatch && attachmentWritePlan
         ? readAttachmentSourceState(
             vevent,
             attachmentWritePlan.nextProperties,
-          ).editable.map(({ url }) => ({ url }))
+          )
         : undefined;
+    const attachmentProjection = updatedAttachmentState
+      ? updatedAttachmentState.editable
+          .filter(
+            ({ url }) =>
+              !updatedAttachmentState.opaqueUriUrls.includes(url),
+          )
+          .map(({ url }) => ({ url }))
+      : undefined;
     const {
       alarm: alarmPatch,
       conference: _conferencePatch,
@@ -1397,6 +1406,9 @@ export class ICalendarEventCodec {
       vevent,
       attachmentPropertiesByEvent[eventIndex] ?? [],
     );
+    const authorableAttachments = attachmentState.editable.filter(
+      ({ url }) => !attachmentState.opaqueUriUrls.includes(url),
+    );
     const ambiguousAttachmentSource =
       attachmentState.unsupported ||
       hasAmbiguousAttachmentSource(
@@ -1418,10 +1430,10 @@ export class ICalendarEventCodec {
       location: textValue(vevent.getFirstPropertyValue('location')),
       url: textValue(vevent.getFirstPropertyValue('url')),
       externalLinks: readCalendarLinks(vevent),
-      ...(attachmentState.editable.length > 0 &&
+      ...(authorableAttachments.length > 0 &&
       !ambiguousAttachmentSource
         ? {
-            attachments: attachmentState.editable.map(({ url }) => ({ url })),
+            attachments: authorableAttachments.map(({ url }) => ({ url })),
           }
         : {}),
       categories: readCategories(vevent),
@@ -3931,6 +3943,7 @@ function readAttachmentSourceState(
   const parsedProperties = vevent.getAllProperties('attach');
   let unsupported = rawProperties.length !== parsedProperties.length;
   const editable: SupportedAttachmentValue[] = [];
+  const opaqueUriUrls: string[] = [];
 
   for (
     let propertyIndex = 0;
@@ -3944,19 +3957,27 @@ function readAttachmentSourceState(
           (parameter) => parameter.name === 'value',
         )
       : [];
+    const hasUriValueType =
+      valueTypes.length === 0 ||
+      valueTypes.some(
+        (parameter) => parameter.value?.toUpperCase() === 'URI',
+      );
+    const rawUrl = raw
+      ? canonicalizeCalendarExternalUrl(raw.value)
+      : undefined;
+    const parsedUrl = canonicalizeCalendarExternalUrl(property.getFirstValue());
     if (
       !raw ||
       valueTypes.length > 1 ||
       (valueTypes.length === 1 &&
         valueTypes[0].value?.toUpperCase() !== 'URI') ||
-      property.type !== 'uri'
+      property.type !== 'uri' ||
+      !rawUrl ||
+      rawUrl !== parsedUrl
     ) {
-      continue;
-    }
-
-    const rawUrl = canonicalizeCalendarExternalUrl(raw.value);
-    const parsedUrl = canonicalizeCalendarExternalUrl(property.getFirstValue());
-    if (!rawUrl || rawUrl !== parsedUrl) {
+      if (hasUriValueType && rawUrl) {
+        opaqueUriUrls.push(rawUrl);
+      }
       continue;
     }
     if (editable.length <= MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS) {
@@ -3977,7 +3998,7 @@ function readAttachmentSourceState(
     unsupported = true;
   }
 
-  return { editable, unsupported };
+  return { editable, opaqueUriUrls, unsupported };
 }
 
 function hasAmbiguousAttachmentSource(
@@ -3989,9 +4010,10 @@ function hasAmbiguousAttachmentSource(
   const matchingEvents = calendar
     .getAllSubcomponents('vevent')
     .map((component, index) => ({ component, index }))
-    .filter(
-      ({ component }) =>
-        textValue(component.getFirstPropertyValue('uid')) === uid,
+    .filter(({ component }) =>
+      component
+        .getAllProperties('uid')
+        .some((property) => textValue(property.getFirstValue()) === uid),
     );
   const masters = matchingEvents.filter(
     ({ component }) => !component.hasProperty('recurrence-id'),
@@ -4023,6 +4045,15 @@ function planAttachmentPatch(
   }
 
   const targetUrl = 'sourceUrl' in patch ? patch.sourceUrl : patch.url;
+  if (sourceState.opaqueUriUrls.includes(targetUrl)) {
+    throw unsupportedAttachmentPatch();
+  }
+  if (
+    patch.action === 'set' &&
+    sourceState.opaqueUriUrls.includes(patch.url)
+  ) {
+    throw unsupportedAttachmentPatch();
+  }
   const matches = sourceState.editable.filter(
     (attachment) => attachment.url === targetUrl,
   );

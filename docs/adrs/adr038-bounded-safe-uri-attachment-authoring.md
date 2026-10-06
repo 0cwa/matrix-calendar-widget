@@ -26,11 +26,14 @@ from a plain list of links.
    projection is capped at 16 authorable URI links.
 3. A set or remove may target only one unique canonical source URL. Adding a
    URL already present is an exact no-op only when that canonical URL occurs
-   once. Duplicate canonical source URLs, an over-limit projection, multiple
-   same-UID masters, or a same-UID detached VEVENT containing ATTACH disable
-   attachment authoring for the event. Detached components without ATTACH may
-   inherit the master property. Occurrence and following writes cannot author
-   ATTACH.
+   once. Duplicate canonical authorable source URLs, an over-limit
+   projection, a VEVENT with multiple UID properties that include this UID,
+   multiple same-UID masters, or a same-UID detached VEVENT containing ATTACH
+   disable attachment authoring for the event. An opaque
+   URI-intent line that collides canonically with a projected URL makes only
+   that URL unavailable as a source or destination; unrelated safe links remain
+   editable. Detached components without ATTACH may inherit the master
+   property. Occurrence and following writes cannot author ATTACH.
 4. An attachment operation changes only its target URI line or appends/removes
    one URI line. It retains original parameters, folding, order, and all
    unrelated raw ATTACH lines, including binary, unsafe, or otherwise opaque

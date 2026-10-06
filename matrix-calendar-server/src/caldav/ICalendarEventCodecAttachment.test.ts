@@ -276,6 +276,56 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
     );
   });
 
+  it('does not edit a URL colliding with an opaque URI-intent sibling', () => {
+    const sourceUrl = 'https://files.example.test/shared';
+    const repeatedValue =
+      'ATTACH;VALUE=URI;VALUE=URI:https://FILES.example.test:443/shared';
+    const otherUrl = 'https://files.example.test/other';
+    const source = calendarWithAttachments(
+      `ATTACH;VALUE=URI:${sourceUrl}`,
+      repeatedValue,
+      `ATTACH;VALUE=URI:${otherUrl}`,
+    );
+    const parsed = codec().parse('team', 'event.ics', source);
+
+    expect(parsed.event.unsupportedAttachment).toBeUndefined();
+    expect(parsed.event.attachments).toEqual([{ url: otherUrl }]);
+    expect(() =>
+      parsed.applyPatch({
+        attachment: { action: 'remove', sourceUrl },
+      }),
+    ).toThrow(ICalendarEventCodecError);
+    expect(() =>
+      parsed.applyPatch({
+        attachment: { action: 'add', url: sourceUrl },
+      }),
+    ).toThrow(ICalendarEventCodecError);
+    expect(() =>
+      parsed.applyPatch({
+        attachment: {
+          action: 'set',
+          sourceUrl: otherUrl,
+          url: sourceUrl,
+        },
+      }),
+    ).toThrow(ICalendarEventCodecError);
+
+    const unrelated = parsed.applyPatch({
+      attachment: {
+        action: 'set',
+        sourceUrl: otherUrl,
+        url: 'https://files.example.test/changed',
+      },
+    });
+    expect(unrelated.icalendar).toContain(repeatedValue);
+    expect(unrelated.icalendar).toContain(
+      `ATTACH;VALUE=URI:${sourceUrl}`,
+    );
+    expect(unrelated.event.attachments).toEqual([
+      { url: 'https://files.example.test/changed' },
+    ]);
+  });
+
   it('preserves default, binary, and unsafe raw lines on ordinary edits', () => {
     const unsafe = 'ATTACH;VALUE=URI:https://user:secret@files.example.test/a';
     const source = calendarWithAttachments(
@@ -315,6 +365,68 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
     expect(unchanged.icalendar).toBe(source);
     expect(unchanged.event.revision?.sequence).toBe(2_147_483_647);
   });
+
+  it('applies an effective write without changing exhausted sequence metadata', () => {
+    const source = calendarWithAttachments(
+      'ATTACH;VALUE=URI:https://files.example.test/agenda',
+    ).replace('SEQUENCE:3', 'SEQUENCE:2147483647');
+    const parsed = codec().parse('team', 'event.ics', source);
+
+    const changed = parsed.applyPatch({
+      attachment: {
+        action: 'set',
+        sourceUrl: 'https://files.example.test/agenda',
+        url: 'https://files.example.test/revised',
+      },
+    });
+
+    expect(changed.icalendar).toContain(
+      'ATTACH;VALUE=URI:https://files.example.test/revised',
+    );
+    expect(changed.icalendar).toContain('SEQUENCE:2147483647');
+    expect(changed.event.revision?.sequence).toBe(2_147_483_647);
+  });
+
+  it(
+    'blocks a malformed VEVENT that hides a duplicate same-UID component',
+    () => {
+      const hiddenAttachment =
+        'ATTACH;VALUE=URI:https://files.example.test/hidden';
+      const malformedComponent = [
+        'BEGIN:VEVENT',
+        'UID:other@example.test',
+        'UID:event@example.test',
+        'DTSTART:20261006T110000Z',
+        'DTEND:20261006T120000Z',
+        hiddenAttachment,
+        'END:VEVENT',
+      ].join('\r\n');
+      const source = calendarWithAttachments(
+        'ATTACH;VALUE=URI:https://files.example.test/master',
+      ).replace(
+        'END:VCALENDAR',
+        [malformedComponent, 'END:VCALENDAR'].join('\r\n'),
+      );
+      const parsed = codec().parse('team', 'event.ics', source);
+
+      expect(parsed.event.unsupportedAttachment).toBe(true);
+      expect(parsed.event.attachments).toBeUndefined();
+      expect(() =>
+        parsed.applyPatch({
+          attachment: {
+            action: 'remove',
+            sourceUrl: 'https://files.example.test/master',
+          },
+        }),
+      ).toThrow(ICalendarEventCodecError);
+
+      const ordinaryEdit = parsed.applyPatch({ title: 'Updated' });
+      expect(ordinaryEdit.icalendar).toContain(hiddenAttachment);
+      expect(ordinaryEdit.icalendar).toContain(
+        'ATTACH;VALUE=URI:https://files.example.test/master',
+      );
+    },
+  );
 
   it('blocks detached attachments but permits detached components without ATTACH', () => {
     const masterAttachment =
