@@ -121,11 +121,11 @@ describe('<CalendarEventEditorDialog />', () => {
       await screen.findByRole('textbox', { name: /Title/i }),
       'Attachment event',
     );
-    fireEvent.change(
+    await userEvent.click(
       screen.getByRole('combobox', { name: 'Attachment link' }),
-      {
-        target: { value: 'add' },
-      },
+    );
+    await userEvent.click(
+      await screen.findByRole('option', { name: 'Add link' }),
     );
     await userEvent.type(
       screen.getByRole('textbox', { name: 'Attachment URL' }),
@@ -171,9 +171,11 @@ describe('<CalendarEventEditorDialog />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    fireEvent.change(
+    await userEvent.click(
       await screen.findByRole('combobox', { name: 'Attachment link' }),
-      { target: { value: 'set' } },
+    );
+    await userEvent.click(
+      await screen.findByRole('option', { name: 'Replace link' }),
     );
     const urlInput = await screen.findByRole('textbox', {
       name: 'Attachment URL',
@@ -221,13 +223,15 @@ describe('<CalendarEventEditorDialog />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    fireEvent.change(
+    await userEvent.click(
       await screen.findByRole('combobox', { name: 'Attachment link' }),
-      { target: { value: 'remove' } },
+    );
+    await userEvent.click(
+      await screen.findByRole('option', { name: 'Remove link' }),
     );
     expect(
       await screen.findByRole('combobox', { name: 'Existing attachment link' }),
-    ).toHaveValue('https://files.example.test/old.pdf');
+    ).toHaveTextContent('https://files.example.test/old.pdf');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
@@ -267,7 +271,7 @@ describe('<CalendarEventEditorDialog />', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole('combobox', { name: 'Attachment link' }),
-    ).toBeDisabled();
+    ).toHaveAttribute('aria-disabled', 'true');
     await userEvent.clear(screen.getByRole('textbox', { name: /Title/i }));
     await userEvent.type(
       screen.getByRole('textbox', { name: /Title/i }),

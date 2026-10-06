@@ -1195,20 +1195,20 @@ export function CalendarEventEditorDialog({
                   {t('calendarEvents.editor.attachmentAdd', 'Add link')}
                 </MenuItem>
                 {(values.attachmentUrls?.length ?? 0) > 0 && (
-                  <>
-                    <MenuItem value="set">
-                      {t(
-                        'calendarEvents.editor.attachmentReplace',
-                        'Replace link',
-                      )}
-                    </MenuItem>
-                    <MenuItem value="remove">
-                      {t(
-                        'calendarEvents.editor.attachmentRemove',
-                        'Remove link',
-                      )}
-                    </MenuItem>
-                  </>
+                  <MenuItem value="set">
+                    {t(
+                      'calendarEvents.editor.attachmentReplace',
+                      'Replace link',
+                    )}
+                  </MenuItem>
+                )}
+                {(values.attachmentUrls?.length ?? 0) > 0 && (
+                  <MenuItem value="remove">
+                    {t(
+                      'calendarEvents.editor.attachmentRemove',
+                      'Remove link',
+                    )}
+                  </MenuItem>
                 )}
               </TextField>
 

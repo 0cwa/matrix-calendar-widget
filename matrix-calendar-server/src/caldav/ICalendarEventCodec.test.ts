@@ -3738,7 +3738,10 @@ END:VCALENDAR`,
       }
 
       expect(fetchSpy).not.toHaveBeenCalled();
-      expect(parsed.event).not.toHaveProperty('attachments');
+      expect(parsed.event.attachments).toEqual([
+        { url: 'https://files.example.test/agenda.pdf' },
+      ]);
+      expect(parsed.event.unsupportedAttachment).toBeUndefined();
       expect(parsed.event).not.toHaveProperty('conference');
     } finally {
       fetchSpy.mockRestore();
