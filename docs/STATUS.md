@@ -1,8 +1,8 @@
 # Project status
 
-_Last updated: 2026-10-03._
+_Last updated: 2026-10-06._
 
-_Source snapshot: `main` at `f49acee71280944ad6ae351111947ff01c00031d` (PR #201)._
+_Source snapshot: `main` at `d32dceb9bd7d1fbc17078ef986040d1940813142` (PR #214)._
 
 ## Current phase
 
@@ -54,6 +54,14 @@ PR #184 adds a synthetic projection benchmark, not a production latency or capac
 - **M8:** record actual Element Web/Desktop/mobile and screen-reader evidence separately; issue #9 remains open for beta, capacity, and client/operator acceptance. Gateway and bot quotas are process-local. Callers behind one reverse proxy share the gateway's TCP-peer quota; use one server replica or add a trusted upstream/distributed control.
 - **Operator readiness:** production homeserver/proxy behavior, OpenID query-token log redaction, actual Radicale image/configuration and `/data` preservation, PostgreSQL endpoint TLS/CA and role, backups/restores, secrets, network exposure, and rollback remain to be verified. The Compose sidecar creates its own Radicale store and is not a migration of etke data.
 - **Release/deployment:** the project remains pre-alpha. Build and contract evidence do not authorize image/chart publication or a live deployment.
+
+## Active repository work
+
+The October 6 continuation is validating bounded monthly ordinal-weekday
+authoring (ADR035) and narrow room-calendar browser coverage (PR #213). Both
+are pending final exact-head validation and merge; they do not complete the
+broader M5 or M8 acceptance criteria. PR #214 repaired a date-sensitive
+upcoming-command test and merged after all seven hosted checks passed.
 
 ## Documentation note
 

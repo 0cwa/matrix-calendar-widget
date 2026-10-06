@@ -130,6 +130,11 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
       any same-event VALARM. The editor requires an explicit instance/series
       choice and displays preflight or conflict feedback (ADR029).
 - [ ] Extend RRULE editing to additional recurrence rule parts and patterns.
+  - [ ] Author one MONTHLY ordinal BYDAY selector (first through fifth or
+        last weekday), with matching DTSTART, interval/count/typed-UNTIL
+        controls and DST regressions. Preserve broader read projection and
+        keep this-and-following timing support within ADR034 (ADR035; exact-head
+        validation pending).
 - [x] Skip and restore one projected supported occurrence by adding or
       removing only its matching EXDATE. Use the original recurrence identity
       even when a detached override moves the displayed instance, and preserve

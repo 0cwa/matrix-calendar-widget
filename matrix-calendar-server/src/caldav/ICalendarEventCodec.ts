@@ -145,6 +145,30 @@ export class ParsedICalendarEvent {
     const recurrenceWrite = hasRecurrencePatch
       ? recurrenceWriteFromUnknown(patch.recurrence)
       : undefined;
+    if (
+      hasOwn(patch, 'timing') &&
+      patch.timing &&
+      !(recurrenceWrite && 'rrule' in recurrenceWrite) &&
+      typeof this.event.recurrence?.rrule === 'string'
+    ) {
+      let hasSupportedMonthlyOrdinal = false;
+      try {
+        hasSupportedMonthlyOrdinal =
+          parseSupportedCalendarEventRecurrenceRule(
+            this.event.recurrence.rrule,
+            timingStartAsDateTime(this.event.timing),
+          )?.weekdayOrdinal !== undefined;
+      } catch {
+        // Preserve timing edits for recurrence rules outside the editor's
+        // authoring subset; the RRULE remains opaque and unchanged.
+      }
+      if (hasSupportedMonthlyOrdinal) {
+        validateRecurrenceRule(
+          this.event.recurrence.rrule,
+          timingStartAsDateTime(patch.timing),
+        );
+      }
+    }
     if (recurrenceWrite && 'occurrence' in recurrenceWrite) {
       if (Object.keys(patch).some((key) => key !== 'recurrence')) {
         throw unsupportedOccurrenceTimingPatch();
