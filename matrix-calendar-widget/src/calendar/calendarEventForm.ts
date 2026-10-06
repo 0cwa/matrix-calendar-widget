@@ -25,6 +25,8 @@ import {
   CalendarEventInput,
   CalendarEventPatch,
   CalendarEventRecurrenceDate,
+  CalendarEventOccurrenceTextField,
+  CalendarEventOccurrenceTextOperation,
   CalendarEventTiming,
   CalendarEventWeekday,
   CalendarEventWeekdayOrdinal,
@@ -111,6 +113,22 @@ export type CalendarEventFormValues = {
   alarmEditable?: boolean;
   alarmDisabledReason?: 'unsupported';
   alarmChanged?: boolean;
+  occurrenceTextModes?: Record<
+    CalendarEventOccurrenceTextField,
+    'series' | 'custom'
+  >;
+  occurrenceTextOriginalModes?: Record<
+    CalendarEventOccurrenceTextField,
+    'series' | 'custom'
+  >;
+  occurrenceTextOriginalValues?: Record<
+    CalendarEventOccurrenceTextField,
+    string
+  >;
+  occurrenceTextSeriesValues?: Record<CalendarEventOccurrenceTextField, string>;
+  occurrenceTextUnsupported?: Partial<
+    Record<CalendarEventOccurrenceTextField, true>
+  >;
 };
 
 export type CalendarEventValidationError =
@@ -212,6 +230,94 @@ export function calendarEventToFormValues(
     ...recurrenceExdateFormValues(event),
     ...alarmFormValues(event),
   };
+}
+
+export function calendarEventOccurrenceToFormValues(
+  sourceEvent: CalendarEvent,
+  occurrenceEvent: CalendarEvent,
+  recurrenceId: CalendarEventDateTime,
+  calendar: Calendar,
+): CalendarEventFormValues {
+  const values = calendarEventToFormValues(occurrenceEvent, calendar);
+  const identity = calendarEventRecurrenceIdentity(recurrenceId);
+  const override = sourceEvent.recurrence?.overrides?.find(
+    (candidate) =>
+      calendarEventRecurrenceIdentity(candidate.recurrenceId) === identity,
+  );
+  const fields: CalendarEventOccurrenceTextField[] = [
+    'title',
+    'description',
+    'location',
+  ];
+  const modes = Object.fromEntries(
+    fields.map((field) => [
+      field,
+      override &&
+      (Object.prototype.hasOwnProperty.call(override, field) ||
+        override.unsupportedText?.[field])
+        ? 'custom'
+        : 'series',
+    ]),
+  ) as Record<CalendarEventOccurrenceTextField, 'series' | 'custom'>;
+  const currentValues = {
+    title: values.title,
+    description: values.description,
+    location: values.location,
+  };
+  return {
+    ...values,
+    occurrenceTextModes: modes,
+    occurrenceTextOriginalModes: { ...modes },
+    occurrenceTextOriginalValues: { ...currentValues },
+    occurrenceTextSeriesValues: {
+      title: sourceEvent.title,
+      description: sourceEvent.description ?? '',
+      location: sourceEvent.location ?? '',
+    },
+    ...(override?.unsupportedText
+      ? { occurrenceTextUnsupported: { ...override.unsupportedText } }
+      : {}),
+  };
+}
+
+export function calendarEventOccurrenceTextOperationsFromForm(
+  values: CalendarEventFormValues,
+): Partial<
+  Record<CalendarEventOccurrenceTextField, CalendarEventOccurrenceTextOperation>
+> {
+  const modes = values.occurrenceTextModes;
+  const originalModes = values.occurrenceTextOriginalModes;
+  const originalValues = values.occurrenceTextOriginalValues;
+  if (!modes || !originalModes || !originalValues) {
+    return {};
+  }
+
+  const operations: Partial<
+    Record<CalendarEventOccurrenceTextField, CalendarEventOccurrenceTextOperation>
+  > = {};
+  const fields: CalendarEventOccurrenceTextField[] = [
+    'title',
+    'description',
+    'location',
+  ];
+  for (const field of fields) {
+    if (values.occurrenceTextUnsupported?.[field]) {
+      continue;
+    }
+    if (modes[field] === 'series') {
+      if (originalModes[field] !== 'series') {
+        operations[field] = { action: 'inherit' };
+      }
+      continue;
+    }
+    if (
+      originalModes[field] !== 'custom' ||
+      values[field] !== originalValues[field]
+    ) {
+      operations[field] = { action: 'set', value: values[field].trim() };
+    }
+  }
+  return operations;
 }
 
 function conferenceFormValues(
@@ -397,7 +503,14 @@ export function validateCalendarEventForm(
   values: CalendarEventFormValues,
 ): CalendarEventValidationError | undefined {
   if (!values.title.trim()) {
-    return 'title-required';
+    const titleOperation =
+      calendarEventOccurrenceTextOperationsFromForm(values).title;
+    if (
+      !values.occurrenceTextModes ||
+      titleOperation?.action === 'set'
+    ) {
+      return 'title-required';
+    }
   }
 
   const conferenceError = validateConference(values);

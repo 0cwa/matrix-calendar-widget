@@ -2263,6 +2263,36 @@ END:VCALENDAR`,
     expect(forRoom).not.toHaveBeenCalled();
   });
 
+  it('rejects malformed selected-occurrence patches before CalDAV access', async () => {
+    await expect(
+      createController().updateEvent(
+        userContext,
+        openIdCredential,
+        {
+          recurrence: {
+            occurrence: {
+              action: 'set-fields',
+              recurrenceId: {
+                type: 'floating-date-time',
+                value: '2026-09-25T09:00:00',
+              },
+              viewerTimezone: 'UTC',
+              title: { action: 'set', value: '   ' },
+            },
+          },
+        } as CalendarEventPatch,
+        '"current-etag"',
+        roomId,
+        'https://radicale.example.test/alice/team/',
+        'https://radicale.example.test/alice/team/event.ics',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'invalid-event-occurrence' },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(forRoom).not.toHaveBeenCalled();
+  });
+
   it('preserves unknown iCalendar data when updating an event', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';

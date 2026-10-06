@@ -22,6 +22,13 @@ export {
   validateCalendarEventPatchConference,
 } from './calendarEventConference';
 export {
+  CalendarEventOccurrenceValidationError,
+  isCalendarEventDateTime,
+  isCalendarEventOccurrenceWrite,
+  isCalendarEventRecurrenceTiming,
+  validateCalendarEventPatchOccurrence,
+} from './calendarEventOccurrenceWrite';
+export {
   MAX_CALENDAR_EVENT_EXTERNAL_LINKS,
   MAX_CALENDAR_EVENT_EXTERNAL_LINK_LABEL_LENGTH,
   MAX_CALENDAR_EVENT_EXTERNAL_LINK_URI_LENGTH,

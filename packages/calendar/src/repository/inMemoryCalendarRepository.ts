@@ -42,9 +42,14 @@ import {
   validateCalendarEventPatchConference,
 } from '../utils/calendarEventConference';
 import {
+  CalendarEventOccurrenceValidationError,
+  validateCalendarEventPatchOccurrence,
+} from '../utils/calendarEventOccurrenceWrite';
+import {
   calendarEventFollowingTimingOverrides,
   calendarEventRecurrenceIdentity,
   isSupportedCalendarEventOccurrenceExclusion,
+  projectCalendarEventOccurrenceByRecurrenceId,
 } from '../utils/calendarEventOccurrenceProjection';
 import { calendarEventTimedDateTimeToDateTime } from '../utils/calendarEventTimedDateTime';
 import {
@@ -626,6 +631,9 @@ function cloneRecurrenceOverride(
     timing: override.timing
       ? cloneRecurrenceTiming(override.timing)
       : undefined,
+    unsupportedText: override.unsupportedText
+      ? { ...override.unsupportedText }
+      : undefined,
   };
 }
 
@@ -661,7 +669,18 @@ function cloneCalendarEventPatch(
         occurrence: {
           ...operation,
           recurrenceId: cloneCalendarEventDateTime(operation.recurrenceId),
-          timing: cloneRecurrenceTiming(operation.timing),
+          ...(operation.timing
+            ? { timing: cloneRecurrenceTiming(operation.timing) }
+            : {}),
+          ...('title' in operation && operation.title
+            ? { title: { ...operation.title } }
+            : {}),
+          ...('description' in operation && operation.description
+            ? { description: { ...operation.description } }
+            : {}),
+          ...('location' in operation && operation.location
+            ? { location: { ...operation.location } }
+            : {}),
         },
       };
     } else if ('following' in patch.recurrence) {
@@ -757,11 +776,14 @@ function applyRecurrenceWrite(
       return {
         ...current,
         overrides: plan.overrides.map((override) => ({
+          ...override,
           recurrenceId: cloneCalendarEventDateTime(override.recurrenceId),
           timing: override.timing
             ? cloneRecurrenceTiming(override.timing)
             : undefined,
-          ...(override.status ? { status: override.status } : {}),
+          unsupportedText: override.unsupportedText
+            ? { ...override.unsupportedText }
+            : undefined,
         })),
       };
     } catch {
@@ -965,7 +987,7 @@ function applyOccurrenceTimingWrite(
   ) {
     throw new CalendarRepositoryError(
       'unsupported-patch',
-      'This occurrence cannot be timed safely because its recurrence, alarms, or identity are unsupported or ambiguous.',
+      'This occurrence cannot be changed safely because its recurrence, alarms, or identity are unsupported or ambiguous.',
     );
   }
 
@@ -973,9 +995,10 @@ function applyOccurrenceTimingWrite(
     (override) =>
       calendarEventRecurrenceIdentity(override.recurrenceId) === identity,
   );
+  const existing = matchingOverrides[0];
   if (
     matchingOverrides.length > 1 ||
-    matchingOverrides[0]?.status === 'cancelled'
+    existing?.status === 'cancelled'
   ) {
     throw new CalendarRepositoryError(
       'unsupported-patch',
@@ -983,22 +1006,145 @@ function applyOccurrenceTimingWrite(
     );
   }
 
-  validateRecurrenceTiming(operation.timing, event, operation.viewerTimezone);
+  if (operation.timing) {
+    validateRecurrenceTiming(
+      operation.timing,
+      event,
+      operation.viewerTimezone,
+    );
+  }
+  const fields = ['title', 'description', 'location'] as const;
+  for (const field of fields) {
+    const textOperation = operation.action === 'set-fields' ? operation[field] : undefined;
+    if (
+      textOperation &&
+      existing?.unsupportedText?.[field]
+    ) {
+      throw new CalendarRepositoryError(
+        'unsupported-patch',
+        'This occurrence text field is not supported for editing',
+      );
+    }
+  }
+
   const nextOverride: CalendarEventRecurrenceOverride = {
+    ...(existing ?? {}),
     recurrenceId: cloneCalendarEventDateTime(operation.recurrenceId),
-    timing: cloneRecurrenceTiming(operation.timing),
-    ...(matchingOverrides[0]?.status
-      ? { status: matchingOverrides[0].status }
+    ...(operation.timing
+      ? { timing: cloneRecurrenceTiming(operation.timing) }
+      : {}),
+    ...(existing?.status ? { status: existing.status } : {}),
+    ...(existing?.unsupportedText
+      ? { unsupportedText: { ...existing.unsupportedText } }
       : {}),
   };
+  let changed = !existing && Boolean(operation.timing);
+  for (const field of fields) {
+    const textOperation =
+      operation.action === 'set-fields'
+        ? operation[field]
+        : undefined;
+    if (!textOperation) {
+      continue;
+    }
+    if (textOperation.action === 'inherit') {
+      if (Object.prototype.hasOwnProperty.call(nextOverride, field)) {
+        delete nextOverride[field];
+        changed = true;
+      }
+    } else if (
+      !Object.prototype.hasOwnProperty.call(nextOverride, field) ||
+      nextOverride[field] !== textOperation.value
+    ) {
+      nextOverride[field] = textOperation.value;
+      changed = true;
+    }
+  }
+  if (operation.timing && existing) {
+    const oldTiming = existing.timing;
+    if (!oldTiming || JSON.stringify(oldTiming) !== JSON.stringify(operation.timing)) {
+      changed = true;
+    }
+  }
+
+  if (
+    !existing &&
+    changed &&
+    operation.action === 'set-fields' &&
+    !operation.timing
+  ) {
+    const projected = projectCalendarEventOccurrenceByRecurrenceId(
+      event,
+      operation.recurrenceId,
+      operation.viewerTimezone,
+    );
+    if (!projected) {
+      throw invalidOccurrenceTiming();
+    }
+    const defaultTiming = recurrenceTimingFromOccurrenceTiming(
+      projected.event.timing,
+    );
+    validateRecurrenceTiming(
+      defaultTiming,
+      event,
+      operation.viewerTimezone,
+    );
+    nextOverride.timing = defaultTiming;
+  }
+
+  if (!changed) {
+    return recurrence;
+  }
   const overrides = [...(recurrence.overrides ?? [])];
-  if (matchingOverrides.length === 1) {
-    const index = overrides.indexOf(matchingOverrides[0]);
-    overrides[index] = nextOverride;
+  if (existing) {
+    const emptyTextOnlyOverride =
+      !nextOverride.timing &&
+      !nextOverride.status &&
+      !Object.prototype.hasOwnProperty.call(nextOverride, 'title') &&
+      !Object.prototype.hasOwnProperty.call(nextOverride, 'description') &&
+      !Object.prototype.hasOwnProperty.call(nextOverride, 'location') &&
+      !nextOverride.unsupportedText;
+    const index = overrides.indexOf(existing);
+    if (emptyTextOnlyOverride) {
+      overrides.splice(index, 1);
+    } else {
+      overrides[index] = nextOverride;
+    }
   } else {
     overrides.push(nextOverride);
   }
-  return { ...recurrence, overrides };
+  return {
+    ...recurrence,
+    ...(overrides.length ? { overrides } : { overrides: undefined }),
+  };
+}
+
+function recurrenceTimingFromOccurrenceTiming(
+  timing: CalendarEvent['timing'],
+): CalendarEventRecurrenceTiming {
+  if (timing.type === 'all-day') {
+    return {
+      type: 'end',
+      start: { type: 'date', value: timing.startDate },
+      end: { type: 'date', value: timing.endDate },
+    };
+  }
+  const endpoint = (
+    value: (typeof timing)['start'],
+  ): CalendarEventDateTime => {
+    const local = value.local.length === 16 ? `${value.local}:00` : value.local;
+    return value.type === 'floating'
+      ? { type: 'floating-date-time', value: local }
+      : {
+          type: 'date-time',
+          value: { local, timezone: value.timezone },
+        };
+  };
+  return {
+    type: 'end',
+    start: endpoint(timing.start),
+    end: endpoint(timing.end),
+  };
 }
 
 function validateRecurrenceTiming(
@@ -1110,30 +1256,13 @@ function recurrenceDurationEndMillis(
 }
 
 function validateOccurrenceTimingPatchShape(patch: unknown): void {
-  if (!isRecord(patch) || !isRecord(patch.recurrence)) {
-    return;
-  }
-  const recurrence = patch.recurrence;
-  if (!Object.prototype.hasOwnProperty.call(recurrence, 'occurrence')) {
-    return;
-  }
-
-  const operation = recurrence.occurrence;
-  if (
-    Object.keys(patch).length !== 1 ||
-    Object.keys(recurrence).length !== 1 ||
-    !isRecord(operation) ||
-    Object.keys(operation).length !== 4 ||
-    !['action', 'recurrenceId', 'timing', 'viewerTimezone'].every((key) =>
-      Object.prototype.hasOwnProperty.call(operation, key),
-    ) ||
-    operation.action !== 'set-timing' ||
-    typeof operation.viewerTimezone !== 'string' ||
-    !isCalendarTimezoneSupported(operation.viewerTimezone) ||
-    !isOccurrenceDateTime(operation.recurrenceId) ||
-    !isOccurrenceTiming(operation.timing)
-  ) {
-    throw invalidOccurrenceTiming();
+  try {
+    validateCalendarEventPatchOccurrence(patch);
+  } catch (error) {
+    if (error instanceof CalendarEventOccurrenceValidationError) {
+      throw invalidOccurrenceTiming();
+    }
+    throw error;
   }
 }
 

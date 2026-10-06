@@ -17,6 +17,7 @@
 import {
   CalendarAuthorizationRequest,
   CalendarEventConferenceValidationError,
+  CalendarEventOccurrenceValidationError,
   CalendarEventInput,
   CalendarEventPatch,
   CalendarTimeRange,
@@ -24,6 +25,7 @@ import {
   projectCalendarEventOccurrences,
   validateCalendarEventInputConference,
   validateCalendarEventPatchConference,
+  validateCalendarEventPatchOccurrence,
   type CalendarEventListDiagnosticReason,
 } from '@matrix-calendar-widget/calendar';
 import {
@@ -842,6 +844,7 @@ export class CalendarGatewayController {
     @Query('target') target?: string,
   ): Promise<CalendarGatewayEventDto> {
     assertValidConferencePayload(patch, 'patch');
+    assertValidOccurrencePayload(patch);
     if (this.isRoomTarget(target)) {
       const roomTarget = await this.authorizeRoomCalendarTarget(
         userContext,
@@ -1620,6 +1623,20 @@ function normalizeUrlForComparison(value: string): string {
   const url = new URL(value);
   const path = url.pathname.replace(/\/+$/, '') || '/';
   return `${url.origin}${path}`;
+}
+
+function assertValidOccurrencePayload(value: unknown): void {
+  try {
+    validateCalendarEventPatchOccurrence(value);
+  } catch (error) {
+    if (error instanceof CalendarEventOccurrenceValidationError) {
+      throw new BadRequestException({
+        code: 'invalid-event-occurrence',
+        message: 'The selected occurrence operation is invalid or unsupported.',
+      });
+    }
+    throw error;
+  }
 }
 
 function assertValidConferencePayload(

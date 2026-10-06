@@ -16,6 +16,7 @@
 
 import type {
   CalendarEventDateTime,
+  CalendarEventOccurrenceTextField,
   CalendarEventRecurrenceDate,
   CalendarEventWeekday,
 } from '@matrix-calendar-widget/calendar';
@@ -63,6 +64,8 @@ import {
   calendarEventFormStartWeekday,
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
+  calendarEventOccurrenceTextOperationsFromForm,
+  calendarEventOccurrenceToFormValues,
   calendarEventRdatePeriodDurationFromForm,
   calendarEventRdatePeriodIsEditable,
   calendarEventRdatePeriodValueFromForm,
@@ -230,6 +233,11 @@ export function CalendarEventEditorDialog({
       label: t('calendarEvents.editor.durationSeconds', 'Seconds'),
     },
   ] as const;
+  const occurrenceTextOperations =
+    calendarEventOccurrenceTextOperationsFromForm(values);
+  const occurrenceHasChanges =
+    values.timingChanged === true ||
+    Object.keys(occurrenceTextOperations).length > 0;
   const originalTimedTiming =
     values.originalTiming?.type === 'timed' ? values.originalTiming : undefined;
   const hasFloatingEndpoint =
@@ -693,20 +701,44 @@ export function CalendarEventEditorDialog({
           return;
         }
         if (editingOccurrence && occurrence) {
-          const timing =
-            calendarEventPatchFromForm(values).timing ??
-            occurrence.event.timing;
-          saved = await updateEvent(event.calendarId, event.id, {
-            recurrence: {
-              occurrence: {
-                action: 'set-timing',
-                recurrenceId: occurrence.recurrenceId,
-                timing: recurrenceTimingFromEventTiming(timing),
-                viewerTimezone,
+          const timing = calendarEventPatchFromForm(values).timing;
+          if (Object.keys(occurrenceTextOperations).length > 0) {
+            saved = await updateEvent(event.calendarId, event.id, {
+              recurrence: {
+                occurrence: {
+                  action: 'set-fields',
+                  recurrenceId: occurrence.recurrenceId,
+                  ...(timing
+                    ? { timing: recurrenceTimingFromEventTiming(timing) }
+                    : {}),
+                  viewerTimezone,
+                  ...occurrenceTextOperations,
+                },
               },
-            },
-          });
-          onSaved?.(saved, { ...occurrence.event, timing });
+            });
+          } else if (timing) {
+            saved = await updateEvent(event.calendarId, event.id, {
+              recurrence: {
+                occurrence: {
+                  action: 'set-timing',
+                  recurrenceId: occurrence.recurrenceId,
+                  timing: recurrenceTimingFromEventTiming(timing),
+                  viewerTimezone,
+                },
+              },
+            });
+          } else {
+            onSaved?.(event, occurrence.event);
+            onClose();
+            return;
+          }
+          const updatedOccurrence =
+            projectCalendarEventOccurrenceByRecurrenceId(
+              saved,
+              occurrence.recurrenceId,
+              viewerTimezone,
+            )?.event ?? occurrence.event;
+          onSaved?.(saved, updatedOccurrence);
           onClose();
           return;
         }
@@ -820,10 +852,39 @@ export function CalendarEventEditorDialog({
     if (!event || !occurrence) {
       return;
     }
-    setValues(calendarEventToFormValues(occurrence.event, initialCalendar));
+    setValues(
+      calendarEventOccurrenceToFormValues(
+        event,
+        occurrence.event,
+        occurrence.recurrenceId,
+        initialCalendar,
+      ),
+    );
     setEditScope('occurrence');
     setError(undefined);
   };
+
+  const handleOccurrenceTextModeChange =
+    (field: CalendarEventOccurrenceTextField) =>
+    (change: ChangeEvent<HTMLInputElement>) => {
+      const useSeriesValue = change.target.checked;
+      setValues((current) => {
+        if (!current || !current.occurrenceTextModes) {
+          return current;
+        }
+        const mode = useSeriesValue ? 'series' : 'custom';
+        return {
+          ...current,
+          occurrenceTextModes: {
+            ...current.occurrenceTextModes,
+            [field]: mode,
+          },
+          ...(useSeriesValue
+            ? { [field]: current.occurrenceTextSeriesValues?.[field] ?? '' }
+            : {}),
+        };
+      });
+    };
 
   const chooseFollowingScope = () => {
     if (!event || !occurrence || !followingSupported || occurrenceHasAlarm) {
@@ -942,10 +1003,68 @@ export function CalendarEventEditorDialog({
                       'This occurrence and every later occurrence will use the start and end below. Original recurrence dates and time zone stay unchanged. Timed events keep the entered elapsed duration; all-day events keep the entered whole-day duration.',
                     )
                   : t(
-                      'calendarEvents.editor.instanceTimingOnly',
-                      'Only this occurrence’s start and end time will change.',
+                      'calendarEvents.editor.instanceEditHelp',
+                      'Change only this occurrence’s title, description, location, or timing.',
                     )}
               </Alert>
+              {editingOccurrence &&
+                (
+                  [
+                    {
+                      field: 'title',
+                      label: t('calendarEvents.editor.title', 'Title'),
+                      useSeriesKey: 'calendarEvents.editor.useSeriesTitle',
+                      useSeriesLabel: 'Use series title',
+                    },
+                    {
+                      field: 'description',
+                      label: t('calendarEvents.editor.description', 'Description'),
+                      useSeriesKey: 'calendarEvents.editor.useSeriesDescription',
+                      useSeriesLabel: 'Use series description',
+                    },
+                    {
+                      field: 'location',
+                      label: t('calendarEvents.editor.location', 'Location'),
+                      useSeriesKey: 'calendarEvents.editor.useSeriesLocation',
+                      useSeriesLabel: 'Use series location',
+                    },
+                  ] as const
+                ).map(({ field, label, useSeriesKey, useSeriesLabel }) => {
+                  const unsupported =
+                    values.occurrenceTextUnsupported?.[field] === true;
+                  const mode =
+                    values.occurrenceTextModes?.[field] ?? 'series';
+                  return (
+                    <FormControl key={field}>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={mode === 'series'}
+                            disabled={readOnly || saving || unsupported}
+                            onChange={handleOccurrenceTextModeChange(field)}
+                          />
+                        }
+                        label={t(useSeriesKey, useSeriesLabel)}
+                      />
+                      <TextField
+                        disabled={
+                          readOnly || saving || unsupported || mode === 'series'
+                        }
+                        label={label}
+                        onChange={handleChange(field)}
+                        value={values[field]}
+                      />
+                      {unsupported && (
+                        <FormHelperText>
+                          {t(
+                            'calendarEvents.editor.occurrenceTextUnavailable',
+                            'This occurrence has text data this editor cannot safely change.',
+                          )}
+                        </FormHelperText>
+                      )}
+                    </FormControl>
+                  );
+                })}
               <TextField
                 InputLabelProps={{ shrink: true }}
                 label={t('calendarEvents.editor.start', 'Start')}
@@ -1846,7 +1965,8 @@ export function CalendarEventEditorDialog({
               readOnly ||
               chooseScope ||
               missingOccurrence ||
-              followingTimingUnchanged
+              followingTimingUnchanged ||
+              (editingOccurrence && !occurrenceHasChanges)
             }
             loading={saving}
             type="submit"

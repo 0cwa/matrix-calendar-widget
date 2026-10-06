@@ -19,6 +19,8 @@ import { DateTime } from 'luxon';
 import {
   calendarEventInputFromForm,
   calendarEventPatchFromForm,
+  calendarEventOccurrenceTextOperationsFromForm,
+  calendarEventOccurrenceToFormValues,
   calendarEventRdatePeriodDurationFromForm,
   calendarEventRdatePeriodIsEditable,
   calendarEventRdatePeriodValueFromForm,
@@ -35,6 +37,204 @@ const calendar: Calendar = {
 };
 
 describe('calendar event form adapter', () => {
+  it('tracks occurrence text source presence separately from equal values', () => {
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-10-24T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const sourceEvent: CalendarEvent = {
+      id: 'series',
+      calendarId: 'team',
+      uid: 'series@example.test',
+      title: 'Series title',
+      description: 'Series description',
+      location: 'Series room',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=DAILY;COUNT=3',
+        overrides: [
+          {
+            recurrenceId,
+            title: 'Series title',
+            description: '',
+            location: 'Instance room',
+          },
+        ],
+      },
+    };
+    const selectedOccurrence: CalendarEvent = {
+      ...sourceEvent,
+      id: 'series::occurrence::2026-10-24',
+      title: 'Series title',
+      description: '',
+      location: 'Instance room',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-24T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-24T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    };
+
+    const values = calendarEventOccurrenceToFormValues(
+      sourceEvent,
+      selectedOccurrence,
+      recurrenceId,
+      calendar,
+    );
+    expect(values.occurrenceTextModes).toEqual({
+      title: 'custom',
+      description: 'custom',
+      location: 'custom',
+    });
+    expect(
+      calendarEventOccurrenceTextOperationsFromForm(values),
+    ).toEqual({});
+
+    const changed = {
+      ...values,
+      occurrenceTextModes: {
+        ...values.occurrenceTextModes!,
+        description: 'series' as const,
+        location: 'series' as const,
+      },
+      description: 'Series description',
+      location: 'Series room',
+    };
+    expect(
+      calendarEventOccurrenceTextOperationsFromForm(changed),
+    ).toEqual({
+      description: { action: 'inherit' },
+      location: { action: 'inherit' },
+    });
+  });
+
+  it('creates an explicit text value even when it matches the inherited series value', () => {
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-10-24T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const sourceEvent: CalendarEvent = {
+      id: 'series',
+      calendarId: 'team',
+      uid: 'series@example.test',
+      title: 'Series title',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=DAILY;COUNT=3' },
+    };
+    const selectedOccurrence: CalendarEvent = {
+      ...sourceEvent,
+      id: 'series::occurrence::2026-10-24',
+      timing: sourceEvent.timing,
+    };
+    const values = calendarEventOccurrenceToFormValues(
+      sourceEvent,
+      selectedOccurrence,
+      recurrenceId,
+      calendar,
+    );
+    const customized = {
+      ...values,
+      occurrenceTextModes: {
+        ...values.occurrenceTextModes!,
+        title: 'custom' as const,
+      },
+    };
+    expect(
+      calendarEventOccurrenceTextOperationsFromForm(customized),
+    ).toEqual({ title: { action: 'set', value: 'Series title' } });
+  });
+
+  it('keeps an imported blank occurrence title readable when another field changes', () => {
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-10-24T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const sourceEvent: CalendarEvent = {
+      id: 'blank-title-series',
+      calendarId: 'team',
+      uid: 'blank-title@example.test',
+      title: 'Series title',
+      description: 'Series description',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: {
+        rrule: 'FREQ=DAILY;COUNT=3',
+        overrides: [{ recurrenceId, title: '' }],
+      },
+    };
+    const occurrenceEvent: CalendarEvent = {
+      ...sourceEvent,
+      id: 'blank-title-series::occurrence::2026-10-24',
+      title: '',
+      timing: sourceEvent.timing,
+    };
+    const values = calendarEventOccurrenceToFormValues(
+      sourceEvent,
+      occurrenceEvent,
+      recurrenceId,
+      calendar,
+    );
+
+    expect(validateCalendarEventForm(values)).toBeUndefined();
+    expect(values.title).toBe('');
+    expect(values.occurrenceTextModes?.title).toBe('custom');
+    expect(
+      validateCalendarEventForm({ ...values, description: 'One instance' }),
+    ).toBeUndefined();
+  });
+
   it('creates default timed values in the calendar timezone', () => {
     const values = createCalendarEventFormValues(
       calendar,

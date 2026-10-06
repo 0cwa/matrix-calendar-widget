@@ -527,6 +527,28 @@ describe('RoomCalendarEventOperations', () => {
       ),
     ).rejects.toMatchObject({ code: 'invalid-event-input' });
     expect(fetchMock).not.toHaveBeenCalled();
+
+    await expect(
+      operations.updateEvent(
+        access(),
+        `${collectionUrl}occurrence.ics`,
+        '"room-v1"',
+        {
+          recurrence: {
+            occurrence: {
+              action: 'set-fields',
+              recurrenceId: {
+                type: 'floating-date-time',
+                value: '2026-09-25T09:00:00',
+              },
+              viewerTimezone: 'UTC',
+              title: { action: 'set', value: '   ' },
+            },
+          },
+        } as CalendarEventPatch,
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-event-input' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('skips same-value conference writes only with the current ETag', async () => {
