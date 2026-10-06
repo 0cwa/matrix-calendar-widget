@@ -28,6 +28,7 @@ import type {
   CalendarEventTimedDateTime,
   CalendarEventTiming,
   CalendarEventWeekday,
+  CalendarEventWeekdayOrdinal,
   CalendarTimeRange,
   TimedCalendarEventTiming,
 } from '../model';
@@ -166,6 +167,8 @@ export type SupportedCalendarEventRecurrenceRule = {
   end: SupportedCalendarEventRecurrenceEnd;
   /** Plain weekday tokens for the supported weekly BYDAY subset. */
   weekdays?: CalendarEventWeekday[];
+  /** A single monthly ordinal BYDAY selector, such as 2MO or -1FR. */
+  weekdayOrdinal?: CalendarEventWeekdayOrdinal;
 };
 
 const recurrenceWeekdays: CalendarEventWeekday[] = [
@@ -188,8 +191,8 @@ const editorFrequencies = new Set<SupportedCalendarEventRecurrenceFrequency>([
 /**
  * Parse only the recurrence subset exposed by the first series editor. The
  * existing projection parser remains authoritative for anchor and UNTIL
- * semantics. The only BY* part exposed for editing is the bounded weekly
- * plain-weekday subset.
+ * semantics. The exposed BY* parts are the bounded weekly plain-weekday and
+ * single monthly ordinal-weekday subsets.
  */
 export function parseSupportedCalendarEventRecurrenceRule(
   rawRule: string | undefined,
@@ -225,6 +228,7 @@ export function parseSupportedCalendarEventRecurrenceRule(
   const interval = Number(intervalText);
   const count = countText === undefined ? undefined : Number(countText);
   let weekdays: CalendarEventWeekday[] | undefined;
+  let weekdayOrdinal: CalendarEventWeekdayOrdinal | undefined;
   if (
     !frequency ||
     !editorFrequencies.has(
@@ -243,7 +247,11 @@ export function parseSupportedCalendarEventRecurrenceRule(
   }
 
   try {
-    weekdays = parseSimpleWeeklyByDay(parts, anchor);
+    if (frequency === 'MONTHLY' && parts.has('BYDAY')) {
+      weekdayOrdinal = parseMonthlyOrdinalByDay(parts, anchor);
+    } else {
+      weekdays = parseSimpleWeeklyByDay(parts, anchor);
+    }
   } catch {
     throw new Error('Unsupported recurrence rule');
   }
@@ -259,6 +267,7 @@ export function parseSupportedCalendarEventRecurrenceRule(
     frequency: frequency as SupportedCalendarEventRecurrenceFrequency,
     interval,
     ...(weekdays ? { weekdays } : {}),
+    ...(weekdayOrdinal ? { weekdayOrdinal } : {}),
     end:
       count !== undefined
         ? { type: 'count', count }
@@ -490,6 +499,7 @@ function followingCandidates(
   );
   if (
     !rule ||
+    rule.weekdayOrdinal !== undefined ||
     rule.end.type !== 'count' ||
     rule.end.count > MAX_FOLLOWING_OCCURRENCES_PER_EVENT
   ) {
@@ -851,11 +861,22 @@ export function formatSupportedCalendarEventRecurrenceRule(
     components.push(`INTERVAL=${rule.interval}`);
   }
   if (rule.weekdays !== undefined) {
-    if (rule.frequency !== 'WEEKLY') {
+    if (rule.frequency !== 'WEEKLY' || rule.weekdayOrdinal !== undefined) {
       throw new Error('Unsupported recurrence rule');
     }
     const weekdays = normalizeSelectedWeekdays(rule.weekdays, anchor);
     components.push(`BYDAY=${weekdays.join(',')}`);
+  }
+  if (rule.weekdayOrdinal !== undefined) {
+    const { ordinal, weekday } = rule.weekdayOrdinal;
+    if (
+      rule.frequency !== 'MONTHLY' ||
+      !isSupportedMonthlyOrdinal(ordinal) ||
+      !recurrenceWeekdays.includes(weekday)
+    ) {
+      throw new Error('Unsupported recurrence rule');
+    }
+    components.push(`BYDAY=${ordinal}${weekday}`);
   }
   if (rule.end.type === 'count') {
     components.push(`COUNT=${rule.end.count}`);
@@ -1812,6 +1833,57 @@ function parseSimpleWeeklyByDay(
     throw new Error('DTSTART does not match the weekly BYDAY rule');
   }
   return weekdays;
+}
+
+function parseMonthlyOrdinalByDay(
+  parts: Map<string, string>,
+  anchor: CalendarEventDateTime,
+): CalendarEventWeekdayOrdinal {
+  const byDay = parts.get('BYDAY');
+  const match = byDay?.match(/^(1|2|3|4|5|-1)(MO|TU|WE|TH|FR|SA|SU)$/i);
+  const allowedParts = new Set(['FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'BYDAY']);
+  if (
+    parts.get('FREQ')?.toUpperCase() !== 'MONTHLY' ||
+    !match ||
+    [...parts.keys()].some((part) => !allowedParts.has(part))
+  ) {
+    throw new Error('Unsupported monthly ordinal BYDAY rule');
+  }
+
+  const ordinal = Number(match[1]);
+  const weekday = match[2].toUpperCase() as CalendarEventWeekday;
+  const anchorLocal =
+    anchor.type === 'date'
+      ? anchor.value
+      : anchor.type === 'floating-date-time'
+        ? anchor.value
+        : anchor.value.local;
+  const anchorDate = DateTime.fromISO(anchorLocal.slice(0, 10), {
+    zone: 'UTC',
+  });
+  const ordinalInMonth = Math.ceil(anchorDate.day / 7);
+  const isLastWeekday = anchorDate.day + 7 > anchorDate.daysInMonth;
+  if (
+    !anchorDate.isValid ||
+    calendarEventStartWeekday(anchor) !== weekday ||
+    (ordinal === -1 ? !isLastWeekday : ordinal !== ordinalInMonth)
+  ) {
+    throw new Error('DTSTART does not match the monthly ordinal BYDAY rule');
+  }
+
+  return {
+    ordinal: ordinal as CalendarEventWeekdayOrdinal['ordinal'],
+    weekday,
+  };
+}
+
+function isSupportedMonthlyOrdinal(
+  ordinal: number,
+): ordinal is CalendarEventWeekdayOrdinal['ordinal'] {
+  return (
+    Number.isInteger(ordinal) &&
+    (ordinal === -1 || (ordinal >= 1 && ordinal <= 5))
+  );
 }
 
 function normalizeSelectedWeekdays(

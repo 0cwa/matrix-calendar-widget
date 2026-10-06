@@ -54,6 +54,7 @@ export type {
   CalendarEventUnsupportedRecurrence,
   CalendarEventUnsupportedTimezone,
   CalendarEventWeekday,
+  CalendarEventWeekdayOrdinal,
   CalendarId,
   CalendarTimeRange,
   LocalCalendarDateTime,

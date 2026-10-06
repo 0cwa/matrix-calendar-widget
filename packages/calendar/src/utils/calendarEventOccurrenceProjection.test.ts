@@ -156,6 +156,62 @@ describe('supported series recurrence rules', () => {
     ).toEqual(rule);
   });
 
+  it.each([
+    {
+      text: 'FREQ=MONTHLY;BYDAY=1MO',
+      weekdayOrdinal: { ordinal: 1, weekday: 'MO' },
+      end: { type: 'never' },
+      anchor: {
+        type: 'date-time',
+        value: { local: '2026-10-05T09:00:00', timezone: 'Europe/Stockholm' },
+      },
+    },
+    {
+      text: 'FREQ=MONTHLY;BYDAY=2MO',
+      weekdayOrdinal: { ordinal: 2, weekday: 'MO' },
+      end: { type: 'never' },
+      anchor: {
+        type: 'date-time',
+        value: { local: '2026-10-12T09:00:00', timezone: 'Europe/Stockholm' },
+      },
+    },
+    {
+      text: 'FREQ=MONTHLY;INTERVAL=2;BYDAY=-1FR;COUNT=5',
+      weekdayOrdinal: { ordinal: -1, weekday: 'FR' },
+      end: { type: 'count', count: 5 },
+      anchor: {
+        type: 'date-time',
+        value: { local: '2026-10-30T09:00:00', timezone: 'Europe/Stockholm' },
+      },
+    },
+    {
+      text: 'FREQ=MONTHLY;BYDAY=5MO;UNTIL=20261130T225959Z',
+      weekdayOrdinal: { ordinal: 5, weekday: 'MO' },
+      end: { type: 'until', value: '20261130T225959Z' },
+      anchor: {
+        type: 'date-time',
+        value: { local: '2026-03-30T09:00:00', timezone: 'Europe/Stockholm' },
+      },
+    },
+  ] as const)(
+    'parses and serializes the bounded monthly ordinal rule $text',
+    ({ text, weekdayOrdinal, end, anchor }) => {
+      const rule: SupportedCalendarEventRecurrenceRule = {
+        frequency: 'MONTHLY',
+        interval: text.includes('INTERVAL=2') ? 2 : 1,
+        end,
+        weekdayOrdinal,
+      };
+
+      expect(formatSupportedCalendarEventRecurrenceRule(rule, anchor)).toBe(
+        text,
+      );
+      expect(parseSupportedCalendarEventRecurrenceRule(text, anchor)).toEqual(
+        rule,
+      );
+    },
+  );
+
   it('accepts positive safe-integer weekly intervals and rejects unsafe values', () => {
     const maxSafeInterval = Number.MAX_SAFE_INTEGER;
     expect(
@@ -186,6 +242,13 @@ describe('supported series recurrence rules', () => {
     'FREQ=WEEKLY;BYDAY=MO;BYHOUR=9',
     'FREQ=WEEKLY;BYDAY=MO,MO',
     'FREQ=DAILY;BYDAY=MO',
+    'FREQ=MONTHLY;BYDAY=6MO',
+    'FREQ=MONTHLY;BYDAY=2MO',
+    'FREQ=MONTHLY;BYDAY=-2FR',
+    'FREQ=MONTHLY;BYDAY=2MO,3WE',
+    'FREQ=MONTHLY;BYDAY=2MO;BYMONTHDAY=1',
+    'FREQ=MONTHLY;BYDAY=2MO;WKST=MO',
+    'FREQ=YEARLY;BYDAY=2MO',
   ])('rejects unsupported or anchor-incompatible rule %s', (rule) => {
     expect(() =>
       parseSupportedCalendarEventRecurrenceRule(rule, zonedAnchor),
@@ -212,6 +275,18 @@ describe('supported series recurrence rules', () => {
           interval: 3,
           end: { type: 'count', count: 0 },
           weekdays: ['MO'],
+        },
+        zonedAnchor,
+      ),
+    ).toThrow('Unsupported recurrence rule');
+
+    expect(() =>
+      formatSupportedCalendarEventRecurrenceRule(
+        {
+          frequency: 'WEEKLY',
+          interval: 1,
+          end: { type: 'never' },
+          weekdayOrdinal: { ordinal: 2, weekday: 'MO' },
         },
         zonedAnchor,
       ),
@@ -431,6 +506,213 @@ describe('projectCalendarEventOccurrences', () => {
       '2026-04-17T07:00:00.000Z',
       '2026-05-04T07:00:00.000Z',
     ]);
+  });
+
+  it('counts only existing fifth-weekday months for a monthly ordinal rule', () => {
+    const event = timedEvent({
+      start: '2026-03-30T09:00:00',
+      end: '2026-03-30T10:00:00',
+      recurrence: { rrule: 'FREQ=MONTHLY;BYDAY=5MO;COUNT=3' },
+    });
+
+    const result = projectCalendarEventOccurrences(
+      [event],
+      {
+        start: '2026-03-01T00:00:00Z',
+        end: '2026-09-01T00:00:00Z',
+      },
+      'Europe/Stockholm',
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(
+      result.occurrences.map(({ event: occurrence }) => {
+        if (occurrence.timing.type !== 'timed') {
+          throw new Error('Expected a timed occurrence');
+        }
+        return occurrence.timing.start.local;
+      }),
+    ).toEqual([
+      '2026-03-30T09:00:00',
+      '2026-06-29T09:00:00',
+      '2026-08-31T09:00:00',
+    ]);
+  });
+
+  it('projects the last Friday of each month', () => {
+    const event = timedEvent({
+      id: 'last-friday',
+      start: '2026-01-30T09:00:00',
+      end: '2026-01-30T10:00:00',
+      recurrence: { rrule: 'FREQ=MONTHLY;BYDAY=-1FR;COUNT=4' },
+    });
+
+    const result = projectCalendarEventOccurrences(
+      [event],
+      {
+        start: '2026-01-01T00:00:00Z',
+        end: '2026-05-01T00:00:00Z',
+      },
+      'Europe/Stockholm',
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(
+      result.occurrences.map(({ event: occurrence }) => {
+        if (occurrence.timing.type !== 'timed') {
+          throw new Error('Expected a timed occurrence');
+        }
+        return occurrence.timing.start.local;
+      }),
+    ).toEqual([
+      '2026-01-30T09:00:00',
+      '2026-02-27T09:00:00',
+      '2026-03-27T09:00:00',
+      '2026-04-24T09:00:00',
+    ]);
+  });
+
+  it('retains legacy projection for ordinal rules outside editor authoring', () => {
+    const monthlyMultiple = timedEvent({
+      id: 'monthly-multiple-ordinal',
+      start: '2026-10-12T09:00:00',
+      end: '2026-10-12T10:00:00',
+      recurrence: {
+        rrule: 'FREQ=MONTHLY;BYDAY=2MO,3WE;COUNT=4',
+      },
+    });
+    const yearlyOrdinal = timedEvent({
+      id: 'yearly-ordinal',
+      start: '2026-10-12T09:00:00',
+      end: '2026-10-12T10:00:00',
+      recurrence: {
+        rrule: 'FREQ=YEARLY;BYMONTH=10;BYDAY=2MO;COUNT=3',
+      },
+    });
+    const result = projectCalendarEventOccurrences(
+      [monthlyMultiple, yearlyOrdinal],
+      {
+        start: '2026-10-01T00:00:00Z',
+        end: '2029-01-01T00:00:00Z',
+      },
+      'Europe/Stockholm',
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(
+      result.occurrences
+        .filter(
+          ({ sourceEvent }) => sourceEvent.id === 'monthly-multiple-ordinal',
+        )
+        .map(({ event: occurrence }) => {
+          if (occurrence.timing.type !== 'timed') {
+            throw new Error('Expected a timed occurrence');
+          }
+          return occurrence.timing.start.local;
+        }),
+    ).toEqual([
+      '2026-10-12T09:00:00',
+      '2026-10-21T09:00:00',
+      '2026-11-09T09:00:00',
+      '2026-11-18T09:00:00',
+    ]);
+    expect(
+      result.occurrences
+        .filter(({ sourceEvent }) => sourceEvent.id === 'yearly-ordinal')
+        .map(({ event: occurrence }) => {
+          if (occurrence.timing.type !== 'timed') {
+            throw new Error('Expected a timed occurrence');
+          }
+          return occurrence.timing.start.local;
+        }),
+    ).toEqual([
+      '2026-10-12T09:00:00',
+      '2027-10-11T09:00:00',
+      '2028-10-09T09:00:00',
+    ]);
+
+    expect(() =>
+      parseSupportedCalendarEventRecurrenceRule(
+        monthlyMultiple.recurrence?.rrule,
+        zoned('2026-10-12T09:00:00'),
+      ),
+    ).toThrow('Unsupported recurrence rule');
+    expect(() =>
+      parseSupportedCalendarEventRecurrenceRule(
+        yearlyOrdinal.recurrence?.rrule,
+        zoned('2026-10-12T09:00:00'),
+      ),
+    ).toThrow('Unsupported recurrence rule');
+  });
+
+  it('projects a TZID monthly ordinal through DST and includes its UTC UNTIL boundary', () => {
+    const event = timedEvent({
+      start: '2026-02-08T09:00:00',
+      end: '2026-02-08T10:00:00',
+      timezone: 'Europe/Stockholm',
+      recurrence: {
+        rrule: 'FREQ=MONTHLY;BYDAY=2SU;UNTIL=20260412T070000Z',
+      },
+    });
+
+    const result = projectCalendarEventOccurrences(
+      [event],
+      {
+        start: '2026-02-01T00:00:00Z',
+        end: '2026-05-15T00:00:00Z',
+      },
+      'America/Los_Angeles',
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(
+      result.occurrences.map(({ event: occurrence, recurrenceId }) => {
+        if (occurrence.timing.type !== 'timed') {
+          throw new Error('Expected a timed occurrence');
+        }
+        return {
+          local: occurrence.timing.start.local,
+          timezone:
+            occurrence.timing.start.type === 'zoned'
+              ? occurrence.timing.start.timezone
+              : undefined,
+          recurrenceId,
+        };
+      }),
+    ).toEqual([
+      {
+        local: '2026-02-08T09:00:00',
+        timezone: 'Europe/Stockholm',
+        recurrenceId: zoned('2026-02-08T09:00:00'),
+      },
+      {
+        local: '2026-03-08T09:00:00',
+        timezone: 'Europe/Stockholm',
+        recurrenceId: zoned('2026-03-08T09:00:00'),
+      },
+      {
+        local: '2026-04-12T09:00:00',
+        timezone: 'Europe/Stockholm',
+        recurrenceId: zoned('2026-04-12T09:00:00'),
+      },
+    ]);
+    const instants = result.occurrences.map(({ event: occurrence }) => {
+      if (occurrence.timing.type !== 'timed') {
+        throw new Error('Expected a timed occurrence');
+      }
+      return calendarLocalDateTimeToUnixMillis(
+        occurrence.timing.start.local,
+        'Europe/Stockholm',
+      );
+    });
+    expect(instants.map((instant) => new Date(instant).toISOString())).toEqual([
+      '2026-02-08T08:00:00.000Z',
+      '2026-03-08T08:00:00.000Z',
+      '2026-04-12T07:00:00.000Z',
+    ]);
+    expect(instants[2] - instants[1]).toBe(
+      35 * 24 * 60 * 60 * 1000 - 60 * 60 * 1000,
+    );
   });
 
   it('includes the UNTIL occurrence for DATE, floating, TZID, and UTC starts', () => {
@@ -1860,6 +2142,36 @@ describe('bounded following timing edits', () => {
     }
   });
 
+  it('keeps monthly ordinal rules outside following timing edits', () => {
+    const event = timedEvent({
+      id: 'monthly-following-scope',
+      start: '2026-10-12T09:00:00',
+      end: '2026-10-12T10:00:00',
+      recurrence: { rrule: 'FREQ=MONTHLY;BYDAY=2MO;COUNT=3' },
+    });
+    const recurrenceId = zoned('2026-10-12T09:00:00');
+
+    expect(
+      isSupportedCalendarEventFollowingTimingEdit(
+        event,
+        recurrenceId,
+        'Europe/Stockholm',
+      ),
+    ).toBe(false);
+    expect(() =>
+      calendarEventFollowingTimingOverrides(event, {
+        action: 'set-timing',
+        recurrenceId,
+        timing: {
+          type: 'end',
+          start: zoned('2026-10-12T11:00:00'),
+          end: zoned('2026-10-12T12:00:00'),
+        },
+        viewerTimezone: 'Europe/Stockholm',
+      }),
+    ).toThrow();
+  });
+
   it('rejects a suffix whose generated wall time is ambiguous', () => {
     const event = timedEvent({
       start: '2026-10-23T02:30:00',
@@ -1886,6 +2198,7 @@ function timedEvent({
   id = 'planning',
   start = '2026-10-23T09:00:00',
   end = '2026-10-23T10:00:00',
+  timezone = 'Europe/Stockholm',
   recurrence,
   unsupportedRecurrence,
   unsupportedTimezone,
@@ -1893,6 +2206,7 @@ function timedEvent({
   id?: string;
   start?: string;
   end?: string;
+  timezone?: string;
   recurrence?: CalendarEvent['recurrence'];
   unsupportedRecurrence?: CalendarEvent['unsupportedRecurrence'];
   unsupportedTimezone?: CalendarEvent['unsupportedTimezone'];
@@ -1904,8 +2218,8 @@ function timedEvent({
     title: 'Team planning',
     timing: {
       type: 'timed',
-      start: { type: 'zoned', local: start, timezone: 'Europe/Stockholm' },
-      end: { type: 'zoned', local: end, timezone: 'Europe/Stockholm' },
+      start: { type: 'zoned', local: start, timezone },
+      end: { type: 'zoned', local: end, timezone },
     },
     recurrence,
     unsupportedRecurrence,
