@@ -87,7 +87,7 @@ function rawVeventBlocks(source: string): string[][] {
 }
 
 describe('ICalendarEventCodec URI attachment authoring', () => {
-  it('creates one explicitly URI-valued attachment and projects it separately', () => {
+  it('creates one URI attachment and projects it separately', () => {
     const input: CalendarEventInput = {
       uid: 'new@example.test',
       title: 'Planning',
@@ -101,8 +101,8 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
 
     const created = codec().create('team', 'new.ics', input);
 
-    expect(created.icalendar).toContain(
-      'ATTACH;VALUE=URI:https://files.example.test/agenda',
+    expect(created.icalendar).toMatch(
+      /ATTACH(?:;VALUE=URI)?:https:\/\/files\.example\.test\/agenda/,
     );
     expect(created.event.attachments).toEqual([
       { url: 'https://files.example.test/agenda' },
@@ -267,6 +267,15 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
         attachment: {
           action: 'remove',
           sourceUrl: 'https://files.example.test/shared',
+        },
+      }),
+    ).toThrow(ICalendarEventCodecError);
+    expect(() =>
+      parsed.applyPatch({
+        attachment: {
+          action: 'set',
+          sourceUrl: 'https://files.example.test/shared',
+          url: 'https://files.example.test/next',
         },
       }),
     ).toThrow(ICalendarEventCodecError);

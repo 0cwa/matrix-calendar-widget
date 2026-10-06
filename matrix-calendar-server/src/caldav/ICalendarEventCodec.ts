@@ -107,6 +107,7 @@ type SupportedAttachmentValue = {
 type AttachmentSourceState = {
   editable: SupportedAttachmentValue[];
   opaqueUriUrls: string[];
+  projectable: boolean;
   unsupported: boolean;
 };
 
@@ -523,7 +524,7 @@ export class ParsedICalendarEvent {
       attachmentPatch && attachmentWritePlan
         ? readAttachmentSourceState(vevent, attachmentWritePlan.nextProperties)
         : undefined;
-    const attachmentProjection = updatedAttachmentState
+    const attachmentProjection = updatedAttachmentState?.projectable
       ? updatedAttachmentState.editable
           .filter(
             ({ url }) => !updatedAttachmentState.opaqueUriUrls.includes(url),
@@ -542,7 +543,9 @@ export class ParsedICalendarEvent {
       title: patch.title ?? this.event.title,
       timing: patch.timing ?? this.event.timing,
       externalLinks: readCalendarLinks(vevent),
-      ...(attachmentPatch ? { attachments: attachmentProjection } : {}),
+      ...(attachmentPatch && attachmentProjection?.length
+        ? { attachments: attachmentProjection }
+        : {}),
       recurrence,
       revision: revisionUpdated
         ? readUpdatedCalendarEventRevision(
@@ -555,6 +558,9 @@ export class ParsedICalendarEvent {
       delete event.unsupportedConference;
     }
     if (attachmentPatch) {
+      if (!attachmentProjection?.length) {
+        delete event.attachments;
+      }
       delete event.unsupportedAttachment;
     }
     if (hasAlarmPatch) {
@@ -1402,9 +1408,11 @@ export class ICalendarEventCodec {
       vevent,
       attachmentPropertiesByEvent[eventIndex] ?? [],
     );
-    const authorableAttachments = attachmentState.editable.filter(
-      ({ url }) => !attachmentState.opaqueUriUrls.includes(url),
-    );
+    const authorableAttachments = attachmentState.projectable
+      ? attachmentState.editable.filter(
+          ({ url }) => !attachmentState.opaqueUriUrls.includes(url),
+        )
+      : [];
     const ambiguousAttachmentSource =
       attachmentState.unsupported ||
       hasAmbiguousAttachmentSource(
@@ -1426,7 +1434,7 @@ export class ICalendarEventCodec {
       location: textValue(vevent.getFirstPropertyValue('location')),
       url: textValue(vevent.getFirstPropertyValue('url')),
       externalLinks: readCalendarLinks(vevent),
-      ...(authorableAttachments.length > 0 && !ambiguousAttachmentSource
+      ...(authorableAttachments.length > 0
         ? {
             attachments: authorableAttachments.map(({ url }) => ({ url })),
           }
@@ -3989,7 +3997,14 @@ function readAttachmentSourceState(
     unsupported = true;
   }
 
-  return { editable, opaqueUriUrls, unsupported };
+  return {
+    editable,
+    opaqueUriUrls,
+    projectable:
+      rawProperties.length === parsedProperties.length &&
+      editable.length <= MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS,
+    unsupported,
+  };
 }
 
 function hasAmbiguousAttachmentSource(
