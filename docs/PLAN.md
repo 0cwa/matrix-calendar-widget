@@ -209,6 +209,11 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
         properties and detached-specific conference data read-only. Preserve
         raw parameters on all source components and timing clones; unchanged
         composite saves retain exact source bytes and revision metadata.
+  - [x] Add, change, or remove one safe HTTP(S) URI ATTACH on an unambiguous
+        master, using one ETag-protected resource update (ADR038). Preserve raw
+        parameters and unrelated source data; reject duplicate or colliding
+        identities, over-limit resources, and detached attachment authoring.
+        Binary attachments and file upload/download remain outside this slice.
 
 The recurring-resource contract uses the hosted CI stack pinned to Synapse
 v1.161.0 and the project-owned Radicale 3.8.0.0 OpenID-only image. A passing

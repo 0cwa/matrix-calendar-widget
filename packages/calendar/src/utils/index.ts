@@ -15,6 +15,14 @@
  */
 
 export {
+  CalendarEventAttachmentValidationError,
+  MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS,
+  normalizeCalendarEventAttachmentInput,
+  normalizeCalendarEventAttachmentPatch,
+  validateCalendarEventInputAttachment,
+  validateCalendarEventPatchAttachment,
+} from './calendarEventAttachment';
+export {
   CalendarEventConferenceValidationError,
   normalizeCalendarEventConferenceInput,
   normalizeCalendarEventConferencePatch,

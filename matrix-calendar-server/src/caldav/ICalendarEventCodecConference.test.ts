@@ -100,7 +100,7 @@ describe('ICalendarEventCodec conference authoring', () => {
         'X-OPAQUE=one;X-OPAQUE=second:https://meet.example.test/next',
     );
     expect(changed.icalendar).toContain(
-      'ATTACH;ENCODING=BASE64;VALUE=BINARY:YQ==',
+      'ATTACH;VALUE=BINARY;ENCODING=BASE64:YQ==',
     );
     expect(changed.event.externalLinks).toEqual([
       {
@@ -236,7 +236,7 @@ describe('ICalendarEventCodec conference authoring', () => {
 
     expect(removed.icalendar).not.toContain('CONFERENCE');
     expect(removed.icalendar).toContain(
-      'ATTACH;ENCODING=BASE64;VALUE=BINARY:YQ==',
+      'ATTACH;VALUE=BINARY;ENCODING=BASE64:YQ==',
     );
     expect(removed.event.externalLinks).toBeUndefined();
     expect(removed.event.unsupportedConference).toBeUndefined();

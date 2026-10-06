@@ -19,6 +19,8 @@ import {
   AllDayCalendarEventTiming,
   Calendar,
   CalendarEvent,
+  CalendarEventAttachmentInput,
+  CalendarEventAttachmentPatch,
   CalendarEventConferenceInput,
   CalendarEventConferencePatch,
   CalendarEventDateTime,
@@ -35,12 +37,21 @@ import {
   isCalendarEventAlarmRemoval,
 } from '../model';
 import {
+  CalendarEventAttachmentValidationError,
+  MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS,
+  normalizeCalendarEventAttachmentInput,
+  normalizeCalendarEventAttachmentPatch,
+  validateCalendarEventInputAttachment,
+  validateCalendarEventPatchAttachment,
+} from '../utils/calendarEventAttachment';
+import {
   CalendarEventConferenceValidationError,
   normalizeCalendarEventConferenceInput,
   normalizeCalendarEventConferencePatch,
   validateCalendarEventInputConference,
   validateCalendarEventPatchConference,
 } from '../utils/calendarEventConference';
+import { canonicalizeCalendarExternalUrl } from '../utils/calendarEventExternalLinks';
 import {
   calendarEventFollowingTimingOverrides,
   calendarEventRecurrenceIdentity,
@@ -232,16 +243,24 @@ export class InMemoryCalendarRepository implements CalendarRepository {
   ): Promise<CalendarEvent> {
     const calendar = this.getWritableCalendar(calendarId);
     let conference: CalendarEventConferenceInput | undefined;
+    let attachment: CalendarEventAttachmentInput | undefined;
     try {
       validateCalendarEventInputConference(input);
+      validateCalendarEventInputAttachment(input);
       conference = input.conference
         ? normalizeCalendarEventConferenceInput(input.conference)
         : undefined;
+      attachment = input.attachment
+        ? normalizeCalendarEventAttachmentInput(input.attachment)
+        : undefined;
     } catch (error) {
-      if (error instanceof CalendarEventConferenceValidationError) {
+      if (
+        error instanceof CalendarEventConferenceValidationError ||
+        error instanceof CalendarEventAttachmentValidationError
+      ) {
         throw new CalendarRepositoryError(
           'unsupported-patch',
-          'Invalid conference link operation',
+          'Invalid event link operation',
         );
       }
       throw error;
@@ -249,20 +268,27 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     const calendarEvents = this.events.get(calendar.id)!;
     const id = this.nextEventId(calendarEvents);
 
-    const { conference: _conference, ...eventInput } = input;
+    const {
+      conference: _conference,
+      attachment: _attachment,
+      ...eventInput
+    } = input;
 
+    const initialLinks = conference
+      ? applyConferenceToLinks(undefined, { action: 'set', ...conference })
+      : undefined;
+    const externalLinks = attachment
+      ? applyAttachmentToLinks(initialLinks, {
+          action: 'add',
+          url: attachment.url,
+        })
+      : initialLinks;
     const event: CalendarEvent = {
       ...cloneCalendarEventInput(eventInput),
       id,
       calendarId,
-      ...(conference
-        ? {
-            externalLinks: applyConferenceToLinks(undefined, {
-              action: 'set',
-              ...conference,
-            }),
-          }
-        : {}),
+      ...(attachment ? { attachments: [{ url: attachment.url }] } : {}),
+      ...(externalLinks ? { externalLinks } : {}),
     };
 
     calendarEvents.set(id, event);
@@ -277,16 +303,24 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     this.getWritableCalendar(calendarId);
     const current = this.getStoredEvent(calendarId, eventId);
     let conference: CalendarEventConferencePatch | undefined;
+    let attachment: CalendarEventAttachmentPatch | undefined;
     try {
       validateCalendarEventPatchConference(patch);
+      validateCalendarEventPatchAttachment(patch);
       conference = Object.prototype.hasOwnProperty.call(patch, 'conference')
         ? normalizeCalendarEventConferencePatch(patch.conference)
         : undefined;
+      attachment = Object.prototype.hasOwnProperty.call(patch, 'attachment')
+        ? normalizeCalendarEventAttachmentPatch(patch.attachment)
+        : undefined;
     } catch (error) {
-      if (error instanceof CalendarEventConferenceValidationError) {
+      if (
+        error instanceof CalendarEventConferenceValidationError ||
+        error instanceof CalendarEventAttachmentValidationError
+      ) {
         throw new CalendarRepositoryError(
           'unsupported-patch',
-          'Invalid conference link operation',
+          'Invalid event link operation',
         );
       }
       throw error;
@@ -295,6 +329,12 @@ export class InMemoryCalendarRepository implements CalendarRepository {
       throw new CalendarRepositoryError(
         'unsupported-patch',
         'Conference edits are not supported for this event',
+      );
+    }
+    if (attachment && current.unsupportedAttachment) {
+      throw new CalendarRepositoryError(
+        'unsupported-patch',
+        'Attachment edits are not supported for this event',
       );
     }
     validateOccurrenceTimingPatchShape(patch);
@@ -312,12 +352,16 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     const {
       alarm: alarmPatch,
       conference: _conference,
+      attachment: _attachment,
       ...mutablePatch
     } = clonedPatch;
     const recurrence = Object.prototype.hasOwnProperty.call(patch, 'recurrence')
       ? applyRecurrenceWrite(current, clonedPatch.recurrence)
       : current.recurrence;
 
+    const conferenceLinks = conference
+      ? applyConferenceToLinks(current.externalLinks, conference)
+      : current.externalLinks;
     const updated: CalendarEvent = {
       ...current,
       ...mutablePatch,
@@ -325,12 +369,14 @@ export class InMemoryCalendarRepository implements CalendarRepository {
       calendarId: current.calendarId,
       uid: current.uid,
       recurrence,
-      ...(conference
+      ...(attachment
+        ? { attachments: applyAttachmentToProjection(current, attachment) }
+        : {}),
+      ...(conference || attachment
         ? {
-            externalLinks: applyConferenceToLinks(
-              current.externalLinks,
-              conference,
-            ),
+            externalLinks: attachment
+              ? applyAttachmentToLinks(conferenceLinks, attachment)
+              : conferenceLinks,
           }
         : {}),
     };
@@ -338,6 +384,9 @@ export class InMemoryCalendarRepository implements CalendarRepository {
       delete updated.alarm;
     } else if (alarmPatch) {
       updated.alarm = alarmPatch;
+    }
+    if (attachment) {
+      delete updated.unsupportedAttachment;
     }
 
     this.events.get(calendarId)!.set(eventId, updated);
@@ -544,6 +593,7 @@ function cloneCalendarEvent(event: CalendarEvent): CalendarEvent {
     ...event,
     revision: event.revision ? { ...event.revision } : undefined,
     externalLinks: event.externalLinks?.map((link) => ({ ...link })),
+    attachments: event.attachments?.map((attachment) => ({ ...attachment })),
     timing:
       event.timing.type === 'timed'
         ? cloneTimedTiming(event.timing)
@@ -571,6 +621,105 @@ function cloneCalendarEventInput(
       : undefined,
     recurrence: input.recurrence ? { ...input.recurrence } : undefined,
   };
+}
+
+function applyAttachmentToProjection(
+  event: CalendarEvent,
+  operation: CalendarEventAttachmentPatch,
+): CalendarEvent['attachments'] {
+  const current =
+    event.attachments?.map((attachment) => ({ ...attachment })) ??
+    event.externalLinks
+      ?.filter((link) => link.kind === 'attachment')
+      .map((link) => ({ url: link.href })) ??
+    [];
+  const matches = current.flatMap((attachment, index) =>
+    canonicalizeCalendarExternalUrl(attachment.url) ===
+    ('sourceUrl' in operation ? operation.sourceUrl : operation.url)
+      ? [index]
+      : [],
+  );
+
+  if (operation.action === 'add') {
+    if (matches.length > 1) {
+      throw unsupportedRepositoryAttachment();
+    }
+    if (matches.length === 1) {
+      return current.length > 0 ? current : undefined;
+    }
+    if (current.length >= MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS) {
+      throw unsupportedRepositoryAttachment();
+    }
+    current.push({ url: operation.url });
+    return current;
+  }
+
+  if (matches.length !== 1) {
+    throw unsupportedRepositoryAttachment();
+  }
+  if (operation.action === 'remove') {
+    current.splice(matches[0], 1);
+    return current.length > 0 ? current : undefined;
+  }
+  if (
+    current.some(
+      (attachment, index) =>
+        index !== matches[0] &&
+        canonicalizeCalendarExternalUrl(attachment.url) === operation.url,
+    )
+  ) {
+    throw unsupportedRepositoryAttachment();
+  }
+  if (operation.sourceUrl === operation.url) {
+    return current;
+  }
+  current[matches[0]] = { url: operation.url };
+  return current;
+}
+
+function applyAttachmentToLinks(
+  links: CalendarEvent['externalLinks'],
+  operation: CalendarEventAttachmentPatch,
+): CalendarEvent['externalLinks'] {
+  const currentLinks = links?.map((link) => ({ ...link })) ?? [];
+  const targetUrl =
+    'sourceUrl' in operation ? operation.sourceUrl : operation.url;
+  const matches = currentLinks.flatMap((link, index) =>
+    link.kind === 'attachment' &&
+    canonicalizeCalendarExternalUrl(link.href) === targetUrl
+      ? [index]
+      : [],
+  );
+  if (operation.action === 'add') {
+    if (
+      matches.length === 0 &&
+      currentLinks.length < 20 &&
+      !currentLinks.some(
+        (link) =>
+          link.kind === 'attachment' &&
+          canonicalizeCalendarExternalUrl(link.href) === operation.url,
+      )
+    ) {
+      currentLinks.push({ kind: 'attachment', href: operation.url });
+    }
+    return currentLinks.length > 0 ? currentLinks : undefined;
+  }
+  if (matches.length !== 1) {
+    return currentLinks.length > 0 ? currentLinks : undefined;
+  }
+  if (operation.action === 'remove') {
+    currentLinks.splice(matches[0], 1);
+  } else if (operation.sourceUrl !== operation.url) {
+    currentLinks[matches[0]] = { kind: 'attachment', href: operation.url };
+  }
+  return currentLinks.length > 0 ? currentLinks : undefined;
+}
+
+function unsupportedRepositoryAttachment(): CalendarRepositoryError {
+  return new CalendarRepositoryError(
+    'unsupported-patch',
+    'Attachment edits require one unambiguous safe URI link',
+  );
 }
 
 function applyConferenceToLinks(
