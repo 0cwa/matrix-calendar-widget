@@ -36,7 +36,7 @@ state is unsupported and must fail closed. Delivery is not exactly once.
 ## Supported behavior and limits
 
 The beta covers room-bound VEVENT calendars and the implemented bounded event
-editor, recurrence, alarm, and conference-link operations. The detailed data
+editor, recurrence, alarm, URI attachment, and conference-link operations. The detailed data
 contracts remain in [ADR023](./adrs/adr023-floating-recurrence-semantics.md),
 [ADR028](./adrs/adr028-room-reminder-configuration-and-delivery.md),
 [ADR029](./adrs/adr029-recurrence-instance-timing-edits.md),
@@ -45,13 +45,19 @@ contracts remain in [ADR023](./adrs/adr023-floating-recurrence-semantics.md),
 [ADR033](./adrs/adr033-room-reminder-alarm-options.md),
 [ADR034](./adrs/adr034-bounded-following-timing-edits.md),
 [ADR035](./adrs/adr035-monthly-ordinal-weekday-recurrence.md),
-[ADR036](./adrs/adr036-bounded-conference-link-authoring.md), and
+[ADR036](./adrs/adr036-bounded-conference-link-authoring.md),
+[ADR038](./adrs/adr038-bounded-safe-uri-attachment-authoring.md),
+[ADR039](./adrs/adr039-calendar-absolute-display-alarm-metadata.md), and
 [ADR040](./adrs/adr040-selected-occurrence-text-fields.md). Authentication,
 room authorization, and the separate-store deployment choice remain governed
 by [ADR014](./adrs/adr014-split-widget-and-bot-calendar-principals.md),
 [ADR015](./adrs/adr015-server-managed-room-calendar-bindings.md),
 [ADR024](./adrs/adr024-in-repo-radicale-openid-auth.md), and
 [ADR037](./adrs/adr037-independent-radicale-store-for-controlled-beta.md).
+Absolute UTC DISPLAY alarms remain calendar metadata and cannot be delivered
+as Matrix room reminders. Reminder configuration and delivery continue to use
+the supported relative-trigger contract under ADR028.
+
 CalDAV remains canonical. Existing mixed collections and unknown properties
 are preserved where supported edits allow it; the widget does not normalize
 unsupported members destructively.
