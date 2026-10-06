@@ -48,6 +48,7 @@ const PHASES = new Set([
   'widget-a-identity-dialog-not-required',
   'widget-a-identity-approval',
   'widget-a-iframe-attached',
+  'widget-a-runtime-observed',
   'widget-a-iframe-ready',
   'widget-a-approved',
   'widget-b-approved',
@@ -135,6 +136,52 @@ const VERSION_FIELDS = new Set([
   'runnerArchitecture',
   'nodeVersion',
 ]);
+const GATEWAY_ENDPOINTS = new Set([
+  'context',
+  'calendars',
+  'events',
+  'other-calendar',
+  'other-api',
+  'none',
+]);
+const GATEWAY_METHODS = new Set([
+  'GET',
+  'POST',
+  'PATCH',
+  'PUT',
+  'DELETE',
+  'OPTIONS',
+  'HEAD',
+  'OTHER',
+  'NONE',
+]);
+const GATEWAY_RUNTIME_FIELDS = [
+  'gatewayContextRequestCount',
+  'gatewayCalendarsRequestCount',
+  'gatewayEventsRequestCount',
+  'gatewayOtherCalendarRequestCount',
+  'gatewayOtherApiRequestCount',
+  'gatewayOptionsRequestCount',
+  'gatewayFailedRequestCount',
+  'gatewayLastRequestEndpoint',
+  'gatewayLastRequestMethod',
+  'gatewayLastResponseEndpoint',
+  'gatewayLastResponseMethod',
+  'iframeObservationAvailable',
+  'iframeGatewayBaseOriginMatches',
+  'iframeRoomIdMatches',
+  'createEventVisible',
+  'identityContinueVisible',
+];
+const GATEWAY_COUNTER_FIELDS = [
+  'gatewayContextRequestCount',
+  'gatewayCalendarsRequestCount',
+  'gatewayEventsRequestCount',
+  'gatewayOtherCalendarRequestCount',
+  'gatewayOtherApiRequestCount',
+  'gatewayOptionsRequestCount',
+  'gatewayFailedRequestCount',
+];
 const ALLOWED_KEYS = new Set([
   'phase',
   'status',
@@ -166,8 +213,57 @@ const ALLOWED_KEYS = new Set([
   'containerExitCode',
   'containerOomKilled',
   'containerRuntimeErrorPresent',
+  ...GATEWAY_RUNTIME_FIELDS,
+  'gatewayLastResponseStatus',
   ...VERSION_FIELDS,
 ]);
+
+function validGatewayRuntimeObservation(record) {
+  const expectedKeys = new Set([
+    'phase',
+    'status',
+    ...GATEWAY_RUNTIME_FIELDS,
+    ...(Object.hasOwn(record, 'gatewayLastResponseStatus')
+      ? ['gatewayLastResponseStatus']
+      : []),
+  ]);
+  if (
+    Object.keys(record).length !== expectedKeys.size ||
+    Object.keys(record).some((key) => !expectedKeys.has(key)) ||
+    !['passed', 'unavailable'].includes(record.status) ||
+    GATEWAY_COUNTER_FIELDS.some(
+      (key) =>
+        !Number.isInteger(record[key]) || record[key] < 0 || record[key] > 2,
+    ) ||
+    !GATEWAY_ENDPOINTS.has(record.gatewayLastRequestEndpoint) ||
+    !GATEWAY_METHODS.has(record.gatewayLastRequestMethod) ||
+    !GATEWAY_ENDPOINTS.has(record.gatewayLastResponseEndpoint) ||
+    !GATEWAY_METHODS.has(record.gatewayLastResponseMethod) ||
+    typeof record.iframeObservationAvailable !== 'boolean' ||
+    typeof record.iframeGatewayBaseOriginMatches !== 'boolean' ||
+    typeof record.iframeRoomIdMatches !== 'boolean' ||
+    typeof record.createEventVisible !== 'boolean' ||
+    typeof record.identityContinueVisible !== 'boolean' ||
+    (record.status === 'passed' && !record.iframeObservationAvailable) ||
+    (record.status === 'unavailable' && record.iframeObservationAvailable) ||
+    (!record.iframeObservationAvailable &&
+      (record.iframeGatewayBaseOriginMatches || record.iframeRoomIdMatches)) ||
+    (record.gatewayLastRequestEndpoint === 'none') !==
+      (record.gatewayLastRequestMethod === 'NONE') ||
+    (record.gatewayLastResponseEndpoint === 'none') !==
+      (record.gatewayLastResponseMethod === 'NONE') ||
+    (record.gatewayLastResponseEndpoint === 'none') !==
+      !Object.hasOwn(record, 'gatewayLastResponseStatus') ||
+    (Object.hasOwn(record, 'gatewayLastResponseStatus') &&
+      (!Number.isInteger(record.gatewayLastResponseStatus) ||
+        record.gatewayLastResponseStatus < 100 ||
+        record.gatewayLastResponseStatus > 599))
+  ) {
+    return false;
+  }
+
+  return true;
+}
 
 function validRuntimeVersions(record) {
   const expectedKeys = new Set(['phase', 'status', ...VERSION_FIELDS]);
@@ -218,6 +314,19 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       Object.keys(record).some((key) => !ALLOWED_KEYS.has(key)) ||
       !PHASES.has(record.phase) ||
       !STATUSES.has(record.status)
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    const hasGatewayRuntimeObservation = GATEWAY_RUNTIME_FIELDS.some((key) =>
+      Object.hasOwn(record, key),
+    );
+    if (
+      (record.phase === 'widget-a-runtime-observed' &&
+        !validGatewayRuntimeObservation(record)) ||
+      (record.phase !== 'widget-a-runtime-observed' &&
+        (hasGatewayRuntimeObservation ||
+          Object.hasOwn(record, 'gatewayLastResponseStatus')))
     ) {
       throw new Error('invalid element acceptance summary');
     }
@@ -490,6 +599,36 @@ export function sanitizeElementAcceptance(input, sourceSha) {
 
   const lines = [`element-acceptance source_sha=${sourceSha.toLowerCase()}`];
   for (const [phase, record] of phases) {
+    if (phase === 'widget-a-runtime-observed') {
+      const fields = [
+        `phase=${phase}`,
+        `status=${record.status}`,
+        `gateway_context_requests=${record.gatewayContextRequestCount}`,
+        `gateway_calendars_requests=${record.gatewayCalendarsRequestCount}`,
+        `gateway_events_requests=${record.gatewayEventsRequestCount}`,
+        `gateway_other_calendar_requests=${record.gatewayOtherCalendarRequestCount}`,
+        `gateway_other_api_requests=${record.gatewayOtherApiRequestCount}`,
+        `gateway_options_requests=${record.gatewayOptionsRequestCount}`,
+        `gateway_failed_requests=${record.gatewayFailedRequestCount}`,
+        `gateway_last_request_endpoint=${record.gatewayLastRequestEndpoint}`,
+        `gateway_last_request_method=${record.gatewayLastRequestMethod}`,
+        `gateway_last_response_endpoint=${record.gatewayLastResponseEndpoint}`,
+        `gateway_last_response_method=${record.gatewayLastResponseMethod}`,
+        ...(record.gatewayLastResponseStatus === undefined
+          ? []
+          : [
+              `gateway_last_response_status=${record.gatewayLastResponseStatus}`,
+            ]),
+        `iframe_observation_available=${record.iframeObservationAvailable}`,
+        `iframe_gateway_base_origin_matches=${record.iframeGatewayBaseOriginMatches}`,
+        `iframe_room_id_matches=${record.iframeRoomIdMatches}`,
+        `create_event_visible=${record.createEventVisible}`,
+        `identity_continue_visible=${record.identityContinueVisible}`,
+      ];
+      lines.push(fields.join(' '));
+      continue;
+    }
+
     if (phase === 'runtime-versions') {
       lines.push(
         [

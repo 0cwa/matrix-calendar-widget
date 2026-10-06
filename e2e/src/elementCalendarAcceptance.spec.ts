@@ -71,6 +71,7 @@ type Phase =
   | 'widget-a-identity-dialog-not-required'
   | 'widget-a-identity-approval'
   | 'widget-a-iframe-attached'
+  | 'widget-a-runtime-observed'
   | 'widget-a-iframe-ready'
   | 'widget-a-approved'
   | 'widget-b-approved'
@@ -145,6 +146,39 @@ type PinnedControlObservation = {
   panelPresent?: boolean;
 };
 
+type GatewayEndpointKind =
+  | 'context'
+  | 'calendars'
+  | 'events'
+  | 'other-calendar'
+  | 'other-api';
+
+type GatewayRequestMethod =
+  | 'GET'
+  | 'POST'
+  | 'PATCH'
+  | 'PUT'
+  | 'DELETE'
+  | 'OPTIONS'
+  | 'HEAD'
+  | 'OTHER';
+
+type GatewayTrafficObservation = {
+  requestCounts: Record<GatewayEndpointKind, number>;
+  optionsRequestCount: number;
+  failedRequestCount: number;
+  lastRequestEndpoint: GatewayEndpointKind | 'none';
+  lastRequestMethod: GatewayRequestMethod | 'NONE';
+  lastResponseEndpoint: GatewayEndpointKind | 'none';
+  lastResponseMethod: GatewayRequestMethod | 'NONE';
+  lastResponseStatus?: number;
+  iframeObservationAvailable: boolean;
+  iframeGatewayBaseOriginMatches: boolean;
+  iframeRoomIdMatches: boolean;
+  createEventVisible: boolean;
+  identityContinueVisible: boolean;
+};
+
 let fixture: Fixture;
 
 let activePhase: Phase = 'member-a-authenticated';
@@ -216,6 +250,7 @@ test('Element Web members share events and enforce room authorization', async ({
   let pageA: Page | undefined;
   let pageB: Page | undefined;
   let pageC: Page | undefined;
+  let memberAGatewayTraffic: GatewayTrafficObservation | undefined;
   let failureHttpStatus: number | undefined;
   let failureAlreadyReported = false;
 
@@ -225,6 +260,7 @@ test('Element Web members share events and enforce room authorization', async ({
     activePhase = 'member-a-authenticated';
     contextA = await makeContext();
     pageA = await authenticateInElement(contextA, fixture.users.memberA, true);
+    memberAGatewayTraffic = observeGatewayTraffic(pageA, fixture.gatewayUrl);
     record(activePhase, 'passed');
 
     activePhase = 'member-b-authenticated';
@@ -262,7 +298,18 @@ test('Element Web members share events and enforce room authorization', async ({
       captureMemberADiagnostics: true,
     });
     activePhase = 'gateway-backed-read';
-    const firstReadResponse = await firstRead;
+    let firstReadResponse: Response;
+    try {
+      firstReadResponse = await firstRead;
+    } catch {
+      await recordWidgetRuntimeObservation(
+        pageA,
+        frameA,
+        memberAGatewayTraffic,
+      );
+      throw new Error('Initial calendar event request was not observed');
+    }
+    await recordWidgetRuntimeObservation(pageA, frameA, memberAGatewayTraffic);
     failureHttpStatus = firstReadResponse.status();
     expect(failureHttpStatus).toBe(200);
     record(activePhase, 'passed', failureHttpStatus);
@@ -1069,6 +1116,233 @@ function waitForGatewayResponse(
       );
     },
     { timeout: 30_000 },
+  );
+}
+
+function observeGatewayTraffic(
+  page: Page,
+  gatewayUrl: string,
+): GatewayTrafficObservation {
+  const gatewayOrigin = new URL(gatewayUrl).origin;
+  const observation: GatewayTrafficObservation = {
+    requestCounts: {
+      context: 0,
+      calendars: 0,
+      events: 0,
+      'other-calendar': 0,
+      'other-api': 0,
+    },
+    optionsRequestCount: 0,
+    failedRequestCount: 0,
+    lastRequestEndpoint: 'none',
+    lastRequestMethod: 'NONE',
+    lastResponseEndpoint: 'none',
+    lastResponseMethod: 'NONE',
+    iframeObservationAvailable: false,
+    iframeGatewayBaseOriginMatches: false,
+    iframeRoomIdMatches: false,
+    createEventVisible: false,
+    identityContinueVisible: false,
+  };
+
+  page.on('request', (request) => {
+    const requestDetails = classifyGatewayRequest(
+      request.url(),
+      request.method(),
+      gatewayOrigin,
+    );
+    if (!requestDetails) return;
+    observation.requestCounts[requestDetails.endpoint] = Math.min(
+      observation.requestCounts[requestDetails.endpoint] + 1,
+      2,
+    );
+    observation.lastRequestEndpoint = requestDetails.endpoint;
+    observation.lastRequestMethod = requestDetails.method;
+    if (requestDetails.method === 'OPTIONS') {
+      observation.optionsRequestCount = Math.min(
+        observation.optionsRequestCount + 1,
+        2,
+      );
+    }
+  });
+
+  page.on('requestfailed', (request) => {
+    const requestDetails = classifyGatewayRequest(
+      request.url(),
+      request.method(),
+      gatewayOrigin,
+    );
+    if (!requestDetails) return;
+    observation.failedRequestCount = Math.min(
+      observation.failedRequestCount + 1,
+      2,
+    );
+  });
+
+  page.on('response', (response) => {
+    const responseDetails = classifyGatewayRequest(
+      response.url(),
+      response.request().method(),
+      gatewayOrigin,
+    );
+    if (!responseDetails) return;
+    observation.lastResponseEndpoint = responseDetails.endpoint;
+    observation.lastResponseMethod = responseDetails.method;
+    observation.lastResponseStatus = response.status();
+  });
+
+  return observation;
+}
+
+function classifyGatewayRequest(
+  rawUrl: string,
+  rawMethod: string,
+  gatewayOrigin: string,
+):
+  | {
+      endpoint: GatewayEndpointKind;
+      method: GatewayRequestMethod;
+    }
+  | undefined {
+  try {
+    const url = new URL(rawUrl);
+    if (url.origin !== gatewayOrigin) return undefined;
+
+    let endpoint: GatewayEndpointKind;
+    if (url.pathname === '/v1/calendar/context') {
+      endpoint = 'context';
+    } else if (url.pathname === '/v1/calendar/calendars') {
+      endpoint = 'calendars';
+    } else if (url.pathname === '/v1/calendar/events') {
+      endpoint = 'events';
+    } else if (url.pathname.startsWith('/v1/calendar/')) {
+      endpoint = 'other-calendar';
+    } else {
+      endpoint = 'other-api';
+    }
+
+    const methods: GatewayRequestMethod[] = [
+      'GET',
+      'POST',
+      'PATCH',
+      'PUT',
+      'DELETE',
+      'OPTIONS',
+      'HEAD',
+    ];
+    const method = methods.includes(rawMethod as GatewayRequestMethod)
+      ? (rawMethod as GatewayRequestMethod)
+      : 'OTHER';
+    return { endpoint, method };
+  } catch {
+    return undefined;
+  }
+}
+
+async function recordWidgetRuntimeObservation(
+  page: Page,
+  frame: ReturnType<ElementWebPage['widgetByTitle']>,
+  observation: GatewayTrafficObservation | undefined,
+) {
+  if (!observation) return;
+
+  try {
+    const iframeParameters = await page
+      .locator('iframe[title="Matrix Calendar"]')
+      .evaluate(
+        (iframe, { expectedGatewayOrigin, expectedRoomId }) => {
+          const source = iframe.getAttribute('src') ?? '';
+          const widgetUrl = new URL(source, window.location.href);
+          const hashQuery = widgetUrl.hash.includes('?')
+            ? widgetUrl.hash.slice(widgetUrl.hash.indexOf('?') + 1)
+            : '';
+          const parameterSources = [
+            new URLSearchParams(widgetUrl.search),
+            new URLSearchParams(hashQuery),
+          ];
+          const values = (name: string) =>
+            parameterSources.flatMap((parameterSource) =>
+              parameterSource.getAll(name),
+            );
+          const gatewayValues = values('meetings_bot_base_url');
+          const roomValues = values('matrix_room_id');
+          let gatewayOriginMatches = false;
+          if (gatewayValues.length === 1) {
+            try {
+              gatewayOriginMatches =
+                new URL(gatewayValues[0]).origin === expectedGatewayOrigin;
+            } catch {
+              gatewayOriginMatches = false;
+            }
+          }
+          return {
+            gatewayOriginMatches,
+            roomIdMatches:
+              roomValues.length === 1 && roomValues[0] === expectedRoomId,
+          };
+        },
+        {
+          expectedGatewayOrigin: new URL(fixture.gatewayUrl).origin,
+          expectedRoomId: fixture.teamRoomId,
+        },
+      );
+    observation.iframeObservationAvailable = true;
+    observation.iframeGatewayBaseOriginMatches =
+      iframeParameters.gatewayOriginMatches;
+    observation.iframeRoomIdMatches = iframeParameters.roomIdMatches;
+  } catch {
+    // The raw iframe URL and any navigation error stay out of the evidence.
+  }
+
+  const [createEventVisible, identityContinueVisible] = await Promise.all([
+    frame
+      .getByRole('button', { name: 'Create event', exact: true })
+      .isVisible()
+      .catch(() => false),
+    page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Continue', exact: true })
+      .first()
+      .isVisible()
+      .catch(() => false),
+  ]);
+  observation.createEventVisible = createEventVisible;
+  observation.identityContinueVisible = identityContinueVisible;
+
+  appendRuntimeObservation(observation);
+}
+
+function appendRuntimeObservation(observation: GatewayTrafficObservation) {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase: 'widget-a-runtime-observed',
+      status: observation.iframeObservationAvailable ? 'passed' : 'unavailable',
+      gatewayContextRequestCount: observation.requestCounts.context,
+      gatewayCalendarsRequestCount: observation.requestCounts.calendars,
+      gatewayEventsRequestCount: observation.requestCounts.events,
+      gatewayOtherCalendarRequestCount:
+        observation.requestCounts['other-calendar'],
+      gatewayOtherApiRequestCount: observation.requestCounts['other-api'],
+      gatewayOptionsRequestCount: observation.optionsRequestCount,
+      gatewayFailedRequestCount: observation.failedRequestCount,
+      gatewayLastRequestEndpoint: observation.lastRequestEndpoint,
+      gatewayLastRequestMethod: observation.lastRequestMethod,
+      gatewayLastResponseEndpoint: observation.lastResponseEndpoint,
+      gatewayLastResponseMethod: observation.lastResponseMethod,
+      ...(observation.lastResponseStatus === undefined
+        ? {}
+        : { gatewayLastResponseStatus: observation.lastResponseStatus }),
+      iframeObservationAvailable: observation.iframeObservationAvailable,
+      iframeGatewayBaseOriginMatches:
+        observation.iframeGatewayBaseOriginMatches,
+      iframeRoomIdMatches: observation.iframeRoomIdMatches,
+      createEventVisible: observation.createEventVisible,
+      identityContinueVisible: observation.identityContinueVisible,
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
   );
 }
 

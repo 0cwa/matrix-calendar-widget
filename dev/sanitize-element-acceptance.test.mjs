@@ -221,6 +221,115 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
   );
 });
 
+test('emits fixed gateway traffic and iframe observations only', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'widget-a-runtime-observed',
+      status: 'passed',
+      gatewayContextRequestCount: 1,
+      gatewayCalendarsRequestCount: 2,
+      gatewayEventsRequestCount: 0,
+      gatewayOtherCalendarRequestCount: 0,
+      gatewayOtherApiRequestCount: 0,
+      gatewayOptionsRequestCount: 1,
+      gatewayFailedRequestCount: 0,
+      gatewayLastRequestEndpoint: 'calendars',
+      gatewayLastRequestMethod: 'GET',
+      gatewayLastResponseEndpoint: 'calendars',
+      gatewayLastResponseMethod: 'GET',
+      gatewayLastResponseStatus: 200,
+      iframeObservationAvailable: true,
+      iframeGatewayBaseOriginMatches: true,
+      iframeRoomIdMatches: true,
+      createEventVisible: false,
+      identityContinueVisible: false,
+    }),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=widget-a-runtime-observed status=passed gateway_context_requests=1 gateway_calendars_requests=2 gateway_events_requests=0 gateway_other_calendar_requests=0 gateway_other_api_requests=0 gateway_options_requests=1 gateway_failed_requests=0 gateway_last_request_endpoint=calendars gateway_last_request_method=GET gateway_last_response_endpoint=calendars gateway_last_response_method=GET gateway_last_response_status=200 iframe_observation_available=true iframe_gateway_base_origin_matches=true iframe_room_id_matches=true create_event_visible=false identity_continue_visible=false',
+      '',
+    ].join('\n'),
+  );
+});
+
+test('constrains runtime observations to bounded enums, counts, and booleans', () => {
+  const validRuntimeObservation = {
+    phase: 'widget-a-runtime-observed',
+    status: 'passed',
+    gatewayContextRequestCount: 1,
+    gatewayCalendarsRequestCount: 1,
+    gatewayEventsRequestCount: 0,
+    gatewayOtherCalendarRequestCount: 0,
+    gatewayOtherApiRequestCount: 0,
+    gatewayOptionsRequestCount: 0,
+    gatewayFailedRequestCount: 0,
+    gatewayLastRequestEndpoint: 'calendars',
+    gatewayLastRequestMethod: 'GET',
+    gatewayLastResponseEndpoint: 'calendars',
+    gatewayLastResponseMethod: 'GET',
+    gatewayLastResponseStatus: 200,
+    iframeObservationAvailable: true,
+    iframeGatewayBaseOriginMatches: true,
+    iframeRoomIdMatches: true,
+    createEventVisible: false,
+    identityContinueVisible: false,
+  };
+  const rejectedRecords = [
+    { ...validRuntimeObservation, gatewayEventsRequestCount: 3 },
+    {
+      ...validRuntimeObservation,
+      gatewayLastRequestEndpoint: 'https://private.example/path?token=x',
+    },
+    {
+      ...validRuntimeObservation,
+      gatewayLastResponseStatus: '200 private response',
+    },
+    {
+      ...validRuntimeObservation,
+      iframeRoomIdMatches: '!private-room:server',
+    },
+    { ...validRuntimeObservation, requestUrl: 'http://private.example' },
+    {
+      ...validRuntimeObservation,
+      phase: 'gateway-backed-read',
+    },
+    {
+      ...validRuntimeObservation,
+      status: 'unavailable',
+    },
+  ];
+
+  for (const record of rejectedRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+
+  assert.doesNotThrow(() =>
+    sanitizeElementAcceptance(
+      JSON.stringify({
+        ...validRuntimeObservation,
+        status: 'unavailable',
+        gatewayLastRequestEndpoint: 'none',
+        gatewayLastRequestMethod: 'NONE',
+        gatewayLastResponseEndpoint: 'none',
+        gatewayLastResponseMethod: 'NONE',
+        gatewayLastResponseStatus: undefined,
+        iframeObservationAvailable: false,
+        iframeGatewayBaseOriginMatches: false,
+        iframeRoomIdMatches: false,
+      }),
+      sourceSha,
+    ),
+  );
+});
+
 test('emits and constrains pinned widget-control failure observations', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify({
