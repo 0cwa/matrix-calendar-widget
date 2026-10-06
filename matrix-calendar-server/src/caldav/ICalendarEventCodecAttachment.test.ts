@@ -135,6 +135,22 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
     expect(parsed.event.unsupportedAttachment).toBeUndefined();
   });
 
+  it('treats adding one existing canonical URL as a byte no-op', () => {
+    const source = calendarWithAttachments(
+      'ATTACH;VALUE=URI:https://files.example.test:443/agenda',
+    );
+    const parsed = codec().parse('team', 'event.ics', source);
+
+    expect(
+      parsed.applyPatch({
+        attachment: {
+          action: 'add',
+          url: 'https://files.example.test/agenda',
+        },
+      }),
+    ).toEqual({ event: parsed.event, icalendar: source });
+  });
+
   it('adds a link without changing folded parameters or opaque siblings', () => {
     const source = calendarWithAttachments(oldAttachment, binaryAttachment);
     const parsed = codec().parse('team', 'event.ics', source);
@@ -239,6 +255,14 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
       { url: 'https://files.example.test/shared' },
     ]);
     expect(parsed.event.unsupportedAttachment).toBe(true);
+    expect(() =>
+      parsed.applyPatch({
+        attachment: {
+          action: 'add',
+          url: 'https://files.example.test/shared',
+        },
+      }),
+    ).toThrow(ICalendarEventCodecError);
     expect(() =>
       parsed.applyPatch({
         attachment: {

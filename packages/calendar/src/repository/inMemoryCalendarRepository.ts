@@ -38,13 +38,14 @@ import {
 } from '../model';
 import {
   CalendarEventAttachmentValidationError,
-  CalendarEventConferenceValidationError,
+  MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS,
   normalizeCalendarEventAttachmentInput,
   normalizeCalendarEventAttachmentPatch,
   validateCalendarEventInputAttachment,
   validateCalendarEventPatchAttachment,
 } from '../utils/calendarEventAttachment';
 import {
+  CalendarEventConferenceValidationError,
   normalizeCalendarEventConferenceInput,
   normalizeCalendarEventConferencePatch,
   validateCalendarEventInputConference,
@@ -56,10 +57,7 @@ import {
   isSupportedCalendarEventOccurrenceExclusion,
 } from '../utils/calendarEventOccurrenceProjection';
 import { calendarEventTimedDateTimeToDateTime } from '../utils/calendarEventTimedDateTime';
-import {
-  MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS,
-  canonicalizeCalendarExternalUrl,
-} from '../utils/calendarEventExternalLinks';
+import { canonicalizeCalendarExternalUrl } from '../utils/calendarEventExternalLinks';
 import {
   calendarLocalDateTimeToUnixMillis,
   isCalendarTimezoneSupported,
