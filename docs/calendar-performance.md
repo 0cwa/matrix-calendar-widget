@@ -2,9 +2,10 @@
 
 This benchmark measures the synchronous domain occurrence projection on
 synthetic calendars. It does not measure the CalDAV gateway, network latency,
-React/FullCalendar rendering, memory peaks, or a deployment's capacity. The
-current implementation runs synchronously; the measurements below identify
-large input workloads that still need product performance work.
+React/FullCalendar rendering, memory peaks, or a deployment's capacity. A
+separate synthetic browser smoke measures one fixed 1,000-event calendar in
+the actual list and month components; it is an observational UI measurement,
+not a product latency or capacity target.
 
 ## Reproduce
 
@@ -51,8 +52,47 @@ recurrence input members. These bounds limit individual-resource expansion;
 they do not bound the aggregate number of resources or rendered events.
 
 The large daily workload takes seconds in this environment. It therefore does
-not establish that a large calendar remains interactive. Follow-up evaluation
-must measure actual calendar loading and rendering, realistic input sizes,
-memory, and a controlled runtime before setting a pilot capacity or latency
-target. Windowed loading, reducing repeated timezone work, and off-main-thread
-projection are candidate improvements to measure before adopting them.
+not establish that a large calendar remains interactive. The fixed browser
+workload below is only one rendered input size. Follow-up evaluation must
+measure varied realistic inputs, memory, and a controlled runtime before
+setting a pilot capacity or latency target. Windowed loading, reducing repeated
+timezone work, and off-main-thread projection are candidate improvements to
+measure before adopting them.
+
+## Synthetic browser render measurement
+
+The Chromium fixture's `large-calendar` mode uses an in-memory repository with
+1,000 uniquely named, one-off timed events distributed across October 2026.
+It renders the production `CalendarToolbar` and `CalendarEventsSurface` at
+1280×800. The browser test warms each view once, then captures five
+fresh-navigation samples for list and month. Its timer starts immediately before
+`createRoot().render`, waits until the list has all 1,000 event rows or month
+view has its 31 overflow links, and records elapsed time after two animation
+frames. For month samples, it also follows a real overflow link to list view
+and verifies that all 1,000 expected event names are present exactly once.
+An in-page observer stores the ready timestamp before Playwright waits for the
+result, so test-driver round trips after the DOM is populated do not extend the
+reported duration.
+
+Run it after installing the locked dependencies and building the linked
+packages:
+
+```bash
+yarn workspace @matrix-calendar-widget/ical-timezones build
+yarn workspace @matrix-calendar-widget/calendar build
+yarn workspace e2e playwright install --with-deps chromium --only-shell
+yarn workspace e2e playwright test --config playwright.calendar.config.ts --grep "1,000 event"
+```
+
+The Playwright JSON attachments contain the warm-up, five elapsed samples,
+median and maximum, browser metadata, event/list counts, overflow-link count,
+horizontal dimensions, and (where supported) only a long-task count and
+maximum duration. There is no elapsed-time threshold. The check fails on
+missing or duplicate list entries, page errors, horizontal overflow, or a
+broken month overflow path. The timer excludes navigation,
+script download/evaluation, and i18next initialization. The fixture data is
+already constructed in memory, so this is only a fixture mount-to-populated-DOM
+measure; it is not a data-load or domain-projection benchmark. This fixed
+workload does not measure memory, gateway/network latency, real user calendars,
+or a controlled runtime, and it must not be used to claim pilot capacity or
+production responsiveness.
