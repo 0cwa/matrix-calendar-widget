@@ -15,7 +15,7 @@
 // limitations under the License.
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -66,9 +66,12 @@ const APPROVED_SOURCE_PATHS = Object.freeze([
   'matrix-calendar-server/src/service/RoomCalendarEventOperations.test.ts',
 ]);
 
+const MAX_REPORT_BYTES = 20 * 1024 * 1024;
+const MAX_AGGREGATE_ASSERTIONS = 25_000;
 const MAX_DIAGNOSTIC_STRINGS = 256;
 const MAX_DIAGNOSTIC_STRING_LENGTH = 250_000;
 const MAX_REPORTED_LOCATIONS = 40;
+const MAX_REPORTED_FAILED_TEST_LOCATIONS = 40;
 const MAX_REPORTED_TYPESCRIPT_CODES = 20;
 const UNAVAILABLE_REPORT_SHAPE = 'diagnostic-unavailable code=report-shape';
 
@@ -189,7 +192,8 @@ function summarizeReport(candidate, report, testExitCode) {
     !report ||
     typeof report !== 'object' ||
     !Array.isArray(report.testResults) ||
-    report.testResults.length === 0
+    report.testResults.length === 0 ||
+    report.testResults.length > targetPaths.length
   ) {
     return [UNAVAILABLE_REPORT_SHAPE];
   }
@@ -202,6 +206,7 @@ function summarizeReport(candidate, report, testExitCode) {
   let failed = 0;
   let skipped = 0;
   let failedSuites = 0;
+  let aggregateAssertions = 0;
 
   for (const testResult of report.testResults) {
     if (!testResult || typeof testResult !== 'object') {
@@ -212,8 +217,12 @@ function summarizeReport(candidate, report, testExitCode) {
       return ['diagnostic-unavailable code=unapproved-suite'];
     }
     suitePaths.push(suitePath);
+    if (!Array.isArray(testResult.assertionResults)) {
+      return [UNAVAILABLE_REPORT_SHAPE];
+    }
+    aggregateAssertions += testResult.assertionResults.length;
     if (
-      !Array.isArray(testResult.assertionResults) ||
+      aggregateAssertions > MAX_AGGREGATE_ASSERTIONS ||
       !collectFailureMessages(testResult, messages)
     ) {
       return [UNAVAILABLE_REPORT_SHAPE];
@@ -229,7 +238,12 @@ function summarizeReport(candidate, report, testExitCode) {
           failed += 1;
           suiteAssertionFailures += 1;
           const line = assertion.location && assertion.location.line;
-          if (Number.isSafeInteger(line) && line > 0) {
+          if (
+            Number.isSafeInteger(line) &&
+            line > 0 &&
+            (failedTestLocations.size < MAX_REPORTED_FAILED_TEST_LOCATIONS ||
+              failedTestLocations.has(suitePath + ':' + line))
+          ) {
             failedTestLocations.add(suitePath + ':' + line);
           }
           break;
@@ -248,7 +262,9 @@ function summarizeReport(candidate, report, testExitCode) {
       failedSuites += 1;
       if (suiteAssertionFailures === 0) {
         failed += 1;
-        failedTestLocations.add(suitePath);
+        if (failedTestLocations.size < MAX_REPORTED_FAILED_TEST_LOCATIONS) {
+          failedTestLocations.add(suitePath);
+        }
       }
     } else if (
       testResult.status !== 'passed' &&
@@ -355,6 +371,56 @@ function runSelfTests() {
     ['diagnostic-unavailable code=unapproved-suite'],
   );
 
+  const oversizedAssertions = summarizeReport(
+    candidate,
+    {
+      testResults: [
+        {
+          name: suitePath,
+          status: 'passed',
+          assertionResults: Array.from(
+            { length: MAX_AGGREGATE_ASSERTIONS + 1 },
+            () => ({
+              status: 'passed',
+              failureMessages: [],
+            }),
+          ),
+        },
+      ],
+    },
+    0,
+  );
+  assert.deepEqual(oversizedAssertions, [UNAVAILABLE_REPORT_SHAPE]);
+
+  const manyFailedAssertions = summarizeReport(
+    candidate,
+    {
+      testResults: [
+        {
+          name: suitePath,
+          status: 'failed',
+          assertionResults: Array.from(
+            { length: MAX_REPORTED_FAILED_TEST_LOCATIONS + 1 },
+            (_, index) => ({
+              status: 'failed',
+              location: { line: index + 1 },
+              failureMessages: [],
+            }),
+          ),
+        },
+      ],
+    },
+    1,
+  ).join('\n');
+  assert.equal(
+    (
+      manyFailedAssertions.match(
+        /matrix-calendar-server\/src\/caldav\/ICalendarEventCodec\.test\.ts:\d+/g,
+      ) || []
+    ).length,
+    MAX_REPORTED_FAILED_TEST_LOCATIONS,
+  );
+
   const passing = summarizeReport(
     candidate,
     {
@@ -416,6 +482,10 @@ function main(argv) {
 
     let report;
     try {
+      const reportStats = statSync(reportPath);
+      if (!reportStats.isFile() || reportStats.size > MAX_REPORT_BYTES) {
+        throw new Error('report-size-limit');
+      }
       report = JSON.parse(readFileSync(reportPath, 'utf8'));
     } catch {
       process.stdout.write(UNAVAILABLE_REPORT_SHAPE + '\n');
