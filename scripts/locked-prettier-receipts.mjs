@@ -7,7 +7,7 @@ import { join } from 'node:path';
 const repository = '0cwa/matrix-calendar-widget';
 const candidates = new Map([
   [
-    '80ce117c6e2fce22e9831eeb40b91239d9bcf604',
+    '2011e7b63b14b17c71e15d590663df6592469f89',
     {
       base: 'ba21aa48dd5afb3f0bba71d1e37eeb2ecc3db789',
       paths: [
