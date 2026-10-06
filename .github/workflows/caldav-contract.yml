@@ -19,6 +19,8 @@ on:
       - 'matrix-calendar-server/src/reminder/**'
       - 'matrix-calendar-server/src/service/MatrixCalendarAuthorization.ts'
       - 'matrix-calendar-server/src/service/MatrixCalendarAuthorization.test.ts'
+      - 'matrix-calendar-server/src/service/RoomCalendarCalDavAccess.ts'
+      - 'matrix-calendar-server/src/service/RoomCalendarCalDavAccess.test.ts'
       - 'matrix-calendar-server/test/CalendarGatewayMembershipGuard.test.ts'
       - 'matrix-calendar-server/test/integration/CalDavDiscoveryContract.test.ts'
       - 'matrix-calendar-server/test/integration/PersonalOpenIdRadicaleContract.test.ts'

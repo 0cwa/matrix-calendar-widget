@@ -52,6 +52,32 @@ export function isSafeRoomCalendarServiceUserLocalpart(
   );
 }
 
+export function parseRoomCalendarServiceUserId(
+  userId: string,
+): { localpart: string; serverName: string } | undefined {
+  try {
+    const parsedUserId = new UserID(userId);
+    const localpart = parsedUserId.localpart;
+    const serverName = parsedUserId.domain;
+    const delimiter = userId.indexOf(':');
+    if (
+      !userId.startsWith('@') ||
+      delimiter <= 1 ||
+      delimiter === userId.length - 1 ||
+      !localpart ||
+      !serverName ||
+      userId.slice(1, delimiter) !== localpart ||
+      userId.slice(delimiter + 1) !== serverName
+    ) {
+      return undefined;
+    }
+
+    return { localpart, serverName };
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Room-target CalDAV uses only a server-configured application principal and
  * exact room binding. Deployment must keep the explicit access gate disabled
@@ -117,27 +143,11 @@ export class RoomCalendarCalDavAccess {
       throw this.disabledError();
     }
 
-    let localpart: string;
-    let serverName: string;
-    try {
-      const parsedUserId = new UserID(serviceUserId);
-      localpart = parsedUserId.localpart;
-      serverName = parsedUserId.domain;
-      const delimiter = serviceUserId.indexOf(':');
-      if (
-        !serviceUserId.startsWith('@') ||
-        delimiter <= 1 ||
-        delimiter === serviceUserId.length - 1 ||
-        !localpart ||
-        !serverName ||
-        serviceUserId.slice(1, delimiter) !== localpart ||
-        serviceUserId.slice(delimiter + 1) !== serverName
-      ) {
-        throw new Error('invalid configured application-service user ID');
-      }
-    } catch {
+    const parsedUserId = parseRoomCalendarServiceUserId(serviceUserId);
+    if (!parsedUserId) {
       throw this.disabledError();
     }
+    const { localpart, serverName } = parsedUserId;
 
     const calendarUrl = roomCalendarCollectionUrl(
       radicaleUrl,

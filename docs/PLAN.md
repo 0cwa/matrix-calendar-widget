@@ -511,6 +511,11 @@ access and event writes stay disabled by default.
 
 - [x] Define the bounded Element Web/Desktop pilot scope, deployment shape,
       and acceptance evidence in `docs/beta-scope.md`.
+- [x] Add default-off sidecar Compose inputs, an optional server-only env file,
+      and a sanitized no-start preflight for room/appservice/reminder settings
+      and external PostgreSQL configuration. CI covers omitted defaults and
+      valid/invalid opt-ins; this validates configuration only, not operator or
+      production acceptance (PR #224).
 - [ ] Pass the existing five protected checks on the exact candidate head and
       retain the relevant hosted browser-layout and real Radicale/PostgreSQL
       contract results.
