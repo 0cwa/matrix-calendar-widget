@@ -1,0 +1,131 @@
+name: Temporary server focused test locations
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/temporary-server-test-locations.yml'
+      - 'scripts/temporary-server-test-locations.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-server-tests:
+    name: Focused server tests (${{ matrix.candidate }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    concurrency:
+      group: temporary-server-test-locations-${{ github.event.pull_request.number || github.ref }}-${{ matrix.candidate }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        candidate:
+          - absolute-alarm
+          - uri-attachments
+    steps:
+      - name: Check out locator source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Check out immutable candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.candidate == 'absolute-alarm' && '5d2cbafa178fddd5aaa1fc39734cd027459b3dd5' || '61e606e5b8e0f69d8f1c4f3d132f5b72856d9523' }}
+          path: candidate
+          persist-credentials: false
+
+      - name: Set up Node 22 and Yarn cache
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: yarn
+          cache-dependency-path: candidate/yarn.lock
+
+      - name: Run sanitizer self-tests
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/locator-self-test.log"
+          trap 'rm -f "$log"' EXIT
+          if ! node scripts/temporary-server-test-locations.mjs self-test >"$log" 2>&1; then
+            printf '%s\n' 'diagnostic-unavailable code=sanitizer-self-test' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Install, build linked packages, and run focused Jest suites
+        working-directory: candidate
+        env:
+          CANDIDATE: ${{ matrix.candidate }}
+        run: |
+          set -euo pipefail
+          locator="$GITHUB_WORKSPACE/scripts/temporary-server-test-locations.mjs"
+          summary_path="$GITHUB_STEP_SUMMARY"
+          install_log="$RUNNER_TEMP/locator-yarn-install.log"
+          timezone_log="$RUNNER_TEMP/locator-timezone-build.log"
+          calendar_log="$RUNNER_TEMP/locator-calendar-build.log"
+          test_log="$RUNNER_TEMP/locator-jest.log"
+          report="$RUNNER_TEMP/locator-jest-results.json"
+          safe_summary="$RUNNER_TEMP/locator-safe-summary.txt"
+          path_file="$RUNNER_TEMP/locator-approved-paths.txt"
+          parser_log="$RUNNER_TEMP/locator-parser.log"
+          trap 'rm -f "$install_log" "$timezone_log" "$calendar_log" "$test_log" "$report" "$safe_summary" "$path_file" "$parser_log"' EXIT
+
+          # Test/build code must not write unsanitized output to GitHub command files.
+          unset GITHUB_STEP_SUMMARY GITHUB_OUTPUT GITHUB_ENV
+
+          if ! node "$locator" paths "$CANDIDATE" >"$path_file" 2>"$parser_log"; then
+            printf '%s\n' 'diagnostic-unavailable code=target-map' >> "$summary_path"
+            exit 1
+          fi
+          mapfile -t test_paths < "$path_file"
+          if [ "${#test_paths[@]}" -lt 1 ]; then
+            printf '%s\n' 'diagnostic-unavailable code=target-map' >> "$summary_path"
+            exit 1
+          fi
+
+          if ! yarn install --frozen-lockfile >"$install_log" 2>&1; then
+            printf '%s\n' 'diagnostic-unavailable code=install-failed' >> "$summary_path"
+            exit 1
+          fi
+          if ! yarn workspace @matrix-calendar-widget/ical-timezones build >"$timezone_log" 2>&1; then
+            printf '%s\n' 'diagnostic-unavailable code=timezone-build-failed' >> "$summary_path"
+            exit 1
+          fi
+          if ! yarn workspace @matrix-calendar-widget/calendar build >"$calendar_log" 2>&1; then
+            printf '%s\n' 'diagnostic-unavailable code=calendar-build-failed' >> "$summary_path"
+            exit 1
+          fi
+
+          set +e
+          yarn workspace @matrix-calendar-widget/server jest \
+            "${test_paths[@]}" \
+            --runInBand \
+            --json \
+            --outputFile="$report" \
+            --testLocationInResults \
+            >"$test_log" 2>&1
+          test_status=$?
+          set -e
+
+          set +e
+          node "$locator" summarize "$CANDIDATE" "$report" "$test_status" \
+            >"$safe_summary" 2>"$parser_log"
+          summary_status=$?
+          set -e
+
+          if [ -s "$safe_summary" ]; then
+            cat "$safe_summary" >> "$summary_path"
+            cat "$safe_summary"
+          else
+            printf '%s\n' 'diagnostic-unavailable code=report-shape' >> "$summary_path"
+            printf '%s\n' 'diagnostic-unavailable code=report-shape'
+            summary_status=1
+          fi
+
+          if [ "$summary_status" -ne 0 ]; then
+            exit "$summary_status"
+          fi
+          exit "$test_status"
