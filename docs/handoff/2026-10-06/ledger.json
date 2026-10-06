@@ -673,7 +673,39 @@
     "tree": "b448ac05e55ceade141cc30e7dd5cdcc1e6b9b52",
     "capturedAt": "2026-10-06T19:46:13.498Z",
     "sourceHead": "2011e7b63b14b17c71e15d590663df6592469f89",
-    "sourceTree": "b448ac05e55ceade141cc30e7dd5cdcc1e6b9b52"
+    "sourceTree": "b448ac05e55ceade141cc30e7dd5cdcc1e6b9b52",
+    "postMergeCheckEvidence": [
+      {
+        "name": "Quality",
+        "conclusion": "success",
+        "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37521379950/job/112467362186"
+      },
+      {
+        "name": "Widget",
+        "conclusion": "success",
+        "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37521379950/job/112467362172"
+      },
+      {
+        "name": "Calendar browser layout",
+        "conclusion": "success",
+        "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37521379950/job/112467362068"
+      },
+      {
+        "name": "Server and bot",
+        "conclusion": "success",
+        "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37521379950/job/112467362047"
+      },
+      {
+        "name": "Container image build smoke",
+        "conclusion": "success",
+        "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37521379950/job/112467361731"
+      },
+      {
+        "name": "Analyze JavaScript/TypeScript",
+        "conclusion": "success",
+        "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37521379985/job/112467361225"
+      }
+    ]
   },
   "temporaryHelpers": {
     "formatter": {
@@ -703,7 +735,8 @@
       "target": "80ce117c6e2fce22e9831eeb40b91239d9bcf604",
       "run": 37518410756,
       "sanitizerSelfTests": "PASS",
-      "purpose": "Located an earlier test folding expectation; repaired at final accepted alarm head"
+      "purpose": "Located an earlier test folding expectation; repaired at final accepted alarm head",
+      "runConclusion": "failure"
     }
   }
 }

@@ -1,6 +1,6 @@
 # Repository and operator readiness
 
-_Snapshot: `main` at `5c543da1a3e4f4fdb6c1724380e9cf9f1174451d` (PR #217), 2026-10-06._
+_Snapshot: `main` at `e772d7de6644332be4daeb97ee529f6d15e68800` (PR #218, reviewed source tree `b448ac05e55ceade141cc30e7dd5cdcc1e6b9b52`), 2026-10-06._
 
 _Status: pre-alpha; the bounded beta scope is documented, but acceptance evidence is incomplete. This matrix is evidence tracking, not a release or deployment approval._
 
