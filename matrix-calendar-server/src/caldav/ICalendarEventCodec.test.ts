@@ -761,7 +761,7 @@ describe('selected-occurrence text codec writes', () => {
           'RECURRENCE-ID:20261002T090000',
           'DTSTART:20261002T110000',
           'DTEND:20261002T120000',
-          'SUMMARY;LANGUAGE=de:Besprechung',
+          'SUMMARY;X-OPAQUE=value:Besprechung',
           'DESCRIPTION:Old description',
           'END:VEVENT',
         ].join('\r\n'),
@@ -786,6 +786,19 @@ describe('selected-occurrence text codec writes', () => {
       )?.event.title,
     ).toBe('Besprechung');
 
+    expect(() =>
+      parsed.applyPatch({
+        recurrence: {
+          occurrence: {
+            action: 'set-fields',
+            recurrenceId,
+            viewerTimezone: 'Europe/Stockholm',
+            title: { action: 'set', value: 'Changed title' },
+          },
+        },
+      }),
+    ).toThrow(ICalendarEventCodecError);
+
     const result = parsed.applyPatch({
       recurrence: {
         occurrence: {
@@ -798,7 +811,7 @@ describe('selected-occurrence text codec writes', () => {
     });
 
     expect(rawVeventBlocks(result.icalendar)[1]).toContain(
-      'SUMMARY;LANGUAGE=de:Besprechung',
+      'SUMMARY;X-OPAQUE=value:Besprechung',
     );
     expect(result.event.recurrence?.overrides).toContainEqual(
       expect.objectContaining({

@@ -520,14 +520,23 @@ export class ParsedICalendarEvent {
   private applyOccurrencePatch(
     operation: OccurrenceTimingOverrideWrite & { viewerTimezone: string },
   ): EncodedICalendarEvent {
+    const writeOperation: CalendarEventOccurrenceWrite =
+      'action' in operation
+        ? operation
+        : {
+            action: 'set-timing',
+            recurrenceId: operation.recurrenceId,
+            timing: operation.timing,
+            viewerTimezone: operation.viewerTimezone,
+          };
     const result = applyOccurrenceTimingOverride(
       this.calendar,
       this.event,
-      operation,
+      writeOperation,
       {
         source: this.sourceICalendar,
         now: this.clock(),
-        viewerTimezone: operation.viewerTimezone,
+        viewerTimezone: writeOperation.viewerTimezone,
         listProjectionDiagnostic: this.listProjectionDiagnostic,
       },
     );
@@ -536,7 +545,7 @@ export class ParsedICalendarEvent {
     }
     const calendar = ICAL.Component.fromString(this.calendar.toString());
     const targetIdentity = calendarEventRecurrenceIdentity(
-      operation.recurrenceId,
+      writeOperation.recurrenceId,
     );
     const components = calendar.getAllSubcomponents();
     const sourceRevisionPropertiesByEvent = readVeventRevisionProperties(
@@ -676,14 +685,14 @@ export class ParsedICalendarEvent {
       icalendar,
       outputTextProperties,
       targetEventIndex,
-      operation,
+      writeOperation,
       result.action === 'created',
     );
     icalendar = restoreOccurrenceUntouchedProperties(
       icalendar,
       outputRawProperties,
       targetEventIndex,
-      operation,
+      writeOperation,
       result.action === 'created',
     );
     icalendar = restoreUntouchedVeventBlocks(
@@ -3420,7 +3429,7 @@ function readOccurrenceTextProperties(
       unsupportedText[field] = true;
       continue;
     }
-    const parameters = property.getParameterNames();
+    const parameters = Object.keys(property.toJSON()[1]);
     if (
       property.type !== 'text' ||
       values.length !== 1 ||
