@@ -144,10 +144,7 @@ export function isCalendarEventDateTime(
     return false;
   }
   if (value.type === 'date') {
-    return (
-      typeof value.value === 'string' &&
-      isValidCalendarDate(value.value)
-    );
+    return typeof value.value === 'string' && isValidCalendarDate(value.value);
   }
   if (value.type === 'floating-date-time') {
     return (
@@ -202,10 +199,7 @@ function isTextOperation(
   if (!isRecord(value)) {
     return false;
   }
-  if (
-    value.action === 'inherit' &&
-    hasExactlyKeys(value, ['action'])
-  ) {
+  if (value.action === 'inherit' && hasExactlyKeys(value, ['action'])) {
     return true;
   }
   return (
@@ -224,8 +218,7 @@ function isPositiveDuration(value: unknown): value is CalendarEventDuration {
     !hasExactlyKeys(value, [...units, 'isNegative']) ||
     units.some(
       (unit) =>
-        !Number.isSafeInteger(value[unit]) ||
-        (value[unit] as number) < 0,
+        !Number.isSafeInteger(value[unit]) || (value[unit] as number) < 0,
     ) ||
     typeof value.isNegative !== 'boolean' ||
     value.isNegative ||

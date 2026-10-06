@@ -63,9 +63,9 @@ import {
   CalendarEventFormValues,
   calendarEventFormStartWeekday,
   calendarEventInputFromForm,
-  calendarEventPatchFromForm,
   calendarEventOccurrenceTextOperationsFromForm,
   calendarEventOccurrenceToFormValues,
+  calendarEventPatchFromForm,
   calendarEventRdatePeriodDurationFromForm,
   calendarEventRdatePeriodIsEditable,
   calendarEventRdatePeriodValueFromForm,
@@ -1013,27 +1013,35 @@ export function CalendarEventEditorDialog({
                     {
                       field: 'title',
                       label: t('calendarEvents.editor.title', 'Title'),
-                      useSeriesKey: 'calendarEvents.editor.useSeriesTitle',
-                      useSeriesLabel: 'Use series title',
+                      useSeriesLabel: t(
+                        'calendarEvents.editor.useSeriesTitle',
+                        'Use series title',
+                      ),
                     },
                     {
                       field: 'description',
-                      label: t('calendarEvents.editor.description', 'Description'),
-                      useSeriesKey: 'calendarEvents.editor.useSeriesDescription',
-                      useSeriesLabel: 'Use series description',
+                      label: t(
+                        'calendarEvents.editor.description',
+                        'Description',
+                      ),
+                      useSeriesLabel: t(
+                        'calendarEvents.editor.useSeriesDescription',
+                        'Use series description',
+                      ),
                     },
                     {
                       field: 'location',
                       label: t('calendarEvents.editor.location', 'Location'),
-                      useSeriesKey: 'calendarEvents.editor.useSeriesLocation',
-                      useSeriesLabel: 'Use series location',
+                      useSeriesLabel: t(
+                        'calendarEvents.editor.useSeriesLocation',
+                        'Use series location',
+                      ),
                     },
                   ] as const
-                ).map(({ field, label, useSeriesKey, useSeriesLabel }) => {
+                ).map(({ field, label, useSeriesLabel }) => {
                   const unsupported =
                     values.occurrenceTextUnsupported?.[field] === true;
-                  const mode =
-                    values.occurrenceTextModes?.[field] ?? 'series';
+                  const mode = values.occurrenceTextModes?.[field] ?? 'series';
                   return (
                     <FormControl key={field}>
                       <FormControlLabel
@@ -1044,7 +1052,7 @@ export function CalendarEventEditorDialog({
                             onChange={handleOccurrenceTextModeChange(field)}
                           />
                         }
-                        label={t(useSeriesKey, useSeriesLabel)}
+                        label={useSeriesLabel}
                       />
                       <TextField
                         disabled={

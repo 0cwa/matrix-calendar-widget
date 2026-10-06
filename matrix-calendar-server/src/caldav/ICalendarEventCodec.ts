@@ -27,15 +27,15 @@ import {
   CalendarEventFollowingTimingWrite,
   CalendarEventId,
   CalendarEventInput,
+  CalendarEventOccurrenceTextField,
+  CalendarEventOccurrenceTextOperation,
+  CalendarEventOccurrenceWrite,
   CalendarEventPatch,
   CalendarEventRecurrence,
   CalendarEventRecurrenceDate,
   CalendarEventRecurrenceOverride,
   CalendarEventRecurrenceTiming,
   CalendarEventRecurrenceWrite,
-  CalendarEventOccurrenceWrite,
-  CalendarEventOccurrenceTextField,
-  CalendarEventOccurrenceTextOperation,
   CalendarEventRevision,
   CalendarEventStatus,
   CalendarEventTimedDateTime,
@@ -51,14 +51,14 @@ import {
   isCalendarEventAlarmRemoval,
   isCalendarEventOccurrenceWrite,
   isCalendarTimezoneSupported,
-  projectCalendarEventOccurrenceByRecurrenceId,
-  validateCalendarEventPatchOccurrence,
   isSupportedCalendarEventOccurrenceExclusion,
   normalizeCalendarEventConferenceInput,
   normalizeCalendarEventConferencePatch,
   parseSupportedCalendarEventRecurrenceRule,
+  projectCalendarEventOccurrenceByRecurrenceId,
   validateCalendarEventInputConference,
   validateCalendarEventPatchConference,
+  validateCalendarEventPatchOccurrence,
 } from '@matrix-calendar-widget/calendar';
 import { randomUUID } from 'crypto';
 import ICAL from 'ical.js';
@@ -611,7 +611,9 @@ export class ParsedICalendarEvent {
             ? []
             : sourceTextPropertiesByEvent[originalEventIndex],
         );
-        outputRawProperties.push(sourceRawPropertiesByEvent[originalEventIndex]);
+        outputRawProperties.push(
+          sourceRawPropertiesByEvent[originalEventIndex],
+        );
         outputVeventBlocks.push(sourceVeventBlocksByEvent[originalEventIndex]);
         replaced = true;
       } else {
@@ -625,7 +627,9 @@ export class ParsedICalendarEvent {
         outputTextProperties.push(
           sourceTextPropertiesByEvent[originalEventIndex],
         );
-        outputRawProperties.push(sourceRawPropertiesByEvent[originalEventIndex]);
+        outputRawProperties.push(
+          sourceRawPropertiesByEvent[originalEventIndex],
+        );
         outputVeventBlocks.push(sourceVeventBlocksByEvent[originalEventIndex]);
       }
       originalEventIndex += 1;
@@ -637,9 +641,7 @@ export class ParsedICalendarEvent {
       outputConferenceProperties.push(
         sourceConferencePropertiesByEvent[sourceMasterIndex],
       );
-      outputTextProperties.push(
-        sourceTextPropertiesByEvent[sourceMasterIndex],
-      );
+      outputTextProperties.push(sourceTextPropertiesByEvent[sourceMasterIndex]);
       outputRawProperties.push(sourceRawPropertiesByEvent[sourceMasterIndex]);
       outputVeventBlocks.push(sourceVeventBlocksByEvent[sourceMasterIndex]);
     }
@@ -966,7 +968,9 @@ function validateOccurrenceTextOperations(
     description: 'description',
     location: 'location',
   };
-  for (const field of Object.keys(operations) as CalendarEventOccurrenceTextField[]) {
+  for (const field of Object.keys(
+    operations,
+  ) as CalendarEventOccurrenceTextField[]) {
     const name = propertyNames[field];
     const raw = rawProperties.filter((property) => property.name === name);
     const parsed = component.getAllProperties(name);
@@ -1002,7 +1006,9 @@ function occurrenceTextOperationIsNoOp(
     return true;
   }
   const operations = occurrenceTextOperationMap(operation);
-  for (const field of Object.keys(operations) as CalendarEventOccurrenceTextField[]) {
+  for (const field of Object.keys(
+    operations,
+  ) as CalendarEventOccurrenceTextField[]) {
     const textOperation = operations[field]!;
     const hasExplicitValue =
       existing !== undefined &&
@@ -1011,10 +1017,7 @@ function occurrenceTextOperationIsNoOp(
       if (hasExplicitValue) {
         return false;
       }
-    } else if (
-      !hasExplicitValue ||
-      existing?.[field] !== textOperation.value
-    ) {
+    } else if (!hasExplicitValue || existing?.[field] !== textOperation.value) {
       // An explicit value equal to the master still changes source presence.
       return false;
     }
@@ -1032,7 +1035,9 @@ function applyOccurrenceTextOperations(
     description: 'description',
     location: 'location',
   };
-  for (const field of Object.keys(operations) as CalendarEventOccurrenceTextField[]) {
+  for (const field of Object.keys(
+    operations,
+  ) as CalendarEventOccurrenceTextField[]) {
     const operation = operations[field]!;
     const property = propertyNames[field];
     if (operation.action === 'inherit') {
@@ -1099,7 +1104,9 @@ export function applyOccurrenceTimingOverride(
           timing: operation.timing,
           viewerTimezone: options.viewerTimezone,
         };
-  const recurrenceId = recurrenceDateTimeFromUnknown(writeOperation.recurrenceId);
+  const recurrenceId = recurrenceDateTimeFromUnknown(
+    writeOperation.recurrenceId,
+  );
   const timing = writeOperation.timing
     ? recurrenceTimingFromUnknown(writeOperation.timing)
     : undefined;
@@ -1274,7 +1281,9 @@ export function applyOccurrenceTimingOverride(
   const defaultTiming =
     !existing && writeOperation.action === 'set-fields' && !timing
       ? projectedOriginal
-        ? recurrenceTimingFromCalendarEventTiming(projectedOriginal.event.timing)
+        ? recurrenceTimingFromCalendarEventTiming(
+            projectedOriginal.event.timing,
+          )
         : undefined
       : undefined;
   const timingToApply = timing ?? defaultTiming;
@@ -1303,12 +1312,12 @@ export function applyOccurrenceTimingOverride(
       ? Boolean(existingTiming && sameOccurrenceTiming(existingTiming, timing))
       : Boolean(
           projectedOriginal &&
-            sameOccurrenceTiming(
-              recurrenceTimingFromCalendarEventTiming(
-                projectedOriginal.event.timing,
-              ),
-              timing,
+          sameOccurrenceTiming(
+            recurrenceTimingFromCalendarEventTiming(
+              projectedOriginal.event.timing,
             ),
+            timing,
+          ),
         ));
   if (noTextChange && timingIsNoOp) {
     return {
@@ -4061,12 +4070,10 @@ function rawVeventBlocks(source: string): ICalendarContentLine[][] {
   const ranges = findVeventRanges(lines);
   return (
     ranges?.map((range) =>
-      lines
-        .slice(range.start, range.end + 1)
-        .map((line) => ({
-          value: line.value,
-          physicalLines: [...line.physicalLines],
-        })),
+      lines.slice(range.start, range.end + 1).map((line) => ({
+        value: line.value,
+        physicalLines: [...line.physicalLines],
+      })),
     ) ?? []
   );
 }
@@ -4418,7 +4425,16 @@ function restoreOccurrenceUntouchedProperties(
     const skipNames = new Set(separatelyRestoredNames);
     if (eventIndex === targetEventIndex) {
       if (created) {
-        for (const name of ['rrule', 'rdate', 'exdate', 'exrule', 'recurrence-id', 'dtstart', 'dtend', 'duration']) {
+        for (const name of [
+          'rrule',
+          'rdate',
+          'exdate',
+          'exrule',
+          'recurrence-id',
+          'dtstart',
+          'dtend',
+          'duration',
+        ]) {
           skipNames.add(name);
         }
       } else {
@@ -4442,7 +4458,11 @@ function restoreOccurrenceUntouchedProperties(
     const matchedSource = new Set<RawVeventProperty>();
     const body: ICalendarContentLine[] = [];
     let nestedComponents = 0;
-    for (let lineIndex = range.start + 1; lineIndex < range.end; lineIndex += 1) {
+    for (
+      let lineIndex = range.start + 1;
+      lineIndex < range.end;
+      lineIndex += 1
+    ) {
       const line = lines[lineIndex];
       const marker = line.value.toUpperCase();
       if (marker.startsWith('BEGIN:')) {
@@ -4456,7 +4476,9 @@ function restoreOccurrenceUntouchedProperties(
         continue;
       }
       const propertyName =
-        nestedComponents === 0 ? contentLinePropertyName(line.value) : undefined;
+        nestedComponents === 0
+          ? contentLinePropertyName(line.value)
+          : undefined;
       if (!propertyName || skipNames.has(propertyName)) {
         body.push(line);
         continue;
@@ -4518,10 +4540,10 @@ function restoreOccurrenceTextProperties(
     const sourceProperties = sourcePropertiesByEvent[eventIndex] ?? [];
     const operations = occurrenceTextOperationMap(operation);
     const fieldForName = new Map(
-      Object.entries(nameByField).map(([field, name]) => [
-        name,
-        field as CalendarEventOccurrenceTextField,
-      ] as const),
+      Object.entries(nameByField).map(
+        ([field, name]) =>
+          [name, field as CalendarEventOccurrenceTextField] as const,
+      ),
     );
     const controlledNames = new Set(Object.values(nameByField));
     const touchedNames = new Set<string>();
@@ -4548,7 +4570,11 @@ function restoreOccurrenceTextProperties(
     const matchedSource = new Set<RawVeventProperty>();
     const body: ICalendarContentLine[] = [];
     let nestedComponents = 0;
-    for (let lineIndex = range.start + 1; lineIndex < range.end; lineIndex += 1) {
+    for (
+      let lineIndex = range.start + 1;
+      lineIndex < range.end;
+      lineIndex += 1
+    ) {
       const line = lines[lineIndex];
       const marker = line.value.toUpperCase();
       if (marker.startsWith('BEGIN:')) {
@@ -4562,7 +4588,9 @@ function restoreOccurrenceTextProperties(
         continue;
       }
       const propertyName =
-        nestedComponents === 0 ? contentLinePropertyName(line.value) : undefined;
+        nestedComponents === 0
+          ? contentLinePropertyName(line.value)
+          : undefined;
       if (!propertyName || !controlledNames.has(propertyName)) {
         body.push(line);
         continue;

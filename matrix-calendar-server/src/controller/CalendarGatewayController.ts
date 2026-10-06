@@ -17,8 +17,8 @@
 import {
   CalendarAuthorizationRequest,
   CalendarEventConferenceValidationError,
-  CalendarEventOccurrenceValidationError,
   CalendarEventInput,
+  CalendarEventOccurrenceValidationError,
   CalendarEventPatch,
   CalendarTimeRange,
   isCalendarTimezoneSupported,

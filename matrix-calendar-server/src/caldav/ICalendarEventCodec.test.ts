@@ -20,6 +20,7 @@ import type {
   CalendarEventInput,
   CalendarEventPatch,
 } from '@matrix-calendar-widget/calendar';
+import { projectCalendarEventOccurrenceByRecurrenceId } from '@matrix-calendar-widget/calendar';
 import { getVTimezoneBlock } from '@matrix-calendar-widget/ical-timezones';
 import fs from 'fs';
 import ICAL from 'ical.js';
@@ -29,7 +30,6 @@ import {
   ICalendarEventCodec,
   ICalendarEventCodecError,
 } from './ICalendarEventCodec';
-import { projectCalendarEventOccurrenceByRecurrenceId } from '@matrix-calendar-widget/calendar';
 
 const codec = new ICalendarEventCodec();
 
@@ -649,13 +649,13 @@ describe('selected-occurrence text codec writes', () => {
     expect(blocks[2]).toContain(
       'DTSTART;TZID=Europe/Stockholm:20261025T090000',
     );
-    expect(blocks[2]).toContain(
-      'DTEND;TZID=Europe/Stockholm:20261025T100000',
-    );
+    expect(blocks[2]).toContain('DTEND;TZID=Europe/Stockholm:20261025T100000');
     expect(blocks[2]).toContain('SUMMARY:Changed instance');
     expect(blocks[2]).toContain('DESCRIPTION:');
     expect(blocks[2]).not.toContain('LOCATION:Master room');
-    expect(blocks[2]).toContain('X-MASTER;X-OPAQUE="Keep exactly":master value');
+    expect(blocks[2]).toContain(
+      'X-MASTER;X-OPAQUE="Keep exactly":master value',
+    );
     expect(encoded.event.recurrence?.overrides).toContainEqual(
       expect.objectContaining({
         recurrenceId,
@@ -889,16 +889,18 @@ describe('selected-occurrence text codec writes', () => {
       type: 'floating-date-time' as const,
       value: '2026-10-02T09:00:00',
     };
-    const result = codec.parse('team', 'explicit-equal.ics', source).applyPatch({
-      recurrence: {
-        occurrence: {
-          action: 'set-fields',
-          recurrenceId,
-          viewerTimezone: 'Europe/Stockholm',
-          title: { action: 'set', value: 'Simple recurring event' },
+    const result = codec
+      .parse('team', 'explicit-equal.ics', source)
+      .applyPatch({
+        recurrence: {
+          occurrence: {
+            action: 'set-fields',
+            recurrenceId,
+            viewerTimezone: 'Europe/Stockholm',
+            title: { action: 'set', value: 'Simple recurring event' },
+          },
         },
-      },
-    });
+      });
 
     expect(result.icalendar).not.toBe(source);
     expect(rawVeventBlocks(result.icalendar)[1]).toContain(

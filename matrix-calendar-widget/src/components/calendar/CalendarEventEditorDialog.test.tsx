@@ -430,9 +430,7 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.click(
       await screen.findByRole('button', { name: 'This occurrence only' }),
     );
-    expect(
-      screen.getByRole('textbox', { name: 'Title' }),
-    ).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: 'Title' })).toBeDisabled();
     expect(
       screen.queryByRole('textbox', { name: 'Conference URL' }),
     ).toBeNull();

@@ -222,9 +222,7 @@ export type CalendarEventRecurrenceOverride = {
   title?: string;
   description?: string;
   location?: string;
-  unsupportedText?: Partial<
-    Record<CalendarEventOccurrenceTextField, true>
-  >;
+  unsupportedText?: Partial<Record<CalendarEventOccurrenceTextField, true>>;
 };
 
 /**

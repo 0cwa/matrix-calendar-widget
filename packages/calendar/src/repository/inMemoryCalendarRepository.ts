@@ -42,15 +42,15 @@ import {
   validateCalendarEventPatchConference,
 } from '../utils/calendarEventConference';
 import {
-  CalendarEventOccurrenceValidationError,
-  validateCalendarEventPatchOccurrence,
-} from '../utils/calendarEventOccurrenceWrite';
-import {
   calendarEventFollowingTimingOverrides,
   calendarEventRecurrenceIdentity,
   isSupportedCalendarEventOccurrenceExclusion,
   projectCalendarEventOccurrenceByRecurrenceId,
 } from '../utils/calendarEventOccurrenceProjection';
+import {
+  CalendarEventOccurrenceValidationError,
+  validateCalendarEventPatchOccurrence,
+} from '../utils/calendarEventOccurrenceWrite';
 import { calendarEventTimedDateTimeToDateTime } from '../utils/calendarEventTimedDateTime';
 import {
   calendarLocalDateTimeToUnixMillis,
@@ -996,10 +996,7 @@ function applyOccurrenceTimingWrite(
       calendarEventRecurrenceIdentity(override.recurrenceId) === identity,
   );
   const existing = matchingOverrides[0];
-  if (
-    matchingOverrides.length > 1 ||
-    existing?.status === 'cancelled'
-  ) {
+  if (matchingOverrides.length > 1 || existing?.status === 'cancelled') {
     throw new CalendarRepositoryError(
       'unsupported-patch',
       'This occurrence has an ambiguous or cancelled override.',
@@ -1007,19 +1004,13 @@ function applyOccurrenceTimingWrite(
   }
 
   if (operation.timing) {
-    validateRecurrenceTiming(
-      operation.timing,
-      event,
-      operation.viewerTimezone,
-    );
+    validateRecurrenceTiming(operation.timing, event, operation.viewerTimezone);
   }
   const fields = ['title', 'description', 'location'] as const;
   for (const field of fields) {
-    const textOperation = operation.action === 'set-fields' ? operation[field] : undefined;
-    if (
-      textOperation &&
-      existing?.unsupportedText?.[field]
-    ) {
+    const textOperation =
+      operation.action === 'set-fields' ? operation[field] : undefined;
+    if (textOperation && existing?.unsupportedText?.[field]) {
       throw new CalendarRepositoryError(
         'unsupported-patch',
         'This occurrence text field is not supported for editing',
@@ -1041,9 +1032,7 @@ function applyOccurrenceTimingWrite(
   let changed = !existing && Boolean(operation.timing);
   for (const field of fields) {
     const textOperation =
-      operation.action === 'set-fields'
-        ? operation[field]
-        : undefined;
+      operation.action === 'set-fields' ? operation[field] : undefined;
     if (!textOperation) {
       continue;
     }
@@ -1062,7 +1051,10 @@ function applyOccurrenceTimingWrite(
   }
   if (operation.timing && existing) {
     const oldTiming = existing.timing;
-    if (!oldTiming || JSON.stringify(oldTiming) !== JSON.stringify(operation.timing)) {
+    if (
+      !oldTiming ||
+      JSON.stringify(oldTiming) !== JSON.stringify(operation.timing)
+    ) {
       changed = true;
     }
   }
@@ -1084,11 +1076,7 @@ function applyOccurrenceTimingWrite(
     const defaultTiming = recurrenceTimingFromOccurrenceTiming(
       projected.event.timing,
     );
-    validateRecurrenceTiming(
-      defaultTiming,
-      event,
-      operation.viewerTimezone,
-    );
+    validateRecurrenceTiming(defaultTiming, event, operation.viewerTimezone);
     nextOverride.timing = defaultTiming;
   }
 
@@ -1129,9 +1117,7 @@ function recurrenceTimingFromOccurrenceTiming(
       end: { type: 'date', value: timing.endDate },
     };
   }
-  const endpoint = (
-    value: (typeof timing)['start'],
-  ): CalendarEventDateTime => {
+  const endpoint = (value: (typeof timing)['start']): CalendarEventDateTime => {
     const local = value.local.length === 16 ? `${value.local}:00` : value.local;
     return value.type === 'floating'
       ? { type: 'floating-date-time', value: local }

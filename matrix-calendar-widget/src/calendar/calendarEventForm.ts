@@ -23,10 +23,10 @@ import {
   CalendarEventDisplayAlarm,
   CalendarEventDuration,
   CalendarEventInput,
-  CalendarEventPatch,
-  CalendarEventRecurrenceDate,
   CalendarEventOccurrenceTextField,
   CalendarEventOccurrenceTextOperation,
+  CalendarEventPatch,
+  CalendarEventRecurrenceDate,
   CalendarEventTiming,
   CalendarEventWeekday,
   CalendarEventWeekdayOrdinal,
@@ -293,7 +293,10 @@ export function calendarEventOccurrenceTextOperationsFromForm(
   }
 
   const operations: Partial<
-    Record<CalendarEventOccurrenceTextField, CalendarEventOccurrenceTextOperation>
+    Record<
+      CalendarEventOccurrenceTextField,
+      CalendarEventOccurrenceTextOperation
+    >
   > = {};
   const fields: CalendarEventOccurrenceTextField[] = [
     'title',
@@ -505,10 +508,7 @@ export function validateCalendarEventForm(
   if (!values.title.trim()) {
     const titleOperation =
       calendarEventOccurrenceTextOperationsFromForm(values).title;
-    if (
-      !values.occurrenceTextModes ||
-      titleOperation?.action === 'set'
-    ) {
+    if (!values.occurrenceTextModes || titleOperation?.action === 'set') {
       return 'title-required';
     }
   }

@@ -18,9 +18,9 @@ import { Calendar, CalendarEvent } from '@matrix-calendar-widget/calendar';
 import { DateTime } from 'luxon';
 import {
   calendarEventInputFromForm,
-  calendarEventPatchFromForm,
   calendarEventOccurrenceTextOperationsFromForm,
   calendarEventOccurrenceToFormValues,
+  calendarEventPatchFromForm,
   calendarEventRdatePeriodDurationFromForm,
   calendarEventRdatePeriodIsEditable,
   calendarEventRdatePeriodValueFromForm,
@@ -109,9 +109,7 @@ describe('calendar event form adapter', () => {
       description: 'custom',
       location: 'custom',
     });
-    expect(
-      calendarEventOccurrenceTextOperationsFromForm(values),
-    ).toEqual({});
+    expect(calendarEventOccurrenceTextOperationsFromForm(values)).toEqual({});
 
     const changed = {
       ...values,
@@ -123,9 +121,7 @@ describe('calendar event form adapter', () => {
       description: 'Series description',
       location: 'Series room',
     };
-    expect(
-      calendarEventOccurrenceTextOperationsFromForm(changed),
-    ).toEqual({
+    expect(calendarEventOccurrenceTextOperationsFromForm(changed)).toEqual({
       description: { action: 'inherit' },
       location: { action: 'inherit' },
     });
@@ -177,9 +173,9 @@ describe('calendar event form adapter', () => {
         title: 'custom' as const,
       },
     };
-    expect(
-      calendarEventOccurrenceTextOperationsFromForm(customized),
-    ).toEqual({ title: { action: 'set', value: 'Series title' } });
+    expect(calendarEventOccurrenceTextOperationsFromForm(customized)).toEqual({
+      title: { action: 'set', value: 'Series title' },
+    });
   });
 
   it('keeps an imported blank occurrence title readable when another field changes', () => {

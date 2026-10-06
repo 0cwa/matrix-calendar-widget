@@ -23,9 +23,9 @@ export {
 export {
   calendarEventFormStartWeekday,
   calendarEventInputFromForm,
-  calendarEventPatchFromForm,
   calendarEventOccurrenceTextOperationsFromForm,
   calendarEventOccurrenceToFormValues,
+  calendarEventPatchFromForm,
   calendarEventRdatePeriodDurationFromForm,
   calendarEventRdatePeriodIsEditable,
   calendarEventRdatePeriodValueFromForm,
