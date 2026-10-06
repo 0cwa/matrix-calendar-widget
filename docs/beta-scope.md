@@ -44,8 +44,9 @@ contracts remain in [ADR023](./adrs/adr023-floating-recurrence-semantics.md),
 [ADR032](./adrs/adr032-room-calendar-action-messages.md),
 [ADR033](./adrs/adr033-room-reminder-alarm-options.md),
 [ADR034](./adrs/adr034-bounded-following-timing-edits.md),
-[ADR035](./adrs/adr035-monthly-ordinal-weekday-recurrence.md), and
-[ADR036](./adrs/adr036-bounded-conference-link-authoring.md). Authentication,
+[ADR035](./adrs/adr035-monthly-ordinal-weekday-recurrence.md),
+[ADR036](./adrs/adr036-bounded-conference-link-authoring.md), and
+[ADR040](./adrs/adr040-selected-occurrence-text-fields.md). Authentication,
 room authorization, and the separate-store deployment choice remain governed
 by [ADR014](./adrs/adr014-split-widget-and-bot-calendar-principals.md),
 [ADR015](./adrs/adr015-server-managed-room-calendar-bindings.md),

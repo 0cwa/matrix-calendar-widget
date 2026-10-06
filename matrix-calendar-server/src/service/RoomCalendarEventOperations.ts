@@ -18,10 +18,12 @@ import {
   CalendarEvent,
   CalendarEventConferenceValidationError,
   CalendarEventInput,
+  CalendarEventOccurrenceValidationError,
   CalendarEventPatch,
   CalendarTimeRange,
   validateCalendarEventInputConference,
   validateCalendarEventPatchConference,
+  validateCalendarEventPatchOccurrence,
 } from '@matrix-calendar-widget/calendar';
 import { Injectable } from '@nestjs/common';
 import { UserID } from 'matrix-bot-sdk';
@@ -235,8 +237,12 @@ export class RoomCalendarEventOperations {
     );
     try {
       validateCalendarEventPatchConference(patch);
+      validateCalendarEventPatchOccurrence(patch);
     } catch (error) {
-      if (error instanceof CalendarEventConferenceValidationError) {
+      if (
+        error instanceof CalendarEventConferenceValidationError ||
+        error instanceof CalendarEventOccurrenceValidationError
+      ) {
         throw new RoomCalendarEventOperationError('invalid-event-input');
       }
       throw error;

@@ -49,6 +49,13 @@ export type {
   SupportedCalendarEventRecurrenceFrequency,
   SupportedCalendarEventRecurrenceRule,
 } from './calendarEventOccurrenceProjection';
+export {
+  CalendarEventOccurrenceValidationError,
+  isCalendarEventDateTime,
+  isCalendarEventOccurrenceWrite,
+  isCalendarEventRecurrenceTiming,
+  validateCalendarEventPatchOccurrence,
+} from './calendarEventOccurrenceWrite';
 export { calendarEventTimedDateTimeToDateTime } from './calendarEventTimedDateTime';
 export {
   calendarLocalDateTimeToUnixMillis,

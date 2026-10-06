@@ -325,6 +325,102 @@ describe('InMemoryCalendarRepository', () => {
     expect(fetched.recurrence?.overrides).toEqual([{ recurrenceId, timing }]);
   });
 
+  it('stores sparse occurrence text overrides and restores inherited values', async () => {
+    const event: CalendarEvent = {
+      ...events[2],
+      id: 'occurrence-text',
+      title: 'Series title',
+      description: 'Series description',
+      location: 'Series room',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-01-05T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-01-05T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [event],
+    });
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-01-12T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+
+    const updated = await repository.updateEvent('team', event.id, {
+      recurrence: {
+        occurrence: {
+          action: 'set-fields',
+          recurrenceId,
+          viewerTimezone: 'Europe/Stockholm',
+          title: { action: 'set', value: 'One instance' },
+          description: { action: 'set', value: '' },
+          location: { action: 'inherit' },
+        },
+      },
+    });
+
+    expect(updated.timing).toEqual(event.timing);
+    expect(updated.recurrence?.overrides).toEqual([
+      {
+        recurrenceId,
+        timing: {
+          type: 'end',
+          start: recurrenceId,
+          end: {
+            type: 'date-time',
+            value: {
+              local: '2026-01-12T10:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        },
+        title: 'One instance',
+        description: '',
+      },
+    ]);
+
+    const inherited = await repository.updateEvent('team', event.id, {
+      recurrence: {
+        occurrence: {
+          action: 'set-fields',
+          recurrenceId,
+          viewerTimezone: 'Europe/Stockholm',
+          title: { action: 'inherit' },
+          description: { action: 'inherit' },
+        },
+      },
+    });
+    expect(inherited.recurrence?.overrides).toEqual([
+      {
+        recurrenceId,
+        timing: {
+          type: 'end',
+          start: recurrenceId,
+          end: {
+            type: 'date-time',
+            value: {
+              local: '2026-01-12T10:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        },
+      },
+    ]);
+  });
+
   it('stores a bounded following suffix and treats an exact repeat as a no-op', async () => {
     const event: CalendarEvent = {
       ...events[2],

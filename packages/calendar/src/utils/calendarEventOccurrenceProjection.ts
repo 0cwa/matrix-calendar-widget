@@ -1133,6 +1133,7 @@ export function projectCalendarEventOccurrenceByRecurrenceId(
       timing,
       candidate.recurrenceId,
       override?.status,
+      override,
     );
   } catch {
     return undefined;
@@ -1417,6 +1418,7 @@ function materializeCandidates(
           displayTiming,
           candidate.recurrenceId,
           override?.status,
+          override,
         ),
       );
     }
@@ -1434,6 +1436,7 @@ function makeOccurrence(
   timing: CalendarEventTiming,
   recurrenceId?: CalendarEventDateTime,
   status?: CalendarEvent['status'],
+  override?: CalendarEventRecurrenceOverride,
 ): ProjectedCalendarEventOccurrence {
   if (!recurrenceId) {
     return {
@@ -1449,6 +1452,9 @@ function makeOccurrence(
       id: `${sourceEvent.id}::occurrence::${encodeURIComponent(identity)}`,
       status: status ?? sourceEvent.status,
       timing,
+      title: override?.title ?? sourceEvent.title,
+      description: override?.description ?? sourceEvent.description,
+      location: override?.location ?? sourceEvent.location,
     },
     sourceEvent,
     recurrenceId,
