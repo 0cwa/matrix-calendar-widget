@@ -55,10 +55,16 @@ type Phase =
   | 'member-a-credentials-seeded'
   | 'member-a-root-navigation'
   | 'member-a-session-observed'
-  | 'member-a-navigation-ready'
   | 'member-b-authenticated'
   | 'outsider-authenticated'
+  | 'member-a-room-context'
+  | 'member-b-room-context'
   | 'outsider-room-context'
+  | 'widget-a-sidebar-ready'
+  | 'widget-a-identity-dialog-observed'
+  | 'widget-a-identity-dialog-not-required'
+  | 'widget-a-identity-approval'
+  | 'widget-a-iframe-ready'
   | 'widget-a-approved'
   | 'widget-b-approved'
   | 'outsider-widget-approved'
@@ -132,6 +138,7 @@ test('Element Web members share events and enforce room authorization', async ({
   let pageA: Page | undefined;
   let pageB: Page | undefined;
   let pageC: Page | undefined;
+  let failureHttpStatus: number | undefined;
 
   try {
     recordRuntimeVersions(browser.version());
@@ -151,22 +158,34 @@ test('Element Web members share events and enforce room authorization', async ({
     pageC = await authenticateInElement(contextC, fixture.users.outsider);
     record(activePhase, 'passed');
 
-    activePhase = 'widget-a-approved';
+    activePhase = 'member-a-room-context';
     const elementA = await openFixtureRoom(
       pageA,
       fixture.roomName,
       fixture.teamRoomId,
     );
+    record(activePhase, 'passed');
+    activePhase = 'widget-a-approved';
     const firstRead = waitForGatewayResponse(
       pageA,
       'GET',
       '/v1/calendar/events',
     );
-    const frameA = await openCalendarWidget(elementA, pageA);
+    void firstRead.catch(() => undefined);
+    const frameA = await openCalendarWidget(elementA, pageA, false, true);
+    activePhase = 'gateway-backed-read';
     const firstReadResponse = await firstRead;
-    expect(firstReadResponse.status()).toBe(200);
+    failureHttpStatus = firstReadResponse.status();
+    expect(failureHttpStatus).toBe(200);
+    record(activePhase, 'passed', failureHttpStatus);
+    failureHttpStatus = undefined;
+    activePhase = 'widget-a-iframe-ready';
+    await frameA
+      .getByRole('button', { name: 'Create event', exact: true })
+      .waitFor({ timeout: 30_000 });
+    record(activePhase, 'passed');
+    activePhase = 'widget-a-approved';
     record('widget-a-approved', 'passed');
-    record('gateway-backed-read', 'passed', firstReadResponse.status());
 
     const eventTitle = `Acceptance ${randomUUID()}`;
     activePhase = 'event-created';
@@ -191,12 +210,14 @@ test('Element Web members share events and enforce room authorization', async ({
     ).toBeVisible();
     record(activePhase, 'passed', createResponseResult.status());
 
-    activePhase = 'widget-b-approved';
+    activePhase = 'member-b-room-context';
     const elementB = await openFixtureRoom(
       pageB,
       fixture.roomName,
       fixture.teamRoomId,
     );
+    record(activePhase, 'passed');
+    activePhase = 'widget-b-approved';
     const memberBRead = waitForGatewayResponse(
       pageB,
       'GET',
@@ -247,6 +268,7 @@ test('Element Web members share events and enforce room authorization', async ({
       fixture.outsiderRoomName,
       fixture.outsiderRoomId,
     );
+    record(activePhase, 'passed');
     expect(fixture.outsiderRoomId).not.toBe(fixture.teamRoomId);
     activePhase = 'outsider-widget-approved';
     const outsiderRead = waitForGatewayResponse(
@@ -347,7 +369,7 @@ test('Element Web members share events and enforce room authorization', async ({
     expect(blockedExternalRequests).toBe(0);
     record(activePhase, 'passed', undefined, blockedExternalRequests);
   } catch {
-    record(activePhase, 'failed');
+    record(activePhase, 'failed', failureHttpStatus);
     throw new Error('Element acceptance journey failed');
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
@@ -424,7 +446,10 @@ async function authenticateInElement(
   const sessionReady = await page
     .waitForFunction(
       (expectedUserId) => {
-        type MatrixClient = { getUserId?: () => string | null };
+        type MatrixClient = {
+          getUserId?: () => string | null;
+          getSyncState?: () => string | null;
+        };
         type MatrixClientPeg = { get?: () => MatrixClient | undefined };
         try {
           const matrixClientPeg = (
@@ -432,7 +457,12 @@ async function authenticateInElement(
               mxMatrixClientPeg?: MatrixClientPeg;
             }
           ).mxMatrixClientPeg;
-          return matrixClientPeg?.get?.()?.getUserId?.() === expectedUserId;
+          const matrixClient = matrixClientPeg?.get?.();
+          // Direct room routing needs the joined-room state loaded by sync.
+          return (
+            matrixClient?.getUserId?.() === expectedUserId &&
+            matrixClient.getSyncState?.() === 'SYNCING'
+          );
         } catch {
           return false;
         }
@@ -526,8 +556,16 @@ async function openCalendarWidget(
   element: ElementWebPage,
   page: Page,
   waitForCalendar = true,
+  captureMemberADiagnostics = false,
 ) {
+  if (captureMemberADiagnostics) {
+    activePhase = 'widget-a-sidebar-ready';
+  }
   await element.showWidgetInSidebar('Matrix Calendar');
+  if (captureMemberADiagnostics) {
+    record(activePhase, 'passed');
+    activePhase = 'widget-a-identity-approval';
+  }
   const identityContinue = page
     .getByRole('dialog')
     .getByRole('button', { name: 'Continue', exact: true })
@@ -535,8 +573,28 @@ async function openCalendarWidget(
   await identityContinue
     .waitFor({ state: 'visible', timeout: 8_000 })
     .catch(() => undefined);
-  if (await identityContinue.isVisible().catch(() => false)) {
+  const identityDialogShown = await identityContinue
+    .isVisible()
+    .catch(() => false);
+  if (captureMemberADiagnostics) {
+    record(
+      identityDialogShown
+        ? 'widget-a-identity-dialog-observed'
+        : 'widget-a-identity-dialog-not-required',
+      'passed',
+    );
+  }
+  if (identityDialogShown) {
+    if (captureMemberADiagnostics) {
+      activePhase = 'widget-a-identity-approval';
+    }
     await element.approveWidgetIdentity();
+    if (captureMemberADiagnostics) {
+      record(activePhase, 'passed');
+      activePhase = 'widget-a-iframe-ready';
+    }
+  } else if (captureMemberADiagnostics) {
+    activePhase = 'widget-a-iframe-ready';
   }
   const frame = element.widgetByTitle('Matrix Calendar');
   if (waitForCalendar) {
@@ -566,14 +624,17 @@ function waitForGatewayResponse(
   method: string,
   pathname: string,
 ): Promise<Response> {
-  return page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return (
-      url.origin === new URL(fixture.gatewayUrl).origin &&
-      url.pathname === pathname &&
-      response.request().method() === method
-    );
-  });
+  return page.waitForResponse(
+    (response) => {
+      const url = new URL(response.url());
+      return (
+        url.origin === new URL(fixture.gatewayUrl).origin &&
+        url.pathname === pathname &&
+        response.request().method() === method
+      );
+    },
+    { timeout: 30_000 },
+  );
 }
 
 function record(

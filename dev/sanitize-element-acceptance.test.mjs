@@ -97,7 +97,7 @@ test('emits bounded member A navigation and session observations', () => {
         matrixSyncState: 'SYNCING',
       }),
       JSON.stringify({
-        phase: 'member-a-navigation-ready',
+        phase: 'member-a-authenticated',
         status: 'failed',
       }),
     ].join('\n'),
@@ -112,7 +112,58 @@ test('emits bounded member A navigation and session observations', () => {
       'phase=member-a-credentials-seeded status=passed',
       'phase=member-a-root-navigation status=passed http_status=200',
       'phase=member-a-session-observed status=passed matrix_client_hook_present=true matrix_client_present=true matrix_user_matches=false matrix_sync_state=SYNCING',
-      'phase=member-a-navigation-ready status=failed',
+      'phase=member-a-authenticated status=failed',
+      '',
+    ].join('\n'),
+  );
+});
+
+test('emits bounded room, widget, identity, and gateway readiness steps', () => {
+  const summary = sanitizeElementAcceptance(
+    [
+      JSON.stringify({ phase: 'member-a-room-context', status: 'passed' }),
+      JSON.stringify({ phase: 'widget-a-sidebar-ready', status: 'passed' }),
+      JSON.stringify({
+        phase: 'widget-a-identity-dialog-observed',
+        status: 'passed',
+      }),
+      JSON.stringify({
+        phase: 'widget-a-identity-approval',
+        status: 'failed',
+      }),
+      JSON.stringify({
+        phase: 'gateway-backed-read',
+        status: 'failed',
+        httpStatus: 403,
+      }),
+      JSON.stringify({
+        phase: 'widget-a-iframe-ready',
+        status: 'failed',
+      }),
+      JSON.stringify({
+        phase: 'member-b-room-context',
+        status: 'passed',
+      }),
+      JSON.stringify({
+        phase: 'widget-a-identity-dialog-not-required',
+        status: 'passed',
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=member-a-room-context status=passed',
+      'phase=widget-a-sidebar-ready status=passed',
+      'phase=widget-a-identity-dialog-observed status=passed',
+      'phase=widget-a-identity-approval status=failed',
+      'phase=gateway-backed-read status=failed http_status=403',
+      'phase=widget-a-iframe-ready status=failed',
+      'phase=member-b-room-context status=passed',
+      'phase=widget-a-identity-dialog-not-required status=passed',
       '',
     ].join('\n'),
   );
