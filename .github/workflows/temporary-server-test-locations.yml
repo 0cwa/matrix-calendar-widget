@@ -23,13 +23,7 @@ jobs:
       matrix:
         include:
           - candidate: alarm-server
-            sha: c64bf613fdc9048cded4ac1b8f7fc96c19a07314
-          - candidate: attachment-server
-            sha: f4ac59fcdd56979ac1b67822f275d47267bdebe7
-          - candidate: attachment-widget
-            sha: f4ac59fcdd56979ac1b67822f275d47267bdebe7
-          - candidate: text-widget
-            sha: fe1a9c63aae28350ef2dc01563b1f3bf8eb7f3fd
+            sha: 80ce117c6e2fce22e9831eeb40b91239d9bcf604
     steps:
       - name: Check out locator source
         uses: actions/checkout@v7
@@ -88,7 +82,7 @@ jobs:
           unset GITHUB_STEP_SUMMARY GITHUB_OUTPUT GITHUB_ENV
 
           case "$CANDIDATE" in
-            alarm-server) approved_sha='c64bf613fdc9048cded4ac1b8f7fc96c19a07314' ;;
+            alarm-server) approved_sha='80ce117c6e2fce22e9831eeb40b91239d9bcf604' ;;
             attachment-server|attachment-widget) approved_sha='f4ac59fcdd56979ac1b67822f275d47267bdebe7' ;;
             text-widget) approved_sha='fe1a9c63aae28350ef2dc01563b1f3bf8eb7f3fd' ;;
             *) printf '%s\n' 'diagnostic-unavailable code=target-map' >> "$summary_path"; exit 1 ;;
