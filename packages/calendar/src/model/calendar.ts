@@ -320,6 +320,21 @@ export type CalendarEventConferencePatch =
 /** Read-only warning for CONFERENCE source data outside the write subset. */
 export type CalendarEventUnsupportedConference = true;
 
+/** Safe URI attachments that the bounded event editor can address by URL. */
+export type CalendarEventAttachmentLink = Readonly<{ url: string }>;
+
+/** One URI attachment accepted at event creation. */
+export type CalendarEventAttachmentInput = { url: string };
+
+/** One master-event attachment operation, keyed by a unique canonical URL. */
+export type CalendarEventAttachmentPatch =
+  | { action: 'add'; url: string }
+  | { action: 'set'; sourceUrl: string; url: string }
+  | { action: 'remove'; sourceUrl: string };
+
+/** Source attachments cannot be reconciled to one unambiguous master identity. */
+export type CalendarEventUnsupportedAttachment = true;
+
 export type Calendar = {
   id: CalendarId;
   name: string;
@@ -348,6 +363,10 @@ export type CalendarEvent = {
   readonly revision?: CalendarEventRevision;
   /** Safe external links projected from the resource by the iCalendar codec. */
   readonly externalLinks?: readonly CalendarEventExternalLink[];
+  /** Bounded safe URI attachments available to the authoring form. */
+  readonly attachments?: readonly CalendarEventAttachmentLink[];
+  /** Attachment identity cannot be reconciled to one master component. */
+  unsupportedAttachment?: CalendarEventUnsupportedAttachment;
   /** The source CONFERENCE property cannot be changed by this editor. */
   unsupportedConference?: CalendarEventUnsupportedConference;
 
@@ -379,12 +398,15 @@ export type CalendarEventInput = Omit<
   | 'unsupportedAlarm'
   | 'unsupportedTimezone'
   | 'unsupportedConference'
+  | 'unsupportedAttachment'
+  | 'attachments'
   | 'revision'
   | 'externalLinks'
 > & {
   alarm?: CalendarEventDisplayAlarmInput;
   recurrence?: { rrule?: string };
   conference?: CalendarEventConferenceInput;
+  attachment?: CalendarEventAttachmentInput;
 };
 
 /**
@@ -403,6 +425,8 @@ export type CalendarEventPatch = Partial<
     | 'unsupportedRecurrence'
     | 'unsupportedTimezone'
     | 'unsupportedConference'
+    | 'unsupportedAttachment'
+    | 'attachments'
     | 'revision'
     | 'externalLinks'
   >
@@ -410,6 +434,7 @@ export type CalendarEventPatch = Partial<
   alarm?: CalendarEventAlarmPatch;
   recurrence?: CalendarEventRecurrenceWrite;
   conference?: CalendarEventConferencePatch;
+  attachment?: CalendarEventAttachmentPatch;
 };
 
 export type CalendarTimeRange = {

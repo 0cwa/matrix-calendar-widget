@@ -180,6 +180,84 @@ describe('InMemoryCalendarRepository', () => {
     );
   });
 
+  it('creates, replaces, and removes one attachment link while preserving conference links', async () => {
+    const repository = createRepository();
+    const created = await repository.createEvent('team', {
+      uid: 'attachment@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-09-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      conference: {
+        url: 'https://meet.example.test/room',
+        label: 'Planning room',
+      },
+      attachment: { url: 'https://files.example.test/agenda.pdf' },
+    });
+
+    expect(created.attachments).toEqual([
+      { url: 'https://files.example.test/agenda.pdf' },
+    ]);
+    expect(created.externalLinks).toEqual([
+      {
+        kind: 'conference',
+        href: 'https://meet.example.test/room',
+        label: 'Planning room',
+      },
+      {
+        kind: 'attachment',
+        href: 'https://files.example.test/agenda.pdf',
+      },
+    ]);
+
+    const replaced = await repository.updateEvent('team', created.id, {
+      attachment: {
+        action: 'set',
+        sourceUrl: 'https://files.example.test/agenda.pdf',
+        url: 'https://files.example.test/revised.pdf',
+      },
+    });
+    expect(replaced.attachments).toEqual([
+      { url: 'https://files.example.test/revised.pdf' },
+    ]);
+    expect(replaced.externalLinks).toEqual([
+      {
+        kind: 'conference',
+        href: 'https://meet.example.test/room',
+        label: 'Planning room',
+      },
+      {
+        kind: 'attachment',
+        href: 'https://files.example.test/revised.pdf',
+      },
+    ]);
+
+    const removed = await repository.updateEvent('team', created.id, {
+      attachment: {
+        action: 'remove',
+        sourceUrl: 'https://files.example.test/revised.pdf',
+      },
+    });
+    expect(removed.attachments).toBeUndefined();
+    expect(removed.externalLinks).toEqual([
+      {
+        kind: 'conference',
+        href: 'https://meet.example.test/room',
+        label: 'Planning room',
+      },
+    ]);
+  });
+
   it('defensively clones recurrence override identity and timing', async () => {
     const inputOverride = recurrenceOverride();
     const inputRdate = recurrencePeriod();

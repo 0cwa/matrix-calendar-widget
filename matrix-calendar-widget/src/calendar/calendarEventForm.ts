@@ -17,6 +17,9 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarEventAttachmentInput,
+  CalendarEventAttachmentPatch,
+  CalendarEventAttachmentValidationError,
   CalendarEventConferenceInput,
   CalendarEventConferenceValidationError,
   CalendarEventDateTime,
@@ -38,6 +41,8 @@ import {
   isAllDayCalendarEvent,
   isSupportedCalendarEventOccurrenceExclusion,
   isTimedCalendarEvent,
+  normalizeCalendarEventAttachmentInput,
+  normalizeCalendarEventAttachmentPatch,
   normalizeCalendarEventConferenceInput,
   parseSupportedCalendarEventRecurrenceRule,
   type TimedCalendarEventTiming,
@@ -53,6 +58,12 @@ export type CalendarEventFormValues = {
   conferenceLabel?: string;
   conferenceEditable?: boolean;
   conferenceChanged?: boolean;
+  attachmentUrls?: readonly string[];
+  attachmentEditable?: boolean;
+  attachmentOperation?: 'none' | 'add' | 'set' | 'remove';
+  attachmentSourceUrl?: string;
+  attachmentUrl?: string;
+  attachmentChanged?: boolean;
   timingType: 'timed' | 'all-day';
   timedKind?: 'floating' | 'zoned' | 'mixed';
   start: string;
@@ -138,7 +149,8 @@ export type CalendarEventValidationError =
   | 'invalid-recurrence'
   | 'invalid-rdate'
   | 'invalid-alarm'
-  | 'invalid-conference';
+  | 'invalid-conference'
+  | 'invalid-attachment';
 
 export function createCalendarEventFormValues(
   calendar: Calendar,
@@ -157,6 +169,12 @@ export function createCalendarEventFormValues(
     conferenceLabel: '',
     conferenceEditable: true,
     conferenceChanged: false,
+    attachmentUrls: [],
+    attachmentEditable: true,
+    attachmentOperation: 'none',
+    attachmentSourceUrl: '',
+    attachmentUrl: '',
+    attachmentChanged: false,
     timingType: 'timed',
     timedKind: 'zoned',
     start: start.toFormat("yyyy-MM-dd'T'HH:mm"),
@@ -187,6 +205,7 @@ export function calendarEventToFormValues(
       description: event.description ?? '',
       location: event.location ?? '',
       ...conferenceFormValues(event),
+      ...attachmentFormValues(event),
       timingType: 'all-day',
       timedKind: 'zoned',
       start: event.timing.startDate,
@@ -214,6 +233,7 @@ export function calendarEventToFormValues(
     description: event.description ?? '',
     location: event.location ?? '',
     ...conferenceFormValues(event),
+    ...attachmentFormValues(event),
     timingType: 'timed',
     timedKind: timedKindForTiming(event.timing),
     start: event.timing.start.local.slice(0, 16),
@@ -229,6 +249,27 @@ export function calendarEventToFormValues(
     ...recurrenceRdateFormValues(event),
     ...recurrenceExdateFormValues(event),
     ...alarmFormValues(event),
+  };
+}
+
+function attachmentFormValues(
+  event: CalendarEvent,
+): Pick<
+  CalendarEventFormValues,
+  | 'attachmentUrls'
+  | 'attachmentEditable'
+  | 'attachmentOperation'
+  | 'attachmentSourceUrl'
+  | 'attachmentUrl'
+  | 'attachmentChanged'
+> {
+  return {
+    attachmentUrls: (event.attachments ?? []).map(({ url }) => url),
+    attachmentEditable: !event.unsupportedAttachment,
+    attachmentOperation: 'none',
+    attachmentSourceUrl: '',
+    attachmentUrl: '',
+    attachmentChanged: false,
   };
 }
 
@@ -343,6 +384,66 @@ function conferenceFormValues(
   };
 }
 
+function attachmentInputFromForm(
+  values: CalendarEventFormValues,
+): CalendarEventAttachmentInput {
+  return normalizeCalendarEventAttachmentInput({
+    url: values.attachmentUrl ?? '',
+  });
+}
+
+function attachmentPatchFromForm(
+  values: CalendarEventFormValues,
+): CalendarEventAttachmentPatch {
+  const operation = values.attachmentOperation;
+  if (operation === 'add') {
+    return normalizeCalendarEventAttachmentPatch({
+      action: 'add',
+      url: values.attachmentUrl ?? '',
+    });
+  }
+  if (operation === 'set') {
+    return normalizeCalendarEventAttachmentPatch({
+      action: 'set',
+      sourceUrl: values.attachmentSourceUrl ?? '',
+      url: values.attachmentUrl ?? '',
+    });
+  }
+  if (operation === 'remove') {
+    return normalizeCalendarEventAttachmentPatch({
+      action: 'remove',
+      sourceUrl: values.attachmentSourceUrl ?? '',
+    });
+  }
+  throw new CalendarEventAttachmentValidationError();
+}
+
+function validateAttachment(
+  values: CalendarEventFormValues,
+): CalendarEventValidationError | undefined {
+  if (
+    values.attachmentEditable === false ||
+    (!values.attachmentChanged &&
+      (values.attachmentOperation === undefined ||
+        values.attachmentOperation === 'none'))
+  ) {
+    return undefined;
+  }
+  try {
+    if (values.attachmentOperation === 'add') {
+      attachmentInputFromForm(values);
+    } else {
+      attachmentPatchFromForm(values);
+    }
+    return undefined;
+  } catch (error) {
+    if (error instanceof CalendarEventAttachmentValidationError) {
+      return 'invalid-attachment';
+    }
+    throw error;
+  }
+}
+
 function conferenceFromForm(
   values: CalendarEventFormValues,
 ): CalendarEventConferenceInput {
@@ -404,6 +505,9 @@ export function calendarEventInputFromForm(
     ...((values.conferenceUrl ?? '').trim()
       ? { conference: conferenceFromForm(values) }
       : {}),
+    ...(values.attachmentChanged && values.attachmentOperation === 'add'
+      ? { attachment: attachmentInputFromForm(values) }
+      : {}),
     ...(values.repeats
       ? {
           recurrence: {
@@ -439,6 +543,9 @@ export function calendarEventPatchFromForm(
             ? { action: 'set' as const, ...conferenceFromForm(values) }
             : { action: 'remove' as const },
         }
+      : {}),
+    ...(values.attachmentChanged && values.attachmentEditable !== false
+      ? { attachment: attachmentPatchFromForm(values) }
       : {}),
     description: normalizeOptional(values.description),
     location: normalizeOptional(values.location),
@@ -516,6 +623,11 @@ export function validateCalendarEventForm(
   const conferenceError = validateConference(values);
   if (conferenceError) {
     return conferenceError;
+  }
+
+  const attachmentError = validateAttachment(values);
+  if (attachmentError) {
+    return attachmentError;
   }
 
   const alarmError = validateAlarm(values);
@@ -1385,7 +1497,7 @@ function eventDate(event: CalendarEvent): string {
 
 function calendarEventEditableFieldsFromForm(
   values: CalendarEventFormValues,
-): Omit<CalendarEventInput, 'uid' | 'conference'> {
+): Omit<CalendarEventInput, 'uid' | 'conference' | 'attachment'> {
   const description = normalizeOptional(values.description);
   const location = normalizeOptional(values.location);
 

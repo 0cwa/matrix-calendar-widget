@@ -17,6 +17,9 @@
 import {
   CalendarEvent,
   CalendarEventAlarmPatch,
+  CalendarEventAttachmentInput,
+  CalendarEventAttachmentPatch,
+  CalendarEventAttachmentValidationError,
   CalendarEventConferenceInput,
   CalendarEventConferencePatch,
   CalendarEventConferenceValidationError,
@@ -42,6 +45,7 @@ import {
   CalendarEventTiming,
   CalendarEventTransparency,
   CalendarId,
+  MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS,
   boundCalendarEventExternalLinkLabel,
   calendarEventFollowingTimingOverrides,
   calendarEventRecurrenceIdentity,
@@ -52,11 +56,15 @@ import {
   isCalendarEventOccurrenceWrite,
   isCalendarTimezoneSupported,
   isSupportedCalendarEventOccurrenceExclusion,
+  normalizeCalendarEventAttachmentInput,
+  normalizeCalendarEventAttachmentPatch,
   normalizeCalendarEventConferenceInput,
   normalizeCalendarEventConferencePatch,
   parseSupportedCalendarEventRecurrenceRule,
   projectCalendarEventOccurrenceByRecurrenceId,
+  validateCalendarEventInputAttachment,
   validateCalendarEventInputConference,
+  validateCalendarEventPatchAttachment,
   validateCalendarEventPatchConference,
   validateCalendarEventPatchOccurrence,
 } from '@matrix-calendar-widget/calendar';
@@ -95,6 +103,24 @@ type SupportedConferenceValue = {
 type ConferenceSourceState = {
   present: boolean;
   editable?: SupportedConferenceValue;
+};
+
+type SupportedAttachmentValue = {
+  url: string;
+  propertyIndex: number;
+};
+
+type AttachmentSourceState = {
+  editable: SupportedAttachmentValue[];
+  opaqueUriUrls: string[];
+  projectable: boolean;
+  unsupported: boolean;
+};
+
+type AttachmentPatchPlan = {
+  noOp: boolean;
+  nextProperties: ICalendarContentLine[];
+  sourcePropertyIndex?: number;
 };
 
 const systemClock = (): Date => new Date();
@@ -162,16 +188,26 @@ export class ParsedICalendarEvent {
       throw unsupportedOccurrenceTimingPatch();
     }
     let conferencePatch: CalendarEventConferencePatch | undefined;
+    let attachmentPatch: CalendarEventAttachmentPatch | undefined;
     try {
       validateCalendarEventPatchConference(patch);
+      validateCalendarEventPatchAttachment(patch);
       if (hasOwn(patch, 'conference')) {
         conferencePatch = normalizeCalendarEventConferencePatch(
           patch.conference,
         );
       }
+      if (hasOwn(patch, 'attachment')) {
+        attachmentPatch = normalizeCalendarEventAttachmentPatch(
+          patch.attachment,
+        );
+      }
     } catch (error) {
       if (error instanceof CalendarEventConferenceValidationError) {
         throw unsupportedConferencePatch();
+      }
+      if (error instanceof CalendarEventAttachmentValidationError) {
+        throw unsupportedAttachmentPatch();
       }
       throw error;
     }
@@ -181,12 +217,17 @@ export class ParsedICalendarEvent {
     const sourceConferencePropertiesByEvent = rawVeventConferenceProperties(
       this.sourceICalendar,
     );
+    const sourceAttachmentPropertiesByEvent = rawVeventAttachmentProperties(
+      this.sourceICalendar,
+    );
     const sourceMasterEvent = findMasterEvent(this.calendar, this.event.uid);
     const sourceMasterIndex = sourceMasterEvent
       ? this.calendar.getAllSubcomponents('vevent').indexOf(sourceMasterEvent)
       : -1;
     const sourceConferenceProperties =
       sourceConferencePropertiesByEvent[sourceMasterIndex] ?? [];
+    const sourceAttachmentProperties =
+      sourceAttachmentPropertiesByEvent[sourceMasterIndex] ?? [];
     const sourceConferenceState = conferencePatch
       ? sourceMasterEvent
         ? readConferenceSourceState(
@@ -200,10 +241,43 @@ export class ParsedICalendarEvent {
       sourceConferenceState &&
       conferencePatchIsNoOp(conferencePatch, sourceConferenceState),
     );
+    const sourceAttachmentState = sourceMasterEvent
+      ? readAttachmentSourceState(sourceMasterEvent, sourceAttachmentProperties)
+      : undefined;
+    const ambiguousAttachmentSource = sourceMasterEvent
+      ? hasAmbiguousAttachmentSource(
+          this.calendar,
+          this.event.uid,
+          sourceMasterEvent,
+          sourceAttachmentPropertiesByEvent,
+        )
+      : true;
     if (
-      conferencePatch &&
+      attachmentPatch &&
+      (this.event.unsupportedAttachment ||
+        ambiguousAttachmentSource ||
+        sourceAttachmentState?.unsupported)
+    ) {
+      throw unsupportedAttachmentPatch();
+    }
+    const attachmentWritePlan =
+      attachmentPatch && sourceMasterEvent && sourceAttachmentState
+        ? planAttachmentPatch(
+            sourceAttachmentProperties,
+            sourceAttachmentState,
+            attachmentPatch,
+          )
+        : undefined;
+    if (attachmentPatch && !attachmentWritePlan) {
+      throw unsupportedAttachmentPatch();
+    }
+    const attachmentWriteIsNoOp = Boolean(
+      attachmentPatch && attachmentWritePlan?.noOp,
+    );
+    if (
       Object.keys(patch).length === 1 &&
-      conferenceWriteIsNoOp
+      ((conferencePatch && conferenceWriteIsNoOp) ||
+        (attachmentPatch && attachmentWriteIsNoOp))
     ) {
       return { event: this.event, icalendar: this.sourceICalendar };
     }
@@ -369,6 +443,13 @@ export class ParsedICalendarEvent {
     if (conferencePatch && !conferenceWriteIsNoOp) {
       setConferenceProperty(vevent, conferencePatch);
     }
+    if (attachmentPatch && !attachmentWritePlan?.noOp) {
+      setAttachmentProperty(
+        vevent,
+        attachmentPatch,
+        attachmentWritePlan?.sourcePropertyIndex,
+      );
+    }
     if (hasRecurrencePatch) {
       if (recurrenceWrite && 'exdate' in recurrenceWrite) {
         applyOccurrenceExdate(vevent, recurrenceWrite.exdate);
@@ -429,9 +510,13 @@ export class ParsedICalendarEvent {
     // current ETag without a needless CalDAV PUT. The semantic comparison is
     // against ical.js's parsed form above; returning the source also retains
     // original property ordering and folding.
+    const hasExplicitLinkPatch = Boolean(conferencePatch || attachmentPatch);
+    const explicitLinkPatchesAreNoOp =
+      (!conferencePatch || conferenceWriteIsNoOp) &&
+      (!attachmentPatch || attachmentWriteIsNoOp);
     if (
-      conferencePatch &&
-      conferenceWriteIsNoOp &&
+      hasExplicitLinkPatch &&
+      explicitLinkPatchesAreNoOp &&
       !veventContentChanged &&
       !hasAlarmPatch
     ) {
@@ -448,17 +533,36 @@ export class ParsedICalendarEvent {
             : undefined
       : this.event.recurrence;
 
+    const updatedAttachmentState =
+      attachmentPatch && attachmentWritePlan
+        ? readAttachmentSourceState(vevent, attachmentWritePlan.nextProperties)
+        : undefined;
+    const attachmentProjection = updatedAttachmentState?.projectable
+      ? updatedAttachmentState.editable
+          .filter(
+            ({ url }) => !updatedAttachmentState.opaqueUriUrls.includes(url),
+          )
+          .map(({ url }) => ({ url }))
+      : undefined;
     const {
       alarm: alarmPatch,
       conference: _conferencePatch,
+      attachment: _attachmentPatch,
       ...eventPatch
     } = patch;
+    const {
+      attachments: _sourceAttachments,
+      ...eventWithoutAttachmentProjection
+    } = this.event;
     const event: CalendarEvent = {
-      ...this.event,
+      ...(attachmentWritePlan ? eventWithoutAttachmentProjection : this.event),
       ...eventPatch,
       title: patch.title ?? this.event.title,
       timing: patch.timing ?? this.event.timing,
       externalLinks: readCalendarLinks(vevent),
+      ...(attachmentWritePlan && attachmentProjection?.length
+        ? { attachments: attachmentProjection }
+        : {}),
       recurrence,
       revision: revisionUpdated
         ? readUpdatedCalendarEventRevision(
@@ -469,6 +573,9 @@ export class ParsedICalendarEvent {
     };
     if (conferencePatch) {
       delete event.unsupportedConference;
+    }
+    if (attachmentWritePlan) {
+      delete event.unsupportedAttachment;
     }
     if (hasAlarmPatch) {
       if (isCalendarEventAlarmRemoval(alarmPatch)) {
@@ -507,12 +614,35 @@ export class ParsedICalendarEvent {
         forceConferenceReplacement.add(sourceMasterIndex);
       }
     }
+    const attachmentPropertiesByOutputEvent =
+      sourceAttachmentPropertiesByEvent.map((properties) => [...properties]);
+    const forceAttachmentReplacement = new Set<number>();
+    if (
+      attachmentPatch &&
+      !attachmentWriteIsNoOp &&
+      attachmentWritePlan &&
+      sourceMasterIndex >= 0
+    ) {
+      attachmentPropertiesByOutputEvent[sourceMasterIndex] =
+        attachmentWritePlan.nextProperties;
+      if (
+        attachmentPatch.action === 'remove' &&
+        attachmentWritePlan.nextProperties.length === 0
+      ) {
+        forceAttachmentReplacement.add(sourceMasterIndex);
+      }
+    }
+    const withRawConference = restoreVeventConferenceProperties(
+      preservedRevisionProperties,
+      conferencePropertiesByOutputEvent,
+      forceConferenceReplacement,
+    );
     return {
       event,
-      icalendar: restoreVeventConferenceProperties(
-        preservedRevisionProperties,
-        conferencePropertiesByOutputEvent,
-        forceConferenceReplacement,
+      icalendar: restoreVeventAttachmentProperties(
+        withRawConference,
+        attachmentPropertiesByOutputEvent,
+        forceAttachmentReplacement,
       ),
     };
   }
@@ -559,6 +689,9 @@ export class ParsedICalendarEvent {
     const sourceConferencePropertiesByEvent = rawVeventConferenceProperties(
       this.sourceICalendar,
     );
+    const sourceAttachmentPropertiesByEvent = rawVeventAttachmentProperties(
+      this.sourceICalendar,
+    );
     const sourceTextPropertiesByEvent = rawVeventTextProperties(
       this.sourceICalendar,
     );
@@ -573,6 +706,7 @@ export class ParsedICalendarEvent {
       sourceRawPropertiesByEvent.length !== originalEvents.length ||
       sourceVeventBlocksByEvent.length !== originalEvents.length ||
       sourceConferencePropertiesByEvent.length !== originalEvents.length ||
+      sourceAttachmentPropertiesByEvent.length !== originalEvents.length ||
       sourceTextPropertiesByEvent.length !== originalEvents.length ||
       sourceMasterIndex < 0
     ) {
@@ -581,6 +715,7 @@ export class ParsedICalendarEvent {
     const outputComponents: ICAL.Component[] = [];
     const outputRevisionProperties: RawRevisionProperty[][] = [];
     const outputConferenceProperties: ICalendarContentLine[][] = [];
+    const outputAttachmentProperties: ICalendarContentLine[][] = [];
     const outputTextProperties: RawVeventProperty[][] = [];
     const outputRawProperties: RawVeventProperty[][] = [];
     const outputVeventBlocks: ICalendarContentLine[][] = [];
@@ -606,6 +741,9 @@ export class ParsedICalendarEvent {
         outputConferenceProperties.push(
           sourceConferencePropertiesByEvent[originalEventIndex],
         );
+        outputAttachmentProperties.push(
+          sourceAttachmentPropertiesByEvent[originalEventIndex],
+        );
         outputTextProperties.push(
           result.action === 'created'
             ? []
@@ -624,6 +762,9 @@ export class ParsedICalendarEvent {
         outputConferenceProperties.push(
           sourceConferencePropertiesByEvent[originalEventIndex],
         );
+        outputAttachmentProperties.push(
+          sourceAttachmentPropertiesByEvent[originalEventIndex],
+        );
         outputTextProperties.push(
           sourceTextPropertiesByEvent[originalEventIndex],
         );
@@ -640,6 +781,9 @@ export class ParsedICalendarEvent {
       outputRevisionProperties.push(result.sourceRevisionProperties);
       outputConferenceProperties.push(
         sourceConferencePropertiesByEvent[sourceMasterIndex],
+      );
+      outputAttachmentProperties.push(
+        sourceAttachmentPropertiesByEvent[sourceMasterIndex],
       );
       outputTextProperties.push(sourceTextPropertiesByEvent[sourceMasterIndex]);
       outputRawProperties.push(sourceRawPropertiesByEvent[sourceMasterIndex]);
@@ -702,6 +846,10 @@ export class ParsedICalendarEvent {
       outputVeventBlocks,
       targetEventIndex,
     );
+    icalendar = restoreVeventAttachmentProperties(
+      icalendar,
+      outputAttachmentProperties,
+    );
 
     return {
       event: {
@@ -737,6 +885,9 @@ export class ParsedICalendarEvent {
     const sourceConferencePropertiesByEvent = rawVeventConferenceProperties(
       this.sourceICalendar,
     );
+    const sourceAttachmentPropertiesByEvent = rawVeventAttachmentProperties(
+      this.sourceICalendar,
+    );
     const rawRevisionProperties = readVeventRevisionProperties(
       this.sourceICalendar,
     );
@@ -744,6 +895,7 @@ export class ParsedICalendarEvent {
       !rawEventProperties ||
       rawEventProperties.length !== events.length ||
       sourceConferencePropertiesByEvent.length !== events.length ||
+      sourceAttachmentPropertiesByEvent.length !== events.length ||
       !rawRevisionProperties ||
       rawRevisionProperties.length !== events.length ||
       hasUnsupportedTimezoneRules(calendar, this.event.uid)
@@ -913,6 +1065,14 @@ export class ParsedICalendarEvent {
     icalendar = restoreVeventConferenceProperties(
       icalendar,
       conferencePropertiesByOutputEvent,
+    );
+    const attachmentPropertiesByOutputEvent = [
+      ...sourceAttachmentPropertiesByEvent,
+      ...detached.map(() => sourceAttachmentPropertiesByEvent[masterIndex]),
+    ];
+    icalendar = restoreVeventAttachmentProperties(
+      icalendar,
+      attachmentPropertiesByOutputEvent,
     );
     if (Buffer.byteLength(icalendar, 'utf8') > MAX_FOLLOWING_RESOURCE_BYTES) {
       throw followingResourceTooLarge();
@@ -1378,14 +1538,22 @@ export class ICalendarEventCodec {
     input: CalendarEventInput,
   ): EncodedICalendarEvent {
     let conferenceInput: CalendarEventConferenceInput | undefined;
+    let attachmentInput: CalendarEventAttachmentInput | undefined;
     try {
       validateCalendarEventInputConference(input);
+      validateCalendarEventInputAttachment(input);
       conferenceInput = input.conference
         ? normalizeCalendarEventConferenceInput(input.conference)
+        : undefined;
+      attachmentInput = input.attachment
+        ? normalizeCalendarEventAttachmentInput(input.attachment)
         : undefined;
     } catch (error) {
       if (error instanceof CalendarEventConferenceValidationError) {
         throw unsupportedConferencePatch();
+      }
+      if (error instanceof CalendarEventAttachmentValidationError) {
+        throw unsupportedAttachmentPatch();
       }
       throw error;
     }
@@ -1436,6 +1604,12 @@ export class ICalendarEventCodec {
     if (conferenceInput) {
       setConferenceProperty(vevent, { action: 'set', ...conferenceInput });
     }
+    if (attachmentInput) {
+      setAttachmentProperty(vevent, {
+        action: 'add',
+        url: attachmentInput.url,
+      });
+    }
     const recurrenceRule =
       recurrenceWrite && 'rrule' in recurrenceWrite
         ? recurrenceWrite.rrule
@@ -1445,10 +1619,17 @@ export class ICalendarEventCodec {
       ? setDisplayAlarm(calendar, vevent, input.alarm, input.title)
       : undefined;
 
-    const { conference: _conferenceInput, ...eventInput } = input;
+    const {
+      conference: _conferenceInput,
+      attachment: _attachmentInput,
+      ...eventInput
+    } = input;
     return {
       event: {
         ...eventInput,
+        ...(attachmentInput
+          ? { attachments: [{ url: attachmentInput.url }] }
+          : {}),
         id: eventId,
         calendarId,
         revision: readCalendarEventRevision(vevent),
@@ -1522,6 +1703,24 @@ export class ICalendarEventCodec {
       vevent,
       conferencePropertiesByEvent,
     );
+    const attachmentPropertiesByEvent = rawVeventAttachmentProperties(source);
+    const attachmentState = readAttachmentSourceState(
+      vevent,
+      attachmentPropertiesByEvent[eventIndex] ?? [],
+    );
+    const authorableAttachments = attachmentState.projectable
+      ? attachmentState.editable.filter(
+          ({ url }) => !attachmentState.opaqueUriUrls.includes(url),
+        )
+      : [];
+    const ambiguousAttachmentSource =
+      attachmentState.unsupported ||
+      hasAmbiguousAttachmentSource(
+        calendar,
+        uid,
+        vevent,
+        attachmentPropertiesByEvent,
+      );
 
     const event: CalendarEvent = {
       id: eventId,
@@ -1535,6 +1734,11 @@ export class ICalendarEventCodec {
       location: textValue(vevent.getFirstPropertyValue('location')),
       url: textValue(vevent.getFirstPropertyValue('url')),
       externalLinks: readCalendarLinks(vevent),
+      ...(authorableAttachments.length > 0
+        ? {
+            attachments: authorableAttachments.map(({ url }) => ({ url })),
+          }
+        : {}),
       categories: readCategories(vevent),
       priority: numberValue(vevent.getFirstPropertyValue('priority')),
       recurrence,
@@ -1545,6 +1749,7 @@ export class ICalendarEventCodec {
       (conferenceState.present && !conferenceState.editable)
         ? { unsupportedConference: true }
         : {}),
+      ...(ambiguousAttachmentSource ? { unsupportedAttachment: true } : {}),
       ...(unsupportedRecurrence ? { unsupportedRecurrence } : {}),
       ...(unsupportedTimezone ? { unsupportedTimezone: true } : {}),
     };
@@ -3286,6 +3491,13 @@ function unsupportedConferencePatch(): ICalendarEventCodecError {
   );
 }
 
+function unsupportedAttachmentPatch(): ICalendarEventCodecError {
+  return new ICalendarEventCodecError(
+    'unsupported-patch',
+    'Only one uniquely addressed safe URI attachment can be edited',
+  );
+}
+
 function readUnsupportedRecurrence(
   calendar: ICAL.Component,
   uid: string,
@@ -4088,6 +4300,234 @@ function rawVeventTextProperties(source: string): RawVeventProperty[][] {
   );
 }
 
+function rawVeventAttachmentProperties(
+  source: string,
+): ICalendarContentLine[][] {
+  const rawProperties = readRawVeventProperties(source);
+  return (
+    rawProperties?.map((properties) =>
+      properties
+        .filter((property) => property.name === 'attach')
+        .map((property) => ({
+          value: `${property.header}:${property.value}`,
+          physicalLines: [...property.physicalLines],
+        })),
+    ) ?? []
+  );
+}
+
+function readAttachmentSourceState(
+  vevent: ICAL.Component,
+  rawProperties: ICalendarContentLine[],
+): AttachmentSourceState {
+  const parsedProperties = vevent.getAllProperties('attach');
+  let unsupported = rawProperties.length !== parsedProperties.length;
+  const editable: SupportedAttachmentValue[] = [];
+  const opaqueUriUrls: string[] = [];
+
+  for (
+    let propertyIndex = 0;
+    propertyIndex < Math.min(rawProperties.length, parsedProperties.length);
+    propertyIndex += 1
+  ) {
+    const raw = parseContentLine(rawProperties[propertyIndex].value);
+    const property = parsedProperties[propertyIndex];
+    const valueTypes = raw
+      ? contentLineParameters(raw.header).filter(
+          (parameter) => parameter.name === 'value',
+        )
+      : [];
+    const hasUriValueType =
+      valueTypes.length === 0 ||
+      valueTypes.some((parameter) => parameter.value?.toUpperCase() === 'URI');
+    const rawUrl = raw ? canonicalizeCalendarExternalUrl(raw.value) : undefined;
+    const parsedUrl = canonicalizeCalendarExternalUrl(property.getFirstValue());
+    if (
+      !raw ||
+      valueTypes.length > 1 ||
+      (valueTypes.length === 1 &&
+        valueTypes[0].value?.toUpperCase() !== 'URI') ||
+      property.type !== 'uri' ||
+      !rawUrl ||
+      rawUrl !== parsedUrl
+    ) {
+      if (hasUriValueType && rawUrl) {
+        opaqueUriUrls.push(rawUrl);
+      }
+      continue;
+    }
+    if (editable.length <= MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS) {
+      editable.push({ url: rawUrl, propertyIndex });
+    } else {
+      unsupported = true;
+    }
+  }
+
+  const seenUrls = new Set<string>();
+  for (const attachment of editable) {
+    if (seenUrls.has(attachment.url)) {
+      unsupported = true;
+    }
+    seenUrls.add(attachment.url);
+  }
+  if (editable.length > MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS) {
+    unsupported = true;
+  }
+
+  return {
+    editable,
+    opaqueUriUrls,
+    projectable:
+      rawProperties.length === parsedProperties.length &&
+      editable.length <= MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS,
+    unsupported,
+  };
+}
+
+function hasAmbiguousAttachmentSource(
+  calendar: ICAL.Component,
+  uid: string,
+  master: ICAL.Component,
+  attachmentPropertiesByEvent: ICalendarContentLine[][],
+): boolean {
+  const matchingEvents = calendar
+    .getAllSubcomponents('vevent')
+    .map((component, index) => ({ component, index }))
+    .filter(({ component }) =>
+      component
+        .getAllProperties('uid')
+        .some((property) => textValue(property.getFirstValue()) === uid),
+    );
+  const masters = matchingEvents.filter(
+    ({ component }) => !component.hasProperty('recurrence-id'),
+  );
+  return (
+    masters.length !== 1 ||
+    matchingEvents.some(({ component, index }) => {
+      if (component.getAllProperties('uid').length !== 1) {
+        return true;
+      }
+      if (component === master) {
+        return false;
+      }
+      return (
+        component.getAllProperties('attach').length > 0 ||
+        (attachmentPropertiesByEvent[index]?.length ?? 0) > 0
+      );
+    })
+  );
+}
+
+function planAttachmentPatch(
+  sourceProperties: ICalendarContentLine[],
+  sourceState: AttachmentSourceState,
+  patch: CalendarEventAttachmentPatch,
+): AttachmentPatchPlan {
+  if (sourceState.unsupported) {
+    throw unsupportedAttachmentPatch();
+  }
+
+  const targetUrl = 'sourceUrl' in patch ? patch.sourceUrl : patch.url;
+  if (sourceState.opaqueUriUrls.includes(targetUrl)) {
+    throw unsupportedAttachmentPatch();
+  }
+  if (patch.action === 'set' && sourceState.opaqueUriUrls.includes(patch.url)) {
+    throw unsupportedAttachmentPatch();
+  }
+  const matches = sourceState.editable.filter(
+    (attachment) => attachment.url === targetUrl,
+  );
+  if (patch.action === 'add') {
+    if (matches.length > 1) {
+      throw unsupportedAttachmentPatch();
+    }
+    if (matches.length === 1) {
+      return { noOp: true, nextProperties: sourceProperties };
+    }
+    if (
+      sourceState.editable.length >= MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS
+    ) {
+      throw unsupportedAttachmentPatch();
+    }
+    return {
+      noOp: false,
+      nextProperties: [
+        ...sourceProperties,
+        foldContentLine(`ATTACH;VALUE=URI:${patch.url}`),
+      ],
+    };
+  }
+
+  if (matches.length !== 1) {
+    throw unsupportedAttachmentPatch();
+  }
+  const sourcePropertyIndex = matches[0].propertyIndex;
+  if (patch.action === 'remove') {
+    return {
+      noOp: false,
+      sourcePropertyIndex,
+      nextProperties: sourceProperties.filter(
+        (_property, index) => index !== sourcePropertyIndex,
+      ),
+    };
+  }
+  if (patch.sourceUrl === patch.url) {
+    return {
+      noOp: true,
+      sourcePropertyIndex,
+      nextProperties: sourceProperties,
+    };
+  }
+  if (
+    sourceState.editable.some(
+      (attachment) =>
+        attachment.propertyIndex !== sourcePropertyIndex &&
+        attachment.url === patch.url,
+    )
+  ) {
+    throw unsupportedAttachmentPatch();
+  }
+  const source = parseContentLine(sourceProperties[sourcePropertyIndex].value);
+  if (!source) {
+    throw unsupportedAttachmentPatch();
+  }
+  return {
+    noOp: false,
+    sourcePropertyIndex,
+    nextProperties: sourceProperties.map((property, index) =>
+      index === sourcePropertyIndex
+        ? foldContentLine(`${source.header}:${patch.url}`)
+        : property,
+    ),
+  };
+}
+
+function setAttachmentProperty(
+  vevent: ICAL.Component,
+  patch: CalendarEventAttachmentPatch,
+  sourcePropertyIndex?: number,
+): void {
+  if (patch.action === 'add') {
+    vevent.addProperty(
+      ICAL.Property.fromString(`ATTACH;VALUE=URI:${patch.url}`),
+    );
+    return;
+  }
+  const properties = vevent.getAllProperties('attach');
+  const property =
+    sourcePropertyIndex === undefined
+      ? undefined
+      : properties[sourcePropertyIndex];
+  if (!property) {
+    throw unsupportedAttachmentPatch();
+  }
+  if (patch.action === 'remove') {
+    vevent.removeProperty(property);
+  } else {
+    property.setValue(patch.url);
+  }
+}
+
 function rawVeventConferenceProperties(
   source: string,
 ): ICalendarContentLine[][] {
@@ -4298,6 +4738,67 @@ function foldContentLine(value: string): ICalendarContentLine {
   }
   physicalLines.push(current);
   return { value, physicalLines };
+}
+
+function restoreVeventAttachmentProperties(
+  serialized: string,
+  sourcePropertiesByEvent: ICalendarContentLine[][],
+  forceReplacementForEvent = new Set<number>(),
+): string {
+  const lines = readContentLines(serialized);
+  const ranges = findVeventRanges(lines);
+  if (!ranges) {
+    return serialized;
+  }
+  for (let eventIndex = ranges.length - 1; eventIndex >= 0; eventIndex -= 1) {
+    const range = ranges[eventIndex];
+    const sourceProperties = sourcePropertiesByEvent[eventIndex] ?? [];
+    if (
+      sourceProperties.length === 0 &&
+      !forceReplacementForEvent.has(eventIndex)
+    ) {
+      continue;
+    }
+
+    const body: ICalendarContentLine[] = [];
+    let nestedComponents = 0;
+    let inserted = false;
+    for (let index = range.start + 1; index < range.end; index += 1) {
+      const line = lines[index];
+      const marker = line.value.toUpperCase();
+      if (marker.startsWith('BEGIN:')) {
+        nestedComponents += 1;
+        body.push(line);
+        continue;
+      }
+      if (marker.startsWith('END:')) {
+        nestedComponents = Math.max(0, nestedComponents - 1);
+        body.push(line);
+        continue;
+      }
+      if (
+        nestedComponents === 0 &&
+        contentLinePropertyName(line.value) === 'attach'
+      ) {
+        if (!inserted) {
+          body.push(...sourceProperties);
+          inserted = true;
+        }
+        continue;
+      }
+      body.push(line);
+    }
+    if (!inserted && sourceProperties.length > 0) {
+      const uidIndex = body.findIndex(
+        (line) => contentLinePropertyName(line.value) === 'uid',
+      );
+      body.splice(uidIndex < 0 ? 0 : uidIndex + 1, 0, ...sourceProperties);
+    }
+    lines.splice(range.start + 1, range.end - range.start - 1, ...body);
+  }
+  const physicalLines = lines.flatMap((line) => line.physicalLines);
+  const hasFinalLineEnding = /(?:\r\n|\n|\r)$/.test(serialized);
+  return `${physicalLines.join('\r\n')}${hasFinalLineEnding ? '\r\n' : ''}`;
 }
 
 function restoreVeventConferenceProperties(

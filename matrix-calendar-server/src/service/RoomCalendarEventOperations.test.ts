@@ -526,6 +526,16 @@ describe('RoomCalendarEventOperations', () => {
         } as unknown as CalendarEventPatch,
       ),
     ).rejects.toMatchObject({ code: 'invalid-event-input' });
+    await expect(
+      operations.updateEvent(
+        access(),
+        `${collectionUrl}conference.ics`,
+        '"room-v1"',
+        {
+          attachment: { action: 'add', url: 'javascript:alert(1)' },
+        } as unknown as CalendarEventPatch,
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-event-input' });
     expect(fetchMock).not.toHaveBeenCalled();
 
     await expect(
@@ -570,6 +580,35 @@ describe('RoomCalendarEventOperations', () => {
           action: 'set',
           url: 'https://meet.example.test/room',
           label: 'Planning room',
+        },
+      }),
+    ).resolves.toMatchObject({ etag: '"room-v1"', noOp: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it('skips a same-value attachment write only with the current ETag', async () => {
+    const eventUrl = `${collectionUrl}conference.ics`;
+    const source = conferenceCalendar().replace(
+      'DESCRIPTION:Agenda',
+      'ATTACH;VALUE=URI:https://files.example.test/agenda\r\nDESCRIPTION:Agenda',
+    );
+    fetchMock.mockResolvedValueOnce(
+      new Response(source, {
+        status: 200,
+        headers: { ETag: '"room-v1"' },
+      }),
+    );
+
+    await expect(
+      operations.updateEvent(access(), eventUrl, '"room-v1"', {
+        title: 'Team planning',
+        description: 'Agenda',
+        location: undefined,
+        attachment: {
+          action: 'set',
+          sourceUrl: 'https://files.example.test/agenda',
+          url: 'https://files.example.test/agenda',
         },
       }),
     ).resolves.toMatchObject({ etag: '"room-v1"', noOp: true });
