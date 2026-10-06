@@ -188,6 +188,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     ).toString();
     cleanupResourceUrls.push(resourceUrl);
     const alarmTime = '2030-01-15T08:45:00Z';
+    const expectedMonthlyRule = 'FREQ=MONTHLY;COUNT=3;BYDAY=1MO';
     const created = codec.create(calendarUrl, resourceUrl, {
       uid,
       title: 'Monthly ordinal with calendar alarm',
@@ -217,7 +218,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     await client.createEvent(resourceUrl, created.icalendar);
     const stored = await directGet(resourceUrl, credentials);
     expect(stored.body).toContain('TRIGGER;VALUE=DATE-TIME:20300115T084500Z');
-    expect(stored.body).toContain('RRULE:FREQ=MONTHLY;BYDAY=1MO;COUNT=3');
+    expect(stored.body).toContain(`RRULE:${expectedMonthlyRule}`);
     expect(stored.body).toContain(`UID:${stableAlarmUid}`);
     expect(stored.body).not.toContain('REPEAT:');
     const parsedStored = codec.parse(calendarUrl, resourceUrl, stored.body);
@@ -225,9 +226,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
       type: 'absolute',
       value: alarmTime,
     });
-    expect(parsedStored.event.recurrence?.rrule).toBe(
-      'FREQ=MONTHLY;BYDAY=1MO;COUNT=3',
-    );
+    expect(parsedStored.event.recurrence?.rrule).toBe(expectedMonthlyRule);
 
     const replacementTime = '2030-01-15T09:15:00Z';
     const updated = parsedStored.applyPatch({
@@ -243,7 +242,7 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     expect(roundTrip.body).toContain(
       'TRIGGER;VALUE=DATE-TIME:20300115T091500Z',
     );
-    expect(roundTrip.body).toContain('RRULE:FREQ=MONTHLY;BYDAY=1MO;COUNT=3');
+    expect(roundTrip.body).toContain(`RRULE:${expectedMonthlyRule}`);
     expect(roundTrip.body).toContain(`UID:${stableAlarmUid}`);
     const roundTripEvent = codec.parse(
       calendarUrl,
