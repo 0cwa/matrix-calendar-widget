@@ -463,9 +463,9 @@ function recordRuntimeVersions(chromiumVersion: string) {
     `${JSON.stringify({
       phase: 'runtime-versions',
       status: 'passed',
-      elementWebVersion: 'v1.12.30',
-      synapseVersion: 'v1.161.0',
-      radicaleVersion: '3.8.0.0',
+      elementWebConfiguredTag: 'v1.12.30',
+      synapseConfiguredTag: 'v1.161.0',
+      radicaleConfiguredTag: '3.8.0.0',
       chromiumVersion,
       runnerOS: platform(),
       runnerOSVersion: release(),

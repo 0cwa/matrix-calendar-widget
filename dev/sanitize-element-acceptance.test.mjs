@@ -70,14 +70,14 @@ test('emits bounded setup substeps and numeric failure details', () => {
   );
 });
 
-test('emits only validated pinned runtime and runner versions', () => {
+test('labels configured service tags and observed browser and runner versions', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify({
       phase: 'runtime-versions',
       status: 'passed',
-      elementWebVersion: 'v1.12.30',
-      synapseVersion: 'v1.161.0',
-      radicaleVersion: '3.8.0.0',
+      elementWebConfiguredTag: 'v1.12.30',
+      synapseConfiguredTag: 'v1.161.0',
+      radicaleConfiguredTag: '3.8.0.0',
       chromiumVersion: '140.0.7339.80',
       runnerOS: 'linux',
       runnerOSVersion: '6.8.0-1027-azure',
@@ -91,7 +91,7 @@ test('emits only validated pinned runtime and runner versions', () => {
     summary,
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=runtime-versions status=passed element_web=v1.12.30 synapse=v1.161.0 radicale=3.8.0.0 chromium=140.0.7339.80 runner_os=linux runner_os_version=6.8.0-1027-azure runner_arch=x64 node=v22.23.3',
+      'phase=runtime-versions status=passed element_web_configured_tag=v1.12.30 synapse_configured_tag=v1.161.0 radicale_configured_tag=3.8.0.0 chromium_observed=140.0.7339.80 runner_os=linux kernel_release=6.8.0-1027-azure runner_arch=x64 node_observed=v22.23.3',
       '',
     ].join('\n'),
   );
@@ -156,9 +156,9 @@ test('rejects arbitrary failure labels, invalid exit codes, and untrusted versio
     {
       phase: 'runtime-versions',
       status: 'passed',
-      elementWebVersion: 'v1.12.30',
-      synapseVersion: 'v1.161.0',
-      radicaleVersion: '3.8.0.0',
+      elementWebConfiguredTag: 'v1.12.30',
+      synapseConfiguredTag: 'v1.161.0',
+      radicaleConfiguredTag: '3.8.0.0',
       chromiumVersion: '140.0.7339.80 token=secret',
       runnerOS: 'linux',
       runnerOSVersion: '6.8.0-1027-azure',

@@ -47,9 +47,9 @@ const FAILURE_CODES = new Set([
   'matrix-transport-failed',
 ]);
 const VERSION_FIELDS = new Set([
-  'elementWebVersion',
-  'synapseVersion',
-  'radicaleVersion',
+  'elementWebConfiguredTag',
+  'synapseConfiguredTag',
+  'radicaleConfiguredTag',
   'chromiumVersion',
   'runnerOS',
   'runnerOSVersion',
@@ -72,9 +72,9 @@ function validRuntimeVersions(record) {
     Object.keys(record).length !== expectedKeys.size ||
     Object.keys(record).some((key) => !expectedKeys.has(key)) ||
     record.status !== 'passed' ||
-    record.elementWebVersion !== 'v1.12.30' ||
-    record.synapseVersion !== 'v1.161.0' ||
-    record.radicaleVersion !== '3.8.0.0' ||
+    record.elementWebConfiguredTag !== 'v1.12.30' ||
+    record.synapseConfiguredTag !== 'v1.161.0' ||
+    record.radicaleConfiguredTag !== '3.8.0.0' ||
     typeof record.chromiumVersion !== 'string' ||
     !/^\d{1,3}(?:\.\d{1,5}){2,3}$/u.test(record.chromiumVersion) ||
     record.runnerOS !== 'linux' ||
@@ -182,14 +182,14 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         [
           'phase=runtime-versions',
           'status=passed',
-          `element_web=${record.elementWebVersion}`,
-          `synapse=${record.synapseVersion}`,
-          `radicale=${record.radicaleVersion}`,
-          `chromium=${record.chromiumVersion}`,
+          `element_web_configured_tag=${record.elementWebConfiguredTag}`,
+          `synapse_configured_tag=${record.synapseConfiguredTag}`,
+          `radicale_configured_tag=${record.radicaleConfiguredTag}`,
+          `chromium_observed=${record.chromiumVersion}`,
           `runner_os=${record.runnerOS}`,
-          `runner_os_version=${record.runnerOSVersion}`,
+          `kernel_release=${record.runnerOSVersion}`,
           `runner_arch=${record.runnerArchitecture}`,
-          `node=${record.nodeVersion}`,
+          `node_observed=${record.nodeVersion}`,
         ].join(' '),
       );
       continue;
