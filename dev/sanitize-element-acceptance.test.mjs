@@ -95,6 +95,60 @@ test('emits allowlisted gateway container state without exposing its error text'
   );
 });
 
+test('emits a missing dependency only when the runtime manifest allowlists it', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'gateway-ready',
+      status: 'failed',
+      failureCode: 'gateway-module-load-failed',
+      missingModuleKind: 'declared-package',
+      missingDependency: '@nestjs/common',
+    }),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=gateway-ready status=failed failure_code=gateway-module-load-failed missing_module_kind=declared-package missing_dependency=@nestjs/common',
+      '',
+    ].join('\n'),
+  );
+});
+
+test('rejects unlisted module names and missing-module details on other outcomes', () => {
+  const rejectedRecords = [
+    {
+      phase: 'gateway-ready',
+      status: 'failed',
+      failureCode: 'gateway-module-load-failed',
+      missingModuleKind: 'declared-package',
+      missingDependency: 'private-token-value',
+    },
+    {
+      phase: 'gateway-ready',
+      status: 'failed',
+      failureCode: 'gateway-module-load-failed',
+      missingModuleKind: 'relative-or-file',
+      missingDependency: '/app/private/path',
+    },
+    {
+      phase: 'widget-ready',
+      status: 'failed',
+      failureCode: 'gateway-module-load-failed',
+      missingModuleKind: 'unknown',
+    },
+  ];
+
+  for (const record of rejectedRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
 test('labels configured service tags and observed browser and runner versions', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify({

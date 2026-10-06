@@ -3,6 +3,10 @@ import { randomBytes } from 'node:crypto';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  diagnoseMissingModule,
+  loadRuntimeDependencyAllowlist,
+} from './element-acceptance-diagnostics.mjs';
 
 const SERVICE_USER_ID = '@_matrix_calendar_service:localhost';
 const SERVICE_LOCALPART = '_matrix_calendar_service';
@@ -418,7 +422,7 @@ function classifyGatewayStartupFailure(text) {
     ['gateway-matrix-connect-failed', /\bECONNREFUSED\b/iu],
     [
       'gateway-module-load-failed',
-      /\bERR_MODULE_NOT_FOUND\b|Cannot find module\b/iu,
+      /\bERR_MODULE_NOT_FOUND\b|Cannot find (?:package|module)\b/iu,
     ],
     [
       'gateway-config-validation-failed',
@@ -432,6 +436,13 @@ function classifyGatewayStartupFailure(text) {
   return (
     categories.find(([, pattern]) => pattern.test(text))?.[0] ??
     'gateway-startup-unknown'
+  );
+}
+
+function missingModuleDetails(text, rootDirectory) {
+  return diagnoseMissingModule(
+    text,
+    loadRuntimeDependencyAllowlist(rootDirectory),
   );
 }
 
@@ -524,6 +535,11 @@ function readComposeServiceDiagnostic(service) {
     } catch {
       // Keep only fixed classifications; raw service output stays in memory.
     }
+    const startupText = `${typeof state.Error === 'string' ? state.Error : ''}\n${logText}`;
+    const failureCode =
+      state.OOMKilled === true
+        ? 'gateway-out-of-memory'
+        : classifyGatewayStartupFailure(startupText);
     const diagnostic = {
       containerState: states.has(state.Status) ? state.Status : 'unavailable',
       containerHealth:
@@ -532,13 +548,11 @@ function readComposeServiceDiagnostic(service) {
           : healthStates.has(state.Health.Status)
             ? state.Health.Status
             : 'unavailable',
-      failureCode:
-        state.OOMKilled === true
-          ? 'gateway-out-of-memory'
-          : classifyGatewayStartupFailure(
-              `${typeof state.Error === 'string' ? state.Error : ''}\n${logText}`,
-            ),
+      failureCode,
     };
+    if (failureCode === 'gateway-module-load-failed') {
+      Object.assign(diagnostic, missingModuleDetails(startupText, cwd));
+    }
     if (
       Number.isInteger(state.ExitCode) &&
       state.ExitCode >= 0 &&

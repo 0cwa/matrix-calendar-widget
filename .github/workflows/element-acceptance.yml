@@ -59,8 +59,10 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
-      - name: Test acceptance summary sanitizer
-        run: node dev/sanitize-element-acceptance.test.mjs
+      - name: Test bounded acceptance diagnostics and summary sanitizer
+        run: |
+          node dev/element-acceptance-diagnostics.test.mjs
+          node dev/sanitize-element-acceptance.test.mjs
 
       - name: Build calendar, server, and widget images
         run: |

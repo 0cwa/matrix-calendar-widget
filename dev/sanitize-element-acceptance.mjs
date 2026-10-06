@@ -1,4 +1,15 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  isMissingModuleKind,
+  isRuntimeDependencyName,
+  loadRuntimeDependencyAllowlist,
+} from './element-acceptance-diagnostics.mjs';
+
+const RUNTIME_DEPENDENCIES = loadRuntimeDependencyAllowlist(
+  resolve(dirname(fileURLToPath(import.meta.url)), '..'),
+);
 
 const PHASES = new Set([
   'accounts-ready',
@@ -86,6 +97,8 @@ const ALLOWED_KEYS = new Set([
   'httpStatus',
   'count',
   'failureCode',
+  'missingModuleKind',
+  'missingDependency',
   'processExitCode',
   'containerState',
   'containerHealth',
@@ -169,6 +182,26 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     if (
       Object.hasOwn(record, 'failureCode') &&
       !FAILURE_CODES.has(record.failureCode)
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    const hasMissingModuleDiagnostic =
+      Object.hasOwn(record, 'missingModuleKind') ||
+      Object.hasOwn(record, 'missingDependency');
+    if (
+      (hasMissingModuleDiagnostic &&
+        (record.phase !== 'gateway-ready' ||
+          record.status !== 'failed' ||
+          record.failureCode !== 'gateway-module-load-failed' ||
+          !Object.hasOwn(record, 'missingModuleKind') ||
+          !isMissingModuleKind(record.missingModuleKind))) ||
+      (record.missingModuleKind === 'declared-package'
+        ? !isRuntimeDependencyName(
+            record.missingDependency,
+            RUNTIME_DEPENDENCIES,
+          )
+        : Object.hasOwn(record, 'missingDependency'))
     ) {
       throw new Error('invalid element acceptance summary');
     }
@@ -260,6 +293,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     }
     if (Object.hasOwn(record, 'failureCode')) {
       fields.push(`failure_code=${record.failureCode}`);
+    }
+    if (Object.hasOwn(record, 'missingModuleKind')) {
+      fields.push(`missing_module_kind=${record.missingModuleKind}`);
+    }
+    if (Object.hasOwn(record, 'missingDependency')) {
+      fields.push(`missing_dependency=${record.missingDependency}`);
     }
     if (Object.hasOwn(record, 'processExitCode')) {
       fields.push(`process_exit_code=${record.processExitCode}`);
