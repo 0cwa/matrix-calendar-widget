@@ -37,7 +37,7 @@ The local shell backend stopped returning even trivial read-only commands. Exist
 
 Normal server and contract diagnostics retain only counts. Temporary draft workflows expose approved source paths and numeric test locations while keeping messages, calendar values, assertion contents, and credentials private. These diagnostics supplement normal gates; they never replace them or alter test timeouts.
 
-The formatter helper PR #222 remains a draft for the final receipt; the location helper PR #223 is closed and unmerged. Both helper branches are preserved, and neither helper is merged.
+The temporary formatter helper PR #222 and location helper PR #223 are closed and unmerged. Both helper branches are preserved.
 
 ## Remaining acceptance
 

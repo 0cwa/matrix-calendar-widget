@@ -492,7 +492,7 @@
     "verifiedAt": "2026-10-06T19:39:31.308Z"
   },
   "localBackend": "Local shell stopped responding; worktrees and dirty alarm work preserved; no blind reset or alignment.",
-  "acceptedInventoryCapturedAt": "2026-10-06T19:46:32.974Z",
+  "acceptedInventoryCapturedAt": "2026-10-06T20:02:42.376Z",
   "priorHandoffCandidates": [
     {
       "pr": 164,
@@ -711,17 +711,17 @@
     "formatter": {
       "pr": 222,
       "branch": "codex/temporary-locked-prettier-receipts-20261006",
-      "head": "425ff3fa327cfb88f263d0742ad76faf14e046e9",
-      "state": "open",
+      "head": "aa29816ab22de896dfe35d28203382625bd337c4",
+      "state": "closed",
       "draft": true,
       "merged": false,
       "branchPreserved": true,
-      "target": "2011e7b63b14b17c71e15d590663df6592469f89",
-      "run": 37519640436,
-      "job": 112461449302,
+      "target": "ff948882ca82377f35aea6d580820685fa50b035",
+      "run": 37522957823,
+      "job": 112472732769,
       "runConclusion": "success",
-      "receipts": 25,
-      "identities": 25,
+      "receipts": 6,
+      "identities": 6,
       "nonidentities": 0
     },
     "locator": {
