@@ -1,12 +1,14 @@
 # Release and versioning policy
 
 This is the adopted policy for the current pre-alpha phase and for a possible
-future controlled beta. It does not configure a release, publish artifacts, or
-establish that any deployment is ready. The project remains pre-alpha: live
-deployment and publication are not authorized, breaking changes are allowed,
-and the project makes no compatibility or support promise. The M8 and
-operator-specific gates below must be met before a controlled beta is
-considered.
+future controlled beta. The bounded candidate scope and required evidence are
+defined in [beta-scope.md](./beta-scope.md); broader M4/M5/M8 work may remain
+open when that narrower contract is met. This policy does not configure a
+release, publish artifacts, or establish that any deployment is ready. The
+project remains pre-alpha: live deployment and publication are not authorized,
+breaking changes are allowed, and the project makes no compatibility or
+support promise. A passing candidate must still receive a separate release or
+rollout decision.
 
 ## What the repository does today
 
@@ -117,9 +119,10 @@ release:
 - Confirm the release commit is based on reviewed `main`, the required checks
   passed for that exact commit, and required security and interoperability
   reviews are recorded.
-- Confirm M8 gates relevant to the release have evidence. A container build
-  smoke is not deployment validation; operator-specific deployment gates must
-  be reported separately.
+- Confirm the gates applicable to the selected bounded beta scope have
+  evidence. Do not imply completion of deferred M4/M5/M8 work. A container
+  build smoke is not deployment validation; operator-specific deployment
+  gates must be reported separately.
 - Review the changes for configuration, API, CalDAV serialization, and database
   migration compatibility. Verify preservation and recovery behavior where
   applicable.

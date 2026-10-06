@@ -2,13 +2,19 @@
 
 _Last updated: 2026-10-06._
 
-_Source snapshot: `main` at `4c25fa97d4e5a01cca9eaf675b62dfd7b82ec863` (PR #216)._
+_Source snapshot: `main` at `5c543da1a3e4f4fdb6c1724380e9cf9f1174451d` (PR #217)._
 
 ## Current phase
 
-**Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; actual-client and operator acceptance remain open. M7 has bounded bot commands and post-success room-target event notices. M8 has source-level gateway and CalDAV limits plus a hosted synthetic Chromium fixture; actual-client, screen-reader, capacity, and operator acceptance remain open.
+**Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; actual-client and operator acceptance remain open. M7 has bounded bot commands and post-success room-target event notices. M8 has source-level gateway and CalDAV limits plus a hosted synthetic Chromium fixture; actual Element Web/Desktop, operator/restore, and measured pilot-envelope acceptance remain open. Mobile/other clients, formal screen-reader certification, and broad capacity characterization are outside the bounded beta target.
 
-This is source status, not release or deployment approval. The [repository and operator readiness matrix](./repository-readiness.md) separates tested repository behavior from evidence that still requires a real operator or Matrix client.
+The controlled-beta scope and its acceptance contract are documented in
+[`beta-scope.md`](./beta-scope.md). Its target is Element Web/Desktop, one
+server replica, the project-owned Radicale store, and separate app-owned
+PostgreSQL reminder state. Scope definition is not acceptance evidence; it
+does not complete M4/M5/M8 or authorize publication or rollout.
+
+This is source status, not release or deployment approval. The bounded recurrence/timezone projector can omit unsupported or malformed source resources from the visible calendar. It warns for source forms it diagnoses but does not guarantee every unsupported form is detected; the widget does not promise a complete view of every existing VEVENT. The [repository and operator readiness matrix](./repository-readiness.md) separates tested repository behavior from evidence that still requires a real operator or Matrix client.
 
 ## Landed on `main`
 
@@ -89,10 +95,10 @@ loading, memory, and actual clients remain unmeasured.
 ## Open scope and acceptance blockers
 
 - **M4:** collection-timezone editing and remaining issue #5 acceptance work.
-- **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, arbitrary RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, attachment authoring, and conference forms beyond ADR036 are not part of the implemented editor.
+- **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, arbitrary RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, attachment authoring, and conference forms beyond ADR036 are not part of the implemented editor. Unsupported recurrence or timezone sources may be omitted from projection; the widget warns for source forms it diagnoses, while preserving the canonical resource.
 - **M6:** issue #7 bounded repository criteria are complete. Keep room access, event writes, settings, delivery, and action notices off until the operator accepts each capability and its trust boundary. A passing pinned stack is not an etke-host or production proof.
-- **M8:** record actual Element Web/Desktop/mobile and screen-reader evidence separately; issue #9 remains open for beta, capacity, and client/operator acceptance. Gateway and bot quotas are process-local. Callers behind one reverse proxy share the gateway's TCP-peer quota; use one server replica or add a trusted upstream/distributed control.
-- **Operator readiness:** production homeserver/proxy behavior, OpenID query-token log redaction, actual Radicale image/configuration and `/data` preservation, PostgreSQL endpoint TLS/CA and role, backups/restores, secrets, network exposure, and rollback remain to be verified. The Compose sidecar creates its own Radicale store and is not a migration of etke data.
+- **M8:** record actual Element Web/Desktop versions and acceptance against the isolated pinned stack; prove two-identity authorization denial, stale-ETag conflict behavior, keyboard/focus behavior, and restart plus restore of both Radicale and app-owned PostgreSQL data. Record an operator-approved measured enrollment/capacity envelope with hardware/runtime, displayed date-range counts, API/render latency, and explicit thresholds. Mobile/other clients and formal screen-reader certification remain deferred. Issue #9 remains open for beta, capacity, and client/operator acceptance. Gateway and bot quotas are process-local. Callers behind one reverse proxy share the gateway's TCP-peer quota; the beta target uses one server replica.
+- **Operator readiness:** homeserver/proxy behavior, OpenID query-token log redaction, selected Radicale image/configuration, PostgreSQL endpoint TLS/CA and role, backups/restores, secrets, network exposure, and rollback remain to be verified. The beta baseline uses the project-owned Radicale image and its own store; replacing an existing service or reusing its `/data` is optional and would require additional image/data-path compatibility and recovery evidence. The Compose sidecar does not migrate another service's data.
 - **Release/deployment:** the project remains pre-alpha. Build and contract evidence do not authorize image/chart publication or a live deployment.
 
 ## Documentation note

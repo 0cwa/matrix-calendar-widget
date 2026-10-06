@@ -18,6 +18,13 @@ verify keyboard scrolling in the details content, close with Escape, and confirm
 focus returns to the event. Dimensions and failure screenshots are retained as
 synthetic CI diagnostics for seven days. Browser traces and video are disabled.
 
+The fixture was later extended with room-control coverage; PR #213 passed ten
+total hosted cases. PR #216 added a prepared 1,000-event list/month benchmark,
+bringing the fixture to twelve total cases. All twelve passed at exact tested tree
+`911027044f96463a06e7d42cd2371ecf333662f7`. The month benchmark's samples
+include a 2.63-second long task. This remains synthetic rendering evidence,
+not a latency target, capacity guarantee, or actual-client result.
+
 Two additional 320 × 640 cases use the production `CalendarToolbar`,
 `CalendarEventsSurface`, event details, and reminder control with a synthetic
 room-capability repository. The read-only case checks disabled event-write
@@ -35,8 +42,9 @@ The fixture uses a default MUI theme, English text, a fixed Stockholm timezone,
 and synthetic long titles, locations, and descriptions. It validates those
 components and inputs only. It does not establish that a Matrix client embeds
 the widget, approves capabilities, forwards keyboard input, supports a screen
-reader, or uses the same fonts/theme. The actual Element Web, Desktop, Android,
-and iOS checks in the client validation record remain separate release gates.
+reader, or uses the same fonts/theme. Actual Element Web and Desktop acceptance
+against the isolated pinned stack is a controlled-beta gate. Android/iOS
+clients and formal screen-reader certification are deferred beyond this beta.
 
 Run the checks from a clean checkout:
 
@@ -50,8 +58,9 @@ yarn workspace e2e playwright install --with-deps chromium --only-shell
 yarn workspace e2e playwright test --config playwright.calendar.config.ts
 ```
 
-The local validation environment could not download the Chromium executable.
-Source type checks, lint, and test discovery were run locally; the hosted
-Chromium result above supplies standalone component-layout evidence only. It
-does not replace the actual-client and screen-reader checks in the client
-validation record.
+The local validation environment could not download the Chromium executable
+for the original fixture run. Source type checks, lint, and test discovery were
+run locally; hosted Chromium results supply standalone component-layout
+evidence only. They do not replace actual Element Web/Desktop acceptance.
+Formal screen-reader certification is deferred for the bounded beta and must
+not be inferred from axe results.
