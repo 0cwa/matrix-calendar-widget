@@ -84,7 +84,7 @@ jobs:
             echo 'The built server image does not use the compiled entrypoint.' >&2
             exit 1
           fi
-          if ! docker run --rm --network none --read-only \
+          if ! docker run --rm --network none --read-only --ulimit core=0 \
             --mount "type=bind,source=$GITHUB_WORKSPACE/dev/element-acceptance-image-smoke.mjs,target=/tmp/element-acceptance-image-smoke.mjs,readonly" \
             --entrypoint node matrix-calendar-widget/server:element-acceptance \
             /tmp/element-acceptance-image-smoke.mjs \
