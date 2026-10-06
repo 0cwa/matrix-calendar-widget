@@ -188,12 +188,15 @@ home, so that home must stay within one trusted organizational boundary or
 use equivalent per-room isolation; gateway bindings are application-level
 scoping, not backend per-room ACLs. M2 #48/#45 cover personal actor
 authentication and same-user enumeration. M6 contracts cover the appservice
-room path and cross-room denial against pinned services, not the production
-host. The actual etke-host custom-image override and preservation of its
-`/data` store remain unverified deployment gates. Existing user-principal
-room-context routes are separate and remain active. Issue #7's bounded
-repository criteria are complete; actual Element-client and operator-host
-acceptance remain separate.
+room path and cross-room denial against pinned services, not compatibility
+with a team host. [ADR037](./adrs/adr037-independent-radicale-store-for-controlled-beta.md)
+selects a new project-owned Radicale store for the controlled beta; local
+acceptance does not establish team-host compatibility. If an operator selects
+an existing managed service or store, the custom-image override and
+preservation of its `/data` store remain separate deployment gates. Existing
+user-principal room-context routes are separate and remain active. Issue #7's
+bounded repository criteria are complete; actual Element-client and
+operator-host acceptance remain separate.
 
 ## Reminder delivery
 

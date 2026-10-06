@@ -1,23 +1,26 @@
 # Calendar widget accessibility and client validation
 
-This checklist separates automated calendar-widget evidence from testing inside
-an actual Matrix client. The component tests do not establish that an Element
-client embeds this build correctly, forwards keyboard input, or presents it
-well at every viewport size. Actual-client, screen-reader, and zoom checks
-below remain a release gate until recorded against a release candidate.
+This checklist separates automated calendar-widget evidence from testing in an
+actual Matrix client. The bounded beta targets Element Web and Element Desktop;
+test both against the isolated pinned Synapse, project-owned Radicale, and
+PostgreSQL stack before any production contact. Actual keyboard/focus and
+responsive checks in those clients are required. Mobile/other clients and
+formal screen-reader certification are deferred beyond this beta. This local
+acceptance does not establish compatibility with a team host.
 
 ## Automated evidence
 
 The calendar-view, event-list, and event-details suites run in Vitest's
 `happy-dom` environment. They cover these current surfaces:
 
-| Surface                                  | Automated check                                                                          | Current evidence                                                                |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Calendar grid event                      | Accessible button name and keyboard `Enter` activation                                   | Covered                                                                         |
-| Event list and details                   | `Tab` to event, `Enter` to open, named dialog, `Escape` to close, focus returns to event | Covered                                                                         |
-| Calendar grid, event list, event details | `vitest-axe` automated accessibility scan                                                | Covered; no violations in the tested fixtures                                   |
-| Actual CSS layout at multiple widths     | Hosted Chromium production-preview fixture at four viewports                             | Passed 8/8 list/month cases at tested tree `c368aac`; synthetic components only |
-| Matrix client integration                | Embedded in a real client                                                                | Not run                                                                         |
+| Surface                                               | Automated check                                                                          | Current evidence                                                                                                |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Calendar grid event                                   | Accessible button name and keyboard `Enter` activation                                   | Covered                                                                                                         |
+| Event list and details                                | `Tab` to event, `Enter` to open, named dialog, `Escape` to close, focus returns to event | Covered                                                                                                         |
+| Calendar grid, event list, event details              | `vitest-axe` automated accessibility scan                                                | Covered; no violations in the tested fixtures                                                                   |
+| Actual CSS layout at multiple widths                  | Hosted Chromium production-preview fixture at four viewports                             | PR #216 passed 12/12 hosted cases at tree `911027044f96463a06e7d42cd2371ecf333662f7`; synthetic components only |
+| Element Web and Element Desktop                       | Embedded in real clients against isolated pinned services                                | Not run; required beta evidence                                                                                 |
+| Mobile clients and formal screen-reader certification | Actual platform and assistive technology run                                             | Deferred beyond this beta                                                                                       |
 
 The automated tests use synthetic events and an in-memory calendar repository.
 For this worktree, all 14 tests in the three listed suites passed on
@@ -26,11 +29,12 @@ permission flow.
 
 ## Client and viewport test procedure
 
-Run this procedure against the release-candidate widget URL and the same
-disposable Matrix test deployment used for the release candidate. Use a test
-room and synthetic calendar events only; do not use personal calendars or
-production room data. The client must be able to load the widget and approve
-the capability request generated by
+Run this procedure with the candidate widget and the same isolated, pinned
+Matrix/Radicale/PostgreSQL test deployment used for candidate acceptance. Use
+a test room and synthetic calendar events only; do not use personal calendars
+or production room data. Test the actual Element Web and Desktop versions
+selected for the beta. Each client must load the widget and approve the
+capability request generated by
 `matrix-calendar-widget/src/widgetCapabilities.ts`. Record which capabilities
 the client displays and whether it allows the widget to proceed. Do not grant
 extra capabilities to make a failed check pass.
@@ -42,12 +46,9 @@ personal data, omit attendees and alarms, and isolate the test deployment from
 real notification channels.
 
 For browser clients, select the widget iframe in developer tools and evaluate
-the width measurements in that frame. For native clients, use the platform's
-remote web inspector when available; otherwise record the measurements as
-unavailable rather than estimating them. For each available client, record its
-exact app version, operating system, browser and version (where applicable),
-viewport in CSS pixels, browser zoom, screen reader and version (when tested),
-test date, and release-candidate commit. Check the following:
+the width measurements in that frame. Record each beta client's exact app
+version, operating system, browser and version, viewport in CSS pixels, test
+date, and candidate commit. Check the following:
 
 1. Open the calendar widget in a disposable room. Record whether the client
    loads the widget, presents its requested capabilities, and displays the
@@ -64,42 +65,43 @@ test date, and release-candidate commit. Check the following:
 4. Using only the keyboard, reach an event, activate it with `Enter`, move
    through the details dialog, close with `Escape`, and confirm focus returns
    to the event that opened it. Also test `Space` on the list event action.
-5. With the platform screen reader enabled, verify that the calendar event is
-   announced with its title and displayed time, and that the details dialog is
-   announced by its event title. Verify that Edit, Delete, and Close controls
-   are announced by name. Do not infer screen-reader support from the axe scan.
-6. At 200% browser zoom on desktop, repeat the list, month, and details checks.
-   Record the effective CSS viewport after zoom; check for clipped controls,
-   horizontal overflow, and keyboard access to the dialog actions.
+5. Formal screen-reader certification is deferred for this beta. The hosted
+   axe result does not establish screen-reader support; do not claim it.
+6. At 200% browser zoom on desktop, record any overflow or clipped controls
+   observed during the client run. This is additional evidence, not a
+   substitute for the required keyboard/focus flow.
 
-Use these viewport sizes for browser-based runs. For native mobile apps, record
-the device and effective CSS viewport reported by the embedded widget rather
-than substituting a desktop browser emulation result.
+Use these viewport sizes for browser-based runs. Element Web and Desktop must
+be checked in both a narrow embedded panel and a full-screen widget. Native
+mobile app checks are deferred; if later performed, record the device and
+effective CSS viewport reported by the embedded widget rather than
+substituting a desktop browser emulation result.
 
-| Profile         | CSS viewport |
-| --------------- | -----------: |
-| Narrow phone    |    320 × 640 |
-| Phone           |    390 × 844 |
-| Tablet portrait |   768 × 1024 |
-| Desktop         |   1280 × 800 |
+| Profile      | CSS viewport |
+| ------------ | -----------: |
+| Narrow panel |    320 × 640 |
+| Phone-sized  |    390 × 844 |
+| Tablet-sized |   768 × 1024 |
+| Full screen  |   1280 × 800 |
 
 ## Evidence status
 
 The hosted Chromium component fixture passed at the exact tree recorded in
-[browser validation](./browser-calendar-validation.md). No actual Element
-client or screen-reader run is recorded. The rows below keep that distinction
-visible; automated happy-dom and standalone-browser results do not validate a
-host client.
+[browser validation](./browser-calendar-validation.md). No actual Element Web
+or Desktop run is recorded. Automated happy-dom and standalone-browser results
+do not validate a host client. Mobile clients and formal screen-reader
+certification are outside the current beta scope.
 
-| Client target                      | Version / device  | Result       | Evidence                                                                                              |
-| ---------------------------------- | ----------------- | ------------ | ----------------------------------------------------------------------------------------------------- |
-| Element Web                        | Not recorded      | **Untested** | No live client run                                                                                    |
-| Element Desktop                    | Not recorded      | **Untested** | No live client run                                                                                    |
-| Element for Android                | Not recorded      | **Untested** | No live client run                                                                                    |
-| Element for iOS                    | Not recorded      | **Untested** | No live client run                                                                                    |
-| Browser layout at listed viewports | Synthetic fixture | **Passed**   | Hosted Chromium job, 8/8 list/month cases; see [browser validation](./browser-calendar-validation.md) |
+| Client target                      | Version / device  | Result       | Evidence                                                                                                                                        |
+| ---------------------------------- | ----------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Element Web                        | Not recorded      | **Untested** | Required beta target; no actual client run recorded                                                                                             |
+| Element Desktop                    | Not recorded      | **Untested** | Required beta target; no actual client run recorded                                                                                             |
+| Element for Android                | Not recorded      | **Deferred** | Outside this beta scope                                                                                                                         |
+| Element for iOS                    | Not recorded      | **Deferred** | Outside this beta scope                                                                                                                         |
+| Screen-reader certification        | Not recorded      | **Deferred** | Outside this beta scope; axe is not certification                                                                                               |
+| Browser layout at listed viewports | Synthetic fixture | **Passed**   | Hosted Chromium job, 12/12 cases at tree `911027044f96463a06e7d42cd2371ecf333662f7`; see [browser validation](./browser-calendar-validation.md) |
 
-For each actual-client row, replace “Not recorded” and “Untested” with the
-exact version/device, pass/fail result, measured dimensions, and a link to
-retained evidence. Keep failed and unavailable targets visible in the release
-record.
+For each beta target, replace “Not recorded” and “Untested” with the exact
+version, pass/fail result, measured dimensions, and a link to retained
+evidence. Keep failed and unavailable targets visible in the candidate record;
+do not change deferred targets into implied support.

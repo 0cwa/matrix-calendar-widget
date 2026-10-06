@@ -4,6 +4,9 @@
 - Date: 2026-10-01
 - Supersedes: ADR009's external-only implementation-location requirement and
   conventional Matrix-password compatibility path
+- Partially superseded by ADR037 only for the controlled-beta deployment
+  topology and associated existing-store gates, including the gate in
+  decision 9. Authentication and authorization decisions remain in force.
 - Preserves: ADR006, ADR010, ADR014, and ADR015 identity, principal, and
   authorization decisions
 
@@ -21,8 +24,11 @@ host or its image-override and `/data` replacement path.
 
 M6 issue #7 remains a separate gate for appservice-principal proof issuance,
 room authorization, and cross-room isolation. Room-target access remains
-disabled until that contract and the required authorization gates pass and an
-operator rehearses the custom image and existing `/data` store on the host.
+default-off until that contract and the required authorization gates pass.
+ADR037 selects a separate project-owned store for the controlled beta; if an
+operator selects the existing managed service or store, that path remains
+disabled until the custom-image and existing `/data` rehearsal passes. New-store
+acceptance does not establish compatibility with the managed host.
 
 ## Context
 
@@ -83,7 +89,9 @@ canonical calendar store.
    `/data/collections`; image replacement must leave the existing persistent
    CalDAV store canonical and intact. Do not claim etke-host compatibility
    until the image replacement path is confirmed and a deployment rehearsal
-   verifies the actual volume, network, config, and service lifecycle.
+   verifies the actual volume, network, config, and service lifecycle. ADR037
+   selects a separate store for the controlled beta; this existing-store path
+   and its gates apply if an operator selects that deployment.
 3. **Accept tagged OpenID credentials only.** The CalDAV Basic Auth password
    must use ADR009's `matrix-openid:` tag and carry a short-lived OpenID proof.
    Reject untagged values and all other password credentials before any
@@ -157,8 +165,10 @@ canonical calendar store.
    lookup and an `isAllowed=false` denial before provider/CalDAV I/O. M6 issue #7 owns the
    separate appservice-principal proof exchange and cross-room isolation
    acceptance. Room-target access remains disabled until #7 and the
-   ADR014/ADR015 authorization gates pass and the operator's custom-image
-   `/data` replacement path is verified.
+   ADR014/ADR015 authorization gates pass. Under ADR037, the controlled beta
+   uses a new project-owned store. If an operator selects the existing-store
+   path, keep that path disabled until the custom-image `/data` replacement
+   path is verified.
 
 ## Alternatives considered
 
@@ -248,10 +258,12 @@ supported Auth interface and does not add a new proxy identity protocol.
 - M6 issue #7 tests that actor, membership, power, and exact binding checks
   precede appservice proof minting and CalDAV operations, and validates
   cross-room isolation under the appservice principal.
-- M6 issue #7 real-Radicale tests prove the same `/data` collection store
-  remains visible after image replacement and room operations cannot select a
-  different room's collection.
+- For an existing-store/image-replacement deployment, M6 issue #7 real-Radicale
+  tests prove the same `/data` collection store remains visible after image
+  replacement and room operations cannot select a different room's collection.
 - A sentinel-token log test covers gateway, Radicale, Synapse, and Traefik.
-- The actual etke host's image override, `/data` persistence, network, config,
-  Traefik routing/logging, and upgrade/rollback procedure are documented and
-  rehearsed before production room-calendar access is enabled.
+- If the existing managed service/store is selected, its image override,
+  `/data` persistence, network, config, Traefik routing/logging, and
+  upgrade/rollback procedure are documented and rehearsed before room-calendar
+  access is enabled on that path. The controlled-beta new-store evidence does
+  not satisfy these gates.
