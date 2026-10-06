@@ -126,8 +126,12 @@ function encode(original, finalText) {
   const positions = new Map();
   for (let i = 0; i + gramSize <= original.length; i += 1) {
     const gram = original.slice(i, i + gramSize);
-    if (!positions.has(gram)) positions.set(gram, []);
-    positions.get(gram).push(i);
+    const occurrences = positions.get(gram);
+    if (occurrences) {
+      if (occurrences.length < 128) occurrences.push(i);
+    } else {
+      positions.set(gram, [i]);
+    }
   }
 
   const ops = [];
