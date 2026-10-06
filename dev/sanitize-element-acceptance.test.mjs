@@ -137,7 +137,15 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
         blockedExternalRequestCount: 0,
         homeserverHttpErrorCount: 0,
       }),
-      JSON.stringify({ phase: 'widget-a-sidebar-ready', status: 'passed' }),
+      JSON.stringify({ phase: 'widget-a-extension-open', status: 'passed' }),
+      JSON.stringify({
+        phase: 'widget-a-warning-not-required',
+        status: 'passed',
+      }),
+      JSON.stringify({
+        phase: 'widget-a-capabilities-approval',
+        status: 'passed',
+      }),
       JSON.stringify({
         phase: 'widget-a-identity-dialog-observed',
         status: 'passed',
@@ -177,7 +185,9 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
       `element-acceptance source_sha=${sourceSha}`,
       'phase=member-a-room-navigation status=passed',
       'phase=member-a-room-context status=passed matrix_user_matches=true matrix_room_known=true matrix_room_joined=true matrix_sync_state=SYNCING room_navigation_completed=true room_heading_ready=true room_heading_present=true room_name_matches=true room_id_matches=true blocked_external_request_count=0 homeserver_http_error_count=0',
-      'phase=widget-a-sidebar-ready status=passed',
+      'phase=widget-a-extension-open status=passed',
+      'phase=widget-a-warning-not-required status=passed',
+      'phase=widget-a-capabilities-approval status=passed',
       'phase=widget-a-identity-dialog-observed status=passed',
       'phase=widget-a-identity-approval status=passed',
       'phase=widget-a-iframe-attached status=passed',

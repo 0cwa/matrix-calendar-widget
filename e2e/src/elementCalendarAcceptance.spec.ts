@@ -19,6 +19,7 @@ import {
   expect,
   test,
   type BrowserContext,
+  type Locator,
   type Page,
   type Response,
 } from '@playwright/test';
@@ -61,7 +62,9 @@ type Phase =
   | 'member-a-room-context'
   | 'member-b-room-context'
   | 'outsider-room-context'
-  | 'widget-a-sidebar-ready'
+  | 'widget-a-extension-open'
+  | 'widget-a-warning-not-required'
+  | 'widget-a-capabilities-approval'
   | 'widget-a-identity-dialog-observed'
   | 'widget-a-identity-dialog-not-required'
   | 'widget-a-identity-approval'
@@ -120,6 +123,12 @@ type MemberARoomResult = {
   navigationCompleted: boolean;
   observation?: MemberARoomObservation;
   failureCode?: MemberARoomFailureCode;
+};
+
+type OpenCalendarWidgetOptions = {
+  expectWidgetWarning: boolean;
+  waitForCalendar?: boolean;
+  captureMemberADiagnostics?: boolean;
 };
 
 type HomeserverHttpFailures = {
@@ -237,7 +246,11 @@ test('Element Web members share events and enforce room authorization', async ({
       '/v1/calendar/events',
     );
     void firstRead.catch(() => undefined);
-    const frameA = await openCalendarWidget(elementA, pageA, false, true);
+    const frameA = await openCalendarWidget(elementA, pageA, {
+      expectWidgetWarning: false,
+      waitForCalendar: false,
+      captureMemberADiagnostics: true,
+    });
     activePhase = 'gateway-backed-read';
     const firstReadResponse = await firstRead;
     failureHttpStatus = firstReadResponse.status();
@@ -288,7 +301,9 @@ test('Element Web members share events and enforce room authorization', async ({
       'GET',
       '/v1/calendar/events',
     );
-    const frameB = await openCalendarWidget(elementB, pageB);
+    const frameB = await openCalendarWidget(elementB, pageB, {
+      expectWidgetWarning: true,
+    });
     const memberBReadResult = await memberBRead;
     expect(memberBReadResult.status()).toBe(200);
     record(activePhase, 'passed');
@@ -341,7 +356,10 @@ test('Element Web members share events and enforce room authorization', async ({
       'GET',
       '/v1/calendar/events',
     );
-    await openCalendarWidget(elementC, pageC, false);
+    await openCalendarWidget(elementC, pageC, {
+      expectWidgetWarning: false,
+      waitForCalendar: false,
+    });
     record(activePhase, 'passed');
 
     activePhase = 'outsider-room-widget-team-target';
@@ -633,9 +651,13 @@ async function openFixtureRoom(
   await page.goto(roomUrl.href);
 
   const element = new ElementWebPage(page);
-  await expect(element.roomNameText).toHaveText(roomName);
+  await expect(getPinnedElementRoomNameHeading(page)).toHaveText(roomName);
   expect(element.getCurrentRoomId()).toBe(roomId);
   return element;
+}
+
+function getPinnedElementRoomNameHeading(page: Page): Locator {
+  return page.locator('header.mx_RoomHeader').getByRole('heading');
 }
 
 async function openMemberARoomWithDiagnostics(
@@ -655,14 +677,15 @@ async function openMemberARoomWithDiagnostics(
   }
 
   const element = new ElementWebPage(page);
+  const roomNameHeading = getPinnedElementRoomNameHeading(page);
   let roomHeadingReady = false;
   if (navigationCompleted) {
     try {
-      await element.roomNameText.waitFor({
+      await roomNameHeading.waitFor({
         state: 'visible',
         timeout: 15_000,
       });
-      const headingText = await element.roomNameText.textContent({
+      const headingText = await roomNameHeading.textContent({
         timeout: 1_000,
       });
       roomHeadingReady = headingText?.trim() === roomName;
@@ -763,13 +786,14 @@ async function observeMemberARoom(
     },
     { expectedRoomId: roomId, expectedMatrixUserId: expectedUserId },
   );
-  const roomHeadingCount = await element.roomNameText.count().catch(() => 0);
+  const roomNameHeading = getPinnedElementRoomNameHeading(page);
+  const roomHeadingCount = await roomNameHeading.count().catch(() => 0);
   const roomHeadingPresent =
     roomHeadingCount > 0 &&
-    (await element.roomNameText.isVisible().catch(() => false));
+    (await roomNameHeading.isVisible().catch(() => false));
   const roomNameMatches =
     roomHeadingCount > 0 &&
-    (await element.roomNameText
+    (await roomNameHeading
       .first()
       .evaluate(
         (heading, expectedName) =>
@@ -844,15 +868,32 @@ function recordJourneyFailure(
 async function openCalendarWidget(
   element: ElementWebPage,
   page: Page,
-  waitForCalendar = true,
-  captureMemberADiagnostics = false,
+  {
+    expectWidgetWarning,
+    waitForCalendar = true,
+    captureMemberADiagnostics = false,
+  }: OpenCalendarWidgetOptions,
 ) {
   if (captureMemberADiagnostics) {
-    activePhase = 'widget-a-sidebar-ready';
+    activePhase = 'widget-a-extension-open';
   }
-  await element.showWidgetInSidebar('Matrix Calendar');
+  await openPinnedElementWidget(page, 'Matrix Calendar');
   if (captureMemberADiagnostics) {
     record(activePhase, 'passed');
+    if (!expectWidgetWarning) activePhase = 'widget-a-warning-not-required';
+  }
+  if (expectWidgetWarning) {
+    await element.approveWidgetWarning();
+    if (captureMemberADiagnostics) record(activePhase, 'passed');
+  } else if (captureMemberADiagnostics) {
+    record(activePhase, 'passed');
+  }
+  if (captureMemberADiagnostics) {
+    activePhase = 'widget-a-capabilities-approval';
+  }
+  await element.approveWidgetCapabilities();
+  if (captureMemberADiagnostics) record(activePhase, 'passed');
+  if (captureMemberADiagnostics) {
     activePhase = 'widget-a-identity-approval';
   }
   const identityContinue = page
@@ -900,6 +941,17 @@ async function openCalendarWidget(
       .waitFor();
   }
   return frame;
+}
+
+async function openPinnedElementWidget(
+  page: Page,
+  widgetName: string,
+): Promise<void> {
+  const roomHeader = page.locator('header.mx_RoomHeader');
+  const rightPanel = page.getByRole('complementary');
+  await roomHeader.getByRole('button', { name: 'Room info' }).click();
+  await rightPanel.getByRole('menuitem', { name: 'Extensions' }).click();
+  await rightPanel.getByRole('button', { name: widgetName }).click();
 }
 
 async function openEventEditor(
