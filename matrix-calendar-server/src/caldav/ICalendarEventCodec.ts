@@ -1737,7 +1737,8 @@ function isValidNegativeAlarmDuration(value: string): boolean {
   const dateDuration = /^(\d+)D(?:T(.+))?$/i.exec(durationValue);
   if (dateDuration) {
     return (
-      dateDuration[2] === undefined || isValidAlarmTimeDuration(dateDuration[2])
+      dateDuration[2] === undefined ||
+      isValidAlarmTimeDuration(`T${dateDuration[2]}`)
     );
   }
 
@@ -1826,7 +1827,8 @@ function setDisplayAlarmTrigger(
   trigger: CalendarEventDisplayAlarm['trigger'],
 ): void {
   if ('type' in trigger) {
-    property.setParameter('value', 'DATE-TIME');
+    // ical.js emits VALUE=DATE-TIME for a date-time value when serializing.
+    property.removeParameter('value');
     property.removeParameter('related');
     property.setValue(ICAL.Time.fromDateTimeString(trigger.value));
     return;
