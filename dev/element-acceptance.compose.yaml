@@ -39,7 +39,7 @@ services:
       REACT_APP_API_BASE_URL: http://127.0.0.1:3000
       REACT_APP_HOME_SERVER_URL: http://127.0.0.1:8008
     ports:
-      - '127.0.0.1:8080:80'
+      - '127.0.0.1:8080:8080'
 
   element:
     image: ghcr.io/element-hq/element-web:v1.12.30@sha256:9189d2871ecc9ba8a79a1a94c29c4696648fbaa7a6979092919d9b18d0f1ae09
