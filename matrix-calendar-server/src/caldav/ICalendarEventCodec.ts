@@ -656,11 +656,7 @@ export class ParsedICalendarEvent {
             withRawAttachments,
             this.sourceICalendar,
           );
-    if (
-      hasAlarmPatch &&
-      explicitLinkPatchesAreNoOp &&
-      !veventContentChanged
-    ) {
+    if (hasAlarmPatch && explicitLinkPatchesAreNoOp && !veventContentChanged) {
       return { event: this.event, icalendar: this.sourceICalendar };
     }
     return { event, icalendar };

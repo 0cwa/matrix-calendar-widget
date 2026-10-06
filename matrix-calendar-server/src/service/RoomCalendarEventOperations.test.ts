@@ -1102,7 +1102,6 @@ describe('RoomCalendarEventOperations', () => {
       new Headers(fetchMock.mock.calls[1][1]?.headers).get('If-Match'),
     ).toBe('"room-v1"');
   });
-
 });
 
 function access(

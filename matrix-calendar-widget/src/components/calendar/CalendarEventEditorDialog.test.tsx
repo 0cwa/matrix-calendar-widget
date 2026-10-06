@@ -2351,9 +2351,7 @@ describe('<CalendarEventEditorDialog />', () => {
         'Enter a valid UTC date and time in YYYY-MM-DDTHH:mm:ssZ format.',
       ),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Create event' }),
-    ).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create event' })).toBeDisabled();
 
     fireEvent.change(
       screen.getByRole('textbox', { name: 'Exact time (UTC)' }),

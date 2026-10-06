@@ -460,9 +460,7 @@ describe('ICalendarEventCodec conference authoring', () => {
       expect(changed.icalendar).toContain(alarmLines);
       expect(changed.event.alarm).toEqual(parsedAlarm);
       if (conference.action === 'set') {
-        expect(changed.icalendar).toContain(
-          'https://meet.example.test/next',
-        );
+        expect(changed.icalendar).toContain('https://meet.example.test/next');
         expect(changed.icalendar).not.toContain(
           'https://meet.example.test/room',
         );
@@ -471,7 +469,6 @@ describe('ICalendarEventCodec conference authoring', () => {
       }
     },
   );
-
 });
 
 function recurringCalendarWithConference(conference: string): string {

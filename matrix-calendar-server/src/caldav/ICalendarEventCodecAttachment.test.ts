@@ -720,5 +720,4 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
       ]);
     },
   );
-
 });
