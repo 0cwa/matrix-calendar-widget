@@ -53,6 +53,7 @@ import { CalendarToolbar } from '../src/components/calendar/CalendarToolbar';
 import { LocalizationProvider } from '../src/components/common/LocalizationProvider';
 import type { ViewType } from '../src/components/meetings/MeetingsNavigation';
 import { registerDateRangeFormatter } from '../src/dateRangeFormatter';
+import { setLocale } from '../src/lib/locale';
 
 type LargeCalendarRenderMeasurement = {
   status: 'ready' | 'timeout';
@@ -432,6 +433,7 @@ async function start() {
     resources: { en: { translation: en } },
   });
   registerDateRangeFormatter(i18next);
+  setLocale(i18next.language);
   const largeCalendarMode =
     new URLSearchParams(window.location.search).get('mode') ===
     'large-calendar';
