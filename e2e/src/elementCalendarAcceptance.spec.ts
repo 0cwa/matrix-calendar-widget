@@ -51,6 +51,11 @@ type Fixture = {
 
 type Phase =
   | 'member-a-authenticated'
+  | 'member-a-origin-navigation'
+  | 'member-a-credentials-seeded'
+  | 'member-a-root-navigation'
+  | 'member-a-session-observed'
+  | 'member-a-navigation-ready'
   | 'member-b-authenticated'
   | 'outsider-authenticated'
   | 'outsider-room-context'
@@ -66,6 +71,15 @@ type Phase =
   | 'stale-etag-conflict'
   | 'canonical-read-after-denial'
   | 'browser-egress';
+
+type MatrixSyncState =
+  | 'ERROR'
+  | 'PREPARED'
+  | 'RECONNECTING'
+  | 'STOPPED'
+  | 'SYNCING'
+  | 'CATCHUP'
+  | 'UNKNOWN';
 
 let fixture: Fixture;
 
@@ -124,7 +138,7 @@ test('Element Web members share events and enforce room authorization', async ({
 
     activePhase = 'member-a-authenticated';
     contextA = await makeContext();
-    pageA = await authenticateInElement(contextA, fixture.users.memberA);
+    pageA = await authenticateInElement(contextA, fixture.users.memberA, true);
     record(activePhase, 'passed');
 
     activePhase = 'member-b-authenticated';
@@ -347,9 +361,24 @@ function readFixture(): Fixture {
 async function authenticateInElement(
   context: BrowserContext,
   user: User,
+  captureMemberADiagnostics = false,
 ): Promise<Page> {
   const page = await context.newPage();
-  await page.goto(new URL('/welcome/images/logo.svg', fixture.elementUrl).href);
+  if (captureMemberADiagnostics) {
+    activePhase = 'member-a-origin-navigation';
+  }
+  const originResponse = await page.goto(
+    new URL('/welcome/images/logo.svg', fixture.elementUrl).href,
+  );
+  if (captureMemberADiagnostics) {
+    const originMatchesElement =
+      new URL(page.url()).origin === new URL(fixture.elementUrl).origin;
+    record(activePhase, 'passed', originResponse?.status(), undefined, {
+      originMatchesElement,
+    });
+    activePhase = 'member-a-credentials-seeded';
+  }
+
   await page.evaluate(
     ({ homeserverUrl, credentials }) => {
       window.localStorage.setItem('mx_hs_url', homeserverUrl);
@@ -373,11 +402,94 @@ async function authenticateInElement(
     },
     { homeserverUrl: fixture.homeserverUrl, credentials: user },
   );
-  await page.goto(fixture.elementUrl);
-  await page
+  if (captureMemberADiagnostics) {
+    record(activePhase, 'passed');
+    activePhase = 'member-a-root-navigation';
+  }
+
+  const rootResponse = await page.goto(fixture.elementUrl);
+  if (captureMemberADiagnostics) {
+    record(activePhase, 'passed', rootResponse?.status());
+    activePhase = 'member-a-session-observed';
+  }
+
+  if (captureMemberADiagnostics) {
+    activePhase = 'member-a-navigation-ready';
+  }
+  const addButton = page
     .getByRole('navigation')
-    .getByRole('button', { name: 'Add', exact: true })
-    .waitFor();
+    .getByRole('button', { name: 'Add', exact: true });
+  if (captureMemberADiagnostics) {
+    let navigationReady = true;
+    try {
+      await addButton.waitFor();
+    } catch {
+      navigationReady = false;
+    }
+
+    const sessionObservation = await page
+      .evaluate((expectedUserId) => {
+        type MatrixClient = {
+          getUserId?: () => string | null;
+          getSyncState?: () => string | null;
+        };
+        type MatrixClientPeg = { get?: () => MatrixClient | undefined };
+        let matrixClientPeg: MatrixClientPeg | undefined;
+        let matrixClient: MatrixClient | undefined;
+        try {
+          matrixClientPeg = (
+            window as unknown as {
+              mxMatrixClientPeg?: MatrixClientPeg;
+            }
+          ).mxMatrixClientPeg;
+          matrixClient = matrixClientPeg?.get?.();
+        } catch {
+          // Report only the bounded state below; never return exception text.
+        }
+        const knownSyncStates = new Set([
+          'ERROR',
+          'PREPARED',
+          'RECONNECTING',
+          'STOPPED',
+          'SYNCING',
+          'CATCHUP',
+        ]);
+        let matrixUserMatches = false;
+        let matrixSyncState: MatrixSyncState = 'UNKNOWN';
+        try {
+          matrixUserMatches = matrixClient?.getUserId?.() === expectedUserId;
+        } catch {
+          // Report only bounded booleans and known sync states.
+        }
+        try {
+          const rawSyncState = matrixClient?.getSyncState?.();
+          if (
+            typeof rawSyncState === 'string' &&
+            knownSyncStates.has(rawSyncState)
+          ) {
+            matrixSyncState = rawSyncState as MatrixSyncState;
+          }
+        } catch {
+          // Report only bounded booleans and known sync states.
+        }
+        return {
+          matrixClientHookPresent: Boolean(matrixClientPeg),
+          matrixClientPresent: Boolean(matrixClient),
+          matrixUserMatches,
+          matrixSyncState,
+        };
+      }, user.userId)
+      .catch(() => undefined);
+    recordMemberASessionObservation(sessionObservation);
+
+    if (!navigationReady) {
+      throw new Error('Element navigation did not become ready');
+    }
+    record(activePhase, 'passed');
+    activePhase = 'member-a-authenticated';
+  } else {
+    await addButton.waitFor();
+  }
   return page;
 }
 
@@ -440,6 +552,7 @@ function record(
   status: 'started' | 'passed' | 'failed',
   httpStatus?: number,
   count?: number,
+  extra?: { originMatchesElement: boolean },
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   if (!stageFile) throw new Error('Element acceptance fixture unavailable');
@@ -450,6 +563,30 @@ function record(
       status,
       ...(httpStatus === undefined ? {} : { httpStatus }),
       ...(count === undefined ? {} : { count }),
+      ...extra,
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+}
+
+function recordMemberASessionObservation(
+  observation:
+    | {
+        matrixClientHookPresent: boolean;
+        matrixClientPresent: boolean;
+        matrixUserMatches: boolean;
+        matrixSyncState: MatrixSyncState;
+      }
+    | undefined,
+) {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase: 'member-a-session-observed',
+      status: observation ? 'passed' : 'unavailable',
+      ...(observation ?? {}),
     })}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );

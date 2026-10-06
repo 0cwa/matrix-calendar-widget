@@ -29,6 +29,11 @@ const PHASES = new Set([
   'bot-registration',
   'bot-login',
   'member-a-authenticated',
+  'member-a-origin-navigation',
+  'member-a-credentials-seeded',
+  'member-a-root-navigation',
+  'member-a-session-observed',
+  'member-a-navigation-ready',
   'member-b-authenticated',
   'outsider-authenticated',
   'outsider-room-context',
@@ -81,6 +86,15 @@ const CONTAINER_HEALTH_STATES = new Set([
   'none',
   'unavailable',
 ]);
+const MATRIX_SYNC_STATES = new Set([
+  'ERROR',
+  'PREPARED',
+  'RECONNECTING',
+  'STOPPED',
+  'SYNCING',
+  'CATCHUP',
+  'UNKNOWN',
+]);
 const VERSION_FIELDS = new Set([
   'elementWebConfiguredTag',
   'synapseConfiguredTag',
@@ -96,6 +110,11 @@ const ALLOWED_KEYS = new Set([
   'status',
   'httpStatus',
   'count',
+  'originMatchesElement',
+  'matrixClientHookPresent',
+  'matrixClientPresent',
+  'matrixUserMatches',
+  'matrixSyncState',
   'failureCode',
   'missingModuleKind',
   'missingDependency',
@@ -261,6 +280,44 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       throw new Error('invalid element acceptance summary');
     }
 
+    const sessionObservationKeys = [
+      'matrixClientHookPresent',
+      'matrixClientPresent',
+      'matrixUserMatches',
+      'matrixSyncState',
+    ];
+    const hasSessionObservation = sessionObservationKeys.some((key) =>
+      Object.hasOwn(record, key),
+    );
+    const validSessionObservation =
+      record.phase !== 'member-a-session-observed' ||
+      (record.status === 'passed' && hasSessionObservation) ||
+      (record.status === 'unavailable' && !hasSessionObservation);
+    if (
+      (hasSessionObservation &&
+        (record.phase !== 'member-a-session-observed' ||
+          record.status !== 'passed' ||
+          typeof record.matrixClientHookPresent !== 'boolean' ||
+          typeof record.matrixClientPresent !== 'boolean' ||
+          typeof record.matrixUserMatches !== 'boolean' ||
+          !MATRIX_SYNC_STATES.has(record.matrixSyncState))) ||
+      !validSessionObservation
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    if (
+      (Object.hasOwn(record, 'originMatchesElement') &&
+        (record.phase !== 'member-a-origin-navigation' ||
+          record.status !== 'passed' ||
+          typeof record.originMatchesElement !== 'boolean')) ||
+      (record.phase === 'member-a-origin-navigation' &&
+        record.status === 'passed' &&
+        !Object.hasOwn(record, 'originMatchesElement'))
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
     phases.set(record.phase, record);
   }
 
@@ -290,6 +347,17 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     }
     if (Object.hasOwn(record, 'count')) {
       fields.push(`count=${record.count}`);
+    }
+    if (Object.hasOwn(record, 'originMatchesElement')) {
+      fields.push(`origin_matches_element=${record.originMatchesElement}`);
+    }
+    if (Object.hasOwn(record, 'matrixClientHookPresent')) {
+      fields.push(
+        `matrix_client_hook_present=${record.matrixClientHookPresent}`,
+      );
+      fields.push(`matrix_client_present=${record.matrixClientPresent}`);
+      fields.push(`matrix_user_matches=${record.matrixUserMatches}`);
+      fields.push(`matrix_sync_state=${record.matrixSyncState}`);
     }
     if (Object.hasOwn(record, 'failureCode')) {
       fields.push(`failure_code=${record.failureCode}`);

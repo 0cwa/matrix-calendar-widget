@@ -70,6 +70,115 @@ test('emits bounded setup substeps and numeric failure details', () => {
   );
 });
 
+test('emits bounded member A navigation and session observations', () => {
+  const summary = sanitizeElementAcceptance(
+    [
+      JSON.stringify({
+        phase: 'member-a-origin-navigation',
+        status: 'passed',
+        httpStatus: 404,
+        originMatchesElement: true,
+      }),
+      JSON.stringify({
+        phase: 'member-a-credentials-seeded',
+        status: 'passed',
+      }),
+      JSON.stringify({
+        phase: 'member-a-root-navigation',
+        status: 'passed',
+        httpStatus: 200,
+      }),
+      JSON.stringify({
+        phase: 'member-a-session-observed',
+        status: 'passed',
+        matrixClientHookPresent: true,
+        matrixClientPresent: true,
+        matrixUserMatches: false,
+        matrixSyncState: 'SYNCING',
+      }),
+      JSON.stringify({
+        phase: 'member-a-navigation-ready',
+        status: 'failed',
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=member-a-origin-navigation status=passed http_status=404 origin_matches_element=true',
+      'phase=member-a-credentials-seeded status=passed',
+      'phase=member-a-root-navigation status=passed http_status=200',
+      'phase=member-a-session-observed status=passed matrix_client_hook_present=true matrix_client_present=true matrix_user_matches=false matrix_sync_state=SYNCING',
+      'phase=member-a-navigation-ready status=failed',
+      '',
+    ].join('\n'),
+  );
+});
+
+test('keeps an unavailable Matrix session sample non-gating and empty', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'member-a-session-observed',
+      status: 'unavailable',
+    }),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    `element-acceptance source_sha=${sourceSha}\nphase=member-a-session-observed status=unavailable\n`,
+  );
+});
+
+test('rejects session details outside the fixed observation schema', () => {
+  const rejectedRecords = [
+    {
+      phase: 'member-a-session-observed',
+      status: 'passed',
+      matrixClientHookPresent: true,
+      matrixClientPresent: true,
+      matrixUserMatches: true,
+      matrixSyncState: '@member:private-server',
+    },
+    {
+      phase: 'member-a-authenticated',
+      status: 'passed',
+      matrixClientHookPresent: true,
+      matrixClientPresent: true,
+      matrixUserMatches: true,
+      matrixSyncState: 'SYNCING',
+    },
+    {
+      phase: 'member-a-origin-navigation',
+      status: 'passed',
+      httpStatus: 200,
+      originMatchesElement: 'https://private.example',
+    },
+    {
+      phase: 'member-a-session-observed',
+      status: 'passed',
+      matrixClientHookPresent: true,
+      matrixClientPresent: true,
+      matrixUserMatches: true,
+    },
+    {
+      phase: 'member-a-session-observed',
+      status: 'unavailable',
+      matrixClientHookPresent: false,
+    },
+  ];
+
+  for (const record of rejectedRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
 test('emits allowlisted gateway container state without exposing its error text', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify({
