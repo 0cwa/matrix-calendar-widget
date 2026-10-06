@@ -51,7 +51,6 @@ even when opaque or exhausted revision metadata cannot be updated. This does
 not add attachment authoring, multiple conferences, RTC provisioning, or
 instance/following conference operations.
 
-
 PR #220 (ADR040) adds selected-occurrence title, description, and location
 editing through sparse set/inherit operations. Explicit empty description and
 location remain distinct from inheritance; an untouched imported empty title
