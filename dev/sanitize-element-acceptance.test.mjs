@@ -241,6 +241,23 @@ test('emits and constrains pinned widget-control failure observations', () => {
       '',
     ].join('\n'),
   );
+  const duplicateControlSummary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'widget-a-room-info-button',
+      status: 'failed',
+      count: 2,
+      controlVisible: true,
+    }),
+    sourceSha,
+  );
+  assert.equal(
+    duplicateControlSummary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=widget-a-room-info-button status=failed count=2 control_visible=true',
+      '',
+    ].join('\n'),
+  );
   assert.throws(
     () =>
       sanitizeElementAcceptance(

@@ -979,7 +979,7 @@ async function openPinnedElementWidget(
   const roomHeader = page.locator('header.mx_RoomHeader');
   const rightPanel = page.getByRole('complementary');
   await clickPinnedWidgetControl(
-    roomHeader.getByRole('button', { name: 'Room info' }),
+    roomHeader.locator('button.mx_RoomHeader_infoWrapper'),
     captureMemberADiagnostics ? 'widget-a-room-info-button' : undefined,
   );
   await clickPinnedWidgetControl(
@@ -1010,11 +1010,11 @@ async function clickPinnedWidgetControl(
   activePhase = diagnosticPhase;
   await control.waitFor({ state: 'visible', timeout: 8_000 }).catch(() => {});
   const count = Math.min(await control.count(), 2);
-  const controlVisible =
-    count === 1 && (await control.isVisible().catch(() => false));
+  const visibleControl = control.filter({ visible: true });
+  const visibleCount = Math.min(await visibleControl.count(), 2);
+  const controlVisible = visibleCount > 0;
   const panelPresent = panel
-    ? (await panel.count()) === 1 &&
-      (await panel.isVisible().catch(() => false))
+    ? (await panel.filter({ visible: true }).count()) > 0
     : undefined;
   pendingPinnedControlObservation = {
     phase: diagnosticPhase,
@@ -1023,11 +1023,16 @@ async function clickPinnedWidgetControl(
     ...(panelPresent === undefined ? {} : { panelPresent }),
   };
 
-  if (count !== 1 || !controlVisible || panelPresent === false) {
+  if (
+    count !== 1 ||
+    visibleCount !== 1 ||
+    !controlVisible ||
+    panelPresent === false
+  ) {
     throw new Error('Pinned Element widget control unavailable');
   }
 
-  await control.click({ timeout: 8_000 });
+  await visibleControl.click({ timeout: 8_000 });
   record(diagnosticPhase, 'passed', undefined, count, {
     controlVisible,
     ...(panelPresent === undefined ? {} : { panelPresent }),
