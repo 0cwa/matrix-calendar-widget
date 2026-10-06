@@ -4261,13 +4261,30 @@ END:VCALENDAR`,
       );
       const parsed = codec.parse('team', 'equivalent-duration.ics', source);
 
-      expect(parsed.event.alarm?.trigger).toEqual({
-        weeks: 0,
-        days: 0,
-        hours: 0,
-        minutes: 15,
-        seconds: 0,
+      const alarm = {
+        action: 'display' as const,
+        trigger: { weeks: 0, days: 0, hours: 0, minutes: 15, seconds: 0 },
+      };
+      expect(parsed.event.alarm?.trigger).toEqual(alarm.trigger);
+
+      const unchanged = parsed.applyPatch({ alarm });
+      expect(unchanged.icalendar).toBe(source);
+      expect(unchanged.event.revision).toEqual(parsed.event.revision);
+      expect(unchanged.event.alarm?.uid).toBeUndefined();
+
+      const unrelatedEdit = parsed.applyPatch({
+        title: 'Retitled while preserving alarm',
+        alarm,
       });
+      expect(unrelatedEdit.icalendar).toContain(`TRIGGER:${trigger}`);
+      expect(unrelatedEdit.event.alarm?.uid).toBeUndefined();
+      expect(
+        codec.parse(
+          'team',
+          'equivalent-duration.ics',
+          unrelatedEdit.icalendar,
+        ).event.alarm?.trigger,
+      ).toEqual(alarm.trigger);
     },
   );
 
@@ -4572,6 +4589,26 @@ END:VCALENDAR`,
       ICAL.Component.fromString(source).getAllSubcomponents('vevent').length,
     );
     expect(renamed.event.unsupportedAlarm).toBe(true);
+  });
+
+  it('keeps VALARM child components opaque during unrelated edits', () => {
+    const nestedAlarm = alarmEventSource().replace(
+      'END:VALARM',
+      [
+        'BEGIN:X-ALARM-CHILD',
+        'X-CHILD-METADATA:preserve-child',
+        'END:X-ALARM-CHILD',
+        'END:VALARM',
+      ].join('\r\n'),
+    );
+    const parsed = codec.parse('team', 'nested-alarm.ics', nestedAlarm);
+    expect(parsed.event.alarm).toBeUndefined();
+    expect(parsed.event.unsupportedAlarm).toBe(true);
+
+    const edited = parsed.applyPatch({ title: 'Retitled with opaque alarm' });
+    expect(edited.icalendar).toContain('BEGIN:X-ALARM-CHILD');
+    expect(edited.icalendar).toContain('X-CHILD-METADATA:preserve-child');
+    expect(edited.icalendar).toContain('END:X-ALARM-CHILD');
   });
 
   it('rejects malformed alarm writes without partially changing an event', () => {

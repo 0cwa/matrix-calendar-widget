@@ -384,6 +384,15 @@ export class ParsedICalendarEvent {
         setRecurrenceRule(vevent, recurrenceWrite?.rrule);
       }
     }
+    const alarmWriteIsNoOp =
+      hasAlarmPatch &&
+      patch.alarm !== undefined &&
+      !isCalendarEventAlarmRemoval(patch.alarm) &&
+      this.event.alarm !== undefined &&
+      displayAlarmTriggersEqual(
+        this.event.alarm.trigger,
+        patch.alarm.trigger,
+      );
     const writtenAlarmUid = hasAlarmPatch
       ? setDisplayAlarm(
           calendar,
@@ -500,12 +509,13 @@ export class ParsedICalendarEvent {
       conferencePropertiesByOutputEvent,
       forceConferenceReplacement,
     );
-    const icalendar = hasAlarmPatch
-      ? conferenceRestored
-      : restoreVeventAlarmComponents(
-          conferenceRestored,
-          this.sourceICalendar,
-        );
+    const icalendar =
+      hasAlarmPatch && !alarmWriteIsNoOp
+        ? conferenceRestored
+        : restoreVeventAlarmComponents(
+            conferenceRestored,
+            this.sourceICalendar,
+          );
     if (hasAlarmPatch && !veventContentChanged) {
       return { event: this.event, icalendar: this.sourceICalendar };
     }
@@ -1605,6 +1615,7 @@ function readDisplayAlarm(
     descriptions.length !== 1 ||
     component.hasProperty('repeat') ||
     component.hasProperty('duration') ||
+    component.getAllSubcomponents().length > 0 ||
     textValue(actionProperties[0].getFirstValue())?.toUpperCase() !== 'DISPLAY'
   ) {
     return undefined;
@@ -1786,9 +1797,16 @@ function setDisplayAlarm(
     if (!triggerProperty || !currentAlarm) {
       throw unsupportedAlarmPatch();
     }
-    setDisplayAlarmTrigger(triggerProperty, alarm.trigger);
-    const uid = currentAlarm.uid ?? createAlarmUid(calendar);
-    if (!currentAlarm.uid) {
+    const alarmChanged = !displayAlarmTriggersEqual(
+      currentAlarm.trigger,
+      alarm.trigger,
+    );
+    if (alarmChanged) {
+      setDisplayAlarmTrigger(triggerProperty, alarm.trigger);
+    }
+    let uid = currentAlarm.uid;
+    if (alarmChanged && uid === undefined) {
+      uid = createAlarmUid(calendar);
       component.addPropertyWithValue('uid', uid);
     }
     return uid;
@@ -1826,6 +1844,23 @@ function setDisplayAlarmTrigger(
       ...trigger,
       isNegative: true,
     }),
+  );
+}
+
+function displayAlarmTriggersEqual(
+  left: CalendarEventDisplayAlarm['trigger'],
+  right: CalendarEventDisplayAlarm['trigger'],
+): boolean {
+  if ('type' in left || 'type' in right) {
+    return 'type' in left && 'type' in right && left.value === right.value;
+  }
+
+  return (
+    left.weeks === right.weeks &&
+    left.days === right.days &&
+    left.hours === right.hours &&
+    left.minutes === right.minutes &&
+    left.seconds === right.seconds
   );
 }
 
