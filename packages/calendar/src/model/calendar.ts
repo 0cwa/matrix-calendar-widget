@@ -180,11 +180,49 @@ export type CalendarEventTransparency = 'opaque' | 'transparent';
  * Supported timing and cancellation data from one detached VEVENT in a
  * recurring CalDAV resource.
  */
+export type CalendarEventOccurrenceTextField =
+  | 'title'
+  | 'description'
+  | 'location';
+
+export type CalendarEventOccurrenceTextOperation =
+  | { action: 'set'; value: string }
+  | { action: 'inherit' };
+
+/** Sparse text/timing changes for exactly one original occurrence identity. */
+export type CalendarEventOccurrenceWrite =
+  | {
+      /** Legacy timing-only operation retained for existing clients. */
+      action: 'set-timing';
+      recurrenceId: CalendarEventDateTime;
+      timing: CalendarEventRecurrenceTiming;
+      viewerTimezone: string;
+    }
+  | {
+      /** Set selected instance text fields; timing is optional. */
+      action: 'set-fields';
+      recurrenceId: CalendarEventDateTime;
+      timing?: CalendarEventRecurrenceTiming;
+      viewerTimezone: string;
+      title?: CalendarEventOccurrenceTextOperation;
+      description?: CalendarEventOccurrenceTextOperation;
+      location?: CalendarEventOccurrenceTextOperation;
+    };
+
+/**
+ * Supported values from one detached VEVENT. Missing text fields inherit the
+ * master property. Unsupported text property shapes are identified per field
+ * and remain preserved without authoring them.
+ */
 export type CalendarEventRecurrenceOverride = {
   /** Original occurrence identity, even when the instance has moved. */
   recurrenceId: CalendarEventDateTime;
   timing?: CalendarEventRecurrenceTiming;
   status?: CalendarEventStatus;
+  title?: string;
+  description?: string;
+  location?: string;
+  unsupportedText?: Partial<Record<CalendarEventOccurrenceTextField, true>>;
 };
 
 /**
@@ -207,10 +245,11 @@ export type CalendarEventRecurrence = {
  * only the master rule; EXDATE operations target one original occurrence
  * identity; RDATE operations add/remove point values or remove one exact
  * PERIOD value, add one positive-duration or explicit-end PERIOD, or
- * atomically replace one exact existing PERIOD value. Occurrence timing writes
+ * atomically replace one exact existing PERIOD value. Occurrence writes
  * change one original recurrence identity without changing the master event;
- * following timing writes materialize a bounded finite suffix in the same
- * resource.
+ * they may set timing and sparse title/description/location values, including
+ * explicit inheritance. Following timing writes materialize a bounded finite
+ * suffix in the same resource.
  */
 export type CalendarEventRecurrenceWrite =
   | {
@@ -226,13 +265,7 @@ export type CalendarEventRecurrenceWrite =
     }
   | {
       /** Change timing for exactly one supported original recurrence identity. */
-      occurrence: {
-        action: 'set-timing';
-        recurrenceId: CalendarEventDateTime;
-        timing: CalendarEventRecurrenceTiming;
-        /** Required projection context for validating DATE/floating intervals. */
-        viewerTimezone: string;
-      };
+      occurrence: CalendarEventOccurrenceWrite;
     }
   | {
       /** Apply timing to one supported finite recurrence suffix. */

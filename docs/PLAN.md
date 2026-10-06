@@ -165,6 +165,13 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
         timezone. Reject stale, duplicate, malformed, or colliding values;
         preserve siblings and exact-source supported no-ops.
 - [ ] Broader RECURRENCE-ID instance property editing beyond timing.
+  - [x] Edit selected-occurrence title, description, and location with sparse
+        set/inherit operations, preserving explicit empty values and original
+        typed recurrence identity. Text-only overrides use validated projected
+        timing; unchanged saves do not create a detached component. Preserve
+        opaque parameters and sibling data; reject unsupported selected fields,
+        alarms, and ambiguous recurrence. Following edits remain timing-only
+        (PR #220, ADR040).
 - [x] Offer occurrence, this-and-following, and entire-series edit scopes for
       supported timing operations. ADR034 bounds following edits to one
       resource and a supported COUNT series of at most 128 members, with no
@@ -270,16 +277,18 @@ preserved RFC DURATION components, and status. Recurrence DATE-TIME values
 retain their DATE, named-TZID, UTC, or floating kind and exact local wall time;
 PR #120 implements master floating DTSTART and DTEND as independent endpoint
 tags, preserving local wall time without TZID or UTC conversion. The widget
-projects bounded read-only occurrences from the typed model, applies detached
-timing/status overrides, and clips the result before rendering either view.
+projects bounded occurrences from the typed model, applies detached timing,
+status, and supported text overrides, and clips the result before rendering
+either view.
 The widget displays timed events in the viewer's local timezone:
 floating times are interpreted there, while named-TZID and UTC times keep their
 instant and are converted from their saved zone. This covers details, lists,
 visible and accessible calendar-cell labels, grid sorting, and the in-memory
 range filter. Projection occurrence IDs keep selected detail timing and
-recurrence identity separate from their source resource. Ordinary edit and
-delete actions remain series-level; skip/restore changes only the matching
-EXDATE for one projected occurrence. A moved override is identified by its
+recurrence identity separate from their source resource. Delete actions remain series-level. Supported edits offer explicit occurrence,
+series, and bounded following scopes; selected-occurrence text edits use
+ADR040 while following edits remain timing-only. Skip/restore changes only the
+matching EXDATE for one projected occurrence. A moved override is identified by its
 original RECURRENCE-ID. Unsupported or malformed recurrence is hidden with a
 diagnostic. The bounded projector resolves source and viewer
 IANA timezones only when their exact identifiers exist in the bundled 2026d

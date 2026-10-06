@@ -430,7 +430,7 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.click(
       await screen.findByRole('button', { name: 'This occurrence only' }),
     );
-    expect(screen.queryByRole('textbox', { name: /Title/i })).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Title' })).toBeDisabled();
     expect(
       screen.queryByRole('textbox', { name: 'Conference URL' }),
     ).toBeNull();
@@ -470,6 +470,87 @@ describe('<CalendarEventEditorDialog />', () => {
     expect(onSaved).toHaveBeenCalledWith(
       expect.objectContaining({ recurrence: saved.recurrence }),
       expect.objectContaining({ timing: expect.any(Object) }),
+    );
+  });
+
+  it('edits selected-occurrence text sparsely and keeps blank text explicit', async () => {
+    const occurrence: CalendarEvent = {
+      ...recurringEvent,
+      id: 'series-resource::occurrence::2026-10-07',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-07T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-07T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    };
+    const recurrenceId = {
+      type: 'date-time' as const,
+      value: {
+        local: '2026-10-07T09:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [recurringEvent],
+    });
+    const onSaved = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={recurringEvent}
+        occurrence={{ recurrenceId, event: occurrence }}
+        onClose={onClose}
+        onSaved={onSaved}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'This occurrence only' }),
+    );
+    const title = screen.getByRole('textbox', { name: 'Title' });
+    expect(title).toBeDisabled();
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: 'Use series title' }),
+    );
+    await userEvent.clear(title);
+    await userEvent.type(title, 'One instance');
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: 'Use series description' }),
+    );
+    const description = screen.getByRole('textbox', {
+      name: 'Description',
+    });
+    await userEvent.clear(description);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    const saved = await repository.getEvent('team', recurringEvent.id);
+    expect(saved.recurrence?.overrides).toMatchObject([
+      {
+        recurrenceId,
+        title: 'One instance',
+        description: '',
+      },
+    ]);
+    expect(onSaved).toHaveBeenCalledWith(
+      expect.objectContaining({ recurrence: saved.recurrence }),
+      expect.objectContaining({
+        title: 'One instance',
+        description: '',
+      }),
     );
   });
 
@@ -661,6 +742,12 @@ describe('<CalendarEventEditorDialog />', () => {
       await userEvent.click(
         await screen.findByRole('button', { name: 'This occurrence only' }),
       );
+      fireEvent.change(screen.getByLabelText(/^Start/), {
+        target: { value: '2026-09-23T11:00' },
+      });
+      fireEvent.change(screen.getByLabelText(/^End/), {
+        target: { value: '2026-09-23T12:00' },
+      });
       await userEvent.click(screen.getByRole('button', { name: 'Save' }));
       expect(
         await screen.findByText(
@@ -704,6 +791,12 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.click(
       await screen.findByRole('button', { name: 'This occurrence only' }),
     );
+    fireEvent.change(screen.getByLabelText(/^Start/), {
+      target: { value: '2026-09-23T11:00' },
+    });
+    fireEvent.change(screen.getByLabelText(/^End/), {
+      target: { value: '2026-09-23T12:00' },
+    });
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await userEvent.click(
       await screen.findByRole('button', { name: 'Reload latest' }),

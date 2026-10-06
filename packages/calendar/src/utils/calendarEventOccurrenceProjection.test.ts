@@ -2194,6 +2194,47 @@ describe('bounded following timing edits', () => {
   });
 });
 
+describe('occurrence text projection', () => {
+  it('projects explicit text overrides and inherits absent fields from the master', () => {
+    const event = timedEvent({
+      id: 'occurrence-text',
+      start: '2026-10-05T09:00:00',
+      end: '2026-10-05T10:00:00',
+      recurrence: {
+        rrule: 'FREQ=DAILY;COUNT=3',
+        overrides: [
+          {
+            recurrenceId: zoned('2026-10-06T09:00:00'),
+            title: 'One instance',
+            description: '',
+          },
+        ],
+      },
+    });
+    const explicit = projectCalendarEventOccurrenceByRecurrenceId(
+      event,
+      zoned('2026-10-06T09:00:00'),
+      'Europe/Stockholm',
+    );
+    const inherited = projectCalendarEventOccurrenceByRecurrenceId(
+      event,
+      zoned('2026-10-07T09:00:00'),
+      'Europe/Stockholm',
+    );
+
+    expect(explicit?.event).toMatchObject({
+      title: 'One instance',
+      description: '',
+      location: undefined,
+    });
+    expect(inherited?.event).toMatchObject({
+      title: 'Team planning',
+      description: undefined,
+      location: undefined,
+    });
+  });
+});
+
 function timedEvent({
   id = 'planning',
   start = '2026-10-23T09:00:00',
