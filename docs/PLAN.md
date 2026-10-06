@@ -474,8 +474,15 @@ access and event writes stay disabled by default.
 - [ ] Compatibility matrix: Element Web/Desktop and other tested clients.
 - [ ] Performance testing with large calendars and recurrence.
   - [x] Measure synthetic large-calendar domain projection with a reproducible
-        benchmark and exact occurrence-count assertions; browser rendering,
-        CalDAV latency, memory peaks, and deployment capacity remain unmeasured.
+        benchmark and exact occurrence-count assertions; this measures domain
+        projection separately from rendering, loading, and memory.
+  - [x] Measure prepared 1,000-event list/month rendering at 1280×800 with
+        five samples per view, exact counts, overflow checks, and a real month
+        overflow-link interaction (PR #216; twelve hosted browser cases pass
+        at tree `911027044f96463a06e7d42cd2371ecf333662f7`). Retain raw numeric
+        evidence in `docs/evidence/calendar-browser-20261006.json`. Month
+        samples include long tasks up to 2.63 seconds; combined recurring
+        projection/rendering, memory, CalDAV latency, and capacity remain open.
   - [x] Reuse exact timezone transition instants and local boundaries during
         projection; preserve gap/overlap and historical-second semantics with
         regressions and before/after synthetic measurements. Synchronous large

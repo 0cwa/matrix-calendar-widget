@@ -53,6 +53,19 @@ import { CalendarToolbar } from '../src/components/calendar/CalendarToolbar';
 import { LocalizationProvider } from '../src/components/common/LocalizationProvider';
 import type { ViewType } from '../src/components/meetings/MeetingsNavigation';
 import { registerDateRangeFormatter } from '../src/dateRangeFormatter';
+import { setLocale } from '../src/lib/locale';
+
+type LargeCalendarRenderMeasurement = {
+  status: 'ready' | 'timeout';
+  elapsedMs?: number;
+  populatedElementCount: number;
+};
+
+declare global {
+  interface Window {
+    __largeCalendarRenderMeasurement?: LargeCalendarRenderMeasurement;
+  }
+}
 
 // Synthetic data only: this fixture has no Matrix client or gateway connection.
 const events: CalendarEvent[] = Array.from({ length: 8 }, (_, index) => ({
@@ -127,11 +140,51 @@ const roomAlarmOption: CalendarRoomReminderAlarmOption = {
 };
 const theme = createTheme();
 
-function CalendarFixture() {
-  const [view, setView] = useState<ViewType>('list');
-  const [selected, setSelected] = useState<CalendarEvent>();
+function createLargeCalendarRepository(): InMemoryCalendarRepository {
+  const calendar: Calendar = {
+    id: 'synthetic-large',
+    name: 'Synthetic capacity calendar',
+    timezone: 'Europe/Stockholm',
+    supportedComponents: ['VEVENT'],
+  };
+  const events: CalendarEvent[] = Array.from({ length: 1000 }, (_, index) => {
+    const eventNumber = String(index + 1).padStart(4, '0');
+    const localStart = `2026-10-${String((index % 31) + 1).padStart(2, '0')}T09:00:00`;
+    return {
+      id: `synthetic-capacity-${eventNumber}`,
+      uid: `synthetic-capacity-${eventNumber}@example.test`,
+      calendarId: calendar.id,
+      title: `Synthetic capacity event ${eventNumber}`,
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: localStart,
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: localStart.replace('09:00:00', '10:00:00'),
+          timezone: 'Europe/Stockholm',
+        },
+      },
+    };
+  });
+  return new InMemoryCalendarRepository({ calendars: [calendar], events });
+}
+
+function CalendarFixture({
+  largeCalendarRepository,
+}: {
+  largeCalendarRepository?: InMemoryCalendarRepository;
+}) {
   const query = new URLSearchParams(window.location.search);
   const roomMode = query.get('mode');
+  const initialView: ViewType =
+    query.get('view') === 'month' ? 'month' : 'list';
+  const [view, setView] = useState<ViewType>(initialView);
+  const [selected, setSelected] = useState<CalendarEvent>();
+  const largeCalendarMode = roomMode === 'large-calendar';
   const roomRepository = useMemo(
     () =>
       roomMode === 'room-read-only' || roomMode === 'room-manager'
@@ -139,17 +192,22 @@ function CalendarFixture() {
         : undefined,
     [roomMode],
   );
+  const activeRepository =
+    roomRepository ?? (largeCalendarMode ? largeCalendarRepository : undefined);
   const [filters, setFilters] = useState({
     startDate: '2026-10-01T00:00:00+02:00',
     endDate: '2026-11-01T00:00:00+01:00',
     filterText: '',
   });
 
-  if (roomRepository) {
+  if (activeRepository) {
     return (
-      <CalendarRepositoryProvider repository={roomRepository}>
-        <main>
-          <Stack spacing={2} sx={{ p: 1 }}>
+      <CalendarRepositoryProvider repository={activeRepository}>
+        <main style={largeCalendarMode ? { height: '100vh' } : undefined}>
+          <Stack
+            spacing={2}
+            sx={{ p: 1, ...(largeCalendarMode ? { height: '100%' } : {}) }}
+          >
             <h1>Calendar component validation</h1>
             <Stack direction="row" spacing={1}>
               <Button onClick={() => setView('list')}>List</Button>
@@ -166,7 +224,15 @@ function CalendarFixture() {
               onViewChange={setView}
               view={view}
             />
-            <Box data-testid="calendar-surface" sx={{ minWidth: 0 }}>
+            <Box
+              data-testid="calendar-surface"
+              sx={{
+                minWidth: 0,
+                ...(largeCalendarMode
+                  ? { flexGrow: 1, minHeight: 0, overflow: 'hidden' }
+                  : {}),
+              }}
+            >
               <CalendarEventsSurface
                 filters={filters}
                 onShowMore={() => setView('list')}
@@ -316,6 +382,60 @@ class SyntheticRoomCalendarRepository
   }
 }
 
+function observeLargeCalendarRender(view: 'list' | 'month'): void {
+  const selector =
+    view === 'list'
+      ? 'li[aria-label^="Synthetic capacity event "]'
+      : '.fc-daygrid-more-link';
+  const expectedMinimum = view === 'list' ? 1000 : 31;
+  const getCount = () => document.querySelectorAll(selector).length;
+  let completed = false;
+  const observer = new MutationObserver(() => {
+    if (getCount() >= expectedMinimum) finishAfterTwoFrames();
+  });
+  const timeout = window.setTimeout(() => {
+    if (completed) return;
+    completed = true;
+    observer.disconnect();
+    window.__largeCalendarRenderMeasurement = {
+      status: 'timeout',
+      populatedElementCount: getCount(),
+    };
+  }, 45_000);
+  function finishAfterTwoFrames() {
+    if (completed) return;
+    completed = true;
+    window.clearTimeout(timeout);
+    observer.disconnect();
+    window.requestAnimationFrame(() =>
+      window.requestAnimationFrame(() => {
+        const mountStart = performance
+          .getEntriesByName('synthetic-large-calendar-mount-start', 'mark')
+          .at(0);
+        if (!mountStart) {
+          window.__largeCalendarRenderMeasurement = {
+            status: 'timeout',
+            populatedElementCount: getCount(),
+          };
+          return;
+        }
+        const endTime = performance.now();
+        performance.mark('synthetic-large-calendar-render-ready');
+        window.__largeCalendarRenderMeasurement = {
+          status: 'ready',
+          elapsedMs: endTime - mountStart.startTime,
+          populatedElementCount: getCount(),
+        };
+      }),
+    );
+  }
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+  if (getCount() >= expectedMinimum) finishAfterTwoFrames();
+}
+
 async function start() {
   await i18next.use(initReactI18next).init({
     lng: 'en',
@@ -324,13 +444,30 @@ async function start() {
     resources: { en: { translation: en } },
   });
   registerDateRangeFormatter(i18next);
+  setLocale(i18next.language);
+  const largeCalendarMode =
+    new URLSearchParams(window.location.search).get('mode') ===
+    'large-calendar';
+  const largeCalendarRepository = largeCalendarMode
+    ? createLargeCalendarRepository()
+    : undefined;
+  if (largeCalendarMode) {
+    observeLargeCalendarRender(
+      new URLSearchParams(window.location.search).get('view') === 'month'
+        ? 'month'
+        : 'list',
+    );
+    performance.mark('synthetic-large-calendar-mount-start');
+  }
   createRoot(document.getElementById('root')!).render(
     <I18nextProvider i18n={i18next}>
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <LocalizationProvider>
           <CalendarRepositoryProvider repository={repository}>
-            <CalendarFixture />
+            <CalendarFixture
+              largeCalendarRepository={largeCalendarRepository}
+            />
           </CalendarRepositoryProvider>
         </LocalizationProvider>
       </ThemeProvider>
