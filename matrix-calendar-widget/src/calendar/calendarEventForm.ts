@@ -116,6 +116,8 @@ export type CalendarEventFormValues = {
   exdateChanged?: boolean;
   exdateOperation?: { action: 'remove'; recurrenceId: CalendarEventDateTime };
   alarmEnabled?: boolean;
+  alarmMode?: 'relative' | 'absolute';
+  alarmUtcDateTime?: string;
   alarmWeeks?: string;
   alarmDays?: string;
   alarmHours?: string;
@@ -756,6 +758,8 @@ function validateExdateOperation(
 function emptyAlarmFormValues(): Pick<
   CalendarEventFormValues,
   | 'alarmEnabled'
+  | 'alarmMode'
+  | 'alarmUtcDateTime'
   | 'alarmWeeks'
   | 'alarmDays'
   | 'alarmHours'
@@ -766,6 +770,8 @@ function emptyAlarmFormValues(): Pick<
 > {
   return {
     alarmEnabled: false,
+    alarmMode: 'relative',
+    alarmUtcDateTime: '',
     alarmWeeks: '0',
     alarmDays: '0',
     alarmHours: '0',
@@ -781,6 +787,8 @@ function alarmFormValues(
 ): Pick<
   CalendarEventFormValues,
   | 'alarmEnabled'
+  | 'alarmMode'
+  | 'alarmUtcDateTime'
   | 'alarmWeeks'
   | 'alarmDays'
   | 'alarmHours'
@@ -799,20 +807,35 @@ function alarmFormValues(
   }
 
   const trigger = event.alarm?.trigger;
+  const absolute = trigger && 'type' in trigger ? trigger : undefined;
   return {
     ...emptyAlarmFormValues(),
     alarmEnabled: trigger !== undefined,
-    alarmWeeks: String(trigger?.weeks ?? 0),
-    alarmDays: String(trigger?.days ?? 0),
-    alarmHours: String(trigger?.hours ?? 0),
-    alarmMinutes: String(trigger?.minutes ?? 0),
-    alarmSeconds: String(trigger?.seconds ?? 0),
+    alarmMode: absolute ? 'absolute' : 'relative',
+    alarmUtcDateTime: absolute?.value ?? '',
+    alarmWeeks: trigger && !('type' in trigger) ? String(trigger.weeks) : '0',
+    alarmDays: trigger && !('type' in trigger) ? String(trigger.days) : '0',
+    alarmHours: trigger && !('type' in trigger) ? String(trigger.hours) : '0',
+    alarmMinutes:
+      trigger && !('type' in trigger) ? String(trigger.minutes) : '15',
+    alarmSeconds:
+      trigger && !('type' in trigger) ? String(trigger.seconds) : '0',
   };
 }
 
 function alarmFromForm(
   values: CalendarEventFormValues,
 ): CalendarEventDisplayAlarm {
+  if (values.alarmMode === 'absolute') {
+    return {
+      action: 'display',
+      trigger: {
+        type: 'absolute',
+        value: values.alarmUtcDateTime?.trim() ?? '',
+      },
+    };
+  }
+
   return {
     action: 'display',
     trigger: {
@@ -829,6 +852,20 @@ function validateAlarm(
   values: CalendarEventFormValues,
 ): CalendarEventValidationError | undefined {
   if (!values.alarmEnabled || values.alarmEditable === false) {
+    return undefined;
+  }
+
+  if (values.alarmMode === 'absolute') {
+    const value = values.alarmUtcDateTime ?? '';
+    const parsed = DateTime.fromISO(value, { setZone: true });
+    if (
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value) ||
+      !parsed.isValid ||
+      parsed.offset !== 0 ||
+      parsed.toUTC().toFormat("yyyy-MM-dd'T'HH:mm:ss'Z'") !== value
+    ) {
+      return 'invalid-alarm';
+    }
     return undefined;
   }
 

@@ -86,6 +86,25 @@ function rawVeventBlocks(source: string): string[][] {
   return blocks;
 }
 
+function calendarWithDisplayAlarm(
+  triggerProperty: string,
+  ...attachments: string[]
+): string {
+  const alarm = [
+    'BEGIN:VALARM',
+    'UID:stable-alarm@example.test',
+    'ACTION:DISPLAY',
+    'DESCRIPTION:Keep this alarm description',
+    triggerProperty,
+    'X-ALARM-METADATA:preserve-alarm-property',
+    'END:VALARM',
+  ];
+  return calendarWithAttachments(...attachments).replace(
+    'END:VEVENT',
+    [...alarm, 'END:VEVENT'].join('\r\n'),
+  );
+}
+
 describe('ICalendarEventCodec URI attachment authoring', () => {
   it('creates one URI attachment and projects it separately', () => {
     const input: CalendarEventInput = {
@@ -643,4 +662,54 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
       expect(block.join('\r\n')).toContain(attachment);
     }
   });
+  it.each([
+    ['absolute UTC', 'TRIGGER;VALUE=DATE-TIME:20261005T084500Z'],
+    ['relative DURATION', 'TRIGGER;RELATED=START;VALUE=DURATION:-PT15M'],
+  ])(
+    'preserves a %s alarm and raw ATTACH data on an attachment edit',
+    (_mode, triggerProperty) => {
+      const attachmentUrl = 'https://files.example.test/agenda';
+      const revisedAttachmentUrl = 'https://files.example.test/revised';
+      const alarm = [
+        'BEGIN:VALARM',
+        'UID:stable-alarm@example.test',
+        'ACTION:DISPLAY',
+        'DESCRIPTION:Keep this alarm description',
+        triggerProperty,
+        'X-ALARM-METADATA:preserve-alarm-property',
+        'END:VALARM',
+      ].join('\r\n');
+      const source = calendarWithDisplayAlarm(
+        triggerProperty,
+        oldAttachment,
+        binaryAttachment,
+      );
+      const parsed = codec().parse('team', 'event.ics', source);
+
+      expect(parsed.event.alarm?.uid).toBe('stable-alarm@example.test');
+      expect(parsed.event.unsupportedAlarm).toBeUndefined();
+
+      const changed = parsed.applyPatch({
+        attachment: {
+          action: 'set',
+          sourceUrl: attachmentUrl,
+          url: revisedAttachmentUrl,
+        },
+      });
+
+      expect(changed.icalendar).toContain(alarm);
+      expect(changed.icalendar).toContain(
+        oldAttachment.replace(attachmentUrl, revisedAttachmentUrl),
+      );
+      expect(changed.icalendar).toContain(binaryAttachment);
+      expect(changed.event.alarm?.uid).toBe('stable-alarm@example.test');
+
+      const reparsed = codec().parse('team', 'event.ics', changed.icalendar);
+      expect(reparsed.event.alarm).toEqual(parsed.event.alarm);
+      expect(reparsed.event.attachments).toEqual([
+        { url: revisedAttachmentUrl },
+      ]);
+    },
+  );
+
 });

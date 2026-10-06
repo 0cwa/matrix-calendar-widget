@@ -221,6 +221,57 @@ describe('CanonicalRoomReminderSchedulerSource', () => {
     });
   });
 
+  it('does not deliver stale relative reminder intent after the current alarm becomes absolute', async () => {
+    const absoluteFixture = supportedFixture.replace(
+      'TRIGGER:-PT15M',
+      'TRIGGER;VALUE=DATE-TIME:20261019T064500Z',
+    );
+    const fetchMock = createFetchMock(absoluteFixture, absoluteFixture);
+    const { source } = createSource(fetchMock as typeof fetch);
+    const signal = new AbortController().signal;
+    const dueWindow = window(
+      '2026-10-19T06:40:00.000Z',
+      '2026-10-19T06:50:00.000Z',
+    );
+    const staleIdentity = {
+      roomId,
+      calendarId,
+      eventUid,
+      recurrenceId: JSON.stringify([
+        'date-time',
+        'tzid',
+        'Europe/Stockholm',
+        '2026-10-19T09:00:00',
+      ]),
+      alarmUid,
+      triggerOrdinal: 0,
+    };
+
+    await expect(
+      source.listDueCandidates(
+        configuration(),
+        dueWindow,
+        undefined,
+        1,
+        signal,
+      ),
+    ).rejects.toMatchObject({
+      name: 'CanonicalReminderSourceError',
+      code: 'unavailable',
+    });
+    await expect(
+      source.resolveCurrentDelivery(
+        configuration(),
+        staleIdentity,
+        dueWindow,
+        signal,
+      ),
+    ).rejects.toMatchObject({
+      name: 'CanonicalReminderSourceError',
+      code: 'unavailable',
+    });
+  });
+
   it('does not inherit master alarms onto detached overrides but keeps explicit override alarms', async () => {
     const unarmedOverrideFixture = supportedFixture.replace(
       'BEGIN:VEVENT\nUID:unrelated@example.test',

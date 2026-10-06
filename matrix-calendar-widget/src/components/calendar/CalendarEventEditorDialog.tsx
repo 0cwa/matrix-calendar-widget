@@ -45,6 +45,8 @@ import {
   FormHelperText,
   FormLabel,
   MenuItem,
+  Radio,
+  RadioGroup,
   Stack,
   Switch,
   TextField,
@@ -393,6 +395,14 @@ export function CalendarEventEditorDialog({
           : current,
       );
     };
+
+  const handleAlarmModeChange = (change: ChangeEvent<HTMLInputElement>) => {
+    const alarmMode =
+      change.target.value === 'absolute' ? 'absolute' : 'relative';
+    setValues((current) =>
+      current ? { ...current, alarmMode, alarmChanged: true } : current,
+    );
+  };
 
   const handleRdateDraftChange = (change: ChangeEvent<HTMLInputElement>) => {
     setValues((current) =>
@@ -1417,37 +1427,109 @@ export function CalendarEventEditorDialog({
                 {values.alarmEnabled && values.alarmEditable !== false && (
                   <Stack spacing={1}>
                     <FormLabel component="legend">
-                      {t(
-                        'calendarEvents.editor.alarmLeadTime',
-                        'Time before the event starts',
-                      )}
+                      {t('calendarEvents.editor.alarmMode', 'Alarm timing')}
                     </FormLabel>
-                    <Stack direction={{ sm: 'row', xs: 'column' }} spacing={1}>
-                      {(
-                        [
-                          ['alarmWeeks', 'alarmWeeks', 'Weeks before'],
-                          ['alarmDays', 'alarmDays', 'Days before'],
-                          ['alarmHours', 'alarmHours', 'Hours before'],
-                          ['alarmMinutes', 'alarmMinutes', 'Minutes before'],
-                          ['alarmSeconds', 'alarmSeconds', 'Seconds before'],
-                        ] as const
-                      ).map(([field, key, fallback]) => (
-                        <TextField
-                          inputProps={{ min: 0, step: 1 }}
-                          key={field}
-                          label={t(`calendarEvents.editor.${key}`, fallback)}
-                          onChange={handleAlarmDurationChange(field)}
-                          type="number"
-                          value={values[field] ?? '0'}
-                        />
-                      ))}
-                    </Stack>
-                    <Typography color="text.secondary" variant="body2">
-                      {t(
-                        'calendarEvents.editor.alarmBoundary',
-                        'This stores a CalDAV display alarm for clients that support it. Matrix reminder delivery is separate.',
+                    <RadioGroup
+                      aria-label={t(
+                        'calendarEvents.editor.alarmMode',
+                        'Alarm timing',
                       )}
-                    </Typography>
+                      onChange={handleAlarmModeChange}
+                      row
+                      value={values.alarmMode ?? 'relative'}
+                    >
+                      <FormControlLabel
+                        control={<Radio />}
+                        label={t(
+                          'calendarEvents.editor.alarmRelativeMode',
+                          'Before the event',
+                        )}
+                        value="relative"
+                      />
+                      <FormControlLabel
+                        control={<Radio />}
+                        label={t(
+                          'calendarEvents.editor.alarmAbsoluteMode',
+                          'At an exact UTC time',
+                        )}
+                        value="absolute"
+                      />
+                    </RadioGroup>
+                    {values.alarmMode === 'absolute' ? (
+                      <Stack spacing={1}>
+                        <TextField
+                          fullWidth
+                          helperText={t(
+                            'calendarEvents.editor.alarmUtcDateTimeHelp',
+                            'Enter YYYY-MM-DDTHH:mm:ssZ in UTC.',
+                          )}
+                          label={t(
+                            'calendarEvents.editor.alarmUtcDateTime',
+                            'Exact time (UTC)',
+                          )}
+                          onChange={handleAlarmDurationChange(
+                            'alarmUtcDateTime',
+                          )}
+                          placeholder="2026-10-01T08:45:00Z"
+                          value={values.alarmUtcDateTime ?? ''}
+                        />
+                        <Typography color="text.secondary" variant="body2">
+                          {t(
+                            'calendarEvents.editor.absoluteAlarmBoundary',
+                            'This absolute alarm is saved to the calendar and cannot be delivered as a Matrix room reminder.',
+                          )}
+                        </Typography>
+                      </Stack>
+                    ) : (
+                      <Stack spacing={1}>
+                        <FormLabel component="legend">
+                          {t(
+                            'calendarEvents.editor.alarmLeadTime',
+                            'Time before the event starts',
+                          )}
+                        </FormLabel>
+                        <Stack
+                          direction={{ sm: 'row', xs: 'column' }}
+                          spacing={1}
+                        >
+                          {(
+                            [
+                              ['alarmWeeks', 'alarmWeeks', 'Weeks before'],
+                              ['alarmDays', 'alarmDays', 'Days before'],
+                              ['alarmHours', 'alarmHours', 'Hours before'],
+                              [
+                                'alarmMinutes',
+                                'alarmMinutes',
+                                'Minutes before',
+                              ],
+                              [
+                                'alarmSeconds',
+                                'alarmSeconds',
+                                'Seconds before',
+                              ],
+                            ] as const
+                          ).map(([field, key, fallback]) => (
+                            <TextField
+                              inputProps={{ min: 0, step: 1 }}
+                              key={field}
+                              label={t(
+                                `calendarEvents.editor.${key}`,
+                                fallback,
+                              )}
+                              onChange={handleAlarmDurationChange(field)}
+                              type="number"
+                              value={values[field] ?? '0'}
+                            />
+                          ))}
+                        </Stack>
+                        <Typography color="text.secondary" variant="body2">
+                          {t(
+                            'calendarEvents.editor.alarmBoundary',
+                            'This stores a CalDAV display alarm for clients that support it. Matrix reminder delivery is separate.',
+                          )}
+                        </Typography>
+                      </Stack>
+                    )}
                   </Stack>
                 )}
               </FormControl>
