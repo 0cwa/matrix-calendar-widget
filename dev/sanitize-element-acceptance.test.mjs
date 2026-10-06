@@ -137,7 +137,26 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
         blockedExternalRequestCount: 0,
         homeserverHttpErrorCount: 0,
       }),
-      JSON.stringify({ phase: 'widget-a-extension-open', status: 'passed' }),
+      JSON.stringify({
+        phase: 'widget-a-room-info-button',
+        status: 'passed',
+        count: 1,
+        controlVisible: true,
+      }),
+      JSON.stringify({
+        phase: 'widget-a-extensions-menuitem',
+        status: 'passed',
+        count: 1,
+        controlVisible: true,
+        panelPresent: true,
+      }),
+      JSON.stringify({
+        phase: 'widget-a-extension-row',
+        status: 'passed',
+        count: 1,
+        controlVisible: true,
+        panelPresent: true,
+      }),
       JSON.stringify({
         phase: 'widget-a-warning-not-required',
         status: 'passed',
@@ -185,7 +204,9 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
       `element-acceptance source_sha=${sourceSha}`,
       'phase=member-a-room-navigation status=passed',
       'phase=member-a-room-context status=passed matrix_user_matches=true matrix_room_known=true matrix_room_joined=true matrix_sync_state=SYNCING room_navigation_completed=true room_heading_ready=true room_heading_present=true room_name_matches=true room_id_matches=true blocked_external_request_count=0 homeserver_http_error_count=0',
-      'phase=widget-a-extension-open status=passed',
+      'phase=widget-a-room-info-button status=passed count=1 control_visible=true',
+      'phase=widget-a-extensions-menuitem status=passed count=1 control_visible=true panel_present=true',
+      'phase=widget-a-extension-row status=passed count=1 control_visible=true panel_present=true',
       'phase=widget-a-warning-not-required status=passed',
       'phase=widget-a-capabilities-approval status=passed',
       'phase=widget-a-identity-dialog-observed status=passed',
@@ -197,6 +218,69 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
       'phase=widget-a-identity-dialog-not-required status=passed',
       '',
     ].join('\n'),
+  );
+});
+
+test('emits and constrains pinned widget-control failure observations', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'widget-a-extension-row',
+      status: 'failed',
+      count: 0,
+      controlVisible: false,
+      panelPresent: true,
+    }),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=widget-a-extension-row status=failed count=0 control_visible=false panel_present=true',
+      '',
+    ].join('\n'),
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'widget-a-extension-row',
+          status: 'failed',
+          count: 0,
+          controlVisible: false,
+          panelPresent: true,
+          widgetName: 'private label',
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'widget-a-extensions-menuitem',
+          status: 'failed',
+          count: 0,
+          controlVisible: false,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'widget-a-room-info-button',
+          status: 'failed',
+          count: 3,
+          controlVisible: true,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
   );
 });
 

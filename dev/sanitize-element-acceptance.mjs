@@ -39,7 +39,9 @@ const PHASES = new Set([
   'member-a-room-context',
   'member-b-room-context',
   'outsider-room-context',
-  'widget-a-extension-open',
+  'widget-a-room-info-button',
+  'widget-a-extensions-menuitem',
+  'widget-a-extension-row',
   'widget-a-warning-not-required',
   'widget-a-capabilities-approval',
   'widget-a-identity-dialog-observed',
@@ -61,6 +63,15 @@ const PHASES = new Set([
   'canonical-read-after-denial',
   'browser-egress',
   'runtime-versions',
+]);
+const PINNED_WIDGET_CONTROL_PHASES = new Set([
+  'widget-a-room-info-button',
+  'widget-a-extensions-menuitem',
+  'widget-a-extension-row',
+]);
+const PINNED_WIDGET_PANEL_PHASES = new Set([
+  'widget-a-extensions-menuitem',
+  'widget-a-extension-row',
 ]);
 const STATUSES = new Set(['started', 'passed', 'failed', 'unavailable']);
 const FAILURE_CODES = new Set([
@@ -130,6 +141,8 @@ const ALLOWED_KEYS = new Set([
   'httpStatus',
   'count',
   'originMatchesElement',
+  'controlVisible',
+  'panelPresent',
   'matrixClientHookPresent',
   'matrixClientPresent',
   'matrixUserMatches',
@@ -223,6 +236,29 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (!Number.isInteger(record.count) ||
         record.count < 0 ||
         record.count > 100000)
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    const hasPinnedControlObservation =
+      Object.hasOwn(record, 'controlVisible') ||
+      Object.hasOwn(record, 'panelPresent');
+    const pinnedControlPhase = PINNED_WIDGET_CONTROL_PHASES.has(record.phase);
+    const requiresPanelPresence = PINNED_WIDGET_PANEL_PHASES.has(record.phase);
+    if (
+      (hasPinnedControlObservation && !pinnedControlPhase) ||
+      (pinnedControlPhase &&
+        record.status !== 'passed' &&
+        record.status !== 'failed') ||
+      (pinnedControlPhase &&
+        (!Object.hasOwn(record, 'count') || record.count > 2)) ||
+      (pinnedControlPhase &&
+        (!Object.hasOwn(record, 'controlVisible') ||
+          typeof record.controlVisible !== 'boolean')) ||
+      (pinnedControlPhase &&
+        requiresPanelPresence !== Object.hasOwn(record, 'panelPresent')) ||
+      (Object.hasOwn(record, 'panelPresent') &&
+        typeof record.panelPresent !== 'boolean')
     ) {
       throw new Error('invalid element acceptance summary');
     }
@@ -478,6 +514,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     }
     if (Object.hasOwn(record, 'count')) {
       fields.push(`count=${record.count}`);
+    }
+    if (Object.hasOwn(record, 'controlVisible')) {
+      fields.push(`control_visible=${record.controlVisible}`);
+    }
+    if (Object.hasOwn(record, 'panelPresent')) {
+      fields.push(`panel_present=${record.panelPresent}`);
     }
     if (Object.hasOwn(record, 'originMatchesElement')) {
       fields.push(`origin_matches_element=${record.originMatchesElement}`);

@@ -62,7 +62,9 @@ type Phase =
   | 'member-a-room-context'
   | 'member-b-room-context'
   | 'outsider-room-context'
-  | 'widget-a-extension-open'
+  | 'widget-a-room-info-button'
+  | 'widget-a-extensions-menuitem'
+  | 'widget-a-extension-row'
   | 'widget-a-warning-not-required'
   | 'widget-a-capabilities-approval'
   | 'widget-a-identity-dialog-observed'
@@ -136,9 +138,17 @@ type HomeserverHttpFailures = {
   lastStatus?: number;
 };
 
+type PinnedControlObservation = {
+  phase: Phase;
+  count: number;
+  controlVisible: boolean;
+  panelPresent?: boolean;
+};
+
 let fixture: Fixture;
 
 let activePhase: Phase = 'member-a-authenticated';
+let pendingPinnedControlObservation: PinnedControlObservation | undefined;
 const memberAHomeserverHttpFailures = new WeakMap<
   Page,
   HomeserverHttpFailures
@@ -861,8 +871,26 @@ function recordJourneyFailure(
   alreadyRecorded: boolean,
 ) {
   if (!alreadyRecorded) {
-    record(phase, 'failed', httpStatus);
+    const observation =
+      pendingPinnedControlObservation?.phase === phase
+        ? pendingPinnedControlObservation
+        : undefined;
+    record(
+      phase,
+      'failed',
+      httpStatus,
+      observation?.count,
+      observation
+        ? {
+            controlVisible: observation.controlVisible,
+            ...(observation.panelPresent === undefined
+              ? {}
+              : { panelPresent: observation.panelPresent }),
+          }
+        : undefined,
+    );
   }
+  pendingPinnedControlObservation = undefined;
 }
 
 async function openCalendarWidget(
@@ -874,12 +902,12 @@ async function openCalendarWidget(
     captureMemberADiagnostics = false,
   }: OpenCalendarWidgetOptions,
 ) {
+  await openPinnedElementWidget(
+    page,
+    'Matrix Calendar',
+    captureMemberADiagnostics,
+  );
   if (captureMemberADiagnostics) {
-    activePhase = 'widget-a-extension-open';
-  }
-  await openPinnedElementWidget(page, 'Matrix Calendar');
-  if (captureMemberADiagnostics) {
-    record(activePhase, 'passed');
     if (!expectWidgetWarning) activePhase = 'widget-a-warning-not-required';
   }
   if (expectWidgetWarning) {
@@ -946,12 +974,65 @@ async function openCalendarWidget(
 async function openPinnedElementWidget(
   page: Page,
   widgetName: string,
+  captureMemberADiagnostics = false,
 ): Promise<void> {
   const roomHeader = page.locator('header.mx_RoomHeader');
   const rightPanel = page.getByRole('complementary');
-  await roomHeader.getByRole('button', { name: 'Room info' }).click();
-  await rightPanel.getByRole('menuitem', { name: 'Extensions' }).click();
-  await rightPanel.getByRole('button', { name: widgetName }).click();
+  await clickPinnedWidgetControl(
+    roomHeader.getByRole('button', { name: 'Room info' }),
+    captureMemberADiagnostics ? 'widget-a-room-info-button' : undefined,
+  );
+  await clickPinnedWidgetControl(
+    rightPanel.getByRole('menuitem', { name: 'Extensions' }),
+    captureMemberADiagnostics ? 'widget-a-extensions-menuitem' : undefined,
+    rightPanel,
+  );
+  await clickPinnedWidgetControl(
+    rightPanel.getByRole('button', { name: widgetName }),
+    captureMemberADiagnostics ? 'widget-a-extension-row' : undefined,
+    rightPanel,
+  );
+}
+
+async function clickPinnedWidgetControl(
+  control: Locator,
+  diagnosticPhase?:
+    | 'widget-a-room-info-button'
+    | 'widget-a-extensions-menuitem'
+    | 'widget-a-extension-row',
+  panel?: Locator,
+): Promise<void> {
+  if (!diagnosticPhase) {
+    await control.click();
+    return;
+  }
+
+  activePhase = diagnosticPhase;
+  await control.waitFor({ state: 'visible', timeout: 8_000 }).catch(() => {});
+  const count = Math.min(await control.count(), 2);
+  const controlVisible =
+    count === 1 && (await control.isVisible().catch(() => false));
+  const panelPresent = panel
+    ? (await panel.count()) === 1 &&
+      (await panel.isVisible().catch(() => false))
+    : undefined;
+  pendingPinnedControlObservation = {
+    phase: diagnosticPhase,
+    count,
+    controlVisible,
+    ...(panelPresent === undefined ? {} : { panelPresent }),
+  };
+
+  if (count !== 1 || !controlVisible || panelPresent === false) {
+    throw new Error('Pinned Element widget control unavailable');
+  }
+
+  await control.click({ timeout: 8_000 });
+  record(diagnosticPhase, 'passed', undefined, count, {
+    controlVisible,
+    ...(panelPresent === undefined ? {} : { panelPresent }),
+  });
+  pendingPinnedControlObservation = undefined;
 }
 
 async function openEventEditor(
@@ -991,7 +1072,11 @@ function record(
   status: 'started' | 'passed' | 'failed',
   httpStatus?: number,
   count?: number,
-  extra?: { originMatchesElement: boolean },
+  extra?: {
+    originMatchesElement?: boolean;
+    controlVisible?: boolean;
+    panelPresent?: boolean;
+  },
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   if (!stageFile) throw new Error('Element acceptance fixture unavailable');
