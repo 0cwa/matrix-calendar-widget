@@ -742,6 +742,12 @@ describe('<CalendarEventEditorDialog />', () => {
       await userEvent.click(
         await screen.findByRole('button', { name: 'This occurrence only' }),
       );
+      fireEvent.change(screen.getByLabelText(/^Start/), {
+        target: { value: '2026-09-23T11:00' },
+      });
+      fireEvent.change(screen.getByLabelText(/^End/), {
+        target: { value: '2026-09-23T12:00' },
+      });
       await userEvent.click(screen.getByRole('button', { name: 'Save' }));
       expect(
         await screen.findByText(
@@ -785,6 +791,12 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.click(
       await screen.findByRole('button', { name: 'This occurrence only' }),
     );
+    fireEvent.change(screen.getByLabelText(/^Start/), {
+      target: { value: '2026-09-23T11:00' },
+    });
+    fireEvent.change(screen.getByLabelText(/^End/), {
+      target: { value: '2026-09-23T12:00' },
+    });
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await userEvent.click(
       await screen.findByRole('button', { name: 'Reload latest' }),
