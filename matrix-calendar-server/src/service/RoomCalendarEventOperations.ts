@@ -21,10 +21,10 @@ import {
   CalendarEventInput,
   CalendarEventPatch,
   CalendarTimeRange,
-  validateCalendarEventInputConference,
-  validateCalendarEventPatchConference,
   validateCalendarEventInputAttachment,
+  validateCalendarEventInputConference,
   validateCalendarEventPatchAttachment,
+  validateCalendarEventPatchConference,
 } from '@matrix-calendar-widget/calendar';
 import { Injectable } from '@nestjs/common';
 import { UserID } from 'matrix-bot-sdk';

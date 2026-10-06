@@ -121,9 +121,12 @@ describe('<CalendarEventEditorDialog />', () => {
       await screen.findByRole('textbox', { name: /Title/i }),
       'Attachment event',
     );
-    fireEvent.change(screen.getByRole('combobox', { name: 'Attachment link' }), {
-      target: { value: 'add' },
-    });
+    fireEvent.change(
+      screen.getByRole('combobox', { name: 'Attachment link' }),
+      {
+        target: { value: 'add' },
+      },
+    );
     await userEvent.type(
       screen.getByRole('textbox', { name: 'Attachment URL' }),
       'https://files.example.test/agenda.pdf',
@@ -181,13 +184,14 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    await expect(repository.getEvent('team', attachmentEvent.id)).resolves
-      .toMatchObject({
-        attachments: [{ url: 'https://files.example.test/new.pdf' }],
-        externalLinks: [
-          { kind: 'attachment', href: 'https://files.example.test/new.pdf' },
-        ],
-      });
+    await expect(
+      repository.getEvent('team', attachmentEvent.id),
+    ).resolves.toMatchObject({
+      attachments: [{ url: 'https://files.example.test/new.pdf' }],
+      externalLinks: [
+        { kind: 'attachment', href: 'https://files.example.test/new.pdf' },
+      ],
+    });
   });
 
   it('removes the selected attachment URL through the editor', async () => {
@@ -227,11 +231,12 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    await expect(repository.getEvent('team', attachmentEvent.id)).resolves
-      .toMatchObject({
-        attachments: undefined,
-        externalLinks: undefined,
-      });
+    await expect(
+      repository.getEvent('team', attachmentEvent.id),
+    ).resolves.toMatchObject({
+      attachments: undefined,
+      externalLinks: undefined,
+    });
   });
 
   it('keeps unsupported attachment authoring disabled while saving ordinary fields', async () => {
@@ -270,7 +275,9 @@ describe('<CalendarEventEditorDialog />', () => {
     );
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(async () => {
-      await expect(repository.getEvent('team', event.id)).resolves.toMatchObject({
+      await expect(
+        repository.getEvent('team', event.id),
+      ).resolves.toMatchObject({
         title: 'Updated title',
         unsupportedAttachment: true,
         attachments: [{ url: 'https://files.example.test/visible.pdf' }],

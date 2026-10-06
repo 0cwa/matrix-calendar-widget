@@ -177,11 +177,11 @@ export function CalendarEventEditorDialog({
   const occurrenceHasAlarm = Boolean(event?.alarm || event?.unsupportedAlarm);
   const attachmentControlsDisabled = Boolean(
     readOnly ||
-      chooseScope ||
-      editingOccurrence ||
-      editingFollowing ||
-      values.attachmentEditable === false ||
-      saving,
+    chooseScope ||
+    editingOccurrence ||
+    editingFollowing ||
+    values.attachmentEditable === false ||
+    saving,
   );
   const followingSupported = Boolean(
     event &&
@@ -280,9 +280,7 @@ export function CalendarEventEditorDialog({
               ...(field === 'conferenceUrl' || field === 'conferenceLabel'
                 ? { conferenceChanged: true }
                 : {}),
-              ...(field === 'attachmentUrl'
-                ? { attachmentChanged: true }
-                : {}),
+              ...(field === 'attachmentUrl' ? { attachmentChanged: true } : {}),
               ...(field.startsWith('recurrence')
                 ? { recurrenceChanged: true }
                 : {}),
@@ -1182,7 +1180,10 @@ export function CalendarEventEditorDialog({
 
               <TextField
                 disabled={attachmentControlsDisabled}
-                label={t('calendarEvents.editor.attachmentOperation', 'Attachment link')}
+                label={t(
+                  'calendarEvents.editor.attachmentOperation',
+                  'Attachment link',
+                )}
                 onChange={handleAttachmentOperationChange}
                 select
                 value={values.attachmentOperation ?? 'none'}
@@ -1196,10 +1197,16 @@ export function CalendarEventEditorDialog({
                 {(values.attachmentUrls?.length ?? 0) > 0 && (
                   <>
                     <MenuItem value="set">
-                      {t('calendarEvents.editor.attachmentReplace', 'Replace link')}
+                      {t(
+                        'calendarEvents.editor.attachmentReplace',
+                        'Replace link',
+                      )}
                     </MenuItem>
                     <MenuItem value="remove">
-                      {t('calendarEvents.editor.attachmentRemove', 'Remove link')}
+                      {t(
+                        'calendarEvents.editor.attachmentRemove',
+                        'Remove link',
+                      )}
                     </MenuItem>
                   </>
                 )}

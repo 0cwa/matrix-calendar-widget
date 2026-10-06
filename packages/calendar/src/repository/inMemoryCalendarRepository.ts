@@ -51,13 +51,13 @@ import {
   validateCalendarEventInputConference,
   validateCalendarEventPatchConference,
 } from '../utils/calendarEventConference';
+import { canonicalizeCalendarExternalUrl } from '../utils/calendarEventExternalLinks';
 import {
   calendarEventFollowingTimingOverrides,
   calendarEventRecurrenceIdentity,
   isSupportedCalendarEventOccurrenceExclusion,
 } from '../utils/calendarEventOccurrenceProjection';
 import { calendarEventTimedDateTimeToDateTime } from '../utils/calendarEventTimedDateTime';
-import { canonicalizeCalendarExternalUrl } from '../utils/calendarEventExternalLinks';
 import {
   calendarLocalDateTimeToUnixMillis,
   isCalendarTimezoneSupported,
@@ -677,9 +677,8 @@ function applyAttachmentToLinks(
   operation: CalendarEventAttachmentPatch,
 ): CalendarEvent['externalLinks'] {
   const currentLinks = links?.map((link) => ({ ...link })) ?? [];
-  const targetUrl = 'sourceUrl' in operation
-    ? operation.sourceUrl
-    : operation.url;
+  const targetUrl =
+    'sourceUrl' in operation ? operation.sourceUrl : operation.url;
   const matches = currentLinks.flatMap((link, index) =>
     link.kind === 'attachment' &&
     canonicalizeCalendarExternalUrl(link.href) === targetUrl

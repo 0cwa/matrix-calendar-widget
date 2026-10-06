@@ -23,7 +23,6 @@ import {
   CalendarEventConferenceInput,
   CalendarEventConferencePatch,
   CalendarEventConferenceValidationError,
-  MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS,
   CalendarEventDateTime,
   CalendarEventDisplayAlarm,
   CalendarEventDisplayAlarmInput,
@@ -43,6 +42,7 @@ import {
   CalendarEventTiming,
   CalendarEventTransparency,
   CalendarId,
+  MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS,
   boundCalendarEventExternalLinkLabel,
   calendarEventFollowingTimingOverrides,
   calendarEventRecurrenceIdentity,
@@ -52,15 +52,15 @@ import {
   isCalendarEventAlarmRemoval,
   isCalendarTimezoneSupported,
   isSupportedCalendarEventOccurrenceExclusion,
-  normalizeCalendarEventConferenceInput,
-  normalizeCalendarEventConferencePatch,
   normalizeCalendarEventAttachmentInput,
   normalizeCalendarEventAttachmentPatch,
+  normalizeCalendarEventConferenceInput,
+  normalizeCalendarEventConferencePatch,
   parseSupportedCalendarEventRecurrenceRule,
-  validateCalendarEventInputConference,
-  validateCalendarEventPatchConference,
   validateCalendarEventInputAttachment,
+  validateCalendarEventInputConference,
   validateCalendarEventPatchAttachment,
+  validateCalendarEventPatchConference,
 } from '@matrix-calendar-widget/calendar';
 import { randomUUID } from 'crypto';
 import ICAL from 'ical.js';
@@ -521,16 +521,12 @@ export class ParsedICalendarEvent {
 
     const updatedAttachmentState =
       attachmentPatch && attachmentWritePlan
-        ? readAttachmentSourceState(
-            vevent,
-            attachmentWritePlan.nextProperties,
-          )
+        ? readAttachmentSourceState(vevent, attachmentWritePlan.nextProperties)
         : undefined;
     const attachmentProjection = updatedAttachmentState
       ? updatedAttachmentState.editable
           .filter(
-            ({ url }) =>
-              !updatedAttachmentState.opaqueUriUrls.includes(url),
+            ({ url }) => !updatedAttachmentState.opaqueUriUrls.includes(url),
           )
           .map(({ url }) => ({ url }))
       : undefined;
@@ -1430,8 +1426,7 @@ export class ICalendarEventCodec {
       location: textValue(vevent.getFirstPropertyValue('location')),
       url: textValue(vevent.getFirstPropertyValue('url')),
       externalLinks: readCalendarLinks(vevent),
-      ...(authorableAttachments.length > 0 &&
-      !ambiguousAttachmentSource
+      ...(authorableAttachments.length > 0 && !ambiguousAttachmentSource
         ? {
             attachments: authorableAttachments.map(({ url }) => ({ url })),
           }
@@ -3959,12 +3954,8 @@ function readAttachmentSourceState(
       : [];
     const hasUriValueType =
       valueTypes.length === 0 ||
-      valueTypes.some(
-        (parameter) => parameter.value?.toUpperCase() === 'URI',
-      );
-    const rawUrl = raw
-      ? canonicalizeCalendarExternalUrl(raw.value)
-      : undefined;
+      valueTypes.some((parameter) => parameter.value?.toUpperCase() === 'URI');
+    const rawUrl = raw ? canonicalizeCalendarExternalUrl(raw.value) : undefined;
     const parsedUrl = canonicalizeCalendarExternalUrl(property.getFirstValue());
     if (
       !raw ||
@@ -4048,10 +4039,7 @@ function planAttachmentPatch(
   if (sourceState.opaqueUriUrls.includes(targetUrl)) {
     throw unsupportedAttachmentPatch();
   }
-  if (
-    patch.action === 'set' &&
-    sourceState.opaqueUriUrls.includes(patch.url)
-  ) {
+  if (patch.action === 'set' && sourceState.opaqueUriUrls.includes(patch.url)) {
     throw unsupportedAttachmentPatch();
   }
   const matches = sourceState.editable.filter(
@@ -4135,7 +4123,9 @@ function setAttachmentProperty(
   }
   const properties = vevent.getAllProperties('attach');
   const property =
-    sourcePropertyIndex === undefined ? undefined : properties[sourcePropertyIndex];
+    sourcePropertyIndex === undefined
+      ? undefined
+      : properties[sourcePropertyIndex];
   if (!property) {
     throw unsupportedAttachmentPatch();
   }

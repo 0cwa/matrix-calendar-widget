@@ -187,7 +187,7 @@ export function calendarEventToFormValues(
       description: event.description ?? '',
       location: event.location ?? '',
       ...conferenceFormValues(event),
-    ...attachmentFormValues(event),
+      ...attachmentFormValues(event),
       timingType: 'all-day',
       timedKind: 'zoned',
       start: event.timing.startDate,

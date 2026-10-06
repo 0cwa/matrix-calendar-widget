@@ -23,10 +23,10 @@ import {
   CalendarTimeRange,
   isCalendarTimezoneSupported,
   projectCalendarEventOccurrences,
-  validateCalendarEventInputConference,
-  validateCalendarEventPatchConference,
   validateCalendarEventInputAttachment,
+  validateCalendarEventInputConference,
   validateCalendarEventPatchAttachment,
+  validateCalendarEventPatchConference,
   type CalendarEventListDiagnosticReason,
 } from '@matrix-calendar-widget/calendar';
 import {

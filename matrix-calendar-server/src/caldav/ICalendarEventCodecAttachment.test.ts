@@ -22,8 +22,7 @@ import {
 
 const oldAttachment =
   'ATTACH;FMTTYPE=application/pdf;X-OPAQUE=one;X-OPAQUE=\r\n two:https://files.example.test/agenda';
-const binaryAttachment =
-  'ATTACH;VALUE=BINARY;ENCODING=BASE64:YQ==';
+const binaryAttachment = 'ATTACH;VALUE=BINARY;ENCODING=BASE64:YQ==';
 const codec = () =>
   new ICalendarEventCodec(() => new Date('2026-10-06T12:00:00Z'));
 
@@ -318,9 +317,7 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
       },
     });
     expect(unrelated.icalendar).toContain(repeatedValue);
-    expect(unrelated.icalendar).toContain(
-      `ATTACH;VALUE=URI:${sourceUrl}`,
-    );
+    expect(unrelated.icalendar).toContain(`ATTACH;VALUE=URI:${sourceUrl}`);
     expect(unrelated.event.attachments).toEqual([
       { url: 'https://files.example.test/changed' },
     ]);
@@ -387,51 +384,47 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
     expect(changed.event.revision?.sequence).toBe(2_147_483_647);
   });
 
-  it(
-    'blocks a malformed VEVENT that hides a duplicate same-UID component',
-    () => {
-      const hiddenAttachment =
-        'ATTACH;VALUE=URI:https://files.example.test/hidden';
-      const malformedComponent = [
-        'BEGIN:VEVENT',
-        'UID:other@example.test',
-        'UID:event@example.test',
-        'DTSTART:20261006T110000Z',
-        'DTEND:20261006T120000Z',
-        hiddenAttachment,
-        'END:VEVENT',
-      ].join('\r\n');
-      const source = calendarWithAttachments(
-        'ATTACH;VALUE=URI:https://files.example.test/master',
-      ).replace(
-        'END:VCALENDAR',
-        [malformedComponent, 'END:VCALENDAR'].join('\r\n'),
-      );
-      const parsed = codec().parse('team', 'event.ics', source);
+  it('blocks a malformed VEVENT that hides a duplicate same-UID component', () => {
+    const hiddenAttachment =
+      'ATTACH;VALUE=URI:https://files.example.test/hidden';
+    const malformedComponent = [
+      'BEGIN:VEVENT',
+      'UID:other@example.test',
+      'UID:event@example.test',
+      'DTSTART:20261006T110000Z',
+      'DTEND:20261006T120000Z',
+      hiddenAttachment,
+      'END:VEVENT',
+    ].join('\r\n');
+    const source = calendarWithAttachments(
+      'ATTACH;VALUE=URI:https://files.example.test/master',
+    ).replace(
+      'END:VCALENDAR',
+      [malformedComponent, 'END:VCALENDAR'].join('\r\n'),
+    );
+    const parsed = codec().parse('team', 'event.ics', source);
 
-      expect(parsed.event.unsupportedAttachment).toBe(true);
-      expect(parsed.event.attachments).toBeUndefined();
-      expect(() =>
-        parsed.applyPatch({
-          attachment: {
-            action: 'remove',
-            sourceUrl: 'https://files.example.test/master',
-          },
-        }),
-      ).toThrow(ICalendarEventCodecError);
+    expect(parsed.event.unsupportedAttachment).toBe(true);
+    expect(parsed.event.attachments).toBeUndefined();
+    expect(() =>
+      parsed.applyPatch({
+        attachment: {
+          action: 'remove',
+          sourceUrl: 'https://files.example.test/master',
+        },
+      }),
+    ).toThrow(ICalendarEventCodecError);
 
-      const ordinaryEdit = parsed.applyPatch({ title: 'Updated' });
-      expect(ordinaryEdit.icalendar).toContain(hiddenAttachment);
-      expect(ordinaryEdit.icalendar).toContain(
-        'ATTACH;VALUE=URI:https://files.example.test/master',
-      );
-    },
-  );
+    const ordinaryEdit = parsed.applyPatch({ title: 'Updated' });
+    expect(ordinaryEdit.icalendar).toContain(hiddenAttachment);
+    expect(ordinaryEdit.icalendar).toContain(
+      'ATTACH;VALUE=URI:https://files.example.test/master',
+    );
+  });
 
   it('blocks detached attachments but permits detached components without ATTACH', () => {
     const masterAttachment =
-      'ATTACH;VALUE=URI:' +
-      'https://files.example.test/agenda';
+      'ATTACH;VALUE=URI:' + 'https://files.example.test/agenda';
     const detachedWithAttachment = recurringCalendarWithAttachment(
       masterAttachment,
     ).replace(
@@ -447,11 +440,7 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
         'END:VCALENDAR',
       ].join('\r\n'),
     );
-    const blocked = codec().parse(
-      'team',
-      'series.ics',
-      detachedWithAttachment,
-    );
+    const blocked = codec().parse('team', 'series.ics', detachedWithAttachment);
     expect(blocked.event.unsupportedAttachment).toBe(true);
     expect(() =>
       blocked.applyPatch({
@@ -499,8 +488,7 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
   });
 
   it('marks duplicate masters and over-cap link projections read-only', () => {
-    const oneAttachment =
-      'ATTACH;VALUE=URI:https://files.example.test/agenda';
+    const oneAttachment = 'ATTACH;VALUE=URI:https://files.example.test/agenda';
     const duplicateMaster = calendarWithAttachments(oneAttachment).replace(
       'END:VCALENDAR',
       [
