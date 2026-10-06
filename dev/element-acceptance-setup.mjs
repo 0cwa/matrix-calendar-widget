@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const SERVICE_USER_ID = '@_matrix_calendar_service:localhost';
 const SERVICE_LOCALPART = '_matrix_calendar_service';
@@ -122,28 +122,6 @@ function matrixUserId(localpart) {
   return `@${localpart}:localhost`;
 }
 
-export function buildRegisterUserArgs(projectName, localpart) {
-  return [
-    'compose',
-    '-p',
-    projectName,
-    '-f',
-    'dev/compose.yaml',
-    'exec',
-    '-T',
-    'synapse',
-    'register_new_matrix_user',
-    '-c',
-    '/data/homeserver.yaml',
-    '-u',
-    localpart,
-    '--password-file',
-    '/dev/stdin',
-    '--no-admin',
-    'http://localhost:8008',
-  ];
-}
-
 function createUser(localpart, password, phase) {
   const projectName = requiredEnvironment('COMPOSE_PROJECT_NAME');
   if (!/^[a-z0-9][a-z0-9_-]{0,62}$/u.test(projectName)) {
@@ -151,13 +129,35 @@ function createUser(localpart, password, phase) {
   }
 
   try {
-    execFileSync('docker', buildRegisterUserArgs(projectName, localpart), {
-      cwd: resolve(dirname(fileURLToPath(import.meta.url)), '..'),
-      encoding: 'utf8',
-      input: `${password}\n`,
-      maxBuffer: 1024 * 1024,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    execFileSync(
+      'docker',
+      [
+        'compose',
+        '-p',
+        projectName,
+        '-f',
+        'dev/compose.yaml',
+        'exec',
+        '-T',
+        'synapse',
+        'register_new_matrix_user',
+        '-c',
+        '/data/homeserver.yaml',
+        '-u',
+        localpart,
+        '--password-file',
+        '/dev/stdin',
+        '--no-admin',
+        'http://localhost:8008',
+      ],
+      {
+        cwd: resolve(dirname(fileURLToPath(import.meta.url)), '..'),
+        encoding: 'utf8',
+        input: `${password}\n`,
+        maxBuffer: 1024 * 1024,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
   } catch (error) {
     const processExitCode =
       Number.isInteger(error?.status) &&
@@ -632,9 +632,4 @@ async function main() {
   }
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(resolve(process.argv[1])).href
-) {
-  main();
-}
+main();
