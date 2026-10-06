@@ -688,8 +688,17 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
 
       expect(parsed.event.alarm?.uid).toBe('stable-alarm@example.test');
       expect(parsed.event.unsupportedAlarm).toBeUndefined();
+      const parsedAlarm = parsed.event.alarm;
+      if (!parsedAlarm) {
+        throw new Error('Expected the supported alarm to be readable');
+      }
+      const unchangedAlarm = {
+        action: 'display' as const,
+        trigger: parsedAlarm.trigger,
+      };
 
       const changed = parsed.applyPatch({
+        alarm: unchangedAlarm,
         attachment: {
           action: 'set',
           sourceUrl: attachmentUrl,
