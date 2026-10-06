@@ -545,7 +545,13 @@ function cloneCalendarEvent(event: CalendarEvent): CalendarEvent {
         : cloneAllDayTiming(event.timing),
     categories: event.categories ? [...event.categories] : undefined,
     alarm: event.alarm
-      ? { ...event.alarm, trigger: { ...event.alarm.trigger } }
+      ? {
+          ...event.alarm,
+          trigger:
+            'type' in event.alarm.trigger
+              ? { ...event.alarm.trigger }
+              : { ...event.alarm.trigger },
+        }
       : undefined,
     recurrence: cloneRecurrence(event.recurrence),
   };
@@ -562,7 +568,13 @@ function cloneCalendarEventInput(
         : cloneAllDayTiming(input.timing),
     categories: input.categories ? [...input.categories] : undefined,
     alarm: input.alarm
-      ? { ...input.alarm, trigger: { ...input.alarm.trigger } }
+      ? {
+          ...input.alarm,
+          trigger:
+            'type' in input.alarm.trigger
+              ? { ...input.alarm.trigger }
+              : { ...input.alarm.trigger },
+        }
       : undefined,
     recurrence: input.recurrence ? { ...input.recurrence } : undefined,
   };

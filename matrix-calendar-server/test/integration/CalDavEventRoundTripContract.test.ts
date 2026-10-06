@@ -180,6 +180,128 @@ describeContract('CalDAV VEVENT round-trip contract', () => {
     });
   });
 
+  it('stores and round-trips an absolute alarm beside a monthly ordinal recurrence', async () => {
+    const uid = `radicale-absolute-${randomUUID()}@matrix-calendar-widget`;
+    const resourceUrl = new URL(
+      `${randomUUID()}-absolute-alarm.ics`,
+      calendarUrl,
+    ).toString();
+    cleanupResourceUrls.push(resourceUrl);
+    const alarmTime = '2030-01-15T08:45:00Z';
+    const created = codec.create(calendarUrl, resourceUrl, {
+      uid,
+      title: 'Monthly ordinal with calendar alarm',
+      description: 'Stored calendar metadata only',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2030-01-07T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2030-01-07T11:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=MONTHLY;BYDAY=1MO;COUNT=3' },
+      alarm: {
+        action: 'display',
+        trigger: { type: 'absolute', value: alarmTime },
+      },
+    });
+    const stableAlarmUid = created.event.alarm?.uid;
+    expect(stableAlarmUid).toBeTruthy();
+
+    await client.createEvent(resourceUrl, created.icalendar);
+    const stored = await directGet(resourceUrl, credentials);
+    expect(stored.body).toContain('TRIGGER;VALUE=DATE-TIME:20300115T084500Z');
+    expect(stored.body).toContain('RRULE:FREQ=MONTHLY;BYDAY=1MO;COUNT=3');
+    expect(stored.body).toContain(`UID:${stableAlarmUid}`);
+    expect(stored.body).not.toContain('REPEAT:');
+    const parsedStored = codec.parse(calendarUrl, resourceUrl, stored.body);
+    expect(parsedStored.event.alarm?.trigger).toEqual({
+      type: 'absolute',
+      value: alarmTime,
+    });
+    expect(parsedStored.event.recurrence?.rrule).toBe(
+      'FREQ=MONTHLY;BYDAY=1MO;COUNT=3',
+    );
+
+    const replacementTime = '2030-01-15T09:15:00Z';
+    const updated = parsedStored.applyPatch({
+      alarm: {
+        action: 'display',
+        trigger: { type: 'absolute', value: replacementTime },
+      },
+    });
+    expect(updated.event.alarm?.uid).toBe(stableAlarmUid);
+    await client.updateEvent(resourceUrl, stored.etag, updated.icalendar);
+
+    const roundTrip = await directGet(resourceUrl, credentials);
+    expect(roundTrip.body).toContain(
+      'TRIGGER;VALUE=DATE-TIME:20300115T091500Z',
+    );
+    expect(roundTrip.body).toContain('RRULE:FREQ=MONTHLY;BYDAY=1MO;COUNT=3');
+    expect(roundTrip.body).toContain(`UID:${stableAlarmUid}`);
+    const roundTripEvent = codec.parse(
+      calendarUrl,
+      resourceUrl,
+      roundTrip.body,
+    ).event;
+    expect(roundTripEvent.alarm?.trigger).toEqual({
+      type: 'absolute',
+      value: replacementTime,
+    });
+    expect(roundTripEvent.alarm?.uid).toBe(stableAlarmUid);
+    expect(roundTripEvent.description).toBe('Stored calendar metadata only');
+  });
+
+  it('round-trips an authored weekly RRULE through CalDAV storage', async () => {
+    const uid = `radicale-weekly-${randomUUID()}@matrix-calendar-widget`;
+    const resourceUrl = new URL(
+      `${randomUUID()}-weekly-recurrence.ics`,
+      calendarUrl,
+    ).toString();
+    cleanupResourceUrls.push(resourceUrl);
+    const created = codec.create(calendarUrl, resourceUrl, {
+      uid,
+      title: 'Authored weekly recurrence',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2030-01-07T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2030-01-07T11:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      recurrence: { rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=3' },
+    });
+    const expectedRule = created.event.recurrence?.rrule;
+    expect(expectedRule).toBeTruthy();
+
+    await client.createEvent(resourceUrl, created.icalendar);
+    const stored = await directGet(resourceUrl, credentials);
+    const parsedStored = codec.parse(calendarUrl, resourceUrl, stored.body);
+    expect(parsedStored.event.recurrence?.rrule).toBe(expectedRule);
+
+    const patched = parsedStored.applyPatch({
+      title: 'Updated weekly recurrence',
+    });
+    await client.updateEvent(resourceUrl, stored.etag, patched.icalendar);
+
+    const afterPut = await directGet(resourceUrl, credentials);
+    const roundTrip = codec.parse(calendarUrl, resourceUrl, afterPut.body);
+    expect(roundTrip.event.title).toBe('Updated weekly recurrence');
+    expect(roundTrip.event.recurrence?.rrule).toBe(expectedRule);
+  });
+
   it('round-trips a recurring master and detached overrides in one CalDAV resource', async () => {
     const uid = `radicale-${randomUUID()}@matrix-calendar-widget`;
     const resourceUrl = new URL(

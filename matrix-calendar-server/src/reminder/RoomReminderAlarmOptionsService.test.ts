@@ -157,6 +157,30 @@ describe('RoomReminderAlarmOptionsService', () => {
     expect(JSON.stringify(result)).not.toContain('BEGIN:VCALENDAR');
   });
 
+  it('returns no trigger option after a configured relative alarm becomes absolute', async () => {
+    const resource: CanonicalReminderResourceData = {
+      calendarId,
+      icalendar: [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        event(
+          'planning@example.test',
+          'DTSTART:20261001T090000Z',
+          'TRIGGER;VALUE=DATE-TIME:20261001T085500Z',
+        ),
+        'END:VCALENDAR',
+        '',
+      ].join('\r\n'),
+    };
+    const service = new RoomReminderAlarmOptionsService({
+      readSourceForAlarmOptions: jest.fn().mockResolvedValue(resource),
+    } as unknown as RoomReminderConfigurationService);
+
+    await expect(service.list(actor, roomId, eventId)).resolves.toEqual({
+      options: [],
+    });
+  });
+
   it('omits alarms with unsupported anchors, absolute triggers, or malformed raw parameters', async () => {
     const resource: CanonicalReminderResourceData = {
       calendarId,
