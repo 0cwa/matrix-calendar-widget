@@ -21,8 +21,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        candidate:
-          - uri-attachments
+        include:
+          - candidate: alarm-server
+            sha: c64bf613fdc9048cded4ac1b8f7fc96c19a07314
+          - candidate: attachment-server
+            sha: f4ac59fcdd56979ac1b67822f275d47267bdebe7
+          - candidate: attachment-widget
+            sha: f4ac59fcdd56979ac1b67822f275d47267bdebe7
+          - candidate: text-widget
+            sha: fe1a9c63aae28350ef2dc01563b1f3bf8eb7f3fd
     steps:
       - name: Check out locator source
         uses: actions/checkout@v7
@@ -35,7 +42,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: 0cwa/matrix-calendar-widget
-          ref: b17fd89a38f001047822a66e91830c67d7dc22c2
+          ref: ${{ matrix.sha }}
           path: candidate
           persist-credentials: false
 
@@ -58,10 +65,11 @@ jobs:
             exit 1
           fi
 
-      - name: Install, build linked packages, and run focused Jest suites
+      - name: Install, build linked packages, and run pinned test suites
         working-directory: candidate
         env:
           CANDIDATE: ${{ matrix.candidate }}
+          EXPECTED_SHA: ${{ matrix.sha }}
         run: |
           set -euo pipefail
           locator="$GITHUB_WORKSPACE/scripts/temporary-server-test-locations.mjs"
@@ -69,8 +77,8 @@ jobs:
           install_log="$RUNNER_TEMP/locator-yarn-install.log"
           timezone_log="$RUNNER_TEMP/locator-timezone-build.log"
           calendar_log="$RUNNER_TEMP/locator-calendar-build.log"
-          test_log="$RUNNER_TEMP/locator-jest.log"
-          report="$RUNNER_TEMP/locator-jest-results.json"
+          test_log="$RUNNER_TEMP/locator-tests.log"
+          report="$RUNNER_TEMP/locator-test-results.json"
           safe_summary="$RUNNER_TEMP/locator-safe-summary.txt"
           path_file="$RUNNER_TEMP/locator-approved-paths.txt"
           parser_log="$RUNNER_TEMP/locator-parser.log"
@@ -79,11 +87,17 @@ jobs:
           # Test/build code must not write unsanitized output to GitHub command files.
           unset GITHUB_STEP_SUMMARY GITHUB_OUTPUT GITHUB_ENV
 
-          expected_sha=''
           case "$CANDIDATE" in
-            uri-attachments) expected_sha='b17fd89a38f001047822a66e91830c67d7dc22c2' ;;
+            alarm-server) approved_sha='c64bf613fdc9048cded4ac1b8f7fc96c19a07314' ;;
+            attachment-server|attachment-widget) approved_sha='f4ac59fcdd56979ac1b67822f275d47267bdebe7' ;;
+            text-widget) approved_sha='fe1a9c63aae28350ef2dc01563b1f3bf8eb7f3fd' ;;
             *) printf '%s\n' 'diagnostic-unavailable code=target-map' >> "$summary_path"; exit 1 ;;
           esac
+          expected_sha="$EXPECTED_SHA"
+          if [ "$expected_sha" != "$approved_sha" ]; then
+            printf '%s\n' 'diagnostic-unavailable code=candidate-revision' >> "$summary_path"
+            exit 1
+          fi
           candidate_sha="$(git rev-parse HEAD 2>/dev/null || true)"
           if [ "$candidate_sha" != "$expected_sha" ]; then
             printf '%s\n' 'diagnostic-unavailable code=candidate-revision' >> "$summary_path"
@@ -114,13 +128,31 @@ jobs:
           fi
 
           set +e
-          yarn workspace @matrix-calendar-widget/server jest \
-            "${test_paths[@]}" \
-            --runInBand \
-            --json \
-            --outputFile="$report" \
-            --testLocationInResults \
-            >"$test_log" 2>&1
+          case "$CANDIDATE" in
+            alarm-server|attachment-server)
+              yarn workspace @matrix-calendar-widget/server test:all \
+                "${test_paths[@]}" \
+                --runInBand \
+                --json \
+                --outputFile="$report" \
+                --testLocationInResults
+              ;;
+            attachment-widget|text-widget)
+              if [ "${#test_paths[@]}" -ne 2 ]; then
+                printf '%s\n' 'diagnostic-unavailable code=target-map' >> "$summary_path"
+                exit 1
+              fi
+              yarn workspace @matrix-calendar-widget/widget test:all \
+                "${test_paths[@]}" \
+                --includeTaskLocation \
+                --reporter=json \
+                --outputFile="$report"
+              ;;
+            *)
+              printf '%s\n' 'diagnostic-unavailable code=target-map' >> "$summary_path"
+              exit 1
+              ;;
+          esac >"$test_log" 2>&1
           test_status=$?
           set -e
 
