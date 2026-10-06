@@ -5,7 +5,6 @@ on:
     paths:
       - '.github/workflows/temporary-server-test-locations.yml'
       - 'scripts/temporary-server-test-locations.mjs'
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,6 +12,7 @@ permissions:
 jobs:
   focused-server-tests:
     name: Focused server tests (${{ matrix.candidate }})
+    if: github.event.pull_request.head.repo.full_name == '0cwa/matrix-calendar-widget'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     concurrency:
@@ -28,12 +28,14 @@ jobs:
       - name: Check out locator source
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: 0cwa/matrix-calendar-widget
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
       - name: Check out immutable candidate
         uses: actions/checkout@v7
         with:
+          repository: 0cwa/matrix-calendar-widget
           ref: ${{ matrix.candidate == 'absolute-alarm' && '5d2cbafa178fddd5aaa1fc39734cd027459b3dd5' || '61e606e5b8e0f69d8f1c4f3d132f5b72856d9523' }}
           path: candidate
           persist-credentials: false
@@ -48,10 +50,12 @@ jobs:
       - name: Run sanitizer self-tests
         run: |
           set -euo pipefail
+          summary_path="$GITHUB_STEP_SUMMARY"
           log="$RUNNER_TEMP/locator-self-test.log"
           trap 'rm -f "$log"' EXIT
+          unset GITHUB_STEP_SUMMARY GITHUB_OUTPUT GITHUB_ENV
           if ! node scripts/temporary-server-test-locations.mjs self-test >"$log" 2>&1; then
-            printf '%s\n' 'diagnostic-unavailable code=sanitizer-self-test' >> "$GITHUB_STEP_SUMMARY"
+            printf '%s\n' 'diagnostic-unavailable code=sanitizer-self-test' >> "$summary_path"
             exit 1
           fi
 
@@ -75,6 +79,18 @@ jobs:
 
           # Test/build code must not write unsanitized output to GitHub command files.
           unset GITHUB_STEP_SUMMARY GITHUB_OUTPUT GITHUB_ENV
+
+          expected_sha=''
+          case "$CANDIDATE" in
+            absolute-alarm) expected_sha='5d2cbafa178fddd5aaa1fc39734cd027459b3dd5' ;;
+            uri-attachments) expected_sha='61e606e5b8e0f69d8f1c4f3d132f5b72856d9523' ;;
+            *) printf '%s\n' 'diagnostic-unavailable code=target-map' >> "$summary_path"; exit 1 ;;
+          esac
+          candidate_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+          if [ "$candidate_sha" != "$expected_sha" ]; then
+            printf '%s\n' 'diagnostic-unavailable code=candidate-revision' >> "$summary_path"
+            exit 1
+          fi
 
           if ! node "$locator" paths "$CANDIDATE" >"$path_file" 2>"$parser_log"; then
             printf '%s\n' 'diagnostic-unavailable code=target-map' >> "$summary_path"
