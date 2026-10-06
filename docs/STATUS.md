@@ -2,11 +2,12 @@
 
 _Last updated: 2026-10-06._
 
-_Source snapshot: `main` at `4c25fa97d4e5a01cca9eaf675b62dfd7b82ec863` (PR #216)._
+_Source baseline: `main` at `5c543da1a3e4f4fdb6c1724380e9cf9f1174451d`
+(PR #217); PR #220 adds the bounded selected-occurrence text slice below._
 
 ## Current phase
 
-**Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; actual-client and operator acceptance remain open. M7 has bounded bot commands and post-success room-target event notices. M8 has source-level gateway and CalDAV limits plus a hosted synthetic Chromium fixture; actual-client, screen-reader, capacity, and operator acceptance remain open.
+**Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence timing/text and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; actual-client and operator acceptance remain open. M7 has bounded bot commands and post-success room-target event notices. M8 has source-level gateway and CalDAV limits plus a hosted synthetic Chromium fixture; actual-client, screen-reader, capacity, and operator acceptance remain open.
 
 This is source status, not release or deployment approval. The [repository and operator readiness matrix](./repository-readiness.md) separates tested repository behavior from evidence that still requires a real operator or Matrix client.
 
@@ -22,7 +23,7 @@ Calendar visibility, VEVENT-only creation, rename, safe deletion, description an
 
 ### M5 — bounded recurrence and iCalendar support
 
-The codec and widget support a documented bounded RRULE/RDATE/EXDATE subset, PERIOD values, supported relative DISPLAY VALARM metadata, revision metadata, bundled-timezone projection, selected-occurrence timing edits, typed EXDATE skip/restore, and bounded safe event links. PR #197 adds selected-occurrence timing and link behavior; its exact merged tree `f532c628a227ad6c97ceeaa557feff58d3139dc6` passed all eight required repository checks. PR #200 adds timing-only this-and-following edits for supported finite COUNT rules of at most 128 members within one resource; its exact tree `9d1ce37f2457bbdeef4835ad26a8b28beac438ee` passed all eight checks. It rejects alarms, RDATE/EXDATE, unsafe detached suffixes, unsupported status/timing, and oversized results. Unsupported data remains opaque where supported edits allow it. Issue #6 remains open for broader recurrence authoring and actual client/server interoperability, including additional RRULE parts, general RECURRENCE-ID property editing, arbitrary rule splitting, attendee/email, individual reminder, URI attachment authoring, and conference forms beyond ADR036.
+The codec and widget support a documented bounded RRULE/RDATE/EXDATE subset, PERIOD values, supported relative DISPLAY VALARM metadata, revision metadata, bundled-timezone projection, selected-occurrence timing/text edits, typed EXDATE skip/restore, and bounded safe event links. PR #197 adds selected-occurrence timing and link behavior; its exact merged tree `f532c628a227ad6c97ceeaa557feff58d3139dc6` passed all eight required repository checks. PR #200 adds timing-only this-and-following edits for supported finite COUNT rules of at most 128 members within one resource; its exact tree `9d1ce37f2457bbdeef4835ad26a8b28beac438ee` passed all eight checks. It rejects alarms, RDATE/EXDATE, unsafe detached suffixes, unsupported status/timing, and oversized results. Unsupported data remains opaque where supported edits allow it. Issue #6 remains open for broader recurrence authoring and actual client/server interoperability, including additional RRULE parts, general RECURRENCE-ID property editing, arbitrary rule splitting, attendee/email, individual reminder, URI attachment authoring, and conference forms beyond ADR036.
 
 PR #215 adds one authored MONTHLY ordinal BYDAY selector (first through fifth
 or last weekday), with matching DTSTART and existing interval/count/typed-UNTIL
@@ -43,6 +44,18 @@ composite form save retains exact source bytes; an effective edit is retained
 even when opaque or exhausted revision metadata cannot be updated. This does
 not add attachment authoring, multiple conferences, RTC provisioning, or
 instance/following conference operations.
+
+
+PR #220 (ADR037) adds selected-occurrence title, description, and location
+editing through sparse set/inherit operations. Explicit empty description and
+location remain distinct from inheritance; an untouched imported empty title
+is preserved, while an authored title must be nonblank. Text-only overrides
+use validated projected timing and the original typed RECURRENCE-ID; existing
+moved timing, master/sibling data, and untouched opaque parameters are retained.
+An unchanged save creates no detached component. Parameterized fields that
+cannot be safely authored, alarms, and ambiguous recurrence fail closed.
+This-and-following remains timing-only; broader instance properties and
+client/server interoperability remain open.
 
 ### M6 — room calendars and reminders
 
