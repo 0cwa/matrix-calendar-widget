@@ -190,17 +190,8 @@ test('room visitor sees read-only event controls at a narrow width', async ({
     0,
   );
 
-  const dimensions = await page.evaluate(() => ({
-    viewportWidth: document.documentElement.clientWidth,
-    documentWidth: document.documentElement.scrollWidth,
-    dialogWidth:
-      document.querySelector('[role="dialog"]')?.getBoundingClientRect()
-        .width ?? 0,
-    dialogClientWidth:
-      document.querySelector('[role="dialog"]')?.clientWidth ?? 0,
-    dialogScrollWidth:
-      document.querySelector('[role="dialog"]')?.scrollWidth ?? 0,
-  }));
+  await waitForDialogTransitions(dialog);
+  const dimensions = await readDialogMeasurements(page);
   await test.info().attach('room-visitor-layout.json', {
     body: JSON.stringify(dimensions),
     contentType: 'application/json',
@@ -212,6 +203,7 @@ test('room visitor sees read-only event controls at a narrow width', async ({
   expect(dimensions.dialogScrollWidth).toBeLessThanOrEqual(
     dimensions.dialogClientWidth + 1,
   );
+  expect(dimensions.roomLinkPaintOpacity).toBe(1);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   await page.keyboard.press('Escape');
@@ -286,17 +278,8 @@ test('room manager sees writable event controls at a narrow width', async ({
   await dialog.getByRole('button', { name: 'Notify room' }).click();
   await expect(reminder).not.toBeChecked();
 
-  const dimensions = await page.evaluate(() => ({
-    viewportWidth: document.documentElement.clientWidth,
-    documentWidth: document.documentElement.scrollWidth,
-    dialogWidth:
-      document.querySelector('[role="dialog"]')?.getBoundingClientRect()
-        .width ?? 0,
-    dialogClientWidth:
-      document.querySelector('[role="dialog"]')?.clientWidth ?? 0,
-    dialogScrollWidth:
-      document.querySelector('[role="dialog"]')?.scrollWidth ?? 0,
-  }));
+  await waitForDialogTransitions(dialog);
+  const dimensions = await readDialogMeasurements(page);
   await test.info().attach('room-manager-layout.json', {
     body: JSON.stringify(dimensions),
     contentType: 'application/json',
@@ -308,6 +291,7 @@ test('room manager sees writable event controls at a narrow width', async ({
   expect(dimensions.dialogScrollWidth).toBeLessThanOrEqual(
     dimensions.dialogClientWidth + 1,
   );
+  expect(dimensions.roomLinkPaintOpacity).toBe(1);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   await page.keyboard.press('Escape');
@@ -323,4 +307,62 @@ async function tabToEvent(page: Page, event: Locator): Promise<void> {
       return;
     }
   }
+}
+
+async function waitForDialogTransitions(dialog: Locator): Promise<void> {
+  await dialog.evaluate(async (element) => {
+    const dialogRoot = element.closest('.MuiDialog-root');
+    if (!dialogRoot) return;
+
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => resolve());
+    });
+    const dialogElements = [
+      dialogRoot,
+      ...Array.from(dialogRoot.querySelectorAll('*')),
+    ];
+    const transitions = dialogElements
+      .flatMap((dialogElement) => dialogElement.getAnimations())
+      .filter((animation) => animation.constructor.name === 'CSSTransition');
+    await Promise.all(
+      transitions.map((transition) =>
+        transition.finished.catch(() => undefined),
+      ),
+    );
+  });
+}
+
+async function readDialogMeasurements(page: Page) {
+  return page.evaluate(() => {
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const dialogRoot = dialog?.closest<HTMLElement>('.MuiDialog-root');
+    const roomLink = dialog?.querySelector<HTMLElement>(
+      'a[href^="https://matrix.to/"]',
+    );
+    let roomLinkPaintOpacity = 1;
+    if (roomLink && dialogRoot) {
+      let currentElement: HTMLElement | null = roomLink;
+      while (currentElement) {
+        roomLinkPaintOpacity *= Number.parseFloat(
+          window.getComputedStyle(currentElement).opacity,
+        );
+        if (currentElement === dialogRoot) break;
+        currentElement = currentElement.parentElement;
+      }
+    }
+    return {
+      viewportWidth: document.documentElement.clientWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      dialogWidth: dialog?.getBoundingClientRect().width ?? 0,
+      dialogClientWidth: dialog?.clientWidth ?? 0,
+      dialogScrollWidth: dialog?.scrollWidth ?? 0,
+      dialogRootOpacity: dialogRoot
+        ? window.getComputedStyle(dialogRoot).opacity
+        : undefined,
+      roomLinkColor: roomLink
+        ? window.getComputedStyle(roomLink).color
+        : undefined,
+      roomLinkPaintOpacity,
+    };
+  });
 }
