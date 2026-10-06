@@ -64,12 +64,34 @@ jobs:
           node dev/element-acceptance-diagnostics.test.mjs
           node dev/sanitize-element-acceptance.test.mjs
 
-      - name: Build calendar, server, and widget images
+      - name: Build calendar, server, and widget outputs
         run: |
           yarn workspace @matrix-calendar-widget/ical-timezones build
           yarn workspace @matrix-calendar-widget/calendar build
           yarn workspace @matrix-calendar-widget/server build
           yarn workspace @matrix-calendar-widget/widget build
+          docker build \
+            --tag matrix-calendar-widget/server:element-acceptance \
+            --file matrix-calendar-server/Dockerfile \
+            .
+          docker build \
+            --build-context root=. \
+            --tag matrix-calendar-widget/widget:element-acceptance \
+            --file matrix-calendar-widget/Dockerfile \
+            matrix-calendar-widget
+          server_cmd="$(docker image inspect --format '{{json .Config.Cmd}}' matrix-calendar-widget/server:element-acceptance)"
+          if [[ "$server_cmd" != '["node","./lib/src/index.js"]' ]]; then
+            echo 'The built server image does not use the compiled entrypoint.' >&2
+            exit 1
+          fi
+          if ! docker run --rm --network none --read-only \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/dev/element-acceptance-image-smoke.mjs,target=/tmp/element-acceptance-image-smoke.mjs,readonly" \
+            --entrypoint node matrix-calendar-widget/server:element-acceptance \
+            /tmp/element-acceptance-image-smoke.mjs \
+            > "$RUNNER_TEMP/element-acceptance-image-smoke.log" 2>&1; then
+            echo 'The isolated server image failed its compiled entrypoint smoke.' >&2
+            exit 1
+          fi
 
       - name: Install isolated Chromium
         run: yarn workspace e2e playwright install --with-deps chromium --only-shell
@@ -93,7 +115,7 @@ jobs:
             echo 'Synthetic Element stack configuration is invalid.' >&2
             exit 1
           fi
-          if ! "${compose[@]}" up --build -d gateway widget element > "$RUNNER_TEMP/element-acceptance-compose-up.log" 2>&1; then
+          if ! "${compose[@]}" up --no-build -d gateway widget element > "$RUNNER_TEMP/element-acceptance-compose-up.log" 2>&1; then
             printf '%s\n' '{"phase":"runtime-ready","status":"failed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
             echo 'Synthetic Element stack startup failed.' >&2
             exit 1
@@ -143,4 +165,5 @@ jobs:
           rm -f \
             "$RUNNER_TEMP/element-acceptance-dev-up.log" \
             "$RUNNER_TEMP/element-acceptance-compose-up.log" \
+            "$RUNNER_TEMP/element-acceptance-image-smoke.log" \
             "$RUNNER_TEMP/element-acceptance-playwright.log"

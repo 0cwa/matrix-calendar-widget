@@ -243,11 +243,40 @@ jobs:
       - name: Build server workspace
         run: yarn workspace @matrix-calendar-widget/server build
 
+      - name: Verify compiled server entrypoint metadata
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const pkg = require('./matrix-calendar-server/package.json');
+          for (const entry of [pkg.main, pkg.types]) {
+            if (!fs.existsSync(path.join('matrix-calendar-server', entry))) {
+              throw new Error('Compiled server entrypoint metadata points to a missing file.');
+            }
+          }
+          NODE
+
       - name: Build widget workspace
         run: yarn workspace @matrix-calendar-widget/widget build
 
       - name: Build server image (local only)
         run: docker build -t matrix-calendar-widget/server:ci -f matrix-calendar-server/Dockerfile .
+
+      - name: Smoke test server image entrypoint without network
+        run: |
+          server_cmd="$(docker image inspect --format '{{json .Config.Cmd}}' matrix-calendar-widget/server:ci)"
+          if [[ "$server_cmd" != '["node","./lib/src/index.js"]' ]]; then
+            echo 'The built server image does not use the compiled entrypoint.' >&2
+            exit 1
+          fi
+          if ! docker run --rm --network none --read-only \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/dev/element-acceptance-image-smoke.mjs,target=/tmp/element-acceptance-image-smoke.mjs,readonly" \
+            --entrypoint node matrix-calendar-widget/server:ci \
+            /tmp/element-acceptance-image-smoke.mjs \
+            >/dev/null 2>&1; then
+            echo 'The built server image failed its compiled entrypoint smoke.' >&2
+            exit 1
+          fi
 
       - name: Build widget image (local only)
         run: >-
