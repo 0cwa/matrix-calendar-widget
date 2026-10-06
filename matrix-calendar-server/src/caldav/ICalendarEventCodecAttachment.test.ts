@@ -150,6 +150,26 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
     ).toEqual({ event: parsed.event, icalendar: source });
   });
 
+  it('preserves links when an existing add accompanies an event edit', () => {
+    const source = calendarWithAttachments(
+      'ATTACH;VALUE=URI:https://files.example.test:443/agenda',
+    );
+    const parsed = codec().parse('team', 'event.ics', source);
+
+    const changed = parsed.applyPatch({
+      title: 'Updated planning',
+      attachment: {
+        action: 'add',
+        url: 'https://files.example.test/agenda',
+      },
+    });
+
+    expect(changed.event.title).toBe('Updated planning');
+    expect(changed.event.attachments).toEqual([
+      { url: 'https://files.example.test/agenda' },
+    ]);
+  });
+
   it('adds a link without changing folded parameters or opaque siblings', () => {
     const source = calendarWithAttachments(oldAttachment, binaryAttachment);
     const parsed = codec().parse('team', 'event.ics', source);
@@ -414,7 +434,9 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
     const parsed = codec().parse('team', 'event.ics', source);
 
     expect(parsed.event.unsupportedAttachment).toBe(true);
-    expect(parsed.event.attachments).toBeUndefined();
+    expect(parsed.event.attachments).toEqual([
+      { url: 'https://files.example.test/master' },
+    ]);
     expect(() =>
       parsed.applyPatch({
         attachment: {

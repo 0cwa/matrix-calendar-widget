@@ -542,9 +542,7 @@ export class ParsedICalendarEvent {
       ...eventWithoutAttachmentProjection
     } = this.event;
     const event: CalendarEvent = {
-      ...(attachmentWritePlan
-        ? eventWithoutAttachmentProjection
-        : this.event),
+      ...(attachmentWritePlan ? eventWithoutAttachmentProjection : this.event),
       ...eventPatch,
       title: patch.title ?? this.event.title,
       timing: patch.timing ?? this.event.timing,
