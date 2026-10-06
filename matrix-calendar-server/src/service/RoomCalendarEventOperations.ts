@@ -16,12 +16,15 @@
 
 import {
   CalendarEvent,
+  CalendarEventAttachmentValidationError,
   CalendarEventConferenceValidationError,
   CalendarEventInput,
   CalendarEventOccurrenceValidationError,
   CalendarEventPatch,
   CalendarTimeRange,
+  validateCalendarEventInputAttachment,
   validateCalendarEventInputConference,
+  validateCalendarEventPatchAttachment,
   validateCalendarEventPatchConference,
   validateCalendarEventPatchOccurrence,
 } from '@matrix-calendar-widget/calendar';
@@ -188,8 +191,12 @@ export class RoomCalendarEventOperations {
     );
     try {
       validateCalendarEventInputConference(input);
+      validateCalendarEventInputAttachment(input);
     } catch (error) {
-      if (error instanceof CalendarEventConferenceValidationError) {
+      if (
+        error instanceof CalendarEventConferenceValidationError ||
+        error instanceof CalendarEventAttachmentValidationError
+      ) {
         throw new RoomCalendarEventOperationError('invalid-event-input');
       }
       throw error;
@@ -237,10 +244,12 @@ export class RoomCalendarEventOperations {
     );
     try {
       validateCalendarEventPatchConference(patch);
+      validateCalendarEventPatchAttachment(patch);
       validateCalendarEventPatchOccurrence(patch);
     } catch (error) {
       if (
         error instanceof CalendarEventConferenceValidationError ||
+        error instanceof CalendarEventAttachmentValidationError ||
         error instanceof CalendarEventOccurrenceValidationError
       ) {
         throw new RoomCalendarEventOperationError('invalid-event-input');
@@ -284,6 +293,7 @@ export class RoomCalendarEventOperations {
       encoded.icalendar === current.icalendar &&
       etag === current.etag &&
       (Object.prototype.hasOwnProperty.call(patch, 'conference') ||
+        Object.prototype.hasOwnProperty.call(patch, 'attachment') ||
         (patch?.recurrence &&
           ('occurrence' in patch.recurrence ||
             'following' in patch.recurrence)))

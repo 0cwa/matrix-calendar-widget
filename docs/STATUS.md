@@ -2,8 +2,8 @@
 
 _Last updated: 2026-10-06._
 
-_Source baseline: `main` at `b73cdb61e30c20878a2cab282b6dc854130b92dd`
-(PR #221); PR #220 adds the bounded selected-occurrence text slice below._
+_Source baseline: `main` at `151d3c713799a12f18dcb8a5cb307081399daff5`
+(PR #220); PR #219 adds the bounded URI attachment slice below._
 
 ## Current phase
 
@@ -29,7 +29,7 @@ Calendar visibility, VEVENT-only creation, rename, safe deletion, description an
 
 ### M5 — bounded recurrence and iCalendar support
 
-The codec and widget support a documented bounded RRULE/RDATE/EXDATE subset, PERIOD values, supported relative DISPLAY VALARM metadata, revision metadata, bundled-timezone projection, selected-occurrence timing/text edits, typed EXDATE skip/restore, and bounded safe event links. PR #197 adds selected-occurrence timing and link behavior; its exact merged tree `f532c628a227ad6c97ceeaa557feff58d3139dc6` passed all eight required repository checks. PR #200 adds timing-only this-and-following edits for supported finite COUNT rules of at most 128 members within one resource; its exact tree `9d1ce37f2457bbdeef4835ad26a8b28beac438ee` passed all eight checks. It rejects alarms, RDATE/EXDATE, unsafe detached suffixes, unsupported status/timing, and oversized results. Unsupported data remains opaque where supported edits allow it. Issue #6 remains open for broader recurrence authoring and actual client/server interoperability, including additional RRULE parts, general RECURRENCE-ID property editing, arbitrary rule splitting, attendee/email, individual reminder, URI attachment authoring, and conference forms beyond ADR036.
+The codec and widget support a documented bounded RRULE/RDATE/EXDATE subset, PERIOD values, supported relative DISPLAY VALARM metadata, revision metadata, bundled-timezone projection, selected-occurrence timing/text edits, typed EXDATE skip/restore, and bounded safe event links. PR #197 adds selected-occurrence timing and link behavior; its exact merged tree `f532c628a227ad6c97ceeaa557feff58d3139dc6` passed all eight required repository checks. PR #200 adds timing-only this-and-following edits for supported finite COUNT rules of at most 128 members within one resource; its exact tree `9d1ce37f2457bbdeef4835ad26a8b28beac438ee` passed all eight checks. It rejects alarms, RDATE/EXDATE, unsafe detached suffixes, unsupported status/timing, and oversized results. Unsupported data remains opaque where supported edits allow it. Issue #6 remains open for broader recurrence authoring and actual client/server interoperability, including additional RRULE parts, general RECURRENCE-ID property editing, arbitrary rule splitting, attendee/email, individual reminder, attachment forms beyond ADR038, and conference forms beyond ADR036.
 
 PR #215 adds one authored MONTHLY ordinal BYDAY selector (first through fifth
 or last weekday), with matching DTSTART and existing interval/count/typed-UNTIL
@@ -61,6 +61,15 @@ An unchanged save creates no detached component. Parameterized fields that
 cannot be safely authored, alarms, and ambiguous recurrence fail closed.
 This-and-following remains timing-only; broader instance properties and
 client/server interoperability remain open.
+
+PR #219 (ADR038) adds one safe HTTP(S) URI ATTACH operation on an unambiguous
+master: add, replace a unique saved URI, or remove it. It preserves raw
+parameters, unrelated properties, and exact-source supported no-ops. Duplicate
+or colliding identities, more than 16 authorable URI links, ambiguous resources
+for the target UID, and detached attachment authoring are refused. Malformed, binary,
+and unsafe attachment data remain opaque; a bounded safe projection can
+remain visible with a read-only marker. This does not add uploads, downloads,
+previews, or attachment fetching.
 
 ### M6 — room calendars and reminders
 
@@ -107,7 +116,7 @@ loading, memory, and actual clients remain unmeasured.
 ## Open scope and acceptance blockers
 
 - **M4:** collection-timezone editing and remaining issue #5 acceptance work.
-- **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, arbitrary RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, attachment authoring, and conference forms beyond ADR036 are not part of the implemented editor. Unsupported recurrence or timezone sources may be omitted from projection; the widget warns for source forms it diagnoses, while preserving the canonical resource.
+- **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, arbitrary RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, attachment forms beyond ADR038, and conference forms beyond ADR036 are not part of the implemented editor. Unsupported recurrence or timezone sources may be omitted from projection; the widget warns for source forms it diagnoses, while preserving the canonical resource.
 - **M6:** issue #7 bounded repository criteria are complete. Keep room access, event writes, settings, delivery, and action notices off until the operator accepts each capability and its trust boundary. A passing pinned stack is not an etke-host or production proof.
 - **M8:** record actual Element Web/Desktop versions and acceptance against the isolated pinned stack; prove two-identity authorization denial, stale-ETag conflict behavior, keyboard/focus behavior, and restart plus restore of both Radicale and app-owned PostgreSQL data. Record an operator-approved measured enrollment/capacity envelope with hardware/runtime, displayed date-range counts, API/render latency, and explicit thresholds. Mobile/other clients and formal screen-reader certification remain deferred. Issue #9 remains open for beta, capacity, and client/operator acceptance. Gateway and bot quotas are process-local. Callers behind one reverse proxy share the gateway's TCP-peer quota; the beta target uses one server replica.
 - **Operator readiness:** homeserver/proxy behavior, OpenID query-token log redaction, selected Radicale image/configuration, PostgreSQL endpoint TLS/CA and role, backups/restores, secrets, network exposure, and rollback remain to be verified. The beta baseline uses the project-owned Radicale image and its own store; replacing an existing service or reusing its `/data` is optional and would require additional image/data-path compatibility and recovery evidence. The Compose sidecar does not migrate another service's data.

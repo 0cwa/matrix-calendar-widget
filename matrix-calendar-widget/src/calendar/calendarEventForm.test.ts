@@ -248,6 +248,12 @@ describe('calendar event form adapter', () => {
       conferenceLabel: '',
       conferenceEditable: true,
       conferenceChanged: false,
+      attachmentUrls: [],
+      attachmentEditable: true,
+      attachmentOperation: 'none',
+      attachmentSourceUrl: '',
+      attachmentUrl: '',
+      attachmentChanged: false,
       timingType: 'timed',
       start: '2026-09-23T09:00',
       end: '2026-09-23T10:00',
@@ -337,6 +343,80 @@ describe('calendar event form adapter', () => {
         conferenceLabel: 'x'.repeat(121),
       }),
     ).toBe('invalid-conference');
+  });
+
+  it('creates one safe URI attachment from the form', () => {
+    const values = {
+      ...createCalendarEventFormValues(calendar),
+      title: 'Planning',
+      attachmentOperation: 'add' as const,
+      attachmentUrl: 'HTTPS://FILES.EXAMPLE.TEST/agenda.pdf',
+      attachmentChanged: true,
+    };
+
+    expect(validateCalendarEventForm(values)).toBeUndefined();
+    expect(
+      calendarEventInputFromForm(values, 'planning@example.test').attachment,
+    ).toEqual({ url: 'https://files.example.test/agenda.pdf' });
+    expect(
+      validateCalendarEventForm({
+        ...values,
+        attachmentUrl: 'javascript:alert(1)',
+      }),
+    ).toBe('invalid-attachment');
+  });
+
+  it('maps one existing attachment selection to set or remove', () => {
+    const event: CalendarEvent = {
+      id: 'attachment-event',
+      calendarId: 'team',
+      uid: 'attachment@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-09-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      attachments: [{ url: 'https://files.example.test/old.pdf' }],
+    };
+    const values = calendarEventToFormValues(event, calendar);
+    expect(values.attachmentEditable).toBe(true);
+    expect(values.attachmentUrls).toEqual([
+      'https://files.example.test/old.pdf',
+    ]);
+
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        attachmentOperation: 'set',
+        attachmentSourceUrl: 'https://files.example.test/old.pdf',
+        attachmentUrl: 'https://files.example.test/new.pdf',
+        attachmentChanged: true,
+      }).attachment,
+    ).toEqual({
+      action: 'set',
+      sourceUrl: 'https://files.example.test/old.pdf',
+      url: 'https://files.example.test/new.pdf',
+    });
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        attachmentOperation: 'remove',
+        attachmentSourceUrl: 'https://files.example.test/old.pdf',
+        attachmentChanged: true,
+      }).attachment,
+    ).toEqual({
+      action: 'remove',
+      sourceUrl: 'https://files.example.test/old.pdf',
+    });
   });
 
   it('maps conference edit and clear to explicit set and remove operations', () => {
