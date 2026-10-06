@@ -5,78 +5,69 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const repository = '0cwa/matrix-calendar-widget';
-const base = '5c543da1a3e4f4fdb6c1724380e9cf9f1174451d';
 const candidates = new Map([
-  ['61e606e5b8e0f69d8f1c4f3d132f5b72856d9523', [
-    'docs/adrs/adr038-bounded-safe-uri-attachment-authoring.md',
-    'matrix-calendar-server/src/caldav/ICalendarEventCodec.ts',
-    'matrix-calendar-server/src/caldav/ICalendarEventCodecAttachment.test.ts',
-    'matrix-calendar-server/src/controller/CalendarGatewayController.test.ts',
-    'matrix-calendar-server/src/controller/CalendarGatewayController.ts',
-    'matrix-calendar-server/src/service/RoomCalendarEventOperations.test.ts',
-    'matrix-calendar-server/src/service/RoomCalendarEventOperations.ts',
-    'matrix-calendar-widget/public/locales/de/translation.json',
-    'matrix-calendar-widget/public/locales/en/translation.json',
-    'matrix-calendar-widget/src/calendar/calendarEventForm.test.ts',
-    'matrix-calendar-widget/src/calendar/calendarEventForm.ts',
-    'matrix-calendar-widget/src/components/calendar/CalendarEventEditorDialog.test.tsx',
-    'matrix-calendar-widget/src/components/calendar/CalendarEventEditorDialog.tsx',
-    'packages/calendar/src/model/calendar.ts',
-    'packages/calendar/src/model/index.ts',
-    'packages/calendar/src/repository/inMemoryCalendarRepository.test.ts',
-    'packages/calendar/src/repository/inMemoryCalendarRepository.ts',
-    'packages/calendar/src/utils/calendarEventAttachment.test.ts',
-    'packages/calendar/src/utils/calendarEventAttachment.ts',
-    'packages/calendar/src/utils/index.ts',
-  ]],
-  ['4669e8e9cd338b984d661029ffd25e315d8e5721', [
-    'docs/adrs/adr037-selected-occurrence-text-fields.md',
-    'matrix-calendar-server/src/caldav/ICalendarEventCodec.test.ts',
-    'matrix-calendar-server/src/caldav/ICalendarEventCodec.ts',
-    'matrix-calendar-server/src/controller/CalendarGatewayController.test.ts',
-    'matrix-calendar-server/src/controller/CalendarGatewayController.ts',
-    'matrix-calendar-server/src/service/RoomCalendarEventOperations.test.ts',
-    'matrix-calendar-server/src/service/RoomCalendarEventOperations.ts',
-    'matrix-calendar-widget/public/locales/de/translation.json',
-    'matrix-calendar-widget/public/locales/en/translation.json',
-    'matrix-calendar-widget/src/calendar/calendarEventForm.test.ts',
-    'matrix-calendar-widget/src/calendar/calendarEventForm.ts',
-    'matrix-calendar-widget/src/calendar/index.ts',
-    'matrix-calendar-widget/src/components/calendar/CalendarEventEditorDialog.test.tsx',
-    'matrix-calendar-widget/src/components/calendar/CalendarEventEditorDialog.tsx',
-    'packages/calendar/src/model/calendar.ts',
-    'packages/calendar/src/model/index.ts',
-    'packages/calendar/src/repository/inMemoryCalendarRepository.test.ts',
-    'packages/calendar/src/repository/inMemoryCalendarRepository.ts',
-    'packages/calendar/src/utils/calendarEventOccurrenceProjection.test.ts',
-    'packages/calendar/src/utils/calendarEventOccurrenceProjection.ts',
-    'packages/calendar/src/utils/calendarEventOccurrenceWrite.test.ts',
-    'packages/calendar/src/utils/calendarEventOccurrenceWrite.ts',
-    'packages/calendar/src/utils/index.ts',
-  ]],
-  ['5d2cbafa178fddd5aaa1fc39734cd027459b3dd5', [
-    'docs/adrs/adr039-calendar-absolute-display-alarm-metadata.md',
-    'fixtures/ical/alarm-absolute.ics',
-    'matrix-calendar-server/src/caldav/ICalendarEventCodec.test.ts',
-    'matrix-calendar-server/src/caldav/ICalendarEventCodec.ts',
-    'matrix-calendar-server/src/controller/CalendarGatewayController.test.ts',
-    'matrix-calendar-server/src/controller/CalendarGatewayController.ts',
-    'matrix-calendar-server/src/reminder/CanonicalRoomReminderSchedulerSource.test.ts',
-    'matrix-calendar-server/src/reminder/ReminderTrigger.test.ts',
-    'matrix-calendar-server/src/reminder/RoomReminderAlarmOptionsService.test.ts',
-    'matrix-calendar-server/src/reminder/RoomReminderConfigurationService.test.ts',
-    'matrix-calendar-server/src/service/RoomCalendarEventOperations.test.ts',
-    'matrix-calendar-server/src/service/RoomCalendarEventOperations.ts',
-    'matrix-calendar-server/test/integration/CalDavEventRoundTripContract.test.ts',
-    'matrix-calendar-widget/public/locales/de/translation.json',
-    'matrix-calendar-widget/public/locales/en/translation.json',
-    'matrix-calendar-widget/src/calendar/calendarEventForm.test.ts',
-    'matrix-calendar-widget/src/calendar/calendarEventForm.ts',
-    'matrix-calendar-widget/src/components/calendar/CalendarEventEditorDialog.test.tsx',
-    'matrix-calendar-widget/src/components/calendar/CalendarEventEditorDialog.tsx',
-    'packages/calendar/src/model/calendar.ts',
-    'packages/calendar/src/model/index.ts',
-  ]],
+  [
+    'd681ec6cbe1130917dc45ba780e331ad01bfded7',
+    {
+      base: 'b73cdb61e30c20878a2cab282b6dc854130b92dd',
+      paths: [
+        "docs/PLAN.md",
+        "docs/STATUS.md",
+        "docs/adrs/adr040-selected-occurrence-text-fields.md",
+        "docs/beta-scope.md",
+        "matrix-calendar-server/src/caldav/ICalendarEventCodec.test.ts",
+        "matrix-calendar-server/src/caldav/ICalendarEventCodec.ts",
+        "matrix-calendar-server/src/controller/CalendarGatewayController.test.ts",
+        "matrix-calendar-server/src/controller/CalendarGatewayController.ts",
+        "matrix-calendar-server/src/service/RoomCalendarEventOperations.test.ts",
+        "matrix-calendar-server/src/service/RoomCalendarEventOperations.ts",
+        "matrix-calendar-widget/public/locales/de/translation.json",
+        "matrix-calendar-widget/public/locales/en/translation.json",
+        "matrix-calendar-widget/src/calendar/calendarEventForm.test.ts",
+        "matrix-calendar-widget/src/calendar/calendarEventForm.ts",
+        "matrix-calendar-widget/src/calendar/index.ts",
+        "matrix-calendar-widget/src/components/calendar/CalendarEventEditorDialog.test.tsx",
+        "matrix-calendar-widget/src/components/calendar/CalendarEventEditorDialog.tsx",
+        "packages/calendar/src/model/calendar.ts",
+        "packages/calendar/src/model/index.ts",
+        "packages/calendar/src/repository/inMemoryCalendarRepository.test.ts",
+        "packages/calendar/src/repository/inMemoryCalendarRepository.ts",
+        "packages/calendar/src/utils/calendarEventOccurrenceProjection.test.ts",
+        "packages/calendar/src/utils/calendarEventOccurrenceProjection.ts",
+        "packages/calendar/src/utils/calendarEventOccurrenceWrite.test.ts",
+        "packages/calendar/src/utils/calendarEventOccurrenceWrite.ts",
+        "packages/calendar/src/utils/index.ts",
+      ],
+    },
+  ],
+  [
+    'b17fd89a38f001047822a66e91830c67d7dc22c2',
+    {
+      base: '5c543da1a3e4f4fdb6c1724380e9cf9f1174451d',
+      paths: [
+        "docs/adrs/adr038-bounded-safe-uri-attachment-authoring.md",
+        "matrix-calendar-server/src/caldav/ICalendarEventCodec.ts",
+        "matrix-calendar-server/src/caldav/ICalendarEventCodecAttachment.test.ts",
+        "matrix-calendar-server/src/controller/CalendarGatewayController.test.ts",
+        "matrix-calendar-server/src/controller/CalendarGatewayController.ts",
+        "matrix-calendar-server/src/service/RoomCalendarEventOperations.test.ts",
+        "matrix-calendar-server/src/service/RoomCalendarEventOperations.ts",
+        "matrix-calendar-widget/public/locales/de/translation.json",
+        "matrix-calendar-widget/public/locales/en/translation.json",
+        "matrix-calendar-widget/src/calendar/calendarEventForm.test.ts",
+        "matrix-calendar-widget/src/calendar/calendarEventForm.ts",
+        "matrix-calendar-widget/src/components/calendar/CalendarEventEditorDialog.test.tsx",
+        "matrix-calendar-widget/src/components/calendar/CalendarEventEditorDialog.tsx",
+        "packages/calendar/src/model/calendar.ts",
+        "packages/calendar/src/model/index.ts",
+        "packages/calendar/src/repository/inMemoryCalendarRepository.test.ts",
+        "packages/calendar/src/repository/inMemoryCalendarRepository.ts",
+        "packages/calendar/src/utils/calendarEventAttachment.test.ts",
+        "packages/calendar/src/utils/calendarEventAttachment.ts",
+        "packages/calendar/src/utils/index.ts",
+      ],
+    },
+  ],
 ]);
 
 const maxFileBytes = 250_000;
@@ -183,8 +174,9 @@ function blocked(code) {
 function main() {
   const cwd = process.cwd();
   const head = git(['rev-parse', 'HEAD']).trim();
-  const allowlist = candidates.get(head);
-  if (!allowlist) return blocked('UNPINNED_TARGET');
+  const candidate = candidates.get(head);
+  if (!candidate) return blocked('UNPINNED_TARGET');
+  const { base, paths: allowlist } = candidate;
   if (git(['rev-parse', base]).trim() !== base || git(['merge-base', base, head]).trim() !== base) {
     return blocked('BASE_MISMATCH');
   }
