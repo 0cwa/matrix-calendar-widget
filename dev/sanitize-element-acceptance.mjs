@@ -45,6 +45,30 @@ const FAILURE_CODES = new Set([
   'matrix-http-failed',
   'matrix-invalid-json',
   'matrix-transport-failed',
+  'gateway-listener-port-conflict',
+  'gateway-matrix-unauthorized',
+  'gateway-matrix-connect-failed',
+  'gateway-module-load-failed',
+  'gateway-config-validation-failed',
+  'gateway-out-of-memory',
+  'gateway-startup-unknown',
+]);
+const CONTAINER_STATES = new Set([
+  'created',
+  'restarting',
+  'running',
+  'removing',
+  'paused',
+  'exited',
+  'dead',
+  'unavailable',
+]);
+const CONTAINER_HEALTH_STATES = new Set([
+  'starting',
+  'healthy',
+  'unhealthy',
+  'none',
+  'unavailable',
 ]);
 const VERSION_FIELDS = new Set([
   'elementWebConfiguredTag',
@@ -63,6 +87,11 @@ const ALLOWED_KEYS = new Set([
   'count',
   'failureCode',
   'processExitCode',
+  'containerState',
+  'containerHealth',
+  'containerExitCode',
+  'containerOomKilled',
+  'containerRuntimeErrorPresent',
   ...VERSION_FIELDS,
 ]);
 
@@ -153,6 +182,33 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       throw new Error('invalid element acceptance summary');
     }
 
+    const hasContainerDiagnostic = [
+      'containerState',
+      'containerHealth',
+      'containerExitCode',
+      'containerOomKilled',
+      'containerRuntimeErrorPresent',
+    ].some((key) => Object.hasOwn(record, key));
+    if (
+      (hasContainerDiagnostic &&
+        (record.phase !== 'gateway-ready' ||
+          record.status !== 'failed' ||
+          !Object.hasOwn(record, 'containerState') ||
+          !CONTAINER_STATES.has(record.containerState) ||
+          !Object.hasOwn(record, 'containerHealth') ||
+          !CONTAINER_HEALTH_STATES.has(record.containerHealth))) ||
+      (Object.hasOwn(record, 'containerExitCode') &&
+        (!Number.isInteger(record.containerExitCode) ||
+          record.containerExitCode < 0 ||
+          record.containerExitCode > 255)) ||
+      (Object.hasOwn(record, 'containerOomKilled') &&
+        typeof record.containerOomKilled !== 'boolean') ||
+      (Object.hasOwn(record, 'containerRuntimeErrorPresent') &&
+        typeof record.containerRuntimeErrorPresent !== 'boolean')
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
     if (
       (record.phase === 'runtime-versions' && !validRuntimeVersions(record)) ||
       (record.phase !== 'runtime-versions' &&
@@ -207,6 +263,21 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     }
     if (Object.hasOwn(record, 'processExitCode')) {
       fields.push(`process_exit_code=${record.processExitCode}`);
+    }
+    if (Object.hasOwn(record, 'containerState')) {
+      fields.push(`container_state=${record.containerState}`);
+      fields.push(`container_health=${record.containerHealth}`);
+    }
+    if (Object.hasOwn(record, 'containerExitCode')) {
+      fields.push(`container_exit_code=${record.containerExitCode}`);
+    }
+    if (Object.hasOwn(record, 'containerOomKilled')) {
+      fields.push(`container_oom_killed=${record.containerOomKilled}`);
+    }
+    if (Object.hasOwn(record, 'containerRuntimeErrorPresent')) {
+      fields.push(
+        `container_runtime_error_present=${record.containerRuntimeErrorPresent}`,
+      );
     }
     lines.push(fields.join(' '));
   }

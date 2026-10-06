@@ -70,6 +70,31 @@ test('emits bounded setup substeps and numeric failure details', () => {
   );
 });
 
+test('emits allowlisted gateway container state without exposing its error text', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'gateway-ready',
+      status: 'failed',
+      failureCode: 'gateway-matrix-connect-failed',
+      containerState: 'exited',
+      containerHealth: 'none',
+      containerExitCode: 1,
+      containerOomKilled: false,
+      containerRuntimeErrorPresent: true,
+    }),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=gateway-ready status=failed failure_code=gateway-matrix-connect-failed container_state=exited container_health=none container_exit_code=1 container_oom_killed=false container_runtime_error_present=true',
+      '',
+    ].join('\n'),
+  );
+});
+
 test('labels configured service tags and observed browser and runner versions', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify({
@@ -164,6 +189,58 @@ test('rejects arbitrary failure labels, invalid exit codes, and untrusted versio
       runnerOSVersion: '6.8.0-1027-azure',
       runnerArchitecture: 'x64',
       nodeVersion: 'v22.23.3',
+    },
+  ];
+
+  for (const record of rejectedRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
+test('rejects unsafe container diagnostics and diagnostics on other phases', () => {
+  const rejectedRecords = [
+    {
+      phase: 'gateway-ready',
+      status: 'failed',
+      containerState: 'password=secret',
+      containerHealth: 'none',
+    },
+    {
+      phase: 'gateway-ready',
+      status: 'failed',
+      containerState: 'exited',
+      containerHealth: 'none',
+      containerExitCode: 256,
+    },
+    {
+      phase: 'gateway-ready',
+      status: 'failed',
+      containerState: 'exited',
+      containerHealth: 'none',
+      containerOomKilled: 'no',
+    },
+    {
+      phase: 'gateway-ready',
+      status: 'failed',
+      containerState: 'exited',
+      containerHealth: 'none',
+      containerRuntimeErrorPresent: 'no',
+    },
+    {
+      phase: 'widget-ready',
+      status: 'failed',
+      containerState: 'running',
+      containerHealth: 'none',
+    },
+    {
+      phase: 'gateway-ready',
+      status: 'failed',
+      failureCode: 'startup-output=secret',
+      containerState: 'running',
+      containerHealth: 'none',
     },
   ];
 

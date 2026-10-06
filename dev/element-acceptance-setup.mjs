@@ -34,12 +34,19 @@ const PHASES = new Set([
 ]);
 
 class FixtureSetupError extends Error {
-  constructor(phase, httpStatus, failureCode, processExitCode) {
+  constructor(
+    phase,
+    httpStatus,
+    failureCode,
+    processExitCode,
+    serviceDiagnostic,
+  ) {
     super('Element acceptance fixture setup failed');
     this.phase = phase;
     this.httpStatus = httpStatus;
     this.failureCode = failureCode;
     this.processExitCode = processExitCode;
+    this.serviceDiagnostic = serviceDiagnostic;
   }
 }
 
@@ -401,6 +408,156 @@ function writePrivateJson(path, value) {
   });
 }
 
+function classifyGatewayStartupFailure(text) {
+  const categories = [
+    [
+      'gateway-listener-port-conflict',
+      /\bEADDRINUSE\b|port is already allocated/iu,
+    ],
+    ['gateway-matrix-unauthorized', /\bM_UNKNOWN_TOKEN\b|\bM_FORBIDDEN\b/iu],
+    ['gateway-matrix-connect-failed', /\bECONNREFUSED\b/iu],
+    [
+      'gateway-module-load-failed',
+      /\bERR_MODULE_NOT_FOUND\b|Cannot find module\b/iu,
+    ],
+    [
+      'gateway-config-validation-failed',
+      /\bJoi validation failed\b|\bValidationError\b/iu,
+    ],
+    [
+      'gateway-out-of-memory',
+      /JavaScript heap out of memory|OOMKilled\s*[:=]\s*true/iu,
+    ],
+  ];
+  return (
+    categories.find(([, pattern]) => pattern.test(text))?.[0] ??
+    'gateway-startup-unknown'
+  );
+}
+
+function readComposeServiceDiagnostic(service) {
+  const unavailable = {
+    containerState: 'unavailable',
+    containerHealth: 'unavailable',
+    failureCode: 'gateway-startup-unknown',
+  };
+  const projectName = process.env.COMPOSE_PROJECT_NAME;
+  const envFile = process.env.ELEMENT_ACCEPTANCE_SERVER_ENV_FILE;
+  const runnerTemp = process.env.RUNNER_TEMP;
+  if (
+    !projectName ||
+    !/^[a-z0-9][a-z0-9_-]{0,62}$/u.test(projectName) ||
+    !envFile ||
+    !isAbsolute(envFile) ||
+    !runnerTemp ||
+    !resolve(envFile).startsWith(resolve(runnerTemp) + sep)
+  ) {
+    return unavailable;
+  }
+
+  const cwd = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const composeArgs = [
+    'compose',
+    '-p',
+    projectName,
+    '--env-file',
+    envFile,
+    '-f',
+    'dev/compose.yaml',
+    '-f',
+    'dev/element-acceptance.compose.yaml',
+  ];
+  try {
+    const ids = execFileSync(
+      'docker',
+      [...composeArgs, 'ps', '--all', '-q', service],
+      {
+        cwd,
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 10_000,
+      },
+    )
+      .trim()
+      .split(/\s+/u)
+      .filter(Boolean);
+    if (ids.length !== 1 || !/^[a-f0-9]{12,64}$/iu.test(ids[0])) {
+      return unavailable;
+    }
+
+    const stateJson = execFileSync(
+      'docker',
+      ['inspect', '--format', '{{json .State}}', ids[0]],
+      {
+        cwd,
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 10_000,
+      },
+    );
+    const state = JSON.parse(stateJson);
+    const states = new Set([
+      'created',
+      'restarting',
+      'running',
+      'removing',
+      'paused',
+      'exited',
+      'dead',
+    ]);
+    const healthStates = new Set(['starting', 'healthy', 'unhealthy']);
+    let logText = '';
+    try {
+      logText = execFileSync(
+        'docker',
+        [...composeArgs, 'logs', '--no-color', '--tail', '200', service],
+        {
+          cwd,
+          encoding: 'utf8',
+          maxBuffer: 4 * 1024 * 1024,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: 10_000,
+        },
+      );
+    } catch {
+      // Keep only fixed classifications; raw service output stays in memory.
+    }
+    const diagnostic = {
+      containerState: states.has(state.Status) ? state.Status : 'unavailable',
+      containerHealth:
+        state.Health === null || state.Health === undefined
+          ? 'none'
+          : healthStates.has(state.Health.Status)
+            ? state.Health.Status
+            : 'unavailable',
+      failureCode:
+        state.OOMKilled === true
+          ? 'gateway-out-of-memory'
+          : classifyGatewayStartupFailure(
+              `${typeof state.Error === 'string' ? state.Error : ''}\n${logText}`,
+            ),
+    };
+    if (
+      Number.isInteger(state.ExitCode) &&
+      state.ExitCode >= 0 &&
+      state.ExitCode <= 255
+    ) {
+      diagnostic.containerExitCode = state.ExitCode;
+    }
+    if (typeof state.OOMKilled === 'boolean') {
+      diagnostic.containerOomKilled = state.OOMKilled;
+    }
+    if (typeof state.Error === 'string') {
+      diagnostic.containerRuntimeErrorPresent = state.Error.length > 0;
+    }
+    return diagnostic;
+  } catch {
+    return unavailable;
+  }
+}
+
 async function provision() {
   const stageFile = stagePath();
   const userFile = requiredEnvironment('ELEMENT_ACCEPTANCE_USERS_FILE');
@@ -553,12 +710,19 @@ async function waitForEndpoint(phase, url, expectedStatus) {
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
   }
-  recordStage(
+  const serviceDiagnostic =
+    phase === 'gateway-ready' ? readComposeServiceDiagnostic('gateway') : {};
+  recordStage(phase, 'failed', {
+    ...(Number.isInteger(lastStatus) ? { httpStatus: lastStatus } : {}),
+    ...serviceDiagnostic,
+  });
+  throw new FixtureSetupError(
     phase,
-    'failed',
-    Number.isInteger(lastStatus) ? { httpStatus: lastStatus } : {},
+    lastStatus,
+    undefined,
+    undefined,
+    serviceDiagnostic,
   );
-  throw new FixtureSetupError(phase, lastStatus);
 }
 
 async function waitForServices() {
@@ -607,6 +771,7 @@ async function main() {
             ...(typeof error.failureCode === 'string'
               ? { failureCode: error.failureCode }
               : {}),
+            ...(error.serviceDiagnostic ?? {}),
           }
         : {};
     try {
