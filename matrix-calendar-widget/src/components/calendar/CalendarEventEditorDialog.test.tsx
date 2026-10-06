@@ -2066,7 +2066,7 @@ describe('<CalendarEventEditorDialog />', () => {
     );
     expect(
       screen.getByText(
-        'This absolute alarm is saved in the calendar and is unavailable for Matrix room reminder delivery.',
+        'This absolute alarm is saved to the calendar and cannot be delivered as a Matrix room reminder.',
       ),
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
