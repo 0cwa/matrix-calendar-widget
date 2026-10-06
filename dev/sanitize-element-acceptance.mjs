@@ -42,6 +42,7 @@ const PHASES = new Set([
   'widget-a-identity-dialog-observed',
   'widget-a-identity-dialog-not-required',
   'widget-a-identity-approval',
+  'widget-a-iframe-attached',
   'widget-a-iframe-ready',
   'widget-a-approved',
   'widget-b-approved',

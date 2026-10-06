@@ -64,6 +64,7 @@ type Phase =
   | 'widget-a-identity-dialog-observed'
   | 'widget-a-identity-dialog-not-required'
   | 'widget-a-identity-approval'
+  | 'widget-a-iframe-attached'
   | 'widget-a-iframe-ready'
   | 'widget-a-approved'
   | 'widget-b-approved'
@@ -590,6 +591,14 @@ async function openCalendarWidget(
     activePhase = 'widget-a-iframe-ready';
   }
   const frame = element.widgetByTitle('Matrix Calendar');
+  if (captureMemberADiagnostics) {
+    activePhase = 'widget-a-iframe-attached';
+    await page
+      .locator('iframe[title="Matrix Calendar"]')
+      .waitFor({ state: 'attached', timeout: 30_000 });
+    record(activePhase, 'passed');
+    activePhase = 'widget-a-iframe-ready';
+  }
   if (waitForCalendar) {
     await frame
       .getByRole('button', { name: 'Create event', exact: true })

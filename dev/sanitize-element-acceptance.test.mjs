@@ -129,7 +129,11 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
       }),
       JSON.stringify({
         phase: 'widget-a-identity-approval',
-        status: 'failed',
+        status: 'passed',
+      }),
+      JSON.stringify({
+        phase: 'widget-a-iframe-attached',
+        status: 'passed',
       }),
       JSON.stringify({
         phase: 'gateway-backed-read',
@@ -159,7 +163,8 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
       'phase=member-a-room-context status=passed',
       'phase=widget-a-sidebar-ready status=passed',
       'phase=widget-a-identity-dialog-observed status=passed',
-      'phase=widget-a-identity-approval status=failed',
+      'phase=widget-a-identity-approval status=passed',
+      'phase=widget-a-iframe-attached status=passed',
       'phase=gateway-backed-read status=failed http_status=403',
       'phase=widget-a-iframe-ready status=failed',
       'phase=member-b-room-context status=passed',
