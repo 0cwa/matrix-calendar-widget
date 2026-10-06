@@ -1384,7 +1384,7 @@ function eventDate(event: CalendarEvent): string {
 
 function calendarEventEditableFieldsFromForm(
   values: CalendarEventFormValues,
-): Omit<CalendarEventInput, 'uid' | 'conference'> {
+): Omit<CalendarEventInput, 'uid' | 'conference' | 'attachment'> {
   const description = normalizeOptional(values.description);
   const location = normalizeOptional(values.location);
 
