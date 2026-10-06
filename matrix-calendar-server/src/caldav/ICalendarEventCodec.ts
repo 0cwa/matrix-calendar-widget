@@ -537,13 +537,19 @@ export class ParsedICalendarEvent {
       attachment: _attachmentPatch,
       ...eventPatch
     } = patch;
+    const {
+      attachments: _sourceAttachments,
+      ...eventWithoutAttachmentProjection
+    } = this.event;
     const event: CalendarEvent = {
-      ...this.event,
+      ...(attachmentWritePlan
+        ? eventWithoutAttachmentProjection
+        : this.event),
       ...eventPatch,
       title: patch.title ?? this.event.title,
       timing: patch.timing ?? this.event.timing,
       externalLinks: readCalendarLinks(vevent),
-      ...(attachmentPatch && attachmentProjection?.length
+      ...(attachmentWritePlan && attachmentProjection?.length
         ? { attachments: attachmentProjection }
         : {}),
       recurrence,
@@ -557,10 +563,7 @@ export class ParsedICalendarEvent {
     if (conferencePatch) {
       delete event.unsupportedConference;
     }
-    if (attachmentPatch) {
-      if (!attachmentProjection?.length) {
-        delete event.attachments;
-      }
+    if (attachmentWritePlan) {
       delete event.unsupportedAttachment;
     }
     if (hasAlarmPatch) {
