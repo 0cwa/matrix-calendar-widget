@@ -4279,11 +4279,8 @@ END:VCALENDAR`,
       expect(unrelatedEdit.icalendar).toContain(`TRIGGER:${trigger}`);
       expect(unrelatedEdit.event.alarm?.uid).toBeUndefined();
       expect(
-        codec.parse(
-          'team',
-          'equivalent-duration.ics',
-          unrelatedEdit.icalendar,
-        ).event.alarm?.trigger,
+        codec.parse('team', 'equivalent-duration.ics', unrelatedEdit.icalendar)
+          .event.alarm?.trigger,
       ).toEqual(alarm.trigger);
     },
   );

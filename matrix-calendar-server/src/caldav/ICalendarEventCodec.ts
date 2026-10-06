@@ -389,10 +389,7 @@ export class ParsedICalendarEvent {
       patch.alarm !== undefined &&
       !isCalendarEventAlarmRemoval(patch.alarm) &&
       this.event.alarm !== undefined &&
-      displayAlarmTriggersEqual(
-        this.event.alarm.trigger,
-        patch.alarm.trigger,
-      );
+      displayAlarmTriggersEqual(this.event.alarm.trigger, patch.alarm.trigger);
     const writtenAlarmUid = hasAlarmPatch
       ? setDisplayAlarm(
           calendar,
@@ -1657,9 +1654,7 @@ function readDisplayAlarm(
   if (
     !(trigger instanceof ICAL.Duration) ||
     !trigger.isNegative ||
-    rawParameters.some(
-      ({ name }) => !['related', 'value'].includes(name),
-    ) ||
+    rawParameters.some(({ name }) => !['related', 'value'].includes(name)) ||
     (related !== undefined && related.toUpperCase() !== 'START') ||
     (valueType !== undefined && valueType.toUpperCase() !== 'DURATION') ||
     !isValidNegativeAlarmDuration(rawTrigger.value)
@@ -1742,8 +1737,7 @@ function isValidNegativeAlarmDuration(value: string): boolean {
   const dateDuration = /^(\d+)D(?:T(.+))?$/i.exec(durationValue);
   if (dateDuration) {
     return (
-      dateDuration[2] === undefined ||
-      isValidAlarmTimeDuration(dateDuration[2])
+      dateDuration[2] === undefined || isValidAlarmTimeDuration(dateDuration[2])
     );
   }
 
@@ -3877,9 +3871,7 @@ function rawVeventConferenceProperties(
   );
 }
 
-function rawVeventAlarmProperties(
-  source: string,
-): ICalendarContentLine[][][] {
+function rawVeventAlarmProperties(source: string): ICalendarContentLine[][][] {
   const lines = readContentLines(source);
   const ranges = findVeventRanges(lines);
   if (!ranges) {
@@ -3904,11 +3896,7 @@ function rawVeventAlarmProperties(
       if (marker.startsWith('END:')) {
         const componentName = marker.slice('END:'.length);
         const popped = componentStack.pop();
-        if (
-          componentName === 'VALARM' &&
-          popped === 'VALARM' &&
-          currentAlarm
-        ) {
+        if (componentName === 'VALARM' && popped === 'VALARM' && currentAlarm) {
           alarms.push(currentAlarm);
           currentAlarm = undefined;
         }
@@ -3922,9 +3910,7 @@ function rawVeventAlarmProperties(
   });
 }
 
-function rawVeventAlarmComponents(
-  source: string,
-): ICalendarContentLine[][][] {
+function rawVeventAlarmComponents(source: string): ICalendarContentLine[][][] {
   const lines = readContentLines(source);
   const ranges = findVeventRanges(lines);
   if (!ranges) {
@@ -4277,11 +4263,7 @@ function restoreVeventAlarmComponents(
         nestedComponents = Math.max(0, nestedComponents - 1);
       }
     }
-    body.splice(
-      uidIndex < 0 ? 0 : uidIndex + 1,
-      0,
-      ...sourceComponents.flat(),
-    );
+    body.splice(uidIndex < 0 ? 0 : uidIndex + 1, 0, ...sourceComponents.flat());
     lines.splice(range.start + 1, range.end - range.start - 1, ...body);
   }
 
