@@ -31,6 +31,8 @@ PR #221 merged as `b73cdb61e30c20878a2cab282b6dc854130b92dd` defines Element Web
 
 Actual isolated Element validation, two-identity authorization denials, stale-ETag conflicts, keyboard/focus acceptance, enabled unencrypted reminder delivery, restart and restore of both stores, a measured operator-approved pilot envelope, and operator review remain open. Mobile/other clients and formal screen-reader certification remain outside this bounded target. M4/M5/M8 remain open.
 
+The separate [hosted Element Web acceptance draft (PR #225)](https://github.com/0cwa/matrix-calendar-widget/pull/225) remains unmerged. At observed head `1f9e2f4ca240e03a87ca1d54709bc8273b72ffef`, its eight ordinary checks passed and its dedicated Element Web acceptance check failed. Re-read the live head and inspect sanitized diagnostics before continuing that work; this draft does not establish client acceptance. The ledger records this observation separately from accepted source evidence.
+
 ## Workspace and evidence preservation
 
 The local shell backend stopped returning even trivial read-only commands. Existing worktrees, dirty absolute-alarm work, and historical backup refs were preserved. Subsequent source candidates were reconstructed from immutable GitHub source blobs and reviewed against exact remote trees, with repository-locked tools and hosted gates. They are not claimed byte-identical to inaccessible local edits. No blind local reset or alignment was performed.

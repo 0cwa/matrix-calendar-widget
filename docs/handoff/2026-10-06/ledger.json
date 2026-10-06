@@ -738,5 +738,66 @@
       "purpose": "Located an earlier test folding expectation; repaired at final accepted alarm head",
       "runConclusion": "failure"
     }
-  }
+  },
+  "pendingAcceptanceDrafts": [
+    {
+      "pr": 225,
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/225",
+      "title": "Add hosted Element Web acceptance journey",
+      "head": "1f9e2f4ca240e03a87ca1d54709bc8273b72ffef",
+      "base": "e772d7de6644332be4daeb97ee529f6d15e68800",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "capturedAt": "2026-10-06T20:13:57.194Z",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/112473388222"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993453/job/112472854520"
+        },
+        {
+          "name": "Calendar browser layout",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993453/job/112472854497"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993453/job/112472854487"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993453/job/112472854227"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993453/job/112472854047"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993448/job/112472852464"
+        },
+        {
+          "name": "Real Radicale contract",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993560/job/112472852219"
+        },
+        {
+          "name": "Element Web acceptance",
+          "conclusion": "failure",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993409/job/112472851987"
+        }
+      ],
+      "next": "Re-read the live head and review sanitized dedicated Element diagnostics; no client acceptance is established by the failed draft check."
+    }
+  ]
 }
