@@ -203,8 +203,11 @@ function CalendarFixture({
   if (activeRepository) {
     return (
       <CalendarRepositoryProvider repository={activeRepository}>
-        <main>
-          <Stack spacing={2} sx={{ p: 1 }}>
+        <main style={largeCalendarMode ? { height: '100vh' } : undefined}>
+          <Stack
+            spacing={2}
+            sx={{ p: 1, ...(largeCalendarMode ? { height: '100%' } : {}) }}
+          >
             <h1>Calendar component validation</h1>
             <Stack direction="row" spacing={1}>
               <Button onClick={() => setView('list')}>List</Button>
@@ -221,7 +224,15 @@ function CalendarFixture({
               onViewChange={setView}
               view={view}
             />
-            <Box data-testid="calendar-surface" sx={{ minWidth: 0 }}>
+            <Box
+              data-testid="calendar-surface"
+              sx={{
+                minWidth: 0,
+                ...(largeCalendarMode
+                  ? { flexGrow: 1, minHeight: 0, overflow: 'hidden' }
+                  : {}),
+              }}
+            >
               <CalendarEventsSurface
                 filters={filters}
                 onShowMore={() => setView('list')}

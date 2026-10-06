@@ -182,7 +182,7 @@ async function runSample(
     ).toBe(eventCount);
 
     await expect(moreLinks.first()).toBeVisible();
-    await moreLinks.first().click();
+    await moreLinks.first().click({ timeout: 10_000 });
     titles = await readAndCheckExactEventTitles(page);
     returnedListOverflow = await readAndCheckOverflow(page);
   }
