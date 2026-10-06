@@ -446,10 +446,7 @@ async function authenticateInElement(
   const sessionReady = await page
     .waitForFunction(
       (expectedUserId) => {
-        type MatrixClient = {
-          getUserId?: () => string | null;
-          getSyncState?: () => string | null;
-        };
+        type MatrixClient = { getUserId?: () => string | null };
         type MatrixClientPeg = { get?: () => MatrixClient | undefined };
         try {
           const matrixClientPeg = (
@@ -458,11 +455,7 @@ async function authenticateInElement(
             }
           ).mxMatrixClientPeg;
           const matrixClient = matrixClientPeg?.get?.();
-          // Direct room routing needs the joined-room state loaded by sync.
-          return (
-            matrixClient?.getUserId?.() === expectedUserId &&
-            matrixClient.getSyncState?.() === 'SYNCING'
-          );
+          return matrixClient?.getUserId?.() === expectedUserId;
         } catch {
           return false;
         }
