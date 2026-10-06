@@ -101,6 +101,7 @@
       "instanceScope": "This occurrence only",
       "interval": "Repeat every",
       "invalidAlarm": "Enter a positive lead time using whole-number duration units. Weeks cannot be combined with other units.",
+      "invalidAlarmUtcDateTime": "Enter a valid UTC date and time in YYYY-MM-DDTHH:mm:ssZ format.",
       "invalidAttachment": "Enter a safe HTTP(S) attachment URL and choose one attachment operation.",
       "invalidConference": "Enter a safe HTTP(S) conference URL and a label of at most 120 characters.",
       "invalidPeriodEnd": "The end must be later than the start and keep its saved date-time kind and time zone.",

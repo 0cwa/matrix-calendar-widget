@@ -101,6 +101,7 @@
       "instanceScope": "Nur dieser Termin",
       "interval": "Wiederholen alle",
       "invalidAlarm": "Gib eine positive Vorlaufzeit mit ganzzahligen Zeiteinheiten ein. Wochen können nicht mit anderen Einheiten kombiniert werden.",
+      "invalidAlarmUtcDateTime": "Gib ein gültiges UTC-Datum und eine gültige UTC-Uhrzeit im Format YYYY-MM-DDTHH:mm:ssZ ein.",
       "invalidAttachment": "Gib eine sichere HTTP(S)-Anhangs-URL ein und wähle eine einzelne Anhangsaktion.",
       "invalidConference": "Gib eine sichere HTTP(S)-Konferenz-URL und eine Bezeichnung mit höchstens 120 Zeichen ein.",
       "invalidPeriodEnd": "Das Ende muss nach dem Beginn liegen und die gespeicherte Art des Zeitwerts und Zeitzone beibehalten.",

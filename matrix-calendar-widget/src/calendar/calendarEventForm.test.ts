@@ -658,7 +658,14 @@ describe('calendar event form adapter', () => {
         alarmUtcDateTime: '2026-10-01T10:30:00+02:00',
         alarmChanged: true,
       }),
-    ).toBe('invalid-alarm');
+    ).toBe('invalid-alarm-utc');
+    expect(
+      validateCalendarEventForm({
+        ...values,
+        alarmUtcDateTime: '2026-10-01T10:30:00',
+        alarmChanged: true,
+      }),
+    ).toBe('invalid-alarm-utc');
   });
 
   it('keeps unsupported alarms opaque and validates positive lead times', () => {

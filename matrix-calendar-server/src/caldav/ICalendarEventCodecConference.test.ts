@@ -62,7 +62,7 @@ function calendarWithDisplayAlarm(
   ];
   return calendarWithConference(conference).replace(
     'END:VEVENT',
-    [...alarm, 'END:VEVENT'].join('\\r\\n'),
+    [...alarm, 'END:VEVENT'].join('\r\n'),
   );
 }
 
@@ -447,7 +447,7 @@ describe('ICalendarEventCodec conference authoring', () => {
         triggerProperty,
         'X-ALARM-METADATA:preserve-alarm-property',
         'END:VALARM',
-      ].join('\\r\\n');
+      ].join('\r\n');
 
       const changed = parsed.applyPatch({
         alarm: {

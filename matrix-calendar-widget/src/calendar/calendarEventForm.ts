@@ -151,6 +151,7 @@ export type CalendarEventValidationError =
   | 'invalid-recurrence'
   | 'invalid-rdate'
   | 'invalid-alarm'
+  | 'invalid-alarm-utc'
   | 'invalid-conference'
   | 'invalid-attachment';
 
@@ -864,7 +865,7 @@ function validateAlarm(
       parsed.offset !== 0 ||
       parsed.toUTC().toFormat("yyyy-MM-dd'T'HH:mm:ss'Z'") !== value
     ) {
-      return 'invalid-alarm';
+      return 'invalid-alarm-utc';
     }
     return undefined;
   }

@@ -712,27 +712,32 @@ export function CalendarEventEditorDialog({
                 'calendarEvents.editor.invalidRecurrence',
                 'Check the recurrence frequency, interval, and end date or count.',
               )
-            : validationErrorCode === 'invalid-alarm'
+            : validationErrorCode === 'invalid-alarm-utc'
               ? t(
-                  'calendarEvents.editor.invalidAlarm',
-                  'Enter a positive lead time using whole-number duration units. Weeks cannot be combined with other units.',
+                  'calendarEvents.editor.invalidAlarmUtcDateTime',
+                  'Enter a valid UTC date and time in YYYY-MM-DDTHH:mm:ssZ format.',
                 )
-              : validationErrorCode === 'invalid-rdate'
+              : validationErrorCode === 'invalid-alarm'
                 ? t(
-                    'calendarEvents.editor.invalidRdateDuration',
-                    'Enter a positive duration using whole-number units. Weeks cannot be combined with other units.',
+                    'calendarEvents.editor.invalidAlarm',
+                    'Enter a positive lead time using whole-number duration units. Weeks cannot be combined with other units.',
                   )
-                : validationErrorCode === 'invalid-conference'
+                : validationErrorCode === 'invalid-rdate'
                   ? t(
-                      'calendarEvents.editor.invalidConference',
-                      'Enter a safe HTTP(S) conference URL and a label of at most 120 characters.',
+                      'calendarEvents.editor.invalidRdateDuration',
+                      'Enter a positive duration using whole-number units. Weeks cannot be combined with other units.',
                     )
-                  : validationErrorCode === 'invalid-attachment'
+                  : validationErrorCode === 'invalid-conference'
                     ? t(
-                        'calendarEvents.editor.invalidAttachment',
-                        'Enter a safe HTTP(S) attachment URL and choose one attachment operation.',
+                        'calendarEvents.editor.invalidConference',
+                        'Enter a safe HTTP(S) conference URL and a label of at most 120 characters.',
                       )
-                    : undefined;
+                    : validationErrorCode === 'invalid-attachment'
+                      ? t(
+                          'calendarEvents.editor.invalidAttachment',
+                          'Enter a safe HTTP(S) attachment URL and choose one attachment operation.',
+                        )
+                      : undefined;
 
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();

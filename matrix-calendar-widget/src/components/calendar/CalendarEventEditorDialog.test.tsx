@@ -2344,6 +2344,19 @@ describe('<CalendarEventEditorDialog />', () => {
     );
     fireEvent.change(
       screen.getByRole('textbox', { name: 'Exact time (UTC)' }),
+      { target: { value: '2026-10-01T08:45:00+02:00' } },
+    );
+    expect(
+      screen.getByText(
+        'Enter a valid UTC date and time in YYYY-MM-DDTHH:mm:ssZ format.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Create event' }),
+    ).toBeDisabled();
+
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Exact time (UTC)' }),
       { target: { value: '2026-10-01T08:45:00Z' } },
     );
     expect(

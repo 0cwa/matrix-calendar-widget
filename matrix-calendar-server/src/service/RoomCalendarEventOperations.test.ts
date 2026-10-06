@@ -70,7 +70,7 @@ function absoluteAlarmAttachmentSource(): {
       'X-ALARM-METADATA:preserve-alarm-property',
       'END:VALARM',
       'END:VEVENT',
-    ].join('\\r\\n'),
+    ].join('\r\n'),
   );
   return { alarm, attachmentUrl, source };
 }
