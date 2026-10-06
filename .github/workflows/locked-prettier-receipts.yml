@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - head: 2011e7b63b14b17c71e15d590663df6592469f89
+          - head: 36d71ff0aad7aa7440a21130dbdfed4ee84d1c79
     steps:
       - name: Checkout helper source
         uses: actions/checkout@v7
