@@ -255,7 +255,10 @@ describe('CanonicalRoomReminderSchedulerSource', () => {
         1,
         signal,
       ),
-    ).resolves.toEqual([]);
+    ).rejects.toMatchObject({
+      name: 'CanonicalReminderSourceError',
+      code: 'unavailable',
+    });
     await expect(
       source.resolveCurrentDelivery(
         configuration(),
@@ -263,7 +266,10 @@ describe('CanonicalRoomReminderSchedulerSource', () => {
         dueWindow,
         signal,
       ),
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({
+      name: 'CanonicalReminderSourceError',
+      code: 'unavailable',
+    });
   });
 
   it('does not inherit master alarms onto detached overrides but keeps explicit override alarms', async () => {
