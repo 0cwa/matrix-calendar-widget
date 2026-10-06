@@ -2,8 +2,11 @@
 
 _Last updated: 2026-10-06._
 
-_Source baseline: `main` at `ba21aa48dd5afb3f0bba71d1e37eeb2ecc3db789`
-(PR #219); PR #218 adds the bounded absolute UTC alarm slice below._
+_Source baseline: `main` at `e772d7de6644332be4daeb97ee529f6d15e68800`
+(PR #218; reviewed source tree `b448ac05e55ceade141cc30e7dd5cdcc1e6b9b52`)._
+
+See the [dated continuation](handoff/2026-10-06/README.md) and
+[exact delivered-slice ledger](handoff/2026-10-06/ledger.json).
 
 ## Current phase
 
