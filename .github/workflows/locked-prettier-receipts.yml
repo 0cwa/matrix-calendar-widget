@@ -34,10 +34,13 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           path: helper-source
           persist-credentials: false
-          sparse-checkout: scripts/locked-prettier-receipts.mjs
 
       - name: Copy helper into runner temp
-        run: cp helper-source/scripts/locked-prettier-receipts.mjs "$RUNNER_TEMP/locked-prettier-receipts.mjs"
+        run: |
+          if ! cp helper-source/scripts/locked-prettier-receipts.mjs "$RUNNER_TEMP/locked-prettier-receipts.mjs" >/dev/null 2>&1; then
+            printf '%s\\n' 'helper-copy-failed'
+            exit 1
+          fi
 
       - name: Set up Node
         uses: actions/setup-node@v7

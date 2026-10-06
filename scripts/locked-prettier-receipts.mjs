@@ -184,7 +184,7 @@ function main() {
   if (git(['rev-parse', base]).trim() !== base || git(['merge-base', base, head]).trim() !== base) {
     return blocked('BASE_MISMATCH');
   }
-  if (git(['status', '--porcelain', '--untracked-files=no']).trim() !== '') return blocked('TARGET_NOT_CLEAN');
+  if (git(['status', '--porcelain', '--untracked-files=all']).trim() !== '') return blocked('TARGET_NOT_CLEAN');
 
   const paths = git(['diff', '--name-only', '--no-renames', base, head]).trim().split('\n').filter(Boolean).sort();
   const approved = [...allowlist].sort();
@@ -222,17 +222,17 @@ function main() {
     if (!quietRun('yarn', ['install', '--frozen-lockfile', '--ignore-scripts'], cwd, installLog)) {
       return blocked('LOCKED_INSTALL_FAILED');
     }
-    if (git(['status', '--porcelain', '--untracked-files=no']).trim() !== '') {
+    if (git(['status', '--porcelain', '--untracked-files=all']).trim() !== '') {
       return blocked('INSTALL_CHANGED_TRACKED_SOURCE');
     }
-    if (!quietRun('yarn', ['prettier', '--write', ...approved], cwd, prettierLog)) {
+    if (!quietRun('yarn', ['prettier', '--write', ...approved.filter((path) => !path.endsWith('.ics'))], cwd, prettierLog)) {
       return blocked('PRETTIER_FAILED');
     }
     if (!quietRun('yarn', ['workspace', '@matrix-calendar-widget/widget', 'translate'], cwd, translationLog)) {
       return blocked('WIDGET_TRANSLATION_FAILED');
     }
 
-    const dirty = git(['status', '--porcelain', '--untracked-files=no'])
+    const dirty = git(['status', '--porcelain', '--untracked-files=all'])
       .split('\n').filter(Boolean).map((line) => line.slice(3).trim()).sort();
     if (dirty.some((path) => !originals.has(path))) return blocked('MUTATION_OUTSIDE_ALLOWLIST');
 
