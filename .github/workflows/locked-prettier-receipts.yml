@@ -38,7 +38,7 @@ jobs:
       - name: Copy helper into runner temp
         run: |
           if ! cp helper-source/scripts/locked-prettier-receipts.mjs "$RUNNER_TEMP/locked-prettier-receipts.mjs" >/dev/null 2>&1; then
-            printf '%s\\n' 'helper-copy-failed'
+            printf '%s\n' 'helper-copy-failed'
             exit 1
           fi
 
