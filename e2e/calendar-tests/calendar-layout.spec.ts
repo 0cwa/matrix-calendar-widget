@@ -142,9 +142,13 @@ for (const viewport of viewports) {
   }
 }
 
-test('room visitor sees read-only room event controls at a narrow width', async ({ page }) => {
+test('room visitor sees read-only event controls at a narrow width', async ({
+  page,
+}) => {
   const pageErrors: string[] = [];
-  page.on('pageerror', (error) => pageErrors.push(error.message.slice(0, 2000)));
+  page.on('pageerror', (error) =>
+    pageErrors.push(error.message.slice(0, 2000)),
+  );
   await page.setViewportSize({ width: 320, height: 640 });
   await page.goto('/browser-tests/index.html?mode=room-read-only');
   await expect(
@@ -171,7 +175,9 @@ test('room visitor sees read-only room event controls at a narrow width', async 
     exact: true,
   });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('alert')).toHaveText('This calendar is read-only.');
+  await expect(dialog.getByRole('alert')).toHaveText(
+    'This calendar is read-only.',
+  );
   await expect(
     dialog.getByRole('link', { name: 'Open Matrix room' }),
   ).toHaveAttribute(
@@ -180,21 +186,32 @@ test('room visitor sees read-only room event controls at a narrow width', async 
   );
   await expect(dialog.getByRole('button', { name: 'Edit' })).toBeDisabled();
   await expect(dialog.getByRole('button', { name: 'Delete' })).toBeDisabled();
-  await expect(
-    dialog.getByRole('button', { name: 'Notify room' }),
-  ).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Notify room' })).toHaveCount(
+    0,
+  );
 
   const dimensions = await page.evaluate(() => ({
     viewportWidth: document.documentElement.clientWidth,
     documentWidth: document.documentElement.scrollWidth,
-    dialogWidth: document.querySelector('[role="dialog"]')?.getBoundingClientRect().width,
+    dialogWidth:
+      document.querySelector('[role="dialog"]')?.getBoundingClientRect()
+        .width ?? 0,
+    dialogClientWidth:
+      document.querySelector('[role="dialog"]')?.clientWidth ?? 0,
+    dialogScrollWidth:
+      document.querySelector('[role="dialog"]')?.scrollWidth ?? 0,
   }));
   await test.info().attach('room-visitor-layout.json', {
     body: JSON.stringify(dimensions),
     contentType: 'application/json',
   });
-  expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+  expect(dimensions.documentWidth).toBeLessThanOrEqual(
+    dimensions.viewportWidth + 1,
+  );
   expect(dimensions.dialogWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
+  expect(dimensions.dialogScrollWidth).toBeLessThanOrEqual(
+    dimensions.dialogClientWidth + 1,
+  );
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   await page.keyboard.press('Escape');
@@ -203,9 +220,13 @@ test('room visitor sees read-only room event controls at a narrow width', async 
   expect(pageErrors).toEqual([]);
 });
 
-test('room manager can write events and configure a room reminder at a narrow width', async ({ page }) => {
+test('room manager sees writable event controls at a narrow width', async ({
+  page,
+}) => {
   const pageErrors: string[] = [];
-  page.on('pageerror', (error) => pageErrors.push(error.message.slice(0, 2000)));
+  page.on('pageerror', (error) =>
+    pageErrors.push(error.message.slice(0, 2000)),
+  );
   await page.setViewportSize({ width: 320, height: 640 });
   await page.goto('/browser-tests/index.html?mode=room-manager');
   await expect(
@@ -244,7 +265,9 @@ test('room manager can write events and configure a room reminder at a narrow wi
     exact: true,
   });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('link', { name: 'Open Matrix room' })).toBeVisible();
+  await expect(
+    dialog.getByRole('link', { name: 'Open Matrix room' }),
+  ).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Edit' })).toBeEnabled();
   await expect(dialog.getByRole('button', { name: 'Delete' })).toBeEnabled();
   await dialog.getByRole('button', { name: 'Notify room' }).click();
@@ -254,18 +277,37 @@ test('room manager can write events and configure a room reminder at a narrow wi
   await expect(reminder).toBeVisible();
   await reminder.check();
   await expect(reminder).toBeChecked();
+  await dialog.getByRole('button', { name: 'Close room reminder' }).click();
+  await dialog.getByRole('button', { name: 'Notify room' }).click();
+  await expect(reminder).toBeChecked();
+  await reminder.uncheck();
+  await expect(reminder).not.toBeChecked();
+  await dialog.getByRole('button', { name: 'Close room reminder' }).click();
+  await dialog.getByRole('button', { name: 'Notify room' }).click();
+  await expect(reminder).not.toBeChecked();
 
   const dimensions = await page.evaluate(() => ({
     viewportWidth: document.documentElement.clientWidth,
     documentWidth: document.documentElement.scrollWidth,
-    dialogWidth: document.querySelector('[role="dialog"]')?.getBoundingClientRect().width,
+    dialogWidth:
+      document.querySelector('[role="dialog"]')?.getBoundingClientRect()
+        .width ?? 0,
+    dialogClientWidth:
+      document.querySelector('[role="dialog"]')?.clientWidth ?? 0,
+    dialogScrollWidth:
+      document.querySelector('[role="dialog"]')?.scrollWidth ?? 0,
   }));
   await test.info().attach('room-manager-layout.json', {
     body: JSON.stringify(dimensions),
     contentType: 'application/json',
   });
-  expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+  expect(dimensions.documentWidth).toBeLessThanOrEqual(
+    dimensions.viewportWidth + 1,
+  );
   expect(dimensions.dialogWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
+  expect(dimensions.dialogScrollWidth).toBeLessThanOrEqual(
+    dimensions.dialogClientWidth + 1,
+  );
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   await page.keyboard.press('Escape');

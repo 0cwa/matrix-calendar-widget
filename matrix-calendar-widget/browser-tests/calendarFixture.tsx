@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
-import {
-  Calendar,
-  CalendarEvent,
-  InMemoryCalendarRepository,
-} from '@matrix-calendar-widget/calendar';
 import type {
   CalendarEventListResult,
   CalendarId,
   CalendarTimeRange,
+} from '@matrix-calendar-widget/calendar';
+import {
+  Calendar,
+  CalendarEvent,
+  InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
 import {
   Box,
@@ -37,20 +37,21 @@ import { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import en from '../public/locales/en/translation.json';
-import { CalendarRepositoryProvider } from '../src/calendar';
 import type {
-  CalendarTargetAvailabilityRepository,
   CalendarRoomCapabilities,
-  CalendarRoomReminderRepository,
   CalendarRoomReminderAlarmOption,
   CalendarRoomReminderIdentity,
+  CalendarRoomReminderRepository,
+  CalendarTargetAvailabilityRepository,
 } from '../src/calendar';
+import { CalendarRepositoryProvider } from '../src/calendar';
 import { CalendarEventDetailsDialog } from '../src/components/calendar/CalendarEventDetailsDialog';
 import { CalendarEventsCalendar } from '../src/components/calendar/CalendarEventsCalendar';
 import { CalendarEventsList } from '../src/components/calendar/CalendarEventsList';
 import { CalendarEventsSurface } from '../src/components/calendar/CalendarEventsSurface';
 import { CalendarToolbar } from '../src/components/calendar/CalendarToolbar';
 import { LocalizationProvider } from '../src/components/common/LocalizationProvider';
+import type { ViewType } from '../src/components/meetings/MeetingsNavigation';
 import { registerDateRangeFormatter } from '../src/dateRangeFormatter';
 
 // Synthetic data only: this fixture has no Matrix client or gateway connection.
@@ -127,7 +128,7 @@ const roomAlarmOption: CalendarRoomReminderAlarmOption = {
 const theme = createTheme();
 
 function CalendarFixture() {
-  const [view, setView] = useState<'list' | 'month'>('list');
+  const [view, setView] = useState<ViewType>('list');
   const [selected, setSelected] = useState<CalendarEvent>();
   const query = new URLSearchParams(window.location.search);
   const roomMode = query.get('mode');

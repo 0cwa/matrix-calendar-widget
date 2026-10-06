@@ -1,6 +1,6 @@
 # Project status
 
-_Last updated: 2026-10-03._
+_Last updated: 2026-10-06._
 
 _Source snapshot: `main` at `f49acee71280944ad6ae351111947ff01c00031d` (PR #201)._
 
@@ -48,6 +48,9 @@ PR #184 adds a synthetic projection benchmark, not a production latency or capac
 
 ## Open scope and acceptance blockers
 
+- **Active repository work:** PR #213 extends the synthetic Chromium fixture
+  to room member/manager controls and reminder setting reloads. Validation is
+  pending; it does not establish actual-client or gateway authorization evidence.
 - **M4:** collection-timezone editing and remaining issue #5 acceptance work.
 - **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, additional RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, and attachment/conference authoring are not part of the implemented editor.
 - **M6:** issue #7 bounded repository criteria are complete. Keep room access, event writes, settings, delivery, and action notices off until the operator accepts each capability and its trust boundary. A passing pinned stack is not an etke-host or production proof.

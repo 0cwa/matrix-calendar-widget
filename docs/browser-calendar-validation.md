@@ -20,13 +20,15 @@ synthetic CI diagnostics for seven days. Browser traces and video are disabled.
 
 Two additional 320 × 640 cases use the production `CalendarToolbar`,
 `CalendarEventsSurface`, event details, and reminder control with a synthetic
-room-capability repository. The read-only case checks disabled event writes,
-read-only details, and the safe current-room link. The manager case checks the
-bound “Room calendar” label in the event editor, enabled room writes, the room
-link, and an opt-in reminder setting. Both check narrow-width overflow,
-keyboard focus return, page errors, and axe. The repository is deterministic
-and in-memory; it does not simulate Matrix authorization, gateway enforcement,
-CalDAV persistence, reminder delivery, or a live Matrix client.
+room-capability repository. The read-only case checks disabled event-write
+controls, read-only details, and the safe current-room link. The manager case
+checks the bound “Room calendar” label in the event editor, enabled create/edit/
+delete controls, the room link, and an opt-in reminder setting whose saved
+state reloads from the synthetic repository. Both check document and dialog
+overflow, keyboard focus return, page errors, and axe. The repository is
+deterministic and in-memory; the smoke does not save calendar events or deliver
+reminders, and it does not simulate Matrix authorization, gateway enforcement,
+CalDAV persistence, or a live Matrix client.
 
 The fixture uses a default MUI theme, English text, a fixed Stockholm timezone,
 and synthetic long titles, locations, and descriptions. It validates those
