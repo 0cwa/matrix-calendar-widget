@@ -524,9 +524,15 @@ access and event writes stay disabled by default.
 - [ ] Pass the existing five protected checks on the exact candidate head and
       retain the relevant hosted browser-layout and real Radicale/PostgreSQL
       contract results.
-- [ ] Complete actual Element Web/Desktop acceptance against isolated pinned
-      Synapse, project-owned Radicale, and PostgreSQL services before any
-      production contact.
+- [ ] Run the first hosted Element Web journey against isolated pinned
+      Synapse, project-owned Radicale, and gateway services: two authorized
+      members share a basic event create/read/edit; the stale editor receives
+      a conflict and reloads the saved event; an outsider-room widget targeting
+      the team room and the outsider's own unbound room are denied. This slice
+      does not test attachment authoring or establish the remaining beta gates.
+- [ ] Complete actual Element Web/Desktop beta acceptance against isolated
+      pinned Synapse, project-owned Radicale, and PostgreSQL services before
+      any production contact.
 - [ ] Verify two-identity authorization denial before CalDAV I/O, stale-ETag
       conflict handling, unsupported-projection disclosure, and actual-client
       keyboard/focus behavior.
