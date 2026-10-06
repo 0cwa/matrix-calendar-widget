@@ -209,8 +209,9 @@ before testing it. Do not hand-edit managed homeserver configuration.
 Before setting `ROOM_CALENDAR_BINDINGS` or enabling the room UI, create the
 calendar collection under the service user's Radicale home. The authorized
 operator must obtain a short-lived OpenID proof for the exact service user by
-calling `POST /_matrix/client/v3/user/{serviceUserId}/openid/request_token`
-with `Authorization: Bearer <as_token>` and JSON body
+calling `POST /_matrix/client/v3/user/{serviceUserId}/openid/request_token`,
+with the full `serviceUserId` URL-encoded as one path segment, then send
+`Authorization: Bearer <as_token>` and JSON body
 `{"user_id":"<same serviceUserId>"}`. Keep the `as_token` out of the URL.
 Then use Radicale's tagged credential form from
 [ADR024](./adrs/adr024-in-repo-radicale-openid-auth.md) to issue one `MKCALENDAR`
