@@ -45,7 +45,7 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 - [x] Implement the clean-room Radicale 3.8.0.0 Auth module and pinned project-owned image (ADR024 / #48) for the validated personal actor's tagged, request-scoped OpenID proof. Reject untagged credentials before homeserver I/O; do not include or invoke an external auth package.
 - [x] Add the final personal actor OpenID gateway contract against a real Radicale container (#45): same-user enumeration, invalid-identity rejection, and nonmember denial before CalDAV I/O (PR #147). A focused mocked `CalendarGatewayMembershipGuard` test directly verifies a thrown membership lookup and an `isAllowed=false` decision deny before provider/CalDAV I/O.
 
-PR #60's password-authenticated discovery contract is historical evidence about the prior deployment and does not make Matrix-password CalDAV login supported in the owned pre-alpha image. PR #146 completed issue #48's ADR024-scoped first-party adapter, owned image, tests, and dev/contract integration; PR #147 completed #45's real-container same-user enumeration, invalid-identity rejection, and nonmember denial before CalDAV I/O. The focused mocked `CalendarGatewayMembershipGuard` test directly verifies that a thrown membership lookup and an `isAllowed=false` decision stop before provider/CalDAV I/O. M2 is complete against the pinned development Synapse and project-owned Radicale image. The actual etke-host image override and preservation of its existing `/data` volume remain unverified deployment gates.
+PR #60's password-authenticated discovery contract is historical evidence about the prior deployment and does not make Matrix-password CalDAV login supported in the owned pre-alpha image. PR #146 completed issue #48's ADR024-scoped first-party adapter, owned image, tests, and dev/contract integration; PR #147 completed #45's real-container same-user enumeration, invalid-identity rejection, and nonmember denial before CalDAV I/O. The focused mocked `CalendarGatewayMembershipGuard` test directly verifies that a thrown membership lookup and an `isAllowed=false` decision stop before provider/CalDAV I/O. M2 is complete against the pinned development Synapse and project-owned Radicale image. Under [ADR037](./adrs/adr037-independent-radicale-store-for-controlled-beta.md), compatibility with an existing service or store is a separate deployment gate only if an operator selects that reuse; the bounded beta baseline uses the project-owned image and an independent store.
 
 **Exit:** the gateway can authenticate personal access with the validated actor's tagged Matrix OpenID proof, enumerate only that actor's calendars, and deny invalid identities and non-members before CalDAV I/O. The real-container contract covers those identity and membership cases; the focused mocked guard test directly covers a thrown membership lookup and an `isAllowed=false` denial before provider/CalDAV I/O. The owned backend rejects untagged Matrix-password credentials; support for any separate Radicale-native credential mode requires a future ADR.
 
@@ -171,7 +171,7 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
         timing; unchanged saves do not create a detached component. Preserve
         opaque parameters and sibling data; reject unsupported selected fields,
         alarms, and ambiguous recurrence. Following edits remain timing-only
-        (PR #220, ADR037).
+        (PR #220, ADR040).
 - [x] Offer occurrence, this-and-following, and entire-series edit scopes for
       supported timing operations. ADR034 bounds following edits to one
       resource and a supported COUNT series of at most 128 members, with no
@@ -287,7 +287,7 @@ visible and accessible calendar-cell labels, grid sorting, and the in-memory
 range filter. Projection occurrence IDs keep selected detail timing and
 recurrence identity separate from their source resource. Delete actions remain series-level. Supported edits offer explicit occurrence,
 series, and bounded following scopes; selected-occurrence text edits use
-ADR037 while following edits remain timing-only. Skip/restore changes only the
+ADR040 while following edits remain timing-only. Skip/restore changes only the
 matching EXDATE for one projected occurrence. A moved override is identified by its
 original RECURRENCE-ID. Unsupported or malformed recurrence is hidden with a
 diagnostic. The bounded projector resolves source and viewer
@@ -393,9 +393,13 @@ DST regression or recurrence-editing criteria above.
 - [x] Add separately gated, best-effort action notices after successful room
       create/update/delete operations (ADR032). The SDK request is awaited and
       retains its timeout behavior; notice failure does not roll back CalDAV.
-- [ ] Accept operator enablement against the actual etke image, existing
-      `/data`, public ingress/URLs/TLS/secrets, production PostgreSQL endpoint
-      and trusted CA, and an isolated restore rehearsal.
+- [ ] Accept operator enablement for the selected deployment: public
+      ingress/URLs/TLS/secrets, PostgreSQL endpoint and trusted CA, and an
+      isolated restore rehearsal for both Radicale and app-owned PostgreSQL.
+      The bounded beta baseline uses the project-owned Radicale image and its
+      own store. If an operator selects an existing etke image or `/data`
+      store, verify override, data-path preservation, backup, and rollback as
+      additional gates.
 - [ ] Room-target diagnostics beyond the supported calendar/event paths.
 
 Room access, event writes, reminder configuration, reminder delivery, and
@@ -438,7 +442,9 @@ access and event writes stay disabled by default.
       Hosted passing evidence is required; actual Matrix clients remain a
       separate release gate (docs/browser-calendar-validation.md).
 
-- [ ] Responsive/a11y pass across narrow Element panels and full-screen widget.
+- [ ] Actual Element Web/Desktop responsive and keyboard/focus acceptance for
+      the bounded beta target (see `docs/beta-scope.md`). Mobile clients and
+      formal screen-reader certification are deferred beyond this candidate.
   - [x] Add current calendar grid/list/details keyboard, focus, accessible-name,
         and axe regressions. Hosted browser fixture checks pass; actual client
         embedding remains unverified; see `docs/calendar-client-validation.md`.
@@ -480,7 +486,8 @@ access and event writes stay disabled by default.
   - [x] Add non-publishing CI image-build smoke checks with fork-owned local tags; PR #102 run 36316604092 passed both image build steps at `0da7f3345e603e808231a24cc2ed6d979bea987a` without publishing.
 - [x] Document upgrade/migration, schema compatibility, and safe rollback for
       the project-owned stack; live operator rehearsal remains unverified.
-- [ ] Compatibility matrix: Element Web/Desktop and other tested clients.
+- [ ] Record exact Element Web and Desktop versions and results for the beta
+      target. Other Matrix clients remain a broader compatibility task.
 - [ ] Performance testing with large calendars and recurrence.
   - [x] Measure synthetic large-calendar domain projection with a reproducible
         benchmark and exact occurrence-count assertions; this measures domain
@@ -500,7 +507,35 @@ access and event writes stay disabled by default.
       publication is authorized, and breaking changes are allowed. Future
       controlled-beta and public-release gates remain explicit.
 
-**Exit:** documented deployable beta suitable for a controlled organizational pilot.
+### Controlled beta acceptance — separate from milestone completion
+
+- [x] Define the bounded Element Web/Desktop pilot scope, deployment shape,
+      and acceptance evidence in `docs/beta-scope.md`.
+- [ ] Pass the existing five protected checks on the exact candidate head and
+      retain the relevant hosted browser-layout and real Radicale/PostgreSQL
+      contract results.
+- [ ] Complete actual Element Web/Desktop acceptance against isolated pinned
+      Synapse, project-owned Radicale, and PostgreSQL services before any
+      production contact.
+- [ ] Verify two-identity authorization denial before CalDAV I/O, stale-ETag
+      conflict handling, unsupported-projection disclosure, and actual-client
+      keyboard/focus behavior.
+- [ ] Exercise the enabled unencrypted-room reminder path, then restart and
+      separately restore both Radicale and application PostgreSQL data in an
+      isolated environment.
+- [ ] Record an operator-approved enrollment/capacity envelope with hardware,
+      runtime, date-range event counts, API/render latency, and pre-declared
+      pass thresholds. Do not infer a universal supported event count.
+- [ ] Complete operator evidence and independent review of the exact
+      candidate before a separate rollout decision.
+
+This bounded beta path does not complete M4, M5, or the broader M8 work, and it
+does not authorize publication or live rollout. The broad M8 milestone remains
+open until its remaining hardening and compatibility work is dispositioned.
+
+**M8 exit:** broad hardening is complete and the applicable release path has
+recorded its evidence. A controlled beta candidate may meet the separate
+bounded contract above while broader M4/M5/M8 work remains open.
 
 ## Working rule
 

@@ -1,4 +1,4 @@
-# ADR 037: Bounded selected-occurrence text edits
+# ADR 040: Bounded selected-occurrence text edits
 
 - Status: Accepted
 - Date: 2026-10-06
