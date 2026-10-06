@@ -142,8 +142,140 @@ for (const viewport of viewports) {
   }
 }
 
+test('room visitor sees read-only room event controls at a narrow width', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message.slice(0, 2000)));
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto('/browser-tests/index.html?mode=room-read-only');
+  await expect(
+    page.getByRole('heading', { name: 'Calendar component validation' }),
+  ).toBeVisible();
+
+  const createEvent = page.getByRole('button', { name: 'Create event' });
+  await expect(createEvent).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Create calendar' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Delete calendar' }),
+  ).toBeDisabled();
+
+  const event = page.getByRole('button', { name: /Synthetic room planning/ });
+  await expect(event).toBeVisible();
+  await page.getByRole('button', { name: 'List', exact: true }).focus();
+  await tabToEvent(page, event);
+  await page.keyboard.press('Enter');
+
+  const dialog = page.getByRole('dialog', {
+    name: 'Synthetic room planning',
+    exact: true,
+  });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('alert')).toHaveText('This calendar is read-only.');
+  await expect(
+    dialog.getByRole('link', { name: 'Open Matrix room' }),
+  ).toHaveAttribute(
+    'href',
+    'https://matrix.to/#/%21synthetic-room%3Aexample.test',
+  );
+  await expect(dialog.getByRole('button', { name: 'Edit' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  await expect(
+    dialog.getByRole('button', { name: 'Notify room' }),
+  ).toHaveCount(0);
+
+  const dimensions = await page.evaluate(() => ({
+    viewportWidth: document.documentElement.clientWidth,
+    documentWidth: document.documentElement.scrollWidth,
+    dialogWidth: document.querySelector('[role="dialog"]')?.getBoundingClientRect().width,
+  }));
+  await test.info().attach('room-visitor-layout.json', {
+    body: JSON.stringify(dimensions),
+    contentType: 'application/json',
+  });
+  expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+  expect(dimensions.dialogWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(event).toBeFocused();
+  expect(pageErrors).toEqual([]);
+});
+
+test('room manager can write events and configure a room reminder at a narrow width', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message.slice(0, 2000)));
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto('/browser-tests/index.html?mode=room-manager');
+  await expect(
+    page.getByRole('heading', { name: 'Calendar component validation' }),
+  ).toBeVisible();
+
+  const createEvent = page.getByRole('button', { name: 'Create event' });
+  await expect(createEvent).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Create calendar' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Delete calendar' }),
+  ).toBeDisabled();
+
+  await createEvent.click();
+  const editor = page.getByRole('dialog', { name: 'Create event' });
+  await expect(editor).toBeVisible();
+  await expect(editor.getByRole('combobox', { name: 'Calendar' })).toHaveValue(
+    'synthetic-room-calendar',
+  );
+  await expect(
+    editor.getByRole('option', { name: 'Room calendar' }),
+  ).toBeAttached();
+  await editor.getByRole('button', { name: 'Cancel' }).click();
+  await expect(editor).toBeHidden();
+
+  const event = page.getByRole('button', { name: /Synthetic room planning/ });
+  await expect(event).toBeVisible();
+  await page.getByRole('button', { name: 'List', exact: true }).focus();
+  await tabToEvent(page, event);
+  await page.keyboard.press('Enter');
+
+  const dialog = page.getByRole('dialog', {
+    name: 'Synthetic room planning',
+    exact: true,
+  });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('link', { name: 'Open Matrix room' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Edit' })).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Delete' })).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Notify room' }).click();
+  const reminder = dialog.getByRole('checkbox', {
+    name: 'Alarm 1: −15m relative to event start',
+  });
+  await expect(reminder).toBeVisible();
+  await reminder.check();
+  await expect(reminder).toBeChecked();
+
+  const dimensions = await page.evaluate(() => ({
+    viewportWidth: document.documentElement.clientWidth,
+    documentWidth: document.documentElement.scrollWidth,
+    dialogWidth: document.querySelector('[role="dialog"]')?.getBoundingClientRect().width,
+  }));
+  await test.info().attach('room-manager-layout.json', {
+    body: JSON.stringify(dimensions),
+    contentType: 'application/json',
+  });
+  expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+  expect(dimensions.dialogWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(event).toBeFocused();
+  expect(pageErrors).toEqual([]);
+});
+
 async function tabToEvent(page: Page, event: Locator): Promise<void> {
-  for (let tab = 0; tab < 32; tab += 1) {
+  for (let tab = 0; tab < 64; tab += 1) {
     await page.keyboard.press('Tab');
     if (await event.evaluate((element) => element === document.activeElement)) {
       return;
