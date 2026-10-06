@@ -173,6 +173,18 @@ test('room access requires one binding, service identity, and matching homeserve
   );
 });
 
+test('room access rejects reuse of the bot token as the appservice token', () => {
+  assert.throws(() =>
+    validateSidecarComposeModel(
+      composeModel(
+        roomAccessEnvironment({
+          MATRIX_APPLICATION_SERVICE_TOKEN: baseServerEnvironment.ACCESS_TOKEN,
+        }),
+      ),
+    ),
+  );
+});
+
 test('reminder gates reject a missing database', () => {
   assert.throws(() =>
     validateSidecarComposeModel(

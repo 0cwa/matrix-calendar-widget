@@ -190,6 +190,7 @@ export function validateSidecarComposeModel(model) {
     if (
       bindings.length !== 1 ||
       !hasNonEmptyString(value.MATRIX_APPLICATION_SERVICE_TOKEN) ||
+      value.MATRIX_APPLICATION_SERVICE_TOKEN === value.ACCESS_TOKEN ||
       !validateServiceUserId(
         value.MATRIX_APPLICATION_SERVICE_USER_ID,
         radicaleEnvironment.RADICALE_MATRIX_SERVER_NAME,
