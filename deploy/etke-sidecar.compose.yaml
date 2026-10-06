@@ -13,6 +13,9 @@ services:
   server:
     image: matrix-calendar-widget/server:local
     restart: unless-stopped
+    env_file:
+      - path: .env.server
+        required: false
     environment:
       ACCESS_TOKEN: ${MATRIX_CALENDAR_BOT_ACCESS_TOKEN:?Supply the bot access token}
       HOMESERVER_URL: ${MATRIX_HOMESERVER_URL:?Set the homeserver URL}

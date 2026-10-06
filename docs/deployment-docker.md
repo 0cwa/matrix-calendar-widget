@@ -152,6 +152,84 @@ moving existing calendars requires a separately planned, verified CalDAV
 migration with a recoverable backup; this example does not provide that
 migration.
 
+The server service reads optional server-only settings from
+[`deploy/.env.server`](../deploy/.env.server.example). The file is optional;
+when it is absent, room access, room writes, reminder configuration, reminder
+delivery, and action notices remain disabled by the server's existing
+default-false gates. Do not add empty assignments for optional credentials,
+database URLs, or bindings. The sample file contains only commented examples.
+This uses Docker Compose's optional `env_file` support and requires Docker
+Compose 2.24.0 or newer. See the Compose
+[`env_file` reference](https://docs.docker.com/reference/compose-file/services/#env_file)
+and [variable precedence guide](https://docs.docker.com/compose/how-tos/environment-variables/envvars-precedence/).
+
+Keep `deploy/.env.local` for the Compose interpolation values used by the
+widget, homeserver, bot, and proxy. Put room and reminder settings only in
+`deploy/.env.server`; this file supplies the server container environment and
+does not override the interpolation file. Exported shell values can override
+interpolated Compose values, so run preflight and deployment with the same
+shell, project name, and `--env-file` options. Quote values containing `$` with
+single quotes in `.env.server` so Compose treats them literally.
+
+### Application-service identity and room collection provisioning
+
+Room calendars use one dedicated homeserver application-service identity. On
+Synapse, install a registration through its supported
+`app_service_config_files` setting. This example has a deliberately narrow
+exclusive namespace and no event-delivery URL: the Matrix application-service
+spec allows `url: null` when no traffic needs to be sent to the service, and
+this gateway does not implement an application-service transaction endpoint.
+See the [Matrix registration specification](https://spec.matrix.org/latest/application-service-api/#registration)
+and [Synapse registration instructions](https://element-hq.github.io/synapse/latest/application_services.html).
+
+```yaml
+id: matrix-calendar-room
+url: null
+as_token: REPLACE_WITH_A_DISTINCT_RANDOM_AS_TOKEN
+hs_token: REPLACE_WITH_A_DIFFERENT_RANDOM_HS_TOKEN
+sender_localpart: _matrix_calendar_service
+namespaces:
+  users:
+    - exclusive: true
+      regex: '^@_matrix_calendar_service:example\.org$'
+  aliases: []
+  rooms: []
+```
+
+Replace both token placeholders with separately generated high-entropy values;
+never use tokens from a test fixture. Set
+`MATRIX_APPLICATION_SERVICE_TOKEN` to this registration's `as_token` and
+`MATRIX_APPLICATION_SERVICE_USER_ID` to the sender ID formed with the actual
+Matrix server name. The server's required `ACCESS_TOKEN` remains a separate
+normal bot-user access token; do not substitute either application-service
+token for it. Apply the registration through the homeserver operator's
+supported process and restart or reload the isolated acceptance homeserver
+before testing it. Do not hand-edit managed homeserver configuration.
+
+Before setting `ROOM_CALENDAR_BINDINGS` or enabling the room UI, create the
+calendar collection under the service user's Radicale home. The authorized
+operator must obtain a short-lived OpenID proof for the exact service user by
+calling `POST /_matrix/client/v3/user/{serviceUserId}/openid/request_token`
+with the `as_token`, then use Radicale's tagged credential form from
+[ADR024](./adrs/adr024-in-repo-radicale-openid-auth.md) to issue one `MKCALENDAR`
+request to `{RADICALE_URL}/{serviceLocalpart}/{calendarId}/`. The tagged
+credential uses the service localpart as the username and a
+`matrix-openid:` password containing the short-lived proof and Matrix server
+name. Keep the proof in memory, suppress request/response logging that could
+expose it, and discard it immediately; never place it in command arguments,
+shell history, files, or artifacts. The repository does not yet provide a
+one-command provisioner, so perform this step only with an operator-approved
+secret-safe tool during isolated acceptance.
+
+Invite the service user to the single pilot room and give it only the room
+membership/state and message permissions required by the selected features.
+Then set exactly one matching room/calendar pair in `.env.server`, run the
+preflight below, and keep each feature gate separate. Room writes require the
+room access gate; either reminder gate also requires room access, the
+application-service identity, the binding, and the external reminder database.
+`ROOM_CALENDAR_ACTION_MESSAGES_ENABLED` remains independent. These settings
+are opt-in configuration, not evidence of a tested team-host deployment.
+
 This is an operator-configured sidecar pattern, not a verified etke deployment.
 Before using it, the operator must provide:
 
@@ -194,13 +272,27 @@ to the ignored `deploy/.env.local` and replace the example URLs and
 network name. The Matrix widget URL templates use single-quoted env values so
 Compose passes Matrix's `$matrix_*` placeholders through literally. Set the
 bot token in the secret-injection environment when available; Compose uses a
-shell-provided value ahead of the example env file.
+shell-provided value ahead of the example env file. Only when a room or
+reminder feature is deliberately being configured, copy
+[`deploy/.env.server.example`](../deploy/.env.server.example) to the ignored
+`deploy/.env.server` and uncomment only the required settings. Leave optional
+values absent when the corresponding gate is off.
 
-Validate the example with only placeholder secrets, then start it with the
-same project name on every deployment so Compose reuses its named volumes:
+After building the server workspace, validate the resolved Compose environment
+without starting services. The preflight runs `docker compose config --quiet`,
+captures the resolved model only in memory, and validates server settings with
+the server's Joi, binding, and TLS helpers. It prints fixed success or failure
+text; it does not print or save resolved configuration or secrets. Pass the
+same options and shell environment that will be used for deployment:
 
 ```bash
-docker compose --project-name matrix-calendar-sidecar --env-file deploy/.env.local -f deploy/etke-sidecar.compose.yaml config
+node scripts/validate-sidecar-compose.mjs --project-name matrix-calendar-sidecar --env-file deploy/.env.local
+```
+
+Then start the stack with the same project name and interpolation file so
+Compose reuses its named volumes:
+
+```bash
 docker compose --project-name matrix-calendar-sidecar --env-file deploy/.env.local -f deploy/etke-sidecar.compose.yaml up -d
 ```
 
@@ -224,7 +316,8 @@ database or role.
 
 Connections require verified TLS by default. Use a certificate whose DNS name
 or IP subject alternative name matches the configured endpoint; the driver uses
-Node.js's system trust store. A TLS or certificate error prevents startup and
+Node.js's system trust store. This Compose example exposes no custom CA setting.
+A TLS or certificate error prevents startup and
 does not fall back to plaintext. The only opt-out is
 `MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE=trusted-private-network`, for an
 operator-controlled isolated database network. It disables TLS explicitly and

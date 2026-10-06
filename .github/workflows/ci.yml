@@ -186,6 +186,37 @@ jobs:
       - name: Build server
         run: yarn workspace @matrix-calendar-widget/server build
 
+      - name: Validate sidecar Compose defaults and opt-in configuration
+        run: |
+          node --test scripts/validate-sidecar-compose.test.mjs
+          node scripts/validate-sidecar-compose.mjs \
+            --project-name matrix-calendar-sidecar \
+            --env-file deploy/etke-sidecar.env.example
+          trap 'rm -f deploy/.env.server' EXIT
+          cat > deploy/.env.server <<'EOF'
+          ROOM_CALENDAR_BINDINGS='[{"roomId":"!pilot-room:example.org","calendarId":"team-calendar"}]'
+          ROOM_CALENDAR_ACCESS_ENABLED=true
+          ROOM_CALENDAR_EVENT_WRITES_ENABLED=true
+          MATRIX_APPLICATION_SERVICE_USER_ID=@_matrix_calendar_service:example.org
+          MATRIX_APPLICATION_SERVICE_TOKEN=synthetic-as-token
+          MATRIX_CALENDAR_REMINDER_DATABASE_URL=postgresql://calendar:synthetic-secret@db.example.org:5432/calendar
+          MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED=true
+          ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED=true
+          ROOM_CALENDAR_ACTION_MESSAGES_ENABLED=true
+          EOF
+          node scripts/validate-sidecar-compose.mjs \
+            --project-name matrix-calendar-sidecar \
+            --env-file deploy/etke-sidecar.env.example
+          cat > deploy/.env.server <<'EOF'
+          ROOM_CALENDAR_EVENT_WRITES_ENABLED=true
+          EOF
+          if node scripts/validate-sidecar-compose.mjs \
+            --project-name matrix-calendar-sidecar \
+            --env-file deploy/etke-sidecar.env.example; then
+            echo 'Expected an invalid room-write configuration to fail.' >&2
+            exit 1
+          fi
+
   container-images:
     name: Container image build smoke
     runs-on: ubuntu-latest
