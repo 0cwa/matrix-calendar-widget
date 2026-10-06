@@ -4397,8 +4397,14 @@ END:VCALENDAR`,
     );
     expect(
       codec.parse('team', 'recurring-alarm.ics', changed.icalendar).event.alarm
-        ?.trigger.minutes,
-    ).toBe(20);
+        ?.trigger,
+    ).toEqual({
+      weeks: 0,
+      days: 0,
+      hours: 0,
+      minutes: 20,
+      seconds: 0,
+    });
 
     const removePatch = JSON.parse(
       JSON.stringify({ alarm: { operation: 'remove' } }),
