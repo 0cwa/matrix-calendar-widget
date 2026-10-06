@@ -59,6 +59,10 @@ by [ADR014](./adrs/adr014-split-widget-and-bot-calendar-principals.md),
 [ADR015](./adrs/adr015-server-managed-room-calendar-bindings.md),
 [ADR024](./adrs/adr024-in-repo-radicale-openid-auth.md), and
 [ADR037](./adrs/adr037-independent-radicale-store-for-controlled-beta.md).
+Absolute UTC DISPLAY alarms remain calendar metadata and cannot be delivered
+as Matrix room reminders. Reminder configuration and delivery continue to use
+the supported relative-trigger contract under ADR028.
+
 CalDAV remains canonical. Existing mixed collections and unknown properties
 are preserved where supported edits allow it; the widget does not normalize
 unsupported members destructively.

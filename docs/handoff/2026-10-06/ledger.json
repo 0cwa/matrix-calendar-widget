@@ -1,0 +1,803 @@
+{
+  "date": "2026-10-06",
+  "repository": "0cwa/matrix-calendar-widget",
+  "delivered": [
+    {
+      "pr": 214,
+      "slice": "Stabilize clock-sensitive upcoming-warning test",
+      "merge": "d32dceb9bd7d1fbc17078ef986040d1940813142",
+      "tree": "63b37cf30bffd2631688765ef7f8a9457576b123",
+      "review": "Independent exact-tree PASS",
+      "checks": "All seven applicable PR checks passed",
+      "head": "d058f6bfdb3942fe361ceb547716f115cf25e3e5",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/214",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/112291233113"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37470001203/job/112290707951"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37470001203/job/112290707886"
+        },
+        {
+          "name": "Calendar browser layout",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37470001203/job/112290707753"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37470001203/job/112290707692"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37470001203/job/112290707340"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37470001361/job/112290707024"
+        }
+      ]
+    },
+    {
+      "pr": 215,
+      "slice": "Author one monthly ordinal weekday selector",
+      "merge": "e2c4ee1f1269545557050ac938505007028be941",
+      "tree": "f4e38e69ddc1d082aae7a27e10aaef08a55b0417",
+      "review": "Independent exact-tree PASS",
+      "checks": "All eight applicable PR checks including real Radicale passed",
+      "adr": "ADR035",
+      "head": "a5b494db0914ff7ccb94526fdf3e84ea5da9e5d5",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/215",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/112296861206"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37471624918/job/112296302065"
+        },
+        {
+          "name": "Calendar browser layout",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37471624918/job/112296301971"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37471624918/job/112296301833"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37471624918/job/112296301796"
+        },
+        {
+          "name": "Real Radicale contract",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37471624961/job/112296301600"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37471624918/job/112296301572"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37471624896/job/112296300925"
+        }
+      ]
+    },
+    {
+      "pr": 213,
+      "slice": "Synthetic member/manager room browser and reminder controls",
+      "merge": "69630543268c990605ab1936520956150f08d4c2",
+      "tree": "495dd64ba9b966055707ff4e149cbb8c1c470762",
+      "review": "Independent current-base exact-tree PASS",
+      "checks": "All seven applicable PR checks passed",
+      "limit": "Synthetic fixture, no actual Matrix client or saved CRUD proof",
+      "head": "5548e6cdce0e9de61aef6d159ff280acc9342c80",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/213",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/112301081781"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37472787129/job/112300449048"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37472786568/job/112300336022"
+        },
+        {
+          "name": "Calendar browser layout",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37472786568/job/112300335960"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37472786568/job/112300335881"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37472786568/job/112300335839"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37472786568/job/112300335463"
+        }
+      ]
+    },
+    {
+      "pr": 216,
+      "slice": "Fixed 1,000-event list/month browser rendering measurements",
+      "merge": "4c25fa97d4e5a01cca9eaf675b62dfd7b82ec863",
+      "tree": "c0a1076bf9fcaab1f4b177481a472ee099937e14",
+      "review": "Independent source/numeric/docs exact-tree PASS",
+      "checks": "All seven applicable PR checks passed",
+      "evidence": "docs/evidence/calendar-browser-20261006.json",
+      "limit": "Prepared one-off fixture, no controlled capacity or combined recurrence/render/loading/memory claim",
+      "head": "ca8166a3b20a4566d6c9d093349d58a49f72a1a0",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/216",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/112335927136"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37482905686/job/112335421728"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37482905686/job/112335421701"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37482905686/job/112335421656"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37482905686/job/112335421629"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37482905774/job/112335421465"
+        },
+        {
+          "name": "Calendar browser layout",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37482905686/job/112335421433"
+        }
+      ]
+    },
+    {
+      "pr": 217,
+      "slice": "One safe HTTP(S) CONFERENCE URI and optional label",
+      "merge": "5c543da1a3e4f4fdb6c1724380e9cf9f1174451d",
+      "tree": "1068480e49b7edb9365d3a016bf20f7ac17627cd",
+      "review": "Independent initial source and refreshed remote exact-tree PASS; all 20 feature blob SHAs retained",
+      "checks": "All eight applicable refreshed PR checks including real Radicale passed",
+      "adr": "ADR036",
+      "limit": "Whole-master only, no RTC provisioning or multiple conference authoring",
+      "head": "b3b0653ad51242ed42fc408e36db8b08f3cb0894",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/217",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/112342945764"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37484907947/job/112342338340"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37484907947/job/112342338258"
+        },
+        {
+          "name": "Calendar browser layout",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37484907947/job/112342338224"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37484907947/job/112342338167"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37484907947/job/112342337792"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37484907265/job/112342335955"
+        },
+        {
+          "name": "Real Radicale contract",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37484906991/job/112342335740"
+        }
+      ]
+    },
+    {
+      "pr": 220,
+      "slice": "Selected-occurrence title/description/location set or inherit",
+      "merge": "151d3c713799a12f18dcb8a5cb307081399daff5",
+      "tree": "dae2891fe296d4fa6dbe8db3775a1e45f66f5142",
+      "review": "Independent source/docs and final testdelta exact PASS",
+      "checks": "All eight applicable checks passed on final exact f069 against b73",
+      "adr": "ADR040",
+      "limit": "Following timing-only; arbitrary instances, alarms, ambiguous/parameterized text failclosed",
+      "head": "f0690e03a4d19e44770ff403c499cf8c5049345f",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/220",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/112412405216"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37505216105/job/112412032228"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37505216141/job/112412031967"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37505216141/job/112412031963"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37505216141/job/112412031677"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37505216141/job/112412031594"
+        },
+        {
+          "name": "Real Radicale contract",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37505216096/job/112412031572"
+        },
+        {
+          "name": "Calendar browser layout",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37505216141/job/112412031472"
+        }
+      ]
+    },
+    {
+      "pr": 219,
+      "slice": "One safe HTTP(S) URI ATTACH operation on an unambiguous master",
+      "merge": "ba21aa48dd5afb3f0bba71d1e37eeb2ecc3db789",
+      "tree": "55bb081a0ab873f5da3763072b006e7fe7b34bbc",
+      "review": "Independent full source/text preservation + exact current-base/docs PASS",
+      "checks": "All eight applicable checks passed on exact050e against036",
+      "adr": "ADR038",
+      "limit": "No fetching/upload/binary/occurrence/following authoring; target UID ambiguity/collisions failclosed",
+      "head": "050e2ec414edf97a8cb1c7bfa7d18602bcfcf8c6",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/219",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/112432083409"
+        },
+        {
+          "name": "Real Radicale contract",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37510974124/job/112431716579"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37510974143/job/112431713478"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37510974143/job/112431713453"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37510974143/job/112431713349"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37510974143/job/112431713173"
+        },
+        {
+          "name": "Calendar browser layout",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37510974143/job/112431712696"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37510974171/job/112431712210"
+        }
+      ]
+    },
+    {
+      "pr": 218,
+      "slice": "One absolute UTC DISPLAY alarm and nominal day/week DST fixtures",
+      "merge": "e772d7de6644332be4daeb97ee529f6d15e68800",
+      "tree": "b448ac05e55ceade141cc30e7dd5cdcc1e6b9b52",
+      "head": "2011e7b63b14b17c71e15d590663df6592469f89",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/218",
+      "review": "Independent final exact-tree PASS; inherited formatter delta and exact one-block test repair reviewed",
+      "checks": "All eight applicable exact-head checks including real Radicale passed",
+      "adr": "ADR039",
+      "limit": "Calendar-only; one non-repeating UTC DISPLAY alarm; Matrix options/configuration/scheduler remain ADR028 relative-only",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/112464061854"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37520252160/job/112463526339"
+        },
+        {
+          "name": "Calendar browser layout",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37520252160/job/112463526200"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37520252160/job/112463526175"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37520252160/job/112463526161"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37520252160/job/112463525847"
+        },
+        {
+          "name": "Real Radicale contract",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37520252155/job/112463525832"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37520252065/job/112463525289"
+        }
+      ]
+    }
+  ],
+  "externalIntegrations": {
+    "betaScope": {
+      "pr": 221,
+      "merge": "b73cdb61e30c20878a2cab282b6dc854130b92dd",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/221"
+    },
+    "defaultOffDeploymentPreflight": {
+      "pr": 224,
+      "merge": "036300f317b55be18af923477c8377067478f3d0",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/224"
+    }
+  },
+  "evidenceBoundary": "Hosted repository gates and synthetic fixtures do not establish actual Element client, operator, restore, production or capacity acceptance.",
+  "preservation": {
+    "historicalHandoff": "bf0fda4d04066a82f9b2e8dce7ac7109724f0dfe",
+    "debtReportBlob": "26a0bdf7d9a006ace33af08e251dc04302f33ea3",
+    "refs": [
+      {
+        "branch": "codex/web-handoff-20261003",
+        "head": "bf0fda4d04066a82f9b2e8dce7ac7109724f0dfe",
+        "expected": "bf0fda4d04066a82f9b2e8dce7ac7109724f0dfe",
+        "preserved": true
+      },
+      {
+        "branch": "codex/backup-local-main-20261003",
+        "head": "3ed83753c989830c2209073df96ad7bedae6ecf9",
+        "expected": null,
+        "preserved": true,
+        "historicalExpectedPrefix": "3ed83753"
+      },
+      {
+        "branch": "codex/backup-m6-reminder-alarm-uid-20261003",
+        "head": "d227de8ebcc7df932bf75404e7cfb13d48249ce2",
+        "expected": "d227de8ebcc7df932bf75404e7cfb13d48249ce2",
+        "preserved": true
+      },
+      {
+        "branch": "codex/backup-m6-reminder-config-api-20261003",
+        "head": "55bff4242320cb06ac51a0eaed4c3916720648a5",
+        "expected": "55bff4242320cb06ac51a0eaed4c3916720648a5",
+        "preserved": true
+      },
+      {
+        "branch": "codex/backup-m6-reminder-config-api-auth-20261003",
+        "head": "1f188a5e0d4021433828c0db7b470f10832acbb2",
+        "expected": "1f188a5e0d4021433828c0db7b470f10832acbb2",
+        "preserved": true
+      },
+      {
+        "branch": "codex/backup-m6-reminder-deployment-20261003",
+        "head": "ea920b8a3b7894bf0ec6b7f3e80e8ab81482a067",
+        "expected": "ea920b8a3b7894bf0ec6b7f3e80e8ab81482a067",
+        "preserved": true
+      },
+      {
+        "branch": "codex/backup-m6-reminder-integrated-20261003",
+        "head": "101551a22b8197fa538a4f9f7b7c81efb5f6d942",
+        "expected": "101551a22b8197fa538a4f9f7b7c81efb5f6d942",
+        "preserved": true
+      },
+      {
+        "branch": "codex/backup-m6-reminder-postgres-store-20261003",
+        "head": "576b0ee437551b8f46266da17c75946935e636b4",
+        "expected": "576b0ee437551b8f46266da17c75946935e636b4",
+        "preserved": true
+      },
+      {
+        "branch": "codex/backup-m6-room-reminder-auth-20261003",
+        "head": "611395561524fbf2aef80324897f56babc69a2d7",
+        "expected": "611395561524fbf2aef80324897f56babc69a2d7",
+        "preserved": true
+      }
+    ],
+    "verifiedAt": "2026-10-06T19:39:31.308Z"
+  },
+  "localBackend": "Local shell stopped responding; worktrees and dirty alarm work preserved; no blind reset or alignment.",
+  "acceptedInventoryCapturedAt": "2026-10-06T20:02:42.376Z",
+  "priorHandoffCandidates": [
+    {
+      "pr": 164,
+      "head": "14ffdb86dcea23d1fa604359f1e03dbb2406cb27",
+      "merge": "47aaed9c5d0a5ddc0167df0e1005049d3012117a",
+      "mergedAt": "2026-10-03T18:22:13Z",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/164",
+      "title": "feat: add gated appservice room calendar reads",
+      "tree": "e4a7b92f8b9136dc8dcf1e49f7c6c5455497ae2a",
+      "state": "merged",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/111262248301"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37143324052/job/111262086166"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37143324052/job/111262086164"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37143324052/job/111262086155"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37143324052/job/111262085970"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37143324019/job/111262085698"
+        },
+        {
+          "name": "Real Radicale contract",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37143324029/job/111262085687"
+        }
+      ]
+    },
+    {
+      "pr": 177,
+      "head": "067d545bc8ff6cc121d49a2eb7e3c45dc86e03a7",
+      "merge": "e274fadfaacf4e01c679be79b86d1f0ce4017f3c",
+      "mergedAt": "2026-10-03T17:03:49Z",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/177",
+      "title": "Add duration PERIOD entry to recurrence editor",
+      "tree": "15dfc43e81e504053a04de646c064182122f50a5",
+      "state": "merged",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/111246008605"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37137811683/job/111245815076"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37137811683/job/111245815035"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37137811683/job/111245815028"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37137811683/job/111245814971"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37137811692/job/111245814885"
+        }
+      ]
+    },
+    {
+      "pr": 178,
+      "head": "50aaabb6be45a62d64a0bd5e2521bd7e0d6238f9",
+      "merge": "cbd1a0a9652d3ac35ef1723900c682d5247ac9d0",
+      "mergedAt": "2026-10-03T16:38:42Z",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/178",
+      "title": "docs: add current calendar gateway threat model",
+      "tree": "66aa477aa1654a5005f62ee0c8a3e9c23743081c",
+      "state": "merged",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/111244199408"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37137208382/job/111244051709"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37137208382/job/111244051703"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37137208382/job/111244051688"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37137208382/job/111244051612"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37137208327/job/111244051211"
+        }
+      ]
+    },
+    {
+      "pr": 179,
+      "head": "84215fbf55f884ff94e5a298a182a275b59f811b",
+      "merge": "9afadbe83dd28943dfc88440816528f564081190",
+      "mergedAt": "2026-10-03T16:23:01Z",
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/179",
+      "title": "Build workspace prerequisites before aggregate tests",
+      "tree": "c431a22d9f2e65c42c16e03c7a33682a0fd89971",
+      "state": "merged",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/111213922675"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37126839185/job/111213751348"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37126839185/job/111213751305"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37126839185/job/111213751268"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37126839185/job/111213751137"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37126839172/job/111213750967"
+        }
+      ]
+    }
+  ],
+  "acceptedCodeBaseline": {
+    "head": "e772d7de6644332be4daeb97ee529f6d15e68800",
+    "tree": "b448ac05e55ceade141cc30e7dd5cdcc1e6b9b52",
+    "capturedAt": "2026-10-06T19:46:13.498Z",
+    "sourceHead": "2011e7b63b14b17c71e15d590663df6592469f89",
+    "sourceTree": "b448ac05e55ceade141cc30e7dd5cdcc1e6b9b52",
+    "postMergeCheckEvidence": [
+      {
+        "name": "Quality",
+        "conclusion": "success",
+        "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37521379950/job/112467362186"
+      },
+      {
+        "name": "Widget",
+        "conclusion": "success",
+        "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37521379950/job/112467362172"
+      },
+      {
+        "name": "Calendar browser layout",
+        "conclusion": "success",
+        "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37521379950/job/112467362068"
+      },
+      {
+        "name": "Server and bot",
+        "conclusion": "success",
+        "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37521379950/job/112467362047"
+      },
+      {
+        "name": "Container image build smoke",
+        "conclusion": "success",
+        "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37521379950/job/112467361731"
+      },
+      {
+        "name": "Analyze JavaScript/TypeScript",
+        "conclusion": "success",
+        "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37521379985/job/112467361225"
+      }
+    ]
+  },
+  "temporaryHelpers": {
+    "formatter": {
+      "pr": 222,
+      "branch": "codex/temporary-locked-prettier-receipts-20261006",
+      "head": "aa29816ab22de896dfe35d28203382625bd337c4",
+      "state": "closed",
+      "draft": true,
+      "merged": false,
+      "branchPreserved": true,
+      "target": "ff948882ca82377f35aea6d580820685fa50b035",
+      "run": 37522957823,
+      "job": 112472732769,
+      "runConclusion": "success",
+      "receipts": 6,
+      "identities": 6,
+      "nonidentities": 0
+    },
+    "locator": {
+      "pr": 223,
+      "branch": "codex/temporary-server-test-locations-20261006",
+      "head": "704bbdd82d1204d254f5ddc4ed71e9af2c8034c0",
+      "state": "closed",
+      "draft": true,
+      "merged": false,
+      "branchPreserved": true,
+      "target": "80ce117c6e2fce22e9831eeb40b91239d9bcf604",
+      "run": 37518410756,
+      "sanitizerSelfTests": "PASS",
+      "purpose": "Located an earlier test folding expectation; repaired at final accepted alarm head",
+      "runConclusion": "failure"
+    }
+  },
+  "pendingAcceptanceDrafts": [
+    {
+      "pr": 225,
+      "url": "https://github.com/0cwa/matrix-calendar-widget/pull/225",
+      "title": "Add hosted Element Web acceptance journey",
+      "head": "1f9e2f4ca240e03a87ca1d54709bc8273b72ffef",
+      "base": "e772d7de6644332be4daeb97ee529f6d15e68800",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "capturedAt": "2026-10-06T20:13:57.194Z",
+      "checkEvidence": [
+        {
+          "name": "CodeQL",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/runs/112473388222"
+        },
+        {
+          "name": "Server and bot",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993453/job/112472854520"
+        },
+        {
+          "name": "Calendar browser layout",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993453/job/112472854497"
+        },
+        {
+          "name": "Quality",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993453/job/112472854487"
+        },
+        {
+          "name": "Widget",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993453/job/112472854227"
+        },
+        {
+          "name": "Container image build smoke",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993453/job/112472854047"
+        },
+        {
+          "name": "Analyze JavaScript/TypeScript",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993448/job/112472852464"
+        },
+        {
+          "name": "Real Radicale contract",
+          "conclusion": "success",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993560/job/112472852219"
+        },
+        {
+          "name": "Element Web acceptance",
+          "conclusion": "failure",
+          "url": "https://github.com/0cwa/matrix-calendar-widget/actions/runs/37522993409/job/112472851987"
+        }
+      ],
+      "next": "Re-read the live head and review sanitized dedicated Element diagnostics; no client acceptance is established by the failed draft check."
+    }
+  ]
+}
