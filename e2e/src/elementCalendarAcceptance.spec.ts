@@ -57,6 +57,7 @@ type Phase =
   | 'member-a-session-observed'
   | 'member-b-authenticated'
   | 'outsider-authenticated'
+  | 'member-a-room-navigation'
   | 'member-a-room-context'
   | 'member-b-room-context'
   | 'outsider-room-context'
@@ -88,9 +89,56 @@ type MatrixSyncState =
   | 'CATCHUP'
   | 'UNKNOWN';
 
+type MemberARoomObservation = {
+  matrixUserMatches: boolean;
+  matrixRoomKnown: boolean;
+  matrixRoomJoined: boolean;
+  matrixSyncState: MatrixSyncState;
+  roomNavigationCompleted: boolean;
+  roomHeadingReady: boolean;
+  roomHeadingPresent: boolean;
+  roomNameMatches: boolean;
+  roomIdMatches: boolean;
+  blockedExternalRequestCount: number;
+  homeserverHttpErrorCount: number;
+  homeserverLastHttpErrorStatus?: number;
+};
+
+type MemberARoomFailureCode =
+  | 'element-room-navigation-failed'
+  | 'element-room-observation-unavailable'
+  | 'element-room-session-mismatch'
+  | 'element-room-not-known'
+  | 'element-room-not-joined'
+  | 'element-room-route-mismatch'
+  | 'element-room-heading-not-present'
+  | 'element-room-name-mismatch'
+  | 'element-room-heading-wait-timeout';
+
+type MemberARoomResult = {
+  element: ElementWebPage;
+  navigationCompleted: boolean;
+  observation?: MemberARoomObservation;
+  failureCode?: MemberARoomFailureCode;
+};
+
+type HomeserverHttpFailures = {
+  count: number;
+  lastStatus?: number;
+};
+
 let fixture: Fixture;
 
 let activePhase: Phase = 'member-a-authenticated';
+const memberAHomeserverHttpFailures = new WeakMap<
+  Page,
+  HomeserverHttpFailures
+>();
+const blockedExternalRequestsByContext = new WeakMap<
+  BrowserContext,
+  { count: number }
+>();
+const memberABlockedExternalRequests = new WeakMap<Page, { count: number }>();
 
 test('Element Web members share events and enforce room authorization', async ({
   browser,
@@ -112,6 +160,8 @@ test('Element Web members share events and enforce room authorization', async ({
       timezoneId: 'Europe/Stockholm',
       viewport: { width: 1440, height: 900 },
     });
+    const contextBlockedRequests = { count: 0 };
+    blockedExternalRequestsByContext.set(context, contextBlockedRequests);
     contexts.push(context);
     await context.route('**/*', async (route) => {
       let origin: string | undefined;
@@ -119,12 +169,20 @@ test('Element Web members share events and enforce room authorization', async ({
         origin = new URL(route.request().url()).origin;
       } catch {
         blockedExternalRequests += 1;
+        contextBlockedRequests.count = Math.min(
+          contextBlockedRequests.count + 1,
+          100_000,
+        );
         await route.abort('blockedbyclient');
         return;
       }
 
       if (!allowedOrigins.has(origin)) {
         blockedExternalRequests += 1;
+        contextBlockedRequests.count = Math.min(
+          contextBlockedRequests.count + 1,
+          100_000,
+        );
         await route.abort('blockedbyclient');
         return;
       }
@@ -140,6 +198,7 @@ test('Element Web members share events and enforce room authorization', async ({
   let pageB: Page | undefined;
   let pageC: Page | undefined;
   let failureHttpStatus: number | undefined;
+  let failureAlreadyReported = false;
 
   try {
     recordRuntimeVersions(browser.version());
@@ -159,13 +218,18 @@ test('Element Web members share events and enforce room authorization', async ({
     pageC = await authenticateInElement(contextC, fixture.users.outsider);
     record(activePhase, 'passed');
 
-    activePhase = 'member-a-room-context';
-    const elementA = await openFixtureRoom(
+    activePhase = 'member-a-room-navigation';
+    const memberARoom = await openMemberARoomWithDiagnostics(
       pageA,
       fixture.roomName,
       fixture.teamRoomId,
+      fixture.users.memberA.userId,
     );
-    record(activePhase, 'passed');
+    record(activePhase, memberARoom.navigationCompleted ? 'passed' : 'failed');
+    activePhase = 'member-a-room-context';
+    recordMemberARoomObservation(memberARoom);
+    failureAlreadyReported = Boolean(memberARoom.failureCode);
+    const elementA = requireMemberARoom(memberARoom);
     activePhase = 'widget-a-approved';
     const firstRead = waitForGatewayResponse(
       pageA,
@@ -370,7 +434,11 @@ test('Element Web members share events and enforce room authorization', async ({
     expect(blockedExternalRequests).toBe(0);
     record(activePhase, 'passed', undefined, blockedExternalRequests);
   } catch {
-    record(activePhase, 'failed', failureHttpStatus);
+    recordJourneyFailure(
+      activePhase,
+      failureHttpStatus,
+      failureAlreadyReported,
+    );
     throw new Error('Element acceptance journey failed');
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
@@ -396,6 +464,30 @@ async function authenticateInElement(
   page.setDefaultTimeout(30_000);
   page.setDefaultNavigationTimeout(30_000);
   if (captureMemberADiagnostics) {
+    const homeserverOrigin = new URL(fixture.homeserverUrl).origin;
+    const homeserverHttpFailures: HomeserverHttpFailures = { count: 0 };
+    memberAHomeserverHttpFailures.set(page, homeserverHttpFailures);
+    const contextBlockedRequests =
+      blockedExternalRequestsByContext.get(context);
+    if (contextBlockedRequests) {
+      memberABlockedExternalRequests.set(page, contextBlockedRequests);
+    }
+    page.on('response', (response) => {
+      try {
+        if (
+          new URL(response.url()).origin === homeserverOrigin &&
+          response.status() >= 400
+        ) {
+          homeserverHttpFailures.count = Math.min(
+            homeserverHttpFailures.count + 1,
+            100_000,
+          );
+          homeserverHttpFailures.lastStatus = response.status();
+        }
+      } catch {
+        // Keep only the bounded count/status below; never retain request data.
+      }
+    });
     activePhase = 'member-a-origin-navigation';
   }
   const originResponse = await page.goto(
@@ -546,6 +638,209 @@ async function openFixtureRoom(
   return element;
 }
 
+async function openMemberARoomWithDiagnostics(
+  page: Page,
+  roomName: string,
+  roomId: string,
+  expectedUserId: string,
+): Promise<MemberARoomResult> {
+  const roomUrl = new URL(fixture.elementUrl);
+  roomUrl.hash = `/room/${roomId}`;
+  let navigationCompleted = false;
+  try {
+    await page.goto(roomUrl.href, { timeout: 20_000 });
+    navigationCompleted = true;
+  } catch {
+    // The failure summary records only whether this bounded navigation ended.
+  }
+
+  const element = new ElementWebPage(page);
+  let roomHeadingReady = false;
+  if (navigationCompleted) {
+    try {
+      await element.roomNameText.waitFor({
+        state: 'visible',
+        timeout: 15_000,
+      });
+      const headingText = await element.roomNameText.textContent({
+        timeout: 1_000,
+      });
+      roomHeadingReady = headingText?.trim() === roomName;
+    } catch {
+      // The post-wait observation records only fixed booleans.
+    }
+  }
+
+  const observation = await observeMemberARoom(
+    page,
+    element,
+    roomName,
+    roomId,
+    expectedUserId,
+    navigationCompleted,
+    roomHeadingReady,
+  ).catch(() => undefined);
+  return {
+    element,
+    navigationCompleted,
+    observation,
+    failureCode: getMemberARoomFailureCode(navigationCompleted, observation),
+  };
+}
+
+async function observeMemberARoom(
+  page: Page,
+  element: ElementWebPage,
+  roomName: string,
+  roomId: string,
+  expectedUserId: string,
+  roomNavigationCompleted: boolean,
+  roomHeadingReady: boolean,
+): Promise<MemberARoomObservation> {
+  const matrixState = await page.evaluate(
+    ({ expectedRoomId, expectedMatrixUserId }) => {
+      type MatrixRoom = { getMyMembership?: () => string | null };
+      type MatrixClient = {
+        getUserId?: () => string | null;
+        getRoom?: (id: string) => MatrixRoom | undefined;
+        getSyncState?: () => string | null;
+      };
+      type MatrixClientPeg = { get?: () => MatrixClient | undefined };
+      const knownSyncStates = new Set([
+        'ERROR',
+        'PREPARED',
+        'RECONNECTING',
+        'STOPPED',
+        'SYNCING',
+        'CATCHUP',
+      ]);
+      let matrixClient: MatrixClient | undefined;
+      try {
+        const matrixClientPeg = (
+          window as unknown as {
+            mxMatrixClientPeg?: MatrixClientPeg;
+          }
+        ).mxMatrixClientPeg;
+        matrixClient = matrixClientPeg?.get?.();
+      } catch {
+        // Report fixed booleans and known sync states only.
+      }
+
+      let matrixUserMatches = false;
+      let matrixRoomKnown = false;
+      let matrixRoomJoined = false;
+      let matrixSyncState: MatrixSyncState = 'UNKNOWN';
+      try {
+        matrixUserMatches =
+          matrixClient?.getUserId?.() === expectedMatrixUserId;
+      } catch {
+        // Keep the identity observation boolean-only.
+      }
+      try {
+        const matrixRoom = matrixClient?.getRoom?.(expectedRoomId);
+        matrixRoomKnown = Boolean(matrixRoom);
+        matrixRoomJoined = matrixRoom?.getMyMembership?.() === 'join';
+      } catch {
+        // Keep room state observations boolean-only.
+      }
+      try {
+        const rawSyncState = matrixClient?.getSyncState?.();
+        if (
+          typeof rawSyncState === 'string' &&
+          knownSyncStates.has(rawSyncState)
+        ) {
+          matrixSyncState = rawSyncState as MatrixSyncState;
+        }
+      } catch {
+        // Keep only fixed sync state values.
+      }
+      return {
+        matrixUserMatches,
+        matrixRoomKnown,
+        matrixRoomJoined,
+        matrixSyncState,
+      };
+    },
+    { expectedRoomId: roomId, expectedMatrixUserId: expectedUserId },
+  );
+  const roomHeadingCount = await element.roomNameText.count().catch(() => 0);
+  const roomHeadingPresent =
+    roomHeadingCount > 0 &&
+    (await element.roomNameText.isVisible().catch(() => false));
+  const roomNameMatches =
+    roomHeadingCount > 0 &&
+    (await element.roomNameText
+      .first()
+      .evaluate(
+        (heading, expectedName) =>
+          (heading.textContent ?? '').trim() === expectedName,
+        roomName,
+        { timeout: 1_000 },
+      )
+      .catch(() => false));
+  let roomIdMatches = false;
+  try {
+    roomIdMatches = element.getCurrentRoomId() === roomId;
+  } catch {
+    // The URL is represented only as an equality result.
+  }
+  const homeserverHttpFailures = memberAHomeserverHttpFailures.get(page) ?? {
+    count: 0,
+  };
+  const blockedExternalRequests =
+    memberABlockedExternalRequests.get(page)?.count ?? 0;
+  return {
+    ...matrixState,
+    roomNavigationCompleted,
+    roomHeadingReady,
+    roomHeadingPresent,
+    roomNameMatches,
+    roomIdMatches,
+    blockedExternalRequestCount: blockedExternalRequests,
+    homeserverHttpErrorCount: homeserverHttpFailures.count,
+    ...(homeserverHttpFailures.lastStatus === undefined
+      ? {}
+      : { homeserverLastHttpErrorStatus: homeserverHttpFailures.lastStatus }),
+  };
+}
+
+function getMemberARoomFailureCode(
+  navigationCompleted: boolean,
+  observation: MemberARoomObservation | undefined,
+): MemberARoomFailureCode | undefined {
+  if (!navigationCompleted) return 'element-room-navigation-failed';
+  if (!observation) return 'element-room-observation-unavailable';
+  if (!observation.matrixUserMatches) return 'element-room-session-mismatch';
+  if (!observation.roomIdMatches) return 'element-room-route-mismatch';
+  if (!observation.matrixRoomKnown) return 'element-room-not-known';
+  if (!observation.matrixRoomJoined) return 'element-room-not-joined';
+  if (!observation.roomHeadingPresent) {
+    return 'element-room-heading-not-present';
+  }
+  if (!observation.roomNameMatches) return 'element-room-name-mismatch';
+  if (!observation.roomHeadingReady) {
+    return 'element-room-heading-wait-timeout';
+  }
+  return undefined;
+}
+
+function requireMemberARoom(result: MemberARoomResult): ElementWebPage {
+  if (result.failureCode) {
+    throw new Error('Element room context did not become ready');
+  }
+  return result.element;
+}
+
+function recordJourneyFailure(
+  phase: Phase,
+  httpStatus: number | undefined,
+  alreadyRecorded: boolean,
+) {
+  if (!alreadyRecorded) {
+    record(phase, 'failed', httpStatus);
+  }
+}
+
 async function openCalendarWidget(
   element: ElementWebPage,
   page: Page,
@@ -679,6 +974,21 @@ function recordMemberASessionObservation(
       phase: 'member-a-session-observed',
       status: observation ? 'passed' : 'unavailable',
       ...(observation ?? {}),
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+}
+
+function recordMemberARoomObservation(result: MemberARoomResult) {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase: 'member-a-room-context',
+      status: result.failureCode ? 'failed' : 'passed',
+      ...(result.failureCode ? { failureCode: result.failureCode } : {}),
+      ...(result.observation ?? {}),
     })}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );

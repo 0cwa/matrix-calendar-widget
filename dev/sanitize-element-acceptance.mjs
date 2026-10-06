@@ -35,6 +35,7 @@ const PHASES = new Set([
   'member-a-session-observed',
   'member-b-authenticated',
   'outsider-authenticated',
+  'member-a-room-navigation',
   'member-a-room-context',
   'member-b-room-context',
   'outsider-room-context',
@@ -75,6 +76,15 @@ const FAILURE_CODES = new Set([
   'gateway-config-validation-failed',
   'gateway-out-of-memory',
   'gateway-startup-unknown',
+  'element-room-navigation-failed',
+  'element-room-observation-unavailable',
+  'element-room-session-mismatch',
+  'element-room-not-known',
+  'element-room-not-joined',
+  'element-room-route-mismatch',
+  'element-room-heading-not-present',
+  'element-room-name-mismatch',
+  'element-room-heading-wait-timeout',
 ]);
 const CONTAINER_STATES = new Set([
   'created',
@@ -122,6 +132,16 @@ const ALLOWED_KEYS = new Set([
   'matrixClientPresent',
   'matrixUserMatches',
   'matrixSyncState',
+  'matrixRoomKnown',
+  'matrixRoomJoined',
+  'roomNavigationCompleted',
+  'roomHeadingReady',
+  'roomHeadingPresent',
+  'roomNameMatches',
+  'roomIdMatches',
+  'blockedExternalRequestCount',
+  'homeserverHttpErrorCount',
+  'homeserverLastHttpErrorStatus',
   'failureCode',
   'missingModuleKind',
   'missingDependency',
@@ -201,6 +221,28 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (!Number.isInteger(record.count) ||
         record.count < 0 ||
         record.count > 100000)
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    for (const countKey of [
+      'blockedExternalRequestCount',
+      'homeserverHttpErrorCount',
+    ]) {
+      if (
+        Object.hasOwn(record, countKey) &&
+        (!Number.isInteger(record[countKey]) ||
+          record[countKey] < 0 ||
+          record[countKey] > 100000)
+      ) {
+        throw new Error('invalid element acceptance summary');
+      }
+    }
+    if (
+      Object.hasOwn(record, 'homeserverLastHttpErrorStatus') &&
+      (!Number.isInteger(record.homeserverLastHttpErrorStatus) ||
+        record.homeserverLastHttpErrorStatus < 400 ||
+        record.homeserverLastHttpErrorStatus > 599)
     ) {
       throw new Error('invalid element acceptance summary');
     }
@@ -290,25 +332,105 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     const sessionObservationKeys = [
       'matrixClientHookPresent',
       'matrixClientPresent',
-      'matrixUserMatches',
-      'matrixSyncState',
     ];
     const hasSessionObservation = sessionObservationKeys.some((key) =>
       Object.hasOwn(record, key),
     );
+    const hasMatrixUserObservation = Object.hasOwn(record, 'matrixUserMatches');
+    const hasSyncObservation = Object.hasOwn(record, 'matrixSyncState');
     const validSessionObservation =
       record.phase !== 'member-a-session-observed' ||
-      (record.status === 'passed' && hasSessionObservation) ||
-      (record.status === 'unavailable' && !hasSessionObservation);
+      (record.status === 'passed' &&
+        hasSessionObservation &&
+        hasSyncObservation) ||
+      (record.status === 'unavailable' &&
+        !hasSessionObservation &&
+        !hasMatrixUserObservation &&
+        !hasSyncObservation);
     if (
       (hasSessionObservation &&
         (record.phase !== 'member-a-session-observed' ||
           record.status !== 'passed' ||
           typeof record.matrixClientHookPresent !== 'boolean' ||
-          typeof record.matrixClientPresent !== 'boolean' ||
-          typeof record.matrixUserMatches !== 'boolean' ||
+          typeof record.matrixClientPresent !== 'boolean')) ||
+      (hasMatrixUserObservation &&
+        record.phase !== 'member-a-session-observed' &&
+        record.phase !== 'member-a-room-context') ||
+      (hasSyncObservation &&
+        ((record.phase !== 'member-a-session-observed' &&
+          record.phase !== 'member-a-room-context') ||
           !MATRIX_SYNC_STATES.has(record.matrixSyncState))) ||
+      (record.phase === 'member-a-session-observed' &&
+        hasMatrixUserObservation !== hasSyncObservation) ||
+      (hasMatrixUserObservation &&
+        typeof record.matrixUserMatches !== 'boolean') ||
       !validSessionObservation
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    const roomObservationKeys = [
+      'matrixRoomKnown',
+      'matrixRoomJoined',
+      'roomNavigationCompleted',
+      'roomHeadingReady',
+      'roomHeadingPresent',
+      'roomNameMatches',
+      'roomIdMatches',
+      'blockedExternalRequestCount',
+      'homeserverHttpErrorCount',
+      'homeserverLastHttpErrorStatus',
+    ];
+    const hasRoomObservation = roomObservationKeys.some((key) =>
+      Object.hasOwn(record, key),
+    );
+    const roomFailureCodes = new Set([
+      'element-room-navigation-failed',
+      'element-room-observation-unavailable',
+      'element-room-session-mismatch',
+      'element-room-not-known',
+      'element-room-not-joined',
+      'element-room-route-mismatch',
+      'element-room-heading-not-present',
+      'element-room-name-mismatch',
+      'element-room-heading-wait-timeout',
+    ]);
+    const requiredRoomBooleans = [
+      'matrixUserMatches',
+      'matrixRoomKnown',
+      'matrixRoomJoined',
+      'roomNavigationCompleted',
+      'roomHeadingReady',
+      'roomHeadingPresent',
+      'roomNameMatches',
+      'roomIdMatches',
+    ];
+    if (
+      ((hasRoomObservation || record.phase === 'member-a-room-context') &&
+        (record.phase !== 'member-a-room-context' ||
+          !['passed', 'failed'].includes(record.status))) ||
+      (hasRoomObservation &&
+        (requiredRoomBooleans.some((key) => typeof record[key] !== 'boolean') ||
+          !hasSyncObservation ||
+          !Object.hasOwn(record, 'blockedExternalRequestCount') ||
+          !Object.hasOwn(record, 'homeserverHttpErrorCount') ||
+          (Object.hasOwn(record, 'homeserverLastHttpErrorStatus') &&
+            record.homeserverHttpErrorCount === 0) ||
+          (record.status === 'passed' &&
+            (record.failureCode !== undefined ||
+              requiredRoomBooleans.some((key) => record[key] !== true))) ||
+          (record.status === 'failed' &&
+            !roomFailureCodes.has(record.failureCode)))) ||
+      (record.phase === 'member-a-room-context' &&
+        !hasRoomObservation &&
+        (record.status !== 'failed' ||
+          !roomFailureCodes.has(record.failureCode))) ||
+      (hasRoomObservation &&
+        (Object.hasOwn(record, 'matrixClientHookPresent') ||
+          Object.hasOwn(record, 'matrixClientPresent'))) ||
+      (Object.hasOwn(record, 'failureCode') &&
+        roomFailureCodes.has(record.failureCode) &&
+        record.phase !== 'member-a-room-context')
     ) {
       throw new Error('invalid element acceptance summary');
     }
@@ -365,6 +487,33 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       fields.push(`matrix_client_present=${record.matrixClientPresent}`);
       fields.push(`matrix_user_matches=${record.matrixUserMatches}`);
       fields.push(`matrix_sync_state=${record.matrixSyncState}`);
+    }
+    if (
+      phase === 'member-a-room-context' &&
+      record.matrixUserMatches !== undefined
+    ) {
+      fields.push(`matrix_user_matches=${record.matrixUserMatches}`);
+      fields.push(`matrix_room_known=${record.matrixRoomKnown}`);
+      fields.push(`matrix_room_joined=${record.matrixRoomJoined}`);
+      fields.push(`matrix_sync_state=${record.matrixSyncState}`);
+      fields.push(
+        `room_navigation_completed=${record.roomNavigationCompleted}`,
+      );
+      fields.push(`room_heading_ready=${record.roomHeadingReady}`);
+      fields.push(`room_heading_present=${record.roomHeadingPresent}`);
+      fields.push(`room_name_matches=${record.roomNameMatches}`);
+      fields.push(`room_id_matches=${record.roomIdMatches}`);
+      fields.push(
+        `blocked_external_request_count=${record.blockedExternalRequestCount}`,
+      );
+      fields.push(
+        `homeserver_http_error_count=${record.homeserverHttpErrorCount}`,
+      );
+      if (record.homeserverLastHttpErrorStatus !== undefined) {
+        fields.push(
+          `homeserver_last_http_error_status=${record.homeserverLastHttpErrorStatus}`,
+        );
+      }
     }
     if (Object.hasOwn(record, 'failureCode')) {
       fields.push(`failure_code=${record.failureCode}`);

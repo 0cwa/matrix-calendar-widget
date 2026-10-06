@@ -121,7 +121,22 @@ test('emits bounded member A navigation and session observations', () => {
 test('emits bounded room, widget, identity, and gateway readiness steps', () => {
   const summary = sanitizeElementAcceptance(
     [
-      JSON.stringify({ phase: 'member-a-room-context', status: 'passed' }),
+      JSON.stringify({ phase: 'member-a-room-navigation', status: 'passed' }),
+      JSON.stringify({
+        phase: 'member-a-room-context',
+        status: 'passed',
+        matrixUserMatches: true,
+        matrixRoomKnown: true,
+        matrixRoomJoined: true,
+        matrixSyncState: 'SYNCING',
+        roomNavigationCompleted: true,
+        roomHeadingReady: true,
+        roomHeadingPresent: true,
+        roomNameMatches: true,
+        roomIdMatches: true,
+        blockedExternalRequestCount: 0,
+        homeserverHttpErrorCount: 0,
+      }),
       JSON.stringify({ phase: 'widget-a-sidebar-ready', status: 'passed' }),
       JSON.stringify({
         phase: 'widget-a-identity-dialog-observed',
@@ -160,7 +175,8 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
     summary,
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=member-a-room-context status=passed',
+      'phase=member-a-room-navigation status=passed',
+      'phase=member-a-room-context status=passed matrix_user_matches=true matrix_room_known=true matrix_room_joined=true matrix_sync_state=SYNCING room_navigation_completed=true room_heading_ready=true room_heading_present=true room_name_matches=true room_id_matches=true blocked_external_request_count=0 homeserver_http_error_count=0',
       'phase=widget-a-sidebar-ready status=passed',
       'phase=widget-a-identity-dialog-observed status=passed',
       'phase=widget-a-identity-approval status=passed',
@@ -172,6 +188,48 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
       '',
     ].join('\n'),
   );
+});
+
+test('emits bounded Element room state and rejects private-shaped values', () => {
+  const roomObservation = {
+    phase: 'member-a-room-context',
+    status: 'failed',
+    failureCode: 'element-room-not-known',
+    matrixUserMatches: true,
+    matrixRoomKnown: false,
+    matrixRoomJoined: false,
+    matrixSyncState: 'UNKNOWN',
+    roomNavigationCompleted: true,
+    roomHeadingReady: false,
+    roomHeadingPresent: false,
+    roomNameMatches: false,
+    roomIdMatches: true,
+    blockedExternalRequestCount: 0,
+    homeserverHttpErrorCount: 1,
+    homeserverLastHttpErrorStatus: 500,
+  };
+  assert.equal(
+    sanitizeElementAcceptance(JSON.stringify(roomObservation), sourceSha),
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=member-a-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-not-known',
+      '',
+    ].join('\n'),
+  );
+
+  const invalidRecords = [
+    { ...roomObservation, matrixUserMatches: '@member:private-server' },
+    { ...roomObservation, matrixSyncState: 'token=secret' },
+    { ...roomObservation, roomIdMatches: '!private-room:server' },
+    { ...roomObservation, homeserverLastHttpErrorStatus: '500 /sync?token=x' },
+    { ...roomObservation, failureCode: 'room name: private meeting' },
+    { ...roomObservation, roomName: 'private meeting' },
+  ];
+  for (const record of invalidRecords) {
+    assert.throws(() =>
+      sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+    );
+  }
 });
 
 test('keeps an unavailable Matrix session sample non-gating and empty', () => {
