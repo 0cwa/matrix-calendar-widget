@@ -1,4 +1,4 @@
-# Calendar projection benchmark
+# Calendar performance measurements
 
 This benchmark measures the synchronous domain occurrence projection on
 synthetic calendars. It does not measure the CalDAV gateway, network latency,
@@ -96,3 +96,34 @@ measure; it is not a data-load or domain-projection benchmark. This fixed
 workload does not measure memory, gateway/network latency, real user calendars,
 or a controlled runtime, and it must not be used to claim pilot capacity or
 production responsiveness.
+
+### Hosted measurement, 2026-10-06
+
+All twelve browser cases passed in [run 37481392793](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37481392793),
+browser job `112330122875`, at source commit
+`1af82dee25e2365c7083c860e65fec94b2bffa14` / tree
+`911027044f96463a06e7d42cd2371ecf333662f7`. The runner used Linux x64,
+Node 22, and Headless Chromium 149.0.7827.55. The fixture initializes locale
+with the production helper and gives the month grid the production viewport
+height chain. It exercises a normal pointer click on the overflow link.
+
+The [retained JSON](./evidence/calendar-browser-20261006.json) includes the
+warm-up, five raw samples per view, environment, counts, horizontal dimensions,
+and optional long-task summaries from artifact `11421332275`.
+
+| View  | Median mount ms | Maximum mount ms | Maximum sampled long task ms |
+| ----- | --------------: | ---------------: | ---------------------------: |
+| List  |          947.30 |          1044.50 |                          586 |
+| Month |         2819.90 |          2898.70 |                         2631 |
+
+Each list sample returned exactly 1,000 unique expected titles. Each month
+sample accounted for 62 visible events plus 938 hidden events across 31
+overflow links, then returned the same 1,000 unique titles after clicking one
+link. Document and surface widths stayed within the 1280-pixel viewport.
+There were no browser page errors.
+
+The month render includes a long task of up to 2.63 seconds in these samples.
+Passing the count and layout gates does not establish interactivity at this
+size. Varied recurring workloads, memory peaks, loading, and a controlled
+capacity target remain open. These numbers cover the prepared fixture's
+mount interval only, with the exclusions above.
