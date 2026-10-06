@@ -2218,7 +2218,7 @@ END:VCALENDAR`,
     expect(putInit?.body).toContain('SUMMARY:Created event');
   });
 
-  it('rejects malformed conference fields before CalDAV access', async () => {
+  it('rejects malformed link fields before CalDAV access', async () => {
     await expect(
       createController().createEvent(
         userContext,
@@ -2249,6 +2249,34 @@ END:VCALENDAR`,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
+      createController().createEvent(
+        userContext,
+        openIdCredential,
+        {
+          uid: 'event@example.test',
+          title: 'Attachment',
+          timing: {
+            type: 'timed',
+            start: {
+              type: 'zoned',
+              local: '2026-09-24T08:00:00',
+              timezone: 'UTC',
+            },
+            end: {
+              type: 'zoned',
+              local: '2026-09-24T09:00:00',
+              timezone: 'UTC',
+            },
+          },
+          attachment: { url: 'javascript:alert(1)' },
+        } as unknown as CalendarEventInput,
+        roomId,
+        'https://radicale.example.test/alice/team/',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'invalid-event-attachment' },
+    });
+    await expect(
       createController().updateEvent(
         userContext,
         openIdCredential,
@@ -2259,6 +2287,21 @@ END:VCALENDAR`,
         'https://radicale.example.test/alice/team/event.ics',
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      createController().updateEvent(
+        userContext,
+        openIdCredential,
+        {
+          attachment: { action: 'add', url: 'javascript:alert(1)' },
+        } as unknown as CalendarEventPatch,
+        '"current-etag"',
+        roomId,
+        'https://radicale.example.test/alice/team/',
+        'https://radicale.example.test/alice/team/event.ics',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'invalid-event-attachment' },
+    });
     expect(fetch).not.toHaveBeenCalled();
     expect(forRoom).not.toHaveBeenCalled();
   });
@@ -2367,6 +2410,44 @@ END:VCALENDAR`,
             action: 'set',
             url: 'https://meet.example.test/room',
             label: 'Planning room',
+          },
+        },
+        '"stale-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls[1][1]?.method).toBe('PUT');
+    expect(new Headers(fetch.mock.calls[1][1]?.headers).get('If-Match')).toBe(
+      '"stale-etag"',
+    );
+  });
+
+  it('sends a same-value attachment operation with a stale ETag to conditional PUT', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/event.ics';
+    fetch
+      .mockResponseOnce(
+        simpleEventIcs(
+          'Team planning',
+          'ATTACH;VALUE=URI:https://files.example.test/agenda',
+        ),
+        { status: 200, headers: { ETag: '"current-etag"' } },
+      )
+      .mockResponseOnce('Precondition failed', { status: 412 });
+
+    await expect(
+      createController().updateEvent(
+        userContext,
+        openIdCredential,
+        {
+          attachment: {
+            action: 'set',
+            sourceUrl: 'https://files.example.test/agenda',
+            url: 'https://files.example.test/agenda',
           },
         },
         '"stale-etag"',

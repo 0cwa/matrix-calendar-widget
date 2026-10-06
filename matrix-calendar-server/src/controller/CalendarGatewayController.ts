@@ -16,6 +16,7 @@
 
 import {
   CalendarAuthorizationRequest,
+  CalendarEventAttachmentValidationError,
   CalendarEventConferenceValidationError,
   CalendarEventInput,
   CalendarEventPatch,
@@ -24,6 +25,8 @@ import {
   projectCalendarEventOccurrences,
   validateCalendarEventInputConference,
   validateCalendarEventPatchConference,
+  validateCalendarEventInputAttachment,
+  validateCalendarEventPatchAttachment,
   type CalendarEventListDiagnosticReason,
 } from '@matrix-calendar-widget/calendar';
 import {
@@ -760,7 +763,7 @@ export class CalendarGatewayController {
     @Query('calendarId') calendarId?: string,
     @Query('target') target?: string,
   ): Promise<CalendarGatewayEventDto> {
-    assertValidConferencePayload(input, 'create');
+    assertValidEventLinkPayload(input, 'create');
     if (this.isRoomTarget(target)) {
       const roomTarget = await this.authorizeRoomCalendarTarget(
         userContext,
@@ -841,7 +844,7 @@ export class CalendarGatewayController {
     @Query('eventId') eventId?: string,
     @Query('target') target?: string,
   ): Promise<CalendarGatewayEventDto> {
-    assertValidConferencePayload(patch, 'patch');
+    assertValidEventLinkPayload(patch, 'patch');
     if (this.isRoomTarget(target)) {
       const roomTarget = await this.authorizeRoomCalendarTarget(
         userContext,
@@ -936,6 +939,7 @@ export class CalendarGatewayController {
         encoded.icalendar === current.icalendar &&
         etag === current.etag &&
         (Object.prototype.hasOwnProperty.call(patch, 'conference') ||
+          Object.prototype.hasOwnProperty.call(patch, 'attachment') ||
           (patch?.recurrence &&
             ('occurrence' in patch.recurrence ||
               'following' in patch.recurrence)))
@@ -1622,21 +1626,29 @@ function normalizeUrlForComparison(value: string): string {
   return `${url.origin}${path}`;
 }
 
-function assertValidConferencePayload(
+function assertValidEventLinkPayload(
   value: unknown,
   mode: 'create' | 'patch',
 ): void {
   try {
     if (mode === 'create') {
       validateCalendarEventInputConference(value);
+      validateCalendarEventInputAttachment(value);
     } else {
       validateCalendarEventPatchConference(value);
+      validateCalendarEventPatchAttachment(value);
     }
   } catch (error) {
     if (error instanceof CalendarEventConferenceValidationError) {
       throw new BadRequestException({
         code: 'invalid-event-conference',
         message: 'The conference link operation is invalid or unsupported.',
+      });
+    }
+    if (error instanceof CalendarEventAttachmentValidationError) {
+      throw new BadRequestException({
+        code: 'invalid-event-attachment',
+        message: 'The attachment link operation is invalid or unsupported.',
       });
     }
     throw error;

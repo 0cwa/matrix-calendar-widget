@@ -43,6 +43,7 @@ import {
   FormGroup,
   FormHelperText,
   FormLabel,
+  MenuItem,
   Stack,
   Switch,
   TextField,
@@ -174,6 +175,14 @@ export function CalendarEventEditorDialog({
     event && occurrence && editScope === 'following',
   );
   const occurrenceHasAlarm = Boolean(event?.alarm || event?.unsupportedAlarm);
+  const attachmentControlsDisabled = Boolean(
+    readOnly ||
+      chooseScope ||
+      editingOccurrence ||
+      editingFollowing ||
+      values.attachmentEditable === false ||
+      saving,
+  );
   const followingSupported = Boolean(
     event &&
     occurrence &&
@@ -271,6 +280,9 @@ export function CalendarEventEditorDialog({
               ...(field === 'conferenceUrl' || field === 'conferenceLabel'
                 ? { conferenceChanged: true }
                 : {}),
+              ...(field === 'attachmentUrl'
+                ? { attachmentChanged: true }
+                : {}),
               ...(field.startsWith('recurrence')
                 ? { recurrenceChanged: true }
                 : {}),
@@ -278,6 +290,48 @@ export function CalendarEventEditorDialog({
           : current,
       );
     };
+
+  const handleAttachmentOperationChange = (
+    change: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const operation = change.target.value as NonNullable<
+      CalendarEventFormValues['attachmentOperation']
+    >;
+    setValues((current) => {
+      if (!current) {
+        return current;
+      }
+      const sourceUrl =
+        operation === 'set' || operation === 'remove'
+          ? current.attachmentSourceUrl || current.attachmentUrls?.[0] || ''
+          : '';
+      return {
+        ...current,
+        attachmentOperation: operation,
+        attachmentSourceUrl: sourceUrl,
+        attachmentUrl: operation === 'set' ? sourceUrl : '',
+        attachmentChanged: operation !== 'none',
+      };
+    });
+  };
+
+  const handleAttachmentSourceChange = (
+    change: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const sourceUrl = change.target.value;
+    setValues((current) =>
+      current
+        ? {
+            ...current,
+            attachmentSourceUrl: sourceUrl,
+            ...(current.attachmentOperation === 'set'
+              ? { attachmentUrl: sourceUrl }
+              : {}),
+            attachmentChanged: true,
+          }
+        : current,
+    );
+  };
 
   const handleCalendarChange = (change: ChangeEvent<HTMLInputElement>) => {
     const calendarId = change.target.value;
@@ -657,7 +711,12 @@ export function CalendarEventEditorDialog({
                       'calendarEvents.editor.invalidConference',
                       'Enter a safe HTTP(S) conference URL and a label of at most 120 characters.',
                     )
-                  : undefined;
+                  : validationErrorCode === 'invalid-attachment'
+                    ? t(
+                        'calendarEvents.editor.invalidAttachment',
+                        'Enter a safe HTTP(S) attachment URL and choose one attachment operation.',
+                      )
+                    : undefined;
 
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
@@ -1111,6 +1170,88 @@ export function CalendarEventEditorDialog({
                 onChange={handleChange('conferenceLabel')}
                 value={values.conferenceLabel}
               />
+
+              {values.attachmentEditable === false && (
+                <Alert severity="info">
+                  {t(
+                    'calendarEvents.editor.unsupportedAttachmentReadOnly',
+                    'Attachment editing is unavailable for source data this editor cannot safely reconcile. Other edits will preserve it.',
+                  )}
+                </Alert>
+              )}
+
+              <TextField
+                disabled={attachmentControlsDisabled}
+                label={t('calendarEvents.editor.attachmentOperation', 'Attachment link')}
+                onChange={handleAttachmentOperationChange}
+                select
+                value={values.attachmentOperation ?? 'none'}
+              >
+                <MenuItem value="none">
+                  {t('calendarEvents.editor.attachmentNoChange', 'No change')}
+                </MenuItem>
+                <MenuItem value="add">
+                  {t('calendarEvents.editor.attachmentAdd', 'Add link')}
+                </MenuItem>
+                {(values.attachmentUrls?.length ?? 0) > 0 && (
+                  <>
+                    <MenuItem value="set">
+                      {t('calendarEvents.editor.attachmentReplace', 'Replace link')}
+                    </MenuItem>
+                    <MenuItem value="remove">
+                      {t('calendarEvents.editor.attachmentRemove', 'Remove link')}
+                    </MenuItem>
+                  </>
+                )}
+              </TextField>
+
+              {(values.attachmentOperation === 'set' ||
+                values.attachmentOperation === 'remove') && (
+                <TextField
+                  disabled={attachmentControlsDisabled}
+                  label={t(
+                    'calendarEvents.editor.attachmentSource',
+                    'Existing attachment link',
+                  )}
+                  onChange={handleAttachmentSourceChange}
+                  select
+                  value={values.attachmentSourceUrl ?? ''}
+                >
+                  {(values.attachmentUrls ?? []).map((url) => (
+                    <MenuItem key={url} value={url}>
+                      {url}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              )}
+
+              {(values.attachmentOperation === 'add' ||
+                values.attachmentOperation === 'set') && (
+                <TextField
+                  disabled={attachmentControlsDisabled}
+                  error={validationErrorCode === 'invalid-attachment'}
+                  helperText={t(
+                    'calendarEvents.editor.attachmentUrlHelp',
+                    'Use an HTTP(S) URL. The link is saved as text; no file is uploaded or fetched.',
+                  )}
+                  label={t(
+                    'calendarEvents.editor.attachmentUrl',
+                    'Attachment URL',
+                  )}
+                  onChange={handleChange('attachmentUrl')}
+                  type="url"
+                  value={values.attachmentUrl ?? ''}
+                />
+              )}
+
+              {values.attachmentChanged && (
+                <Typography color="text.secondary" variant="body2">
+                  {t(
+                    'calendarEvents.editor.attachmentWillBeSaved',
+                    'One attachment link change will be applied when you save.',
+                  )}
+                </Typography>
+              )}
 
               <TextField
                 label={t('calendarEvents.editor.description', 'Description')}

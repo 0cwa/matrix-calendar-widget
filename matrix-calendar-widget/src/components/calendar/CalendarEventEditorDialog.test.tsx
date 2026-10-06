@@ -100,6 +100,184 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventEditorDialog />', () => {
+  it('creates one attachment link and exposes accessible edit controls', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      idFactory: () => 'created-with-attachment',
+    });
+    const onClose = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        onClose={onClose}
+        open
+        uidFactory={() => 'attachment@example.test'}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.type(
+      await screen.findByRole('textbox', { name: /Title/i }),
+      'Attachment event',
+    );
+    fireEvent.change(screen.getByRole('combobox', { name: 'Attachment link' }), {
+      target: { value: 'add' },
+    });
+    await userEvent.type(
+      screen.getByRole('textbox', { name: 'Attachment URL' }),
+      'https://files.example.test/agenda.pdf',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await expect(
+      repository.getEvent('team', 'created-with-attachment'),
+    ).resolves.toMatchObject({
+      attachments: [{ url: 'https://files.example.test/agenda.pdf' }],
+      externalLinks: [
+        { kind: 'attachment', href: 'https://files.example.test/agenda.pdf' },
+      ],
+    });
+  });
+
+  it('replaces one selected attachment URL through the editor', async () => {
+    const attachmentEvent: CalendarEvent = {
+      ...event,
+      attachments: [{ url: 'https://files.example.test/old.pdf' }],
+      externalLinks: [
+        {
+          kind: 'attachment',
+          href: 'https://files.example.test/old.pdf',
+        },
+      ],
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [attachmentEvent],
+    });
+    const onClose = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={attachmentEvent}
+        onClose={onClose}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.change(
+      await screen.findByRole('combobox', { name: 'Attachment link' }),
+      { target: { value: 'set' } },
+    );
+    const urlInput = await screen.findByRole('textbox', {
+      name: 'Attachment URL',
+    });
+    expect(urlInput).toHaveValue('https://files.example.test/old.pdf');
+    await userEvent.clear(urlInput);
+    await userEvent.type(urlInput, 'https://files.example.test/new.pdf');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await expect(repository.getEvent('team', attachmentEvent.id)).resolves
+      .toMatchObject({
+        attachments: [{ url: 'https://files.example.test/new.pdf' }],
+        externalLinks: [
+          { kind: 'attachment', href: 'https://files.example.test/new.pdf' },
+        ],
+      });
+  });
+
+  it('removes the selected attachment URL through the editor', async () => {
+    const attachmentEvent: CalendarEvent = {
+      ...event,
+      attachments: [{ url: 'https://files.example.test/old.pdf' }],
+      externalLinks: [
+        {
+          kind: 'attachment',
+          href: 'https://files.example.test/old.pdf',
+        },
+      ],
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [attachmentEvent],
+    });
+    const onClose = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={attachmentEvent}
+        onClose={onClose}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.change(
+      await screen.findByRole('combobox', { name: 'Attachment link' }),
+      { target: { value: 'remove' } },
+    );
+    expect(
+      await screen.findByRole('combobox', { name: 'Existing attachment link' }),
+    ).toHaveValue('https://files.example.test/old.pdf');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await expect(repository.getEvent('team', attachmentEvent.id)).resolves
+      .toMatchObject({
+        attachments: undefined,
+        externalLinks: undefined,
+      });
+  });
+
+  it('keeps unsupported attachment authoring disabled while saving ordinary fields', async () => {
+    const unsupportedEvent: CalendarEvent = {
+      ...event,
+      unsupportedAttachment: true,
+      attachments: [{ url: 'https://files.example.test/visible.pdf' }],
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [unsupportedEvent],
+    });
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={unsupportedEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByText(
+        'Attachment editing is unavailable for source data this editor cannot safely reconcile. Other edits will preserve it.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Attachment link' }),
+    ).toBeDisabled();
+    await userEvent.clear(screen.getByRole('textbox', { name: /Title/i }));
+    await userEvent.type(
+      screen.getByRole('textbox', { name: /Title/i }),
+      'Updated title',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(async () => {
+      await expect(repository.getEvent('team', event.id)).resolves.toMatchObject({
+        title: 'Updated title',
+        unsupportedAttachment: true,
+        attachments: [{ url: 'https://files.example.test/visible.pdf' }],
+      });
+    });
+  });
+
   it('creates an event through CalendarRepository', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
