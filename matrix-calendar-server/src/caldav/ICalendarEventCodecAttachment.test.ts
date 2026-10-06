@@ -707,9 +707,11 @@ describe('ICalendarEventCodec URI attachment authoring', () => {
       });
 
       expect(changed.icalendar).toContain(alarm);
-      expect(changed.icalendar).toContain(
-        oldAttachment.replace(attachmentUrl, revisedAttachmentUrl),
-      );
+      const unfoldedCalendar = changed.icalendar.replace(/\r\n[ \t]/g, '');
+      const expectedAttachment = oldAttachment
+        .replace(/\r\n[ \t]/g, '')
+        .replace(attachmentUrl, revisedAttachmentUrl);
+      expect(unfoldedCalendar).toContain(expectedAttachment);
       expect(changed.icalendar).toContain(binaryAttachment);
       expect(changed.event.alarm?.uid).toBe('stable-alarm@example.test');
 
