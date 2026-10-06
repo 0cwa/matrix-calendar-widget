@@ -2493,6 +2493,74 @@ END:VCALENDAR`,
     );
   });
 
+  it('skips same-value alarm writes only with the current ETag', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = `${calendarId}event.ics`;
+    const alarm = {
+      action: 'display' as const,
+      trigger: { type: 'absolute' as const, value: '2026-09-24T07:45:00Z' },
+    };
+    const source = new ICalendarEventCodec()
+      .parse(calendarId, eventId, simpleEventIcs())
+      .applyPatch({ alarm }).icalendar;
+    fetch.mockResponseOnce(source, {
+      status: 200,
+      headers: { ETag: '"current-etag"' },
+    });
+
+    const result = await createController().updateEvent(
+      userContext,
+      openIdCredential,
+      { alarm },
+      '"current-etag"',
+      roomId,
+      calendarId,
+      eventId,
+    );
+
+    expect(result.event.alarm?.trigger).toEqual(alarm.trigger);
+    expect(result.etag).toBe('"current-etag"');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it('sends same-value alarm operations with a stale ETag to conditional PUT', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = `${calendarId}event.ics`;
+    const alarm = {
+      action: 'display' as const,
+      trigger: { type: 'absolute' as const, value: '2026-09-24T07:45:00Z' },
+    };
+    const source = new ICalendarEventCodec()
+      .parse(calendarId, eventId, simpleEventIcs())
+      .applyPatch({ alarm }).icalendar;
+    fetch
+      .mockResponseOnce(source, {
+        status: 200,
+        headers: { ETag: '"current-etag"' },
+      })
+      .mockResponseOnce('Precondition failed', { status: 412 });
+
+    await expect(
+      createController().updateEvent(
+        userContext,
+        openIdCredential,
+        { alarm },
+        '"stale-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls[1][1]?.method).toBe('PUT');
+    expect(new Headers(fetch.mock.calls[1][1]?.headers).get('If-Match')).toBe(
+      '"stale-etag"',
+    );
+  });
+
   it.each(['*', 'W/"weak-etag"', '"first", "second"'])(
     'rejects nonconcrete strong If-Match validator %s before a CalDAV read',
     async (ifMatch) => {

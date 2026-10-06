@@ -92,12 +92,18 @@ export type CalendarEventAlarmLeadTime = Omit<
   'isNegative'
 >;
 
-/** One editable RFC 5545 ACTION:DISPLAY alarm relative to DTSTART. */
+/** Absolute RFC 5545 alarm instant, normalized to ISO UTC with a trailing Z. */
+export type CalendarEventAbsoluteAlarmTrigger = {
+  type: 'absolute';
+  value: string;
+};
+
+/** One editable, non-repeating RFC 5545 ACTION:DISPLAY alarm. */
 export type CalendarEventDisplayAlarm = {
   action: 'display';
   /** RFC 9074 identity retained when present; legacy VALARMs may omit it. */
   uid?: string;
-  trigger: CalendarEventAlarmLeadTime;
+  trigger: CalendarEventAlarmLeadTime | CalendarEventAbsoluteAlarmTrigger;
 };
 
 /** Alarm values accepted on writes; the server owns and generates the UID. */

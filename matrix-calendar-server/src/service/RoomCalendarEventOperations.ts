@@ -293,6 +293,7 @@ export class RoomCalendarEventOperations {
       encoded.icalendar === current.icalendar &&
       etag === current.etag &&
       (Object.prototype.hasOwnProperty.call(patch, 'conference') ||
+        Object.prototype.hasOwnProperty.call(patch, 'alarm') ||
         Object.prototype.hasOwnProperty.call(patch, 'attachment') ||
         (patch?.recurrence &&
           ('occurrence' in patch.recurrence ||

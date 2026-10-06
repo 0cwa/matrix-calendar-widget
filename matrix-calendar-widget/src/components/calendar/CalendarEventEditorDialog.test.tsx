@@ -2303,13 +2303,97 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     const updated = await repository.getEvent('team', 'alarm-event');
-    expect(updated.alarm?.trigger.minutes).toBe(40);
+    expect(updated.alarm?.trigger).toEqual({
+      weeks: 0,
+      days: 0,
+      hours: 0,
+      minutes: 40,
+      seconds: 0,
+    });
 
     view.rerender(<CalendarEventEditorDialog {...props} event={updated} />);
     await userEvent.click(await screen.findByLabelText('CalDAV reminder'));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await expect(
       repository.getEvent('team', 'alarm-event'),
+    ).resolves.toMatchObject({ alarm: undefined });
+  });
+
+  it('creates, reloads, updates, and removes one absolute UTC alarm', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      idFactory: () => 'absolute-alarm-event',
+    });
+    const props = {
+      calendars: [calendar],
+      onClose: vi.fn(),
+      open: true,
+      uidFactory: () => 'absolute-alarm-event@example.test',
+    };
+    const view = render(<CalendarEventEditorDialog {...props} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    await userEvent.type(
+      await screen.findByRole('textbox', { name: /Title/i }),
+      'Absolute alarm event',
+    );
+    await userEvent.click(screen.getByLabelText('CalDAV reminder'));
+    await userEvent.click(
+      await screen.findByRole('radio', { name: 'At an exact UTC time' }),
+    );
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Exact time (UTC)' }),
+      { target: { value: '2026-10-01T08:45:00+02:00' } },
+    );
+    expect(
+      screen.getByText(
+        'Enter a valid UTC date and time in YYYY-MM-DDTHH:mm:ssZ format.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create event' })).toBeDisabled();
+
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Exact time (UTC)' }),
+      { target: { value: '2026-10-01T08:45:00Z' } },
+    );
+    expect(
+      screen.getByText(
+        'This absolute alarm is saved to the calendar and cannot be delivered as a Matrix room reminder.',
+      ),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
+
+    const created = await repository.getEvent('team', 'absolute-alarm-event');
+    expect(created.alarm).toEqual({
+      action: 'display',
+      trigger: { type: 'absolute', value: '2026-10-01T08:45:00Z' },
+    });
+
+    view.rerender(<CalendarEventEditorDialog {...props} event={created} />);
+    expect(
+      await screen.findByRole('radio', { name: 'At an exact UTC time' }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('textbox', { name: 'Exact time (UTC)' }),
+    ).toHaveValue('2026-10-01T08:45:00Z');
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Exact time (UTC)' }),
+      { target: { value: '2026-10-01T08:30:00Z' } },
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const updated = await repository.getEvent('team', 'absolute-alarm-event');
+    expect(updated.alarm?.trigger).toEqual({
+      type: 'absolute',
+      value: '2026-10-01T08:30:00Z',
+    });
+
+    view.rerender(<CalendarEventEditorDialog {...props} event={updated} />);
+    await userEvent.click(await screen.findByLabelText('CalDAV reminder'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await expect(
+      repository.getEvent('team', 'absolute-alarm-event'),
     ).resolves.toMatchObject({ alarm: undefined });
   });
 

@@ -47,6 +47,25 @@ function calendarWithConference(...conference: string[]): string {
   ].join('\r\n');
 }
 
+function calendarWithDisplayAlarm(
+  triggerProperty: string,
+  conference: string,
+): string {
+  const alarm = [
+    'BEGIN:VALARM',
+    'UID:stable-alarm@example.test',
+    'ACTION:DISPLAY',
+    'DESCRIPTION:Keep this alarm description',
+    triggerProperty,
+    'X-ALARM-METADATA:preserve-alarm-property',
+    'END:VALARM',
+  ];
+  return calendarWithConference(conference).replace(
+    'END:VEVENT',
+    [...alarm, 'END:VEVENT'].join('\r\n'),
+  );
+}
+
 function codec(): ICalendarEventCodec {
   return new ICalendarEventCodec(() => new Date('2026-10-06T12:00:00Z'));
 }
@@ -373,6 +392,83 @@ describe('ICalendarEventCodec conference authoring', () => {
       conference,
     );
   });
+  it.each([
+    [
+      'absolute',
+      'set',
+      'TRIGGER;VALUE=DATE-TIME:20261005T084500Z',
+      {
+        action: 'set' as const,
+        url: 'https://meet.example.test/next',
+        label: 'Next room',
+      },
+    ],
+    [
+      'absolute',
+      'remove',
+      'TRIGGER;VALUE=DATE-TIME:20261005T084500Z',
+      { action: 'remove' as const },
+    ],
+    [
+      'relative',
+      'set',
+      'TRIGGER;RELATED=START;VALUE=DURATION:-PT15M',
+      {
+        action: 'set' as const,
+        url: 'https://meet.example.test/next',
+        label: 'Next room',
+      },
+    ],
+    [
+      'relative',
+      'remove',
+      'TRIGGER;RELATED=START;VALUE=DURATION:-PT15M',
+      { action: 'remove' as const },
+    ],
+  ] as const)(
+    'preserves an unchanged %s alarm during conference %s',
+    (_alarmKind, _operation, triggerProperty, conference) => {
+      const originalConference =
+        'CONFERENCE;VALUE=URI;LABEL="Team":https://meet.example.test/room';
+      const parsed = codec().parse(
+        'team',
+        'meet.ics',
+        calendarWithDisplayAlarm(triggerProperty, originalConference),
+      );
+      const parsedAlarm = parsed.event.alarm;
+      if (!parsedAlarm) {
+        throw new Error('Expected the supported alarm to be readable');
+      }
+      const alarmLines = [
+        'BEGIN:VALARM',
+        'UID:stable-alarm@example.test',
+        'ACTION:DISPLAY',
+        'DESCRIPTION:Keep this alarm description',
+        triggerProperty,
+        'X-ALARM-METADATA:preserve-alarm-property',
+        'END:VALARM',
+      ].join('\r\n');
+
+      const changed = parsed.applyPatch({
+        alarm: {
+          action: 'display',
+          trigger: parsedAlarm.trigger,
+        },
+        conference,
+      });
+
+      expect(changed.icalendar).toContain(alarmLines);
+      expect(changed.event.alarm).toEqual(parsedAlarm);
+      if (conference.action === 'set') {
+        expect(changed.icalendar).toContain('https://meet.example.test/next');
+        expect(changed.icalendar).not.toContain(
+          'https://meet.example.test/room',
+        );
+      } else {
+        expect(changed.icalendar).not.toContain('CONFERENCE');
+      }
+    },
+  );
 });
 
 function recurringCalendarWithConference(conference: string): string {
