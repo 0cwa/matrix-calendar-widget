@@ -2,8 +2,8 @@
 
 _Last updated: 2026-10-06._
 
-_Source baseline: `main` at `151d3c713799a12f18dcb8a5cb307081399daff5`
-(PR #220); PR #219 adds the bounded URI attachment slice below._
+_Source baseline: `main` at `036300f317b55be18af923477c8377067478f3d0`
+(PR #224); PR #219 adds the bounded URI attachment slice below._
 
 ## Current phase
 
