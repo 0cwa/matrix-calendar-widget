@@ -104,15 +104,26 @@ jobs:
             exit 1
           fi
 
-          if ! node "$locator" paths "$CANDIDATE" >"$path_file" 2>"$parser_log"; then
-            printf '%s\n' 'diagnostic-unavailable code=target-map' >> "$summary_path"
-            exit 1
-          fi
-          mapfile -t test_paths < "$path_file"
-          if [ "${#test_paths[@]}" -lt 1 ]; then
-            printf '%s\n' 'diagnostic-unavailable code=target-map' >> "$summary_path"
-            exit 1
-          fi
+          case "$CANDIDATE" in
+            alarm-server|attachment-server)
+              test_paths=()
+              ;;
+            attachment-widget|text-widget)
+              if ! node "$locator" paths "$CANDIDATE" >"$path_file" 2>"$parser_log"; then
+                printf '%s\n' 'diagnostic-unavailable code=target-map' >> "$summary_path"
+                exit 1
+              fi
+              mapfile -t test_paths < "$path_file"
+              if [ "${#test_paths[@]}" -ne 2 ]; then
+                printf '%s\n' 'diagnostic-unavailable code=target-map' >> "$summary_path"
+                exit 1
+              fi
+              ;;
+            *)
+              printf '%s\n' 'diagnostic-unavailable code=target-map' >> "$summary_path"
+              exit 1
+              ;;
+          esac
 
           if ! yarn install --frozen-lockfile >"$install_log" 2>&1; then
             printf '%s\n' 'diagnostic-unavailable code=install-failed' >> "$summary_path"
@@ -131,7 +142,6 @@ jobs:
           case "$CANDIDATE" in
             alarm-server|attachment-server)
               yarn workspace @matrix-calendar-widget/server test:all \
-                "${test_paths[@]}" \
                 --runInBand \
                 --json \
                 --outputFile="$report" \
