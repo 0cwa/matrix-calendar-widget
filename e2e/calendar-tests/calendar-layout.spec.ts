@@ -142,11 +142,229 @@ for (const viewport of viewports) {
   }
 }
 
+test('room visitor sees read-only event controls at a narrow width', async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) =>
+    pageErrors.push(error.message.slice(0, 2000)),
+  );
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto('/browser-tests/index.html?mode=room-read-only');
+  await expect(
+    page.getByRole('heading', { name: 'Calendar component validation' }),
+  ).toBeVisible();
+
+  const createEvent = page.getByRole('button', { name: 'Create event' });
+  await expect(createEvent).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Create calendar' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Delete calendar' }),
+  ).toBeDisabled();
+
+  const event = page.getByRole('button', { name: /Synthetic room planning/ });
+  await expect(event).toBeVisible();
+  await page.getByRole('button', { name: 'List', exact: true }).focus();
+  await tabToEvent(page, event);
+  await page.keyboard.press('Enter');
+
+  const dialog = page.getByRole('dialog', {
+    name: 'Synthetic room planning',
+    exact: true,
+  });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('alert')).toHaveText(
+    'This calendar is read-only.',
+  );
+  await expect(
+    dialog.getByRole('link', { name: 'Open Matrix room' }),
+  ).toHaveAttribute(
+    'href',
+    'https://matrix.to/#/%21synthetic-room%3Aexample.test',
+  );
+  await expect(dialog.getByRole('button', { name: 'Edit' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Notify room' })).toHaveCount(
+    0,
+  );
+
+  await waitForDialogTransitions(dialog);
+  const dimensions = await readDialogMeasurements(dialog);
+  await test.info().attach('room-visitor-layout.json', {
+    body: JSON.stringify(dimensions),
+    contentType: 'application/json',
+  });
+  expect(dimensions.documentWidth).toBeLessThanOrEqual(
+    dimensions.viewportWidth + 1,
+  );
+  expect(dimensions.dialogWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
+  expect(dimensions.dialogScrollWidth).toBeLessThanOrEqual(
+    dimensions.dialogClientWidth + 1,
+  );
+  expect(dimensions.roomLinkPaintOpacity).toBe(1);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(event).toBeFocused();
+  expect(pageErrors).toEqual([]);
+});
+
+test('room manager sees writable event controls at a narrow width', async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) =>
+    pageErrors.push(error.message.slice(0, 2000)),
+  );
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto('/browser-tests/index.html?mode=room-manager');
+  await expect(
+    page.getByRole('heading', { name: 'Calendar component validation' }),
+  ).toBeVisible();
+
+  const createEvent = page.getByRole('button', { name: 'Create event' });
+  await expect(createEvent).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Create calendar' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Delete calendar' }),
+  ).toBeDisabled();
+
+  await createEvent.click();
+  const editor = page.getByRole('dialog', { name: 'Create event' });
+  await expect(editor).toBeVisible();
+  await expect(editor.getByRole('combobox', { name: 'Calendar' })).toHaveValue(
+    'synthetic-room-calendar',
+  );
+  await expect(
+    editor.getByRole('option', { name: 'Room calendar' }),
+  ).toBeAttached();
+  await editor.getByRole('button', { name: 'Cancel' }).click();
+  await expect(editor).toBeHidden();
+
+  const event = page.getByRole('button', { name: /Synthetic room planning/ });
+  await expect(event).toBeVisible();
+  await page.getByRole('button', { name: 'List', exact: true }).focus();
+  await tabToEvent(page, event);
+  await page.keyboard.press('Enter');
+
+  const dialog = page.getByRole('dialog', {
+    name: 'Synthetic room planning',
+    exact: true,
+  });
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByRole('link', { name: 'Open Matrix room' }),
+  ).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Edit' })).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Delete' })).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Notify room' }).click();
+  const reminder = dialog.getByRole('checkbox', {
+    name: 'Alarm 1: −15m relative to event start',
+  });
+  await expect(reminder).toBeVisible();
+  await reminder.check();
+  await expect(reminder).toBeChecked();
+  await dialog.getByRole('button', { name: 'Close room reminder' }).click();
+  await dialog.getByRole('button', { name: 'Notify room' }).click();
+  await expect(reminder).toBeChecked();
+  await reminder.uncheck();
+  await expect(reminder).not.toBeChecked();
+  await dialog.getByRole('button', { name: 'Close room reminder' }).click();
+  await dialog.getByRole('button', { name: 'Notify room' }).click();
+  await expect(reminder).not.toBeChecked();
+
+  await waitForDialogTransitions(dialog);
+  const dimensions = await readDialogMeasurements(dialog);
+  await test.info().attach('room-manager-layout.json', {
+    body: JSON.stringify(dimensions),
+    contentType: 'application/json',
+  });
+  expect(dimensions.documentWidth).toBeLessThanOrEqual(
+    dimensions.viewportWidth + 1,
+  );
+  expect(dimensions.dialogWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
+  expect(dimensions.dialogScrollWidth).toBeLessThanOrEqual(
+    dimensions.dialogClientWidth + 1,
+  );
+  expect(dimensions.roomLinkPaintOpacity).toBe(1);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(event).toBeFocused();
+  expect(pageErrors).toEqual([]);
+});
+
 async function tabToEvent(page: Page, event: Locator): Promise<void> {
-  for (let tab = 0; tab < 32; tab += 1) {
+  for (let tab = 0; tab < 64; tab += 1) {
     await page.keyboard.press('Tab');
     if (await event.evaluate((element) => element === document.activeElement)) {
       return;
     }
   }
+}
+
+async function waitForDialogTransitions(dialog: Locator): Promise<void> {
+  await dialog.evaluate(async (element) => {
+    const dialogRoot = element.closest('.MuiDialog-root');
+    if (!dialogRoot) return;
+
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => resolve());
+    });
+    const dialogElements = [
+      dialogRoot,
+      ...Array.from(dialogRoot.querySelectorAll('*')),
+    ];
+    const transitions = dialogElements
+      .flatMap((dialogElement) => dialogElement.getAnimations())
+      .filter((animation) => animation.constructor.name === 'CSSTransition');
+    await Promise.all(
+      transitions.map((transition) =>
+        transition.finished.catch(() => undefined),
+      ),
+    );
+  });
+}
+
+async function readDialogMeasurements(dialogLocator: Locator) {
+  return dialogLocator.evaluate((dialogElement) => {
+    const dialog = dialogElement as HTMLElement;
+    const document = dialog.ownerDocument;
+    const dialogRoot = dialog.closest<HTMLElement>('.MuiDialog-root');
+    if (!dialogRoot) {
+      throw new Error('Expected active dialog inside .MuiDialog-root');
+    }
+    const roomLink = dialog.querySelector<HTMLElement>(
+      'a[href^="https://matrix.to/"]',
+    );
+    let roomLinkPaintOpacity = 1;
+    if (roomLink) {
+      let currentElement: HTMLElement | null = roomLink;
+      while (currentElement) {
+        roomLinkPaintOpacity *= Number.parseFloat(
+          window.getComputedStyle(currentElement).opacity,
+        );
+        if (currentElement === dialogRoot) break;
+        currentElement = currentElement.parentElement;
+      }
+    }
+    return {
+      viewportWidth: document.documentElement.clientWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      dialogWidth: dialog.getBoundingClientRect().width,
+      dialogClientWidth: dialog.clientWidth,
+      dialogScrollWidth: dialog.scrollWidth,
+      dialogRootOpacity: window.getComputedStyle(dialogRoot).opacity,
+      roomLinkColor: roomLink
+        ? window.getComputedStyle(roomLink).color
+        : undefined,
+      roomLinkPaintOpacity,
+    };
+  });
 }

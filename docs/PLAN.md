@@ -130,11 +130,11 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
       any same-event VALARM. The editor requires an explicit instance/series
       choice and displays preflight or conflict feedback (ADR029).
 - [ ] Extend RRULE editing to additional recurrence rule parts and patterns.
-  - [ ] Author one MONTHLY ordinal BYDAY selector (first through fifth or
+  - [x] Author one MONTHLY ordinal BYDAY selector (first through fifth or
         last weekday), with matching DTSTART, interval/count/typed-UNTIL
         controls and DST regressions. Preserve broader read projection and
-        keep this-and-following timing support within ADR034 (ADR035; exact-head
-        validation pending).
+        keep this-and-following timing support within ADR034 (PR #215, ADR035;
+        all eight hosted checks passed).
 - [x] Skip and restore one projected supported occurrence by adding or
       removing only its matching EXDATE. Use the original recurrence identity
       even when a detached override moves the displayed instance, and preserve
@@ -427,6 +427,9 @@ access and event writes stay disabled by default.
   - [x] Add current calendar grid/list/details keyboard, focus, accessible-name,
         and axe regressions. Hosted browser fixture checks pass; actual client
         embedding remains unverified; see `docs/calendar-client-validation.md`.
+  - [x] Extend the synthetic Chromium fixture to room member/manager controls,
+        current-room links, and reminder setting reloads at 320 CSS pixels
+        (PR #213; ten hosted cases passed, including transition-settled axe).
 - [x] Source-based threat model and independent security review of its current
       boundary claims. Residual risks and deployment acceptance gates remain
       tracked in `docs/threat-model.md`; this is not a penetration test.
