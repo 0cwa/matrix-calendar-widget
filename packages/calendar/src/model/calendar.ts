@@ -272,6 +272,21 @@ export type CalendarEventUnsupportedRecurrence = 'range-this-and-future';
 /** Read-only marker for timezone semantics that are unsafe to project. */
 export type CalendarEventUnsupportedTimezone = true;
 
+/** One bounded RFC 7986 CONFERENCE property accepted on event creation. */
+export type CalendarEventConferenceInput = {
+  url: string;
+  /** Omission clears any LABEL parameter when replacing an existing value. */
+  label?: string;
+};
+
+/** Explicit whole-property operation accepted on a master-event patch. */
+export type CalendarEventConferencePatch =
+  | ({ action: 'set' } & CalendarEventConferenceInput)
+  | { action: 'remove' };
+
+/** Read-only warning for CONFERENCE source data outside the write subset. */
+export type CalendarEventUnsupportedConference = true;
+
 export type Calendar = {
   id: CalendarId;
   name: string;
@@ -300,6 +315,8 @@ export type CalendarEvent = {
   readonly revision?: CalendarEventRevision;
   /** Safe external links projected from the resource by the iCalendar codec. */
   readonly externalLinks?: readonly CalendarEventExternalLink[];
+  /** The source CONFERENCE property cannot be changed by this editor. */
+  unsupportedConference?: CalendarEventUnsupportedConference;
 
   status?: CalendarEventStatus;
   transparency?: CalendarEventTransparency;
@@ -328,11 +345,13 @@ export type CalendarEventInput = Omit<
   | 'unsupportedRecurrence'
   | 'unsupportedAlarm'
   | 'unsupportedTimezone'
+  | 'unsupportedConference'
   | 'revision'
   | 'externalLinks'
 > & {
   alarm?: CalendarEventDisplayAlarmInput;
   recurrence?: { rrule?: string };
+  conference?: CalendarEventConferenceInput;
 };
 
 /**
@@ -350,12 +369,14 @@ export type CalendarEventPatch = Partial<
     | 'unsupportedAlarm'
     | 'unsupportedRecurrence'
     | 'unsupportedTimezone'
+    | 'unsupportedConference'
     | 'revision'
     | 'externalLinks'
   >
 > & {
   alarm?: CalendarEventAlarmPatch;
   recurrence?: CalendarEventRecurrenceWrite;
+  conference?: CalendarEventConferencePatch;
 };
 
 export type CalendarTimeRange = {

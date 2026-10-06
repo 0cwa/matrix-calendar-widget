@@ -192,10 +192,16 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
       outside the supported editor.
 - [ ] Attachments/conference properties where safely interoperable.
   - [x] Preserve opaque attachment and conference properties on ordinary edits;
-        authoring remains open.
+        broader authoring remains open.
   - [x] Display bounded, revalidated HTTP(S) URL, URI ATTACH, and CONFERENCE
         links as explicit safe anchors, with no previews, uploads, or fetches
         (ADR031).
+  - [x] Add, label, change, or remove one safe HTTP(S) CONFERENCE URI on an
+        unambiguous master through ordinary ETag-protected event editing
+        (ADR036). Require explicit VALUE=URI; keep malformed/repeated source
+        properties and detached-specific conference data read-only. Preserve
+        raw parameters on all source components and timing clones; unchanged
+        composite saves retain exact source bytes and revision metadata.
 
 The recurring-resource contract uses the hosted CI stack pinned to Synapse
 v1.161.0 and the project-owned Radicale 3.8.0.0 OpenID-only image. A passing
@@ -373,8 +379,8 @@ DST regression or recurrence-editing criteria above.
         against pinned Synapse/Radicale (PR #199). This proves the pinned stack,
         rather than exactly-once delivery on arbitrary homeservers.
 - [x] Offer a safe current-room link from authorized room event details and
-      display existing safe conference links. RTC creation and link authoring
-      remain future work.
+      display existing safe conference links. Ordinary master conference URI
+      authoring follows ADR036; RTC service creation remains future work.
 - [x] Add separately gated, best-effort action notices after successful room
       create/update/delete operations (ADR032). The SDK request is awaited and
       retains its timeout behavior; notice failure does not roll back CalDAV.

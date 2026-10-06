@@ -261,10 +261,16 @@ export function CalendarEventEditorDialog({
           ? {
               ...current,
               [field]: change.target.value,
+              ...(field === 'conferenceUrl' && !change.target.value.trim()
+                ? { conferenceLabel: '' }
+                : {}),
               ...(field === 'start' || field === 'end' || field === 'timezone'
                 ? { timingChanged: true }
                 : {}),
               ...(field === 'timezone' ? { timezoneChanged: true } : {}),
+              ...(field === 'conferenceUrl' || field === 'conferenceLabel'
+                ? { conferenceChanged: true }
+                : {}),
               ...(field.startsWith('recurrence')
                 ? { recurrenceChanged: true }
                 : {}),
@@ -646,7 +652,12 @@ export function CalendarEventEditorDialog({
                     'calendarEvents.editor.invalidRdateDuration',
                     'Enter a positive duration using whole-number units. Weeks cannot be combined with other units.',
                   )
-                : undefined;
+                : validationErrorCode === 'invalid-conference'
+                  ? t(
+                      'calendarEvents.editor.invalidConference',
+                      'Enter a safe HTTP(S) conference URL and a label of at most 120 characters.',
+                    )
+                  : undefined;
 
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
@@ -1067,6 +1078,40 @@ export function CalendarEventEditorDialog({
                 value={values.location}
               />
 
+              {values.conferenceEditable === false && (
+                <Alert severity="info">
+                  {t(
+                    'calendarEvents.editor.unsupportedConferenceReadOnly',
+                    'Conference editing is unavailable for source data this editor cannot safely reconcile. Other edits will preserve it.',
+                  )}
+                </Alert>
+              )}
+
+              <TextField
+                disabled={values.conferenceEditable === false}
+                helperText={t(
+                  'calendarEvents.editor.conferenceUrlHelp',
+                  'Use an HTTP(S) link. Clear the URL to remove the conference link.',
+                )}
+                label={t(
+                  'calendarEvents.editor.conferenceUrl',
+                  'Conference URL',
+                )}
+                onChange={handleChange('conferenceUrl')}
+                type="url"
+                value={values.conferenceUrl}
+              />
+
+              <TextField
+                disabled={values.conferenceEditable === false}
+                label={t(
+                  'calendarEvents.editor.conferenceLabel',
+                  'Conference label',
+                )}
+                onChange={handleChange('conferenceLabel')}
+                value={values.conferenceLabel}
+              />
+
               <TextField
                 label={t('calendarEvents.editor.description', 'Description')}
                 multiline
@@ -1355,6 +1400,14 @@ export function CalendarEventEditorDialog({
                             ))}
                           </TextField>
                         </Stack>
+                      )}
+                      {values.recurrenceMonthlyByDay && (
+                        <Typography color="text.secondary" variant="body2">
+                          {t(
+                            'calendarEvents.editor.monthlyOrdinalStartHelp',
+                            'The start date must match the selected weekday pattern.',
+                          )}
+                        </Typography>
                       )}
                     </>
                   )}

@@ -19,6 +19,8 @@ import {
   AllDayCalendarEventTiming,
   Calendar,
   CalendarEvent,
+  CalendarEventConferenceInput,
+  CalendarEventConferencePatch,
   CalendarEventDateTime,
   CalendarEventDuration,
   CalendarEventId,
@@ -32,6 +34,13 @@ import {
   TimedCalendarEventTiming,
   isCalendarEventAlarmRemoval,
 } from '../model';
+import {
+  CalendarEventConferenceValidationError,
+  normalizeCalendarEventConferenceInput,
+  normalizeCalendarEventConferencePatch,
+  validateCalendarEventInputConference,
+  validateCalendarEventPatchConference,
+} from '../utils/calendarEventConference';
 import {
   calendarEventFollowingTimingOverrides,
   calendarEventRecurrenceIdentity,
@@ -217,13 +226,38 @@ export class InMemoryCalendarRepository implements CalendarRepository {
     input: CalendarEventInput,
   ): Promise<CalendarEvent> {
     const calendar = this.getWritableCalendar(calendarId);
+    let conference: CalendarEventConferenceInput | undefined;
+    try {
+      validateCalendarEventInputConference(input);
+      conference = input.conference
+        ? normalizeCalendarEventConferenceInput(input.conference)
+        : undefined;
+    } catch (error) {
+      if (error instanceof CalendarEventConferenceValidationError) {
+        throw new CalendarRepositoryError(
+          'unsupported-patch',
+          'Invalid conference link operation',
+        );
+      }
+      throw error;
+    }
     const calendarEvents = this.events.get(calendar.id)!;
     const id = this.nextEventId(calendarEvents);
 
+    const { conference: _conference, ...eventInput } = input;
+
     const event: CalendarEvent = {
-      ...cloneCalendarEventInput(input),
+      ...cloneCalendarEventInput(eventInput),
       id,
       calendarId,
+      ...(conference
+        ? {
+            externalLinks: applyConferenceToLinks(undefined, {
+              action: 'set',
+              ...conference,
+            }),
+          }
+        : {}),
     };
 
     calendarEvents.set(id, event);
@@ -237,6 +271,27 @@ export class InMemoryCalendarRepository implements CalendarRepository {
   ): Promise<CalendarEvent> {
     this.getWritableCalendar(calendarId);
     const current = this.getStoredEvent(calendarId, eventId);
+    let conference: CalendarEventConferencePatch | undefined;
+    try {
+      validateCalendarEventPatchConference(patch);
+      conference = Object.prototype.hasOwnProperty.call(patch, 'conference')
+        ? normalizeCalendarEventConferencePatch(patch.conference)
+        : undefined;
+    } catch (error) {
+      if (error instanceof CalendarEventConferenceValidationError) {
+        throw new CalendarRepositoryError(
+          'unsupported-patch',
+          'Invalid conference link operation',
+        );
+      }
+      throw error;
+    }
+    if (conference && current.unsupportedConference) {
+      throw new CalendarRepositoryError(
+        'unsupported-patch',
+        'Conference edits are not supported for this event',
+      );
+    }
     validateOccurrenceTimingPatchShape(patch);
     validateFollowingTimingPatchShape(patch);
     if (
@@ -249,7 +304,11 @@ export class InMemoryCalendarRepository implements CalendarRepository {
       );
     }
     const clonedPatch = cloneCalendarEventPatch(patch);
-    const { alarm: alarmPatch, ...mutablePatch } = clonedPatch;
+    const {
+      alarm: alarmPatch,
+      conference: _conference,
+      ...mutablePatch
+    } = clonedPatch;
     const recurrence = Object.prototype.hasOwnProperty.call(patch, 'recurrence')
       ? applyRecurrenceWrite(current, clonedPatch.recurrence)
       : current.recurrence;
@@ -261,6 +320,14 @@ export class InMemoryCalendarRepository implements CalendarRepository {
       calendarId: current.calendarId,
       uid: current.uid,
       recurrence,
+      ...(conference
+        ? {
+            externalLinks: applyConferenceToLinks(
+              current.externalLinks,
+              conference,
+            ),
+          }
+        : {}),
     };
     if (isCalendarEventAlarmRemoval(alarmPatch)) {
       delete updated.alarm;
@@ -499,6 +566,39 @@ function cloneCalendarEventInput(
       : undefined,
     recurrence: input.recurrence ? { ...input.recurrence } : undefined,
   };
+}
+
+function applyConferenceToLinks(
+  links: CalendarEvent['externalLinks'],
+  operation: CalendarEventConferencePatch,
+): CalendarEvent['externalLinks'] {
+  const currentLinks = links?.map((link) => ({ ...link })) ?? [];
+  const conferenceIndices = currentLinks.flatMap((link, index) =>
+    link.kind === 'conference' ? [index] : [],
+  );
+  if (conferenceIndices.length > 1) {
+    throw new CalendarRepositoryError(
+      'unsupported-patch',
+      'Conference edits are not supported for ambiguous event data',
+    );
+  }
+  if (operation.action === 'remove') {
+    if (conferenceIndices.length === 1) {
+      currentLinks.splice(conferenceIndices[0], 1);
+    }
+    return currentLinks.length > 0 ? currentLinks : undefined;
+  }
+  const link = {
+    kind: 'conference' as const,
+    href: operation.url,
+    ...(operation.label ? { label: operation.label } : {}),
+  };
+  if (conferenceIndices.length === 1) {
+    currentLinks[conferenceIndices[0]] = link;
+  } else {
+    currentLinks.push(link);
+  }
+  return currentLinks;
 }
 
 function cloneRecurrence(

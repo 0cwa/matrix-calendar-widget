@@ -48,6 +48,10 @@ describe('calendar event form adapter', () => {
       title: '',
       description: '',
       location: '',
+      conferenceUrl: '',
+      conferenceLabel: '',
+      conferenceEditable: true,
+      conferenceChanged: false,
       timingType: 'timed',
       start: '2026-09-23T09:00',
       end: '2026-09-23T10:00',
@@ -108,6 +112,115 @@ describe('calendar event form adapter', () => {
         },
       },
     });
+  });
+
+  it('creates a bounded conference write and validates its URL and label', () => {
+    const values = {
+      ...createCalendarEventFormValues(calendar),
+      title: 'Planning',
+      conferenceUrl: 'HTTPS://MEET.EXAMPLE.TEST/room',
+      conferenceLabel: 'Planning room',
+    };
+
+    expect(validateCalendarEventForm(values)).toBeUndefined();
+    expect(
+      calendarEventInputFromForm(values, 'planning@example.test').conference,
+    ).toEqual({
+      url: 'https://meet.example.test/room',
+      label: 'Planning room',
+    });
+    expect(
+      validateCalendarEventForm({
+        ...values,
+        conferenceUrl: 'javascript:alert(1)',
+      }),
+    ).toBe('invalid-conference');
+    expect(
+      validateCalendarEventForm({
+        ...values,
+        conferenceLabel: 'x'.repeat(121),
+      }),
+    ).toBe('invalid-conference');
+  });
+
+  it('maps conference edit and clear to explicit set and remove operations', () => {
+    const event: CalendarEvent = {
+      id: 'conference-event',
+      calendarId: 'team',
+      uid: 'conference@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-09-23T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+      },
+      externalLinks: [
+        {
+          kind: 'conference',
+          href: 'https://meet.example.test/old',
+          label: 'Old room',
+        },
+      ],
+    };
+    const values = calendarEventToFormValues(event, calendar);
+    expect(values.conferenceUrl).toBe('https://meet.example.test/old');
+    expect(values.conferenceLabel).toBe('Old room');
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        conferenceUrl: 'https://meet.example.test/new',
+        conferenceLabel: 'New room',
+        conferenceChanged: true,
+      }).conference,
+    ).toEqual({
+      action: 'set',
+      url: 'https://meet.example.test/new',
+      label: 'New room',
+    });
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        conferenceUrl: '',
+        conferenceLabel: '',
+        conferenceChanged: true,
+      }).conference,
+    ).toEqual({ action: 'remove' });
+  });
+
+  it('keeps unsupported conference source data read-only during form edits', () => {
+    const event: CalendarEvent = {
+      id: 'conference-event',
+      calendarId: 'team',
+      uid: 'conference@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'all-day',
+        startDate: '2026-10-05',
+        endDate: '2026-10-06',
+      },
+      unsupportedConference: true,
+      externalLinks: [
+        { kind: 'conference', href: 'https://meet.example.test/old' },
+      ],
+    };
+    const values = calendarEventToFormValues(event, calendar);
+
+    expect(values.conferenceEditable).toBe(false);
+    expect(
+      calendarEventPatchFromForm({
+        ...values,
+        conferenceChanged: true,
+        conferenceUrl: '',
+      }),
+    ).not.toHaveProperty('conference');
   });
 
   it('maps inclusive all-day form end dates to exclusive domain end dates', () => {

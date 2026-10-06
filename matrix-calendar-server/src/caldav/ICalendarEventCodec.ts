@@ -17,6 +17,9 @@
 import {
   CalendarEvent,
   CalendarEventAlarmPatch,
+  CalendarEventConferenceInput,
+  CalendarEventConferencePatch,
+  CalendarEventConferenceValidationError,
   CalendarEventDateTime,
   CalendarEventDisplayAlarm,
   CalendarEventDisplayAlarmInput,
@@ -36,14 +39,20 @@ import {
   CalendarEventTiming,
   CalendarEventTransparency,
   CalendarId,
+  boundCalendarEventExternalLinkLabel,
   calendarEventFollowingTimingOverrides,
   calendarEventRecurrenceIdentity,
   calendarEventTimedDateTimeToDateTime,
   calendarLocalDateTimeToUnixMillis,
+  canonicalizeCalendarExternalUrl,
   isCalendarEventAlarmRemoval,
   isCalendarTimezoneSupported,
   isSupportedCalendarEventOccurrenceExclusion,
+  normalizeCalendarEventConferenceInput,
+  normalizeCalendarEventConferencePatch,
   parseSupportedCalendarEventRecurrenceRule,
+  validateCalendarEventInputConference,
+  validateCalendarEventPatchConference,
 } from '@matrix-calendar-widget/calendar';
 import { randomUUID } from 'crypto';
 import ICAL from 'ical.js';
@@ -69,6 +78,17 @@ type RawVeventProperty = {
   name: string;
   header: string;
   value: string;
+  physicalLines: string[];
+};
+
+type SupportedConferenceValue = {
+  url: string;
+  label?: string;
+};
+
+type ConferenceSourceState = {
+  present: boolean;
+  editable?: SupportedConferenceValue;
 };
 
 const systemClock = (): Date => new Date();
@@ -128,6 +148,52 @@ export class ParsedICalendarEvent {
   ) {}
 
   applyPatch(patch: CalendarEventPatch): EncodedICalendarEvent {
+    let conferencePatch: CalendarEventConferencePatch | undefined;
+    try {
+      validateCalendarEventPatchConference(patch);
+      if (hasOwn(patch, 'conference')) {
+        conferencePatch = normalizeCalendarEventConferencePatch(
+          patch.conference,
+        );
+      }
+    } catch (error) {
+      if (error instanceof CalendarEventConferenceValidationError) {
+        throw unsupportedConferencePatch();
+      }
+      throw error;
+    }
+    if (conferencePatch && this.event.unsupportedConference) {
+      throw unsupportedConferencePatch();
+    }
+    const sourceConferencePropertiesByEvent = rawVeventConferenceProperties(
+      this.sourceICalendar,
+    );
+    const sourceMasterEvent = findMasterEvent(this.calendar, this.event.uid);
+    const sourceMasterIndex = sourceMasterEvent
+      ? this.calendar.getAllSubcomponents('vevent').indexOf(sourceMasterEvent)
+      : -1;
+    const sourceConferenceProperties =
+      sourceConferencePropertiesByEvent[sourceMasterIndex] ?? [];
+    const sourceConferenceState = conferencePatch
+      ? sourceMasterEvent
+        ? readConferenceSourceState(
+            sourceMasterEvent,
+            sourceConferenceProperties,
+          )
+        : undefined
+      : undefined;
+    const conferenceWriteIsNoOp = Boolean(
+      conferencePatch &&
+      sourceConferenceState &&
+      conferencePatchIsNoOp(conferencePatch, sourceConferenceState),
+    );
+    if (
+      conferencePatch &&
+      Object.keys(patch).length === 1 &&
+      conferenceWriteIsNoOp
+    ) {
+      return { event: this.event, icalendar: this.sourceICalendar };
+    }
     if (this.event.unsupportedTimezone && hasOwn(patch, 'timing')) {
       throw new ICalendarEventCodecError(
         'unsupported-patch',
@@ -287,6 +353,9 @@ export class ParsedICalendarEvent {
     if (hasOwn(patch, 'priority')) {
       setOptionalProperty(vevent, 'priority', patch.priority);
     }
+    if (conferencePatch && !conferenceWriteIsNoOp) {
+      setConferenceProperty(vevent, conferencePatch);
+    }
     if (hasRecurrencePatch) {
       if (recurrenceWrite && 'exdate' in recurrenceWrite) {
         applyOccurrenceExdate(vevent, recurrenceWrite.exdate);
@@ -332,13 +401,29 @@ export class ParsedICalendarEvent {
       return { event: this.event, icalendar: this.sourceICalendar };
     }
 
+    const veventContentChanged = vevent.toString() !== eventSourceBeforePatch;
     const revisionUpdated =
-      vevent.toString() !== eventSourceBeforePatch &&
+      veventContentChanged &&
       updateRevisionMetadata(
         vevent,
         this.clock(),
         this.sourceRevisionProperties,
       );
+
+    // The editor submits its ordinary fields together with a conference
+    // change. If that conference operation and every VEVENT field are
+    // unchanged, return the original bytes so the gateway can honor the
+    // current ETag without a needless CalDAV PUT. The semantic comparison is
+    // against ical.js's parsed form above; returning the source also retains
+    // original property ordering and folding.
+    if (
+      conferencePatch &&
+      conferenceWriteIsNoOp &&
+      !veventContentChanged &&
+      !hasAlarmPatch
+    ) {
+      return { event: this.event, icalendar: this.sourceICalendar };
+    }
 
     const recurrence = hasRecurrencePatch
       ? recurrenceWrite && 'exdate' in recurrenceWrite
@@ -350,7 +435,11 @@ export class ParsedICalendarEvent {
             : undefined
       : this.event.recurrence;
 
-    const { alarm: alarmPatch, ...eventPatch } = patch;
+    const {
+      alarm: alarmPatch,
+      conference: _conferencePatch,
+      ...eventPatch
+    } = patch;
     const event: CalendarEvent = {
       ...this.event,
       ...eventPatch,
@@ -365,6 +454,9 @@ export class ParsedICalendarEvent {
           )
         : this.event.revision,
     };
+    if (conferencePatch) {
+      delete event.unsupportedConference;
+    }
     if (hasAlarmPatch) {
       if (isCalendarEventAlarmRemoval(alarmPatch)) {
         delete event.alarm;
@@ -385,9 +477,30 @@ export class ParsedICalendarEvent {
         : ['dtstamp', 'created', 'last-modified', 'sequence'],
     );
 
+    const conferenceOutputProperties =
+      conferencePatch && !conferenceWriteIsNoOp
+        ? rawConferencePropertiesAfterPatch(
+            sourceConferenceProperties,
+            conferencePatch,
+          )
+        : sourceConferenceProperties;
+    const conferencePropertiesByOutputEvent =
+      sourceConferencePropertiesByEvent.map((properties) => [...properties]);
+    const forceConferenceReplacement = new Set<number>();
+    if (conferencePatch && !conferenceWriteIsNoOp && sourceMasterIndex >= 0) {
+      conferencePropertiesByOutputEvent[sourceMasterIndex] =
+        conferenceOutputProperties;
+      if (conferencePatch.action === 'remove') {
+        forceConferenceReplacement.add(sourceMasterIndex);
+      }
+    }
     return {
       event,
-      icalendar: preservedRevisionProperties,
+      icalendar: restoreVeventConferenceProperties(
+        preservedRevisionProperties,
+        conferencePropertiesByOutputEvent,
+        forceConferenceReplacement,
+      ),
     };
   }
 
@@ -417,14 +530,24 @@ export class ParsedICalendarEvent {
       this.sourceICalendar,
     );
     const originalEvents = calendar.getAllSubcomponents('vevent');
+    const sourceConferencePropertiesByEvent = rawVeventConferenceProperties(
+      this.sourceICalendar,
+    );
+    const sourceMasterEvent = findMasterEvent(calendar, this.event.uid);
+    const sourceMasterIndex = sourceMasterEvent
+      ? originalEvents.indexOf(sourceMasterEvent)
+      : -1;
     if (
       !sourceRevisionPropertiesByEvent ||
-      sourceRevisionPropertiesByEvent.length !== originalEvents.length
+      sourceRevisionPropertiesByEvent.length !== originalEvents.length ||
+      sourceConferencePropertiesByEvent.length !== originalEvents.length ||
+      sourceMasterIndex < 0
     ) {
       throw unsupportedOccurrenceTimingPatch();
     }
     const outputComponents: ICAL.Component[] = [];
     const outputRevisionProperties: RawRevisionProperty[][] = [];
+    const outputConferenceProperties: ICalendarContentLine[][] = [];
     let originalEventIndex = 0;
     let targetEventIndex: number | undefined;
     let replaced = false;
@@ -444,11 +567,17 @@ export class ParsedICalendarEvent {
         targetEventIndex = outputRevisionProperties.length;
         outputComponents.push(result.component);
         outputRevisionProperties.push(result.sourceRevisionProperties);
+        outputConferenceProperties.push(
+          sourceConferencePropertiesByEvent[originalEventIndex],
+        );
         replaced = true;
       } else {
         outputComponents.push(component);
         outputRevisionProperties.push(
           sourceRevisionPropertiesByEvent[originalEventIndex],
+        );
+        outputConferenceProperties.push(
+          sourceConferencePropertiesByEvent[originalEventIndex],
         );
       }
       originalEventIndex += 1;
@@ -457,6 +586,9 @@ export class ParsedICalendarEvent {
       targetEventIndex = outputRevisionProperties.length;
       outputComponents.push(result.component);
       outputRevisionProperties.push(result.sourceRevisionProperties);
+      outputConferenceProperties.push(
+        sourceConferencePropertiesByEvent[sourceMasterIndex],
+      );
     }
     calendar.removeAllSubcomponents();
     for (const component of outputComponents) {
@@ -492,6 +624,10 @@ export class ParsedICalendarEvent {
         index,
       );
     }
+    icalendar = restoreVeventConferenceProperties(
+      icalendar,
+      outputConferenceProperties,
+    );
 
     return {
       event: {
@@ -524,12 +660,16 @@ export class ParsedICalendarEvent {
     }
     const events = calendar.getAllSubcomponents('vevent');
     const rawEventProperties = readRawVeventProperties(this.sourceICalendar);
+    const sourceConferencePropertiesByEvent = rawVeventConferenceProperties(
+      this.sourceICalendar,
+    );
     const rawRevisionProperties = readVeventRevisionProperties(
       this.sourceICalendar,
     );
     if (
       !rawEventProperties ||
       rawEventProperties.length !== events.length ||
+      sourceConferencePropertiesByEvent.length !== events.length ||
       !rawRevisionProperties ||
       rawRevisionProperties.length !== events.length ||
       hasUnsupportedTimezoneRules(calendar, this.event.uid)
@@ -688,9 +828,17 @@ export class ParsedICalendarEvent {
       detached.push(component);
     }
 
-    const icalendar = appendVeventsBeforeCalendarEnd(
+    let icalendar = appendVeventsBeforeCalendarEnd(
       this.sourceICalendar,
       detached,
+    );
+    const conferencePropertiesByOutputEvent = [
+      ...sourceConferencePropertiesByEvent,
+      ...detached.map(() => sourceConferencePropertiesByEvent[masterIndex]),
+    ];
+    icalendar = restoreVeventConferenceProperties(
+      icalendar,
+      conferencePropertiesByOutputEvent,
     );
     if (Buffer.byteLength(icalendar, 'utf8') > MAX_FOLLOWING_RESOURCE_BYTES) {
       throw followingResourceTooLarge();
@@ -930,6 +1078,18 @@ export class ICalendarEventCodec {
     eventId: CalendarEventId,
     input: CalendarEventInput,
   ): EncodedICalendarEvent {
+    let conferenceInput: CalendarEventConferenceInput | undefined;
+    try {
+      validateCalendarEventInputConference(input);
+      conferenceInput = input.conference
+        ? normalizeCalendarEventConferenceInput(input.conference)
+        : undefined;
+    } catch (error) {
+      if (error instanceof CalendarEventConferenceValidationError) {
+        throw unsupportedConferencePatch();
+      }
+      throw error;
+    }
     if (input.alarm !== undefined) {
       validateDisplayAlarm(input.alarm);
     }
@@ -974,6 +1134,9 @@ export class ICalendarEventCodec {
     setOptionalProperty(vevent, 'url', input.url);
     setCategories(vevent, input.categories);
     setOptionalProperty(vevent, 'priority', input.priority);
+    if (conferenceInput) {
+      setConferenceProperty(vevent, { action: 'set', ...conferenceInput });
+    }
     const recurrenceRule =
       recurrenceWrite && 'rrule' in recurrenceWrite
         ? recurrenceWrite.rrule
@@ -983,9 +1146,10 @@ export class ICalendarEventCodec {
       ? setDisplayAlarm(calendar, vevent, input.alarm, input.title)
       : undefined;
 
+    const { conference: _conferenceInput, ...eventInput } = input;
     return {
       event: {
-        ...input,
+        ...eventInput,
         id: eventId,
         calendarId,
         revision: readCalendarEventRevision(vevent),
@@ -1047,6 +1211,18 @@ export class ICalendarEventCodec {
     const hasMultipleMasterRules = vevent.getAllProperties('rrule').length > 1;
     const unsupportedTimezone = hasUnsupportedTimezoneRules(calendar, uid);
     const alarmState = readResourceAlarm(calendar, vevent);
+    const conferencePropertiesByEvent = rawVeventConferenceProperties(source);
+    const eventIndex = calendar.getAllSubcomponents('vevent').indexOf(vevent);
+    const conferenceState = readConferenceSourceState(
+      vevent,
+      conferencePropertiesByEvent[eventIndex] ?? [],
+    );
+    const ambiguousConferenceSource = hasAmbiguousConferenceSource(
+      calendar,
+      uid,
+      vevent,
+      conferencePropertiesByEvent,
+    );
 
     const event: CalendarEvent = {
       id: eventId,
@@ -1066,6 +1242,10 @@ export class ICalendarEventCodec {
       revision: readCalendarEventRevision(vevent, sourceRevisionProperties),
       ...(alarmState.alarm ? { alarm: alarmState.alarm } : {}),
       ...(alarmState.unsupported ? { unsupportedAlarm: true } : {}),
+      ...(ambiguousConferenceSource ||
+      (conferenceState.present && !conferenceState.editable)
+        ? { unsupportedConference: true }
+        : {}),
       ...(unsupportedRecurrence ? { unsupportedRecurrence } : {}),
       ...(unsupportedTimezone ? { unsupportedTimezone: true } : {}),
     };
@@ -2807,6 +2987,13 @@ function unsupportedRecurrencePatch(): ICalendarEventCodecError {
   );
 }
 
+function unsupportedConferencePatch(): ICalendarEventCodecError {
+  return new ICalendarEventCodecError(
+    'unsupported-patch',
+    'Only one explicitly URI-typed safe conference link can be edited',
+  );
+}
+
 function readUnsupportedRecurrence(
   calendar: ICAL.Component,
   uid: string,
@@ -3518,11 +3705,284 @@ function readRawVeventProperties(
       }
       const parsed = parseContentLine(line.value);
       if (parsed) {
-        properties.push(parsed);
+        properties.push({ ...parsed, physicalLines: [...line.physicalLines] });
       }
     }
     return properties;
   });
+}
+
+function rawVeventConferenceProperties(
+  source: string,
+): ICalendarContentLine[][] {
+  const rawProperties = readRawVeventProperties(source);
+  return (
+    rawProperties?.map((properties) =>
+      properties
+        .filter((property) => property.name === 'conference')
+        .map((property) => ({
+          value: `${property.header}:${property.value}`,
+          physicalLines: [...property.physicalLines],
+        })),
+    ) ?? []
+  );
+}
+
+function readConferenceSourceState(
+  vevent: ICAL.Component,
+  rawProperties: ICalendarContentLine[],
+): ConferenceSourceState {
+  const parsedProperties = vevent.getAllProperties('conference');
+  if (rawProperties.length === 0 && parsedProperties.length === 0) {
+    return { present: false };
+  }
+  if (rawProperties.length !== 1 || parsedProperties.length !== 1) {
+    return { present: true };
+  }
+
+  const raw = parseContentLine(rawProperties[0].value);
+  const valueTypes = raw
+    ? contentLineParameters(raw.header).filter((p) => p.name === 'value')
+    : [];
+  const labels = raw
+    ? contentLineParameters(raw.header).filter((p) => p.name === 'label')
+    : [];
+  const property = parsedProperties[0];
+  if (
+    !raw ||
+    valueTypes.length !== 1 ||
+    valueTypes[0].value?.toUpperCase() !== 'URI' ||
+    labels.length > 1 ||
+    property.type !== 'uri'
+  ) {
+    return { present: true };
+  }
+
+  const url = canonicalizeCalendarExternalUrl(property.getFirstValue());
+  if (!url) {
+    return { present: true };
+  }
+
+  let label: string | undefined;
+  if (labels.length === 1) {
+    const rawLabel = property.getParameter('label');
+    if (typeof rawLabel !== 'string') {
+      return { present: true };
+    }
+    label = boundCalendarEventExternalLinkLabel(rawLabel);
+    if (!label || label !== rawLabel.trim()) {
+      return { present: true };
+    }
+  }
+
+  return {
+    present: true,
+    editable: { url, ...(label ? { label } : {}) },
+  };
+}
+
+function hasAmbiguousConferenceSource(
+  calendar: ICAL.Component,
+  uid: string,
+  master: ICAL.Component,
+  conferencePropertiesByEvent: ICalendarContentLine[][],
+): boolean {
+  const matchingEvents = calendar
+    .getAllSubcomponents('vevent')
+    .map((component, index) => ({ component, index }))
+    .filter(
+      ({ component }) =>
+        textValue(component.getFirstPropertyValue('uid')) === uid,
+    );
+  const masters = matchingEvents.filter(
+    ({ component }) => !component.hasProperty('recurrence-id'),
+  );
+  return (
+    masters.length !== 1 ||
+    matchingEvents.some(
+      ({ component, index }) =>
+        component !== master &&
+        (component.hasProperty('conference') ||
+          (conferencePropertiesByEvent[index]?.length ?? 0) > 0),
+    )
+  );
+}
+
+function conferencePatchIsNoOp(
+  patch: CalendarEventConferencePatch,
+  state: ConferenceSourceState,
+): boolean {
+  if (patch.action === 'remove') {
+    return !state.present;
+  }
+  return (
+    state.editable?.url === patch.url && state.editable.label === patch.label
+  );
+}
+
+function setConferenceProperty(
+  vevent: ICAL.Component,
+  patch: CalendarEventConferencePatch,
+): void {
+  const properties = vevent.getAllProperties('conference');
+  if (patch.action === 'remove') {
+    for (const property of properties) {
+      vevent.removeProperty(property);
+    }
+    return;
+  }
+
+  const property =
+    properties.length === 1
+      ? properties[0]
+      : ICAL.Property.fromString(`CONFERENCE;VALUE=URI:${patch.url}`);
+  property.setValue(patch.url);
+  if (patch.label) {
+    property.setParameter('label', patch.label);
+  } else {
+    property.removeParameter('label');
+  }
+  if (properties.length === 0) {
+    vevent.addProperty(property);
+  }
+}
+
+function rawConferencePropertiesAfterPatch(
+  sourceProperties: ICalendarContentLine[],
+  patch: CalendarEventConferencePatch,
+): ICalendarContentLine[] {
+  if (patch.action === 'remove' || sourceProperties.length === 0) {
+    return [];
+  }
+  if (sourceProperties.length !== 1) {
+    throw unsupportedConferencePatch();
+  }
+
+  const parsed = parseContentLine(sourceProperties[0].value);
+  if (!parsed) {
+    throw unsupportedConferencePatch();
+  }
+  const segments = splitContentLineHeader(parsed.header);
+  const output = [segments[0]];
+  let labelWritten = false;
+  for (const segment of segments.slice(1)) {
+    const separator = segment.indexOf('=');
+    const name = (separator < 0 ? segment : segment.slice(0, separator))
+      .trim()
+      .toLowerCase();
+    if (name !== 'label') {
+      output.push(segment);
+      continue;
+    }
+    if (patch.label) {
+      output.push(`LABEL=${quoteConferenceLabel(patch.label)}`);
+      labelWritten = true;
+    }
+  }
+  if (patch.label && !labelWritten) {
+    output.push(`LABEL=${quoteConferenceLabel(patch.label)}`);
+  }
+  return [foldContentLine(`${output.join(';')}:${patch.url}`)];
+}
+
+function splitContentLineHeader(header: string): string[] {
+  const segments: string[] = [];
+  let start = 0;
+  let quoted = false;
+  for (let index = 0; index < header.length; index += 1) {
+    if (header[index] === '"' && header[index - 1] !== '^') {
+      quoted = !quoted;
+    } else if (header[index] === ';' && !quoted) {
+      segments.push(header.slice(start, index));
+      start = index + 1;
+    }
+  }
+  segments.push(header.slice(start));
+  return segments;
+}
+
+function quoteConferenceLabel(label: string): string {
+  return `"${label.replace(/\^/g, '^^').replace(/"/g, "^'")}"`;
+}
+
+function foldContentLine(value: string): ICalendarContentLine {
+  const physicalLines: string[] = [];
+  let current = '';
+  let currentBytes = 0;
+  for (const character of Array.from(value)) {
+    const bytes = Buffer.byteLength(character, 'utf8');
+    if (currentBytes + bytes > 75) {
+      physicalLines.push(current);
+      current = ` ${character}`;
+      currentBytes = 1 + bytes;
+    } else {
+      current += character;
+      currentBytes += bytes;
+    }
+  }
+  physicalLines.push(current);
+  return { value, physicalLines };
+}
+
+function restoreVeventConferenceProperties(
+  serialized: string,
+  sourcePropertiesByEvent: ICalendarContentLine[][],
+  forceReplacementForEvent = new Set<number>(),
+): string {
+  const lines = readContentLines(serialized);
+  const ranges = findVeventRanges(lines);
+  if (!ranges) {
+    return serialized;
+  }
+  for (let eventIndex = ranges.length - 1; eventIndex >= 0; eventIndex -= 1) {
+    const range = ranges[eventIndex];
+    const sourceProperties = sourcePropertiesByEvent[eventIndex] ?? [];
+    if (
+      sourceProperties.length === 0 &&
+      !forceReplacementForEvent.has(eventIndex)
+    ) {
+      continue;
+    }
+
+    const body: ICalendarContentLine[] = [];
+    let nestedComponents = 0;
+    let inserted = false;
+    for (let index = range.start + 1; index < range.end; index += 1) {
+      const line = lines[index];
+      const marker = line.value.toUpperCase();
+      if (marker.startsWith('BEGIN:')) {
+        nestedComponents += 1;
+        body.push(line);
+        continue;
+      }
+      if (marker.startsWith('END:')) {
+        nestedComponents = Math.max(0, nestedComponents - 1);
+        body.push(line);
+        continue;
+      }
+      if (
+        nestedComponents === 0 &&
+        contentLinePropertyName(line.value) === 'conference'
+      ) {
+        if (!inserted) {
+          body.push(...sourceProperties);
+          inserted = true;
+        }
+        continue;
+      }
+      body.push(line);
+    }
+    if (!inserted && sourceProperties.length > 0) {
+      const uidIndex = body.findIndex(
+        (line) => contentLinePropertyName(line.value) === 'uid',
+      );
+      body.splice(uidIndex < 0 ? 0 : uidIndex + 1, 0, ...sourceProperties);
+    }
+    lines.splice(range.start + 1, range.end - range.start - 1, ...body);
+  }
+  const physicalLines = lines.flatMap((line) => line.physicalLines);
+  const hasFinalLineEnding = /(?:\r\n|\n|\r)$/.test(serialized);
+  return `${physicalLines.join('\r\n')}${hasFinalLineEnding ? '\r\n' : ''}`;
 }
 
 function validateRawOccurrenceTimingProperties(

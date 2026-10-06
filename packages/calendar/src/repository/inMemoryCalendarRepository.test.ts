@@ -1586,6 +1586,90 @@ describe('InMemoryCalendarRepository', () => {
       }),
     ).rejects.toMatchObject({ code: 'calendar-not-found' });
   });
+
+  it('stores a created conference link only in the safe read projection', async () => {
+    const repository = createRepository();
+    const { id: _id, calendarId: _calendarId, ...input } = events[0];
+
+    const created = await repository.createEvent('team', {
+      ...input,
+      conference: {
+        url: 'HTTPS://EXAMPLE.TEST/meet',
+        label: 'Planning room',
+      },
+    });
+
+    expect(created.externalLinks).toEqual([
+      {
+        kind: 'conference',
+        href: 'https://example.test/meet',
+        label: 'Planning room',
+      },
+    ]);
+    expect(created).not.toHaveProperty('conference');
+  });
+
+  it('changes and removes only the conference link while preserving siblings', async () => {
+    const existing: CalendarEvent = {
+      ...events[0],
+      externalLinks: [
+        { kind: 'event', href: 'https://example.test/event' },
+        { kind: 'attachment', href: 'https://example.test/file' },
+      ],
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [existing],
+    });
+
+    const changed = await repository.updateEvent('team', existing.id, {
+      conference: {
+        action: 'set',
+        url: 'https://example.test/meet',
+        label: 'Planning room',
+      },
+    });
+    expect(changed.externalLinks).toEqual([
+      ...existing.externalLinks!,
+      {
+        kind: 'conference',
+        href: 'https://example.test/meet',
+        label: 'Planning room',
+      },
+    ]);
+
+    const removed = await repository.updateEvent('team', existing.id, {
+      conference: { action: 'remove' },
+    });
+    expect(removed.externalLinks).toEqual(existing.externalLinks);
+  });
+
+  it('rejects malformed conference writes and unsupported source data', async () => {
+    const unsupported: CalendarEvent = {
+      ...events[0],
+      unsupportedConference: true,
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars,
+      events: [unsupported],
+    });
+
+    await expect(
+      repository.updateEvent('team', unsupported.id, {
+        conference: { action: 'set', url: 'javascript:alert(1)' },
+      } as unknown as CalendarEventPatch),
+    ).rejects.toMatchObject({ code: 'unsupported-patch' });
+    await expect(
+      repository.updateEvent('team', unsupported.id, {
+        conference: { action: 'remove' },
+      }),
+    ).rejects.toMatchObject({ code: 'unsupported-patch' });
+    await expect(
+      repository.updateEvent('team', unsupported.id, {
+        externalLinks: [],
+      } as unknown as CalendarEventPatch),
+    ).rejects.toMatchObject({ code: 'unsupported-patch' });
+  });
 });
 
 function recurrenceOverride(): CalendarEventRecurrenceOverride {
