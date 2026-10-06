@@ -17,6 +17,7 @@
 import type {
   CalendarEventFollowingTimingWrite,
   CalendarEventInput,
+  CalendarEventPatch,
 } from '@matrix-calendar-widget/calendar';
 import fs from 'fs';
 import path from 'path';
@@ -510,6 +511,80 @@ describe('RoomCalendarEventOperations', () => {
     expect(basicUsername(putInit)).toBe('_matrix_calendar_service');
   });
 
+  it('rejects malformed conference patches before CalDAV reads', async () => {
+    await expect(
+      operations.updateEvent(
+        access(),
+        `${collectionUrl}conference.ics`,
+        '"room-v1"',
+        {
+          conference: {
+            action: 'set',
+            url: 'javascript:alert(1)',
+            unexpected: true,
+          },
+        } as unknown as CalendarEventPatch,
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-event-input' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('skips same-value conference writes only with the current ETag', async () => {
+    const eventUrl = `${collectionUrl}conference.ics`;
+    const source = conferenceCalendar();
+    fetchMock.mockResolvedValueOnce(
+      new Response(source, {
+        status: 200,
+        headers: { ETag: '"room-v1"' },
+      }),
+    );
+
+    await expect(
+      operations.updateEvent(access(), eventUrl, '"room-v1"', {
+        title: 'Team planning',
+        description: 'Agenda',
+        location: undefined,
+        conference: {
+          action: 'set',
+          url: 'https://meet.example.test/room',
+          label: 'Planning room',
+        },
+      }),
+    ).resolves.toMatchObject({ etag: '"room-v1"', noOp: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it('sends same-value conference operations with stale ETags to conditional PUT', async () => {
+    const eventUrl = `${collectionUrl}conference.ics`;
+    const source = conferenceCalendar();
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(source, {
+          status: 200,
+          headers: { ETag: '"room-v2"' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('Precondition failed', { status: 412 }),
+      );
+
+    await expect(
+      operations.updateEvent(access(), eventUrl, '"room-v1"', {
+        conference: {
+          action: 'set',
+          url: 'https://meet.example.test/room',
+          label: 'Planning room',
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'etag-conflict' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('PUT');
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).get('If-Match'),
+    ).toBe('"room-v1"');
+  });
+
   it('skips DAV writes for an identical following-suffix ETag retry', async () => {
     const eventUrl = `${collectionUrl}following.ics`;
     const sourceCalendar = followingCalendar();
@@ -924,4 +999,25 @@ function followingOperation(): CalendarEventFollowingTimingWrite {
     },
     viewerTimezone: 'UTC',
   };
+}
+
+function conferenceCalendar(): string {
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Matrix Calendar Widget//Tests//EN',
+    'BEGIN:VEVENT',
+    'UID:conference-room@example.test',
+    'DTSTAMP:20261001T120000Z',
+    'CREATED:20261001T120000Z',
+    'LAST-MODIFIED:20261001T120000Z',
+    'SEQUENCE:3',
+    'DTSTART:20260924T080000Z',
+    'DTEND:20260924T090000Z',
+    'SUMMARY:Team planning',
+    'CONFERENCE;VALUE=URI;LABEL="Planning room":https://meet.example.test/room',
+    'DESCRIPTION:Agenda',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
 }

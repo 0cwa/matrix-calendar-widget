@@ -17,6 +17,8 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarEventConferenceInput,
+  CalendarEventConferenceValidationError,
   CalendarEventDateTime,
   CalendarEventDisplayAlarm,
   CalendarEventDuration,
@@ -34,6 +36,7 @@ import {
   isAllDayCalendarEvent,
   isSupportedCalendarEventOccurrenceExclusion,
   isTimedCalendarEvent,
+  normalizeCalendarEventConferenceInput,
   parseSupportedCalendarEventRecurrenceRule,
   type TimedCalendarEventTiming,
 } from '@matrix-calendar-widget/calendar';
@@ -44,6 +47,10 @@ export type CalendarEventFormValues = {
   title: string;
   description: string;
   location: string;
+  conferenceUrl?: string;
+  conferenceLabel?: string;
+  conferenceEditable?: boolean;
+  conferenceChanged?: boolean;
   timingType: 'timed' | 'all-day';
   timedKind?: 'floating' | 'zoned' | 'mixed';
   start: string;
@@ -112,7 +119,8 @@ export type CalendarEventValidationError =
   | 'invalid-timezone'
   | 'invalid-recurrence'
   | 'invalid-rdate'
-  | 'invalid-alarm';
+  | 'invalid-alarm'
+  | 'invalid-conference';
 
 export function createCalendarEventFormValues(
   calendar: Calendar,
@@ -127,6 +135,10 @@ export function createCalendarEventFormValues(
     title: '',
     description: '',
     location: '',
+    conferenceUrl: '',
+    conferenceLabel: '',
+    conferenceEditable: true,
+    conferenceChanged: false,
     timingType: 'timed',
     timedKind: 'zoned',
     start: start.toFormat("yyyy-MM-dd'T'HH:mm"),
@@ -156,6 +168,7 @@ export function calendarEventToFormValues(
       title: event.title,
       description: event.description ?? '',
       location: event.location ?? '',
+      ...conferenceFormValues(event),
       timingType: 'all-day',
       timedKind: 'zoned',
       start: event.timing.startDate,
@@ -182,6 +195,7 @@ export function calendarEventToFormValues(
     title: event.title,
     description: event.description ?? '',
     location: event.location ?? '',
+    ...conferenceFormValues(event),
     timingType: 'timed',
     timedKind: timedKindForTiming(event.timing),
     start: event.timing.start.local.slice(0, 16),
@@ -198,6 +212,57 @@ export function calendarEventToFormValues(
     ...recurrenceExdateFormValues(event),
     ...alarmFormValues(event),
   };
+}
+
+function conferenceFormValues(
+  event: CalendarEvent,
+): Pick<
+  CalendarEventFormValues,
+  | 'conferenceUrl'
+  | 'conferenceLabel'
+  | 'conferenceEditable'
+  | 'conferenceChanged'
+> {
+  const links =
+    event.externalLinks?.filter((link) => link.kind === 'conference') ?? [];
+  const link = links.length === 1 ? links[0] : undefined;
+  return {
+    conferenceUrl: link?.href ?? '',
+    conferenceLabel: link?.label ?? '',
+    conferenceEditable: !event.unsupportedConference && links.length <= 1,
+    conferenceChanged: false,
+  };
+}
+
+function conferenceFromForm(
+  values: CalendarEventFormValues,
+): CalendarEventConferenceInput {
+  return normalizeCalendarEventConferenceInput({
+    url: (values.conferenceUrl ?? '').trim(),
+    label: values.conferenceLabel ?? '',
+  });
+}
+
+function validateConference(
+  values: CalendarEventFormValues,
+): CalendarEventValidationError | undefined {
+  if (values.conferenceEditable === false) {
+    return undefined;
+  }
+  if (!(values.conferenceUrl ?? '').trim()) {
+    return (values.conferenceLabel ?? '').trim()
+      ? 'invalid-conference'
+      : undefined;
+  }
+  try {
+    conferenceFromForm(values);
+    return undefined;
+  } catch (error) {
+    if (error instanceof CalendarEventConferenceValidationError) {
+      return 'invalid-conference';
+    }
+    throw error;
+  }
 }
 
 function timedKindForTiming(
@@ -227,6 +292,9 @@ export function calendarEventInputFromForm(
     uid,
     ...editableFields,
     ...(values.alarmEnabled ? { alarm: alarmFromForm(values) } : {}),
+    ...((values.conferenceUrl ?? '').trim()
+      ? { conference: conferenceFromForm(values) }
+      : {}),
     ...(values.repeats
       ? {
           recurrence: {
@@ -254,6 +322,13 @@ export function calendarEventPatchFromForm(
           alarm: values.alarmEnabled
             ? alarmFromForm(values)
             : { operation: 'remove' },
+        }
+      : {}),
+    ...(values.conferenceChanged && values.conferenceEditable !== false
+      ? {
+          conference: (values.conferenceUrl ?? '').trim()
+            ? { action: 'set' as const, ...conferenceFromForm(values) }
+            : { action: 'remove' as const },
         }
       : {}),
     description: normalizeOptional(values.description),
@@ -323,6 +398,11 @@ export function validateCalendarEventForm(
 ): CalendarEventValidationError | undefined {
   if (!values.title.trim()) {
     return 'title-required';
+  }
+
+  const conferenceError = validateConference(values);
+  if (conferenceError) {
+    return conferenceError;
   }
 
   const alarmError = validateAlarm(values);
@@ -1192,7 +1272,7 @@ function eventDate(event: CalendarEvent): string {
 
 function calendarEventEditableFieldsFromForm(
   values: CalendarEventFormValues,
-): Omit<CalendarEventInput, 'uid'> {
+): Omit<CalendarEventInput, 'uid' | 'conference'> {
   const description = normalizeOptional(values.description);
   const location = normalizeOptional(values.location);
 

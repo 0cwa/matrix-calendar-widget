@@ -134,6 +134,208 @@ describe('<CalendarEventEditorDialog />', () => {
     );
   });
 
+  it('creates a conference link with an accessible URL and label', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      idFactory: () => 'created-conference',
+    });
+    const onClose = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        onClose={onClose}
+        open
+        uidFactory={() => 'created-conference@example.test'}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.change(await screen.findByRole('textbox', { name: /Title/i }), {
+      target: { value: 'Planning call' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Conference URL' }), {
+      target: { value: 'https://meet.example.test/planning' },
+    });
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Conference label' }),
+      { target: { value: 'Planning room' } },
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await expect(
+      repository.getEvent('team', 'created-conference'),
+    ).resolves.toMatchObject({
+      externalLinks: [
+        {
+          kind: 'conference',
+          href: 'https://meet.example.test/planning',
+          label: 'Planning room',
+        },
+      ],
+    });
+  });
+
+  it('edits one existing conference link', async () => {
+    const conferenceEvent: CalendarEvent = {
+      ...event,
+      externalLinks: [
+        {
+          kind: 'conference',
+          href: 'https://meet.example.test/old',
+          label: 'Old room',
+        },
+      ],
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [conferenceEvent],
+    });
+    const onClose = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={conferenceEvent}
+        onClose={onClose}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const url = await screen.findByRole('textbox', { name: 'Conference URL' });
+    const label = screen.getByRole('textbox', { name: 'Conference label' });
+    fireEvent.change(url, {
+      target: { value: 'https://meet.example.test/new' },
+    });
+    fireEvent.change(label, { target: { value: 'New room' } });
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await expect(repository.getEvent('team', event.id)).resolves.toMatchObject({
+      externalLinks: [
+        {
+          kind: 'conference',
+          href: 'https://meet.example.test/new',
+          label: 'New room',
+        },
+      ],
+    });
+  });
+
+  it('removes an existing conference link when its URL is cleared', async () => {
+    const conferenceEvent: CalendarEvent = {
+      ...event,
+      externalLinks: [
+        {
+          kind: 'conference',
+          href: 'https://meet.example.test/old',
+          label: 'Old room',
+        },
+      ],
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [conferenceEvent],
+    });
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={conferenceEvent}
+        onClose={vi.fn()}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+    fireEvent.change(
+      await screen.findByRole('textbox', { name: 'Conference URL' }),
+      { target: { value: '' } },
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(async () => {
+      await expect(
+        repository.getEvent('team', event.id),
+      ).resolves.toMatchObject({ externalLinks: undefined });
+    });
+  });
+
+  it('blocks an unsafe conference URL with a visible form error', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+    });
+    const onClose = vi.fn();
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        onClose={onClose}
+        open
+        uidFactory={() => 'unsafe-conference@example.test'}
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.type(
+      await screen.findByRole('textbox', { name: /Title/i }),
+      'Unsafe meeting',
+    );
+    fireEvent.change(screen.getByRole('textbox', { name: 'Conference URL' }), {
+      target: { value: 'javascript:alert(1)' },
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Enter a safe HTTP(S) conference URL and a label of at most 120 characters.',
+    );
+    expect(screen.getByRole('button', { name: 'Create event' })).toBeDisabled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('keeps unsupported conference data read-only while saving ordinary fields', async () => {
+    const unsupportedEvent: CalendarEvent = {
+      ...event,
+      unsupportedConference: true,
+      externalLinks: [
+        {
+          kind: 'conference',
+          href: 'https://meet.example.test/opaque',
+        },
+      ],
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [unsupportedEvent],
+    });
+    const onClose = vi.fn();
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={unsupportedEvent}
+        onClose={onClose}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByText(
+        'Conference editing is unavailable for source data this editor cannot safely reconcile. Other edits will preserve it.',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('textbox', { name: 'Conference URL' }),
+    ).toBeDisabled();
+    fireEvent.change(screen.getByRole('textbox', { name: /Title/i }), {
+      target: { value: 'Ordinary update' },
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await expect(repository.getEvent('team', event.id)).resolves.toMatchObject({
+      title: 'Ordinary update',
+      unsupportedConference: true,
+      externalLinks: unsupportedEvent.externalLinks,
+    });
+  });
+
   it('creates a supported recurring event through CalendarRepository', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
@@ -229,6 +431,9 @@ describe('<CalendarEventEditorDialog />', () => {
       await screen.findByRole('button', { name: 'This occurrence only' }),
     );
     expect(screen.queryByRole('textbox', { name: /Title/i })).toBeNull();
+    expect(
+      screen.queryByRole('textbox', { name: 'Conference URL' }),
+    ).toBeNull();
     fireEvent.change(screen.getByLabelText(/^Start/), {
       target: { value: '2026-10-07T11:00' },
     });

@@ -15,6 +15,13 @@
  */
 
 export {
+  CalendarEventConferenceValidationError,
+  normalizeCalendarEventConferenceInput,
+  normalizeCalendarEventConferencePatch,
+  validateCalendarEventInputConference,
+  validateCalendarEventPatchConference,
+} from './calendarEventConference';
+export {
   MAX_CALENDAR_EVENT_EXTERNAL_LINKS,
   MAX_CALENDAR_EVENT_EXTERNAL_LINK_LABEL_LENGTH,
   MAX_CALENDAR_EVENT_EXTERNAL_LINK_URI_LENGTH,

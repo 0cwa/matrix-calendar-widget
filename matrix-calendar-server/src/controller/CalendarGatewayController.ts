@@ -16,11 +16,14 @@
 
 import {
   CalendarAuthorizationRequest,
+  CalendarEventConferenceValidationError,
   CalendarEventInput,
   CalendarEventPatch,
   CalendarTimeRange,
   isCalendarTimezoneSupported,
   projectCalendarEventOccurrences,
+  validateCalendarEventInputConference,
+  validateCalendarEventPatchConference,
   type CalendarEventListDiagnosticReason,
 } from '@matrix-calendar-widget/calendar';
 import {
@@ -757,6 +760,7 @@ export class CalendarGatewayController {
     @Query('calendarId') calendarId?: string,
     @Query('target') target?: string,
   ): Promise<CalendarGatewayEventDto> {
+    assertValidConferencePayload(input, 'create');
     if (this.isRoomTarget(target)) {
       const roomTarget = await this.authorizeRoomCalendarTarget(
         userContext,
@@ -837,6 +841,7 @@ export class CalendarGatewayController {
     @Query('eventId') eventId?: string,
     @Query('target') target?: string,
   ): Promise<CalendarGatewayEventDto> {
+    assertValidConferencePayload(patch, 'patch');
     if (this.isRoomTarget(target)) {
       const roomTarget = await this.authorizeRoomCalendarTarget(
         userContext,
@@ -862,14 +867,16 @@ export class CalendarGatewayController {
           patch ?? {},
         ),
       );
-      await this.recordRoomCalendarAction(
-        userContext,
-        roomTarget,
-        principal.calendarUrl,
-        result.event.id,
-        'updated',
-        result.event.title,
-      );
+      if (!result.noOp) {
+        await this.recordRoomCalendarAction(
+          userContext,
+          roomTarget,
+          principal.calendarUrl,
+          result.event.id,
+          'updated',
+          result.event.title,
+        );
+      }
       return new CalendarGatewayEventDto(result.event, result.etag);
     }
 
@@ -926,10 +933,12 @@ export class CalendarGatewayController {
       }
 
       if (
-        patch?.recurrence &&
-        ('occurrence' in patch.recurrence || 'following' in patch.recurrence) &&
         encoded.icalendar === current.icalendar &&
-        etag === current.etag
+        etag === current.etag &&
+        (Object.prototype.hasOwnProperty.call(patch, 'conference') ||
+          (patch?.recurrence &&
+            ('occurrence' in patch.recurrence ||
+              'following' in patch.recurrence)))
       ) {
         return this.eventDto(codec, scope.calendarId, current);
       }
@@ -1611,4 +1620,25 @@ function normalizeUrlForComparison(value: string): string {
   const url = new URL(value);
   const path = url.pathname.replace(/\/+$/, '') || '/';
   return `${url.origin}${path}`;
+}
+
+function assertValidConferencePayload(
+  value: unknown,
+  mode: 'create' | 'patch',
+): void {
+  try {
+    if (mode === 'create') {
+      validateCalendarEventInputConference(value);
+    } else {
+      validateCalendarEventPatchConference(value);
+    }
+  } catch (error) {
+    if (error instanceof CalendarEventConferenceValidationError) {
+      throw new BadRequestException({
+        code: 'invalid-event-conference',
+        message: 'The conference link operation is invalid or unsupported.',
+      });
+    }
+    throw error;
+  }
 }

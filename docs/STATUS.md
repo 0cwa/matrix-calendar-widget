@@ -2,7 +2,7 @@
 
 _Last updated: 2026-10-06._
 
-_Source snapshot: `main` at `e2c4ee1f1269545557050ac938505007028be941` (PR #215)._
+_Source snapshot: `main` at `69630543268c990605ab1936520956150f08d4c2` (PR #213)._
 
 ## Current phase
 
@@ -22,7 +22,7 @@ Calendar visibility, VEVENT-only creation, rename, safe deletion, description an
 
 ### M5 — bounded recurrence and iCalendar support
 
-The codec and widget support a documented bounded RRULE/RDATE/EXDATE subset, PERIOD values, supported relative DISPLAY VALARM metadata, revision metadata, bundled-timezone projection, selected-occurrence timing edits, typed EXDATE skip/restore, and bounded safe event links. PR #197 adds selected-occurrence timing and link behavior; its exact merged tree `f532c628a227ad6c97ceeaa557feff58d3139dc6` passed all eight required repository checks. PR #200 adds timing-only this-and-following edits for supported finite COUNT rules of at most 128 members within one resource; its exact tree `9d1ce37f2457bbdeef4835ad26a8b28beac438ee` passed all eight checks. It rejects alarms, RDATE/EXDATE, unsafe detached suffixes, unsupported status/timing, and oversized results. Unsupported data remains opaque where supported edits allow it. Issue #6 remains open for broader recurrence authoring and actual client/server interoperability, including additional RRULE parts, general RECURRENCE-ID property editing, arbitrary rule splitting, attendee/email, individual reminder, and attachment/conference authoring.
+The codec and widget support a documented bounded RRULE/RDATE/EXDATE subset, PERIOD values, supported relative DISPLAY VALARM metadata, revision metadata, bundled-timezone projection, selected-occurrence timing edits, typed EXDATE skip/restore, and bounded safe event links. PR #197 adds selected-occurrence timing and link behavior; its exact merged tree `f532c628a227ad6c97ceeaa557feff58d3139dc6` passed all eight required repository checks. PR #200 adds timing-only this-and-following edits for supported finite COUNT rules of at most 128 members within one resource; its exact tree `9d1ce37f2457bbdeef4835ad26a8b28beac438ee` passed all eight checks. It rejects alarms, RDATE/EXDATE, unsafe detached suffixes, unsupported status/timing, and oversized results. Unsupported data remains opaque where supported edits allow it. Issue #6 remains open for broader recurrence authoring and actual client/server interoperability, including additional RRULE parts, general RECURRENCE-ID property editing, arbitrary rule splitting, attendee/email, individual reminder, URI attachment authoring, and conference forms beyond ADR036.
 
 PR #215 adds one authored MONTHLY ordinal BYDAY selector (first through fifth
 or last weekday), with matching DTSTART and existing interval/count/typed-UNTIL
@@ -31,6 +31,18 @@ monthly ordinals remain outside ADR034 following timing edits. All eight hosted
 checks, including the real Radicale and PostgreSQL contracts, passed on exact
 tree `f4e38e69ddc1d082aae7a27e10aaef08a55b0417`. ADR035 documents this bounded
 extension; arbitrary rule authoring and broader M5 interoperability remain open.
+
+ADR036 adds ordinary master-event authoring of one safe HTTP(S) CONFERENCE
+URI with an optional label. Runtime validation applies before external I/O;
+normal personal/room authorization and conditional ETag writes remain in use.
+Malformed/repeated properties, duplicate masters, and same-UID detached
+conference data keep those controls read-only. Supported writes retain opaque
+parameters, and ordinary/occurrence/following timing edits preserve raw
+conference lines on source components and new timing clones. An unchanged
+composite form save retains exact source bytes; an effective edit is retained
+even when opaque or exhausted revision metadata cannot be updated. This does
+not add attachment authoring, multiple conferences, RTC provisioning, or
+instance/following conference operations.
 
 ### M6 — room calendars and reminders
 
@@ -64,7 +76,7 @@ live Matrix authorization, persistence, or client result.
 ## Open scope and acceptance blockers
 
 - **M4:** collection-timezone editing and remaining issue #5 acceptance work.
-- **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, arbitrary RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, and attachment/conference authoring are not part of the implemented editor.
+- **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, arbitrary RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, attachment authoring, and conference forms beyond ADR036 are not part of the implemented editor.
 - **M6:** issue #7 bounded repository criteria are complete. Keep room access, event writes, settings, delivery, and action notices off until the operator accepts each capability and its trust boundary. A passing pinned stack is not an etke-host or production proof.
 - **M8:** record actual Element Web/Desktop/mobile and screen-reader evidence separately; issue #9 remains open for beta, capacity, and client/operator acceptance. Gateway and bot quotas are process-local. Callers behind one reverse proxy share the gateway's TCP-peer quota; use one server replica or add a trusted upstream/distributed control.
 - **Operator readiness:** production homeserver/proxy behavior, OpenID query-token log redaction, actual Radicale image/configuration and `/data` preservation, PostgreSQL endpoint TLS/CA and role, backups/restores, secrets, network exposure, and rollback remain to be verified. The Compose sidecar creates its own Radicale store and is not a migration of etke data.

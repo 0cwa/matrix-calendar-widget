@@ -847,6 +847,80 @@ describe('CalendarGatewayController', () => {
     expect(record).not.toHaveBeenCalled();
   });
 
+  it('does not send a room audit notice for an ETag-matched conference no-op', async () => {
+    isAllowed.mockResolvedValue(true);
+    const eventUrl =
+      'https://radicale.example.test/_matrix_calendar_service/team-calendar/event.ics';
+    forAuthorizedTarget.mockResolvedValue({
+      userId: '@_matrix_calendar_service:example.test',
+      calendarUrl:
+        'https://radicale.example.test/_matrix_calendar_service/team-calendar/',
+      credential: {
+        accessToken: 'service-openid-proof',
+        matrixServerName: 'example.test',
+      },
+    });
+    const event: CalendarEvent = {
+      id: eventUrl,
+      calendarId: 'team-calendar',
+      uid: 'private-event-uid@example.test',
+      title: 'Planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-03T12:00:00',
+          timezone: 'UTC',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-03T13:00:00',
+          timezone: 'UTC',
+        },
+      },
+    };
+    const updateEvent = jest.fn().mockResolvedValue({
+      event,
+      etag: '"event-v1"',
+      noOp: true,
+    });
+    const operations = {
+      updateEvent,
+    } as unknown as RoomCalendarEventOperations;
+    const record = jest.fn();
+    const auditService = {
+      record,
+    } as unknown as RoomCalendarEventAuditService;
+    const controller = createController(
+      appConfig,
+      roomCalendarCalDavAccess,
+      new MatrixOpenIdCalDavCredentialProviderFactory(),
+      operations,
+      auditService,
+    );
+
+    await expect(
+      controller.updateEvent(
+        userContext,
+        openIdCredential,
+        {
+          conference: {
+            action: 'set',
+            url: 'https://meet.example.test/room',
+            label: 'Planning room',
+          },
+        },
+        '"event-v1"',
+        roomId,
+        'team-calendar',
+        eventUrl,
+        'room',
+      ),
+    ).resolves.toMatchObject({ event, etag: '"event-v1"' });
+    expect(updateEvent).toHaveBeenCalledTimes(1);
+    expect(record).not.toHaveBeenCalled();
+  });
+
   it('rejects unsafe room event IDs before requesting an appservice proof', async () => {
     isAllowed.mockResolvedValue(true);
     const { controller } = createRoomTargetController();
@@ -2144,6 +2218,51 @@ END:VCALENDAR`,
     expect(putInit?.body).toContain('SUMMARY:Created event');
   });
 
+  it('rejects malformed conference fields before CalDAV access', async () => {
+    await expect(
+      createController().createEvent(
+        userContext,
+        openIdCredential,
+        {
+          uid: 'event@example.test',
+          title: 'Conference',
+          timing: {
+            type: 'timed',
+            start: {
+              type: 'zoned',
+              local: '2026-09-24T08:00:00',
+              timezone: 'UTC',
+            },
+            end: {
+              type: 'zoned',
+              local: '2026-09-24T09:00:00',
+              timezone: 'UTC',
+            },
+          },
+          conference: {
+            url: 'https://meet.example.test/room',
+            unexpected: true,
+          },
+        } as unknown as CalendarEventInput,
+        roomId,
+        'https://radicale.example.test/alice/team/',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      createController().updateEvent(
+        userContext,
+        openIdCredential,
+        { unsupportedConference: true } as unknown as CalendarEventPatch,
+        '"current-etag"',
+        roomId,
+        'https://radicale.example.test/alice/team/',
+        'https://radicale.example.test/alice/team/event.ics',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(forRoom).not.toHaveBeenCalled();
+  });
+
   it('preserves unknown iCalendar data when updating an event', async () => {
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';
@@ -2186,6 +2305,81 @@ END:VCALENDAR`,
     expect(putHeaders.get('If-Match')).toBe('"old-etag"');
     expect(putInit?.body).toContain('SUMMARY:After update');
     expect(putInit?.body).toContain('X-CUSTOM:preserve');
+  });
+
+  it('skips a same-value conference write only with the current ETag', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/event.ics';
+    const source = conferenceEventIcs();
+    fetch.mockResponseOnce(source, {
+      status: 200,
+      headers: { ETag: '"current-etag"' },
+    });
+
+    const result = await createController().updateEvent(
+      userContext,
+      openIdCredential,
+      {
+        title: 'Team planning',
+        description: 'Agenda',
+        location: undefined,
+        conference: {
+          action: 'set',
+          url: 'https://meet.example.test/room',
+          label: 'Planning room',
+        },
+      },
+      '"current-etag"',
+      roomId,
+      calendarId,
+      eventId,
+    );
+
+    expect(result.event.externalLinks).toEqual([
+      {
+        kind: 'conference',
+        href: 'https://meet.example.test/room',
+        label: 'Planning room',
+      },
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it('still sends a same-value conference operation with a stale ETag', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = 'https://radicale.example.test/alice/team/event.ics';
+    fetch
+      .mockResponseOnce(conferenceEventIcs(), {
+        status: 200,
+        headers: { ETag: '"current-etag"' },
+      })
+      .mockResponseOnce('Precondition failed', { status: 412 });
+
+    await expect(
+      createController().updateEvent(
+        userContext,
+        openIdCredential,
+        {
+          conference: {
+            action: 'set',
+            url: 'https://meet.example.test/room',
+            label: 'Planning room',
+          },
+        },
+        '"stale-etag"',
+        roomId,
+        calendarId,
+        eventId,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls[1][1]?.method).toBe('PUT');
+    expect(new Headers(fetch.mock.calls[1][1]?.headers).get('If-Match')).toBe(
+      '"stale-etag"',
+    );
   });
 
   it.each(['*', 'W/"weak-etag"', '"first", "second"'])(
@@ -3059,6 +3253,25 @@ DTSTART:20260924T080000Z
 DTEND:20260924T090000Z
 SUMMARY:${title}
 ${extraProperty ? `${extraProperty}\n` : ''}END:VEVENT
+END:VCALENDAR`;
+}
+
+function conferenceEventIcs(): string {
+  return `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Matrix Calendar Widget Tests//EN
+BEGIN:VEVENT
+UID:event@example.test
+DTSTAMP:20261001T120000Z
+CREATED:20261001T120000Z
+LAST-MODIFIED:20261001T120000Z
+SEQUENCE:3
+DTSTART:20260924T080000Z
+DTEND:20260924T090000Z
+SUMMARY:Team planning
+CONFERENCE;VALUE=URI;LABEL="Planning room":https://meet.example.test/room
+DESCRIPTION:Agenda
+END:VEVENT
 END:VCALENDAR`;
 }
 

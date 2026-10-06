@@ -16,9 +16,12 @@
 
 import {
   CalendarEvent,
+  CalendarEventConferenceValidationError,
   CalendarEventInput,
   CalendarEventPatch,
   CalendarTimeRange,
+  validateCalendarEventInputConference,
+  validateCalendarEventPatchConference,
 } from '@matrix-calendar-widget/calendar';
 import { Injectable } from '@nestjs/common';
 import { UserID } from 'matrix-bot-sdk';
@@ -66,6 +69,8 @@ export interface AuthorizedRoomCalendarEventAccess {
 export interface RoomCalendarEventResult {
   readonly event: CalendarEvent;
   readonly etag: string;
+  /** True only when a conditional update was verified as an exact no-op. */
+  readonly noOp?: true;
 }
 
 /** Internal server-only source for consumers that must inspect canonical ICS. */
@@ -179,6 +184,14 @@ export class RoomCalendarEventOperations {
       this.options.radicaleBaseUrl,
       this.options.servicePrincipalUserId,
     );
+    try {
+      validateCalendarEventInputConference(input);
+    } catch (error) {
+      if (error instanceof CalendarEventConferenceValidationError) {
+        throw new RoomCalendarEventOperationError('invalid-event-input');
+      }
+      throw error;
+    }
     if (
       !input ||
       typeof input.uid !== 'string' ||
@@ -220,6 +233,14 @@ export class RoomCalendarEventOperations {
       this.options.radicaleBaseUrl,
       this.options.servicePrincipalUserId,
     );
+    try {
+      validateCalendarEventPatchConference(patch);
+    } catch (error) {
+      if (error instanceof CalendarEventConferenceValidationError) {
+        throw new RoomCalendarEventOperationError('invalid-event-input');
+      }
+      throw error;
+    }
     const eventUrl = collectionChildUrl(scope.collectionUrl, eventId);
     const etag = requireExpectedEtag(expectedEtag);
     const client = this.client(scope.servicePrincipal);
@@ -254,12 +275,14 @@ export class RoomCalendarEventOperations {
     }
 
     if (
-      patch?.recurrence &&
-      ('occurrence' in patch.recurrence || 'following' in patch.recurrence) &&
       encoded.icalendar === current.icalendar &&
-      etag === current.etag
+      etag === current.etag &&
+      (Object.prototype.hasOwnProperty.call(patch, 'conference') ||
+        (patch?.recurrence &&
+          ('occurrence' in patch.recurrence ||
+            'following' in patch.recurrence)))
     ) {
-      return resolveResource(scope.calendarId, current);
+      return { ...resolveResource(scope.calendarId, current), noOp: true };
     }
 
     // Keep the caller's validator. A stale edit must fail with 412 rather
