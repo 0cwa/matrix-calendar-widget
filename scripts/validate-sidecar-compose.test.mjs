@@ -153,6 +153,9 @@ test('room access requires one binding, service identity, and matching homeserve
     roomAccessEnvironment({ MATRIX_APPLICATION_SERVICE_TOKEN: undefined }),
     roomAccessEnvironment({ MATRIX_APPLICATION_SERVICE_USER_ID: undefined }),
     roomAccessEnvironment({
+      MATRIX_APPLICATION_SERVICE_USER_ID: '@bad space:example.org',
+    }),
+    roomAccessEnvironment({
       ROOM_CALENDAR_BINDINGS: JSON.stringify([
         { roomId: '!one:example.org', calendarId: 'one' },
         { roomId: '!two:example.org', calendarId: 'two' },

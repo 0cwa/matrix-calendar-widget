@@ -20,6 +20,7 @@ import { IAppConfiguration } from '../IAppConfiguration';
 import {
   RoomCalendarCalDavAccess,
   RoomCalendarTarget,
+  parseRoomCalendarServiceUserId,
 } from './RoomCalendarCalDavAccess';
 
 const roomId = '!team:example.test';
@@ -233,4 +234,26 @@ describe('RoomCalendarCalDavAccess', () => {
       expect(JSON.stringify(error)).not.toContain('synthetic-test-as-token');
     }
   });
+});
+
+describe('parseRoomCalendarServiceUserId', () => {
+  it.each([
+    [
+      '@matrix_calendar_service:example.test',
+      { localpart: 'matrix_calendar_service', serverName: 'example.test' },
+    ],
+    [
+      '@matrix_calendar_service:example.test:8448',
+      { localpart: 'matrix_calendar_service', serverName: 'example.test:8448' },
+    ],
+  ])('returns the SDK-parsed components for %s', (userId, expected) => {
+    expect(parseRoomCalendarServiceUserId(userId)).toEqual(expected);
+  });
+
+  it.each(['invalid', '@:example.test', '@service:', '@service'])(
+    'rejects a service user ID without the required structure %s',
+    (userId) => {
+      expect(parseRoomCalendarServiceUserId(userId)).toBeUndefined();
+    },
+  );
 });

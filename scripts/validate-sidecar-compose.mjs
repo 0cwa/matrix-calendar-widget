@@ -70,11 +70,10 @@ function loadServerValidators() {
     // htmlencode import emits DEP0060. Suppress warnings only during that
     // import so CLI output remains fixed.
     const previousNoDeprecation = process.noDeprecation;
-    let isSafeRoomCalendarServiceUserLocalpart;
+    let roomCalendarCalDavAccessHelpers;
     try {
       process.noDeprecation = true;
-      isSafeRoomCalendarServiceUserLocalpart =
-        require('../matrix-calendar-server/lib/src/service/RoomCalendarCalDavAccess.js').isSafeRoomCalendarServiceUserLocalpart;
+      roomCalendarCalDavAccessHelpers = require('../matrix-calendar-server/lib/src/service/RoomCalendarCalDavAccess.js');
     } finally {
       if (previousNoDeprecation === undefined) {
         delete process.noDeprecation;
@@ -85,8 +84,10 @@ function loadServerValidators() {
 
     return {
       ...serverValidators,
-      isSafeRoomCalendarServiceUserLocalpart,
-      UserID: require('matrix-bot-sdk').UserID,
+      isSafeRoomCalendarServiceUserLocalpart:
+        roomCalendarCalDavAccessHelpers.isSafeRoomCalendarServiceUserLocalpart,
+      parseRoomCalendarServiceUserId:
+        roomCalendarCalDavAccessHelpers.parseRoomCalendarServiceUserId,
     };
   } catch {
     fail();
@@ -99,17 +100,10 @@ function validateServiceUserId(userId, matrixServerName, validators) {
   }
 
   try {
-    const parsed = new validators.UserID(userId);
-    const delimiter = userId.indexOf(':');
+    const parsed = validators.parseRoomCalendarServiceUserId(userId);
     return (
-      userId.startsWith('@') &&
-      delimiter > 1 &&
-      delimiter < userId.length - 1 &&
-      parsed.localpart.length > 0 &&
-      parsed.domain.length > 0 &&
-      userId.slice(1, delimiter) === parsed.localpart &&
-      userId.slice(delimiter + 1) === parsed.domain &&
-      parsed.domain === matrixServerName &&
+      parsed !== undefined &&
+      parsed.serverName === matrixServerName &&
       validators.isSafeRoomCalendarServiceUserLocalpart(parsed.localpart)
     );
   } catch {
