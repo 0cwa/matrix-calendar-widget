@@ -190,6 +190,12 @@ Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor 
 - [x] Preserve existing VALARM data on ordinary event edits and add/edit/remove
       one supported relative DISPLAY alarm whose negative DURATION trigger is
       measured from DTSTART.
+  - [x] Add, edit, or remove one absolute UTC DATE-TIME DISPLAY trigger
+        (ADR039), preserving alarm identity, description, unknown properties,
+        and exact-source supported no-ops. Absolute alarms remain calendar
+        metadata and are unavailable for Matrix room reminder delivery.
+  - [x] Verify nominal negative day/week relative triggers across Stockholm
+        spring and fall DST changes; retain wall-time duration semantics.
 - [x] Preserve revision metadata and update supported master edits with one
       whole-second UTC clock snapshot and a bounded SEQUENCE increment (ADR025).
       Malformed, duplicate, and exhausted revision metadata stays opaque;
@@ -266,11 +272,12 @@ opaque; unrelated event edits preserve their original RRULE and resource data.
 Full recurrence editing and client interoperability remain open.
 
 The widget can add, edit, or remove one `ACTION:DISPLAY` VALARM with a single
-negative relative DURATION trigger from DTSTART. It preserves the existing
-alarm description and unknown alarm properties when changing the trigger.
-Multiple alarms, other actions, absolute or non-START triggers, and repeating
-alarms remain opaque: only alarm controls are disabled, while ordinary event
-fields stay editable and preserve the resource. This edits CalDAV alarm
+negative relative DURATION trigger from DTSTART or one absolute UTC DATE-TIME
+trigger (ADR039). It preserves the existing alarm identity, description, and
+unknown properties when changing the trigger. Multiple alarms, other actions,
+non-UTC absolute or non-START relative triggers, repeating alarms, and nested
+alarm components remain opaque: only alarm controls are disabled, while
+ordinary event fields stay editable and preserve the resource. This edits CalDAV alarm
 metadata for clients that honor it; room reminder settings are stored in
 gateway sidecar state, separate from iCalendar, and scheduling/delivery use
 their own authorization and default-off runtime gates under ADR007.

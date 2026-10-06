@@ -4533,9 +4533,9 @@ END:VCALENDAR`,
         trigger: { weeks: 0, days: 0, hours: 0, minutes: 30, seconds: 0 },
       },
     });
-    expect(changed.event.alarm?.trigger.minutes).toBe(30);
+    expect(relativeAlarmMinutes(changed.event.alarm)).toBe(30);
     const reparsed = codec.parse('team', 'alarm.ics', changed.icalendar);
-    expect(reparsed.event.alarm?.trigger.minutes).toBe(30);
+    expect(relativeAlarmMinutes(reparsed.event.alarm)).toBe(30);
     expect(reparsed.event.alarm?.uid).toBe(changed.event.alarm?.uid);
 
     const removePatch = JSON.parse(
@@ -4550,6 +4550,155 @@ END:VCALENDAR`,
         ?.getAllSubcomponents('valarm'),
     ).toHaveLength(0);
   });
+
+  it('reads, creates, updates, preserves, and removes one absolute UTC DISPLAY alarm', () => {
+    const source = fixture('alarm-absolute.ics');
+    const parsed = codec.parse('team', 'absolute-alarm.ics', source);
+    const originalAlarm = {
+      action: 'display' as const,
+      uid: 'absolute-alarm@example.test',
+      trigger: { type: 'absolute' as const, value: '2026-09-23T08:45:00Z' },
+    };
+    expect(parsed.event.alarm).toEqual(originalAlarm);
+    expect(parsed.event.unsupportedAlarm).toBeUndefined();
+
+    const identical = parsed.applyPatch({
+      alarm: {
+        action: 'display',
+        trigger: { type: 'absolute', value: '2026-09-23T08:45:00Z' },
+      },
+    });
+    expect(identical.icalendar).toBe(source);
+    expect(identical.event.revision).toEqual(parsed.event.revision);
+
+    const identicalWithUnchangedEventFields = parsed.applyPatch({
+      title: parsed.event.title,
+      alarm: {
+        action: 'display',
+        trigger: { type: 'absolute', value: '2026-09-23T08:45:00Z' },
+      },
+    });
+    expect(identicalWithUnchangedEventFields.icalendar).toBe(source);
+    expect(identicalWithUnchangedEventFields.event.revision).toEqual(
+      parsed.event.revision,
+    );
+
+    const changed = parsed.applyPatch({
+      alarm: {
+        action: 'display',
+        trigger: { type: 'absolute', value: '2026-09-23T08:30:00Z' },
+      },
+    });
+    expect(changed.event.alarm).toEqual({
+      ...originalAlarm,
+      trigger: { type: 'absolute', value: '2026-09-23T08:30:00Z' },
+    });
+    expect(changed.event.revision).not.toEqual(parsed.event.revision);
+    expect(changed.icalendar).toContain(
+      'TRIGGER;VALUE=DATE-TIME:20260923T083000Z',
+    );
+    const changedAlarm = ICAL.Component.fromString(changed.icalendar)
+      .getFirstSubcomponent('vevent')
+      ?.getFirstSubcomponent('valarm');
+    expect(changedAlarm?.getFirstPropertyValue('uid')).toBe(
+      'absolute-alarm@example.test',
+    );
+    expect(changedAlarm?.getFirstPropertyValue('description')).toBe(
+      'Alarm description',
+    );
+    expect(changedAlarm?.getFirstPropertyValue('x-alarm-metadata')).toBe(
+      'preserve-alarm-property',
+    );
+    expect(
+      codec.parse('team', 'absolute-alarm.ics', changed.icalendar).event.alarm,
+    ).toEqual(changed.event.alarm);
+
+    const created = codec.create('team', 'new-absolute.ics', {
+      uid: 'new-absolute@example.test',
+      title: 'Absolute calendar alarm',
+      timing: {
+        type: 'timed',
+        start: { type: 'floating', local: '2026-09-23T09:00:00' },
+        end: { type: 'floating', local: '2026-09-23T10:00:00' },
+      },
+      alarm: {
+        action: 'display',
+        trigger: { type: 'absolute', value: '2026-09-23T08:45:00Z' },
+      },
+    });
+    expect(created.event.alarm?.uid).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(created.icalendar).toContain(
+      'TRIGGER;VALUE=DATE-TIME:20260923T084500Z',
+    );
+
+    const removed = codec
+      .parse('team', 'absolute-alarm.ics', changed.icalendar)
+      .applyPatch({ alarm: { operation: 'remove' } });
+    expect(removed.event.alarm).toBeUndefined();
+    expect(removed.icalendar).not.toContain('BEGIN:VALARM');
+  });
+
+  it.each([
+    ['malformed sequence', 'SEQUENCE:not-a-number'],
+    ['exhausted sequence', 'SEQUENCE:2147483647'],
+  ])(
+    'applies other edits with an unchanged alarm when revision is %s',
+    (_label, sequence) => {
+      const absoluteTrigger = {
+        type: 'absolute' as const,
+        value: '2026-09-23T08:45:00Z',
+      };
+      const source = fixture('alarm-absolute.ics').replace(
+        'UID:absolute-event@example.test',
+        `UID:absolute-event@example.test\r\n${sequence}`,
+      );
+      const parsed = codec.parse('team', 'absolute-alarm.ics', source);
+      const edited = parsed.applyPatch({
+        title: 'Retitled while retaining alarm',
+        alarm: { action: 'display', trigger: absoluteTrigger },
+      });
+
+      expect(edited.event.title).toBe('Retitled while retaining alarm');
+      expect(edited.event.alarm?.trigger).toEqual(absoluteTrigger);
+      expect(edited.event.revision).toEqual(parsed.event.revision);
+      expect(edited.icalendar).toContain(sequence);
+    },
+  );
+
+  it.each(['-P0DT15M', '-PT015M'])(
+    'retains compatible RFC duration spelling %s',
+    (trigger) => {
+      const source = alarmEventSource().replace(
+        'TRIGGER:-PT15M',
+        `TRIGGER:${trigger}`,
+      );
+      const parsed = codec.parse('team', 'equivalent-duration.ics', source);
+
+      const alarm = {
+        action: 'display' as const,
+        trigger: { weeks: 0, days: 0, hours: 0, minutes: 15, seconds: 0 },
+      };
+      expect(parsed.event.alarm?.trigger).toEqual(alarm.trigger);
+
+      const unchanged = parsed.applyPatch({ alarm });
+      expect(unchanged.icalendar).toBe(source);
+      expect(unchanged.event.revision).toEqual(parsed.event.revision);
+      expect(unchanged.event.alarm?.uid).toBeUndefined();
+
+      const unrelatedEdit = parsed.applyPatch({
+        title: 'Retitled while preserving alarm',
+        alarm,
+      });
+      expect(unrelatedEdit.icalendar).toContain(`TRIGGER:${trigger}`);
+      expect(unrelatedEdit.event.alarm?.uid).toBeUndefined();
+      expect(
+        codec.parse('team', 'equivalent-duration.ics', unrelatedEdit.icalendar)
+          .event.alarm?.trigger,
+      ).toEqual(alarm.trigger);
+    },
+  );
 
   it('preserves an existing VALARM UID across supported and ordinary edits', () => {
     const parsed = codec.parse(
@@ -4621,7 +4770,7 @@ END:VCALENDAR`,
   it('changes a supported alarm without rewriting unrelated resource data', () => {
     const source = fixture('recurrence-override.ics');
     const parsed = codec.parse('team', 'recurring-alarm.ics', source);
-    expect(parsed.event.alarm?.trigger.minutes).toBe(10);
+    expect(relativeAlarmMinutes(parsed.event.alarm)).toBe(10);
 
     const changed = parsed.applyPatch({
       alarm: {
@@ -4660,8 +4809,14 @@ END:VCALENDAR`,
     );
     expect(
       codec.parse('team', 'recurring-alarm.ics', changed.icalendar).event.alarm
-        ?.trigger.minutes,
-    ).toBe(20);
+        ?.trigger,
+    ).toEqual({
+      weeks: 0,
+      days: 0,
+      hours: 0,
+      minutes: 20,
+      seconds: 0,
+    });
 
     const removePatch = JSON.parse(
       JSON.stringify({ alarm: { operation: 'remove' } }),
@@ -4694,7 +4849,7 @@ END:VCALENDAR`,
       expect(() => parsed.applyPatch(malformedPatch)).toThrow(
         new ICalendarEventCodecError(
           'unsupported-patch',
-          'Only one negative relative DISPLAY alarm from DTSTART is supported',
+          'Only one non-repeating DISPLAY alarm with a supported trigger is supported',
         ),
       );
     }
@@ -4736,11 +4891,48 @@ END:VCALENDAR`,
       (source) => source.replace('BEGIN:VALARM', 'BEGIN:VALARM\r\nUID:'),
     ],
     [
-      'an absolute DATE-TIME trigger',
+      'an absolute trigger without a UTC Z suffix',
       (source) =>
         source.replace(
           'TRIGGER:-PT15M',
-          'TRIGGER;VALUE=DATE-TIME:20260923T084500Z',
+          'TRIGGER;VALUE=DATE-TIME:20260923T084500',
+        ),
+    ],
+    [
+      'an absolute trigger with a TZID',
+      (source) =>
+        source.replace(
+          'TRIGGER:-PT15M',
+          'TRIGGER;VALUE=DATE-TIME;TZID=Europe/Stockholm:20260923T104500',
+        ),
+    ],
+    [
+      'an absolute DATE trigger',
+      (source) =>
+        source.replace('TRIGGER:-PT15M', 'TRIGGER;VALUE=DATE:20260923'),
+    ],
+    [
+      'an absolute trigger with duplicate VALUE parameters',
+      (source) =>
+        source.replace(
+          'TRIGGER:-PT15M',
+          'TRIGGER;VALUE=DATE-TIME;VALUE=DATE-TIME:20260923T084500Z',
+        ),
+    ],
+    [
+      'an invalid absolute calendar date',
+      (source) =>
+        source.replace(
+          'TRIGGER:-PT15M',
+          'TRIGGER;VALUE=DATE-TIME:20260230T084500Z',
+        ),
+    ],
+    [
+      'duplicate absolute TRIGGER properties',
+      (source) =>
+        source.replace(
+          'TRIGGER:-PT15M',
+          'TRIGGER;VALUE=DATE-TIME:20260923T084500Z\r\nTRIGGER;VALUE=DATE-TIME:20260923T084500Z',
         ),
     ],
     [
@@ -4791,20 +4983,23 @@ END:VCALENDAR`,
     expect(() => parsed.applyPatch({ alarm })).toThrow(
       new ICalendarEventCodecError(
         'unsupported-patch',
-        'Only one negative relative DISPLAY alarm from DTSTART is supported',
+        'Only one non-repeating DISPLAY alarm with a supported trigger is supported',
       ),
     );
     expect(() => parsed.applyPatch({ alarm: { operation: 'remove' } })).toThrow(
       new ICalendarEventCodecError(
         'unsupported-patch',
-        'Only one negative relative DISPLAY alarm from DTSTART is supported',
+        'Only one non-repeating DISPLAY alarm with a supported trigger is supported',
       ),
     );
 
+    const rawAlarm = source.match(/BEGIN:VALARM[\s\S]*?END:VALARM/)?.[0];
     const renamed = parsed.applyPatch({
       title: 'Renamed while keeping opaque alarm',
     });
     const calendar = ICAL.Component.fromString(renamed.icalendar);
+    expect(rawAlarm).toBeTruthy();
+    expect(renamed.icalendar).toContain(rawAlarm!);
     expect(calendar.toString()).toContain(
       'X-ALARM-METADATA:preserve-alarm-property',
     );
@@ -4812,6 +5007,26 @@ END:VCALENDAR`,
       ICAL.Component.fromString(source).getAllSubcomponents('vevent').length,
     );
     expect(renamed.event.unsupportedAlarm).toBe(true);
+  });
+
+  it('keeps VALARM child components opaque during unrelated edits', () => {
+    const nestedAlarm = alarmEventSource().replace(
+      'END:VALARM',
+      [
+        'BEGIN:X-ALARM-CHILD',
+        'X-CHILD-METADATA:preserve-child',
+        'END:X-ALARM-CHILD',
+        'END:VALARM',
+      ].join('\r\n'),
+    );
+    const parsed = codec.parse('team', 'nested-alarm.ics', nestedAlarm);
+    expect(parsed.event.alarm).toBeUndefined();
+    expect(parsed.event.unsupportedAlarm).toBe(true);
+
+    const edited = parsed.applyPatch({ title: 'Retitled with opaque alarm' });
+    expect(edited.icalendar).toContain('BEGIN:X-ALARM-CHILD');
+    expect(edited.icalendar).toContain('X-CHILD-METADATA:preserve-child');
+    expect(edited.icalendar).toContain('END:X-ALARM-CHILD');
   });
 
   it('rejects malformed alarm writes without partially changing an event', () => {
@@ -4833,7 +5048,7 @@ END:VCALENDAR`,
     ).toThrow(
       new ICalendarEventCodecError(
         'unsupported-patch',
-        'Only one negative relative DISPLAY alarm from DTSTART is supported',
+        'Only one non-repeating DISPLAY alarm with a supported trigger is supported',
       ),
     );
     expect(() =>
@@ -4846,7 +5061,7 @@ END:VCALENDAR`,
     ).toThrow(
       new ICalendarEventCodecError(
         'unsupported-patch',
-        'Only one negative relative DISPLAY alarm from DTSTART is supported',
+        'Only one non-repeating DISPLAY alarm with a supported trigger is supported',
       ),
     );
 
@@ -4861,7 +5076,7 @@ END:VCALENDAR`,
     expect(() => parsed.applyPatch(spoofedPatch)).toThrow(
       new ICalendarEventCodecError(
         'unsupported-patch',
-        'Only one negative relative DISPLAY alarm from DTSTART is supported',
+        'Only one non-repeating DISPLAY alarm with a supported trigger is supported',
       ),
     );
 
@@ -4880,11 +5095,18 @@ END:VCALENDAR`,
     expect(() => codec.create('team', 'spoofed.ics', spoofedInput)).toThrow(
       new ICalendarEventCodecError(
         'unsupported-patch',
-        'Only one negative relative DISPLAY alarm from DTSTART is supported',
+        'Only one non-repeating DISPLAY alarm with a supported trigger is supported',
       ),
     );
   });
 });
+
+function relativeAlarmMinutes(
+  alarm: CalendarEvent['alarm'],
+): number | undefined {
+  const trigger = alarm?.trigger;
+  return trigger && !('type' in trigger) ? trigger.minutes : undefined;
+}
 
 function alarmEventSource(): string {
   return [

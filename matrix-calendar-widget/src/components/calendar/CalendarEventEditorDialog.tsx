@@ -45,6 +45,8 @@ import {
   FormHelperText,
   FormLabel,
   MenuItem,
+  Radio,
+  RadioGroup,
   Stack,
   Switch,
   TextField,
@@ -394,6 +396,14 @@ export function CalendarEventEditorDialog({
       );
     };
 
+  const handleAlarmModeChange = (change: ChangeEvent<HTMLInputElement>) => {
+    const alarmMode =
+      change.target.value === 'absolute' ? 'absolute' : 'relative';
+    setValues((current) =>
+      current ? { ...current, alarmMode, alarmChanged: true } : current,
+    );
+  };
+
   const handleRdateDraftChange = (change: ChangeEvent<HTMLInputElement>) => {
     setValues((current) =>
       current ? { ...current, rdateDraft: change.target.value } : current,
@@ -702,27 +712,32 @@ export function CalendarEventEditorDialog({
                 'calendarEvents.editor.invalidRecurrence',
                 'Check the recurrence frequency, interval, and end date or count.',
               )
-            : validationErrorCode === 'invalid-alarm'
+            : validationErrorCode === 'invalid-alarm-utc'
               ? t(
-                  'calendarEvents.editor.invalidAlarm',
-                  'Enter a positive lead time using whole-number duration units. Weeks cannot be combined with other units.',
+                  'calendarEvents.editor.invalidAlarmUtcDateTime',
+                  'Enter a valid UTC date and time in YYYY-MM-DDTHH:mm:ssZ format.',
                 )
-              : validationErrorCode === 'invalid-rdate'
+              : validationErrorCode === 'invalid-alarm'
                 ? t(
-                    'calendarEvents.editor.invalidRdateDuration',
-                    'Enter a positive duration using whole-number units. Weeks cannot be combined with other units.',
+                    'calendarEvents.editor.invalidAlarm',
+                    'Enter a positive lead time using whole-number duration units. Weeks cannot be combined with other units.',
                   )
-                : validationErrorCode === 'invalid-conference'
+                : validationErrorCode === 'invalid-rdate'
                   ? t(
-                      'calendarEvents.editor.invalidConference',
-                      'Enter a safe HTTP(S) conference URL and a label of at most 120 characters.',
+                      'calendarEvents.editor.invalidRdateDuration',
+                      'Enter a positive duration using whole-number units. Weeks cannot be combined with other units.',
                     )
-                  : validationErrorCode === 'invalid-attachment'
+                  : validationErrorCode === 'invalid-conference'
                     ? t(
-                        'calendarEvents.editor.invalidAttachment',
-                        'Enter a safe HTTP(S) attachment URL and choose one attachment operation.',
+                        'calendarEvents.editor.invalidConference',
+                        'Enter a safe HTTP(S) conference URL and a label of at most 120 characters.',
                       )
-                    : undefined;
+                    : validationErrorCode === 'invalid-attachment'
+                      ? t(
+                          'calendarEvents.editor.invalidAttachment',
+                          'Enter a safe HTTP(S) attachment URL and choose one attachment operation.',
+                        )
+                      : undefined;
 
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
@@ -1417,37 +1432,109 @@ export function CalendarEventEditorDialog({
                 {values.alarmEnabled && values.alarmEditable !== false && (
                   <Stack spacing={1}>
                     <FormLabel component="legend">
-                      {t(
-                        'calendarEvents.editor.alarmLeadTime',
-                        'Time before the event starts',
-                      )}
+                      {t('calendarEvents.editor.alarmMode', 'Alarm timing')}
                     </FormLabel>
-                    <Stack direction={{ sm: 'row', xs: 'column' }} spacing={1}>
-                      {(
-                        [
-                          ['alarmWeeks', 'alarmWeeks', 'Weeks before'],
-                          ['alarmDays', 'alarmDays', 'Days before'],
-                          ['alarmHours', 'alarmHours', 'Hours before'],
-                          ['alarmMinutes', 'alarmMinutes', 'Minutes before'],
-                          ['alarmSeconds', 'alarmSeconds', 'Seconds before'],
-                        ] as const
-                      ).map(([field, key, fallback]) => (
-                        <TextField
-                          inputProps={{ min: 0, step: 1 }}
-                          key={field}
-                          label={t(`calendarEvents.editor.${key}`, fallback)}
-                          onChange={handleAlarmDurationChange(field)}
-                          type="number"
-                          value={values[field] ?? '0'}
-                        />
-                      ))}
-                    </Stack>
-                    <Typography color="text.secondary" variant="body2">
-                      {t(
-                        'calendarEvents.editor.alarmBoundary',
-                        'This stores a CalDAV display alarm for clients that support it. Matrix reminder delivery is separate.',
+                    <RadioGroup
+                      aria-label={t(
+                        'calendarEvents.editor.alarmMode',
+                        'Alarm timing',
                       )}
-                    </Typography>
+                      onChange={handleAlarmModeChange}
+                      row
+                      value={values.alarmMode ?? 'relative'}
+                    >
+                      <FormControlLabel
+                        control={<Radio />}
+                        label={t(
+                          'calendarEvents.editor.alarmRelativeMode',
+                          'Before the event',
+                        )}
+                        value="relative"
+                      />
+                      <FormControlLabel
+                        control={<Radio />}
+                        label={t(
+                          'calendarEvents.editor.alarmAbsoluteMode',
+                          'At an exact UTC time',
+                        )}
+                        value="absolute"
+                      />
+                    </RadioGroup>
+                    {values.alarmMode === 'absolute' ? (
+                      <Stack spacing={1}>
+                        <TextField
+                          fullWidth
+                          helperText={t(
+                            'calendarEvents.editor.alarmUtcDateTimeHelp',
+                            'Enter YYYY-MM-DDTHH:mm:ssZ in UTC.',
+                          )}
+                          label={t(
+                            'calendarEvents.editor.alarmUtcDateTime',
+                            'Exact time (UTC)',
+                          )}
+                          onChange={handleAlarmDurationChange(
+                            'alarmUtcDateTime',
+                          )}
+                          placeholder="2026-10-01T08:45:00Z"
+                          value={values.alarmUtcDateTime ?? ''}
+                        />
+                        <Typography color="text.secondary" variant="body2">
+                          {t(
+                            'calendarEvents.editor.absoluteAlarmBoundary',
+                            'This absolute alarm is saved to the calendar and cannot be delivered as a Matrix room reminder.',
+                          )}
+                        </Typography>
+                      </Stack>
+                    ) : (
+                      <Stack spacing={1}>
+                        <FormLabel component="legend">
+                          {t(
+                            'calendarEvents.editor.alarmLeadTime',
+                            'Time before the event starts',
+                          )}
+                        </FormLabel>
+                        <Stack
+                          direction={{ sm: 'row', xs: 'column' }}
+                          spacing={1}
+                        >
+                          {(
+                            [
+                              ['alarmWeeks', 'alarmWeeks', 'Weeks before'],
+                              ['alarmDays', 'alarmDays', 'Days before'],
+                              ['alarmHours', 'alarmHours', 'Hours before'],
+                              [
+                                'alarmMinutes',
+                                'alarmMinutes',
+                                'Minutes before',
+                              ],
+                              [
+                                'alarmSeconds',
+                                'alarmSeconds',
+                                'Seconds before',
+                              ],
+                            ] as const
+                          ).map(([field, key, fallback]) => (
+                            <TextField
+                              inputProps={{ min: 0, step: 1 }}
+                              key={field}
+                              label={t(
+                                `calendarEvents.editor.${key}`,
+                                fallback,
+                              )}
+                              onChange={handleAlarmDurationChange(field)}
+                              type="number"
+                              value={values[field] ?? '0'}
+                            />
+                          ))}
+                        </Stack>
+                        <Typography color="text.secondary" variant="body2">
+                          {t(
+                            'calendarEvents.editor.alarmBoundary',
+                            'This stores a CalDAV display alarm for clients that support it. Matrix reminder delivery is separate.',
+                          )}
+                        </Typography>
+                      </Stack>
+                    )}
                   </Stack>
                 )}
               </FormControl>

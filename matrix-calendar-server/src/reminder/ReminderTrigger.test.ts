@@ -203,6 +203,46 @@ describe('calculateDisplayReminderDueAt', () => {
   });
 
   it.each([
+    [
+      'before the Stockholm spring transition',
+      '20260329T090000',
+      '-P1D',
+      '2026-03-28T08:00:00.000Z',
+    ],
+    [
+      'one week before the Stockholm spring transition',
+      '20260329T090000',
+      '-P1W',
+      '2026-03-22T08:00:00.000Z',
+    ],
+    [
+      'before the Stockholm autumn transition',
+      '20261025T090000',
+      '-P1D',
+      '2026-10-24T07:00:00.000Z',
+    ],
+    [
+      'one week before the Stockholm autumn transition',
+      '20261025T090000',
+      '-P1W',
+      '2026-10-18T07:00:00.000Z',
+    ],
+  ])(
+    'keeps %s as local calendar arithmetic for relative reminders',
+    (_label, start, trigger, expected) => {
+      const { alarm, occurrence } = parsedEvent(
+        `BEGIN:VEVENT\nUID:dst-relative\nDTSTART;TZID=Europe/Stockholm:${start}`,
+        `ACTION:DISPLAY\nTRIGGER:${trigger}`,
+        stockholmTimezone,
+      );
+      expect(calculateDisplayReminderDueAt(alarm, occurrence)).toEqual(
+        new Date(expected),
+      );
+      expect(isReminderScheduleWithinLimits(alarm, occurrence)).toBe(true);
+    },
+  );
+
+  it.each([
     ['absolute UTC trigger', 'TRIGGER;VALUE=DATE-TIME:20261001T084500Z'],
     ['fractional trigger duration', 'TRIGGER:-P1.5D'],
     ['invalid RELATED value', 'TRIGGER;RELATED=NEXT:-PT5M'],
@@ -254,6 +294,7 @@ describe('calculateDisplayReminderDueAt', () => {
     );
 
     expect(calculateDisplayReminderDueAt(alarm, occurrence)).toBeUndefined();
+    expect(isReminderScheduleWithinLimits(alarm, occurrence)).toBe(false);
   });
 
   it('fails closed when DISPLAY DESCRIPTION is missing', () => {

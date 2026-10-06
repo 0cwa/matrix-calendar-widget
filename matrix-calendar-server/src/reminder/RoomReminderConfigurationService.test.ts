@@ -376,7 +376,7 @@ describe('RoomReminderConfigurationService', () => {
     expect(upsertConfiguration).not.toHaveBeenCalled();
   });
 
-  it('rejects a non-triggerable or stale alarm without storing calendar text', async () => {
+  it('rejects stale relative reminder intent when the current alarm is absolute', async () => {
     getEventResource.mockResolvedValue({
       event: { summary: 'private title' },
       etag: 'private-etag',

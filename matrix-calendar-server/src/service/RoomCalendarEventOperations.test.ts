@@ -45,6 +45,36 @@ const simpleCalendar = fs.readFileSync(
   'utf8',
 );
 
+function absoluteAlarmAttachmentSource(): {
+  alarm: {
+    action: 'display';
+    trigger: { type: 'absolute'; value: string };
+  };
+  attachmentUrl: string;
+  source: string;
+} {
+  const attachmentUrl = 'https://files.example.test/agenda';
+  const alarm = {
+    action: 'display' as const,
+    trigger: { type: 'absolute' as const, value: '2026-10-05T08:45:00Z' },
+  };
+  const source = simpleCalendar.replace(
+    'END:VEVENT',
+    [
+      `ATTACH;VALUE=URI:${attachmentUrl}`,
+      'BEGIN:VALARM',
+      'UID:stable-alarm@example.test',
+      'ACTION:DISPLAY',
+      'DESCRIPTION:Keep this alarm description',
+      'TRIGGER;VALUE=DATE-TIME:20261005T084500Z',
+      'X-ALARM-METADATA:preserve-alarm-property',
+      'END:VALARM',
+      'END:VEVENT',
+    ].join('\r\n'),
+  );
+  return { alarm, attachmentUrl, source };
+}
+
 describe('RoomCalendarEventOperations', () => {
   let fetchMock: jest.Mock<ReturnType<typeof fetch>, Parameters<typeof fetch>>;
   let operations: RoomCalendarEventOperations;
@@ -646,6 +676,63 @@ describe('RoomCalendarEventOperations', () => {
     ).toBe('"room-v1"');
   });
 
+  it('skips same-value alarm writes only with the current ETag', async () => {
+    const eventUrl = `${collectionUrl}alarm.ics`;
+    const alarm = {
+      action: 'display' as const,
+      trigger: { type: 'absolute' as const, value: '2026-09-24T07:45:00Z' },
+    };
+    const source = new ICalendarEventCodec()
+      .parse(calendarId, eventUrl, simpleCalendar)
+      .applyPatch({ alarm }).icalendar;
+    fetchMock.mockResolvedValueOnce(
+      new Response(source, {
+        status: 200,
+        headers: { ETag: '"room-v1"' },
+      }),
+    );
+
+    await expect(
+      operations.updateEvent(access(), eventUrl, '"room-v1"', { alarm }),
+    ).resolves.toMatchObject({
+      etag: '"room-v1"',
+      noOp: true,
+      event: { alarm: { trigger: alarm.trigger } },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it('sends same-value alarm operations with stale ETags to conditional PUT', async () => {
+    const eventUrl = `${collectionUrl}alarm.ics`;
+    const alarm = {
+      action: 'display' as const,
+      trigger: { type: 'absolute' as const, value: '2026-09-24T07:45:00Z' },
+    };
+    const source = new ICalendarEventCodec()
+      .parse(calendarId, eventUrl, simpleCalendar)
+      .applyPatch({ alarm }).icalendar;
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(source, {
+          status: 200,
+          headers: { ETag: '"room-v2"' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('Precondition failed', { status: 412 }),
+      );
+
+    await expect(
+      operations.updateEvent(access(), eventUrl, '"room-v1"', { alarm }),
+    ).rejects.toMatchObject({ code: 'etag-conflict' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('PUT');
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).get('If-Match'),
+    ).toBe('"room-v1"');
+  });
+
   it('skips DAV writes for an identical following-suffix ETag retry', async () => {
     const eventUrl = `${collectionUrl}following.ics`;
     const sourceCalendar = followingCalendar();
@@ -953,6 +1040,67 @@ describe('RoomCalendarEventOperations', () => {
       ),
     ).rejects.toMatchObject({ code: 'etag-conflict' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it('skips current-ETag alarm and attachment no-ops', async () => {
+    const eventUrl = `${collectionUrl}alarm-attachment.ics`;
+    const { alarm, attachmentUrl, source } = absoluteAlarmAttachmentSource();
+    fetchMock.mockResolvedValueOnce(
+      new Response(source, {
+        status: 200,
+        headers: { ETag: '"room-v1"' },
+      }),
+    );
+
+    await expect(
+      operations.updateEvent(access(), eventUrl, '"room-v1"', {
+        alarm,
+        attachment: {
+          action: 'set',
+          sourceUrl: attachmentUrl,
+          url: attachmentUrl,
+        },
+      }),
+    ).resolves.toMatchObject({
+      etag: '"room-v1"',
+      noOp: true,
+      event: {
+        alarm: { trigger: alarm.trigger },
+        attachments: [{ url: attachmentUrl }],
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+  });
+
+  it('sends stale alarm and attachment no-ops to conditional PUT', async () => {
+    const eventUrl = `${collectionUrl}alarm-attachment.ics`;
+    const { alarm, attachmentUrl, source } = absoluteAlarmAttachmentSource();
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(source, {
+          status: 200,
+          headers: { ETag: '"room-v2"' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('Precondition failed', { status: 412 }),
+      );
+
+    await expect(
+      operations.updateEvent(access(), eventUrl, '"room-v1"', {
+        alarm,
+        attachment: {
+          action: 'set',
+          sourceUrl: attachmentUrl,
+          url: attachmentUrl,
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'etag-conflict' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('PUT');
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).get('If-Match'),
+    ).toBe('"room-v1"');
   });
 });
 

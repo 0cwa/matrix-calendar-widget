@@ -29,6 +29,7 @@ export type {
   Calendar,
   CalendarDate,
   CalendarEvent,
+  CalendarEventAbsoluteAlarmTrigger,
   CalendarEventAlarmLeadTime,
   CalendarEventAlarmPatch,
   CalendarEventAlarmRemoval,
