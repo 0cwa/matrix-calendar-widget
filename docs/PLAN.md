@@ -565,6 +565,10 @@ access and event writes stay disabled by default.
 - [ ] Record an operator-approved enrollment/capacity envelope with hardware,
       runtime, date-range event counts, API/render latency, and pre-declared
       pass thresholds. Do not infer a universal supported event count.
+  - [x] Predeclare the approved synthetic Element Web target of 250 simple
+        events over 31 local calendar days, including strict per-sample API,
+        view, and details thresholds in `docs/calendar-performance.md`.
+        Hosted measurement and exact-run evidence remain open.
 - [ ] Complete operator evidence and independent review of the exact
       candidate before a separate rollout decision.
 

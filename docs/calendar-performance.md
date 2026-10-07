@@ -7,6 +7,59 @@ separate synthetic browser smoke measures one fixed 1,000-event calendar in
 the actual list and month components; it is an observational UI measurement,
 not a product latency or capacity target.
 
+## Controlled beta 250-event pilot contract
+
+This acceptance contract was approved and recorded on 2026-10-07 before any
+measurement. It is a synthetic controlled-beta target, not a universal
+calendar-size limit or a production-capacity claim. No 250-event real-client
+measurement has passed yet.
+
+The workload is one authorized Element Web session at 1280×800, with exactly
+250 unique, simple timed VEVENTs across exactly 31 calendar days in
+`Europe/Stockholm`. Events have no recurrence, alarm, attachment, or concurrent
+load. Seed them sequentially through the fixture's authenticated CalDAV path;
+do not use 250 widget saves or gateway POSTs. Keep identities and content in
+process memory only.
+
+Every measured sample has a strict limit: a calendar range request through
+fully received and decoded JSON must take at most 1,000 ms; a real List or Month
+view action through the stable populated widget DOM must take at most 2,000 ms;
+and selecting an event through its stable details dialog must take at most
+500 ms. A single over-limit sample fails the gate. Report all values, including
+warm-ups, plus measured median and maximum; do not discard or retry slow
+samples.
+
+The cold first widget opening is measured from immediately before activating
+the registered widget through the fully populated List view. The 2,000 ms
+limit includes widget startup, capability approval, OpenID, API transfer and
+decode, projection, and rendering. Record setup/authentication separately, and
+record startup subphases for diagnosis, but do not subtract them from the cold
+total. Then record two List and two Month warm-ups, followed by five measured
+List and five measured Month samples, alternating views in the same session.
+After two explicitly labeled detail warm-ups, measure five event-detail opens.
+
+Use the real date-range picker to set the exact 31 local dates for List. Assert
+the actual request range in memory. Month deliberately requests a wider range:
+the repository adds seven days on either side, while the visible grid uses
+whole weeks. Report the actual List and Month request spans separately and
+count only the 250 seeded events in the chosen month; no seeded event belongs
+to the Month padding days.
+
+Each measured List response must be HTTP 200 with exactly 250 distinct expected
+events and zero server/projection diagnostics; all 250 rows must appear once
+and remain stable over two animation frames. Month must return the same 250
+events with zero diagnostics; visible entries plus every overflow count must
+sum to 250, and opening an actual overflow day must reveal its expected 8 or 9
+events. Details timing includes query/rendering. Page errors, missing or
+malformed responses, unexpected ranges, wrong counts, and any over-limit
+sample fail the gate. The acceptance report retains every sample and exact
+runner/client/service versions, with no URLs, query strings, IDs, titles,
+headers, response bodies, ICS, tokens, profiles, screenshots, or traces.
+
+The complete execution sequence, timing boundaries, evidence schema, and
+cleanup requirements are fixed in the approved private contract before the
+hosted measurement. Results apply only to the recorded synthetic environment.
+
 ## Reproduce
 
 Use the locked dependencies and build the linked packages first:
