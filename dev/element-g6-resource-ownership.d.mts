@@ -15,6 +15,7 @@ export type G6ResourceOwnership = {
 };
 
 export function createG6ResourceOwnership(name: string): G6ResourceOwnership;
+export function isStrongG6ResourceEtag(etag: unknown): etag is string;
 export function beginG6ResourceCreate(resource: G6ResourceOwnership): boolean;
 export function recordG6ResourceCreate(
   resource: G6ResourceOwnership,

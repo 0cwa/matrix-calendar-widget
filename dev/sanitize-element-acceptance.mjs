@@ -318,6 +318,14 @@ const G6_EXTRA_NUMERIC_FIELDS = new Set(
     .flat()
     .filter((key) => key !== 'httpStatus' && key !== 'count'),
 );
+const G6_SEED_CREATE_OUTCOMES = new Set([
+  'response',
+  'timeout',
+  'aborted',
+  'network-error',
+  'other-error',
+  'not-sent',
+]);
 const REMINDER_DELIVERY_PHASES = new Set([
   'reminder-delivery-snapshot',
   'reminder-restart-delivery-row',
@@ -830,6 +838,7 @@ const ALLOWED_KEYS = new Set([
   ...VERSION_FIELDS,
   'openIdProofValid',
   'allResourcesSeeded',
+  'seedCreateObservations',
   'unsupportedWarningVisible',
   'unsupportedRowOmitted',
   'supportedNeighborVisible',
@@ -883,6 +892,7 @@ function validG6Observation(record) {
     'status',
     ...booleanFields,
     ...numericFields,
+    ...(record.phase === 'g6-fixture-ready' ? ['seedCreateObservations'] : []),
   ]);
   if (
     Object.keys(record).some((key) => !allowedFields.has(key)) ||
@@ -907,6 +917,47 @@ function validG6Observation(record) {
     })
   ) {
     return false;
+  }
+
+  if (Object.hasOwn(record, 'seedCreateObservations')) {
+    const observations = record.seedCreateObservations;
+    if (
+      record.phase !== 'g6-fixture-ready' ||
+      !Array.isArray(observations) ||
+      observations.length !== 4 ||
+      observations.some((observation) => {
+        if (
+          observation === null ||
+          typeof observation !== 'object' ||
+          Array.isArray(observation) ||
+          Object.keys(observation).length !== 4 ||
+          !Object.hasOwn(observation, 'outcome') ||
+          !Object.hasOwn(observation, 'status') ||
+          !Object.hasOwn(observation, 'etagPresent') ||
+          !Object.hasOwn(observation, 'etagStrong') ||
+          !G6_SEED_CREATE_OUTCOMES.has(observation.outcome)
+        ) {
+          return true;
+        }
+        if (observation.outcome === 'response') {
+          return (
+            !Number.isInteger(observation.status) ||
+            observation.status < 100 ||
+            observation.status > 599 ||
+            typeof observation.etagPresent !== 'boolean' ||
+            typeof observation.etagStrong !== 'boolean' ||
+            (observation.etagStrong && !observation.etagPresent)
+          );
+        }
+        return (
+          observation.status !== null ||
+          observation.etagPresent !== null ||
+          observation.etagStrong !== null
+        );
+      })
+    ) {
+      return false;
+    }
   }
 
   if (
@@ -963,7 +1014,17 @@ function validG6Observation(record) {
       return (
         record.httpStatus === 200 &&
         record.openIdProofValid === true &&
-        record.count === 4
+        record.count === 4 &&
+        Array.isArray(record.seedCreateObservations) &&
+        record.seedCreateObservations.length === 4 &&
+        record.seedCreateObservations.every(
+          (observation) =>
+            observation.outcome === 'response' &&
+            observation.status >= 200 &&
+            observation.status < 300 &&
+            observation.etagPresent === true &&
+            observation.etagStrong === true,
+        )
       );
     case 'g6-unsupported-preservation':
       return (
@@ -2654,6 +2715,13 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     }
     if (Object.hasOwn(record, 'failureCode')) {
       fields.push(`failure_code=${record.failureCode}`);
+    }
+    if (Object.hasOwn(record, 'seedCreateObservations')) {
+      record.seedCreateObservations.forEach((observation, index) => {
+        fields.push(
+          `seed_create_${index + 1}=${observation.outcome}:${observation.status ?? 'none'}:${observation.etagPresent ?? 'unknown'}:${observation.etagStrong ?? 'unknown'}`,
+        );
+      });
     }
     if (Object.hasOwn(record, 'missingModuleKind')) {
       fields.push(`missing_module_kind=${record.missingModuleKind}`);

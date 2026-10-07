@@ -2637,6 +2637,12 @@ test('accepts the compact four-case Element client evidence contract', () => {
       count: 4,
       openIdProofValid: true,
       allResourcesSeeded: true,
+      seedCreateObservations: Array.from({ length: 4 }, () => ({
+        outcome: 'response',
+        status: 201,
+        etagPresent: true,
+        etagStrong: true,
+      })),
     },
     {
       phase: 'g6-unsupported-preservation',
@@ -2773,6 +2779,92 @@ test('accepts the compact four-case Element client evidence contract', () => {
     { message: 'invalid element acceptance summary' },
   );
   assert.doesNotMatch(summary, /Matrix Calendar|G6 unsupported|\.ics|UID:/u);
+});
+
+test('retains only four fixed G6 create outcome and ETag diagnostics', () => {
+  const record = {
+    phase: 'g6-fixture-ready',
+    status: 'failed',
+    httpStatus: 200,
+    count: 0,
+    openIdProofValid: true,
+    allResourcesSeeded: false,
+    seedCreateObservations: [
+      {
+        outcome: 'timeout',
+        status: null,
+        etagPresent: null,
+        etagStrong: null,
+      },
+      {
+        outcome: 'response',
+        status: 412,
+        etagPresent: false,
+        etagStrong: false,
+      },
+      {
+        outcome: 'response',
+        status: 201,
+        etagPresent: true,
+        etagStrong: false,
+      },
+      {
+        outcome: 'network-error',
+        status: null,
+        etagPresent: null,
+        etagStrong: null,
+      },
+    ],
+  };
+  const summary = sanitizeElementAcceptance(JSON.stringify(record), sourceSha);
+
+  assert.match(
+    summary,
+    /seed_create_1=timeout:none:unknown:unknown seed_create_2=response:412:false:false seed_create_3=response:201:true:false seed_create_4=network-error:none:unknown:unknown/u,
+  );
+  assert.doesNotMatch(summary, /ETag|etag_value|\.ics|UID:/u);
+
+  const invalidRecords = [
+    {
+      ...record,
+      seedCreateObservations: record.seedCreateObservations.slice(1),
+    },
+    {
+      ...record,
+      seedCreateObservations: record.seedCreateObservations.map(
+        (item, index) =>
+          index === 0 ? { ...item, outcome: 'raw-error' } : item,
+      ),
+    },
+    {
+      ...record,
+      seedCreateObservations: record.seedCreateObservations.map(
+        (item, index) =>
+          index === 2
+            ? { ...item, etagStrong: true, etagPresent: false }
+            : item,
+      ),
+    },
+    {
+      ...record,
+      seedCreateObservations: record.seedCreateObservations.map(
+        (item, index) => (index === 1 ? { ...item, status: null } : item),
+      ),
+    },
+    {
+      ...record,
+      seedCreateObservations: record.seedCreateObservations.map(
+        (item, index) =>
+          index === 0 ? { ...item, rawEtag: 'private-value' } : item,
+      ),
+    },
+  ];
+  for (const invalid of invalidRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(invalid), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
 });
 
 test('accepts the real Element room observations under the g6 phase labels', () => {

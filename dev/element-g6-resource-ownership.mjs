@@ -17,6 +17,10 @@
 
 const STRONG_ETAG = /^"[\x21\x23-\x7e]{1,200}"$/u;
 
+export function isStrongG6ResourceEtag(etag) {
+  return typeof etag === 'string' && STRONG_ETAG.test(etag);
+}
+
 export function createG6ResourceOwnership(name) {
   return {
     name,
@@ -36,7 +40,7 @@ export function recordG6ResourceCreate(resource, status, etag) {
   if (resource.state !== 'creating') return false;
 
   if (Number.isInteger(status) && status >= 200 && status < 300) {
-    if (typeof etag === 'string' && STRONG_ETAG.test(etag)) {
+    if (isStrongG6ResourceEtag(etag)) {
       resource.state = 'created';
       resource.etag = etag;
       resource.confirmedCreated = true;
@@ -73,8 +77,7 @@ export function recordG6ResourceUpdate(
     status >= 200 &&
     status < 300 &&
     identityMatches === true &&
-    typeof etag === 'string' &&
-    STRONG_ETAG.test(etag) &&
+    isStrongG6ResourceEtag(etag) &&
     etag !== resource.etag
   ) {
     resource.etag = etag;

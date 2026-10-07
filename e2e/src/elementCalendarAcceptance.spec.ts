@@ -34,6 +34,7 @@ import {
   beginG6ResourceCreate,
   createG6ResourceOwnership,
   g6ResourceCleanupRequest,
+  isStrongG6ResourceEtag,
   recordG6ResourceCleanup,
   recordG6ResourceCreate,
   recordG6ResourceUpdate,
@@ -119,6 +120,7 @@ type G6StageRecord = {
   count?: number;
   openIdProofValid?: boolean;
   allResourcesSeeded?: boolean;
+  seedCreateObservations?: G6SeedCreateObservation[];
   projectionHttpStatus?: number;
   canonicalBeforeHttpStatus?: number;
   neighborPatchHttpStatus?: number;
@@ -196,12 +198,32 @@ type G6StageRecord = {
   detailsActionTabCount?: number;
 };
 
+type G6SeedCreateObservation = {
+  outcome:
+    | 'response'
+    | 'timeout'
+    | 'aborted'
+    | 'network-error'
+    | 'other-error'
+    | 'not-sent';
+  status: number | null;
+  etagPresent: boolean | null;
+  etagStrong: boolean | null;
+};
+
 type G6CalDavClient = {
   authorization: string;
   collectionUrl: URL;
 };
 
 type G6CalDavResult = {
+  outcome:
+    | 'response'
+    | 'timeout'
+    | 'aborted'
+    | 'network-error'
+    | 'other-error'
+    | 'not-sent';
   status?: number;
   bytes?: Buffer;
   etag?: string;
@@ -1522,6 +1544,7 @@ test('Element Web preserves unsupported events and supports client interactions'
     ];
 
     let createdResourceCount = 0;
+    const seedCreateObservations: G6SeedCreateObservation[] = [];
     for (const resource of resourcesToSeed) {
       const ownership = createG6ResourceOwnership(resource.name);
       resourcesToTrack.push(ownership);
@@ -1533,6 +1556,18 @@ test('Element Web preserves unsupported events and supports client interactions'
         'PUT',
         resource.icalendar,
       );
+      seedCreateObservations.push({
+        outcome: result.outcome,
+        status: result.status ?? null,
+        etagPresent:
+          result.outcome === 'response'
+            ? typeof result.etag === 'string'
+            : null,
+        etagStrong:
+          result.outcome === 'response'
+            ? isStrongG6ResourceEtag(result.etag)
+            : null,
+      });
       if (recordG6ResourceCreate(ownership, result.status, result.etag)) {
         createdResourceCount += 1;
       }
@@ -1545,6 +1580,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       openIdProofValid: calDavResult.proofValid,
       allResourcesSeeded,
       count: createdResourceCount,
+      seedCreateObservations,
     });
 
     activeG6Phase = 'g6-unsupported-preservation';
@@ -2175,7 +2211,7 @@ test('Element Web preserves unsupported events and supports client interactions'
             undefined,
             cleanup.ifMatch,
           )
-        : {};
+        : { outcome: 'not-sent' as const };
       recordG6ResourceCleanup(resource, result.status);
     }
     const cleanupSummary = summarizeG6ResourceOwnership(resourcesToTrack);
@@ -2310,7 +2346,7 @@ async function g6CalDavRequest(
     !/^g6-[0-9a-f-]{36}\.ics$/u.test(resourceName) ||
     client.collectionUrl.origin !== G6_RADICALE_ORIGIN
   ) {
-    return {};
+    return { outcome: 'not-sent' };
   }
 
   const resourceUrl = new URL(
@@ -2323,7 +2359,7 @@ async function g6CalDavRequest(
     !resourceUrl.pathname.startsWith(collectionPrefix) ||
     resourceUrl.pathname.slice(collectionPrefix.length).includes('/')
   ) {
-    return {};
+    return { outcome: 'not-sent' };
   }
 
   const headers: Record<string, string> = {
@@ -2334,12 +2370,14 @@ async function g6CalDavRequest(
       typeof icalendar !== 'string' ||
       icalendar.length > G6_MAX_RESOURCE_BYTES
     ) {
-      return {};
+      return { outcome: 'not-sent' };
     }
     headers['Content-Type'] = 'text/calendar; charset=utf-8';
     headers['If-None-Match'] = '*';
   } else if (method === 'DELETE' && ifMatch !== undefined) {
-    if (!/^"[\x21\x23-\x7e]{1,200}"$/u.test(ifMatch)) return {};
+    if (!/^"[\x21\x23-\x7e]{1,200}"$/u.test(ifMatch)) {
+      return { outcome: 'not-sent' };
+    }
     headers['If-Match'] = ifMatch;
   }
 
@@ -2352,8 +2390,18 @@ async function g6CalDavRequest(
       redirect: 'error',
       signal: AbortSignal.timeout(10_000),
     });
-  } catch {
-    return {};
+  } catch (error) {
+    const errorName = error instanceof Error ? error.name : '';
+    return {
+      outcome:
+        errorName === 'TimeoutError'
+          ? 'timeout'
+          : errorName === 'AbortError'
+            ? 'aborted'
+            : errorName === 'TypeError'
+              ? 'network-error'
+              : 'other-error',
+    };
   }
 
   if (method === 'GET' && response.status === 200) {
@@ -2363,21 +2411,22 @@ async function g6CalDavRequest(
       contentLength > G6_MAX_RESOURCE_BYTES
     ) {
       await response.body?.cancel().catch(() => undefined);
-      return { status: response.status };
+      return { outcome: 'response', status: response.status };
     }
     try {
       const bytes = Buffer.from(await response.arrayBuffer());
       return bytes.length <= G6_MAX_RESOURCE_BYTES
-        ? { status: response.status, bytes }
-        : { status: response.status };
+        ? { outcome: 'response', status: response.status, bytes }
+        : { outcome: 'response', status: response.status };
     } catch {
-      return { status: response.status };
+      return { outcome: 'response', status: response.status };
     }
   }
 
   await response.body?.cancel().catch(() => undefined);
   const etag = method === 'PUT' ? response.headers.get('etag') : null;
   return {
+    outcome: 'response',
     status: response.status,
     ...(etag ? { etag } : {}),
   };

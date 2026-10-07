@@ -21,6 +21,7 @@ import {
   beginG6ResourceCreate,
   createG6ResourceOwnership,
   g6ResourceCleanupRequest,
+  isStrongG6ResourceEtag,
   recordG6ResourceCleanup,
   recordG6ResourceCreate,
   recordG6ResourceUpdate,
@@ -32,6 +33,13 @@ function start(name = 'private-resource-name.ics') {
   assert.equal(beginG6ResourceCreate(resource), true);
   return resource;
 }
+
+test('strong ETag diagnostics use the same bounded validator as ownership', () => {
+  assert.equal(isStrongG6ResourceEtag('"strong-tag"'), true);
+  assert.equal(isStrongG6ResourceEtag('W/"weak-tag"'), false);
+  assert.equal(isStrongG6ResourceEtag('"bad\nvalue"'), false);
+  assert.equal(isStrongG6ResourceEtag(undefined), false);
+});
 
 test('a pre-existing conditional-create collision is never adopted or deleted', () => {
   const resource = start();
