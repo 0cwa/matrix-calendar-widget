@@ -27,6 +27,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
+import { hasUniqueWidgetFrameOwnedByElement } from '../../dev/element-desktop-frame-origin.mjs';
 import {
   appendDesktopJourneyOutcome,
   initializeDesktopJourneyEvidence,
@@ -410,25 +411,26 @@ async function waitForDesktopMatrixUser(
 async function assertDesktopWidgetAttachment(page: Page, widgetUrl: string) {
   const iframe = page.locator('iframe[title="Matrix Calendar"]');
   await iframe.waitFor({ state: 'attached', timeout: 30_000 });
+  const iframeCount = await iframe.count();
+  const iframeElement =
+    iframeCount === 1 ? await iframe.elementHandle() : undefined;
   const desktopUrl = new URL(page.mainFrame().url());
   const widgetOrigin = new URL(widgetUrl).origin;
-  const widgetFrame = page.frames().find((frame) => {
-    if (frame.parentFrame() !== page.mainFrame()) return false;
-    try {
-      return new URL(frame.url()).origin === widgetOrigin;
-    } catch {
-      return false;
-    }
-  });
-  const widgetFrameOrigin = widgetFrame
-    ? new URL(widgetFrame.url()).origin
-    : undefined;
+  const widgetFrameIsAttached =
+    iframeElement !== undefined &&
+    (await hasUniqueWidgetFrameOwnedByElement({
+      getFrames: () => page.frames(),
+      parentFrame: page.mainFrame(),
+      ownerElement: iframeElement,
+      expectedOrigin: widgetOrigin,
+      timeoutMs: 30_000,
+    }));
   if (
     desktopUrl.protocol !== 'vector:' ||
     desktopUrl.hostname !== 'vector' ||
     desktopUrl.origin === widgetOrigin ||
-    widgetFrameOrigin !== widgetOrigin ||
-    widgetFrameOrigin === desktopUrl.origin
+    iframeCount !== 1 ||
+    !widgetFrameIsAttached
   ) {
     throw new Error(
       'Desktop widget origin isolation did not match the packaged client',

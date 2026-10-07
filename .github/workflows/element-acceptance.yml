@@ -81,6 +81,7 @@ jobs:
           node dev/element-desktop-evidence.test.mjs
           node --test dev/element-desktop-startup.test.mjs
           node --test dev/element-desktop-journey.test.mjs
+          node --test dev/element-desktop-frame-origin.test.mjs
           node --test dev/element-desktop-journey-runner.test.mjs
           node --test dev/validate-element-acceptance-compose.test.mjs
 
