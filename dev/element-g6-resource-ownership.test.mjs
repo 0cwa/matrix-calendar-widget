@@ -23,6 +23,7 @@ import {
   g6ResourceCleanupRequest,
   recordG6ResourceCleanup,
   recordG6ResourceCreate,
+  recordG6ResourceUpdate,
   summarizeG6ResourceOwnership,
 } from './element-g6-resource-ownership.mjs';
 
@@ -73,6 +74,45 @@ test('only a confirmed strong ETag authorizes conditional cleanup', () => {
   assert.equal(summary.confirmedCreatedCount, 1);
   assert.equal(summary.cleanupUnresolvedCount, 1);
   assert.equal(summary.allOwnedResourcesRemoved, false);
+});
+
+test('a confirmed update replaces the cleanup validator before deleting', () => {
+  const resource = start();
+  assert.equal(recordG6ResourceCreate(resource, 201, '"created-v1"'), true);
+  assert.equal(
+    recordG6ResourceUpdate(resource, 200, '"updated-v2"', true),
+    true,
+  );
+  assert.deepEqual(g6ResourceCleanupRequest(resource), {
+    method: 'DELETE',
+    ifMatch: '"updated-v2"',
+  });
+  assert.equal(recordG6ResourceCleanup(resource, 204), true);
+  assert.equal(
+    summarizeG6ResourceOwnership([resource]).allOwnedResourcesRemoved,
+    true,
+  );
+});
+
+test('an update response for a different resource cannot replace its validator', () => {
+  const resource = start();
+  assert.equal(recordG6ResourceCreate(resource, 201, '"created-v1"'), true);
+  assert.equal(
+    recordG6ResourceUpdate(resource, 200, '"other-resource-v2"', false),
+    false,
+  );
+  assert.deepEqual(g6ResourceCleanupRequest(resource), { method: 'skip' });
+});
+
+test('an ambiguous update never authorizes deletion with the stale validator', () => {
+  const resource = start();
+  assert.equal(recordG6ResourceCreate(resource, 201, '"created-v1"'), true);
+  assert.equal(recordG6ResourceUpdate(resource, 200, undefined, true), false);
+  assert.deepEqual(g6ResourceCleanupRequest(resource), { method: 'skip' });
+  assert.equal(
+    summarizeG6ResourceOwnership([resource]).allOwnedResourcesRemoved,
+    false,
+  );
 });
 
 test('a successful conditional delete and an already-absent owned object close safely', () => {

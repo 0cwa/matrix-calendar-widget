@@ -36,6 +36,7 @@ import {
   g6ResourceCleanupRequest,
   recordG6ResourceCleanup,
   recordG6ResourceCreate,
+  recordG6ResourceUpdate,
   summarizeG6ResourceOwnership,
   type G6ResourceOwnership,
 } from '../../dev/element-g6-resource-ownership.mjs';
@@ -132,6 +133,8 @@ type G6StageRecord = {
   canonicalSnapshotAvailable?: boolean;
   supportedNeighborEdited?: boolean;
   canonicalUnsupportedObjectUnchanged?: boolean;
+  neighborOwnershipUpdated?: boolean;
+  neighborUpdateIdentityMatches?: boolean;
   deleteButtonVisible?: boolean;
   deleteConfirmationVisible?: boolean;
   deletedRowAbsent?: boolean;
@@ -1346,6 +1349,7 @@ test('Element Web preserves unsupported events and supports client interactions'
 
   const contexts: BrowserContext[] = [];
   const resourcesToTrack: G6ResourceOwnership[] = [];
+  const resourceOwnershipByName = new Map<string, G6ResourceOwnership>();
   const stageRecords = new Map<G6Phase, G6StageRecord>();
   const allowedOrigins = new Set([
     new URL(fixture.elementUrl).origin,
@@ -1513,6 +1517,7 @@ test('Element Web preserves unsupported events and supports client interactions'
     for (const resource of resourcesToSeed) {
       const ownership = createG6ResourceOwnership(resource.name);
       resourcesToTrack.push(ownership);
+      resourceOwnershipByName.set(resource.name, ownership);
       beginG6ResourceCreate(ownership);
       const result = await g6CalDavRequest(
         calDavClient!,
@@ -1592,6 +1597,23 @@ test('Element Web preserves unsupported events and supports client interactions'
       .click();
     const neighborPatch = await neighborPatchResponse.catch(() => undefined);
     const neighborPatchStatus = neighborPatch?.status();
+    const neighborResourceHref = new URL(
+      encodeURIComponent(resources.neighbor),
+      calDavClient!.collectionUrl,
+    ).href;
+    const neighborUpdate = await readGatewayEventUpdate(
+      neighborPatch,
+      neighborResourceHref,
+    );
+    const neighborOwnership = resourceOwnershipByName.get(resources.neighbor);
+    const neighborOwnershipUpdated =
+      neighborOwnership !== undefined &&
+      recordG6ResourceUpdate(
+        neighborOwnership,
+        neighborPatchStatus,
+        neighborUpdate.etag,
+        neighborUpdate.identityMatches,
+      );
     const editedNeighborRow = frameA.getByRole('listitem', {
       name: names.neighborEdited,
     });
@@ -1602,6 +1624,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       neighborPatchStatus !== undefined &&
       neighborPatchStatus >= 200 &&
       neighborPatchStatus < 300 &&
+      neighborOwnershipUpdated &&
       (await editedNeighborRow.isVisible().catch(() => false));
 
     const unsupportedAfter = await g6CalDavRequest(
@@ -1642,6 +1665,8 @@ test('Element Web preserves unsupported events and supports client interactions'
       canonicalSnapshotAvailable,
       supportedNeighborEdited,
       canonicalUnsupportedObjectUnchanged,
+      neighborOwnershipUpdated,
+      neighborUpdateIdentityMatches: neighborUpdate.identityMatches,
     });
 
     activeG6Phase = 'g6-widget-layout';
@@ -3602,6 +3627,33 @@ async function openEventEditor(
   await expect(
     frame.getByRole('dialog').last().getByRole('textbox', { name: 'Title' }),
   ).toBeVisible();
+}
+
+async function readGatewayEventUpdate(
+  response: Response | undefined,
+  expectedEventHref: string,
+): Promise<{ etag?: string; identityMatches: boolean }> {
+  if (!response) return { identityMatches: false };
+  try {
+    const body: unknown = await response.json();
+    if (typeof body !== 'object' || body === null || !('event' in body)) {
+      return { identityMatches: false };
+    }
+    const event = body.event;
+    const etag =
+      'etag' in body && typeof body.etag === 'string' ? body.etag : undefined;
+    const identityMatches =
+      typeof event === 'object' &&
+      event !== null &&
+      'id' in event &&
+      event.id === expectedEventHref;
+    return {
+      ...(etag ? { etag } : {}),
+      identityMatches,
+    };
+  } catch {
+    return { identityMatches: false };
+  }
 }
 
 function waitForGatewayResponse(

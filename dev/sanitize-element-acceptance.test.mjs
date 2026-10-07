@@ -2427,6 +2427,8 @@ test('formats bounded Element client acceptance evidence', () => {
       canonicalSnapshotAvailable: true,
       supportedNeighborEdited: true,
       canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
     }),
     sourceSha,
   );
@@ -2454,6 +2456,8 @@ test('rejects inconsistent Element client acceptance evidence', () => {
       canonicalSnapshotAvailable: true,
       supportedNeighborEdited: true,
       canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
       eventTitle: 'private event title',
     },
     {
@@ -2470,6 +2474,8 @@ test('rejects inconsistent Element client acceptance evidence', () => {
       canonicalSnapshotAvailable: true,
       supportedNeighborEdited: true,
       canonicalUnsupportedObjectUnchanged: false,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
     },
     {
       phase: 'g6-unsupported-preservation',
@@ -2485,6 +2491,8 @@ test('rejects inconsistent Element client acceptance evidence', () => {
       canonicalSnapshotAvailable: true,
       supportedNeighborEdited: true,
       canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
     },
     {
       phase: 'g6-keyboard-focus',
@@ -2628,6 +2636,8 @@ test('accepts the compact four-case Element client evidence contract', () => {
       canonicalSnapshotAvailable: true,
       supportedNeighborEdited: true,
       canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
     },
     {
       phase: 'g6-delete-and-refresh',
@@ -2743,4 +2753,55 @@ test('accepts the real Element room observations under the g6 phase labels', () 
   );
   assert.match(summary, /phase=g6-member-a-room-context status=passed/u);
   assert.match(summary, /matrix_room_joined=true/u);
+});
+
+test('rejects a passed Element edit whose updated ETag belongs to another event', () => {
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'g6-unsupported-preservation',
+          status: 'passed',
+          projectionHttpStatus: 200,
+          canonicalBeforeHttpStatus: 200,
+          neighborPatchHttpStatus: 204,
+          canonicalAfterHttpStatus: 200,
+          count: 1,
+          unsupportedWarningVisible: true,
+          unsupportedRowOmitted: true,
+          supportedNeighborVisible: true,
+          canonicalSnapshotAvailable: true,
+          supportedNeighborEdited: true,
+          canonicalUnsupportedObjectUnchanged: true,
+          neighborOwnershipUpdated: false,
+          neighborUpdateIdentityMatches: false,
+        }),
+        sourceSha,
+      ),
+    { message: 'invalid element acceptance summary' },
+  );
+});
+
+test('retains a consistent failed G6 ownership cleanup count ledger', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-resource-cleanup',
+      status: 'failed',
+      count: 1,
+      plannedCount: 4,
+      confirmedCreatedCount: 1,
+      conflictCount: 0,
+      notCreatedCount: 0,
+      createUnresolvedCount: 3,
+      deletedCount: 1,
+      alreadyAbsentCount: 0,
+      cleanupUnresolvedCount: 0,
+      allOwnedResourcesRemoved: false,
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /phase=g6-resource-cleanup status=failed/u);
+  assert.match(summary, /create_unresolved_count=3/u);
+  assert.doesNotMatch(summary, /private|\.ics|ETag/u);
 });

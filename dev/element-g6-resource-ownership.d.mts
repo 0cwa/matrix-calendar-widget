@@ -21,6 +21,12 @@ export function recordG6ResourceCreate(
   status: number | undefined,
   etag: string | undefined,
 ): boolean;
+export function recordG6ResourceUpdate(
+  resource: G6ResourceOwnership,
+  status: number | undefined,
+  etag: string | undefined,
+  identityMatches: boolean,
+): boolean;
 export function g6ResourceCleanupRequest(
   resource: G6ResourceOwnership,
 ): { method: 'DELETE'; ifMatch: string } | { method: 'skip' };

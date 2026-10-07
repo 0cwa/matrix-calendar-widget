@@ -60,6 +60,32 @@ export function recordG6ResourceCreate(resource, status, etag) {
   return false;
 }
 
+export function recordG6ResourceUpdate(
+  resource,
+  status,
+  etag,
+  identityMatches,
+) {
+  if (resource.state !== 'created') return false;
+
+  if (
+    Number.isInteger(status) &&
+    status >= 200 &&
+    status < 300 &&
+    identityMatches === true &&
+    typeof etag === 'string' &&
+    STRONG_ETAG.test(etag) &&
+    etag !== resource.etag
+  ) {
+    resource.etag = etag;
+    return true;
+  }
+
+  resource.state = 'cleanup-unresolved';
+  resource.etag = undefined;
+  return false;
+}
+
 export function g6ResourceCleanupRequest(resource) {
   if (resource.state === 'created' && typeof resource.etag === 'string') {
     return { method: 'DELETE', ifMatch: resource.etag };

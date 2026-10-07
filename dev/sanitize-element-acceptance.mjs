@@ -196,6 +196,8 @@ const PHASE_BOOLEAN_FIELDS = new Map([
       'canonicalSnapshotAvailable',
       'supportedNeighborEdited',
       'canonicalUnsupportedObjectUnchanged',
+      'neighborOwnershipUpdated',
+      'neighborUpdateIdentityMatches',
     ],
   ],
   [
@@ -826,6 +828,8 @@ const ALLOWED_KEYS = new Set([
   'canonicalSnapshotAvailable',
   'supportedNeighborEdited',
   'canonicalUnsupportedObjectUnchanged',
+  'neighborOwnershipUpdated',
+  'neighborUpdateIdentityMatches',
   'deleteButtonVisible',
   'deleteConfirmationVisible',
   'deletedRowAbsent',
@@ -944,7 +948,9 @@ function validG6Observation(record) {
         record.neighborPatchHttpStatus >= 200 &&
         record.neighborPatchHttpStatus < 300 &&
         record.canonicalAfterHttpStatus === 200 &&
-        record.count === 1
+        record.count === 1 &&
+        record.neighborOwnershipUpdated === true &&
+        record.neighborUpdateIdentityMatches === true
       );
     case 'g6-delete-and-refresh':
       return (
