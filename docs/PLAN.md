@@ -528,9 +528,11 @@ access and event writes stay disabled by default.
       and external PostgreSQL configuration. CI covers omitted defaults and
       valid/invalid opt-ins; this validates configuration only, not operator or
       production acceptance (PR #224).
-- [ ] Pass the existing five protected checks on the exact candidate head and
+- [x] Pass the existing five protected checks on the exact candidate head and
       retain the relevant hosted browser-layout and real Radicale/PostgreSQL
-      contract results.
+      contract results. All passed on PR #227 candidate
+      `a02932dafbbfa9316bee5e8bda1ee15ed1ddbaff`, including hosted run
+      [37611136645](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37611136645).
 - [x] Run the first hosted Element Web journey against isolated pinned
       Synapse, project-owned Radicale, and gateway services: two authorized
       members share a basic event create/read/edit; the stale editor receives
@@ -542,12 +544,22 @@ access and event writes stay disabled by default.
 - [ ] Complete actual Element Web/Desktop beta acceptance against isolated
       pinned Synapse, project-owned Radicale, and PostgreSQL services before
       any production contact.
-- [ ] Verify two-identity authorization denial before CalDAV I/O, stale-ETag
-      conflict handling, unsupported-projection disclosure, and actual-client
-      keyboard/focus behavior.
-- [ ] Exercise the enabled unencrypted-room reminder path, then restart and
+- [x] Verify the actual Element Web shared edit, stale-ETag conflict/reload,
+      and outsider denial for the bound team room and own unbound room on PR
+      #227 candidate `a02932dafbbfa9316bee5e8bda1ee15ed1ddbaff`, hosted run
+      [37611136645](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37611136645).
+- [ ] Prove unauthorized requests are denied before CalDAV I/O; exercise
+      unsupported-projection disclosure with canonical-resource preservation;
+      and verify actual-client keyboard/focus behavior.
+- [x] Exercise the enabled unencrypted-room reminder path, then restart and
       separately restore both Radicale and application PostgreSQL data in an
-      isolated environment.
+      isolated environment. PR #227 candidate
+      `a02932dafbbfa9316bee5e8bda1ee15ed1ddbaff` passed the real Element Web
+      reminder UI, relative DISPLAY alarm readback, `m.mentions.room` delivery,
+      gateway restart scheduler scan, and fresh paired-store restore. The
+      restored scheduler delivered its due canary once, prior sent-state stayed
+      unchanged, and cleanup passed; this covers the completed-send recovery
+      path and does not claim exactly-once delivery.
 - [ ] Record an operator-approved enrollment/capacity envelope with hardware,
       runtime, date-range event counts, API/render latency, and pre-declared
       pass thresholds. Do not infer a universal supported event count.
