@@ -7,10 +7,10 @@ import {
   mkdirSync,
   opendirSync,
   openSync,
-  readFileSync,
-  readSync,
   readdirSync,
+  readFileSync,
   readlinkSync,
+  readSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
