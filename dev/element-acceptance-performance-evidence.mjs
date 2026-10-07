@@ -89,6 +89,15 @@ const COLD_KEYS = [
   'appLoadingIndicatorCount',
   'appWarningCount',
   'appDrawerMaximised',
+  'hostTileCountBeforeHover',
+  'hostToolbarCountBeforeHover',
+  'hostMaximizeCountBeforeHover',
+  'hostMaximizeVisibleBeforeHover',
+  'hostHeaderHoverAttempted',
+  'hostHeaderHoverCompleted',
+  'hostTileCountAfterHover',
+  'hostToolbarCountAfterHover',
+  'hostMaximizeVisibleAfterHover',
   'maximizeControlCount',
   'hostMaximizeMs',
   'maximizedIframeWidth',
@@ -323,6 +332,23 @@ function validReport(report) {
         report.coldList.appLoadingIndicatorCount === null &&
         report.coldList.appWarningCount === null &&
         report.coldList.appDrawerMaximised === null) &&
+    boundedInteger(report.coldList.hostTileCountBeforeHover, 0, 2) &&
+    boundedInteger(report.coldList.hostToolbarCountBeforeHover, 0, 2) &&
+    boundedInteger(report.coldList.hostMaximizeCountBeforeHover, 0, 2) &&
+    typeof report.coldList.hostMaximizeVisibleBeforeHover === 'boolean' &&
+    (report.coldList.hostMaximizeVisibleBeforeHover
+      ? report.coldList.hostMaximizeCountBeforeHover === 1
+      : true) &&
+    typeof report.coldList.hostHeaderHoverAttempted === 'boolean' &&
+    typeof report.coldList.hostHeaderHoverCompleted === 'boolean' &&
+    (!report.coldList.hostHeaderHoverCompleted ||
+      report.coldList.hostHeaderHoverAttempted) &&
+    boundedInteger(report.coldList.hostTileCountAfterHover, 0, 2) &&
+    boundedInteger(report.coldList.hostToolbarCountAfterHover, 0, 2) &&
+    typeof report.coldList.hostMaximizeVisibleAfterHover === 'boolean' &&
+    (report.coldList.hostMaximizeVisibleAfterHover
+      ? report.coldList.maximizeControlCount === 1
+      : true) &&
     boundedInteger(report.coldList.maximizeControlCount, 0, 2) &&
     optionalMilliseconds(report.coldList.hostMaximizeMs) &&
     optionalCount(report.coldList.maximizedIframeWidth, 4096) &&
@@ -442,7 +468,14 @@ function reportPasses(report) {
     report.coldList.appDrawerFrameCount === 0 &&
     report.coldList.persistedHostFrameCount === 1 &&
     report.coldList.persistedHostFrameVisible &&
+    report.coldList.hostTileCountBeforeHover === 1 &&
+    report.coldList.hostToolbarCountBeforeHover === 1 &&
+    report.coldList.hostHeaderHoverAttempted &&
+    report.coldList.hostHeaderHoverCompleted &&
+    report.coldList.hostTileCountAfterHover === 1 &&
+    report.coldList.hostToolbarCountAfterHover === 1 &&
     report.coldList.maximizeControlCount === 1 &&
+    report.coldList.hostMaximizeVisibleAfterHover &&
     report.coldList.maximizedIframeWidth !== null &&
     report.coldList.maximizedIframeWidth >= 800 &&
     report.coldList.maximizedLayout &&
@@ -602,6 +635,15 @@ export function formatPerformanceEvidence(record) {
       `app_loading_indicator_count=${display(report.coldList.appLoadingIndicatorCount)}`,
       `app_warning_count=${display(report.coldList.appWarningCount)}`,
       `app_drawer_maximised=${display(report.coldList.appDrawerMaximised)}`,
+      `host_tile_count_before_hover=${report.coldList.hostTileCountBeforeHover}`,
+      `host_toolbar_count_before_hover=${report.coldList.hostToolbarCountBeforeHover}`,
+      `host_maximize_count_before_hover=${report.coldList.hostMaximizeCountBeforeHover}`,
+      `host_maximize_visible_before_hover=${report.coldList.hostMaximizeVisibleBeforeHover}`,
+      `host_header_hover_attempted=${report.coldList.hostHeaderHoverAttempted}`,
+      `host_header_hover_completed=${report.coldList.hostHeaderHoverCompleted}`,
+      `host_tile_count_after_hover=${report.coldList.hostTileCountAfterHover}`,
+      `host_toolbar_count_after_hover=${report.coldList.hostToolbarCountAfterHover}`,
+      `host_maximize_visible_after_hover=${report.coldList.hostMaximizeVisibleAfterHover}`,
       `maximize_control_count=${report.coldList.maximizeControlCount}`,
       `host_maximize_ms=${display(report.coldList.hostMaximizeMs)}`,
       `maximized_iframe_width=${display(report.coldList.maximizedIframeWidth)}`,

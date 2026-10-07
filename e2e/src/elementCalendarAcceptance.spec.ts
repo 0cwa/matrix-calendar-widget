@@ -404,6 +404,15 @@ type PerformanceReport = {
     appLoadingIndicatorCount: number | null;
     appWarningCount: number | null;
     appDrawerMaximised: boolean | null;
+    hostTileCountBeforeHover: number;
+    hostToolbarCountBeforeHover: number;
+    hostMaximizeCountBeforeHover: number;
+    hostMaximizeVisibleBeforeHover: boolean;
+    hostHeaderHoverAttempted: boolean;
+    hostHeaderHoverCompleted: boolean;
+    hostTileCountAfterHover: number;
+    hostToolbarCountAfterHover: number;
+    hostMaximizeVisibleAfterHover: boolean;
     maximizeControlCount: number;
     hostMaximizeMs: number | null;
     maximizedIframeWidth: number | null;
@@ -888,6 +897,15 @@ function makeEmptyPerformanceReport(
       appLoadingIndicatorCount: null,
       appWarningCount: null,
       appDrawerMaximised: null,
+      hostTileCountBeforeHover: 0,
+      hostToolbarCountBeforeHover: 0,
+      hostMaximizeCountBeforeHover: 0,
+      hostMaximizeVisibleBeforeHover: false,
+      hostHeaderHoverAttempted: false,
+      hostHeaderHoverCompleted: false,
+      hostTileCountAfterHover: 0,
+      hostToolbarCountAfterHover: 0,
+      hostMaximizeVisibleAfterHover: false,
       maximizeControlCount: 0,
       hostMaximizeMs: null,
       maximizedIframeWidth: null,
@@ -1933,17 +1951,66 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
     report.coldList.initialIframeWidth = await hostIframe.evaluate((iframe) =>
       Math.round(iframe.getBoundingClientRect().width),
     );
-    await hostIframe.hover();
-    const maximizeControl = page.getByRole('button', {
+    const appTile = page.locator(
+      '.mx_AppsDrawer .mx_AppTileFullWidth, .mx_AppsDrawer .mx_AppTile, .mx_AppsDrawer .mx_AppTile_mini',
+    );
+    const appTileToolbar = appTile.locator('.mx_AppTileMenuBar');
+    const maximizeControl = appTile.getByRole('button', {
       name: 'Maximise',
       exact: true,
     });
-    report.coldList.maximizeControlCount = Math.min(
-      await maximizeControl.count(),
+    const maximizeStartedAt = performance.now();
+    report.coldList.hostTileCountBeforeHover = Math.min(
+      await appTile.count().catch(() => 0),
       2,
     );
-    const maximizeStartedAt = performance.now();
-    await expect(maximizeControl).toBeVisible();
+    report.coldList.hostToolbarCountBeforeHover = Math.min(
+      await appTileToolbar.count().catch(() => 0),
+      2,
+    );
+    report.coldList.hostMaximizeCountBeforeHover = Math.min(
+      await maximizeControl.count().catch(() => 0),
+      2,
+    );
+    report.coldList.hostMaximizeVisibleBeforeHover =
+      report.coldList.hostMaximizeCountBeforeHover === 1 &&
+      (await maximizeControl.isVisible().catch(() => false));
+    report.coldList.hostHeaderHoverAttempted =
+      report.coldList.hostTileCountBeforeHover === 1 &&
+      report.coldList.hostToolbarCountBeforeHover === 1;
+    report.coldList.hostHeaderHoverCompleted =
+      report.coldList.hostHeaderHoverAttempted &&
+      (await appTileToolbar
+        .first()
+        .hover({ timeout: 5_000 })
+        .then(() => true)
+        .catch(() => false));
+    await maximizeControl
+      .waitFor({ state: 'visible', timeout: 5_000 })
+      .catch(() => {});
+    report.coldList.hostTileCountAfterHover = Math.min(
+      await appTile.count().catch(() => 0),
+      2,
+    );
+    report.coldList.hostToolbarCountAfterHover = Math.min(
+      await appTileToolbar.count().catch(() => 0),
+      2,
+    );
+    report.coldList.maximizeControlCount = Math.min(
+      await maximizeControl.count().catch(() => 0),
+      2,
+    );
+    report.coldList.hostMaximizeVisibleAfterHover =
+      report.coldList.maximizeControlCount === 1 &&
+      (await maximizeControl.isVisible().catch(() => false));
+    expect(report.coldList.hostTileCountBeforeHover).toBe(1);
+    expect(report.coldList.hostToolbarCountBeforeHover).toBe(1);
+    expect(report.coldList.hostHeaderHoverAttempted).toBe(true);
+    expect(report.coldList.hostHeaderHoverCompleted).toBe(true);
+    expect(report.coldList.hostTileCountAfterHover).toBe(1);
+    expect(report.coldList.hostToolbarCountAfterHover).toBe(1);
+    expect(report.coldList.maximizeControlCount).toBe(1);
+    expect(report.coldList.hostMaximizeVisibleAfterHover).toBe(true);
     await maximizeControl.click();
     const maximizedLayout = page.locator('.mx_AppsDrawer--maximised');
     await expect(maximizedLayout).toBeVisible();

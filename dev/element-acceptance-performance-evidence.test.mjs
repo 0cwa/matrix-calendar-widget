@@ -131,6 +131,15 @@ function completeReport() {
       appLoadingIndicatorCount: null,
       appWarningCount: null,
       appDrawerMaximised: null,
+      hostTileCountBeforeHover: 1,
+      hostToolbarCountBeforeHover: 1,
+      hostMaximizeCountBeforeHover: 0,
+      hostMaximizeVisibleBeforeHover: false,
+      hostHeaderHoverAttempted: true,
+      hostHeaderHoverCompleted: true,
+      hostTileCountAfterHover: 1,
+      hostToolbarCountAfterHover: 1,
+      hostMaximizeVisibleAfterHover: true,
       maximizeControlCount: 1,
       hostMaximizeMs: 180,
       maximizedIframeWidth: 1280,
@@ -220,6 +229,10 @@ test('sanitizes complete performance samples and bounded decoded API timings', (
     summary,
     /Performance\s+\d|@matrix-calendar-widget|access_token|https?:\/\/|error message|stack/u,
   );
+  assert.match(
+    summary,
+    /host_tile_count_before_hover=1 host_toolbar_count_before_hover=1 host_maximize_count_before_hover=0 host_maximize_visible_before_hover=false host_header_hover_attempted=true host_header_hover_completed=true host_tile_count_after_hover=1 host_toolbar_count_after_hover=1 host_maximize_visible_after_hover=true maximize_control_count=1/u,
+  );
 });
 
 test('requires the pinned app-drawer route and retains only fixed page-error classes', () => {
@@ -247,6 +260,17 @@ test('requires the pinned app-drawer route and retains only fixed page-error cla
     () =>
       sanitizeElementAcceptance(
         JSON.stringify(stage('passed', inconsistentHostFrame)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const missingHeaderHover = completeReport();
+  missingHeaderHover.coldList.hostHeaderHoverCompleted = false;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(stage('passed', missingHeaderHover)),
         sourceSha,
       ),
     /invalid element acceptance summary/u,
