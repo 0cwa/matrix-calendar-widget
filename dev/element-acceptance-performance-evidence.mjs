@@ -40,6 +40,17 @@ const PAGE_ERROR_CLASSES = new Set([
   'eval-error',
   'other',
 ]);
+const HOST_HOVER_FAILURE_CLASSES = new Set([
+  'not-attempted',
+  'none',
+  'timeout',
+  'not-visible',
+  'outside-viewport',
+  'intercepted',
+  'detached',
+  'other',
+]);
+const HOST_HOVER_CENTER_HITS = new Set(['toolbar', 'tile', 'other', 'none']);
 const API_SAMPLE =
   /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5])$/u;
 
@@ -89,6 +100,7 @@ const COLD_KEYS = [
   'appLoadingIndicatorCount',
   'appWarningCount',
   'appDrawerMaximised',
+  'hostHoverActionability',
   'hostTileCountBeforeHover',
   'hostToolbarCountBeforeHover',
   'hostMaximizeCountBeforeHover',
@@ -147,6 +159,16 @@ const OVERFLOW_KEYS = [
   'dayEventCount',
   'dayIdentityMatches',
   'stable',
+];
+const HOST_HOVER_ACTIONABILITY_KEYS = [
+  'available',
+  'connected',
+  'visible',
+  'positiveBox',
+  'viewportIntersection',
+  'hiddenAncestor',
+  'centerHit',
+  'failureClass',
 ];
 const API_KEYS = [
   'sample',
@@ -228,6 +250,43 @@ function validDetailSample(value, index) {
     typeof value.stable === 'boolean' &&
     (typeof value.horizontalOverflow === 'boolean' ||
       value.horizontalOverflow === null)
+  );
+}
+
+function validHostHoverActionability(value, attempted, completed) {
+  return (
+    hasExactKeys(value, HOST_HOVER_ACTIONABILITY_KEYS) &&
+    typeof value.available === 'boolean' &&
+    (value.available
+      ? [
+          value.connected,
+          value.visible,
+          value.positiveBox,
+          value.viewportIntersection,
+          value.hiddenAncestor,
+        ].every((item) => typeof item === 'boolean') &&
+        HOST_HOVER_CENTER_HITS.has(value.centerHit)
+      : [
+          value.connected,
+          value.visible,
+          value.positiveBox,
+          value.viewportIntersection,
+          value.hiddenAncestor,
+          value.centerHit,
+        ].every((item) => item === null)) &&
+    HOST_HOVER_FAILURE_CLASSES.has(value.failureClass) &&
+    (attempted
+      ? value.failureClass !== 'not-attempted' &&
+        completed === (value.failureClass === 'none') &&
+        (value.failureClass !== 'none' ||
+          (value.available &&
+            value.connected &&
+            value.visible &&
+            value.positiveBox &&
+            value.viewportIntersection &&
+            !value.hiddenAncestor &&
+            value.centerHit === 'toolbar'))
+      : value.failureClass === 'not-attempted' && !completed)
   );
 }
 
@@ -341,6 +400,11 @@ function validReport(report) {
       : true) &&
     typeof report.coldList.hostHeaderHoverAttempted === 'boolean' &&
     typeof report.coldList.hostHeaderHoverCompleted === 'boolean' &&
+    validHostHoverActionability(
+      report.coldList.hostHoverActionability,
+      report.coldList.hostHeaderHoverAttempted,
+      report.coldList.hostHeaderHoverCompleted,
+    ) &&
     (!report.coldList.hostHeaderHoverCompleted ||
       report.coldList.hostHeaderHoverAttempted) &&
     boundedInteger(report.coldList.hostTileCountAfterHover, 0, 2) &&
@@ -468,6 +532,14 @@ function reportPasses(report) {
     report.coldList.appDrawerFrameCount === 0 &&
     report.coldList.persistedHostFrameCount === 1 &&
     report.coldList.persistedHostFrameVisible &&
+    report.coldList.hostHoverActionability.available &&
+    report.coldList.hostHoverActionability.connected &&
+    report.coldList.hostHoverActionability.visible &&
+    report.coldList.hostHoverActionability.positiveBox &&
+    report.coldList.hostHoverActionability.viewportIntersection &&
+    !report.coldList.hostHoverActionability.hiddenAncestor &&
+    report.coldList.hostHoverActionability.centerHit === 'toolbar' &&
+    report.coldList.hostHoverActionability.failureClass === 'none' &&
     report.coldList.hostTileCountBeforeHover === 1 &&
     report.coldList.hostToolbarCountBeforeHover === 1 &&
     report.coldList.hostHeaderHoverAttempted &&
@@ -568,6 +640,27 @@ function display(value) {
   return value === null ? 'unavailable' : String(value);
 }
 
+export function classifyPerformanceHoverFailure(error) {
+  const errorName = error instanceof Error ? error.name : '';
+  const message = error instanceof Error ? error.message : '';
+  if (/outside(?: of)? the viewport/iu.test(message)) {
+    return 'outside-viewport';
+  }
+  if (/not visible/iu.test(message)) return 'not-visible';
+  if (/intercepts? .*pointer|receives? .*pointer/iu.test(message)) {
+    return 'intercepted';
+  }
+  if (
+    /detached from (?:the )?DOM|not attached to (?:the )?DOM/iu.test(message)
+  ) {
+    return 'detached';
+  }
+  if (errorName === 'TimeoutError' || /timeout/iu.test(message)) {
+    return 'timeout';
+  }
+  return 'other';
+}
+
 function median(values) {
   const sorted = [...values].sort((a, b) => a - b);
   if (sorted.length === 0) return null;
@@ -641,6 +734,14 @@ export function formatPerformanceEvidence(record) {
       `host_maximize_visible_before_hover=${report.coldList.hostMaximizeVisibleBeforeHover}`,
       `host_header_hover_attempted=${report.coldList.hostHeaderHoverAttempted}`,
       `host_header_hover_completed=${report.coldList.hostHeaderHoverCompleted}`,
+      `host_hover_observation_available=${report.coldList.hostHoverActionability.available}`,
+      `host_hover_toolbar_connected=${display(report.coldList.hostHoverActionability.connected)}`,
+      `host_hover_toolbar_visible=${display(report.coldList.hostHoverActionability.visible)}`,
+      `host_hover_toolbar_positive_box=${display(report.coldList.hostHoverActionability.positiveBox)}`,
+      `host_hover_toolbar_viewport_intersection=${display(report.coldList.hostHoverActionability.viewportIntersection)}`,
+      `host_hover_toolbar_hidden_ancestor=${display(report.coldList.hostHoverActionability.hiddenAncestor)}`,
+      `host_hover_center_hit=${display(report.coldList.hostHoverActionability.centerHit)}`,
+      `host_hover_failure_class=${report.coldList.hostHoverActionability.failureClass}`,
       `host_tile_count_after_hover=${report.coldList.hostTileCountAfterHover}`,
       `host_toolbar_count_after_hover=${report.coldList.hostToolbarCountAfterHover}`,
       `host_maximize_visible_after_hover=${report.coldList.hostMaximizeVisibleAfterHover}`,

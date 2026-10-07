@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { classifyPerformanceHoverFailure } from './element-acceptance-performance-evidence.mjs';
 import { sanitizeElementAcceptance } from './sanitize-element-acceptance.mjs';
 
 const sourceSha = 'b'.repeat(40);
@@ -131,6 +132,16 @@ function completeReport() {
       appLoadingIndicatorCount: null,
       appWarningCount: null,
       appDrawerMaximised: null,
+      hostHoverActionability: {
+        available: true,
+        connected: true,
+        visible: true,
+        positiveBox: true,
+        viewportIntersection: true,
+        hiddenAncestor: false,
+        centerHit: 'toolbar',
+        failureClass: 'none',
+      },
       hostTileCountBeforeHover: 1,
       hostToolbarCountBeforeHover: 1,
       hostMaximizeCountBeforeHover: 0,
@@ -211,6 +222,10 @@ test('sanitizes complete performance samples and bounded decoded API timings', (
     summary,
     /pin_control_count=1 pin_control_visible=true pin_control_enabled=true pin_action_completed=true app_drawer_count=1 app_drawer_frame_count=0 persisted_host_frame_count=1 persisted_host_frame_visible=true/u,
   );
+  assert.match(
+    summary,
+    /host_hover_observation_available=true host_hover_toolbar_connected=true host_hover_toolbar_visible=true host_hover_toolbar_positive_box=true host_hover_toolbar_viewport_intersection=true host_hover_toolbar_hidden_ancestor=false host_hover_center_hit=toolbar host_hover_failure_class=none/u,
+  );
   assert.match(summary, /maximized_iframe_width=1280 maximized_layout=true/u);
   assert.match(
     summary,
@@ -231,8 +246,82 @@ test('sanitizes complete performance samples and bounded decoded API timings', (
   );
   assert.match(
     summary,
-    /host_tile_count_before_hover=1 host_toolbar_count_before_hover=1 host_maximize_count_before_hover=0 host_maximize_visible_before_hover=false host_header_hover_attempted=true host_header_hover_completed=true host_tile_count_after_hover=1 host_toolbar_count_after_hover=1 host_maximize_visible_after_hover=true maximize_control_count=1/u,
+    /host_tile_count_before_hover=1 host_toolbar_count_before_hover=1 host_maximize_count_before_hover=0 host_maximize_visible_before_hover=false host_header_hover_attempted=true host_header_hover_completed=true .*host_tile_count_after_hover=1 host_toolbar_count_after_hover=1 host_maximize_visible_after_hover=true maximize_control_count=1/u,
   );
+});
+
+test('maps host hover failures to fixed classes without preserving error text', () => {
+  const classified = [
+    [new Error('Element is not visible secret-value'), 'not-visible'],
+    [
+      new Error('Element is outside of the viewport private-value'),
+      'outside-viewport',
+    ],
+    [
+      new Error('Other element intercepts pointer events hidden-title'),
+      'intercepted',
+    ],
+    [new Error('Element is not attached to the DOM private-url'), 'detached'],
+    [
+      Object.assign(new Error('Timeout 5000ms exceeded private-detail'), {
+        name: 'TimeoutError',
+      }),
+      'timeout',
+    ],
+    [new Error('unclassified secret-value'), 'other'],
+  ].map(([error, expected]) => [
+    classifyPerformanceHoverFailure(error),
+    expected,
+  ]);
+  for (const [actual, expected] of classified) assert.equal(actual, expected);
+  assert.doesNotMatch(
+    JSON.stringify(classified),
+    /secret-value|private-value|hidden-title|private-url|private-detail/u,
+  );
+});
+
+test('requires visible unobscured hover evidence for pass and preserves fixed failure class', () => {
+  const unavailablePass = completeReport();
+  Object.assign(unavailablePass.coldList.hostHoverActionability, {
+    available: false,
+    connected: null,
+    visible: null,
+    positiveBox: null,
+    viewportIntersection: null,
+    hiddenAncestor: null,
+    centerHit: null,
+  });
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(stage('passed', unavailablePass)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const hiddenPass = completeReport();
+  hiddenPass.coldList.hostHoverActionability.hiddenAncestor = true;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(stage('passed', hiddenPass)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const hoverFailure = completeReport();
+  hoverFailure.coldList.hostHeaderHoverCompleted = false;
+  hoverFailure.coldList.hostHoverActionability.failureClass = 'intercepted';
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(
+      stage('failed', hoverFailure, 'performance-host-layout-failed'),
+    ),
+    sourceSha,
+  );
+  assert.match(summary, /host_hover_failure_class=intercepted/u);
+  assert.doesNotMatch(summary, /pointer|hidden-title|secret-value/u);
 });
 
 test('requires the pinned app-drawer route and retains only fixed page-error classes', () => {

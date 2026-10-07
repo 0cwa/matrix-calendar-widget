@@ -31,6 +31,7 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { arch, platform, release } from 'node:os';
 import { isAbsolute, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { classifyPerformanceHoverFailure } from '../../dev/element-acceptance-performance-evidence.mjs';
 import { ElementWebPage } from './pages/elementWebPage';
 import { fillDatePicker } from './pages/helper';
 
@@ -367,6 +368,24 @@ type PerformanceDetailsSample = {
   stable: boolean;
   horizontalOverflow: boolean | null;
 };
+type PerformanceHoverActionability = {
+  available: boolean;
+  connected: boolean | null;
+  visible: boolean | null;
+  positiveBox: boolean | null;
+  viewportIntersection: boolean | null;
+  hiddenAncestor: boolean | null;
+  centerHit: 'toolbar' | 'tile' | 'other' | 'none' | null;
+  failureClass:
+    | 'not-attempted'
+    | 'none'
+    | 'timeout'
+    | 'not-visible'
+    | 'outside-viewport'
+    | 'intercepted'
+    | 'detached'
+    | 'other';
+};
 type PerformanceReport = {
   version: 1;
   year: number;
@@ -404,6 +423,7 @@ type PerformanceReport = {
     appLoadingIndicatorCount: number | null;
     appWarningCount: number | null;
     appDrawerMaximised: boolean | null;
+    hostHoverActionability: PerformanceHoverActionability;
     hostTileCountBeforeHover: number;
     hostToolbarCountBeforeHover: number;
     hostMaximizeCountBeforeHover: number;
@@ -897,6 +917,16 @@ function makeEmptyPerformanceReport(
       appLoadingIndicatorCount: null,
       appWarningCount: null,
       appDrawerMaximised: null,
+      hostHoverActionability: {
+        available: false,
+        connected: null,
+        visible: null,
+        positiveBox: null,
+        viewportIntersection: null,
+        hiddenAncestor: null,
+        centerHit: null,
+        failureClass: 'not-attempted',
+      },
       hostTileCountBeforeHover: 0,
       hostToolbarCountBeforeHover: 0,
       hostMaximizeCountBeforeHover: 0,
@@ -1978,13 +2008,105 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
     report.coldList.hostHeaderHoverAttempted =
       report.coldList.hostTileCountBeforeHover === 1 &&
       report.coldList.hostToolbarCountBeforeHover === 1;
-    report.coldList.hostHeaderHoverCompleted =
-      report.coldList.hostHeaderHoverAttempted &&
-      (await appTileToolbar
-        .first()
-        .hover({ timeout: 5_000 })
-        .then(() => true)
-        .catch(() => false));
+    if (report.coldList.hostHeaderHoverAttempted) {
+      try {
+        const observation = await appTileToolbar.first().evaluate((toolbar) => {
+          const rect = toolbar.getBoundingClientRect();
+          const style = window.getComputedStyle(toolbar);
+          const tile = toolbar.closest(
+            '.mx_AppTileFullWidth, .mx_AppTile, .mx_AppTile_mini',
+          );
+          const positiveBox = rect.width > 0 && rect.height > 0;
+          const viewportIntersection =
+            rect.right > 0 &&
+            rect.bottom > 0 &&
+            rect.left < window.innerWidth &&
+            rect.top < window.innerHeight;
+          let ancestor = toolbar.parentElement;
+          let hiddenAncestor = false;
+          let ancestorCount = 0;
+          while (ancestor !== null && ancestorCount < 128) {
+            const ancestorStyle = window.getComputedStyle(ancestor);
+            if (
+              ancestor.hidden ||
+              ancestorStyle.display === 'none' ||
+              ancestorStyle.visibility === 'hidden' ||
+              ancestorStyle.visibility === 'collapse'
+            ) {
+              hiddenAncestor = true;
+              break;
+            }
+            ancestor = ancestor.parentElement;
+            ancestorCount += 1;
+          }
+          if (ancestor !== null && !hiddenAncestor) {
+            throw new Error('toolbar ancestor scan exceeded its bound');
+          }
+          const centerX = rect.left + rect.width / 2;
+          const centerY = rect.top + rect.height / 2;
+          const hit =
+            centerX >= 0 &&
+            centerY >= 0 &&
+            centerX < window.innerWidth &&
+            centerY < window.innerHeight
+              ? document.elementFromPoint(centerX, centerY)
+              : null;
+          const centerHit =
+            hit === null
+              ? 'none'
+              : toolbar.contains(hit)
+                ? 'toolbar'
+                : tile?.contains(hit)
+                  ? 'tile'
+                  : 'other';
+          return {
+            connected: toolbar.isConnected,
+            positiveBox,
+            viewportIntersection,
+            hiddenAncestor,
+            centerHit,
+            computedVisible:
+              positiveBox &&
+              style.display !== 'none' &&
+              style.visibility !== 'hidden' &&
+              style.visibility !== 'collapse',
+          };
+        });
+        const visible = await appTileToolbar.first().isVisible();
+        report.coldList.hostHoverActionability = {
+          available: true,
+          connected: observation.connected,
+          visible: visible && observation.computedVisible,
+          positiveBox: observation.positiveBox,
+          viewportIntersection: observation.viewportIntersection,
+          hiddenAncestor: observation.hiddenAncestor,
+          centerHit: observation.centerHit,
+          failureClass: 'not-attempted',
+        };
+      } catch {
+        report.coldList.hostHoverActionability = {
+          available: false,
+          connected: null,
+          visible: null,
+          positiveBox: null,
+          viewportIntersection: null,
+          hiddenAncestor: null,
+          centerHit: null,
+          failureClass: 'not-attempted',
+        };
+      }
+    }
+    if (report.coldList.hostHeaderHoverAttempted) {
+      try {
+        await appTileToolbar.first().hover({ timeout: 5_000 });
+        report.coldList.hostHeaderHoverCompleted = true;
+        report.coldList.hostHoverActionability.failureClass = 'none';
+      } catch (error) {
+        report.coldList.hostHeaderHoverCompleted = false;
+        report.coldList.hostHoverActionability.failureClass =
+          classifyPerformanceHoverFailure(error);
+      }
+    }
     await maximizeControl
       .waitFor({ state: 'visible', timeout: 5_000 })
       .catch(() => {});
