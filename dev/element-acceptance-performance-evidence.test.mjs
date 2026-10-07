@@ -115,6 +115,12 @@ function completeReport() {
       identityApprovalMs: 200,
       iframeReadyMs: 400,
       initialIframeWidth: 460,
+      pinControlCount: 1,
+      pinControlVisible: true,
+      pinControlEnabled: true,
+      pinActionCompleted: true,
+      appDrawerCount: 1,
+      appDrawerFrameCount: 1,
       maximizeControlCount: 1,
       hostMaximizeMs: 180,
       maximizedIframeWidth: 1280,
@@ -155,6 +161,7 @@ function completeReport() {
     apiResponses,
     blockedRequestCount: 0,
     pageErrorCount: 0,
+    pageErrorClass: 'none',
   };
 }
 
@@ -177,7 +184,14 @@ test('sanitizes complete performance samples and bounded decoded API timings', (
     summary,
     /events=250 calendar_days=31 timezone=Europe\/Stockholm/u,
   );
-  assert.match(summary, /embedded_iframe_width=460 maximize_control_count=1/u);
+  assert.match(
+    summary,
+    /embedded_iframe_width=460 .*maximize_control_count=1/u,
+  );
+  assert.match(
+    summary,
+    /pin_control_count=1 pin_control_visible=true pin_control_enabled=true pin_action_completed=true app_drawer_count=1 app_drawer_frame_count=1/u,
+  );
   assert.match(summary, /maximized_iframe_width=1280 maximized_layout=true/u);
   assert.match(
     summary,
@@ -194,7 +208,44 @@ test('sanitizes complete performance samples and bounded decoded API timings', (
   );
   assert.doesNotMatch(
     summary,
-    /Performance\s+\d|@matrix-calendar-widget|access_token|https?:\/\//iu,
+    /Performance\s+\d|@matrix-calendar-widget|access_token|https?:\/\/|error message|stack/u,
+  );
+});
+
+test('requires the pinned app-drawer route and retains only fixed page-error classes', () => {
+  const missingPin = completeReport();
+  missingPin.coldList.pinControlCount = 0;
+  missingPin.coldList.pinControlVisible = false;
+  missingPin.coldList.pinControlEnabled = false;
+  missingPin.coldList.pinActionCompleted = false;
+  missingPin.coldList.appDrawerCount = 0;
+  missingPin.coldList.appDrawerFrameCount = 0;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(stage('passed', missingPin)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const pageError = completeReport();
+  pageError.pageErrorCount = 1;
+  pageError.pageErrorClass = 'type-error';
+  const failed = sanitizeElementAcceptance(
+    JSON.stringify(stage('failed', pageError, 'performance-page-error')),
+    sourceSha,
+  );
+  assert.match(failed, /page_errors=1 page_error_class=type-error/u);
+
+  pageError.pageErrorClass = 'message contains private fixture data';
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(stage('failed', pageError, 'performance-page-error')),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
   );
 });
 

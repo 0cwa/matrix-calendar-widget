@@ -261,6 +261,8 @@ type OpenCalendarWidgetOptions = {
   expectWidgetWarning: boolean;
   waitForCalendar?: boolean;
   captureMemberADiagnostics?: boolean;
+  openInAppDrawer?: boolean;
+  onAppDrawerPlacement?: (observation: AppDrawerPlacementObservation) => void;
   onTiming?: (
     phase:
       | 'activation'
@@ -272,7 +274,26 @@ type OpenCalendarWidgetOptions = {
   ) => void;
 };
 
-type PerformanceView = 'list' | 'month' | 'day';
+type AppDrawerPlacementObservation = Partial<{
+  pinControlCount: number;
+  pinControlVisible: boolean;
+  pinControlEnabled: boolean;
+  pinActionCompleted: boolean;
+  appDrawerCount: number;
+  appDrawerFrameCount: number;
+}>;
+
+type PerformancePageErrorClass =
+  | 'none'
+  | 'error'
+  | 'type-error'
+  | 'reference-error'
+  | 'syntax-error'
+  | 'range-error'
+  | 'uri-error'
+  | 'eval-error'
+  | 'other';
+
 type PerformanceSampleKey =
   | 'cold-list'
   | `warmup-${'list' | 'month'}-${1 | 2}`
@@ -357,6 +378,12 @@ type PerformanceReport = {
     identityApprovalMs: number | null;
     iframeReadyMs: number | null;
     initialIframeWidth: number | null;
+    pinControlCount: number;
+    pinControlVisible: boolean;
+    pinControlEnabled: boolean;
+    pinActionCompleted: boolean;
+    appDrawerCount: number;
+    appDrawerFrameCount: number;
     maximizeControlCount: number;
     hostMaximizeMs: number | null;
     maximizedIframeWidth: number | null;
@@ -391,6 +418,7 @@ type PerformanceReport = {
   apiResponses: PerformanceApiResponse[];
   blockedRequestCount: number | null;
   pageErrorCount: number | null;
+  pageErrorClass: PerformancePageErrorClass;
 };
 
 type PerformancePendingRequest = {
@@ -824,6 +852,12 @@ function makeEmptyPerformanceReport(
       identityApprovalMs: null,
       iframeReadyMs: null,
       initialIframeWidth: null,
+      pinControlCount: 0,
+      pinControlVisible: false,
+      pinControlEnabled: false,
+      pinActionCompleted: false,
+      appDrawerCount: 0,
+      appDrawerFrameCount: 0,
       maximizeControlCount: 0,
       hostMaximizeMs: null,
       maximizedIframeWidth: null,
@@ -858,7 +892,29 @@ function makeEmptyPerformanceReport(
     apiResponses: [],
     blockedRequestCount: null,
     pageErrorCount: null,
+    pageErrorClass: 'none',
   };
+}
+
+function classifyPerformancePageError(error: Error): PerformancePageErrorClass {
+  switch (error.name) {
+    case 'Error':
+      return 'error';
+    case 'TypeError':
+      return 'type-error';
+    case 'ReferenceError':
+      return 'reference-error';
+    case 'SyntaxError':
+      return 'syntax-error';
+    case 'RangeError':
+      return 'range-error';
+    case 'URIError':
+      return 'uri-error';
+    case 'EvalError':
+      return 'eval-error';
+    default:
+      return 'other';
+  }
 }
 
 function readPerformanceMonth(): { year: number; month: number } {
@@ -1735,6 +1791,7 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
   let observer: PerformanceApiObserver | undefined;
   let blockedRequestCount = 0;
   let pageErrorCount = 0;
+  let pageErrorClass: PerformancePageErrorClass = 'none';
   let failureCode:
     | 'performance-setup-failed'
     | 'performance-widget-open-failed'
@@ -1761,8 +1818,11 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
       viewport: { width: 1280, height: 800 },
     });
     context.on('page', (openedPage) => {
-      openedPage.on('pageerror', () => {
+      openedPage.on('pageerror', (error) => {
         pageErrorCount = Math.min(pageErrorCount + 1, 100_000);
+        if (pageErrorClass === 'none') {
+          pageErrorClass = classifyPerformancePageError(error);
+        }
       });
     });
     await context.route('**/*', async (route) => {
@@ -1813,6 +1873,10 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
     failureCode = 'performance-widget-open-failed';
     const frame = await openCalendarWidget(element, page, {
       expectWidgetWarning: false,
+      openInAppDrawer: true,
+      onAppDrawerPlacement: (observation) => {
+        Object.assign(report.coldList, observation);
+      },
       onTiming: (phase, durationMs) => {
         switch (phase) {
           case 'activation':
@@ -1866,7 +1930,12 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
     );
     report.coldList.hostMaximizeMs = elapsedMilliseconds(maximizeStartedAt);
     expect(report.coldList.initialIframeWidth).toBeGreaterThan(0);
-    expect(report.coldList.initialIframeWidth).toBeLessThan(800);
+    expect(report.coldList.pinControlCount).toBe(1);
+    expect(report.coldList.pinControlVisible).toBe(true);
+    expect(report.coldList.pinControlEnabled).toBe(true);
+    expect(report.coldList.pinActionCompleted).toBe(true);
+    expect(report.coldList.appDrawerCount).toBe(1);
+    expect(report.coldList.appDrawerFrameCount).toBe(1);
     expect(report.coldList.maximizeControlCount).toBe(1);
     expect(report.coldList.maximizedLayout).toBe(true);
     expect(report.coldList.maximizedIframeWidth).toBeGreaterThanOrEqual(800);
@@ -2166,8 +2235,7 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
       monthMeasurement.second.visibleEventCount;
     report.overflow.collapsedEventCount =
       monthMeasurement.second.collapsedEventCount;
-    report.overflow.renderedEventCount =
-      monthMeasurement.second.renderedEventCount;
+    report.overflow.renderedEventCount = monthMeasurement.second.renderedCount;
     const monthDate = `${year}-${String(month).padStart(2, '0')}-01`;
     const moreLink = frame.locator(
       `.fc-daygrid-day[data-date="${monthDate}"] .fc-daygrid-more-link`,
@@ -2269,7 +2337,7 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
       return placeholder;
     };
 
-    for (let index = 1; index <= 2; index += 1) {
+    for (const index of [1, 2] as const) {
       failureCode = 'performance-details-failed';
       const sample = `details-warmup-${index}` as const;
       const details = await openDetails(sample, index, false);
@@ -2277,7 +2345,7 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
       expect(details.titleMatches).toBe(true);
       expect(details.stable).toBe(true);
     }
-    for (let index = 1; index <= 5; index += 1) {
+    for (const index of [1, 2, 3, 4, 5] as const) {
       failureCode = 'performance-details-failed';
       const sample = `details-${index}` as const;
       const details = await openDetails(sample, index, true);
@@ -2291,6 +2359,7 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
 
     report.blockedRequestCount = blockedRequestCount;
     report.pageErrorCount = pageErrorCount;
+    report.pageErrorClass = pageErrorClass;
     syncApiRows();
     failureCode = 'performance-egress-blocked';
     expect(blockedRequestCount).toBe(0);
@@ -2322,6 +2391,7 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
   } catch {
     report.blockedRequestCount = blockedRequestCount;
     report.pageErrorCount = pageErrorCount;
+    report.pageErrorClass = pageErrorClass;
     syncApiRows();
     recordPerformancePilot('failed', report, failureCode);
     throw new Error('Element performance pilot failed');
@@ -3695,6 +3765,8 @@ async function openCalendarWidget(
     expectWidgetWarning,
     waitForCalendar = true,
     captureMemberADiagnostics = false,
+    openInAppDrawer = false,
+    onAppDrawerPlacement,
     onTiming,
   }: OpenCalendarWidgetOptions,
 ) {
@@ -3704,6 +3776,8 @@ async function openCalendarWidget(
     page,
     'Matrix Calendar',
     captureMemberADiagnostics,
+    openInAppDrawer,
+    onAppDrawerPlacement,
   );
   onTiming?.('activation', elapsedMilliseconds(activationStartedAt));
   if (captureMemberADiagnostics) {
@@ -3798,6 +3872,8 @@ async function openPinnedElementWidget(
   page: Page,
   widgetName: string,
   captureMemberADiagnostics = false,
+  openInAppDrawer = false,
+  onAppDrawerPlacement?: (observation: AppDrawerPlacementObservation) => void,
 ): Promise<void> {
   const roomHeader = page.locator('header.mx_RoomHeader');
   const rightPanel = page.getByRole('complementary');
@@ -3810,6 +3886,50 @@ async function openPinnedElementWidget(
     captureMemberADiagnostics ? 'widget-a-extensions-menuitem' : undefined,
     rightPanel,
   );
+
+  if (openInAppDrawer) {
+    const pinControl = rightPanel.getByRole('button', {
+      name: 'Pin',
+      exact: true,
+    });
+    await pinControl
+      .waitFor({ state: 'visible', timeout: 8_000 })
+      .catch(() => {});
+    const pinControlCount = Math.min(await pinControl.count(), 2);
+    const pinControlVisible =
+      pinControlCount === 1 &&
+      (await pinControl.isVisible().catch(() => false));
+    const pinControlEnabled =
+      pinControlCount === 1 &&
+      (await pinControl.isEnabled().catch(() => false));
+    onAppDrawerPlacement?.({
+      pinControlCount,
+      pinControlVisible,
+      pinControlEnabled,
+    });
+    expect(pinControlCount).toBe(1);
+    expect(pinControlVisible).toBe(true);
+    expect(pinControlEnabled).toBe(true);
+    await pinControl.click();
+    onAppDrawerPlacement?.({ pinActionCompleted: true });
+
+    const appDrawer = page.locator('.mx_AppsDrawer');
+    await expect(appDrawer.first()).toBeVisible();
+    const appDrawerCount = Math.min(await appDrawer.count(), 2);
+    onAppDrawerPlacement?.({ appDrawerCount });
+    const drawerFrame = appDrawer.locator('iframe[title="Matrix Calendar"]');
+    await drawerFrame
+      .first()
+      .waitFor({ state: 'attached' })
+      .catch(() => {});
+    const appDrawerFrameCount = Math.min(await drawerFrame.count(), 2);
+    onAppDrawerPlacement?.({ appDrawerFrameCount });
+    expect(appDrawerCount).toBe(1);
+    expect(appDrawerFrameCount).toBe(1);
+    await expect(drawerFrame.first()).toBeVisible();
+    return;
+  }
+
   await clickPinnedWidgetControl(
     rightPanel.getByRole('button', { name: widgetName }),
     captureMemberADiagnostics ? 'widget-a-extension-row' : undefined,

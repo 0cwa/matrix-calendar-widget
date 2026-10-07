@@ -29,6 +29,17 @@ const RANGE_CLASSES = new Set([
   'overflow-day',
   'mismatch',
 ]);
+const PAGE_ERROR_CLASSES = new Set([
+  'none',
+  'error',
+  'type-error',
+  'reference-error',
+  'syntax-error',
+  'range-error',
+  'uri-error',
+  'eval-error',
+  'other',
+]);
 const API_SAMPLE =
   /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5])$/u;
 
@@ -51,6 +62,7 @@ const REPORT_KEYS = [
   'apiResponses',
   'blockedRequestCount',
   'pageErrorCount',
+  'pageErrorClass',
 ];
 const PREPARATION_KEYS = ['elementLoginMs', 'roomNavigationMs'];
 const COLD_KEYS = [
@@ -61,6 +73,12 @@ const COLD_KEYS = [
   'identityApprovalMs',
   'iframeReadyMs',
   'initialIframeWidth',
+  'pinControlCount',
+  'pinControlVisible',
+  'pinControlEnabled',
+  'pinActionCompleted',
+  'appDrawerCount',
+  'appDrawerFrameCount',
   'maximizeControlCount',
   'hostMaximizeMs',
   'maximizedIframeWidth',
@@ -257,6 +275,12 @@ function validReport(report) {
       optionalMilliseconds(report.coldList[key]),
     ) &&
     optionalCount(report.coldList.initialIframeWidth, 4096) &&
+    boundedInteger(report.coldList.pinControlCount, 0, 2) &&
+    typeof report.coldList.pinControlVisible === 'boolean' &&
+    typeof report.coldList.pinControlEnabled === 'boolean' &&
+    typeof report.coldList.pinActionCompleted === 'boolean' &&
+    boundedInteger(report.coldList.appDrawerCount, 0, 2) &&
+    boundedInteger(report.coldList.appDrawerFrameCount, 0, 2) &&
     boundedInteger(report.coldList.maximizeControlCount, 0, 2) &&
     optionalMilliseconds(report.coldList.hostMaximizeMs) &&
     optionalCount(report.coldList.maximizedIframeWidth, 4096) &&
@@ -313,7 +337,13 @@ function validReport(report) {
     report.apiResponses.length <= 512 &&
     report.apiResponses.every(validApiResponse) &&
     optionalCount(report.blockedRequestCount, 100_000) &&
-    optionalCount(report.pageErrorCount, 100_000)
+    optionalCount(report.pageErrorCount, 100_000) &&
+    PAGE_ERROR_CLASSES.has(report.pageErrorClass) &&
+    (report.pageErrorCount === null
+      ? report.pageErrorClass === 'none'
+      : report.pageErrorCount === 0
+        ? report.pageErrorClass === 'none'
+        : report.pageErrorClass !== 'none')
   );
 }
 
@@ -362,7 +392,12 @@ function reportPasses(report) {
     report.coldList.openIdMaxMs !== null &&
     report.coldList.initialIframeWidth !== null &&
     report.coldList.initialIframeWidth > 0 &&
-    report.coldList.initialIframeWidth < 800 &&
+    report.coldList.pinControlCount === 1 &&
+    report.coldList.pinControlVisible &&
+    report.coldList.pinControlEnabled &&
+    report.coldList.pinActionCompleted &&
+    report.coldList.appDrawerCount === 1 &&
+    report.coldList.appDrawerFrameCount === 1 &&
     report.coldList.maximizeControlCount === 1 &&
     report.coldList.maximizedIframeWidth !== null &&
     report.coldList.maximizedIframeWidth >= 800 &&
@@ -431,6 +466,7 @@ function reportPasses(report) {
     report.overflow.stable &&
     report.blockedRequestCount === 0 &&
     report.pageErrorCount === 0 &&
+    report.pageErrorClass === 'none' &&
     report.apiResponses.every(
       (row) =>
         row.status === 200 &&
@@ -494,6 +530,7 @@ export function formatPerformanceEvidence(record) {
       `viewport_height=${report.viewportHeight}`,
       `blocked_requests=${display(report.blockedRequestCount)}`,
       `page_errors=${display(report.pageErrorCount)}`,
+      `page_error_class=${report.pageErrorClass}`,
     ].join(' '),
     `performance_preparation login_ms=${display(report.preparation.elementLoginMs)} room_navigation_ms=${display(report.preparation.roomNavigationMs)}`,
     [
@@ -505,6 +542,12 @@ export function formatPerformanceEvidence(record) {
       `identity_approval_ms=${display(report.coldList.identityApprovalMs)}`,
       `iframe_ready_ms=${display(report.coldList.iframeReadyMs)}`,
       `embedded_iframe_width=${display(report.coldList.initialIframeWidth)}`,
+      `pin_control_count=${report.coldList.pinControlCount}`,
+      `pin_control_visible=${report.coldList.pinControlVisible}`,
+      `pin_control_enabled=${report.coldList.pinControlEnabled}`,
+      `pin_action_completed=${report.coldList.pinActionCompleted}`,
+      `app_drawer_count=${report.coldList.appDrawerCount}`,
+      `app_drawer_frame_count=${report.coldList.appDrawerFrameCount}`,
       `maximize_control_count=${report.coldList.maximizeControlCount}`,
       `host_maximize_ms=${display(report.coldList.hostMaximizeMs)}`,
       `maximized_iframe_width=${display(report.coldList.maximizedIframeWidth)}`,

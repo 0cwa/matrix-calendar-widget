@@ -42,14 +42,15 @@ record two List and two Month warm-ups, followed by five measured List and five
 measured Month samples, alternating views in the same session. After two
 explicitly labeled detail warm-ups, measure five event-detail opens.
 
-Start from Element's normal embedded room-panel state at the fixed 1280×800
-viewport, not a pre-maximized widget. Require and record an actual embedded
-iframe width below 800 pixels, activate Element's accessible **Maximise**
-control, and verify the maximized layout and iframe width is at least 800
-pixels before selecting the range. The cold timer includes this host layout
-action. The calendar disables Month below an 800-pixel iframe width; do not
-simulate the host transition by resizing the browser window. Report both
-iframe widths so the measured host state is explicit.
+Start from Element's normal room state at the fixed 1280×800 viewport, with the
+widget in the Extensions list. During the cold sample, use the real **Pin**
+action to place it in the room's Apps drawer, verify that the drawer hosts the
+calendar iframe, then use Element's accessible **Maximise** control and verify
+the maximized layout and iframe width is at least 800 pixels before selecting
+the range. The cold timer includes both host actions and the widget remains in
+Element's real layout containers; do not seed layout state or simulate the
+transition by resizing the browser window. Record the iframe width before and
+after maximizing; the initial width is descriptive and has no threshold.
 
 Use the real date-range picker to set the exact 31 local dates for List. Assert
 the actual request range in memory. Month deliberately requests a wider range:
