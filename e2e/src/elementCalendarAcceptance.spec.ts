@@ -2243,7 +2243,9 @@ test('Element Web preserves unsupported events and supports client interactions'
 
 const G6_SERVICE_USER_ID = '@_matrix_calendar_service:localhost';
 const G6_SERVICE_LOCALPART = '_matrix_calendar_service';
-const G6_RADICALE_ORIGIN = 'http://127.0.0.1:5232';
+// The paired-restore flow stops the original listener on 5232 and publishes
+// the restored Radicale collection on the isolated host port 5233.
+const G6_RADICALE_ORIGIN = 'http://127.0.0.1:5233';
 const G6_RADICALE_COLLECTION = 'element-acceptance';
 const G6_MAX_RESOURCE_BYTES = 16_384;
 
