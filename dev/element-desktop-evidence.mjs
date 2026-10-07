@@ -58,6 +58,20 @@ const ENCRYPTED_STORAGE_BACKENDS = new Set([
   'kwallet5',
   'kwallet6',
 ]);
+const PROBE_OUTCOMES = new Set([
+  'connected',
+  'listener-error',
+  'probe-error',
+  'refused',
+  'signaled',
+  'socket-error',
+  'socket-init-error',
+  'spawn-error',
+  'timeout',
+  'unexpected-exit',
+  'uid-mismatch',
+  'unreachable',
+]);
 const STAGES = new Set([
   'desktop-startup',
   'egress-policy',
@@ -192,12 +206,153 @@ function validateStartup(record, sourceSha) {
 }
 
 function validatePolicy(record) {
+  if (
+    !hasKeys(record, ['phase', 'status', 'negativeTest', 'diagnostic']) ||
+    record.phase !== 'egress-policy' ||
+    !['passed', 'failed', 'not_run'].includes(record.status) ||
+    !['passed', 'failed', 'not_run'].includes(record.negativeTest) ||
+    (record.diagnostic !== null && !validateNegativeProbe(record.diagnostic))
+  ) {
+    return false;
+  }
+  if (record.negativeTest === 'passed' && record.diagnostic?.passed !== true) {
+    return false;
+  }
+  if (record.negativeTest === 'failed' && record.diagnostic?.passed === true) {
+    return false;
+  }
+  if (record.negativeTest === 'not_run' && record.diagnostic !== null) {
+    return false;
+  }
+  if (record.status === 'not_run' && record.negativeTest !== 'not_run') {
+    return false;
+  }
+  return record.status !== 'passed' || record.negativeTest === 'passed';
+}
+
+function validateProbeFamily(value) {
+  if (
+    !hasKeys(value, [
+      'listenerBound',
+      'probeSpawned',
+      'probeUidMatches',
+      'connectAttempted',
+      'connectionOutcome',
+      'listenerAcceptedCount',
+      'dropCount',
+    ]) ||
+    typeof value.listenerBound !== 'boolean' ||
+    typeof value.probeSpawned !== 'boolean' ||
+    ![null, true, false].includes(value.probeUidMatches) ||
+    typeof value.connectAttempted !== 'boolean' ||
+    !PROBE_OUTCOMES.has(value.connectionOutcome) ||
+    (value.listenerAcceptedCount !== null &&
+      (!Number.isSafeInteger(value.listenerAcceptedCount) ||
+        value.listenerAcceptedCount < 0 ||
+        value.listenerAcceptedCount > 2)) ||
+    (value.dropCount !== null && !count(value.dropCount))
+  ) {
+    return false;
+  }
+  if (
+    !value.listenerBound &&
+    (value.listenerAcceptedCount !== null ||
+      value.probeSpawned ||
+      value.probeUidMatches !== null ||
+      value.connectAttempted ||
+      value.connectionOutcome !== 'listener-error')
+  ) {
+    return false;
+  }
+  if (value.listenerBound && value.listenerAcceptedCount === null) return false;
+  if (
+    value.connectionOutcome === 'uid-mismatch' &&
+    (!value.probeSpawned ||
+      value.probeUidMatches !== false ||
+      value.connectAttempted)
+  ) {
+    return false;
+  }
+  if (
+    value.probeUidMatches === false &&
+    value.connectionOutcome !== 'uid-mismatch'
+  ) {
+    return false;
+  }
+  if (
+    value.probeUidMatches === true &&
+    (!value.probeSpawned ||
+      ![
+        'connected',
+        'refused',
+        'socket-error',
+        'socket-init-error',
+        'timeout',
+        'unreachable',
+      ].includes(value.connectionOutcome))
+  ) {
+    return false;
+  }
+  if (
+    ['connected', 'refused', 'socket-error', 'timeout', 'unreachable'].includes(
+      value.connectionOutcome,
+    ) !== value.connectAttempted
+  ) {
+    return false;
+  }
+  if (value.connectionOutcome === 'listener-error' && value.listenerBound) {
+    return false;
+  }
+  if (
+    value.connectAttempted &&
+    (!value.listenerBound ||
+      !value.probeSpawned ||
+      value.probeUidMatches !== true ||
+      ![
+        'connected',
+        'refused',
+        'socket-error',
+        'timeout',
+        'unreachable',
+      ].includes(value.connectionOutcome))
+  ) {
+    return false;
+  }
+  if (
+    !value.probeSpawned &&
+    value.probeUidMatches !== null &&
+    value.connectionOutcome !== 'uid-mismatch'
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function probeFamilyPassed(value) {
   return (
-    hasKeys(record, ['phase', 'status', 'negativeTest']) &&
-    record.phase === 'egress-policy' &&
-    ['passed', 'failed', 'not_run'].includes(record.status) &&
-    ['passed', 'failed', 'not_run'].includes(record.negativeTest) &&
-    (record.status === 'passed' ? record.negativeTest === 'passed' : true)
+    value.listenerBound === true &&
+    value.probeSpawned === true &&
+    value.probeUidMatches === true &&
+    value.connectAttempted === true &&
+    value.connectionOutcome === 'timeout' &&
+    value.listenerAcceptedCount === 0 &&
+    Number.isSafeInteger(value.dropCount) &&
+    value.dropCount > 0
+  );
+}
+
+function validateNegativeProbe(value) {
+  if (
+    !hasKeys(value, ['passed', 'ipv4', 'ipv6']) ||
+    typeof value.passed !== 'boolean' ||
+    !validateProbeFamily(value.ipv4) ||
+    !validateProbeFamily(value.ipv6)
+  ) {
+    return false;
+  }
+  return (
+    value.passed ===
+    (probeFamilyPassed(value.ipv4) && probeFamilyPassed(value.ipv6))
   );
 }
 
@@ -340,7 +495,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -368,6 +523,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
       ipv4: observation?.ipv4Blocked ?? null,
       ipv6: observation?.ipv6Blocked ?? null,
     },
+    egressProbe: policy?.diagnostic ?? null,
     checks,
   };
 }
@@ -385,9 +541,10 @@ export function validDesktopSummary(value) {
       'safeStorage',
       'rendererCount',
       'egressBlocked',
+      'egressProbe',
       'checks',
     ]) &&
-    value.schemaVersion === 1 &&
+    value.schemaVersion === 2 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
@@ -431,6 +588,7 @@ export function validDesktopSummary(value) {
         value.egressBlocked[family] === null ||
         count(value.egressBlocked[family]),
     ) &&
+    (value.egressProbe === null || validateNegativeProbe(value.egressProbe)) &&
     hasKeys(value.checks, [
       ...CHECK_NAMES,
       'egressPolicy',

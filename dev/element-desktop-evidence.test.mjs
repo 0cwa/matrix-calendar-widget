@@ -25,6 +25,26 @@ const checks = Object.fromEntries(
   ].map((name) => [name, 'passed']),
 );
 
+function passingProbeFamily() {
+  return {
+    listenerBound: true,
+    probeSpawned: true,
+    probeUidMatches: true,
+    connectAttempted: true,
+    connectionOutcome: 'timeout',
+    listenerAcceptedCount: 0,
+    dropCount: 1,
+  };
+}
+
+function passingProbe() {
+  return {
+    passed: true,
+    ipv4: passingProbeFamily(),
+    ipv6: passingProbeFamily(),
+  };
+}
+
 function stages(overrides = {}) {
   return [
     {
@@ -54,7 +74,12 @@ function stages(overrides = {}) {
       rendererCount: 1,
       checks: { ...checks },
     },
-    { phase: 'egress-policy', status: 'passed', negativeTest: 'passed' },
+    {
+      phase: 'egress-policy',
+      status: 'passed',
+      negativeTest: 'passed',
+      diagnostic: passingProbe(),
+    },
     {
       phase: 'egress-observation',
       status: 'passed',
@@ -76,8 +101,10 @@ function stages(overrides = {}) {
 test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
+  assert.equal(summary.schemaVersion, 2);
   assert.equal(summary.failureCode, null);
   assert.deepEqual(summary.egressBlocked, { ipv4: 0, ipv6: 0 });
+  assert.deepEqual(summary.egressProbe, passingProbe());
   assert.equal(validDesktopSummary(summary), true);
 });
 
@@ -93,6 +120,17 @@ test('Desktop evidence fails closed on blocked egress and rejects private-shaped
   assert.equal(summary.status, 'failed');
   assert.equal(summary.failureCode, 'blocked-egress');
 
+  const failedProbe = stages();
+  failedProbe[1].status = 'failed';
+  failedProbe[1].negativeTest = 'failed';
+  failedProbe[1].diagnostic.ipv6.dropCount = 0;
+  failedProbe[1].diagnostic.ipv6.connectionOutcome = 'connected';
+  failedProbe[1].diagnostic.ipv6.listenerAcceptedCount = 1;
+  failedProbe[1].diagnostic.passed = false;
+  const failedProbeSummary = sanitizeDesktopStages(failedProbe, sourceSha);
+  assert.equal(failedProbeSummary.status, 'failed');
+  assert.equal(failedProbeSummary.egressProbe.passed, false);
+
   const privateRecord = stages();
   privateRecord[0].rawUrl = 'http://private.invalid/path';
   assert.throws(
@@ -101,6 +139,12 @@ test('Desktop evidence fails closed on blocked egress and rejects private-shaped
   );
   assert.throws(
     () => sanitizeDesktopStages(stages(), 'not-a-source-sha'),
+    /invalid Desktop evidence input/u,
+  );
+  const privateProbe = stages();
+  privateProbe[1].diagnostic.ipv4.rawAddress = '127.0.0.1';
+  assert.throws(
+    () => sanitizeDesktopStages(privateProbe, sourceSha),
     /invalid Desktop evidence input/u,
   );
 });
@@ -112,6 +156,13 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
   const missingSummary = sanitizeDesktopStages(missingPolicy, sourceSha);
   assert.equal(missingSummary.status, 'failed');
   assert.equal(missingSummary.failureCode, 'evidence-incomplete');
+
+  const absentDiagnostic = stages();
+  absentDiagnostic[1].diagnostic = null;
+  assert.throws(
+    () => sanitizeDesktopStages(absentDiagnostic, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
 
   const failedCleanup = stages();
   failedCleanup[3].policy = 'failed';

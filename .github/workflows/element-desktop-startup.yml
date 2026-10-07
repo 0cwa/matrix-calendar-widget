@@ -157,16 +157,18 @@ jobs:
           set +e
           policy_status=failed
           negative_status=not_run
+          negative_diagnostic=null
           sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs install \
             "$ELEMENT_DESKTOP_PROBE_UID" "$GITHUB_RUN_ID" "$ELEMENT_DESKTOP_CDP_PORT" \
             >/dev/null 2>&1
           install_status=$?
           if [[ "$install_status" -eq 0 ]]; then
             policy_status=passed
-            sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs negative-self-test \
+            probe_output="$(sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs negative-self-test \
               "$ELEMENT_DESKTOP_PROBE_UID" "$GITHUB_RUN_ID" "$ELEMENT_DESKTOP_CDP_PORT" \
-              >/dev/null 2>&1
+              2>/dev/null)"
             negative_exit=$?
+            if [[ -n "$probe_output" ]]; then negative_diagnostic="$probe_output"; fi
             if [[ "$negative_exit" -eq 0 ]]; then
               negative_status=passed
               sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs zero-counters "$GITHUB_RUN_ID" \
@@ -178,8 +180,8 @@ jobs:
               policy_status=failed
             fi
           fi
-          printf '{"phase":"egress-policy","status":"%s","negativeTest":"%s"}\n' \
-            "$policy_status" "$negative_status" >> "$ELEMENT_DESKTOP_STAGE_FILE"
+          printf '{"phase":"egress-policy","status":"%s","negativeTest":"%s","diagnostic":%s}\n' \
+            "$policy_status" "$negative_status" "$negative_diagnostic" >> "$ELEMENT_DESKTOP_STAGE_FILE"
           if [[ "$policy_status" != passed || "$negative_status" != passed ]]; then
             echo 'The isolated dual-stack egress policy or its local deny test failed.' >&2
             exit 1
@@ -342,7 +344,7 @@ jobs:
           for (const phase of ['egress-policy','egress-observation']) {
             if (!phases.has(phase)) {
               const fallback = phase === 'egress-policy'
-                ? {phase,status:'not_run',negativeTest:'not_run'}
+                ? {phase,status:'not_run',negativeTest:'not_run',diagnostic:null}
                 : {phase,status:'failed',ipv4Blocked:null,ipv6Blocked:null};
               appendFileSync(stageFile, JSON.stringify(fallback) + '\n');
             }

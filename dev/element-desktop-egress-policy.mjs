@@ -217,10 +217,15 @@ export function readBlockedCounters(runIdValue) {
   if (process.geteuid?.() !== 0) throw new Error('egress policy requires root');
   const counts = {};
   for (const family of families) {
-    const output = command(`${family.tool}-save`, ['-c']);
-    counts[family.name] = parseDropCounter(output, family.chain);
+    counts[family.name] = readBlockedCounter(family);
   }
   return counts;
+}
+
+function readBlockedCounter(family) {
+  if (process.geteuid?.() !== 0) throw new Error('egress policy requires root');
+  const output = command(`${family.tool}-save`, ['-c']);
+  return parseDropCounter(output, family.chain);
 }
 
 export function resetCounters(runIdValue) {
@@ -237,6 +242,78 @@ export function resetCounters(runIdValue) {
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function probeFromSpawn(result) {
+  const output = typeof result?.stdout === 'string' ? result.stdout : '';
+  const lines = output.split(/\r?\n/u).filter(Boolean);
+  const probeSpawned = lines[0] === 'probe-started';
+  const defaults = {
+    probeSpawned,
+    probeUidMatches: null,
+    connectAttempted: false,
+    connectionOutcome: 'unexpected-exit',
+  };
+  if (!probeSpawned) {
+    return {
+      ...defaults,
+      connectionOutcome: result?.error ? 'spawn-error' : 'unexpected-exit',
+    };
+  }
+  if (result?.signal) return { ...defaults, connectionOutcome: 'signaled' };
+  if (result?.error || lines.length !== 2) return defaults;
+  if (lines[1] === 'probe-uid-mismatch') {
+    if (result?.status === 3) {
+      return {
+        ...defaults,
+        probeUidMatches: false,
+        connectionOutcome: 'uid-mismatch',
+      };
+    }
+    return defaults;
+  }
+  const outcome = lines[1].startsWith('probe-result:')
+    ? lines[1].slice('probe-result:'.length)
+    : null;
+  const exitStatus = {
+    connected: 0,
+    timeout: 2,
+    refused: 4,
+    unreachable: 5,
+    'socket-error': 6,
+    'socket-init-error': 7,
+  }[outcome];
+  if (!Number.isSafeInteger(exitStatus) || result?.status !== exitStatus) {
+    return defaults;
+  }
+  return {
+    ...defaults,
+    probeUidMatches: true,
+    connectAttempted: outcome !== 'socket-init-error',
+    connectionOutcome: outcome,
+  };
+}
+
+function familyProbePassed(value) {
+  return (
+    value?.listenerBound === true &&
+    value.probeSpawned === true &&
+    value.probeUidMatches === true &&
+    value.connectAttempted === true &&
+    value.connectionOutcome === 'timeout' &&
+    value.listenerAcceptedCount === 0 &&
+    Number.isSafeInteger(value.dropCount) &&
+    value.dropCount > 0
+  );
+}
+
+export function negativeProbePassed(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    familyProbePassed(value.ipv4) &&
+    familyProbePassed(value.ipv6)
+  );
 }
 
 async function localListener(host, excludedPort) {
@@ -273,17 +350,30 @@ async function localListener(host, excludedPort) {
 
 function connectResult(host, port) {
   return new Promise((resolve) => {
-    const socket = createConnection({ host, port });
+    let socket;
+    try {
+      socket = createConnection({ host, port });
+    } catch {
+      resolve('socket-init-error');
+      return;
+    }
     let settled = false;
-    const finish = (connected) => {
+    const finish = (outcome) => {
       if (settled) return;
       settled = true;
       socket.destroy();
-      resolve(connected);
+      resolve(outcome);
     };
-    socket.setTimeout(600, () => finish(false));
-    socket.once('connect', () => finish(true));
-    socket.once('error', () => finish(false));
+    socket.setTimeout(600, () => finish('timeout'));
+    socket.once('connect', () => finish('connected'));
+    socket.once('error', (error) => {
+      if (error.code === 'ECONNREFUSED') finish('refused');
+      else if (
+        ['EHOSTUNREACH', 'ENETUNREACH', 'EADDRNOTAVAIL'].includes(error.code)
+      ) {
+        finish('unreachable');
+      } else finish('socket-error');
+    });
   });
 }
 
@@ -299,14 +389,18 @@ async function testFamilyAsUid(uid, host, port) {
       process.execPath,
       script,
       '--connect',
+      String(uid),
       host,
       String(port),
     ],
-    { encoding: 'utf8', stdio: ['ignore', 'ignore', 'ignore'], timeout: 2_000 },
+    {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2_000,
+      maxBuffer: 1_024,
+    },
   );
-  return (
-    result.error === undefined && result.signal === null && result.status === 2
-  );
+  return probeFromSpawn(result);
 }
 
 export async function negativeLocalEgressCheck(
@@ -317,33 +411,76 @@ export async function negativeLocalEgressCheck(
   const uid = requireDecimal(uidValue, 1, 65_535);
   const cdpPort = requireDecimal(cdpPortValue, 1_024, 65_535);
   requireRunId(runIdValue);
-  const listeners = [];
-  try {
-    for (const host of ['127.0.0.1', '::1']) {
-      const listener = await localListener(host, cdpPort);
-      listeners.push(listener);
-      const connected = await testFamilyAsUid(uid, host, listener.port);
-      await wait(25);
-      if (connected || listener.getAccepts() !== 0) return false;
+  const diagnostic = {};
+  for (const family of FAMILIES) {
+    const host = family.name === 'ipv4' ? '127.0.0.1' : '::1';
+    const value = {
+      listenerBound: false,
+      probeSpawned: false,
+      probeUidMatches: null,
+      connectAttempted: false,
+      connectionOutcome: 'listener-error',
+      listenerAcceptedCount: null,
+      dropCount: null,
+    };
+    let listener;
+    try {
+      listener = await localListener(host, cdpPort);
+      value.listenerBound = true;
+      value.listenerAcceptedCount = 0;
+    } catch {
+      // Keep the fixed listener-error observation and continue to IPv6/IPv4.
     }
-    const counts = readBlockedCounters(runIdValue);
-    return counts.ipv4 > 0 && counts.ipv6 > 0;
-  } catch {
-    return false;
-  } finally {
-    await Promise.all(
-      listeners.map(
-        ({ server }) => new Promise((resolve) => server.close(resolve)),
-      ),
-    );
+    if (listener) {
+      try {
+        Object.assign(value, await testFamilyAsUid(uid, host, listener.port));
+      } catch {
+        value.connectionOutcome = 'probe-error';
+      }
+      await wait(25);
+      value.listenerAcceptedCount = Math.min(2, listener.getAccepts());
+      await new Promise((resolve) => listener.server.close(resolve));
+    }
+    try {
+      const counterFamily = runIdChains(runIdValue).find(
+        (entry) => entry.name === family.name,
+      );
+      if (!counterFamily) throw new Error('counter family unavailable');
+      value.dropCount = readBlockedCounter(counterFamily);
+    } catch {
+      // Null distinguishes an unavailable counter from a measured zero.
+    }
+    diagnostic[family.name] = value;
   }
+  return { ...diagnostic, passed: negativeProbePassed(diagnostic) };
 }
 
-async function connectOnly(host, port) {
+async function connectOnly(expectedUidValue, host, port) {
+  process.stdout.write('probe-started\n');
+  const expectedUid = requireDecimal(expectedUidValue, 1, 65_535);
   const normalizedHost = host === '127.0.0.1' || host === '::1' ? host : null;
   const normalizedPort = requireDecimal(port, 1, 65_535);
-  if (normalizedHost === null) process.exit(2);
-  process.exit((await connectResult(normalizedHost, normalizedPort)) ? 0 : 2);
+  if (normalizedHost === null) {
+    process.stdout.write('probe-result:socket-init-error\n');
+    process.exitCode = 7;
+    return;
+  }
+  if (process.getuid?.() !== expectedUid) {
+    process.stdout.write('probe-uid-mismatch\n');
+    process.exitCode = 3;
+    return;
+  }
+  const outcome = await connectResult(normalizedHost, normalizedPort);
+  const status = {
+    connected: 0,
+    timeout: 2,
+    refused: 4,
+    unreachable: 5,
+    'socket-error': 6,
+    'socket-init-error': 7,
+  }[outcome];
+  process.stdout.write(`probe-result:${outcome}\n`);
+  process.exitCode = status ?? 6;
 }
 
 function printCounters(runId) {
@@ -358,13 +495,13 @@ async function main(args) {
     return;
   }
   if (operation === 'negative-self-test' && values.length === 3) {
-    const passed = await negativeLocalEgressCheck(
+    const diagnostic = await negativeLocalEgressCheck(
       values[0],
       values[1],
       values[2],
     );
-    if (!passed) throw new Error('negative egress self-test failed');
-    process.stdout.write('desktop-egress-negative-test=passed\n');
+    process.stdout.write(`${JSON.stringify(diagnostic)}\n`);
+    if (!diagnostic.passed) process.exitCode = 2;
     return;
   }
   if (operation === 'zero-counters' && values.length === 1) {
@@ -380,8 +517,8 @@ async function main(args) {
       throw new Error('egress policy cleanup failed');
     return;
   }
-  if (operation === '--connect' && values.length === 2) {
-    await connectOnly(values[0], values[1]);
+  if (operation === '--connect' && values.length === 3) {
+    await connectOnly(values[0], values[1], values[2]);
     return;
   }
   throw new Error('invalid egress policy operation');
