@@ -18,8 +18,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   existsSync,
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
@@ -232,7 +232,10 @@ test('Radicale archive extraction preserves validated owner and mode safely', (t
         eventUid: event.uid,
         eventGid: event.gid,
         eventMode: event.mode & 0o777,
-        content: readFileSync(join(destination, 'collections', 'event.ics'), 'utf8'),
+        content: readFileSync(
+          join(destination, 'collections', 'event.ics'),
+          'utf8',
+        ),
       },
       {
         uid: account.uid,

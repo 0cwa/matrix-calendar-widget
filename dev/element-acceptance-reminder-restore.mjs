@@ -484,11 +484,7 @@ function captureRadicaleFilesystemProbe(volumeName) {
 }
 
 function samePathValue(left, right, property) {
-  return (
-    left.exists &&
-    right.exists &&
-    left[property] === right[property]
-  );
+  return left.exists && right.exists && left[property] === right[property];
 }
 
 export function createRadicaleFilesystemEvidence(source, restored) {
@@ -512,19 +508,26 @@ export function createRadicaleFilesystemEvidence(source, restored) {
     restoreRadicaleDataModeMatchesSource:
       comparable && samePathValue(source.data, restored.data, 'mode'),
     restoreRadicaleCollectionsUidMatchesSource:
-      comparable && samePathValue(source.collections, restored.collections, 'uid'),
+      comparable &&
+      samePathValue(source.collections, restored.collections, 'uid'),
     restoreRadicaleCollectionsGidMatchesSource:
-      comparable && samePathValue(source.collections, restored.collections, 'gid'),
+      comparable &&
+      samePathValue(source.collections, restored.collections, 'gid'),
     restoreRadicaleCollectionsModeMatchesSource:
-      comparable && samePathValue(source.collections, restored.collections, 'mode'),
+      comparable &&
+      samePathValue(source.collections, restored.collections, 'mode'),
     restoreRadicaleDataRootReadable:
       restoredAvailable && restored.data.exists && restored.data.readable,
     restoreRadicaleDataRootSearchable:
       restoredAvailable && restored.data.exists && restored.data.searchable,
     restoreRadicaleCollectionsRootReadable:
-      restoredAvailable && restored.collections.exists && restored.collections.readable,
+      restoredAvailable &&
+      restored.collections.exists &&
+      restored.collections.readable,
     restoreRadicaleCollectionsRootSearchable:
-      restoredAvailable && restored.collections.exists && restored.collections.searchable,
+      restoredAvailable &&
+      restored.collections.exists &&
+      restored.collections.searchable,
     restoreRadicaleCollectionTreeComplete:
       restoredAvailable && restored.tree.complete,
     restoreRadicaleCollectionEntryCount: restoredAvailable
@@ -1342,9 +1345,8 @@ function restoreRadicaleArchive(diagnostics) {
       freshDatabase: true,
     });
   }
-  restoredRadicaleFilesystemProbe = captureRadicaleFilesystemProbe(
-    restoreVolumeName,
-  );
+  restoredRadicaleFilesystemProbe =
+    captureRadicaleFilesystemProbe(restoreVolumeName);
 }
 
 function restorePostgresDump(diagnostics) {

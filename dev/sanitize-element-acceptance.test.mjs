@@ -1791,11 +1791,20 @@ test('classifies only fixed Radicale startup signatures and sanitizes the eviden
       tree: { complete: false, entries: 4, accessFailures: 1 },
     }),
   );
-  assert.equal(metadataMismatch.restoreRadicalePythonVersionMatchesSource, false);
-  assert.equal(metadataMismatch.restoreRadicaleCollectionsUidMatchesSource, false);
+  assert.equal(
+    metadataMismatch.restoreRadicalePythonVersionMatchesSource,
+    false,
+  );
+  assert.equal(
+    metadataMismatch.restoreRadicaleCollectionsUidMatchesSource,
+    false,
+  );
   assert.equal(metadataMismatch.restoreRadicaleCollectionsRootReadable, false);
   assert.equal(metadataMismatch.restoreRadicaleCollectionTreeComplete, false);
-  assert.equal(metadataMismatch.restoreRadicaleCollectionReadSearchFailureCount, 1);
+  assert.equal(
+    metadataMismatch.restoreRadicaleCollectionReadSearchFailureCount,
+    1,
+  );
 
   const unavailableTargetEvidence = createRadicaleFilesystemEvidence(
     sourceProbe,
@@ -1805,28 +1814,35 @@ test('classifies only fixed Radicale startup signatures and sanitizes the eviden
     unavailableTargetEvidence.restoreRadicaleFilesystemProbeAvailable,
     false,
   );
-  assert.equal(unavailableTargetEvidence.restoreRadicaleCollectionEntryCount, 0);
-  assert.throws(() =>
-    sanitizeElementAcceptance(
-      JSON.stringify({
-        phase: 'restore-radicale-ready',
-        status: 'failed',
-        restoreRadicaleProbeOutcome: 'no-response',
-        containerState: 'exited',
-        containerHealth: 'none',
-        ...evidence,
-        ...unavailableTargetEvidence,
-        restoreRadicaleCollectionEntryCount: 1,
-      }),
-      sourceSha,
-    ),
+  assert.equal(
+    unavailableTargetEvidence.restoreRadicaleCollectionEntryCount,
+    0,
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'restore-radicale-ready',
+          status: 'failed',
+          restoreRadicaleProbeOutcome: 'no-response',
+          containerState: 'exited',
+          containerHealth: 'none',
+          ...evidence,
+          ...unavailableTargetEvidence,
+          restoreRadicaleCollectionEntryCount: 1,
+        }),
+        sourceSha,
+      ),
     { message: 'invalid element acceptance summary' },
   );
 
   const filesystemHint = classifyRadicaleStartupLogs(
     "An exception occurred during server startup: PermissionError: [Errno 13] Permission denied: '/data/collections/private-name'",
   );
-  assert.equal(filesystemHint.restoreRadicaleStartupExceptionClass, 'permission-error');
+  assert.equal(
+    filesystemHint.restoreRadicaleStartupExceptionClass,
+    'permission-error',
+  );
   assert.equal(filesystemHint.restoreRadicaleStartupErrno, 'eacces');
   assert.equal(filesystemHint.restoreRadicaleStartupPathBucket, 'collections');
   assert.equal(JSON.stringify(filesystemHint).includes('private-name'), false);
@@ -1842,7 +1858,10 @@ test('classifies only fixed Radicale startup signatures and sanitizes the eviden
     sourceSha,
   );
   assert.match(filesystemHintSummary, /radicale_startup_errno=eacces/u);
-  assert.match(filesystemHintSummary, /radicale_startup_path_bucket=collections/u);
+  assert.match(
+    filesystemHintSummary,
+    /radicale_startup_path_bucket=collections/u,
+  );
   assert.equal(filesystemHintSummary.includes('private-name'), false);
 
   assert.deepEqual(classifyRadicaleStartupLogs('unrecognized startup output'), {
