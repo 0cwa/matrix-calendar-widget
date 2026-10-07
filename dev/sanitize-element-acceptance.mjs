@@ -264,6 +264,12 @@ const POST_CREATE_VISIBILITY_FIELDS = [
   'createResponseHasEvent',
   'createResponseTitleMatches',
   'createResponseCalendarMatches',
+  'createResponseTimingComparable',
+  'createResponseEventIntersectsRoomRange',
+  'caldavReportProbeCompleted',
+  'caldavOpenIdHttpStatus',
+  'caldavReportHttpStatus',
+  'caldavReportContainsCreatedEvent',
   'roomListResponseHasEventsArray',
   'roomListResponseTitleMatches',
   'roomListResponseIdMatches',
@@ -513,6 +519,19 @@ function validPostCreateVisibilityObservation(record) {
     typeof record.createResponseHasEvent === 'boolean' &&
     typeof record.createResponseTitleMatches === 'boolean' &&
     typeof record.createResponseCalendarMatches === 'boolean' &&
+    typeof record.createResponseTimingComparable === 'boolean' &&
+    typeof record.createResponseEventIntersectsRoomRange === 'boolean' &&
+    typeof record.caldavReportProbeCompleted === 'boolean' &&
+    (record.caldavOpenIdHttpStatus === null ||
+      (Number.isInteger(record.caldavOpenIdHttpStatus) &&
+        record.caldavOpenIdHttpStatus >= 100 &&
+        record.caldavOpenIdHttpStatus <= 599)) &&
+    (record.caldavReportHttpStatus === null ||
+      (Number.isInteger(record.caldavReportHttpStatus) &&
+        record.caldavReportHttpStatus >= 100 &&
+        record.caldavReportHttpStatus <= 599)) &&
+    (record.caldavReportContainsCreatedEvent === null ||
+      typeof record.caldavReportContainsCreatedEvent === 'boolean') &&
     typeof record.roomListResponseHasEventsArray === 'boolean' &&
     typeof record.roomListResponseTitleMatches === 'boolean' &&
     typeof record.roomListResponseIdMatches === 'boolean' &&
@@ -527,6 +546,20 @@ function validPostCreateVisibilityObservation(record) {
       record.expectedRoomRangeRequestSeen) &&
     (!record.createResponseTitleMatches || record.createResponseHasEvent) &&
     (!record.createResponseCalendarMatches || record.createResponseHasEvent) &&
+    (!record.createResponseTimingComparable ||
+      (record.createResponseHasEvent && record.expectedRoomRangeRequestSeen)) &&
+    (!record.createResponseEventIntersectsRoomRange ||
+      record.createResponseTimingComparable) &&
+    (record.caldavReportHttpStatus === null ||
+      record.caldavOpenIdHttpStatus === 200) &&
+    (!record.caldavReportProbeCompleted ||
+      (record.caldavOpenIdHttpStatus === 200 &&
+        record.caldavReportHttpStatus >= 200 &&
+        record.caldavReportHttpStatus < 300)) &&
+    record.caldavReportProbeCompleted ===
+      (record.caldavReportContainsCreatedEvent !== null) &&
+    (!record.caldavReportContainsCreatedEvent ||
+      record.caldavReportProbeCompleted) &&
     (!record.roomListResponseHasEventsArray ||
       record.roomTargetRangeResponseCount > 0) &&
     (!record.roomListResponseTitleMatches ||
@@ -992,6 +1025,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `create_response_has_event=${record.createResponseHasEvent}`,
           `create_response_title_matches=${record.createResponseTitleMatches}`,
           `create_response_calendar_matches=${record.createResponseCalendarMatches}`,
+          `create_response_timing_comparable=${record.createResponseTimingComparable}`,
+          `create_response_event_intersects_room_range=${record.createResponseEventIntersectsRoomRange}`,
+          `caldav_report_probe_completed=${record.caldavReportProbeCompleted}`,
+          `caldav_openid_http_status=${record.caldavOpenIdHttpStatus ?? 'none'}`,
+          `caldav_report_http_status=${record.caldavReportHttpStatus ?? 'none'}`,
+          `caldav_report_contains_created_event=${record.caldavReportContainsCreatedEvent ?? 'inconclusive'}`,
           `room_list_response_has_events=${record.roomListResponseHasEventsArray}`,
           `room_list_response_title_matches=${record.roomListResponseTitleMatches}`,
           `room_list_response_id_matches=${record.roomListResponseIdMatches}`,

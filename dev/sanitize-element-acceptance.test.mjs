@@ -16,6 +16,12 @@ function postCreateVisibilityObservation(overrides = {}) {
     createResponseHasEvent: true,
     createResponseTitleMatches: true,
     createResponseCalendarMatches: true,
+    createResponseTimingComparable: true,
+    createResponseEventIntersectsRoomRange: true,
+    caldavReportProbeCompleted: true,
+    caldavOpenIdHttpStatus: 200,
+    caldavReportHttpStatus: 207,
+    caldavReportContainsCreatedEvent: true,
     roomListResponseHasEventsArray: true,
     roomListResponseTitleMatches: true,
     roomListResponseIdMatches: true,
@@ -188,7 +194,7 @@ test('emits only bounded post-create refresh and event-match evidence', () => {
     summary,
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=event-create-post-refresh-observed status=passed post_create_event_get_requests=2 room_target_range_requests=1 expected_room_range_request_seen=true room_target_range_responses=1 room_target_range_last_status=200 create_response_has_event=true create_response_title_matches=true create_response_calendar_matches=true room_list_response_has_events=true room_list_response_title_matches=true room_list_response_id_matches=true room_list_response_calendar_matches=true list_view_heading_present=true matching_list_item_count=1',
+      'phase=event-create-post-refresh-observed status=passed post_create_event_get_requests=2 room_target_range_requests=1 expected_room_range_request_seen=true room_target_range_responses=1 room_target_range_last_status=200 create_response_has_event=true create_response_title_matches=true create_response_calendar_matches=true create_response_timing_comparable=true create_response_event_intersects_room_range=true caldav_report_probe_completed=true caldav_openid_http_status=200 caldav_report_http_status=207 caldav_report_contains_created_event=true room_list_response_has_events=true room_list_response_title_matches=true room_list_response_id_matches=true room_list_response_calendar_matches=true list_view_heading_present=true matching_list_item_count=1',
       '',
     ].join('\n'),
   );
@@ -204,12 +210,56 @@ test('emits only bounded post-create refresh and event-match evidence', () => {
       roomTargetRangeResponseCount: 0,
       roomTargetRangeLastStatus: 200,
     }),
+    postCreateVisibilityObservation({
+      createResponseHasEvent: false,
+      createResponseTimingComparable: true,
+    }),
+    postCreateVisibilityObservation({
+      createResponseTimingComparable: false,
+      createResponseEventIntersectsRoomRange: true,
+    }),
+    postCreateVisibilityObservation({
+      caldavReportProbeCompleted: false,
+      caldavReportContainsCreatedEvent: true,
+    }),
+    postCreateVisibilityObservation({
+      caldavReportProbeCompleted: false,
+      caldavReportContainsCreatedEvent: false,
+    }),
+    postCreateVisibilityObservation({
+      caldavOpenIdHttpStatus: 403,
+      caldavReportHttpStatus: 207,
+    }),
+    postCreateVisibilityObservation({
+      caldavReportProbeCompleted: true,
+      caldavOpenIdHttpStatus: 200,
+      caldavReportHttpStatus: null,
+    }),
   ]) {
     assert.throws(
       () => sanitizeElementAcceptance(JSON.stringify(invalid), sourceSha),
       /invalid element acceptance summary/u,
     );
   }
+});
+
+test('labels an incomplete CalDAV comparison as inconclusive', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(
+      postCreateVisibilityObservation({
+        caldavReportProbeCompleted: false,
+        caldavOpenIdHttpStatus: 503,
+        caldavReportHttpStatus: null,
+        caldavReportContainsCreatedEvent: null,
+      }),
+    ),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /caldav_report_probe_completed=false caldav_openid_http_status=503 caldav_report_http_status=none caldav_report_contains_created_event=inconclusive/u,
+  );
 });
 
 test('emits bounded setup substeps and numeric failure details', () => {

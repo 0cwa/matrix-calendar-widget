@@ -24,9 +24,11 @@ import {
   type Page,
   type Response,
 } from '@playwright/test';
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { arch, platform, release } from 'node:os';
+import { resolve } from 'node:path';
 import { ElementWebPage } from './pages/elementWebPage';
 
 type User = {
@@ -260,6 +262,12 @@ type PostCreateVisibilityObservation = {
   createResponseHasEvent: boolean;
   createResponseTitleMatches: boolean;
   createResponseCalendarMatches: boolean;
+  createResponseTimingComparable: boolean;
+  createResponseEventIntersectsRoomRange: boolean;
+  caldavReportProbeCompleted: boolean;
+  caldavOpenIdHttpStatus: number | null;
+  caldavReportHttpStatus: number | null;
+  caldavReportContainsCreatedEvent: boolean | null;
   roomListResponseHasEventsArray: boolean;
   roomListResponseTitleMatches: boolean;
   roomListResponseIdMatches: boolean;
@@ -1283,6 +1291,12 @@ function observePostCreateVisibility(
     createResponseHasEvent: false,
     createResponseTitleMatches: false,
     createResponseCalendarMatches: false,
+    createResponseTimingComparable: false,
+    createResponseEventIntersectsRoomRange: false,
+    caldavReportProbeCompleted: false,
+    caldavOpenIdHttpStatus: null,
+    caldavReportHttpStatus: null,
+    caldavReportContainsCreatedEvent: null,
     roomListResponseHasEventsArray: false,
     roomListResponseTitleMatches: false,
     roomListResponseIdMatches: false,
@@ -1292,6 +1306,9 @@ function observePostCreateVisibility(
   };
   const pendingResponseReads: Promise<void>[] = [];
   let createdEventId: string | undefined;
+  let createdEventUid: string | undefined;
+  let createdEventTiming: CreatedEventTiming | undefined;
+  let expectedRoomRange: ExpectedRoomRange | undefined;
   let matchingEventListRow: { id?: string; calendarId?: string } | undefined;
 
   const roomRangeMatches = (rawUrl: string) => {
@@ -1307,14 +1324,28 @@ function observePostCreateVisibility(
       }
 
       const roomTarget = true;
-      const start = Date.parse(url.searchParams.get('start') ?? '');
-      const end = Date.parse(url.searchParams.get('end') ?? '');
+      const start = url.searchParams.get('start') ?? '';
+      const end = url.searchParams.get('end') ?? '';
+      const startMillis = Date.parse(start);
+      const endMillis = Date.parse(end);
       const expectedRange =
         url.searchParams.get('calendarId') === expectedCalendarId &&
-        Number.isFinite(start) &&
-        Number.isFinite(end) &&
-        end > start;
-      return { roomTarget, expectedRange };
+        Number.isFinite(startMillis) &&
+        Number.isFinite(endMillis) &&
+        endMillis > startMillis;
+      return {
+        roomTarget,
+        expectedRange,
+        ...(expectedRange
+          ? {
+              range: {
+                start,
+                end,
+                timezone: url.searchParams.get('timezone') ?? '',
+              },
+            }
+          : {}),
+      };
     } catch {
       return { roomTarget: false, expectedRange: false };
     }
@@ -1341,6 +1372,7 @@ function observePostCreateVisibility(
     }
     if (roomRange.expectedRange) {
       observation.expectedRoomRangeRequestSeen = true;
+      expectedRoomRange ??= roomRange.range;
     }
   };
 
@@ -1359,6 +1391,7 @@ function observePostCreateVisibility(
       2,
     );
     observation.roomTargetRangeLastStatus = response.status();
+    expectedRoomRange ??= roomRange.range;
 
     pendingResponseReads.push(
       (async () => {
@@ -1418,6 +1451,11 @@ function observePostCreateVisibility(
       }
 
       createdEventId = event.id;
+      createdEventUid =
+        typeof event.uid === 'string' && event.uid.length > 0
+          ? event.uid
+          : undefined;
+      createdEventTiming = readCreatedEventTiming(event.timing);
       observation.createResponseHasEvent = true;
       observation.createResponseTitleMatches = event.title === expectedTitle;
       observation.createResponseCalendarMatches =
@@ -1431,6 +1469,30 @@ function observePostCreateVisibility(
     },
     async collect(frame: FrameLocator, eventRow: Locator) {
       await Promise.allSettled(pendingResponseReads);
+      if (createdEventTiming && expectedRoomRange) {
+        const timingMatch = await compareEventTimingWithRoomRange(
+          page,
+          createdEventTiming,
+          expectedRoomRange,
+        );
+        observation.createResponseTimingComparable = timingMatch.comparable;
+        observation.createResponseEventIntersectsRoomRange =
+          timingMatch.intersects;
+      }
+      if (createdEventUid && expectedRoomRange) {
+        const caldavProbe = runCalDavReportProbe({
+          calendarId: expectedCalendarId,
+          eventUid: createdEventUid,
+          range: expectedRoomRange,
+        });
+        if (caldavProbe) {
+          observation.caldavReportProbeCompleted = caldavProbe.completed;
+          observation.caldavOpenIdHttpStatus = caldavProbe.openIdStatus;
+          observation.caldavReportHttpStatus = caldavProbe.reportStatus;
+          observation.caldavReportContainsCreatedEvent =
+            caldavProbe.containsCreatedEvent;
+        }
+      }
       const [headingCount, itemCount] = await Promise.all([
         frame
           .getByRole('heading', { name: 'Calendar events', exact: true })
@@ -1445,6 +1507,197 @@ function observePostCreateVisibility(
       return observation;
     },
   };
+}
+
+type ExpectedRoomRange = {
+  start: string;
+  end: string;
+  timezone: string;
+};
+
+type ZonedEventTiming = {
+  type: 'timed';
+  start: { type: 'zoned'; local: string; timezone: string };
+  end: { type: 'zoned'; local: string; timezone: string };
+};
+
+type CreatedEventTiming = ZonedEventTiming;
+
+type CalDavReportProbeResult = {
+  completed: boolean;
+  openIdStatus: number | null;
+  reportStatus: number | null;
+  containsCreatedEvent: boolean | null;
+};
+
+function runCalDavReportProbe({
+  calendarId,
+  eventUid,
+  range,
+}: {
+  calendarId: string;
+  eventUid: string;
+  range: ExpectedRoomRange;
+}): CalDavReportProbeResult | undefined {
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve(
+        process.cwd(),
+        '../dev/element-acceptance-caldav-report-probe.mjs',
+      ),
+    ],
+    {
+      input: JSON.stringify({ calendarId, eventUid, range }),
+      encoding: 'utf8',
+      env: {
+        MATRIX_APPLICATION_SERVICE_TOKEN:
+          process.env.MATRIX_APPLICATION_SERVICE_TOKEN ?? '',
+      },
+      stdio: ['pipe', 'pipe', 'ignore'],
+      timeout: 20_000,
+      maxBuffer: 4096,
+    },
+  );
+  if (result.error || result.status !== 0 || !result.stdout) return undefined;
+
+  let value: unknown;
+  try {
+    value = JSON.parse(result.stdout);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(value)) return undefined;
+  const expectedKeys = [
+    'completed',
+    'openIdStatus',
+    'reportStatus',
+    'containsCreatedEvent',
+  ];
+  if (
+    Object.keys(value).length !== expectedKeys.length ||
+    expectedKeys.some((key) => !Object.hasOwn(value, key)) ||
+    typeof value.completed !== 'boolean' ||
+    (value.containsCreatedEvent !== null &&
+      typeof value.containsCreatedEvent !== 'boolean') ||
+    value.completed !== (value.containsCreatedEvent !== null) ||
+    !isOptionalHttpStatus(value.openIdStatus) ||
+    !isOptionalHttpStatus(value.reportStatus) ||
+    (value.containsCreatedEvent && !value.completed)
+  ) {
+    return undefined;
+  }
+  return {
+    completed: value.completed,
+    openIdStatus: value.openIdStatus,
+    reportStatus: value.reportStatus,
+    containsCreatedEvent: value.containsCreatedEvent,
+  };
+}
+
+function isOptionalHttpStatus(value: unknown): value is number | null {
+  return (
+    value === null ||
+    (Number.isInteger(value) && Number(value) >= 100 && Number(value) <= 599)
+  );
+}
+
+function readCreatedEventTiming(
+  value: unknown,
+): CreatedEventTiming | undefined {
+  if (!isRecord(value) || value.type !== 'timed') return undefined;
+  const readEndpoint = (endpoint: unknown) => {
+    if (
+      !isRecord(endpoint) ||
+      endpoint.type !== 'zoned' ||
+      typeof endpoint.local !== 'string' ||
+      typeof endpoint.timezone !== 'string' ||
+      endpoint.timezone.length === 0
+    ) {
+      return undefined;
+    }
+    return {
+      type: 'zoned' as const,
+      local: endpoint.local,
+      timezone: endpoint.timezone,
+    };
+  };
+  const start = readEndpoint(value.start);
+  const end = readEndpoint(value.end);
+  return start && end ? { type: 'timed', start, end } : undefined;
+}
+
+async function compareEventTimingWithRoomRange(
+  page: Page,
+  timing: CreatedEventTiming,
+  range: ExpectedRoomRange,
+): Promise<{ comparable: boolean; intersects: boolean }> {
+  return page.evaluate(
+    ({ timing, range }) => {
+      const rangeStart = Date.parse(range.start);
+      const rangeEnd = Date.parse(range.end);
+      const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (
+        !Number.isFinite(rangeStart) ||
+        !Number.isFinite(rangeEnd) ||
+        rangeEnd <= rangeStart ||
+        timing.start.timezone !== browserTimezone ||
+        timing.end.timezone !== browserTimezone
+      ) {
+        return { comparable: false, intersects: false };
+      }
+
+      const toInstant = (local: string, timezone: string) => {
+        const match =
+          /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/u.exec(
+            local,
+          );
+        if (!match || timezone !== browserTimezone) return undefined;
+        const [, year, month, day, hour, minute, second, fraction] = match;
+        const instant = Date.parse(local);
+        if (!Number.isFinite(instant)) return undefined;
+        const parts = Object.fromEntries(
+          new Intl.DateTimeFormat('en-CA-u-ca-iso8601', {
+            timeZone: timezone,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hourCycle: 'h23',
+          })
+            .formatToParts(new Date(instant))
+            .filter((part) => part.type !== 'literal')
+            .map((part) => [part.type, Number(part.value)]),
+        );
+        const milliseconds = Number((fraction ?? '').padEnd(3, '0') || '0');
+        if (
+          parts.year !== Number(year) ||
+          parts.month !== Number(month) ||
+          parts.day !== Number(day) ||
+          parts.hour !== Number(hour) ||
+          parts.minute !== Number(minute) ||
+          parts.second !== Number(second ?? '0') ||
+          new Date(instant).getUTCMilliseconds() !== milliseconds
+        ) {
+          return undefined;
+        }
+        return instant;
+      };
+
+      const start = toInstant(timing.start.local, timing.start.timezone);
+      const end = toInstant(timing.end.local, timing.end.timezone);
+      if (start === undefined || end === undefined || end <= start) {
+        return { comparable: false, intersects: false };
+      }
+      return {
+        comparable: true,
+        intersects: start < rangeEnd && end > rangeStart,
+      };
+    },
+    { timing, range },
+  );
 }
 
 function isCalendarEventsEndpoint(rawUrl: string): boolean {
