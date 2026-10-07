@@ -60,6 +60,7 @@ const PHASES = new Set([
   'event-create-title-entered',
   'event-create-submit',
   'event-create-response',
+  'event-create-post-refresh-observed',
   'event-create-visible',
   'event-created',
   'shared-visibility',
@@ -254,6 +255,28 @@ const OPTIONAL_RUNTIME_STATUS_FIELDS = [
   'widgetStylesheetLastStatus',
   'openIdLastResponseStatus',
 ];
+const POST_CREATE_VISIBILITY_FIELDS = [
+  'postCreateEventGetRequestCount',
+  'roomTargetRangeRequestCount',
+  'expectedRoomRangeRequestSeen',
+  'roomTargetRangeResponseCount',
+  'roomTargetRangeLastStatus',
+  'createResponseHasEvent',
+  'createResponseTitleMatches',
+  'createResponseCalendarMatches',
+  'roomListResponseHasEventsArray',
+  'roomListResponseTitleMatches',
+  'roomListResponseIdMatches',
+  'roomListResponseCalendarMatches',
+  'listViewHeadingPresent',
+  'matchingListItemCount',
+];
+const POST_CREATE_VISIBILITY_COUNTER_FIELDS = [
+  'postCreateEventGetRequestCount',
+  'roomTargetRangeRequestCount',
+  'roomTargetRangeResponseCount',
+  'matchingListItemCount',
+];
 const RUNTIME_COUNTER_FIELDS = [
   'gatewayContextRequestCount',
   'gatewayCalendarsRequestCount',
@@ -309,6 +332,7 @@ const ALLOWED_KEYS = new Set([
   'containerRuntimeErrorPresent',
   ...RUNTIME_OBSERVATION_FIELDS,
   ...OPTIONAL_RUNTIME_STATUS_FIELDS,
+  ...POST_CREATE_VISIBILITY_FIELDS,
   ...VERSION_FIELDS,
 ]);
 
@@ -467,6 +491,54 @@ function validRuntimeObservation(record) {
   return true;
 }
 
+function validPostCreateVisibilityObservation(record) {
+  const expectedKeys = new Set([
+    'phase',
+    'status',
+    ...POST_CREATE_VISIBILITY_FIELDS,
+  ]);
+  return (
+    Object.keys(record).length === expectedKeys.size &&
+    Object.keys(record).every((key) => expectedKeys.has(key)) &&
+    record.status === 'passed' &&
+    POST_CREATE_VISIBILITY_COUNTER_FIELDS.every(
+      (key) =>
+        Number.isInteger(record[key]) && record[key] >= 0 && record[key] <= 2,
+    ) &&
+    typeof record.expectedRoomRangeRequestSeen === 'boolean' &&
+    (record.roomTargetRangeLastStatus === null ||
+      (Number.isInteger(record.roomTargetRangeLastStatus) &&
+        record.roomTargetRangeLastStatus >= 100 &&
+        record.roomTargetRangeLastStatus <= 599)) &&
+    typeof record.createResponseHasEvent === 'boolean' &&
+    typeof record.createResponseTitleMatches === 'boolean' &&
+    typeof record.createResponseCalendarMatches === 'boolean' &&
+    typeof record.roomListResponseHasEventsArray === 'boolean' &&
+    typeof record.roomListResponseTitleMatches === 'boolean' &&
+    typeof record.roomListResponseIdMatches === 'boolean' &&
+    typeof record.roomListResponseCalendarMatches === 'boolean' &&
+    typeof record.listViewHeadingPresent === 'boolean' &&
+    (record.roomTargetRangeResponseCount === 0
+      ? record.roomTargetRangeLastStatus === null
+      : record.roomTargetRangeLastStatus !== null) &&
+    (!record.expectedRoomRangeRequestSeen ||
+      record.roomTargetRangeRequestCount > 0) &&
+    (record.roomTargetRangeResponseCount === 0 ||
+      record.expectedRoomRangeRequestSeen) &&
+    (!record.createResponseTitleMatches || record.createResponseHasEvent) &&
+    (!record.createResponseCalendarMatches || record.createResponseHasEvent) &&
+    (!record.roomListResponseHasEventsArray ||
+      record.roomTargetRangeResponseCount > 0) &&
+    (!record.roomListResponseTitleMatches ||
+      record.roomListResponseHasEventsArray) &&
+    (!record.roomListResponseIdMatches ||
+      (record.roomListResponseTitleMatches && record.createResponseHasEvent)) &&
+    (!record.roomListResponseCalendarMatches ||
+      record.roomListResponseTitleMatches) &&
+    (record.matchingListItemCount === 0 || record.listViewHeadingPresent)
+  );
+}
+
 function validRuntimeVersions(record) {
   const expectedKeys = new Set(['phase', 'status', ...VERSION_FIELDS]);
   if (
@@ -523,6 +595,8 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     const hasRuntimeObservation = RUNTIME_OBSERVATION_FIELDS.some((key) =>
       Object.hasOwn(record, key),
     );
+    const hasPostCreateVisibilityObservation =
+      POST_CREATE_VISIBILITY_FIELDS.some((key) => Object.hasOwn(record, key));
     if (
       (record.phase === 'widget-a-runtime-observed' &&
         !validRuntimeObservation(record)) ||
@@ -530,7 +604,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         (hasRuntimeObservation ||
           OPTIONAL_RUNTIME_STATUS_FIELDS.some((key) =>
             Object.hasOwn(record, key),
-          )))
+          ))) ||
+      (record.phase === 'event-create-post-refresh-observed' &&
+        !validPostCreateVisibilityObservation(record)) ||
+      (record.phase !== 'event-create-post-refresh-observed' &&
+        hasPostCreateVisibilityObservation)
     ) {
       throw new Error('invalid element acceptance summary');
     }
@@ -896,6 +974,30 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `kernel_release=${record.runnerOSVersion}`,
           `runner_arch=${record.runnerArchitecture}`,
           `node_observed=${record.nodeVersion}`,
+        ].join(' '),
+      );
+      continue;
+    }
+
+    if (phase === 'event-create-post-refresh-observed') {
+      lines.push(
+        [
+          `phase=${phase}`,
+          `status=${record.status}`,
+          `post_create_event_get_requests=${record.postCreateEventGetRequestCount}`,
+          `room_target_range_requests=${record.roomTargetRangeRequestCount}`,
+          `expected_room_range_request_seen=${record.expectedRoomRangeRequestSeen}`,
+          `room_target_range_responses=${record.roomTargetRangeResponseCount}`,
+          `room_target_range_last_status=${record.roomTargetRangeLastStatus ?? 'none'}`,
+          `create_response_has_event=${record.createResponseHasEvent}`,
+          `create_response_title_matches=${record.createResponseTitleMatches}`,
+          `create_response_calendar_matches=${record.createResponseCalendarMatches}`,
+          `room_list_response_has_events=${record.roomListResponseHasEventsArray}`,
+          `room_list_response_title_matches=${record.roomListResponseTitleMatches}`,
+          `room_list_response_id_matches=${record.roomListResponseIdMatches}`,
+          `room_list_response_calendar_matches=${record.roomListResponseCalendarMatches}`,
+          `list_view_heading_present=${record.listViewHeadingPresent}`,
+          `matching_list_item_count=${record.matchingListItemCount}`,
         ].join(' '),
       );
       continue;

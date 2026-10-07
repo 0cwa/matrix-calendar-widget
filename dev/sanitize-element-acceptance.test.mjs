@@ -4,6 +4,28 @@ import { sanitizeElementAcceptance } from './sanitize-element-acceptance.mjs';
 
 const sourceSha = 'a'.repeat(40);
 
+function postCreateVisibilityObservation(overrides = {}) {
+  return {
+    phase: 'event-create-post-refresh-observed',
+    status: 'passed',
+    postCreateEventGetRequestCount: 2,
+    roomTargetRangeRequestCount: 1,
+    expectedRoomRangeRequestSeen: true,
+    roomTargetRangeResponseCount: 1,
+    roomTargetRangeLastStatus: 200,
+    createResponseHasEvent: true,
+    createResponseTitleMatches: true,
+    createResponseCalendarMatches: true,
+    roomListResponseHasEventsArray: true,
+    roomListResponseTitleMatches: true,
+    roomListResponseIdMatches: true,
+    roomListResponseCalendarMatches: true,
+    listViewHeadingPresent: true,
+    matchingListItemCount: 1,
+    ...overrides,
+  };
+}
+
 function validRuntimeObservation(overrides = {}) {
   return {
     phase: 'widget-a-runtime-observed',
@@ -154,6 +176,40 @@ test('emits bounded event creation steps and keeps response status numeric', () 
       ),
     /invalid element acceptance summary/u,
   );
+});
+
+test('emits only bounded post-create refresh and event-match evidence', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(postCreateVisibilityObservation()),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=event-create-post-refresh-observed status=passed post_create_event_get_requests=2 room_target_range_requests=1 expected_room_range_request_seen=true room_target_range_responses=1 room_target_range_last_status=200 create_response_has_event=true create_response_title_matches=true create_response_calendar_matches=true room_list_response_has_events=true room_list_response_title_matches=true room_list_response_id_matches=true room_list_response_calendar_matches=true list_view_heading_present=true matching_list_item_count=1',
+      '',
+    ].join('\n'),
+  );
+
+  for (const invalid of [
+    postCreateVisibilityObservation({ eventId: 'private-id' }),
+    postCreateVisibilityObservation({ matchingListItemCount: 3 }),
+    postCreateVisibilityObservation({
+      expectedRoomRangeRequestSeen: false,
+      roomTargetRangeRequestCount: 0,
+    }),
+    postCreateVisibilityObservation({
+      roomTargetRangeResponseCount: 0,
+      roomTargetRangeLastStatus: 200,
+    }),
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(invalid), sourceSha),
+      /invalid element acceptance summary/u,
+    );
+  }
 });
 
 test('emits bounded setup substeps and numeric failure details', () => {

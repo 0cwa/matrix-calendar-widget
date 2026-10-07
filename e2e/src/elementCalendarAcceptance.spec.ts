@@ -19,6 +19,7 @@ import {
   expect,
   test,
   type BrowserContext,
+  type FrameLocator,
   type Locator,
   type Page,
   type Response,
@@ -83,6 +84,7 @@ type Phase =
   | 'event-create-title-entered'
   | 'event-create-submit'
   | 'event-create-response'
+  | 'event-create-post-refresh-observed'
   | 'event-create-visible'
   | 'event-created'
   | 'shared-visibility'
@@ -247,6 +249,23 @@ type AcceptanceRuntimeObservation = {
   calendarEventsLoadingVisible: boolean;
   calendarEventsLoadErrorVisible: boolean;
   createEventEnabled: boolean;
+};
+
+type PostCreateVisibilityObservation = {
+  postCreateEventGetRequestCount: number;
+  roomTargetRangeRequestCount: number;
+  expectedRoomRangeRequestSeen: boolean;
+  roomTargetRangeResponseCount: number;
+  roomTargetRangeLastStatus: number | null;
+  createResponseHasEvent: boolean;
+  createResponseTitleMatches: boolean;
+  createResponseCalendarMatches: boolean;
+  roomListResponseHasEventsArray: boolean;
+  roomListResponseTitleMatches: boolean;
+  roomListResponseIdMatches: boolean;
+  roomListResponseCalendarMatches: boolean;
+  listViewHeadingPresent: boolean;
+  matchingListItemCount: number;
 };
 
 let fixture: Fixture;
@@ -427,6 +446,11 @@ test('Element Web members share events and enforce room authorization', async ({
       'POST',
       '/v1/calendar/events',
     );
+    const postCreateVisibility = observePostCreateVisibility(pageA, {
+      expectedCalendarId: fixture.calendarId,
+      expectedRoomId: fixture.teamRoomId,
+      expectedTitle: eventTitle,
+    });
     await createDialog
       .getByRole('button', { name: 'Create event', exact: true })
       .click();
@@ -439,11 +463,25 @@ test('Element Web members share events and enforce room authorization', async ({
     expect(createResponseResult.status()).toBeLessThan(300);
     record(activePhase, 'passed', failureHttpStatus);
     failureHttpStatus = undefined;
+    await postCreateVisibility.observeCreatedEvent(createResponseResult);
 
     activePhase = 'event-create-visible';
-    await expect(
-      frameA.getByRole('listitem', { name: eventTitle }),
-    ).toBeVisible({ timeout: 15_000 });
+    record(activePhase, 'started');
+    const eventRow = frameA.getByRole('listitem', { name: eventTitle });
+    let eventVisible = false;
+    try {
+      await expect(eventRow).toBeVisible({ timeout: 15_000 });
+      eventVisible = true;
+    } catch {
+      // The bounded observation below distinguishes the gateway refresh from
+      // the widget's rendered list without retaining the failed assertion.
+    }
+    const postCreateObservation = await postCreateVisibility.collect(
+      frameA,
+      eventRow,
+    );
+    appendPostCreateVisibilityObservation(postCreateObservation);
+    expect(eventVisible).toBe(true);
     record(activePhase, 'passed');
 
     activePhase = 'event-created';
@@ -1220,6 +1258,224 @@ function waitForGatewayResponse(
       );
     },
     { timeout: 30_000 },
+  );
+}
+
+function observePostCreateVisibility(
+  page: Page,
+  {
+    expectedCalendarId,
+    expectedRoomId,
+    expectedTitle,
+  }: {
+    expectedCalendarId: string;
+    expectedRoomId: string;
+    expectedTitle: string;
+  },
+) {
+  const expectedGatewayOrigin = new URL(fixture.gatewayUrl).origin;
+  const observation: PostCreateVisibilityObservation = {
+    postCreateEventGetRequestCount: 0,
+    roomTargetRangeRequestCount: 0,
+    expectedRoomRangeRequestSeen: false,
+    roomTargetRangeResponseCount: 0,
+    roomTargetRangeLastStatus: null,
+    createResponseHasEvent: false,
+    createResponseTitleMatches: false,
+    createResponseCalendarMatches: false,
+    roomListResponseHasEventsArray: false,
+    roomListResponseTitleMatches: false,
+    roomListResponseIdMatches: false,
+    roomListResponseCalendarMatches: false,
+    listViewHeadingPresent: false,
+    matchingListItemCount: 0,
+  };
+  const pendingResponseReads: Promise<void>[] = [];
+  let createdEventId: string | undefined;
+  let matchingEventListRow: { id?: string; calendarId?: string } | undefined;
+
+  const roomRangeMatches = (rawUrl: string) => {
+    try {
+      const url = new URL(rawUrl);
+      if (
+        url.origin !== expectedGatewayOrigin ||
+        url.pathname !== '/v1/calendar/events' ||
+        url.searchParams.get('target') !== 'room' ||
+        url.searchParams.get('roomId') !== expectedRoomId
+      ) {
+        return { roomTarget: false, expectedRange: false };
+      }
+
+      const roomTarget = true;
+      const start = Date.parse(url.searchParams.get('start') ?? '');
+      const end = Date.parse(url.searchParams.get('end') ?? '');
+      const expectedRange =
+        url.searchParams.get('calendarId') === expectedCalendarId &&
+        Number.isFinite(start) &&
+        Number.isFinite(end) &&
+        end > start;
+      return { roomTarget, expectedRange };
+    } catch {
+      return { roomTarget: false, expectedRange: false };
+    }
+  };
+
+  const onRequest = (request: import('@playwright/test').Request) => {
+    if (
+      request.method() !== 'GET' ||
+      !isCalendarEventsEndpoint(request.url())
+    ) {
+      return;
+    }
+
+    observation.postCreateEventGetRequestCount = Math.min(
+      observation.postCreateEventGetRequestCount + 1,
+      2,
+    );
+    const roomRange = roomRangeMatches(request.url());
+    if (roomRange.roomTarget) {
+      observation.roomTargetRangeRequestCount = Math.min(
+        observation.roomTargetRangeRequestCount + 1,
+        2,
+      );
+    }
+    if (roomRange.expectedRange) {
+      observation.expectedRoomRangeRequestSeen = true;
+    }
+  };
+
+  const onResponse = (response: Response) => {
+    if (
+      response.request().method() !== 'GET' ||
+      !isCalendarEventsEndpoint(response.url())
+    ) {
+      return;
+    }
+    const roomRange = roomRangeMatches(response.url());
+    if (!roomRange.expectedRange) return;
+
+    observation.roomTargetRangeResponseCount = Math.min(
+      observation.roomTargetRangeResponseCount + 1,
+      2,
+    );
+    observation.roomTargetRangeLastStatus = response.status();
+
+    pendingResponseReads.push(
+      (async () => {
+        let body: unknown;
+        try {
+          body = await response.json();
+        } catch {
+          return;
+        }
+        if (!isRecord(body) || !Array.isArray(body.events)) return;
+        observation.roomListResponseHasEventsArray = true;
+
+        for (const resource of body.events) {
+          if (!isRecord(resource) || !isRecord(resource.event)) continue;
+          const event = resource.event;
+          if (event.title !== expectedTitle) continue;
+
+          observation.roomListResponseTitleMatches = true;
+          const candidate = {
+            ...(typeof event.id === 'string' ? { id: event.id } : {}),
+            ...(typeof event.calendarId === 'string'
+              ? { calendarId: event.calendarId }
+              : {}),
+          };
+          matchingEventListRow ??= candidate;
+          observation.roomListResponseCalendarMatches =
+            event.calendarId === expectedCalendarId;
+          observation.roomListResponseIdMatches = Boolean(
+            createdEventId && event.id === createdEventId,
+          );
+          break;
+        }
+      })(),
+    );
+  };
+
+  page.on('request', onRequest);
+  page.on('response', onResponse);
+
+  return {
+    async observeCreatedEvent(response: Response) {
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        return;
+      }
+      if (!isRecord(body) || !isRecord(body.event)) return;
+
+      const event = body.event;
+      if (
+        typeof event.id !== 'string' ||
+        typeof event.title !== 'string' ||
+        typeof event.calendarId !== 'string'
+      ) {
+        return;
+      }
+
+      createdEventId = event.id;
+      observation.createResponseHasEvent = true;
+      observation.createResponseTitleMatches = event.title === expectedTitle;
+      observation.createResponseCalendarMatches =
+        event.calendarId === expectedCalendarId;
+      if (matchingEventListRow) {
+        observation.roomListResponseIdMatches =
+          matchingEventListRow.id === createdEventId;
+        observation.roomListResponseCalendarMatches =
+          matchingEventListRow.calendarId === expectedCalendarId;
+      }
+    },
+    async collect(frame: FrameLocator, eventRow: Locator) {
+      await Promise.allSettled(pendingResponseReads);
+      const [headingCount, itemCount] = await Promise.all([
+        frame
+          .getByRole('heading', { name: 'Calendar events', exact: true })
+          .count()
+          .catch(() => 0),
+        eventRow.count().catch(() => 0),
+      ]);
+      observation.listViewHeadingPresent = headingCount > 0;
+      observation.matchingListItemCount = Math.min(itemCount, 2);
+      page.off('request', onRequest);
+      page.off('response', onResponse);
+      return observation;
+    },
+  };
+}
+
+function isCalendarEventsEndpoint(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.origin === new URL(fixture.gatewayUrl).origin &&
+      url.pathname === '/v1/calendar/events'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function appendPostCreateVisibilityObservation(
+  observation: PostCreateVisibilityObservation,
+) {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase: 'event-create-post-refresh-observed',
+      status: 'passed',
+      ...observation,
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
   );
 }
 
