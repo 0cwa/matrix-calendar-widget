@@ -10,6 +10,10 @@ import {
 } from './sanitize-element-acceptance.mjs';
 
 const sourceSha = 'a'.repeat(40);
+const g6PassedTitleDiagnostic = {
+  neighborPatchTitleOutcome: 'matched',
+  neighborCanonicalTitleReadbackOutcome: 'not-needed',
+};
 
 function projectionDiagnosticCounts(overrides = {}) {
   return {
@@ -2429,6 +2433,7 @@ test('formats bounded Element client acceptance evidence', () => {
       canonicalUnsupportedObjectUnchanged: true,
       neighborOwnershipUpdated: true,
       neighborUpdateIdentityMatches: true,
+      ...g6PassedTitleDiagnostic,
     }),
     sourceSha,
   );
@@ -2437,7 +2442,93 @@ test('formats bounded Element client acceptance evidence', () => {
   assert.match(summary, /projection_http_status=200/u);
   assert.match(summary, /count=1/u);
   assert.match(summary, /unsupported_warning_visible=true/u);
-  assert.doesNotMatch(summary, /title|uid|calendarId|private/u);
+  assert.match(summary, /neighbor_patch_title_outcome=matched/u);
+  assert.match(
+    summary,
+    /neighbor_canonical_title_readback_outcome=not-needed/u,
+  );
+  assert.doesNotMatch(summary, /G6 neighbor|uid|calendarId|private|SUMMARY:/u);
+});
+
+test('keeps failed neighbor readback failed while formatting finite title diagnostics', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-unsupported-preservation',
+      status: 'failed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      neighborCanonicalTitleReadbackHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      supportedNeighborEdited: false,
+      canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: false,
+      neighborUpdateIdentityMatches: false,
+      neighborPatchTitleOutcome: 'matched',
+      neighborCanonicalTitleReadbackOutcome: 'matched',
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /phase=g6-unsupported-preservation status=failed/u);
+  assert.match(summary, /neighbor_patch_title_outcome=matched/u);
+  assert.match(summary, /neighbor_canonical_title_readback_outcome=matched/u);
+  assert.match(summary, /neighbor_canonical_title_readback_http_status=200/u);
+  assert.doesNotMatch(summary, /G6 neighbor|event title|SUMMARY:/u);
+});
+
+test('rejects malformed or contradictory G6 title readback diagnostics', () => {
+  const base = {
+    phase: 'g6-unsupported-preservation',
+    status: 'passed',
+    projectionHttpStatus: 200,
+    canonicalBeforeHttpStatus: 200,
+    neighborPatchHttpStatus: 204,
+    canonicalAfterHttpStatus: 200,
+    count: 1,
+    unsupportedWarningVisible: true,
+    unsupportedRowOmitted: true,
+    supportedNeighborVisible: true,
+    canonicalSnapshotAvailable: true,
+    supportedNeighborEdited: true,
+    canonicalUnsupportedObjectUnchanged: true,
+    neighborOwnershipUpdated: true,
+    neighborUpdateIdentityMatches: true,
+    neighborPatchTitleOutcome: 'matched',
+    neighborCanonicalTitleReadbackOutcome: 'not-needed',
+  };
+  const invalidRecords = [
+    { ...base, neighborPatchTitleOutcome: 'private title' },
+    {
+      ...base,
+      neighborCanonicalTitleReadbackOutcome: 'mismatched',
+      neighborCanonicalTitleReadbackHttpStatus: 200,
+    },
+    {
+      ...base,
+      supportedNeighborEdited: false,
+      neighborCanonicalTitleReadbackOutcome: 'not-needed',
+    },
+    {
+      ...base,
+      status: 'failed',
+      supportedNeighborEdited: false,
+      neighborCanonicalTitleReadbackOutcome: 'matched',
+      neighborCanonicalTitleReadbackHttpStatus: 404,
+    },
+  ];
+
+  for (const record of invalidRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
 });
 
 test('rejects inconsistent Element client acceptance evidence', () => {
@@ -2458,6 +2549,7 @@ test('rejects inconsistent Element client acceptance evidence', () => {
       canonicalUnsupportedObjectUnchanged: true,
       neighborOwnershipUpdated: true,
       neighborUpdateIdentityMatches: true,
+      ...g6PassedTitleDiagnostic,
       eventTitle: 'private event title',
     },
     {
@@ -2476,6 +2568,7 @@ test('rejects inconsistent Element client acceptance evidence', () => {
       canonicalUnsupportedObjectUnchanged: false,
       neighborOwnershipUpdated: true,
       neighborUpdateIdentityMatches: true,
+      ...g6PassedTitleDiagnostic,
     },
     {
       phase: 'g6-unsupported-preservation',
@@ -2493,6 +2586,7 @@ test('rejects inconsistent Element client acceptance evidence', () => {
       canonicalUnsupportedObjectUnchanged: true,
       neighborOwnershipUpdated: true,
       neighborUpdateIdentityMatches: true,
+      ...g6PassedTitleDiagnostic,
     },
     {
       phase: 'g6-keyboard-focus',
@@ -2616,6 +2710,7 @@ test('accepts the compact four-case Element client evidence contract', () => {
       canonicalUnsupportedObjectUnchanged: true,
       neighborOwnershipUpdated: true,
       neighborUpdateIdentityMatches: true,
+      ...g6PassedTitleDiagnostic,
     },
     {
       phase: 'g6-delete-and-refresh',
@@ -2865,6 +2960,7 @@ test('rejects a passed Element edit whose updated ETag belongs to another event'
           canonicalUnsupportedObjectUnchanged: true,
           neighborOwnershipUpdated: false,
           neighborUpdateIdentityMatches: false,
+          ...g6PassedTitleDiagnostic,
         }),
         sourceSha,
       ),

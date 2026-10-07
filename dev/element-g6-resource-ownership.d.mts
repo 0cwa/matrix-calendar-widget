@@ -14,6 +14,11 @@ export type G6ResourceOwnership = {
   confirmedCreated: boolean;
 };
 
+export function g6EventSummaryMatches(
+  bytes: Buffer,
+  expectedTitle: string,
+): boolean | undefined;
+
 export function g6GatewayResourceIdentityMatches(
   gatewayEventHref: string,
   externallyOwnedResourceHref: string,

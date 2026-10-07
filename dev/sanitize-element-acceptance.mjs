@@ -247,6 +247,7 @@ const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
       'canonicalBeforeHttpStatus',
       'neighborPatchHttpStatus',
       'canonicalAfterHttpStatus',
+      'neighborCanonicalTitleReadbackHttpStatus',
       'count',
     ],
   ],
@@ -296,6 +297,31 @@ const G6_EXTRA_NUMERIC_FIELDS = new Set(
     .flat()
     .filter((key) => key !== 'httpStatus' && key !== 'count'),
 );
+const G6_ENUM_FIELDS_BY_PHASE = new Map([
+  [
+    'g6-unsupported-preservation',
+    ['neighborPatchTitleOutcome', 'neighborCanonicalTitleReadbackOutcome'],
+  ],
+]);
+const G6_EXTRA_ENUM_FIELDS = new Set(
+  [...G6_ENUM_FIELDS_BY_PHASE.values()].flat(),
+);
+const G6_ENUM_VALUES = new Map([
+  [
+    'neighborPatchTitleOutcome',
+    new Set(['matched', 'mismatched', 'unavailable']),
+  ],
+  [
+    'neighborCanonicalTitleReadbackOutcome',
+    new Set([
+      'not-needed',
+      'not-owned',
+      'matched',
+      'mismatched',
+      'unavailable',
+    ]),
+  ],
+]);
 const G6_SEED_CREATE_OUTCOMES = new Set([
   'response',
   'timeout',
@@ -825,6 +851,7 @@ const ALLOWED_KEYS = new Set([
   'canonicalUnsupportedObjectUnchanged',
   'neighborOwnershipUpdated',
   'neighborUpdateIdentityMatches',
+  ...G6_EXTRA_ENUM_FIELDS,
   'deleteButtonVisible',
   'deleteConfirmationVisible',
   'deletedRowAbsent',
@@ -854,11 +881,13 @@ function validG6Observation(record) {
 
   const booleanFields = PHASE_BOOLEAN_FIELDS.get(record.phase) ?? [];
   const numericFields = G6_NUMERIC_FIELDS_BY_PHASE.get(record.phase) ?? [];
+  const enumFields = G6_ENUM_FIELDS_BY_PHASE.get(record.phase) ?? [];
   const allowedFields = new Set([
     'phase',
     'status',
     ...booleanFields,
     ...numericFields,
+    ...enumFields,
     ...(record.phase === 'g6-fixture-ready' ? ['seedCreateObservations'] : []),
   ]);
   if (
@@ -883,9 +912,53 @@ function validG6Observation(record) {
       if (key === 'detailsActionTabCount') return value < 0 || value > 14;
       if (record.phase === 'g6-resource-cleanup') return value < 0 || value > 4;
       return value < 0 || value > 100_000;
-    })
+    }) ||
+    enumFields.some(
+      (key) =>
+        Object.hasOwn(record, key) &&
+        !G6_ENUM_VALUES.get(key)?.has(record[key]),
+    )
   ) {
     return false;
+  }
+
+  if (enumFields.length > 0) {
+    const hasAnyEnumField = enumFields.some((key) =>
+      Object.hasOwn(record, key),
+    );
+    const hasEveryEnumField = enumFields.every((key) =>
+      Object.hasOwn(record, key),
+    );
+    if (
+      (record.status === 'passed' && !hasEveryEnumField) ||
+      (hasAnyEnumField && !hasEveryEnumField)
+    ) {
+      return false;
+    }
+    if (hasEveryEnumField) {
+      const patchOutcome = record.neighborPatchTitleOutcome;
+      const canonicalOutcome = record.neighborCanonicalTitleReadbackOutcome;
+      const canonicalStatusPresent = Object.hasOwn(
+        record,
+        'neighborCanonicalTitleReadbackHttpStatus',
+      );
+      if (
+        (patchOutcome !== 'unavailable' &&
+          !Object.hasOwn(record, 'neighborPatchHttpStatus')) ||
+        (canonicalOutcome === 'not-needed' &&
+          record.supportedNeighborEdited !== true) ||
+        (record.supportedNeighborEdited === true &&
+          canonicalOutcome !== 'not-needed') ||
+        ((canonicalOutcome === 'matched' ||
+          canonicalOutcome === 'mismatched') &&
+          record.neighborCanonicalTitleReadbackHttpStatus !== 200) ||
+        ((canonicalOutcome === 'not-needed' ||
+          canonicalOutcome === 'not-owned') &&
+          canonicalStatusPresent)
+      ) {
+        return false;
+      }
+    }
   }
 
   if (Object.hasOwn(record, 'seedCreateObservations')) {
@@ -1725,6 +1798,8 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     if (
       !validG6Observation(record) ||
       ([...G6_EXTRA_NUMERIC_FIELDS].some((key) => Object.hasOwn(record, key)) &&
+        !G6_PHASES.has(record.phase)) ||
+      ([...G6_EXTRA_ENUM_FIELDS].some((key) => Object.hasOwn(record, key)) &&
         !G6_PHASES.has(record.phase))
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
@@ -2766,6 +2841,14 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       ) {
         continue;
       }
+      const outputKey = key.replace(
+        /[A-Z]/gu,
+        (letter) => `_${letter.toLowerCase()}`,
+      );
+      fields.push(`${outputKey}=${record[key]}`);
+    }
+    for (const key of G6_ENUM_FIELDS_BY_PHASE.get(phase) ?? []) {
+      if (!Object.hasOwn(record, key)) continue;
       const outputKey = key.replace(
         /[A-Z]/gu,
         (letter) => `_${letter.toLowerCase()}`,

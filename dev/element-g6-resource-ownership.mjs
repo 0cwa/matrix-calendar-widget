@@ -20,6 +20,47 @@ const G6_EXTERNAL_RADICALE_ORIGIN = 'http://127.0.0.1:5233';
 const G6_GATEWAY_RADICALE_ORIGIN = 'http://restore-radicale:5232';
 const G6_COLLECTION_PATH = '/_matrix_calendar_service/element-acceptance/';
 const G6_RESOURCE_NAME = /^g6-[0-9a-f-]{36}\.ics$/u;
+const G6_MAX_RESOURCE_BYTES = 16_384;
+
+export function g6EventSummaryMatches(bytes, expectedTitle) {
+  if (
+    !Buffer.isBuffer(bytes) ||
+    bytes.length > G6_MAX_RESOURCE_BYTES ||
+    typeof expectedTitle !== 'string' ||
+    expectedTitle.length > 200
+  ) {
+    return undefined;
+  }
+
+  let source;
+  try {
+    source = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return undefined;
+  }
+
+  const logicalLines = [];
+  for (const line of source.split(/\r\n|\n/u)) {
+    if (/^[ \t]/u.test(line) && logicalLines.length > 0) {
+      logicalLines[logicalLines.length - 1] += line.slice(1);
+    } else {
+      logicalLines.push(line);
+    }
+  }
+  const summaryLines = logicalLines.filter((line) =>
+    /^SUMMARY(?:;[^:]*)?:/iu.test(line),
+  );
+  if (summaryLines.length !== 1) return undefined;
+
+  const summary = summaryLines[0].match(/^SUMMARY(?:;[^:]*)?:(.*)$/iu)?.[1];
+  if (summary === undefined) return undefined;
+  const escapedExpected = expectedTitle
+    .replace(/\\/gu, '\\\\')
+    .replace(/\r\n|\r|\n/gu, '\\n')
+    .replace(/;/gu, '\\;')
+    .replace(/,/gu, '\\,');
+  return summary === escapedExpected;
+}
 
 function parseOwnedG6ResourceHref(href, expectedOrigin) {
   if (typeof href !== 'string') return undefined;

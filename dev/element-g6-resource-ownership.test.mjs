@@ -20,6 +20,7 @@ import test from 'node:test';
 import {
   beginG6ResourceCreate,
   createG6ResourceOwnership,
+  g6EventSummaryMatches,
   g6GatewayResourceIdentityMatches,
   g6ResourceCleanupRequest,
   isStrongG6ResourceEtag,
@@ -28,6 +29,36 @@ import {
   recordG6ResourceUpdate,
   summarizeG6ResourceOwnership,
 } from './element-g6-resource-ownership.mjs';
+
+test('compares one bounded canonical VEVENT summary without returning content', () => {
+  const bytes = Buffer.from(
+    'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:G6 neighbor edited abc\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n',
+  );
+  assert.equal(g6EventSummaryMatches(bytes, 'G6 neighbor edited abc'), true);
+  assert.equal(g6EventSummaryMatches(bytes, 'G6 neighbor edited other'), false);
+  assert.equal(
+    g6EventSummaryMatches(
+      Buffer.from(
+        'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:G6 neighbor\r\n edited abc\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n',
+      ),
+      'G6 neighboredited abc',
+    ),
+    true,
+  );
+});
+
+test('canonical summary comparison is inconclusive for invalid or ambiguous data', () => {
+  assert.equal(g6EventSummaryMatches(Buffer.from([0xff]), 'title'), undefined);
+  assert.equal(
+    g6EventSummaryMatches(Buffer.from('BEGIN:VCALENDAR\r\n'), 'title'),
+    undefined,
+  );
+  assert.equal(
+    g6EventSummaryMatches(Buffer.from('SUMMARY:a\r\nSUMMARY:b\r\n'), 'a'),
+    undefined,
+  );
+  assert.equal(g6EventSummaryMatches(Buffer.alloc(16_385), 'title'), undefined);
+});
 
 test('matches the same owned G6 resource across the two fixture Radicale origins', () => {
   const external =

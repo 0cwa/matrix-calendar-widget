@@ -33,6 +33,7 @@ import { isAbsolute, resolve, sep } from 'node:path';
 import {
   beginG6ResourceCreate,
   createG6ResourceOwnership,
+  g6EventSummaryMatches,
   g6GatewayResourceIdentityMatches,
   g6ResourceCleanupRequest,
   isStrongG6ResourceEtag,
@@ -114,6 +115,14 @@ type G6Phase =
   | 'g6-browser-egress'
   | 'g6-resource-cleanup';
 
+type G6NeighborTitleOutcome = 'matched' | 'mismatched' | 'unavailable';
+type G6CanonicalTitleReadbackOutcome =
+  | 'not-needed'
+  | 'not-owned'
+  | 'matched'
+  | 'mismatched'
+  | 'unavailable';
+
 type G6StageRecord = {
   phase: G6Phase;
   status: 'passed' | 'failed';
@@ -138,6 +147,9 @@ type G6StageRecord = {
   canonicalUnsupportedObjectUnchanged?: boolean;
   neighborOwnershipUpdated?: boolean;
   neighborUpdateIdentityMatches?: boolean;
+  neighborPatchTitleOutcome?: G6NeighborTitleOutcome;
+  neighborCanonicalTitleReadbackOutcome?: G6CanonicalTitleReadbackOutcome;
+  neighborCanonicalTitleReadbackHttpStatus?: number;
   deleteButtonVisible?: boolean;
   deleteConfirmationVisible?: boolean;
   deletedRowAbsent?: boolean;
@@ -1619,6 +1631,7 @@ test('Element Web preserves unsupported events and supports client interactions'
     const neighborUpdate = await readGatewayEventUpdate(
       neighborPatch,
       neighborResourceHref,
+      names.neighborEdited,
     );
     const neighborOwnership = resourceOwnershipByName.get(resources.neighbor);
     const neighborOwnershipUpdated =
@@ -1641,6 +1654,38 @@ test('Element Web preserves unsupported events and supports client interactions'
       neighborPatchStatus < 300 &&
       neighborOwnershipUpdated &&
       (await editedNeighborRow.isVisible().catch(() => false));
+    const neighborPatchTitleOutcome: G6NeighborTitleOutcome =
+      neighborUpdate.titleMatches === true
+        ? 'matched'
+        : neighborUpdate.titleMatches === false
+          ? 'mismatched'
+          : 'unavailable';
+    let neighborCanonicalTitleReadbackOutcome: G6CanonicalTitleReadbackOutcome;
+    let neighborCanonicalTitleReadbackHttpStatus: number | undefined;
+    if (supportedNeighborEdited) {
+      neighborCanonicalTitleReadbackOutcome = 'not-needed';
+    } else if (neighborOwnership?.confirmedCreated !== true) {
+      neighborCanonicalTitleReadbackOutcome = 'not-owned';
+    } else {
+      const canonicalNeighbor = await g6CalDavRequest(
+        calDavClient!,
+        resources.neighbor,
+        'GET',
+      );
+      neighborCanonicalTitleReadbackHttpStatus = canonicalNeighbor.status;
+      const canonicalTitleMatches =
+        canonicalNeighbor.outcome === 'response' &&
+        canonicalNeighbor.status === 200 &&
+        canonicalNeighbor.bytes !== undefined
+          ? g6EventSummaryMatches(canonicalNeighbor.bytes, names.neighborEdited)
+          : undefined;
+      neighborCanonicalTitleReadbackOutcome =
+        canonicalTitleMatches === true
+          ? 'matched'
+          : canonicalTitleMatches === false
+            ? 'mismatched'
+            : 'unavailable';
+    }
 
     const unsupportedAfter = await g6CalDavRequest(
       calDavClient!,
@@ -1682,6 +1727,11 @@ test('Element Web preserves unsupported events and supports client interactions'
       canonicalUnsupportedObjectUnchanged,
       neighborOwnershipUpdated,
       neighborUpdateIdentityMatches: neighborUpdate.identityMatches,
+      neighborPatchTitleOutcome,
+      neighborCanonicalTitleReadbackOutcome,
+      ...(neighborCanonicalTitleReadbackHttpStatus === undefined
+        ? {}
+        : { neighborCanonicalTitleReadbackHttpStatus }),
     });
 
     activeG6Phase = 'g6-side-panel-layout';
@@ -3565,7 +3615,12 @@ async function openEventEditor(
 async function readGatewayEventUpdate(
   response: Response | undefined,
   expectedEventHref: string,
-): Promise<{ etag?: string; identityMatches: boolean }> {
+  expectedTitle: string,
+): Promise<{
+  etag?: string;
+  identityMatches: boolean;
+  titleMatches?: boolean;
+}> {
   if (!response) return { identityMatches: false };
   try {
     const body: unknown = await response.json();
@@ -3581,9 +3636,17 @@ async function readGatewayEventUpdate(
       'id' in event &&
       typeof event.id === 'string' &&
       g6GatewayResourceIdentityMatches(event.id, expectedEventHref);
+    const titleMatches =
+      typeof event === 'object' &&
+      event !== null &&
+      'title' in event &&
+      typeof event.title === 'string'
+        ? event.title === expectedTitle
+        : undefined;
     return {
       ...(etag ? { etag } : {}),
       identityMatches,
+      ...(titleMatches === undefined ? {} : { titleMatches }),
     };
   } catch {
     return { identityMatches: false };
