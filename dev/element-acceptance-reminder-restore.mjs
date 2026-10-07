@@ -1170,12 +1170,7 @@ function inspectRestoreRadicaleReadiness() {
       'restore-radicale',
       'restore-radicale-ready',
     );
-    const result = run(
-      'docker',
-      ['logs', '--tail', '100', containerId],
-      { timeout: 10_000, maxBuffer: MAX_RADICALE_LOG_BUFFER },
-    );
-    if (result.status === 0) startupLogs = result.stdout.toString('utf8');
+    startupLogs = readRadicaleStartupLogs(containerId);
   } catch {
     // Log retrieval failure is represented as unavailable, never as a guessed cause.
   }
@@ -1184,6 +1179,32 @@ function inspectRestoreRadicaleReadiness() {
     ...container,
     ...classifyRadicaleStartupLogs(startupLogs),
   };
+}
+
+function readRadicaleStartupLogs(containerId) {
+  const result = spawnSync('docker', ['logs', '--tail', '100', containerId], {
+    cwd: ROOT,
+    timeout: 10_000,
+    maxBuffer: MAX_RADICALE_LOG_BUFFER / 2,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (
+    result.error ||
+    result.status !== 0 ||
+    result.signal ||
+    !Buffer.isBuffer(result.stdout) ||
+    !Buffer.isBuffer(result.stderr)
+  ) {
+    return undefined;
+  }
+
+  const separator = Buffer.from('\n');
+  const combinedLength =
+    result.stdout.length + separator.length + result.stderr.length;
+  if (combinedLength > MAX_RADICALE_LOG_BUFFER) return undefined;
+  return Buffer.concat([result.stdout, separator, result.stderr]).toString(
+    'utf8',
+  );
 }
 
 async function restoreStores() {
