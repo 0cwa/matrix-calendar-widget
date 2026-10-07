@@ -174,6 +174,30 @@ const PRIVATE_CHECKSUM_PHASES = new Set([
   'restore-radicale-backup',
   'restore-postgres-backup',
 ]);
+const RESTORE_TARGET_STEPS = new Set([
+  'target-volume-check',
+  'target-database-check',
+  'target-plan-check',
+  'volume-create',
+  'volume-empty-check',
+  'database-create',
+  'archive-extract',
+  'restored-volume-count',
+  'postgres-restore',
+  'complete',
+]);
+const RESTORE_TARGET_DIAGNOSTIC_FIELDS = [
+  'restoreStep',
+  'restoreVolumeExists',
+  'restoreDatabaseExists',
+  'restoreTargetPlanSafe',
+  'restoreVolumeCreated',
+  'restoreVolumeEmpty',
+  'restoreDatabaseCreated',
+  'restoreArchiveExtracted',
+  'restoreArchiveEntryCount',
+  'restorePostgresRestored',
+];
 const PINNED_WIDGET_CONTROL_PHASES = new Set([
   'widget-a-room-info-button',
   'widget-a-extensions-menuitem',
@@ -184,6 +208,12 @@ const PINNED_WIDGET_PANEL_PHASES = new Set([
   'widget-a-extension-row',
 ]);
 const STATUSES = new Set(['started', 'passed', 'failed', 'unavailable']);
+const SUMMARY_FAILURE_CATEGORIES = new Set([
+  'invalid-source-sha',
+  'invalid-stage-json',
+  'invalid-stage-record',
+  'summary-unavailable',
+]);
 const BLOCKED_REQUEST_ACTORS = new Set(['member-a', 'member-b', 'outsider']);
 const BLOCKED_REQUEST_CLASSES = new Set([
   'fixture-host-origin-mismatch',
@@ -520,6 +550,7 @@ const ALLOWED_KEYS = new Set([
   'oomFree',
   'freshVolume',
   'freshDatabase',
+  ...RESTORE_TARGET_DIAGNOSTIC_FIELDS,
   'containerState',
   'containerHealth',
   'containerExitCode',
@@ -1018,21 +1049,59 @@ function validRuntimeVersions(record) {
   return true;
 }
 
+class SummaryValidationError extends Error {
+  constructor(category, phase) {
+    super('invalid element acceptance summary');
+    this.category = SUMMARY_FAILURE_CATEGORIES.has(category)
+      ? category
+      : 'summary-unavailable';
+    this.phase = PHASES.has(phase) ? phase : 'unknown';
+  }
+}
+
+export function formatSanitizerFailureSummary(error, sourceSha) {
+  const safeSourceSha =
+    typeof sourceSha === 'string' && /^[a-f0-9]{40}$/iu.test(sourceSha)
+      ? sourceSha.toLowerCase()
+      : 'unavailable';
+  const category = SUMMARY_FAILURE_CATEGORIES.has(error?.category)
+    ? error.category
+    : 'summary-unavailable';
+  const phase = PHASES.has(error?.phase) ? error.phase : 'unknown';
+  return [
+    `element-acceptance source_sha=${safeSourceSha}`,
+    `phase=summary status=unavailable category=${category} rejected_phase=${phase}`,
+    '',
+  ].join('\n');
+}
+
 export function sanitizeElementAcceptance(input, sourceSha) {
   if (typeof sourceSha !== 'string' || !/^[a-f0-9]{40}$/i.test(sourceSha)) {
-    throw new Error('invalid element acceptance summary');
+    throw new SummaryValidationError('invalid-source-sha', 'unknown');
   }
 
   const phases = new Map();
+  let rejectedPhase = 'unknown';
+  let rejectionCategory = 'invalid-stage-record';
   for (const line of input.split(/\r?\n/u)) {
     if (!line) continue;
 
     let record;
+    rejectedPhase = 'unknown';
+    rejectionCategory = 'invalid-stage-json';
     try {
       record = JSON.parse(line);
     } catch {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
+    rejectionCategory = 'invalid-stage-record';
+    rejectedPhase =
+      record !== null &&
+      typeof record === 'object' &&
+      !Array.isArray(record) &&
+      PHASES.has(record.phase)
+        ? record.phase
+        : 'unknown';
 
     if (
       record === null ||
@@ -1042,7 +1111,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       !PHASES.has(record.phase) ||
       !STATUSES.has(record.status)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const hasRuntimeObservation = RUNTIME_OBSERVATION_FIELDS.some((key) =>
@@ -1069,7 +1138,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.phase !== 'reminder-room-configuration-enabled' &&
         hasReminderConfigurationObservation)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1078,7 +1147,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         record.httpStatus < 100 ||
         record.httpStatus > 599)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1096,7 +1165,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         record.status === 'passed' &&
         record.httpStatus !== 404)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1105,7 +1174,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.phase !== 'reminder-widget-context' &&
         Object.hasOwn(record, 'canManageReminders'))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1114,7 +1183,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         record.count < 0 ||
         record.count > 100000)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const phaseBooleans = PHASE_BOOLEAN_FIELDS.get(record.phase) ?? [];
@@ -1129,7 +1198,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.status === 'passed' &&
         phaseBooleans.some((key) => record[key] !== true))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1149,7 +1218,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         PRIVATE_CHECKSUM_PHASES.has(record.phase) &&
         !Object.hasOwn(record, 'checksum'))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1157,7 +1226,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       record.status === 'passed' &&
       record.count !== 4
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1165,7 +1234,56 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       record.status === 'passed' &&
       (record.freshVolume !== true || record.freshDatabase !== true)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    const hasRestoreTargetDiagnostics = RESTORE_TARGET_DIAGNOSTIC_FIELDS.some(
+      (key) => Object.hasOwn(record, key),
+    );
+    if (
+      (hasRestoreTargetDiagnostics &&
+        (record.phase !== 'restore-targets-prepared' ||
+          !['passed', 'failed'].includes(record.status) ||
+          !RESTORE_TARGET_STEPS.has(record.restoreStep))) ||
+      (record.phase === 'restore-targets-prepared' &&
+        ['passed', 'failed'].includes(record.status) &&
+        !hasRestoreTargetDiagnostics) ||
+      RESTORE_TARGET_DIAGNOSTIC_FIELDS.slice(1, 8).some(
+        (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
+      ) ||
+      (Object.hasOwn(record, 'restoreArchiveEntryCount') &&
+        (!Number.isInteger(record.restoreArchiveEntryCount) ||
+          record.restoreArchiveEntryCount < 0 ||
+          record.restoreArchiveEntryCount > 2)) ||
+      (Object.hasOwn(record, 'restorePostgresRestored') &&
+        typeof record.restorePostgresRestored !== 'boolean') ||
+      (record.restoreDatabaseCreated === true &&
+        record.restoreDatabaseExists !== false) ||
+      (record.restoreVolumeCreated === true &&
+        record.restoreVolumeExists !== false) ||
+      (record.restoreVolumeEmpty === true &&
+        record.restoreVolumeCreated !== true) ||
+      (record.restoreArchiveExtracted === true &&
+        (record.restoreVolumeCreated !== true ||
+          record.restoreVolumeEmpty !== true)) ||
+      (record.restoreArchiveEntryCount > 0 &&
+        record.restoreArchiveExtracted !== true) ||
+      (record.restorePostgresRestored === true &&
+        record.restoreDatabaseCreated !== true) ||
+      (record.phase === 'restore-targets-prepared' &&
+        record.status === 'passed' &&
+        (record.restoreStep !== 'complete' ||
+          record.restoreVolumeExists !== false ||
+          record.restoreDatabaseExists !== false ||
+          record.restoreTargetPlanSafe !== true ||
+          record.restoreVolumeCreated !== true ||
+          record.restoreVolumeEmpty !== true ||
+          record.restoreDatabaseCreated !== true ||
+          record.restoreArchiveExtracted !== true ||
+          record.restoreArchiveEntryCount < 1 ||
+          record.restorePostgresRestored !== true))
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1223,7 +1341,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           record.httpStatus >= 300 ||
           record.count !== 1))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const reminderGatewayReadinessPhases = new Set([
@@ -1240,7 +1358,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         (record.status === 'failed' &&
           (record.httpStatus < 100 || record.httpStatus > 599)))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const hasBlockedRequestDiagnostics =
@@ -1259,7 +1377,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         (record.blockedRequestDiagnosticOverflow &&
           record.blockedRequestDiagnostics.length !== 32))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (hasBlockedRequestDiagnostics) {
@@ -1284,7 +1402,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           diagnostic.count < 1 ||
           diagnostic.count > 2
         ) {
-          throw new Error('invalid element acceptance summary');
+          throw new SummaryValidationError(rejectionCategory, rejectedPhase);
         }
 
         const key = JSON.stringify([
@@ -1294,13 +1412,13 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           diagnostic.resourceType,
         ]);
         if (diagnosticKeys.has(key)) {
-          throw new Error('invalid element acceptance summary');
+          throw new SummaryValidationError(rejectionCategory, rejectedPhase);
         }
         diagnosticKeys.add(key);
         diagnosticCount += diagnostic.count;
       }
       if (record.count < diagnosticCount) {
-        throw new Error('invalid element acceptance summary');
+        throw new SummaryValidationError(rejectionCategory, rejectedPhase);
       }
     }
 
@@ -1309,14 +1427,14 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       record.status === 'passed' &&
       record.count !== 0
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
     if (
       record.phase === 'browser-egress' &&
       record.count > 0 &&
       !hasBlockedRequestDiagnostics
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const hasPinnedControlObservation =
@@ -1339,7 +1457,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (Object.hasOwn(record, 'panelPresent') &&
         typeof record.panelPresent !== 'boolean')
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     for (const countKey of [
@@ -1352,7 +1470,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           record[countKey] < 0 ||
           record[countKey] > 100000)
       ) {
-        throw new Error('invalid element acceptance summary');
+        throw new SummaryValidationError(rejectionCategory, rejectedPhase);
       }
     }
     if (
@@ -1361,14 +1479,14 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         record.homeserverLastHttpErrorStatus < 400 ||
         record.homeserverLastHttpErrorStatus > 599)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
       Object.hasOwn(record, 'failureCode') &&
       !FAILURE_CODES.has(record.failureCode)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const hasMissingModuleDiagnostic =
@@ -1388,7 +1506,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           )
         : Object.hasOwn(record, 'missingDependency'))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1397,7 +1515,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         record.processExitCode < 1 ||
         record.processExitCode > 255)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const hasContainerDiagnostic = [
@@ -1424,7 +1542,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (Object.hasOwn(record, 'containerRuntimeErrorPresent') &&
         typeof record.containerRuntimeErrorPresent !== 'boolean')
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1432,7 +1550,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.phase !== 'runtime-versions' &&
         [...VERSION_FIELDS].some((key) => Object.hasOwn(record, key)))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1443,7 +1561,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.failureCode === 'matrix-invalid-json' &&
         !Object.hasOwn(record, 'httpStatus'))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const sessionObservationKeys = [
@@ -1483,7 +1601,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         typeof record.matrixUserMatches !== 'boolean') ||
       !validSessionObservation
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const roomObservationKeys = [
@@ -1549,7 +1667,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         roomFailureCodes.has(record.failureCode) &&
         record.phase !== 'member-a-room-context')
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1561,7 +1679,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         record.status === 'passed' &&
         !Object.hasOwn(record, 'originMatchesElement'))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     phases.set(record.phase, record);
@@ -1762,6 +1880,24 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     if (Object.hasOwn(record, 'count')) {
       fields.push(`count=${record.count}`);
     }
+    if (Object.hasOwn(record, 'restoreStep')) {
+      fields.push(`restore_step=${record.restoreStep}`);
+      for (const [key, outputKey] of [
+        ['restoreVolumeExists', 'restore_volume_exists'],
+        ['restoreDatabaseExists', 'restore_database_exists'],
+        ['restoreTargetPlanSafe', 'restore_target_plan_safe'],
+        ['restoreVolumeCreated', 'restore_volume_created'],
+        ['restoreVolumeEmpty', 'restore_volume_empty'],
+        ['restoreDatabaseCreated', 'restore_database_created'],
+        ['restoreArchiveExtracted', 'restore_archive_extracted'],
+        ['restoreArchiveEntryCount', 'restore_archive_entry_count'],
+        ['restorePostgresRestored', 'restore_postgres_restored'],
+      ]) {
+        if (Object.hasOwn(record, key)) {
+          fields.push(`${outputKey}=${record[key]}`);
+        }
+      }
+    }
     for (const [key, name] of [
       ['relativeAlarmReadback', 'relative_alarm_readback'],
       ['reminderEnabled', 'reminder_enabled'],
@@ -1882,7 +2018,13 @@ function main() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     main();
-  } catch {
+  } catch (error) {
+    process.stdout.write(
+      formatSanitizerFailureSummary(
+        error,
+        process.argv[3] ?? process.env.ELEMENT_ACCEPTANCE_SOURCE_SHA,
+      ),
+    );
     process.stderr.write('Element acceptance summary unavailable.\n');
     process.exitCode = 1;
   }

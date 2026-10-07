@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { sanitizeElementAcceptance } from './sanitize-element-acceptance.mjs';
+import {
+  formatSanitizerFailureSummary,
+  sanitizeElementAcceptance,
+} from './sanitize-element-acceptance.mjs';
 
 const sourceSha = 'a'.repeat(40);
 
@@ -256,6 +259,16 @@ test('summarizes reminder restore gates without exposing backup fingerprints or 
         status: 'passed',
         freshVolume: true,
         freshDatabase: true,
+        restoreStep: 'complete',
+        restoreVolumeExists: false,
+        restoreDatabaseExists: false,
+        restoreTargetPlanSafe: true,
+        restoreVolumeCreated: true,
+        restoreVolumeEmpty: true,
+        restoreDatabaseCreated: true,
+        restoreArchiveExtracted: true,
+        restoreArchiveEntryCount: 2,
+        restorePostgresRestored: true,
       }),
       JSON.stringify({
         phase: 'restore-delivery-row',
@@ -275,13 +288,79 @@ test('summarizes reminder restore gates without exposing backup fingerprints or 
   assert.match(summary, /gateway_stopped_gracefully=true/u);
   assert.match(
     summary,
-    /phase=restore-targets-prepared status=passed fresh_volume=true fresh_database=true/u,
+    /phase=restore-targets-prepared status=passed restore_step=complete restore_volume_exists=false restore_database_exists=false restore_target_plan_safe=true restore_volume_created=true restore_volume_empty=true restore_database_created=true restore_archive_extracted=true restore_archive_entry_count=2 restore_postgres_restored=true fresh_volume=true fresh_database=true/u,
   );
   assert.match(
     summary,
     /delivery_key_unchanged=true attempt_count_unchanged=true/u,
   );
   assert.doesNotMatch(summary, /b{64}|attempt_count=2/u);
+});
+
+test('reports only an allowlisted rejection category and phase when a summary is invalid', () => {
+  let failure;
+  try {
+    sanitizeElementAcceptance(
+      JSON.stringify({
+        phase: 'restore-targets-prepared',
+        status: 'failed',
+        restoreStep: 'private-value',
+        credential: 'never-emit-this',
+      }),
+      sourceSha,
+    );
+  } catch (error) {
+    failure = error;
+  }
+
+  assert.equal(failure.category, 'invalid-stage-record');
+  assert.equal(failure.phase, 'restore-targets-prepared');
+  assert.equal(
+    formatSanitizerFailureSummary(failure, sourceSha),
+    `element-acceptance source_sha=${sourceSha}\nphase=summary status=unavailable category=invalid-stage-record rejected_phase=restore-targets-prepared\n`,
+  );
+  assert.doesNotMatch(
+    formatSanitizerFailureSummary(failure, sourceSha),
+    /private-value|never-emit-this|credential/u,
+  );
+  const unexpectedFailure = Object.assign(
+    new Error('secret-bearing exception detail'),
+    { category: 'private-label', phase: 'private-phase' },
+  );
+  assert.equal(
+    formatSanitizerFailureSummary(unexpectedFailure, sourceSha),
+    `element-acceptance source_sha=${sourceSha}\nphase=summary status=unavailable category=summary-unavailable rejected_phase=unknown\n`,
+  );
+  let malformedRecord;
+  try {
+    sanitizeElementAcceptance('{not-json', sourceSha);
+  } catch (error) {
+    malformedRecord = error;
+  }
+  assert.equal(malformedRecord.category, 'invalid-stage-json');
+  assert.equal(malformedRecord.phase, 'unknown');
+});
+
+test('emits bounded restore target failure details without raw command output', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-targets-prepared',
+      status: 'failed',
+      restoreStep: 'volume-create',
+      restoreVolumeExists: false,
+      restoreDatabaseExists: false,
+      restoreTargetPlanSafe: true,
+      restoreVolumeCreated: false,
+      processExitCode: 1,
+    }),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /phase=restore-targets-prepared status=failed restore_step=volume-create restore_volume_exists=false restore_database_exists=false restore_target_plan_safe=true restore_volume_created=false process_exit_code=1/u,
+  );
+  assert.doesNotMatch(summary, /volume name|database name|stderr|password/u);
 });
 
 test('requires UI, Matrix delivery, and timeline evidence for reminder recovery', () => {

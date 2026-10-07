@@ -46,6 +46,15 @@ const RADICALE_EXTRACT_TAR = [
 const MAX_COMMAND_BUFFER = 16 * 1024 * 1024;
 const MAX_WAIT_MS = 120_000;
 const COMPOSE_GRACEFUL_STOP_COMMAND_TIMEOUT_MS = 75_000;
+const RADICALE_EMPTY_DIRECTORY_CHECK = [
+  'import os,sys',
+  "entries=os.listdir('/data')",
+  "sys.stdout.write('empty' if not entries else 'nonempty')",
+].join(';');
+const RADICALE_ENTRY_COUNT_CHECK = [
+  'import os',
+  "print(min(len(os.listdir('/data')),2))",
+].join(';');
 const PHASES = new Set([
   'reminder-compose-validation',
   'reminder-postgres-ready',
@@ -827,7 +836,8 @@ function backupPostgres() {
   });
 }
 
-function verifyVolumeAbsentAndCreate(sourceVolumeName) {
+function verifyVolumeAbsentAndCreate(sourceVolumeName, diagnostics) {
+  diagnostics.restoreStep = 'target-volume-check';
   const listedVolumes = requireSuccess(
     run('docker', [
       'volume',
@@ -843,6 +853,8 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName) {
     .split(/\r?\n/u)
     .filter(Boolean);
   const restoreVolumeExists = listedVolumes.length !== 0;
+  diagnostics.restoreVolumeExists = restoreVolumeExists;
+  diagnostics.restoreStep = 'target-database-check';
   const databaseExists = queryPostgres(
     'postgres',
     "SELECT count(*) FROM pg_database WHERE datname = 'matrix_calendar_restored';",
@@ -856,6 +868,8 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName) {
     });
   }
   const freshDatabaseExists = databaseExists === '1';
+  diagnostics.restoreDatabaseExists = freshDatabaseExists;
+  diagnostics.restoreStep = 'target-plan-check';
   const targetPlanIsSafe = isSafeRestoreTargetPlan({
     projectName,
     sourceVolumeName,
@@ -865,24 +879,28 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName) {
     restoreDatabase: 'matrix_calendar_restored',
     restoreDatabaseExists: freshDatabaseExists,
   });
+  diagnostics.restoreTargetPlanSafe = targetPlanIsSafe;
   if (!targetPlanIsSafe) {
     throw new StageFailure('restore-targets-prepared', {
       freshVolume: !restoreVolumeExists,
       freshDatabase: !freshDatabaseExists,
     });
   }
+  diagnostics.restoreStep = 'volume-create';
   const created = requireSuccess(
     run('docker', ['volume', 'create', '--name', restoreVolumeName]),
     'restore-targets-prepared',
   )
     .toString('utf8')
     .trim();
-  if (created !== restoreVolumeName) {
+  diagnostics.restoreVolumeCreated = created === restoreVolumeName;
+  if (!diagnostics.restoreVolumeCreated) {
     throw new StageFailure('restore-targets-prepared', {
       freshVolume: false,
       freshDatabase: false,
     });
   }
+  diagnostics.restoreStep = 'volume-empty-check';
   const emptyCheck = requireSuccess(
     run('docker', [
       'run',
@@ -897,17 +915,21 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName) {
       '/app/bin/python',
       RADICALE_IMAGE,
       '-c',
-      "import os,sys; sys.exit(0 if not os.listdir('/data') else 1)",
+      RADICALE_EMPTY_DIRECTORY_CHECK,
     ]),
     'restore-targets-prepared',
-  );
-  if (emptyCheck.length !== 0) {
+  )
+    .toString('utf8')
+    .trim();
+  diagnostics.restoreVolumeEmpty = emptyCheck === 'empty';
+  if (!diagnostics.restoreVolumeEmpty) {
     throw new StageFailure('restore-targets-prepared', {
       freshVolume: false,
       freshDatabase: false,
     });
   }
 
+  diagnostics.restoreStep = 'database-create';
   requireSuccess(
     compose(
       [
@@ -929,10 +951,12 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName) {
     ),
     'restore-targets-prepared',
   );
+  diagnostics.restoreDatabaseCreated = true;
   return { freshVolume: true, freshDatabase: true };
 }
 
-function restoreRadicaleArchive() {
+function restoreRadicaleArchive(diagnostics) {
+  diagnostics.restoreStep = 'archive-extract';
   const archive = readFileSync(radicaleArchivePath);
   requireSuccess(
     run(
@@ -957,7 +981,9 @@ function restoreRadicaleArchive() {
     ),
     'restore-targets-prepared',
   );
-  const nonEmptyCheck = requireSuccess(
+  diagnostics.restoreArchiveExtracted = true;
+  diagnostics.restoreStep = 'restored-volume-count';
+  const entryCount = requireSuccess(
     run('docker', [
       'run',
       '--rm',
@@ -971,11 +997,19 @@ function restoreRadicaleArchive() {
       '/app/bin/python',
       RADICALE_IMAGE,
       '-c',
-      "import os,sys; sys.exit(0 if os.listdir('/data') else 1)",
+      RADICALE_ENTRY_COUNT_CHECK,
     ]),
     'restore-targets-prepared',
-  );
-  if (nonEmptyCheck.length !== 0) {
+  )
+    .toString('utf8')
+    .trim();
+  diagnostics.restoreArchiveEntryCount = /^[012]$/u.test(entryCount)
+    ? Number(entryCount)
+    : 0;
+  if (
+    !/^[012]$/u.test(entryCount) ||
+    diagnostics.restoreArchiveEntryCount === 0
+  ) {
     throw new StageFailure('restore-targets-prepared', {
       freshVolume: true,
       freshDatabase: true,
@@ -983,7 +1017,8 @@ function restoreRadicaleArchive() {
   }
 }
 
-function restorePostgresDump() {
+function restorePostgresDump(diagnostics) {
+  diagnostics.restoreStep = 'postgres-restore';
   const dump = readFileSync(postgresDumpPath);
   requireSuccess(
     compose(
@@ -1007,6 +1042,7 @@ function restorePostgresDump() {
     ),
     'restore-targets-prepared',
   );
+  diagnostics.restorePostgresRestored = true;
 }
 
 async function waitForRestoreRadicale() {
@@ -1023,10 +1059,20 @@ async function restoreStores() {
   await backupRadicale(sourceVolume);
   await backupPostgres();
   await withStage('restore-targets-prepared', async () => {
-    const details = verifyVolumeAbsentAndCreate(sourceVolume);
-    restoreRadicaleArchive();
-    restorePostgresDump();
-    return details;
+    const diagnostics = { restoreStep: 'target-volume-check' };
+    try {
+      const details = verifyVolumeAbsentAndCreate(sourceVolume, diagnostics);
+      restoreRadicaleArchive(diagnostics);
+      restorePostgresDump(diagnostics);
+      diagnostics.restoreStep = 'complete';
+      return { ...details, ...diagnostics };
+    } catch (error) {
+      if (error instanceof StageFailure) {
+        error.details = { ...diagnostics, ...error.details };
+        throw error;
+      }
+      throw new StageFailure('restore-targets-prepared', diagnostics);
+    }
   });
   await withStage('restore-radicale-ready', async () => {
     requireSuccess(
