@@ -49,10 +49,18 @@ type Fixture = {
   roomName: string;
   teamRoomId: string;
   calendarId: string;
-  users: { memberB: FixtureUser };
+  users: {
+    memberA: { userId: string };
+    memberB: FixtureUser;
+  };
 };
 
-type EgressObservation = { blockedRequests: number };
+// Counts only HTTP(S) requests observed by this Playwright context route.
+// WebSockets and traffic outside this route are outside this phase.
+type WebHttpRouteObservation = {
+  observedHttpRequests: number;
+  blockedHttpRequests: number;
+};
 
 const FIXTURE_VALUES = Object.freeze({
   homeserverUrl: 'http://127.0.0.1:8008',
@@ -87,7 +95,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   const contexts: BrowserContext[] = [];
   let desktopBrowser: Browser | undefined;
   let desktopPage: Page | undefined;
-  let egress: EgressObservation | undefined;
+  let webHttpRoute: WebHttpRouteObservation | undefined;
   let currentPhase: DesktopJourneyPhase | undefined;
   let failed = false;
   let evidenceInitialized = false;
@@ -127,6 +135,25 @@ test('Element Desktop room event journey', async ({ browser }) => {
       .getByRole('tree', { name: 'Rooms', exact: true })
       .waitFor({ state: 'visible', timeout: 60_000 });
     recordPhase(evidence, recorded, 'desktop-login');
+
+    currentPhase = 'desktop-member-identity';
+    const expectedMemberAUserId = `@${credentials.username}:localhost`;
+    const membersAreDistinct =
+      fixture.users.memberA.userId !== fixture.users.memberB.userId;
+    const handoffMatchesMemberA =
+      fixture.users.memberA.userId === expectedMemberAUserId;
+    const desktopUserMatchesMemberA = await waitForDesktopMatrixUser(
+      desktopPage,
+      fixture.users.memberA.userId,
+    );
+    if (
+      !membersAreDistinct ||
+      !handoffMatchesMemberA ||
+      !desktopUserMatchesMemberA
+    ) {
+      throw new Error('Desktop did not authenticate as synthetic member A');
+    }
+    recordPhase(evidence, recorded, 'desktop-member-identity');
 
     currentPhase = 'desktop-room-widget-read';
     await desktopElement.navigateToRoomOrInvitation(fixture.roomName);
@@ -170,8 +197,8 @@ test('Element Desktop room event journey', async ({ browser }) => {
     recordPhase(evidence, recorded, 'desktop-event-create');
 
     currentPhase = 'web-member-b-read';
-    egress = { blockedRequests: 0 };
-    const webContext = await makeMemberBContext(browser, fixture, egress);
+    webHttpRoute = { observedHttpRequests: 0, blockedHttpRequests: 0 };
+    const webContext = await makeMemberBContext(browser, fixture, webHttpRoute);
     contexts.push(webContext);
     const webPage = await authenticateMemberB(webContext, fixture);
     const webElement = await openFixtureRoom(webPage, fixture);
@@ -299,15 +326,21 @@ test('Element Desktop room event journey', async ({ browser }) => {
     if (desktopBrowser) {
       await desktopBrowser.close().catch(() => undefined);
     }
-    if (evidenceInitialized && egress && !recorded.has('web-browser-egress')) {
-      const noBlockedRequests = (egress?.blockedRequests ?? 0) === 0;
-      if (!noBlockedRequests) failed = true;
+    if (
+      evidenceInitialized &&
+      webHttpRoute &&
+      !recorded.has('web-http-route-enforcement')
+    ) {
+      const routePolicyEnforced =
+        webHttpRoute.observedHttpRequests > 0 &&
+        webHttpRoute.blockedHttpRequests === 0;
+      if (!routePolicyEnforced) failed = true;
       if (
         !safeRecordPhase(
           evidence,
           recorded,
-          'web-browser-egress',
-          noBlockedRequests ? 'passed' : 'failed',
+          'web-http-route-enforcement',
+          routePolicyEnforced ? 'passed' : 'failed',
         )
       ) {
         failed = true;
@@ -349,6 +382,31 @@ async function getDesktopPage(browser: Browser): Promise<Page> {
   throw new Error('Desktop application page is unavailable');
 }
 
+async function waitForDesktopMatrixUser(
+  page: Page,
+  expectedUserId: string,
+): Promise<boolean> {
+  return page
+    .waitForFunction(
+      (userId) => {
+        type MatrixClient = { getUserId?: () => string | null };
+        type MatrixClientPeg = { get?: () => MatrixClient | undefined };
+        try {
+          const peg = (
+            window as unknown as { mxMatrixClientPeg?: MatrixClientPeg }
+          ).mxMatrixClientPeg;
+          return peg?.get?.()?.getUserId?.() === userId;
+        } catch {
+          return false;
+        }
+      },
+      expectedUserId,
+      { timeout: 30_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+}
+
 async function assertDesktopWidgetAttachment(page: Page, widgetUrl: string) {
   const iframe = page.locator('iframe[title="Matrix Calendar"]');
   await iframe.waitFor({ state: 'attached', timeout: 30_000 });
@@ -381,7 +439,7 @@ async function assertDesktopWidgetAttachment(page: Page, widgetUrl: string) {
 async function makeMemberBContext(
   browser: Browser,
   fixture: Fixture,
-  egress: EgressObservation,
+  routeObservation: WebHttpRouteObservation,
 ): Promise<BrowserContext> {
   const context = await browser.newContext({
     locale: 'en-US',
@@ -397,8 +455,19 @@ async function makeMemberBContext(
   ]);
   await context.route('**/*', async (route) => {
     const requestUrl = parseHttpRequestUrl(route.request());
-    if (!requestUrl || !allowedOrigins.has(requestUrl.origin)) {
-      egress.blockedRequests = Math.min(egress.blockedRequests + 1, 100_000);
+    if (!requestUrl) {
+      await route.abort('blockedbyclient');
+      return;
+    }
+    routeObservation.observedHttpRequests = Math.min(
+      routeObservation.observedHttpRequests + 1,
+      100_000,
+    );
+    if (!allowedOrigins.has(requestUrl.origin)) {
+      routeObservation.blockedHttpRequests = Math.min(
+        routeObservation.blockedHttpRequests + 1,
+        100_000,
+      );
       await route.abort('blockedbyclient');
       return;
     }
@@ -700,6 +769,7 @@ function readFixture(filePath: string): Fixture {
     typeof fixture.roomName !== 'string' ||
     typeof fixture.teamRoomId !== 'string' ||
     typeof fixture.calendarId !== 'string' ||
+    typeof fixture.users?.memberA?.userId !== 'string' ||
     typeof fixture.users?.memberB?.userId !== 'string' ||
     typeof fixture.users.memberB.accessToken !== 'string' ||
     typeof fixture.users.memberB.deviceId !== 'string'

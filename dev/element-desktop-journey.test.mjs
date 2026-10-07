@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -77,6 +78,7 @@ test('rejects broad permissions and extra credential fields', () => {
       () => readSyntheticDesktopCredentials({ filePath, runnerTemp }),
       /Invalid Desktop journey input/u,
     );
+    assert.equal(existsSync(filePath), false);
 
     writeFileSync(
       filePath,
@@ -91,6 +93,26 @@ test('rejects broad permissions and extra credential fields', () => {
       () => readSyntheticDesktopCredentials({ filePath, runnerTemp }),
       /Invalid Desktop journey input/u,
     );
+    assert.equal(existsSync(filePath), true);
+  });
+});
+
+test('removes malformed credential JSON without exposing its contents', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(
+      runnerTemp,
+      'element-acceptance-desktop-credentials.json',
+    );
+    writeFileSync(filePath, '{invalid json', {
+      mode: 0o600,
+      flag: 'wx',
+    });
+
+    assert.throws(
+      () => readSyntheticDesktopCredentials({ filePath, runnerTemp }),
+      /Invalid Desktop journey input/u,
+    );
+    assert.equal(existsSync(filePath), false);
   });
 });
 

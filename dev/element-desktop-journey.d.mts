@@ -1,5 +1,6 @@
 export type DesktopJourneyPhase =
   | 'desktop-login'
+  | 'desktop-member-identity'
   | 'desktop-room-widget-read'
   | 'desktop-widget-origin-isolation'
   | 'desktop-event-create'
@@ -9,7 +10,7 @@ export type DesktopJourneyPhase =
   | 'web-member-b-edit-save'
   | 'desktop-a-refresh'
   | 'canonical-edit-read'
-  | 'web-browser-egress';
+  | 'web-http-route-enforcement';
 
 export type DesktopJourneyOutcome = 'passed' | 'failed';
 

@@ -9,6 +9,7 @@ import { isAbsolute, resolve } from 'node:path';
 
 export const DESKTOP_JOURNEY_PHASES = Object.freeze([
   'desktop-login',
+  'desktop-member-identity',
   'desktop-room-widget-read',
   'desktop-widget-origin-isolation',
   'desktop-event-create',
@@ -18,7 +19,7 @@ export const DESKTOP_JOURNEY_PHASES = Object.freeze([
   'web-member-b-edit-save',
   'desktop-a-refresh',
   'canonical-edit-read',
-  'web-browser-egress',
+  'web-http-route-enforcement',
 ]);
 
 const PHASE_SET = new Set(DESKTOP_JOURNEY_PHASES);
@@ -44,7 +45,7 @@ function privateRunnerPath(filePath, runnerTemp, expectedName) {
   return resolve(filePath);
 }
 
-function privateFileStat(filePath, maximumBytes) {
+function ownedPrivateFileStat(filePath) {
   let stat;
   try {
     stat = lstatSync(filePath);
@@ -56,12 +57,32 @@ function privateFileStat(filePath, maximumBytes) {
     stat.isSymbolicLink() ||
     stat.nlink !== 1 ||
     (stat.mode & 0o777) !== 0o600 ||
-    stat.size > maximumBytes ||
     (typeof process.getuid === 'function' && stat.uid !== process.getuid())
   ) {
     invalidInput();
   }
   return stat;
+}
+
+function privateFileStat(filePath, maximumBytes) {
+  const stat = ownedPrivateFileStat(filePath);
+  if (stat.size > maximumBytes) invalidInput();
+  return stat;
+}
+
+function unlinkOwnedPrivateFile(filePath, expectedStat) {
+  const currentStat = ownedPrivateFileStat(filePath);
+  if (
+    currentStat.dev !== expectedStat.dev ||
+    currentStat.ino !== expectedStat.ino
+  ) {
+    invalidInput();
+  }
+  try {
+    unlinkSync(filePath);
+  } catch {
+    invalidInput();
+  }
 }
 
 function parseEvidence(input) {
@@ -105,12 +126,17 @@ export function readSyntheticDesktopCredentials({ filePath, runnerTemp }) {
     runnerTemp,
     JOURNEY_CREDENTIALS_NAME,
   );
-  privateFileStat(path, MAX_CREDENTIAL_BYTES);
+  const stat = ownedPrivateFileStat(path);
+  if (stat.size > MAX_CREDENTIAL_BYTES) {
+    unlinkOwnedPrivateFile(path, stat);
+    invalidInput();
+  }
 
   let value;
   try {
     value = JSON.parse(readFileSync(path, 'utf8'));
   } catch {
+    unlinkOwnedPrivateFile(path, stat);
     invalidInput();
   }
   if (
@@ -123,14 +149,11 @@ export function readSyntheticDesktopCredentials({ filePath, runnerTemp }) {
     typeof value.password !== 'string' ||
     !/^[A-Za-z0-9_-]{32}$/u.test(value.password)
   ) {
+    unlinkOwnedPrivateFile(path, stat);
     invalidInput();
   }
 
-  try {
-    unlinkSync(path);
-  } catch {
-    invalidInput();
-  }
+  unlinkOwnedPrivateFile(path, stat);
   return { username: value.username, password: value.password };
 }
 
