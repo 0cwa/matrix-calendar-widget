@@ -6,6 +6,7 @@ import {
   isRuntimeDependencyName,
   loadRuntimeDependencyAllowlist,
 } from './element-acceptance-diagnostics.mjs';
+import { formatPerformanceEvidence } from './element-acceptance-performance-evidence.mjs';
 
 const RUNTIME_DEPENDENCIES = loadRuntimeDependencyAllowlist(
   resolve(dirname(fileURLToPath(import.meta.url)), '..'),
@@ -106,6 +107,7 @@ const PHASES = new Set([
   'reminder-restore-prior-state',
   'reminder-restore-scheduler-scan',
   'reminder-restore-no-duplicate',
+  'performance-pilot',
 ]);
 const ROOM_CONTEXT_PHASES = new Set([
   'member-a-room-context',
@@ -279,6 +281,18 @@ const FAILURE_CODES = new Set([
   'element-room-heading-not-present',
   'element-room-name-mismatch',
   'element-room-heading-wait-timeout',
+  'performance-setup-failed',
+  'performance-widget-open-failed',
+  'performance-host-layout-failed',
+  'performance-range-selection-failed',
+  'performance-cold-list-failed',
+  'performance-warmup-failed',
+  'performance-view-sample-failed',
+  'performance-overflow-failed',
+  'performance-details-failed',
+  'performance-egress-blocked',
+  'performance-page-error',
+  'performance-threshold-exceeded',
 ]);
 const CONTAINER_STATES = new Set([
   'created',
@@ -634,6 +648,7 @@ const ALLOWED_KEYS = new Set([
   'homeserverHttpErrorCount',
   'homeserverLastHttpErrorStatus',
   'failureCode',
+  'performanceReport',
   'missingModuleKind',
   'missingDependency',
   'processExitCode',
@@ -1258,6 +1273,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
   const phases = new Map();
   let rejectedPhase = 'unknown';
   let rejectionCategory = 'invalid-stage-record';
+  let performanceTerminalStatus;
   for (const line of input.split(/\r?\n/u)) {
     if (!line) continue;
 
@@ -1286,6 +1302,26 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       !PHASES.has(record.phase) ||
       !STATUSES.has(record.status)
     ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    if (record.phase === 'performance-pilot') {
+      if (performanceTerminalStatus !== undefined) {
+        throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+      }
+      try {
+        formatPerformanceEvidence(record);
+      } catch {
+        throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+      }
+      if (record.status === 'started') {
+        if (Object.hasOwn(record, 'failureCode')) {
+          throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+        }
+      } else {
+        performanceTerminalStatus = record.status;
+      }
+    } else if (Object.hasOwn(record, 'performanceReport')) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
@@ -2093,6 +2129,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `node_observed=${record.nodeVersion}`,
         ].join(' '),
       );
+      continue;
+    }
+
+    if (phase === 'performance-pilot') {
+      lines.push(...formatPerformanceEvidence(record));
       continue;
     }
 
