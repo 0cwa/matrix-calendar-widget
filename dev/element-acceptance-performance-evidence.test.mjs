@@ -314,6 +314,8 @@ test('requires visible unobscured hover evidence for pass and preserves fixed fa
   const hoverFailure = completeReport();
   hoverFailure.coldList.hostHeaderHoverCompleted = false;
   hoverFailure.coldList.hostHoverActionability.failureClass = 'intercepted';
+  hoverFailure.coldList.hostHoverActionability.centerHit =
+    'persisted-widget-iframe';
   const summary = sanitizeElementAcceptance(
     JSON.stringify(
       stage('failed', hoverFailure, 'performance-host-layout-failed'),
@@ -321,7 +323,23 @@ test('requires visible unobscured hover evidence for pass and preserves fixed fa
     sourceSha,
   );
   assert.match(summary, /host_hover_failure_class=intercepted/u);
+  assert.match(summary, /host_hover_center_hit=persisted-widget-iframe/u);
   assert.doesNotMatch(summary, /pointer|hidden-title|secret-value/u);
+
+  const unknownHit = completeReport();
+  unknownHit.coldList.hostHeaderHoverCompleted = false;
+  unknownHit.coldList.hostHoverActionability.failureClass = 'intercepted';
+  unknownHit.coldList.hostHoverActionability.centerHit = 'private-selector';
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(
+          stage('failed', unknownHit, 'performance-host-layout-failed'),
+        ),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
 });
 
 test('requires the pinned app-drawer route and retains only fixed page-error classes', () => {

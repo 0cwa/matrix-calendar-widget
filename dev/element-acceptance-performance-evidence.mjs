@@ -50,7 +50,16 @@ const HOST_HOVER_FAILURE_CLASSES = new Set([
   'detached',
   'other',
 ]);
-const HOST_HOVER_CENTER_HITS = new Set(['toolbar', 'tile', 'other', 'none']);
+const HOST_HOVER_CENTER_HITS = new Set([
+  'toolbar',
+  'tile',
+  'persisted-widget-iframe',
+  'element-dialog',
+  'context-menu',
+  'drawer',
+  'other',
+  'none',
+]);
 const API_SAMPLE =
   /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5])$/u;
 

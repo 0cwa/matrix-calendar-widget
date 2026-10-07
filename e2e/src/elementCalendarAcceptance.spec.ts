@@ -375,7 +375,16 @@ type PerformanceHoverActionability = {
   positiveBox: boolean | null;
   viewportIntersection: boolean | null;
   hiddenAncestor: boolean | null;
-  centerHit: 'toolbar' | 'tile' | 'other' | 'none' | null;
+  centerHit:
+    | 'toolbar'
+    | 'tile'
+    | 'persisted-widget-iframe'
+    | 'element-dialog'
+    | 'context-menu'
+    | 'drawer'
+    | 'other'
+    | 'none'
+    | null;
   failureClass:
     | 'not-attempted'
     | 'none'
@@ -2051,14 +2060,35 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
             centerY < window.innerHeight
               ? document.elementFromPoint(centerX, centerY)
               : null;
-          const centerHit =
-            hit === null
-              ? 'none'
-              : toolbar.contains(hit)
-                ? 'toolbar'
-                : tile?.contains(hit)
-                  ? 'tile'
-                  : 'other';
+          let centerHit:
+            | 'toolbar'
+            | 'tile'
+            | 'persisted-widget-iframe'
+            | 'element-dialog'
+            | 'context-menu'
+            | 'drawer'
+            | 'other'
+            | 'none';
+          if (hit === null) {
+            centerHit = 'none';
+          } else if (toolbar.contains(hit)) {
+            centerHit = 'toolbar';
+          } else if (tile?.contains(hit)) {
+            centerHit = 'tile';
+          } else if (
+            hit instanceof HTMLIFrameElement &&
+            hit.title === 'Matrix Calendar'
+          ) {
+            centerHit = 'persisted-widget-iframe';
+          } else if (hit.closest('[role="dialog"]') !== null) {
+            centerHit = 'element-dialog';
+          } else if (hit.closest('.mx_ContextualMenu') !== null) {
+            centerHit = 'context-menu';
+          } else if (hit.closest('.mx_AppsDrawer') !== null) {
+            centerHit = 'drawer';
+          } else {
+            centerHit = 'other';
+          }
           return {
             connected: toolbar.isConnected,
             positiveBox,
