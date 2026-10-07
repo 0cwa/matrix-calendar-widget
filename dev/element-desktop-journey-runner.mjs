@@ -135,6 +135,67 @@ function capture(program, args, { input, timeout = 10_000, cwd, env } = {}) {
   return result.stdout;
 }
 
+export function classifyPasswdLookupResult(result, expectedUsername) {
+  if (
+    result === null ||
+    typeof result !== 'object' ||
+    result.error ||
+    (result.signal !== null && result.signal !== undefined) ||
+    !Number.isInteger(result.status) ||
+    typeof expectedUsername !== 'string'
+  ) {
+    return { state: 'unavailable' };
+  }
+  if (result.status === 2 && result.stdout === '') {
+    return { state: 'absent' };
+  }
+  if (
+    result.status !== 0 ||
+    typeof result.stdout !== 'string' ||
+    Buffer.byteLength(result.stdout) > 4_096
+  ) {
+    return { state: 'unavailable' };
+  }
+
+  const records = result.stdout.split(/\r?\n/u);
+  if (records.at(-1) === '') records.pop();
+  if (records.length !== 1) return { state: 'unavailable' };
+  const fields = records[0].split(':');
+  if (
+    fields.length !== 7 ||
+    fields[0] !== expectedUsername ||
+    !/^[0-9]{1,10}$/u.test(fields[2]) ||
+    !/^[0-9]{1,10}$/u.test(fields[3])
+  ) {
+    return { state: 'unavailable' };
+  }
+  const uid = Number(fields[2]);
+  const groupId = Number(fields[3]);
+  if (!Number.isSafeInteger(uid) || !Number.isSafeInteger(groupId)) {
+    return { state: 'unavailable' };
+  }
+  return { state: 'present', uid };
+}
+
+export function lookupPasswdAccount(username, commandRunner = spawnSync) {
+  if (typeof username !== 'string' || typeof commandRunner !== 'function') {
+    return { state: 'unavailable' };
+  }
+  let result;
+  try {
+    result = commandRunner('getent', ['-s', 'files', 'passwd', username], {
+      encoding: 'utf8',
+      env: createSystemCommandEnvironment(process.env),
+      maxBuffer: 8_192,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2_000,
+    });
+  } catch {
+    return { state: 'unavailable' };
+  }
+  return classifyPasswdLookupResult(result, username);
+}
+
 function requiredCommand(program, args, options = {}) {
   const output = capture(program, args, options);
   if (output === undefined) throw failure();
@@ -702,10 +763,8 @@ function localCdpPort() {
 }
 
 async function createPrivateProfile(config, mode) {
-  const existingUser = capture('getent', ['passwd', PROBE_USERNAME], {
-    timeout: 2_000,
-  });
-  if (existingUser !== undefined) throw failure('unsupported-runner');
+  const existingUser = lookupPasswdAccount(PROBE_USERNAME);
+  if (existingUser.state !== 'absent') throw failure('unsupported-runner');
   const groupRecord = requiredCommand('getent', ['group', 'nogroup']);
   const groupIdText = groupRecord.split(':')[2];
   if (!/^[0-9]{1,5}$/u.test(groupIdText ?? '')) {
@@ -1697,17 +1756,13 @@ function cleanupPolicy(state) {
   );
 }
 
-function cleanupUser(state, allowDeletion) {
-  const account = capture('getent', ['passwd', state.username], {
-    timeout: 2_000,
-  });
+export function cleanupUser(state, allowDeletion, commandRunner = spawnSync) {
+  const account = lookupPasswdAccount(state.username, commandRunner);
   let userdelStatus = 'not_run';
   let userdelExitStatus = null;
-  let status = 'passed';
-  if (account !== undefined) {
-    const fields = account.trim().split(':');
-    const accountUid = Number(fields[2]);
-    if (fields[0] !== state.username || accountUid !== state.uid) {
+  let status = account.state === 'unavailable' ? 'failed' : 'passed';
+  if (account.state === 'present') {
+    if (account.uid !== state.uid) {
       status = 'failed';
     } else if (!state.userMayBeCreated || !allowDeletion) {
       status = 'failed';
@@ -1726,23 +1781,36 @@ function cleanupUser(state, allowDeletion) {
         { timeout: 12_000 },
       );
       userdelStatus = userdelExitStatus === 0 ? 'passed' : 'failed';
-      const remaining = capture('getent', ['passwd', state.username], {
-        timeout: 2_000,
-      });
-      if (remaining !== undefined) status = 'failed';
+      if (userdelStatus !== 'passed') status = 'failed';
     }
   }
-  const afterDelete = capture('getent', ['passwd', state.username], {
-    timeout: 2_000,
-  });
+  const afterDelete = lookupPasswdAccount(state.username, commandRunner);
   let accountState = 'unavailable';
-  if (afterDelete === undefined) {
+  if (afterDelete.state === 'absent') {
     accountState = 'absent';
+  } else if (afterDelete.state === 'present') {
+    accountState = afterDelete.uid === state.uid ? 'uid_match' : 'uid_mismatch';
+    status = 'failed';
   } else {
-    const uid = Number(afterDelete.trim().split(':')[2]);
-    accountState = uid === state.uid ? 'uid_match' : 'uid_mismatch';
+    status = 'failed';
   }
+  if (account.state === 'unavailable') status = 'failed';
   return { status, userdelStatus, userdelExitStatus, accountState };
+}
+
+export function cleanupProofAllowsPolicyRemoval({
+  processStatus,
+  beforeUserdelClear,
+  finalUidClear,
+  user,
+}) {
+  return (
+    processStatus === 'passed' &&
+    beforeUserdelClear === true &&
+    finalUidClear === true &&
+    user?.status === 'passed' &&
+    user.accountState === 'absent'
+  );
 }
 
 function cleanupProfile(state, allowCleanup) {
@@ -1890,11 +1958,12 @@ async function cleanupRunner(config) {
     const finalUidClear =
       finalLifecycle.state === 'observed' &&
       finalLifecycle.uidProcessCount === 0;
-    const cleanupProof =
-      processStatus === 'passed' &&
-      beforeUserdelClear &&
-      finalUidClear &&
-      user.accountState === 'absent';
+    const cleanupProof = cleanupProofAllowsPolicyRemoval({
+      processStatus,
+      beforeUserdelClear,
+      finalUidClear,
+      user,
+    });
     if (cleanupProof) {
       policyStatus =
         !state.policyMayBeInstalled || cleanupPolicy(state)

@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildDesktopPolicyArguments,
+  classifyPasswdLookupResult,
+  cleanupProofAllowsPolicyRemoval,
+  cleanupUser,
   createJourneyChildEnvironment,
   createSystemCommandEnvironment,
+  lookupPasswdAccount,
   parseStartupProgressRecord,
   selectAvailableProbeUid,
   selectPinnedPackageHash,
@@ -149,6 +153,79 @@ test('keeps the default CDP port distinct from the Matrix fixture', () => {
   for (const port of [8_008, 1_023, 65_536, 42_424.5]) {
     assert.equal(validateDefaultPolicyPort(port), false);
   }
+});
+
+test('removes the probe account only after authoritative passwd lookups', () => {
+  const notFound = classifyPasswdLookupResult(
+    { status: 2, signal: null, stdout: '' },
+    'mcwdesktopprobe',
+  );
+  assert.deepEqual(notFound, { state: 'absent' });
+  assert.deepEqual(
+    classifyPasswdLookupResult(
+      { status: 0, signal: null, stdout: 'malformed passwd record\n' },
+      'mcwdesktopprobe',
+    ),
+    { state: 'unavailable' },
+  );
+
+  const state = {
+    username: 'mcwdesktopprobe',
+    uid: 24_001,
+    userMayBeCreated: true,
+  };
+  let lookupCount = 0;
+  const injectedGetent = (program, args) => {
+    assert.equal(program, 'getent');
+    assert.deepEqual(args, ['-s', 'files', 'passwd', 'mcwdesktopprobe']);
+    lookupCount += 1;
+    if (lookupCount === 1) {
+      return {
+        error: Object.assign(new Error('injected timeout'), {
+          code: 'ETIMEDOUT',
+        }),
+        signal: 'SIGTERM',
+        status: null,
+        stdout: '',
+      };
+    }
+    return { status: 2, signal: null, stdout: '' };
+  };
+  const cleanup = cleanupUser(state, true, injectedGetent);
+  assert.equal(lookupCount, 2);
+  assert.deepEqual(cleanup, {
+    status: 'failed',
+    userdelStatus: 'not_run',
+    userdelExitStatus: null,
+    accountState: 'absent',
+  });
+
+  const requiredEvidence = {
+    processStatus: 'passed',
+    beforeUserdelClear: true,
+    finalUidClear: true,
+  };
+  assert.equal(
+    cleanupProofAllowsPolicyRemoval({ ...requiredEvidence, user: cleanup }),
+    false,
+  );
+  assert.equal(
+    cleanupProofAllowsPolicyRemoval({
+      ...requiredEvidence,
+      user: {
+        status: 'passed',
+        accountState: 'absent',
+      },
+    }),
+    true,
+  );
+
+  const confirmedAbsent = lookupPasswdAccount('mcwdesktopprobe', () => ({
+    status: 2,
+    signal: null,
+    stdout: '',
+  }));
+  assert.deepEqual(confirmedAbsent, { state: 'absent' });
 });
 
 test('selects the first unused UID from one bounded account snapshot', () => {
