@@ -243,13 +243,13 @@ test('emits only bounded post-create refresh and event-match evidence', () => {
   }
 });
 
-test('labels an incomplete CalDAV comparison as inconclusive', () => {
+test('labels an incomplete REPORT comparison as inconclusive', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify(
       postCreateVisibilityObservation({
         caldavReportProbeCompleted: false,
-        caldavOpenIdHttpStatus: 503,
-        caldavReportHttpStatus: null,
+        caldavOpenIdHttpStatus: 200,
+        caldavReportHttpStatus: 207,
         caldavReportContainsCreatedEvent: null,
       }),
     ),
@@ -258,7 +258,7 @@ test('labels an incomplete CalDAV comparison as inconclusive', () => {
 
   assert.match(
     summary,
-    /caldav_report_probe_completed=false caldav_openid_http_status=503 caldav_report_http_status=none caldav_report_contains_created_event=inconclusive/u,
+    /caldav_report_probe_completed=false caldav_openid_http_status=200 caldav_report_http_status=207 caldav_report_contains_created_event=inconclusive/u,
   );
 });
 

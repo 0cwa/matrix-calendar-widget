@@ -148,7 +148,8 @@ async function main() {
           break;
         }
       } catch {
-        // Keep malformed or unsupported event contents inside this process.
+        writeResult(unavailable(openIdStatus, reportStatus));
+        return;
       }
     }
     writeResult({
