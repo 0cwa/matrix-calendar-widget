@@ -125,6 +125,25 @@ const PROBE_SPAWN_ERRORS = new Set([
   'resource',
   'timeout',
 ]);
+const DESKTOP_CHILD_STATES = new Set([
+  'not-started',
+  'running',
+  'exited',
+  'signaled',
+  'spawn-error',
+]);
+const DESKTOP_CHILD_SPAWN_ERRORS = new Set([
+  'missing-executable',
+  'other',
+  'permission',
+  'resource',
+]);
+const DESKTOP_PAGE_LOAD_OUTCOMES = new Set([
+  'not-attempted',
+  'domcontentloaded',
+  'domcontentloaded-timeout',
+  'domcontentloaded-failed',
+]);
 const PROBE_STDERR_CLASSES = new Set([
   'empty',
   'missing-import',
@@ -191,6 +210,110 @@ function safeStoragePassed(value) {
     value.markerCount === 1 &&
     value.mode === 'encrypted' &&
     ENCRYPTED_STORAGE_BACKENDS.has(value.backend)
+  );
+}
+
+function validateDesktopObservation(value) {
+  if (
+    !hasKeys(value, [
+      'childState',
+      'childExitStatus',
+      'childSignal',
+      'childSpawnErrorClass',
+      'cdp',
+      'pageLoadOutcome',
+    ]) ||
+    !DESKTOP_CHILD_STATES.has(value.childState) ||
+    ![null, ...PROBE_SIGNALS].includes(value.childSignal) ||
+    (value.childExitStatus !== null &&
+      (!Number.isSafeInteger(value.childExitStatus) ||
+        value.childExitStatus < 0 ||
+        value.childExitStatus > 255)) ||
+    (value.childSpawnErrorClass !== null &&
+      !DESKTOP_CHILD_SPAWN_ERRORS.has(value.childSpawnErrorClass)) ||
+    !DESKTOP_PAGE_LOAD_OUTCOMES.has(value.pageLoadOutcome) ||
+    !hasKeys(value.cdp, [
+      'versionResponseCount',
+      'versionOkResponseCount',
+      'versionLastStatus',
+      'versionJsonValidObserved',
+      'targetListResponseCount',
+      'targetListOkResponseCount',
+      'targetListLastStatus',
+      'targetListJsonValidObserved',
+      'pageTargetCount',
+      'fixedOriginPageCount',
+    ])
+  ) {
+    return false;
+  }
+
+  const childShapeValid =
+    value.childState === 'not-started'
+      ? value.childExitStatus === null &&
+        value.childSignal === null &&
+        value.childSpawnErrorClass === null
+      : value.childState === 'running'
+        ? value.childExitStatus === null &&
+          value.childSignal === null &&
+          value.childSpawnErrorClass === null
+        : value.childState === 'exited'
+          ? value.childExitStatus !== null &&
+            value.childSignal === null &&
+            value.childSpawnErrorClass === null
+          : value.childState === 'signaled'
+            ? value.childExitStatus === null &&
+              value.childSignal !== null &&
+              value.childSpawnErrorClass === null
+            : value.childExitStatus === null &&
+              value.childSignal === null &&
+              value.childSpawnErrorClass !== null;
+  if (!childShapeValid) return false;
+
+  for (const name of ['version', 'targetList']) {
+    const responseCount = value.cdp[`${name}ResponseCount`];
+    const okCount = value.cdp[`${name}OkResponseCount`];
+    const lastStatus = value.cdp[`${name}LastStatus`];
+    const jsonValid = value.cdp[`${name}JsonValidObserved`];
+    if (
+      !Number.isSafeInteger(responseCount) ||
+      responseCount < 0 ||
+      responseCount > 2 ||
+      !Number.isSafeInteger(okCount) ||
+      okCount < 0 ||
+      okCount > responseCount ||
+      (lastStatus !== null &&
+        (!Number.isSafeInteger(lastStatus) ||
+          lastStatus < 100 ||
+          lastStatus > 599)) ||
+      (responseCount === 0) !== (lastStatus === null) ||
+      typeof jsonValid !== 'boolean' ||
+      (jsonValid && okCount === 0)
+    ) {
+      return false;
+    }
+  }
+  const pageCountsValid = value.cdp.targetListJsonValidObserved
+    ? Number.isSafeInteger(value.cdp.pageTargetCount) &&
+      value.cdp.pageTargetCount >= 0 &&
+      value.cdp.pageTargetCount <= 2 &&
+      Number.isSafeInteger(value.cdp.fixedOriginPageCount) &&
+      value.cdp.fixedOriginPageCount >= 0 &&
+      value.cdp.fixedOriginPageCount <= value.cdp.pageTargetCount
+    : value.cdp.pageTargetCount === null &&
+      value.cdp.fixedOriginPageCount === null;
+  return pageCountsValid;
+}
+
+function desktopObservationPassed(value) {
+  return (
+    value.childState === 'running' &&
+    value.cdp.versionOkResponseCount > 0 &&
+    value.cdp.versionJsonValidObserved &&
+    value.cdp.targetListOkResponseCount > 0 &&
+    value.cdp.targetListJsonValidObserved &&
+    value.cdp.fixedOriginPageCount > 0 &&
+    value.pageLoadOutcome === 'domcontentloaded'
   );
 }
 
@@ -503,6 +626,7 @@ function validateStartup(record, sourceSha) {
       'origin',
       'secretService',
       'safeStorage',
+      'desktopObservation',
       'rendererCount',
       'checks',
     ]) ||
@@ -512,9 +636,10 @@ function validateStartup(record, sourceSha) {
       !STARTUP_FAILURES.has(record.failureCode)) ||
     record.sourceSha !== sourceSha ||
     record.origin !== ORIGIN ||
-    !Number.isSafeInteger(record.rendererCount) ||
-    record.rendererCount < 0 ||
-    record.rendererCount > 2 ||
+    (record.rendererCount !== null &&
+      (!Number.isSafeInteger(record.rendererCount) ||
+        record.rendererCount < 1 ||
+        record.rendererCount > 2)) ||
     !hasKeys(record.package, ['version', 'architecture', 'sha256']) ||
     ![null, '1.12.30'].includes(record.package.version) ||
     ![null, 'amd64'].includes(record.package.architecture) ||
@@ -538,6 +663,7 @@ function validateStartup(record, sourceSha) {
     ) ||
     !validateSecretService(record.secretService) ||
     !validateSafeStorage(record.safeStorage) ||
+    !validateDesktopObservation(record.desktopObservation) ||
     record.runtime.runner !== 'ubuntu-24.04' ||
     !hasKeys(record.checks, CHECK_NAMES) ||
     Object.values(record.checks).some((value) => !isStatus(value))
@@ -561,7 +687,9 @@ function validateStartup(record, sourceSha) {
   if (
     record.status === 'passed' &&
     (record.failureCode !== null ||
+      record.rendererCount === null ||
       record.rendererCount < 1 ||
+      !desktopObservationPassed(record.desktopObservation) ||
       Object.values(record.checks).some((value) => value !== 'passed') ||
       !safeStoragePassed(record.safeStorage) ||
       record.package.version !== '1.12.30' ||
@@ -807,6 +935,28 @@ function defaultChecks() {
   );
 }
 
+function emptyDesktopObservation() {
+  return {
+    childState: 'not-started',
+    childExitStatus: null,
+    childSignal: null,
+    childSpawnErrorClass: null,
+    cdp: {
+      versionResponseCount: 0,
+      versionOkResponseCount: 0,
+      versionLastStatus: null,
+      versionJsonValidObserved: false,
+      targetListResponseCount: 0,
+      targetListOkResponseCount: 0,
+      targetListLastStatus: null,
+      targetListJsonValidObserved: false,
+      pageTargetCount: null,
+      fixedOriginPageCount: null,
+    },
+    pageLoadOutcome: 'not-attempted',
+  };
+}
+
 function setFailure(candidate, fallback) {
   if (candidate?.failureCode) return candidate.failureCode;
   if (candidate?.status === 'failed') return fallback;
@@ -910,7 +1060,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -948,7 +1098,9 @@ export function sanitizeDesktopStages(records, sourceSha) {
       markerCount: 0,
       complete: false,
     },
-    rendererCount: startup?.rendererCount ?? 0,
+    desktopObservation:
+      startup?.desktopObservation ?? emptyDesktopObservation(),
+    rendererCount: startup?.rendererCount ?? null,
     targetUidPreflight: targetUidPreflight ?? null,
     egressBlocked: {
       ipv4: observation?.ipv4Blocked ?? null,
@@ -971,13 +1123,14 @@ export function validDesktopSummary(value) {
       'origin',
       'secretService',
       'safeStorage',
+      'desktopObservation',
       'rendererCount',
       'targetUidPreflight',
       'egressBlocked',
       'egressProbe',
       'checks',
     ]) &&
-    value.schemaVersion === 7 &&
+    value.schemaVersion === 8 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
@@ -1018,15 +1171,17 @@ export function validDesktopSummary(value) {
     (value.checks?.secretService !== 'failed' ||
       !['not-run', 'none'].includes(value.secretService.step)) &&
     validateSafeStorage(value.safeStorage) &&
+    validateDesktopObservation(value.desktopObservation) &&
     (value.targetUidPreflight === null ||
       validateTargetUidPreflight(value.targetUidPreflight)) &&
     value.checks?.isolatedNodePreflight ===
       (value.targetUidPreflight?.status ?? 'not_run') &&
     value.runtime.runner === 'ubuntu-24.04' &&
     value.origin === ORIGIN &&
-    Number.isSafeInteger(value.rendererCount) &&
-    value.rendererCount >= 0 &&
-    value.rendererCount <= 2 &&
+    (value.rendererCount === null ||
+      (Number.isSafeInteger(value.rendererCount) &&
+        value.rendererCount >= 1 &&
+        value.rendererCount <= 2)) &&
     hasKeys(value.egressBlocked, ['ipv4', 'ipv6']) &&
     ['ipv4', 'ipv6'].every(
       (family) =>
@@ -1053,6 +1208,8 @@ export function validDesktopSummary(value) {
         value.targetUidPreflight?.status === 'passed' &&
         secretServicePassed(value.secretService) &&
         safeStoragePassed(value.safeStorage) &&
+        desktopObservationPassed(value.desktopObservation) &&
+        value.rendererCount !== null &&
         value.runtime.electron !== null &&
         value.runtime.chromium !== null &&
         value.egressBlocked.ipv4 === 0 &&

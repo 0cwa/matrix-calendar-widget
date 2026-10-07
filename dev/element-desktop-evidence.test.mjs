@@ -68,6 +68,29 @@ function passingSecretService() {
   };
 }
 
+function passingDesktopObservation(overrides = {}) {
+  return {
+    childState: 'running',
+    childExitStatus: null,
+    childSignal: null,
+    childSpawnErrorClass: null,
+    cdp: {
+      versionResponseCount: 1,
+      versionOkResponseCount: 1,
+      versionLastStatus: 200,
+      versionJsonValidObserved: true,
+      targetListResponseCount: 1,
+      targetListOkResponseCount: 1,
+      targetListLastStatus: 200,
+      targetListJsonValidObserved: true,
+      pageTargetCount: 1,
+      fixedOriginPageCount: 1,
+    },
+    pageLoadOutcome: 'domcontentloaded',
+    ...overrides,
+  };
+}
+
 function passingTargetUidPreflight() {
   return {
     phase: 'target-uid-preflight',
@@ -135,6 +158,7 @@ function stages(overrides = {}) {
         markerCount: 1,
         complete: true,
       },
+      desktopObservation: passingDesktopObservation(),
       rendererCount: 1,
       checks: { ...checks },
     },
@@ -165,7 +189,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 7);
+  assert.equal(summary.schemaVersion, 8);
   assert.equal(summary.failureCode, null);
   assert.equal(summary.checks.isolatedNodePreflight, 'passed');
   assert.equal(summary.targetUidPreflight.status, 'passed');
@@ -306,6 +330,8 @@ test('Desktop evidence reports absent startup as incomplete and rejects degraded
   assert.equal(missingSummary.status, 'failed');
   assert.equal(missingSummary.failureCode, 'evidence-incomplete');
   assert.equal(missingSummary.checks.privateProfile, 'not_run');
+  assert.equal(missingSummary.rendererCount, null);
+  assert.equal(missingSummary.desktopObservation.childState, 'not-started');
 
   const missingPreflight = stages().filter(
     (record) => record.phase !== 'target-uid-preflight',
@@ -456,4 +482,58 @@ test('Desktop evidence reports absent startup as incomplete and rejects degraded
   const degradedSummary = sanitizeDesktopStages(degraded, sourceSha);
   assert.equal(degradedSummary.status, 'failed');
   assert.equal(degradedSummary.failureCode, 'safe-storage-backend-unconfirmed');
+});
+
+test('Desktop evidence distinguishes pre-cleanup child exit, CDP responses, and page load', () => {
+  const exited = stages();
+  exited[1].status = 'failed';
+  exited[1].failureCode = 'desktop-not-ready';
+  exited[1].rendererCount = null;
+  exited[1].desktopObservation = passingDesktopObservation({
+    childState: 'exited',
+    childExitStatus: 1,
+    cdp: {
+      versionResponseCount: 1,
+      versionOkResponseCount: 1,
+      versionLastStatus: 200,
+      versionJsonValidObserved: true,
+      targetListResponseCount: 1,
+      targetListOkResponseCount: 1,
+      targetListLastStatus: 200,
+      targetListJsonValidObserved: true,
+      pageTargetCount: 1,
+      fixedOriginPageCount: 0,
+    },
+    pageLoadOutcome: 'not-attempted',
+  });
+  const exitedSummary = sanitizeDesktopStages(exited, sourceSha);
+  assert.equal(exitedSummary.status, 'failed');
+  assert.equal(exitedSummary.desktopObservation.childState, 'exited');
+  assert.equal(exitedSummary.desktopObservation.childExitStatus, 1);
+  assert.equal(
+    exitedSummary.desktopObservation.cdp.versionJsonValidObserved,
+    true,
+  );
+  assert.equal(exitedSummary.desktopObservation.cdp.fixedOriginPageCount, 0);
+  assert.equal(exitedSummary.rendererCount, null);
+
+  const timedOutPage = stages();
+  timedOutPage[1].status = 'failed';
+  timedOutPage[1].failureCode = 'desktop-not-ready';
+  timedOutPage[1].rendererCount = null;
+  timedOutPage[1].desktopObservation = passingDesktopObservation({
+    pageLoadOutcome: 'domcontentloaded-timeout',
+  });
+  const timedOutSummary = sanitizeDesktopStages(timedOutPage, sourceSha);
+  assert.equal(
+    timedOutSummary.desktopObservation.pageLoadOutcome,
+    'domcontentloaded-timeout',
+  );
+
+  const impossibleRenderer = stages();
+  impossibleRenderer[1].rendererCount = 0;
+  assert.throws(
+    () => sanitizeDesktopStages(impossibleRenderer, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
 });

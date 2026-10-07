@@ -24,6 +24,30 @@ const SAFE_STORAGE_BACKENDS = new Set([
 const SAFE_STORAGE_MODES = new Set(['encrypted', 'plaintext', 'basic_text']);
 const MAX_SAFE_STORAGE_LOG_BYTES = 1_048_576;
 const MAX_SAFE_STORAGE_LINE_LENGTH = 512;
+const CHILD_SIGNALS = new Set([
+  'SIGABRT',
+  'SIGALRM',
+  'SIGBUS',
+  'SIGFPE',
+  'SIGHUP',
+  'SIGILL',
+  'SIGINT',
+  'SIGKILL',
+  'SIGPIPE',
+  'SIGQUIT',
+  'SIGSEGV',
+  'SIGTERM',
+  'SIGTRAP',
+  'SIGUSR1',
+  'SIGUSR2',
+  'other',
+]);
+const CHILD_SPAWN_ERRORS = new Set([
+  'missing-executable',
+  'other',
+  'permission',
+  'resource',
+]);
 const CHECK_NAMES = Object.freeze([
   'sourceSha',
   'runner',
@@ -251,6 +275,7 @@ let app;
 let browser;
 let appClosePromise;
 let appClosed = false;
+let appSpawnErrorClass = null;
 let safeStorageLogCollector;
 let safeStorageObservation = {
   mode: 'not_observed',
@@ -259,7 +284,86 @@ let safeStorageObservation = {
   complete: false,
 };
 let secretServiceObservation = emptySecretServiceObservation();
+const desktopObservation = {
+  childState: 'not-started',
+  childExitStatus: null,
+  childSignal: null,
+  childSpawnErrorClass: null,
+  cdp: {
+    versionResponseCount: 0,
+    versionOkResponseCount: 0,
+    versionLastStatus: null,
+    versionJsonValidObserved: false,
+    targetListResponseCount: 0,
+    targetListOkResponseCount: 0,
+    targetListLastStatus: null,
+    targetListJsonValidObserved: false,
+    pageTargetCount: null,
+    fixedOriginPageCount: null,
+  },
+  pageLoadOutcome: 'not-attempted',
+};
 let failureCode = null;
+
+function cappedTwo(value) {
+  return Math.min(value, 2);
+}
+
+function finiteStatus(value) {
+  return Number.isSafeInteger(value) && value >= 100 && value <= 599
+    ? value
+    : null;
+}
+
+function recordCdpResponse(name, response) {
+  const countName = `${name}ResponseCount`;
+  const okCountName = `${name}OkResponseCount`;
+  const statusName = `${name}LastStatus`;
+  desktopObservation.cdp[countName] = cappedTwo(
+    desktopObservation.cdp[countName] + 1,
+  );
+  desktopObservation.cdp[statusName] = finiteStatus(response.status);
+  if (response.ok) {
+    desktopObservation.cdp[okCountName] = cappedTwo(
+      desktopObservation.cdp[okCountName] + 1,
+    );
+  }
+}
+
+function classifyChildSpawnError(error) {
+  if (error?.code === 'ENOENT') return 'missing-executable';
+  if (error?.code === 'EACCES' || error?.code === 'EPERM') return 'permission';
+  if (['EMFILE', 'ENFILE', 'ENOMEM', 'EAGAIN'].includes(error?.code))
+    return 'resource';
+  return 'other';
+}
+
+function sampleChildBeforeCleanup() {
+  if (!app) return;
+  if (appSpawnErrorClass !== null) {
+    desktopObservation.childState = 'spawn-error';
+    desktopObservation.childSpawnErrorClass = CHILD_SPAWN_ERRORS.has(
+      appSpawnErrorClass,
+    )
+      ? appSpawnErrorClass
+      : 'other';
+  } else if (app.exitCode !== null) {
+    desktopObservation.childState = 'exited';
+    desktopObservation.childExitStatus =
+      Number.isSafeInteger(app.exitCode) &&
+      app.exitCode >= 0 &&
+      app.exitCode <= 255
+        ? app.exitCode
+        : null;
+  } else if (app.signalCode !== null) {
+    desktopObservation.childState = 'signaled';
+    desktopObservation.childSignal = CHILD_SIGNALS.has(app.signalCode)
+      ? app.signalCode
+      : 'other';
+  } else {
+    desktopObservation.childState = 'running';
+  }
+}
 
 function fail(code, check) {
   throw new ProbeFailure(code, check);
@@ -620,7 +724,7 @@ async function waitForDebugger() {
     if (app.exitCode !== null || app.signalCode !== null)
       fail('desktop-not-ready', 'desktopProcess');
     try {
-      const [versionResponse, targetResponse] = await Promise.all([
+      const [versionResult, targetResult] = await Promise.allSettled([
         fetch(`http://127.0.0.1:${cdpPort}/json/version`, {
           redirect: 'error',
           signal: AbortSignal.timeout(750),
@@ -630,11 +734,69 @@ async function waitForDebugger() {
           signal: AbortSignal.timeout(750),
         }),
       ]);
-      if (versionResponse.ok && targetResponse.ok) {
-        const [versionInfo, targets] = await Promise.all([
-          versionResponse.json(),
-          targetResponse.json(),
-        ]);
+      let versionInfo;
+      let targets;
+      if (versionResult.status === 'fulfilled') {
+        const response = versionResult.value;
+        recordCdpResponse('version', response);
+        if (response.ok) {
+          try {
+            const parsed = await response.json();
+            if (
+              parsed !== null &&
+              typeof parsed === 'object' &&
+              !Array.isArray(parsed) &&
+              typeof parsed.webSocketDebuggerUrl === 'string'
+            ) {
+              versionInfo = parsed;
+              desktopObservation.cdp.versionJsonValidObserved = true;
+            }
+          } catch {
+            // A malformed transient CDP response is recorded only as not valid.
+          }
+        } else {
+          await response.body?.cancel().catch(() => {});
+        }
+      }
+      if (targetResult.status === 'fulfilled') {
+        const response = targetResult.value;
+        recordCdpResponse('targetList', response);
+        if (response.ok) {
+          try {
+            const parsed = await response.json();
+            if (
+              Array.isArray(parsed) &&
+              parsed.every(
+                (target) =>
+                  target !== null &&
+                  typeof target === 'object' &&
+                  typeof target.type === 'string' &&
+                  typeof target.url === 'string',
+              )
+            ) {
+              targets = parsed;
+              desktopObservation.cdp.targetListJsonValidObserved = true;
+              const pageTargets = targets.filter(
+                (target) => target.type === 'page',
+              );
+              const expectedPages = pageTargets.filter((target) =>
+                target.url.startsWith(`${FIXED_ORIGIN}/webapp/`),
+              );
+              desktopObservation.cdp.pageTargetCount = cappedTwo(
+                pageTargets.length,
+              );
+              desktopObservation.cdp.fixedOriginPageCount = cappedTwo(
+                expectedPages.length,
+              );
+            }
+          } catch {
+            // A malformed transient CDP response is recorded only as not valid.
+          }
+        } else {
+          await response.body?.cancel().catch(() => {});
+        }
+      }
+      if (versionInfo && targets) {
         const websocket = new URL(versionInfo.webSocketDebuggerUrl);
         if (
           websocket.protocol !== 'ws:' ||
@@ -693,7 +855,12 @@ async function connectAndCheckPage() {
   }
   try {
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 });
-  } catch {
+    desktopObservation.pageLoadOutcome = 'domcontentloaded';
+  } catch (error) {
+    desktopObservation.pageLoadOutcome =
+      error?.name === 'TimeoutError'
+        ? 'domcontentloaded-timeout'
+        : 'domcontentloaded-failed';
     fail('desktop-not-ready', 'desktopProcess');
   }
   const observation = await page.evaluate(() => ({
@@ -761,7 +928,7 @@ async function stopApp() {
   }
 }
 
-function emitRecord(rendererCount = 0) {
+function emitRecord(rendererCount = null) {
   const values = Object.values(checks);
   const passed =
     failureCode === null && values.every((value) => value === 'passed');
@@ -775,6 +942,7 @@ function emitRecord(rendererCount = 0) {
     origin: FIXED_ORIGIN,
     secretService: secretServiceObservation,
     safeStorage: safeStorageObservation,
+    desktopObservation,
     rendererCount,
     checks,
   };
@@ -783,7 +951,7 @@ function emitRecord(rendererCount = 0) {
 }
 
 async function main() {
-  let rendererCount = 0;
+  let rendererCount = null;
   try {
     checkSource();
     checkRunner();
@@ -812,6 +980,7 @@ async function main() {
         `--profile-dir=${profileRoot}/profile`,
         `--config=${configPath}`,
         '--no-update',
+        '--password-store=gnome-libsecret',
         '--remote-debugging-address=127.0.0.1',
         `--remote-debugging-port=${cdpPort}`,
       ],
@@ -839,7 +1008,8 @@ async function main() {
     writeFileSync(`${profileRoot}/process-group`, `${app.pid}\n`, {
       mode: 0o600,
     });
-    app.on('error', () => {
+    app.on('error', (error) => {
+      appSpawnErrorClass = classifyChildSpawnError(error);
       failureCode ??= 'desktop-not-ready';
     });
     rendererCount = await connectAndCheckPage();
@@ -854,6 +1024,14 @@ async function main() {
       status(error.check, 'failed');
     }
   } finally {
+    sampleChildBeforeCleanup();
+    if (
+      checks.desktopProcess === 'passed' &&
+      desktopObservation.childState !== 'running'
+    ) {
+      failureCode ??= 'desktop-not-ready';
+      status('desktopProcess', 'failed');
+    }
     await stopApp();
     if (safeStorageLogCollector) {
       safeStorageObservation = safeStorageLogCollector.finish(appClosed);
@@ -886,7 +1064,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         origin: FIXED_ORIGIN,
         secretService: secretServiceObservation,
         safeStorage: safeStorageObservation,
-        rendererCount: 0,
+        desktopObservation,
+        rendererCount: null,
         checks,
       })}\n`,
     );
