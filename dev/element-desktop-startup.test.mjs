@@ -6,6 +6,7 @@ import {
   classifyUidSocketProcess,
   createKeyringUnlockInput,
   createSafeStorageLogCollector,
+  matchesProbeConfigProjection,
   parseCdpRendererHandoff,
   parseProcCommandLine,
   readCappedDirectoryEntries,
@@ -45,6 +46,49 @@ test('keyring unlock entropy is encoded as an ASCII line without embedded NULs',
   assert.equal(input.at(-1), 0x0a);
   assert.match(input.subarray(0, -1).toString('ascii'), /^[0-9a-f]{64}$/u);
   assert.equal(input.includes(0), false);
+});
+
+test('in-memory config projection recognizes only the fixed local fixture settings', () => {
+  const config = {
+    default_server_config: {
+      'm.homeserver': {
+        base_url: 'http://127.0.0.1:8008',
+        server_name: 'localhost',
+      },
+    },
+    update_base_url: null,
+    disable_custom_urls: true,
+    enable_client_well_known_lookups: false,
+    disable_analytics: true,
+    integrations_ui_url: '',
+    integrations_rest_url: '',
+    integrations_widgets_urls: [],
+    bug_report_endpoint_url: '',
+    jitsi: {},
+    map_style_url: '',
+  };
+
+  assert.equal(matchesProbeConfigProjection(config), true);
+  assert.equal(
+    matchesProbeConfigProjection({
+      ...config,
+      default_server_config: {
+        'm.homeserver': {
+          ...config.default_server_config['m.homeserver'],
+          base_url: 'https://example.invalid',
+        },
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    matchesProbeConfigProjection({
+      ...config,
+      integrations_widgets_urls: ['https://example.invalid/widget'],
+    }),
+    false,
+  );
+  assert.equal(matchesProbeConfigProjection(null), false);
 });
 
 test('keyring control accepts modern plain output and legacy export output without requiring a PID', () => {
@@ -508,6 +552,15 @@ test('UID lifecycle diagnostics compare app ancestry with process-group coverage
   assert.equal(observation.processClassCounts.application, 1);
   assert.equal(observation.processClassCounts.zygote, 1);
   assert.equal(observation.processClassCounts.renderer, 3);
+  assert.deepEqual(observation.processRoleCounts, {
+    application: 1,
+    chromium: 4,
+    keyring: 0,
+    dbus: 0,
+    xvfb: 0,
+    other: 0,
+    unknown: 0,
+  });
   assert.deepEqual(
     {
       total: observation.rendererOwnership.rendererCount,
@@ -554,6 +607,15 @@ test('UID lifecycle cleanup keeps process ownership unobserved and retains cappe
   assert.equal(cleanup.rendererOwnership.rendererCount, null);
   assert.equal(cleanup.seccompState, 'not_observed');
   assert.equal(cleanup.processClassCounts.renderer, 1);
+  assert.deepEqual(cleanup.processRoleCounts, {
+    application: 0,
+    chromium: 1,
+    keyring: 0,
+    dbus: 0,
+    xvfb: 0,
+    other: 1,
+    unknown: 0,
+  });
   assert.equal(JSON.stringify(cleanup).includes('private-command'), false);
 
   const partial = summarizeUidLifecycleObservation(
@@ -598,6 +660,7 @@ test('UID lifecycle cleanup keeps process ownership unobserved and retains cappe
   assert.equal(overflow.overflow, true);
   assert.equal(overflow.uidProcessCount, 100);
   assert.equal(overflow.processClassCounts.renderer, 100);
+  assert.equal(overflow.processRoleCounts.chromium, 100);
 });
 
 function procTcpRow(index, uid, local, remote, state, inode) {

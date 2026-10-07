@@ -97,6 +97,7 @@ function passingDesktopObservation(overrides = {}) {
       fixedOriginPageCount: 1,
     },
     pageLoadOutcome: 'domcontentloaded',
+    configInMemoryObservation: { state: 'observed', matchesFixture: true },
     ...overrides,
   };
 }
@@ -117,6 +118,15 @@ function passingUidLifecycleObservation() {
       zygote: 0,
       gpu: 0,
       utility: 0,
+      other: 0,
+      unknown: 0,
+    },
+    processRoleCounts: {
+      application: 1,
+      chromium: 1,
+      keyring: 0,
+      dbus: 0,
+      xvfb: 0,
       other: 0,
       unknown: 0,
     },
@@ -173,6 +183,15 @@ function observedEmptyUidLifecycleObservation() {
       zygote: 0,
       gpu: 0,
       utility: 0,
+      other: 0,
+      unknown: 0,
+    },
+    processRoleCounts: {
+      application: 0,
+      chromium: 0,
+      keyring: 0,
+      dbus: 0,
+      xvfb: 0,
       other: 0,
       unknown: 0,
     },
@@ -415,7 +434,9 @@ function stages(overrides = {}) {
         zombieCount: 0,
         unreadableProcessCount: 0,
       },
-      uidLifecycleObservation: observedEmptyUidLifecycleObservation(),
+      uidLifecycleObservationBeforeUserdel:
+        observedEmptyUidLifecycleObservation(),
+      finalUidLifecycleObservation: observedEmptyUidLifecycleObservation(),
     },
     ...(overrides.extraStages ?? []),
   ];
@@ -424,7 +445,11 @@ function stages(overrides = {}) {
 test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 12);
+  assert.equal(summary.schemaVersion, 13);
+  assert.deepEqual(summary.desktopObservation.configInMemoryObservation, {
+    state: 'observed',
+    matchesFixture: true,
+  });
   assert.equal(summary.failureCode, null);
   assert.equal(summary.checks.isolatedNodePreflight, 'passed');
   assert.equal(summary.targetUidPreflight.status, 'passed');
@@ -484,6 +509,66 @@ test('Desktop evidence passes only with a complete startup, deny test, zero-egre
   assert.deepEqual(summary.egressProbe, passingProbe());
   assert.deepEqual(summary.secretService, passingSecretService());
   assert.equal(validDesktopSummary(summary), true);
+});
+
+test('cleanup pass requires observed zero UID counts on both sides of user deletion', () => {
+  const unclearedBeforeUserdel = stages();
+  unclearedBeforeUserdel[4].uidLifecycleObservationBeforeUserdel = {
+    ...observedEmptyUidLifecycleObservation(),
+    uidProcessCount: 1,
+    nonZombieProcessCount: 1,
+    processClassCounts: {
+      ...observedEmptyUidLifecycleObservation().processClassCounts,
+      other: 1,
+    },
+    processRoleCounts: {
+      ...observedEmptyUidLifecycleObservation().processRoleCounts,
+      other: 1,
+    },
+  };
+  assert.throws(
+    () => sanitizeDesktopStages(unclearedBeforeUserdel, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
+
+  const remainingAfterUserdel = stages();
+  remainingAfterUserdel[4].finalUidLifecycleObservation = {
+    ...observedEmptyUidLifecycleObservation(),
+    state: 'partial',
+  };
+  remainingAfterUserdel[4].uidProcessObservation =
+    uidProcessObservationFromLifecycle(
+      remainingAfterUserdel[4].finalUidLifecycleObservation,
+    );
+  assert.throws(
+    () => sanitizeDesktopStages(remainingAfterUserdel, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
+});
+
+test('in-memory config evidence exposes only a fixed match result and remains diagnostic', () => {
+  const unavailableConfig = stages();
+  unavailableConfig[1].desktopObservation.configInMemoryObservation = {
+    state: 'unavailable',
+    matchesFixture: null,
+  };
+  const summary = sanitizeDesktopStages(unavailableConfig, sourceSha);
+  assert.equal(summary.status, 'passed');
+  assert.deepEqual(summary.desktopObservation.configInMemoryObservation, {
+    state: 'unavailable',
+    matchesFixture: null,
+  });
+
+  const privateConfig = stages();
+  privateConfig[1].desktopObservation.configInMemoryObservation = {
+    state: 'observed',
+    matchesFixture: true,
+    sessionId: 'private-session-canary',
+  };
+  assert.throws(
+    () => sanitizeDesktopStages(privateConfig, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
 });
 
 test('trusted sandbox resolution uses root-bound CDP identity when argv misses a renderer', () => {
@@ -1045,6 +1130,16 @@ test('UID lifecycle sanitizer rejects contradictory process and renderer counts'
   assert.deepEqual(
     sanitizeUidLifecycleObservation({
       ...observed,
+      processRoleCounts: {
+        ...observed.processRoleCounts,
+        other: 1,
+      },
+    }),
+    unavailable,
+  );
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation({
+      ...observed,
       rendererOwnership: {
         ...observed.rendererOwnership,
         rendererCount: 0,
@@ -1198,7 +1293,7 @@ test('egress counter sanitizer preserves only fixed classes and honest overflow'
   );
 });
 
-test('phase egress and cleanup diagnostics remain separate from final acceptance gates', () => {
+test('unavailable phase snapshots stay diagnostic when final egress and cleanup proofs pass', () => {
   const withUnavailableSnapshots = stages();
   withUnavailableSnapshots[1].egressPhaseCounters = {
     beforeApp: observedCounters(),
@@ -1226,13 +1321,13 @@ test('phase egress and cleanup diagnostics remain separate from final acceptance
   };
   withUnavailableSnapshots[4].accountState = 'absent';
   withUnavailableSnapshots[4].userdelStatus = 'not_run';
-  withUnavailableSnapshots[4].uidLifecycleObservation = {
-    ...observedEmptyUidLifecycleObservation(),
-    state: 'partial',
-  };
+  withUnavailableSnapshots[4].uidLifecycleObservationBeforeUserdel =
+    observedEmptyUidLifecycleObservation();
+  withUnavailableSnapshots[4].finalUidLifecycleObservation =
+    observedEmptyUidLifecycleObservation();
   withUnavailableSnapshots[4].uidProcessObservation =
     uidProcessObservationFromLifecycle(
-      withUnavailableSnapshots[4].uidLifecycleObservation,
+      withUnavailableSnapshots[4].finalUidLifecycleObservation,
     );
   const summary = sanitizeDesktopStages(withUnavailableSnapshots, sourceSha);
 
@@ -1244,7 +1339,7 @@ test('phase egress and cleanup diagnostics remain separate from final acceptance
   assert.deepEqual(summary.uidEgressPhaseCounters.final, observedCounters());
   assert.equal(
     summary.cleanupDiagnostics.uidProcessObservation.state,
-    'partial',
+    'observed',
   );
   assert.equal(summary.checks.zeroBlockedEgress, 'passed');
 
@@ -1390,7 +1485,7 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
   failedAccountCleanup[4].accountState = 'uid_match';
   failedAccountCleanup[4].userdelStatus = 'failed';
   failedAccountCleanup[4].userdelExitStatus = 8;
-  failedAccountCleanup[4].uidLifecycleObservation = {
+  const remainingUidProcesses = {
     ...observedEmptyUidLifecycleObservation(),
     state: 'observed',
     overflow: false,
@@ -1408,10 +1503,22 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
       other: 1,
       unknown: 0,
     },
+    processRoleCounts: {
+      application: 0,
+      chromium: 1,
+      keyring: 0,
+      dbus: 0,
+      xvfb: 0,
+      other: 1,
+      unknown: 0,
+    },
   };
+  failedAccountCleanup[4].uidLifecycleObservationBeforeUserdel =
+    remainingUidProcesses;
+  failedAccountCleanup[4].finalUidLifecycleObservation = remainingUidProcesses;
   failedAccountCleanup[4].uidProcessObservation =
     uidProcessObservationFromLifecycle(
-      failedAccountCleanup[4].uidLifecycleObservation,
+      failedAccountCleanup[4].finalUidLifecycleObservation,
     );
   const failedAccountSummary = sanitizeDesktopStages(
     failedAccountCleanup,

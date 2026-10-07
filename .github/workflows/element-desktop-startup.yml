@@ -544,19 +544,51 @@ jobs:
           account_state=not_observed
           userdel_status=not_run
           userdel_exit_status=null
-          uid_lifecycle_observation=not_observed
+          uid_lifecycle_observation_before_userdel=not_observed
+          final_uid_lifecycle_observation=not_observed
           profile_status=not_run
           apt_source_status=not_run
           observation_status=failed
+          pgrep_clear=false
+
+          capture_uid_lifecycle_observation() {
+            local observation
+            if [[ "$uid" =~ ^[0-9]{1,5}$ ]] && [[ "$uid" -gt 0 ]]; then
+              if observation="$(timeout --signal=TERM --kill-after=1s 6s sudo -n \
+                "$ELEMENT_DESKTOP_NODE_BIN" "$GITHUB_WORKSPACE/dev/element-desktop-startup.mjs" \
+                uid-lifecycle-observation "$uid" 2>/dev/null)" && [[ -n "$observation" ]]; then
+                printf '%s' "$observation"
+              else
+                printf '%s' unavailable
+              fi
+            else
+              printf '%s' unavailable
+            fi
+          }
+
+          lifecycle_observation_is_empty() {
+            local observation="$1"
+            [[ "$observation" != not_observed && "$observation" != unavailable ]] || return 1
+            printf '%s' "$observation" | timeout --signal=TERM --kill-after=1s 1s node --input-type=module -e '
+              import { sanitizeUidLifecycleObservation } from "./dev/element-desktop-evidence.mjs";
+              let input=""; for await (const chunk of process.stdin) input+=chunk;
+              const value=sanitizeUidLifecycleObservation(input);
+              process.exit(value.state === "observed" && value.uidProcessCount === 0 ? 0 : 1);
+            ' >/dev/null 2>&1
+          }
 
           if [[ "$uid" =~ ^[0-9]{1,5}$ ]] && [[ "$uid" -gt 0 ]]; then
-            isolated_processes=passed
             if pgrep -u "$uid" >/dev/null 2>&1; then
               sudo -n pkill -TERM -u "$uid" >/dev/null 2>&1
               sleep 2
               sudo -n pkill -KILL -u "$uid" >/dev/null 2>&1
             fi
-            if pgrep -u "$uid" >/dev/null 2>&1; then isolated_processes=failed; fi
+            if pgrep -u "$uid" >/dev/null 2>&1; then
+              pgrep_clear=false
+            else
+              pgrep_status=$?
+              if [[ "$pgrep_status" -eq 1 ]]; then pgrep_clear=true; fi
+            fi
           fi
 
           if [[ "$run_id" =~ ^[0-9]{1,18}$ ]] && [[ "$uid" =~ ^[0-9]{1,5}$ ]]; then
@@ -576,49 +608,36 @@ jobs:
             fi
           fi
 
-          if [[ "$uid" =~ ^[0-9]{1,5}$ ]] && [[ "$uid" -gt 0 ]] && \
-            [[ -n "$ELEMENT_DESKTOP_STARTUP_SCRIPT_PATH" ]]; then
-            process_observation="$(timeout --signal=TERM --kill-after=1s 6s sudo -n "$ELEMENT_DESKTOP_NODE_BIN" \
-              "$GITHUB_WORKSPACE/dev/element-desktop-startup.mjs" uid-lifecycle-observation "$uid" 2>/dev/null)"
-            if [[ -n "$process_observation" ]]; then
-              uid_lifecycle_observation="$process_observation"
-            else
-              uid_lifecycle_observation=unavailable
-            fi
-          fi
           if [[ "$observation_status" != passed ]]; then
             printf '%s\n' '{"phase":"egress-observation","status":"failed","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}' >> "$stage_file"
           fi
 
-          if [[ "$uid" =~ ^[0-9]{1,5}$ ]] && [[ "$uid" -gt 0 ]] && [[ "$run_id" =~ ^[0-9]{1,18}$ ]]; then
-            if sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs remove "$uid" "$run_id" >/dev/null 2>&1; then
-              policy_status=passed
-            else
-              policy_status=failed
-            fi
+          uid_lifecycle_observation_before_userdel="$(capture_uid_lifecycle_observation)"
+          before_userdel_clear=false
+          if lifecycle_observation_is_empty "$uid_lifecycle_observation_before_userdel"; then
+            before_userdel_clear=true
           fi
 
           if [[ "$uid" =~ ^[0-9]{1,5}$ ]] && [[ "$uid" -gt 0 ]]; then
             account_uid="$(getent passwd "$username" | cut -d: -f3)"
             if [[ -n "$account_uid" ]]; then
               if [[ "$account_uid" == "$uid" ]]; then
-                if timeout --signal=TERM --kill-after=1s 10s sudo -n userdel \
-                  "$username" >/dev/null 2>&1; then
-                  user_status=passed
-                  userdel_status=passed
-                  userdel_exit_status=0
+                if [[ "$before_userdel_clear" == true && "$pgrep_clear" == true ]]; then
+                  if timeout --signal=TERM --kill-after=1s 10s sudo -n userdel \
+                    "$username" >/dev/null 2>&1; then
+                    userdel_status=passed
+                    userdel_exit_status=0
+                  else
+                    userdel_exit_status=$?
+                    userdel_status=failed
+                  fi
                 else
-                  userdel_exit_status=$?
                   user_status=failed
-                  userdel_status=failed
                 fi
               else
                 user_status=failed
               fi
-            else
-              user_status=passed
             fi
-            if getent passwd "$username" >/dev/null; then user_status=failed; fi
 
             account_record="$(getent passwd "$username" 2>/dev/null)"
             account_lookup=$?
@@ -633,6 +652,31 @@ jobs:
               account_state=absent
             else
               account_state=unavailable
+            fi
+          fi
+
+          final_uid_lifecycle_observation="$(capture_uid_lifecycle_observation)"
+          final_uid_census_clear=false
+          if lifecycle_observation_is_empty "$final_uid_lifecycle_observation"; then
+            final_uid_census_clear=true
+          fi
+          if [[ "$account_state" == absent ]]; then
+            user_status=passed
+          else
+            user_status=failed
+          fi
+          if [[ "$pgrep_clear" == true && "$before_userdel_clear" == true && \
+                "$final_uid_census_clear" == true && "$account_state" == absent ]]; then
+            isolated_processes=passed
+          else
+            isolated_processes=failed
+          fi
+
+          if [[ "$uid" =~ ^[0-9]{1,5}$ ]] && [[ "$uid" -gt 0 ]] && [[ "$run_id" =~ ^[0-9]{1,18}$ ]]; then
+            if sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs remove "$uid" "$run_id" >/dev/null 2>&1; then
+              policy_status=passed
+            else
+              policy_status=failed
             fi
           fi
 
@@ -682,19 +726,27 @@ jobs:
           ELEMENT_DESKTOP_ACCOUNT_STATE="$account_state" \
           ELEMENT_DESKTOP_USERDEL_STATUS="$userdel_status" \
           ELEMENT_DESKTOP_USERDEL_EXIT_STATUS="$userdel_exit_status" \
-          ELEMENT_DESKTOP_UID_LIFECYCLE_OBSERVATION="$uid_lifecycle_observation" \
+          ELEMENT_DESKTOP_UID_LIFECYCLE_OBSERVATION_BEFORE_USERDEL="$uid_lifecycle_observation_before_userdel" \
+          ELEMENT_DESKTOP_FINAL_UID_LIFECYCLE_OBSERVATION="$final_uid_lifecycle_observation" \
           ELEMENT_DESKTOP_PROFILE_CLEANUP="$profile_status" \
           ELEMENT_DESKTOP_APT_CLEANUP="$apt_source_status" \
           node --input-type=module - "$stage_file" <<'NODE'
           import { appendFileSync, readFileSync } from 'node:fs';
           import { emptyUidLifecycleObservation, sanitizeUidLifecycleObservation, uidProcessObservationFromLifecycle } from './dev/element-desktop-evidence.mjs';
           const [stageFile] = process.argv.slice(2);
-          const lifecycleRaw = process.env.ELEMENT_DESKTOP_UID_LIFECYCLE_OBSERVATION;
-          const uidLifecycleObservation = lifecycleRaw === 'not_observed'
-            ? emptyUidLifecycleObservation('not_observed')
-            : lifecycleRaw === 'unavailable'
-              ? emptyUidLifecycleObservation('unavailable')
-              : sanitizeUidLifecycleObservation(lifecycleRaw);
+          function lifecycleObservation(raw) {
+            return raw === 'not_observed'
+              ? emptyUidLifecycleObservation('not_observed')
+              : raw === 'unavailable'
+                ? emptyUidLifecycleObservation('unavailable')
+                : sanitizeUidLifecycleObservation(raw);
+          }
+          const uidLifecycleObservationBeforeUserdel = lifecycleObservation(
+            process.env.ELEMENT_DESKTOP_UID_LIFECYCLE_OBSERVATION_BEFORE_USERDEL,
+          );
+          const finalUidLifecycleObservation = lifecycleObservation(
+            process.env.ELEMENT_DESKTOP_FINAL_UID_LIFECYCLE_OBSERVATION,
+          );
           const exitStatusRaw = process.env.ELEMENT_DESKTOP_USERDEL_EXIT_STATUS;
           const userdelExitStatus = /^(?:0|[1-9][0-9]{0,2})$/u.test(exitStatusRaw ?? '') && Number(exitStatusRaw) <= 255
             ? Number(exitStatusRaw)
@@ -727,8 +779,9 @@ jobs:
             userdelStatus:['passed','failed','not_run'].includes(process.env.ELEMENT_DESKTOP_USERDEL_STATUS)
               ? process.env.ELEMENT_DESKTOP_USERDEL_STATUS : 'not_run',
             userdelExitStatus,
-            uidProcessObservation:uidProcessObservationFromLifecycle(uidLifecycleObservation),
-            uidLifecycleObservation,
+            uidProcessObservation:uidProcessObservationFromLifecycle(finalUidLifecycleObservation),
+            uidLifecycleObservationBeforeUserdel,
+            finalUidLifecycleObservation,
           }) + '\n');
           NODE
 
