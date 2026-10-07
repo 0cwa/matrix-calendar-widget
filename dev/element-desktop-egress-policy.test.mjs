@@ -93,12 +93,12 @@ test('desktop egress permits only the fixture homeserver and loopback CDP ports'
       'ACCEPT',
     ],
     [
+      '-d',
+      '127.0.0.1/32',
       '-o',
       'lo',
       '-p',
       'tcp',
-      '-d',
-      '127.0.0.1/32',
       '-m',
       'multiport',
       '--dports',
@@ -114,7 +114,7 @@ test('desktop egress permits only the fixture homeserver and loopback CDP ports'
   assert.deepEqual(ipv4.chainRules.slice(0, 2), acceptedRules);
   assert.deepEqual(ipv6.chainRules.slice(0, 2), [
     acceptedRules[0],
-    [...acceptedRules[1].slice(0, 5), '::1/128', ...acceptedRules[1].slice(6)],
+    acceptedRules[1].map((token, index) => (index === 1 ? '::1/128' : token)),
   ]);
   for (const family of [ipv4, ipv6]) {
     assert.deepEqual(
@@ -140,9 +140,44 @@ test('policy verifier requires the exact first OUTPUT hook and ordered chain rul
     ].join('\n');
 
   for (const family of [ipv4, ipv6]) {
+    const destination = family.name === 'ipv4' ? '127.0.0.1/32' : '::1/128';
+    const canonicalDestinationRule = [
+      '-d',
+      destination,
+      '-o',
+      'lo',
+      '-p',
+      'tcp',
+      '-m',
+      'multiport',
+      '--dports',
+      '8008,9223',
+      '-m',
+      'conntrack',
+      '--ctstate',
+      'NEW',
+      '-j',
+      'ACCEPT',
+    ];
     assert.equal(
       verifyPolicySnapshot(family, output(family), chain(family)),
       true,
+    );
+    assert.deepEqual(family.chainRules[1], canonicalDestinationRule);
+    const previousNoncanonicalOrder = family.chainRules.map((rule, index) =>
+      index === 1
+        ? ['-o', 'lo', '-p', 'tcp', '-d', destination, ...rule.slice(6)]
+        : rule,
+    );
+    const noncanonicalSnapshot = [
+      `-N ${family.chain}`,
+      ...previousNoncanonicalOrder.map(
+        (rule) => `-A ${family.chain} ${rule.join(' ')}`,
+      ),
+    ].join('\n');
+    assert.equal(
+      verifyPolicySnapshot(family, output(family), noncanonicalSnapshot),
+      false,
     );
     assert.equal(
       verifyPolicySnapshot(
