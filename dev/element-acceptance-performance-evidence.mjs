@@ -60,6 +60,46 @@ const HOST_HOVER_CENTER_HITS = new Set([
   'other',
   'none',
 ]);
+const HOST_HOVER_OCCLUDER_TAGS = new Set([
+  'a',
+  'body',
+  'button',
+  'div',
+  'html',
+  'iframe',
+  'input',
+  'label',
+  'li',
+  'main',
+  'other',
+  'path',
+  'section',
+  'span',
+  'svg',
+  'ul',
+]);
+const HOST_HOVER_OCCLUDER_CLASSES = new Set([
+  'mx_AppPermission',
+  'mx_AppTile',
+  'mx_AppTileBody_fadeInSpinner',
+  'mx_AppTileFullWidth',
+  'mx_AppTileMenuBar',
+  'mx_AppTileMenuBar_widgets',
+  'mx_AppTileMenuBar_widgets_button',
+  'mx_AppTile_mini',
+  'mx_AppTile_persistedWrapper',
+  'mx_AppWarning',
+  'mx_AppsDrawer',
+  'mx_AppsDrawer--maximised',
+  'mx_ContextualMenu',
+]);
+const HOST_HOVER_OCCLUDER_ROOTS = new Set([
+  'document-body',
+  'document-element',
+  'none',
+  'persisted-element-container',
+  'persisted-element-instance',
+]);
 const API_SAMPLE =
   /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5])$/u;
 
@@ -177,8 +217,16 @@ const HOST_HOVER_ACTIONABILITY_KEYS = [
   'viewportIntersection',
   'hiddenAncestor',
   'centerHit',
+  'occluder',
   'failureClass',
 ];
+const HOST_HOVER_OCCLUDER_KEYS = [
+  'available',
+  'path',
+  'pathTruncated',
+  'classOverflow',
+];
+const HOST_HOVER_OCCLUDER_NODE_KEYS = ['tag', 'classes', 'root'];
 const API_KEYS = [
   'sample',
   'endpoint',
@@ -274,7 +322,8 @@ function validHostHoverActionability(value, attempted, completed) {
           value.viewportIntersection,
           value.hiddenAncestor,
         ].every((item) => typeof item === 'boolean') &&
-        HOST_HOVER_CENTER_HITS.has(value.centerHit)
+        HOST_HOVER_CENTER_HITS.has(value.centerHit) &&
+        validHostHoverOccluder(value.occluder, value.centerHit)
       : [
           value.connected,
           value.visible,
@@ -282,7 +331,8 @@ function validHostHoverActionability(value, attempted, completed) {
           value.viewportIntersection,
           value.hiddenAncestor,
           value.centerHit,
-        ].every((item) => item === null)) &&
+        ].every((item) => item === null) &&
+        validHostHoverOccluder(value.occluder, null)) &&
     HOST_HOVER_FAILURE_CLASSES.has(value.failureClass) &&
     (attempted
       ? value.failureClass !== 'not-attempted' &&
@@ -297,6 +347,55 @@ function validHostHoverActionability(value, attempted, completed) {
             value.centerHit === 'toolbar'))
       : value.failureClass === 'not-attempted' && !completed)
   );
+}
+
+function validHostHoverOccluder(value, centerHit) {
+  if (
+    !hasExactKeys(value, HOST_HOVER_OCCLUDER_KEYS) ||
+    typeof value.available !== 'boolean'
+  ) {
+    return false;
+  }
+  if (!value.available) {
+    return (
+      value.path === null &&
+      value.pathTruncated === null &&
+      value.classOverflow === null &&
+      centerHit === null
+    );
+  }
+  if (
+    centerHit === null ||
+    !Array.isArray(value.path) ||
+    value.path.length > 16 ||
+    typeof value.pathTruncated !== 'boolean' ||
+    typeof value.classOverflow !== 'boolean' ||
+    (value.pathTruncated && value.path.length !== 16) ||
+    (centerHit === 'none' ? value.path.length !== 0 : value.path.length === 0)
+  ) {
+    return false;
+  }
+  let classCount = 0;
+  for (const node of value.path) {
+    if (
+      !hasExactKeys(node, HOST_HOVER_OCCLUDER_NODE_KEYS) ||
+      !HOST_HOVER_OCCLUDER_TAGS.has(node.tag) ||
+      !HOST_HOVER_OCCLUDER_ROOTS.has(node.root) ||
+      (node.root === 'document-body' && node.tag !== 'body') ||
+      (node.root === 'document-element' && node.tag !== 'html') ||
+      (node.root.startsWith('persisted-element-') && node.tag !== 'div') ||
+      !Array.isArray(node.classes) ||
+      node.classes.length > 8 ||
+      !node.classes.every((className) =>
+        HOST_HOVER_OCCLUDER_CLASSES.has(className),
+      ) ||
+      new Set(node.classes).size !== node.classes.length
+    ) {
+      return false;
+    }
+    classCount += node.classes.length;
+  }
+  return classCount <= 8 && (!value.classOverflow || classCount === 8);
 }
 
 function validApiResponse(value) {
@@ -649,6 +748,14 @@ function display(value) {
   return value === null ? 'unavailable' : String(value);
 }
 
+function displayHostHoverOccluder(value) {
+  if (!value.available) return 'unavailable';
+  if (value.path.length === 0) return 'none';
+  return value.path
+    .map(({ tag, classes, root }) => `${tag}[${classes.join('+')}]@${root}`)
+    .join('>');
+}
+
 export function classifyPerformanceHoverFailure(error) {
   const errorName = error instanceof Error ? error.name : '';
   const message = error instanceof Error ? error.message : '';
@@ -750,6 +857,12 @@ export function formatPerformanceEvidence(record) {
       `host_hover_toolbar_viewport_intersection=${display(report.coldList.hostHoverActionability.viewportIntersection)}`,
       `host_hover_toolbar_hidden_ancestor=${display(report.coldList.hostHoverActionability.hiddenAncestor)}`,
       `host_hover_center_hit=${display(report.coldList.hostHoverActionability.centerHit)}`,
+      `host_hover_occluder_available=${report.coldList.hostHoverActionability.occluder.available}`,
+      `host_hover_occluder_path_node_count=${display(report.coldList.hostHoverActionability.occluder.path?.length ?? null)}`,
+      `host_hover_occluder_class_count=${display(report.coldList.hostHoverActionability.occluder.path?.reduce((count, node) => count + node.classes.length, 0) ?? null)}`,
+      `host_hover_occluder_path_truncated=${display(report.coldList.hostHoverActionability.occluder.pathTruncated)}`,
+      `host_hover_occluder_class_overflow=${display(report.coldList.hostHoverActionability.occluder.classOverflow)}`,
+      `host_hover_occluder_path=${displayHostHoverOccluder(report.coldList.hostHoverActionability.occluder)}`,
       `host_hover_failure_class=${report.coldList.hostHoverActionability.failureClass}`,
       `host_tile_count_after_hover=${report.coldList.hostTileCountAfterHover}`,
       `host_toolbar_count_after_hover=${report.coldList.hostToolbarCountAfterHover}`,

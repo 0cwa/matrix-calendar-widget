@@ -377,6 +377,54 @@ type PerformanceHoverCenterHit =
   | 'drawer'
   | 'other'
   | 'none';
+type PerformanceHoverOccluderTag =
+  | 'a'
+  | 'body'
+  | 'button'
+  | 'div'
+  | 'html'
+  | 'iframe'
+  | 'input'
+  | 'label'
+  | 'li'
+  | 'main'
+  | 'other'
+  | 'path'
+  | 'section'
+  | 'span'
+  | 'svg'
+  | 'ul';
+type PerformanceHoverOccluderClass =
+  | 'mx_AppPermission'
+  | 'mx_AppTile'
+  | 'mx_AppTileBody_fadeInSpinner'
+  | 'mx_AppTileFullWidth'
+  | 'mx_AppTileMenuBar'
+  | 'mx_AppTileMenuBar_widgets'
+  | 'mx_AppTileMenuBar_widgets_button'
+  | 'mx_AppTile_mini'
+  | 'mx_AppTile_persistedWrapper'
+  | 'mx_AppWarning'
+  | 'mx_AppsDrawer'
+  | 'mx_AppsDrawer--maximised'
+  | 'mx_ContextualMenu';
+type PerformanceHoverOccluderRoot =
+  | 'document-body'
+  | 'document-element'
+  | 'none'
+  | 'persisted-element-container'
+  | 'persisted-element-instance';
+type PerformanceHoverOccluderNode = {
+  tag: PerformanceHoverOccluderTag;
+  classes: PerformanceHoverOccluderClass[];
+  root: PerformanceHoverOccluderRoot;
+};
+type PerformanceHoverOccluderObservation = {
+  available: boolean;
+  path: PerformanceHoverOccluderNode[] | null;
+  pathTruncated: boolean | null;
+  classOverflow: boolean | null;
+};
 type PerformanceHoverActionability = {
   available: boolean;
   connected: boolean | null;
@@ -385,6 +433,7 @@ type PerformanceHoverActionability = {
   viewportIntersection: boolean | null;
   hiddenAncestor: boolean | null;
   centerHit: PerformanceHoverCenterHit | null;
+  occluder: PerformanceHoverOccluderObservation;
   failureClass:
     | 'not-attempted'
     | 'none'
@@ -948,6 +997,12 @@ function makeEmptyPerformanceReport(
         viewportIntersection: null,
         hiddenAncestor: null,
         centerHit: null,
+        occluder: {
+          available: false,
+          path: null,
+          pathTruncated: null,
+          classOverflow: null,
+        },
         failureClass: 'not-attempted',
       },
       hostTileCountBeforeHover: 0,
@@ -2074,6 +2129,72 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
             centerY < window.innerHeight
               ? document.elementFromPoint(centerX, centerY)
               : null;
+          const knownClasses: PerformanceHoverOccluderClass[] = [
+            'mx_AppPermission',
+            'mx_AppTile',
+            'mx_AppTileBody_fadeInSpinner',
+            'mx_AppTileFullWidth',
+            'mx_AppTileMenuBar',
+            'mx_AppTileMenuBar_widgets',
+            'mx_AppTileMenuBar_widgets_button',
+            'mx_AppTile_mini',
+            'mx_AppTile_persistedWrapper',
+            'mx_AppWarning',
+            'mx_AppsDrawer',
+            'mx_AppsDrawer--maximised',
+            'mx_ContextualMenu',
+          ];
+          const knownTags = new Map<string, PerformanceHoverOccluderTag>([
+            ['a', 'a'],
+            ['body', 'body'],
+            ['button', 'button'],
+            ['div', 'div'],
+            ['html', 'html'],
+            ['iframe', 'iframe'],
+            ['input', 'input'],
+            ['label', 'label'],
+            ['li', 'li'],
+            ['main', 'main'],
+            ['path', 'path'],
+            ['section', 'section'],
+            ['span', 'span'],
+            ['svg', 'svg'],
+            ['ul', 'ul'],
+          ]);
+          const occluderPath: PerformanceHoverOccluderNode[] = [];
+          let occluderClassCount = 0;
+          let occluderClassOverflow = false;
+          let occluderAncestor = hit;
+          while (occluderAncestor !== null && occluderPath.length < 16) {
+            const classes: PerformanceHoverOccluderClass[] = [];
+            for (const className of knownClasses) {
+              if (occluderAncestor.classList.contains(className)) {
+                if (occluderClassCount < 8) {
+                  classes.push(className);
+                  occluderClassCount += 1;
+                } else {
+                  occluderClassOverflow = true;
+                }
+              }
+            }
+            let root: PerformanceHoverOccluderRoot = 'none';
+            if (occluderAncestor.id === 'mx_PersistedElement_container') {
+              root = 'persisted-element-container';
+            } else if (occluderAncestor.id.startsWith('mx_persistedElement_')) {
+              root = 'persisted-element-instance';
+            } else if (occluderAncestor === document.body) {
+              root = 'document-body';
+            } else if (occluderAncestor === document.documentElement) {
+              root = 'document-element';
+            }
+            const tagName = occluderAncestor.tagName.toLowerCase();
+            occluderPath.push({
+              tag: knownTags.get(tagName) ?? 'other',
+              classes,
+              root,
+            });
+            occluderAncestor = occluderAncestor.parentElement;
+          }
           let centerHit: PerformanceHoverCenterHit;
           if (hit === null) {
             centerHit = 'none';
@@ -2095,12 +2216,19 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
           } else {
             centerHit = 'other';
           }
+          const occluder = {
+            available: true,
+            path: occluderPath,
+            pathTruncated: occluderAncestor !== null,
+            classOverflow: occluderClassOverflow,
+          };
           return {
             connected: toolbar.isConnected,
             positiveBox,
             viewportIntersection,
             hiddenAncestor,
             centerHit,
+            occluder,
             computedVisible:
               positiveBox &&
               style.display !== 'none' &&
@@ -2120,6 +2248,7 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
           viewportIntersection: observation.viewportIntersection,
           hiddenAncestor: observation.hiddenAncestor,
           centerHit: observation.centerHit,
+          occluder: observation.occluder,
           failureClass: 'not-attempted',
         };
       } catch {
@@ -2131,6 +2260,12 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
           viewportIntersection: null,
           hiddenAncestor: null,
           centerHit: null,
+          occluder: {
+            available: false,
+            path: null,
+            pathTruncated: null,
+            classOverflow: null,
+          },
           failureClass: 'not-attempted',
         };
       }
