@@ -127,6 +127,7 @@ const PROBE_SPAWN_ERRORS = new Set([
 ]);
 const DESKTOP_CHILD_STATES = new Set([
   'not-started',
+  'launch-timeout',
   'running',
   'exited',
   'signaled',
@@ -249,7 +250,7 @@ function validateDesktopObservation(value) {
   }
 
   const childShapeValid =
-    value.childState === 'not-started'
+    value.childState === 'not-started' || value.childState === 'launch-timeout'
       ? value.childExitStatus === null &&
         value.childSignal === null &&
         value.childSpawnErrorClass === null

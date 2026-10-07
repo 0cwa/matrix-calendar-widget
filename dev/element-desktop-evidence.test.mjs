@@ -485,6 +485,35 @@ test('Desktop evidence reports absent startup as incomplete and rejects degraded
 });
 
 test('Desktop evidence distinguishes pre-cleanup child exit, CDP responses, and page load', () => {
+  const spawnFailed = stages();
+  spawnFailed[1].status = 'failed';
+  spawnFailed[1].failureCode = 'desktop-not-ready';
+  spawnFailed[1].rendererCount = null;
+  spawnFailed[1].desktopObservation = passingDesktopObservation({
+    childState: 'spawn-error',
+    childSpawnErrorClass: 'missing-executable',
+    cdp: {
+      versionResponseCount: 0,
+      versionOkResponseCount: 0,
+      versionLastStatus: null,
+      versionJsonValidObserved: false,
+      targetListResponseCount: 0,
+      targetListOkResponseCount: 0,
+      targetListLastStatus: null,
+      targetListJsonValidObserved: false,
+      pageTargetCount: null,
+      fixedOriginPageCount: null,
+    },
+    pageLoadOutcome: 'not-attempted',
+  });
+  const spawnSummary = sanitizeDesktopStages(spawnFailed, sourceSha);
+  assert.equal(spawnSummary.desktopObservation.childState, 'spawn-error');
+  assert.equal(
+    spawnSummary.desktopObservation.childSpawnErrorClass,
+    'missing-executable',
+  );
+  assert.notEqual(spawnSummary.desktopObservation.childState, 'running');
+
   const exited = stages();
   exited[1].status = 'failed';
   exited[1].failureCode = 'desktop-not-ready';

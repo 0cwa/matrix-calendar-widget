@@ -24,6 +24,7 @@ const SAFE_STORAGE_BACKENDS = new Set([
 const SAFE_STORAGE_MODES = new Set(['encrypted', 'plaintext', 'basic_text']);
 const MAX_SAFE_STORAGE_LOG_BYTES = 1_048_576;
 const MAX_SAFE_STORAGE_LINE_LENGTH = 512;
+const DESKTOP_SPAWN_WAIT_MS = 5_000;
 const CHILD_SIGNALS = new Set([
   'SIGABRT',
   'SIGALRM',
@@ -184,6 +185,26 @@ export function createKeyringUnlockInput(entropy) {
   return Buffer.from(`${entropy.toString('hex')}\n`, 'ascii');
 }
 
+export function waitForDesktopChildSpawn(child) {
+  return new Promise((resolveSpawn) => {
+    let settled = false;
+    const finish = (outcome, errorClass = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.off('spawn', onSpawn);
+      child.off('error', onError);
+      resolveSpawn({ outcome, errorClass });
+    };
+    const onSpawn = () => finish('spawned');
+    const onError = (error) =>
+      finish('spawn-error', classifyChildSpawnError(error));
+    const timer = setTimeout(() => finish('timeout'), DESKTOP_SPAWN_WAIT_MS);
+    child.once('spawn', onSpawn);
+    child.once('error', onError);
+  });
+}
+
 export function readKeyringControl(stdout) {
   if (typeof stdout !== 'string') return undefined;
   for (const line of stdout.split(/\r?\n/u)) {
@@ -276,6 +297,7 @@ let browser;
 let appClosePromise;
 let appClosed = false;
 let appSpawnErrorClass = null;
+let appLaunchState = 'not-started';
 let safeStorageLogCollector;
 let safeStorageObservation = {
   mode: 'not_observed',
@@ -340,7 +362,9 @@ function classifyChildSpawnError(error) {
 
 function sampleChildBeforeCleanup() {
   if (!app) return;
-  if (appSpawnErrorClass !== null) {
+  if (appLaunchState === 'launch-timeout') {
+    desktopObservation.childState = 'launch-timeout';
+  } else if (appSpawnErrorClass !== null) {
     desktopObservation.childState = 'spawn-error';
     desktopObservation.childSpawnErrorClass = CHILD_SPAWN_ERRORS.has(
       appSpawnErrorClass,
@@ -990,6 +1014,17 @@ async function main() {
         env: process.env,
       },
     );
+    appLaunchState = 'pending';
+    const spawnOutcome = waitForDesktopChildSpawn(app);
+    app.on('spawn', () => {
+      if (appLaunchState === 'pending') appLaunchState = 'spawned';
+    });
+    app.on('error', (error) => {
+      if (appLaunchState !== 'pending') return;
+      appSpawnErrorClass = classifyChildSpawnError(error);
+      appLaunchState = 'spawn-error';
+      failureCode ??= 'desktop-not-ready';
+    });
     safeStorageLogCollector = createSafeStorageLogCollector();
     app.stdout?.on('data', (chunk) =>
       safeStorageLogCollector.write('stdout', chunk),
@@ -1003,14 +1038,20 @@ async function main() {
         resolveClose();
       });
     });
+    const spawnResult = await spawnOutcome;
+    if (spawnResult.outcome === 'spawn-error') {
+      appLaunchState = 'spawn-error';
+      appSpawnErrorClass = spawnResult.errorClass;
+      fail('desktop-not-ready', 'desktopProcess');
+    }
+    if (spawnResult.outcome === 'timeout') {
+      appLaunchState = 'launch-timeout';
+      fail('desktop-not-ready', 'desktopProcess');
+    }
     if (!Number.isSafeInteger(app.pid))
       fail('desktop-not-ready', 'desktopProcess');
     writeFileSync(`${profileRoot}/process-group`, `${app.pid}\n`, {
       mode: 0o600,
-    });
-    app.on('error', (error) => {
-      appSpawnErrorClass = classifyChildSpawnError(error);
-      failureCode ??= 'desktop-not-ready';
     });
     rendererCount = await connectAndCheckPage();
   } catch (error) {

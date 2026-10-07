@@ -1,11 +1,26 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import test from 'node:test';
 
 import {
   createKeyringUnlockInput,
   createSafeStorageLogCollector,
   readKeyringControl,
+  waitForDesktopChildSpawn,
 } from './element-desktop-startup.mjs';
+
+test('missing desktop executable is reported as a finite spawn outcome', async () => {
+  const child = spawn('/usr/bin/element-desktop-startup-missing-test', [], {
+    stdio: 'ignore',
+  });
+  const result = await waitForDesktopChildSpawn(child);
+
+  assert.deepEqual(result, {
+    outcome: 'spawn-error',
+    errorClass: 'missing-executable',
+  });
+  assert.equal(child.pid, undefined);
+});
 
 test('keyring unlock entropy is encoded as an ASCII line without embedded NULs', () => {
   const entropy = Buffer.from([
