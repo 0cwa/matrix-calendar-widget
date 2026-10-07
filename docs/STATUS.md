@@ -113,8 +113,9 @@ the real relative DISPLAY alarm and room reminder UI. It delivered a real
 restored Radicale plus app-owned PostgreSQL into fresh destinations. The
 restored UI read the saved reminders, a due canary was delivered once, and the
 previous sent-row key and attempt count remained unchanged. The Radicale root
-readiness check observed its expected HTTP 302 without following it; all
-workflow cleanup steps passed. The [sanitized summary
+readiness check observed its expected HTTP 302 without following it. The
+always-run cleanup step completed; Compose teardown is best-effort, so
+container and volume removal were not independently verified. The [sanitized summary
 artifact](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37611136645)
 has SHA-256 `22f29e8e2609ea2734feb44d665484d9bf983c5fdf6975c18f39588b8abd21f6`.
 This proves the tested completed-send recovery path, not exactly-once delivery,

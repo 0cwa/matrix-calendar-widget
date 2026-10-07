@@ -208,24 +208,43 @@ jobs:
       - name: Stop and remove the isolated stack and private evidence
         if: always()
         run: |
+          compose_cleanup_status=not-needed
           if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
+            compose_cleanup_status=passed
             if [[ -f "${ELEMENT_ACCEPTANCE_SERVER_ENV_FILE:-}" ]]; then
-              docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ELEMENT_ACCEPTANCE_SERVER_ENV_FILE" -f dev/compose.yaml -f dev/element-acceptance.compose.yaml -f dev/element-acceptance-reminder.compose.yaml down --volumes --remove-orphans >/dev/null 2>&1 || true
+              if ! docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ELEMENT_ACCEPTANCE_SERVER_ENV_FILE" -f dev/compose.yaml -f dev/element-acceptance.compose.yaml -f dev/element-acceptance-reminder.compose.yaml down --volumes --remove-orphans >/dev/null 2>&1; then
+                compose_cleanup_status=failed
+              fi
             else
-              docker compose -p "$COMPOSE_PROJECT_NAME" -f dev/compose.yaml down --volumes --remove-orphans >/dev/null 2>&1 || true
+              if ! docker compose -p "$COMPOSE_PROJECT_NAME" -f dev/compose.yaml down --volumes --remove-orphans >/dev/null 2>&1; then
+                compose_cleanup_status=failed
+              fi
             fi
           fi
-          rm -rf \
+          private_cleanup_status=passed
+          if ! rm -rf \
             "$RUNNER_TEMP/element-acceptance-users.json" \
             "$RUNNER_TEMP/element-acceptance-server.env" \
             "$RUNNER_TEMP/element-acceptance-reminder-events.json" \
             "$RUNNER_TEMP/element-acceptance-reminder-deliveries.json" \
-            "$RUNNER_TEMP/element-acceptance-playwright-output"
-          rm -f \
+            "$RUNNER_TEMP/element-acceptance-playwright-output"; then
+            private_cleanup_status=failed
+          fi
+          if ! rm -f \
             "$RUNNER_TEMP/element-acceptance-stage.jsonl" \
             "$RUNNER_TEMP/element-acceptance-radicale.tar" \
             "$RUNNER_TEMP/element-acceptance-reminder.pgcustom" \
             "$RUNNER_TEMP/element-acceptance-dev-up.log" \
             "$RUNNER_TEMP/element-acceptance-compose-up.log" \
             "$RUNNER_TEMP/element-acceptance-image-smoke.log" \
-            "$RUNNER_TEMP/element-acceptance-playwright.log"
+            "$RUNNER_TEMP/element-acceptance-playwright.log"; then
+            private_cleanup_status=failed
+          fi
+          {
+            echo "Compose teardown command: $compose_cleanup_status"
+            echo "Private-file removal commands: $private_cleanup_status"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$compose_cleanup_status" == failed || "$private_cleanup_status" == failed ]]; then
+            echo 'Isolated acceptance cleanup failed.' >&2
+            exit 1
+          fi

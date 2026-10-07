@@ -558,8 +558,10 @@ access and event writes stay disabled by default.
       reminder UI, relative DISPLAY alarm readback, `m.mentions.room` delivery,
       gateway restart scheduler scan, and fresh paired-store restore. The
       restored scheduler delivered its due canary once, prior sent-state stayed
-      unchanged, and cleanup passed; this covers the completed-send recovery
-      path and does not claim exactly-once delivery.
+      unchanged, and the always-run cleanup step completed. Compose teardown is
+      best-effort, so container and volume removal were not independently
+      verified. This covers the completed-send recovery path and does not claim
+      exactly-once delivery.
 - [ ] Record an operator-approved enrollment/capacity envelope with hardware,
       runtime, date-range event counts, API/render latency, and pre-declared
       pass thresholds. Do not infer a universal supported event count.
