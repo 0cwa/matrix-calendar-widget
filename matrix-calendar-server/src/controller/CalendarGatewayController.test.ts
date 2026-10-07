@@ -1831,6 +1831,80 @@ describe('CalendarGatewayController', () => {
     expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
   });
 
+  it('keeps the bound room calendar identity separate from its CalDAV URL', async () => {
+    isAllowed.mockResolvedValue(true);
+    const config = {
+      ...appConfig,
+      room_calendar_access_enabled: true,
+      room_calendar_event_writes_enabled: true,
+    } as IAppConfiguration;
+    const principal: RoomCalendarCalDavPrincipal = {
+      userId: '@_matrix_calendar_service:example.test',
+      calendarUrl:
+        'https://radicale.example.test/_matrix_calendar_service/team-calendar/',
+      credential: openIdCredential,
+    };
+    forAuthorizedTarget.mockResolvedValue(principal);
+    const credentialProvider = {
+      getRequestHeaders: jest
+        .fn()
+        .mockResolvedValue({ Authorization: 'Basic synthetic' }),
+    };
+    const credentialProviderFactory = {
+      forPrincipal: jest.fn(() => credentialProvider),
+    } as unknown as MatrixOpenIdCalDavCredentialProviderFactory;
+    fetch.mockResponseOnce(
+      multistatus(
+        eventResourceResponse(
+          '/_matrix_calendar_service/team-calendar/event.ics',
+          '"room-event-etag"',
+          simpleEventIcs('Team planning'),
+        ),
+      ),
+      { status: 207 },
+    );
+
+    const response = await createController(
+      config,
+      roomCalendarCalDavAccess,
+      credentialProviderFactory,
+    ).listEvents(
+      userContext,
+      openIdCredential,
+      roomId,
+      'team-calendar',
+      '2026-09-24T00:00:00Z',
+      '2026-09-25T00:00:00Z',
+      'UTC',
+      'room',
+    );
+
+    expect(response.events).toEqual([
+      {
+        event: expect.objectContaining({
+          id: `${principal.calendarUrl}event.ics`,
+          calendarId: 'team-calendar',
+          title: 'Team planning',
+        }),
+        etag: '"room-event-etag"',
+      },
+    ]);
+    expect(fetch.mock.calls[0][0]).toBe(principal.calendarUrl);
+    expect(fetch.mock.calls[0][1]?.method).toBe('REPORT');
+    expect(forAuthorizedTarget).toHaveBeenCalledWith(
+      {
+        roomId,
+        calendarId: 'team-calendar',
+        principal: { kind: 'service' },
+      },
+      'read',
+    );
+    expect(credentialProviderFactory.forPrincipal).toHaveBeenCalledWith(
+      principal.userId,
+      principal.credential,
+    );
+  });
+
   it('returns an opaque gateway error for a CalDAV event redirect', async () => {
     isAllowed.mockResolvedValue(true);
     fetch.mockResponseOnce('secret upstream body', {
