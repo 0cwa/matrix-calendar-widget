@@ -107,7 +107,31 @@ const PHASES = new Set([
   'reminder-restore-prior-state',
   'reminder-restore-scheduler-scan',
   'reminder-restore-no-duplicate',
+  'performance-seed',
+  'performance-cleanup',
   'performance-pilot',
+]);
+const PERFORMANCE_FIXTURE_FAILURES = new Map([
+  [
+    'performance-seed',
+    new Set([
+      'environment-invalid',
+      'manifest-invalid',
+      'openid-failed',
+      'runtime-dependency-unavailable',
+      'caldav-operation-failed',
+    ]),
+  ],
+  [
+    'performance-cleanup',
+    new Set([
+      'environment-invalid',
+      'manifest-invalid',
+      'openid-failed',
+      'runtime-dependency-unavailable',
+      'cleanup-incomplete',
+    ]),
+  ],
 ]);
 const ROOM_CONTEXT_PHASES = new Set([
   'member-a-room-context',
@@ -281,6 +305,12 @@ const FAILURE_CODES = new Set([
   'element-room-heading-not-present',
   'element-room-name-mismatch',
   'element-room-heading-wait-timeout',
+  'environment-invalid',
+  'manifest-invalid',
+  'openid-failed',
+  'runtime-dependency-unavailable',
+  'caldav-operation-failed',
+  'cleanup-incomplete',
   'performance-setup-failed',
   'performance-widget-open-failed',
   'performance-host-layout-failed',
@@ -1274,6 +1304,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
   let rejectedPhase = 'unknown';
   let rejectionCategory = 'invalid-stage-record';
   let performanceTerminalStatus;
+  const performanceFixturePhaseStatus = new Map();
   for (const line of input.split(/\r?\n/u)) {
     if (!line) continue;
 
@@ -1320,6 +1351,48 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         }
       } else {
         performanceTerminalStatus = record.status;
+      }
+    } else if (PERFORMANCE_FIXTURE_FAILURES.has(record.phase)) {
+      const previousStatus = performanceFixturePhaseStatus.get(record.phase);
+      const failureCodes = PERFORMANCE_FIXTURE_FAILURES.get(record.phase);
+      const exactKeys = (keys) =>
+        Object.keys(record).length === keys.length &&
+        keys.every((key) => Object.hasOwn(record, key));
+      if (record.status === 'started') {
+        if (previousStatus !== undefined || !exactKeys(['phase', 'status'])) {
+          throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+        }
+        performanceFixturePhaseStatus.set(record.phase, 'started');
+      } else {
+        const terminalKeys =
+          record.status === 'passed'
+            ? ['phase', 'status', 'count']
+            : [
+                'phase',
+                'status',
+                'count',
+                'failureCode',
+                ...(Object.hasOwn(record, 'httpStatus') ? ['httpStatus'] : []),
+              ];
+        if (
+          previousStatus !== 'started' ||
+          !exactKeys(terminalKeys) ||
+          !Number.isInteger(record.count) ||
+          record.count < 0 ||
+          record.count > 250 ||
+          (record.phase === 'performance-seed' &&
+            record.status === 'passed' &&
+            record.count !== 250) ||
+          (record.status === 'failed' &&
+            !failureCodes.has(record.failureCode)) ||
+          (Object.hasOwn(record, 'httpStatus') &&
+            (!Number.isInteger(record.httpStatus) ||
+              record.httpStatus < 100 ||
+              record.httpStatus > 599))
+        ) {
+          throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+        }
+        performanceFixturePhaseStatus.set(record.phase, record.status);
       }
     } else if (Object.hasOwn(record, 'performanceReport')) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
@@ -2134,6 +2207,21 @@ export function sanitizeElementAcceptance(input, sourceSha) {
 
     if (phase === 'performance-pilot') {
       lines.push(...formatPerformanceEvidence(record));
+      continue;
+    }
+
+    if (PERFORMANCE_FIXTURE_FAILURES.has(phase)) {
+      const fields = [`phase=${phase}`, `status=${record.status}`];
+      if (Object.hasOwn(record, 'count')) {
+        fields.push(`count=${record.count}`);
+      }
+      if (Object.hasOwn(record, 'httpStatus')) {
+        fields.push(`http_status=${record.httpStatus}`);
+      }
+      if (Object.hasOwn(record, 'failureCode')) {
+        fields.push(`failure_code=${record.failureCode}`);
+      }
+      lines.push(fields.join(' '));
       continue;
     }
 

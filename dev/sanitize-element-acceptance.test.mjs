@@ -2410,3 +2410,48 @@ test('rejects unsafe container diagnostics and diagnostics on other phases', () 
     );
   }
 });
+
+test('sanitizes the fixed performance seed and cleanup phases', () => {
+  const stages = [
+    { phase: 'performance-seed', status: 'started' },
+    { phase: 'performance-seed', status: 'passed', count: 250 },
+    { phase: 'performance-cleanup', status: 'started' },
+    { phase: 'performance-cleanup', status: 'passed', count: 250 },
+  ];
+  const summary = sanitizeElementAcceptance(
+    stages.map((stage) => JSON.stringify(stage)).join('\n'),
+    sourceSha,
+  );
+  assert.match(summary, /phase=performance-seed status=passed count=250/u);
+  assert.match(summary, /phase=performance-cleanup status=passed count=250/u);
+});
+
+test('rejects invalid performance fixture counts and failure categories', () => {
+  const invalidStages = [
+    [
+      { phase: 'performance-seed', status: 'started' },
+      { phase: 'performance-seed', status: 'passed', count: 249 },
+    ],
+    [
+      { phase: 'performance-cleanup', status: 'started' },
+      {
+        phase: 'performance-cleanup',
+        status: 'failed',
+        count: 0,
+        failureCode: 'caldav-operation-failed',
+      },
+    ],
+    [{ phase: 'performance-seed', status: 'passed', count: 250 }],
+    [{ phase: 'performance-seed', status: 'started', token: 'private' }],
+  ];
+  for (const stages of invalidStages) {
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          stages.map((stage) => JSON.stringify(stage)).join('\n'),
+          sourceSha,
+        ),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
