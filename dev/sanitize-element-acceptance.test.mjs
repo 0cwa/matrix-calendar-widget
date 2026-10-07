@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyRadicaleStartupLogs } from './element-acceptance-reminder-restore.mjs';
+import {
+  classifyRadicaleStartupLogs,
+  createRadicaleFilesystemEvidence,
+} from './element-acceptance-reminder-restore.mjs';
 import {
   formatSanitizerFailureSummary,
   sanitizeElementAcceptance,
@@ -64,6 +67,55 @@ function missingReminderOptionObservation() {
     reminderPutCount: 0,
     reminderPutStatus: 0,
     reminderOptionCheckedAfter: false,
+  };
+}
+
+function radicaleFilesystemEvidence(overrides = {}) {
+  return {
+    restoreRadicaleSourceProbeAvailable: true,
+    restoreRadicaleFilesystemProbeAvailable: true,
+    restoreRadicalePythonVersion: '3.13.13',
+    restoreRadicalePythonVersionMatchesSource: true,
+    restoreRadicaleRuntimeMatchesAccount: true,
+    restoreRadicaleDataUidMatchesSource: true,
+    restoreRadicaleDataGidMatchesSource: true,
+    restoreRadicaleDataModeMatchesSource: true,
+    restoreRadicaleCollectionsUidMatchesSource: true,
+    restoreRadicaleCollectionsGidMatchesSource: true,
+    restoreRadicaleCollectionsModeMatchesSource: true,
+    restoreRadicaleDataRootReadable: true,
+    restoreRadicaleDataRootSearchable: true,
+    restoreRadicaleCollectionsRootReadable: true,
+    restoreRadicaleCollectionsRootSearchable: true,
+    restoreRadicaleCollectionTreeComplete: true,
+    restoreRadicaleCollectionEntryCount: 4,
+    restoreRadicaleCollectionReadSearchFailureCount: 0,
+    ...overrides,
+  };
+}
+
+function radicaleFilesystemProbe(overrides = {}) {
+  return {
+    pythonVersion: '3.13.13',
+    runtimeOwner: true,
+    data: {
+      exists: true,
+      uid: 1000,
+      gid: 1000,
+      mode: 0o755,
+      readable: true,
+      searchable: true,
+    },
+    collections: {
+      exists: true,
+      uid: 1000,
+      gid: 1000,
+      mode: 0o700,
+      readable: true,
+      searchable: true,
+    },
+    tree: { complete: true, entries: 4, accessFailures: 0 },
+    ...overrides,
   };
 }
 
@@ -1683,8 +1735,19 @@ test('classifies only fixed Radicale startup signatures and sanitizes the eviden
     restoreRadicaleLogsAvailable: true,
     restoreRadicaleStartupExceptionPresent: true,
     restoreRadicaleReadyMarkerPresent: false,
+    restoreRadicaleStartupExceptionClass: 'other',
+    restoreRadicaleStartupErrno: 'none',
+    restoreRadicaleStartupPathBucket: 'none',
   });
   assert.equal(JSON.stringify(evidence).includes('private-value'), false);
+
+  const sourceProbe = radicaleFilesystemProbe();
+  const restoredProbe = radicaleFilesystemProbe();
+  const filesystemEvidence = createRadicaleFilesystemEvidence(
+    sourceProbe,
+    restoredProbe,
+  );
+  assert.deepEqual(filesystemEvidence, radicaleFilesystemEvidence());
 
   const summary = sanitizeElementAcceptance(
     JSON.stringify({
@@ -1697,6 +1760,7 @@ test('classifies only fixed Radicale startup signatures and sanitizes the eviden
       containerOomKilled: false,
       containerRuntimeErrorPresent: false,
       ...evidence,
+      ...filesystemEvidence,
     }),
     sourceSha,
   );
@@ -1704,19 +1768,100 @@ test('classifies only fixed Radicale startup signatures and sanitizes the eviden
   assert.match(summary, /radicale_logs_available=true/u);
   assert.match(summary, /radicale_startup_exception_present=true/u);
   assert.match(summary, /radicale_ready_marker_present=false/u);
+  assert.match(summary, /radicale_startup_exception_class=other/u);
+  assert.match(summary, /radicale_startup_errno=none/u);
+  assert.match(summary, /radicale_startup_path_bucket=none/u);
+  assert.match(summary, /radicale_python_version=3\.13\.13/u);
+  assert.match(summary, /radicale_runtime_matches_account=true/u);
+  assert.match(summary, /radicale_probe_mount=readonly/u);
+  assert.match(summary, /radicale_collections_root_readable=true/u);
+  assert.match(summary, /radicale_collections_root_searchable=true/u);
+  assert.equal(summary.includes('writable'), false);
   assert.equal(summary.includes('private-value'), false);
+
+  const metadataMismatch = createRadicaleFilesystemEvidence(
+    sourceProbe,
+    radicaleFilesystemProbe({
+      pythonVersion: '3.14.0',
+      collections: {
+        ...restoredProbe.collections,
+        uid: 1001,
+        readable: false,
+      },
+      tree: { complete: false, entries: 4, accessFailures: 1 },
+    }),
+  );
+  assert.equal(metadataMismatch.restoreRadicalePythonVersionMatchesSource, false);
+  assert.equal(metadataMismatch.restoreRadicaleCollectionsUidMatchesSource, false);
+  assert.equal(metadataMismatch.restoreRadicaleCollectionsRootReadable, false);
+  assert.equal(metadataMismatch.restoreRadicaleCollectionTreeComplete, false);
+  assert.equal(metadataMismatch.restoreRadicaleCollectionReadSearchFailureCount, 1);
+
+  const unavailableTargetEvidence = createRadicaleFilesystemEvidence(
+    sourceProbe,
+    undefined,
+  );
+  assert.equal(
+    unavailableTargetEvidence.restoreRadicaleFilesystemProbeAvailable,
+    false,
+  );
+  assert.equal(unavailableTargetEvidence.restoreRadicaleCollectionEntryCount, 0);
+  assert.throws(() =>
+    sanitizeElementAcceptance(
+      JSON.stringify({
+        phase: 'restore-radicale-ready',
+        status: 'failed',
+        restoreRadicaleProbeOutcome: 'no-response',
+        containerState: 'exited',
+        containerHealth: 'none',
+        ...evidence,
+        ...unavailableTargetEvidence,
+        restoreRadicaleCollectionEntryCount: 1,
+      }),
+      sourceSha,
+    ),
+    { message: 'invalid element acceptance summary' },
+  );
+
+  const filesystemHint = classifyRadicaleStartupLogs(
+    "An exception occurred during server startup: PermissionError: [Errno 13] Permission denied: '/data/collections/private-name'",
+  );
+  assert.equal(filesystemHint.restoreRadicaleStartupExceptionClass, 'permission-error');
+  assert.equal(filesystemHint.restoreRadicaleStartupErrno, 'eacces');
+  assert.equal(filesystemHint.restoreRadicaleStartupPathBucket, 'collections');
+  assert.equal(JSON.stringify(filesystemHint).includes('private-name'), false);
+  const filesystemHintSummary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      ...filesystemHint,
+    }),
+    sourceSha,
+  );
+  assert.match(filesystemHintSummary, /radicale_startup_errno=eacces/u);
+  assert.match(filesystemHintSummary, /radicale_startup_path_bucket=collections/u);
+  assert.equal(filesystemHintSummary.includes('private-name'), false);
 
   assert.deepEqual(classifyRadicaleStartupLogs('unrecognized startup output'), {
     restoreRadicaleStartupSignature: 'unclassified',
     restoreRadicaleLogsAvailable: true,
     restoreRadicaleStartupExceptionPresent: false,
     restoreRadicaleReadyMarkerPresent: false,
+    restoreRadicaleStartupExceptionClass: 'none',
+    restoreRadicaleStartupErrno: 'none',
+    restoreRadicaleStartupPathBucket: 'none',
   });
   assert.deepEqual(classifyRadicaleStartupLogs(undefined), {
     restoreRadicaleStartupSignature: 'unavailable',
     restoreRadicaleLogsAvailable: false,
     restoreRadicaleStartupExceptionPresent: false,
     restoreRadicaleReadyMarkerPresent: false,
+    restoreRadicaleStartupExceptionClass: 'unavailable',
+    restoreRadicaleStartupErrno: 'unavailable',
+    restoreRadicaleStartupPathBucket: 'unavailable',
   });
 
   const signatures = [
@@ -2092,6 +2237,46 @@ test('rejects unsafe container diagnostics and diagnostics on other phases', () 
       restoreRadicaleLogsAvailable: true,
       restoreRadicaleStartupExceptionPresent: false,
       restoreRadicaleReadyMarkerPresent: false,
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      ...classifyRadicaleStartupLogs('unrecognized output'),
+      ...radicaleFilesystemEvidence({
+        restoreRadicalePythonVersion: '3.13.13;token=private',
+      }),
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      ...classifyRadicaleStartupLogs('unrecognized output'),
+      ...radicaleFilesystemEvidence({ privatePath: '/private/collection' }),
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      ...classifyRadicaleStartupLogs('unrecognized output'),
+      restoreRadicaleStartupErrno: '/private/path',
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      ...classifyRadicaleStartupLogs('unrecognized output'),
+      ...radicaleFilesystemEvidence({
+        restoreRadicaleSourceProbeAvailable: false,
+      }),
     },
     {
       phase: 'restore-radicale-ready',

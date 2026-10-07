@@ -298,6 +298,70 @@ const CONTAINER_HEALTH_STATES = new Set([
   'unavailable',
 ]);
 const RESTORE_RADICALE_PROBE_OUTCOMES = new Set(['no-response', 'http-status']);
+const RESTORE_RADICALE_FILESYSTEM_FIELDS = [
+  'restoreRadicaleSourceProbeAvailable',
+  'restoreRadicaleFilesystemProbeAvailable',
+  'restoreRadicalePythonVersion',
+  'restoreRadicalePythonVersionMatchesSource',
+  'restoreRadicaleRuntimeMatchesAccount',
+  'restoreRadicaleDataUidMatchesSource',
+  'restoreRadicaleDataGidMatchesSource',
+  'restoreRadicaleDataModeMatchesSource',
+  'restoreRadicaleCollectionsUidMatchesSource',
+  'restoreRadicaleCollectionsGidMatchesSource',
+  'restoreRadicaleCollectionsModeMatchesSource',
+  'restoreRadicaleDataRootReadable',
+  'restoreRadicaleDataRootSearchable',
+  'restoreRadicaleCollectionsRootReadable',
+  'restoreRadicaleCollectionsRootSearchable',
+  'restoreRadicaleCollectionTreeComplete',
+  'restoreRadicaleCollectionEntryCount',
+  'restoreRadicaleCollectionReadSearchFailureCount',
+];
+const RESTORE_RADICALE_FILESYSTEM_BOOLEAN_FIELDS = [
+  'restoreRadicaleSourceProbeAvailable',
+  'restoreRadicaleFilesystemProbeAvailable',
+  'restoreRadicalePythonVersionMatchesSource',
+  'restoreRadicaleRuntimeMatchesAccount',
+  'restoreRadicaleDataUidMatchesSource',
+  'restoreRadicaleDataGidMatchesSource',
+  'restoreRadicaleDataModeMatchesSource',
+  'restoreRadicaleCollectionsUidMatchesSource',
+  'restoreRadicaleCollectionsGidMatchesSource',
+  'restoreRadicaleCollectionsModeMatchesSource',
+  'restoreRadicaleDataRootReadable',
+  'restoreRadicaleDataRootSearchable',
+  'restoreRadicaleCollectionsRootReadable',
+  'restoreRadicaleCollectionsRootSearchable',
+  'restoreRadicaleCollectionTreeComplete',
+];
+const RESTORE_RADICALE_STARTUP_EXCEPTION_CLASSES = new Set([
+  'unavailable',
+  'none',
+  'permission-error',
+  'missing-path-error',
+  'module-not-found',
+  'import-error',
+  'os-error',
+  'other',
+]);
+const RESTORE_RADICALE_STARTUP_ERRNOS = new Set([
+  'unavailable',
+  'none',
+  'eacces',
+  'erofs',
+  'enoent',
+  'other',
+]);
+const RESTORE_RADICALE_STARTUP_PATH_BUCKETS = new Set([
+  'unavailable',
+  'none',
+  'collections',
+  'data-root',
+  'config',
+  'plugin',
+  'other-path',
+]);
 const RESTORE_RADICALE_STARTUP_SIGNATURES = new Set([
   'unavailable',
   'unclassified',
@@ -594,6 +658,10 @@ const ALLOWED_KEYS = new Set([
   'restoreRadicaleLogsAvailable',
   'restoreRadicaleStartupExceptionPresent',
   'restoreRadicaleReadyMarkerPresent',
+  ...RESTORE_RADICALE_FILESYSTEM_FIELDS,
+  'restoreRadicaleStartupExceptionClass',
+  'restoreRadicaleStartupErrno',
+  'restoreRadicaleStartupPathBucket',
   ...RUNTIME_OBSERVATION_FIELDS,
   ...OPTIONAL_RUNTIME_STATUS_FIELDS,
   ...POST_CREATE_VISIBILITY_FIELDS,
@@ -755,6 +823,62 @@ function validRuntimeObservation(record) {
   }
 
   return true;
+}
+
+function validRestoreRadicaleFilesystemEvidence(record) {
+  const present = RESTORE_RADICALE_FILESYSTEM_FIELDS.some((key) =>
+    Object.hasOwn(record, key),
+  );
+  if (!present) return true;
+  if (
+    record.phase !== 'restore-radicale-ready' ||
+    !['passed', 'failed'].includes(record.status) ||
+    !RESTORE_RADICALE_FILESYSTEM_FIELDS.every((key) =>
+      Object.hasOwn(record, key),
+    ) ||
+    RESTORE_RADICALE_FILESYSTEM_BOOLEAN_FIELDS.some(
+      (key) => typeof record[key] !== 'boolean',
+    ) ||
+    !Number.isInteger(record.restoreRadicaleCollectionEntryCount) ||
+    record.restoreRadicaleCollectionEntryCount < 0 ||
+    record.restoreRadicaleCollectionEntryCount > 512 ||
+    !Number.isInteger(record.restoreRadicaleCollectionReadSearchFailureCount) ||
+    record.restoreRadicaleCollectionReadSearchFailureCount < 0 ||
+    record.restoreRadicaleCollectionReadSearchFailureCount > 2 ||
+    (record.restoreRadicaleFilesystemProbeAvailable
+      ? !/^\d+\.\d+\.\d+$/u.test(record.restoreRadicalePythonVersion)
+      : record.restoreRadicalePythonVersion !== 'unavailable')
+  ) {
+    return false;
+  }
+
+  const metadataMatches = [
+    'restoreRadicalePythonVersionMatchesSource',
+    'restoreRadicaleDataUidMatchesSource',
+    'restoreRadicaleDataGidMatchesSource',
+    'restoreRadicaleDataModeMatchesSource',
+    'restoreRadicaleCollectionsUidMatchesSource',
+    'restoreRadicaleCollectionsGidMatchesSource',
+    'restoreRadicaleCollectionsModeMatchesSource',
+  ];
+  const targetAccess = [
+    'restoreRadicaleRuntimeMatchesAccount',
+    'restoreRadicaleDataRootReadable',
+    'restoreRadicaleDataRootSearchable',
+    'restoreRadicaleCollectionsRootReadable',
+    'restoreRadicaleCollectionsRootSearchable',
+    'restoreRadicaleCollectionTreeComplete',
+  ];
+
+  return (
+    ((record.restoreRadicaleSourceProbeAvailable &&
+      record.restoreRadicaleFilesystemProbeAvailable) ||
+      metadataMatches.every((key) => !record[key])) &&
+    (record.restoreRadicaleFilesystemProbeAvailable ||
+      (targetAccess.every((key) => !record[key]) &&
+        record.restoreRadicaleCollectionEntryCount === 0 &&
+        record.restoreRadicaleCollectionReadSearchFailureCount === 0))
+  );
 }
 
 function validPostCreateVisibilityObservation(record) {
@@ -1586,6 +1710,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       'restoreRadicaleLogsAvailable',
       'restoreRadicaleStartupExceptionPresent',
       'restoreRadicaleReadyMarkerPresent',
+      'restoreRadicaleStartupExceptionClass',
+      'restoreRadicaleStartupErrno',
+      'restoreRadicaleStartupPathBucket',
     ];
     const hasRestoreRadicaleStartupDiagnostic =
       restoreRadicaleStartupFields.some((key) => Object.hasOwn(record, key));
@@ -1626,12 +1753,28 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           typeof record.restoreRadicaleLogsAvailable !== 'boolean' ||
           typeof record.restoreRadicaleStartupExceptionPresent !== 'boolean' ||
           typeof record.restoreRadicaleReadyMarkerPresent !== 'boolean' ||
+          !RESTORE_RADICALE_STARTUP_EXCEPTION_CLASSES.has(
+            record.restoreRadicaleStartupExceptionClass,
+          ) ||
+          !RESTORE_RADICALE_STARTUP_ERRNOS.has(
+            record.restoreRadicaleStartupErrno,
+          ) ||
+          !RESTORE_RADICALE_STARTUP_PATH_BUCKETS.has(
+            record.restoreRadicaleStartupPathBucket,
+          ) ||
           (record.restoreRadicaleLogsAvailable === false &&
             (record.restoreRadicaleStartupSignature !== 'unavailable' ||
               record.restoreRadicaleStartupExceptionPresent ||
-              record.restoreRadicaleReadyMarkerPresent)) ||
+              record.restoreRadicaleReadyMarkerPresent ||
+              record.restoreRadicaleStartupExceptionClass !== 'unavailable' ||
+              record.restoreRadicaleStartupErrno !== 'unavailable' ||
+              record.restoreRadicaleStartupPathBucket !== 'unavailable')) ||
           (record.restoreRadicaleLogsAvailable === true &&
-            record.restoreRadicaleStartupSignature === 'unavailable'))) ||
+            (record.restoreRadicaleStartupSignature === 'unavailable' ||
+              record.restoreRadicaleStartupExceptionClass === 'unavailable' ||
+              record.restoreRadicaleStartupErrno === 'unavailable' ||
+              record.restoreRadicaleStartupPathBucket === 'unavailable')))) ||
+      !validRestoreRadicaleFilesystemEvidence(record) ||
       (Object.hasOwn(record, 'containerExitCode') &&
         (!Number.isInteger(record.containerExitCode) ||
           record.containerExitCode < 0 ||
@@ -2154,7 +2297,25 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         `radicale_logs_available=${record.restoreRadicaleLogsAvailable}`,
         `radicale_startup_exception_present=${record.restoreRadicaleStartupExceptionPresent}`,
         `radicale_ready_marker_present=${record.restoreRadicaleReadyMarkerPresent}`,
+        `radicale_startup_exception_class=${record.restoreRadicaleStartupExceptionClass}`,
+        `radicale_startup_errno=${record.restoreRadicaleStartupErrno}`,
+        `radicale_startup_path_bucket=${record.restoreRadicaleStartupPathBucket}`,
       );
+    }
+    if (
+      RESTORE_RADICALE_FILESYSTEM_FIELDS.every((key) =>
+        Object.hasOwn(record, key),
+      )
+    ) {
+      fields.push('radicale_probe_mount=readonly');
+      for (const key of RESTORE_RADICALE_FILESYSTEM_FIELDS) {
+        const label = key
+          .replace(/^restoreRadicale/u, '')
+          .replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`)
+          .replace(/^_/u, '')
+          .toLowerCase();
+        fields.push(`radicale_${label}=${record[key]}`);
+      }
     }
     const phaseBooleans = PHASE_BOOLEAN_FIELDS.get(phase) ?? [];
     for (const key of phaseBooleans) {

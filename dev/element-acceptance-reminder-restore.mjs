@@ -32,16 +32,54 @@ const RADICALE_CREATE_TAR = [
   "with tarfile.open(fileobj=sys.stdout.buffer,mode='w|') as archive:",
   " archive.add('/data',arcname='.',recursive=True)",
 ].join('\n');
-const RADICALE_EXTRACT_TAR = [
-  'import posixpath,sys,tarfile',
-  'def safe(member):',
+export const RADICALE_EXTRACT_TAR = [
+  'import os,posixpath,pwd,sys,tarfile',
+  'destination=sys.argv[1]',
+  'account=pwd.getpwnam(sys.argv[2])',
+  'def safe(member,dest):',
   ' name=posixpath.normpath(member.name)',
   " if member.name.startswith('/') or name=='..' or name.startswith('../'): raise ValueError()",
+  " if name=='.' and member.name not in ('.','./'): raise ValueError()",
+  ' target=os.path.realpath(os.path.join(dest,name))',
+  ' base=os.path.realpath(dest)',
+  ' if os.path.commonpath((base,target))!=base: raise ValueError()',
   ' if member.issym() or member.islnk() or not (member.isdir() or member.isfile()): raise ValueError()',
+  ' if member.uid!=account.pw_uid or member.gid!=account.pw_gid: raise ValueError()',
+  ' if not isinstance(member.mode,int) or member.mode<0 or member.mode>0o777 or member.mode&0o002: raise ValueError()',
+  ' member.name=name',
   ' return member',
   "with tarfile.open(fileobj=sys.stdin.buffer,mode='r|*') as archive:",
   ' for member in archive:',
-  "  archive.extract(safe(member),'/data')",
+  '  if sys.version_info >= (3,12):',
+  '   archive.extract(member,destination,numeric_owner=True,filter=safe)',
+  '  else:',
+  '   archive.extract(safe(member,destination),destination,numeric_owner=True)',
+].join('\n');
+export const RADICALE_FILESYSTEM_PROBE = [
+  'import json,os,pwd,stat,sys',
+  'account=pwd.getpwnam("radicale")',
+  'def path_state(path):',
+  ' try: info=os.stat(path)',
+  ' except OSError: return {"exists":False,"uid":0,"gid":0,"mode":0,"readable":False,"searchable":False}',
+  ' return {"exists":True,"uid":info.st_uid,"gid":info.st_gid,"mode":stat.S_IMODE(info.st_mode),"readable":os.access(path,os.R_OK,effective_ids=True),"searchable":os.access(path,os.X_OK,effective_ids=True)}',
+  'tree={"complete":True,"entries":0,"accessFailures":0}',
+  'def fail(): tree["accessFailures"]=min(tree["accessFailures"]+1,2)',
+  'def walk_error(_error): tree["complete"]=False; fail()',
+  'data=path_state("/data"); collections=path_state("/data/collections")',
+  'if not collections["exists"]: tree["complete"]=False; fail()',
+  'for root,dirs,files in os.walk("/data/collections",topdown=True,onerror=walk_error,followlinks=False):',
+  ' dirs.sort(); files.sort()',
+  ' for name in dirs+files:',
+  '  if tree["entries"]==512: tree["complete"]=False; break',
+  '  path=os.path.join(root,name); tree["entries"]+=1',
+  '  try: info=os.lstat(path)',
+  '  except OSError: tree["complete"]=False; fail(); continue',
+  '  if stat.S_ISDIR(info.st_mode): flags=(os.R_OK,os.X_OK)',
+  '  elif stat.S_ISREG(info.st_mode): flags=(os.R_OK,)',
+  '  else: fail(); continue',
+  '  if not all(os.access(path,flag,effective_ids=True) for flag in flags): fail()',
+  ' if not tree["complete"] and tree["entries"]==512: break',
+  'print(json.dumps({"pythonVersion":"%d.%d.%d"%sys.version_info[:3],"runtimeOwner":os.geteuid()==account.pw_uid and os.getegid()==account.pw_gid,"data":data,"collections":collections,"tree":tree},separators=(",",":")))',
 ].join('\n');
 const MAX_COMMAND_BUFFER = 16 * 1024 * 1024;
 const MAX_RADICALE_LOG_BUFFER = 1024 * 1024;
@@ -124,6 +162,45 @@ export function classifyRadicaleStartupLogs(logText) {
     'An exception occurred during server startup: ',
   );
   const readyMarkerPresent = logs.includes('Radicale server ready');
+  const exceptionClass = !logsAvailable
+    ? 'unavailable'
+    : logs.includes('PermissionError:')
+      ? 'permission-error'
+      : logs.includes('FileNotFoundError:')
+        ? 'missing-path-error'
+        : logs.includes('ModuleNotFoundError:')
+          ? 'module-not-found'
+          : logs.includes('ImportError:')
+            ? 'import-error'
+            : logs.includes('OSError:')
+              ? 'os-error'
+              : startupExceptionPresent
+                ? 'other'
+                : 'none';
+  const errno = !logsAvailable
+    ? 'unavailable'
+    : logs.includes('[Errno 13]')
+      ? 'eacces'
+      : logs.includes('[Errno 30]')
+        ? 'erofs'
+        : logs.includes('[Errno 2]')
+          ? 'enoent'
+          : /\[Errno [0-9]+\]/u.test(logs)
+            ? 'other'
+            : 'none';
+  const pathBucket = !logsAvailable
+    ? 'unavailable'
+    : /['"]\/data\/collections(?:\/|['"])/u.test(logs)
+      ? 'collections'
+      : /['"]\/data(?:\/|['"])/u.test(logs)
+        ? 'data-root'
+        : /['"]\/etc\/radicale(?:\/|['"])/u.test(logs)
+          ? 'config'
+          : /['"]\/opt\/radicale-auth(?:\/|['"])/u.test(logs)
+            ? 'plugin'
+            : /['"]\/[^'"]+['"]/u.test(logs)
+              ? 'other-path'
+              : 'none';
   let signature = logsAvailable ? 'unclassified' : 'unavailable';
 
   if (logsAvailable) {
@@ -171,6 +248,9 @@ export function classifyRadicaleStartupLogs(logText) {
     restoreRadicaleLogsAvailable: logsAvailable,
     restoreRadicaleStartupExceptionPresent: startupExceptionPresent,
     restoreRadicaleReadyMarkerPresent: readyMarkerPresent,
+    restoreRadicaleStartupExceptionClass: exceptionClass,
+    restoreRadicaleStartupErrno: errno,
+    restoreRadicaleStartupPathBucket: pathBucket,
   };
 }
 
@@ -200,6 +280,8 @@ let postgresDumpPath;
 let restoreVolumeName;
 let commonComposeArgs;
 let failureStageRecorded = false;
+let sourceRadicaleFilesystemProbe;
+let restoredRadicaleFilesystemProbe;
 
 function initializeConfiguration() {
   runnerTemp = resolve(required('RUNNER_TEMP'));
@@ -310,6 +392,148 @@ function requireSuccess(result, phase) {
 
 function compose(args, options) {
   return run('docker', [...commonComposeArgs, ...args], options);
+}
+
+function isRadicaleFilesystemProbe(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'collections,data,pythonVersion,runtimeOwner,tree' ||
+    typeof value.pythonVersion !== 'string' ||
+    !/^\d+\.\d+\.\d+$/u.test(value.pythonVersion) ||
+    typeof value.runtimeOwner !== 'boolean'
+  ) {
+    return false;
+  }
+
+  for (const pathState of [value.data, value.collections]) {
+    if (
+      pathState === null ||
+      typeof pathState !== 'object' ||
+      Array.isArray(pathState) ||
+      Object.keys(pathState).sort().join(',') !==
+        'exists,gid,mode,readable,searchable,uid' ||
+      typeof pathState.exists !== 'boolean' ||
+      typeof pathState.readable !== 'boolean' ||
+      typeof pathState.searchable !== 'boolean' ||
+      !Number.isInteger(pathState.mode) ||
+      pathState.mode < 0 ||
+      pathState.mode > 0o777 ||
+      !Number.isInteger(pathState.uid) ||
+      pathState.uid < 0 ||
+      pathState.uid > 65535 ||
+      !Number.isInteger(pathState.gid) ||
+      pathState.gid < 0 ||
+      pathState.gid > 65535 ||
+      (!pathState.exists &&
+        (pathState.uid !== 0 ||
+          pathState.gid !== 0 ||
+          pathState.mode !== 0 ||
+          pathState.readable ||
+          pathState.searchable))
+    ) {
+      return false;
+    }
+  }
+
+  return (
+    value.tree !== null &&
+    typeof value.tree === 'object' &&
+    !Array.isArray(value.tree) &&
+    Object.keys(value.tree).sort().join(',') ===
+      'accessFailures,complete,entries' &&
+    typeof value.tree.complete === 'boolean' &&
+    Number.isInteger(value.tree.entries) &&
+    value.tree.entries >= 0 &&
+    value.tree.entries <= 512 &&
+    Number.isInteger(value.tree.accessFailures) &&
+    value.tree.accessFailures >= 0 &&
+    value.tree.accessFailures <= 2
+  );
+}
+
+function captureRadicaleFilesystemProbe(volumeName) {
+  // The mount is read-only; this sample reports metadata and read/search access only.
+  const result = run(
+    'docker',
+    [
+      'run',
+      '--rm',
+      '--network',
+      'none',
+      '--mount',
+      `type=volume,src=${volumeName},dst=/data,readonly`,
+      '--entrypoint',
+      '/app/bin/python',
+      RADICALE_IMAGE,
+      '-c',
+      RADICALE_FILESYSTEM_PROBE,
+    ],
+    { timeout: 10_000, maxBuffer: 64 * 1024 },
+  );
+  if (result.status !== 0) return undefined;
+
+  try {
+    const probe = JSON.parse(result.stdout.toString('utf8'));
+    return isRadicaleFilesystemProbe(probe) ? probe : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function samePathValue(left, right, property) {
+  return (
+    left.exists &&
+    right.exists &&
+    left[property] === right[property]
+  );
+}
+
+export function createRadicaleFilesystemEvidence(source, restored) {
+  const sourceAvailable = isRadicaleFilesystemProbe(source);
+  const restoredAvailable = isRadicaleFilesystemProbe(restored);
+  const comparable = sourceAvailable && restoredAvailable;
+  return {
+    restoreRadicaleSourceProbeAvailable: sourceAvailable,
+    restoreRadicaleFilesystemProbeAvailable: restoredAvailable,
+    restoreRadicalePythonVersion: restoredAvailable
+      ? restored.pythonVersion
+      : 'unavailable',
+    restoreRadicalePythonVersionMatchesSource:
+      comparable && source.pythonVersion === restored.pythonVersion,
+    restoreRadicaleRuntimeMatchesAccount:
+      restoredAvailable && restored.runtimeOwner,
+    restoreRadicaleDataUidMatchesSource:
+      comparable && samePathValue(source.data, restored.data, 'uid'),
+    restoreRadicaleDataGidMatchesSource:
+      comparable && samePathValue(source.data, restored.data, 'gid'),
+    restoreRadicaleDataModeMatchesSource:
+      comparable && samePathValue(source.data, restored.data, 'mode'),
+    restoreRadicaleCollectionsUidMatchesSource:
+      comparable && samePathValue(source.collections, restored.collections, 'uid'),
+    restoreRadicaleCollectionsGidMatchesSource:
+      comparable && samePathValue(source.collections, restored.collections, 'gid'),
+    restoreRadicaleCollectionsModeMatchesSource:
+      comparable && samePathValue(source.collections, restored.collections, 'mode'),
+    restoreRadicaleDataRootReadable:
+      restoredAvailable && restored.data.exists && restored.data.readable,
+    restoreRadicaleDataRootSearchable:
+      restoredAvailable && restored.data.exists && restored.data.searchable,
+    restoreRadicaleCollectionsRootReadable:
+      restoredAvailable && restored.collections.exists && restored.collections.readable,
+    restoreRadicaleCollectionsRootSearchable:
+      restoredAvailable && restored.collections.exists && restored.collections.searchable,
+    restoreRadicaleCollectionTreeComplete:
+      restoredAvailable && restored.tree.complete,
+    restoreRadicaleCollectionEntryCount: restoredAvailable
+      ? restored.tree.entries
+      : 0,
+    restoreRadicaleCollectionReadSearchFailureCount: restoredAvailable
+      ? restored.tree.accessFailures
+      : 0,
+  };
 }
 
 async function sleep(milliseconds) {
@@ -873,6 +1097,7 @@ function savePrivateArtifact(path, content, phase) {
 
 function backupRadicale(volumeName) {
   return withStage('restore-radicale-backup', async () => {
+    sourceRadicaleFilesystemProbe = captureRadicaleFilesystemProbe(volumeName);
     const archive = requireSuccess(
       run(
         'docker',
@@ -1074,6 +1299,8 @@ function restoreRadicaleArchive(diagnostics) {
         RADICALE_IMAGE,
         '-c',
         RADICALE_EXTRACT_TAR,
+        '/data',
+        'radicale',
       ],
       { input: archive, timeout: 120_000 },
     ),
@@ -1115,6 +1342,9 @@ function restoreRadicaleArchive(diagnostics) {
       freshDatabase: true,
     });
   }
+  restoredRadicaleFilesystemProbe = captureRadicaleFilesystemProbe(
+    restoreVolumeName,
+  );
 }
 
 function restorePostgresDump(diagnostics) {
@@ -1199,6 +1429,10 @@ function inspectRestoreRadicaleReadiness() {
   return {
     ...container,
     ...classifyRadicaleStartupLogs(startupLogs),
+    ...createRadicaleFilesystemEvidence(
+      sourceRadicaleFilesystemProbe,
+      restoredRadicaleFilesystemProbe,
+    ),
   };
 }
 
@@ -1255,7 +1489,13 @@ async function restoreStores() {
       'restore-radicale-ready',
     );
     try {
-      return { httpStatus: await waitForRestoreRadicale() };
+      return {
+        httpStatus: await waitForRestoreRadicale(),
+        ...createRadicaleFilesystemEvidence(
+          sourceRadicaleFilesystemProbe,
+          restoredRadicaleFilesystemProbe,
+        ),
+      };
     } catch (error) {
       if (
         !(error instanceof StageFailure) ||
