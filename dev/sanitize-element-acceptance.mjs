@@ -2009,7 +2009,10 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           fields.push(`${label}=${record[key]}`);
         }
       }
-      if (Object.hasOwn(record, 'reminderWidgetContextResponseCount')) {
+      if (
+        phase === 'reminder-room-context' &&
+        Object.hasOwn(record, 'reminderWidgetContextResponseCount')
+      ) {
         fields.push(
           `reminder_widget_context_response_count=${record.reminderWidgetContextResponseCount}`,
         );
@@ -2029,6 +2032,21 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         fields.push(
           `homeserver_last_http_error_status=${record.homeserverLastHttpErrorStatus}`,
         );
+      }
+    }
+    if (
+      phase === 'reminder-room-context' &&
+      record.matrixUserMatches === undefined
+    ) {
+      if (Object.hasOwn(record, 'reminderWidgetContextResponseCount')) {
+        fields.push(
+          `reminder_widget_context_response_count=${record.reminderWidgetContextResponseCount}`,
+        );
+        if (Object.hasOwn(record, 'reminderWidgetContextResponseStatus')) {
+          fields.push(
+            `reminder_widget_context_response_status=${record.reminderWidgetContextResponseStatus}`,
+          );
+        }
       }
     }
     if (Object.hasOwn(record, 'failureCode')) {

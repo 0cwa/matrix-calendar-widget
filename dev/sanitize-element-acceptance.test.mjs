@@ -1523,6 +1523,27 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
   }
 });
 
+test('preserves reminder context response evidence when room observation is unavailable', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'reminder-room-context',
+      status: 'failed',
+      failureCode: 'element-room-observation-unavailable',
+      reminderWidgetContextResponseCount: 0,
+    }),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=reminder-room-context status=failed reminder_widget_context_response_count=0 failure_code=element-room-observation-unavailable',
+      '',
+    ].join('\n'),
+  );
+});
+
 test('keeps an unavailable Matrix session sample non-gating and empty', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify({
