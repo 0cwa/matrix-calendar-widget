@@ -1463,7 +1463,14 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     ...roomObservation,
     phase: 'reminder-room-context',
     failureCode: 'element-room-heading-wait-timeout',
+    roomViewPresent: true,
+    roomHeaderPresent: false,
+    roomHeadingDomPresent: false,
+    roomInfoControlPresent: false,
+    fixtureCalendarIframePresent: false,
   };
+  const incompleteRoomLayoutObservation = { ...reminderRoomObservation };
+  delete incompleteRoomLayoutObservation.fixtureCalendarIframePresent;
   assert.equal(
     sanitizeElementAcceptance(
       JSON.stringify(reminderRoomObservation),
@@ -1471,7 +1478,7 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     ),
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=reminder-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-heading-wait-timeout',
+      'phase=reminder-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true room_view_present=true room_header_present=false room_heading_dom_present=false room_info_control_present=false fixture_calendar_iframe_present=false blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-heading-wait-timeout',
       '',
     ].join('\n'),
   );
@@ -1483,6 +1490,9 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     { ...roomObservation, homeserverLastHttpErrorStatus: '500 /sync?token=x' },
     { ...roomObservation, failureCode: 'room name: private meeting' },
     { ...roomObservation, roomName: 'private meeting' },
+    { ...roomObservation, roomViewPresent: true },
+    incompleteRoomLayoutObservation,
+    { ...reminderRoomObservation, roomInfoControlPresent: 'present' },
   ];
   for (const record of invalidRecords) {
     assert.throws(() =>

@@ -218,6 +218,11 @@ type MemberARoomObservation = {
   roomHeadingPresent: boolean;
   roomNameMatches: boolean;
   roomIdMatches: boolean;
+  roomViewPresent?: boolean;
+  roomHeaderPresent?: boolean;
+  roomHeadingDomPresent?: boolean;
+  roomInfoControlPresent?: boolean;
+  fixtureCalendarIframePresent?: boolean;
   blockedExternalRequestCount: number;
   homeserverHttpErrorCount: number;
   homeserverLastHttpErrorStatus?: number;
@@ -971,6 +976,7 @@ test('Element Web delivers a relative room reminder across restart and restore',
       fixture.roomName,
       fixture.teamRoomId,
       fixture.users.memberA.userId,
+      true,
     );
     recordMemberARoomObservation(reminderRoom, 'reminder-room-context');
     failureAlreadyRecorded = Boolean(reminderRoom.failureCode);
@@ -2003,6 +2009,7 @@ async function openMemberARoomWithDiagnostics(
   roomName: string,
   roomId: string,
   expectedUserId: string,
+  captureReminderRoomLayout = false,
 ): Promise<MemberARoomResult> {
   const roomUrl = new URL(fixture.elementUrl);
   roomUrl.hash = `/room/${roomId}`;
@@ -2040,6 +2047,7 @@ async function openMemberARoomWithDiagnostics(
     expectedUserId,
     navigationCompleted,
     roomHeadingReady,
+    captureReminderRoomLayout,
   ).catch(() => undefined);
   return {
     element,
@@ -2057,6 +2065,7 @@ async function observeMemberARoom(
   expectedUserId: string,
   roomNavigationCompleted: boolean,
   roomHeadingReady: boolean,
+  captureReminderRoomLayout: boolean,
 ): Promise<MemberARoomObservation> {
   const matrixState = await page.evaluate(
     ({ expectedRoomId, expectedMatrixUserId }) => {
@@ -2140,6 +2149,44 @@ async function observeMemberARoom(
         { timeout: 1_000 },
       )
       .catch(() => false));
+  let roomLayoutObservation:
+    | Pick<
+        MemberARoomObservation,
+        | 'roomViewPresent'
+        | 'roomHeaderPresent'
+        | 'roomHeadingDomPresent'
+        | 'roomInfoControlPresent'
+        | 'fixtureCalendarIframePresent'
+      >
+    | undefined;
+  if (captureReminderRoomLayout) {
+    const [roomViewCount, roomHeaderCount, roomInfoControlCount, iframeCount] =
+      await Promise.all([
+        page
+          .locator('.mx_RoomView')
+          .count()
+          .catch(() => 0),
+        page
+          .locator('header.mx_RoomHeader')
+          .count()
+          .catch(() => 0),
+        page
+          .locator('header.mx_RoomHeader button.mx_RoomHeader_infoWrapper')
+          .count()
+          .catch(() => 0),
+        page
+          .locator('iframe[title="Matrix Calendar"]')
+          .count()
+          .catch(() => 0),
+      ]);
+    roomLayoutObservation = {
+      roomViewPresent: roomViewCount > 0,
+      roomHeaderPresent: roomHeaderCount > 0,
+      roomHeadingDomPresent: roomHeadingCount > 0,
+      roomInfoControlPresent: roomInfoControlCount > 0,
+      fixtureCalendarIframePresent: iframeCount > 0,
+    };
+  }
   let roomIdMatches = false;
   try {
     roomIdMatches = element.getCurrentRoomId() === roomId;
@@ -2158,6 +2205,7 @@ async function observeMemberARoom(
     roomHeadingPresent,
     roomNameMatches,
     roomIdMatches,
+    ...(roomLayoutObservation ?? {}),
     blockedExternalRequestCount: blockedExternalRequests,
     homeserverHttpErrorCount: homeserverHttpFailures.count,
     ...(homeserverHttpFailures.lastStatus === undefined

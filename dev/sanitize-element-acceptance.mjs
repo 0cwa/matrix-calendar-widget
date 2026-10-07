@@ -111,6 +111,13 @@ const ROOM_CONTEXT_PHASES = new Set([
   'member-a-room-context',
   'reminder-room-context',
 ]);
+const REMINDER_ROOM_LAYOUT_FIELDS = [
+  'roomViewPresent',
+  'roomHeaderPresent',
+  'roomHeadingDomPresent',
+  'roomInfoControlPresent',
+  'fixtureCalendarIframePresent',
+];
 const PHASE_BOOLEAN_FIELDS = new Map([
   ['service-room-ready', ['serviceUserJoined', 'powerPolicyVerified']],
   ['reminder-role-verified', ['rolePolicyVerified']],
@@ -528,6 +535,7 @@ const ALLOWED_KEYS = new Set([
   'roomHeadingPresent',
   'roomNameMatches',
   'roomIdMatches',
+  ...REMINDER_ROOM_LAYOUT_FIELDS,
   'blockedExternalRequestCount',
   'homeserverHttpErrorCount',
   'homeserverLastHttpErrorStatus',
@@ -1631,12 +1639,16 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       'roomHeadingPresent',
       'roomNameMatches',
       'roomIdMatches',
+      ...REMINDER_ROOM_LAYOUT_FIELDS,
       'blockedExternalRequestCount',
       'homeserverHttpErrorCount',
       'homeserverLastHttpErrorStatus',
     ];
     const hasRoomObservation = roomObservationKeys.some((key) =>
       Object.hasOwn(record, key),
+    );
+    const hasReminderRoomLayoutObservation = REMINDER_ROOM_LAYOUT_FIELDS.some(
+      (key) => Object.hasOwn(record, key),
     );
     const roomFailureCodes = new Set([
       'element-room-navigation-failed',
@@ -1675,6 +1687,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
               requiredRoomBooleans.some((key) => record[key] !== true))) ||
           (record.status === 'failed' &&
             !roomFailureCodes.has(record.failureCode)))) ||
+      (hasReminderRoomLayoutObservation &&
+        (record.phase !== 'reminder-room-context' ||
+          REMINDER_ROOM_LAYOUT_FIELDS.some(
+            (key) =>
+              !Object.hasOwn(record, key) || typeof record[key] !== 'boolean',
+          ))) ||
       (ROOM_CONTEXT_PHASES.has(record.phase) &&
         !hasRoomObservation &&
         (record.status !== 'failed' ||
@@ -1960,6 +1978,17 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       fields.push(`room_heading_present=${record.roomHeadingPresent}`);
       fields.push(`room_name_matches=${record.roomNameMatches}`);
       fields.push(`room_id_matches=${record.roomIdMatches}`);
+      for (const [key, label] of [
+        ['roomViewPresent', 'room_view_present'],
+        ['roomHeaderPresent', 'room_header_present'],
+        ['roomHeadingDomPresent', 'room_heading_dom_present'],
+        ['roomInfoControlPresent', 'room_info_control_present'],
+        ['fixtureCalendarIframePresent', 'fixture_calendar_iframe_present'],
+      ]) {
+        if (Object.hasOwn(record, key)) {
+          fields.push(`${label}=${record[key]}`);
+        }
+      }
       fields.push(
         `blocked_external_request_count=${record.blockedExternalRequestCount}`,
       );
