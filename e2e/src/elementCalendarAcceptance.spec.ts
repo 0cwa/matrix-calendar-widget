@@ -78,6 +78,12 @@ type Phase =
   | 'widget-b-approved'
   | 'outsider-widget-approved'
   | 'gateway-backed-read'
+  | 'event-create-dialog'
+  | 'event-create-calendar-selected'
+  | 'event-create-title-entered'
+  | 'event-create-submit'
+  | 'event-create-response'
+  | 'event-create-visible'
   | 'event-created'
   | 'shared-visibility'
   | 'member-a-edited'
@@ -395,26 +401,50 @@ test('Element Web members share events and enforce room authorization', async ({
     record('widget-a-approved', 'passed');
 
     const eventTitle = `Acceptance ${randomUUID()}`;
-    activePhase = 'event-created';
+    activePhase = 'event-create-dialog';
+    await frameA
+      .getByRole('button', { name: 'Create event', exact: true })
+      .click();
+    const createDialog = frameA.getByRole('dialog').last();
+    await expect(createDialog).toBeVisible({ timeout: 15_000 });
+    record(activePhase, 'passed');
+
+    activePhase = 'event-create-calendar-selected';
+    await createDialog
+      .getByRole('combobox', { name: 'Calendar' })
+      .selectOption({ label: 'Synthetic team calendar' });
+    record(activePhase, 'passed');
+
+    activePhase = 'event-create-title-entered';
+    await createDialog.getByRole('textbox', { name: 'Title' }).fill(eventTitle);
+    record(activePhase, 'passed');
+
+    activePhase = 'event-create-submit';
     const createResponse = waitForGatewayResponse(
       pageA,
       'POST',
       '/v1/calendar/events',
     );
-    await frameA
-      .getByRole('button', { name: 'Create event', exact: true })
-      .click();
-    const createDialog = frameA.getByRole('dialog').last();
-    await createDialog.getByRole('textbox', { name: 'Title' }).fill(eventTitle);
     await createDialog
       .getByRole('button', { name: 'Create event', exact: true })
       .click();
+    record(activePhase, 'passed');
+
+    activePhase = 'event-create-response';
     const createResponseResult = await createResponse;
+    failureHttpStatus = createResponseResult.status();
     expect(createResponseResult.status()).toBeGreaterThanOrEqual(200);
     expect(createResponseResult.status()).toBeLessThan(300);
+    record(activePhase, 'passed', failureHttpStatus);
+    failureHttpStatus = undefined;
+
+    activePhase = 'event-create-visible';
     await expect(
       frameA.getByRole('listitem', { name: eventTitle }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 15_000 });
+    record(activePhase, 'passed');
+
+    activePhase = 'event-created';
     record(activePhase, 'passed', createResponseResult.status());
 
     activePhase = 'member-b-room-context';

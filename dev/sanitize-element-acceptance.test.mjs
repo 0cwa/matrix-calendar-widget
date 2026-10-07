@@ -107,6 +107,55 @@ test('emits only fixed phase names, outcomes, and source SHA', () => {
   );
 });
 
+test('emits bounded event creation steps and keeps response status numeric', () => {
+  const summary = sanitizeElementAcceptance(
+    [
+      JSON.stringify({ phase: 'event-create-dialog', status: 'passed' }),
+      JSON.stringify({
+        phase: 'event-create-calendar-selected',
+        status: 'passed',
+      }),
+      JSON.stringify({
+        phase: 'event-create-title-entered',
+        status: 'passed',
+      }),
+      JSON.stringify({ phase: 'event-create-submit', status: 'passed' }),
+      JSON.stringify({
+        phase: 'event-create-response',
+        status: 'failed',
+        httpStatus: 403,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=event-create-dialog status=passed',
+      'phase=event-create-calendar-selected status=passed',
+      'phase=event-create-title-entered status=passed',
+      'phase=event-create-submit status=passed',
+      'phase=event-create-response status=failed http_status=403',
+      '',
+    ].join('\n'),
+  );
+
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'event-create-title-entered',
+          status: 'passed',
+          eventTitle: 'not retained',
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
 test('emits bounded setup substeps and numeric failure details', () => {
   const summary = sanitizeElementAcceptance(
     [
