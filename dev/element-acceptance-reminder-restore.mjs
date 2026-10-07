@@ -46,6 +46,16 @@ const RADICALE_EXTRACT_TAR = [
 const MAX_COMMAND_BUFFER = 16 * 1024 * 1024;
 const MAX_WAIT_MS = 120_000;
 const COMPOSE_GRACEFUL_STOP_COMMAND_TIMEOUT_MS = 75_000;
+const CONTAINER_STATUS_VALUES = new Set([
+  'created',
+  'restarting',
+  'running',
+  'removing',
+  'paused',
+  'exited',
+  'dead',
+]);
+const CONTAINER_HEALTH_VALUES = new Set(['starting', 'healthy', 'unhealthy']);
 const RADICALE_EMPTY_DIRECTORY_CHECK = [
   'import os,sys',
   "entries=os.listdir('/data')",
@@ -301,6 +311,8 @@ function inspectContainer(service, phase = 'restore-quiesced') {
       typeof state.Health?.Status === 'string'
         ? state.Health.Status
         : undefined,
+    runtimeErrorPresent:
+      typeof state.Error === 'string' && state.Error.length > 0,
   };
 }
 
@@ -1082,6 +1094,38 @@ async function waitForRestoreRadicale() {
   );
 }
 
+function inspectRestoreRadicaleReadiness() {
+  try {
+    const state = inspectContainer(
+      'restore-radicale',
+      'restore-radicale-ready',
+    );
+    return {
+      containerState: CONTAINER_STATUS_VALUES.has(state.status)
+        ? state.status
+        : 'unavailable',
+      containerHealth:
+        state.healthStatus === undefined
+          ? 'none'
+          : CONTAINER_HEALTH_VALUES.has(state.healthStatus)
+            ? state.healthStatus
+            : 'unavailable',
+      ...(Number.isInteger(state.exitCode)
+        ? { containerExitCode: state.exitCode }
+        : {}),
+      ...(typeof state.oomKilled === 'boolean'
+        ? { containerOomKilled: state.oomKilled }
+        : {}),
+      containerRuntimeErrorPresent: state.runtimeErrorPresent,
+    };
+  } catch {
+    return {
+      containerState: 'unavailable',
+      containerHealth: 'unavailable',
+    };
+  }
+}
+
 async function restoreStores() {
   await validateCompose();
   const sourceVolume = await quiesceWriters();
@@ -1108,7 +1152,23 @@ async function restoreStores() {
       compose(['up', '--no-build', '-d', 'restore-radicale']),
       'restore-radicale-ready',
     );
-    return { httpStatus: await waitForRestoreRadicale() };
+    try {
+      return { httpStatus: await waitForRestoreRadicale() };
+    } catch (error) {
+      if (
+        !(error instanceof StageFailure) ||
+        error.phase !== 'restore-radicale-ready'
+      ) {
+        throw error;
+      }
+      throw new StageFailure('restore-radicale-ready', {
+        ...error.details,
+        restoreRadicaleProbeOutcome: Number.isInteger(error.details.httpStatus)
+          ? 'http-status'
+          : 'no-response',
+        ...inspectRestoreRadicaleReadiness(),
+      });
+    }
   });
   await withStage('restore-postgres-role-ready', async () => {
     verifyRestrictedRole(

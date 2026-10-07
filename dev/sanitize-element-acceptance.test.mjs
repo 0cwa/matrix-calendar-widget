@@ -1630,6 +1630,49 @@ test('emits allowlisted gateway container state without exposing its error text'
   );
 });
 
+test('emits only fixed Radicale readiness state after an unanswered probe', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'running',
+      containerHealth: 'none',
+      containerOomKilled: false,
+      containerRuntimeErrorPresent: false,
+    }),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=restore-radicale-ready status=failed container_state=running container_health=none container_oom_killed=false container_runtime_error_present=false restore_radicale_probe_outcome=no-response',
+      '',
+    ].join('\n'),
+  );
+
+  const httpStatusSummary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      httpStatus: 503,
+      restoreRadicaleProbeOutcome: 'http-status',
+      containerState: 'exited',
+      containerHealth: 'none',
+      containerExitCode: 1,
+      containerOomKilled: false,
+      containerRuntimeErrorPresent: true,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    httpStatusSummary,
+    /phase=restore-radicale-ready status=failed http_status=503 container_state=exited container_health=none container_exit_code=1 container_oom_killed=false container_runtime_error_present=true restore_radicale_probe_outcome=http-status/u,
+  );
+});
+
 test('emits a missing dependency only when the runtime manifest allowlists it', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify({
@@ -1929,6 +1972,33 @@ test('rejects unsafe container diagnostics and diagnostics on other phases', () 
       phase: 'gateway-ready',
       status: 'failed',
       failureCode: 'startup-output=secret',
+      containerState: 'running',
+      containerHealth: 'none',
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      httpStatus: 503,
+      containerState: 'running',
+      containerHealth: 'none',
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'http-status',
+      containerState: 'running',
+      containerHealth: 'none',
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+    },
+    {
+      phase: 'gateway-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
       containerState: 'running',
       containerHealth: 'none',
     },

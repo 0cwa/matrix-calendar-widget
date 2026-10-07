@@ -297,6 +297,7 @@ const CONTAINER_HEALTH_STATES = new Set([
   'none',
   'unavailable',
 ]);
+const RESTORE_RADICALE_PROBE_OUTCOMES = new Set(['no-response', 'http-status']);
 const MATRIX_SYNC_STATES = new Set([
   'ERROR',
   'PREPARED',
@@ -574,6 +575,7 @@ const ALLOWED_KEYS = new Set([
   'containerExitCode',
   'containerOomKilled',
   'containerRuntimeErrorPresent',
+  'restoreRadicaleProbeOutcome',
   ...RUNTIME_OBSERVATION_FIELDS,
   ...OPTIONAL_RUNTIME_STATUS_FIELDS,
   ...POST_CREATE_VISIBILITY_FIELDS,
@@ -1557,14 +1559,34 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       'containerOomKilled',
       'containerRuntimeErrorPresent',
     ].some((key) => Object.hasOwn(record, key));
+    const hasRestoreRadicaleProbeDiagnostic = Object.hasOwn(
+      record,
+      'restoreRadicaleProbeOutcome',
+    );
     if (
+      (hasRestoreRadicaleProbeDiagnostic &&
+        (record.phase !== 'restore-radicale-ready' ||
+          record.status !== 'failed' ||
+          !RESTORE_RADICALE_PROBE_OUTCOMES.has(
+            record.restoreRadicaleProbeOutcome,
+          ) ||
+          (record.restoreRadicaleProbeOutcome === 'no-response' &&
+            Object.hasOwn(record, 'httpStatus')) ||
+          (record.restoreRadicaleProbeOutcome === 'http-status' &&
+            !Object.hasOwn(record, 'httpStatus')) ||
+          Object.hasOwn(record, 'processExitCode'))) ||
       (hasContainerDiagnostic &&
-        (record.phase !== 'gateway-ready' ||
+        (!(
+          record.phase === 'gateway-ready' ||
+          (record.phase === 'restore-radicale-ready' &&
+            hasRestoreRadicaleProbeDiagnostic)
+        ) ||
           record.status !== 'failed' ||
           !Object.hasOwn(record, 'containerState') ||
           !CONTAINER_STATES.has(record.containerState) ||
           !Object.hasOwn(record, 'containerHealth') ||
           !CONTAINER_HEALTH_STATES.has(record.containerHealth))) ||
+      (hasRestoreRadicaleProbeDiagnostic && !hasContainerDiagnostic) ||
       (Object.hasOwn(record, 'containerExitCode') &&
         (!Number.isInteger(record.containerExitCode) ||
           record.containerExitCode < 0 ||
@@ -2074,6 +2096,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     if (Object.hasOwn(record, 'containerRuntimeErrorPresent')) {
       fields.push(
         `container_runtime_error_present=${record.containerRuntimeErrorPresent}`,
+      );
+    }
+    if (Object.hasOwn(record, 'restoreRadicaleProbeOutcome')) {
+      fields.push(
+        `restore_radicale_probe_outcome=${record.restoreRadicaleProbeOutcome}`,
       );
     }
     const phaseBooleans = PHASE_BOOLEAN_FIELDS.get(phase) ?? [];
