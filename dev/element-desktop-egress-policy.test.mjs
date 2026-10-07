@@ -13,7 +13,12 @@ import {
 function passingFamily() {
   return {
     listenerBound: true,
-    probeSpawned: true,
+    childResult: 'probe-reported',
+    childExitStatus: 2,
+    childSignal: null,
+    spawnErrorClass: null,
+    stderrClass: 'empty',
+    probeMarkerPresent: true,
     probeUidMatches: true,
     connectAttempted: true,
     connectionOutcome: 'timeout',
@@ -157,29 +162,73 @@ test('child result classification does not treat spawn or identity failures as b
     stdout: 'probe-started\nprobe-result:timeout\n',
   });
   assert.deepEqual(timeout, {
-    probeSpawned: true,
+    childResult: 'probe-reported',
+    childExitStatus: 2,
+    childSignal: null,
+    spawnErrorClass: null,
+    stderrClass: 'empty',
+    probeMarkerPresent: true,
     probeUidMatches: true,
     connectAttempted: true,
     connectionOutcome: 'timeout',
   });
+  const uidMismatch = probeFromSpawn({
+    pid: 123,
+    status: 3,
+    signal: null,
+    stdout: 'probe-started\nprobe-uid-mismatch\n',
+  });
+  assert.equal(uidMismatch.childResult, 'probe-reported');
+  assert.equal(uidMismatch.connectionOutcome, 'uid-mismatch');
+
+  const beforeMarker = probeFromSpawn({
+    pid: 123,
+    status: 1,
+    signal: null,
+    stdout: '',
+    stderr: 'sudo: a password is required\n',
+  });
+  assert.deepEqual(beforeMarker, {
+    childResult: 'exited-before-marker',
+    childExitStatus: 1,
+    childSignal: null,
+    spawnErrorClass: null,
+    stderrClass: 'sudo-policy',
+    probeMarkerPresent: false,
+    probeUidMatches: null,
+    connectAttempted: false,
+    connectionOutcome: 'unexpected-exit',
+  });
+
+  const spawnFailure = probeFromSpawn({
+    pid: undefined,
+    status: null,
+    signal: null,
+    error: Object.assign(new Error(), { code: 'EACCES' }),
+    stdout: '',
+    stderr: 'permission denied',
+  });
+  assert.equal(spawnFailure.childResult, 'spawn-error');
+  assert.equal(spawnFailure.spawnErrorClass, 'permission');
+  assert.equal(spawnFailure.stderrClass, 'permission');
+  assert.equal(spawnFailure.probeMarkerPresent, false);
   assert.equal(
-    probeFromSpawn({
-      pid: 123,
-      status: 3,
-      signal: null,
-      stdout: 'probe-started\nprobe-uid-mismatch\n',
-    }).connectionOutcome,
-    'uid-mismatch',
+    JSON.stringify(spawnFailure).includes('permission denied'),
+    false,
   );
-  assert.equal(
-    probeFromSpawn({
-      pid: undefined,
-      status: null,
-      error: new Error(),
-      stdout: '',
-    }).connectionOutcome,
-    'spawn-error',
-  );
+
+  const signaled = probeFromSpawn({
+    pid: 123,
+    status: null,
+    signal: 'SIGTERM',
+    stdout: 'probe-started\n',
+    stderr: '',
+  });
+  assert.equal(signaled.childResult, 'signaled');
+  assert.equal(signaled.childSignal, 'SIGTERM');
+  assert.equal(signaled.probeMarkerPresent, true);
+  assert.equal(signaled.connectionOutcome, 'signaled');
+
   assert.equal(
     probeFromSpawn({
       pid: 123,
@@ -245,7 +294,12 @@ test('connect probe checks its real uid before making a loopback connection', as
   assert.equal(matching.signal, null);
   assert.equal(matching.status, 0);
   assert.deepEqual(probeFromSpawn(matching), {
-    probeSpawned: true,
+    childResult: 'probe-reported',
+    childExitStatus: 0,
+    childSignal: null,
+    spawnErrorClass: null,
+    stderrClass: 'empty',
+    probeMarkerPresent: true,
     probeUidMatches: true,
     connectAttempted: true,
     connectionOutcome: 'connected',
@@ -274,7 +328,12 @@ test('connect probe rejects a mismatched uid before attempting a socket', (conte
   assert.equal(mismatched.signal, null);
   assert.equal(mismatched.status, 3);
   assert.deepEqual(probeFromSpawn(mismatched), {
-    probeSpawned: true,
+    childResult: 'probe-reported',
+    childExitStatus: 3,
+    childSignal: null,
+    spawnErrorClass: null,
+    stderrClass: 'empty',
+    probeMarkerPresent: true,
     probeUidMatches: false,
     connectAttempted: false,
     connectionOutcome: 'uid-mismatch',

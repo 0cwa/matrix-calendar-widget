@@ -8,6 +8,23 @@ const FAMILIES = Object.freeze([
   { name: 'ipv4', tool: 'iptables', suffix: '4', destination: '127.0.0.1/32' },
   { name: 'ipv6', tool: 'ip6tables', suffix: '6', destination: '::1/128' },
 ]);
+const SAFE_SIGNALS = new Set([
+  'SIGABRT',
+  'SIGALRM',
+  'SIGBUS',
+  'SIGFPE',
+  'SIGHUP',
+  'SIGILL',
+  'SIGINT',
+  'SIGKILL',
+  'SIGPIPE',
+  'SIGQUIT',
+  'SIGSEGV',
+  'SIGTERM',
+  'SIGTRAP',
+  'SIGUSR1',
+  'SIGUSR2',
+]);
 
 function requireDecimal(value, min, max) {
   if (!/^[0-9]{1,20}$/u.test(String(value)))
@@ -244,24 +261,116 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function classifySpawnError(error) {
+  switch (error?.code) {
+    case 'ENOENT':
+      return 'missing-executable';
+    case 'EACCES':
+    case 'EPERM':
+      return 'permission';
+    case 'ETIMEDOUT':
+      return 'timeout';
+    case 'EAGAIN':
+    case 'EMFILE':
+    case 'ENFILE':
+    case 'ENOMEM':
+      return 'resource';
+    default:
+      return 'other';
+  }
+}
+
+function classifyChildStderr(stderr) {
+  const text = stderr.toLowerCase();
+  if (text.trim().length === 0) return 'empty';
+  if (
+    [
+      'a password is required',
+      'a terminal is required',
+      'not allowed to execute',
+      'not in the sudoers',
+    ].some((marker) => text.includes(marker))
+  ) {
+    return 'sudo-policy';
+  }
+  if (
+    ['permission denied', 'eacces', 'eperm'].some((marker) =>
+      text.includes(marker),
+    )
+  ) {
+    return 'permission';
+  }
+  if (
+    [
+      'cannot find module',
+      'cannot find package',
+      'err_module_not_found',
+      'syntaxerror',
+    ].some((marker) => text.includes(marker))
+  ) {
+    return 'node-load';
+  }
+  return 'other';
+}
+
 export function probeFromSpawn(result) {
   const output = typeof result?.stdout === 'string' ? result.stdout : '';
+  const stderr = typeof result?.stderr === 'string' ? result.stderr : '';
   const lines = output.split(/\r?\n/u).filter(Boolean);
-  const probeSpawned = lines[0] === 'probe-started';
+  const probeMarkerPresent = lines[0] === 'probe-started';
+  const childExitStatus =
+    Number.isSafeInteger(result?.status) &&
+    result.status >= 0 &&
+    result.status <= 255
+      ? result.status
+      : null;
+  const childSignal =
+    typeof result?.signal === 'string' && result.signal.length > 0
+      ? SAFE_SIGNALS.has(result.signal)
+        ? result.signal
+        : 'other'
+      : null;
   const defaults = {
-    probeSpawned,
+    childResult: 'probe-reported',
+    childExitStatus,
+    childSignal,
+    spawnErrorClass: result?.error ? classifySpawnError(result.error) : null,
+    stderrClass: classifyChildStderr(stderr),
+    probeMarkerPresent,
     probeUidMatches: null,
     connectAttempted: false,
     connectionOutcome: 'unexpected-exit',
   };
-  if (!probeSpawned) {
+  if (result?.error) {
     return {
       ...defaults,
-      connectionOutcome: result?.error ? 'spawn-error' : 'unexpected-exit',
+      childResult: 'spawn-error',
+      connectionOutcome: 'spawn-error',
     };
   }
-  if (result?.signal) return { ...defaults, connectionOutcome: 'signaled' };
-  if (result?.error || lines.length !== 2) return defaults;
+  if (childSignal !== null) {
+    return {
+      ...defaults,
+      childResult: 'signaled',
+      connectionOutcome: 'signaled',
+    };
+  }
+  if (!probeMarkerPresent) {
+    return {
+      ...defaults,
+      childResult:
+        lines.length === 0 ? 'exited-before-marker' : 'protocol-invalid',
+      connectionOutcome:
+        lines.length === 0 ? 'unexpected-exit' : 'protocol-error',
+    };
+  }
+  if (lines.length !== 2) {
+    return {
+      ...defaults,
+      childResult: 'protocol-invalid',
+      connectionOutcome: 'protocol-error',
+    };
+  }
   if (lines[1] === 'probe-uid-mismatch') {
     if (result?.status === 3) {
       return {
@@ -270,7 +379,11 @@ export function probeFromSpawn(result) {
         connectionOutcome: 'uid-mismatch',
       };
     }
-    return defaults;
+    return {
+      ...defaults,
+      childResult: 'protocol-invalid',
+      connectionOutcome: 'protocol-error',
+    };
   }
   const outcome = lines[1].startsWith('probe-result:')
     ? lines[1].slice('probe-result:'.length)
@@ -284,7 +397,11 @@ export function probeFromSpawn(result) {
     'socket-init-error': 7,
   }[outcome];
   if (!Number.isSafeInteger(exitStatus) || result?.status !== exitStatus) {
-    return defaults;
+    return {
+      ...defaults,
+      childResult: 'protocol-invalid',
+      connectionOutcome: 'protocol-error',
+    };
   }
   return {
     ...defaults,
@@ -297,7 +414,8 @@ export function probeFromSpawn(result) {
 function familyProbePassed(value) {
   return (
     value?.listenerBound === true &&
-    value.probeSpawned === true &&
+    value.childResult === 'probe-reported' &&
+    value.probeMarkerPresent === true &&
     value.probeUidMatches === true &&
     value.connectAttempted === true &&
     value.connectionOutcome === 'timeout' &&
@@ -314,6 +432,20 @@ export function negativeProbePassed(value) {
     familyProbePassed(value.ipv4) &&
     familyProbePassed(value.ipv6)
   );
+}
+
+function unrunChildObservation() {
+  return {
+    childResult: 'not-run',
+    childExitStatus: null,
+    childSignal: null,
+    spawnErrorClass: null,
+    stderrClass: 'empty',
+    probeMarkerPresent: false,
+    probeUidMatches: null,
+    connectAttempted: false,
+    connectionOutcome: 'listener-error',
+  };
 }
 
 async function localListener(host, excludedPort) {
@@ -395,9 +527,9 @@ async function testFamilyAsUid(uid, host, port) {
     ],
     {
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 2_000,
-      maxBuffer: 1_024,
+      maxBuffer: 4_096,
     },
   );
   return probeFromSpawn(result);
@@ -416,10 +548,7 @@ export async function negativeLocalEgressCheck(
     const host = family.name === 'ipv4' ? '127.0.0.1' : '::1';
     const value = {
       listenerBound: false,
-      probeSpawned: false,
-      probeUidMatches: null,
-      connectAttempted: false,
-      connectionOutcome: 'listener-error',
+      ...unrunChildObservation(),
       listenerAcceptedCount: null,
       dropCount: null,
     };
@@ -435,7 +564,17 @@ export async function negativeLocalEgressCheck(
       try {
         Object.assign(value, await testFamilyAsUid(uid, host, listener.port));
       } catch {
-        value.connectionOutcome = 'probe-error';
+        Object.assign(value, {
+          childResult: 'probe-error',
+          childExitStatus: null,
+          childSignal: null,
+          spawnErrorClass: null,
+          stderrClass: 'unavailable',
+          probeMarkerPresent: false,
+          probeUidMatches: null,
+          connectAttempted: false,
+          connectionOutcome: 'probe-error',
+        });
       }
       await wait(25);
       value.listenerAcceptedCount = Math.min(2, listener.getAccepts());

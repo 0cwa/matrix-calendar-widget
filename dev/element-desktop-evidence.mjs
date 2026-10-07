@@ -61,6 +61,7 @@ const ENCRYPTED_STORAGE_BACKENDS = new Set([
 const PROBE_OUTCOMES = new Set([
   'connected',
   'listener-error',
+  'protocol-error',
   'probe-error',
   'refused',
   'signaled',
@@ -71,6 +72,48 @@ const PROBE_OUTCOMES = new Set([
   'unexpected-exit',
   'uid-mismatch',
   'unreachable',
+]);
+const PROBE_CHILD_RESULTS = new Set([
+  'exited-before-marker',
+  'not-run',
+  'probe-error',
+  'probe-reported',
+  'protocol-invalid',
+  'signaled',
+  'spawn-error',
+]);
+const PROBE_SIGNALS = new Set([
+  'SIGABRT',
+  'SIGALRM',
+  'SIGBUS',
+  'SIGFPE',
+  'SIGHUP',
+  'SIGILL',
+  'SIGINT',
+  'SIGKILL',
+  'SIGPIPE',
+  'SIGQUIT',
+  'SIGSEGV',
+  'SIGTERM',
+  'SIGTRAP',
+  'SIGUSR1',
+  'SIGUSR2',
+  'other',
+]);
+const PROBE_SPAWN_ERRORS = new Set([
+  'missing-executable',
+  'other',
+  'permission',
+  'resource',
+  'timeout',
+]);
+const PROBE_STDERR_CLASSES = new Set([
+  'empty',
+  'node-load',
+  'other',
+  'permission',
+  'sudo-policy',
+  'unavailable',
 ]);
 const STAGES = new Set([
   'desktop-startup',
@@ -233,16 +276,30 @@ function validatePolicy(record) {
 function validateProbeFamily(value) {
   if (
     !hasKeys(value, [
+      'childResult',
+      'childExitStatus',
+      'childSignal',
+      'spawnErrorClass',
+      'stderrClass',
       'listenerBound',
-      'probeSpawned',
+      'probeMarkerPresent',
       'probeUidMatches',
       'connectAttempted',
       'connectionOutcome',
       'listenerAcceptedCount',
       'dropCount',
     ]) ||
+    !PROBE_CHILD_RESULTS.has(value.childResult) ||
+    (value.childExitStatus !== null &&
+      (!Number.isSafeInteger(value.childExitStatus) ||
+        value.childExitStatus < 0 ||
+        value.childExitStatus > 255)) ||
+    (value.childSignal !== null && !PROBE_SIGNALS.has(value.childSignal)) ||
+    (value.spawnErrorClass !== null &&
+      !PROBE_SPAWN_ERRORS.has(value.spawnErrorClass)) ||
+    !PROBE_STDERR_CLASSES.has(value.stderrClass) ||
     typeof value.listenerBound !== 'boolean' ||
-    typeof value.probeSpawned !== 'boolean' ||
+    typeof value.probeMarkerPresent !== 'boolean' ||
     ![null, true, false].includes(value.probeUidMatches) ||
     typeof value.connectAttempted !== 'boolean' ||
     !PROBE_OUTCOMES.has(value.connectionOutcome) ||
@@ -254,84 +311,104 @@ function validateProbeFamily(value) {
   ) {
     return false;
   }
+  if (value.childResult === 'not-run') {
+    return (
+      !value.listenerBound &&
+      value.listenerAcceptedCount === null &&
+      value.childExitStatus === null &&
+      value.childSignal === null &&
+      value.spawnErrorClass === null &&
+      value.stderrClass === 'empty' &&
+      !value.probeMarkerPresent &&
+      value.probeUidMatches === null &&
+      !value.connectAttempted &&
+      value.connectionOutcome === 'listener-error'
+    );
+  }
+  if (!value.listenerBound || value.listenerAcceptedCount === null)
+    return false;
+  if (value.childResult === 'spawn-error') {
+    return (
+      value.spawnErrorClass !== null &&
+      value.probeUidMatches === null &&
+      !value.connectAttempted &&
+      value.connectionOutcome === 'spawn-error'
+    );
+  }
+  if (value.childResult === 'signaled') {
+    return (
+      value.childExitStatus === null &&
+      value.childSignal !== null &&
+      value.spawnErrorClass === null &&
+      value.probeUidMatches === null &&
+      !value.connectAttempted &&
+      value.connectionOutcome === 'signaled'
+    );
+  }
+  if (value.childResult === 'exited-before-marker') {
+    return (
+      value.childSignal === null &&
+      value.spawnErrorClass === null &&
+      !value.probeMarkerPresent &&
+      value.probeUidMatches === null &&
+      !value.connectAttempted &&
+      value.connectionOutcome === 'unexpected-exit'
+    );
+  }
+  if (value.childResult === 'protocol-invalid') {
+    return (
+      value.childSignal === null &&
+      value.spawnErrorClass === null &&
+      value.probeUidMatches === null &&
+      !value.connectAttempted &&
+      value.connectionOutcome === 'protocol-error'
+    );
+  }
+  if (value.childResult === 'probe-error') {
+    return (
+      value.childExitStatus === null &&
+      value.childSignal === null &&
+      value.spawnErrorClass === null &&
+      value.stderrClass === 'unavailable' &&
+      !value.probeMarkerPresent &&
+      value.probeUidMatches === null &&
+      !value.connectAttempted &&
+      value.connectionOutcome === 'probe-error'
+    );
+  }
   if (
-    !value.listenerBound &&
-    (value.listenerAcceptedCount !== null ||
-      value.probeSpawned ||
-      value.probeUidMatches !== null ||
-      value.connectAttempted ||
-      value.connectionOutcome !== 'listener-error')
+    value.childResult !== 'probe-reported' ||
+    !value.probeMarkerPresent ||
+    value.childSignal !== null ||
+    value.spawnErrorClass !== null
   ) {
     return false;
   }
-  if (value.listenerBound && value.listenerAcceptedCount === null) return false;
-  if (
-    value.connectionOutcome === 'uid-mismatch' &&
-    (!value.probeSpawned ||
-      value.probeUidMatches !== false ||
-      value.connectAttempted)
-  ) {
-    return false;
+  const expectedExitStatus = {
+    connected: 0,
+    timeout: 2,
+    'uid-mismatch': 3,
+    refused: 4,
+    unreachable: 5,
+    'socket-error': 6,
+    'socket-init-error': 7,
+  }[value.connectionOutcome];
+  if (value.childExitStatus !== expectedExitStatus) return false;
+  if (value.connectionOutcome === 'uid-mismatch') {
+    return value.probeUidMatches === false && !value.connectAttempted;
   }
-  if (
-    value.probeUidMatches === false &&
-    value.connectionOutcome !== 'uid-mismatch'
-  ) {
-    return false;
-  }
-  if (
+  const connectionAttempted = value.connectionOutcome !== 'socket-init-error';
+  return (
     value.probeUidMatches === true &&
-    (!value.probeSpawned ||
-      ![
-        'connected',
-        'refused',
-        'socket-error',
-        'socket-init-error',
-        'timeout',
-        'unreachable',
-      ].includes(value.connectionOutcome))
-  ) {
-    return false;
-  }
-  if (
-    ['connected', 'refused', 'socket-error', 'timeout', 'unreachable'].includes(
-      value.connectionOutcome,
-    ) !== value.connectAttempted
-  ) {
-    return false;
-  }
-  if (value.connectionOutcome === 'listener-error' && value.listenerBound) {
-    return false;
-  }
-  if (
-    value.connectAttempted &&
-    (!value.listenerBound ||
-      !value.probeSpawned ||
-      value.probeUidMatches !== true ||
-      ![
-        'connected',
-        'refused',
-        'socket-error',
-        'timeout',
-        'unreachable',
-      ].includes(value.connectionOutcome))
-  ) {
-    return false;
-  }
-  if (
-    !value.probeSpawned &&
-    value.probeUidMatches !== null &&
-    value.connectionOutcome !== 'uid-mismatch'
-  ) {
-    return false;
-  }
-  return true;
+    value.connectAttempted === connectionAttempted
+  );
 }
 
 function probeFamilyPassed(value) {
   return (
     value.listenerBound === true &&
-    value.probeSpawned === true &&
+    value.childResult === 'probe-reported' &&
+    value.probeMarkerPresent === true &&
     value.probeUidMatches === true &&
     value.connectAttempted === true &&
     value.connectionOutcome === 'timeout' &&
@@ -495,7 +572,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -544,7 +621,7 @@ export function validDesktopSummary(value) {
       'egressProbe',
       'checks',
     ]) &&
-    value.schemaVersion === 2 &&
+    value.schemaVersion === 3 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||

@@ -28,7 +28,12 @@ const checks = Object.fromEntries(
 function passingProbeFamily() {
   return {
     listenerBound: true,
-    probeSpawned: true,
+    childResult: 'probe-reported',
+    childExitStatus: 2,
+    childSignal: null,
+    spawnErrorClass: null,
+    stderrClass: 'empty',
+    probeMarkerPresent: true,
     probeUidMatches: true,
     connectAttempted: true,
     connectionOutcome: 'timeout',
@@ -101,7 +106,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 2);
+  assert.equal(summary.schemaVersion, 3);
   assert.equal(summary.failureCode, null);
   assert.deepEqual(summary.egressBlocked, { ipv4: 0, ipv6: 0 });
   assert.deepEqual(summary.egressProbe, passingProbe());
@@ -125,11 +130,32 @@ test('Desktop evidence fails closed on blocked egress and rejects private-shaped
   failedProbe[1].negativeTest = 'failed';
   failedProbe[1].diagnostic.ipv6.dropCount = 0;
   failedProbe[1].diagnostic.ipv6.connectionOutcome = 'connected';
+  failedProbe[1].diagnostic.ipv6.childExitStatus = 0;
   failedProbe[1].diagnostic.ipv6.listenerAcceptedCount = 1;
   failedProbe[1].diagnostic.passed = false;
   const failedProbeSummary = sanitizeDesktopStages(failedProbe, sourceSha);
   assert.equal(failedProbeSummary.status, 'failed');
   assert.equal(failedProbeSummary.egressProbe.passed, false);
+
+  const beforeMarker = stages();
+  beforeMarker[1].status = 'failed';
+  beforeMarker[1].negativeTest = 'failed';
+  beforeMarker[1].diagnostic.ipv4.childResult = 'exited-before-marker';
+  beforeMarker[1].diagnostic.ipv4.childExitStatus = 1;
+  beforeMarker[1].diagnostic.ipv4.stderrClass = 'sudo-policy';
+  beforeMarker[1].diagnostic.ipv4.probeMarkerPresent = false;
+  beforeMarker[1].diagnostic.ipv4.probeUidMatches = null;
+  beforeMarker[1].diagnostic.ipv4.connectAttempted = false;
+  beforeMarker[1].diagnostic.ipv4.connectionOutcome = 'unexpected-exit';
+  beforeMarker[1].diagnostic.ipv4.dropCount = 0;
+  beforeMarker[1].diagnostic.passed = false;
+  const beforeMarkerSummary = sanitizeDesktopStages(beforeMarker, sourceSha);
+  assert.equal(
+    beforeMarkerSummary.egressProbe.ipv4.childResult,
+    'exited-before-marker',
+  );
+  assert.equal(beforeMarkerSummary.egressProbe.ipv4.childExitStatus, 1);
+  assert.equal(beforeMarkerSummary.egressProbe.ipv4.stderrClass, 'sudo-policy');
 
   const privateRecord = stages();
   privateRecord[0].rawUrl = 'http://private.invalid/path';
