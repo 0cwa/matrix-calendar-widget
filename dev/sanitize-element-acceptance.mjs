@@ -118,6 +118,10 @@ const REMINDER_ROOM_LAYOUT_FIELDS = [
   'roomInfoControlPresent',
   'fixtureCalendarIframePresent',
 ];
+const REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS = [
+  'reminderWidgetContextResponseCount',
+  'reminderWidgetContextResponseStatus',
+];
 const PHASE_BOOLEAN_FIELDS = new Map([
   ['service-room-ready', ['serviceUserJoined', 'powerPolicyVerified']],
   ['reminder-role-verified', ['rolePolicyVerified']],
@@ -536,6 +540,7 @@ const ALLOWED_KEYS = new Set([
   'roomNameMatches',
   'roomIdMatches',
   ...REMINDER_ROOM_LAYOUT_FIELDS,
+  ...REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS,
   'blockedExternalRequestCount',
   'homeserverHttpErrorCount',
   'homeserverLastHttpErrorStatus',
@@ -1650,6 +1655,10 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     const hasReminderRoomLayoutObservation = REMINDER_ROOM_LAYOUT_FIELDS.some(
       (key) => Object.hasOwn(record, key),
     );
+    const hasReminderWidgetContextObservation =
+      REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS.some((key) =>
+        Object.hasOwn(record, key),
+      );
     const roomFailureCodes = new Set([
       'element-room-navigation-failed',
       'element-room-observation-unavailable',
@@ -1693,6 +1702,17 @@ export function sanitizeElementAcceptance(input, sourceSha) {
             (key) =>
               !Object.hasOwn(record, key) || typeof record[key] !== 'boolean',
           ))) ||
+      (hasReminderWidgetContextObservation &&
+        (record.phase !== 'reminder-room-context' ||
+          !Number.isInteger(record.reminderWidgetContextResponseCount) ||
+          record.reminderWidgetContextResponseCount < 0 ||
+          record.reminderWidgetContextResponseCount > 1 ||
+          (record.reminderWidgetContextResponseCount === 0 &&
+            Object.hasOwn(record, 'reminderWidgetContextResponseStatus')) ||
+          (record.reminderWidgetContextResponseCount === 1 &&
+            (!Number.isInteger(record.reminderWidgetContextResponseStatus) ||
+              record.reminderWidgetContextResponseStatus < 100 ||
+              record.reminderWidgetContextResponseStatus > 599)))) ||
       (ROOM_CONTEXT_PHASES.has(record.phase) &&
         !hasRoomObservation &&
         (record.status !== 'failed' ||
@@ -1987,6 +2007,16 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       ]) {
         if (Object.hasOwn(record, key)) {
           fields.push(`${label}=${record[key]}`);
+        }
+      }
+      if (Object.hasOwn(record, 'reminderWidgetContextResponseCount')) {
+        fields.push(
+          `reminder_widget_context_response_count=${record.reminderWidgetContextResponseCount}`,
+        );
+        if (Object.hasOwn(record, 'reminderWidgetContextResponseStatus')) {
+          fields.push(
+            `reminder_widget_context_response_status=${record.reminderWidgetContextResponseStatus}`,
+          );
         }
       }
       fields.push(

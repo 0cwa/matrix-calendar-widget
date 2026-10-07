@@ -1468,6 +1468,7 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     roomHeadingDomPresent: false,
     roomInfoControlPresent: false,
     fixtureCalendarIframePresent: false,
+    reminderWidgetContextResponseCount: 0,
   };
   const incompleteRoomLayoutObservation = { ...reminderRoomObservation };
   delete incompleteRoomLayoutObservation.fixtureCalendarIframePresent;
@@ -1478,10 +1479,24 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     ),
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=reminder-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true room_view_present=true room_header_present=false room_heading_dom_present=false room_info_control_present=false fixture_calendar_iframe_present=false blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-heading-wait-timeout',
+      'phase=reminder-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true room_view_present=true room_header_present=false room_heading_dom_present=false room_info_control_present=false fixture_calendar_iframe_present=false reminder_widget_context_response_count=0 blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-heading-wait-timeout',
       '',
     ].join('\n'),
   );
+  const deniedWidgetContext = sanitizeElementAcceptance(
+    JSON.stringify({
+      ...reminderRoomObservation,
+      reminderWidgetContextResponseCount: 1,
+      reminderWidgetContextResponseStatus: 403,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    deniedWidgetContext,
+    /reminder_widget_context_response_count=1 reminder_widget_context_response_status=403/u,
+  );
+  const missingWidgetContextStatus = { ...reminderRoomObservation };
+  missingWidgetContextStatus.reminderWidgetContextResponseCount = 1;
 
   const invalidRecords = [
     { ...roomObservation, matrixUserMatches: '@member:private-server' },
@@ -1493,6 +1508,13 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     { ...roomObservation, roomViewPresent: true },
     incompleteRoomLayoutObservation,
     { ...reminderRoomObservation, roomInfoControlPresent: 'present' },
+    { ...reminderRoomObservation, reminderWidgetContextResponseCount: 2 },
+    missingWidgetContextStatus,
+    {
+      ...reminderRoomObservation,
+      reminderWidgetContextResponseStatus: 403,
+    },
+    { ...roomObservation, reminderWidgetContextResponseCount: 0 },
   ];
   for (const record of invalidRecords) {
     assert.throws(() =>

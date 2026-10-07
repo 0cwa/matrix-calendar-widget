@@ -227,6 +227,14 @@ type MemberARoomObservation = {
   homeserverHttpErrorCount: number;
   homeserverLastHttpErrorStatus?: number;
 };
+type ReminderWidgetContextResponseSnapshot = {
+  reminderWidgetContextResponseCount: number;
+  reminderWidgetContextResponseStatus?: number;
+};
+type ReminderWidgetContextResponseObserver = {
+  response: Promise<Response>;
+  snapshot: () => ReminderWidgetContextResponseSnapshot;
+};
 
 type MemberARoomFailureCode =
   | 'element-room-navigation-failed'
@@ -971,6 +979,9 @@ test('Element Web delivers a relative room reminder across restart and restore',
     const page = await authenticateInElement(context, fixture.users.memberA);
     record(activePhase, 'passed');
     activePhase = 'reminder-room-context';
+    const reminderContextResponseObserver =
+      observeReminderWidgetContextResponse(page, fixture.teamRoomId);
+    void reminderContextResponseObserver.response.catch(() => undefined);
     const reminderRoom = await openMemberARoomWithDiagnostics(
       page,
       fixture.roomName,
@@ -978,20 +989,19 @@ test('Element Web delivers a relative room reminder across restart and restore',
       fixture.users.memberA.userId,
       true,
     );
-    recordMemberARoomObservation(reminderRoom, 'reminder-room-context');
+    recordMemberARoomObservation(
+      reminderRoom,
+      'reminder-room-context',
+      reminderContextResponseObserver.snapshot(),
+    );
     failureAlreadyRecorded = Boolean(reminderRoom.failureCode);
     const element = requireMemberARoom(reminderRoom);
 
     activePhase = 'reminder-widget-context';
-    const contextResponse = waitForGatewayResponse(
-      page,
-      'GET',
-      '/v1/calendar/context',
-    );
     const frame = await openCalendarWidget(element, page, {
       expectWidgetWarning: false,
     });
-    const contextResult = await contextResponse;
+    const contextResult = await reminderContextResponseObserver.response;
     failureHttpStatus = contextResult.status();
     const contextPayload: unknown = await contextResult
       .json()
@@ -2444,6 +2454,47 @@ function waitForGatewayResponse(
     },
     { timeout: 30_000 },
   );
+}
+
+function observeReminderWidgetContextResponse(
+  page: Page,
+  roomId: string,
+): ReminderWidgetContextResponseObserver {
+  let responseStatus: number | undefined;
+  const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
+  const widgetOrigin = new URL(fixture.widgetUrl).origin;
+  const response = page.waitForResponse(
+    (candidate) => {
+      try {
+        const url = new URL(candidate.url());
+        const request = candidate.request();
+        const requestFrameOrigin = new URL(request.frame().url()).origin;
+        if (
+          url.origin !== gatewayOrigin ||
+          url.pathname !== '/v1/calendar/context' ||
+          url.searchParams.get('roomId') !== roomId ||
+          request.method() !== 'GET' ||
+          requestFrameOrigin !== widgetOrigin
+        ) {
+          return false;
+        }
+        responseStatus = candidate.status();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { timeout: 60_000 },
+  );
+  return {
+    response,
+    snapshot: () => ({
+      reminderWidgetContextResponseCount: responseStatus === undefined ? 0 : 1,
+      ...(responseStatus === undefined
+        ? {}
+        : { reminderWidgetContextResponseStatus: responseStatus }),
+    }),
+  };
 }
 
 async function requestRoomEventsStatus(
@@ -4187,6 +4238,7 @@ function recordMemberASessionObservation(
 function recordMemberARoomObservation(
   result: MemberARoomResult,
   phase: MemberRoomContextPhase = 'member-a-room-context',
+  reminderWidgetContext?: ReminderWidgetContextResponseSnapshot,
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   if (!stageFile) throw new Error('Element acceptance fixture unavailable');
@@ -4197,6 +4249,7 @@ function recordMemberARoomObservation(
       status: result.failureCode ? 'failed' : 'passed',
       ...(result.failureCode ? { failureCode: result.failureCode } : {}),
       ...(result.observation ?? {}),
+      ...(reminderWidgetContext ?? {}),
     })}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
