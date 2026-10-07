@@ -14,6 +14,7 @@ const checks = Object.fromEntries(
     'package',
     'privateProfile',
     'secretService',
+    'safeStorageBackend',
     'config',
     'updatesDisabled',
     'desktopProcess',
@@ -37,13 +38,21 @@ function stages(overrides = {}) {
         sha256: 'b'.repeat(64),
       },
       runtime: {
-        node: '22.23.3',
+        probeNode: '22.23.3',
+        embeddedNode: null,
+        electron: '44.3.0',
         chromium: '149.0.7827.55',
         runner: 'ubuntu-24.04',
       },
       origin: 'vector://vector',
+      safeStorage: {
+        mode: 'encrypted',
+        backend: 'gnome_libsecret',
+        markerCount: 1,
+        complete: true,
+      },
       rendererCount: 1,
-      checks,
+      checks: { ...checks },
     },
     { phase: 'egress-policy', status: 'passed', negativeTest: 'passed' },
     {
@@ -113,4 +122,28 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
   const malformedPackage = sanitizeDesktopStages(stages(), sourceSha);
   malformedPackage.package.version = '1.12.31';
   assert.equal(validDesktopSummary(malformedPackage), false);
+});
+
+test('Desktop evidence reports absent startup as incomplete and rejects degraded storage', () => {
+  const missingStartup = stages().filter(
+    (record) => record.phase !== 'desktop-startup',
+  );
+  const missingSummary = sanitizeDesktopStages(missingStartup, sourceSha);
+  assert.equal(missingSummary.status, 'failed');
+  assert.equal(missingSummary.failureCode, 'evidence-incomplete');
+  assert.equal(missingSummary.checks.privateProfile, 'not_run');
+
+  const degraded = stages();
+  degraded[0].status = 'failed';
+  degraded[0].failureCode = 'safe-storage-backend-unconfirmed';
+  degraded[0].checks.safeStorageBackend = 'failed';
+  degraded[0].safeStorage = {
+    mode: 'basic_text',
+    backend: 'gnome_libsecret',
+    markerCount: 1,
+    complete: true,
+  };
+  const degradedSummary = sanitizeDesktopStages(degraded, sourceSha);
+  assert.equal(degradedSummary.status, 'failed');
+  assert.equal(degradedSummary.failureCode, 'safe-storage-backend-unconfirmed');
 });

@@ -8,8 +8,6 @@ on:
       - 'dev/element-desktop-*'
       - 'e2e/package.json'
       - 'yarn.lock'
-      - 'docs/PLAN.md'
-      - 'docs/STATUS.md'
 
 permissions:
   contents: read
@@ -37,11 +35,12 @@ jobs:
       - name: Install locked workspace dependencies
         run: yarn install --frozen-lockfile
 
-      - name: Test Desktop egress policy and evidence sanitizer
+      - name: Test Desktop startup, egress policy, and evidence sanitizer
         run: |
           node --check dev/element-desktop-egress-policy.mjs
           node --check dev/element-desktop-startup.mjs
           node --check dev/element-desktop-evidence.mjs
+          node dev/element-desktop-startup.test.mjs
           node dev/element-desktop-egress-policy.test.mjs
           node dev/element-desktop-evidence.test.mjs
 
@@ -212,12 +211,6 @@ jobs:
           set -e
           if [[ -s "$result_file" ]]; then
             cat "$result_file" >> "$ELEMENT_DESKTOP_STAGE_FILE"
-          else
-            node --input-type=module -e '
-              const sourceSha = process.env.ELEMENT_DESKTOP_SOURCE_SHA;
-              const checks = Object.fromEntries(["sourceSha","runner","package","privateProfile","secretService","config","updatesDisabled","desktopProcess","loopbackCdp","packagedOrigin","nativeSandbox","nodeIntegrationDisabled"].map((key) => [key,"not_run"]));
-              process.stdout.write(JSON.stringify({ phase:"desktop-startup",status:"failed",failureCode:"probe-internal-error",sourceSha,package:{version:null,architecture:null,sha256:null},runtime:{node:process.versions.node,chromium:null,runner:"ubuntu-24.04"},origin:"vector://vector",rendererCount:0,checks })+"\n");
-            ' >> "$ELEMENT_DESKTOP_STAGE_FILE"
           fi
           if [[ "$probe_exit" -ne 0 ]]; then
             echo 'Packaged Element Desktop did not complete its startup checks.' >&2
@@ -346,10 +339,6 @@ jobs:
           const rows = readFileSync(stageFile, 'utf8').split(/\r?\n/u).filter(Boolean);
           const phases = new Set();
           for (const row of rows) phases.add(JSON.parse(row).phase);
-          if (!phases.has('desktop-startup')) {
-            const checks = Object.fromEntries(['sourceSha','runner','package','privateProfile','secretService','config','updatesDisabled','desktopProcess','loopbackCdp','packagedOrigin','nativeSandbox','nodeIntegrationDisabled'].map((key) => [key,'not_run']));
-            appendFileSync(stageFile, JSON.stringify({phase:'desktop-startup',status:'failed',failureCode:'probe-internal-error',sourceSha:process.env.ELEMENT_DESKTOP_SOURCE_SHA,package:{version:null,architecture:null,sha256:null},runtime:{node:process.versions.node,chromium:null,runner:'ubuntu-24.04'},origin:'vector://vector',rendererCount:0,checks} ) + '\n');
-          }
           for (const phase of ['egress-policy','egress-observation']) {
             if (!phases.has(phase)) {
               const fallback = phase === 'egress-policy'

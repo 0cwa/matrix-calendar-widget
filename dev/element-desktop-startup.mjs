@@ -14,12 +14,23 @@ import { fileURLToPath } from 'node:url';
 
 const FIXED_ORIGIN = 'vector://vector';
 const PROFILE_MARKER = 'element-desktop-startup-profile-v1';
+const SAFE_STORAGE_PREFIX = 'Using storage mode ';
+const SAFE_STORAGE_BACKENDS = new Set([
+  'gnome_libsecret',
+  'kwallet',
+  'kwallet5',
+  'kwallet6',
+]);
+const SAFE_STORAGE_MODES = new Set(['encrypted', 'plaintext', 'basic_text']);
+const MAX_SAFE_STORAGE_LOG_BYTES = 1_048_576;
+const MAX_SAFE_STORAGE_LINE_LENGTH = 512;
 const CHECK_NAMES = Object.freeze([
   'sourceSha',
   'runner',
   'package',
   'privateProfile',
   'secretService',
+  'safeStorageBackend',
   'config',
   'updatesDisabled',
   'desktopProcess',
@@ -42,8 +53,105 @@ const FAILURE_CODES = Object.freeze([
   'unexpected-origin',
   'renderer-sandbox-unconfirmed',
   'node-integration-visible',
+  'safe-storage-backend-unconfirmed',
   'probe-internal-error',
 ]);
+
+export function createSafeStorageLogCollector() {
+  const streams = new Map([
+    ['stdout', { pending: '', discarding: false }],
+    ['stderr', { pending: '', discarding: false }],
+  ]);
+  let bytesRead = 0;
+  let overflow = false;
+  let longMarker = false;
+  let markerCount = 0;
+  let mode = 'not_observed';
+  let backend = 'not_observed';
+  let finished = false;
+
+  function observeLine(rawLine) {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    if (!line.startsWith(SAFE_STORAGE_PREFIX)) return;
+    markerCount = Math.min(markerCount + 1, 2);
+    if (markerCount > 1) {
+      mode = 'ambiguous';
+      backend = 'ambiguous';
+      return;
+    }
+    const match =
+      /^Using storage mode '([A-Za-z0-9_]{1,32})' with backend '([A-Za-z0-9_]{1,32})'$/u.exec(
+        line,
+      );
+    if (!match) {
+      mode = 'other';
+      backend = 'other';
+      return;
+    }
+    mode = SAFE_STORAGE_MODES.has(match[1]) ? match[1] : 'other';
+    backend = SAFE_STORAGE_BACKENDS.has(match[2]) ? match[2] : 'other';
+  }
+
+  function write(streamName, chunk) {
+    if (finished || overflow) return;
+    const state = streams.get(streamName);
+    if (!state) throw new Error('invalid safe storage stream');
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytesRead += buffer.length;
+    if (bytesRead > MAX_SAFE_STORAGE_LOG_BYTES) {
+      overflow = true;
+      return;
+    }
+
+    let text = buffer.toString('utf8');
+    if (state.discarding) {
+      const newline = text.indexOf('\n');
+      if (newline < 0) return;
+      text = text.slice(newline + 1);
+      state.discarding = false;
+    }
+    const lines = `${state.pending}${text}`.split('\n');
+    state.pending = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line.length > MAX_SAFE_STORAGE_LINE_LENGTH) {
+        if (line.startsWith(SAFE_STORAGE_PREFIX)) {
+          longMarker = true;
+          observeLine(line.slice(0, MAX_SAFE_STORAGE_LINE_LENGTH));
+        }
+      } else {
+        observeLine(line);
+      }
+    }
+    if (state.pending.length > MAX_SAFE_STORAGE_LINE_LENGTH) {
+      if (state.pending.startsWith(SAFE_STORAGE_PREFIX)) {
+        longMarker = true;
+        observeLine(state.pending.slice(0, MAX_SAFE_STORAGE_LINE_LENGTH));
+      }
+      state.pending = '';
+      state.discarding = true;
+    }
+  }
+
+  function finish(processClosed) {
+    if (!finished) {
+      for (const state of streams.values()) {
+        if (!state.discarding && state.pending.length > 0) {
+          observeLine(state.pending);
+        }
+        state.pending = '';
+      }
+      finished = true;
+    }
+    return {
+      mode,
+      backend,
+      markerCount,
+      complete: processClosed === true && !overflow && !longMarker,
+    };
+  }
+
+  return Object.freeze({ write, finish });
+}
 
 class ProbeFailure extends Error {
   constructor(code, check) {
@@ -62,13 +170,24 @@ const cdpPort = Number(process.env.ELEMENT_DESKTOP_CDP_PORT);
 const expectedUid = Number(process.env.ELEMENT_DESKTOP_PROBE_UID);
 const packageInfo = { version: null, architecture: null, sha256: null };
 const runtime = {
-  node: process.versions.node,
+  probeNode: process.versions.node,
+  embeddedNode: null,
+  electron: null,
   chromium: null,
   runner: 'ubuntu-24.04',
 };
 
 let app;
 let browser;
+let appClosePromise;
+let appClosed = false;
+let safeStorageLogCollector;
+let safeStorageObservation = {
+  mode: 'not_observed',
+  backend: 'not_observed',
+  markerCount: 0,
+  complete: false,
+};
 let keyringPid = null;
 let failureCode = null;
 
@@ -435,12 +554,20 @@ async function waitForDebugger() {
             target.type === 'page' &&
             target.url.startsWith(`${FIXED_ORIGIN}/webapp/`),
         );
+        const runtimeText = `${versionInfo.Browser ?? ''} ${versionInfo['User-Agent'] ?? ''}`;
+        const chromiumMatch =
+          /(?:Chrome|Chromium)\/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/u.exec(
+            runtimeText,
+          );
+        const electronMatch = /Electron\/([0-9]+\.[0-9]+\.[0-9]+)/u.exec(
+          runtimeText,
+        );
+        if (chromiumMatch) runtime.chromium = chromiumMatch[1];
+        if (electronMatch) runtime.electron = electronMatch[1];
+        if (runtime.chromium === null || runtime.electron === null) {
+          fail('desktop-not-ready', 'desktopProcess');
+        }
         if (page) {
-          const match =
-            /(?:Chrome|Chromium)\/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/u.exec(
-              String(versionInfo.Browser ?? ''),
-            );
-          if (match) runtime.chromium = match[1];
           return page;
         }
       }
@@ -528,6 +655,16 @@ async function stopApp() {
       }
     }
   }
+  if (appClosePromise && !appClosed) {
+    let closeTimer;
+    await Promise.race([
+      appClosePromise,
+      new Promise((resolveClose) => {
+        closeTimer = setTimeout(resolveClose, 1_000);
+      }),
+    ]);
+    clearTimeout(closeTimer);
+  }
   if (keyringPid !== null) {
     try {
       process.kill(keyringPid, 'SIGTERM');
@@ -549,6 +686,7 @@ function emitRecord(rendererCount = 0) {
     package: packageInfo,
     runtime,
     origin: FIXED_ORIGIN,
+    safeStorage: safeStorageObservation,
     rendererCount,
     checks,
   };
@@ -591,10 +729,23 @@ async function main() {
       ],
       {
         detached: true,
-        stdio: 'ignore',
+        stdio: ['ignore', 'pipe', 'pipe'],
         env: process.env,
       },
     );
+    safeStorageLogCollector = createSafeStorageLogCollector();
+    app.stdout?.on('data', (chunk) =>
+      safeStorageLogCollector.write('stdout', chunk),
+    );
+    app.stderr?.on('data', (chunk) =>
+      safeStorageLogCollector.write('stderr', chunk),
+    );
+    appClosePromise = new Promise((resolveClose) => {
+      app.once('close', () => {
+        appClosed = true;
+        resolveClose();
+      });
+    });
     if (!Number.isSafeInteger(app.pid))
       fail('desktop-not-ready', 'desktopProcess');
     writeFileSync(`${profileRoot}/process-group`, `${app.pid}\n`, {
@@ -616,6 +767,20 @@ async function main() {
     }
   } finally {
     await stopApp();
+    if (safeStorageLogCollector) {
+      safeStorageObservation = safeStorageLogCollector.finish(appClosed);
+      const encryptedBackendSelected =
+        safeStorageObservation.complete &&
+        safeStorageObservation.markerCount === 1 &&
+        safeStorageObservation.mode === 'encrypted' &&
+        SAFE_STORAGE_BACKENDS.has(safeStorageObservation.backend);
+      if (encryptedBackendSelected) {
+        pass('safeStorageBackend');
+      } else {
+        status('safeStorageBackend', 'failed');
+        failureCode ??= 'safe-storage-backend-unconfirmed';
+      }
+    }
     emitRecord(rendererCount);
   }
 }
@@ -631,6 +796,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         package: packageInfo,
         runtime,
         origin: FIXED_ORIGIN,
+        safeStorage: safeStorageObservation,
         rendererCount: 0,
         checks,
       })}\n`,

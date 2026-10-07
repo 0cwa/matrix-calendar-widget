@@ -8,6 +8,7 @@ const CHECK_NAMES = Object.freeze([
   'package',
   'privateProfile',
   'secretService',
+  'safeStorageBackend',
   'config',
   'updatesDisabled',
   'desktopProcess',
@@ -31,7 +32,31 @@ const STARTUP_FAILURES = new Set([
   'unexpected-origin',
   'renderer-sandbox-unconfirmed',
   'node-integration-visible',
+  'safe-storage-backend-unconfirmed',
   'probe-internal-error',
+]);
+const SAFE_STORAGE_MODES = new Set([
+  'encrypted',
+  'plaintext',
+  'basic_text',
+  'other',
+  'ambiguous',
+  'not_observed',
+]);
+const SAFE_STORAGE_BACKENDS = new Set([
+  'gnome_libsecret',
+  'kwallet',
+  'kwallet5',
+  'kwallet6',
+  'other',
+  'ambiguous',
+  'not_observed',
+]);
+const ENCRYPTED_STORAGE_BACKENDS = new Set([
+  'gnome_libsecret',
+  'kwallet',
+  'kwallet5',
+  'kwallet6',
 ]);
 const STAGES = new Set([
   'desktop-startup',
@@ -57,6 +82,39 @@ function count(value) {
   return Number.isSafeInteger(value) && value >= 0 && value <= 100_000;
 }
 
+function validateSafeStorage(value) {
+  if (
+    !hasKeys(value, ['mode', 'backend', 'markerCount', 'complete']) ||
+    !SAFE_STORAGE_MODES.has(value.mode) ||
+    !SAFE_STORAGE_BACKENDS.has(value.backend) ||
+    !Number.isSafeInteger(value.markerCount) ||
+    value.markerCount < 0 ||
+    value.markerCount > 2 ||
+    typeof value.complete !== 'boolean'
+  ) {
+    return false;
+  }
+  if (value.markerCount === 0) {
+    return value.mode === 'not_observed' && value.backend === 'not_observed';
+  }
+  if (value.markerCount === 2) {
+    return value.mode === 'ambiguous' && value.backend === 'ambiguous';
+  }
+  return (
+    !['not_observed', 'ambiguous'].includes(value.mode) &&
+    !['not_observed', 'ambiguous'].includes(value.backend)
+  );
+}
+
+function safeStoragePassed(value) {
+  return (
+    value.complete === true &&
+    value.markerCount === 1 &&
+    value.mode === 'encrypted' &&
+    ENCRYPTED_STORAGE_BACKENDS.has(value.backend)
+  );
+}
+
 function validateStartup(record, sourceSha) {
   if (
     !hasKeys(record, [
@@ -67,6 +125,7 @@ function validateStartup(record, sourceSha) {
       'package',
       'runtime',
       'origin',
+      'safeStorage',
       'rendererCount',
       'checks',
     ]) ||
@@ -84,16 +143,34 @@ function validateStartup(record, sourceSha) {
     ![null, 'amd64'].includes(record.package.architecture) ||
     (record.package.sha256 !== null &&
       !/^[0-9a-f]{64}$/u.test(record.package.sha256)) ||
-    !hasKeys(record.runtime, ['node', 'chromium', 'runner']) ||
-    !/^\d+\.\d+\.\d+$/u.test(record.runtime.node) ||
+    !hasKeys(record.runtime, [
+      'probeNode',
+      'embeddedNode',
+      'electron',
+      'chromium',
+      'runner',
+    ]) ||
+    !/^\d+\.\d+\.\d+$/u.test(record.runtime.probeNode) ||
+    record.runtime.embeddedNode !== null ||
+    (record.runtime.electron !== null &&
+      !/^\d+\.\d+\.\d+$/u.test(record.runtime.electron)) ||
     ![null, /^\d+\.\d+\.\d+(?:\.\d+)?$/u].some((pattern) =>
       pattern === null
         ? record.runtime.chromium === null
         : pattern.test(record.runtime.chromium ?? ''),
     ) ||
+    !validateSafeStorage(record.safeStorage) ||
     record.runtime.runner !== 'ubuntu-24.04' ||
     !hasKeys(record.checks, CHECK_NAMES) ||
     Object.values(record.checks).some((value) => !isStatus(value))
+  ) {
+    return false;
+  }
+  const storagePassed = safeStoragePassed(record.safeStorage);
+  if (
+    (record.checks.safeStorageBackend === 'passed') !== storagePassed ||
+    (record.checks.safeStorageBackend === 'not_run' &&
+      record.safeStorage.markerCount > 0)
   ) {
     return false;
   }
@@ -102,9 +179,11 @@ function validateStartup(record, sourceSha) {
     (record.failureCode !== null ||
       record.rendererCount < 1 ||
       Object.values(record.checks).some((value) => value !== 'passed') ||
+      !safeStoragePassed(record.safeStorage) ||
       record.package.version !== '1.12.30' ||
       record.package.architecture !== 'amd64' ||
       record.package.sha256 === null ||
+      record.runtime.electron === null ||
       record.runtime.chromium === null)
   ) {
     return false;
@@ -271,11 +350,19 @@ export function sanitizeDesktopStages(records, sourceSha) {
       sha256: null,
     },
     runtime: startup?.runtime ?? {
-      node: null,
+      probeNode: null,
+      embeddedNode: null,
+      electron: null,
       chromium: null,
       runner: 'ubuntu-24.04',
     },
     origin: ORIGIN,
+    safeStorage: startup?.safeStorage ?? {
+      mode: 'not_observed',
+      backend: 'not_observed',
+      markerCount: 0,
+      complete: false,
+    },
     rendererCount: startup?.rendererCount ?? 0,
     egressBlocked: {
       ipv4: observation?.ipv4Blocked ?? null,
@@ -295,6 +382,7 @@ export function validDesktopSummary(value) {
       'package',
       'runtime',
       'origin',
+      'safeStorage',
       'rendererCount',
       'egressBlocked',
       'checks',
@@ -312,16 +400,26 @@ export function validDesktopSummary(value) {
         ...STARTUP_FAILURES,
       ].includes(value.failureCode)) &&
     hasKeys(value.package, ['version', 'architecture', 'sha256']) &&
-    hasKeys(value.runtime, ['node', 'chromium', 'runner']) &&
+    hasKeys(value.runtime, [
+      'probeNode',
+      'embeddedNode',
+      'electron',
+      'chromium',
+      'runner',
+    ]) &&
     (value.package.version === null || value.package.version === '1.12.30') &&
     (value.package.architecture === null ||
       value.package.architecture === 'amd64') &&
     (value.package.sha256 === null ||
       /^[0-9a-f]{64}$/u.test(value.package.sha256)) &&
-    (value.runtime.node === null ||
-      /^\d+\.\d+\.\d+$/u.test(value.runtime.node)) &&
+    (value.runtime.probeNode === null ||
+      /^\d+\.\d+\.\d+$/u.test(value.runtime.probeNode)) &&
+    value.runtime.embeddedNode === null &&
+    (value.runtime.electron === null ||
+      /^\d+\.\d+\.\d+$/u.test(value.runtime.electron)) &&
     (value.runtime.chromium === null ||
       /^\d+\.\d+\.\d+(?:\.\d+)?$/u.test(value.runtime.chromium)) &&
+    validateSafeStorage(value.safeStorage) &&
     value.runtime.runner === 'ubuntu-24.04' &&
     value.origin === ORIGIN &&
     Number.isSafeInteger(value.rendererCount) &&
@@ -348,6 +446,9 @@ export function validDesktopSummary(value) {
     (value.status === 'passed'
       ? value.failureCode === null &&
         Object.values(value.checks).every((state) => state === 'passed') &&
+        safeStoragePassed(value.safeStorage) &&
+        value.runtime.electron !== null &&
+        value.runtime.chromium !== null &&
         value.egressBlocked.ipv4 === 0 &&
         value.egressBlocked.ipv6 === 0
       : value.failureCode !== null)
