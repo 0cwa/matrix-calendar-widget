@@ -218,6 +218,7 @@ type AcceptanceRuntimeObservation = {
   widgetChildErrorVisible: boolean;
   widgetPageErrorCount: number;
   widgetLastPageErrorClass: WidgetPageErrorClass;
+  widgetApiParentObserverAvailable: boolean;
   widgetApiGetOpenIdRequestCount: number;
   widgetApiRequestSourceMatches: boolean;
   widgetApiRequestOriginMatches: boolean;
@@ -1561,6 +1562,7 @@ async function observeAcceptanceRuntime(
     widgetChildErrorVisible: false,
     widgetPageErrorCount: 0,
     widgetLastPageErrorClass: 'NONE',
+    widgetApiParentObserverAvailable: false,
     widgetApiGetOpenIdRequestCount: 0,
     widgetApiRequestSourceMatches: false,
     widgetApiRequestOriginMatches: false,
@@ -2034,6 +2036,7 @@ async function recordWidgetRuntimeObservation(
       const request = runtimeWindow.__matrixCalendarAcceptanceWidgetApiParent;
       return request
         ? {
+            available: true,
             count: request.count,
             sourceMatches: request.sourceMatches,
             originMatches: request.originMatches,
@@ -2042,6 +2045,8 @@ async function recordWidgetRuntimeObservation(
         : undefined;
     });
     if (parentObservation) {
+      observation.widgetApiParentObserverAvailable =
+        parentObservation.available;
       observation.widgetApiGetOpenIdRequestCount = parentObservation.count;
       observation.widgetApiRequestSourceMatches =
         parentObservation.sourceMatches;
@@ -2114,6 +2119,8 @@ function appendRuntimeObservation(observation: AcceptanceRuntimeObservation) {
       openIdLastRequestMethod: observation.openIdLastRequestMethod,
       widgetApiGetOpenIdRequestCount:
         observation.widgetApiGetOpenIdRequestCount,
+      widgetApiParentObserverAvailable:
+        observation.widgetApiParentObserverAvailable,
       widgetApiRequestSourceMatches: observation.widgetApiRequestSourceMatches,
       widgetApiRequestOriginMatches: observation.widgetApiRequestOriginMatches,
       widgetApiRequestWidgetIdMatches:

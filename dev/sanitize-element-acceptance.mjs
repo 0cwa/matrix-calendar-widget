@@ -217,6 +217,7 @@ const RUNTIME_OBSERVATION_FIELDS = [
   'widgetRegistrationErrorVisible',
   'widgetOutsideClientVisible',
   'widgetChildErrorVisible',
+  'widgetApiParentObserverAvailable',
   'widgetApiGetOpenIdRequestCount',
   'widgetApiRequestSourceMatches',
   'widgetApiRequestOriginMatches',
@@ -348,6 +349,7 @@ function validRuntimeObservation(record) {
       'widgetChildErrorVisible',
       'widgetFrameAvailable',
       'widgetApiRequestSourceMatches',
+      'widgetApiParentObserverAvailable',
       'widgetApiRequestOriginMatches',
       'widgetApiRequestWidgetIdMatches',
       'widgetApiInitialResponseSourceMatches',
@@ -371,6 +373,11 @@ function validRuntimeObservation(record) {
     record.widgetApiFollowupCount > 2 ||
     (record.widgetApiGetOpenIdRequestCount === 0 &&
       (record.widgetApiRequestSourceMatches ||
+        record.widgetApiRequestOriginMatches ||
+        record.widgetApiRequestWidgetIdMatches)) ||
+    (!record.widgetApiParentObserverAvailable &&
+      (record.widgetApiGetOpenIdRequestCount !== 0 ||
+        record.widgetApiRequestSourceMatches ||
         record.widgetApiRequestOriginMatches ||
         record.widgetApiRequestWidgetIdMatches)) ||
     (record.widgetApiInitialResponseCount === 0 &&
@@ -827,6 +834,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         `openid_options_requests=${record.openIdOptionsRequestCount}`,
         `openid_failed_requests=${record.openIdFailedRequestCount}`,
         `openid_last_request_method=${record.openIdLastRequestMethod}`,
+        `widget_api_parent_observer_available=${record.widgetApiParentObserverAvailable}`,
         `widget_api_get_openid_requests=${record.widgetApiGetOpenIdRequestCount}`,
         `widget_api_request_source_matches=${record.widgetApiRequestSourceMatches}`,
         `widget_api_request_origin_matches=${record.widgetApiRequestOriginMatches}`,
