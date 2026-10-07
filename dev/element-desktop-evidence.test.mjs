@@ -445,7 +445,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 13);
+  assert.equal(summary.schemaVersion, 14);
   assert.deepEqual(summary.desktopObservation.configInMemoryObservation, {
     state: 'observed',
     matchesFixture: true,
@@ -485,6 +485,7 @@ test('Desktop evidence passes only with a complete startup, deny test, zero-egre
     },
   });
   assert.deepEqual(summary.cleanupDiagnostics, {
+    policyStatus: 'passed',
     accountState: 'absent',
     userdelStatus: 'not_run',
     userdelExitStatus: null,
@@ -509,6 +510,27 @@ test('Desktop evidence passes only with a complete startup, deny test, zero-egre
   assert.deepEqual(summary.egressProbe, passingProbe());
   assert.deepEqual(summary.secretService, passingSecretService());
   assert.equal(validDesktopSummary(summary), true);
+});
+
+test('cleanup reports the deny policy retained when account removal is unproven', () => {
+  const retainedPolicy = stages();
+  retainedPolicy[4].isolatedProcesses = 'failed';
+  retainedPolicy[4].policy = 'retained';
+  retainedPolicy[4].user = 'failed';
+  retainedPolicy[4].accountState = 'uid_match';
+
+  const summary = sanitizeDesktopStages(retainedPolicy, sourceSha);
+  assert.equal(summary.status, 'failed');
+  assert.equal(summary.failureCode, 'cleanup-failed');
+  assert.equal(summary.cleanupDiagnostics.policyStatus, 'retained');
+  assert.equal(summary.checks.cleanupPolicy, 'failed');
+
+  const unjustifiedRetention = stages();
+  unjustifiedRetention[4].policy = 'retained';
+  assert.throws(
+    () => sanitizeDesktopStages(unjustifiedRetention, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
 });
 
 test('cleanup pass requires observed zero UID counts on both sides of user deletion', () => {
@@ -1481,6 +1503,7 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
 
   const failedAccountCleanup = stages();
   failedAccountCleanup[4].isolatedProcesses = 'failed';
+  failedAccountCleanup[4].policy = 'retained';
   failedAccountCleanup[4].user = 'failed';
   failedAccountCleanup[4].accountState = 'uid_match';
   failedAccountCleanup[4].userdelStatus = 'failed';
@@ -1527,6 +1550,7 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
   assert.equal(failedAccountSummary.status, 'failed');
   assert.equal(failedAccountSummary.failureCode, 'cleanup-failed');
   assert.deepEqual(failedAccountSummary.cleanupDiagnostics, {
+    policyStatus: 'retained',
     accountState: 'uid_match',
     userdelStatus: 'failed',
     userdelExitStatus: 8,

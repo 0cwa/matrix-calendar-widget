@@ -2134,9 +2134,10 @@ function validateCleanup(record) {
       'finalUidLifecycleObservation',
     ]) &&
     record.phase === 'cleanup' &&
-    ['isolatedProcesses', 'policy', 'user', 'profile', 'aptSource'].every(
-      (name) => ['passed', 'failed', 'not_run'].includes(record[name]),
+    ['isolatedProcesses', 'user', 'profile', 'aptSource'].every((name) =>
+      ['passed', 'failed', 'not_run'].includes(record[name]),
     ) &&
+    ['passed', 'failed', 'not_run', 'retained'].includes(record.policy) &&
     [
       'not_observed',
       'unavailable',
@@ -2180,6 +2181,10 @@ function validateCleanup(record) {
         record.accountState === 'absent';
       return (
         projectionMatches &&
+        (record.policy !== 'passed' ||
+          (record.isolatedProcesses === 'passed' && finalCleanupProven)) &&
+        (record.policy !== 'retained' ||
+          record.isolatedProcesses === 'failed') &&
         (record.isolatedProcesses !== 'passed' || finalCleanupProven) &&
         (record.user !== 'passed' || record.accountState === 'absent')
       );
@@ -2426,6 +2431,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
   };
   const cleanupDiagnostics = cleanup
     ? {
+        policyStatus: cleanup.policy,
         accountState: cleanup.accountState,
         userdelStatus: cleanup.userdelStatus,
         userdelExitStatus: cleanup.userdelExitStatus,
@@ -2451,7 +2457,8 @@ export function sanitizeDesktopStages(records, sourceSha) {
   }
   if (cleanup) {
     checks.cleanupIsolatedProcesses = cleanup.isolatedProcesses;
-    checks.cleanupPolicy = cleanup.policy;
+    checks.cleanupPolicy =
+      cleanup.policy === 'retained' ? 'failed' : cleanup.policy;
     checks.cleanupUser = cleanup.user;
     checks.cleanupProfile = cleanup.profile;
     checks.cleanupAptSource = cleanup.aptSource;
@@ -2483,14 +2490,15 @@ export function sanitizeDesktopStages(records, sourceSha) {
         ? 'blocked-egress'
         : null) ??
       (cleanup &&
-      ['isolatedProcesses', 'policy', 'user', 'profile', 'aptSource'].some(
-        (name) => cleanup[name] === 'failed',
-      )
+      (cleanup.policy === 'retained' ||
+        ['isolatedProcesses', 'policy', 'user', 'profile', 'aptSource'].some(
+          (name) => cleanup[name] === 'failed',
+        ))
         ? 'cleanup-failed'
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 13,
+    schemaVersion: 14,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -2593,7 +2601,7 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 13 &&
+    value.schemaVersion === 14 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
@@ -2672,11 +2680,15 @@ export function validDesktopSummary(value) {
     validateEgressPhaseDeltas(value.uidEgressPhaseDeltas) &&
     (value.cleanupDiagnostics === null ||
       (hasKeys(value.cleanupDiagnostics, [
+        'policyStatus',
         'accountState',
         'userdelStatus',
         'userdelExitStatus',
         'uidProcessObservation',
       ]) &&
+        ['passed', 'failed', 'not_run', 'retained'].includes(
+          value.cleanupDiagnostics.policyStatus,
+        ) &&
         [
           'not_observed',
           'unavailable',
@@ -2700,6 +2712,14 @@ export function validDesktopSummary(value) {
         validateUidProcessObservation(
           value.cleanupDiagnostics.uidProcessObservation,
         ))) &&
+    (value.cleanupDiagnostics === null
+      ? value.checks?.cleanupPolicy === 'not_run'
+      : value.checks?.cleanupPolicy ===
+        (value.cleanupDiagnostics.policyStatus === 'passed'
+          ? 'passed'
+          : value.cleanupDiagnostics.policyStatus === 'not_run'
+            ? 'not_run'
+            : 'failed')) &&
     (value.checks?.cleanupIsolatedProcesses !== 'passed' ||
       (value.cleanupDiagnostics?.accountState === 'absent' &&
         value.cleanupDiagnostics.uidProcessObservation.state === 'observed' &&

@@ -673,10 +673,15 @@ jobs:
           fi
 
           if [[ "$uid" =~ ^[0-9]{1,5}$ ]] && [[ "$uid" -gt 0 ]] && [[ "$run_id" =~ ^[0-9]{1,18}$ ]]; then
-            if sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs remove "$uid" "$run_id" >/dev/null 2>&1; then
-              policy_status=passed
+            if [[ "$pgrep_clear" == true && "$before_userdel_clear" == true && \
+                  "$final_uid_census_clear" == true && "$account_state" == absent ]]; then
+              if sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs remove "$uid" "$run_id" >/dev/null 2>&1; then
+                policy_status=passed
+              else
+                policy_status=failed
+              fi
             else
-              policy_status=failed
+              policy_status=retained
             fi
           fi
 
@@ -770,7 +775,8 @@ jobs:
           appendFileSync(stageFile, JSON.stringify({
             phase:'cleanup',
             isolatedProcesses:process.env.ELEMENT_DESKTOP_ISOLATED_PROCESSES,
-            policy:process.env.ELEMENT_DESKTOP_POLICY_CLEANUP,
+            policy:['passed','failed','not_run','retained'].includes(process.env.ELEMENT_DESKTOP_POLICY_CLEANUP)
+              ? process.env.ELEMENT_DESKTOP_POLICY_CLEANUP : 'not_run',
             user:process.env.ELEMENT_DESKTOP_USER_CLEANUP,
             profile:process.env.ELEMENT_DESKTOP_PROFILE_CLEANUP,
             aptSource:process.env.ELEMENT_DESKTOP_APT_CLEANUP,
