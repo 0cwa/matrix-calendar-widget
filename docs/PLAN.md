@@ -455,8 +455,10 @@ access and event writes stay disabled by default.
       separate release gate (docs/browser-calendar-validation.md).
 
 - [ ] Actual Element Web/Desktop responsive and keyboard/focus acceptance for
-      the bounded beta target (see `docs/beta-scope.md`). Mobile clients and
-      formal screen-reader certification are deferred beyond this candidate.
+      the bounded beta target (see `docs/beta-scope.md`). Require the standard
+      side-panel widget layout and overflow checks; pinned/full-width Apps-drawer
+      layout certification is deferred. Mobile clients and formal screen-reader
+      certification are deferred beyond this candidate.
   - [x] Add current calendar grid/list/details keyboard, focus, accessible-name,
         and axe regressions. Hosted browser fixture checks pass; actual client
         embedding remains unverified; see `docs/calendar-client-validation.md`.
@@ -566,9 +568,10 @@ access and event writes stay disabled by default.
       runtime, date-range event counts, API/render latency, and pre-declared
       pass thresholds. Do not infer a universal supported event count.
   - [x] Predeclare the approved synthetic Element Web target of 250 simple
-        events over 31 local calendar days, including strict per-sample API,
-        view, and details thresholds in `docs/calendar-performance.md`.
-        Hosted measurement and exact-run evidence remain open.
+        events over 31 local calendar days in the standard side-panel WidgetCard
+        path, including strict per-sample API, view, and details thresholds in
+        `docs/calendar-performance.md`. Pinned/full-width layout certification
+        is deferred. Hosted measurement and exact-run evidence remain open.
 - [ ] Complete operator evidence and independent review of the exact
       candidate before a separate rollout decision.
 

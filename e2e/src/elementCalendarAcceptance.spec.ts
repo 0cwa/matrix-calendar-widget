@@ -31,7 +31,6 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { arch, platform, release } from 'node:os';
 import { isAbsolute, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { classifyPerformanceHoverFailure } from '../../dev/element-acceptance-performance-evidence.mjs';
 import { ElementWebPage } from './pages/elementWebPage';
 import { fillDatePicker } from './pages/helper';
 
@@ -262,8 +261,6 @@ type OpenCalendarWidgetOptions = {
   expectWidgetWarning: boolean;
   waitForCalendar?: boolean;
   captureMemberADiagnostics?: boolean;
-  openInAppDrawer?: boolean;
-  onAppDrawerPlacement?: (observation: AppDrawerPlacementObservation) => void;
   onTiming?: (
     phase:
       | 'activation'
@@ -274,25 +271,6 @@ type OpenCalendarWidgetOptions = {
     durationMs: number,
   ) => void;
 };
-
-type AppDrawerPlacementObservation = Partial<{
-  pinControlCount: number;
-  pinControlVisible: boolean;
-  pinControlEnabled: boolean;
-  pinActionCompleted: boolean;
-  appDrawerCount: number;
-  appDrawerFrameCount: number;
-  persistedHostFrameCount?: number;
-  persistedHostFrameVisible?: boolean;
-  appTileSnapshotAvailable: boolean;
-  appTileCount: number | null;
-  appTileFrameCount: number | null;
-  appTileNamedFrameCount: number | null;
-  appPermissionCount: number | null;
-  appLoadingIndicatorCount: number | null;
-  appWarningCount: number | null;
-  appDrawerMaximised: boolean | null;
-}>;
 
 type PerformancePageErrorClass =
   | 'none'
@@ -368,98 +346,8 @@ type PerformanceDetailsSample = {
   stable: boolean;
   horizontalOverflow: boolean | null;
 };
-type PerformanceHoverCenterHit =
-  | 'toolbar'
-  | 'tile'
-  | 'persisted-widget-iframe'
-  | 'element-dialog'
-  | 'context-menu'
-  | 'drawer'
-  | 'other'
-  | 'none';
-type PerformanceHoverOccluderTag =
-  | 'a'
-  | 'body'
-  | 'button'
-  | 'div'
-  | 'html'
-  | 'iframe'
-  | 'input'
-  | 'label'
-  | 'li'
-  | 'main'
-  | 'other'
-  | 'path'
-  | 'section'
-  | 'span'
-  | 'svg'
-  | 'ul';
-type PerformanceHoverOccluderClass =
-  | 'mx_AppPermission'
-  | 'mx_AppTile'
-  | 'mx_AppTileBody_fadeInSpinner'
-  | 'mx_AppTileFullWidth'
-  | 'mx_AppTileMenuBar'
-  | 'mx_AppTileMenuBar_widgets'
-  | 'mx_AppTileMenuBar_widgets_button'
-  | 'mx_AppTile_mini'
-  | 'mx_AppTile_persistedWrapper'
-  | 'mx_AppWarning'
-  | 'mx_AppsDrawer'
-  | 'mx_AppsDrawer--maximised'
-  | 'mx_ContextualMenu';
-type PerformanceHoverOccluderRoot =
-  | 'document-body'
-  | 'document-element'
-  | 'none'
-  | 'persisted-element-container'
-  | 'persisted-element-instance';
-type PerformanceHoverOccluderNode = {
-  tag: PerformanceHoverOccluderTag;
-  classes: PerformanceHoverOccluderClass[];
-  root: PerformanceHoverOccluderRoot;
-};
-type PerformanceHoverOccluderObservation = {
-  available: boolean;
-  path: PerformanceHoverOccluderNode[] | null;
-  pathTruncated: boolean | null;
-  classOverflow: boolean | null;
-};
-type PerformanceHoverActionability = {
-  available: boolean;
-  connected: boolean | null;
-  visible: boolean | null;
-  positiveBox: boolean | null;
-  viewportIntersection: boolean | null;
-  hiddenAncestor: boolean | null;
-  centerHit: PerformanceHoverCenterHit | null;
-  occluder: PerformanceHoverOccluderObservation;
-  failureClass:
-    | 'not-attempted'
-    | 'none'
-    | 'timeout'
-    | 'not-visible'
-    | 'outside-viewport'
-    | 'intercepted'
-    | 'detached'
-    | 'other';
-};
-function isPerformanceHoverCenterHit(
-  value: unknown,
-): value is PerformanceHoverCenterHit {
-  return (
-    value === 'toolbar' ||
-    value === 'tile' ||
-    value === 'persisted-widget-iframe' ||
-    value === 'element-dialog' ||
-    value === 'context-menu' ||
-    value === 'drawer' ||
-    value === 'other' ||
-    value === 'none'
-  );
-}
 type PerformanceReport = {
-  version: 1;
+  version: 2;
   year: number;
   month: number;
   viewportWidth: 1280;
@@ -478,37 +366,15 @@ type PerformanceReport = {
     capabilityApprovalMs: number | null;
     identityApprovalMs: number | null;
     iframeReadyMs: number | null;
-    initialIframeWidth: number | null;
-    pinControlCount: number;
-    pinControlVisible: boolean;
-    pinControlEnabled: boolean;
-    pinActionCompleted: boolean;
+    placement: 'widget-card' | 'apps-drawer' | 'unknown';
+    widgetCardCount: number;
+    widgetCardVisible: boolean;
     appDrawerCount: number;
-    appDrawerFrameCount: number;
     persistedHostFrameCount: number;
     persistedHostFrameVisible: boolean;
-    appTileSnapshotAvailable: boolean | null;
-    appTileCount: number | null;
-    appTileFrameCount: number | null;
-    appTileNamedFrameCount: number | null;
-    appPermissionCount: number | null;
-    appLoadingIndicatorCount: number | null;
-    appWarningCount: number | null;
-    appDrawerMaximised: boolean | null;
-    hostHoverActionability: PerformanceHoverActionability;
-    hostTileCountBeforeHover: number;
-    hostToolbarCountBeforeHover: number;
-    hostMaximizeCountBeforeHover: number;
-    hostMaximizeVisibleBeforeHover: boolean;
-    hostHeaderHoverAttempted: boolean;
-    hostHeaderHoverCompleted: boolean;
-    hostTileCountAfterHover: number;
-    hostToolbarCountAfterHover: number;
-    hostMaximizeVisibleAfterHover: boolean;
-    maximizeControlCount: number;
-    hostMaximizeMs: number | null;
-    maximizedIframeWidth: number | null;
-    maximizedLayout: boolean;
+    iframeWidth: number | null;
+    iframeHeight: number | null;
+    hostHorizontalOverflow: boolean | null;
     rangeSelectionMs: number | null;
     openIdResponseCount: number;
     openIdMaxMs: number | null;
@@ -956,7 +822,7 @@ function makeEmptyPerformanceReport(
   month: number,
 ): PerformanceReport {
   return {
-    version: 1,
+    version: 2,
     year,
     month,
     viewportWidth: 1280,
@@ -972,52 +838,15 @@ function makeEmptyPerformanceReport(
       capabilityApprovalMs: null,
       identityApprovalMs: null,
       iframeReadyMs: null,
-      initialIframeWidth: null,
-      pinControlCount: 0,
-      pinControlVisible: false,
-      pinControlEnabled: false,
-      pinActionCompleted: false,
+      placement: 'unknown',
+      widgetCardCount: 0,
+      widgetCardVisible: false,
       appDrawerCount: 0,
-      appDrawerFrameCount: 0,
       persistedHostFrameCount: 0,
       persistedHostFrameVisible: false,
-      appTileSnapshotAvailable: null,
-      appTileCount: null,
-      appTileFrameCount: null,
-      appTileNamedFrameCount: null,
-      appPermissionCount: null,
-      appLoadingIndicatorCount: null,
-      appWarningCount: null,
-      appDrawerMaximised: null,
-      hostHoverActionability: {
-        available: false,
-        connected: null,
-        visible: null,
-        positiveBox: null,
-        viewportIntersection: null,
-        hiddenAncestor: null,
-        centerHit: null,
-        occluder: {
-          available: false,
-          path: null,
-          pathTruncated: null,
-          classOverflow: null,
-        },
-        failureClass: 'not-attempted',
-      },
-      hostTileCountBeforeHover: 0,
-      hostToolbarCountBeforeHover: 0,
-      hostMaximizeCountBeforeHover: 0,
-      hostMaximizeVisibleBeforeHover: false,
-      hostHeaderHoverAttempted: false,
-      hostHeaderHoverCompleted: false,
-      hostTileCountAfterHover: 0,
-      hostToolbarCountAfterHover: 0,
-      hostMaximizeVisibleAfterHover: false,
-      maximizeControlCount: 0,
-      hostMaximizeMs: null,
-      maximizedIframeWidth: null,
-      maximizedLayout: false,
+      iframeWidth: null,
+      iframeHeight: null,
+      hostHorizontalOverflow: null,
       rangeSelectionMs: null,
       openIdResponseCount: 0,
       openIdMaxMs: null,
@@ -2029,10 +1858,6 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
     failureCode = 'performance-widget-open-failed';
     const frame = await openCalendarWidget(element, page, {
       expectWidgetWarning: false,
-      openInAppDrawer: true,
-      onAppDrawerPlacement: (observation) => {
-        Object.assign(report.coldList, observation);
-      },
       onTiming: (phase, durationMs) => {
         switch (phase) {
           case 'activation':
@@ -2055,303 +1880,40 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
     });
 
     failureCode = 'performance-host-layout-failed';
-    const hostIframe = page.locator('iframe[title="Matrix Calendar"]');
-    report.coldList.initialIframeWidth = await hostIframe.evaluate((iframe) =>
-      Math.round(iframe.getBoundingClientRect().width),
+    const widgetCard = page.locator('.mx_WidgetCard');
+    report.coldList.widgetCardCount = Math.min(await widgetCard.count(), 2);
+    report.coldList.widgetCardVisible =
+      report.coldList.widgetCardCount === 1 &&
+      (await widgetCard.isVisible().catch(() => false));
+    const appDrawer = page.locator('.mx_AppsDrawer');
+    report.coldList.appDrawerCount = Math.min(await appDrawer.count(), 2);
+    report.coldList.placement = report.coldList.widgetCardVisible
+      ? 'widget-card'
+      : report.coldList.appDrawerCount > 0
+        ? 'apps-drawer'
+        : 'unknown';
+    const hostIframe = page.locator(
+      '#mx_PersistedElement_container iframe[title="Matrix Calendar"]',
     );
-    const appTile = page.locator(
-      '.mx_AppsDrawer .mx_AppTileFullWidth, .mx_AppsDrawer .mx_AppTile, .mx_AppsDrawer .mx_AppTile_mini',
-    );
-    const appTileToolbar = appTile.locator('.mx_AppTileMenuBar');
-    const maximizeControl = appTile.getByRole('button', {
-      name: 'Maximise',
-      exact: true,
-    });
-    const maximizeStartedAt = performance.now();
-    report.coldList.hostTileCountBeforeHover = Math.min(
-      await appTile.count().catch(() => 0),
-      2,
-    );
-    report.coldList.hostToolbarCountBeforeHover = Math.min(
-      await appTileToolbar.count().catch(() => 0),
-      2,
-    );
-    report.coldList.hostMaximizeCountBeforeHover = Math.min(
-      await maximizeControl.count().catch(() => 0),
-      2,
-    );
-    report.coldList.hostMaximizeVisibleBeforeHover =
-      report.coldList.hostMaximizeCountBeforeHover === 1 &&
-      (await maximizeControl.isVisible().catch(() => false));
-    report.coldList.hostHeaderHoverAttempted =
-      report.coldList.hostTileCountBeforeHover === 1 &&
-      report.coldList.hostToolbarCountBeforeHover === 1;
-    let occluderOnHoverFailure: PerformanceHoverOccluderObservation = {
-      available: false,
-      path: null,
-      pathTruncated: null,
-      classOverflow: null,
-    };
-    if (report.coldList.hostHeaderHoverAttempted) {
-      try {
-        const observation = await appTileToolbar.first().evaluate((toolbar) => {
-          const rect = toolbar.getBoundingClientRect();
-          const style = window.getComputedStyle(toolbar);
-          const tile = toolbar.closest(
-            '.mx_AppTileFullWidth, .mx_AppTile, .mx_AppTile_mini',
-          );
-          const positiveBox = rect.width > 0 && rect.height > 0;
-          const viewportIntersection =
-            rect.right > 0 &&
-            rect.bottom > 0 &&
-            rect.left < window.innerWidth &&
-            rect.top < window.innerHeight;
-          let ancestor = toolbar.parentElement;
-          let hiddenAncestor = false;
-          let ancestorCount = 0;
-          while (ancestor !== null && ancestorCount < 128) {
-            const ancestorStyle = window.getComputedStyle(ancestor);
-            if (
-              ancestor.hidden ||
-              ancestorStyle.display === 'none' ||
-              ancestorStyle.visibility === 'hidden' ||
-              ancestorStyle.visibility === 'collapse'
-            ) {
-              hiddenAncestor = true;
-              break;
-            }
-            ancestor = ancestor.parentElement;
-            ancestorCount += 1;
-          }
-          if (ancestor !== null && !hiddenAncestor) {
-            throw new Error('toolbar ancestor scan exceeded its bound');
-          }
-          const centerX = rect.left + rect.width / 2;
-          const centerY = rect.top + rect.height / 2;
-          const hit =
-            centerX >= 0 &&
-            centerY >= 0 &&
-            centerX < window.innerWidth &&
-            centerY < window.innerHeight
-              ? document.elementFromPoint(centerX, centerY)
-              : null;
-          const knownClasses: PerformanceHoverOccluderClass[] = [
-            'mx_AppPermission',
-            'mx_AppTile',
-            'mx_AppTileBody_fadeInSpinner',
-            'mx_AppTileFullWidth',
-            'mx_AppTileMenuBar',
-            'mx_AppTileMenuBar_widgets',
-            'mx_AppTileMenuBar_widgets_button',
-            'mx_AppTile_mini',
-            'mx_AppTile_persistedWrapper',
-            'mx_AppWarning',
-            'mx_AppsDrawer',
-            'mx_AppsDrawer--maximised',
-            'mx_ContextualMenu',
-          ];
-          const knownTags = new Map<string, PerformanceHoverOccluderTag>([
-            ['a', 'a'],
-            ['body', 'body'],
-            ['button', 'button'],
-            ['div', 'div'],
-            ['html', 'html'],
-            ['iframe', 'iframe'],
-            ['input', 'input'],
-            ['label', 'label'],
-            ['li', 'li'],
-            ['main', 'main'],
-            ['path', 'path'],
-            ['section', 'section'],
-            ['span', 'span'],
-            ['svg', 'svg'],
-            ['ul', 'ul'],
-          ]);
-          const occluderPath: PerformanceHoverOccluderNode[] = [];
-          let occluderClassCount = 0;
-          let occluderClassOverflow = false;
-          let occluderAncestor = hit;
-          while (occluderAncestor !== null && occluderPath.length < 16) {
-            const classes: PerformanceHoverOccluderClass[] = [];
-            for (const className of knownClasses) {
-              if (occluderAncestor.classList.contains(className)) {
-                if (occluderClassCount < 8) {
-                  classes.push(className);
-                  occluderClassCount += 1;
-                } else {
-                  occluderClassOverflow = true;
-                }
-              }
-            }
-            let root: PerformanceHoverOccluderRoot = 'none';
-            if (occluderAncestor.id === 'mx_PersistedElement_container') {
-              root = 'persisted-element-container';
-            } else if (occluderAncestor.id.startsWith('mx_persistedElement_')) {
-              root = 'persisted-element-instance';
-            } else if (occluderAncestor === document.body) {
-              root = 'document-body';
-            } else if (occluderAncestor === document.documentElement) {
-              root = 'document-element';
-            }
-            const tagName = occluderAncestor.tagName.toLowerCase();
-            occluderPath.push({
-              tag: knownTags.get(tagName) ?? 'other',
-              classes,
-              root,
-            });
-            occluderAncestor = occluderAncestor.parentElement;
-          }
-          let centerHit: PerformanceHoverCenterHit;
-          if (hit === null) {
-            centerHit = 'none';
-          } else if (toolbar.contains(hit)) {
-            centerHit = 'toolbar';
-          } else if (tile?.contains(hit)) {
-            centerHit = 'tile';
-          } else if (
-            hit instanceof HTMLIFrameElement &&
-            hit.title === 'Matrix Calendar'
-          ) {
-            centerHit = 'persisted-widget-iframe';
-          } else if (hit.closest('[role="dialog"]') !== null) {
-            centerHit = 'element-dialog';
-          } else if (hit.closest('.mx_ContextualMenu') !== null) {
-            centerHit = 'context-menu';
-          } else if (hit.closest('.mx_AppsDrawer') !== null) {
-            centerHit = 'drawer';
-          } else {
-            centerHit = 'other';
-          }
-          const occluder = {
-            available: true,
-            path: occluderPath,
-            pathTruncated: occluderAncestor !== null,
-            classOverflow: occluderClassOverflow,
-          };
-          return {
-            connected: toolbar.isConnected,
-            positiveBox,
-            viewportIntersection,
-            hiddenAncestor,
-            centerHit,
-            occluder,
-            computedVisible:
-              positiveBox &&
-              style.display !== 'none' &&
-              style.visibility !== 'hidden' &&
-              style.visibility !== 'collapse',
-          };
-        });
-        if (!isPerformanceHoverCenterHit(observation.centerHit)) {
-          throw new Error('invalid performance hover target classification');
-        }
-        const visible = await appTileToolbar.first().isVisible();
-        report.coldList.hostHoverActionability = {
-          available: true,
-          connected: observation.connected,
-          visible: visible && observation.computedVisible,
-          positiveBox: observation.positiveBox,
-          viewportIntersection: observation.viewportIntersection,
-          hiddenAncestor: observation.hiddenAncestor,
-          centerHit: observation.centerHit,
-          occluder: {
-            available: false,
-            path: null,
-            pathTruncated: null,
-            classOverflow: null,
-          },
-          failureClass: 'not-attempted',
-        };
-        occluderOnHoverFailure = observation.occluder;
-      } catch {
-        report.coldList.hostHoverActionability = {
-          available: false,
-          connected: null,
-          visible: null,
-          positiveBox: null,
-          viewportIntersection: null,
-          hiddenAncestor: null,
-          centerHit: null,
-          occluder: {
-            available: false,
-            path: null,
-            pathTruncated: null,
-            classOverflow: null,
-          },
-          failureClass: 'not-attempted',
-        };
-      }
-    }
-    if (report.coldList.hostHeaderHoverAttempted) {
-      try {
-        await appTileToolbar.first().hover({ timeout: 5_000 });
-        report.coldList.hostHeaderHoverCompleted = true;
-        report.coldList.hostHoverActionability.failureClass = 'none';
-      } catch (error) {
-        report.coldList.hostHeaderHoverCompleted = false;
-        report.coldList.hostHoverActionability.failureClass =
-          classifyPerformanceHoverFailure(error);
-      }
-    }
-    if (
-      report.coldList.hostHeaderHoverAttempted &&
-      !report.coldList.hostHeaderHoverCompleted
-    ) {
-      report.coldList.hostHoverActionability.occluder = occluderOnHoverFailure;
-    }
-    await maximizeControl
-      .waitFor({ state: 'visible', timeout: 5_000 })
+    await hostIframe
+      .first()
+      .waitFor({ state: 'attached', timeout: 30_000 })
       .catch(() => {});
-    report.coldList.hostTileCountAfterHover = Math.min(
-      await appTile.count().catch(() => 0),
+    report.coldList.persistedHostFrameCount = Math.min(
+      await hostIframe.count(),
       2,
     );
-    report.coldList.hostToolbarCountAfterHover = Math.min(
-      await appTileToolbar.count().catch(() => 0),
-      2,
-    );
-    report.coldList.maximizeControlCount = Math.min(
-      await maximizeControl.count().catch(() => 0),
-      2,
-    );
-    report.coldList.hostMaximizeVisibleAfterHover =
-      report.coldList.maximizeControlCount === 1 &&
-      (await maximizeControl.isVisible().catch(() => false));
-    expect(report.coldList.hostTileCountBeforeHover).toBe(1);
-    expect(report.coldList.hostToolbarCountBeforeHover).toBe(1);
-    expect(report.coldList.hostHeaderHoverAttempted).toBe(true);
-    expect(report.coldList.hostHeaderHoverCompleted).toBe(true);
-    expect(report.coldList.hostTileCountAfterHover).toBe(1);
-    expect(report.coldList.hostToolbarCountAfterHover).toBe(1);
-    expect(report.coldList.maximizeControlCount).toBe(1);
-    expect(report.coldList.hostMaximizeVisibleAfterHover).toBe(true);
-    await maximizeControl.click();
-    const maximizedLayout = page.locator('.mx_AppsDrawer--maximised');
-    await expect(maximizedLayout).toBeVisible();
-    report.coldList.maximizedLayout = true;
-    await expect
-      .poll(async () =>
-        hostIframe.evaluate((iframe) =>
-          Math.round(iframe.getBoundingClientRect().width),
-        ),
-      )
-      .toBeGreaterThanOrEqual(800);
-    report.coldList.maximizedIframeWidth = await hostIframe.evaluate((iframe) =>
-      Math.round(iframe.getBoundingClientRect().width),
-    );
-    report.coldList.hostMaximizeMs = elapsedMilliseconds(maximizeStartedAt);
-    expect(report.coldList.initialIframeWidth).toBeGreaterThan(0);
-    expect(report.coldList.pinControlCount).toBe(1);
-    expect(report.coldList.pinControlVisible).toBe(true);
-    expect(report.coldList.pinControlEnabled).toBe(true);
-    expect(report.coldList.pinActionCompleted).toBe(true);
-    expect(report.coldList.appDrawerCount).toBe(1);
-    expect(report.coldList.appDrawerFrameCount).toBe(0);
+    report.coldList.persistedHostFrameVisible =
+      report.coldList.persistedHostFrameCount === 1 &&
+      (await hostIframe
+        .first()
+        .isVisible()
+        .catch(() => false));
+    expect(report.coldList.widgetCardCount).toBe(1);
+    expect(report.coldList.widgetCardVisible).toBe(true);
+    expect(report.coldList.placement).toBe('widget-card');
     expect(report.coldList.persistedHostFrameCount).toBe(1);
     expect(report.coldList.persistedHostFrameVisible).toBe(true);
-    expect(report.coldList.maximizeControlCount).toBe(1);
-    expect(report.coldList.maximizedLayout).toBe(true);
-    expect(report.coldList.maximizedIframeWidth).toBeGreaterThanOrEqual(800);
 
     failureCode = 'performance-range-selection-failed';
     const rangeSelectionStartedAt = performance.now();
@@ -2427,6 +1989,24 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
     report.coldList.stable = listMeasurement.stable;
     report.coldList.horizontalOverflow =
       listMeasurement.second.horizontalOverflow;
+    failureCode = 'performance-host-layout-failed';
+    const finalFrameDimensions = await hostIframe.evaluate((iframe) => {
+      const rect = iframe.getBoundingClientRect();
+      return {
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      };
+    });
+    report.coldList.iframeWidth = finalFrameDimensions.width;
+    report.coldList.iframeHeight = finalFrameDimensions.height;
+    report.coldList.hostHorizontalOverflow = await page.evaluate(() => {
+      const root = document.documentElement;
+      const body = document.body;
+      return Math.max(root.scrollWidth, body.scrollWidth) > root.clientWidth;
+    });
+    expect(report.coldList.iframeWidth).toBeGreaterThan(0);
+    expect(report.coldList.iframeHeight).toBeGreaterThan(0);
+    expect(report.coldList.hostHorizontalOverflow).toBe(false);
     syncApiRows();
 
     failureCode = 'performance-threshold-exceeded';
@@ -4178,8 +3758,6 @@ async function openCalendarWidget(
     expectWidgetWarning,
     waitForCalendar = true,
     captureMemberADiagnostics = false,
-    openInAppDrawer = false,
-    onAppDrawerPlacement,
     onTiming,
   }: OpenCalendarWidgetOptions,
 ) {
@@ -4189,8 +3767,6 @@ async function openCalendarWidget(
     page,
     'Matrix Calendar',
     captureMemberADiagnostics,
-    openInAppDrawer,
-    onAppDrawerPlacement,
   );
   onTiming?.('activation', elapsedMilliseconds(activationStartedAt));
   if (captureMemberADiagnostics) {
@@ -4285,8 +3861,6 @@ async function openPinnedElementWidget(
   page: Page,
   widgetName: string,
   captureMemberADiagnostics = false,
-  openInAppDrawer = false,
-  onAppDrawerPlacement?: (observation: AppDrawerPlacementObservation) => void,
 ): Promise<void> {
   const roomHeader = page.locator('header.mx_RoomHeader');
   const rightPanel = page.getByRole('complementary');
@@ -4299,141 +3873,6 @@ async function openPinnedElementWidget(
     captureMemberADiagnostics ? 'widget-a-extensions-menuitem' : undefined,
     rightPanel,
   );
-
-  if (openInAppDrawer) {
-    const pinControl = rightPanel.getByRole('button', {
-      name: 'Pin',
-      exact: true,
-    });
-    await pinControl
-      .waitFor({ state: 'visible', timeout: 8_000 })
-      .catch(() => {});
-    const pinControlCount = Math.min(await pinControl.count(), 2);
-    const pinControlVisible =
-      pinControlCount === 1 &&
-      (await pinControl.isVisible().catch(() => false));
-    const pinControlEnabled =
-      pinControlCount === 1 &&
-      (await pinControl.isEnabled().catch(() => false));
-    onAppDrawerPlacement?.({
-      pinControlCount,
-      pinControlVisible,
-      pinControlEnabled,
-    });
-    expect(pinControlCount).toBe(1);
-    expect(pinControlVisible).toBe(true);
-    expect(pinControlEnabled).toBe(true);
-    await pinControl.click();
-    onAppDrawerPlacement?.({ pinActionCompleted: true });
-
-    const appDrawer = page.locator('.mx_AppsDrawer');
-    await expect(appDrawer.first()).toBeVisible();
-    const appDrawerCount = Math.min(await appDrawer.count(), 2);
-    onAppDrawerPlacement?.({ appDrawerCount });
-    const drawerFrame = appDrawer.locator('iframe[title="Matrix Calendar"]');
-    const appDrawerFrameCount = Math.min(await drawerFrame.count(), 2);
-    onAppDrawerPlacement?.({ appDrawerFrameCount });
-    const persistedHostFrame = page.locator(
-      '#mx_PersistedElement_container iframe[title="Matrix Calendar"]',
-    );
-    await persistedHostFrame
-      .first()
-      .waitFor({ state: 'attached', timeout: 30_000 })
-      .catch(() => {});
-    const persistedHostFrameCount = Math.min(
-      await persistedHostFrame.count(),
-      2,
-    );
-    const persistedHostFrameVisible =
-      persistedHostFrameCount === 1 &&
-      (await persistedHostFrame
-        .first()
-        .isVisible()
-        .catch(() => false));
-    onAppDrawerPlacement?.({
-      persistedHostFrameCount,
-      persistedHostFrameVisible,
-    });
-    if (persistedHostFrameCount !== 1 || !persistedHostFrameVisible) {
-      let renderSnapshot: AppDrawerPlacementObservation = {
-        appTileSnapshotAvailable: false,
-        appTileCount: null,
-        appTileFrameCount: null,
-        appTileNamedFrameCount: null,
-        appPermissionCount: null,
-        appLoadingIndicatorCount: null,
-        appWarningCount: null,
-        appDrawerMaximised: null,
-      };
-      try {
-        renderSnapshot = await appDrawer
-          .first()
-          .evaluate((drawer, expectedWidgetTitle) => {
-            const cap = (value: number) => Math.min(value, 2);
-            const tileSelector =
-              '.mx_AppTileFullWidth, .mx_AppTile, .mx_AppTile_mini';
-            const tiles = Array.from(
-              new Set(drawer.querySelectorAll(tileSelector)),
-            );
-            const frames = tiles.flatMap((tile) =>
-              Array.from(tile.querySelectorAll('iframe')),
-            );
-            return {
-              appTileSnapshotAvailable: true,
-              appTileCount: cap(tiles.length),
-              appTileFrameCount: cap(frames.length),
-              appTileNamedFrameCount: cap(
-                frames.filter(
-                  (frame) =>
-                    frame.getAttribute('title') === expectedWidgetTitle,
-                ).length,
-              ),
-              appPermissionCount: cap(
-                tiles.reduce(
-                  (count, tile) =>
-                    count + tile.querySelectorAll('.mx_AppPermission').length,
-                  0,
-                ),
-              ),
-              appLoadingIndicatorCount: cap(
-                tiles.reduce(
-                  (count, tile) =>
-                    count +
-                    tile.querySelectorAll('.mx_AppTileBody_fadeInSpinner')
-                      .length,
-                  0,
-                ),
-              ),
-              appWarningCount: cap(
-                tiles.reduce(
-                  (count, tile) =>
-                    count + tile.querySelectorAll('.mx_AppWarning').length,
-                  0,
-                ),
-              ),
-              appDrawerMaximised: drawer.classList.contains(
-                'mx_AppsDrawer--maximised',
-              ),
-            };
-          }, 'Matrix Calendar');
-      } catch {
-        // Missing DOM evidence remains unavailable; no exception text escapes.
-      }
-      onAppDrawerPlacement?.(renderSnapshot);
-    }
-    expect(appDrawerCount).toBe(1);
-    expect(appDrawerFrameCount).toBe(0);
-    expect(persistedHostFrameCount).toBe(1);
-    await expect(persistedHostFrame.first()).toBeVisible();
-    const persistedHostFrameVisibleAfterWait = await persistedHostFrame
-      .first()
-      .isVisible()
-      .catch(() => false);
-    onAppDrawerPlacement?.({
-      persistedHostFrameVisible: persistedHostFrameVisibleAfterWait,
-    });
-    return;
-  }
 
   await clickPinnedWidgetControl(
     rightPanel.getByRole('button', { name: widgetName }),

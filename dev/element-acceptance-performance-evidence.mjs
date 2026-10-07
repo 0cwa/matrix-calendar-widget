@@ -40,66 +40,6 @@ const PAGE_ERROR_CLASSES = new Set([
   'eval-error',
   'other',
 ]);
-const HOST_HOVER_FAILURE_CLASSES = new Set([
-  'not-attempted',
-  'none',
-  'timeout',
-  'not-visible',
-  'outside-viewport',
-  'intercepted',
-  'detached',
-  'other',
-]);
-const HOST_HOVER_CENTER_HITS = new Set([
-  'toolbar',
-  'tile',
-  'persisted-widget-iframe',
-  'element-dialog',
-  'context-menu',
-  'drawer',
-  'other',
-  'none',
-]);
-const HOST_HOVER_OCCLUDER_TAGS = new Set([
-  'a',
-  'body',
-  'button',
-  'div',
-  'html',
-  'iframe',
-  'input',
-  'label',
-  'li',
-  'main',
-  'other',
-  'path',
-  'section',
-  'span',
-  'svg',
-  'ul',
-]);
-const HOST_HOVER_OCCLUDER_CLASSES = new Set([
-  'mx_AppPermission',
-  'mx_AppTile',
-  'mx_AppTileBody_fadeInSpinner',
-  'mx_AppTileFullWidth',
-  'mx_AppTileMenuBar',
-  'mx_AppTileMenuBar_widgets',
-  'mx_AppTileMenuBar_widgets_button',
-  'mx_AppTile_mini',
-  'mx_AppTile_persistedWrapper',
-  'mx_AppWarning',
-  'mx_AppsDrawer',
-  'mx_AppsDrawer--maximised',
-  'mx_ContextualMenu',
-]);
-const HOST_HOVER_OCCLUDER_ROOTS = new Set([
-  'document-body',
-  'document-element',
-  'none',
-  'persisted-element-container',
-  'persisted-element-instance',
-]);
 const API_SAMPLE =
   /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5])$/u;
 
@@ -132,37 +72,15 @@ const COLD_KEYS = [
   'capabilityApprovalMs',
   'identityApprovalMs',
   'iframeReadyMs',
-  'initialIframeWidth',
-  'pinControlCount',
-  'pinControlVisible',
-  'pinControlEnabled',
-  'pinActionCompleted',
+  'placement',
+  'widgetCardCount',
+  'widgetCardVisible',
   'appDrawerCount',
-  'appDrawerFrameCount',
   'persistedHostFrameCount',
   'persistedHostFrameVisible',
-  'appTileSnapshotAvailable',
-  'appTileCount',
-  'appTileFrameCount',
-  'appTileNamedFrameCount',
-  'appPermissionCount',
-  'appLoadingIndicatorCount',
-  'appWarningCount',
-  'appDrawerMaximised',
-  'hostHoverActionability',
-  'hostTileCountBeforeHover',
-  'hostToolbarCountBeforeHover',
-  'hostMaximizeCountBeforeHover',
-  'hostMaximizeVisibleBeforeHover',
-  'hostHeaderHoverAttempted',
-  'hostHeaderHoverCompleted',
-  'hostTileCountAfterHover',
-  'hostToolbarCountAfterHover',
-  'hostMaximizeVisibleAfterHover',
-  'maximizeControlCount',
-  'hostMaximizeMs',
-  'maximizedIframeWidth',
-  'maximizedLayout',
+  'iframeWidth',
+  'iframeHeight',
+  'hostHorizontalOverflow',
   'rangeSelectionMs',
   'openIdResponseCount',
   'openIdMaxMs',
@@ -209,24 +127,6 @@ const OVERFLOW_KEYS = [
   'dayIdentityMatches',
   'stable',
 ];
-const HOST_HOVER_ACTIONABILITY_KEYS = [
-  'available',
-  'connected',
-  'visible',
-  'positiveBox',
-  'viewportIntersection',
-  'hiddenAncestor',
-  'centerHit',
-  'occluder',
-  'failureClass',
-];
-const HOST_HOVER_OCCLUDER_KEYS = [
-  'available',
-  'path',
-  'pathTruncated',
-  'classOverflow',
-];
-const HOST_HOVER_OCCLUDER_NODE_KEYS = ['tag', 'classes', 'root'];
 const API_KEYS = [
   'sample',
   'endpoint',
@@ -310,94 +210,6 @@ function validDetailSample(value, index) {
   );
 }
 
-function validHostHoverActionability(value, attempted, completed) {
-  return (
-    hasExactKeys(value, HOST_HOVER_ACTIONABILITY_KEYS) &&
-    typeof value.available === 'boolean' &&
-    (value.available
-      ? [
-          value.connected,
-          value.visible,
-          value.positiveBox,
-          value.viewportIntersection,
-          value.hiddenAncestor,
-        ].every((item) => typeof item === 'boolean') &&
-        HOST_HOVER_CENTER_HITS.has(value.centerHit) &&
-        validHostHoverOccluder(value.occluder, value.centerHit) &&
-        (!value.occluder.available || (attempted && !completed))
-      : [
-          value.connected,
-          value.visible,
-          value.positiveBox,
-          value.viewportIntersection,
-          value.hiddenAncestor,
-          value.centerHit,
-        ].every((item) => item === null) &&
-        validHostHoverOccluder(value.occluder, null)) &&
-    HOST_HOVER_FAILURE_CLASSES.has(value.failureClass) &&
-    (attempted
-      ? value.failureClass !== 'not-attempted' &&
-        completed === (value.failureClass === 'none') &&
-        (value.failureClass !== 'none' ||
-          (value.available &&
-            value.connected &&
-            value.visible &&
-            value.positiveBox &&
-            value.viewportIntersection &&
-            !value.hiddenAncestor &&
-            value.centerHit === 'toolbar'))
-      : value.failureClass === 'not-attempted' && !completed)
-  );
-}
-
-function validHostHoverOccluder(value, centerHit) {
-  if (
-    !hasExactKeys(value, HOST_HOVER_OCCLUDER_KEYS) ||
-    typeof value.available !== 'boolean'
-  ) {
-    return false;
-  }
-  if (!value.available) {
-    return (
-      value.path === null &&
-      value.pathTruncated === null &&
-      value.classOverflow === null
-    );
-  }
-  if (
-    centerHit === null ||
-    !Array.isArray(value.path) ||
-    value.path.length > 16 ||
-    typeof value.pathTruncated !== 'boolean' ||
-    typeof value.classOverflow !== 'boolean' ||
-    (value.pathTruncated && value.path.length !== 16) ||
-    (centerHit === 'none' ? value.path.length !== 0 : value.path.length === 0)
-  ) {
-    return false;
-  }
-  let classCount = 0;
-  for (const node of value.path) {
-    if (
-      !hasExactKeys(node, HOST_HOVER_OCCLUDER_NODE_KEYS) ||
-      !HOST_HOVER_OCCLUDER_TAGS.has(node.tag) ||
-      !HOST_HOVER_OCCLUDER_ROOTS.has(node.root) ||
-      (node.root === 'document-body' && node.tag !== 'body') ||
-      (node.root === 'document-element' && node.tag !== 'html') ||
-      (node.root.startsWith('persisted-element-') && node.tag !== 'div') ||
-      !Array.isArray(node.classes) ||
-      node.classes.length > 8 ||
-      !node.classes.every((className) =>
-        HOST_HOVER_OCCLUDER_CLASSES.has(className),
-      ) ||
-      new Set(node.classes).size !== node.classes.length
-    ) {
-      return false;
-    }
-    classCount += node.classes.length;
-  }
-  return classCount <= 8 && (!value.classOverflow || classCount === 8);
-}
-
 function validApiResponse(value) {
   if (
     !hasExactKeys(value, API_KEYS) ||
@@ -443,7 +255,7 @@ function validApiResponse(value) {
 function validReport(report) {
   return (
     hasExactKeys(report, REPORT_KEYS) &&
-    report.version === 1 &&
+    report.version === 2 &&
     boundedInteger(report.year, 2020, 2200) &&
     boundedInteger(report.month, 1, 12) &&
     new Date(Date.UTC(report.year, report.month, 0)).getUTCDate() === 31 &&
@@ -460,71 +272,22 @@ function validReport(report) {
     COLD_KEYS.slice(0, 6).every((key) =>
       optionalMilliseconds(report.coldList[key]),
     ) &&
-    optionalCount(report.coldList.initialIframeWidth, 4096) &&
-    boundedInteger(report.coldList.pinControlCount, 0, 2) &&
-    typeof report.coldList.pinControlVisible === 'boolean' &&
-    typeof report.coldList.pinControlEnabled === 'boolean' &&
-    typeof report.coldList.pinActionCompleted === 'boolean' &&
+    ['widget-card', 'apps-drawer', 'unknown'].includes(
+      report.coldList.placement,
+    ) &&
+    boundedInteger(report.coldList.widgetCardCount, 0, 2) &&
+    typeof report.coldList.widgetCardVisible === 'boolean' &&
+    (!report.coldList.widgetCardVisible ||
+      report.coldList.widgetCardCount === 1) &&
     boundedInteger(report.coldList.appDrawerCount, 0, 2) &&
-    boundedInteger(report.coldList.appDrawerFrameCount, 0, 2) &&
     boundedInteger(report.coldList.persistedHostFrameCount, 0, 2) &&
     typeof report.coldList.persistedHostFrameVisible === 'boolean' &&
-    (report.coldList.persistedHostFrameVisible
-      ? report.coldList.persistedHostFrameCount === 1
-      : true) &&
-    (typeof report.coldList.appTileSnapshotAvailable === 'boolean' ||
-      report.coldList.appTileSnapshotAvailable === null) &&
-    optionalCount(report.coldList.appTileCount, 2) &&
-    optionalCount(report.coldList.appTileFrameCount, 2) &&
-    optionalCount(report.coldList.appTileNamedFrameCount, 2) &&
-    optionalCount(report.coldList.appPermissionCount, 2) &&
-    optionalCount(report.coldList.appLoadingIndicatorCount, 2) &&
-    optionalCount(report.coldList.appWarningCount, 2) &&
-    (typeof report.coldList.appDrawerMaximised === 'boolean' ||
-      report.coldList.appDrawerMaximised === null) &&
-    (report.coldList.appTileSnapshotAvailable === true
-      ? report.coldList.appTileCount !== null &&
-        report.coldList.appTileFrameCount !== null &&
-        report.coldList.appTileNamedFrameCount !== null &&
-        report.coldList.appPermissionCount !== null &&
-        report.coldList.appLoadingIndicatorCount !== null &&
-        report.coldList.appWarningCount !== null &&
-        report.coldList.appDrawerMaximised !== null &&
-        report.coldList.appTileNamedFrameCount <=
-          report.coldList.appTileFrameCount
-      : report.coldList.appTileCount === null &&
-        report.coldList.appTileFrameCount === null &&
-        report.coldList.appTileNamedFrameCount === null &&
-        report.coldList.appPermissionCount === null &&
-        report.coldList.appLoadingIndicatorCount === null &&
-        report.coldList.appWarningCount === null &&
-        report.coldList.appDrawerMaximised === null) &&
-    boundedInteger(report.coldList.hostTileCountBeforeHover, 0, 2) &&
-    boundedInteger(report.coldList.hostToolbarCountBeforeHover, 0, 2) &&
-    boundedInteger(report.coldList.hostMaximizeCountBeforeHover, 0, 2) &&
-    typeof report.coldList.hostMaximizeVisibleBeforeHover === 'boolean' &&
-    (report.coldList.hostMaximizeVisibleBeforeHover
-      ? report.coldList.hostMaximizeCountBeforeHover === 1
-      : true) &&
-    typeof report.coldList.hostHeaderHoverAttempted === 'boolean' &&
-    typeof report.coldList.hostHeaderHoverCompleted === 'boolean' &&
-    validHostHoverActionability(
-      report.coldList.hostHoverActionability,
-      report.coldList.hostHeaderHoverAttempted,
-      report.coldList.hostHeaderHoverCompleted,
-    ) &&
-    (!report.coldList.hostHeaderHoverCompleted ||
-      report.coldList.hostHeaderHoverAttempted) &&
-    boundedInteger(report.coldList.hostTileCountAfterHover, 0, 2) &&
-    boundedInteger(report.coldList.hostToolbarCountAfterHover, 0, 2) &&
-    typeof report.coldList.hostMaximizeVisibleAfterHover === 'boolean' &&
-    (report.coldList.hostMaximizeVisibleAfterHover
-      ? report.coldList.maximizeControlCount === 1
-      : true) &&
-    boundedInteger(report.coldList.maximizeControlCount, 0, 2) &&
-    optionalMilliseconds(report.coldList.hostMaximizeMs) &&
-    optionalCount(report.coldList.maximizedIframeWidth, 4096) &&
-    typeof report.coldList.maximizedLayout === 'boolean' &&
+    (!report.coldList.persistedHostFrameVisible ||
+      report.coldList.persistedHostFrameCount === 1) &&
+    optionalCount(report.coldList.iframeWidth, 4096) &&
+    optionalCount(report.coldList.iframeHeight, 4096) &&
+    (typeof report.coldList.hostHorizontalOverflow === 'boolean' ||
+      report.coldList.hostHorizontalOverflow === null) &&
     optionalMilliseconds(report.coldList.rangeSelectionMs) &&
     boundedInteger(report.coldList.openIdResponseCount, 0, 8) &&
     optionalMilliseconds(report.coldList.openIdMaxMs) &&
@@ -625,40 +388,20 @@ function reportPasses(report) {
       report.coldList.capabilityApprovalMs,
       report.coldList.identityApprovalMs,
       report.coldList.iframeReadyMs,
-      report.coldList.hostMaximizeMs,
       report.coldList.rangeSelectionMs,
     ].every((value) => value !== null) &&
     report.coldList.openIdResponseCount > 0 &&
     report.coldList.openIdMaxMs !== null &&
-    report.coldList.initialIframeWidth !== null &&
-    report.coldList.initialIframeWidth > 0 &&
-    report.coldList.pinControlCount === 1 &&
-    report.coldList.pinControlVisible &&
-    report.coldList.pinControlEnabled &&
-    report.coldList.pinActionCompleted &&
-    report.coldList.appDrawerCount === 1 &&
-    report.coldList.appDrawerFrameCount === 0 &&
+    report.coldList.placement === 'widget-card' &&
+    report.coldList.widgetCardCount === 1 &&
+    report.coldList.widgetCardVisible &&
     report.coldList.persistedHostFrameCount === 1 &&
     report.coldList.persistedHostFrameVisible &&
-    report.coldList.hostHoverActionability.available &&
-    report.coldList.hostHoverActionability.connected &&
-    report.coldList.hostHoverActionability.visible &&
-    report.coldList.hostHoverActionability.positiveBox &&
-    report.coldList.hostHoverActionability.viewportIntersection &&
-    !report.coldList.hostHoverActionability.hiddenAncestor &&
-    report.coldList.hostHoverActionability.centerHit === 'toolbar' &&
-    report.coldList.hostHoverActionability.failureClass === 'none' &&
-    report.coldList.hostTileCountBeforeHover === 1 &&
-    report.coldList.hostToolbarCountBeforeHover === 1 &&
-    report.coldList.hostHeaderHoverAttempted &&
-    report.coldList.hostHeaderHoverCompleted &&
-    report.coldList.hostTileCountAfterHover === 1 &&
-    report.coldList.hostToolbarCountAfterHover === 1 &&
-    report.coldList.maximizeControlCount === 1 &&
-    report.coldList.hostMaximizeVisibleAfterHover &&
-    report.coldList.maximizedIframeWidth !== null &&
-    report.coldList.maximizedIframeWidth >= 800 &&
-    report.coldList.maximizedLayout &&
+    report.coldList.iframeWidth !== null &&
+    report.coldList.iframeWidth > 0 &&
+    report.coldList.iframeHeight !== null &&
+    report.coldList.iframeHeight > 0 &&
+    report.coldList.hostHorizontalOverflow === false &&
     report.coldList.expectedRangeMatches &&
     report.coldList.selectedRoomResponseCount === 1 &&
     report.coldList.returnedCount === 250 &&
@@ -748,35 +491,6 @@ function display(value) {
   return value === null ? 'unavailable' : String(value);
 }
 
-function displayHostHoverOccluder(value) {
-  if (!value.available) return 'unavailable';
-  if (value.path.length === 0) return 'none';
-  return value.path
-    .map(({ tag, classes, root }) => `${tag}[${classes.join('+')}]@${root}`)
-    .join('>');
-}
-
-export function classifyPerformanceHoverFailure(error) {
-  const errorName = error instanceof Error ? error.name : '';
-  const message = error instanceof Error ? error.message : '';
-  if (/outside(?: of)? the viewport/iu.test(message)) {
-    return 'outside-viewport';
-  }
-  if (/not visible/iu.test(message)) return 'not-visible';
-  if (/intercepts? .*pointer|receives? .*pointer/iu.test(message)) {
-    return 'intercepted';
-  }
-  if (
-    /detached from (?:the )?DOM|not attached to (?:the )?DOM/iu.test(message)
-  ) {
-    return 'detached';
-  }
-  if (errorName === 'TimeoutError' || /timeout/iu.test(message)) {
-    return 'timeout';
-  }
-  return 'other';
-}
-
 function median(values) {
   const sorted = [...values].sort((a, b) => a - b);
   if (sorted.length === 0) return null;
@@ -806,6 +520,7 @@ export function formatPerformanceEvidence(record) {
   const lines = [
     [
       'phase=performance-pilot',
+      `report_version=${report.version}`,
       `status=${record.status}`,
       `failure_code=${record.failureCode ?? 'none'}`,
       `month=${report.year}-${String(report.month).padStart(2, '0')}`,
@@ -827,50 +542,15 @@ export function formatPerformanceEvidence(record) {
       `capability_approval_ms=${display(report.coldList.capabilityApprovalMs)}`,
       `identity_approval_ms=${display(report.coldList.identityApprovalMs)}`,
       `iframe_ready_ms=${display(report.coldList.iframeReadyMs)}`,
-      `embedded_iframe_width=${display(report.coldList.initialIframeWidth)}`,
-      `pin_control_count=${report.coldList.pinControlCount}`,
-      `pin_control_visible=${report.coldList.pinControlVisible}`,
-      `pin_control_enabled=${report.coldList.pinControlEnabled}`,
-      `pin_action_completed=${report.coldList.pinActionCompleted}`,
+      `placement=${report.coldList.placement}`,
+      `widget_card_count=${report.coldList.widgetCardCount}`,
+      `widget_card_visible=${report.coldList.widgetCardVisible}`,
       `app_drawer_count=${report.coldList.appDrawerCount}`,
-      `app_drawer_frame_count=${report.coldList.appDrawerFrameCount}`,
       `persisted_host_frame_count=${report.coldList.persistedHostFrameCount}`,
       `persisted_host_frame_visible=${report.coldList.persistedHostFrameVisible}`,
-      `app_tile_snapshot_available=${display(report.coldList.appTileSnapshotAvailable)}`,
-      `app_tile_count=${display(report.coldList.appTileCount)}`,
-      `app_tile_frame_count=${display(report.coldList.appTileFrameCount)}`,
-      `app_tile_named_frame_count=${display(report.coldList.appTileNamedFrameCount)}`,
-      `app_permission_count=${display(report.coldList.appPermissionCount)}`,
-      `app_loading_indicator_count=${display(report.coldList.appLoadingIndicatorCount)}`,
-      `app_warning_count=${display(report.coldList.appWarningCount)}`,
-      `app_drawer_maximised=${display(report.coldList.appDrawerMaximised)}`,
-      `host_tile_count_before_hover=${report.coldList.hostTileCountBeforeHover}`,
-      `host_toolbar_count_before_hover=${report.coldList.hostToolbarCountBeforeHover}`,
-      `host_maximize_count_before_hover=${report.coldList.hostMaximizeCountBeforeHover}`,
-      `host_maximize_visible_before_hover=${report.coldList.hostMaximizeVisibleBeforeHover}`,
-      `host_header_hover_attempted=${report.coldList.hostHeaderHoverAttempted}`,
-      `host_header_hover_completed=${report.coldList.hostHeaderHoverCompleted}`,
-      `host_hover_observation_available=${report.coldList.hostHoverActionability.available}`,
-      `host_hover_toolbar_connected=${display(report.coldList.hostHoverActionability.connected)}`,
-      `host_hover_toolbar_visible=${display(report.coldList.hostHoverActionability.visible)}`,
-      `host_hover_toolbar_positive_box=${display(report.coldList.hostHoverActionability.positiveBox)}`,
-      `host_hover_toolbar_viewport_intersection=${display(report.coldList.hostHoverActionability.viewportIntersection)}`,
-      `host_hover_toolbar_hidden_ancestor=${display(report.coldList.hostHoverActionability.hiddenAncestor)}`,
-      `host_hover_center_hit=${display(report.coldList.hostHoverActionability.centerHit)}`,
-      `host_hover_occluder_available=${report.coldList.hostHoverActionability.occluder.available}`,
-      `host_hover_occluder_path_node_count=${display(report.coldList.hostHoverActionability.occluder.path?.length ?? null)}`,
-      `host_hover_occluder_class_count=${display(report.coldList.hostHoverActionability.occluder.path?.reduce((count, node) => count + node.classes.length, 0) ?? null)}`,
-      `host_hover_occluder_path_truncated=${display(report.coldList.hostHoverActionability.occluder.pathTruncated)}`,
-      `host_hover_occluder_class_overflow=${display(report.coldList.hostHoverActionability.occluder.classOverflow)}`,
-      `host_hover_occluder_path=${displayHostHoverOccluder(report.coldList.hostHoverActionability.occluder)}`,
-      `host_hover_failure_class=${report.coldList.hostHoverActionability.failureClass}`,
-      `host_tile_count_after_hover=${report.coldList.hostTileCountAfterHover}`,
-      `host_toolbar_count_after_hover=${report.coldList.hostToolbarCountAfterHover}`,
-      `host_maximize_visible_after_hover=${report.coldList.hostMaximizeVisibleAfterHover}`,
-      `maximize_control_count=${report.coldList.maximizeControlCount}`,
-      `host_maximize_ms=${display(report.coldList.hostMaximizeMs)}`,
-      `maximized_iframe_width=${display(report.coldList.maximizedIframeWidth)}`,
-      `maximized_layout=${report.coldList.maximizedLayout}`,
+      `iframe_width=${display(report.coldList.iframeWidth)}`,
+      `iframe_height=${display(report.coldList.iframeHeight)}`,
+      `host_horizontal_overflow=${display(report.coldList.hostHorizontalOverflow)}`,
       `range_selection_ms=${display(report.coldList.rangeSelectionMs)}`,
       `openid_responses=${report.coldList.openIdResponseCount}`,
       `openid_max_ms=${display(report.coldList.openIdMaxMs)}`,

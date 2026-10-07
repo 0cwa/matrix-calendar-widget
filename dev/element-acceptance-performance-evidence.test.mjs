@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyPerformanceHoverFailure } from './element-acceptance-performance-evidence.mjs';
 import { sanitizeElementAcceptance } from './sanitize-element-acceptance.mjs';
 
 const sourceSha = 'b'.repeat(40);
@@ -99,7 +98,7 @@ function completeReport() {
   });
 
   return {
-    version: 1,
+    version: 2,
     year: 2026,
     month: 12,
     viewportWidth: 1280,
@@ -115,52 +114,15 @@ function completeReport() {
       capabilityApprovalMs: 150,
       identityApprovalMs: 200,
       iframeReadyMs: 400,
-      initialIframeWidth: 460,
-      pinControlCount: 1,
-      pinControlVisible: true,
-      pinControlEnabled: true,
-      pinActionCompleted: true,
-      appDrawerCount: 1,
-      appDrawerFrameCount: 0,
+      placement: 'widget-card',
+      widgetCardCount: 1,
+      widgetCardVisible: true,
+      appDrawerCount: 0,
       persistedHostFrameCount: 1,
       persistedHostFrameVisible: true,
-      appTileSnapshotAvailable: null,
-      appTileCount: null,
-      appTileFrameCount: null,
-      appTileNamedFrameCount: null,
-      appPermissionCount: null,
-      appLoadingIndicatorCount: null,
-      appWarningCount: null,
-      appDrawerMaximised: null,
-      hostHoverActionability: {
-        available: true,
-        connected: true,
-        visible: true,
-        positiveBox: true,
-        viewportIntersection: true,
-        hiddenAncestor: false,
-        centerHit: 'toolbar',
-        occluder: {
-          available: false,
-          path: null,
-          pathTruncated: null,
-          classOverflow: null,
-        },
-        failureClass: 'none',
-      },
-      hostTileCountBeforeHover: 1,
-      hostToolbarCountBeforeHover: 1,
-      hostMaximizeCountBeforeHover: 0,
-      hostMaximizeVisibleBeforeHover: false,
-      hostHeaderHoverAttempted: true,
-      hostHeaderHoverCompleted: true,
-      hostTileCountAfterHover: 1,
-      hostToolbarCountAfterHover: 1,
-      hostMaximizeVisibleAfterHover: true,
-      maximizeControlCount: 1,
-      hostMaximizeMs: 180,
-      maximizedIframeWidth: 1280,
-      maximizedLayout: true,
+      iframeWidth: 319,
+      iframeHeight: 690,
+      hostHorizontalOverflow: false,
       rangeSelectionMs: 400,
       openIdResponseCount: 1,
       openIdMaxMs: 100,
@@ -201,25 +163,6 @@ function completeReport() {
   };
 }
 
-function failedHoverReport() {
-  const report = completeReport();
-  report.coldList.hostHeaderHoverCompleted = false;
-  report.coldList.hostHoverActionability.failureClass = 'intercepted';
-  report.coldList.hostHoverActionability.occluder = {
-    available: true,
-    path: [
-      { tag: 'iframe', classes: [], root: 'none' },
-      { tag: 'div', classes: [], root: 'persisted-element-instance' },
-      { tag: 'div', classes: [], root: 'persisted-element-container' },
-      { tag: 'body', classes: [], root: 'document-body' },
-      { tag: 'html', classes: [], root: 'document-element' },
-    ],
-    pathTruncated: false,
-    classOverflow: false,
-  };
-  return report;
-}
-
 function stage(status, performanceReport, failureCode) {
   return {
     phase: 'performance-pilot',
@@ -234,24 +177,19 @@ test('sanitizes complete performance samples and bounded decoded API timings', (
     JSON.stringify(stage('passed', completeReport())),
     sourceSha,
   );
-  assert.match(summary, /phase=performance-pilot status=passed/u);
+  assert.match(
+    summary,
+    /phase=performance-pilot report_version=2 status=passed/u,
+  );
   assert.match(
     summary,
     /events=250 calendar_days=31 timezone=Europe\/Stockholm/u,
   );
   assert.match(
     summary,
-    /embedded_iframe_width=460 .*maximize_control_count=1/u,
+    /placement=widget-card widget_card_count=1 widget_card_visible=true app_drawer_count=0 persisted_host_frame_count=1 persisted_host_frame_visible=true iframe_width=319 iframe_height=690 host_horizontal_overflow=false/u,
   );
-  assert.match(
-    summary,
-    /pin_control_count=1 pin_control_visible=true pin_control_enabled=true pin_action_completed=true app_drawer_count=1 app_drawer_frame_count=0 persisted_host_frame_count=1 persisted_host_frame_visible=true/u,
-  );
-  assert.match(
-    summary,
-    /host_hover_observation_available=true host_hover_toolbar_connected=true host_hover_toolbar_visible=true host_hover_toolbar_positive_box=true host_hover_toolbar_viewport_intersection=true host_hover_toolbar_hidden_ancestor=false host_hover_center_hit=toolbar host_hover_occluder_available=false host_hover_occluder_path_node_count=unavailable host_hover_occluder_class_count=unavailable host_hover_occluder_path_truncated=unavailable host_hover_occluder_class_overflow=unavailable host_hover_occluder_path=unavailable host_hover_failure_class=none/u,
-  );
-  assert.match(summary, /maximized_iframe_width=1280 maximized_layout=true/u);
+  assert.doesNotMatch(summary, /maximi[sz]ed|pin_control|host_hover/u);
   assert.match(
     summary,
     /performance_api sample=measured-month-5 endpoint=events method=GET status=200 duration_ms=600 decoded=true/u,
@@ -269,304 +207,64 @@ test('sanitizes complete performance samples and bounded decoded API timings', (
     summary,
     /Performance\s+\d|@matrix-calendar-widget|access_token|https?:\/\/|error message|stack/u,
   );
-  assert.match(
-    summary,
-    /host_tile_count_before_hover=1 host_toolbar_count_before_hover=1 host_maximize_count_before_hover=0 host_maximize_visible_before_hover=false host_header_hover_attempted=true host_header_hover_completed=true .*host_tile_count_after_hover=1 host_toolbar_count_after_hover=1 host_maximize_visible_after_hover=true maximize_control_count=1/u,
-  );
 });
 
-test('maps host hover failures to fixed classes without preserving error text', () => {
-  const classified = [
-    [new Error('Element is not visible secret-value'), 'not-visible'],
-    [
-      new Error('Element is outside of the viewport private-value'),
-      'outside-viewport',
-    ],
-    [
-      new Error('Other element intercepts pointer events hidden-title'),
-      'intercepted',
-    ],
-    [new Error('Element is not attached to the DOM private-url'), 'detached'],
-    [
-      Object.assign(new Error('Timeout 5000ms exceeded private-detail'), {
-        name: 'TimeoutError',
-      }),
-      'timeout',
-    ],
-    [new Error('unclassified secret-value'), 'other'],
-  ].map(([error, expected]) => [
-    classifyPerformanceHoverFailure(error),
-    expected,
-  ]);
-  for (const [actual, expected] of classified) assert.equal(actual, expected);
-  assert.doesNotMatch(
-    JSON.stringify(classified),
-    /secret-value|private-value|hidden-title|private-url|private-detail/u,
-  );
-});
-
-test('requires visible unobscured hover evidence for pass and preserves fixed failure class', () => {
-  const unavailablePass = completeReport();
-  Object.assign(unavailablePass.coldList.hostHoverActionability, {
-    available: false,
-    connected: null,
-    visible: null,
-    positiveBox: null,
-    viewportIntersection: null,
-    hiddenAncestor: null,
-    centerHit: null,
-    occluder: {
-      available: false,
-      path: null,
-      pathTruncated: null,
-      classOverflow: null,
-    },
-  });
+test('requires the real visible side-panel widget and bounded geometry', () => {
+  const hiddenCard = completeReport();
+  hiddenCard.coldList.widgetCardVisible = false;
   assert.throws(
     () =>
       sanitizeElementAcceptance(
-        JSON.stringify(stage('passed', unavailablePass)),
+        JSON.stringify(stage('passed', hiddenCard)),
         sourceSha,
       ),
     /invalid element acceptance summary/u,
   );
 
-  const hiddenPass = completeReport();
-  hiddenPass.coldList.hostHoverActionability.hiddenAncestor = true;
+  const drawerPlacement = completeReport();
+  drawerPlacement.coldList.placement = 'apps-drawer';
   assert.throws(
     () =>
       sanitizeElementAcceptance(
-        JSON.stringify(stage('passed', hiddenPass)),
+        JSON.stringify(stage('passed', drawerPlacement)),
         sourceSha,
       ),
     /invalid element acceptance summary/u,
   );
 
-  const hoverFailure = failedHoverReport();
-  hoverFailure.coldList.hostHeaderHoverCompleted = false;
-  hoverFailure.coldList.hostHoverActionability.failureClass = 'intercepted';
-  hoverFailure.coldList.hostHoverActionability.centerHit =
-    'persisted-widget-iframe';
-  const summary = sanitizeElementAcceptance(
-    JSON.stringify(
-      stage('failed', hoverFailure, 'performance-host-layout-failed'),
-    ),
-    sourceSha,
-  );
-  assert.match(summary, /host_hover_failure_class=intercepted/u);
-  assert.match(summary, /host_hover_center_hit=persisted-widget-iframe/u);
-  assert.match(
-    summary,
-    /host_hover_occluder_path=iframe\[\]@none>div\[\]@persisted-element-instance>div\[\]@persisted-element-container/u,
-  );
-  assert.doesNotMatch(summary, /pointer|hidden-title|secret-value/u);
-
-  const successfulHoverWithPath = completeReport();
-  successfulHoverWithPath.coldList.hostHoverActionability.occluder =
-    failedHoverReport().coldList.hostHoverActionability.occluder;
+  const missingFrame = completeReport();
+  missingFrame.coldList.persistedHostFrameCount = 0;
+  missingFrame.coldList.persistedHostFrameVisible = false;
   assert.throws(
     () =>
       sanitizeElementAcceptance(
-        JSON.stringify(stage('passed', successfulHoverWithPath)),
+        JSON.stringify(stage('passed', missingFrame)),
         sourceSha,
       ),
     /invalid element acceptance summary/u,
   );
 
-  const unknownHit = completeReport();
-  unknownHit.coldList.hostHeaderHoverCompleted = false;
-  unknownHit.coldList.hostHoverActionability.failureClass = 'intercepted';
-  unknownHit.coldList.hostHoverActionability.centerHit = 'private-selector';
+  const hiddenOverflow = completeReport();
+  hiddenOverflow.coldList.hostHorizontalOverflow = true;
   assert.throws(
     () =>
       sanitizeElementAcceptance(
-        JSON.stringify(
-          stage('failed', unknownHit, 'performance-host-layout-failed'),
-        ),
+        JSON.stringify(stage('passed', hiddenOverflow)),
         sourceSha,
       ),
     /invalid element acceptance summary/u,
   );
 
-  const unknownClass = failedHoverReport();
-  unknownClass.coldList.hostHoverActionability.occluder.path[0].classes.push(
-    'private-class',
-  );
-  assert.throws(
-    () =>
-      sanitizeElementAcceptance(
-        JSON.stringify(
-          stage('failed', unknownClass, 'performance-host-layout-failed'),
-        ),
-        sourceSha,
-      ),
-    /invalid element acceptance summary/u,
-  );
-
-  const unboundedPath = failedHoverReport();
-  unboundedPath.coldList.hostHoverActionability.occluder.path = Array.from(
-    { length: 17 },
-    () => ({ tag: 'div', classes: [], root: 'none' }),
-  );
-  unboundedPath.coldList.hostHoverActionability.occluder.pathTruncated = true;
-  assert.throws(
-    () =>
-      sanitizeElementAcceptance(
-        JSON.stringify(
-          stage('failed', unboundedPath, 'performance-host-layout-failed'),
-        ),
-        sourceSha,
-      ),
-    /invalid element acceptance summary/u,
-  );
-
-  const falseClassOverflow = failedHoverReport();
-  falseClassOverflow.coldList.hostHoverActionability.occluder.classOverflow = true;
-  assert.throws(
-    () =>
-      sanitizeElementAcceptance(
-        JSON.stringify(
-          stage('failed', falseClassOverflow, 'performance-host-layout-failed'),
-        ),
-        sourceSha,
-      ),
-    /invalid element acceptance summary/u,
-  );
-
-  const mismatchedRoot = failedHoverReport();
-  mismatchedRoot.coldList.hostHoverActionability.occluder.path[1].tag = 'span';
-  assert.throws(
-    () =>
-      sanitizeElementAcceptance(
-        JSON.stringify(
-          stage('failed', mismatchedRoot, 'performance-host-layout-failed'),
-        ),
-        sourceSha,
-      ),
-    /invalid element acceptance summary/u,
-  );
-});
-
-test('requires the pinned app-drawer route and retains only fixed page-error classes', () => {
-  const missingPin = completeReport();
-  missingPin.coldList.pinControlCount = 0;
-  missingPin.coldList.pinControlVisible = false;
-  missingPin.coldList.pinControlEnabled = false;
-  missingPin.coldList.pinActionCompleted = false;
-  missingPin.coldList.appDrawerCount = 0;
-  missingPin.coldList.appDrawerFrameCount = 0;
-  missingPin.coldList.persistedHostFrameCount = 0;
-  missingPin.coldList.persistedHostFrameVisible = false;
-  assert.throws(
-    () =>
-      sanitizeElementAcceptance(
-        JSON.stringify(stage('passed', missingPin)),
-        sourceSha,
-      ),
-    /invalid element acceptance summary/u,
-  );
-
-  const inconsistentHostFrame = completeReport();
-  inconsistentHostFrame.coldList.persistedHostFrameCount = 2;
-  assert.throws(
-    () =>
-      sanitizeElementAcceptance(
-        JSON.stringify(stage('passed', inconsistentHostFrame)),
-        sourceSha,
-      ),
-    /invalid element acceptance summary/u,
-  );
-
-  const missingHeaderHover = completeReport();
-  missingHeaderHover.coldList.hostHeaderHoverCompleted = false;
-  assert.throws(
-    () =>
-      sanitizeElementAcceptance(
-        JSON.stringify(stage('passed', missingHeaderHover)),
-        sourceSha,
-      ),
-    /invalid element acceptance summary/u,
-  );
-
-  const pageError = completeReport();
-  pageError.pageErrorCount = 1;
-  pageError.pageErrorClass = 'type-error';
-  const failed = sanitizeElementAcceptance(
-    JSON.stringify(stage('failed', pageError, 'performance-page-error')),
-    sourceSha,
-  );
-  assert.match(failed, /page_errors=1 page_error_class=type-error/u);
-
-  pageError.pageErrorClass = 'message contains private fixture data';
-  assert.throws(
-    () =>
-      sanitizeElementAcceptance(
-        JSON.stringify(stage('failed', pageError, 'performance-page-error')),
-        sourceSha,
-      ),
-    /invalid element acceptance summary/u,
-  );
-});
-
-test('retains only a bounded AppTile render snapshot when iframe attachment fails', () => {
-  const report = completeReport();
-  report.coldList.appDrawerFrameCount = 0;
-  report.coldList.persistedHostFrameCount = 0;
-  report.coldList.persistedHostFrameVisible = false;
-  Object.assign(report.coldList, {
-    appTileSnapshotAvailable: true,
-    appTileCount: 1,
-    appTileFrameCount: 0,
-    appTileNamedFrameCount: 0,
-    appPermissionCount: 0,
-    appLoadingIndicatorCount: 1,
-    appWarningCount: 1,
-    appDrawerMaximised: false,
-  });
-  const summary = sanitizeElementAcceptance(
-    JSON.stringify(stage('failed', report, 'performance-widget-open-failed')),
-    sourceSha,
-  );
-  assert.match(
-    summary,
-    /app_tile_snapshot_available=true app_tile_count=1 app_tile_frame_count=0 app_tile_named_frame_count=0 app_permission_count=0 app_loading_indicator_count=1 app_warning_count=1 app_drawer_maximised=false/u,
-  );
-
-  const unavailable = completeReport();
-  Object.assign(unavailable.coldList, {
-    appTileSnapshotAvailable: false,
-    appTileCount: 1,
-  });
-  assert.throws(
-    () =>
-      sanitizeElementAcceptance(
-        JSON.stringify(
-          stage('failed', unavailable, 'performance-widget-open-failed'),
-        ),
-        sourceSha,
-      ),
-    /invalid element acceptance summary/u,
-  );
-
-  const impossibleFrameCounts = completeReport();
-  Object.assign(impossibleFrameCounts.coldList, {
-    appTileSnapshotAvailable: true,
-    appTileCount: 1,
-    appTileFrameCount: 0,
-    appTileNamedFrameCount: 1,
-    appPermissionCount: 0,
-    appLoadingIndicatorCount: 0,
-    appWarningCount: 0,
-    appDrawerMaximised: false,
-  });
+  const malformedDimensions = completeReport();
+  malformedDimensions.coldList.iframeWidth = 4097;
   assert.throws(
     () =>
       sanitizeElementAcceptance(
         JSON.stringify(
           stage(
             'failed',
-            impossibleFrameCounts,
-            'performance-widget-open-failed',
+            malformedDimensions,
+            'performance-host-layout-failed',
           ),
         ),
         sourceSha,
@@ -575,12 +273,12 @@ test('retains only a bounded AppTile render snapshot when iframe attachment fail
   );
 
   const privateField = completeReport();
-  privateField.coldList.appTileErrorText = 'private widget details';
+  privateField.coldList.iframeSelector = '#private-widget';
   assert.throws(
     () =>
       sanitizeElementAcceptance(
         JSON.stringify(
-          stage('failed', privateField, 'performance-widget-open-failed'),
+          stage('failed', privateField, 'performance-host-layout-failed'),
         ),
         sourceSha,
       ),
@@ -664,27 +362,15 @@ test('does not pass missing samples, slow API responses, or duplicate terminal r
   );
 });
 
-test('requires the actual Element maximize transition and expected API methods', () => {
-  const narrow = completeReport();
-  narrow.coldList.maximizedIframeWidth = 799;
-  assert.throws(
-    () =>
-      sanitizeElementAcceptance(
-        JSON.stringify(stage('passed', narrow)),
-        sourceSha,
-      ),
-    /invalid element acceptance summary/u,
-  );
-
-  const fakeLayout = completeReport();
-  fakeLayout.coldList.maximizedLayout = false;
-  assert.throws(
-    () =>
-      sanitizeElementAcceptance(
-        JSON.stringify(stage('passed', fakeLayout)),
-        sourceSha,
-      ),
-    /invalid element acceptance summary/u,
+test('accepts the measured side-panel width without a minimum and checks expected API methods', () => {
+  const sidePanel = completeReport();
+  sidePanel.coldList.iframeWidth = 319;
+  assert.match(
+    sanitizeElementAcceptance(
+      JSON.stringify(stage('passed', sidePanel)),
+      sourceSha,
+    ),
+    /iframe_width=319/u,
   );
 
   const wrongOverflowCount = completeReport();

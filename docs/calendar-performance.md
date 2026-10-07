@@ -42,16 +42,17 @@ record two List and two Month warm-ups, followed by five measured List and five
 measured Month samples, alternating views in the same session. After two
 explicitly labeled detail warm-ups, measure five event-detail opens.
 
-Start from Element's normal room state at the fixed 1280×800 viewport, with the
-widget in the Extensions list. During the cold sample, use the real **Pin**
-action to place it in the room's Apps drawer, verify that the drawer hosts the
-calendar iframe, then hover the AppTile toolbar and use Element's accessible
-**Maximise** control. Verify the maximized layout and iframe width is at least
-800 pixels before selecting the range. The cold timer includes the host actions
-and the widget remains in Element's real layout containers; do not seed layout
-state or simulate the transition by resizing the browser window. Record the
-iframe width before and after maximizing; the initial width is descriptive and
-has no threshold.
+Start from Element's normal room state at the fixed 1280×800 viewport and open
+the registered widget through the usual Room Info → Extensions → WidgetCard
+path. Keep the widget in Element's standard side panel; do not Pin it into the
+Apps drawer or use Maximise/Un-maximise. The cold timer includes first
+activation, capability and identity approvals, and all ordinary widget startup
+work. Record the actual WidgetCard placement and iframe width and height, and
+require the host and widget document to have no horizontal overflow. Report the
+observed dimensions without adding a minimum iframe-width threshold. Do not
+seed layout state or simulate the side panel by resizing the browser window.
+Pinning and maximized Apps-drawer layout certification are deferred and must
+not be reported as passed by this pilot.
 
 Use the real date-range picker to set the exact 31 local dates for List. Assert
 the actual request range in memory. Month deliberately requests a wider range:
