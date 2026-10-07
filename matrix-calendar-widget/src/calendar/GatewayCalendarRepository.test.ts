@@ -44,6 +44,45 @@ const event: CalendarEvent = {
 };
 
 describe('GatewayCalendarRepository', () => {
+  it('binds the default fetch implementation to the global receiver', async () => {
+    const originalFetch = globalThis.fetch;
+    const roomId = '!team:example.test';
+    const defaultFetch = vi.fn(function (this: unknown): Promise<Response> {
+      expect(this).toBe(globalThis);
+      return Promise.resolve(
+        jsonResponse({
+          roomId,
+          roomCalendar: {
+            calendarId,
+            canReadEvents: true,
+            canWriteEvents: true,
+            canManageReminders: false,
+          },
+        }),
+      );
+    }) as typeof fetch;
+    vi.stubGlobal('fetch', defaultFetch);
+
+    try {
+      const repository = new GatewayCalendarRepository({
+        baseUrl: 'https://widget-api.example.test',
+        roomId,
+        getAuthorizationHeader: async () => 'MX-Identity delegated',
+      });
+
+      await expect(repository.getRoomCalendarCapabilities()).resolves.toEqual({
+        calendarId,
+        roomId,
+        canReadEvents: true,
+        canWriteEvents: true,
+        canManageReminders: false,
+      });
+      expect(defaultFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+  });
+
   it('uses the server-authorized room ID from the matching context response', async () => {
     const roomId = '!team:example.test';
     const fetchMock = mockFetch(

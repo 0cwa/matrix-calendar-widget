@@ -103,7 +103,7 @@ export class GatewayCalendarRepository
   private readonly fetchImpl: typeof fetch;
 
   constructor(private readonly options: GatewayCalendarRepositoryOptions) {
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   }
 
   async listCalendars(): Promise<Calendar[]> {
