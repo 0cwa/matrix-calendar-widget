@@ -147,7 +147,11 @@ jobs:
       - name: Preflight isolated Node and probe script before package installation
         run: |
           set +e
-          preflight_output="$(sudo -n "$ELEMENT_DESKTOP_NODE_BIN" \
+          preflight_output="$(sudo -n env \
+            ELEMENT_DESKTOP_PROFILE_ROOT="$ELEMENT_DESKTOP_PROFILE_ROOT" \
+            ELEMENT_DESKTOP_STARTUP_SCRIPT_PATH="$ELEMENT_DESKTOP_STARTUP_SCRIPT_PATH" \
+            ELEMENT_DESKTOP_CONFIG_PATH="$ELEMENT_DESKTOP_CONFIG_PATH" \
+            "$ELEMENT_DESKTOP_NODE_BIN" \
             dev/element-desktop-egress-policy.mjs target-uid-preflight \
             "$ELEMENT_DESKTOP_PROBE_UID" "$ELEMENT_DESKTOP_EGRESS_SCRIPT_PATH" 2>/dev/null)"
           preflight_exit=$?
@@ -218,7 +222,9 @@ jobs:
           install_status=$?
           if [[ "$install_status" -eq 0 ]]; then
             policy_status=passed
-            probe_output="$(sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs negative-self-test \
+            probe_output="$(sudo -n env \
+              ELEMENT_DESKTOP_PROFILE_ROOT="$ELEMENT_DESKTOP_PROFILE_ROOT" \
+              "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs negative-self-test \
               "$ELEMENT_DESKTOP_PROBE_UID" "$GITHUB_RUN_ID" "$ELEMENT_DESKTOP_CDP_PORT" "$ELEMENT_DESKTOP_EGRESS_SCRIPT_PATH" \
               2>/dev/null)"
             negative_exit=$?
