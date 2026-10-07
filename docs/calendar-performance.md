@@ -30,13 +30,17 @@ warm-ups, plus measured median and maximum; do not discard or retry slow
 samples.
 
 The cold first widget opening is measured from immediately before activating
-the registered widget through the fully populated List view. The 2,000 ms
-limit includes widget startup, capability approval, OpenID, API transfer and
-decode, projection, and rendering. Record setup/authentication separately, and
-record startup subphases for diagnosis, but do not subtract them from the cold
-total. Then record two List and two Month warm-ups, followed by five measured
-List and five measured Month samples, alternating views in the same session.
-After two explicitly labeled detail warm-ups, measure five event-detail opens.
+the registered widget through automated approvals, selection of the exact
+31-day List range in the real date picker, and the fully populated stable List
+view containing all 250 events. The 2,000 ms limit includes widget startup,
+capability approval, OpenID, range selection, API transfer and decode,
+projection, and rendering. Record every calendar API response exercised by
+this cold operation through full JSON decode and apply the 1,000 ms response
+limit to each one. Record setup/authentication separately, and record startup
+subphases for diagnosis, but do not subtract them from the cold total. Then
+record two List and two Month warm-ups, followed by five measured List and five
+measured Month samples, alternating views in the same session. After two
+explicitly labeled detail warm-ups, measure five event-detail opens.
 
 Use the real date-range picker to set the exact 31 local dates for List. Assert
 the actual request range in memory. Month deliberately requests a wider range:
@@ -44,6 +48,10 @@ the repository adds seven days on either side, while the visible grid uses
 whole weeks. Report the actual List and Month request spans separately and
 count only the 250 seeded events in the chosen month; no seeded event belongs
 to the Month padding days.
+
+Record each sample and its fixed failure observations before asserting its
+status, content count, range, or timing. A failed sample remains in the report;
+no sample may be discarded or retried.
 
 Each measured List response must be HTTP 200 with exactly 250 distinct expected
 events and zero server/projection diagnostics; all 250 rows must appear once
@@ -54,7 +62,8 @@ events. Details timing includes query/rendering. Page errors, missing or
 malformed responses, unexpected ranges, wrong counts, and any over-limit
 sample fail the gate. The acceptance report retains every sample and exact
 runner/client/service versions, with no URLs, query strings, IDs, titles,
-headers, response bodies, ICS, tokens, profiles, screenshots, or traces.
+headers, response bodies, ICS, tokens, profiles, screenshots, traces, raw logs,
+or HAR files.
 
 The complete execution sequence, timing boundaries, evidence schema, and
 cleanup requirements are fixed in the approved private contract before the
