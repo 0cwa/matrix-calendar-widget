@@ -1049,6 +1049,7 @@ function restoreRadicaleArchive(diagnostics) {
 function restorePostgresDump(diagnostics) {
   diagnostics.restoreStep = 'postgres-restore';
   const dump = readFileSync(postgresDumpPath);
+  // Omit the archive filename operand so pg_restore reads the supplied stdin.
   requireSuccess(
     compose(
       [
@@ -1065,7 +1066,6 @@ function restorePostgresDump(diagnostics) {
         'matrix_calendar_app',
         '--dbname',
         'matrix_calendar_restored',
-        '-',
       ],
       { input: dump, timeout: 120_000 },
     ),
