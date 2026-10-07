@@ -141,38 +141,10 @@ function completeReport() {
         hiddenAncestor: false,
         centerHit: 'toolbar',
         occluder: {
-          available: true,
-          path: [
-            {
-              tag: 'button',
-              classes: ['mx_AppTileMenuBar_widgets_button'],
-              root: 'none',
-            },
-            {
-              tag: 'span',
-              classes: ['mx_AppTileMenuBar_widgets'],
-              root: 'none',
-            },
-            {
-              tag: 'div',
-              classes: ['mx_AppTileMenuBar'],
-              root: 'none',
-            },
-            {
-              tag: 'div',
-              classes: ['mx_AppTileFullWidth', 'mx_AppTile'],
-              root: 'none',
-            },
-            {
-              tag: 'div',
-              classes: ['mx_AppsDrawer'],
-              root: 'none',
-            },
-            { tag: 'body', classes: [], root: 'document-body' },
-            { tag: 'html', classes: [], root: 'document-element' },
-          ],
-          pathTruncated: false,
-          classOverflow: false,
+          available: false,
+          path: null,
+          pathTruncated: null,
+          classOverflow: null,
         },
         failureClass: 'none',
       },
@@ -229,6 +201,25 @@ function completeReport() {
   };
 }
 
+function failedHoverReport() {
+  const report = completeReport();
+  report.coldList.hostHeaderHoverCompleted = false;
+  report.coldList.hostHoverActionability.failureClass = 'intercepted';
+  report.coldList.hostHoverActionability.occluder = {
+    available: true,
+    path: [
+      { tag: 'iframe', classes: [], root: 'none' },
+      { tag: 'div', classes: [], root: 'persisted-element-instance' },
+      { tag: 'div', classes: [], root: 'persisted-element-container' },
+      { tag: 'body', classes: [], root: 'document-body' },
+      { tag: 'html', classes: [], root: 'document-element' },
+    ],
+    pathTruncated: false,
+    classOverflow: false,
+  };
+  return report;
+}
+
 function stage(status, performanceReport, failureCode) {
   return {
     phase: 'performance-pilot',
@@ -258,7 +249,7 @@ test('sanitizes complete performance samples and bounded decoded API timings', (
   );
   assert.match(
     summary,
-    /host_hover_observation_available=true host_hover_toolbar_connected=true host_hover_toolbar_visible=true host_hover_toolbar_positive_box=true host_hover_toolbar_viewport_intersection=true host_hover_toolbar_hidden_ancestor=false host_hover_center_hit=toolbar host_hover_occluder_available=true host_hover_occluder_path_node_count=7 host_hover_occluder_class_count=6 host_hover_occluder_path_truncated=false host_hover_occluder_class_overflow=false host_hover_occluder_path=button\[mx_AppTileMenuBar_widgets_button\]@none>.*div\[mx_AppsDrawer\]@none>body\[\]@document-body>html\[\]@document-element host_hover_failure_class=none/u,
+    /host_hover_observation_available=true host_hover_toolbar_connected=true host_hover_toolbar_visible=true host_hover_toolbar_positive_box=true host_hover_toolbar_viewport_intersection=true host_hover_toolbar_hidden_ancestor=false host_hover_center_hit=toolbar host_hover_occluder_available=false host_hover_occluder_path_node_count=unavailable host_hover_occluder_class_count=unavailable host_hover_occluder_path_truncated=unavailable host_hover_occluder_class_overflow=unavailable host_hover_occluder_path=unavailable host_hover_failure_class=none/u,
   );
   assert.match(summary, /maximized_iframe_width=1280 maximized_layout=true/u);
   assert.match(
@@ -351,18 +342,11 @@ test('requires visible unobscured hover evidence for pass and preserves fixed fa
     /invalid element acceptance summary/u,
   );
 
-  const hoverFailure = completeReport();
+  const hoverFailure = failedHoverReport();
   hoverFailure.coldList.hostHeaderHoverCompleted = false;
   hoverFailure.coldList.hostHoverActionability.failureClass = 'intercepted';
   hoverFailure.coldList.hostHoverActionability.centerHit =
     'persisted-widget-iframe';
-  hoverFailure.coldList.hostHoverActionability.occluder.path = [
-    { tag: 'iframe', classes: [], root: 'none' },
-    { tag: 'div', classes: [], root: 'persisted-element-instance' },
-    { tag: 'div', classes: [], root: 'persisted-element-container' },
-    { tag: 'body', classes: [], root: 'document-body' },
-    { tag: 'html', classes: [], root: 'document-element' },
-  ];
   const summary = sanitizeElementAcceptance(
     JSON.stringify(
       stage('failed', hoverFailure, 'performance-host-layout-failed'),
@@ -376,6 +360,18 @@ test('requires visible unobscured hover evidence for pass and preserves fixed fa
     /host_hover_occluder_path=iframe\[\]@none>div\[\]@persisted-element-instance>div\[\]@persisted-element-container/u,
   );
   assert.doesNotMatch(summary, /pointer|hidden-title|secret-value/u);
+
+  const successfulHoverWithPath = completeReport();
+  successfulHoverWithPath.coldList.hostHoverActionability.occluder =
+    failedHoverReport().coldList.hostHoverActionability.occluder;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(stage('passed', successfulHoverWithPath)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
 
   const unknownHit = completeReport();
   unknownHit.coldList.hostHeaderHoverCompleted = false;
@@ -392,9 +388,7 @@ test('requires visible unobscured hover evidence for pass and preserves fixed fa
     /invalid element acceptance summary/u,
   );
 
-  const unknownClass = completeReport();
-  unknownClass.coldList.hostHeaderHoverCompleted = false;
-  unknownClass.coldList.hostHoverActionability.failureClass = 'intercepted';
+  const unknownClass = failedHoverReport();
   unknownClass.coldList.hostHoverActionability.occluder.path[0].classes.push(
     'private-class',
   );
@@ -409,9 +403,7 @@ test('requires visible unobscured hover evidence for pass and preserves fixed fa
     /invalid element acceptance summary/u,
   );
 
-  const unboundedPath = completeReport();
-  unboundedPath.coldList.hostHeaderHoverCompleted = false;
-  unboundedPath.coldList.hostHoverActionability.failureClass = 'intercepted';
+  const unboundedPath = failedHoverReport();
   unboundedPath.coldList.hostHoverActionability.occluder.path = Array.from(
     { length: 17 },
     () => ({ tag: 'div', classes: [], root: 'none' }),
@@ -428,10 +420,7 @@ test('requires visible unobscured hover evidence for pass and preserves fixed fa
     /invalid element acceptance summary/u,
   );
 
-  const falseClassOverflow = completeReport();
-  falseClassOverflow.coldList.hostHeaderHoverCompleted = false;
-  falseClassOverflow.coldList.hostHoverActionability.failureClass =
-    'intercepted';
+  const falseClassOverflow = failedHoverReport();
   falseClassOverflow.coldList.hostHoverActionability.occluder.classOverflow = true;
   assert.throws(
     () =>
@@ -444,10 +433,8 @@ test('requires visible unobscured hover evidence for pass and preserves fixed fa
     /invalid element acceptance summary/u,
   );
 
-  const mismatchedRoot = completeReport();
-  mismatchedRoot.coldList.hostHeaderHoverCompleted = false;
-  mismatchedRoot.coldList.hostHoverActionability.failureClass = 'intercepted';
-  mismatchedRoot.coldList.hostHoverActionability.occluder.path[5].tag = 'span';
+  const mismatchedRoot = failedHoverReport();
+  mismatchedRoot.coldList.hostHoverActionability.occluder.path[1].tag = 'span';
   assert.throws(
     () =>
       sanitizeElementAcceptance(

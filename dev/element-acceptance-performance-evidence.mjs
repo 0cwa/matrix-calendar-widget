@@ -323,7 +323,8 @@ function validHostHoverActionability(value, attempted, completed) {
           value.hiddenAncestor,
         ].every((item) => typeof item === 'boolean') &&
         HOST_HOVER_CENTER_HITS.has(value.centerHit) &&
-        validHostHoverOccluder(value.occluder, value.centerHit)
+        validHostHoverOccluder(value.occluder, value.centerHit) &&
+        (!value.occluder.available || (attempted && !completed))
       : [
           value.connected,
           value.visible,
@@ -360,8 +361,7 @@ function validHostHoverOccluder(value, centerHit) {
     return (
       value.path === null &&
       value.pathTruncated === null &&
-      value.classOverflow === null &&
-      centerHit === null
+      value.classOverflow === null
     );
   }
   if (

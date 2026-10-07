@@ -2086,6 +2086,12 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
     report.coldList.hostHeaderHoverAttempted =
       report.coldList.hostTileCountBeforeHover === 1 &&
       report.coldList.hostToolbarCountBeforeHover === 1;
+    let occluderOnHoverFailure: PerformanceHoverOccluderObservation = {
+      available: false,
+      path: null,
+      pathTruncated: null,
+      classOverflow: null,
+    };
     if (report.coldList.hostHeaderHoverAttempted) {
       try {
         const observation = await appTileToolbar.first().evaluate((toolbar) => {
@@ -2248,9 +2254,15 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
           viewportIntersection: observation.viewportIntersection,
           hiddenAncestor: observation.hiddenAncestor,
           centerHit: observation.centerHit,
-          occluder: observation.occluder,
+          occluder: {
+            available: false,
+            path: null,
+            pathTruncated: null,
+            classOverflow: null,
+          },
           failureClass: 'not-attempted',
         };
+        occluderOnHoverFailure = observation.occluder;
       } catch {
         report.coldList.hostHoverActionability = {
           available: false,
@@ -2280,6 +2292,12 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
         report.coldList.hostHoverActionability.failureClass =
           classifyPerformanceHoverFailure(error);
       }
+    }
+    if (
+      report.coldList.hostHeaderHoverAttempted &&
+      !report.coldList.hostHeaderHoverCompleted
+    ) {
+      report.coldList.hostHoverActionability.occluder = occluderOnHoverFailure;
     }
     await maximizeControl
       .waitFor({ state: 'visible', timeout: 5_000 })
