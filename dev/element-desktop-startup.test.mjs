@@ -7,6 +7,7 @@ import {
   createKeyringUnlockInput,
   createSafeStorageLogCollector,
   parseProcCommandLine,
+  readCappedDirectoryEntries,
   readKeyringControl,
   SANDBOX_REASONS,
   selectUidLifecycleProcessEntries,
@@ -333,6 +334,49 @@ test('UID lifecycle process cap marks app PID substitution and overflow honestly
     selectUidLifecycleProcessEntries(['10', '11', '99'], 99, 3),
     { entries: ['10', '11', '99'], overflow: false },
   );
+});
+
+test('capped directory iteration reads only through the first excess match and closes', () => {
+  const names = ['metadata', '10', '11', '12', '13'];
+  let readCalls = 0;
+  let closed = false;
+  const directory = {
+    readSync() {
+      const name = names[readCalls];
+      readCalls += 1;
+      return name === undefined ? null : { name };
+    },
+    closeSync() {
+      closed = true;
+    },
+  };
+
+  const result = readCappedDirectoryEntries(directory, 2, (entry) =>
+    /^[0-9]+$/u.test(entry.name),
+  );
+
+  assert.deepEqual(
+    result.entries.map((entry) => entry.name),
+    ['10', '11'],
+  );
+  assert.equal(result.overflow, true);
+  assert.equal(readCalls, 4);
+  assert.equal(closed, true);
+});
+
+test('capped directory iteration closes its handle when reading fails', () => {
+  let closed = false;
+  const directory = {
+    readSync() {
+      throw new Error('directory read failed');
+    },
+    closeSync() {
+      closed = true;
+    },
+  };
+
+  assert.throws(() => readCappedDirectoryEntries(directory, 2));
+  assert.equal(closed, true);
 });
 
 test('UID lifecycle diagnostics compare app ancestry with process-group coverage', () => {

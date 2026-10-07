@@ -527,6 +527,63 @@ test('UID lifecycle sanitizer preserves bounded ownership evidence and unavailab
   assert.equal(JSON.stringify(observed).includes('private-canary'), false);
 });
 
+test('UID lifecycle sanitizer rejects contradictory process and renderer counts', () => {
+  const unavailable = emptyUidLifecycleObservation('unavailable');
+  const empty = observedEmptyUidLifecycleObservation();
+
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation({ ...empty, nonZombieProcessCount: 1 }),
+    unavailable,
+  );
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation({
+      ...empty,
+      state: 'partial',
+      overflow: true,
+      processClassCounts: { ...empty.processClassCounts, other: 1 },
+    }),
+    unavailable,
+  );
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation({
+      ...empty,
+      uidProcessCount: 1,
+      nonZombieProcessCount: 0,
+      zombieCount: 2,
+      processClassCounts: { ...empty.processClassCounts, other: 1 },
+    }),
+    unavailable,
+  );
+
+  const observed = passingUidLifecycleObservation();
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation({
+      ...observed,
+      processClassCounts: {
+        ...observed.processClassCounts,
+        application: 0,
+      },
+    }),
+    unavailable,
+  );
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation({
+      ...observed,
+      rendererOwnership: {
+        ...observed.rendererOwnership,
+        rendererCount: 0,
+        appDescendantCount: 0,
+        appProcessGroupCount: 0,
+        appDescendantAndProcessGroupCount: 0,
+        appDescendantOnlyCount: 0,
+        appProcessGroupOnlyCount: 0,
+        noCurrentLinkCount: 0,
+      },
+    }),
+    unavailable,
+  );
+});
+
 test('TCP socket diagnostics preserve only fixed roles, categories, and states', () => {
   const observed = passingUidTcpSocketObservation();
   assert.deepEqual(

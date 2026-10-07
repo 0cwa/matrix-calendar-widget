@@ -5,6 +5,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  opendirSync,
   openSync,
   readFileSync,
   readSync,
@@ -1206,24 +1207,21 @@ function readUidTcpSocketObservation(
   }
 
   const ownersByInode = new Map();
-  for (const group of namespaceGroups.values()) {
+  processScan: for (const group of namespaceGroups.values()) {
     for (const item of group.processes) {
-      let fdNames;
+      let fdEntries;
       try {
-        fdNames = readdirSync(`/proc/${item.pid}/fd`).filter((name) =>
-          /^\d+$/u.test(name),
+        fdEntries = readCappedDirectoryEntries(
+          opendirSync(`/proc/${item.pid}/fd`),
+          MAX_UID_SOCKET_FD_REFERENCES - fdReferenceCount,
+          (entry) => /^\d+$/u.test(entry.name),
         );
       } catch {
         if (existsSync(`/proc/${item.pid}`)) complete = false;
         continue;
       }
-      fdNames.sort((left, right) => Number(left) - Number(right));
-      for (const name of fdNames) {
-        if (fdReferenceCount >= MAX_UID_SOCKET_FD_REFERENCES) {
-          overflow = true;
-          complete = false;
-          break;
-        }
+      for (const entry of fdEntries.entries) {
+        const name = entry.name;
         fdReferenceCount += 1;
         let target;
         try {
@@ -1250,10 +1248,10 @@ function readUidTcpSocketObservation(
         owners.set(item.pid, role);
         if (role === 'unknown') complete = false;
       }
-      if (fdReferenceCount >= MAX_UID_SOCKET_FD_REFERENCES) {
+      if (fdEntries.overflow) {
         overflow = true;
         complete = false;
-        break;
+        break processScan;
       }
     }
   }
@@ -1388,6 +1386,30 @@ export function selectUidLifecycleProcessEntries(
   return { entries: selected, overflow };
 }
 
+export function readCappedDirectoryEntries(
+  directory,
+  maximum,
+  includeEntry = () => true,
+) {
+  const entries = [];
+  let overflow = false;
+  try {
+    while (true) {
+      const entry = directory.readSync();
+      if (entry === null) break;
+      if (!includeEntry(entry)) continue;
+      if (entries.length === maximum) {
+        overflow = true;
+        break;
+      }
+      entries.push(entry);
+    }
+  } finally {
+    directory.closeSync();
+  }
+  return { entries, overflow };
+}
+
 function readUidLifecycleObservation(
   uid,
   applicationPid = null,
@@ -1414,17 +1436,22 @@ function readUidLifecycleObservation(
     return emptyObservation('unavailable');
   }
 
-  let entries;
+  let directoryEntries;
   try {
-    entries = readdirSync('/proc').filter((name) => /^[0-9]+$/u.test(name));
+    directoryEntries = readCappedDirectoryEntries(
+      opendirSync('/proc'),
+      MAX_UID_LIFECYCLE_PROCESSES,
+      (entry) => /^[0-9]+$/u.test(entry.name),
+    );
   } catch {
     return emptyObservation('unavailable');
   }
   const selectedEntries = selectUidLifecycleProcessEntries(
-    entries,
+    directoryEntries.entries.map((entry) => entry.name),
     applicationPid,
   );
-  const { overflow, entries: scanEntries } = selectedEntries;
+  const overflow = directoryEntries.overflow || selectedEntries.overflow;
+  const scanEntries = selectedEntries.entries;
 
   let complete = true;
   const processes = [];

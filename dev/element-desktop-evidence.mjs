@@ -537,6 +537,29 @@ function validateUidLifecycleObservation(value) {
     return false;
   }
 
+  const classCountTotal = UID_LIFECYCLE_PROCESS_CLASSES.reduce(
+    (total, name) => total + value.processClassCounts[name],
+    0,
+  );
+  if (
+    value.nonZombieProcessCount > value.uidProcessCount ||
+    value.zombieCount > value.uidProcessCount ||
+    value.unreadableProcessCount > value.uidProcessCount ||
+    UID_LIFECYCLE_PROCESS_CLASSES.some(
+      (name) => value.processClassCounts[name] > value.uidProcessCount,
+    ) ||
+    (!value.overflow &&
+      (value.nonZombieProcessCount + value.zombieCount >
+        value.uidProcessCount ||
+        classCountTotal !== value.uidProcessCount)) ||
+    (value.state === 'observed' &&
+      (value.overflow ||
+        value.nonZombieProcessCount + value.zombieCount !==
+          value.uidProcessCount))
+  ) {
+    return false;
+  }
+
   if (ownership.appIdentityState === 'not_observed') {
     return (
       ownership.state === 'not_observed' &&
@@ -583,7 +606,7 @@ function validateUidLifecycleObservation(value) {
     ownership.state !== value.state ||
     ownershipCounts.some((name) => !diagnosticCount(ownership[name])) ||
     !['observed', 'partial'].includes(ownership.securityCoverageState) ||
-    ownership.rendererCount > value.processClassCounts.renderer ||
+    ownership.rendererCount !== value.processClassCounts.renderer ||
     ownership.appDescendantCount > ownership.rendererCount ||
     ownership.appProcessGroupCount > ownership.rendererCount ||
     ownership.appDescendantAndProcessGroupCount >
