@@ -19,6 +19,8 @@ import {
   EGRESS_DROP_COUNTER_CLASSES,
   negativeProbePassed,
   parseDropCounterDetails,
+  parsePolicyProfileArguments,
+  policyAllowedLoopbackPorts,
   policySpec,
   probeFromSpawn,
   RUNTIME_FACTS_SOURCE,
@@ -125,6 +127,84 @@ test('desktop egress permits only the fixture homeserver and loopback CDP ports'
       family.chainRules.slice(2).every((rule) => rule.at(-1) === 'DROP'),
     );
   }
+});
+
+test('journey profile adds only its fixed loopback service ports', () => {
+  assert.deepEqual(policyAllowedLoopbackPorts(9_223), [8_008, 9_223]);
+  assert.deepEqual(
+    policyAllowedLoopbackPorts(9_223, true),
+    [8_008, 3_000, 8_080, 9_223],
+  );
+
+  const defaultFamilies = policySpec(42_420, '7315', 9_223);
+  const journeyFamilies = policySpec(42_420, '7315', 9_223, true);
+  for (const [index, family] of journeyFamilies.entries()) {
+    const expectedJourneyRule = [...defaultFamilies[index].chainRules[1]];
+    expectedJourneyRule[9] = '8008,3000,8080,9223';
+    assert.deepEqual(family.chainRules.slice(0, 2), [
+      defaultFamilies[index].chainRules[0],
+      expectedJourneyRule,
+    ]);
+    assert.deepEqual(
+      family.chainRules.slice(2),
+      EGRESS_DROP_COUNTER_CLASSES.map(({ rule }) => rule),
+    );
+  }
+  assert.deepEqual(
+    policySpec(42_420, '7315', 9_223)[0].chainRules[1].slice(9, 10),
+    ['8008,9223'],
+  );
+  assert.throws(
+    () => policySpec(42_420, '7315', 3_000, true),
+    /invalid policy input/u,
+  );
+  assert.throws(
+    () => policySpec(42_420, '7315', 8_080, true),
+    /invalid policy input/u,
+  );
+});
+
+test('journey profile is accepted only as the final flag on policy operations', () => {
+  const operationArguments = [
+    ['install', ['42_420', '7315', '9_223']],
+    ['negative-self-test', ['42_420', '7315', '9_223', '/safe/probe.mjs']],
+    ['zero-counters', ['42_420', '7315', '9_223']],
+    ['counters', ['42_420', '7315', '9_223']],
+  ];
+
+  for (const [operation, values] of operationArguments) {
+    assert.deepEqual(parsePolicyProfileArguments(operation, values), {
+      values,
+      journeyMode: false,
+    });
+    assert.deepEqual(
+      parsePolicyProfileArguments(operation, [...values, '--journey']),
+      { values, journeyMode: true },
+    );
+    assert.throws(
+      () =>
+        parsePolicyProfileArguments(operation, [
+          ...values.slice(0, -1),
+          '--journey',
+          values.at(-1),
+        ]),
+      /invalid policy input/u,
+    );
+    assert.throws(
+      () =>
+        parsePolicyProfileArguments(operation, [
+          ...values,
+          '--journey',
+          '--journey',
+        ]),
+      /invalid policy input/u,
+    );
+  }
+  assert.throws(
+    () =>
+      parsePolicyProfileArguments('remove', ['42_420', '7315', '--journey']),
+    /invalid policy input/u,
+  );
 });
 
 test('policy verifier requires the exact first OUTPUT hook and ordered chain rules', () => {

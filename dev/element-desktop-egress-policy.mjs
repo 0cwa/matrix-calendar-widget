@@ -4,7 +4,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const LOCAL_HOMESERVER_PORT = 8008;
+const JOURNEY_SERVICE_PORTS = Object.freeze([3_000, 8_080]);
 const MAX_COUNT = 100_000;
+const PROFILED_POLICY_OPERATIONS = new Map([
+  ['install', 3],
+  ['negative-self-test', 4],
+  ['zero-counters', 3],
+  ['counters', 3],
+]);
 const POLICY_VERIFICATION_STATES = Object.freeze([
   'verified',
   'mismatch',
@@ -63,12 +70,44 @@ function requireRunId(value) {
   return String(value);
 }
 
-export function policySpec(uidValue, runIdValue, cdpPortValue) {
+export function policyAllowedLoopbackPorts(cdpPortValue, journeyMode = false) {
+  if (typeof journeyMode !== 'boolean') {
+    throw new Error('invalid policy input');
+  }
+  const cdpPort = requireDecimal(cdpPortValue, 1_024, 65_535);
+  const fixedPorts = journeyMode
+    ? [LOCAL_HOMESERVER_PORT, ...JOURNEY_SERVICE_PORTS]
+    : [LOCAL_HOMESERVER_PORT];
+  if (fixedPorts.includes(cdpPort)) throw new Error('invalid policy input');
+  return [...fixedPorts, cdpPort];
+}
+
+export function parsePolicyProfileArguments(operation, values) {
+  const requiredCount = PROFILED_POLICY_OPERATIONS.get(operation);
+  if (requiredCount === undefined || !Array.isArray(values)) {
+    throw new Error('invalid policy input');
+  }
+  const journeyMode =
+    values.length === requiredCount + 1 &&
+    values[requiredCount] === '--journey';
+  if (values.length !== requiredCount && !journeyMode) {
+    throw new Error('invalid policy input');
+  }
+  return {
+    values: values.slice(0, requiredCount),
+    journeyMode,
+  };
+}
+
+export function policySpec(
+  uidValue,
+  runIdValue,
+  cdpPortValue,
+  journeyMode = false,
+) {
   const uid = requireDecimal(uidValue, 1, 65_535);
   const runId = requireRunId(runIdValue);
-  const cdpPort = requireDecimal(cdpPortValue, 1_024, 65_535);
-  if (cdpPort === LOCAL_HOMESERVER_PORT)
-    throw new Error('invalid policy input');
+  const allowedPorts = policyAllowedLoopbackPorts(cdpPortValue, journeyMode);
 
   return FAMILIES.map(({ name, tool, suffix, destination }) => {
     const chain = `MCWD_${runId}_${suffix}`;
@@ -94,7 +133,7 @@ export function policySpec(uidValue, runIdValue, cdpPortValue) {
         '-m',
         'multiport',
         '--dports',
-        `${LOCAL_HOMESERVER_PORT},${cdpPort}`,
+        allowedPorts.join(','),
         '-m',
         'conntrack',
         '--ctstate',
@@ -224,8 +263,13 @@ function verifyPolicyFamily(family) {
   }
 }
 
-export function verifyPolicy(uidValue, runIdValue, cdpPortValue) {
-  const families = policySpec(uidValue, runIdValue, cdpPortValue);
+export function verifyPolicy(
+  uidValue,
+  runIdValue,
+  cdpPortValue,
+  journeyMode = false,
+) {
+  const families = policySpec(uidValue, runIdValue, cdpPortValue, journeyMode);
   if (process.geteuid?.() !== 0) throw new Error('egress policy requires root');
   const states = families.map(verifyPolicyFamily);
   if (states.includes('mismatch')) return 'mismatch';
@@ -249,8 +293,13 @@ export function removePolicy(uidValue, runIdValue) {
   return complete;
 }
 
-export function installPolicy(uidValue, runIdValue, cdpPortValue) {
-  const families = policySpec(uidValue, runIdValue, cdpPortValue);
+export function installPolicy(
+  uidValue,
+  runIdValue,
+  cdpPortValue,
+  journeyMode = false,
+) {
+  const families = policySpec(uidValue, runIdValue, cdpPortValue, journeyMode);
   if (process.geteuid?.() !== 0) throw new Error('egress policy requires root');
   if (families.some(({ tool }) => !commandExists(tool))) {
     throw new Error('egress policy tool unavailable');
@@ -277,7 +326,10 @@ export function installPolicy(uidValue, runIdValue, cdpPortValue) {
       if (activeRules.length !== chainRules.length)
         throw new Error('egress chain incomplete');
     }
-    if (verifyPolicy(uidValue, runIdValue, cdpPortValue) !== 'verified') {
+    if (
+      verifyPolicy(uidValue, runIdValue, cdpPortValue, journeyMode) !==
+      'verified'
+    ) {
       throw new Error('egress policy verification failed');
     }
   } catch {
@@ -404,9 +456,16 @@ function readBlockedCounterDetails(family) {
   return parseDropCounterDetails(output, family.chain);
 }
 
-export function resetCounters(uidValue, runIdValue, cdpPortValue) {
+export function resetCounters(
+  uidValue,
+  runIdValue,
+  cdpPortValue,
+  journeyMode = false,
+) {
   if (process.geteuid?.() !== 0) throw new Error('egress policy requires root');
-  if (verifyPolicy(uidValue, runIdValue, cdpPortValue) !== 'verified') {
+  if (
+    verifyPolicy(uidValue, runIdValue, cdpPortValue, journeyMode) !== 'verified'
+  ) {
     throw new Error('egress policy verification failed');
   }
   for (const family of runIdChains(runIdValue)) {
@@ -414,7 +473,8 @@ export function resetCounters(uidValue, runIdValue, cdpPortValue) {
   }
   const counts = readBlockedCounters(runIdValue);
   if (
-    verifyPolicy(uidValue, runIdValue, cdpPortValue) !== 'verified' ||
+    verifyPolicy(uidValue, runIdValue, cdpPortValue, journeyMode) !==
+      'verified' ||
     counts.ipv4 !== 0 ||
     counts.ipv6 !== 0 ||
     counts.overflow
@@ -655,7 +715,8 @@ function unrunChildObservation() {
   };
 }
 
-async function localListener(host, excludedPort) {
+async function localListener(host, excludedPorts = [LOCAL_HOMESERVER_PORT]) {
+  const excludedPortSet = new Set(excludedPorts);
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const server = createServer();
     let accepts = 0;
@@ -675,10 +736,7 @@ async function localListener(host, excludedPort) {
       await new Promise((resolve) => server.close(resolve));
       continue;
     }
-    if (
-      address.port === LOCAL_HOMESERVER_PORT ||
-      address.port === excludedPort
-    ) {
+    if (excludedPortSet.has(address.port)) {
       await new Promise((resolve) => server.close(resolve));
       continue;
     }
@@ -1019,9 +1077,10 @@ export async function negativeLocalEgressCheck(
   runIdValue,
   cdpPortValue,
   stagedScriptPath = fileURLToPath(import.meta.url),
+  journeyMode = false,
 ) {
   const uid = requireDecimal(uidValue, 1, 65_535);
-  const cdpPort = requireDecimal(cdpPortValue, 1_024, 65_535);
+  const allowedPorts = policyAllowedLoopbackPorts(cdpPortValue, journeyMode);
   requireRunId(runIdValue);
   const diagnostic = {};
   for (const family of FAMILIES) {
@@ -1035,7 +1094,7 @@ export async function negativeLocalEgressCheck(
     };
     let listener;
     try {
-      listener = await localListener(host, cdpPort);
+      listener = await localListener(host, allowedPorts);
       value.listenerBound = true;
       value.listenerAcceptedCount = 0;
     } catch {
@@ -1069,9 +1128,12 @@ export async function negativeLocalEgressCheck(
         (entry) => entry.name === family.name,
       );
       if (!counterFamily) throw new Error('counter family unavailable');
-      const policyFamily = policySpec(uid, runIdValue, cdpPort).find(
-        (entry) => entry.name === family.name,
-      );
+      const policyFamily = policySpec(
+        uid,
+        runIdValue,
+        cdpPortValue,
+        journeyMode,
+      ).find((entry) => entry.name === family.name);
       if (!policyFamily) throw new Error('policy family unavailable');
       value.policyState = verifyPolicyFamily(policyFamily);
       value.dropCount = readBlockedCounter(counterFamily);
@@ -1111,8 +1173,18 @@ async function connectOnly(expectedUidValue, host, port) {
   process.exitCode = status ?? 6;
 }
 
-function printCounters(uidValue, runIdValue, cdpPortValue) {
-  const policyState = verifyPolicy(uidValue, runIdValue, cdpPortValue);
+function printCounters(
+  uidValue,
+  runIdValue,
+  cdpPortValue,
+  journeyMode = false,
+) {
+  const policyState = verifyPolicy(
+    uidValue,
+    runIdValue,
+    cdpPortValue,
+    journeyMode,
+  );
   try {
     const counts = readBlockedCounters(runIdValue);
     process.stdout.write(
@@ -1135,16 +1207,19 @@ function printCounters(uidValue, runIdValue, cdpPortValue) {
 
 async function main(args) {
   const [operation, ...values] = args;
-  if (operation === 'install' && values.length === 3) {
-    installPolicy(values[0], values[1], values[2]);
+  if (operation === 'install') {
+    const profile = parsePolicyProfileArguments(operation, values);
+    installPolicy(...profile.values, profile.journeyMode);
     return;
   }
-  if (operation === 'negative-self-test' && values.length === 4) {
+  if (operation === 'negative-self-test') {
+    const profile = parsePolicyProfileArguments(operation, values);
     const diagnostic = await negativeLocalEgressCheck(
-      values[0],
-      values[1],
-      values[2],
-      requireStagedProbeScript(values[3]),
+      profile.values[0],
+      profile.values[1],
+      profile.values[2],
+      requireStagedProbeScript(profile.values[3]),
+      profile.journeyMode,
     );
     process.stdout.write(`${JSON.stringify(diagnostic)}\n`);
     if (!diagnostic.passed) process.exitCode = 2;
@@ -1169,12 +1244,14 @@ async function main(args) {
     if (record.status !== 'passed') process.exitCode = 2;
     return;
   }
-  if (operation === 'zero-counters' && values.length === 3) {
-    resetCounters(values[0], values[1], values[2]);
+  if (operation === 'zero-counters') {
+    const profile = parsePolicyProfileArguments(operation, values);
+    resetCounters(...profile.values, profile.journeyMode);
     return;
   }
-  if (operation === 'counters' && values.length === 3) {
-    printCounters(values[0], values[1], values[2]);
+  if (operation === 'counters') {
+    const profile = parsePolicyProfileArguments(operation, values);
+    printCounters(...profile.values, profile.journeyMode);
     return;
   }
   if (operation === 'remove' && values.length === 2) {
