@@ -17,6 +17,15 @@ const { ICalendarEventCodec } = requireServer(
 const { projectCalendarEventOccurrences } = requireServer(
   '@matrix-calendar-widget/calendar',
 );
+const { getVTimezoneBlock } = requireServer(
+  '@matrix-calendar-widget/ical-timezones',
+);
+const ICAL = requireServer('ical.js');
+const { hasUnsupportedTimezoneRules } = requireServer(
+  './lib/src/caldav/ICalendarTimezoneProjectionSafety.js',
+);
+
+const TIMEZONE_AUDIT_UID = 'element-acceptance-timezone-audit';
 
 const PROJECTION_DIAGNOSTIC_REASONS = [
   'invalid-recurrence',
@@ -40,7 +49,118 @@ function unavailableProjection() {
     includesCreatedEvent: null,
     diagnosticCode: 'inconclusive',
     diagnosticCounts: emptyProjectionDiagnosticCounts(),
+    timezoneAudit: unavailableTimezoneAudit(),
   };
+}
+
+function unavailableTimezoneAudit() {
+  return {
+    completed: false,
+    parsedEventUnsupportedTimezone: null,
+    bundledZoneId: null,
+    embeddedDefinitionCount: 0,
+    canonicalEmbeddedDefinitionMatches: null,
+    classification: 'inconclusive',
+  };
+}
+
+function inspectCreatedEventTimezone(resource, event) {
+  try {
+    const timing = event.timing;
+    const startZone =
+      timing.type === 'timed' && timing.start.type === 'zoned'
+        ? timing.start.timezone
+        : undefined;
+    if (!startZone) {
+      const parsedEventUnsupportedTimezone = event.unsupportedTimezone === true;
+      return {
+        completed: true,
+        parsedEventUnsupportedTimezone,
+        bundledZoneId: null,
+        embeddedDefinitionCount: 0,
+        canonicalEmbeddedDefinitionMatches: null,
+        classification: parsedEventUnsupportedTimezone
+          ? 'other-unsupported-timezone'
+          : 'no-zoned-start',
+      };
+    }
+
+    const calendar = ICAL.Component.fromString(resource.icalendar);
+    const bundledZoneId = Boolean(getVTimezoneBlock(startZone));
+    const embeddedDefinitionCount = Math.min(
+      calendar
+        .getAllSubcomponents('vtimezone')
+        .filter(
+          (definition) =>
+            definition.getFirstPropertyValue('tzid') === startZone,
+        ).length,
+      2,
+    );
+    const parsedEventUnsupportedTimezone = event.unsupportedTimezone === true;
+    const matchingDefinitions = calendar
+      .getAllSubcomponents('vtimezone')
+      .filter(
+        (definition) => definition.getFirstPropertyValue('tzid') === startZone,
+      );
+    const canonicalEmbeddedDefinitionMatches =
+      bundledZoneId && embeddedDefinitionCount === 1
+        ? matchesBundledDefinition(matchingDefinitions[0], startZone)
+        : null;
+    if (
+      (!bundledZoneId ||
+        embeddedDefinitionCount > 1 ||
+        canonicalEmbeddedDefinitionMatches === false) &&
+      !parsedEventUnsupportedTimezone
+    ) {
+      return unavailableTimezoneAudit();
+    }
+    let classification;
+    if (!bundledZoneId) {
+      classification = 'unsupported-zone-id';
+    } else if (embeddedDefinitionCount > 1) {
+      classification = 'duplicate-definitions';
+    } else if (canonicalEmbeddedDefinitionMatches === false) {
+      classification = 'embedded-definition-mismatch';
+    } else if (parsedEventUnsupportedTimezone) {
+      classification = 'other-unsupported-timezone';
+    } else if (embeddedDefinitionCount === 0) {
+      classification = 'no-embedded-definition';
+    } else {
+      classification = 'embedded-definition-matches';
+    }
+
+    return {
+      completed: true,
+      parsedEventUnsupportedTimezone,
+      bundledZoneId,
+      embeddedDefinitionCount,
+      canonicalEmbeddedDefinitionMatches,
+      classification,
+    };
+  } catch {
+    return unavailableTimezoneAudit();
+  }
+}
+
+function matchesBundledDefinition(definition, timezoneId) {
+  try {
+    const auditCalendar = ICAL.Component.fromString(
+      [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Matrix Calendar Widget//Timezone Audit//EN',
+        definition.toString(),
+        'BEGIN:VEVENT',
+        `UID:${TIMEZONE_AUDIT_UID}`,
+        `DTSTART;TZID=${timezoneId}:20260101T120000`,
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n'),
+    );
+    return !hasUnsupportedTimezoneRules(auditCalendar, TIMEZONE_AUDIT_UID);
+  } catch {
+    return false;
+  }
 }
 
 const unavailable = (openIdStatus = null, reportStatus = null) => ({
@@ -167,7 +287,6 @@ async function main() {
     );
     const codec = new ICalendarEventCodec();
     let containsCreatedEvent = false;
-    let createdEvent;
     const parsedResources = [];
     for (const resource of resources) {
       try {
@@ -179,7 +298,6 @@ async function main() {
         parsedResources.push({ resource, parsed: event, event: event.event });
         if (event.event.uid === input.eventUid) {
           containsCreatedEvent = true;
-          createdEvent = event;
         }
       } catch {
         writeResult(unavailable(openIdStatus, reportStatus));
@@ -225,25 +343,23 @@ async function main() {
         2,
       );
     }
+    const created = parsedResources.find(
+      ({ event }) => event.uid === input.eventUid,
+    );
     let diagnosticCode = 'none';
     let includesCreatedEvent = false;
-    if (createdEvent) {
-      const created = parsedResources.find(
-        ({ event }) => event.uid === input.eventUid,
-      );
-      if (created) {
-        includesCreatedEvent = inRangeResourceIds.has(created.event.id);
-        diagnosticCode = 'none';
-        if (created.event.unsupportedRecurrence === 'range-this-and-future') {
-          diagnosticCode = 'range-this-and-future';
-        } else if (created.parsed.listProjectionDiagnostic !== undefined) {
-          diagnosticCode = 'unsupported-recurrence';
-        } else {
-          diagnosticCode =
-            projection.diagnostics.find(
-              ({ sourceEvent }) => sourceEvent.id === created.event.id,
-            )?.reason ?? 'none';
-        }
+    if (created) {
+      includesCreatedEvent = inRangeResourceIds.has(created.event.id);
+      diagnosticCode = 'none';
+      if (created.event.unsupportedRecurrence === 'range-this-and-future') {
+        diagnosticCode = 'range-this-and-future';
+      } else if (created.parsed.listProjectionDiagnostic !== undefined) {
+        diagnosticCode = 'unsupported-recurrence';
+      } else {
+        diagnosticCode =
+          projection.diagnostics.find(
+            ({ sourceEvent }) => sourceEvent.id === created.event.id,
+          )?.reason ?? 'none';
       }
     }
 
@@ -257,6 +373,9 @@ async function main() {
         includesCreatedEvent,
         diagnosticCode,
         diagnosticCounts,
+        timezoneAudit: created
+          ? inspectCreatedEventTimezone(created.resource, created.event)
+          : unavailableTimezoneAudit(),
       },
     });
   } catch {

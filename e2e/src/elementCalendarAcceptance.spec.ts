@@ -305,12 +305,43 @@ type CalDavProjectionDiagnosticCode =
   | 'none'
   | 'inconclusive';
 
+type TimezoneAuditClassification =
+  | 'unsupported-zone-id'
+  | 'no-embedded-definition'
+  | 'duplicate-definitions'
+  | 'embedded-definition-mismatch'
+  | 'embedded-definition-matches'
+  | 'other-unsupported-timezone'
+  | 'no-zoned-start'
+  | 'inconclusive';
+
+type TimezoneSafetyObservation = {
+  completed: boolean;
+  parsedEventUnsupportedTimezone: boolean | null;
+  bundledZoneId: boolean | null;
+  embeddedDefinitionCount: number;
+  canonicalEmbeddedDefinitionMatches: boolean | null;
+  classification: TimezoneAuditClassification;
+};
+
 type CalDavProjectionObservation = {
   completed: boolean;
   includesCreatedEvent: boolean | null;
   diagnosticCode: CalDavProjectionDiagnosticCode;
   diagnosticCounts: ProjectionDiagnosticCounts;
+  timezoneAudit: TimezoneSafetyObservation;
 };
+
+function unavailableTimezoneAudit(): TimezoneSafetyObservation {
+  return {
+    completed: false,
+    parsedEventUnsupportedTimezone: null,
+    bundledZoneId: null,
+    embeddedDefinitionCount: 0,
+    canonicalEmbeddedDefinitionMatches: null,
+    classification: 'inconclusive',
+  };
+}
 
 function emptyProjectionDiagnosticCounts(): ProjectionDiagnosticCounts {
   return Object.fromEntries(
@@ -1369,6 +1400,7 @@ function observePostCreateVisibility(
       includesCreatedEvent: null,
       diagnosticCode: 'inconclusive',
       diagnosticCounts: emptyProjectionDiagnosticCounts(),
+      timezoneAudit: unavailableTimezoneAudit(),
     },
     roomListResponseHasEventsArray: false,
     roomListResponseEventCount: 0,
@@ -1732,6 +1764,7 @@ function isCalDavProjectionObservation(
     'includesCreatedEvent',
     'diagnosticCode',
     'diagnosticCounts',
+    'timezoneAudit',
   ];
   return (
     Object.keys(value).length === expectedKeys.length &&
@@ -1745,8 +1778,85 @@ function isCalDavProjectionObservation(
         value.diagnosticCode as ProjectionDiagnosticReason,
       )) &&
     isProjectionDiagnosticCounts(value.diagnosticCounts) &&
+    isTimezoneSafetyObservation(value.timezoneAudit) &&
     value.completed === (value.includesCreatedEvent !== null) &&
     (value.completed || value.diagnosticCode === 'inconclusive')
+  );
+}
+
+function isTimezoneSafetyObservation(
+  value: unknown,
+): value is TimezoneSafetyObservation {
+  if (!isRecord(value)) return false;
+  const expectedKeys = [
+    'completed',
+    'parsedEventUnsupportedTimezone',
+    'bundledZoneId',
+    'embeddedDefinitionCount',
+    'canonicalEmbeddedDefinitionMatches',
+    'classification',
+  ];
+  return (
+    Object.keys(value).length === expectedKeys.length &&
+    expectedKeys.every((key) => Object.hasOwn(value, key)) &&
+    typeof value.completed === 'boolean' &&
+    (value.parsedEventUnsupportedTimezone === null ||
+      typeof value.parsedEventUnsupportedTimezone === 'boolean') &&
+    (value.bundledZoneId === null ||
+      typeof value.bundledZoneId === 'boolean') &&
+    typeof value.embeddedDefinitionCount === 'number' &&
+    Number.isInteger(value.embeddedDefinitionCount) &&
+    value.embeddedDefinitionCount >= 0 &&
+    value.embeddedDefinitionCount <= 2 &&
+    (value.canonicalEmbeddedDefinitionMatches === null ||
+      typeof value.canonicalEmbeddedDefinitionMatches === 'boolean') &&
+    (value.classification === 'unsupported-zone-id' ||
+      value.classification === 'no-embedded-definition' ||
+      value.classification === 'duplicate-definitions' ||
+      value.classification === 'embedded-definition-mismatch' ||
+      value.classification === 'embedded-definition-matches' ||
+      value.classification === 'other-unsupported-timezone' ||
+      value.classification === 'no-zoned-start' ||
+      value.classification === 'inconclusive') &&
+    (value.completed ||
+      (value.parsedEventUnsupportedTimezone === null &&
+        value.bundledZoneId === null &&
+        value.embeddedDefinitionCount === 0 &&
+        value.canonicalEmbeddedDefinitionMatches === null &&
+        value.classification === 'inconclusive')) &&
+    (value.canonicalEmbeddedDefinitionMatches === null ||
+      (value.embeddedDefinitionCount === 1 && value.bundledZoneId === true)) &&
+    (value.classification === 'inconclusive'
+      ? !value.completed
+      : value.completed) &&
+    (value.classification !== 'unsupported-zone-id' ||
+      (value.bundledZoneId === false &&
+        value.parsedEventUnsupportedTimezone === true)) &&
+    (value.classification !== 'no-embedded-definition' ||
+      (value.bundledZoneId === true &&
+        value.embeddedDefinitionCount === 0 &&
+        value.parsedEventUnsupportedTimezone === false)) &&
+    (value.classification !== 'duplicate-definitions' ||
+      (value.bundledZoneId === true &&
+        value.embeddedDefinitionCount === 2 &&
+        value.parsedEventUnsupportedTimezone === true)) &&
+    (value.classification !== 'embedded-definition-mismatch' ||
+      (value.bundledZoneId === true &&
+        value.embeddedDefinitionCount === 1 &&
+        value.parsedEventUnsupportedTimezone === true &&
+        value.canonicalEmbeddedDefinitionMatches === false)) &&
+    (value.classification !== 'embedded-definition-matches' ||
+      (value.bundledZoneId === true &&
+        value.embeddedDefinitionCount === 1 &&
+        value.parsedEventUnsupportedTimezone === false &&
+        value.canonicalEmbeddedDefinitionMatches === true)) &&
+    (value.classification !== 'other-unsupported-timezone' ||
+      value.parsedEventUnsupportedTimezone === true) &&
+    (value.classification !== 'no-zoned-start' ||
+      (value.parsedEventUnsupportedTimezone === false &&
+        value.bundledZoneId === null &&
+        value.embeddedDefinitionCount === 0 &&
+        value.canonicalEmbeddedDefinitionMatches === null))
   );
 }
 

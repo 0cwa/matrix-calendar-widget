@@ -40,6 +40,14 @@ function postCreateVisibilityObservation(overrides = {}) {
       includesCreatedEvent: true,
       diagnosticCode: 'none',
       diagnosticCounts: projectionDiagnosticCounts(),
+      timezoneAudit: {
+        completed: true,
+        parsedEventUnsupportedTimezone: false,
+        bundledZoneId: true,
+        embeddedDefinitionCount: 0,
+        canonicalEmbeddedDefinitionMatches: null,
+        classification: 'no-embedded-definition',
+      },
     },
     roomListResponseHasEventsArray: true,
     roomListResponseEventCount: 1,
@@ -218,7 +226,7 @@ test('emits only bounded post-create refresh and event-match evidence', () => {
     summary,
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=event-create-post-refresh-observed status=passed post_create_event_get_requests=2 room_target_range_requests=1 expected_room_range_request_seen=true room_target_range_responses=1 room_target_range_last_status=200 create_response_has_event=true create_response_title_matches=true create_response_calendar_matches=true create_response_timing_comparable=true create_response_event_intersects_room_range=true caldav_report_probe_completed=true caldav_openid_http_status=200 caldav_report_http_status=207 caldav_report_contains_created_event=true caldav_projection_completed=true caldav_projection_includes_created_event=true caldav_projection_diagnostic=none caldav_projection_invalid-recurrence=0 caldav_projection_invalid-timing=0 caldav_projection_occurrence-limit=0 caldav_projection_recurrence-input-limit=0 caldav_projection_unsupported-recurrence=0 caldav_projection_unsupported-timezone=0 caldav_projection_range-this-and-future=0 room_list_response_has_events=true room_list_response_event_count=1 room_list_diagnostics_complete=true room_list_diagnostic_invalid-recurrence=0 room_list_diagnostic_invalid-timing=0 room_list_diagnostic_occurrence-limit=0 room_list_diagnostic_recurrence-input-limit=0 room_list_diagnostic_unsupported-recurrence=0 room_list_diagnostic_unsupported-timezone=0 room_list_diagnostic_range-this-and-future=0 room_list_response_title_matches=true room_list_response_id_matches=true room_list_response_calendar_matches=true list_view_heading_present=true matching_list_item_count=1',
+      'phase=event-create-post-refresh-observed status=passed post_create_event_get_requests=2 room_target_range_requests=1 expected_room_range_request_seen=true room_target_range_responses=1 room_target_range_last_status=200 create_response_has_event=true create_response_title_matches=true create_response_calendar_matches=true create_response_timing_comparable=true create_response_event_intersects_room_range=true caldav_report_probe_completed=true caldav_openid_http_status=200 caldav_report_http_status=207 caldav_report_contains_created_event=true caldav_projection_completed=true caldav_projection_includes_created_event=true caldav_projection_diagnostic=none caldav_projection_invalid-recurrence=0 caldav_projection_invalid-timing=0 caldav_projection_occurrence-limit=0 caldav_projection_recurrence-input-limit=0 caldav_projection_unsupported-recurrence=0 caldav_projection_unsupported-timezone=0 caldav_projection_range-this-and-future=0 timezone_audit_completed=true timezone_event_unsupported=false timezone_source_id_bundled=true timezone_embedded_definitions=0 timezone_embedded_definition_matches=inconclusive timezone_audit_classification=no-embedded-definition room_list_response_has_events=true room_list_response_event_count=1 room_list_diagnostics_complete=true room_list_diagnostic_invalid-recurrence=0 room_list_diagnostic_invalid-timing=0 room_list_diagnostic_occurrence-limit=0 room_list_diagnostic_recurrence-input-limit=0 room_list_diagnostic_unsupported-recurrence=0 room_list_diagnostic_unsupported-timezone=0 room_list_diagnostic_range-this-and-future=0 room_list_response_title_matches=true room_list_response_id_matches=true room_list_response_calendar_matches=true list_view_heading_present=true matching_list_item_count=1',
       '',
     ].join('\n'),
   );
@@ -265,6 +273,32 @@ test('emits only bounded post-create refresh and event-match evidence', () => {
         includesCreatedEvent: true,
         diagnosticCode: 'invalid-calendar',
         diagnosticCounts: projectionDiagnosticCounts(),
+        timezoneAudit: {
+          completed: true,
+          parsedEventUnsupportedTimezone: false,
+          bundledZoneId: true,
+          embeddedDefinitionCount: 0,
+          canonicalEmbeddedDefinitionMatches: null,
+          classification: 'no-embedded-definition',
+        },
+      },
+    }),
+    postCreateVisibilityObservation({
+      caldavProjection: {
+        completed: true,
+        includesCreatedEvent: false,
+        diagnosticCode: 'unsupported-timezone',
+        diagnosticCounts: projectionDiagnosticCounts({
+          'unsupported-timezone': 1,
+        }),
+        timezoneAudit: {
+          completed: true,
+          parsedEventUnsupportedTimezone: false,
+          bundledZoneId: true,
+          embeddedDefinitionCount: 1,
+          canonicalEmbeddedDefinitionMatches: false,
+          classification: 'embedded-definition-mismatch',
+        },
       },
     }),
     postCreateVisibilityObservation({
@@ -273,12 +307,36 @@ test('emits only bounded post-create refresh and event-match evidence', () => {
         includesCreatedEvent: false,
         diagnosticCode: 'none',
         diagnosticCounts: projectionDiagnosticCounts({ 'invalid-timing': 3 }),
+        timezoneAudit: {
+          completed: true,
+          parsedEventUnsupportedTimezone: false,
+          bundledZoneId: true,
+          embeddedDefinitionCount: 0,
+          canonicalEmbeddedDefinitionMatches: null,
+          classification: 'no-embedded-definition',
+        },
       },
     }),
     postCreateVisibilityObservation({
       roomListDiagnostics: {
         complete: false,
         counts: projectionDiagnosticCounts({ 'invalid-timing': 1 }),
+      },
+    }),
+    postCreateVisibilityObservation({
+      caldavProjection: {
+        completed: true,
+        includesCreatedEvent: true,
+        diagnosticCode: 'none',
+        diagnosticCounts: projectionDiagnosticCounts(),
+        timezoneAudit: {
+          completed: true,
+          parsedEventUnsupportedTimezone: false,
+          bundledZoneId: true,
+          embeddedDefinitionCount: 1,
+          canonicalEmbeddedDefinitionMatches: false,
+          classification: 'embedded-definition-mismatch',
+        },
       },
     }),
     postCreateVisibilityObservation({
@@ -314,6 +372,66 @@ test('labels an incomplete REPORT comparison as inconclusive', () => {
   assert.match(
     summary,
     /caldav_report_probe_completed=false caldav_openid_http_status=200 caldav_report_http_status=207 caldav_report_contains_created_event=inconclusive/u,
+  );
+});
+
+test('emits only the fixed timezone projection diagnosis', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(
+      postCreateVisibilityObservation({
+        caldavProjection: {
+          completed: true,
+          includesCreatedEvent: false,
+          diagnosticCode: 'unsupported-timezone',
+          diagnosticCounts: projectionDiagnosticCounts({
+            'unsupported-timezone': 1,
+          }),
+          timezoneAudit: {
+            completed: true,
+            parsedEventUnsupportedTimezone: true,
+            bundledZoneId: true,
+            embeddedDefinitionCount: 1,
+            canonicalEmbeddedDefinitionMatches: false,
+            classification: 'embedded-definition-mismatch',
+          },
+        },
+      }),
+    ),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /caldav_projection_diagnostic=unsupported-timezone[\s\S]*timezone_event_unsupported=true timezone_source_id_bundled=true timezone_embedded_definitions=1 timezone_embedded_definition_matches=false timezone_audit_classification=embedded-definition-mismatch/u,
+  );
+});
+
+test('accepts a canonical embedded timezone audit', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(
+      postCreateVisibilityObservation({
+        caldavProjection: {
+          completed: true,
+          includesCreatedEvent: true,
+          diagnosticCode: 'none',
+          diagnosticCounts: projectionDiagnosticCounts(),
+          timezoneAudit: {
+            completed: true,
+            parsedEventUnsupportedTimezone: false,
+            bundledZoneId: true,
+            embeddedDefinitionCount: 1,
+            canonicalEmbeddedDefinitionMatches: true,
+            classification: 'embedded-definition-matches',
+          },
+        },
+      }),
+    ),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /timezone_embedded_definition_matches=true timezone_audit_classification=embedded-definition-matches/u,
   );
 });
 
