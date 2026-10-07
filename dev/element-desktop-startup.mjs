@@ -25,6 +25,19 @@ const SAFE_STORAGE_MODES = new Set(['encrypted', 'plaintext', 'basic_text']);
 const MAX_SAFE_STORAGE_LOG_BYTES = 1_048_576;
 const MAX_SAFE_STORAGE_LINE_LENGTH = 512;
 const DESKTOP_SPAWN_WAIT_MS = 5_000;
+const MAX_DIAGNOSTIC_COUNT = 100;
+const EGRESS_COUNTER_ACK_WAIT_MS = 12_000;
+export const SANDBOX_REASONS = Object.freeze([
+  'not_observed',
+  'passed',
+  'application_process_missing',
+  'unreadable_process_member',
+  'uid_mismatch',
+  'no_sandbox_flag',
+  'renderer_missing',
+  'seccomp_unconfirmed',
+  'no_new_privs_unconfirmed',
+]);
 const CHILD_SIGNALS = new Set([
   'SIGABRT',
   'SIGALRM',
@@ -326,9 +339,220 @@ const desktopObservation = {
   pageLoadOutcome: 'not-attempted',
 };
 let failureCode = null;
+let rendererDiagnostics = emptyRendererDiagnostics();
+let egressPhaseCounters = {
+  beforeApp: emptyEgressCounterObservation(),
+  afterPageLoad: emptyEgressCounterObservation(),
+};
 
 function cappedTwo(value) {
   return Math.min(value, 2);
+}
+
+function cappedDiagnosticCount(value) {
+  return Math.min(value, MAX_DIAGNOSTIC_COUNT);
+}
+
+function emptyRendererDiagnostics() {
+  return {
+    state: 'not_observed',
+    sandboxReason: 'not_observed',
+    applicationProcessObserved: null,
+    processGroupCount: null,
+    unreadableProcessCount: null,
+    uidMismatchCount: null,
+    noSandboxFlagCount: null,
+    rendererCount: null,
+    seccompState: 'not_observed',
+    noNewPrivsState: 'not_observed',
+  };
+}
+
+function emptyEgressCounterObservation(state = 'not_observed') {
+  return {
+    state,
+    ipv4Blocked: null,
+    ipv6Blocked: null,
+  };
+}
+
+function aggregateRendererSecurityState(renderers, field, expected) {
+  if (renderers.length === 0) return 'unavailable';
+  const values = renderers.map((renderer) => renderer[field]);
+  if (values.some((value) => value === null || value === undefined)) {
+    return 'unavailable';
+  }
+  const enabled = values.filter((value) => value === expected).length;
+  if (enabled === values.length) return 'enabled';
+  if (enabled === 0) return 'disabled';
+  return 'mixed';
+}
+
+export function summarizeProcessCoverageAndSandbox(
+  processes,
+  appPid,
+  expectedUid,
+) {
+  const applicationProcessObserved = processes.some(
+    (item) => item.pid === appPid,
+  );
+  const unreadableProcessCount = processes.filter(
+    (item) =>
+      item.unreadable || !Array.isArray(item.uids) || !Array.isArray(item.args),
+  ).length;
+  const uidMismatchCount = processes.filter(
+    (item) =>
+      !item.unreadable &&
+      Array.isArray(item.uids) &&
+      item.uids.some((uid) => uid !== expectedUid),
+  ).length;
+  const noSandboxFlagCount = processes.filter(
+    (item) =>
+      Array.isArray(item.args) &&
+      item.args.some((arg) => arg.startsWith('--no-sandbox')),
+  ).length;
+  const renderers = processes.filter(
+    (item) =>
+      Array.isArray(item.args) &&
+      item.args.some((arg) => arg.startsWith('--type=renderer')),
+  );
+  const seccompState = aggregateRendererSecurityState(
+    renderers,
+    'seccomp',
+    '2',
+  );
+  const noNewPrivsState = aggregateRendererSecurityState(
+    renderers,
+    'noNewPrivs',
+    '1',
+  );
+
+  let sandboxReason = 'passed';
+  if (!applicationProcessObserved) {
+    sandboxReason = 'application_process_missing';
+  } else if (unreadableProcessCount > 0) {
+    sandboxReason = 'unreadable_process_member';
+  } else if (uidMismatchCount > 0) {
+    sandboxReason = 'uid_mismatch';
+  } else if (noSandboxFlagCount > 0) {
+    sandboxReason = 'no_sandbox_flag';
+  } else if (renderers.length === 0) {
+    sandboxReason = 'renderer_missing';
+  } else if (seccompState !== 'enabled') {
+    sandboxReason = 'seccomp_unconfirmed';
+  } else if (noNewPrivsState !== 'enabled') {
+    sandboxReason = 'no_new_privs_unconfirmed';
+  }
+
+  return {
+    state: 'observed',
+    sandboxReason,
+    applicationProcessObserved,
+    processGroupCount: cappedDiagnosticCount(processes.length),
+    unreadableProcessCount: cappedDiagnosticCount(unreadableProcessCount),
+    uidMismatchCount: cappedDiagnosticCount(uidMismatchCount),
+    noSandboxFlagCount: cappedDiagnosticCount(noSandboxFlagCount),
+    rendererCount: cappedDiagnosticCount(renderers.length),
+    seccompState,
+    noNewPrivsState,
+  };
+}
+
+export function summarizeUidProcessObservations(
+  processes,
+  expectedUid,
+  complete = true,
+) {
+  let uidProcessCount = 0;
+  let nonZombieProcessCount = 0;
+  let zombieCount = 0;
+  let unreadableProcessCount = 0;
+  for (const item of processes) {
+    if (!Array.isArray(item.uids)) continue;
+    if (!item.uids.includes(expectedUid)) continue;
+    uidProcessCount += 1;
+    if (item.state === 'Z') {
+      zombieCount += 1;
+    } else if (item.state === null || item.state === undefined) {
+      unreadableProcessCount += 1;
+    } else {
+      nonZombieProcessCount += 1;
+    }
+  }
+  return {
+    state: complete ? 'observed' : 'partial',
+    uidProcessCount: cappedDiagnosticCount(uidProcessCount),
+    nonZombieProcessCount: cappedDiagnosticCount(nonZombieProcessCount),
+    zombieCount: cappedDiagnosticCount(zombieCount),
+    unreadableProcessCount: cappedDiagnosticCount(unreadableProcessCount),
+  };
+}
+
+function readUidProcessObservations(uid) {
+  if (!Number.isSafeInteger(uid) || uid < 1 || uid > 65_535) {
+    return {
+      state: 'unavailable',
+      uidProcessCount: null,
+      nonZombieProcessCount: null,
+      zombieCount: null,
+      unreadableProcessCount: null,
+    };
+  }
+  let entries;
+  try {
+    entries = readdirSync('/proc').filter((name) => /^[0-9]+$/u.test(name));
+  } catch {
+    return {
+      state: 'unavailable',
+      uidProcessCount: null,
+      nonZombieProcessCount: null,
+      zombieCount: null,
+      unreadableProcessCount: null,
+    };
+  }
+
+  const processes = [];
+  let complete = true;
+  for (const entry of entries) {
+    const path = `/proc/${entry}`;
+    let statusText;
+    try {
+      statusText = readFileSync(`${path}/status`, 'utf8');
+    } catch {
+      if (existsSync(path)) complete = false;
+      continue;
+    }
+    const uidText = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$/mu.exec(statusText);
+    if (!uidText) {
+      if (existsSync(path)) complete = false;
+      continue;
+    }
+    const uids = uidText.slice(1).map(Number);
+    if (!uids.includes(uid)) continue;
+    try {
+      const statText = readFileSync(`${path}/stat`, 'utf8');
+      const end = statText.lastIndexOf(')');
+      const state =
+        end < 0
+          ? null
+          : statText
+              .slice(end + 2)
+              .trim()
+              .split(/\s+/u)[0];
+      if (state === null || state.length !== 1) {
+        processes.push({ uids, state: null });
+        complete = false;
+      } else {
+        processes.push({ uids, state });
+      }
+    } catch {
+      if (existsSync(path)) {
+        processes.push({ uids, state: null });
+        complete = false;
+      }
+    }
+  }
+  return summarizeUidProcessObservations(processes, uid, complete);
 }
 
 function finiteStatus(value) {
@@ -684,35 +908,17 @@ function appProcessGroup(processGroupId) {
 
 function verifyProcessCoverageAndSandbox(appPid) {
   const processes = appProcessGroup(appPid);
-  if (!processes.some((item) => item.pid === appPid)) {
-    fail('renderer-sandbox-unconfirmed', 'nativeSandbox');
-  }
-  if (
-    processes.some(
-      (item) => item.unreadable || item.uids.some((uid) => uid !== expectedUid),
-    )
-  ) {
-    fail('renderer-sandbox-unconfirmed', 'nativeSandbox');
-  }
-  if (
-    processes.some((item) =>
-      item.args.some((arg) => arg.startsWith('--no-sandbox')),
-    )
-  ) {
-    fail('renderer-sandbox-unconfirmed', 'nativeSandbox');
-  }
-  const renderers = processes.filter((item) =>
-    item.args.some((arg) => arg.startsWith('--type=renderer')),
+  rendererDiagnostics = summarizeProcessCoverageAndSandbox(
+    processes,
+    appPid,
+    expectedUid,
   );
-  if (
-    renderers.length === 0 ||
-    renderers.some((item) => item.seccomp !== '2' || item.noNewPrivs !== '1')
-  ) {
+  if (rendererDiagnostics.sandboxReason !== 'passed') {
     fail('renderer-sandbox-unconfirmed', 'nativeSandbox');
   }
   pass('desktopProcess');
   pass('nativeSandbox');
-  return renderers.length > 1 ? 2 : renderers.length;
+  return cappedTwo(rendererDiagnostics.rendererCount);
 }
 
 function listeningAddresses() {
@@ -740,6 +946,16 @@ function listeningAddresses() {
     fail('cdp-not-loopback', 'loopbackCdp');
   }
   return true;
+}
+
+async function waitForCounterAcknowledgement(milestone) {
+  const acknowledgement = `${profileRoot}/.${milestone}-counter-read`;
+  const deadline = Date.now() + EGRESS_COUNTER_ACK_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (existsSync(acknowledgement)) return true;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+  }
+  return false;
 }
 
 async function waitForDebugger() {
@@ -880,6 +1096,14 @@ async function connectAndCheckPage() {
   try {
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 });
     desktopObservation.pageLoadOutcome = 'domcontentloaded';
+    process.stdout.write(
+      '{"phase":"desktop-startup-progress","milestone":"after-page-load"}\n',
+    );
+    egressPhaseCounters.afterPageLoad = emptyEgressCounterObservation(
+      (await waitForCounterAcknowledgement('after-page-load'))
+        ? 'observed'
+        : 'unavailable',
+    );
   } catch (error) {
     desktopObservation.pageLoadOutcome =
       error?.name === 'TimeoutError'
@@ -968,6 +1192,8 @@ function emitRecord(rendererCount = null) {
     safeStorage: safeStorageObservation,
     desktopObservation,
     rendererCount,
+    rendererDiagnostics,
+    egressPhaseCounters,
     checks,
   };
   process.stdout.write(`${JSON.stringify(record)}\n`);
@@ -998,6 +1224,14 @@ async function main() {
     ) {
       fail('probe-internal-error', 'desktopProcess');
     }
+    process.stdout.write(
+      '{"phase":"desktop-startup-progress","milestone":"before-app"}\n',
+    );
+    egressPhaseCounters.beforeApp = emptyEgressCounterObservation(
+      (await waitForCounterAcknowledgement('before-app'))
+        ? 'observed'
+        : 'unavailable',
+    );
     app = spawn(
       '/usr/bin/element-desktop',
       [
@@ -1093,23 +1327,32 @@ async function main() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch(() => {
-    process.stdout.write(
-      `${JSON.stringify({
-        phase: 'desktop-startup',
-        status: 'failed',
-        failureCode: 'probe-internal-error',
-        sourceSha,
-        package: packageInfo,
-        runtime,
-        origin: FIXED_ORIGIN,
-        secretService: secretServiceObservation,
-        safeStorage: safeStorageObservation,
-        desktopObservation,
-        rendererCount: null,
-        checks,
-      })}\n`,
-    );
-    process.exitCode = 1;
-  });
+  if (process.argv[2] === 'cleanup-observation') {
+    const requestedUid = Number(process.argv[3]);
+    const observation = readUidProcessObservations(requestedUid);
+    process.stdout.write(`${JSON.stringify(observation)}\n`);
+    if (observation.state === 'unavailable') process.exitCode = 1;
+  } else {
+    main().catch(() => {
+      process.stdout.write(
+        `${JSON.stringify({
+          phase: 'desktop-startup',
+          status: 'failed',
+          failureCode: 'probe-internal-error',
+          sourceSha,
+          package: packageInfo,
+          runtime,
+          origin: FIXED_ORIGIN,
+          secretService: secretServiceObservation,
+          safeStorage: safeStorageObservation,
+          desktopObservation,
+          rendererCount: null,
+          rendererDiagnostics,
+          egressPhaseCounters,
+          checks,
+        })}\n`,
+      );
+      process.exitCode = 1;
+    });
+  }
 }

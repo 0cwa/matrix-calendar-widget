@@ -6,6 +6,9 @@ import {
   createKeyringUnlockInput,
   createSafeStorageLogCollector,
   readKeyringControl,
+  SANDBOX_REASONS,
+  summarizeProcessCoverageAndSandbox,
+  summarizeUidProcessObservations,
   waitForDesktopChildSpawn,
 } from './element-desktop-startup.mjs';
 
@@ -113,5 +116,175 @@ test('safe-storage collector fails closed on incomplete process output', () => {
     backend: 'not_observed',
     markerCount: 0,
     complete: false,
+  });
+});
+
+function desktopProcess(pid, args, overrides = {}) {
+  return {
+    pid,
+    uids: [24000, 24000, 24000, 24000],
+    args,
+    seccomp: null,
+    noNewPrivs: null,
+    unreadable: false,
+    ...overrides,
+  };
+}
+
+function passingProcessGroup(overrides = {}) {
+  return [
+    desktopProcess(10, ['/usr/bin/element-desktop', '--type=browser']),
+    desktopProcess(11, ['--type=renderer'], {
+      seccomp: '2',
+      noNewPrivs: '1',
+    }),
+    ...(overrides.extraProcesses ?? []),
+  ];
+}
+
+test('sandbox diagnostics preserve a fixed reason for each failed coverage condition', () => {
+  const cases = [
+    [[], 'application_process_missing'],
+    [
+      [
+        desktopProcess(10, [], { unreadable: true }),
+        desktopProcess(11, ['--type=renderer'], {
+          seccomp: '2',
+          noNewPrivs: '1',
+        }),
+      ],
+      'unreadable_process_member',
+    ],
+    [
+      [
+        desktopProcess(10, ['/usr/bin/element-desktop'], {
+          uids: [24000, 25000, 24000, 24000],
+        }),
+        desktopProcess(11, ['--type=renderer'], {
+          seccomp: '2',
+          noNewPrivs: '1',
+        }),
+      ],
+      'uid_mismatch',
+    ],
+    [
+      [
+        desktopProcess(10, ['/usr/bin/element-desktop', '--no-sandbox']),
+        desktopProcess(11, ['--type=renderer'], {
+          seccomp: '2',
+          noNewPrivs: '1',
+        }),
+      ],
+      'no_sandbox_flag',
+    ],
+    [[desktopProcess(10, ['/usr/bin/element-desktop'])], 'renderer_missing'],
+    [
+      [
+        desktopProcess(10, ['/usr/bin/element-desktop']),
+        desktopProcess(11, ['--type=renderer'], {
+          seccomp: '0',
+          noNewPrivs: '1',
+        }),
+      ],
+      'seccomp_unconfirmed',
+    ],
+    [
+      [
+        desktopProcess(10, ['/usr/bin/element-desktop']),
+        desktopProcess(11, ['--type=renderer'], {
+          seccomp: '2',
+          noNewPrivs: '0',
+        }),
+      ],
+      'no_new_privs_unconfirmed',
+    ],
+  ];
+
+  for (const [processes, reason] of cases) {
+    const diagnostic = summarizeProcessCoverageAndSandbox(processes, 10, 24000);
+    assert.equal(diagnostic.sandboxReason, reason);
+    assert.ok(SANDBOX_REASONS.includes(diagnostic.sandboxReason));
+    assert.equal(diagnostic.state, 'observed');
+  }
+});
+
+test('sandbox diagnostics report aggregate security state and bounded counts without argv or PIDs', () => {
+  const mixed = summarizeProcessCoverageAndSandbox(
+    passingProcessGroup({
+      extraProcesses: [
+        desktopProcess(12, ['--type=renderer', 'private-canary'], {
+          seccomp: '0',
+          noNewPrivs: '1',
+        }),
+      ],
+    }),
+    10,
+    24000,
+  );
+  assert.equal(mixed.sandboxReason, 'seccomp_unconfirmed');
+  assert.equal(mixed.seccompState, 'mixed');
+  assert.equal(mixed.noNewPrivsState, 'enabled');
+  assert.equal(JSON.stringify(mixed).includes('private-canary'), false);
+  assert.equal(JSON.stringify(mixed).includes('24000'), false);
+  assert.equal(JSON.stringify(mixed).includes('11'), false);
+
+  const unavailable = summarizeProcessCoverageAndSandbox(
+    [
+      desktopProcess(10, ['/usr/bin/element-desktop']),
+      desktopProcess(11, ['--type=renderer'], { seccomp: null }),
+    ],
+    10,
+    24000,
+  );
+  assert.equal(unavailable.seccompState, 'unavailable');
+  assert.equal(unavailable.noNewPrivsState, 'unavailable');
+
+  const capped = summarizeProcessCoverageAndSandbox(
+    [
+      ...Array.from({ length: 120 }, (_, index) =>
+        desktopProcess(index + 1, ['--type=renderer'], {
+          seccomp: '2',
+          noNewPrivs: '1',
+        }),
+      ),
+    ],
+    1,
+    24000,
+  );
+  assert.equal(capped.processGroupCount, 100);
+  assert.equal(capped.rendererCount, 100);
+});
+
+test('UID cleanup summaries expose only bounded process and zombie counts', () => {
+  const diagnostic = summarizeUidProcessObservations(
+    [
+      { uids: [24000, 24000, 24000, 24000], state: 'Z' },
+      { uids: [24000, 24000, 24000, 24000], state: 'S' },
+      { uids: [24000, 24000, 24000, 24000], state: null },
+      { uids: [25000, 25000, 25000, 25000], state: 'Z' },
+    ],
+    24000,
+    false,
+  );
+  assert.deepEqual(diagnostic, {
+    state: 'partial',
+    uidProcessCount: 3,
+    nonZombieProcessCount: 1,
+    zombieCount: 1,
+    unreadableProcessCount: 1,
+  });
+  assert.equal(JSON.stringify(diagnostic).includes('25000'), false);
+  assert.equal(JSON.stringify(diagnostic).includes('pid'), false);
+
+  const capped = summarizeUidProcessObservations(
+    Array.from({ length: 105 }, () => ({ uids: [24000], state: 'Z' })),
+    24000,
+  );
+  assert.deepEqual(capped, {
+    state: 'observed',
+    uidProcessCount: 100,
+    nonZombieProcessCount: 0,
+    zombieCount: 100,
+    unreadableProcessCount: 0,
   });
 });

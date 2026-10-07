@@ -91,6 +91,26 @@ function passingDesktopObservation(overrides = {}) {
   };
 }
 
+function passingRendererDiagnostics(overrides = {}) {
+  return {
+    state: 'observed',
+    sandboxReason: 'passed',
+    applicationProcessObserved: true,
+    processGroupCount: 3,
+    unreadableProcessCount: 0,
+    uidMismatchCount: 0,
+    noSandboxFlagCount: 0,
+    rendererCount: 1,
+    seccompState: 'enabled',
+    noNewPrivsState: 'enabled',
+    ...overrides,
+  };
+}
+
+function observedCounters(ipv4Blocked = 0, ipv6Blocked = 0) {
+  return { state: 'observed', ipv4Blocked, ipv6Blocked };
+}
+
 function passingTargetUidPreflight() {
   return {
     phase: 'target-uid-preflight',
@@ -160,6 +180,11 @@ function stages(overrides = {}) {
       },
       desktopObservation: passingDesktopObservation(),
       rendererCount: 1,
+      rendererDiagnostics: passingRendererDiagnostics(),
+      egressPhaseCounters: {
+        beforeApp: observedCounters(),
+        afterPageLoad: observedCounters(),
+      },
       checks: { ...checks },
     },
     {
@@ -181,6 +206,15 @@ function stages(overrides = {}) {
       user: 'passed',
       profile: 'passed',
       aptSource: 'passed',
+      accountState: 'absent',
+      userdelStatus: 'not_run',
+      uidProcessObservation: {
+        state: 'observed',
+        uidProcessCount: 0,
+        nonZombieProcessCount: 0,
+        zombieCount: 0,
+        unreadableProcessCount: 0,
+      },
     },
     ...(overrides.extraStages ?? []),
   ];
@@ -189,11 +223,28 @@ function stages(overrides = {}) {
 test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 8);
+  assert.equal(summary.schemaVersion, 9);
   assert.equal(summary.failureCode, null);
   assert.equal(summary.checks.isolatedNodePreflight, 'passed');
   assert.equal(summary.targetUidPreflight.status, 'passed');
   assert.deepEqual(summary.egressBlocked, { ipv4: 0, ipv6: 0 });
+  assert.equal(summary.rendererDiagnostics.sandboxReason, 'passed');
+  assert.deepEqual(summary.uidEgressPhaseCounters, {
+    beforeApp: observedCounters(),
+    afterPageLoad: observedCounters(),
+    final: observedCounters(),
+  });
+  assert.deepEqual(summary.cleanupDiagnostics, {
+    accountState: 'absent',
+    userdelStatus: 'not_run',
+    uidProcessObservation: {
+      state: 'observed',
+      uidProcessCount: 0,
+      nonZombieProcessCount: 0,
+      zombieCount: 0,
+      unreadableProcessCount: 0,
+    },
+  });
   assert.deepEqual(summary.egressProbe, passingProbe());
   assert.deepEqual(summary.secretService, passingSecretService());
   assert.equal(validDesktopSummary(summary), true);
@@ -232,6 +283,78 @@ test('Desktop evidence retains only the finite secret-service failure substep', 
     () => sanitizeDesktopStages(inconsistent, sourceSha),
     /invalid Desktop evidence input/u,
   );
+});
+
+test('Desktop evidence preserves a finite sandbox failure reason without raw process data', () => {
+  const failed = stages();
+  failed[1].status = 'failed';
+  failed[1].failureCode = 'renderer-sandbox-unconfirmed';
+  failed[1].checks.nativeSandbox = 'failed';
+  failed[1].rendererCount = null;
+  failed[1].rendererDiagnostics = passingRendererDiagnostics({
+    sandboxReason: 'unreadable_process_member',
+    unreadableProcessCount: 1,
+    seccompState: 'unavailable',
+    noNewPrivsState: 'unavailable',
+  });
+
+  const summary = sanitizeDesktopStages(failed, sourceSha);
+  assert.equal(summary.status, 'failed');
+  assert.equal(summary.failureCode, 'renderer-sandbox-unconfirmed');
+  assert.equal(
+    summary.rendererDiagnostics.sandboxReason,
+    'unreadable_process_member',
+  );
+  assert.equal(summary.rendererDiagnostics.unreadableProcessCount, 1);
+  assert.equal(validDesktopSummary(summary), true);
+
+  const privateDiagnostic = stages();
+  privateDiagnostic[1].rendererDiagnostics.pid = 1234;
+  assert.throws(
+    () => sanitizeDesktopStages(privateDiagnostic, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
+});
+
+test('phase egress and cleanup diagnostics remain separate from final acceptance gates', () => {
+  const withUnavailableSnapshots = stages();
+  withUnavailableSnapshots[1].egressPhaseCounters = {
+    beforeApp: { state: 'observed', ipv4Blocked: 0, ipv6Blocked: 0 },
+    afterPageLoad: {
+      state: 'unavailable',
+      ipv4Blocked: null,
+      ipv6Blocked: null,
+    },
+  };
+  withUnavailableSnapshots[4].accountState = 'absent';
+  withUnavailableSnapshots[4].userdelStatus = 'not_run';
+  withUnavailableSnapshots[4].uidProcessObservation = {
+    state: 'partial',
+    uidProcessCount: 0,
+    nonZombieProcessCount: 0,
+    zombieCount: 0,
+    unreadableProcessCount: 0,
+  };
+  const summary = sanitizeDesktopStages(withUnavailableSnapshots, sourceSha);
+
+  assert.equal(summary.status, 'passed');
+  assert.equal(
+    summary.uidEgressPhaseCounters.afterPageLoad.state,
+    'unavailable',
+  );
+  assert.deepEqual(summary.uidEgressPhaseCounters.final, observedCounters());
+  assert.equal(
+    summary.cleanupDiagnostics.uidProcessObservation.state,
+    'partial',
+  );
+  assert.equal(summary.checks.zeroBlockedEgress, 'passed');
+
+  const nonzeroFinalCounters = stages();
+  nonzeroFinalCounters[3].ipv4Blocked = 1;
+  const failed = sanitizeDesktopStages(nonzeroFinalCounters, sourceSha);
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.failureCode, 'blocked-egress');
+  assert.equal(failed.uidEgressPhaseCounters.final.ipv4Blocked, 1);
 });
 
 test('Desktop evidence fails closed on blocked egress and rejects private-shaped fields', () => {
@@ -317,6 +440,43 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
   assert.equal(cleanupSummary.status, 'failed');
   assert.equal(cleanupSummary.failureCode, 'cleanup-failed');
 
+  const failedAccountCleanup = stages();
+  failedAccountCleanup[4].isolatedProcesses = 'failed';
+  failedAccountCleanup[4].user = 'failed';
+  failedAccountCleanup[4].accountState = 'uid_match';
+  failedAccountCleanup[4].userdelStatus = 'failed';
+  failedAccountCleanup[4].uidProcessObservation = {
+    state: 'observed',
+    uidProcessCount: 2,
+    nonZombieProcessCount: 1,
+    zombieCount: 1,
+    unreadableProcessCount: 0,
+  };
+  const failedAccountSummary = sanitizeDesktopStages(
+    failedAccountCleanup,
+    sourceSha,
+  );
+  assert.equal(failedAccountSummary.status, 'failed');
+  assert.equal(failedAccountSummary.failureCode, 'cleanup-failed');
+  assert.deepEqual(failedAccountSummary.cleanupDiagnostics, {
+    accountState: 'uid_match',
+    userdelStatus: 'failed',
+    uidProcessObservation: {
+      state: 'observed',
+      uidProcessCount: 2,
+      nonZombieProcessCount: 1,
+      zombieCount: 1,
+      unreadableProcessCount: 0,
+    },
+  });
+
+  const privateCleanup = stages();
+  privateCleanup[4].remainingPid = 1234;
+  assert.throws(
+    () => sanitizeDesktopStages(privateCleanup, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
+
   const malformedPackage = sanitizeDesktopStages(stages(), sourceSha);
   malformedPackage.package.version = '1.12.31';
   assert.equal(validDesktopSummary(malformedPackage), false);
@@ -332,6 +492,23 @@ test('Desktop evidence reports absent startup as incomplete and rejects degraded
   assert.equal(missingSummary.checks.privateProfile, 'not_run');
   assert.equal(missingSummary.rendererCount, null);
   assert.equal(missingSummary.desktopObservation.childState, 'not-started');
+  assert.equal(
+    missingSummary.rendererDiagnostics.sandboxReason,
+    'not_observed',
+  );
+  assert.deepEqual(missingSummary.uidEgressPhaseCounters, {
+    beforeApp: {
+      state: 'not_observed',
+      ipv4Blocked: null,
+      ipv6Blocked: null,
+    },
+    afterPageLoad: {
+      state: 'not_observed',
+      ipv4Blocked: null,
+      ipv6Blocked: null,
+    },
+    final: observedCounters(),
+  });
 
   const missingPreflight = stages().filter(
     (record) => record.phase !== 'target-uid-preflight',

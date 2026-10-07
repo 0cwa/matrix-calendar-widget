@@ -18,6 +18,37 @@ const CHECK_NAMES = Object.freeze([
   'nodeIntegrationDisabled',
 ]);
 const CHECK_STATES = new Set(['not_run', 'passed', 'failed']);
+const MAX_DIAGNOSTIC_COUNT = 100;
+const SANDBOX_DIAGNOSTIC_STATES = new Set(['not_observed', 'observed']);
+const SANDBOX_DIAGNOSTIC_REASONS = new Set([
+  'not_observed',
+  'passed',
+  'application_process_missing',
+  'unreadable_process_member',
+  'uid_mismatch',
+  'no_sandbox_flag',
+  'renderer_missing',
+  'seccomp_unconfirmed',
+  'no_new_privs_unconfirmed',
+]);
+const SANDBOX_DIAGNOSTIC_VALUES = new Set([
+  'not_observed',
+  'unavailable',
+  'enabled',
+  'disabled',
+  'mixed',
+]);
+const COUNTER_OBSERVATION_STATES = new Set([
+  'not_observed',
+  'unavailable',
+  'observed',
+]);
+const UID_PROCESS_OBSERVATION_STATES = new Set([
+  'not_observed',
+  'unavailable',
+  'partial',
+  'observed',
+]);
 const STARTUP_FAILURES = new Set([
   'invalid-source-sha',
   'unsupported-runner',
@@ -179,6 +210,143 @@ function isStatus(value) {
 
 function count(value) {
   return Number.isSafeInteger(value) && value >= 0 && value <= 100_000;
+}
+
+function diagnosticCount(value) {
+  return (
+    Number.isSafeInteger(value) && value >= 0 && value <= MAX_DIAGNOSTIC_COUNT
+  );
+}
+
+function validateCounterObservation(value) {
+  if (
+    !hasKeys(value, ['state', 'ipv4Blocked', 'ipv6Blocked']) ||
+    !COUNTER_OBSERVATION_STATES.has(value.state)
+  ) {
+    return false;
+  }
+  if (value.state === 'observed') {
+    return count(value.ipv4Blocked) && count(value.ipv6Blocked);
+  }
+  return value.ipv4Blocked === null && value.ipv6Blocked === null;
+}
+
+function validateEgressPhaseCounters(value) {
+  return (
+    hasKeys(value, ['beforeApp', 'afterPageLoad']) &&
+    validateCounterObservation(value.beforeApp) &&
+    validateCounterObservation(value.afterPageLoad)
+  );
+}
+
+function validateRendererDiagnostics(value) {
+  if (
+    !hasKeys(value, [
+      'state',
+      'sandboxReason',
+      'applicationProcessObserved',
+      'processGroupCount',
+      'unreadableProcessCount',
+      'uidMismatchCount',
+      'noSandboxFlagCount',
+      'rendererCount',
+      'seccompState',
+      'noNewPrivsState',
+    ]) ||
+    !SANDBOX_DIAGNOSTIC_STATES.has(value.state) ||
+    !SANDBOX_DIAGNOSTIC_REASONS.has(value.sandboxReason) ||
+    !SANDBOX_DIAGNOSTIC_VALUES.has(value.seccompState) ||
+    !SANDBOX_DIAGNOSTIC_VALUES.has(value.noNewPrivsState)
+  ) {
+    return false;
+  }
+  if (value.state === 'not_observed') {
+    return (
+      value.sandboxReason === 'not_observed' &&
+      value.applicationProcessObserved === null &&
+      value.processGroupCount === null &&
+      value.unreadableProcessCount === null &&
+      value.uidMismatchCount === null &&
+      value.noSandboxFlagCount === null &&
+      value.rendererCount === null &&
+      value.seccompState === 'not_observed' &&
+      value.noNewPrivsState === 'not_observed'
+    );
+  }
+  if (
+    value.sandboxReason === 'not_observed' ||
+    typeof value.applicationProcessObserved !== 'boolean' ||
+    !diagnosticCount(value.processGroupCount) ||
+    !diagnosticCount(value.unreadableProcessCount) ||
+    !diagnosticCount(value.uidMismatchCount) ||
+    !diagnosticCount(value.noSandboxFlagCount) ||
+    !diagnosticCount(value.rendererCount) ||
+    value.seccompState === 'not_observed' ||
+    value.noNewPrivsState === 'not_observed'
+  ) {
+    return false;
+  }
+  return (
+    value.sandboxReason !== 'passed' ||
+    (value.applicationProcessObserved &&
+      value.unreadableProcessCount === 0 &&
+      value.uidMismatchCount === 0 &&
+      value.noSandboxFlagCount === 0 &&
+      value.rendererCount > 0 &&
+      value.seccompState === 'enabled' &&
+      value.noNewPrivsState === 'enabled')
+  );
+}
+
+function emptyRendererDiagnostics() {
+  return {
+    state: 'not_observed',
+    sandboxReason: 'not_observed',
+    applicationProcessObserved: null,
+    processGroupCount: null,
+    unreadableProcessCount: null,
+    uidMismatchCount: null,
+    noSandboxFlagCount: null,
+    rendererCount: null,
+    seccompState: 'not_observed',
+    noNewPrivsState: 'not_observed',
+  };
+}
+
+function emptyCounterObservation(state = 'not_observed') {
+  return { state, ipv4Blocked: null, ipv6Blocked: null };
+}
+
+function validateUidProcessObservation(value) {
+  if (
+    !hasKeys(value, [
+      'state',
+      'uidProcessCount',
+      'nonZombieProcessCount',
+      'zombieCount',
+      'unreadableProcessCount',
+    ]) ||
+    !UID_PROCESS_OBSERVATION_STATES.has(value.state)
+  ) {
+    return false;
+  }
+  if (value.state === 'observed' || value.state === 'partial') {
+    return (
+      diagnosticCount(value.uidProcessCount) &&
+      diagnosticCount(value.nonZombieProcessCount) &&
+      value.nonZombieProcessCount <= value.uidProcessCount &&
+      diagnosticCount(value.zombieCount) &&
+      value.zombieCount <= value.uidProcessCount &&
+      diagnosticCount(value.unreadableProcessCount) &&
+      value.unreadableProcessCount <= value.uidProcessCount
+    );
+  }
+  return (
+    value.uidProcessCount === null &&
+    value.nonZombieProcessCount === null &&
+    value.zombieCount === null &&
+    value.unreadableProcessCount === null
+  );
 }
 
 function validateSafeStorage(value) {
@@ -629,6 +797,8 @@ function validateStartup(record, sourceSha) {
       'safeStorage',
       'desktopObservation',
       'rendererCount',
+      'rendererDiagnostics',
+      'egressPhaseCounters',
       'checks',
     ]) ||
     record.phase !== 'desktop-startup' ||
@@ -665,9 +835,21 @@ function validateStartup(record, sourceSha) {
     !validateSecretService(record.secretService) ||
     !validateSafeStorage(record.safeStorage) ||
     !validateDesktopObservation(record.desktopObservation) ||
+    !validateRendererDiagnostics(record.rendererDiagnostics) ||
+    !validateEgressPhaseCounters(record.egressPhaseCounters) ||
     record.runtime.runner !== 'ubuntu-24.04' ||
     !hasKeys(record.checks, CHECK_NAMES) ||
     Object.values(record.checks).some((value) => !isStatus(value))
+  ) {
+    return false;
+  }
+  if (
+    (record.checks.nativeSandbox === 'passed' &&
+      record.rendererDiagnostics.sandboxReason !== 'passed') ||
+    (record.checks.nativeSandbox === 'failed' &&
+      record.rendererDiagnostics.sandboxReason === 'passed') ||
+    (record.checks.nativeSandbox === 'not_run' &&
+      record.rendererDiagnostics.state !== 'not_observed')
   ) {
     return false;
   }
@@ -911,12 +1093,32 @@ function validateCleanup(record) {
       'user',
       'profile',
       'aptSource',
+      'accountState',
+      'userdelStatus',
+      'uidProcessObservation',
     ]) &&
     record.phase === 'cleanup' &&
     ['isolatedProcesses', 'policy', 'user', 'profile', 'aptSource'].every(
       (name) => ['passed', 'failed', 'not_run'].includes(record[name]),
-    )
+    ) &&
+    [
+      'not_observed',
+      'unavailable',
+      'absent',
+      'uid_match',
+      'uid_mismatch',
+    ].includes(record.accountState) &&
+    ['passed', 'failed', 'not_run'].includes(record.userdelStatus) &&
+    validateUidProcessObservation(record.uidProcessObservation)
   );
+}
+
+function emptyEgressPhaseCounters() {
+  return {
+    beforeApp: emptyCounterObservation(),
+    afterPageLoad: emptyCounterObservation(),
+    final: emptyCounterObservation(),
+  };
 }
 
 function defaultChecks() {
@@ -1003,6 +1205,31 @@ export function sanitizeDesktopStages(records, sourceSha) {
   const policy = byPhase.get('egress-policy');
   const observation = byPhase.get('egress-observation');
   const cleanup = byPhase.get('cleanup');
+  const uidEgressPhaseCounters = {
+    beforeApp:
+      startup?.egressPhaseCounters.beforeApp ??
+      emptyCounterObservation('not_observed'),
+    afterPageLoad:
+      startup?.egressPhaseCounters.afterPageLoad ??
+      emptyCounterObservation('not_observed'),
+    final:
+      observation === undefined
+        ? emptyCounterObservation('not_observed')
+        : observation.ipv4Blocked !== null && observation.ipv6Blocked !== null
+          ? {
+              state: 'observed',
+              ipv4Blocked: observation.ipv4Blocked,
+              ipv6Blocked: observation.ipv6Blocked,
+            }
+          : emptyCounterObservation('unavailable'),
+  };
+  const cleanupDiagnostics = cleanup
+    ? {
+        accountState: cleanup.accountState,
+        userdelStatus: cleanup.userdelStatus,
+        uidProcessObservation: cleanup.uidProcessObservation,
+      }
+    : null;
   const checks = defaultChecks();
   if (targetUidPreflight) {
     checks.isolatedNodePreflight = targetUidPreflight.status;
@@ -1061,7 +1288,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -1102,12 +1329,16 @@ export function sanitizeDesktopStages(records, sourceSha) {
     desktopObservation:
       startup?.desktopObservation ?? emptyDesktopObservation(),
     rendererCount: startup?.rendererCount ?? null,
+    rendererDiagnostics:
+      startup?.rendererDiagnostics ?? emptyRendererDiagnostics(),
     targetUidPreflight: targetUidPreflight ?? null,
     egressBlocked: {
       ipv4: observation?.ipv4Blocked ?? null,
       ipv6: observation?.ipv6Blocked ?? null,
     },
+    uidEgressPhaseCounters,
     egressProbe: policy?.diagnostic ?? null,
+    cleanupDiagnostics,
     checks,
   };
 }
@@ -1126,12 +1357,15 @@ export function validDesktopSummary(value) {
       'safeStorage',
       'desktopObservation',
       'rendererCount',
+      'rendererDiagnostics',
       'targetUidPreflight',
       'egressBlocked',
+      'uidEgressPhaseCounters',
       'egressProbe',
+      'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 8 &&
+    value.schemaVersion === 9 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
@@ -1173,6 +1407,31 @@ export function validDesktopSummary(value) {
       !['not-run', 'none'].includes(value.secretService.step)) &&
     validateSafeStorage(value.safeStorage) &&
     validateDesktopObservation(value.desktopObservation) &&
+    validateRendererDiagnostics(value.rendererDiagnostics) &&
+    validateEgressPhaseCounters({
+      beforeApp: value.uidEgressPhaseCounters?.beforeApp,
+      afterPageLoad: value.uidEgressPhaseCounters?.afterPageLoad,
+    }) &&
+    validateCounterObservation(value.uidEgressPhaseCounters?.final) &&
+    (value.cleanupDiagnostics === null ||
+      (hasKeys(value.cleanupDiagnostics, [
+        'accountState',
+        'userdelStatus',
+        'uidProcessObservation',
+      ]) &&
+        [
+          'not_observed',
+          'unavailable',
+          'absent',
+          'uid_match',
+          'uid_mismatch',
+        ].includes(value.cleanupDiagnostics.accountState) &&
+        ['passed', 'failed', 'not_run'].includes(
+          value.cleanupDiagnostics.userdelStatus,
+        ) &&
+        validateUidProcessObservation(
+          value.cleanupDiagnostics.uidProcessObservation,
+        ))) &&
     (value.targetUidPreflight === null ||
       validateTargetUidPreflight(value.targetUidPreflight)) &&
     value.checks?.isolatedNodePreflight ===
@@ -1210,11 +1469,16 @@ export function validDesktopSummary(value) {
         secretServicePassed(value.secretService) &&
         safeStoragePassed(value.safeStorage) &&
         desktopObservationPassed(value.desktopObservation) &&
+        value.rendererDiagnostics.sandboxReason === 'passed' &&
         value.rendererCount !== null &&
         value.runtime.electron !== null &&
         value.runtime.chromium !== null &&
         value.egressBlocked.ipv4 === 0 &&
-        value.egressBlocked.ipv6 === 0
+        value.egressBlocked.ipv6 === 0 &&
+        value.uidEgressPhaseCounters.final.state === 'observed' &&
+        value.uidEgressPhaseCounters.final.ipv4Blocked === 0 &&
+        value.uidEgressPhaseCounters.final.ipv6Blocked === 0 &&
+        value.cleanupDiagnostics !== null
       : value.failureCode !== null)
   );
 }
