@@ -153,6 +153,65 @@ export function createSafeStorageLogCollector() {
   return Object.freeze({ write, finish });
 }
 
+export function createKeyringUnlockInput(entropy) {
+  if (!Buffer.isBuffer(entropy) || entropy.length !== 32) {
+    throw new TypeError('invalid keyring unlock entropy');
+  }
+  return Buffer.from(`${entropy.toString('hex')}\n`, 'ascii');
+}
+
+function emptySecretServiceObservation() {
+  return {
+    step: 'not-run',
+    dbusAddressPresent: false,
+    daemonOutcome: 'not-run',
+    daemonExitStatus: null,
+    daemonPidPresent: false,
+    daemonControlPresent: false,
+    storeOutcome: 'not-run',
+    storeExitStatus: null,
+    lookupOutcome: 'not-run',
+    lookupExitStatus: null,
+    lookupMatches: false,
+    clearOutcome: 'not-run',
+    clearExitStatus: null,
+    keyringFilePresent: false,
+  };
+}
+
+function runSecretCommand(program, args, { input, timeout = 5_000 } = {}) {
+  let result;
+  try {
+    result = spawnSync(program, args, {
+      encoding: 'utf8',
+      input,
+      stdio: ['pipe', 'pipe', 'ignore'],
+      timeout,
+      maxBuffer: 128 * 1024,
+    });
+  } catch {
+    return { outcome: 'spawn-error', exitStatus: null, stdout: '' };
+  }
+  let outcome = 'passed';
+  if (result.error) {
+    outcome = result.error.code === 'ETIMEDOUT' ? 'timeout' : 'spawn-error';
+  } else if (result.signal) {
+    outcome = 'signaled';
+  } else if (result.status !== 0) {
+    outcome = 'nonzero-exit';
+  }
+  return {
+    outcome,
+    exitStatus:
+      Number.isSafeInteger(result.status) &&
+      result.status >= 0 &&
+      result.status <= 255
+        ? result.status
+        : null,
+    stdout: outcome === 'passed' ? result.stdout : '',
+  };
+}
+
 class ProbeFailure extends Error {
   constructor(code, check) {
     super('Desktop startup check failed');
@@ -188,6 +247,7 @@ let safeStorageObservation = {
   markerCount: 0,
   complete: false,
 };
+let secretServiceObservation = emptySecretServiceObservation();
 let keyringPid = null;
 let failureCode = null;
 
@@ -353,17 +413,35 @@ function checkConfig() {
 }
 
 function startSecretService() {
+  const observation = emptySecretServiceObservation();
+  secretServiceObservation = observation;
+  observation.dbusAddressPresent = Boolean(
+    process.env.DBUS_SESSION_BUS_ADDRESS,
+  );
+  if (!observation.dbusAddressPresent) {
+    observation.step = 'dbus-session';
+    fail('secret-service-unavailable', 'secretService');
+  }
+
+  observation.step = 'daemon-start';
   const unlock = randomBytes(32);
-  const unlockInput = Buffer.concat([unlock, Buffer.from('\n')]);
+  const unlockInput = createKeyringUnlockInput(unlock);
+  unlock.fill(0);
   try {
-    const output = safeCommand(
+    const daemon = runSecretCommand(
       'gnome-keyring-daemon',
       ['--unlock', '--components=secrets'],
       { input: unlockInput, timeout: 10_000 },
     );
-    if (output === null) fail('secret-service-unavailable', 'secretService');
+    observation.daemonOutcome = daemon.outcome;
+    observation.daemonExitStatus = daemon.exitStatus;
+    if (daemon.outcome !== 'passed') {
+      observation.step = 'daemon-start';
+      fail('secret-service-unavailable', 'secretService');
+    }
+    observation.step = 'daemon-output';
     const values = new Map();
-    for (const line of output.split(/\r?\n/u)) {
+    for (const line of daemon.stdout.split(/\r?\n/u)) {
       const match =
         /^(GNOME_KEYRING_CONTROL|GNOME_KEYRING_PID)=([^;\r\n]+); export \1;$/u.exec(
           line,
@@ -371,48 +449,72 @@ function startSecretService() {
       if (match) values.set(match[1], match[2]);
     }
     const pidValue = values.get('GNOME_KEYRING_PID');
-    if (!pidValue || !/^[1-9][0-9]{0,8}$/u.test(pidValue)) {
+    observation.daemonPidPresent = Boolean(
+      pidValue && /^[1-9][0-9]{0,8}$/u.test(pidValue),
+    );
+    if (!observation.daemonPidPresent) {
+      observation.step = 'daemon-output';
       fail('secret-service-unavailable', 'secretService');
     }
     keyringPid = Number(pidValue);
     process.env.GNOME_KEYRING_PID = pidValue;
     const control = values.get('GNOME_KEYRING_CONTROL');
+    observation.daemonControlPresent = Boolean(control);
     if (control) process.env.GNOME_KEYRING_CONTROL = control;
 
+    observation.step = 'secret-store';
     const challenge = randomBytes(32).toString('hex');
-    if (
-      safeCommand(
-        'secret-tool',
-        [
-          'store',
-          '--label=Desktop startup synthetic check',
-          'desktop-startup',
-          'secret-service',
-        ],
-        { input: `${challenge}\n` },
-      ) === null
-    ) {
-      fail('secret-service-unavailable', 'secretService');
-    }
-    const observed = safeCommand('secret-tool', [
+    const stored = runSecretCommand(
+      'secret-tool',
+      [
+        'store',
+        '--label=Desktop startup synthetic check',
+        'desktop-startup',
+        'secret-service',
+      ],
+      { input: `${challenge}\n` },
+    );
+    observation.storeOutcome = stored.outcome;
+    observation.storeExitStatus = stored.exitStatus;
+    observation.step = 'secret-lookup';
+    const observed = runSecretCommand('secret-tool', [
       'lookup',
       'desktop-startup',
       'secret-service',
     ]);
-    const cleared = safeCommand('secret-tool', [
+    observation.lookupOutcome = observed.outcome;
+    observation.lookupExitStatus = observed.exitStatus;
+    observation.lookupMatches =
+      observed.outcome === 'passed' && observed.stdout.trim() === challenge;
+    observation.step = 'secret-clear';
+    const cleared = runSecretCommand('secret-tool', [
       'clear',
       'desktop-startup',
       'secret-service',
     ]);
+    observation.clearOutcome = cleared.outcome;
+    observation.clearExitStatus = cleared.exitStatus;
+    observation.step = 'keyring-file';
     const keyringDirectory = `${process.env.XDG_DATA_HOME}/keyrings`;
-    const hasPrivateKeyring =
-      existsSync(keyringDirectory) &&
-      readdirSync(keyringDirectory).some((name) => name.endsWith('.keyring'));
-    if (
-      observed?.trim() !== challenge ||
-      cleared === null ||
-      !hasPrivateKeyring
-    ) {
+    try {
+      observation.keyringFilePresent =
+        existsSync(keyringDirectory) &&
+        readdirSync(keyringDirectory).some((name) => name.endsWith('.keyring'));
+    } catch {
+      observation.keyringFilePresent = false;
+    }
+
+    observation.step =
+      stored.outcome !== 'passed'
+        ? 'secret-store'
+        : observed.outcome !== 'passed' || !observation.lookupMatches
+          ? 'secret-lookup'
+          : cleared.outcome !== 'passed'
+            ? 'secret-clear'
+            : !observation.keyringFilePresent
+              ? 'keyring-file'
+              : 'none';
+    if (observation.step !== 'none') {
       fail('secret-service-unavailable', 'secretService');
     }
     pass('secretService');
@@ -687,6 +789,7 @@ function emitRecord(rendererCount = 0) {
     package: packageInfo,
     runtime,
     origin: FIXED_ORIGIN,
+    secretService: secretServiceObservation,
     safeStorage: safeStorageObservation,
     rendererCount,
     checks,
@@ -797,6 +900,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         package: packageInfo,
         runtime,
         origin: FIXED_ORIGIN,
+        secretService: secretServiceObservation,
         safeStorage: safeStorageObservation,
         rendererCount: 0,
         checks,

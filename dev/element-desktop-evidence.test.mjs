@@ -50,6 +50,25 @@ function passingProbe() {
   };
 }
 
+function passingSecretService() {
+  return {
+    step: 'none',
+    dbusAddressPresent: true,
+    daemonOutcome: 'passed',
+    daemonExitStatus: 0,
+    daemonPidPresent: true,
+    daemonControlPresent: true,
+    storeOutcome: 'passed',
+    storeExitStatus: 0,
+    lookupOutcome: 'passed',
+    lookupExitStatus: 0,
+    lookupMatches: true,
+    clearOutcome: 'passed',
+    clearExitStatus: 0,
+    keyringFilePresent: true,
+  };
+}
+
 function passingTargetUidPreflight() {
   return {
     phase: 'target-uid-preflight',
@@ -110,6 +129,7 @@ function stages(overrides = {}) {
         runner: 'ubuntu-24.04',
       },
       origin: 'vector://vector',
+      secretService: passingSecretService(),
       safeStorage: {
         mode: 'encrypted',
         backend: 'gnome_libsecret',
@@ -146,13 +166,49 @@ function stages(overrides = {}) {
 test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 5);
+  assert.equal(summary.schemaVersion, 6);
   assert.equal(summary.failureCode, null);
   assert.equal(summary.checks.isolatedNodePreflight, 'passed');
   assert.equal(summary.targetUidPreflight.status, 'passed');
   assert.deepEqual(summary.egressBlocked, { ipv4: 0, ipv6: 0 });
   assert.deepEqual(summary.egressProbe, passingProbe());
+  assert.deepEqual(summary.secretService, passingSecretService());
   assert.equal(validDesktopSummary(summary), true);
+});
+
+test('Desktop evidence retains only the finite secret-service failure substep', () => {
+  const failed = stages();
+  failed[1].status = 'failed';
+  failed[1].failureCode = 'secret-service-unavailable';
+  failed[1].checks.secretService = 'failed';
+  failed[1].secretService = {
+    ...passingSecretService(),
+    step: 'secret-store',
+    storeOutcome: 'nonzero-exit',
+    storeExitStatus: 1,
+  };
+
+  const summary = sanitizeDesktopStages(failed, sourceSha);
+  assert.equal(summary.status, 'failed');
+  assert.equal(summary.failureCode, 'secret-service-unavailable');
+  assert.equal(summary.secretService.step, 'secret-store');
+  assert.equal(summary.secretService.storeOutcome, 'nonzero-exit');
+  assert.equal(summary.secretService.storeExitStatus, 1);
+  assert.equal(JSON.stringify(summary).includes('private-canary'), false);
+
+  const unexpected = stages();
+  unexpected[1].secretService.rawOutput = 'private-canary';
+  assert.throws(
+    () => sanitizeDesktopStages(unexpected, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
+
+  const inconsistent = stages();
+  inconsistent[1].secretService.step = 'secret-store';
+  assert.throws(
+    () => sanitizeDesktopStages(inconsistent, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
 });
 
 test('Desktop evidence fails closed on blocked egress and rejects private-shaped fields', () => {

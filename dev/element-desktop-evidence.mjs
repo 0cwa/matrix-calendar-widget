@@ -58,6 +58,25 @@ const ENCRYPTED_STORAGE_BACKENDS = new Set([
   'kwallet5',
   'kwallet6',
 ]);
+const SECRET_SERVICE_STEPS = new Set([
+  'not-run',
+  'dbus-session',
+  'daemon-start',
+  'daemon-output',
+  'secret-store',
+  'secret-lookup',
+  'secret-clear',
+  'keyring-file',
+  'none',
+]);
+const SECRET_COMMAND_OUTCOMES = new Set([
+  'not-run',
+  'passed',
+  'spawn-error',
+  'signaled',
+  'nonzero-exit',
+  'timeout',
+]);
 const PROBE_OUTCOMES = new Set([
   'connected',
   'listener-error',
@@ -174,6 +193,152 @@ function safeStoragePassed(value) {
     value.mode === 'encrypted' &&
     ENCRYPTED_STORAGE_BACKENDS.has(value.backend)
   );
+}
+
+function validateSecretService(value) {
+  if (
+    !hasKeys(value, [
+      'step',
+      'dbusAddressPresent',
+      'daemonOutcome',
+      'daemonExitStatus',
+      'daemonPidPresent',
+      'daemonControlPresent',
+      'storeOutcome',
+      'storeExitStatus',
+      'lookupOutcome',
+      'lookupExitStatus',
+      'lookupMatches',
+      'clearOutcome',
+      'clearExitStatus',
+      'keyringFilePresent',
+    ]) ||
+    !SECRET_SERVICE_STEPS.has(value.step) ||
+    typeof value.dbusAddressPresent !== 'boolean' ||
+    typeof value.daemonPidPresent !== 'boolean' ||
+    typeof value.daemonControlPresent !== 'boolean' ||
+    typeof value.lookupMatches !== 'boolean' ||
+    typeof value.keyringFilePresent !== 'boolean'
+  ) {
+    return false;
+  }
+
+  for (const name of ['daemon', 'store', 'lookup', 'clear']) {
+    const outcome = value[`${name}Outcome`];
+    const exitStatus = value[`${name}ExitStatus`];
+    if (
+      !SECRET_COMMAND_OUTCOMES.has(outcome) ||
+      (exitStatus !== null &&
+        (!Number.isSafeInteger(exitStatus) ||
+          exitStatus < 0 ||
+          exitStatus > 255)) ||
+      (outcome === 'not-run' && exitStatus !== null) ||
+      (outcome === 'passed' && exitStatus !== 0) ||
+      (outcome === 'nonzero-exit' &&
+        (exitStatus === null || exitStatus === 0)) ||
+      (!['passed', 'nonzero-exit'].includes(outcome) && exitStatus !== null)
+    ) {
+      return false;
+    }
+  }
+
+  const daemonPassed = value.daemonOutcome === 'passed';
+  const dataCommandsPassed =
+    value.storeOutcome === 'passed' &&
+    value.lookupOutcome === 'passed' &&
+    value.lookupMatches &&
+    value.clearOutcome === 'passed';
+  const commandsNotRun =
+    value.storeOutcome === 'not-run' &&
+    value.lookupOutcome === 'not-run' &&
+    value.clearOutcome === 'not-run' &&
+    !value.lookupMatches &&
+    !value.keyringFilePresent;
+  const daemonNotRun = value.daemonOutcome === 'not-run';
+
+  switch (value.step) {
+    case 'not-run':
+      return (
+        !value.dbusAddressPresent &&
+        daemonNotRun &&
+        value.daemonExitStatus === null &&
+        !value.daemonPidPresent &&
+        !value.daemonControlPresent &&
+        commandsNotRun
+      );
+    case 'dbus-session':
+      return (
+        !value.dbusAddressPresent &&
+        daemonNotRun &&
+        value.daemonExitStatus === null &&
+        !value.daemonPidPresent &&
+        !value.daemonControlPresent &&
+        commandsNotRun
+      );
+    case 'daemon-start':
+      return (
+        value.dbusAddressPresent &&
+        !daemonPassed &&
+        !value.daemonPidPresent &&
+        !value.daemonControlPresent &&
+        commandsNotRun
+      );
+    case 'daemon-output':
+      return (
+        value.dbusAddressPresent &&
+        daemonPassed &&
+        !value.daemonPidPresent &&
+        !value.daemonControlPresent &&
+        commandsNotRun
+      );
+    case 'secret-store':
+      return (
+        value.dbusAddressPresent &&
+        daemonPassed &&
+        value.daemonPidPresent &&
+        value.storeOutcome !== 'passed'
+      );
+    case 'secret-lookup':
+      return (
+        value.dbusAddressPresent &&
+        daemonPassed &&
+        value.daemonPidPresent &&
+        value.storeOutcome === 'passed' &&
+        (value.lookupOutcome !== 'passed' || !value.lookupMatches)
+      );
+    case 'secret-clear':
+      return (
+        value.dbusAddressPresent &&
+        daemonPassed &&
+        value.daemonPidPresent &&
+        value.storeOutcome === 'passed' &&
+        value.lookupOutcome === 'passed' &&
+        value.lookupMatches &&
+        value.clearOutcome !== 'passed'
+      );
+    case 'keyring-file':
+      return (
+        value.dbusAddressPresent &&
+        daemonPassed &&
+        value.daemonPidPresent &&
+        dataCommandsPassed &&
+        !value.keyringFilePresent
+      );
+    case 'none':
+      return (
+        value.dbusAddressPresent &&
+        daemonPassed &&
+        value.daemonPidPresent &&
+        dataCommandsPassed &&
+        value.keyringFilePresent
+      );
+    default:
+      return false;
+  }
+}
+
+function secretServicePassed(value) {
+  return validateSecretService(value) && value.step === 'none';
 }
 
 function validateRuntimeFacts(value) {
@@ -355,6 +520,7 @@ function validateStartup(record, sourceSha) {
       'package',
       'runtime',
       'origin',
+      'secretService',
       'safeStorage',
       'rendererCount',
       'checks',
@@ -389,6 +555,7 @@ function validateStartup(record, sourceSha) {
         ? record.runtime.chromium === null
         : pattern.test(record.runtime.chromium ?? ''),
     ) ||
+    !validateSecretService(record.secretService) ||
     !validateSafeStorage(record.safeStorage) ||
     record.runtime.runner !== 'ubuntu-24.04' ||
     !hasKeys(record.checks, CHECK_NAMES) ||
@@ -398,6 +565,12 @@ function validateStartup(record, sourceSha) {
   }
   const storagePassed = safeStoragePassed(record.safeStorage);
   if (
+    (record.checks.secretService === 'passed') !==
+      secretServicePassed(record.secretService) ||
+    (record.checks.secretService === 'not_run' &&
+      record.secretService.step !== 'not-run') ||
+    (record.checks.secretService === 'failed' &&
+      ['not-run', 'none'].includes(record.secretService.step)) ||
     (record.checks.safeStorageBackend === 'passed') !== storagePassed ||
     (record.checks.safeStorageBackend === 'not_run' &&
       record.safeStorage.markerCount > 0)
@@ -756,7 +929,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -773,6 +946,22 @@ export function sanitizeDesktopStages(records, sourceSha) {
       runner: 'ubuntu-24.04',
     },
     origin: ORIGIN,
+    secretService: startup?.secretService ?? {
+      step: 'not-run',
+      dbusAddressPresent: false,
+      daemonOutcome: 'not-run',
+      daemonExitStatus: null,
+      daemonPidPresent: false,
+      daemonControlPresent: false,
+      storeOutcome: 'not-run',
+      storeExitStatus: null,
+      lookupOutcome: 'not-run',
+      lookupExitStatus: null,
+      lookupMatches: false,
+      clearOutcome: 'not-run',
+      clearExitStatus: null,
+      keyringFilePresent: false,
+    },
     safeStorage: startup?.safeStorage ?? {
       mode: 'not_observed',
       backend: 'not_observed',
@@ -800,6 +989,7 @@ export function validDesktopSummary(value) {
       'package',
       'runtime',
       'origin',
+      'secretService',
       'safeStorage',
       'rendererCount',
       'targetUidPreflight',
@@ -807,7 +997,7 @@ export function validDesktopSummary(value) {
       'egressProbe',
       'checks',
     ]) &&
-    value.schemaVersion === 5 &&
+    value.schemaVersion === 6 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
@@ -840,6 +1030,13 @@ export function validDesktopSummary(value) {
       /^\d+\.\d+\.\d+$/u.test(value.runtime.electron)) &&
     (value.runtime.chromium === null ||
       /^\d+\.\d+\.\d+(?:\.\d+)?$/u.test(value.runtime.chromium)) &&
+    validateSecretService(value.secretService) &&
+    (value.checks?.secretService === 'passed') ===
+      secretServicePassed(value.secretService) &&
+    (value.checks?.secretService !== 'not_run' ||
+      value.secretService.step === 'not-run') &&
+    (value.checks?.secretService !== 'failed' ||
+      !['not-run', 'none'].includes(value.secretService.step)) &&
     validateSafeStorage(value.safeStorage) &&
     (value.targetUidPreflight === null ||
       validateTargetUidPreflight(value.targetUidPreflight)) &&
@@ -874,6 +1071,7 @@ export function validDesktopSummary(value) {
       ? value.failureCode === null &&
         Object.values(value.checks).every((state) => state === 'passed') &&
         value.targetUidPreflight?.status === 'passed' &&
+        secretServicePassed(value.secretService) &&
         safeStoragePassed(value.safeStorage) &&
         value.runtime.electron !== null &&
         value.runtime.chromium !== null &&

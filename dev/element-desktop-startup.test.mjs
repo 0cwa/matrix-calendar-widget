@@ -1,7 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createSafeStorageLogCollector } from './element-desktop-startup.mjs';
+import {
+  createKeyringUnlockInput,
+  createSafeStorageLogCollector,
+} from './element-desktop-startup.mjs';
+
+test('keyring unlock entropy is encoded as an ASCII line without embedded NULs', () => {
+  const entropy = Buffer.from([
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+  ]);
+  const input = createKeyringUnlockInput(entropy);
+
+  assert.equal(input.toString('ascii'), `${entropy.toString('hex')}\n`);
+  assert.equal(input.at(-1), 0x0a);
+  assert.match(input.subarray(0, -1).toString('ascii'), /^[0-9a-f]{64}$/u);
+  assert.equal(input.includes(0), false);
+});
 
 test('safe-storage collector recognizes the exact vendor marker across chunks', () => {
   const collector = createSafeStorageLogCollector();
