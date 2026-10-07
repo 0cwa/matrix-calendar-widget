@@ -30,9 +30,11 @@ import { isAbsolute, resolve } from 'node:path';
 import { hasUniqueWidgetFrameOwnedByElement } from '../../dev/element-desktop-frame-origin.mjs';
 import {
   appendDesktopJourneyOutcome,
+  appendDesktopLoginStep,
   initializeDesktopJourneyEvidence,
   readSyntheticDesktopCredentials,
   type DesktopJourneyPhase,
+  type DesktopLoginStep,
 } from '../../dev/element-desktop-journey.mjs';
 import { ElementWebPage } from './pages/elementWebPage';
 
@@ -98,6 +100,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let desktopPage: Page | undefined;
   let webHttpRoute: WebHttpRouteObservation | undefined;
   let currentPhase: DesktopJourneyPhase | undefined;
+  let currentLoginStep: DesktopLoginStep = 'not_observed';
   let failed = false;
   let evidenceInitialized = false;
 
@@ -107,13 +110,17 @@ test('Element Desktop room event journey', async ({ browser }) => {
     fixture = readFixture(usersFile);
 
     currentPhase = 'desktop-login';
+    currentLoginStep = 'cdp_connect';
     desktopBrowser = await connectToDesktop();
+    currentLoginStep = 'page_select';
     desktopPage = await getDesktopPage(desktopBrowser);
     desktopPage.setDefaultTimeout(30_000);
+    currentLoginStep = 'credentials_read';
     const credentials = readSyntheticDesktopCredentials({
       filePath: credentialsFile,
       runnerTemp,
     });
+    currentLoginStep = 'login_form_select';
     const username = desktopPage.getByRole('textbox', {
       name: 'Username',
       exact: true,
@@ -123,18 +130,24 @@ test('Element Desktop room event journey', async ({ browser }) => {
       exact: true,
     });
     try {
+      currentLoginStep = 'username_fill';
       await username.fill(credentials.username);
+      currentLoginStep = 'password_fill';
       await password.fill(credentials.password);
     } finally {
       credentials.password = '';
     }
+    currentLoginStep = 'sign_in_submit';
     await desktopPage
       .getByRole('button', { name: 'Sign in', exact: true })
       .click();
     const desktopElement = new ElementWebPage(desktopPage);
+    currentLoginStep = 'rooms_ready';
     await desktopPage
       .getByRole('tree', { name: 'Rooms', exact: true })
       .waitFor({ state: 'visible', timeout: 60_000 });
+    currentLoginStep = 'complete';
+    appendDesktopLoginStep({ ...evidence, step: currentLoginStep });
     recordPhase(evidence, recorded, 'desktop-login');
 
     currentPhase = 'desktop-member-identity';
@@ -315,6 +328,9 @@ test('Element Desktop room event journey', async ({ browser }) => {
     recordPhase(evidence, recorded, 'canonical-edit-read');
   } catch {
     failed = true;
+    if (currentPhase === 'desktop-login' && evidenceInitialized) {
+      safeRecordDesktopLoginStep(evidence, currentLoginStep);
+    }
     if (currentPhase && evidenceInitialized && !recorded.has(currentPhase)) {
       safeRecordPhase(evidence, recorded, currentPhase, 'failed');
     }
@@ -790,6 +806,18 @@ function safeRecordPhase(
   try {
     appendDesktopJourneyOutcome({ ...evidence, phase, status });
     recorded.add(phase);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeRecordDesktopLoginStep(
+  evidence: { filePath: string; runnerTemp: string },
+  step: DesktopLoginStep,
+) {
+  try {
+    appendDesktopLoginStep({ ...evidence, step });
     return true;
   } catch {
     return false;

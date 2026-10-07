@@ -14,12 +14,26 @@ export type DesktopJourneyPhase =
 
 export type DesktopJourneyOutcome = 'passed' | 'failed';
 
+export type DesktopLoginStep =
+  | 'not_observed'
+  | 'cdp_connect'
+  | 'page_select'
+  | 'credentials_read'
+  | 'login_form_select'
+  | 'username_fill'
+  | 'password_fill'
+  | 'sign_in_submit'
+  | 'rooms_ready'
+  | 'complete';
+
 export type DesktopJourneySummary = {
   status: 'passed' | 'failed' | 'incomplete';
+  loginStep: DesktopLoginStep;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
 
 export declare const DESKTOP_JOURNEY_PHASES: readonly DesktopJourneyPhase[];
+export declare const DESKTOP_LOGIN_STEPS: readonly DesktopLoginStep[];
 
 export declare function writeSyntheticDesktopCredentials(input: {
   filePath: string;
@@ -43,6 +57,12 @@ export declare function appendDesktopJourneyOutcome(input: {
   runnerTemp: string;
   phase: DesktopJourneyPhase;
   status: DesktopJourneyOutcome;
+}): void;
+
+export declare function appendDesktopLoginStep(input: {
+  filePath: string;
+  runnerTemp: string;
+  step: DesktopLoginStep;
 }): void;
 
 export declare function summarizeDesktopJourneyEvidence(

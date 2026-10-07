@@ -13,7 +13,9 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   DESKTOP_JOURNEY_PHASES,
+  DESKTOP_LOGIN_STEPS,
   appendDesktopJourneyOutcome,
+  appendDesktopLoginStep,
   initializeDesktopJourneyEvidence,
   readDesktopJourneyEvidence,
   readSyntheticDesktopCredentials,
@@ -163,6 +165,11 @@ test('keeps journey evidence within finite phases and statuses', () => {
       phase: 'desktop-login',
       status: 'passed',
     });
+    appendDesktopLoginStep({
+      filePath,
+      runnerTemp,
+      step: 'complete',
+    });
     appendDesktopJourneyOutcome({
       filePath,
       runnerTemp,
@@ -172,6 +179,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
     assert.equal(summary.status, 'incomplete');
+    assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.cases['desktop-login'], 'passed');
     assert.equal(summary.cases['desktop-widget-origin-isolation'], 'not_run');
     assert.equal(summary.cases['web-member-b-read'], 'passed');
@@ -180,7 +188,66 @@ test('keeps journey evidence within finite phases and statuses', () => {
     assert.equal(
       readFileSync(filePath, 'utf8'),
       '{"phase":"desktop-login","status":"passed"}\n' +
+        '{"loginStep":"complete"}\n' +
         '{"phase":"web-member-b-read","status":"passed"}\n',
+    );
+  });
+});
+
+test('records only the fixed Desktop login step in private journey evidence', () => {
+  assert.deepEqual(
+    [...DESKTOP_LOGIN_STEPS],
+    [
+      'not_observed',
+      'cdp_connect',
+      'page_select',
+      'credentials_read',
+      'login_form_select',
+      'username_fill',
+      'password_fill',
+      'sign_in_submit',
+      'rooms_ready',
+      'complete',
+    ],
+  );
+
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopLoginStep({
+      filePath,
+      runnerTemp,
+      step: 'sign_in_submit',
+    });
+
+    const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
+    assert.equal(summary.loginStep, 'sign_in_submit');
+    assert.throws(
+      () =>
+        appendDesktopLoginStep({
+          filePath,
+          runnerTemp,
+          step: 'complete',
+        }),
+      /Invalid Desktop journey input/u,
+    );
+    assert.throws(
+      () =>
+        summarizeDesktopJourneyEvidence(
+          '{"phase":"desktop-login","status":"passed"}\n',
+        ),
+      /Invalid Desktop journey input/u,
+    );
+    assert.throws(
+      () =>
+        summarizeDesktopJourneyEvidence(
+          '{"loginStep":"not-a-fixed-step","private":"value"}\n',
+        ),
+      /Invalid Desktop journey input/u,
+    );
+    assert.equal(
+      readFileSync(filePath, 'utf8'),
+      '{"loginStep":"sign_in_submit"}\n',
     );
   });
 });

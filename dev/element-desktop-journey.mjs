@@ -23,8 +23,21 @@ export const DESKTOP_JOURNEY_PHASES = Object.freeze([
   'canonical-edit-read',
   'web-http-route-enforcement',
 ]);
+export const DESKTOP_LOGIN_STEPS = Object.freeze([
+  'not_observed',
+  'cdp_connect',
+  'page_select',
+  'credentials_read',
+  'login_form_select',
+  'username_fill',
+  'password_fill',
+  'sign_in_submit',
+  'rooms_ready',
+  'complete',
+]);
 
 const PHASE_SET = new Set(DESKTOP_JOURNEY_PHASES);
+const LOGIN_STEP_SET = new Set(DESKTOP_LOGIN_STEPS);
 const JOURNEY_CREDENTIALS_NAME = 'element-acceptance-desktop-credentials.json';
 const JOURNEY_EVIDENCE_NAME = 'element-desktop-journey-stage.jsonl';
 const MAX_CREDENTIAL_BYTES = 2_048;
@@ -128,8 +141,10 @@ function parseEvidence(input) {
   }
 
   const outcomes = new Map();
+  let loginStep = 'not_observed';
+  let loginStepRecorded = false;
   const rows = input.split(/\r?\n/u).filter(Boolean);
-  if (rows.length > DESKTOP_JOURNEY_PHASES.length) invalidInput();
+  if (rows.length > DESKTOP_JOURNEY_PHASES.length + 1) invalidInput();
 
   for (const row of rows) {
     let value;
@@ -138,10 +153,18 @@ function parseEvidence(input) {
     } catch {
       invalidInput();
     }
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      invalidInput();
+    }
+    if (Object.keys(value).join(',') === 'loginStep') {
+      if (loginStepRecorded || !LOGIN_STEP_SET.has(value.loginStep)) {
+        invalidInput();
+      }
+      loginStep = value.loginStep;
+      loginStepRecorded = true;
+      continue;
+    }
     if (
-      value === null ||
-      typeof value !== 'object' ||
-      Array.isArray(value) ||
       Object.keys(value).sort().join(',') !== 'phase,status' ||
       !PHASE_SET.has(value.phase) ||
       !['passed', 'failed'].includes(value.status) ||
@@ -151,7 +174,7 @@ function parseEvidence(input) {
     }
     outcomes.set(value.phase, value.status);
   }
-  return outcomes;
+  return { outcomes, loginStep, loginStepRecorded };
 }
 
 export function readSyntheticDesktopCredentials({ filePath, runnerTemp }) {
@@ -209,7 +232,7 @@ export function appendDesktopJourneyOutcome({
 }) {
   const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
   privateFileStat(path, MAX_EVIDENCE_BYTES);
-  const outcomes = parseEvidence(readFileSync(path, 'utf8'));
+  const { outcomes } = parseEvidence(readFileSync(path, 'utf8'));
   if (!PHASE_SET.has(phase) || !['passed', 'failed'].includes(status)) {
     invalidInput();
   }
@@ -226,8 +249,28 @@ export function appendDesktopJourneyOutcome({
   privateFileStat(path, MAX_EVIDENCE_BYTES);
 }
 
+export function appendDesktopLoginStep({ filePath, runnerTemp, step }) {
+  const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
+  privateFileStat(path, MAX_EVIDENCE_BYTES);
+  const parsed = parseEvidence(readFileSync(path, 'utf8'));
+  if (!LOGIN_STEP_SET.has(step) || parsed.loginStepRecorded) invalidInput();
+
+  try {
+    appendFileSync(path, `${JSON.stringify({ loginStep: step })}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+  } catch {
+    invalidInput();
+  }
+  privateFileStat(path, MAX_EVIDENCE_BYTES);
+}
+
 export function summarizeDesktopJourneyEvidence(input) {
-  const outcomes = parseEvidence(input);
+  const { outcomes, loginStep } = parseEvidence(input);
+  if (outcomes.get('desktop-login') === 'passed' && loginStep !== 'complete') {
+    invalidInput();
+  }
   const cases = Object.fromEntries(
     DESKTOP_JOURNEY_PHASES.map((phase) => [
       phase,
@@ -238,6 +281,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   const complete = Object.values(cases).every((value) => value === 'passed');
   return {
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
+    loginStep,
     cases,
   };
 }
