@@ -632,8 +632,13 @@ async function snapshotDelivery() {
       'reminder-delivery-snapshot',
     );
     const summary = summarizeDeliveries(deliveries, titles.length);
-    const { complete, ...details } = summary;
-    if (!complete) {
+    const details = {
+      count: summary.count,
+      attemptCount: summary.attemptCount,
+      deliveryStateSent: summary.deliveryStateSent,
+      deliveryClaimClear: summary.deliveryClaimClear,
+    };
+    if (!summary.complete) {
       throw new StageFailure('reminder-delivery-snapshot', details);
     }
     writeFileSync(
