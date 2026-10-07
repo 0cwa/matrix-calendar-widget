@@ -14,6 +14,7 @@ import {
   uidProcessObservationFromLifecycle,
   validDesktopSummary,
 } from './element-desktop-evidence.mjs';
+import { summarizeUidLifecycleObservation } from './element-desktop-startup.mjs';
 
 const sourceSha = 'a'.repeat(40);
 const checks = Object.fromEntries(
@@ -589,6 +590,259 @@ test('trusted sandbox resolution uses root-bound CDP identity when argv misses a
     const result = resolveTrustedRendererSandbox(processGroup, unsafe);
     assert.equal(result.passed, false, name);
   }
+});
+
+test('trusted CDP proof cannot override explicit unsafe app-group sandbox states', () => {
+  const lifecycle = passingUidLifecycleObservation();
+  const rejectedStates = [
+    [
+      'disabled seccomp',
+      {
+        sandboxReason: 'seccomp_unconfirmed',
+        rendererCount: 1,
+        seccompState: 'disabled',
+        noNewPrivsState: 'enabled',
+      },
+      'seccompState',
+      'disabled',
+    ],
+    [
+      'mixed seccomp',
+      {
+        sandboxReason: 'seccomp_unconfirmed',
+        rendererCount: 1,
+        seccompState: 'mixed',
+        noNewPrivsState: 'enabled',
+      },
+      'seccompState',
+      'mixed',
+    ],
+    [
+      'disabled no new privs',
+      {
+        sandboxReason: 'no_new_privs_unconfirmed',
+        rendererCount: 1,
+        seccompState: 'enabled',
+        noNewPrivsState: 'disabled',
+      },
+      'noNewPrivsState',
+      'disabled',
+    ],
+    [
+      'mixed no new privs',
+      {
+        sandboxReason: 'no_new_privs_unconfirmed',
+        rendererCount: 1,
+        seccompState: 'enabled',
+        noNewPrivsState: 'mixed',
+      },
+      'noNewPrivsState',
+      'mixed',
+    ],
+  ];
+
+  for (const [name, overrides, stateField, expectedState] of rejectedStates) {
+    const result = resolveTrustedRendererSandbox(
+      passingRendererDiagnostics(overrides),
+      lifecycle,
+    );
+    assert.equal(result.passed, false, name);
+    assert.equal(
+      result.rendererDiagnostics.sandboxReason,
+      'renderer_ownership_unconfirmed',
+      name,
+    );
+    assert.equal(result.rendererDiagnostics[stateField], expectedState, name);
+  }
+
+  const unavailableSeccomp = resolveTrustedRendererSandbox(
+    passingRendererDiagnostics({
+      sandboxReason: 'seccomp_unconfirmed',
+      rendererCount: 1,
+      seccompState: 'unavailable',
+      noNewPrivsState: 'enabled',
+    }),
+    lifecycle,
+  );
+  assert.equal(unavailableSeccomp.passed, true);
+  assert.equal(unavailableSeccomp.rendererDiagnostics.seccompState, 'enabled');
+
+  const unavailableNoNewPrivs = resolveTrustedRendererSandbox(
+    passingRendererDiagnostics({
+      sandboxReason: 'no_new_privs_unconfirmed',
+      rendererCount: 1,
+      seccompState: 'enabled',
+      noNewPrivsState: 'unavailable',
+    }),
+    lifecycle,
+  );
+  assert.equal(unavailableNoNewPrivs.passed, true);
+  assert.equal(
+    unavailableNoNewPrivs.rendererDiagnostics.noNewPrivsState,
+    'enabled',
+  );
+});
+
+test('trusted CDP renderer set reconciles with the complete root lifecycle census', () => {
+  const processGroup = passingRendererDiagnostics();
+  const mismatchedCount = passingUidLifecycleObservation();
+  mismatchedCount.uidProcessCount = 3;
+  mismatchedCount.nonZombieProcessCount = 3;
+  mismatchedCount.processClassCounts.renderer = 2;
+  mismatchedCount.rendererOwnership = {
+    ...mismatchedCount.rendererOwnership,
+    rendererCount: 2,
+    appDescendantCount: 2,
+    appProcessGroupCount: 2,
+    appDescendantAndProcessGroupCount: 2,
+  };
+
+  const countMismatchResult = resolveTrustedRendererSandbox(
+    processGroup,
+    mismatchedCount,
+  );
+  assert.equal(countMismatchResult.passed, false);
+  assert.equal(
+    countMismatchResult.rendererDiagnostics.sandboxReason,
+    'renderer_ownership_unconfirmed',
+  );
+
+  const uncontainedRenderer = passingUidLifecycleObservation();
+  uncontainedRenderer.rendererOwnership = {
+    ...uncontainedRenderer.rendererOwnership,
+    appProcessGroupCount: 0,
+    appDescendantAndProcessGroupCount: 0,
+    appDescendantOnlyCount: 1,
+  };
+  const uncontainedResult = resolveTrustedRendererSandbox(
+    processGroup,
+    uncontainedRenderer,
+  );
+  assert.equal(uncontainedResult.passed, false);
+
+  const unsafeLifecycleSecurity = passingUidLifecycleObservation();
+  unsafeLifecycleSecurity.seccompState = 'disabled';
+  const unsafeSecurityResult = resolveTrustedRendererSandbox(
+    processGroup,
+    unsafeLifecycleSecurity,
+  );
+  assert.equal(unsafeSecurityResult.passed, false);
+
+  const foreignAppDescendant = passingUidLifecycleObservation();
+  foreignAppDescendant.rendererOwnership.otherUidAppDescendantCount = 1;
+  const foreignDescendantResult = resolveTrustedRendererSandbox(
+    processGroup,
+    foreignAppDescendant,
+  );
+  assert.equal(foreignDescendantResult.passed, false);
+});
+
+test('trusted renderer proof covers known argv PIDs without equating argv and CDP totals', () => {
+  const processRow = (
+    pid,
+    parentPid,
+    processGroupId,
+    args,
+    overrides = {},
+  ) => ({
+    pid,
+    parentPid,
+    processGroupId,
+    state: 'S',
+    uids: [24_000, 24_000, 24_000, 24_000],
+    args,
+    seccomp: '2',
+    noNewPrivs: '1',
+    unreadable: false,
+    ...overrides,
+  });
+  const app = processRow(500, 1, 500, ['/usr/bin/element-desktop']);
+  const summarize = (children, cdpPids) =>
+    summarizeUidLifecycleObservation(
+      [app, ...children],
+      24_000,
+      500,
+      true,
+      false,
+      {
+        state: 'observed',
+        overflow: false,
+        rendererCount: cdpPids.length,
+        pids: cdpPids,
+      },
+    );
+  const secureRenderer = processRow(502, 500, 500, [
+    '--type=renderer',
+    'private-process-canary',
+  ]);
+  const processGroup = passingRendererDiagnostics();
+
+  const argvMiss = summarize(
+    [processRow(502, 500, 500, ['--type=utility'])],
+    [502],
+  );
+  assert.equal(argvMiss.state, 'observed');
+  assert.equal(argvMiss.rendererOwnership.rendererCount, 0);
+  assert.equal(argvMiss.cdpRendererObservation.rendererCount, 1);
+  assert.equal(argvMiss.cdpRendererObservation.argvRendererMatchCount, 0);
+  assert.equal(
+    resolveTrustedRendererSandbox(
+      passingRendererDiagnostics({
+        sandboxReason: 'renderer_missing',
+        rendererCount: 0,
+        seccompState: 'unavailable',
+        noNewPrivsState: 'unavailable',
+      }),
+      argvMiss,
+    ).passed,
+    true,
+  );
+
+  const omittedUnsafeRenderer = summarize(
+    [secureRenderer, processRow(503, 500, 500, ['--type=renderer'])],
+    [502],
+  );
+  assert.equal(omittedUnsafeRenderer.cdpRendererObservation.state, 'observed');
+  assert.equal(omittedUnsafeRenderer.state, 'partial');
+  assert.equal(
+    resolveTrustedRendererSandbox(processGroup, omittedUnsafeRenderer).passed,
+    false,
+  );
+
+  const coveredMixedMarkers = summarize(
+    [secureRenderer, processRow(503, 500, 500, ['--type=utility'])],
+    [502, 503],
+  );
+  assert.equal(coveredMixedMarkers.state, 'observed');
+  assert.equal(coveredMixedMarkers.rendererOwnership.rendererCount, 1);
+  assert.equal(coveredMixedMarkers.cdpRendererObservation.rendererCount, 2);
+  assert.equal(
+    coveredMixedMarkers.cdpRendererObservation.argvRendererMatchCount,
+    1,
+  );
+  const mixedResult = resolveTrustedRendererSandbox(
+    processGroup,
+    coveredMixedMarkers,
+  );
+  assert.equal(mixedResult.passed, true);
+  assert.equal(mixedResult.rendererCount, 2);
+
+  const uncoveredMixedMarkers = summarize(
+    [secureRenderer, processRow(503, 500, 500, ['--type=utility'])],
+    [503],
+  );
+  assert.equal(uncoveredMixedMarkers.state, 'partial');
+  assert.equal(
+    resolveTrustedRendererSandbox(processGroup, uncoveredMixedMarkers).passed,
+    false,
+  );
+  const publicEvidence = JSON.stringify([
+    argvMiss,
+    omittedUnsafeRenderer,
+    coveredMixedMarkers,
+    uncoveredMixedMarkers,
+  ]);
+  assert.doesNotMatch(publicEvidence, /502|503|private-process-canary/u);
 });
 
 test('startup sanitizer rejects a native sandbox pass without full root CDP binding', () => {

@@ -1022,6 +1022,13 @@ export function summarizeUidLifecycleObservation(
     unknown: 0,
   };
   const rendererSecurityRows = [];
+  const completeCdpRendererPids =
+    validateCdpRendererHandoff(cdpRendererHandoff) &&
+    cdpRendererHandoff.state === 'observed' &&
+    !cdpRendererHandoff.overflow
+      ? new Set(cdpRendererHandoff.pids)
+      : null;
+  const appBoundRendererPids = new Set();
   let uidProcessCount = 0;
   let nonZombieProcessCount = 0;
   let zombieCount = 0;
@@ -1088,6 +1095,9 @@ export function summarizeUidLifecycleObservation(
     if (!applicationIdentityVerified) continue;
 
     const inAppProcessGroup = item.processGroupId === applicationPid;
+    if (appDescendant || inAppProcessGroup) {
+      appBoundRendererPids.add(item.pid);
+    }
     if (appDescendant) appDescendantRendererCount += 1;
     if (inAppProcessGroup) appProcessGroupRendererCount += 1;
     if (appDescendant && inAppProcessGroup) {
@@ -1122,7 +1132,13 @@ export function summarizeUidLifecycleObservation(
   if (countValues.some((value) => value > MAX_DIAGNOSTIC_COUNT)) {
     sawCountOverflow = true;
   }
-  const state = complete && !sawCountOverflow ? 'observed' : 'partial';
+  const cdpRendererCoverageComplete =
+    completeCdpRendererPids === null ||
+    [...appBoundRendererPids].every((pid) => completeCdpRendererPids.has(pid));
+  const state =
+    complete && !sawCountOverflow && cdpRendererCoverageComplete
+      ? 'observed'
+      : 'partial';
   const rendererOwnershipState = applicationIdentityVerified
     ? state
     : applicationPid === null

@@ -509,6 +509,12 @@ function trustedRendererSandboxReason(processGroup, lifecycle) {
   if (processGroup.uidMismatchCount > 0) return 'uid_mismatch';
   if (processGroup.noSandboxFlagCount > 0) return 'no_sandbox_flag';
   if (
+    ['disabled', 'mixed'].includes(processGroup.seccompState) ||
+    ['disabled', 'mixed'].includes(processGroup.noNewPrivsState)
+  ) {
+    return 'renderer_ownership_unconfirmed';
+  }
+  if (
     ![
       'passed',
       'renderer_missing',
@@ -564,6 +570,28 @@ function trustedRendererSandboxReason(processGroup, lifecycle) {
   ) {
     return 'renderer_ownership_unconfirmed';
   }
+  const ownership = lifecycle.rendererOwnership;
+  if (
+    ownership.appIdentityState !== 'verified' ||
+    ownership.state !== 'observed' ||
+    ownership.securityCoverageState !== 'observed' ||
+    ownership.otherUidAppDescendantCount !== 0 ||
+    ownership.rendererCount !== renderer.argvRendererMatchCount ||
+    ownership.appDescendantCount !== ownership.rendererCount ||
+    ownership.appProcessGroupCount !== ownership.rendererCount ||
+    ownership.appDescendantAndProcessGroupCount !== ownership.rendererCount ||
+    ownership.appDescendantOnlyCount !== 0 ||
+    ownership.appProcessGroupOnlyCount !== 0 ||
+    ownership.noCurrentLinkCount !== 0 ||
+    (ownership.rendererCount === 0 &&
+      (lifecycle.seccompState !== 'unavailable' ||
+        lifecycle.noNewPrivsState !== 'unavailable')) ||
+    (ownership.rendererCount > 0 &&
+      (lifecycle.seccompState !== 'enabled' ||
+        lifecycle.noNewPrivsState !== 'enabled'))
+  ) {
+    return 'renderer_ownership_unconfirmed';
+  }
   if (renderer.seccompState !== 'enabled') return 'seccomp_unconfirmed';
   if (renderer.noNewPrivsState !== 'enabled') {
     return 'no_new_privs_unconfirmed';
@@ -604,9 +632,14 @@ export function resolveTrustedRendererSandbox(processGroup, lifecycle) {
       cdpObservation?.state === 'partial'
         ? cdpObservation.rendererCount
         : processGroup.rendererCount,
-    seccompState: cdpObservation?.seccompState ?? processGroup.seccompState,
-    noNewPrivsState:
-      cdpObservation?.noNewPrivsState ?? processGroup.noNewPrivsState,
+    seccompState: ['disabled', 'mixed'].includes(processGroup.seccompState)
+      ? processGroup.seccompState
+      : (cdpObservation?.seccompState ?? processGroup.seccompState),
+    noNewPrivsState: ['disabled', 'mixed'].includes(
+      processGroup.noNewPrivsState,
+    )
+      ? processGroup.noNewPrivsState
+      : (cdpObservation?.noNewPrivsState ?? processGroup.noNewPrivsState),
   };
   return {
     passed: reason === 'passed',
