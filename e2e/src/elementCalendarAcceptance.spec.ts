@@ -22,6 +22,7 @@ import {
   type FrameLocator,
   type Locator,
   type Page,
+  type Request,
   type Response,
 } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
@@ -1305,6 +1306,8 @@ function observePostCreateVisibility(
     matchingListItemCount: 0,
   };
   const pendingResponseReads: Promise<void>[] = [];
+  const postCreateRangeRequests = new WeakSet<Request>();
+  let successfulCreateResponseObserved = false;
   let createdEventId: string | undefined;
   let createdEventUid: string | undefined;
   let createdEventTiming: CreatedEventTiming | undefined;
@@ -1351,14 +1354,22 @@ function observePostCreateVisibility(
     }
   };
 
-  const onRequest = (request: import('@playwright/test').Request) => {
+  const onRequest = (request: Request) => {
+    if (
+      request.method() === 'POST' &&
+      isCalendarEventsEndpoint(request.url())
+    ) {
+      return;
+    }
     if (
       request.method() !== 'GET' ||
-      !isCalendarEventsEndpoint(request.url())
+      !isCalendarEventsEndpoint(request.url()) ||
+      !successfulCreateResponseObserved
     ) {
       return;
     }
 
+    postCreateRangeRequests.add(request);
     observation.postCreateEventGetRequestCount = Math.min(
       observation.postCreateEventGetRequestCount + 1,
       2,
@@ -1377,9 +1388,19 @@ function observePostCreateVisibility(
   };
 
   const onResponse = (response: Response) => {
+    const request = response.request();
     if (
-      response.request().method() !== 'GET' ||
-      !isCalendarEventsEndpoint(response.url())
+      request.method() === 'POST' &&
+      isCalendarEventsEndpoint(response.url())
+    ) {
+      successfulCreateResponseObserved =
+        response.status() >= 200 && response.status() < 300;
+      return;
+    }
+    if (
+      request.method() !== 'GET' ||
+      !isCalendarEventsEndpoint(response.url()) ||
+      !postCreateRangeRequests.has(request)
     ) {
       return;
     }
