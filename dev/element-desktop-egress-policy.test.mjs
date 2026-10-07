@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -10,6 +19,7 @@ import {
   probeFromSpawn,
   RUNTIME_FACTS_SOURCE,
   runtimeFactsFromSpawn,
+  stagedE2ePackagePath,
 } from './element-desktop-egress-policy.mjs';
 
 function passingFamily() {
@@ -288,6 +298,11 @@ test('isolated runtime facts parser accepts only fixed fields and Node 22 versio
     nodeExecutableRunnable: true,
     scriptExists: true,
     scriptReadable: true,
+    startupScriptReadable: true,
+    configReadable: true,
+    e2eManifestReadable: true,
+    playwrightUsable: true,
+    checkoutControlProtected: true,
   };
   const result = runtimeFactsFromSpawn(
     {
@@ -311,6 +326,11 @@ test('isolated runtime facts parser accepts only fixed fields and Node 22 versio
     nodeExecutableRunnable: true,
     scriptExists: true,
     scriptReadable: true,
+    startupScriptReadable: true,
+    configReadable: true,
+    e2eManifestReadable: true,
+    playwrightUsable: true,
+    checkoutControlProtected: true,
   });
 
   const malformed = runtimeFactsFromSpawn(
@@ -348,28 +368,143 @@ test('runtime facts child emits the exact bounded protocol', (context) => {
   }
   const uid = process.getuid?.();
   assert.ok(Number.isSafeInteger(uid) && uid > 0);
-  const script = fileURLToPath(
-    new URL('./element-desktop-egress-policy.mjs', import.meta.url),
-  );
-  const result = spawnSync(
-    process.execPath,
-    ['-e', RUNTIME_FACTS_SOURCE, String(uid), script],
-    {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 2_000,
-      maxBuffer: 4_096,
-    },
-  );
-  const facts = runtimeFactsFromSpawn(result, script);
-  assert.equal(facts.childResult, 'probe-reported');
-  assert.equal(facts.uidMatches, true);
-  assert.match(facts.nodeVersion, /^\d+\.\d+\.\d+$/u);
-  assert.equal(facts.nodeVersionSupported, facts.nodeVersion.startsWith('22.'));
-  assert.equal(facts.nodeExecutableRunnable, true);
-  assert.equal(facts.scriptExists, true);
-  assert.equal(facts.scriptReadable, true);
-  assert.equal(JSON.stringify(facts).includes(script), false);
+  const root = mkdtempSync(join(tmpdir(), 'mcw-desktop-runtime-facts-'));
+  try {
+    const script = join(
+      root,
+      'probe',
+      'dev',
+      'element-desktop-egress-policy.mjs',
+    );
+    const startupScript = join(
+      root,
+      'probe',
+      'dev',
+      'element-desktop-startup.mjs',
+    );
+    const configFile = join(
+      root,
+      'probe',
+      'dev',
+      'element-desktop-probe-config.json',
+    );
+    const packageDir = join(
+      root,
+      'probe',
+      'node_modules',
+      '@playwright',
+      'test',
+    );
+    const e2ePackage = stagedE2ePackagePath(script);
+    const e2eDir = join(root, 'probe', 'e2e');
+    const controlRoot = join(root, 'checkout');
+    const controlDev = join(controlRoot, 'dev');
+    const controlScript = join(controlDev, 'element-desktop-egress-policy.mjs');
+    mkdirSync(packageDir, { recursive: true });
+    mkdirSync(e2eDir, { recursive: true });
+    mkdirSync(join(root, 'probe', 'dev'), { recursive: true });
+    mkdirSync(controlDev, { recursive: true });
+    writeFileSync(script, 'staged probe script\n');
+    writeFileSync(startupScript, 'staged startup script\n');
+    writeFileSync(configFile, '{}\n');
+    writeFileSync(controlScript, 'trusted control source\n');
+    chmodSync(controlScript, 0o400);
+    chmodSync(controlDev, 0o500);
+    chmodSync(controlRoot, 0o500);
+    writeFileSync(e2ePackage, '{}\n');
+    writeFileSync(
+      join(packageDir, 'package.json'),
+      JSON.stringify({ name: '@playwright/test', main: 'index.js' }),
+    );
+    writeFileSync(
+      join(packageDir, 'index.js'),
+      'module.exports = { chromium: { connectOverCDP() {} } };\n',
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        '-e',
+        RUNTIME_FACTS_SOURCE,
+        String(uid),
+        script,
+        startupScript,
+        configFile,
+        e2ePackage,
+        controlRoot,
+        controlDev,
+        controlScript,
+      ],
+      {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 2_000,
+        maxBuffer: 4_096,
+      },
+    );
+    const facts = runtimeFactsFromSpawn(result, script);
+    assert.equal(facts.childResult, 'probe-reported');
+    assert.equal(facts.uidMatches, true);
+    assert.match(facts.nodeVersion, /^\d+\.\d+\.\d+$/u);
+    assert.equal(
+      facts.nodeVersionSupported,
+      facts.nodeVersion.startsWith('22.'),
+    );
+    assert.equal(facts.nodeExecutableRunnable, true);
+    assert.equal(facts.scriptExists, true);
+    assert.equal(facts.scriptReadable, true);
+    assert.equal(facts.startupScriptReadable, true);
+    assert.equal(facts.configReadable, true);
+    assert.equal(facts.e2eManifestReadable, true);
+    assert.equal(facts.playwrightUsable, true);
+    assert.equal(facts.checkoutControlProtected, true);
+    assert.equal(JSON.stringify(facts).includes(script), false);
+    assert.equal(JSON.stringify(facts).includes(root), false);
+
+    rmSync(join(root, 'probe', 'node_modules'), {
+      recursive: true,
+      force: true,
+    });
+    const missingStartup = join(root, 'missing-startup.mjs');
+    const missingConfig = join(root, 'missing-config.json');
+    const missingManifest = join(root, 'missing-e2e', 'package.json');
+    const incompleteResult = spawnSync(
+      process.execPath,
+      [
+        '-e',
+        RUNTIME_FACTS_SOURCE,
+        String(uid),
+        script,
+        missingStartup,
+        missingConfig,
+        missingManifest,
+        controlRoot,
+        controlDev,
+        controlScript,
+      ],
+      {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 2_000,
+        maxBuffer: 4_096,
+      },
+    );
+    const incomplete = runtimeFactsFromSpawn(incompleteResult, script);
+    assert.equal(incomplete.childResult, 'probe-reported');
+    assert.equal(incomplete.startupScriptReadable, false);
+    assert.equal(incomplete.configReadable, false);
+    assert.equal(incomplete.e2eManifestReadable, false);
+    assert.equal(incomplete.playwrightUsable, false);
+    assert.equal(incomplete.checkoutControlProtected, true);
+    assert.equal(JSON.stringify(incomplete).includes(root), false);
+  } finally {
+    try {
+      chmodSync(join(root, 'checkout', 'dev'), 0o700);
+      chmodSync(join(root, 'checkout'), 0o700);
+    } catch {
+      // Preserve the test result if the fixture was only partially created.
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('connect probe checks its real uid before making a loopback connection', async (context) => {

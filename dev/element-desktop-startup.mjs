@@ -243,6 +243,7 @@ function requireProfile() {
     'cache',
     'runtime',
     'profile',
+    'probe',
   ]) {
     const path = `${profileRoot}/${name}`;
     mkdirSync(path, { recursive: true, mode: 0o700 });

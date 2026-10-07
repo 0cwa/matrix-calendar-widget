@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createConnection, createServer } from 'node:net';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const LOCAL_HOMESERVER_PORT = 8008;
@@ -548,8 +549,12 @@ function connectResult(host, port) {
   });
 }
 
-async function testFamilyAsUid(uid, host, port) {
-  const script = fileURLToPath(import.meta.url);
+async function testFamilyAsUid(
+  uid,
+  host,
+  port,
+  script = fileURLToPath(import.meta.url),
+) {
   const result = spawnSync(
     'sudo',
     [
@@ -574,19 +579,46 @@ async function testFamilyAsUid(uid, host, port) {
   return probeFromSpawn(result, script);
 }
 
+export function stagedE2ePackagePath(scriptPath) {
+  if (typeof scriptPath !== 'string' || scriptPath.length === 0) {
+    throw new Error('invalid staged probe script');
+  }
+  return join(dirname(dirname(scriptPath)), 'e2e', 'package.json');
+}
+
 export const RUNTIME_FACTS_SOURCE = `
 const fs = require('node:fs');
-const [expectedUidText, scriptPath] = process.argv.slice(1);
+const { createRequire } = require('node:module');
+const [expectedUidText, scriptPath, startupPath, configPath, e2ePackagePath, checkoutRootPath, checkoutDevPath, controlScriptPath] = process.argv.slice(1);
 const expectedUid = Number(expectedUidText);
 const canAccess = (path, mode) => {
   try { fs.accessSync(path, mode); return true; } catch { return false; }
 };
+let playwrightUsable = false;
+try {
+  const e2eRequire = createRequire(e2ePackagePath);
+  playwrightUsable = typeof e2eRequire('@playwright/test').chromium?.connectOverCDP === 'function';
+} catch {}
 const facts = {
   uidMatches: process.getuid?.() === expectedUid,
   nodeVersion: process.versions.node,
   nodeExecutableRunnable: canAccess(process.execPath, fs.constants.X_OK),
   scriptExists: fs.existsSync(scriptPath),
   scriptReadable: canAccess(scriptPath, fs.constants.R_OK),
+  startupScriptReadable: canAccess(startupPath, fs.constants.R_OK),
+  configReadable: canAccess(configPath, fs.constants.R_OK),
+  e2eManifestReadable: canAccess(e2ePackagePath, fs.constants.R_OK),
+  playwrightUsable,
+  checkoutControlProtected: [
+    checkoutRootPath,
+    checkoutDevPath,
+    controlScriptPath,
+  ].every(
+    (path) =>
+      typeof path === 'string' &&
+      path.length > 0 &&
+      !canAccess(path, fs.constants.W_OK),
+  ),
 };
 process.stdout.write('runtime-facts-started\\n' + JSON.stringify(facts) + '\\n');
 `;
@@ -621,6 +653,11 @@ export function runtimeFactsFromSpawn(result, expectedScriptPath) {
     nodeExecutableRunnable: null,
     scriptExists: null,
     scriptReadable: null,
+    startupScriptReadable: null,
+    configReadable: null,
+    e2eManifestReadable: null,
+    playwrightUsable: null,
+    checkoutControlProtected: null,
   };
   if (result?.error) return { ...resultBase, childResult: 'spawn-error' };
   if (childSignal !== null) return { ...resultBase, childResult: 'signaled' };
@@ -642,6 +679,11 @@ export function runtimeFactsFromSpawn(result, expectedScriptPath) {
       'nodeExecutableRunnable',
       'scriptExists',
       'scriptReadable',
+      'startupScriptReadable',
+      'configReadable',
+      'e2eManifestReadable',
+      'playwrightUsable',
+      'checkoutControlProtected',
     ];
     if (
       value === null ||
@@ -651,9 +693,16 @@ export function runtimeFactsFromSpawn(result, expectedScriptPath) {
       typeof value.uidMatches !== 'boolean' ||
       typeof value.nodeVersion !== 'string' ||
       !/^\d+\.\d+\.\d+$/u.test(value.nodeVersion) ||
-      ['nodeExecutableRunnable', 'scriptExists', 'scriptReadable'].some(
-        (key) => typeof value[key] !== 'boolean',
-      )
+      [
+        'nodeExecutableRunnable',
+        'scriptExists',
+        'scriptReadable',
+        'startupScriptReadable',
+        'configReadable',
+        'e2eManifestReadable',
+        'playwrightUsable',
+        'checkoutControlProtected',
+      ].some((key) => typeof value[key] !== 'boolean')
     ) {
       return { ...resultBase, childResult: 'protocol-invalid' };
     }
@@ -666,6 +715,11 @@ export function runtimeFactsFromSpawn(result, expectedScriptPath) {
       nodeExecutableRunnable: value.nodeExecutableRunnable,
       scriptExists: value.scriptExists,
       scriptReadable: value.scriptReadable,
+      startupScriptReadable: value.startupScriptReadable,
+      configReadable: value.configReadable,
+      e2eManifestReadable: value.e2eManifestReadable,
+      playwrightUsable: value.playwrightUsable,
+      checkoutControlProtected: value.checkoutControlProtected,
     };
   } catch {
     return { ...resultBase, childResult: 'protocol-invalid' };
@@ -680,9 +734,30 @@ function unrunPositiveProbe() {
   };
 }
 
-export async function isolatedUidPreflight(uidValue) {
+function requireStagedProbeScript(value) {
+  const profileRoot = process.env.ELEMENT_DESKTOP_PROFILE_ROOT ?? '';
+  if (
+    !/^\/tmp\/mcw-element-desktop-[0-9]{1,18}-[0-9]{1,6}-[A-Za-z0-9]{6}$/u.test(
+      profileRoot,
+    ) ||
+    value !== `${profileRoot}/probe/dev/element-desktop-egress-policy.mjs`
+  ) {
+    throw new Error('invalid staged probe script');
+  }
+  return value;
+}
+
+export async function isolatedUidPreflight(
+  uidValue,
+  stagedScriptPath = fileURLToPath(import.meta.url),
+) {
   const uid = requireDecimal(uidValue, 1, 65_535);
-  const script = fileURLToPath(import.meta.url);
+  const script = stagedScriptPath;
+  const startupScript = process.env.ELEMENT_DESKTOP_STARTUP_SCRIPT_PATH ?? '';
+  const configFile = process.env.ELEMENT_DESKTOP_CONFIG_PATH ?? '';
+  const e2ePackage = stagedE2ePackagePath(script);
+  const checkoutDev = fileURLToPath(new URL('.', import.meta.url));
+  const checkoutRoot = fileURLToPath(new URL('../', import.meta.url));
   const factsResult = spawnSync(
     'sudo',
     [
@@ -695,6 +770,12 @@ export async function isolatedUidPreflight(uidValue) {
       RUNTIME_FACTS_SOURCE,
       String(uid),
       script,
+      startupScript,
+      configFile,
+      e2ePackage,
+      checkoutRoot,
+      checkoutDev,
+      fileURLToPath(import.meta.url),
     ],
     {
       encoding: 'utf8',
@@ -715,7 +796,12 @@ export async function isolatedUidPreflight(uidValue) {
     try {
       scriptProbe = {
         listenerBound: true,
-        ...(await testFamilyAsUid(uid, '127.0.0.1', listener.port)),
+        ...(await testFamilyAsUid(
+          uid,
+          '127.0.0.1',
+          listener.port,
+          stagedScriptPath,
+        )),
         listenerAcceptedCount: 0,
       };
     } catch {
@@ -744,6 +830,11 @@ export async function isolatedUidPreflight(uidValue) {
     runtimeFacts.nodeExecutableRunnable === true &&
     runtimeFacts.scriptExists === true &&
     runtimeFacts.scriptReadable === true &&
+    runtimeFacts.startupScriptReadable === true &&
+    runtimeFacts.configReadable === true &&
+    runtimeFacts.e2eManifestReadable === true &&
+    runtimeFacts.playwrightUsable === true &&
+    runtimeFacts.checkoutControlProtected === true &&
     scriptProbe.listenerBound === true &&
     scriptProbe.childResult === 'probe-reported' &&
     scriptProbe.probeMarkerPresent === true &&
@@ -760,6 +851,7 @@ export async function negativeLocalEgressCheck(
   uidValue,
   runIdValue,
   cdpPortValue,
+  stagedScriptPath = fileURLToPath(import.meta.url),
 ) {
   const uid = requireDecimal(uidValue, 1, 65_535);
   const cdpPort = requireDecimal(cdpPortValue, 1_024, 65_535);
@@ -783,7 +875,10 @@ export async function negativeLocalEgressCheck(
     }
     if (listener) {
       try {
-        Object.assign(value, await testFamilyAsUid(uid, host, listener.port));
+        Object.assign(
+          value,
+          await testFamilyAsUid(uid, host, listener.port, stagedScriptPath),
+        );
       } catch {
         Object.assign(value, {
           childResult: 'probe-error',
@@ -854,20 +949,24 @@ async function main(args) {
     installPolicy(values[0], values[1], values[2]);
     return;
   }
-  if (operation === 'negative-self-test' && values.length === 3) {
+  if (operation === 'negative-self-test' && values.length === 4) {
     const diagnostic = await negativeLocalEgressCheck(
       values[0],
       values[1],
       values[2],
+      requireStagedProbeScript(values[3]),
     );
     process.stdout.write(`${JSON.stringify(diagnostic)}\n`);
     if (!diagnostic.passed) process.exitCode = 2;
     return;
   }
-  if (operation === 'target-uid-preflight' && values.length === 1) {
+  if (operation === 'target-uid-preflight' && values.length === 2) {
     let record;
     try {
-      record = await isolatedUidPreflight(values[0]);
+      record = await isolatedUidPreflight(
+        values[0],
+        requireStagedProbeScript(values[1]),
+      );
     } catch {
       record = {
         phase: 'target-uid-preflight',

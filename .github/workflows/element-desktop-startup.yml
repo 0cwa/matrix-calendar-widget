@@ -84,8 +84,41 @@ jobs:
           sudo chown "$uid:$nogroup_gid" "$profile_root"
           sudo chown "$uid:$nogroup_gid" "$profile_root/.owned"
           sudo chmod 0700 "$profile_root"
-          for child in home config data cache runtime profile; do
+          for child in home config data cache runtime profile probe; do
             sudo install -d -m 0700 -o "$uid" -g "$nogroup_gid" "$profile_root/$child"
+          done
+          probe_root="$profile_root/probe"
+          sudo install -d -m 0700 -o "$uid" -g "$nogroup_gid" \
+            "$probe_root/dev" "$probe_root/e2e" \
+            "$probe_root/node_modules/@playwright/test"
+          sudo install -d -m 0700 -o "$uid" -g "$nogroup_gid" \
+            "$probe_root/node_modules/playwright" \
+            "$probe_root/node_modules/playwright-core"
+          sudo install -o "$uid" -g "$nogroup_gid" -m 0400 \
+            "$GITHUB_WORKSPACE/dev/element-desktop-egress-policy.mjs" \
+            "$probe_root/dev/element-desktop-egress-policy.mjs"
+          sudo install -o "$uid" -g "$nogroup_gid" -m 0400 \
+            "$GITHUB_WORKSPACE/dev/element-desktop-startup.mjs" \
+            "$probe_root/dev/element-desktop-startup.mjs"
+          sudo install -o "$uid" -g "$nogroup_gid" -m 0400 \
+            "$GITHUB_WORKSPACE/dev/element-desktop-probe-config.json" \
+            "$probe_root/dev/element-desktop-probe-config.json"
+          sudo install -o "$uid" -g "$nogroup_gid" -m 0400 \
+            "$GITHUB_WORKSPACE/e2e/package.json" "$probe_root/e2e/package.json"
+          for package in @playwright/test playwright playwright-core; do
+            source="$GITHUB_WORKSPACE/node_modules/$package"
+            target="$probe_root/node_modules/$package"
+            test -d "$source"
+            sudo cp -aL "$source/." "$target/"
+            sudo chown -R "$uid:$nogroup_gid" "$target"
+            sudo chmod -R go-rwx "$target"
+          done
+          for source in \
+            dev/element-desktop-egress-policy.mjs \
+            dev/element-desktop-startup.mjs \
+            dev/element-desktop-probe-config.json \
+            e2e/package.json; do
+            sudo cmp -s "$GITHUB_WORKSPACE/$source" "$probe_root/$source"
           done
           cdp_port="$(node --input-type=module -e '
             import { createServer } from "node:net";
@@ -101,12 +134,14 @@ jobs:
           test "$cdp_port" -le 65535
           {
             printf 'ELEMENT_DESKTOP_CDP_PORT=%s\n' "$cdp_port"
-            printf 'ELEMENT_DESKTOP_CONFIG_PATH=%s/dev/element-desktop-probe-config.json\n' "$GITHUB_WORKSPACE"
             printf 'ELEMENT_DESKTOP_PROFILE_HOME=%s/home\n' "$profile_root"
             printf 'ELEMENT_DESKTOP_PROFILE_CONFIG=%s/config\n' "$profile_root"
             printf 'ELEMENT_DESKTOP_PROFILE_DATA=%s/data\n' "$profile_root"
             printf 'ELEMENT_DESKTOP_PROFILE_CACHE=%s/cache\n' "$profile_root"
             printf 'ELEMENT_DESKTOP_PROFILE_RUNTIME=%s/runtime\n' "$profile_root"
+            printf 'ELEMENT_DESKTOP_EGRESS_SCRIPT_PATH=%s/dev/element-desktop-egress-policy.mjs\n' "$probe_root"
+            printf 'ELEMENT_DESKTOP_STARTUP_SCRIPT_PATH=%s/dev/element-desktop-startup.mjs\n' "$probe_root"
+            printf 'ELEMENT_DESKTOP_CONFIG_PATH=%s/dev/element-desktop-probe-config.json\n' "$probe_root"
           } >> "$GITHUB_ENV"
 
       - name: Preflight isolated Node and probe script before package installation
@@ -114,7 +149,7 @@ jobs:
           set +e
           preflight_output="$(sudo -n "$ELEMENT_DESKTOP_NODE_BIN" \
             dev/element-desktop-egress-policy.mjs target-uid-preflight \
-            "$ELEMENT_DESKTOP_PROBE_UID" 2>/dev/null)"
+            "$ELEMENT_DESKTOP_PROBE_UID" "$ELEMENT_DESKTOP_EGRESS_SCRIPT_PATH" 2>/dev/null)"
           preflight_exit=$?
           set -e
           if [[ -n "$preflight_output" ]]; then
@@ -184,7 +219,7 @@ jobs:
           if [[ "$install_status" -eq 0 ]]; then
             policy_status=passed
             probe_output="$(sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs negative-self-test \
-              "$ELEMENT_DESKTOP_PROBE_UID" "$GITHUB_RUN_ID" "$ELEMENT_DESKTOP_CDP_PORT" \
+              "$ELEMENT_DESKTOP_PROBE_UID" "$GITHUB_RUN_ID" "$ELEMENT_DESKTOP_CDP_PORT" "$ELEMENT_DESKTOP_EGRESS_SCRIPT_PATH" \
               2>/dev/null)"
             negative_exit=$?
             if [[ -n "$probe_output" ]]; then negative_diagnostic="$probe_output"; fi
@@ -226,7 +261,7 @@ jobs:
             ELEMENT_DESKTOP_CDP_PORT="$ELEMENT_DESKTOP_CDP_PORT" \
             ELEMENT_DESKTOP_PROBE_UID="$ELEMENT_DESKTOP_PROBE_UID" \
             ELEMENT_DESKTOP_NO_UPDATE=true \
-            dbus-run-session -- xvfb-run -a "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-startup.mjs \
+            dbus-run-session -- xvfb-run -a "$ELEMENT_DESKTOP_NODE_BIN" "$ELEMENT_DESKTOP_STARTUP_SCRIPT_PATH" \
             > "$result_file" 2>/dev/null
           probe_exit=$?
           set -e

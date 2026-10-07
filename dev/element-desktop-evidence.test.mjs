@@ -67,6 +67,11 @@ function passingTargetUidPreflight() {
       nodeExecutableRunnable: true,
       scriptExists: true,
       scriptReadable: true,
+      startupScriptReadable: true,
+      configReadable: true,
+      e2eManifestReadable: true,
+      playwrightUsable: true,
+      checkoutControlProtected: true,
     },
     scriptProbe: {
       listenerBound: true,
@@ -141,7 +146,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 4);
+  assert.equal(summary.schemaVersion, 5);
   assert.equal(summary.failureCode, null);
   assert.equal(summary.checks.isolatedNodePreflight, 'passed');
   assert.equal(summary.targetUidPreflight.status, 'passed');
@@ -272,6 +277,11 @@ test('Desktop evidence reports absent startup as incomplete and rejects degraded
   failedPreflight[0].runtimeFacts.nodeExecutableRunnable = null;
   failedPreflight[0].runtimeFacts.scriptExists = null;
   failedPreflight[0].runtimeFacts.scriptReadable = null;
+  failedPreflight[0].runtimeFacts.startupScriptReadable = null;
+  failedPreflight[0].runtimeFacts.configReadable = null;
+  failedPreflight[0].runtimeFacts.e2eManifestReadable = null;
+  failedPreflight[0].runtimeFacts.playwrightUsable = null;
+  failedPreflight[0].runtimeFacts.checkoutControlProtected = null;
   failedPreflight[0].scriptProbe = {
     listenerBound: false,
     childResult: 'not-run',
@@ -314,6 +324,23 @@ test('Desktop evidence reports absent startup as incomplete and rejects degraded
     false,
   );
 
+  const unusablePlaywright = stages();
+  unusablePlaywright[0].status = 'failed';
+  unusablePlaywright[0].runtimeFacts.playwrightUsable = false;
+  const unusablePlaywrightSummary = sanitizeDesktopStages(
+    unusablePlaywright,
+    sourceSha,
+  );
+  assert.equal(unusablePlaywrightSummary.status, 'failed');
+  assert.equal(
+    unusablePlaywrightSummary.failureCode,
+    'isolated-node-preflight-failed',
+  );
+  assert.equal(
+    unusablePlaywrightSummary.targetUidPreflight.runtimeFacts.playwrightUsable,
+    false,
+  );
+
   const timedOutPreflight = stages().filter(
     (record) => record.phase !== 'desktop-startup',
   );
@@ -330,6 +357,11 @@ test('Desktop evidence reports absent startup as incomplete and rejects degraded
     nodeExecutableRunnable: null,
     scriptExists: null,
     scriptReadable: null,
+    startupScriptReadable: null,
+    configReadable: null,
+    e2eManifestReadable: null,
+    playwrightUsable: null,
+    checkoutControlProtected: null,
   });
   timedOutPreflight[0].scriptProbe = {
     listenerBound: false,

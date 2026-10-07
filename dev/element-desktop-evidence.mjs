@@ -191,6 +191,11 @@ function validateRuntimeFacts(value) {
       'nodeExecutableRunnable',
       'scriptExists',
       'scriptReadable',
+      'startupScriptReadable',
+      'configReadable',
+      'e2eManifestReadable',
+      'playwrightUsable',
+      'checkoutControlProtected',
     ]) ||
     ![
       'exited-before-marker',
@@ -214,7 +219,12 @@ function validateRuntimeFacts(value) {
     typeof value.nodeVersionSupported !== 'boolean' ||
     ![null, true, false].includes(value.nodeExecutableRunnable) ||
     ![null, true, false].includes(value.scriptExists) ||
-    ![null, true, false].includes(value.scriptReadable)
+    ![null, true, false].includes(value.scriptReadable) ||
+    ![null, true, false].includes(value.startupScriptReadable) ||
+    ![null, true, false].includes(value.configReadable) ||
+    ![null, true, false].includes(value.e2eManifestReadable) ||
+    ![null, true, false].includes(value.playwrightUsable) ||
+    ![null, true, false].includes(value.checkoutControlProtected)
   ) {
     return false;
   }
@@ -230,7 +240,12 @@ function validateRuntimeFacts(value) {
         (value.nodeVersion.split('.')[0] === '22') &&
       typeof value.nodeExecutableRunnable === 'boolean' &&
       typeof value.scriptExists === 'boolean' &&
-      typeof value.scriptReadable === 'boolean'
+      typeof value.scriptReadable === 'boolean' &&
+      typeof value.startupScriptReadable === 'boolean' &&
+      typeof value.configReadable === 'boolean' &&
+      typeof value.e2eManifestReadable === 'boolean' &&
+      typeof value.playwrightUsable === 'boolean' &&
+      typeof value.checkoutControlProtected === 'boolean'
     );
   }
   return (
@@ -245,7 +260,12 @@ function validateRuntimeFacts(value) {
     !value.nodeVersionSupported &&
     value.nodeExecutableRunnable === null &&
     value.scriptExists === null &&
-    value.scriptReadable === null
+    value.scriptReadable === null &&
+    value.startupScriptReadable === null &&
+    value.configReadable === null &&
+    value.e2eManifestReadable === null &&
+    value.playwrightUsable === null &&
+    value.checkoutControlProtected === null
   );
 }
 
@@ -256,7 +276,12 @@ function runtimeFactsPassed(value) {
     value.nodeVersionSupported === true &&
     value.nodeExecutableRunnable === true &&
     value.scriptExists === true &&
-    value.scriptReadable === true
+    value.scriptReadable === true &&
+    value.startupScriptReadable === true &&
+    value.configReadable === true &&
+    value.e2eManifestReadable === true &&
+    value.playwrightUsable === true &&
+    value.checkoutControlProtected === true
   );
 }
 
@@ -731,7 +756,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -782,7 +807,7 @@ export function validDesktopSummary(value) {
       'egressProbe',
       'checks',
     ]) &&
-    value.schemaVersion === 4 &&
+    value.schemaVersion === 5 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
