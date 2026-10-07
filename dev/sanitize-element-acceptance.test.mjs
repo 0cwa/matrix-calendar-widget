@@ -1723,12 +1723,28 @@ test('classifies only fixed Radicale startup signatures and sanitizes the eviden
     ['Invalid configuration: secret=/private/path', 'invalid-configuration'],
     ['No servers started', 'no-listener'],
     [
-      "cannot create server socket on '/private/address': permission denied",
+      "cannot create server socket on '/private/address': address in use",
       'bind-failed',
     ],
     [
       "cannot retrieve IPv4 or IPv6 address of '/private/address': failed",
       'address-resolution-failed',
+    ],
+    [
+      "An exception occurred during server startup: PermissionError: [Errno 13] Permission denied: '/private/path'; token=private-value",
+      'filesystem-permission',
+    ],
+    [
+      "An exception occurred during server startup: OSError: [Errno 30] Read-only file system: '/private/path'",
+      'filesystem-readonly',
+    ],
+    [
+      "An exception occurred during server startup: FileNotFoundError: [Errno 2] No such file or directory: '/private/path'",
+      'filesystem-missing-path',
+    ],
+    [
+      "An exception occurred during server startup: ModuleNotFoundError: No module named 'private-module'",
+      'module-import-failed',
     ],
     [
       'An exception occurred during server startup: private exception text',
@@ -1739,6 +1755,8 @@ test('classifies only fixed Radicale startup signatures and sanitizes the eviden
     const classified = classifyRadicaleStartupLogs(logText);
     assert.equal(classified.restoreRadicaleStartupSignature, expectedSignature);
     assert.equal(JSON.stringify(classified).includes('/private'), false);
+    assert.equal(JSON.stringify(classified).includes('private-value'), false);
+    assert.equal(JSON.stringify(classified).includes('private-module'), false);
   }
   assert.equal(
     classifyRadicaleStartupLogs('Radicale server ready')

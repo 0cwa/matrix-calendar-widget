@@ -303,6 +303,10 @@ const RESTORE_RADICALE_STARTUP_SIGNATURES = new Set([
   'unclassified',
   'plugin-config-invalid',
   'invalid-configuration',
+  'module-import-failed',
+  'filesystem-permission',
+  'filesystem-readonly',
+  'filesystem-missing-path',
   'no-listener',
   'bind-failed',
   'address-resolution-failed',
@@ -1583,9 +1587,8 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       'restoreRadicaleStartupExceptionPresent',
       'restoreRadicaleReadyMarkerPresent',
     ];
-    const hasRestoreRadicaleStartupDiagnostic = restoreRadicaleStartupFields.some(
-      (key) => Object.hasOwn(record, key),
-    );
+    const hasRestoreRadicaleStartupDiagnostic =
+      restoreRadicaleStartupFields.some((key) => Object.hasOwn(record, key));
     const restoreRadicaleStartupFieldsComplete =
       restoreRadicaleStartupFields.every((key) => Object.hasOwn(record, key));
     if (

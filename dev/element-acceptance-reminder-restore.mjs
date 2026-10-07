@@ -134,6 +134,27 @@ export function classifyRadicaleStartupLogs(logText) {
       signature = 'plugin-config-invalid';
     } else if (logs.includes('Invalid configuration: ')) {
       signature = 'invalid-configuration';
+    } else if (
+      logs.includes('ModuleNotFoundError:') ||
+      logs.includes('ImportError:')
+    ) {
+      signature = 'module-import-failed';
+    } else if (
+      logs.includes('PermissionError:') ||
+      logs.includes('[Errno 13]') ||
+      logs.includes('Permission denied')
+    ) {
+      signature = 'filesystem-permission';
+    } else if (
+      logs.includes('Read-only file system') ||
+      logs.includes('[Errno 30]')
+    ) {
+      signature = 'filesystem-readonly';
+    } else if (
+      logs.includes('No such file or directory') ||
+      logs.includes('[Errno 2]')
+    ) {
+      signature = 'filesystem-missing-path';
     } else if (logs.includes('No servers started')) {
       signature = 'no-listener';
     } else if (logs.includes("cannot create server socket on '")) {
