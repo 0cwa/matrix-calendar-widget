@@ -268,6 +268,7 @@ test('summarizes reminder restore gates without exposing backup fingerprints or 
         restoreDatabaseCreated: true,
         restoreArchiveExtracted: true,
         restoreArchiveEntryCount: 2,
+        restoreArchiveCountProbeValid: true,
         restorePostgresRestored: true,
       }),
       JSON.stringify({
@@ -288,7 +289,7 @@ test('summarizes reminder restore gates without exposing backup fingerprints or 
   assert.match(summary, /gateway_stopped_gracefully=true/u);
   assert.match(
     summary,
-    /phase=restore-targets-prepared status=passed restore_step=complete restore_volume_exists=false restore_database_exists=false restore_target_plan_safe=true restore_volume_created=true restore_volume_empty=true restore_database_created=true restore_archive_extracted=true restore_archive_entry_count=2 restore_postgres_restored=true fresh_volume=true fresh_database=true/u,
+    /phase=restore-targets-prepared status=passed restore_step=complete restore_volume_exists=false restore_database_exists=false restore_target_plan_safe=true restore_volume_created=true restore_volume_empty=true restore_database_created=true restore_archive_extracted=true restore_archive_entry_count=2 restore_archive_count_probe_valid=true restore_postgres_restored=true fresh_volume=true fresh_database=true/u,
   );
   assert.match(
     summary,
@@ -361,6 +362,49 @@ test('emits bounded restore target failure details without raw command output', 
     /phase=restore-targets-prepared status=failed restore_step=volume-create restore_volume_exists=false restore_database_exists=false restore_target_plan_safe=true restore_volume_created=false process_exit_code=1/u,
   );
   assert.doesNotMatch(summary, /volume name|database name|stderr|password/u);
+});
+
+test('distinguishes an empty restored volume from an invalid entry-count probe', () => {
+  const invalidProbe = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-targets-prepared',
+      status: 'failed',
+      restoreStep: 'restored-volume-count',
+      restoreVolumeExists: false,
+      restoreDatabaseExists: false,
+      restoreTargetPlanSafe: true,
+      restoreVolumeCreated: true,
+      restoreVolumeEmpty: true,
+      restoreDatabaseCreated: true,
+      restoreArchiveExtracted: true,
+      restoreArchiveCountProbeValid: false,
+    }),
+    sourceSha,
+  );
+  const emptyVolume = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-targets-prepared',
+      status: 'failed',
+      restoreStep: 'restored-volume-count',
+      restoreVolumeExists: false,
+      restoreDatabaseExists: false,
+      restoreTargetPlanSafe: true,
+      restoreVolumeCreated: true,
+      restoreVolumeEmpty: true,
+      restoreDatabaseCreated: true,
+      restoreArchiveExtracted: true,
+      restoreArchiveEntryCount: 0,
+      restoreArchiveCountProbeValid: true,
+    }),
+    sourceSha,
+  );
+
+  assert.match(invalidProbe, /restore_archive_count_probe_valid=false/u);
+  assert.doesNotMatch(invalidProbe, /restore_archive_entry_count=/u);
+  assert.match(
+    emptyVolume,
+    /restore_archive_entry_count=0 restore_archive_count_probe_valid=true/u,
+  );
 });
 
 test('requires UI, Matrix delivery, and timeline evidence for reminder recovery', () => {

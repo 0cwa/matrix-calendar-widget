@@ -983,6 +983,7 @@ function restoreRadicaleArchive(diagnostics) {
   );
   diagnostics.restoreArchiveExtracted = true;
   diagnostics.restoreStep = 'restored-volume-count';
+  diagnostics.restoreArchiveCountProbeValid = false;
   const entryCount = requireSuccess(
     run('docker', [
       'run',
@@ -1003,11 +1004,12 @@ function restoreRadicaleArchive(diagnostics) {
   )
     .toString('utf8')
     .trim();
-  diagnostics.restoreArchiveEntryCount = /^[012]$/u.test(entryCount)
-    ? Number(entryCount)
-    : 0;
+  diagnostics.restoreArchiveCountProbeValid = /^[012]$/u.test(entryCount);
+  if (diagnostics.restoreArchiveCountProbeValid) {
+    diagnostics.restoreArchiveEntryCount = Number(entryCount);
+  }
   if (
-    !/^[012]$/u.test(entryCount) ||
+    !diagnostics.restoreArchiveCountProbeValid ||
     diagnostics.restoreArchiveEntryCount === 0
   ) {
     throw new StageFailure('restore-targets-prepared', {

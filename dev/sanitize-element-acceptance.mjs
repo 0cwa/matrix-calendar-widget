@@ -196,6 +196,7 @@ const RESTORE_TARGET_DIAGNOSTIC_FIELDS = [
   'restoreDatabaseCreated',
   'restoreArchiveExtracted',
   'restoreArchiveEntryCount',
+  'restoreArchiveCountProbeValid',
   'restorePostgresRestored',
 ];
 const PINNED_WIDGET_CONTROL_PHASES = new Set([
@@ -1257,6 +1258,8 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           record.restoreArchiveEntryCount > 2)) ||
       (Object.hasOwn(record, 'restorePostgresRestored') &&
         typeof record.restorePostgresRestored !== 'boolean') ||
+      (Object.hasOwn(record, 'restoreArchiveCountProbeValid') &&
+        typeof record.restoreArchiveCountProbeValid !== 'boolean') ||
       (record.restoreDatabaseCreated === true &&
         record.restoreDatabaseExists !== false) ||
       (record.restoreVolumeCreated === true &&
@@ -1268,6 +1271,17 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           record.restoreVolumeEmpty !== true)) ||
       (record.restoreArchiveEntryCount > 0 &&
         record.restoreArchiveExtracted !== true) ||
+      (record.restoreArchiveCountProbeValid === true &&
+        (record.restoreArchiveExtracted !== true ||
+          !Object.hasOwn(record, 'restoreArchiveEntryCount'))) ||
+      (Object.hasOwn(record, 'restoreArchiveCountProbeValid') &&
+        (record.phase !== 'restore-targets-prepared' ||
+          (record.restoreArchiveCountProbeValid === false &&
+            record.restoreStep !== 'restored-volume-count') ||
+          (record.restoreArchiveCountProbeValid === true &&
+            !['restored-volume-count', 'postgres-restore', 'complete'].includes(
+              record.restoreStep,
+            )))) ||
       (record.restorePostgresRestored === true &&
         record.restoreDatabaseCreated !== true) ||
       (record.phase === 'restore-targets-prepared' &&
@@ -1280,6 +1294,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           record.restoreVolumeEmpty !== true ||
           record.restoreDatabaseCreated !== true ||
           record.restoreArchiveExtracted !== true ||
+          record.restoreArchiveCountProbeValid !== true ||
           record.restoreArchiveEntryCount < 1 ||
           record.restorePostgresRestored !== true))
     ) {
@@ -1891,6 +1906,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         ['restoreDatabaseCreated', 'restore_database_created'],
         ['restoreArchiveExtracted', 'restore_archive_extracted'],
         ['restoreArchiveEntryCount', 'restore_archive_entry_count'],
+        ['restoreArchiveCountProbeValid', 'restore_archive_count_probe_valid'],
         ['restorePostgresRestored', 'restore_postgres_restored'],
       ]) {
         if (Object.hasOwn(record, key)) {
