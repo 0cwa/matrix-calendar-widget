@@ -7,11 +7,17 @@ const requiredBindings = new Map([
   ['gateway', { target: 3000, published: '3000' }],
   ['widget', { target: 8080, published: '8080' }],
   ['element', { target: 80, published: '8090' }],
+  ['restore-gateway', { target: 3000, published: '3000' }],
+  ['restore-radicale', { target: 5232, published: '5233' }],
 ]);
 
 export function hasAcceptanceLoopbackBindings(model) {
   const services = model?.services;
   if (!services || typeof services !== 'object') return false;
+
+  const hasRestoreGateway = services['restore-gateway'] !== undefined;
+  const hasRestoreRadicale = services['restore-radicale'] !== undefined;
+  if (hasRestoreGateway !== hasRestoreRadicale) return false;
 
   for (const [name, expected] of requiredBindings) {
     const service = services[name];
@@ -33,6 +39,17 @@ export function hasAcceptanceLoopbackBindings(model) {
     ) {
       return false;
     }
+  }
+
+  const postgres = services.postgres;
+  if (
+    postgres !== undefined &&
+    (!postgres ||
+      typeof postgres !== 'object' ||
+      (postgres.ports !== undefined &&
+        (!Array.isArray(postgres.ports) || postgres.ports.length !== 0)))
+  ) {
+    return false;
   }
 
   return true;

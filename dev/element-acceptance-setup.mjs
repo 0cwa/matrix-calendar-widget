@@ -21,6 +21,7 @@ const WIDGET_URL = 'http://127.0.0.1:8080';
 const PHASES = new Set([
   'accounts-ready',
   'service-calendar-ready',
+  'service-room-ready',
   'room-ready',
   'widget-registered',
   'runtime-ready',
@@ -84,11 +85,11 @@ function recordStage(phase, status, extra = {}) {
   });
 }
 
-async function runPhase(phase, operation) {
+async function runPhase(phase, operation, summarizeSuccess = () => ({})) {
   recordStage(phase, 'started');
   try {
     const result = await operation();
-    recordStage(phase, 'passed');
+    recordStage(phase, 'passed', summarizeSuccess(result));
     return result;
   } catch (error) {
     const details =
@@ -287,6 +288,80 @@ async function joinRoom(token, roomId) {
   );
 }
 
+async function joinReminderSender(
+  serviceAccessToken,
+  roomId,
+  managerToken,
+  managerUserId,
+) {
+  await matrixJson(
+    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
+    {
+      method: 'POST',
+      token: managerToken,
+      body: { user_id: SERVICE_USER_ID },
+    },
+    'service-room-ready',
+  );
+  await matrixJson(
+    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/join`,
+    { method: 'POST', token: serviceAccessToken },
+    'service-room-ready',
+  );
+
+  const powerLevels = {
+    ban: 100,
+    events: {
+      'm.room.message': 0,
+      'm.room.power_levels': 100,
+    },
+    events_default: 100,
+    invite: 100,
+    kick: 100,
+    notifications: { room: 50 },
+    redact: 100,
+    state_default: 100,
+    users: {
+      [SERVICE_USER_ID]: 50,
+      [managerUserId]: 100,
+    },
+    users_default: 0,
+  };
+
+  await matrixJson(
+    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.power_levels/`,
+    {
+      method: 'PUT',
+      token: managerToken,
+      body: powerLevels,
+    },
+    'service-room-ready',
+  );
+
+  const [joined, verifiedPowerLevels] = await Promise.all([
+    matrixJson(
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`,
+      { token: managerToken },
+      'service-room-ready',
+    ),
+    matrixJson(
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.power_levels/`,
+      { token: managerToken },
+      'service-room-ready',
+    ),
+  ]);
+  if (
+    !Object.hasOwn(joined?.joined ?? {}, SERVICE_USER_ID) ||
+    verifiedPowerLevels?.users?.[SERVICE_USER_ID] !== 50 ||
+    verifiedPowerLevels?.events?.['m.room.message'] !== 0 ||
+    verifiedPowerLevels?.notifications?.room !== 50 ||
+    verifiedPowerLevels?.events_default !== 100 ||
+    verifiedPowerLevels?.state_default !== 100
+  ) {
+    throw new FixtureSetupError('service-room-ready');
+  }
+}
+
 async function createServiceCalendar(applicationServiceToken) {
   const serviceUser = await matrixJson(
     '/_matrix/client/v3/register',
@@ -367,6 +442,8 @@ async function createServiceCalendar(applicationServiceToken) {
     await response.body?.cancel().catch(() => undefined);
     throw new FixtureSetupError('service-calendar-ready', response.status);
   }
+
+  return serviceUser.access_token;
 }
 
 async function registerWidget(stateRoomId, targetRoomId, actor, widgetId) {
@@ -662,6 +739,22 @@ async function provision() {
     return { teamRoomId, outsiderRoomId };
   });
 
+  const serviceUserAccessToken = await runPhase('service-calendar-ready', () =>
+    createServiceCalendar(applicationServiceToken),
+  );
+
+  await runPhase(
+    'service-room-ready',
+    () =>
+      joinReminderSender(
+        serviceUserAccessToken,
+        rooms.teamRoomId,
+        actors.memberA.accessToken,
+        actors.memberA.userId,
+      ),
+    () => ({ serviceUserJoined: true, powerPolicyVerified: true }),
+  );
+
   await runPhase('widget-registered', async () => {
     await registerWidget(
       rooms.teamRoomId,
@@ -679,14 +772,26 @@ async function provision() {
     );
   });
 
-  await runPhase('service-calendar-ready', () =>
-    createServiceCalendar(applicationServiceToken),
-  );
-
   const bot = actors.bot;
   addMask(bot.accessToken);
+  const reminderBootstrapPassword = randomBytes(32).toString('base64url');
+  const reminderAppPassword = randomBytes(32).toString('base64url');
+  addMask(reminderBootstrapPassword);
+  addMask(reminderAppPassword);
+  const reminderDatabaseUrl =
+    `postgresql://matrix_calendar_app:${reminderAppPassword}` +
+    '@postgres:5432/matrix_calendar_test';
+  const reminderRestoreDatabaseUrl =
+    `postgresql://matrix_calendar_app:${reminderAppPassword}` +
+    '@postgres:5432/matrix_calendar_restored';
   writeComposeEnvironment(serverEnvFile, {
     ELEMENT_ACCEPTANCE_BOT_ACCESS_TOKEN: bot.accessToken,
+    ELEMENT_ACCEPTANCE_REMINDER_BOOTSTRAP_PASSWORD: reminderBootstrapPassword,
+    ELEMENT_ACCEPTANCE_REMINDER_APP_PASSWORD: reminderAppPassword,
+    ELEMENT_ACCEPTANCE_REMINDER_DATABASE_URL: reminderDatabaseUrl,
+    ELEMENT_ACCEPTANCE_REMINDER_RESTORE_DATABASE_URL:
+      reminderRestoreDatabaseUrl,
+    ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME: `${requiredEnvironment('COMPOSE_PROJECT_NAME')}_radicale-restore`,
     ELEMENT_ACCEPTANCE_ROOM_BINDING: JSON.stringify([
       { roomId: rooms.teamRoomId, calendarId: CALENDAR_ID },
     ]),

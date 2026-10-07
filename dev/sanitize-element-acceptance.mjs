@@ -14,6 +14,7 @@ const RUNTIME_DEPENDENCIES = loadRuntimeDependencyAllowlist(
 const PHASES = new Set([
   'accounts-ready',
   'service-calendar-ready',
+  'service-room-ready',
   'room-ready',
   'widget-registered',
   'runtime-ready',
@@ -72,6 +73,60 @@ const PHASES = new Set([
   'canonical-read-after-denial',
   'browser-egress',
   'runtime-versions',
+  'reminder-compose-validation',
+  'reminder-postgres-ready',
+  'reminder-role-verified',
+  'reminder-gateway-migrated',
+  'reminder-delivery-snapshot',
+  'reminder-gateway-restarted',
+  'reminder-restart-delivery-row',
+  'restore-quiesced',
+  'restore-radicale-backup',
+  'restore-postgres-backup',
+  'restore-targets-prepared',
+  'restore-radicale-ready',
+  'restore-postgres-role-ready',
+  'restore-gateway-ready',
+  'restore-element-ready',
+  'restore-delivery-row',
+]);
+const PHASE_BOOLEAN_FIELDS = new Map([
+  ['service-room-ready', ['serviceUserJoined', 'powerPolicyVerified']],
+  ['reminder-role-verified', ['rolePolicyVerified']],
+  ['reminder-delivery-snapshot', ['deliveryStateSent', 'deliveryClaimClear']],
+  [
+    'reminder-restart-delivery-row',
+    [
+      'deliveryStateSent',
+      'deliveryClaimClear',
+      'deliveryKeyUnchanged',
+      'attemptCountUnchanged',
+    ],
+  ],
+  [
+    'restore-quiesced',
+    ['gatewayStoppedGracefully', 'radicaleStoppedGracefully', 'oomFree'],
+  ],
+  ['restore-targets-prepared', ['freshVolume', 'freshDatabase']],
+  ['restore-postgres-role-ready', ['rolePolicyVerified']],
+  [
+    'restore-delivery-row',
+    [
+      'deliveryStateSent',
+      'deliveryClaimClear',
+      'deliveryKeyUnchanged',
+      'attemptCountUnchanged',
+    ],
+  ],
+]);
+const REMINDER_DELIVERY_PHASES = new Set([
+  'reminder-delivery-snapshot',
+  'reminder-restart-delivery-row',
+  'restore-delivery-row',
+]);
+const PRIVATE_CHECKSUM_PHASES = new Set([
+  'restore-radicale-backup',
+  'restore-postgres-backup',
 ]);
 const PINNED_WIDGET_CONTROL_PHASES = new Set([
   'widget-a-room-info-button',
@@ -364,6 +419,20 @@ const ALLOWED_KEYS = new Set([
   'missingModuleKind',
   'missingDependency',
   'processExitCode',
+  'serviceUserJoined',
+  'powerPolicyVerified',
+  'rolePolicyVerified',
+  'deliveryStateSent',
+  'deliveryClaimClear',
+  'deliveryKeyUnchanged',
+  'attemptCountUnchanged',
+  'attemptCount',
+  'checksum',
+  'gatewayStoppedGracefully',
+  'radicaleStoppedGracefully',
+  'oomFree',
+  'freshVolume',
+  'freshDatabase',
   'containerState',
   'containerHealth',
   'containerExitCode',
@@ -873,6 +942,74 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (!Number.isInteger(record.count) ||
         record.count < 0 ||
         record.count > 100000)
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    const phaseBooleans = PHASE_BOOLEAN_FIELDS.get(record.phase) ?? [];
+    if (
+      [...PHASE_BOOLEAN_FIELDS.values()]
+        .flat()
+        .some(
+          (key) =>
+            Object.hasOwn(record, key) &&
+            (!phaseBooleans.includes(key) || typeof record[key] !== 'boolean'),
+        ) ||
+      (record.status === 'passed' &&
+        phaseBooleans.some((key) => record[key] !== true))
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    if (
+      (Object.hasOwn(record, 'attemptCount') &&
+        (!REMINDER_DELIVERY_PHASES.has(record.phase) ||
+          !Number.isSafeInteger(record.attemptCount) ||
+          record.attemptCount < 0)) ||
+      (Object.hasOwn(record, 'checksum') &&
+        (!PRIVATE_CHECKSUM_PHASES.has(record.phase) ||
+          typeof record.checksum !== 'string' ||
+          !/^[a-f0-9]{64}$/u.test(record.checksum))) ||
+      (record.status === 'passed' &&
+        REMINDER_DELIVERY_PHASES.has(record.phase) &&
+        (!Number.isSafeInteger(record.attemptCount) ||
+          record.attemptCount < 1)) ||
+      (record.status === 'passed' &&
+        PRIVATE_CHECKSUM_PHASES.has(record.phase) &&
+        !Object.hasOwn(record, 'checksum'))
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    if (
+      record.phase === 'restore-quiesced' &&
+      record.status === 'passed' &&
+      record.count !== 4
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    if (
+      record.phase === 'restore-targets-prepared' &&
+      record.status === 'passed' &&
+      (record.freshVolume !== true || record.freshDatabase !== true)
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    const reminderGatewayReadinessPhases = new Set([
+      'reminder-gateway-migrated',
+      'reminder-gateway-restarted',
+      'restore-gateway-ready',
+      'restore-radicale-ready',
+    ]);
+    if (
+      Object.hasOwn(record, 'httpStatus') &&
+      reminderGatewayReadinessPhases.has(record.phase) &&
+      ((record.status === 'passed' &&
+        (record.httpStatus < 400 || record.httpStatus > 499)) ||
+        (record.status === 'failed' &&
+          (record.httpStatus < 100 || record.httpStatus > 599)))
     ) {
       throw new Error('invalid element acceptance summary');
     }
@@ -1443,6 +1580,16 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       fields.push(
         `container_runtime_error_present=${record.containerRuntimeErrorPresent}`,
       );
+    }
+    const phaseBooleans = PHASE_BOOLEAN_FIELDS.get(phase) ?? [];
+    for (const key of phaseBooleans) {
+      if (Object.hasOwn(record, key)) {
+        const outputKey = key.replace(
+          /[A-Z]/gu,
+          (letter) => `_${letter.toLowerCase()}`,
+        );
+        fields.push(`${outputKey}=${record[key]}`);
+      }
     }
     lines.push(fields.join(' '));
   }

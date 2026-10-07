@@ -58,3 +58,31 @@ test('checks loopback bindings for project services when the overlay is present'
   model.services.widget.ports[0].host_ip = '0.0.0.0';
   assert.equal(hasAcceptanceLoopbackBindings(model), false);
 });
+
+test('accepts paired loopback-only restore services without publishing PostgreSQL', () => {
+  const model = baseModel('127.0.0.1', '127.0.0.1');
+  model.services.gateway = { ports: [port(3000, 3000)] };
+  model.services.widget = { ports: [port(8080, 8080)] };
+  model.services.element = { ports: [port(80, 8090)] };
+  model.services.postgres = { ports: [] };
+  model.services['restore-radicale'] = { ports: [port(5232, 5233)] };
+  model.services['restore-gateway'] = { ports: [port(3000, 3000)] };
+
+  assert.equal(hasAcceptanceLoopbackBindings(model), true);
+});
+
+test('rejects incomplete restore services, wildcard restore ports, or published PostgreSQL', () => {
+  const model = baseModel('127.0.0.1', '127.0.0.1');
+  model.services['restore-radicale'] = { ports: [port(5232, 5233)] };
+  assert.equal(hasAcceptanceLoopbackBindings(model), false);
+
+  model.services['restore-gateway'] = { ports: [port(3000, 3000)] };
+  assert.equal(hasAcceptanceLoopbackBindings(model), true);
+
+  model.services['restore-gateway'].ports[0].host_ip = '0.0.0.0';
+  assert.equal(hasAcceptanceLoopbackBindings(model), false);
+
+  model.services['restore-gateway'].ports[0].host_ip = '127.0.0.1';
+  model.services.postgres = { ports: [port(5432, 5432)] };
+  assert.equal(hasAcceptanceLoopbackBindings(model), false);
+});

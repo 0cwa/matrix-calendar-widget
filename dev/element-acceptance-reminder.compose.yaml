@@ -1,0 +1,81 @@
+x-reminder-gateway-environment: &reminder-gateway-environment
+  ACCESS_TOKEN: ${ELEMENT_ACCEPTANCE_BOT_ACCESS_TOKEN:?}
+  HOMESERVER_URL: http://synapse:8008
+  PORT: '3000'
+  ROOM_CALENDAR_BINDINGS: ${ELEMENT_ACCEPTANCE_ROOM_BINDING:?}
+  ROOM_CALENDAR_ACCESS_ENABLED: 'true'
+  ROOM_CALENDAR_EVENT_WRITES_ENABLED: 'true'
+  MATRIX_APPLICATION_SERVICE_TOKEN: ${MATRIX_APPLICATION_SERVICE_TOKEN:?}
+  MATRIX_APPLICATION_SERVICE_USER_ID: '@_matrix_calendar_service:localhost'
+  MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED: 'true'
+  ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED: 'true'
+  MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE: trusted-private-network
+  MEETINGWIDGET_URL: http://widget:80/
+  MEETINGWIDGET_COCKPIT_URL: http://widget:80/cockpit
+  BREAKOUT_SESSION_WIDGET_URL: http://widget:80/
+  ENABLE_WELCOME_WORKFLOW: 'false'
+  ENABLE_CONTROL_ROOM_MIGRATION: 'false'
+  ENABLE_PRIVATE_ROOM_ERROR_SENDING: 'false'
+  ROOM_CALENDAR_ACTION_MESSAGES_ENABLED: 'false'
+  LOG_LEVEL: error
+
+services:
+  postgres:
+    image: postgres:16.15-alpine3.23
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: reminder_bootstrap
+      POSTGRES_PASSWORD: ${ELEMENT_ACCEPTANCE_REMINDER_BOOTSTRAP_PASSWORD:?}
+      ELEMENT_ACCEPTANCE_REMINDER_APP_PASSWORD: ${ELEMENT_ACCEPTANCE_REMINDER_APP_PASSWORD:?}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready --username reminder_bootstrap --dbname postgres
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    volumes:
+      - ./element-acceptance-reminder-db-init.sh:/docker-entrypoint-initdb.d/10-element-acceptance-reminder-db-init.sh:ro
+
+  gateway:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *reminder-gateway-environment
+      RADICALE_URL: http://radicale:5232
+      MATRIX_CALENDAR_REMINDER_DATABASE_URL: ${ELEMENT_ACCEPTANCE_REMINDER_DATABASE_URL:?}
+
+  restore-radicale:
+    image: matrix-calendar-widget/radicale-openid:3.8.0.0
+    depends_on:
+      synapse:
+        condition: service_started
+    environment:
+      RADICALE_MATRIX_HOMESERVER_URL: http://synapse:8008
+      RADICALE_MATRIX_SERVER_NAME: localhost
+    ports:
+      - '127.0.0.1:5233:5232'
+    volumes:
+      - reminder-restore-radicale-data:/data
+
+  restore-gateway:
+    image: matrix-calendar-widget/server:element-acceptance
+    depends_on:
+      synapse:
+        condition: service_started
+      restore-radicale:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *reminder-gateway-environment
+      RADICALE_URL: http://restore-radicale:5232
+      MATRIX_CALENDAR_REMINDER_DATABASE_URL: ${ELEMENT_ACCEPTANCE_REMINDER_RESTORE_DATABASE_URL:?}
+    ports:
+      - '127.0.0.1:3000:3000'
+
+volumes:
+  reminder-restore-radicale-data:
+    name: ${ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME:?}

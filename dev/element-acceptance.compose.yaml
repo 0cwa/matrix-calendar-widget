@@ -5,8 +5,10 @@ services:
       context: ..
       dockerfile: matrix-calendar-server/Dockerfile
     depends_on:
-      - synapse
-      - radicale
+      synapse:
+        condition: service_started
+      radicale:
+        condition: service_started
     environment:
       ACCESS_TOKEN: ${ELEMENT_ACCEPTANCE_BOT_ACCESS_TOKEN:?}
       HOMESERVER_URL: http://synapse:8008

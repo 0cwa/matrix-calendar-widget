@@ -174,6 +174,114 @@ test('emits only fixed phase names, outcomes, and source SHA', () => {
   );
 });
 
+test('summarizes reminder restore gates without exposing backup fingerprints or row counters', () => {
+  const privateChecksum = 'b'.repeat(64);
+  const summary = sanitizeElementAcceptance(
+    [
+      JSON.stringify({
+        phase: 'service-room-ready',
+        status: 'passed',
+        serviceUserJoined: true,
+        powerPolicyVerified: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-delivery-snapshot',
+        status: 'passed',
+        count: 1,
+        attemptCount: 2,
+        deliveryStateSent: true,
+        deliveryClaimClear: true,
+      }),
+      JSON.stringify({
+        phase: 'restore-quiesced',
+        status: 'passed',
+        count: 4,
+        gatewayStoppedGracefully: true,
+        radicaleStoppedGracefully: true,
+        oomFree: true,
+      }),
+      JSON.stringify({
+        phase: 'restore-radicale-backup',
+        status: 'passed',
+        checksum: privateChecksum,
+      }),
+      JSON.stringify({
+        phase: 'restore-targets-prepared',
+        status: 'passed',
+        freshVolume: true,
+        freshDatabase: true,
+      }),
+      JSON.stringify({
+        phase: 'restore-delivery-row',
+        status: 'passed',
+        count: 1,
+        attemptCount: 2,
+        deliveryStateSent: true,
+        deliveryClaimClear: true,
+        deliveryKeyUnchanged: true,
+        attemptCountUnchanged: true,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+
+  assert.match(summary, /service_user_joined=true power_policy_verified=true/u);
+  assert.match(summary, /gateway_stopped_gracefully=true/u);
+  assert.match(
+    summary,
+    /phase=restore-targets-prepared status=passed fresh_volume=true fresh_database=true/u,
+  );
+  assert.match(
+    summary,
+    /delivery_key_unchanged=true attempt_count_unchanged=true/u,
+  );
+  assert.doesNotMatch(summary, /b{64}|attempt_count=2/u);
+});
+
+test('rejects incomplete or inconsistent restore evidence', () => {
+  for (const record of [
+    {
+      phase: 'restore-quiesced',
+      status: 'passed',
+      count: 3,
+      gatewayStoppedGracefully: true,
+      radicaleStoppedGracefully: true,
+      oomFree: true,
+    },
+    {
+      phase: 'restore-targets-prepared',
+      status: 'passed',
+      freshVolume: true,
+      freshDatabase: false,
+    },
+    {
+      phase: 'restore-delivery-row',
+      status: 'passed',
+      count: 1,
+      attemptCount: 1,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: false,
+      attemptCountUnchanged: true,
+    },
+    {
+      phase: 'restore-radicale-backup',
+      status: 'passed',
+      checksum: 'not-a-fingerprint',
+    },
+    {
+      phase: 'restore-delivery-row',
+      status: 'failed',
+      password: 'private-value',
+    },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      /invalid element acceptance summary/u,
+    );
+  }
+});
+
 test('requires exact outsider denial status and expected widget room context', () => {
   for (const record of [
     {
