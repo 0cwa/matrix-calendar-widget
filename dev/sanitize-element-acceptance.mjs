@@ -298,6 +298,16 @@ const CONTAINER_HEALTH_STATES = new Set([
   'unavailable',
 ]);
 const RESTORE_RADICALE_PROBE_OUTCOMES = new Set(['no-response', 'http-status']);
+const RESTORE_RADICALE_CONTAINER_HTTP_OUTCOMES = new Set([
+  'unavailable',
+  'no-response',
+  'http-status',
+]);
+const RESTORE_RADICALE_PUBLISHED_PORT_BINDINGS = new Set([
+  'unavailable',
+  'other',
+  'loopback-5233',
+]);
 const RESTORE_RADICALE_FILESYSTEM_FIELDS = [
   'restoreRadicaleSourceProbeAvailable',
   'restoreRadicaleFilesystemProbeAvailable',
@@ -654,6 +664,9 @@ const ALLOWED_KEYS = new Set([
   'containerOomKilled',
   'containerRuntimeErrorPresent',
   'restoreRadicaleProbeOutcome',
+  'restoreRadicaleContainerHttpOutcome',
+  'restoreRadicaleContainerHttpStatus',
+  'restoreRadicalePublishedPortBinding',
   'restoreRadicaleStartupSignature',
   'restoreRadicaleLogsAvailable',
   'restoreRadicaleStartupExceptionPresent',
@@ -1705,6 +1718,17 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       record,
       'restoreRadicaleProbeOutcome',
     );
+    const restoreRadicaleListenerFields = [
+      'restoreRadicaleContainerHttpOutcome',
+      'restoreRadicaleContainerHttpStatus',
+      'restoreRadicalePublishedPortBinding',
+    ];
+    const hasRestoreRadicaleListenerDiagnostic =
+      restoreRadicaleListenerFields.some((key) => Object.hasOwn(record, key));
+    const restoreRadicaleListenerFieldsComplete = [
+      'restoreRadicaleContainerHttpOutcome',
+      'restoreRadicalePublishedPortBinding',
+    ].every((key) => Object.hasOwn(record, key));
     const restoreRadicaleStartupFields = [
       'restoreRadicaleStartupSignature',
       'restoreRadicaleLogsAvailable',
@@ -1742,6 +1766,23 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           !Object.hasOwn(record, 'containerHealth') ||
           !CONTAINER_HEALTH_STATES.has(record.containerHealth))) ||
       (hasRestoreRadicaleProbeDiagnostic && !hasContainerDiagnostic) ||
+      (hasRestoreRadicaleListenerDiagnostic &&
+        (record.phase !== 'restore-radicale-ready' ||
+          record.status !== 'failed' ||
+          !hasRestoreRadicaleProbeDiagnostic ||
+          !restoreRadicaleListenerFieldsComplete ||
+          !RESTORE_RADICALE_CONTAINER_HTTP_OUTCOMES.has(
+            record.restoreRadicaleContainerHttpOutcome,
+          ) ||
+          !RESTORE_RADICALE_PUBLISHED_PORT_BINDINGS.has(
+            record.restoreRadicalePublishedPortBinding,
+          ) ||
+          (record.restoreRadicaleContainerHttpOutcome === 'http-status' &&
+            (!Number.isInteger(record.restoreRadicaleContainerHttpStatus) ||
+              record.restoreRadicaleContainerHttpStatus < 100 ||
+              record.restoreRadicaleContainerHttpStatus > 599)) ||
+          (record.restoreRadicaleContainerHttpOutcome !== 'http-status' &&
+            Object.hasOwn(record, 'restoreRadicaleContainerHttpStatus')))) ||
       (hasRestoreRadicaleStartupDiagnostic &&
         (record.phase !== 'restore-radicale-ready' ||
           record.status !== 'failed' ||
@@ -2290,6 +2331,17 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       fields.push(
         `restore_radicale_probe_outcome=${record.restoreRadicaleProbeOutcome}`,
       );
+    }
+    if (Object.hasOwn(record, 'restoreRadicaleContainerHttpOutcome')) {
+      fields.push(
+        `radicale_container_http_outcome=${record.restoreRadicaleContainerHttpOutcome}`,
+        `radicale_published_port_binding=${record.restoreRadicalePublishedPortBinding}`,
+      );
+      if (Object.hasOwn(record, 'restoreRadicaleContainerHttpStatus')) {
+        fields.push(
+          `radicale_container_http_status=${record.restoreRadicaleContainerHttpStatus}`,
+        );
+      }
     }
     if (Object.hasOwn(record, 'restoreRadicaleStartupSignature')) {
       fields.push(

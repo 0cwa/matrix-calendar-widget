@@ -81,6 +81,22 @@ export const RADICALE_FILESYSTEM_PROBE = [
   ' if not tree["complete"] and tree["entries"]==512: break',
   'print(json.dumps({"pythonVersion":"%d.%d.%d"%sys.version_info[:3],"runtimeOwner":os.geteuid()==account.pw_uid and os.getegid()==account.pw_gid,"data":data,"collections":collections,"tree":tree},separators=(",",":")))',
 ].join('\n');
+const RADICALE_LOOPBACK_HTTP_PROBE = [
+  // An unauthenticated root GET observes the listener without reading calendar data.
+  'import http.client,json',
+  'result={"httpStatus":None}',
+  'connection=http.client.HTTPConnection("127.0.0.1",5232,timeout=2)',
+  'try:',
+  ' connection.request("GET","/")',
+  ' response=connection.getresponse()',
+  ' result["httpStatus"]=response.status',
+  ' response.close()',
+  'except Exception:',
+  ' pass',
+  'finally:',
+  ' connection.close()',
+  'print(json.dumps(result,separators=(",",":")))',
+].join('\n');
 const MAX_COMMAND_BUFFER = 16 * 1024 * 1024;
 const MAX_RADICALE_LOG_BUFFER = 1024 * 1024;
 const MAX_WAIT_MS = 120_000;
@@ -1428,14 +1444,107 @@ function inspectRestoreRadicaleReadiness() {
     // Log retrieval failure is represented as unavailable, never as a guessed cause.
   }
 
+  let listener = {
+    restoreRadicaleContainerHttpOutcome: 'unavailable',
+    restoreRadicalePublishedPortBinding: 'unavailable',
+  };
+  let containerId;
+  try {
+    containerId = serviceContainerId(
+      'restore-radicale',
+      'restore-radicale-ready',
+    );
+  } catch {
+    // Listener and published-port probes are unavailable without a container.
+  }
+  if (containerId) {
+    try {
+      listener = {
+        ...listener,
+        ...inspectRestoreRadicaleContainerHttp(containerId),
+      };
+    } catch {
+      // Keep the independent published-port observation.
+    }
+    try {
+      listener.restoreRadicalePublishedPortBinding =
+        inspectRestoreRadicalePublishedPortBinding(containerId);
+    } catch {
+      // Keep the independent in-container HTTP observation.
+    }
+  }
+
   return {
     ...container,
+    ...listener,
     ...classifyRadicaleStartupLogs(startupLogs),
     ...createRadicaleFilesystemEvidence(
       sourceRadicaleFilesystemProbe,
       restoredRadicaleFilesystemProbe,
     ),
   };
+}
+
+function inspectRestoreRadicaleContainerHttp(containerId) {
+  const result = run(
+    'docker',
+    [
+      'exec',
+      containerId,
+      '/app/bin/python',
+      '-c',
+      RADICALE_LOOPBACK_HTTP_PROBE,
+    ],
+    { timeout: 5_000, maxBuffer: 4096 },
+  );
+  if (result.status !== 0) {
+    return { restoreRadicaleContainerHttpOutcome: 'unavailable' };
+  }
+
+  try {
+    const observation = JSON.parse(result.stdout.toString('utf8'));
+    if (
+      observation === null ||
+      typeof observation !== 'object' ||
+      Array.isArray(observation) ||
+      Object.keys(observation).join(',') !== 'httpStatus' ||
+      (observation.httpStatus !== null &&
+        (!Number.isInteger(observation.httpStatus) ||
+          observation.httpStatus < 100 ||
+          observation.httpStatus > 599))
+    ) {
+      return { restoreRadicaleContainerHttpOutcome: 'unavailable' };
+    }
+    return observation.httpStatus === null
+      ? { restoreRadicaleContainerHttpOutcome: 'no-response' }
+      : {
+          restoreRadicaleContainerHttpOutcome: 'http-status',
+          restoreRadicaleContainerHttpStatus: observation.httpStatus,
+        };
+  } catch {
+    return { restoreRadicaleContainerHttpOutcome: 'unavailable' };
+  }
+}
+
+function inspectRestoreRadicalePublishedPortBinding(containerId) {
+  const result = run(
+    'docker',
+    ['inspect', '--format', '{{json .NetworkSettings.Ports}}', containerId],
+    { timeout: 5_000, maxBuffer: 4096 },
+  );
+  if (result.status !== 0) return 'unavailable';
+
+  try {
+    const bindings = JSON.parse(result.stdout.toString('utf8'))?.['5232/tcp'];
+    return Array.isArray(bindings) &&
+      bindings.length === 1 &&
+      bindings[0]?.HostIp === '127.0.0.1' &&
+      bindings[0]?.HostPort === '5233'
+      ? 'loopback-5233'
+      : 'other';
+  } catch {
+    return 'unavailable';
+  }
 }
 
 function readRadicaleStartupLogs(containerId) {

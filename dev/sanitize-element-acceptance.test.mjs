@@ -1689,6 +1689,9 @@ test('emits only fixed Radicale readiness state after an unanswered probe', () =
       phase: 'restore-radicale-ready',
       status: 'failed',
       restoreRadicaleProbeOutcome: 'no-response',
+      restoreRadicaleContainerHttpOutcome: 'http-status',
+      restoreRadicaleContainerHttpStatus: 401,
+      restoreRadicalePublishedPortBinding: 'loopback-5233',
       containerState: 'running',
       containerHealth: 'none',
       containerOomKilled: false,
@@ -1701,9 +1704,46 @@ test('emits only fixed Radicale readiness state after an unanswered probe', () =
     summary,
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=restore-radicale-ready status=failed container_state=running container_health=none container_oom_killed=false container_runtime_error_present=false restore_radicale_probe_outcome=no-response',
+      'phase=restore-radicale-ready status=failed container_state=running container_health=none container_oom_killed=false container_runtime_error_present=false restore_radicale_probe_outcome=no-response radicale_container_http_outcome=http-status radicale_published_port_binding=loopback-5233 radicale_container_http_status=401',
       '',
     ].join('\n'),
+  );
+
+  const unavailableListenerSummary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      restoreRadicaleContainerHttpOutcome: 'unavailable',
+      restoreRadicalePublishedPortBinding: 'other',
+      containerState: 'running',
+      containerHealth: 'none',
+      containerOomKilled: false,
+      containerRuntimeErrorPresent: false,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    unavailableListenerSummary,
+    /radicale_container_http_outcome=unavailable radicale_published_port_binding=other/u,
+  );
+
+  assert.throws(() =>
+    sanitizeElementAcceptance(
+      JSON.stringify({
+        phase: 'restore-radicale-ready',
+        status: 'failed',
+        restoreRadicaleProbeOutcome: 'no-response',
+        restoreRadicaleContainerHttpOutcome: 'no-response',
+        restoreRadicaleContainerHttpStatus: 401,
+        restoreRadicalePublishedPortBinding: 'loopback-5233',
+        containerState: 'running',
+        containerHealth: 'none',
+        containerOomKilled: false,
+        containerRuntimeErrorPresent: false,
+      }),
+      sourceSha,
+    ),
   );
 
   const httpStatusSummary = sanitizeElementAcceptance(
