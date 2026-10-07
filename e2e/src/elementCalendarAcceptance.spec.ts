@@ -269,13 +269,79 @@ type PostCreateVisibilityObservation = {
   caldavOpenIdHttpStatus: number | null;
   caldavReportHttpStatus: number | null;
   caldavReportContainsCreatedEvent: boolean | null;
+  caldavProjection: CalDavProjectionObservation;
   roomListResponseHasEventsArray: boolean;
+  roomListResponseEventCount: number;
+  roomListDiagnostics: ProjectionDiagnosticSummary;
   roomListResponseTitleMatches: boolean;
   roomListResponseIdMatches: boolean;
   roomListResponseCalendarMatches: boolean;
   listViewHeadingPresent: boolean;
   matchingListItemCount: number;
 };
+
+const PROJECTION_DIAGNOSTIC_REASONS = [
+  'invalid-recurrence',
+  'invalid-timing',
+  'occurrence-limit',
+  'recurrence-input-limit',
+  'unsupported-recurrence',
+  'unsupported-timezone',
+  'range-this-and-future',
+] as const;
+
+type ProjectionDiagnosticReason =
+  (typeof PROJECTION_DIAGNOSTIC_REASONS)[number];
+
+type ProjectionDiagnosticCounts = Record<ProjectionDiagnosticReason, number>;
+
+type ProjectionDiagnosticSummary = {
+  complete: boolean;
+  counts: ProjectionDiagnosticCounts;
+};
+
+type CalDavProjectionDiagnosticCode =
+  | ProjectionDiagnosticReason
+  | 'none'
+  | 'inconclusive';
+
+type CalDavProjectionObservation = {
+  completed: boolean;
+  includesCreatedEvent: boolean | null;
+  diagnosticCode: CalDavProjectionDiagnosticCode;
+  diagnosticCounts: ProjectionDiagnosticCounts;
+};
+
+function emptyProjectionDiagnosticCounts(): ProjectionDiagnosticCounts {
+  return Object.fromEntries(
+    PROJECTION_DIAGNOSTIC_REASONS.map((reason) => [reason, 0]),
+  ) as ProjectionDiagnosticCounts;
+}
+
+function summarizeProjectionDiagnostics(
+  value: unknown,
+): ProjectionDiagnosticSummary {
+  const counts = emptyProjectionDiagnosticCounts();
+  if (!Array.isArray(value)) return { complete: false, counts };
+
+  for (const diagnostic of value) {
+    if (
+      !isRecord(diagnostic) ||
+      typeof diagnostic.reason !== 'string' ||
+      !PROJECTION_DIAGNOSTIC_REASONS.includes(
+        diagnostic.reason as ProjectionDiagnosticReason,
+      ) ||
+      !Number.isInteger(diagnostic.count) ||
+      Number(diagnostic.count) < 0
+    ) {
+      return { complete: false, counts: emptyProjectionDiagnosticCounts() };
+    }
+    const reason = diagnostic.reason as ProjectionDiagnosticReason;
+    counts[reason] = Math.min(counts[reason] + Number(diagnostic.count), 2);
+  }
+
+  return { complete: true, counts };
+}
 
 let fixture: Fixture;
 
@@ -1298,7 +1364,18 @@ function observePostCreateVisibility(
     caldavOpenIdHttpStatus: null,
     caldavReportHttpStatus: null,
     caldavReportContainsCreatedEvent: null,
+    caldavProjection: {
+      completed: false,
+      includesCreatedEvent: null,
+      diagnosticCode: 'inconclusive',
+      diagnosticCounts: emptyProjectionDiagnosticCounts(),
+    },
     roomListResponseHasEventsArray: false,
+    roomListResponseEventCount: 0,
+    roomListDiagnostics: {
+      complete: false,
+      counts: emptyProjectionDiagnosticCounts(),
+    },
     roomListResponseTitleMatches: false,
     roomListResponseIdMatches: false,
     roomListResponseCalendarMatches: false,
@@ -1424,6 +1501,13 @@ function observePostCreateVisibility(
         }
         if (!isRecord(body) || !Array.isArray(body.events)) return;
         observation.roomListResponseHasEventsArray = true;
+        observation.roomListResponseEventCount = Math.min(
+          body.events.length,
+          2,
+        );
+        observation.roomListDiagnostics = summarizeProjectionDiagnostics(
+          body.diagnostics,
+        );
 
         for (const resource of body.events) {
           if (!isRecord(resource) || !isRecord(resource.event)) continue;
@@ -1512,6 +1596,7 @@ function observePostCreateVisibility(
           observation.caldavReportHttpStatus = caldavProbe.reportStatus;
           observation.caldavReportContainsCreatedEvent =
             caldavProbe.containsCreatedEvent;
+          observation.caldavProjection = caldavProbe.projection;
         }
       }
       const [headingCount, itemCount] = await Promise.all([
@@ -1549,6 +1634,7 @@ type CalDavReportProbeResult = {
   openIdStatus: number | null;
   reportStatus: number | null;
   containsCreatedEvent: boolean | null;
+  projection: CalDavProjectionObservation;
 };
 
 function runCalDavReportProbe({
@@ -1594,6 +1680,7 @@ function runCalDavReportProbe({
     'openIdStatus',
     'reportStatus',
     'containsCreatedEvent',
+    'projection',
   ];
   if (
     Object.keys(value).length !== expectedKeys.length ||
@@ -1604,6 +1691,8 @@ function runCalDavReportProbe({
     value.completed !== (value.containsCreatedEvent !== null) ||
     !isOptionalHttpStatus(value.openIdStatus) ||
     !isOptionalHttpStatus(value.reportStatus) ||
+    !isCalDavProjectionObservation(value.projection) ||
+    value.completed !== value.projection.completed ||
     (value.containsCreatedEvent && !value.completed)
   ) {
     return undefined;
@@ -1613,7 +1702,52 @@ function runCalDavReportProbe({
     openIdStatus: value.openIdStatus,
     reportStatus: value.reportStatus,
     containsCreatedEvent: value.containsCreatedEvent,
+    projection: value.projection,
   };
+}
+
+function isProjectionDiagnosticCounts(
+  value: unknown,
+): value is ProjectionDiagnosticCounts {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  return (
+    keys.length === PROJECTION_DIAGNOSTIC_REASONS.length &&
+    PROJECTION_DIAGNOSTIC_REASONS.every(
+      (reason) =>
+        Object.hasOwn(value, reason) &&
+        Number.isInteger(value[reason]) &&
+        Number(value[reason]) >= 0 &&
+        Number(value[reason]) <= 2,
+    )
+  );
+}
+
+function isCalDavProjectionObservation(
+  value: unknown,
+): value is CalDavProjectionObservation {
+  if (!isRecord(value)) return false;
+  const expectedKeys = [
+    'completed',
+    'includesCreatedEvent',
+    'diagnosticCode',
+    'diagnosticCounts',
+  ];
+  return (
+    Object.keys(value).length === expectedKeys.length &&
+    expectedKeys.every((key) => Object.hasOwn(value, key)) &&
+    typeof value.completed === 'boolean' &&
+    (value.includesCreatedEvent === null ||
+      typeof value.includesCreatedEvent === 'boolean') &&
+    (value.diagnosticCode === 'none' ||
+      value.diagnosticCode === 'inconclusive' ||
+      PROJECTION_DIAGNOSTIC_REASONS.includes(
+        value.diagnosticCode as ProjectionDiagnosticReason,
+      )) &&
+    isProjectionDiagnosticCounts(value.diagnosticCounts) &&
+    value.completed === (value.includesCreatedEvent !== null) &&
+    (value.completed || value.diagnosticCode === 'inconclusive')
+  );
 }
 
 function isOptionalHttpStatus(value: unknown): value is number | null {

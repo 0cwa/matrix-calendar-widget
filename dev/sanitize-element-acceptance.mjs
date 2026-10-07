@@ -270,7 +270,10 @@ const POST_CREATE_VISIBILITY_FIELDS = [
   'caldavOpenIdHttpStatus',
   'caldavReportHttpStatus',
   'caldavReportContainsCreatedEvent',
+  'caldavProjection',
   'roomListResponseHasEventsArray',
+  'roomListResponseEventCount',
+  'roomListDiagnostics',
   'roomListResponseTitleMatches',
   'roomListResponseIdMatches',
   'roomListResponseCalendarMatches',
@@ -281,6 +284,7 @@ const POST_CREATE_VISIBILITY_COUNTER_FIELDS = [
   'postCreateEventGetRequestCount',
   'roomTargetRangeRequestCount',
   'roomTargetRangeResponseCount',
+  'roomListResponseEventCount',
   'matchingListItemCount',
 ];
 const RUNTIME_COUNTER_FIELDS = [
@@ -532,7 +536,10 @@ function validPostCreateVisibilityObservation(record) {
         record.caldavReportHttpStatus <= 599)) &&
     (record.caldavReportContainsCreatedEvent === null ||
       typeof record.caldavReportContainsCreatedEvent === 'boolean') &&
+    validCalDavProjectionObservation(record.caldavProjection) &&
     typeof record.roomListResponseHasEventsArray === 'boolean' &&
+    Number.isInteger(record.roomListResponseEventCount) &&
+    validProjectionDiagnosticSummary(record.roomListDiagnostics) &&
     typeof record.roomListResponseTitleMatches === 'boolean' &&
     typeof record.roomListResponseIdMatches === 'boolean' &&
     typeof record.roomListResponseCalendarMatches === 'boolean' &&
@@ -562,6 +569,12 @@ function validPostCreateVisibilityObservation(record) {
       record.caldavReportProbeCompleted) &&
     (!record.roomListResponseHasEventsArray ||
       record.roomTargetRangeResponseCount > 0) &&
+    (record.roomListResponseHasEventsArray ||
+      record.roomListResponseEventCount === 0) &&
+    (record.roomListDiagnostics.complete ||
+      Object.values(record.roomListDiagnostics.counts).every(
+        (count) => count === 0,
+      )) &&
     (!record.roomListResponseTitleMatches ||
       record.roomListResponseHasEventsArray) &&
     (!record.roomListResponseIdMatches ||
@@ -569,6 +582,77 @@ function validPostCreateVisibilityObservation(record) {
     (!record.roomListResponseCalendarMatches ||
       record.roomListResponseTitleMatches) &&
     (record.matchingListItemCount === 0 || record.listViewHeadingPresent)
+  );
+}
+
+const PROJECTION_DIAGNOSTIC_REASONS = [
+  'invalid-recurrence',
+  'invalid-timing',
+  'occurrence-limit',
+  'recurrence-input-limit',
+  'unsupported-recurrence',
+  'unsupported-timezone',
+  'range-this-and-future',
+];
+
+function validProjectionDiagnosticCounts(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const keys = Object.keys(value);
+  return (
+    keys.length === PROJECTION_DIAGNOSTIC_REASONS.length &&
+    keys.every((key) => PROJECTION_DIAGNOSTIC_REASONS.includes(key)) &&
+    PROJECTION_DIAGNOSTIC_REASONS.every(
+      (reason) =>
+        Number.isInteger(value[reason]) &&
+        value[reason] >= 0 &&
+        value[reason] <= 2,
+    )
+  );
+}
+
+function validProjectionDiagnosticSummary(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 2 &&
+    Object.hasOwn(value, 'complete') &&
+    Object.hasOwn(value, 'counts') &&
+    typeof value.complete === 'boolean' &&
+    validProjectionDiagnosticCounts(value.counts)
+  );
+}
+
+function validCalDavProjectionObservation(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).length !== 4 ||
+    !Object.hasOwn(value, 'completed') ||
+    !Object.hasOwn(value, 'includesCreatedEvent') ||
+    !Object.hasOwn(value, 'diagnosticCode') ||
+    !Object.hasOwn(value, 'diagnosticCounts') ||
+    typeof value.completed !== 'boolean' ||
+    (value.includesCreatedEvent !== null &&
+      typeof value.includesCreatedEvent !== 'boolean') ||
+    !validProjectionDiagnosticCounts(value.diagnosticCounts)
+  ) {
+    return false;
+  }
+  const diagnosticCodeIsKnown =
+    value.diagnosticCode === 'none' ||
+    value.diagnosticCode === 'inconclusive' ||
+    PROJECTION_DIAGNOSTIC_REASONS.includes(value.diagnosticCode);
+  return (
+    diagnosticCodeIsKnown &&
+    value.completed === (value.includesCreatedEvent !== null) &&
+    (value.completed || value.diagnosticCode === 'inconclusive') &&
+    (value.includesCreatedEvent !== true || value.diagnosticCode === 'none') &&
+    (value.completed ||
+      Object.values(value.diagnosticCounts).every((count) => count === 0))
   );
 }
 
@@ -1031,7 +1115,20 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `caldav_openid_http_status=${record.caldavOpenIdHttpStatus ?? 'none'}`,
           `caldav_report_http_status=${record.caldavReportHttpStatus ?? 'none'}`,
           `caldav_report_contains_created_event=${record.caldavReportContainsCreatedEvent ?? 'inconclusive'}`,
+          `caldav_projection_completed=${record.caldavProjection.completed}`,
+          `caldav_projection_includes_created_event=${record.caldavProjection.includesCreatedEvent ?? 'inconclusive'}`,
+          `caldav_projection_diagnostic=${record.caldavProjection.diagnosticCode}`,
+          ...PROJECTION_DIAGNOSTIC_REASONS.map(
+            (reason) =>
+              `caldav_projection_${reason}=${record.caldavProjection.diagnosticCounts[reason]}`,
+          ),
           `room_list_response_has_events=${record.roomListResponseHasEventsArray}`,
+          `room_list_response_event_count=${record.roomListResponseEventCount}`,
+          `room_list_diagnostics_complete=${record.roomListDiagnostics.complete}`,
+          ...PROJECTION_DIAGNOSTIC_REASONS.map(
+            (reason) =>
+              `room_list_diagnostic_${reason}=${record.roomListDiagnostics.counts[reason]}`,
+          ),
           `room_list_response_title_matches=${record.roomListResponseTitleMatches}`,
           `room_list_response_id_matches=${record.roomListResponseIdMatches}`,
           `room_list_response_calendar_matches=${record.roomListResponseCalendarMatches}`,

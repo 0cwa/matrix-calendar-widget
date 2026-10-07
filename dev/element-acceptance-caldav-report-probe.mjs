@@ -14,12 +14,41 @@ const { CalDavEventClient } = requireServer(
 const { ICalendarEventCodec } = requireServer(
   './lib/src/caldav/ICalendarEventCodec.js',
 );
+const { projectCalendarEventOccurrences } = requireServer(
+  '@matrix-calendar-widget/calendar',
+);
+
+const PROJECTION_DIAGNOSTIC_REASONS = [
+  'invalid-recurrence',
+  'invalid-timing',
+  'occurrence-limit',
+  'recurrence-input-limit',
+  'unsupported-recurrence',
+  'unsupported-timezone',
+  'range-this-and-future',
+];
+
+function emptyProjectionDiagnosticCounts() {
+  return Object.fromEntries(
+    PROJECTION_DIAGNOSTIC_REASONS.map((reason) => [reason, 0]),
+  );
+}
+
+function unavailableProjection() {
+  return {
+    completed: false,
+    includesCreatedEvent: null,
+    diagnosticCode: 'inconclusive',
+    diagnosticCounts: emptyProjectionDiagnosticCounts(),
+  };
+}
 
 const unavailable = (openIdStatus = null, reportStatus = null) => ({
   completed: false,
   openIdStatus,
   reportStatus,
   containsCreatedEvent: null,
+  projection: unavailableProjection(),
 });
 
 function writeResult(result) {
@@ -50,6 +79,8 @@ async function main() {
     !input.range ||
     typeof input.range.start !== 'string' ||
     typeof input.range.end !== 'string' ||
+    typeof input.range.timezone !== 'string' ||
+    !input.range.timezone ||
     !Number.isFinite(Date.parse(input.range.start)) ||
     !Number.isFinite(Date.parse(input.range.end)) ||
     Date.parse(input.range.end) <= Date.parse(input.range.start) ||
@@ -136,27 +167,97 @@ async function main() {
     );
     const codec = new ICalendarEventCodec();
     let containsCreatedEvent = false;
+    let createdEvent;
+    const parsedResources = [];
     for (const resource of resources) {
       try {
         const event = codec.parse(
-          CALENDAR_ID,
-          'element-acceptance-probe.ics',
+          collectionUrl.href,
+          resource.href,
           resource.icalendar,
-        ).event;
-        if (event.uid === input.eventUid) {
+        );
+        parsedResources.push({ resource, parsed: event, event: event.event });
+        if (event.event.uid === input.eventUid) {
           containsCreatedEvent = true;
-          break;
+          createdEvent = event;
         }
       } catch {
         writeResult(unavailable(openIdStatus, reportStatus));
         return;
       }
     }
+
+    const rangeUnsupportedResources = parsedResources.filter(
+      ({ event }) => event.unsupportedRecurrence === 'range-this-and-future',
+    );
+    const projectionUnsupportedResources = parsedResources.filter(
+      ({ parsed }) => parsed.listProjectionDiagnostic !== undefined,
+    );
+    const projectableResources = parsedResources.filter(
+      ({ event, parsed }) =>
+        event.unsupportedRecurrence !== 'range-this-and-future' &&
+        parsed.listProjectionDiagnostic === undefined,
+    );
+    const projection = projectCalendarEventOccurrences(
+      projectableResources.map(({ event }) => event),
+      { start: input.range.start, end: input.range.end },
+      input.range.timezone,
+    );
+    const inRangeResourceIds = new Set(
+      projection.occurrences.map(({ sourceEvent }) => sourceEvent.id),
+    );
+    const diagnosticCounts = emptyProjectionDiagnosticCounts();
+    if (rangeUnsupportedResources.length > 0) {
+      diagnosticCounts['range-this-and-future'] = Math.min(
+        rangeUnsupportedResources.length,
+        2,
+      );
+    }
+    if (projectionUnsupportedResources.length > 0) {
+      diagnosticCounts['unsupported-recurrence'] = Math.min(
+        projectionUnsupportedResources.length,
+        2,
+      );
+    }
+    for (const diagnostic of projection.diagnostics) {
+      diagnosticCounts[diagnostic.reason] = Math.min(
+        diagnosticCounts[diagnostic.reason] + 1,
+        2,
+      );
+    }
+    let diagnosticCode = 'none';
+    let includesCreatedEvent = false;
+    if (createdEvent) {
+      const created = parsedResources.find(
+        ({ event }) => event.uid === input.eventUid,
+      );
+      if (created) {
+        includesCreatedEvent = inRangeResourceIds.has(created.event.id);
+        diagnosticCode = 'none';
+        if (created.event.unsupportedRecurrence === 'range-this-and-future') {
+          diagnosticCode = 'range-this-and-future';
+        } else if (created.parsed.listProjectionDiagnostic !== undefined) {
+          diagnosticCode = 'unsupported-recurrence';
+        } else {
+          diagnosticCode =
+            projection.diagnostics.find(
+              ({ sourceEvent }) => sourceEvent.id === created.event.id,
+            )?.reason ?? 'none';
+        }
+      }
+    }
+
     writeResult({
       completed: true,
       openIdStatus,
       reportStatus,
       containsCreatedEvent,
+      projection: {
+        completed: true,
+        includesCreatedEvent,
+        diagnosticCode,
+        diagnosticCounts,
+      },
     });
   } catch {
     writeResult(unavailable(openIdStatus, reportStatus));

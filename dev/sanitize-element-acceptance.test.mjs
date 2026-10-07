@@ -4,6 +4,19 @@ import { sanitizeElementAcceptance } from './sanitize-element-acceptance.mjs';
 
 const sourceSha = 'a'.repeat(40);
 
+function projectionDiagnosticCounts(overrides = {}) {
+  return {
+    'invalid-recurrence': 0,
+    'invalid-timing': 0,
+    'occurrence-limit': 0,
+    'recurrence-input-limit': 0,
+    'unsupported-recurrence': 0,
+    'unsupported-timezone': 0,
+    'range-this-and-future': 0,
+    ...overrides,
+  };
+}
+
 function postCreateVisibilityObservation(overrides = {}) {
   return {
     phase: 'event-create-post-refresh-observed',
@@ -22,7 +35,18 @@ function postCreateVisibilityObservation(overrides = {}) {
     caldavOpenIdHttpStatus: 200,
     caldavReportHttpStatus: 207,
     caldavReportContainsCreatedEvent: true,
+    caldavProjection: {
+      completed: true,
+      includesCreatedEvent: true,
+      diagnosticCode: 'none',
+      diagnosticCounts: projectionDiagnosticCounts(),
+    },
     roomListResponseHasEventsArray: true,
+    roomListResponseEventCount: 1,
+    roomListDiagnostics: {
+      complete: true,
+      counts: projectionDiagnosticCounts(),
+    },
     roomListResponseTitleMatches: true,
     roomListResponseIdMatches: true,
     roomListResponseCalendarMatches: true,
@@ -194,7 +218,7 @@ test('emits only bounded post-create refresh and event-match evidence', () => {
     summary,
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=event-create-post-refresh-observed status=passed post_create_event_get_requests=2 room_target_range_requests=1 expected_room_range_request_seen=true room_target_range_responses=1 room_target_range_last_status=200 create_response_has_event=true create_response_title_matches=true create_response_calendar_matches=true create_response_timing_comparable=true create_response_event_intersects_room_range=true caldav_report_probe_completed=true caldav_openid_http_status=200 caldav_report_http_status=207 caldav_report_contains_created_event=true room_list_response_has_events=true room_list_response_title_matches=true room_list_response_id_matches=true room_list_response_calendar_matches=true list_view_heading_present=true matching_list_item_count=1',
+      'phase=event-create-post-refresh-observed status=passed post_create_event_get_requests=2 room_target_range_requests=1 expected_room_range_request_seen=true room_target_range_responses=1 room_target_range_last_status=200 create_response_has_event=true create_response_title_matches=true create_response_calendar_matches=true create_response_timing_comparable=true create_response_event_intersects_room_range=true caldav_report_probe_completed=true caldav_openid_http_status=200 caldav_report_http_status=207 caldav_report_contains_created_event=true caldav_projection_completed=true caldav_projection_includes_created_event=true caldav_projection_diagnostic=none caldav_projection_invalid-recurrence=0 caldav_projection_invalid-timing=0 caldav_projection_occurrence-limit=0 caldav_projection_recurrence-input-limit=0 caldav_projection_unsupported-recurrence=0 caldav_projection_unsupported-timezone=0 caldav_projection_range-this-and-future=0 room_list_response_has_events=true room_list_response_event_count=1 room_list_diagnostics_complete=true room_list_diagnostic_invalid-recurrence=0 room_list_diagnostic_invalid-timing=0 room_list_diagnostic_occurrence-limit=0 room_list_diagnostic_recurrence-input-limit=0 room_list_diagnostic_unsupported-recurrence=0 room_list_diagnostic_unsupported-timezone=0 room_list_diagnostic_range-this-and-future=0 room_list_response_title_matches=true room_list_response_id_matches=true room_list_response_calendar_matches=true list_view_heading_present=true matching_list_item_count=1',
       '',
     ].join('\n'),
   );
@@ -234,6 +258,37 @@ test('emits only bounded post-create refresh and event-match evidence', () => {
       caldavReportProbeCompleted: true,
       caldavOpenIdHttpStatus: 200,
       caldavReportHttpStatus: null,
+    }),
+    postCreateVisibilityObservation({
+      caldavProjection: {
+        completed: true,
+        includesCreatedEvent: true,
+        diagnosticCode: 'invalid-calendar',
+        diagnosticCounts: projectionDiagnosticCounts(),
+      },
+    }),
+    postCreateVisibilityObservation({
+      caldavProjection: {
+        completed: true,
+        includesCreatedEvent: false,
+        diagnosticCode: 'none',
+        diagnosticCounts: projectionDiagnosticCounts({ 'invalid-timing': 3 }),
+      },
+    }),
+    postCreateVisibilityObservation({
+      roomListDiagnostics: {
+        complete: false,
+        counts: projectionDiagnosticCounts({ 'invalid-timing': 1 }),
+      },
+    }),
+    postCreateVisibilityObservation({
+      roomListDiagnostics: {
+        complete: true,
+        counts: {
+          ...projectionDiagnosticCounts(),
+          private: 1,
+        },
+      },
     }),
   ]) {
     assert.throws(
