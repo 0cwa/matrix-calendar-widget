@@ -45,6 +45,7 @@ const RADICALE_EXTRACT_TAR = [
 ].join('\n');
 const MAX_COMMAND_BUFFER = 16 * 1024 * 1024;
 const MAX_WAIT_MS = 120_000;
+const COMPOSE_GRACEFUL_STOP_COMMAND_TIMEOUT_MS = 75_000;
 const PHASES = new Set([
   'reminder-compose-validation',
   'reminder-postgres-ready',
@@ -621,7 +622,9 @@ async function snapshotDelivery() {
 async function restartGateway() {
   await withStage('reminder-gateway-restarted', async () => {
     requireSuccess(
-      compose(['restart', '--timeout', '60', 'gateway']),
+      compose(['restart', '--timeout', '60', 'gateway'], {
+        timeout: COMPOSE_GRACEFUL_STOP_COMMAND_TIMEOUT_MS,
+      }),
       'reminder-gateway-restarted',
     );
     const httpStatus = await waitForHttp(
@@ -686,15 +689,21 @@ async function quiesceWriters() {
   let radicaleVolume;
   await withStage('restore-quiesced', async () => {
     requireSuccess(
-      compose(['stop', '--timeout', '60', 'element', 'widget']),
+      compose(['stop', '--timeout', '60', 'element', 'widget'], {
+        timeout: COMPOSE_GRACEFUL_STOP_COMMAND_TIMEOUT_MS,
+      }),
       'restore-quiesced',
     );
     requireSuccess(
-      compose(['stop', '--timeout', '60', 'gateway']),
+      compose(['stop', '--timeout', '60', 'gateway'], {
+        timeout: COMPOSE_GRACEFUL_STOP_COMMAND_TIMEOUT_MS,
+      }),
       'restore-quiesced',
     );
     requireSuccess(
-      compose(['stop', '--timeout', '60', 'radicale']),
+      compose(['stop', '--timeout', '60', 'radicale'], {
+        timeout: COMPOSE_GRACEFUL_STOP_COMMAND_TIMEOUT_MS,
+      }),
       'restore-quiesced',
     );
     const states = ['element', 'widget', 'gateway', 'radicale'].map(
