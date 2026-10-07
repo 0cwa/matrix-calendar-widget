@@ -121,6 +121,14 @@ function completeReport() {
       pinActionCompleted: true,
       appDrawerCount: 1,
       appDrawerFrameCount: 1,
+      appTileSnapshotAvailable: null,
+      appTileCount: null,
+      appTileFrameCount: null,
+      appTileNamedFrameCount: null,
+      appPermissionCount: null,
+      appLoadingIndicatorCount: null,
+      appWarningCount: null,
+      appDrawerMaximised: null,
       maximizeControlCount: 1,
       hostMaximizeMs: 180,
       maximizedIframeWidth: 1280,
@@ -243,6 +251,84 @@ test('requires the pinned app-drawer route and retains only fixed page-error cla
     () =>
       sanitizeElementAcceptance(
         JSON.stringify(stage('failed', pageError, 'performance-page-error')),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
+test('retains only a bounded AppTile render snapshot when iframe attachment fails', () => {
+  const report = completeReport();
+  report.coldList.appDrawerFrameCount = 0;
+  Object.assign(report.coldList, {
+    appTileSnapshotAvailable: true,
+    appTileCount: 1,
+    appTileFrameCount: 0,
+    appTileNamedFrameCount: 0,
+    appPermissionCount: 0,
+    appLoadingIndicatorCount: 1,
+    appWarningCount: 1,
+    appDrawerMaximised: false,
+  });
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(stage('failed', report, 'performance-widget-open-failed')),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /app_tile_snapshot_available=true app_tile_count=1 app_tile_frame_count=0 app_tile_named_frame_count=0 app_permission_count=0 app_loading_indicator_count=1 app_warning_count=1 app_drawer_maximised=false/u,
+  );
+
+  const unavailable = completeReport();
+  Object.assign(unavailable.coldList, {
+    appTileSnapshotAvailable: false,
+    appTileCount: 1,
+  });
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(
+          stage('failed', unavailable, 'performance-widget-open-failed'),
+        ),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const impossibleFrameCounts = completeReport();
+  Object.assign(impossibleFrameCounts.coldList, {
+    appTileSnapshotAvailable: true,
+    appTileCount: 1,
+    appTileFrameCount: 0,
+    appTileNamedFrameCount: 1,
+    appPermissionCount: 0,
+    appLoadingIndicatorCount: 0,
+    appWarningCount: 0,
+    appDrawerMaximised: false,
+  });
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(
+          stage(
+            'failed',
+            impossibleFrameCounts,
+            'performance-widget-open-failed',
+          ),
+        ),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const privateField = completeReport();
+  privateField.coldList.appTileErrorText = 'private widget details';
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(
+          stage('failed', privateField, 'performance-widget-open-failed'),
+        ),
         sourceSha,
       ),
     /invalid element acceptance summary/u,

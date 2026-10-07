@@ -281,6 +281,14 @@ type AppDrawerPlacementObservation = Partial<{
   pinActionCompleted: boolean;
   appDrawerCount: number;
   appDrawerFrameCount: number;
+  appTileSnapshotAvailable: boolean;
+  appTileCount: number | null;
+  appTileFrameCount: number | null;
+  appTileNamedFrameCount: number | null;
+  appPermissionCount: number | null;
+  appLoadingIndicatorCount: number | null;
+  appWarningCount: number | null;
+  appDrawerMaximised: boolean | null;
 }>;
 
 type PerformancePageErrorClass =
@@ -384,6 +392,14 @@ type PerformanceReport = {
     pinActionCompleted: boolean;
     appDrawerCount: number;
     appDrawerFrameCount: number;
+    appTileSnapshotAvailable: boolean | null;
+    appTileCount: number | null;
+    appTileFrameCount: number | null;
+    appTileNamedFrameCount: number | null;
+    appPermissionCount: number | null;
+    appLoadingIndicatorCount: number | null;
+    appWarningCount: number | null;
+    appDrawerMaximised: boolean | null;
     maximizeControlCount: number;
     hostMaximizeMs: number | null;
     maximizedIframeWidth: number | null;
@@ -858,6 +874,14 @@ function makeEmptyPerformanceReport(
       pinActionCompleted: false,
       appDrawerCount: 0,
       appDrawerFrameCount: 0,
+      appTileSnapshotAvailable: null,
+      appTileCount: null,
+      appTileFrameCount: null,
+      appTileNamedFrameCount: null,
+      appPermissionCount: null,
+      appLoadingIndicatorCount: null,
+      appWarningCount: null,
+      appDrawerMaximised: null,
       maximizeControlCount: 0,
       hostMaximizeMs: null,
       maximizedIframeWidth: null,
@@ -3924,6 +3948,73 @@ async function openPinnedElementWidget(
       .catch(() => {});
     const appDrawerFrameCount = Math.min(await drawerFrame.count(), 2);
     onAppDrawerPlacement?.({ appDrawerFrameCount });
+    if (appDrawerFrameCount !== 1) {
+      let renderSnapshot: AppDrawerPlacementObservation = {
+        appTileSnapshotAvailable: false,
+        appTileCount: null,
+        appTileFrameCount: null,
+        appTileNamedFrameCount: null,
+        appPermissionCount: null,
+        appLoadingIndicatorCount: null,
+        appWarningCount: null,
+        appDrawerMaximised: null,
+      };
+      try {
+        renderSnapshot = await appDrawer
+          .first()
+          .evaluate((drawer, expectedWidgetTitle) => {
+            const cap = (value: number) => Math.min(value, 2);
+            const tileSelector =
+              '.mx_AppTileFullWidth, .mx_AppTile, .mx_AppTile_mini';
+            const tiles = Array.from(
+              new Set(drawer.querySelectorAll(tileSelector)),
+            );
+            const frames = tiles.flatMap((tile) =>
+              Array.from(tile.querySelectorAll('iframe')),
+            );
+            return {
+              appTileSnapshotAvailable: true,
+              appTileCount: cap(tiles.length),
+              appTileFrameCount: cap(frames.length),
+              appTileNamedFrameCount: cap(
+                frames.filter(
+                  (frame) =>
+                    frame.getAttribute('title') === expectedWidgetTitle,
+                ).length,
+              ),
+              appPermissionCount: cap(
+                tiles.reduce(
+                  (count, tile) =>
+                    count + tile.querySelectorAll('.mx_AppPermission').length,
+                  0,
+                ),
+              ),
+              appLoadingIndicatorCount: cap(
+                tiles.reduce(
+                  (count, tile) =>
+                    count +
+                    tile.querySelectorAll('.mx_AppTileBody_fadeInSpinner')
+                      .length,
+                  0,
+                ),
+              ),
+              appWarningCount: cap(
+                tiles.reduce(
+                  (count, tile) =>
+                    count + tile.querySelectorAll('.mx_AppWarning').length,
+                  0,
+                ),
+              ),
+              appDrawerMaximised: drawer.classList.contains(
+                'mx_AppsDrawer--maximised',
+              ),
+            };
+          }, 'Matrix Calendar');
+      } catch {
+        // Missing DOM evidence remains unavailable; no exception text escapes.
+      }
+      onAppDrawerPlacement?.(renderSnapshot);
+    }
     expect(appDrawerCount).toBe(1);
     expect(appDrawerFrameCount).toBe(1);
     await expect(drawerFrame.first()).toBeVisible();

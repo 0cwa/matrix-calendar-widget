@@ -79,6 +79,14 @@ const COLD_KEYS = [
   'pinActionCompleted',
   'appDrawerCount',
   'appDrawerFrameCount',
+  'appTileSnapshotAvailable',
+  'appTileCount',
+  'appTileFrameCount',
+  'appTileNamedFrameCount',
+  'appPermissionCount',
+  'appLoadingIndicatorCount',
+  'appWarningCount',
+  'appDrawerMaximised',
   'maximizeControlCount',
   'hostMaximizeMs',
   'maximizedIframeWidth',
@@ -281,6 +289,33 @@ function validReport(report) {
     typeof report.coldList.pinActionCompleted === 'boolean' &&
     boundedInteger(report.coldList.appDrawerCount, 0, 2) &&
     boundedInteger(report.coldList.appDrawerFrameCount, 0, 2) &&
+    (typeof report.coldList.appTileSnapshotAvailable === 'boolean' ||
+      report.coldList.appTileSnapshotAvailable === null) &&
+    optionalCount(report.coldList.appTileCount, 2) &&
+    optionalCount(report.coldList.appTileFrameCount, 2) &&
+    optionalCount(report.coldList.appTileNamedFrameCount, 2) &&
+    optionalCount(report.coldList.appPermissionCount, 2) &&
+    optionalCount(report.coldList.appLoadingIndicatorCount, 2) &&
+    optionalCount(report.coldList.appWarningCount, 2) &&
+    (typeof report.coldList.appDrawerMaximised === 'boolean' ||
+      report.coldList.appDrawerMaximised === null) &&
+    (report.coldList.appTileSnapshotAvailable === true
+      ? report.coldList.appTileCount !== null &&
+        report.coldList.appTileFrameCount !== null &&
+        report.coldList.appTileNamedFrameCount !== null &&
+        report.coldList.appPermissionCount !== null &&
+        report.coldList.appLoadingIndicatorCount !== null &&
+        report.coldList.appWarningCount !== null &&
+        report.coldList.appDrawerMaximised !== null &&
+        report.coldList.appTileNamedFrameCount <=
+          report.coldList.appTileFrameCount
+      : report.coldList.appTileCount === null &&
+        report.coldList.appTileFrameCount === null &&
+        report.coldList.appTileNamedFrameCount === null &&
+        report.coldList.appPermissionCount === null &&
+        report.coldList.appLoadingIndicatorCount === null &&
+        report.coldList.appWarningCount === null &&
+        report.coldList.appDrawerMaximised === null) &&
     boundedInteger(report.coldList.maximizeControlCount, 0, 2) &&
     optionalMilliseconds(report.coldList.hostMaximizeMs) &&
     optionalCount(report.coldList.maximizedIframeWidth, 4096) &&
@@ -548,6 +583,14 @@ export function formatPerformanceEvidence(record) {
       `pin_action_completed=${report.coldList.pinActionCompleted}`,
       `app_drawer_count=${report.coldList.appDrawerCount}`,
       `app_drawer_frame_count=${report.coldList.appDrawerFrameCount}`,
+      `app_tile_snapshot_available=${display(report.coldList.appTileSnapshotAvailable)}`,
+      `app_tile_count=${display(report.coldList.appTileCount)}`,
+      `app_tile_frame_count=${display(report.coldList.appTileFrameCount)}`,
+      `app_tile_named_frame_count=${display(report.coldList.appTileNamedFrameCount)}`,
+      `app_permission_count=${display(report.coldList.appPermissionCount)}`,
+      `app_loading_indicator_count=${display(report.coldList.appLoadingIndicatorCount)}`,
+      `app_warning_count=${display(report.coldList.appWarningCount)}`,
+      `app_drawer_maximised=${display(report.coldList.appDrawerMaximised)}`,
       `maximize_control_count=${report.coldList.maximizeControlCount}`,
       `host_maximize_ms=${display(report.coldList.hostMaximizeMs)}`,
       `maximized_iframe_width=${display(report.coldList.maximizedIframeWidth)}`,
