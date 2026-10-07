@@ -1459,6 +1459,23 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     ].join('\n'),
   );
 
+  const reminderRoomObservation = {
+    ...roomObservation,
+    phase: 'reminder-room-context',
+    failureCode: 'element-room-heading-wait-timeout',
+  };
+  assert.equal(
+    sanitizeElementAcceptance(
+      JSON.stringify(reminderRoomObservation),
+      sourceSha,
+    ),
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=reminder-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-heading-wait-timeout',
+      '',
+    ].join('\n'),
+  );
+
   const invalidRecords = [
     { ...roomObservation, matrixUserMatches: '@member:private-server' },
     { ...roomObservation, matrixSyncState: 'token=secret' },

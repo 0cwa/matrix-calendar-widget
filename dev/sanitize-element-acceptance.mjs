@@ -107,6 +107,10 @@ const PHASES = new Set([
   'reminder-restore-scheduler-scan',
   'reminder-restore-no-duplicate',
 ]);
+const ROOM_CONTEXT_PHASES = new Set([
+  'member-a-room-context',
+  'reminder-room-context',
+]);
 const PHASE_BOOLEAN_FIELDS = new Map([
   ['service-room-ready', ['serviceUserJoined', 'powerPolicyVerified']],
   ['reminder-role-verified', ['rolePolicyVerified']],
@@ -1605,10 +1609,10 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           typeof record.matrixClientPresent !== 'boolean')) ||
       (hasMatrixUserObservation &&
         record.phase !== 'member-a-session-observed' &&
-        record.phase !== 'member-a-room-context') ||
+        !ROOM_CONTEXT_PHASES.has(record.phase)) ||
       (hasSyncObservation &&
         ((record.phase !== 'member-a-session-observed' &&
-          record.phase !== 'member-a-room-context') ||
+          !ROOM_CONTEXT_PHASES.has(record.phase)) ||
           !MATRIX_SYNC_STATES.has(record.matrixSyncState))) ||
       (record.phase === 'member-a-session-observed' &&
         hasMatrixUserObservation !== hasSyncObservation) ||
@@ -1656,8 +1660,8 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       'roomIdMatches',
     ];
     if (
-      ((hasRoomObservation || record.phase === 'member-a-room-context') &&
-        (record.phase !== 'member-a-room-context' ||
+      ((hasRoomObservation || ROOM_CONTEXT_PHASES.has(record.phase)) &&
+        (!ROOM_CONTEXT_PHASES.has(record.phase) ||
           !['passed', 'failed'].includes(record.status))) ||
       (hasRoomObservation &&
         (requiredRoomBooleans.some((key) => typeof record[key] !== 'boolean') ||
@@ -1671,7 +1675,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
               requiredRoomBooleans.some((key) => record[key] !== true))) ||
           (record.status === 'failed' &&
             !roomFailureCodes.has(record.failureCode)))) ||
-      (record.phase === 'member-a-room-context' &&
+      (ROOM_CONTEXT_PHASES.has(record.phase) &&
         !hasRoomObservation &&
         (record.status !== 'failed' ||
           !roomFailureCodes.has(record.failureCode))) ||
@@ -1680,7 +1684,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           Object.hasOwn(record, 'matrixClientPresent'))) ||
       (Object.hasOwn(record, 'failureCode') &&
         roomFailureCodes.has(record.failureCode) &&
-        record.phase !== 'member-a-room-context')
+        !ROOM_CONTEXT_PHASES.has(record.phase))
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
@@ -1942,7 +1946,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       fields.push(`matrix_sync_state=${record.matrixSyncState}`);
     }
     if (
-      phase === 'member-a-room-context' &&
+      ROOM_CONTEXT_PHASES.has(phase) &&
       record.matrixUserMatches !== undefined
     ) {
       fields.push(`matrix_user_matches=${record.matrixUserMatches}`);

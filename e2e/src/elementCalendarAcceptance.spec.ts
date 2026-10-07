@@ -161,6 +161,7 @@ type Phase =
   | 'reminder-restore-prior-state'
   | 'reminder-restore-scheduler-scan'
   | 'reminder-restore-no-duplicate';
+type MemberRoomContextPhase = 'member-a-room-context' | 'reminder-room-context';
 
 type BrowserActor = 'member-a' | 'member-b' | 'outsider';
 type BlockedRequestClass =
@@ -965,12 +966,15 @@ test('Element Web delivers a relative room reminder across restart and restore',
     const page = await authenticateInElement(context, fixture.users.memberA);
     record(activePhase, 'passed');
     activePhase = 'reminder-room-context';
-    const element = await openFixtureRoom(
+    const reminderRoom = await openMemberARoomWithDiagnostics(
       page,
       fixture.roomName,
       fixture.teamRoomId,
+      fixture.users.memberA.userId,
     );
-    record(activePhase, 'passed');
+    recordMemberARoomObservation(reminderRoom, 'reminder-room-context');
+    failureAlreadyRecorded = Boolean(reminderRoom.failureCode);
+    const element = requireMemberARoom(reminderRoom);
 
     activePhase = 'reminder-widget-context';
     const contextResponse = waitForGatewayResponse(
@@ -4132,13 +4136,16 @@ function recordMemberASessionObservation(
   );
 }
 
-function recordMemberARoomObservation(result: MemberARoomResult) {
+function recordMemberARoomObservation(
+  result: MemberARoomResult,
+  phase: MemberRoomContextPhase = 'member-a-room-context',
+) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   if (!stageFile) throw new Error('Element acceptance fixture unavailable');
   appendFileSync(
     stageFile,
     `${JSON.stringify({
-      phase: 'member-a-room-context',
+      phase,
       status: result.failureCode ? 'failed' : 'passed',
       ...(result.failureCode ? { failureCode: result.failureCode } : {}),
       ...(result.observation ?? {}),
