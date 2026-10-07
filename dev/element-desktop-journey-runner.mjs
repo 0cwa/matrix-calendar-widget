@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import {
   acknowledgedEgressCounterObservation,
   emptyUidLifecycleObservation,
+  emptyUidProcessStopDiagnostics,
   emptyUidStartupObservation,
   resolveTrustedRendererSandbox,
   sanitizeDesktopStages,
@@ -40,6 +41,12 @@ const RUNNER_STATE_NAME = 'element-desktop-journey-runner-state.json';
 const DESKTOP_RESULT_NAME = 'element-desktop-journey-startup-output.jsonl';
 const DESKTOP_STAGE_NAME = 'element-desktop-startup-stage.jsonl';
 const DESKTOP_EVIDENCE_MAX_BYTES = 1_048_576;
+const UID_CENSUS_MAX_BYTES = 16_384;
+const UID_STOP_CENSUS_WAIT_LIMITS_MS = Object.freeze({
+  initial: 1_200,
+  postTerm: 1_500,
+  postKill: 900,
+});
 const WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const POLICY_SCRIPT = resolve(
   WORKSPACE_ROOT,
@@ -1658,25 +1665,193 @@ function readDesktopStagePhases(path) {
   return phases;
 }
 
-async function stopUidProcesses(state) {
-  let status = runQuietly('pgrep', ['-u', String(state.uid)], {
-    timeout: 2_000,
-  });
-  if (status === 1) return 'passed';
-  if (status !== 0) return 'failed';
-  runQuietly('sudo', ['-n', 'pkill', '-TERM', '-u', String(state.uid)], {
-    timeout: 2_000,
-  });
-  await new Promise((resolveWait) => setTimeout(resolveWait, 2_000));
-  status = runQuietly('pgrep', ['-u', String(state.uid)], { timeout: 2_000 });
-  if (status === 0) {
-    runQuietly('sudo', ['-n', 'pkill', '-KILL', '-u', String(state.uid)], {
-      timeout: 2_000,
-    });
-    await new Promise((resolveWait) => setTimeout(resolveWait, 1_000));
-    status = runQuietly('pgrep', ['-u', String(state.uid)], { timeout: 2_000 });
+function uidStopCensusFromLifecycle(input) {
+  const observation = sanitizeUidLifecycleObservation(input);
+  if (!['observed', 'partial'].includes(observation.state)) {
+    return {
+      state: 'unavailable',
+      overflow: null,
+      uidProcessCount: null,
+      nonZombieProcessCount: null,
+      zombieCount: null,
+      unreadableProcessCount: null,
+      unattributedProcessCount: null,
+      processClassCounts: null,
+      processRoleCounts: null,
+    };
   }
-  return status === 1 ? 'passed' : 'failed';
+  return {
+    state: observation.state,
+    overflow: observation.overflow,
+    uidProcessCount: observation.uidProcessCount,
+    nonZombieProcessCount: observation.nonZombieProcessCount,
+    zombieCount: observation.zombieCount,
+    unreadableProcessCount: observation.unreadableProcessCount,
+    unattributedProcessCount: observation.unattributedProcessCount,
+    processClassCounts: observation.processClassCounts,
+    processRoleCounts: observation.processRoleCounts,
+  };
+}
+
+function captureUidStopCensus(state) {
+  return new Promise((resolveCensus) => {
+    let output = '';
+    let overflow = false;
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolveCensus(value);
+    };
+    let child;
+    try {
+      child = spawn(
+        'timeout',
+        [
+          '--signal=TERM',
+          '--kill-after=250ms',
+          '1s',
+          'sudo',
+          '-n',
+          process.execPath,
+          STARTUP_SCRIPT,
+          'uid-lifecycle-observation',
+          String(state.uid),
+        ],
+        {
+          env: createSystemCommandEnvironment(process.env),
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      );
+    } catch {
+      finish(undefined);
+      return;
+    }
+    child.stdout.on('data', (chunk) => {
+      if (overflow) return;
+      if (Buffer.byteLength(output) + chunk.length > UID_CENSUS_MAX_BYTES) {
+        overflow = true;
+        output = '';
+        return;
+      }
+      output += chunk.toString('utf8');
+    });
+    child.once('error', () => finish(undefined));
+    child.once('close', (status, signal) => {
+      if (status !== 0 || signal !== null || overflow) {
+        finish(undefined);
+        return;
+      }
+      finish(output);
+    });
+  });
+}
+
+function waitForUidStopCensus(census, checkpoint, state, timeoutMs) {
+  let timer;
+  return Promise.race([
+    Promise.resolve()
+      .then(() => census(checkpoint, state))
+      .then(uidStopCensusFromLifecycle)
+      .catch(() => uidStopCensusFromLifecycle(undefined)),
+    new Promise((resolveTimeout) => {
+      timer = setTimeout(
+        () => resolveTimeout(uidStopCensusFromLifecycle(undefined)),
+        timeoutMs,
+      );
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+function pgrepInspection(status) {
+  return status === 0 ? 'present' : status === 1 ? 'absent' : 'unavailable';
+}
+
+function signalOutcome(status) {
+  return status === 0
+    ? 'sent'
+    : status === 1
+      ? 'no_process'
+      : Number.isInteger(status)
+        ? 'failed'
+        : 'unavailable';
+}
+
+export async function stopUidProcesses(
+  state,
+  {
+    runCommand = runQuietly,
+    wait = (duration) =>
+      new Promise((resolveWait) => setTimeout(resolveWait, duration)),
+    census = captureUidStopCensus,
+  } = {},
+) {
+  const diagnostics = emptyUidProcessStopDiagnostics();
+  const inspect = () => {
+    try {
+      return runCommand('pgrep', ['-u', String(state.uid)], {
+        timeout: 2_000,
+      });
+    } catch {
+      return undefined;
+    }
+  };
+  const signal = (name) => {
+    let status;
+    try {
+      status = runCommand(
+        'sudo',
+        ['-n', 'pkill', `-${name}`, '-u', String(state.uid)],
+        { timeout: 2_000 },
+      );
+    } catch {
+      status = undefined;
+    }
+    return signalOutcome(status);
+  };
+
+  const initialCensus = waitForUidStopCensus(
+    census,
+    'initial',
+    state,
+    UID_STOP_CENSUS_WAIT_LIMITS_MS.initial,
+  );
+  const initialStatus = inspect();
+  diagnostics.initial.inspection = pgrepInspection(initialStatus);
+  diagnostics.initial.census = await initialCensus;
+  if (initialStatus !== 0) {
+    diagnostics.status = initialStatus === 1 ? 'passed' : 'failed';
+    return { status: diagnostics.status, diagnostics };
+  }
+
+  diagnostics.termSignal = signal('TERM');
+  const postTermCensus = waitForUidStopCensus(
+    census,
+    'post-term',
+    state,
+    UID_STOP_CENSUS_WAIT_LIMITS_MS.postTerm,
+  );
+  await wait(2_000);
+  const postTermStatus = inspect();
+  diagnostics.postTerm.inspection = pgrepInspection(postTermStatus);
+  diagnostics.postTerm.census = await postTermCensus;
+  if (postTermStatus === 0) {
+    diagnostics.killSignal = signal('KILL');
+    const postKillCensus = waitForUidStopCensus(
+      census,
+      'post-kill',
+      state,
+      UID_STOP_CENSUS_WAIT_LIMITS_MS.postKill,
+    );
+    await wait(1_000);
+    const postKillStatus = inspect();
+    diagnostics.postKill.inspection = pgrepInspection(postKillStatus);
+    diagnostics.postKill.census = await postKillCensus;
+    diagnostics.status = postKillStatus === 1 ? 'passed' : 'failed';
+    return { status: diagnostics.status, diagnostics };
+  }
+  diagnostics.status = postTermStatus === 1 ? 'passed' : 'failed';
+  return { status: diagnostics.status, diagnostics };
 }
 
 function captureFinalEgress(state) {
@@ -1934,6 +2109,7 @@ async function cleanupRunner(config) {
     accountState: 'not_observed',
   };
   let profileStatus = 'not_run';
+  let stopDiagnostics = emptyUidProcessStopDiagnostics();
   let lifecycleBeforeUserdel = emptyUidLifecycleObservation('not_observed');
   let finalLifecycle = emptyUidLifecycleObservation('not_observed');
   let egressObservation = {
@@ -1947,7 +2123,9 @@ async function cleanupRunner(config) {
     overflow: null,
   };
   if (state !== undefined && !stateInvalid) {
-    processStatus = await stopUidProcesses(state);
+    const stopResult = await stopUidProcesses(state);
+    processStatus = stopResult.status;
+    stopDiagnostics = stopResult.diagnostics;
     egressObservation = captureFinalEgress(state);
     lifecycleBeforeUserdel = captureFinalUidLifecycle(state);
     const beforeUserdelClear =
@@ -2003,6 +2181,7 @@ async function cleanupRunner(config) {
       accountState: stateInvalid ? 'unavailable' : user.accountState,
       userdelStatus: stateInvalid ? 'not_run' : user.userdelStatus,
       userdelExitStatus: stateInvalid ? null : user.userdelExitStatus,
+      stopDiagnostics,
       uidProcessObservation: uidProcessObservationFromLifecycle(finalLifecycle),
       uidLifecycleObservationBeforeUserdel: lifecycleBeforeUserdel,
       finalUidLifecycleObservation: finalLifecycle,

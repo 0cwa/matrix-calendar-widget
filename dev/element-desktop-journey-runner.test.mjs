@@ -11,11 +11,162 @@ import {
   parseStartupProgressRecord,
   selectAvailableProbeUid,
   selectPinnedPackageHash,
+  stopUidProcesses,
   validateDefaultPolicyPort,
   validateJourneyPolicyPorts,
 } from './element-desktop-journey-runner.mjs';
+import { emptyUidLifecycleObservation } from './element-desktop-evidence.mjs';
 
 const PACKAGE_HASH = 'a'.repeat(64);
+
+function observedUidCensus(uidProcessCount) {
+  return {
+    ...emptyUidLifecycleObservation(),
+    state: 'observed',
+    overflow: false,
+    uidProcessCount,
+    nonZombieProcessCount: uidProcessCount,
+    zombieCount: 0,
+    unreadableProcessCount: 0,
+    unattributedProcessCount: 0,
+    processClassCounts: {
+      application: 0,
+      browser: 0,
+      renderer: 0,
+      zygote: 0,
+      gpu: 0,
+      utility: 0,
+      other: uidProcessCount,
+      unknown: 0,
+    },
+    processRoleCounts: {
+      application: 0,
+      chromium: 0,
+      keyring: 0,
+      dbus: 0,
+      xvfb: 0,
+      other: uidProcessCount,
+      unknown: 0,
+    },
+  };
+}
+
+test('records a clear initial UID inspection without entering the signal path', async () => {
+  const calls = [];
+  const waits = [];
+  const result = await stopUidProcesses(
+    { uid: 24_000 },
+    {
+      runCommand: (program, args) => {
+        calls.push([program, ...args]);
+        return 1;
+      },
+      wait: async (duration) => waits.push(duration),
+      census: async () => observedUidCensus(0),
+    },
+  );
+
+  assert.equal(result.status, 'passed');
+  assert.equal(result.diagnostics.initial.inspection, 'absent');
+  assert.equal(result.diagnostics.initial.census.uidProcessCount, 0);
+  assert.equal(result.diagnostics.termSignal, 'not_attempted');
+  assert.equal(result.diagnostics.killSignal, 'not_attempted');
+  assert.deepEqual(calls, [['pgrep', '-u', '24000']]);
+  assert.deepEqual(waits, []);
+});
+
+test('keeps unavailable UID inspection distinct from an empty census', async () => {
+  const calls = [];
+  const result = await stopUidProcesses(
+    { uid: 24_000 },
+    {
+      runCommand: (program, args) => {
+        calls.push([program, ...args]);
+        return undefined;
+      },
+      wait: async () => assert.fail('unavailable inspection must not wait'),
+      census: async () => undefined,
+    },
+  );
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.diagnostics.initial.inspection, 'unavailable');
+  assert.equal(result.diagnostics.initial.census.state, 'unavailable');
+  assert.equal(result.diagnostics.initial.census.uidProcessCount, null);
+  assert.equal(result.diagnostics.termSignal, 'not_attempted');
+  assert.equal(result.diagnostics.killSignal, 'not_attempted');
+  assert.deepEqual(calls, [['pgrep', '-u', '24000']]);
+});
+
+test('skips KILL when the post-TERM inspection is clear', async () => {
+  const statuses = [0, 0, 1];
+  const calls = [];
+  const waits = [];
+  const result = await stopUidProcesses(
+    { uid: 24_000 },
+    {
+      runCommand: (program, args) => {
+        calls.push([program, ...args]);
+        return statuses.shift();
+      },
+      wait: async (duration) => waits.push(duration),
+      census: async () => observedUidCensus(0),
+    },
+  );
+
+  assert.equal(result.status, 'passed');
+  assert.deepEqual(waits, [2_000]);
+  assert.deepEqual(
+    calls.map((call) => call.slice(0, 4)),
+    [
+      ['pgrep', '-u', '24000'],
+      ['sudo', '-n', 'pkill', '-TERM'],
+      ['pgrep', '-u', '24000'],
+    ],
+  );
+  assert.equal(result.diagnostics.postTerm.inspection, 'absent');
+  assert.equal(result.diagnostics.killSignal, 'not_attempted');
+  assert.equal(result.diagnostics.postKill.inspection, 'not_attempted');
+});
+
+test('uses the existing conditional KILL branch and bounded waits', async () => {
+  const statuses = [0, 0, 0, 0, 1];
+  const calls = [];
+  const waits = [];
+  const censuses = [];
+  const result = await stopUidProcesses(
+    { uid: 24_000 },
+    {
+      runCommand: (program, args) => {
+        calls.push([program, ...args]);
+        return statuses.shift();
+      },
+      wait: async (duration) => waits.push(duration),
+      census: async (checkpoint) => {
+        censuses.push(checkpoint);
+        return observedUidCensus(checkpoint === 'post-kill' ? 0 : 1);
+      },
+    },
+  );
+
+  assert.equal(result.status, 'passed');
+  assert.deepEqual(waits, [2_000, 1_000]);
+  assert.deepEqual(censuses, ['initial', 'post-term', 'post-kill']);
+  assert.deepEqual(
+    calls.map((call) => call.slice(0, 4)),
+    [
+      ['pgrep', '-u', '24000'],
+      ['sudo', '-n', 'pkill', '-TERM'],
+      ['pgrep', '-u', '24000'],
+      ['sudo', '-n', 'pkill', '-KILL'],
+      ['pgrep', '-u', '24000'],
+    ],
+  );
+  assert.equal(result.diagnostics.termSignal, 'sent');
+  assert.equal(result.diagnostics.postTerm.inspection, 'present');
+  assert.equal(result.diagnostics.killSignal, 'sent');
+  assert.equal(result.diagnostics.postKill.inspection, 'absent');
+});
 
 test('accepts only bounded Desktop startup progress records', () => {
   assert.deepEqual(

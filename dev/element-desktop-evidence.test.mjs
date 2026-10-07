@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   emptyUidLifecycleObservation,
+  emptyUidProcessStopDiagnostics,
   emptyUidStartupObservation,
   resolveTrustedRendererSandbox,
   sanitizeDesktopStages,
@@ -214,6 +215,30 @@ function observedEmptyUidLifecycleObservation() {
     seccompState: 'not_observed',
     noNewPrivsState: 'not_observed',
   };
+}
+
+function observedStopCensus(lifecycle) {
+  return {
+    state: lifecycle.state,
+    overflow: lifecycle.overflow,
+    uidProcessCount: lifecycle.uidProcessCount,
+    nonZombieProcessCount: lifecycle.nonZombieProcessCount,
+    zombieCount: lifecycle.zombieCount,
+    unreadableProcessCount: lifecycle.unreadableProcessCount,
+    unattributedProcessCount: lifecycle.unattributedProcessCount,
+    processClassCounts: lifecycle.processClassCounts,
+    processRoleCounts: lifecycle.processRoleCounts,
+  };
+}
+
+function passedStopDiagnostics() {
+  const diagnostics = emptyUidProcessStopDiagnostics();
+  diagnostics.status = 'passed';
+  diagnostics.initial = {
+    inspection: 'absent',
+    census: observedStopCensus(observedEmptyUidLifecycleObservation()),
+  };
+  return diagnostics;
 }
 
 function observedEmptyUidTcpSocketObservation() {
@@ -442,6 +467,7 @@ function stages(overrides = {}) {
       accountState: 'absent',
       userdelStatus: 'not_run',
       userdelExitStatus: null,
+      stopDiagnostics: passedStopDiagnostics(),
       uidProcessObservation: {
         state: 'observed',
         uidProcessCount: 0,
@@ -460,7 +486,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes with complete verified isolation and cleanup', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 15);
+  assert.equal(summary.schemaVersion, 16);
   assert.deepEqual(summary.desktopObservation.configInMemoryObservation, {
     state: 'observed',
     matchesFixture: true,
@@ -505,6 +531,7 @@ test('Desktop evidence passes with complete verified isolation and cleanup', () 
     accountState: 'absent',
     userdelStatus: 'not_run',
     userdelExitStatus: null,
+    stopDiagnostics: passedStopDiagnostics(),
     uidProcessObservation: {
       state: 'observed',
       uidProcessCount: 0,
@@ -545,6 +572,35 @@ test('cleanup reports the deny policy retained when account removal is unproven'
   unjustifiedRetention[4].policy = 'retained';
   assert.throws(
     () => sanitizeDesktopStages(unjustifiedRetention, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
+});
+
+test('cleanup keeps unavailable stop snapshots null and cannot treat them as clear', () => {
+  const unavailable = stages();
+  unavailable[4].isolatedProcesses = 'failed';
+  unavailable[4].policy = 'retained';
+  unavailable[4].user = 'failed';
+  unavailable[4].accountState = 'uid_match';
+  unavailable[4].stopDiagnostics = emptyUidProcessStopDiagnostics();
+  unavailable[4].stopDiagnostics.status = 'failed';
+  unavailable[4].stopDiagnostics.initial.inspection = 'unavailable';
+  unavailable[4].stopDiagnostics.initial.census.state = 'unavailable';
+
+  const summary = sanitizeDesktopStages(unavailable, sourceSha);
+  assert.equal(summary.cleanupDiagnostics.policyStatus, 'retained');
+  assert.equal(
+    summary.cleanupDiagnostics.stopDiagnostics.initial.inspection,
+    'unavailable',
+  );
+  assert.equal(
+    summary.cleanupDiagnostics.stopDiagnostics.initial.census.uidProcessCount,
+    null,
+  );
+
+  unavailable[4].stopDiagnostics.status = 'passed';
+  assert.throws(
+    () => sanitizeDesktopStages(unavailable, sourceSha),
     /invalid Desktop evidence input/u,
   );
 });
@@ -1634,6 +1690,7 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
     accountState: 'uid_match',
     userdelStatus: 'failed',
     userdelExitStatus: 8,
+    stopDiagnostics: passedStopDiagnostics(),
     uidProcessObservation: {
       state: 'observed',
       uidProcessCount: 2,

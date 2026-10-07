@@ -94,6 +94,19 @@ const UID_LIFECYCLE_PROCESS_ROLES = Object.freeze([
   'other',
   'unknown',
 ]);
+const UID_STOP_INSPECTION_STATES = new Set([
+  'not_attempted',
+  'unavailable',
+  'absent',
+  'present',
+]);
+const UID_STOP_SIGNAL_OUTCOMES = new Set([
+  'not_attempted',
+  'unavailable',
+  'no_process',
+  'failed',
+  'sent',
+]);
 const UID_LIFECYCLE_RELATION_STATES = new Set([
   'not_observed',
   'unavailable',
@@ -1187,6 +1200,180 @@ export function sanitizeUidLifecycleObservation(input) {
   };
 }
 
+function emptyUidStopCensus(state) {
+  return {
+    state,
+    overflow: null,
+    uidProcessCount: null,
+    nonZombieProcessCount: null,
+    zombieCount: null,
+    unreadableProcessCount: null,
+    unattributedProcessCount: null,
+    processClassCounts: null,
+    processRoleCounts: null,
+  };
+}
+
+function emptyUidStopCheckpoint() {
+  return {
+    inspection: 'not_attempted',
+    census: emptyUidStopCensus('not_attempted'),
+  };
+}
+
+export function emptyUidProcessStopDiagnostics() {
+  return {
+    status: 'not_run',
+    initial: emptyUidStopCheckpoint(),
+    termSignal: 'not_attempted',
+    postTerm: emptyUidStopCheckpoint(),
+    killSignal: 'not_attempted',
+    postKill: emptyUidStopCheckpoint(),
+  };
+}
+
+function validateUidStopCensus(value) {
+  if (
+    !hasKeys(value, [
+      'state',
+      'overflow',
+      'uidProcessCount',
+      'nonZombieProcessCount',
+      'zombieCount',
+      'unreadableProcessCount',
+      'unattributedProcessCount',
+      'processClassCounts',
+      'processRoleCounts',
+    ]) ||
+    !['not_attempted', 'unavailable', 'partial', 'observed'].includes(
+      value.state,
+    )
+  ) {
+    return false;
+  }
+  if (value.state === 'not_attempted' || value.state === 'unavailable') {
+    return (
+      value.overflow === null &&
+      value.uidProcessCount === null &&
+      value.nonZombieProcessCount === null &&
+      value.zombieCount === null &&
+      value.unreadableProcessCount === null &&
+      value.unattributedProcessCount === null &&
+      value.processClassCounts === null &&
+      value.processRoleCounts === null
+    );
+  }
+  if (
+    typeof value.overflow !== 'boolean' ||
+    !diagnosticCount(value.uidProcessCount) ||
+    !diagnosticCount(value.nonZombieProcessCount) ||
+    !diagnosticCount(value.zombieCount) ||
+    !diagnosticCount(value.unreadableProcessCount) ||
+    !diagnosticCount(value.unattributedProcessCount) ||
+    !hasKeys(value.processClassCounts, UID_LIFECYCLE_PROCESS_CLASSES) ||
+    !hasKeys(value.processRoleCounts, UID_LIFECYCLE_PROCESS_ROLES) ||
+    UID_LIFECYCLE_PROCESS_CLASSES.some(
+      (name) => !diagnosticCount(value.processClassCounts[name]),
+    ) ||
+    UID_LIFECYCLE_PROCESS_ROLES.some(
+      (name) => !diagnosticCount(value.processRoleCounts[name]),
+    ) ||
+    value.nonZombieProcessCount > value.uidProcessCount ||
+    value.zombieCount > value.uidProcessCount ||
+    value.unreadableProcessCount > value.uidProcessCount ||
+    value.unattributedProcessCount > value.uidProcessCount ||
+    UID_LIFECYCLE_PROCESS_CLASSES.some(
+      (name) => value.processClassCounts[name] > value.uidProcessCount,
+    ) ||
+    UID_LIFECYCLE_PROCESS_ROLES.some(
+      (name) => value.processRoleCounts[name] > value.uidProcessCount,
+    )
+  ) {
+    return false;
+  }
+  const classTotal = UID_LIFECYCLE_PROCESS_CLASSES.reduce(
+    (total, name) => total + value.processClassCounts[name],
+    0,
+  );
+  const roleTotal = UID_LIFECYCLE_PROCESS_ROLES.reduce(
+    (total, name) => total + value.processRoleCounts[name],
+    0,
+  );
+  return (
+    value.nonZombieProcessCount + value.zombieCount <= value.uidProcessCount &&
+    (value.overflow ||
+      (value.nonZombieProcessCount + value.zombieCount ===
+        value.uidProcessCount &&
+        classTotal === value.uidProcessCount &&
+        roleTotal === value.uidProcessCount)) &&
+    (value.state !== 'observed' || !value.overflow)
+  );
+}
+
+function validateUidStopCheckpoint(value) {
+  return (
+    hasKeys(value, ['inspection', 'census']) &&
+    UID_STOP_INSPECTION_STATES.has(value.inspection) &&
+    validateUidStopCensus(value.census) &&
+    (value.inspection !== 'not_attempted' ||
+      value.census.state === 'not_attempted')
+  );
+}
+
+function validateUidProcessStopDiagnostics(value) {
+  if (
+    !hasKeys(value, [
+      'status',
+      'initial',
+      'termSignal',
+      'postTerm',
+      'killSignal',
+      'postKill',
+    ]) ||
+    !['not_run', 'passed', 'failed'].includes(value.status) ||
+    !validateUidStopCheckpoint(value.initial) ||
+    !validateUidStopCheckpoint(value.postTerm) ||
+    !validateUidStopCheckpoint(value.postKill) ||
+    !UID_STOP_SIGNAL_OUTCOMES.has(value.termSignal) ||
+    !UID_STOP_SIGNAL_OUTCOMES.has(value.killSignal)
+  ) {
+    return false;
+  }
+  const initialAbsent = value.initial.inspection === 'absent';
+  const initialPresent = value.initial.inspection === 'present';
+  const postTermAbsent = value.postTerm.inspection === 'absent';
+  const postTermPresent = value.postTerm.inspection === 'present';
+  const termNotAttempted = value.termSignal === 'not_attempted';
+  const killNotAttempted = value.killSignal === 'not_attempted';
+  if (initialAbsent || value.initial.inspection !== 'present') {
+    if (
+      !termNotAttempted ||
+      value.postTerm.inspection !== 'not_attempted' ||
+      !killNotAttempted ||
+      value.postKill.inspection !== 'not_attempted'
+    ) {
+      return false;
+    }
+  } else if (termNotAttempted) {
+    return false;
+  }
+  if (postTermPresent) {
+    if (killNotAttempted || value.postKill.inspection === 'not_attempted') {
+      return false;
+    }
+  } else if (
+    !killNotAttempted ||
+    value.postKill.inspection !== 'not_attempted'
+  ) {
+    return false;
+  }
+  const observedClear =
+    initialAbsent ||
+    postTermAbsent ||
+    (postTermPresent && value.postKill.inspection === 'absent');
+  return value.status !== 'passed' || observedClear;
+}
+
 function emptyUidTcpSocketObservation(state = 'not_observed') {
   return {
     coverage: 'process_owned_tcp_only',
@@ -2162,6 +2349,7 @@ function validateCleanup(record) {
       'accountState',
       'userdelStatus',
       'userdelExitStatus',
+      'stopDiagnostics',
       'uidProcessObservation',
       'uidLifecycleObservationBeforeUserdel',
       'finalUidLifecycleObservation',
@@ -2189,6 +2377,7 @@ function validateCleanup(record) {
         ? record.userdelExitStatus !== null && record.userdelExitStatus !== 0
         : record.userdelExitStatus === null) &&
     validateUidProcessObservation(record.uidProcessObservation) &&
+    validateUidProcessStopDiagnostics(record.stopDiagnostics) &&
     validateUidLifecycleObservation(
       record.uidLifecycleObservationBeforeUserdel,
     ) &&
@@ -2211,7 +2400,8 @@ function validateCleanup(record) {
         record.uidLifecycleObservationBeforeUserdel.uidProcessCount === 0 &&
         record.finalUidLifecycleObservation.state === 'observed' &&
         record.finalUidLifecycleObservation.uidProcessCount === 0 &&
-        record.accountState === 'absent';
+        record.accountState === 'absent' &&
+        record.stopDiagnostics.status === 'passed';
       return (
         projectionMatches &&
         (record.policy !== 'passed' ||
@@ -2502,6 +2692,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         accountState: cleanup.accountState,
         userdelStatus: cleanup.userdelStatus,
         userdelExitStatus: cleanup.userdelExitStatus,
+        stopDiagnostics: cleanup.stopDiagnostics,
         uidProcessObservation: cleanup.uidProcessObservation,
       }
     : null;
@@ -2563,7 +2754,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 15,
+    schemaVersion: 16,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -2666,7 +2857,7 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 15 &&
+    value.schemaVersion === 16 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
@@ -2766,6 +2957,7 @@ export function validDesktopSummary(value) {
         'accountState',
         'userdelStatus',
         'userdelExitStatus',
+        'stopDiagnostics',
         'uidProcessObservation',
       ]) &&
         ['passed', 'failed', 'not_run', 'retained'].includes(
@@ -2793,6 +2985,9 @@ export function validDesktopSummary(value) {
             : value.cleanupDiagnostics.userdelExitStatus === null) &&
         validateUidProcessObservation(
           value.cleanupDiagnostics.uidProcessObservation,
+        ) &&
+        validateUidProcessStopDiagnostics(
+          value.cleanupDiagnostics.stopDiagnostics,
         ))) &&
     (value.cleanupDiagnostics === null
       ? value.checks?.cleanupPolicy === 'not_run'
@@ -2804,6 +2999,7 @@ export function validDesktopSummary(value) {
             : 'failed')) &&
     (value.checks?.cleanupIsolatedProcesses !== 'passed' ||
       (value.cleanupDiagnostics?.accountState === 'absent' &&
+        value.cleanupDiagnostics.stopDiagnostics.status === 'passed' &&
         value.cleanupDiagnostics.uidProcessObservation.state === 'observed' &&
         value.cleanupDiagnostics.uidProcessObservation.uidProcessCount ===
           0)) &&
