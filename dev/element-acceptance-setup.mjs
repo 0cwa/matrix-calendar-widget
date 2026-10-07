@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -318,6 +318,7 @@ async function joinReminderSender(
     events_default: 100,
     invite: 100,
     kick: 100,
+    // Synapse's default room mention threshold is 50; ordinary messages need 0.
     notifications: { room: 50 },
     redact: 100,
     state_default: 100,
@@ -743,18 +744,6 @@ async function provision() {
     createServiceCalendar(applicationServiceToken),
   );
 
-  await runPhase(
-    'service-room-ready',
-    () =>
-      joinReminderSender(
-        serviceUserAccessToken,
-        rooms.teamRoomId,
-        actors.memberA.accessToken,
-        actors.memberA.userId,
-      ),
-    () => ({ serviceUserJoined: true, powerPolicyVerified: true }),
-  );
-
   await runPhase('widget-registered', async () => {
     await registerWidget(
       rooms.teamRoomId,
@@ -814,10 +803,59 @@ async function provision() {
     outsiderRoomId: rooms.outsiderRoomId,
     calendarId: CALENDAR_ID,
     users: publicActors,
+    serviceSender: {
+      userId: SERVICE_USER_ID,
+      accessToken: serviceUserAccessToken,
+    },
   });
 
   recordStage('runtime-ready', 'passed');
   process.stdout.write('Element acceptance fixture setup complete.\n');
+}
+
+async function prepareReminderRoom() {
+  const userFile = requiredEnvironment('ELEMENT_ACCEPTANCE_USERS_FILE');
+  const runnerTemp = process.env.RUNNER_TEMP;
+  if (
+    !runnerTemp ||
+    !isAbsolute(userFile) ||
+    !resolve(userFile).startsWith(resolve(runnerTemp) + sep)
+  ) {
+    throw new FixtureSetupError('service-room-ready');
+  }
+
+  await runPhase(
+    'service-room-ready',
+    async () => {
+      let fixture;
+      try {
+        fixture = JSON.parse(readFileSync(userFile, 'utf8'));
+      } catch {
+        throw new FixtureSetupError('service-room-ready');
+      }
+      const memberA = fixture?.users?.memberA;
+      const serviceSender = fixture?.serviceSender;
+      if (
+        !safeCredential(fixture?.teamRoomId) ||
+        typeof memberA?.userId !== 'string' ||
+        !/^@[a-z0-9-]+:localhost$/u.test(memberA.userId) ||
+        !safeCredential(memberA?.accessToken) ||
+        serviceSender?.userId !== SERVICE_USER_ID ||
+        !safeCredential(serviceSender?.accessToken)
+      ) {
+        throw new FixtureSetupError('service-room-ready');
+      }
+      await joinReminderSender(
+        serviceSender.accessToken,
+        fixture.teamRoomId,
+        memberA.accessToken,
+        memberA.userId,
+      );
+      return true;
+    },
+    () => ({ serviceUserJoined: true, powerPolicyVerified: true }),
+  );
+  process.stdout.write('Reminder sender joined the synthetic team room.\n');
 }
 
 async function waitForEndpoint(phase, url, expectedStatus) {
@@ -880,6 +918,8 @@ async function main() {
   try {
     if (mode === 'setup') {
       await provision();
+    } else if (mode === 'reminder-room') {
+      await prepareReminderRoom();
     } else if (mode === 'wait') {
       await waitForServices();
     } else {

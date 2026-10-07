@@ -20,6 +20,18 @@ function baseModel(synapseHostIp, radicaleHostIp) {
   };
 }
 
+function webAcceptanceModel() {
+  return {
+    services: {
+      synapse: { ports: [port(8008, 8008)] },
+      radicale: { ports: [port(5232, 5232)] },
+      gateway: { ports: [port(3000, 3000)] },
+      widget: { ports: [port(8080, 8080)] },
+      element: { ports: [port(80, 8090)] },
+    },
+  };
+}
+
 test('accepts base synthetic services bound only to IPv4 loopback', () => {
   assert.equal(
     hasAcceptanceLoopbackBindings(baseModel('127.0.0.1', '127.0.0.1')),
@@ -49,14 +61,20 @@ test('rejects extra published ports even when a loopback mapping is present', ()
 });
 
 test('checks loopback bindings for project services when the overlay is present', () => {
-  const model = baseModel('127.0.0.1', '127.0.0.1');
-  model.services.gateway = { ports: [port(3000, 3000)] };
-  model.services.widget = { ports: [port(8080, 8080)] };
-  model.services.element = { ports: [port(80, 8090)] };
+  const model = webAcceptanceModel();
 
   assert.equal(hasAcceptanceLoopbackBindings(model), true);
   model.services.widget.ports[0].host_ip = '0.0.0.0';
   assert.equal(hasAcceptanceLoopbackBindings(model), false);
+});
+
+test('preserves the full Web-only overlay without reminder restore services', () => {
+  const model = webAcceptanceModel();
+
+  assert.equal(hasAcceptanceLoopbackBindings(model), true);
+  assert.equal('postgres' in model.services, false);
+  assert.equal('restore-gateway' in model.services, false);
+  assert.equal('restore-radicale' in model.services, false);
 });
 
 test('accepts paired loopback-only restore services without publishing PostgreSQL', () => {
