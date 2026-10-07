@@ -906,12 +906,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           Array.isArray(diagnostic) ||
           Object.keys(diagnostic).length !== 5 ||
           !Object.hasOwn(diagnostic, 'actor') ||
-          !Object.hasOwn(diagnostic, 'phase') ||
+          !Object.hasOwn(diagnostic, 'harnessPhase') ||
           !Object.hasOwn(diagnostic, 'requestClass') ||
           !Object.hasOwn(diagnostic, 'resourceType') ||
           !Object.hasOwn(diagnostic, 'count') ||
           !BLOCKED_REQUEST_ACTORS.has(diagnostic.actor) ||
-          !PHASES.has(diagnostic.phase) ||
+          !PHASES.has(diagnostic.harnessPhase) ||
           !BLOCKED_REQUEST_CLASSES.has(diagnostic.requestClass) ||
           !BLOCKED_REQUEST_RESOURCE_TYPES.has(diagnostic.resourceType) ||
           !Number.isInteger(diagnostic.count) ||
@@ -923,7 +923,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
 
         const key = JSON.stringify([
           diagnostic.actor,
-          diagnostic.phase,
+          diagnostic.harnessPhase,
           diagnostic.requestClass,
           diagnostic.resourceType,
         ]);
@@ -1353,8 +1353,8 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     if (phase === 'browser-egress' && record.blockedRequestDiagnostics) {
       const diagnostics = record.blockedRequestDiagnostics
         .map(
-          ({ actor, phase: requestPhase, requestClass, resourceType, count }) =>
-            `${actor}/${requestPhase}/${requestClass}/${resourceType}/${count}`,
+          ({ actor, harnessPhase, requestClass, resourceType, count }) =>
+            `${actor}/harness_phase=${harnessPhase}/${requestClass}/${resourceType}/${count}`,
         )
         .join(',');
       lines.push(

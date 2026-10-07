@@ -124,7 +124,8 @@ type BlockedRequestResourceType =
   | 'other';
 type BlockedRequestDiagnostic = {
   actor: BrowserActor;
-  phase: Phase;
+  // Sampled shared harness phase; asynchronous requests can outlive an action.
+  harnessPhase: Phase;
   requestClass: BlockedRequestClass;
   resourceType: BlockedRequestResourceType;
   count: number;
@@ -907,26 +908,24 @@ function classifyBlockedRequest(
 function recordBlockedRequest(
   evidence: BlockedRequestEvidence,
   actor: BrowserActor,
-  phase: Phase,
+  harnessPhase: Phase,
   requestClass: BlockedRequestClass,
   resourceType: BlockedRequestResourceType,
 ) {
-  const key = JSON.stringify([actor, phase, requestClass, resourceType]);
+  const key = JSON.stringify([actor, harnessPhase, requestClass, resourceType]);
   const existing = evidence.diagnostics.get(key);
   if (existing) {
     existing.count = Math.min(existing.count + 1, 2);
     return;
   }
-  if (
-    evidence.diagnostics.size >= MAX_BLOCKED_REQUEST_DIAGNOSTIC_BUCKETS
-  ) {
+  if (evidence.diagnostics.size >= MAX_BLOCKED_REQUEST_DIAGNOSTIC_BUCKETS) {
     evidence.overflow = true;
     return;
   }
 
   evidence.diagnostics.set(key, {
     actor,
-    phase,
+    harnessPhase,
     requestClass,
     resourceType,
     count: 1,

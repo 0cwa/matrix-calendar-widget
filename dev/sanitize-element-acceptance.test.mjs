@@ -1209,14 +1209,14 @@ test('emits only fixed blocked-request classifications on egress failure', () =>
       blockedRequestDiagnostics: [
         {
           actor: 'member-a',
-          phase: 'member-a-authenticated',
+          harnessPhase: 'member-a-authenticated',
           requestClass: 'external-http-origin',
           resourceType: 'script',
           count: 1,
         },
         {
           actor: 'outsider',
-          phase: 'outsider-room-context',
+          harnessPhase: 'outsider-room-context',
           requestClass: 'matrix-server-well-known-discovery',
           resourceType: 'fetch',
           count: 2,
@@ -1230,7 +1230,7 @@ test('emits only fixed blocked-request classifications on egress failure', () =>
     summary,
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=browser-egress status=failed count=3 blocked_request_diagnostic_overflow=false blocked_requests=member-a/member-a-authenticated/external-http-origin/script/1,outsider/outsider-room-context/matrix-server-well-known-discovery/fetch/2',
+      'phase=browser-egress status=failed count=3 blocked_request_diagnostic_overflow=false blocked_requests=member-a/harness_phase=member-a-authenticated/external-http-origin/script/1,outsider/harness_phase=outsider-room-context/matrix-server-well-known-discovery/fetch/2',
       '',
     ].join('\n'),
   );
@@ -1240,7 +1240,7 @@ test('emits only fixed blocked-request classifications on egress failure', () =>
 test('rejects malformed or unbounded blocked-request evidence', () => {
   const diagnostic = {
     actor: 'member-a',
-    phase: 'member-a-authenticated',
+    harnessPhase: 'member-a-authenticated',
     requestClass: 'external-http-origin',
     resourceType: 'script',
     count: 1,
@@ -1263,7 +1263,9 @@ test('rejects malformed or unbounded blocked-request evidence', () => {
     },
     {
       ...base,
-      blockedRequestDiagnostics: [{ ...diagnostic, phase: 'private-phase' }],
+      blockedRequestDiagnostics: [
+        { ...diagnostic, harnessPhase: 'private-phase' },
+      ],
     },
     {
       ...base,
