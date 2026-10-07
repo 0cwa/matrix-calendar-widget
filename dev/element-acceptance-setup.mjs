@@ -372,7 +372,18 @@ async function createServiceCalendar(applicationServiceToken) {
 async function registerWidget(stateRoomId, targetRoomId, actor, widgetId) {
   const url = new URL('/', WIDGET_URL);
   url.searchParams.set('meetings_bot_base_url', GATEWAY_URL);
+  // Keep the target room literal for the outsider cross-room probe.
   url.searchParams.set('matrix_room_id', targetRoomId);
+  // Element fills these standard widget-context placeholders at launch.
+  url.hash =
+    '/?theme=$org.matrix.msc2873.client_theme' +
+    '&matrix_user_id=$matrix_user_id' +
+    '&matrix_display_name=$matrix_display_name' +
+    '&matrix_avatar_url=$matrix_avatar_url' +
+    '&matrix_client_id=$org.matrix.msc2873.client_id' +
+    '&matrix_client_language=$org.matrix.msc2873.client_language' +
+    '&matrix_device_id=$org.matrix.msc3819.matrix_device_id' +
+    '&matrix_base_url=$org.matrix.msc4039.matrix_base_url';
   await matrixJson(
     `/_matrix/client/v3/rooms/${encodeURIComponent(stateRoomId)}/state/im.vector.modular.widgets/${encodeURIComponent(widgetId)}`,
     {
