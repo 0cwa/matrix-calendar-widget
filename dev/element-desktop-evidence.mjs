@@ -234,9 +234,12 @@ function validateRuntimeFacts(value) {
     );
   }
   return (
-    (value.childResult === 'spawn-error') ===
-      (value.spawnErrorClass !== null) &&
-    (value.childResult === 'signaled') === (value.childSignal !== null) &&
+    (value.childResult === 'spawn-error'
+      ? value.spawnErrorClass !== null
+      : value.spawnErrorClass === null) &&
+    (value.childResult === 'signaled'
+      ? value.childSignal !== null
+      : value.childResult === 'spawn-error' || value.childSignal === null) &&
     value.uidMatches === null &&
     value.nodeVersion === null &&
     !value.nodeVersionSupported &&

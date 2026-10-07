@@ -314,6 +314,48 @@ test('Desktop evidence reports absent startup as incomplete and rejects degraded
     false,
   );
 
+  const timedOutPreflight = stages().filter(
+    (record) => record.phase !== 'desktop-startup',
+  );
+  timedOutPreflight[0].status = 'failed';
+  Object.assign(timedOutPreflight[0].runtimeFacts, {
+    childResult: 'spawn-error',
+    childExitStatus: null,
+    childSignal: 'SIGTERM',
+    spawnErrorClass: 'timeout',
+    markerPresent: false,
+    uidMatches: null,
+    nodeVersion: null,
+    nodeVersionSupported: false,
+    nodeExecutableRunnable: null,
+    scriptExists: null,
+    scriptReadable: null,
+  });
+  timedOutPreflight[0].scriptProbe = {
+    listenerBound: false,
+    childResult: 'not-run',
+    childExitStatus: null,
+    childSignal: null,
+    spawnErrorClass: null,
+    stderrClass: 'empty',
+    probeMarkerPresent: false,
+    probeUidMatches: null,
+    connectAttempted: false,
+    connectionOutcome: 'listener-error',
+    listenerAcceptedCount: null,
+  };
+  const timedOutSummary = sanitizeDesktopStages(timedOutPreflight, sourceSha);
+  assert.equal(timedOutSummary.status, 'failed');
+  assert.equal(timedOutSummary.failureCode, 'isolated-node-preflight-failed');
+  assert.equal(
+    timedOutSummary.targetUidPreflight.runtimeFacts.childResult,
+    'spawn-error',
+  );
+  assert.equal(
+    timedOutSummary.targetUidPreflight.runtimeFacts.childSignal,
+    'SIGTERM',
+  );
+
   const degraded = stages();
   degraded[1].status = 'failed';
   degraded[1].failureCode = 'safe-storage-backend-unconfirmed';

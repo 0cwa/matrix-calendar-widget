@@ -324,6 +324,21 @@ test('isolated runtime facts parser accepts only fixed fields and Node 22 versio
   );
   assert.equal(malformed.childResult, 'protocol-invalid');
   assert.equal(JSON.stringify(malformed).includes('/private/path'), false);
+
+  const timedOut = runtimeFactsFromSpawn(
+    {
+      status: null,
+      signal: 'SIGTERM',
+      error: Object.assign(new Error(), { code: 'ETIMEDOUT' }),
+      stdout: '',
+      stderr: '',
+    },
+    '/workspace/dev/element-desktop-egress-policy.mjs',
+  );
+  assert.equal(timedOut.childResult, 'spawn-error');
+  assert.equal(timedOut.spawnErrorClass, 'timeout');
+  assert.equal(timedOut.childSignal, 'SIGTERM');
+  assert.equal(timedOut.markerPresent, false);
 });
 
 test('runtime facts child emits the exact bounded protocol', (context) => {
