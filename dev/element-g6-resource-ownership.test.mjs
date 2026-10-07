@@ -1,0 +1,98 @@
+/* Modified for Matrix Calendar Widget fork, 2026. */
+/*
+ * Copyright 2026 Matrix Calendar Widget contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  beginG6ResourceCreate,
+  createG6ResourceOwnership,
+  g6ResourceCleanupRequest,
+  recordG6ResourceCleanup,
+  recordG6ResourceCreate,
+  summarizeG6ResourceOwnership,
+} from './element-g6-resource-ownership.mjs';
+
+function start(name = 'private-resource-name.ics') {
+  const resource = createG6ResourceOwnership(name);
+  assert.equal(beginG6ResourceCreate(resource), true);
+  return resource;
+}
+
+test('a pre-existing conditional-create collision is never adopted or deleted', () => {
+  const resource = start();
+  assert.equal(recordG6ResourceCreate(resource, 412, undefined), false);
+  assert.deepEqual(g6ResourceCleanupRequest(resource), { method: 'skip' });
+  assert.deepEqual(summarizeG6ResourceOwnership([resource]), {
+    plannedCount: 1,
+    confirmedCreatedCount: 0,
+    conflictCount: 1,
+    notCreatedCount: 0,
+    createUnresolvedCount: 0,
+    deletedCount: 0,
+    alreadyAbsentCount: 0,
+    cleanupUnresolvedCount: 0,
+    count: 0,
+    allOwnedResourcesRemoved: true,
+  });
+});
+
+test('an ambiguous create outcome is not followed by a conditional delete guess', () => {
+  const resource = start();
+  assert.equal(recordG6ResourceCreate(resource, undefined, undefined), false);
+  assert.deepEqual(g6ResourceCleanupRequest(resource), { method: 'skip' });
+  assert.equal(
+    summarizeG6ResourceOwnership([resource]).allOwnedResourcesRemoved,
+    false,
+  );
+});
+
+test('only a confirmed strong ETag authorizes conditional cleanup', () => {
+  const resource = start();
+  assert.equal(recordG6ResourceCreate(resource, 201, '"strong-tag"'), true);
+  assert.deepEqual(g6ResourceCleanupRequest(resource), {
+    method: 'DELETE',
+    ifMatch: '"strong-tag"',
+  });
+  assert.equal(recordG6ResourceCleanup(resource, 412), false);
+  assert.deepEqual(g6ResourceCleanupRequest(resource), { method: 'skip' });
+  const summary = summarizeG6ResourceOwnership([resource]);
+  assert.equal(summary.confirmedCreatedCount, 1);
+  assert.equal(summary.cleanupUnresolvedCount, 1);
+  assert.equal(summary.allOwnedResourcesRemoved, false);
+});
+
+test('a successful conditional delete and an already-absent owned object close safely', () => {
+  const removed = start('private-a.ics');
+  assert.equal(recordG6ResourceCreate(removed, 201, '"a"'), true);
+  assert.equal(recordG6ResourceCleanup(removed, 204), true);
+  const absent = start('private-b.ics');
+  assert.equal(recordG6ResourceCreate(absent, 201, '"b"'), true);
+  assert.equal(recordG6ResourceCleanup(absent, 404), true);
+  const summary = summarizeG6ResourceOwnership([removed, absent]);
+  assert.equal(summary.count, 2);
+  assert.equal(summary.confirmedCreatedCount, 2);
+  assert.equal(summary.allOwnedResourcesRemoved, true);
+});
+
+test('success without a usable strong ETag remains unresolved and is not deleted', () => {
+  const resource = start();
+  assert.equal(recordG6ResourceCreate(resource, 201, 'W/"weak"'), false);
+  assert.deepEqual(g6ResourceCleanupRequest(resource), { method: 'skip' });
+  const summary = summarizeG6ResourceOwnership([resource]);
+  assert.equal(summary.createUnresolvedCount, 1);
+  assert.equal(summary.allOwnedResourcesRemoved, false);
+});

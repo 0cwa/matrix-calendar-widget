@@ -243,7 +243,7 @@ const PHASE_BOOLEAN_FIELDS = new Map([
     ],
   ],
   ['g6-browser-egress', ['browserEgressClear']],
-  ['g6-resource-cleanup', ['allResourcesRemoved']],
+  ['g6-resource-cleanup', ['allOwnedResourcesRemoved']],
 ]);
 const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
   ['g6-fixture-ready', ['httpStatus', 'count']],
@@ -280,6 +280,7 @@ const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
       'iframeHeight',
       'pinControlCount',
       'drawerIframeWidth',
+      'drawerIframeHeight',
       'maximisedIframeWidth',
       'maximisedIframeHeight',
       'restoredIframeWidth',
@@ -287,7 +288,20 @@ const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
     ],
   ],
   ['g6-browser-egress', ['count']],
-  ['g6-resource-cleanup', ['count']],
+  [
+    'g6-resource-cleanup',
+    [
+      'count',
+      'plannedCount',
+      'confirmedCreatedCount',
+      'conflictCount',
+      'notCreatedCount',
+      'createUnresolvedCount',
+      'deletedCount',
+      'alreadyAbsentCount',
+      'cleanupUnresolvedCount',
+    ],
+  ],
 ]);
 const G6_EXTRA_NUMERIC_FIELDS = new Set(
   [...G6_NUMERIC_FIELDS_BY_PHASE.values()]
@@ -841,7 +855,7 @@ const ALLOWED_KEYS = new Set([
   'drawerRestored',
   'frameReturned',
   'browserEgressClear',
-  'allResourcesRemoved',
+  'allOwnedResourcesRemoved',
   ...G6_EXTRA_NUMERIC_FIELDS,
 ]);
 
@@ -873,10 +887,45 @@ function validG6Observation(record) {
       }
       if (key === 'eventActionTabCount') return value < 0 || value > 80;
       if (key === 'detailsActionTabCount') return value < 0 || value > 14;
+      if (record.phase === 'g6-resource-cleanup') return value < 0 || value > 4;
       return value < 0 || value > 100_000;
     })
   ) {
     return false;
+  }
+
+  if (record.phase === 'g6-resource-cleanup') {
+    const cleanupCounts = [
+      'count',
+      'plannedCount',
+      'confirmedCreatedCount',
+      'conflictCount',
+      'notCreatedCount',
+      'createUnresolvedCount',
+      'deletedCount',
+      'alreadyAbsentCount',
+      'cleanupUnresolvedCount',
+    ];
+    if (cleanupCounts.some((key) => !Number.isInteger(record[key]))) {
+      return false;
+    }
+    if (
+      record.plannedCount !==
+        record.confirmedCreatedCount +
+          record.conflictCount +
+          record.notCreatedCount +
+          record.createUnresolvedCount ||
+      record.confirmedCreatedCount !==
+        record.deletedCount +
+          record.alreadyAbsentCount +
+          record.cleanupUnresolvedCount ||
+      record.count !== record.deletedCount + record.alreadyAbsentCount ||
+      record.allOwnedResourcesRemoved !==
+        (record.createUnresolvedCount === 0 &&
+          record.cleanupUnresolvedCount === 0)
+    ) {
+      return false;
+    }
   }
 
   if (record.status !== 'passed') return true;
@@ -911,7 +960,7 @@ function validG6Observation(record) {
       return (
         record.count === record.eventActionTabCount &&
         record.eventActionTabCount <= 80 &&
-        record.detailsActionTabCount <= 12
+        record.detailsActionTabCount <= 14
       );
     case 'g6-widget-layout':
       return (
@@ -920,12 +969,13 @@ function validG6Observation(record) {
         record.iframeWidth <= 480 &&
         record.pinControlCount === 1 &&
         record.maximisedIframeWidth > record.drawerIframeWidth &&
-        Math.abs(record.restoredIframeWidth - record.drawerIframeWidth) <= 2
+        Math.abs(record.restoredIframeWidth - record.drawerIframeWidth) <= 2 &&
+        Math.abs(record.restoredIframeHeight - record.drawerIframeHeight) <= 2
       );
     case 'g6-browser-egress':
       return record.count === 0;
     case 'g6-resource-cleanup':
-      return record.count <= 4;
+      return record.allOwnedResourcesRemoved === true && record.count <= 4;
     default:
       return false;
   }

@@ -30,6 +30,15 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { arch, platform, release } from 'node:os';
 import { isAbsolute, resolve, sep } from 'node:path';
+import {
+  beginG6ResourceCreate,
+  createG6ResourceOwnership,
+  g6ResourceCleanupRequest,
+  recordG6ResourceCleanup,
+  recordG6ResourceCreate,
+  summarizeG6ResourceOwnership,
+  type G6ResourceOwnership,
+} from '../../dev/element-g6-resource-ownership.mjs';
 import { ElementWebPage } from './pages/elementWebPage';
 
 type User = {
@@ -151,13 +160,22 @@ type G6StageRecord = {
   drawerRestored?: boolean;
   frameReturned?: boolean;
   browserEgressClear?: boolean;
-  allResourcesRemoved?: boolean;
+  allOwnedResourcesRemoved?: boolean;
+  plannedCount?: number;
+  confirmedCreatedCount?: number;
+  conflictCount?: number;
+  notCreatedCount?: number;
+  createUnresolvedCount?: number;
+  deletedCount?: number;
+  alreadyAbsentCount?: number;
+  cleanupUnresolvedCount?: number;
   drawerIframePresent?: boolean;
   viewportWidth?: number;
   viewportHeight?: number;
   iframeWidth?: number;
   iframeHeight?: number;
   drawerIframeWidth?: number;
+  drawerIframeHeight?: number;
   maximisedIframeWidth?: number;
   maximisedIframeHeight?: number;
   restoredIframeWidth?: number;
@@ -175,7 +193,18 @@ type G6CalDavClient = {
 type G6CalDavResult = {
   status?: number;
   bytes?: Buffer;
+  etag?: string;
 };
+
+const ELEMENT_WEB_CONFIGURED_TAG = 'v1.12.30';
+const ELEMENT_WEB_CONTROLS = {
+  [ELEMENT_WEB_CONFIGURED_TAG]: {
+    pin: 'Pin',
+    maximise: 'Maximise',
+    unmaximise: 'Un-maximise',
+  },
+} as const;
+const elementWebControls = ELEMENT_WEB_CONTROLS[ELEMENT_WEB_CONFIGURED_TAG];
 
 const REMINDER_START_LEAD_MS = 150_000;
 const REMINDER_ALARM_OFFSET_MS = 60_000;
@@ -1316,7 +1345,7 @@ test('Element Web preserves unsupported events and supports client interactions'
   recordRuntimeVersions(browser.version());
 
   const contexts: BrowserContext[] = [];
-  const resourcesToClean: string[] = [];
+  const resourcesToTrack: G6ResourceOwnership[] = [];
   const stageRecords = new Map<G6Phase, G6StageRecord>();
   const allowedOrigins = new Set([
     new URL(fixture.elementUrl).origin,
@@ -1482,18 +1511,18 @@ test('Element Web preserves unsupported events and supports client interactions'
 
     let createdResourceCount = 0;
     for (const resource of resourcesToSeed) {
-      resourcesToClean.push(resource.name);
+      const ownership = createG6ResourceOwnership(resource.name);
+      resourcesToTrack.push(ownership);
+      beginG6ResourceCreate(ownership);
       const result = await g6CalDavRequest(
         calDavClient!,
         resource.name,
         'PUT',
         resource.icalendar,
       );
-      const resourceCreated =
-        result.status !== undefined &&
-        result.status >= 200 &&
-        result.status < 300;
-      if (resourceCreated) createdResourceCount += 1;
+      if (recordG6ResourceCreate(ownership, result.status, result.etag)) {
+        createdResourceCount += 1;
+      }
     }
     const allResourcesSeeded = createdResourceCount === resourcesToSeed.length;
     assertG6Stage(activeG6Phase, allResourcesSeeded, {
@@ -1881,7 +1910,10 @@ test('Element Web preserves unsupported events and supports client interactions'
 
     activeG6Phase = 'g6-widget-layout';
     await openPinnedElementWidget(pageA, 'Matrix Calendar');
-    const pinControl = pageA.getByRole('button', { name: 'Pin', exact: true });
+    const pinControl = pageA.getByRole('button', {
+      name: elementWebControls.pin,
+      exact: true,
+    });
     const pinControlCount = Math.min(
       await pinControl.count().catch(() => 0),
       2,
@@ -1905,7 +1937,7 @@ test('Element Web preserves unsupported events and supports client interactions'
     );
     const drawerBox = await drawerIframe.boundingBox().catch(() => null);
     const maximiseControl = pageA.getByRole('button', {
-      name: 'Maximise',
+      name: elementWebControls.maximise,
       exact: true,
     });
     const maximiseControlVisible = await maximiseControl
@@ -1947,7 +1979,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       widgetNoOverflowAfterMaximise;
 
     const unmaximiseControl = pageA.getByRole('button', {
-      name: 'Un-maximise',
+      name: elementWebControls.unmaximise,
       exact: true,
     });
     const unmaximiseControlVisible = await unmaximiseControl
@@ -1962,7 +1994,8 @@ test('Element Web preserves unsupported events and supports client interactions'
     const frameReturned =
       drawerBox !== null &&
       restoredBox !== null &&
-      Math.abs(restoredBox.width - drawerBox.width) <= 2;
+      Math.abs(restoredBox.width - drawerBox.width) <= 2 &&
+      Math.abs(restoredBox.height - drawerBox.height) <= 2;
     const restoredPassed =
       unmaximiseControlVisible && drawerRestored && frameReturned;
 
@@ -1997,7 +2030,12 @@ test('Element Web preserves unsupported events and supports client interactions'
         : {}),
       ...(iframeWidth === undefined ? {} : { iframeWidth }),
       ...(iframeHeight === undefined ? {} : { iframeHeight }),
-      ...(drawerBox ? { drawerIframeWidth: Math.round(drawerBox.width) } : {}),
+      ...(drawerBox
+        ? {
+            drawerIframeWidth: Math.round(drawerBox.width),
+            drawerIframeHeight: Math.round(drawerBox.height),
+          }
+        : {}),
       ...(maximisedBox
         ? {
             maximisedIframeWidth: Math.round(maximisedBox.width),
@@ -2028,35 +2066,26 @@ test('Element Web preserves unsupported events and supports client interactions'
       contexts.map((context) => context.close().catch(() => {})),
     );
     activeG6Phase = 'g6-resource-cleanup';
-    let cleanupCount = 0;
-    let allResourcesRemoved = resourcesToClean.length === 0;
-    if (calDavClient) {
-      allResourcesRemoved = true;
-      for (const resourceName of resourcesToClean) {
-        const result = await g6CalDavRequest(
-          calDavClient,
-          resourceName,
-          'DELETE',
-        );
-        if (
-          result.status === 404 ||
-          (result.status !== undefined &&
-            result.status >= 200 &&
-            result.status < 300)
-        ) {
-          cleanupCount += 1;
-        } else {
-          allResourcesRemoved = false;
-        }
-      }
+    for (const resource of resourcesToTrack) {
+      const cleanup = g6ResourceCleanupRequest(resource);
+      if (cleanup.method !== 'DELETE') continue;
+      const result = calDavClient
+        ? await g6CalDavRequest(
+            calDavClient,
+            resource.name,
+            'DELETE',
+            undefined,
+            cleanup.ifMatch,
+          )
+        : {};
+      recordG6ResourceCleanup(resource, result.status);
     }
-    const cleanupPassed =
-      allResourcesRemoved && cleanupCount === resourcesToClean.length;
+    const cleanupSummary = summarizeG6ResourceOwnership(resourcesToTrack);
+    const cleanupPassed = cleanupSummary.allOwnedResourcesRemoved;
     saveG6Stage({
       phase: activeG6Phase,
       status: cleanupPassed ? 'passed' : 'failed',
-      count: cleanupCount,
-      allResourcesRemoved: cleanupPassed,
+      ...cleanupSummary,
     });
     if (!cleanupPassed) journeyFailed = true;
 
@@ -2177,6 +2206,7 @@ async function g6CalDavRequest(
   resourceName: string,
   method: 'GET' | 'PUT' | 'DELETE',
   icalendar?: string,
+  ifMatch?: string,
 ): Promise<G6CalDavResult> {
   if (
     !/^g6-[0-9a-f-]{36}\.ics$/u.test(resourceName) ||
@@ -2210,6 +2240,9 @@ async function g6CalDavRequest(
     }
     headers['Content-Type'] = 'text/calendar; charset=utf-8';
     headers['If-None-Match'] = '*';
+  } else if (method === 'DELETE' && ifMatch !== undefined) {
+    if (!/^"[\x21\x23-\x7e]{1,200}"$/u.test(ifMatch)) return {};
+    headers['If-Match'] = ifMatch;
   }
 
   let response: globalThis.Response;
@@ -2245,7 +2278,11 @@ async function g6CalDavRequest(
   }
 
   await response.body?.cancel().catch(() => undefined);
-  return { status: response.status };
+  const etag = method === 'PUT' ? response.headers.get('etag') : null;
+  return {
+    status: response.status,
+    ...(etag ? { etag } : {}),
+  };
 }
 
 function g6SimpleEventIcal(
@@ -5393,7 +5430,7 @@ function recordRuntimeVersions(chromiumVersion: string) {
     `${JSON.stringify({
       phase: 'runtime-versions',
       status: 'passed',
-      elementWebConfiguredTag: 'v1.12.30',
+      elementWebConfiguredTag: ELEMENT_WEB_CONFIGURED_TAG,
       synapseConfiguredTag: 'v1.161.0',
       radicaleConfiguredTag: '3.8.0.0',
       chromiumVersion,
