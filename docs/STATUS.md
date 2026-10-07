@@ -2,7 +2,7 @@
 
 _Last updated: 2026-10-07._
 
-_Source baseline: `main` at `9b3772a4302144c817c4d2d08e1abf25ee4e7917`._
+_Source baseline: `main` at `ec2780497adffa0efb58602f8994bd3db34fb57e`._
 
 See the [dated continuation](handoff/2026-10-06/README.md) and
 [exact delivered-slice ledger](handoff/2026-10-06/ledger.json).
@@ -11,16 +11,16 @@ See the [dated continuation](handoff/2026-10-06/README.md) and
 
 **Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence timing/text and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; actual-client and operator acceptance remain open. M7 has bounded bot commands and post-success room-target event notices. M8 has source-level gateway and CalDAV limits plus a hosted synthetic Chromium fixture; actual Element Web/Desktop, operator/restore, and measured pilot-envelope acceptance remain open. Mobile/other clients, formal screen-reader certification, and broad capacity characterization are outside the bounded beta target.
 
-The first hosted Element Web shared-event journey passed on draft PR #225
-candidate `031a17e1b1c1b7d7f68b5293a80b8a2c46c5ccb6` ([run
+The first hosted Element Web shared-event journey passed before merge on draft
+PR #225 candidate `031a17e1b1c1b7d7f68b5293a80b8a2c46c5ccb6` ([run
 37569137448](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37569137448)).
 The isolated run used configured Element Web 1.12.30, Synapse 1.161.0, and
 Radicale 3.8.0.0; it observed Chromium 149.0.7827.55, Node 22.23.3, and a
 Linux runner. The blocked browser egress count was zero. The journey verified
 shared event create/read/edit, a stale-edit conflict and reload, outsider
 team-room denial, and denial for the outsider's own unbound room. This is
-draft-candidate evidence, not evidence from `main` or a complete Web/Desktop,
-operator, restore, capacity, or beta acceptance.
+This validates that candidate, not the later `main` source baseline or a
+complete Web/Desktop, operator, restore, capacity, or beta acceptance.
 
 The controlled-beta scope and its acceptance contract are documented in
 [`beta-scope.md`](./beta-scope.md). Its target is Element Web/Desktop, one

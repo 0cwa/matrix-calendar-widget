@@ -238,6 +238,196 @@ test('summarizes reminder restore gates without exposing backup fingerprints or 
   assert.doesNotMatch(summary, /b{64}|attempt_count=2/u);
 });
 
+test('requires UI, Matrix delivery, and timeline evidence for reminder recovery', () => {
+  const summary = sanitizeElementAcceptance(
+    [
+      JSON.stringify({
+        phase: 'reminder-configuration-stored',
+        status: 'passed',
+        count: 1,
+      }),
+      JSON.stringify({
+        phase: 'reminder-event-created',
+        status: 'passed',
+        httpStatus: 201,
+      }),
+      JSON.stringify({
+        phase: 'reminder-event-visible',
+        status: 'passed',
+        httpStatus: 201,
+        count: 1,
+      }),
+      JSON.stringify({
+        phase: 'reminder-alarm-ui-readback',
+        status: 'passed',
+        count: 1,
+        relativeAlarmReadback: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-room-configuration-enabled',
+        status: 'passed',
+        httpStatus: 200,
+        count: 1,
+        reminderEnabled: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-ui-readback',
+        status: 'passed',
+        count: 1,
+        relativeAlarmReadback: true,
+        reminderEnabled: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-initial-delivery',
+        status: 'passed',
+        httpStatus: 200,
+        count: 1,
+        canaryDelivered: true,
+        roomMentioned: true,
+        deliveredAfterDue: true,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-restart-prior-state',
+        status: 'passed',
+        httpStatus: 200,
+        count: 1,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-restart-scheduler-scan',
+        status: 'passed',
+        httpStatus: 200,
+        count: 2,
+        canaryDelivered: true,
+        roomMentioned: true,
+        deliveredAfterDue: true,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-restart-no-duplicate',
+        status: 'passed',
+        httpStatus: 200,
+        count: 2,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-restore-prior-state',
+        status: 'passed',
+        httpStatus: 200,
+        count: 2,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-restore-scheduler-scan',
+        status: 'passed',
+        httpStatus: 200,
+        count: 3,
+        canaryDelivered: true,
+        roomMentioned: true,
+        deliveredAfterDue: true,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-restore-no-duplicate',
+        status: 'passed',
+        httpStatus: 200,
+        count: 3,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-browser-egress',
+        status: 'passed',
+        count: 0,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /phase=reminder-event-visible status=passed http_status=201 count=1/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-initial-delivery status=passed http_status=200 count=1 canary_delivered=true room_mentioned=true delivered_after_due=true all_markers_once=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-restart-scheduler-scan status=passed http_status=200 count=2/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-restore-scheduler-scan status=passed http_status=200 count=3/u,
+  );
+  assert.match(summary, /phase=reminder-browser-egress status=passed count=0/u);
+
+  for (const record of [
+    {
+      phase: 'reminder-event-visible',
+      status: 'passed',
+      count: 1,
+    },
+    {
+      phase: 'reminder-room-configuration-enabled',
+      status: 'passed',
+      count: 1,
+      reminderEnabled: true,
+    },
+    {
+      phase: 'reminder-event-visible',
+      status: 'passed',
+      httpStatus: 201,
+      count: 0,
+    },
+    {
+      phase: 'reminder-restart-scheduler-scan',
+      status: 'passed',
+      count: 2,
+      canaryDelivered: true,
+      roomMentioned: true,
+      deliveredAfterDue: true,
+      allMarkersOnce: true,
+    },
+    {
+      phase: 'reminder-restore-no-duplicate',
+      status: 'passed',
+      httpStatus: 200,
+      count: 2,
+      allMarkersOnce: true,
+    },
+    {
+      phase: 'reminder-ui-readback',
+      status: 'passed',
+      count: 1,
+      relativeAlarmReadback: true,
+      reminderEnabled: false,
+    },
+    {
+      phase: 'reminder-initial-delivery',
+      status: 'passed',
+      httpStatus: 200,
+      count: 1,
+      canaryDelivered: true,
+      roomMentioned: true,
+      deliveredAfterDue: false,
+      allMarkersOnce: true,
+    },
+    {
+      phase: 'reminder-initial-delivery',
+      status: 'failed',
+      httpStatus: 403,
+      count: 1,
+      eventTitle: 'Reminder acceptance private marker',
+    },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      /invalid element acceptance summary/u,
+    );
+  }
+});
+
 test('rejects incomplete or inconsistent restore evidence', () => {
   for (const record of [
     {

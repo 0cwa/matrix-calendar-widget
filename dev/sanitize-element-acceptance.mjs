@@ -77,6 +77,7 @@ const PHASES = new Set([
   'reminder-postgres-ready',
   'reminder-role-verified',
   'reminder-gateway-migrated',
+  'reminder-configuration-stored',
   'reminder-delivery-snapshot',
   'reminder-gateway-restarted',
   'reminder-restart-delivery-row',
@@ -89,10 +90,45 @@ const PHASES = new Set([
   'restore-gateway-ready',
   'restore-element-ready',
   'restore-delivery-row',
+  'reminder-browser-egress',
+  'reminder-room-context',
+  'reminder-widget-context',
+  'reminder-event-create-dialog',
+  'reminder-event-created',
+  'reminder-event-visible',
+  'reminder-alarm-ui-readback',
+  'reminder-room-configuration-enabled',
+  'reminder-ui-readback',
+  'reminder-initial-delivery',
+  'reminder-restart-prior-state',
+  'reminder-restart-scheduler-scan',
+  'reminder-restart-no-duplicate',
+  'reminder-restore-prior-state',
+  'reminder-restore-scheduler-scan',
+  'reminder-restore-no-duplicate',
 ]);
 const PHASE_BOOLEAN_FIELDS = new Map([
   ['service-room-ready', ['serviceUserJoined', 'powerPolicyVerified']],
   ['reminder-role-verified', ['rolePolicyVerified']],
+  ['reminder-alarm-ui-readback', ['relativeAlarmReadback']],
+  ['reminder-room-configuration-enabled', ['reminderEnabled']],
+  ['reminder-ui-readback', ['relativeAlarmReadback', 'reminderEnabled']],
+  [
+    'reminder-initial-delivery',
+    ['canaryDelivered', 'roomMentioned', 'deliveredAfterDue', 'allMarkersOnce'],
+  ],
+  [
+    'reminder-restart-scheduler-scan',
+    ['canaryDelivered', 'roomMentioned', 'deliveredAfterDue', 'allMarkersOnce'],
+  ],
+  [
+    'reminder-restore-scheduler-scan',
+    ['canaryDelivered', 'roomMentioned', 'deliveredAfterDue', 'allMarkersOnce'],
+  ],
+  ['reminder-restart-no-duplicate', ['allMarkersOnce']],
+  ['reminder-restart-prior-state', ['allMarkersOnce']],
+  ['reminder-restore-no-duplicate', ['allMarkersOnce']],
+  ['reminder-restore-prior-state', ['allMarkersOnce']],
   ['reminder-delivery-snapshot', ['deliveryStateSent', 'deliveryClaimClear']],
   [
     'reminder-restart-delivery-row',
@@ -123,6 +159,15 @@ const REMINDER_DELIVERY_PHASES = new Set([
   'reminder-delivery-snapshot',
   'reminder-restart-delivery-row',
   'restore-delivery-row',
+]);
+const REMINDER_TIMELINE_COUNTS = new Map([
+  ['reminder-initial-delivery', 1],
+  ['reminder-restart-prior-state', 1],
+  ['reminder-restart-scheduler-scan', 2],
+  ['reminder-restart-no-duplicate', 2],
+  ['reminder-restore-prior-state', 2],
+  ['reminder-restore-scheduler-scan', 3],
+  ['reminder-restore-no-duplicate', 3],
 ]);
 const PRIVATE_CHECKSUM_PHASES = new Set([
   'restore-radicale-backup',
@@ -426,6 +471,12 @@ const ALLOWED_KEYS = new Set([
   'deliveryClaimClear',
   'deliveryKeyUnchanged',
   'attemptCountUnchanged',
+  'relativeAlarmReadback',
+  'reminderEnabled',
+  'canaryDelivered',
+  'roomMentioned',
+  'deliveredAfterDue',
+  'allMarkersOnce',
   'attemptCount',
   'checksum',
   'gatewayStoppedGracefully',
@@ -997,6 +1048,64 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       throw new Error('invalid element acceptance summary');
     }
 
+    if (
+      (record.phase === 'reminder-postgres-ready' &&
+        record.status === 'passed' &&
+        record.count !== 1) ||
+      (record.phase === 'restore-element-ready' &&
+        record.status === 'passed' &&
+        record.count !== 2) ||
+      (record.phase === 'reminder-configuration-stored' &&
+        record.status === 'passed' &&
+        (!Number.isInteger(record.count) ||
+          record.count < 1 ||
+          record.count > 3)) ||
+      (record.phase === 'reminder-delivery-snapshot' &&
+        record.status === 'passed' &&
+        (!Number.isInteger(record.count) ||
+          record.count < 1 ||
+          record.count > 3)) ||
+      (REMINDER_TIMELINE_COUNTS.has(record.phase) &&
+        record.status === 'passed' &&
+        (record.httpStatus !== 200 ||
+          record.count !== REMINDER_TIMELINE_COUNTS.get(record.phase))) ||
+      (record.phase === 'reminder-browser-egress' &&
+        record.status === 'passed' &&
+        record.count !== 0) ||
+      (record.phase === 'reminder-alarm-ui-readback' &&
+        record.status === 'passed' &&
+        record.count !== 1) ||
+      (record.phase === 'reminder-room-configuration-enabled' &&
+        record.status === 'passed' &&
+        record.count !== 1) ||
+      (record.phase === 'reminder-ui-readback' &&
+        record.status === 'passed' &&
+        (!Number.isInteger(record.count) ||
+          record.count < 1 ||
+          record.count > 3)) ||
+      (record.phase === 'reminder-widget-context' &&
+        record.status === 'passed' &&
+        record.httpStatus !== 200) ||
+      (record.phase === 'reminder-room-configuration-enabled' &&
+        record.status === 'passed' &&
+        (!Number.isInteger(record.httpStatus) ||
+          record.httpStatus < 200 ||
+          record.httpStatus >= 300)) ||
+      (record.phase === 'reminder-event-created' &&
+        record.status === 'passed' &&
+        (!Number.isInteger(record.httpStatus) ||
+          record.httpStatus < 200 ||
+          record.httpStatus >= 300)) ||
+      (record.phase === 'reminder-event-visible' &&
+        record.status === 'passed' &&
+        (!Number.isInteger(record.httpStatus) ||
+          record.httpStatus < 200 ||
+          record.httpStatus >= 300 ||
+          record.count !== 1))
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
     const reminderGatewayReadinessPhases = new Set([
       'reminder-gateway-migrated',
       'reminder-gateway-restarted',
@@ -1509,6 +1618,16 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     }
     if (Object.hasOwn(record, 'count')) {
       fields.push(`count=${record.count}`);
+    }
+    for (const [key, name] of [
+      ['relativeAlarmReadback', 'relative_alarm_readback'],
+      ['reminderEnabled', 'reminder_enabled'],
+      ['canaryDelivered', 'canary_delivered'],
+      ['roomMentioned', 'room_mentioned'],
+      ['deliveredAfterDue', 'delivered_after_due'],
+      ['allMarkersOnce', 'all_markers_once'],
+    ]) {
+      if (Object.hasOwn(record, key)) fields.push(`${name}=${record[key]}`);
     }
     if (Object.hasOwn(record, 'controlVisible')) {
       fields.push(`control_visible=${record.controlVisible}`);
