@@ -39,6 +39,28 @@ function validRuntimeObservation(overrides = {}) {
     widgetChildErrorVisible: false,
     widgetPageErrorCount: 0,
     widgetLastPageErrorClass: 'NONE',
+    widgetApiGetOpenIdRequestCount: 0,
+    widgetApiRequestSourceMatches: false,
+    widgetApiRequestOriginMatches: false,
+    widgetApiRequestWidgetIdMatches: false,
+    widgetApiInitialResponseCount: 0,
+    widgetApiInitialResponseState: 'none',
+    widgetApiInitialResponseSourceMatches: false,
+    widgetApiInitialResponseOriginMatches: false,
+    widgetApiInitialResponseWidgetIdMatches: false,
+    widgetApiFollowupCount: 0,
+    widgetApiFollowupState: 'none',
+    widgetApiFollowupRequestIdMatches: false,
+    widgetApiFollowupSourceMatches: false,
+    widgetApiFollowupOriginMatches: false,
+    widgetApiFollowupWidgetIdMatches: false,
+    widgetParametersObserved: false,
+    widgetGatewayBaseOriginMatches: false,
+    widgetRoomIdMatches: false,
+    widgetIdParameterPresent: false,
+    calendarEventsLoadingVisible: false,
+    calendarEventsLoadErrorVisible: false,
+    createEventEnabled: false,
     iframeObservationAvailable: true,
     iframeGatewayBaseOriginMatches: true,
     iframeRoomIdMatches: true,
@@ -299,10 +321,58 @@ test('emits bounded widget, gateway, and OpenID observations only', () => {
     summary,
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=widget-a-runtime-observed status=passed gateway_context_requests=1 gateway_calendars_requests=2 gateway_events_requests=0 gateway_other_calendar_requests=0 gateway_other_api_requests=0 gateway_options_requests=1 gateway_failed_requests=0 gateway_last_request_endpoint=calendars gateway_last_request_method=GET gateway_last_response_endpoint=calendars gateway_last_response_method=GET gateway_last_response_status=200 widget_document_last_status=200 widget_script_last_status=404 widget_stylesheet_last_status=200 openid_last_response_status=200 widget_document_requests=1 widget_script_requests=2 widget_stylesheet_requests=1 widget_document_failures=0 widget_script_failures=1 widget_stylesheet_failures=0 openid_requests=1 openid_options_requests=0 openid_failed_requests=0 openid_last_request_method=GET widget_frame_available=true widget_document_ready_state=complete widget_root_has_children=true widget_loading_visible=false widget_missing_capabilities_visible=false widget_registration_error_visible=false widget_outside_client_visible=false widget_child_error_visible=false widget_page_errors=1 widget_last_page_error_class=TypeError iframe_observation_available=true iframe_gateway_base_origin_matches=true iframe_room_id_matches=true create_event_visible=false identity_continue_visible=false',
+      'phase=widget-a-runtime-observed status=passed gateway_context_requests=1 gateway_calendars_requests=2 gateway_events_requests=0 gateway_other_calendar_requests=0 gateway_other_api_requests=0 gateway_options_requests=1 gateway_failed_requests=0 gateway_last_request_endpoint=calendars gateway_last_request_method=GET gateway_last_response_endpoint=calendars gateway_last_response_method=GET gateway_last_response_status=200 widget_document_last_status=200 widget_script_last_status=404 widget_stylesheet_last_status=200 openid_last_response_status=200 widget_document_requests=1 widget_script_requests=2 widget_stylesheet_requests=1 widget_document_failures=0 widget_script_failures=1 widget_stylesheet_failures=0 openid_requests=1 openid_options_requests=0 openid_failed_requests=0 openid_last_request_method=GET widget_api_get_openid_requests=0 widget_api_request_source_matches=false widget_api_request_origin_matches=false widget_api_request_widget_id_matches=false widget_api_initial_response_count=0 widget_api_initial_response_state=none widget_api_initial_response_source_matches=false widget_api_initial_response_origin_matches=false widget_api_initial_response_widget_id_matches=false widget_api_followup_count=0 widget_api_followup_state=none widget_api_followup_request_id_matches=false widget_api_followup_source_matches=false widget_api_followup_origin_matches=false widget_api_followup_widget_id_matches=false widget_parameters_observed=false widget_gateway_base_origin_matches=false widget_room_id_matches=false widget_id_parameter_present=false widget_frame_available=true widget_document_ready_state=complete widget_root_has_children=true widget_loading_visible=false widget_missing_capabilities_visible=false widget_registration_error_visible=false widget_outside_client_visible=false widget_child_error_visible=false calendar_events_loading_visible=false calendar_events_load_error_visible=false widget_page_errors=1 widget_last_page_error_class=TypeError iframe_observation_available=true iframe_gateway_base_origin_matches=true iframe_room_id_matches=true create_event_visible=false create_event_enabled=false identity_continue_visible=false',
       '',
     ].join('\n'),
   );
+});
+
+test('emits only allowlisted Widget API OpenID states and match booleans', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(
+      validRuntimeObservation({
+        widgetApiGetOpenIdRequestCount: 1,
+        widgetApiRequestSourceMatches: true,
+        widgetApiRequestOriginMatches: true,
+        widgetApiRequestWidgetIdMatches: true,
+        widgetApiInitialResponseCount: 1,
+        widgetApiInitialResponseState: 'request',
+        widgetApiInitialResponseSourceMatches: true,
+        widgetApiInitialResponseOriginMatches: true,
+        widgetApiInitialResponseWidgetIdMatches: true,
+        widgetApiFollowupCount: 1,
+        widgetApiFollowupState: 'allowed',
+        widgetApiFollowupRequestIdMatches: true,
+        widgetApiFollowupSourceMatches: true,
+        widgetApiFollowupOriginMatches: true,
+        widgetApiFollowupWidgetIdMatches: true,
+        widgetParametersObserved: true,
+        widgetGatewayBaseOriginMatches: true,
+        widgetRoomIdMatches: true,
+        widgetIdParameterPresent: true,
+        calendarEventsLoadingVisible: false,
+        calendarEventsLoadErrorVisible: false,
+        createEventVisible: true,
+        createEventEnabled: true,
+      }),
+    ),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /widget_api_initial_response_state=request widget_api_initial_response_source_matches=true/u,
+  );
+  assert.match(
+    summary,
+    /widget_api_followup_state=allowed widget_api_followup_request_id_matches=true/u,
+  );
+  assert.match(
+    summary,
+    /widget_parameters_observed=true widget_gateway_base_origin_matches=true widget_room_id_matches=true widget_id_parameter_present=true/u,
+  );
+  assert.match(summary, /create_event_visible=true create_event_enabled=true/u);
+  assert.doesNotMatch(summary, /access_token|request-id-value|room-id-value/iu);
 });
 
 test('constrains runtime observations to bounded enums, counts, and booleans', () => {
@@ -334,6 +404,15 @@ test('constrains runtime observations to bounded enums, counts, and booleans', (
     { ...validObservation, widgetDocumentReadyState: '/private/path' },
     { ...validObservation, widgetLastPageErrorClass: 'TypeError: secret' },
     { ...validObservation, widgetPageErrorCount: 1 },
+    { ...validObservation, widgetApiInitialResponseState: 'allowed token=x' },
+    {
+      ...validObservation,
+      widgetApiInitialResponseCount: 1,
+      widgetApiInitialResponseState: 'request',
+      requestId: 'sensitive-request-id',
+    },
+    { ...validObservation, accessToken: 'sensitive-token' },
+    { ...validObservation, widgetApiFollowupCount: 3 },
     { ...validObservation, widgetScriptFailureCount: 2 },
     { ...validObservation, widgetDocumentLastStatus: 404 },
     { ...validObservation, openIdLastResponseStatus: 401 },

@@ -173,6 +173,13 @@ const WIDGET_PAGE_ERROR_CLASSES = new Set([
   'OTHER',
   'NONE',
 ]);
+const OPENID_PROTOCOL_STATES = new Set([
+  'none',
+  'allowed',
+  'request',
+  'blocked',
+  'other',
+]);
 const RUNTIME_OBSERVATION_FIELDS = [
   'gatewayContextRequestCount',
   'gatewayCalendarsRequestCount',
@@ -210,6 +217,28 @@ const RUNTIME_OBSERVATION_FIELDS = [
   'widgetRegistrationErrorVisible',
   'widgetOutsideClientVisible',
   'widgetChildErrorVisible',
+  'widgetApiGetOpenIdRequestCount',
+  'widgetApiRequestSourceMatches',
+  'widgetApiRequestOriginMatches',
+  'widgetApiRequestWidgetIdMatches',
+  'widgetApiInitialResponseCount',
+  'widgetApiInitialResponseState',
+  'widgetApiInitialResponseSourceMatches',
+  'widgetApiInitialResponseOriginMatches',
+  'widgetApiInitialResponseWidgetIdMatches',
+  'widgetApiFollowupCount',
+  'widgetApiFollowupState',
+  'widgetApiFollowupRequestIdMatches',
+  'widgetApiFollowupSourceMatches',
+  'widgetApiFollowupOriginMatches',
+  'widgetApiFollowupWidgetIdMatches',
+  'widgetParametersObserved',
+  'widgetGatewayBaseOriginMatches',
+  'widgetRoomIdMatches',
+  'widgetIdParameterPresent',
+  'calendarEventsLoadingVisible',
+  'calendarEventsLoadErrorVisible',
+  'createEventEnabled',
 ];
 const OPTIONAL_RUNTIME_STATUS_FIELDS = [
   'gatewayLastResponseStatus',
@@ -235,6 +264,9 @@ const RUNTIME_COUNTER_FIELDS = [
   'openIdRequestCount',
   'openIdOptionsRequestCount',
   'openIdFailedRequestCount',
+  'widgetApiGetOpenIdRequestCount',
+  'widgetApiInitialResponseCount',
+  'widgetApiFollowupCount',
   'widgetPageErrorCount',
 ];
 const ALLOWED_KEYS = new Set([
@@ -299,6 +331,8 @@ function validRuntimeObservation(record) {
     typeof record.iframeRoomIdMatches !== 'boolean' ||
     typeof record.createEventVisible !== 'boolean' ||
     typeof record.identityContinueVisible !== 'boolean' ||
+    !OPENID_PROTOCOL_STATES.has(record.widgetApiInitialResponseState) ||
+    !OPENID_PROTOCOL_STATES.has(record.widgetApiFollowupState) ||
     !Number.isInteger(record.openIdRequestCount) ||
     !Number.isInteger(record.openIdOptionsRequestCount) ||
     !Number.isInteger(record.openIdFailedRequestCount) ||
@@ -313,8 +347,51 @@ function validRuntimeObservation(record) {
       'widgetOutsideClientVisible',
       'widgetChildErrorVisible',
       'widgetFrameAvailable',
+      'widgetApiRequestSourceMatches',
+      'widgetApiRequestOriginMatches',
+      'widgetApiRequestWidgetIdMatches',
+      'widgetApiInitialResponseSourceMatches',
+      'widgetApiInitialResponseOriginMatches',
+      'widgetApiInitialResponseWidgetIdMatches',
+      'widgetApiFollowupRequestIdMatches',
+      'widgetApiFollowupSourceMatches',
+      'widgetApiFollowupOriginMatches',
+      'widgetApiFollowupWidgetIdMatches',
+      'widgetParametersObserved',
+      'widgetGatewayBaseOriginMatches',
+      'widgetRoomIdMatches',
+      'widgetIdParameterPresent',
+      'calendarEventsLoadingVisible',
+      'calendarEventsLoadErrorVisible',
+      'createEventEnabled',
     ].some((key) => typeof record[key] !== 'boolean') ||
     record.openIdRequestCount > 2 ||
+    record.widgetApiGetOpenIdRequestCount > 2 ||
+    record.widgetApiInitialResponseCount > 2 ||
+    record.widgetApiFollowupCount > 2 ||
+    (record.widgetApiGetOpenIdRequestCount === 0 &&
+      (record.widgetApiRequestSourceMatches ||
+        record.widgetApiRequestOriginMatches ||
+        record.widgetApiRequestWidgetIdMatches)) ||
+    (record.widgetApiInitialResponseCount === 0 &&
+      (record.widgetApiInitialResponseState !== 'none' ||
+        record.widgetApiInitialResponseSourceMatches ||
+        record.widgetApiInitialResponseOriginMatches ||
+        record.widgetApiInitialResponseWidgetIdMatches)) ||
+    (record.widgetApiInitialResponseCount > 0 &&
+      record.widgetApiInitialResponseState === 'none') ||
+    (record.widgetApiFollowupCount === 0 &&
+      (record.widgetApiFollowupState !== 'none' ||
+        record.widgetApiFollowupRequestIdMatches ||
+        record.widgetApiFollowupSourceMatches ||
+        record.widgetApiFollowupOriginMatches ||
+        record.widgetApiFollowupWidgetIdMatches)) ||
+    (record.widgetApiFollowupCount > 0 &&
+      record.widgetApiFollowupState === 'none') ||
+    (!record.widgetParametersObserved &&
+      (record.widgetGatewayBaseOriginMatches ||
+        record.widgetRoomIdMatches ||
+        record.widgetIdParameterPresent)) ||
     record.openIdOptionsRequestCount > record.openIdRequestCount ||
     record.openIdFailedRequestCount > record.openIdRequestCount ||
     (record.openIdRequestCount === 0) !==
@@ -750,6 +827,25 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         `openid_options_requests=${record.openIdOptionsRequestCount}`,
         `openid_failed_requests=${record.openIdFailedRequestCount}`,
         `openid_last_request_method=${record.openIdLastRequestMethod}`,
+        `widget_api_get_openid_requests=${record.widgetApiGetOpenIdRequestCount}`,
+        `widget_api_request_source_matches=${record.widgetApiRequestSourceMatches}`,
+        `widget_api_request_origin_matches=${record.widgetApiRequestOriginMatches}`,
+        `widget_api_request_widget_id_matches=${record.widgetApiRequestWidgetIdMatches}`,
+        `widget_api_initial_response_count=${record.widgetApiInitialResponseCount}`,
+        `widget_api_initial_response_state=${record.widgetApiInitialResponseState}`,
+        `widget_api_initial_response_source_matches=${record.widgetApiInitialResponseSourceMatches}`,
+        `widget_api_initial_response_origin_matches=${record.widgetApiInitialResponseOriginMatches}`,
+        `widget_api_initial_response_widget_id_matches=${record.widgetApiInitialResponseWidgetIdMatches}`,
+        `widget_api_followup_count=${record.widgetApiFollowupCount}`,
+        `widget_api_followup_state=${record.widgetApiFollowupState}`,
+        `widget_api_followup_request_id_matches=${record.widgetApiFollowupRequestIdMatches}`,
+        `widget_api_followup_source_matches=${record.widgetApiFollowupSourceMatches}`,
+        `widget_api_followup_origin_matches=${record.widgetApiFollowupOriginMatches}`,
+        `widget_api_followup_widget_id_matches=${record.widgetApiFollowupWidgetIdMatches}`,
+        `widget_parameters_observed=${record.widgetParametersObserved}`,
+        `widget_gateway_base_origin_matches=${record.widgetGatewayBaseOriginMatches}`,
+        `widget_room_id_matches=${record.widgetRoomIdMatches}`,
+        `widget_id_parameter_present=${record.widgetIdParameterPresent}`,
         `widget_frame_available=${record.widgetFrameAvailable}`,
         `widget_document_ready_state=${record.widgetDocumentReadyState}`,
         `widget_root_has_children=${record.widgetRootHasChildren}`,
@@ -758,12 +854,15 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         `widget_registration_error_visible=${record.widgetRegistrationErrorVisible}`,
         `widget_outside_client_visible=${record.widgetOutsideClientVisible}`,
         `widget_child_error_visible=${record.widgetChildErrorVisible}`,
+        `calendar_events_loading_visible=${record.calendarEventsLoadingVisible}`,
+        `calendar_events_load_error_visible=${record.calendarEventsLoadErrorVisible}`,
         `widget_page_errors=${record.widgetPageErrorCount}`,
         `widget_last_page_error_class=${record.widgetLastPageErrorClass}`,
         `iframe_observation_available=${record.iframeObservationAvailable}`,
         `iframe_gateway_base_origin_matches=${record.iframeGatewayBaseOriginMatches}`,
         `iframe_room_id_matches=${record.iframeRoomIdMatches}`,
         `create_event_visible=${record.createEventVisible}`,
+        `create_event_enabled=${record.createEventEnabled}`,
         `identity_continue_visible=${record.identityContinueVisible}`,
       ];
       lines.push(fields.join(' '));
