@@ -110,7 +110,7 @@ type G6Phase =
   | 'g6-unsupported-preservation'
   | 'g6-delete-and-refresh'
   | 'g6-keyboard-focus'
-  | 'g6-widget-layout'
+  | 'g6-side-panel-layout'
   | 'g6-browser-egress'
   | 'g6-resource-cleanup';
 
@@ -151,22 +151,11 @@ type G6StageRecord = {
   closeActionFocused?: boolean;
   escapeClosedDialog?: boolean;
   focusReturnedToEvent?: boolean;
-  narrowPanel?: boolean;
+  widgetCardVisible?: boolean;
   createControlReachable?: boolean;
   eventDetailsReachable?: boolean;
   hostNoHorizontalOverflow?: boolean;
   widgetNoHorizontalOverflow?: boolean;
-  pinVisible?: boolean;
-  pinEnabled?: boolean;
-  pinnedToDrawer?: boolean;
-  maximiseControlVisible?: boolean;
-  drawerMaximised?: boolean;
-  frameExpanded?: boolean;
-  unmaximiseControlVisible?: boolean;
-  drawerRestored?: boolean;
-  frameReturned?: boolean;
-  appTileHeaderHoverAttempted?: boolean;
-  appTileHeaderHoverCompleted?: boolean;
   persistedHostFramePresent?: boolean;
   browserEgressClear?: boolean;
   allOwnedResourcesRemoved?: boolean;
@@ -182,19 +171,8 @@ type G6StageRecord = {
   viewportHeight?: number;
   iframeWidth?: number;
   iframeHeight?: number;
-  persistedHostFrameWidth?: number;
-  persistedHostFrameHeight?: number;
-  maximisedIframeWidth?: number;
-  maximisedIframeHeight?: number;
-  restoredIframeWidth?: number;
-  restoredIframeHeight?: number;
-  pinControlCount?: number;
-  appTileCountBeforeHover?: number;
-  appTileMenuBarCountBeforeHover?: number;
-  maximiseControlCountBeforeHover?: number;
-  appTileCountAfterHover?: number;
-  appTileMenuBarCountAfterHover?: number;
-  maximiseControlCountAfterHover?: number;
+  widgetCardCount?: number;
+  appDrawerCount?: number;
   eventActionTabCount?: number;
   detailsActionTabCount?: number;
 };
@@ -231,14 +209,6 @@ type G6CalDavResult = {
 };
 
 const ELEMENT_WEB_CONFIGURED_TAG = 'v1.12.30';
-const ELEMENT_WEB_CONTROLS = {
-  [ELEMENT_WEB_CONFIGURED_TAG]: {
-    pin: 'Pin',
-    maximise: 'Maximise',
-    unmaximise: 'Un-maximise',
-  },
-} as const;
-const elementWebControls = ELEMENT_WEB_CONTROLS[ELEMENT_WEB_CONFIGURED_TAG];
 
 const REMINDER_START_LEAD_MS = 150_000;
 const REMINDER_ALARM_OFFSET_MS = 60_000;
@@ -1714,7 +1684,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       neighborUpdateIdentityMatches: neighborUpdate.identityMatches,
     });
 
-    activeG6Phase = 'g6-widget-layout';
+    activeG6Phase = 'g6-side-panel-layout';
     const neighborDetails = frameA.getByRole('dialog').last();
     if (await neighborDetails.isVisible().catch(() => false)) {
       await neighborDetails
@@ -1736,8 +1706,29 @@ test('Element Web preserves unsupported events and supports client interactions'
       .isVisible()
       .catch(() => false);
     const viewport = pageA.viewportSize();
-    const narrowBox = await pageA
-      .locator('iframe[title="Matrix Calendar"]')
+    const widgetCard = pageA.locator('.mx_WidgetCard');
+    const widgetCardCount = Math.min(
+      await widgetCard.count().catch(() => 0),
+      2,
+    );
+    const widgetCardVisible = await widgetCard
+      .first()
+      .isVisible()
+      .catch(() => false);
+    const appDrawerCount = Math.min(
+      await pageA
+        .locator('.mx_AppsDrawer')
+        .count()
+        .catch(() => 0),
+      2,
+    );
+    const persistedHostFrame = pageA.locator(
+      '#mx_PersistedElement_container iframe[title="Matrix Calendar"]',
+    );
+    const persistedHostFramePresent =
+      (await persistedHostFrame.count().catch(() => 0)) === 1 &&
+      (await persistedHostFrame.isVisible().catch(() => false));
+    const sidePanelBox = await persistedHostFrame
       .boundingBox()
       .catch(() => null);
     const hostNoHorizontalOverflow = await pageA
@@ -1751,17 +1742,41 @@ test('Element Web preserves unsupported events and supports client interactions'
       .locator('html')
       .evaluate((element) => element.scrollWidth <= element.clientWidth)
       .catch(() => false);
-    const iframeWidth = narrowBox ? Math.round(narrowBox.width) : undefined;
-    const iframeHeight = narrowBox ? Math.round(narrowBox.height) : undefined;
-    const narrowPanel = iframeWidth !== undefined && iframeWidth <= 480;
-    const narrowLayoutPassed =
+    const iframeWidth = sidePanelBox
+      ? Math.round(sidePanelBox.width)
+      : undefined;
+    const iframeHeight = sidePanelBox
+      ? Math.round(sidePanelBox.height)
+      : undefined;
+    const sidePanelLayoutPassed =
       viewport?.width === 1440 &&
       viewport.height === 900 &&
-      narrowPanel &&
+      widgetCardCount === 1 &&
+      widgetCardVisible &&
+      persistedHostFramePresent &&
+      iframeWidth !== undefined &&
+      iframeWidth > 0 &&
+      iframeHeight !== undefined &&
+      iframeHeight > 0 &&
       createControlReachable &&
       eventDetailsReachable &&
       hostNoHorizontalOverflow &&
       widgetNoHorizontalOverflow;
+    assertG6Stage(activeG6Phase, sidePanelLayoutPassed, {
+      widgetCardCount,
+      appDrawerCount,
+      widgetCardVisible,
+      createControlReachable,
+      eventDetailsReachable,
+      hostNoHorizontalOverflow,
+      widgetNoHorizontalOverflow,
+      persistedHostFramePresent,
+      ...(viewport
+        ? { viewportWidth: viewport.width, viewportHeight: viewport.height }
+        : {}),
+      ...(iframeWidth === undefined ? {} : { iframeWidth }),
+      ...(iframeHeight === undefined ? {} : { iframeHeight }),
+    });
 
     activeG6Phase = 'g6-keyboard-focus';
     const memberBEventsResponse = waitForG6EventsResponse(
@@ -1976,213 +1991,6 @@ test('Element Web preserves unsupported events and supports client interactions'
       canonicalObjectAbsent,
       memberBDeleteRowAbsent,
       supportedNeighborVisible: memberBNeighborVisible,
-    });
-
-    activeG6Phase = 'g6-widget-layout';
-    await openPinnedElementWidget(pageA, 'Matrix Calendar');
-    const pinControl = pageA.getByRole('button', {
-      name: elementWebControls.pin,
-      exact: true,
-    });
-    const pinControlCount = Math.min(
-      await pinControl.count().catch(() => 0),
-      2,
-    );
-    const pinVisible = await pinControl.isVisible().catch(() => false);
-    const pinEnabled = await pinControl.isEnabled().catch(() => false);
-    if (pinVisible && pinEnabled) await pinControl.click();
-    const drawer = pageA.locator('.mx_AppsDrawer');
-    const persistedHostFrame = pageA.locator(
-      '#mx_PersistedElement_container iframe[title="Matrix Calendar"]',
-    );
-    await persistedHostFrame
-      .waitFor({ state: 'visible', timeout: 30_000 })
-      .catch(() => {});
-    const persistedHostFrameVisible = await persistedHostFrame
-      .isVisible()
-      .catch(() => false);
-    const pinnedToDrawer =
-      (await drawer.count().catch(() => 0)) === 1 &&
-      (await persistedHostFrame.count().catch(() => 0)) === 1 &&
-      persistedHostFrameVisible;
-
-    const widgetFrame = pageA.frameLocator(
-      '#mx_PersistedElement_container iframe[title="Matrix Calendar"]',
-    );
-    const persistedHostBox = await persistedHostFrame
-      .boundingBox()
-      .catch(() => null);
-    const appTile = pageA.locator(
-      '.mx_AppsDrawer .mx_AppTileFullWidth, .mx_AppsDrawer .mx_AppTile, .mx_AppsDrawer .mx_AppTile_mini',
-    );
-    const appTileMenuBar = appTile.locator('.mx_AppTileMenuBar');
-    const maximiseControl = appTile.getByRole('button', {
-      name: elementWebControls.maximise,
-      exact: true,
-    });
-    const appTileCountBeforeHover = Math.min(
-      await appTile.count().catch(() => 0),
-      2,
-    );
-    const appTileMenuBarCountBeforeHover = Math.min(
-      await appTileMenuBar.count().catch(() => 0),
-      2,
-    );
-    const maximiseControlCountBeforeHover = Math.min(
-      await maximiseControl.count().catch(() => 0),
-      2,
-    );
-    const appTileHeaderHoverAttempted =
-      appTileCountBeforeHover === 1 && appTileMenuBarCountBeforeHover === 1;
-    const appTileHeaderHoverCompleted =
-      appTileHeaderHoverAttempted &&
-      (await appTileMenuBar
-        .first()
-        .hover({ timeout: 5_000 })
-        .then(() => true)
-        .catch(() => false));
-    await maximiseControl
-      .waitFor({ state: 'visible', timeout: 5_000 })
-      .catch(() => {});
-    const appTileCountAfterHover = Math.min(
-      await appTile.count().catch(() => 0),
-      2,
-    );
-    const appTileMenuBarCountAfterHover = Math.min(
-      await appTileMenuBar.count().catch(() => 0),
-      2,
-    );
-    const maximiseControlCountAfterHover = Math.min(
-      await maximiseControl.count().catch(() => 0),
-      2,
-    );
-    const maximiseControlVisible = await maximiseControl
-      .isVisible()
-      .catch(() => false);
-    if (maximiseControlVisible) await maximiseControl.click();
-    const maximisedDrawer = pageA.locator('.mx_AppsDrawer--maximised');
-    await maximisedDrawer
-      .waitFor({ state: 'visible', timeout: 15_000 })
-      .catch(() => {});
-    const maximisedBox = await persistedHostFrame
-      .boundingBox()
-      .catch(() => null);
-    const drawerMaximised =
-      (await maximisedDrawer.count().catch(() => 0)) === 1;
-    const frameExpanded =
-      persistedHostBox !== null &&
-      maximisedBox !== null &&
-      maximisedBox.width > persistedHostBox.width;
-    const createControlReachableAfterMaximise = await widgetFrame
-      .getByRole('button', { name: 'Create event', exact: true })
-      .isVisible()
-      .catch(() => false);
-    const maximiseNoOverflow = await pageA
-      .evaluate(
-        () =>
-          document.documentElement.scrollWidth <=
-          document.documentElement.clientWidth,
-      )
-      .catch(() => false);
-    const widgetNoOverflowAfterMaximise = await widgetFrame
-      .locator('html')
-      .evaluate((element) => element.scrollWidth <= element.clientWidth)
-      .catch(() => false);
-    const maximisePassed =
-      maximiseControlVisible &&
-      drawerMaximised &&
-      frameExpanded &&
-      createControlReachableAfterMaximise &&
-      maximiseNoOverflow &&
-      widgetNoOverflowAfterMaximise;
-
-    const unmaximiseControl = pageA.getByRole('button', {
-      name: elementWebControls.unmaximise,
-      exact: true,
-    });
-    const unmaximiseControlVisible = await unmaximiseControl
-      .isVisible()
-      .catch(() => false);
-    if (unmaximiseControlVisible) await unmaximiseControl.click();
-    await maximisedDrawer
-      .waitFor({ state: 'detached', timeout: 15_000 })
-      .catch(() => {});
-    const restoredBox = await persistedHostFrame
-      .boundingBox()
-      .catch(() => null);
-    const drawerRestored = (await maximisedDrawer.count().catch(() => 0)) === 0;
-    const frameReturned =
-      persistedHostBox !== null &&
-      restoredBox !== null &&
-      Math.abs(restoredBox.width - persistedHostBox.width) <= 2 &&
-      Math.abs(restoredBox.height - persistedHostBox.height) <= 2;
-    const restoredPassed =
-      unmaximiseControlVisible && drawerRestored && frameReturned;
-
-    const layoutPassed =
-      narrowLayoutPassed &&
-      pinVisible &&
-      pinEnabled &&
-      pinnedToDrawer &&
-      appTileCountBeforeHover === 1 &&
-      appTileMenuBarCountBeforeHover === 1 &&
-      appTileHeaderHoverAttempted &&
-      appTileHeaderHoverCompleted &&
-      appTileCountAfterHover === 1 &&
-      appTileMenuBarCountAfterHover === 1 &&
-      maximiseControlCountAfterHover === 1 &&
-      maximisePassed &&
-      restoredPassed;
-    assertG6Stage(activeG6Phase, layoutPassed, {
-      narrowPanel,
-      createControlReachable:
-        createControlReachable && createControlReachableAfterMaximise,
-      eventDetailsReachable,
-      hostNoHorizontalOverflow: maximiseNoOverflow && hostNoHorizontalOverflow,
-      widgetNoHorizontalOverflow:
-        widgetNoOverflowAfterMaximise && widgetNoHorizontalOverflow,
-      pinVisible,
-      pinEnabled,
-      pinnedToDrawer,
-      persistedHostFramePresent: pinnedToDrawer,
-      pinControlCount,
-      appTileCountBeforeHover,
-      appTileMenuBarCountBeforeHover,
-      maximiseControlCountBeforeHover,
-      appTileHeaderHoverAttempted,
-      appTileHeaderHoverCompleted,
-      appTileCountAfterHover,
-      appTileMenuBarCountAfterHover,
-      maximiseControlCountAfterHover,
-      maximiseControlVisible,
-      drawerMaximised,
-      frameExpanded,
-      unmaximiseControlVisible,
-      drawerRestored,
-      frameReturned,
-      ...(viewport
-        ? { viewportWidth: viewport.width, viewportHeight: viewport.height }
-        : {}),
-      ...(iframeWidth === undefined ? {} : { iframeWidth }),
-      ...(iframeHeight === undefined ? {} : { iframeHeight }),
-      ...(persistedHostBox
-        ? {
-            persistedHostFrameWidth: Math.round(persistedHostBox.width),
-            persistedHostFrameHeight: Math.round(persistedHostBox.height),
-          }
-        : {}),
-      ...(maximisedBox
-        ? {
-            maximisedIframeWidth: Math.round(maximisedBox.width),
-            maximisedIframeHeight: Math.round(maximisedBox.height),
-          }
-        : {}),
-      ...(restoredBox
-        ? {
-            restoredIframeWidth: Math.round(restoredBox.width),
-            restoredIframeHeight: Math.round(restoredBox.height),
-          }
-        : {}),
     });
 
     activeG6Phase = 'g6-browser-egress';

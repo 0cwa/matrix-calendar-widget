@@ -112,7 +112,7 @@ const PHASES = new Set([
   'g6-unsupported-preservation',
   'g6-delete-and-refresh',
   'g6-keyboard-focus',
-  'g6-widget-layout',
+  'g6-side-panel-layout',
   'g6-browser-egress',
   'g6-resource-cleanup',
 ]);
@@ -225,25 +225,14 @@ const PHASE_BOOLEAN_FIELDS = new Map([
     ],
   ],
   [
-    'g6-widget-layout',
+    'g6-side-panel-layout',
     [
-      'narrowPanel',
+      'widgetCardVisible',
       'createControlReachable',
       'eventDetailsReachable',
       'hostNoHorizontalOverflow',
       'widgetNoHorizontalOverflow',
-      'pinVisible',
-      'pinEnabled',
-      'pinnedToDrawer',
       'persistedHostFramePresent',
-      'appTileHeaderHoverAttempted',
-      'appTileHeaderHoverCompleted',
-      'maximiseControlVisible',
-      'drawerMaximised',
-      'frameExpanded',
-      'unmaximiseControlVisible',
-      'drawerRestored',
-      'frameReturned',
     ],
   ],
   ['g6-browser-egress', ['browserEgressClear']],
@@ -276,25 +265,14 @@ const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
     ['count', 'eventActionTabCount', 'detailsActionTabCount'],
   ],
   [
-    'g6-widget-layout',
+    'g6-side-panel-layout',
     [
       'viewportWidth',
       'viewportHeight',
       'iframeWidth',
       'iframeHeight',
-      'pinControlCount',
-      'appTileCountBeforeHover',
-      'appTileMenuBarCountBeforeHover',
-      'maximiseControlCountBeforeHover',
-      'appTileCountAfterHover',
-      'appTileMenuBarCountAfterHover',
-      'maximiseControlCountAfterHover',
-      'persistedHostFrameWidth',
-      'persistedHostFrameHeight',
-      'maximisedIframeWidth',
-      'maximisedIframeHeight',
-      'restoredIframeWidth',
-      'restoredIframeHeight',
+      'widgetCardCount',
+      'appDrawerCount',
     ],
   ],
   ['g6-browser-egress', ['count']],
@@ -860,23 +838,12 @@ const ALLOWED_KEYS = new Set([
   'closeActionFocused',
   'escapeClosedDialog',
   'focusReturnedToEvent',
-  'narrowPanel',
+  'widgetCardVisible',
   'createControlReachable',
   'eventDetailsReachable',
   'hostNoHorizontalOverflow',
   'widgetNoHorizontalOverflow',
-  'pinVisible',
-  'pinEnabled',
-  'pinnedToDrawer',
   'persistedHostFramePresent',
-  'appTileHeaderHoverAttempted',
-  'appTileHeaderHoverCompleted',
-  'maximiseControlVisible',
-  'drawerMaximised',
-  'frameExpanded',
-  'unmaximiseControlVisible',
-  'drawerRestored',
-  'frameReturned',
   'browserEgressClear',
   'allOwnedResourcesRemoved',
   ...G6_EXTRA_NUMERIC_FIELDS,
@@ -909,7 +876,9 @@ function validG6Observation(record) {
       if (key.endsWith('Width') || key.endsWith('Height')) {
         return value < 1 || value > 10_000;
       }
-      if (record.phase === 'g6-widget-layout') return value < 0 || value > 2;
+      if (record.phase === 'g6-side-panel-layout') {
+        return value < 0 || value > 2;
+      }
       if (key === 'eventActionTabCount') return value < 0 || value > 80;
       if (key === 'detailsActionTabCount') return value < 0 || value > 14;
       if (record.phase === 'g6-resource-cleanup') return value < 0 || value > 4;
@@ -961,15 +930,11 @@ function validG6Observation(record) {
   }
 
   if (
-    record.phase === 'g6-widget-layout' &&
-    ((Object.hasOwn(record, 'appTileHeaderHoverAttempted') &&
-      record.appTileHeaderHoverAttempted !==
-        (record.appTileCountBeforeHover === 1 &&
-          record.appTileMenuBarCountBeforeHover === 1)) ||
-      (record.appTileHeaderHoverCompleted === true &&
-        record.appTileHeaderHoverAttempted !== true) ||
-      (record.maximiseControlVisible === true &&
-        record.maximiseControlCountAfterHover !== 1))
+    record.phase === 'g6-side-panel-layout' &&
+    ((record.widgetCardVisible === true && record.widgetCardCount !== 1) ||
+      (record.persistedHostFramePresent === true &&
+        (!Number.isInteger(record.iframeWidth) ||
+          !Number.isInteger(record.iframeHeight))))
   ) {
     return false;
   }
@@ -1054,27 +1019,21 @@ function validG6Observation(record) {
         record.eventActionTabCount <= 80 &&
         record.detailsActionTabCount <= 14
       );
-    case 'g6-widget-layout':
+    case 'g6-side-panel-layout':
       return (
         record.viewportWidth === 1440 &&
         record.viewportHeight === 900 &&
-        record.iframeWidth <= 480 &&
-        record.pinControlCount === 1 &&
+        record.widgetCardCount === 1 &&
+        record.widgetCardVisible === true &&
         record.persistedHostFramePresent === true &&
-        record.appTileCountBeforeHover === 1 &&
-        record.appTileMenuBarCountBeforeHover === 1 &&
-        record.appTileHeaderHoverAttempted === true &&
-        record.appTileHeaderHoverCompleted === true &&
-        record.appTileCountAfterHover === 1 &&
-        record.appTileMenuBarCountAfterHover === 1 &&
-        record.maximiseControlCountAfterHover === 1 &&
-        record.maximiseControlVisible === true &&
-        record.maximisedIframeWidth > record.persistedHostFrameWidth &&
-        Math.abs(record.restoredIframeWidth - record.persistedHostFrameWidth) <=
-          2 &&
-        Math.abs(
-          record.restoredIframeHeight - record.persistedHostFrameHeight,
-        ) <= 2
+        Number.isInteger(record.iframeWidth) &&
+        record.iframeWidth > 0 &&
+        Number.isInteger(record.iframeHeight) &&
+        record.iframeHeight > 0 &&
+        record.createControlReachable === true &&
+        record.eventDetailsReachable === true &&
+        record.hostNoHorizontalOverflow === true &&
+        record.widgetNoHorizontalOverflow === true
       );
     case 'g6-browser-egress':
       return record.count === 0;

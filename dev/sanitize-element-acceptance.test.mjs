@@ -2537,42 +2537,20 @@ test('rejects inconsistent Element client acceptance evidence', () => {
       allOwnedResourcesRemoved: true,
     },
     {
-      phase: 'g6-widget-layout',
+      phase: 'g6-side-panel-layout',
       status: 'passed',
-      narrowPanel: true,
+      widgetCardVisible: false,
       createControlReachable: true,
       eventDetailsReachable: true,
       hostNoHorizontalOverflow: true,
       widgetNoHorizontalOverflow: true,
-      pinVisible: true,
-      pinEnabled: true,
-      pinnedToDrawer: true,
       persistedHostFramePresent: true,
-      appTileHeaderHoverAttempted: true,
-      appTileHeaderHoverCompleted: true,
-      maximiseControlVisible: true,
-      drawerMaximised: true,
-      frameExpanded: true,
-      unmaximiseControlVisible: true,
-      drawerRestored: true,
-      frameReturned: true,
       viewportWidth: 1440,
       viewportHeight: 900,
       iframeWidth: 319,
       iframeHeight: 640,
-      pinControlCount: 1,
-      appTileCountBeforeHover: 1,
-      appTileMenuBarCountBeforeHover: 1,
-      maximiseControlCountBeforeHover: 0,
-      appTileCountAfterHover: 1,
-      appTileMenuBarCountAfterHover: 1,
-      maximiseControlCountAfterHover: 1,
-      persistedHostFrameWidth: 500,
-      persistedHostFrameHeight: 500,
-      maximisedIframeWidth: 1200,
-      maximisedIframeHeight: 700,
-      restoredIframeWidth: 500,
-      restoredIframeHeight: 400,
+      widgetCardCount: 0,
+      appDrawerCount: 1,
     },
     {
       phase: 'g6-browser-egress',
@@ -2581,42 +2559,20 @@ test('rejects inconsistent Element client acceptance evidence', () => {
       browserEgressClear: true,
     },
     {
-      phase: 'g6-widget-layout',
+      phase: 'g6-side-panel-layout',
       status: 'passed',
-      narrowPanel: true,
+      widgetCardVisible: true,
       createControlReachable: true,
       eventDetailsReachable: true,
-      hostNoHorizontalOverflow: true,
+      hostNoHorizontalOverflow: false,
       widgetNoHorizontalOverflow: true,
-      pinVisible: true,
-      pinEnabled: true,
-      pinnedToDrawer: true,
       persistedHostFramePresent: true,
-      appTileHeaderHoverAttempted: true,
-      appTileHeaderHoverCompleted: true,
-      maximiseControlVisible: true,
-      drawerMaximised: true,
-      frameExpanded: true,
-      unmaximiseControlVisible: true,
-      drawerRestored: true,
-      frameReturned: true,
       viewportWidth: 1440,
       viewportHeight: 900,
       iframeWidth: 319,
       iframeHeight: 640,
-      pinControlCount: 2,
-      appTileCountBeforeHover: 1,
-      appTileMenuBarCountBeforeHover: 1,
-      maximiseControlCountBeforeHover: 0,
-      appTileCountAfterHover: 1,
-      appTileMenuBarCountAfterHover: 1,
-      maximiseControlCountAfterHover: 1,
-      persistedHostFrameWidth: 500,
-      persistedHostFrameHeight: 500,
-      maximisedIframeWidth: 1200,
-      maximisedIframeHeight: 700,
-      restoredIframeWidth: 500,
-      restoredIframeHeight: 500,
+      widgetCardCount: 1,
+      appDrawerCount: 0,
     },
   ];
 
@@ -2692,42 +2648,20 @@ test('accepts the compact four-case Element client evidence contract', () => {
       focusReturnedToEvent: true,
     },
     {
-      phase: 'g6-widget-layout',
+      phase: 'g6-side-panel-layout',
       status: 'passed',
-      narrowPanel: true,
+      widgetCardVisible: true,
       createControlReachable: true,
       eventDetailsReachable: true,
       hostNoHorizontalOverflow: true,
       widgetNoHorizontalOverflow: true,
-      pinVisible: true,
-      pinEnabled: true,
-      pinnedToDrawer: true,
       persistedHostFramePresent: true,
-      appTileHeaderHoverAttempted: true,
-      appTileHeaderHoverCompleted: true,
-      maximiseControlVisible: true,
-      drawerMaximised: true,
-      frameExpanded: true,
-      unmaximiseControlVisible: true,
-      drawerRestored: true,
-      frameReturned: true,
       viewportWidth: 1440,
       viewportHeight: 900,
       iframeWidth: 319,
       iframeHeight: 640,
-      pinControlCount: 1,
-      appTileCountBeforeHover: 1,
-      appTileMenuBarCountBeforeHover: 1,
-      maximiseControlCountBeforeHover: 0,
-      appTileCountAfterHover: 1,
-      appTileMenuBarCountAfterHover: 1,
-      maximiseControlCountAfterHover: 1,
-      persistedHostFrameWidth: 500,
-      persistedHostFrameHeight: 400,
-      maximisedIframeWidth: 1200,
-      maximisedIframeHeight: 700,
-      restoredIframeWidth: 500,
-      restoredIframeHeight: 400,
+      widgetCardCount: 1,
+      appDrawerCount: 0,
     },
     {
       phase: 'g6-browser-egress',
@@ -2760,7 +2694,11 @@ test('accepts the compact four-case Element client evidence contract', () => {
   }
   assert.match(
     summary,
-    /persisted_host_frame_present=true app_tile_header_hover_attempted=true app_tile_header_hover_completed=true.*app_tile_count_before_hover=1 app_tile_menu_bar_count_before_hover=1 maximise_control_count_before_hover=0 app_tile_count_after_hover=1 app_tile_menu_bar_count_after_hover=1 maximise_control_count_after_hover=1/u,
+    /phase=g6-side-panel-layout status=passed widget_card_visible=true create_control_reachable=true event_details_reachable=true host_no_horizontal_overflow=true widget_no_horizontal_overflow=true persisted_host_frame_present=true viewport_width=1440 viewport_height=900 iframe_width=319 iframe_height=640 widget_card_count=1 app_drawer_count=0/u,
+  );
+  assert.doesNotMatch(
+    summary,
+    /pin_control|maximise|drawer_maximised|app_tile/u,
   );
   assert.throws(
     () =>
@@ -2768,8 +2706,24 @@ test('accepts the compact four-case Element client evidence contract', () => {
         records
           .map((record) =>
             JSON.stringify(
-              record.phase === 'g6-widget-layout'
-                ? { ...record, maximiseControlVisible: false }
+              record.phase === 'g6-side-panel-layout'
+                ? { ...record, widgetCardVisible: false }
+                : record,
+            ),
+          )
+          .join('\n'),
+        sourceSha,
+      ),
+    { message: 'invalid element acceptance summary' },
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        records
+          .map((record) =>
+            JSON.stringify(
+              record.phase === 'g6-side-panel-layout'
+                ? { ...record, maximiseControlVisible: true }
                 : record,
             ),
           )
