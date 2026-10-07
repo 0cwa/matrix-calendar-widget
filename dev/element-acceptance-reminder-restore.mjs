@@ -635,13 +635,19 @@ async function waitForHealth(service) {
   throw new StageFailure('reminder-postgres-ready');
 }
 
-async function waitForHttp(url, predicate, phase) {
-  const deadline = Date.now() + MAX_WAIT_MS;
+async function waitForHttp(
+  url,
+  predicate,
+  phase,
+  redirect = 'error',
+  timeoutMs = MAX_WAIT_MS,
+) {
+  const deadline = Date.now() + timeoutMs;
   let lastStatus;
   while (Date.now() < deadline) {
     try {
       const response = await fetch(url, {
-        redirect: 'error',
+        redirect,
         signal: AbortSignal.timeout(3_000),
       });
       lastStatus = response.status;
@@ -1393,12 +1399,18 @@ function restorePostgresDump(diagnostics) {
   diagnostics.restorePostgresRestored = true;
 }
 
-async function waitForRestoreRadicale() {
+export function waitForRestoreRadicaleAt(url, timeoutMs = MAX_WAIT_MS) {
   return waitForHttp(
-    'http://127.0.0.1:5233/',
-    (status) => status >= 400 && status < 500,
+    url,
+    (status) => status === 302 || (status >= 400 && status < 500),
     'restore-radicale-ready',
+    'manual',
+    timeoutMs,
   );
+}
+
+async function waitForRestoreRadicale() {
+  return waitForRestoreRadicaleAt('http://127.0.0.1:5233/');
 }
 
 function inspectRestoreRadicaleReadiness() {

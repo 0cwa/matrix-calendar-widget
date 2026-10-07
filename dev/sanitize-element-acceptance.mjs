@@ -1543,6 +1543,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       Object.hasOwn(record, 'httpStatus') &&
       reminderGatewayReadinessPhases.has(record.phase) &&
       ((record.status === 'passed' &&
+        !(
+          record.phase === 'restore-radicale-ready' && record.httpStatus === 302
+        ) &&
         (record.httpStatus < 400 || record.httpStatus > 499)) ||
         (record.status === 'failed' &&
           (record.httpStatus < 100 || record.httpStatus > 599)))

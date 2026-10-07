@@ -1764,6 +1764,29 @@ test('emits only fixed Radicale readiness state after an unanswered probe', () =
     httpStatusSummary,
     /phase=restore-radicale-ready status=failed http_status=503 container_state=exited container_health=none container_exit_code=1 container_oom_killed=false container_runtime_error_present=true restore_radicale_probe_outcome=http-status/u,
   );
+
+  const redirectReadinessSummary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-radicale-ready',
+      status: 'passed',
+      httpStatus: 302,
+    }),
+    sourceSha,
+  );
+  assert.equal(
+    redirectReadinessSummary,
+    `element-acceptance source_sha=${sourceSha}\nphase=restore-radicale-ready status=passed http_status=302\n`,
+  );
+  assert.throws(() =>
+    sanitizeElementAcceptance(
+      JSON.stringify({
+        phase: 'restore-radicale-ready',
+        status: 'passed',
+        httpStatus: 301,
+      }),
+      sourceSha,
+    ),
+  );
 });
 
 test('classifies only fixed Radicale startup signatures and sanitizes the evidence', () => {

@@ -35,7 +35,27 @@ import {
 import {
   formatFailureMarker,
   RADICALE_EXTRACT_TAR,
+  waitForRestoreRadicaleAt,
 } from './element-acceptance-reminder-restore.mjs';
+
+test('restore Radicale readiness accepts its redirect without following it', async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    requests.push({ url: String(url), redirect: options.redirect });
+    return new Response(null, {
+      status: 302,
+      headers: { location: '/redirect-target' },
+    });
+  });
+
+  assert.equal(
+    await waitForRestoreRadicaleAt('http://127.0.0.1:5233/', 2_000),
+    302,
+  );
+  assert.deepEqual(requests, [
+    { url: 'http://127.0.0.1:5233/', redirect: 'manual' },
+  ]);
+});
 
 const PYTHON_ACCOUNT = [
   'import json,os,pwd',
