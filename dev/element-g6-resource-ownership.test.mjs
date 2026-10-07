@@ -20,6 +20,7 @@ import test from 'node:test';
 import {
   beginG6ResourceCreate,
   createG6ResourceOwnership,
+  g6GatewayResourceIdentityMatches,
   g6ResourceCleanupRequest,
   isStrongG6ResourceEtag,
   recordG6ResourceCleanup,
@@ -27,6 +28,42 @@ import {
   recordG6ResourceUpdate,
   summarizeG6ResourceOwnership,
 } from './element-g6-resource-ownership.mjs';
+
+test('matches the same owned G6 resource across the two fixture Radicale origins', () => {
+  const external =
+    'http://127.0.0.1:5233/_matrix_calendar_service/element-acceptance/g6-01234567-89ab-cdef-0123-456789abcdef.ics';
+  const internal = external.replace(
+    'http://127.0.0.1:5233',
+    'http://restore-radicale:5232',
+  );
+
+  assert.equal(g6GatewayResourceIdentityMatches(internal, external), true);
+  assert.equal(g6GatewayResourceIdentityMatches(external, external), false);
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
+      internal.replace('01234567-89ab', '11234567-89ab'),
+      external,
+    ),
+    false,
+  );
+});
+
+test('rejects foreign origins, collection paths, and decorated G6 hrefs', () => {
+  const external =
+    'http://127.0.0.1:5233/_matrix_calendar_service/element-acceptance/g6-01234567-89ab-cdef-0123-456789abcdef.ics';
+  const internal =
+    'http://restore-radicale:5232/_matrix_calendar_service/element-acceptance/g6-01234567-89ab-cdef-0123-456789abcdef.ics';
+
+  for (const candidate of [
+    internal.replace('restore-radicale:5232', 'restore-radicale.evil:5232'),
+    internal.replace('/element-acceptance/', '/other/'),
+    `${internal}?download=1`,
+    `${internal}#fragment`,
+    external.replace('127.0.0.1:5233', '127.0.0.1:5232'),
+  ]) {
+    assert.equal(g6GatewayResourceIdentityMatches(candidate, external), false);
+  }
+});
 
 function start(name = 'private-resource-name.ics') {
   const resource = createG6ResourceOwnership(name);

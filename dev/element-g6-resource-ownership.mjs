@@ -16,6 +16,57 @@
  */
 
 const STRONG_ETAG = /^"[\x21\x23-\x7e]{1,200}"$/u;
+const G6_EXTERNAL_RADICALE_ORIGIN = 'http://127.0.0.1:5233';
+const G6_GATEWAY_RADICALE_ORIGIN = 'http://restore-radicale:5232';
+const G6_COLLECTION_PATH = '/_matrix_calendar_service/element-acceptance/';
+const G6_RESOURCE_NAME = /^g6-[0-9a-f-]{36}\.ics$/u;
+
+function parseOwnedG6ResourceHref(href, expectedOrigin) {
+  if (typeof href !== 'string') return undefined;
+  let url;
+  try {
+    url = new URL(href);
+  } catch {
+    return undefined;
+  }
+  if (
+    url.origin !== expectedOrigin ||
+    url.protocol !== 'http:' ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.search !== '' ||
+    url.hash !== '' ||
+    url.href !== href ||
+    !url.pathname.startsWith(G6_COLLECTION_PATH)
+  ) {
+    return undefined;
+  }
+  const resourceName = url.pathname.slice(G6_COLLECTION_PATH.length);
+  if (
+    !G6_RESOURCE_NAME.test(resourceName) ||
+    url.pathname !== `${G6_COLLECTION_PATH}${resourceName}`
+  ) {
+    return undefined;
+  }
+  return url;
+}
+
+// The fixture reaches the restored volume externally on 5233, while the
+// gateway reports the same canonical resource from its Compose origin on 5232.
+export function g6GatewayResourceIdentityMatches(
+  gatewayEventHref,
+  externallyOwnedResourceHref,
+) {
+  const external = parseOwnedG6ResourceHref(
+    externallyOwnedResourceHref,
+    G6_EXTERNAL_RADICALE_ORIGIN,
+  );
+  const gateway = parseOwnedG6ResourceHref(
+    gatewayEventHref,
+    G6_GATEWAY_RADICALE_ORIGIN,
+  );
+  return external !== undefined && gateway?.pathname === external.pathname;
+}
 
 export function isStrongG6ResourceEtag(etag) {
   return typeof etag === 'string' && STRONG_ETAG.test(etag);

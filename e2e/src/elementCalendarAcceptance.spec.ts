@@ -33,6 +33,7 @@ import { isAbsolute, resolve, sep } from 'node:path';
 import {
   beginG6ResourceCreate,
   createG6ResourceOwnership,
+  g6GatewayResourceIdentityMatches,
   g6ResourceCleanupRequest,
   isStrongG6ResourceEtag,
   recordG6ResourceCleanup,
@@ -3770,7 +3771,8 @@ async function readGatewayEventUpdate(
       typeof event === 'object' &&
       event !== null &&
       'id' in event &&
-      event.id === expectedEventHref;
+      typeof event.id === 'string' &&
+      g6GatewayResourceIdentityMatches(event.id, expectedEventHref);
     return {
       ...(etag ? { etag } : {}),
       identityMatches,
