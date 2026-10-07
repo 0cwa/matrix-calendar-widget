@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   createKeyringUnlockInput,
   createSafeStorageLogCollector,
+  readKeyringControl,
 } from './element-desktop-startup.mjs';
 
 test('keyring unlock entropy is encoded as an ASCII line without embedded NULs', () => {
@@ -17,6 +18,21 @@ test('keyring unlock entropy is encoded as an ASCII line without embedded NULs',
   assert.equal(input.at(-1), 0x0a);
   assert.match(input.subarray(0, -1).toString('ascii'), /^[0-9a-f]{64}$/u);
   assert.equal(input.includes(0), false);
+});
+
+test('keyring control accepts modern plain output and legacy export output without requiring a PID', () => {
+  assert.equal(
+    readKeyringControl('GNOME_KEYRING_CONTROL=/tmp/private-runtime/keyring\n'),
+    '/tmp/private-runtime/keyring',
+  );
+  assert.equal(
+    readKeyringControl(
+      'GNOME_KEYRING_CONTROL=/tmp/private-runtime/keyring; export GNOME_KEYRING_CONTROL;\nGNOME_KEYRING_PID=42\n',
+    ),
+    '/tmp/private-runtime/keyring',
+  );
+  assert.equal(readKeyringControl('GNOME_KEYRING_PID=42\n'), undefined);
+  assert.equal(readKeyringControl('ordinary output\n'), undefined);
 });
 
 test('safe-storage collector recognizes the exact vendor marker across chunks', () => {

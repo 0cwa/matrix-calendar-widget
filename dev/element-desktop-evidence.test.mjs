@@ -56,8 +56,7 @@ function passingSecretService() {
     dbusAddressPresent: true,
     daemonOutcome: 'passed',
     daemonExitStatus: 0,
-    daemonPidPresent: true,
-    daemonControlPresent: true,
+    daemonControlPresent: false,
     storeOutcome: 'passed',
     storeExitStatus: 0,
     lookupOutcome: 'passed',
@@ -166,7 +165,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 6);
+  assert.equal(summary.schemaVersion, 7);
   assert.equal(summary.failureCode, null);
   assert.equal(summary.checks.isolatedNodePreflight, 'passed');
   assert.equal(summary.targetUidPreflight.status, 'passed');

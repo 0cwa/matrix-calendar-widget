@@ -160,13 +160,24 @@ export function createKeyringUnlockInput(entropy) {
   return Buffer.from(`${entropy.toString('hex')}\n`, 'ascii');
 }
 
+export function readKeyringControl(stdout) {
+  if (typeof stdout !== 'string') return undefined;
+  for (const line of stdout.split(/\r?\n/u)) {
+    const match =
+      /^GNOME_KEYRING_CONTROL=([^;\r\n]{1,512})(?:; export GNOME_KEYRING_CONTROL;)?$/u.exec(
+        line,
+      );
+    if (match) return match[1];
+  }
+  return undefined;
+}
+
 function emptySecretServiceObservation() {
   return {
     step: 'not-run',
     dbusAddressPresent: false,
     daemonOutcome: 'not-run',
     daemonExitStatus: null,
-    daemonPidPresent: false,
     daemonControlPresent: false,
     storeOutcome: 'not-run',
     storeExitStatus: null,
@@ -248,7 +259,6 @@ let safeStorageObservation = {
   complete: false,
 };
 let secretServiceObservation = emptySecretServiceObservation();
-let keyringPid = null;
 let failureCode = null;
 
 function fail(code, check) {
@@ -439,26 +449,7 @@ function startSecretService() {
       observation.step = 'daemon-start';
       fail('secret-service-unavailable', 'secretService');
     }
-    observation.step = 'daemon-output';
-    const values = new Map();
-    for (const line of daemon.stdout.split(/\r?\n/u)) {
-      const match =
-        /^(GNOME_KEYRING_CONTROL|GNOME_KEYRING_PID)=([^;\r\n]+); export \1;$/u.exec(
-          line,
-        );
-      if (match) values.set(match[1], match[2]);
-    }
-    const pidValue = values.get('GNOME_KEYRING_PID');
-    observation.daemonPidPresent = Boolean(
-      pidValue && /^[1-9][0-9]{0,8}$/u.test(pidValue),
-    );
-    if (!observation.daemonPidPresent) {
-      observation.step = 'daemon-output';
-      fail('secret-service-unavailable', 'secretService');
-    }
-    keyringPid = Number(pidValue);
-    process.env.GNOME_KEYRING_PID = pidValue;
-    const control = values.get('GNOME_KEYRING_CONTROL');
+    const control = readKeyringControl(daemon.stdout);
     observation.daemonControlPresent = Boolean(control);
     if (control) process.env.GNOME_KEYRING_CONTROL = control;
 
@@ -767,13 +758,6 @@ async function stopApp() {
       }),
     ]);
     clearTimeout(closeTimer);
-  }
-  if (keyringPid !== null) {
-    try {
-      process.kill(keyringPid, 'SIGTERM');
-    } catch {
-      // The session bus may already have stopped the daemon.
-    }
   }
 }
 

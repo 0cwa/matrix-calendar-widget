@@ -62,7 +62,6 @@ const SECRET_SERVICE_STEPS = new Set([
   'not-run',
   'dbus-session',
   'daemon-start',
-  'daemon-output',
   'secret-store',
   'secret-lookup',
   'secret-clear',
@@ -202,7 +201,6 @@ function validateSecretService(value) {
       'dbusAddressPresent',
       'daemonOutcome',
       'daemonExitStatus',
-      'daemonPidPresent',
       'daemonControlPresent',
       'storeOutcome',
       'storeExitStatus',
@@ -215,7 +213,6 @@ function validateSecretService(value) {
     ]) ||
     !SECRET_SERVICE_STEPS.has(value.step) ||
     typeof value.dbusAddressPresent !== 'boolean' ||
-    typeof value.daemonPidPresent !== 'boolean' ||
     typeof value.daemonControlPresent !== 'boolean' ||
     typeof value.lookupMatches !== 'boolean' ||
     typeof value.keyringFilePresent !== 'boolean'
@@ -262,7 +259,6 @@ function validateSecretService(value) {
         !value.dbusAddressPresent &&
         daemonNotRun &&
         value.daemonExitStatus === null &&
-        !value.daemonPidPresent &&
         !value.daemonControlPresent &&
         commandsNotRun
       );
@@ -271,7 +267,6 @@ function validateSecretService(value) {
         !value.dbusAddressPresent &&
         daemonNotRun &&
         value.daemonExitStatus === null &&
-        !value.daemonPidPresent &&
         !value.daemonControlPresent &&
         commandsNotRun
       );
@@ -279,15 +274,6 @@ function validateSecretService(value) {
       return (
         value.dbusAddressPresent &&
         !daemonPassed &&
-        !value.daemonPidPresent &&
-        !value.daemonControlPresent &&
-        commandsNotRun
-      );
-    case 'daemon-output':
-      return (
-        value.dbusAddressPresent &&
-        daemonPassed &&
-        !value.daemonPidPresent &&
         !value.daemonControlPresent &&
         commandsNotRun
       );
@@ -295,14 +281,12 @@ function validateSecretService(value) {
       return (
         value.dbusAddressPresent &&
         daemonPassed &&
-        value.daemonPidPresent &&
         value.storeOutcome !== 'passed'
       );
     case 'secret-lookup':
       return (
         value.dbusAddressPresent &&
         daemonPassed &&
-        value.daemonPidPresent &&
         value.storeOutcome === 'passed' &&
         (value.lookupOutcome !== 'passed' || !value.lookupMatches)
       );
@@ -310,7 +294,6 @@ function validateSecretService(value) {
       return (
         value.dbusAddressPresent &&
         daemonPassed &&
-        value.daemonPidPresent &&
         value.storeOutcome === 'passed' &&
         value.lookupOutcome === 'passed' &&
         value.lookupMatches &&
@@ -320,7 +303,6 @@ function validateSecretService(value) {
       return (
         value.dbusAddressPresent &&
         daemonPassed &&
-        value.daemonPidPresent &&
         dataCommandsPassed &&
         !value.keyringFilePresent
       );
@@ -328,7 +310,6 @@ function validateSecretService(value) {
       return (
         value.dbusAddressPresent &&
         daemonPassed &&
-        value.daemonPidPresent &&
         dataCommandsPassed &&
         value.keyringFilePresent
       );
@@ -929,7 +910,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -951,7 +932,6 @@ export function sanitizeDesktopStages(records, sourceSha) {
       dbusAddressPresent: false,
       daemonOutcome: 'not-run',
       daemonExitStatus: null,
-      daemonPidPresent: false,
       daemonControlPresent: false,
       storeOutcome: 'not-run',
       storeExitStatus: null,
@@ -997,7 +977,7 @@ export function validDesktopSummary(value) {
       'egressProbe',
       'checks',
     ]) &&
-    value.schemaVersion === 6 &&
+    value.schemaVersion === 7 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
