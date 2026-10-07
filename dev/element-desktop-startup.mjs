@@ -46,6 +46,7 @@ const MAX_PROC_COMMAND_LINE_BYTES = 4_096;
 const MAX_PROC_NETWORK_TABLE_BYTES = 1_048_576;
 const MAX_UID_SOCKET_FD_REFERENCES = 8_192;
 const MAX_UID_SOCKET_BUCKETS = 100;
+const MAX_CONFIG_OBSERVATION_WAIT_MS = 5_000;
 // The workflow budgets 13s for each marker ACK, including command kill grace;
 // leave 2s of the 15s helper wait for polling and dispatch overhead.
 const EGRESS_COUNTER_ACK_WAIT_MS = 15_000;
@@ -83,6 +84,15 @@ const UID_TCP_STATES = Object.freeze([
   'closing',
   'listening',
   'closed',
+  'unknown',
+]);
+const UID_LIFECYCLE_PROCESS_ROLES = Object.freeze([
+  'application',
+  'chromium',
+  'keyring',
+  'dbus',
+  'xvfb',
+  'other',
   'unknown',
 ]);
 export const SANDBOX_REASONS = Object.freeze([
@@ -518,6 +528,10 @@ const desktopObservation = {
     fixedOriginPageCount: null,
   },
   pageLoadOutcome: 'not-attempted',
+  configInMemoryObservation: {
+    state: 'not_observed',
+    matchesFixture: null,
+  },
 };
 let failureCode = null;
 let rendererDiagnostics = emptyRendererDiagnostics();
@@ -553,6 +567,7 @@ function emptyRendererDiagnostics() {
 function emptyEgressCounterObservation(state = 'not_observed') {
   return {
     state,
+    policyState: state === 'not_observed' ? 'not_observed' : 'unavailable',
     ipv4Blocked: null,
     ipv6Blocked: null,
     ipv4Classes: null,
@@ -711,6 +726,7 @@ function emptyUidLifecycleObservation(state) {
     unreadableProcessCount: null,
     unattributedProcessCount: null,
     processClassCounts: null,
+    processRoleCounts: null,
     rendererOwnership: {
       state: rendererState,
       appIdentityState: rendererState,
@@ -741,6 +757,18 @@ function classifyUidProcess(args, pid, applicationPid) {
   if (processType === '--type=zygote') return 'zygote';
   if (processType === '--type=gpu-process') return 'gpu';
   if (processType === '--type=utility') return 'utility';
+  return 'other';
+}
+
+function classifyUidProcessRole(args, pid, applicationPid) {
+  if (pid === applicationPid) return 'application';
+  if (!Array.isArray(args) || args.length === 0) return 'unknown';
+  const executable = basename(args[0]).toLowerCase();
+  if (executable === 'gnome-keyring-daemon') return 'keyring';
+  if (executable === 'dbus-daemon') return 'dbus';
+  if (executable === 'xvfb') return 'xvfb';
+  if (executable === 'element-desktop') return 'application';
+  if (args.some((arg) => arg.startsWith('--type='))) return 'chromium';
   return 'other';
 }
 
@@ -1150,6 +1178,9 @@ export function summarizeUidLifecycleObservation(
     other: 0,
     unknown: 0,
   };
+  const roleCounts = Object.fromEntries(
+    UID_LIFECYCLE_PROCESS_ROLES.map((name) => [name, 0]),
+  );
   const rendererSecurityRows = [];
   const completeCdpRendererPids =
     validateCdpRendererHandoff(cdpRendererHandoff) &&
@@ -1203,6 +1234,8 @@ export function summarizeUidLifecycleObservation(
     if (!matchesUid) continue;
 
     uidProcessCount += 1;
+    roleCounts[classifyUidProcessRole(item.args, item.pid, applicationPid)] +=
+      1;
     let processUnreadable =
       item.unreadable === true || !Array.isArray(item.args);
     if (item.state === 'Z') {
@@ -1257,6 +1290,7 @@ export function summarizeUidLifecycleObservation(
     noCurrentLinkRendererCount,
     otherUidAppDescendantRendererCount,
     ...Object.values(classCounts),
+    ...Object.values(roleCounts),
   ];
   if (countValues.some((value) => value > MAX_DIAGNOSTIC_COUNT)) {
     sawCountOverflow = true;
@@ -1289,6 +1323,12 @@ export function summarizeUidLifecycleObservation(
     unattributedProcessCount: cappedDiagnosticCount(unattributedProcessCount),
     processClassCounts: Object.fromEntries(
       Object.entries(classCounts).map(([name, value]) => [
+        name,
+        cappedDiagnosticCount(value),
+      ]),
+    ),
+    processRoleCounts: Object.fromEntries(
+      Object.entries(roleCounts).map(([name, value]) => [
         name,
         cappedDiagnosticCount(value),
       ]),
@@ -2341,6 +2381,28 @@ function checkPackage() {
   pass('package');
 }
 
+export function matchesProbeConfigProjection(config) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    return false;
+  }
+  const homeserver = config.default_server_config?.['m.homeserver'];
+  const jitsi = config.jitsi;
+  return (
+    homeserver?.base_url === 'http://127.0.0.1:8008' &&
+    homeserver?.server_name === 'localhost' &&
+    config.update_base_url === null &&
+    config.disable_custom_urls === true &&
+    config.enable_client_well_known_lookups === false &&
+    config.disable_analytics === true &&
+    config.integrations_ui_url === '' &&
+    config.integrations_rest_url === '' &&
+    config.integrations_widgets_urls?.length === 0 &&
+    config.bug_report_endpoint_url === '' &&
+    Object.keys(jitsi ?? {}).length === 0 &&
+    config.map_style_url === ''
+  );
+}
+
 function checkConfig() {
   let config;
   try {
@@ -2348,35 +2410,66 @@ function checkConfig() {
   } catch {
     fail('invalid-config', 'config');
   }
-  const homeserver = config?.default_server_config?.['m.homeserver'];
   const urls = JSON.stringify(config).match(/https?:\/\/[^"\\\s]+/gu) ?? [];
-  const allowedOrigins = new Set(['http://127.0.0.1:8008']);
   let allUrlsLocal = true;
   for (const value of urls) {
     try {
-      allUrlsLocal &&= allowedOrigins.has(new URL(value).origin);
+      allUrlsLocal &&= new URL(value).origin === 'http://127.0.0.1:8008';
     } catch {
       allUrlsLocal = false;
     }
   }
-  if (
-    homeserver?.base_url !== 'http://127.0.0.1:8008' ||
-    homeserver?.server_name !== 'localhost' ||
-    config.update_base_url !== null ||
-    config.disable_custom_urls !== true ||
-    config.enable_client_well_known_lookups !== false ||
-    config.disable_analytics !== true ||
-    config.integrations_ui_url !== '' ||
-    config.integrations_rest_url !== '' ||
-    config.integrations_widgets_urls?.length !== 0 ||
-    config.bug_report_endpoint_url !== '' ||
-    Object.keys(config.jitsi ?? {}).length !== 0 ||
-    config.map_style_url !== '' ||
-    allUrlsLocal !== true
-  ) {
+  if (!matchesProbeConfigProjection(config) || !allUrlsLocal) {
     fail('invalid-config', 'config');
   }
   pass('config');
+}
+
+async function observeInMemoryConfig(page) {
+  const unavailable = { state: 'unavailable', matchesFixture: null };
+  try {
+    await page.waitForFunction(() => window.matrixChat != null, {
+      timeout: MAX_CONFIG_OBSERVATION_WAIT_MS,
+    });
+  } catch {
+    return unavailable;
+  }
+  try {
+    return await page.evaluate(async () => {
+      try {
+        if (typeof window.electron?.initialise !== 'function') {
+          return { state: 'unavailable', matchesFixture: null };
+        }
+        const result = await window.electron.initialise();
+        const config = result?.config;
+        if (!config || typeof config !== 'object' || Array.isArray(config)) {
+          return { state: 'unavailable', matchesFixture: null };
+        }
+        const homeserver = config.default_server_config?.['m.homeserver'];
+        const jitsi = config.jitsi;
+        return {
+          state: 'observed',
+          matchesFixture:
+            homeserver?.base_url === 'http://127.0.0.1:8008' &&
+            homeserver?.server_name === 'localhost' &&
+            config.update_base_url === null &&
+            config.disable_custom_urls === true &&
+            config.enable_client_well_known_lookups === false &&
+            config.disable_analytics === true &&
+            config.integrations_ui_url === '' &&
+            config.integrations_rest_url === '' &&
+            config.integrations_widgets_urls?.length === 0 &&
+            config.bug_report_endpoint_url === '' &&
+            Object.keys(jitsi ?? {}).length === 0 &&
+            config.map_style_url === '',
+        };
+      } catch {
+        return { state: 'unavailable', matchesFixture: null };
+      }
+    });
+  } catch {
+    return unavailable;
+  }
 }
 
 function startSecretService() {
@@ -2776,6 +2869,8 @@ async function connectAndCheckPage() {
   if (observation.requirePresent)
     fail('node-integration-visible', 'nodeIntegrationDisabled');
   pass('nodeIntegrationDisabled');
+  desktopObservation.configInMemoryObservation =
+    await observeInMemoryConfig(page);
   const rendererCount = verifyProcessCoverageAndSandbox(app.pid);
   return rendererCount;
 }

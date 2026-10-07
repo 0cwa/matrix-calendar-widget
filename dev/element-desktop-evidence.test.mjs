@@ -37,6 +37,7 @@ const checks = Object.fromEntries(
 
 function passingProbeFamily() {
   return {
+    policyState: 'verified',
     listenerBound: true,
     childResult: 'probe-reported',
     childExitStatus: 2,
@@ -97,6 +98,7 @@ function passingDesktopObservation(overrides = {}) {
       fixedOriginPageCount: 1,
     },
     pageLoadOutcome: 'domcontentloaded',
+    configInMemoryObservation: { state: 'observed', matchesFixture: true },
     ...overrides,
   };
 }
@@ -117,6 +119,15 @@ function passingUidLifecycleObservation() {
       zygote: 0,
       gpu: 0,
       utility: 0,
+      other: 0,
+      unknown: 0,
+    },
+    processRoleCounts: {
+      application: 1,
+      chromium: 1,
+      keyring: 0,
+      dbus: 0,
+      xvfb: 0,
       other: 0,
       unknown: 0,
     },
@@ -173,6 +184,15 @@ function observedEmptyUidLifecycleObservation() {
       zygote: 0,
       gpu: 0,
       utility: 0,
+      other: 0,
+      unknown: 0,
+    },
+    processRoleCounts: {
+      application: 0,
+      chromium: 0,
+      keyring: 0,
+      dbus: 0,
+      xvfb: 0,
       other: 0,
       unknown: 0,
     },
@@ -256,11 +276,19 @@ function notObservedRendererDiagnostics() {
   };
 }
 
-function observedCounters(ipv4Blocked = 0, ipv6Blocked = 0) {
-  return countersFromClasses({ other: ipv4Blocked }, { other: ipv6Blocked });
+function observedCounters(
+  ipv4Blocked = 0,
+  ipv6Blocked = 0,
+  policyState = 'verified',
+) {
+  return countersFromClasses(
+    { other: ipv4Blocked },
+    { other: ipv6Blocked },
+    policyState,
+  );
 }
 
-function countersFromClasses(ipv4 = {}, ipv6 = {}) {
+function countersFromClasses(ipv4 = {}, ipv6 = {}, policyState = 'verified') {
   const classes = (values) => ({
     udp_dns_port: 0,
     tcp_dns_port: 0,
@@ -272,6 +300,7 @@ function countersFromClasses(ipv4 = {}, ipv6 = {}) {
   const ipv6Classes = classes(ipv6);
   return {
     state: 'observed',
+    policyState,
     ipv4Blocked: Object.values(ipv4Classes).reduce(
       (total, count) => total + count,
       0,
@@ -286,9 +315,13 @@ function countersFromClasses(ipv4 = {}, ipv6 = {}) {
   };
 }
 
-function emptyCounters(state) {
+function emptyCounters(
+  state,
+  policyState = state === 'not_observed' ? 'not_observed' : 'unavailable',
+) {
   return {
     state,
+    policyState,
     ipv4Blocked: null,
     ipv6Blocked: null,
     ipv4Classes: null,
@@ -392,6 +425,7 @@ function stages(overrides = {}) {
     {
       phase: 'egress-observation',
       status: 'passed',
+      policyState: 'verified',
       ipv4Blocked: 0,
       ipv6Blocked: 0,
       ipv4Classes: observedCounters().ipv4Classes,
@@ -415,19 +449,26 @@ function stages(overrides = {}) {
         zombieCount: 0,
         unreadableProcessCount: 0,
       },
-      uidLifecycleObservation: observedEmptyUidLifecycleObservation(),
+      uidLifecycleObservationBeforeUserdel:
+        observedEmptyUidLifecycleObservation(),
+      finalUidLifecycleObservation: observedEmptyUidLifecycleObservation(),
     },
     ...(overrides.extraStages ?? []),
   ];
 }
 
-test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
+test('Desktop evidence passes with complete verified isolation and cleanup', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 12);
+  assert.equal(summary.schemaVersion, 15);
+  assert.deepEqual(summary.desktopObservation.configInMemoryObservation, {
+    state: 'observed',
+    matchesFixture: true,
+  });
   assert.equal(summary.failureCode, null);
   assert.equal(summary.checks.isolatedNodePreflight, 'passed');
   assert.equal(summary.targetUidPreflight.status, 'passed');
+  assert.equal(summary.checks.networkIsolationVerified, 'passed');
   assert.deepEqual(summary.egressBlocked, { ipv4: 0, ipv6: 0 });
   assert.equal(summary.rendererDiagnostics.sandboxReason, 'passed');
   assert.deepEqual(summary.uidEgressPhaseCounters, {
@@ -460,6 +501,7 @@ test('Desktop evidence passes only with a complete startup, deny test, zero-egre
     },
   });
   assert.deepEqual(summary.cleanupDiagnostics, {
+    policyStatus: 'passed',
     accountState: 'absent',
     userdelStatus: 'not_run',
     userdelExitStatus: null,
@@ -484,6 +526,156 @@ test('Desktop evidence passes only with a complete startup, deny test, zero-egre
   assert.deepEqual(summary.egressProbe, passingProbe());
   assert.deepEqual(summary.secretService, passingSecretService());
   assert.equal(validDesktopSummary(summary), true);
+});
+
+test('cleanup reports the deny policy retained when account removal is unproven', () => {
+  const retainedPolicy = stages();
+  retainedPolicy[4].isolatedProcesses = 'failed';
+  retainedPolicy[4].policy = 'retained';
+  retainedPolicy[4].user = 'failed';
+  retainedPolicy[4].accountState = 'uid_match';
+
+  const summary = sanitizeDesktopStages(retainedPolicy, sourceSha);
+  assert.equal(summary.status, 'failed');
+  assert.equal(summary.failureCode, 'cleanup-failed');
+  assert.equal(summary.cleanupDiagnostics.policyStatus, 'retained');
+  assert.equal(summary.checks.cleanupPolicy, 'failed');
+
+  const unjustifiedRetention = stages();
+  unjustifiedRetention[4].policy = 'retained';
+  assert.throws(
+    () => sanitizeDesktopStages(unjustifiedRetention, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
+});
+
+test('cleanup pass requires observed zero UID counts on both sides of user deletion', () => {
+  const unclearedBeforeUserdel = stages();
+  unclearedBeforeUserdel[4].uidLifecycleObservationBeforeUserdel = {
+    ...observedEmptyUidLifecycleObservation(),
+    uidProcessCount: 1,
+    nonZombieProcessCount: 1,
+    processClassCounts: {
+      ...observedEmptyUidLifecycleObservation().processClassCounts,
+      other: 1,
+    },
+    processRoleCounts: {
+      ...observedEmptyUidLifecycleObservation().processRoleCounts,
+      other: 1,
+    },
+  };
+  assert.throws(
+    () => sanitizeDesktopStages(unclearedBeforeUserdel, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
+
+  const remainingAfterUserdel = stages();
+  remainingAfterUserdel[4].finalUidLifecycleObservation = {
+    ...observedEmptyUidLifecycleObservation(),
+    state: 'partial',
+  };
+  remainingAfterUserdel[4].uidProcessObservation =
+    uidProcessObservationFromLifecycle(
+      remainingAfterUserdel[4].finalUidLifecycleObservation,
+    );
+  assert.throws(
+    () => sanitizeDesktopStages(remainingAfterUserdel, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
+});
+
+test('verified dual-stack policy passes with positive DROP counts and retains each class', () => {
+  const positiveDrops = stages();
+  const snapshot = countersFromClasses(
+    { udp_dns_port: 2, tcp_https_port: 1 },
+    { tcp_dns_port: 1, other: 1 },
+  );
+  positiveDrops[1].egressPhaseCounters = {
+    beforeApp: snapshot,
+    afterAppSpawn: snapshot,
+    afterPageLoad: snapshot,
+  };
+  positiveDrops[3] = {
+    phase: 'egress-observation',
+    status: 'passed',
+    policyState: 'verified',
+    ipv4Blocked: snapshot.ipv4Blocked,
+    ipv6Blocked: snapshot.ipv6Blocked,
+    ipv4Classes: snapshot.ipv4Classes,
+    ipv6Classes: snapshot.ipv6Classes,
+    overflow: false,
+  };
+
+  const summary = sanitizeDesktopStages(positiveDrops, sourceSha);
+  assert.equal(summary.status, 'passed');
+  assert.equal(summary.checks.networkIsolationVerified, 'passed');
+  assert.deepEqual(summary.egressBlocked, { ipv4: 3, ipv6: 2 });
+  assert.deepEqual(
+    summary.uidEgressPhaseCounters.afterAppSpawn.ipv4Classes,
+    snapshot.ipv4Classes,
+  );
+  assert.deepEqual(
+    summary.uidEgressPhaseCounters.final.ipv6Classes,
+    snapshot.ipv6Classes,
+  );
+});
+
+test('partial overflow counters remain visible but cannot verify network isolation', () => {
+  const overflow = {
+    state: 'partial',
+    policyState: 'verified',
+    ipv4Blocked: 100_000,
+    ipv6Blocked: 0,
+    ipv4Classes: {
+      udp_dns_port: 100_000,
+      tcp_dns_port: 0,
+      tcp_https_port: 0,
+      other: 0,
+    },
+    ipv6Classes: {
+      udp_dns_port: 0,
+      tcp_dns_port: 0,
+      tcp_https_port: 0,
+      other: 0,
+    },
+    overflow: true,
+  };
+  const withOverflow = stages();
+  withOverflow[1].egressPhaseCounters.afterPageLoad = overflow;
+
+  const summary = sanitizeDesktopStages(withOverflow, sourceSha);
+  assert.equal(summary.status, 'failed');
+  assert.equal(summary.checks.networkIsolationVerified, 'failed');
+  assert.equal(summary.uidEgressPhaseCounters.afterPageLoad.state, 'partial');
+  assert.equal(
+    summary.uidEgressPhaseCounters.afterPageLoad.ipv4Blocked,
+    100_000,
+  );
+});
+
+test('in-memory config evidence exposes only a fixed match result and remains diagnostic', () => {
+  const unavailableConfig = stages();
+  unavailableConfig[1].desktopObservation.configInMemoryObservation = {
+    state: 'unavailable',
+    matchesFixture: null,
+  };
+  const summary = sanitizeDesktopStages(unavailableConfig, sourceSha);
+  assert.equal(summary.status, 'passed');
+  assert.deepEqual(summary.desktopObservation.configInMemoryObservation, {
+    state: 'unavailable',
+    matchesFixture: null,
+  });
+
+  const privateConfig = stages();
+  privateConfig[1].desktopObservation.configInMemoryObservation = {
+    state: 'observed',
+    matchesFixture: true,
+    sessionId: 'private-session-canary',
+  };
+  assert.throws(
+    () => sanitizeDesktopStages(privateConfig, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
 });
 
 test('trusted sandbox resolution uses root-bound CDP identity when argv misses a renderer', () => {
@@ -1045,6 +1237,16 @@ test('UID lifecycle sanitizer rejects contradictory process and renderer counts'
   assert.deepEqual(
     sanitizeUidLifecycleObservation({
       ...observed,
+      processRoleCounts: {
+        ...observed.processRoleCounts,
+        other: 1,
+      },
+    }),
+    unavailable,
+  );
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation({
+      ...observed,
       rendererOwnership: {
         ...observed.rendererOwnership,
         rendererCount: 0,
@@ -1161,10 +1363,11 @@ test('egress counter sanitizer preserves only fixed classes and honest overflow'
       ...observed,
       ipv4Classes: { other: 2, numericPort: 443 },
     }),
-    emptyCounters('unavailable'),
+    emptyCounters('unavailable', 'verified'),
   );
   const overflow = {
     state: 'partial',
+    policyState: 'verified',
     ipv4Blocked: 100_000,
     ipv6Blocked: 0,
     ipv4Classes: {
@@ -1194,16 +1397,17 @@ test('egress counter sanitizer preserves only fixed classes and honest overflow'
   };
   assert.deepEqual(
     sanitizeEgressCounterObservation(mixedFamilyOverflow),
-    emptyCounters('unavailable'),
+    emptyCounters('unavailable', 'verified'),
   );
 });
 
-test('phase egress and cleanup diagnostics remain separate from final acceptance gates', () => {
+test('unavailable phase snapshots prevent a network-isolation pass', () => {
   const withUnavailableSnapshots = stages();
   withUnavailableSnapshots[1].egressPhaseCounters = {
     beforeApp: observedCounters(),
     afterAppSpawn: {
       state: 'unavailable',
+      policyState: 'unavailable',
       ipv4Blocked: null,
       ipv6Blocked: null,
       ipv4Classes: null,
@@ -1212,6 +1416,7 @@ test('phase egress and cleanup diagnostics remain separate from final acceptance
     },
     afterPageLoad: {
       state: 'unavailable',
+      policyState: 'unavailable',
       ipv4Blocked: null,
       ipv6Blocked: null,
       ipv4Classes: null,
@@ -1226,17 +1431,17 @@ test('phase egress and cleanup diagnostics remain separate from final acceptance
   };
   withUnavailableSnapshots[4].accountState = 'absent';
   withUnavailableSnapshots[4].userdelStatus = 'not_run';
-  withUnavailableSnapshots[4].uidLifecycleObservation = {
-    ...observedEmptyUidLifecycleObservation(),
-    state: 'partial',
-  };
+  withUnavailableSnapshots[4].uidLifecycleObservationBeforeUserdel =
+    observedEmptyUidLifecycleObservation();
+  withUnavailableSnapshots[4].finalUidLifecycleObservation =
+    observedEmptyUidLifecycleObservation();
   withUnavailableSnapshots[4].uidProcessObservation =
     uidProcessObservationFromLifecycle(
-      withUnavailableSnapshots[4].uidLifecycleObservation,
+      withUnavailableSnapshots[4].finalUidLifecycleObservation,
     );
   const summary = sanitizeDesktopStages(withUnavailableSnapshots, sourceSha);
 
-  assert.equal(summary.status, 'passed');
+  assert.equal(summary.status, 'failed');
   assert.equal(
     summary.uidEgressPhaseCounters.afterPageLoad.state,
     'unavailable',
@@ -1244,17 +1449,10 @@ test('phase egress and cleanup diagnostics remain separate from final acceptance
   assert.deepEqual(summary.uidEgressPhaseCounters.final, observedCounters());
   assert.equal(
     summary.cleanupDiagnostics.uidProcessObservation.state,
-    'partial',
+    'observed',
   );
-  assert.equal(summary.checks.zeroBlockedEgress, 'passed');
-
-  const nonzeroFinalCounters = stages();
-  nonzeroFinalCounters[3].ipv4Blocked = 1;
-  nonzeroFinalCounters[3].ipv4Classes = observedCounters(1).ipv4Classes;
-  const failed = sanitizeDesktopStages(nonzeroFinalCounters, sourceSha);
-  assert.equal(failed.status, 'failed');
-  assert.equal(failed.failureCode, 'blocked-egress');
-  assert.equal(failed.uidEgressPhaseCounters.final.ipv4Blocked, 1);
+  assert.equal(summary.checks.networkIsolationVerified, 'failed');
+  assert.equal(summary.failureCode, 'network-isolation-unverified');
 });
 
 test('egress phase deltas preserve fixed classes and go unavailable on decrease or malformed totals', () => {
@@ -1265,7 +1463,7 @@ test('egress phase deltas preserve fixed classes and go unavailable on decrease 
     afterPageLoad: countersFromClasses({ udp_dns_port: 2, other: 3 }),
   };
   const summary = sanitizeDesktopStages(phased, sourceSha);
-  assert.equal(summary.status, 'passed');
+  assert.equal(summary.status, 'failed');
   assert.deepEqual(summary.uidEgressPhaseDeltas.beforeAppToAfterAppSpawn, {
     state: 'observed',
     ipv4Blocked: 2,
@@ -1286,6 +1484,7 @@ test('egress phase deltas preserve fixed classes and go unavailable on decrease 
     summary.uidEgressPhaseDeltas.afterPageLoadToFinal.state,
     'unavailable',
   );
+  assert.equal(summary.checks.networkIsolationVerified, 'failed');
 
   const malformed = stages();
   malformed[1].egressPhaseCounters.afterAppSpawn = {
@@ -1298,20 +1497,18 @@ test('egress phase deltas preserve fixed classes and go unavailable on decrease 
   );
 });
 
-test('Desktop evidence fails closed on blocked egress and rejects private-shaped fields', () => {
+test('zero counters cannot hide a missing dual-stack policy snapshot', () => {
   const blocked = stages();
-  blocked[3] = {
-    phase: 'egress-observation',
-    status: 'passed',
-    ipv4Blocked: 1,
-    ipv6Blocked: 0,
-    ipv4Classes: observedCounters(1).ipv4Classes,
-    ipv6Classes: observedCounters().ipv6Classes,
-    overflow: false,
-  };
+  blocked[1].egressPhaseCounters.afterAppSpawn = observedCounters(
+    0,
+    0,
+    'mismatch',
+  );
   const summary = sanitizeDesktopStages(blocked, sourceSha);
   assert.equal(summary.status, 'failed');
-  assert.equal(summary.failureCode, 'blocked-egress');
+  assert.equal(summary.failureCode, 'network-isolation-unverified');
+  assert.equal(summary.egressBlocked.ipv4, 0);
+  assert.equal(summary.checks.networkIsolationVerified, 'failed');
 
   const failedProbe = stages();
   failedProbe[2].status = 'failed';
@@ -1386,11 +1583,12 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
 
   const failedAccountCleanup = stages();
   failedAccountCleanup[4].isolatedProcesses = 'failed';
+  failedAccountCleanup[4].policy = 'retained';
   failedAccountCleanup[4].user = 'failed';
   failedAccountCleanup[4].accountState = 'uid_match';
   failedAccountCleanup[4].userdelStatus = 'failed';
   failedAccountCleanup[4].userdelExitStatus = 8;
-  failedAccountCleanup[4].uidLifecycleObservation = {
+  const remainingUidProcesses = {
     ...observedEmptyUidLifecycleObservation(),
     state: 'observed',
     overflow: false,
@@ -1408,10 +1606,22 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
       other: 1,
       unknown: 0,
     },
+    processRoleCounts: {
+      application: 0,
+      chromium: 1,
+      keyring: 0,
+      dbus: 0,
+      xvfb: 0,
+      other: 1,
+      unknown: 0,
+    },
   };
+  failedAccountCleanup[4].uidLifecycleObservationBeforeUserdel =
+    remainingUidProcesses;
+  failedAccountCleanup[4].finalUidLifecycleObservation = remainingUidProcesses;
   failedAccountCleanup[4].uidProcessObservation =
     uidProcessObservationFromLifecycle(
-      failedAccountCleanup[4].uidLifecycleObservation,
+      failedAccountCleanup[4].finalUidLifecycleObservation,
     );
   const failedAccountSummary = sanitizeDesktopStages(
     failedAccountCleanup,
@@ -1420,6 +1630,7 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
   assert.equal(failedAccountSummary.status, 'failed');
   assert.equal(failedAccountSummary.failureCode, 'cleanup-failed');
   assert.deepEqual(failedAccountSummary.cleanupDiagnostics, {
+    policyStatus: 'retained',
     accountState: 'uid_match',
     userdelStatus: 'failed',
     userdelExitStatus: 8,

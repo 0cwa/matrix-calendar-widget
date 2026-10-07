@@ -114,6 +114,19 @@ aliases, configuration, logs, or topology in repository artifacts.
    versions. This proves only the tested local stack; it does not establish
    compatibility with a team host. A production rollout needs a separate
    explicit gate after this acceptance is complete.
+
+   The Desktop startup harness must prove its exact dual-stack OUTPUT policy
+   for packets emitted by the isolated Desktop UID at each counter snapshot
+   and pass its loopback deny probes. Every snapshot must be complete and
+   non-overflowing. Report blocked DROP counts and fixed protocol classes even
+   when attempts occur; a DROP count is evidence of denied traffic, not
+   successful external egress or attribution to a particular process or
+   request. Trusted controller loopback operations and fixture services are
+   scoped separately. This harness does not measure all runner traffic or
+   claim that the client made no network attempts. Missing or changed policy
+   rules, unavailable counters, or partial counters fail the
+   `networkIsolationVerified` gate.
+
 3. **Authorization and stale-write behavior.** Exercise two independent
    Matrix identities: an authorized actor succeeds, and a second actor is
    denied for an unauthorized room operation before service-principal proof

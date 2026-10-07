@@ -45,6 +45,12 @@ const COUNTER_OBSERVATION_STATES = new Set([
   'partial',
   'observed',
 ]);
+const COUNTER_POLICY_STATES = new Set([
+  'not_observed',
+  'verified',
+  'mismatch',
+  'unavailable',
+]);
 const EGRESS_DROP_COUNTER_CLASSES = Object.freeze([
   'udp_dns_port',
   'tcp_dns_port',
@@ -76,6 +82,15 @@ const UID_LIFECYCLE_PROCESS_CLASSES = Object.freeze([
   'zygote',
   'gpu',
   'utility',
+  'other',
+  'unknown',
+]);
+const UID_LIFECYCLE_PROCESS_ROLES = Object.freeze([
+  'application',
+  'chromium',
+  'keyring',
+  'dbus',
+  'xvfb',
   'other',
   'unknown',
 ]);
@@ -258,6 +273,11 @@ const DESKTOP_PAGE_LOAD_OUTCOMES = new Set([
   'domcontentloaded-timeout',
   'domcontentloaded-failed',
 ]);
+const CONFIG_IN_MEMORY_STATES = new Set([
+  'not_observed',
+  'unavailable',
+  'observed',
+]);
 const PROBE_STDERR_CLASSES = new Set([
   'empty',
   'missing-import',
@@ -304,13 +324,18 @@ function validateCounterObservation(value) {
   if (
     !hasKeys(value, [
       'state',
+      'policyState',
       'ipv4Blocked',
       'ipv6Blocked',
       'ipv4Classes',
       'ipv6Classes',
       'overflow',
     ]) ||
-    !COUNTER_OBSERVATION_STATES.has(value.state)
+    !COUNTER_OBSERVATION_STATES.has(value.state) ||
+    !COUNTER_POLICY_STATES.has(value.policyState) ||
+    (value.state === 'not_observed'
+      ? value.policyState !== 'not_observed'
+      : value.policyState === 'not_observed')
   ) {
     return false;
   }
@@ -370,18 +395,25 @@ function validateEgressPhaseCounters(value) {
 }
 
 export function sanitizeEgressCounterObservation(input) {
-  const unavailable = emptyCounterObservation('unavailable');
   let value = input;
   if (typeof input === 'string') {
     try {
       value = JSON.parse(input);
     } catch {
-      return unavailable;
+      return emptyCounterObservation('unavailable');
     }
   }
-  if (!validateCounterObservation(value)) return unavailable;
+  if (!validateCounterObservation(value)) {
+    const policyState =
+      COUNTER_POLICY_STATES.has(value?.policyState) &&
+      value.policyState !== 'not_observed'
+        ? value.policyState
+        : 'unavailable';
+    return emptyCounterObservation('unavailable', policyState);
+  }
   return {
     state: value.state,
+    policyState: value.policyState,
     ipv4Blocked: value.ipv4Blocked,
     ipv6Blocked: value.ipv6Blocked,
     ipv4Classes:
@@ -664,9 +696,13 @@ function emptyRendererDiagnostics() {
   };
 }
 
-function emptyCounterObservation(state = 'not_observed') {
+function emptyCounterObservation(
+  state = 'not_observed',
+  policyState = state === 'not_observed' ? 'not_observed' : 'unavailable',
+) {
   return {
     state,
+    policyState,
     ipv4Blocked: null,
     ipv6Blocked: null,
     ipv4Classes: null,
@@ -722,6 +758,7 @@ export function emptyUidLifecycleObservation(state = 'not_observed') {
     unreadableProcessCount: null,
     unattributedProcessCount: null,
     processClassCounts: null,
+    processRoleCounts: null,
     rendererOwnership: {
       state: rendererState,
       appIdentityState: unavailable ? 'unavailable' : rendererState,
@@ -866,6 +903,7 @@ function validateUidLifecycleObservation(value) {
       'unreadableProcessCount',
       'unattributedProcessCount',
       'processClassCounts',
+      'processRoleCounts',
       'rendererOwnership',
       'cdpRendererObservation',
       'seccompState',
@@ -913,6 +951,7 @@ function validateUidLifecycleObservation(value) {
       value.unreadableProcessCount === expected.unreadableProcessCount &&
       value.unattributedProcessCount === expected.unattributedProcessCount &&
       value.processClassCounts === expected.processClassCounts &&
+      value.processRoleCounts === expected.processRoleCounts &&
       ownership.state === expected.rendererOwnership.state &&
       ownership.appIdentityState ===
         expected.rendererOwnership.appIdentityState &&
@@ -944,8 +983,12 @@ function validateUidLifecycleObservation(value) {
     !diagnosticCount(value.unreadableProcessCount) ||
     !diagnosticCount(value.unattributedProcessCount) ||
     !hasKeys(value.processClassCounts, UID_LIFECYCLE_PROCESS_CLASSES) ||
+    !hasKeys(value.processRoleCounts, UID_LIFECYCLE_PROCESS_ROLES) ||
     UID_LIFECYCLE_PROCESS_CLASSES.some(
       (name) => !diagnosticCount(value.processClassCounts[name]),
+    ) ||
+    UID_LIFECYCLE_PROCESS_ROLES.some(
+      (name) => !diagnosticCount(value.processRoleCounts[name]),
     )
   ) {
     return false;
@@ -955,6 +998,10 @@ function validateUidLifecycleObservation(value) {
     (total, name) => total + value.processClassCounts[name],
     0,
   );
+  const roleCountTotal = UID_LIFECYCLE_PROCESS_ROLES.reduce(
+    (total, name) => total + value.processRoleCounts[name],
+    0,
+  );
   if (
     value.nonZombieProcessCount > value.uidProcessCount ||
     value.zombieCount > value.uidProcessCount ||
@@ -962,10 +1009,14 @@ function validateUidLifecycleObservation(value) {
     UID_LIFECYCLE_PROCESS_CLASSES.some(
       (name) => value.processClassCounts[name] > value.uidProcessCount,
     ) ||
+    UID_LIFECYCLE_PROCESS_ROLES.some(
+      (name) => value.processRoleCounts[name] > value.uidProcessCount,
+    ) ||
     (!value.overflow &&
       (value.nonZombieProcessCount + value.zombieCount >
         value.uidProcessCount ||
-        classCountTotal !== value.uidProcessCount)) ||
+        classCountTotal !== value.uidProcessCount ||
+        roleCountTotal !== value.uidProcessCount)) ||
     (value.state === 'observed' &&
       (value.overflow ||
         value.nonZombieProcessCount + value.zombieCount !==
@@ -1098,6 +1149,15 @@ export function sanitizeUidLifecycleObservation(input) {
             UID_LIFECYCLE_PROCESS_CLASSES.map((name) => [
               name,
               value.processClassCounts[name],
+            ]),
+          ),
+    processRoleCounts:
+      value.processRoleCounts === null
+        ? null
+        : Object.fromEntries(
+            UID_LIFECYCLE_PROCESS_ROLES.map((name) => [
+              name,
+              value.processRoleCounts[name],
             ]),
           ),
     rendererOwnership: {
@@ -1332,6 +1392,7 @@ function validateDesktopObservation(value) {
       'childSpawnErrorClass',
       'cdp',
       'pageLoadOutcome',
+      'configInMemoryObservation',
     ]) ||
     !DESKTOP_CHILD_STATES.has(value.childState) ||
     ![null, ...PROBE_SIGNALS].includes(value.childSignal) ||
@@ -1342,6 +1403,11 @@ function validateDesktopObservation(value) {
     (value.childSpawnErrorClass !== null &&
       !DESKTOP_CHILD_SPAWN_ERRORS.has(value.childSpawnErrorClass)) ||
     !DESKTOP_PAGE_LOAD_OUTCOMES.has(value.pageLoadOutcome) ||
+    !hasKeys(value.configInMemoryObservation, ['state', 'matchesFixture']) ||
+    !CONFIG_IN_MEMORY_STATES.has(value.configInMemoryObservation.state) ||
+    (value.configInMemoryObservation.state === 'observed'
+      ? typeof value.configInMemoryObservation.matchesFixture !== 'boolean'
+      : value.configInMemoryObservation.matchesFixture !== null) ||
     !hasKeys(value.cdp, [
       'versionResponseCount',
       'versionOkResponseCount',
@@ -1682,7 +1748,11 @@ function validatePositiveScriptProbe(value) {
   ) {
     return false;
   }
-  return validateProbeFamily({ ...value, dropCount: null });
+  return validateProbeFamily({
+    ...value,
+    dropCount: null,
+    policyState: 'not_observed',
+  });
 }
 
 function positiveScriptProbePassed(value) {
@@ -1895,6 +1965,7 @@ function validateProbeFamily(value) {
       'connectionOutcome',
       'listenerAcceptedCount',
       'dropCount',
+      'policyState',
     ]) ||
     !PROBE_CHILD_RESULTS.has(value.childResult) ||
     (value.childExitStatus !== null &&
@@ -1910,6 +1981,7 @@ function validateProbeFamily(value) {
     ![null, true, false].includes(value.probeUidMatches) ||
     typeof value.connectAttempted !== 'boolean' ||
     !PROBE_OUTCOMES.has(value.connectionOutcome) ||
+    !COUNTER_POLICY_STATES.has(value.policyState) ||
     (value.listenerAcceptedCount !== null &&
       (!Number.isSafeInteger(value.listenerAcceptedCount) ||
         value.listenerAcceptedCount < 0 ||
@@ -2013,6 +2085,7 @@ function validateProbeFamily(value) {
 
 function probeFamilyPassed(value) {
   return (
+    value.policyState === 'verified' &&
     value.listenerBound === true &&
     value.childResult === 'probe-reported' &&
     value.probeMarkerPresent === true &&
@@ -2045,6 +2118,7 @@ function validateObservation(record) {
     hasKeys(record, [
       'phase',
       'status',
+      'policyState',
       'ipv4Blocked',
       'ipv6Blocked',
       'ipv4Classes',
@@ -2053,9 +2127,12 @@ function validateObservation(record) {
     ]) &&
     record.phase === 'egress-observation' &&
     ['passed', 'failed'].includes(record.status) &&
+    COUNTER_POLICY_STATES.has(record.policyState) &&
+    record.policyState !== 'not_observed' &&
     (record.status === 'passed'
       ? validateCounterObservation({
           state: record.overflow ? 'partial' : 'observed',
+          policyState: record.policyState,
           ipv4Blocked: record.ipv4Blocked,
           ipv6Blocked: record.ipv6Blocked,
           ipv4Classes: record.ipv4Classes,
@@ -2086,12 +2163,14 @@ function validateCleanup(record) {
       'userdelStatus',
       'userdelExitStatus',
       'uidProcessObservation',
-      'uidLifecycleObservation',
+      'uidLifecycleObservationBeforeUserdel',
+      'finalUidLifecycleObservation',
     ]) &&
     record.phase === 'cleanup' &&
-    ['isolatedProcesses', 'policy', 'user', 'profile', 'aptSource'].every(
-      (name) => ['passed', 'failed', 'not_run'].includes(record[name]),
+    ['isolatedProcesses', 'user', 'profile', 'aptSource'].every((name) =>
+      ['passed', 'failed', 'not_run'].includes(record[name]),
     ) &&
+    ['passed', 'failed', 'not_run', 'retained'].includes(record.policy) &&
     [
       'not_observed',
       'unavailable',
@@ -2110,12 +2189,15 @@ function validateCleanup(record) {
         ? record.userdelExitStatus !== null && record.userdelExitStatus !== 0
         : record.userdelExitStatus === null) &&
     validateUidProcessObservation(record.uidProcessObservation) &&
-    validateUidLifecycleObservation(record.uidLifecycleObservation) &&
+    validateUidLifecycleObservation(
+      record.uidLifecycleObservationBeforeUserdel,
+    ) &&
+    validateUidLifecycleObservation(record.finalUidLifecycleObservation) &&
     (() => {
       const projected = uidProcessObservationFromLifecycle(
-        record.uidLifecycleObservation,
+        record.finalUidLifecycleObservation,
       );
-      return (
+      const projectionMatches =
         record.uidProcessObservation.state === projected.state &&
         record.uidProcessObservation.uidProcessCount ===
           projected.uidProcessCount &&
@@ -2123,7 +2205,21 @@ function validateCleanup(record) {
           projected.nonZombieProcessCount &&
         record.uidProcessObservation.zombieCount === projected.zombieCount &&
         record.uidProcessObservation.unreadableProcessCount ===
-          projected.unreadableProcessCount
+          projected.unreadableProcessCount;
+      const finalCleanupProven =
+        record.uidLifecycleObservationBeforeUserdel.state === 'observed' &&
+        record.uidLifecycleObservationBeforeUserdel.uidProcessCount === 0 &&
+        record.finalUidLifecycleObservation.state === 'observed' &&
+        record.finalUidLifecycleObservation.uidProcessCount === 0 &&
+        record.accountState === 'absent';
+      return (
+        projectionMatches &&
+        (record.policy !== 'passed' ||
+          (record.isolatedProcesses === 'passed' && finalCleanupProven)) &&
+        (record.policy !== 'retained' ||
+          record.isolatedProcesses === 'failed') &&
+        (record.isolatedProcesses !== 'passed' || finalCleanupProven) &&
+        (record.user !== 'passed' || record.accountState === 'absent')
       );
     })()
   );
@@ -2183,6 +2279,39 @@ function counterDelta(before, after) {
       ]),
     ),
   };
+}
+
+function completeVerifiedCounterObservation(value) {
+  return (
+    validateCounterObservation(value) &&
+    value.state === 'observed' &&
+    value.overflow === false &&
+    value.policyState === 'verified'
+  );
+}
+
+function networkIsolationEvidencePassed(
+  policy,
+  startup,
+  observation,
+  phaseDeltas,
+) {
+  return (
+    policy?.status === 'passed' &&
+    policy.negativeTest === 'passed' &&
+    policy.diagnostic?.passed === true &&
+    startup !== undefined &&
+    ['beforeApp', 'afterAppSpawn', 'afterPageLoad'].every((phase) =>
+      completeVerifiedCounterObservation(startup.egressPhaseCounters[phase]),
+    ) &&
+    phaseDeltas !== undefined &&
+    Object.values(phaseDeltas).every((delta) => delta.state === 'observed') &&
+    observation?.status === 'passed' &&
+    observation.overflow === false &&
+    observation.policyState === 'verified' &&
+    count(observation.ipv4Blocked) &&
+    count(observation.ipv6Blocked)
+  );
 }
 
 function validateEgressPhaseDelta(value) {
@@ -2247,7 +2376,7 @@ function defaultChecks() {
       'isolatedNodePreflight',
       'egressPolicy',
       'negativeEgress',
-      'zeroBlockedEgress',
+      'networkIsolationVerified',
       'cleanupIsolatedProcesses',
       'cleanupPolicy',
       'cleanupUser',
@@ -2276,6 +2405,10 @@ function emptyDesktopObservation() {
       fixedOriginPageCount: null,
     },
     pageLoadOutcome: 'not-attempted',
+    configInMemoryObservation: {
+      state: 'not_observed',
+      matchesFixture: null,
+    },
   };
 }
 
@@ -2340,13 +2473,14 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : observation.status === 'passed'
           ? {
               state: observation.overflow ? 'partial' : 'observed',
+              policyState: observation.policyState,
               ipv4Blocked: observation.ipv4Blocked,
               ipv6Blocked: observation.ipv6Blocked,
               ipv4Classes: observation.ipv4Classes,
               ipv6Classes: observation.ipv6Classes,
               overflow: observation.overflow,
             }
-          : emptyCounterObservation('unavailable'),
+          : emptyCounterObservation('unavailable', observation.policyState),
   };
   const uidEgressPhaseDeltas = {
     beforeAppToAfterAppSpawn: counterDelta(
@@ -2364,6 +2498,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
   };
   const cleanupDiagnostics = cleanup
     ? {
+        policyStatus: cleanup.policy,
         accountState: cleanup.accountState,
         userdelStatus: cleanup.userdelStatus,
         userdelExitStatus: cleanup.userdelExitStatus,
@@ -2379,17 +2514,20 @@ export function sanitizeDesktopStages(records, sourceSha) {
     checks.egressPolicy = policy.status;
     checks.negativeEgress = policy.negativeTest;
   }
-  if (observation?.status === 'passed') {
-    checks.zeroBlockedEgress =
-      observation.ipv4Blocked === 0 && observation.ipv6Blocked === 0
-        ? 'passed'
-        : 'failed';
-  } else if (observation?.status === 'failed') {
-    checks.zeroBlockedEgress = 'failed';
+  if (startup && policy && observation) {
+    checks.networkIsolationVerified = networkIsolationEvidencePassed(
+      policy,
+      startup,
+      observation,
+      uidEgressPhaseDeltas,
+    )
+      ? 'passed'
+      : 'failed';
   }
   if (cleanup) {
     checks.cleanupIsolatedProcesses = cleanup.isolatedProcesses;
-    checks.cleanupPolicy = cleanup.policy;
+    checks.cleanupPolicy =
+      cleanup.policy === 'retained' ? 'failed' : cleanup.policy;
     checks.cleanupUser = cleanup.user;
     checks.cleanupProfile = cleanup.profile;
     checks.cleanupAptSource = cleanup.aptSource;
@@ -2400,9 +2538,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
     startup?.status === 'passed' &&
     policy?.status === 'passed' &&
     policy.negativeTest === 'passed' &&
-    observation?.status === 'passed' &&
-    observation.ipv4Blocked === 0 &&
-    observation.ipv6Blocked === 0 &&
+    checks.networkIsolationVerified === 'passed' &&
     cleanup !== undefined &&
     ['isolatedProcesses', 'policy', 'user', 'profile', 'aptSource'].every(
       (name) => cleanup[name] === 'passed',
@@ -2415,20 +2551,19 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : null) ??
       setFailure(startup, 'startup-observation-missing') ??
       (policy?.status === 'failed' ? 'egress-policy-failed' : null) ??
-      (observation?.status === 'failed' ||
-      (observation?.ipv4Blocked ?? 0) > 0 ||
-      (observation?.ipv6Blocked ?? 0) > 0
-        ? 'blocked-egress'
+      (checks.networkIsolationVerified === 'failed'
+        ? 'network-isolation-unverified'
         : null) ??
       (cleanup &&
-      ['isolatedProcesses', 'policy', 'user', 'profile', 'aptSource'].some(
-        (name) => cleanup[name] === 'failed',
-      )
+      (cleanup.policy === 'retained' ||
+        ['isolatedProcesses', 'policy', 'user', 'profile', 'aptSource'].some(
+          (name) => cleanup[name] === 'failed',
+        ))
         ? 'cleanup-failed'
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 12,
+    schemaVersion: 15,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -2482,7 +2617,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         startup?.uidLifecycleDiagnostics.afterPageLoad ??
         emptyUidLifecycleObservation('not_observed'),
       beforeUserdel:
-        cleanup?.uidLifecycleObservation ??
+        cleanup?.uidLifecycleObservationBeforeUserdel ??
         emptyUidLifecycleObservation('not_observed'),
     },
     uidTcpSocketDiagnostics: {
@@ -2531,16 +2666,16 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 12 &&
+    value.schemaVersion === 15 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
       [
-        'blocked-egress',
         'cleanup-failed',
         'egress-policy-failed',
         'evidence-incomplete',
         'isolated-node-preflight-failed',
+        'network-isolation-unverified',
         'startup-observation-missing',
         ...STARTUP_FAILURES,
       ].includes(value.failureCode)) &&
@@ -2608,13 +2743,34 @@ export function validDesktopSummary(value) {
     }) &&
     validateCounterObservation(value.uidEgressPhaseCounters?.final) &&
     validateEgressPhaseDeltas(value.uidEgressPhaseDeltas) &&
+    (value.checks?.networkIsolationVerified !== 'passed' ||
+      (value.checks.egressPolicy === 'passed' &&
+        value.checks.negativeEgress === 'passed' &&
+        value.egressProbe?.passed === true &&
+        [
+          value.uidEgressPhaseCounters.beforeApp,
+          value.uidEgressPhaseCounters.afterAppSpawn,
+          value.uidEgressPhaseCounters.afterPageLoad,
+          value.uidEgressPhaseCounters.final,
+        ].every(completeVerifiedCounterObservation) &&
+        Object.values(value.uidEgressPhaseDeltas).every(
+          (delta) => delta.state === 'observed',
+        ) &&
+        value.egressBlocked.ipv4 ===
+          value.uidEgressPhaseCounters.final.ipv4Blocked &&
+        value.egressBlocked.ipv6 ===
+          value.uidEgressPhaseCounters.final.ipv6Blocked)) &&
     (value.cleanupDiagnostics === null ||
       (hasKeys(value.cleanupDiagnostics, [
+        'policyStatus',
         'accountState',
         'userdelStatus',
         'userdelExitStatus',
         'uidProcessObservation',
       ]) &&
+        ['passed', 'failed', 'not_run', 'retained'].includes(
+          value.cleanupDiagnostics.policyStatus,
+        ) &&
         [
           'not_observed',
           'unavailable',
@@ -2638,6 +2794,19 @@ export function validDesktopSummary(value) {
         validateUidProcessObservation(
           value.cleanupDiagnostics.uidProcessObservation,
         ))) &&
+    (value.cleanupDiagnostics === null
+      ? value.checks?.cleanupPolicy === 'not_run'
+      : value.checks?.cleanupPolicy ===
+        (value.cleanupDiagnostics.policyStatus === 'passed'
+          ? 'passed'
+          : value.cleanupDiagnostics.policyStatus === 'not_run'
+            ? 'not_run'
+            : 'failed')) &&
+    (value.checks?.cleanupIsolatedProcesses !== 'passed' ||
+      (value.cleanupDiagnostics?.accountState === 'absent' &&
+        value.cleanupDiagnostics.uidProcessObservation.state === 'observed' &&
+        value.cleanupDiagnostics.uidProcessObservation.uidProcessCount ===
+          0)) &&
     (value.targetUidPreflight === null ||
       validateTargetUidPreflight(value.targetUidPreflight)) &&
     value.checks?.isolatedNodePreflight ===
@@ -2660,7 +2829,7 @@ export function validDesktopSummary(value) {
       'isolatedNodePreflight',
       'egressPolicy',
       'negativeEgress',
-      'zeroBlockedEgress',
+      'networkIsolationVerified',
       'cleanupIsolatedProcesses',
       'cleanupPolicy',
       'cleanupUser',
@@ -2679,11 +2848,9 @@ export function validDesktopSummary(value) {
         value.rendererCount !== null &&
         value.runtime.electron !== null &&
         value.runtime.chromium !== null &&
-        value.egressBlocked.ipv4 === 0 &&
-        value.egressBlocked.ipv6 === 0 &&
+        value.checks.networkIsolationVerified === 'passed' &&
         value.uidEgressPhaseCounters.final.state === 'observed' &&
-        value.uidEgressPhaseCounters.final.ipv4Blocked === 0 &&
-        value.uidEgressPhaseCounters.final.ipv6Blocked === 0 &&
+        value.uidEgressPhaseCounters.final.policyState === 'verified' &&
         value.cleanupDiagnostics !== null
       : value.failureCode !== null)
   );

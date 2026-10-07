@@ -24,6 +24,7 @@ import {
   RUNTIME_FACTS_SOURCE,
   runtimeFactsFromSpawn,
   stagedE2ePackagePath,
+  verifyPolicySnapshot,
 } from './element-desktop-egress-policy.mjs';
 import {
   acknowledgedEgressCounterObservation,
@@ -32,6 +33,7 @@ import {
 
 function passingFamily() {
   return {
+    policyState: 'verified',
     listenerBound: true,
     childResult: 'probe-reported',
     childExitStatus: 2,
@@ -86,17 +88,17 @@ test('desktop egress permits only the fixture homeserver and loopback CDP ports'
       '-m',
       'conntrack',
       '--ctstate',
-      'ESTABLISHED,RELATED',
+      'RELATED,ESTABLISHED',
       '-j',
       'ACCEPT',
     ],
     [
+      '-d',
+      '127.0.0.1/32',
       '-o',
       'lo',
       '-p',
       'tcp',
-      '-d',
-      '127.0.0.1/32',
       '-m',
       'multiport',
       '--dports',
@@ -112,7 +114,7 @@ test('desktop egress permits only the fixture homeserver and loopback CDP ports'
   assert.deepEqual(ipv4.chainRules.slice(0, 2), acceptedRules);
   assert.deepEqual(ipv6.chainRules.slice(0, 2), [
     acceptedRules[0],
-    [...acceptedRules[1].slice(0, 5), '::1/128', ...acceptedRules[1].slice(6)],
+    acceptedRules[1].map((token, index) => (index === 1 ? '::1/128' : token)),
   ]);
   for (const family of [ipv4, ipv6]) {
     assert.deepEqual(
@@ -121,6 +123,100 @@ test('desktop egress permits only the fixture homeserver and loopback CDP ports'
     );
     assert.ok(
       family.chainRules.slice(2).every((rule) => rule.at(-1) === 'DROP'),
+    );
+  }
+});
+
+test('policy verifier requires the exact first OUTPUT hook and ordered chain rules', () => {
+  const [ipv4, ipv6] = policySpec(42_420, '7315', 9_223);
+  const output = (family) =>
+    `-P OUTPUT ACCEPT\n-A OUTPUT ${family.hook.join(' ')}`;
+  const chain = (family) =>
+    [
+      `-N ${family.chain}`,
+      ...family.chainRules.map(
+        (rule) => `-A ${family.chain} ${rule.join(' ')}`,
+      ),
+    ].join('\n');
+
+  for (const family of [ipv4, ipv6]) {
+    const destination = family.name === 'ipv4' ? '127.0.0.1/32' : '::1/128';
+    const noncanonicalStateOrderRules = family.chainRules.map((rule, index) =>
+      index === 0
+        ? rule.map((token) =>
+            token === 'RELATED,ESTABLISHED' ? 'ESTABLISHED,RELATED' : token,
+          )
+        : rule,
+    );
+    const reorderedStateSnapshot = [
+      `-N ${family.chain}`,
+      ...noncanonicalStateOrderRules.map(
+        (rule) => `-A ${family.chain} ${rule.join(' ')}`,
+      ),
+    ].join('\n');
+    assert.equal(
+      verifyPolicySnapshot(family, output(family), reorderedStateSnapshot),
+      false,
+    );
+
+    const canonicalDestinationRule = [
+      '-d',
+      destination,
+      '-o',
+      'lo',
+      '-p',
+      'tcp',
+      '-m',
+      'multiport',
+      '--dports',
+      '8008,9223',
+      '-m',
+      'conntrack',
+      '--ctstate',
+      'NEW',
+      '-j',
+      'ACCEPT',
+    ];
+    assert.equal(
+      verifyPolicySnapshot(family, output(family), chain(family)),
+      true,
+    );
+    assert.deepEqual(family.chainRules[1], canonicalDestinationRule);
+    const previousNoncanonicalOrder = family.chainRules.map((rule, index) =>
+      index === 1
+        ? ['-o', 'lo', '-p', 'tcp', '-d', destination, ...rule.slice(6)]
+        : rule,
+    );
+    const noncanonicalSnapshot = [
+      `-N ${family.chain}`,
+      ...previousNoncanonicalOrder.map(
+        (rule) => `-A ${family.chain} ${rule.join(' ')}`,
+      ),
+    ].join('\n');
+    assert.equal(
+      verifyPolicySnapshot(family, output(family), noncanonicalSnapshot),
+      false,
+    );
+    assert.equal(
+      verifyPolicySnapshot(
+        family,
+        `-P OUTPUT ACCEPT\n-A OUTPUT -j ACCEPT\n${output(family).split('\n')[1]}`,
+        chain(family),
+      ),
+      false,
+    );
+    assert.equal(
+      verifyPolicySnapshot(
+        family,
+        `-P OUTPUT ACCEPT\n-A OUTPUT ${family.hook.join(' ').replace('42420', '42421')}`,
+        chain(family),
+      ),
+      false,
+    );
+    const changedChain = chain(family).replace(/-j DROP$/u, '-j ACCEPT');
+    assert.equal(
+      verifyPolicySnapshot(family, output(family), changedChain),
+      false,
     );
   }
 });
@@ -238,28 +334,32 @@ test('IPv4 and IPv6 class counters aggregate without changing the blocked totals
 });
 
 test('counter CLI state survives workflow acknowledgement and evidence sanitization', () => {
-  const cliOutput = cliCounterObservation({
-    ipv4: 3,
-    ipv6: 1,
-    ipv4Classes: {
-      udp_dns_port: 1,
-      tcp_dns_port: 0,
-      tcp_https_port: 1,
-      other: 1,
+  const cliOutput = cliCounterObservation(
+    {
+      ipv4: 3,
+      ipv6: 1,
+      ipv4Classes: {
+        udp_dns_port: 1,
+        tcp_dns_port: 0,
+        tcp_https_port: 1,
+        other: 1,
+      },
+      ipv6Classes: {
+        udp_dns_port: 0,
+        tcp_dns_port: 0,
+        tcp_https_port: 1,
+        other: 0,
+      },
+      overflow: false,
     },
-    ipv6Classes: {
-      udp_dns_port: 0,
-      tcp_dns_port: 0,
-      tcp_https_port: 1,
-      other: 0,
-    },
-    overflow: false,
-  });
+    'verified',
+  );
   const workflowSnapshot = sanitizeEgressCounterObservation(
     JSON.stringify(cliOutput),
   );
   assert.deepEqual(workflowSnapshot, {
     state: 'observed',
+    policyState: 'verified',
     ipv4Blocked: 3,
     ipv6Blocked: 1,
     ipv4Classes: {
@@ -287,6 +387,7 @@ test('counter CLI state survives workflow acknowledgement and evidence sanitizat
     ),
     {
       state: 'unavailable',
+      policyState: 'unavailable',
       ipv4Blocked: null,
       ipv6Blocked: null,
       ipv4Classes: null,
@@ -298,23 +399,26 @@ test('counter CLI state survives workflow acknowledgement and evidence sanitizat
     acknowledgedEgressCounterObservation(workflowSnapshot, 'unavailable').state,
     'unavailable',
   );
-  const partialCliOutput = cliCounterObservation({
-    ipv4: 100_000,
-    ipv6: 0,
-    ipv4Classes: {
-      udp_dns_port: 100_000,
-      tcp_dns_port: 0,
-      tcp_https_port: 0,
-      other: 0,
+  const partialCliOutput = cliCounterObservation(
+    {
+      ipv4: 100_000,
+      ipv6: 0,
+      ipv4Classes: {
+        udp_dns_port: 100_000,
+        tcp_dns_port: 0,
+        tcp_https_port: 0,
+        other: 0,
+      },
+      ipv6Classes: {
+        udp_dns_port: 0,
+        tcp_dns_port: 0,
+        tcp_https_port: 0,
+        other: 0,
+      },
+      overflow: true,
     },
-    ipv6Classes: {
-      udp_dns_port: 0,
-      tcp_dns_port: 0,
-      tcp_https_port: 0,
-      other: 0,
-    },
-    overflow: true,
-  });
+    'verified',
+  );
   assert.equal(partialCliOutput.state, 'partial');
   assert.equal(
     acknowledgedEgressCounterObservation(
@@ -343,6 +447,7 @@ test('negative egress requires the expected uid, timed-out connects and DROP cou
   assert.equal(negativeProbePassed(diagnostic), true);
 
   for (const [family, field, value] of [
+    ['ipv4', 'policyState', 'mismatch'],
     ['ipv4', 'probeUidMatches', false],
     ['ipv4', 'connectionOutcome', 'connected'],
     ['ipv4', 'listenerAcceptedCount', 1],
