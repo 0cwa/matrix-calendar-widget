@@ -49,6 +49,74 @@ const UID_PROCESS_OBSERVATION_STATES = new Set([
   'partial',
   'observed',
 ]);
+const UID_LIFECYCLE_STATES = new Set([
+  'not_observed',
+  'unavailable',
+  'partial',
+  'observed',
+]);
+const UID_LIFECYCLE_PROCESS_CLASSES = Object.freeze([
+  'application',
+  'browser',
+  'renderer',
+  'zygote',
+  'gpu',
+  'utility',
+  'other',
+  'unknown',
+]);
+const UID_LIFECYCLE_RELATION_STATES = new Set([
+  'not_observed',
+  'unavailable',
+  'partial',
+  'observed',
+]);
+const UID_LIFECYCLE_APP_IDENTITY_STATES = new Set([
+  'not_observed',
+  'unavailable',
+  'verified',
+]);
+const UID_TCP_SOCKET_STATES = new Set([
+  'not_observed',
+  'unavailable',
+  'partial',
+  'observed',
+]);
+const UID_TCP_PROCESS_ROLES = Object.freeze([
+  'application',
+  'browser',
+  'renderer',
+  'zygote',
+  'gpu',
+  'utility',
+  'other',
+  'shared',
+  'unknown',
+]);
+const UID_TCP_PEER_CATEGORIES = new Set([
+  'matrix_loopback',
+  'loopback_other',
+  'non_loopback_web',
+  'non_loopback_other',
+  'cdp_loopback_listener',
+  'cdp_non_loopback_listener',
+  'other_listener',
+  'no_peer',
+  'unknown',
+]);
+const UID_TCP_STATE_CATEGORIES = new Set([
+  'established',
+  'syn_sent',
+  'syn_received',
+  'fin_wait',
+  'time_wait',
+  'close_wait',
+  'last_ack',
+  'closing',
+  'listening',
+  'closed',
+  'unknown',
+]);
 const STARTUP_FAILURES = new Set([
   'invalid-source-sha',
   'unsupported-runner',
@@ -347,6 +415,436 @@ function validateUidProcessObservation(value) {
     value.zombieCount === null &&
     value.unreadableProcessCount === null
   );
+}
+
+export function emptyUidLifecycleObservation(state = 'not_observed') {
+  const unavailable = state === 'unavailable';
+  const rendererState =
+    state === 'not_observed' ? 'not_observed' : 'unavailable';
+  const securityState =
+    state === 'not_observed' ? 'not_observed' : 'unavailable';
+  return {
+    state,
+    overflow: null,
+    uidProcessCount: null,
+    nonZombieProcessCount: null,
+    zombieCount: null,
+    unreadableProcessCount: null,
+    unattributedProcessCount: null,
+    processClassCounts: null,
+    rendererOwnership: {
+      state: rendererState,
+      appIdentityState: unavailable ? 'unavailable' : rendererState,
+      rendererCount: null,
+      appDescendantCount: null,
+      appProcessGroupCount: null,
+      appDescendantAndProcessGroupCount: null,
+      appDescendantOnlyCount: null,
+      appProcessGroupOnlyCount: null,
+      noCurrentLinkCount: null,
+      otherUidAppDescendantCount: null,
+      securityCoverageState: rendererState,
+    },
+    seccompState: securityState,
+    noNewPrivsState: securityState,
+  };
+}
+
+function validateUidLifecycleObservation(value) {
+  if (
+    !hasKeys(value, [
+      'state',
+      'overflow',
+      'uidProcessCount',
+      'nonZombieProcessCount',
+      'zombieCount',
+      'unreadableProcessCount',
+      'unattributedProcessCount',
+      'processClassCounts',
+      'rendererOwnership',
+      'seccompState',
+      'noNewPrivsState',
+    ]) ||
+    !UID_LIFECYCLE_STATES.has(value.state) ||
+    !SANDBOX_DIAGNOSTIC_VALUES.has(value.seccompState) ||
+    !SANDBOX_DIAGNOSTIC_VALUES.has(value.noNewPrivsState)
+  ) {
+    return false;
+  }
+
+  const ownership = value.rendererOwnership;
+  if (
+    !hasKeys(ownership, [
+      'state',
+      'appIdentityState',
+      'rendererCount',
+      'appDescendantCount',
+      'appProcessGroupCount',
+      'appDescendantAndProcessGroupCount',
+      'appDescendantOnlyCount',
+      'appProcessGroupOnlyCount',
+      'noCurrentLinkCount',
+      'otherUidAppDescendantCount',
+      'securityCoverageState',
+    ]) ||
+    !UID_LIFECYCLE_RELATION_STATES.has(ownership.state) ||
+    !UID_LIFECYCLE_APP_IDENTITY_STATES.has(ownership.appIdentityState) ||
+    !UID_LIFECYCLE_RELATION_STATES.has(ownership.securityCoverageState)
+  ) {
+    return false;
+  }
+
+  if (value.state === 'not_observed' || value.state === 'unavailable') {
+    const expected = emptyUidLifecycleObservation(value.state);
+    return (
+      value.overflow === expected.overflow &&
+      value.uidProcessCount === expected.uidProcessCount &&
+      value.nonZombieProcessCount === expected.nonZombieProcessCount &&
+      value.zombieCount === expected.zombieCount &&
+      value.unreadableProcessCount === expected.unreadableProcessCount &&
+      value.unattributedProcessCount === expected.unattributedProcessCount &&
+      value.processClassCounts === expected.processClassCounts &&
+      ownership.state === expected.rendererOwnership.state &&
+      ownership.appIdentityState ===
+        expected.rendererOwnership.appIdentityState &&
+      ownership.rendererCount === null &&
+      ownership.appDescendantCount === null &&
+      ownership.appProcessGroupCount === null &&
+      ownership.appDescendantAndProcessGroupCount === null &&
+      ownership.appDescendantOnlyCount === null &&
+      ownership.appProcessGroupOnlyCount === null &&
+      ownership.noCurrentLinkCount === null &&
+      ownership.otherUidAppDescendantCount === null &&
+      ownership.securityCoverageState ===
+        expected.rendererOwnership.securityCoverageState &&
+      value.seccompState === expected.seccompState &&
+      value.noNewPrivsState === expected.noNewPrivsState
+    );
+  }
+
+  if (
+    typeof value.overflow !== 'boolean' ||
+    !diagnosticCount(value.uidProcessCount) ||
+    !diagnosticCount(value.nonZombieProcessCount) ||
+    !diagnosticCount(value.zombieCount) ||
+    !diagnosticCount(value.unreadableProcessCount) ||
+    !diagnosticCount(value.unattributedProcessCount) ||
+    !hasKeys(value.processClassCounts, UID_LIFECYCLE_PROCESS_CLASSES) ||
+    UID_LIFECYCLE_PROCESS_CLASSES.some(
+      (name) => !diagnosticCount(value.processClassCounts[name]),
+    )
+  ) {
+    return false;
+  }
+
+  if (ownership.appIdentityState === 'not_observed') {
+    return (
+      ownership.state === 'not_observed' &&
+      ownership.rendererCount === null &&
+      ownership.appDescendantCount === null &&
+      ownership.appProcessGroupCount === null &&
+      ownership.appDescendantAndProcessGroupCount === null &&
+      ownership.appDescendantOnlyCount === null &&
+      ownership.appProcessGroupOnlyCount === null &&
+      ownership.noCurrentLinkCount === null &&
+      ownership.otherUidAppDescendantCount === null &&
+      ownership.securityCoverageState === 'not_observed' &&
+      value.seccompState === 'not_observed' &&
+      value.noNewPrivsState === 'not_observed'
+    );
+  }
+  if (ownership.appIdentityState === 'unavailable') {
+    return (
+      ownership.state === 'unavailable' &&
+      ownership.rendererCount === null &&
+      ownership.appDescendantCount === null &&
+      ownership.appProcessGroupCount === null &&
+      ownership.appDescendantAndProcessGroupCount === null &&
+      ownership.appDescendantOnlyCount === null &&
+      ownership.appProcessGroupOnlyCount === null &&
+      ownership.noCurrentLinkCount === null &&
+      ownership.otherUidAppDescendantCount === null &&
+      ownership.securityCoverageState === 'unavailable' &&
+      value.seccompState === 'unavailable' &&
+      value.noNewPrivsState === 'unavailable'
+    );
+  }
+  const ownershipCounts = [
+    'rendererCount',
+    'appDescendantCount',
+    'appProcessGroupCount',
+    'appDescendantAndProcessGroupCount',
+    'appDescendantOnlyCount',
+    'appProcessGroupOnlyCount',
+    'noCurrentLinkCount',
+    'otherUidAppDescendantCount',
+  ];
+  if (
+    ownership.state !== value.state ||
+    ownershipCounts.some((name) => !diagnosticCount(ownership[name])) ||
+    !['observed', 'partial'].includes(ownership.securityCoverageState) ||
+    ownership.rendererCount > value.processClassCounts.renderer ||
+    ownership.appDescendantCount > ownership.rendererCount ||
+    ownership.appProcessGroupCount > ownership.rendererCount ||
+    ownership.appDescendantAndProcessGroupCount >
+      Math.min(ownership.appDescendantCount, ownership.appProcessGroupCount) ||
+    ownership.appDescendantOnlyCount !==
+      ownership.appDescendantCount -
+        ownership.appDescendantAndProcessGroupCount ||
+    ownership.appProcessGroupOnlyCount !==
+      ownership.appProcessGroupCount -
+        ownership.appDescendantAndProcessGroupCount ||
+    ownership.noCurrentLinkCount !==
+      ownership.rendererCount -
+        ownership.appDescendantCount -
+        ownership.appProcessGroupCount +
+        ownership.appDescendantAndProcessGroupCount ||
+    (value.state === 'observed' &&
+      (value.overflow || ownership.securityCoverageState !== 'observed'))
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+export function sanitizeUidProcessObservation(input) {
+  const fallback = {
+    state: 'unavailable',
+    uidProcessCount: null,
+    nonZombieProcessCount: null,
+    zombieCount: null,
+    unreadableProcessCount: null,
+  };
+  let value = input;
+  if (typeof input === 'string') {
+    try {
+      value = JSON.parse(input);
+    } catch {
+      return fallback;
+    }
+  }
+  if (!validateUidProcessObservation(value)) return fallback;
+  return {
+    state: value.state,
+    uidProcessCount: value.uidProcessCount,
+    nonZombieProcessCount: value.nonZombieProcessCount,
+    zombieCount: value.zombieCount,
+    unreadableProcessCount: value.unreadableProcessCount,
+  };
+}
+
+export function sanitizeUidLifecycleObservation(input) {
+  if (input === undefined) return emptyUidLifecycleObservation('not_observed');
+  const fallback = emptyUidLifecycleObservation('unavailable');
+  let value = input;
+  if (typeof input === 'string') {
+    try {
+      value = JSON.parse(input);
+    } catch {
+      return fallback;
+    }
+  }
+  if (!validateUidLifecycleObservation(value)) return fallback;
+  return {
+    state: value.state,
+    overflow: value.overflow,
+    uidProcessCount: value.uidProcessCount,
+    nonZombieProcessCount: value.nonZombieProcessCount,
+    zombieCount: value.zombieCount,
+    unreadableProcessCount: value.unreadableProcessCount,
+    unattributedProcessCount: value.unattributedProcessCount,
+    processClassCounts:
+      value.processClassCounts === null
+        ? null
+        : Object.fromEntries(
+            UID_LIFECYCLE_PROCESS_CLASSES.map((name) => [
+              name,
+              value.processClassCounts[name],
+            ]),
+          ),
+    rendererOwnership: {
+      state: value.rendererOwnership.state,
+      appIdentityState: value.rendererOwnership.appIdentityState,
+      rendererCount: value.rendererOwnership.rendererCount,
+      appDescendantCount: value.rendererOwnership.appDescendantCount,
+      appProcessGroupCount: value.rendererOwnership.appProcessGroupCount,
+      appDescendantAndProcessGroupCount:
+        value.rendererOwnership.appDescendantAndProcessGroupCount,
+      appDescendantOnlyCount: value.rendererOwnership.appDescendantOnlyCount,
+      appProcessGroupOnlyCount:
+        value.rendererOwnership.appProcessGroupOnlyCount,
+      noCurrentLinkCount: value.rendererOwnership.noCurrentLinkCount,
+      otherUidAppDescendantCount:
+        value.rendererOwnership.otherUidAppDescendantCount,
+      securityCoverageState: value.rendererOwnership.securityCoverageState,
+    },
+    seccompState: value.seccompState,
+    noNewPrivsState: value.noNewPrivsState,
+  };
+}
+
+function emptyUidTcpSocketObservation(state = 'not_observed') {
+  return {
+    coverage: 'process_owned_tcp_only',
+    packetAttribution: 'not_observed',
+    state,
+    overflow: null,
+    tcpSocketCount: null,
+    buckets: null,
+  };
+}
+
+function validateUidTcpSocketObservation(value) {
+  if (
+    !hasKeys(value, [
+      'coverage',
+      'packetAttribution',
+      'state',
+      'overflow',
+      'tcpSocketCount',
+      'buckets',
+    ]) ||
+    value.coverage !== 'process_owned_tcp_only' ||
+    value.packetAttribution !== 'not_observed' ||
+    !UID_TCP_SOCKET_STATES.has(value.state)
+  ) {
+    return false;
+  }
+  if (value.state === 'not_observed' || value.state === 'unavailable') {
+    return (
+      value.overflow === null &&
+      value.tcpSocketCount === null &&
+      value.buckets === null
+    );
+  }
+  if (
+    typeof value.overflow !== 'boolean' ||
+    !diagnosticCount(value.tcpSocketCount) ||
+    !Array.isArray(value.buckets) ||
+    value.buckets.length > MAX_DIAGNOSTIC_COUNT
+  ) {
+    return false;
+  }
+  const seen = new Set();
+  let bucketTotal = 0;
+  for (const bucket of value.buckets) {
+    if (
+      !hasKeys(bucket, ['processRole', 'peerCategory', 'tcpState', 'count']) ||
+      !UID_TCP_PROCESS_ROLES.includes(bucket.processRole) ||
+      !UID_TCP_PEER_CATEGORIES.has(bucket.peerCategory) ||
+      !UID_TCP_STATE_CATEGORIES.has(bucket.tcpState) ||
+      !diagnosticCount(bucket.count) ||
+      bucket.count < 1
+    ) {
+      return false;
+    }
+    const key = `${bucket.processRole}\u0000${bucket.peerCategory}\u0000${bucket.tcpState}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    bucketTotal += bucket.count;
+  }
+  if (
+    (value.tcpSocketCount === 0) !== (value.buckets.length === 0) ||
+    value.buckets.length > value.tcpSocketCount
+  ) {
+    return false;
+  }
+  return (
+    value.state !== 'observed' ||
+    (!value.overflow && bucketTotal === value.tcpSocketCount)
+  );
+}
+
+export function sanitizeUidTcpSocketObservation(input) {
+  if (input === undefined) return emptyUidTcpSocketObservation();
+  const fallback = emptyUidTcpSocketObservation('unavailable');
+  let value = input;
+  if (typeof input === 'string') {
+    try {
+      value = JSON.parse(input);
+    } catch {
+      return fallback;
+    }
+  }
+  if (!validateUidTcpSocketObservation(value)) return fallback;
+  return {
+    coverage: 'process_owned_tcp_only',
+    packetAttribution: 'not_observed',
+    state: value.state,
+    overflow: value.overflow,
+    tcpSocketCount: value.tcpSocketCount,
+    buckets:
+      value.buckets === null
+        ? null
+        : [...value.buckets]
+            .map((bucket) => ({
+              processRole: bucket.processRole,
+              peerCategory: bucket.peerCategory,
+              tcpState: bucket.tcpState,
+              count: bucket.count,
+            }))
+            .sort((left, right) => {
+              const leftKey = `${left.processRole}\u0000${left.peerCategory}\u0000${left.tcpState}`;
+              const rightKey = `${right.processRole}\u0000${right.peerCategory}\u0000${right.tcpState}`;
+              return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+            }),
+  };
+}
+
+export function emptyUidStartupObservation(state = 'not_observed') {
+  return {
+    uidLifecycleObservation: emptyUidLifecycleObservation(state),
+    tcpSocketObservation: emptyUidTcpSocketObservation(state),
+  };
+}
+
+export function sanitizeUidStartupObservation(input) {
+  if (input === undefined) return emptyUidStartupObservation();
+  const fallback = emptyUidStartupObservation('unavailable');
+  let value = input;
+  if (typeof input === 'string') {
+    try {
+      value = JSON.parse(input);
+    } catch {
+      return fallback;
+    }
+  }
+  if (
+    !hasKeys(value, ['uidLifecycleObservation', 'tcpSocketObservation']) ||
+    !validateUidLifecycleObservation(value.uidLifecycleObservation) ||
+    !validateUidTcpSocketObservation(value.tcpSocketObservation)
+  ) {
+    return fallback;
+  }
+  return {
+    uidLifecycleObservation: sanitizeUidLifecycleObservation(
+      value.uidLifecycleObservation,
+    ),
+    tcpSocketObservation: sanitizeUidTcpSocketObservation(
+      value.tcpSocketObservation,
+    ),
+  };
+}
+
+export function uidProcessObservationFromLifecycle(input) {
+  const observation = sanitizeUidLifecycleObservation(input);
+  if (observation.state !== 'observed' && observation.state !== 'partial') {
+    return {
+      state: observation.state,
+      uidProcessCount: null,
+      nonZombieProcessCount: null,
+      zombieCount: null,
+      unreadableProcessCount: null,
+    };
+  }
+  return {
+    state: observation.state,
+    uidProcessCount: observation.uidProcessCount,
+    nonZombieProcessCount: observation.nonZombieProcessCount,
+    zombieCount: observation.zombieCount,
+    unreadableProcessCount: observation.unreadableProcessCount,
+  };
 }
 
 function validateSafeStorage(value) {
@@ -798,6 +1296,8 @@ function validateStartup(record, sourceSha) {
       'desktopObservation',
       'rendererCount',
       'rendererDiagnostics',
+      'uidLifecycleDiagnostics',
+      'uidTcpSocketDiagnostics',
       'egressPhaseCounters',
       'checks',
     ]) ||
@@ -836,6 +1336,20 @@ function validateStartup(record, sourceSha) {
     !validateSafeStorage(record.safeStorage) ||
     !validateDesktopObservation(record.desktopObservation) ||
     !validateRendererDiagnostics(record.rendererDiagnostics) ||
+    !hasKeys(record.uidLifecycleDiagnostics, ['beforeApp', 'afterPageLoad']) ||
+    !validateUidLifecycleObservation(
+      record.uidLifecycleDiagnostics.beforeApp,
+    ) ||
+    !validateUidLifecycleObservation(
+      record.uidLifecycleDiagnostics.afterPageLoad,
+    ) ||
+    !hasKeys(record.uidTcpSocketDiagnostics, ['beforeApp', 'afterPageLoad']) ||
+    !validateUidTcpSocketObservation(
+      record.uidTcpSocketDiagnostics.beforeApp,
+    ) ||
+    !validateUidTcpSocketObservation(
+      record.uidTcpSocketDiagnostics.afterPageLoad,
+    ) ||
     !validateEgressPhaseCounters(record.egressPhaseCounters) ||
     record.runtime.runner !== 'ubuntu-24.04' ||
     !hasKeys(record.checks, CHECK_NAMES) ||
@@ -1095,7 +1609,9 @@ function validateCleanup(record) {
       'aptSource',
       'accountState',
       'userdelStatus',
+      'userdelExitStatus',
       'uidProcessObservation',
+      'uidLifecycleObservation',
     ]) &&
     record.phase === 'cleanup' &&
     ['isolatedProcesses', 'policy', 'user', 'profile', 'aptSource'].every(
@@ -1109,7 +1625,32 @@ function validateCleanup(record) {
       'uid_mismatch',
     ].includes(record.accountState) &&
     ['passed', 'failed', 'not_run'].includes(record.userdelStatus) &&
-    validateUidProcessObservation(record.uidProcessObservation)
+    (record.userdelExitStatus === null ||
+      (Number.isSafeInteger(record.userdelExitStatus) &&
+        record.userdelExitStatus >= 0 &&
+        record.userdelExitStatus <= 255)) &&
+    (record.userdelStatus === 'passed'
+      ? record.userdelExitStatus === 0
+      : record.userdelStatus === 'failed'
+        ? record.userdelExitStatus !== null && record.userdelExitStatus !== 0
+        : record.userdelExitStatus === null) &&
+    validateUidProcessObservation(record.uidProcessObservation) &&
+    validateUidLifecycleObservation(record.uidLifecycleObservation) &&
+    (() => {
+      const projected = uidProcessObservationFromLifecycle(
+        record.uidLifecycleObservation,
+      );
+      return (
+        record.uidProcessObservation.state === projected.state &&
+        record.uidProcessObservation.uidProcessCount ===
+          projected.uidProcessCount &&
+        record.uidProcessObservation.nonZombieProcessCount ===
+          projected.nonZombieProcessCount &&
+        record.uidProcessObservation.zombieCount === projected.zombieCount &&
+        record.uidProcessObservation.unreadableProcessCount ===
+          projected.unreadableProcessCount
+      );
+    })()
   );
 }
 
@@ -1227,6 +1768,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
     ? {
         accountState: cleanup.accountState,
         userdelStatus: cleanup.userdelStatus,
+        userdelExitStatus: cleanup.userdelExitStatus,
         uidProcessObservation: cleanup.uidProcessObservation,
       }
     : null;
@@ -1288,7 +1830,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -1331,6 +1873,25 @@ export function sanitizeDesktopStages(records, sourceSha) {
     rendererCount: startup?.rendererCount ?? null,
     rendererDiagnostics:
       startup?.rendererDiagnostics ?? emptyRendererDiagnostics(),
+    uidLifecycleDiagnostics: {
+      beforeApp:
+        startup?.uidLifecycleDiagnostics.beforeApp ??
+        emptyUidLifecycleObservation('not_observed'),
+      afterPageLoad:
+        startup?.uidLifecycleDiagnostics.afterPageLoad ??
+        emptyUidLifecycleObservation('not_observed'),
+      beforeUserdel:
+        cleanup?.uidLifecycleObservation ??
+        emptyUidLifecycleObservation('not_observed'),
+    },
+    uidTcpSocketDiagnostics: {
+      beforeApp:
+        startup?.uidTcpSocketDiagnostics.beforeApp ??
+        emptyUidTcpSocketObservation('not_observed'),
+      afterPageLoad:
+        startup?.uidTcpSocketDiagnostics.afterPageLoad ??
+        emptyUidTcpSocketObservation('not_observed'),
+    },
     targetUidPreflight: targetUidPreflight ?? null,
     egressBlocked: {
       ipv4: observation?.ipv4Blocked ?? null,
@@ -1358,6 +1919,8 @@ export function validDesktopSummary(value) {
       'desktopObservation',
       'rendererCount',
       'rendererDiagnostics',
+      'uidLifecycleDiagnostics',
+      'uidTcpSocketDiagnostics',
       'targetUidPreflight',
       'egressBlocked',
       'uidEgressPhaseCounters',
@@ -1365,7 +1928,7 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 9 &&
+    value.schemaVersion === 10 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
@@ -1408,6 +1971,23 @@ export function validDesktopSummary(value) {
     validateSafeStorage(value.safeStorage) &&
     validateDesktopObservation(value.desktopObservation) &&
     validateRendererDiagnostics(value.rendererDiagnostics) &&
+    hasKeys(value.uidLifecycleDiagnostics, [
+      'beforeApp',
+      'afterPageLoad',
+      'beforeUserdel',
+    ]) &&
+    validateUidLifecycleObservation(value.uidLifecycleDiagnostics.beforeApp) &&
+    validateUidLifecycleObservation(
+      value.uidLifecycleDiagnostics.afterPageLoad,
+    ) &&
+    validateUidLifecycleObservation(
+      value.uidLifecycleDiagnostics.beforeUserdel,
+    ) &&
+    hasKeys(value.uidTcpSocketDiagnostics, ['beforeApp', 'afterPageLoad']) &&
+    validateUidTcpSocketObservation(value.uidTcpSocketDiagnostics.beforeApp) &&
+    validateUidTcpSocketObservation(
+      value.uidTcpSocketDiagnostics.afterPageLoad,
+    ) &&
     validateEgressPhaseCounters({
       beforeApp: value.uidEgressPhaseCounters?.beforeApp,
       afterPageLoad: value.uidEgressPhaseCounters?.afterPageLoad,
@@ -1417,6 +1997,7 @@ export function validDesktopSummary(value) {
       (hasKeys(value.cleanupDiagnostics, [
         'accountState',
         'userdelStatus',
+        'userdelExitStatus',
         'uidProcessObservation',
       ]) &&
         [
@@ -1429,6 +2010,16 @@ export function validDesktopSummary(value) {
         ['passed', 'failed', 'not_run'].includes(
           value.cleanupDiagnostics.userdelStatus,
         ) &&
+        (value.cleanupDiagnostics.userdelExitStatus === null ||
+          (Number.isSafeInteger(value.cleanupDiagnostics.userdelExitStatus) &&
+            value.cleanupDiagnostics.userdelExitStatus >= 0 &&
+            value.cleanupDiagnostics.userdelExitStatus <= 255)) &&
+        (value.cleanupDiagnostics.userdelStatus === 'passed'
+          ? value.cleanupDiagnostics.userdelExitStatus === 0
+          : value.cleanupDiagnostics.userdelStatus === 'failed'
+            ? value.cleanupDiagnostics.userdelExitStatus !== null &&
+              value.cleanupDiagnostics.userdelExitStatus !== 0
+            : value.cleanupDiagnostics.userdelExitStatus === null) &&
         validateUidProcessObservation(
           value.cleanupDiagnostics.uidProcessObservation,
         ))) &&

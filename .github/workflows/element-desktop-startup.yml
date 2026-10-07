@@ -253,13 +253,19 @@ jobs:
           result_file="$RUNNER_TEMP/element-desktop-startup-result.jsonl"
           before_app_counter='{"state":"not_observed","ipv4Blocked":null,"ipv6Blocked":null}'
           after_page_load_counter='{"state":"not_observed","ipv4Blocked":null,"ipv6Blocked":null}'
+          before_app_uid_startup_observation=not_observed
+          after_page_load_uid_startup_observation=not_observed
           before_app_seen=false
           after_page_load_seen=false
+          uid="$ELEMENT_DESKTOP_PROBE_UID"
+          cdp_port="$ELEMENT_DESKTOP_CDP_PORT"
+          # After-page ACK work is capped at 13s including kill grace: counters and parse 4s,
+          # UID snapshot 5s, app-PID parse 2s, and marker touch 2s. The app waits 15s.
           capture_egress_counters() {
             local counters
-            if counters="$(timeout --kill-after=2s 4s sudo -n "$ELEMENT_DESKTOP_NODE_BIN" \
+            if counters="$(timeout --kill-after=1s 1s sudo -n "$ELEMENT_DESKTOP_NODE_BIN" \
               dev/element-desktop-egress-policy.mjs counters "$GITHUB_RUN_ID" 2>/dev/null)"; then
-              printf '%s' "$counters" | node --input-type=module -e '
+              printf '%s' "$counters" | timeout --kill-after=1s 1s node --input-type=module -e '
                 let input=""; for await (const chunk of process.stdin) input+=chunk;
                 try {
                   const value=JSON.parse(input);
@@ -269,6 +275,32 @@ jobs:
               '
             else
               printf '%s' '{"state":"unavailable","ipv4Blocked":null,"ipv6Blocked":null}'
+            fi
+          }
+          capture_uid_startup_observation() {
+            local app_pid="${1:-}"
+            local observation
+            if [[ ! "$uid" =~ ^[0-9]{1,5}$ ]] || [[ ! "$cdp_port" =~ ^[0-9]{1,5}$ ]]; then
+              printf '%s' unavailable
+              return
+            fi
+            if [[ -n "$app_pid" ]]; then
+              if [[ ! "$app_pid" =~ ^[1-9][0-9]{0,9}$ ]] || [[ "$app_pid" -gt 2147483647 ]]; then
+                printf '%s' unavailable
+                return
+              fi
+              observation="$(timeout --signal=TERM --kill-after=1s 4s sudo -n \
+                "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-startup.mjs \
+                uid-startup-observation "$uid" "$cdp_port" "$app_pid" 2>/dev/null)"
+            else
+              observation="$(timeout --signal=TERM --kill-after=1s 4s sudo -n \
+                "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-startup.mjs \
+                uid-startup-observation "$uid" "$cdp_port" 2>/dev/null)"
+            fi
+            if [[ -z "$observation" ]]; then
+              printf '%s' unavailable
+            else
+              printf '%s' "$observation"
             fi
           }
           timeout --signal=TERM --kill-after=5s 120s \
@@ -296,14 +328,34 @@ jobs:
             if [[ "$before_app_seen" != true ]] && \
               grep -Fqx '{"phase":"desktop-startup-progress","milestone":"before-app"}' "$result_file" 2>/dev/null; then
               before_app_counter="$(capture_egress_counters)"
-              timeout --kill-after=1s 2s sudo -n -u "$ELEMENT_DESKTOP_PROBE_USERNAME" -- touch \
+              before_app_uid_startup_observation="$(capture_uid_startup_observation)"
+              timeout --kill-after=1s 1s sudo -n -u "$ELEMENT_DESKTOP_PROBE_USERNAME" -- touch \
                 "$ELEMENT_DESKTOP_PROFILE_ROOT/.before-app-counter-read" >/dev/null 2>&1
               before_app_seen=true
             fi
             if [[ "$after_page_load_seen" != true ]] && \
-              grep -Fqx '{"phase":"desktop-startup-progress","milestone":"after-page-load"}' "$result_file" 2>/dev/null; then
+              grep -Fq '{"phase":"desktop-startup-progress","milestone":"after-page-load","appPid":' "$result_file" 2>/dev/null; then
               after_page_load_counter="$(capture_egress_counters)"
-              timeout --kill-after=1s 2s sudo -n -u "$ELEMENT_DESKTOP_PROBE_USERNAME" -- touch \
+              app_pid="$(timeout --signal=TERM --kill-after=1s 1s node --input-type=module - "$result_file" 2>/dev/null <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const [resultFile] = process.argv.slice(2);
+          for (const row of readFileSync(resultFile, 'utf8').split(/\r?\n/u).filter(Boolean)) {
+            let value;
+            try { value = JSON.parse(row); } catch { continue; }
+            if (value.phase !== 'desktop-startup-progress' || value.milestone !== 'after-page-load') continue;
+            if (Object.keys(value).sort().join(',') !== 'appPid,milestone,phase' || !Number.isSafeInteger(value.appPid) || value.appPid < 2 || value.appPid > 2147483647) process.exit(2);
+            process.stdout.write(String(value.appPid));
+            process.exit(0);
+          }
+          process.exit(1);
+          NODE
+              )"
+              if [[ "$app_pid" =~ ^[1-9][0-9]{0,9}$ ]] && [[ "$app_pid" -ge 2 ]] && [[ "$app_pid" -le 2147483647 ]]; then
+                after_page_load_uid_startup_observation="$(capture_uid_startup_observation "$app_pid")"
+              else
+                after_page_load_uid_startup_observation=unavailable
+              fi
+              timeout --kill-after=1s 1s sudo -n -u "$ELEMENT_DESKTOP_PROBE_USERNAME" -- touch \
                 "$ELEMENT_DESKTOP_PROFILE_ROOT/.after-page-load-counter-read" >/dev/null 2>&1
               after_page_load_seen=true
             fi
@@ -314,9 +366,25 @@ jobs:
           set -e
           ELEMENT_DESKTOP_BEFORE_APP_COUNTER="$before_app_counter" \
           ELEMENT_DESKTOP_AFTER_PAGE_LOAD_COUNTER="$after_page_load_counter" \
+          ELEMENT_DESKTOP_BEFORE_APP_UID_STARTUP_OBSERVATION="$before_app_uid_startup_observation" \
+          ELEMENT_DESKTOP_AFTER_PAGE_LOAD_UID_STARTUP_OBSERVATION="$after_page_load_uid_startup_observation" \
           node --input-type=module - "$result_file" "$ELEMENT_DESKTOP_STAGE_FILE" <<'NODE'
           import { appendFileSync, readFileSync } from 'node:fs';
+          import { emptyUidStartupObservation, sanitizeUidStartupObservation } from './dev/element-desktop-evidence.mjs';
           const [resultFile, stageFile] = process.argv.slice(2);
+          function startupObservation(raw) {
+            return raw === 'not_observed'
+              ? emptyUidStartupObservation('not_observed')
+              : raw === 'unavailable'
+                ? emptyUidStartupObservation('unavailable')
+                : sanitizeUidStartupObservation(raw);
+          }
+          const beforeAppStartupObservation = startupObservation(
+            process.env.ELEMENT_DESKTOP_BEFORE_APP_UID_STARTUP_OBSERVATION,
+          );
+          const afterPageLoadStartupObservation = startupObservation(
+            process.env.ELEMENT_DESKTOP_AFTER_PAGE_LOAD_UID_STARTUP_OBSERVATION,
+          );
           function counterSnapshot(raw, fallbackState) {
             const fallback = {state:fallbackState,ipv4Blocked:null,ipv6Blocked:null};
             try {
@@ -341,10 +409,20 @@ jobs:
             let value;
             try { value = JSON.parse(row); } catch { continue; }
             if (value.phase === 'desktop-startup-progress') {
-              if (Object.keys(value).sort().join(',') !== 'milestone,phase' || !milestones.has(value.milestone)) process.exit(2);
+              const beforeApp = Object.keys(value).sort().join(',') === 'milestone,phase' && value.milestone === 'before-app';
+              const afterPageLoad = Object.keys(value).sort().join(',') === 'appPid,milestone,phase' && value.milestone === 'after-page-load' && Number.isSafeInteger(value.appPid) && value.appPid >= 2 && value.appPid <= 2147483647;
+              if (!milestones.has(value.milestone) || !(beforeApp || afterPageLoad)) process.exit(2);
               continue;
             }
             if (value.phase === 'desktop-startup') {
+              value.uidLifecycleDiagnostics = {
+                beforeApp:beforeAppStartupObservation.uidLifecycleObservation,
+                afterPageLoad:afterPageLoadStartupObservation.uidLifecycleObservation,
+              };
+              value.uidTcpSocketDiagnostics = {
+                beforeApp:beforeAppStartupObservation.tcpSocketObservation,
+                afterPageLoad:afterPageLoadStartupObservation.tcpSocketObservation,
+              };
               const acknowledgements = value.egressPhaseCounters ?? {};
               value.egressPhaseCounters = {
                 beforeApp:acknowledgedCounter(beforeApp, acknowledgements.beforeApp?.state),
@@ -375,7 +453,8 @@ jobs:
           user_status=not_run
           account_state=not_observed
           userdel_status=not_run
-          uid_process_observation='{"state":"not_observed","uidProcessCount":null,"nonZombieProcessCount":null,"zombieCount":null,"unreadableProcessCount":null}'
+          userdel_exit_status=null
+          uid_lifecycle_observation=not_observed
           profile_status=not_run
           apt_source_status=not_run
           observation_status=failed
@@ -410,12 +489,12 @@ jobs:
 
           if [[ "$uid" =~ ^[0-9]{1,5}$ ]] && [[ "$uid" -gt 0 ]] && \
             [[ -n "$ELEMENT_DESKTOP_STARTUP_SCRIPT_PATH" ]]; then
-            process_observation="$(timeout --kill-after=2s 10s sudo -n "$ELEMENT_DESKTOP_NODE_BIN" \
-              "$GITHUB_WORKSPACE/dev/element-desktop-startup.mjs" cleanup-observation "$uid" 2>/dev/null)"
+            process_observation="$(timeout --signal=TERM --kill-after=1s 6s sudo -n "$ELEMENT_DESKTOP_NODE_BIN" \
+              "$GITHUB_WORKSPACE/dev/element-desktop-startup.mjs" uid-lifecycle-observation "$uid" 2>/dev/null)"
             if [[ -n "$process_observation" ]]; then
-              uid_process_observation="$process_observation"
+              uid_lifecycle_observation="$process_observation"
             else
-              uid_process_observation='{"state":"unavailable","uidProcessCount":null,"nonZombieProcessCount":null,"zombieCount":null,"unreadableProcessCount":null}'
+              uid_lifecycle_observation=unavailable
             fi
           fi
           if [[ "$observation_status" != passed ]]; then
@@ -433,12 +512,19 @@ jobs:
           if [[ "$uid" =~ ^[0-9]{1,5}$ ]] && [[ "$uid" -gt 0 ]]; then
             account_uid="$(getent passwd "$username" | cut -d: -f3)"
             if [[ -n "$account_uid" ]]; then
-              if [[ "$account_uid" == "$uid" ]] && sudo -n userdel "$username" >/dev/null 2>&1; then
-                user_status=passed
-                userdel_status=passed
+              if [[ "$account_uid" == "$uid" ]]; then
+                if timeout --signal=TERM --kill-after=1s 10s sudo -n userdel \
+                  "$username" >/dev/null 2>&1; then
+                  user_status=passed
+                  userdel_status=passed
+                  userdel_exit_status=0
+                else
+                  userdel_exit_status=$?
+                  user_status=failed
+                  userdel_status=failed
+                fi
               else
                 user_status=failed
-                if [[ "$account_uid" == "$uid" ]]; then userdel_status=failed; fi
               fi
             else
               user_status=passed
@@ -506,12 +592,24 @@ jobs:
           ELEMENT_DESKTOP_USER_CLEANUP="$user_status" \
           ELEMENT_DESKTOP_ACCOUNT_STATE="$account_state" \
           ELEMENT_DESKTOP_USERDEL_STATUS="$userdel_status" \
-          ELEMENT_DESKTOP_UID_PROCESS_OBSERVATION="$uid_process_observation" \
+          ELEMENT_DESKTOP_USERDEL_EXIT_STATUS="$userdel_exit_status" \
+          ELEMENT_DESKTOP_UID_LIFECYCLE_OBSERVATION="$uid_lifecycle_observation" \
           ELEMENT_DESKTOP_PROFILE_CLEANUP="$profile_status" \
           ELEMENT_DESKTOP_APT_CLEANUP="$apt_source_status" \
           node --input-type=module - "$stage_file" <<'NODE'
           import { appendFileSync, readFileSync } from 'node:fs';
+          import { emptyUidLifecycleObservation, sanitizeUidLifecycleObservation, uidProcessObservationFromLifecycle } from './dev/element-desktop-evidence.mjs';
           const [stageFile] = process.argv.slice(2);
+          const lifecycleRaw = process.env.ELEMENT_DESKTOP_UID_LIFECYCLE_OBSERVATION;
+          const uidLifecycleObservation = lifecycleRaw === 'not_observed'
+            ? emptyUidLifecycleObservation('not_observed')
+            : lifecycleRaw === 'unavailable'
+              ? emptyUidLifecycleObservation('unavailable')
+              : sanitizeUidLifecycleObservation(lifecycleRaw);
+          const exitStatusRaw = process.env.ELEMENT_DESKTOP_USERDEL_EXIT_STATUS;
+          const userdelExitStatus = /^(?:0|[1-9][0-9]{0,2})$/u.test(exitStatusRaw ?? '') && Number(exitStatusRaw) <= 255
+            ? Number(exitStatusRaw)
+            : null;
           const rows = readFileSync(stageFile, 'utf8').split(/\r?\n/u).filter(Boolean);
           const phases = new Set();
           for (const row of rows) phases.add(JSON.parse(row).phase);
@@ -539,19 +637,9 @@ jobs:
               ? process.env.ELEMENT_DESKTOP_ACCOUNT_STATE : 'unavailable',
             userdelStatus:['passed','failed','not_run'].includes(process.env.ELEMENT_DESKTOP_USERDEL_STATUS)
               ? process.env.ELEMENT_DESKTOP_USERDEL_STATUS : 'not_run',
-            uidProcessObservation:(() => {
-              const fallback = {state:'unavailable',uidProcessCount:null,nonZombieProcessCount:null,zombieCount:null,unreadableProcessCount:null};
-              try {
-                const value = JSON.parse(process.env.ELEMENT_DESKTOP_UID_PROCESS_OBSERVATION ?? '');
-                const keys = Object.keys(value ?? {}).sort().join(',');
-                const allowedStates = ['not_observed','unavailable','partial','observed'];
-                const count = (item) => Number.isSafeInteger(item) && item >= 0 && item <= 100;
-                const noCounts = value?.uidProcessCount === null && value?.nonZombieProcessCount === null && value?.zombieCount === null && value?.unreadableProcessCount === null;
-                const counts = count(value?.uidProcessCount) && count(value?.nonZombieProcessCount) && count(value?.zombieCount) && count(value?.unreadableProcessCount) && value.nonZombieProcessCount <= value.uidProcessCount && value.zombieCount <= value.uidProcessCount && value.unreadableProcessCount <= value.uidProcessCount;
-                if (keys !== 'state,uidProcessCount,nonZombieProcessCount,unreadableProcessCount,zombieCount' || !allowedStates.includes(value.state) || !((['observed','partial'].includes(value.state) && counts) || (!['observed','partial'].includes(value.state) && noCounts))) return fallback;
-                return {state:value.state,uidProcessCount:value.uidProcessCount,nonZombieProcessCount:value.nonZombieProcessCount,zombieCount:value.zombieCount,unreadableProcessCount:value.unreadableProcessCount};
-              } catch { return fallback; }
-            })(),
+            userdelExitStatus,
+            uidProcessObservation:uidProcessObservationFromLifecycle(uidLifecycleObservation),
+            uidLifecycleObservation,
           }) + '\n');
           NODE
 

@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  emptyUidLifecycleObservation,
+  emptyUidStartupObservation,
   sanitizeDesktopStages,
+  sanitizeUidLifecycleObservation,
+  sanitizeUidProcessObservation,
+  sanitizeUidStartupObservation,
+  sanitizeUidTcpSocketObservation,
+  uidProcessObservationFromLifecycle,
   validDesktopSummary,
 } from './element-desktop-evidence.mjs';
 
@@ -88,6 +95,109 @@ function passingDesktopObservation(overrides = {}) {
     },
     pageLoadOutcome: 'domcontentloaded',
     ...overrides,
+  };
+}
+
+function passingUidLifecycleObservation() {
+  return {
+    state: 'observed',
+    overflow: false,
+    uidProcessCount: 2,
+    nonZombieProcessCount: 2,
+    zombieCount: 0,
+    unreadableProcessCount: 0,
+    unattributedProcessCount: 0,
+    processClassCounts: {
+      application: 1,
+      browser: 0,
+      renderer: 1,
+      zygote: 0,
+      gpu: 0,
+      utility: 0,
+      other: 0,
+      unknown: 0,
+    },
+    rendererOwnership: {
+      state: 'observed',
+      appIdentityState: 'verified',
+      rendererCount: 1,
+      appDescendantCount: 1,
+      appProcessGroupCount: 1,
+      appDescendantAndProcessGroupCount: 1,
+      appDescendantOnlyCount: 0,
+      appProcessGroupOnlyCount: 0,
+      noCurrentLinkCount: 0,
+      otherUidAppDescendantCount: 0,
+      securityCoverageState: 'observed',
+    },
+    seccompState: 'enabled',
+    noNewPrivsState: 'enabled',
+  };
+}
+
+function observedEmptyUidLifecycleObservation() {
+  return {
+    state: 'observed',
+    overflow: false,
+    uidProcessCount: 0,
+    nonZombieProcessCount: 0,
+    zombieCount: 0,
+    unreadableProcessCount: 0,
+    unattributedProcessCount: 0,
+    processClassCounts: {
+      application: 0,
+      browser: 0,
+      renderer: 0,
+      zygote: 0,
+      gpu: 0,
+      utility: 0,
+      other: 0,
+      unknown: 0,
+    },
+    rendererOwnership: {
+      state: 'not_observed',
+      appIdentityState: 'not_observed',
+      rendererCount: null,
+      appDescendantCount: null,
+      appProcessGroupCount: null,
+      appDescendantAndProcessGroupCount: null,
+      appDescendantOnlyCount: null,
+      appProcessGroupOnlyCount: null,
+      noCurrentLinkCount: null,
+      otherUidAppDescendantCount: null,
+      securityCoverageState: 'not_observed',
+    },
+    seccompState: 'not_observed',
+    noNewPrivsState: 'not_observed',
+  };
+}
+
+function observedEmptyUidTcpSocketObservation() {
+  return {
+    coverage: 'process_owned_tcp_only',
+    packetAttribution: 'not_observed',
+    state: 'observed',
+    overflow: false,
+    tcpSocketCount: 0,
+    buckets: [],
+  };
+}
+
+function passingUidTcpSocketObservation() {
+  return {
+    coverage: 'process_owned_tcp_only',
+    packetAttribution: 'not_observed',
+    state: 'observed',
+    overflow: false,
+    tcpSocketCount: 1,
+    buckets: [
+      {
+        processRole: 'renderer',
+        peerCategory: 'matrix_loopback',
+        tcpState: 'established',
+        count: 1,
+      },
+    ],
   };
 }
 
@@ -181,6 +291,14 @@ function stages(overrides = {}) {
       desktopObservation: passingDesktopObservation(),
       rendererCount: 1,
       rendererDiagnostics: passingRendererDiagnostics(),
+      uidLifecycleDiagnostics: {
+        beforeApp: observedEmptyUidLifecycleObservation(),
+        afterPageLoad: passingUidLifecycleObservation(),
+      },
+      uidTcpSocketDiagnostics: {
+        beforeApp: observedEmptyUidTcpSocketObservation(),
+        afterPageLoad: passingUidTcpSocketObservation(),
+      },
       egressPhaseCounters: {
         beforeApp: observedCounters(),
         afterPageLoad: observedCounters(),
@@ -208,6 +326,7 @@ function stages(overrides = {}) {
       aptSource: 'passed',
       accountState: 'absent',
       userdelStatus: 'not_run',
+      userdelExitStatus: null,
       uidProcessObservation: {
         state: 'observed',
         uidProcessCount: 0,
@@ -215,6 +334,7 @@ function stages(overrides = {}) {
         zombieCount: 0,
         unreadableProcessCount: 0,
       },
+      uidLifecycleObservation: observedEmptyUidLifecycleObservation(),
     },
     ...(overrides.extraStages ?? []),
   ];
@@ -223,7 +343,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 9);
+  assert.equal(summary.schemaVersion, 10);
   assert.equal(summary.failureCode, null);
   assert.equal(summary.checks.isolatedNodePreflight, 'passed');
   assert.equal(summary.targetUidPreflight.status, 'passed');
@@ -237,6 +357,7 @@ test('Desktop evidence passes only with a complete startup, deny test, zero-egre
   assert.deepEqual(summary.cleanupDiagnostics, {
     accountState: 'absent',
     userdelStatus: 'not_run',
+    userdelExitStatus: null,
     uidProcessObservation: {
       state: 'observed',
       uidProcessCount: 0,
@@ -244,6 +365,15 @@ test('Desktop evidence passes only with a complete startup, deny test, zero-egre
       zombieCount: 0,
       unreadableProcessCount: 0,
     },
+  });
+  assert.deepEqual(summary.uidLifecycleDiagnostics, {
+    beforeApp: observedEmptyUidLifecycleObservation(),
+    afterPageLoad: passingUidLifecycleObservation(),
+    beforeUserdel: observedEmptyUidLifecycleObservation(),
+  });
+  assert.deepEqual(summary.uidTcpSocketDiagnostics, {
+    beforeApp: observedEmptyUidTcpSocketObservation(),
+    afterPageLoad: passingUidTcpSocketObservation(),
   });
   assert.deepEqual(summary.egressProbe, passingProbe());
   assert.deepEqual(summary.secretService, passingSecretService());
@@ -316,6 +446,155 @@ test('Desktop evidence preserves a finite sandbox failure reason without raw pro
   );
 });
 
+test('cleanup census sanitizer accepts the fixed process-count shape and fails closed on malformed fields', () => {
+  const observed = {
+    state: 'observed',
+    uidProcessCount: 3,
+    nonZombieProcessCount: 2,
+    zombieCount: 1,
+    unreadableProcessCount: 0,
+  };
+  assert.deepEqual(
+    sanitizeUidProcessObservation(JSON.stringify(observed)),
+    observed,
+  );
+
+  const unavailable = {
+    state: 'unavailable',
+    uidProcessCount: null,
+    nonZombieProcessCount: null,
+    zombieCount: null,
+    unreadableProcessCount: null,
+  };
+  assert.deepEqual(
+    sanitizeUidProcessObservation(JSON.stringify(unavailable)),
+    unavailable,
+  );
+  assert.deepEqual(sanitizeUidProcessObservation('{'), unavailable);
+  assert.deepEqual(
+    sanitizeUidProcessObservation({ ...observed, processId: 1234 }),
+    unavailable,
+  );
+});
+
+test('UID lifecycle sanitizer preserves bounded ownership evidence and unavailable states without private fields', () => {
+  const observed = passingUidLifecycleObservation();
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation(JSON.stringify(observed)),
+    observed,
+  );
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation(undefined),
+    emptyUidLifecycleObservation('not_observed'),
+  );
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation('{'),
+    emptyUidLifecycleObservation('unavailable'),
+  );
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation({
+      ...observed,
+      applicationPid: 98_765,
+      rawCommandLine: 'private-canary',
+    }),
+    emptyUidLifecycleObservation('unavailable'),
+  );
+
+  const partial = {
+    ...observed,
+    state: 'partial',
+    overflow: true,
+    rendererOwnership: {
+      ...observed.rendererOwnership,
+      state: 'partial',
+      securityCoverageState: 'partial',
+    },
+  };
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation(JSON.stringify(partial)),
+    partial,
+  );
+
+  const unavailableProjection = uidProcessObservationFromLifecycle('{');
+  assert.deepEqual(unavailableProjection, {
+    state: 'unavailable',
+    uidProcessCount: null,
+    nonZombieProcessCount: null,
+    zombieCount: null,
+    unreadableProcessCount: null,
+  });
+  assert.equal(JSON.stringify(observed).includes('98765'), false);
+  assert.equal(JSON.stringify(observed).includes('private-canary'), false);
+});
+
+test('TCP socket diagnostics preserve only fixed roles, categories, and states', () => {
+  const observed = passingUidTcpSocketObservation();
+  assert.deepEqual(
+    sanitizeUidTcpSocketObservation(JSON.stringify(observed)),
+    observed,
+  );
+  assert.deepEqual(
+    sanitizeUidTcpSocketObservation(undefined),
+    emptyUidStartupObservation().tcpSocketObservation,
+  );
+  assert.deepEqual(
+    sanitizeUidTcpSocketObservation('{'),
+    emptyUidStartupObservation('unavailable').tcpSocketObservation,
+  );
+  assert.deepEqual(
+    sanitizeUidTcpSocketObservation({
+      ...observed,
+      buckets: [
+        {
+          ...observed.buckets[0],
+          remoteAddress: '192.0.2.44',
+          numericPort: 8008,
+        },
+      ],
+    }),
+    emptyUidStartupObservation('unavailable').tcpSocketObservation,
+  );
+  assert.deepEqual(
+    sanitizeUidTcpSocketObservation({
+      ...observed,
+      buckets: [{ ...observed.buckets[0], peerCategory: 'raw_ip_192.0.2.44' }],
+    }),
+    emptyUidStartupObservation('unavailable').tcpSocketObservation,
+  );
+
+  const incomplete = {
+    ...observed,
+    state: 'partial',
+    overflow: true,
+  };
+  assert.deepEqual(sanitizeUidTcpSocketObservation(incomplete), incomplete);
+  assert.equal(
+    JSON.stringify(sanitizeUidTcpSocketObservation(observed)).includes(
+      '192.0.2.44',
+    ),
+    false,
+  );
+});
+
+test('UID startup observation rejects unrecognized envelope fields and keeps missing captures unavailable', () => {
+  const observed = {
+    uidLifecycleObservation: passingUidLifecycleObservation(),
+    tcpSocketObservation: passingUidTcpSocketObservation(),
+  };
+  assert.deepEqual(
+    sanitizeUidStartupObservation(JSON.stringify(observed)),
+    observed,
+  );
+  assert.deepEqual(
+    sanitizeUidStartupObservation(undefined),
+    emptyUidStartupObservation('not_observed'),
+  );
+  assert.deepEqual(
+    sanitizeUidStartupObservation({ ...observed, applicationPid: 41_002 }),
+    emptyUidStartupObservation('unavailable'),
+  );
+});
+
 test('phase egress and cleanup diagnostics remain separate from final acceptance gates', () => {
   const withUnavailableSnapshots = stages();
   withUnavailableSnapshots[1].egressPhaseCounters = {
@@ -326,15 +605,21 @@ test('phase egress and cleanup diagnostics remain separate from final acceptance
       ipv6Blocked: null,
     },
   };
+  withUnavailableSnapshots[1].uidTcpSocketDiagnostics = {
+    beforeApp: emptyUidStartupObservation('unavailable').tcpSocketObservation,
+    afterPageLoad:
+      emptyUidStartupObservation('unavailable').tcpSocketObservation,
+  };
   withUnavailableSnapshots[4].accountState = 'absent';
   withUnavailableSnapshots[4].userdelStatus = 'not_run';
-  withUnavailableSnapshots[4].uidProcessObservation = {
+  withUnavailableSnapshots[4].uidLifecycleObservation = {
+    ...observedEmptyUidLifecycleObservation(),
     state: 'partial',
-    uidProcessCount: 0,
-    nonZombieProcessCount: 0,
-    zombieCount: 0,
-    unreadableProcessCount: 0,
   };
+  withUnavailableSnapshots[4].uidProcessObservation =
+    uidProcessObservationFromLifecycle(
+      withUnavailableSnapshots[4].uidLifecycleObservation,
+    );
   const summary = sanitizeDesktopStages(withUnavailableSnapshots, sourceSha);
 
   assert.equal(summary.status, 'passed');
@@ -445,13 +730,30 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
   failedAccountCleanup[4].user = 'failed';
   failedAccountCleanup[4].accountState = 'uid_match';
   failedAccountCleanup[4].userdelStatus = 'failed';
-  failedAccountCleanup[4].uidProcessObservation = {
+  failedAccountCleanup[4].userdelExitStatus = 8;
+  failedAccountCleanup[4].uidLifecycleObservation = {
+    ...observedEmptyUidLifecycleObservation(),
     state: 'observed',
+    overflow: false,
     uidProcessCount: 2,
     nonZombieProcessCount: 1,
     zombieCount: 1,
     unreadableProcessCount: 0,
+    processClassCounts: {
+      application: 0,
+      browser: 0,
+      renderer: 1,
+      zygote: 0,
+      gpu: 0,
+      utility: 0,
+      other: 1,
+      unknown: 0,
+    },
   };
+  failedAccountCleanup[4].uidProcessObservation =
+    uidProcessObservationFromLifecycle(
+      failedAccountCleanup[4].uidLifecycleObservation,
+    );
   const failedAccountSummary = sanitizeDesktopStages(
     failedAccountCleanup,
     sourceSha,
@@ -461,6 +763,7 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
   assert.deepEqual(failedAccountSummary.cleanupDiagnostics, {
     accountState: 'uid_match',
     userdelStatus: 'failed',
+    userdelExitStatus: 8,
     uidProcessObservation: {
       state: 'observed',
       uidProcessCount: 2,

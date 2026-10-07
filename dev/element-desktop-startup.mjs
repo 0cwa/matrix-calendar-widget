@@ -1,11 +1,15 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import {
+  closeSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
+  readlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -26,7 +30,49 @@ const MAX_SAFE_STORAGE_LOG_BYTES = 1_048_576;
 const MAX_SAFE_STORAGE_LINE_LENGTH = 512;
 const DESKTOP_SPAWN_WAIT_MS = 5_000;
 const MAX_DIAGNOSTIC_COUNT = 100;
-const EGRESS_COUNTER_ACK_WAIT_MS = 12_000;
+const MAX_UID_LIFECYCLE_PROCESSES = 4_096;
+const MAX_PROC_COMMAND_LINE_BYTES = 4_096;
+const MAX_PROC_NETWORK_TABLE_BYTES = 1_048_576;
+const MAX_UID_SOCKET_FD_REFERENCES = 8_192;
+const MAX_UID_SOCKET_BUCKETS = 100;
+// The workflow's after-page observation budget is 13s including kill grace;
+// keep 2s here for polling and dispatch overhead.
+const EGRESS_COUNTER_ACK_WAIT_MS = 15_000;
+const UID_SOCKET_PROCESS_ROLES = Object.freeze([
+  'application',
+  'browser',
+  'renderer',
+  'zygote',
+  'gpu',
+  'utility',
+  'other',
+  'shared',
+  'unknown',
+]);
+const UID_SOCKET_PEER_CATEGORIES = Object.freeze([
+  'matrix_loopback',
+  'loopback_other',
+  'non_loopback_web',
+  'non_loopback_other',
+  'cdp_loopback_listener',
+  'cdp_non_loopback_listener',
+  'other_listener',
+  'no_peer',
+  'unknown',
+]);
+const UID_TCP_STATES = Object.freeze([
+  'established',
+  'syn_sent',
+  'syn_received',
+  'fin_wait',
+  'time_wait',
+  'close_wait',
+  'last_ack',
+  'closing',
+  'listening',
+  'closed',
+  'unknown',
+]);
 export const SANDBOX_REASONS = Object.freeze([
   'not_observed',
   'passed',
@@ -485,6 +531,983 @@ export function summarizeUidProcessObservations(
     nonZombieProcessCount: cappedDiagnosticCount(nonZombieProcessCount),
     zombieCount: cappedDiagnosticCount(zombieCount),
     unreadableProcessCount: cappedDiagnosticCount(unreadableProcessCount),
+  };
+}
+
+function emptyUidLifecycleObservation(state) {
+  const rendererState =
+    state === 'not_observed' ? 'not_observed' : 'unavailable';
+  const securityState =
+    state === 'not_observed' ? 'not_observed' : 'unavailable';
+  return {
+    state,
+    overflow: null,
+    uidProcessCount: null,
+    nonZombieProcessCount: null,
+    zombieCount: null,
+    unreadableProcessCount: null,
+    unattributedProcessCount: null,
+    processClassCounts: null,
+    rendererOwnership: {
+      state: rendererState,
+      appIdentityState: rendererState,
+      rendererCount: null,
+      appDescendantCount: null,
+      appProcessGroupCount: null,
+      appDescendantAndProcessGroupCount: null,
+      appDescendantOnlyCount: null,
+      appProcessGroupOnlyCount: null,
+      noCurrentLinkCount: null,
+      otherUidAppDescendantCount: null,
+      securityCoverageState: rendererState,
+    },
+    seccompState: securityState,
+    noNewPrivsState: securityState,
+  };
+}
+
+function classifyUidProcess(args, pid, applicationPid) {
+  if (pid === applicationPid) return 'application';
+  if (!Array.isArray(args) || args.length === 0) return 'unknown';
+  const processType = args.find((arg) => arg.startsWith('--type='));
+  if (processType === '--type=browser') return 'browser';
+  if (processType === '--type=renderer') return 'renderer';
+  if (processType === '--type=zygote') return 'zygote';
+  if (processType === '--type=gpu-process') return 'gpu';
+  if (processType === '--type=utility') return 'utility';
+  return 'other';
+}
+
+export function classifyUidSocketProcess(
+  process,
+  expectedUid,
+  applicationPid = null,
+  applicationIdentityVerified = false,
+) {
+  if (
+    !Number.isSafeInteger(expectedUid) ||
+    expectedUid < 1 ||
+    expectedUid > 65_535 ||
+    !Array.isArray(process?.uids) ||
+    process.uids.length !== 4 ||
+    !process.uids.every((uid) => uid === expectedUid)
+  ) {
+    return null;
+  }
+  if (
+    Number.isSafeInteger(applicationPid) &&
+    process.pid === applicationPid &&
+    !applicationIdentityVerified
+  ) {
+    return 'unknown';
+  }
+  return classifyUidProcess(
+    process.args,
+    process.pid,
+    applicationIdentityVerified ? applicationPid : null,
+  );
+}
+
+function hasProcessAncestor(process, processByPid, ancestorPid) {
+  if (!Number.isSafeInteger(process.parentPid)) return false;
+  let parentPid = process.parentPid;
+  const visited = new Set();
+  for (let depth = 0; depth < 64; depth += 1) {
+    if (parentPid === ancestorPid) return true;
+    if (parentPid <= 1 || visited.has(parentPid)) return false;
+    visited.add(parentPid);
+    const parent = processByPid.get(parentPid);
+    if (!parent || !Number.isSafeInteger(parent.parentPid)) return false;
+    parentPid = parent.parentPid;
+  }
+  return false;
+}
+
+export function summarizeUidLifecycleObservation(
+  processes,
+  expectedUid,
+  applicationPid = null,
+  complete = true,
+  overflow = false,
+) {
+  if (
+    !Array.isArray(processes) ||
+    !Number.isSafeInteger(expectedUid) ||
+    expectedUid < 1 ||
+    expectedUid > 65_535
+  ) {
+    return emptyUidLifecycleObservation('unavailable');
+  }
+
+  const processByPid = new Map(
+    processes
+      .filter((item) => Number.isSafeInteger(item?.pid) && item.pid > 0)
+      .map((item) => [item.pid, item]),
+  );
+  const application =
+    Number.isSafeInteger(applicationPid) && applicationPid > 1
+      ? processByPid.get(applicationPid)
+      : undefined;
+  const applicationIdentityVerified = Boolean(
+    application &&
+    Array.isArray(application.uids) &&
+    application.uids.length === 4 &&
+    application.uids.every((uid) => uid === expectedUid) &&
+    application.processGroupId === applicationPid &&
+    application.unreadable !== true,
+  );
+
+  const classCounts = {
+    application: 0,
+    browser: 0,
+    renderer: 0,
+    zygote: 0,
+    gpu: 0,
+    utility: 0,
+    other: 0,
+    unknown: 0,
+  };
+  const rendererSecurityRows = [];
+  let uidProcessCount = 0;
+  let nonZombieProcessCount = 0;
+  let zombieCount = 0;
+  let unreadableProcessCount = 0;
+  let unattributedProcessCount = 0;
+  let uidRendererCount = 0;
+  let appDescendantRendererCount = 0;
+  let appProcessGroupRendererCount = 0;
+  let appDescendantAndProcessGroupRendererCount = 0;
+  let appDescendantOnlyRendererCount = 0;
+  let appProcessGroupOnlyRendererCount = 0;
+  let noCurrentLinkRendererCount = 0;
+  let otherUidAppDescendantRendererCount = 0;
+  let sawCountOverflow = overflow;
+
+  for (const item of processes) {
+    const appDescendant =
+      applicationIdentityVerified &&
+      Number.isSafeInteger(item?.pid) &&
+      item.pid !== applicationPid &&
+      hasProcessAncestor(item, processByPid, applicationPid);
+    if (!Array.isArray(item?.uids)) {
+      if (
+        applicationIdentityVerified &&
+        (appDescendant || item?.processGroupId === applicationPid)
+      ) {
+        unattributedProcessCount += 1;
+      }
+      complete = false;
+      continue;
+    }
+
+    const processClass = classifyUidProcess(
+      item.args,
+      item.pid,
+      applicationIdentityVerified ? applicationPid : null,
+    );
+    const matchesUid = item.uids.includes(expectedUid);
+
+    if (appDescendant && !matchesUid && processClass === 'renderer') {
+      otherUidAppDescendantRendererCount += 1;
+    }
+    if (!matchesUid) continue;
+
+    uidProcessCount += 1;
+    let processUnreadable =
+      item.unreadable === true || !Array.isArray(item.args);
+    if (item.state === 'Z') {
+      zombieCount += 1;
+    } else if (typeof item.state === 'string' && item.state.length === 1) {
+      nonZombieProcessCount += 1;
+    } else {
+      processUnreadable = true;
+    }
+
+    if (processUnreadable) {
+      unreadableProcessCount += 1;
+      complete = false;
+    }
+    classCounts[processClass] += 1;
+
+    if (processClass !== 'renderer') continue;
+    uidRendererCount += 1;
+    if (!applicationIdentityVerified) continue;
+
+    const inAppProcessGroup = item.processGroupId === applicationPid;
+    if (appDescendant) appDescendantRendererCount += 1;
+    if (inAppProcessGroup) appProcessGroupRendererCount += 1;
+    if (appDescendant && inAppProcessGroup) {
+      appDescendantAndProcessGroupRendererCount += 1;
+      rendererSecurityRows.push(item);
+    } else if (appDescendant) {
+      appDescendantOnlyRendererCount += 1;
+      rendererSecurityRows.push(item);
+    } else if (inAppProcessGroup) {
+      appProcessGroupOnlyRendererCount += 1;
+    } else {
+      noCurrentLinkRendererCount += 1;
+    }
+  }
+
+  const countValues = [
+    uidProcessCount,
+    nonZombieProcessCount,
+    zombieCount,
+    unreadableProcessCount,
+    unattributedProcessCount,
+    uidRendererCount,
+    appDescendantRendererCount,
+    appProcessGroupRendererCount,
+    appDescendantAndProcessGroupRendererCount,
+    appDescendantOnlyRendererCount,
+    appProcessGroupOnlyRendererCount,
+    noCurrentLinkRendererCount,
+    otherUidAppDescendantRendererCount,
+    ...Object.values(classCounts),
+  ];
+  if (countValues.some((value) => value > MAX_DIAGNOSTIC_COUNT)) {
+    sawCountOverflow = true;
+  }
+  const state = complete && !sawCountOverflow ? 'observed' : 'partial';
+  const rendererOwnershipState = applicationIdentityVerified
+    ? state
+    : applicationPid === null
+      ? 'not_observed'
+      : 'unavailable';
+  const securityCoverageState = applicationIdentityVerified
+    ? state
+    : applicationPid === null
+      ? 'not_observed'
+      : 'unavailable';
+
+  return {
+    state,
+    overflow: sawCountOverflow,
+    uidProcessCount: cappedDiagnosticCount(uidProcessCount),
+    nonZombieProcessCount: cappedDiagnosticCount(nonZombieProcessCount),
+    zombieCount: cappedDiagnosticCount(zombieCount),
+    unreadableProcessCount: cappedDiagnosticCount(unreadableProcessCount),
+    unattributedProcessCount: cappedDiagnosticCount(unattributedProcessCount),
+    processClassCounts: Object.fromEntries(
+      Object.entries(classCounts).map(([name, value]) => [
+        name,
+        cappedDiagnosticCount(value),
+      ]),
+    ),
+    rendererOwnership: {
+      state: rendererOwnershipState,
+      appIdentityState: applicationIdentityVerified
+        ? 'verified'
+        : applicationPid === null
+          ? 'not_observed'
+          : 'unavailable',
+      rendererCount: applicationIdentityVerified
+        ? cappedDiagnosticCount(uidRendererCount)
+        : null,
+      appDescendantCount: applicationIdentityVerified
+        ? cappedDiagnosticCount(appDescendantRendererCount)
+        : null,
+      appProcessGroupCount: applicationIdentityVerified
+        ? cappedDiagnosticCount(appProcessGroupRendererCount)
+        : null,
+      appDescendantAndProcessGroupCount: applicationIdentityVerified
+        ? cappedDiagnosticCount(appDescendantAndProcessGroupRendererCount)
+        : null,
+      appDescendantOnlyCount: applicationIdentityVerified
+        ? cappedDiagnosticCount(appDescendantOnlyRendererCount)
+        : null,
+      appProcessGroupOnlyCount: applicationIdentityVerified
+        ? cappedDiagnosticCount(appProcessGroupOnlyRendererCount)
+        : null,
+      noCurrentLinkCount: applicationIdentityVerified
+        ? cappedDiagnosticCount(noCurrentLinkRendererCount)
+        : null,
+      otherUidAppDescendantCount: applicationIdentityVerified
+        ? cappedDiagnosticCount(otherUidAppDescendantRendererCount)
+        : null,
+      securityCoverageState,
+    },
+    seccompState: applicationIdentityVerified
+      ? aggregateRendererSecurityState(rendererSecurityRows, 'seccomp', '2')
+      : applicationPid === null
+        ? 'not_observed'
+        : 'unavailable',
+    noNewPrivsState: applicationIdentityVerified
+      ? aggregateRendererSecurityState(rendererSecurityRows, 'noNewPrivs', '1')
+      : applicationPid === null
+        ? 'not_observed'
+        : 'unavailable',
+  };
+}
+
+function emptyUidTcpSocketObservation(state) {
+  return {
+    coverage: 'process_owned_tcp_only',
+    packetAttribution: 'not_observed',
+    state,
+    overflow: null,
+    tcpSocketCount: null,
+    buckets: null,
+  };
+}
+
+function parseProcEndpoint(value, family) {
+  if (typeof value !== 'string') return null;
+  const parts = value.split(':');
+  const addressHex = parts[0]?.toLowerCase();
+  const portHex = parts[1];
+  const addressLength = family === 4 ? 8 : 32;
+  if (
+    parts.length !== 2 ||
+    !new RegExp(`^[0-9a-f]{${addressLength}}$`, 'u').test(addressHex ?? '') ||
+    !/^[0-9a-f]{4}$/iu.test(portHex ?? '')
+  ) {
+    return null;
+  }
+  const port = Number.parseInt(portHex, 16);
+  if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) return null;
+
+  let loopback = false;
+  let unspecified = false;
+  if (family === 4) {
+    const octets = addressHex
+      .match(/.{2}/gu)
+      .reverse()
+      .map((octet) => Number.parseInt(octet, 16));
+    unspecified = octets.every((octet) => octet === 0);
+    loopback = octets[0] === 127;
+  } else {
+    unspecified = /^0{32}$/u.test(addressHex);
+    loopback =
+      /^0{30}01$/u.test(addressHex) || /^0{24}01000000$/u.test(addressHex);
+  }
+
+  return { family, addressHex, port, loopback, unspecified };
+}
+
+function procTcpState(code) {
+  const states = {
+    '01': 'established',
+    '02': 'syn_sent',
+    '03': 'syn_received',
+    '04': 'fin_wait',
+    '05': 'fin_wait',
+    '06': 'time_wait',
+    '07': 'closed',
+    '08': 'close_wait',
+    '09': 'last_ack',
+    '0A': 'listening',
+    '0B': 'closing',
+  };
+  return states[String(code).toUpperCase()] ?? 'unknown';
+}
+
+function procTcpPeerCategory(state, local, remote, cdpPort) {
+  if (state === 'listening') {
+    if (local.port === cdpPort) {
+      return local.loopback
+        ? 'cdp_loopback_listener'
+        : 'cdp_non_loopback_listener';
+    }
+    return 'other_listener';
+  }
+  if (remote.unspecified && remote.port === 0) return 'no_peer';
+  if (remote.loopback) {
+    return remote.port === 8_008 ? 'matrix_loopback' : 'loopback_other';
+  }
+  if (remote.unspecified) return 'unknown';
+  if (remote.port === 80 || remote.port === 443) return 'non_loopback_web';
+  return 'non_loopback_other';
+}
+
+function parseProcTcpTable(text, family, expectedUid, desiredInodes) {
+  const rows = [];
+  let complete = true;
+  for (const line of text.split(/\r?\n/u).slice(1)) {
+    if (line.trim() === '') continue;
+    const fields = line.trim().split(/\s+/u);
+    if (fields.length < 10 || !/^\d+:$/u.test(fields[0] ?? '')) {
+      complete = false;
+      continue;
+    }
+    const inode = fields[9];
+    if (!desiredInodes.has(inode)) continue;
+    if (!/^\d+$/u.test(fields[7] ?? '')) {
+      complete = false;
+      continue;
+    }
+    const uid = Number(fields[7]);
+    if (!Number.isSafeInteger(uid)) {
+      complete = false;
+      continue;
+    }
+    if (uid !== expectedUid) continue;
+    const local = parseProcEndpoint(fields[1], family);
+    const remote = parseProcEndpoint(fields[2], family);
+    const state = procTcpState(fields[3]);
+    if (!local || !remote || state === 'unknown') complete = false;
+    rows.push({
+      inode,
+      uid,
+      state,
+      local,
+      remote,
+      family,
+    });
+  }
+  return { rows, complete };
+}
+
+function readBoundedProcText(path, maximumBytes) {
+  let descriptor;
+  try {
+    descriptor = openSync(path, 'r');
+    const buffer = Buffer.alloc(maximumBytes + 1);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const count = readSync(
+        descriptor,
+        buffer,
+        bytesRead,
+        buffer.length - bytesRead,
+        null,
+      );
+      if (count === 0) break;
+      bytesRead += count;
+    }
+    const overflow = bytesRead > maximumBytes;
+    return {
+      text: buffer
+        .subarray(0, Math.min(bytesRead, maximumBytes))
+        .toString('ascii'),
+      complete: !overflow,
+      overflow,
+    };
+  } catch {
+    return null;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+export function summarizeUidTcpSocketObservation(
+  socketOwners,
+  tcpRows,
+  expectedUid,
+  complete = true,
+  overflow = false,
+  cdpPort = null,
+) {
+  if (
+    !(socketOwners instanceof Map) ||
+    !Array.isArray(tcpRows) ||
+    !Number.isSafeInteger(expectedUid) ||
+    expectedUid < 1 ||
+    expectedUid > 65_535 ||
+    !Number.isSafeInteger(cdpPort) ||
+    cdpPort < 1 ||
+    cdpPort > 65_535
+  ) {
+    return emptyUidTcpSocketObservation('unavailable');
+  }
+  const buckets = new Map();
+  const seenSockets = new Set();
+  for (const row of tcpRows) {
+    if (
+      row?.uid !== expectedUid ||
+      typeof row.inode !== 'string' ||
+      !socketOwners.has(row.inode)
+    ) {
+      continue;
+    }
+    if (seenSockets.has(row.inode)) {
+      complete = false;
+      continue;
+    }
+    seenSockets.add(row.inode);
+    const roles = socketOwners.get(row.inode);
+    const observedRole =
+      roles instanceof Map && roles.size === 1
+        ? roles.values().next().value
+        : roles instanceof Map && roles.size > 1
+          ? 'shared'
+          : 'unknown';
+    const role = UID_SOCKET_PROCESS_ROLES.includes(observedRole)
+      ? observedRole
+      : 'unknown';
+    const state = UID_TCP_STATES.includes(row.state) ? row.state : 'unknown';
+    const peerCategory =
+      row.local && row.remote
+        ? procTcpPeerCategory(state, row.local, row.remote, cdpPort)
+        : 'unknown';
+    if (
+      !UID_SOCKET_PROCESS_ROLES.includes(role) ||
+      role === 'unknown' ||
+      state === 'unknown' ||
+      peerCategory === 'unknown'
+    ) {
+      complete = false;
+    }
+    const key = `${role}\u0000${peerCategory}\u0000${state}`;
+    buckets.set(key, (buckets.get(key) ?? 0) + 1);
+  }
+
+  const orderedBuckets = [...buckets.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(0, MAX_UID_SOCKET_BUCKETS)
+    .map(([key, count]) => {
+      const [processRole, peerCategory, state] = key.split('\u0000');
+      return {
+        processRole,
+        peerCategory,
+        tcpState: state,
+        count: cappedDiagnosticCount(count),
+      };
+    });
+  if (
+    seenSockets.size > MAX_DIAGNOSTIC_COUNT ||
+    buckets.size > MAX_UID_SOCKET_BUCKETS ||
+    [...buckets.values()].some((count) => count > MAX_DIAGNOSTIC_COUNT)
+  ) {
+    overflow = true;
+  }
+  return {
+    coverage: 'process_owned_tcp_only',
+    packetAttribution: 'not_observed',
+    state: complete && !overflow ? 'observed' : 'partial',
+    overflow,
+    tcpSocketCount: cappedDiagnosticCount(seenSockets.size),
+    buckets: orderedBuckets,
+  };
+}
+
+export function summarizeUidTcpSocketTables(
+  socketOwners,
+  tables,
+  expectedUid,
+  cdpPort,
+  complete = true,
+  overflow = false,
+) {
+  if (!(socketOwners instanceof Map) || !Array.isArray(tables)) {
+    return emptyUidTcpSocketObservation('unavailable');
+  }
+  if (socketOwners.size > 0 && tables.length === 0) {
+    return emptyUidTcpSocketObservation('unavailable');
+  }
+  const desiredInodes = new Set(socketOwners.keys());
+  const rows = [];
+  for (const table of tables) {
+    if (
+      !table ||
+      typeof table.text !== 'string' ||
+      ![4, 6].includes(table.family)
+    ) {
+      complete = false;
+      continue;
+    }
+    complete &&= table.complete !== false;
+    overflow ||= table.overflow === true;
+    const parsed = parseProcTcpTable(
+      table.text,
+      table.family,
+      expectedUid,
+      desiredInodes,
+    );
+    complete &&= parsed.complete;
+    rows.push(...parsed.rows);
+  }
+  return summarizeUidTcpSocketObservation(
+    socketOwners,
+    rows,
+    expectedUid,
+    complete,
+    overflow,
+    cdpPort,
+  );
+}
+
+function readUidTcpSocketObservation(
+  processes,
+  expectedUid,
+  applicationPid,
+  processScanComplete,
+  processScanOverflow,
+  cdpPort,
+) {
+  if (
+    !Array.isArray(processes) ||
+    !Number.isSafeInteger(expectedUid) ||
+    expectedUid < 1 ||
+    expectedUid > 65_535 ||
+    !Number.isSafeInteger(cdpPort) ||
+    cdpPort < 1 ||
+    cdpPort > 65_535
+  ) {
+    return emptyUidTcpSocketObservation('unavailable');
+  }
+
+  let complete = processScanComplete;
+  let overflow = processScanOverflow;
+  let fdReferenceCount = 0;
+  const processByPid = new Map(processes.map((item) => [item.pid, item]));
+  const application = processByPid.get(applicationPid);
+  const applicationIdentityVerified = Boolean(
+    Number.isSafeInteger(applicationPid) &&
+    applicationPid > 1 &&
+    application &&
+    Array.isArray(application.uids) &&
+    application.uids.length === 4 &&
+    application.uids.every((uid) => uid === expectedUid) &&
+    application.processGroupId === applicationPid &&
+    application.unreadable !== true,
+  );
+  const localNetworkNamespace = (() => {
+    try {
+      return readlinkSync('/proc/self/ns/net');
+    } catch {
+      return null;
+    }
+  })();
+  if (localNetworkNamespace === null) {
+    return emptyUidTcpSocketObservation('unavailable');
+  }
+
+  const namespaceGroups = new Map();
+  for (const item of processes) {
+    if (!Array.isArray(item?.uids) || !item.uids.includes(expectedUid))
+      continue;
+    if (!item.uids.every((uid) => uid === expectedUid)) {
+      complete = false;
+      continue;
+    }
+    let namespace;
+    try {
+      namespace = readlinkSync(`/proc/${item.pid}/ns/net`);
+    } catch {
+      if (existsSync(`/proc/${item.pid}`)) complete = false;
+      continue;
+    }
+    if (namespace !== localNetworkNamespace) {
+      complete = false;
+      continue;
+    }
+    let group = namespaceGroups.get(namespace);
+    if (!group) {
+      if (namespaceGroups.size >= 8) {
+        overflow = true;
+        complete = false;
+        continue;
+      }
+      group = { representativePid: item.pid, processes: [], inodes: new Set() };
+      namespaceGroups.set(namespace, group);
+    }
+    group.processes.push(item);
+  }
+
+  const ownersByInode = new Map();
+  for (const group of namespaceGroups.values()) {
+    for (const item of group.processes) {
+      let fdNames;
+      try {
+        fdNames = readdirSync(`/proc/${item.pid}/fd`).filter((name) =>
+          /^\d+$/u.test(name),
+        );
+      } catch {
+        if (existsSync(`/proc/${item.pid}`)) complete = false;
+        continue;
+      }
+      fdNames.sort((left, right) => Number(left) - Number(right));
+      for (const name of fdNames) {
+        if (fdReferenceCount >= MAX_UID_SOCKET_FD_REFERENCES) {
+          overflow = true;
+          complete = false;
+          break;
+        }
+        fdReferenceCount += 1;
+        let target;
+        try {
+          target = readlinkSync(`/proc/${item.pid}/fd/${name}`);
+        } catch {
+          if (existsSync(`/proc/${item.pid}`)) complete = false;
+          continue;
+        }
+        const socket = /^socket:\[(\d+)\]$/u.exec(target);
+        if (!socket) continue;
+        const inode = socket[1];
+        group.inodes.add(inode);
+        let owners = ownersByInode.get(inode);
+        if (!owners) {
+          owners = new Map();
+          ownersByInode.set(inode, owners);
+        }
+        const role = classifyUidSocketProcess(
+          item,
+          expectedUid,
+          applicationPid,
+          applicationIdentityVerified,
+        );
+        owners.set(item.pid, role);
+        if (role === 'unknown') complete = false;
+      }
+      if (fdReferenceCount >= MAX_UID_SOCKET_FD_REFERENCES) {
+        overflow = true;
+        complete = false;
+        break;
+      }
+    }
+  }
+
+  const tables = [];
+  for (const group of namespaceGroups.values()) {
+    if (group.inodes.size === 0) continue;
+    let tableReadable = false;
+    for (const family of [4, 6]) {
+      const table = readBoundedProcText(
+        `/proc/${group.representativePid}/net/tcp${family === 6 ? '6' : ''}`,
+        MAX_PROC_NETWORK_TABLE_BYTES,
+      );
+      if (!table) {
+        complete = false;
+        continue;
+      }
+      tableReadable = true;
+      tables.push(table);
+      tables[tables.length - 1].family = family;
+    }
+    if (!tableReadable) {
+      return emptyUidTcpSocketObservation('unavailable');
+    }
+  }
+
+  return summarizeUidTcpSocketTables(
+    ownersByInode,
+    tables,
+    expectedUid,
+    cdpPort,
+    complete,
+    overflow,
+  );
+}
+
+function parseProcStat(pid, text) {
+  const end = text.lastIndexOf(')');
+  if (end < 0) return null;
+  const fields = text
+    .slice(end + 2)
+    .trim()
+    .split(/\s+/u);
+  const parentPid = Number(fields[1]);
+  const processGroupId = Number(fields[2]);
+  if (
+    fields.length < 20 ||
+    fields[0]?.length !== 1 ||
+    !Number.isSafeInteger(parentPid) ||
+    parentPid < 0 ||
+    !Number.isSafeInteger(processGroupId) ||
+    processGroupId < 0
+  ) {
+    return null;
+  }
+  return { pid, parentPid, processGroupId, state: fields[0] };
+}
+
+function parseProcStatus(text) {
+  const uidText = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$/mu.exec(text);
+  if (!uidText) return null;
+  return {
+    uids: uidText.slice(1).map(Number),
+    seccomp: /^Seccomp:\s+(\d+)$/mu.exec(text)?.[1] ?? null,
+    noNewPrivs: /^NoNewPrivs:\s+(\d+)$/mu.exec(text)?.[1] ?? null,
+  };
+}
+
+export function parseProcCommandLine(buffer) {
+  if (!Buffer.isBuffer(buffer)) {
+    return { args: null, complete: false };
+  }
+  const complete = buffer.length <= MAX_PROC_COMMAND_LINE_BYTES;
+  return {
+    args: buffer
+      .subarray(0, MAX_PROC_COMMAND_LINE_BYTES)
+      .toString('utf8')
+      .split('\0')
+      .filter(Boolean),
+    complete,
+  };
+}
+
+function readProcCommandLine(path) {
+  const descriptor = openSync(path, 'r');
+  try {
+    const buffer = Buffer.alloc(MAX_PROC_COMMAND_LINE_BYTES + 1);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const count = readSync(
+        descriptor,
+        buffer,
+        bytesRead,
+        buffer.length - bytesRead,
+        null,
+      );
+      if (count === 0) break;
+      bytesRead += count;
+    }
+    return parseProcCommandLine(buffer.subarray(0, bytesRead));
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+export function selectUidLifecycleProcessEntries(
+  entries,
+  applicationPid = null,
+  maximum = MAX_UID_LIFECYCLE_PROCESSES,
+) {
+  if (
+    !Array.isArray(entries) ||
+    !Number.isSafeInteger(maximum) ||
+    maximum < 1
+  ) {
+    return { entries: [], overflow: true };
+  }
+  const selected = entries.slice(0, maximum);
+  let overflow = entries.length > maximum;
+  if (
+    Number.isSafeInteger(applicationPid) &&
+    applicationPid > 1 &&
+    !selected.includes(String(applicationPid))
+  ) {
+    if (selected.length === maximum) {
+      selected[maximum - 1] = String(applicationPid);
+      overflow = true;
+    } else {
+      selected.push(String(applicationPid));
+    }
+  }
+  return { entries: selected, overflow };
+}
+
+function readUidLifecycleObservation(
+  uid,
+  applicationPid = null,
+  cdpPort = null,
+) {
+  const emptyObservation = (state) =>
+    cdpPort === null
+      ? emptyUidLifecycleObservation(state)
+      : {
+          uidLifecycleObservation: emptyUidLifecycleObservation(state),
+          tcpSocketObservation: emptyUidTcpSocketObservation(state),
+        };
+  if (
+    !Number.isSafeInteger(uid) ||
+    uid < 1 ||
+    uid > 65_535 ||
+    (applicationPid !== null &&
+      (!Number.isSafeInteger(applicationPid) ||
+        applicationPid < 2 ||
+        applicationPid > 2_147_483_647)) ||
+    (cdpPort !== null &&
+      (!Number.isSafeInteger(cdpPort) || cdpPort < 1 || cdpPort > 65_535))
+  ) {
+    return emptyObservation('unavailable');
+  }
+
+  let entries;
+  try {
+    entries = readdirSync('/proc').filter((name) => /^[0-9]+$/u.test(name));
+  } catch {
+    return emptyObservation('unavailable');
+  }
+  const selectedEntries = selectUidLifecycleProcessEntries(
+    entries,
+    applicationPid,
+  );
+  const { overflow, entries: scanEntries } = selectedEntries;
+
+  let complete = true;
+  const processes = [];
+  for (const entry of scanEntries) {
+    const pid = Number(entry);
+    if (!Number.isSafeInteger(pid) || pid < 1) {
+      complete = false;
+      continue;
+    }
+    const path = `/proc/${entry}`;
+    let stat = null;
+    try {
+      stat = parseProcStat(pid, readFileSync(`${path}/stat`, 'utf8'));
+    } catch {
+      if (existsSync(path)) complete = false;
+    }
+    if (stat === null && existsSync(path)) complete = false;
+
+    let status = null;
+    try {
+      status = parseProcStatus(readFileSync(`${path}/status`, 'utf8'));
+    } catch {
+      if (existsSync(path)) complete = false;
+    }
+    if (status === null && existsSync(path)) complete = false;
+    if (stat === null && status === null) continue;
+
+    processes.push({
+      pid,
+      parentPid: stat?.parentPid ?? null,
+      processGroupId: stat?.processGroupId ?? null,
+      state: stat?.state ?? null,
+      uids: status?.uids ?? null,
+      seccomp: status?.seccomp ?? null,
+      noNewPrivs: status?.noNewPrivs ?? null,
+      args: null,
+      unreadable: stat === null || status === null,
+    });
+  }
+
+  const processByPid = new Map(processes.map((item) => [item.pid, item]));
+  for (const item of processes) {
+    const matchesUid = item.uids?.includes(uid) === true;
+    const appDescendant =
+      applicationPid !== null &&
+      item.pid !== applicationPid &&
+      hasProcessAncestor(item, processByPid, applicationPid);
+    const inAppProcessGroup =
+      applicationPid !== null && item.processGroupId === applicationPid;
+    if (!matchesUid && !appDescendant && !inAppProcessGroup) continue;
+    try {
+      const commandLine = readProcCommandLine(`/proc/${item.pid}/cmdline`);
+      item.args = commandLine.args;
+      if (!commandLine.complete) {
+        item.unreadable = true;
+        complete = false;
+      }
+    } catch {
+      if (existsSync(`/proc/${item.pid}`)) {
+        item.unreadable = true;
+        complete = false;
+      }
+    }
+  }
+
+  const lifecycle = summarizeUidLifecycleObservation(
+    processes,
+    uid,
+    applicationPid,
+    complete,
+    overflow,
+  );
+  if (cdpPort === null) return lifecycle;
+  return {
+    uidLifecycleObservation: lifecycle,
+    tcpSocketObservation: readUidTcpSocketObservation(
+      processes,
+      uid,
+      applicationPid,
+      complete,
+      overflow,
+      cdpPort,
+    ),
   };
 }
 
@@ -1097,7 +2120,11 @@ async function connectAndCheckPage() {
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 });
     desktopObservation.pageLoadOutcome = 'domcontentloaded';
     process.stdout.write(
-      '{"phase":"desktop-startup-progress","milestone":"after-page-load"}\n',
+      `${JSON.stringify({
+        phase: 'desktop-startup-progress',
+        milestone: 'after-page-load',
+        appPid: app.pid,
+      })}\n`,
     );
     egressPhaseCounters.afterPageLoad = emptyEgressCounterObservation(
       (await waitForCounterAcknowledgement('after-page-load'))
@@ -1332,6 +2359,33 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const observation = readUidProcessObservations(requestedUid);
     process.stdout.write(`${JSON.stringify(observation)}\n`);
     if (observation.state === 'unavailable') process.exitCode = 1;
+  } else if (process.argv[2] === 'uid-lifecycle-observation') {
+    const requestedUid = Number(process.argv[3]);
+    const requestedAppPid =
+      process.argv[4] === undefined ? null : Number(process.argv[4]);
+    const observation = readUidLifecycleObservation(
+      requestedUid,
+      requestedAppPid,
+    );
+    process.stdout.write(`${JSON.stringify(observation)}\n`);
+    if (observation.state === 'unavailable') process.exitCode = 1;
+  } else if (process.argv[2] === 'uid-startup-observation') {
+    const requestedUid = Number(process.argv[3]);
+    const requestedCdpPort = Number(process.argv[4]);
+    const requestedAppPid =
+      process.argv[5] === undefined ? null : Number(process.argv[5]);
+    const observation = readUidLifecycleObservation(
+      requestedUid,
+      requestedAppPid,
+      requestedCdpPort,
+    );
+    process.stdout.write(`${JSON.stringify(observation)}\n`);
+    if (
+      observation.uidLifecycleObservation.state === 'unavailable' ||
+      observation.tcpSocketObservation.state === 'unavailable'
+    ) {
+      process.exitCode = 1;
+    }
   } else {
     main().catch(() => {
       process.stdout.write(
