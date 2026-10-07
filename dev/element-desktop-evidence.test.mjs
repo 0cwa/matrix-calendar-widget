@@ -5,6 +5,7 @@ import {
   emptyUidLifecycleObservation,
   emptyUidStartupObservation,
   sanitizeDesktopStages,
+  sanitizeEgressCounterObservation,
   sanitizeUidLifecycleObservation,
   sanitizeUidProcessObservation,
   sanitizeUidStartupObservation,
@@ -130,6 +131,25 @@ function passingUidLifecycleObservation() {
       otherUidAppDescendantCount: 0,
       securityCoverageState: 'observed',
     },
+    cdpRendererObservation: {
+      state: 'observed',
+      overflow: false,
+      rendererCount: 1,
+      missingCount: 0,
+      unreadableCount: 0,
+      uidMatchCount: 1,
+      uidMismatchCount: 0,
+      appIdentityState: 'verified',
+      appDescendantCount: 1,
+      appDescendantUnobservedCount: 0,
+      appProcessGroupCount: 1,
+      appProcessGroupUnobservedCount: 0,
+      appDescendantAndProcessGroupCount: 1,
+      argvRendererMatchCount: 1,
+      noSandboxFlagCount: 0,
+      seccompState: 'enabled',
+      noNewPrivsState: 'enabled',
+    },
     seccompState: 'enabled',
     noNewPrivsState: 'enabled',
   };
@@ -167,6 +187,8 @@ function observedEmptyUidLifecycleObservation() {
       otherUidAppDescendantCount: null,
       securityCoverageState: 'not_observed',
     },
+    cdpRendererObservation:
+      emptyUidLifecycleObservation().cdpRendererObservation,
     seccompState: 'not_observed',
     noNewPrivsState: 'not_observed',
   };
@@ -218,7 +240,44 @@ function passingRendererDiagnostics(overrides = {}) {
 }
 
 function observedCounters(ipv4Blocked = 0, ipv6Blocked = 0) {
-  return { state: 'observed', ipv4Blocked, ipv6Blocked };
+  return countersFromClasses({ other: ipv4Blocked }, { other: ipv6Blocked });
+}
+
+function countersFromClasses(ipv4 = {}, ipv6 = {}) {
+  const classes = (values) => ({
+    udp_dns_port: 0,
+    tcp_dns_port: 0,
+    tcp_https_port: 0,
+    other: 0,
+    ...values,
+  });
+  const ipv4Classes = classes(ipv4);
+  const ipv6Classes = classes(ipv6);
+  return {
+    state: 'observed',
+    ipv4Blocked: Object.values(ipv4Classes).reduce(
+      (total, count) => total + count,
+      0,
+    ),
+    ipv6Blocked: Object.values(ipv6Classes).reduce(
+      (total, count) => total + count,
+      0,
+    ),
+    ipv4Classes,
+    ipv6Classes,
+    overflow: false,
+  };
+}
+
+function emptyCounters(state) {
+  return {
+    state,
+    ipv4Blocked: null,
+    ipv6Blocked: null,
+    ipv4Classes: null,
+    ipv6Classes: null,
+    overflow: null,
+  };
 }
 
 function passingTargetUidPreflight() {
@@ -293,6 +352,7 @@ function stages(overrides = {}) {
       rendererDiagnostics: passingRendererDiagnostics(),
       uidLifecycleDiagnostics: {
         beforeApp: observedEmptyUidLifecycleObservation(),
+        afterAppSpawn: observedEmptyUidLifecycleObservation(),
         afterPageLoad: passingUidLifecycleObservation(),
       },
       uidTcpSocketDiagnostics: {
@@ -301,6 +361,7 @@ function stages(overrides = {}) {
       },
       egressPhaseCounters: {
         beforeApp: observedCounters(),
+        afterAppSpawn: observedCounters(),
         afterPageLoad: observedCounters(),
       },
       checks: { ...checks },
@@ -316,6 +377,9 @@ function stages(overrides = {}) {
       status: 'passed',
       ipv4Blocked: 0,
       ipv6Blocked: 0,
+      ipv4Classes: observedCounters().ipv4Classes,
+      ipv6Classes: observedCounters().ipv6Classes,
+      overflow: false,
     },
     {
       phase: 'cleanup',
@@ -343,7 +407,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 10);
+  assert.equal(summary.schemaVersion, 11);
   assert.equal(summary.failureCode, null);
   assert.equal(summary.checks.isolatedNodePreflight, 'passed');
   assert.equal(summary.targetUidPreflight.status, 'passed');
@@ -351,8 +415,32 @@ test('Desktop evidence passes only with a complete startup, deny test, zero-egre
   assert.equal(summary.rendererDiagnostics.sandboxReason, 'passed');
   assert.deepEqual(summary.uidEgressPhaseCounters, {
     beforeApp: observedCounters(),
+    afterAppSpawn: observedCounters(),
     afterPageLoad: observedCounters(),
     final: observedCounters(),
+  });
+  assert.deepEqual(summary.uidEgressPhaseDeltas, {
+    beforeAppToAfterAppSpawn: {
+      state: 'observed',
+      ipv4Blocked: 0,
+      ipv6Blocked: 0,
+      ipv4Classes: observedCounters().ipv4Classes,
+      ipv6Classes: observedCounters().ipv6Classes,
+    },
+    afterAppSpawnToAfterPageLoad: {
+      state: 'observed',
+      ipv4Blocked: 0,
+      ipv6Blocked: 0,
+      ipv4Classes: observedCounters().ipv4Classes,
+      ipv6Classes: observedCounters().ipv6Classes,
+    },
+    afterPageLoadToFinal: {
+      state: 'observed',
+      ipv4Blocked: 0,
+      ipv6Blocked: 0,
+      ipv4Classes: observedCounters().ipv4Classes,
+      ipv6Classes: observedCounters().ipv6Classes,
+    },
   });
   assert.deepEqual(summary.cleanupDiagnostics, {
     accountState: 'absent',
@@ -368,6 +456,7 @@ test('Desktop evidence passes only with a complete startup, deny test, zero-egre
   });
   assert.deepEqual(summary.uidLifecycleDiagnostics, {
     beforeApp: observedEmptyUidLifecycleObservation(),
+    afterAppSpawn: observedEmptyUidLifecycleObservation(),
     afterPageLoad: passingUidLifecycleObservation(),
     beforeUserdel: observedEmptyUidLifecycleObservation(),
   });
@@ -584,6 +673,24 @@ test('UID lifecycle sanitizer rejects contradictory process and renderer counts'
   );
 });
 
+test('CDP renderer evidence rejects impossible counts and all process identifiers', () => {
+  const observed = passingUidLifecycleObservation();
+  const impossible = structuredClone(observed);
+  impossible.cdpRendererObservation.uidMatchCount = 2;
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation(impossible),
+    emptyUidLifecycleObservation('unavailable'),
+  );
+
+  const privatePid = structuredClone(observed);
+  privatePid.cdpRendererObservation.pid = 42_001;
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation(privatePid),
+    emptyUidLifecycleObservation('unavailable'),
+  );
+  assert.equal(JSON.stringify(observed).includes('42001'), false);
+});
+
 test('TCP socket diagnostics preserve only fixed roles, categories, and states', () => {
   const observed = passingUidTcpSocketObservation();
   assert.deepEqual(
@@ -652,14 +759,63 @@ test('UID startup observation rejects unrecognized envelope fields and keeps mis
   );
 });
 
+test('egress counter sanitizer preserves only fixed classes and honest overflow', () => {
+  const observed = observedCounters(2, 1);
+  assert.deepEqual(
+    sanitizeEgressCounterObservation(JSON.stringify(observed)),
+    observed,
+  );
+  assert.deepEqual(
+    sanitizeEgressCounterObservation('{'),
+    emptyCounters('unavailable'),
+  );
+  assert.deepEqual(
+    sanitizeEgressCounterObservation({
+      ...observed,
+      ipv4Classes: { other: 2, numericPort: 443 },
+    }),
+    emptyCounters('unavailable'),
+  );
+  const overflow = {
+    state: 'partial',
+    ipv4Blocked: 100_000,
+    ipv6Blocked: 0,
+    ipv4Classes: {
+      udp_dns_port: 100_000,
+      tcp_dns_port: 0,
+      tcp_https_port: 0,
+      other: 0,
+    },
+    ipv6Classes: {
+      udp_dns_port: 0,
+      tcp_dns_port: 0,
+      tcp_https_port: 0,
+      other: 0,
+    },
+    overflow: true,
+  };
+  assert.deepEqual(sanitizeEgressCounterObservation(overflow), overflow);
+});
+
 test('phase egress and cleanup diagnostics remain separate from final acceptance gates', () => {
   const withUnavailableSnapshots = stages();
   withUnavailableSnapshots[1].egressPhaseCounters = {
-    beforeApp: { state: 'observed', ipv4Blocked: 0, ipv6Blocked: 0 },
+    beforeApp: observedCounters(),
+    afterAppSpawn: {
+      state: 'unavailable',
+      ipv4Blocked: null,
+      ipv6Blocked: null,
+      ipv4Classes: null,
+      ipv6Classes: null,
+      overflow: null,
+    },
     afterPageLoad: {
       state: 'unavailable',
       ipv4Blocked: null,
       ipv6Blocked: null,
+      ipv4Classes: null,
+      ipv6Classes: null,
+      overflow: null,
     },
   };
   withUnavailableSnapshots[1].uidTcpSocketDiagnostics = {
@@ -693,10 +849,52 @@ test('phase egress and cleanup diagnostics remain separate from final acceptance
 
   const nonzeroFinalCounters = stages();
   nonzeroFinalCounters[3].ipv4Blocked = 1;
+  nonzeroFinalCounters[3].ipv4Classes = observedCounters(1).ipv4Classes;
   const failed = sanitizeDesktopStages(nonzeroFinalCounters, sourceSha);
   assert.equal(failed.status, 'failed');
   assert.equal(failed.failureCode, 'blocked-egress');
   assert.equal(failed.uidEgressPhaseCounters.final.ipv4Blocked, 1);
+});
+
+test('egress phase deltas preserve fixed classes and go unavailable on decrease or malformed totals', () => {
+  const phased = stages();
+  phased[1].egressPhaseCounters = {
+    beforeApp: observedCounters(),
+    afterAppSpawn: countersFromClasses({ udp_dns_port: 2 }),
+    afterPageLoad: countersFromClasses({ udp_dns_port: 2, other: 3 }),
+  };
+  const summary = sanitizeDesktopStages(phased, sourceSha);
+  assert.equal(summary.status, 'passed');
+  assert.deepEqual(summary.uidEgressPhaseDeltas.beforeAppToAfterAppSpawn, {
+    state: 'observed',
+    ipv4Blocked: 2,
+    ipv6Blocked: 0,
+    ipv4Classes: {
+      udp_dns_port: 2,
+      tcp_dns_port: 0,
+      tcp_https_port: 0,
+      other: 0,
+    },
+    ipv6Classes: observedCounters().ipv6Classes,
+  });
+  assert.equal(
+    summary.uidEgressPhaseDeltas.afterAppSpawnToAfterPageLoad.ipv4Blocked,
+    3,
+  );
+  assert.equal(
+    summary.uidEgressPhaseDeltas.afterPageLoadToFinal.state,
+    'unavailable',
+  );
+
+  const malformed = stages();
+  malformed[1].egressPhaseCounters.afterAppSpawn = {
+    ...observedCounters(),
+    ipv4Classes: { ...observedCounters().ipv4Classes, udp_dns_port: 1 },
+  };
+  assert.throws(
+    () => sanitizeDesktopStages(malformed, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
 });
 
 test('Desktop evidence fails closed on blocked egress and rejects private-shaped fields', () => {
@@ -706,6 +904,9 @@ test('Desktop evidence fails closed on blocked egress and rejects private-shaped
     status: 'passed',
     ipv4Blocked: 1,
     ipv6Blocked: 0,
+    ipv4Classes: observedCounters(1).ipv4Classes,
+    ipv6Classes: observedCounters().ipv6Classes,
+    overflow: false,
   };
   const summary = sanitizeDesktopStages(blocked, sourceSha);
   assert.equal(summary.status, 'failed');
@@ -857,16 +1058,9 @@ test('Desktop evidence reports absent startup as incomplete and rejects degraded
     'not_observed',
   );
   assert.deepEqual(missingSummary.uidEgressPhaseCounters, {
-    beforeApp: {
-      state: 'not_observed',
-      ipv4Blocked: null,
-      ipv6Blocked: null,
-    },
-    afterPageLoad: {
-      state: 'not_observed',
-      ipv4Blocked: null,
-      ipv6Blocked: null,
-    },
+    beforeApp: emptyCounters('not_observed'),
+    afterAppSpawn: emptyCounters('not_observed'),
+    afterPageLoad: emptyCounters('not_observed'),
     final: observedCounters(),
   });
 

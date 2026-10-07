@@ -32,13 +32,17 @@ const MAX_SAFE_STORAGE_LINE_LENGTH = 512;
 const DESKTOP_SPAWN_WAIT_MS = 5_000;
 const MAX_DIAGNOSTIC_COUNT = 100;
 const MAX_UID_LIFECYCLE_PROCESSES = 4_096;
+const MAX_CDP_PROCESS_INFO_RECORDS = 128;
+const MAX_CDP_RENDERER_PIDS = 64;
+const MAX_CDP_RENDERER_HANDOFF_BYTES = 2_048;
 const MAX_PROC_COMMAND_LINE_BYTES = 4_096;
 const MAX_PROC_NETWORK_TABLE_BYTES = 1_048_576;
 const MAX_UID_SOCKET_FD_REFERENCES = 8_192;
 const MAX_UID_SOCKET_BUCKETS = 100;
-// The workflow's after-page observation budget is 13s including kill grace;
-// keep 2s here for polling and dispatch overhead.
+// The workflow budgets 13s for each marker ACK, including command kill grace;
+// leave 2s of the 15s helper wait for polling and dispatch overhead.
 const EGRESS_COUNTER_ACK_WAIT_MS = 15_000;
+const CDP_PROCESS_INFO_TIMEOUT_MS = 2_000;
 const UID_SOCKET_PROCESS_ROLES = Object.freeze([
   'application',
   'browser',
@@ -389,6 +393,7 @@ let failureCode = null;
 let rendererDiagnostics = emptyRendererDiagnostics();
 let egressPhaseCounters = {
   beforeApp: emptyEgressCounterObservation(),
+  afterAppSpawn: emptyEgressCounterObservation(),
   afterPageLoad: emptyEgressCounterObservation(),
 };
 
@@ -420,6 +425,33 @@ function emptyEgressCounterObservation(state = 'not_observed') {
     state,
     ipv4Blocked: null,
     ipv6Blocked: null,
+    ipv4Classes: null,
+    ipv6Classes: null,
+    overflow: null,
+  };
+}
+
+function emptyCdpRendererObservation(state) {
+  const securityState =
+    state === 'not_observed' ? 'not_observed' : 'unavailable';
+  return {
+    state,
+    overflow: null,
+    rendererCount: null,
+    missingCount: null,
+    unreadableCount: null,
+    uidMatchCount: null,
+    uidMismatchCount: null,
+    appIdentityState: state === 'not_observed' ? 'not_observed' : 'unavailable',
+    appDescendantCount: null,
+    appDescendantUnobservedCount: null,
+    appProcessGroupCount: null,
+    appProcessGroupUnobservedCount: null,
+    appDescendantAndProcessGroupCount: null,
+    argvRendererMatchCount: null,
+    noSandboxFlagCount: null,
+    seccompState: securityState,
+    noNewPrivsState: securityState,
   };
 }
 
@@ -562,6 +594,9 @@ function emptyUidLifecycleObservation(state) {
       otherUidAppDescendantCount: null,
       securityCoverageState: rendererState,
     },
+    cdpRendererObservation: emptyCdpRendererObservation(
+      state === 'not_observed' ? 'not_observed' : 'unavailable',
+    ),
     seccompState: securityState,
     noNewPrivsState: securityState,
   };
@@ -624,12 +659,319 @@ function hasProcessAncestor(process, processByPid, ancestorPid) {
   return false;
 }
 
+function processAncestorStatus(process, processByPid, ancestorPid) {
+  if (!Number.isSafeInteger(process?.parentPid)) return 'unavailable';
+  let parentPid = process.parentPid;
+  const visited = new Set();
+  for (let depth = 0; depth < 64; depth += 1) {
+    if (parentPid === ancestorPid) return 'ancestor';
+    if (parentPid <= 1) return 'not-ancestor';
+    if (visited.has(parentPid)) return 'unavailable';
+    visited.add(parentPid);
+    const parent = processByPid.get(parentPid);
+    if (!parent || !Number.isSafeInteger(parent.parentPid)) {
+      return 'unavailable';
+    }
+    parentPid = parent.parentPid;
+  }
+  return 'unavailable';
+}
+
+export function summarizeCdpRendererProcessInfo(processInfo) {
+  const unavailable = emptyCdpRendererObservation('unavailable');
+  unavailable.pids = null;
+  if (!Array.isArray(processInfo)) return unavailable;
+
+  const pids = [];
+  const seen = new Set();
+  let overflow = processInfo.length > MAX_CDP_PROCESS_INFO_RECORDS;
+  let malformed = false;
+  const recordLimit = Math.min(
+    processInfo.length,
+    MAX_CDP_PROCESS_INFO_RECORDS,
+  );
+  for (let index = 0; index < recordLimit; index += 1) {
+    const item = processInfo[index];
+    if (
+      item === null ||
+      typeof item !== 'object' ||
+      typeof item.type !== 'string' ||
+      item.type.length === 0 ||
+      item.type.length > 64
+    ) {
+      malformed = true;
+      continue;
+    }
+    if (item.type !== 'renderer') continue;
+    if (
+      !Number.isSafeInteger(item.id) ||
+      item.id < 2 ||
+      item.id > 2_147_483_647 ||
+      seen.has(item.id)
+    ) {
+      malformed = true;
+      continue;
+    }
+    seen.add(item.id);
+    if (pids.length === MAX_CDP_RENDERER_PIDS) {
+      overflow = true;
+      continue;
+    }
+    pids.push(item.id);
+  }
+  return {
+    state: overflow || malformed ? 'partial' : 'observed',
+    overflow,
+    rendererCount: pids.length,
+    pids,
+  };
+}
+
+function validateCdpRendererHandoff(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'overflow,pids,rendererCount,state' ||
+    !['not_observed', 'unavailable', 'partial', 'observed'].includes(
+      value.state,
+    )
+  ) {
+    return false;
+  }
+  if (value.state === 'not_observed' || value.state === 'unavailable') {
+    return (
+      value.overflow === null &&
+      value.rendererCount === null &&
+      value.pids === null
+    );
+  }
+  return (
+    typeof value.overflow === 'boolean' &&
+    Number.isSafeInteger(value.rendererCount) &&
+    value.rendererCount >= 0 &&
+    value.rendererCount <= MAX_CDP_RENDERER_PIDS &&
+    Array.isArray(value.pids) &&
+    value.pids.length === value.rendererCount &&
+    value.pids.length <= MAX_CDP_RENDERER_PIDS &&
+    value.pids.every(
+      (pid, index) =>
+        Number.isSafeInteger(pid) &&
+        pid >= 2 &&
+        pid <= 2_147_483_647 &&
+        value.pids.indexOf(pid) === index,
+    ) &&
+    (value.state !== 'observed' || value.overflow === false)
+  );
+}
+
+export function parseCdpRendererHandoff(input) {
+  const unavailable = {
+    state: 'unavailable',
+    overflow: null,
+    rendererCount: null,
+    pids: null,
+  };
+  if (
+    typeof input !== 'string' ||
+    input.length > MAX_CDP_RENDERER_HANDOFF_BYTES
+  ) {
+    return unavailable;
+  }
+  let value;
+  try {
+    value = JSON.parse(input);
+  } catch {
+    return unavailable;
+  }
+  return validateCdpRendererHandoff(value) ? value : unavailable;
+}
+
+function summarizeCdpRendererOwnership(
+  processes,
+  expectedUid,
+  applicationPid,
+  handoff,
+) {
+  if (!validateCdpRendererHandoff(handoff)) {
+    return emptyCdpRendererObservation('unavailable');
+  }
+  if (handoff.state === 'not_observed' || handoff.state === 'unavailable') {
+    return emptyCdpRendererObservation(handoff.state);
+  }
+
+  const processByPid = new Map(
+    processes
+      .filter((item) => Number.isSafeInteger(item?.pid) && item.pid > 0)
+      .map((item) => [item.pid, item]),
+  );
+  const application = processByPid.get(applicationPid);
+  const applicationIdentityVerified = Boolean(
+    Number.isSafeInteger(applicationPid) &&
+    application &&
+    Array.isArray(application.uids) &&
+    application.uids.length === 4 &&
+    application.uids.every((uid) => uid === expectedUid) &&
+    application.processGroupId === applicationPid &&
+    application.unreadable !== true,
+  );
+  let missingCount = 0;
+  let unreadableCount = 0;
+  let uidMatchCount = 0;
+  let uidMismatchCount = 0;
+  let appDescendantCount = 0;
+  let appDescendantUnobservedCount = 0;
+  let appProcessGroupCount = 0;
+  let appProcessGroupUnobservedCount = 0;
+  let appDescendantAndProcessGroupCount = 0;
+  let argvRendererMatchCount = 0;
+  let noSandboxFlagCount = 0;
+  const securityRows = [];
+
+  for (const pid of handoff.pids) {
+    const item = processByPid.get(pid);
+    if (!item) {
+      missingCount += 1;
+      continue;
+    }
+    const isZombie = item.state === 'Z';
+    const hasUids =
+      Array.isArray(item.uids) &&
+      item.uids.length === 4 &&
+      item.uids.every(Number.isSafeInteger);
+    const uidMatches = hasUids && item.uids.every((uid) => uid === expectedUid);
+    let processUnreadable = !hasUids || item.unreadable === true || isZombie;
+    if (uidMatches) uidMatchCount += 1;
+    else if (hasUids) uidMismatchCount += 1;
+
+    const ancestorStatus =
+      applicationIdentityVerified && pid !== applicationPid
+        ? processAncestorStatus(item, processByPid, applicationPid)
+        : 'not-ancestor';
+    const appDescendant = ancestorStatus === 'ancestor';
+    if (ancestorStatus === 'unavailable') appDescendantUnobservedCount += 1;
+    const inAppProcessGroup =
+      applicationIdentityVerified && item.processGroupId === applicationPid;
+    if (
+      applicationIdentityVerified &&
+      !Number.isSafeInteger(item.processGroupId)
+    ) {
+      appProcessGroupUnobservedCount += 1;
+    }
+    if (appDescendant) appDescendantCount += 1;
+    if (inAppProcessGroup) appProcessGroupCount += 1;
+    if (appDescendant && inAppProcessGroup) {
+      appDescendantAndProcessGroupCount += 1;
+    }
+
+    if (uidMatches && Array.isArray(item.args)) {
+      if (classifyUidProcess(item.args, pid, null) === 'renderer') {
+        argvRendererMatchCount += 1;
+      }
+      if (item.args.includes('--no-sandbox')) noSandboxFlagCount += 1;
+    } else if (uidMatches) {
+      processUnreadable = true;
+    }
+    if (processUnreadable) unreadableCount += 1;
+    if (
+      uidMatches &&
+      !isZombie &&
+      item.unreadable !== true &&
+      (appDescendant || inAppProcessGroup)
+    ) {
+      securityRows.push(item);
+    }
+  }
+
+  const completeSecurityCoverage =
+    applicationIdentityVerified &&
+    securityRows.length === handoff.rendererCount &&
+    missingCount === 0 &&
+    unreadableCount === 0 &&
+    uidMismatchCount === 0;
+  return {
+    state:
+      handoff.state === 'partial' ||
+      !applicationIdentityVerified ||
+      missingCount > 0 ||
+      unreadableCount > 0 ||
+      uidMismatchCount > 0 ||
+      appDescendantUnobservedCount > 0 ||
+      appProcessGroupUnobservedCount > 0
+        ? 'partial'
+        : 'observed',
+    overflow: handoff.overflow,
+    rendererCount: handoff.rendererCount,
+    missingCount: cappedDiagnosticCount(missingCount),
+    unreadableCount: cappedDiagnosticCount(unreadableCount),
+    uidMatchCount: cappedDiagnosticCount(uidMatchCount),
+    uidMismatchCount: cappedDiagnosticCount(uidMismatchCount),
+    appIdentityState: applicationIdentityVerified ? 'verified' : 'unavailable',
+    appDescendantCount: applicationIdentityVerified
+      ? cappedDiagnosticCount(appDescendantCount)
+      : null,
+    appDescendantUnobservedCount: applicationIdentityVerified
+      ? cappedDiagnosticCount(appDescendantUnobservedCount)
+      : null,
+    appProcessGroupCount: applicationIdentityVerified
+      ? cappedDiagnosticCount(appProcessGroupCount)
+      : null,
+    appProcessGroupUnobservedCount: applicationIdentityVerified
+      ? cappedDiagnosticCount(appProcessGroupUnobservedCount)
+      : null,
+    appDescendantAndProcessGroupCount: applicationIdentityVerified
+      ? cappedDiagnosticCount(appDescendantAndProcessGroupCount)
+      : null,
+    argvRendererMatchCount: cappedDiagnosticCount(argvRendererMatchCount),
+    noSandboxFlagCount: cappedDiagnosticCount(noSandboxFlagCount),
+    seccompState: completeSecurityCoverage
+      ? aggregateRendererSecurityState(securityRows, 'seccomp', '2')
+      : 'unavailable',
+    noNewPrivsState: completeSecurityCoverage
+      ? aggregateRendererSecurityState(securityRows, 'noNewPrivs', '1')
+      : 'unavailable',
+  };
+}
+
+function readBoundedCdpRendererHandoff() {
+  const buffer = Buffer.alloc(MAX_CDP_RENDERER_HANDOFF_BYTES + 1);
+  let bytesRead = 0;
+  try {
+    while (bytesRead < buffer.length) {
+      const count = readSync(
+        0,
+        buffer,
+        bytesRead,
+        buffer.length - bytesRead,
+        null,
+      );
+      if (count === 0) break;
+      bytesRead += count;
+    }
+  } catch {
+    return parseCdpRendererHandoff(null);
+  }
+  if (bytesRead > MAX_CDP_RENDERER_HANDOFF_BYTES) {
+    return parseCdpRendererHandoff(null);
+  }
+  return parseCdpRendererHandoff(
+    buffer.subarray(0, bytesRead).toString('utf8'),
+  );
+}
+
 export function summarizeUidLifecycleObservation(
   processes,
   expectedUid,
   applicationPid = null,
   complete = true,
   overflow = false,
+  cdpRendererHandoff = {
+    state: 'not_observed',
+    overflow: null,
+    rendererCount: null,
+    pids: null,
+  },
 ) {
   if (
     !Array.isArray(processes) ||
@@ -828,6 +1170,12 @@ export function summarizeUidLifecycleObservation(
         : null,
       securityCoverageState,
     },
+    cdpRendererObservation: summarizeCdpRendererOwnership(
+      processes,
+      expectedUid,
+      applicationPid,
+      cdpRendererHandoff,
+    ),
     seccompState: applicationIdentityVerified
       ? aggregateRendererSecurityState(rendererSecurityRows, 'seccomp', '2')
       : applicationPid === null
@@ -1361,26 +1709,40 @@ export function selectUidLifecycleProcessEntries(
   entries,
   applicationPid = null,
   maximum = MAX_UID_LIFECYCLE_PROCESSES,
+  preferredPids = [],
 ) {
   if (
     !Array.isArray(entries) ||
     !Number.isSafeInteger(maximum) ||
-    maximum < 1
+    maximum < 1 ||
+    !Array.isArray(preferredPids)
   ) {
     return { entries: [], overflow: true };
   }
   const selected = entries.slice(0, maximum);
   let overflow = entries.length > maximum;
-  if (
-    Number.isSafeInteger(applicationPid) &&
-    applicationPid > 1 &&
-    !selected.includes(String(applicationPid))
-  ) {
+  const requiredPids = [
+    ...(Number.isSafeInteger(applicationPid) && applicationPid > 1
+      ? [applicationPid]
+      : []),
+    ...preferredPids.filter((pid) => Number.isSafeInteger(pid) && pid > 1),
+  ];
+  const requiredNames = new Set(requiredPids.map(String));
+  for (const requiredName of requiredNames) {
+    if (selected.includes(requiredName)) continue;
     if (selected.length === maximum) {
-      selected[maximum - 1] = String(applicationPid);
+      let replaceIndex = selected.length - 1;
+      while (replaceIndex >= 0 && requiredNames.has(selected[replaceIndex])) {
+        replaceIndex -= 1;
+      }
+      if (replaceIndex < 0) {
+        overflow = true;
+        continue;
+      }
+      selected[replaceIndex] = requiredName;
       overflow = true;
     } else {
-      selected.push(String(applicationPid));
+      selected.push(requiredName);
     }
   }
   return { entries: selected, overflow };
@@ -1414,6 +1776,12 @@ function readUidLifecycleObservation(
   uid,
   applicationPid = null,
   cdpPort = null,
+  cdpRendererHandoff = {
+    state: 'not_observed',
+    overflow: null,
+    rendererCount: null,
+    pids: null,
+  },
 ) {
   const emptyObservation = (state) =>
     cdpPort === null
@@ -1446,9 +1814,24 @@ function readUidLifecycleObservation(
   } catch {
     return emptyObservation('unavailable');
   }
+  const verifiedCdpHandoff = validateCdpRendererHandoff(cdpRendererHandoff)
+    ? cdpRendererHandoff
+    : {
+        state: 'unavailable',
+        overflow: null,
+        rendererCount: null,
+        pids: null,
+      };
+  const preferredCdpPids =
+    verifiedCdpHandoff.state === 'observed' ||
+    verifiedCdpHandoff.state === 'partial'
+      ? verifiedCdpHandoff.pids
+      : [];
   const selectedEntries = selectUidLifecycleProcessEntries(
     directoryEntries.entries.map((entry) => entry.name),
     applicationPid,
+    MAX_UID_LIFECYCLE_PROCESSES,
+    preferredCdpPids,
   );
   const overflow = directoryEntries.overflow || selectedEntries.overflow;
   const scanEntries = selectedEntries.entries;
@@ -1477,7 +1860,22 @@ function readUidLifecycleObservation(
       if (existsSync(path)) complete = false;
     }
     if (status === null && existsSync(path)) complete = false;
-    if (stat === null && status === null) continue;
+    if (stat === null && status === null) {
+      if (preferredCdpPids.includes(pid) && existsSync(path)) {
+        processes.push({
+          pid,
+          parentPid: null,
+          processGroupId: null,
+          state: null,
+          uids: null,
+          seccomp: null,
+          noNewPrivs: null,
+          args: null,
+          unreadable: true,
+        });
+      }
+      continue;
+    }
 
     processes.push({
       pid,
@@ -1523,6 +1921,7 @@ function readUidLifecycleObservation(
     applicationPid,
     complete,
     overflow,
+    verifiedCdpHandoff,
   );
   if (cdpPort === null) return lifecycle;
   return {
@@ -2125,6 +2524,34 @@ async function waitForDebugger() {
   fail('desktop-not-ready', 'desktopProcess');
 }
 
+async function readCdpRendererProcessInfo(browserValue) {
+  let session;
+  let timeoutHandle;
+  try {
+    session = await browserValue.newBrowserCDPSession();
+    const result = await Promise.race([
+      session.send('SystemInfo.getProcessInfo'),
+      new Promise((_, reject) => {
+        timeoutHandle = setTimeout(
+          () => reject(new Error('CDP process info timed out')),
+          CDP_PROCESS_INFO_TIMEOUT_MS,
+        );
+      }),
+    ]);
+    return summarizeCdpRendererProcessInfo(result?.processInfo);
+  } catch {
+    return {
+      state: 'unavailable',
+      overflow: null,
+      rendererCount: null,
+      pids: null,
+    };
+  } finally {
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    if (session) void session.detach().catch(() => {});
+  }
+}
+
 async function connectAndCheckPage() {
   const requireE2e = createRequire(
     new URL('../e2e/package.json', import.meta.url),
@@ -2146,11 +2573,13 @@ async function connectAndCheckPage() {
   try {
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 });
     desktopObservation.pageLoadOutcome = 'domcontentloaded';
+    const cdpRendererHandoff = await readCdpRendererProcessInfo(browser);
     process.stdout.write(
       `${JSON.stringify({
         phase: 'desktop-startup-progress',
         milestone: 'after-page-load',
         appPid: app.pid,
+        cdpRendererHandoff,
       })}\n`,
     );
     egressPhaseCounters.afterPageLoad = emptyEgressCounterObservation(
@@ -2341,6 +2770,18 @@ async function main() {
     writeFileSync(`${profileRoot}/process-group`, `${app.pid}\n`, {
       mode: 0o600,
     });
+    process.stdout.write(
+      `${JSON.stringify({
+        phase: 'desktop-startup-progress',
+        milestone: 'after-app-spawn',
+        appPid: app.pid,
+      })}\n`,
+    );
+    egressPhaseCounters.afterAppSpawn = emptyEgressCounterObservation(
+      (await waitForCounterAcknowledgement('after-app-spawn'))
+        ? 'observed'
+        : 'unavailable',
+    );
     rendererCount = await connectAndCheckPage();
   } catch (error) {
     failureCode =
@@ -2401,17 +2842,39 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const requestedCdpPort = Number(process.argv[4]);
     const requestedAppPid =
       process.argv[5] === undefined ? null : Number(process.argv[5]);
-    const observation = readUidLifecycleObservation(
-      requestedUid,
-      requestedAppPid,
-      requestedCdpPort,
-    );
-    process.stdout.write(`${JSON.stringify(observation)}\n`);
-    if (
-      observation.uidLifecycleObservation.state === 'unavailable' ||
-      observation.tcpSocketObservation.state === 'unavailable'
-    ) {
+    const hasCdpRendererHandoff = process.argv[6] === '--cdp-renderer-handoff';
+    const validArgumentShape = hasCdpRendererHandoff
+      ? process.argv.length === 7
+      : process.argv.length === (requestedAppPid === null ? 5 : 6);
+    if (!validArgumentShape) {
+      const unavailable = {
+        uidLifecycleObservation: emptyUidLifecycleObservation('unavailable'),
+        tcpSocketObservation: emptyUidTcpSocketObservation('unavailable'),
+      };
+      process.stdout.write(`${JSON.stringify(unavailable)}\n`);
       process.exitCode = 1;
+    } else {
+      const cdpRendererHandoff = hasCdpRendererHandoff
+        ? readBoundedCdpRendererHandoff()
+        : {
+            state: 'not_observed',
+            overflow: null,
+            rendererCount: null,
+            pids: null,
+          };
+      const observation = readUidLifecycleObservation(
+        requestedUid,
+        requestedAppPid,
+        requestedCdpPort,
+        cdpRendererHandoff,
+      );
+      process.stdout.write(`${JSON.stringify(observation)}\n`);
+      if (
+        observation.uidLifecycleObservation.state === 'unavailable' ||
+        observation.tcpSocketObservation.state === 'unavailable'
+      ) {
+        process.exitCode = 1;
+      }
     }
   } else {
     main().catch(() => {

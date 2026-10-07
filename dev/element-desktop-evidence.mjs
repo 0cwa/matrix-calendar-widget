@@ -41,6 +41,19 @@ const SANDBOX_DIAGNOSTIC_VALUES = new Set([
 const COUNTER_OBSERVATION_STATES = new Set([
   'not_observed',
   'unavailable',
+  'partial',
+  'observed',
+]);
+const EGRESS_DROP_COUNTER_CLASSES = Object.freeze([
+  'udp_dns_port',
+  'tcp_dns_port',
+  'tcp_https_port',
+  'other',
+]);
+const CDP_RENDERER_OBSERVATION_STATES = new Set([
+  'not_observed',
+  'unavailable',
+  'partial',
   'observed',
 ]);
 const UID_PROCESS_OBSERVATION_STATES = new Set([
@@ -288,23 +301,101 @@ function diagnosticCount(value) {
 
 function validateCounterObservation(value) {
   if (
-    !hasKeys(value, ['state', 'ipv4Blocked', 'ipv6Blocked']) ||
+    !hasKeys(value, [
+      'state',
+      'ipv4Blocked',
+      'ipv6Blocked',
+      'ipv4Classes',
+      'ipv6Classes',
+      'overflow',
+    ]) ||
     !COUNTER_OBSERVATION_STATES.has(value.state)
   ) {
     return false;
   }
-  if (value.state === 'observed') {
-    return count(value.ipv4Blocked) && count(value.ipv6Blocked);
+  if (value.state === 'observed' || value.state === 'partial') {
+    if (
+      !count(value.ipv4Blocked) ||
+      !count(value.ipv6Blocked) ||
+      !hasKeys(value.ipv4Classes, EGRESS_DROP_COUNTER_CLASSES) ||
+      !hasKeys(value.ipv6Classes, EGRESS_DROP_COUNTER_CLASSES) ||
+      EGRESS_DROP_COUNTER_CLASSES.some(
+        (name) =>
+          !count(value.ipv4Classes[name]) || !count(value.ipv6Classes[name]),
+      ) ||
+      typeof value.overflow !== 'boolean' ||
+      value.state !== (value.overflow ? 'partial' : 'observed')
+    ) {
+      return false;
+    }
+    const ipv4ClassTotal = EGRESS_DROP_COUNTER_CLASSES.reduce(
+      (total, name) => total + value.ipv4Classes[name],
+      0,
+    );
+    const ipv6ClassTotal = EGRESS_DROP_COUNTER_CLASSES.reduce(
+      (total, name) => total + value.ipv6Classes[name],
+      0,
+    );
+    return value.overflow
+      ? (value.ipv4Blocked === 100_000 || value.ipv6Blocked === 100_000) &&
+          ipv4ClassTotal >= value.ipv4Blocked &&
+          ipv6ClassTotal >= value.ipv6Blocked
+      : ipv4ClassTotal === value.ipv4Blocked &&
+          ipv6ClassTotal === value.ipv6Blocked;
   }
-  return value.ipv4Blocked === null && value.ipv6Blocked === null;
+  return (
+    value.ipv4Blocked === null &&
+    value.ipv6Blocked === null &&
+    value.ipv4Classes === null &&
+    value.ipv6Classes === null &&
+    value.overflow === null
+  );
 }
 
 function validateEgressPhaseCounters(value) {
   return (
-    hasKeys(value, ['beforeApp', 'afterPageLoad']) &&
+    hasKeys(value, ['beforeApp', 'afterAppSpawn', 'afterPageLoad']) &&
     validateCounterObservation(value.beforeApp) &&
+    validateCounterObservation(value.afterAppSpawn) &&
     validateCounterObservation(value.afterPageLoad)
   );
+}
+
+export function sanitizeEgressCounterObservation(input) {
+  const unavailable = emptyCounterObservation('unavailable');
+  let value = input;
+  if (typeof input === 'string') {
+    try {
+      value = JSON.parse(input);
+    } catch {
+      return unavailable;
+    }
+  }
+  if (!validateCounterObservation(value)) return unavailable;
+  return {
+    state: value.state,
+    ipv4Blocked: value.ipv4Blocked,
+    ipv6Blocked: value.ipv6Blocked,
+    ipv4Classes:
+      value.ipv4Classes === null
+        ? null
+        : Object.fromEntries(
+            EGRESS_DROP_COUNTER_CLASSES.map((name) => [
+              name,
+              value.ipv4Classes[name],
+            ]),
+          ),
+    ipv6Classes:
+      value.ipv6Classes === null
+        ? null
+        : Object.fromEntries(
+            EGRESS_DROP_COUNTER_CLASSES.map((name) => [
+              name,
+              value.ipv6Classes[name],
+            ]),
+          ),
+    overflow: value.overflow,
+  };
 }
 
 function validateRendererDiagnostics(value) {
@@ -382,7 +473,14 @@ function emptyRendererDiagnostics() {
 }
 
 function emptyCounterObservation(state = 'not_observed') {
-  return { state, ipv4Blocked: null, ipv6Blocked: null };
+  return {
+    state,
+    ipv4Blocked: null,
+    ipv6Blocked: null,
+    ipv4Classes: null,
+    ipv6Classes: null,
+    overflow: null,
+  };
 }
 
 function validateUidProcessObservation(value) {
@@ -445,9 +543,124 @@ export function emptyUidLifecycleObservation(state = 'not_observed') {
       otherUidAppDescendantCount: null,
       securityCoverageState: rendererState,
     },
+    cdpRendererObservation: emptyCdpRendererObservation(
+      unavailable ? 'unavailable' : rendererState,
+    ),
     seccompState: securityState,
     noNewPrivsState: securityState,
   };
+}
+
+function emptyCdpRendererObservation(state) {
+  const securityState =
+    state === 'not_observed' ? 'not_observed' : 'unavailable';
+  return {
+    state,
+    overflow: null,
+    rendererCount: null,
+    missingCount: null,
+    unreadableCount: null,
+    uidMatchCount: null,
+    uidMismatchCount: null,
+    appIdentityState: securityState,
+    appDescendantCount: null,
+    appDescendantUnobservedCount: null,
+    appProcessGroupCount: null,
+    appProcessGroupUnobservedCount: null,
+    appDescendantAndProcessGroupCount: null,
+    argvRendererMatchCount: null,
+    noSandboxFlagCount: null,
+    seccompState: securityState,
+    noNewPrivsState: securityState,
+  };
+}
+
+function validateCdpRendererObservation(value) {
+  const fields = [
+    'state',
+    'overflow',
+    'rendererCount',
+    'missingCount',
+    'unreadableCount',
+    'uidMatchCount',
+    'uidMismatchCount',
+    'appIdentityState',
+    'appDescendantCount',
+    'appDescendantUnobservedCount',
+    'appProcessGroupCount',
+    'appProcessGroupUnobservedCount',
+    'appDescendantAndProcessGroupCount',
+    'argvRendererMatchCount',
+    'noSandboxFlagCount',
+    'seccompState',
+    'noNewPrivsState',
+  ];
+  if (
+    !hasKeys(value, fields) ||
+    !CDP_RENDERER_OBSERVATION_STATES.has(value.state) ||
+    !UID_LIFECYCLE_APP_IDENTITY_STATES.has(value.appIdentityState) ||
+    !SANDBOX_DIAGNOSTIC_VALUES.has(value.seccompState) ||
+    !SANDBOX_DIAGNOSTIC_VALUES.has(value.noNewPrivsState)
+  ) {
+    return false;
+  }
+  if (value.state === 'not_observed' || value.state === 'unavailable') {
+    const expected = emptyCdpRendererObservation(value.state);
+    return fields.every((field) => value[field] === expected[field]);
+  }
+  if (
+    typeof value.overflow !== 'boolean' ||
+    !diagnosticCount(value.rendererCount) ||
+    value.rendererCount > 64 ||
+    [
+      'missingCount',
+      'unreadableCount',
+      'uidMatchCount',
+      'uidMismatchCount',
+      'argvRendererMatchCount',
+      'noSandboxFlagCount',
+    ].some(
+      (field) =>
+        !diagnosticCount(value[field]) || value[field] > value.rendererCount,
+    )
+  ) {
+    return false;
+  }
+  if (value.uidMatchCount + value.uidMismatchCount > value.rendererCount) {
+    return false;
+  }
+  const relationCounts = [
+    'appDescendantCount',
+    'appDescendantUnobservedCount',
+    'appProcessGroupCount',
+    'appProcessGroupUnobservedCount',
+    'appDescendantAndProcessGroupCount',
+  ];
+  if (value.appIdentityState === 'verified') {
+    if (
+      relationCounts.some(
+        (field) =>
+          !diagnosticCount(value[field]) || value[field] > value.rendererCount,
+      ) ||
+      value.appDescendantAndProcessGroupCount >
+        Math.min(value.appDescendantCount, value.appProcessGroupCount) ||
+      (value.state === 'observed' &&
+        (value.overflow ||
+          value.missingCount > 0 ||
+          value.unreadableCount > 0 ||
+          value.uidMismatchCount > 0 ||
+          value.appDescendantUnobservedCount > 0 ||
+          value.appProcessGroupUnobservedCount > 0))
+    ) {
+      return false;
+    }
+  } else if (
+    value.state !== 'partial' ||
+    relationCounts.some((field) => value[field] !== null)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function validateUidLifecycleObservation(value) {
@@ -462,6 +675,7 @@ function validateUidLifecycleObservation(value) {
       'unattributedProcessCount',
       'processClassCounts',
       'rendererOwnership',
+      'cdpRendererObservation',
       'seccompState',
       'noNewPrivsState',
     ]) ||
@@ -469,6 +683,9 @@ function validateUidLifecycleObservation(value) {
     !SANDBOX_DIAGNOSTIC_VALUES.has(value.seccompState) ||
     !SANDBOX_DIAGNOSTIC_VALUES.has(value.noNewPrivsState)
   ) {
+    return false;
+  }
+  if (!validateCdpRendererObservation(value.cdpRendererObservation)) {
     return false;
   }
 
@@ -517,6 +734,11 @@ function validateUidLifecycleObservation(value) {
       ownership.otherUidAppDescendantCount === null &&
       ownership.securityCoverageState ===
         expected.rendererOwnership.securityCoverageState &&
+      Object.keys(expected.cdpRendererObservation).every(
+        (field) =>
+          value.cdpRendererObservation[field] ===
+          expected.cdpRendererObservation[field],
+      ) &&
       value.seccompState === expected.seccompState &&
       value.noNewPrivsState === expected.noNewPrivsState
     );
@@ -702,6 +924,12 @@ export function sanitizeUidLifecycleObservation(input) {
         value.rendererOwnership.otherUidAppDescendantCount,
       securityCoverageState: value.rendererOwnership.securityCoverageState,
     },
+    cdpRendererObservation: Object.fromEntries(
+      Object.keys(value.cdpRendererObservation).map((name) => [
+        name,
+        value.cdpRendererObservation[name],
+      ]),
+    ),
     seccompState: value.seccompState,
     noNewPrivsState: value.noNewPrivsState,
   };
@@ -1359,9 +1587,16 @@ function validateStartup(record, sourceSha) {
     !validateSafeStorage(record.safeStorage) ||
     !validateDesktopObservation(record.desktopObservation) ||
     !validateRendererDiagnostics(record.rendererDiagnostics) ||
-    !hasKeys(record.uidLifecycleDiagnostics, ['beforeApp', 'afterPageLoad']) ||
+    !hasKeys(record.uidLifecycleDiagnostics, [
+      'beforeApp',
+      'afterAppSpawn',
+      'afterPageLoad',
+    ]) ||
     !validateUidLifecycleObservation(
       record.uidLifecycleDiagnostics.beforeApp,
+    ) ||
+    !validateUidLifecycleObservation(
+      record.uidLifecycleDiagnostics.afterAppSpawn,
     ) ||
     !validateUidLifecycleObservation(
       record.uidLifecycleDiagnostics.afterPageLoad,
@@ -1610,11 +1845,31 @@ function validateNegativeProbe(value) {
 
 function validateObservation(record) {
   return (
-    hasKeys(record, ['phase', 'status', 'ipv4Blocked', 'ipv6Blocked']) &&
+    hasKeys(record, [
+      'phase',
+      'status',
+      'ipv4Blocked',
+      'ipv6Blocked',
+      'ipv4Classes',
+      'ipv6Classes',
+      'overflow',
+    ]) &&
     record.phase === 'egress-observation' &&
     ['passed', 'failed'].includes(record.status) &&
-    (record.ipv4Blocked === null || count(record.ipv4Blocked)) &&
-    (record.ipv6Blocked === null || count(record.ipv6Blocked)) &&
+    (record.status === 'passed'
+      ? validateCounterObservation({
+          state: record.overflow ? 'partial' : 'observed',
+          ipv4Blocked: record.ipv4Blocked,
+          ipv6Blocked: record.ipv6Blocked,
+          ipv4Classes: record.ipv4Classes,
+          ipv6Classes: record.ipv6Classes,
+          overflow: record.overflow,
+        })
+      : record.ipv4Blocked === null &&
+        record.ipv6Blocked === null &&
+        record.ipv4Classes === null &&
+        record.ipv6Classes === null &&
+        record.overflow === null) &&
     (record.status === 'passed'
       ? count(record.ipv4Blocked) && count(record.ipv6Blocked)
       : true)
@@ -1680,9 +1935,112 @@ function validateCleanup(record) {
 function emptyEgressPhaseCounters() {
   return {
     beforeApp: emptyCounterObservation(),
+    afterAppSpawn: emptyCounterObservation(),
     afterPageLoad: emptyCounterObservation(),
     final: emptyCounterObservation(),
   };
+}
+
+function emptyEgressPhaseDelta() {
+  return {
+    state: 'unavailable',
+    ipv4Blocked: null,
+    ipv6Blocked: null,
+    ipv4Classes: null,
+    ipv6Classes: null,
+  };
+}
+
+function counterDelta(before, after) {
+  if (
+    !validateCounterObservation(before) ||
+    !validateCounterObservation(after) ||
+    before.state !== 'observed' ||
+    after.state !== 'observed'
+  ) {
+    return emptyEgressPhaseDelta();
+  }
+  const familyIsMonotonic = (family) =>
+    after[`${family}Blocked`] >= before[`${family}Blocked`] &&
+    EGRESS_DROP_COUNTER_CLASSES.every(
+      (name) =>
+        after[`${family}Classes`][name] >= before[`${family}Classes`][name],
+    );
+  if (!familyIsMonotonic('ipv4') || !familyIsMonotonic('ipv6')) {
+    return emptyEgressPhaseDelta();
+  }
+  return {
+    state: 'observed',
+    ipv4Blocked: after.ipv4Blocked - before.ipv4Blocked,
+    ipv6Blocked: after.ipv6Blocked - before.ipv6Blocked,
+    ipv4Classes: Object.fromEntries(
+      EGRESS_DROP_COUNTER_CLASSES.map((name) => [
+        name,
+        after.ipv4Classes[name] - before.ipv4Classes[name],
+      ]),
+    ),
+    ipv6Classes: Object.fromEntries(
+      EGRESS_DROP_COUNTER_CLASSES.map((name) => [
+        name,
+        after.ipv6Classes[name] - before.ipv6Classes[name],
+      ]),
+    ),
+  };
+}
+
+function validateEgressPhaseDelta(value) {
+  if (
+    !hasKeys(value, [
+      'state',
+      'ipv4Blocked',
+      'ipv6Blocked',
+      'ipv4Classes',
+      'ipv6Classes',
+    ])
+  ) {
+    return false;
+  }
+  if (value.state === 'unavailable') {
+    return (
+      value.ipv4Blocked === null &&
+      value.ipv6Blocked === null &&
+      value.ipv4Classes === null &&
+      value.ipv6Classes === null
+    );
+  }
+  if (
+    value.state !== 'observed' ||
+    !count(value.ipv4Blocked) ||
+    !count(value.ipv6Blocked) ||
+    !hasKeys(value.ipv4Classes, EGRESS_DROP_COUNTER_CLASSES) ||
+    !hasKeys(value.ipv6Classes, EGRESS_DROP_COUNTER_CLASSES)
+  ) {
+    return false;
+  }
+  return (
+    EGRESS_DROP_COUNTER_CLASSES.every(
+      (name) =>
+        count(value.ipv4Classes[name]) && count(value.ipv6Classes[name]),
+    ) &&
+    EGRESS_DROP_COUNTER_CLASSES.reduce(
+      (total, name) => total + value.ipv4Classes[name],
+      0,
+    ) === value.ipv4Blocked &&
+    EGRESS_DROP_COUNTER_CLASSES.reduce(
+      (total, name) => total + value.ipv6Classes[name],
+      0,
+    ) === value.ipv6Blocked
+  );
+}
+
+function validateEgressPhaseDeltas(value) {
+  return (
+    hasKeys(value, [
+      'beforeAppToAfterAppSpawn',
+      'afterAppSpawnToAfterPageLoad',
+      'afterPageLoadToFinal',
+    ]) && Object.values(value).every(validateEgressPhaseDelta)
+  );
 }
 
 function defaultChecks() {
@@ -1773,19 +2131,39 @@ export function sanitizeDesktopStages(records, sourceSha) {
     beforeApp:
       startup?.egressPhaseCounters.beforeApp ??
       emptyCounterObservation('not_observed'),
+    afterAppSpawn:
+      startup?.egressPhaseCounters.afterAppSpawn ??
+      emptyCounterObservation('not_observed'),
     afterPageLoad:
       startup?.egressPhaseCounters.afterPageLoad ??
       emptyCounterObservation('not_observed'),
     final:
       observation === undefined
         ? emptyCounterObservation('not_observed')
-        : observation.ipv4Blocked !== null && observation.ipv6Blocked !== null
+        : observation.status === 'passed'
           ? {
-              state: 'observed',
+              state: observation.overflow ? 'partial' : 'observed',
               ipv4Blocked: observation.ipv4Blocked,
               ipv6Blocked: observation.ipv6Blocked,
+              ipv4Classes: observation.ipv4Classes,
+              ipv6Classes: observation.ipv6Classes,
+              overflow: observation.overflow,
             }
           : emptyCounterObservation('unavailable'),
+  };
+  const uidEgressPhaseDeltas = {
+    beforeAppToAfterAppSpawn: counterDelta(
+      uidEgressPhaseCounters.beforeApp,
+      uidEgressPhaseCounters.afterAppSpawn,
+    ),
+    afterAppSpawnToAfterPageLoad: counterDelta(
+      uidEgressPhaseCounters.afterAppSpawn,
+      uidEgressPhaseCounters.afterPageLoad,
+    ),
+    afterPageLoadToFinal: counterDelta(
+      uidEgressPhaseCounters.afterPageLoad,
+      uidEgressPhaseCounters.final,
+    ),
   };
   const cleanupDiagnostics = cleanup
     ? {
@@ -1853,7 +2231,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 10,
+    schemaVersion: 11,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -1900,6 +2278,9 @@ export function sanitizeDesktopStages(records, sourceSha) {
       beforeApp:
         startup?.uidLifecycleDiagnostics.beforeApp ??
         emptyUidLifecycleObservation('not_observed'),
+      afterAppSpawn:
+        startup?.uidLifecycleDiagnostics.afterAppSpawn ??
+        emptyUidLifecycleObservation('not_observed'),
       afterPageLoad:
         startup?.uidLifecycleDiagnostics.afterPageLoad ??
         emptyUidLifecycleObservation('not_observed'),
@@ -1921,6 +2302,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
       ipv6: observation?.ipv6Blocked ?? null,
     },
     uidEgressPhaseCounters,
+    uidEgressPhaseDeltas,
     egressProbe: policy?.diagnostic ?? null,
     cleanupDiagnostics,
     checks,
@@ -1947,11 +2329,12 @@ export function validDesktopSummary(value) {
       'targetUidPreflight',
       'egressBlocked',
       'uidEgressPhaseCounters',
+      'uidEgressPhaseDeltas',
       'egressProbe',
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 10 &&
+    value.schemaVersion === 11 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
@@ -1996,10 +2379,14 @@ export function validDesktopSummary(value) {
     validateRendererDiagnostics(value.rendererDiagnostics) &&
     hasKeys(value.uidLifecycleDiagnostics, [
       'beforeApp',
+      'afterAppSpawn',
       'afterPageLoad',
       'beforeUserdel',
     ]) &&
     validateUidLifecycleObservation(value.uidLifecycleDiagnostics.beforeApp) &&
+    validateUidLifecycleObservation(
+      value.uidLifecycleDiagnostics.afterAppSpawn,
+    ) &&
     validateUidLifecycleObservation(
       value.uidLifecycleDiagnostics.afterPageLoad,
     ) &&
@@ -2013,9 +2400,11 @@ export function validDesktopSummary(value) {
     ) &&
     validateEgressPhaseCounters({
       beforeApp: value.uidEgressPhaseCounters?.beforeApp,
+      afterAppSpawn: value.uidEgressPhaseCounters?.afterAppSpawn,
       afterPageLoad: value.uidEgressPhaseCounters?.afterPageLoad,
     }) &&
     validateCounterObservation(value.uidEgressPhaseCounters?.final) &&
+    validateEgressPhaseDeltas(value.uidEgressPhaseDeltas) &&
     (value.cleanupDiagnostics === null ||
       (hasKeys(value.cleanupDiagnostics, [
         'accountState',

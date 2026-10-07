@@ -251,40 +251,49 @@ jobs:
         run: |
           set +e
           result_file="$RUNNER_TEMP/element-desktop-startup-result.jsonl"
-          before_app_counter='{"state":"not_observed","ipv4Blocked":null,"ipv6Blocked":null}'
-          after_page_load_counter='{"state":"not_observed","ipv4Blocked":null,"ipv6Blocked":null}'
+          before_app_counter='{"state":"not_observed","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}'
+          after_app_spawn_counter='{"state":"not_observed","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}'
+          after_page_load_counter='{"state":"not_observed","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}'
           before_app_uid_startup_observation=not_observed
+          after_app_spawn_uid_startup_observation=not_observed
           after_page_load_uid_startup_observation=not_observed
           before_app_seen=false
+          after_app_spawn_seen=false
           after_page_load_seen=false
           uid="$ELEMENT_DESKTOP_PROBE_UID"
           cdp_port="$ELEMENT_DESKTOP_CDP_PORT"
-          # After-page ACK work is capped at 13s including kill grace: counters and parse 4s,
-          # UID snapshot 5s, app-PID parse 2s, and marker touch 2s. The app waits 15s.
+          # Each live phase ACK is capped at 13s including kill grace: counters and parse 4s,
+          # PID/handoff parse 2s, UID snapshot 5s, and marker touch 2s. The app waits 15s.
           capture_egress_counters() {
             local counters
             if counters="$(timeout --kill-after=1s 1s sudo -n "$ELEMENT_DESKTOP_NODE_BIN" \
               dev/element-desktop-egress-policy.mjs counters "$GITHUB_RUN_ID" 2>/dev/null)"; then
               printf '%s' "$counters" | timeout --kill-after=1s 1s node --input-type=module -e '
+                import { sanitizeEgressCounterObservation } from "./dev/element-desktop-evidence.mjs";
                 let input=""; for await (const chunk of process.stdin) input+=chunk;
-                try {
-                  const value=JSON.parse(input);
-                  const valid=value && Object.keys(value).sort().join(",")==="ipv4,ipv6" && [value.ipv4,value.ipv6].every((n)=>Number.isSafeInteger(n)&&n>=0&&n<=100000);
-                  process.stdout.write(valid?JSON.stringify({state:"observed",ipv4Blocked:value.ipv4,ipv6Blocked:value.ipv6}):JSON.stringify({state:"unavailable",ipv4Blocked:null,ipv6Blocked:null}));
-                } catch { process.stdout.write(JSON.stringify({state:"unavailable",ipv4Blocked:null,ipv6Blocked:null})); }
+                process.stdout.write(JSON.stringify(sanitizeEgressCounterObservation(input)));
               '
             else
-              printf '%s' '{"state":"unavailable","ipv4Blocked":null,"ipv6Blocked":null}'
+              printf '%s' '{"state":"unavailable","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}'
             fi
           }
           capture_uid_startup_observation() {
             local app_pid="${1:-}"
+            local cdp_handoff="${2:-}"
             local observation
             if [[ ! "$uid" =~ ^[0-9]{1,5}$ ]] || [[ ! "$cdp_port" =~ ^[0-9]{1,5}$ ]]; then
               printf '%s' unavailable
               return
             fi
-            if [[ -n "$app_pid" ]]; then
+            if [[ -n "$app_pid" && -n "$cdp_handoff" ]]; then
+              if [[ ! "$app_pid" =~ ^[1-9][0-9]{0,9}$ ]] || [[ "$app_pid" -gt 2147483647 ]]; then
+                printf '%s' unavailable
+                return
+              fi
+              observation="$(printf '%s' "$cdp_handoff" | timeout --signal=TERM --kill-after=1s 4s sudo -n \
+                "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-startup.mjs \
+                uid-startup-observation "$uid" "$cdp_port" "$app_pid" --cdp-renderer-handoff 2>/dev/null)"
+            elif [[ -n "$app_pid" ]]; then
               if [[ ! "$app_pid" =~ ^[1-9][0-9]{0,9}$ ]] || [[ "$app_pid" -gt 2147483647 ]]; then
                 printf '%s' unavailable
                 return
@@ -333,16 +342,16 @@ jobs:
                 "$ELEMENT_DESKTOP_PROFILE_ROOT/.before-app-counter-read" >/dev/null 2>&1
               before_app_seen=true
             fi
-            if [[ "$after_page_load_seen" != true ]] && \
-              grep -Fq '{"phase":"desktop-startup-progress","milestone":"after-page-load","appPid":' "$result_file" 2>/dev/null; then
-              after_page_load_counter="$(capture_egress_counters)"
+            if [[ "$after_app_spawn_seen" != true ]] && \
+              grep -Fq '{"phase":"desktop-startup-progress","milestone":"after-app-spawn","appPid":' "$result_file" 2>/dev/null; then
+              after_app_spawn_counter="$(capture_egress_counters)"
               app_pid="$(timeout --signal=TERM --kill-after=1s 1s node --input-type=module - "$result_file" 2>/dev/null <<'NODE'
           import { readFileSync } from 'node:fs';
           const [resultFile] = process.argv.slice(2);
           for (const row of readFileSync(resultFile, 'utf8').split(/\r?\n/u).filter(Boolean)) {
             let value;
             try { value = JSON.parse(row); } catch { continue; }
-            if (value.phase !== 'desktop-startup-progress' || value.milestone !== 'after-page-load') continue;
+            if (value.phase !== 'desktop-startup-progress' || value.milestone !== 'after-app-spawn') continue;
             if (Object.keys(value).sort().join(',') !== 'appPid,milestone,phase' || !Number.isSafeInteger(value.appPid) || value.appPid < 2 || value.appPid > 2147483647) process.exit(2);
             process.stdout.write(String(value.appPid));
             process.exit(0);
@@ -351,7 +360,42 @@ jobs:
           NODE
               )"
               if [[ "$app_pid" =~ ^[1-9][0-9]{0,9}$ ]] && [[ "$app_pid" -ge 2 ]] && [[ "$app_pid" -le 2147483647 ]]; then
-                after_page_load_uid_startup_observation="$(capture_uid_startup_observation "$app_pid")"
+                after_app_spawn_uid_startup_observation="$(capture_uid_startup_observation "$app_pid")"
+              else
+                after_app_spawn_uid_startup_observation=unavailable
+              fi
+              timeout --kill-after=1s 1s sudo -n -u "$ELEMENT_DESKTOP_PROBE_USERNAME" -- touch \
+                "$ELEMENT_DESKTOP_PROFILE_ROOT/.after-app-spawn-counter-read" >/dev/null 2>&1
+              after_app_spawn_seen=true
+            fi
+            if [[ "$after_page_load_seen" != true ]] && \
+              grep -Fq '{"phase":"desktop-startup-progress","milestone":"after-page-load","appPid":' "$result_file" 2>/dev/null; then
+              after_page_load_counter="$(capture_egress_counters)"
+              handoff_record="$(timeout --signal=TERM --kill-after=1s 1s node --input-type=module - "$result_file" 2>/dev/null <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const [resultFile] = process.argv.slice(2);
+          const validHandoff = (value) => {
+            if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== 'overflow,pids,rendererCount,state') return false;
+            if (!['unavailable','partial','observed'].includes(value.state)) return false;
+            if (value.state === 'unavailable') return value.overflow === null && value.pids === null && value.rendererCount === null;
+            return typeof value.overflow === 'boolean' && Number.isSafeInteger(value.rendererCount) && value.rendererCount >= 0 && value.rendererCount <= 64 && Array.isArray(value.pids) && value.pids.length === value.rendererCount && value.pids.every((pid,index)=>Number.isSafeInteger(pid)&&pid>=2&&pid<=2147483647&&value.pids.indexOf(pid)===index) && (value.state !== 'observed' || value.overflow === false);
+          };
+          for (const row of readFileSync(resultFile, 'utf8').split(/\r?\n/u).filter(Boolean)) {
+            let value;
+            try { value = JSON.parse(row); } catch { continue; }
+            if (value.phase !== 'desktop-startup-progress' || value.milestone !== 'after-page-load') continue;
+            if (Object.keys(value).sort().join(',') !== 'appPid,cdpRendererHandoff,milestone,phase' || !Number.isSafeInteger(value.appPid) || value.appPid < 2 || value.appPid > 2147483647 || !validHandoff(value.cdpRendererHandoff)) process.exit(2);
+            process.stdout.write(`${value.appPid}\t${JSON.stringify(value.cdpRendererHandoff)}`);
+            process.exit(0);
+          }
+          process.exit(1);
+          NODE
+              )"
+              app_pid=''
+              cdp_handoff=''
+              IFS=$'\t' read -r app_pid cdp_handoff <<< "$handoff_record"
+              if [[ "$app_pid" =~ ^[1-9][0-9]{0,9}$ ]] && [[ "$app_pid" -ge 2 ]] && [[ "$app_pid" -le 2147483647 ]] && [[ -n "$cdp_handoff" ]]; then
+                after_page_load_uid_startup_observation="$(capture_uid_startup_observation "$app_pid" "$cdp_handoff")"
               else
                 after_page_load_uid_startup_observation=unavailable
               fi
@@ -365,12 +409,14 @@ jobs:
           probe_exit=$?
           set -e
           ELEMENT_DESKTOP_BEFORE_APP_COUNTER="$before_app_counter" \
+          ELEMENT_DESKTOP_AFTER_APP_SPAWN_COUNTER="$after_app_spawn_counter" \
           ELEMENT_DESKTOP_AFTER_PAGE_LOAD_COUNTER="$after_page_load_counter" \
           ELEMENT_DESKTOP_BEFORE_APP_UID_STARTUP_OBSERVATION="$before_app_uid_startup_observation" \
+          ELEMENT_DESKTOP_AFTER_APP_SPAWN_UID_STARTUP_OBSERVATION="$after_app_spawn_uid_startup_observation" \
           ELEMENT_DESKTOP_AFTER_PAGE_LOAD_UID_STARTUP_OBSERVATION="$after_page_load_uid_startup_observation" \
           node --input-type=module - "$result_file" "$ELEMENT_DESKTOP_STAGE_FILE" <<'NODE'
           import { appendFileSync, readFileSync } from 'node:fs';
-          import { emptyUidStartupObservation, sanitizeUidStartupObservation } from './dev/element-desktop-evidence.mjs';
+          import { emptyUidStartupObservation, sanitizeEgressCounterObservation, sanitizeUidStartupObservation } from './dev/element-desktop-evidence.mjs';
           const [resultFile, stageFile] = process.argv.slice(2);
           function startupObservation(raw) {
             return raw === 'not_observed'
@@ -382,41 +428,36 @@ jobs:
           const beforeAppStartupObservation = startupObservation(
             process.env.ELEMENT_DESKTOP_BEFORE_APP_UID_STARTUP_OBSERVATION,
           );
+          const afterAppSpawnStartupObservation = startupObservation(
+            process.env.ELEMENT_DESKTOP_AFTER_APP_SPAWN_UID_STARTUP_OBSERVATION,
+          );
           const afterPageLoadStartupObservation = startupObservation(
             process.env.ELEMENT_DESKTOP_AFTER_PAGE_LOAD_UID_STARTUP_OBSERVATION,
           );
-          function counterSnapshot(raw, fallbackState) {
-            const fallback = {state:fallbackState,ipv4Blocked:null,ipv6Blocked:null};
-            try {
-              const value = JSON.parse(raw ?? '');
-              const keys = Object.keys(value ?? {}).sort().join(',');
-              const validState = ['not_observed','unavailable','observed'].includes(value?.state);
-              const observed = value?.state === 'observed' && [value.ipv4Blocked,value.ipv6Blocked].every((n)=>Number.isSafeInteger(n)&&n>=0&&n<=100000);
-              const noCounts = value?.ipv4Blocked === null && value?.ipv6Blocked === null;
-              if (keys !== 'ipv4Blocked,ipv6Blocked,state' || !validState || !(observed || (value.state !== 'observed' && noCounts))) return fallback;
-              return {state:value.state,ipv4Blocked:value.ipv4Blocked,ipv6Blocked:value.ipv6Blocked};
-            } catch { return fallback; }
-          }
-          const beforeApp = counterSnapshot(process.env.ELEMENT_DESKTOP_BEFORE_APP_COUNTER, 'unavailable');
-          const afterPageLoad = counterSnapshot(process.env.ELEMENT_DESKTOP_AFTER_PAGE_LOAD_COUNTER, 'not_observed');
+          const beforeApp = sanitizeEgressCounterObservation(process.env.ELEMENT_DESKTOP_BEFORE_APP_COUNTER);
+          const afterAppSpawn = sanitizeEgressCounterObservation(process.env.ELEMENT_DESKTOP_AFTER_APP_SPAWN_COUNTER);
+          const afterPageLoad = sanitizeEgressCounterObservation(process.env.ELEMENT_DESKTOP_AFTER_PAGE_LOAD_COUNTER);
           function acknowledgedCounter(snapshot, acknowledgement) {
-            if (acknowledgement === 'not_observed') return {state:'not_observed',ipv4Blocked:null,ipv6Blocked:null};
-            if (acknowledgement !== 'observed' || snapshot.state !== 'observed') return {state:'unavailable',ipv4Blocked:null,ipv6Blocked:null};
+            if (acknowledgement === 'not_observed') return {state:'not_observed',ipv4Blocked:null,ipv6Blocked:null,ipv4Classes:null,ipv6Classes:null,overflow:null};
+            if (acknowledgement !== 'observed' || !['observed','partial'].includes(snapshot.state)) return {state:'unavailable',ipv4Blocked:null,ipv6Blocked:null,ipv4Classes:null,ipv6Classes:null,overflow:null};
             return snapshot;
           }
-          const milestones = new Set(['before-app','after-page-load']);
+          const milestones = new Set(['before-app','after-app-spawn','after-page-load']);
           for (const row of readFileSync(resultFile, 'utf8').split(/\r?\n/u).filter(Boolean)) {
             let value;
             try { value = JSON.parse(row); } catch { continue; }
             if (value.phase === 'desktop-startup-progress') {
               const beforeApp = Object.keys(value).sort().join(',') === 'milestone,phase' && value.milestone === 'before-app';
-              const afterPageLoad = Object.keys(value).sort().join(',') === 'appPid,milestone,phase' && value.milestone === 'after-page-load' && Number.isSafeInteger(value.appPid) && value.appPid >= 2 && value.appPid <= 2147483647;
-              if (!milestones.has(value.milestone) || !(beforeApp || afterPageLoad)) process.exit(2);
+              const validPid = Number.isSafeInteger(value.appPid) && value.appPid >= 2 && value.appPid <= 2147483647;
+              const afterAppSpawn = Object.keys(value).sort().join(',') === 'appPid,milestone,phase' && value.milestone === 'after-app-spawn' && validPid;
+              const afterPageLoad = Object.keys(value).sort().join(',') === 'appPid,cdpRendererHandoff,milestone,phase' && value.milestone === 'after-page-load' && validPid && value.cdpRendererHandoff && typeof value.cdpRendererHandoff === 'object';
+              if (!milestones.has(value.milestone) || !(beforeApp || afterAppSpawn || afterPageLoad)) process.exit(2);
               continue;
             }
             if (value.phase === 'desktop-startup') {
               value.uidLifecycleDiagnostics = {
                 beforeApp:beforeAppStartupObservation.uidLifecycleObservation,
+                afterAppSpawn:afterAppSpawnStartupObservation.uidLifecycleObservation,
                 afterPageLoad:afterPageLoadStartupObservation.uidLifecycleObservation,
               };
               value.uidTcpSocketDiagnostics = {
@@ -426,6 +467,7 @@ jobs:
               const acknowledgements = value.egressPhaseCounters ?? {};
               value.egressPhaseCounters = {
                 beforeApp:acknowledgedCounter(beforeApp, acknowledgements.beforeApp?.state),
+                afterAppSpawn:acknowledgedCounter(afterAppSpawn, acknowledgements.afterAppSpawn?.state),
                 afterPageLoad:acknowledgedCounter(afterPageLoad, acknowledgements.afterPageLoad?.state),
               };
               appendFileSync(stageFile, JSON.stringify(value) + '\n');
@@ -473,12 +515,11 @@ jobs:
             counter_json="$(sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs counters "$run_id" 2>/dev/null)"
             if [[ -n "$counter_json" ]]; then
               observation="$(printf '%s' "$counter_json" | node --input-type=module -e '
+                import { sanitizeEgressCounterObservation } from "./dev/element-desktop-evidence.mjs";
                 let input=""; for await (const chunk of process.stdin) input+=chunk;
-                try {
-                  const value=JSON.parse(input);
-                  const valid=value && Object.keys(value).sort().join(",")==="ipv4,ipv6" && [value.ipv4,value.ipv6].every((n)=>Number.isSafeInteger(n)&&n>=0&&n<=100000);
-                  process.stdout.write(valid?JSON.stringify({phase:"egress-observation",status:"passed",ipv4Blocked:value.ipv4,ipv6Blocked:value.ipv6}):"");
-                } catch {}
+                const value=sanitizeEgressCounterObservation(input);
+                const valid=["observed","partial"].includes(value.state);
+                process.stdout.write(valid?JSON.stringify({phase:"egress-observation",status:"passed",ipv4Blocked:value.ipv4Blocked,ipv6Blocked:value.ipv6Blocked,ipv4Classes:value.ipv4Classes,ipv6Classes:value.ipv6Classes,overflow:value.overflow}):"");
               ')"
               if [[ -n "$observation" ]]; then
                 printf '%s\n' "$observation" >> "$stage_file"
@@ -498,7 +539,7 @@ jobs:
             fi
           fi
           if [[ "$observation_status" != passed ]]; then
-            printf '%s\n' '{"phase":"egress-observation","status":"failed","ipv4Blocked":null,"ipv6Blocked":null}' >> "$stage_file"
+            printf '%s\n' '{"phase":"egress-observation","status":"failed","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}' >> "$stage_file"
           fi
 
           if [[ "$uid" =~ ^[0-9]{1,5}$ ]] && [[ "$uid" -gt 0 ]] && [[ "$run_id" =~ ^[0-9]{1,18}$ ]]; then
@@ -622,7 +663,7 @@ jobs:
             if (!phases.has(phase)) {
               const fallback = phase === 'egress-policy'
                 ? {phase,status:'not_run',negativeTest:'not_run',diagnostic:null}
-                : {phase,status:'failed',ipv4Blocked:null,ipv6Blocked:null};
+                : {phase,status:'failed',ipv4Blocked:null,ipv6Blocked:null,ipv4Classes:null,ipv6Classes:null,overflow:null};
               appendFileSync(stageFile, JSON.stringify(fallback) + '\n');
             }
           }

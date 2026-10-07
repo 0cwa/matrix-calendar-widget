@@ -14,7 +14,10 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  aggregateDropCounterDetails,
+  EGRESS_DROP_COUNTER_CLASSES,
   negativeProbePassed,
+  parseDropCounterDetails,
   policySpec,
   probeFromSpawn,
   RUNTIME_FACTS_SOURCE,
@@ -71,7 +74,7 @@ test('desktop egress permits only the fixture homeserver and loopback CDP ports'
     '-j',
     'MCWD_7315_6',
   ]);
-  assert.deepEqual(ipv4.chainRules, [
+  const acceptedRules = [
     [
       '-o',
       'lo',
@@ -100,39 +103,133 @@ test('desktop egress permits only the fixture homeserver and loopback CDP ports'
       '-j',
       'ACCEPT',
     ],
-    ['-j', 'DROP'],
+  ];
+  assert.deepEqual(ipv4.chainRules.slice(0, 2), acceptedRules);
+  assert.deepEqual(ipv6.chainRules.slice(0, 2), [
+    acceptedRules[0],
+    [...acceptedRules[1].slice(0, 5), '::1/128', ...acceptedRules[1].slice(6)],
   ]);
-  assert.deepEqual(ipv6.chainRules, [
-    [
-      '-o',
-      'lo',
-      '-m',
-      'conntrack',
-      '--ctstate',
-      'ESTABLISHED,RELATED',
-      '-j',
-      'ACCEPT',
-    ],
-    [
-      '-o',
-      'lo',
-      '-p',
-      'tcp',
-      '-d',
-      '::1/128',
-      '-m',
-      'multiport',
-      '--dports',
-      '8008,9223',
-      '-m',
-      'conntrack',
-      '--ctstate',
-      'NEW',
-      '-j',
-      'ACCEPT',
-    ],
-    ['-j', 'DROP'],
-  ]);
+  for (const family of [ipv4, ipv6]) {
+    assert.deepEqual(
+      family.chainRules.slice(2),
+      EGRESS_DROP_COUNTER_CLASSES.map(({ rule }) => rule),
+    );
+    assert.ok(
+      family.chainRules.slice(2).every((rule) => rule.at(-1) === 'DROP'),
+    );
+  }
+});
+
+test('drop counter classes stay disjoint, aggregate, capped, and unavailable on malformed rules', () => {
+  const chain = 'MCWD_7315_4';
+  const makeSaveOutput = (counts) =>
+    EGRESS_DROP_COUNTER_CLASSES.map(
+      ({ name, rule }) => `[${counts[name]}:0] -A ${chain} ${rule.join(' ')}`,
+    ).join('\n');
+  const details = parseDropCounterDetails(
+    makeSaveOutput({
+      udp_dns_port: 2,
+      tcp_dns_port: 3,
+      tcp_https_port: 5,
+      other: 6,
+    }),
+    chain,
+  );
+  assert.deepEqual(details, {
+    blocked: 16,
+    classes: {
+      udp_dns_port: 2,
+      tcp_dns_port: 3,
+      tcp_https_port: 5,
+      other: 6,
+    },
+    overflow: false,
+  });
+
+  assert.throws(
+    () =>
+      parseDropCounterDetails(
+        makeSaveOutput({
+          udp_dns_port: 0,
+          tcp_dns_port: 0,
+          tcp_https_port: 0,
+          other: 0,
+        }).replace(/-A MCWD_7315_4 -j DROP/u, '-A MCWD_7315_4 -j ACCEPT'),
+        chain,
+      ),
+    /egress counter unavailable/u,
+  );
+  assert.throws(
+    () =>
+      parseDropCounterDetails(
+        `${makeSaveOutput({ udp_dns_port: 0, tcp_dns_port: 0, tcp_https_port: 0, other: 0 })}\n[0:0] -A ${chain} -j DROP`,
+        chain,
+      ),
+    /egress counter unavailable/u,
+  );
+
+  const overflow = parseDropCounterDetails(
+    makeSaveOutput({
+      udp_dns_port: 100_001,
+      tcp_dns_port: 0,
+      tcp_https_port: 0,
+      other: 0,
+    }),
+    chain,
+  );
+  assert.deepEqual(overflow, {
+    blocked: 100_000,
+    classes: {
+      udp_dns_port: 100_000,
+      tcp_dns_port: 0,
+      tcp_https_port: 0,
+      other: 0,
+    },
+    overflow: true,
+  });
+});
+
+test('IPv4 and IPv6 class counters aggregate without changing the blocked totals', () => {
+  const parseFamily = (chain, counts) =>
+    parseDropCounterDetails(
+      EGRESS_DROP_COUNTER_CLASSES.map(
+        ({ name, rule }) => `[${counts[name]}:0] -A ${chain} ${rule.join(' ')}`,
+      ).join('\n'),
+      chain,
+    );
+  const ipv4 = parseFamily('MCWD_7315_4', {
+    udp_dns_port: 2,
+    tcp_dns_port: 1,
+    tcp_https_port: 0,
+    other: 3,
+  });
+  const ipv6 = parseFamily('MCWD_7315_6', {
+    udp_dns_port: 0,
+    tcp_dns_port: 1,
+    tcp_https_port: 4,
+    other: 0,
+  });
+  assert.deepEqual(aggregateDropCounterDetails(ipv4, ipv6), {
+    ipv4: 6,
+    ipv6: 5,
+    ipv4Classes: {
+      udp_dns_port: 2,
+      tcp_dns_port: 1,
+      tcp_https_port: 0,
+      other: 3,
+    },
+    ipv6Classes: {
+      udp_dns_port: 0,
+      tcp_dns_port: 1,
+      tcp_https_port: 4,
+      other: 0,
+    },
+    overflow: false,
+  });
+  assert.throws(
+    () => aggregateDropCounterDetails({ ...ipv4, blocked: 7 }, ipv6),
+    /egress counter unavailable/u,
+  );
 });
 
 test('desktop egress rejects invalid identifiers and a CDP port that shadows Synapse', () => {

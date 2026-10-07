@@ -5,6 +5,21 @@ import { fileURLToPath } from 'node:url';
 
 const LOCAL_HOMESERVER_PORT = 8008;
 const MAX_COUNT = 100_000;
+export const EGRESS_DROP_COUNTER_CLASSES = Object.freeze([
+  {
+    name: 'udp_dns_port',
+    rule: ['-p', 'udp', '-m', 'udp', '--dport', '53', '-j', 'DROP'],
+  },
+  {
+    name: 'tcp_dns_port',
+    rule: ['-p', 'tcp', '-m', 'tcp', '--dport', '53', '-j', 'DROP'],
+  },
+  {
+    name: 'tcp_https_port',
+    rule: ['-p', 'tcp', '-m', 'tcp', '--dport', '443', '-j', 'DROP'],
+  },
+  { name: 'other', rule: ['-j', 'DROP'] },
+]);
 const FAMILIES = Object.freeze([
   { name: 'ipv4', tool: 'iptables', suffix: '4', destination: '127.0.0.1/32' },
   { name: 'ipv6', tool: 'ip6tables', suffix: '6', destination: '::1/128' },
@@ -82,7 +97,7 @@ export function policySpec(uidValue, runIdValue, cdpPortValue) {
         '-j',
         'ACCEPT',
       ],
-      ['-j', 'DROP'],
+      ...EGRESS_DROP_COUNTER_CLASSES.map(({ rule }) => rule),
     ];
     return {
       name,
@@ -205,7 +220,8 @@ export function installPolicy(uidValue, runIdValue, cdpPortValue) {
       const activeRules = command(tool, ['-w', '-S', chain])
         .split(/\r?\n/u)
         .filter((line) => line.startsWith(`-A ${chain} `));
-      if (activeRules.length !== 3) throw new Error('egress chain incomplete');
+      if (activeRules.length !== chainRules.length)
+        throw new Error('egress chain incomplete');
     }
   } catch {
     try {
@@ -218,32 +234,102 @@ export function installPolicy(uidValue, runIdValue, cdpPortValue) {
   return true;
 }
 
-function parseDropCounter(saveOutput, chain) {
-  const escaped = chain.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-  const matches = [
-    ...saveOutput.matchAll(
-      new RegExp(`^\\[(\\d+):\\d+\\] -A ${escaped} -j DROP$`, 'gmu'),
-    ),
-  ];
-  if (matches.length !== 1) throw new Error('egress counter unavailable');
-  const count = BigInt(matches[0][1]);
-  return Number(count > BigInt(MAX_COUNT) ? BigInt(MAX_COUNT) : count);
+export function parseDropCounterDetails(saveOutput, chain) {
+  if (
+    typeof saveOutput !== 'string' ||
+    typeof chain !== 'string' ||
+    !/^[A-Za-z0-9_]{1,28}$/u.test(chain)
+  ) {
+    throw new Error('egress counter unavailable');
+  }
+  const classes = {};
+  let total = 0n;
+  let overflow = false;
+  for (const counterClass of EGRESS_DROP_COUNTER_CLASSES) {
+    const rule = counterClass.rule.join(' ');
+    const matches = [
+      ...saveOutput.matchAll(
+        new RegExp(`^\\[(\\d+):\\d+\\] -A ${chain} ${rule}$`, 'gmu'),
+      ),
+    ];
+    if (matches.length !== 1) throw new Error('egress counter unavailable');
+    const rawCount = BigInt(matches[0][1]);
+    if (rawCount > BigInt(MAX_COUNT)) overflow = true;
+    total += rawCount;
+    classes[counterClass.name] = Number(
+      rawCount > BigInt(MAX_COUNT) ? BigInt(MAX_COUNT) : rawCount,
+    );
+  }
+  if (total > BigInt(MAX_COUNT)) overflow = true;
+  return {
+    blocked: Number(total > BigInt(MAX_COUNT) ? BigInt(MAX_COUNT) : total),
+    classes,
+    overflow,
+  };
+}
+
+export function aggregateDropCounterDetails(ipv4, ipv6) {
+  const validDetails = (value) =>
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).sort().join(',') === 'blocked,classes,overflow' &&
+    Number.isSafeInteger(value.blocked) &&
+    value.blocked >= 0 &&
+    value.blocked <= MAX_COUNT &&
+    typeof value.overflow === 'boolean' &&
+    value.classes !== null &&
+    typeof value.classes === 'object' &&
+    !Array.isArray(value.classes) &&
+    Object.keys(value.classes).sort().join(',') ===
+      EGRESS_DROP_COUNTER_CLASSES.map(({ name }) => name)
+        .sort()
+        .join(',') &&
+    EGRESS_DROP_COUNTER_CLASSES.every(
+      ({ name }) =>
+        Number.isSafeInteger(value.classes[name]) &&
+        value.classes[name] >= 0 &&
+        value.classes[name] <= MAX_COUNT,
+    ) &&
+    (value.overflow
+      ? value.blocked === MAX_COUNT &&
+        EGRESS_DROP_COUNTER_CLASSES.reduce(
+          (total, { name }) => total + value.classes[name],
+          0,
+        ) >= value.blocked
+      : EGRESS_DROP_COUNTER_CLASSES.reduce(
+          (total, { name }) => total + value.classes[name],
+          0,
+        ) === value.blocked);
+  if (!validDetails(ipv4) || !validDetails(ipv6)) {
+    throw new Error('egress counter unavailable');
+  }
+  return {
+    ipv4: ipv4.blocked,
+    ipv6: ipv6.blocked,
+    ipv4Classes: ipv4.classes,
+    ipv6Classes: ipv6.classes,
+    overflow: ipv4.overflow || ipv6.overflow,
+  };
 }
 
 export function readBlockedCounters(runIdValue) {
   const families = runIdChains(runIdValue);
   if (process.geteuid?.() !== 0) throw new Error('egress policy requires root');
-  const counts = {};
-  for (const family of families) {
-    counts[family.name] = readBlockedCounter(family);
-  }
-  return counts;
+  return aggregateDropCounterDetails(
+    readBlockedCounterDetails(families[0]),
+    readBlockedCounterDetails(families[1]),
+  );
 }
 
 function readBlockedCounter(family) {
+  return readBlockedCounterDetails(family).blocked;
+}
+
+function readBlockedCounterDetails(family) {
   if (process.geteuid?.() !== 0) throw new Error('egress policy requires root');
   const output = command(`${family.tool}-save`, ['-c']);
-  return parseDropCounter(output, family.chain);
+  return parseDropCounterDetails(output, family.chain);
 }
 
 export function resetCounters(runIdValue) {
@@ -252,7 +338,7 @@ export function resetCounters(runIdValue) {
     command(family.tool, ['-w', '-Z', family.chain]);
   }
   const counts = readBlockedCounters(runIdValue);
-  if (Object.values(counts).some((value) => value !== 0)) {
+  if (counts.ipv4 !== 0 || counts.ipv6 !== 0 || counts.overflow) {
     throw new Error('egress counters did not reset');
   }
   return true;
@@ -940,7 +1026,15 @@ async function connectOnly(expectedUidValue, host, port) {
 
 function printCounters(runId) {
   const counts = readBlockedCounters(runId);
-  process.stdout.write(`${JSON.stringify(counts)}\n`);
+  process.stdout.write(
+    `${JSON.stringify({
+      ipv4Blocked: counts.ipv4,
+      ipv6Blocked: counts.ipv6,
+      ipv4Classes: counts.ipv4Classes,
+      ipv6Classes: counts.ipv6Classes,
+      overflow: counts.overflow,
+    })}\n`,
+  );
 }
 
 async function main(args) {

@@ -6,11 +6,13 @@ import {
   classifyUidSocketProcess,
   createKeyringUnlockInput,
   createSafeStorageLogCollector,
+  parseCdpRendererHandoff,
   parseProcCommandLine,
   readCappedDirectoryEntries,
   readKeyringControl,
   SANDBOX_REASONS,
   selectUidLifecycleProcessEntries,
+  summarizeCdpRendererProcessInfo,
   summarizeProcessCoverageAndSandbox,
   summarizeUidLifecycleObservation,
   summarizeUidProcessObservations,
@@ -334,6 +336,81 @@ test('UID lifecycle process cap marks app PID substitution and overflow honestly
     selectUidLifecycleProcessEntries(['10', '11', '99'], 99, 3),
     { entries: ['10', '11', '99'], overflow: false },
   );
+  assert.deepEqual(
+    selectUidLifecycleProcessEntries(['10', '11', '12'], 99, 3, [101, 102]),
+    { entries: ['102', '101', '99'], overflow: true },
+  );
+});
+
+test('CDP renderer handoff is bounded, private, and reports unknown process lists', () => {
+  const processInfo = [
+    { type: 'browser', id: 4 },
+    ...Array.from({ length: 65 }, (_, index) => ({
+      type: 'renderer',
+      id: 100 + index,
+    })),
+  ];
+  const summary = summarizeCdpRendererProcessInfo(processInfo);
+  assert.equal(summary.state, 'partial');
+  assert.equal(summary.overflow, true);
+  assert.equal(summary.rendererCount, 64);
+  assert.equal(summary.pids.length, 64);
+  assert.equal(JSON.stringify(summary).includes('type'), false);
+
+  const unavailable = parseCdpRendererHandoff('{"state":"observed"}');
+  assert.deepEqual(unavailable, {
+    state: 'unavailable',
+    overflow: null,
+    rendererCount: null,
+    pids: null,
+  });
+  assert.deepEqual(parseCdpRendererHandoff('x'.repeat(2_049)), unavailable);
+});
+
+test('CDP renderer ownership compares live UID, app ancestry, process group, argv, and security', () => {
+  const handoff = {
+    state: 'observed',
+    overflow: false,
+    rendererCount: 2,
+    pids: [502, 503],
+  };
+  const observation = summarizeUidLifecycleObservation(
+    [
+      lifecycleProcess(500, 1, 500, ['/usr/bin/element-desktop']),
+      lifecycleProcess(501, 500, 500, ['--type=zygote']),
+      lifecycleProcess(502, 501, 500, ['--type=renderer'], {
+        seccomp: '2',
+        noNewPrivs: '1',
+      }),
+      lifecycleProcess(503, 1, 503, ['--type=renderer', '--no-sandbox']),
+    ],
+    24_000,
+    500,
+    true,
+    false,
+    handoff,
+  );
+  assert.deepEqual(observation.cdpRendererObservation, {
+    state: 'observed',
+    overflow: false,
+    rendererCount: 2,
+    missingCount: 0,
+    unreadableCount: 0,
+    uidMatchCount: 2,
+    uidMismatchCount: 0,
+    appIdentityState: 'verified',
+    appDescendantCount: 1,
+    appDescendantUnobservedCount: 0,
+    appProcessGroupCount: 1,
+    appProcessGroupUnobservedCount: 0,
+    appDescendantAndProcessGroupCount: 1,
+    argvRendererMatchCount: 2,
+    noSandboxFlagCount: 1,
+    seccompState: 'unavailable',
+    noNewPrivsState: 'unavailable',
+  });
+  assert.equal(JSON.stringify(observation).includes('502'), false);
+  assert.equal(JSON.stringify(observation).includes('24000'), false);
 });
 
 test('capped directory iteration reads only through the first excess match and closes', () => {
