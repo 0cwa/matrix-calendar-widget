@@ -99,6 +99,41 @@ type Phase =
   | 'canonical-read-after-denial'
   | 'browser-egress';
 
+type BrowserActor = 'member-a' | 'member-b' | 'outsider';
+type BlockedRequestClass =
+  | 'fixture-host-origin-mismatch'
+  | 'matrix-client-well-known-discovery'
+  | 'matrix-server-well-known-discovery'
+  | 'non-http-scheme'
+  | 'invalid-url'
+  | 'unapproved-loopback-origin'
+  | 'external-http-origin';
+type BlockedRequestResourceType =
+  | 'document'
+  | 'stylesheet'
+  | 'image'
+  | 'media'
+  | 'font'
+  | 'script'
+  | 'texttrack'
+  | 'xhr'
+  | 'fetch'
+  | 'eventsource'
+  | 'websocket'
+  | 'manifest'
+  | 'other';
+type BlockedRequestDiagnostic = {
+  actor: BrowserActor;
+  phase: Phase;
+  requestClass: BlockedRequestClass;
+  resourceType: BlockedRequestResourceType;
+  count: number;
+};
+type BlockedRequestEvidence = {
+  diagnostics: Map<string, BlockedRequestDiagnostic>;
+  overflow: boolean;
+};
+
 type MatrixSyncState =
   | 'ERROR'
   | 'PREPARED'
@@ -388,6 +423,22 @@ const blockedExternalRequestsByContext = new WeakMap<
   { count: number }
 >();
 const memberABlockedExternalRequests = new WeakMap<Page, { count: number }>();
+const BLOCKED_REQUEST_RESOURCE_TYPES = new Set<BlockedRequestResourceType>([
+  'document',
+  'stylesheet',
+  'image',
+  'media',
+  'font',
+  'script',
+  'texttrack',
+  'xhr',
+  'fetch',
+  'eventsource',
+  'websocket',
+  'manifest',
+  'other',
+]);
+const MAX_BLOCKED_REQUEST_DIAGNOSTIC_BUCKETS = 32;
 
 test('Element Web members share events and enforce room authorization', async ({
   browser,
@@ -395,6 +446,10 @@ test('Element Web members share events and enforce room authorization', async ({
   fixture = readFixture();
   const contexts: BrowserContext[] = [];
   let blockedExternalRequests = 0;
+  const blockedRequestEvidence: BlockedRequestEvidence = {
+    diagnostics: new Map(),
+    overflow: false,
+  };
   const allowedOrigins = new Set([
     new URL(fixture.elementUrl).origin,
     new URL(fixture.homeserverUrl).origin,
@@ -402,8 +457,16 @@ test('Element Web members share events and enforce room authorization', async ({
     new URL(fixture.gatewayUrl).origin,
     'http://127.0.0.1:8080',
   ]);
+  const fixtureHosts = new Set([
+    ...Array.from(allowedOrigins, (origin) => new URL(origin).hostname),
+    'synapse',
+    'radicale',
+    'gateway',
+    'widget',
+    'element',
+  ]);
 
-  const makeContext = async () => {
+  const makeContext = async (actor: BrowserActor) => {
     const context = await browser.newContext({
       locale: 'en-US',
       timezoneId: 'Europe/Stockholm',
@@ -413,24 +476,40 @@ test('Element Web members share events and enforce room authorization', async ({
     blockedExternalRequestsByContext.set(context, contextBlockedRequests);
     contexts.push(context);
     await context.route('**/*', async (route) => {
-      let origin: string | undefined;
+      let requestUrl: URL;
       try {
-        origin = new URL(route.request().url()).origin;
+        requestUrl = new URL(route.request().url());
       } catch {
         blockedExternalRequests += 1;
         contextBlockedRequests.count = Math.min(
           contextBlockedRequests.count + 1,
           100_000,
         );
+        const request = route.request();
+        recordBlockedRequest(
+          blockedRequestEvidence,
+          actor,
+          activePhase,
+          'invalid-url',
+          safeBlockedRequestResourceType(request.resourceType()),
+        );
         await route.abort('blockedbyclient');
         return;
       }
 
-      if (!allowedOrigins.has(origin)) {
+      if (!allowedOrigins.has(requestUrl.origin)) {
         blockedExternalRequests += 1;
         contextBlockedRequests.count = Math.min(
           contextBlockedRequests.count + 1,
           100_000,
+        );
+        const request = route.request();
+        recordBlockedRequest(
+          blockedRequestEvidence,
+          actor,
+          activePhase,
+          classifyBlockedRequest(requestUrl, fixtureHosts),
+          safeBlockedRequestResourceType(request.resourceType()),
         );
         await route.abort('blockedbyclient');
         return;
@@ -455,7 +534,7 @@ test('Element Web members share events and enforce room authorization', async ({
     recordRuntimeVersions(browser.version());
 
     activePhase = 'member-a-authenticated';
-    contextA = await makeContext();
+    contextA = await makeContext('member-a');
     pageA = await authenticateInElement(contextA, fixture.users.memberA, true);
     memberARuntimeObservation = await observeAcceptanceRuntime(pageA, {
       gatewayUrl: fixture.gatewayUrl,
@@ -465,12 +544,12 @@ test('Element Web members share events and enforce room authorization', async ({
     record(activePhase, 'passed');
 
     activePhase = 'member-b-authenticated';
-    contextB = await makeContext();
+    contextB = await makeContext('member-b');
     pageB = await authenticateInElement(contextB, fixture.users.memberB);
     record(activePhase, 'passed');
 
     activePhase = 'outsider-authenticated';
-    contextC = await makeContext();
+    contextC = await makeContext('outsider');
     pageC = await authenticateInElement(contextC, fixture.users.outsider);
     record(activePhase, 'passed');
 
@@ -742,6 +821,10 @@ test('Element Web members share events and enforce room authorization', async ({
     record(activePhase, 'passed', reloadResponseResult.status());
 
     activePhase = 'browser-egress';
+    failureAlreadyReported = recordBlockedRequestFailure(
+      blockedExternalRequests,
+      blockedRequestEvidence,
+    );
     expect(blockedExternalRequests).toBe(0);
     record(activePhase, 'passed', undefined, blockedExternalRequests);
   } catch {
@@ -765,6 +848,89 @@ function readFixture(): Fixture {
   } catch {
     throw new Error('Element acceptance fixture unavailable');
   }
+}
+
+function recordBlockedRequestFailure(
+  blockedRequestCount: number,
+  evidence: BlockedRequestEvidence,
+): boolean {
+  if (blockedRequestCount === 0) return false;
+  record('browser-egress', 'failed', undefined, blockedRequestCount, {
+    blockedRequestDiagnostics: Array.from(evidence.diagnostics.values()),
+    blockedRequestDiagnosticOverflow: evidence.overflow,
+  });
+  return true;
+}
+
+function safeBlockedRequestResourceType(
+  resourceType: string,
+): BlockedRequestResourceType {
+  return BLOCKED_REQUEST_RESOURCE_TYPES.has(
+    resourceType as BlockedRequestResourceType,
+  )
+    ? (resourceType as BlockedRequestResourceType)
+    : 'other';
+}
+
+function classifyBlockedRequest(
+  url: URL,
+  fixtureHosts: ReadonlySet<string>,
+): BlockedRequestClass {
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return 'non-http-scheme';
+  }
+
+  const hostname = url.hostname.toLowerCase();
+  if (fixtureHosts.has(hostname)) {
+    if (url.pathname === '/.well-known/matrix/client') {
+      return 'matrix-client-well-known-discovery';
+    }
+    if (url.pathname === '/.well-known/matrix/server') {
+      return 'matrix-server-well-known-discovery';
+    }
+    return 'fixture-host-origin-mismatch';
+  }
+
+  if (
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname === '::1' ||
+    hostname === '[::1]' ||
+    /^127(?:\.\d{1,3}){3}$/u.test(hostname)
+  ) {
+    return 'unapproved-loopback-origin';
+  }
+
+  return 'external-http-origin';
+}
+
+function recordBlockedRequest(
+  evidence: BlockedRequestEvidence,
+  actor: BrowserActor,
+  phase: Phase,
+  requestClass: BlockedRequestClass,
+  resourceType: BlockedRequestResourceType,
+) {
+  const key = JSON.stringify([actor, phase, requestClass, resourceType]);
+  const existing = evidence.diagnostics.get(key);
+  if (existing) {
+    existing.count = Math.min(existing.count + 1, 2);
+    return;
+  }
+  if (
+    evidence.diagnostics.size >= MAX_BLOCKED_REQUEST_DIAGNOSTIC_BUCKETS
+  ) {
+    evidence.overflow = true;
+    return;
+  }
+
+  evidence.diagnostics.set(key, {
+    actor,
+    phase,
+    requestClass,
+    resourceType,
+    count: 1,
+  });
 }
 
 async function authenticateInElement(
@@ -3043,6 +3209,8 @@ function record(
     controlVisible?: boolean;
     panelPresent?: boolean;
     teamRoomMatches?: boolean;
+    blockedRequestDiagnostics?: BlockedRequestDiagnostic[];
+    blockedRequestDiagnosticOverflow?: boolean;
   },
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;

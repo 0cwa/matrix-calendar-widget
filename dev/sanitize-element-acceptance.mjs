@@ -83,6 +83,31 @@ const PINNED_WIDGET_PANEL_PHASES = new Set([
   'widget-a-extension-row',
 ]);
 const STATUSES = new Set(['started', 'passed', 'failed', 'unavailable']);
+const BLOCKED_REQUEST_ACTORS = new Set(['member-a', 'member-b', 'outsider']);
+const BLOCKED_REQUEST_CLASSES = new Set([
+  'fixture-host-origin-mismatch',
+  'matrix-client-well-known-discovery',
+  'matrix-server-well-known-discovery',
+  'non-http-scheme',
+  'invalid-url',
+  'unapproved-loopback-origin',
+  'external-http-origin',
+]);
+const BLOCKED_REQUEST_RESOURCE_TYPES = new Set([
+  'document',
+  'stylesheet',
+  'image',
+  'media',
+  'font',
+  'script',
+  'texttrack',
+  'xhr',
+  'fetch',
+  'eventsource',
+  'websocket',
+  'manifest',
+  'other',
+]);
 const FAILURE_CODES = new Set([
   'docker-command-failed',
   'docker-process-spawn-failed',
@@ -317,6 +342,8 @@ const ALLOWED_KEYS = new Set([
   'count',
   'originMatchesElement',
   'teamRoomMatches',
+  'blockedRequestDiagnostics',
+  'blockedRequestDiagnosticOverflow',
   'controlVisible',
   'panelPresent',
   'matrixClientHookPresent',
@@ -850,6 +877,82 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       throw new Error('invalid element acceptance summary');
     }
 
+    const hasBlockedRequestDiagnostics =
+      Object.hasOwn(record, 'blockedRequestDiagnostics') ||
+      Object.hasOwn(record, 'blockedRequestDiagnosticOverflow');
+    if (
+      hasBlockedRequestDiagnostics &&
+      (record.phase !== 'browser-egress' ||
+        record.status !== 'failed' ||
+        !Number.isInteger(record.count) ||
+        record.count < 1 ||
+        !Array.isArray(record.blockedRequestDiagnostics) ||
+        record.blockedRequestDiagnostics.length < 1 ||
+        record.blockedRequestDiagnostics.length > 32 ||
+        typeof record.blockedRequestDiagnosticOverflow !== 'boolean' ||
+        (record.blockedRequestDiagnosticOverflow &&
+          record.blockedRequestDiagnostics.length !== 32))
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    if (hasBlockedRequestDiagnostics) {
+      const diagnosticKeys = new Set();
+      let diagnosticCount = 0;
+      for (const diagnostic of record.blockedRequestDiagnostics) {
+        if (
+          diagnostic === null ||
+          typeof diagnostic !== 'object' ||
+          Array.isArray(diagnostic) ||
+          Object.keys(diagnostic).length !== 5 ||
+          !Object.hasOwn(diagnostic, 'actor') ||
+          !Object.hasOwn(diagnostic, 'phase') ||
+          !Object.hasOwn(diagnostic, 'requestClass') ||
+          !Object.hasOwn(diagnostic, 'resourceType') ||
+          !Object.hasOwn(diagnostic, 'count') ||
+          !BLOCKED_REQUEST_ACTORS.has(diagnostic.actor) ||
+          !PHASES.has(diagnostic.phase) ||
+          !BLOCKED_REQUEST_CLASSES.has(diagnostic.requestClass) ||
+          !BLOCKED_REQUEST_RESOURCE_TYPES.has(diagnostic.resourceType) ||
+          !Number.isInteger(diagnostic.count) ||
+          diagnostic.count < 1 ||
+          diagnostic.count > 2
+        ) {
+          throw new Error('invalid element acceptance summary');
+        }
+
+        const key = JSON.stringify([
+          diagnostic.actor,
+          diagnostic.phase,
+          diagnostic.requestClass,
+          diagnostic.resourceType,
+        ]);
+        if (diagnosticKeys.has(key)) {
+          throw new Error('invalid element acceptance summary');
+        }
+        diagnosticKeys.add(key);
+        diagnosticCount += diagnostic.count;
+      }
+      if (record.count < diagnosticCount) {
+        throw new Error('invalid element acceptance summary');
+      }
+    }
+
+    if (
+      record.phase === 'browser-egress' &&
+      record.status === 'passed' &&
+      record.count !== 0
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+    if (
+      record.phase === 'browser-egress' &&
+      record.count > 0 &&
+      !hasBlockedRequestDiagnostics
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
     const hasPinnedControlObservation =
       Object.hasOwn(record, 'controlVisible') ||
       Object.hasOwn(record, 'panelPresent');
@@ -1243,6 +1346,19 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `list_view_heading_present=${record.listViewHeadingPresent}`,
           `matching_list_item_count=${record.matchingListItemCount}`,
         ].join(' '),
+      );
+      continue;
+    }
+
+    if (phase === 'browser-egress' && record.blockedRequestDiagnostics) {
+      const diagnostics = record.blockedRequestDiagnostics
+        .map(
+          ({ actor, phase: requestPhase, requestClass, resourceType, count }) =>
+            `${actor}/${requestPhase}/${requestClass}/${resourceType}/${count}`,
+        )
+        .join(',');
+      lines.push(
+        `phase=browser-egress status=failed count=${record.count} blocked_request_diagnostic_overflow=${record.blockedRequestDiagnosticOverflow} blocked_requests=${diagnostics}`,
       );
       continue;
     }

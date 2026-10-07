@@ -1199,6 +1199,105 @@ test('rejects arbitrary failure labels, invalid exit codes, and untrusted versio
   }
 });
 
+test('emits only fixed blocked-request classifications on egress failure', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'browser-egress',
+      status: 'failed',
+      count: 3,
+      blockedRequestDiagnosticOverflow: false,
+      blockedRequestDiagnostics: [
+        {
+          actor: 'member-a',
+          phase: 'member-a-authenticated',
+          requestClass: 'external-http-origin',
+          resourceType: 'script',
+          count: 1,
+        },
+        {
+          actor: 'outsider',
+          phase: 'outsider-room-context',
+          requestClass: 'matrix-server-well-known-discovery',
+          resourceType: 'fetch',
+          count: 2,
+        },
+      ],
+    }),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=browser-egress status=failed count=3 blocked_request_diagnostic_overflow=false blocked_requests=member-a/member-a-authenticated/external-http-origin/script/1,outsider/outsider-room-context/matrix-server-well-known-discovery/fetch/2',
+      '',
+    ].join('\n'),
+  );
+  assert.equal(summary.includes('https://'), false);
+});
+
+test('rejects malformed or unbounded blocked-request evidence', () => {
+  const diagnostic = {
+    actor: 'member-a',
+    phase: 'member-a-authenticated',
+    requestClass: 'external-http-origin',
+    resourceType: 'script',
+    count: 1,
+  };
+  const base = {
+    phase: 'browser-egress',
+    status: 'failed',
+    count: 1,
+    blockedRequestDiagnosticOverflow: false,
+    blockedRequestDiagnostics: [diagnostic],
+  };
+  const invalidRecords = [
+    {
+      ...base,
+      blockedRequestDiagnostics: [{ ...diagnostic, target: 'private' }],
+    },
+    {
+      ...base,
+      blockedRequestDiagnostics: [{ ...diagnostic, actor: 'private-host' }],
+    },
+    {
+      ...base,
+      blockedRequestDiagnostics: [{ ...diagnostic, phase: 'private-phase' }],
+    },
+    {
+      ...base,
+      blockedRequestDiagnostics: [
+        { ...diagnostic, requestClass: 'https://private.example' },
+      ],
+    },
+    {
+      ...base,
+      blockedRequestDiagnostics: [
+        { ...diagnostic, resourceType: 'private-resource' },
+      ],
+    },
+    { ...base, blockedRequestDiagnostics: [{ ...diagnostic, count: 3 }] },
+    {
+      ...base,
+      blockedRequestDiagnostics: [diagnostic, { ...diagnostic }],
+      count: 2,
+    },
+    { ...base, blockedRequestDiagnosticOverflow: true },
+    { ...base, count: 0 },
+    { ...base, phase: 'member-a-authenticated' },
+    { phase: 'browser-egress', status: 'failed', count: 1 },
+    { phase: 'browser-egress', status: 'passed', count: 1 },
+  ];
+
+  for (const record of invalidRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
 test('rejects unsafe container diagnostics and diagnostics on other phases', () => {
   const rejectedRecords = [
     {
