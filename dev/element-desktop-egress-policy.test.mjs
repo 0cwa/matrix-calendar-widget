@@ -88,7 +88,7 @@ test('desktop egress permits only the fixture homeserver and loopback CDP ports'
       '-m',
       'conntrack',
       '--ctstate',
-      'ESTABLISHED,RELATED',
+      'RELATED,ESTABLISHED',
       '-j',
       'ACCEPT',
     ],
@@ -141,6 +141,24 @@ test('policy verifier requires the exact first OUTPUT hook and ordered chain rul
 
   for (const family of [ipv4, ipv6]) {
     const destination = family.name === 'ipv4' ? '127.0.0.1/32' : '::1/128';
+    const noncanonicalStateOrderRules = family.chainRules.map((rule, index) =>
+      index === 0
+        ? rule.map((token) =>
+            token === 'RELATED,ESTABLISHED' ? 'ESTABLISHED,RELATED' : token,
+          )
+        : rule,
+    );
+    const reorderedStateSnapshot = [
+      `-N ${family.chain}`,
+      ...noncanonicalStateOrderRules.map(
+        (rule) => `-A ${family.chain} ${rule.join(' ')}`,
+      ),
+    ].join('\n');
+    assert.equal(
+      verifyPolicySnapshot(family, output(family), reorderedStateSnapshot),
+      false,
+    );
+
     const canonicalDestinationRule = [
       '-d',
       destination,

@@ -80,7 +80,7 @@ export function policySpec(uidValue, runIdValue, cdpPortValue) {
         '-m',
         'conntrack',
         '--ctstate',
-        'ESTABLISHED,RELATED',
+        'RELATED,ESTABLISHED',
         '-j',
         'ACCEPT',
       ],
