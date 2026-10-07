@@ -795,6 +795,20 @@ test('egress counter sanitizer preserves only fixed classes and honest overflow'
     overflow: true,
   };
   assert.deepEqual(sanitizeEgressCounterObservation(overflow), overflow);
+
+  const mixedFamilyOverflow = {
+    ...overflow,
+    ipv6Classes: {
+      udp_dns_port: 0,
+      tcp_dns_port: 0,
+      tcp_https_port: 0,
+      other: 1,
+    },
+  };
+  assert.deepEqual(
+    sanitizeEgressCounterObservation(mixedFamilyOverflow),
+    emptyCounters('unavailable'),
+  );
 });
 
 test('phase egress and cleanup diagnostics remain separate from final acceptance gates', () => {

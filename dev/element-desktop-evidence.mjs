@@ -336,12 +336,19 @@ function validateCounterObservation(value) {
       (total, name) => total + value.ipv6Classes[name],
       0,
     );
+    const ipv4ClassTotalMatches =
+      value.overflow && value.ipv4Blocked === 100_000
+        ? ipv4ClassTotal >= value.ipv4Blocked
+        : ipv4ClassTotal === value.ipv4Blocked;
+    const ipv6ClassTotalMatches =
+      value.overflow && value.ipv6Blocked === 100_000
+        ? ipv6ClassTotal >= value.ipv6Blocked
+        : ipv6ClassTotal === value.ipv6Blocked;
     return value.overflow
       ? (value.ipv4Blocked === 100_000 || value.ipv6Blocked === 100_000) &&
-          ipv4ClassTotal >= value.ipv4Blocked &&
-          ipv6ClassTotal >= value.ipv6Blocked
-      : ipv4ClassTotal === value.ipv4Blocked &&
-          ipv6ClassTotal === value.ipv6Blocked;
+          ipv4ClassTotalMatches &&
+          ipv6ClassTotalMatches
+      : ipv4ClassTotalMatches && ipv6ClassTotalMatches;
   }
   return (
     value.ipv4Blocked === null &&
