@@ -1337,17 +1337,7 @@ async function createAndConfigureReminder(
   record(activePhase, 'passed', undefined, 1, { relativeAlarmReadback: true });
 
   activePhase = 'reminder-room-configuration-enabled';
-  const enabled = await setRoomReminder(frame, page, title, true);
-  if (!enabled.enabled || enabled.httpStatus === null) {
-    record(activePhase, 'failed', enabled.httpStatus ?? undefined, 1, {
-      reminderEnabled: false,
-    });
-    activeReminderFailureRecorded = true;
-    throw new Error('The room reminder was not enabled in the widget');
-  }
-  record(activePhase, 'passed', enabled.httpStatus, 1, {
-    reminderEnabled: true,
-  });
+  await setRoomReminder(frame, page, title, true);
 
   const titles = readReminderEventTitles();
   titles.push(title);

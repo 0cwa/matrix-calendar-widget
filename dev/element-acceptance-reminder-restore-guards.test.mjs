@@ -21,6 +21,7 @@ import {
   isPrivateArtifactPath,
   isSafeRestoreTargetPlan,
 } from './element-acceptance-reminder-restore-guards.mjs';
+import { formatFailureMarker } from './element-acceptance-reminder-restore.mjs';
 
 const safePlan = {
   projectName: 'matrix-calendar-element-123-1',
@@ -123,5 +124,24 @@ test('quiescent snapshot accepts graceful stop only without OOM', () => {
       oomKilled: false,
     }).accepted,
     false,
+  );
+});
+
+test('failure marker emits only a known restore substep', () => {
+  assert.equal(
+    formatFailureMarker('restore-targets-prepared', 'archive-extract'),
+    'Reminder acceptance fixture failed phase=restore-targets-prepared restore_step=archive-extract',
+  );
+  assert.equal(
+    formatFailureMarker('restore-targets-prepared', 'private-token'),
+    'Reminder acceptance fixture failed phase=restore-targets-prepared',
+  );
+  assert.equal(
+    formatFailureMarker('reminder-compose-validation', 'archive-extract'),
+    'Reminder acceptance fixture failed phase=reminder-compose-validation',
+  );
+  assert.equal(
+    formatFailureMarker('private-data', 'private-token'),
+    'Reminder acceptance fixture failed phase=reminder-compose-validation',
   );
 });

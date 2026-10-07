@@ -74,6 +74,18 @@ const PHASES = new Set([
   'restore-element-ready',
   'restore-delivery-row',
 ]);
+const RESTORE_TARGET_STEPS = new Set([
+  'target-volume-check',
+  'target-database-check',
+  'target-plan-check',
+  'volume-create',
+  'volume-empty-check',
+  'database-create',
+  'archive-extract',
+  'restored-volume-count',
+  'postgres-restore',
+  'complete',
+]);
 
 class StageFailure extends Error {
   constructor(phase, details = {}) {
@@ -81,6 +93,16 @@ class StageFailure extends Error {
     this.phase = phase;
     this.details = details;
   }
+}
+
+export function formatFailureMarker(phase, restoreStep) {
+  const safePhase = PHASES.has(phase) ? phase : 'reminder-compose-validation';
+  const safeRestoreStep =
+    safePhase === 'restore-targets-prepared' &&
+    RESTORE_TARGET_STEPS.has(restoreStep)
+      ? ` restore_step=${restoreStep}`
+      : '';
+  return `Reminder acceptance fixture failed phase=${safePhase}${safeRestoreStep}`;
 }
 
 function required(name) {
@@ -1169,7 +1191,9 @@ async function main() {
         // Keep the fixed stderr summary if the private stage file is unavailable.
       }
     }
-    process.stderr.write(`Reminder acceptance fixture failed phase=${phase}\n`);
+    const restoreStep =
+      error instanceof StageFailure ? error.details.restoreStep : undefined;
+    process.stderr.write(`${formatFailureMarker(phase, restoreStep)}\n`);
     process.exitCode = 1;
   }
 }
