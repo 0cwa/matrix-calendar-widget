@@ -1,0 +1,49 @@
+services:
+  gateway:
+    image: matrix-calendar-widget/server:element-acceptance
+    build:
+      context: ..
+      dockerfile: matrix-calendar-server/Dockerfile
+    depends_on:
+      - synapse
+      - radicale
+    environment:
+      ACCESS_TOKEN: ${ELEMENT_ACCEPTANCE_BOT_ACCESS_TOKEN:?}
+      HOMESERVER_URL: http://synapse:8008
+      RADICALE_URL: http://radicale:5232
+      PORT: '3000'
+      ROOM_CALENDAR_BINDINGS: ${ELEMENT_ACCEPTANCE_ROOM_BINDING:?}
+      ROOM_CALENDAR_ACCESS_ENABLED: 'true'
+      ROOM_CALENDAR_EVENT_WRITES_ENABLED: 'true'
+      MATRIX_APPLICATION_SERVICE_TOKEN: ${MATRIX_APPLICATION_SERVICE_TOKEN:?}
+      MATRIX_APPLICATION_SERVICE_USER_ID: '@_matrix_calendar_service:localhost'
+      MEETINGWIDGET_URL: http://widget:80/
+      MEETINGWIDGET_COCKPIT_URL: http://widget:80/cockpit
+      BREAKOUT_SESSION_WIDGET_URL: http://widget:80/
+      ENABLE_WELCOME_WORKFLOW: 'false'
+      ENABLE_CONTROL_ROOM_MIGRATION: 'false'
+      ENABLE_PRIVATE_ROOM_ERROR_SENDING: 'false'
+      ROOM_CALENDAR_ACTION_MESSAGES_ENABLED: 'false'
+      LOG_LEVEL: error
+    ports:
+      - '127.0.0.1:3000:3000'
+
+  widget:
+    image: matrix-calendar-widget/widget:element-acceptance
+    build:
+      context: ../matrix-calendar-widget
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: ..
+    environment:
+      REACT_APP_API_BASE_URL: http://127.0.0.1:3000
+      REACT_APP_HOME_SERVER_URL: http://127.0.0.1:8008
+    ports:
+      - '127.0.0.1:8080:8080'
+
+  element:
+    image: ghcr.io/element-hq/element-web:v1.12.30@sha256:9189d2871ecc9ba8a79a1a94c29c4696648fbaa7a6979092919d9b18d0f1ae09
+    ports:
+      - '127.0.0.1:8090:80'
+    volumes:
+      - ./element-acceptance-config.json:/app/config.json:ro

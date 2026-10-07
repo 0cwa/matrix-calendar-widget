@@ -137,19 +137,19 @@ MATRIX_CALENDAR_REMINDER_DATABASE_URL='postgresql://matrix_calendar:password@pos
 ACCESS_TOKEN=syt_...
 
 # the url to the Matrix Calendar widget that will be added to the planning room
-MEETINGWIDGET_URL='http://meetings-widget.example.com/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id'
+MEETINGWIDGET_URL='http://meetings-widget.example.com/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id&matrix_base_url=$org.matrix.msc4039.matrix_base_url'
 
 # optional - the name of the Matrix Calendar widget that will be added to the planning room
 MEETINGWIDGET_NAME='Matrix Calendar'
 
 # the url to the cockpit widget that will be added to the meeting rooms
-MEETINGWIDGET_COCKPIT_URL='http://meetings-widget.example.com/cockpit/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id'
+MEETINGWIDGET_COCKPIT_URL='http://meetings-widget.example.com/cockpit/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id&matrix_base_url=$org.matrix.msc4039.matrix_base_url'
 
 # optional - the name of the cockpit widget that will be added to the meeting rooms
 MEETINGWIDGET_COCKPIT_NAME='Calendar Details'
 
 # the url to the breakout sessions widget that will be added to the meeting rooms
-BREAKOUT_SESSION_WIDGET_URL='http://meetings-widget.example.com/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id'
+BREAKOUT_SESSION_WIDGET_URL='http://meetings-widget.example.com/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id&matrix_base_url=$org.matrix.msc4039.matrix_base_url'
 
 # optional - the name of the breakout sessions widget that will be added to the meeting rooms
 BREAKOUT_SESSION_WIDGET_NAME='Breakout Sessions'

@@ -1,0 +1,3287 @@
+/* Modified for Matrix Calendar Widget fork, 2026. */
+/*
+ * Copyright 2026 Matrix Calendar Widget contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import {
+  expect,
+  test,
+  type BrowserContext,
+  type FrameLocator,
+  type Locator,
+  type Page,
+  type Request,
+  type Response,
+} from '@playwright/test';
+import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, readFileSync } from 'node:fs';
+import { arch, platform, release } from 'node:os';
+import { resolve } from 'node:path';
+import { ElementWebPage } from './pages/elementWebPage';
+
+type User = {
+  userId: string;
+  accessToken: string;
+  deviceId: string;
+};
+
+type Fixture = {
+  homeserverUrl: string;
+  elementUrl: string;
+  gatewayUrl: string;
+  widgetUrl: string;
+  roomName: string;
+  outsiderRoomName: string;
+  calendarId: string;
+  outsiderRoomId: string;
+  teamRoomId: string;
+  users: {
+    memberA: User;
+    memberB: User;
+    outsider: User;
+  };
+};
+
+type Phase =
+  | 'member-a-authenticated'
+  | 'member-a-origin-navigation'
+  | 'member-a-credentials-seeded'
+  | 'member-a-root-navigation'
+  | 'member-a-session-observed'
+  | 'member-b-authenticated'
+  | 'outsider-authenticated'
+  | 'member-a-room-navigation'
+  | 'member-a-room-context'
+  | 'member-b-room-context'
+  | 'outsider-room-context'
+  | 'widget-a-room-info-button'
+  | 'widget-a-extensions-menuitem'
+  | 'widget-a-extension-row'
+  | 'widget-a-warning-not-required'
+  | 'widget-a-capabilities-approval'
+  | 'widget-a-identity-dialog-observed'
+  | 'widget-a-identity-dialog-not-required'
+  | 'widget-a-identity-approval'
+  | 'widget-a-iframe-attached'
+  | 'widget-a-runtime-observed'
+  | 'widget-a-iframe-ready'
+  | 'widget-a-approved'
+  | 'widget-b-approved'
+  | 'outsider-widget-approved'
+  | 'gateway-backed-read'
+  | 'event-create-dialog'
+  | 'event-create-calendar-selected'
+  | 'event-create-title-entered'
+  | 'event-create-submit'
+  | 'event-create-response'
+  | 'event-create-post-refresh-observed'
+  | 'event-create-visible'
+  | 'event-created'
+  | 'shared-visibility'
+  | 'member-a-edited'
+  | 'outsider-room-widget-team-target'
+  | 'outsider-room-events-api-team-target'
+  | 'outsider-own-unbound-room'
+  | 'stale-etag-conflict'
+  | 'canonical-read-after-denial'
+  | 'browser-egress';
+
+type BrowserActor = 'member-a' | 'member-b' | 'outsider';
+type BlockedRequestClass =
+  | 'fixture-host-origin-mismatch'
+  | 'matrix-client-well-known-discovery'
+  | 'matrix-server-well-known-discovery'
+  | 'non-http-scheme'
+  | 'invalid-url'
+  | 'unapproved-loopback-origin'
+  | 'external-http-origin';
+type BlockedRequestResourceType =
+  | 'document'
+  | 'stylesheet'
+  | 'image'
+  | 'media'
+  | 'font'
+  | 'script'
+  | 'texttrack'
+  | 'xhr'
+  | 'fetch'
+  | 'eventsource'
+  | 'websocket'
+  | 'manifest'
+  | 'other';
+type BlockedRequestDiagnostic = {
+  actor: BrowserActor;
+  // Sampled shared harness phase; asynchronous requests can outlive an action.
+  harnessPhase: Phase;
+  requestClass: BlockedRequestClass;
+  resourceType: BlockedRequestResourceType;
+  count: number;
+};
+type BlockedRequestEvidence = {
+  diagnostics: Map<string, BlockedRequestDiagnostic>;
+  overflow: boolean;
+};
+
+type MatrixSyncState =
+  | 'ERROR'
+  | 'PREPARED'
+  | 'RECONNECTING'
+  | 'STOPPED'
+  | 'SYNCING'
+  | 'CATCHUP'
+  | 'UNKNOWN';
+
+type MemberARoomObservation = {
+  matrixUserMatches: boolean;
+  matrixRoomKnown: boolean;
+  matrixRoomJoined: boolean;
+  matrixSyncState: MatrixSyncState;
+  roomNavigationCompleted: boolean;
+  roomHeadingReady: boolean;
+  roomHeadingPresent: boolean;
+  roomNameMatches: boolean;
+  roomIdMatches: boolean;
+  blockedExternalRequestCount: number;
+  homeserverHttpErrorCount: number;
+  homeserverLastHttpErrorStatus?: number;
+};
+
+type MemberARoomFailureCode =
+  | 'element-room-navigation-failed'
+  | 'element-room-observation-unavailable'
+  | 'element-room-session-mismatch'
+  | 'element-room-not-known'
+  | 'element-room-not-joined'
+  | 'element-room-route-mismatch'
+  | 'element-room-heading-not-present'
+  | 'element-room-name-mismatch'
+  | 'element-room-heading-wait-timeout';
+
+type MemberARoomResult = {
+  element: ElementWebPage;
+  navigationCompleted: boolean;
+  observation?: MemberARoomObservation;
+  failureCode?: MemberARoomFailureCode;
+};
+
+type OpenCalendarWidgetOptions = {
+  expectWidgetWarning: boolean;
+  waitForCalendar?: boolean;
+  captureMemberADiagnostics?: boolean;
+};
+
+type HomeserverHttpFailures = {
+  count: number;
+  lastStatus?: number;
+};
+
+type PinnedControlObservation = {
+  phase: Phase;
+  count: number;
+  controlVisible: boolean;
+  panelPresent?: boolean;
+};
+
+type GatewayEndpointKind =
+  | 'context'
+  | 'calendars'
+  | 'events'
+  | 'other-calendar'
+  | 'other-api';
+
+type GatewayRequestMethod =
+  | 'GET'
+  | 'POST'
+  | 'PATCH'
+  | 'PUT'
+  | 'DELETE'
+  | 'OPTIONS'
+  | 'HEAD'
+  | 'OTHER';
+
+type WidgetResourceKind = 'document' | 'script' | 'stylesheet';
+
+type WidgetDocumentReadyState =
+  | 'loading'
+  | 'interactive'
+  | 'complete'
+  | 'unavailable';
+
+type WidgetPageErrorClass =
+  | 'Error'
+  | 'TypeError'
+  | 'ReferenceError'
+  | 'SyntaxError'
+  | 'RangeError'
+  | 'URIError'
+  | 'EvalError'
+  | 'AggregateError'
+  | 'OTHER'
+  | 'NONE';
+
+type OpenIdProtocolState = 'none' | 'allowed' | 'request' | 'blocked' | 'other';
+
+type AcceptanceRuntimeObservation = {
+  requestCounts: Record<GatewayEndpointKind, number>;
+  optionsRequestCount: number;
+  failedRequestCount: number;
+  lastRequestEndpoint: GatewayEndpointKind | 'none';
+  lastRequestMethod: GatewayRequestMethod | 'NONE';
+  lastResponseEndpoint: GatewayEndpointKind | 'none';
+  lastResponseMethod: GatewayRequestMethod | 'NONE';
+  lastResponseStatus?: number;
+  iframeObservationAvailable: boolean;
+  iframeGatewayBaseOriginMatches: boolean;
+  iframeRoomIdMatches: boolean;
+  createEventVisible: boolean;
+  identityContinueVisible: boolean;
+  widgetResourceRequestCounts: Record<WidgetResourceKind, number>;
+  widgetResourceFailureCounts: Record<WidgetResourceKind, number>;
+  widgetResourceLastStatuses: Partial<Record<WidgetResourceKind, number>>;
+  openIdRequestCount: number;
+  openIdOptionsRequestCount: number;
+  openIdFailedRequestCount: number;
+  openIdLastRequestMethod: GatewayRequestMethod | 'NONE';
+  openIdLastResponseStatus?: number;
+  widgetFrameAvailable: boolean;
+  widgetDocumentReadyState: WidgetDocumentReadyState;
+  widgetRootHasChildren: boolean;
+  widgetLoadingVisible: boolean;
+  widgetMissingCapabilitiesVisible: boolean;
+  widgetRegistrationErrorVisible: boolean;
+  widgetOutsideClientVisible: boolean;
+  widgetChildErrorVisible: boolean;
+  widgetPageErrorCount: number;
+  widgetLastPageErrorClass: WidgetPageErrorClass;
+  widgetApiParentObserverAvailable: boolean;
+  widgetApiGetOpenIdRequestCount: number;
+  widgetApiRequestSourceMatches: boolean;
+  widgetApiRequestOriginMatches: boolean;
+  widgetApiRequestWidgetIdMatches: boolean;
+  widgetApiInitialResponseCount: number;
+  widgetApiInitialResponseState: OpenIdProtocolState;
+  widgetApiInitialResponseSourceMatches: boolean;
+  widgetApiInitialResponseOriginMatches: boolean;
+  widgetApiInitialResponseWidgetIdMatches: boolean;
+  widgetApiFollowupCount: number;
+  widgetApiFollowupState: OpenIdProtocolState;
+  widgetApiFollowupRequestIdMatches: boolean;
+  widgetApiFollowupSourceMatches: boolean;
+  widgetApiFollowupOriginMatches: boolean;
+  widgetApiFollowupWidgetIdMatches: boolean;
+  widgetParametersObserved: boolean;
+  widgetGatewayBaseOriginMatches: boolean;
+  widgetRoomIdMatches: boolean;
+  widgetIdParameterPresent: boolean;
+  calendarEventsLoadingVisible: boolean;
+  calendarEventsLoadErrorVisible: boolean;
+  createEventEnabled: boolean;
+};
+
+type PostCreateVisibilityObservation = {
+  postCreateEventGetRequestCount: number;
+  roomTargetRangeRequestCount: number;
+  expectedRoomRangeRequestSeen: boolean;
+  roomTargetRangeResponseCount: number;
+  roomTargetRangeLastStatus: number | null;
+  createResponseHasEvent: boolean;
+  createResponseTitleMatches: boolean;
+  createResponseCalendarMatches: boolean;
+  createResponseTimingComparable: boolean;
+  createResponseEventIntersectsRoomRange: boolean;
+  caldavReportProbeCompleted: boolean;
+  caldavOpenIdHttpStatus: number | null;
+  caldavReportHttpStatus: number | null;
+  caldavReportContainsCreatedEvent: boolean | null;
+  caldavProjection: CalDavProjectionObservation;
+  roomListResponseHasEventsArray: boolean;
+  roomListResponseEventCount: number;
+  roomListDiagnostics: ProjectionDiagnosticSummary;
+  roomListResponseTitleMatches: boolean;
+  roomListResponseIdMatches: boolean;
+  roomListResponseCalendarMatches: boolean;
+  listViewHeadingPresent: boolean;
+  matchingListItemCount: number;
+};
+
+const PROJECTION_DIAGNOSTIC_REASONS = [
+  'invalid-recurrence',
+  'invalid-timing',
+  'occurrence-limit',
+  'recurrence-input-limit',
+  'unsupported-recurrence',
+  'unsupported-timezone',
+  'range-this-and-future',
+] as const;
+
+type ProjectionDiagnosticReason =
+  (typeof PROJECTION_DIAGNOSTIC_REASONS)[number];
+
+type ProjectionDiagnosticCounts = Record<ProjectionDiagnosticReason, number>;
+
+type ProjectionDiagnosticSummary = {
+  complete: boolean;
+  counts: ProjectionDiagnosticCounts;
+};
+
+type CalDavProjectionDiagnosticCode =
+  | ProjectionDiagnosticReason
+  | 'none'
+  | 'inconclusive';
+
+type TimezoneAuditClassification =
+  | 'unsupported-zone-id'
+  | 'no-embedded-definition'
+  | 'duplicate-definitions'
+  | 'embedded-definition-mismatch'
+  | 'embedded-definition-matches'
+  | 'other-unsupported-timezone'
+  | 'no-zoned-start'
+  | 'inconclusive';
+
+type TimezoneSafetyObservation = {
+  completed: boolean;
+  parsedEventUnsupportedTimezone: boolean | null;
+  bundledZoneId: boolean | null;
+  embeddedDefinitionCount: number;
+  canonicalEmbeddedDefinitionMatches: boolean | null;
+  classification: TimezoneAuditClassification;
+};
+
+type CalDavProjectionObservation = {
+  completed: boolean;
+  includesCreatedEvent: boolean | null;
+  diagnosticCode: CalDavProjectionDiagnosticCode;
+  diagnosticCounts: ProjectionDiagnosticCounts;
+  timezoneAudit: TimezoneSafetyObservation;
+};
+
+function unavailableTimezoneAudit(): TimezoneSafetyObservation {
+  return {
+    completed: false,
+    parsedEventUnsupportedTimezone: null,
+    bundledZoneId: null,
+    embeddedDefinitionCount: 0,
+    canonicalEmbeddedDefinitionMatches: null,
+    classification: 'inconclusive',
+  };
+}
+
+function emptyProjectionDiagnosticCounts(): ProjectionDiagnosticCounts {
+  return Object.fromEntries(
+    PROJECTION_DIAGNOSTIC_REASONS.map((reason) => [reason, 0]),
+  ) as ProjectionDiagnosticCounts;
+}
+
+function summarizeProjectionDiagnostics(
+  value: unknown,
+): ProjectionDiagnosticSummary {
+  const counts = emptyProjectionDiagnosticCounts();
+  if (!Array.isArray(value)) return { complete: false, counts };
+
+  for (const diagnostic of value) {
+    if (
+      !isRecord(diagnostic) ||
+      typeof diagnostic.reason !== 'string' ||
+      !PROJECTION_DIAGNOSTIC_REASONS.includes(
+        diagnostic.reason as ProjectionDiagnosticReason,
+      ) ||
+      !Number.isInteger(diagnostic.count) ||
+      Number(diagnostic.count) < 0
+    ) {
+      return { complete: false, counts: emptyProjectionDiagnosticCounts() };
+    }
+    const reason = diagnostic.reason as ProjectionDiagnosticReason;
+    counts[reason] = Math.min(counts[reason] + Number(diagnostic.count), 2);
+  }
+
+  return { complete: true, counts };
+}
+
+let fixture: Fixture;
+
+let activePhase: Phase = 'member-a-authenticated';
+let pendingPinnedControlObservation: PinnedControlObservation | undefined;
+const memberAHomeserverHttpFailures = new WeakMap<
+  Page,
+  HomeserverHttpFailures
+>();
+const blockedExternalRequestsByContext = new WeakMap<
+  BrowserContext,
+  { count: number }
+>();
+const memberABlockedExternalRequests = new WeakMap<Page, { count: number }>();
+const BLOCKED_REQUEST_RESOURCE_TYPES = new Set<BlockedRequestResourceType>([
+  'document',
+  'stylesheet',
+  'image',
+  'media',
+  'font',
+  'script',
+  'texttrack',
+  'xhr',
+  'fetch',
+  'eventsource',
+  'websocket',
+  'manifest',
+  'other',
+]);
+const MAX_BLOCKED_REQUEST_DIAGNOSTIC_BUCKETS = 32;
+
+test('Element Web members share events and enforce room authorization', async ({
+  browser,
+}) => {
+  fixture = readFixture();
+  const contexts: BrowserContext[] = [];
+  let blockedExternalRequests = 0;
+  const blockedRequestEvidence: BlockedRequestEvidence = {
+    diagnostics: new Map(),
+    overflow: false,
+  };
+  const allowedOrigins = new Set([
+    new URL(fixture.elementUrl).origin,
+    new URL(fixture.homeserverUrl).origin,
+    'http://localhost:8008',
+    new URL(fixture.gatewayUrl).origin,
+    'http://127.0.0.1:8080',
+  ]);
+  const fixtureHosts = new Set([
+    ...Array.from(allowedOrigins, (origin) => new URL(origin).hostname),
+    'synapse',
+    'radicale',
+    'gateway',
+    'widget',
+    'element',
+  ]);
+
+  const makeContext = async (actor: BrowserActor) => {
+    const context = await browser.newContext({
+      locale: 'en-US',
+      timezoneId: 'Europe/Stockholm',
+      viewport: { width: 1440, height: 900 },
+    });
+    const contextBlockedRequests = { count: 0 };
+    blockedExternalRequestsByContext.set(context, contextBlockedRequests);
+    contexts.push(context);
+    await context.route('**/*', async (route) => {
+      let requestUrl: URL;
+      try {
+        requestUrl = new URL(route.request().url());
+      } catch {
+        blockedExternalRequests += 1;
+        contextBlockedRequests.count = Math.min(
+          contextBlockedRequests.count + 1,
+          100_000,
+        );
+        const request = route.request();
+        recordBlockedRequest(
+          blockedRequestEvidence,
+          actor,
+          activePhase,
+          'invalid-url',
+          safeBlockedRequestResourceType(request.resourceType()),
+        );
+        await route.abort('blockedbyclient');
+        return;
+      }
+
+      if (!allowedOrigins.has(requestUrl.origin)) {
+        blockedExternalRequests += 1;
+        contextBlockedRequests.count = Math.min(
+          contextBlockedRequests.count + 1,
+          100_000,
+        );
+        const request = route.request();
+        recordBlockedRequest(
+          blockedRequestEvidence,
+          actor,
+          activePhase,
+          classifyBlockedRequest(requestUrl, fixtureHosts),
+          safeBlockedRequestResourceType(request.resourceType()),
+        );
+        await route.abort('blockedbyclient');
+        return;
+      }
+      await route.continue();
+    });
+    return context;
+  };
+
+  let contextA: BrowserContext | undefined;
+  let contextB: BrowserContext | undefined;
+  let contextC: BrowserContext | undefined;
+  let pageA: Page | undefined;
+  let pageB: Page | undefined;
+  let pageC: Page | undefined;
+  let memberARuntimeObservation: AcceptanceRuntimeObservation | undefined;
+  let failureHttpStatus: number | undefined;
+  let failureTeamRoomMatches: boolean | undefined;
+  let failureAlreadyReported = false;
+
+  try {
+    recordRuntimeVersions(browser.version());
+
+    activePhase = 'member-a-authenticated';
+    contextA = await makeContext('member-a');
+    pageA = await authenticateInElement(contextA, fixture.users.memberA, true);
+    memberARuntimeObservation = await observeAcceptanceRuntime(pageA, {
+      gatewayUrl: fixture.gatewayUrl,
+      homeserverUrl: fixture.homeserverUrl,
+      widgetUrl: fixture.widgetUrl,
+    });
+    record(activePhase, 'passed');
+
+    activePhase = 'member-b-authenticated';
+    contextB = await makeContext('member-b');
+    pageB = await authenticateInElement(contextB, fixture.users.memberB);
+    record(activePhase, 'passed');
+
+    activePhase = 'outsider-authenticated';
+    contextC = await makeContext('outsider');
+    pageC = await authenticateInElement(contextC, fixture.users.outsider);
+    record(activePhase, 'passed');
+
+    activePhase = 'member-a-room-navigation';
+    const memberARoom = await openMemberARoomWithDiagnostics(
+      pageA,
+      fixture.roomName,
+      fixture.teamRoomId,
+      fixture.users.memberA.userId,
+    );
+    record(activePhase, memberARoom.navigationCompleted ? 'passed' : 'failed');
+    activePhase = 'member-a-room-context';
+    recordMemberARoomObservation(memberARoom);
+    failureAlreadyReported = Boolean(memberARoom.failureCode);
+    const elementA = requireMemberARoom(memberARoom);
+    activePhase = 'widget-a-approved';
+    const firstRead = waitForGatewayResponse(
+      pageA,
+      'GET',
+      '/v1/calendar/events',
+    );
+    void firstRead.catch(() => undefined);
+    const frameA = await openCalendarWidget(elementA, pageA, {
+      expectWidgetWarning: false,
+      waitForCalendar: false,
+      captureMemberADiagnostics: true,
+    });
+    activePhase = 'gateway-backed-read';
+    let firstReadResponse: Response;
+    try {
+      firstReadResponse = await firstRead;
+    } catch {
+      await recordWidgetRuntimeObservation(
+        pageA,
+        frameA,
+        memberARuntimeObservation,
+      );
+      throw new Error('Initial calendar event request was not observed');
+    }
+    await recordWidgetRuntimeObservation(
+      pageA,
+      frameA,
+      memberARuntimeObservation,
+    );
+    failureHttpStatus = firstReadResponse.status();
+    expect(failureHttpStatus).toBe(200);
+    record(activePhase, 'passed', failureHttpStatus);
+    failureHttpStatus = undefined;
+    activePhase = 'widget-a-iframe-ready';
+    await frameA
+      .getByRole('button', { name: 'Create event', exact: true })
+      .waitFor({ timeout: 30_000 });
+    record(activePhase, 'passed');
+    activePhase = 'widget-a-approved';
+    record('widget-a-approved', 'passed');
+
+    const eventTitle = `Acceptance ${randomUUID()}`;
+    activePhase = 'event-create-dialog';
+    await frameA
+      .getByRole('button', { name: 'Create event', exact: true })
+      .click();
+    const createDialog = frameA.getByRole('dialog').last();
+    await expect(createDialog).toBeVisible({ timeout: 15_000 });
+    record(activePhase, 'passed');
+
+    activePhase = 'event-create-calendar-selected';
+    await createDialog
+      .getByRole('combobox', { name: 'Calendar' })
+      .selectOption({
+        value: `matrix-calendar-target://room/${encodeURIComponent(fixture.calendarId)}`,
+      });
+    record(activePhase, 'passed');
+
+    activePhase = 'event-create-title-entered';
+    await createDialog.getByRole('textbox', { name: 'Title' }).fill(eventTitle);
+    record(activePhase, 'passed');
+
+    activePhase = 'event-create-submit';
+    const createResponse = waitForGatewayResponse(
+      pageA,
+      'POST',
+      '/v1/calendar/events',
+    );
+    const postCreateVisibility = observePostCreateVisibility(pageA, {
+      expectedCalendarId: fixture.calendarId,
+      expectedRoomId: fixture.teamRoomId,
+      expectedTitle: eventTitle,
+    });
+    await createDialog
+      .getByRole('button', { name: 'Create event', exact: true })
+      .click();
+    record(activePhase, 'passed');
+
+    activePhase = 'event-create-response';
+    const createResponseResult = await createResponse;
+    failureHttpStatus = createResponseResult.status();
+    expect(createResponseResult.status()).toBeGreaterThanOrEqual(200);
+    expect(createResponseResult.status()).toBeLessThan(300);
+    record(activePhase, 'passed', failureHttpStatus);
+    failureHttpStatus = undefined;
+    await postCreateVisibility.observeCreatedEvent(createResponseResult);
+
+    activePhase = 'event-create-visible';
+    record(activePhase, 'started');
+    const eventRow = frameA.getByRole('listitem', { name: eventTitle });
+    let eventVisible = false;
+    try {
+      await expect(eventRow).toBeVisible({ timeout: 15_000 });
+      eventVisible = true;
+    } catch {
+      // The bounded observation below distinguishes the gateway refresh from
+      // the widget's rendered list without retaining the failed assertion.
+    }
+    const postCreateObservation = await postCreateVisibility.collect(
+      frameA,
+      eventRow,
+    );
+    appendPostCreateVisibilityObservation(postCreateObservation);
+    expect(eventVisible).toBe(true);
+    record(activePhase, 'passed');
+
+    activePhase = 'event-created';
+    record(activePhase, 'passed', createResponseResult.status());
+
+    activePhase = 'member-b-room-context';
+    const elementB = await openFixtureRoom(
+      pageB,
+      fixture.roomName,
+      fixture.teamRoomId,
+    );
+    record(activePhase, 'passed');
+    activePhase = 'widget-b-approved';
+    const memberBRead = waitForGatewayResponse(
+      pageB,
+      'GET',
+      '/v1/calendar/events',
+    );
+    const frameB = await openCalendarWidget(elementB, pageB, {
+      expectWidgetWarning: true,
+    });
+    const memberBReadResult = await memberBRead;
+    expect(memberBReadResult.status()).toBe(200);
+    record(activePhase, 'passed');
+
+    activePhase = 'shared-visibility';
+    await expect(
+      frameB.getByRole('listitem', { name: eventTitle }),
+    ).toBeVisible();
+    await openEventEditor(frameB, eventTitle);
+    await frameB
+      .getByRole('dialog')
+      .last()
+      .getByRole('textbox', { name: 'Title' })
+      .fill('Member B stale draft');
+    record(activePhase, 'passed');
+
+    activePhase = 'member-a-edited';
+    await openEventEditor(frameA, eventTitle);
+    const updateResponse = waitForGatewayResponse(
+      pageA,
+      'PATCH',
+      '/v1/calendar/events',
+    );
+    await frameA
+      .getByRole('dialog')
+      .last()
+      .getByRole('textbox', { name: 'Title' })
+      .fill('Member A canonical edit');
+    await frameA
+      .getByRole('dialog')
+      .last()
+      .getByRole('button', { name: 'Save', exact: true })
+      .click();
+    const updateResponseResult = await updateResponse;
+    expect(updateResponseResult.status()).toBeGreaterThanOrEqual(200);
+    expect(updateResponseResult.status()).toBeLessThan(300);
+    record(activePhase, 'passed', updateResponseResult.status());
+
+    activePhase = 'outsider-room-context';
+    const elementC = await openFixtureRoom(
+      pageC,
+      fixture.outsiderRoomName,
+      fixture.outsiderRoomId,
+    );
+    record(activePhase, 'passed');
+    expect(fixture.outsiderRoomId).not.toBe(fixture.teamRoomId);
+    activePhase = 'outsider-widget-approved';
+    const outsiderContextRead = waitForGatewayResponse(
+      pageC,
+      'GET',
+      '/v1/calendar/context',
+    );
+    await openCalendarWidget(elementC, pageC, {
+      expectWidgetWarning: false,
+      waitForCalendar: false,
+    });
+    record(activePhase, 'passed');
+
+    activePhase = 'outsider-room-widget-team-target';
+    const outsiderContextResponse = await outsiderContextRead;
+    failureHttpStatus = outsiderContextResponse.status();
+    failureTeamRoomMatches =
+      new URL(outsiderContextResponse.url()).searchParams.get('roomId') ===
+      fixture.teamRoomId;
+    expect(failureTeamRoomMatches).toBe(true);
+    expect(failureHttpStatus).toBe(403);
+    record(activePhase, 'passed', failureHttpStatus, undefined, {
+      teamRoomMatches: failureTeamRoomMatches,
+    });
+    failureHttpStatus = undefined;
+    failureTeamRoomMatches = undefined;
+
+    activePhase = 'outsider-room-events-api-team-target';
+    failureHttpStatus = await requestRoomEventsStatus(pageC, {
+      gatewayUrl: fixture.gatewayUrl,
+      roomId: fixture.teamRoomId,
+      calendarId: fixture.calendarId,
+    });
+    expect(failureHttpStatus).toBe(403);
+    record(activePhase, 'passed', failureHttpStatus);
+    failureHttpStatus = undefined;
+
+    activePhase = 'outsider-own-unbound-room';
+    failureHttpStatus = await requestRoomEventsStatus(pageC, {
+      gatewayUrl: fixture.gatewayUrl,
+      roomId: fixture.outsiderRoomId,
+      calendarId: fixture.calendarId,
+    });
+    expect(failureHttpStatus).toBe(404);
+    record(activePhase, 'passed', failureHttpStatus);
+    failureHttpStatus = undefined;
+
+    activePhase = 'stale-etag-conflict';
+    const staleUpdate = waitForGatewayResponse(
+      pageB,
+      'PATCH',
+      '/v1/calendar/events',
+    );
+    await frameB
+      .getByRole('dialog')
+      .last()
+      .getByRole('button', { name: 'Save', exact: true })
+      .click();
+    const staleUpdateResult = await staleUpdate;
+    expect(staleUpdateResult.status()).toBe(409);
+    await expect(
+      frameB.getByText(
+        'This event changed elsewhere. Reload the latest version before retrying.',
+      ),
+    ).toBeVisible();
+    record(activePhase, 'passed', staleUpdateResult.status());
+
+    activePhase = 'canonical-read-after-denial';
+    const reloadResponse = waitForGatewayResponse(
+      pageB,
+      'GET',
+      '/v1/calendar/event',
+    );
+    await frameB
+      .getByRole('dialog')
+      .last()
+      .getByRole('button', { name: 'Reload latest', exact: true })
+      .click();
+    const reloadResponseResult = await reloadResponse;
+    expect(reloadResponseResult.status()).toBe(200);
+    await expect(frameB.getByRole('textbox', { name: 'Title' })).toHaveValue(
+      'Member A canonical edit',
+    );
+    record(activePhase, 'passed', reloadResponseResult.status());
+
+    activePhase = 'browser-egress';
+    failureAlreadyReported = recordBlockedRequestFailure(
+      blockedExternalRequests,
+      blockedRequestEvidence,
+    );
+    expect(blockedExternalRequests).toBe(0);
+    record(activePhase, 'passed', undefined, blockedExternalRequests);
+  } catch {
+    recordJourneyFailure(
+      activePhase,
+      failureHttpStatus,
+      failureAlreadyReported,
+      failureTeamRoomMatches,
+    );
+    throw new Error('Element acceptance journey failed');
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
+  }
+});
+
+function readFixture(): Fixture {
+  const path = process.env.ELEMENT_ACCEPTANCE_USERS_FILE;
+  if (!path) throw new Error('Element acceptance fixture unavailable');
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as Fixture;
+  } catch {
+    throw new Error('Element acceptance fixture unavailable');
+  }
+}
+
+function recordBlockedRequestFailure(
+  blockedRequestCount: number,
+  evidence: BlockedRequestEvidence,
+): boolean {
+  if (blockedRequestCount === 0) return false;
+  record('browser-egress', 'failed', undefined, blockedRequestCount, {
+    blockedRequestDiagnostics: Array.from(evidence.diagnostics.values()),
+    blockedRequestDiagnosticOverflow: evidence.overflow,
+  });
+  return true;
+}
+
+function safeBlockedRequestResourceType(
+  resourceType: string,
+): BlockedRequestResourceType {
+  return BLOCKED_REQUEST_RESOURCE_TYPES.has(
+    resourceType as BlockedRequestResourceType,
+  )
+    ? (resourceType as BlockedRequestResourceType)
+    : 'other';
+}
+
+function classifyBlockedRequest(
+  url: URL,
+  fixtureHosts: ReadonlySet<string>,
+): BlockedRequestClass {
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return 'non-http-scheme';
+  }
+
+  const hostname = url.hostname.toLowerCase();
+  if (fixtureHosts.has(hostname)) {
+    if (url.pathname === '/.well-known/matrix/client') {
+      return 'matrix-client-well-known-discovery';
+    }
+    if (url.pathname === '/.well-known/matrix/server') {
+      return 'matrix-server-well-known-discovery';
+    }
+    return 'fixture-host-origin-mismatch';
+  }
+
+  if (
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname === '::1' ||
+    hostname === '[::1]' ||
+    /^127(?:\.\d{1,3}){3}$/u.test(hostname)
+  ) {
+    return 'unapproved-loopback-origin';
+  }
+
+  return 'external-http-origin';
+}
+
+function recordBlockedRequest(
+  evidence: BlockedRequestEvidence,
+  actor: BrowserActor,
+  harnessPhase: Phase,
+  requestClass: BlockedRequestClass,
+  resourceType: BlockedRequestResourceType,
+) {
+  const key = JSON.stringify([actor, harnessPhase, requestClass, resourceType]);
+  const existing = evidence.diagnostics.get(key);
+  if (existing) {
+    existing.count = Math.min(existing.count + 1, 2);
+    return;
+  }
+  if (evidence.diagnostics.size >= MAX_BLOCKED_REQUEST_DIAGNOSTIC_BUCKETS) {
+    evidence.overflow = true;
+    return;
+  }
+
+  evidence.diagnostics.set(key, {
+    actor,
+    harnessPhase,
+    requestClass,
+    resourceType,
+    count: 1,
+  });
+}
+
+async function authenticateInElement(
+  context: BrowserContext,
+  user: User,
+  captureMemberADiagnostics = false,
+): Promise<Page> {
+  const page = await context.newPage();
+  page.setDefaultTimeout(30_000);
+  page.setDefaultNavigationTimeout(30_000);
+  if (captureMemberADiagnostics) {
+    const homeserverOrigin = new URL(fixture.homeserverUrl).origin;
+    const homeserverHttpFailures: HomeserverHttpFailures = { count: 0 };
+    memberAHomeserverHttpFailures.set(page, homeserverHttpFailures);
+    const contextBlockedRequests =
+      blockedExternalRequestsByContext.get(context);
+    if (contextBlockedRequests) {
+      memberABlockedExternalRequests.set(page, contextBlockedRequests);
+    }
+    page.on('response', (response) => {
+      try {
+        if (
+          new URL(response.url()).origin === homeserverOrigin &&
+          response.status() >= 400
+        ) {
+          homeserverHttpFailures.count = Math.min(
+            homeserverHttpFailures.count + 1,
+            100_000,
+          );
+          homeserverHttpFailures.lastStatus = response.status();
+        }
+      } catch {
+        // Keep only the bounded count/status below; never retain request data.
+      }
+    });
+    activePhase = 'member-a-origin-navigation';
+  }
+  const originResponse = await page.goto(
+    new URL('/welcome/images/logo.svg', fixture.elementUrl).href,
+  );
+  if (captureMemberADiagnostics) {
+    const originMatchesElement =
+      new URL(page.url()).origin === new URL(fixture.elementUrl).origin;
+    record(activePhase, 'passed', originResponse?.status(), undefined, {
+      originMatchesElement,
+    });
+    activePhase = 'member-a-credentials-seeded';
+  }
+
+  await page.evaluate(
+    ({ homeserverUrl, credentials }) => {
+      window.localStorage.setItem('mx_hs_url', homeserverUrl);
+      window.localStorage.setItem('mx_user_id', credentials.userId);
+      window.localStorage.setItem('mx_access_token', credentials.accessToken);
+      window.localStorage.setItem('mx_device_id', credentials.deviceId);
+      window.localStorage.setItem('mx_is_guest', 'false');
+      window.localStorage.setItem('mx_has_pickle_key', 'false');
+      window.localStorage.setItem('mx_has_access_token', 'true');
+      window.localStorage.setItem(
+        'mx_local_settings',
+        JSON.stringify({
+          analyticsOptIn: false,
+          showCookieBar: false,
+          language: 'en',
+          theme: 'light',
+        }),
+      );
+      window.localStorage.setItem('notifications_hidden', 'true');
+      window.localStorage.setItem('audio_notifications_enabled', 'false');
+    },
+    { homeserverUrl: fixture.homeserverUrl, credentials: user },
+  );
+  if (captureMemberADiagnostics) {
+    record(activePhase, 'passed');
+    activePhase = 'member-a-root-navigation';
+  }
+
+  const rootResponse = await page.goto(fixture.elementUrl);
+  if (captureMemberADiagnostics) {
+    record(activePhase, 'passed', rootResponse?.status());
+    activePhase = 'member-a-session-observed';
+  }
+
+  const sessionReady = await page
+    .waitForFunction(
+      (expectedUserId) => {
+        type MatrixClient = { getUserId?: () => string | null };
+        type MatrixClientPeg = { get?: () => MatrixClient | undefined };
+        try {
+          const matrixClientPeg = (
+            window as unknown as {
+              mxMatrixClientPeg?: MatrixClientPeg;
+            }
+          ).mxMatrixClientPeg;
+          const matrixClient = matrixClientPeg?.get?.();
+          return matrixClient?.getUserId?.() === expectedUserId;
+        } catch {
+          return false;
+        }
+      },
+      user.userId,
+      { timeout: 30_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+
+  if (captureMemberADiagnostics) {
+    const sessionObservation = await page
+      .evaluate((expectedUserId) => {
+        type MatrixClient = {
+          getUserId?: () => string | null;
+          getSyncState?: () => string | null;
+        };
+        type MatrixClientPeg = { get?: () => MatrixClient | undefined };
+        let matrixClientPeg: MatrixClientPeg | undefined;
+        let matrixClient: MatrixClient | undefined;
+        try {
+          matrixClientPeg = (
+            window as unknown as {
+              mxMatrixClientPeg?: MatrixClientPeg;
+            }
+          ).mxMatrixClientPeg;
+          matrixClient = matrixClientPeg?.get?.();
+        } catch {
+          // Report only the bounded state below; never return exception text.
+        }
+        const knownSyncStates = new Set([
+          'ERROR',
+          'PREPARED',
+          'RECONNECTING',
+          'STOPPED',
+          'SYNCING',
+          'CATCHUP',
+        ]);
+        let matrixUserMatches = false;
+        let matrixSyncState: MatrixSyncState = 'UNKNOWN';
+        try {
+          matrixUserMatches = matrixClient?.getUserId?.() === expectedUserId;
+        } catch {
+          // Report only bounded booleans and known sync states.
+        }
+        try {
+          const rawSyncState = matrixClient?.getSyncState?.();
+          if (
+            typeof rawSyncState === 'string' &&
+            knownSyncStates.has(rawSyncState)
+          ) {
+            matrixSyncState = rawSyncState as MatrixSyncState;
+          }
+        } catch {
+          // Report only bounded booleans and known sync states.
+        }
+        return {
+          matrixClientHookPresent: Boolean(matrixClientPeg),
+          matrixClientPresent: Boolean(matrixClient),
+          matrixUserMatches,
+          matrixSyncState,
+        };
+      }, user.userId)
+      .catch(() => undefined);
+    recordMemberASessionObservation(sessionObservation);
+    activePhase = 'member-a-authenticated';
+  }
+
+  if (!sessionReady) {
+    throw new Error('Element session did not restore the expected user');
+  }
+  return page;
+}
+
+async function openFixtureRoom(
+  page: Page,
+  roomName: string,
+  roomId: string,
+): Promise<ElementWebPage> {
+  const roomUrl = new URL(fixture.elementUrl);
+  roomUrl.hash = `/room/${roomId}`;
+  await page.goto(roomUrl.href);
+
+  const element = new ElementWebPage(page);
+  await expect(getPinnedElementRoomNameHeading(page)).toHaveText(roomName);
+  expect(element.getCurrentRoomId()).toBe(roomId);
+  return element;
+}
+
+function getPinnedElementRoomNameHeading(page: Page): Locator {
+  return page.locator('header.mx_RoomHeader').getByRole('heading');
+}
+
+async function openMemberARoomWithDiagnostics(
+  page: Page,
+  roomName: string,
+  roomId: string,
+  expectedUserId: string,
+): Promise<MemberARoomResult> {
+  const roomUrl = new URL(fixture.elementUrl);
+  roomUrl.hash = `/room/${roomId}`;
+  let navigationCompleted = false;
+  try {
+    await page.goto(roomUrl.href, { timeout: 20_000 });
+    navigationCompleted = true;
+  } catch {
+    // The failure summary records only whether this bounded navigation ended.
+  }
+
+  const element = new ElementWebPage(page);
+  const roomNameHeading = getPinnedElementRoomNameHeading(page);
+  let roomHeadingReady = false;
+  if (navigationCompleted) {
+    try {
+      await roomNameHeading.waitFor({
+        state: 'visible',
+        timeout: 15_000,
+      });
+      const headingText = await roomNameHeading.textContent({
+        timeout: 1_000,
+      });
+      roomHeadingReady = headingText?.trim() === roomName;
+    } catch {
+      // The post-wait observation records only fixed booleans.
+    }
+  }
+
+  const observation = await observeMemberARoom(
+    page,
+    element,
+    roomName,
+    roomId,
+    expectedUserId,
+    navigationCompleted,
+    roomHeadingReady,
+  ).catch(() => undefined);
+  return {
+    element,
+    navigationCompleted,
+    observation,
+    failureCode: getMemberARoomFailureCode(navigationCompleted, observation),
+  };
+}
+
+async function observeMemberARoom(
+  page: Page,
+  element: ElementWebPage,
+  roomName: string,
+  roomId: string,
+  expectedUserId: string,
+  roomNavigationCompleted: boolean,
+  roomHeadingReady: boolean,
+): Promise<MemberARoomObservation> {
+  const matrixState = await page.evaluate(
+    ({ expectedRoomId, expectedMatrixUserId }) => {
+      type MatrixRoom = { getMyMembership?: () => string | null };
+      type MatrixClient = {
+        getUserId?: () => string | null;
+        getRoom?: (id: string) => MatrixRoom | undefined;
+        getSyncState?: () => string | null;
+      };
+      type MatrixClientPeg = { get?: () => MatrixClient | undefined };
+      const knownSyncStates = new Set([
+        'ERROR',
+        'PREPARED',
+        'RECONNECTING',
+        'STOPPED',
+        'SYNCING',
+        'CATCHUP',
+      ]);
+      let matrixClient: MatrixClient | undefined;
+      try {
+        const matrixClientPeg = (
+          window as unknown as {
+            mxMatrixClientPeg?: MatrixClientPeg;
+          }
+        ).mxMatrixClientPeg;
+        matrixClient = matrixClientPeg?.get?.();
+      } catch {
+        // Report fixed booleans and known sync states only.
+      }
+
+      let matrixUserMatches = false;
+      let matrixRoomKnown = false;
+      let matrixRoomJoined = false;
+      let matrixSyncState: MatrixSyncState = 'UNKNOWN';
+      try {
+        matrixUserMatches =
+          matrixClient?.getUserId?.() === expectedMatrixUserId;
+      } catch {
+        // Keep the identity observation boolean-only.
+      }
+      try {
+        const matrixRoom = matrixClient?.getRoom?.(expectedRoomId);
+        matrixRoomKnown = Boolean(matrixRoom);
+        matrixRoomJoined = matrixRoom?.getMyMembership?.() === 'join';
+      } catch {
+        // Keep room state observations boolean-only.
+      }
+      try {
+        const rawSyncState = matrixClient?.getSyncState?.();
+        if (
+          typeof rawSyncState === 'string' &&
+          knownSyncStates.has(rawSyncState)
+        ) {
+          matrixSyncState = rawSyncState as MatrixSyncState;
+        }
+      } catch {
+        // Keep only fixed sync state values.
+      }
+      return {
+        matrixUserMatches,
+        matrixRoomKnown,
+        matrixRoomJoined,
+        matrixSyncState,
+      };
+    },
+    { expectedRoomId: roomId, expectedMatrixUserId: expectedUserId },
+  );
+  const roomNameHeading = getPinnedElementRoomNameHeading(page);
+  const roomHeadingCount = await roomNameHeading.count().catch(() => 0);
+  const roomHeadingPresent =
+    roomHeadingCount > 0 &&
+    (await roomNameHeading.isVisible().catch(() => false));
+  const roomNameMatches =
+    roomHeadingCount > 0 &&
+    (await roomNameHeading
+      .first()
+      .evaluate(
+        (heading, expectedName) =>
+          (heading.textContent ?? '').trim() === expectedName,
+        roomName,
+        { timeout: 1_000 },
+      )
+      .catch(() => false));
+  let roomIdMatches = false;
+  try {
+    roomIdMatches = element.getCurrentRoomId() === roomId;
+  } catch {
+    // The URL is represented only as an equality result.
+  }
+  const homeserverHttpFailures = memberAHomeserverHttpFailures.get(page) ?? {
+    count: 0,
+  };
+  const blockedExternalRequests =
+    memberABlockedExternalRequests.get(page)?.count ?? 0;
+  return {
+    ...matrixState,
+    roomNavigationCompleted,
+    roomHeadingReady,
+    roomHeadingPresent,
+    roomNameMatches,
+    roomIdMatches,
+    blockedExternalRequestCount: blockedExternalRequests,
+    homeserverHttpErrorCount: homeserverHttpFailures.count,
+    ...(homeserverHttpFailures.lastStatus === undefined
+      ? {}
+      : { homeserverLastHttpErrorStatus: homeserverHttpFailures.lastStatus }),
+  };
+}
+
+function getMemberARoomFailureCode(
+  navigationCompleted: boolean,
+  observation: MemberARoomObservation | undefined,
+): MemberARoomFailureCode | undefined {
+  if (!navigationCompleted) return 'element-room-navigation-failed';
+  if (!observation) return 'element-room-observation-unavailable';
+  if (!observation.matrixUserMatches) return 'element-room-session-mismatch';
+  if (!observation.roomIdMatches) return 'element-room-route-mismatch';
+  if (!observation.matrixRoomKnown) return 'element-room-not-known';
+  if (!observation.matrixRoomJoined) return 'element-room-not-joined';
+  if (!observation.roomHeadingPresent) {
+    return 'element-room-heading-not-present';
+  }
+  if (!observation.roomNameMatches) return 'element-room-name-mismatch';
+  if (!observation.roomHeadingReady) {
+    return 'element-room-heading-wait-timeout';
+  }
+  return undefined;
+}
+
+function requireMemberARoom(result: MemberARoomResult): ElementWebPage {
+  if (result.failureCode) {
+    throw new Error('Element room context did not become ready');
+  }
+  return result.element;
+}
+
+function recordJourneyFailure(
+  phase: Phase,
+  httpStatus: number | undefined,
+  alreadyRecorded: boolean,
+  teamRoomMatches?: boolean,
+) {
+  if (!alreadyRecorded) {
+    const observation =
+      pendingPinnedControlObservation?.phase === phase
+        ? pendingPinnedControlObservation
+        : undefined;
+    record(phase, 'failed', httpStatus, observation?.count, {
+      ...(observation
+        ? {
+            controlVisible: observation.controlVisible,
+            ...(observation.panelPresent === undefined
+              ? {}
+              : { panelPresent: observation.panelPresent }),
+          }
+        : {}),
+      ...(teamRoomMatches === undefined ? {} : { teamRoomMatches }),
+    });
+  }
+  pendingPinnedControlObservation = undefined;
+}
+
+async function openCalendarWidget(
+  element: ElementWebPage,
+  page: Page,
+  {
+    expectWidgetWarning,
+    waitForCalendar = true,
+    captureMemberADiagnostics = false,
+  }: OpenCalendarWidgetOptions,
+) {
+  await openPinnedElementWidget(
+    page,
+    'Matrix Calendar',
+    captureMemberADiagnostics,
+  );
+  if (captureMemberADiagnostics) {
+    if (!expectWidgetWarning) activePhase = 'widget-a-warning-not-required';
+  }
+  if (expectWidgetWarning) {
+    await element.approveWidgetWarning();
+    if (captureMemberADiagnostics) record(activePhase, 'passed');
+  } else if (captureMemberADiagnostics) {
+    record(activePhase, 'passed');
+  }
+  if (captureMemberADiagnostics) {
+    activePhase = 'widget-a-capabilities-approval';
+  }
+  await element.approveWidgetCapabilities();
+  if (captureMemberADiagnostics) record(activePhase, 'passed');
+  if (captureMemberADiagnostics) {
+    activePhase = 'widget-a-identity-approval';
+  }
+  const identityContinue = page
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Continue', exact: true })
+    .first();
+  await identityContinue
+    .waitFor({ state: 'visible', timeout: 8_000 })
+    .catch(() => undefined);
+  const identityDialogShown = await identityContinue
+    .isVisible()
+    .catch(() => false);
+  if (captureMemberADiagnostics) {
+    record(
+      identityDialogShown
+        ? 'widget-a-identity-dialog-observed'
+        : 'widget-a-identity-dialog-not-required',
+      'passed',
+    );
+  }
+  if (identityDialogShown) {
+    if (captureMemberADiagnostics) {
+      activePhase = 'widget-a-identity-approval';
+    }
+    await element.approveWidgetIdentity();
+    if (captureMemberADiagnostics) {
+      record(activePhase, 'passed');
+      activePhase = 'widget-a-iframe-ready';
+    }
+  } else if (captureMemberADiagnostics) {
+    activePhase = 'widget-a-iframe-ready';
+  }
+  const frame = element.widgetByTitle('Matrix Calendar');
+  if (captureMemberADiagnostics) {
+    activePhase = 'widget-a-iframe-attached';
+    await page
+      .locator('iframe[title="Matrix Calendar"]')
+      .waitFor({ state: 'attached', timeout: 30_000 });
+    record(activePhase, 'passed');
+    activePhase = 'widget-a-iframe-ready';
+  }
+  if (waitForCalendar) {
+    await frame
+      .getByRole('button', { name: 'Create event', exact: true })
+      .waitFor();
+  }
+  return frame;
+}
+
+async function openPinnedElementWidget(
+  page: Page,
+  widgetName: string,
+  captureMemberADiagnostics = false,
+): Promise<void> {
+  const roomHeader = page.locator('header.mx_RoomHeader');
+  const rightPanel = page.getByRole('complementary');
+  await clickPinnedWidgetControl(
+    roomHeader.locator('button.mx_RoomHeader_infoWrapper'),
+    captureMemberADiagnostics ? 'widget-a-room-info-button' : undefined,
+  );
+  await clickPinnedWidgetControl(
+    rightPanel.getByRole('menuitem', { name: 'Extensions' }),
+    captureMemberADiagnostics ? 'widget-a-extensions-menuitem' : undefined,
+    rightPanel,
+  );
+  await clickPinnedWidgetControl(
+    rightPanel.getByRole('button', { name: widgetName }),
+    captureMemberADiagnostics ? 'widget-a-extension-row' : undefined,
+    rightPanel,
+  );
+}
+
+async function clickPinnedWidgetControl(
+  control: Locator,
+  diagnosticPhase?:
+    | 'widget-a-room-info-button'
+    | 'widget-a-extensions-menuitem'
+    | 'widget-a-extension-row',
+  panel?: Locator,
+): Promise<void> {
+  if (!diagnosticPhase) {
+    await control.click();
+    return;
+  }
+
+  activePhase = diagnosticPhase;
+  await control.waitFor({ state: 'visible', timeout: 8_000 }).catch(() => {});
+  const count = Math.min(await control.count(), 2);
+  const visibleControl = control.filter({ visible: true });
+  const visibleCount = Math.min(await visibleControl.count(), 2);
+  const controlVisible = visibleCount > 0;
+  const panelPresent = panel
+    ? (await panel.filter({ visible: true }).count()) > 0
+    : undefined;
+  pendingPinnedControlObservation = {
+    phase: diagnosticPhase,
+    count,
+    controlVisible,
+    ...(panelPresent === undefined ? {} : { panelPresent }),
+  };
+
+  if (
+    count !== 1 ||
+    visibleCount !== 1 ||
+    !controlVisible ||
+    panelPresent === false
+  ) {
+    throw new Error('Pinned Element widget control unavailable');
+  }
+
+  await visibleControl.click({ timeout: 8_000 });
+  record(diagnosticPhase, 'passed', undefined, count, {
+    controlVisible,
+    ...(panelPresent === undefined ? {} : { panelPresent }),
+  });
+  pendingPinnedControlObservation = undefined;
+}
+
+async function openEventEditor(
+  frame: ReturnType<ElementWebPage['widgetByTitle']>,
+  title: string,
+) {
+  const row = frame.getByRole('listitem', { name: title });
+  await expect(row).toBeVisible();
+  await row.click();
+  const details = frame.getByRole('dialog').last();
+  await details.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(
+    frame.getByRole('dialog').last().getByRole('textbox', { name: 'Title' }),
+  ).toBeVisible();
+}
+
+function waitForGatewayResponse(
+  page: Page,
+  method: string,
+  pathname: string,
+): Promise<Response> {
+  return page.waitForResponse(
+    (response) => {
+      const url = new URL(response.url());
+      return (
+        url.origin === new URL(fixture.gatewayUrl).origin &&
+        url.pathname === pathname &&
+        response.request().method() === method
+      );
+    },
+    { timeout: 30_000 },
+  );
+}
+
+async function requestRoomEventsStatus(
+  page: Page,
+  {
+    gatewayUrl,
+    roomId,
+    calendarId,
+  }: { gatewayUrl: string; roomId: string; calendarId: string },
+): Promise<number> {
+  return page.evaluate(
+    async ({ gatewayUrl, roomId, calendarId }) => {
+      // Only the numeric HTTP status crosses back into the test process.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const matrixClient = (window as any).mxMatrixClientPeg.get();
+      const credentials = await matrixClient.getOpenIdToken();
+      const identity = {
+        matrix_server_name: credentials.matrix_server_name,
+        access_token: credentials.access_token,
+      };
+      const query = new URLSearchParams({
+        roomId,
+        target: 'room',
+        calendarId,
+        start: new Date().toISOString(),
+        end: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        timezone: 'Europe/Stockholm',
+      });
+      const response = await fetch(
+        `${gatewayUrl}/v1/calendar/events?${query.toString()}`,
+        {
+          headers: {
+            Authorization: `MX-Identity ${btoa(JSON.stringify(identity))}`,
+          },
+        },
+      );
+      await response.body?.cancel();
+      return response.status;
+    },
+    { gatewayUrl, roomId, calendarId },
+  );
+}
+
+function observePostCreateVisibility(
+  page: Page,
+  {
+    expectedCalendarId,
+    expectedRoomId,
+    expectedTitle,
+  }: {
+    expectedCalendarId: string;
+    expectedRoomId: string;
+    expectedTitle: string;
+  },
+) {
+  const expectedGatewayOrigin = new URL(fixture.gatewayUrl).origin;
+  const observation: PostCreateVisibilityObservation = {
+    postCreateEventGetRequestCount: 0,
+    roomTargetRangeRequestCount: 0,
+    expectedRoomRangeRequestSeen: false,
+    roomTargetRangeResponseCount: 0,
+    roomTargetRangeLastStatus: null,
+    createResponseHasEvent: false,
+    createResponseTitleMatches: false,
+    createResponseCalendarMatches: false,
+    createResponseTimingComparable: false,
+    createResponseEventIntersectsRoomRange: false,
+    caldavReportProbeCompleted: false,
+    caldavOpenIdHttpStatus: null,
+    caldavReportHttpStatus: null,
+    caldavReportContainsCreatedEvent: null,
+    caldavProjection: {
+      completed: false,
+      includesCreatedEvent: null,
+      diagnosticCode: 'inconclusive',
+      diagnosticCounts: emptyProjectionDiagnosticCounts(),
+      timezoneAudit: unavailableTimezoneAudit(),
+    },
+    roomListResponseHasEventsArray: false,
+    roomListResponseEventCount: 0,
+    roomListDiagnostics: {
+      complete: false,
+      counts: emptyProjectionDiagnosticCounts(),
+    },
+    roomListResponseTitleMatches: false,
+    roomListResponseIdMatches: false,
+    roomListResponseCalendarMatches: false,
+    listViewHeadingPresent: false,
+    matchingListItemCount: 0,
+  };
+  const pendingResponseReads: Promise<void>[] = [];
+  const postCreateRangeRequests = new WeakSet<Request>();
+  let successfulCreateResponseObserved = false;
+  let createdEventId: string | undefined;
+  let createdEventUid: string | undefined;
+  let createdEventTiming: CreatedEventTiming | undefined;
+  let expectedRoomRange: ExpectedRoomRange | undefined;
+  let matchingEventListRow: { id?: string; calendarId?: string } | undefined;
+
+  const roomRangeMatches = (rawUrl: string) => {
+    try {
+      const url = new URL(rawUrl);
+      if (
+        url.origin !== expectedGatewayOrigin ||
+        url.pathname !== '/v1/calendar/events' ||
+        url.searchParams.get('target') !== 'room' ||
+        url.searchParams.get('roomId') !== expectedRoomId
+      ) {
+        return { roomTarget: false, expectedRange: false };
+      }
+
+      const roomTarget = true;
+      const start = url.searchParams.get('start') ?? '';
+      const end = url.searchParams.get('end') ?? '';
+      const startMillis = Date.parse(start);
+      const endMillis = Date.parse(end);
+      const expectedRange =
+        url.searchParams.get('calendarId') === expectedCalendarId &&
+        Number.isFinite(startMillis) &&
+        Number.isFinite(endMillis) &&
+        endMillis > startMillis;
+      return {
+        roomTarget,
+        expectedRange,
+        ...(expectedRange
+          ? {
+              range: {
+                start,
+                end,
+                timezone: url.searchParams.get('timezone') ?? '',
+              },
+            }
+          : {}),
+      };
+    } catch {
+      return { roomTarget: false, expectedRange: false };
+    }
+  };
+
+  const onRequest = (request: Request) => {
+    if (
+      request.method() === 'POST' &&
+      isCalendarEventsEndpoint(request.url())
+    ) {
+      return;
+    }
+    if (
+      request.method() !== 'GET' ||
+      !isCalendarEventsEndpoint(request.url()) ||
+      !successfulCreateResponseObserved
+    ) {
+      return;
+    }
+
+    postCreateRangeRequests.add(request);
+    observation.postCreateEventGetRequestCount = Math.min(
+      observation.postCreateEventGetRequestCount + 1,
+      2,
+    );
+    const roomRange = roomRangeMatches(request.url());
+    if (roomRange.roomTarget) {
+      observation.roomTargetRangeRequestCount = Math.min(
+        observation.roomTargetRangeRequestCount + 1,
+        2,
+      );
+    }
+    if (roomRange.expectedRange) {
+      observation.expectedRoomRangeRequestSeen = true;
+      expectedRoomRange ??= roomRange.range;
+    }
+  };
+
+  const onResponse = (response: Response) => {
+    const request = response.request();
+    if (
+      request.method() === 'POST' &&
+      isCalendarEventsEndpoint(response.url())
+    ) {
+      successfulCreateResponseObserved =
+        response.status() >= 200 && response.status() < 300;
+      return;
+    }
+    if (
+      request.method() !== 'GET' ||
+      !isCalendarEventsEndpoint(response.url()) ||
+      !postCreateRangeRequests.has(request)
+    ) {
+      return;
+    }
+    const roomRange = roomRangeMatches(response.url());
+    if (!roomRange.expectedRange) return;
+
+    observation.roomTargetRangeResponseCount = Math.min(
+      observation.roomTargetRangeResponseCount + 1,
+      2,
+    );
+    observation.roomTargetRangeLastStatus = response.status();
+    expectedRoomRange ??= roomRange.range;
+
+    pendingResponseReads.push(
+      (async () => {
+        let body: unknown;
+        try {
+          body = await response.json();
+        } catch {
+          return;
+        }
+        if (!isRecord(body) || !Array.isArray(body.events)) return;
+        observation.roomListResponseHasEventsArray = true;
+        observation.roomListResponseEventCount = Math.min(
+          body.events.length,
+          2,
+        );
+        observation.roomListDiagnostics = summarizeProjectionDiagnostics(
+          body.diagnostics,
+        );
+
+        for (const resource of body.events) {
+          if (!isRecord(resource) || !isRecord(resource.event)) continue;
+          const event = resource.event;
+          if (event.title !== expectedTitle) continue;
+
+          observation.roomListResponseTitleMatches = true;
+          const candidate = {
+            ...(typeof event.id === 'string' ? { id: event.id } : {}),
+            ...(typeof event.calendarId === 'string'
+              ? { calendarId: event.calendarId }
+              : {}),
+          };
+          matchingEventListRow ??= candidate;
+          observation.roomListResponseCalendarMatches =
+            event.calendarId === expectedCalendarId;
+          observation.roomListResponseIdMatches = Boolean(
+            createdEventId && event.id === createdEventId,
+          );
+          break;
+        }
+      })(),
+    );
+  };
+
+  page.on('request', onRequest);
+  page.on('response', onResponse);
+
+  return {
+    async observeCreatedEvent(response: Response) {
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        return;
+      }
+      if (!isRecord(body) || !isRecord(body.event)) return;
+
+      const event = body.event;
+      if (
+        typeof event.id !== 'string' ||
+        typeof event.title !== 'string' ||
+        typeof event.calendarId !== 'string'
+      ) {
+        return;
+      }
+
+      createdEventId = event.id;
+      createdEventUid =
+        typeof event.uid === 'string' && event.uid.length > 0
+          ? event.uid
+          : undefined;
+      createdEventTiming = readCreatedEventTiming(event.timing);
+      observation.createResponseHasEvent = true;
+      observation.createResponseTitleMatches = event.title === expectedTitle;
+      observation.createResponseCalendarMatches =
+        event.calendarId === expectedCalendarId;
+      if (matchingEventListRow) {
+        observation.roomListResponseIdMatches =
+          matchingEventListRow.id === createdEventId;
+        observation.roomListResponseCalendarMatches =
+          matchingEventListRow.calendarId === expectedCalendarId;
+      }
+    },
+    async collect(frame: FrameLocator, eventRow: Locator) {
+      await Promise.allSettled(pendingResponseReads);
+      if (createdEventTiming && expectedRoomRange) {
+        const timingMatch = await compareEventTimingWithRoomRange(
+          page,
+          createdEventTiming,
+          expectedRoomRange,
+        );
+        observation.createResponseTimingComparable = timingMatch.comparable;
+        observation.createResponseEventIntersectsRoomRange =
+          timingMatch.intersects;
+      }
+      if (createdEventUid && expectedRoomRange) {
+        const caldavProbe = runCalDavReportProbe({
+          calendarId: expectedCalendarId,
+          eventUid: createdEventUid,
+          range: expectedRoomRange,
+        });
+        if (caldavProbe) {
+          observation.caldavReportProbeCompleted = caldavProbe.completed;
+          observation.caldavOpenIdHttpStatus = caldavProbe.openIdStatus;
+          observation.caldavReportHttpStatus = caldavProbe.reportStatus;
+          observation.caldavReportContainsCreatedEvent =
+            caldavProbe.containsCreatedEvent;
+          observation.caldavProjection = caldavProbe.projection;
+        }
+      }
+      const [headingCount, itemCount] = await Promise.all([
+        frame
+          .getByRole('heading', { name: 'Calendar events', exact: true })
+          .count()
+          .catch(() => 0),
+        eventRow.count().catch(() => 0),
+      ]);
+      observation.listViewHeadingPresent = headingCount > 0;
+      observation.matchingListItemCount = Math.min(itemCount, 2);
+      page.off('request', onRequest);
+      page.off('response', onResponse);
+      return observation;
+    },
+  };
+}
+
+type ExpectedRoomRange = {
+  start: string;
+  end: string;
+  timezone: string;
+};
+
+type ZonedEventTiming = {
+  type: 'timed';
+  start: { type: 'zoned'; local: string; timezone: string };
+  end: { type: 'zoned'; local: string; timezone: string };
+};
+
+type CreatedEventTiming = ZonedEventTiming;
+
+type CalDavReportProbeResult = {
+  completed: boolean;
+  openIdStatus: number | null;
+  reportStatus: number | null;
+  containsCreatedEvent: boolean | null;
+  projection: CalDavProjectionObservation;
+};
+
+function runCalDavReportProbe({
+  calendarId,
+  eventUid,
+  range,
+}: {
+  calendarId: string;
+  eventUid: string;
+  range: ExpectedRoomRange;
+}): CalDavReportProbeResult | undefined {
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve(
+        process.cwd(),
+        '../dev/element-acceptance-caldav-report-probe.mjs',
+      ),
+    ],
+    {
+      input: JSON.stringify({ calendarId, eventUid, range }),
+      encoding: 'utf8',
+      env: {
+        MATRIX_APPLICATION_SERVICE_TOKEN:
+          process.env.MATRIX_APPLICATION_SERVICE_TOKEN ?? '',
+      },
+      stdio: ['pipe', 'pipe', 'ignore'],
+      timeout: 20_000,
+      maxBuffer: 4096,
+    },
+  );
+  if (result.error || result.status !== 0 || !result.stdout) return undefined;
+
+  let value: unknown;
+  try {
+    value = JSON.parse(result.stdout);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(value)) return undefined;
+  const expectedKeys = [
+    'completed',
+    'openIdStatus',
+    'reportStatus',
+    'containsCreatedEvent',
+    'projection',
+  ];
+  if (
+    Object.keys(value).length !== expectedKeys.length ||
+    expectedKeys.some((key) => !Object.hasOwn(value, key)) ||
+    typeof value.completed !== 'boolean' ||
+    (value.containsCreatedEvent !== null &&
+      typeof value.containsCreatedEvent !== 'boolean') ||
+    value.completed !== (value.containsCreatedEvent !== null) ||
+    !isOptionalHttpStatus(value.openIdStatus) ||
+    !isOptionalHttpStatus(value.reportStatus) ||
+    !isCalDavProjectionObservation(value.projection) ||
+    value.completed !== value.projection.completed ||
+    (value.containsCreatedEvent && !value.completed)
+  ) {
+    return undefined;
+  }
+  return {
+    completed: value.completed,
+    openIdStatus: value.openIdStatus,
+    reportStatus: value.reportStatus,
+    containsCreatedEvent: value.containsCreatedEvent,
+    projection: value.projection,
+  };
+}
+
+function isProjectionDiagnosticCounts(
+  value: unknown,
+): value is ProjectionDiagnosticCounts {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  return (
+    keys.length === PROJECTION_DIAGNOSTIC_REASONS.length &&
+    PROJECTION_DIAGNOSTIC_REASONS.every(
+      (reason) =>
+        Object.hasOwn(value, reason) &&
+        Number.isInteger(value[reason]) &&
+        Number(value[reason]) >= 0 &&
+        Number(value[reason]) <= 2,
+    )
+  );
+}
+
+function isCalDavProjectionObservation(
+  value: unknown,
+): value is CalDavProjectionObservation {
+  if (!isRecord(value)) return false;
+  const expectedKeys = [
+    'completed',
+    'includesCreatedEvent',
+    'diagnosticCode',
+    'diagnosticCounts',
+    'timezoneAudit',
+  ];
+  return (
+    Object.keys(value).length === expectedKeys.length &&
+    expectedKeys.every((key) => Object.hasOwn(value, key)) &&
+    typeof value.completed === 'boolean' &&
+    (value.includesCreatedEvent === null ||
+      typeof value.includesCreatedEvent === 'boolean') &&
+    (value.diagnosticCode === 'none' ||
+      value.diagnosticCode === 'inconclusive' ||
+      PROJECTION_DIAGNOSTIC_REASONS.includes(
+        value.diagnosticCode as ProjectionDiagnosticReason,
+      )) &&
+    isProjectionDiagnosticCounts(value.diagnosticCounts) &&
+    isTimezoneSafetyObservation(value.timezoneAudit) &&
+    value.completed === (value.includesCreatedEvent !== null) &&
+    (value.completed || value.diagnosticCode === 'inconclusive')
+  );
+}
+
+function isTimezoneSafetyObservation(
+  value: unknown,
+): value is TimezoneSafetyObservation {
+  if (!isRecord(value)) return false;
+  const expectedKeys = [
+    'completed',
+    'parsedEventUnsupportedTimezone',
+    'bundledZoneId',
+    'embeddedDefinitionCount',
+    'canonicalEmbeddedDefinitionMatches',
+    'classification',
+  ];
+  return (
+    Object.keys(value).length === expectedKeys.length &&
+    expectedKeys.every((key) => Object.hasOwn(value, key)) &&
+    typeof value.completed === 'boolean' &&
+    (value.parsedEventUnsupportedTimezone === null ||
+      typeof value.parsedEventUnsupportedTimezone === 'boolean') &&
+    (value.bundledZoneId === null ||
+      typeof value.bundledZoneId === 'boolean') &&
+    typeof value.embeddedDefinitionCount === 'number' &&
+    Number.isInteger(value.embeddedDefinitionCount) &&
+    value.embeddedDefinitionCount >= 0 &&
+    value.embeddedDefinitionCount <= 2 &&
+    (value.canonicalEmbeddedDefinitionMatches === null ||
+      typeof value.canonicalEmbeddedDefinitionMatches === 'boolean') &&
+    (value.classification === 'unsupported-zone-id' ||
+      value.classification === 'no-embedded-definition' ||
+      value.classification === 'duplicate-definitions' ||
+      value.classification === 'embedded-definition-mismatch' ||
+      value.classification === 'embedded-definition-matches' ||
+      value.classification === 'other-unsupported-timezone' ||
+      value.classification === 'no-zoned-start' ||
+      value.classification === 'inconclusive') &&
+    (value.completed ||
+      (value.parsedEventUnsupportedTimezone === null &&
+        value.bundledZoneId === null &&
+        value.embeddedDefinitionCount === 0 &&
+        value.canonicalEmbeddedDefinitionMatches === null &&
+        value.classification === 'inconclusive')) &&
+    (value.canonicalEmbeddedDefinitionMatches === null ||
+      (value.embeddedDefinitionCount === 1 && value.bundledZoneId === true)) &&
+    (value.classification === 'inconclusive'
+      ? !value.completed
+      : value.completed) &&
+    (value.classification !== 'unsupported-zone-id' ||
+      (value.bundledZoneId === false &&
+        value.parsedEventUnsupportedTimezone === true)) &&
+    (value.classification !== 'no-embedded-definition' ||
+      (value.bundledZoneId === true &&
+        value.embeddedDefinitionCount === 0 &&
+        value.parsedEventUnsupportedTimezone === false)) &&
+    (value.classification !== 'duplicate-definitions' ||
+      (value.bundledZoneId === true &&
+        value.embeddedDefinitionCount === 2 &&
+        value.parsedEventUnsupportedTimezone === true)) &&
+    (value.classification !== 'embedded-definition-mismatch' ||
+      (value.bundledZoneId === true &&
+        value.embeddedDefinitionCount === 1 &&
+        value.parsedEventUnsupportedTimezone === true &&
+        value.canonicalEmbeddedDefinitionMatches === false)) &&
+    (value.classification !== 'embedded-definition-matches' ||
+      (value.bundledZoneId === true &&
+        value.embeddedDefinitionCount === 1 &&
+        value.parsedEventUnsupportedTimezone === false &&
+        value.canonicalEmbeddedDefinitionMatches === true)) &&
+    (value.classification !== 'other-unsupported-timezone' ||
+      value.parsedEventUnsupportedTimezone === true) &&
+    (value.classification !== 'no-zoned-start' ||
+      (value.parsedEventUnsupportedTimezone === false &&
+        value.bundledZoneId === null &&
+        value.embeddedDefinitionCount === 0 &&
+        value.canonicalEmbeddedDefinitionMatches === null))
+  );
+}
+
+function isOptionalHttpStatus(value: unknown): value is number | null {
+  return (
+    value === null ||
+    (Number.isInteger(value) && Number(value) >= 100 && Number(value) <= 599)
+  );
+}
+
+function readCreatedEventTiming(
+  value: unknown,
+): CreatedEventTiming | undefined {
+  if (!isRecord(value) || value.type !== 'timed') return undefined;
+  const readEndpoint = (endpoint: unknown) => {
+    if (
+      !isRecord(endpoint) ||
+      endpoint.type !== 'zoned' ||
+      typeof endpoint.local !== 'string' ||
+      typeof endpoint.timezone !== 'string' ||
+      endpoint.timezone.length === 0
+    ) {
+      return undefined;
+    }
+    return {
+      type: 'zoned' as const,
+      local: endpoint.local,
+      timezone: endpoint.timezone,
+    };
+  };
+  const start = readEndpoint(value.start);
+  const end = readEndpoint(value.end);
+  return start && end ? { type: 'timed', start, end } : undefined;
+}
+
+async function compareEventTimingWithRoomRange(
+  page: Page,
+  timing: CreatedEventTiming,
+  range: ExpectedRoomRange,
+): Promise<{ comparable: boolean; intersects: boolean }> {
+  return page.evaluate(
+    ({ timing, range }) => {
+      const rangeStart = Date.parse(range.start);
+      const rangeEnd = Date.parse(range.end);
+      const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (
+        !Number.isFinite(rangeStart) ||
+        !Number.isFinite(rangeEnd) ||
+        rangeEnd <= rangeStart ||
+        timing.start.timezone !== browserTimezone ||
+        timing.end.timezone !== browserTimezone
+      ) {
+        return { comparable: false, intersects: false };
+      }
+
+      const toInstant = (local: string, timezone: string) => {
+        const match =
+          /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/u.exec(
+            local,
+          );
+        if (!match || timezone !== browserTimezone) return undefined;
+        const [, year, month, day, hour, minute, second, fraction] = match;
+        const instant = Date.parse(local);
+        if (!Number.isFinite(instant)) return undefined;
+        const parts = Object.fromEntries(
+          new Intl.DateTimeFormat('en-CA-u-ca-iso8601', {
+            timeZone: timezone,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hourCycle: 'h23',
+          })
+            .formatToParts(new Date(instant))
+            .filter((part) => part.type !== 'literal')
+            .map((part) => [part.type, Number(part.value)]),
+        );
+        const milliseconds = Number((fraction ?? '').padEnd(3, '0') || '0');
+        if (
+          parts.year !== Number(year) ||
+          parts.month !== Number(month) ||
+          parts.day !== Number(day) ||
+          parts.hour !== Number(hour) ||
+          parts.minute !== Number(minute) ||
+          parts.second !== Number(second ?? '0') ||
+          new Date(instant).getUTCMilliseconds() !== milliseconds
+        ) {
+          return undefined;
+        }
+        return instant;
+      };
+
+      const start = toInstant(timing.start.local, timing.start.timezone);
+      const end = toInstant(timing.end.local, timing.end.timezone);
+      if (start === undefined || end === undefined || end <= start) {
+        return { comparable: false, intersects: false };
+      }
+      return {
+        comparable: true,
+        intersects: start < rangeEnd && end > rangeStart,
+      };
+    },
+    { timing, range },
+  );
+}
+
+function isCalendarEventsEndpoint(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.origin === new URL(fixture.gatewayUrl).origin &&
+      url.pathname === '/v1/calendar/events'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function appendPostCreateVisibilityObservation(
+  observation: PostCreateVisibilityObservation,
+) {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase: 'event-create-post-refresh-observed',
+      status: 'passed',
+      ...observation,
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+}
+
+async function observeAcceptanceRuntime(
+  page: Page,
+  {
+    gatewayUrl,
+    homeserverUrl,
+    widgetUrl,
+  }: {
+    gatewayUrl: string;
+    homeserverUrl: string;
+    widgetUrl: string;
+  },
+): Promise<AcceptanceRuntimeObservation> {
+  const gatewayOrigin = new URL(gatewayUrl).origin;
+  const homeserverOrigin = new URL(homeserverUrl).origin;
+  const widgetOrigin = new URL(widgetUrl).origin;
+  const observerArgs = {
+    expectedElementOrigin: new URL(fixture.elementUrl).origin,
+    expectedWidgetOrigin: widgetOrigin,
+    expectedGatewayOrigin: gatewayOrigin,
+    expectedRoomId: fixture.teamRoomId,
+  };
+  const installAcceptanceObserver = ({
+    expectedElementOrigin,
+    expectedWidgetOrigin,
+    expectedGatewayOrigin,
+    expectedRoomId,
+  }: typeof observerArgs) => {
+    type WidgetApiState = 'none' | 'allowed' | 'request' | 'blocked' | 'other';
+    type WidgetParameters = Record<string, string | undefined>;
+    type WidgetApiMessage = {
+      api?: unknown;
+      action?: unknown;
+      widgetId?: unknown;
+      requestId?: unknown;
+      response?: unknown;
+      data?: unknown;
+    };
+    type RequestObservation = {
+      count: number;
+      sourceMatches: boolean;
+      originMatches: boolean;
+      widgetIdMatches: boolean;
+    };
+    type ChildObservation = {
+      parametersObserved: boolean;
+      gatewayBaseOriginMatches: boolean;
+      roomIdMatches: boolean;
+      widgetIdParameterPresent: boolean;
+      initialResponseCount: number;
+      initialResponseState: WidgetApiState;
+      initialResponseSourceMatches: boolean;
+      initialResponseOriginMatches: boolean;
+      initialResponseWidgetIdMatches: boolean;
+      followupCount: number;
+      followupState: WidgetApiState;
+      followupRequestIdMatches: boolean;
+      followupSourceMatches: boolean;
+      followupOriginMatches: boolean;
+      followupWidgetIdMatches: boolean;
+    };
+    const readParameters = (search: string, hash: string): WidgetParameters => {
+      const parse = (query: string): WidgetParameters => {
+        const params = new URLSearchParams(query);
+        const keys = new Set<string>();
+        params.forEach((_value, key) => keys.add(key));
+        const parsed: WidgetParameters = Object.create(
+          null,
+        ) as WidgetParameters;
+        for (const key of keys) {
+          const values = params.getAll(key);
+          parsed[key] = values.length === 1 ? values[0] : undefined;
+        }
+        return parsed;
+      };
+      const hashQuery = hash.substring(hash.indexOf('?') + 1);
+      return { ...parse(search), ...parse(hashQuery) };
+    };
+    const stateOf = (value: unknown): WidgetApiState =>
+      value === 'allowed' || value === 'request' || value === 'blocked'
+        ? value
+        : 'other';
+    const messageOf = (event: MessageEvent): WidgetApiMessage | undefined => {
+      if (
+        event.data === null ||
+        typeof event.data !== 'object' ||
+        Array.isArray(event.data)
+      ) {
+        return undefined;
+      }
+      return event.data as WidgetApiMessage;
+    };
+    const updateMatches = (
+      observation: RequestObservation,
+      matches: {
+        source: boolean;
+        origin: boolean;
+        widgetId: boolean;
+      },
+    ) => {
+      const first = observation.count === 0;
+      observation.count = Math.min(observation.count + 1, 2);
+      observation.sourceMatches = first
+        ? matches.source
+        : observation.sourceMatches && matches.source;
+      observation.originMatches = first
+        ? matches.origin
+        : observation.originMatches && matches.origin;
+      observation.widgetIdMatches = first
+        ? matches.widgetId
+        : observation.widgetIdMatches && matches.widgetId;
+    };
+    const runtimeWindow = window as Window & {
+      __matrixCalendarAcceptanceErrors?: {
+        count: number;
+        lastClass: WidgetPageErrorClass;
+      };
+      __matrixCalendarAcceptanceWidgetApiParent?: RequestObservation;
+      __matrixCalendarAcceptanceWidgetApiChild?: ChildObservation;
+    };
+
+    if (window.location.origin === expectedElementOrigin) {
+      const requestObservation: RequestObservation = {
+        count: 0,
+        sourceMatches: false,
+        originMatches: false,
+        widgetIdMatches: false,
+      };
+      runtimeWindow.__matrixCalendarAcceptanceWidgetApiParent =
+        requestObservation;
+      window.addEventListener('message', (event) => {
+        const message = messageOf(event);
+        if (
+          message?.api !== 'fromWidget' ||
+          message.action !== 'get_openid' ||
+          Object.hasOwn(message, 'response')
+        ) {
+          return;
+        }
+
+        let sourceMatches = false;
+        let expectedWidgetId: string | undefined;
+        for (const iframe of Array.from(document.querySelectorAll('iframe'))) {
+          if (iframe.contentWindow !== event.source) continue;
+          try {
+            const frameUrl = new URL(
+              iframe.getAttribute('src') ?? '',
+              document.baseURI,
+            );
+            const parameters = readParameters(frameUrl.search, frameUrl.hash);
+            sourceMatches = frameUrl.origin === expectedWidgetOrigin;
+            expectedWidgetId = parameters.widgetId;
+          } catch {
+            sourceMatches = false;
+          }
+          break;
+        }
+        updateMatches(requestObservation, {
+          source: sourceMatches,
+          origin: event.origin === expectedWidgetOrigin,
+          widgetId:
+            typeof expectedWidgetId === 'string' &&
+            message.widgetId === expectedWidgetId,
+        });
+      });
+    }
+
+    if (window.location.origin === expectedWidgetOrigin) {
+      const { expectedWidgetId, childObservation } = (() => {
+        const parsedParameters = readParameters(
+          window.location.search,
+          window.location.hash,
+        );
+        let gatewayBaseOriginMatches = false;
+        if (typeof parsedParameters.meetings_bot_base_url === 'string') {
+          try {
+            gatewayBaseOriginMatches =
+              new URL(parsedParameters.meetings_bot_base_url).origin ===
+              expectedGatewayOrigin;
+          } catch {
+            gatewayBaseOriginMatches = false;
+          }
+        }
+        const expectedWidgetId =
+          typeof parsedParameters.widgetId === 'string'
+            ? parsedParameters.widgetId
+            : undefined;
+        const childObservation: ChildObservation = {
+          parametersObserved: true,
+          gatewayBaseOriginMatches,
+          roomIdMatches: parsedParameters.matrix_room_id === expectedRoomId,
+          widgetIdParameterPresent:
+            typeof expectedWidgetId === 'string' && expectedWidgetId.length > 0,
+          initialResponseCount: 0,
+          initialResponseState: 'none',
+          initialResponseSourceMatches: false,
+          initialResponseOriginMatches: false,
+          initialResponseWidgetIdMatches: false,
+          followupCount: 0,
+          followupState: 'none',
+          followupRequestIdMatches: false,
+          followupSourceMatches: false,
+          followupOriginMatches: false,
+          followupWidgetIdMatches: false,
+        };
+        return { expectedWidgetId, childObservation };
+      })();
+      let initialRequestId: string | undefined;
+      runtimeWindow.__matrixCalendarAcceptanceWidgetApiChild = childObservation;
+      window.addEventListener('message', (event) => {
+        const message = messageOf(event);
+        if (!message) return;
+        const commonMatches = {
+          source: event.source === window.parent,
+          origin: event.origin === expectedElementOrigin,
+          widgetId:
+            typeof expectedWidgetId === 'string' &&
+            message.widgetId === expectedWidgetId,
+        };
+
+        if (
+          message.api === 'fromWidget' &&
+          message.action === 'get_openid' &&
+          Object.hasOwn(message, 'response') &&
+          message.response !== null &&
+          typeof message.response === 'object' &&
+          !Array.isArray(message.response)
+        ) {
+          const first = childObservation.initialResponseCount === 0;
+          childObservation.initialResponseCount = Math.min(
+            childObservation.initialResponseCount + 1,
+            2,
+          );
+          const response = message.response as { state?: unknown };
+          childObservation.initialResponseState = stateOf(response.state);
+          childObservation.initialResponseSourceMatches = first
+            ? commonMatches.source
+            : childObservation.initialResponseSourceMatches &&
+              commonMatches.source;
+          childObservation.initialResponseOriginMatches = first
+            ? commonMatches.origin
+            : childObservation.initialResponseOriginMatches &&
+              commonMatches.origin;
+          childObservation.initialResponseWidgetIdMatches = first
+            ? commonMatches.widgetId
+            : childObservation.initialResponseWidgetIdMatches &&
+              commonMatches.widgetId;
+          initialRequestId =
+            commonMatches.source &&
+            commonMatches.origin &&
+            commonMatches.widgetId &&
+            typeof message.requestId === 'string'
+              ? message.requestId
+              : undefined;
+          return;
+        }
+
+        if (
+          message.api !== 'toWidget' ||
+          message.action !== 'openid_credentials' ||
+          Object.hasOwn(message, 'response') ||
+          message.data === null ||
+          typeof message.data !== 'object' ||
+          Array.isArray(message.data)
+        ) {
+          return;
+        }
+        const first = childObservation.followupCount === 0;
+        childObservation.followupCount = Math.min(
+          childObservation.followupCount + 1,
+          2,
+        );
+        const data = message.data as {
+          state?: unknown;
+          original_request_id?: unknown;
+        };
+        childObservation.followupState = stateOf(data.state);
+        const requestIdMatches =
+          typeof initialRequestId === 'string' &&
+          typeof data.original_request_id === 'string' &&
+          data.original_request_id === initialRequestId;
+        childObservation.followupRequestIdMatches = first
+          ? requestIdMatches
+          : childObservation.followupRequestIdMatches && requestIdMatches;
+        childObservation.followupSourceMatches = first
+          ? commonMatches.source
+          : childObservation.followupSourceMatches && commonMatches.source;
+        childObservation.followupOriginMatches = first
+          ? commonMatches.origin
+          : childObservation.followupOriginMatches && commonMatches.origin;
+        childObservation.followupWidgetIdMatches = first
+          ? commonMatches.widgetId
+          : childObservation.followupWidgetIdMatches && commonMatches.widgetId;
+      });
+
+      const knownErrorClasses = [
+        'Error',
+        'TypeError',
+        'ReferenceError',
+        'SyntaxError',
+        'RangeError',
+        'URIError',
+        'EvalError',
+        'AggregateError',
+      ];
+      const errorState = {
+        count: 0,
+        lastClass: 'NONE' as WidgetPageErrorClass,
+      };
+      runtimeWindow.__matrixCalendarAcceptanceErrors = errorState;
+      const recordPageError = (reason: unknown) => {
+        errorState.count = Math.min(errorState.count + 1, 2);
+        const name = reason instanceof Error ? reason.name : 'OTHER';
+        errorState.lastClass = knownErrorClasses.includes(name)
+          ? (name as WidgetPageErrorClass)
+          : 'OTHER';
+      };
+      window.addEventListener('error', (event) => {
+        if (event instanceof ErrorEvent) recordPageError(event.error);
+      });
+      window.addEventListener('unhandledrejection', (event) => {
+        recordPageError(event.reason);
+      });
+    }
+  };
+  await page.context().addInitScript(installAcceptanceObserver, observerArgs);
+  await page.evaluate(installAcceptanceObserver, observerArgs);
+
+  const observation: AcceptanceRuntimeObservation = {
+    requestCounts: {
+      context: 0,
+      calendars: 0,
+      events: 0,
+      'other-calendar': 0,
+      'other-api': 0,
+    },
+    optionsRequestCount: 0,
+    failedRequestCount: 0,
+    lastRequestEndpoint: 'none',
+    lastRequestMethod: 'NONE',
+    lastResponseEndpoint: 'none',
+    lastResponseMethod: 'NONE',
+    iframeObservationAvailable: false,
+    iframeGatewayBaseOriginMatches: false,
+    iframeRoomIdMatches: false,
+    createEventVisible: false,
+    identityContinueVisible: false,
+    widgetResourceRequestCounts: {
+      document: 0,
+      script: 0,
+      stylesheet: 0,
+    },
+    widgetResourceFailureCounts: {
+      document: 0,
+      script: 0,
+      stylesheet: 0,
+    },
+    widgetResourceLastStatuses: {},
+    openIdRequestCount: 0,
+    openIdOptionsRequestCount: 0,
+    openIdFailedRequestCount: 0,
+    openIdLastRequestMethod: 'NONE',
+    widgetFrameAvailable: false,
+    widgetDocumentReadyState: 'unavailable',
+    widgetRootHasChildren: false,
+    widgetLoadingVisible: false,
+    widgetMissingCapabilitiesVisible: false,
+    widgetRegistrationErrorVisible: false,
+    widgetOutsideClientVisible: false,
+    widgetChildErrorVisible: false,
+    widgetPageErrorCount: 0,
+    widgetLastPageErrorClass: 'NONE',
+    widgetApiParentObserverAvailable: false,
+    widgetApiGetOpenIdRequestCount: 0,
+    widgetApiRequestSourceMatches: false,
+    widgetApiRequestOriginMatches: false,
+    widgetApiRequestWidgetIdMatches: false,
+    widgetApiInitialResponseCount: 0,
+    widgetApiInitialResponseState: 'none',
+    widgetApiInitialResponseSourceMatches: false,
+    widgetApiInitialResponseOriginMatches: false,
+    widgetApiInitialResponseWidgetIdMatches: false,
+    widgetApiFollowupCount: 0,
+    widgetApiFollowupState: 'none',
+    widgetApiFollowupRequestIdMatches: false,
+    widgetApiFollowupSourceMatches: false,
+    widgetApiFollowupOriginMatches: false,
+    widgetApiFollowupWidgetIdMatches: false,
+    widgetParametersObserved: false,
+    widgetGatewayBaseOriginMatches: false,
+    widgetRoomIdMatches: false,
+    widgetIdParameterPresent: false,
+    calendarEventsLoadingVisible: false,
+    calendarEventsLoadErrorVisible: false,
+    createEventEnabled: false,
+  };
+
+  page.on('request', (request) => {
+    const requestDetails = classifyGatewayRequest(
+      request.url(),
+      request.method(),
+      gatewayOrigin,
+    );
+    if (requestDetails) {
+      observation.requestCounts[requestDetails.endpoint] = Math.min(
+        observation.requestCounts[requestDetails.endpoint] + 1,
+        2,
+      );
+      observation.lastRequestEndpoint = requestDetails.endpoint;
+      observation.lastRequestMethod = requestDetails.method;
+      if (requestDetails.method === 'OPTIONS') {
+        observation.optionsRequestCount = Math.min(
+          observation.optionsRequestCount + 1,
+          2,
+        );
+      }
+    }
+
+    const widgetResource = classifyWidgetResource(
+      request.url(),
+      request.resourceType(),
+      widgetOrigin,
+    );
+    if (widgetResource) {
+      observation.widgetResourceRequestCounts[widgetResource] = Math.min(
+        observation.widgetResourceRequestCounts[widgetResource] + 1,
+        2,
+      );
+    }
+
+    if (isOpenIdRequest(request.url(), homeserverOrigin)) {
+      observation.openIdRequestCount = Math.min(
+        observation.openIdRequestCount + 1,
+        2,
+      );
+      observation.openIdLastRequestMethod = classifyGatewayMethod(
+        request.method(),
+      );
+      if (observation.openIdLastRequestMethod === 'OPTIONS') {
+        observation.openIdOptionsRequestCount = Math.min(
+          observation.openIdOptionsRequestCount + 1,
+          2,
+        );
+      }
+    }
+  });
+
+  page.on('requestfailed', (request) => {
+    const requestDetails = classifyGatewayRequest(
+      request.url(),
+      request.method(),
+      gatewayOrigin,
+    );
+    if (requestDetails) {
+      observation.failedRequestCount = Math.min(
+        observation.failedRequestCount + 1,
+        2,
+      );
+    }
+
+    const widgetResource = classifyWidgetResource(
+      request.url(),
+      request.resourceType(),
+      widgetOrigin,
+    );
+    if (widgetResource) {
+      observation.widgetResourceFailureCounts[widgetResource] = Math.min(
+        observation.widgetResourceFailureCounts[widgetResource] + 1,
+        2,
+      );
+    }
+
+    if (isOpenIdRequest(request.url(), homeserverOrigin)) {
+      observation.openIdFailedRequestCount = Math.min(
+        observation.openIdFailedRequestCount + 1,
+        2,
+      );
+    }
+  });
+
+  page.on('response', (response) => {
+    const responseDetails = classifyGatewayRequest(
+      response.url(),
+      response.request().method(),
+      gatewayOrigin,
+    );
+    if (responseDetails) {
+      observation.lastResponseEndpoint = responseDetails.endpoint;
+      observation.lastResponseMethod = responseDetails.method;
+      observation.lastResponseStatus = response.status();
+    }
+
+    const widgetResource = classifyWidgetResource(
+      response.url(),
+      response.request().resourceType(),
+      widgetOrigin,
+    );
+    if (widgetResource) {
+      observation.widgetResourceLastStatuses[widgetResource] =
+        response.status();
+      if (response.status() >= 400) {
+        observation.widgetResourceFailureCounts[widgetResource] = Math.min(
+          observation.widgetResourceFailureCounts[widgetResource] + 1,
+          2,
+        );
+      }
+    }
+
+    if (isOpenIdRequest(response.url(), homeserverOrigin)) {
+      observation.openIdLastResponseStatus = response.status();
+    }
+  });
+
+  return observation;
+}
+
+function classifyGatewayRequest(
+  rawUrl: string,
+  rawMethod: string,
+  gatewayOrigin: string,
+):
+  | {
+      endpoint: GatewayEndpointKind;
+      method: GatewayRequestMethod;
+    }
+  | undefined {
+  try {
+    const url = new URL(rawUrl);
+    if (url.origin !== gatewayOrigin) return undefined;
+
+    let endpoint: GatewayEndpointKind;
+    if (url.pathname === '/v1/calendar/context') {
+      endpoint = 'context';
+    } else if (url.pathname === '/v1/calendar/calendars') {
+      endpoint = 'calendars';
+    } else if (url.pathname === '/v1/calendar/events') {
+      endpoint = 'events';
+    } else if (url.pathname.startsWith('/v1/calendar/')) {
+      endpoint = 'other-calendar';
+    } else {
+      endpoint = 'other-api';
+    }
+
+    const method = classifyGatewayMethod(rawMethod);
+    return { endpoint, method };
+  } catch {
+    return undefined;
+  }
+}
+
+function classifyGatewayMethod(rawMethod: string): GatewayRequestMethod {
+  const methods: GatewayRequestMethod[] = [
+    'GET',
+    'POST',
+    'PATCH',
+    'PUT',
+    'DELETE',
+    'OPTIONS',
+    'HEAD',
+  ];
+  return methods.includes(rawMethod as GatewayRequestMethod)
+    ? (rawMethod as GatewayRequestMethod)
+    : 'OTHER';
+}
+
+function classifyWidgetResource(
+  rawUrl: string,
+  resourceType: string,
+  widgetOrigin: string,
+): WidgetResourceKind | undefined {
+  try {
+    if (new URL(rawUrl).origin !== widgetOrigin) return undefined;
+    return resourceType === 'document' ||
+      resourceType === 'script' ||
+      resourceType === 'stylesheet'
+      ? resourceType
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isOpenIdRequest(rawUrl: string, homeserverOrigin: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.origin === homeserverOrigin &&
+      url.pathname.endsWith('/openid/request_token')
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function recordWidgetRuntimeObservation(
+  page: Page,
+  frame: ReturnType<ElementWebPage['widgetByTitle']>,
+  observation: AcceptanceRuntimeObservation | undefined,
+) {
+  if (!observation) return;
+
+  try {
+    const iframeParameters = await page
+      .locator('iframe[title="Matrix Calendar"]')
+      .evaluate(
+        (iframe, { expectedGatewayOrigin, expectedRoomId }) => {
+          const source = iframe.getAttribute('src') ?? '';
+          const widgetUrl = new URL(source, window.location.href);
+          const parse = (query: string) => {
+            const params = new URLSearchParams(query);
+            const keys = new Set<string>();
+            params.forEach((_value, key) => keys.add(key));
+            const parsed: Record<string, string | undefined> = Object.create(
+              null,
+            ) as Record<string, string | undefined>;
+            for (const key of keys) {
+              const values = params.getAll(key);
+              parsed[key] = values.length === 1 ? values[0] : undefined;
+            }
+            return parsed;
+          };
+          const hashQuery = widgetUrl.hash.substring(
+            widgetUrl.hash.indexOf('?') + 1,
+          );
+          const parameters = {
+            ...parse(widgetUrl.search),
+            ...parse(hashQuery),
+          };
+          let gatewayOriginMatches = false;
+          if (typeof parameters.meetings_bot_base_url === 'string') {
+            try {
+              gatewayOriginMatches =
+                new URL(parameters.meetings_bot_base_url).origin ===
+                expectedGatewayOrigin;
+            } catch {
+              gatewayOriginMatches = false;
+            }
+          }
+          return {
+            gatewayOriginMatches,
+            roomIdMatches: parameters.matrix_room_id === expectedRoomId,
+          };
+        },
+        {
+          expectedGatewayOrigin: new URL(fixture.gatewayUrl).origin,
+          expectedRoomId: fixture.teamRoomId,
+        },
+      );
+    observation.iframeObservationAvailable = true;
+    observation.iframeGatewayBaseOriginMatches =
+      iframeParameters.gatewayOriginMatches;
+    observation.iframeRoomIdMatches = iframeParameters.roomIdMatches;
+  } catch {
+    // The raw iframe URL and any navigation error stay out of the evidence.
+  }
+
+  const widgetOrigin = new URL(fixture.widgetUrl).origin;
+  const widgetFrame = page.frames().find((candidate) => {
+    if (candidate === page.mainFrame()) return false;
+    try {
+      return new URL(candidate.url()).origin === widgetOrigin;
+    } catch {
+      return false;
+    }
+  });
+  if (widgetFrame) {
+    try {
+      const documentObservation = await widgetFrame.evaluate(() => {
+        const runtimeWindow = window as Window & {
+          __matrixCalendarAcceptanceErrors?: {
+            count: number;
+            lastClass: WidgetPageErrorClass;
+          };
+          __matrixCalendarAcceptanceWidgetApiChild?: {
+            parametersObserved: boolean;
+            gatewayBaseOriginMatches: boolean;
+            roomIdMatches: boolean;
+            widgetIdParameterPresent: boolean;
+            initialResponseCount: number;
+            initialResponseState: OpenIdProtocolState;
+            initialResponseSourceMatches: boolean;
+            initialResponseOriginMatches: boolean;
+            initialResponseWidgetIdMatches: boolean;
+            followupCount: number;
+            followupState: OpenIdProtocolState;
+            followupRequestIdMatches: boolean;
+            followupSourceMatches: boolean;
+            followupOriginMatches: boolean;
+            followupWidgetIdMatches: boolean;
+          };
+        };
+        const errors = runtimeWindow.__matrixCalendarAcceptanceErrors;
+        const widgetApi =
+          runtimeWindow.__matrixCalendarAcceptanceWidgetApiChild;
+        const readyState = document.readyState;
+        const visible = (element: Element | null) => {
+          if (!element) return false;
+          const style = window.getComputedStyle(element);
+          return (
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            element.getClientRects().length > 0
+          );
+        };
+        const alertMarkerVisible = (marker: string) =>
+          Array.from(document.querySelectorAll('[role="alert"]')).some(
+            (alert) => alert.textContent?.includes(marker) && visible(alert),
+          );
+        const createEventButton = Array.from(
+          document.querySelectorAll('button'),
+        ).find((button) => button.textContent?.trim() === 'Create event');
+        const calendarToolbarPresent = Boolean(createEventButton);
+        const calendarEventsLoadingVisible =
+          calendarToolbarPresent &&
+          Array.from(document.querySelectorAll('[role="progressbar"]')).some(
+            (progress) => visible(progress),
+          );
+        const widgetDocumentReadyState: WidgetDocumentReadyState =
+          readyState === 'loading' ||
+          readyState === 'interactive' ||
+          readyState === 'complete'
+            ? readyState
+            : 'unavailable';
+        return {
+          documentReadyState: widgetDocumentReadyState,
+          rootHasChildren:
+            (document.getElementById('root')?.childElementCount ?? 0) > 0,
+          loadingVisible: visible(
+            document.querySelector('[role="progressbar"]'),
+          ),
+          missingCapabilitiesVisible: alertMarkerVisible(
+            'Missing capabilities',
+          ),
+          registrationErrorVisible: alertMarkerVisible(
+            'Wrong widget registration',
+          ),
+          outsideClientVisible: alertMarkerVisible('Only runs as a widget'),
+          childErrorVisible: alertMarkerVisible(
+            'An error occured inside the widget.',
+          ),
+          calendarEventsLoadingVisible,
+          calendarEventsLoadErrorVisible: alertMarkerVisible(
+            'Calendar events could not be loaded.',
+          ),
+          createEventEnabled: Boolean(
+            createEventButton &&
+            !createEventButton.hasAttribute('disabled') &&
+            createEventButton.getAttribute('aria-disabled') !== 'true',
+          ),
+          pageErrorCount: Math.min(errors?.count ?? 0, 2),
+          lastPageErrorClass: errors?.lastClass ?? 'NONE',
+          widgetApi: widgetApi
+            ? {
+                parametersObserved: widgetApi.parametersObserved,
+                gatewayBaseOriginMatches: widgetApi.gatewayBaseOriginMatches,
+                roomIdMatches: widgetApi.roomIdMatches,
+                widgetIdParameterPresent: widgetApi.widgetIdParameterPresent,
+                initialResponseCount: widgetApi.initialResponseCount,
+                initialResponseState: widgetApi.initialResponseState,
+                initialResponseSourceMatches:
+                  widgetApi.initialResponseSourceMatches,
+                initialResponseOriginMatches:
+                  widgetApi.initialResponseOriginMatches,
+                initialResponseWidgetIdMatches:
+                  widgetApi.initialResponseWidgetIdMatches,
+                followupCount: widgetApi.followupCount,
+                followupState: widgetApi.followupState,
+                followupRequestIdMatches: widgetApi.followupRequestIdMatches,
+                followupSourceMatches: widgetApi.followupSourceMatches,
+                followupOriginMatches: widgetApi.followupOriginMatches,
+                followupWidgetIdMatches: widgetApi.followupWidgetIdMatches,
+              }
+            : undefined,
+        };
+      });
+      observation.widgetFrameAvailable = true;
+      observation.widgetDocumentReadyState =
+        documentObservation.documentReadyState;
+      observation.widgetRootHasChildren = documentObservation.rootHasChildren;
+      observation.widgetLoadingVisible = documentObservation.loadingVisible;
+      observation.widgetMissingCapabilitiesVisible =
+        documentObservation.missingCapabilitiesVisible;
+      observation.widgetRegistrationErrorVisible =
+        documentObservation.registrationErrorVisible;
+      observation.widgetOutsideClientVisible =
+        documentObservation.outsideClientVisible;
+      observation.widgetChildErrorVisible =
+        documentObservation.childErrorVisible;
+      observation.widgetPageErrorCount = documentObservation.pageErrorCount;
+      observation.widgetLastPageErrorClass =
+        documentObservation.lastPageErrorClass;
+      observation.calendarEventsLoadingVisible =
+        documentObservation.calendarEventsLoadingVisible;
+      observation.calendarEventsLoadErrorVisible =
+        documentObservation.calendarEventsLoadErrorVisible;
+      observation.createEventEnabled = documentObservation.createEventEnabled;
+      if (documentObservation.widgetApi) {
+        observation.widgetParametersObserved =
+          documentObservation.widgetApi.parametersObserved;
+        observation.widgetGatewayBaseOriginMatches =
+          documentObservation.widgetApi.gatewayBaseOriginMatches;
+        observation.widgetRoomIdMatches =
+          documentObservation.widgetApi.roomIdMatches;
+        observation.widgetIdParameterPresent =
+          documentObservation.widgetApi.widgetIdParameterPresent;
+        observation.widgetApiInitialResponseCount =
+          documentObservation.widgetApi.initialResponseCount;
+        observation.widgetApiInitialResponseState =
+          documentObservation.widgetApi.initialResponseState;
+        observation.widgetApiInitialResponseSourceMatches =
+          documentObservation.widgetApi.initialResponseSourceMatches;
+        observation.widgetApiInitialResponseOriginMatches =
+          documentObservation.widgetApi.initialResponseOriginMatches;
+        observation.widgetApiInitialResponseWidgetIdMatches =
+          documentObservation.widgetApi.initialResponseWidgetIdMatches;
+        observation.widgetApiFollowupCount =
+          documentObservation.widgetApi.followupCount;
+        observation.widgetApiFollowupState =
+          documentObservation.widgetApi.followupState;
+        observation.widgetApiFollowupRequestIdMatches =
+          documentObservation.widgetApi.followupRequestIdMatches;
+        observation.widgetApiFollowupSourceMatches =
+          documentObservation.widgetApi.followupSourceMatches;
+        observation.widgetApiFollowupOriginMatches =
+          documentObservation.widgetApi.followupOriginMatches;
+        observation.widgetApiFollowupWidgetIdMatches =
+          documentObservation.widgetApi.followupWidgetIdMatches;
+      }
+    } catch {
+      // Keep a failed frame read as unavailable without retaining its error.
+    }
+  }
+
+  try {
+    const parentObservation = await page.evaluate(() => {
+      const runtimeWindow = window as Window & {
+        __matrixCalendarAcceptanceWidgetApiParent?: {
+          count: number;
+          sourceMatches: boolean;
+          originMatches: boolean;
+          widgetIdMatches: boolean;
+        };
+      };
+      const request = runtimeWindow.__matrixCalendarAcceptanceWidgetApiParent;
+      return request
+        ? {
+            available: true,
+            count: request.count,
+            sourceMatches: request.sourceMatches,
+            originMatches: request.originMatches,
+            widgetIdMatches: request.widgetIdMatches,
+          }
+        : undefined;
+    });
+    if (parentObservation) {
+      observation.widgetApiParentObserverAvailable =
+        parentObservation.available;
+      observation.widgetApiGetOpenIdRequestCount = parentObservation.count;
+      observation.widgetApiRequestSourceMatches =
+        parentObservation.sourceMatches;
+      observation.widgetApiRequestOriginMatches =
+        parentObservation.originMatches;
+      observation.widgetApiRequestWidgetIdMatches =
+        parentObservation.widgetIdMatches;
+    }
+  } catch {
+    // Keep a failed parent-window read as unavailable without retaining its error.
+  }
+
+  const [createEventVisible, createEventEnabled, identityContinueVisible] =
+    await Promise.all([
+      frame
+        .getByRole('button', { name: 'Create event', exact: true })
+        .isVisible()
+        .catch(() => false),
+      frame
+        .getByRole('button', { name: 'Create event', exact: true })
+        .isEnabled()
+        .catch(() => false),
+      page
+        .getByRole('dialog')
+        .getByRole('button', { name: 'Continue', exact: true })
+        .first()
+        .isVisible()
+        .catch(() => false),
+    ]);
+  observation.createEventVisible = createEventVisible;
+  observation.createEventEnabled = createEventEnabled;
+  observation.identityContinueVisible = identityContinueVisible;
+
+  appendRuntimeObservation(observation);
+}
+
+function appendRuntimeObservation(observation: AcceptanceRuntimeObservation) {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase: 'widget-a-runtime-observed',
+      status: observation.iframeObservationAvailable ? 'passed' : 'unavailable',
+      gatewayContextRequestCount: observation.requestCounts.context,
+      gatewayCalendarsRequestCount: observation.requestCounts.calendars,
+      gatewayEventsRequestCount: observation.requestCounts.events,
+      gatewayOtherCalendarRequestCount:
+        observation.requestCounts['other-calendar'],
+      gatewayOtherApiRequestCount: observation.requestCounts['other-api'],
+      gatewayOptionsRequestCount: observation.optionsRequestCount,
+      gatewayFailedRequestCount: observation.failedRequestCount,
+      gatewayLastRequestEndpoint: observation.lastRequestEndpoint,
+      gatewayLastRequestMethod: observation.lastRequestMethod,
+      gatewayLastResponseEndpoint: observation.lastResponseEndpoint,
+      gatewayLastResponseMethod: observation.lastResponseMethod,
+      widgetDocumentRequestCount:
+        observation.widgetResourceRequestCounts.document,
+      widgetScriptRequestCount: observation.widgetResourceRequestCounts.script,
+      widgetStylesheetRequestCount:
+        observation.widgetResourceRequestCounts.stylesheet,
+      widgetDocumentFailureCount:
+        observation.widgetResourceFailureCounts.document,
+      widgetScriptFailureCount: observation.widgetResourceFailureCounts.script,
+      widgetStylesheetFailureCount:
+        observation.widgetResourceFailureCounts.stylesheet,
+      openIdRequestCount: observation.openIdRequestCount,
+      openIdOptionsRequestCount: observation.openIdOptionsRequestCount,
+      openIdFailedRequestCount: observation.openIdFailedRequestCount,
+      openIdLastRequestMethod: observation.openIdLastRequestMethod,
+      widgetApiGetOpenIdRequestCount:
+        observation.widgetApiGetOpenIdRequestCount,
+      widgetApiParentObserverAvailable:
+        observation.widgetApiParentObserverAvailable,
+      widgetApiRequestSourceMatches: observation.widgetApiRequestSourceMatches,
+      widgetApiRequestOriginMatches: observation.widgetApiRequestOriginMatches,
+      widgetApiRequestWidgetIdMatches:
+        observation.widgetApiRequestWidgetIdMatches,
+      widgetApiInitialResponseCount: observation.widgetApiInitialResponseCount,
+      widgetApiInitialResponseState: observation.widgetApiInitialResponseState,
+      widgetApiInitialResponseSourceMatches:
+        observation.widgetApiInitialResponseSourceMatches,
+      widgetApiInitialResponseOriginMatches:
+        observation.widgetApiInitialResponseOriginMatches,
+      widgetApiInitialResponseWidgetIdMatches:
+        observation.widgetApiInitialResponseWidgetIdMatches,
+      widgetApiFollowupCount: observation.widgetApiFollowupCount,
+      widgetApiFollowupState: observation.widgetApiFollowupState,
+      widgetApiFollowupRequestIdMatches:
+        observation.widgetApiFollowupRequestIdMatches,
+      widgetApiFollowupSourceMatches:
+        observation.widgetApiFollowupSourceMatches,
+      widgetApiFollowupOriginMatches:
+        observation.widgetApiFollowupOriginMatches,
+      widgetApiFollowupWidgetIdMatches:
+        observation.widgetApiFollowupWidgetIdMatches,
+      widgetParametersObserved: observation.widgetParametersObserved,
+      widgetGatewayBaseOriginMatches:
+        observation.widgetGatewayBaseOriginMatches,
+      widgetRoomIdMatches: observation.widgetRoomIdMatches,
+      widgetIdParameterPresent: observation.widgetIdParameterPresent,
+      ...(observation.lastResponseStatus === undefined
+        ? {}
+        : { gatewayLastResponseStatus: observation.lastResponseStatus }),
+      ...(observation.widgetResourceLastStatuses.document === undefined
+        ? {}
+        : {
+            widgetDocumentLastStatus:
+              observation.widgetResourceLastStatuses.document,
+          }),
+      ...(observation.widgetResourceLastStatuses.script === undefined
+        ? {}
+        : {
+            widgetScriptLastStatus:
+              observation.widgetResourceLastStatuses.script,
+          }),
+      ...(observation.widgetResourceLastStatuses.stylesheet === undefined
+        ? {}
+        : {
+            widgetStylesheetLastStatus:
+              observation.widgetResourceLastStatuses.stylesheet,
+          }),
+      ...(observation.openIdLastResponseStatus === undefined
+        ? {}
+        : { openIdLastResponseStatus: observation.openIdLastResponseStatus }),
+      iframeObservationAvailable: observation.iframeObservationAvailable,
+      iframeGatewayBaseOriginMatches:
+        observation.iframeGatewayBaseOriginMatches,
+      iframeRoomIdMatches: observation.iframeRoomIdMatches,
+      widgetFrameAvailable: observation.widgetFrameAvailable,
+      widgetDocumentReadyState: observation.widgetDocumentReadyState,
+      widgetRootHasChildren: observation.widgetRootHasChildren,
+      widgetLoadingVisible: observation.widgetLoadingVisible,
+      widgetMissingCapabilitiesVisible:
+        observation.widgetMissingCapabilitiesVisible,
+      widgetRegistrationErrorVisible:
+        observation.widgetRegistrationErrorVisible,
+      widgetOutsideClientVisible: observation.widgetOutsideClientVisible,
+      widgetChildErrorVisible: observation.widgetChildErrorVisible,
+      calendarEventsLoadingVisible: observation.calendarEventsLoadingVisible,
+      calendarEventsLoadErrorVisible:
+        observation.calendarEventsLoadErrorVisible,
+      widgetPageErrorCount: observation.widgetPageErrorCount,
+      widgetLastPageErrorClass: observation.widgetLastPageErrorClass,
+      createEventVisible: observation.createEventVisible,
+      createEventEnabled: observation.createEventEnabled,
+      identityContinueVisible: observation.identityContinueVisible,
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+}
+
+function record(
+  phase: Phase,
+  status: 'started' | 'passed' | 'failed',
+  httpStatus?: number,
+  count?: number,
+  extra?: {
+    originMatchesElement?: boolean;
+    controlVisible?: boolean;
+    panelPresent?: boolean;
+    teamRoomMatches?: boolean;
+    blockedRequestDiagnostics?: BlockedRequestDiagnostic[];
+    blockedRequestDiagnosticOverflow?: boolean;
+  },
+) {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase,
+      status,
+      ...(httpStatus === undefined ? {} : { httpStatus }),
+      ...(count === undefined ? {} : { count }),
+      ...extra,
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+}
+
+function recordMemberASessionObservation(
+  observation:
+    | {
+        matrixClientHookPresent: boolean;
+        matrixClientPresent: boolean;
+        matrixUserMatches: boolean;
+        matrixSyncState: MatrixSyncState;
+      }
+    | undefined,
+) {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase: 'member-a-session-observed',
+      status: observation ? 'passed' : 'unavailable',
+      ...(observation ?? {}),
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+}
+
+function recordMemberARoomObservation(result: MemberARoomResult) {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase: 'member-a-room-context',
+      status: result.failureCode ? 'failed' : 'passed',
+      ...(result.failureCode ? { failureCode: result.failureCode } : {}),
+      ...(result.observation ?? {}),
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+}
+
+function recordRuntimeVersions(chromiumVersion: string) {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase: 'runtime-versions',
+      status: 'passed',
+      elementWebConfiguredTag: 'v1.12.30',
+      synapseConfiguredTag: 'v1.161.0',
+      radicaleConfiguredTag: '3.8.0.0',
+      chromiumVersion,
+      runnerOS: platform(),
+      runnerOSVersion: release(),
+      runnerArchitecture: arch(),
+      nodeVersion: process.version,
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+}

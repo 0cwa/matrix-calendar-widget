@@ -38,4 +38,4 @@ COPY --from=builder /build/packages/calendar/ ./packages/calendar/
 COPY --from=builder /build/packages/ical-timezones/ ./packages/ical-timezones/
 COPY matrix-calendar-server/conf ./conf
 COPY matrix-calendar-server/lib ./lib
-CMD ["node", "./lib/index.js"]
+CMD ["node", "./lib/src/index.js"]

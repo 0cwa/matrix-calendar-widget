@@ -36,8 +36,13 @@ state is unsupported and must fail closed. Delivery is not exactly once.
 ## Supported behavior and limits
 
 The beta covers room-bound VEVENT calendars and the implemented bounded event
-editor, recurrence, alarm, URI attachment, and conference-link operations. The detailed data
-contracts remain in [ADR023](./adrs/adr023-floating-recurrence-semantics.md),
+editor, recurrence, alarm, conference-link operations, and one safe HTTP(S) URI
+attachment operation on an unambiguous master event. Attachment authoring is
+limited to the add, replace, or remove operation defined by
+[ADR038](./adrs/adr038-bounded-safe-uri-attachment-authoring.md); opaque,
+binary, unsafe, ambiguous, occurrence, and following attachment data remains
+outside the editor's authoring support and is preserved where supported. The
+detailed data contracts remain in [ADR023](./adrs/adr023-floating-recurrence-semantics.md),
 [ADR028](./adrs/adr028-room-reminder-configuration-and-delivery.md),
 [ADR029](./adrs/adr029-recurrence-instance-timing-edits.md),
 [ADR031](./adrs/adr031-safe-calendar-external-links.md),

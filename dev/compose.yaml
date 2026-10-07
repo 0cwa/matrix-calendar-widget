@@ -7,7 +7,7 @@ services:
       SYNAPSE_SERVER_NAME: localhost
       SYNAPSE_REPORT_STATS: 'no'
     ports:
-      - '8008:8008'
+      - '${MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING:-8008:8008}'
     volumes:
       - synapse-data:/data
       - ./appservice-calendar-contract.yaml:/data/appservice-calendar-contract.yaml:ro
@@ -24,7 +24,7 @@ services:
       RADICALE_MATRIX_HOMESERVER_URL: 'http://synapse:8008'
       RADICALE_MATRIX_SERVER_NAME: localhost
     ports:
-      - '5232:5232'
+      - '${MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING:-5232:5232}'
     volumes:
       - radicale-data:/data
 

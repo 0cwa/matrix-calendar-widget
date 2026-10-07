@@ -4209,6 +4209,9 @@ END:VCALENDAR`,
       categories: ['TEAM', 'PLANNING'],
       priority: 4,
     });
+    const serializedCalendar = ICAL.Component.fromString(encoded.icalendar);
+    const timezoneDefinitions =
+      serializedCalendar.getAllSubcomponents('vtimezone');
 
     expect(encoded.event).toMatchObject({
       id: 'new.ics',
@@ -4216,8 +4219,13 @@ END:VCALENDAR`,
       uid: 'new@example.test',
       title: 'Planning',
     });
+    expect(timezoneDefinitions).toHaveLength(1);
+    expect(timezoneDefinitions[0].getFirstPropertyValue('tzid')).toBe(
+      'Europe/Stockholm',
+    );
 
     const reparsed = codec.parse('team', 'new.ics', encoded.icalendar);
+    expect(reparsed.event.unsupportedTimezone).toBeUndefined();
     expect(reparsed.event).toEqual(encoded.event);
   });
 
@@ -4239,6 +4247,41 @@ END:VCALENDAR`,
     expect(codec.parse('team', 'new.ics', encoded.icalendar).event).toEqual(
       encoded.event,
     );
+  });
+
+  it('includes one canonical definition for each distinct zoned endpoint', () => {
+    const encoded = codec.create('team', 'different-zones.ics', {
+      uid: 'different-zones@example.test',
+      title: 'Different endpoint zones',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-11-02T09:00:00',
+          timezone: 'Europe/Stockholm',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-11-02T04:00:00',
+          timezone: 'America/New_York',
+        },
+      },
+    });
+    const calendar = ICAL.Component.fromString(encoded.icalendar);
+    const timezoneIds = calendar
+      .getAllSubcomponents('vtimezone')
+      .map((definition) => definition.getFirstPropertyValue('tzid'))
+      .sort();
+
+    expect(timezoneIds).toEqual(['America/New_York', 'Europe/Stockholm']);
+
+    const reparsed = codec.parse(
+      'team',
+      'different-zones.ics',
+      encoded.icalendar,
+    );
+    expect(reparsed.event.timing).toEqual(encoded.event.timing);
+    expect(reparsed.event.unsupportedTimezone).toBeUndefined();
   });
 
   it('creates, updates, and reloads a supported every-other-week BYDAY rule', () => {

@@ -1,0 +1,184 @@
+name: Element Web acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/element-acceptance.yml'
+      - 'dev/**'
+      - 'e2e/**'
+      - 'matrix-calendar-server/**'
+      - 'matrix-calendar-widget/**'
+      - 'packages/calendar/**'
+      - 'packages/ical-timezones/**'
+      - 'package.json'
+      - 'yarn.lock'
+      - 'docs/PLAN.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: element-acceptance-${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  element-web-acceptance:
+    name: Element Web acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      MATRIX_CALENDAR_DEV_USER: calendar
+      MATRIX_APPLICATION_SERVICE_TOKEN: matrix-calendar-contract-as-token
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: yarn
+
+      - name: Mask synthetic service credentials and prepare private files
+        run: |
+          echo "::add-mask::$MATRIX_APPLICATION_SERVICE_TOKEN"
+          fixture_password="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')"
+          echo "::add-mask::$fixture_password"
+          echo "MATRIX_CALENDAR_DEV_PASSWORD=$fixture_password" >> "$GITHUB_ENV"
+          echo "MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING=127.0.0.1:8008:8008" >> "$GITHUB_ENV"
+          echo "MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING=127.0.0.1:5232:5232" >> "$GITHUB_ENV"
+          echo "COMPOSE_PROJECT_NAME=matrix-calendar-element-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+          echo "ELEMENT_ACCEPTANCE_STAGE_FILE=$RUNNER_TEMP/element-acceptance-stage.jsonl" >> "$GITHUB_ENV"
+          echo "ELEMENT_ACCEPTANCE_USERS_FILE=$RUNNER_TEMP/element-acceptance-users.json" >> "$GITHUB_ENV"
+          echo "ELEMENT_ACCEPTANCE_SERVER_ENV_FILE=$RUNNER_TEMP/element-acceptance-server.env" >> "$GITHUB_ENV"
+          echo "ELEMENT_ACCEPTANCE_PLAYWRIGHT_OUTPUT=$RUNNER_TEMP/element-acceptance-playwright-output" >> "$GITHUB_ENV"
+          source_sha="${{ github.event.pull_request.head.sha || github.sha }}"
+          echo "ELEMENT_ACCEPTANCE_SOURCE_SHA=$source_sha" >> "$GITHUB_ENV"
+          : > "$RUNNER_TEMP/element-acceptance-stage.jsonl"
+          chmod 0600 "$RUNNER_TEMP/element-acceptance-stage.jsonl"
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Test bounded acceptance diagnostics and summary sanitizer
+        run: |
+          node dev/element-acceptance-diagnostics.test.mjs
+          node dev/sanitize-element-acceptance.test.mjs
+          node --test dev/validate-element-acceptance-compose.test.mjs
+
+      - name: Build calendar, server, and widget outputs
+        run: |
+          yarn workspace @matrix-calendar-widget/ical-timezones build
+          yarn workspace @matrix-calendar-widget/calendar build
+          yarn workspace @matrix-calendar-widget/server build
+          yarn workspace @matrix-calendar-widget/widget build
+          docker build \
+            --tag matrix-calendar-widget/server:element-acceptance \
+            --file matrix-calendar-server/Dockerfile \
+            .
+          docker build \
+            --build-context root=. \
+            --tag matrix-calendar-widget/widget:element-acceptance \
+            --file matrix-calendar-widget/Dockerfile \
+            matrix-calendar-widget
+          server_cmd="$(docker image inspect --format '{{json .Config.Cmd}}' matrix-calendar-widget/server:element-acceptance)"
+          if [[ "$server_cmd" != '["node","./lib/src/index.js"]' ]]; then
+            echo 'The built server image does not use the compiled entrypoint.' >&2
+            exit 1
+          fi
+          if ! docker run --rm --network none --read-only --ulimit core=0 \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/dev/element-acceptance-image-smoke.mjs,target=/tmp/element-acceptance-image-smoke.mjs,readonly" \
+            --entrypoint node matrix-calendar-widget/server:element-acceptance \
+            /tmp/element-acceptance-image-smoke.mjs \
+            > "$RUNNER_TEMP/element-acceptance-image-smoke.log" 2>&1; then
+            echo 'The isolated server image failed its compiled entrypoint smoke.' >&2
+            exit 1
+          fi
+
+      - name: Install isolated Chromium
+        run: yarn workspace e2e playwright install --with-deps chromium --only-shell
+
+      - name: Validate loopback-only Synapse and Radicale ports
+        run: |
+          if ! docker compose -p "$COMPOSE_PROJECT_NAME" -f dev/compose.yaml config --format json 2>/dev/null | node dev/validate-element-acceptance-compose.mjs; then
+            echo 'Synthetic Synapse and Radicale ports must bind to loopback.' >&2
+            exit 1
+          fi
+
+      - name: Start isolated Synapse and Radicale fixture
+        run: |
+          if ! bash dev/up.sh > "$RUNNER_TEMP/element-acceptance-dev-up.log" 2>&1; then
+            printf '%s\n' '{"phase":"runtime-ready","status":"failed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
+            echo 'Synthetic Matrix and CalDAV fixture startup failed.' >&2
+            exit 1
+          fi
+
+      - name: Provision three synthetic users and the isolated calendar
+        run: node dev/element-acceptance-setup.mjs setup
+
+      - name: Validate and start the project gateway, widget, and pinned Element
+        run: |
+          compose=(docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ELEMENT_ACCEPTANCE_SERVER_ENV_FILE" -f dev/compose.yaml -f dev/element-acceptance.compose.yaml)
+          if ! "${compose[@]}" config --quiet >/dev/null 2>&1; then
+            printf '%s\n' '{"phase":"runtime-ready","status":"failed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
+            echo 'Synthetic Element stack configuration is invalid.' >&2
+            exit 1
+          fi
+          if ! "${compose[@]}" config --format json 2>/dev/null | node dev/validate-element-acceptance-compose.mjs; then
+            printf '%s\n' '{"phase":"runtime-ready","status":"failed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
+            echo 'Synthetic service ports must bind to loopback.' >&2
+            exit 1
+          fi
+          if ! "${compose[@]}" up --no-build -d gateway widget element > "$RUNNER_TEMP/element-acceptance-compose-up.log" 2>&1; then
+            printf '%s\n' '{"phase":"runtime-ready","status":"failed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
+            echo 'Synthetic Element stack startup failed.' >&2
+            exit 1
+          fi
+          node dev/element-acceptance-setup.mjs wait
+
+      - name: Run the real Element Web member and outsider journey
+        run: |
+          printf '%s\n' '{"phase":"browser-test-suite","status":"started"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
+          if ! yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+            echo 'Element Web acceptance journey failed; see sanitized phase summary.' >&2
+            exit 1
+          fi
+          printf '%s\n' '{"phase":"browser-test-suite","status":"passed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
+
+      - name: Emit sanitized acceptance summary
+        if: always()
+        run: |
+          node dev/sanitize-element-acceptance.mjs \
+            "$ELEMENT_ACCEPTANCE_STAGE_FILE" \
+            "$ELEMENT_ACCEPTANCE_SOURCE_SHA" \
+            > "$RUNNER_TEMP/element-acceptance-safe-summary.txt"
+
+      - name: Retain sanitized acceptance summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: element-web-acceptance-summary
+          path: ${{ runner.temp }}/element-acceptance-safe-summary.txt
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Stop and remove the isolated stack and private evidence
+        if: always()
+        run: |
+          if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
+            if [[ -f "${ELEMENT_ACCEPTANCE_SERVER_ENV_FILE:-}" ]]; then
+              docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ELEMENT_ACCEPTANCE_SERVER_ENV_FILE" -f dev/compose.yaml -f dev/element-acceptance.compose.yaml down --volumes --remove-orphans >/dev/null 2>&1 || true
+            else
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f dev/compose.yaml down --volumes --remove-orphans >/dev/null 2>&1 || true
+            fi
+          fi
+          rm -rf \
+            "$RUNNER_TEMP/element-acceptance-users.json" \
+            "$RUNNER_TEMP/element-acceptance-server.env" \
+            "$RUNNER_TEMP/element-acceptance-playwright-output"
+          rm -f \
+            "$RUNNER_TEMP/element-acceptance-dev-up.log" \
+            "$RUNNER_TEMP/element-acceptance-compose-up.log" \
+            "$RUNNER_TEMP/element-acceptance-image-smoke.log" \
+            "$RUNNER_TEMP/element-acceptance-playwright.log"

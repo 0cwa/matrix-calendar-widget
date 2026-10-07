@@ -660,6 +660,7 @@ export class CalendarGatewayController {
         return this.listCalendarEvents(
           this.eventClientForPrincipal(principal.userId, principal.credential),
           principal.calendarUrl,
+          roomTarget.calendarId,
           range,
           viewerTimezone,
         );
@@ -691,6 +692,7 @@ export class CalendarGatewayController {
     return this.runCalDav(() =>
       this.listCalendarEvents(
         this.eventClient(userContext, openIdCredential),
+        scope.calendarId,
         scope.calendarId,
         range,
         viewerTimezone,
@@ -1248,14 +1250,19 @@ export class CalendarGatewayController {
 
   private async listCalendarEvents(
     client: CalDavEventClient,
-    calendarId: string,
+    collectionUrl: string,
+    logicalCalendarId: string,
     range: CalendarTimeRange,
     viewerTimezone: string,
   ): Promise<CalendarGatewayEventListDto> {
     const codec = new ICalendarEventCodec();
-    const resources = await client.listEvents(calendarId, range);
+    const resources = await client.listEvents(collectionUrl, range);
     const parsedResources = resources.map((resource) => {
-      const parsed = codec.parse(calendarId, resource.href, resource.icalendar);
+      const parsed = codec.parse(
+        logicalCalendarId,
+        resource.href,
+        resource.icalendar,
+      );
       return { resource, parsed, event: parsed.event };
     });
     const rangeUnsupportedResources = parsedResources.filter(

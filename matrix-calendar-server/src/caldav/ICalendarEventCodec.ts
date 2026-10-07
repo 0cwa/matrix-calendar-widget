@@ -68,6 +68,7 @@ import {
   validateCalendarEventPatchConference,
   validateCalendarEventPatchOccurrence,
 } from '@matrix-calendar-widget/calendar';
+import { getVTimezoneBlock } from '@matrix-calendar-widget/ical-timezones';
 import { randomUUID } from 'crypto';
 import ICAL from 'ical.js';
 import { DateTime } from 'luxon';
@@ -1594,6 +1595,7 @@ export class ICalendarEventCodec {
     const calendar = new ICAL.Component('vcalendar');
     calendar.addPropertyWithValue('version', '2.0');
     calendar.addPropertyWithValue('prodid', '-//Matrix Calendar Widget//EN');
+    addNewEventTimezoneDefinitions(calendar, input.timing);
 
     const vevent = new ICAL.Component('vevent');
     calendar.addSubcomponent(vevent);
@@ -6282,6 +6284,29 @@ function setTiming(
     timedValueForEventEndpoint(timing.end),
     timing.end.type === 'zoned' ? timing.end.timezone : undefined,
   );
+}
+
+function addNewEventTimezoneDefinitions(
+  calendar: ICAL.Component,
+  timing: CalendarEventTiming,
+): void {
+  if (timing.type !== 'timed') {
+    return;
+  }
+
+  const timezoneIds = new Set<string>();
+  for (const endpoint of [timing.start, timing.end]) {
+    if (endpoint.type === 'zoned' && endpoint.timezone !== 'UTC') {
+      timezoneIds.add(endpoint.timezone);
+    }
+  }
+
+  for (const timezoneId of timezoneIds) {
+    const definition = getVTimezoneBlock(timezoneId);
+    if (definition) {
+      calendar.addSubcomponent(ICAL.Component.fromString(definition));
+    }
+  }
 }
 
 function timedValueForEventEndpoint(
