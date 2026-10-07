@@ -120,7 +120,9 @@ function completeReport() {
       pinControlEnabled: true,
       pinActionCompleted: true,
       appDrawerCount: 1,
-      appDrawerFrameCount: 1,
+      appDrawerFrameCount: 0,
+      persistedHostFrameCount: 1,
+      persistedHostFrameVisible: true,
       appTileSnapshotAvailable: null,
       appTileCount: null,
       appTileFrameCount: null,
@@ -198,7 +200,7 @@ test('sanitizes complete performance samples and bounded decoded API timings', (
   );
   assert.match(
     summary,
-    /pin_control_count=1 pin_control_visible=true pin_control_enabled=true pin_action_completed=true app_drawer_count=1 app_drawer_frame_count=1/u,
+    /pin_control_count=1 pin_control_visible=true pin_control_enabled=true pin_action_completed=true app_drawer_count=1 app_drawer_frame_count=0 persisted_host_frame_count=1 persisted_host_frame_visible=true/u,
   );
   assert.match(summary, /maximized_iframe_width=1280 maximized_layout=true/u);
   assert.match(
@@ -228,10 +230,23 @@ test('requires the pinned app-drawer route and retains only fixed page-error cla
   missingPin.coldList.pinActionCompleted = false;
   missingPin.coldList.appDrawerCount = 0;
   missingPin.coldList.appDrawerFrameCount = 0;
+  missingPin.coldList.persistedHostFrameCount = 0;
+  missingPin.coldList.persistedHostFrameVisible = false;
   assert.throws(
     () =>
       sanitizeElementAcceptance(
         JSON.stringify(stage('passed', missingPin)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const inconsistentHostFrame = completeReport();
+  inconsistentHostFrame.coldList.persistedHostFrameCount = 2;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(stage('passed', inconsistentHostFrame)),
         sourceSha,
       ),
     /invalid element acceptance summary/u,
@@ -260,6 +275,8 @@ test('requires the pinned app-drawer route and retains only fixed page-error cla
 test('retains only a bounded AppTile render snapshot when iframe attachment fails', () => {
   const report = completeReport();
   report.coldList.appDrawerFrameCount = 0;
+  report.coldList.persistedHostFrameCount = 0;
+  report.coldList.persistedHostFrameVisible = false;
   Object.assign(report.coldList, {
     appTileSnapshotAvailable: true,
     appTileCount: 1,

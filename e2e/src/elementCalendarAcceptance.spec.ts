@@ -281,6 +281,8 @@ type AppDrawerPlacementObservation = Partial<{
   pinActionCompleted: boolean;
   appDrawerCount: number;
   appDrawerFrameCount: number;
+  persistedHostFrameCount?: number;
+  persistedHostFrameVisible?: boolean;
   appTileSnapshotAvailable: boolean;
   appTileCount: number | null;
   appTileFrameCount: number | null;
@@ -392,6 +394,8 @@ type PerformanceReport = {
     pinActionCompleted: boolean;
     appDrawerCount: number;
     appDrawerFrameCount: number;
+    persistedHostFrameCount: number;
+    persistedHostFrameVisible: boolean;
     appTileSnapshotAvailable: boolean | null;
     appTileCount: number | null;
     appTileFrameCount: number | null;
@@ -874,6 +878,8 @@ function makeEmptyPerformanceReport(
       pinActionCompleted: false,
       appDrawerCount: 0,
       appDrawerFrameCount: 0,
+      persistedHostFrameCount: 0,
+      persistedHostFrameVisible: false,
       appTileSnapshotAvailable: null,
       appTileCount: null,
       appTileFrameCount: null,
@@ -1959,7 +1965,9 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
     expect(report.coldList.pinControlEnabled).toBe(true);
     expect(report.coldList.pinActionCompleted).toBe(true);
     expect(report.coldList.appDrawerCount).toBe(1);
-    expect(report.coldList.appDrawerFrameCount).toBe(1);
+    expect(report.coldList.appDrawerFrameCount).toBe(0);
+    expect(report.coldList.persistedHostFrameCount).toBe(1);
+    expect(report.coldList.persistedHostFrameVisible).toBe(true);
     expect(report.coldList.maximizeControlCount).toBe(1);
     expect(report.coldList.maximizedLayout).toBe(true);
     expect(report.coldList.maximizedIframeWidth).toBeGreaterThanOrEqual(800);
@@ -3942,13 +3950,30 @@ async function openPinnedElementWidget(
     const appDrawerCount = Math.min(await appDrawer.count(), 2);
     onAppDrawerPlacement?.({ appDrawerCount });
     const drawerFrame = appDrawer.locator('iframe[title="Matrix Calendar"]');
-    await drawerFrame
-      .first()
-      .waitFor({ state: 'attached' })
-      .catch(() => {});
     const appDrawerFrameCount = Math.min(await drawerFrame.count(), 2);
     onAppDrawerPlacement?.({ appDrawerFrameCount });
-    if (appDrawerFrameCount !== 1) {
+    const persistedHostFrame = page.locator(
+      '#mx_PersistedElement_container iframe[title="Matrix Calendar"]',
+    );
+    await persistedHostFrame
+      .first()
+      .waitFor({ state: 'attached', timeout: 30_000 })
+      .catch(() => {});
+    const persistedHostFrameCount = Math.min(
+      await persistedHostFrame.count(),
+      2,
+    );
+    const persistedHostFrameVisible =
+      persistedHostFrameCount === 1 &&
+      (await persistedHostFrame
+        .first()
+        .isVisible()
+        .catch(() => false));
+    onAppDrawerPlacement?.({
+      persistedHostFrameCount,
+      persistedHostFrameVisible,
+    });
+    if (persistedHostFrameCount !== 1 || !persistedHostFrameVisible) {
       let renderSnapshot: AppDrawerPlacementObservation = {
         appTileSnapshotAvailable: false,
         appTileCount: null,
@@ -4016,8 +4041,9 @@ async function openPinnedElementWidget(
       onAppDrawerPlacement?.(renderSnapshot);
     }
     expect(appDrawerCount).toBe(1);
-    expect(appDrawerFrameCount).toBe(1);
-    await expect(drawerFrame.first()).toBeVisible();
+    expect(appDrawerFrameCount).toBe(0);
+    expect(persistedHostFrameCount).toBe(1);
+    await expect(persistedHostFrame.first()).toBeVisible();
     return;
   }
 

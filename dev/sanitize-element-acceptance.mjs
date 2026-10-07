@@ -133,6 +133,15 @@ const PERFORMANCE_FIXTURE_FAILURES = new Map([
     ]),
   ],
 ]);
+const PERFORMANCE_CLEANUP_COUNT_FIELDS = [
+  'manifestEventCount',
+  'plannedCount',
+  'confirmedCreatedCount',
+  'deletedCount',
+  'alreadyAbsentCount',
+  'conflictCount',
+  'unresolvedCount',
+];
 const ROOM_CONTEXT_PHASES = new Set([
   'member-a-room-context',
   'reminder-room-context',
@@ -655,6 +664,8 @@ const ALLOWED_KEYS = new Set([
   'status',
   'httpStatus',
   'count',
+  ...PERFORMANCE_CLEANUP_COUNT_FIELDS,
+  'inventoryAvailable',
   'originMatchesElement',
   'teamRoomMatches',
   'blockedRequestDiagnostics',
@@ -1365,33 +1376,81 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         performanceFixturePhaseStatus.set(record.phase, 'started');
       } else {
         const terminalKeys =
-          record.status === 'passed'
-            ? ['phase', 'status', 'count']
-            : [
+          record.phase === 'performance-cleanup'
+            ? [
                 'phase',
                 'status',
-                'count',
-                'failureCode',
+                ...PERFORMANCE_CLEANUP_COUNT_FIELDS,
+                'inventoryAvailable',
+                ...(record.status === 'failed' ? ['failureCode'] : []),
                 ...(Object.hasOwn(record, 'httpStatus') ? ['httpStatus'] : []),
-              ];
+              ]
+            : record.status === 'passed'
+              ? ['phase', 'status', 'count']
+              : [
+                  'phase',
+                  'status',
+                  'count',
+                  'failureCode',
+                  ...(Object.hasOwn(record, 'httpStatus')
+                    ? ['httpStatus']
+                    : []),
+                ];
+        const cleanupCountsAvailable =
+          record.inventoryAvailable === true &&
+          PERFORMANCE_CLEANUP_COUNT_FIELDS.every(
+            (key) =>
+              Number.isInteger(record[key]) &&
+              record[key] >= 0 &&
+              record[key] <= 250,
+          );
+        const cleanupCountsUnknown =
+          record.inventoryAvailable === false &&
+          record.status === 'failed' &&
+          PERFORMANCE_CLEANUP_COUNT_FIELDS.every((key) => record[key] === null);
+        const cleanupCountsConsistent =
+          cleanupCountsAvailable &&
+          record.deletedCount + record.alreadyAbsentCount <=
+            record.confirmedCreatedCount &&
+          record.plannedCount +
+            record.confirmedCreatedCount +
+            record.conflictCount <=
+            record.manifestEventCount &&
+          record.unresolvedCount <= record.manifestEventCount;
+        const passedCleanupConsistent =
+          record.status !== 'passed' ||
+          (cleanupCountsConsistent &&
+            record.unresolvedCount === 0 &&
+            record.plannedCount +
+              record.confirmedCreatedCount +
+              record.conflictCount ===
+              record.manifestEventCount &&
+            record.confirmedCreatedCount ===
+              record.deletedCount + record.alreadyAbsentCount);
+        const passedSeedCleanupConsistent =
+          record.status !== 'passed' ||
+          performanceFixturePhaseStatus.get('performance-seed') !== 'passed' ||
+          (record.manifestEventCount === 250 &&
+            record.plannedCount === 0 &&
+            record.confirmedCreatedCount === 250 &&
+            record.conflictCount === 0 &&
+            record.deletedCount + record.alreadyAbsentCount === 250);
+        const cleanupInventoryValid =
+          record.phase !== 'performance-cleanup' ||
+          (typeof record.inventoryAvailable === 'boolean' &&
+            ((cleanupCountsConsistent &&
+              passedCleanupConsistent &&
+              passedSeedCleanupConsistent) ||
+              cleanupCountsUnknown));
         if (
           previousStatus !== 'started' ||
           !exactKeys(terminalKeys) ||
-          !Number.isInteger(record.count) ||
-          record.count < 0 ||
-          record.count > 250 ||
           (record.phase === 'performance-seed' &&
-            record.status === 'passed' &&
-            record.count !== 250) ||
-          (record.phase === 'performance-cleanup' &&
-            record.status === 'passed' &&
-            record.count !== 0 &&
-            record.count !== 250) ||
-          (record.phase === 'performance-cleanup' &&
-            record.status === 'passed' &&
-            record.count === 0 &&
-            performanceFixturePhaseStatus.get('performance-seed') ===
-              'passed') ||
+            (!Number.isInteger(record.count) ||
+              record.count < 0 ||
+              record.count > 250 ||
+              (record.status === 'passed' && record.count !== 250))) ||
+          !cleanupInventoryValid ||
           (record.status === 'failed' &&
             !failureCodes.has(record.failureCode)) ||
           (Object.hasOwn(record, 'httpStatus') &&
@@ -2221,7 +2280,14 @@ export function sanitizeElementAcceptance(input, sourceSha) {
 
     if (PERFORMANCE_FIXTURE_FAILURES.has(phase)) {
       const fields = [`phase=${phase}`, `status=${record.status}`];
-      if (Object.hasOwn(record, 'count')) {
+      if (phase === 'performance-cleanup') {
+        for (const key of PERFORMANCE_CLEANUP_COUNT_FIELDS) {
+          fields.push(
+            `${key.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`)}=${record[key] ?? 'unavailable'}`,
+          );
+        }
+        fields.push(`inventory_available=${record.inventoryAvailable}`);
+      } else if (Object.hasOwn(record, 'count')) {
         fields.push(`count=${record.count}`);
       }
       if (Object.hasOwn(record, 'httpStatus')) {

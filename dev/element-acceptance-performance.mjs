@@ -20,6 +20,14 @@ const CALDAV_URL = 'http://127.0.0.1:5232/';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const MAX_EVENTS = 250;
+const PERFORMANCE_MANIFEST_STATES = new Set([
+  'planned',
+  'creating',
+  'created',
+  'conflict',
+  'deleted',
+  'absent',
+]);
 
 export function next31DayMonth(now = new Date()) {
   const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -88,7 +96,7 @@ export function isSafePerformanceManifest(value, runId, attempt) {
   if (
     !isRecord(value) ||
     Object.keys(value).length !== 6 ||
-    value.version !== 1 ||
+    value.version !== 2 ||
     value.runId !== runId ||
     value.attempt !== attempt ||
     !Number.isInteger(value.year) ||
@@ -105,16 +113,21 @@ export function isSafePerformanceManifest(value, runId, attempt) {
   }
   const seen = new Set();
   return value.events.every((entry) => {
+    const hasEtag = Object.hasOwn(entry ?? {}, 'etag');
+    const needsEtag = entry?.state === 'deleted' || entry?.state === 'absent';
     if (
       !isRecord(entry) ||
-      (Object.keys(entry).length !== 1 && Object.keys(entry).length !== 2) ||
+      (Object.keys(entry).length !== 2 && Object.keys(entry).length !== 3) ||
+      !PERFORMANCE_MANIFEST_STATES.has(entry.state) ||
+      (needsEtag && !hasEtag) ||
+      (hasEtag && entry.state !== 'created' && !needsEtag) ||
       typeof entry.resourceName !== 'string' ||
       !new RegExp(
         `^element-performance-${escapeRegExp(runId)}-${escapeRegExp(attempt)}-[0-9]{3}\\.ics$`,
         'u',
       ).test(entry.resourceName) ||
       seen.has(entry.resourceName) ||
-      (Object.hasOwn(entry, 'etag') &&
+      (hasEtag &&
         (typeof entry.etag !== 'string' ||
           !/^"[\x21\x23-\x7e]*"$/u.test(entry.etag)))
     ) {
@@ -123,6 +136,99 @@ export function isSafePerformanceManifest(value, runId, attempt) {
     seen.add(entry.resourceName);
     return true;
   });
+}
+
+function isStrongEtag(value) {
+  return typeof value === 'string' && /^"[\x21\x23-\x7e]*"$/u.test(value);
+}
+
+export async function createPerformanceManifestEvent(
+  entry,
+  createResource,
+  persistManifest,
+) {
+  entry.state = 'creating';
+  delete entry.etag;
+  persistManifest();
+  try {
+    const result = await createResource();
+    entry.state = 'created';
+    if (isStrongEtag(result?.etag)) entry.etag = result.etag;
+    persistManifest();
+    return { ownershipTokenAvailable: isStrongEtag(entry.etag) };
+  } catch (error) {
+    if (error?.status === 409 || error?.status === 412) {
+      entry.state = 'conflict';
+      delete entry.etag;
+      persistManifest();
+    }
+    throw error;
+  }
+}
+
+export function summarizePerformanceManifest(events) {
+  const summary = {
+    manifestEventCount: events.length,
+    plannedCount: 0,
+    confirmedCreatedCount: 0,
+    deletedCount: 0,
+    alreadyAbsentCount: 0,
+    conflictCount: 0,
+    unresolvedCount: 0,
+  };
+  for (const entry of events) {
+    switch (entry.state) {
+      case 'planned':
+        summary.plannedCount += 1;
+        break;
+      case 'creating':
+        summary.unresolvedCount += 1;
+        break;
+      case 'created':
+        summary.confirmedCreatedCount += 1;
+        summary.unresolvedCount += 1;
+        break;
+      case 'conflict':
+        summary.conflictCount += 1;
+        break;
+      case 'deleted':
+        summary.confirmedCreatedCount += 1;
+        summary.deletedCount += 1;
+        break;
+      case 'absent':
+        summary.confirmedCreatedCount += 1;
+        summary.alreadyAbsentCount += 1;
+        break;
+      default:
+        throw new PerformanceFixtureError('manifest-invalid');
+    }
+  }
+  return summary;
+}
+
+export async function cleanupPerformanceManifestEvents(
+  events,
+  deleteResource,
+  persistManifest,
+) {
+  let httpStatus;
+  for (const entry of events) {
+    if (entry.state !== 'created' || !isStrongEtag(entry.etag)) continue;
+    try {
+      await deleteResource(entry.resourceName, entry.etag);
+    } catch (error) {
+      if (error?.status === 404) {
+        entry.state = 'absent';
+        await persistManifest();
+        continue;
+      }
+      httpStatus = Number.isInteger(error?.status) ? error.status : httpStatus;
+      continue;
+    }
+    entry.state = 'deleted';
+    await persistManifest();
+  }
+  return { ...summarizePerformanceManifest(events), httpStatus };
 }
 
 function daysInMonth(year, month) {
@@ -209,12 +315,51 @@ class PerformanceFixtureError extends Error {
   }
 }
 
-function record(phase, status, { count, httpStatus, failureCode } = {}) {
+function record(
+  phase,
+  status,
+  {
+    count,
+    httpStatus,
+    failureCode,
+    manifestEventCount,
+    plannedCount,
+    confirmedCreatedCount,
+    deletedCount,
+    alreadyAbsentCount,
+    conflictCount,
+    unresolvedCount,
+    inventoryAvailable,
+  } = {},
+) {
   const stageFile = privatePath('ELEMENT_ACCEPTANCE_STAGE_FILE');
   const recordValue = {
     phase,
     status,
     ...(Number.isInteger(count) ? { count } : {}),
+    ...(manifestEventCount === null || Number.isInteger(manifestEventCount)
+      ? { manifestEventCount }
+      : {}),
+    ...(plannedCount === null || Number.isInteger(plannedCount)
+      ? { plannedCount }
+      : {}),
+    ...(confirmedCreatedCount === null ||
+    Number.isInteger(confirmedCreatedCount)
+      ? { confirmedCreatedCount }
+      : {}),
+    ...(deletedCount === null || Number.isInteger(deletedCount)
+      ? { deletedCount }
+      : {}),
+    ...(alreadyAbsentCount === null || Number.isInteger(alreadyAbsentCount)
+      ? { alreadyAbsentCount }
+      : {}),
+    ...(conflictCount === null || Number.isInteger(conflictCount)
+      ? { conflictCount }
+      : {}),
+    ...(unresolvedCount === null || Number.isInteger(unresolvedCount)
+      ? { unresolvedCount }
+      : {}),
+    ...(typeof inventoryAvailable === 'boolean' ? { inventoryAvailable } : {}),
     ...(Number.isInteger(httpStatus) ? { httpStatus } : {}),
     ...(failureCode ? { failureCode } : {}),
   };
@@ -328,7 +473,7 @@ function calendarCollectionUrl() {
 }
 
 function expectedManifest(runId, attempt) {
-  return { version: 1, runId, attempt, events: [] };
+  return { version: 2, runId, attempt, events: [] };
 }
 
 function manifestIdentity() {
@@ -366,7 +511,7 @@ async function seed() {
       throw new PerformanceFixtureError('manifest-invalid');
     }
     const monthManifest = {
-      version: 1,
+      version: 2,
       runId,
       attempt,
       year,
@@ -382,6 +527,7 @@ async function seed() {
     const events = buildPerformanceEvents(year, month, runId, attempt);
     monthManifest.events = events.map((_, index) => ({
       resourceName: `element-performance-${runId}-${attempt}-${String(index + 1).padStart(3, '0')}.ics`,
+      state: 'planned',
     }));
     writePrivateJson(manifestPath, monthManifest);
 
@@ -403,18 +549,24 @@ async function seed() {
         },
       });
       try {
-        const result = await client.createEvent(resourceUrl, encoded.icalendar);
-        httpStatus = undefined;
-        if (result.etag !== undefined) {
-          manifestEntry.etag = result.etag;
-        } else {
-          const readback = await client.getEvent(resourceUrl);
-          manifestEntry.etag = readback.etag;
-        }
-        writePrivateJson(manifestPath, monthManifest);
+        const creation = await createPerformanceManifestEvent(
+          manifestEntry,
+          () => client.createEvent(resourceUrl, encoded.icalendar),
+          () => writePrivateJson(manifestPath, monthManifest),
+        );
         createdCount += 1;
+        httpStatus = undefined;
+        if (!creation.ownershipTokenAvailable) {
+          throw new PerformanceFixtureError('caldav-operation-failed');
+        }
       } catch (error) {
         httpStatus = Number.isInteger(error?.status) ? error.status : undefined;
+        if (
+          error instanceof PerformanceFixtureError &&
+          error.code === 'caldav-operation-failed'
+        ) {
+          throw error;
+        }
         throw new PerformanceFixtureError(
           'caldav-operation-failed',
           httpStatus,
@@ -454,56 +606,70 @@ async function cleanup() {
     'ELEMENT_ACCEPTANCE_PERFORMANCE_MANIFEST_FILE',
   );
   const { runId, attempt } = manifestIdentity();
-  let deletedCount = 0;
-  let expectedCount = 0;
+  let inventoryAvailable = false;
+  let cleanupSummary = null;
   let httpStatus;
   record('performance-cleanup', 'started');
   try {
     ensureRegularOrAbsent(manifestPath);
     if (!existsSync(manifestPath)) {
-      record('performance-cleanup', 'passed', { count: 0 });
+      inventoryAvailable = true;
+      cleanupSummary = summarizePerformanceManifest([]);
+      record('performance-cleanup', 'passed', {
+        ...cleanupSummary,
+        inventoryAvailable,
+      });
       return;
     }
-    let manifest;
-    manifest = readManifest(manifestPath, runId, attempt);
-    expectedCount = manifest.events.length;
-    if (expectedCount === 0) {
-      rmSync(manifestPath, { force: true });
-      record('performance-cleanup', 'passed', { count: 0 });
-      return;
+    const manifest = readManifest(manifestPath, runId, attempt);
+    inventoryAvailable = true;
+    const needsDelete = manifest.events.some(
+      (entry) => entry.state === 'created' && isStrongEtag(entry.etag),
+    );
+    let client;
+    let collectionUrl;
+    if (needsDelete) {
+      const fixture = privateFixture();
+      const proof = await obtainOpenIdCredential(fixture);
+      client = makeClient(fixture, proof);
+      collectionUrl = calendarCollectionUrl();
     }
-    const fixture = privateFixture();
-    const proof = await obtainOpenIdCredential(fixture);
-    const client = makeClient(fixture, proof);
-    const collectionUrl = calendarCollectionUrl();
-    for (const entry of manifest.events) {
-      const resourceUrl = new URL(entry.resourceName, collectionUrl).toString();
-      try {
-        const current = entry.etag
-          ? { etag: entry.etag }
-          : await client.getEvent(resourceUrl);
-        await client.deleteEvent(resourceUrl, current.etag);
-        deletedCount += 1;
-        httpStatus = undefined;
-      } catch (error) {
-        if (error?.status === 404) {
-          deletedCount += 1;
-          httpStatus = undefined;
-          continue;
-        }
-        httpStatus = Number.isInteger(error?.status)
-          ? error.status
-          : httpStatus;
-      }
-    }
-    if (deletedCount !== expectedCount) {
+    cleanupSummary = await cleanupPerformanceManifestEvents(
+      manifest.events,
+      (resourceName, etag) =>
+        client.deleteEvent(
+          new URL(resourceName, collectionUrl).toString(),
+          etag,
+        ),
+      () => writePrivateJson(manifestPath, manifest),
+    );
+    httpStatus = cleanupSummary.httpStatus;
+    if (cleanupSummary.unresolvedCount !== 0) {
       throw new PerformanceFixtureError('cleanup-incomplete', httpStatus);
     }
     rmSync(manifestPath, { force: true });
-    record('performance-cleanup', 'passed', { count: deletedCount });
+    record('performance-cleanup', 'passed', {
+      ...cleanupSummary,
+      inventoryAvailable,
+    });
   } catch (error) {
+    if (cleanupSummary === null && inventoryAvailable) {
+      try {
+        const manifest = readManifest(manifestPath, runId, attempt);
+        cleanupSummary = summarizePerformanceManifest(manifest.events);
+      } catch {
+        inventoryAvailable = false;
+      }
+    }
     record('performance-cleanup', 'failed', {
-      count: deletedCount,
+      manifestEventCount: cleanupSummary?.manifestEventCount ?? null,
+      plannedCount: cleanupSummary?.plannedCount ?? null,
+      confirmedCreatedCount: cleanupSummary?.confirmedCreatedCount ?? null,
+      deletedCount: cleanupSummary?.deletedCount ?? null,
+      alreadyAbsentCount: cleanupSummary?.alreadyAbsentCount ?? null,
+      conflictCount: cleanupSummary?.conflictCount ?? null,
+      unresolvedCount: cleanupSummary?.unresolvedCount ?? null,
+      inventoryAvailable,
       httpStatus: error?.httpStatus ?? httpStatus,
       failureCode:
         error instanceof PerformanceFixtureError

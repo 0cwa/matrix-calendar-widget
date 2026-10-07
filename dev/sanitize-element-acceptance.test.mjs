@@ -2412,22 +2412,46 @@ test('rejects unsafe container diagnostics and diagnostics on other phases', () 
 });
 
 test('sanitizes the fixed performance seed and cleanup phases', () => {
+  const completeCleanup = {
+    manifestEventCount: 250,
+    plannedCount: 0,
+    confirmedCreatedCount: 250,
+    deletedCount: 250,
+    alreadyAbsentCount: 0,
+    conflictCount: 0,
+    unresolvedCount: 0,
+    inventoryAvailable: true,
+  };
   const stages = [
     { phase: 'performance-seed', status: 'started' },
     { phase: 'performance-seed', status: 'passed', count: 250 },
     { phase: 'performance-cleanup', status: 'started' },
-    { phase: 'performance-cleanup', status: 'passed', count: 250 },
+    { phase: 'performance-cleanup', status: 'passed', ...completeCleanup },
   ];
   const summary = sanitizeElementAcceptance(
     stages.map((stage) => JSON.stringify(stage)).join('\n'),
     sourceSha,
   );
   assert.match(summary, /phase=performance-seed status=passed count=250/u);
-  assert.match(summary, /phase=performance-cleanup status=passed count=250/u);
+  assert.match(
+    summary,
+    /phase=performance-cleanup status=passed manifest_event_count=250 planned_count=0 confirmed_created_count=250 deleted_count=250 already_absent_count=0 conflict_count=0 unresolved_count=0 inventory_available=true/u,
+  );
   const emptyCleanup = sanitizeElementAcceptance(
     [
       { phase: 'performance-cleanup', status: 'started' },
-      { phase: 'performance-cleanup', status: 'passed', count: 0 },
+      {
+        phase: 'performance-cleanup',
+        status: 'passed',
+        manifestEventCount: 0,
+        plannedCount: 0,
+        confirmedCreatedCount: 0,
+        deletedCount: 0,
+        alreadyAbsentCount: 0,
+        conflictCount: 0,
+        unresolvedCount: 0,
+        inventoryAvailable: true,
+      },
     ]
       .map((stage) => JSON.stringify(stage))
       .join('\n'),
@@ -2435,7 +2459,32 @@ test('sanitizes the fixed performance seed and cleanup phases', () => {
   );
   assert.match(
     emptyCleanup,
-    /phase=performance-cleanup status=passed count=0/u,
+    /phase=performance-cleanup status=passed manifest_event_count=0 planned_count=0 confirmed_created_count=0 deleted_count=0 already_absent_count=0 conflict_count=0 unresolved_count=0 inventory_available=true/u,
+  );
+  const unavailableCleanup = sanitizeElementAcceptance(
+    [
+      { phase: 'performance-cleanup', status: 'started' },
+      {
+        phase: 'performance-cleanup',
+        status: 'failed',
+        manifestEventCount: null,
+        plannedCount: null,
+        confirmedCreatedCount: null,
+        deletedCount: null,
+        alreadyAbsentCount: null,
+        conflictCount: null,
+        unresolvedCount: null,
+        inventoryAvailable: false,
+        failureCode: 'manifest-invalid',
+      },
+    ]
+      .map((stage) => JSON.stringify(stage))
+      .join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    unavailableCleanup,
+    /phase=performance-cleanup status=failed manifest_event_count=unavailable planned_count=unavailable confirmed_created_count=unavailable deleted_count=unavailable already_absent_count=unavailable conflict_count=unavailable unresolved_count=unavailable inventory_available=false failure_code=manifest-invalid/u,
   );
 });
 
@@ -2449,18 +2498,47 @@ test('rejects invalid performance fixture counts and failure categories', () => 
       { phase: 'performance-seed', status: 'started' },
       { phase: 'performance-seed', status: 'passed', count: 250 },
       { phase: 'performance-cleanup', status: 'started' },
-      { phase: 'performance-cleanup', status: 'passed', count: 0 },
+      {
+        phase: 'performance-cleanup',
+        status: 'passed',
+        manifestEventCount: 0,
+        plannedCount: 0,
+        confirmedCreatedCount: 0,
+        deletedCount: 0,
+        alreadyAbsentCount: 0,
+        conflictCount: 0,
+        unresolvedCount: 0,
+        inventoryAvailable: true,
+      },
     ],
     [
       { phase: 'performance-cleanup', status: 'started' },
-      { phase: 'performance-cleanup', status: 'passed', count: 125 },
+      {
+        phase: 'performance-cleanup',
+        status: 'passed',
+        manifestEventCount: 250,
+        plannedCount: 0,
+        confirmedCreatedCount: 250,
+        deletedCount: 125,
+        alreadyAbsentCount: 0,
+        conflictCount: 0,
+        unresolvedCount: 125,
+        inventoryAvailable: true,
+      },
     ],
     [
       { phase: 'performance-cleanup', status: 'started' },
       {
         phase: 'performance-cleanup',
         status: 'failed',
-        count: 0,
+        manifestEventCount: 0,
+        plannedCount: 0,
+        confirmedCreatedCount: 0,
+        deletedCount: 0,
+        alreadyAbsentCount: 0,
+        conflictCount: 0,
+        unresolvedCount: 0,
+        inventoryAvailable: true,
         failureCode: 'caldav-operation-failed',
       },
     ],

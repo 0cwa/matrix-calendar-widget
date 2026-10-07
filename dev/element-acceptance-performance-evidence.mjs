@@ -79,6 +79,8 @@ const COLD_KEYS = [
   'pinActionCompleted',
   'appDrawerCount',
   'appDrawerFrameCount',
+  'persistedHostFrameCount',
+  'persistedHostFrameVisible',
   'appTileSnapshotAvailable',
   'appTileCount',
   'appTileFrameCount',
@@ -289,6 +291,11 @@ function validReport(report) {
     typeof report.coldList.pinActionCompleted === 'boolean' &&
     boundedInteger(report.coldList.appDrawerCount, 0, 2) &&
     boundedInteger(report.coldList.appDrawerFrameCount, 0, 2) &&
+    boundedInteger(report.coldList.persistedHostFrameCount, 0, 2) &&
+    typeof report.coldList.persistedHostFrameVisible === 'boolean' &&
+    (report.coldList.persistedHostFrameVisible
+      ? report.coldList.persistedHostFrameCount === 1
+      : true) &&
     (typeof report.coldList.appTileSnapshotAvailable === 'boolean' ||
       report.coldList.appTileSnapshotAvailable === null) &&
     optionalCount(report.coldList.appTileCount, 2) &&
@@ -432,7 +439,9 @@ function reportPasses(report) {
     report.coldList.pinControlEnabled &&
     report.coldList.pinActionCompleted &&
     report.coldList.appDrawerCount === 1 &&
-    report.coldList.appDrawerFrameCount === 1 &&
+    report.coldList.appDrawerFrameCount === 0 &&
+    report.coldList.persistedHostFrameCount === 1 &&
+    report.coldList.persistedHostFrameVisible &&
     report.coldList.maximizeControlCount === 1 &&
     report.coldList.maximizedIframeWidth !== null &&
     report.coldList.maximizedIframeWidth >= 800 &&
@@ -583,6 +592,8 @@ export function formatPerformanceEvidence(record) {
       `pin_action_completed=${report.coldList.pinActionCompleted}`,
       `app_drawer_count=${report.coldList.appDrawerCount}`,
       `app_drawer_frame_count=${report.coldList.appDrawerFrameCount}`,
+      `persisted_host_frame_count=${report.coldList.persistedHostFrameCount}`,
+      `persisted_host_frame_visible=${report.coldList.persistedHostFrameVisible}`,
       `app_tile_snapshot_available=${display(report.coldList.appTileSnapshotAvailable)}`,
       `app_tile_count=${display(report.coldList.appTileCount)}`,
       `app_tile_frame_count=${display(report.coldList.appTileFrameCount)}`,
