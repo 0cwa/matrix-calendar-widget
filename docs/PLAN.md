@@ -531,12 +531,14 @@ access and event writes stay disabled by default.
 - [ ] Pass the existing five protected checks on the exact candidate head and
       retain the relevant hosted browser-layout and real Radicale/PostgreSQL
       contract results.
-- [ ] Run the first hosted Element Web journey against isolated pinned
+- [x] Run the first hosted Element Web journey against isolated pinned
       Synapse, project-owned Radicale, and gateway services: two authorized
       members share a basic event create/read/edit; the stale editor receives
       a conflict and reloads the saved event; an outsider-room widget targeting
       the team room and the outsider's own unbound room are denied. This slice
       does not test attachment authoring or establish the remaining beta gates.
+      Passed on draft PR #225 candidate `031a17e1b1c1b7d7f68b5293a80b8a2c46c5ccb6`
+      in [hosted run 37569137448](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37569137448): configured Element Web 1.12.30, Synapse 1.161.0, and Radicale 3.8.0.0; observed Chromium 149.0.7827.55, Node 22.23.3, and Linux runner; blocked browser egress count was zero.
 - [ ] Complete actual Element Web/Desktop beta acceptance against isolated
       pinned Synapse, project-owned Radicale, and PostgreSQL services before
       any production contact.
