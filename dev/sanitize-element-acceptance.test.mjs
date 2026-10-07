@@ -2410,3 +2410,255 @@ test('rejects unsafe container diagnostics and diagnostics on other phases', () 
     );
   }
 });
+
+test('formats bounded Element client acceptance evidence', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-unsupported-preservation',
+      status: 'passed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      supportedNeighborEdited: true,
+      canonicalUnsupportedObjectUnchanged: true,
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /phase=g6-unsupported-preservation status=passed/u);
+  assert.match(summary, /projection_http_status=200/u);
+  assert.match(summary, /count=1/u);
+  assert.match(summary, /unsupported_warning_visible=true/u);
+  assert.doesNotMatch(summary, /title|uid|calendarId|private/u);
+});
+
+test('rejects inconsistent Element client acceptance evidence', () => {
+  const invalidRecords = [
+    {
+      phase: 'g6-unsupported-preservation',
+      status: 'passed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      supportedNeighborEdited: true,
+      canonicalUnsupportedObjectUnchanged: true,
+      eventTitle: 'private event title',
+    },
+    {
+      phase: 'g6-unsupported-preservation',
+      status: 'passed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      supportedNeighborEdited: true,
+      canonicalUnsupportedObjectUnchanged: false,
+    },
+    {
+      phase: 'g6-unsupported-preservation',
+      status: 'passed',
+      projectionHttpStatus: 99,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      supportedNeighborEdited: true,
+      canonicalUnsupportedObjectUnchanged: true,
+    },
+    {
+      phase: 'g6-browser-egress',
+      status: 'passed',
+      count: 1,
+      browserEgressClear: true,
+    },
+    {
+      phase: 'g6-widget-layout',
+      status: 'passed',
+      narrowPanel: true,
+      createControlReachable: true,
+      eventDetailsReachable: true,
+      hostNoHorizontalOverflow: true,
+      widgetNoHorizontalOverflow: true,
+      pinVisible: true,
+      pinEnabled: true,
+      pinnedToDrawer: true,
+      drawerIframePresent: true,
+      maximiseControlVisible: true,
+      drawerMaximised: true,
+      frameExpanded: true,
+      unmaximiseControlVisible: true,
+      drawerRestored: true,
+      frameReturned: true,
+      viewportWidth: 1440,
+      viewportHeight: 900,
+      iframeWidth: 319,
+      iframeHeight: 640,
+      pinControlCount: 2,
+      drawerIframeWidth: 500,
+      maximisedIframeWidth: 1200,
+      maximisedIframeHeight: 700,
+      restoredIframeWidth: 500,
+      restoredIframeHeight: 400,
+    },
+  ];
+
+  for (const record of invalidRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
+test('accepts the compact four-case Element client evidence contract', () => {
+  const records = [
+    {
+      phase: 'g6-fixture-ready',
+      status: 'passed',
+      httpStatus: 200,
+      count: 4,
+      openIdProofValid: true,
+      allResourcesSeeded: true,
+    },
+    {
+      phase: 'g6-unsupported-preservation',
+      status: 'passed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      supportedNeighborEdited: true,
+      canonicalUnsupportedObjectUnchanged: true,
+    },
+    {
+      phase: 'g6-delete-and-refresh',
+      status: 'passed',
+      memberBEventsHttpStatus: 200,
+      deleteHttpStatus: 204,
+      canonicalDeleteHttpStatus: 404,
+      memberBReloadHttpStatus: 200,
+      count: 1,
+      memberBDeleteRowVisible: true,
+      deleteButtonVisible: true,
+      deleteConfirmationVisible: true,
+      deletedRowAbsent: true,
+      canonicalObjectAbsent: true,
+      memberBDeleteRowAbsent: true,
+      supportedNeighborVisible: true,
+    },
+    {
+      phase: 'g6-keyboard-focus',
+      status: 'passed',
+      count: 7,
+      eventActionTabCount: 7,
+      detailsActionTabCount: 4,
+      keyboardEventFocused: true,
+      detailsOpened: true,
+      editActionFocused: true,
+      deleteActionFocused: true,
+      closeActionFocused: true,
+      escapeClosedDialog: true,
+      focusReturnedToEvent: true,
+    },
+    {
+      phase: 'g6-widget-layout',
+      status: 'passed',
+      narrowPanel: true,
+      createControlReachable: true,
+      eventDetailsReachable: true,
+      hostNoHorizontalOverflow: true,
+      widgetNoHorizontalOverflow: true,
+      pinVisible: true,
+      pinEnabled: true,
+      pinnedToDrawer: true,
+      drawerIframePresent: true,
+      maximiseControlVisible: true,
+      drawerMaximised: true,
+      frameExpanded: true,
+      unmaximiseControlVisible: true,
+      drawerRestored: true,
+      frameReturned: true,
+      viewportWidth: 1440,
+      viewportHeight: 900,
+      iframeWidth: 319,
+      iframeHeight: 640,
+      pinControlCount: 1,
+      drawerIframeWidth: 500,
+      maximisedIframeWidth: 1200,
+      maximisedIframeHeight: 700,
+      restoredIframeWidth: 500,
+      restoredIframeHeight: 400,
+    },
+    {
+      phase: 'g6-browser-egress',
+      status: 'passed',
+      count: 0,
+      browserEgressClear: true,
+    },
+    {
+      phase: 'g6-resource-cleanup',
+      status: 'passed',
+      count: 4,
+      allResourcesRemoved: true,
+    },
+  ];
+  const summary = sanitizeElementAcceptance(
+    records.map((record) => JSON.stringify(record)).join('\n'),
+    sourceSha,
+  );
+
+  for (const record of records) {
+    assert.ok(summary.includes(`phase=${record.phase} status=passed`));
+  }
+  assert.doesNotMatch(summary, /Matrix Calendar|G6 unsupported|\.ics|UID:/u);
+});
+
+test('accepts the real Element room observations under the g6 phase labels', () => {
+  const roomRecord = {
+    phase: 'g6-member-a-room-context',
+    status: 'passed',
+    matrixUserMatches: true,
+    matrixRoomKnown: true,
+    matrixRoomJoined: true,
+    roomNavigationCompleted: true,
+    roomHeadingReady: true,
+    roomHeadingPresent: true,
+    roomNameMatches: true,
+    roomIdMatches: true,
+    matrixSyncState: 'SYNCING',
+    blockedExternalRequestCount: 0,
+    homeserverHttpErrorCount: 0,
+  };
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(roomRecord),
+    sourceSha,
+  );
+  assert.match(summary, /phase=g6-member-a-room-context status=passed/u);
+  assert.match(summary, /matrix_room_joined=true/u);
+});

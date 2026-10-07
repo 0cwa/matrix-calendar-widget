@@ -106,11 +106,27 @@ const PHASES = new Set([
   'reminder-restore-prior-state',
   'reminder-restore-scheduler-scan',
   'reminder-restore-no-duplicate',
+  'g6-member-a-room-context',
+  'g6-member-b-room-context',
+  'g6-fixture-ready',
+  'g6-unsupported-preservation',
+  'g6-delete-and-refresh',
+  'g6-keyboard-focus',
+  'g6-widget-layout',
+  'g6-browser-egress',
+  'g6-resource-cleanup',
 ]);
 const ROOM_CONTEXT_PHASES = new Set([
   'member-a-room-context',
   'reminder-room-context',
+  'g6-member-a-room-context',
+  'g6-member-b-room-context',
 ]);
+const G6_PHASES = new Set(
+  [...PHASES].filter(
+    (phase) => phase.startsWith('g6-') && !ROOM_CONTEXT_PHASES.has(phase),
+  ),
+);
 const REMINDER_ROOM_LAYOUT_FIELDS = [
   'roomViewPresent',
   'roomHeaderPresent',
@@ -170,7 +186,114 @@ const PHASE_BOOLEAN_FIELDS = new Map([
       'attemptCountUnchanged',
     ],
   ],
+  ['g6-fixture-ready', ['openIdProofValid', 'allResourcesSeeded']],
+  [
+    'g6-unsupported-preservation',
+    [
+      'unsupportedWarningVisible',
+      'unsupportedRowOmitted',
+      'supportedNeighborVisible',
+      'canonicalSnapshotAvailable',
+      'supportedNeighborEdited',
+      'canonicalUnsupportedObjectUnchanged',
+    ],
+  ],
+  [
+    'g6-delete-and-refresh',
+    [
+      'memberBDeleteRowVisible',
+      'deleteButtonVisible',
+      'deleteConfirmationVisible',
+      'deletedRowAbsent',
+      'canonicalObjectAbsent',
+      'memberBDeleteRowAbsent',
+      'supportedNeighborVisible',
+    ],
+  ],
+  [
+    'g6-keyboard-focus',
+    [
+      'keyboardEventFocused',
+      'detailsOpened',
+      'editActionFocused',
+      'deleteActionFocused',
+      'closeActionFocused',
+      'escapeClosedDialog',
+      'focusReturnedToEvent',
+    ],
+  ],
+  [
+    'g6-widget-layout',
+    [
+      'narrowPanel',
+      'createControlReachable',
+      'eventDetailsReachable',
+      'hostNoHorizontalOverflow',
+      'widgetNoHorizontalOverflow',
+      'pinVisible',
+      'pinEnabled',
+      'pinnedToDrawer',
+      'drawerIframePresent',
+      'maximiseControlVisible',
+      'drawerMaximised',
+      'frameExpanded',
+      'unmaximiseControlVisible',
+      'drawerRestored',
+      'frameReturned',
+    ],
+  ],
+  ['g6-browser-egress', ['browserEgressClear']],
+  ['g6-resource-cleanup', ['allResourcesRemoved']],
 ]);
+const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
+  ['g6-fixture-ready', ['httpStatus', 'count']],
+  [
+    'g6-unsupported-preservation',
+    [
+      'projectionHttpStatus',
+      'canonicalBeforeHttpStatus',
+      'neighborPatchHttpStatus',
+      'canonicalAfterHttpStatus',
+      'count',
+    ],
+  ],
+  [
+    'g6-delete-and-refresh',
+    [
+      'memberBEventsHttpStatus',
+      'deleteHttpStatus',
+      'canonicalDeleteHttpStatus',
+      'memberBReloadHttpStatus',
+      'count',
+    ],
+  ],
+  [
+    'g6-keyboard-focus',
+    ['count', 'eventActionTabCount', 'detailsActionTabCount'],
+  ],
+  [
+    'g6-widget-layout',
+    [
+      'viewportWidth',
+      'viewportHeight',
+      'iframeWidth',
+      'iframeHeight',
+      'pinControlCount',
+      'drawerIframeWidth',
+      'maximisedIframeWidth',
+      'maximisedIframeHeight',
+      'restoredIframeWidth',
+      'restoredIframeHeight',
+    ],
+  ],
+  ['g6-browser-egress', ['count']],
+  ['g6-resource-cleanup', ['count']],
+]);
+const G6_EXTRA_NUMERIC_FIELDS = new Set(
+  [...G6_NUMERIC_FIELDS_BY_PHASE.values()]
+    .flat()
+    .filter((key) => key !== 'httpStatus' && key !== 'count'),
+);
 const REMINDER_DELIVERY_PHASES = new Set([
   'reminder-delivery-snapshot',
   'reminder-restart-delivery-row',
@@ -681,7 +804,132 @@ const ALLOWED_KEYS = new Set([
   'canManageReminders',
   ...REMINDER_CONFIGURATION_FIELDS,
   ...VERSION_FIELDS,
+  'openIdProofValid',
+  'allResourcesSeeded',
+  'unsupportedWarningVisible',
+  'unsupportedRowOmitted',
+  'supportedNeighborVisible',
+  'canonicalSnapshotAvailable',
+  'supportedNeighborEdited',
+  'canonicalUnsupportedObjectUnchanged',
+  'deleteButtonVisible',
+  'deleteConfirmationVisible',
+  'deletedRowAbsent',
+  'canonicalObjectAbsent',
+  'memberBDeleteRowVisible',
+  'memberBDeleteRowAbsent',
+  'keyboardEventFocused',
+  'detailsOpened',
+  'editActionFocused',
+  'deleteActionFocused',
+  'closeActionFocused',
+  'escapeClosedDialog',
+  'focusReturnedToEvent',
+  'narrowPanel',
+  'createControlReachable',
+  'eventDetailsReachable',
+  'hostNoHorizontalOverflow',
+  'widgetNoHorizontalOverflow',
+  'pinVisible',
+  'pinEnabled',
+  'pinnedToDrawer',
+  'drawerIframePresent',
+  'maximiseControlVisible',
+  'drawerMaximised',
+  'frameExpanded',
+  'unmaximiseControlVisible',
+  'drawerRestored',
+  'frameReturned',
+  'browserEgressClear',
+  'allResourcesRemoved',
+  ...G6_EXTRA_NUMERIC_FIELDS,
 ]);
+
+function validG6Observation(record) {
+  if (!G6_PHASES.has(record.phase)) return true;
+
+  const booleanFields = PHASE_BOOLEAN_FIELDS.get(record.phase) ?? [];
+  const numericFields = G6_NUMERIC_FIELDS_BY_PHASE.get(record.phase) ?? [];
+  const allowedFields = new Set([
+    'phase',
+    'status',
+    ...booleanFields,
+    ...numericFields,
+  ]);
+  if (
+    Object.keys(record).some((key) => !allowedFields.has(key)) ||
+    booleanFields.some(
+      (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
+    ) ||
+    numericFields.some((key) => {
+      if (!Object.hasOwn(record, key)) return false;
+      const value = record[key];
+      if (!Number.isInteger(value)) return true;
+      if (key === 'httpStatus' || key.endsWith('HttpStatus')) {
+        return value < 100 || value > 599;
+      }
+      if (key.endsWith('Width') || key.endsWith('Height')) {
+        return value < 1 || value > 10_000;
+      }
+      if (key === 'eventActionTabCount') return value < 0 || value > 80;
+      if (key === 'detailsActionTabCount') return value < 0 || value > 14;
+      return value < 0 || value > 100_000;
+    })
+  ) {
+    return false;
+  }
+
+  if (record.status !== 'passed') return true;
+  switch (record.phase) {
+    case 'g6-fixture-ready':
+      return (
+        record.httpStatus === 200 &&
+        record.openIdProofValid === true &&
+        record.count === 4
+      );
+    case 'g6-unsupported-preservation':
+      return (
+        record.projectionHttpStatus === 200 &&
+        record.canonicalBeforeHttpStatus === 200 &&
+        Number.isInteger(record.neighborPatchHttpStatus) &&
+        record.neighborPatchHttpStatus >= 200 &&
+        record.neighborPatchHttpStatus < 300 &&
+        record.canonicalAfterHttpStatus === 200 &&
+        record.count === 1
+      );
+    case 'g6-delete-and-refresh':
+      return (
+        record.memberBEventsHttpStatus === 200 &&
+        Number.isInteger(record.deleteHttpStatus) &&
+        record.deleteHttpStatus >= 200 &&
+        record.deleteHttpStatus < 300 &&
+        record.canonicalDeleteHttpStatus === 404 &&
+        record.memberBReloadHttpStatus === 200 &&
+        record.count === 1
+      );
+    case 'g6-keyboard-focus':
+      return (
+        record.count === record.eventActionTabCount &&
+        record.eventActionTabCount <= 80 &&
+        record.detailsActionTabCount <= 12
+      );
+    case 'g6-widget-layout':
+      return (
+        record.viewportWidth === 1440 &&
+        record.viewportHeight === 900 &&
+        record.iframeWidth <= 480 &&
+        record.pinControlCount === 1 &&
+        record.maximisedIframeWidth > record.drawerIframeWidth &&
+        Math.abs(record.restoredIframeWidth - record.drawerIframeWidth) <= 2
+      );
+    case 'g6-browser-egress':
+      return record.count === 0;
+    case 'g6-resource-cleanup':
+      return record.count <= 4;
+    default:
+      return false;
+  }
+}
 
 function validRuntimeObservation(record) {
   const expectedKeys = new Set([
@@ -1357,6 +1605,14 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (!Number.isInteger(record.count) ||
         record.count < 0 ||
         record.count > 100000)
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    if (
+      !validG6Observation(record) ||
+      ([...G6_EXTRA_NUMERIC_FIELDS].some((key) => Object.hasOwn(record, key)) &&
+        !G6_PHASES.has(record.phase))
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
@@ -2381,6 +2637,20 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         );
         fields.push(`${outputKey}=${record[key]}`);
       }
+    }
+    for (const key of G6_NUMERIC_FIELDS_BY_PHASE.get(phase) ?? []) {
+      if (
+        key === 'httpStatus' ||
+        key === 'count' ||
+        !Object.hasOwn(record, key)
+      ) {
+        continue;
+      }
+      const outputKey = key.replace(
+        /[A-Z]/gu,
+        (letter) => `_${letter.toLowerCase()}`,
+      );
+      fields.push(`${outputKey}=${record[key]}`);
     }
     lines.push(fields.join(' '));
   }

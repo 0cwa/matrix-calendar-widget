@@ -93,6 +93,90 @@ type ReminderConfigurationObservation = {
   reminderOptionCheckedAfter: boolean;
 };
 
+type G6Phase =
+  | 'g6-fixture-ready'
+  | 'g6-unsupported-preservation'
+  | 'g6-delete-and-refresh'
+  | 'g6-keyboard-focus'
+  | 'g6-widget-layout'
+  | 'g6-browser-egress'
+  | 'g6-resource-cleanup';
+
+type G6StageRecord = {
+  phase: G6Phase;
+  status: 'passed' | 'failed';
+  httpStatus?: number;
+  count?: number;
+  openIdProofValid?: boolean;
+  allResourcesSeeded?: boolean;
+  projectionHttpStatus?: number;
+  canonicalBeforeHttpStatus?: number;
+  neighborPatchHttpStatus?: number;
+  canonicalAfterHttpStatus?: number;
+  memberBEventsHttpStatus?: number;
+  deleteHttpStatus?: number;
+  canonicalDeleteHttpStatus?: number;
+  memberBReloadHttpStatus?: number;
+  unsupportedWarningVisible?: boolean;
+  unsupportedRowOmitted?: boolean;
+  supportedNeighborVisible?: boolean;
+  canonicalSnapshotAvailable?: boolean;
+  supportedNeighborEdited?: boolean;
+  canonicalUnsupportedObjectUnchanged?: boolean;
+  deleteButtonVisible?: boolean;
+  deleteConfirmationVisible?: boolean;
+  deletedRowAbsent?: boolean;
+  canonicalObjectAbsent?: boolean;
+  memberBDeleteRowVisible?: boolean;
+  memberBDeleteRowAbsent?: boolean;
+  keyboardEventFocused?: boolean;
+  detailsOpened?: boolean;
+  editActionFocused?: boolean;
+  deleteActionFocused?: boolean;
+  closeActionFocused?: boolean;
+  escapeClosedDialog?: boolean;
+  focusReturnedToEvent?: boolean;
+  narrowPanel?: boolean;
+  createControlReachable?: boolean;
+  eventDetailsReachable?: boolean;
+  hostNoHorizontalOverflow?: boolean;
+  widgetNoHorizontalOverflow?: boolean;
+  pinVisible?: boolean;
+  pinEnabled?: boolean;
+  pinnedToDrawer?: boolean;
+  maximiseControlVisible?: boolean;
+  drawerMaximised?: boolean;
+  frameExpanded?: boolean;
+  unmaximiseControlVisible?: boolean;
+  drawerRestored?: boolean;
+  frameReturned?: boolean;
+  browserEgressClear?: boolean;
+  allResourcesRemoved?: boolean;
+  drawerIframePresent?: boolean;
+  viewportWidth?: number;
+  viewportHeight?: number;
+  iframeWidth?: number;
+  iframeHeight?: number;
+  drawerIframeWidth?: number;
+  maximisedIframeWidth?: number;
+  maximisedIframeHeight?: number;
+  restoredIframeWidth?: number;
+  restoredIframeHeight?: number;
+  pinControlCount?: number;
+  eventActionTabCount?: number;
+  detailsActionTabCount?: number;
+};
+
+type G6CalDavClient = {
+  authorization: string;
+  collectionUrl: URL;
+};
+
+type G6CalDavResult = {
+  status?: number;
+  bytes?: Buffer;
+};
+
 const REMINDER_START_LEAD_MS = 150_000;
 const REMINDER_ALARM_OFFSET_MS = 60_000;
 // Allow one default 60-second scheduler interval plus its 30-second scan deadline.
@@ -160,8 +244,15 @@ type Phase =
   | 'reminder-restart-no-duplicate'
   | 'reminder-restore-prior-state'
   | 'reminder-restore-scheduler-scan'
-  | 'reminder-restore-no-duplicate';
-type MemberRoomContextPhase = 'member-a-room-context' | 'reminder-room-context';
+  | 'reminder-restore-no-duplicate'
+  | 'g6-member-a-room-context'
+  | 'g6-member-b-room-context'
+  | G6Phase;
+type MemberRoomContextPhase =
+  | 'member-a-room-context'
+  | 'reminder-room-context'
+  | 'g6-member-a-room-context'
+  | 'g6-member-b-room-context';
 
 type BrowserActor = 'member-a' | 'member-b' | 'outsider';
 type BlockedRequestClass =
@@ -1216,6 +1307,1044 @@ test('Element Web delivers a relative room reminder across restart and restore',
     await context.close();
   }
 });
+
+test('Element Web preserves unsupported events and supports client interactions', async ({
+  browser,
+}) => {
+  test.setTimeout(360_000);
+  fixture = readFixture();
+  recordRuntimeVersions(browser.version());
+
+  const contexts: BrowserContext[] = [];
+  const resourcesToClean: string[] = [];
+  const stageRecords = new Map<G6Phase, G6StageRecord>();
+  const allowedOrigins = new Set([
+    new URL(fixture.elementUrl).origin,
+    new URL(fixture.homeserverUrl).origin,
+    'http://localhost:8008',
+    new URL(fixture.gatewayUrl).origin,
+    new URL(fixture.widgetUrl).origin,
+  ]);
+  let blockedRequests = 0;
+  let activeG6Phase: G6Phase = 'g6-fixture-ready';
+  let activeRoomPhase:
+    | 'g6-member-a-room-context'
+    | 'g6-member-b-room-context'
+    | undefined;
+  let calDavClient: G6CalDavClient | undefined;
+  let journeyFailed = false;
+
+  const saveG6Stage = (observation: G6StageRecord) => {
+    stageRecords.set(observation.phase, observation);
+    const { phase, status, httpStatus, count, ...extra } = observation;
+    record(phase, status, httpStatus, count, extra);
+  };
+  const assertG6Stage = (
+    phase: G6Phase,
+    passed: boolean,
+    evidence: Omit<Partial<G6StageRecord>, 'phase' | 'status'> = {},
+  ) => {
+    saveG6Stage({ phase, status: passed ? 'passed' : 'failed', ...evidence });
+    expect(passed).toBe(true);
+  };
+
+  const newRoutedContext = async (): Promise<BrowserContext> => {
+    const context = await browser.newContext({
+      locale: 'en-US',
+      timezoneId: 'Europe/Stockholm',
+      viewport: { width: 1440, height: 900 },
+    });
+    contexts.push(context);
+    await context.route('**/*', async (route) => {
+      let origin: string;
+      try {
+        origin = new URL(route.request().url()).origin;
+      } catch {
+        blockedRequests = Math.min(blockedRequests + 1, 100_000);
+        await route.abort('blockedbyclient');
+        return;
+      }
+      if (!allowedOrigins.has(origin)) {
+        blockedRequests = Math.min(blockedRequests + 1, 100_000);
+        await route.abort('blockedbyclient');
+        return;
+      }
+      await route.continue();
+    });
+    return context;
+  };
+
+  let pageA: Page | undefined;
+  let pageB: Page | undefined;
+  let frameA: FrameLocator | undefined;
+  let frameB: FrameLocator | undefined;
+  const names = {
+    unsupported: `G6 unsupported ${randomUUID()}`,
+    neighbor: `G6 neighbor ${randomUUID()}`,
+    neighborEdited: `G6 neighbor edited ${randomUUID()}`,
+    deletable: `G6 delete ${randomUUID()}`,
+    keyboard: `G6 keyboard ${randomUUID()}`,
+  };
+  const resources = {
+    unsupported: `g6-${randomUUID()}.ics`,
+    neighbor: `g6-${randomUUID()}.ics`,
+    deletable: `g6-${randomUUID()}.ics`,
+    keyboard: `g6-${randomUUID()}.ics`,
+  };
+
+  try {
+    const contextA = await newRoutedContext();
+    pageA = await authenticateInElement(contextA, fixture.users.memberA, true);
+    record('member-a-authenticated', 'passed');
+    activeRoomPhase = 'g6-member-a-room-context';
+    const memberARoom = await openMemberARoomWithDiagnostics(
+      pageA,
+      fixture.roomName,
+      fixture.teamRoomId,
+      fixture.users.memberA.userId,
+    );
+    recordMemberARoomObservation(memberARoom, activeRoomPhase);
+    if (memberARoom.failureCode) {
+      throw new Error('Member A room context was not ready');
+    }
+    activeRoomPhase = undefined;
+
+    const contextB = await newRoutedContext();
+    pageB = await authenticateInElement(contextB, fixture.users.memberB);
+    record('member-b-authenticated', 'passed');
+    activeRoomPhase = 'g6-member-b-room-context';
+    const memberBRoom = await openMemberARoomWithDiagnostics(
+      pageB,
+      fixture.roomName,
+      fixture.teamRoomId,
+      fixture.users.memberB.userId,
+    );
+    recordMemberARoomObservation(memberBRoom, activeRoomPhase);
+    if (memberBRoom.failureCode) {
+      throw new Error('Member B room context was not ready');
+    }
+    activeRoomPhase = undefined;
+
+    activeG6Phase = 'g6-fixture-ready';
+    const calDavResult = await createG6CalDavClient(fixture);
+    if (calDavResult.client) calDavClient = calDavResult.client;
+    if (calDavClient === undefined) {
+      assertG6Stage(activeG6Phase, false, {
+        ...(calDavResult.status === undefined
+          ? {}
+          : { httpStatus: calDavResult.status }),
+        openIdProofValid: calDavResult.proofValid,
+        allResourcesSeeded: false,
+        count: 0,
+      });
+      throw new Error('Fixture CalDAV access was not available');
+    }
+
+    const startAt = Date.now() + 10 * 60_000;
+    const eventEndAt = startAt + 60 * 60_000;
+    const resourcesToSeed = [
+      {
+        name: resources.unsupported,
+        icalendar: g6UnsupportedSeriesIcal(
+          randomUUID(),
+          names.unsupported,
+          startAt,
+        ),
+      },
+      {
+        name: resources.neighbor,
+        icalendar: g6SimpleEventIcal(
+          randomUUID(),
+          names.neighbor,
+          startAt,
+          eventEndAt,
+        ),
+      },
+      {
+        name: resources.deletable,
+        icalendar: g6SimpleEventIcal(
+          randomUUID(),
+          names.deletable,
+          startAt + 5 * 60_000,
+          eventEndAt + 5 * 60_000,
+        ),
+      },
+      {
+        name: resources.keyboard,
+        icalendar: g6SimpleEventIcal(
+          randomUUID(),
+          names.keyboard,
+          startAt + 10 * 60_000,
+          eventEndAt + 10 * 60_000,
+        ),
+      },
+    ];
+
+    let createdResourceCount = 0;
+    for (const resource of resourcesToSeed) {
+      resourcesToClean.push(resource.name);
+      const result = await g6CalDavRequest(
+        calDavClient!,
+        resource.name,
+        'PUT',
+        resource.icalendar,
+      );
+      const resourceCreated =
+        result.status !== undefined &&
+        result.status >= 200 &&
+        result.status < 300;
+      if (resourceCreated) createdResourceCount += 1;
+    }
+    const allResourcesSeeded = createdResourceCount === resourcesToSeed.length;
+    assertG6Stage(activeG6Phase, allResourcesSeeded, {
+      ...(calDavResult.status === undefined
+        ? {}
+        : { httpStatus: calDavResult.status }),
+      openIdProofValid: calDavResult.proofValid,
+      allResourcesSeeded,
+      count: createdResourceCount,
+    });
+
+    activeG6Phase = 'g6-unsupported-preservation';
+    const memberAEventsResponse = waitForG6EventsResponse(
+      pageA,
+      fixture.teamRoomId,
+    );
+    void memberAEventsResponse.catch(() => undefined);
+    const elementA = memberARoom.element;
+    frameA = await openCalendarWidget(elementA, pageA, {
+      expectWidgetWarning: false,
+      waitForCalendar: false,
+    });
+    const memberAEvents = await memberAEventsResponse.catch(() => undefined);
+    const memberAEventsStatus = memberAEvents?.status();
+    const warning = frameA
+      .getByRole('alert')
+      .filter({ hasText: 'THISANDFUTURE' });
+    const unsupportedRow = frameA.getByRole('listitem', {
+      name: names.unsupported,
+    });
+    const neighborRow = frameA.getByRole('listitem', { name: names.neighbor });
+    await Promise.all([
+      warning.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {}),
+      neighborRow
+        .waitFor({ state: 'visible', timeout: 30_000 })
+        .catch(() => {}),
+    ]);
+    const unsupportedWarningVisible = await warning
+      .isVisible()
+      .catch(() => false);
+    const unsupportedRowOmitted =
+      (await unsupportedRow.count().catch(() => 0)) === 0;
+    const supportedNeighborVisible = await neighborRow
+      .isVisible()
+      .catch(() => false);
+
+    const unsupportedBefore = await g6CalDavRequest(
+      calDavClient!,
+      resources.unsupported,
+      'GET',
+    );
+    const canonicalSnapshotAvailable =
+      unsupportedBefore.status === 200 && unsupportedBefore.bytes !== undefined;
+    await openEventEditor(frameA, names.neighbor);
+    const neighborEditor = frameA.getByRole('dialog').last();
+    const neighborPatchResponse = waitForGatewayResponse(
+      pageA,
+      'PATCH',
+      '/v1/calendar/events',
+    );
+    void neighborPatchResponse.catch(() => undefined);
+    await neighborEditor
+      .getByRole('textbox', { name: 'Title' })
+      .fill(names.neighborEdited);
+    await neighborEditor
+      .getByRole('button', { name: 'Save', exact: true })
+      .click();
+    const neighborPatch = await neighborPatchResponse.catch(() => undefined);
+    const neighborPatchStatus = neighborPatch?.status();
+    const editedNeighborRow = frameA.getByRole('listitem', {
+      name: names.neighborEdited,
+    });
+    await editedNeighborRow
+      .waitFor({ state: 'visible', timeout: 20_000 })
+      .catch(() => {});
+    const supportedNeighborEdited =
+      neighborPatchStatus !== undefined &&
+      neighborPatchStatus >= 200 &&
+      neighborPatchStatus < 300 &&
+      (await editedNeighborRow.isVisible().catch(() => false));
+
+    const unsupportedAfter = await g6CalDavRequest(
+      calDavClient!,
+      resources.unsupported,
+      'GET',
+    );
+    const canonicalUnsupportedObjectUnchanged =
+      unsupportedAfter.status === 200 &&
+      unsupportedAfter.bytes !== undefined &&
+      unsupportedBefore.bytes !== undefined &&
+      unsupportedBefore.bytes.equals(unsupportedAfter.bytes);
+    const unsupportedPreservationPassed =
+      memberAEventsStatus === 200 &&
+      unsupportedWarningVisible &&
+      unsupportedRowOmitted &&
+      supportedNeighborVisible &&
+      canonicalSnapshotAvailable &&
+      supportedNeighborEdited &&
+      canonicalUnsupportedObjectUnchanged;
+    assertG6Stage(activeG6Phase, unsupportedPreservationPassed, {
+      ...(memberAEventsStatus === undefined
+        ? {}
+        : { projectionHttpStatus: memberAEventsStatus }),
+      ...(unsupportedBefore.status === undefined
+        ? {}
+        : { canonicalBeforeHttpStatus: unsupportedBefore.status }),
+      ...(neighborPatchStatus === undefined
+        ? {}
+        : { neighborPatchHttpStatus: neighborPatchStatus }),
+      ...(unsupportedAfter.status === undefined
+        ? {}
+        : { canonicalAfterHttpStatus: unsupportedAfter.status }),
+      count: unsupportedWarningVisible ? 1 : 0,
+      unsupportedWarningVisible,
+      unsupportedRowOmitted,
+      supportedNeighborVisible,
+      canonicalSnapshotAvailable,
+      supportedNeighborEdited,
+      canonicalUnsupportedObjectUnchanged,
+    });
+
+    activeG6Phase = 'g6-widget-layout';
+    const neighborDetails = frameA.getByRole('dialog').last();
+    if (await neighborDetails.isVisible().catch(() => false)) {
+      await neighborDetails
+        .getByRole('button', { name: 'Close', exact: true })
+        .click();
+    }
+    await editedNeighborRow.click();
+    const narrowDetails = frameA.getByRole('dialog').last();
+    const eventDetailsReachable = await narrowDetails
+      .isVisible()
+      .catch(() => false);
+    if (eventDetailsReachable) {
+      await narrowDetails
+        .getByRole('button', { name: 'Close', exact: true })
+        .click();
+    }
+    const createControlReachable = await frameA
+      .getByRole('button', { name: 'Create event', exact: true })
+      .isVisible()
+      .catch(() => false);
+    const viewport = pageA.viewportSize();
+    const narrowBox = await pageA
+      .locator('iframe[title="Matrix Calendar"]')
+      .boundingBox()
+      .catch(() => null);
+    const hostNoHorizontalOverflow = await pageA
+      .evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      )
+      .catch(() => false);
+    const widgetNoHorizontalOverflow = await frameA
+      .locator('html')
+      .evaluate((element) => element.scrollWidth <= element.clientWidth)
+      .catch(() => false);
+    const iframeWidth = narrowBox ? Math.round(narrowBox.width) : undefined;
+    const iframeHeight = narrowBox ? Math.round(narrowBox.height) : undefined;
+    const narrowPanel = iframeWidth !== undefined && iframeWidth <= 480;
+    const narrowLayoutPassed =
+      viewport?.width === 1440 &&
+      viewport.height === 900 &&
+      narrowPanel &&
+      createControlReachable &&
+      eventDetailsReachable &&
+      hostNoHorizontalOverflow &&
+      widgetNoHorizontalOverflow;
+
+    activeG6Phase = 'g6-keyboard-focus';
+    const memberBEventsResponse = waitForG6EventsResponse(
+      pageB,
+      fixture.teamRoomId,
+    );
+    void memberBEventsResponse.catch(() => undefined);
+    frameB = await openCalendarWidget(memberBRoom.element, pageB, {
+      expectWidgetWarning: false,
+      waitForCalendar: false,
+    });
+    const memberBEvents = await memberBEventsResponse.catch(() => undefined);
+    const memberBEventsStatus = memberBEvents?.status();
+    const keyboardEventButton = frameB.getByRole('button', {
+      name: names.keyboard,
+    });
+    await keyboardEventButton
+      .waitFor({ state: 'visible', timeout: 20_000 })
+      .catch(() => {});
+    let eventActionTabCount = 0;
+    let keyboardEventFocused = await keyboardEventButton
+      .evaluate((element) => element === document.activeElement)
+      .catch(() => false);
+    while (!keyboardEventFocused && eventActionTabCount < 80) {
+      await pageB.keyboard.press('Tab');
+      eventActionTabCount += 1;
+      keyboardEventFocused = await keyboardEventButton
+        .evaluate((element) => element === document.activeElement)
+        .catch(() => false);
+    }
+    if (keyboardEventFocused) await pageB.keyboard.press('Enter');
+    const keyboardDetails = frameB.getByRole('dialog').last();
+    const detailsOpened = await keyboardDetails
+      .waitFor({ state: 'visible', timeout: 8_000 })
+      .then(() => true)
+      .catch(() => false);
+    const editButton = keyboardDetails.getByRole('button', {
+      name: 'Edit',
+      exact: true,
+    });
+    let detailsActionTabCount = 0;
+    let editActionFocused = await editButton
+      .evaluate((element) => element === document.activeElement)
+      .catch(() => false);
+    while (!editActionFocused && detailsOpened && detailsActionTabCount < 12) {
+      await pageB.keyboard.press('Tab');
+      detailsActionTabCount += 1;
+      editActionFocused = await editButton
+        .evaluate((element) => element === document.activeElement)
+        .catch(() => false);
+    }
+    const deleteAction = keyboardDetails.getByRole('button', {
+      name: 'Delete',
+      exact: true,
+    });
+    let deleteActionFocused = false;
+    let closeActionFocused = false;
+    if (editActionFocused) {
+      await pageB.keyboard.press('Tab');
+      detailsActionTabCount += 1;
+      deleteActionFocused = await deleteAction
+        .evaluate((element) => element === document.activeElement)
+        .catch(() => false);
+      await pageB.keyboard.press('Tab');
+      detailsActionTabCount += 1;
+      closeActionFocused = await keyboardDetails
+        .getByRole('button', { name: 'Close', exact: true })
+        .evaluate((element) => element === document.activeElement)
+        .catch(() => false);
+      await pageB.keyboard.press('Escape');
+    }
+    const escapeClosedDialog = await keyboardDetails
+      .waitFor({ state: 'hidden', timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    const focusReturnedToEvent = await expect(keyboardEventButton)
+      .toBeFocused({ timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    const keyboardPassed =
+      keyboardEventFocused &&
+      detailsOpened &&
+      editActionFocused &&
+      deleteActionFocused &&
+      closeActionFocused &&
+      escapeClosedDialog &&
+      focusReturnedToEvent;
+    assertG6Stage(activeG6Phase, keyboardPassed, {
+      count: eventActionTabCount,
+      eventActionTabCount,
+      detailsActionTabCount,
+      keyboardEventFocused,
+      detailsOpened,
+      editActionFocused,
+      deleteActionFocused,
+      closeActionFocused,
+      escapeClosedDialog,
+      focusReturnedToEvent,
+    });
+
+    activeG6Phase = 'g6-delete-and-refresh';
+    const memberBDeleteRow = frameB.getByRole('listitem', {
+      name: names.deletable,
+    });
+    await memberBDeleteRow
+      .waitFor({ state: 'visible', timeout: 30_000 })
+      .catch(() => {});
+    const memberBDeleteRowVisible = await memberBDeleteRow
+      .isVisible()
+      .catch(() => false);
+    const deletableRow = frameA.getByRole('listitem', {
+      name: names.deletable,
+    });
+    await deletableRow.click();
+    const deleteDetails = frameA.getByRole('dialog').last();
+    const deleteButton = deleteDetails.getByRole('button', {
+      name: 'Delete',
+      exact: true,
+    });
+    const deleteButtonVisible = await deleteButton
+      .isVisible()
+      .catch(() => false);
+    await deleteButton.click();
+    const confirmation = frameA.getByRole('dialog', { name: 'Delete event' });
+    const deleteConfirmationVisible = await confirmation
+      .isVisible()
+      .catch(() => false);
+    const deleteResponse = waitForGatewayResponse(
+      pageA,
+      'DELETE',
+      '/v1/calendar/events',
+    );
+    void deleteResponse.catch(() => undefined);
+    await confirmation
+      .getByRole('button', { name: 'Delete', exact: true })
+      .click();
+    const deleteResult = await deleteResponse.catch(() => undefined);
+    const deleteHttpStatus = deleteResult?.status();
+    await deletableRow
+      .waitFor({ state: 'detached', timeout: 20_000 })
+      .catch(() => {});
+    const deletedRowAbsent = (await deletableRow.count().catch(() => 1)) === 0;
+    const deletePassed =
+      deleteButtonVisible &&
+      deleteConfirmationVisible &&
+      deleteHttpStatus !== undefined &&
+      deleteHttpStatus >= 200 &&
+      deleteHttpStatus < 300 &&
+      deletedRowAbsent;
+    const canonicalDelete = await g6CalDavRequest(
+      calDavClient!,
+      resources.deletable,
+      'GET',
+    );
+    const canonicalObjectAbsent = canonicalDelete.status === 404;
+
+    await pageB.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+    const memberBReloadedRoom = await openFixtureRoom(
+      pageB,
+      fixture.roomName,
+      fixture.teamRoomId,
+    );
+    const memberBReloadEventsResponse = waitForG6EventsResponse(
+      pageB,
+      fixture.teamRoomId,
+    );
+    void memberBReloadEventsResponse.catch(() => undefined);
+    frameB = await openCalendarWidget(memberBReloadedRoom, pageB, {
+      expectWidgetWarning: false,
+      waitForCalendar: false,
+    });
+    const memberBReloadEvents = await memberBReloadEventsResponse.catch(
+      () => undefined,
+    );
+    const memberBReloadStatus = memberBReloadEvents?.status();
+    const memberBDeleteRowAfterReload = frameB.getByRole('listitem', {
+      name: names.deletable,
+    });
+    const memberBDeleteRowAbsent =
+      (await memberBDeleteRowAfterReload.count().catch(() => 1)) === 0;
+    const memberBNeighborVisible = await frameB
+      .getByRole('listitem', { name: names.neighborEdited })
+      .isVisible()
+      .catch(() => false);
+    const memberBRefreshPassed =
+      memberBReloadStatus === 200 &&
+      memberBDeleteRowAbsent &&
+      memberBNeighborVisible;
+
+    const deleteAndRefreshPassed =
+      memberBEventsStatus === 200 &&
+      memberBDeleteRowVisible &&
+      deletePassed &&
+      canonicalObjectAbsent &&
+      memberBRefreshPassed;
+    assertG6Stage(activeG6Phase, deleteAndRefreshPassed, {
+      ...(memberBEventsStatus === undefined
+        ? {}
+        : { memberBEventsHttpStatus: memberBEventsStatus }),
+      ...(deleteHttpStatus === undefined ? {} : { deleteHttpStatus }),
+      ...(canonicalDelete.status === undefined
+        ? {}
+        : { canonicalDeleteHttpStatus: canonicalDelete.status }),
+      ...(memberBReloadStatus === undefined
+        ? {}
+        : { memberBReloadHttpStatus: memberBReloadStatus }),
+      count: 1,
+      memberBDeleteRowVisible,
+      deleteButtonVisible,
+      deleteConfirmationVisible,
+      deletedRowAbsent,
+      canonicalObjectAbsent,
+      memberBDeleteRowAbsent,
+      supportedNeighborVisible: memberBNeighborVisible,
+    });
+
+    activeG6Phase = 'g6-widget-layout';
+    await openPinnedElementWidget(pageA, 'Matrix Calendar');
+    const pinControl = pageA.getByRole('button', { name: 'Pin', exact: true });
+    const pinControlCount = Math.min(
+      await pinControl.count().catch(() => 0),
+      2,
+    );
+    const pinVisible = await pinControl.isVisible().catch(() => false);
+    const pinEnabled = await pinControl.isEnabled().catch(() => false);
+    if (pinVisible && pinEnabled) await pinControl.click();
+    const drawer = pageA.locator('.mx_AppsDrawer');
+    const drawerIframe = pageA.locator(
+      '.mx_AppsDrawer iframe[title="Matrix Calendar"]',
+    );
+    await drawerIframe
+      .waitFor({ state: 'attached', timeout: 30_000 })
+      .catch(() => {});
+    const pinnedToDrawer =
+      (await drawer.count().catch(() => 0)) === 1 &&
+      (await drawerIframe.count().catch(() => 0)) === 1;
+
+    const drawerFrame = pageA.frameLocator(
+      '.mx_AppsDrawer iframe[title="Matrix Calendar"]',
+    );
+    const drawerBox = await drawerIframe.boundingBox().catch(() => null);
+    const maximiseControl = pageA.getByRole('button', {
+      name: 'Maximise',
+      exact: true,
+    });
+    const maximiseControlVisible = await maximiseControl
+      .isVisible()
+      .catch(() => false);
+    if (maximiseControlVisible) await maximiseControl.click();
+    const maximisedDrawer = pageA.locator('.mx_AppsDrawer--maximised');
+    await maximisedDrawer
+      .waitFor({ state: 'visible', timeout: 15_000 })
+      .catch(() => {});
+    const maximisedBox = await drawerIframe.boundingBox().catch(() => null);
+    const drawerMaximised =
+      (await maximisedDrawer.count().catch(() => 0)) === 1;
+    const frameExpanded =
+      drawerBox !== null &&
+      maximisedBox !== null &&
+      maximisedBox.width > drawerBox.width;
+    const createControlReachableAfterMaximise = await drawerFrame
+      .getByRole('button', { name: 'Create event', exact: true })
+      .isVisible()
+      .catch(() => false);
+    const maximiseNoOverflow = await pageA
+      .evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      )
+      .catch(() => false);
+    const widgetNoOverflowAfterMaximise = await drawerFrame
+      .locator('html')
+      .evaluate((element) => element.scrollWidth <= element.clientWidth)
+      .catch(() => false);
+    const maximisePassed =
+      maximiseControlVisible &&
+      drawerMaximised &&
+      frameExpanded &&
+      createControlReachableAfterMaximise &&
+      maximiseNoOverflow &&
+      widgetNoOverflowAfterMaximise;
+
+    const unmaximiseControl = pageA.getByRole('button', {
+      name: 'Un-maximise',
+      exact: true,
+    });
+    const unmaximiseControlVisible = await unmaximiseControl
+      .isVisible()
+      .catch(() => false);
+    if (unmaximiseControlVisible) await unmaximiseControl.click();
+    await maximisedDrawer
+      .waitFor({ state: 'detached', timeout: 15_000 })
+      .catch(() => {});
+    const restoredBox = await drawerIframe.boundingBox().catch(() => null);
+    const drawerRestored = (await maximisedDrawer.count().catch(() => 0)) === 0;
+    const frameReturned =
+      drawerBox !== null &&
+      restoredBox !== null &&
+      Math.abs(restoredBox.width - drawerBox.width) <= 2;
+    const restoredPassed =
+      unmaximiseControlVisible && drawerRestored && frameReturned;
+
+    const layoutPassed =
+      narrowLayoutPassed &&
+      pinVisible &&
+      pinEnabled &&
+      pinnedToDrawer &&
+      maximisePassed &&
+      restoredPassed;
+    assertG6Stage(activeG6Phase, layoutPassed, {
+      narrowPanel,
+      createControlReachable:
+        createControlReachable && createControlReachableAfterMaximise,
+      eventDetailsReachable,
+      hostNoHorizontalOverflow: maximiseNoOverflow && hostNoHorizontalOverflow,
+      widgetNoHorizontalOverflow:
+        widgetNoOverflowAfterMaximise && widgetNoHorizontalOverflow,
+      pinVisible,
+      pinEnabled,
+      pinnedToDrawer,
+      drawerIframePresent: pinnedToDrawer,
+      pinControlCount,
+      maximiseControlVisible,
+      drawerMaximised,
+      frameExpanded,
+      unmaximiseControlVisible,
+      drawerRestored,
+      frameReturned,
+      ...(viewport
+        ? { viewportWidth: viewport.width, viewportHeight: viewport.height }
+        : {}),
+      ...(iframeWidth === undefined ? {} : { iframeWidth }),
+      ...(iframeHeight === undefined ? {} : { iframeHeight }),
+      ...(drawerBox ? { drawerIframeWidth: Math.round(drawerBox.width) } : {}),
+      ...(maximisedBox
+        ? {
+            maximisedIframeWidth: Math.round(maximisedBox.width),
+            maximisedIframeHeight: Math.round(maximisedBox.height),
+          }
+        : {}),
+      ...(restoredBox
+        ? {
+            restoredIframeWidth: Math.round(restoredBox.width),
+            restoredIframeHeight: Math.round(restoredBox.height),
+          }
+        : {}),
+    });
+
+    activeG6Phase = 'g6-browser-egress';
+    const browserEgressClear = blockedRequests === 0;
+    assertG6Stage(activeG6Phase, browserEgressClear, {
+      count: blockedRequests,
+      browserEgressClear,
+    });
+  } catch {
+    journeyFailed = true;
+    if (!activeRoomPhase && !stageRecords.has(activeG6Phase)) {
+      saveG6Stage({ phase: activeG6Phase, status: 'failed' });
+    }
+  } finally {
+    await Promise.all(
+      contexts.map((context) => context.close().catch(() => {})),
+    );
+    activeG6Phase = 'g6-resource-cleanup';
+    let cleanupCount = 0;
+    let allResourcesRemoved = resourcesToClean.length === 0;
+    if (calDavClient) {
+      allResourcesRemoved = true;
+      for (const resourceName of resourcesToClean) {
+        const result = await g6CalDavRequest(
+          calDavClient,
+          resourceName,
+          'DELETE',
+        );
+        if (
+          result.status === 404 ||
+          (result.status !== undefined &&
+            result.status >= 200 &&
+            result.status < 300)
+        ) {
+          cleanupCount += 1;
+        } else {
+          allResourcesRemoved = false;
+        }
+      }
+    }
+    const cleanupPassed =
+      allResourcesRemoved && cleanupCount === resourcesToClean.length;
+    saveG6Stage({
+      phase: activeG6Phase,
+      status: cleanupPassed ? 'passed' : 'failed',
+      count: cleanupCount,
+      allResourcesRemoved: cleanupPassed,
+    });
+    if (!cleanupPassed) journeyFailed = true;
+
+    activeG6Phase = 'g6-browser-egress';
+    if (!stageRecords.has(activeG6Phase)) {
+      const browserEgressClear = blockedRequests === 0;
+      saveG6Stage({
+        phase: activeG6Phase,
+        status: browserEgressClear ? 'passed' : 'failed',
+        count: blockedRequests,
+        browserEgressClear,
+      });
+      if (!browserEgressClear) journeyFailed = true;
+    }
+  }
+
+  if (journeyFailed) {
+    throw new Error('Element Web client acceptance cases failed');
+  }
+});
+
+const G6_SERVICE_USER_ID = '@_matrix_calendar_service:localhost';
+const G6_SERVICE_LOCALPART = '_matrix_calendar_service';
+const G6_RADICALE_ORIGIN = 'http://127.0.0.1:5232';
+const G6_RADICALE_COLLECTION = 'element-acceptance';
+const G6_MAX_RESOURCE_BYTES = 16_384;
+
+async function createG6CalDavClient(fixtureValue: Fixture): Promise<{
+  status?: number;
+  proofValid: boolean;
+  client?: G6CalDavClient;
+}> {
+  const applicationServiceToken = process.env.MATRIX_APPLICATION_SERVICE_TOKEN;
+  if (
+    fixtureValue.serviceSender.userId !== G6_SERVICE_USER_ID ||
+    fixtureValue.calendarId !== G6_RADICALE_COLLECTION ||
+    new URL(fixtureValue.homeserverUrl).origin !== 'http://127.0.0.1:8008' ||
+    typeof applicationServiceToken !== 'string' ||
+    applicationServiceToken.length === 0 ||
+    applicationServiceToken.length > 4096
+  ) {
+    return { proofValid: false };
+  }
+
+  let openIdResponse: globalThis.Response;
+  try {
+    const openIdUrl = new URL(
+      `/_matrix/client/v3/user/${encodeURIComponent(G6_SERVICE_USER_ID)}/openid/request_token`,
+      fixtureValue.homeserverUrl,
+    );
+    openIdResponse = await fetch(openIdUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${applicationServiceToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ user_id: G6_SERVICE_USER_ID }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return { proofValid: false };
+  }
+
+  const status = openIdResponse.status;
+  if (status !== 200) {
+    await openIdResponse.body?.cancel().catch(() => undefined);
+    return { status, proofValid: false };
+  }
+
+  let proof: unknown;
+  try {
+    proof = await openIdResponse.json();
+  } catch {
+    return { status, proofValid: false };
+  }
+  if (
+    proof === null ||
+    typeof proof !== 'object' ||
+    Array.isArray(proof) ||
+    !('access_token' in proof) ||
+    typeof proof.access_token !== 'string' ||
+    proof.access_token.length === 0 ||
+    proof.access_token.length > 4096 ||
+    !('matrix_server_name' in proof) ||
+    proof.matrix_server_name !== 'localhost'
+  ) {
+    return { status, proofValid: false };
+  }
+
+  const delegatedCredential = Buffer.from(
+    JSON.stringify({
+      access_token: proof.access_token,
+      matrix_server_name: proof.matrix_server_name,
+    }),
+  ).toString('base64url');
+  const authorization = Buffer.from(
+    `${G6_SERVICE_LOCALPART}:matrix-openid:${delegatedCredential}`,
+    'utf8',
+  ).toString('base64');
+  const collectionUrl = new URL(
+    `${encodeURIComponent(G6_SERVICE_LOCALPART)}/${encodeURIComponent(G6_RADICALE_COLLECTION)}/`,
+    `${G6_RADICALE_ORIGIN}/`,
+  );
+  if (collectionUrl.origin !== G6_RADICALE_ORIGIN) {
+    return { status, proofValid: false };
+  }
+
+  return {
+    status,
+    proofValid: true,
+    client: { authorization, collectionUrl },
+  };
+}
+
+async function g6CalDavRequest(
+  client: G6CalDavClient,
+  resourceName: string,
+  method: 'GET' | 'PUT' | 'DELETE',
+  icalendar?: string,
+): Promise<G6CalDavResult> {
+  if (
+    !/^g6-[0-9a-f-]{36}\.ics$/u.test(resourceName) ||
+    client.collectionUrl.origin !== G6_RADICALE_ORIGIN
+  ) {
+    return {};
+  }
+
+  const resourceUrl = new URL(
+    encodeURIComponent(resourceName),
+    client.collectionUrl,
+  );
+  const collectionPrefix = `/${encodeURIComponent(G6_SERVICE_LOCALPART)}/${encodeURIComponent(G6_RADICALE_COLLECTION)}/`;
+  if (
+    resourceUrl.origin !== G6_RADICALE_ORIGIN ||
+    !resourceUrl.pathname.startsWith(collectionPrefix) ||
+    resourceUrl.pathname.slice(collectionPrefix.length).includes('/')
+  ) {
+    return {};
+  }
+
+  const headers: Record<string, string> = {
+    Authorization: `Basic ${client.authorization}`,
+  };
+  if (method === 'PUT') {
+    if (
+      typeof icalendar !== 'string' ||
+      icalendar.length > G6_MAX_RESOURCE_BYTES
+    ) {
+      return {};
+    }
+    headers['Content-Type'] = 'text/calendar; charset=utf-8';
+    headers['If-None-Match'] = '*';
+  }
+
+  let response: globalThis.Response;
+  try {
+    response = await fetch(resourceUrl, {
+      method,
+      headers,
+      ...(method === 'PUT' ? { body: icalendar } : {}),
+      redirect: 'error',
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return {};
+  }
+
+  if (method === 'GET' && response.status === 200) {
+    const contentLength = Number(response.headers.get('content-length'));
+    if (
+      Number.isFinite(contentLength) &&
+      contentLength > G6_MAX_RESOURCE_BYTES
+    ) {
+      await response.body?.cancel().catch(() => undefined);
+      return { status: response.status };
+    }
+    try {
+      const bytes = Buffer.from(await response.arrayBuffer());
+      return bytes.length <= G6_MAX_RESOURCE_BYTES
+        ? { status: response.status, bytes }
+        : { status: response.status };
+    } catch {
+      return { status: response.status };
+    }
+  }
+
+  await response.body?.cancel().catch(() => undefined);
+  return { status: response.status };
+}
+
+function g6SimpleEventIcal(
+  uid: string,
+  title: string,
+  startAt: number,
+  endAt: number,
+): string {
+  const summary = title
+    .replace(/\\/gu, '\\\\')
+    .replace(/;/gu, '\\;')
+    .replace(/,/gu, '\\,')
+    .replace(/\r?\n/gu, '\\n');
+  return (
+    [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Matrix Calendar Widget//G6 Acceptance//EN',
+      'CALSCALE:GREGORIAN',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTAMP:${g6IcsTimestamp(Date.now())}`,
+      `DTSTART:${g6IcsTimestamp(startAt)}`,
+      `DTEND:${g6IcsTimestamp(endAt)}`,
+      `SUMMARY:${summary}`,
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n') + '\r\n'
+  );
+}
+
+function g6UnsupportedSeriesIcal(
+  uid: string,
+  title: string,
+  startAt: number,
+): string {
+  const nextOccurrence = startAt + 24 * 60 * 60_000;
+  const duration = 60 * 60_000;
+  const summary = title.replace(/\\/gu, '\\\\').replace(/;/gu, '\\;');
+  return (
+    [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Matrix Calendar Widget//G6 Acceptance//EN',
+      'CALSCALE:GREGORIAN',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTAMP:${g6IcsTimestamp(Date.now())}`,
+      `DTSTART:${g6IcsTimestamp(startAt)}`,
+      `DTEND:${g6IcsTimestamp(startAt + duration)}`,
+      'RRULE:FREQ=DAILY;COUNT=5',
+      `SUMMARY:${summary}`,
+      'END:VEVENT',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTAMP:${g6IcsTimestamp(Date.now())}`,
+      `RECURRENCE-ID;RANGE=THISANDFUTURE:${g6IcsTimestamp(nextOccurrence)}`,
+      `DTSTART:${g6IcsTimestamp(nextOccurrence + 60 * 60_000)}`,
+      `DTEND:${g6IcsTimestamp(nextOccurrence + 2 * 60 * 60_000)}`,
+      `SUMMARY:${summary}`,
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n') + '\r\n'
+  );
+}
+
+function g6IcsTimestamp(timestamp: number): string {
+  return new Date(timestamp)
+    .toISOString()
+    .replace(/[-:]/gu, '')
+    .replace(/\.\d{3}/u, '');
+}
+
+function waitForG6EventsResponse(
+  page: Page,
+  roomId: string,
+): Promise<Response> {
+  const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
+  const widgetOrigin = new URL(fixture.widgetUrl).origin;
+  return page.waitForResponse(
+    (response) => {
+      try {
+        const url = new URL(response.url());
+        const request = response.request();
+        return (
+          url.origin === gatewayOrigin &&
+          url.pathname === '/v1/calendar/events' &&
+          url.searchParams.get('roomId') === roomId &&
+          url.searchParams.get('target') === 'room' &&
+          request.method() === 'GET' &&
+          new URL(request.frame().url()).origin === widgetOrigin
+        );
+      } catch {
+        return false;
+      }
+    },
+    { timeout: 30_000 },
+  );
+}
 
 function readReminderFlow(): ReminderFlow {
   const value = process.env.ELEMENT_ACCEPTANCE_REMINDER_FLOW;
@@ -4195,7 +5324,8 @@ function record(
     deliveredAfterDue?: boolean;
     allMarkersOnce?: boolean;
     canManageReminders?: boolean;
-  } & Partial<ReminderConfigurationObservation>,
+  } & Partial<ReminderConfigurationObservation> &
+    Partial<Omit<G6StageRecord, 'phase' | 'status' | 'httpStatus' | 'count'>>,
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   if (!stageFile) throw new Error('Element acceptance fixture unavailable');
