@@ -46,6 +46,8 @@ jobs:
           fixture_password="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')"
           echo "::add-mask::$fixture_password"
           echo "MATRIX_CALENDAR_DEV_PASSWORD=$fixture_password" >> "$GITHUB_ENV"
+          echo "MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING=127.0.0.1:8008:8008" >> "$GITHUB_ENV"
+          echo "MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING=127.0.0.1:5232:5232" >> "$GITHUB_ENV"
           echo "COMPOSE_PROJECT_NAME=matrix-calendar-element-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
           echo "ELEMENT_ACCEPTANCE_STAGE_FILE=$RUNNER_TEMP/element-acceptance-stage.jsonl" >> "$GITHUB_ENV"
           echo "ELEMENT_ACCEPTANCE_USERS_FILE=$RUNNER_TEMP/element-acceptance-users.json" >> "$GITHUB_ENV"
@@ -63,6 +65,7 @@ jobs:
         run: |
           node dev/element-acceptance-diagnostics.test.mjs
           node dev/sanitize-element-acceptance.test.mjs
+          node --test dev/validate-element-acceptance-compose.test.mjs
 
       - name: Build calendar, server, and widget outputs
         run: |
@@ -96,6 +99,13 @@ jobs:
       - name: Install isolated Chromium
         run: yarn workspace e2e playwright install --with-deps chromium --only-shell
 
+      - name: Validate loopback-only Synapse and Radicale ports
+        run: |
+          if ! docker compose -p "$COMPOSE_PROJECT_NAME" -f dev/compose.yaml config --format json 2>/dev/null | node dev/validate-element-acceptance-compose.mjs; then
+            echo 'Synthetic Synapse and Radicale ports must bind to loopback.' >&2
+            exit 1
+          fi
+
       - name: Start isolated Synapse and Radicale fixture
         run: |
           if ! bash dev/up.sh > "$RUNNER_TEMP/element-acceptance-dev-up.log" 2>&1; then
@@ -113,6 +123,11 @@ jobs:
           if ! "${compose[@]}" config --quiet >/dev/null 2>&1; then
             printf '%s\n' '{"phase":"runtime-ready","status":"failed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
             echo 'Synthetic Element stack configuration is invalid.' >&2
+            exit 1
+          fi
+          if ! "${compose[@]}" config --format json 2>/dev/null | node dev/validate-element-acceptance-compose.mjs; then
+            printf '%s\n' '{"phase":"runtime-ready","status":"failed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
+            echo 'Synthetic service ports must bind to loopback.' >&2
             exit 1
           fi
           if ! "${compose[@]}" up --no-build -d gateway widget element > "$RUNNER_TEMP/element-acceptance-compose-up.log" 2>&1; then

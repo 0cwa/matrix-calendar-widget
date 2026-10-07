@@ -139,6 +139,12 @@ test('emits only fixed phase names, outcomes, and source SHA', () => {
         phase: 'outsider-room-widget-team-target',
         status: 'passed',
         httpStatus: 403,
+        teamRoomMatches: true,
+      }),
+      JSON.stringify({
+        phase: 'outsider-room-events-api-team-target',
+        status: 'passed',
+        httpStatus: 403,
       }),
       JSON.stringify({
         phase: 'outsider-own-unbound-room',
@@ -159,12 +165,45 @@ test('emits only fixed phase names, outcomes, and source SHA', () => {
     [
       `element-acceptance source_sha=${sourceSha}`,
       'phase=accounts-ready status=passed count=3',
-      'phase=outsider-room-widget-team-target status=passed http_status=403',
+      'phase=outsider-room-widget-team-target status=passed http_status=403 team_room_matches=true',
+      'phase=outsider-room-events-api-team-target status=passed http_status=403',
       'phase=outsider-own-unbound-room status=passed http_status=404',
       'phase=stale-etag-conflict status=passed http_status=409',
       '',
     ].join('\n'),
   );
+});
+
+test('requires exact outsider denial status and expected widget room context', () => {
+  for (const record of [
+    {
+      phase: 'outsider-room-widget-team-target',
+      status: 'passed',
+      httpStatus: 403,
+      teamRoomMatches: false,
+    },
+    {
+      phase: 'outsider-room-widget-team-target',
+      status: 'passed',
+      httpStatus: 200,
+      teamRoomMatches: true,
+    },
+    {
+      phase: 'outsider-room-events-api-team-target',
+      status: 'passed',
+      httpStatus: 200,
+    },
+    {
+      phase: 'outsider-own-unbound-room',
+      status: 'passed',
+      httpStatus: 403,
+    },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      /invalid element acceptance summary/u,
+    );
+  }
 });
 
 test('emits bounded event creation steps and keeps response status numeric', () => {

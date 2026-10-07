@@ -66,6 +66,7 @@ const PHASES = new Set([
   'shared-visibility',
   'member-a-edited',
   'outsider-room-widget-team-target',
+  'outsider-room-events-api-team-target',
   'outsider-own-unbound-room',
   'stale-etag-conflict',
   'canonical-read-after-denial',
@@ -315,6 +316,7 @@ const ALLOWED_KEYS = new Set([
   'httpStatus',
   'count',
   'originMatchesElement',
+  'teamRoomMatches',
   'controlVisible',
   'panelPresent',
   'matrixClientHookPresent',
@@ -822,6 +824,24 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     }
 
     if (
+      (Object.hasOwn(record, 'teamRoomMatches') &&
+        typeof record.teamRoomMatches !== 'boolean') ||
+      (record.phase !== 'outsider-room-widget-team-target' &&
+        Object.hasOwn(record, 'teamRoomMatches')) ||
+      (record.phase === 'outsider-room-widget-team-target' &&
+        record.status === 'passed' &&
+        (record.httpStatus !== 403 || record.teamRoomMatches !== true)) ||
+      (record.phase === 'outsider-room-events-api-team-target' &&
+        record.status === 'passed' &&
+        record.httpStatus !== 403) ||
+      (record.phase === 'outsider-own-unbound-room' &&
+        record.status === 'passed' &&
+        record.httpStatus !== 404)
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    if (
       Object.hasOwn(record, 'count') &&
       (!Number.isInteger(record.count) ||
         record.count < 0 ||
@@ -1230,6 +1250,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     const fields = [`phase=${phase}`, `status=${record.status}`];
     if (Object.hasOwn(record, 'httpStatus')) {
       fields.push(`http_status=${record.httpStatus}`);
+    }
+    if (Object.hasOwn(record, 'teamRoomMatches')) {
+      fields.push(`team_room_matches=${record.teamRoomMatches}`);
     }
     if (Object.hasOwn(record, 'count')) {
       fields.push(`count=${record.count}`);

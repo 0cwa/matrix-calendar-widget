@@ -93,6 +93,7 @@ type Phase =
   | 'shared-visibility'
   | 'member-a-edited'
   | 'outsider-room-widget-team-target'
+  | 'outsider-room-events-api-team-target'
   | 'outsider-own-unbound-room'
   | 'stale-etag-conflict'
   | 'canonical-read-after-denial'
@@ -447,6 +448,7 @@ test('Element Web members share events and enforce room authorization', async ({
   let pageC: Page | undefined;
   let memberARuntimeObservation: AcceptanceRuntimeObservation | undefined;
   let failureHttpStatus: number | undefined;
+  let failureTeamRoomMatches: boolean | undefined;
   let failureAlreadyReported = false;
 
   try {
@@ -656,10 +658,10 @@ test('Element Web members share events and enforce room authorization', async ({
     record(activePhase, 'passed');
     expect(fixture.outsiderRoomId).not.toBe(fixture.teamRoomId);
     activePhase = 'outsider-widget-approved';
-    const outsiderRead = waitForGatewayResponse(
+    const outsiderContextRead = waitForGatewayResponse(
       pageC,
       'GET',
-      '/v1/calendar/events',
+      '/v1/calendar/context',
     );
     await openCalendarWidget(elementC, pageC, {
       expectWidgetWarning: false,
@@ -668,52 +670,38 @@ test('Element Web members share events and enforce room authorization', async ({
     record(activePhase, 'passed');
 
     activePhase = 'outsider-room-widget-team-target';
-    const outsiderResponse = await outsiderRead;
-    expect(new URL(outsiderResponse.url()).searchParams.get('roomId')).toBe(
-      fixture.teamRoomId,
-    );
-    expect(outsiderResponse.status()).toBe(403);
-    record(activePhase, 'passed', outsiderResponse.status());
+    const outsiderContextResponse = await outsiderContextRead;
+    failureHttpStatus = outsiderContextResponse.status();
+    failureTeamRoomMatches =
+      new URL(outsiderContextResponse.url()).searchParams.get('roomId') ===
+      fixture.teamRoomId;
+    expect(failureTeamRoomMatches).toBe(true);
+    expect(failureHttpStatus).toBe(403);
+    record(activePhase, 'passed', failureHttpStatus, undefined, {
+      teamRoomMatches: failureTeamRoomMatches,
+    });
+    failureHttpStatus = undefined;
+    failureTeamRoomMatches = undefined;
+
+    activePhase = 'outsider-room-events-api-team-target';
+    failureHttpStatus = await requestRoomEventsStatus(pageC, {
+      gatewayUrl: fixture.gatewayUrl,
+      roomId: fixture.teamRoomId,
+      calendarId: fixture.calendarId,
+    });
+    expect(failureHttpStatus).toBe(403);
+    record(activePhase, 'passed', failureHttpStatus);
+    failureHttpStatus = undefined;
 
     activePhase = 'outsider-own-unbound-room';
-    const ownRoomStatus = await pageC.evaluate(
-      async ({ gatewayUrl, roomId, calendarId }) => {
-        // The current Element session requests a fresh Matrix OpenID assertion;
-        // only the status crosses back into the test process.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const matrixClient = (window as any).mxMatrixClientPeg.get();
-        const credentials = await matrixClient.getOpenIdToken();
-        const identity = {
-          matrix_server_name: credentials.matrix_server_name,
-          access_token: credentials.access_token,
-        };
-        const query = new URLSearchParams({
-          roomId,
-          target: 'room',
-          calendarId,
-          start: new Date().toISOString(),
-          end: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-          timezone: 'Europe/Stockholm',
-        });
-        const response = await fetch(
-          `${gatewayUrl}/v1/calendar/events?${query.toString()}`,
-          {
-            headers: {
-              Authorization: `MX-Identity ${btoa(JSON.stringify(identity))}`,
-            },
-          },
-        );
-        await response.body?.cancel();
-        return response.status;
-      },
-      {
-        gatewayUrl: fixture.gatewayUrl,
-        roomId: fixture.outsiderRoomId,
-        calendarId: fixture.calendarId,
-      },
-    );
-    expect(ownRoomStatus).toBe(404);
-    record(activePhase, 'passed', ownRoomStatus);
+    failureHttpStatus = await requestRoomEventsStatus(pageC, {
+      gatewayUrl: fixture.gatewayUrl,
+      roomId: fixture.outsiderRoomId,
+      calendarId: fixture.calendarId,
+    });
+    expect(failureHttpStatus).toBe(404);
+    record(activePhase, 'passed', failureHttpStatus);
+    failureHttpStatus = undefined;
 
     activePhase = 'stale-etag-conflict';
     const staleUpdate = waitForGatewayResponse(
@@ -761,6 +749,7 @@ test('Element Web members share events and enforce room authorization', async ({
       activePhase,
       failureHttpStatus,
       failureAlreadyReported,
+      failureTeamRoomMatches,
     );
     throw new Error('Element acceptance journey failed');
   } finally {
@@ -1164,26 +1153,24 @@ function recordJourneyFailure(
   phase: Phase,
   httpStatus: number | undefined,
   alreadyRecorded: boolean,
+  teamRoomMatches?: boolean,
 ) {
   if (!alreadyRecorded) {
     const observation =
       pendingPinnedControlObservation?.phase === phase
         ? pendingPinnedControlObservation
         : undefined;
-    record(
-      phase,
-      'failed',
-      httpStatus,
-      observation?.count,
-      observation
+    record(phase, 'failed', httpStatus, observation?.count, {
+      ...(observation
         ? {
             controlVisible: observation.controlVisible,
             ...(observation.panelPresent === undefined
               ? {}
               : { panelPresent: observation.panelPresent }),
           }
-        : undefined,
-    );
+        : {}),
+      ...(teamRoomMatches === undefined ? {} : { teamRoomMatches }),
+    });
   }
   pendingPinnedControlObservation = undefined;
 }
@@ -1364,6 +1351,47 @@ function waitForGatewayResponse(
       );
     },
     { timeout: 30_000 },
+  );
+}
+
+async function requestRoomEventsStatus(
+  page: Page,
+  {
+    gatewayUrl,
+    roomId,
+    calendarId,
+  }: { gatewayUrl: string; roomId: string; calendarId: string },
+): Promise<number> {
+  return page.evaluate(
+    async ({ gatewayUrl, roomId, calendarId }) => {
+      // Only the numeric HTTP status crosses back into the test process.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const matrixClient = (window as any).mxMatrixClientPeg.get();
+      const credentials = await matrixClient.getOpenIdToken();
+      const identity = {
+        matrix_server_name: credentials.matrix_server_name,
+        access_token: credentials.access_token,
+      };
+      const query = new URLSearchParams({
+        roomId,
+        target: 'room',
+        calendarId,
+        start: new Date().toISOString(),
+        end: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        timezone: 'Europe/Stockholm',
+      });
+      const response = await fetch(
+        `${gatewayUrl}/v1/calendar/events?${query.toString()}`,
+        {
+          headers: {
+            Authorization: `MX-Identity ${btoa(JSON.stringify(identity))}`,
+          },
+        },
+      );
+      await response.body?.cancel();
+      return response.status;
+    },
+    { gatewayUrl, roomId, calendarId },
   );
 }
 
@@ -3014,6 +3042,7 @@ function record(
     originMatchesElement?: boolean;
     controlVisible?: boolean;
     panelPresent?: boolean;
+    teamRoomMatches?: boolean;
   },
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
