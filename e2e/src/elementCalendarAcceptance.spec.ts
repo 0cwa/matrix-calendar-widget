@@ -162,6 +162,9 @@ type G6StageRecord = {
   unmaximiseControlVisible?: boolean;
   drawerRestored?: boolean;
   frameReturned?: boolean;
+  appTileHeaderHoverAttempted?: boolean;
+  appTileHeaderHoverCompleted?: boolean;
+  persistedHostFramePresent?: boolean;
   browserEgressClear?: boolean;
   allOwnedResourcesRemoved?: boolean;
   plannedCount?: number;
@@ -172,18 +175,23 @@ type G6StageRecord = {
   deletedCount?: number;
   alreadyAbsentCount?: number;
   cleanupUnresolvedCount?: number;
-  drawerIframePresent?: boolean;
   viewportWidth?: number;
   viewportHeight?: number;
   iframeWidth?: number;
   iframeHeight?: number;
-  drawerIframeWidth?: number;
-  drawerIframeHeight?: number;
+  persistedHostFrameWidth?: number;
+  persistedHostFrameHeight?: number;
   maximisedIframeWidth?: number;
   maximisedIframeHeight?: number;
   restoredIframeWidth?: number;
   restoredIframeHeight?: number;
   pinControlCount?: number;
+  appTileCountBeforeHover?: number;
+  appTileMenuBarCountBeforeHover?: number;
+  maximiseControlCountBeforeHover?: number;
+  appTileCountAfterHover?: number;
+  appTileMenuBarCountAfterHover?: number;
+  maximiseControlCountAfterHover?: number;
   eventActionTabCount?: number;
   detailsActionTabCount?: number;
 };
@@ -1947,24 +1955,70 @@ test('Element Web preserves unsupported events and supports client interactions'
     const pinEnabled = await pinControl.isEnabled().catch(() => false);
     if (pinVisible && pinEnabled) await pinControl.click();
     const drawer = pageA.locator('.mx_AppsDrawer');
-    const drawerIframe = pageA.locator(
-      '.mx_AppsDrawer iframe[title="Matrix Calendar"]',
+    const persistedHostFrame = pageA.locator(
+      '#mx_PersistedElement_container iframe[title="Matrix Calendar"]',
     );
-    await drawerIframe
-      .waitFor({ state: 'attached', timeout: 30_000 })
+    await persistedHostFrame
+      .waitFor({ state: 'visible', timeout: 30_000 })
       .catch(() => {});
+    const persistedHostFrameVisible = await persistedHostFrame
+      .isVisible()
+      .catch(() => false);
     const pinnedToDrawer =
       (await drawer.count().catch(() => 0)) === 1 &&
-      (await drawerIframe.count().catch(() => 0)) === 1;
+      (await persistedHostFrame.count().catch(() => 0)) === 1 &&
+      persistedHostFrameVisible;
 
-    const drawerFrame = pageA.frameLocator(
-      '.mx_AppsDrawer iframe[title="Matrix Calendar"]',
+    const widgetFrame = pageA.frameLocator(
+      '#mx_PersistedElement_container iframe[title="Matrix Calendar"]',
     );
-    const drawerBox = await drawerIframe.boundingBox().catch(() => null);
-    const maximiseControl = pageA.getByRole('button', {
+    const persistedHostBox = await persistedHostFrame
+      .boundingBox()
+      .catch(() => null);
+    const appTile = pageA.locator(
+      '.mx_AppsDrawer .mx_AppTileFullWidth, .mx_AppsDrawer .mx_AppTile, .mx_AppsDrawer .mx_AppTile_mini',
+    );
+    const appTileMenuBar = appTile.locator('.mx_AppTileMenuBar');
+    const maximiseControl = appTile.getByRole('button', {
       name: elementWebControls.maximise,
       exact: true,
     });
+    const appTileCountBeforeHover = Math.min(
+      await appTile.count().catch(() => 0),
+      2,
+    );
+    const appTileMenuBarCountBeforeHover = Math.min(
+      await appTileMenuBar.count().catch(() => 0),
+      2,
+    );
+    const maximiseControlCountBeforeHover = Math.min(
+      await maximiseControl.count().catch(() => 0),
+      2,
+    );
+    const appTileHeaderHoverAttempted =
+      appTileCountBeforeHover === 1 && appTileMenuBarCountBeforeHover === 1;
+    const appTileHeaderHoverCompleted =
+      appTileHeaderHoverAttempted &&
+      (await appTileMenuBar
+        .first()
+        .hover({ timeout: 5_000 })
+        .then(() => true)
+        .catch(() => false));
+    await maximiseControl
+      .waitFor({ state: 'visible', timeout: 5_000 })
+      .catch(() => {});
+    const appTileCountAfterHover = Math.min(
+      await appTile.count().catch(() => 0),
+      2,
+    );
+    const appTileMenuBarCountAfterHover = Math.min(
+      await appTileMenuBar.count().catch(() => 0),
+      2,
+    );
+    const maximiseControlCountAfterHover = Math.min(
+      await maximiseControl.count().catch(() => 0),
+      2,
+    );
     const maximiseControlVisible = await maximiseControl
       .isVisible()
       .catch(() => false);
@@ -1973,14 +2027,16 @@ test('Element Web preserves unsupported events and supports client interactions'
     await maximisedDrawer
       .waitFor({ state: 'visible', timeout: 15_000 })
       .catch(() => {});
-    const maximisedBox = await drawerIframe.boundingBox().catch(() => null);
+    const maximisedBox = await persistedHostFrame
+      .boundingBox()
+      .catch(() => null);
     const drawerMaximised =
       (await maximisedDrawer.count().catch(() => 0)) === 1;
     const frameExpanded =
-      drawerBox !== null &&
+      persistedHostBox !== null &&
       maximisedBox !== null &&
-      maximisedBox.width > drawerBox.width;
-    const createControlReachableAfterMaximise = await drawerFrame
+      maximisedBox.width > persistedHostBox.width;
+    const createControlReachableAfterMaximise = await widgetFrame
       .getByRole('button', { name: 'Create event', exact: true })
       .isVisible()
       .catch(() => false);
@@ -1991,7 +2047,7 @@ test('Element Web preserves unsupported events and supports client interactions'
           document.documentElement.clientWidth,
       )
       .catch(() => false);
-    const widgetNoOverflowAfterMaximise = await drawerFrame
+    const widgetNoOverflowAfterMaximise = await widgetFrame
       .locator('html')
       .evaluate((element) => element.scrollWidth <= element.clientWidth)
       .catch(() => false);
@@ -2014,13 +2070,15 @@ test('Element Web preserves unsupported events and supports client interactions'
     await maximisedDrawer
       .waitFor({ state: 'detached', timeout: 15_000 })
       .catch(() => {});
-    const restoredBox = await drawerIframe.boundingBox().catch(() => null);
+    const restoredBox = await persistedHostFrame
+      .boundingBox()
+      .catch(() => null);
     const drawerRestored = (await maximisedDrawer.count().catch(() => 0)) === 0;
     const frameReturned =
-      drawerBox !== null &&
+      persistedHostBox !== null &&
       restoredBox !== null &&
-      Math.abs(restoredBox.width - drawerBox.width) <= 2 &&
-      Math.abs(restoredBox.height - drawerBox.height) <= 2;
+      Math.abs(restoredBox.width - persistedHostBox.width) <= 2 &&
+      Math.abs(restoredBox.height - persistedHostBox.height) <= 2;
     const restoredPassed =
       unmaximiseControlVisible && drawerRestored && frameReturned;
 
@@ -2029,6 +2087,13 @@ test('Element Web preserves unsupported events and supports client interactions'
       pinVisible &&
       pinEnabled &&
       pinnedToDrawer &&
+      appTileCountBeforeHover === 1 &&
+      appTileMenuBarCountBeforeHover === 1 &&
+      appTileHeaderHoverAttempted &&
+      appTileHeaderHoverCompleted &&
+      appTileCountAfterHover === 1 &&
+      appTileMenuBarCountAfterHover === 1 &&
+      maximiseControlCountAfterHover === 1 &&
       maximisePassed &&
       restoredPassed;
     assertG6Stage(activeG6Phase, layoutPassed, {
@@ -2042,8 +2107,16 @@ test('Element Web preserves unsupported events and supports client interactions'
       pinVisible,
       pinEnabled,
       pinnedToDrawer,
-      drawerIframePresent: pinnedToDrawer,
+      persistedHostFramePresent: pinnedToDrawer,
       pinControlCount,
+      appTileCountBeforeHover,
+      appTileMenuBarCountBeforeHover,
+      maximiseControlCountBeforeHover,
+      appTileHeaderHoverAttempted,
+      appTileHeaderHoverCompleted,
+      appTileCountAfterHover,
+      appTileMenuBarCountAfterHover,
+      maximiseControlCountAfterHover,
       maximiseControlVisible,
       drawerMaximised,
       frameExpanded,
@@ -2055,10 +2128,10 @@ test('Element Web preserves unsupported events and supports client interactions'
         : {}),
       ...(iframeWidth === undefined ? {} : { iframeWidth }),
       ...(iframeHeight === undefined ? {} : { iframeHeight }),
-      ...(drawerBox
+      ...(persistedHostBox
         ? {
-            drawerIframeWidth: Math.round(drawerBox.width),
-            drawerIframeHeight: Math.round(drawerBox.height),
+            persistedHostFrameWidth: Math.round(persistedHostBox.width),
+            persistedHostFrameHeight: Math.round(persistedHostBox.height),
           }
         : {}),
       ...(maximisedBox

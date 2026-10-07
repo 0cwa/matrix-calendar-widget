@@ -2547,7 +2547,9 @@ test('rejects inconsistent Element client acceptance evidence', () => {
       pinVisible: true,
       pinEnabled: true,
       pinnedToDrawer: true,
-      drawerIframePresent: true,
+      persistedHostFramePresent: true,
+      appTileHeaderHoverAttempted: true,
+      appTileHeaderHoverCompleted: true,
       maximiseControlVisible: true,
       drawerMaximised: true,
       frameExpanded: true,
@@ -2559,8 +2561,14 @@ test('rejects inconsistent Element client acceptance evidence', () => {
       iframeWidth: 319,
       iframeHeight: 640,
       pinControlCount: 1,
-      drawerIframeWidth: 500,
-      drawerIframeHeight: 500,
+      appTileCountBeforeHover: 1,
+      appTileMenuBarCountBeforeHover: 1,
+      maximiseControlCountBeforeHover: 0,
+      appTileCountAfterHover: 1,
+      appTileMenuBarCountAfterHover: 1,
+      maximiseControlCountAfterHover: 1,
+      persistedHostFrameWidth: 500,
+      persistedHostFrameHeight: 500,
       maximisedIframeWidth: 1200,
       maximisedIframeHeight: 700,
       restoredIframeWidth: 500,
@@ -2583,7 +2591,9 @@ test('rejects inconsistent Element client acceptance evidence', () => {
       pinVisible: true,
       pinEnabled: true,
       pinnedToDrawer: true,
-      drawerIframePresent: true,
+      persistedHostFramePresent: true,
+      appTileHeaderHoverAttempted: true,
+      appTileHeaderHoverCompleted: true,
       maximiseControlVisible: true,
       drawerMaximised: true,
       frameExpanded: true,
@@ -2595,8 +2605,14 @@ test('rejects inconsistent Element client acceptance evidence', () => {
       iframeWidth: 319,
       iframeHeight: 640,
       pinControlCount: 2,
-      drawerIframeWidth: 500,
-      drawerIframeHeight: 500,
+      appTileCountBeforeHover: 1,
+      appTileMenuBarCountBeforeHover: 1,
+      maximiseControlCountBeforeHover: 0,
+      appTileCountAfterHover: 1,
+      appTileMenuBarCountAfterHover: 1,
+      maximiseControlCountAfterHover: 1,
+      persistedHostFrameWidth: 500,
+      persistedHostFrameHeight: 500,
       maximisedIframeWidth: 1200,
       maximisedIframeHeight: 700,
       restoredIframeWidth: 500,
@@ -2680,7 +2696,9 @@ test('accepts the compact four-case Element client evidence contract', () => {
       pinVisible: true,
       pinEnabled: true,
       pinnedToDrawer: true,
-      drawerIframePresent: true,
+      persistedHostFramePresent: true,
+      appTileHeaderHoverAttempted: true,
+      appTileHeaderHoverCompleted: true,
       maximiseControlVisible: true,
       drawerMaximised: true,
       frameExpanded: true,
@@ -2692,8 +2710,14 @@ test('accepts the compact four-case Element client evidence contract', () => {
       iframeWidth: 319,
       iframeHeight: 640,
       pinControlCount: 1,
-      drawerIframeWidth: 500,
-      drawerIframeHeight: 400,
+      appTileCountBeforeHover: 1,
+      appTileMenuBarCountBeforeHover: 1,
+      maximiseControlCountBeforeHover: 0,
+      appTileCountAfterHover: 1,
+      appTileMenuBarCountAfterHover: 1,
+      maximiseControlCountAfterHover: 1,
+      persistedHostFrameWidth: 500,
+      persistedHostFrameHeight: 400,
       maximisedIframeWidth: 1200,
       maximisedIframeHeight: 700,
       restoredIframeWidth: 500,
@@ -2728,6 +2752,26 @@ test('accepts the compact four-case Element client evidence contract', () => {
   for (const record of records) {
     assert.ok(summary.includes(`phase=${record.phase} status=passed`));
   }
+  assert.match(
+    summary,
+    /persisted_host_frame_present=true app_tile_header_hover_attempted=true app_tile_header_hover_completed=true.*app_tile_count_before_hover=1 app_tile_menu_bar_count_before_hover=1 maximise_control_count_before_hover=0 app_tile_count_after_hover=1 app_tile_menu_bar_count_after_hover=1 maximise_control_count_after_hover=1/u,
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        records
+          .map((record) =>
+            JSON.stringify(
+              record.phase === 'g6-widget-layout'
+                ? { ...record, maximiseControlVisible: false }
+                : record,
+            ),
+          )
+          .join('\n'),
+        sourceSha,
+      ),
+    { message: 'invalid element acceptance summary' },
+  );
   assert.doesNotMatch(summary, /Matrix Calendar|G6 unsupported|\.ics|UID:/u);
 });
 

@@ -235,7 +235,9 @@ const PHASE_BOOLEAN_FIELDS = new Map([
       'pinVisible',
       'pinEnabled',
       'pinnedToDrawer',
-      'drawerIframePresent',
+      'persistedHostFramePresent',
+      'appTileHeaderHoverAttempted',
+      'appTileHeaderHoverCompleted',
       'maximiseControlVisible',
       'drawerMaximised',
       'frameExpanded',
@@ -281,8 +283,14 @@ const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
       'iframeWidth',
       'iframeHeight',
       'pinControlCount',
-      'drawerIframeWidth',
-      'drawerIframeHeight',
+      'appTileCountBeforeHover',
+      'appTileMenuBarCountBeforeHover',
+      'maximiseControlCountBeforeHover',
+      'appTileCountAfterHover',
+      'appTileMenuBarCountAfterHover',
+      'maximiseControlCountAfterHover',
+      'persistedHostFrameWidth',
+      'persistedHostFrameHeight',
       'maximisedIframeWidth',
       'maximisedIframeHeight',
       'restoredIframeWidth',
@@ -851,7 +859,9 @@ const ALLOWED_KEYS = new Set([
   'pinVisible',
   'pinEnabled',
   'pinnedToDrawer',
-  'drawerIframePresent',
+  'persistedHostFramePresent',
+  'appTileHeaderHoverAttempted',
+  'appTileHeaderHoverCompleted',
   'maximiseControlVisible',
   'drawerMaximised',
   'frameExpanded',
@@ -889,11 +899,26 @@ function validG6Observation(record) {
       if (key.endsWith('Width') || key.endsWith('Height')) {
         return value < 1 || value > 10_000;
       }
+      if (record.phase === 'g6-widget-layout') return value < 0 || value > 2;
       if (key === 'eventActionTabCount') return value < 0 || value > 80;
       if (key === 'detailsActionTabCount') return value < 0 || value > 14;
       if (record.phase === 'g6-resource-cleanup') return value < 0 || value > 4;
       return value < 0 || value > 100_000;
     })
+  ) {
+    return false;
+  }
+
+  if (
+    record.phase === 'g6-widget-layout' &&
+    ((Object.hasOwn(record, 'appTileHeaderHoverAttempted') &&
+      record.appTileHeaderHoverAttempted !==
+        (record.appTileCountBeforeHover === 1 &&
+          record.appTileMenuBarCountBeforeHover === 1)) ||
+      (record.appTileHeaderHoverCompleted === true &&
+        record.appTileHeaderHoverAttempted !== true) ||
+      (record.maximiseControlVisible === true &&
+        record.maximiseControlCountAfterHover !== 1))
   ) {
     return false;
   }
@@ -974,9 +999,21 @@ function validG6Observation(record) {
         record.viewportHeight === 900 &&
         record.iframeWidth <= 480 &&
         record.pinControlCount === 1 &&
-        record.maximisedIframeWidth > record.drawerIframeWidth &&
-        Math.abs(record.restoredIframeWidth - record.drawerIframeWidth) <= 2 &&
-        Math.abs(record.restoredIframeHeight - record.drawerIframeHeight) <= 2
+        record.persistedHostFramePresent === true &&
+        record.appTileCountBeforeHover === 1 &&
+        record.appTileMenuBarCountBeforeHover === 1 &&
+        record.appTileHeaderHoverAttempted === true &&
+        record.appTileHeaderHoverCompleted === true &&
+        record.appTileCountAfterHover === 1 &&
+        record.appTileMenuBarCountAfterHover === 1 &&
+        record.maximiseControlCountAfterHover === 1 &&
+        record.maximiseControlVisible === true &&
+        record.maximisedIframeWidth > record.persistedHostFrameWidth &&
+        Math.abs(record.restoredIframeWidth - record.persistedHostFrameWidth) <=
+          2 &&
+        Math.abs(
+          record.restoredIframeHeight - record.persistedHostFrameHeight,
+        ) <= 2
       );
     case 'g6-browser-egress':
       return record.count === 0;
