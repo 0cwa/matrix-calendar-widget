@@ -298,6 +298,16 @@ const CONTAINER_HEALTH_STATES = new Set([
   'unavailable',
 ]);
 const RESTORE_RADICALE_PROBE_OUTCOMES = new Set(['no-response', 'http-status']);
+const RESTORE_RADICALE_STARTUP_SIGNATURES = new Set([
+  'unavailable',
+  'unclassified',
+  'plugin-config-invalid',
+  'invalid-configuration',
+  'no-listener',
+  'bind-failed',
+  'address-resolution-failed',
+  'startup-exception',
+]);
 const MATRIX_SYNC_STATES = new Set([
   'ERROR',
   'PREPARED',
@@ -576,6 +586,10 @@ const ALLOWED_KEYS = new Set([
   'containerOomKilled',
   'containerRuntimeErrorPresent',
   'restoreRadicaleProbeOutcome',
+  'restoreRadicaleStartupSignature',
+  'restoreRadicaleLogsAvailable',
+  'restoreRadicaleStartupExceptionPresent',
+  'restoreRadicaleReadyMarkerPresent',
   ...RUNTIME_OBSERVATION_FIELDS,
   ...OPTIONAL_RUNTIME_STATUS_FIELDS,
   ...POST_CREATE_VISIBILITY_FIELDS,
@@ -1563,6 +1577,17 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       record,
       'restoreRadicaleProbeOutcome',
     );
+    const restoreRadicaleStartupFields = [
+      'restoreRadicaleStartupSignature',
+      'restoreRadicaleLogsAvailable',
+      'restoreRadicaleStartupExceptionPresent',
+      'restoreRadicaleReadyMarkerPresent',
+    ];
+    const hasRestoreRadicaleStartupDiagnostic = restoreRadicaleStartupFields.some(
+      (key) => Object.hasOwn(record, key),
+    );
+    const restoreRadicaleStartupFieldsComplete =
+      restoreRadicaleStartupFields.every((key) => Object.hasOwn(record, key));
     if (
       (hasRestoreRadicaleProbeDiagnostic &&
         (record.phase !== 'restore-radicale-ready' ||
@@ -1587,6 +1612,23 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           !Object.hasOwn(record, 'containerHealth') ||
           !CONTAINER_HEALTH_STATES.has(record.containerHealth))) ||
       (hasRestoreRadicaleProbeDiagnostic && !hasContainerDiagnostic) ||
+      (hasRestoreRadicaleStartupDiagnostic &&
+        (record.phase !== 'restore-radicale-ready' ||
+          record.status !== 'failed' ||
+          !hasRestoreRadicaleProbeDiagnostic ||
+          !restoreRadicaleStartupFieldsComplete ||
+          !RESTORE_RADICALE_STARTUP_SIGNATURES.has(
+            record.restoreRadicaleStartupSignature,
+          ) ||
+          typeof record.restoreRadicaleLogsAvailable !== 'boolean' ||
+          typeof record.restoreRadicaleStartupExceptionPresent !== 'boolean' ||
+          typeof record.restoreRadicaleReadyMarkerPresent !== 'boolean' ||
+          (record.restoreRadicaleLogsAvailable === false &&
+            (record.restoreRadicaleStartupSignature !== 'unavailable' ||
+              record.restoreRadicaleStartupExceptionPresent ||
+              record.restoreRadicaleReadyMarkerPresent)) ||
+          (record.restoreRadicaleLogsAvailable === true &&
+            record.restoreRadicaleStartupSignature === 'unavailable'))) ||
       (Object.hasOwn(record, 'containerExitCode') &&
         (!Number.isInteger(record.containerExitCode) ||
           record.containerExitCode < 0 ||
@@ -2101,6 +2143,14 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     if (Object.hasOwn(record, 'restoreRadicaleProbeOutcome')) {
       fields.push(
         `restore_radicale_probe_outcome=${record.restoreRadicaleProbeOutcome}`,
+      );
+    }
+    if (Object.hasOwn(record, 'restoreRadicaleStartupSignature')) {
+      fields.push(
+        `radicale_startup_signature=${record.restoreRadicaleStartupSignature}`,
+        `radicale_logs_available=${record.restoreRadicaleLogsAvailable}`,
+        `radicale_startup_exception_present=${record.restoreRadicaleStartupExceptionPresent}`,
+        `radicale_ready_marker_present=${record.restoreRadicaleReadyMarkerPresent}`,
       );
     }
     const phaseBooleans = PHASE_BOOLEAN_FIELDS.get(phase) ?? [];

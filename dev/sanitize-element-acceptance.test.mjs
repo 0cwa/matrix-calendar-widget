@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { classifyRadicaleStartupLogs } from './element-acceptance-reminder-restore.mjs';
 import {
   formatSanitizerFailureSummary,
   sanitizeElementAcceptance,
@@ -1673,6 +1674,79 @@ test('emits only fixed Radicale readiness state after an unanswered probe', () =
   );
 });
 
+test('classifies only fixed Radicale startup signatures and sanitizes the evidence', () => {
+  const rawLog =
+    'An exception occurred during server startup: Radicale OpenID homeserver URL is invalid; token=private-value';
+  const evidence = classifyRadicaleStartupLogs(rawLog);
+  assert.deepEqual(evidence, {
+    restoreRadicaleStartupSignature: 'plugin-config-invalid',
+    restoreRadicaleLogsAvailable: true,
+    restoreRadicaleStartupExceptionPresent: true,
+    restoreRadicaleReadyMarkerPresent: false,
+  });
+  assert.equal(JSON.stringify(evidence).includes('private-value'), false);
+
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      containerExitCode: 1,
+      containerOomKilled: false,
+      containerRuntimeErrorPresent: false,
+      ...evidence,
+    }),
+    sourceSha,
+  );
+  assert.match(summary, /radicale_startup_signature=plugin-config-invalid/u);
+  assert.match(summary, /radicale_logs_available=true/u);
+  assert.match(summary, /radicale_startup_exception_present=true/u);
+  assert.match(summary, /radicale_ready_marker_present=false/u);
+  assert.equal(summary.includes('private-value'), false);
+
+  assert.deepEqual(classifyRadicaleStartupLogs('unrecognized startup output'), {
+    restoreRadicaleStartupSignature: 'unclassified',
+    restoreRadicaleLogsAvailable: true,
+    restoreRadicaleStartupExceptionPresent: false,
+    restoreRadicaleReadyMarkerPresent: false,
+  });
+  assert.deepEqual(classifyRadicaleStartupLogs(undefined), {
+    restoreRadicaleStartupSignature: 'unavailable',
+    restoreRadicaleLogsAvailable: false,
+    restoreRadicaleStartupExceptionPresent: false,
+    restoreRadicaleReadyMarkerPresent: false,
+  });
+
+  const signatures = [
+    ['Invalid configuration: secret=/private/path', 'invalid-configuration'],
+    ['No servers started', 'no-listener'],
+    [
+      "cannot create server socket on '/private/address': permission denied",
+      'bind-failed',
+    ],
+    [
+      "cannot retrieve IPv4 or IPv6 address of '/private/address': failed",
+      'address-resolution-failed',
+    ],
+    [
+      'An exception occurred during server startup: private exception text',
+      'startup-exception',
+    ],
+  ];
+  for (const [logText, expectedSignature] of signatures) {
+    const classified = classifyRadicaleStartupLogs(logText);
+    assert.equal(classified.restoreRadicaleStartupSignature, expectedSignature);
+    assert.equal(JSON.stringify(classified).includes('/private'), false);
+  }
+  assert.equal(
+    classifyRadicaleStartupLogs('Radicale server ready')
+      .restoreRadicaleReadyMarkerPresent,
+    true,
+  );
+});
+
 test('emits a missing dependency only when the runtime manifest allowlists it', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify({
@@ -1989,6 +2063,46 @@ test('rejects unsafe container diagnostics and diagnostics on other phases', () 
       restoreRadicaleProbeOutcome: 'http-status',
       containerState: 'running',
       containerHealth: 'none',
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      restoreRadicaleStartupSignature: 'password=secret',
+      restoreRadicaleLogsAvailable: true,
+      restoreRadicaleStartupExceptionPresent: false,
+      restoreRadicaleReadyMarkerPresent: false,
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      restoreRadicaleStartupSignature: 'unavailable',
+      restoreRadicaleLogsAvailable: false,
+      restoreRadicaleStartupExceptionPresent: true,
+      restoreRadicaleReadyMarkerPresent: false,
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      restoreRadicaleStartupSignature: 'unclassified',
+      restoreRadicaleLogsAvailable: true,
+      restoreRadicaleStartupExceptionPresent: false,
+    },
+    {
+      phase: 'restore-targets-prepared',
+      status: 'failed',
+      restoreRadicaleStartupSignature: 'unclassified',
+      restoreRadicaleLogsAvailable: true,
+      restoreRadicaleStartupExceptionPresent: false,
+      restoreRadicaleReadyMarkerPresent: false,
     },
     {
       phase: 'restore-radicale-ready',

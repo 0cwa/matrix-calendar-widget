@@ -44,6 +44,7 @@ const RADICALE_EXTRACT_TAR = [
   "  archive.extract(safe(member),'/data')",
 ].join('\n');
 const MAX_COMMAND_BUFFER = 16 * 1024 * 1024;
+const MAX_RADICALE_LOG_BUFFER = 1024 * 1024;
 const MAX_WAIT_MS = 120_000;
 const COMPOSE_GRACEFUL_STOP_COMMAND_TIMEOUT_MS = 75_000;
 const CONTAINER_STATUS_VALUES = new Set([
@@ -113,6 +114,43 @@ export function formatFailureMarker(phase, restoreStep) {
       ? ` restore_step=${restoreStep}`
       : '';
   return `Reminder acceptance fixture failed phase=${safePhase}${safeRestoreStep}`;
+}
+
+export function classifyRadicaleStartupLogs(logText) {
+  // These fixed signatures are diagnostic hints; unknown output remains opaque.
+  const logsAvailable = typeof logText === 'string';
+  const logs = logsAvailable ? logText : '';
+  const startupExceptionPresent = logs.includes(
+    'An exception occurred during server startup: ',
+  );
+  const readyMarkerPresent = logs.includes('Radicale server ready');
+  let signature = logsAvailable ? 'unclassified' : 'unavailable';
+
+  if (logsAvailable) {
+    if (
+      logs.includes('Radicale OpenID homeserver URL is invalid') ||
+      logs.includes('Radicale OpenID Matrix server name is invalid')
+    ) {
+      signature = 'plugin-config-invalid';
+    } else if (logs.includes('Invalid configuration: ')) {
+      signature = 'invalid-configuration';
+    } else if (logs.includes('No servers started')) {
+      signature = 'no-listener';
+    } else if (logs.includes("cannot create server socket on '")) {
+      signature = 'bind-failed';
+    } else if (logs.includes("cannot retrieve IPv4 or IPv6 address of '")) {
+      signature = 'address-resolution-failed';
+    } else if (startupExceptionPresent) {
+      signature = 'startup-exception';
+    }
+  }
+
+  return {
+    restoreRadicaleStartupSignature: signature,
+    restoreRadicaleLogsAvailable: logsAvailable,
+    restoreRadicaleStartupExceptionPresent: startupExceptionPresent,
+    restoreRadicaleReadyMarkerPresent: readyMarkerPresent,
+  };
 }
 
 function required(name) {
@@ -1095,12 +1133,16 @@ async function waitForRestoreRadicale() {
 }
 
 function inspectRestoreRadicaleReadiness() {
+  let container = {
+    containerState: 'unavailable',
+    containerHealth: 'unavailable',
+  };
   try {
     const state = inspectContainer(
       'restore-radicale',
       'restore-radicale-ready',
     );
-    return {
+    container = {
       containerState: CONTAINER_STATUS_VALUES.has(state.status)
         ? state.status
         : 'unavailable',
@@ -1119,11 +1161,29 @@ function inspectRestoreRadicaleReadiness() {
       containerRuntimeErrorPresent: state.runtimeErrorPresent,
     };
   } catch {
-    return {
-      containerState: 'unavailable',
-      containerHealth: 'unavailable',
-    };
+    // Preserve the failed HTTP/container observation if inspection is unavailable.
   }
+
+  let startupLogs;
+  try {
+    const containerId = serviceContainerId(
+      'restore-radicale',
+      'restore-radicale-ready',
+    );
+    const result = run(
+      'docker',
+      ['logs', '--tail', '100', containerId],
+      { timeout: 10_000, maxBuffer: MAX_RADICALE_LOG_BUFFER },
+    );
+    if (result.status === 0) startupLogs = result.stdout.toString('utf8');
+  } catch {
+    // Log retrieval failure is represented as unavailable, never as a guessed cause.
+  }
+
+  return {
+    ...container,
+    ...classifyRadicaleStartupLogs(startupLogs),
+  };
 }
 
 async function restoreStores() {
