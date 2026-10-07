@@ -1,0 +1,394 @@
+name: Element Desktop startup acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/element-desktop-startup.yml'
+      - 'dev/element-desktop-*'
+      - 'e2e/package.json'
+      - 'yarn.lock'
+      - 'docs/PLAN.md'
+      - 'docs/STATUS.md'
+
+permissions:
+  contents: read
+
+jobs:
+  element-desktop-startup:
+    name: Element Desktop startup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      ELEMENT_DESKTOP_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: yarn
+
+      - name: Install locked workspace dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Test Desktop egress policy and evidence sanitizer
+        run: |
+          node --check dev/element-desktop-egress-policy.mjs
+          node --check dev/element-desktop-startup.mjs
+          node --check dev/element-desktop-evidence.mjs
+          node dev/element-desktop-egress-policy.test.mjs
+          node dev/element-desktop-evidence.test.mjs
+
+      - name: Initialize private stage file
+        run: |
+          umask 077
+          stage_file="$RUNNER_TEMP/element-desktop-startup-stage.jsonl"
+          node_binary="$(command -v node)"
+          : > "$stage_file"
+          chmod 0600 "$stage_file"
+          printf 'ELEMENT_DESKTOP_STAGE_FILE=%s\n' "$stage_file" >> "$GITHUB_ENV"
+          printf 'ELEMENT_DESKTOP_NODE_BIN=%s\n' "$node_binary" >> "$GITHUB_ENV"
+
+      - name: Install authenticated Element Desktop package and probe tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          key_file="$RUNNER_TEMP/element-io-archive-keyring.gpg"
+          source_file=/etc/apt/sources.list.d/element-desktop-startup.list
+          system_key=/usr/share/keyrings/element-desktop-startup.gpg
+          curl --fail --silent --show-error --location \
+            https://packages.element.io/debian/element-io-archive-keyring.gpg \
+            --output "$key_file"
+          sudo install -D -m 0644 "$key_file" "$system_key"
+          printf 'deb [arch=amd64 signed-by=%s] https://packages.element.io/debian/ default main\n' \
+            "$system_key" | sudo tee "$source_file" >/dev/null
+          sudo apt-get update --quiet
+          package_metadata="$(apt-cache show element-desktop=1.12.30)"
+          package_hash="$(printf '%s\n' "$package_metadata" | node --input-type=module -e '
+            let input = "";
+            for await (const chunk of process.stdin) input += chunk;
+            const matches = input.split(/\n\n+/u).filter((block) => {
+              const fields = Object.fromEntries(block.split(/\n/u).map((line) => {
+                const split = line.indexOf(":");
+                return split < 0 ? ["", ""] : [line.slice(0, split), line.slice(split + 1).trim()];
+              }));
+              return fields.Package === "element-desktop" && fields.Version === "1.12.30" && fields.Architecture === "amd64";
+            });
+            const values = matches.map((block) => /^SHA256:\s+([0-9a-f]{64})$/mu.exec(block)?.[1] ?? "");
+            if (values.length !== 1 || !/^[0-9a-f]{64}$/u.test(values[0])) process.exit(2);
+            process.stdout.write(values[0]);
+          ')"
+          cd "$RUNNER_TEMP"
+          apt-get download element-desktop=1.12.30 >/dev/null 2>&1
+          deb_file="$RUNNER_TEMP/element-desktop_1.12.30_amd64.deb"
+          test -f "$deb_file"
+          downloaded_hash="$(sha256sum "$deb_file" | cut -d ' ' -f 1)"
+          test "$downloaded_hash" = "$package_hash"
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+            xvfb xauth dbus-daemon gnome-keyring libsecret-tools iptables iproute2 \
+            element-desktop:amd64=1.12.30
+          installed="$(dpkg-query -W -f='%v\t%a' element-desktop)"
+          test "$installed" = $'1.12.30\tamd64'
+          printf 'ELEMENT_DESKTOP_PACKAGE_SHA256=%s\n' "$package_hash" >> "$GITHUB_ENV"
+
+      - name: Create isolated Desktop identity and private profile
+        run: |
+          set -euo pipefail
+          username=mcwdesktopprobe
+          if getent passwd "$username" >/dev/null; then
+            echo 'The isolated Desktop account name is already present.' >&2
+            exit 1
+          fi
+          uid=24000
+          while getent passwd "$uid" >/dev/null; do
+            uid=$((uid + 1))
+            if [[ "$uid" -gt 65535 ]]; then
+              echo 'No isolated Desktop UID is available.' >&2
+              exit 1
+            fi
+          done
+          nogroup_gid="$(getent group nogroup | cut -d: -f3)"
+          test -n "$nogroup_gid"
+          {
+            printf 'ELEMENT_DESKTOP_PROBE_UID=%s\n' "$uid"
+            printf 'ELEMENT_DESKTOP_PROBE_USERNAME=%s\n' "$username"
+          } >> "$GITHUB_ENV"
+          sudo useradd --uid "$uid" --gid "$nogroup_gid" --no-create-home --shell /usr/sbin/nologin "$username"
+          profile_root="$(mktemp -d "/tmp/mcw-element-desktop-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-XXXXXX")"
+          printf 'ELEMENT_DESKTOP_PROFILE_ROOT=%s\n' "$profile_root" >> "$GITHUB_ENV"
+          printf 'element-desktop-startup-profile-v1\n' > "$profile_root/.owned"
+          chmod 0600 "$profile_root/.owned"
+          sudo chown "$uid:$nogroup_gid" "$profile_root"
+          sudo chown "$uid:$nogroup_gid" "$profile_root/.owned"
+          sudo chmod 0700 "$profile_root"
+          for child in home config data cache runtime profile; do
+            sudo install -d -m 0700 -o "$uid" -g "$nogroup_gid" "$profile_root/$child"
+          done
+          cdp_port="$(node --input-type=module -e '
+            import { createServer } from "node:net";
+            const server = createServer();
+            server.listen({ host: "127.0.0.1", port: 0 }, () => {
+              const address = server.address();
+              if (!address || typeof address === "string") process.exit(2);
+              process.stdout.write(String(address.port));
+              server.close();
+            });
+          ')"
+          test "$cdp_port" -ge 1024
+          test "$cdp_port" -le 65535
+          {
+            printf 'ELEMENT_DESKTOP_CDP_PORT=%s\n' "$cdp_port"
+            printf 'ELEMENT_DESKTOP_CONFIG_PATH=%s/dev/element-desktop-probe-config.json\n' "$GITHUB_WORKSPACE"
+            printf 'ELEMENT_DESKTOP_PROFILE_HOME=%s/home\n' "$profile_root"
+            printf 'ELEMENT_DESKTOP_PROFILE_CONFIG=%s/config\n' "$profile_root"
+            printf 'ELEMENT_DESKTOP_PROFILE_DATA=%s/data\n' "$profile_root"
+            printf 'ELEMENT_DESKTOP_PROFILE_CACHE=%s/cache\n' "$profile_root"
+            printf 'ELEMENT_DESKTOP_PROFILE_RUNTIME=%s/runtime\n' "$profile_root"
+          } >> "$GITHUB_ENV"
+
+      - name: Install exact dual-stack egress policy and deny-test it
+        run: |
+          set +e
+          policy_status=failed
+          negative_status=not_run
+          sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs install \
+            "$ELEMENT_DESKTOP_PROBE_UID" "$GITHUB_RUN_ID" "$ELEMENT_DESKTOP_CDP_PORT" \
+            >/dev/null 2>&1
+          install_status=$?
+          if [[ "$install_status" -eq 0 ]]; then
+            policy_status=passed
+            sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs negative-self-test \
+              "$ELEMENT_DESKTOP_PROBE_UID" "$GITHUB_RUN_ID" "$ELEMENT_DESKTOP_CDP_PORT" \
+              >/dev/null 2>&1
+            negative_exit=$?
+            if [[ "$negative_exit" -eq 0 ]]; then
+              negative_status=passed
+              sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs zero-counters "$GITHUB_RUN_ID" \
+                >/dev/null 2>&1
+              reset_exit=$?
+              if [[ "$reset_exit" -ne 0 ]]; then policy_status=failed; fi
+            else
+              negative_status=failed
+              policy_status=failed
+            fi
+          fi
+          printf '{"phase":"egress-policy","status":"%s","negativeTest":"%s"}\n' \
+            "$policy_status" "$negative_status" >> "$ELEMENT_DESKTOP_STAGE_FILE"
+          if [[ "$policy_status" != passed || "$negative_status" != passed ]]; then
+            echo 'The isolated dual-stack egress policy or its local deny test failed.' >&2
+            exit 1
+          fi
+
+      - name: Start packaged Desktop under isolated identity
+        run: |
+          set +e
+          result_file="$RUNNER_TEMP/element-desktop-startup-result.jsonl"
+          sudo -n -u "$ELEMENT_DESKTOP_PROBE_USERNAME" -- /usr/bin/env \
+            PATH="$PATH" \
+            HOME="$ELEMENT_DESKTOP_PROFILE_HOME" \
+            XDG_CONFIG_HOME="$ELEMENT_DESKTOP_PROFILE_CONFIG" \
+            XDG_DATA_HOME="$ELEMENT_DESKTOP_PROFILE_DATA" \
+            XDG_CACHE_HOME="$ELEMENT_DESKTOP_PROFILE_CACHE" \
+            XDG_RUNTIME_DIR="$ELEMENT_DESKTOP_PROFILE_RUNTIME" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            ELEMENT_DESKTOP_SOURCE_SHA="$ELEMENT_DESKTOP_SOURCE_SHA" \
+            ELEMENT_DESKTOP_PACKAGE_SHA256="$ELEMENT_DESKTOP_PACKAGE_SHA256" \
+            ELEMENT_DESKTOP_PROFILE_ROOT="$ELEMENT_DESKTOP_PROFILE_ROOT" \
+            ELEMENT_DESKTOP_CONFIG_PATH="$ELEMENT_DESKTOP_CONFIG_PATH" \
+            ELEMENT_DESKTOP_CDP_PORT="$ELEMENT_DESKTOP_CDP_PORT" \
+            ELEMENT_DESKTOP_PROBE_UID="$ELEMENT_DESKTOP_PROBE_UID" \
+            ELEMENT_DESKTOP_NO_UPDATE=true \
+            dbus-run-session -- xvfb-run -a "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-startup.mjs \
+            > "$result_file" 2>/dev/null
+          probe_exit=$?
+          set -e
+          if [[ -s "$result_file" ]]; then
+            cat "$result_file" >> "$ELEMENT_DESKTOP_STAGE_FILE"
+          else
+            node --input-type=module -e '
+              const sourceSha = process.env.ELEMENT_DESKTOP_SOURCE_SHA;
+              const checks = Object.fromEntries(["sourceSha","runner","package","privateProfile","secretService","config","updatesDisabled","desktopProcess","loopbackCdp","packagedOrigin","nativeSandbox","nodeIntegrationDisabled"].map((key) => [key,"not_run"]));
+              process.stdout.write(JSON.stringify({ phase:"desktop-startup",status:"failed",failureCode:"probe-internal-error",sourceSha,package:{version:null,architecture:null,sha256:null},runtime:{node:process.versions.node,chromium:null,runner:"ubuntu-24.04"},origin:"vector://vector",rendererCount:0,checks })+"\n");
+            ' >> "$ELEMENT_DESKTOP_STAGE_FILE"
+          fi
+          if [[ "$probe_exit" -ne 0 ]]; then
+            echo 'Packaged Element Desktop did not complete its startup checks.' >&2
+            exit 1
+          fi
+
+      - name: Stop isolated processes, measure egress, and remove private resources
+        if: always()
+        run: |
+          set +e
+          stage_file="$RUNNER_TEMP/element-desktop-startup-stage.jsonl"
+          mkdir -p "$RUNNER_TEMP"
+          touch "$stage_file"
+          chmod 0600 "$stage_file"
+          uid="$ELEMENT_DESKTOP_PROBE_UID"
+          username=mcwdesktopprobe
+          run_id="$GITHUB_RUN_ID"
+          isolated_processes=not_run
+          policy_status=not_run
+          user_status=not_run
+          profile_status=not_run
+          apt_source_status=not_run
+          observation_status=failed
+
+          if [[ "$uid" =~ ^[0-9]{1,5}$ ]] && [[ "$uid" -gt 0 ]]; then
+            isolated_processes=passed
+            if pgrep -u "$uid" >/dev/null 2>&1; then
+              sudo -n pkill -TERM -u "$uid" >/dev/null 2>&1
+              sleep 2
+              sudo -n pkill -KILL -u "$uid" >/dev/null 2>&1
+            fi
+            if pgrep -u "$uid" >/dev/null 2>&1; then isolated_processes=failed; fi
+          fi
+
+          if [[ "$run_id" =~ ^[0-9]{1,18}$ ]] && [[ "$uid" =~ ^[0-9]{1,5}$ ]]; then
+            counter_json="$(sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs counters "$run_id" 2>/dev/null)"
+            if [[ -n "$counter_json" ]]; then
+              observation="$(printf '%s' "$counter_json" | node --input-type=module -e '
+                let input=""; for await (const chunk of process.stdin) input+=chunk;
+                try {
+                  const value=JSON.parse(input);
+                  const valid=value && Object.keys(value).sort().join(",")==="ipv4,ipv6" && [value.ipv4,value.ipv6].every((n)=>Number.isSafeInteger(n)&&n>=0&&n<=100000);
+                  process.stdout.write(valid?JSON.stringify({phase:"egress-observation",status:"passed",ipv4Blocked:value.ipv4,ipv6Blocked:value.ipv6}):"");
+                } catch {}
+              ')"
+              if [[ -n "$observation" ]]; then
+                printf '%s\n' "$observation" >> "$stage_file"
+                observation_status=passed
+              fi
+            fi
+          fi
+          if [[ "$observation_status" != passed ]]; then
+            printf '%s\n' '{"phase":"egress-observation","status":"failed","ipv4Blocked":null,"ipv6Blocked":null}' >> "$stage_file"
+          fi
+
+          if [[ "$uid" =~ ^[0-9]{1,5}$ ]] && [[ "$uid" -gt 0 ]] && [[ "$run_id" =~ ^[0-9]{1,18}$ ]]; then
+            if sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs remove "$uid" "$run_id" >/dev/null 2>&1; then
+              policy_status=passed
+            else
+              policy_status=failed
+            fi
+          fi
+
+          if [[ "$uid" =~ ^[0-9]{1,5}$ ]] && [[ "$uid" -gt 0 ]]; then
+            account_uid="$(getent passwd "$username" | cut -d: -f3)"
+            if [[ -n "$account_uid" ]]; then
+              if [[ "$account_uid" == "$uid" ]] && sudo -n userdel "$username" >/dev/null 2>&1; then
+                user_status=passed
+              else
+                user_status=failed
+              fi
+            else
+              user_status=passed
+            fi
+            if getent passwd "$username" >/dev/null; then user_status=failed; fi
+          fi
+
+          profile_root="$ELEMENT_DESKTOP_PROFILE_ROOT"
+          if [[ -z "$profile_root" ]]; then
+            profile_status=passed
+          elif [[ "$profile_root" =~ ^/tmp/mcw-element-desktop-[0-9]{1,18}-[0-9]{1,6}-[A-Za-z0-9]{6}$ ]]; then
+            if [[ ! -e "$profile_root" ]]; then
+              profile_status=passed
+            elif [[ -d "$profile_root" && ! -L "$profile_root" && ! -L "$profile_root/.owned" ]] && \
+              { [[ "$(stat -c %u "$profile_root" 2>/dev/null)" == "$(id -u)" ]] || \
+                [[ "$(stat -c %u "$profile_root" 2>/dev/null)" == "$uid" ]]; } && \
+              { [[ ! -e "$profile_root/.owned" ]] || \
+                [[ "$(sudo -n cat "$profile_root/.owned" 2>/dev/null)" == element-desktop-startup-profile-v1 ]]; }; then
+              if sudo -n rm -rf -- "$profile_root" >/dev/null 2>&1 && [[ ! -e "$profile_root" ]]; then
+                profile_status=passed
+              else
+                profile_status=failed
+              fi
+            else
+              profile_status=failed
+            fi
+          else
+            profile_status=failed
+          fi
+
+          if sudo -n rm -f \
+            /etc/apt/sources.list.d/element-desktop-startup.list \
+            /usr/share/keyrings/element-desktop-startup.gpg \
+            "$RUNNER_TEMP/element-io-archive-keyring.gpg" \
+            "$RUNNER_TEMP/element-desktop_1.12.30_amd64.deb" \
+            "$RUNNER_TEMP/element-desktop-startup-result.jsonl"; then
+            apt_source_status=passed
+          else
+            apt_source_status=failed
+          fi
+          if [[ -e /etc/apt/sources.list.d/element-desktop-startup.list || \
+                -e /usr/share/keyrings/element-desktop-startup.gpg || \
+                -e "$RUNNER_TEMP/element-io-archive-keyring.gpg" || \
+                -e "$RUNNER_TEMP/element-desktop_1.12.30_amd64.deb" ]]; then
+            apt_source_status=failed
+          fi
+
+          ELEMENT_DESKTOP_ISOLATED_PROCESSES="$isolated_processes" \
+          ELEMENT_DESKTOP_POLICY_CLEANUP="$policy_status" \
+          ELEMENT_DESKTOP_USER_CLEANUP="$user_status" \
+          ELEMENT_DESKTOP_PROFILE_CLEANUP="$profile_status" \
+          ELEMENT_DESKTOP_APT_CLEANUP="$apt_source_status" \
+          node --input-type=module - "$stage_file" <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const [stageFile] = process.argv.slice(2);
+          const rows = readFileSync(stageFile, 'utf8').split(/\r?\n/u).filter(Boolean);
+          const phases = new Set();
+          for (const row of rows) phases.add(JSON.parse(row).phase);
+          if (!phases.has('desktop-startup')) {
+            const checks = Object.fromEntries(['sourceSha','runner','package','privateProfile','secretService','config','updatesDisabled','desktopProcess','loopbackCdp','packagedOrigin','nativeSandbox','nodeIntegrationDisabled'].map((key) => [key,'not_run']));
+            appendFileSync(stageFile, JSON.stringify({phase:'desktop-startup',status:'failed',failureCode:'probe-internal-error',sourceSha:process.env.ELEMENT_DESKTOP_SOURCE_SHA,package:{version:null,architecture:null,sha256:null},runtime:{node:process.versions.node,chromium:null,runner:'ubuntu-24.04'},origin:'vector://vector',rendererCount:0,checks} ) + '\n');
+          }
+          for (const phase of ['egress-policy','egress-observation']) {
+            if (!phases.has(phase)) {
+              const fallback = phase === 'egress-policy'
+                ? {phase,status:'not_run',negativeTest:'not_run'}
+                : {phase,status:'failed',ipv4Blocked:null,ipv6Blocked:null};
+              appendFileSync(stageFile, JSON.stringify(fallback) + '\n');
+            }
+          }
+          appendFileSync(stageFile, JSON.stringify({
+            phase:'cleanup',
+            isolatedProcesses:process.env.ELEMENT_DESKTOP_ISOLATED_PROCESSES,
+            policy:process.env.ELEMENT_DESKTOP_POLICY_CLEANUP,
+            user:process.env.ELEMENT_DESKTOP_USER_CLEANUP,
+            profile:process.env.ELEMENT_DESKTOP_PROFILE_CLEANUP,
+            aptSource:process.env.ELEMENT_DESKTOP_APT_CLEANUP,
+          }) + '\n');
+          NODE
+
+      - name: Sanitize Desktop startup evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          summary_file="$RUNNER_TEMP/element-desktop-startup-safe-summary.json"
+          node dev/element-desktop-evidence.mjs \
+            "$RUNNER_TEMP/element-desktop-startup-stage.jsonl" \
+            "$ELEMENT_DESKTOP_SOURCE_SHA" > "$summary_file"
+          node --input-type=module - "$summary_file" <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const [path] = process.argv.slice(2);
+          const summary = JSON.parse(readFileSync(path, 'utf8'));
+          if (summary.status !== 'passed') process.exit(1);
+          NODE
+          cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized Desktop startup evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: element-desktop-startup-summary
+          path: ${{ runner.temp }}/element-desktop-startup-safe-summary.json
+          if-no-files-found: ignore
+          retention-days: 1
