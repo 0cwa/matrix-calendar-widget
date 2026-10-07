@@ -110,6 +110,7 @@ const PHASES = new Set([
 const PHASE_BOOLEAN_FIELDS = new Map([
   ['service-room-ready', ['serviceUserJoined', 'powerPolicyVerified']],
   ['reminder-role-verified', ['rolePolicyVerified']],
+  ['reminder-widget-context', ['canManageReminders']],
   ['reminder-alarm-ui-readback', ['relativeAlarmReadback']],
   ['reminder-room-configuration-enabled', ['reminderEnabled']],
   ['reminder-ui-readback', ['relativeAlarmReadback', 'reminderEnabled']],
@@ -413,6 +414,41 @@ const POST_CREATE_VISIBILITY_COUNTER_FIELDS = [
   'roomListResponseEventCount',
   'matchingListItemCount',
 ];
+const REMINDER_CONFIGURATION_STEPS = new Set([
+  'event-details',
+  'notify-control',
+  'options-load',
+  'eligible-option',
+  'put-response',
+  'complete',
+]);
+const REMINDER_CONFIGURATION_FIELDS = [
+  'reminderStep',
+  'notifyButtonCount',
+  'notifyButtonVisible',
+  'reminderOptionsGetCount',
+  'reminderOptionsGetStatus',
+  'reminderConfigGetCount',
+  'reminderConfigGetStatus',
+  'reminderEligibleOptionCount',
+  'reminderOptionCheckedBefore',
+  'reminderOptionCheckAttempted',
+  'reminderPutCount',
+  'reminderPutStatus',
+  'reminderOptionCheckedAfter',
+];
+const REMINDER_CONFIGURATION_COUNTER_FIELDS = [
+  'notifyButtonCount',
+  'reminderOptionsGetCount',
+  'reminderConfigGetCount',
+  'reminderEligibleOptionCount',
+  'reminderPutCount',
+];
+const REMINDER_CONFIGURATION_STATUS_FIELDS = [
+  'reminderOptionsGetStatus',
+  'reminderConfigGetStatus',
+  'reminderPutStatus',
+];
 const RUNTIME_COUNTER_FIELDS = [
   'gatewayContextRequestCount',
   'gatewayCalendarsRequestCount',
@@ -492,6 +528,8 @@ const ALLOWED_KEYS = new Set([
   ...RUNTIME_OBSERVATION_FIELDS,
   ...OPTIONAL_RUNTIME_STATUS_FIELDS,
   ...POST_CREATE_VISIBILITY_FIELDS,
+  'canManageReminders',
+  ...REMINDER_CONFIGURATION_FIELDS,
   ...VERSION_FIELDS,
 ]);
 
@@ -734,6 +772,73 @@ function validPostCreateVisibilityObservation(record) {
   );
 }
 
+function validReminderConfigurationObservation(record) {
+  const expectedKeys = new Set([
+    'phase',
+    'status',
+    ...['httpStatus', 'count'].filter((key) => Object.hasOwn(record, key)),
+    'reminderEnabled',
+    ...REMINDER_CONFIGURATION_FIELDS,
+  ]);
+  return (
+    Object.keys(record).length === expectedKeys.size &&
+    Object.keys(record).every((key) => expectedKeys.has(key)) &&
+    (record.status === 'passed' || record.status === 'failed') &&
+    typeof record.reminderEnabled === 'boolean' &&
+    REMINDER_CONFIGURATION_STEPS.has(record.reminderStep) &&
+    REMINDER_CONFIGURATION_COUNTER_FIELDS.every(
+      (key) =>
+        Number.isInteger(record[key]) && record[key] >= 0 && record[key] <= 2,
+    ) &&
+    REMINDER_CONFIGURATION_STATUS_FIELDS.every(
+      (key) =>
+        Number.isInteger(record[key]) &&
+        (record[key] === 0 || (record[key] >= 100 && record[key] <= 599)),
+    ) &&
+    [
+      'notifyButtonVisible',
+      'reminderOptionCheckedBefore',
+      'reminderOptionCheckAttempted',
+      'reminderOptionCheckedAfter',
+    ].every((key) => typeof record[key] === 'boolean') &&
+    (!record.notifyButtonVisible || record.notifyButtonCount === 1) &&
+    (record.reminderOptionsGetCount > 0 ||
+      record.reminderOptionsGetStatus === 0) &&
+    (record.reminderConfigGetCount > 0 ||
+      record.reminderConfigGetStatus === 0) &&
+    (record.reminderPutCount > 0 || record.reminderPutStatus === 0) &&
+    (!record.reminderOptionCheckedBefore ||
+      record.reminderEligibleOptionCount === 1) &&
+    (!record.reminderOptionCheckAttempted ||
+      (record.reminderEligibleOptionCount === 1 &&
+        !record.reminderOptionCheckedBefore)) &&
+    (!record.reminderOptionCheckedAfter ||
+      record.reminderEligibleOptionCount === 1) &&
+    (!Object.hasOwn(record, 'count') ||
+      (record.status === 'passed' && record.count === 1)) &&
+    (record.status !== 'passed' ||
+      (record.reminderStep === 'complete' &&
+        record.notifyButtonCount === 1 &&
+        record.notifyButtonVisible &&
+        record.reminderOptionsGetCount >= 1 &&
+        record.reminderOptionsGetStatus >= 200 &&
+        record.reminderOptionsGetStatus < 300 &&
+        record.reminderConfigGetCount >= 1 &&
+        record.reminderConfigGetStatus >= 200 &&
+        record.reminderConfigGetStatus < 300 &&
+        record.reminderEligibleOptionCount === 1 &&
+        !record.reminderOptionCheckedBefore &&
+        record.reminderOptionCheckAttempted &&
+        record.reminderPutCount === 1 &&
+        record.reminderPutStatus >= 200 &&
+        record.reminderPutStatus < 300 &&
+        record.reminderOptionCheckedAfter &&
+        record.reminderEnabled &&
+        record.httpStatus === record.reminderPutStatus &&
+        record.count === 1))
+  );
+}
+
 const PROJECTION_DIAGNOSTIC_REASONS = [
   'invalid-recurrence',
   'invalid-timing',
@@ -945,6 +1050,8 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     );
     const hasPostCreateVisibilityObservation =
       POST_CREATE_VISIBILITY_FIELDS.some((key) => Object.hasOwn(record, key));
+    const hasReminderConfigurationObservation =
+      REMINDER_CONFIGURATION_FIELDS.some((key) => Object.hasOwn(record, key));
     if (
       (record.phase === 'widget-a-runtime-observed' &&
         !validRuntimeObservation(record)) ||
@@ -956,7 +1063,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.phase === 'event-create-post-refresh-observed' &&
         !validPostCreateVisibilityObservation(record)) ||
       (record.phase !== 'event-create-post-refresh-observed' &&
-        hasPostCreateVisibilityObservation)
+        hasPostCreateVisibilityObservation) ||
+      (record.phase === 'reminder-room-configuration-enabled' &&
+        !validReminderConfigurationObservation(record)) ||
+      (record.phase !== 'reminder-room-configuration-enabled' &&
+        hasReminderConfigurationObservation)
     ) {
       throw new Error('invalid element acceptance summary');
     }
@@ -984,6 +1095,15 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.phase === 'outsider-own-unbound-room' &&
         record.status === 'passed' &&
         record.httpStatus !== 404)
+    ) {
+      throw new Error('invalid element acceptance summary');
+    }
+
+    if (
+      (record.phase === 'reminder-widget-context' &&
+        typeof record.canManageReminders !== 'boolean') ||
+      (record.phase !== 'reminder-widget-context' &&
+        Object.hasOwn(record, 'canManageReminders'))
     ) {
       throw new Error('invalid element acceptance summary');
     }
@@ -1542,6 +1662,29 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `kernel_release=${record.runnerOSVersion}`,
           `runner_arch=${record.runnerArchitecture}`,
           `node_observed=${record.nodeVersion}`,
+        ].join(' '),
+      );
+      continue;
+    }
+
+    if (phase === 'reminder-room-configuration-enabled') {
+      lines.push(
+        [
+          `phase=${phase}`,
+          `status=${record.status}`,
+          `reminder_step=${record.reminderStep}`,
+          `notify_button_count=${record.notifyButtonCount}`,
+          `notify_button_visible=${record.notifyButtonVisible}`,
+          `options_get_count=${record.reminderOptionsGetCount}`,
+          `options_http_status=${record.reminderOptionsGetStatus}`,
+          `configuration_get_count=${record.reminderConfigGetCount}`,
+          `configuration_http_status=${record.reminderConfigGetStatus}`,
+          `eligible_option_count=${record.reminderEligibleOptionCount}`,
+          `option_checked_before=${record.reminderOptionCheckedBefore}`,
+          `option_check_attempted=${record.reminderOptionCheckAttempted}`,
+          `put_count=${record.reminderPutCount}`,
+          `put_http_status=${record.reminderPutStatus}`,
+          `option_checked_after=${record.reminderOptionCheckedAfter}`,
         ].join(' '),
       );
       continue;

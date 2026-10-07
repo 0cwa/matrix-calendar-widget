@@ -17,6 +17,52 @@ function projectionDiagnosticCounts(overrides = {}) {
   };
 }
 
+function reminderConfigurationObservation(overrides = {}) {
+  return {
+    phase: 'reminder-room-configuration-enabled',
+    status: 'passed',
+    httpStatus: 200,
+    count: 1,
+    reminderEnabled: true,
+    reminderStep: 'complete',
+    notifyButtonCount: 1,
+    notifyButtonVisible: true,
+    reminderOptionsGetCount: 1,
+    reminderOptionsGetStatus: 200,
+    reminderConfigGetCount: 1,
+    reminderConfigGetStatus: 200,
+    reminderEligibleOptionCount: 1,
+    reminderOptionCheckedBefore: false,
+    reminderOptionCheckAttempted: true,
+    reminderPutCount: 1,
+    reminderPutStatus: 200,
+    reminderOptionCheckedAfter: true,
+    ...overrides,
+  };
+}
+
+function missingReminderOptionObservation() {
+  return {
+    phase: 'reminder-room-configuration-enabled',
+    status: 'failed',
+    httpStatus: 200,
+    reminderEnabled: false,
+    reminderStep: 'eligible-option',
+    notifyButtonCount: 1,
+    notifyButtonVisible: true,
+    reminderOptionsGetCount: 1,
+    reminderOptionsGetStatus: 200,
+    reminderConfigGetCount: 1,
+    reminderConfigGetStatus: 200,
+    reminderEligibleOptionCount: 0,
+    reminderOptionCheckedBefore: false,
+    reminderOptionCheckAttempted: false,
+    reminderPutCount: 0,
+    reminderPutStatus: 0,
+    reminderOptionCheckedAfter: false,
+  };
+}
+
 function postCreateVisibilityObservation(overrides = {}) {
   return {
     phase: 'event-create-post-refresh-observed',
@@ -242,6 +288,13 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
   const summary = sanitizeElementAcceptance(
     [
       JSON.stringify({
+        phase: 'reminder-widget-context',
+        status: 'passed',
+        httpStatus: 200,
+        canManageReminders: true,
+      }),
+      JSON.stringify(reminderConfigurationObservation()),
+      JSON.stringify({
         phase: 'reminder-configuration-stored',
         status: 'passed',
         count: 1,
@@ -262,13 +315,6 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
         status: 'passed',
         count: 1,
         relativeAlarmReadback: true,
-      }),
-      JSON.stringify({
-        phase: 'reminder-room-configuration-enabled',
-        status: 'passed',
-        httpStatus: 200,
-        count: 1,
-        reminderEnabled: true,
       }),
       JSON.stringify({
         phase: 'reminder-ui-readback',
@@ -350,6 +396,14 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
   );
   assert.match(
     summary,
+    /phase=reminder-widget-context status=passed http_status=200 can_manage_reminders=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete notify_button_count=1 notify_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 eligible_option_count=1 option_checked_before=false option_check_attempted=true put_count=1 put_http_status=200 option_checked_after=true/u,
+  );
+  assert.match(
+    summary,
     /phase=reminder-initial-delivery status=passed http_status=200 count=1 canary_delivered=true room_mentioned=true delivered_after_due=true all_markers_once=true/u,
   );
   assert.match(
@@ -371,6 +425,7 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
     {
       phase: 'reminder-room-configuration-enabled',
       status: 'passed',
+      httpStatus: 200,
       count: 1,
       reminderEnabled: true,
     },
@@ -420,12 +475,56 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
       count: 1,
       eventTitle: 'Reminder acceptance private marker',
     },
+    reminderConfigurationObservation({ reminderOptionsGetStatus: 999 }),
+    reminderConfigurationObservation({ reminderPutCount: 3 }),
+    reminderConfigurationObservation({ accessToken: 'private-test-token' }),
   ]) {
     assert.throws(
       () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
       /invalid element acceptance summary/u,
     );
   }
+});
+
+test('sanitizes the fixed reminder option failure boundary', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(missingReminderOptionObservation()),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-room-configuration-enabled status=failed reminder_step=eligible-option notify_button_count=1 notify_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 eligible_option_count=0 option_checked_before=false option_check_attempted=false put_count=0 put_http_status=0 option_checked_after=false/u,
+  );
+  assert.doesNotMatch(summary, /https?:|access_token|event_id|error_text/iu);
+});
+
+test('keeps a successful context status distinct from reminder capability', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'reminder-widget-context',
+      status: 'failed',
+      httpStatus: 200,
+      canManageReminders: false,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-widget-context status=failed http_status=200 can_manage_reminders=false/u,
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'reminder-widget-context',
+          status: 'passed',
+          httpStatus: 200,
+          canManageReminders: false,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
 });
 
 test('rejects incomplete or inconsistent restore evidence', () => {

@@ -69,6 +69,30 @@ type ReminderTimelineSnapshot = {
   markerTimestamps: Array<number | null>;
 };
 
+type ReminderConfigurationStep =
+  | 'event-details'
+  | 'notify-control'
+  | 'options-load'
+  | 'eligible-option'
+  | 'put-response'
+  | 'complete';
+
+type ReminderConfigurationObservation = {
+  reminderStep: ReminderConfigurationStep;
+  notifyButtonCount: number;
+  notifyButtonVisible: boolean;
+  reminderOptionsGetCount: number;
+  reminderOptionsGetStatus: number;
+  reminderConfigGetCount: number;
+  reminderConfigGetStatus: number;
+  reminderEligibleOptionCount: number;
+  reminderOptionCheckedBefore: boolean;
+  reminderOptionCheckAttempted: boolean;
+  reminderPutCount: number;
+  reminderPutStatus: number;
+  reminderOptionCheckedAfter: boolean;
+};
+
 const REMINDER_START_LEAD_MS = 150_000;
 const REMINDER_ALARM_OFFSET_MS = 60_000;
 // Allow one default 60-second scheduler interval plus its 30-second scan deadline.
@@ -959,12 +983,27 @@ test('Element Web delivers a relative room reminder across restart and restore',
     });
     const contextResult = await contextResponse;
     failureHttpStatus = contextResult.status();
-    if (failureHttpStatus !== 200) {
-      record(activePhase, 'failed', failureHttpStatus);
+    const contextPayload: unknown = await contextResult
+      .json()
+      .catch(() => null);
+    const canManageReminders =
+      contextPayload !== null &&
+      typeof contextPayload === 'object' &&
+      'roomCalendar' in contextPayload &&
+      contextPayload.roomCalendar !== null &&
+      typeof contextPayload.roomCalendar === 'object' &&
+      'canManageReminders' in contextPayload.roomCalendar &&
+      contextPayload.roomCalendar.canManageReminders === true;
+    if (failureHttpStatus !== 200 || !canManageReminders) {
+      record(activePhase, 'failed', failureHttpStatus, undefined, {
+        canManageReminders,
+      });
       failureAlreadyRecorded = true;
       throw new Error('Reminder room context was not authorized');
     }
-    record(activePhase, 'passed', failureHttpStatus);
+    record(activePhase, 'passed', failureHttpStatus, undefined, {
+      canManageReminders,
+    });
     failureHttpStatus = undefined;
 
     if (eventTitles.length > 0) {
@@ -1365,42 +1404,184 @@ async function setRoomReminder(
   enable: boolean,
 ): Promise<{ enabled: boolean; httpStatus: number | null }> {
   const row = frame.getByRole('listitem', { name: title });
-  await expect(row).toBeVisible();
-  await row.click();
   const details = frame.getByRole('dialog').last();
-  await expect(details).toBeVisible();
-  await details
-    .getByRole('button', { name: 'Notify room', exact: true })
-    .click();
   const option = details.getByRole('checkbox', {
     name: /relative to event start$/u,
   });
-  await expect(option).toBeVisible({ timeout: 20_000 });
-  let httpStatus: number | null = null;
-  let enabled = await option.isChecked();
-  if (enable) {
-    if (enabled) {
-      await details.getByRole('button', { name: 'Close', exact: true }).click();
-      return { enabled: false, httpStatus };
-    }
-    const responsePromise = waitForGatewayResponse(
-      page,
-      'PUT',
-      `/v1/calendar/rooms/${encodeURIComponent(fixture.teamRoomId)}/reminders`,
-    );
-    await option.check();
-    const response = await responsePromise;
-    const responseStatus = response.status();
-    httpStatus = responseStatus;
-    if (responseStatus >= 200 && responseStatus < 300) {
-      await expect(option).toBeChecked();
-      enabled = true;
-    } else {
-      enabled = false;
-    }
+
+  if (!enable) {
+    await expect(row).toBeVisible();
+    await row.click();
+    await expect(details).toBeVisible();
+    await details
+      .getByRole('button', { name: 'Notify room', exact: true })
+      .click();
+    await expect(option).toBeVisible({ timeout: 20_000 });
+    const enabled = await option.isChecked();
+    await details.getByRole('button', { name: 'Close', exact: true }).click();
+    return { enabled, httpStatus: null };
   }
-  await details.getByRole('button', { name: 'Close', exact: true }).click();
-  return { enabled, httpStatus };
+
+  const observation: ReminderConfigurationObservation = {
+    reminderStep: 'event-details',
+    notifyButtonCount: 0,
+    notifyButtonVisible: false,
+    reminderOptionsGetCount: 0,
+    reminderOptionsGetStatus: 0,
+    reminderConfigGetCount: 0,
+    reminderConfigGetStatus: 0,
+    reminderEligibleOptionCount: 0,
+    reminderOptionCheckedBefore: false,
+    reminderOptionCheckAttempted: false,
+    reminderPutCount: 0,
+    reminderPutStatus: 0,
+    reminderOptionCheckedAfter: false,
+  };
+  const roomPath = `/v1/calendar/rooms/${fixture.teamRoomId}/reminders`;
+  const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
+  const classifyRequest = (urlValue: string, method: string) => {
+    try {
+      const url = new URL(urlValue);
+      if (url.origin !== gatewayOrigin) return undefined;
+      const pathname = decodeURIComponent(url.pathname);
+      if (method === 'GET' && pathname === `${roomPath}/options`) {
+        return 'options' as const;
+      }
+      if (method === 'GET' && pathname === roomPath) {
+        return 'config' as const;
+      }
+      if (method === 'PUT' && pathname === roomPath) {
+        return 'put' as const;
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  };
+  const onRequest = (request: Request) => {
+    const kind = classifyRequest(request.url(), request.method());
+    if (kind === 'options') {
+      observation.reminderOptionsGetCount = Math.min(
+        observation.reminderOptionsGetCount + 1,
+        2,
+      );
+    } else if (kind === 'config') {
+      observation.reminderConfigGetCount = Math.min(
+        observation.reminderConfigGetCount + 1,
+        2,
+      );
+    } else if (kind === 'put') {
+      observation.reminderPutCount = Math.min(
+        observation.reminderPutCount + 1,
+        2,
+      );
+    }
+  };
+  const onResponse = (response: Response) => {
+    const kind = classifyRequest(response.url(), response.request().method());
+    if (kind === 'options') {
+      observation.reminderOptionsGetStatus = response.status();
+    } else if (kind === 'config') {
+      observation.reminderConfigGetStatus = response.status();
+    } else if (kind === 'put') {
+      observation.reminderPutStatus = response.status();
+    }
+  };
+  const writeFailure = async () => {
+    observation.reminderOptionCheckedAfter = await option
+      .isChecked()
+      .catch(() => false);
+    const httpStatus =
+      observation.reminderPutStatus ||
+      observation.reminderOptionsGetStatus ||
+      observation.reminderConfigGetStatus ||
+      undefined;
+    record(activePhase, 'failed', httpStatus, undefined, {
+      ...observation,
+      reminderEnabled: observation.reminderOptionCheckedAfter,
+    });
+    activeReminderFailureRecorded = true;
+  };
+
+  page.on('request', onRequest);
+  page.on('response', onResponse);
+  try {
+    await expect(row).toBeVisible();
+    await row.click();
+    await expect(details).toBeVisible();
+    observation.reminderStep = 'notify-control';
+    const notifyButton = details.getByRole('button', {
+      name: 'Notify room',
+      exact: true,
+    });
+    observation.notifyButtonCount = Math.min(await notifyButton.count(), 2);
+    observation.notifyButtonVisible =
+      observation.notifyButtonCount === 1 &&
+      (await notifyButton.isVisible().catch(() => false));
+    if (!observation.notifyButtonVisible) {
+      throw new Error('Room reminder control is unavailable');
+    }
+
+    observation.reminderStep = 'options-load';
+    await notifyButton.click();
+    await option.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
+    observation.reminderEligibleOptionCount = Math.min(await option.count(), 2);
+    observation.reminderOptionCheckedBefore =
+      observation.reminderEligibleOptionCount === 1 &&
+      (await option.isChecked().catch(() => false));
+    if (
+      observation.reminderEligibleOptionCount !== 1 ||
+      observation.reminderOptionsGetCount === 0 ||
+      observation.reminderConfigGetCount === 0 ||
+      observation.reminderOptionsGetStatus < 200 ||
+      observation.reminderOptionsGetStatus >= 300 ||
+      observation.reminderConfigGetStatus < 200 ||
+      observation.reminderConfigGetStatus >= 300 ||
+      observation.reminderOptionCheckedBefore
+    ) {
+      observation.reminderStep = 'eligible-option';
+      throw new Error('Expected reminder alarm option is unavailable');
+    }
+
+    observation.reminderStep = 'put-response';
+    const putResponse = page
+      .waitForResponse(
+        (response) =>
+          classifyRequest(response.url(), response.request().method()) ===
+          'put',
+        { timeout: 15_000 },
+      )
+      .catch(() => undefined);
+    observation.reminderOptionCheckAttempted = true;
+    await option.click();
+    const response = await putResponse;
+    if (response) observation.reminderPutStatus = response.status();
+    observation.reminderOptionCheckedAfter = await option
+      .isChecked()
+      .catch(() => false);
+    if (
+      observation.reminderPutCount !== 1 ||
+      observation.reminderPutStatus < 200 ||
+      observation.reminderPutStatus >= 300 ||
+      !observation.reminderOptionCheckedAfter
+    ) {
+      throw new Error('Room reminder configuration was not saved');
+    }
+
+    await details.getByRole('button', { name: 'Close', exact: true }).click();
+    observation.reminderStep = 'complete';
+    record(activePhase, 'passed', observation.reminderPutStatus, 1, {
+      ...observation,
+      reminderEnabled: true,
+    });
+    return { enabled: true, httpStatus: observation.reminderPutStatus };
+  } catch {
+    if (!activeReminderFailureRecorded) await writeFailure();
+    throw new Error('Room reminder configuration could not be confirmed');
+  } finally {
+    page.off('request', onRequest);
+    page.off('response', onResponse);
+  }
 }
 
 async function readBackReminderMarkers(
@@ -3920,7 +4101,8 @@ function record(
     roomMentioned?: boolean;
     deliveredAfterDue?: boolean;
     allMarkersOnce?: boolean;
-  },
+    canManageReminders?: boolean;
+  } & Partial<ReminderConfigurationObservation>,
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   if (!stageFile) throw new Error('Element acceptance fixture unavailable');
