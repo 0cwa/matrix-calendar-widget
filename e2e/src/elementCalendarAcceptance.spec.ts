@@ -1754,6 +1754,7 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
   };
 
   try {
+    recordRuntimeVersions(browser.version());
     context = await browser.newContext({
       locale: 'en-US',
       timezoneId: 'Europe/Stockholm',
@@ -2297,8 +2298,7 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
     expect(pageErrorCount).toBe(0);
     failureCode = 'performance-threshold-exceeded';
     expect(report.overflow.renderedEventCount).toBe(250);
-    expect(report.overflow.expectedDayEventCount).toBeGreaterThanOrEqual(8);
-    expect(report.overflow.expectedDayEventCount).toBeLessThanOrEqual(9);
+    expect(report.overflow.expectedDayEventCount).toBe(9);
     expect(report.overflow.dayEventCount).toBe(
       report.overflow.expectedDayEventCount,
     );

@@ -297,6 +297,18 @@ test('requires the actual Element maximize transition and expected API methods',
     /invalid element acceptance summary/u,
   );
 
+  const wrongOverflowCount = completeReport();
+  wrongOverflowCount.overflow.expectedDayEventCount = 8;
+  wrongOverflowCount.overflow.dayEventCount = 8;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(stage('passed', wrongOverflowCount)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
   const methodMismatch = completeReport();
   methodMismatch.apiResponses[0].method = 'POST';
   assert.throws(

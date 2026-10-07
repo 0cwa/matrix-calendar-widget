@@ -2424,6 +2424,19 @@ test('sanitizes the fixed performance seed and cleanup phases', () => {
   );
   assert.match(summary, /phase=performance-seed status=passed count=250/u);
   assert.match(summary, /phase=performance-cleanup status=passed count=250/u);
+  const emptyCleanup = sanitizeElementAcceptance(
+    [
+      { phase: 'performance-cleanup', status: 'started' },
+      { phase: 'performance-cleanup', status: 'passed', count: 0 },
+    ]
+      .map((stage) => JSON.stringify(stage))
+      .join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    emptyCleanup,
+    /phase=performance-cleanup status=passed count=0/u,
+  );
 });
 
 test('rejects invalid performance fixture counts and failure categories', () => {
@@ -2431,6 +2444,16 @@ test('rejects invalid performance fixture counts and failure categories', () => 
     [
       { phase: 'performance-seed', status: 'started' },
       { phase: 'performance-seed', status: 'passed', count: 249 },
+    ],
+    [
+      { phase: 'performance-seed', status: 'started' },
+      { phase: 'performance-seed', status: 'passed', count: 250 },
+      { phase: 'performance-cleanup', status: 'started' },
+      { phase: 'performance-cleanup', status: 'passed', count: 0 },
+    ],
+    [
+      { phase: 'performance-cleanup', status: 'started' },
+      { phase: 'performance-cleanup', status: 'passed', count: 125 },
     ],
     [
       { phase: 'performance-cleanup', status: 'started' },

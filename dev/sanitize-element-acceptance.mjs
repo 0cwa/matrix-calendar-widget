@@ -1383,6 +1383,15 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           (record.phase === 'performance-seed' &&
             record.status === 'passed' &&
             record.count !== 250) ||
+          (record.phase === 'performance-cleanup' &&
+            record.status === 'passed' &&
+            record.count !== 0 &&
+            record.count !== 250) ||
+          (record.phase === 'performance-cleanup' &&
+            record.status === 'passed' &&
+            record.count === 0 &&
+            performanceFixturePhaseStatus.get('performance-seed') ===
+              'passed') ||
           (record.status === 'failed' &&
             !failureCodes.has(record.failureCode)) ||
           (Object.hasOwn(record, 'httpStatus') &&

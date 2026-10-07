@@ -425,8 +425,7 @@ function reportPasses(report) {
     report.overflow.visibleEventCount + report.overflow.collapsedEventCount ===
       report.overflow.renderedEventCount &&
     report.overflow.opened &&
-    (report.overflow.expectedDayEventCount === 8 ||
-      report.overflow.expectedDayEventCount === 9) &&
+    report.overflow.expectedDayEventCount === 9 &&
     report.overflow.dayEventCount === report.overflow.expectedDayEventCount &&
     report.overflow.dayIdentityMatches &&
     report.overflow.stable &&
