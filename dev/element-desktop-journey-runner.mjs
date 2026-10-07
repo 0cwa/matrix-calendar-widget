@@ -1,0 +1,1986 @@
+import { spawn, spawnSync } from 'node:child_process';
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { createServer } from 'node:net';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
+import {
+  acknowledgedEgressCounterObservation,
+  emptyUidLifecycleObservation,
+  emptyUidStartupObservation,
+  resolveTrustedRendererSandbox,
+  sanitizeDesktopStages,
+  sanitizeEgressCounterObservation,
+  sanitizeUidLifecycleObservation,
+  sanitizeUidStartupObservation,
+  uidProcessObservationFromLifecycle,
+} from './element-desktop-evidence.mjs';
+
+const PACKAGE_VERSION = '1.12.30';
+const PROBE_USERNAME = 'mcwdesktopprobe';
+const PROBE_UID_START = 24_000;
+const PROBE_UID_END = 65_535;
+const JOURNEY_HOLD_MS = 180_000;
+const STARTUP_WAIT_MS = 90_000;
+const STARTUP_EXIT_WAIT_MS = 20_000;
+const PLAYWRIGHT_TIMEOUT_MS = 165_000;
+const RUNNER_STATE_NAME = 'element-desktop-journey-runner-state.json';
+const DESKTOP_RESULT_NAME = 'element-desktop-journey-startup-output.jsonl';
+const DESKTOP_STAGE_NAME = 'element-desktop-startup-stage.jsonl';
+const DESKTOP_EVIDENCE_MAX_BYTES = 1_048_576;
+const WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const POLICY_SCRIPT = resolve(
+  WORKSPACE_ROOT,
+  'dev/element-desktop-egress-policy.mjs',
+);
+const STARTUP_SCRIPT = resolve(
+  WORKSPACE_ROOT,
+  'dev/element-desktop-startup.mjs',
+);
+const CONFIG_FILE = resolve(
+  WORKSPACE_ROOT,
+  'dev/element-desktop-probe-config.json',
+);
+const E2E_PACKAGE_FILE = resolve(WORKSPACE_ROOT, 'e2e/package.json');
+
+const RUNNER_STATE_KEYS = Object.freeze([
+  'runId',
+  'runAttempt',
+  'sourceSha',
+  'journey',
+  'username',
+  'uid',
+  'groupId',
+  'profileRoot',
+  'cdpPort',
+  'packageSha256',
+  'policyMayBeInstalled',
+  'userMayBeCreated',
+  'resultPath',
+]);
+
+const PROGRESS_SHAPES = Object.freeze({
+  'before-app': ['milestone', 'phase'],
+  'after-app-spawn': ['appPid', 'milestone', 'phase'],
+  'after-page-load': ['appPid', 'cdpRendererHandoff', 'milestone', 'phase'],
+  'desktop-journey-ready': ['milestone', 'phase'],
+});
+
+function failure(code = 'desktop-journey-runner-failed') {
+  const error = new Error('Element Desktop journey runner failed');
+  error.code = code;
+  return error;
+}
+
+function safePath(input, expectedName, runnerTemp) {
+  if (
+    typeof input !== 'string' ||
+    typeof runnerTemp !== 'string' ||
+    !isAbsolute(input) ||
+    !isAbsolute(runnerTemp) ||
+    resolve(input) !== resolve(runnerTemp, expectedName)
+  ) {
+    throw failure();
+  }
+  return resolve(input);
+}
+
+function requiredEnvironment(name, pattern) {
+  const value = process.env[name];
+  if (typeof value !== 'string' || !pattern.test(value)) throw failure();
+  return value;
+}
+
+export function createSystemCommandEnvironment(sourceEnvironment) {
+  if (sourceEnvironment === null || typeof sourceEnvironment !== 'object') {
+    throw failure();
+  }
+  const environment = {};
+  for (const name of ['HOME', 'LANG', 'LC_ALL', 'PATH']) {
+    if (typeof sourceEnvironment[name] === 'string') {
+      environment[name] = sourceEnvironment[name];
+    }
+  }
+  environment.TMPDIR =
+    typeof sourceEnvironment.RUNNER_TEMP === 'string' &&
+    isAbsolute(sourceEnvironment.RUNNER_TEMP)
+      ? sourceEnvironment.RUNNER_TEMP
+      : '/tmp';
+  return environment;
+}
+
+function capture(program, args, { input, timeout = 10_000, cwd, env } = {}) {
+  const result = spawnSync(program, args, {
+    cwd,
+    env: env ?? createSystemCommandEnvironment(process.env),
+    encoding: 'utf8',
+    input,
+    stdio: ['pipe', 'pipe', 'ignore'],
+    timeout,
+    maxBuffer: 1_048_576,
+  });
+  if (result.error || result.signal || result.status !== 0) return undefined;
+  return result.stdout;
+}
+
+function requiredCommand(program, args, options = {}) {
+  const output = capture(program, args, options);
+  if (output === undefined) throw failure();
+  return output;
+}
+
+function runQuietly(program, args, { input, timeout = 10_000, cwd, env } = {}) {
+  const result = spawnSync(program, args, {
+    cwd,
+    env: env ?? createSystemCommandEnvironment(process.env),
+    encoding: 'utf8',
+    input,
+    stdio: ['pipe', 'ignore', 'ignore'],
+    timeout,
+  });
+  if (result.error || result.signal || !Number.isInteger(result.status)) {
+    return undefined;
+  }
+  return result.status;
+}
+
+export function parseStartupProgressRecord(line) {
+  if (typeof line !== 'string' || Buffer.byteLength(line) > 8_192) {
+    return undefined;
+  }
+  let value;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    value.phase !== 'desktop-startup-progress' ||
+    !Object.hasOwn(PROGRESS_SHAPES, value.milestone) ||
+    Object.keys(value).sort().join(',') !==
+      [...PROGRESS_SHAPES[value.milestone]].sort().join(',')
+  ) {
+    return undefined;
+  }
+  if (
+    ['after-app-spawn', 'after-page-load'].includes(value.milestone) &&
+    (!Number.isSafeInteger(value.appPid) ||
+      value.appPid < 2 ||
+      value.appPid > 2_147_483_647)
+  ) {
+    return undefined;
+  }
+  if (
+    value.milestone === 'after-page-load' &&
+    !validRendererHandoff(value.cdpRendererHandoff)
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+function validRendererHandoff(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'overflow,pids,rendererCount,state' ||
+    !['unavailable', 'partial', 'observed'].includes(value.state)
+  ) {
+    return false;
+  }
+  if (value.state === 'unavailable') {
+    return (
+      value.overflow === null &&
+      value.pids === null &&
+      value.rendererCount === null
+    );
+  }
+  return (
+    typeof value.overflow === 'boolean' &&
+    Number.isSafeInteger(value.rendererCount) &&
+    value.rendererCount >= 0 &&
+    value.rendererCount <= 64 &&
+    Array.isArray(value.pids) &&
+    value.pids.length === value.rendererCount &&
+    value.pids.every(
+      (pid, index) =>
+        Number.isSafeInteger(pid) &&
+        pid >= 2 &&
+        pid <= 2_147_483_647 &&
+        value.pids.indexOf(pid) === index,
+    ) &&
+    (value.state !== 'observed' || value.overflow === false)
+  );
+}
+
+function statePath() {
+  const runnerTemp = requiredEnvironment('RUNNER_TEMP', /^.+$/u);
+  return safePath(
+    join(runnerTemp, RUNNER_STATE_NAME),
+    RUNNER_STATE_NAME,
+    runnerTemp,
+  );
+}
+
+function desktopStagePath() {
+  const runnerTemp = requiredEnvironment('RUNNER_TEMP', /^.+$/u);
+  return safePath(
+    process.env.ELEMENT_DESKTOP_STAGE_FILE ??
+      join(runnerTemp, DESKTOP_STAGE_NAME),
+    DESKTOP_STAGE_NAME,
+    runnerTemp,
+  );
+}
+
+function writePrivateJson(path, value) {
+  const temporaryPath = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporaryPath, `${JSON.stringify(value)}\n`, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+    chmodSync(temporaryPath, 0o600);
+    renameSync(temporaryPath, path);
+  } catch {
+    try {
+      unlinkSync(temporaryPath);
+    } catch {
+      // Keep the original safe failure if cleanup has nothing to remove.
+    }
+    throw failure();
+  }
+}
+
+function persistState(state) {
+  if (
+    Object.keys(state).sort().join(',') !==
+    [...RUNNER_STATE_KEYS].sort().join(',')
+  ) {
+    throw failure();
+  }
+  writePrivateJson(statePath(), state);
+}
+
+function readState() {
+  const path = statePath();
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    return undefined;
+  }
+  if (
+    !stat.isFile() ||
+    stat.isSymbolicLink() ||
+    stat.nlink !== 1 ||
+    stat.uid !== process.getuid?.() ||
+    (stat.mode & 0o777) !== 0o600 ||
+    stat.size > 8_192
+  ) {
+    throw failure();
+  }
+  let state;
+  try {
+    state = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    throw failure();
+  }
+  if (
+    state === null ||
+    typeof state !== 'object' ||
+    Array.isArray(state) ||
+    Object.keys(state).sort().join(',') !==
+      [...RUNNER_STATE_KEYS].sort().join(',') ||
+    !/^[0-9]{1,18}$/u.test(state.runId) ||
+    !/^[0-9]{1,6}$/u.test(state.runAttempt) ||
+    !/^[0-9a-f]{40}$/u.test(state.sourceSha) ||
+    typeof state.journey !== 'boolean' ||
+    state.username !== PROBE_USERNAME ||
+    !Number.isSafeInteger(state.uid) ||
+    state.uid < PROBE_UID_START ||
+    state.uid > PROBE_UID_END ||
+    !Number.isSafeInteger(state.groupId) ||
+    state.groupId < 1 ||
+    typeof state.profileRoot !== 'string' ||
+    !new RegExp(
+      `^/tmp/mcw-element-desktop-${state.runId}-${state.runAttempt}-[A-Za-z0-9]{6}$`,
+      'u',
+    ).test(state.profileRoot) ||
+    !Number.isSafeInteger(state.cdpPort) ||
+    state.cdpPort < 1_024 ||
+    state.cdpPort > 65_535 ||
+    (state.packageSha256 !== null &&
+      !/^[0-9a-f]{64}$/u.test(state.packageSha256)) ||
+    typeof state.policyMayBeInstalled !== 'boolean' ||
+    typeof state.userMayBeCreated !== 'boolean' ||
+    typeof state.resultPath !== 'string' ||
+    !isAbsolute(state.resultPath) ||
+    resolve(state.resultPath) !==
+      resolve(requiredEnvironment('RUNNER_TEMP', /^.+$/u), DESKTOP_RESULT_NAME)
+  ) {
+    throw failure();
+  }
+  return state;
+}
+
+function appendStage(path, record) {
+  const serialized = `${JSON.stringify(record)}\n`;
+  let size = 0;
+  try {
+    const stat = lstatSync(path);
+    if (
+      !stat.isFile() ||
+      stat.isSymbolicLink() ||
+      stat.nlink !== 1 ||
+      stat.uid !== process.getuid?.() ||
+      (stat.mode & 0o777) !== 0o600
+    ) {
+      throw failure();
+    }
+    size = stat.size;
+  } catch {
+    if (!existsSync(path)) {
+      writeFileSync(path, '', { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    } else {
+      throw failure();
+    }
+  }
+  if (size + Buffer.byteLength(serialized) > DESKTOP_EVIDENCE_MAX_BYTES) {
+    throw failure();
+  }
+  appendFileSync(path, serialized, { encoding: 'utf8', mode: 0o600 });
+}
+
+export function validateJourneyPolicyPorts(cdpPort) {
+  return (
+    Number.isSafeInteger(cdpPort) &&
+    cdpPort >= 1_024 &&
+    cdpPort <= 65_535 &&
+    ![8_008, 3_000, 8_080].includes(cdpPort)
+  );
+}
+
+export function validateDefaultPolicyPort(cdpPort) {
+  return (
+    Number.isSafeInteger(cdpPort) &&
+    cdpPort >= 1_024 &&
+    cdpPort <= 65_535 &&
+    cdpPort !== 8_008
+  );
+}
+
+export function buildDesktopPolicyArguments(
+  state,
+  command,
+  extraArguments = [],
+) {
+  if (
+    state === null ||
+    typeof state !== 'object' ||
+    ![
+      'install',
+      'negative-self-test',
+      'zero-counters',
+      'counters',
+      'remove',
+    ].includes(command) ||
+    !Array.isArray(extraArguments) ||
+    !extraArguments.every((argument) => typeof argument === 'string')
+  ) {
+    throw failure();
+  }
+  const base = [command, String(state.uid), state.runId];
+  if (command === 'remove') return base;
+  return [
+    ...base,
+    String(state.cdpPort),
+    ...extraArguments,
+    ...(state.journey ? ['--journey'] : []),
+  ];
+}
+
+export function selectAvailableProbeUid(passwdEntries, processUidEntries = '') {
+  if (
+    typeof passwdEntries !== 'string' ||
+    passwdEntries.length > 4_194_304 ||
+    typeof processUidEntries !== 'string' ||
+    processUidEntries.length > 1_048_576
+  ) {
+    throw failure('unsupported-runner');
+  }
+  const usedUids = new Set();
+  for (const entry of passwdEntries.split(/\r?\n/u)) {
+    const match = /^[^:\n]{1,256}:[^:\n]*:([0-9]{1,10}):/u.exec(entry);
+    if (!match) continue;
+    const uid = Number(match[1]);
+    if (
+      Number.isSafeInteger(uid) &&
+      uid >= PROBE_UID_START &&
+      uid <= PROBE_UID_END
+    ) {
+      usedUids.add(uid);
+    }
+  }
+  for (const entry of processUidEntries.split(/\s+/u)) {
+    if (!/^[0-9]{1,10}$/u.test(entry)) continue;
+    const uid = Number(entry);
+    if (
+      Number.isSafeInteger(uid) &&
+      uid >= PROBE_UID_START &&
+      uid <= PROBE_UID_END
+    ) {
+      usedUids.add(uid);
+    }
+  }
+  for (let uid = PROBE_UID_START; uid <= PROBE_UID_END; uid += 1) {
+    if (!usedUids.has(uid)) return uid;
+  }
+  throw failure('unsupported-runner');
+}
+
+export function createJourneyChildEnvironment(
+  sourceEnvironment,
+  config,
+  state,
+) {
+  if (
+    sourceEnvironment === null ||
+    typeof sourceEnvironment !== 'object' ||
+    config === null ||
+    typeof config !== 'object' ||
+    state === null ||
+    typeof state !== 'object'
+  ) {
+    throw failure();
+  }
+  return {
+    CI: 'true',
+    HOME:
+      typeof sourceEnvironment.HOME === 'string'
+        ? sourceEnvironment.HOME
+        : '/home/runner',
+    PATH:
+      typeof sourceEnvironment.PATH === 'string'
+        ? sourceEnvironment.PATH
+        : '/usr/local/bin:/usr/bin:/bin',
+    TMPDIR: config.runnerTemp,
+    GITHUB_WORKSPACE: config.workspace,
+    RUNNER_TEMP: config.runnerTemp,
+    ELEMENT_DESKTOP_SOURCE_SHA: state.sourceSha,
+    ELEMENT_DESKTOP_CDP_PORT: String(state.cdpPort),
+    ELEMENT_DESKTOP_JOURNEY_STAGE_FILE: config.journeyStageFile,
+    ELEMENT_DESKTOP_JOURNEY_PLAYWRIGHT_OUTPUT: config.playwrightOutput,
+    ELEMENT_ACCEPTANCE_USERS_FILE: config.usersFile,
+    ELEMENT_ACCEPTANCE_DESKTOP_CREDENTIALS_FILE: config.credentialsFile,
+    ...(typeof sourceEnvironment.PLAYWRIGHT_BROWSERS_PATH === 'string'
+      ? {
+          PLAYWRIGHT_BROWSERS_PATH: sourceEnvironment.PLAYWRIGHT_BROWSERS_PATH,
+        }
+      : {}),
+  };
+}
+
+function validateEnvironment(mode) {
+  const runId = requiredEnvironment('GITHUB_RUN_ID', /^[0-9]{1,18}$/u);
+  const runAttempt = requiredEnvironment('GITHUB_RUN_ATTEMPT', /^[0-9]{1,6}$/u);
+  const sourceSha = requiredEnvironment(
+    'ELEMENT_DESKTOP_SOURCE_SHA',
+    /^[0-9a-f]{40}$/u,
+  );
+  const runnerTemp = requiredEnvironment('RUNNER_TEMP', /^.+$/u);
+  const workspace = requiredEnvironment('GITHUB_WORKSPACE', /^.+$/u);
+  const usersFile =
+    mode === 'journey'
+      ? safePath(
+          process.env.ELEMENT_ACCEPTANCE_USERS_FILE,
+          'element-acceptance-users.json',
+          runnerTemp,
+        )
+      : undefined;
+  const credentialsFile =
+    mode === 'journey'
+      ? safePath(
+          process.env.ELEMENT_ACCEPTANCE_DESKTOP_CREDENTIALS_FILE,
+          'element-acceptance-desktop-credentials.json',
+          runnerTemp,
+        )
+      : undefined;
+  const playwrightOutput =
+    mode === 'journey'
+      ? safePath(
+          process.env.ELEMENT_DESKTOP_JOURNEY_PLAYWRIGHT_OUTPUT,
+          'element-desktop-journey-playwright-output',
+          runnerTemp,
+        )
+      : undefined;
+  const journeyStageFile =
+    mode === 'journey'
+      ? safePath(
+          process.env.ELEMENT_DESKTOP_JOURNEY_STAGE_FILE,
+          'element-desktop-journey-stage.jsonl',
+          runnerTemp,
+        )
+      : undefined;
+  const workspaceReal = resolve(workspace);
+  if (
+    !isAbsolute(runnerTemp) ||
+    !isAbsolute(workspace) ||
+    workspaceReal !== WORKSPACE_ROOT
+  ) {
+    throw failure();
+  }
+  return {
+    runId,
+    runAttempt,
+    sourceSha,
+    runnerTemp: resolve(runnerTemp),
+    workspace: workspaceReal,
+    usersFile,
+    credentialsFile,
+    playwrightOutput,
+    journeyStageFile,
+    stateFile: statePath(),
+    stageFile: desktopStagePath(),
+  };
+}
+
+export function selectPinnedPackageHash(metadata) {
+  if (typeof metadata !== 'string' || metadata.length > 4_194_304) {
+    throw failure('package-unavailable');
+  }
+  const matchingBlocks = metadata.split(/\n\n+/u).filter((block) => {
+    const fields = new Map();
+    for (const line of block.split(/\r?\n/u)) {
+      const separator = line.indexOf(':');
+      if (separator < 1) continue;
+      fields.set(line.slice(0, separator), line.slice(separator + 1).trim());
+    }
+    return (
+      fields.get('Package') === 'element-desktop' &&
+      fields.get('Version') === PACKAGE_VERSION &&
+      fields.get('Architecture') === 'amd64'
+    );
+  });
+  const hashes = matchingBlocks.map((block) => {
+    const values = block
+      .split(/\r?\n/u)
+      .filter((line) => line.startsWith('SHA256:'));
+    if (values.length !== 1) return '';
+    const match = /^SHA256:\s+([0-9a-f]{64})$/u.exec(values[0]);
+    return match?.[1] ?? '';
+  });
+  if (hashes.length !== 1 || !/^[0-9a-f]{64}$/u.test(hashes[0])) {
+    throw failure('package-unavailable');
+  }
+  return hashes[0];
+}
+
+function installPinnedDesktopPackage(runnerTemp) {
+  const keyFile = join(runnerTemp, 'element-io-archive-keyring.gpg');
+  const debFile = join(
+    runnerTemp,
+    `element-desktop_${PACKAGE_VERSION}_amd64.deb`,
+  );
+  const sourceFile = '/etc/apt/sources.list.d/element-desktop-startup.list';
+  const systemKey = '/usr/share/keyrings/element-desktop-startup.gpg';
+
+  requiredCommand('curl', [
+    '--fail',
+    '--silent',
+    '--show-error',
+    '--location',
+    'https://packages.element.io/debian/element-io-archive-keyring.gpg',
+    '--output',
+    keyFile,
+  ]);
+  requiredCommand('sudo', [
+    '-n',
+    'install',
+    '-D',
+    '-m',
+    '0644',
+    keyFile,
+    systemKey,
+  ]);
+  requiredCommand('sudo', ['-n', 'tee', sourceFile], {
+    input: `deb [arch=amd64 signed-by=${systemKey}] https://packages.element.io/debian/ default main\n`,
+  });
+  requiredCommand('sudo', ['-n', 'apt-get', 'update', '--quiet'], {
+    timeout: 300_000,
+  });
+  const packageHash = selectPinnedPackageHash(
+    requiredCommand('apt-cache', [
+      'show',
+      `element-desktop=${PACKAGE_VERSION}`,
+    ]),
+  );
+  requiredCommand(
+    'apt-get',
+    ['download', `element-desktop=${PACKAGE_VERSION}`],
+    {
+      cwd: runnerTemp,
+      timeout: 300_000,
+    },
+  );
+  const downloadedHash = requiredCommand('sha256sum', [debFile])
+    .trim()
+    .split(/\s+/u)[0];
+  if (downloadedHash !== packageHash) throw failure('package-mismatch');
+  requiredCommand(
+    'sudo',
+    [
+      '-n',
+      'env',
+      'DEBIAN_FRONTEND=noninteractive',
+      'apt-get',
+      'install',
+      '--yes',
+      '--no-install-recommends',
+      'xvfb',
+      'xauth',
+      'dbus-daemon',
+      'gnome-keyring',
+      'libsecret-tools',
+      'iptables',
+      'iproute2',
+      `element-desktop:amd64=${PACKAGE_VERSION}`,
+    ],
+    { timeout: 600_000 },
+  );
+  const installed = requiredCommand('dpkg-query', [
+    '-W',
+    '-f=${Version}\t${Architecture}',
+    'element-desktop',
+  ]);
+  if (installed !== `${PACKAGE_VERSION}\tamd64`) {
+    throw failure('package-mismatch');
+  }
+  return { packageHash, keyFile, debFile, sourceFile, systemKey };
+}
+
+function allocateUid() {
+  return selectAvailableProbeUid(
+    requiredCommand('getent', ['passwd']),
+    requiredCommand('ps', ['-eo', 'uid=']),
+  );
+}
+
+function localCdpPort() {
+  return new Promise((resolvePort, rejectPort) => {
+    const server = createServer();
+    server.once('error', () => rejectPort(failure('cdp-not-loopback')));
+    server.listen({ host: '127.0.0.1', port: 0 }, () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => rejectPort(failure('cdp-not-loopback')));
+        return;
+      }
+      server.close((error) => {
+        if (error) rejectPort(failure('cdp-not-loopback'));
+        else resolvePort(address.port);
+      });
+    });
+  });
+}
+
+async function createPrivateProfile(config, mode) {
+  const existingUser = capture('getent', ['passwd', PROBE_USERNAME], {
+    timeout: 2_000,
+  });
+  if (existingUser !== undefined) throw failure('unsupported-runner');
+  const groupRecord = requiredCommand('getent', ['group', 'nogroup']);
+  const groupIdText = groupRecord.split(':')[2];
+  if (!/^[0-9]{1,5}$/u.test(groupIdText ?? '')) {
+    throw failure('unsupported-runner');
+  }
+  const groupId = Number(groupIdText);
+  const uid = allocateUid();
+  const cdpPort = await localCdpPort();
+  const journey = mode === 'journey';
+  if (
+    !['journey', 'startup'].includes(mode) ||
+    (journey
+      ? !validateJourneyPolicyPorts(cdpPort)
+      : !validateDefaultPolicyPort(cdpPort))
+  ) {
+    throw failure('cdp-not-loopback');
+  }
+  const profileRoot = mkdtempSync(
+    `/tmp/mcw-element-desktop-${config.runId}-${config.runAttempt}-`,
+  );
+  const resultPath = safePath(
+    join(config.runnerTemp, DESKTOP_RESULT_NAME),
+    DESKTOP_RESULT_NAME,
+    config.runnerTemp,
+  );
+  const state = {
+    runId: config.runId,
+    runAttempt: config.runAttempt,
+    sourceSha: config.sourceSha,
+    journey,
+    username: PROBE_USERNAME,
+    uid,
+    groupId,
+    profileRoot,
+    cdpPort,
+    packageSha256: null,
+    policyMayBeInstalled: false,
+    userMayBeCreated: false,
+    resultPath,
+  };
+  try {
+    persistState(state);
+  } catch (error) {
+    rmSync(profileRoot, { recursive: true, force: true });
+    throw error;
+  }
+  writeFileSync(resultPath, '', {
+    encoding: 'utf8',
+    flag: 'wx',
+    mode: 0o600,
+  });
+  const profileMarker = join(profileRoot, '.owned');
+  writeFileSync(profileMarker, 'element-desktop-startup-profile-v1\n', {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  state.userMayBeCreated = true;
+  persistState(state);
+  requiredCommand('sudo', [
+    '-n',
+    'useradd',
+    '--uid',
+    String(uid),
+    '--gid',
+    String(groupId),
+    '--no-create-home',
+    '--shell',
+    '/usr/sbin/nologin',
+    PROBE_USERNAME,
+  ]);
+  requiredCommand('sudo', [
+    '-n',
+    'chown',
+    `${uid}:${groupId}`,
+    profileRoot,
+    profileMarker,
+  ]);
+  requiredCommand('sudo', ['-n', 'chmod', '0700', profileRoot]);
+  for (const child of [
+    'home',
+    'config',
+    'data',
+    'cache',
+    'runtime',
+    'profile',
+    'probe',
+  ]) {
+    requiredCommand('sudo', [
+      '-n',
+      'install',
+      '-d',
+      '-m',
+      '0700',
+      '-o',
+      String(uid),
+      '-g',
+      String(groupId),
+      join(profileRoot, child),
+    ]);
+  }
+
+  const probeRoot = join(profileRoot, 'probe');
+  for (const directory of [
+    'dev',
+    'e2e',
+    'node_modules/@playwright/test',
+    'node_modules/playwright',
+    'node_modules/playwright-core',
+  ]) {
+    requiredCommand('sudo', [
+      '-n',
+      'install',
+      '-d',
+      '-m',
+      '0700',
+      '-o',
+      String(uid),
+      '-g',
+      String(groupId),
+      join(probeRoot, directory),
+    ]);
+  }
+  for (const [source, destination] of [
+    [POLICY_SCRIPT, join(probeRoot, 'dev/element-desktop-egress-policy.mjs')],
+    [STARTUP_SCRIPT, join(probeRoot, 'dev/element-desktop-startup.mjs')],
+    [CONFIG_FILE, join(probeRoot, 'dev/element-desktop-probe-config.json')],
+    [E2E_PACKAGE_FILE, join(probeRoot, 'e2e/package.json')],
+  ]) {
+    requiredCommand('sudo', [
+      '-n',
+      'install',
+      '-o',
+      String(uid),
+      '-g',
+      String(groupId),
+      '-m',
+      '0400',
+      source,
+      destination,
+    ]);
+  }
+  for (const packageName of [
+    '@playwright/test',
+    'playwright',
+    'playwright-core',
+  ]) {
+    const source = resolve(config.workspace, 'node_modules', packageName);
+    const destination = join(probeRoot, 'node_modules', packageName);
+    if (!existsSync(source)) throw failure('unsupported-runner');
+    requiredCommand('sudo', [
+      '-n',
+      'cp',
+      '-aL',
+      `${source}/.`,
+      `${destination}/`,
+    ]);
+    requiredCommand('sudo', [
+      '-n',
+      'chown',
+      '-R',
+      `${uid}:${groupId}`,
+      destination,
+    ]);
+    requiredCommand('sudo', ['-n', 'chmod', '-R', 'go-rwx', destination]);
+  }
+  for (const [source, destination] of [
+    [POLICY_SCRIPT, join(probeRoot, 'dev/element-desktop-egress-policy.mjs')],
+    [STARTUP_SCRIPT, join(probeRoot, 'dev/element-desktop-startup.mjs')],
+    [CONFIG_FILE, join(probeRoot, 'dev/element-desktop-probe-config.json')],
+    [E2E_PACKAGE_FILE, join(probeRoot, 'e2e/package.json')],
+  ]) {
+    const comparison = capture('sudo', [
+      '-n',
+      'cmp',
+      '-s',
+      source,
+      destination,
+    ]);
+    if (comparison === undefined) throw failure('invalid-profile');
+  }
+
+  return state;
+}
+
+function profilePaths(state) {
+  const profileRoot = state.profileRoot;
+  const probeRoot = join(profileRoot, 'probe');
+  return {
+    profileRoot,
+    probeRoot,
+    stagedPolicy: join(probeRoot, 'dev/element-desktop-egress-policy.mjs'),
+    stagedStartup: join(probeRoot, 'dev/element-desktop-startup.mjs'),
+    stagedConfig: join(probeRoot, 'dev/element-desktop-probe-config.json'),
+    profileHome: join(profileRoot, 'home'),
+    profileConfig: join(profileRoot, 'config'),
+    profileData: join(profileRoot, 'data'),
+    profileCache: join(profileRoot, 'cache'),
+    profileRuntime: join(profileRoot, 'runtime'),
+  };
+}
+
+function runTargetUidPreflight(state) {
+  const paths = profilePaths(state);
+  const output = capture(
+    'sudo',
+    [
+      '-n',
+      'env',
+      `ELEMENT_DESKTOP_PROFILE_ROOT=${paths.profileRoot}`,
+      `ELEMENT_DESKTOP_STARTUP_SCRIPT_PATH=${paths.stagedStartup}`,
+      `ELEMENT_DESKTOP_CONFIG_PATH=${paths.stagedConfig}`,
+      `ELEMENT_DESKTOP_EGRESS_SCRIPT_PATH=${paths.stagedPolicy}`,
+      process.execPath,
+      POLICY_SCRIPT,
+      'target-uid-preflight',
+      String(state.uid),
+      paths.stagedPolicy,
+    ],
+    { timeout: 15_000 },
+  );
+  let record;
+  try {
+    record = JSON.parse(output ?? '');
+  } catch {
+    record = undefined;
+  }
+  if (
+    record?.phase !== 'target-uid-preflight' ||
+    !['passed', 'failed'].includes(record.status)
+  ) {
+    record = {
+      phase: 'target-uid-preflight',
+      status: 'failed',
+      runtimeFacts: null,
+      scriptProbe: null,
+    };
+  }
+  try {
+    sanitizeDesktopStages([record], state.sourceSha);
+  } catch {
+    record = {
+      phase: 'target-uid-preflight',
+      status: 'failed',
+      runtimeFacts: null,
+      scriptProbe: null,
+    };
+  }
+  appendStage(desktopStagePath(), record);
+  if (record.status !== 'passed') throw failure('unsupported-runner');
+}
+
+function installDesktopPolicy(state) {
+  const paths = profilePaths(state);
+  state.policyMayBeInstalled = true;
+  persistState(state);
+  const installStatus = runQuietly('sudo', [
+    '-n',
+    process.execPath,
+    POLICY_SCRIPT,
+    ...buildDesktopPolicyArguments(state, 'install'),
+  ]);
+  let diagnostic;
+  let negativeStatus;
+  let resetStatus;
+  if (installStatus === 0) {
+    const output = capture(
+      'sudo',
+      [
+        '-n',
+        'env',
+        `ELEMENT_DESKTOP_PROFILE_ROOT=${paths.profileRoot}`,
+        process.execPath,
+        POLICY_SCRIPT,
+        ...buildDesktopPolicyArguments(state, 'negative-self-test', [
+          paths.stagedPolicy,
+        ]),
+      ],
+      { timeout: 20_000 },
+    );
+    try {
+      diagnostic = JSON.parse(output ?? '');
+    } catch {
+      diagnostic = undefined;
+    }
+    negativeStatus =
+      diagnostic?.passed === true &&
+      typeof diagnostic === 'object' &&
+      Object.keys(diagnostic).sort().join(',') === 'ipv4,ipv6,passed'
+        ? 'passed'
+        : 'failed';
+    if (negativeStatus === 'passed') {
+      resetStatus = runQuietly('sudo', [
+        '-n',
+        process.execPath,
+        POLICY_SCRIPT,
+        ...buildDesktopPolicyArguments(state, 'zero-counters'),
+      ]);
+      const verifiedCounters = capture(
+        'sudo',
+        [
+          '-n',
+          process.execPath,
+          POLICY_SCRIPT,
+          ...buildDesktopPolicyArguments(state, 'counters'),
+        ],
+        { timeout: 2_000 },
+      );
+      const counters = sanitizeEgressCounterObservation(verifiedCounters);
+      if (
+        resetStatus !== 0 ||
+        counters.state !== 'observed' ||
+        counters.policyState !== 'verified' ||
+        counters.ipv4Blocked !== 0 ||
+        counters.ipv6Blocked !== 0
+      ) {
+        resetStatus = undefined;
+      }
+    }
+  }
+  const status =
+    installStatus === 0 && negativeStatus === 'passed' && resetStatus === 0
+      ? 'passed'
+      : 'failed';
+  appendStage(desktopStagePath(), {
+    phase: 'egress-policy',
+    status,
+    negativeTest: negativeStatus ?? 'not_run',
+    diagnostic: diagnostic ?? null,
+  });
+  if (status !== 'passed') throw failure('cdp-not-loopback');
+}
+
+function parseStartupRecord(line) {
+  if (typeof line !== 'string' || Buffer.byteLength(line) > 262_144) {
+    return undefined;
+  }
+  let value;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    value.phase !== 'desktop-startup'
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+function getProgressCounter(state) {
+  const output = capture(
+    'timeout',
+    [
+      '--signal=TERM',
+      '--kill-after=1s',
+      '1s',
+      'sudo',
+      '-n',
+      process.execPath,
+      POLICY_SCRIPT,
+      ...buildDesktopPolicyArguments(state, 'counters'),
+    ],
+    { timeout: 3_000 },
+  );
+  return sanitizeEgressCounterObservation(output);
+}
+
+function getUidStartupObservation(state, appPid, cdpRendererHandoff) {
+  const args = [
+    '--signal=TERM',
+    '--kill-after=1s',
+    '4s',
+    'sudo',
+    '-n',
+    process.execPath,
+    STARTUP_SCRIPT,
+    'uid-startup-observation',
+    String(state.uid),
+    String(state.cdpPort),
+  ];
+  let input;
+  if (Number.isSafeInteger(appPid) && appPid >= 2) {
+    args.push(String(appPid));
+    if (cdpRendererHandoff !== undefined) {
+      args.push('--cdp-renderer-handoff');
+      input = `${JSON.stringify(cdpRendererHandoff)}\n`;
+    }
+  }
+  const output = capture('timeout', args, { input, timeout: 6_000 });
+  return sanitizeUidStartupObservation(output);
+}
+
+function acknowledgeMilestone(state, milestone, progress) {
+  const counters = getProgressCounter(state);
+  let observation;
+  if (milestone === 'before-app') {
+    observation = getUidStartupObservation(state);
+  } else if (milestone === 'after-app-spawn') {
+    observation = getUidStartupObservation(state, progress.appPid);
+  } else {
+    observation = getUidStartupObservation(
+      state,
+      progress.appPid,
+      progress.cdpRendererHandoff,
+    );
+  }
+  const marker = join(state.profileRoot, `.${milestone}-counter-read`);
+  runQuietly(
+    'timeout',
+    [
+      '--signal=TERM',
+      '--kill-after=1s',
+      '1s',
+      'sudo',
+      '-n',
+      '-u',
+      `#${state.uid}`,
+      '--',
+      'touch',
+      marker,
+    ],
+    { timeout: 3_000 },
+  );
+  return { counter: counters, observation };
+}
+
+function signalDesktopJourneyCompletion(state) {
+  const paths = profilePaths(state);
+  const output = capture(
+    'timeout',
+    [
+      '--signal=TERM',
+      '--kill-after=1s',
+      '3s',
+      'sudo',
+      '-n',
+      '-u',
+      `#${state.uid}`,
+      '--',
+      '/usr/bin/env',
+      `ELEMENT_DESKTOP_PROFILE_ROOT=${state.profileRoot}`,
+      `ELEMENT_DESKTOP_PROBE_UID=${state.uid}`,
+      process.execPath,
+      paths.stagedStartup,
+      'desktop-journey-complete',
+    ],
+    { timeout: 5_000 },
+  );
+  try {
+    const record = JSON.parse(output ?? '');
+    return (
+      record !== null &&
+      typeof record === 'object' &&
+      !Array.isArray(record) &&
+      Object.keys(record).sort().join(',') === 'phase,status' &&
+      record.phase === 'desktop-journey-completion' &&
+      record.status === 'passed'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function enrichStartupRecord(record, state, progressObservations, exitCode) {
+  if (record === undefined) return undefined;
+  const initialStatus = record.status;
+  const initialFailureCode = record.failureCode;
+  const initialNativeSandbox = record.checks?.nativeSandbox;
+  const beforeApp =
+    progressObservations.get('before-app')?.observation ??
+    emptyUidStartupObservation('unavailable');
+  const afterAppSpawn =
+    progressObservations.get('after-app-spawn')?.observation ??
+    emptyUidStartupObservation('unavailable');
+  const afterPageLoad =
+    progressObservations.get('after-page-load')?.observation ??
+    emptyUidStartupObservation('unavailable');
+  record.uidLifecycleDiagnostics = {
+    beforeApp: beforeApp.uidLifecycleObservation,
+    afterAppSpawn: afterAppSpawn.uidLifecycleObservation,
+    afterPageLoad: afterPageLoad.uidLifecycleObservation,
+  };
+  record.uidTcpSocketDiagnostics = {
+    beforeApp: beforeApp.tcpSocketObservation,
+    afterPageLoad: afterPageLoad.tcpSocketObservation,
+  };
+  const acknowledgements = record.egressPhaseCounters ?? {};
+  record.egressPhaseCounters = {
+    beforeApp: acknowledgedEgressCounterObservation(
+      progressObservations.get('before-app')?.counter,
+      acknowledgements.beforeApp?.state,
+    ),
+    afterAppSpawn: acknowledgedEgressCounterObservation(
+      progressObservations.get('after-app-spawn')?.counter,
+      acknowledgements.afterAppSpawn?.state,
+    ),
+    afterPageLoad: acknowledgedEgressCounterObservation(
+      progressObservations.get('after-page-load')?.counter,
+      acknowledgements.afterPageLoad?.state,
+    ),
+  };
+  const rendererSandbox = resolveTrustedRendererSandbox(
+    record.rendererDiagnostics,
+    record.uidLifecycleDiagnostics.afterPageLoad,
+  );
+  record.rendererDiagnostics = rendererSandbox.rendererDiagnostics;
+  record.rendererCount = rendererSandbox.rendererCount;
+  record.checks.nativeSandbox = rendererSandbox.passed ? 'passed' : 'failed';
+  const otherChecksPassed = Object.entries(record.checks).every(
+    ([name, status]) => name === 'nativeSandbox' || status === 'passed',
+  );
+  const pendingNativeOnly =
+    exitCode === 1 &&
+    initialStatus === 'failed' &&
+    initialFailureCode === null &&
+    initialNativeSandbox === 'not_run' &&
+    otherChecksPassed;
+  const alreadyPassed =
+    exitCode === 0 &&
+    initialStatus === 'passed' &&
+    initialNativeSandbox === 'passed';
+  const finalizedPassed =
+    initialFailureCode === null &&
+    rendererSandbox.passed &&
+    otherChecksPassed &&
+    (pendingNativeOnly || alreadyPassed);
+  if (finalizedPassed) {
+    record.failureCode = null;
+    record.status = 'passed';
+  } else {
+    record.failureCode ??= rendererSandbox.passed
+      ? 'probe-internal-error'
+      : 'renderer-sandbox-unconfirmed';
+    record.status = 'failed';
+  }
+  try {
+    sanitizeDesktopStages([record], state.sourceSha);
+  } catch {
+    throw failure('desktop-not-ready');
+  }
+  writePrivateJson(state.resultPath, record);
+  appendStage(desktopStagePath(), record);
+  return record;
+}
+
+function createStartupController(state, mode, progressObservations) {
+  const paths = profilePaths(state);
+  const timeoutSeconds = mode === 'journey' ? '300s' : '150s';
+  const appEnvironment = [
+    `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+    `HOME=${paths.profileHome}`,
+    `XDG_CONFIG_HOME=${paths.profileConfig}`,
+    `XDG_DATA_HOME=${paths.profileData}`,
+    `XDG_CACHE_HOME=${paths.profileCache}`,
+    `XDG_RUNTIME_DIR=${paths.profileRuntime}`,
+    `GITHUB_RUN_ID=${state.runId}`,
+    `GITHUB_RUN_ATTEMPT=${state.runAttempt}`,
+    `ELEMENT_DESKTOP_SOURCE_SHA=${state.sourceSha}`,
+    `ELEMENT_DESKTOP_PACKAGE_SHA256=${state.packageSha256}`,
+    `ELEMENT_DESKTOP_PROFILE_ROOT=${paths.profileRoot}`,
+    `ELEMENT_DESKTOP_CONFIG_PATH=${paths.stagedConfig}`,
+    `ELEMENT_DESKTOP_CDP_PORT=${state.cdpPort}`,
+    `ELEMENT_DESKTOP_PROBE_UID=${state.uid}`,
+    'ELEMENT_DESKTOP_NO_UPDATE=true',
+    ...(mode === 'journey' ? ['ELEMENT_DESKTOP_JOURNEY_HOLD=true'] : []),
+  ];
+  const args = [
+    '--signal=TERM',
+    '--kill-after=5s',
+    timeoutSeconds,
+    'sudo',
+    '-n',
+    '-u',
+    `#${state.uid}`,
+    '--',
+    '/usr/bin/env',
+    ...appEnvironment,
+    'dbus-run-session',
+    '--',
+    'xvfb-run',
+    '-a',
+    process.execPath,
+    paths.stagedStartup,
+  ];
+  let resolveReady;
+  let resolveClosed;
+  const readyPromise = new Promise((resolvePromise) => {
+    resolveReady = resolvePromise;
+  });
+  const closedPromise = new Promise((resolvePromise) => {
+    resolveClosed = resolvePromise;
+  });
+  const child = spawn('timeout', args, {
+    cwd: WORKSPACE_ROOT,
+    detached: true,
+    env: createSystemCommandEnvironment(process.env),
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  let startupRecord;
+  let protocolFailed = false;
+  let ready = false;
+  let expectedProgressIndex = 0;
+  const progressSequence =
+    mode === 'journey'
+      ? [
+          'before-app',
+          'after-app-spawn',
+          'after-page-load',
+          'desktop-journey-ready',
+        ]
+      : ['before-app', 'after-app-spawn', 'after-page-load'];
+  let progressQueue = Promise.resolve();
+  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  lines.on('line', (line) => {
+    const progress = parseStartupProgressRecord(line);
+    if (progress) {
+      progressQueue = progressQueue
+        .then(async () => {
+          if (progress.milestone !== progressSequence[expectedProgressIndex]) {
+            protocolFailed = true;
+            return;
+          }
+          expectedProgressIndex += 1;
+          if (progress.milestone === 'desktop-journey-ready') {
+            ready = true;
+            resolveReady(true);
+            return;
+          }
+          progressObservations.set(
+            progress.milestone,
+            acknowledgeMilestone(state, progress.milestone, progress),
+          );
+        })
+        .catch(() => {
+          protocolFailed = true;
+          resolveReady(false);
+        });
+      return;
+    }
+    const record = parseStartupRecord(line);
+    if (record) {
+      if (startupRecord !== undefined) {
+        protocolFailed = true;
+      } else {
+        startupRecord = record;
+      }
+    }
+  });
+  child.once('error', () => {
+    protocolFailed = true;
+    resolveReady(false);
+  });
+  child.once('close', (code, signal) => {
+    void progressQueue.finally(() => {
+      resolveClosed({ code, signal });
+      if (!ready) resolveReady(false);
+    });
+  });
+
+  return {
+    child,
+    readyPromise,
+    closedPromise,
+    get startupRecord() {
+      return startupRecord;
+    },
+    get protocolFailed() {
+      return protocolFailed;
+    },
+    get ready() {
+      return ready;
+    },
+  };
+}
+
+async function waitForStartupReady(controller) {
+  let timeoutHandle;
+  try {
+    return await Promise.race([
+      controller.readyPromise,
+      controller.closedPromise.then(() => false),
+      new Promise((resolvePromise) => {
+        timeoutHandle = setTimeout(
+          () => resolvePromise(false),
+          STARTUP_WAIT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+  }
+}
+
+async function waitForStartupClose(controller, timeoutMs) {
+  let timeoutHandle;
+  try {
+    return await Promise.race([
+      controller.closedPromise,
+      new Promise((resolvePromise) => {
+        timeoutHandle = setTimeout(() => resolvePromise(undefined), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+  }
+}
+
+async function stopStartupController(controller) {
+  if (
+    controller.child.exitCode !== null ||
+    controller.child.signalCode !== null
+  ) {
+    return;
+  }
+  try {
+    process.kill(-controller.child.pid, 'SIGTERM');
+  } catch {
+    try {
+      controller.child.kill('SIGTERM');
+    } catch {
+      // The child may have exited between status check and signal.
+    }
+  }
+  const closed = await waitForStartupClose(controller, STARTUP_EXIT_WAIT_MS);
+  if (closed !== undefined) return;
+  try {
+    process.kill(-controller.child.pid, 'SIGKILL');
+  } catch {
+    try {
+      controller.child.kill('SIGKILL');
+    } catch {
+      // The workflow cleanup repeats UID-scoped process removal.
+    }
+  }
+  await waitForStartupClose(controller, 5_000);
+}
+
+function runDesktopCalendarJourney(config, state) {
+  rmSync(config.playwrightOutput, { recursive: true, force: true });
+  mkdirSync(config.playwrightOutput, { recursive: false, mode: 0o700 });
+  chmodSync(config.playwrightOutput, 0o700);
+  const env = createJourneyChildEnvironment(process.env, config, state);
+  const result = spawnSync(
+    'yarn',
+    [
+      'workspace',
+      'e2e',
+      'playwright',
+      'test',
+      '--config',
+      'playwright.element-desktop-acceptance.config.ts',
+      '--grep',
+      'Element Desktop room event journey',
+    ],
+    {
+      cwd: WORKSPACE_ROOT,
+      env,
+      encoding: 'utf8',
+      stdio: 'ignore',
+      timeout: PLAYWRIGHT_TIMEOUT_MS,
+    },
+  );
+  if (result.error || result.signal || result.status !== 0) {
+    throw failure('desktop-not-ready');
+  }
+}
+
+async function runDesktopStartup(config, state, mode) {
+  const progressObservations = new Map();
+  const controller = createStartupController(state, mode, progressObservations);
+  let journeyFailure;
+  let closeResult;
+  try {
+    if (mode === 'journey') {
+      if (!(await waitForStartupReady(controller))) {
+        throw failure('desktop-not-ready');
+      }
+      runDesktopCalendarJourney(config, state);
+    } else {
+      closeResult = await waitForStartupClose(controller, 140_000);
+      if (closeResult === undefined) throw failure('desktop-not-ready');
+    }
+  } catch (error) {
+    journeyFailure = error;
+  } finally {
+    if (mode === 'journey' && controller.ready) {
+      const completionWritten = signalDesktopJourneyCompletion(state);
+      if (!completionWritten) journeyFailure ??= failure('desktop-not-ready');
+      closeResult = await waitForStartupClose(controller, STARTUP_EXIT_WAIT_MS);
+    }
+    if (closeResult === undefined) {
+      await stopStartupController(controller);
+    }
+  }
+
+  closeResult ??= await waitForStartupClose(controller, 0);
+  const finalized = enrichStartupRecord(
+    controller.startupRecord,
+    state,
+    progressObservations,
+    closeResult?.code ?? null,
+  );
+  if (
+    finalized?.status !== 'passed' ||
+    controller.protocolFailed ||
+    journeyFailure !== undefined
+  ) {
+    throw failure(
+      finalized?.failureCode === 'renderer-sandbox-unconfirmed'
+        ? 'renderer-sandbox-unconfirmed'
+        : 'desktop-not-ready',
+    );
+  }
+}
+
+function initializeDesktopStage(path) {
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    if (existsSync(path)) throw failure();
+    writeFileSync(path, '', { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    return;
+  }
+  if (
+    !stat.isFile() ||
+    stat.isSymbolicLink() ||
+    stat.nlink !== 1 ||
+    stat.uid !== process.getuid?.() ||
+    (stat.mode & 0o777) !== 0o600 ||
+    stat.size !== 0
+  ) {
+    throw failure();
+  }
+}
+
+async function prepareAndRun(config, mode) {
+  initializeDesktopStage(config.stageFile);
+  const state = await createPrivateProfile(config, mode);
+  runTargetUidPreflight(state);
+  const packageInfo = installPinnedDesktopPackage(config.runnerTemp);
+  state.packageSha256 = packageInfo.packageHash;
+  persistState(state);
+  installDesktopPolicy(state);
+  await runDesktopStartup(config, state, mode);
+}
+
+function readDesktopStagePhases(path) {
+  if (!existsSync(path)) return new Set();
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    throw failure();
+  }
+  if (
+    !stat.isFile() ||
+    stat.isSymbolicLink() ||
+    stat.nlink !== 1 ||
+    stat.uid !== process.getuid?.() ||
+    (stat.mode & 0o777) !== 0o600 ||
+    stat.size > DESKTOP_EVIDENCE_MAX_BYTES
+  ) {
+    throw failure();
+  }
+  const phases = new Set();
+  for (const row of readFileSync(path, 'utf8')
+    .split(/\r?\n/u)
+    .filter(Boolean)) {
+    let value;
+    try {
+      value = JSON.parse(row);
+    } catch {
+      throw failure();
+    }
+    if (
+      value === null ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      typeof value.phase !== 'string' ||
+      phases.has(value.phase)
+    ) {
+      throw failure();
+    }
+    phases.add(value.phase);
+  }
+  return phases;
+}
+
+async function stopUidProcesses(state) {
+  let status = runQuietly('pgrep', ['-u', String(state.uid)], {
+    timeout: 2_000,
+  });
+  if (status === 1) return 'passed';
+  if (status !== 0) return 'failed';
+  runQuietly('sudo', ['-n', 'pkill', '-TERM', '-u', String(state.uid)], {
+    timeout: 2_000,
+  });
+  await new Promise((resolveWait) => setTimeout(resolveWait, 2_000));
+  status = runQuietly('pgrep', ['-u', String(state.uid)], { timeout: 2_000 });
+  if (status === 0) {
+    runQuietly('sudo', ['-n', 'pkill', '-KILL', '-u', String(state.uid)], {
+      timeout: 2_000,
+    });
+    await new Promise((resolveWait) => setTimeout(resolveWait, 1_000));
+    status = runQuietly('pgrep', ['-u', String(state.uid)], { timeout: 2_000 });
+  }
+  return status === 1 ? 'passed' : 'failed';
+}
+
+function captureFinalEgress(state) {
+  const output = capture(
+    'timeout',
+    [
+      '--signal=TERM',
+      '--kill-after=1s',
+      '3s',
+      'sudo',
+      '-n',
+      process.execPath,
+      POLICY_SCRIPT,
+      ...buildDesktopPolicyArguments(state, 'counters'),
+    ],
+    { timeout: 5_000 },
+  );
+  const counters = sanitizeEgressCounterObservation(output);
+  if (
+    !['observed', 'partial'].includes(counters.state) ||
+    counters.policyState !== 'verified'
+  ) {
+    return {
+      phase: 'egress-observation',
+      status: 'failed',
+      policyState: counters.policyState,
+      ipv4Blocked: null,
+      ipv6Blocked: null,
+      ipv4Classes: null,
+      ipv6Classes: null,
+      overflow: null,
+    };
+  }
+  return {
+    phase: 'egress-observation',
+    status: 'passed',
+    policyState: counters.policyState,
+    ipv4Blocked: counters.ipv4Blocked,
+    ipv6Blocked: counters.ipv6Blocked,
+    ipv4Classes: counters.ipv4Classes,
+    ipv6Classes: counters.ipv6Classes,
+    overflow: counters.overflow,
+  };
+}
+
+function captureFinalUidLifecycle(state) {
+  const output = capture(
+    'timeout',
+    [
+      '--signal=TERM',
+      '--kill-after=1s',
+      '7s',
+      'sudo',
+      '-n',
+      process.execPath,
+      STARTUP_SCRIPT,
+      'uid-lifecycle-observation',
+      String(state.uid),
+    ],
+    { timeout: 9_000 },
+  );
+  return sanitizeUidLifecycleObservation(output);
+}
+
+function cleanupPolicy(state) {
+  return (
+    runQuietly(
+      'sudo',
+      [
+        '-n',
+        process.execPath,
+        POLICY_SCRIPT,
+        ...buildDesktopPolicyArguments(state, 'remove'),
+      ],
+      { timeout: 10_000 },
+    ) === 0
+  );
+}
+
+function cleanupUser(state, allowDeletion) {
+  const account = capture('getent', ['passwd', state.username], {
+    timeout: 2_000,
+  });
+  let userdelStatus = 'not_run';
+  let userdelExitStatus = null;
+  let status = 'passed';
+  if (account !== undefined) {
+    const fields = account.trim().split(':');
+    const accountUid = Number(fields[2]);
+    if (fields[0] !== state.username || accountUid !== state.uid) {
+      status = 'failed';
+    } else if (!state.userMayBeCreated || !allowDeletion) {
+      status = 'failed';
+    } else {
+      userdelExitStatus = runQuietly(
+        'timeout',
+        [
+          '--signal=TERM',
+          '--kill-after=1s',
+          '10s',
+          'sudo',
+          '-n',
+          'userdel',
+          state.username,
+        ],
+        { timeout: 12_000 },
+      );
+      userdelStatus = userdelExitStatus === 0 ? 'passed' : 'failed';
+      const remaining = capture('getent', ['passwd', state.username], {
+        timeout: 2_000,
+      });
+      if (remaining !== undefined) status = 'failed';
+    }
+  }
+  const afterDelete = capture('getent', ['passwd', state.username], {
+    timeout: 2_000,
+  });
+  let accountState = 'unavailable';
+  if (afterDelete === undefined) {
+    accountState = 'absent';
+  } else {
+    const uid = Number(afterDelete.trim().split(':')[2]);
+    accountState = uid === state.uid ? 'uid_match' : 'uid_mismatch';
+  }
+  return { status, userdelStatus, userdelExitStatus, accountState };
+}
+
+function cleanupProfile(state, allowCleanup) {
+  const profileRoot = state.profileRoot;
+  if (!allowCleanup) {
+    return runQuietly('sudo', ['-n', 'test', '!', '-e', profileRoot]) === 0
+      ? 'passed'
+      : 'failed';
+  }
+  const rootStatText = capture('sudo', [
+    '-n',
+    'stat',
+    '-c',
+    '%F %u %a',
+    profileRoot,
+  ]);
+  if (rootStatText === undefined) {
+    return runQuietly('sudo', ['-n', 'test', '!', '-e', profileRoot]) === 0
+      ? 'passed'
+      : 'failed';
+  }
+  const [fileType, uidText, mode] = rootStatText.trim().split(/\s+/u);
+  const rootUid = Number(uidText);
+  if (
+    fileType !== 'directory' ||
+    ![state.uid, process.getuid?.()].includes(rootUid) ||
+    mode !== '700' ||
+    runQuietly('sudo', ['-n', 'test', '!', '-L', profileRoot]) !== 0
+  ) {
+    return 'failed';
+  }
+  const markerPath = join(profileRoot, '.owned');
+  const markerStatText = capture('sudo', [
+    '-n',
+    'stat',
+    '-c',
+    '%u %a %h %F',
+    markerPath,
+  ]);
+  if (markerStatText !== undefined) {
+    const [markerUidText, markerMode, linksText, ...typeParts] = markerStatText
+      .trim()
+      .split(/\s+/u);
+    const markerType = typeParts.join(' ');
+    const markerUid = Number(markerUidText);
+    const markerContent = capture('sudo', ['-n', 'cat', '--', markerPath]);
+    if (
+      markerType !== 'regular file' ||
+      ![state.uid, process.getuid?.()].includes(markerUid) ||
+      markerMode !== '600' ||
+      linksText !== '1' ||
+      markerContent !== 'element-desktop-startup-profile-v1\n' ||
+      runQuietly('sudo', ['-n', 'test', '!', '-L', markerPath]) !== 0
+    ) {
+      return 'failed';
+    }
+  } else if (rootUid !== process.getuid?.()) {
+    return 'failed';
+  }
+  if (
+    runQuietly('sudo', ['-n', 'rm', '-rf', '--', profileRoot], {
+      timeout: 15_000,
+    }) !== 0 ||
+    runQuietly('sudo', ['-n', 'test', '!', '-e', profileRoot]) !== 0
+  ) {
+    return 'failed';
+  }
+  return 'passed';
+}
+
+function cleanupAptArtifacts(runnerTemp) {
+  const sourceFile = '/etc/apt/sources.list.d/element-desktop-startup.list';
+  const systemKey = '/usr/share/keyrings/element-desktop-startup.gpg';
+  const localFiles = [
+    join(runnerTemp, 'element-io-archive-keyring.gpg'),
+    join(runnerTemp, `element-desktop_${PACKAGE_VERSION}_amd64.deb`),
+    join(runnerTemp, DESKTOP_RESULT_NAME),
+  ];
+  const removeSystem = runQuietly('sudo', [
+    '-n',
+    'rm',
+    '-f',
+    '--',
+    sourceFile,
+    systemKey,
+  ]);
+  let localRemoved = true;
+  for (const path of localFiles) {
+    try {
+      rmSync(path, { force: true });
+    } catch {
+      localRemoved = false;
+    }
+  }
+  const systemAbsent = [sourceFile, systemKey].every(
+    (path) => runQuietly('sudo', ['-n', 'test', '!', '-e', path]) === 0,
+  );
+  return (
+    removeSystem === 0 &&
+    localRemoved &&
+    systemAbsent &&
+    localFiles.every((path) => !existsSync(path))
+  );
+}
+
+async function cleanupRunner(config) {
+  let state;
+  let stateInvalid = false;
+  try {
+    state = readState();
+  } catch {
+    stateInvalid = true;
+  }
+  const phases = readDesktopStagePhases(config.stageFile);
+  let processStatus = 'not_run';
+  let policyStatus = 'not_run';
+  let user = {
+    status: 'not_run',
+    userdelStatus: 'not_run',
+    userdelExitStatus: null,
+    accountState: 'not_observed',
+  };
+  let profileStatus = 'not_run';
+  let lifecycleBeforeUserdel = emptyUidLifecycleObservation('not_observed');
+  let finalLifecycle = emptyUidLifecycleObservation('not_observed');
+  let egressObservation = {
+    phase: 'egress-observation',
+    status: 'failed',
+    policyState: 'unavailable',
+    ipv4Blocked: null,
+    ipv6Blocked: null,
+    ipv4Classes: null,
+    ipv6Classes: null,
+    overflow: null,
+  };
+  if (state !== undefined && !stateInvalid) {
+    processStatus = await stopUidProcesses(state);
+    egressObservation = captureFinalEgress(state);
+    lifecycleBeforeUserdel = captureFinalUidLifecycle(state);
+    const beforeUserdelClear =
+      lifecycleBeforeUserdel.state === 'observed' &&
+      lifecycleBeforeUserdel.uidProcessCount === 0;
+    user = cleanupUser(state, processStatus === 'passed' && beforeUserdelClear);
+    finalLifecycle = captureFinalUidLifecycle(state);
+    const finalUidClear =
+      finalLifecycle.state === 'observed' &&
+      finalLifecycle.uidProcessCount === 0;
+    const cleanupProof =
+      processStatus === 'passed' &&
+      beforeUserdelClear &&
+      finalUidClear &&
+      user.accountState === 'absent';
+    if (cleanupProof) {
+      policyStatus =
+        !state.policyMayBeInstalled || cleanupPolicy(state)
+          ? 'passed'
+          : 'failed';
+      profileStatus = cleanupProfile(state, true);
+    } else {
+      policyStatus = state.policyMayBeInstalled ? 'retained' : 'not_run';
+      profileStatus = cleanupProfile(state, false);
+    }
+  }
+  const aptStatus = cleanupAptArtifacts(config.runnerTemp)
+    ? 'passed'
+    : 'failed';
+  if (!phases.has('egress-observation')) {
+    appendStage(config.stageFile, egressObservation);
+  }
+  if (!phases.has('cleanup')) {
+    appendStage(config.stageFile, {
+      phase: 'cleanup',
+      isolatedProcesses: stateInvalid
+        ? 'failed'
+        : state === undefined
+          ? 'not_run'
+          : processStatus === 'passed' &&
+              lifecycleBeforeUserdel.state === 'observed' &&
+              lifecycleBeforeUserdel.uidProcessCount === 0 &&
+              finalLifecycle.state === 'observed' &&
+              finalLifecycle.uidProcessCount === 0 &&
+              user.accountState === 'absent'
+            ? 'passed'
+            : 'failed',
+      policy: stateInvalid ? 'failed' : policyStatus,
+      user: stateInvalid ? 'failed' : user.status,
+      profile: stateInvalid ? 'failed' : profileStatus,
+      aptSource: aptStatus,
+      accountState: stateInvalid ? 'unavailable' : user.accountState,
+      userdelStatus: stateInvalid ? 'not_run' : user.userdelStatus,
+      userdelExitStatus: stateInvalid ? null : user.userdelExitStatus,
+      uidProcessObservation: uidProcessObservationFromLifecycle(finalLifecycle),
+      uidLifecycleObservationBeforeUserdel: lifecycleBeforeUserdel,
+      finalUidLifecycleObservation: finalLifecycle,
+    });
+  }
+  const cleanupPassed =
+    !stateInvalid &&
+    aptStatus === 'passed' &&
+    (state === undefined ||
+      (processStatus === 'passed' &&
+        lifecycleBeforeUserdel.state === 'observed' &&
+        lifecycleBeforeUserdel.uidProcessCount === 0 &&
+        finalLifecycle.state === 'observed' &&
+        finalLifecycle.uidProcessCount === 0 &&
+        user.accountState === 'absent' &&
+        policyStatus === 'passed' &&
+        user.status === 'passed' &&
+        profileStatus === 'passed'));
+  if (!cleanupPassed) throw failure('desktop-not-ready');
+}
+
+async function main() {
+  const mode = process.argv[2];
+  if (!['journey', 'startup', 'cleanup'].includes(mode)) throw failure();
+  const config = validateEnvironment(
+    mode === 'journey' ? 'journey' : 'startup',
+  );
+  if (mode === 'cleanup') {
+    await cleanupRunner(config);
+    process.stdout.write('Element Desktop cleanup completed.\n');
+    return;
+  }
+  await prepareAndRun(config, mode);
+  process.stdout.write(
+    mode === 'journey'
+      ? 'Element Desktop calendar journey completed.\n'
+      : 'Element Desktop startup completed.\n',
+  );
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    const code =
+      error && typeof error === 'object' && typeof error.code === 'string'
+        ? error.code
+        : 'desktop-journey-runner-failed';
+    process.stderr.write(`Element Desktop runner failed (${code}).\n`);
+    process.exitCode = 1;
+  });
+}

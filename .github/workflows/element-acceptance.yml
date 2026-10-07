@@ -55,11 +55,16 @@ jobs:
           echo "ELEMENT_ACCEPTANCE_STAGE_FILE=$RUNNER_TEMP/element-acceptance-stage.jsonl" >> "$GITHUB_ENV"
           echo "ELEMENT_ACCEPTANCE_USERS_FILE=$RUNNER_TEMP/element-acceptance-users.json" >> "$GITHUB_ENV"
           echo "ELEMENT_ACCEPTANCE_SERVER_ENV_FILE=$RUNNER_TEMP/element-acceptance-server.env" >> "$GITHUB_ENV"
+          echo "ELEMENT_DESKTOP_STAGE_FILE=$RUNNER_TEMP/element-desktop-startup-stage.jsonl" >> "$GITHUB_ENV"
+          echo "ELEMENT_ACCEPTANCE_DESKTOP_CREDENTIALS_FILE=$RUNNER_TEMP/element-acceptance-desktop-credentials.json" >> "$GITHUB_ENV"
+          echo "ELEMENT_DESKTOP_JOURNEY_STAGE_FILE=$RUNNER_TEMP/element-desktop-journey-stage.jsonl" >> "$GITHUB_ENV"
+          echo "ELEMENT_DESKTOP_JOURNEY_PLAYWRIGHT_OUTPUT=$RUNNER_TEMP/element-desktop-journey-playwright-output" >> "$GITHUB_ENV"
           echo "ELEMENT_ACCEPTANCE_REMINDER_EVENT_FILE=$RUNNER_TEMP/element-acceptance-reminder-events.json" >> "$GITHUB_ENV"
           echo "ELEMENT_ACCEPTANCE_REMINDER_DELIVERY_FILE=$RUNNER_TEMP/element-acceptance-reminder-deliveries.json" >> "$GITHUB_ENV"
           echo "ELEMENT_ACCEPTANCE_PLAYWRIGHT_OUTPUT=$RUNNER_TEMP/element-acceptance-playwright-output" >> "$GITHUB_ENV"
           source_sha="${{ github.event.pull_request.head.sha || github.sha }}"
           echo "ELEMENT_ACCEPTANCE_SOURCE_SHA=$source_sha" >> "$GITHUB_ENV"
+          echo "ELEMENT_DESKTOP_SOURCE_SHA=$source_sha" >> "$GITHUB_ENV"
           : > "$RUNNER_TEMP/element-acceptance-stage.jsonl"
           printf '[]\n' > "$RUNNER_TEMP/element-acceptance-reminder-events.json"
           chmod 0600 "$RUNNER_TEMP/element-acceptance-stage.jsonl"
@@ -72,6 +77,11 @@ jobs:
         run: |
           node dev/element-acceptance-diagnostics.test.mjs
           node dev/sanitize-element-acceptance.test.mjs
+          node dev/element-desktop-egress-policy.test.mjs
+          node dev/element-desktop-evidence.test.mjs
+          node --test dev/element-desktop-startup.test.mjs
+          node --test dev/element-desktop-journey.test.mjs
+          node --test dev/element-desktop-journey-runner.test.mjs
           node --test dev/validate-element-acceptance-compose.test.mjs
 
       - name: Build calendar, server, and widget outputs
@@ -153,6 +163,14 @@ jobs:
           fi
           printf '%s\n' '{"phase":"browser-test-suite","status":"passed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
 
+      - name: Run the packaged Element Desktop shared-calendar journey
+        id: desktop_journey
+        run: node dev/element-desktop-journey-runner.mjs journey
+
+      - name: Clean up the packaged Element Desktop journey
+        if: ${{ always() && steps.desktop_journey.outcome != 'skipped' }}
+        run: node dev/element-desktop-journey-runner.mjs cleanup
+
       - name: Provision the synthetic reminder sender room membership
         run: node dev/element-acceptance-setup.mjs reminder-room
 
@@ -205,6 +223,44 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
+      - name: Emit finite Desktop journey summary
+        if: always()
+        run: |
+          node dev/element-desktop-journey.mjs summary \
+            > "$RUNNER_TEMP/element-desktop-journey-safe-summary.txt"
+
+      - name: Retain finite Desktop journey summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: element-desktop-journey-summary
+          path: ${{ runner.temp }}/element-desktop-journey-safe-summary.txt
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Sanitize Desktop startup and network-isolation evidence
+        if: ${{ always() && steps.desktop_journey.outcome != 'skipped' }}
+        run: |
+          summary_file="$RUNNER_TEMP/element-desktop-startup-safe-summary.json"
+          node dev/element-desktop-evidence.mjs \
+            "$ELEMENT_DESKTOP_STAGE_FILE" \
+            "$ELEMENT_DESKTOP_SOURCE_SHA" > "$summary_file"
+          node --input-type=module - "$summary_file" <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const [path] = process.argv.slice(2);
+          const summary = JSON.parse(readFileSync(path, 'utf8'));
+          if (summary.status !== 'passed') process.exit(1);
+          NODE
+
+      - name: Retain sanitized Desktop startup evidence
+        if: ${{ always() && steps.desktop_journey.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: element-desktop-startup-summary
+          path: ${{ runner.temp }}/element-desktop-startup-safe-summary.json
+          if-no-files-found: ignore
+          retention-days: 1
+
       - name: Stop and remove the isolated stack and private evidence
         if: always()
         run: |
@@ -225,6 +281,7 @@ jobs:
           if ! rm -rf \
             "$RUNNER_TEMP/element-acceptance-users.json" \
             "$RUNNER_TEMP/element-acceptance-server.env" \
+            "$RUNNER_TEMP/element-desktop-journey-playwright-output" \
             "$RUNNER_TEMP/element-acceptance-reminder-events.json" \
             "$RUNNER_TEMP/element-acceptance-reminder-deliveries.json" \
             "$RUNNER_TEMP/element-acceptance-playwright-output"; then
@@ -232,6 +289,13 @@ jobs:
           fi
           if ! rm -f \
             "$RUNNER_TEMP/element-acceptance-stage.jsonl" \
+            "$RUNNER_TEMP/element-acceptance-desktop-credentials.json" \
+            "$RUNNER_TEMP/element-desktop-journey-stage.jsonl" \
+            "$RUNNER_TEMP/element-desktop-startup-stage.jsonl" \
+            "$RUNNER_TEMP/element-desktop-journey-runner-state.json" \
+            "$RUNNER_TEMP/element-desktop-journey-startup-output.jsonl" \
+            "$RUNNER_TEMP/element-desktop-journey-safe-summary.txt" \
+            "$RUNNER_TEMP/element-desktop-startup-safe-summary.json" \
             "$RUNNER_TEMP/element-acceptance-radicale.tar" \
             "$RUNNER_TEMP/element-acceptance-reminder.pgcustom" \
             "$RUNNER_TEMP/element-acceptance-dev-up.log" \

@@ -1,5 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -19,7 +28,20 @@ import {
   summarizeUidTcpSocketObservation,
   summarizeUidTcpSocketTables,
   waitForDesktopChildSpawn,
+  waitForDesktopJourneyCompletion,
+  writeDesktopJourneyCompletionMarker,
+  writeDesktopJourneyReadyMarker,
 } from './element-desktop-startup.mjs';
+
+async function withPrivateProfile(run) {
+  const profileRoot = mkdtempSync(join(tmpdir(), 'mcw-desktop-startup-test-'));
+  chmodSync(profileRoot, 0o700);
+  try {
+    await run(profileRoot, process.getuid());
+  } finally {
+    rmSync(profileRoot, { recursive: true, force: true });
+  }
+}
 
 test('missing desktop executable is reported as a finite spawn outcome', async () => {
   const child = spawn('/usr/bin/element-desktop-startup-missing-test', [], {
@@ -32,6 +54,105 @@ test('missing desktop executable is reported as a finite spawn outcome', async (
     errorClass: 'missing-executable',
   });
   assert.equal(child.pid, undefined);
+});
+
+test('Desktop journey hold accepts only a private fixed completion marker', async () => {
+  await withPrivateProfile(async (profileRoot, expectedUid) => {
+    const completionPath = join(profileRoot, '.desktop-journey-complete');
+    assert.equal(
+      writeDesktopJourneyReadyMarker(profileRoot, expectedUid),
+      true,
+    );
+    setTimeout(() => {
+      assert.equal(
+        writeDesktopJourneyCompletionMarker(profileRoot, expectedUid),
+        true,
+      );
+    }, 10);
+    assert.equal(
+      await waitForDesktopJourneyCompletion({
+        profileRoot,
+        expectedUid,
+        timeoutMs: 1_000,
+      }),
+      true,
+    );
+    assert.equal(
+      writeDesktopJourneyCompletionMarker(profileRoot, expectedUid),
+      false,
+    );
+  });
+});
+
+test('Desktop journey hold fails closed on malformed, insecure, and late markers', async () => {
+  await withPrivateProfile(async (profileRoot, expectedUid) => {
+    const readyPath = join(profileRoot, '.desktop-journey-ready');
+    const completionPath = join(profileRoot, '.desktop-journey-complete');
+    assert.equal(
+      writeDesktopJourneyReadyMarker(profileRoot, expectedUid),
+      true,
+    );
+    writeFileSync(completionPath, 'wrong marker\n', {
+      flag: 'wx',
+      mode: 0o600,
+    });
+    assert.equal(
+      await waitForDesktopJourneyCompletion({
+        profileRoot,
+        expectedUid,
+        timeoutMs: 100,
+      }),
+      false,
+    );
+
+    rmSync(completionPath);
+    writeFileSync(
+      completionPath,
+      'matrix-calendar-desktop-journey-complete-v1\n',
+      {
+        flag: 'wx',
+        mode: 0o600,
+      },
+    );
+    chmodSync(completionPath, 0o644);
+    assert.equal(
+      await waitForDesktopJourneyCompletion({
+        profileRoot,
+        expectedUid,
+        timeoutMs: 100,
+      }),
+      false,
+    );
+
+    rmSync(completionPath);
+    assert.equal(
+      await waitForDesktopJourneyCompletion({
+        profileRoot,
+        expectedUid,
+        timeoutMs: 10,
+      }),
+      false,
+    );
+    setTimeout(() => {
+      writeFileSync(
+        completionPath,
+        'matrix-calendar-desktop-journey-complete-v1\n',
+        { flag: 'wx', mode: 0o600 },
+      );
+    }, 25);
+    assert.equal(
+      await waitForDesktopJourneyCompletion({
+        profileRoot,
+        expectedUid,
+        timeoutMs: 10,
+      }),
+      false,
+    );
+    await new Promise((resolveWait) => setTimeout(resolveWait, 30));
+    assert.equal(existsSync(completionPath), true);
+    rmSync(completionPath);
+    rmSync(readyPath);
+  });
 });
 
 test('keyring unlock entropy is encoded as an ASCII line without embedded NULs', () => {

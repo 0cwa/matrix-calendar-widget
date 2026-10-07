@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,6 +18,7 @@ import {
   readDesktopJourneyEvidence,
   readSyntheticDesktopCredentials,
   summarizeDesktopJourneyEvidence,
+  writeSyntheticDesktopCredentials,
 } from './element-desktop-journey.mjs';
 
 function withTempDirectory(run) {
@@ -55,6 +57,40 @@ test('reads and removes private synthetic Desktop credentials', () => {
     assert.throws(
       () => readSyntheticDesktopCredentials({ filePath, runnerTemp }),
       /Invalid Desktop journey input/u,
+    );
+  });
+});
+
+test('writes synthetic Desktop credentials once with private runner permissions', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(
+      runnerTemp,
+      'element-acceptance-desktop-credentials.json',
+    );
+    writeSyntheticDesktopCredentials({
+      filePath,
+      runnerTemp,
+      username: 'element-0123456789-a',
+      password: 'Abcdefghijklmnopqrstuvwxyz012345',
+    });
+
+    assert.equal(statSync(filePath).mode & 0o777, 0o600);
+    assert.throws(
+      () =>
+        writeSyntheticDesktopCredentials({
+          filePath,
+          runnerTemp,
+          username: 'element-0123456789-a',
+          password: 'Abcdefghijklmnopqrstuvwxyz012345',
+        }),
+      /Invalid Desktop journey input/u,
+    );
+    assert.deepEqual(
+      readSyntheticDesktopCredentials({ filePath, runnerTemp }),
+      {
+        username: 'element-0123456789-a',
+        password: 'Abcdefghijklmnopqrstuvwxyz012345',
+      },
     );
   });
 });

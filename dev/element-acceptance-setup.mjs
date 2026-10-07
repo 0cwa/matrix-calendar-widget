@@ -7,6 +7,7 @@ import {
   diagnoseMissingModule,
   loadRuntimeDependencyAllowlist,
 } from './element-acceptance-diagnostics.mjs';
+import { writeSyntheticDesktopCredentials } from './element-desktop-journey.mjs';
 
 const SERVICE_USER_ID = '@_matrix_calendar_service:localhost';
 const SERVICE_LOCALPART = '_matrix_calendar_service';
@@ -808,6 +809,22 @@ async function provision() {
       accessToken: serviceUserAccessToken,
     },
   });
+
+  if (process.env.ELEMENT_ACCEPTANCE_DESKTOP_CREDENTIALS_FILE !== undefined) {
+    addMask(actorPasswords.memberA);
+    try {
+      writeSyntheticDesktopCredentials({
+        filePath: process.env.ELEMENT_ACCEPTANCE_DESKTOP_CREDENTIALS_FILE,
+        runnerTemp: requiredEnvironment('RUNNER_TEMP'),
+        username: actorLocalparts.memberA,
+        password: actorPasswords.memberA,
+      });
+    } catch {
+      actorPasswords.memberA = '';
+      throw new FixtureSetupError('accounts-ready');
+    }
+    actorPasswords.memberA = '';
+  }
 
   recordStage('runtime-ready', 'passed');
   process.stdout.write('Element acceptance fixture setup complete.\n');

@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const FIXED_ORIGIN = 'vector://vector';
@@ -30,6 +30,13 @@ const SAFE_STORAGE_MODES = new Set(['encrypted', 'plaintext', 'basic_text']);
 const MAX_SAFE_STORAGE_LOG_BYTES = 1_048_576;
 const MAX_SAFE_STORAGE_LINE_LENGTH = 512;
 const DESKTOP_SPAWN_WAIT_MS = 5_000;
+const DESKTOP_JOURNEY_HOLD_MS = 180_000;
+const DESKTOP_JOURNEY_READY_MARKER = '.desktop-journey-ready';
+const DESKTOP_JOURNEY_COMPLETE_MARKER = '.desktop-journey-complete';
+const DESKTOP_JOURNEY_READY_CONTENT =
+  'matrix-calendar-desktop-journey-ready-v1\n';
+const DESKTOP_JOURNEY_COMPLETE_CONTENT =
+  'matrix-calendar-desktop-journey-complete-v1\n';
 const MAX_DIAGNOSTIC_COUNT = 100;
 const MAX_UID_LIFECYCLE_PROCESSES = 4_096;
 const MAX_CDP_PROCESS_INFO_RECORDS = 128;
@@ -268,6 +275,128 @@ export function waitForDesktopChildSpawn(child) {
     child.once('spawn', onSpawn);
     child.once('error', onError);
   });
+}
+
+function validDesktopJourneyMarkerRoot(profileRoot, expectedUid) {
+  if (
+    typeof profileRoot !== 'string' ||
+    !isAbsolute(profileRoot) ||
+    !Number.isSafeInteger(expectedUid) ||
+    expectedUid < 1
+  ) {
+    return false;
+  }
+  try {
+    const stat = lstatSync(profileRoot);
+    return (
+      stat.isDirectory() &&
+      !stat.isSymbolicLink() &&
+      stat.uid === expectedUid &&
+      (stat.mode & 0o777) === 0o700
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validDesktopJourneyMarker(markerPath, expectedUid, expectedContent) {
+  try {
+    const stat = lstatSync(markerPath);
+    return (
+      stat.isFile() &&
+      !stat.isSymbolicLink() &&
+      stat.nlink === 1 &&
+      stat.uid === expectedUid &&
+      (stat.mode & 0o777) === 0o600 &&
+      stat.size === Buffer.byteLength(expectedContent) &&
+      readFileSync(markerPath, 'utf8') === expectedContent
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function writeDesktopJourneyReadyMarker(profileRoot, expectedUid) {
+  if (!validDesktopJourneyMarkerRoot(profileRoot, expectedUid)) return false;
+  const markerPath = `${profileRoot}/${DESKTOP_JOURNEY_READY_MARKER}`;
+  try {
+    writeFileSync(markerPath, DESKTOP_JOURNEY_READY_CONTENT, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+  } catch {
+    return false;
+  }
+  return validDesktopJourneyMarker(
+    markerPath,
+    expectedUid,
+    DESKTOP_JOURNEY_READY_CONTENT,
+  );
+}
+
+export function writeDesktopJourneyCompletionMarker(profileRoot, expectedUid) {
+  if (
+    !validDesktopJourneyMarkerRoot(profileRoot, expectedUid) ||
+    !validDesktopJourneyMarker(
+      `${profileRoot}/${DESKTOP_JOURNEY_READY_MARKER}`,
+      expectedUid,
+      DESKTOP_JOURNEY_READY_CONTENT,
+    )
+  ) {
+    return false;
+  }
+  const markerPath = `${profileRoot}/${DESKTOP_JOURNEY_COMPLETE_MARKER}`;
+  try {
+    writeFileSync(markerPath, DESKTOP_JOURNEY_COMPLETE_CONTENT, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+  } catch {
+    return false;
+  }
+  return validDesktopJourneyMarker(
+    markerPath,
+    expectedUid,
+    DESKTOP_JOURNEY_COMPLETE_CONTENT,
+  );
+}
+
+export async function waitForDesktopJourneyCompletion({
+  profileRoot,
+  expectedUid,
+  timeoutMs = DESKTOP_JOURNEY_HOLD_MS,
+}) {
+  if (
+    !validDesktopJourneyMarkerRoot(profileRoot, expectedUid) ||
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < 1 ||
+    timeoutMs > DESKTOP_JOURNEY_HOLD_MS ||
+    !validDesktopJourneyMarker(
+      `${profileRoot}/${DESKTOP_JOURNEY_READY_MARKER}`,
+      expectedUid,
+      DESKTOP_JOURNEY_READY_CONTENT,
+    )
+  ) {
+    return false;
+  }
+  const markerPath = `${profileRoot}/${DESKTOP_JOURNEY_COMPLETE_MARKER}`;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(markerPath)) {
+      return validDesktopJourneyMarker(
+        markerPath,
+        expectedUid,
+        DESKTOP_JOURNEY_COMPLETE_CONTENT,
+      );
+    }
+    const remaining = deadline - Date.now();
+    await new Promise((resolveWait) =>
+      setTimeout(resolveWait, Math.min(100, remaining)),
+    );
+  }
+  return false;
 }
 
 export function readKeyringControl(stdout) {
@@ -2651,6 +2780,27 @@ async function connectAndCheckPage() {
   return rendererCount;
 }
 
+async function holdForDesktopJourney() {
+  const requested = process.env.ELEMENT_DESKTOP_JOURNEY_HOLD;
+  if (requested === undefined || requested === 'false') return;
+  if (requested !== 'true') fail('invalid-config', 'config');
+  if (!writeDesktopJourneyReadyMarker(profileRoot, expectedUid)) {
+    fail('invalid-profile', 'privateProfile');
+  }
+  process.stdout.write(
+    '{"phase":"desktop-startup-progress","milestone":"desktop-journey-ready"}\n',
+  );
+  if (
+    !(await waitForDesktopJourneyCompletion({
+      profileRoot,
+      expectedUid,
+      timeoutMs: DESKTOP_JOURNEY_HOLD_MS,
+    }))
+  ) {
+    fail('desktop-not-ready', 'desktopProcess');
+  }
+}
+
 async function stopApp() {
   if (browser) {
     try {
@@ -2762,7 +2912,11 @@ async function main() {
       {
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: process.env,
+        env: Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([name]) => name !== 'ELEMENT_DESKTOP_JOURNEY_HOLD',
+          ),
+        ),
       },
     );
     appLaunchState = 'pending';
@@ -2817,6 +2971,7 @@ async function main() {
         : 'unavailable',
     );
     rendererCount = await connectAndCheckPage();
+    await holdForDesktopJourney();
   } catch (error) {
     failureCode =
       error instanceof ProbeFailure ? error.code : 'probe-internal-error';
@@ -2856,7 +3011,19 @@ async function main() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  if (process.argv[2] === 'cleanup-observation') {
+  if (process.argv[2] === 'desktop-journey-complete') {
+    const completed = writeDesktopJourneyCompletionMarker(
+      profileRoot,
+      expectedUid,
+    );
+    process.stdout.write(
+      `${JSON.stringify({
+        phase: 'desktop-journey-completion',
+        status: completed ? 'passed' : 'failed',
+      })}\n`,
+    );
+    if (!completed) process.exitCode = 1;
+  } else if (process.argv[2] === 'cleanup-observation') {
     const requestedUid = Number(process.argv[3]);
     const observation = readUidProcessObservations(requestedUid);
     process.stdout.write(`${JSON.stringify(observation)}\n`);

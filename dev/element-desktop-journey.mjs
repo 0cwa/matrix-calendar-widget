@@ -1,11 +1,13 @@
 import {
   appendFileSync,
+  existsSync,
   lstatSync,
   readFileSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const DESKTOP_JOURNEY_PHASES = Object.freeze([
   'desktop-login',
@@ -68,6 +70,38 @@ function privateFileStat(filePath, maximumBytes) {
   const stat = ownedPrivateFileStat(filePath);
   if (stat.size > maximumBytes) invalidInput();
   return stat;
+}
+
+export function writeSyntheticDesktopCredentials({
+  filePath,
+  runnerTemp,
+  username,
+  password,
+}) {
+  const path = privateRunnerPath(
+    filePath,
+    runnerTemp,
+    JOURNEY_CREDENTIALS_NAME,
+  );
+  if (
+    typeof username !== 'string' ||
+    !/^element-[0-9a-f]{10}-a$/u.test(username) ||
+    typeof password !== 'string' ||
+    !/^[A-Za-z0-9_-]{32}$/u.test(password)
+  ) {
+    invalidInput();
+  }
+
+  try {
+    writeFileSync(path, `${JSON.stringify({ username, password })}\n`, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+  } catch {
+    invalidInput();
+  }
+  privateFileStat(path, MAX_CREDENTIAL_BYTES);
 }
 
 function unlinkOwnedPrivateFile(filePath, expectedStat) {
@@ -210,6 +244,22 @@ export function summarizeDesktopJourneyEvidence(input) {
 
 export function readDesktopJourneyEvidence({ filePath, runnerTemp }) {
   const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
+  if (!existsSync(path)) return summarizeDesktopJourneyEvidence('');
   privateFileStat(path, MAX_EVIDENCE_BYTES);
   return summarizeDesktopJourneyEvidence(readFileSync(path, 'utf8'));
+}
+
+if (
+  process.argv[1] === fileURLToPath(import.meta.url) &&
+  process.argv[2] === 'summary'
+) {
+  try {
+    const runnerTemp = process.env.RUNNER_TEMP;
+    const filePath = process.env.ELEMENT_DESKTOP_JOURNEY_STAGE_FILE;
+    const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
+    process.stdout.write(`${JSON.stringify(summary)}\n`);
+  } catch {
+    process.stderr.write('Desktop journey evidence is unavailable.\n');
+    process.exitCode = 1;
+  }
 }

@@ -21,6 +21,13 @@ export type DesktopJourneySummary = {
 
 export declare const DESKTOP_JOURNEY_PHASES: readonly DesktopJourneyPhase[];
 
+export declare function writeSyntheticDesktopCredentials(input: {
+  filePath: string;
+  runnerTemp: string;
+  username: string;
+  password: string;
+}): void;
+
 export declare function readSyntheticDesktopCredentials(input: {
   filePath: string;
   runnerTemp: string;
