@@ -408,16 +408,17 @@ jobs:
           wait "$probe_pid"
           probe_exit=$?
           set -e
-          ELEMENT_DESKTOP_BEFORE_APP_COUNTER="$before_app_counter" \
+          if finalized_probe_status="$(ELEMENT_DESKTOP_BEFORE_APP_COUNTER="$before_app_counter" \
           ELEMENT_DESKTOP_AFTER_APP_SPAWN_COUNTER="$after_app_spawn_counter" \
           ELEMENT_DESKTOP_AFTER_PAGE_LOAD_COUNTER="$after_page_load_counter" \
           ELEMENT_DESKTOP_BEFORE_APP_UID_STARTUP_OBSERVATION="$before_app_uid_startup_observation" \
           ELEMENT_DESKTOP_AFTER_APP_SPAWN_UID_STARTUP_OBSERVATION="$after_app_spawn_uid_startup_observation" \
           ELEMENT_DESKTOP_AFTER_PAGE_LOAD_UID_STARTUP_OBSERVATION="$after_page_load_uid_startup_observation" \
-          node --input-type=module - "$result_file" "$ELEMENT_DESKTOP_STAGE_FILE" <<'NODE'
+          node --input-type=module - "$result_file" "$ELEMENT_DESKTOP_STAGE_FILE" "$probe_exit" <<'NODE'
           import { appendFileSync, readFileSync } from 'node:fs';
-          import { emptyUidStartupObservation, sanitizeEgressCounterObservation, sanitizeUidStartupObservation } from './dev/element-desktop-evidence.mjs';
-          const [resultFile, stageFile] = process.argv.slice(2);
+          import { acknowledgedEgressCounterObservation, emptyUidStartupObservation, resolveTrustedRendererSandbox, sanitizeEgressCounterObservation, sanitizeUidStartupObservation } from './dev/element-desktop-evidence.mjs';
+          const [resultFile, stageFile, probeExitText] = process.argv.slice(2);
+          const probeExit = Number(probeExitText);
           function startupObservation(raw) {
             return raw === 'not_observed'
               ? emptyUidStartupObservation('not_observed')
@@ -437,12 +438,8 @@ jobs:
           const beforeApp = sanitizeEgressCounterObservation(process.env.ELEMENT_DESKTOP_BEFORE_APP_COUNTER);
           const afterAppSpawn = sanitizeEgressCounterObservation(process.env.ELEMENT_DESKTOP_AFTER_APP_SPAWN_COUNTER);
           const afterPageLoad = sanitizeEgressCounterObservation(process.env.ELEMENT_DESKTOP_AFTER_PAGE_LOAD_COUNTER);
-          function acknowledgedCounter(snapshot, acknowledgement) {
-            if (acknowledgement === 'not_observed') return {state:'not_observed',ipv4Blocked:null,ipv6Blocked:null,ipv4Classes:null,ipv6Classes:null,overflow:null};
-            if (acknowledgement !== 'observed' || !['observed','partial'].includes(snapshot.state)) return {state:'unavailable',ipv4Blocked:null,ipv6Blocked:null,ipv4Classes:null,ipv6Classes:null,overflow:null};
-            return snapshot;
-          }
           const milestones = new Set(['before-app','after-app-spawn','after-page-load']);
+          let finalizedStatus = 'failed';
           for (const row of readFileSync(resultFile, 'utf8').split(/\r?\n/u).filter(Boolean)) {
             let value;
             try { value = JSON.parse(row); } catch { continue; }
@@ -455,6 +452,9 @@ jobs:
               continue;
             }
             if (value.phase === 'desktop-startup') {
+              const initialStatus = value.status;
+              const initialFailureCode = value.failureCode;
+              const initialNativeSandbox = value.checks?.nativeSandbox;
               value.uidLifecycleDiagnostics = {
                 beforeApp:beforeAppStartupObservation.uidLifecycleObservation,
                 afterAppSpawn:afterAppSpawnStartupObservation.uidLifecycleObservation,
@@ -466,14 +466,62 @@ jobs:
               };
               const acknowledgements = value.egressPhaseCounters ?? {};
               value.egressPhaseCounters = {
-                beforeApp:acknowledgedCounter(beforeApp, acknowledgements.beforeApp?.state),
-                afterAppSpawn:acknowledgedCounter(afterAppSpawn, acknowledgements.afterAppSpawn?.state),
-                afterPageLoad:acknowledgedCounter(afterPageLoad, acknowledgements.afterPageLoad?.state),
+                beforeApp:acknowledgedEgressCounterObservation(beforeApp, acknowledgements.beforeApp?.state),
+                afterAppSpawn:acknowledgedEgressCounterObservation(afterAppSpawn, acknowledgements.afterAppSpawn?.state),
+                afterPageLoad:acknowledgedEgressCounterObservation(afterPageLoad, acknowledgements.afterPageLoad?.state),
               };
+              const rendererSandbox = resolveTrustedRendererSandbox(
+                value.rendererDiagnostics,
+                value.uidLifecycleDiagnostics.afterPageLoad,
+              );
+              value.rendererDiagnostics = rendererSandbox.rendererDiagnostics;
+              value.rendererCount = rendererSandbox.rendererCount;
+              value.checks.nativeSandbox = rendererSandbox.passed ? 'passed' : 'failed';
+              const otherChecksPassed = Object.entries(value.checks).every(
+                ([name, state]) => name === 'nativeSandbox' || state === 'passed',
+              );
+              const pendingNativeOnly =
+                probeExit === 1 &&
+                initialStatus === 'failed' &&
+                initialFailureCode === null &&
+                initialNativeSandbox === 'not_run' &&
+                otherChecksPassed;
+              const alreadyPassed =
+                probeExit === 0 &&
+                initialStatus === 'passed' &&
+                initialNativeSandbox === 'passed';
+              const finalizedPassed =
+                initialFailureCode === null &&
+                rendererSandbox.passed &&
+                otherChecksPassed &&
+                (pendingNativeOnly || alreadyPassed);
+              if (finalizedPassed) {
+                value.failureCode = null;
+                value.status = 'passed';
+              } else {
+                if (value.failureCode === null) {
+                  value.failureCode = rendererSandbox.passed
+                    ? 'probe-internal-error'
+                    : 'renderer-sandbox-unconfirmed';
+                }
+                value.status = 'failed';
+              }
+              finalizedStatus = value.status;
               appendFileSync(stageFile, JSON.stringify(value) + '\n');
             }
           }
+          process.stdout.write(finalizedStatus);
           NODE
+          )"; then
+            if [[ "$finalized_probe_status" == passed ]]; then
+            # The trusted root snapshot finalizes the provisional app-side sandbox check.
+              probe_exit=0
+            else
+              probe_exit=1
+            fi
+          else
+            probe_exit=1
+          fi
           if [[ "$probe_exit" -ne 0 ]]; then
             echo 'Packaged Element Desktop did not complete its startup checks.' >&2
             exit 1

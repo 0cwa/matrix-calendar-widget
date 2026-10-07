@@ -86,6 +86,7 @@ export const SANDBOX_REASONS = Object.freeze([
   'uid_mismatch',
   'no_sandbox_flag',
   'renderer_missing',
+  'renderer_ownership_unconfirmed',
   'seccomp_unconfirmed',
   'no_new_privs_unconfirmed',
 ]);
@@ -841,7 +842,12 @@ function summarizeCdpRendererOwnership(
       item.uids.length === 4 &&
       item.uids.every(Number.isSafeInteger);
     const uidMatches = hasUids && item.uids.every((uid) => uid === expectedUid);
-    let processUnreadable = !hasUids || item.unreadable === true || isZombie;
+    let processUnreadable =
+      !hasUids ||
+      item.unreadable === true ||
+      isZombie ||
+      !Array.isArray(item.args) ||
+      item.args.length === 0;
     if (uidMatches) uidMatchCount += 1;
     else if (hasUids) uidMismatchCount += 1;
 
@@ -869,15 +875,20 @@ function summarizeCdpRendererOwnership(
       if (classifyUidProcess(item.args, pid, null) === 'renderer') {
         argvRendererMatchCount += 1;
       }
-      if (item.args.includes('--no-sandbox')) noSandboxFlagCount += 1;
+      if (
+        item.args.some(
+          (arg) => arg === '--no-sandbox' || arg.startsWith('--no-sandbox='),
+        )
+      ) {
+        noSandboxFlagCount += 1;
+      }
     } else if (uidMatches) {
       processUnreadable = true;
     }
     if (processUnreadable) unreadableCount += 1;
     if (
       uidMatches &&
-      !isZombie &&
-      item.unreadable !== true &&
+      !processUnreadable &&
       (appDescendant || inAppProcessGroup)
     ) {
       securityRows.push(item);
@@ -2362,12 +2373,19 @@ function verifyProcessCoverageAndSandbox(appPid) {
     appPid,
     expectedUid,
   );
-  if (rendererDiagnostics.sandboxReason !== 'passed') {
+  if (
+    [
+      'application_process_missing',
+      'unreadable_process_member',
+      'uid_mismatch',
+      'no_sandbox_flag',
+    ].includes(rendererDiagnostics.sandboxReason)
+  ) {
     fail('renderer-sandbox-unconfirmed', 'nativeSandbox');
   }
   pass('desktopProcess');
-  pass('nativeSandbox');
-  return cappedTwo(rendererDiagnostics.rendererCount);
+  status('nativeSandbox', 'not_run');
+  return null;
 }
 
 function listeningAddresses() {

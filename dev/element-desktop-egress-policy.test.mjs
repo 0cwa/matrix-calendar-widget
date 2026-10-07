@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   aggregateDropCounterDetails,
+  cliCounterObservation,
   EGRESS_DROP_COUNTER_CLASSES,
   negativeProbePassed,
   parseDropCounterDetails,
@@ -24,6 +25,10 @@ import {
   runtimeFactsFromSpawn,
   stagedE2ePackagePath,
 } from './element-desktop-egress-policy.mjs';
+import {
+  acknowledgedEgressCounterObservation,
+  sanitizeEgressCounterObservation,
+} from './element-desktop-evidence.mjs';
 
 function passingFamily() {
   return {
@@ -229,6 +234,94 @@ test('IPv4 and IPv6 class counters aggregate without changing the blocked totals
   assert.throws(
     () => aggregateDropCounterDetails({ ...ipv4, blocked: 7 }, ipv6),
     /egress counter unavailable/u,
+  );
+});
+
+test('counter CLI state survives workflow acknowledgement and evidence sanitization', () => {
+  const cliOutput = cliCounterObservation({
+    ipv4: 3,
+    ipv6: 1,
+    ipv4Classes: {
+      udp_dns_port: 1,
+      tcp_dns_port: 0,
+      tcp_https_port: 1,
+      other: 1,
+    },
+    ipv6Classes: {
+      udp_dns_port: 0,
+      tcp_dns_port: 0,
+      tcp_https_port: 1,
+      other: 0,
+    },
+    overflow: false,
+  });
+  const workflowSnapshot = sanitizeEgressCounterObservation(
+    JSON.stringify(cliOutput),
+  );
+  assert.deepEqual(workflowSnapshot, {
+    state: 'observed',
+    ipv4Blocked: 3,
+    ipv6Blocked: 1,
+    ipv4Classes: {
+      udp_dns_port: 1,
+      tcp_dns_port: 0,
+      tcp_https_port: 1,
+      other: 1,
+    },
+    ipv6Classes: {
+      udp_dns_port: 0,
+      tcp_dns_port: 0,
+      tcp_https_port: 1,
+      other: 0,
+    },
+    overflow: false,
+  });
+  assert.deepEqual(
+    acknowledgedEgressCounterObservation(workflowSnapshot, 'observed'),
+    workflowSnapshot,
+  );
+  assert.deepEqual(
+    acknowledgedEgressCounterObservation(
+      { ...cliOutput, state: undefined },
+      'observed',
+    ),
+    {
+      state: 'unavailable',
+      ipv4Blocked: null,
+      ipv6Blocked: null,
+      ipv4Classes: null,
+      ipv6Classes: null,
+      overflow: null,
+    },
+  );
+  assert.equal(
+    acknowledgedEgressCounterObservation(workflowSnapshot, 'unavailable').state,
+    'unavailable',
+  );
+  const partialCliOutput = cliCounterObservation({
+    ipv4: 100_000,
+    ipv6: 0,
+    ipv4Classes: {
+      udp_dns_port: 100_000,
+      tcp_dns_port: 0,
+      tcp_https_port: 0,
+      other: 0,
+    },
+    ipv6Classes: {
+      udp_dns_port: 0,
+      tcp_dns_port: 0,
+      tcp_https_port: 0,
+      other: 0,
+    },
+    overflow: true,
+  });
+  assert.equal(partialCliOutput.state, 'partial');
+  assert.equal(
+    acknowledgedEgressCounterObservation(
+      sanitizeEgressCounterObservation(JSON.stringify(partialCliOutput)),
+      'observed',
+    ).state,
+    'partial',
   );
 });
 

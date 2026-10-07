@@ -322,6 +322,17 @@ export function readBlockedCounters(runIdValue) {
   );
 }
 
+export function cliCounterObservation(counts) {
+  return {
+    state: counts.overflow ? 'partial' : 'observed',
+    ipv4Blocked: counts.ipv4,
+    ipv6Blocked: counts.ipv6,
+    ipv4Classes: counts.ipv4Classes,
+    ipv6Classes: counts.ipv6Classes,
+    overflow: counts.overflow,
+  };
+}
+
 function readBlockedCounter(family) {
   return readBlockedCounterDetails(family).blocked;
 }
@@ -1026,15 +1037,7 @@ async function connectOnly(expectedUidValue, host, port) {
 
 function printCounters(runId) {
   const counts = readBlockedCounters(runId);
-  process.stdout.write(
-    `${JSON.stringify({
-      ipv4Blocked: counts.ipv4,
-      ipv6Blocked: counts.ipv6,
-      ipv4Classes: counts.ipv4Classes,
-      ipv6Classes: counts.ipv6Classes,
-      overflow: counts.overflow,
-    })}\n`,
-  );
+  process.stdout.write(`${JSON.stringify(cliCounterObservation(counts))}\n`);
 }
 
 async function main(args) {

@@ -28,6 +28,7 @@ const SANDBOX_DIAGNOSTIC_REASONS = new Set([
   'uid_mismatch',
   'no_sandbox_flag',
   'renderer_missing',
+  'renderer_ownership_unconfirmed',
   'seccomp_unconfirmed',
   'no_new_privs_unconfirmed',
 ]);
@@ -405,6 +406,23 @@ export function sanitizeEgressCounterObservation(input) {
   };
 }
 
+export function acknowledgedEgressCounterObservation(
+  snapshot,
+  acknowledgement,
+) {
+  if (acknowledgement === 'not_observed') {
+    return emptyCounterObservation('not_observed');
+  }
+  const sanitized = sanitizeEgressCounterObservation(snapshot);
+  if (
+    acknowledgement !== 'observed' ||
+    !['observed', 'partial'].includes(sanitized.state)
+  ) {
+    return emptyCounterObservation('unavailable');
+  }
+  return sanitized;
+}
+
 function validateRendererDiagnostics(value) {
   if (
     !hasKeys(value, [
@@ -462,6 +480,140 @@ function validateRendererDiagnostics(value) {
       value.seccompState === 'enabled' &&
       value.noNewPrivsState === 'enabled')
   );
+}
+
+function matchesTrustedRendererSandbox(processGroup, lifecycle, rendererCount) {
+  const resolved = resolveTrustedRendererSandbox(processGroup, lifecycle);
+  return (
+    resolved.passed &&
+    rendererCount === resolved.rendererCount &&
+    Object.keys(resolved.rendererDiagnostics).every(
+      (field) => processGroup[field] === resolved.rendererDiagnostics[field],
+    )
+  );
+}
+
+function trustedRendererSandboxReason(processGroup, lifecycle) {
+  if (!validateRendererDiagnostics(processGroup)) {
+    return 'renderer_ownership_unconfirmed';
+  }
+  if (processGroup.state === 'not_observed') {
+    return 'renderer_ownership_unconfirmed';
+  }
+  if (!processGroup.applicationProcessObserved) {
+    return 'application_process_missing';
+  }
+  if (processGroup.unreadableProcessCount > 0) {
+    return 'unreadable_process_member';
+  }
+  if (processGroup.uidMismatchCount > 0) return 'uid_mismatch';
+  if (processGroup.noSandboxFlagCount > 0) return 'no_sandbox_flag';
+  if (
+    ![
+      'passed',
+      'renderer_missing',
+      'seccomp_unconfirmed',
+      'no_new_privs_unconfirmed',
+    ].includes(processGroup.sandboxReason)
+  ) {
+    return 'renderer_ownership_unconfirmed';
+  }
+  if (
+    (processGroup.sandboxReason === 'renderer_missing' &&
+      (processGroup.rendererCount !== 0 ||
+        processGroup.seccompState !== 'unavailable' ||
+        processGroup.noNewPrivsState !== 'unavailable')) ||
+    (processGroup.sandboxReason !== 'renderer_missing' &&
+      processGroup.rendererCount === 0) ||
+    (processGroup.sandboxReason === 'seccomp_unconfirmed' &&
+      processGroup.seccompState === 'enabled') ||
+    (processGroup.sandboxReason === 'no_new_privs_unconfirmed' &&
+      (processGroup.seccompState !== 'enabled' ||
+        processGroup.noNewPrivsState === 'enabled'))
+  ) {
+    return 'renderer_ownership_unconfirmed';
+  }
+  if (
+    !validateUidLifecycleObservation(lifecycle) ||
+    lifecycle.state !== 'observed' ||
+    lifecycle.overflow ||
+    lifecycle.unreadableProcessCount > 0 ||
+    lifecycle.unattributedProcessCount > 0
+  ) {
+    return 'renderer_ownership_unconfirmed';
+  }
+
+  const renderer = lifecycle.cdpRendererObservation;
+  if (renderer.state !== 'observed' || renderer.overflow) {
+    return 'renderer_ownership_unconfirmed';
+  }
+  if (renderer.rendererCount === 0) return 'renderer_missing';
+  if (renderer.uidMismatchCount > 0) return 'uid_mismatch';
+  if (renderer.unreadableCount > 0 || renderer.missingCount > 0) {
+    return 'unreadable_process_member';
+  }
+  if (renderer.noSandboxFlagCount > 0) return 'no_sandbox_flag';
+  if (
+    renderer.appIdentityState !== 'verified' ||
+    renderer.uidMatchCount !== renderer.rendererCount ||
+    renderer.appDescendantCount !== renderer.rendererCount ||
+    renderer.appDescendantUnobservedCount !== 0 ||
+    renderer.appProcessGroupCount !== renderer.rendererCount ||
+    renderer.appProcessGroupUnobservedCount !== 0 ||
+    renderer.appDescendantAndProcessGroupCount !== renderer.rendererCount
+  ) {
+    return 'renderer_ownership_unconfirmed';
+  }
+  if (renderer.seccompState !== 'enabled') return 'seccomp_unconfirmed';
+  if (renderer.noNewPrivsState !== 'enabled') {
+    return 'no_new_privs_unconfirmed';
+  }
+  return 'passed';
+}
+
+export function resolveTrustedRendererSandbox(processGroup, lifecycle) {
+  const validProcessGroup = validateRendererDiagnostics(processGroup);
+  const reason = trustedRendererSandboxReason(processGroup, lifecycle);
+  if (!validProcessGroup || processGroup.state === 'not_observed') {
+    return {
+      passed: false,
+      rendererCount: null,
+      rendererDiagnostics: emptyRendererDiagnostics(),
+    };
+  }
+  const cdpObservation = validateUidLifecycleObservation(lifecycle)
+    ? lifecycle.cdpRendererObservation
+    : null;
+  const rendererDiagnostics = {
+    ...processGroup,
+    sandboxReason: reason,
+    unreadableProcessCount: Math.max(
+      processGroup.unreadableProcessCount,
+      cdpObservation?.unreadableCount ?? 0,
+    ),
+    uidMismatchCount: Math.max(
+      processGroup.uidMismatchCount,
+      cdpObservation?.uidMismatchCount ?? 0,
+    ),
+    noSandboxFlagCount: Math.max(
+      processGroup.noSandboxFlagCount,
+      cdpObservation?.noSandboxFlagCount ?? 0,
+    ),
+    rendererCount:
+      cdpObservation?.state === 'observed' ||
+      cdpObservation?.state === 'partial'
+        ? cdpObservation.rendererCount
+        : processGroup.rendererCount,
+    seccompState: cdpObservation?.seccompState ?? processGroup.seccompState,
+    noNewPrivsState:
+      cdpObservation?.noNewPrivsState ?? processGroup.noNewPrivsState,
+  };
+  return {
+    passed: reason === 'passed',
+    rendererCount:
+      reason === 'passed' ? Math.min(2, cdpObservation.rendererCount) : null,
+    rendererDiagnostics,
+  };
 }
 
 function emptyRendererDiagnostics() {
@@ -1624,7 +1776,12 @@ function validateStartup(record, sourceSha) {
   }
   if (
     (record.checks.nativeSandbox === 'passed' &&
-      record.rendererDiagnostics.sandboxReason !== 'passed') ||
+      (record.rendererDiagnostics.sandboxReason !== 'passed' ||
+        !matchesTrustedRendererSandbox(
+          record.rendererDiagnostics,
+          record.uidLifecycleDiagnostics.afterPageLoad,
+          record.rendererCount,
+        ))) ||
     (record.checks.nativeSandbox === 'failed' &&
       record.rendererDiagnostics.sandboxReason === 'passed') ||
     (record.checks.nativeSandbox === 'not_run' &&
@@ -2238,7 +2395,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 11,
+    schemaVersion: 12,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -2341,7 +2498,7 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 11 &&
+    value.schemaVersion === 12 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
@@ -2384,6 +2541,12 @@ export function validDesktopSummary(value) {
     validateSafeStorage(value.safeStorage) &&
     validateDesktopObservation(value.desktopObservation) &&
     validateRendererDiagnostics(value.rendererDiagnostics) &&
+    (value.checks?.nativeSandbox !== 'passed' ||
+      matchesTrustedRendererSandbox(
+        value.rendererDiagnostics,
+        value.uidLifecycleDiagnostics?.afterPageLoad,
+        value.rendererCount,
+      )) &&
     hasKeys(value.uidLifecycleDiagnostics, [
       'beforeApp',
       'afterAppSpawn',

@@ -413,6 +413,33 @@ test('CDP renderer ownership compares live UID, app ancestry, process group, arg
   assert.equal(JSON.stringify(observation).includes('24000'), false);
 });
 
+test('CDP renderer with an empty command line remains unreadable', () => {
+  const observation = summarizeUidLifecycleObservation(
+    [
+      lifecycleProcess(500, 1, 500, ['/usr/bin/element-desktop']),
+      lifecycleProcess(502, 500, 500, [], {
+        seccomp: '2',
+        noNewPrivs: '1',
+      }),
+    ],
+    24_000,
+    500,
+    true,
+    false,
+    {
+      state: 'observed',
+      overflow: false,
+      rendererCount: 1,
+      pids: [502],
+    },
+  );
+
+  assert.equal(observation.cdpRendererObservation.state, 'partial');
+  assert.equal(observation.cdpRendererObservation.unreadableCount, 1);
+  assert.equal(observation.cdpRendererObservation.seccompState, 'unavailable');
+  assert.doesNotMatch(JSON.stringify(observation), /502|24000/u);
+});
+
 test('capped directory iteration reads only through the first excess match and closes', () => {
   const names = ['metadata', '10', '11', '12', '13'];
   let readCalls = 0;

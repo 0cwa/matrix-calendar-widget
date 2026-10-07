@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   emptyUidLifecycleObservation,
   emptyUidStartupObservation,
+  resolveTrustedRendererSandbox,
   sanitizeDesktopStages,
   sanitizeEgressCounterObservation,
   sanitizeUidLifecycleObservation,
@@ -239,6 +240,21 @@ function passingRendererDiagnostics(overrides = {}) {
   };
 }
 
+function notObservedRendererDiagnostics() {
+  return {
+    state: 'not_observed',
+    sandboxReason: 'not_observed',
+    applicationProcessObserved: null,
+    processGroupCount: null,
+    unreadableProcessCount: null,
+    uidMismatchCount: null,
+    noSandboxFlagCount: null,
+    rendererCount: null,
+    seccompState: 'not_observed',
+    noNewPrivsState: 'not_observed',
+  };
+}
+
 function observedCounters(ipv4Blocked = 0, ipv6Blocked = 0) {
   return countersFromClasses({ other: ipv4Blocked }, { other: ipv6Blocked });
 }
@@ -407,7 +423,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 11);
+  assert.equal(summary.schemaVersion, 12);
   assert.equal(summary.failureCode, null);
   assert.equal(summary.checks.isolatedNodePreflight, 'passed');
   assert.equal(summary.targetUidPreflight.status, 'passed');
@@ -467,6 +483,123 @@ test('Desktop evidence passes only with a complete startup, deny test, zero-egre
   assert.deepEqual(summary.egressProbe, passingProbe());
   assert.deepEqual(summary.secretService, passingSecretService());
   assert.equal(validDesktopSummary(summary), true);
+});
+
+test('trusted sandbox resolution uses root-bound CDP identity when argv misses a renderer', () => {
+  const lifecycle = passingUidLifecycleObservation();
+  lifecycle.processClassCounts.renderer = 0;
+  lifecycle.processClassCounts.unknown = 1;
+  lifecycle.rendererOwnership = {
+    ...lifecycle.rendererOwnership,
+    rendererCount: 0,
+    appDescendantCount: 0,
+    appProcessGroupCount: 0,
+    appDescendantAndProcessGroupCount: 0,
+    appDescendantOnlyCount: 0,
+    appProcessGroupOnlyCount: 0,
+    noCurrentLinkCount: 0,
+  };
+  lifecycle.cdpRendererObservation.argvRendererMatchCount = 0;
+  lifecycle.seccompState = 'unavailable';
+  lifecycle.noNewPrivsState = 'unavailable';
+
+  const processGroup = passingRendererDiagnostics({
+    sandboxReason: 'renderer_missing',
+    rendererCount: 0,
+    seccompState: 'unavailable',
+    noNewPrivsState: 'unavailable',
+  });
+  const resolved = resolveTrustedRendererSandbox(processGroup, lifecycle);
+
+  assert.equal(resolved.passed, true);
+  assert.equal(resolved.rendererCount, 1);
+  assert.equal(resolved.rendererDiagnostics.sandboxReason, 'passed');
+  assert.equal(resolved.rendererDiagnostics.rendererCount, 1);
+  assert.equal(resolved.rendererDiagnostics.seccompState, 'enabled');
+  assert.equal(resolved.rendererDiagnostics.noNewPrivsState, 'enabled');
+
+  const detached = structuredClone(lifecycle);
+  detached.cdpRendererObservation.appProcessGroupCount = 0;
+  detached.cdpRendererObservation.appDescendantAndProcessGroupCount = 0;
+  const detachedResult = resolveTrustedRendererSandbox(processGroup, detached);
+  assert.equal(detachedResult.passed, false);
+  assert.equal(
+    detachedResult.rendererDiagnostics.sandboxReason,
+    'renderer_ownership_unconfirmed',
+  );
+
+  const incomplete = structuredClone(lifecycle);
+  incomplete.cdpRendererObservation.state = 'partial';
+  incomplete.cdpRendererObservation.overflow = true;
+  const incompleteResult = resolveTrustedRendererSandbox(
+    processGroup,
+    incomplete,
+  );
+  assert.equal(incompleteResult.passed, false);
+  assert.equal(
+    incompleteResult.rendererDiagnostics.sandboxReason,
+    'renderer_ownership_unconfirmed',
+  );
+
+  const rejectedCases = [
+    [
+      'foreign uid',
+      (renderer) => {
+        renderer.state = 'partial';
+        renderer.uidMatchCount = 0;
+        renderer.uidMismatchCount = 1;
+      },
+    ],
+    [
+      'missing pid',
+      (renderer) => {
+        renderer.state = 'partial';
+        renderer.missingCount = 1;
+      },
+    ],
+    [
+      'unreadable proc data',
+      (renderer) => {
+        renderer.state = 'partial';
+        renderer.unreadableCount = 1;
+      },
+    ],
+    [
+      'no sandbox',
+      (renderer) => {
+        renderer.noSandboxFlagCount = 1;
+      },
+    ],
+    [
+      'seccomp disabled',
+      (renderer) => {
+        renderer.seccompState = 'disabled';
+      },
+    ],
+    [
+      'no new privs disabled',
+      (renderer) => {
+        renderer.noNewPrivsState = 'disabled';
+      },
+    ],
+  ];
+  for (const [name, mutate] of rejectedCases) {
+    const unsafe = structuredClone(lifecycle);
+    mutate(unsafe.cdpRendererObservation);
+    const result = resolveTrustedRendererSandbox(processGroup, unsafe);
+    assert.equal(result.passed, false, name);
+  }
+});
+
+test('startup sanitizer rejects a native sandbox pass without full root CDP binding', () => {
+  const invalid = stages();
+  invalid[1].uidLifecycleDiagnostics.afterPageLoad.cdpRendererObservation.appProcessGroupCount = 0;
+  invalid[1].uidLifecycleDiagnostics.afterPageLoad.cdpRendererObservation.appDescendantAndProcessGroupCount = 0;
+
+  assert.throws(
+    () => sanitizeDesktopStages(invalid, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
 });
 
 test('Desktop evidence retains only the finite secret-service failure substep', () => {
@@ -1234,6 +1367,10 @@ test('Desktop evidence distinguishes pre-cleanup child exit, CDP responses, and 
   spawnFailed[1].status = 'failed';
   spawnFailed[1].failureCode = 'desktop-not-ready';
   spawnFailed[1].rendererCount = null;
+  spawnFailed[1].checks.nativeSandbox = 'failed';
+  spawnFailed[1].rendererDiagnostics = notObservedRendererDiagnostics();
+  spawnFailed[1].uidLifecycleDiagnostics.afterPageLoad =
+    emptyUidLifecycleObservation('not_observed');
   spawnFailed[1].desktopObservation = passingDesktopObservation({
     childState: 'spawn-error',
     childSpawnErrorClass: 'missing-executable',
@@ -1263,6 +1400,10 @@ test('Desktop evidence distinguishes pre-cleanup child exit, CDP responses, and 
   exited[1].status = 'failed';
   exited[1].failureCode = 'desktop-not-ready';
   exited[1].rendererCount = null;
+  exited[1].checks.nativeSandbox = 'failed';
+  exited[1].rendererDiagnostics = notObservedRendererDiagnostics();
+  exited[1].uidLifecycleDiagnostics.afterPageLoad =
+    emptyUidLifecycleObservation('not_observed');
   exited[1].desktopObservation = passingDesktopObservation({
     childState: 'exited',
     childExitStatus: 1,
@@ -1295,6 +1436,10 @@ test('Desktop evidence distinguishes pre-cleanup child exit, CDP responses, and 
   timedOutPage[1].status = 'failed';
   timedOutPage[1].failureCode = 'desktop-not-ready';
   timedOutPage[1].rendererCount = null;
+  timedOutPage[1].checks.nativeSandbox = 'failed';
+  timedOutPage[1].rendererDiagnostics = notObservedRendererDiagnostics();
+  timedOutPage[1].uidLifecycleDiagnostics.afterPageLoad =
+    emptyUidLifecycleObservation('not_observed');
   timedOutPage[1].desktopObservation = passingDesktopObservation({
     pageLoadOutcome: 'domcontentloaded-timeout',
   });
