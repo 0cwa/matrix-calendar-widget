@@ -5,6 +5,11 @@ import { fileURLToPath } from 'node:url';
 
 const LOCAL_HOMESERVER_PORT = 8008;
 const MAX_COUNT = 100_000;
+const POLICY_VERIFICATION_STATES = Object.freeze([
+  'verified',
+  'mismatch',
+  'unavailable',
+]);
 export const EGRESS_DROP_COUNTER_CLASSES = Object.freeze([
   {
     name: 'udp_dns_port',
@@ -179,6 +184,55 @@ function deleteOneFamily(tool, chain, uid) {
   );
 }
 
+export function verifyPolicySnapshot(family, outputRules, chainRules) {
+  if (
+    family === null ||
+    typeof family !== 'object' ||
+    typeof outputRules !== 'string' ||
+    typeof chainRules !== 'string' ||
+    !Array.isArray(family.hook) ||
+    !Array.isArray(family.chainRules) ||
+    typeof family.chain !== 'string'
+  ) {
+    return false;
+  }
+  const activeRules = (text, chain) =>
+    text.split(/\r?\n/u).filter((line) => line.startsWith(`-A ${chain} `));
+  const expectedHook = `-A OUTPUT ${family.hook.join(' ')}`;
+  const output = activeRules(outputRules, 'OUTPUT');
+  const expectedChain = family.chainRules.map(
+    (rule) => `-A ${family.chain} ${rule.join(' ')}`,
+  );
+  const actualChain = activeRules(chainRules, family.chain);
+  return (
+    output[0] === expectedHook &&
+    output.filter((line) => line === expectedHook).length === 1 &&
+    actualChain.length === expectedChain.length &&
+    actualChain.every((line, index) => line === expectedChain[index])
+  );
+}
+
+function verifyPolicyFamily(family) {
+  try {
+    const outputRules = command(family.tool, ['-w', '-S', 'OUTPUT']);
+    const chainRules = command(family.tool, ['-w', '-S', family.chain]);
+    return verifyPolicySnapshot(family, outputRules, chainRules)
+      ? 'verified'
+      : 'mismatch';
+  } catch {
+    return 'unavailable';
+  }
+}
+
+export function verifyPolicy(uidValue, runIdValue, cdpPortValue) {
+  const families = policySpec(uidValue, runIdValue, cdpPortValue);
+  if (process.geteuid?.() !== 0) throw new Error('egress policy requires root');
+  const states = families.map(verifyPolicyFamily);
+  if (states.includes('mismatch')) return 'mismatch';
+  if (states.includes('unavailable')) return 'unavailable';
+  return 'verified';
+}
+
 export function removePolicy(uidValue, runIdValue) {
   const uid = requireDecimal(uidValue, 1, 65_535);
   const families = runIdChains(runIdValue);
@@ -222,6 +276,9 @@ export function installPolicy(uidValue, runIdValue, cdpPortValue) {
         .filter((line) => line.startsWith(`-A ${chain} `));
       if (activeRules.length !== chainRules.length)
         throw new Error('egress chain incomplete');
+    }
+    if (verifyPolicy(uidValue, runIdValue, cdpPortValue) !== 'verified') {
+      throw new Error('egress policy verification failed');
     }
   } catch {
     try {
@@ -322,9 +379,13 @@ export function readBlockedCounters(runIdValue) {
   );
 }
 
-export function cliCounterObservation(counts) {
+export function cliCounterObservation(counts, policyState = 'unavailable') {
+  if (!POLICY_VERIFICATION_STATES.includes(policyState)) {
+    policyState = 'unavailable';
+  }
   return {
     state: counts.overflow ? 'partial' : 'observed',
+    policyState,
     ipv4Blocked: counts.ipv4,
     ipv6Blocked: counts.ipv6,
     ipv4Classes: counts.ipv4Classes,
@@ -343,13 +404,21 @@ function readBlockedCounterDetails(family) {
   return parseDropCounterDetails(output, family.chain);
 }
 
-export function resetCounters(runIdValue) {
+export function resetCounters(uidValue, runIdValue, cdpPortValue) {
   if (process.geteuid?.() !== 0) throw new Error('egress policy requires root');
+  if (verifyPolicy(uidValue, runIdValue, cdpPortValue) !== 'verified') {
+    throw new Error('egress policy verification failed');
+  }
   for (const family of runIdChains(runIdValue)) {
     command(family.tool, ['-w', '-Z', family.chain]);
   }
   const counts = readBlockedCounters(runIdValue);
-  if (counts.ipv4 !== 0 || counts.ipv6 !== 0 || counts.overflow) {
+  if (
+    verifyPolicy(uidValue, runIdValue, cdpPortValue) !== 'verified' ||
+    counts.ipv4 !== 0 ||
+    counts.ipv6 !== 0 ||
+    counts.overflow
+  ) {
     throw new Error('egress counters did not reset');
   }
   return true;
@@ -550,6 +619,7 @@ export function probeFromSpawn(
 
 function familyProbePassed(value) {
   return (
+    value?.policyState === 'verified' &&
     value?.listenerBound === true &&
     value.childResult === 'probe-reported' &&
     value.probeMarkerPresent === true &&
@@ -961,6 +1031,7 @@ export async function negativeLocalEgressCheck(
       ...unrunChildObservation(),
       listenerAcceptedCount: null,
       dropCount: null,
+      policyState: 'unavailable',
     };
     let listener;
     try {
@@ -998,6 +1069,11 @@ export async function negativeLocalEgressCheck(
         (entry) => entry.name === family.name,
       );
       if (!counterFamily) throw new Error('counter family unavailable');
+      const policyFamily = policySpec(uid, runIdValue, cdpPort).find(
+        (entry) => entry.name === family.name,
+      );
+      if (!policyFamily) throw new Error('policy family unavailable');
+      value.policyState = verifyPolicyFamily(policyFamily);
       value.dropCount = readBlockedCounter(counterFamily);
     } catch {
       // Null distinguishes an unavailable counter from a measured zero.
@@ -1035,9 +1111,26 @@ async function connectOnly(expectedUidValue, host, port) {
   process.exitCode = status ?? 6;
 }
 
-function printCounters(runId) {
-  const counts = readBlockedCounters(runId);
-  process.stdout.write(`${JSON.stringify(cliCounterObservation(counts))}\n`);
+function printCounters(uidValue, runIdValue, cdpPortValue) {
+  const policyState = verifyPolicy(uidValue, runIdValue, cdpPortValue);
+  try {
+    const counts = readBlockedCounters(runIdValue);
+    process.stdout.write(
+      `${JSON.stringify(cliCounterObservation(counts, policyState))}\n`,
+    );
+  } catch {
+    process.stdout.write(
+      `${JSON.stringify({
+        state: 'unavailable',
+        policyState,
+        ipv4Blocked: null,
+        ipv6Blocked: null,
+        ipv4Classes: null,
+        ipv6Classes: null,
+        overflow: null,
+      })}\n`,
+    );
+  }
 }
 
 async function main(args) {
@@ -1076,12 +1169,12 @@ async function main(args) {
     if (record.status !== 'passed') process.exitCode = 2;
     return;
   }
-  if (operation === 'zero-counters' && values.length === 1) {
-    resetCounters(values[0]);
+  if (operation === 'zero-counters' && values.length === 3) {
+    resetCounters(values[0], values[1], values[2]);
     return;
   }
-  if (operation === 'counters' && values.length === 1) {
-    printCounters(values[0]);
+  if (operation === 'counters' && values.length === 3) {
+    printCounters(values[0], values[1], values[2]);
     return;
   }
   if (operation === 'remove' && values.length === 2) {

@@ -231,7 +231,8 @@ jobs:
             if [[ -n "$probe_output" ]]; then negative_diagnostic="$probe_output"; fi
             if [[ "$negative_exit" -eq 0 ]]; then
               negative_status=passed
-              sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs zero-counters "$GITHUB_RUN_ID" \
+              sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs zero-counters \
+                "$ELEMENT_DESKTOP_PROBE_UID" "$GITHUB_RUN_ID" "$ELEMENT_DESKTOP_CDP_PORT" \
                 >/dev/null 2>&1
               reset_exit=$?
               if [[ "$reset_exit" -ne 0 ]]; then policy_status=failed; fi
@@ -251,9 +252,9 @@ jobs:
         run: |
           set +e
           result_file="$RUNNER_TEMP/element-desktop-startup-result.jsonl"
-          before_app_counter='{"state":"not_observed","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}'
-          after_app_spawn_counter='{"state":"not_observed","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}'
-          after_page_load_counter='{"state":"not_observed","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}'
+          before_app_counter='{"state":"not_observed","policyState":"not_observed","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}'
+          after_app_spawn_counter='{"state":"not_observed","policyState":"not_observed","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}'
+          after_page_load_counter='{"state":"not_observed","policyState":"not_observed","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}'
           before_app_uid_startup_observation=not_observed
           after_app_spawn_uid_startup_observation=not_observed
           after_page_load_uid_startup_observation=not_observed
@@ -267,14 +268,14 @@ jobs:
           capture_egress_counters() {
             local counters
             if counters="$(timeout --kill-after=1s 1s sudo -n "$ELEMENT_DESKTOP_NODE_BIN" \
-              dev/element-desktop-egress-policy.mjs counters "$GITHUB_RUN_ID" 2>/dev/null)"; then
+              dev/element-desktop-egress-policy.mjs counters "$uid" "$GITHUB_RUN_ID" "$cdp_port" 2>/dev/null)"; then
               printf '%s' "$counters" | timeout --kill-after=1s 1s node --input-type=module -e '
                 import { sanitizeEgressCounterObservation } from "./dev/element-desktop-evidence.mjs";
                 let input=""; for await (const chunk of process.stdin) input+=chunk;
                 process.stdout.write(JSON.stringify(sanitizeEgressCounterObservation(input)));
               '
             else
-              printf '%s' '{"state":"unavailable","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}'
+              printf '%s' '{"state":"unavailable","policyState":"unavailable","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}'
             fi
           }
           capture_uid_startup_observation() {
@@ -592,14 +593,14 @@ jobs:
           fi
 
           if [[ "$run_id" =~ ^[0-9]{1,18}$ ]] && [[ "$uid" =~ ^[0-9]{1,5}$ ]]; then
-            counter_json="$(sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs counters "$run_id" 2>/dev/null)"
+            counter_json="$(sudo -n "$ELEMENT_DESKTOP_NODE_BIN" dev/element-desktop-egress-policy.mjs counters "$uid" "$run_id" "$ELEMENT_DESKTOP_CDP_PORT" 2>/dev/null)"
             if [[ -n "$counter_json" ]]; then
               observation="$(printf '%s' "$counter_json" | node --input-type=module -e '
                 import { sanitizeEgressCounterObservation } from "./dev/element-desktop-evidence.mjs";
                 let input=""; for await (const chunk of process.stdin) input+=chunk;
                 const value=sanitizeEgressCounterObservation(input);
-                const valid=["observed","partial"].includes(value.state);
-                process.stdout.write(valid?JSON.stringify({phase:"egress-observation",status:"passed",ipv4Blocked:value.ipv4Blocked,ipv6Blocked:value.ipv6Blocked,ipv4Classes:value.ipv4Classes,ipv6Classes:value.ipv6Classes,overflow:value.overflow}):"");
+                const observed=["observed","partial"].includes(value.state);
+                process.stdout.write(JSON.stringify({phase:"egress-observation",status:observed?"passed":"failed",policyState:value.policyState,ipv4Blocked:observed?value.ipv4Blocked:null,ipv6Blocked:observed?value.ipv6Blocked:null,ipv4Classes:observed?value.ipv4Classes:null,ipv6Classes:observed?value.ipv6Classes:null,overflow:observed?value.overflow:null}));
               ')"
               if [[ -n "$observation" ]]; then
                 printf '%s\n' "$observation" >> "$stage_file"
@@ -609,7 +610,7 @@ jobs:
           fi
 
           if [[ "$observation_status" != passed ]]; then
-            printf '%s\n' '{"phase":"egress-observation","status":"failed","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}' >> "$stage_file"
+            printf '%s\n' '{"phase":"egress-observation","status":"failed","policyState":"unavailable","ipv4Blocked":null,"ipv6Blocked":null,"ipv4Classes":null,"ipv6Classes":null,"overflow":null}' >> "$stage_file"
           fi
 
           uid_lifecycle_observation_before_userdel="$(capture_uid_lifecycle_observation)"
@@ -768,7 +769,7 @@ jobs:
             if (!phases.has(phase)) {
               const fallback = phase === 'egress-policy'
                 ? {phase,status:'not_run',negativeTest:'not_run',diagnostic:null}
-                : {phase,status:'failed',ipv4Blocked:null,ipv6Blocked:null,ipv4Classes:null,ipv6Classes:null,overflow:null};
+                : {phase,status:'failed',policyState:'unavailable',ipv4Blocked:null,ipv6Blocked:null,ipv4Classes:null,ipv6Classes:null,overflow:null};
               appendFileSync(stageFile, JSON.stringify(fallback) + '\n');
             }
           }

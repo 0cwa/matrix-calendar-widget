@@ -45,6 +45,12 @@ const COUNTER_OBSERVATION_STATES = new Set([
   'partial',
   'observed',
 ]);
+const COUNTER_POLICY_STATES = new Set([
+  'not_observed',
+  'verified',
+  'mismatch',
+  'unavailable',
+]);
 const EGRESS_DROP_COUNTER_CLASSES = Object.freeze([
   'udp_dns_port',
   'tcp_dns_port',
@@ -318,13 +324,18 @@ function validateCounterObservation(value) {
   if (
     !hasKeys(value, [
       'state',
+      'policyState',
       'ipv4Blocked',
       'ipv6Blocked',
       'ipv4Classes',
       'ipv6Classes',
       'overflow',
     ]) ||
-    !COUNTER_OBSERVATION_STATES.has(value.state)
+    !COUNTER_OBSERVATION_STATES.has(value.state) ||
+    !COUNTER_POLICY_STATES.has(value.policyState) ||
+    (value.state === 'not_observed'
+      ? value.policyState !== 'not_observed'
+      : value.policyState === 'not_observed')
   ) {
     return false;
   }
@@ -384,18 +395,25 @@ function validateEgressPhaseCounters(value) {
 }
 
 export function sanitizeEgressCounterObservation(input) {
-  const unavailable = emptyCounterObservation('unavailable');
   let value = input;
   if (typeof input === 'string') {
     try {
       value = JSON.parse(input);
     } catch {
-      return unavailable;
+      return emptyCounterObservation('unavailable');
     }
   }
-  if (!validateCounterObservation(value)) return unavailable;
+  if (!validateCounterObservation(value)) {
+    const policyState =
+      COUNTER_POLICY_STATES.has(value?.policyState) &&
+      value.policyState !== 'not_observed'
+        ? value.policyState
+        : 'unavailable';
+    return emptyCounterObservation('unavailable', policyState);
+  }
   return {
     state: value.state,
+    policyState: value.policyState,
     ipv4Blocked: value.ipv4Blocked,
     ipv6Blocked: value.ipv6Blocked,
     ipv4Classes:
@@ -678,9 +696,13 @@ function emptyRendererDiagnostics() {
   };
 }
 
-function emptyCounterObservation(state = 'not_observed') {
+function emptyCounterObservation(
+  state = 'not_observed',
+  policyState = state === 'not_observed' ? 'not_observed' : 'unavailable',
+) {
   return {
     state,
+    policyState,
     ipv4Blocked: null,
     ipv6Blocked: null,
     ipv4Classes: null,
@@ -1726,7 +1748,11 @@ function validatePositiveScriptProbe(value) {
   ) {
     return false;
   }
-  return validateProbeFamily({ ...value, dropCount: null });
+  return validateProbeFamily({
+    ...value,
+    dropCount: null,
+    policyState: 'not_observed',
+  });
 }
 
 function positiveScriptProbePassed(value) {
@@ -1939,6 +1965,7 @@ function validateProbeFamily(value) {
       'connectionOutcome',
       'listenerAcceptedCount',
       'dropCount',
+      'policyState',
     ]) ||
     !PROBE_CHILD_RESULTS.has(value.childResult) ||
     (value.childExitStatus !== null &&
@@ -1954,6 +1981,7 @@ function validateProbeFamily(value) {
     ![null, true, false].includes(value.probeUidMatches) ||
     typeof value.connectAttempted !== 'boolean' ||
     !PROBE_OUTCOMES.has(value.connectionOutcome) ||
+    !COUNTER_POLICY_STATES.has(value.policyState) ||
     (value.listenerAcceptedCount !== null &&
       (!Number.isSafeInteger(value.listenerAcceptedCount) ||
         value.listenerAcceptedCount < 0 ||
@@ -2057,6 +2085,7 @@ function validateProbeFamily(value) {
 
 function probeFamilyPassed(value) {
   return (
+    value.policyState === 'verified' &&
     value.listenerBound === true &&
     value.childResult === 'probe-reported' &&
     value.probeMarkerPresent === true &&
@@ -2089,6 +2118,7 @@ function validateObservation(record) {
     hasKeys(record, [
       'phase',
       'status',
+      'policyState',
       'ipv4Blocked',
       'ipv6Blocked',
       'ipv4Classes',
@@ -2097,9 +2127,12 @@ function validateObservation(record) {
     ]) &&
     record.phase === 'egress-observation' &&
     ['passed', 'failed'].includes(record.status) &&
+    COUNTER_POLICY_STATES.has(record.policyState) &&
+    record.policyState !== 'not_observed' &&
     (record.status === 'passed'
       ? validateCounterObservation({
           state: record.overflow ? 'partial' : 'observed',
+          policyState: record.policyState,
           ipv4Blocked: record.ipv4Blocked,
           ipv6Blocked: record.ipv6Blocked,
           ipv4Classes: record.ipv4Classes,
@@ -2248,6 +2281,39 @@ function counterDelta(before, after) {
   };
 }
 
+function completeVerifiedCounterObservation(value) {
+  return (
+    validateCounterObservation(value) &&
+    value.state === 'observed' &&
+    value.overflow === false &&
+    value.policyState === 'verified'
+  );
+}
+
+function networkIsolationEvidencePassed(
+  policy,
+  startup,
+  observation,
+  phaseDeltas,
+) {
+  return (
+    policy?.status === 'passed' &&
+    policy.negativeTest === 'passed' &&
+    policy.diagnostic?.passed === true &&
+    startup !== undefined &&
+    ['beforeApp', 'afterAppSpawn', 'afterPageLoad'].every((phase) =>
+      completeVerifiedCounterObservation(startup.egressPhaseCounters[phase]),
+    ) &&
+    phaseDeltas !== undefined &&
+    Object.values(phaseDeltas).every((delta) => delta.state === 'observed') &&
+    observation?.status === 'passed' &&
+    observation.overflow === false &&
+    observation.policyState === 'verified' &&
+    count(observation.ipv4Blocked) &&
+    count(observation.ipv6Blocked)
+  );
+}
+
 function validateEgressPhaseDelta(value) {
   if (
     !hasKeys(value, [
@@ -2310,7 +2376,7 @@ function defaultChecks() {
       'isolatedNodePreflight',
       'egressPolicy',
       'negativeEgress',
-      'zeroBlockedEgress',
+      'networkIsolationVerified',
       'cleanupIsolatedProcesses',
       'cleanupPolicy',
       'cleanupUser',
@@ -2407,13 +2473,14 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : observation.status === 'passed'
           ? {
               state: observation.overflow ? 'partial' : 'observed',
+              policyState: observation.policyState,
               ipv4Blocked: observation.ipv4Blocked,
               ipv6Blocked: observation.ipv6Blocked,
               ipv4Classes: observation.ipv4Classes,
               ipv6Classes: observation.ipv6Classes,
               overflow: observation.overflow,
             }
-          : emptyCounterObservation('unavailable'),
+          : emptyCounterObservation('unavailable', observation.policyState),
   };
   const uidEgressPhaseDeltas = {
     beforeAppToAfterAppSpawn: counterDelta(
@@ -2447,13 +2514,15 @@ export function sanitizeDesktopStages(records, sourceSha) {
     checks.egressPolicy = policy.status;
     checks.negativeEgress = policy.negativeTest;
   }
-  if (observation?.status === 'passed') {
-    checks.zeroBlockedEgress =
-      observation.ipv4Blocked === 0 && observation.ipv6Blocked === 0
-        ? 'passed'
-        : 'failed';
-  } else if (observation?.status === 'failed') {
-    checks.zeroBlockedEgress = 'failed';
+  if (startup && policy && observation) {
+    checks.networkIsolationVerified = networkIsolationEvidencePassed(
+      policy,
+      startup,
+      observation,
+      uidEgressPhaseDeltas,
+    )
+      ? 'passed'
+      : 'failed';
   }
   if (cleanup) {
     checks.cleanupIsolatedProcesses = cleanup.isolatedProcesses;
@@ -2469,9 +2538,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
     startup?.status === 'passed' &&
     policy?.status === 'passed' &&
     policy.negativeTest === 'passed' &&
-    observation?.status === 'passed' &&
-    observation.ipv4Blocked === 0 &&
-    observation.ipv6Blocked === 0 &&
+    checks.networkIsolationVerified === 'passed' &&
     cleanup !== undefined &&
     ['isolatedProcesses', 'policy', 'user', 'profile', 'aptSource'].every(
       (name) => cleanup[name] === 'passed',
@@ -2484,10 +2551,8 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : null) ??
       setFailure(startup, 'startup-observation-missing') ??
       (policy?.status === 'failed' ? 'egress-policy-failed' : null) ??
-      (observation?.status === 'failed' ||
-      (observation?.ipv4Blocked ?? 0) > 0 ||
-      (observation?.ipv6Blocked ?? 0) > 0
-        ? 'blocked-egress'
+      (checks.networkIsolationVerified === 'failed'
+        ? 'network-isolation-unverified'
         : null) ??
       (cleanup &&
       (cleanup.policy === 'retained' ||
@@ -2498,7 +2563,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 14,
+    schemaVersion: 15,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -2601,16 +2666,16 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 14 &&
+    value.schemaVersion === 15 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
       [
-        'blocked-egress',
         'cleanup-failed',
         'egress-policy-failed',
         'evidence-incomplete',
         'isolated-node-preflight-failed',
+        'network-isolation-unverified',
         'startup-observation-missing',
         ...STARTUP_FAILURES,
       ].includes(value.failureCode)) &&
@@ -2678,6 +2743,23 @@ export function validDesktopSummary(value) {
     }) &&
     validateCounterObservation(value.uidEgressPhaseCounters?.final) &&
     validateEgressPhaseDeltas(value.uidEgressPhaseDeltas) &&
+    (value.checks?.networkIsolationVerified !== 'passed' ||
+      (value.checks.egressPolicy === 'passed' &&
+        value.checks.negativeEgress === 'passed' &&
+        value.egressProbe?.passed === true &&
+        [
+          value.uidEgressPhaseCounters.beforeApp,
+          value.uidEgressPhaseCounters.afterAppSpawn,
+          value.uidEgressPhaseCounters.afterPageLoad,
+          value.uidEgressPhaseCounters.final,
+        ].every(completeVerifiedCounterObservation) &&
+        Object.values(value.uidEgressPhaseDeltas).every(
+          (delta) => delta.state === 'observed',
+        ) &&
+        value.egressBlocked.ipv4 ===
+          value.uidEgressPhaseCounters.final.ipv4Blocked &&
+        value.egressBlocked.ipv6 ===
+          value.uidEgressPhaseCounters.final.ipv6Blocked)) &&
     (value.cleanupDiagnostics === null ||
       (hasKeys(value.cleanupDiagnostics, [
         'policyStatus',
@@ -2747,7 +2829,7 @@ export function validDesktopSummary(value) {
       'isolatedNodePreflight',
       'egressPolicy',
       'negativeEgress',
-      'zeroBlockedEgress',
+      'networkIsolationVerified',
       'cleanupIsolatedProcesses',
       'cleanupPolicy',
       'cleanupUser',
@@ -2766,11 +2848,9 @@ export function validDesktopSummary(value) {
         value.rendererCount !== null &&
         value.runtime.electron !== null &&
         value.runtime.chromium !== null &&
-        value.egressBlocked.ipv4 === 0 &&
-        value.egressBlocked.ipv6 === 0 &&
+        value.checks.networkIsolationVerified === 'passed' &&
         value.uidEgressPhaseCounters.final.state === 'observed' &&
-        value.uidEgressPhaseCounters.final.ipv4Blocked === 0 &&
-        value.uidEgressPhaseCounters.final.ipv6Blocked === 0 &&
+        value.uidEgressPhaseCounters.final.policyState === 'verified' &&
         value.cleanupDiagnostics !== null
       : value.failureCode !== null)
   );

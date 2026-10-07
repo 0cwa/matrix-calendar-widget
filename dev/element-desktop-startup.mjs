@@ -438,6 +438,7 @@ function emptyRendererDiagnostics() {
 function emptyEgressCounterObservation(state = 'not_observed') {
   return {
     state,
+    policyState: state === 'not_observed' ? 'not_observed' : 'unavailable',
     ipv4Blocked: null,
     ipv6Blocked: null,
     ipv4Classes: null,

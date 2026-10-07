@@ -37,6 +37,7 @@ const checks = Object.fromEntries(
 
 function passingProbeFamily() {
   return {
+    policyState: 'verified',
     listenerBound: true,
     childResult: 'probe-reported',
     childExitStatus: 2,
@@ -275,11 +276,19 @@ function notObservedRendererDiagnostics() {
   };
 }
 
-function observedCounters(ipv4Blocked = 0, ipv6Blocked = 0) {
-  return countersFromClasses({ other: ipv4Blocked }, { other: ipv6Blocked });
+function observedCounters(
+  ipv4Blocked = 0,
+  ipv6Blocked = 0,
+  policyState = 'verified',
+) {
+  return countersFromClasses(
+    { other: ipv4Blocked },
+    { other: ipv6Blocked },
+    policyState,
+  );
 }
 
-function countersFromClasses(ipv4 = {}, ipv6 = {}) {
+function countersFromClasses(ipv4 = {}, ipv6 = {}, policyState = 'verified') {
   const classes = (values) => ({
     udp_dns_port: 0,
     tcp_dns_port: 0,
@@ -291,6 +300,7 @@ function countersFromClasses(ipv4 = {}, ipv6 = {}) {
   const ipv6Classes = classes(ipv6);
   return {
     state: 'observed',
+    policyState,
     ipv4Blocked: Object.values(ipv4Classes).reduce(
       (total, count) => total + count,
       0,
@@ -305,9 +315,13 @@ function countersFromClasses(ipv4 = {}, ipv6 = {}) {
   };
 }
 
-function emptyCounters(state) {
+function emptyCounters(
+  state,
+  policyState = state === 'not_observed' ? 'not_observed' : 'unavailable',
+) {
   return {
     state,
+    policyState,
     ipv4Blocked: null,
     ipv6Blocked: null,
     ipv4Classes: null,
@@ -411,6 +425,7 @@ function stages(overrides = {}) {
     {
       phase: 'egress-observation',
       status: 'passed',
+      policyState: 'verified',
       ipv4Blocked: 0,
       ipv6Blocked: 0,
       ipv4Classes: observedCounters().ipv4Classes,
@@ -442,10 +457,10 @@ function stages(overrides = {}) {
   ];
 }
 
-test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
+test('Desktop evidence passes with complete verified isolation and cleanup', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 14);
+  assert.equal(summary.schemaVersion, 15);
   assert.deepEqual(summary.desktopObservation.configInMemoryObservation, {
     state: 'observed',
     matchesFixture: true,
@@ -453,6 +468,7 @@ test('Desktop evidence passes only with a complete startup, deny test, zero-egre
   assert.equal(summary.failureCode, null);
   assert.equal(summary.checks.isolatedNodePreflight, 'passed');
   assert.equal(summary.targetUidPreflight.status, 'passed');
+  assert.equal(summary.checks.networkIsolationVerified, 'passed');
   assert.deepEqual(summary.egressBlocked, { ipv4: 0, ipv6: 0 });
   assert.equal(summary.rendererDiagnostics.sandboxReason, 'passed');
   assert.deepEqual(summary.uidEgressPhaseCounters, {
@@ -565,6 +581,75 @@ test('cleanup pass requires observed zero UID counts on both sides of user delet
   assert.throws(
     () => sanitizeDesktopStages(remainingAfterUserdel, sourceSha),
     /invalid Desktop evidence input/u,
+  );
+});
+
+test('verified dual-stack policy passes with positive DROP counts and retains each class', () => {
+  const positiveDrops = stages();
+  const snapshot = countersFromClasses(
+    { udp_dns_port: 2, tcp_https_port: 1 },
+    { tcp_dns_port: 1, other: 1 },
+  );
+  positiveDrops[1].egressPhaseCounters = {
+    beforeApp: snapshot,
+    afterAppSpawn: snapshot,
+    afterPageLoad: snapshot,
+  };
+  positiveDrops[3] = {
+    phase: 'egress-observation',
+    status: 'passed',
+    policyState: 'verified',
+    ipv4Blocked: snapshot.ipv4Blocked,
+    ipv6Blocked: snapshot.ipv6Blocked,
+    ipv4Classes: snapshot.ipv4Classes,
+    ipv6Classes: snapshot.ipv6Classes,
+    overflow: false,
+  };
+
+  const summary = sanitizeDesktopStages(positiveDrops, sourceSha);
+  assert.equal(summary.status, 'passed');
+  assert.equal(summary.checks.networkIsolationVerified, 'passed');
+  assert.deepEqual(summary.egressBlocked, { ipv4: 3, ipv6: 2 });
+  assert.deepEqual(
+    summary.uidEgressPhaseCounters.afterAppSpawn.ipv4Classes,
+    snapshot.ipv4Classes,
+  );
+  assert.deepEqual(
+    summary.uidEgressPhaseCounters.final.ipv6Classes,
+    snapshot.ipv6Classes,
+  );
+});
+
+test('partial overflow counters remain visible but cannot verify network isolation', () => {
+  const overflow = {
+    state: 'partial',
+    policyState: 'verified',
+    ipv4Blocked: 100_000,
+    ipv6Blocked: 0,
+    ipv4Classes: {
+      udp_dns_port: 100_000,
+      tcp_dns_port: 0,
+      tcp_https_port: 0,
+      other: 0,
+    },
+    ipv6Classes: {
+      udp_dns_port: 0,
+      tcp_dns_port: 0,
+      tcp_https_port: 0,
+      other: 0,
+    },
+    overflow: true,
+  };
+  const withOverflow = stages();
+  withOverflow[1].egressPhaseCounters.afterPageLoad = overflow;
+
+  const summary = sanitizeDesktopStages(withOverflow, sourceSha);
+  assert.equal(summary.status, 'failed');
+  assert.equal(summary.checks.networkIsolationVerified, 'failed');
+  assert.equal(summary.uidEgressPhaseCounters.afterPageLoad.state, 'partial');
+  assert.equal(
+    summary.uidEgressPhaseCounters.afterPageLoad.ipv4Blocked,
+    100_000,
   );
 });
 
@@ -1278,10 +1363,11 @@ test('egress counter sanitizer preserves only fixed classes and honest overflow'
       ...observed,
       ipv4Classes: { other: 2, numericPort: 443 },
     }),
-    emptyCounters('unavailable'),
+    emptyCounters('unavailable', 'verified'),
   );
   const overflow = {
     state: 'partial',
+    policyState: 'verified',
     ipv4Blocked: 100_000,
     ipv6Blocked: 0,
     ipv4Classes: {
@@ -1311,16 +1397,17 @@ test('egress counter sanitizer preserves only fixed classes and honest overflow'
   };
   assert.deepEqual(
     sanitizeEgressCounterObservation(mixedFamilyOverflow),
-    emptyCounters('unavailable'),
+    emptyCounters('unavailable', 'verified'),
   );
 });
 
-test('unavailable phase snapshots stay diagnostic when final egress and cleanup proofs pass', () => {
+test('unavailable phase snapshots prevent a network-isolation pass', () => {
   const withUnavailableSnapshots = stages();
   withUnavailableSnapshots[1].egressPhaseCounters = {
     beforeApp: observedCounters(),
     afterAppSpawn: {
       state: 'unavailable',
+      policyState: 'unavailable',
       ipv4Blocked: null,
       ipv6Blocked: null,
       ipv4Classes: null,
@@ -1329,6 +1416,7 @@ test('unavailable phase snapshots stay diagnostic when final egress and cleanup 
     },
     afterPageLoad: {
       state: 'unavailable',
+      policyState: 'unavailable',
       ipv4Blocked: null,
       ipv6Blocked: null,
       ipv4Classes: null,
@@ -1353,7 +1441,7 @@ test('unavailable phase snapshots stay diagnostic when final egress and cleanup 
     );
   const summary = sanitizeDesktopStages(withUnavailableSnapshots, sourceSha);
 
-  assert.equal(summary.status, 'passed');
+  assert.equal(summary.status, 'failed');
   assert.equal(
     summary.uidEgressPhaseCounters.afterPageLoad.state,
     'unavailable',
@@ -1363,15 +1451,8 @@ test('unavailable phase snapshots stay diagnostic when final egress and cleanup 
     summary.cleanupDiagnostics.uidProcessObservation.state,
     'observed',
   );
-  assert.equal(summary.checks.zeroBlockedEgress, 'passed');
-
-  const nonzeroFinalCounters = stages();
-  nonzeroFinalCounters[3].ipv4Blocked = 1;
-  nonzeroFinalCounters[3].ipv4Classes = observedCounters(1).ipv4Classes;
-  const failed = sanitizeDesktopStages(nonzeroFinalCounters, sourceSha);
-  assert.equal(failed.status, 'failed');
-  assert.equal(failed.failureCode, 'blocked-egress');
-  assert.equal(failed.uidEgressPhaseCounters.final.ipv4Blocked, 1);
+  assert.equal(summary.checks.networkIsolationVerified, 'failed');
+  assert.equal(summary.failureCode, 'network-isolation-unverified');
 });
 
 test('egress phase deltas preserve fixed classes and go unavailable on decrease or malformed totals', () => {
@@ -1382,7 +1463,7 @@ test('egress phase deltas preserve fixed classes and go unavailable on decrease 
     afterPageLoad: countersFromClasses({ udp_dns_port: 2, other: 3 }),
   };
   const summary = sanitizeDesktopStages(phased, sourceSha);
-  assert.equal(summary.status, 'passed');
+  assert.equal(summary.status, 'failed');
   assert.deepEqual(summary.uidEgressPhaseDeltas.beforeAppToAfterAppSpawn, {
     state: 'observed',
     ipv4Blocked: 2,
@@ -1403,6 +1484,7 @@ test('egress phase deltas preserve fixed classes and go unavailable on decrease 
     summary.uidEgressPhaseDeltas.afterPageLoadToFinal.state,
     'unavailable',
   );
+  assert.equal(summary.checks.networkIsolationVerified, 'failed');
 
   const malformed = stages();
   malformed[1].egressPhaseCounters.afterAppSpawn = {
@@ -1415,20 +1497,18 @@ test('egress phase deltas preserve fixed classes and go unavailable on decrease 
   );
 });
 
-test('Desktop evidence fails closed on blocked egress and rejects private-shaped fields', () => {
+test('zero counters cannot hide a missing dual-stack policy snapshot', () => {
   const blocked = stages();
-  blocked[3] = {
-    phase: 'egress-observation',
-    status: 'passed',
-    ipv4Blocked: 1,
-    ipv6Blocked: 0,
-    ipv4Classes: observedCounters(1).ipv4Classes,
-    ipv6Classes: observedCounters().ipv6Classes,
-    overflow: false,
-  };
+  blocked[1].egressPhaseCounters.afterAppSpawn = observedCounters(
+    0,
+    0,
+    'mismatch',
+  );
   const summary = sanitizeDesktopStages(blocked, sourceSha);
   assert.equal(summary.status, 'failed');
-  assert.equal(summary.failureCode, 'blocked-egress');
+  assert.equal(summary.failureCode, 'network-isolation-unverified');
+  assert.equal(summary.egressBlocked.ipv4, 0);
+  assert.equal(summary.checks.networkIsolationVerified, 'failed');
 
   const failedProbe = stages();
   failedProbe[2].status = 'failed';
