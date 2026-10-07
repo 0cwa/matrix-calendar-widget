@@ -54,49 +54,6 @@ jobs:
           printf 'ELEMENT_DESKTOP_STAGE_FILE=%s\n' "$stage_file" >> "$GITHUB_ENV"
           printf 'ELEMENT_DESKTOP_NODE_BIN=%s\n' "$node_binary" >> "$GITHUB_ENV"
 
-      - name: Install authenticated Element Desktop package and probe tools
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          set -euo pipefail
-          key_file="$RUNNER_TEMP/element-io-archive-keyring.gpg"
-          source_file=/etc/apt/sources.list.d/element-desktop-startup.list
-          system_key=/usr/share/keyrings/element-desktop-startup.gpg
-          curl --fail --silent --show-error --location \
-            https://packages.element.io/debian/element-io-archive-keyring.gpg \
-            --output "$key_file"
-          sudo install -D -m 0644 "$key_file" "$system_key"
-          printf 'deb [arch=amd64 signed-by=%s] https://packages.element.io/debian/ default main\n' \
-            "$system_key" | sudo tee "$source_file" >/dev/null
-          sudo apt-get update --quiet
-          package_metadata="$(apt-cache show element-desktop=1.12.30)"
-          package_hash="$(printf '%s\n' "$package_metadata" | node --input-type=module -e '
-            let input = "";
-            for await (const chunk of process.stdin) input += chunk;
-            const matches = input.split(/\n\n+/u).filter((block) => {
-              const fields = Object.fromEntries(block.split(/\n/u).map((line) => {
-                const split = line.indexOf(":");
-                return split < 0 ? ["", ""] : [line.slice(0, split), line.slice(split + 1).trim()];
-              }));
-              return fields.Package === "element-desktop" && fields.Version === "1.12.30" && fields.Architecture === "amd64";
-            });
-            const values = matches.map((block) => /^SHA256:\s+([0-9a-f]{64})$/mu.exec(block)?.[1] ?? "");
-            if (values.length !== 1 || !/^[0-9a-f]{64}$/u.test(values[0])) process.exit(2);
-            process.stdout.write(values[0]);
-          ')"
-          cd "$RUNNER_TEMP"
-          apt-get download element-desktop=1.12.30 >/dev/null 2>&1
-          deb_file="$RUNNER_TEMP/element-desktop_1.12.30_amd64.deb"
-          test -f "$deb_file"
-          downloaded_hash="$(sha256sum "$deb_file" | cut -d ' ' -f 1)"
-          test "$downloaded_hash" = "$package_hash"
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
-            xvfb xauth dbus-daemon gnome-keyring libsecret-tools iptables iproute2 \
-            element-desktop:amd64=1.12.30
-          installed="$(dpkg-query -W -f='${Version}\t${Architecture}' element-desktop)"
-          test "$installed" = $'1.12.30\tamd64'
-          printf 'ELEMENT_DESKTOP_PACKAGE_SHA256=%s\n' "$package_hash" >> "$GITHUB_ENV"
-
       - name: Create isolated Desktop identity and private profile
         run: |
           set -euo pipefail
@@ -151,6 +108,68 @@ jobs:
             printf 'ELEMENT_DESKTOP_PROFILE_CACHE=%s/cache\n' "$profile_root"
             printf 'ELEMENT_DESKTOP_PROFILE_RUNTIME=%s/runtime\n' "$profile_root"
           } >> "$GITHUB_ENV"
+
+      - name: Preflight isolated Node and probe script before package installation
+        run: |
+          set +e
+          preflight_output="$(sudo -n "$ELEMENT_DESKTOP_NODE_BIN" \
+            dev/element-desktop-egress-policy.mjs target-uid-preflight \
+            "$ELEMENT_DESKTOP_PROBE_UID" 2>/dev/null)"
+          preflight_exit=$?
+          set -e
+          if [[ -n "$preflight_output" ]]; then
+            printf '%s\n' "$preflight_output" >> "$ELEMENT_DESKTOP_STAGE_FILE"
+          else
+            printf '%s\n' '{"phase":"target-uid-preflight","status":"failed","runtimeFacts":null,"scriptProbe":null}' \
+              >> "$ELEMENT_DESKTOP_STAGE_FILE"
+          fi
+          if [[ "$preflight_exit" -ne 0 ]]; then
+            echo 'The isolated UID Node and probe-script preflight failed.' >&2
+            exit 1
+          fi
+
+      - name: Install authenticated Element Desktop package and probe tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          key_file="$RUNNER_TEMP/element-io-archive-keyring.gpg"
+          source_file=/etc/apt/sources.list.d/element-desktop-startup.list
+          system_key=/usr/share/keyrings/element-desktop-startup.gpg
+          curl --fail --silent --show-error --location \
+            https://packages.element.io/debian/element-io-archive-keyring.gpg \
+            --output "$key_file"
+          sudo install -D -m 0644 "$key_file" "$system_key"
+          printf 'deb [arch=amd64 signed-by=%s] https://packages.element.io/debian/ default main\n' \
+            "$system_key" | sudo tee "$source_file" >/dev/null
+          sudo apt-get update --quiet
+          package_metadata="$(apt-cache show element-desktop=1.12.30)"
+          package_hash="$(printf '%s\n' "$package_metadata" | node --input-type=module -e '
+            let input = "";
+            for await (const chunk of process.stdin) input += chunk;
+            const matches = input.split(/\n\n+/u).filter((block) => {
+              const fields = Object.fromEntries(block.split(/\n/u).map((line) => {
+                const split = line.indexOf(":");
+                return split < 0 ? ["", ""] : [line.slice(0, split), line.slice(split + 1).trim()];
+              }));
+              return fields.Package === "element-desktop" && fields.Version === "1.12.30" && fields.Architecture === "amd64";
+            });
+            const values = matches.map((block) => /^SHA256:\s+([0-9a-f]{64})$/mu.exec(block)?.[1] ?? "");
+            if (values.length !== 1 || !/^[0-9a-f]{64}$/u.test(values[0])) process.exit(2);
+            process.stdout.write(values[0]);
+          ')"
+          cd "$RUNNER_TEMP"
+          apt-get download element-desktop=1.12.30 >/dev/null 2>&1
+          deb_file="$RUNNER_TEMP/element-desktop_1.12.30_amd64.deb"
+          test -f "$deb_file"
+          downloaded_hash="$(sha256sum "$deb_file" | cut -d ' ' -f 1)"
+          test "$downloaded_hash" = "$package_hash"
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+            xvfb xauth dbus-daemon gnome-keyring libsecret-tools iptables iproute2 \
+            element-desktop:amd64=1.12.30
+          installed="$(dpkg-query -W -f='${Version}\t${Architecture}' element-desktop)"
+          test "$installed" = $'1.12.30\tamd64'
+          printf 'ELEMENT_DESKTOP_PACKAGE_SHA256=%s\n' "$package_hash" >> "$GITHUB_ENV"
 
       - name: Install exact dual-stack egress policy and deny-test it
         run: |
@@ -341,6 +360,11 @@ jobs:
           const rows = readFileSync(stageFile, 'utf8').split(/\r?\n/u).filter(Boolean);
           const phases = new Set();
           for (const row of rows) phases.add(JSON.parse(row).phase);
+          if (!phases.has('target-uid-preflight')) {
+            appendFileSync(stageFile, JSON.stringify({
+              phase:'target-uid-preflight',status:'failed',runtimeFacts:null,scriptProbe:null,
+            }) + '\n');
+          }
           for (const phase of ['egress-policy','egress-observation']) {
             if (!phases.has(phase)) {
               const fallback = phase === 'egress-policy'

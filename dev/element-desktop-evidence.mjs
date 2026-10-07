@@ -109,13 +109,17 @@ const PROBE_SPAWN_ERRORS = new Set([
 ]);
 const PROBE_STDERR_CLASSES = new Set([
   'empty',
-  'node-load',
+  'missing-import',
+  'missing-script',
   'other',
   'permission',
+  'runtime-version',
   'sudo-policy',
+  'syntax',
   'unavailable',
 ]);
 const STAGES = new Set([
+  'target-uid-preflight',
   'desktop-startup',
   'egress-policy',
   'egress-observation',
@@ -170,6 +174,147 @@ function safeStoragePassed(value) {
     value.mode === 'encrypted' &&
     ENCRYPTED_STORAGE_BACKENDS.has(value.backend)
   );
+}
+
+function validateRuntimeFacts(value) {
+  if (
+    !hasKeys(value, [
+      'childResult',
+      'childExitStatus',
+      'childSignal',
+      'spawnErrorClass',
+      'stderrClass',
+      'markerPresent',
+      'uidMatches',
+      'nodeVersion',
+      'nodeVersionSupported',
+      'nodeExecutableRunnable',
+      'scriptExists',
+      'scriptReadable',
+    ]) ||
+    ![
+      'exited-before-marker',
+      'probe-reported',
+      'protocol-invalid',
+      'signaled',
+      'spawn-error',
+    ].includes(value.childResult) ||
+    (value.childExitStatus !== null &&
+      (!Number.isSafeInteger(value.childExitStatus) ||
+        value.childExitStatus < 0 ||
+        value.childExitStatus > 255)) ||
+    (value.childSignal !== null && !PROBE_SIGNALS.has(value.childSignal)) ||
+    (value.spawnErrorClass !== null &&
+      !PROBE_SPAWN_ERRORS.has(value.spawnErrorClass)) ||
+    !PROBE_STDERR_CLASSES.has(value.stderrClass) ||
+    typeof value.markerPresent !== 'boolean' ||
+    ![null, true, false].includes(value.uidMatches) ||
+    (value.nodeVersion !== null &&
+      !/^\d+\.\d+\.\d+$/u.test(value.nodeVersion)) ||
+    typeof value.nodeVersionSupported !== 'boolean' ||
+    ![null, true, false].includes(value.nodeExecutableRunnable) ||
+    ![null, true, false].includes(value.scriptExists) ||
+    ![null, true, false].includes(value.scriptReadable)
+  ) {
+    return false;
+  }
+  if (value.childResult === 'probe-reported') {
+    return (
+      value.childExitStatus === 0 &&
+      value.childSignal === null &&
+      value.spawnErrorClass === null &&
+      value.markerPresent &&
+      typeof value.uidMatches === 'boolean' &&
+      value.nodeVersion !== null &&
+      value.nodeVersionSupported ===
+        (value.nodeVersion.split('.')[0] === '22') &&
+      typeof value.nodeExecutableRunnable === 'boolean' &&
+      typeof value.scriptExists === 'boolean' &&
+      typeof value.scriptReadable === 'boolean'
+    );
+  }
+  return (
+    (value.childResult === 'spawn-error') ===
+      (value.spawnErrorClass !== null) &&
+    (value.childResult === 'signaled') === (value.childSignal !== null) &&
+    value.uidMatches === null &&
+    value.nodeVersion === null &&
+    !value.nodeVersionSupported &&
+    value.nodeExecutableRunnable === null &&
+    value.scriptExists === null &&
+    value.scriptReadable === null
+  );
+}
+
+function runtimeFactsPassed(value) {
+  return (
+    value?.childResult === 'probe-reported' &&
+    value.uidMatches === true &&
+    value.nodeVersionSupported === true &&
+    value.nodeExecutableRunnable === true &&
+    value.scriptExists === true &&
+    value.scriptReadable === true
+  );
+}
+
+function validatePositiveScriptProbe(value) {
+  if (
+    !hasKeys(value, [
+      'listenerBound',
+      'childResult',
+      'childExitStatus',
+      'childSignal',
+      'spawnErrorClass',
+      'stderrClass',
+      'probeMarkerPresent',
+      'probeUidMatches',
+      'connectAttempted',
+      'connectionOutcome',
+      'listenerAcceptedCount',
+    ])
+  ) {
+    return false;
+  }
+  return validateProbeFamily({ ...value, dropCount: null });
+}
+
+function positiveScriptProbePassed(value) {
+  return (
+    value?.listenerBound === true &&
+    value.childResult === 'probe-reported' &&
+    value.probeMarkerPresent === true &&
+    value.probeUidMatches === true &&
+    value.connectAttempted === true &&
+    value.connectionOutcome === 'connected' &&
+    value.listenerAcceptedCount === 1
+  );
+}
+
+function validateTargetUidPreflight(record) {
+  if (
+    !hasKeys(record, ['phase', 'status', 'runtimeFacts', 'scriptProbe']) ||
+    record.phase !== 'target-uid-preflight' ||
+    !['passed', 'failed'].includes(record.status)
+  ) {
+    return false;
+  }
+  if (
+    record.status === 'failed' &&
+    record.runtimeFacts === null &&
+    record.scriptProbe === null
+  ) {
+    return true;
+  }
+  if (
+    !validateRuntimeFacts(record.runtimeFacts) ||
+    !validatePositiveScriptProbe(record.scriptProbe)
+  ) {
+    return false;
+  }
+  const passed =
+    runtimeFactsPassed(record.runtimeFacts) &&
+    positiveScriptProbePassed(record.scriptProbe);
+  return record.status === (passed ? 'passed' : 'failed');
 }
 
 function validateStartup(record, sourceSha) {
@@ -467,6 +612,7 @@ function defaultChecks() {
   return Object.fromEntries(
     [
       ...CHECK_NAMES,
+      'isolatedNodePreflight',
       'egressPolicy',
       'negativeEgress',
       'zeroBlockedEgress',
@@ -489,7 +635,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
   if (
     !/^[0-9a-f]{40}$/u.test(sourceSha) ||
     !Array.isArray(records) ||
-    records.length > 4
+    records.length > 5
   ) {
     throw new Error('invalid Desktop evidence input');
   }
@@ -506,22 +652,28 @@ export function sanitizeDesktopStages(records, sourceSha) {
     if (byPhase.has(record.phase))
       throw new Error('duplicate Desktop evidence phase');
     const valid =
-      record.phase === 'desktop-startup'
-        ? validateStartup(record, sourceSha)
-        : record.phase === 'egress-policy'
-          ? validatePolicy(record)
-          : record.phase === 'egress-observation'
-            ? validateObservation(record)
-            : validateCleanup(record);
+      record.phase === 'target-uid-preflight'
+        ? validateTargetUidPreflight(record)
+        : record.phase === 'desktop-startup'
+          ? validateStartup(record, sourceSha)
+          : record.phase === 'egress-policy'
+            ? validatePolicy(record)
+            : record.phase === 'egress-observation'
+              ? validateObservation(record)
+              : validateCleanup(record);
     if (!valid) throw new Error('invalid Desktop evidence input');
     byPhase.set(record.phase, record);
   }
 
+  const targetUidPreflight = byPhase.get('target-uid-preflight');
   const startup = byPhase.get('desktop-startup');
   const policy = byPhase.get('egress-policy');
   const observation = byPhase.get('egress-observation');
   const cleanup = byPhase.get('cleanup');
   const checks = defaultChecks();
+  if (targetUidPreflight) {
+    checks.isolatedNodePreflight = targetUidPreflight.status;
+  }
   if (startup) Object.assign(checks, startup.checks);
   if (policy) {
     checks.egressPolicy = policy.status;
@@ -544,6 +696,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
   }
 
   const allPassed =
+    targetUidPreflight?.status === 'passed' &&
     startup?.status === 'passed' &&
     policy?.status === 'passed' &&
     policy.negativeTest === 'passed' &&
@@ -557,7 +710,10 @@ export function sanitizeDesktopStages(records, sourceSha) {
     Object.values(checks).every((value) => value === 'passed');
   const failureCode = allPassed
     ? null
-    : (setFailure(startup, 'startup-observation-missing') ??
+    : ((targetUidPreflight?.status === 'failed'
+        ? 'isolated-node-preflight-failed'
+        : null) ??
+      setFailure(startup, 'startup-observation-missing') ??
       (policy?.status === 'failed' ? 'egress-policy-failed' : null) ??
       (observation?.status === 'failed' ||
       (observation?.ipv4Blocked ?? 0) > 0 ||
@@ -572,7 +728,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -596,6 +752,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
       complete: false,
     },
     rendererCount: startup?.rendererCount ?? 0,
+    targetUidPreflight: targetUidPreflight ?? null,
     egressBlocked: {
       ipv4: observation?.ipv4Blocked ?? null,
       ipv6: observation?.ipv6Blocked ?? null,
@@ -617,11 +774,12 @@ export function validDesktopSummary(value) {
       'origin',
       'safeStorage',
       'rendererCount',
+      'targetUidPreflight',
       'egressBlocked',
       'egressProbe',
       'checks',
     ]) &&
-    value.schemaVersion === 3 &&
+    value.schemaVersion === 4 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
@@ -630,6 +788,7 @@ export function validDesktopSummary(value) {
         'cleanup-failed',
         'egress-policy-failed',
         'evidence-incomplete',
+        'isolated-node-preflight-failed',
         'startup-observation-missing',
         ...STARTUP_FAILURES,
       ].includes(value.failureCode)) &&
@@ -654,6 +813,10 @@ export function validDesktopSummary(value) {
     (value.runtime.chromium === null ||
       /^\d+\.\d+\.\d+(?:\.\d+)?$/u.test(value.runtime.chromium)) &&
     validateSafeStorage(value.safeStorage) &&
+    (value.targetUidPreflight === null ||
+      validateTargetUidPreflight(value.targetUidPreflight)) &&
+    value.checks?.isolatedNodePreflight ===
+      (value.targetUidPreflight?.status ?? 'not_run') &&
     value.runtime.runner === 'ubuntu-24.04' &&
     value.origin === ORIGIN &&
     Number.isSafeInteger(value.rendererCount) &&
@@ -668,6 +831,7 @@ export function validDesktopSummary(value) {
     (value.egressProbe === null || validateNegativeProbe(value.egressProbe)) &&
     hasKeys(value.checks, [
       ...CHECK_NAMES,
+      'isolatedNodePreflight',
       'egressPolicy',
       'negativeEgress',
       'zeroBlockedEgress',
@@ -681,6 +845,7 @@ export function validDesktopSummary(value) {
     (value.status === 'passed'
       ? value.failureCode === null &&
         Object.values(value.checks).every((state) => state === 'passed') &&
+        value.targetUidPreflight?.status === 'passed' &&
         safeStoragePassed(value.safeStorage) &&
         value.runtime.electron !== null &&
         value.runtime.chromium !== null &&

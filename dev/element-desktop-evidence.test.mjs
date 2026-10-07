@@ -50,8 +50,43 @@ function passingProbe() {
   };
 }
 
+function passingTargetUidPreflight() {
+  return {
+    phase: 'target-uid-preflight',
+    status: 'passed',
+    runtimeFacts: {
+      childResult: 'probe-reported',
+      childExitStatus: 0,
+      childSignal: null,
+      spawnErrorClass: null,
+      stderrClass: 'empty',
+      markerPresent: true,
+      uidMatches: true,
+      nodeVersion: '22.23.3',
+      nodeVersionSupported: true,
+      nodeExecutableRunnable: true,
+      scriptExists: true,
+      scriptReadable: true,
+    },
+    scriptProbe: {
+      listenerBound: true,
+      childResult: 'probe-reported',
+      childExitStatus: 0,
+      childSignal: null,
+      spawnErrorClass: null,
+      stderrClass: 'empty',
+      probeMarkerPresent: true,
+      probeUidMatches: true,
+      connectAttempted: true,
+      connectionOutcome: 'connected',
+      listenerAcceptedCount: 1,
+    },
+  };
+}
+
 function stages(overrides = {}) {
   return [
+    passingTargetUidPreflight(),
     {
       phase: 'desktop-startup',
       status: 'passed',
@@ -106,8 +141,10 @@ function stages(overrides = {}) {
 test('Desktop evidence passes only with a complete startup, deny test, zero-egress, and cleanup record', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 3);
+  assert.equal(summary.schemaVersion, 4);
   assert.equal(summary.failureCode, null);
+  assert.equal(summary.checks.isolatedNodePreflight, 'passed');
+  assert.equal(summary.targetUidPreflight.status, 'passed');
   assert.deepEqual(summary.egressBlocked, { ipv4: 0, ipv6: 0 });
   assert.deepEqual(summary.egressProbe, passingProbe());
   assert.equal(validDesktopSummary(summary), true);
@@ -115,7 +152,7 @@ test('Desktop evidence passes only with a complete startup, deny test, zero-egre
 
 test('Desktop evidence fails closed on blocked egress and rejects private-shaped fields', () => {
   const blocked = stages();
-  blocked[2] = {
+  blocked[3] = {
     phase: 'egress-observation',
     status: 'passed',
     ipv4Blocked: 1,
@@ -126,29 +163,29 @@ test('Desktop evidence fails closed on blocked egress and rejects private-shaped
   assert.equal(summary.failureCode, 'blocked-egress');
 
   const failedProbe = stages();
-  failedProbe[1].status = 'failed';
-  failedProbe[1].negativeTest = 'failed';
-  failedProbe[1].diagnostic.ipv6.dropCount = 0;
-  failedProbe[1].diagnostic.ipv6.connectionOutcome = 'connected';
-  failedProbe[1].diagnostic.ipv6.childExitStatus = 0;
-  failedProbe[1].diagnostic.ipv6.listenerAcceptedCount = 1;
-  failedProbe[1].diagnostic.passed = false;
+  failedProbe[2].status = 'failed';
+  failedProbe[2].negativeTest = 'failed';
+  failedProbe[2].diagnostic.ipv6.dropCount = 0;
+  failedProbe[2].diagnostic.ipv6.connectionOutcome = 'connected';
+  failedProbe[2].diagnostic.ipv6.childExitStatus = 0;
+  failedProbe[2].diagnostic.ipv6.listenerAcceptedCount = 1;
+  failedProbe[2].diagnostic.passed = false;
   const failedProbeSummary = sanitizeDesktopStages(failedProbe, sourceSha);
   assert.equal(failedProbeSummary.status, 'failed');
   assert.equal(failedProbeSummary.egressProbe.passed, false);
 
   const beforeMarker = stages();
-  beforeMarker[1].status = 'failed';
-  beforeMarker[1].negativeTest = 'failed';
-  beforeMarker[1].diagnostic.ipv4.childResult = 'exited-before-marker';
-  beforeMarker[1].diagnostic.ipv4.childExitStatus = 1;
-  beforeMarker[1].diagnostic.ipv4.stderrClass = 'sudo-policy';
-  beforeMarker[1].diagnostic.ipv4.probeMarkerPresent = false;
-  beforeMarker[1].diagnostic.ipv4.probeUidMatches = null;
-  beforeMarker[1].diagnostic.ipv4.connectAttempted = false;
-  beforeMarker[1].diagnostic.ipv4.connectionOutcome = 'unexpected-exit';
-  beforeMarker[1].diagnostic.ipv4.dropCount = 0;
-  beforeMarker[1].diagnostic.passed = false;
+  beforeMarker[2].status = 'failed';
+  beforeMarker[2].negativeTest = 'failed';
+  beforeMarker[2].diagnostic.ipv4.childResult = 'exited-before-marker';
+  beforeMarker[2].diagnostic.ipv4.childExitStatus = 1;
+  beforeMarker[2].diagnostic.ipv4.stderrClass = 'sudo-policy';
+  beforeMarker[2].diagnostic.ipv4.probeMarkerPresent = false;
+  beforeMarker[2].diagnostic.ipv4.probeUidMatches = null;
+  beforeMarker[2].diagnostic.ipv4.connectAttempted = false;
+  beforeMarker[2].diagnostic.ipv4.connectionOutcome = 'unexpected-exit';
+  beforeMarker[2].diagnostic.ipv4.dropCount = 0;
+  beforeMarker[2].diagnostic.passed = false;
   const beforeMarkerSummary = sanitizeDesktopStages(beforeMarker, sourceSha);
   assert.equal(
     beforeMarkerSummary.egressProbe.ipv4.childResult,
@@ -168,7 +205,7 @@ test('Desktop evidence fails closed on blocked egress and rejects private-shaped
     /invalid Desktop evidence input/u,
   );
   const privateProbe = stages();
-  privateProbe[1].diagnostic.ipv4.rawAddress = '127.0.0.1';
+  privateProbe[2].diagnostic.ipv4.rawAddress = '127.0.0.1';
   assert.throws(
     () => sanitizeDesktopStages(privateProbe, sourceSha),
     /invalid Desktop evidence input/u,
@@ -184,14 +221,14 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
   assert.equal(missingSummary.failureCode, 'evidence-incomplete');
 
   const absentDiagnostic = stages();
-  absentDiagnostic[1].diagnostic = null;
+  absentDiagnostic[2].diagnostic = null;
   assert.throws(
     () => sanitizeDesktopStages(absentDiagnostic, sourceSha),
     /invalid Desktop evidence input/u,
   );
 
   const failedCleanup = stages();
-  failedCleanup[3].policy = 'failed';
+  failedCleanup[4].policy = 'failed';
   const cleanupSummary = sanitizeDesktopStages(failedCleanup, sourceSha);
   assert.equal(cleanupSummary.status, 'failed');
   assert.equal(cleanupSummary.failureCode, 'cleanup-failed');
@@ -210,11 +247,78 @@ test('Desktop evidence reports absent startup as incomplete and rejects degraded
   assert.equal(missingSummary.failureCode, 'evidence-incomplete');
   assert.equal(missingSummary.checks.privateProfile, 'not_run');
 
+  const missingPreflight = stages().filter(
+    (record) => record.phase !== 'target-uid-preflight',
+  );
+  const missingPreflightSummary = sanitizeDesktopStages(
+    missingPreflight,
+    sourceSha,
+  );
+  assert.equal(missingPreflightSummary.status, 'failed');
+  assert.equal(missingPreflightSummary.checks.isolatedNodePreflight, 'not_run');
+  assert.equal(missingPreflightSummary.failureCode, 'evidence-incomplete');
+
+  const failedPreflight = stages().filter(
+    (record) => record.phase !== 'desktop-startup',
+  );
+  failedPreflight[0].status = 'failed';
+  failedPreflight[0].runtimeFacts.stderrClass = 'missing-import';
+  failedPreflight[0].runtimeFacts.childResult = 'exited-before-marker';
+  failedPreflight[0].runtimeFacts.childExitStatus = 1;
+  failedPreflight[0].runtimeFacts.markerPresent = false;
+  failedPreflight[0].runtimeFacts.uidMatches = null;
+  failedPreflight[0].runtimeFacts.nodeVersion = null;
+  failedPreflight[0].runtimeFacts.nodeVersionSupported = false;
+  failedPreflight[0].runtimeFacts.nodeExecutableRunnable = null;
+  failedPreflight[0].runtimeFacts.scriptExists = null;
+  failedPreflight[0].runtimeFacts.scriptReadable = null;
+  failedPreflight[0].scriptProbe = {
+    listenerBound: false,
+    childResult: 'not-run',
+    childExitStatus: null,
+    childSignal: null,
+    spawnErrorClass: null,
+    stderrClass: 'empty',
+    probeMarkerPresent: false,
+    probeUidMatches: null,
+    connectAttempted: false,
+    connectionOutcome: 'listener-error',
+    listenerAcceptedCount: null,
+  };
+  const failedPreflightSummary = sanitizeDesktopStages(
+    failedPreflight,
+    sourceSha,
+  );
+  assert.equal(failedPreflightSummary.status, 'failed');
+  assert.equal(
+    failedPreflightSummary.failureCode,
+    'isolated-node-preflight-failed',
+  );
+  assert.equal(
+    failedPreflightSummary.targetUidPreflight.runtimeFacts.stderrClass,
+    'missing-import',
+  );
+  assert.equal(
+    JSON.stringify(failedPreflightSummary).includes('/private/'),
+    false,
+  );
+
+  const unreadableScript = stages();
+  unreadableScript[0].status = 'failed';
+  unreadableScript[0].runtimeFacts.scriptReadable = false;
+  const unreadableSummary = sanitizeDesktopStages(unreadableScript, sourceSha);
+  assert.equal(unreadableSummary.status, 'failed');
+  assert.equal(unreadableSummary.failureCode, 'isolated-node-preflight-failed');
+  assert.equal(
+    unreadableSummary.targetUidPreflight.runtimeFacts.scriptReadable,
+    false,
+  );
+
   const degraded = stages();
-  degraded[0].status = 'failed';
-  degraded[0].failureCode = 'safe-storage-backend-unconfirmed';
-  degraded[0].checks.safeStorageBackend = 'failed';
-  degraded[0].safeStorage = {
+  degraded[1].status = 'failed';
+  degraded[1].failureCode = 'safe-storage-backend-unconfirmed';
+  degraded[1].checks.safeStorageBackend = 'failed';
+  degraded[1].safeStorage = {
     mode: 'basic_text',
     backend: 'gnome_libsecret',
     markerCount: 1,

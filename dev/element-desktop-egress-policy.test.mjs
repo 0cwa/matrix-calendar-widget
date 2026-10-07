@@ -8,6 +8,8 @@ import {
   negativeProbePassed,
   policySpec,
   probeFromSpawn,
+  RUNTIME_FACTS_SOURCE,
+  runtimeFactsFromSpawn,
 } from './element-desktop-egress-policy.mjs';
 
 function passingFamily() {
@@ -247,6 +249,112 @@ test('child result classification does not treat spawn or identity failures as b
   assert.equal(socketInitError.probeUidMatches, true);
   assert.equal(socketInitError.connectAttempted, false);
   assert.equal(socketInitError.connectionOutcome, 'socket-init-error');
+});
+
+test('child stderr classification distinguishes script, import, syntax, version, and access failures', () => {
+  const script = '/workspace/dev/element-desktop-egress-policy.mjs';
+  const classify = (stderr) =>
+    probeFromSpawn({ status: 1, stdout: '', stderr }, script).stderrClass;
+
+  assert.equal(
+    classify(`Error: Cannot find module '${script}'`),
+    'missing-script',
+  );
+  assert.equal(
+    classify(
+      `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'private-pkg' imported from ${script}`,
+    ),
+    'missing-import',
+  );
+  assert.equal(classify('SyntaxError: Unexpected token'), 'syntax');
+  assert.equal(
+    classify('This application requires a newer Node version'),
+    'runtime-version',
+  );
+  assert.equal(classify('EACCES: permission denied'), 'permission');
+  assert.equal(classify('sudo: a password is required'), 'sudo-policy');
+  assert.equal(
+    JSON.stringify(
+      probeFromSpawn({ status: 1, stderr: script }, script),
+    ).includes(script),
+    false,
+  );
+});
+
+test('isolated runtime facts parser accepts only fixed fields and Node 22 version evidence', () => {
+  const facts = {
+    uidMatches: true,
+    nodeVersion: '22.23.3',
+    nodeExecutableRunnable: true,
+    scriptExists: true,
+    scriptReadable: true,
+  };
+  const result = runtimeFactsFromSpawn(
+    {
+      status: 0,
+      signal: null,
+      stdout: `runtime-facts-started\n${JSON.stringify(facts)}\n`,
+      stderr: '',
+    },
+    '/workspace/dev/element-desktop-egress-policy.mjs',
+  );
+  assert.deepEqual(result, {
+    childResult: 'probe-reported',
+    childExitStatus: 0,
+    childSignal: null,
+    spawnErrorClass: null,
+    stderrClass: 'empty',
+    markerPresent: true,
+    uidMatches: true,
+    nodeVersion: '22.23.3',
+    nodeVersionSupported: true,
+    nodeExecutableRunnable: true,
+    scriptExists: true,
+    scriptReadable: true,
+  });
+
+  const malformed = runtimeFactsFromSpawn(
+    {
+      status: 0,
+      signal: null,
+      stdout: `runtime-facts-started\n${JSON.stringify({ ...facts, path: '/private/path' })}\n`,
+      stderr: '',
+    },
+    '/workspace/dev/element-desktop-egress-policy.mjs',
+  );
+  assert.equal(malformed.childResult, 'protocol-invalid');
+  assert.equal(JSON.stringify(malformed).includes('/private/path'), false);
+});
+
+test('runtime facts child emits the exact bounded protocol', (context) => {
+  if (!childStdoutAvailable()) {
+    context.skip('environment does not expose child stdout');
+    return;
+  }
+  const uid = process.getuid?.();
+  assert.ok(Number.isSafeInteger(uid) && uid > 0);
+  const script = fileURLToPath(
+    new URL('./element-desktop-egress-policy.mjs', import.meta.url),
+  );
+  const result = spawnSync(
+    process.execPath,
+    ['-e', RUNTIME_FACTS_SOURCE, String(uid), script],
+    {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 2_000,
+      maxBuffer: 4_096,
+    },
+  );
+  const facts = runtimeFactsFromSpawn(result, script);
+  assert.equal(facts.childResult, 'probe-reported');
+  assert.equal(facts.uidMatches, true);
+  assert.match(facts.nodeVersion, /^\d+\.\d+\.\d+$/u);
+  assert.equal(facts.nodeVersionSupported, facts.nodeVersion.startsWith('22.'));
+  assert.equal(facts.nodeExecutableRunnable, true);
+  assert.equal(facts.scriptExists, true);
+  assert.equal(facts.scriptReadable, true);
+  assert.equal(JSON.stringify(facts).includes(script), false);
 });
 
 test('connect probe checks its real uid before making a loopback connection', async (context) => {

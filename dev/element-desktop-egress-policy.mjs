@@ -280,7 +280,7 @@ function classifySpawnError(error) {
   }
 }
 
-function classifyChildStderr(stderr) {
+function classifyChildStderr(stderr, expectedScriptPath) {
   const text = stderr.toLowerCase();
   if (text.trim().length === 0) return 'empty';
   if (
@@ -300,20 +300,59 @@ function classifyChildStderr(stderr) {
   ) {
     return 'permission';
   }
+  const missingModule = /cannot find module\s+['"]([^'"]+)['"]/iu.exec(stderr);
+  if (missingModule) {
+    const missingTarget = missingModule[1];
+    let normalizedTarget = missingTarget;
+    if (normalizedTarget.startsWith('file:')) {
+      try {
+        normalizedTarget = fileURLToPath(normalizedTarget);
+      } catch {
+        // An invalid or unexpected module target remains a generic import failure.
+      }
+    }
+    if (expectedScriptPath && normalizedTarget === expectedScriptPath) {
+      return 'missing-script';
+    }
+    return 'missing-import';
+  }
+  if (
+    /cannot find package\s+['"]/iu.test(stderr) ||
+    /err_module_not_found/iu.test(stderr)
+  ) {
+    return 'missing-import';
+  }
+  if (
+    /syntaxerror|unexpected token|cannot use import statement outside a module/iu.test(
+      stderr,
+    )
+  ) {
+    return 'syntax';
+  }
   if (
     [
-      'cannot find module',
-      'cannot find package',
-      'err_module_not_found',
-      'syntaxerror',
+      'requires a newer node',
+      'unsupported node version',
+      'node version is not supported',
+      'bad option',
+      'unknown option',
+      'err_unknown_file_extension',
+      'err_unsupported_dir_import',
+      'err_require_esm',
+      'compiled against a different node.js version',
+      'module version mismatch',
+      'node_module_version',
     ].some((marker) => text.includes(marker))
   ) {
-    return 'node-load';
+    return 'runtime-version';
   }
   return 'other';
 }
 
-export function probeFromSpawn(result) {
+export function probeFromSpawn(
+  result,
+  expectedScriptPath = fileURLToPath(import.meta.url),
+) {
   const output = typeof result?.stdout === 'string' ? result.stdout : '';
   const stderr = typeof result?.stderr === 'string' ? result.stderr : '';
   const lines = output.split(/\r?\n/u).filter(Boolean);
@@ -335,7 +374,7 @@ export function probeFromSpawn(result) {
     childExitStatus,
     childSignal,
     spawnErrorClass: result?.error ? classifySpawnError(result.error) : null,
-    stderrClass: classifyChildStderr(stderr),
+    stderrClass: classifyChildStderr(stderr, expectedScriptPath),
     probeMarkerPresent,
     probeUidMatches: null,
     connectAttempted: false,
@@ -532,7 +571,189 @@ async function testFamilyAsUid(uid, host, port) {
       maxBuffer: 4_096,
     },
   );
-  return probeFromSpawn(result);
+  return probeFromSpawn(result, script);
+}
+
+export const RUNTIME_FACTS_SOURCE = `
+const fs = require('node:fs');
+const [expectedUidText, scriptPath] = process.argv.slice(1);
+const expectedUid = Number(expectedUidText);
+const canAccess = (path, mode) => {
+  try { fs.accessSync(path, mode); return true; } catch { return false; }
+};
+const facts = {
+  uidMatches: process.getuid?.() === expectedUid,
+  nodeVersion: process.versions.node,
+  nodeExecutableRunnable: canAccess(process.execPath, fs.constants.X_OK),
+  scriptExists: fs.existsSync(scriptPath),
+  scriptReadable: canAccess(scriptPath, fs.constants.R_OK),
+};
+process.stdout.write('runtime-facts-started\\n' + JSON.stringify(facts) + '\\n');
+`;
+
+export function runtimeFactsFromSpawn(result, expectedScriptPath) {
+  const output = typeof result?.stdout === 'string' ? result.stdout : '';
+  const stderr = typeof result?.stderr === 'string' ? result.stderr : '';
+  const lines = output.split(/\r?\n/u).filter(Boolean);
+  const markerPresent = lines[0] === 'runtime-facts-started';
+  const childExitStatus =
+    Number.isSafeInteger(result?.status) &&
+    result.status >= 0 &&
+    result.status <= 255
+      ? result.status
+      : null;
+  const childSignal =
+    typeof result?.signal === 'string' && result.signal.length > 0
+      ? SAFE_SIGNALS.has(result.signal)
+        ? result.signal
+        : 'other'
+      : null;
+  const resultBase = {
+    childResult: 'exited-before-marker',
+    childExitStatus,
+    childSignal,
+    spawnErrorClass: result?.error ? classifySpawnError(result.error) : null,
+    stderrClass: classifyChildStderr(stderr, expectedScriptPath),
+    markerPresent,
+    uidMatches: null,
+    nodeVersion: null,
+    nodeVersionSupported: false,
+    nodeExecutableRunnable: null,
+    scriptExists: null,
+    scriptReadable: null,
+  };
+  if (result?.error) return { ...resultBase, childResult: 'spawn-error' };
+  if (childSignal !== null) return { ...resultBase, childResult: 'signaled' };
+  if (!markerPresent) {
+    return {
+      ...resultBase,
+      childResult:
+        lines.length === 0 ? 'exited-before-marker' : 'protocol-invalid',
+    };
+  }
+  if (lines.length !== 2 || childExitStatus !== 0) {
+    return { ...resultBase, childResult: 'protocol-invalid' };
+  }
+  try {
+    const value = JSON.parse(lines[1]);
+    const keys = [
+      'uidMatches',
+      'nodeVersion',
+      'nodeExecutableRunnable',
+      'scriptExists',
+      'scriptReadable',
+    ];
+    if (
+      value === null ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      Object.keys(value).sort().join('\0') !== keys.sort().join('\0') ||
+      typeof value.uidMatches !== 'boolean' ||
+      typeof value.nodeVersion !== 'string' ||
+      !/^\d+\.\d+\.\d+$/u.test(value.nodeVersion) ||
+      ['nodeExecutableRunnable', 'scriptExists', 'scriptReadable'].some(
+        (key) => typeof value[key] !== 'boolean',
+      )
+    ) {
+      return { ...resultBase, childResult: 'protocol-invalid' };
+    }
+    return {
+      ...resultBase,
+      childResult: 'probe-reported',
+      uidMatches: value.uidMatches,
+      nodeVersion: value.nodeVersion,
+      nodeVersionSupported: value.nodeVersion.split('.')[0] === '22',
+      nodeExecutableRunnable: value.nodeExecutableRunnable,
+      scriptExists: value.scriptExists,
+      scriptReadable: value.scriptReadable,
+    };
+  } catch {
+    return { ...resultBase, childResult: 'protocol-invalid' };
+  }
+}
+
+function unrunPositiveProbe() {
+  return {
+    listenerBound: false,
+    ...unrunChildObservation(),
+    listenerAcceptedCount: null,
+  };
+}
+
+export async function isolatedUidPreflight(uidValue) {
+  const uid = requireDecimal(uidValue, 1, 65_535);
+  const script = fileURLToPath(import.meta.url);
+  const factsResult = spawnSync(
+    'sudo',
+    [
+      '-n',
+      '-u',
+      `#${uid}`,
+      '--',
+      process.execPath,
+      '-e',
+      RUNTIME_FACTS_SOURCE,
+      String(uid),
+      script,
+    ],
+    {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 2_000,
+      maxBuffer: 4_096,
+    },
+  );
+  const runtimeFacts = runtimeFactsFromSpawn(factsResult, script);
+  let scriptProbe = unrunPositiveProbe();
+  let listener;
+  try {
+    listener = await localListener('127.0.0.1');
+  } catch {
+    // Retain a fixed not-run result if the loopback listener cannot bind.
+  }
+  if (listener) {
+    try {
+      scriptProbe = {
+        listenerBound: true,
+        ...(await testFamilyAsUid(uid, '127.0.0.1', listener.port)),
+        listenerAcceptedCount: 0,
+      };
+    } catch {
+      scriptProbe = {
+        listenerBound: true,
+        childResult: 'probe-error',
+        childExitStatus: null,
+        childSignal: null,
+        spawnErrorClass: null,
+        stderrClass: 'unavailable',
+        probeMarkerPresent: false,
+        probeUidMatches: null,
+        connectAttempted: false,
+        connectionOutcome: 'probe-error',
+        listenerAcceptedCount: 0,
+      };
+    }
+    await wait(25);
+    scriptProbe.listenerAcceptedCount = Math.min(2, listener.getAccepts());
+    await new Promise((resolve) => listener.server.close(resolve));
+  }
+  const status =
+    runtimeFacts.childResult === 'probe-reported' &&
+    runtimeFacts.uidMatches === true &&
+    runtimeFacts.nodeVersionSupported === true &&
+    runtimeFacts.nodeExecutableRunnable === true &&
+    runtimeFacts.scriptExists === true &&
+    runtimeFacts.scriptReadable === true &&
+    scriptProbe.listenerBound === true &&
+    scriptProbe.childResult === 'probe-reported' &&
+    scriptProbe.probeMarkerPresent === true &&
+    scriptProbe.probeUidMatches === true &&
+    scriptProbe.connectAttempted === true &&
+    scriptProbe.connectionOutcome === 'connected' &&
+    scriptProbe.listenerAcceptedCount === 1
+      ? 'passed'
+      : 'failed';
+  return { phase: 'target-uid-preflight', status, runtimeFacts, scriptProbe };
 }
 
 export async function negativeLocalEgressCheck(
@@ -641,6 +862,22 @@ async function main(args) {
     );
     process.stdout.write(`${JSON.stringify(diagnostic)}\n`);
     if (!diagnostic.passed) process.exitCode = 2;
+    return;
+  }
+  if (operation === 'target-uid-preflight' && values.length === 1) {
+    let record;
+    try {
+      record = await isolatedUidPreflight(values[0]);
+    } catch {
+      record = {
+        phase: 'target-uid-preflight',
+        status: 'failed',
+        runtimeFacts: null,
+        scriptProbe: null,
+      };
+    }
+    process.stdout.write(`${JSON.stringify(record)}\n`);
+    if (record.status !== 'passed') process.exitCode = 2;
     return;
   }
   if (operation === 'zero-counters' && values.length === 1) {
