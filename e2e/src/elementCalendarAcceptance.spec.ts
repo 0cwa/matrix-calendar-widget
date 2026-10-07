@@ -412,7 +412,9 @@ test('Element Web members share events and enforce room authorization', async ({
     activePhase = 'event-create-calendar-selected';
     await createDialog
       .getByRole('combobox', { name: 'Calendar' })
-      .selectOption({ label: 'Synthetic team calendar' });
+      .selectOption({
+        value: `matrix-calendar-target://room/${encodeURIComponent(fixture.calendarId)}`,
+      });
     record(activePhase, 'passed');
 
     activePhase = 'event-create-title-entered';
