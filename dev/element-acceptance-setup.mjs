@@ -691,6 +691,7 @@ async function provision() {
     homeserverUrl: HOMESERVER_URL,
     elementUrl: ELEMENT_URL,
     gatewayUrl: GATEWAY_URL,
+    widgetUrl: WIDGET_URL,
     roomName: ROOM_NAME,
     outsiderRoomName: OUTSIDER_ROOM_NAME,
     teamRoomId: rooms.teamRoomId,

@@ -4,6 +4,50 @@ import { sanitizeElementAcceptance } from './sanitize-element-acceptance.mjs';
 
 const sourceSha = 'a'.repeat(40);
 
+function validRuntimeObservation(overrides = {}) {
+  return {
+    phase: 'widget-a-runtime-observed',
+    status: 'passed',
+    gatewayContextRequestCount: 0,
+    gatewayCalendarsRequestCount: 0,
+    gatewayEventsRequestCount: 0,
+    gatewayOtherCalendarRequestCount: 0,
+    gatewayOtherApiRequestCount: 0,
+    gatewayOptionsRequestCount: 0,
+    gatewayFailedRequestCount: 0,
+    gatewayLastRequestEndpoint: 'none',
+    gatewayLastRequestMethod: 'NONE',
+    gatewayLastResponseEndpoint: 'none',
+    gatewayLastResponseMethod: 'NONE',
+    widgetDocumentRequestCount: 0,
+    widgetScriptRequestCount: 0,
+    widgetStylesheetRequestCount: 0,
+    widgetDocumentFailureCount: 0,
+    widgetScriptFailureCount: 0,
+    widgetStylesheetFailureCount: 0,
+    openIdRequestCount: 0,
+    openIdOptionsRequestCount: 0,
+    openIdFailedRequestCount: 0,
+    openIdLastRequestMethod: 'NONE',
+    widgetFrameAvailable: true,
+    widgetDocumentReadyState: 'complete',
+    widgetRootHasChildren: false,
+    widgetLoadingVisible: false,
+    widgetMissingCapabilitiesVisible: false,
+    widgetRegistrationErrorVisible: false,
+    widgetOutsideClientVisible: false,
+    widgetChildErrorVisible: false,
+    widgetPageErrorCount: 0,
+    widgetLastPageErrorClass: 'NONE',
+    iframeObservationAvailable: true,
+    iframeGatewayBaseOriginMatches: true,
+    iframeRoomIdMatches: true,
+    createEventVisible: false,
+    identityContinueVisible: false,
+    ...overrides,
+  };
+}
+
 test('emits only fixed phase names, outcomes, and source SHA', () => {
   const summary = sanitizeElementAcceptance(
     [
@@ -221,29 +265,33 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
   );
 });
 
-test('emits fixed gateway traffic and iframe observations only', () => {
+test('emits bounded widget, gateway, and OpenID observations only', () => {
   const summary = sanitizeElementAcceptance(
-    JSON.stringify({
-      phase: 'widget-a-runtime-observed',
-      status: 'passed',
-      gatewayContextRequestCount: 1,
-      gatewayCalendarsRequestCount: 2,
-      gatewayEventsRequestCount: 0,
-      gatewayOtherCalendarRequestCount: 0,
-      gatewayOtherApiRequestCount: 0,
-      gatewayOptionsRequestCount: 1,
-      gatewayFailedRequestCount: 0,
-      gatewayLastRequestEndpoint: 'calendars',
-      gatewayLastRequestMethod: 'GET',
-      gatewayLastResponseEndpoint: 'calendars',
-      gatewayLastResponseMethod: 'GET',
-      gatewayLastResponseStatus: 200,
-      iframeObservationAvailable: true,
-      iframeGatewayBaseOriginMatches: true,
-      iframeRoomIdMatches: true,
-      createEventVisible: false,
-      identityContinueVisible: false,
-    }),
+    JSON.stringify(
+      validRuntimeObservation({
+        gatewayContextRequestCount: 1,
+        gatewayCalendarsRequestCount: 2,
+        gatewayOptionsRequestCount: 1,
+        gatewayLastRequestEndpoint: 'calendars',
+        gatewayLastRequestMethod: 'GET',
+        gatewayLastResponseEndpoint: 'calendars',
+        gatewayLastResponseMethod: 'GET',
+        gatewayLastResponseStatus: 200,
+        widgetDocumentRequestCount: 1,
+        widgetScriptRequestCount: 2,
+        widgetStylesheetRequestCount: 1,
+        widgetScriptFailureCount: 1,
+        widgetDocumentLastStatus: 200,
+        widgetScriptLastStatus: 404,
+        widgetStylesheetLastStatus: 200,
+        openIdRequestCount: 1,
+        openIdLastRequestMethod: 'GET',
+        openIdLastResponseStatus: 200,
+        widgetRootHasChildren: true,
+        widgetPageErrorCount: 1,
+        widgetLastPageErrorClass: 'TypeError',
+      }),
+    ),
     sourceSha,
   );
 
@@ -251,55 +299,50 @@ test('emits fixed gateway traffic and iframe observations only', () => {
     summary,
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=widget-a-runtime-observed status=passed gateway_context_requests=1 gateway_calendars_requests=2 gateway_events_requests=0 gateway_other_calendar_requests=0 gateway_other_api_requests=0 gateway_options_requests=1 gateway_failed_requests=0 gateway_last_request_endpoint=calendars gateway_last_request_method=GET gateway_last_response_endpoint=calendars gateway_last_response_method=GET gateway_last_response_status=200 iframe_observation_available=true iframe_gateway_base_origin_matches=true iframe_room_id_matches=true create_event_visible=false identity_continue_visible=false',
+      'phase=widget-a-runtime-observed status=passed gateway_context_requests=1 gateway_calendars_requests=2 gateway_events_requests=0 gateway_other_calendar_requests=0 gateway_other_api_requests=0 gateway_options_requests=1 gateway_failed_requests=0 gateway_last_request_endpoint=calendars gateway_last_request_method=GET gateway_last_response_endpoint=calendars gateway_last_response_method=GET gateway_last_response_status=200 widget_document_last_status=200 widget_script_last_status=404 widget_stylesheet_last_status=200 openid_last_response_status=200 widget_document_requests=1 widget_script_requests=2 widget_stylesheet_requests=1 widget_document_failures=0 widget_script_failures=1 widget_stylesheet_failures=0 openid_requests=1 openid_options_requests=0 openid_failed_requests=0 openid_last_request_method=GET widget_frame_available=true widget_document_ready_state=complete widget_root_has_children=true widget_loading_visible=false widget_missing_capabilities_visible=false widget_registration_error_visible=false widget_outside_client_visible=false widget_child_error_visible=false widget_page_errors=1 widget_last_page_error_class=TypeError iframe_observation_available=true iframe_gateway_base_origin_matches=true iframe_room_id_matches=true create_event_visible=false identity_continue_visible=false',
       '',
     ].join('\n'),
   );
 });
 
 test('constrains runtime observations to bounded enums, counts, and booleans', () => {
-  const validRuntimeObservation = {
-    phase: 'widget-a-runtime-observed',
-    status: 'passed',
+  const validObservation = validRuntimeObservation({
     gatewayContextRequestCount: 1,
     gatewayCalendarsRequestCount: 1,
-    gatewayEventsRequestCount: 0,
-    gatewayOtherCalendarRequestCount: 0,
-    gatewayOtherApiRequestCount: 0,
-    gatewayOptionsRequestCount: 0,
-    gatewayFailedRequestCount: 0,
     gatewayLastRequestEndpoint: 'calendars',
     gatewayLastRequestMethod: 'GET',
     gatewayLastResponseEndpoint: 'calendars',
     gatewayLastResponseMethod: 'GET',
     gatewayLastResponseStatus: 200,
-    iframeObservationAvailable: true,
-    iframeGatewayBaseOriginMatches: true,
-    iframeRoomIdMatches: true,
-    createEventVisible: false,
-    identityContinueVisible: false,
-  };
+  });
   const rejectedRecords = [
-    { ...validRuntimeObservation, gatewayEventsRequestCount: 3 },
+    { ...validObservation, gatewayEventsRequestCount: 3 },
     {
-      ...validRuntimeObservation,
+      ...validObservation,
       gatewayLastRequestEndpoint: 'https://private.example/path?token=x',
     },
     {
-      ...validRuntimeObservation,
+      ...validObservation,
       gatewayLastResponseStatus: '200 private response',
     },
     {
-      ...validRuntimeObservation,
+      ...validObservation,
       iframeRoomIdMatches: '!private-room:server',
     },
-    { ...validRuntimeObservation, requestUrl: 'http://private.example' },
+    { ...validObservation, requestUrl: 'http://private.example' },
+    { ...validObservation, openIdLastRequestMethod: '/openid?token=x' },
+    { ...validObservation, widgetDocumentReadyState: '/private/path' },
+    { ...validObservation, widgetLastPageErrorClass: 'TypeError: secret' },
+    { ...validObservation, widgetPageErrorCount: 1 },
+    { ...validObservation, widgetScriptFailureCount: 2 },
+    { ...validObservation, widgetDocumentLastStatus: 404 },
+    { ...validObservation, openIdLastResponseStatus: 401 },
     {
-      ...validRuntimeObservation,
+      ...validObservation,
       phase: 'gateway-backed-read',
     },
     {
-      ...validRuntimeObservation,
+      ...validObservation,
       status: 'unavailable',
     },
   ];
@@ -314,7 +357,7 @@ test('constrains runtime observations to bounded enums, counts, and booleans', (
   assert.doesNotThrow(() =>
     sanitizeElementAcceptance(
       JSON.stringify({
-        ...validRuntimeObservation,
+        ...validObservation,
         status: 'unavailable',
         gatewayLastRequestEndpoint: 'none',
         gatewayLastRequestMethod: 'NONE',
@@ -324,6 +367,17 @@ test('constrains runtime observations to bounded enums, counts, and booleans', (
         iframeObservationAvailable: false,
         iframeGatewayBaseOriginMatches: false,
         iframeRoomIdMatches: false,
+      }),
+      sourceSha,
+    ),
+  );
+
+  assert.doesNotThrow(() =>
+    sanitizeElementAcceptance(
+      JSON.stringify({
+        ...validObservation,
+        openIdRequestCount: 1,
+        openIdLastRequestMethod: 'POST',
       }),
       sourceSha,
     ),

@@ -155,7 +155,25 @@ const GATEWAY_METHODS = new Set([
   'OTHER',
   'NONE',
 ]);
-const GATEWAY_RUNTIME_FIELDS = [
+const WIDGET_READY_STATES = new Set([
+  'loading',
+  'interactive',
+  'complete',
+  'unavailable',
+]);
+const WIDGET_PAGE_ERROR_CLASSES = new Set([
+  'Error',
+  'TypeError',
+  'ReferenceError',
+  'SyntaxError',
+  'RangeError',
+  'URIError',
+  'EvalError',
+  'AggregateError',
+  'OTHER',
+  'NONE',
+]);
+const RUNTIME_OBSERVATION_FIELDS = [
   'gatewayContextRequestCount',
   'gatewayCalendarsRequestCount',
   'gatewayEventsRequestCount',
@@ -172,8 +190,35 @@ const GATEWAY_RUNTIME_FIELDS = [
   'iframeRoomIdMatches',
   'createEventVisible',
   'identityContinueVisible',
+  'widgetDocumentRequestCount',
+  'widgetScriptRequestCount',
+  'widgetStylesheetRequestCount',
+  'widgetDocumentFailureCount',
+  'widgetScriptFailureCount',
+  'widgetStylesheetFailureCount',
+  'openIdRequestCount',
+  'openIdOptionsRequestCount',
+  'openIdFailedRequestCount',
+  'openIdLastRequestMethod',
+  'widgetPageErrorCount',
+  'widgetLastPageErrorClass',
+  'widgetFrameAvailable',
+  'widgetDocumentReadyState',
+  'widgetRootHasChildren',
+  'widgetLoadingVisible',
+  'widgetMissingCapabilitiesVisible',
+  'widgetRegistrationErrorVisible',
+  'widgetOutsideClientVisible',
+  'widgetChildErrorVisible',
 ];
-const GATEWAY_COUNTER_FIELDS = [
+const OPTIONAL_RUNTIME_STATUS_FIELDS = [
+  'gatewayLastResponseStatus',
+  'widgetDocumentLastStatus',
+  'widgetScriptLastStatus',
+  'widgetStylesheetLastStatus',
+  'openIdLastResponseStatus',
+];
+const RUNTIME_COUNTER_FIELDS = [
   'gatewayContextRequestCount',
   'gatewayCalendarsRequestCount',
   'gatewayEventsRequestCount',
@@ -181,6 +226,16 @@ const GATEWAY_COUNTER_FIELDS = [
   'gatewayOtherApiRequestCount',
   'gatewayOptionsRequestCount',
   'gatewayFailedRequestCount',
+  'widgetDocumentRequestCount',
+  'widgetScriptRequestCount',
+  'widgetStylesheetRequestCount',
+  'widgetDocumentFailureCount',
+  'widgetScriptFailureCount',
+  'widgetStylesheetFailureCount',
+  'openIdRequestCount',
+  'openIdOptionsRequestCount',
+  'openIdFailedRequestCount',
+  'widgetPageErrorCount',
 ];
 const ALLOWED_KEYS = new Set([
   'phase',
@@ -213,25 +268,25 @@ const ALLOWED_KEYS = new Set([
   'containerExitCode',
   'containerOomKilled',
   'containerRuntimeErrorPresent',
-  ...GATEWAY_RUNTIME_FIELDS,
-  'gatewayLastResponseStatus',
+  ...RUNTIME_OBSERVATION_FIELDS,
+  ...OPTIONAL_RUNTIME_STATUS_FIELDS,
   ...VERSION_FIELDS,
 ]);
 
-function validGatewayRuntimeObservation(record) {
+function validRuntimeObservation(record) {
   const expectedKeys = new Set([
     'phase',
     'status',
-    ...GATEWAY_RUNTIME_FIELDS,
-    ...(Object.hasOwn(record, 'gatewayLastResponseStatus')
-      ? ['gatewayLastResponseStatus']
-      : []),
+    ...RUNTIME_OBSERVATION_FIELDS,
+    ...OPTIONAL_RUNTIME_STATUS_FIELDS.filter((key) =>
+      Object.hasOwn(record, key),
+    ),
   ]);
   if (
     Object.keys(record).length !== expectedKeys.size ||
     Object.keys(record).some((key) => !expectedKeys.has(key)) ||
     !['passed', 'unavailable'].includes(record.status) ||
-    GATEWAY_COUNTER_FIELDS.some(
+    RUNTIME_COUNTER_FIELDS.some(
       (key) =>
         !Number.isInteger(record[key]) || record[key] < 0 || record[key] > 2,
     ) ||
@@ -244,6 +299,33 @@ function validGatewayRuntimeObservation(record) {
     typeof record.iframeRoomIdMatches !== 'boolean' ||
     typeof record.createEventVisible !== 'boolean' ||
     typeof record.identityContinueVisible !== 'boolean' ||
+    !Number.isInteger(record.openIdRequestCount) ||
+    !Number.isInteger(record.openIdOptionsRequestCount) ||
+    !Number.isInteger(record.openIdFailedRequestCount) ||
+    !GATEWAY_METHODS.has(record.openIdLastRequestMethod) ||
+    !WIDGET_PAGE_ERROR_CLASSES.has(record.widgetLastPageErrorClass) ||
+    !WIDGET_READY_STATES.has(record.widgetDocumentReadyState) ||
+    [
+      'widgetRootHasChildren',
+      'widgetLoadingVisible',
+      'widgetMissingCapabilitiesVisible',
+      'widgetRegistrationErrorVisible',
+      'widgetOutsideClientVisible',
+      'widgetChildErrorVisible',
+      'widgetFrameAvailable',
+    ].some((key) => typeof record[key] !== 'boolean') ||
+    record.openIdRequestCount > 2 ||
+    record.openIdOptionsRequestCount > record.openIdRequestCount ||
+    record.openIdFailedRequestCount > record.openIdRequestCount ||
+    (record.openIdRequestCount === 0) !==
+      (record.openIdLastRequestMethod === 'NONE') ||
+    (record.openIdRequestCount === 0 &&
+      Object.hasOwn(record, 'openIdLastResponseStatus')) ||
+    (record.widgetPageErrorCount === 0) !==
+      (record.widgetLastPageErrorClass === 'NONE') ||
+    (record.widgetFrameAvailable
+      ? record.widgetDocumentReadyState === 'unavailable'
+      : record.widgetDocumentReadyState !== 'unavailable') ||
     (record.status === 'passed' && !record.iframeObservationAvailable) ||
     (record.status === 'unavailable' && record.iframeObservationAvailable) ||
     (!record.iframeObservationAvailable &&
@@ -254,10 +336,40 @@ function validGatewayRuntimeObservation(record) {
       (record.gatewayLastResponseMethod === 'NONE') ||
     (record.gatewayLastResponseEndpoint === 'none') !==
       !Object.hasOwn(record, 'gatewayLastResponseStatus') ||
-    (Object.hasOwn(record, 'gatewayLastResponseStatus') &&
-      (!Number.isInteger(record.gatewayLastResponseStatus) ||
-        record.gatewayLastResponseStatus < 100 ||
-        record.gatewayLastResponseStatus > 599))
+    OPTIONAL_RUNTIME_STATUS_FIELDS.some((key) => {
+      if (!Object.hasOwn(record, key)) return false;
+      const status = record[key];
+      if (!Number.isInteger(status) || status < 100 || status > 599)
+        return true;
+      if (key === 'openIdLastResponseStatus') {
+        return record.openIdRequestCount === 0;
+      }
+      if (key === 'widgetDocumentLastStatus') {
+        return record.widgetDocumentRequestCount === 0;
+      }
+      if (key === 'widgetScriptLastStatus') {
+        return record.widgetScriptRequestCount === 0;
+      }
+      if (key === 'widgetStylesheetLastStatus') {
+        return record.widgetStylesheetRequestCount === 0;
+      }
+      return false;
+    }) ||
+    ['document', 'script', 'stylesheet'].some((kind) => {
+      const suffix = `${kind[0].toUpperCase()}${kind.slice(1)}`;
+      return (
+        record[`widget${suffix}FailureCount`] >
+        record[`widget${suffix}RequestCount`]
+      );
+    }) ||
+    (!record.widgetFrameAvailable &&
+      (record.widgetRootHasChildren ||
+        record.widgetLoadingVisible ||
+        record.widgetMissingCapabilitiesVisible ||
+        record.widgetRegistrationErrorVisible ||
+        record.widgetOutsideClientVisible ||
+        record.widgetChildErrorVisible ||
+        record.widgetPageErrorCount !== 0))
   ) {
     return false;
   }
@@ -318,15 +430,17 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       throw new Error('invalid element acceptance summary');
     }
 
-    const hasGatewayRuntimeObservation = GATEWAY_RUNTIME_FIELDS.some((key) =>
+    const hasRuntimeObservation = RUNTIME_OBSERVATION_FIELDS.some((key) =>
       Object.hasOwn(record, key),
     );
     if (
       (record.phase === 'widget-a-runtime-observed' &&
-        !validGatewayRuntimeObservation(record)) ||
+        !validRuntimeObservation(record)) ||
       (record.phase !== 'widget-a-runtime-observed' &&
-        (hasGatewayRuntimeObservation ||
-          Object.hasOwn(record, 'gatewayLastResponseStatus')))
+        (hasRuntimeObservation ||
+          OPTIONAL_RUNTIME_STATUS_FIELDS.some((key) =>
+            Object.hasOwn(record, key),
+          )))
     ) {
       throw new Error('invalid element acceptance summary');
     }
@@ -614,11 +728,38 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         `gateway_last_request_method=${record.gatewayLastRequestMethod}`,
         `gateway_last_response_endpoint=${record.gatewayLastResponseEndpoint}`,
         `gateway_last_response_method=${record.gatewayLastResponseMethod}`,
-        ...(record.gatewayLastResponseStatus === undefined
-          ? []
-          : [
-              `gateway_last_response_status=${record.gatewayLastResponseStatus}`,
-            ]),
+        ...OPTIONAL_RUNTIME_STATUS_FIELDS.filter((key) =>
+          Object.hasOwn(record, key),
+        ).map((key) => {
+          const outputNames = {
+            gatewayLastResponseStatus: 'gateway_last_response_status',
+            widgetDocumentLastStatus: 'widget_document_last_status',
+            widgetScriptLastStatus: 'widget_script_last_status',
+            widgetStylesheetLastStatus: 'widget_stylesheet_last_status',
+            openIdLastResponseStatus: 'openid_last_response_status',
+          };
+          return `${outputNames[key]}=${record[key]}`;
+        }),
+        `widget_document_requests=${record.widgetDocumentRequestCount}`,
+        `widget_script_requests=${record.widgetScriptRequestCount}`,
+        `widget_stylesheet_requests=${record.widgetStylesheetRequestCount}`,
+        `widget_document_failures=${record.widgetDocumentFailureCount}`,
+        `widget_script_failures=${record.widgetScriptFailureCount}`,
+        `widget_stylesheet_failures=${record.widgetStylesheetFailureCount}`,
+        `openid_requests=${record.openIdRequestCount}`,
+        `openid_options_requests=${record.openIdOptionsRequestCount}`,
+        `openid_failed_requests=${record.openIdFailedRequestCount}`,
+        `openid_last_request_method=${record.openIdLastRequestMethod}`,
+        `widget_frame_available=${record.widgetFrameAvailable}`,
+        `widget_document_ready_state=${record.widgetDocumentReadyState}`,
+        `widget_root_has_children=${record.widgetRootHasChildren}`,
+        `widget_loading_visible=${record.widgetLoadingVisible}`,
+        `widget_missing_capabilities_visible=${record.widgetMissingCapabilitiesVisible}`,
+        `widget_registration_error_visible=${record.widgetRegistrationErrorVisible}`,
+        `widget_outside_client_visible=${record.widgetOutsideClientVisible}`,
+        `widget_child_error_visible=${record.widgetChildErrorVisible}`,
+        `widget_page_errors=${record.widgetPageErrorCount}`,
+        `widget_last_page_error_class=${record.widgetLastPageErrorClass}`,
         `iframe_observation_available=${record.iframeObservationAvailable}`,
         `iframe_gateway_base_origin_matches=${record.iframeGatewayBaseOriginMatches}`,
         `iframe_room_id_matches=${record.iframeRoomIdMatches}`,

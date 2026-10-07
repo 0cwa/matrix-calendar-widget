@@ -38,6 +38,7 @@ type Fixture = {
   homeserverUrl: string;
   elementUrl: string;
   gatewayUrl: string;
+  widgetUrl: string;
   roomName: string;
   outsiderRoomName: string;
   calendarId: string;
@@ -163,7 +164,27 @@ type GatewayRequestMethod =
   | 'HEAD'
   | 'OTHER';
 
-type GatewayTrafficObservation = {
+type WidgetResourceKind = 'document' | 'script' | 'stylesheet';
+
+type WidgetDocumentReadyState =
+  | 'loading'
+  | 'interactive'
+  | 'complete'
+  | 'unavailable';
+
+type WidgetPageErrorClass =
+  | 'Error'
+  | 'TypeError'
+  | 'ReferenceError'
+  | 'SyntaxError'
+  | 'RangeError'
+  | 'URIError'
+  | 'EvalError'
+  | 'AggregateError'
+  | 'OTHER'
+  | 'NONE';
+
+type AcceptanceRuntimeObservation = {
   requestCounts: Record<GatewayEndpointKind, number>;
   optionsRequestCount: number;
   failedRequestCount: number;
@@ -177,6 +198,24 @@ type GatewayTrafficObservation = {
   iframeRoomIdMatches: boolean;
   createEventVisible: boolean;
   identityContinueVisible: boolean;
+  widgetResourceRequestCounts: Record<WidgetResourceKind, number>;
+  widgetResourceFailureCounts: Record<WidgetResourceKind, number>;
+  widgetResourceLastStatuses: Partial<Record<WidgetResourceKind, number>>;
+  openIdRequestCount: number;
+  openIdOptionsRequestCount: number;
+  openIdFailedRequestCount: number;
+  openIdLastRequestMethod: GatewayRequestMethod | 'NONE';
+  openIdLastResponseStatus?: number;
+  widgetFrameAvailable: boolean;
+  widgetDocumentReadyState: WidgetDocumentReadyState;
+  widgetRootHasChildren: boolean;
+  widgetLoadingVisible: boolean;
+  widgetMissingCapabilitiesVisible: boolean;
+  widgetRegistrationErrorVisible: boolean;
+  widgetOutsideClientVisible: boolean;
+  widgetChildErrorVisible: boolean;
+  widgetPageErrorCount: number;
+  widgetLastPageErrorClass: WidgetPageErrorClass;
 };
 
 let fixture: Fixture;
@@ -250,7 +289,7 @@ test('Element Web members share events and enforce room authorization', async ({
   let pageA: Page | undefined;
   let pageB: Page | undefined;
   let pageC: Page | undefined;
-  let memberAGatewayTraffic: GatewayTrafficObservation | undefined;
+  let memberARuntimeObservation: AcceptanceRuntimeObservation | undefined;
   let failureHttpStatus: number | undefined;
   let failureAlreadyReported = false;
 
@@ -260,7 +299,11 @@ test('Element Web members share events and enforce room authorization', async ({
     activePhase = 'member-a-authenticated';
     contextA = await makeContext();
     pageA = await authenticateInElement(contextA, fixture.users.memberA, true);
-    memberAGatewayTraffic = observeGatewayTraffic(pageA, fixture.gatewayUrl);
+    memberARuntimeObservation = await observeAcceptanceRuntime(pageA, {
+      gatewayUrl: fixture.gatewayUrl,
+      homeserverUrl: fixture.homeserverUrl,
+      widgetUrl: fixture.widgetUrl,
+    });
     record(activePhase, 'passed');
 
     activePhase = 'member-b-authenticated';
@@ -305,11 +348,15 @@ test('Element Web members share events and enforce room authorization', async ({
       await recordWidgetRuntimeObservation(
         pageA,
         frameA,
-        memberAGatewayTraffic,
+        memberARuntimeObservation,
       );
       throw new Error('Initial calendar event request was not observed');
     }
-    await recordWidgetRuntimeObservation(pageA, frameA, memberAGatewayTraffic);
+    await recordWidgetRuntimeObservation(
+      pageA,
+      frameA,
+      memberARuntimeObservation,
+    );
     failureHttpStatus = firstReadResponse.status();
     expect(failureHttpStatus).toBe(200);
     record(activePhase, 'passed', failureHttpStatus);
@@ -1119,12 +1166,60 @@ function waitForGatewayResponse(
   );
 }
 
-function observeGatewayTraffic(
+async function observeAcceptanceRuntime(
   page: Page,
-  gatewayUrl: string,
-): GatewayTrafficObservation {
+  {
+    gatewayUrl,
+    homeserverUrl,
+    widgetUrl,
+  }: {
+    gatewayUrl: string;
+    homeserverUrl: string;
+    widgetUrl: string;
+  },
+): Promise<AcceptanceRuntimeObservation> {
   const gatewayOrigin = new URL(gatewayUrl).origin;
-  const observation: GatewayTrafficObservation = {
+  const homeserverOrigin = new URL(homeserverUrl).origin;
+  const widgetOrigin = new URL(widgetUrl).origin;
+  await page.context().addInitScript(
+    ({ expectedWidgetOrigin }) => {
+      if (window.location.origin !== expectedWidgetOrigin) return;
+      const knownErrorClasses = [
+        'Error',
+        'TypeError',
+        'ReferenceError',
+        'SyntaxError',
+        'RangeError',
+        'URIError',
+        'EvalError',
+        'AggregateError',
+      ];
+      const errorState = {
+        count: 0,
+        lastClass: 'NONE' as WidgetPageErrorClass,
+      };
+      const runtimeWindow = window as Window & {
+        __matrixCalendarAcceptanceErrors?: typeof errorState;
+      };
+      runtimeWindow.__matrixCalendarAcceptanceErrors = errorState;
+      const recordPageError = (reason: unknown) => {
+        errorState.count = Math.min(errorState.count + 1, 2);
+        const name = reason instanceof Error ? reason.name : 'OTHER';
+        errorState.lastClass = knownErrorClasses.includes(name)
+          ? (name as WidgetPageErrorClass)
+          : 'OTHER';
+      };
+      window.addEventListener('error', (event) => {
+        if (event instanceof ErrorEvent) recordPageError(event.error);
+      });
+      window.addEventListener('unhandledrejection', (event) => {
+        recordPageError(event.reason);
+      });
+    },
+    { expectedWidgetOrigin: widgetOrigin },
+  );
+
+  const observation: AcceptanceRuntimeObservation = {
     requestCounts: {
       context: 0,
       calendars: 0,
@@ -1143,6 +1238,31 @@ function observeGatewayTraffic(
     iframeRoomIdMatches: false,
     createEventVisible: false,
     identityContinueVisible: false,
+    widgetResourceRequestCounts: {
+      document: 0,
+      script: 0,
+      stylesheet: 0,
+    },
+    widgetResourceFailureCounts: {
+      document: 0,
+      script: 0,
+      stylesheet: 0,
+    },
+    widgetResourceLastStatuses: {},
+    openIdRequestCount: 0,
+    openIdOptionsRequestCount: 0,
+    openIdFailedRequestCount: 0,
+    openIdLastRequestMethod: 'NONE',
+    widgetFrameAvailable: false,
+    widgetDocumentReadyState: 'unavailable',
+    widgetRootHasChildren: false,
+    widgetLoadingVisible: false,
+    widgetMissingCapabilitiesVisible: false,
+    widgetRegistrationErrorVisible: false,
+    widgetOutsideClientVisible: false,
+    widgetChildErrorVisible: false,
+    widgetPageErrorCount: 0,
+    widgetLastPageErrorClass: 'NONE',
   };
 
   page.on('request', (request) => {
@@ -1151,18 +1271,47 @@ function observeGatewayTraffic(
       request.method(),
       gatewayOrigin,
     );
-    if (!requestDetails) return;
-    observation.requestCounts[requestDetails.endpoint] = Math.min(
-      observation.requestCounts[requestDetails.endpoint] + 1,
-      2,
-    );
-    observation.lastRequestEndpoint = requestDetails.endpoint;
-    observation.lastRequestMethod = requestDetails.method;
-    if (requestDetails.method === 'OPTIONS') {
-      observation.optionsRequestCount = Math.min(
-        observation.optionsRequestCount + 1,
+    if (requestDetails) {
+      observation.requestCounts[requestDetails.endpoint] = Math.min(
+        observation.requestCounts[requestDetails.endpoint] + 1,
         2,
       );
+      observation.lastRequestEndpoint = requestDetails.endpoint;
+      observation.lastRequestMethod = requestDetails.method;
+      if (requestDetails.method === 'OPTIONS') {
+        observation.optionsRequestCount = Math.min(
+          observation.optionsRequestCount + 1,
+          2,
+        );
+      }
+    }
+
+    const widgetResource = classifyWidgetResource(
+      request.url(),
+      request.resourceType(),
+      widgetOrigin,
+    );
+    if (widgetResource) {
+      observation.widgetResourceRequestCounts[widgetResource] = Math.min(
+        observation.widgetResourceRequestCounts[widgetResource] + 1,
+        2,
+      );
+    }
+
+    if (isOpenIdRequest(request.url(), homeserverOrigin)) {
+      observation.openIdRequestCount = Math.min(
+        observation.openIdRequestCount + 1,
+        2,
+      );
+      observation.openIdLastRequestMethod = classifyGatewayMethod(
+        request.method(),
+      );
+      if (observation.openIdLastRequestMethod === 'OPTIONS') {
+        observation.openIdOptionsRequestCount = Math.min(
+          observation.openIdOptionsRequestCount + 1,
+          2,
+        );
+      }
     }
   });
 
@@ -1172,11 +1321,31 @@ function observeGatewayTraffic(
       request.method(),
       gatewayOrigin,
     );
-    if (!requestDetails) return;
-    observation.failedRequestCount = Math.min(
-      observation.failedRequestCount + 1,
-      2,
+    if (requestDetails) {
+      observation.failedRequestCount = Math.min(
+        observation.failedRequestCount + 1,
+        2,
+      );
+    }
+
+    const widgetResource = classifyWidgetResource(
+      request.url(),
+      request.resourceType(),
+      widgetOrigin,
     );
+    if (widgetResource) {
+      observation.widgetResourceFailureCounts[widgetResource] = Math.min(
+        observation.widgetResourceFailureCounts[widgetResource] + 1,
+        2,
+      );
+    }
+
+    if (isOpenIdRequest(request.url(), homeserverOrigin)) {
+      observation.openIdFailedRequestCount = Math.min(
+        observation.openIdFailedRequestCount + 1,
+        2,
+      );
+    }
   });
 
   page.on('response', (response) => {
@@ -1185,10 +1354,31 @@ function observeGatewayTraffic(
       response.request().method(),
       gatewayOrigin,
     );
-    if (!responseDetails) return;
-    observation.lastResponseEndpoint = responseDetails.endpoint;
-    observation.lastResponseMethod = responseDetails.method;
-    observation.lastResponseStatus = response.status();
+    if (responseDetails) {
+      observation.lastResponseEndpoint = responseDetails.endpoint;
+      observation.lastResponseMethod = responseDetails.method;
+      observation.lastResponseStatus = response.status();
+    }
+
+    const widgetResource = classifyWidgetResource(
+      response.url(),
+      response.request().resourceType(),
+      widgetOrigin,
+    );
+    if (widgetResource) {
+      observation.widgetResourceLastStatuses[widgetResource] =
+        response.status();
+      if (response.status() >= 400) {
+        observation.widgetResourceFailureCounts[widgetResource] = Math.min(
+          observation.widgetResourceFailureCounts[widgetResource] + 1,
+          2,
+        );
+      }
+    }
+
+    if (isOpenIdRequest(response.url(), homeserverOrigin)) {
+      observation.openIdLastResponseStatus = response.status();
+    }
   });
 
   return observation;
@@ -1221,28 +1411,61 @@ function classifyGatewayRequest(
       endpoint = 'other-api';
     }
 
-    const methods: GatewayRequestMethod[] = [
-      'GET',
-      'POST',
-      'PATCH',
-      'PUT',
-      'DELETE',
-      'OPTIONS',
-      'HEAD',
-    ];
-    const method = methods.includes(rawMethod as GatewayRequestMethod)
-      ? (rawMethod as GatewayRequestMethod)
-      : 'OTHER';
+    const method = classifyGatewayMethod(rawMethod);
     return { endpoint, method };
   } catch {
     return undefined;
   }
 }
 
+function classifyGatewayMethod(rawMethod: string): GatewayRequestMethod {
+  const methods: GatewayRequestMethod[] = [
+    'GET',
+    'POST',
+    'PATCH',
+    'PUT',
+    'DELETE',
+    'OPTIONS',
+    'HEAD',
+  ];
+  return methods.includes(rawMethod as GatewayRequestMethod)
+    ? (rawMethod as GatewayRequestMethod)
+    : 'OTHER';
+}
+
+function classifyWidgetResource(
+  rawUrl: string,
+  resourceType: string,
+  widgetOrigin: string,
+): WidgetResourceKind | undefined {
+  try {
+    if (new URL(rawUrl).origin !== widgetOrigin) return undefined;
+    return resourceType === 'document' ||
+      resourceType === 'script' ||
+      resourceType === 'stylesheet'
+      ? resourceType
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isOpenIdRequest(rawUrl: string, homeserverOrigin: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.origin === homeserverOrigin &&
+      url.pathname.endsWith('/openid/request_token')
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function recordWidgetRuntimeObservation(
   page: Page,
   frame: ReturnType<ElementWebPage['widgetByTitle']>,
-  observation: GatewayTrafficObservation | undefined,
+  observation: AcceptanceRuntimeObservation | undefined,
 ) {
   if (!observation) return;
 
@@ -1294,6 +1517,87 @@ async function recordWidgetRuntimeObservation(
     // The raw iframe URL and any navigation error stay out of the evidence.
   }
 
+  const widgetOrigin = new URL(fixture.widgetUrl).origin;
+  const widgetFrame = page.frames().find((candidate) => {
+    if (candidate === page.mainFrame()) return false;
+    try {
+      return new URL(candidate.url()).origin === widgetOrigin;
+    } catch {
+      return false;
+    }
+  });
+  if (widgetFrame) {
+    try {
+      const documentObservation = await widgetFrame.evaluate(() => {
+        const runtimeWindow = window as Window & {
+          __matrixCalendarAcceptanceErrors?: {
+            count: number;
+            lastClass: WidgetPageErrorClass;
+          };
+        };
+        const errors = runtimeWindow.__matrixCalendarAcceptanceErrors;
+        const readyState = document.readyState;
+        const visible = (element: Element | null) => {
+          if (!element) return false;
+          const style = window.getComputedStyle(element);
+          return (
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            element.getClientRects().length > 0
+          );
+        };
+        const alertMarkerVisible = (marker: string) =>
+          Array.from(document.querySelectorAll('[role="alert"]')).some(
+            (alert) => alert.textContent?.includes(marker) && visible(alert),
+          );
+        const widgetDocumentReadyState: WidgetDocumentReadyState =
+          readyState === 'loading' ||
+          readyState === 'interactive' ||
+          readyState === 'complete'
+            ? readyState
+            : 'unavailable';
+        return {
+          documentReadyState: widgetDocumentReadyState,
+          rootHasChildren:
+            (document.getElementById('root')?.childElementCount ?? 0) > 0,
+          loadingVisible: visible(
+            document.querySelector('[role="progressbar"]'),
+          ),
+          missingCapabilitiesVisible: alertMarkerVisible(
+            'Missing capabilities',
+          ),
+          registrationErrorVisible: alertMarkerVisible(
+            'Wrong widget registration',
+          ),
+          outsideClientVisible: alertMarkerVisible('Only runs as a widget'),
+          childErrorVisible: alertMarkerVisible(
+            'An error occured inside the widget.',
+          ),
+          pageErrorCount: Math.min(errors?.count ?? 0, 2),
+          lastPageErrorClass: errors?.lastClass ?? 'NONE',
+        };
+      });
+      observation.widgetFrameAvailable = true;
+      observation.widgetDocumentReadyState =
+        documentObservation.documentReadyState;
+      observation.widgetRootHasChildren = documentObservation.rootHasChildren;
+      observation.widgetLoadingVisible = documentObservation.loadingVisible;
+      observation.widgetMissingCapabilitiesVisible =
+        documentObservation.missingCapabilitiesVisible;
+      observation.widgetRegistrationErrorVisible =
+        documentObservation.registrationErrorVisible;
+      observation.widgetOutsideClientVisible =
+        documentObservation.outsideClientVisible;
+      observation.widgetChildErrorVisible =
+        documentObservation.childErrorVisible;
+      observation.widgetPageErrorCount = documentObservation.pageErrorCount;
+      observation.widgetLastPageErrorClass =
+        documentObservation.lastPageErrorClass;
+    } catch {
+      // Keep a failed frame read as unavailable without retaining its error.
+    }
+  }
+
   const [createEventVisible, identityContinueVisible] = await Promise.all([
     frame
       .getByRole('button', { name: 'Create event', exact: true })
@@ -1312,7 +1616,7 @@ async function recordWidgetRuntimeObservation(
   appendRuntimeObservation(observation);
 }
 
-function appendRuntimeObservation(observation: GatewayTrafficObservation) {
+function appendRuntimeObservation(observation: AcceptanceRuntimeObservation) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   if (!stageFile) throw new Error('Element acceptance fixture unavailable');
   appendFileSync(
@@ -1332,13 +1636,60 @@ function appendRuntimeObservation(observation: GatewayTrafficObservation) {
       gatewayLastRequestMethod: observation.lastRequestMethod,
       gatewayLastResponseEndpoint: observation.lastResponseEndpoint,
       gatewayLastResponseMethod: observation.lastResponseMethod,
+      widgetDocumentRequestCount:
+        observation.widgetResourceRequestCounts.document,
+      widgetScriptRequestCount: observation.widgetResourceRequestCounts.script,
+      widgetStylesheetRequestCount:
+        observation.widgetResourceRequestCounts.stylesheet,
+      widgetDocumentFailureCount:
+        observation.widgetResourceFailureCounts.document,
+      widgetScriptFailureCount: observation.widgetResourceFailureCounts.script,
+      widgetStylesheetFailureCount:
+        observation.widgetResourceFailureCounts.stylesheet,
+      openIdRequestCount: observation.openIdRequestCount,
+      openIdOptionsRequestCount: observation.openIdOptionsRequestCount,
+      openIdFailedRequestCount: observation.openIdFailedRequestCount,
+      openIdLastRequestMethod: observation.openIdLastRequestMethod,
       ...(observation.lastResponseStatus === undefined
         ? {}
         : { gatewayLastResponseStatus: observation.lastResponseStatus }),
+      ...(observation.widgetResourceLastStatuses.document === undefined
+        ? {}
+        : {
+            widgetDocumentLastStatus:
+              observation.widgetResourceLastStatuses.document,
+          }),
+      ...(observation.widgetResourceLastStatuses.script === undefined
+        ? {}
+        : {
+            widgetScriptLastStatus:
+              observation.widgetResourceLastStatuses.script,
+          }),
+      ...(observation.widgetResourceLastStatuses.stylesheet === undefined
+        ? {}
+        : {
+            widgetStylesheetLastStatus:
+              observation.widgetResourceLastStatuses.stylesheet,
+          }),
+      ...(observation.openIdLastResponseStatus === undefined
+        ? {}
+        : { openIdLastResponseStatus: observation.openIdLastResponseStatus }),
       iframeObservationAvailable: observation.iframeObservationAvailable,
       iframeGatewayBaseOriginMatches:
         observation.iframeGatewayBaseOriginMatches,
       iframeRoomIdMatches: observation.iframeRoomIdMatches,
+      widgetFrameAvailable: observation.widgetFrameAvailable,
+      widgetDocumentReadyState: observation.widgetDocumentReadyState,
+      widgetRootHasChildren: observation.widgetRootHasChildren,
+      widgetLoadingVisible: observation.widgetLoadingVisible,
+      widgetMissingCapabilitiesVisible:
+        observation.widgetMissingCapabilitiesVisible,
+      widgetRegistrationErrorVisible:
+        observation.widgetRegistrationErrorVisible,
+      widgetOutsideClientVisible: observation.widgetOutsideClientVisible,
+      widgetChildErrorVisible: observation.widgetChildErrorVisible,
+      widgetPageErrorCount: observation.widgetPageErrorCount,
+      widgetLastPageErrorClass: observation.widgetLastPageErrorClass,
       createEventVisible: observation.createEventVisible,
       identityContinueVisible: observation.identityContinueVisible,
     })}\n`,
