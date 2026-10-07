@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { sanitizeElementAcceptance } from './sanitize-element-acceptance.mjs';
+import {
+  classifyRadicaleStartupLogs,
+  createRadicaleFilesystemEvidence,
+} from './element-acceptance-reminder-restore.mjs';
+import {
+  formatSanitizerFailureSummary,
+  sanitizeElementAcceptance,
+} from './sanitize-element-acceptance.mjs';
 
 const sourceSha = 'a'.repeat(40);
 
@@ -13,6 +20,101 @@ function projectionDiagnosticCounts(overrides = {}) {
     'unsupported-recurrence': 0,
     'unsupported-timezone': 0,
     'range-this-and-future': 0,
+    ...overrides,
+  };
+}
+
+function reminderConfigurationObservation(overrides = {}) {
+  return {
+    phase: 'reminder-room-configuration-enabled',
+    status: 'passed',
+    httpStatus: 200,
+    count: 1,
+    reminderEnabled: true,
+    reminderStep: 'complete',
+    notifyButtonCount: 1,
+    notifyButtonVisible: true,
+    reminderOptionsGetCount: 1,
+    reminderOptionsGetStatus: 200,
+    reminderConfigGetCount: 1,
+    reminderConfigGetStatus: 200,
+    reminderEligibleOptionCount: 1,
+    reminderOptionCheckedBefore: false,
+    reminderOptionCheckAttempted: true,
+    reminderPutCount: 1,
+    reminderPutStatus: 200,
+    reminderOptionCheckedAfter: true,
+    ...overrides,
+  };
+}
+
+function missingReminderOptionObservation() {
+  return {
+    phase: 'reminder-room-configuration-enabled',
+    status: 'failed',
+    httpStatus: 200,
+    reminderEnabled: false,
+    reminderStep: 'eligible-option',
+    notifyButtonCount: 1,
+    notifyButtonVisible: true,
+    reminderOptionsGetCount: 1,
+    reminderOptionsGetStatus: 200,
+    reminderConfigGetCount: 1,
+    reminderConfigGetStatus: 200,
+    reminderEligibleOptionCount: 0,
+    reminderOptionCheckedBefore: false,
+    reminderOptionCheckAttempted: false,
+    reminderPutCount: 0,
+    reminderPutStatus: 0,
+    reminderOptionCheckedAfter: false,
+  };
+}
+
+function radicaleFilesystemEvidence(overrides = {}) {
+  return {
+    restoreRadicaleSourceProbeAvailable: true,
+    restoreRadicaleFilesystemProbeAvailable: true,
+    restoreRadicalePythonVersion: '3.13.13',
+    restoreRadicalePythonVersionMatchesSource: true,
+    restoreRadicaleRuntimeMatchesAccount: true,
+    restoreRadicaleDataUidMatchesSource: true,
+    restoreRadicaleDataGidMatchesSource: true,
+    restoreRadicaleDataModeMatchesSource: true,
+    restoreRadicaleCollectionsUidMatchesSource: true,
+    restoreRadicaleCollectionsGidMatchesSource: true,
+    restoreRadicaleCollectionsModeMatchesSource: true,
+    restoreRadicaleDataRootReadable: true,
+    restoreRadicaleDataRootSearchable: true,
+    restoreRadicaleCollectionsRootReadable: true,
+    restoreRadicaleCollectionsRootSearchable: true,
+    restoreRadicaleCollectionTreeComplete: true,
+    restoreRadicaleCollectionEntryCount: 4,
+    restoreRadicaleCollectionReadSearchFailureCount: 0,
+    ...overrides,
+  };
+}
+
+function radicaleFilesystemProbe(overrides = {}) {
+  return {
+    pythonVersion: '3.13.13',
+    runtimeOwner: true,
+    data: {
+      exists: true,
+      uid: 1000,
+      gid: 1000,
+      mode: 0o755,
+      readable: true,
+      searchable: true,
+    },
+    collections: {
+      exists: true,
+      uid: 1000,
+      gid: 1000,
+      mode: 0o700,
+      readable: true,
+      searchable: true,
+    },
+    tree: { complete: true, entries: 4, accessFailures: 0 },
     ...overrides,
   };
 }
@@ -172,6 +274,477 @@ test('emits only fixed phase names, outcomes, and source SHA', () => {
       '',
     ].join('\n'),
   );
+});
+
+test('summarizes reminder restore gates without exposing backup fingerprints or row counters', () => {
+  const privateChecksum = 'b'.repeat(64);
+  const summary = sanitizeElementAcceptance(
+    [
+      JSON.stringify({
+        phase: 'service-room-ready',
+        status: 'passed',
+        serviceUserJoined: true,
+        powerPolicyVerified: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-delivery-snapshot',
+        status: 'passed',
+        count: 1,
+        attemptCount: 2,
+        deliveryStateSent: true,
+        deliveryClaimClear: true,
+      }),
+      JSON.stringify({
+        phase: 'restore-quiesced',
+        status: 'passed',
+        count: 4,
+        gatewayStoppedGracefully: true,
+        radicaleStoppedGracefully: true,
+        oomFree: true,
+      }),
+      JSON.stringify({
+        phase: 'restore-radicale-backup',
+        status: 'passed',
+        checksum: privateChecksum,
+      }),
+      JSON.stringify({
+        phase: 'restore-targets-prepared',
+        status: 'passed',
+        freshVolume: true,
+        freshDatabase: true,
+        restoreStep: 'complete',
+        restoreVolumeExists: false,
+        restoreDatabaseExists: false,
+        restoreTargetPlanSafe: true,
+        restoreVolumeCreated: true,
+        restoreVolumeEmpty: true,
+        restoreDatabaseCreated: true,
+        restoreArchiveExtracted: true,
+        restoreArchiveEntryCount: 2,
+        restoreArchiveCountProbeValid: true,
+        restorePostgresRestored: true,
+      }),
+      JSON.stringify({
+        phase: 'restore-delivery-row',
+        status: 'passed',
+        count: 1,
+        attemptCount: 2,
+        deliveryStateSent: true,
+        deliveryClaimClear: true,
+        deliveryKeyUnchanged: true,
+        attemptCountUnchanged: true,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+
+  assert.match(summary, /service_user_joined=true power_policy_verified=true/u);
+  assert.match(summary, /gateway_stopped_gracefully=true/u);
+  assert.match(
+    summary,
+    /phase=restore-targets-prepared status=passed restore_step=complete restore_volume_exists=false restore_database_exists=false restore_target_plan_safe=true restore_volume_created=true restore_volume_empty=true restore_database_created=true restore_archive_extracted=true restore_archive_entry_count=2 restore_archive_count_probe_valid=true restore_postgres_restored=true fresh_volume=true fresh_database=true/u,
+  );
+  assert.match(
+    summary,
+    /delivery_key_unchanged=true attempt_count_unchanged=true/u,
+  );
+  assert.doesNotMatch(summary, /b{64}|attempt_count=2/u);
+});
+
+test('reports only an allowlisted rejection category and phase when a summary is invalid', () => {
+  let failure;
+  try {
+    sanitizeElementAcceptance(
+      JSON.stringify({
+        phase: 'restore-targets-prepared',
+        status: 'failed',
+        restoreStep: 'private-value',
+        credential: 'never-emit-this',
+      }),
+      sourceSha,
+    );
+  } catch (error) {
+    failure = error;
+  }
+
+  assert.equal(failure.category, 'invalid-stage-record');
+  assert.equal(failure.phase, 'restore-targets-prepared');
+  assert.equal(
+    formatSanitizerFailureSummary(failure, sourceSha),
+    `element-acceptance source_sha=${sourceSha}\nphase=summary status=unavailable category=invalid-stage-record rejected_phase=restore-targets-prepared\n`,
+  );
+  assert.doesNotMatch(
+    formatSanitizerFailureSummary(failure, sourceSha),
+    /private-value|never-emit-this|credential/u,
+  );
+  const unexpectedFailure = Object.assign(
+    new Error('secret-bearing exception detail'),
+    { category: 'private-label', phase: 'private-phase' },
+  );
+  assert.equal(
+    formatSanitizerFailureSummary(unexpectedFailure, sourceSha),
+    `element-acceptance source_sha=${sourceSha}\nphase=summary status=unavailable category=summary-unavailable rejected_phase=unknown\n`,
+  );
+  let malformedRecord;
+  try {
+    sanitizeElementAcceptance('{not-json', sourceSha);
+  } catch (error) {
+    malformedRecord = error;
+  }
+  assert.equal(malformedRecord.category, 'invalid-stage-json');
+  assert.equal(malformedRecord.phase, 'unknown');
+});
+
+test('emits bounded restore target failure details without raw command output', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-targets-prepared',
+      status: 'failed',
+      restoreStep: 'volume-create',
+      restoreVolumeExists: false,
+      restoreDatabaseExists: false,
+      restoreTargetPlanSafe: true,
+      restoreVolumeCreated: false,
+      processExitCode: 1,
+    }),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /phase=restore-targets-prepared status=failed restore_step=volume-create restore_volume_exists=false restore_database_exists=false restore_target_plan_safe=true restore_volume_created=false process_exit_code=1/u,
+  );
+  assert.doesNotMatch(summary, /volume name|database name|stderr|password/u);
+});
+
+test('distinguishes an empty restored volume from an invalid entry-count probe', () => {
+  const invalidProbe = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-targets-prepared',
+      status: 'failed',
+      restoreStep: 'restored-volume-count',
+      restoreVolumeExists: false,
+      restoreDatabaseExists: false,
+      restoreTargetPlanSafe: true,
+      restoreVolumeCreated: true,
+      restoreVolumeEmpty: true,
+      restoreDatabaseCreated: true,
+      restoreArchiveExtracted: true,
+      restoreArchiveCountProbeValid: false,
+    }),
+    sourceSha,
+  );
+  const emptyVolume = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-targets-prepared',
+      status: 'failed',
+      restoreStep: 'restored-volume-count',
+      restoreVolumeExists: false,
+      restoreDatabaseExists: false,
+      restoreTargetPlanSafe: true,
+      restoreVolumeCreated: true,
+      restoreVolumeEmpty: true,
+      restoreDatabaseCreated: true,
+      restoreArchiveExtracted: true,
+      restoreArchiveEntryCount: 0,
+      restoreArchiveCountProbeValid: true,
+    }),
+    sourceSha,
+  );
+
+  assert.match(invalidProbe, /restore_archive_count_probe_valid=false/u);
+  assert.doesNotMatch(invalidProbe, /restore_archive_entry_count=/u);
+  assert.match(
+    emptyVolume,
+    /restore_archive_entry_count=0 restore_archive_count_probe_valid=true/u,
+  );
+});
+
+test('requires UI, Matrix delivery, and timeline evidence for reminder recovery', () => {
+  const summary = sanitizeElementAcceptance(
+    [
+      JSON.stringify({
+        phase: 'reminder-widget-context',
+        status: 'passed',
+        httpStatus: 200,
+        canManageReminders: true,
+      }),
+      JSON.stringify(reminderConfigurationObservation()),
+      JSON.stringify({
+        phase: 'reminder-configuration-stored',
+        status: 'passed',
+        count: 1,
+      }),
+      JSON.stringify({
+        phase: 'reminder-event-created',
+        status: 'passed',
+        httpStatus: 201,
+      }),
+      JSON.stringify({
+        phase: 'reminder-event-visible',
+        status: 'passed',
+        httpStatus: 201,
+        count: 1,
+      }),
+      JSON.stringify({
+        phase: 'reminder-alarm-ui-readback',
+        status: 'passed',
+        count: 1,
+        relativeAlarmReadback: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-ui-readback',
+        status: 'passed',
+        count: 1,
+        relativeAlarmReadback: true,
+        reminderEnabled: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-initial-delivery',
+        status: 'passed',
+        httpStatus: 200,
+        count: 1,
+        canaryDelivered: true,
+        roomMentioned: true,
+        deliveredAfterDue: true,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-restart-prior-state',
+        status: 'passed',
+        httpStatus: 200,
+        count: 1,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-restart-scheduler-scan',
+        status: 'passed',
+        httpStatus: 200,
+        count: 2,
+        canaryDelivered: true,
+        roomMentioned: true,
+        deliveredAfterDue: true,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-restart-no-duplicate',
+        status: 'passed',
+        httpStatus: 200,
+        count: 2,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-restore-prior-state',
+        status: 'passed',
+        httpStatus: 200,
+        count: 2,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-restore-scheduler-scan',
+        status: 'passed',
+        httpStatus: 200,
+        count: 3,
+        canaryDelivered: true,
+        roomMentioned: true,
+        deliveredAfterDue: true,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-restore-no-duplicate',
+        status: 'passed',
+        httpStatus: 200,
+        count: 3,
+        allMarkersOnce: true,
+      }),
+      JSON.stringify({
+        phase: 'reminder-browser-egress',
+        status: 'passed',
+        count: 0,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /phase=reminder-event-visible status=passed http_status=201 count=1/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-widget-context status=passed http_status=200 can_manage_reminders=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete notify_button_count=1 notify_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 eligible_option_count=1 option_checked_before=false option_check_attempted=true put_count=1 put_http_status=200 option_checked_after=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-initial-delivery status=passed http_status=200 count=1 canary_delivered=true room_mentioned=true delivered_after_due=true all_markers_once=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-restart-scheduler-scan status=passed http_status=200 count=2/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-restore-scheduler-scan status=passed http_status=200 count=3/u,
+  );
+  assert.match(summary, /phase=reminder-browser-egress status=passed count=0/u);
+
+  for (const record of [
+    {
+      phase: 'reminder-event-visible',
+      status: 'passed',
+      count: 1,
+    },
+    {
+      phase: 'reminder-room-configuration-enabled',
+      status: 'passed',
+      httpStatus: 200,
+      count: 1,
+      reminderEnabled: true,
+    },
+    {
+      phase: 'reminder-event-visible',
+      status: 'passed',
+      httpStatus: 201,
+      count: 0,
+    },
+    {
+      phase: 'reminder-restart-scheduler-scan',
+      status: 'passed',
+      count: 2,
+      canaryDelivered: true,
+      roomMentioned: true,
+      deliveredAfterDue: true,
+      allMarkersOnce: true,
+    },
+    {
+      phase: 'reminder-restore-no-duplicate',
+      status: 'passed',
+      httpStatus: 200,
+      count: 2,
+      allMarkersOnce: true,
+    },
+    {
+      phase: 'reminder-ui-readback',
+      status: 'passed',
+      count: 1,
+      relativeAlarmReadback: true,
+      reminderEnabled: false,
+    },
+    {
+      phase: 'reminder-initial-delivery',
+      status: 'passed',
+      httpStatus: 200,
+      count: 1,
+      canaryDelivered: true,
+      roomMentioned: true,
+      deliveredAfterDue: false,
+      allMarkersOnce: true,
+    },
+    {
+      phase: 'reminder-initial-delivery',
+      status: 'failed',
+      httpStatus: 403,
+      count: 1,
+      eventTitle: 'Reminder acceptance private marker',
+    },
+    reminderConfigurationObservation({ reminderOptionsGetStatus: 999 }),
+    reminderConfigurationObservation({ reminderPutCount: 3 }),
+    reminderConfigurationObservation({ accessToken: 'private-test-token' }),
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      /invalid element acceptance summary/u,
+    );
+  }
+});
+
+test('sanitizes the fixed reminder option failure boundary', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(missingReminderOptionObservation()),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-room-configuration-enabled status=failed reminder_step=eligible-option notify_button_count=1 notify_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 eligible_option_count=0 option_checked_before=false option_check_attempted=false put_count=0 put_http_status=0 option_checked_after=false/u,
+  );
+  assert.doesNotMatch(summary, /https?:|access_token|event_id|error_text/iu);
+});
+
+test('keeps a successful context status distinct from reminder capability', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'reminder-widget-context',
+      status: 'failed',
+      httpStatus: 200,
+      canManageReminders: false,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-widget-context status=failed http_status=200 can_manage_reminders=false/u,
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'reminder-widget-context',
+          status: 'passed',
+          httpStatus: 200,
+          canManageReminders: false,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
+test('rejects incomplete or inconsistent restore evidence', () => {
+  for (const record of [
+    {
+      phase: 'restore-quiesced',
+      status: 'passed',
+      count: 3,
+      gatewayStoppedGracefully: true,
+      radicaleStoppedGracefully: true,
+      oomFree: true,
+    },
+    {
+      phase: 'restore-targets-prepared',
+      status: 'passed',
+      freshVolume: true,
+      freshDatabase: false,
+    },
+    {
+      phase: 'restore-delivery-row',
+      status: 'passed',
+      count: 1,
+      attemptCount: 1,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: false,
+      attemptCountUnchanged: true,
+    },
+    {
+      phase: 'restore-radicale-backup',
+      status: 'passed',
+      checksum: 'not-a-fingerprint',
+    },
+    {
+      phase: 'restore-delivery-row',
+      status: 'failed',
+      password: 'private-value',
+    },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      /invalid element acceptance summary/u,
+    );
+  }
 });
 
 test('requires exact outsider denial status and expected widget room context', () => {
@@ -939,6 +1512,45 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     ].join('\n'),
   );
 
+  const reminderRoomObservation = {
+    ...roomObservation,
+    phase: 'reminder-room-context',
+    failureCode: 'element-room-heading-wait-timeout',
+    roomViewPresent: true,
+    roomHeaderPresent: false,
+    roomHeadingDomPresent: false,
+    roomInfoControlPresent: false,
+    fixtureCalendarIframePresent: false,
+    reminderWidgetContextResponseCount: 0,
+  };
+  const incompleteRoomLayoutObservation = { ...reminderRoomObservation };
+  delete incompleteRoomLayoutObservation.fixtureCalendarIframePresent;
+  assert.equal(
+    sanitizeElementAcceptance(
+      JSON.stringify(reminderRoomObservation),
+      sourceSha,
+    ),
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=reminder-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true room_view_present=true room_header_present=false room_heading_dom_present=false room_info_control_present=false fixture_calendar_iframe_present=false reminder_widget_context_response_count=0 blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-heading-wait-timeout',
+      '',
+    ].join('\n'),
+  );
+  const deniedWidgetContext = sanitizeElementAcceptance(
+    JSON.stringify({
+      ...reminderRoomObservation,
+      reminderWidgetContextResponseCount: 1,
+      reminderWidgetContextResponseStatus: 403,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    deniedWidgetContext,
+    /reminder_widget_context_response_count=1 reminder_widget_context_response_status=403/u,
+  );
+  const missingWidgetContextStatus = { ...reminderRoomObservation };
+  missingWidgetContextStatus.reminderWidgetContextResponseCount = 1;
+
   const invalidRecords = [
     { ...roomObservation, matrixUserMatches: '@member:private-server' },
     { ...roomObservation, matrixSyncState: 'token=secret' },
@@ -946,12 +1558,43 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     { ...roomObservation, homeserverLastHttpErrorStatus: '500 /sync?token=x' },
     { ...roomObservation, failureCode: 'room name: private meeting' },
     { ...roomObservation, roomName: 'private meeting' },
+    { ...roomObservation, roomViewPresent: true },
+    incompleteRoomLayoutObservation,
+    { ...reminderRoomObservation, roomInfoControlPresent: 'present' },
+    { ...reminderRoomObservation, reminderWidgetContextResponseCount: 2 },
+    missingWidgetContextStatus,
+    {
+      ...reminderRoomObservation,
+      reminderWidgetContextResponseStatus: 403,
+    },
+    { ...roomObservation, reminderWidgetContextResponseCount: 0 },
   ];
   for (const record of invalidRecords) {
     assert.throws(() =>
       sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
     );
   }
+});
+
+test('preserves reminder context response evidence when room observation is unavailable', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'reminder-room-context',
+      status: 'failed',
+      failureCode: 'element-room-observation-unavailable',
+      reminderWidgetContextResponseCount: 0,
+    }),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=reminder-room-context status=failed reminder_widget_context_response_count=0 failure_code=element-room-observation-unavailable',
+      '',
+    ].join('\n'),
+  );
 });
 
 test('keeps an unavailable Matrix session sample non-gating and empty', () => {
@@ -1037,6 +1680,315 @@ test('emits allowlisted gateway container state without exposing its error text'
       'phase=gateway-ready status=failed failure_code=gateway-matrix-connect-failed container_state=exited container_health=none container_exit_code=1 container_oom_killed=false container_runtime_error_present=true',
       '',
     ].join('\n'),
+  );
+});
+
+test('emits only fixed Radicale readiness state after an unanswered probe', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      restoreRadicaleContainerHttpOutcome: 'http-status',
+      restoreRadicaleContainerHttpStatus: 401,
+      restoreRadicalePublishedPortBinding: 'loopback-5233',
+      containerState: 'running',
+      containerHealth: 'none',
+      containerOomKilled: false,
+      containerRuntimeErrorPresent: false,
+    }),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=restore-radicale-ready status=failed container_state=running container_health=none container_oom_killed=false container_runtime_error_present=false restore_radicale_probe_outcome=no-response radicale_container_http_outcome=http-status radicale_published_port_binding=loopback-5233 radicale_container_http_status=401',
+      '',
+    ].join('\n'),
+  );
+
+  const unavailableListenerSummary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      restoreRadicaleContainerHttpOutcome: 'unavailable',
+      restoreRadicalePublishedPortBinding: 'other',
+      containerState: 'running',
+      containerHealth: 'none',
+      containerOomKilled: false,
+      containerRuntimeErrorPresent: false,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    unavailableListenerSummary,
+    /radicale_container_http_outcome=unavailable radicale_published_port_binding=other/u,
+  );
+
+  assert.throws(() =>
+    sanitizeElementAcceptance(
+      JSON.stringify({
+        phase: 'restore-radicale-ready',
+        status: 'failed',
+        restoreRadicaleProbeOutcome: 'no-response',
+        restoreRadicaleContainerHttpOutcome: 'no-response',
+        restoreRadicaleContainerHttpStatus: 401,
+        restoreRadicalePublishedPortBinding: 'loopback-5233',
+        containerState: 'running',
+        containerHealth: 'none',
+        containerOomKilled: false,
+        containerRuntimeErrorPresent: false,
+      }),
+      sourceSha,
+    ),
+  );
+
+  const httpStatusSummary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      httpStatus: 503,
+      restoreRadicaleProbeOutcome: 'http-status',
+      containerState: 'exited',
+      containerHealth: 'none',
+      containerExitCode: 1,
+      containerOomKilled: false,
+      containerRuntimeErrorPresent: true,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    httpStatusSummary,
+    /phase=restore-radicale-ready status=failed http_status=503 container_state=exited container_health=none container_exit_code=1 container_oom_killed=false container_runtime_error_present=true restore_radicale_probe_outcome=http-status/u,
+  );
+
+  const redirectReadinessSummary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-radicale-ready',
+      status: 'passed',
+      httpStatus: 302,
+    }),
+    sourceSha,
+  );
+  assert.equal(
+    redirectReadinessSummary,
+    `element-acceptance source_sha=${sourceSha}\nphase=restore-radicale-ready status=passed http_status=302\n`,
+  );
+  assert.throws(() =>
+    sanitizeElementAcceptance(
+      JSON.stringify({
+        phase: 'restore-radicale-ready',
+        status: 'passed',
+        httpStatus: 301,
+      }),
+      sourceSha,
+    ),
+  );
+});
+
+test('classifies only fixed Radicale startup signatures and sanitizes the evidence', () => {
+  const rawLog =
+    'An exception occurred during server startup: Radicale OpenID homeserver URL is invalid; token=private-value';
+  const evidence = classifyRadicaleStartupLogs(rawLog);
+  assert.deepEqual(evidence, {
+    restoreRadicaleStartupSignature: 'plugin-config-invalid',
+    restoreRadicaleLogsAvailable: true,
+    restoreRadicaleStartupExceptionPresent: true,
+    restoreRadicaleReadyMarkerPresent: false,
+    restoreRadicaleStartupExceptionClass: 'other',
+    restoreRadicaleStartupErrno: 'none',
+    restoreRadicaleStartupPathBucket: 'none',
+  });
+  assert.equal(JSON.stringify(evidence).includes('private-value'), false);
+
+  const sourceProbe = radicaleFilesystemProbe();
+  const restoredProbe = radicaleFilesystemProbe();
+  const filesystemEvidence = createRadicaleFilesystemEvidence(
+    sourceProbe,
+    restoredProbe,
+  );
+  assert.deepEqual(filesystemEvidence, radicaleFilesystemEvidence());
+
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      containerExitCode: 1,
+      containerOomKilled: false,
+      containerRuntimeErrorPresent: false,
+      ...evidence,
+      ...filesystemEvidence,
+    }),
+    sourceSha,
+  );
+  assert.match(summary, /radicale_startup_signature=plugin-config-invalid/u);
+  assert.match(summary, /radicale_logs_available=true/u);
+  assert.match(summary, /radicale_startup_exception_present=true/u);
+  assert.match(summary, /radicale_ready_marker_present=false/u);
+  assert.match(summary, /radicale_startup_exception_class=other/u);
+  assert.match(summary, /radicale_startup_errno=none/u);
+  assert.match(summary, /radicale_startup_path_bucket=none/u);
+  assert.match(summary, /radicale_python_version=3\.13\.13/u);
+  assert.match(summary, /radicale_runtime_matches_account=true/u);
+  assert.match(summary, /radicale_probe_mount=readonly/u);
+  assert.match(summary, /radicale_collections_root_readable=true/u);
+  assert.match(summary, /radicale_collections_root_searchable=true/u);
+  assert.equal(summary.includes('writable'), false);
+  assert.equal(summary.includes('private-value'), false);
+
+  const metadataMismatch = createRadicaleFilesystemEvidence(
+    sourceProbe,
+    radicaleFilesystemProbe({
+      pythonVersion: '3.14.0',
+      collections: {
+        ...restoredProbe.collections,
+        uid: 1001,
+        readable: false,
+      },
+      tree: { complete: false, entries: 4, accessFailures: 1 },
+    }),
+  );
+  assert.equal(
+    metadataMismatch.restoreRadicalePythonVersionMatchesSource,
+    false,
+  );
+  assert.equal(
+    metadataMismatch.restoreRadicaleCollectionsUidMatchesSource,
+    false,
+  );
+  assert.equal(metadataMismatch.restoreRadicaleCollectionsRootReadable, false);
+  assert.equal(metadataMismatch.restoreRadicaleCollectionTreeComplete, false);
+  assert.equal(
+    metadataMismatch.restoreRadicaleCollectionReadSearchFailureCount,
+    1,
+  );
+
+  const unavailableTargetEvidence = createRadicaleFilesystemEvidence(
+    sourceProbe,
+    undefined,
+  );
+  assert.equal(
+    unavailableTargetEvidence.restoreRadicaleFilesystemProbeAvailable,
+    false,
+  );
+  assert.equal(
+    unavailableTargetEvidence.restoreRadicaleCollectionEntryCount,
+    0,
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'restore-radicale-ready',
+          status: 'failed',
+          restoreRadicaleProbeOutcome: 'no-response',
+          containerState: 'exited',
+          containerHealth: 'none',
+          ...evidence,
+          ...unavailableTargetEvidence,
+          restoreRadicaleCollectionEntryCount: 1,
+        }),
+        sourceSha,
+      ),
+    { message: 'invalid element acceptance summary' },
+  );
+
+  const filesystemHint = classifyRadicaleStartupLogs(
+    "An exception occurred during server startup: PermissionError: [Errno 13] Permission denied: '/data/collections/private-name'",
+  );
+  assert.equal(
+    filesystemHint.restoreRadicaleStartupExceptionClass,
+    'permission-error',
+  );
+  assert.equal(filesystemHint.restoreRadicaleStartupErrno, 'eacces');
+  assert.equal(filesystemHint.restoreRadicaleStartupPathBucket, 'collections');
+  assert.equal(JSON.stringify(filesystemHint).includes('private-name'), false);
+  const filesystemHintSummary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      ...filesystemHint,
+    }),
+    sourceSha,
+  );
+  assert.match(filesystemHintSummary, /radicale_startup_errno=eacces/u);
+  assert.match(
+    filesystemHintSummary,
+    /radicale_startup_path_bucket=collections/u,
+  );
+  assert.equal(filesystemHintSummary.includes('private-name'), false);
+
+  assert.deepEqual(classifyRadicaleStartupLogs('unrecognized startup output'), {
+    restoreRadicaleStartupSignature: 'unclassified',
+    restoreRadicaleLogsAvailable: true,
+    restoreRadicaleStartupExceptionPresent: false,
+    restoreRadicaleReadyMarkerPresent: false,
+    restoreRadicaleStartupExceptionClass: 'none',
+    restoreRadicaleStartupErrno: 'none',
+    restoreRadicaleStartupPathBucket: 'none',
+  });
+  assert.deepEqual(classifyRadicaleStartupLogs(undefined), {
+    restoreRadicaleStartupSignature: 'unavailable',
+    restoreRadicaleLogsAvailable: false,
+    restoreRadicaleStartupExceptionPresent: false,
+    restoreRadicaleReadyMarkerPresent: false,
+    restoreRadicaleStartupExceptionClass: 'unavailable',
+    restoreRadicaleStartupErrno: 'unavailable',
+    restoreRadicaleStartupPathBucket: 'unavailable',
+  });
+
+  const signatures = [
+    ['Invalid configuration: secret=/private/path', 'invalid-configuration'],
+    ['No servers started', 'no-listener'],
+    [
+      "cannot create server socket on '/private/address': address in use",
+      'bind-failed',
+    ],
+    [
+      "cannot retrieve IPv4 or IPv6 address of '/private/address': failed",
+      'address-resolution-failed',
+    ],
+    [
+      "An exception occurred during server startup: PermissionError: [Errno 13] Permission denied: '/private/path'; token=private-value",
+      'filesystem-permission',
+    ],
+    [
+      "An exception occurred during server startup: OSError: [Errno 30] Read-only file system: '/private/path'",
+      'filesystem-readonly',
+    ],
+    [
+      "An exception occurred during server startup: FileNotFoundError: [Errno 2] No such file or directory: '/private/path'",
+      'filesystem-missing-path',
+    ],
+    [
+      "An exception occurred during server startup: ModuleNotFoundError: No module named 'private-module'",
+      'module-import-failed',
+    ],
+    [
+      'An exception occurred during server startup: private exception text',
+      'startup-exception',
+    ],
+  ];
+  for (const [logText, expectedSignature] of signatures) {
+    const classified = classifyRadicaleStartupLogs(logText);
+    assert.equal(classified.restoreRadicaleStartupSignature, expectedSignature);
+    assert.equal(JSON.stringify(classified).includes('/private'), false);
+    assert.equal(JSON.stringify(classified).includes('private-value'), false);
+    assert.equal(JSON.stringify(classified).includes('private-module'), false);
+  }
+  assert.equal(
+    classifyRadicaleStartupLogs('Radicale server ready')
+      .restoreRadicaleReadyMarkerPresent,
+    true,
   );
 });
 
@@ -1339,6 +2291,113 @@ test('rejects unsafe container diagnostics and diagnostics on other phases', () 
       phase: 'gateway-ready',
       status: 'failed',
       failureCode: 'startup-output=secret',
+      containerState: 'running',
+      containerHealth: 'none',
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      httpStatus: 503,
+      containerState: 'running',
+      containerHealth: 'none',
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'http-status',
+      containerState: 'running',
+      containerHealth: 'none',
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      restoreRadicaleStartupSignature: 'password=secret',
+      restoreRadicaleLogsAvailable: true,
+      restoreRadicaleStartupExceptionPresent: false,
+      restoreRadicaleReadyMarkerPresent: false,
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      ...classifyRadicaleStartupLogs('unrecognized output'),
+      ...radicaleFilesystemEvidence({
+        restoreRadicalePythonVersion: '3.13.13;token=private',
+      }),
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      ...classifyRadicaleStartupLogs('unrecognized output'),
+      ...radicaleFilesystemEvidence({ privatePath: '/private/collection' }),
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      ...classifyRadicaleStartupLogs('unrecognized output'),
+      restoreRadicaleStartupErrno: '/private/path',
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      ...classifyRadicaleStartupLogs('unrecognized output'),
+      ...radicaleFilesystemEvidence({
+        restoreRadicaleSourceProbeAvailable: false,
+      }),
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      restoreRadicaleStartupSignature: 'unavailable',
+      restoreRadicaleLogsAvailable: false,
+      restoreRadicaleStartupExceptionPresent: true,
+      restoreRadicaleReadyMarkerPresent: false,
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+      containerState: 'exited',
+      containerHealth: 'none',
+      restoreRadicaleStartupSignature: 'unclassified',
+      restoreRadicaleLogsAvailable: true,
+      restoreRadicaleStartupExceptionPresent: false,
+    },
+    {
+      phase: 'restore-targets-prepared',
+      status: 'failed',
+      restoreRadicaleStartupSignature: 'unclassified',
+      restoreRadicaleLogsAvailable: true,
+      restoreRadicaleStartupExceptionPresent: false,
+      restoreRadicaleReadyMarkerPresent: false,
+    },
+    {
+      phase: 'restore-radicale-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
+    },
+    {
+      phase: 'gateway-ready',
+      status: 'failed',
+      restoreRadicaleProbeOutcome: 'no-response',
       containerState: 'running',
       containerHealth: 'none',
     },

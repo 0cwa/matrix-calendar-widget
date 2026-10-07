@@ -14,6 +14,7 @@ const RUNTIME_DEPENDENCIES = loadRuntimeDependencyAllowlist(
 const PHASES = new Set([
   'accounts-ready',
   'service-calendar-ready',
+  'service-room-ready',
   'room-ready',
   'widget-registered',
   'runtime-ready',
@@ -72,7 +73,147 @@ const PHASES = new Set([
   'canonical-read-after-denial',
   'browser-egress',
   'runtime-versions',
+  'reminder-compose-validation',
+  'reminder-postgres-ready',
+  'reminder-role-verified',
+  'reminder-gateway-migrated',
+  'reminder-configuration-stored',
+  'reminder-delivery-snapshot',
+  'reminder-gateway-restarted',
+  'reminder-restart-delivery-row',
+  'restore-quiesced',
+  'restore-radicale-backup',
+  'restore-postgres-backup',
+  'restore-targets-prepared',
+  'restore-radicale-ready',
+  'restore-postgres-role-ready',
+  'restore-gateway-ready',
+  'restore-element-ready',
+  'restore-delivery-row',
+  'reminder-browser-egress',
+  'reminder-room-context',
+  'reminder-widget-context',
+  'reminder-event-create-dialog',
+  'reminder-event-created',
+  'reminder-event-visible',
+  'reminder-alarm-ui-readback',
+  'reminder-room-configuration-enabled',
+  'reminder-ui-readback',
+  'reminder-initial-delivery',
+  'reminder-restart-prior-state',
+  'reminder-restart-scheduler-scan',
+  'reminder-restart-no-duplicate',
+  'reminder-restore-prior-state',
+  'reminder-restore-scheduler-scan',
+  'reminder-restore-no-duplicate',
 ]);
+const ROOM_CONTEXT_PHASES = new Set([
+  'member-a-room-context',
+  'reminder-room-context',
+]);
+const REMINDER_ROOM_LAYOUT_FIELDS = [
+  'roomViewPresent',
+  'roomHeaderPresent',
+  'roomHeadingDomPresent',
+  'roomInfoControlPresent',
+  'fixtureCalendarIframePresent',
+];
+const REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS = [
+  'reminderWidgetContextResponseCount',
+  'reminderWidgetContextResponseStatus',
+];
+const PHASE_BOOLEAN_FIELDS = new Map([
+  ['service-room-ready', ['serviceUserJoined', 'powerPolicyVerified']],
+  ['reminder-role-verified', ['rolePolicyVerified']],
+  ['reminder-widget-context', ['canManageReminders']],
+  ['reminder-alarm-ui-readback', ['relativeAlarmReadback']],
+  ['reminder-room-configuration-enabled', ['reminderEnabled']],
+  ['reminder-ui-readback', ['relativeAlarmReadback', 'reminderEnabled']],
+  [
+    'reminder-initial-delivery',
+    ['canaryDelivered', 'roomMentioned', 'deliveredAfterDue', 'allMarkersOnce'],
+  ],
+  [
+    'reminder-restart-scheduler-scan',
+    ['canaryDelivered', 'roomMentioned', 'deliveredAfterDue', 'allMarkersOnce'],
+  ],
+  [
+    'reminder-restore-scheduler-scan',
+    ['canaryDelivered', 'roomMentioned', 'deliveredAfterDue', 'allMarkersOnce'],
+  ],
+  ['reminder-restart-no-duplicate', ['allMarkersOnce']],
+  ['reminder-restart-prior-state', ['allMarkersOnce']],
+  ['reminder-restore-no-duplicate', ['allMarkersOnce']],
+  ['reminder-restore-prior-state', ['allMarkersOnce']],
+  ['reminder-delivery-snapshot', ['deliveryStateSent', 'deliveryClaimClear']],
+  [
+    'reminder-restart-delivery-row',
+    [
+      'deliveryStateSent',
+      'deliveryClaimClear',
+      'deliveryKeyUnchanged',
+      'attemptCountUnchanged',
+    ],
+  ],
+  [
+    'restore-quiesced',
+    ['gatewayStoppedGracefully', 'radicaleStoppedGracefully', 'oomFree'],
+  ],
+  ['restore-targets-prepared', ['freshVolume', 'freshDatabase']],
+  ['restore-postgres-role-ready', ['rolePolicyVerified']],
+  [
+    'restore-delivery-row',
+    [
+      'deliveryStateSent',
+      'deliveryClaimClear',
+      'deliveryKeyUnchanged',
+      'attemptCountUnchanged',
+    ],
+  ],
+]);
+const REMINDER_DELIVERY_PHASES = new Set([
+  'reminder-delivery-snapshot',
+  'reminder-restart-delivery-row',
+  'restore-delivery-row',
+]);
+const REMINDER_TIMELINE_COUNTS = new Map([
+  ['reminder-initial-delivery', 1],
+  ['reminder-restart-prior-state', 1],
+  ['reminder-restart-scheduler-scan', 2],
+  ['reminder-restart-no-duplicate', 2],
+  ['reminder-restore-prior-state', 2],
+  ['reminder-restore-scheduler-scan', 3],
+  ['reminder-restore-no-duplicate', 3],
+]);
+const PRIVATE_CHECKSUM_PHASES = new Set([
+  'restore-radicale-backup',
+  'restore-postgres-backup',
+]);
+const RESTORE_TARGET_STEPS = new Set([
+  'target-volume-check',
+  'target-database-check',
+  'target-plan-check',
+  'volume-create',
+  'volume-empty-check',
+  'database-create',
+  'archive-extract',
+  'restored-volume-count',
+  'postgres-restore',
+  'complete',
+]);
+const RESTORE_TARGET_DIAGNOSTIC_FIELDS = [
+  'restoreStep',
+  'restoreVolumeExists',
+  'restoreDatabaseExists',
+  'restoreTargetPlanSafe',
+  'restoreVolumeCreated',
+  'restoreVolumeEmpty',
+  'restoreDatabaseCreated',
+  'restoreArchiveExtracted',
+  'restoreArchiveEntryCount',
+  'restoreArchiveCountProbeValid',
+  'restorePostgresRestored',
+];
 const PINNED_WIDGET_CONTROL_PHASES = new Set([
   'widget-a-room-info-button',
   'widget-a-extensions-menuitem',
@@ -83,6 +224,12 @@ const PINNED_WIDGET_PANEL_PHASES = new Set([
   'widget-a-extension-row',
 ]);
 const STATUSES = new Set(['started', 'passed', 'failed', 'unavailable']);
+const SUMMARY_FAILURE_CATEGORIES = new Set([
+  'invalid-source-sha',
+  'invalid-stage-json',
+  'invalid-stage-record',
+  'summary-unavailable',
+]);
 const BLOCKED_REQUEST_ACTORS = new Set(['member-a', 'member-b', 'outsider']);
 const BLOCKED_REQUEST_CLASSES = new Set([
   'fixture-host-origin-mismatch',
@@ -149,6 +296,95 @@ const CONTAINER_HEALTH_STATES = new Set([
   'unhealthy',
   'none',
   'unavailable',
+]);
+const RESTORE_RADICALE_PROBE_OUTCOMES = new Set(['no-response', 'http-status']);
+const RESTORE_RADICALE_CONTAINER_HTTP_OUTCOMES = new Set([
+  'unavailable',
+  'no-response',
+  'http-status',
+]);
+const RESTORE_RADICALE_PUBLISHED_PORT_BINDINGS = new Set([
+  'unavailable',
+  'other',
+  'loopback-5233',
+]);
+const RESTORE_RADICALE_FILESYSTEM_FIELDS = [
+  'restoreRadicaleSourceProbeAvailable',
+  'restoreRadicaleFilesystemProbeAvailable',
+  'restoreRadicalePythonVersion',
+  'restoreRadicalePythonVersionMatchesSource',
+  'restoreRadicaleRuntimeMatchesAccount',
+  'restoreRadicaleDataUidMatchesSource',
+  'restoreRadicaleDataGidMatchesSource',
+  'restoreRadicaleDataModeMatchesSource',
+  'restoreRadicaleCollectionsUidMatchesSource',
+  'restoreRadicaleCollectionsGidMatchesSource',
+  'restoreRadicaleCollectionsModeMatchesSource',
+  'restoreRadicaleDataRootReadable',
+  'restoreRadicaleDataRootSearchable',
+  'restoreRadicaleCollectionsRootReadable',
+  'restoreRadicaleCollectionsRootSearchable',
+  'restoreRadicaleCollectionTreeComplete',
+  'restoreRadicaleCollectionEntryCount',
+  'restoreRadicaleCollectionReadSearchFailureCount',
+];
+const RESTORE_RADICALE_FILESYSTEM_BOOLEAN_FIELDS = [
+  'restoreRadicaleSourceProbeAvailable',
+  'restoreRadicaleFilesystemProbeAvailable',
+  'restoreRadicalePythonVersionMatchesSource',
+  'restoreRadicaleRuntimeMatchesAccount',
+  'restoreRadicaleDataUidMatchesSource',
+  'restoreRadicaleDataGidMatchesSource',
+  'restoreRadicaleDataModeMatchesSource',
+  'restoreRadicaleCollectionsUidMatchesSource',
+  'restoreRadicaleCollectionsGidMatchesSource',
+  'restoreRadicaleCollectionsModeMatchesSource',
+  'restoreRadicaleDataRootReadable',
+  'restoreRadicaleDataRootSearchable',
+  'restoreRadicaleCollectionsRootReadable',
+  'restoreRadicaleCollectionsRootSearchable',
+  'restoreRadicaleCollectionTreeComplete',
+];
+const RESTORE_RADICALE_STARTUP_EXCEPTION_CLASSES = new Set([
+  'unavailable',
+  'none',
+  'permission-error',
+  'missing-path-error',
+  'module-not-found',
+  'import-error',
+  'os-error',
+  'other',
+]);
+const RESTORE_RADICALE_STARTUP_ERRNOS = new Set([
+  'unavailable',
+  'none',
+  'eacces',
+  'erofs',
+  'enoent',
+  'other',
+]);
+const RESTORE_RADICALE_STARTUP_PATH_BUCKETS = new Set([
+  'unavailable',
+  'none',
+  'collections',
+  'data-root',
+  'config',
+  'plugin',
+  'other-path',
+]);
+const RESTORE_RADICALE_STARTUP_SIGNATURES = new Set([
+  'unavailable',
+  'unclassified',
+  'plugin-config-invalid',
+  'invalid-configuration',
+  'module-import-failed',
+  'filesystem-permission',
+  'filesystem-readonly',
+  'filesystem-missing-path',
+  'no-listener',
+  'bind-failed',
+  'address-resolution-failed',
+  'startup-exception',
 ]);
 const MATRIX_SYNC_STATES = new Set([
   'ERROR',
@@ -313,6 +549,41 @@ const POST_CREATE_VISIBILITY_COUNTER_FIELDS = [
   'roomListResponseEventCount',
   'matchingListItemCount',
 ];
+const REMINDER_CONFIGURATION_STEPS = new Set([
+  'event-details',
+  'notify-control',
+  'options-load',
+  'eligible-option',
+  'put-response',
+  'complete',
+]);
+const REMINDER_CONFIGURATION_FIELDS = [
+  'reminderStep',
+  'notifyButtonCount',
+  'notifyButtonVisible',
+  'reminderOptionsGetCount',
+  'reminderOptionsGetStatus',
+  'reminderConfigGetCount',
+  'reminderConfigGetStatus',
+  'reminderEligibleOptionCount',
+  'reminderOptionCheckedBefore',
+  'reminderOptionCheckAttempted',
+  'reminderPutCount',
+  'reminderPutStatus',
+  'reminderOptionCheckedAfter',
+];
+const REMINDER_CONFIGURATION_COUNTER_FIELDS = [
+  'notifyButtonCount',
+  'reminderOptionsGetCount',
+  'reminderConfigGetCount',
+  'reminderEligibleOptionCount',
+  'reminderPutCount',
+];
+const REMINDER_CONFIGURATION_STATUS_FIELDS = [
+  'reminderOptionsGetStatus',
+  'reminderConfigGetStatus',
+  'reminderPutStatus',
+];
 const RUNTIME_COUNTER_FIELDS = [
   'gatewayContextRequestCount',
   'gatewayCalendarsRequestCount',
@@ -357,6 +628,8 @@ const ALLOWED_KEYS = new Set([
   'roomHeadingPresent',
   'roomNameMatches',
   'roomIdMatches',
+  ...REMINDER_ROOM_LAYOUT_FIELDS,
+  ...REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS,
   'blockedExternalRequestCount',
   'homeserverHttpErrorCount',
   'homeserverLastHttpErrorStatus',
@@ -364,14 +637,49 @@ const ALLOWED_KEYS = new Set([
   'missingModuleKind',
   'missingDependency',
   'processExitCode',
+  'serviceUserJoined',
+  'powerPolicyVerified',
+  'rolePolicyVerified',
+  'deliveryStateSent',
+  'deliveryClaimClear',
+  'deliveryKeyUnchanged',
+  'attemptCountUnchanged',
+  'relativeAlarmReadback',
+  'reminderEnabled',
+  'canaryDelivered',
+  'roomMentioned',
+  'deliveredAfterDue',
+  'allMarkersOnce',
+  'attemptCount',
+  'checksum',
+  'gatewayStoppedGracefully',
+  'radicaleStoppedGracefully',
+  'oomFree',
+  'freshVolume',
+  'freshDatabase',
+  ...RESTORE_TARGET_DIAGNOSTIC_FIELDS,
   'containerState',
   'containerHealth',
   'containerExitCode',
   'containerOomKilled',
   'containerRuntimeErrorPresent',
+  'restoreRadicaleProbeOutcome',
+  'restoreRadicaleContainerHttpOutcome',
+  'restoreRadicaleContainerHttpStatus',
+  'restoreRadicalePublishedPortBinding',
+  'restoreRadicaleStartupSignature',
+  'restoreRadicaleLogsAvailable',
+  'restoreRadicaleStartupExceptionPresent',
+  'restoreRadicaleReadyMarkerPresent',
+  ...RESTORE_RADICALE_FILESYSTEM_FIELDS,
+  'restoreRadicaleStartupExceptionClass',
+  'restoreRadicaleStartupErrno',
+  'restoreRadicaleStartupPathBucket',
   ...RUNTIME_OBSERVATION_FIELDS,
   ...OPTIONAL_RUNTIME_STATUS_FIELDS,
   ...POST_CREATE_VISIBILITY_FIELDS,
+  'canManageReminders',
+  ...REMINDER_CONFIGURATION_FIELDS,
   ...VERSION_FIELDS,
 ]);
 
@@ -530,6 +838,62 @@ function validRuntimeObservation(record) {
   return true;
 }
 
+function validRestoreRadicaleFilesystemEvidence(record) {
+  const present = RESTORE_RADICALE_FILESYSTEM_FIELDS.some((key) =>
+    Object.hasOwn(record, key),
+  );
+  if (!present) return true;
+  if (
+    record.phase !== 'restore-radicale-ready' ||
+    !['passed', 'failed'].includes(record.status) ||
+    !RESTORE_RADICALE_FILESYSTEM_FIELDS.every((key) =>
+      Object.hasOwn(record, key),
+    ) ||
+    RESTORE_RADICALE_FILESYSTEM_BOOLEAN_FIELDS.some(
+      (key) => typeof record[key] !== 'boolean',
+    ) ||
+    !Number.isInteger(record.restoreRadicaleCollectionEntryCount) ||
+    record.restoreRadicaleCollectionEntryCount < 0 ||
+    record.restoreRadicaleCollectionEntryCount > 512 ||
+    !Number.isInteger(record.restoreRadicaleCollectionReadSearchFailureCount) ||
+    record.restoreRadicaleCollectionReadSearchFailureCount < 0 ||
+    record.restoreRadicaleCollectionReadSearchFailureCount > 2 ||
+    (record.restoreRadicaleFilesystemProbeAvailable
+      ? !/^\d+\.\d+\.\d+$/u.test(record.restoreRadicalePythonVersion)
+      : record.restoreRadicalePythonVersion !== 'unavailable')
+  ) {
+    return false;
+  }
+
+  const metadataMatches = [
+    'restoreRadicalePythonVersionMatchesSource',
+    'restoreRadicaleDataUidMatchesSource',
+    'restoreRadicaleDataGidMatchesSource',
+    'restoreRadicaleDataModeMatchesSource',
+    'restoreRadicaleCollectionsUidMatchesSource',
+    'restoreRadicaleCollectionsGidMatchesSource',
+    'restoreRadicaleCollectionsModeMatchesSource',
+  ];
+  const targetAccess = [
+    'restoreRadicaleRuntimeMatchesAccount',
+    'restoreRadicaleDataRootReadable',
+    'restoreRadicaleDataRootSearchable',
+    'restoreRadicaleCollectionsRootReadable',
+    'restoreRadicaleCollectionsRootSearchable',
+    'restoreRadicaleCollectionTreeComplete',
+  ];
+
+  return (
+    ((record.restoreRadicaleSourceProbeAvailable &&
+      record.restoreRadicaleFilesystemProbeAvailable) ||
+      metadataMatches.every((key) => !record[key])) &&
+    (record.restoreRadicaleFilesystemProbeAvailable ||
+      (targetAccess.every((key) => !record[key]) &&
+        record.restoreRadicaleCollectionEntryCount === 0 &&
+        record.restoreRadicaleCollectionReadSearchFailureCount === 0))
+  );
+}
+
 function validPostCreateVisibilityObservation(record) {
   const expectedKeys = new Set([
     'phase',
@@ -611,6 +975,73 @@ function validPostCreateVisibilityObservation(record) {
     (!record.roomListResponseCalendarMatches ||
       record.roomListResponseTitleMatches) &&
     (record.matchingListItemCount === 0 || record.listViewHeadingPresent)
+  );
+}
+
+function validReminderConfigurationObservation(record) {
+  const expectedKeys = new Set([
+    'phase',
+    'status',
+    ...['httpStatus', 'count'].filter((key) => Object.hasOwn(record, key)),
+    'reminderEnabled',
+    ...REMINDER_CONFIGURATION_FIELDS,
+  ]);
+  return (
+    Object.keys(record).length === expectedKeys.size &&
+    Object.keys(record).every((key) => expectedKeys.has(key)) &&
+    (record.status === 'passed' || record.status === 'failed') &&
+    typeof record.reminderEnabled === 'boolean' &&
+    REMINDER_CONFIGURATION_STEPS.has(record.reminderStep) &&
+    REMINDER_CONFIGURATION_COUNTER_FIELDS.every(
+      (key) =>
+        Number.isInteger(record[key]) && record[key] >= 0 && record[key] <= 2,
+    ) &&
+    REMINDER_CONFIGURATION_STATUS_FIELDS.every(
+      (key) =>
+        Number.isInteger(record[key]) &&
+        (record[key] === 0 || (record[key] >= 100 && record[key] <= 599)),
+    ) &&
+    [
+      'notifyButtonVisible',
+      'reminderOptionCheckedBefore',
+      'reminderOptionCheckAttempted',
+      'reminderOptionCheckedAfter',
+    ].every((key) => typeof record[key] === 'boolean') &&
+    (!record.notifyButtonVisible || record.notifyButtonCount === 1) &&
+    (record.reminderOptionsGetCount > 0 ||
+      record.reminderOptionsGetStatus === 0) &&
+    (record.reminderConfigGetCount > 0 ||
+      record.reminderConfigGetStatus === 0) &&
+    (record.reminderPutCount > 0 || record.reminderPutStatus === 0) &&
+    (!record.reminderOptionCheckedBefore ||
+      record.reminderEligibleOptionCount === 1) &&
+    (!record.reminderOptionCheckAttempted ||
+      (record.reminderEligibleOptionCount === 1 &&
+        !record.reminderOptionCheckedBefore)) &&
+    (!record.reminderOptionCheckedAfter ||
+      record.reminderEligibleOptionCount === 1) &&
+    (!Object.hasOwn(record, 'count') ||
+      (record.status === 'passed' && record.count === 1)) &&
+    (record.status !== 'passed' ||
+      (record.reminderStep === 'complete' &&
+        record.notifyButtonCount === 1 &&
+        record.notifyButtonVisible &&
+        record.reminderOptionsGetCount >= 1 &&
+        record.reminderOptionsGetStatus >= 200 &&
+        record.reminderOptionsGetStatus < 300 &&
+        record.reminderConfigGetCount >= 1 &&
+        record.reminderConfigGetStatus >= 200 &&
+        record.reminderConfigGetStatus < 300 &&
+        record.reminderEligibleOptionCount === 1 &&
+        !record.reminderOptionCheckedBefore &&
+        record.reminderOptionCheckAttempted &&
+        record.reminderPutCount === 1 &&
+        record.reminderPutStatus >= 200 &&
+        record.reminderPutStatus < 300 &&
+        record.reminderOptionCheckedAfter &&
+        record.reminderEnabled &&
+        record.httpStatus === record.reminderPutStatus &&
+        record.count === 1))
   );
 }
 
@@ -793,21 +1224,59 @@ function validRuntimeVersions(record) {
   return true;
 }
 
+class SummaryValidationError extends Error {
+  constructor(category, phase) {
+    super('invalid element acceptance summary');
+    this.category = SUMMARY_FAILURE_CATEGORIES.has(category)
+      ? category
+      : 'summary-unavailable';
+    this.phase = PHASES.has(phase) ? phase : 'unknown';
+  }
+}
+
+export function formatSanitizerFailureSummary(error, sourceSha) {
+  const safeSourceSha =
+    typeof sourceSha === 'string' && /^[a-f0-9]{40}$/iu.test(sourceSha)
+      ? sourceSha.toLowerCase()
+      : 'unavailable';
+  const category = SUMMARY_FAILURE_CATEGORIES.has(error?.category)
+    ? error.category
+    : 'summary-unavailable';
+  const phase = PHASES.has(error?.phase) ? error.phase : 'unknown';
+  return [
+    `element-acceptance source_sha=${safeSourceSha}`,
+    `phase=summary status=unavailable category=${category} rejected_phase=${phase}`,
+    '',
+  ].join('\n');
+}
+
 export function sanitizeElementAcceptance(input, sourceSha) {
   if (typeof sourceSha !== 'string' || !/^[a-f0-9]{40}$/i.test(sourceSha)) {
-    throw new Error('invalid element acceptance summary');
+    throw new SummaryValidationError('invalid-source-sha', 'unknown');
   }
 
   const phases = new Map();
+  let rejectedPhase = 'unknown';
+  let rejectionCategory = 'invalid-stage-record';
   for (const line of input.split(/\r?\n/u)) {
     if (!line) continue;
 
     let record;
+    rejectedPhase = 'unknown';
+    rejectionCategory = 'invalid-stage-json';
     try {
       record = JSON.parse(line);
     } catch {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
+    rejectionCategory = 'invalid-stage-record';
+    rejectedPhase =
+      record !== null &&
+      typeof record === 'object' &&
+      !Array.isArray(record) &&
+      PHASES.has(record.phase)
+        ? record.phase
+        : 'unknown';
 
     if (
       record === null ||
@@ -817,7 +1286,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       !PHASES.has(record.phase) ||
       !STATUSES.has(record.status)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const hasRuntimeObservation = RUNTIME_OBSERVATION_FIELDS.some((key) =>
@@ -825,6 +1294,8 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     );
     const hasPostCreateVisibilityObservation =
       POST_CREATE_VISIBILITY_FIELDS.some((key) => Object.hasOwn(record, key));
+    const hasReminderConfigurationObservation =
+      REMINDER_CONFIGURATION_FIELDS.some((key) => Object.hasOwn(record, key));
     if (
       (record.phase === 'widget-a-runtime-observed' &&
         !validRuntimeObservation(record)) ||
@@ -836,9 +1307,13 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.phase === 'event-create-post-refresh-observed' &&
         !validPostCreateVisibilityObservation(record)) ||
       (record.phase !== 'event-create-post-refresh-observed' &&
-        hasPostCreateVisibilityObservation)
+        hasPostCreateVisibilityObservation) ||
+      (record.phase === 'reminder-room-configuration-enabled' &&
+        !validReminderConfigurationObservation(record)) ||
+      (record.phase !== 'reminder-room-configuration-enabled' &&
+        hasReminderConfigurationObservation)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -847,7 +1322,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         record.httpStatus < 100 ||
         record.httpStatus > 599)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -865,7 +1340,16 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         record.status === 'passed' &&
         record.httpStatus !== 404)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    if (
+      (record.phase === 'reminder-widget-context' &&
+        typeof record.canManageReminders !== 'boolean') ||
+      (record.phase !== 'reminder-widget-context' &&
+        Object.hasOwn(record, 'canManageReminders'))
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -874,7 +1358,199 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         record.count < 0 ||
         record.count > 100000)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    const phaseBooleans = PHASE_BOOLEAN_FIELDS.get(record.phase) ?? [];
+    if (
+      [...PHASE_BOOLEAN_FIELDS.values()]
+        .flat()
+        .some(
+          (key) =>
+            Object.hasOwn(record, key) &&
+            (!phaseBooleans.includes(key) || typeof record[key] !== 'boolean'),
+        ) ||
+      (record.status === 'passed' &&
+        phaseBooleans.some((key) => record[key] !== true))
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    if (
+      (Object.hasOwn(record, 'attemptCount') &&
+        (!REMINDER_DELIVERY_PHASES.has(record.phase) ||
+          !Number.isSafeInteger(record.attemptCount) ||
+          record.attemptCount < 0)) ||
+      (Object.hasOwn(record, 'checksum') &&
+        (!PRIVATE_CHECKSUM_PHASES.has(record.phase) ||
+          typeof record.checksum !== 'string' ||
+          !/^[a-f0-9]{64}$/u.test(record.checksum))) ||
+      (record.status === 'passed' &&
+        REMINDER_DELIVERY_PHASES.has(record.phase) &&
+        (!Number.isSafeInteger(record.attemptCount) ||
+          record.attemptCount < 1)) ||
+      (record.status === 'passed' &&
+        PRIVATE_CHECKSUM_PHASES.has(record.phase) &&
+        !Object.hasOwn(record, 'checksum'))
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    if (
+      record.phase === 'restore-quiesced' &&
+      record.status === 'passed' &&
+      record.count !== 4
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    if (
+      record.phase === 'restore-targets-prepared' &&
+      record.status === 'passed' &&
+      (record.freshVolume !== true || record.freshDatabase !== true)
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    const hasRestoreTargetDiagnostics = RESTORE_TARGET_DIAGNOSTIC_FIELDS.some(
+      (key) => Object.hasOwn(record, key),
+    );
+    if (
+      (hasRestoreTargetDiagnostics &&
+        (record.phase !== 'restore-targets-prepared' ||
+          !['passed', 'failed'].includes(record.status) ||
+          !RESTORE_TARGET_STEPS.has(record.restoreStep))) ||
+      (record.phase === 'restore-targets-prepared' &&
+        ['passed', 'failed'].includes(record.status) &&
+        !hasRestoreTargetDiagnostics) ||
+      RESTORE_TARGET_DIAGNOSTIC_FIELDS.slice(1, 8).some(
+        (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
+      ) ||
+      (Object.hasOwn(record, 'restoreArchiveEntryCount') &&
+        (!Number.isInteger(record.restoreArchiveEntryCount) ||
+          record.restoreArchiveEntryCount < 0 ||
+          record.restoreArchiveEntryCount > 2)) ||
+      (Object.hasOwn(record, 'restorePostgresRestored') &&
+        typeof record.restorePostgresRestored !== 'boolean') ||
+      (Object.hasOwn(record, 'restoreArchiveCountProbeValid') &&
+        typeof record.restoreArchiveCountProbeValid !== 'boolean') ||
+      (record.restoreDatabaseCreated === true &&
+        record.restoreDatabaseExists !== false) ||
+      (record.restoreVolumeCreated === true &&
+        record.restoreVolumeExists !== false) ||
+      (record.restoreVolumeEmpty === true &&
+        record.restoreVolumeCreated !== true) ||
+      (record.restoreArchiveExtracted === true &&
+        (record.restoreVolumeCreated !== true ||
+          record.restoreVolumeEmpty !== true)) ||
+      (record.restoreArchiveEntryCount > 0 &&
+        record.restoreArchiveExtracted !== true) ||
+      (record.restoreArchiveCountProbeValid === true &&
+        (record.restoreArchiveExtracted !== true ||
+          !Object.hasOwn(record, 'restoreArchiveEntryCount'))) ||
+      (Object.hasOwn(record, 'restoreArchiveCountProbeValid') &&
+        (record.phase !== 'restore-targets-prepared' ||
+          (record.restoreArchiveCountProbeValid === false &&
+            record.restoreStep !== 'restored-volume-count') ||
+          (record.restoreArchiveCountProbeValid === true &&
+            !['restored-volume-count', 'postgres-restore', 'complete'].includes(
+              record.restoreStep,
+            )))) ||
+      (record.restorePostgresRestored === true &&
+        record.restoreDatabaseCreated !== true) ||
+      (record.phase === 'restore-targets-prepared' &&
+        record.status === 'passed' &&
+        (record.restoreStep !== 'complete' ||
+          record.restoreVolumeExists !== false ||
+          record.restoreDatabaseExists !== false ||
+          record.restoreTargetPlanSafe !== true ||
+          record.restoreVolumeCreated !== true ||
+          record.restoreVolumeEmpty !== true ||
+          record.restoreDatabaseCreated !== true ||
+          record.restoreArchiveExtracted !== true ||
+          record.restoreArchiveCountProbeValid !== true ||
+          record.restoreArchiveEntryCount < 1 ||
+          record.restorePostgresRestored !== true))
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    if (
+      (record.phase === 'reminder-postgres-ready' &&
+        record.status === 'passed' &&
+        record.count !== 1) ||
+      (record.phase === 'restore-element-ready' &&
+        record.status === 'passed' &&
+        record.count !== 2) ||
+      (record.phase === 'reminder-configuration-stored' &&
+        record.status === 'passed' &&
+        (!Number.isInteger(record.count) ||
+          record.count < 1 ||
+          record.count > 3)) ||
+      (record.phase === 'reminder-delivery-snapshot' &&
+        record.status === 'passed' &&
+        (!Number.isInteger(record.count) ||
+          record.count < 1 ||
+          record.count > 3)) ||
+      (REMINDER_TIMELINE_COUNTS.has(record.phase) &&
+        record.status === 'passed' &&
+        (record.httpStatus !== 200 ||
+          record.count !== REMINDER_TIMELINE_COUNTS.get(record.phase))) ||
+      (record.phase === 'reminder-browser-egress' &&
+        record.status === 'passed' &&
+        record.count !== 0) ||
+      (record.phase === 'reminder-alarm-ui-readback' &&
+        record.status === 'passed' &&
+        record.count !== 1) ||
+      (record.phase === 'reminder-room-configuration-enabled' &&
+        record.status === 'passed' &&
+        record.count !== 1) ||
+      (record.phase === 'reminder-ui-readback' &&
+        record.status === 'passed' &&
+        (!Number.isInteger(record.count) ||
+          record.count < 1 ||
+          record.count > 3)) ||
+      (record.phase === 'reminder-widget-context' &&
+        record.status === 'passed' &&
+        record.httpStatus !== 200) ||
+      (record.phase === 'reminder-room-configuration-enabled' &&
+        record.status === 'passed' &&
+        (!Number.isInteger(record.httpStatus) ||
+          record.httpStatus < 200 ||
+          record.httpStatus >= 300)) ||
+      (record.phase === 'reminder-event-created' &&
+        record.status === 'passed' &&
+        (!Number.isInteger(record.httpStatus) ||
+          record.httpStatus < 200 ||
+          record.httpStatus >= 300)) ||
+      (record.phase === 'reminder-event-visible' &&
+        record.status === 'passed' &&
+        (!Number.isInteger(record.httpStatus) ||
+          record.httpStatus < 200 ||
+          record.httpStatus >= 300 ||
+          record.count !== 1))
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    const reminderGatewayReadinessPhases = new Set([
+      'reminder-gateway-migrated',
+      'reminder-gateway-restarted',
+      'restore-gateway-ready',
+      'restore-radicale-ready',
+    ]);
+    if (
+      Object.hasOwn(record, 'httpStatus') &&
+      reminderGatewayReadinessPhases.has(record.phase) &&
+      ((record.status === 'passed' &&
+        !(
+          record.phase === 'restore-radicale-ready' && record.httpStatus === 302
+        ) &&
+        (record.httpStatus < 400 || record.httpStatus > 499)) ||
+        (record.status === 'failed' &&
+          (record.httpStatus < 100 || record.httpStatus > 599)))
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const hasBlockedRequestDiagnostics =
@@ -893,7 +1569,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         (record.blockedRequestDiagnosticOverflow &&
           record.blockedRequestDiagnostics.length !== 32))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (hasBlockedRequestDiagnostics) {
@@ -918,7 +1594,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           diagnostic.count < 1 ||
           diagnostic.count > 2
         ) {
-          throw new Error('invalid element acceptance summary');
+          throw new SummaryValidationError(rejectionCategory, rejectedPhase);
         }
 
         const key = JSON.stringify([
@@ -928,13 +1604,13 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           diagnostic.resourceType,
         ]);
         if (diagnosticKeys.has(key)) {
-          throw new Error('invalid element acceptance summary');
+          throw new SummaryValidationError(rejectionCategory, rejectedPhase);
         }
         diagnosticKeys.add(key);
         diagnosticCount += diagnostic.count;
       }
       if (record.count < diagnosticCount) {
-        throw new Error('invalid element acceptance summary');
+        throw new SummaryValidationError(rejectionCategory, rejectedPhase);
       }
     }
 
@@ -943,14 +1619,14 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       record.status === 'passed' &&
       record.count !== 0
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
     if (
       record.phase === 'browser-egress' &&
       record.count > 0 &&
       !hasBlockedRequestDiagnostics
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const hasPinnedControlObservation =
@@ -973,7 +1649,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (Object.hasOwn(record, 'panelPresent') &&
         typeof record.panelPresent !== 'boolean')
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     for (const countKey of [
@@ -986,7 +1662,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           record[countKey] < 0 ||
           record[countKey] > 100000)
       ) {
-        throw new Error('invalid element acceptance summary');
+        throw new SummaryValidationError(rejectionCategory, rejectedPhase);
       }
     }
     if (
@@ -995,14 +1671,14 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         record.homeserverLastHttpErrorStatus < 400 ||
         record.homeserverLastHttpErrorStatus > 599)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
       Object.hasOwn(record, 'failureCode') &&
       !FAILURE_CODES.has(record.failureCode)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const hasMissingModuleDiagnostic =
@@ -1022,7 +1698,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           )
         : Object.hasOwn(record, 'missingDependency'))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1031,7 +1707,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         record.processExitCode < 1 ||
         record.processExitCode > 255)
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const hasContainerDiagnostic = [
@@ -1041,14 +1717,108 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       'containerOomKilled',
       'containerRuntimeErrorPresent',
     ].some((key) => Object.hasOwn(record, key));
+    const hasRestoreRadicaleProbeDiagnostic = Object.hasOwn(
+      record,
+      'restoreRadicaleProbeOutcome',
+    );
+    const restoreRadicaleListenerFields = [
+      'restoreRadicaleContainerHttpOutcome',
+      'restoreRadicaleContainerHttpStatus',
+      'restoreRadicalePublishedPortBinding',
+    ];
+    const hasRestoreRadicaleListenerDiagnostic =
+      restoreRadicaleListenerFields.some((key) => Object.hasOwn(record, key));
+    const restoreRadicaleListenerFieldsComplete = [
+      'restoreRadicaleContainerHttpOutcome',
+      'restoreRadicalePublishedPortBinding',
+    ].every((key) => Object.hasOwn(record, key));
+    const restoreRadicaleStartupFields = [
+      'restoreRadicaleStartupSignature',
+      'restoreRadicaleLogsAvailable',
+      'restoreRadicaleStartupExceptionPresent',
+      'restoreRadicaleReadyMarkerPresent',
+      'restoreRadicaleStartupExceptionClass',
+      'restoreRadicaleStartupErrno',
+      'restoreRadicaleStartupPathBucket',
+    ];
+    const hasRestoreRadicaleStartupDiagnostic =
+      restoreRadicaleStartupFields.some((key) => Object.hasOwn(record, key));
+    const restoreRadicaleStartupFieldsComplete =
+      restoreRadicaleStartupFields.every((key) => Object.hasOwn(record, key));
     if (
+      (hasRestoreRadicaleProbeDiagnostic &&
+        (record.phase !== 'restore-radicale-ready' ||
+          record.status !== 'failed' ||
+          !RESTORE_RADICALE_PROBE_OUTCOMES.has(
+            record.restoreRadicaleProbeOutcome,
+          ) ||
+          (record.restoreRadicaleProbeOutcome === 'no-response' &&
+            Object.hasOwn(record, 'httpStatus')) ||
+          (record.restoreRadicaleProbeOutcome === 'http-status' &&
+            !Object.hasOwn(record, 'httpStatus')) ||
+          Object.hasOwn(record, 'processExitCode'))) ||
       (hasContainerDiagnostic &&
-        (record.phase !== 'gateway-ready' ||
+        (!(
+          record.phase === 'gateway-ready' ||
+          (record.phase === 'restore-radicale-ready' &&
+            hasRestoreRadicaleProbeDiagnostic)
+        ) ||
           record.status !== 'failed' ||
           !Object.hasOwn(record, 'containerState') ||
           !CONTAINER_STATES.has(record.containerState) ||
           !Object.hasOwn(record, 'containerHealth') ||
           !CONTAINER_HEALTH_STATES.has(record.containerHealth))) ||
+      (hasRestoreRadicaleProbeDiagnostic && !hasContainerDiagnostic) ||
+      (hasRestoreRadicaleListenerDiagnostic &&
+        (record.phase !== 'restore-radicale-ready' ||
+          record.status !== 'failed' ||
+          !hasRestoreRadicaleProbeDiagnostic ||
+          !restoreRadicaleListenerFieldsComplete ||
+          !RESTORE_RADICALE_CONTAINER_HTTP_OUTCOMES.has(
+            record.restoreRadicaleContainerHttpOutcome,
+          ) ||
+          !RESTORE_RADICALE_PUBLISHED_PORT_BINDINGS.has(
+            record.restoreRadicalePublishedPortBinding,
+          ) ||
+          (record.restoreRadicaleContainerHttpOutcome === 'http-status' &&
+            (!Number.isInteger(record.restoreRadicaleContainerHttpStatus) ||
+              record.restoreRadicaleContainerHttpStatus < 100 ||
+              record.restoreRadicaleContainerHttpStatus > 599)) ||
+          (record.restoreRadicaleContainerHttpOutcome !== 'http-status' &&
+            Object.hasOwn(record, 'restoreRadicaleContainerHttpStatus')))) ||
+      (hasRestoreRadicaleStartupDiagnostic &&
+        (record.phase !== 'restore-radicale-ready' ||
+          record.status !== 'failed' ||
+          !hasRestoreRadicaleProbeDiagnostic ||
+          !restoreRadicaleStartupFieldsComplete ||
+          !RESTORE_RADICALE_STARTUP_SIGNATURES.has(
+            record.restoreRadicaleStartupSignature,
+          ) ||
+          typeof record.restoreRadicaleLogsAvailable !== 'boolean' ||
+          typeof record.restoreRadicaleStartupExceptionPresent !== 'boolean' ||
+          typeof record.restoreRadicaleReadyMarkerPresent !== 'boolean' ||
+          !RESTORE_RADICALE_STARTUP_EXCEPTION_CLASSES.has(
+            record.restoreRadicaleStartupExceptionClass,
+          ) ||
+          !RESTORE_RADICALE_STARTUP_ERRNOS.has(
+            record.restoreRadicaleStartupErrno,
+          ) ||
+          !RESTORE_RADICALE_STARTUP_PATH_BUCKETS.has(
+            record.restoreRadicaleStartupPathBucket,
+          ) ||
+          (record.restoreRadicaleLogsAvailable === false &&
+            (record.restoreRadicaleStartupSignature !== 'unavailable' ||
+              record.restoreRadicaleStartupExceptionPresent ||
+              record.restoreRadicaleReadyMarkerPresent ||
+              record.restoreRadicaleStartupExceptionClass !== 'unavailable' ||
+              record.restoreRadicaleStartupErrno !== 'unavailable' ||
+              record.restoreRadicaleStartupPathBucket !== 'unavailable')) ||
+          (record.restoreRadicaleLogsAvailable === true &&
+            (record.restoreRadicaleStartupSignature === 'unavailable' ||
+              record.restoreRadicaleStartupExceptionClass === 'unavailable' ||
+              record.restoreRadicaleStartupErrno === 'unavailable' ||
+              record.restoreRadicaleStartupPathBucket === 'unavailable')))) ||
+      !validRestoreRadicaleFilesystemEvidence(record) ||
       (Object.hasOwn(record, 'containerExitCode') &&
         (!Number.isInteger(record.containerExitCode) ||
           record.containerExitCode < 0 ||
@@ -1058,7 +1828,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (Object.hasOwn(record, 'containerRuntimeErrorPresent') &&
         typeof record.containerRuntimeErrorPresent !== 'boolean')
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1066,7 +1836,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.phase !== 'runtime-versions' &&
         [...VERSION_FIELDS].some((key) => Object.hasOwn(record, key)))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1077,7 +1847,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.failureCode === 'matrix-invalid-json' &&
         !Object.hasOwn(record, 'httpStatus'))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const sessionObservationKeys = [
@@ -1106,10 +1876,10 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           typeof record.matrixClientPresent !== 'boolean')) ||
       (hasMatrixUserObservation &&
         record.phase !== 'member-a-session-observed' &&
-        record.phase !== 'member-a-room-context') ||
+        !ROOM_CONTEXT_PHASES.has(record.phase)) ||
       (hasSyncObservation &&
         ((record.phase !== 'member-a-session-observed' &&
-          record.phase !== 'member-a-room-context') ||
+          !ROOM_CONTEXT_PHASES.has(record.phase)) ||
           !MATRIX_SYNC_STATES.has(record.matrixSyncState))) ||
       (record.phase === 'member-a-session-observed' &&
         hasMatrixUserObservation !== hasSyncObservation) ||
@@ -1117,7 +1887,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         typeof record.matrixUserMatches !== 'boolean') ||
       !validSessionObservation
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     const roomObservationKeys = [
@@ -1128,6 +1898,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       'roomHeadingPresent',
       'roomNameMatches',
       'roomIdMatches',
+      ...REMINDER_ROOM_LAYOUT_FIELDS,
       'blockedExternalRequestCount',
       'homeserverHttpErrorCount',
       'homeserverLastHttpErrorStatus',
@@ -1135,6 +1906,13 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     const hasRoomObservation = roomObservationKeys.some((key) =>
       Object.hasOwn(record, key),
     );
+    const hasReminderRoomLayoutObservation = REMINDER_ROOM_LAYOUT_FIELDS.some(
+      (key) => Object.hasOwn(record, key),
+    );
+    const hasReminderWidgetContextObservation =
+      REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS.some((key) =>
+        Object.hasOwn(record, key),
+      );
     const roomFailureCodes = new Set([
       'element-room-navigation-failed',
       'element-room-observation-unavailable',
@@ -1157,8 +1935,8 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       'roomIdMatches',
     ];
     if (
-      ((hasRoomObservation || record.phase === 'member-a-room-context') &&
-        (record.phase !== 'member-a-room-context' ||
+      ((hasRoomObservation || ROOM_CONTEXT_PHASES.has(record.phase)) &&
+        (!ROOM_CONTEXT_PHASES.has(record.phase) ||
           !['passed', 'failed'].includes(record.status))) ||
       (hasRoomObservation &&
         (requiredRoomBooleans.some((key) => typeof record[key] !== 'boolean') ||
@@ -1172,7 +1950,24 @@ export function sanitizeElementAcceptance(input, sourceSha) {
               requiredRoomBooleans.some((key) => record[key] !== true))) ||
           (record.status === 'failed' &&
             !roomFailureCodes.has(record.failureCode)))) ||
-      (record.phase === 'member-a-room-context' &&
+      (hasReminderRoomLayoutObservation &&
+        (record.phase !== 'reminder-room-context' ||
+          REMINDER_ROOM_LAYOUT_FIELDS.some(
+            (key) =>
+              !Object.hasOwn(record, key) || typeof record[key] !== 'boolean',
+          ))) ||
+      (hasReminderWidgetContextObservation &&
+        (record.phase !== 'reminder-room-context' ||
+          !Number.isInteger(record.reminderWidgetContextResponseCount) ||
+          record.reminderWidgetContextResponseCount < 0 ||
+          record.reminderWidgetContextResponseCount > 1 ||
+          (record.reminderWidgetContextResponseCount === 0 &&
+            Object.hasOwn(record, 'reminderWidgetContextResponseStatus')) ||
+          (record.reminderWidgetContextResponseCount === 1 &&
+            (!Number.isInteger(record.reminderWidgetContextResponseStatus) ||
+              record.reminderWidgetContextResponseStatus < 100 ||
+              record.reminderWidgetContextResponseStatus > 599)))) ||
+      (ROOM_CONTEXT_PHASES.has(record.phase) &&
         !hasRoomObservation &&
         (record.status !== 'failed' ||
           !roomFailureCodes.has(record.failureCode))) ||
@@ -1181,9 +1976,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           Object.hasOwn(record, 'matrixClientPresent'))) ||
       (Object.hasOwn(record, 'failureCode') &&
         roomFailureCodes.has(record.failureCode) &&
-        record.phase !== 'member-a-room-context')
+        !ROOM_CONTEXT_PHASES.has(record.phase))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     if (
@@ -1195,7 +1990,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         record.status === 'passed' &&
         !Object.hasOwn(record, 'originMatchesElement'))
     ) {
-      throw new Error('invalid element acceptance summary');
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
     phases.set(record.phase, record);
@@ -1301,6 +2096,29 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       continue;
     }
 
+    if (phase === 'reminder-room-configuration-enabled') {
+      lines.push(
+        [
+          `phase=${phase}`,
+          `status=${record.status}`,
+          `reminder_step=${record.reminderStep}`,
+          `notify_button_count=${record.notifyButtonCount}`,
+          `notify_button_visible=${record.notifyButtonVisible}`,
+          `options_get_count=${record.reminderOptionsGetCount}`,
+          `options_http_status=${record.reminderOptionsGetStatus}`,
+          `configuration_get_count=${record.reminderConfigGetCount}`,
+          `configuration_http_status=${record.reminderConfigGetStatus}`,
+          `eligible_option_count=${record.reminderEligibleOptionCount}`,
+          `option_checked_before=${record.reminderOptionCheckedBefore}`,
+          `option_check_attempted=${record.reminderOptionCheckAttempted}`,
+          `put_count=${record.reminderPutCount}`,
+          `put_http_status=${record.reminderPutStatus}`,
+          `option_checked_after=${record.reminderOptionCheckedAfter}`,
+        ].join(' '),
+      );
+      continue;
+    }
+
     if (phase === 'event-create-post-refresh-observed') {
       lines.push(
         [
@@ -1373,6 +2191,35 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     if (Object.hasOwn(record, 'count')) {
       fields.push(`count=${record.count}`);
     }
+    if (Object.hasOwn(record, 'restoreStep')) {
+      fields.push(`restore_step=${record.restoreStep}`);
+      for (const [key, outputKey] of [
+        ['restoreVolumeExists', 'restore_volume_exists'],
+        ['restoreDatabaseExists', 'restore_database_exists'],
+        ['restoreTargetPlanSafe', 'restore_target_plan_safe'],
+        ['restoreVolumeCreated', 'restore_volume_created'],
+        ['restoreVolumeEmpty', 'restore_volume_empty'],
+        ['restoreDatabaseCreated', 'restore_database_created'],
+        ['restoreArchiveExtracted', 'restore_archive_extracted'],
+        ['restoreArchiveEntryCount', 'restore_archive_entry_count'],
+        ['restoreArchiveCountProbeValid', 'restore_archive_count_probe_valid'],
+        ['restorePostgresRestored', 'restore_postgres_restored'],
+      ]) {
+        if (Object.hasOwn(record, key)) {
+          fields.push(`${outputKey}=${record[key]}`);
+        }
+      }
+    }
+    for (const [key, name] of [
+      ['relativeAlarmReadback', 'relative_alarm_readback'],
+      ['reminderEnabled', 'reminder_enabled'],
+      ['canaryDelivered', 'canary_delivered'],
+      ['roomMentioned', 'room_mentioned'],
+      ['deliveredAfterDue', 'delivered_after_due'],
+      ['allMarkersOnce', 'all_markers_once'],
+    ]) {
+      if (Object.hasOwn(record, key)) fields.push(`${name}=${record[key]}`);
+    }
     if (Object.hasOwn(record, 'controlVisible')) {
       fields.push(`control_visible=${record.controlVisible}`);
     }
@@ -1391,7 +2238,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       fields.push(`matrix_sync_state=${record.matrixSyncState}`);
     }
     if (
-      phase === 'member-a-room-context' &&
+      ROOM_CONTEXT_PHASES.has(phase) &&
       record.matrixUserMatches !== undefined
     ) {
       fields.push(`matrix_user_matches=${record.matrixUserMatches}`);
@@ -1405,6 +2252,30 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       fields.push(`room_heading_present=${record.roomHeadingPresent}`);
       fields.push(`room_name_matches=${record.roomNameMatches}`);
       fields.push(`room_id_matches=${record.roomIdMatches}`);
+      for (const [key, label] of [
+        ['roomViewPresent', 'room_view_present'],
+        ['roomHeaderPresent', 'room_header_present'],
+        ['roomHeadingDomPresent', 'room_heading_dom_present'],
+        ['roomInfoControlPresent', 'room_info_control_present'],
+        ['fixtureCalendarIframePresent', 'fixture_calendar_iframe_present'],
+      ]) {
+        if (Object.hasOwn(record, key)) {
+          fields.push(`${label}=${record[key]}`);
+        }
+      }
+      if (
+        phase === 'reminder-room-context' &&
+        Object.hasOwn(record, 'reminderWidgetContextResponseCount')
+      ) {
+        fields.push(
+          `reminder_widget_context_response_count=${record.reminderWidgetContextResponseCount}`,
+        );
+        if (Object.hasOwn(record, 'reminderWidgetContextResponseStatus')) {
+          fields.push(
+            `reminder_widget_context_response_status=${record.reminderWidgetContextResponseStatus}`,
+          );
+        }
+      }
       fields.push(
         `blocked_external_request_count=${record.blockedExternalRequestCount}`,
       );
@@ -1415,6 +2286,21 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         fields.push(
           `homeserver_last_http_error_status=${record.homeserverLastHttpErrorStatus}`,
         );
+      }
+    }
+    if (
+      phase === 'reminder-room-context' &&
+      record.matrixUserMatches === undefined
+    ) {
+      if (Object.hasOwn(record, 'reminderWidgetContextResponseCount')) {
+        fields.push(
+          `reminder_widget_context_response_count=${record.reminderWidgetContextResponseCount}`,
+        );
+        if (Object.hasOwn(record, 'reminderWidgetContextResponseStatus')) {
+          fields.push(
+            `reminder_widget_context_response_status=${record.reminderWidgetContextResponseStatus}`,
+          );
+        }
       }
     }
     if (Object.hasOwn(record, 'failureCode')) {
@@ -1443,6 +2329,58 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       fields.push(
         `container_runtime_error_present=${record.containerRuntimeErrorPresent}`,
       );
+    }
+    if (Object.hasOwn(record, 'restoreRadicaleProbeOutcome')) {
+      fields.push(
+        `restore_radicale_probe_outcome=${record.restoreRadicaleProbeOutcome}`,
+      );
+    }
+    if (Object.hasOwn(record, 'restoreRadicaleContainerHttpOutcome')) {
+      fields.push(
+        `radicale_container_http_outcome=${record.restoreRadicaleContainerHttpOutcome}`,
+        `radicale_published_port_binding=${record.restoreRadicalePublishedPortBinding}`,
+      );
+      if (Object.hasOwn(record, 'restoreRadicaleContainerHttpStatus')) {
+        fields.push(
+          `radicale_container_http_status=${record.restoreRadicaleContainerHttpStatus}`,
+        );
+      }
+    }
+    if (Object.hasOwn(record, 'restoreRadicaleStartupSignature')) {
+      fields.push(
+        `radicale_startup_signature=${record.restoreRadicaleStartupSignature}`,
+        `radicale_logs_available=${record.restoreRadicaleLogsAvailable}`,
+        `radicale_startup_exception_present=${record.restoreRadicaleStartupExceptionPresent}`,
+        `radicale_ready_marker_present=${record.restoreRadicaleReadyMarkerPresent}`,
+        `radicale_startup_exception_class=${record.restoreRadicaleStartupExceptionClass}`,
+        `radicale_startup_errno=${record.restoreRadicaleStartupErrno}`,
+        `radicale_startup_path_bucket=${record.restoreRadicaleStartupPathBucket}`,
+      );
+    }
+    if (
+      RESTORE_RADICALE_FILESYSTEM_FIELDS.every((key) =>
+        Object.hasOwn(record, key),
+      )
+    ) {
+      fields.push('radicale_probe_mount=readonly');
+      for (const key of RESTORE_RADICALE_FILESYSTEM_FIELDS) {
+        const label = key
+          .replace(/^restoreRadicale/u, '')
+          .replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`)
+          .replace(/^_/u, '')
+          .toLowerCase();
+        fields.push(`radicale_${label}=${record[key]}`);
+      }
+    }
+    const phaseBooleans = PHASE_BOOLEAN_FIELDS.get(phase) ?? [];
+    for (const key of phaseBooleans) {
+      if (Object.hasOwn(record, key)) {
+        const outputKey = key.replace(
+          /[A-Z]/gu,
+          (letter) => `_${letter.toLowerCase()}`,
+        );
+        fields.push(`${outputKey}=${record[key]}`);
+      }
     }
     lines.push(fields.join(' '));
   }
@@ -1473,7 +2411,13 @@ function main() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     main();
-  } catch {
+  } catch (error) {
+    process.stdout.write(
+      formatSanitizerFailureSummary(
+        error,
+        process.argv[3] ?? process.env.ELEMENT_ACCEPTANCE_SOURCE_SHA,
+      ),
+    );
     process.stderr.write('Element acceptance summary unavailable.\n');
     process.exitCode = 1;
   }

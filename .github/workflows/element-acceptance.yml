@@ -14,6 +14,7 @@ on:
       - 'package.json'
       - 'yarn.lock'
       - 'docs/PLAN.md'
+      - 'docs/STATUS.md'
 
 permissions:
   contents: read
@@ -48,15 +49,21 @@ jobs:
           echo "MATRIX_CALENDAR_DEV_PASSWORD=$fixture_password" >> "$GITHUB_ENV"
           echo "MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING=127.0.0.1:8008:8008" >> "$GITHUB_ENV"
           echo "MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING=127.0.0.1:5232:5232" >> "$GITHUB_ENV"
-          echo "COMPOSE_PROJECT_NAME=matrix-calendar-element-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+          compose_project_name="matrix-calendar-element-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "COMPOSE_PROJECT_NAME=$compose_project_name" >> "$GITHUB_ENV"
+          echo "ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME=${compose_project_name}_radicale-restore" >> "$GITHUB_ENV"
           echo "ELEMENT_ACCEPTANCE_STAGE_FILE=$RUNNER_TEMP/element-acceptance-stage.jsonl" >> "$GITHUB_ENV"
           echo "ELEMENT_ACCEPTANCE_USERS_FILE=$RUNNER_TEMP/element-acceptance-users.json" >> "$GITHUB_ENV"
           echo "ELEMENT_ACCEPTANCE_SERVER_ENV_FILE=$RUNNER_TEMP/element-acceptance-server.env" >> "$GITHUB_ENV"
+          echo "ELEMENT_ACCEPTANCE_REMINDER_EVENT_FILE=$RUNNER_TEMP/element-acceptance-reminder-events.json" >> "$GITHUB_ENV"
+          echo "ELEMENT_ACCEPTANCE_REMINDER_DELIVERY_FILE=$RUNNER_TEMP/element-acceptance-reminder-deliveries.json" >> "$GITHUB_ENV"
           echo "ELEMENT_ACCEPTANCE_PLAYWRIGHT_OUTPUT=$RUNNER_TEMP/element-acceptance-playwright-output" >> "$GITHUB_ENV"
           source_sha="${{ github.event.pull_request.head.sha || github.sha }}"
           echo "ELEMENT_ACCEPTANCE_SOURCE_SHA=$source_sha" >> "$GITHUB_ENV"
           : > "$RUNNER_TEMP/element-acceptance-stage.jsonl"
+          printf '[]\n' > "$RUNNER_TEMP/element-acceptance-reminder-events.json"
           chmod 0600 "$RUNNER_TEMP/element-acceptance-stage.jsonl"
+          chmod 0600 "$RUNNER_TEMP/element-acceptance-reminder-events.json"
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
@@ -140,11 +147,46 @@ jobs:
       - name: Run the real Element Web member and outsider journey
         run: |
           printf '%s\n' '{"phase":"browser-test-suite","status":"started"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
-          if ! yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+          if ! yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web members share events and enforce room authorization" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
             echo 'Element Web acceptance journey failed; see sanitized phase summary.' >&2
             exit 1
           fi
           printf '%s\n' '{"phase":"browser-test-suite","status":"passed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
+
+      - name: Provision the synthetic reminder sender room membership
+        run: node dev/element-acceptance-setup.mjs reminder-room
+
+      - name: Enable the PostgreSQL-backed reminder fixture
+        run: node dev/element-acceptance-reminder-restore.mjs enable
+
+      - name: Verify real UI reminder delivery
+        run: |
+          if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=initial yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers a relative room reminder" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+            echo 'Initial reminder delivery failed; see sanitized phase summary.' >&2
+            exit 1
+          fi
+          node dev/element-acceptance-reminder-restore.mjs verify-configuration
+          node dev/element-acceptance-reminder-restore.mjs snapshot
+
+      - name: Restart the gateway and verify reminder scheduling
+        run: |
+          node dev/element-acceptance-reminder-restore.mjs restart
+          if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=restart yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers a relative room reminder" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+            echo 'Post-restart reminder delivery failed; see sanitized phase summary.' >&2
+            exit 1
+          fi
+          node dev/element-acceptance-reminder-restore.mjs verify-configuration
+          node dev/element-acceptance-reminder-restore.mjs verify-restart
+          node dev/element-acceptance-reminder-restore.mjs snapshot
+
+      - name: Restore paired Radicale and PostgreSQL stores
+        run: |
+          node dev/element-acceptance-reminder-restore.mjs restore
+          if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=restore yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers a relative room reminder" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+            echo 'Post-restore reminder delivery failed; see sanitized phase summary.' >&2
+            exit 1
+          fi
+          node dev/element-acceptance-reminder-restore.mjs verify-restore
 
       - name: Emit sanitized acceptance summary
         if: always()
@@ -166,19 +208,43 @@ jobs:
       - name: Stop and remove the isolated stack and private evidence
         if: always()
         run: |
+          compose_cleanup_status=not-needed
           if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
+            compose_cleanup_status=passed
             if [[ -f "${ELEMENT_ACCEPTANCE_SERVER_ENV_FILE:-}" ]]; then
-              docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ELEMENT_ACCEPTANCE_SERVER_ENV_FILE" -f dev/compose.yaml -f dev/element-acceptance.compose.yaml down --volumes --remove-orphans >/dev/null 2>&1 || true
+              if ! docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ELEMENT_ACCEPTANCE_SERVER_ENV_FILE" -f dev/compose.yaml -f dev/element-acceptance.compose.yaml -f dev/element-acceptance-reminder.compose.yaml down --volumes --remove-orphans >/dev/null 2>&1; then
+                compose_cleanup_status=failed
+              fi
             else
-              docker compose -p "$COMPOSE_PROJECT_NAME" -f dev/compose.yaml down --volumes --remove-orphans >/dev/null 2>&1 || true
+              if ! docker compose -p "$COMPOSE_PROJECT_NAME" -f dev/compose.yaml down --volumes --remove-orphans >/dev/null 2>&1; then
+                compose_cleanup_status=failed
+              fi
             fi
           fi
-          rm -rf \
+          private_cleanup_status=passed
+          if ! rm -rf \
             "$RUNNER_TEMP/element-acceptance-users.json" \
             "$RUNNER_TEMP/element-acceptance-server.env" \
-            "$RUNNER_TEMP/element-acceptance-playwright-output"
-          rm -f \
+            "$RUNNER_TEMP/element-acceptance-reminder-events.json" \
+            "$RUNNER_TEMP/element-acceptance-reminder-deliveries.json" \
+            "$RUNNER_TEMP/element-acceptance-playwright-output"; then
+            private_cleanup_status=failed
+          fi
+          if ! rm -f \
+            "$RUNNER_TEMP/element-acceptance-stage.jsonl" \
+            "$RUNNER_TEMP/element-acceptance-radicale.tar" \
+            "$RUNNER_TEMP/element-acceptance-reminder.pgcustom" \
             "$RUNNER_TEMP/element-acceptance-dev-up.log" \
             "$RUNNER_TEMP/element-acceptance-compose-up.log" \
             "$RUNNER_TEMP/element-acceptance-image-smoke.log" \
-            "$RUNNER_TEMP/element-acceptance-playwright.log"
+            "$RUNNER_TEMP/element-acceptance-playwright.log"; then
+            private_cleanup_status=failed
+          fi
+          {
+            echo "Compose teardown command: $compose_cleanup_status"
+            echo "Private-file removal commands: $private_cleanup_status"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$compose_cleanup_status" == failed || "$private_cleanup_status" == failed ]]; then
+            echo 'Isolated acceptance cleanup failed.' >&2
+            exit 1
+          fi

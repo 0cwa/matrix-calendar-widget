@@ -2,25 +2,26 @@
 
 _Last updated: 2026-10-07._
 
-_Source baseline: `main` at `9b3772a4302144c817c4d2d08e1abf25ee4e7917`._
+_Source baseline: `main` at `ec2780497adffa0efb58602f8994bd3db34fb57e`._
 
 See the [dated continuation](handoff/2026-10-06/README.md) and
 [exact delivered-slice ledger](handoff/2026-10-06/ledger.json).
 
 ## Current phase
 
-**Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence timing/text and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; actual-client and operator acceptance remain open. M7 has bounded bot commands and post-success room-target event notices. M8 has source-level gateway and CalDAV limits plus a hosted synthetic Chromium fixture; actual Element Web/Desktop, operator/restore, and measured pilot-envelope acceptance remain open. Mobile/other clients, formal screen-reader certification, and broad capacity characterization are outside the bounded beta target.
+**Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence timing/text and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; actual-client and operator acceptance remain open. M7 has bounded bot commands and post-success room-target event notices. M8 has source-level gateway and CalDAV limits plus a hosted synthetic Chromium fixture. A pre-merge Element Web candidate now has shared-event and reminder/restart/paired-restore evidence; broader Web interaction, Desktop, operator-host, and measured pilot-envelope acceptance remain open. Mobile/other clients, formal screen-reader certification, and broad capacity characterization are outside the bounded beta target.
 
-The first hosted Element Web shared-event journey passed on draft PR #225
-candidate `031a17e1b1c1b7d7f68b5293a80b8a2c46c5ccb6` ([run
+The first hosted Element Web shared-event journey passed before merge on draft
+PR #225 candidate `031a17e1b1c1b7d7f68b5293a80b8a2c46c5ccb6` ([run
 37569137448](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37569137448)).
 The isolated run used configured Element Web 1.12.30, Synapse 1.161.0, and
 Radicale 3.8.0.0; it observed Chromium 149.0.7827.55, Node 22.23.3, and a
 Linux runner. The blocked browser egress count was zero. The journey verified
 shared event create/read/edit, a stale-edit conflict and reload, outsider
 team-room denial, and denial for the outsider's own unbound room. This is
-draft-candidate evidence, not evidence from `main` or a complete Web/Desktop,
-operator, restore, capacity, or beta acceptance.
+pre-merge evidence for that candidate, not evidence from the later `main`
+source baseline or complete Web/Desktop, operator, restore, capacity, or beta
+acceptance.
 
 The controlled-beta scope and its acceptance contract are documented in
 [`beta-scope.md`](./beta-scope.md). Its target is Element Web/Desktop, one
@@ -101,6 +102,26 @@ PR #199 adds manager-authorized reminder configuration and alarm-options APIs, b
 
 PR #201 connects the primary widget to the gateway-authorized room calendar. It consumes the current room capability response, shows the authorized bound room calendar and its read/write capabilities, displays a safe link to the current Matrix room in event details, and exposes reminder controls for supported alarms to authorized managers. All eight hosted checks passed at exact source tree `a65811903363397ea0883f4e32a98ace7dfdb9a8`; independent review passed on the same tree, merged as `f49acee71280944ad6ae351111947ff01c00031d`. Issue #7's bounded repository criteria are complete. The complete local check set passed with the server Jest suite rerun serially after the parallel `yarn ci` invocation exited 1 when Jest workers were terminated by SIGKILL; the serial server run, remaining calendar/timezone suites, static checks, and production build passed. The hosted checks ran on Node 22. These checks do not establish actual Element client or operator-host acceptance.
 
+Draft PR #227 candidate `a02932dafbbfa9316bee5e8bda1ee15ed1ddbaff` passed its
+hosted Element Web acceptance on exact head in [run
+37611136645](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37611136645).
+Using configured Element Web 1.12.30, Synapse 1.161.0, and Radicale 3.8.0.0,
+the run verified shared event create/read/edit, stale-edit 409 and reload,
+outsider team-room 403 and unbound-room 404, zero blocked browser egress, and
+the real relative DISPLAY alarm and room reminder UI. It delivered a real
+`m.mentions.room` message, preserved sent state through a gateway restart, and
+restored Radicale plus app-owned PostgreSQL into fresh destinations. The
+restored UI read the saved reminders, a due canary was delivered once, and the
+previous sent-row key and attempt count remained unchanged. The Radicale root
+readiness check observed its expected HTTP 302 without following it. The
+always-run cleanup step completed; Compose teardown is best-effort, so
+container and volume removal were not independently verified. The [sanitized summary
+artifact](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37611136645)
+has SHA-256 `22f29e8e2609ea2734feb44d665484d9bf983c5fdf6975c18f39588b8abd21f6`.
+This proves the tested completed-send recovery path, not exactly-once delivery,
+Desktop behavior, full client accessibility, operator readiness, or beta
+capacity.
+
 Room access, event writes, reminder settings, reminder delivery, and action notices retain independent default-off gates. Delivery requires the app-owned PostgreSQL store and room-access gate, and is controlled by `ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED`. Reminder configuration uses `MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED`; room-target action notices use `ROOM_CALENDAR_ACTION_MESSAGES_ENABLED`. An explicitly configured database connects and migrates at startup; it does not enable room access, event writes, reminder settings or delivery, or action notices.
 
 The initial reminder target is a standard `m.room.message` with `msgtype: m.text` and `m.mentions.room: true` in an unencrypted room. The native appservice transport refuses encrypted or unknown room state; it does not provide end-to-end encrypted scheduled reminders. Stable transaction IDs and database claims support bounded retries but do not guarantee exactly-once delivery. Scheduler work and PostgreSQL coordination are designed for one server replica. Operator acceptance is separate.
@@ -140,7 +161,7 @@ loading, memory, and actual clients remain unmeasured.
 - **M4:** collection-timezone editing and remaining issue #5 acceptance work.
 - **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, arbitrary RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, attachment forms beyond ADR038, broader alarms, and conference forms beyond ADR036 are not part of the implemented editor. Unsupported recurrence or timezone sources may be omitted from projection; the widget warns for source forms it diagnoses, while preserving the canonical resource.
 - **M6:** issue #7 bounded repository criteria are complete. Keep room access, event writes, settings, delivery, and action notices off until the operator accepts each capability and its trust boundary. A passing pinned stack is not an etke-host or production proof.
-- **M8:** record actual Element Web/Desktop versions and acceptance against the isolated pinned stack; prove two-identity authorization denial, stale-ETag conflict behavior, keyboard/focus behavior, and restart plus restore of both Radicale and app-owned PostgreSQL data. Record an operator-approved measured enrollment/capacity envelope with hardware/runtime, displayed date-range counts, API/render latency, and explicit thresholds. Mobile/other clients and formal screen-reader certification remain deferred. Issue #9 remains open for beta, capacity, and client/operator acceptance. Gateway and bot quotas are process-local. Callers behind one reverse proxy share the gateway's TCP-peer quota; the beta target uses one server replica.
+- **M8:** the PR #227 candidate proves the tested Element Web shared-event and reminder/restart/paired-restore path; broader actual-client acceptance remains open. Add actual Web delete, unsupported-projection preservation, keyboard/focus, narrow-panel and maximized-layout evidence, then run the Desktop startup and user-flow gates. Record the approved measured enrollment/capacity envelope with hardware/runtime, displayed date-range counts, API/render latency, and explicit thresholds. Mobile/other clients and formal screen-reader certification remain deferred. Issue #9 remains open for beta, capacity, and client/operator acceptance. Gateway and bot quotas are process-local. Callers behind one reverse proxy share the gateway's TCP-peer quota; the beta target uses one server replica.
 - **Operator readiness:** homeserver/proxy behavior, OpenID query-token log redaction, selected Radicale image/configuration, PostgreSQL endpoint TLS/CA and role, backups/restores, secrets, network exposure, and rollback remain to be verified. The beta baseline uses the project-owned Radicale image and its own store; replacing an existing service or reusing its `/data` is optional and would require additional image/data-path compatibility and recovery evidence. The Compose sidecar does not migrate another service's data.
 - **Release/deployment:** the project remains pre-alpha. Build and contract evidence do not authorize image/chart publication or a live deployment.
 
