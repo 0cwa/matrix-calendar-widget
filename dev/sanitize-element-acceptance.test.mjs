@@ -2486,6 +2486,31 @@ test('sanitizes the fixed performance seed and cleanup phases', () => {
     unavailableCleanup,
     /phase=performance-cleanup status=failed manifest_event_count=unavailable planned_count=unavailable confirmed_created_count=unavailable deleted_count=unavailable already_absent_count=unavailable conflict_count=unavailable unresolved_count=unavailable inventory_available=false failure_code=manifest-invalid/u,
   );
+  const partialCleanup = sanitizeElementAcceptance(
+    [
+      { phase: 'performance-cleanup', status: 'started' },
+      {
+        phase: 'performance-cleanup',
+        status: 'failed',
+        manifestEventCount: 250,
+        plannedCount: 1,
+        confirmedCreatedCount: 200,
+        deletedCount: 150,
+        alreadyAbsentCount: 20,
+        conflictCount: 1,
+        unresolvedCount: 78,
+        inventoryAvailable: true,
+        failureCode: 'cleanup-incomplete',
+      },
+    ]
+      .map((stage) => JSON.stringify(stage))
+      .join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    partialCleanup,
+    /phase=performance-cleanup status=failed manifest_event_count=250 planned_count=1 confirmed_created_count=200 deleted_count=150 already_absent_count=20 conflict_count=1 unresolved_count=78 inventory_available=true failure_code=cleanup-incomplete/u,
+  );
 });
 
 test('rejects invalid performance fixture counts and failure categories', () => {
@@ -2509,6 +2534,22 @@ test('rejects invalid performance fixture counts and failure categories', () => 
         conflictCount: 0,
         unresolvedCount: 0,
         inventoryAvailable: true,
+      },
+    ],
+    [
+      { phase: 'performance-cleanup', status: 'started' },
+      {
+        phase: 'performance-cleanup',
+        status: 'failed',
+        manifestEventCount: 250,
+        plannedCount: 0,
+        confirmedCreatedCount: 0,
+        deletedCount: 0,
+        alreadyAbsentCount: 0,
+        conflictCount: 0,
+        unresolvedCount: 0,
+        inventoryAvailable: true,
+        failureCode: 'cleanup-incomplete',
       },
     ],
     [

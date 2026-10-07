@@ -4044,6 +4044,13 @@ async function openPinnedElementWidget(
     expect(appDrawerFrameCount).toBe(0);
     expect(persistedHostFrameCount).toBe(1);
     await expect(persistedHostFrame.first()).toBeVisible();
+    const persistedHostFrameVisibleAfterWait = await persistedHostFrame
+      .first()
+      .isVisible()
+      .catch(() => false);
+    onAppDrawerPlacement?.({
+      persistedHostFrameVisible: persistedHostFrameVisibleAfterWait,
+    });
     return;
   }
 

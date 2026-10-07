@@ -1410,6 +1410,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           PERFORMANCE_CLEANUP_COUNT_FIELDS.every((key) => record[key] === null);
         const cleanupCountsConsistent =
           cleanupCountsAvailable &&
+          record.manifestEventCount ===
+            record.plannedCount +
+              record.conflictCount +
+              record.deletedCount +
+              record.alreadyAbsentCount +
+              record.unresolvedCount &&
           record.deletedCount + record.alreadyAbsentCount <=
             record.confirmedCreatedCount &&
           record.plannedCount +
