@@ -3,10 +3,14 @@
 This checklist separates automated calendar-widget evidence from testing in an
 actual Matrix client. The bounded beta targets Element Web and Element Desktop;
 test both against the isolated pinned Synapse, project-owned Radicale, and
-PostgreSQL stack before any production contact. Actual keyboard/focus and
-responsive checks in those clients are required. Mobile/other clients and
-formal screen-reader certification are deferred beyond this beta. This local
-acceptance does not establish compatibility with a team host.
+PostgreSQL stack before any production contact. The current candidate requires
+the actual standard side-panel WidgetCard, horizontal-overflow, and
+keyboard/focus checks described in `beta-scope.md`. The broader viewport
+procedure below is reference guidance, not an additional candidate gate.
+Pinned/full-width Apps-drawer placement and Maximise/Un-maximise certification,
+mobile/other clients, and formal screen-reader certification are deferred
+beyond this beta. This local acceptance does not establish compatibility with
+a team host.
 
 ## Automated evidence
 
@@ -71,11 +75,11 @@ date, and candidate commit. Check the following:
    observed during the client run. This is additional evidence, not a
    substitute for the required keyboard/focus flow.
 
-Use these viewport sizes for browser-based runs. Element Web and Desktop must
-be checked in both a narrow embedded panel and a full-screen widget. Native
-mobile app checks are deferred; if later performed, record the device and
-effective CSS viewport reported by the embedded widget rather than
-substituting a desktop browser emulation result.
+These viewport sizes are reference profiles for broader responsive runs. The
+“Full screen” row is a browser viewport size; it does not certify Element's
+pinned/full-width Apps-drawer layout. Native mobile app checks are deferred; if
+later performed, record the device and effective CSS viewport reported by the
+embedded widget rather than substituting a desktop browser emulation result.
 
 | Profile      | CSS viewport |
 | ------------ | -----------: |

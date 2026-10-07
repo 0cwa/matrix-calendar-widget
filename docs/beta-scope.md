@@ -147,8 +147,10 @@ aliases, configuration, logs, or topology in repository artifacts.
    canonical source data intact. This check does not claim every unsupported
    source form is diagnosed. In each target client, use only the keyboard to
    reach and open an event, move through its details, close with Escape, and
-   verify focus returns to the opening event. Check the narrow embedded panel
-   and full-screen layout.
+   verify focus returns to the opening event. For this candidate, certify the
+   actual standard side-panel WidgetCard and horizontal-overflow behavior.
+   Pinned/full-width Apps-drawer placement and its Maximise/Un-maximise
+   controls are deferred.
    Automated axe and component fixtures supplement these checks; they do not
    replace them.
 5. **Reminder behavior.** Configure the app-owned PostgreSQL store and verify
