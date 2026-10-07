@@ -146,6 +146,15 @@ const ROOM_CONTEXT_PHASES = new Set([
   'member-a-room-context',
   'reminder-room-context',
 ]);
+const ROOM_RENDER_STATE_FIELDS = [
+  'roomViewShellVisible',
+  'roomViewBodyVisible',
+  'roomPreviewVisible',
+  'roomPreviewLoadingVisible',
+  'roomHeaderVisible',
+  'roomHeaderHeadingVisible',
+  'roomErrorBoundaryVisible',
+];
 const REMINDER_ROOM_LAYOUT_FIELDS = [
   'roomViewPresent',
   'roomHeaderPresent',
@@ -683,6 +692,8 @@ const ALLOWED_KEYS = new Set([
   'roomHeadingPresent',
   'roomNameMatches',
   'roomIdMatches',
+  'roomRenderStateAvailable',
+  ...ROOM_RENDER_STATE_FIELDS,
   ...REMINDER_ROOM_LAYOUT_FIELDS,
   ...REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS,
   'blockedExternalRequestCount',
@@ -2081,6 +2092,8 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       'roomHeadingPresent',
       'roomNameMatches',
       'roomIdMatches',
+      'roomRenderStateAvailable',
+      ...ROOM_RENDER_STATE_FIELDS,
       ...REMINDER_ROOM_LAYOUT_FIELDS,
       'blockedExternalRequestCount',
       'homeserverHttpErrorCount',
@@ -2092,6 +2105,25 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     const hasReminderRoomLayoutObservation = REMINDER_ROOM_LAYOUT_FIELDS.some(
       (key) => Object.hasOwn(record, key),
     );
+    const hasRoomRenderStateObservation =
+      Object.hasOwn(record, 'roomRenderStateAvailable') ||
+      ROOM_RENDER_STATE_FIELDS.some((key) => Object.hasOwn(record, key));
+    const roomRenderStateAvailable = record.roomRenderStateAvailable;
+    const roomRenderStateValuesValid =
+      hasRoomRenderStateObservation &&
+      typeof roomRenderStateAvailable === 'boolean' &&
+      ROOM_RENDER_STATE_FIELDS.every((key) => Object.hasOwn(record, key)) &&
+      (roomRenderStateAvailable
+        ? ROOM_RENDER_STATE_FIELDS.every(
+            (key) => typeof record[key] === 'boolean',
+          ) &&
+          (!record.roomViewBodyVisible || record.roomViewShellVisible) &&
+          (!record.roomPreviewVisible || record.roomViewShellVisible) &&
+          (!record.roomPreviewLoadingVisible || record.roomPreviewVisible) &&
+          (!record.roomHeaderVisible || record.roomViewShellVisible) &&
+          (!record.roomHeaderHeadingVisible || record.roomHeaderVisible) &&
+          (!record.roomErrorBoundaryVisible || record.roomViewShellVisible)
+        : ROOM_RENDER_STATE_FIELDS.every((key) => record[key] === null));
     const hasReminderWidgetContextObservation =
       REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS.some((key) =>
         Object.hasOwn(record, key),
@@ -2123,6 +2155,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           !['passed', 'failed'].includes(record.status))) ||
       (hasRoomObservation &&
         (requiredRoomBooleans.some((key) => typeof record[key] !== 'boolean') ||
+          !roomRenderStateValuesValid ||
           !hasSyncObservation ||
           !Object.hasOwn(record, 'blockedExternalRequestCount') ||
           !Object.hasOwn(record, 'homeserverHttpErrorCount') ||
@@ -2462,6 +2495,24 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       fields.push(`room_heading_present=${record.roomHeadingPresent}`);
       fields.push(`room_name_matches=${record.roomNameMatches}`);
       fields.push(`room_id_matches=${record.roomIdMatches}`);
+      if (Object.hasOwn(record, 'roomRenderStateAvailable')) {
+        fields.push(
+          `room_render_state_available=${record.roomRenderStateAvailable}`,
+        );
+        for (const [key, label] of [
+          ['roomViewShellVisible', 'room_view_shell_visible'],
+          ['roomViewBodyVisible', 'room_view_body_visible'],
+          ['roomPreviewVisible', 'room_preview_visible'],
+          ['roomPreviewLoadingVisible', 'room_preview_loading_visible'],
+          ['roomHeaderVisible', 'room_header_visible'],
+          ['roomHeaderHeadingVisible', 'room_header_heading_visible'],
+          ['roomErrorBoundaryVisible', 'room_error_boundary_visible'],
+        ]) {
+          fields.push(
+            `${label}=${record[key] === null ? 'unavailable' : record[key]}`,
+          );
+        }
+      }
       for (const [key, label] of [
         ['roomViewPresent', 'room_view_present'],
         ['roomHeaderPresent', 'room_header_present'],

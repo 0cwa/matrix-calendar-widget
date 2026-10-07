@@ -1141,6 +1141,14 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
         roomHeadingPresent: true,
         roomNameMatches: true,
         roomIdMatches: true,
+        roomRenderStateAvailable: true,
+        roomViewShellVisible: true,
+        roomViewBodyVisible: true,
+        roomPreviewVisible: false,
+        roomPreviewLoadingVisible: false,
+        roomHeaderVisible: true,
+        roomHeaderHeadingVisible: true,
+        roomErrorBoundaryVisible: false,
         blockedExternalRequestCount: 0,
         homeserverHttpErrorCount: 0,
       }),
@@ -1210,7 +1218,7 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
     [
       `element-acceptance source_sha=${sourceSha}`,
       'phase=member-a-room-navigation status=passed',
-      'phase=member-a-room-context status=passed matrix_user_matches=true matrix_room_known=true matrix_room_joined=true matrix_sync_state=SYNCING room_navigation_completed=true room_heading_ready=true room_heading_present=true room_name_matches=true room_id_matches=true blocked_external_request_count=0 homeserver_http_error_count=0',
+      'phase=member-a-room-context status=passed matrix_user_matches=true matrix_room_known=true matrix_room_joined=true matrix_sync_state=SYNCING room_navigation_completed=true room_heading_ready=true room_heading_present=true room_name_matches=true room_id_matches=true room_render_state_available=true room_view_shell_visible=true room_view_body_visible=true room_preview_visible=false room_preview_loading_visible=false room_header_visible=true room_header_heading_visible=true room_error_boundary_visible=false blocked_external_request_count=0 homeserver_http_error_count=0',
       'phase=widget-a-room-info-button status=passed count=1 control_visible=true',
       'phase=widget-a-extensions-menuitem status=passed count=1 control_visible=true panel_present=true',
       'phase=widget-a-extension-row status=passed count=1 control_visible=true panel_present=true',
@@ -1499,6 +1507,14 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     roomHeadingPresent: false,
     roomNameMatches: false,
     roomIdMatches: true,
+    roomRenderStateAvailable: true,
+    roomViewShellVisible: true,
+    roomViewBodyVisible: true,
+    roomPreviewVisible: false,
+    roomPreviewLoadingVisible: false,
+    roomHeaderVisible: false,
+    roomHeaderHeadingVisible: false,
+    roomErrorBoundaryVisible: false,
     blockedExternalRequestCount: 0,
     homeserverHttpErrorCount: 1,
     homeserverLastHttpErrorStatus: 500,
@@ -1507,7 +1523,7 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     sanitizeElementAcceptance(JSON.stringify(roomObservation), sourceSha),
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=member-a-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-not-known',
+      'phase=member-a-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true room_render_state_available=true room_view_shell_visible=true room_view_body_visible=true room_preview_visible=false room_preview_loading_visible=false room_header_visible=false room_header_heading_visible=false room_error_boundary_visible=false blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-not-known',
       '',
     ].join('\n'),
   );
@@ -1532,7 +1548,7 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     ),
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=reminder-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true room_view_present=true room_header_present=false room_heading_dom_present=false room_info_control_present=false fixture_calendar_iframe_present=false reminder_widget_context_response_count=0 blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-heading-wait-timeout',
+      'phase=reminder-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true room_render_state_available=true room_view_shell_visible=true room_view_body_visible=true room_preview_visible=false room_preview_loading_visible=false room_header_visible=false room_header_heading_visible=false room_error_boundary_visible=false room_view_present=true room_header_present=false room_heading_dom_present=false room_info_control_present=false fixture_calendar_iframe_present=false reminder_widget_context_response_count=0 blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-heading-wait-timeout',
       '',
     ].join('\n'),
   );
@@ -1559,6 +1575,9 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     { ...roomObservation, failureCode: 'room name: private meeting' },
     { ...roomObservation, roomName: 'private meeting' },
     { ...roomObservation, roomViewPresent: true },
+    { ...roomObservation, roomRenderStateAvailable: false },
+    { ...roomObservation, roomViewBodyVisible: null },
+    { ...roomObservation, roomHeaderHeadingVisible: true },
     incompleteRoomLayoutObservation,
     { ...reminderRoomObservation, roomInfoControlPresent: 'present' },
     { ...reminderRoomObservation, reminderWidgetContextResponseCount: 2 },
@@ -1574,6 +1593,88 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
       sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
     );
   }
+});
+
+test('labels unavailable room render observations without converting them to false', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'member-a-room-context',
+      status: 'failed',
+      failureCode: 'element-room-heading-wait-timeout',
+      matrixUserMatches: true,
+      matrixRoomKnown: true,
+      matrixRoomJoined: true,
+      matrixSyncState: 'SYNCING',
+      roomNavigationCompleted: true,
+      roomHeadingReady: false,
+      roomHeadingPresent: false,
+      roomNameMatches: false,
+      roomIdMatches: true,
+      roomRenderStateAvailable: false,
+      roomViewShellVisible: null,
+      roomViewBodyVisible: null,
+      roomPreviewVisible: null,
+      roomPreviewLoadingVisible: null,
+      roomHeaderVisible: null,
+      roomHeaderHeadingVisible: null,
+      roomErrorBoundaryVisible: null,
+      blockedExternalRequestCount: 0,
+      homeserverHttpErrorCount: 0,
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /room_render_state_available=false/u);
+  assert.match(summary, /room_view_shell_visible=unavailable/u);
+  assert.match(summary, /room_header_heading_visible=unavailable/u);
+});
+
+test('preserves observed missing-shell and loading-branch booleans', () => {
+  const base = {
+    phase: 'member-a-room-context',
+    status: 'failed',
+    failureCode: 'element-room-heading-not-present',
+    matrixUserMatches: true,
+    matrixRoomKnown: true,
+    matrixRoomJoined: true,
+    matrixSyncState: 'SYNCING',
+    roomNavigationCompleted: true,
+    roomHeadingReady: false,
+    roomHeadingPresent: false,
+    roomNameMatches: false,
+    roomIdMatches: true,
+    roomRenderStateAvailable: true,
+    roomViewShellVisible: false,
+    roomViewBodyVisible: false,
+    roomPreviewVisible: false,
+    roomPreviewLoadingVisible: false,
+    roomHeaderVisible: false,
+    roomHeaderHeadingVisible: false,
+    roomErrorBoundaryVisible: false,
+    blockedExternalRequestCount: 0,
+    homeserverHttpErrorCount: 0,
+  };
+  const missingShell = sanitizeElementAcceptance(
+    JSON.stringify(base),
+    sourceSha,
+  );
+  assert.match(missingShell, /room_render_state_available=true/u);
+  assert.match(missingShell, /room_view_shell_visible=false/u);
+  assert.match(missingShell, /room_header_visible=false/u);
+
+  const loadingBranch = sanitizeElementAcceptance(
+    JSON.stringify({
+      ...base,
+      roomViewShellVisible: true,
+      roomPreviewVisible: true,
+      roomPreviewLoadingVisible: true,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    loadingBranch,
+    /room_preview_visible=true room_preview_loading_visible=true room_header_visible=false/u,
+  );
 });
 
 test('preserves reminder context response evidence when room observation is unavailable', () => {

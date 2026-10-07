@@ -221,6 +221,14 @@ type MemberARoomObservation = {
   roomHeadingPresent: boolean;
   roomNameMatches: boolean;
   roomIdMatches: boolean;
+  roomRenderStateAvailable: boolean;
+  roomViewShellVisible: boolean | null;
+  roomViewBodyVisible: boolean | null;
+  roomPreviewVisible: boolean | null;
+  roomPreviewLoadingVisible: boolean | null;
+  roomHeaderVisible: boolean | null;
+  roomHeaderHeadingVisible: boolean | null;
+  roomErrorBoundaryVisible: boolean | null;
   roomViewPresent?: boolean;
   roomHeaderPresent?: boolean;
   roomHeadingDomPresent?: boolean;
@@ -3541,6 +3549,96 @@ async function openMemberARoomWithDiagnostics(
   };
 }
 
+type RoomRenderStateObservation = Pick<
+  MemberARoomObservation,
+  | 'roomRenderStateAvailable'
+  | 'roomViewShellVisible'
+  | 'roomViewBodyVisible'
+  | 'roomPreviewVisible'
+  | 'roomPreviewLoadingVisible'
+  | 'roomHeaderVisible'
+  | 'roomHeaderHeadingVisible'
+  | 'roomErrorBoundaryVisible'
+>;
+
+function unavailableRoomRenderState(): RoomRenderStateObservation {
+  return {
+    roomRenderStateAvailable: false,
+    roomViewShellVisible: null,
+    roomViewBodyVisible: null,
+    roomPreviewVisible: null,
+    roomPreviewLoadingVisible: null,
+    roomHeaderVisible: null,
+    roomHeaderHeadingVisible: null,
+    roomErrorBoundaryVisible: null,
+  };
+}
+
+async function observeRoomRenderState(
+  page: Page,
+): Promise<RoomRenderStateObservation> {
+  return page.evaluate(() => {
+    const isVisible = (element: Element): boolean => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return (
+        element.getClientRects().length > 0 &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        style.visibility !== 'collapse'
+      );
+    };
+    const unavailable = {
+      roomRenderStateAvailable: false,
+      roomViewShellVisible: null,
+      roomViewBodyVisible: null,
+      roomPreviewVisible: null,
+      roomPreviewLoadingVisible: null,
+      roomHeaderVisible: null,
+      roomHeaderHeadingVisible: null,
+      roomErrorBoundaryVisible: null,
+    } as const;
+    const visibleRoomViews = Array.from(
+      document.querySelectorAll('.mx_RoomView'),
+    ).filter(isVisible);
+    if (visibleRoomViews.length > 1) return unavailable;
+    const roomView = visibleRoomViews[0];
+    if (!roomView) {
+      return {
+        ...unavailable,
+        roomRenderStateAvailable: true,
+        roomViewShellVisible: false,
+        roomViewBodyVisible: false,
+        roomPreviewVisible: false,
+        roomPreviewLoadingVisible: false,
+        roomHeaderVisible: false,
+        roomHeaderHeadingVisible: false,
+        roomErrorBoundaryVisible: false,
+      };
+    }
+    const firstVisible = (root: ParentNode, selector: string): boolean =>
+      Array.from(root.querySelectorAll(selector)).some(isVisible);
+    const header = roomView.querySelector('header.mx_RoomHeader');
+    return {
+      roomRenderStateAvailable: true,
+      roomViewShellVisible: true,
+      roomViewBodyVisible: firstVisible(roomView, '.mx_RoomView_body'),
+      roomPreviewVisible: firstVisible(roomView, '.mx_RoomPreviewBar'),
+      roomPreviewLoadingVisible: firstVisible(
+        roomView,
+        '.mx_RoomPreviewBar_Loading',
+      ),
+      roomHeaderVisible: header !== null && isVisible(header),
+      roomHeaderHeadingVisible:
+        header !== null &&
+        firstVisible(header, '.mx_RoomHeader_heading[role="heading"]'),
+      roomErrorBoundaryVisible: firstVisible(roomView, '.mx_ErrorBoundary'),
+    };
+  });
+}
+
 async function observeMemberARoom(
   page: Page,
   element: ElementWebPage,
@@ -3617,6 +3715,9 @@ async function observeMemberARoom(
     },
     { expectedRoomId: roomId, expectedMatrixUserId: expectedUserId },
   );
+  const roomRenderState = await observeRoomRenderState(page).catch(() =>
+    unavailableRoomRenderState(),
+  );
   const roomNameHeading = getPinnedElementRoomNameHeading(page);
   const roomHeadingCount = await roomNameHeading.count().catch(() => 0);
   const roomHeadingPresent =
@@ -3689,6 +3790,7 @@ async function observeMemberARoom(
     roomHeadingPresent,
     roomNameMatches,
     roomIdMatches,
+    ...roomRenderState,
     ...(roomLayoutObservation ?? {}),
     blockedExternalRequestCount: blockedExternalRequests,
     homeserverHttpErrorCount: homeserverHttpFailures.count,
