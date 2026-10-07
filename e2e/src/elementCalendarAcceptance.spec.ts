@@ -368,6 +368,15 @@ type PerformanceDetailsSample = {
   stable: boolean;
   horizontalOverflow: boolean | null;
 };
+type PerformanceHoverCenterHit =
+  | 'toolbar'
+  | 'tile'
+  | 'persisted-widget-iframe'
+  | 'element-dialog'
+  | 'context-menu'
+  | 'drawer'
+  | 'other'
+  | 'none';
 type PerformanceHoverActionability = {
   available: boolean;
   connected: boolean | null;
@@ -375,16 +384,7 @@ type PerformanceHoverActionability = {
   positiveBox: boolean | null;
   viewportIntersection: boolean | null;
   hiddenAncestor: boolean | null;
-  centerHit:
-    | 'toolbar'
-    | 'tile'
-    | 'persisted-widget-iframe'
-    | 'element-dialog'
-    | 'context-menu'
-    | 'drawer'
-    | 'other'
-    | 'none'
-    | null;
+  centerHit: PerformanceHoverCenterHit | null;
   failureClass:
     | 'not-attempted'
     | 'none'
@@ -395,6 +395,20 @@ type PerformanceHoverActionability = {
     | 'detached'
     | 'other';
 };
+function isPerformanceHoverCenterHit(
+  value: unknown,
+): value is PerformanceHoverCenterHit {
+  return (
+    value === 'toolbar' ||
+    value === 'tile' ||
+    value === 'persisted-widget-iframe' ||
+    value === 'element-dialog' ||
+    value === 'context-menu' ||
+    value === 'drawer' ||
+    value === 'other' ||
+    value === 'none'
+  );
+}
 type PerformanceReport = {
   version: 1;
   year: number;
@@ -2060,15 +2074,7 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
             centerY < window.innerHeight
               ? document.elementFromPoint(centerX, centerY)
               : null;
-          let centerHit:
-            | 'toolbar'
-            | 'tile'
-            | 'persisted-widget-iframe'
-            | 'element-dialog'
-            | 'context-menu'
-            | 'drawer'
-            | 'other'
-            | 'none';
+          let centerHit: PerformanceHoverCenterHit;
           if (hit === null) {
             centerHit = 'none';
           } else if (toolbar.contains(hit)) {
@@ -2102,6 +2108,9 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
               style.visibility !== 'collapse',
           };
         });
+        if (!isPerformanceHoverCenterHit(observation.centerHit)) {
+          throw new Error('invalid performance hover target classification');
+        }
         const visible = await appTileToolbar.first().isVisible();
         report.coldList.hostHoverActionability = {
           available: true,
