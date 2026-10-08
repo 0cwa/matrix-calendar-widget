@@ -30,6 +30,24 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { arch, platform, release } from 'node:os';
 import { isAbsolute, resolve, sep } from 'node:path';
+import { performance } from 'node:perf_hooks';
+import {
+  extractElementBundleFrames,
+  readElementErrorSourceMapInPage,
+  resolveElementErrorSourcePointer,
+  type ElementBundleFrame,
+  type ElementErrorSourcePointer,
+} from '../../dev/element-acceptance-error-source-map.mjs';
+import {
+  MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+  classifyPerformancePageError,
+  summarizeDefaultWaitObservation,
+  type PerformanceDefaultWaitFailureSnapshot,
+  type PerformanceDefaultWaitObservation,
+  type PerformancePageErrorClass,
+  type PerformancePageErrorClassification,
+} from '../../dev/element-acceptance-performance-evidence.mjs';
+import { raceCalendarReadyOrIdentityPrompt } from '../../dev/element-acceptance-performance.mjs';
 import { classifyG6KeyboardFocusTarget } from '../../dev/element-g6-keyboard-focus.mjs';
 import {
   beginG6ResourceCreate,
@@ -44,7 +62,9 @@ import {
   summarizeG6ResourceOwnership,
   type G6ResourceOwnership,
 } from '../../dev/element-g6-resource-ownership.mjs';
+import { roomContextObservationForPhase } from '../../dev/element-room-context-observation.mjs';
 import { ElementWebPage } from './pages/elementWebPage';
+import { fillDatePicker } from './pages/helper';
 
 type User = {
   userId: string;
@@ -385,6 +405,7 @@ type Phase =
   | 'reminder-restore-prior-state'
   | 'reminder-restore-scheduler-scan'
   | 'reminder-restore-no-duplicate'
+  | 'performance-pilot'
   | 'g6-member-a-room-context'
   | 'g6-member-b-room-context'
   | G6Phase;
@@ -439,6 +460,19 @@ type MatrixSyncState =
   | 'CATCHUP'
   | 'UNKNOWN';
 
+type OuterRenderBucket =
+  | 'room-page'
+  | 'other-page'
+  | 'no-shell'
+  | 'inconsistent'
+  | 'unavailable';
+type MatrixChatViewBucket = 'logged-in' | 'other-view' | 'unavailable';
+type MatrixChatPageTypeBucket =
+  | 'room-view'
+  | 'other-page'
+  | 'missing'
+  | 'unavailable';
+
 type MemberARoomObservation = {
   matrixUserMatches: boolean;
   matrixRoomKnown: boolean;
@@ -449,6 +483,23 @@ type MemberARoomObservation = {
   roomHeadingPresent: boolean;
   roomNameMatches: boolean;
   roomIdMatches: boolean;
+  outerRenderBucket: OuterRenderBucket;
+  matrixChatShellPresent: boolean | null;
+  roomViewWrapperPresent: boolean | null;
+  roomViewRendererPresent: boolean | null;
+  matrixChatStateAvailable: boolean;
+  matrixChatViewBucket: MatrixChatViewBucket;
+  matrixChatReady: boolean | null;
+  matrixChatPageTypeBucket: MatrixChatPageTypeBucket;
+  matrixChatCurrentRoomMatches: boolean | null;
+  roomRenderStateAvailable: boolean;
+  roomViewShellVisible: boolean | null;
+  roomViewBodyVisible: boolean | null;
+  roomPreviewVisible: boolean | null;
+  roomPreviewLoadingVisible: boolean | null;
+  roomHeaderVisible: boolean | null;
+  roomHeaderHeadingVisible: boolean | null;
+  roomErrorBoundaryVisible: boolean | null;
   roomViewPresent?: boolean;
   roomHeaderPresent?: boolean;
   roomHeadingDomPresent?: boolean;
@@ -489,6 +540,254 @@ type OpenCalendarWidgetOptions = {
   expectWidgetWarning: boolean;
   waitForCalendar?: boolean;
   captureMemberADiagnostics?: boolean;
+  onTiming?: (
+    phase:
+      | 'activation'
+      | 'capability-approval'
+      | 'identity-approval'
+      | 'iframe-ready'
+      | 'widget-startup',
+    durationMs: number,
+  ) => void;
+};
+
+type PerformancePageErrorStage =
+  | 'case-setup'
+  | 'element-login'
+  | 'room-navigation'
+  | 'widget-open'
+  | 'default-view'
+  | 'cold-layout'
+  | 'refresh-setup'
+  | 'refresh'
+  | 'details'
+  | 'case-cleanup';
+
+type PerformancePageErrorObservation = PerformancePageErrorClassification &
+  ElementErrorSourcePointer & {
+    profile: OrdinaryPerformanceProfile;
+    stage: PerformancePageErrorStage;
+  };
+
+type OrdinaryPerformanceProfile = 'empty' | 'events-25';
+type OrdinaryPerformanceSampleKey =
+  | `${OrdinaryPerformanceProfile}-default`
+  | `${OrdinaryPerformanceProfile}-refresh-setup`
+  | `${OrdinaryPerformanceProfile}-refresh`
+  | `events-25-details-${1 | 2 | 3 | 4 | 5}`;
+type PerformanceSampleKey =
+  | 'cold-list'
+  | `warmup-${'list' | 'month'}-${1 | 2}`
+  | `measured-${'list' | 'month'}-${1 | 2 | 3 | 4 | 5}`
+  | 'overflow-month'
+  | 'overflow-day'
+  | 'overflow-reset-month'
+  | 'overflow-reset-list'
+  | `details-warmup-${1 | 2}`
+  | `details-${1 | 2 | 3 | 4 | 5}`
+  | OrdinaryPerformanceSampleKey;
+type PerformanceEndpoint =
+  | 'context'
+  | 'calendars'
+  | 'events'
+  | 'openid'
+  | 'other-calendar'
+  | 'other-api';
+type PerformanceRangeClass =
+  | 'not-applicable'
+  | 'preselection'
+  | 'preselection-next'
+  | 'list31'
+  | 'month-padded'
+  | 'overflow-day'
+  | 'mismatch';
+type PerformanceApiResponse = {
+  sample: PerformanceSampleKey;
+  endpoint: PerformanceEndpoint;
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'OTHER';
+  status: number;
+  durationMs: number;
+  decoded: boolean;
+  eventCount: number | null;
+  diagnosticCount: number | null;
+  target: 'none' | 'personal' | 'room' | 'other';
+  calendarMatches: boolean | null;
+  rangeClass: PerformanceRangeClass;
+  rangeDays: number | null;
+  rangeMatches: boolean | null;
+  expectedTitlesMatch: boolean | null;
+};
+type PerformanceViewSample = {
+  index: number;
+  view: 'list' | 'month';
+  durationMs: number | null;
+  apiResponseCount: number;
+  apiRangeMaxMs: number | null;
+  roomResponseCount: number;
+  returnedCount: number | null;
+  renderedCount: number | null;
+  rangeMatches: boolean;
+  identitiesMatch: boolean;
+  diagnosticsZero: boolean;
+  stable: boolean;
+  horizontalOverflow: boolean | null;
+};
+type PerformanceDetailsSample = {
+  index: number;
+  durationMs: number | null;
+  visible: boolean;
+  titleMatches: boolean;
+  stable: boolean;
+  horizontalOverflow: boolean | null;
+};
+type PerformanceDefaultViewSample = {
+  durationMs: number | null;
+  apiResponseCount: number;
+  apiRangeMaxMs: number | null;
+  returnedCount: number | null;
+  renderedCount: number | null;
+  rangeMatches: boolean;
+  countMatches: boolean;
+  usableControlVisible: boolean;
+  stable: boolean;
+};
+type PerformanceReport = {
+  version: 2;
+  year: number;
+  month: number;
+  viewportWidth: 1280;
+  viewportHeight: 800;
+  workloadEvents: 250;
+  calendarDays: 31;
+  timezone: 'Europe/Stockholm';
+  preparation: {
+    elementLoginMs: number | null;
+    roomNavigationMs: number | null;
+  };
+  coldList: {
+    durationMs: number | null;
+    widgetStartupMs: number | null;
+    activationMs: number | null;
+    capabilityApprovalMs: number | null;
+    identityApprovalMs: number | null;
+    iframeReadyMs: number | null;
+    placement: 'widget-card' | 'apps-drawer' | 'unknown';
+    widgetCardCount: number;
+    widgetCardVisible: boolean;
+    appDrawerCount: number;
+    persistedHostFrameCount: number;
+    persistedHostFrameVisible: boolean;
+    iframeWidth: number | null;
+    iframeHeight: number | null;
+    hostHorizontalOverflow: boolean | null;
+    rangeSelectionMs: number | null;
+    openIdResponseCount: number;
+    openIdMaxMs: number | null;
+    apiRangeMaxMs: number | null;
+    selectedRoomResponseCount: number;
+    returnedCount: number | null;
+    renderedCount: number | null;
+    expectedRangeMatches: boolean;
+    identitiesMatch: boolean;
+    diagnosticsZero: boolean;
+    stable: boolean;
+    horizontalOverflow: boolean | null;
+  };
+  viewWarmups: PerformanceViewSample[];
+  viewSamples: PerformanceViewSample[];
+  detailWarmups: PerformanceDetailsSample[];
+  detailSamples: PerformanceDetailsSample[];
+  overflow: {
+    visibleEventCount: number | null;
+    collapsedEventCount: number | null;
+    renderedEventCount: number | null;
+    opened: boolean;
+    expectedDayEventCount: number | null;
+    dayEventCount: number | null;
+    dayIdentityMatches: boolean;
+    stable: boolean;
+  };
+  apiResponses: PerformanceApiResponse[];
+  blockedRequestCount: number | null;
+  pageErrorCount: number | null;
+  pageErrorClass: PerformancePageErrorClass;
+};
+type PerformanceActionSample = {
+  durationMs: number | null;
+  apiResponseCount: number;
+  apiRangeMaxMs: number | null;
+  roomResponseCount: number;
+  returnedCount: number | null;
+  renderedCount: number | null;
+  rangeMatches: boolean;
+  identitiesMatch: boolean;
+  diagnosticsZero: boolean;
+  stable: boolean;
+  horizontalOverflow: boolean | null;
+};
+type OrdinaryPerformanceCase = {
+  profile: OrdinaryPerformanceProfile;
+  year: number;
+  month: number;
+  eventCount: 0 | 25;
+  preparation: PerformanceReport['preparation'];
+  defaultView: PerformanceDefaultViewSample;
+  defaultWaitObservation: PerformanceDefaultWaitObservation | null;
+  coldList: PerformanceReport['coldList'];
+  refreshSetup: PerformanceActionSample;
+  refresh: PerformanceActionSample;
+  detailSamples: PerformanceDetailsSample[];
+};
+type OrdinaryPerformanceReport = {
+  version: 12;
+  viewportWidth: 1280;
+  viewportHeight: 800;
+  calendarDays: 7;
+  timezone: 'Europe/Stockholm';
+  cases: OrdinaryPerformanceCase[];
+  apiResponses: PerformanceApiResponse[];
+  blockedRequestCount: number | null;
+  pageErrorCount: number | null;
+  pageErrorClass: PerformancePageErrorClass;
+  pageErrorObservations: PerformancePageErrorObservation[];
+  pageErrorObservationOverflow: boolean;
+};
+type PerformanceReportData = PerformanceReport | OrdinaryPerformanceReport;
+
+type PerformancePendingRequest = {
+  sample: PerformanceSampleKey;
+  endpoint: PerformanceEndpoint;
+  method: PerformanceApiResponse['method'];
+  startedAt: number;
+  target: 'none' | 'personal' | 'room' | 'other';
+  calendarMatches: boolean | null;
+  rangeClass: PerformanceRangeClass;
+  rangeDays: number | null;
+  rangeMatches: boolean | null;
+  expectedTitles: ReadonlySet<string>;
+};
+
+type PerformanceApiObserver = {
+  setSample: (
+    sample: PerformanceSampleKey,
+    expectedTitles?: ReadonlySet<string>,
+  ) => void;
+  rows: () => PerformanceApiResponse[];
+  rowsFor: (sample: PerformanceSampleKey) => PerformanceApiResponse[];
+  defaultWaitObservation: (
+    sample: PerformanceSampleKey,
+    failureSnapshot?: PerformanceDefaultWaitFailureSnapshot,
+  ) => PerformanceDefaultWaitObservation;
+  waitForRoomEvents: (
+    sample: PerformanceSampleKey,
+    rangeClass:
+      | 'preselection'
+      | 'preselection-next'
+      | 'list31'
+      | 'month-padded'
+      | 'overflow-day',
+  ) => Promise<void>;
+  waitForSettled: (sample: PerformanceSampleKey) => Promise<void>;
 };
 
 type HomeserverHttpFailures = {
@@ -749,6 +1048,974 @@ const BLOCKED_REQUEST_RESOURCE_TYPES = new Set<BlockedRequestResourceType>([
   'other',
 ]);
 const MAX_BLOCKED_REQUEST_DIAGNOSTIC_BUCKETS = 32;
+
+function elapsedMilliseconds(startedAt: number): number {
+  return roundPerformanceMilliseconds(performance.now() - startedAt);
+}
+
+function roundPerformanceMilliseconds(value: number): number {
+  return Math.max(0, Number(value.toFixed(3)));
+}
+
+function localCalendarDate(date: Date): {
+  year: number;
+  month: number;
+  day: number;
+} {
+  const values = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Stockholm',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .formatToParts(date)
+      .filter(({ type }) => type !== 'literal')
+      .map(({ type, value }) => [type, Number(value)]),
+  );
+  return {
+    year: values.year as number,
+    month: values.month as number,
+    day: values.day as number,
+  };
+}
+
+function shiftCalendarDate(
+  year: number,
+  month: number,
+  day: number,
+  amount: number,
+): { year: number; month: number; day: number } {
+  const date = new Date(Date.UTC(year, month - 1, day + amount));
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+  };
+}
+
+function localMidnightEpoch(year: number, month: number, day: number): number {
+  const target = Date.UTC(year, month - 1, day);
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Stockholm',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  let guess = target;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const values = Object.fromEntries(
+      formatter
+        .formatToParts(new Date(guess))
+        .filter(({ type }) => type !== 'literal')
+        .map(({ type, value }) => [type, Number(value)]),
+    );
+    const represented = Date.UTC(
+      values.year as number,
+      (values.month as number) - 1,
+      values.day as number,
+      values.hour as number,
+      values.minute as number,
+      values.second as number,
+    );
+    const adjustment = target - represented;
+    guess += adjustment;
+    if (adjustment === 0) return guess;
+  }
+  return guess;
+}
+
+function performanceMonthRange(
+  year: number,
+  month: number,
+  view: 'list' | 'month',
+): { start: number; end: number } {
+  const firstDay = localMidnightEpoch(year, month, 1);
+  const nextMonth = localMidnightEpoch(year, month + 1, 1);
+  return view === 'month'
+    ? {
+        start: localMidnightEpoch(year, month, -6),
+        end: localMidnightEpoch(year, month + 1, 8),
+      }
+    : { start: firstDay, end: nextMonth };
+}
+
+function performanceDayRange(
+  year: number,
+  month: number,
+  day: number,
+): { start: number; end: number } {
+  return {
+    start: localMidnightEpoch(year, month, day),
+    end: localMidnightEpoch(year, month, day + 1),
+  };
+}
+
+function performancePreselectionRange(
+  initialDate: {
+    year: number;
+    month: number;
+    day: number;
+  },
+  offsetDays = 0,
+): { start: number; end: number } {
+  const startDate = shiftCalendarDate(
+    initialDate.year,
+    initialDate.month,
+    initialDate.day,
+    offsetDays,
+  );
+  const endDate = shiftCalendarDate(
+    startDate.year,
+    startDate.month,
+    startDate.day,
+    7,
+  );
+  return {
+    start: localMidnightEpoch(startDate.year, startDate.month, startDate.day),
+    end: localMidnightEpoch(endDate.year, endDate.month, endDate.day),
+  };
+}
+
+function makeEmptyPerformanceReport(
+  year: number,
+  month: number,
+): PerformanceReport {
+  return {
+    version: 2,
+    year,
+    month,
+    viewportWidth: 1280,
+    viewportHeight: 800,
+    workloadEvents: 250,
+    calendarDays: 31,
+    timezone: 'Europe/Stockholm',
+    preparation: { elementLoginMs: null, roomNavigationMs: null },
+    coldList: {
+      durationMs: null,
+      widgetStartupMs: null,
+      activationMs: null,
+      capabilityApprovalMs: null,
+      identityApprovalMs: null,
+      iframeReadyMs: null,
+      placement: 'unknown',
+      widgetCardCount: 0,
+      widgetCardVisible: false,
+      appDrawerCount: 0,
+      persistedHostFrameCount: 0,
+      persistedHostFrameVisible: false,
+      iframeWidth: null,
+      iframeHeight: null,
+      hostHorizontalOverflow: null,
+      rangeSelectionMs: null,
+      openIdResponseCount: 0,
+      openIdMaxMs: null,
+      apiRangeMaxMs: null,
+      selectedRoomResponseCount: 0,
+      returnedCount: null,
+      renderedCount: null,
+      expectedRangeMatches: false,
+      identitiesMatch: false,
+      diagnosticsZero: false,
+      stable: false,
+      horizontalOverflow: null,
+    },
+    viewWarmups: [],
+    viewSamples: [],
+    detailWarmups: [],
+    detailSamples: [],
+    overflow: {
+      visibleEventCount: null,
+      collapsedEventCount: null,
+      renderedEventCount: null,
+      opened: false,
+      expectedDayEventCount: null,
+      dayEventCount: null,
+      dayIdentityMatches: false,
+      stable: false,
+    },
+    apiResponses: [],
+    blockedRequestCount: null,
+    pageErrorCount: null,
+    pageErrorClass: 'none',
+  };
+}
+
+function makeEmptyActionSample(): PerformanceActionSample {
+  return {
+    durationMs: null,
+    apiResponseCount: 0,
+    apiRangeMaxMs: null,
+    roomResponseCount: 0,
+    returnedCount: null,
+    renderedCount: null,
+    rangeMatches: false,
+    identitiesMatch: false,
+    diagnosticsZero: false,
+    stable: false,
+    horizontalOverflow: null,
+  };
+}
+
+function makeEmptyOrdinaryPerformanceCase(
+  profile: OrdinaryPerformanceProfile,
+  year: number,
+  month: number,
+): OrdinaryPerformanceCase {
+  return {
+    profile,
+    year,
+    month,
+    eventCount: profile === 'empty' ? 0 : 25,
+    preparation: { elementLoginMs: null, roomNavigationMs: null },
+    defaultView: {
+      durationMs: null,
+      apiResponseCount: 0,
+      apiRangeMaxMs: null,
+      returnedCount: null,
+      renderedCount: null,
+      rangeMatches: false,
+      countMatches: false,
+      usableControlVisible: false,
+      stable: false,
+    },
+    defaultWaitObservation: null,
+    coldList: makeEmptyPerformanceReport(year, month).coldList,
+    refreshSetup: makeEmptyActionSample(),
+    refresh: makeEmptyActionSample(),
+    detailSamples: [],
+  };
+}
+
+function makeEmptyOrdinaryPerformanceReport(initialDate: {
+  year: number;
+  month: number;
+}): OrdinaryPerformanceReport {
+  return {
+    version: 12,
+    viewportWidth: 1280,
+    viewportHeight: 800,
+    calendarDays: 7,
+    timezone: 'Europe/Stockholm',
+    cases: [
+      makeEmptyOrdinaryPerformanceCase(
+        'empty',
+        initialDate.year,
+        initialDate.month,
+      ),
+      makeEmptyOrdinaryPerformanceCase(
+        'events-25',
+        initialDate.year,
+        initialDate.month,
+      ),
+    ],
+    apiResponses: [],
+    blockedRequestCount: 0,
+    pageErrorCount: 0,
+    pageErrorClass: 'none',
+    pageErrorObservations: [],
+    pageErrorObservationOverflow: false,
+  };
+}
+
+function runOrdinaryPerformanceSeed(initialDate: {
+  year: number;
+  month: number;
+  day: number;
+}): void {
+  const environmentNames = [
+    'RUNNER_TEMP',
+    'GITHUB_RUN_ID',
+    'GITHUB_RUN_ATTEMPT',
+    'ELEMENT_ACCEPTANCE_USERS_FILE',
+    'ELEMENT_ACCEPTANCE_PERFORMANCE_MANIFEST_FILE',
+    'ELEMENT_ACCEPTANCE_STAGE_FILE',
+  ];
+  const seedEnvironment: NodeJS.ProcessEnv = {
+    ELEMENT_ACCEPTANCE_PERFORMANCE_START_DATE: `${initialDate.year}-${String(initialDate.month).padStart(2, '0')}-${String(initialDate.day).padStart(2, '0')}`,
+  };
+  for (const name of environmentNames) {
+    const value = process.env[name];
+    if (!value) throw new Error('Ordinary performance fixture is unavailable');
+    seedEnvironment[name] = value;
+  }
+
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve(process.cwd(), '../dev/element-acceptance-performance.mjs'),
+      'seed-ordinary',
+    ],
+    { env: seedEnvironment, stdio: 'ignore' },
+  );
+  if (result.error || result.status !== 0) {
+    throw new Error('Ordinary performance fixture seeding failed');
+  }
+}
+
+function makePerformanceTitles(
+  runId: string,
+  attempt: string,
+  count = 250,
+): string[] {
+  if (!/^\d{1,20}$/u.test(runId) || !/^\d{1,6}$/u.test(attempt)) {
+    throw new Error('Element performance run identity is unavailable');
+  }
+  return Array.from(
+    { length: count },
+    (_, index) =>
+      `Performance ${runId}-${attempt}-${String(index + 1).padStart(3, '0')}`,
+  );
+}
+
+function performanceRangeExpectation(
+  sample: PerformanceSampleKey,
+  year: number,
+  month: number,
+  initialDate: { year: number; month: number; day: number },
+): {
+  rangeClass: PerformanceRangeClass;
+  start: number;
+  end: number;
+} {
+  if (sample === 'cold-list') {
+    return {
+      rangeClass: 'list31',
+      ...performanceMonthRange(year, month, 'list'),
+    };
+  }
+  if (sample.endsWith('-refresh-setup')) {
+    return {
+      rangeClass: 'preselection-next',
+      ...performancePreselectionRange(initialDate, 7),
+    };
+  }
+  if (sample.endsWith('-refresh') || sample.startsWith('events-25-details-')) {
+    return {
+      rangeClass: 'preselection',
+      ...performancePreselectionRange(initialDate),
+    };
+  }
+  if (sample === 'overflow-day') {
+    return {
+      rangeClass: 'overflow-day',
+      ...performanceDayRange(year, month, 1),
+    };
+  }
+  if (
+    sample === 'overflow-month' ||
+    sample === 'overflow-reset-month' ||
+    sample.startsWith('warmup-month-') ||
+    sample.startsWith('measured-month-')
+  ) {
+    return {
+      rangeClass: 'month-padded',
+      ...performanceMonthRange(year, month, 'month'),
+    };
+  }
+  if (
+    sample === 'overflow-reset-list' ||
+    sample.startsWith('warmup-list-') ||
+    sample.startsWith('measured-list-') ||
+    sample.startsWith('details-')
+  ) {
+    return {
+      rangeClass: 'list31',
+      ...performanceMonthRange(year, month, 'list'),
+    };
+  }
+  return {
+    rangeClass: 'preselection',
+    ...performancePreselectionRange(initialDate),
+  };
+}
+
+async function observeDefaultWaitFailureSnapshot(
+  page: Page,
+  frame: ReturnType<ElementWebPage['widgetByTitle']>,
+  gatewayUrl: string,
+  expectedRoomId: string,
+  observer: PerformanceApiObserver,
+  sample: PerformanceSampleKey,
+): Promise<PerformanceDefaultWaitFailureSnapshot> {
+  const unavailableConfiguration: PerformanceDefaultWaitFailureSnapshot['widgetConfiguration'] =
+    {
+      available: false,
+      gatewayBaseParameterPresent: null,
+      gatewayBaseValuePresent: null,
+      gatewayBaseOriginMatches: null,
+      roomIdParameterPresent: null,
+      roomIdValuePresent: null,
+      roomIdMatches: null,
+      repositoryConfig: 'unavailable',
+    };
+  const widgetConfiguration = await page
+    .locator('iframe[title="Matrix Calendar"]')
+    .evaluateAll(
+      (
+        iframes,
+        expected,
+      ): PerformanceDefaultWaitFailureSnapshot['widgetConfiguration'] => {
+        const unavailable =
+          (): PerformanceDefaultWaitFailureSnapshot['widgetConfiguration'] => ({
+            available: false,
+            gatewayBaseParameterPresent: null,
+            gatewayBaseValuePresent: null,
+            gatewayBaseOriginMatches: null,
+            roomIdParameterPresent: null,
+            roomIdValuePresent: null,
+            roomIdMatches: null,
+            repositoryConfig: 'unavailable',
+          });
+        if (iframes.length !== 1) return unavailable();
+
+        try {
+          const source = iframes[0].getAttribute('src');
+          if (!source) return unavailable();
+          const widgetUrl = new URL(source, window.location.href);
+          const hashQueryStart = widgetUrl.hash.indexOf('?');
+          const hashQuery =
+            hashQueryStart >= 0 ? widgetUrl.hash.slice(hashQueryStart + 1) : '';
+          const searchParameters = new URLSearchParams(widgetUrl.search);
+          const hashParameters = new URLSearchParams(hashQuery);
+          const readParameter = (key: string) => {
+            const searchValues = searchParameters.getAll(key);
+            const hashValues = hashParameters.getAll(key);
+            if (
+              searchValues.length > 1 ||
+              hashValues.length > 1 ||
+              (searchValues.length > 0 && hashValues.length > 0)
+            ) {
+              return { unambiguous: false, present: false, value: undefined };
+            }
+            const values = searchValues.length > 0 ? searchValues : hashValues;
+            return {
+              unambiguous: true,
+              present: values.length === 1,
+              value: values[0],
+            };
+          };
+          const gatewayBase = readParameter('meetings_bot_base_url');
+          const roomId = readParameter('matrix_room_id');
+          if (!gatewayBase.unambiguous || !roomId.unambiguous) {
+            return unavailable();
+          }
+
+          const gatewayBaseValuePresent =
+            gatewayBase.present &&
+            typeof gatewayBase.value === 'string' &&
+            gatewayBase.value.length > 0;
+          const roomIdValuePresent =
+            roomId.present &&
+            typeof roomId.value === 'string' &&
+            roomId.value.length > 0;
+          let gatewayBaseOriginMatches: boolean | null = null;
+          if (
+            typeof gatewayBase.value === 'string' &&
+            gatewayBase.value.length > 0
+          ) {
+            try {
+              gatewayBaseOriginMatches =
+                new URL(gatewayBase.value).origin === expected.gatewayOrigin;
+            } catch {
+              gatewayBaseOriginMatches = false;
+            }
+          }
+          const roomIdMatches = roomIdValuePresent
+            ? roomId.value === expected.roomId
+            : null;
+          const repositoryConfig: PerformanceDefaultWaitFailureSnapshot['widgetConfiguration']['repositoryConfig'] =
+            !roomIdValuePresent ||
+            (gatewayBase.present && !gatewayBaseValuePresent)
+              ? 'in-memory-forced'
+              : gatewayBaseValuePresent
+                ? 'explicit-gateway-parameters'
+                : 'build-config-fallback-possible';
+
+          return {
+            available: true,
+            gatewayBaseParameterPresent: gatewayBase.present,
+            gatewayBaseValuePresent,
+            gatewayBaseOriginMatches,
+            roomIdParameterPresent: roomId.present,
+            roomIdValuePresent,
+            roomIdMatches,
+            repositoryConfig,
+          };
+        } catch {
+          return unavailable();
+        }
+      },
+      {
+        gatewayOrigin: new URL(gatewayUrl).origin,
+        roomId: expectedRoomId,
+      },
+    )
+    .catch(() => unavailableConfiguration);
+
+  let createControl: PerformanceDefaultWaitFailureSnapshot['createControl'] = {
+    available: false,
+    count: null,
+    visible: null,
+    enabled: null,
+  };
+  try {
+    const createLocator = frame.getByRole('button', {
+      name: 'Create event',
+      exact: true,
+    });
+    const count = Math.min(await createLocator.count(), 2) as 0 | 1 | 2;
+    if (count === 0) {
+      createControl = {
+        available: true,
+        count,
+        visible: false,
+        enabled: false,
+      };
+    } else if (count === 2) {
+      createControl = {
+        available: true,
+        count,
+        visible: null,
+        enabled: null,
+      };
+    } else {
+      const [visible, enabled] = await Promise.all([
+        createLocator.isVisible().catch(() => null),
+        createLocator.isEnabled().catch(() => null),
+      ]);
+      createControl = { available: true, count, visible, enabled };
+    }
+  } catch {
+    // A failed immediate locator read is reported as unavailable.
+  }
+
+  const completedApiRows: PerformanceDefaultWaitFailureSnapshot['completedApiRows'] =
+    [];
+  let completedApiRowsOverflow = false;
+  for (const row of observer.rowsFor(sample)) {
+    if (
+      row.endpoint !== 'context' &&
+      row.endpoint !== 'calendars' &&
+      row.endpoint !== 'events' &&
+      row.endpoint !== 'openid'
+    ) {
+      continue;
+    }
+    if (completedApiRows.length === MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT) {
+      completedApiRowsOverflow = true;
+      continue;
+    }
+    completedApiRows.push({
+      endpoint: row.endpoint,
+      status: row.status,
+      decoded: row.decoded,
+    });
+  }
+
+  return {
+    widgetConfiguration,
+    createControl,
+    completedApiRows,
+    completedApiRowsOverflow,
+  };
+}
+
+function createPerformanceApiObserver(
+  page: Page,
+  year: number,
+  month: number,
+  expectedTitles: ReadonlySet<string>,
+  expectedDayTitles: ReadonlySet<string>,
+  initialDate: { year: number; month: number; day: number },
+): PerformanceApiObserver {
+  const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
+  const homeserverOrigin = new URL(fixture.homeserverUrl).origin;
+  const pending = new Map<Request, PerformancePendingRequest>();
+  const pendingBySample = new Map<PerformanceSampleKey, number>();
+  const otherOriginCalendarPathCountBySample = new Map<
+    PerformanceSampleKey,
+    number
+  >();
+  const apiResponses: PerformanceApiResponse[] = [];
+  let activeSample: PerformanceSampleKey = 'cold-list';
+  let activeExpectedTitles = expectedTitles;
+
+  const startRequest = (request: Request) => {
+    const startedAt = performance.now();
+    let requestUrl: URL;
+    try {
+      requestUrl = new URL(request.url());
+    } catch {
+      return;
+    }
+    const rawMethod = request.method();
+    if (
+      requestUrl.origin !== gatewayOrigin &&
+      requestUrl.pathname.startsWith('/v1/calendar/')
+    ) {
+      const previousCount =
+        otherOriginCalendarPathCountBySample.get(activeSample) ?? 0;
+      otherOriginCalendarPathCountBySample.set(
+        activeSample,
+        Math.min(previousCount + 1, MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT + 1),
+      );
+    }
+    if (rawMethod === 'OPTIONS' || rawMethod === 'HEAD') return;
+    let endpoint: PerformanceEndpoint | undefined;
+    if (
+      requestUrl.origin === homeserverOrigin &&
+      requestUrl.pathname.endsWith('/openid/request_token')
+    ) {
+      if (rawMethod !== 'POST') return;
+      endpoint = 'openid';
+    } else if (
+      requestUrl.origin === gatewayOrigin &&
+      requestUrl.pathname.startsWith('/v1/calendar/')
+    ) {
+      endpoint =
+        requestUrl.pathname === '/v1/calendar/context'
+          ? 'context'
+          : requestUrl.pathname === '/v1/calendar/calendars'
+            ? 'calendars'
+            : requestUrl.pathname === '/v1/calendar/events'
+              ? 'events'
+              : 'other-calendar';
+    }
+    if (!endpoint) return;
+    const method: PerformanceApiResponse['method'] =
+      rawMethod === 'GET' ||
+      rawMethod === 'POST' ||
+      rawMethod === 'PUT' ||
+      rawMethod === 'DELETE'
+        ? rawMethod
+        : 'OTHER';
+
+    let target: PerformancePendingRequest['target'] = 'none';
+    let calendarMatches: boolean | null = null;
+    let rangeClass: PerformanceRangeClass = 'not-applicable';
+    let rangeDays: number | null = null;
+    let rangeMatches: boolean | null = null;
+    if (endpoint === 'events') {
+      const targetValue = requestUrl.searchParams.get('target');
+      target =
+        targetValue === 'personal' || targetValue === 'room'
+          ? targetValue
+          : targetValue
+            ? 'other'
+            : 'none';
+      calendarMatches =
+        target === 'room' &&
+        requestUrl.searchParams.get('calendarId') === fixture.calendarId &&
+        requestUrl.searchParams.get('roomId') === fixture.teamRoomId;
+      const expected = performanceRangeExpectation(
+        activeSample,
+        year,
+        month,
+        initialDate,
+      );
+      const start = Date.parse(requestUrl.searchParams.get('start') ?? '');
+      const end = Date.parse(requestUrl.searchParams.get('end') ?? '');
+      if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
+        rangeDays = roundPerformanceMilliseconds((end - start) / 86_400_000);
+        rangeMatches = start === expected.start && end === expected.end;
+      }
+      rangeClass = rangeMatches ? expected.rangeClass : 'mismatch';
+      if (
+        activeSample === 'cold-list' &&
+        !rangeMatches &&
+        Number.isFinite(start) &&
+        Number.isFinite(end)
+      ) {
+        const preselection = performancePreselectionRange(initialDate);
+        if (start === preselection.start && end === preselection.end) {
+          rangeClass = 'preselection';
+          rangeMatches = true;
+        }
+      }
+    }
+    const metadata: PerformancePendingRequest = {
+      sample: activeSample,
+      endpoint,
+      method,
+      startedAt,
+      target,
+      calendarMatches,
+      rangeClass,
+      rangeDays,
+      rangeMatches,
+      expectedTitles: activeExpectedTitles,
+    };
+    pending.set(request, metadata);
+    pendingBySample.set(
+      activeSample,
+      (pendingBySample.get(activeSample) ?? 0) + 1,
+    );
+  };
+
+  const finishRequest = (
+    request: Request,
+    metadata: PerformancePendingRequest,
+    status: number,
+    decoded: boolean,
+    body?: unknown,
+  ) => {
+    if (!pending.delete(request)) return;
+    pendingBySample.set(
+      metadata.sample,
+      Math.max(0, (pendingBySample.get(metadata.sample) ?? 1) - 1),
+    );
+    let eventCount: number | null = null;
+    let diagnosticCount: number | null = null;
+    let expectedTitlesMatch: boolean | null = null;
+    let calendarMatches = metadata.calendarMatches;
+    if (metadata.endpoint === 'events' && decoded && isRecord(body)) {
+      const resources = Array.isArray(body.events) ? body.events : undefined;
+      const eventObjects = resources?.map((resource) =>
+        isRecord(resource) && isRecord(resource.event)
+          ? resource.event
+          : undefined,
+      );
+      if (resources && eventObjects?.every((event) => event !== undefined)) {
+        eventCount = resources.length;
+        const titles = eventObjects.map((event) => event?.title);
+        const expectedTitleSet =
+          metadata.sample === 'overflow-day'
+            ? expectedDayTitles
+            : metadata.expectedTitles;
+        expectedTitlesMatch =
+          titles.length === expectedTitleSet.size &&
+          titles.every(
+            (title): title is string =>
+              typeof title === 'string' && expectedTitleSet.has(title),
+          ) &&
+          new Set(titles).size === expectedTitleSet.size;
+        calendarMatches =
+          metadata.calendarMatches === true &&
+          eventObjects.every(
+            (event) => event?.calendarId === fixture.calendarId,
+          );
+      } else {
+        eventCount = resources?.length ?? null;
+        expectedTitlesMatch = false;
+      }
+      const diagnostics = Array.isArray(body.diagnostics)
+        ? body.diagnostics
+        : undefined;
+      if (
+        diagnostics?.every(
+          (diagnostic) =>
+            isRecord(diagnostic) &&
+            Number.isInteger(diagnostic.count) &&
+            (diagnostic.count as number) >= 0 &&
+            (diagnostic.count as number) <= 1000,
+        )
+      ) {
+        diagnosticCount = diagnostics.reduce(
+          (total, diagnostic) =>
+            total + (isRecord(diagnostic) ? (diagnostic.count as number) : 0),
+          0,
+        );
+      }
+    } else if (metadata.endpoint === 'events') {
+      expectedTitlesMatch = false;
+    }
+    apiResponses.push({
+      sample: metadata.sample,
+      endpoint: metadata.endpoint,
+      method: metadata.method,
+      status,
+      durationMs: roundPerformanceMilliseconds(
+        performance.now() - metadata.startedAt,
+      ),
+      decoded,
+      eventCount,
+      diagnosticCount,
+      target: metadata.target,
+      calendarMatches,
+      rangeClass: metadata.rangeClass,
+      rangeDays: metadata.rangeDays,
+      rangeMatches: metadata.rangeMatches,
+      expectedTitlesMatch,
+    });
+  };
+
+  page.on('request', startRequest);
+  page.on('response', (response) => {
+    const request = response.request();
+    const metadata = pending.get(request);
+    if (!metadata) return;
+    void (async () => {
+      let body: unknown;
+      let decoded = false;
+      try {
+        body = await response.json();
+        decoded = true;
+      } catch {
+        // The fixed report records only decode success and numeric status.
+      }
+      finishRequest(request, metadata, response.status(), decoded, body);
+    })();
+  });
+  page.on('requestfailed', (request) => {
+    const metadata = pending.get(request);
+    if (metadata) finishRequest(request, metadata, 0, false);
+  });
+
+  const waitUntil = async (predicate: () => boolean) => {
+    const deadline = performance.now() + 30_000;
+    while (performance.now() < deadline) {
+      if (predicate()) return;
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+    }
+    throw new Error('Calendar API observation did not settle');
+  };
+
+  return {
+    setSample: (sample, sampleExpectedTitles = expectedTitles) => {
+      activeSample = sample;
+      activeExpectedTitles = sampleExpectedTitles;
+    },
+    rows: () => [...apiResponses],
+    rowsFor: (sample) => apiResponses.filter((row) => row.sample === sample),
+    defaultWaitObservation: (sample, failureSnapshot) => {
+      const pendingCounts: Record<PerformanceEndpoint, number> = {
+        context: 0,
+        calendars: 0,
+        events: 0,
+        openid: 0,
+        'other-calendar': 0,
+        'other-api': 0,
+      };
+      for (const metadata of pending.values()) {
+        if (metadata.sample !== sample) continue;
+        pendingCounts[metadata.endpoint] = Math.min(
+          pendingCounts[metadata.endpoint] + 1,
+          MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT + 1,
+        );
+      }
+      return summarizeDefaultWaitObservation(
+        pendingCounts,
+        otherOriginCalendarPathCountBySample.get(sample) ?? 0,
+        failureSnapshot,
+      );
+    },
+    waitForRoomEvents: async (sample, expectedRangeClass) => {
+      await waitUntil(() =>
+        apiResponses.some(
+          (row) =>
+            row.sample === sample &&
+            row.endpoint === 'events' &&
+            row.target === 'room' &&
+            row.calendarMatches === true &&
+            row.rangeClass === expectedRangeClass &&
+            row.rangeMatches === true,
+        ),
+      );
+    },
+    waitForSettled: async (sample) => {
+      await waitUntil(() => (pendingBySample.get(sample) ?? 0) === 0);
+    },
+  };
+}
+
+function measureStableDom<T>(
+  locator: Locator,
+  read: () => Promise<T>,
+): Promise<{
+  first: T;
+  second: T;
+  stable: boolean;
+}> {
+  return (async () => {
+    const first = await read();
+    await locator.evaluate(
+      async () =>
+        new Promise<void>((resolvePromise) =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => resolvePromise()),
+          ),
+        ),
+    );
+    const second = await read();
+    return {
+      first,
+      second,
+      stable: JSON.stringify(first) === JSON.stringify(second),
+    };
+  })();
+}
+
+async function readHorizontalOverflow(body: Locator): Promise<boolean> {
+  return body.evaluate((bodyElement) => {
+    const root = bodyElement.ownerDocument.documentElement;
+    return (
+      Math.max(root.scrollWidth, bodyElement.scrollWidth) > root.clientWidth
+    );
+  });
+}
+
+async function readStableList(
+  frame: FrameLocator,
+  expectedTitles: readonly string[],
+) {
+  const rows = frame.locator('li[aria-label]');
+  await expect(rows).toHaveCount(expectedTitles.length);
+  const body = frame.locator('body');
+  return measureStableDom(body, () =>
+    body.evaluate((bodyElement, expected) => {
+      const root = bodyElement.ownerDocument.documentElement;
+      const titles = Array.from(
+        bodyElement.querySelectorAll('li[aria-label]'),
+        (element) => element.getAttribute('aria-label') ?? '',
+      );
+      const actual = new Set(titles);
+      const expectedSet = new Set(expected);
+      return {
+        renderedCount: titles.length,
+        identitiesMatch:
+          actual.size === expectedSet.size &&
+          titles.length === expected.length &&
+          expected.every((title) => actual.has(title)),
+        horizontalOverflow:
+          Math.max(root.scrollWidth, bodyElement.scrollWidth) >
+          root.clientWidth,
+      };
+    }, expectedTitles),
+  );
+}
+
+async function readStableRowCount(
+  frame: FrameLocator,
+  expectedTitles: readonly string[],
+) {
+  const body = frame.locator('body');
+  return measureStableDom(body, () =>
+    body.evaluate((bodyElement, expected) => {
+      const root = bodyElement.ownerDocument.documentElement;
+      const titles = Array.from(
+        bodyElement.querySelectorAll('li[aria-label]'),
+        (element) => element.getAttribute('aria-label') ?? '',
+      );
+      const actual = new Set(titles);
+      const expectedSet = new Set(expected);
+      return {
+        renderedCount: titles.length,
+        identitiesMatch:
+          actual.size === expectedSet.size &&
+          titles.length === expected.length &&
+          expected.every((title) => actual.has(title)),
+        horizontalOverflow:
+          Math.max(root.scrollWidth, bodyElement.scrollWidth) >
+          root.clientWidth,
+      };
+    }, expectedTitles),
+  );
+}
 
 test('Element Web members share events and enforce room authorization', async ({
   browser,
@@ -1150,6 +2417,685 @@ test('Element Web members share events and enforce room authorization', async ({
   }
 });
 
+const ELEMENT_ERROR_SOURCE_MAP_MAX_BYTES = 64 * 1024 * 1024;
+const ELEMENT_ERROR_SOURCE_MAP_TIMEOUT_MS = 2500;
+const MAX_ELEMENT_ERROR_SOURCE_MAP_OBSERVATIONS = 2;
+const MAX_ELEMENT_ERROR_SOURCE_MAP_LOOKUPS = 4;
+
+async function readCappedElementErrorSourceMap(
+  page: Page,
+  frame: ElementBundleFrame,
+  expectedElementOrigin: string,
+  maxBytes: number,
+): Promise<{ text: string | null; bytesRead: number; limitReached: boolean }> {
+  if (
+    page.isClosed() ||
+    !Number.isSafeInteger(maxBytes) ||
+    maxBytes < 1 ||
+    maxBytes > ELEMENT_ERROR_SOURCE_MAP_MAX_BYTES
+  ) {
+    return { text: null, bytesRead: 0, limitReached: false };
+  }
+  try {
+    const result = await page.evaluate(readElementErrorSourceMapInPage, {
+      bundleUrl: frame.bundleUrl,
+      expectedOrigin: expectedElementOrigin,
+      maxBytes,
+      timeoutMs: ELEMENT_ERROR_SOURCE_MAP_TIMEOUT_MS,
+    });
+    return result !== null &&
+      typeof result === 'object' &&
+      typeof result.bytesRead === 'number' &&
+      Number.isSafeInteger(result.bytesRead) &&
+      result.bytesRead >= 0 &&
+      result.bytesRead <= maxBytes &&
+      typeof result.limitReached === 'boolean' &&
+      (result.text === null ||
+        (typeof result.text === 'string' &&
+          Buffer.byteLength(result.text, 'utf8') === result.bytesRead))
+      ? result
+      : { text: null, bytesRead: maxBytes, limitReached: true };
+  } catch {
+    return { text: null, bytesRead: 0, limitReached: false };
+  }
+}
+
+test('Element Web measures the ordinary 0-and-25-event calendar profile', async ({
+  browser,
+}) => {
+  test.setTimeout(360_000);
+  fixture = readFixture();
+  const runId = process.env.GITHUB_RUN_ID ?? '';
+  const attempt = process.env.GITHUB_RUN_ATTEMPT ?? '';
+  const initialDate = localCalendarDate(new Date());
+  const report = makeEmptyOrdinaryPerformanceReport(initialDate);
+  recordPerformancePilot('started', report);
+  const allowedOrigins = new Set([
+    new URL(fixture.elementUrl).origin,
+    new URL(fixture.homeserverUrl).origin,
+    'http://localhost:8008',
+    new URL(fixture.gatewayUrl).origin,
+    new URL(fixture.widgetUrl).origin,
+  ]);
+  let roomContextRecorded = false;
+  let failureCode:
+    | 'performance-setup-failed'
+    | 'performance-widget-open-failed'
+    | 'performance-host-layout-failed'
+    | 'performance-default-view-failed'
+    | 'performance-view-sample-failed'
+    | 'performance-details-failed'
+    | 'performance-egress-blocked'
+    | 'performance-page-error'
+    | 'performance-threshold-exceeded' = 'performance-setup-failed';
+
+  const runCase = async (caseReport: OrdinaryPerformanceCase) => {
+    const expectedTitles = makePerformanceTitles(
+      runId,
+      attempt,
+      caseReport.eventCount,
+    );
+    const expectedTitleSet = new Set(expectedTitles);
+    const context = await browser.newContext({
+      locale: 'en-US',
+      timezoneId: 'Europe/Stockholm',
+      viewport: { width: 1280, height: 800 },
+    });
+    let page: Page | undefined;
+    let observer: PerformanceApiObserver | undefined;
+    let pageErrorStage: PerformancePageErrorStage = 'case-setup';
+    const pageErrorSourceProfiles = new Set<OrdinaryPerformanceProfile>();
+    const pageErrorSourceLookups: Array<{
+      page: Page;
+      frames: ElementBundleFrame[];
+      observation: PerformancePageErrorObservation;
+    }> = [];
+    context.on('page', (openedPage) => {
+      openedPage.on('pageerror', (error) => {
+        report.pageErrorCount = Math.min(
+          (report.pageErrorCount ?? 0) + 1,
+          100_000,
+        );
+        const classification = classifyPerformancePageError(error, {
+          elementUrl: fixture.elementUrl,
+          widgetUrl: fixture.widgetUrl,
+        });
+        const errorClass = classification.errorClass;
+        if (report.pageErrorClass === 'none') {
+          report.pageErrorClass = errorClass;
+        }
+        if (report.pageErrorObservations.length < 8) {
+          const frames =
+            classification.errorSource === 'element' &&
+            pageErrorStage === 'widget-open'
+              ? extractElementBundleFrames(error, fixture.elementUrl)
+              : [];
+          const shouldResolveSource =
+            frames.length > 0 &&
+            pageErrorSourceLookups.length <
+              MAX_ELEMENT_ERROR_SOURCE_MAP_OBSERVATIONS &&
+            !pageErrorSourceProfiles.has(caseReport.profile);
+          const observation: PerformancePageErrorObservation = {
+            profile: caseReport.profile,
+            stage: pageErrorStage,
+            ...classification,
+            sourceMapStatus:
+              frames.length === 0
+                ? 'not-eligible'
+                : shouldResolveSource
+                  ? 'unavailable'
+                  : 'not-attempted',
+            sourceMapResolution: 'not-applicable',
+            sourceMapUnsupportedReason: 'not-applicable',
+            sourceMapNamespaceClass: 'not-applicable',
+            sourceRefSha256: null,
+            sourceLine: null,
+            sourceColumn: null,
+          };
+          report.pageErrorObservations.push(observation);
+          if (frames.length > 0 && shouldResolveSource) {
+            pageErrorSourceProfiles.add(caseReport.profile);
+            pageErrorSourceLookups.push({
+              page: openedPage,
+              frames,
+              observation,
+            });
+          }
+        } else {
+          report.pageErrorObservationOverflow = true;
+        }
+      });
+    });
+
+    try {
+      await context.route('**/*', async (route) => {
+        let requestOrigin: string;
+        try {
+          requestOrigin = new URL(route.request().url()).origin;
+        } catch {
+          report.blockedRequestCount = Math.min(
+            (report.blockedRequestCount ?? 0) + 1,
+            100_000,
+          );
+          await route.abort('blockedbyclient');
+          return;
+        }
+        if (!allowedOrigins.has(requestOrigin)) {
+          report.blockedRequestCount = Math.min(
+            (report.blockedRequestCount ?? 0) + 1,
+            100_000,
+          );
+          await route.abort('blockedbyclient');
+          return;
+        }
+        await route.continue();
+      });
+
+      const loginStartedAt = performance.now();
+      pageErrorStage = 'element-login';
+      page = await authenticateInElement(context, fixture.users.memberA);
+      caseReport.preparation.elementLoginMs =
+        elapsedMilliseconds(loginStartedAt);
+
+      pageErrorStage = 'room-navigation';
+      activePhase = 'member-a-room-navigation';
+      const roomStartedAt = performance.now();
+      const roomResult = await openMemberARoomWithDiagnostics(
+        page,
+        fixture.roomName,
+        fixture.teamRoomId,
+        fixture.users.memberA.userId,
+        { useNormalRoomSelection: true },
+      );
+      caseReport.preparation.roomNavigationMs =
+        elapsedMilliseconds(roomStartedAt);
+      if (!roomContextRecorded) {
+        record(
+          activePhase,
+          roomResult.navigationCompleted ? 'passed' : 'failed',
+        );
+        recordMemberARoomObservation(roomResult);
+        roomContextRecorded = true;
+      }
+      const element = requireMemberARoom(roomResult);
+
+      const apiObserver = createPerformanceApiObserver(
+        page,
+        caseReport.year,
+        caseReport.month,
+        expectedTitleSet,
+        new Set(),
+        initialDate,
+      );
+      observer = apiObserver;
+      const defaultSample = `${caseReport.profile}-default` as const;
+      observer.setSample(defaultSample);
+      const coldStartedAt = performance.now();
+      pageErrorStage = 'widget-open';
+      failureCode = 'performance-widget-open-failed';
+      const frame = await openCalendarWidget(element, page, {
+        expectWidgetWarning: false,
+        onTiming: (phase, durationMs) => {
+          switch (phase) {
+            case 'activation':
+              caseReport.coldList.activationMs = durationMs;
+              break;
+            case 'capability-approval':
+              caseReport.coldList.capabilityApprovalMs = durationMs;
+              break;
+            case 'identity-approval':
+              caseReport.coldList.identityApprovalMs = durationMs;
+              break;
+            case 'iframe-ready':
+              caseReport.coldList.iframeReadyMs = durationMs;
+              break;
+            case 'widget-startup':
+              caseReport.coldList.widgetStartupMs = durationMs;
+              break;
+          }
+        },
+      });
+
+      failureCode = 'performance-default-view-failed';
+      pageErrorStage = 'default-view';
+      try {
+        await observer.waitForRoomEvents(defaultSample, 'preselection');
+      } catch {
+        const failureSnapshot = await observeDefaultWaitFailureSnapshot(
+          page,
+          frame,
+          fixture.gatewayUrl,
+          fixture.teamRoomId,
+          observer,
+          defaultSample,
+        ).catch(() => undefined);
+        caseReport.defaultWaitObservation = observer.defaultWaitObservation(
+          defaultSample,
+          failureSnapshot,
+        );
+        throw new Error('Default calendar response was not observed');
+      }
+      failureCode = 'performance-view-sample-failed';
+      const defaultMeasurement = await readStableRowCount(
+        frame,
+        expectedTitles,
+      );
+      await observer.waitForSettled(defaultSample);
+      const defaultEventRows = observer
+        .rowsFor(defaultSample)
+        .filter((row) => row.endpoint === 'events');
+      const defaultRoomRows = defaultEventRows.filter(
+        (row) =>
+          row.target === 'room' &&
+          row.calendarMatches === true &&
+          row.rangeClass === 'preselection' &&
+          row.rangeMatches === true,
+      );
+      const defaultReturnedCount =
+        defaultRoomRows.length === 1 ? defaultRoomRows[0].eventCount : null;
+      const defaultUsableControl = await frame
+        .getByRole('button', { name: 'Create event', exact: true })
+        .isVisible()
+        .catch(() => false);
+      caseReport.defaultView = {
+        durationMs: elapsedMilliseconds(coldStartedAt),
+        apiResponseCount: defaultEventRows.length,
+        apiRangeMaxMs: defaultEventRows.length
+          ? Math.max(...defaultEventRows.map((row) => row.durationMs))
+          : null,
+        returnedCount: defaultReturnedCount,
+        renderedCount: defaultMeasurement.second.renderedCount,
+        rangeMatches: defaultRoomRows.length === 1,
+        countMatches:
+          defaultReturnedCount !== null &&
+          defaultReturnedCount === defaultMeasurement.second.renderedCount,
+        usableControlVisible: defaultUsableControl,
+        stable: defaultMeasurement.stable,
+      };
+      const openIdRows = observer
+        .rowsFor(defaultSample)
+        .filter((row) => row.endpoint === 'openid');
+      caseReport.coldList.durationMs = caseReport.defaultView.durationMs;
+      caseReport.coldList.openIdResponseCount = openIdRows.length;
+      caseReport.coldList.openIdMaxMs = openIdRows.length
+        ? Math.max(...openIdRows.map((row) => row.durationMs))
+        : null;
+      caseReport.coldList.apiRangeMaxMs = caseReport.defaultView.apiRangeMaxMs;
+      caseReport.coldList.selectedRoomResponseCount = defaultRoomRows.length;
+      caseReport.coldList.returnedCount = defaultReturnedCount;
+      caseReport.coldList.renderedCount =
+        defaultMeasurement.second.renderedCount;
+      caseReport.coldList.expectedRangeMatches = defaultRoomRows.length === 1;
+      caseReport.coldList.identitiesMatch =
+        defaultRoomRows.length === 1 &&
+        defaultRoomRows[0].expectedTitlesMatch === true &&
+        defaultMeasurement.second.identitiesMatch;
+      caseReport.coldList.diagnosticsZero =
+        defaultEventRows.length > 0 &&
+        defaultEventRows.every((row) => row.diagnosticCount === 0);
+      caseReport.coldList.stable = defaultMeasurement.stable;
+      caseReport.coldList.horizontalOverflow =
+        defaultMeasurement.second.horizontalOverflow;
+      expect(caseReport.defaultView.durationMs).not.toBeNull();
+      expect(caseReport.defaultView.durationMs).toBeLessThanOrEqual(2000);
+      expect(caseReport.defaultView.apiResponseCount).toBeGreaterThan(0);
+      expect(caseReport.defaultView.apiRangeMaxMs).not.toBeNull();
+      expect(caseReport.defaultView.apiRangeMaxMs).toBeLessThanOrEqual(1000);
+      expect(caseReport.defaultView.returnedCount).toBe(caseReport.eventCount);
+      expect(caseReport.defaultView.renderedCount).toBe(caseReport.eventCount);
+      expect(caseReport.defaultView.rangeMatches).toBe(true);
+      expect(caseReport.defaultView.countMatches).toBe(true);
+      expect(caseReport.defaultView.usableControlVisible).toBe(true);
+      expect(caseReport.defaultView.stable).toBe(true);
+      expect(caseReport.coldList.identitiesMatch).toBe(true);
+      expect(caseReport.coldList.diagnosticsZero).toBe(true);
+      expect(caseReport.coldList.horizontalOverflow).toBe(false);
+
+      failureCode = 'performance-host-layout-failed';
+      const widgetCard = page.locator('.mx_WidgetCard');
+      caseReport.coldList.widgetCardCount = Math.min(
+        await widgetCard.count(),
+        2,
+      );
+      caseReport.coldList.widgetCardVisible =
+        caseReport.coldList.widgetCardCount === 1 &&
+        (await widgetCard.isVisible().catch(() => false));
+      const appDrawer = page.locator('.mx_AppsDrawer');
+      caseReport.coldList.appDrawerCount = Math.min(await appDrawer.count(), 2);
+      caseReport.coldList.placement = caseReport.coldList.widgetCardVisible
+        ? 'widget-card'
+        : caseReport.coldList.appDrawerCount > 0
+          ? 'apps-drawer'
+          : 'unknown';
+      const hostIframe = page.locator(
+        '#mx_PersistedElement_container iframe[title="Matrix Calendar"]',
+      );
+      await hostIframe
+        .first()
+        .waitFor({ state: 'attached', timeout: 30_000 })
+        .catch(() => {});
+      caseReport.coldList.persistedHostFrameCount = Math.min(
+        await hostIframe.count(),
+        2,
+      );
+      caseReport.coldList.persistedHostFrameVisible =
+        caseReport.coldList.persistedHostFrameCount === 1 &&
+        (await hostIframe
+          .first()
+          .isVisible()
+          .catch(() => false));
+      expect(caseReport.coldList.widgetCardCount).toBe(1);
+      expect(caseReport.coldList.widgetCardVisible).toBe(true);
+      expect(caseReport.coldList.placement).toBe('widget-card');
+      expect(caseReport.coldList.persistedHostFrameCount).toBe(1);
+      expect(caseReport.coldList.persistedHostFrameVisible).toBe(true);
+
+      failureCode = 'performance-threshold-exceeded';
+      expect(caseReport.coldList.durationMs).toBeLessThanOrEqual(2000);
+      expect(caseReport.coldList.apiRangeMaxMs).toBeLessThanOrEqual(1000);
+      expect(caseReport.coldList.openIdResponseCount).toBeGreaterThan(0);
+      expect(caseReport.coldList.selectedRoomResponseCount).toBe(1);
+      expect(caseReport.coldList.returnedCount).toBe(caseReport.eventCount);
+      expect(caseReport.coldList.renderedCount).toBe(caseReport.eventCount);
+      expect(caseReport.coldList.expectedRangeMatches).toBe(true);
+      expect(caseReport.coldList.identitiesMatch).toBe(true);
+      expect(caseReport.coldList.diagnosticsZero).toBe(true);
+      expect(caseReport.coldList.stable).toBe(true);
+      expect(caseReport.coldList.horizontalOverflow).toBe(false);
+      const body = frame.locator('body');
+
+      pageErrorStage = 'cold-layout';
+      failureCode = 'performance-host-layout-failed';
+      const frameDimensions = await hostIframe.evaluate((iframe) => {
+        const rect = iframe.getBoundingClientRect();
+        return {
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        };
+      });
+      caseReport.coldList.iframeWidth = frameDimensions.width;
+      caseReport.coldList.iframeHeight = frameDimensions.height;
+      caseReport.coldList.hostHorizontalOverflow = await page.evaluate(() => {
+        const root = document.documentElement;
+        const hostBody = document.body;
+        return (
+          Math.max(root.scrollWidth, hostBody.scrollWidth) > root.clientWidth
+        );
+      });
+      expect(caseReport.coldList.iframeWidth).toBeGreaterThan(0);
+      expect(caseReport.coldList.iframeHeight).toBeGreaterThan(0);
+      expect(caseReport.coldList.hostHorizontalOverflow).toBe(false);
+
+      failureCode = 'performance-threshold-exceeded';
+      expect(caseReport.coldList.durationMs).toBeLessThanOrEqual(2000);
+      expect(caseReport.coldList.apiRangeMaxMs).toBeLessThanOrEqual(1000);
+      expect(caseReport.coldList.openIdResponseCount).toBeGreaterThan(0);
+      expect(caseReport.coldList.selectedRoomResponseCount).toBe(1);
+      expect(caseReport.coldList.returnedCount).toBe(caseReport.eventCount);
+      expect(caseReport.coldList.renderedCount).toBe(caseReport.eventCount);
+      expect(caseReport.coldList.expectedRangeMatches).toBe(true);
+      expect(caseReport.coldList.identitiesMatch).toBe(true);
+      expect(caseReport.coldList.diagnosticsZero).toBe(true);
+      expect(caseReport.coldList.stable).toBe(true);
+      expect(caseReport.coldList.horizontalOverflow).toBe(false);
+
+      const summarizeAction = (
+        sample: PerformanceSampleKey,
+        rangeClass: 'preselection' | 'preselection-next',
+        measurement: {
+          second: {
+            renderedCount: number | null;
+            identitiesMatch: boolean;
+            horizontalOverflow: boolean;
+          };
+          stable: boolean;
+        },
+        durationMs: number,
+      ): PerformanceActionSample => {
+        const eventRows = apiObserver
+          .rowsFor(sample)
+          .filter((row) => row.endpoint === 'events');
+        const matchingRoomRows = eventRows.filter(
+          (row) =>
+            row.target === 'room' &&
+            row.calendarMatches === true &&
+            row.rangeClass === rangeClass &&
+            row.rangeMatches === true,
+        );
+        return {
+          durationMs,
+          apiResponseCount: eventRows.length,
+          apiRangeMaxMs: eventRows.length
+            ? Math.max(...eventRows.map((row) => row.durationMs))
+            : null,
+          roomResponseCount: matchingRoomRows.length,
+          returnedCount:
+            matchingRoomRows.length === 1
+              ? matchingRoomRows[0].eventCount
+              : null,
+          renderedCount: measurement.second.renderedCount,
+          rangeMatches: matchingRoomRows.length === 1,
+          identitiesMatch:
+            matchingRoomRows.length === 1 &&
+            matchingRoomRows[0].expectedTitlesMatch === true &&
+            measurement.second.identitiesMatch,
+          diagnosticsZero:
+            eventRows.length > 0 &&
+            eventRows.every((row) => row.diagnosticCount === 0),
+          stable: measurement.stable,
+          horizontalOverflow: measurement.second.horizontalOverflow,
+        };
+      };
+
+      pageErrorStage = 'refresh-setup';
+      failureCode = 'performance-view-sample-failed';
+      const setupSample = `${caseReport.profile}-refresh-setup` as const;
+      observer.setSample(setupSample, new Set());
+      const setupStartedAt = performance.now();
+      const setupStartDate = shiftCalendarDate(
+        initialDate.year,
+        initialDate.month,
+        initialDate.day,
+        7,
+      );
+      const setupEndDate = shiftCalendarDate(
+        setupStartDate.year,
+        setupStartDate.month,
+        setupStartDate.day,
+        6,
+      );
+      await fillDatePicker(
+        frame,
+        frame.getByRole('button', {
+          name: /Choose date range, selected/u,
+        }),
+        [setupStartDate.year, setupStartDate.month, setupStartDate.day],
+        [setupEndDate.year, setupEndDate.month, setupEndDate.day],
+      );
+      await observer.waitForRoomEvents(setupSample, 'preselection-next');
+      const setupMeasurement = await readStableList(frame, []);
+      await observer.waitForSettled(setupSample);
+      caseReport.refreshSetup = summarizeAction(
+        setupSample,
+        'preselection-next',
+        setupMeasurement,
+        elapsedMilliseconds(setupStartedAt),
+      );
+      expect(caseReport.refreshSetup.apiResponseCount).toBeGreaterThan(0);
+      expect(caseReport.refreshSetup.apiRangeMaxMs).toBeLessThanOrEqual(1000);
+      expect(caseReport.refreshSetup.roomResponseCount).toBe(1);
+      expect(caseReport.refreshSetup.returnedCount).toBe(0);
+      expect(caseReport.refreshSetup.renderedCount).toBe(0);
+      expect(caseReport.refreshSetup.rangeMatches).toBe(true);
+      expect(caseReport.refreshSetup.identitiesMatch).toBe(true);
+      expect(caseReport.refreshSetup.diagnosticsZero).toBe(true);
+      expect(caseReport.refreshSetup.stable).toBe(true);
+
+      const refreshSample = `${caseReport.profile}-refresh` as const;
+      pageErrorStage = 'refresh';
+      observer.setSample(refreshSample);
+      const refreshStartedAt = performance.now();
+      const originalEndDate = shiftCalendarDate(
+        initialDate.year,
+        initialDate.month,
+        initialDate.day,
+        6,
+      );
+      await fillDatePicker(
+        frame,
+        frame.getByRole('button', {
+          name: /Choose date range, selected/u,
+        }),
+        [initialDate.year, initialDate.month, initialDate.day],
+        [originalEndDate.year, originalEndDate.month, originalEndDate.day],
+      );
+      await observer.waitForRoomEvents(refreshSample, 'preselection');
+      const refreshMeasurement = await readStableList(frame, expectedTitles);
+      await observer.waitForSettled(refreshSample);
+      caseReport.refresh = summarizeAction(
+        refreshSample,
+        'preselection',
+        refreshMeasurement,
+        elapsedMilliseconds(refreshStartedAt),
+      );
+      failureCode = 'performance-threshold-exceeded';
+      expect(caseReport.refresh.durationMs).toBeLessThanOrEqual(2000);
+      expect(caseReport.refresh.apiRangeMaxMs).toBeLessThanOrEqual(1000);
+      expect(caseReport.refresh.roomResponseCount).toBe(1);
+      expect(caseReport.refresh.returnedCount).toBe(caseReport.eventCount);
+      expect(caseReport.refresh.renderedCount).toBe(caseReport.eventCount);
+      expect(caseReport.refresh.rangeMatches).toBe(true);
+      expect(caseReport.refresh.identitiesMatch).toBe(true);
+      expect(caseReport.refresh.diagnosticsZero).toBe(true);
+      expect(caseReport.refresh.stable).toBe(true);
+      expect(caseReport.refresh.horizontalOverflow).toBe(false);
+
+      if (caseReport.profile === 'events-25') {
+        pageErrorStage = 'details';
+        for (const index of [1, 2, 3, 4, 5] as const) {
+          failureCode = 'performance-details-failed';
+          const sample = `events-25-details-${index}` as const;
+          observer.setSample(sample);
+          const details: PerformanceDetailsSample = {
+            index,
+            durationMs: null,
+            visible: false,
+            titleMatches: false,
+            stable: false,
+            horizontalOverflow: null,
+          };
+          caseReport.detailSamples.push(details);
+          const detailStartedAt = performance.now();
+          const selectedTitle = expectedTitles[index - 1];
+          const row = frame.getByRole('listitem', { name: selectedTitle });
+          await row.click();
+          const dialog = frame.getByRole('dialog').last();
+          await expect(dialog).toBeVisible();
+          const title = dialog.getByText(selectedTitle, { exact: true });
+          await expect(title).toBeVisible();
+          await observer.waitForSettled(sample);
+          const detailsMeasurement = await measureStableDom(body, async () => ({
+            visible: await dialog.isVisible().catch(() => false),
+            titleMatches: await title.isVisible().catch(() => false),
+            horizontalOverflow: await readHorizontalOverflow(body),
+          }));
+          details.durationMs = elapsedMilliseconds(detailStartedAt);
+          details.visible = detailsMeasurement.second.visible;
+          details.titleMatches = detailsMeasurement.second.titleMatches;
+          details.stable = detailsMeasurement.stable;
+          details.horizontalOverflow =
+            detailsMeasurement.second.horizontalOverflow;
+          failureCode = 'performance-threshold-exceeded';
+          expect(details.durationMs).toBeLessThanOrEqual(500);
+          expect(details.visible).toBe(true);
+          expect(details.titleMatches).toBe(true);
+          expect(details.stable).toBe(true);
+          expect(details.horizontalOverflow).toBe(false);
+          await dialog
+            .getByRole('button', { name: 'Close', exact: true })
+            .click();
+          await expect(dialog).toBeHidden();
+        }
+      }
+
+      for (const response of observer.rows()) {
+        expect(response.status).toBe(200);
+        expect(response.decoded).toBe(true);
+        expect(response.method).toBe(
+          response.endpoint === 'openid' ? 'POST' : 'GET',
+        );
+        if (response.endpoint !== 'openid') {
+          expect(response.durationMs).toBeLessThanOrEqual(1000);
+        }
+        if (response.endpoint === 'events') {
+          expect(response.diagnosticCount).toBe(0);
+        }
+      }
+    } finally {
+      pageErrorStage = 'case-cleanup';
+      if (observer) report.apiResponses.push(...observer.rows());
+      for (const lookup of pageErrorSourceLookups) {
+        let remainingBytes = ELEMENT_ERROR_SOURCE_MAP_MAX_BYTES;
+        const sourceMaps: Array<{
+          bundleUrl: string;
+          sourceMapText: string | null;
+        }> = [];
+        const seenBundles = new Set<string>();
+        for (const frame of lookup.frames) {
+          if (
+            seenBundles.has(frame.bundleUrl) ||
+            sourceMaps.length >= MAX_ELEMENT_ERROR_SOURCE_MAP_LOOKUPS ||
+            remainingBytes <= 0
+          ) {
+            continue;
+          }
+          seenBundles.add(frame.bundleUrl);
+          try {
+            const result = await readCappedElementErrorSourceMap(
+              lookup.page,
+              frame,
+              new URL(fixture.elementUrl).origin,
+              remainingBytes,
+            );
+            sourceMaps.push({
+              bundleUrl: frame.bundleUrl,
+              sourceMapText: result.text,
+            });
+            remainingBytes = Math.max(0, remainingBytes - result.bytesRead);
+            if (result.limitReached) remainingBytes = 0;
+          } catch {
+            sourceMaps.push({
+              bundleUrl: frame.bundleUrl,
+              sourceMapText: null,
+            });
+          }
+        }
+        Object.assign(
+          lookup.observation,
+          resolveElementErrorSourcePointer(lookup.frames, sourceMaps),
+        );
+      }
+      await context.close();
+    }
+  };
+
+  try {
+    recordRuntimeVersions(browser.version());
+    await runCase(report.cases[0]);
+    runOrdinaryPerformanceSeed(initialDate);
+    await runCase(report.cases[1]);
+    failureCode = 'performance-egress-blocked';
+    expect(report.blockedRequestCount).toBe(0);
+    failureCode = 'performance-page-error';
+    expect(report.pageErrorCount).toBe(0);
+    expect(report.pageErrorClass).toBe('none');
+    recordPerformancePilot('passed', report);
+  } catch {
+    recordPerformancePilot('failed', report, failureCode);
+    throw new Error('Element ordinary performance profile failed');
+  }
+});
+
 test('Element Web delivers a relative room reminder across restart and restore', async ({
   browser,
 }) => {
@@ -1218,7 +3164,7 @@ test('Element Web delivers a relative room reminder across restart and restore',
       fixture.roomName,
       fixture.teamRoomId,
       fixture.users.memberA.userId,
-      true,
+      { captureReminderRoomLayout: true },
     );
     recordMemberARoomObservation(
       reminderRoom,
@@ -1560,7 +3506,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       fixture.roomName,
       fixture.teamRoomId,
       fixture.users.memberB.userId,
-      true,
+      { captureReminderRoomLayout: true },
     );
     recordMemberARoomObservation(memberBRoom, activeRoomPhase);
     if (memberBRoom.failureCode) {
@@ -3718,19 +5664,26 @@ async function openMemberARoomWithDiagnostics(
   roomName: string,
   roomId: string,
   expectedUserId: string,
-  captureReminderRoomLayout = false,
+  options: {
+    captureReminderRoomLayout?: boolean;
+    useNormalRoomSelection?: boolean;
+  } = {},
 ): Promise<MemberARoomResult> {
-  const roomUrl = new URL(fixture.elementUrl);
-  roomUrl.hash = `/room/${roomId}`;
+  const element = new ElementWebPage(page);
   let navigationCompleted = false;
   try {
-    await page.goto(roomUrl.href, { timeout: 20_000 });
+    if (options.useNormalRoomSelection) {
+      await element.navigateToRoomOrInvitation(roomName);
+    } else {
+      const roomUrl = new URL(fixture.elementUrl);
+      roomUrl.hash = `/room/${roomId}`;
+      await page.goto(roomUrl.href, { timeout: 20_000 });
+    }
     navigationCompleted = true;
   } catch {
     // The failure summary records only whether this bounded navigation ended.
   }
 
-  const element = new ElementWebPage(page);
   const roomNameHeading = getPinnedElementRoomNameHeading(page);
   let roomHeadingReady = false;
   if (navigationCompleted) {
@@ -3756,7 +5709,7 @@ async function openMemberARoomWithDiagnostics(
     expectedUserId,
     navigationCompleted,
     roomHeadingReady,
-    captureReminderRoomLayout,
+    options.captureReminderRoomLayout ?? false,
   ).catch(() => undefined);
   return {
     element,
@@ -3764,6 +5717,199 @@ async function openMemberARoomWithDiagnostics(
     observation,
     failureCode: getMemberARoomFailureCode(navigationCompleted, observation),
   };
+}
+
+type RoomRenderStateObservation = Pick<
+  MemberARoomObservation,
+  | 'outerRenderBucket'
+  | 'matrixChatShellPresent'
+  | 'roomViewWrapperPresent'
+  | 'roomViewRendererPresent'
+  | 'matrixChatStateAvailable'
+  | 'matrixChatViewBucket'
+  | 'matrixChatReady'
+  | 'matrixChatPageTypeBucket'
+  | 'matrixChatCurrentRoomMatches'
+  | 'roomRenderStateAvailable'
+  | 'roomViewShellVisible'
+  | 'roomViewBodyVisible'
+  | 'roomPreviewVisible'
+  | 'roomPreviewLoadingVisible'
+  | 'roomHeaderVisible'
+  | 'roomHeaderHeadingVisible'
+  | 'roomErrorBoundaryVisible'
+>;
+
+function unavailableRoomRenderState(): RoomRenderStateObservation {
+  return {
+    outerRenderBucket: 'unavailable',
+    matrixChatShellPresent: null,
+    roomViewWrapperPresent: null,
+    roomViewRendererPresent: null,
+    matrixChatStateAvailable: false,
+    matrixChatViewBucket: 'unavailable',
+    matrixChatReady: null,
+    matrixChatPageTypeBucket: 'unavailable',
+    matrixChatCurrentRoomMatches: null,
+    roomRenderStateAvailable: false,
+    roomViewShellVisible: null,
+    roomViewBodyVisible: null,
+    roomPreviewVisible: null,
+    roomPreviewLoadingVisible: null,
+    roomHeaderVisible: null,
+    roomHeaderHeadingVisible: null,
+    roomErrorBoundaryVisible: null,
+  };
+}
+
+async function observeRoomRenderState(
+  page: Page,
+  expectedRoomId: string,
+): Promise<RoomRenderStateObservation> {
+  return page.evaluate((expectedRoomId) => {
+    type MatrixChatState = {
+      view?: unknown;
+      ready?: unknown;
+      page_type?: unknown;
+      currentRoomId?: unknown;
+    };
+    let matrixChatState: MatrixChatState | undefined;
+    try {
+      const matrixChat = (
+        window as Window & {
+          matrixChat?: { state?: unknown };
+        }
+      ).matrixChat;
+      if (
+        matrixChat?.state !== null &&
+        typeof matrixChat?.state === 'object' &&
+        !Array.isArray(matrixChat.state)
+      ) {
+        matrixChatState = matrixChat.state as MatrixChatState;
+      }
+    } catch {
+      // Keep Element's internal state in fixed buckets only.
+    }
+    const matrixChatStateAvailable = matrixChatState !== undefined;
+    const matrixChatViewBucket: MatrixChatViewBucket =
+      typeof matrixChatState?.view === 'number' &&
+      Number.isInteger(matrixChatState.view) &&
+      matrixChatState.view >= 0 &&
+      matrixChatState.view <= 11
+        ? matrixChatState.view === 9
+          ? 'logged-in'
+          : 'other-view'
+        : 'unavailable';
+    const matrixChatReady =
+      typeof matrixChatState?.ready === 'boolean'
+        ? matrixChatState.ready
+        : null;
+    const matrixChatPageTypeBucket: MatrixChatPageTypeBucket =
+      matrixChatState?.page_type === undefined ||
+      matrixChatState?.page_type === null
+        ? matrixChatStateAvailable
+          ? 'missing'
+          : 'unavailable'
+        : typeof matrixChatState.page_type === 'string'
+          ? matrixChatState.page_type === 'room_view'
+            ? 'room-view'
+            : 'other-page'
+          : 'unavailable';
+    const matrixChatCurrentRoomMatches =
+      typeof matrixChatState?.currentRoomId === 'string' ||
+      matrixChatState?.currentRoomId === null
+        ? matrixChatState.currentRoomId === expectedRoomId
+        : null;
+    const matrixChatShellPresent =
+      document.querySelector('.mx_MatrixChat') !== null;
+    const roomViewWrapperPresent =
+      document.querySelector('.mx_RoomView_wrapper') !== null;
+    const roomViewRendererPresent =
+      document.querySelector('.mx_RoomView') !== null;
+    const outerRenderBucket: OuterRenderBucket =
+      matrixChatShellPresent &&
+      roomViewWrapperPresent &&
+      roomViewRendererPresent
+        ? 'room-page'
+        : matrixChatShellPresent &&
+            roomViewWrapperPresent &&
+            !roomViewRendererPresent
+          ? 'other-page'
+          : !matrixChatShellPresent &&
+              !roomViewWrapperPresent &&
+              !roomViewRendererPresent
+            ? 'no-shell'
+            : 'inconsistent';
+    const isVisible = (element: Element): boolean => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return (
+        element.getClientRects().length > 0 &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        style.visibility !== 'collapse'
+      );
+    };
+    const unavailable = {
+      outerRenderBucket,
+      matrixChatShellPresent,
+      roomViewWrapperPresent,
+      roomViewRendererPresent,
+      matrixChatStateAvailable,
+      matrixChatViewBucket,
+      matrixChatReady,
+      matrixChatPageTypeBucket,
+      matrixChatCurrentRoomMatches,
+      roomRenderStateAvailable: false,
+      roomViewShellVisible: null,
+      roomViewBodyVisible: null,
+      roomPreviewVisible: null,
+      roomPreviewLoadingVisible: null,
+      roomHeaderVisible: null,
+      roomHeaderHeadingVisible: null,
+      roomErrorBoundaryVisible: null,
+    } as const;
+    const visibleRoomViews = Array.from(
+      document.querySelectorAll('.mx_RoomView'),
+    ).filter(isVisible);
+    if (visibleRoomViews.length > 1) return unavailable;
+    const roomView = visibleRoomViews[0];
+    if (!roomView) {
+      return {
+        ...unavailable,
+        outerRenderBucket,
+        roomRenderStateAvailable: true,
+        roomViewShellVisible: false,
+        roomViewBodyVisible: false,
+        roomPreviewVisible: false,
+        roomPreviewLoadingVisible: false,
+        roomHeaderVisible: false,
+        roomHeaderHeadingVisible: false,
+        roomErrorBoundaryVisible: false,
+      };
+    }
+    const firstVisible = (root: ParentNode, selector: string): boolean =>
+      Array.from(root.querySelectorAll(selector)).some(isVisible);
+    const header = roomView.querySelector('header.mx_RoomHeader');
+    return {
+      ...unavailable,
+      roomRenderStateAvailable: true,
+      roomViewShellVisible: true,
+      roomViewBodyVisible: firstVisible(roomView, '.mx_RoomView_body'),
+      roomPreviewVisible: firstVisible(roomView, '.mx_RoomPreviewBar'),
+      roomPreviewLoadingVisible: firstVisible(
+        roomView,
+        '.mx_RoomPreviewBar_Loading',
+      ),
+      roomHeaderVisible: header !== null && isVisible(header),
+      roomHeaderHeadingVisible:
+        header !== null &&
+        firstVisible(header, '.mx_RoomHeader_heading[role="heading"]'),
+      roomErrorBoundaryVisible: firstVisible(roomView, '.mx_ErrorBoundary'),
+    };
+  }, expectedRoomId);
 }
 
 async function observeMemberARoom(
@@ -3842,6 +5988,9 @@ async function observeMemberARoom(
     },
     { expectedRoomId: roomId, expectedMatrixUserId: expectedUserId },
   );
+  const roomRenderState = await observeRoomRenderState(page, roomId).catch(() =>
+    unavailableRoomRenderState(),
+  );
   const roomNameHeading = getPinnedElementRoomNameHeading(page);
   const roomHeadingCount = await roomNameHeading.count().catch(() => 0);
   const roomHeadingPresent =
@@ -3914,6 +6063,7 @@ async function observeMemberARoom(
     roomHeadingPresent,
     roomNameMatches,
     roomIdMatches,
+    ...roomRenderState,
     ...(roomLayoutObservation ?? {}),
     blockedExternalRequestCount: blockedExternalRequests,
     homeserverHttpErrorCount: homeserverHttpFailures.count,
@@ -3983,13 +6133,17 @@ async function openCalendarWidget(
     expectWidgetWarning,
     waitForCalendar = true,
     captureMemberADiagnostics = false,
+    onTiming,
   }: OpenCalendarWidgetOptions,
 ) {
+  const startupStartedAt = performance.now();
+  const activationStartedAt = startupStartedAt;
   await openPinnedElementWidget(
     page,
     'Matrix Calendar',
     captureMemberADiagnostics,
   );
+  onTiming?.('activation', elapsedMilliseconds(activationStartedAt));
   if (captureMemberADiagnostics) {
     if (!expectWidgetWarning) activePhase = 'widget-a-warning-not-required';
   }
@@ -4002,7 +6156,12 @@ async function openCalendarWidget(
   if (captureMemberADiagnostics) {
     activePhase = 'widget-a-capabilities-approval';
   }
+  const capabilityApprovalStartedAt = performance.now();
   await element.approveWidgetCapabilities();
+  onTiming?.(
+    'capability-approval',
+    elapsedMilliseconds(capabilityApprovalStartedAt),
+  );
   if (captureMemberADiagnostics) record(activePhase, 'passed');
   if (captureMemberADiagnostics) {
     activePhase = 'widget-a-identity-approval';
@@ -4011,12 +6170,25 @@ async function openCalendarWidget(
     .getByRole('dialog')
     .getByRole('button', { name: 'Continue', exact: true })
     .first();
-  await identityContinue
-    .waitFor({ state: 'visible', timeout: 8_000 })
-    .catch(() => undefined);
-  const identityDialogShown = await identityContinue
-    .isVisible()
-    .catch(() => false);
+  const frame = element.widgetByTitle('Matrix Calendar');
+  const identityApprovalStartedAt = performance.now();
+  let identityApprovalDurationMs = 0;
+  let identityDialogShown: boolean;
+  if (onTiming && waitForCalendar) {
+    const createEventButton = frame.getByRole('button', {
+      name: 'Create event',
+      exact: true,
+    });
+    identityDialogShown = await raceCalendarReadyOrIdentityPrompt(
+      () => expect(createEventButton).toBeEnabled({ timeout: 30_000 }),
+      () => identityContinue.waitFor({ state: 'visible', timeout: 30_000 }),
+    );
+  } else {
+    await identityContinue
+      .waitFor({ state: 'visible', timeout: 8_000 })
+      .catch(() => undefined);
+    identityDialogShown = await identityContinue.isVisible().catch(() => false);
+  }
   if (captureMemberADiagnostics) {
     record(
       identityDialogShown
@@ -4030,6 +6202,7 @@ async function openCalendarWidget(
       activePhase = 'widget-a-identity-approval';
     }
     await element.approveWidgetIdentity();
+    identityApprovalDurationMs = elapsedMilliseconds(identityApprovalStartedAt);
     if (captureMemberADiagnostics) {
       record(activePhase, 'passed');
       activePhase = 'widget-a-iframe-ready';
@@ -4037,7 +6210,8 @@ async function openCalendarWidget(
   } else if (captureMemberADiagnostics) {
     activePhase = 'widget-a-iframe-ready';
   }
-  const frame = element.widgetByTitle('Matrix Calendar');
+  onTiming?.('identity-approval', identityApprovalDurationMs);
+  const iframeReadyStartedAt = performance.now();
   if (captureMemberADiagnostics) {
     activePhase = 'widget-a-iframe-attached';
     await page
@@ -4051,6 +6225,8 @@ async function openCalendarWidget(
       .getByRole('button', { name: 'Create event', exact: true })
       .waitFor();
   }
+  onTiming?.('iframe-ready', elapsedMilliseconds(iframeReadyStartedAt));
+  onTiming?.('widget-startup', elapsedMilliseconds(startupStartedAt));
   return frame;
 }
 
@@ -4070,6 +6246,7 @@ async function openPinnedElementWidget(
     captureMemberADiagnostics ? 'widget-a-extensions-menuitem' : undefined,
     rightPanel,
   );
+
   await clickPinnedWidgetControl(
     rightPanel.getByRole('button', { name: widgetName }),
     captureMemberADiagnostics ? 'widget-a-extension-row' : undefined,
@@ -5953,6 +8130,25 @@ function record(
   );
 }
 
+function recordPerformancePilot(
+  status: 'started' | 'passed' | 'failed',
+  performanceReport: PerformanceReportData,
+  failureCode?: string,
+) {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase: 'performance-pilot',
+      status,
+      ...(failureCode === undefined ? {} : { failureCode }),
+      performanceReport,
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+}
+
 function recordMemberASessionObservation(
   observation:
     | {
@@ -5983,13 +8179,16 @@ function recordMemberARoomObservation(
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  const observation = result.observation
+    ? roomContextObservationForPhase(result.observation, phase)
+    : undefined;
   appendFileSync(
     stageFile,
     `${JSON.stringify({
       phase,
       status: result.failureCode ? 'failed' : 'passed',
       ...(result.failureCode ? { failureCode: result.failureCode } : {}),
-      ...(result.observation ?? {}),
+      ...(observation ?? {}),
       ...(reminderWidgetContext ?? {}),
     })}\n`,
     { encoding: 'utf8', mode: 0o600 },

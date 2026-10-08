@@ -30,6 +30,7 @@
     "lint-staged": "^17.5.1",
     "prettier": "^3.8.1",
     "prettier-plugin-organize-imports": "^4.1.0",
+    "source-map-js": "^1.2.1",
     "typescript": "^5.7.3",
     "yarn-deduplicate": "^6.0.2"
   },

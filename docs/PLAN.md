@@ -550,9 +550,14 @@ access and event writes stay disabled by default.
       and outsider denial for the bound team room and own unbound room on PR
       #227 candidate `a02932dafbbfa9316bee5e8bda1ee15ed1ddbaff`, hosted run
       [37611136645](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37611136645).
-- [ ] Prove unauthorized requests are denied before CalDAV I/O; exercise
-      unsupported-projection disclosure with canonical-resource preservation;
-      and verify actual-client keyboard/focus behavior.
+- [ ] Prove unauthorized client requests are denied before CalDAV I/O.
+- [x] Exercise actual Element Web event edit/delete, unsupported-projection
+      disclosure with canonical-resource preservation, keyboard/focus, and the
+      standard side-panel layout. PR #230 passed exact hosted Element run
+      [37739410969](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37739410969)
+      and its applicable checks before merge in `baae43b6a8390a06f0187a54c9de55ef274cb563`.
+      This is evidence for the tested synthetic flow, not a complete Web/Desktop
+      beta acceptance result.
 - [x] Exercise the enabled unencrypted-room reminder path, then restart and
       separately restore both Radicale and application PostgreSQL data in an
       isolated environment. PR #227 candidate
@@ -567,6 +572,15 @@ access and event writes stay disabled by default.
 - [ ] Record an operator-approved enrollment/capacity envelope with hardware,
       runtime, date-range event counts, API/render latency, and pre-declared
       pass thresholds. Do not infer a universal supported event count.
+  - [x] Predeclare the approved synthetic Element Web ordinary-load target of
+        zero and 25 events in the default seven-day List view in the standard
+        side-panel WidgetCard path, with cold activation and same-range refresh
+        through the visible List date-range picker limited to 2s, API limited to
+        1s, and five 25-event details samples limited to 0.5s
+        in `docs/calendar-performance.md`. Custom 31-day and 250-event timing
+        runs are diagnostic only; no complete 250-event timing series passed.
+        Pinned/full-width layout certification is deferred. Hosted measurement
+        and exact-run evidence remain open.
 - [ ] Complete operator evidence and independent review of the exact
       candidate before a separate rollout decision.
 
