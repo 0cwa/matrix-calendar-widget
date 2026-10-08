@@ -140,23 +140,37 @@ export class ElementWebPage {
     await this.switchToRoom(name);
   }
 
-  async navigateToRoomOrInvitation(name: string) {
-    await this.page
+  private roomsListLocator() {
+    return this.page.locator(
+      '.mx_RoomListPanel [role="listbox"], .mx_RoomListPanel [role="treegrid"]',
+    );
+  }
+
+  private roomItemLocator(name: string) {
+    const roomName = new RegExp(`^${name}( Unread messages\\.)?`);
+    const roomsList = this.roomsListLocator();
+    const currentListItem = roomsList
+      .getByRole('option', { name: roomName })
+      .or(roomsList.getByRole('row', { name: roomName }));
+    const legacyListItem = this.page
       .getByRole('tree', { name: 'Rooms' })
-      .getByRole('treeitem', {
-        name: new RegExp(`^${name}( Unread messages\\.)?`),
-      })
-      .click();
+      .getByRole('treeitem', { name: roomName });
+    return currentListItem.or(legacyListItem);
+  }
+
+  async waitForRoomsList(timeout = 60_000) {
+    const legacyRoomsTree = this.page.getByRole('tree', { name: 'Rooms' });
+    await this.roomsListLocator()
+      .or(legacyRoomsTree)
+      .waitFor({ state: 'visible', timeout });
+  }
+
+  async navigateToRoomOrInvitation(name: string) {
+    await this.roomItemLocator(name).click();
   }
 
   async waitForRoom(name: string) {
-    await this.page
-      .getByRole('tree', { name: 'Rooms' })
-      .getByRole('treeitem', {
-        name: new RegExp(`^${name}( Unread messages\\.)?`),
-      })
-      .click();
-
+    await this.roomItemLocator(name).click();
     await this.roomNameText.getByText(name).waitFor();
   }
 

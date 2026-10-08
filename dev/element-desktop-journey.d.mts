@@ -66,7 +66,7 @@ export type DesktopRoomsReadyElementObservation = {
 };
 
 export type DesktopRoomsReadyDiagnostic = {
-  roomsTree: DesktopRoomsReadyElementObservation;
+  roomList: DesktopRoomsReadyElementObservation;
   matrixChatShell: DesktopRoomsReadyElementObservation;
   matrixChatStateAvailable: boolean | null;
   matrixChatView:

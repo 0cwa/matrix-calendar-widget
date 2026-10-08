@@ -178,9 +178,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
       .click();
     const desktopElement = new ElementWebPage(desktopPage);
     currentLoginStep = 'rooms_ready';
-    await desktopPage
-      .getByRole('tree', { name: 'Rooms', exact: true })
-      .waitFor({ state: 'visible', timeout: 60_000 });
+    await desktopElement.waitForRoomsList(60_000);
     currentLoginStep = 'complete';
     appendDesktopLoginStep({
       ...evidence,
@@ -326,9 +324,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
       'GET',
     );
     await desktopPage.reload({ waitUntil: 'domcontentloaded' });
-    await desktopPage
-      .getByRole('tree', { name: 'Rooms', exact: true })
-      .waitFor({ state: 'visible', timeout: 60_000 });
+    await desktopElement.waitForRoomsList(60_000);
     await desktopElement.navigateToRoomOrInvitation(fixture.roomName);
     if (desktopElement.getCurrentRoomId() !== fixture.teamRoomId) {
       throw new Error('Desktop refreshed into an unexpected room');
@@ -988,7 +984,7 @@ function unavailableDesktopRoomsReadyElementObservation(): DesktopRoomsReadyElem
 
 function unavailableDesktopRoomsReadyDiagnostic(): DesktopRoomsReadyDiagnostic {
   return {
-    roomsTree: unavailableDesktopRoomsReadyElementObservation(),
+    roomList: unavailableDesktopRoomsReadyElementObservation(),
     matrixChatShell: unavailableDesktopRoomsReadyElementObservation(),
     matrixChatStateAvailable: null,
     matrixChatView: 'unavailable',
@@ -1027,10 +1023,15 @@ async function observeDesktopRoomsReady(
   expectedRoomId: string | null,
   expectedMemberAId: string | null,
 ): Promise<DesktopRoomsReadyDiagnostic> {
-  const [roomsTree, matrixChatShell, matrixChatState] = await Promise.all([
-    observeDesktopRoomsReadyElement(
-      page.getByRole('tree', { name: 'Rooms', exact: true }),
-    ),
+  const currentRoomList = page.locator(
+    '.mx_RoomListPanel [role="listbox"], .mx_RoomListPanel [role="treegrid"]',
+  );
+  const legacyRoomTree = page.getByRole('tree', {
+    name: 'Rooms',
+    exact: true,
+  });
+  const [roomList, matrixChatShell, matrixChatState] = await Promise.all([
+    observeDesktopRoomsReadyElement(currentRoomList.or(legacyRoomTree)),
     observeDesktopRoomsReadyElement(page.locator('.mx_MatrixChat')),
     page
       .evaluate(
@@ -1046,7 +1047,7 @@ async function observeDesktopRoomsReady(
           type MatrixClientPeg = { get?: () => MatrixClient | undefined };
           type Result = Omit<
             DesktopRoomsReadyDiagnostic,
-            'roomsTree' | 'matrixChatShell'
+            'roomList' | 'matrixChatShell'
           >;
           const unavailableState = (
             available: false | null,
@@ -1167,11 +1168,11 @@ async function observeDesktopRoomsReady(
   if (matrixChatState === null) {
     return {
       ...unavailableDesktopRoomsReadyDiagnostic(),
-      roomsTree,
+      roomList,
       matrixChatShell,
     };
   }
-  return { roomsTree, matrixChatShell, ...matrixChatState };
+  return { roomList, matrixChatShell, ...matrixChatState };
 }
 
 function recordPhase(

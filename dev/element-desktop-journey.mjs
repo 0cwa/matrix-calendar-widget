@@ -81,7 +81,7 @@ const ROOMS_READY_PAGE_TYPES = new Set([
 ]);
 const ROOMS_READY_DIAGNOSTIC_KEYS = Object.freeze(
   [
-    'roomsTree',
+    'roomList',
     'matrixChatShell',
     'matrixChatStateAvailable',
     'matrixChatView',
@@ -174,7 +174,7 @@ function validRoomsReadyDiagnostic(value) {
     Array.isArray(value) ||
     Object.keys(value).sort().join(',') !==
       ROOMS_READY_DIAGNOSTIC_KEYS.join(',') ||
-    !validRoomsReadyElementObservation(value.roomsTree) ||
+    !validRoomsReadyElementObservation(value.roomList) ||
     !validRoomsReadyElementObservation(value.matrixChatShell) ||
     ![null, true, false].includes(value.matrixChatStateAvailable) ||
     !ROOMS_READY_MATRIX_CHAT_VIEWS.has(value.matrixChatView) ||

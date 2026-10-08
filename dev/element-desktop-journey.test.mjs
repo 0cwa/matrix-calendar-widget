@@ -533,7 +533,7 @@ test('persists only capped Desktop login locator observations and fixed failure 
 
 test('records a bounded Rooms-ready render snapshot only at that failure boundary', () => {
   const diagnostic = {
-    roomsTree: { countCapped: 0, visibility: 'absent' },
+    roomList: { countCapped: 0, visibility: 'absent' },
     matrixChatShell: { countCapped: 1, visibility: 'visible' },
     matrixChatStateAvailable: true,
     matrixChatView: 'logged-in',
@@ -568,7 +568,7 @@ test('records a bounded Rooms-ready render snapshot only at that failure boundar
   });
 
   const unavailable = {
-    roomsTree: { countCapped: null, visibility: 'unavailable' },
+    roomList: { countCapped: null, visibility: 'unavailable' },
     matrixChatShell: { countCapped: 1, visibility: 'visible' },
     matrixChatStateAvailable: null,
     matrixChatView: 'unavailable',
@@ -592,7 +592,7 @@ test('records a bounded Rooms-ready render snapshot only at that failure boundar
 
 test('rejects inconsistent or private-shaped Rooms-ready snapshots', () => {
   const diagnostic = {
-    roomsTree: { countCapped: 0, visibility: 'absent' },
+    roomList: { countCapped: 0, visibility: 'absent' },
     matrixChatShell: { countCapped: 1, visibility: 'visible' },
     matrixChatStateAvailable: true,
     matrixChatView: 'logged-in',
@@ -620,7 +620,7 @@ test('rejects inconsistent or private-shaped Rooms-ready snapshots', () => {
         loginStep: 'rooms_ready',
         roomsReadyDiagnostic: {
           ...diagnostic,
-          roomsTree: { countCapped: null, visibility: 'absent' },
+          roomList: { countCapped: null, visibility: 'absent' },
         },
       }),
     /Invalid Desktop journey input/u,
