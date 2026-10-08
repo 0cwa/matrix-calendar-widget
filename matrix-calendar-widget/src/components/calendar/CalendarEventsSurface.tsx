@@ -18,6 +18,7 @@ import {
   CalendarEvent,
   CalendarEventDateTime,
   CalendarId,
+  projectCalendarEventOccurrenceByRecurrenceId,
   projectCalendarEventOccurrences,
 } from '@matrix-calendar-widget/calendar';
 import {
@@ -286,13 +287,31 @@ export function CalendarEventsSurface({
         sourceEvent={selectedEvent?.sourceEvent}
         viewerTimezone={viewerTimezone}
         onSourceEventChange={(sourceEvent) =>
-          setSelectedEvent((current) =>
-            current &&
-            current.sourceEvent.id === sourceEvent.id &&
-            current.sourceEvent.calendarId === sourceEvent.calendarId
-              ? { ...current, sourceEvent }
-              : current,
-          )
+          setSelectedEvent((current) => {
+            if (
+              !current ||
+              current.sourceEvent.id !== sourceEvent.id ||
+              current.sourceEvent.calendarId !== sourceEvent.calendarId
+            ) {
+              return current;
+            }
+
+            // Reproject from the saved resource so occurrence selections keep
+            // their original recurrence identity and projected timing.
+            const selectedEvent = current.recurrenceId
+              ? projectCalendarEventOccurrenceByRecurrenceId(
+                  sourceEvent,
+                  current.recurrenceId,
+                  viewerTimezone,
+                )?.event
+              : sourceEvent;
+
+            return {
+              ...current,
+              event: selectedEvent ?? current.event,
+              sourceEvent,
+            };
+          })
         }
         onClose={() => setSelectedEvent(undefined)}
       />
