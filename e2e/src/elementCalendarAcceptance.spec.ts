@@ -1875,6 +1875,11 @@ test('Element Web preserves unsupported events and supports client interactions'
       await narrowDetails
         .getByRole('button', { name: 'Close', exact: true })
         .click();
+      await expect(narrowDetails).toBeHidden();
+      await frameA
+        .getByRole('button', { name: 'Create event', exact: true })
+        .waitFor({ state: 'visible' })
+        .catch(() => {});
     }
     const createControlReachable = await frameA
       .getByRole('button', { name: 'Create event', exact: true })
