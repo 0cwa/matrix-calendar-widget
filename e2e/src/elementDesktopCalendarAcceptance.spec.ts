@@ -53,6 +53,7 @@ import {
   type DesktopLoginStep,
   type DesktopRoomsReadyDiagnostic,
   type DesktopRoomsReadyElementObservation,
+  type WebBEditRowRenderDiagnostic,
   type WebBEditSaveFailureDiagnostic,
   type WebBEventListReadDiagnostic,
 } from '../../dev/element-desktop-journey.mjs';
@@ -284,6 +285,9 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let desktopBrowser: Browser | undefined;
   let desktopPage: Page | undefined;
   let desktopWidgetFrame: FrameLocator | undefined;
+  let webBFrame: FrameLocator | undefined;
+  let webBSelectedTitle: string | undefined;
+  let webBEditedTitle: string | undefined;
   let desktopGatewayReadObserver: DesktopGatewayReadRequestObserver | undefined;
   let webBEventListReadObserver: WebBEventListReadObserver | undefined;
   const desktopWidgetPromptObservation =
@@ -446,6 +450,8 @@ test('Element Desktop room event journey', async ({ browser }) => {
     enterPhase('desktop-event-create');
     const initialTitle = `Desktop acceptance ${randomUUID()}`;
     const editedTitle = `${initialTitle} edited`;
+    webBSelectedTitle = initialTitle;
+    webBEditedTitle = editedTitle;
     const createResponse = waitForGatewayResponse(desktopPage, fixture, 'POST');
     await createEvent(desktopFrame, initialTitle, fixture.calendarId);
     const created = await createResponse;
@@ -482,6 +488,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
           ),
         ),
     );
+    webBFrame = webFrame;
     currentFailurePoint = 'web-b-gateway-read-await';
     const webReadResponse = await webRead;
     currentFailurePoint = 'web-b-gateway-read-status';
@@ -702,6 +709,11 @@ test('Element Desktop room event journey', async ({ browser }) => {
                 eventListRead:
                   webBEventListReadObserver?.snapshot() ??
                   unavailableWebBEventListReadDiagnostic(),
+                eventRowRender: await observeWebBEditRowRender(
+                  webBFrame,
+                  webBSelectedTitle,
+                  webBEditedTitle,
+                ),
               }
             : {}),
         };
@@ -1259,6 +1271,118 @@ function matchesGatewayResponse(
   } catch {
     return false;
   }
+}
+
+async function observeWebBEditRowRender(
+  frame: FrameLocator | undefined,
+  selectedTitle: string | undefined,
+  editedTitle: string | undefined,
+): Promise<WebBEditRowRenderDiagnostic> {
+  const unavailable: WebBEditRowRenderDiagnostic = {
+    state: 'unavailable',
+    editedRowCountCapped: null,
+    editedRowVisible: null,
+    selectedRowCountCapped: null,
+    selectedRowVisible: null,
+    calendarEventsListVisibleRowCountCapped: null,
+    progressbarVisible: null,
+    errorAlertVisible: null,
+  };
+  if (!frame || !selectedTitle || !editedTitle) return unavailable;
+
+  try {
+    const editedRow = frame.getByRole('listitem', {
+      name: editedTitle,
+      exact: true,
+      includeHidden: true,
+    });
+    const selectedRow = frame.getByRole('listitem', {
+      name: selectedTitle,
+      exact: true,
+      includeHidden: true,
+    });
+    const eventsRegion = frame.getByRole('region', {
+      name: 'Calendar events',
+      exact: true,
+      includeHidden: true,
+    });
+    const progressbar = frame.getByRole('progressbar', {
+      includeHidden: true,
+    });
+    const errorAlerts = frame.locator('.MuiAlert-standardError');
+    const [
+      editedRowCount,
+      editedRowVisible,
+      selectedRowCount,
+      selectedRowVisible,
+      eventsRegionCount,
+      progressbarVisible,
+      errorAlertVisible,
+    ] = await Promise.all([
+      editedRow.count(),
+      hasVisibleRenderedMatch(editedRow),
+      selectedRow.count(),
+      hasVisibleRenderedMatch(selectedRow),
+      eventsRegion.count(),
+      hasVisibleRenderedMatch(progressbar),
+      hasVisibleRenderedMatch(errorAlerts),
+    ]);
+    let calendarEventsListVisibleRowCountCapped: 0 | 1 | 2 | null = null;
+    if (eventsRegionCount === 1) {
+      calendarEventsListVisibleRowCountCapped =
+        await visibleCalendarEventRowCountCapped(
+          eventsRegion.locator('li[aria-label]'),
+        );
+    }
+
+    return {
+      state: 'observed',
+      editedRowCountCapped: Math.min(editedRowCount, 2) as 0 | 1 | 2,
+      editedRowVisible,
+      selectedRowCountCapped: Math.min(selectedRowCount, 2) as 0 | 1 | 2,
+      selectedRowVisible,
+      calendarEventsListVisibleRowCountCapped,
+      progressbarVisible,
+      errorAlertVisible,
+    };
+  } catch {
+    return unavailable;
+  }
+}
+
+async function hasVisibleRenderedMatch(locator: Locator): Promise<boolean> {
+  return locator.evaluateAll((elements) =>
+    elements.some((element) => {
+      const style = window.getComputedStyle(element);
+      return (
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        style.visibility !== 'collapse' &&
+        element.getClientRects().length > 0
+      );
+    }),
+  );
+}
+
+async function visibleCalendarEventRowCountCapped(
+  rows: Locator,
+): Promise<0 | 1 | 2> {
+  return rows.evaluateAll((elements) => {
+    let visibleCount = 0;
+    for (const element of elements) {
+      const style = window.getComputedStyle(element);
+      if (
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        style.visibility !== 'collapse' &&
+        element.getClientRects().length > 0
+      ) {
+        visibleCount += 1;
+        if (visibleCount === 2) return 2;
+      }
+    }
+    return visibleCount as 0 | 1;
+  });
 }
 
 function unavailableWebBEventListReadDiagnostic(): WebBEventListReadDiagnostic {

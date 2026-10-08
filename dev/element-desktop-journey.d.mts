@@ -70,7 +70,32 @@ export type DesktopJourneyFailurePointObservation =
 export type WebBEditSaveFailureDiagnostic = {
   matchedPatchStatus: number | null;
   eventListRead?: WebBEventListReadDiagnostic;
+  eventRowRender?: WebBEditRowRenderDiagnostic;
 };
+
+export type WebBEditRowRenderDiagnostic =
+  | {
+      state: 'observed';
+      // 2 represents two or more exact rows.
+      editedRowCountCapped: 0 | 1 | 2;
+      editedRowVisible: boolean;
+      selectedRowCountCapped: 0 | 1 | 2;
+      selectedRowVisible: boolean;
+      // Null means the uniquely named CalendarEventsList region was unavailable.
+      calendarEventsListVisibleRowCountCapped: 0 | 1 | 2 | null;
+      progressbarVisible: boolean;
+      errorAlertVisible: boolean;
+    }
+  | {
+      state: 'unavailable';
+      editedRowCountCapped: null;
+      editedRowVisible: null;
+      selectedRowCountCapped: null;
+      selectedRowVisible: null;
+      calendarEventsListVisibleRowCountCapped: null;
+      progressbarVisible: null;
+      errorAlertVisible: null;
+    };
 
 export type WebBEventListReadDiagnostic = {
   state:
@@ -191,7 +216,7 @@ export type ReadOnlyWidgetReadinessObservation = {
 };
 
 export type DesktopJourneySummary = {
-  schemaVersion: 6;
+  schemaVersion: 7;
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;

@@ -300,7 +300,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 6);
+    assert.equal(summary.schemaVersion, 7);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -662,13 +662,39 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
     sameEventObserved: true,
     sameEventEditedTitleMatch: true,
   };
-  const row = (failurePoint, matchedPatchStatus, eventListRead) => ({
+  const observedRowRender = {
+    state: 'observed',
+    editedRowCountCapped: 0,
+    editedRowVisible: false,
+    selectedRowCountCapped: 1,
+    selectedRowVisible: true,
+    calendarEventsListVisibleRowCountCapped: 1,
+    progressbarVisible: false,
+    errorAlertVisible: false,
+  };
+  const unavailableRowRender = {
+    state: 'unavailable',
+    editedRowCountCapped: null,
+    editedRowVisible: null,
+    selectedRowCountCapped: null,
+    selectedRowVisible: null,
+    calendarEventsListVisibleRowCountCapped: null,
+    progressbarVisible: null,
+    errorAlertVisible: null,
+  };
+  const row = (
+    failurePoint,
+    matchedPatchStatus,
+    eventListRead,
+    eventRowRender = observedRowRender,
+  ) => ({
     phase: 'web-member-b-edit-save',
     status: 'failed',
     failurePoint,
     webBEditSaveDiagnostic: {
       matchedPatchStatus,
       ...(eventListRead === undefined ? {} : { eventListRead }),
+      ...(failurePoint === 'web-b-edit-event-row' ? { eventRowRender } : {}),
     },
   });
 
@@ -699,7 +725,17 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
   assert.deepEqual(
     summarize(row('web-b-edit-event-row', 204, decodedEventList))
       .webBEditSaveDiagnostic,
-    { matchedPatchStatus: 204, eventListRead: decodedEventList },
+    {
+      matchedPatchStatus: 204,
+      eventListRead: decodedEventList,
+      eventRowRender: observedRowRender,
+    },
+  );
+  assert.deepEqual(
+    summarize(
+      row('web-b-edit-event-row', 204, decodedEventList, unavailableRowRender),
+    ).webBEditSaveDiagnostic.eventRowRender,
+    unavailableRowRender,
   );
   const pendingRead = {
     state: 'request-pending',
@@ -824,6 +860,51 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
         extra: 'private text',
       }),
     },
+    {
+      ...row('web-b-edit-event-row', 204, decodedEventList, {
+        ...observedRowRender,
+        editedRowVisible: true,
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, decodedEventList, {
+        ...observedRowRender,
+        calendarEventsListVisibleRowCountCapped: 0,
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, decodedEventList, {
+        ...unavailableRowRender,
+        errorAlertVisible: false,
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, decodedEventList, {
+        ...observedRowRender,
+        selectedRowCountCapped: 3,
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, decodedEventList, {
+        ...observedRowRender,
+        additional: 'private text',
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, decodedEventList),
+      webBEditSaveDiagnostic: {
+        ...row('web-b-edit-event-row', 204, decodedEventList)
+          .webBEditSaveDiagnostic,
+        extra: 'private text',
+      },
+    },
+    {
+      ...row('web-b-edit-details-close-click', 204),
+      webBEditSaveDiagnostic: {
+        matchedPatchStatus: 204,
+        eventRowRender: observedRowRender,
+      },
+    },
     { ...row('web-b-edit-patch-status', 99) },
     { ...row('web-b-edit-patch-status', 600) },
     { ...row('web-b-edit-patch-status', 409), body: 'private response' },
@@ -849,6 +930,21 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
   withTempDirectory((runnerTemp) => {
     const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
     initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    assert.throws(
+      () =>
+        appendDesktopJourneyOutcome({
+          filePath,
+          runnerTemp,
+          phase: 'web-member-b-edit-save',
+          status: 'failed',
+          failurePoint: 'web-b-edit-event-row',
+          webBEditSaveDiagnostic: {
+            matchedPatchStatus: 204,
+            eventListRead: decodedEventList,
+          },
+        }),
+      /Invalid Desktop journey input/u,
+    );
     appendDesktopJourneyOutcome({
       filePath,
       runnerTemp,
@@ -880,14 +976,20 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
       webBEditSaveDiagnostic: {
         matchedPatchStatus: 204,
         eventListRead: decodedEventList,
+        eventRowRender: observedRowRender,
       },
     });
     const persisted = readFileSync(filePath, 'utf8');
     assert.equal(
       persisted,
-      '{"phase":"web-member-b-edit-save","status":"failed","failurePoint":"web-b-edit-event-row","webBEditSaveDiagnostic":{"matchedPatchStatus":204,"eventListRead":{"state":"decoded","matchingGetRequestCountCapped":1,"matchingGetResponseCountCapped":1,"firstMatchedGetStatus":200,"selectedEventIdentity":"available","sameEventObserved":true,"sameEventEditedTitleMatch":true}}}\n',
+      '{"phase":"web-member-b-edit-save","status":"failed","failurePoint":"web-b-edit-event-row","webBEditSaveDiagnostic":{"matchedPatchStatus":204,"eventListRead":{"state":"decoded","matchingGetRequestCountCapped":1,"matchingGetResponseCountCapped":1,"firstMatchedGetStatus":200,"selectedEventIdentity":"available","sameEventObserved":true,"sameEventEditedTitleMatch":true},"eventRowRender":{"state":"observed","editedRowCountCapped":0,"editedRowVisible":false,"selectedRowCountCapped":1,"selectedRowVisible":true,"calendarEventsListVisibleRowCountCapped":1,"progressbarVisible":false,"errorAlertVisible":false}}}\n',
     );
     assert.doesNotMatch(persisted, /private-event-id|private event title/u);
+    assert.deepEqual(
+      readDesktopJourneyEvidence({ filePath, runnerTemp })
+        .webBEditSaveDiagnostic.eventRowRender,
+      observedRowRender,
+    );
   });
 });
 

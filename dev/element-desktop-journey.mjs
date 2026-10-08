@@ -227,7 +227,7 @@ function validWebBEditSaveDiagnostic(value, failurePoint) {
     Array.isArray(value) ||
     Object.keys(value).sort().join(',') !==
       (isEventRowFailure
-        ? 'eventListRead,matchedPatchStatus'
+        ? 'eventListRead,eventRowRender,matchedPatchStatus'
         : 'matchedPatchStatus')
   ) {
     return false;
@@ -252,7 +252,10 @@ function validWebBEditSaveDiagnostic(value, failurePoint) {
     status >= 200 &&
     status < 300
   ) {
-    return validWebBEventListReadDiagnostic(value.eventListRead);
+    return (
+      validWebBEventListReadDiagnostic(value.eventListRead) &&
+      validWebBEditRowRenderDiagnostic(value.eventRowRender)
+    );
   }
   if (
     WEB_B_EDIT_POST_PATCH_FAILURE_POINT_SET.has(failurePoint) &&
@@ -268,6 +271,48 @@ function validWebBEditSaveDiagnostic(value, failurePoint) {
     failurePoint !== 'web-b-edit-event-row' &&
     !WEB_B_EDIT_POST_PATCH_FAILURE_POINT_SET.has(failurePoint)
   );
+}
+
+function validWebBEditRowRenderDiagnostic(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'calendarEventsListVisibleRowCountCapped,editedRowCountCapped,editedRowVisible,errorAlertVisible,progressbarVisible,selectedRowCountCapped,selectedRowVisible,state'
+  ) {
+    return false;
+  }
+  const observationValues = [
+    value.editedRowCountCapped,
+    value.editedRowVisible,
+    value.selectedRowCountCapped,
+    value.selectedRowVisible,
+    value.calendarEventsListVisibleRowCountCapped,
+    value.progressbarVisible,
+    value.errorAlertVisible,
+  ];
+  if (value.state === 'unavailable') {
+    return observationValues.every((observation) => observation === null);
+  }
+  if (
+    value.state !== 'observed' ||
+    ![0, 1, 2].includes(value.editedRowCountCapped) ||
+    typeof value.editedRowVisible !== 'boolean' ||
+    ![0, 1, 2].includes(value.selectedRowCountCapped) ||
+    typeof value.selectedRowVisible !== 'boolean' ||
+    (value.calendarEventsListVisibleRowCountCapped !== null &&
+      ![0, 1, 2].includes(value.calendarEventsListVisibleRowCountCapped)) ||
+    typeof value.progressbarVisible !== 'boolean' ||
+    typeof value.errorAlertVisible !== 'boolean' ||
+    (value.editedRowCountCapped === 0 && value.editedRowVisible) ||
+    (value.selectedRowCountCapped === 0 && value.selectedRowVisible) ||
+    (value.calendarEventsListVisibleRowCountCapped === 0 &&
+      (value.editedRowVisible || value.selectedRowVisible))
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function validWebBEventListReadDiagnostic(value) {
@@ -1284,7 +1329,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   const failed = Object.values(cases).includes('failed');
   const complete = Object.values(cases).every((value) => value === 'passed');
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
     loginStep,
     loginEntry,
