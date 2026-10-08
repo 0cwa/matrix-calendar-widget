@@ -19,6 +19,7 @@ import {
   CalendarRepositoryError,
 } from '@matrix-calendar-widget/calendar';
 import { vi } from 'vitest';
+import type { CalendarRoomCapabilities } from './CalendarTargetAvailabilityRepository';
 import { GatewayCalendarRepository } from './GatewayCalendarRepository';
 
 const calendarId = 'https://radicale.example.test/alice/team/';
@@ -247,6 +248,7 @@ describe('GatewayCalendarRepository', () => {
         httpStatus: 200,
         calendarCountCapped: 1,
         expectedTargetMatch: true,
+        requestFailurePhase: null,
       },
     });
 
@@ -316,6 +318,7 @@ describe('GatewayCalendarRepository', () => {
           httpStatus: status,
           calendarCountCapped: null,
           expectedTargetMatch: null,
+          requestFailurePhase: null,
         },
       });
       expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -326,6 +329,183 @@ describe('GatewayCalendarRepository', () => {
       ).toBe('room');
     },
   );
+
+  it('identifies room-list OpenID rejection before issuing its fetch', async () => {
+    const fetchMock = mockFetch(jsonResponse([]));
+    const getAuthorizationHeader = vi
+      .fn<() => Promise<string | undefined>>()
+      .mockResolvedValueOnce('MX-Identity synthetic')
+      .mockRejectedValueOnce(new Error('synthetic OpenID rejection'));
+    const repository = createRepository(
+      fetchMock,
+      'UTC',
+      () => ({
+        calendarId,
+        canReadEvents: true,
+        canWriteEvents: false,
+        canManageReminders: false,
+      }),
+      getAuthorizationHeader,
+    );
+
+    await expect(
+      repository.listCalendarsWithAvailability(),
+    ).resolves.toMatchObject({
+      calendars: [],
+      partialAvailability: true,
+      canManageCalendarCollections: true,
+      roomCalendarListDiagnostic: {
+        outcome: 'request-failed',
+        httpStatus: null,
+        calendarCountCapped: null,
+        expectedTargetMatch: null,
+        requestFailurePhase: 'auth-before-fetch',
+      },
+    });
+    expect(getAuthorizationHeader).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      new URL(fetchMock.mock.calls[0][0] as string).searchParams.get('target'),
+    ).toBe('personal');
+  });
+
+  it('identifies a room-list fetch rejection after authorization and headers', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockRejectedValueOnce(new TypeError('synthetic fetch rejection'));
+    const repository = createRepository(fetchMock, 'UTC', () => ({
+      calendarId,
+      canReadEvents: true,
+      canWriteEvents: false,
+      canManageReminders: false,
+    }));
+
+    await expect(
+      repository.listCalendarsWithAvailability(),
+    ).resolves.toMatchObject({
+      calendars: [],
+      partialAvailability: true,
+      roomCalendarListDiagnostic: {
+        outcome: 'request-failed',
+        httpStatus: null,
+        calendarCountCapped: null,
+        expectedTargetMatch: null,
+        requestFailurePhase: 'fetch-before-response',
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      new URL(fetchMock.mock.calls[1][0] as string).searchParams.get('target'),
+    ).toBe('room');
+  });
+
+  it('keeps room-list failure phases isolated across concurrent queries', async () => {
+    const roomCapabilities = {
+      calendarId,
+      canReadEvents: true,
+      canWriteEvents: false,
+      canManageReminders: false,
+    };
+    let resolveFirstCapabilities!: (
+      value: CalendarRoomCapabilities | undefined,
+    ) => void;
+    const firstCapabilities = new Promise<CalendarRoomCapabilities | undefined>(
+      (resolve) => {
+        resolveFirstCapabilities = resolve;
+      },
+    );
+    let capabilityCalls = 0;
+    const getRoomCalendarCapabilities = vi.fn(() => {
+      capabilityCalls += 1;
+      return capabilityCalls === 1
+        ? firstCapabilities
+        : Promise.resolve(roomCapabilities);
+    });
+    let authorizationCalls = 0;
+    const getAuthorizationHeader = vi.fn(async () => {
+      authorizationCalls += 1;
+      if (authorizationCalls === 4) {
+        throw new Error('synthetic room-list OpenID rejection');
+      }
+      return 'MX-Identity synthetic';
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const target = new URL(String(input)).searchParams.get('target');
+      if (target === 'personal') return jsonResponse([]);
+      throw new TypeError('synthetic room-list fetch rejection');
+    });
+    const repository = createRepository(
+      fetchMock,
+      'UTC',
+      getRoomCalendarCapabilities,
+      getAuthorizationHeader,
+    );
+
+    const firstQuery = repository.listCalendarsWithAvailability();
+    const secondQuery = repository.listCalendarsWithAvailability();
+    const secondResult = await secondQuery;
+    resolveFirstCapabilities(roomCapabilities);
+    const firstResult = await firstQuery;
+
+    expect(firstResult.roomCalendarListDiagnostic).toMatchObject({
+      outcome: 'request-failed',
+      httpStatus: null,
+      requestFailurePhase: 'auth-before-fetch',
+    });
+    expect(secondResult.roomCalendarListDiagnostic).toMatchObject({
+      outcome: 'request-failed',
+      httpStatus: null,
+      requestFailurePhase: 'fetch-before-response',
+    });
+    expect(authorizationCalls).toBe(4);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(
+      fetchMock.mock.calls.filter(
+        ([input]) =>
+          new URL(String(input)).searchParams.get('target') === 'room',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('classifies a room-list header construction throw without fetching it', async () => {
+    const fetchMock = mockFetch(jsonResponse([]));
+    const originalHeaders = globalThis.Headers;
+    let headerConstructionCount = 0;
+    class ThrowOnSecondHeadersConstruction extends originalHeaders {
+      constructor(init?: HeadersInit) {
+        headerConstructionCount += 1;
+        if (headerConstructionCount === 2) {
+          throw new TypeError('synthetic header construction failure');
+        }
+        super(init);
+      }
+    }
+    vi.stubGlobal('Headers', ThrowOnSecondHeadersConstruction);
+    const repository = createRepository(fetchMock, 'UTC', () => ({
+      calendarId,
+      canReadEvents: true,
+      canWriteEvents: false,
+      canManageReminders: false,
+    }));
+
+    try {
+      await expect(
+        repository.listCalendarsWithAvailability(),
+      ).resolves.toMatchObject({
+        roomCalendarListDiagnostic: {
+          outcome: 'request-failed',
+          httpStatus: null,
+          calendarCountCapped: null,
+          expectedTargetMatch: null,
+          requestFailurePhase: 'header-construction',
+        },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.stubGlobal('Headers', originalHeaders);
+    }
+  });
 
   it('classifies invalid room-list JSON without changing availability behavior', async () => {
     const fetchMock = mockFetch(
@@ -353,6 +533,7 @@ describe('GatewayCalendarRepository', () => {
         httpStatus: 200,
         calendarCountCapped: null,
         expectedTargetMatch: null,
+        requestFailurePhase: null,
       },
     });
   });
@@ -379,6 +560,7 @@ describe('GatewayCalendarRepository', () => {
         httpStatus: 200,
         calendarCountCapped: null,
         expectedTargetMatch: null,
+        requestFailurePhase: null,
       },
     });
   });
@@ -419,6 +601,7 @@ describe('GatewayCalendarRepository', () => {
           httpStatus: 200,
           calendarCountCapped: count,
           expectedTargetMatch: false,
+          requestFailurePhase: null,
         },
       });
     },
@@ -447,6 +630,7 @@ describe('GatewayCalendarRepository', () => {
         httpStatus: 200,
         calendarCountCapped: 1,
         expectedTargetMatch: true,
+        requestFailurePhase: null,
       },
     });
   });
@@ -481,6 +665,7 @@ describe('GatewayCalendarRepository', () => {
         httpStatus: 200,
         calendarCountCapped: 1,
         expectedTargetMatch: true,
+        requestFailurePhase: null,
       },
     });
   });
@@ -505,6 +690,7 @@ describe('GatewayCalendarRepository', () => {
         httpStatus: null,
         calendarCountCapped: null,
         expectedTargetMatch: null,
+        requestFailurePhase: null,
       },
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -1219,13 +1405,24 @@ function createRepository(
             canWriteEvents: boolean;
             canManageReminders: boolean;
           }
-        | undefined)
+        | undefined
+        | Promise<
+            | {
+                calendarId: string;
+                canReadEvents: boolean;
+                canWriteEvents: boolean;
+                canManageReminders: boolean;
+              }
+            | undefined
+          >)
     | undefined = undefined,
+  getAuthorizationHeader: () => Promise<string | undefined> = async () =>
+    'MX-Identity delegated',
 ): GatewayCalendarRepository {
   return new GatewayCalendarRepository({
     baseUrl: 'https://widget-api.example.test',
     roomId: '!team:example.test',
-    getAuthorizationHeader: async () => 'MX-Identity delegated',
+    getAuthorizationHeader,
     getViewerTimezone: () => timezone,
     getRoomCalendarCapabilities: async () => getRoomCalendarCapabilities?.(),
     fetchImpl,

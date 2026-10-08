@@ -163,6 +163,7 @@ describe('calendar repository hooks', () => {
         httpStatus: 429,
         calendarCountCapped: null,
         expectedTargetMatch: null,
+        requestFailurePhase: null,
       },
     };
     const loadedListResult: CalendarListWithAvailability = {
@@ -174,6 +175,7 @@ describe('calendar repository hooks', () => {
         httpStatus: 200,
         calendarCountCapped: 1,
         expectedTargetMatch: true,
+        requestFailurePhase: null,
       },
     };
     const listCalendarsWithAvailability = vi

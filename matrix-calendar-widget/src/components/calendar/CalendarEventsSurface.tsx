@@ -204,6 +204,9 @@ export function CalendarEventsSurface({
           ? 'unknown'
           : String(calendars.roomCalendarListDiagnostic.expectedTargetMatch)
       }
+      data-mcw-diagnostic-room-list-failure-phase={
+        calendars.roomCalendarListDiagnostic?.requestFailurePhase ?? 'unknown'
+      }
       data-mcw-diagnostic-surface="calendar-events"
       data-mcw-diagnostic-visible-count-capped={cappedDiagnosticCount(
         filteredEvents.length,

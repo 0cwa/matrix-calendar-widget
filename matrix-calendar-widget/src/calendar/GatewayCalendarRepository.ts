@@ -41,6 +41,7 @@ import type {
   CalendarRoomCapabilities,
   CalendarTargetAvailabilityRepository,
   RoomCalendarListDiagnostic,
+  RoomCalendarListRequestFailurePhase,
 } from './CalendarTargetAvailabilityRepository';
 
 type CalendarTarget = 'personal' | 'room';
@@ -76,6 +77,8 @@ type CalendarGatewayEventListResource = {
 };
 
 type GatewayRequestObservation = {
+  onRequestPhase?: (phase: RoomCalendarListRequestFailurePhase) => void;
+  onResponseReceived?: () => void;
   onResponseStatus?: (status: number) => void;
   onInvalidJson?: () => void;
 };
@@ -129,11 +132,15 @@ export class GatewayCalendarRepository
     const calendars: Calendar[] = [];
     let partialAvailability = false;
     let canManageCalendarCollections = false;
+    let roomListResponseReceived = false;
+    let roomListRequestFailurePhase: RoomCalendarListRequestFailurePhase | null =
+      null;
     let roomCalendarListDiagnostic: RoomCalendarListDiagnostic = {
       outcome: 'not-requested',
       httpStatus: null,
       calendarCountCapped: null,
       expectedTargetMatch: null,
+      requestFailurePhase: null,
     };
 
     if (personalResult.status === 'fulfilled') {
@@ -162,6 +169,12 @@ export class GatewayCalendarRepository
             }),
             {},
             {
+              onRequestPhase: (phase) => {
+                roomListRequestFailurePhase = phase;
+              },
+              onResponseReceived: () => {
+                roomListResponseReceived = true;
+              },
               onResponseStatus: (status) => {
                 httpStatus = status;
               },
@@ -183,6 +196,7 @@ export class GatewayCalendarRepository
             httpStatus,
             calendarCountCapped,
             expectedTargetMatch,
+            requestFailurePhase: null,
           };
           if (
             roomCalendars.length !== 1 ||
@@ -193,6 +207,7 @@ export class GatewayCalendarRepository
                 ...roomCalendarListDiagnostic,
                 outcome: 'target-mismatch',
                 expectedTargetMatch: false,
+                requestFailurePhase: null,
               };
             }
             throw new CalendarRepositoryError(
@@ -220,6 +235,7 @@ export class GatewayCalendarRepository
               httpStatus,
               calendarCountCapped: null,
               expectedTargetMatch: null,
+              requestFailurePhase: null,
             };
           } else if (roomCalendarListDiagnostic.outcome === 'not-requested') {
             roomCalendarListDiagnostic = {
@@ -227,6 +243,10 @@ export class GatewayCalendarRepository
               httpStatus,
               calendarCountCapped: null,
               expectedTargetMatch: null,
+              requestFailurePhase:
+                httpStatus === null && !roomListResponseReceived
+                  ? (roomListRequestFailurePhase ?? 'unavailable')
+                  : null,
             };
           }
           partialAvailability = true;
@@ -838,11 +858,7 @@ export class GatewayCalendarRepository
     init: RequestInit = {},
     observation?: GatewayRequestObservation,
   ): Promise<T> {
-    const response = await this.request(
-      url,
-      init,
-      observation?.onResponseStatus,
-    );
+    const response = await this.request(url, init, observation);
 
     try {
       return (await response.json()) as T;
@@ -865,9 +881,11 @@ export class GatewayCalendarRepository
   private async request(
     url: string,
     init: RequestInit,
-    onResponseStatus?: (status: number) => void,
+    observation?: GatewayRequestObservation,
   ): Promise<Response> {
+    observation?.onRequestPhase?.('auth-before-fetch');
     const authorization = await this.options.getAuthorizationHeader();
+    observation?.onRequestPhase?.('header-construction');
     const headers = new Headers(init.headers);
 
     if (authorization) {
@@ -878,6 +896,7 @@ export class GatewayCalendarRepository
     }
 
     let response: Response;
+    observation?.onRequestPhase?.('fetch-before-response');
     try {
       response = await this.fetchImpl(url, {
         ...init,
@@ -892,7 +911,9 @@ export class GatewayCalendarRepository
       );
     }
 
-    onResponseStatus?.(response.status);
+    // A returned Response closes the pre-response phase even if status access fails.
+    observation?.onResponseReceived?.();
+    observation?.onResponseStatus?.(response.status);
 
     if (response.ok) {
       return response;

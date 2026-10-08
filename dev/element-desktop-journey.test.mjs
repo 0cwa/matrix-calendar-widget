@@ -305,7 +305,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 9);
+    assert.equal(summary.schemaVersion, 10);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -663,6 +663,7 @@ test('parses only closed capped calendar surface facts', () => {
     calendarPartialAvailability: 'true',
     roomCapabilitiesState: 'present',
     roomCalendarReadable: 'true',
+    roomCalendarListRequestFailurePhase: 'unknown',
     eventQuerySourceCountCapped: '1',
     eventQueryLoading: 'false',
     eventQueryError: 'false',
@@ -742,6 +743,7 @@ test('parses only closed capped calendar surface facts', () => {
         httpStatus: 200,
         calendarCountCapped: 1,
         expectedTargetMatch: false,
+        requestFailurePhase: null,
       },
     },
   );
@@ -751,6 +753,7 @@ test('parses only closed capped calendar surface facts', () => {
     roomCalendarListHttpStatus: 'unknown',
     roomCalendarListCalendarCountCapped: 'unknown',
     roomCalendarListExpectedTargetMatch: 'unknown',
+    roomCalendarListRequestFailurePhase: 'unknown',
   });
   assert.deepEqual(notRequested.roomCalendarList, {
     state: 'observed',
@@ -758,7 +761,32 @@ test('parses only closed capped calendar surface facts', () => {
     httpStatus: null,
     calendarCountCapped: null,
     expectedTargetMatch: null,
+    requestFailurePhase: null,
   });
+
+  for (const requestFailurePhase of [
+    'auth-before-fetch',
+    'header-construction',
+    'fetch-before-response',
+    'unavailable',
+  ]) {
+    const requestFailure = parseWebBCalendarSurfaceStateAttributes({
+      ...attributes,
+      roomCalendarListOutcome: 'request-failed',
+      roomCalendarListHttpStatus: 'unknown',
+      roomCalendarListCalendarCountCapped: 'unknown',
+      roomCalendarListExpectedTargetMatch: 'unknown',
+      roomCalendarListRequestFailurePhase: requestFailurePhase,
+    });
+    assert.deepEqual(requestFailure.roomCalendarList, {
+      state: 'observed',
+      outcome: 'request-failed',
+      httpStatus: null,
+      calendarCountCapped: null,
+      expectedTargetMatch: null,
+      requestFailurePhase,
+    });
+  }
 
   const invalidRoomDetails = [
     {
@@ -777,6 +805,13 @@ test('parses only closed capped calendar surface facts', () => {
       ...targetMismatchAttributes,
       roomCalendarListOutcome: 'request-failed',
       roomCalendarListHttpStatus: '200',
+      roomCalendarListRequestFailurePhase: 'auth-before-fetch',
+    },
+    {
+      ...targetMismatchAttributes,
+      roomCalendarListOutcome: 'request-failed',
+      roomCalendarListHttpStatus: '429',
+      roomCalendarListRequestFailurePhase: 'fetch-before-response',
     },
     {
       ...targetMismatchAttributes,
@@ -786,6 +821,20 @@ test('parses only closed capped calendar surface facts', () => {
     {
       ...targetMismatchAttributes,
       roomCalendarListHttpStatus: '655',
+    },
+    {
+      ...targetMismatchAttributes,
+      roomCalendarListOutcome: 'request-failed',
+      roomCalendarListHttpStatus: 'unknown',
+      roomCalendarListRequestFailurePhase: 'unknown',
+    },
+    {
+      ...targetMismatchAttributes,
+      roomCalendarListRequestFailurePhase: 'provider-error-content',
+    },
+    {
+      ...targetMismatchAttributes,
+      roomCalendarListRequestFailurePhase: 'fetch-before-response',
     },
   ];
   for (const invalid of invalidRoomDetails) {
@@ -804,6 +853,13 @@ test('parses only closed capped calendar surface facts', () => {
   assert.equal(missingOneRoomAttribute.state, 'observed');
   assert.deepEqual(
     missingOneRoomAttribute.roomCalendarList,
+    unavailableWebBRoomCalendarListDiagnostic(),
+  );
+  const missingFailurePhaseAttribute = { ...targetMismatchAttributes };
+  delete missingFailurePhaseAttribute.roomCalendarListRequestFailurePhase;
+  assert.deepEqual(
+    parseWebBCalendarSurfaceStateAttributes(missingFailurePhaseAttribute)
+      .roomCalendarList,
     unavailableWebBRoomCalendarListDiagnostic(),
   );
 });
@@ -841,10 +897,11 @@ test('bounds the aggregate B surface observation and keeps late results out of f
       calendarPartialAvailability: 'false',
       roomCapabilitiesState: 'absent',
       roomCalendarReadable: 'unknown',
-      roomCalendarListOutcome: 'target-mismatch',
-      roomCalendarListHttpStatus: '200',
-      roomCalendarListCalendarCountCapped: '1',
-      roomCalendarListExpectedTargetMatch: 'false',
+      roomCalendarListOutcome: 'request-failed',
+      roomCalendarListHttpStatus: 'unknown',
+      roomCalendarListCalendarCountCapped: 'unknown',
+      roomCalendarListExpectedTargetMatch: 'unknown',
+      roomCalendarListRequestFailurePhase: 'fetch-before-response',
       eventQuerySourceCountCapped: '1',
       eventQueryLoading: 'false',
       eventQueryError: 'false',
@@ -1271,7 +1328,7 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
     const persisted = readFileSync(filePath, 'utf8');
     assert.equal(
       persisted,
-      '{"phase":"web-member-b-edit-save","status":"failed","failurePoint":"web-b-edit-event-row","webBEditSaveDiagnostic":{"matchedPatchStatus":204,"eventListRead":{"state":"decoded","matchingGetRequestCountCapped":1,"matchingGetResponseCountCapped":1,"firstMatchedGetStatus":200,"selectedEventIdentity":"available","sameEventObserved":true,"sameEventEditedTitleMatch":true},"eventRowRender":{"state":"observed","editedRowCountCapped":0,"editedRowVisible":false,"selectedRowCountCapped":1,"selectedRowVisible":true,"calendarEventsListVisibleRowCountCapped":1,"progressbarVisible":false,"errorAlertVisible":false},"calendarSurfaceState":{"state":"observed","calendarCountCapped":1,"calendarQueryLoading":false,"calendarQueryError":false,"calendarPartialAvailability":false,"roomCapabilitiesState":"absent","roomCalendarReadable":null,"eventQuerySourceCountCapped":1,"eventQueryLoading":false,"eventQueryError":false,"eventPartialAvailability":false,"projectedOccurrenceCountCapped":2,"roomCalendarList":{"state":"unavailable","outcome":null,"httpStatus":null,"calendarCountCapped":null,"expectedTargetMatch":null},"visibleEventCountCapped":1}}}\n',
+      '{"phase":"web-member-b-edit-save","status":"failed","failurePoint":"web-b-edit-event-row","webBEditSaveDiagnostic":{"matchedPatchStatus":204,"eventListRead":{"state":"decoded","matchingGetRequestCountCapped":1,"matchingGetResponseCountCapped":1,"firstMatchedGetStatus":200,"selectedEventIdentity":"available","sameEventObserved":true,"sameEventEditedTitleMatch":true},"eventRowRender":{"state":"observed","editedRowCountCapped":0,"editedRowVisible":false,"selectedRowCountCapped":1,"selectedRowVisible":true,"calendarEventsListVisibleRowCountCapped":1,"progressbarVisible":false,"errorAlertVisible":false},"calendarSurfaceState":{"state":"observed","calendarCountCapped":1,"calendarQueryLoading":false,"calendarQueryError":false,"calendarPartialAvailability":false,"roomCapabilitiesState":"absent","roomCalendarReadable":null,"eventQuerySourceCountCapped":1,"eventQueryLoading":false,"eventQueryError":false,"eventPartialAvailability":false,"projectedOccurrenceCountCapped":2,"roomCalendarList":{"state":"unavailable","outcome":null,"httpStatus":null,"calendarCountCapped":null,"expectedTargetMatch":null,"requestFailurePhase":null},"visibleEventCountCapped":1}}}\n',
     );
     assert.doesNotMatch(persisted, /private-event-id|private event title/u);
     assert.deepEqual(

@@ -197,6 +197,7 @@ describe('<CalendarEventsSurface />', () => {
             httpStatus: 200,
             calendarCountCapped: 1,
             expectedTargetMatch: false,
+            requestFailurePhase: null,
           },
         }),
         listEventsWithAvailability: vi.fn().mockResolvedValue({
@@ -239,6 +240,73 @@ describe('<CalendarEventsSurface />', () => {
       'data-mcw-diagnostic-room-list-target-match',
       'false',
     );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-failure-phase',
+      'unknown',
+    );
+    expect(diagnostic.outerHTML).not.toContain('opaque-room-calendar');
+    expect(diagnostic).toHaveAttribute('hidden');
+  });
+
+  it('exposes only the closed pre-response room-list failure phase', async () => {
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars: [], events: [] }),
+      {
+        getRoomCalendarCapabilities: vi.fn().mockResolvedValue({
+          calendarId: 'opaque-room-calendar',
+          canReadEvents: true,
+          canWriteEvents: false,
+          canManageReminders: false,
+        }),
+        listCalendarsWithAvailability: vi.fn().mockResolvedValue({
+          calendars: [],
+          partialAvailability: true,
+          canManageCalendarCollections: true,
+          roomCalendarListDiagnostic: {
+            outcome: 'request-failed',
+            httpStatus: null,
+            calendarCountCapped: null,
+            expectedTargetMatch: null,
+            requestFailurePhase: 'auth-before-fetch',
+          },
+        }),
+        listEventsWithAvailability: vi.fn().mockResolvedValue({
+          events: [],
+          diagnostics: [],
+          partialAvailability: false,
+        }),
+      },
+    );
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const diagnostic = await screen.findByTestId(
+      'calendar-events-surface-diagnostic',
+    );
+    await waitFor(() => {
+      expect(diagnostic).toHaveAttribute(
+        'data-mcw-diagnostic-room-list-outcome',
+        'request-failed',
+      );
+    });
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-failure-phase',
+      'auth-before-fetch',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-http-status',
+      'unknown',
+    );
+    expect(diagnostic).toHaveAttribute('hidden');
     expect(diagnostic.outerHTML).not.toContain('opaque-room-calendar');
   });
 

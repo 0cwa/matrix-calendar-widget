@@ -31,6 +31,12 @@ export type CalendarRoomCapabilities = {
   canManageReminders: boolean;
 };
 
+export type RoomCalendarListRequestFailurePhase =
+  | 'auth-before-fetch'
+  | 'header-construction'
+  | 'fetch-before-response'
+  | 'unavailable';
+
 export type RoomCalendarListDiagnostic = {
   outcome:
     | 'not-requested'
@@ -41,6 +47,7 @@ export type RoomCalendarListDiagnostic = {
   httpStatus: number | null;
   calendarCountCapped: 0 | 1 | 2 | null;
   expectedTargetMatch: boolean | null;
+  requestFailurePhase: RoomCalendarListRequestFailurePhase | null;
 };
 
 export type CalendarListWithAvailability = {

@@ -130,6 +130,12 @@ export type WebBRoomCalendarListDiagnostic =
       // 2 represents two or more room calendars.
       calendarCountCapped: 0 | 1 | 2 | null;
       expectedTargetMatch: boolean | null;
+      requestFailurePhase:
+        | 'auth-before-fetch'
+        | 'header-construction'
+        | 'fetch-before-response'
+        | 'unavailable'
+        | null;
     }
   | {
       state: 'unavailable';
@@ -137,6 +143,7 @@ export type WebBRoomCalendarListDiagnostic =
       httpStatus: null;
       calendarCountCapped: null;
       expectedTargetMatch: null;
+      requestFailurePhase: null;
     };
 
 export type WebBEditRowRenderDiagnostic =
@@ -298,7 +305,7 @@ export type ReadOnlyWidgetReadinessObservation = {
 };
 
 export type DesktopJourneySummary = {
-  schemaVersion: 9;
+  schemaVersion: 10;
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;

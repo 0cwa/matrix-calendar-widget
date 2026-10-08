@@ -1400,6 +1400,9 @@ async function observeWebBCalendarSurfaceState(
         roomCalendarListExpectedTargetMatch: read(
           'data-mcw-diagnostic-room-list-target-match',
         ),
+        roomCalendarListRequestFailurePhase: read(
+          'data-mcw-diagnostic-room-list-failure-phase',
+        ),
         eventQuerySourceCountCapped: read(
           'data-mcw-diagnostic-event-source-count-capped',
         ),
