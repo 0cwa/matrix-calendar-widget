@@ -2121,6 +2121,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       escapeAttempted,
     });
 
+    activeG6Phase = 'g6-delete-and-refresh';
     const memberBEventsResponse = waitForG6EventsResponse(
       pageB,
       fixture.teamRoomId,
@@ -2133,7 +2134,6 @@ test('Element Web preserves unsupported events and supports client interactions'
     const memberBEvents = await memberBEventsResponse.catch(() => undefined);
     const memberBEventsStatus = memberBEvents?.status();
 
-    activeG6Phase = 'g6-delete-and-refresh';
     const memberBDeleteRow = frameB.getByRole('listitem', {
       name: names.deletable,
     });
