@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { emptyUidLifecycleObservation } from './element-desktop-evidence.mjs';
@@ -185,6 +186,49 @@ test('default UID census uses the supplied state and keeps failed capture unavai
     'nonzero-exit',
   );
   assert.equal(failedCapture.diagnostics.initial.census.exitStatus, 1);
+});
+
+test('uses a GNU timeout grace interval accepted by the census argv', async () => {
+  let captured;
+  await stopUidProcesses(
+    { uid: 24_323 },
+    {
+      runCommand: () => 1,
+      spawnCensus: (program, args, options) => {
+        captured = { program, args, options };
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        queueMicrotask(() => {
+          child.stdout.emit(
+            'data',
+            Buffer.from(JSON.stringify(observedEmptyLifecycle())),
+          );
+          child.emit('close', 0, null);
+        });
+        return child;
+      },
+    },
+  );
+
+  assert.ok(captured);
+  assert.equal(captured.program, 'timeout');
+  const timeoutArguments = captured.args.slice(0, 3);
+  assert.deepEqual(timeoutArguments, [
+    '--signal=TERM',
+    '--kill-after=0.25s',
+    '1s',
+  ]);
+  const result = spawnSync(
+    captured.program,
+    [...timeoutArguments, process.execPath, '-e', 'process.exit(0)'],
+    { env: captured.options.env, encoding: 'utf8' },
+  );
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0);
+  assert.equal(result.signal, null);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, '');
 });
 
 test('classifies UID census subprocess results without exposing subprocess output', async () => {

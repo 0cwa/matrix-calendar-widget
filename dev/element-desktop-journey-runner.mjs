@@ -1919,7 +1919,7 @@ function captureUidStopCensus(state, spawnChild = spawn) {
         'timeout',
         [
           '--signal=TERM',
-          '--kill-after=250ms',
+          '--kill-after=0.25s',
           '1s',
           'sudo',
           '-n',
