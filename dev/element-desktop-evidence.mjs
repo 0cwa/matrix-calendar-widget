@@ -1279,6 +1279,8 @@ function validateUidStopCensus(value) {
     ) ||
     !UID_STOP_CENSUS_OUTCOMES.has(value.outcome) ||
     !UID_STOP_STDERR_OUTCOMES.has(value.stderrOutcome) ||
+    (value.state !== 'not_attempted' &&
+      value.stderrOutcome === 'not_attempted') ||
     !(
       value.exitStatus === null ||
       (Number.isSafeInteger(value.exitStatus) &&
@@ -1306,7 +1308,6 @@ function validateUidStopCensus(value) {
         value.stderrOutcome === 'not_attempted'
       );
     }
-    if (value.stderrOutcome === 'not_attempted') return false;
     if (
       value.outcome === 'spawn-error' &&
       value.stderrOutcome !== 'unavailable'

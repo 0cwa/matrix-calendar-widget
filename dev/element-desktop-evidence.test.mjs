@@ -1237,6 +1237,11 @@ test('cleanup summary accepts only correlated fixed census stderr outcomes', () 
     'timeout-permission';
   assert.equal(validDesktopSummary(impossibleObservedFailure), false);
 
+  const observedNotAttempted = structuredClone(summary);
+  observedNotAttempted.cleanupDiagnostics.stopDiagnostics.initial.census.stderrOutcome =
+    'not_attempted';
+  assert.equal(validDesktopSummary(observedNotAttempted), false);
+
   const notAttempted = structuredClone(summary);
   notAttempted.cleanupDiagnostics.stopDiagnostics.postTerm.census.stderrOutcome =
     'absent';
