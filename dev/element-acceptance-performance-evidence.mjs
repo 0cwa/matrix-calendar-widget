@@ -25,7 +25,7 @@ const TARGETS = new Set(['none', 'personal', 'room', 'other']);
 const RANGE_CLASSES = new Set([
   'not-applicable',
   'preselection',
-  'preselection-padded',
+  'preselection-next',
   'list31',
   'month-padded',
   'overflow-day',
@@ -43,7 +43,7 @@ const PAGE_ERROR_CLASSES = new Set([
   'other',
 ]);
 const API_SAMPLE =
-  /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5]|(?:empty|events-25)-(?:default|refresh-month-setup|refresh-setup|refresh)|events-25-details-[1-5])$/u;
+  /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5]|(?:empty|events-25)-(?:default|refresh-setup|refresh)|events-25-details-[1-5])$/u;
 
 const REPORT_KEYS = [
   'version',
@@ -1011,7 +1011,7 @@ function validOrdinaryCase(value) {
 function validOrdinaryReport(report) {
   return (
     hasExactKeys(report, ORDINARY_REPORT_KEYS) &&
-    report.version === 6 &&
+    report.version === 7 &&
     report.viewportWidth === 1280 &&
     report.viewportHeight === 800 &&
     report.calendarDays === 7 &&
@@ -1027,7 +1027,7 @@ function validOrdinaryReport(report) {
     report.apiResponses.length <= 512 &&
     report.apiResponses.every(validApiResponse) &&
     report.apiResponses.every((row) =>
-      /^(?:empty|events-25)-(?:default|refresh-month-setup|refresh-setup|refresh)$|^events-25-details-[1-5]$/u.test(
+      /^(?:empty|events-25)-(?:default|refresh-setup|refresh)$|^events-25-details-[1-5]$/u.test(
         row.sample,
       ),
     ) &&
@@ -1043,7 +1043,7 @@ function validOrdinaryReport(report) {
 }
 
 function validReport(report) {
-  return isRecord(report) && report.version === 6
+  return isRecord(report) && report.version === 7
     ? validOrdinaryReport(report)
     : validLegacyReport(report);
 }
@@ -1268,18 +1268,6 @@ function ordinaryColdMatches(report, performanceCase) {
   );
 }
 
-function ordinaryMonthSetupMatches(report, performanceCase) {
-  const sample = `${performanceCase.profile}-refresh-month-setup`;
-  const events = ordinaryEvents(report, sample);
-  const rooms = ordinaryRoomRows(report, sample, 'month-padded');
-  return (
-    events.length > 0 &&
-    rooms.length === 1 &&
-    rooms[0].eventCount === performanceCase.eventCount &&
-    rooms[0].expectedTitlesMatch === true
-  );
-}
-
 function ordinaryActionPasses(action, expectedCount, maxDuration) {
   return (
     action.durationMs !== null &&
@@ -1290,6 +1278,23 @@ function ordinaryActionPasses(action, expectedCount, maxDuration) {
     action.roomResponseCount === 1 &&
     action.returnedCount === expectedCount &&
     action.renderedCount === expectedCount &&
+    action.rangeMatches &&
+    action.identitiesMatch &&
+    action.diagnosticsZero &&
+    action.stable &&
+    action.horizontalOverflow === false
+  );
+}
+
+function ordinarySetupPasses(action) {
+  return (
+    action.durationMs !== null &&
+    action.apiResponseCount > 0 &&
+    action.apiRangeMaxMs !== null &&
+    action.apiRangeMaxMs <= 1000 &&
+    action.roomResponseCount === 1 &&
+    action.returnedCount === 0 &&
+    action.renderedCount === 0 &&
     action.rangeMatches &&
     action.identitiesMatch &&
     action.diagnosticsZero &&
@@ -1353,13 +1358,12 @@ function ordinaryCasePasses(report, performanceCase) {
     cold.apiRangeMaxMs !== null &&
     cold.apiRangeMaxMs <= 1000 &&
     ordinaryColdMatches(report, performanceCase) &&
-    ordinaryMonthSetupMatches(report, performanceCase) &&
-    ordinaryActionPasses(performanceCase.refreshSetup, count, null) &&
+    ordinarySetupPasses(performanceCase.refreshSetup) &&
     summarizeOrdinaryApi(
       report,
       setupSample,
       performanceCase.refreshSetup,
-      'preselection-padded',
+      'preselection-next',
     ) &&
     ordinaryActionPasses(performanceCase.refresh, count, 2000) &&
     summarizeOrdinaryApi(
@@ -1418,8 +1422,7 @@ function ordinaryReportPasses(report) {
               );
             }
             const expectedRange = {
-              'refresh-month-setup': 'month-padded',
-              'refresh-setup': 'preselection-padded',
+              'refresh-setup': 'preselection-next',
               refresh: 'preselection',
             }[samplePhase];
             const detailRange = /^details-[1-5]$/u.test(samplePhase)
@@ -1429,7 +1432,10 @@ function ordinaryReportPasses(report) {
               (expectedRange !== undefined || detailRange !== undefined) &&
               row.rangeClass === (expectedRange ?? detailRange) &&
               row.rangeMatches === true &&
-              row.eventCount === performanceCase.eventCount &&
+              row.eventCount ===
+                (samplePhase === 'refresh-setup'
+                  ? 0
+                  : performanceCase.eventCount) &&
               row.expectedTitlesMatch === true
             );
           })()),
@@ -1438,13 +1444,13 @@ function ordinaryReportPasses(report) {
 }
 
 function reportPasses(report) {
-  return report.version === 6
+  return report.version === 7
     ? ordinaryReportPasses(report)
     : legacyReportPasses(report);
 }
 
 function validDefaultWaitRecord(record) {
-  if (record.performanceReport.version !== 6) return true;
+  if (record.performanceReport.version !== 7) return true;
   const snapshotCount = record.performanceReport.cases.filter(
     (performanceCase) => performanceCase.defaultWaitObservation !== null,
   ).length;
@@ -1482,7 +1488,7 @@ function formatOrdinaryPerformanceEvidence(record) {
   const lines = [
     [
       'phase=performance-pilot',
-      'report_version=6',
+      'report_version=7',
       'profile=ordinary-0-25',
       `beta_gate_eligible=${record.status === 'passed'}`,
       `status=${record.status}`,
@@ -1678,7 +1684,7 @@ export function formatPerformanceEvidence(record) {
   }
 
   const report = record.performanceReport;
-  if (report.version === 6) {
+  if (report.version === 7) {
     return formatOrdinaryPerformanceEvidence(record);
   }
   const lines = [

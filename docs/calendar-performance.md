@@ -29,8 +29,8 @@ The strict limits apply to every required sample:
 
 - Cold widget activation through a usable, stable default seven-day List view:
   **≤ 2,000 ms** in both contexts.
-- A view-selector refresh back to that same seven-day interval, through a
-  usable, stable List view: **≤ 2,000 ms**.
+- A visible List date-range-picker refresh back to that same seven-day
+  interval, through a usable, stable List view: **≤ 2,000 ms**.
 - Each required non-OpenID calendar API response, including context,
   calendar-metadata, and event-range requests, through full receipt and JSON
   decoding: **≤ 1,000 ms**. OpenID timings are recorded separately.
@@ -47,15 +47,19 @@ rendered, usable controls are visible, and the content is stable across two
 animation frames. Do not include custom date-picker navigation in the cold
 timer or pre-open the widget or bypass authentication.
 
-Use Element's visible View selector for the measured refresh. Change List to
-Month as setup, record that action and its decoded API response, then restore
-the same seven-day dates with the visible date picker while Month is selected.
-Setup actions have no separate 2,000-ms action limit, but their required
-calendar API responses still have the 1,000-ms limit. Start the refresh timer
-immediately before the Month-to-List selector transition. Require a new exact
-seven-day room-events response, full decoding, and stable correct List content;
-a cached render without a new matching response is incomplete. Do not force
-cache invalidation or add a refresh control for the test.
+Use the visible List date-range picker for the measured refresh. First select
+the adjacent seven-day interval beginning seven days after the original start
+date. Record its decoded response and stable zero-row List content as setup;
+the adjacent interval contains none of the 25 events seeded in the original
+interval. Setup has no separate 2,000-ms action limit, but its required
+calendar API response still has the 1,000-ms limit. Start the refresh timer
+before opening the date-range picker and selecting the exact original seven-day
+interval. This includes every picker action and requires a new exact room-events
+response, full decoding, and stable correct List content; a cached render
+without a new matching response is incomplete. The standard side-panel iframe
+can be narrower than the 800-pixel breakpoint that enables Month, so the test
+uses only controls available in the measured layout. Do not force cache
+invalidation or add a refresh control for the test.
 
 Retain one cold and one refresh sample in each fresh context, plus five details
 samples in the 25-event case. Require HTTP 200, exact interval and event

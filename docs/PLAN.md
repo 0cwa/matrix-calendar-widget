@@ -570,7 +570,8 @@ access and event writes stay disabled by default.
   - [x] Predeclare the approved synthetic Element Web ordinary-load target of
         zero and 25 events in the default seven-day List view in the standard
         side-panel WidgetCard path, with cold activation and same-range refresh
-        limits of 2s, API limit of 1s, and five 25-event details limits of 0.5s
+        through the visible List date-range picker limited to 2s, API limited to
+        1s, and five 25-event details samples limited to 0.5s
         in `docs/calendar-performance.md`. Custom 31-day and 250-event timing
         runs are diagnostic only; no complete 250-event timing series passed.
         Pinned/full-width layout certification is deferred. Hosted measurement

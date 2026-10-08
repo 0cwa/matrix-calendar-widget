@@ -323,7 +323,6 @@ type PerformancePageErrorClass =
 type OrdinaryPerformanceProfile = 'empty' | 'events-25';
 type OrdinaryPerformanceSampleKey =
   | `${OrdinaryPerformanceProfile}-default`
-  | `${OrdinaryPerformanceProfile}-refresh-month-setup`
   | `${OrdinaryPerformanceProfile}-refresh-setup`
   | `${OrdinaryPerformanceProfile}-refresh`
   | `events-25-details-${1 | 2 | 3 | 4 | 5}`;
@@ -348,7 +347,7 @@ type PerformanceEndpoint =
 type PerformanceRangeClass =
   | 'not-applicable'
   | 'preselection'
-  | 'preselection-padded'
+  | 'preselection-next'
   | 'list31'
   | 'month-padded'
   | 'overflow-day'
@@ -491,7 +490,7 @@ type OrdinaryPerformanceCase = {
   detailSamples: PerformanceDetailsSample[];
 };
 type OrdinaryPerformanceReport = {
-  version: 6;
+  version: 7;
   viewportWidth: 1280;
   viewportHeight: 800;
   calendarDays: 7;
@@ -514,10 +513,14 @@ type PerformancePendingRequest = {
   rangeClass: PerformanceRangeClass;
   rangeDays: number | null;
   rangeMatches: boolean | null;
+  expectedTitles: ReadonlySet<string>;
 };
 
 type PerformanceApiObserver = {
-  setSample: (sample: PerformanceSampleKey) => void;
+  setSample: (
+    sample: PerformanceSampleKey,
+    expectedTitles?: ReadonlySet<string>,
+  ) => void;
   rows: () => PerformanceApiResponse[];
   rowsFor: (sample: PerformanceSampleKey) => PerformanceApiResponse[];
   defaultWaitObservation: (
@@ -528,7 +531,7 @@ type PerformanceApiObserver = {
     sample: PerformanceSampleKey,
     rangeClass:
       | 'preselection'
-      | 'preselection-padded'
+      | 'preselection-next'
       | 'list31'
       | 'month-padded'
       | 'overflow-day',
@@ -901,43 +904,25 @@ function performanceDayRange(
   };
 }
 
-function performancePreselectionRange(initialDate: {
-  year: number;
-  month: number;
-  day: number;
-}): { start: number; end: number } {
-  const endDate = shiftCalendarDate(
-    initialDate.year,
-    initialDate.month,
-    initialDate.day,
-    7,
-  );
-  return {
-    start: localMidnightEpoch(
-      initialDate.year,
-      initialDate.month,
-      initialDate.day,
-    ),
-    end: localMidnightEpoch(endDate.year, endDate.month, endDate.day),
-  };
-}
-
-function performancePreselectionMonthRange(initialDate: {
-  year: number;
-  month: number;
-  day: number;
-}): { start: number; end: number } {
+function performancePreselectionRange(
+  initialDate: {
+    year: number;
+    month: number;
+    day: number;
+  },
+  offsetDays = 0,
+): { start: number; end: number } {
   const startDate = shiftCalendarDate(
     initialDate.year,
     initialDate.month,
     initialDate.day,
-    -7,
+    offsetDays,
   );
   const endDate = shiftCalendarDate(
-    initialDate.year,
-    initialDate.month,
-    initialDate.day,
-    14,
+    startDate.year,
+    startDate.month,
+    startDate.day,
+    7,
   );
   return {
     start: localMidnightEpoch(startDate.year, startDate.month, startDate.day),
@@ -1060,7 +1045,7 @@ function makeEmptyOrdinaryPerformanceReport(initialDate: {
   month: number;
 }): OrdinaryPerformanceReport {
   return {
-    version: 6,
+    version: 7,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -1171,16 +1156,10 @@ function performanceRangeExpectation(
       ...performanceMonthRange(year, month, 'list'),
     };
   }
-  if (sample.endsWith('-refresh-month-setup')) {
-    return {
-      rangeClass: 'month-padded',
-      ...performanceMonthRange(year, month, 'month'),
-    };
-  }
   if (sample.endsWith('-refresh-setup')) {
     return {
-      rangeClass: 'preselection-padded',
-      ...performancePreselectionMonthRange(initialDate),
+      rangeClass: 'preselection-next',
+      ...performancePreselectionRange(initialDate, 7),
     };
   }
   if (sample.endsWith('-refresh') || sample.startsWith('events-25-details-')) {
@@ -1432,6 +1411,7 @@ function createPerformanceApiObserver(
   >();
   const apiResponses: PerformanceApiResponse[] = [];
   let activeSample: PerformanceSampleKey = 'cold-list';
+  let activeExpectedTitles = expectedTitles;
 
   const startRequest = (request: Request) => {
     const startedAt = performance.now();
@@ -1536,6 +1516,7 @@ function createPerformanceApiObserver(
       rangeClass,
       rangeDays,
       rangeMatches,
+      expectedTitles: activeExpectedTitles,
     };
     pending.set(request, metadata);
     pendingBySample.set(
@@ -1573,7 +1554,7 @@ function createPerformanceApiObserver(
         const expectedTitleSet =
           metadata.sample === 'overflow-day'
             ? expectedDayTitles
-            : expectedTitles;
+            : metadata.expectedTitles;
         expectedTitlesMatch =
           titles.length === expectedTitleSet.size &&
           titles.every(
@@ -1663,8 +1644,9 @@ function createPerformanceApiObserver(
   };
 
   return {
-    setSample: (sample) => {
+    setSample: (sample, sampleExpectedTitles = expectedTitles) => {
       activeSample = sample;
+      activeExpectedTitles = sampleExpectedTitles;
     },
     rows: () => [...apiResponses],
     rowsFor: (sample) => apiResponses.filter((row) => row.sample === sample),
@@ -2567,7 +2549,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
 
       const summarizeAction = (
         sample: PerformanceSampleKey,
-        rangeClass: 'preselection' | 'preselection-padded' | 'month-padded',
+        rangeClass: 'preselection' | 'preselection-next',
         measurement: {
           second: {
             renderedCount: number | null;
@@ -2614,53 +2596,43 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       };
 
       failureCode = 'performance-view-sample-failed';
-      const monthSetupSample =
-        `${caseReport.profile}-refresh-month-setup` as const;
-      observer.setSample(monthSetupSample);
-      await frame.getByRole('combobox', { name: /^View/u }).click();
-      await frame.getByRole('option', { name: 'Month', exact: true }).click();
-      await observer.waitForRoomEvents(monthSetupSample, 'month-padded');
-      const monthSetupMeasurement = await readStableMonth(
-        frame,
-        expectedTitles,
-      );
-      await observer.waitForSettled(monthSetupSample);
-      expect(monthSetupMeasurement.second.renderedCount).toBe(
-        caseReport.eventCount,
-      );
-      expect(monthSetupMeasurement.second.identitiesMatch).toBe(true);
-      expect(monthSetupMeasurement.stable).toBe(true);
-
       const setupSample = `${caseReport.profile}-refresh-setup` as const;
-      observer.setSample(setupSample);
+      observer.setSample(setupSample, new Set());
       const setupStartedAt = performance.now();
-      const endDate = shiftCalendarDate(
+      const setupStartDate = shiftCalendarDate(
         initialDate.year,
         initialDate.month,
         initialDate.day,
+        7,
+      );
+      const setupEndDate = shiftCalendarDate(
+        setupStartDate.year,
+        setupStartDate.month,
+        setupStartDate.day,
         6,
       );
       await fillDatePicker(
         frame,
         frame.getByRole('button', {
-          name: /Choose (date range|date|work week|week|month), selected/u,
+          name: /Choose date range, selected/u,
         }),
-        [initialDate.year, initialDate.month, initialDate.day],
-        [endDate.year, endDate.month, endDate.day],
+        [setupStartDate.year, setupStartDate.month, setupStartDate.day],
+        [setupEndDate.year, setupEndDate.month, setupEndDate.day],
       );
-      await observer.waitForRoomEvents(setupSample, 'preselection-padded');
-      const setupMeasurement = await readStableMonth(frame, expectedTitles);
+      await observer.waitForRoomEvents(setupSample, 'preselection-next');
+      const setupMeasurement = await readStableList(frame, []);
       await observer.waitForSettled(setupSample);
       caseReport.refreshSetup = summarizeAction(
         setupSample,
-        'preselection-padded',
+        'preselection-next',
         setupMeasurement,
         elapsedMilliseconds(setupStartedAt),
       );
+      expect(caseReport.refreshSetup.apiResponseCount).toBeGreaterThan(0);
       expect(caseReport.refreshSetup.apiRangeMaxMs).toBeLessThanOrEqual(1000);
       expect(caseReport.refreshSetup.roomResponseCount).toBe(1);
-      expect(caseReport.refreshSetup.returnedCount).toBe(caseReport.eventCount);
-      expect(caseReport.refreshSetup.renderedCount).toBe(caseReport.eventCount);
+      expect(caseReport.refreshSetup.returnedCount).toBe(0);
+      expect(caseReport.refreshSetup.renderedCount).toBe(0);
       expect(caseReport.refreshSetup.rangeMatches).toBe(true);
       expect(caseReport.refreshSetup.identitiesMatch).toBe(true);
       expect(caseReport.refreshSetup.diagnosticsZero).toBe(true);
@@ -2669,8 +2641,20 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       const refreshSample = `${caseReport.profile}-refresh` as const;
       observer.setSample(refreshSample);
       const refreshStartedAt = performance.now();
-      await frame.getByRole('combobox', { name: /^View/u }).click();
-      await frame.getByRole('option', { name: 'List', exact: true }).click();
+      const originalEndDate = shiftCalendarDate(
+        initialDate.year,
+        initialDate.month,
+        initialDate.day,
+        6,
+      );
+      await fillDatePicker(
+        frame,
+        frame.getByRole('button', {
+          name: /Choose date range, selected/u,
+        }),
+        [initialDate.year, initialDate.month, initialDate.day],
+        [originalEndDate.year, originalEndDate.month, originalEndDate.day],
+      );
       await observer.waitForRoomEvents(refreshSample, 'preselection');
       const refreshMeasurement = await readStableList(frame, expectedTitles);
       await observer.waitForSettled(refreshSample);

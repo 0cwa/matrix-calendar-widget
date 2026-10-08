@@ -240,8 +240,8 @@ function ordinaryEventsResponse(sample, eventCount, rangeClass) {
     rangeDays:
       rangeClass === 'preselection'
         ? 7
-        : rangeClass === 'preselection-padded'
-          ? 21
+        : rangeClass === 'preselection-next'
+          ? 7
           : rangeClass === 'month-padded'
             ? 44
             : 31,
@@ -289,7 +289,7 @@ function ordinaryCase(profile, year, month, eventCount) {
     },
     defaultWaitObservation: null,
     coldList: ordinaryColdList(eventCount),
-    refreshSetup: ordinaryAction(eventCount, 2500),
+    refreshSetup: ordinaryAction(0, 2500),
     refresh: ordinaryAction(eventCount, 1900),
     detailSamples:
       eventCount === 25
@@ -303,7 +303,7 @@ function ordinaryCase(profile, year, month, eventCount) {
 
 function ordinaryReport() {
   const report = {
-    version: 6,
+    version: 7,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -323,14 +323,9 @@ function ordinaryReport() {
       ordinaryEventsResponse(`${profile}-default`, eventCount, 'preselection'),
       openIdResponse(`${profile}-default`),
       ordinaryEventsResponse(
-        `${profile}-refresh-month-setup`,
-        eventCount,
-        'month-padded',
-      ),
-      ordinaryEventsResponse(
         `${profile}-refresh-setup`,
-        eventCount,
-        'preselection-padded',
+        0,
+        'preselection-next',
       ),
       ordinaryEventsResponse(`${profile}-refresh`, eventCount, 'preselection'),
     );
@@ -396,7 +391,7 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   );
   assert.match(
     summary,
-    /phase=performance-pilot report_version=6 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
+    /phase=performance-pilot report_version=7 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
   );
   assert.match(summary, /performance_case profile=empty events=0/u);
   assert.match(summary, /performance_case profile=events-25 events=25/u);
@@ -406,11 +401,7 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   );
   assert.match(
     summary,
-    /performance_api sample=events-25-refresh-month-setup endpoint=events method=GET status=200 duration_ms=600 decoded=true event_count=25 diagnostics=0 target=room calendar_matches=true range_class=month-padded/u,
-  );
-  assert.match(
-    summary,
-    /performance_api sample=events-25-refresh-setup endpoint=events method=GET status=200 duration_ms=600 decoded=true event_count=25 diagnostics=0 target=room calendar_matches=true range_class=preselection-padded range_days=21 range_matches=true expected_titles_match=true/u,
+    /performance_api sample=events-25-refresh-setup endpoint=events method=GET status=200 duration_ms=600 decoded=true event_count=0 diagnostics=0 target=room calendar_matches=true range_class=preselection-next range_days=7 range_matches=true expected_titles_match=true/u,
   );
   assert.match(
     summary,
@@ -958,6 +949,20 @@ test('gates the cold first usable seven-day view at two seconds', () => {
 });
 
 test('requires a new refresh response for the same seven-day range', () => {
+  const nonemptySetup = ordinaryReport();
+  const setup = nonemptySetup.apiResponses.find(
+    ({ sample }) => sample === 'events-25-refresh-setup',
+  );
+  setup.eventCount = 1;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', nonemptySetup)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
   const wrongRefreshRange = ordinaryReport();
   const refresh = wrongRefreshRange.apiResponses.find(
     ({ sample }) => sample === 'events-25-refresh',
