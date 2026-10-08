@@ -40,7 +40,9 @@ const ELEMENT_BUNDLE_PATH =
 /**
  * @typedef {{bundleUrl: string, generatedLine: number, generatedColumn: number}} ElementBundleFrame
  * @typedef {{bundleUrl: string, sourceMapText: string | null}} ElementSourceMapResult
- * @typedef {{sourceMapStatus: 'not-eligible' | 'not-attempted' | 'unavailable' | 'invalid' | 'unmapped' | 'mapped', sourceMapResolution: 'not-applicable' | 'mapped' | 'no-original-position' | 'dependency-source' | 'unsupported-source' | 'invalid-coordinate', sourceRefSha256: string | null, sourceLine: number | null, sourceColumn: number | null}} ElementErrorSourcePointer
+ * @typedef {'not-applicable' | 'source-not-found' | 'duplicate-source' | 'source-resolution-mismatch' | 'unsupported-namespace' | 'unsupported-scheme' | 'repository-root-prefix' | 'relative-path-prefix' | 'absolute-path' | 'query-or-fragment' | 'unsafe-path-segment' | 'invalid-path-character' | 'unsupported-path-prefix' | 'other-unsupported-source'} ElementSourceMapUnsupportedReason
+ * @typedef {'not-applicable' | 'element-web' | 'matrix-react-sdk' | 'matrix-widget-api' | 'empty' | 'other'} ElementSourceMapNamespaceClass
+ * @typedef {{sourceMapStatus: 'not-eligible' | 'not-attempted' | 'unavailable' | 'invalid' | 'unmapped' | 'mapped', sourceMapResolution: 'not-applicable' | 'mapped' | 'no-original-position' | 'dependency-source' | 'unsupported-source' | 'invalid-coordinate', sourceMapUnsupportedReason: ElementSourceMapUnsupportedReason, sourceMapNamespaceClass: ElementSourceMapNamespaceClass, sourceRefSha256: string | null, sourceLine: number | null, sourceColumn: number | null}} ElementErrorSourcePointer
  * @typedef {{bundleUrl: string, expectedOrigin: string, maxBytes: number, timeoutMs: number}} ElementSourceMapReadRequest
  * @typedef {{text: string | null, bytesRead: number, limitReached: boolean}} ElementSourceMapReadResult
  */
@@ -392,6 +394,156 @@ function resolvedMapSource(rawSource, sourceRoot) {
   }
 }
 
+/** @param {string} rawSource */
+function elementSourceNamespaceClass(rawSource) {
+  if (!rawSource.startsWith('webpack://')) return 'not-applicable';
+  const authority = rawSource.slice('webpack://'.length).split(/[/?#]/u, 1)[0];
+  if (authority === '') return 'empty';
+  if (authority === 'element-web') return 'element-web';
+  if (authority === 'matrix-react-sdk') return 'matrix-react-sdk';
+  if (authority === 'matrix-widget-api') return 'matrix-widget-api';
+  return 'other';
+}
+
+/**
+ * @param {string} source
+ * @param {string} rawSource
+ * @param {string} sourceRoot
+ * @returns {{sourceMapUnsupportedReason: ElementSourceMapUnsupportedReason, sourceMapNamespaceClass: ElementSourceMapNamespaceClass}}
+ */
+function unsupportedElementSourceDetails(source, rawSource, sourceRoot) {
+  const namespaceClass = elementSourceNamespaceClass(rawSource);
+  if (
+    typeof source === 'string' &&
+    typeof rawSource === 'string' &&
+    source !== resolvedMapSource(rawSource, sourceRoot)
+  ) {
+    return {
+      sourceMapUnsupportedReason: 'source-resolution-mismatch',
+      sourceMapNamespaceClass: namespaceClass,
+    };
+  }
+
+  if (rawSource.startsWith('webpack://') && namespaceClass !== 'element-web') {
+    return {
+      sourceMapUnsupportedReason: 'unsupported-namespace',
+      sourceMapNamespaceClass: namespaceClass,
+    };
+  }
+
+  const isElementNamespace = namespaceClass === 'element-web';
+  if (!isElementNamespace && /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(rawSource)) {
+    return {
+      sourceMapUnsupportedReason: 'unsupported-scheme',
+      sourceMapNamespaceClass: namespaceClass,
+    };
+  }
+  if (rawSource.includes('?') || rawSource.includes('#')) {
+    return {
+      sourceMapUnsupportedReason: 'query-or-fragment',
+      sourceMapNamespaceClass: namespaceClass,
+    };
+  }
+
+  let resourcePath = rawSource;
+  if (isElementNamespace) {
+    const namespacePrefix = 'webpack://element-web/';
+    resourcePath = rawSource.startsWith(namespacePrefix)
+      ? rawSource.slice(namespacePrefix.length)
+      : '';
+  }
+
+  if (resourcePath.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(resourcePath)) {
+    return {
+      sourceMapUnsupportedReason: 'absolute-path',
+      sourceMapNamespaceClass: namespaceClass,
+    };
+  }
+  if (
+    resourcePath.startsWith('apps/web/') ||
+    resourcePath.startsWith('packages/')
+  ) {
+    return {
+      sourceMapUnsupportedReason: 'repository-root-prefix',
+      sourceMapNamespaceClass: namespaceClass,
+    };
+  }
+  if (
+    resourcePath.startsWith('../') &&
+    !resourcePath.startsWith('../../packages/')
+  ) {
+    return {
+      sourceMapUnsupportedReason: 'relative-path-prefix',
+      sourceMapNamespaceClass: namespaceClass,
+    };
+  }
+  if (resourcePath.startsWith('./') && !resourcePath.startsWith('./src/')) {
+    return {
+      sourceMapUnsupportedReason: 'relative-path-prefix',
+      sourceMapNamespaceClass: namespaceClass,
+    };
+  }
+  if (resourcePath === '') {
+    return {
+      sourceMapUnsupportedReason: 'unsupported-path-prefix',
+      sourceMapNamespaceClass: namespaceClass,
+    };
+  }
+
+  const acceptedPrefix = resourcePath.startsWith('./src/')
+    ? './src/'
+    : resourcePath.startsWith('src/')
+      ? 'src/'
+      : resourcePath.startsWith('../../packages/')
+        ? '../../packages/'
+        : null;
+  if (acceptedPrefix !== null) {
+    const tail = resourcePath.slice(acceptedPrefix.length);
+    if (
+      tail
+        .split('/')
+        .some(
+          (segment) => segment === '' || segment === '.' || segment === '..',
+        )
+    ) {
+      return {
+        sourceMapUnsupportedReason: 'unsafe-path-segment',
+        sourceMapNamespaceClass: namespaceClass,
+      };
+    }
+    if (!/^[A-Za-z0-9@._/-]+$/u.test(tail)) {
+      return {
+        sourceMapUnsupportedReason: 'invalid-path-character',
+        sourceMapNamespaceClass: namespaceClass,
+      };
+    }
+  }
+  if (resourcePath.includes('%') || /[^A-Za-z0-9@._/-]/u.test(resourcePath)) {
+    return {
+      sourceMapUnsupportedReason: 'invalid-path-character',
+      sourceMapNamespaceClass: namespaceClass,
+    };
+  }
+  if (
+    resourcePath
+      .split('/')
+      .some((segment) => segment === '' || segment === '.' || segment === '..')
+  ) {
+    return {
+      sourceMapUnsupportedReason: 'unsafe-path-segment',
+      sourceMapNamespaceClass: namespaceClass,
+    };
+  }
+
+  return {
+    sourceMapUnsupportedReason:
+      acceptedPrefix === null
+        ? 'unsupported-path-prefix'
+        : 'other-unsupported-source',
+    sourceMapNamespaceClass: namespaceClass,
+  };
+}
+
 function knownElementDependencySource(rawSource) {
   let relative = rawSource;
   if (rawSource.startsWith('webpack://element-web/')) {
@@ -504,17 +656,29 @@ function invalidPointer() {
   return {
     sourceMapStatus: 'invalid',
     sourceMapResolution: 'not-applicable',
+    sourceMapUnsupportedReason: 'not-applicable',
+    sourceMapNamespaceClass: 'not-applicable',
     sourceRefSha256: null,
     sourceLine: null,
     sourceColumn: null,
   };
 }
 
-/** @param {'no-original-position' | 'dependency-source' | 'unsupported-source' | 'invalid-coordinate'} resolution */
-function unmappedPointer(resolution) {
+/**
+ * @param {'no-original-position' | 'dependency-source' | 'unsupported-source' | 'invalid-coordinate'} resolution
+ * @param {ElementSourceMapUnsupportedReason} [unsupportedReason]
+ * @param {ElementSourceMapNamespaceClass} [namespaceClass]
+ */
+function unmappedPointer(
+  resolution,
+  unsupportedReason = 'not-applicable',
+  namespaceClass = 'not-applicable',
+) {
   return {
     sourceMapStatus: 'unmapped',
     sourceMapResolution: resolution,
+    sourceMapUnsupportedReason: unsupportedReason,
+    sourceMapNamespaceClass: namespaceClass,
     sourceRefSha256: null,
     sourceLine: null,
     sourceColumn: null,
@@ -535,6 +699,8 @@ export function resolveElementErrorSourcePointer(frames, sourceMaps) {
     return {
       sourceMapStatus: 'not-eligible',
       sourceMapResolution: 'not-applicable',
+      sourceMapUnsupportedReason: 'not-applicable',
+      sourceMapNamespaceClass: 'not-applicable',
       sourceRefSha256: null,
       sourceLine: null,
       sourceColumn: null,
@@ -570,9 +736,8 @@ export function resolveElementErrorSourcePointer(frames, sourceMaps) {
 
   let hadInvalidMap = false;
   let hadUnavailableMap = false;
-  let hadValidUnmappedFrame = false;
-  /** @type {'no-original-position' | 'dependency-source' | 'unsupported-source' | 'invalid-coordinate' | null} */
-  let firstUnmappedResolution = null;
+  /** @type {ElementErrorSourcePointer | null} */
+  let firstUnmappedPointer = null;
   for (const frame of frames) {
     if (!mapByBundle.has(frame.bundleUrl)) {
       hadUnavailableMap = true;
@@ -587,11 +752,8 @@ export function resolveElementErrorSourcePointer(frames, sourceMaps) {
     const pointer = resolveFramePointer(frame, sourceMapText);
     if (pointer.sourceMapStatus === 'mapped') return pointer;
     if (pointer.sourceMapStatus === 'invalid') hadInvalidMap = true;
-    else {
-      hadValidUnmappedFrame = true;
-      if (firstUnmappedResolution === null) {
-        firstUnmappedResolution = pointer.sourceMapResolution;
-      }
+    else if (firstUnmappedPointer === null) {
+      firstUnmappedPointer = pointer;
     }
   }
 
@@ -599,18 +761,20 @@ export function resolveElementErrorSourcePointer(frames, sourceMaps) {
     return {
       sourceMapStatus: 'unavailable',
       sourceMapResolution: 'not-applicable',
+      sourceMapUnsupportedReason: 'not-applicable',
+      sourceMapNamespaceClass: 'not-applicable',
       sourceRefSha256: null,
       sourceLine: null,
       sourceColumn: null,
     };
   }
-  if (hadValidUnmappedFrame && firstUnmappedResolution !== null) {
-    return unmappedPointer(firstUnmappedResolution);
-  }
+  if (firstUnmappedPointer !== null) return firstUnmappedPointer;
   if (hadInvalidMap) return invalidPointer();
   return {
     sourceMapStatus: 'unavailable',
     sourceMapResolution: 'not-applicable',
+    sourceMapUnsupportedReason: 'not-applicable',
+    sourceMapNamespaceClass: 'not-applicable',
     sourceRefSha256: null,
     sourceLine: null,
     sourceColumn: null,
@@ -714,8 +878,11 @@ function resolveFramePointer(frame, sourceMapText) {
       if (consumer.sources[index] === original.source)
         sourceIndices.push(index);
     }
-    if (sourceIndices.length !== 1) {
-      return unmappedPointer('unsupported-source');
+    if (sourceIndices.length === 0) {
+      return unmappedPointer('unsupported-source', 'source-not-found');
+    }
+    if (sourceIndices.length > 1) {
+      return unmappedPointer('unsupported-source', 'duplicate-source');
     }
     const rawSource = sourceMap.sources[sourceIndices[0]];
     const sourceRoot = sourceMap.sourceRoot ?? '';
@@ -728,7 +895,16 @@ function resolveFramePointer(frame, sourceMapText) {
       sourceRoot,
     );
     if (sourcePath === null) {
-      return unmappedPointer('unsupported-source');
+      const unsupported = unsupportedElementSourceDetails(
+        original.source,
+        rawSource,
+        sourceRoot,
+      );
+      return unmappedPointer(
+        'unsupported-source',
+        unsupported.sourceMapUnsupportedReason,
+        unsupported.sourceMapNamespaceClass,
+      );
     }
 
     const sourceReference = `${ELEMENT_WEB_REPOSITORY}@${ELEMENT_WEB_COMMIT}:${sourcePath}`;
@@ -738,6 +914,8 @@ function resolveFramePointer(frame, sourceMapText) {
     return {
       sourceMapStatus: 'mapped',
       sourceMapResolution: 'mapped',
+      sourceMapUnsupportedReason: 'not-applicable',
+      sourceMapNamespaceClass: 'not-applicable',
       sourceRefSha256,
       sourceLine: original.line,
       sourceColumn: original.column,

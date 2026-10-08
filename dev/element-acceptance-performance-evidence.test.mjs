@@ -850,6 +850,99 @@ test('summarizes bounded page-error stage observations without error text', () =
   );
 });
 
+test('reports v12 source-map rejection shapes without exposing source strings', () => {
+  const report = ordinaryReport();
+  report.version = 12;
+  report.pageErrorCount = 2;
+  report.pageErrorClass = 'other';
+  report.pageErrorObservations = [
+    {
+      profile: 'empty',
+      stage: 'widget-open',
+      errorClass: 'other',
+      errorSubtype: 'named-error',
+      errorSource: 'element',
+      stackAvailable: true,
+      sourceScanTruncated: false,
+      sourceMapStatus: 'unmapped',
+      sourceMapResolution: 'unsupported-source',
+      sourceMapUnsupportedReason: 'unsupported-namespace',
+      sourceMapNamespaceClass: 'matrix-widget-api',
+      sourceRefSha256: null,
+      sourceLine: null,
+      sourceColumn: null,
+    },
+    {
+      profile: 'events-25',
+      stage: 'widget-open',
+      errorClass: 'type-error',
+      errorSubtype: 'type-error',
+      errorSource: 'element',
+      stackAvailable: true,
+      sourceScanTruncated: false,
+      sourceMapStatus: 'unmapped',
+      sourceMapResolution: 'unsupported-source',
+      sourceMapUnsupportedReason: 'repository-root-prefix',
+      sourceMapNamespaceClass: 'element-web',
+      sourceRefSha256: null,
+      sourceLine: null,
+      sourceColumn: null,
+    },
+  ];
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(ordinaryStage('failed', report, 'performance-page-error')),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /source_map_status=unmapped source_map_resolution=unsupported-source source_map_unsupported_reason=unsupported-namespace source_map_namespace_class=matrix-widget-api source_ref_sha256=none/u,
+  );
+  assert.match(
+    summary,
+    /source_map_status=unmapped source_map_resolution=unsupported-source source_map_unsupported_reason=repository-root-prefix source_map_namespace_class=element-web source_ref_sha256=none/u,
+  );
+  assert.doesNotMatch(
+    summary,
+    /(?:webpack:\/\/|apps\/web|sourceRoot|rawSource|https?:\/\/)/u,
+  );
+
+  for (const mutate of [
+    (invalid) => {
+      invalid.pageErrorObservations[0].sourceMapUnsupportedReason =
+        'private-path';
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[0].sourceMapNamespaceClass =
+        'private-package';
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[0].sourceMapNamespaceClass = 'element-web';
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[0].sourceMapUnsupportedReason =
+        'source-not-found';
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[1].sourceMapUnsupportedReason =
+        'not-applicable';
+    },
+  ]) {
+    const invalid = structuredClone(report);
+    mutate(invalid);
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify(
+            ordinaryStage('failed', invalid, 'performance-page-error'),
+          ),
+          sourceSha,
+        ),
+      /invalid element acceptance summary/u,
+    );
+  }
+});
+
 test('accepts seeding between the empty and populated fresh-context samples', () => {
   const stages = [
     ordinaryStage('started', ordinaryReport()),

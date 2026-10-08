@@ -739,7 +739,7 @@ type OrdinaryPerformanceCase = {
   detailSamples: PerformanceDetailsSample[];
 };
 type OrdinaryPerformanceReport = {
-  version: 11;
+  version: 12;
   viewportWidth: 1280;
   viewportHeight: 800;
   calendarDays: 7;
@@ -1296,7 +1296,7 @@ function makeEmptyOrdinaryPerformanceReport(initialDate: {
   month: number;
 }): OrdinaryPerformanceReport {
   return {
-    version: 11,
+    version: 12,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -2546,6 +2546,8 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
                   ? 'unavailable'
                   : 'not-attempted',
             sourceMapResolution: 'not-applicable',
+            sourceMapUnsupportedReason: 'not-applicable',
+            sourceMapNamespaceClass: 'not-applicable',
             sourceRefSha256: null,
             sourceLine: null,
             sourceColumn: null,

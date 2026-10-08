@@ -19,6 +19,28 @@ export type ElementErrorSourcePointer = {
     | 'dependency-source'
     | 'unsupported-source'
     | 'invalid-coordinate';
+  sourceMapUnsupportedReason:
+    | 'not-applicable'
+    | 'source-not-found'
+    | 'duplicate-source'
+    | 'source-resolution-mismatch'
+    | 'unsupported-namespace'
+    | 'unsupported-scheme'
+    | 'repository-root-prefix'
+    | 'relative-path-prefix'
+    | 'absolute-path'
+    | 'query-or-fragment'
+    | 'unsafe-path-segment'
+    | 'invalid-path-character'
+    | 'unsupported-path-prefix'
+    | 'other-unsupported-source';
+  sourceMapNamespaceClass:
+    | 'not-applicable'
+    | 'element-web'
+    | 'matrix-react-sdk'
+    | 'matrix-widget-api'
+    | 'empty'
+    | 'other';
   sourceRefSha256: string | null;
   sourceLine: number | null;
   sourceColumn: number | null;

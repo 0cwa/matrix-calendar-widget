@@ -78,13 +78,37 @@ const PAGE_ERROR_SOURCE_MAP_RESOLUTIONS = new Set([
   'unsupported-source',
   'invalid-coordinate',
 ]);
+const PAGE_ERROR_SOURCE_MAP_UNSUPPORTED_REASONS = new Set([
+  'not-applicable',
+  'source-not-found',
+  'duplicate-source',
+  'source-resolution-mismatch',
+  'unsupported-namespace',
+  'unsupported-scheme',
+  'repository-root-prefix',
+  'relative-path-prefix',
+  'absolute-path',
+  'query-or-fragment',
+  'unsafe-path-segment',
+  'invalid-path-character',
+  'unsupported-path-prefix',
+  'other-unsupported-source',
+]);
+const PAGE_ERROR_SOURCE_MAP_NAMESPACE_CLASSES = new Set([
+  'not-applicable',
+  'element-web',
+  'matrix-react-sdk',
+  'matrix-widget-api',
+  'empty',
+  'other',
+]);
 const UNMAPPED_SOURCE_RESOLUTIONS = new Set([
   'no-original-position',
   'dependency-source',
   'unsupported-source',
   'invalid-coordinate',
 ]);
-const ORDINARY_REPORT_VERSIONS = new Set([9, 10, 11]);
+const ORDINARY_REPORT_VERSIONS = new Set([9, 10, 11, 12]);
 const PAGE_ERROR_SUBTYPE_CLASS = new Map([
   ['error', 'error'],
   ['type-error', 'type-error'],
@@ -146,6 +170,11 @@ const VERSION_10_PAGE_ERROR_OBSERVATION_KEYS = [
 const PAGE_ERROR_OBSERVATION_KEYS = [
   ...VERSION_10_PAGE_ERROR_OBSERVATION_KEYS,
   'sourceMapResolution',
+];
+const VERSION_12_PAGE_ERROR_OBSERVATION_KEYS = [
+  ...PAGE_ERROR_OBSERVATION_KEYS,
+  'sourceMapUnsupportedReason',
+  'sourceMapNamespaceClass',
 ];
 const API_SAMPLE =
   /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5]|(?:empty|events-25)-(?:default|refresh-setup|refresh)|events-25-details-[1-5])$/u;
@@ -1242,7 +1271,9 @@ function validOrdinaryReport(report) {
           ? LEGACY_PAGE_ERROR_OBSERVATION_KEYS
           : report.version === 10
             ? VERSION_10_PAGE_ERROR_OBSERVATION_KEYS
-            : PAGE_ERROR_OBSERVATION_KEYS;
+            : report.version === 11
+              ? PAGE_ERROR_OBSERVATION_KEYS
+              : VERSION_12_PAGE_ERROR_OBSERVATION_KEYS;
       if (!hasExactKeys(observation, pageErrorObservationKeys)) {
         return false;
       }
@@ -1321,6 +1352,58 @@ function validOrdinaryReport(report) {
                         observation.stage === 'widget-open' &&
                         observation.stackAvailable &&
                         !observation.sourceScanTruncated)))));
+      const sourceMapDiagnosticValid =
+        report.version !== 12 ||
+        (() => {
+          const unsupported =
+            observation.sourceMapStatus === 'unmapped' &&
+            observation.sourceMapResolution === 'unsupported-source';
+          if (
+            !PAGE_ERROR_SOURCE_MAP_UNSUPPORTED_REASONS.has(
+              observation.sourceMapUnsupportedReason,
+            ) ||
+            !PAGE_ERROR_SOURCE_MAP_NAMESPACE_CLASSES.has(
+              observation.sourceMapNamespaceClass,
+            )
+          ) {
+            return false;
+          }
+          if (!unsupported) {
+            return (
+              observation.sourceMapUnsupportedReason === 'not-applicable' &&
+              observation.sourceMapNamespaceClass === 'not-applicable'
+            );
+          }
+          if (observation.sourceMapUnsupportedReason === 'not-applicable') {
+            return false;
+          }
+          if (
+            observation.sourceMapUnsupportedReason === 'source-not-found' ||
+            observation.sourceMapUnsupportedReason === 'duplicate-source'
+          ) {
+            return observation.sourceMapNamespaceClass === 'not-applicable';
+          }
+          if (
+            observation.sourceMapUnsupportedReason === 'unsupported-namespace'
+          ) {
+            return (
+              observation.sourceMapNamespaceClass === 'matrix-react-sdk' ||
+              observation.sourceMapNamespaceClass === 'matrix-widget-api' ||
+              observation.sourceMapNamespaceClass === 'empty' ||
+              observation.sourceMapNamespaceClass === 'other'
+            );
+          }
+          if (
+            observation.sourceMapUnsupportedReason ===
+            'source-resolution-mismatch'
+          ) {
+            return true;
+          }
+          return (
+            observation.sourceMapNamespaceClass === 'not-applicable' ||
+            observation.sourceMapNamespaceClass === 'element-web'
+          );
+        })();
       return (
         ORDINARY_PROFILES.has(observation.profile) &&
         PAGE_ERROR_STAGES.has(observation.stage) &&
@@ -1329,7 +1412,8 @@ function validOrdinaryReport(report) {
         PAGE_ERROR_SUBTYPES.has(observation.errorSubtype) &&
         subtypeClass === observation.errorClass &&
         sourceEvidenceValid &&
-        sourcePointerValid
+        sourcePointerValid &&
+        sourceMapDiagnosticValid
       );
     }) &&
     typeof report.pageErrorObservationOverflow === 'boolean' &&
@@ -1845,7 +1929,7 @@ function formatOrdinaryPerformanceEvidence(record) {
 
   for (const [index, observation] of report.pageErrorObservations.entries()) {
     lines.push(
-      `page_error_observation index=${index + 1} profile=${observation.profile} stage=${observation.stage} error_class=${observation.errorClass} error_subtype=${observation.errorSubtype} error_source=${observation.errorSource} stack_available=${observation.stackAvailable} source_scan_truncated=${observation.sourceScanTruncated}${report.version >= 10 ? ` source_map_status=${observation.sourceMapStatus}${report.version >= 11 ? ` source_map_resolution=${observation.sourceMapResolution}` : ''} source_ref_sha256=${observation.sourceRefSha256 ?? 'none'} source_line=${observation.sourceLine ?? 'none'} source_column=${observation.sourceColumn ?? 'none'}` : ''}`,
+      `page_error_observation index=${index + 1} profile=${observation.profile} stage=${observation.stage} error_class=${observation.errorClass} error_subtype=${observation.errorSubtype} error_source=${observation.errorSource} stack_available=${observation.stackAvailable} source_scan_truncated=${observation.sourceScanTruncated}${report.version >= 10 ? ` source_map_status=${observation.sourceMapStatus}${report.version >= 11 ? ` source_map_resolution=${observation.sourceMapResolution}` : ''}${report.version >= 12 ? ` source_map_unsupported_reason=${observation.sourceMapUnsupportedReason} source_map_namespace_class=${observation.sourceMapNamespaceClass}` : ''} source_ref_sha256=${observation.sourceRefSha256 ?? 'none'} source_line=${observation.sourceLine ?? 'none'} source_column=${observation.sourceColumn ?? 'none'}` : ''}`,
     );
   }
 

@@ -44,6 +44,8 @@ function expectedPointer(sourcePath, sourceLine = 42, sourceColumn = 5) {
   return {
     sourceMapStatus: 'mapped',
     sourceMapResolution: 'mapped',
+    sourceMapUnsupportedReason: 'not-applicable',
+    sourceMapNamespaceClass: 'not-applicable',
     sourceRefSha256: createHash('sha256')
       .update(
         `element-hq/element-web@f19cfd9030429240a4209bf5175b372175cf0464:${sourcePath}`,
@@ -51,6 +53,23 @@ function expectedPointer(sourcePath, sourceLine = 42, sourceColumn = 5) {
       .digest('hex'),
     sourceLine,
     sourceColumn,
+  };
+}
+
+function expectedPointerState(
+  sourceMapStatus,
+  sourceMapResolution = 'not-applicable',
+  sourceMapUnsupportedReason = 'not-applicable',
+  sourceMapNamespaceClass = 'not-applicable',
+) {
+  return {
+    sourceMapStatus,
+    sourceMapResolution,
+    sourceMapUnsupportedReason,
+    sourceMapNamespaceClass,
+    sourceRefSha256: null,
+    sourceLine: null,
+    sourceColumn: null,
   };
 }
 
@@ -125,13 +144,7 @@ test('classifies valid unmapped positions without returning source text', () => 
       resolveElementErrorSourcePointer(frames, [
         { bundleUrl, sourceMapText: validMap(source, 'app.js', sourceRoot) },
       ]),
-      {
-        sourceMapStatus: 'unmapped',
-        sourceMapResolution: 'dependency-source',
-        sourceRefSha256: null,
-        sourceLine: null,
-        sourceColumn: null,
-      },
+      expectedPointerState('unmapped', 'dependency-source'),
     );
   }
 
@@ -143,13 +156,10 @@ test('classifies valid unmapped positions without returning source text', () => 
     names: [],
     mappings: '',
   });
-  assert.deepEqual(pointerForMap(noPosition), {
-    sourceMapStatus: 'unmapped',
-    sourceMapResolution: 'no-original-position',
-    sourceRefSha256: null,
-    sourceLine: null,
-    sourceColumn: null,
-  });
+  assert.deepEqual(
+    pointerForMap(noPosition),
+    expectedPointerState('unmapped', 'no-original-position'),
+  );
 
   const invalidCoordinate = JSON.stringify({
     version: 3,
@@ -159,29 +169,24 @@ test('classifies valid unmapped positions without returning source text', () => 
     names: [],
     mappings: `${';'.repeat(12)}AADA`,
   });
-  assert.deepEqual(pointerForMap(invalidCoordinate), {
-    sourceMapStatus: 'unmapped',
-    sourceMapResolution: 'invalid-coordinate',
-    sourceRefSha256: null,
-    sourceLine: null,
-    sourceColumn: null,
-  });
+  assert.deepEqual(
+    pointerForMap(invalidCoordinate),
+    expectedPointerState('unmapped', 'invalid-coordinate'),
+  );
 
-  assert.deepEqual(pointerForMap(validMap('./external/source.ts')), {
-    sourceMapStatus: 'unmapped',
-    sourceMapResolution: 'unsupported-source',
-    sourceRefSha256: null,
-    sourceLine: null,
-    sourceColumn: null,
-  });
+  assert.deepEqual(
+    pointerForMap(validMap('./external/source.ts')),
+    expectedPointerState(
+      'unmapped',
+      'unsupported-source',
+      'relative-path-prefix',
+    ),
+  );
 
-  assert.deepEqual(resolveElementErrorSourcePointer([], []), {
-    sourceMapStatus: 'not-eligible',
-    sourceMapResolution: 'not-applicable',
-    sourceRefSha256: null,
-    sourceLine: null,
-    sourceColumn: null,
-  });
+  assert.deepEqual(
+    resolveElementErrorSourcePointer([], []),
+    expectedPointerState('not-eligible'),
+  );
   assert.deepEqual(
     resolveElementErrorSourcePointer(frames, [
       {
@@ -189,13 +194,7 @@ test('classifies valid unmapped positions without returning source text', () => 
         sourceMapText: null,
       },
     ]),
-    {
-      sourceMapStatus: 'unavailable',
-      sourceMapResolution: 'not-applicable',
-      sourceRefSha256: null,
-      sourceLine: null,
-      sourceColumn: null,
-    },
+    expectedPointerState('unavailable'),
   );
 });
 
@@ -217,13 +216,7 @@ test('rejects malformed, mismatched, and oversized maps without leaking data', (
   ]);
 
   for (const pointer of [malformed, mismatched, oversized]) {
-    assert.deepEqual(pointer, {
-      sourceMapStatus: 'invalid',
-      sourceMapResolution: 'not-applicable',
-      sourceRefSha256: null,
-      sourceLine: null,
-      sourceColumn: null,
-    });
+    assert.deepEqual(pointer, expectedPointerState('invalid'));
     assert.doesNotMatch(
       JSON.stringify(pointer),
       /private|https?:\/\/|other\.js|0123456789abcdef/u,
@@ -326,13 +319,7 @@ test('enforces the bounded map lookup list and keeps unavailable ahead of partia
       { bundleUrl: dependencyUrl, sourceMapText: dependencyMap.toString() },
       { bundleUrl: bundleUrl, sourceMapText: null },
     ]),
-    {
-      sourceMapStatus: 'unavailable',
-      sourceMapResolution: 'not-applicable',
-      sourceRefSha256: null,
-      sourceLine: null,
-      sourceColumn: null,
-    },
+    expectedPointerState('unavailable'),
   );
   assert.equal(
     resolveElementErrorSourcePointer(
@@ -355,13 +342,7 @@ test('rejects a source map associated with a different captured bundle', () => {
     resolveElementErrorSourcePointer(frames, [
       { bundleUrl: wrongBundleUrl, sourceMapText: validMap() },
     ]),
-    {
-      sourceMapStatus: 'invalid',
-      sourceMapResolution: 'not-applicable',
-      sourceRefSha256: null,
-      sourceLine: null,
-      sourceColumn: null,
-    },
+    expectedPointerState('invalid'),
   );
 });
 
@@ -397,32 +378,99 @@ test('maps only the pinned Webpack app and exact workspace-relative sources', ()
     );
   }
 
-  for (const [source, sourceRoot] of [
+  for (const [source, sourceRoot, reason, namespaceClass] of [
     [
       'packages/shared-components/src/RoomListView.tsx',
       'webpack://element-web/',
+      'repository-root-prefix',
+      'not-applicable',
     ],
     [
       '../../../packages/shared-components/src/RoomListView.tsx',
       'webpack://element-web/',
+      'relative-path-prefix',
+      'not-applicable',
     ],
     [
       '../../packages/shared-components/../private.tsx',
       'webpack://element-web/',
+      'unsafe-path-segment',
+      'not-applicable',
     ],
-    ['apps/web/src/components/Widget.tsx', ''],
-    ['apps/web/src/components/Widget.tsx', 'webpack://element-web/'],
-    ['webpack://element-web/apps/web/src/components/Widget.tsx', ''],
-    ['webpack://other.example/src/private.tsx', ''],
-    ['webpack://element-web/../src/private.tsx', ''],
+    [
+      'apps/web/src/components/Widget.tsx',
+      '',
+      'repository-root-prefix',
+      'not-applicable',
+    ],
+    [
+      'apps/web/src/components/Widget.tsx',
+      'webpack://element-web/',
+      'repository-root-prefix',
+      'not-applicable',
+    ],
+    [
+      'webpack://element-web/apps/web/src/components/Widget.tsx',
+      '',
+      'repository-root-prefix',
+      'element-web',
+    ],
+    [
+      'webpack://other.example/src/private.tsx',
+      '',
+      'unsupported-namespace',
+      'other',
+    ],
+    [
+      'webpack://element-web/../src/private.tsx',
+      '',
+      'relative-path-prefix',
+      'element-web',
+    ],
+    [
+      'webpack://matrix-react-sdk/src/index.ts',
+      '',
+      'unsupported-namespace',
+      'matrix-react-sdk',
+    ],
+    [
+      'webpack://matrix-widget-api/src/index.ts',
+      '',
+      'unsupported-namespace',
+      'matrix-widget-api',
+    ],
+    ['webpack:///src/index.ts', '', 'unsupported-namespace', 'empty'],
+    [
+      'https://vendor.invalid/src/index.ts',
+      '',
+      'unsupported-scheme',
+      'not-applicable',
+    ],
+    ['/srv/private/index.ts', '', 'absolute-path', 'not-applicable'],
+    ['src/index.ts?token=private', '', 'query-or-fragment', 'not-applicable'],
+    [
+      'src/private/../index.ts',
+      '',
+      'source-resolution-mismatch',
+      'not-applicable',
+    ],
+    ['src/private name.ts', '', 'invalid-path-character', 'not-applicable'],
+    ['vendor/index.ts', '', 'unsupported-path-prefix', 'not-applicable'],
   ]) {
-    assert.deepEqual(pointerForMap(validMap(source, 'app.js', sourceRoot)), {
-      sourceMapStatus: 'unmapped',
-      sourceMapResolution: 'unsupported-source',
-      sourceRefSha256: null,
-      sourceLine: null,
-      sourceColumn: null,
-    });
+    const pointer = pointerForMap(validMap(source, 'app.js', sourceRoot));
+    assert.deepEqual(
+      pointer,
+      expectedPointerState(
+        'unmapped',
+        'unsupported-source',
+        reason,
+        namespaceClass,
+      ),
+    );
+    assert.doesNotMatch(
+      JSON.stringify(pointer),
+      /RoomListView|Widget\.tsx|private\.tsx|other\.example|apps\/web/u,
+    );
   }
 });
 
@@ -436,13 +484,53 @@ test('rejects duplicate source identities instead of choosing an ambiguous entry
     mappings: `${';'.repeat(12)}AAAA`,
   });
 
-  assert.deepEqual(pointerForMap(map), {
-    sourceMapStatus: 'unmapped',
-    sourceMapResolution: 'unsupported-source',
-    sourceRefSha256: null,
-    sourceLine: null,
-    sourceColumn: null,
-  });
+  assert.deepEqual(
+    pointerForMap(map),
+    expectedPointerState('unmapped', 'unsupported-source', 'duplicate-source'),
+  );
+});
+
+test('keeps the unsupported shape attached to the frame that produced it', () => {
+  const otherBundleUrl =
+    'https://element.invalid/bundles/abcdef0123456789/chunk.js';
+  const pointer = resolveElementErrorSourcePointer(
+    [
+      { bundleUrl, generatedLine: 13, generatedColumn: 7 },
+      { bundleUrl: otherBundleUrl, generatedLine: 13, generatedColumn: 7 },
+    ],
+    [
+      {
+        bundleUrl,
+        sourceMapText: validMap(
+          'webpack://matrix-widget-api/src/index.ts',
+          'app.js',
+          '',
+        ),
+      },
+      {
+        bundleUrl: otherBundleUrl,
+        sourceMapText: validMap(
+          'apps/web/src/components/Widget.tsx',
+          'chunk.js',
+          '',
+        ),
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    pointer,
+    expectedPointerState(
+      'unmapped',
+      'unsupported-source',
+      'unsupported-namespace',
+      'matrix-widget-api',
+    ),
+  );
+  assert.doesNotMatch(
+    JSON.stringify(pointer),
+    /webpack:\/\/|apps\/web|src\/index/u,
+  );
 });
 
 test('cancels response bodies rejected before source-map streaming', async () => {
