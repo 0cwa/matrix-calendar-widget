@@ -134,6 +134,10 @@ const REMINDER_ROOM_LAYOUT_FIELDS = [
   'roomInfoControlPresent',
   'fixtureCalendarIframePresent',
 ];
+const ROOM_LAYOUT_OBSERVATION_PHASES = new Set([
+  'reminder-room-context',
+  'g6-member-b-room-context',
+]);
 const REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS = [
   'reminderWidgetContextResponseCount',
   'reminderWidgetContextResponseStatus',
@@ -2792,7 +2796,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           (record.status === 'failed' &&
             !roomFailureCodes.has(record.failureCode)))) ||
       (hasReminderRoomLayoutObservation &&
-        (record.phase !== 'reminder-room-context' ||
+        (!ROOM_LAYOUT_OBSERVATION_PHASES.has(record.phase) ||
           REMINDER_ROOM_LAYOUT_FIELDS.some(
             (key) =>
               !Object.hasOwn(record, key) || typeof record[key] !== 'boolean',

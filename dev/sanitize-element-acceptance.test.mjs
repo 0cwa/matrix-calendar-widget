@@ -3315,6 +3315,54 @@ test('accepts the real Element room observations under the g6 phase labels', () 
   assert.match(summary, /matrix_room_joined=true/u);
 });
 
+test('accepts the complete bounded room layout group only for G6 member B', () => {
+  const roomRecord = {
+    phase: 'g6-member-b-room-context',
+    status: 'failed',
+    failureCode: 'element-room-heading-not-present',
+    matrixUserMatches: true,
+    matrixRoomKnown: true,
+    matrixRoomJoined: true,
+    roomNavigationCompleted: true,
+    roomHeadingReady: false,
+    roomHeadingPresent: false,
+    roomNameMatches: true,
+    roomIdMatches: true,
+    matrixSyncState: 'SYNCING',
+    blockedExternalRequestCount: 0,
+    homeserverHttpErrorCount: 0,
+    roomViewPresent: true,
+    roomHeaderPresent: true,
+    roomHeadingDomPresent: false,
+    roomInfoControlPresent: true,
+    fixtureCalendarIframePresent: false,
+  };
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(roomRecord),
+    sourceSha,
+  );
+  assert.match(summary, /phase=g6-member-b-room-context status=failed/u);
+  assert.match(
+    summary,
+    /room_view_present=true room_header_present=true room_heading_dom_present=false room_info_control_present=true fixture_calendar_iframe_present=false/u,
+  );
+
+  const incompleteGroup = { ...roomRecord };
+  delete incompleteGroup.fixtureCalendarIframePresent;
+  const nonBooleanGroup = { ...roomRecord, roomHeadingDomPresent: 'present' };
+  const unrelatedPhase = { ...roomRecord, phase: 'g6-member-a-room-context' };
+  for (const invalidRecord of [
+    incompleteGroup,
+    nonBooleanGroup,
+    unrelatedPhase,
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(invalidRecord), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
 test('rejects a passed Element edit whose updated ETag belongs to another event', () => {
   assert.throws(
     () =>

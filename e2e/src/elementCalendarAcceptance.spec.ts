@@ -1560,6 +1560,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       fixture.roomName,
       fixture.teamRoomId,
       fixture.users.memberB.userId,
+      true,
     );
     recordMemberARoomObservation(memberBRoom, activeRoomPhase);
     if (memberBRoom.failureCode) {
