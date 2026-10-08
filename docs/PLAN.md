@@ -564,13 +564,21 @@ access and event writes stay disabled by default.
       Desktop workflows passing. The run covered authorized CRUD, outsider
       denial, reminders across restart and paired-store restore, G6 preservation
       and delete, keyboard/focus, and cleanup. This completes isolated
-      application acceptance only; proof that unauthorized requests stop before
-      CalDAV I/O, operator readiness, and deployment evidence remain open.
+      application acceptance only; operator readiness and deployment evidence
+      remain open.
 - [x] Verify the actual Element Web shared edit, stale-ETag conflict/reload,
       and outsider denial for the bound team room and own unbound room on PR
       #227 candidate `a02932dafbbfa9316bee5e8bda1ee15ed1ddbaff`, hosted run
       [37611136645](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37611136645).
-- [ ] Prove unauthorized client requests are denied before CalDAV I/O.
+- [x] Prove unauthorized client requests are denied before CalDAV I/O. The
+      production Nest HTTP membership-guard test returns 403 for a nonmember
+      before room authorization, credential construction, or CalDAV fetch; it
+      also covers membership lookup failure and denied list authorization before
+      credential or fetch. The test ran in hosted CI
+      [37857387462](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387462).
+      It exercises authorization after the test identity context is prepared;
+      OpenID identity validation is covered separately by hosted auth checks.
+      See the [test source](https://github.com/0cwa/matrix-calendar-widget/blob/main/matrix-calendar-server/test/CalendarGatewayMembershipGuard.test.ts#L150-L185).
 - [x] Exercise actual Element Web event edit/delete, unsupported-projection
       disclosure with canonical-resource preservation, keyboard/focus, and the
       standard side-panel layout. PR #230 passed exact hosted Element run
@@ -600,7 +608,8 @@ access and event writes stay disabled by default.
         1s, and five 25-event details samples limited to 0.5s
         in `docs/calendar-performance.md`. Exact candidate `235e7e446df3efd8784d3468f593f2799602767c`
         passed hosted run [37857387454](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387454):
-        cold activation was 1.351/1.713 seconds and refresh was 1.762/1.832
+        timings below round up to the nearest millisecond. Cold activation was
+        1.351/1.713 seconds and refresh was 1.762/1.832
         seconds for zero/25 events; five detail samples peaked at 0.420 seconds
         and decoded API responses at 0.378 seconds. All stayed within the
         declared limits. Custom 31-day and 250-event timing runs are diagnostic

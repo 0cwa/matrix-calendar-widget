@@ -11,7 +11,7 @@ See the [dated continuation](handoff/2026-10-06/README.md) and
 
 ## Current phase
 
-**Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence timing/text and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; operator acceptance remains open. M7 has bounded bot commands and post-success room-target event notices. The exact application candidate identified above passed the bounded isolated Element Web/Desktop user-flow and ordinary-load acceptance: the paired hosted run passed all 105 Web phases, all 12 Desktop cases, authorization and CRUD flows, reminder restart and paired Radicale/PostgreSQL restore, G6 interactions, and cleanup. Ordinary-load measurements met their predeclared thresholds. Two Element-origin widget-opening errors were captured with complete trusted Element-bundle stacks and passed the approved diagnostic-reporting gate; that evidence does not identify their cause. The separate proof that unauthorized client requests stop before CalDAV I/O and all operator readiness gates remain open. Mobile/other clients, pinned/full-width layout certification, formal screen-reader certification, and broad capacity characterization remain outside the bounded beta target.
+**Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence timing/text and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; operator acceptance remains open. M7 has bounded bot commands and post-success room-target event notices. The exact application candidate identified above passed the bounded isolated Element Web/Desktop user-flow and ordinary-load acceptance: the paired hosted run passed all 105 Web phases, all 12 Desktop cases, authorization and CRUD flows, reminder restart and paired Radicale/PostgreSQL restore, G6 interactions, and cleanup. Ordinary-load measurements met their predeclared thresholds. Two Element-origin widget-opening errors were captured with complete trusted Element-bundle stacks and passed the approved diagnostic-reporting gate; that evidence does not identify their cause. The production HTTP membership-guard test verifies that policy denials stop before CalDAV I/O; hosted Element denial flows verify outsider requests receive the expected statuses. The guard test does not itself verify OpenID identity. Operator readiness gates remain open. Mobile/other clients, pinned/full-width layout certification, formal screen-reader certification, and broad capacity characterization remain outside the bounded beta target.
 
 A source review confirmed a gateway middleware-order defect: Nest 11.1.28
 applied the default CORS option during application initialization, after the
@@ -43,10 +43,9 @@ The controlled-beta scope and its acceptance contract are documented in
 [`beta-scope.md`](./beta-scope.md). Its target is Element Web/Desktop, one
 server replica, the project-owned Radicale store, and separate app-owned
 PostgreSQL reminder state. The tested candidate passed the bounded hosted
-application flows. The separate before-CalDAV-I/O denial proof, operator
-preflight, real-server deployment and backup/restore evidence, and final
-candidate review remain pending; this result does not complete beta acceptance
-or authorize publication or rollout.
+application flows. Operator preflight, real-server deployment and
+backup/restore evidence, and final candidate review remain pending; this result
+does not complete beta acceptance or authorize publication or rollout.
 
 The paired Element Web and Desktop user-flow acceptance passed against exact source
 candidate `235e7e446df3efd8784d3468f593f2799602767c` in [hosted run
@@ -54,9 +53,16 @@ candidate `235e7e446df3efd8784d3468f593f2799602767c` in [hosted run
 All 105 Web phases and all 12 Desktop cases passed, including authorization
 and CRUD, reminder restart, restore of paired Radicale and PostgreSQL state,
 the G6 edit/delete and keyboard paths, browser-egress checks, and final
-cleanup. Client denial scenarios returned their expected statuses; a separate
-proof that unauthorized requests stop before CalDAV I/O remains open. The
-approved zero-event/25-event ordinary profile passed: cold
+cleanup. Client denial scenarios returned their expected statuses. The
+[production Nest HTTP membership-guard test](https://github.com/0cwa/matrix-calendar-widget/blob/main/matrix-calendar-server/test/CalendarGatewayMembershipGuard.test.ts#L150-L185)
+returns 403 for a nonmember before room authorization, credential construction,
+or CalDAV fetch; it also covers membership lookup failure and a denied list
+authorization decision before credential or fetch. The full hosted CI run
+[37857387462](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387462)
+ran this test. It checks request authorization after test identity context is
+prepared; separate hosted auth flows verify identity. The approved
+zero-event/25-event ordinary profile passed. Reported timings below are
+rounded up to the nearest millisecond: cold
 activation took 1.351/1.713 seconds, refresh took 1.762/1.832 seconds, the
 five event-detail samples peaked at 0.420 seconds, and decoded API responses
 peaked at 0.378 seconds. Each result met the predeclared 2-second activation
@@ -219,8 +225,10 @@ loading, memory, and actual clients remain unmeasured.
   Ordinary cold activation, refresh, detail, and decoded API measurements
   met their declared limits. Two opening errors were fully captured from
   trusted Element bundles under the approved diagnostic policy; source mapping
-  did not resolve a cause. The separate proof that unauthorized requests stop
-  before CalDAV I/O remains open. Earlier failed runs
+  did not resolve a cause. The production HTTP guard test verifies that policy
+  denials stop before CalDAV I/O; hosted Element denial flows verify outsider
+  requests receive the expected statuses. OpenID identity validation is covered
+  separately. Earlier failed runs
   [37745671795](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37745671795),
   [37750848604](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37750848604),
   and the prior paired run
