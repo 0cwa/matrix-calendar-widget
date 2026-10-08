@@ -3647,7 +3647,7 @@ async function observeRoomRenderState(
       typeof matrixChatState?.view === 'number' &&
       Number.isInteger(matrixChatState.view) &&
       matrixChatState.view >= 0 &&
-      matrixChatState.view <= 12
+      matrixChatState.view <= 11
         ? matrixChatState.view === 9
           ? 'logged-in'
           : 'other-view'
