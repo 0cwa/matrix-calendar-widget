@@ -45,6 +45,11 @@ export type PerformancePageErrorClassification = {
   errorSource: PerformancePageErrorSource;
   stackAvailable: boolean;
   sourceScanTruncated: boolean;
+  hostStackStatus: 'complete' | 'unavailable' | 'malformed' | 'truncated';
+  hostStackFrameCount: number;
+  hostStackOrigin: 'element' | 'widget' | 'mixed' | 'other' | 'unknown';
+  hostStackFirstFrame: 'element-bundle' | 'widget' | 'other' | 'unknown';
+  hostStackTrustedBundleFrameCount: number;
 };
 
 export type PerformancePageErrorObservation =
@@ -136,6 +141,23 @@ export function classifyPerformancePageError(
   error: unknown,
   fixtureUrls: { elementUrl: string; widgetUrl: string },
 ): PerformancePageErrorClassification;
+
+export function capturePerformancePageError(
+  report: {
+    pageErrorCount: number | null;
+    pageErrorClass: PerformancePageErrorClass;
+    pageErrorObservations: PerformancePageErrorObservation[];
+    pageErrorObservationOverflow: boolean;
+  },
+  error: unknown,
+  profile: 'empty' | 'events-25',
+  stage: PerformancePageErrorObservation['stage'],
+  fixtureUrls: { elementUrl: string; widgetUrl: string },
+): PerformancePageErrorObservation | null;
+
+export function isVerifiedOpeningHostDiagnostic(
+  observation: PerformancePageErrorObservation,
+): boolean;
 
 export function classifyPerformanceHoverFailure(
   error: unknown,

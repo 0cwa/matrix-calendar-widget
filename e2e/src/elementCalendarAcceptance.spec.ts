@@ -40,7 +40,8 @@ import {
 } from '../../dev/element-acceptance-error-source-map.mjs';
 import {
   MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
-  classifyPerformancePageError,
+  capturePerformancePageError,
+  isVerifiedOpeningHostDiagnostic,
   summarizeDefaultWaitObservation,
   type PerformanceDefaultWaitFailureSnapshot,
   type PerformanceDefaultWaitObservation,
@@ -739,7 +740,7 @@ type OrdinaryPerformanceCase = {
   detailSamples: PerformanceDetailsSample[];
 };
 type OrdinaryPerformanceReport = {
-  version: 12;
+  version: 13;
   viewportWidth: 1280;
   viewportHeight: 800;
   calendarDays: 7;
@@ -1296,7 +1297,7 @@ function makeEmptyOrdinaryPerformanceReport(initialDate: {
   month: number;
 }): OrdinaryPerformanceReport {
   return {
-    version: 12,
+    version: 13,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -2512,57 +2513,42 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
     }> = [];
     context.on('page', (openedPage) => {
       openedPage.on('pageerror', (error) => {
-        report.pageErrorCount = Math.min(
-          (report.pageErrorCount ?? 0) + 1,
-          100_000,
+        const observation = capturePerformancePageError(
+          report,
+          error,
+          caseReport.profile,
+          pageErrorStage,
+          {
+            elementUrl: fixture.elementUrl,
+            widgetUrl: fixture.widgetUrl,
+          },
         );
-        const classification = classifyPerformancePageError(error, {
-          elementUrl: fixture.elementUrl,
-          widgetUrl: fixture.widgetUrl,
-        });
-        const errorClass = classification.errorClass;
-        if (report.pageErrorClass === 'none') {
-          report.pageErrorClass = errorClass;
+        if (!observation) {
+          return;
         }
-        if (report.pageErrorObservations.length < 8) {
-          const frames =
-            classification.errorSource === 'element' &&
-            pageErrorStage === 'widget-open'
-              ? extractElementBundleFrames(error, fixture.elementUrl)
-              : [];
-          const shouldResolveSource =
-            frames.length > 0 &&
-            pageErrorSourceLookups.length <
-              MAX_ELEMENT_ERROR_SOURCE_MAP_OBSERVATIONS &&
-            !pageErrorSourceProfiles.has(caseReport.profile);
-          const observation: PerformancePageErrorObservation = {
-            profile: caseReport.profile,
-            stage: pageErrorStage,
-            ...classification,
-            sourceMapStatus:
-              frames.length === 0
-                ? 'not-eligible'
-                : shouldResolveSource
-                  ? 'unavailable'
-                  : 'not-attempted',
-            sourceMapResolution: 'not-applicable',
-            sourceMapUnsupportedReason: 'not-applicable',
-            sourceMapNamespaceClass: 'not-applicable',
-            sourceRefSha256: null,
-            sourceLine: null,
-            sourceColumn: null,
-          };
-          report.pageErrorObservations.push(observation);
-          if (frames.length > 0 && shouldResolveSource) {
-            pageErrorSourceProfiles.add(caseReport.profile);
-            pageErrorSourceLookups.push({
-              page: openedPage,
-              frames,
-              observation,
-            });
-          }
-        } else {
-          report.pageErrorObservationOverflow = true;
+        const frames =
+          observation.errorSource === 'element' &&
+          pageErrorStage === 'widget-open'
+            ? extractElementBundleFrames(error, fixture.elementUrl)
+            : [];
+        const shouldResolveSource =
+          frames.length > 0 &&
+          pageErrorSourceLookups.length <
+            MAX_ELEMENT_ERROR_SOURCE_MAP_OBSERVATIONS &&
+          !pageErrorSourceProfiles.has(caseReport.profile);
+        observation.sourceMapStatus =
+          frames.length === 0
+            ? 'not-eligible'
+            : shouldResolveSource
+              ? 'unavailable'
+              : 'not-attempted';
+        if (frames.length > 0 && shouldResolveSource) {
+          pageErrorSourceProfiles.add(caseReport.profile);
+          pageErrorSourceLookups.push({
+            page: openedPage,
+            frames,
+            observation,
+          });
         }
       });
     });
@@ -3087,8 +3073,16 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
     failureCode = 'performance-egress-blocked';
     expect(report.blockedRequestCount).toBe(0);
     failureCode = 'performance-page-error';
-    expect(report.pageErrorCount).toBe(0);
-    expect(report.pageErrorClass).toBe('none');
+    expect(report.pageErrorObservationOverflow).toBe(false);
+    expect(report.pageErrorObservations.length).toBe(report.pageErrorCount);
+    expect(
+      report.pageErrorObservations.every(isVerifiedOpeningHostDiagnostic),
+    ).toBe(true);
+    expect(report.pageErrorClass).toBe(
+      report.pageErrorCount === 0
+        ? 'none'
+        : report.pageErrorObservations[0]?.errorClass,
+    );
     recordPerformancePilot('passed', report);
   } catch {
     recordPerformancePilot('failed', report, failureCode);

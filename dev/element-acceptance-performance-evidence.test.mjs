@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+  capturePerformancePageError,
   classifyPerformancePageError,
+  isVerifiedOpeningHostDiagnostic,
   summarizeDefaultWaitObservation,
 } from './element-acceptance-performance-evidence.mjs';
 import { sanitizeElementAcceptance } from './sanitize-element-acceptance.mjs';
@@ -336,6 +338,61 @@ function ordinaryReport() {
   return report;
 }
 
+function verifiedHostObservation(overrides = {}) {
+  const error = new Error('private error text');
+  error.stack =
+    'Error: private error text\n' +
+    '    at render (https://element.invalid:8448/bundles/0123456789abcdef/app.js:42:9)';
+  const capture = {
+    pageErrorCount: 0,
+    pageErrorClass: 'none',
+    pageErrorObservations: [],
+    pageErrorObservationOverflow: false,
+  };
+  const observation = capturePerformancePageError(
+    capture,
+    error,
+    'empty',
+    'widget-open',
+    {
+      elementUrl: 'https://element.invalid:8448/',
+      widgetUrl: 'http://widget.invalid:3000/',
+    },
+  );
+  assert.ok(observation);
+  return {
+    ...observation,
+    sourceMapStatus: 'unmapped',
+    sourceMapResolution: 'unsupported-source',
+    sourceMapUnsupportedReason: 'unsupported-namespace',
+    sourceMapNamespaceClass: 'matrix-widget-api',
+    sourceRefSha256: null,
+    sourceLine: null,
+    sourceColumn: null,
+    ...overrides,
+  };
+}
+
+function ordinaryReportWithVerifiedHostError() {
+  const report = ordinaryReport();
+  report.version = 13;
+  const error = new Error('private error text');
+  error.stack =
+    'Error: private error text\n' +
+    '    at render (https://element.invalid:8448/bundles/0123456789abcdef/app.js:42:9)';
+  capturePerformancePageError(report, error, 'empty', 'widget-open', {
+    elementUrl: 'https://element.invalid:8448/',
+    widgetUrl: 'http://widget.invalid:3000/',
+  });
+  Object.assign(report.pageErrorObservations[0], {
+    sourceMapStatus: 'unmapped',
+    sourceMapResolution: 'unsupported-source',
+    sourceMapUnsupportedReason: 'unsupported-namespace',
+    sourceMapNamespaceClass: 'matrix-widget-api',
+  });
+  return report;
+}
+
 function ordinaryStage(status, report, failureCode) {
   return {
     phase: 'performance-pilot',
@@ -394,7 +451,7 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   );
   assert.match(
     summary,
-    /phase=performance-pilot report_version=11 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
+    /phase=performance-pilot report_version=11 profile=ordinary-0-25 ordinary_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
   );
   assert.match(summary, /performance_case profile=empty events=0/u);
   assert.match(summary, /performance_case profile=events-25 events=25/u);
@@ -470,6 +527,11 @@ test('classifies only closed page-error subtype and configured origin buckets', 
     errorSource: 'widget',
     stackAvailable: true,
     sourceScanTruncated: false,
+    hostStackStatus: 'complete',
+    hostStackFrameCount: 1,
+    hostStackOrigin: 'widget',
+    hostStackFirstFrame: 'widget',
+    hostStackTrustedBundleFrameCount: 0,
   });
   assert.doesNotMatch(
     JSON.stringify(widgetClassification),
@@ -573,6 +635,11 @@ test('marks unavailable or truncated stack source as unclassified', () => {
     errorSource: 'unclassified',
     stackAvailable: false,
     sourceScanTruncated: false,
+    hostStackStatus: 'unavailable',
+    hostStackFrameCount: 0,
+    hostStackOrigin: 'unknown',
+    hostStackFirstFrame: 'unknown',
+    hostStackTrustedBundleFrameCount: 0,
   });
 
   const truncated = new Error('private message');
@@ -594,6 +661,156 @@ test('marks unavailable or truncated stack source as unclassified', () => {
   assert.doesNotMatch(
     JSON.stringify(truncatedClassification),
     /private|https?:\/\/|element\.invalid|widget\.invalid|8448|3000/u,
+  );
+});
+
+test('keeps only complete opening Element-bundle errors as ordinary diagnostics', () => {
+  const report = ordinaryReportWithVerifiedHostError();
+  const observation = report.pageErrorObservations[0];
+  assert.equal(isVerifiedOpeningHostDiagnostic(observation), true);
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(ordinaryStage('passed', report)),
+    sourceSha,
+  );
+  assert.match(summary, /ordinary_gate_eligible=true status=passed/u);
+  assert.match(
+    summary,
+    /page_error_observation index=1 profile=empty stage=widget-open error_class=error error_subtype=error error_source=element stack_available=true source_scan_truncated=false source_map_status=unmapped/u,
+  );
+  assert.match(
+    summary,
+    /host_stack_status=complete host_stack_frames=1 host_stack_origin=element host_stack_first_frame=element-bundle host_stack_trusted_bundle_frames=1/u,
+  );
+  assert.doesNotMatch(
+    summary,
+    /private error text|https?:\/\/|app\.js|rawStack|stack_text|message=/u,
+  );
+
+  for (const overrides of [
+    { stage: 'default-view' },
+    { hostStackOrigin: 'widget' },
+    { hostStackOrigin: 'mixed' },
+    { hostStackOrigin: 'other' },
+    { hostStackFirstFrame: 'other' },
+    { hostStackTrustedBundleFrameCount: 0 },
+    { hostStackStatus: 'truncated', sourceScanTruncated: true },
+    { hostStackStatus: 'malformed' },
+    { stackAvailable: false, hostStackStatus: 'unavailable' },
+  ]) {
+    const invalidReport = ordinaryReportWithVerifiedHostError();
+    invalidReport.pageErrorObservations[0] = verifiedHostObservation(overrides);
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify(ordinaryStage('passed', invalidReport)),
+          sourceSha,
+        ),
+      /invalid element acceptance summary/u,
+    );
+  }
+
+  const functionallySlow = ordinaryReportWithVerifiedHostError();
+  functionallySlow.cases[0].coldList.durationMs = 2001;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', functionallySlow)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const tooManyErrors = ordinaryReportWithVerifiedHostError();
+  tooManyErrors.pageErrorCount = 9;
+  tooManyErrors.pageErrorObservations = Array.from({ length: 8 }, () =>
+    verifiedHostObservation(),
+  );
+  tooManyErrors.pageErrorObservationOverflow = true;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', tooManyErrors)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const partialCapture = ordinaryReportWithVerifiedHostError();
+  partialCapture.pageErrorCount = 2;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(
+          ordinaryStage('failed', partialCapture, 'performance-page-error'),
+        ),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
+test('captures bounded closed observations and marks every unobserved error as overflow', () => {
+  const report = ordinaryReport();
+  report.version = 13;
+  const error = new Error('private error text');
+  error.stack =
+    'Error: private error text\n' +
+    '    at render (https://element.invalid:8448/bundles/0123456789abcdef/app.js:42:9)';
+  const fixtureUrls = {
+    elementUrl: 'https://element.invalid:8448/',
+    widgetUrl: 'http://widget.invalid:3000/',
+  };
+
+  const first = capturePerformancePageError(
+    report,
+    error,
+    'empty',
+    'widget-open',
+    fixtureUrls,
+  );
+  assert.equal(first, report.pageErrorObservations[0]);
+  assert.equal(report.pageErrorCount, 1);
+  assert.equal(report.pageErrorClass, first.errorClass);
+  assert.equal(first.sourceMapStatus, 'not-eligible');
+  assert.equal(isVerifiedOpeningHostDiagnostic(first), true);
+  assert.doesNotMatch(
+    JSON.stringify(report.pageErrorObservations),
+    /private|https?:\/\//u,
+  );
+
+  for (let index = 1; index < 8; index += 1) {
+    assert.ok(
+      capturePerformancePageError(
+        report,
+        error,
+        'empty',
+        'widget-open',
+        fixtureUrls,
+      ),
+    );
+  }
+  assert.equal(report.pageErrorObservations.length, 8);
+  assert.equal(report.pageErrorObservationOverflow, false);
+  assert.equal(
+    capturePerformancePageError(
+      report,
+      error,
+      'empty',
+      'widget-open',
+      fixtureUrls,
+    ),
+    null,
+  );
+  assert.equal(report.pageErrorCount, 9);
+  assert.equal(report.pageErrorObservationOverflow, true);
+  assert.equal(report.pageErrorObservations.length, 8);
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', report)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
   );
 });
 

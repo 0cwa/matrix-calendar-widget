@@ -228,6 +228,141 @@ function parseStackLocation(frame) {
 }
 
 /**
+ * Classifies whether an entire captured stack consists only of trusted
+ * Element-hosted production bundles served by the configured Element origin.
+ * It deliberately does not infer trust from a later bundle frame, a source-map
+ * namespace, or an origin match alone. The returned value contains only closed
+ * enums, booleans, and capped counts; no stack text or URL is retained.
+ *
+ * @param {unknown} error Browser error supplied by Playwright.
+ * @param {{elementUrl: string, widgetUrl: string}} fixtureUrls Configured fixture URLs.
+ * @returns {{hostStackStatus: 'complete'|'unavailable'|'malformed'|'truncated', hostStackFrameCount: number, hostStackOrigin: 'element'|'widget'|'mixed'|'other'|'unknown', hostStackFirstFrame: 'element-bundle'|'widget'|'other'|'unknown', hostStackTrustedBundleFrameCount: number}}
+ */
+export function classifyElementHostStack(error, fixtureUrls) {
+  const unavailable = () => ({
+    hostStackStatus: 'unavailable',
+    hostStackFrameCount: 0,
+    hostStackOrigin: 'unknown',
+    hostStackFirstFrame: 'unknown',
+    hostStackTrustedBundleFrameCount: 0,
+  });
+  const malformed = (hostStackFrameCount = 0) => ({
+    hostStackStatus: 'malformed',
+    hostStackFrameCount,
+    hostStackOrigin: 'unknown',
+    hostStackFirstFrame: 'unknown',
+    hostStackTrustedBundleFrameCount: 0,
+  });
+
+  const stack = readStack(error);
+  if (stack === null) return unavailable();
+  if (stack.length > MAX_STACK_CHARACTERS) {
+    return {
+      ...malformed(MAX_STACK_FRAMES),
+      hostStackStatus: 'truncated',
+    };
+  }
+
+  let errorName;
+  let errorMessage;
+  try {
+    errorName = error.name;
+    errorMessage = error.message;
+  } catch {
+    return malformed();
+  }
+  if (
+    typeof errorName !== 'string' ||
+    !/^[A-Za-z][A-Za-z0-9]*$/u.test(errorName) ||
+    typeof errorMessage !== 'string' ||
+    /[\r\n]/u.test(errorMessage)
+  ) {
+    return malformed();
+  }
+
+  const lines = stack.split(/\r?\n/u);
+  const frameCount = Math.min(Math.max(lines.length - 1, 0), MAX_STACK_FRAMES);
+  if (lines.length > MAX_STACK_FRAMES + 1) {
+    return {
+      ...malformed(frameCount),
+      hostStackStatus: 'truncated',
+    };
+  }
+  const expectedHeader =
+    errorMessage.length === 0 ? errorName : `${errorName}: ${errorMessage}`;
+  if (lines[0] !== expectedHeader || frameCount === 0) {
+    return malformed(frameCount);
+  }
+
+  let elementOrigin;
+  let widgetOrigin;
+  try {
+    const elementUrl = new URL(fixtureUrls.elementUrl);
+    const widgetUrl = new URL(fixtureUrls.widgetUrl);
+    if (
+      !['http:', 'https:'].includes(elementUrl.protocol) ||
+      !['http:', 'https:'].includes(widgetUrl.protocol) ||
+      elementUrl.username !== '' ||
+      elementUrl.password !== '' ||
+      widgetUrl.username !== '' ||
+      widgetUrl.password !== '' ||
+      elementUrl.origin === widgetUrl.origin
+    ) {
+      return malformed(frameCount);
+    }
+    elementOrigin = elementUrl.origin;
+    widgetOrigin = widgetUrl.origin;
+  } catch {
+    return malformed(frameCount);
+  }
+
+  const parsedFrames = [];
+  for (const frame of lines.slice(1)) {
+    const parsed = parseStackLocation(frame);
+    if (!parsed) return malformed(frameCount);
+    const { url } = parsed;
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      url.username !== '' ||
+      url.password !== '' ||
+      url.search !== '' ||
+      url.hash !== '' ||
+      url.href.includes('%')
+    ) {
+      return malformed(frameCount);
+    }
+    const origin =
+      url.origin === elementOrigin
+        ? 'element'
+        : url.origin === widgetOrigin
+          ? 'widget'
+          : 'other';
+    const trustedElementBundle =
+      origin === 'element' && ELEMENT_BUNDLE_PATH.test(url.pathname);
+    parsedFrames.push({ origin, trustedElementBundle });
+  }
+
+  const origins = new Set(parsedFrames.map(({ origin }) => origin));
+  const hostStackOrigin = origins.size > 1 ? 'mixed' : [...origins][0];
+  const firstFrame = parsedFrames[0];
+  const hostStackFirstFrame = firstFrame.trustedElementBundle
+    ? 'element-bundle'
+    : firstFrame.origin === 'widget'
+      ? 'widget'
+      : 'other';
+
+  return {
+    hostStackStatus: 'complete',
+    hostStackFrameCount: frameCount,
+    hostStackOrigin,
+    hostStackFirstFrame,
+    hostStackTrustedBundleFrameCount: parsedFrames.filter(
+      ({ trustedElementBundle }) => trustedElementBundle,
+    ).length,
+  };
+}
+
+/**
  * Returns a bounded list of transient pointers to pinned Element static
  * bundle frames. The returned URLs must stay in memory and must never be
  * serialized into acceptance evidence.

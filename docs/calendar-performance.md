@@ -69,8 +69,26 @@ non-OpenID calendar API response in both cases, including refresh setup, must
 meet the 1,000-ms limit. Record every designated sample and fixed failure
 observation before assertions. Keep all observations: no authentication
 bypass, retries, discarded failures, best-of selection, or phase subtraction.
-Missing or malformed data, page errors, overflow, fixture cleanup failures, or
-an over-limit required sample fails the gate.
+Missing or malformed data, unverified page errors, overflow, fixture cleanup
+failures, or an over-limit required sample fails the gate. The only approved
+page-error diagnostic exception applies to future reports: every such error
+must occur during `widget-open`, and its complete, untruncated stack must parse
+with the first frame and every captured frame on the configured Element static
+origin under the pinned production-bundle path. Widget-origin, mixed-origin,
+other-origin, unknown, malformed, truncated, overflowed, or after-opening
+errors still fail. The check does not use a source-map namespace or infer a
+cause, fix, or harmless behavior from the stack. It records only closed labels,
+booleans, and capped frame counts; error messages, names, stacks, URLs, and
+paths are not retained.
+
+This conditional diagnostic applies only to the ordinary performance profile.
+The profile must still pass every startup, timing, decoded API, identity,
+authorization, range, content, cleanup, and details assertion. Every exact
+candidate must also pass its required repository checks and separate Element
+Web/Desktop, CRUD, reminder, restore, and operator gates. An ordinary profile
+result alone never establishes beta acceptance. Earlier reports retain their
+original fail-closed outcomes; the recorded opening errors remain unverified
+and their cause is unknown.
 
 Open the registered widget through Element's usual Room Info → Extensions →
 WidgetCard path. Record the actual placement and iframe width and height, and

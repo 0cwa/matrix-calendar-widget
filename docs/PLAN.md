@@ -581,6 +581,15 @@ access and event writes stay disabled by default.
         runs are diagnostic only; no complete 250-event timing series passed.
         Pinned/full-width layout certification is deferred. Hosted measurement
         and exact-run evidence remain open.
+  - [x] Implement the approved fail-closed page-error diagnostic policy for
+        future ordinary reports: only fully captured widget-opening stacks
+        whose first and every frame identify a trusted Element production
+        bundle on the fixture static origin may be recorded without failing
+        this performance subgate. Unknown, widget, mixed, other-origin,
+        malformed, truncated, overflowed, and after-opening errors still fail.
+        Preserve previous failed reports and require all functional, timing,
+        authorization, CRUD, Desktop, reminder, restore, and repository checks
+        before any exact candidate can pass its separate gates.
 - [ ] Complete operator evidence and independent review of the exact
       candidate before a separate rollout decision.
 

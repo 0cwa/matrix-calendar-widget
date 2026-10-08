@@ -1,3 +1,5 @@
+import { classifyElementHostStack } from './element-acceptance-error-source-map.mjs';
+
 const FAILURE_CODES = new Set([
   'performance-setup-failed',
   'performance-widget-open-failed',
@@ -102,13 +104,32 @@ const PAGE_ERROR_SOURCE_MAP_NAMESPACE_CLASSES = new Set([
   'empty',
   'other',
 ]);
+const PAGE_ERROR_HOST_STACK_STATUSES = new Set([
+  'complete',
+  'unavailable',
+  'malformed',
+  'truncated',
+]);
+const PAGE_ERROR_HOST_STACK_ORIGINS = new Set([
+  'element',
+  'widget',
+  'mixed',
+  'other',
+  'unknown',
+]);
+const PAGE_ERROR_HOST_STACK_FIRST_FRAMES = new Set([
+  'element-bundle',
+  'widget',
+  'other',
+  'unknown',
+]);
 const UNMAPPED_SOURCE_RESOLUTIONS = new Set([
   'no-original-position',
   'dependency-source',
   'unsupported-source',
   'invalid-coordinate',
 ]);
-const ORDINARY_REPORT_VERSIONS = new Set([9, 10, 11, 12]);
+const ORDINARY_REPORT_VERSIONS = new Set([9, 10, 11, 12, 13]);
 const PAGE_ERROR_SUBTYPE_CLASS = new Map([
   ['error', 'error'],
   ['type-error', 'type-error'],
@@ -175,6 +196,14 @@ const VERSION_12_PAGE_ERROR_OBSERVATION_KEYS = [
   ...PAGE_ERROR_OBSERVATION_KEYS,
   'sourceMapUnsupportedReason',
   'sourceMapNamespaceClass',
+];
+const VERSION_13_PAGE_ERROR_OBSERVATION_KEYS = [
+  ...VERSION_12_PAGE_ERROR_OBSERVATION_KEYS,
+  'hostStackStatus',
+  'hostStackFrameCount',
+  'hostStackOrigin',
+  'hostStackFirstFrame',
+  'hostStackTrustedBundleFrameCount',
 ];
 const API_SAMPLE =
   /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5]|(?:empty|events-25)-(?:default|refresh-setup|refresh)|events-25-details-[1-5])$/u;
@@ -315,7 +344,165 @@ export function classifyPerformancePageError(error, fixtureUrls) {
     errorSource,
     stackAvailable,
     sourceScanTruncated,
+    ...classifyElementHostStack(error, fixtureUrls),
   };
+}
+
+/**
+ * Records the bounded page-error observation used by the ordinary E2E
+ * callback. Stack values are classified immediately and never attached to the
+ * report; errors after the first eight set an overflow flag.
+ *
+ * @param {{pageErrorCount: number|null, pageErrorClass: string, pageErrorObservations: object[], pageErrorObservationOverflow: boolean}} report
+ * @param {unknown} error
+ * @param {'empty'|'events-25'} profile
+ * @param {'case-setup'|'element-login'|'room-navigation'|'widget-open'|'default-view'|'cold-layout'|'refresh-setup'|'refresh'|'details'|'case-cleanup'} stage
+ * @param {{elementUrl: string, widgetUrl: string}} fixtureUrls
+ * @returns {object|null} The saved closed observation, or null after overflow.
+ */
+export function capturePerformancePageError(
+  report,
+  error,
+  profile,
+  stage,
+  fixtureUrls,
+) {
+  report.pageErrorCount = Math.min((report.pageErrorCount ?? 0) + 1, 100_000);
+  const classification = classifyPerformancePageError(error, fixtureUrls);
+  if (report.pageErrorClass === 'none') {
+    report.pageErrorClass = classification.errorClass;
+  }
+  if (report.pageErrorObservations.length >= 8) {
+    report.pageErrorObservationOverflow = true;
+    return null;
+  }
+
+  const observation = {
+    profile,
+    stage,
+    ...classification,
+    sourceMapStatus: 'not-eligible',
+    sourceMapResolution: 'not-applicable',
+    sourceMapUnsupportedReason: 'not-applicable',
+    sourceMapNamespaceClass: 'not-applicable',
+    sourceRefSha256: null,
+    sourceLine: null,
+    sourceColumn: null,
+  };
+  report.pageErrorObservations.push(observation);
+  return observation;
+}
+
+function validHostStackEvidence(observation) {
+  if (
+    !PAGE_ERROR_HOST_STACK_STATUSES.has(observation.hostStackStatus) ||
+    !PAGE_ERROR_HOST_STACK_ORIGINS.has(observation.hostStackOrigin) ||
+    !PAGE_ERROR_HOST_STACK_FIRST_FRAMES.has(observation.hostStackFirstFrame) ||
+    !Number.isSafeInteger(observation.hostStackFrameCount) ||
+    observation.hostStackFrameCount < 0 ||
+    observation.hostStackFrameCount > PAGE_ERROR_STACK_FRAME_LIMIT ||
+    !Number.isSafeInteger(observation.hostStackTrustedBundleFrameCount) ||
+    observation.hostStackTrustedBundleFrameCount < 0 ||
+    observation.hostStackTrustedBundleFrameCount >
+      observation.hostStackFrameCount
+  ) {
+    return false;
+  }
+
+  if (observation.hostStackStatus === 'unavailable') {
+    return (
+      !observation.stackAvailable &&
+      !observation.sourceScanTruncated &&
+      observation.hostStackFrameCount === 0 &&
+      observation.hostStackOrigin === 'unknown' &&
+      observation.hostStackFirstFrame === 'unknown' &&
+      observation.hostStackTrustedBundleFrameCount === 0
+    );
+  }
+  if (observation.hostStackStatus === 'truncated') {
+    return (
+      observation.stackAvailable &&
+      observation.sourceScanTruncated &&
+      observation.hostStackOrigin === 'unknown' &&
+      observation.hostStackFirstFrame === 'unknown' &&
+      observation.hostStackTrustedBundleFrameCount === 0
+    );
+  }
+  if (observation.hostStackStatus === 'malformed') {
+    return (
+      observation.stackAvailable &&
+      !observation.sourceScanTruncated &&
+      observation.hostStackOrigin === 'unknown' &&
+      observation.hostStackFirstFrame === 'unknown' &&
+      observation.hostStackTrustedBundleFrameCount === 0
+    );
+  }
+
+  const { hostStackOrigin, hostStackFirstFrame, hostStackFrameCount } =
+    observation;
+  const firstFrameMatchesOrigin =
+    hostStackOrigin === 'mixed' ||
+    (hostStackOrigin === 'element' &&
+      ['element-bundle', 'other'].includes(hostStackFirstFrame)) ||
+    (hostStackOrigin === 'widget' &&
+      ['widget', 'other'].includes(hostStackFirstFrame)) ||
+    (hostStackOrigin === 'other' && hostStackFirstFrame === 'other');
+  return (
+    observation.stackAvailable &&
+    !observation.sourceScanTruncated &&
+    hostStackFrameCount > 0 &&
+    hostStackOrigin !== 'unknown' &&
+    hostStackFirstFrame !== 'unknown' &&
+    firstFrameMatchesOrigin &&
+    (hostStackFirstFrame !== 'element-bundle' ||
+      observation.hostStackTrustedBundleFrameCount > 0)
+  );
+}
+
+/**
+ * The sole page-error exception for ordinary-load acceptance. It requires the
+ * first parsed frame and every captured frame to be a trusted Element-hosted
+ * bundle on the configured fixture origin, with the failure occurring only
+ * during widget opening. Source-map labels are intentionally not consulted.
+ *
+ * @param {Record<string, unknown>} observation Sanitized error observation.
+ * @returns {boolean}
+ */
+export function isVerifiedOpeningHostDiagnostic(observation) {
+  return (
+    observation !== null &&
+    typeof observation === 'object' &&
+    validHostStackEvidence(observation) &&
+    observation.stage === 'widget-open' &&
+    observation.errorSource === 'element' &&
+    observation.stackAvailable === true &&
+    observation.sourceScanTruncated === false &&
+    observation.hostStackStatus === 'complete' &&
+    observation.hostStackFrameCount > 0 &&
+    observation.hostStackOrigin === 'element' &&
+    observation.hostStackFirstFrame === 'element-bundle' &&
+    observation.hostStackTrustedBundleFrameCount ===
+      observation.hostStackFrameCount
+  );
+}
+
+function ordinaryPageErrorsPass(report) {
+  if (report.pageErrorCount === 0) {
+    return (
+      report.pageErrorClass === 'none' &&
+      report.pageErrorObservations.length === 0 &&
+      report.pageErrorObservationOverflow === false
+    );
+  }
+  return (
+    report.version === 13 &&
+    report.pageErrorCount !== null &&
+    report.pageErrorCount > 0 &&
+    report.pageErrorCount <= 8 &&
+    report.pageErrorObservations.length === report.pageErrorCount &&
+    report.pageErrorObservationOverflow === false &&
+    report.pageErrorObservations.every(isVerifiedOpeningHostDiagnostic)
+  );
 }
 const PREPARATION_KEYS = ['elementLoginMs', 'roomNavigationMs'];
 const COLD_KEYS = [
@@ -1273,7 +1460,9 @@ function validOrdinaryReport(report) {
             ? VERSION_10_PAGE_ERROR_OBSERVATION_KEYS
             : report.version === 11
               ? PAGE_ERROR_OBSERVATION_KEYS
-              : VERSION_12_PAGE_ERROR_OBSERVATION_KEYS;
+              : report.version === 12
+                ? VERSION_12_PAGE_ERROR_OBSERVATION_KEYS
+                : VERSION_13_PAGE_ERROR_OBSERVATION_KEYS;
       if (!hasExactKeys(observation, pageErrorObservationKeys)) {
         return false;
       }
@@ -1353,7 +1542,7 @@ function validOrdinaryReport(report) {
                         observation.stackAvailable &&
                         !observation.sourceScanTruncated)))));
       const sourceMapDiagnosticValid =
-        report.version !== 12 ||
+        report.version < 12 ||
         (() => {
           const unsupported =
             observation.sourceMapStatus === 'unmapped' &&
@@ -1404,6 +1593,8 @@ function validOrdinaryReport(report) {
             observation.sourceMapNamespaceClass === 'element-web'
           );
         })();
+      const hostStackEvidenceValid =
+        report.version !== 13 || validHostStackEvidence(observation);
       return (
         ORDINARY_PROFILES.has(observation.profile) &&
         PAGE_ERROR_STAGES.has(observation.stage) &&
@@ -1413,7 +1604,8 @@ function validOrdinaryReport(report) {
         subtypeClass === observation.errorClass &&
         sourceEvidenceValid &&
         sourcePointerValid &&
-        sourceMapDiagnosticValid
+        sourceMapDiagnosticValid &&
+        hostStackEvidenceValid
       );
     }) &&
     typeof report.pageErrorObservationOverflow === 'boolean' &&
@@ -1812,10 +2004,7 @@ function ordinaryReportPasses(report) {
       ordinaryCasePasses(report, performanceCase),
     ) &&
     report.blockedRequestCount === 0 &&
-    report.pageErrorCount === 0 &&
-    report.pageErrorClass === 'none' &&
-    report.pageErrorObservations.length === 0 &&
-    report.pageErrorObservationOverflow === false &&
+    ordinaryPageErrorsPass(report) &&
     report.apiResponses.every(
       (row) =>
         row.status === 200 &&
@@ -1912,7 +2101,7 @@ function formatOrdinaryPerformanceEvidence(record) {
       'phase=performance-pilot',
       `report_version=${report.version}`,
       'profile=ordinary-0-25',
-      `beta_gate_eligible=${record.status === 'passed'}`,
+      `ordinary_gate_eligible=${record.status === 'passed'}`,
       `status=${record.status}`,
       `failure_code=${record.failureCode ?? 'none'}`,
       'cases=2',
@@ -1929,7 +2118,7 @@ function formatOrdinaryPerformanceEvidence(record) {
 
   for (const [index, observation] of report.pageErrorObservations.entries()) {
     lines.push(
-      `page_error_observation index=${index + 1} profile=${observation.profile} stage=${observation.stage} error_class=${observation.errorClass} error_subtype=${observation.errorSubtype} error_source=${observation.errorSource} stack_available=${observation.stackAvailable} source_scan_truncated=${observation.sourceScanTruncated}${report.version >= 10 ? ` source_map_status=${observation.sourceMapStatus}${report.version >= 11 ? ` source_map_resolution=${observation.sourceMapResolution}` : ''}${report.version >= 12 ? ` source_map_unsupported_reason=${observation.sourceMapUnsupportedReason} source_map_namespace_class=${observation.sourceMapNamespaceClass}` : ''} source_ref_sha256=${observation.sourceRefSha256 ?? 'none'} source_line=${observation.sourceLine ?? 'none'} source_column=${observation.sourceColumn ?? 'none'}` : ''}`,
+      `page_error_observation index=${index + 1} profile=${observation.profile} stage=${observation.stage} error_class=${observation.errorClass} error_subtype=${observation.errorSubtype} error_source=${observation.errorSource} stack_available=${observation.stackAvailable} source_scan_truncated=${observation.sourceScanTruncated}${report.version >= 10 ? ` source_map_status=${observation.sourceMapStatus}${report.version >= 11 ? ` source_map_resolution=${observation.sourceMapResolution}` : ''}${report.version >= 12 ? ` source_map_unsupported_reason=${observation.sourceMapUnsupportedReason} source_map_namespace_class=${observation.sourceMapNamespaceClass}` : ''} source_ref_sha256=${observation.sourceRefSha256 ?? 'none'} source_line=${observation.sourceLine ?? 'none'} source_column=${observation.sourceColumn ?? 'none'}` : ''}${report.version >= 13 ? ` host_stack_status=${observation.hostStackStatus} host_stack_frames=${observation.hostStackFrameCount} host_stack_origin=${observation.hostStackOrigin} host_stack_first_frame=${observation.hostStackFirstFrame} host_stack_trusted_bundle_frames=${observation.hostStackTrustedBundleFrameCount}` : ''}`,
     );
   }
 

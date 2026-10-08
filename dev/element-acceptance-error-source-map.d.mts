@@ -4,6 +4,14 @@ export type ElementBundleFrame = {
   generatedColumn: number;
 };
 
+export type ElementHostStackClassification = {
+  hostStackStatus: 'complete' | 'unavailable' | 'malformed' | 'truncated';
+  hostStackFrameCount: number;
+  hostStackOrigin: 'element' | 'widget' | 'mixed' | 'other' | 'unknown';
+  hostStackFirstFrame: 'element-bundle' | 'widget' | 'other' | 'unknown';
+  hostStackTrustedBundleFrameCount: number;
+};
+
 export type ElementErrorSourcePointer = {
   sourceMapStatus:
     | 'not-eligible'
@@ -63,6 +71,11 @@ export type ElementSourceMapResult = {
   bundleUrl: string;
   sourceMapText: string | null;
 };
+
+export function classifyElementHostStack(
+  error: unknown,
+  fixtureUrls: { elementUrl: string; widgetUrl: string },
+): ElementHostStackClassification;
 
 export function extractElementBundleFrames(
   error: unknown,

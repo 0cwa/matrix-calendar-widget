@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { SourceMapGenerator } from 'source-map-js';
 import {
+  classifyElementHostStack,
   extractElementBundleFrames,
   readElementErrorSourceMapInPage,
   resolveElementErrorSourcePointer,
@@ -115,6 +116,121 @@ test('extracts only a bounded first-party production-bundle frame', () => {
     ),
   );
   assert.equal(extractElementBundleFrames(manyFrames, elementUrl).length, 8);
+});
+
+test('proves only complete stacks led by Element bundles on the fixture origin', () => {
+  const widgetUrl = 'http://widget.invalid:3000/';
+  const elementBundle =
+    'https://element.invalid/bundles/0123456789abcdef/app.js';
+  const vendorBundle =
+    'https://element.invalid/bundles/0123456789abcdef/vendor.js';
+  const fixtureUrls = { elementUrl, widgetUrl };
+  const valid = errorWithFrames([
+    `    at render (${elementBundle}:13:8)`,
+    `    at dispatch (${vendorBundle}:27:2)`,
+  ]);
+  assert.deepEqual(classifyElementHostStack(valid, fixtureUrls), {
+    hostStackStatus: 'complete',
+    hostStackFrameCount: 2,
+    hostStackOrigin: 'element',
+    hostStackFirstFrame: 'element-bundle',
+    hostStackTrustedBundleFrameCount: 2,
+  });
+
+  const firefox = errorWithFrames([
+    `render@${elementBundle}:13:8`,
+    `dispatch@${vendorBundle}:27:2`,
+  ]);
+  assert.deepEqual(classifyElementHostStack(firefox, fixtureUrls), {
+    hostStackStatus: 'complete',
+    hostStackFrameCount: 2,
+    hostStackOrigin: 'element',
+    hostStackFirstFrame: 'element-bundle',
+    hostStackTrustedBundleFrameCount: 2,
+  });
+
+  for (const [stack, expected] of [
+    [
+      'Error: private error text\n    at anonymous (<anonymous>)\n' +
+        `    at render (${elementBundle}:13:8)`,
+      'malformed',
+    ],
+    [
+      'Error: private error text\n' +
+        `    at initialize (http://widget.invalid:3000/bundles/0123456789abcdef/app.js:1:1)\n` +
+        `    at render (${elementBundle}:13:8)`,
+      'mixed',
+    ],
+    [
+      'Error: private error text\n' +
+        '    at private (https://third-party.invalid/app.js:1:1)',
+      'other',
+    ],
+    [
+      'Error: private error text\n' +
+        '    at render (https://element.invalid/assets/app.js:13:8)',
+      'element',
+    ],
+    [
+      'Error: private error text\n' +
+        `    at render (${elementBundle}:13:8)\n    not-a-frame`,
+      'malformed',
+    ],
+  ]) {
+    const error = new Error('private error text');
+    error.stack = stack;
+    const result = classifyElementHostStack(error, fixtureUrls);
+    assert.equal(
+      result.hostStackStatus,
+      expected === 'malformed' ? 'malformed' : 'complete',
+    );
+    if (expected !== 'malformed') {
+      assert.equal(result.hostStackOrigin, expected);
+      assert.notEqual(result.hostStackFirstFrame, 'element-bundle');
+    }
+  }
+
+  const widgetFirst = errorWithFrames([
+    '    at initialize (http://widget.invalid:3000/assets/widget.js:1:1)',
+    `    at render (${elementBundle}:13:8)`,
+  ]);
+  assert.deepEqual(classifyElementHostStack(widgetFirst, fixtureUrls), {
+    hostStackStatus: 'complete',
+    hostStackFrameCount: 2,
+    hostStackOrigin: 'mixed',
+    hostStackFirstFrame: 'widget',
+    hostStackTrustedBundleFrameCount: 1,
+  });
+
+  const oversized = errorWithFrames([`    at render (${elementBundle}:13:8)`]);
+  oversized.stack = `Error: private error text\n${'x'.repeat(16_385)}`;
+  assert.equal(
+    classifyElementHostStack(oversized, fixtureUrls).hostStackStatus,
+    'truncated',
+  );
+  const tooMany = errorWithFrames(
+    Array.from(
+      { length: 25 },
+      (_, index) => `    at render (${elementBundle}:${index + 1}:8)`,
+    ),
+  );
+  assert.equal(
+    classifyElementHostStack(tooMany, fixtureUrls).hostStackStatus,
+    'truncated',
+  );
+  const noStack = Object.defineProperty({}, 'stack', {
+    get() {
+      throw new Error('private getter failure');
+    },
+  });
+  assert.equal(
+    classifyElementHostStack(noStack, fixtureUrls).hostStackStatus,
+    'unavailable',
+  );
+  assert.doesNotMatch(
+    JSON.stringify(classifyElementHostStack(valid, fixtureUrls)),
+    /private|https?:\/\/|element\.invalid|widget\.invalid|app\.js/u,
+  );
 });
 
 test('resolves an eligible map to an opaque pinned source reference', () => {
