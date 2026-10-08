@@ -489,9 +489,13 @@ function stages(overrides = {}) {
       userdelStatus: 'not_run',
       userdelExitStatus: null,
       stopDiagnostics: passedStopDiagnostics(),
+      lateUidRetry: null,
       uidProcessObservation: {
         state: 'observed',
+        overflow: false,
         uidProcessCount: 0,
+        effectiveUidMatchCount: 0,
+        nonEffectiveUidOnlyCount: 0,
         nonZombieProcessCount: 0,
         zombieCount: 0,
         unreadableProcessCount: 0,
@@ -507,7 +511,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes with complete verified isolation and cleanup', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 20);
+  assert.equal(summary.schemaVersion, 21);
   assert.equal(
     summary.cleanupDiagnostics.stopDiagnostics.initial.census
       .effectiveUidMatchCount,
@@ -563,9 +567,13 @@ test('Desktop evidence passes with complete verified isolation and cleanup', () 
     userdelStatus: 'not_run',
     userdelExitStatus: null,
     stopDiagnostics: passedStopDiagnostics(),
+    lateUidRetry: null,
     uidProcessObservation: {
       state: 'observed',
+      overflow: false,
       uidProcessCount: 0,
+      effectiveUidMatchCount: 0,
+      nonEffectiveUidOnlyCount: 0,
       nonZombieProcessCount: 0,
       zombieCount: 0,
       unreadableProcessCount: 0,
@@ -688,6 +696,63 @@ test('cleanup pass requires observed zero UID counts on both sides of user delet
     );
   assert.throws(
     () => sanitizeDesktopStages(remainingAfterUserdel, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
+});
+
+test('cleanup evidence preserves the effective UID partition that triggered one retry', () => {
+  const cleanupStages = stages();
+  const lateProcessObservation = {
+    ...observedEmptyUidLifecycleObservation(),
+    uidProcessCount: 1,
+    effectiveUidMatchCount: 1,
+    nonEffectiveUidOnlyCount: 0,
+    nonZombieProcessCount: 1,
+    processClassCounts: {
+      ...observedEmptyUidLifecycleObservation().processClassCounts,
+      other: 1,
+    },
+    processRoleCounts: {
+      ...observedEmptyUidLifecycleObservation().processRoleCounts,
+      other: 1,
+    },
+  };
+  cleanupStages[4].lateUidRetry = {
+    triggerUidProcessObservation: uidProcessObservationFromLifecycle(
+      lateProcessObservation,
+    ),
+    stopDiagnostics: passedStopDiagnostics(),
+  };
+
+  const summary = sanitizeDesktopStages(cleanupStages, sourceSha);
+  assert.deepEqual(summary.cleanupDiagnostics.lateUidRetry, {
+    triggerUidProcessObservation: {
+      state: 'observed',
+      overflow: false,
+      uidProcessCount: 1,
+      effectiveUidMatchCount: 1,
+      nonEffectiveUidOnlyCount: 0,
+      nonZombieProcessCount: 1,
+      zombieCount: 0,
+      unreadableProcessCount: 0,
+    },
+    stopDiagnostics: passedStopDiagnostics(),
+  });
+  assert.deepEqual(summary.cleanupDiagnostics.uidProcessObservation, {
+    state: 'observed',
+    overflow: false,
+    uidProcessCount: 0,
+    effectiveUidMatchCount: 0,
+    nonEffectiveUidOnlyCount: 0,
+    nonZombieProcessCount: 0,
+    zombieCount: 0,
+    unreadableProcessCount: 0,
+  });
+
+  const uncorrelatedTrigger = structuredClone(cleanupStages);
+  uncorrelatedTrigger[4].lateUidRetry.triggerUidProcessObservation.effectiveUidMatchCount = 0;
+  assert.throws(
+    () => sanitizeDesktopStages(uncorrelatedTrigger, sourceSha),
     /invalid Desktop evidence input/u,
   );
 });
@@ -1222,10 +1287,13 @@ test('Desktop evidence preserves a finite sandbox failure reason without raw pro
   );
 });
 
-test('cleanup census sanitizer accepts the fixed process-count shape and fails closed on malformed fields', () => {
+test('cleanup census sanitizer preserves and correlates the effective UID partition', () => {
   const observed = {
     state: 'observed',
+    overflow: false,
     uidProcessCount: 3,
+    effectiveUidMatchCount: 2,
+    nonEffectiveUidOnlyCount: 1,
     nonZombieProcessCount: 2,
     zombieCount: 1,
     unreadableProcessCount: 0,
@@ -1237,7 +1305,10 @@ test('cleanup census sanitizer accepts the fixed process-count shape and fails c
 
   const unavailable = {
     state: 'unavailable',
+    overflow: null,
     uidProcessCount: null,
+    effectiveUidMatchCount: null,
+    nonEffectiveUidOnlyCount: null,
     nonZombieProcessCount: null,
     zombieCount: null,
     unreadableProcessCount: null,
@@ -1251,6 +1322,19 @@ test('cleanup census sanitizer accepts the fixed process-count shape and fails c
     sanitizeUidProcessObservation({ ...observed, processId: 1234 }),
     unavailable,
   );
+  assert.deepEqual(
+    sanitizeUidProcessObservation({ ...observed, nonEffectiveUidOnlyCount: 0 }),
+    unavailable,
+  );
+
+  const overflow = {
+    ...observed,
+    state: 'partial',
+    overflow: true,
+    effectiveUidMatchCount: 3,
+    nonEffectiveUidOnlyCount: 1,
+  };
+  assert.deepEqual(sanitizeUidProcessObservation(overflow), overflow);
 });
 
 test('cleanup summary accepts only correlated fixed census stderr outcomes', () => {
@@ -1384,7 +1468,7 @@ test('cleanup census stderr buckets are closed and correlate timeout 125 signatu
   assert.equal(validDesktopSummary(impossibleEmpty), false);
 
   const previousSchema = structuredClone(summary);
-  previousSchema.schemaVersion = 19;
+  previousSchema.schemaVersion = 20;
   assert.equal(validDesktopSummary(previousSchema), false);
 });
 
@@ -1436,7 +1520,10 @@ test('UID lifecycle sanitizer preserves bounded ownership evidence and unavailab
   const unavailableProjection = uidProcessObservationFromLifecycle('{');
   assert.deepEqual(unavailableProjection, {
     state: 'unavailable',
+    overflow: null,
     uidProcessCount: null,
+    effectiveUidMatchCount: null,
+    nonEffectiveUidOnlyCount: null,
     nonZombieProcessCount: null,
     zombieCount: null,
     unreadableProcessCount: null,
@@ -1887,9 +1974,13 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
     userdelStatus: 'failed',
     userdelExitStatus: 8,
     stopDiagnostics: passedStopDiagnostics(),
+    lateUidRetry: null,
     uidProcessObservation: {
       state: 'observed',
+      overflow: false,
       uidProcessCount: 2,
+      effectiveUidMatchCount: 1,
+      nonEffectiveUidOnlyCount: 1,
       nonZombieProcessCount: 1,
       zombieCount: 1,
       unreadableProcessCount: 0,

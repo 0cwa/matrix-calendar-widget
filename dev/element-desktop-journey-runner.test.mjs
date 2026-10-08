@@ -12,6 +12,7 @@ import {
   createSystemCommandEnvironment,
   lookupPasswdAccount,
   parseStartupProgressRecord,
+  retryLateEffectiveUidStop,
   selectAvailableProbeUid,
   selectPinnedPackageHash,
   stopUidProcesses,
@@ -510,6 +511,130 @@ test('records a clear initial UID inspection without entering the signal path', 
   assert.equal(result.diagnostics.killSignal, 'not_attempted');
   assert.deepEqual(calls, [['pgrep', '-u', '24000']]);
   assert.deepEqual(waits, []);
+});
+
+test('retries one scoped stop after a clear initial inspection finds a late effective-UID process', async () => {
+  const state = { uid: 24_000 };
+  const initialStop = await stopUidProcesses(state, {
+    runCommand: () => 1,
+    census: async () => observedUidCensus(0),
+  });
+  const lateObservation = observedUidCensus(1);
+  const stopCalls = [];
+  const commandCalls = [];
+  const waitCalls = [];
+  const captureCalls = [];
+
+  const result = await retryLateEffectiveUidStop(
+    state,
+    initialStop,
+    lateObservation,
+    {
+      stop: (target) => {
+        stopCalls.push(target);
+        const statuses = [0, 0, 1];
+        return stopUidProcesses(target, {
+          runCommand: (program, args) => {
+            commandCalls.push([program, ...args]);
+            return statuses.shift();
+          },
+          wait: async (duration) => waitCalls.push(duration),
+          census: async () => observedUidCensus(0),
+        });
+      },
+      capture: (target) => {
+        captureCalls.push(target);
+        return observedUidCensus(0);
+      },
+    },
+  );
+
+  assert.equal(initialStop.diagnostics.initial.inspection, 'absent');
+  assert.equal(initialStop.diagnostics.termSignal, 'not_attempted');
+  assert.equal(result.stopResult.status, 'passed');
+  assert.equal(result.stopResult.diagnostics.termSignal, 'sent');
+  assert.equal(result.observation.uidProcessCount, 0);
+  assert.equal(stopCalls.length, 1);
+  assert.equal(stopCalls[0], state);
+  assert.equal(captureCalls.length, 1);
+  assert.equal(captureCalls[0], state);
+  assert.deepEqual(waitCalls, [2_000]);
+  assert.deepEqual(
+    commandCalls.map((call) => call.slice(0, 4)),
+    [
+      ['pgrep', '-u', '24000'],
+      ['sudo', '-n', 'pkill', '-TERM'],
+      ['pgrep', '-u', '24000'],
+    ],
+  );
+  assert.deepEqual(result.lateUidRetry.triggerUidProcessObservation, {
+    state: 'observed',
+    overflow: false,
+    uidProcessCount: 1,
+    effectiveUidMatchCount: 1,
+    nonEffectiveUidOnlyCount: 0,
+    nonZombieProcessCount: 1,
+    zombieCount: 0,
+    unreadableProcessCount: 0,
+  });
+});
+
+test('does not retry for non-effective-only, overflowed, or already-signaled cleanup observations', async () => {
+  const state = { uid: 24_000 };
+  const initialStop = await stopUidProcesses(state, {
+    runCommand: () => 1,
+    census: async () => observedUidCensus(0),
+  });
+  const noRetryCases = [];
+  const nonEffectiveOnly = observedUidCensus(1);
+  nonEffectiveOnly.effectiveUidMatchCount = 0;
+  nonEffectiveOnly.nonEffectiveUidOnlyCount = 1;
+  noRetryCases.push(nonEffectiveOnly);
+  const overflowed = observedUidCensus(1);
+  overflowed.state = 'partial';
+  overflowed.overflow = true;
+  overflowed.effectiveUidMatchCount = 1;
+  overflowed.nonEffectiveUidOnlyCount = 1;
+  noRetryCases.push(overflowed);
+
+  const signaledStop = await stopUidProcesses(state, {
+    runCommand: (() => {
+      const statuses = [0, 0, 1];
+      return () => statuses.shift();
+    })(),
+    wait: async () => {},
+    census: async () => observedUidCensus(0),
+  });
+  assert.equal(signaledStop.diagnostics.termSignal, 'sent');
+
+  for (const [stopResult, observation] of [
+    [initialStop, nonEffectiveOnly],
+    [initialStop, overflowed],
+    [signaledStop, observedUidCensus(1)],
+  ]) {
+    let stopCalls = 0;
+    let captureCalls = 0;
+    const result = await retryLateEffectiveUidStop(
+      state,
+      stopResult,
+      observation,
+      {
+        stop: async () => {
+          stopCalls += 1;
+          return assert.fail('retry must not run');
+        },
+        capture: async () => {
+          captureCalls += 1;
+          return assert.fail('fresh census must not run');
+        },
+      },
+    );
+    assert.equal(result.lateUidRetry, null);
+    assert.equal(result.stopResult, stopResult);
+    assert.equal(result.observation, observation);
+    assert.equal(stopCalls, 0);
+    assert.equal(captureCalls, 0);
+  }
 });
 
 test('keeps unavailable UID inspection distinct from an empty census', async () => {

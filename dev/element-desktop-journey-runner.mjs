@@ -2173,6 +2173,46 @@ export async function stopUidProcesses(
   return { status: diagnostics.status, diagnostics };
 }
 
+export async function retryLateEffectiveUidStop(
+  state,
+  initialStopResult,
+  observationBeforeRetry,
+  { stop = stopUidProcesses, capture = captureFinalUidLifecycle } = {},
+) {
+  const initialDiagnostics = initialStopResult?.diagnostics;
+  const retryIsIndicated =
+    initialStopResult?.status === 'passed' &&
+    initialDiagnostics?.initial?.inspection === 'absent' &&
+    initialDiagnostics.termSignal === 'not_attempted' &&
+    initialDiagnostics.killSignal === 'not_attempted' &&
+    isValidUidLifecycleObservation(observationBeforeRetry) &&
+    observationBeforeRetry.state === 'observed' &&
+    observationBeforeRetry.overflow === false &&
+    observationBeforeRetry.effectiveUidMatchCount > 0;
+  if (!retryIsIndicated) {
+    return {
+      stopResult: initialStopResult,
+      observation: observationBeforeRetry,
+      lateUidRetry: null,
+    };
+  }
+
+  const retryResult = await stop(state);
+  const freshObservation = sanitizeUidLifecycleObservation(
+    await capture(state),
+  );
+  return {
+    stopResult: retryResult,
+    observation: freshObservation,
+    lateUidRetry: {
+      triggerUidProcessObservation: uidProcessObservationFromLifecycle(
+        observationBeforeRetry,
+      ),
+      stopDiagnostics: retryResult.diagnostics,
+    },
+  };
+}
+
 function captureFinalEgress(state) {
   const output = capture(
     'timeout',
@@ -2429,6 +2469,7 @@ async function cleanupRunner(config) {
   };
   let profileStatus = 'not_run';
   let stopDiagnostics = emptyUidProcessStopDiagnostics();
+  let lateUidRetry = null;
   let lifecycleBeforeUserdel = emptyUidLifecycleObservation('not_observed');
   let finalLifecycle = emptyUidLifecycleObservation('not_observed');
   let egressObservation = {
@@ -2447,6 +2488,14 @@ async function cleanupRunner(config) {
     stopDiagnostics = stopResult.diagnostics;
     egressObservation = captureFinalEgress(state);
     lifecycleBeforeUserdel = captureFinalUidLifecycle(state);
+    const reconciledStop = await retryLateEffectiveUidStop(
+      state,
+      stopResult,
+      lifecycleBeforeUserdel,
+    );
+    processStatus = reconciledStop.stopResult.status;
+    lateUidRetry = reconciledStop.lateUidRetry;
+    lifecycleBeforeUserdel = reconciledStop.observation;
     const beforeUserdelClear =
       lifecycleBeforeUserdel.state === 'observed' &&
       lifecycleBeforeUserdel.uidProcessCount === 0;
@@ -2501,6 +2550,7 @@ async function cleanupRunner(config) {
       userdelStatus: stateInvalid ? 'not_run' : user.userdelStatus,
       userdelExitStatus: stateInvalid ? null : user.userdelExitStatus,
       stopDiagnostics,
+      lateUidRetry,
       uidProcessObservation: uidProcessObservationFromLifecycle(finalLifecycle),
       uidLifecycleObservationBeforeUserdel: lifecycleBeforeUserdel,
       finalUidLifecycleObservation: finalLifecycle,

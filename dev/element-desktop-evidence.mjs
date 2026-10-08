@@ -769,7 +769,10 @@ function validateUidProcessObservation(value) {
   if (
     !hasKeys(value, [
       'state',
+      'overflow',
       'uidProcessCount',
+      'effectiveUidMatchCount',
+      'nonEffectiveUidOnlyCount',
       'nonZombieProcessCount',
       'zombieCount',
       'unreadableProcessCount',
@@ -780,7 +783,16 @@ function validateUidProcessObservation(value) {
   }
   if (value.state === 'observed' || value.state === 'partial') {
     return (
+      typeof value.overflow === 'boolean' &&
       diagnosticCount(value.uidProcessCount) &&
+      diagnosticCount(value.effectiveUidMatchCount) &&
+      value.effectiveUidMatchCount <= value.uidProcessCount &&
+      diagnosticCount(value.nonEffectiveUidOnlyCount) &&
+      value.nonEffectiveUidOnlyCount <= value.uidProcessCount &&
+      (value.overflow ||
+        value.effectiveUidMatchCount + value.nonEffectiveUidOnlyCount ===
+          value.uidProcessCount) &&
+      (value.state !== 'observed' || !value.overflow) &&
       diagnosticCount(value.nonZombieProcessCount) &&
       value.nonZombieProcessCount <= value.uidProcessCount &&
       diagnosticCount(value.zombieCount) &&
@@ -790,7 +802,10 @@ function validateUidProcessObservation(value) {
     );
   }
   return (
+    value.overflow === null &&
     value.uidProcessCount === null &&
+    value.effectiveUidMatchCount === null &&
+    value.nonEffectiveUidOnlyCount === null &&
     value.nonZombieProcessCount === null &&
     value.zombieCount === null &&
     value.unreadableProcessCount === null
@@ -1165,7 +1180,10 @@ function validateUidLifecycleObservation(value) {
 export function sanitizeUidProcessObservation(input) {
   const fallback = {
     state: 'unavailable',
+    overflow: null,
     uidProcessCount: null,
+    effectiveUidMatchCount: null,
+    nonEffectiveUidOnlyCount: null,
     nonZombieProcessCount: null,
     zombieCount: null,
     unreadableProcessCount: null,
@@ -1181,7 +1199,10 @@ export function sanitizeUidProcessObservation(input) {
   if (!validateUidProcessObservation(value)) return fallback;
   return {
     state: value.state,
+    overflow: value.overflow,
     uidProcessCount: value.uidProcessCount,
+    effectiveUidMatchCount: value.effectiveUidMatchCount,
+    nonEffectiveUidOnlyCount: value.nonEffectiveUidOnlyCount,
     nonZombieProcessCount: value.nonZombieProcessCount,
     zombieCount: value.zombieCount,
     unreadableProcessCount: value.unreadableProcessCount,
@@ -1298,6 +1319,22 @@ export function emptyUidProcessStopDiagnostics() {
     killSignal: 'not_attempted',
     postKill: emptyUidStopCheckpoint(),
   };
+}
+
+function validateLateUidRetry(value, initialStopDiagnostics) {
+  if (value === null) return true;
+  return (
+    hasKeys(value, ['triggerUidProcessObservation', 'stopDiagnostics']) &&
+    initialStopDiagnostics.status === 'passed' &&
+    initialStopDiagnostics.initial.inspection === 'absent' &&
+    initialStopDiagnostics.termSignal === 'not_attempted' &&
+    initialStopDiagnostics.killSignal === 'not_attempted' &&
+    validateUidProcessObservation(value.triggerUidProcessObservation) &&
+    value.triggerUidProcessObservation.state === 'observed' &&
+    value.triggerUidProcessObservation.overflow === false &&
+    value.triggerUidProcessObservation.effectiveUidMatchCount > 0 &&
+    validateUidProcessStopDiagnostics(value.stopDiagnostics)
+  );
 }
 
 function validateUidCensusStderrPrefixSummary(value) {
@@ -1781,7 +1818,10 @@ export function uidProcessObservationFromLifecycle(input) {
   if (observation.state !== 'observed' && observation.state !== 'partial') {
     return {
       state: observation.state,
+      overflow: null,
       uidProcessCount: null,
+      effectiveUidMatchCount: null,
+      nonEffectiveUidOnlyCount: null,
       nonZombieProcessCount: null,
       zombieCount: null,
       unreadableProcessCount: null,
@@ -1789,7 +1829,10 @@ export function uidProcessObservationFromLifecycle(input) {
   }
   return {
     state: observation.state,
+    overflow: observation.overflow,
     uidProcessCount: observation.uidProcessCount,
+    effectiveUidMatchCount: observation.effectiveUidMatchCount,
+    nonEffectiveUidOnlyCount: observation.nonEffectiveUidOnlyCount,
     nonZombieProcessCount: observation.nonZombieProcessCount,
     zombieCount: observation.zombieCount,
     unreadableProcessCount: observation.unreadableProcessCount,
@@ -2609,6 +2652,7 @@ function validateCleanup(record) {
       'userdelStatus',
       'userdelExitStatus',
       'stopDiagnostics',
+      'lateUidRetry',
       'uidProcessObservation',
       'uidLifecycleObservationBeforeUserdel',
       'finalUidLifecycleObservation',
@@ -2637,6 +2681,7 @@ function validateCleanup(record) {
         : record.userdelExitStatus === null) &&
     validateUidProcessObservation(record.uidProcessObservation) &&
     validateUidProcessStopDiagnostics(record.stopDiagnostics) &&
+    validateLateUidRetry(record.lateUidRetry, record.stopDiagnostics) &&
     validateUidLifecycleObservation(
       record.uidLifecycleObservationBeforeUserdel,
     ) &&
@@ -2647,8 +2692,13 @@ function validateCleanup(record) {
       );
       const projectionMatches =
         record.uidProcessObservation.state === projected.state &&
+        record.uidProcessObservation.overflow === projected.overflow &&
         record.uidProcessObservation.uidProcessCount ===
           projected.uidProcessCount &&
+        record.uidProcessObservation.effectiveUidMatchCount ===
+          projected.effectiveUidMatchCount &&
+        record.uidProcessObservation.nonEffectiveUidOnlyCount ===
+          projected.nonEffectiveUidOnlyCount &&
         record.uidProcessObservation.nonZombieProcessCount ===
           projected.nonZombieProcessCount &&
         record.uidProcessObservation.zombieCount === projected.zombieCount &&
@@ -2660,7 +2710,9 @@ function validateCleanup(record) {
         record.finalUidLifecycleObservation.state === 'observed' &&
         record.finalUidLifecycleObservation.uidProcessCount === 0 &&
         record.accountState === 'absent' &&
-        record.stopDiagnostics.status === 'passed';
+        record.stopDiagnostics.status === 'passed' &&
+        (record.lateUidRetry === null ||
+          record.lateUidRetry.stopDiagnostics.status === 'passed');
       return (
         projectionMatches &&
         (record.policy !== 'passed' ||
@@ -2952,6 +3004,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         userdelStatus: cleanup.userdelStatus,
         userdelExitStatus: cleanup.userdelExitStatus,
         stopDiagnostics: cleanup.stopDiagnostics,
+        lateUidRetry: cleanup.lateUidRetry,
         uidProcessObservation: cleanup.uidProcessObservation,
       }
     : null;
@@ -3013,7 +3066,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 20,
+    schemaVersion: 21,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -3116,7 +3169,7 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 20 &&
+    value.schemaVersion === 21 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
@@ -3217,6 +3270,7 @@ export function validDesktopSummary(value) {
         'userdelStatus',
         'userdelExitStatus',
         'stopDiagnostics',
+        'lateUidRetry',
         'uidProcessObservation',
       ]) &&
         ['passed', 'failed', 'not_run', 'retained'].includes(
@@ -3246,6 +3300,10 @@ export function validDesktopSummary(value) {
           value.cleanupDiagnostics.uidProcessObservation,
         ) &&
         validateUidProcessStopDiagnostics(
+          value.cleanupDiagnostics.stopDiagnostics,
+        ) &&
+        validateLateUidRetry(
+          value.cleanupDiagnostics.lateUidRetry,
           value.cleanupDiagnostics.stopDiagnostics,
         ))) &&
     (value.cleanupDiagnostics === null
