@@ -151,74 +151,26 @@ export function CalendarEventsSurface({
       calendar.supportedComponents?.includes('VEVENT') &&
       calendar.supportedComponents.some((component) => component !== 'VEVENT'),
   );
-  const diagnosticMarker = (
-    <Box
-      aria-hidden="true"
-      component="span"
-      data-testid="calendar-events-surface-diagnostic"
-      data-mcw-diagnostic-calendar-count-capped={cappedDiagnosticCount(
-        calendars.data.length,
-      )}
-      data-mcw-diagnostic-calendar-partial={String(
-        calendars.partialAvailability,
-      )}
-      data-mcw-diagnostic-calendar-query-error={String(
-        Boolean(calendars.error),
-      )}
-      data-mcw-diagnostic-calendar-query-loading={String(calendars.loading)}
-      data-mcw-diagnostic-event-partial={String(events.partialAvailability)}
-      data-mcw-diagnostic-event-query-error={String(Boolean(events.error))}
-      data-mcw-diagnostic-event-query-loading={String(events.loading)}
-      data-mcw-diagnostic-event-source-count-capped={cappedDiagnosticCount(
-        events.data.length,
-      )}
-      data-mcw-diagnostic-projected-count-capped={cappedDiagnosticCount(
-        projection.occurrences.length,
-      )}
-      data-mcw-diagnostic-room-can-read-events={
-        calendars.roomCapabilities
-          ? String(calendars.roomCapabilities.canReadEvents)
-          : 'unknown'
-      }
-      data-mcw-diagnostic-room-capabilities-state={
-        calendars.roomCapabilities ? 'present' : 'absent'
-      }
-      data-mcw-diagnostic-surface="calendar-events"
-      data-mcw-diagnostic-visible-count-capped={cappedDiagnosticCount(
-        filteredEvents.length,
-      )}
-      hidden
-    />
-  );
 
   if (calendars.loading || events.loading) {
-    return (
-      <>
-        {diagnosticMarker}
-        <PageLoader />
-      </>
-    );
+    return <PageLoader />;
   }
 
   if (calendars.error || events.error) {
     return (
-      <>
-        {diagnosticMarker}
-        <Box m={2}>
-          <Alert severity="error">
-            {t(
-              'calendarEvents.loadError',
-              'Calendar events could not be loaded.',
-            )}
-          </Alert>
-        </Box>
-      </>
+      <Box m={2}>
+        <Alert severity="error">
+          {t(
+            'calendarEvents.loadError',
+            'Calendar events could not be loaded.',
+          )}
+        </Alert>
+      </Box>
     );
   }
 
   return (
     <>
-      {diagnosticMarker}
       {(calendars.partialAvailability || events.partialAvailability) && (
         <Box px={1} pb={1}>
           <Alert severity="warning">
@@ -365,9 +317,4 @@ export function CalendarEventsSurface({
       />
     </>
   );
-}
-
-function cappedDiagnosticCount(count: number): string {
-  // The closed diagnostic reports only 0, 1, or 2-or-more.
-  return String(Math.min(count, 2));
 }
