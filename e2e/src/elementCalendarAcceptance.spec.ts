@@ -40,6 +40,7 @@ import {
 } from '../../dev/element-acceptance-error-source-map.mjs';
 import {
   MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+  advanceOrdinaryPageErrorStage,
   capturePerformancePageError,
   isVerifiedOpeningHostDiagnostic,
   summarizeDefaultWaitObservation,
@@ -2517,7 +2518,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
           report,
           error,
           caseReport.profile,
-          pageErrorStage,
+          () => pageErrorStage,
           {
             elementUrl: fixture.elementUrl,
             widgetUrl: fixture.widgetUrl,
@@ -2643,7 +2644,6 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       });
 
       failureCode = 'performance-default-view-failed';
-      pageErrorStage = 'default-view';
       try {
         await observer.waitForRoomEvents(defaultSample, 'preselection');
       } catch {
@@ -2666,6 +2666,39 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
         frame,
         expectedTitles,
       );
+      const readinessEventRows = observer
+        .rowsFor(defaultSample)
+        .filter((row) => row.endpoint === 'events');
+      const readinessRoomRows = readinessEventRows.filter(
+        (row) =>
+          row.target === 'room' &&
+          row.calendarMatches === true &&
+          row.rangeClass === 'preselection' &&
+          row.rangeMatches === true,
+      );
+      const readinessRoomRow = readinessRoomRows[0];
+      const createEventControl = frame.getByRole('button', {
+        name: 'Create event',
+        exact: true,
+      });
+      const [defaultUsableControl, defaultUsableControlEnabled] =
+        await Promise.all([
+          createEventControl.isVisible().catch(() => false),
+          createEventControl.isEnabled().catch(() => false),
+        ]);
+      pageErrorStage = advanceOrdinaryPageErrorStage(pageErrorStage, {
+        responseDecoded:
+          readinessRoomRow?.status === 200 && readinessRoomRow.decoded,
+        responseMatches: readinessRoomRows.length === 1,
+        returnedRowsExact:
+          readinessRoomRow?.eventCount === caseReport.eventCount &&
+          readinessRoomRow.expectedTitlesMatch === true,
+        renderedRowsExact:
+          defaultMeasurement.second.renderedCount === caseReport.eventCount &&
+          defaultMeasurement.second.identitiesMatch,
+        controlsUsable: defaultUsableControl && defaultUsableControlEnabled,
+        stable: defaultMeasurement.stable,
+      });
       await observer.waitForSettled(defaultSample);
       const defaultEventRows = observer
         .rowsFor(defaultSample)
@@ -2679,10 +2712,6 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       );
       const defaultReturnedCount =
         defaultRoomRows.length === 1 ? defaultRoomRows[0].eventCount : null;
-      const defaultUsableControl = await frame
-        .getByRole('button', { name: 'Create event', exact: true })
-        .isVisible()
-        .catch(() => false);
       caseReport.defaultView = {
         durationMs: elapsedMilliseconds(coldStartedAt),
         apiResponseCount: defaultEventRows.length,
@@ -2732,6 +2761,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       expect(caseReport.defaultView.rangeMatches).toBe(true);
       expect(caseReport.defaultView.countMatches).toBe(true);
       expect(caseReport.defaultView.usableControlVisible).toBe(true);
+      expect(defaultUsableControlEnabled).toBe(true);
       expect(caseReport.defaultView.stable).toBe(true);
       expect(caseReport.coldList.identitiesMatch).toBe(true);
       expect(caseReport.coldList.diagnosticsZero).toBe(true);

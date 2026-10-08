@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+  advanceOrdinaryPageErrorStage,
   capturePerformancePageError,
   classifyPerformancePageError,
   isVerifiedOpeningHostDiagnostic,
@@ -743,6 +744,75 @@ test('keeps only complete opening Element-bundle errors as ordinary diagnostics'
         JSON.stringify(
           ordinaryStage('failed', partialCapture, 'performance-page-error'),
         ),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
+test('samples the ordinary error stage at emission and waits for real readiness', async () => {
+  const report = ordinaryReport();
+  report.version = 13;
+  const error = new Error('private error text');
+  error.stack =
+    'Error: private error text\n' +
+    '    at render (https://element.invalid:8448/bundles/0123456789abcdef/app.js:42:9)';
+  const fixtureUrls = {
+    elementUrl: 'https://element.invalid:8448/',
+    widgetUrl: 'http://widget.invalid:3000/',
+  };
+  let stage = 'widget-open';
+  const emitPageError = () =>
+    capturePerformancePageError(
+      report,
+      error,
+      'empty',
+      () => stage,
+      fixtureUrls,
+    );
+  const readyObservation = {
+    responseDecoded: true,
+    responseMatches: true,
+    returnedRowsExact: true,
+    renderedRowsExact: true,
+    controlsUsable: true,
+    stable: true,
+  };
+
+  for (const condition of Object.keys(readyObservation)) {
+    assert.equal(
+      advanceOrdinaryPageErrorStage(stage, {
+        ...readyObservation,
+        [condition]: false,
+      }),
+      'widget-open',
+      `${condition} must be observed before the stage advances`,
+    );
+  }
+  const beforeReadiness = emitPageError();
+  assert.equal(beforeReadiness.stage, 'widget-open');
+
+  let resolveReadiness;
+  const readiness = new Promise((resolve) => {
+    resolveReadiness = resolve;
+  });
+  const advanceAfterReadiness = readiness.then((observed) => {
+    stage = advanceOrdinaryPageErrorStage(stage, observed);
+  });
+  const whileWaiting = emitPageError();
+  assert.equal(whileWaiting.stage, 'widget-open');
+  resolveReadiness(readyObservation);
+  await advanceAfterReadiness;
+
+  const afterReadiness = emitPageError();
+  assert.equal(afterReadiness.stage, 'default-view');
+  assert.equal(isVerifiedOpeningHostDiagnostic(beforeReadiness), true);
+  assert.equal(isVerifiedOpeningHostDiagnostic(whileWaiting), true);
+  assert.equal(isVerifiedOpeningHostDiagnostic(afterReadiness), false);
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', report)),
         sourceSha,
       ),
     /invalid element acceptance summary/u,

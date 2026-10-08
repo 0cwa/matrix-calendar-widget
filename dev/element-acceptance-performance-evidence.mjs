@@ -1,5 +1,7 @@
 import { classifyElementHostStack } from './element-acceptance-error-source-map.mjs';
 
+/** @typedef {'case-setup'|'element-login'|'room-navigation'|'widget-open'|'default-view'|'cold-layout'|'refresh-setup'|'refresh'|'details'|'case-cleanup'} PerformancePageErrorStage */
+
 const FAILURE_CODES = new Set([
   'performance-setup-failed',
   'performance-widget-open-failed',
@@ -356,7 +358,7 @@ export function classifyPerformancePageError(error, fixtureUrls) {
  * @param {{pageErrorCount: number|null, pageErrorClass: string, pageErrorObservations: object[], pageErrorObservationOverflow: boolean}} report
  * @param {unknown} error
  * @param {'empty'|'events-25'} profile
- * @param {'case-setup'|'element-login'|'room-navigation'|'widget-open'|'default-view'|'cold-layout'|'refresh-setup'|'refresh'|'details'|'case-cleanup'} stage
+ * @param {PerformancePageErrorStage|(()=>PerformancePageErrorStage)} stage Current stage or a getter sampled at emission time.
  * @param {{elementUrl: string, widgetUrl: string}} fixtureUrls
  * @returns {object|null} The saved closed observation, or null after overflow.
  */
@@ -367,6 +369,7 @@ export function capturePerformancePageError(
   stage,
   fixtureUrls,
 ) {
+  const observationStage = typeof stage === 'function' ? stage() : stage;
   report.pageErrorCount = Math.min((report.pageErrorCount ?? 0) + 1, 100_000);
   const classification = classifyPerformancePageError(error, fixtureUrls);
   if (report.pageErrorClass === 'none') {
@@ -379,7 +382,7 @@ export function capturePerformancePageError(
 
   const observation = {
     profile,
-    stage,
+    stage: observationStage,
     ...classification,
     sourceMapStatus: 'not-eligible',
     sourceMapResolution: 'not-applicable',
@@ -391,6 +394,30 @@ export function capturePerformancePageError(
   };
   report.pageErrorObservations.push(observation);
   return observation;
+}
+
+/**
+ * Closes the ordinary widget-opening error window only after the profile's
+ * decoded response, exact returned and rendered rows, usable Create control,
+ * and two-frame stable content have all been observed.
+ *
+ * @param {PerformancePageErrorStage} stage
+ * @param {{responseDecoded: boolean, responseMatches: boolean, returnedRowsExact: boolean, renderedRowsExact: boolean, controlsUsable: boolean, stable: boolean}} readiness
+ * @returns {PerformancePageErrorStage}
+ */
+export function advanceOrdinaryPageErrorStage(stage, readiness) {
+  if (
+    stage === 'widget-open' &&
+    readiness.responseDecoded === true &&
+    readiness.responseMatches === true &&
+    readiness.returnedRowsExact === true &&
+    readiness.renderedRowsExact === true &&
+    readiness.controlsUsable === true &&
+    readiness.stable === true
+  ) {
+    return 'default-view';
+  }
+  return stage;
 }
 
 function validHostStackEvidence(observation) {

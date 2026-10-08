@@ -70,16 +70,25 @@ meet the 1,000-ms limit. Record every designated sample and fixed failure
 observation before assertions. Keep all observations: no authentication
 bypass, retries, discarded failures, best-of selection, or phase subtraction.
 Missing or malformed data, unverified page errors, overflow, fixture cleanup
-failures, or an over-limit required sample fails the gate. The only approved
-page-error diagnostic exception applies to future reports: every such error
-must occur during `widget-open`, and its complete, untruncated stack must parse
-with the first frame and every captured frame on the configured Element static
-origin under the pinned production-bundle path. Widget-origin, mixed-origin,
-other-origin, unknown, malformed, truncated, overflowed, or after-opening
-errors still fail. The check does not use a source-map namespace or infer a
-cause, fix, or harmless behavior from the stack. It records only closed labels,
-booleans, and capped frame counts; error messages, names, stacks, URLs, and
-paths are not retained.
+failures, or an over-limit required sample fails the gate. For this profile,
+`widget-open` begins immediately before normal widget activation and remains
+through identity exchange, approvals, and initial loading. It ends as soon as
+the first contract-ready default List observation has one decoded HTTP 200 room
+response for the exact calendar and range, exact returned and rendered event
+identities, a visible and enabled Create event control, and content stable over
+two animation frames. The stage changes at that observation, before waiting
+for unrelated requests to settle; this does not move the cold timing stop or
+add requests.
+
+The only approved page-error diagnostic exception applies to future reports:
+every such error must occur during `widget-open`, and its complete,
+untruncated stack must parse with the first frame and every captured frame on
+the configured Element static origin under the pinned production-bundle path.
+Widget-origin, mixed-origin, other-origin, unknown, malformed, truncated,
+overflowed, or after-readiness errors still fail. The check does not use a
+source-map namespace or infer a cause, fix, or harmless behavior from the
+stack. It records only closed labels, booleans, and capped frame counts; error
+messages, names, stacks, URLs, and paths are not retained.
 
 This conditional diagnostic applies only to the ordinary performance profile.
 The profile must still pass every startup, timing, decoded API, identity,

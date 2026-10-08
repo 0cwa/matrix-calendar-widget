@@ -151,9 +151,23 @@ export function capturePerformancePageError(
   },
   error: unknown,
   profile: 'empty' | 'events-25',
-  stage: PerformancePageErrorObservation['stage'],
+  stage:
+    | PerformancePageErrorObservation['stage']
+    | (() => PerformancePageErrorObservation['stage']),
   fixtureUrls: { elementUrl: string; widgetUrl: string },
 ): PerformancePageErrorObservation | null;
+
+export function advanceOrdinaryPageErrorStage(
+  stage: PerformancePageErrorObservation['stage'],
+  readiness: {
+    responseDecoded: boolean;
+    responseMatches: boolean;
+    returnedRowsExact: boolean;
+    renderedRowsExact: boolean;
+    controlsUsable: boolean;
+    stable: boolean;
+  },
+): PerformancePageErrorObservation['stage'];
 
 export function isVerifiedOpeningHostDiagnostic(
   observation: PerformancePageErrorObservation,
