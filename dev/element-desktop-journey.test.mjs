@@ -20,8 +20,10 @@ import {
   appendDesktopJourneyOutcome,
   appendDesktopLoginStep,
   classifyDesktopLoginFailure,
+  desktopWidgetIsReady,
   enterDesktopPasswordLogin,
   initializeDesktopJourneyEvidence,
+  prepareDesktopWidget,
   readDesktopJourneyEvidence,
   readSyntheticDesktopCredentials,
   summarizeDesktopJourneyEvidence,
@@ -184,6 +186,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
+    assert.equal(summary.schemaVersion, 2);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -246,9 +249,9 @@ test('records closed gateway-read observations and distinguishes false from unav
     widgetWarningObserved: false,
     widgetWarningContinued: false,
     capabilityPromptObserved: true,
-    capabilityApproved: false,
-    identityContinueObserved: null,
-    identityContinued: null,
+    capabilityApproved: true,
+    identityApprovalAttempted: true,
+    identityApprovalCompleted: true,
     iframeAttached: true,
     createControlVisible: true,
   };
@@ -259,8 +262,8 @@ test('records closed gateway-read observations and distinguishes false from unav
     widgetWarningContinued: null,
     capabilityPromptObserved: null,
     capabilityApproved: null,
-    identityContinueObserved: null,
-    identityContinued: null,
+    identityApprovalAttempted: null,
+    identityApprovalCompleted: null,
     iframeAttached: null,
     createControlVisible: null,
   };
@@ -320,8 +323,8 @@ test('rejects inconsistent and open-ended gateway-read failure diagnostics', () 
     widgetWarningContinued: false,
     capabilityPromptObserved: null,
     capabilityApproved: null,
-    identityContinueObserved: null,
-    identityContinued: null,
+    identityApprovalAttempted: null,
+    identityApprovalCompleted: null,
     iframeAttached: false,
     createControlVisible: false,
   };
@@ -359,6 +362,17 @@ test('rejects inconsistent and open-ended gateway-read failure diagnostics', () 
       ...validDiagnostic,
       widgetWarningObserved: false,
       widgetWarningContinued: true,
+    },
+    {
+      ...validDiagnostic,
+      identityApprovalAttempted: false,
+      identityApprovalCompleted: true,
+    },
+    {
+      ...validDiagnostic,
+      capabilityApproved: false,
+      identityApprovalAttempted: true,
+      identityApprovalCompleted: false,
     },
     {
       ...validDiagnostic,
@@ -642,6 +656,114 @@ test('follows the Welcome sign-in link before filling and skips it when login is
       'welcome_sign_in_clicked',
     ],
   );
+});
+
+test('requires an enabled Create control and orders Desktop widget consent around cold and ready paths', async () => {
+  const readyObservation = {
+    createControlCountCapped: 1,
+    createControlVisible: true,
+    createControlEnabled: true,
+    capabilityPromptVisible: false,
+  };
+  assert.equal(desktopWidgetIsReady(readyObservation), true);
+  assert.equal(
+    desktopWidgetIsReady({
+      ...readyObservation,
+      createControlEnabled: false,
+    }),
+    false,
+  );
+  assert.equal(
+    desktopWidgetIsReady({
+      ...readyObservation,
+      capabilityPromptVisible: null,
+    }),
+    false,
+  );
+
+  const readyPath = [];
+  await prepareDesktopWidget({
+    isReady: async () => {
+      readyPath.push('readiness');
+      return true;
+    },
+    isIframeVisible: async () => {
+      readyPath.push('unexpected-iframe-check');
+      return true;
+    },
+    activateWidget: async () => readyPath.push('unexpected-activation'),
+    approveWarning: async () => readyPath.push('warning-check'),
+    approveCapabilities: async () => readyPath.push('unexpected-capabilities'),
+    waitForIdentityContinue: async () => {
+      readyPath.push('identity-check');
+      return false;
+    },
+    approveIdentity: async () => readyPath.push('unexpected-identity'),
+    waitForIframe: async () => readyPath.push('unexpected-iframe-wait'),
+  });
+  assert.deepEqual(readyPath, ['readiness', 'warning-check', 'identity-check']);
+
+  const disabledPlaceholderPath = [];
+  await prepareDesktopWidget({
+    isReady: async () => {
+      disabledPlaceholderPath.push('readiness');
+      return false;
+    },
+    isIframeVisible: async () => {
+      disabledPlaceholderPath.push('iframe-visible');
+      return true;
+    },
+    activateWidget: async () =>
+      disabledPlaceholderPath.push('unexpected-activation'),
+    approveWarning: async () => disabledPlaceholderPath.push('warning'),
+    approveCapabilities: async () =>
+      disabledPlaceholderPath.push('capabilities'),
+    waitForIdentityContinue: async () => {
+      disabledPlaceholderPath.push('identity-check');
+      return true;
+    },
+    approveIdentity: async () => disabledPlaceholderPath.push('identity'),
+    waitForIframe: async () => disabledPlaceholderPath.push('iframe-wait'),
+  });
+  assert.deepEqual(disabledPlaceholderPath, [
+    'readiness',
+    'iframe-visible',
+    'warning',
+    'capabilities',
+    'identity-check',
+    'identity',
+    'iframe-wait',
+  ]);
+
+  const coldPath = [];
+  await prepareDesktopWidget({
+    isReady: async () => {
+      coldPath.push('readiness');
+      return false;
+    },
+    isIframeVisible: async () => {
+      coldPath.push('iframe-visible');
+      return false;
+    },
+    activateWidget: async () => coldPath.push('activate'),
+    approveWarning: async () => coldPath.push('warning'),
+    approveCapabilities: async () => coldPath.push('capabilities'),
+    waitForIdentityContinue: async () => {
+      coldPath.push('identity-check');
+      return false;
+    },
+    approveIdentity: async () => coldPath.push('unexpected-identity'),
+    waitForIframe: async () => coldPath.push('iframe-wait'),
+  });
+  assert.deepEqual(coldPath, [
+    'readiness',
+    'iframe-visible',
+    'activate',
+    'warning',
+    'capabilities',
+    'identity-check',
+    'iframe-wait',
+  ]);
 });
 
 test('classifies Desktop login failures to fixed reasons without retaining error text', () => {

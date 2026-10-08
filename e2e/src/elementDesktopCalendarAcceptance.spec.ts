@@ -32,8 +32,10 @@ import {
   appendDesktopJourneyOutcome,
   appendDesktopLoginStep,
   classifyDesktopLoginFailure,
+  desktopWidgetIsReady,
   enterDesktopPasswordLogin,
   initializeDesktopJourneyEvidence,
+  prepareDesktopWidget,
   readSyntheticDesktopCredentials,
   type DesktopGatewayReadFailureDiagnostic,
   type DesktopJourneyFailurePoint,
@@ -81,8 +83,8 @@ type DesktopWidgetPromptObservation = Pick<
   | 'widgetWarningContinued'
   | 'capabilityPromptObserved'
   | 'capabilityApproved'
-  | 'identityContinueObserved'
-  | 'identityContinued'
+  | 'identityApprovalAttempted'
+  | 'identityApprovalCompleted'
 >;
 
 type DesktopGatewayReadRequestObserver = {
@@ -117,8 +119,8 @@ function unavailableDesktopWidgetPromptObservation(): DesktopWidgetPromptObserva
     widgetWarningContinued: null,
     capabilityPromptObserved: null,
     capabilityApproved: null,
-    identityContinueObserved: null,
-    identityContinued: null,
+    identityApprovalAttempted: null,
+    identityApprovalCompleted: null,
   };
 }
 
@@ -391,7 +393,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
       fixture,
     );
     currentFailurePoint = 'widget-open';
-    const desktopFrame = await openCalendarWidget(
+    const desktopFrame = await openDesktopCalendarWidget(
       desktopPage,
       desktopElement,
       desktopWidgetPromptObservation,
@@ -440,7 +442,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
     const webPage = await authenticateMemberB(webContext, fixture);
     const webElement = await openFixtureRoom(webPage, fixture);
     const webRead = waitForGatewayResponse(webPage, fixture, 'GET');
-    const webFrame = await openCalendarWidget(webPage, webElement);
+    const webFrame = await openWebCalendarWidget(webPage, webElement);
     const webReadResponse = await webRead;
     if (webReadResponse.status() !== 200) {
       throw new Error('Second member calendar read failed');
@@ -515,7 +517,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
     if (desktopElement.getCurrentRoomId() !== fixture.teamRoomId) {
       throw new Error('Desktop refreshed into an unexpected room');
     }
-    await openCalendarWidget(desktopPage, desktopElement);
+    await openDesktopCalendarWidget(desktopPage, desktopElement);
     const refreshed = await refreshedRoomRead;
     if (refreshed.status() !== 200) {
       throw new Error('Desktop refreshed calendar read failed');
@@ -874,10 +876,192 @@ async function openFixtureRoom(
   return element;
 }
 
-async function openCalendarWidget(
+async function openDesktopCalendarWidget(
   page: Page,
   element: ElementWebPage,
   promptObservation?: DesktopWidgetPromptObservation,
+): Promise<FrameLocator> {
+  const iframe = page.locator('iframe[title="Matrix Calendar"]');
+  const frame = element.widgetByTitle('Matrix Calendar');
+
+  await prepareDesktopWidget({
+    isReady: async () =>
+      desktopWidgetIsReady(await observeDesktopWidgetReadiness(page, frame)),
+    isIframeVisible: () => iframe.isVisible().catch(() => false),
+    activateWidget: async () => {
+      await page
+        .locator('header.mx_RoomHeader button.mx_RoomHeader_infoWrapper')
+        .click();
+      const rightPanel = page.getByRole('complementary');
+      await rightPanel.getByRole('menuitem', { name: 'Extensions' }).click();
+      await rightPanel.getByRole('button', { name: 'Matrix Calendar' }).click();
+    },
+    approveWarning: async () => {
+      const warningContinue = getDesktopWidgetWarningContinue(page);
+      const warningVisible = await warningContinue
+        .isVisible()
+        .catch(() => null);
+      if (promptObservation) {
+        promptObservation.widgetWarningObserved = warningVisible;
+        promptObservation.widgetWarningContinued =
+          warningVisible === null ? null : false;
+      }
+      if (warningVisible === true) {
+        await warningContinue.click();
+        if (promptObservation) {
+          promptObservation.widgetWarningContinued = true;
+        }
+      }
+    },
+    approveCapabilities: async () => {
+      if (promptObservation) {
+        const capabilityPromptVisible =
+          await observeDesktopCapabilityPrompt(page);
+        promptObservation.capabilityPromptObserved = capabilityPromptVisible;
+        promptObservation.capabilityApproved =
+          capabilityPromptVisible === null ? null : false;
+      }
+      await element.approveWidgetCapabilities();
+      if (promptObservation) {
+        // Completion of the source-backed approval action proves the specific
+        // switch and Approve controls were present, even if the earlier
+        // non-waiting snapshot preceded their render.
+        promptObservation.capabilityPromptObserved = true;
+        promptObservation.capabilityApproved = true;
+      }
+    },
+    waitForIdentityContinue: async () => {
+      const identityContinue = page
+        .getByRole('dialog')
+        .getByRole('button', { name: 'Continue', exact: true })
+        .first();
+      let identityContinueVisible: boolean | null = null;
+      try {
+        await identityContinue.waitFor({ state: 'visible', timeout: 8_000 });
+        identityContinueVisible = await identityContinue
+          .isVisible()
+          .catch(() => null);
+      } catch {
+        // The existing Web flow treats this identity step as optional. An
+        // unavailable generic Continue control is not evidence of absence.
+        identityContinueVisible = await identityContinue
+          .isVisible()
+          .catch(() => null);
+      }
+      if (promptObservation) {
+        promptObservation.identityApprovalAttempted = false;
+        promptObservation.identityApprovalCompleted = false;
+      }
+      return identityContinueVisible === true;
+    },
+    approveIdentity: async () => {
+      if (promptObservation) {
+        promptObservation.identityApprovalAttempted = true;
+        promptObservation.identityApprovalCompleted = false;
+      }
+      await element.approveWidgetIdentity();
+      if (promptObservation) {
+        promptObservation.identityApprovalCompleted = true;
+      }
+    },
+    waitForIframe: () => iframe.waitFor({ state: 'attached', timeout: 30_000 }),
+  });
+
+  return frame;
+}
+
+async function observeDesktopWidgetReadiness(
+  page: Page,
+  frame: FrameLocator,
+): Promise<{
+  createControlCountCapped: 0 | 1 | 2 | null;
+  createControlVisible: boolean | null;
+  createControlEnabled: boolean | null;
+  capabilityPromptVisible: boolean | null;
+}> {
+  const createControl = frame.getByRole('button', {
+    name: 'Create event',
+    exact: true,
+  });
+  let createControlCountCapped: 0 | 1 | 2 | null = null;
+  let createControlVisible: boolean | null = null;
+  let createControlEnabled: boolean | null = null;
+  try {
+    const count = await createControl.count();
+    createControlCountCapped = Math.min(count, 2) as 0 | 1 | 2;
+    if (count === 1) {
+      createControlVisible = await createControl.isVisible();
+      createControlEnabled = await createControl.isEnabled();
+    }
+  } catch {
+    // A failed passive probe leaves readiness unknown and takes the consent
+    // path; the later existing response and Create assertions remain required.
+  }
+
+  const capabilityPromptVisible = await observeDesktopCapabilityPrompt(page);
+  return {
+    createControlCountCapped,
+    createControlVisible,
+    createControlEnabled,
+    capabilityPromptVisible,
+  };
+}
+
+async function observeDesktopCapabilityPrompt(
+  page: Page,
+): Promise<boolean | null> {
+  const dialogs = page.getByRole('dialog');
+  let dialogCount: number;
+  try {
+    dialogCount = await dialogs.count();
+  } catch {
+    return null;
+  }
+  if (dialogCount === 0) return false;
+  if (dialogCount !== 1) return null;
+
+  const rememberSwitch = dialogs.getByRole('switch', {
+    name: 'Remember my selection for this widget',
+    exact: true,
+  });
+  const approveButton = dialogs.getByRole('button', {
+    name: 'Approve',
+    exact: true,
+  });
+  let switchCount: number;
+  let approveCount: number;
+  try {
+    [switchCount, approveCount] = await Promise.all([
+      rememberSwitch.count(),
+      approveButton.count(),
+    ]);
+  } catch {
+    return null;
+  }
+  if (switchCount > 1 || approveCount > 1) return null;
+  if (switchCount === 0 || approveCount === 0) return false;
+
+  try {
+    const [switchVisible, approveVisible] = await Promise.all([
+      rememberSwitch.isVisible(),
+      approveButton.isVisible(),
+    ]);
+    return switchVisible && approveVisible;
+  } catch {
+    return null;
+  }
+}
+
+function getDesktopWidgetWarningContinue(page: Page): Locator {
+  return page
+    .getByText('Widget added by')
+    .locator('..')
+    .getByRole('button', { name: 'Continue', exact: true });
+}
+
+async function openWebCalendarWidget(
+  page: Page,
+  element: ElementWebPage,
 ): Promise<FrameLocator> {
   const iframe = page.locator('iframe[title="Matrix Calendar"]');
   if (!(await iframe.isVisible().catch(() => false))) {
@@ -893,25 +1077,12 @@ async function openCalendarWidget(
       .locator('..')
       .getByRole('button', { name: 'Continue', exact: true });
     const warningVisible = await warningContinue.isVisible().catch(() => null);
-    if (promptObservation) {
-      promptObservation.widgetWarningObserved = warningVisible;
-      promptObservation.widgetWarningContinued =
-        warningVisible === null ? null : false;
-    }
-    if (warningVisible === true) {
-      await warningContinue.click();
-      if (promptObservation) promptObservation.widgetWarningContinued = true;
-    }
+    if (warningVisible === true) await warningContinue.click();
 
     const permissions = page.getByRole('dialog').last();
     const permissionPromptVisible = await permissions
       .isVisible()
       .catch(() => null);
-    if (promptObservation) {
-      promptObservation.capabilityPromptObserved = permissionPromptVisible;
-      promptObservation.capabilityApproved =
-        permissionPromptVisible === null ? null : false;
-    }
     if (permissionPromptVisible === true) {
       const rememberSwitch = permissions.getByRole('switch', {
         name: 'Remember my selection for this widget',
@@ -925,7 +1096,6 @@ async function openCalendarWidget(
       });
       if (await approve.isVisible().catch(() => false)) {
         await approve.click();
-        if (promptObservation) promptObservation.capabilityApproved = true;
       }
     }
 
@@ -936,14 +1106,8 @@ async function openCalendarWidget(
     const identityContinueVisible = await identityContinue
       .isVisible()
       .catch(() => null);
-    if (promptObservation) {
-      promptObservation.identityContinueObserved = identityContinueVisible;
-      promptObservation.identityContinued =
-        identityContinueVisible === null ? null : false;
-    }
     if (identityContinueVisible === true) {
       await identityContinue.click();
-      if (promptObservation) promptObservation.identityContinued = true;
     }
     await iframe.waitFor({ state: 'attached', timeout: 30_000 });
   }

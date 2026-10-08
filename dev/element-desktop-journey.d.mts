@@ -116,15 +116,18 @@ export type DesktopGatewayReadFailureDiagnostic = {
   expectedRoomCalendarGetObserved: boolean | null;
   widgetWarningObserved: boolean | null;
   widgetWarningContinued: boolean | null;
+  // The capability signature is the Remember-selection switch plus Approve.
   capabilityPromptObserved: boolean | null;
   capabilityApproved: boolean | null;
-  identityContinueObserved: boolean | null;
-  identityContinued: boolean | null;
+  // These record the UI helper action only, not server-side OpenID success.
+  identityApprovalAttempted: boolean | null;
+  identityApprovalCompleted: boolean | null;
   iframeAttached: boolean | null;
   createControlVisible: boolean | null;
 };
 
 export type DesktopJourneySummary = {
+  schemaVersion: 2;
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;
@@ -157,6 +160,24 @@ export declare function enterDesktopPasswordLogin(input: {
   setLoginEntry: (entry: DesktopLoginEntry) => void;
   setLoginStep: (step: DesktopLoginStep) => void;
 }): Promise<DesktopLoginFormObservation>;
+
+export declare function desktopWidgetIsReady(observation: {
+  createControlCountCapped: 0 | 1 | 2 | null;
+  createControlVisible: boolean | null;
+  createControlEnabled: boolean | null;
+  capabilityPromptVisible: boolean | null;
+}): boolean;
+
+export declare function prepareDesktopWidget(input: {
+  isReady: () => Promise<boolean>;
+  isIframeVisible: () => Promise<boolean>;
+  activateWidget: () => Promise<void>;
+  approveWarning: () => Promise<void>;
+  approveCapabilities: () => Promise<void>;
+  waitForIdentityContinue: () => Promise<boolean>;
+  approveIdentity: () => Promise<void>;
+  waitForIframe: () => Promise<void>;
+}): Promise<void>;
 
 export declare function writeSyntheticDesktopCredentials(input: {
   filePath: string;

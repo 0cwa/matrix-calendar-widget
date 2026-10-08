@@ -123,8 +123,8 @@ const GATEWAY_READ_DIAGNOSTIC_KEYS = Object.freeze(
     'widgetWarningContinued',
     'capabilityPromptObserved',
     'capabilityApproved',
-    'identityContinueObserved',
-    'identityContinued',
+    'identityApprovalAttempted',
+    'identityApprovalCompleted',
     'iframeAttached',
     'createControlVisible',
   ].sort(),
@@ -302,9 +302,11 @@ function validDesktopGatewayReadFailureDiagnostic(value) {
       value.capabilityApproved,
     ) ||
     !validPromptObservation(
-      value.identityContinueObserved,
-      value.identityContinued,
+      value.identityApprovalAttempted,
+      value.identityApprovalCompleted,
     ) ||
+    (value.identityApprovalAttempted === true &&
+      value.capabilityApproved === false) ||
     ![null, true, false].includes(value.iframeAttached) ||
     ![null, true, false].includes(value.createControlVisible) ||
     (value.iframeAttached === false && value.createControlVisible === true)
@@ -436,6 +438,62 @@ export async function enterDesktopPasswordLogin({
   onBeforeFill(formBeforeFill);
   await fillCredentials();
   return formBeforeFill;
+}
+
+export function desktopWidgetIsReady(observation) {
+  if (
+    observation === null ||
+    typeof observation !== 'object' ||
+    Array.isArray(observation) ||
+    Object.keys(observation).sort().join(',') !==
+      'capabilityPromptVisible,createControlCountCapped,createControlEnabled,createControlVisible' ||
+    ![null, 0, 1, 2].includes(observation.createControlCountCapped) ||
+    ![null, true, false].includes(observation.createControlVisible) ||
+    ![null, true, false].includes(observation.createControlEnabled) ||
+    ![null, true, false].includes(observation.capabilityPromptVisible)
+  ) {
+    invalidInput();
+  }
+
+  return (
+    observation.createControlCountCapped === 1 &&
+    observation.createControlVisible === true &&
+    observation.createControlEnabled === true &&
+    observation.capabilityPromptVisible === false
+  );
+}
+
+export async function prepareDesktopWidget({
+  isReady,
+  isIframeVisible,
+  activateWidget,
+  approveWarning,
+  approveCapabilities,
+  waitForIdentityContinue,
+  approveIdentity,
+  waitForIframe,
+}) {
+  if (
+    typeof isReady !== 'function' ||
+    typeof isIframeVisible !== 'function' ||
+    typeof activateWidget !== 'function' ||
+    typeof approveWarning !== 'function' ||
+    typeof approveCapabilities !== 'function' ||
+    typeof waitForIdentityContinue !== 'function' ||
+    typeof approveIdentity !== 'function' ||
+    typeof waitForIframe !== 'function'
+  ) {
+    invalidInput();
+  }
+
+  const alreadyReady = await isReady();
+  if (alreadyReady !== true) {
+    if (!(await isIframeVisible())) await activateWidget();
+  }
+  await approveWarning();
+  if (alreadyReady !== true) await approveCapabilities();
+  if ((await waitForIdentityContinue()) === true) await approveIdentity();
+  if (alreadyReady !== true) await waitForIframe();
 }
 
 function privateRunnerPath(filePath, runnerTemp, expectedName) {
@@ -817,6 +875,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   const failed = Object.values(cases).includes('failed');
   const complete = Object.values(cases).every((value) => value === 'passed');
   return {
+    schemaVersion: 2,
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
     loginStep,
     loginEntry,
