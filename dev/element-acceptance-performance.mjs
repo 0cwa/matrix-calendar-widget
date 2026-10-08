@@ -127,6 +127,64 @@ export function buildPerformanceEvents(
   });
 }
 
+function parsePerformanceLocalDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!match) return undefined;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (
+    year < 2020 ||
+    year > 2200 ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth(year, month)
+  ) {
+    return undefined;
+  }
+  return { year, month, day };
+}
+
+export function buildOrdinaryPerformanceEvents(
+  startDate,
+  runId,
+  attempt,
+  count = 25,
+) {
+  const date = parsePerformanceLocalDate(startDate);
+  if (
+    !date ||
+    !/^\d{1,20}$/u.test(runId) ||
+    !/^\d{1,6}$/u.test(attempt) ||
+    count !== 25
+  ) {
+    throw new Error('Invalid ordinary performance event plan');
+  }
+
+  return Array.from({ length: count }, (_, index) => {
+    const eventDate = new Date(
+      Date.UTC(date.year, date.month - 1, date.day + Math.floor(index / 4)),
+    );
+    const year = eventDate.getUTCFullYear();
+    const month = eventDate.getUTCMonth() + 1;
+    const day = eventDate.getUTCDate();
+    const slot = index % 4;
+    const startMinute = 8 * 60 + slot * 45;
+    const endMinute = startMinute + 30;
+    const uid = `element-performance-${runId}-${attempt}-${String(index + 1).padStart(3, '0')}@matrix-calendar-widget`;
+    const title = `Performance ${runId}-${attempt}-${String(index + 1).padStart(3, '0')}`;
+    const localDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    return {
+      uid,
+      title,
+      day,
+      start: `${localDate}T${formatTime(startMinute)}:00`,
+      end: `${localDate}T${formatTime(endMinute)}:00`,
+    };
+  });
+}
+
 export function isSafePerformanceManifest(value, runId, attempt) {
   if (Array.isArray(value) && value.length === 0) return true;
   if (
@@ -141,7 +199,6 @@ export function isSafePerformanceManifest(value, runId, attempt) {
     !Number.isInteger(value.month) ||
     value.month < 1 ||
     value.month > 12 ||
-    daysInMonth(value.year, value.month) !== 31 ||
     !Array.isArray(value.events) ||
     value.events.length > MAX_EVENTS
   ) {
@@ -531,18 +588,31 @@ function readManifest(path, runId, attempt) {
   return value;
 }
 
-async function seed() {
+async function seed(ordinary = false) {
   const manifestPath = privatePath(
     'ELEMENT_ACCEPTANCE_PERFORMANCE_MANIFEST_FILE',
   );
   const { runId, attempt } = manifestIdentity();
-  const { year, month } = next31DayMonth();
-  const emptyMonth = next31DayMonthAfter(year, month);
+  const ordinaryStartDate = ordinary
+    ? parsePerformanceLocalDate(
+        process.env.ELEMENT_ACCEPTANCE_PERFORMANCE_START_DATE ?? '',
+      )
+    : undefined;
   const eventCount = 25;
   let createdCount = 0;
   let httpStatus;
+  let year;
+  let month;
+  let emptyMonth;
   record('performance-seed', 'started');
   try {
+    if (ordinary && !ordinaryStartDate) {
+      throw new PerformanceFixtureError('environment-invalid');
+    }
+    const sourceMonth = ordinaryStartDate ?? next31DayMonth();
+    year = sourceMonth.year;
+    month = sourceMonth.month;
+    emptyMonth = ordinary ? undefined : next31DayMonthAfter(year, month);
     const fixture = privateFixture();
     const manifest = readManifest(manifestPath, runId, attempt);
     if (manifest.events.length !== 0) {
@@ -562,13 +632,14 @@ async function seed() {
     const { ICalendarEventCodec } = loadServerClasses();
     const codec = new ICalendarEventCodec();
     const collectionUrl = calendarCollectionUrl();
-    const events = buildPerformanceEvents(
-      year,
-      month,
-      runId,
-      attempt,
-      eventCount,
-    );
+    const events = ordinary
+      ? buildOrdinaryPerformanceEvents(
+          `${year}-${String(month).padStart(2, '0')}-${String(ordinaryStartDate.day).padStart(2, '0')}`,
+          runId,
+          attempt,
+          eventCount,
+        )
+      : buildPerformanceEvents(year, month, runId, attempt, eventCount);
     monthManifest.events = events.map((_, index) => ({
       resourceName: `element-performance-${runId}-${attempt}-${String(index + 1).padStart(3, '0')}.ics`,
       state: 'planned',
@@ -618,19 +689,21 @@ async function seed() {
       }
     }
 
-    const githubEnv = requiredEnvironment('GITHUB_ENV');
-    const envRoot = resolve(process.env.RUNNER_TEMP ?? '') + sep;
-    if (!isAbsolute(githubEnv) || !resolve(githubEnv).startsWith(envRoot)) {
-      throw new PerformanceFixtureError('environment-invalid');
+    if (!ordinary) {
+      const githubEnv = requiredEnvironment('GITHUB_ENV');
+      const envRoot = resolve(process.env.RUNNER_TEMP ?? '') + sep;
+      if (!isAbsolute(githubEnv) || !resolve(githubEnv).startsWith(envRoot)) {
+        throw new PerformanceFixtureError('environment-invalid');
+      }
+      appendFileSync(
+        githubEnv,
+        `ELEMENT_ACCEPTANCE_PERFORMANCE_MONTH=${year}-${String(month).padStart(2, '0')}\nELEMENT_ACCEPTANCE_PERFORMANCE_EMPTY_MONTH=${emptyMonth.year}-${String(emptyMonth.month).padStart(2, '0')}\n`,
+        {
+          encoding: 'utf8',
+          mode: 0o600,
+        },
+      );
     }
-    appendFileSync(
-      githubEnv,
-      `ELEMENT_ACCEPTANCE_PERFORMANCE_MONTH=${year}-${String(month).padStart(2, '0')}\nELEMENT_ACCEPTANCE_PERFORMANCE_EMPTY_MONTH=${emptyMonth.year}-${String(emptyMonth.month).padStart(2, '0')}\n`,
-      {
-        encoding: 'utf8',
-        mode: 0o600,
-      },
-    );
     record('performance-seed', 'passed', { count: createdCount });
   } catch (error) {
     record('performance-seed', 'failed', {
@@ -727,6 +800,7 @@ async function cleanup() {
 async function main() {
   const mode = process.argv[2];
   if (mode === 'seed') return seed();
+  if (mode === 'seed-ordinary') return seed(true);
   if (mode === 'cleanup') return cleanup();
   throw new Error('Unsupported Element performance fixture mode');
 }

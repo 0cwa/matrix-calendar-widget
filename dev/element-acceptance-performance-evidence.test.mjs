@@ -209,7 +209,7 @@ function ordinaryColdList(eventCount, durationMs = 1800) {
     iframeWidth: 319,
     iframeHeight: 690,
     hostHorizontalOverflow: false,
-    rangeSelectionMs: 400,
+    rangeSelectionMs: null,
     openIdResponseCount: 1,
     openIdMaxMs: 100,
     apiRangeMaxMs: 600,
@@ -240,12 +240,13 @@ function ordinaryEventsResponse(sample, eventCount, rangeClass) {
     rangeDays:
       rangeClass === 'preselection'
         ? 7
-        : rangeClass === 'month-padded'
-          ? 45
-          : 31,
+        : rangeClass === 'preselection-padded'
+          ? 21
+          : rangeClass === 'month-padded'
+            ? 44
+            : 31,
     rangeMatches: true,
-    expectedTitlesMatch:
-      rangeClass === 'preselection' ? eventCount === 0 : true,
+    expectedTitlesMatch: true,
   };
 }
 
@@ -276,11 +277,11 @@ function ordinaryCase(profile, year, month, eventCount) {
     eventCount,
     preparation: { elementLoginMs: 3000, roomNavigationMs: 1000 },
     defaultView: {
-      durationMs: 1200,
+      durationMs: 1800,
       apiResponseCount: 1,
       apiRangeMaxMs: 600,
-      returnedCount: 0,
-      renderedCount: 0,
+      returnedCount: eventCount,
+      renderedCount: eventCount,
       rangeMatches: true,
       countMatches: true,
       usableControlVisible: true,
@@ -302,14 +303,14 @@ function ordinaryCase(profile, year, month, eventCount) {
 
 function ordinaryReport() {
   const report = {
-    version: 4,
+    version: 5,
     viewportWidth: 1280,
     viewportHeight: 800,
-    calendarDays: 31,
+    calendarDays: 7,
     timezone: 'Europe/Stockholm',
     cases: [
-      ordinaryCase('empty', 2026, 12, 0),
-      ordinaryCase('events-25', 2027, 1, 25),
+      ordinaryCase('empty', 2026, 11, 0),
+      ordinaryCase('events-25', 2026, 11, 25),
     ],
     apiResponses: [],
     blockedRequestCount: 0,
@@ -318,17 +319,20 @@ function ordinaryReport() {
   };
   for (const performanceCase of report.cases) {
     const { profile, eventCount } = performanceCase;
-    const cold = `${profile}-cold`;
     report.apiResponses.push(
-      ordinaryEventsResponse(`${profile}-default`, 0, 'preselection'),
-      ordinaryEventsResponse(cold, eventCount, 'list31'),
+      ordinaryEventsResponse(`${profile}-default`, eventCount, 'preselection'),
       openIdResponse(`${profile}-default`),
       ordinaryEventsResponse(
-        `${profile}-refresh-setup`,
+        `${profile}-refresh-month-setup`,
         eventCount,
         'month-padded',
       ),
-      ordinaryEventsResponse(`${profile}-refresh`, eventCount, 'list31'),
+      ordinaryEventsResponse(
+        `${profile}-refresh-setup`,
+        eventCount,
+        'preselection-padded',
+      ),
+      ordinaryEventsResponse(`${profile}-refresh`, eventCount, 'preselection'),
     );
   }
   return report;
@@ -392,13 +396,25 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   );
   assert.match(
     summary,
-    /phase=performance-pilot report_version=4 profile=ordinary-0-25 beta_gate_eligible=true status=passed/u,
+    /phase=performance-pilot report_version=5 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
   );
   assert.match(summary, /performance_case profile=empty events=0/u);
   assert.match(summary, /performance_case profile=events-25 events=25/u);
   assert.match(
     summary,
-    /performance_default_view profile=events-25 elapsed_ms=1200 api_responses=1 event_api_max_ms=600 returned=0 rendered=0 range_matches=true count_matches=true create_visible=true stable=true/u,
+    /performance_default_view profile=events-25 elapsed_ms=1800 api_responses=1 event_api_max_ms=600 returned=25 rendered=25 range_matches=true count_matches=true create_visible=true stable=true/u,
+  );
+  assert.match(
+    summary,
+    /performance_api sample=events-25-refresh-month-setup endpoint=events method=GET status=200 duration_ms=600 decoded=true event_count=25 diagnostics=0 target=room calendar_matches=true range_class=month-padded/u,
+  );
+  assert.match(
+    summary,
+    /performance_api sample=events-25-refresh-setup endpoint=events method=GET status=200 duration_ms=600 decoded=true event_count=25 diagnostics=0 target=room calendar_matches=true range_class=preselection-padded range_days=21 range_matches=true expected_titles_match=true/u,
+  );
+  assert.match(
+    summary,
+    /performance_cold_default profile=events-25 total_ms=1800 .*range_selection_ms=unavailable/u,
   );
   assert.match(
     summary,
@@ -411,6 +427,40 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   assert.match(summary, /performance_details profile=empty samples=0/u);
   assert.match(summary, /performance_details profile=events-25 index=5/u);
   assert.doesNotMatch(summary, /Performance\s+\d|access_token|https?:\/\//u);
+});
+
+test('accepts seeding between the empty and populated fresh-context samples', () => {
+  const stages = [
+    ordinaryStage('started', ordinaryReport()),
+    { phase: 'performance-seed', status: 'started' },
+    { phase: 'performance-seed', status: 'passed', count: 25 },
+    ordinaryStage('passed', ordinaryReport()),
+    { phase: 'performance-cleanup', status: 'started' },
+    {
+      phase: 'performance-cleanup',
+      status: 'passed',
+      manifestEventCount: 25,
+      plannedCount: 0,
+      confirmedCreatedCount: 25,
+      deletedCount: 25,
+      alreadyAbsentCount: 0,
+      conflictCount: 0,
+      unresolvedCount: 0,
+      inventoryAvailable: true,
+    },
+  ];
+  const summary = sanitizeElementAcceptance(
+    stages.map((stage) => JSON.stringify(stage)).join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /performance-seed status=passed count=25 fixture_profile=ordinary-25/u,
+  );
+  assert.match(
+    summary,
+    /performance-cleanup status=passed fixture_profile=ordinary-25 manifest_event_count=25/u,
+  );
 });
 
 test('summarizes default wait counters as observed zero, bounded counts, and overflow', () => {
@@ -605,7 +655,7 @@ test('rejects malformed or mismatched default-wait diagnostics', () => {
           ordinaryStage(
             'failed',
             mismatchedFailure,
-            'performance-cold-list-failed',
+            'performance-threshold-exceeded',
           ),
         ),
         sourceSha,
@@ -686,7 +736,7 @@ test('rejects contradictory empty counts, incomplete detail samples, and slow re
   );
 });
 
-test('does not apply the 2-second refresh limit to List-to-Month setup', () => {
+test('does not apply the 2-second refresh limit to range-restoration setup', () => {
   const report = ordinaryReport();
   report.cases[0].refreshSetup.durationMs = 12_000;
   const summary = sanitizeElementAcceptance(
@@ -696,6 +746,67 @@ test('does not apply the 2-second refresh limit to List-to-Month setup', () => {
   assert.match(
     summary,
     /performance_action profile=empty action=refresh-setup duration_ms=12000/u,
+  );
+});
+
+test('gates the cold first usable seven-day view at two seconds', () => {
+  const slowDefault = ordinaryReport();
+  slowDefault.cases[0].defaultView.durationMs = 2001;
+  slowDefault.cases[0].coldList.durationMs = 2001;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', slowDefault)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const wrongDefaultRange = ordinaryReport();
+  wrongDefaultRange.apiResponses[0].rangeClass = 'list31';
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', wrongDefaultRange)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
+test('requires a new refresh response for the same seven-day range', () => {
+  const wrongRefreshRange = ordinaryReport();
+  const refresh = wrongRefreshRange.apiResponses.find(
+    ({ sample }) => sample === 'events-25-refresh',
+  );
+  refresh.rangeClass = 'list31';
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', wrongRefreshRange)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const missingRefreshResponse = ordinaryReport();
+  missingRefreshResponse.apiResponses =
+    missingRefreshResponse.apiResponses.filter(
+      ({ sample }) => sample !== 'events-25-refresh',
+    );
+  Object.assign(missingRefreshResponse.cases[1].refresh, {
+    apiResponseCount: 0,
+    apiRangeMaxMs: null,
+    roomResponseCount: 0,
+    returnedCount: null,
+  });
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', missingRefreshResponse)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
   );
 });
 

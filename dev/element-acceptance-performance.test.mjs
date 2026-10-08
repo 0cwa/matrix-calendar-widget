@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildOrdinaryPerformanceEvents,
   buildPerformanceEvents,
   cleanupPerformanceManifestEvents,
   createPerformanceManifestEvent,
@@ -58,6 +59,34 @@ test('builds exactly 25 ordinary events and permits an empty visible-range set',
   assert.equal(new Set(events.map(({ uid }) => uid)).size, 25);
   assert.equal(buildPerformanceEvents(2026, 12, '12345', '2', 0).length, 0);
   assert.throws(() => buildPerformanceEvents(2026, 12, '12345', '2', 251));
+});
+
+test('builds 25 ordinary events entirely inside the seven-day default range', () => {
+  const events = buildOrdinaryPerformanceEvents('2026-11-28', '12345', '2');
+  assert.equal(events.length, 25);
+  assert.equal(new Set(events.map(({ uid }) => uid)).size, 25);
+  assert.equal(new Set(events.map(({ title }) => title)).size, 25);
+  assert.deepEqual(
+    [...new Set(events.map(({ start }) => start.slice(0, 10)))],
+    [
+      '2026-11-28',
+      '2026-11-29',
+      '2026-11-30',
+      '2026-12-01',
+      '2026-12-02',
+      '2026-12-03',
+      '2026-12-04',
+    ],
+  );
+  for (const event of events) {
+    assert.equal(
+      Date.parse(`${event.end}Z`) - Date.parse(`${event.start}Z`),
+      30 * 60_000,
+    );
+  }
+  assert.throws(() =>
+    buildOrdinaryPerformanceEvents('2026-11-31', '12345', '2'),
+  );
 });
 
 test('accepts only the fixed run-scoped manifest shape', () => {

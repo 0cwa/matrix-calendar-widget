@@ -321,7 +321,7 @@ type PerformancePageErrorClass =
 type OrdinaryPerformanceProfile = 'empty' | 'events-25';
 type OrdinaryPerformanceSampleKey =
   | `${OrdinaryPerformanceProfile}-default`
-  | `${OrdinaryPerformanceProfile}-cold`
+  | `${OrdinaryPerformanceProfile}-refresh-month-setup`
   | `${OrdinaryPerformanceProfile}-refresh-setup`
   | `${OrdinaryPerformanceProfile}-refresh`
   | `events-25-details-${1 | 2 | 3 | 4 | 5}`;
@@ -346,6 +346,7 @@ type PerformanceEndpoint =
 type PerformanceRangeClass =
   | 'not-applicable'
   | 'preselection'
+  | 'preselection-padded'
   | 'list31'
   | 'month-padded'
   | 'overflow-day'
@@ -488,10 +489,10 @@ type OrdinaryPerformanceCase = {
   detailSamples: PerformanceDetailsSample[];
 };
 type OrdinaryPerformanceReport = {
-  version: 4;
+  version: 5;
   viewportWidth: 1280;
   viewportHeight: 800;
-  calendarDays: 31;
+  calendarDays: 7;
   timezone: 'Europe/Stockholm';
   cases: OrdinaryPerformanceCase[];
   apiResponses: PerformanceApiResponse[];
@@ -522,7 +523,12 @@ type PerformanceApiObserver = {
   ) => PerformanceDefaultWaitObservation;
   waitForRoomEvents: (
     sample: PerformanceSampleKey,
-    rangeClass: 'preselection' | 'list31' | 'month-padded' | 'overflow-day',
+    rangeClass:
+      | 'preselection'
+      | 'preselection-padded'
+      | 'list31'
+      | 'month-padded'
+      | 'overflow-day',
   ) => Promise<void>;
   waitForSettled: (sample: PerformanceSampleKey) => Promise<void>;
 };
@@ -913,6 +919,29 @@ function performancePreselectionRange(initialDate: {
   };
 }
 
+function performancePreselectionMonthRange(initialDate: {
+  year: number;
+  month: number;
+  day: number;
+}): { start: number; end: number } {
+  const startDate = shiftCalendarDate(
+    initialDate.year,
+    initialDate.month,
+    initialDate.day,
+    -7,
+  );
+  const endDate = shiftCalendarDate(
+    initialDate.year,
+    initialDate.month,
+    initialDate.day,
+    14,
+  );
+  return {
+    start: localMidnightEpoch(startDate.year, startDate.month, startDate.day),
+    end: localMidnightEpoch(endDate.year, endDate.month, endDate.day),
+  };
+}
+
 function makeEmptyPerformanceReport(
   year: number,
   month: number,
@@ -1023,26 +1052,26 @@ function makeEmptyOrdinaryPerformanceCase(
   };
 }
 
-function makeEmptyOrdinaryPerformanceReport(
-  emptyMonth: { year: number; month: number },
-  populatedMonth: { year: number; month: number },
-): OrdinaryPerformanceReport {
+function makeEmptyOrdinaryPerformanceReport(initialDate: {
+  year: number;
+  month: number;
+}): OrdinaryPerformanceReport {
   return {
-    version: 4,
+    version: 5,
     viewportWidth: 1280,
     viewportHeight: 800,
-    calendarDays: 31,
+    calendarDays: 7,
     timezone: 'Europe/Stockholm',
     cases: [
       makeEmptyOrdinaryPerformanceCase(
         'empty',
-        emptyMonth.year,
-        emptyMonth.month,
+        initialDate.year,
+        initialDate.month,
       ),
       makeEmptyOrdinaryPerformanceCase(
         'events-25',
-        populatedMonth.year,
-        populatedMonth.month,
+        initialDate.year,
+        initialDate.month,
       ),
     ],
     apiResponses: [],
@@ -1073,37 +1102,39 @@ function classifyPerformancePageError(error: Error): PerformancePageErrorClass {
   }
 }
 
-function readPerformanceMonth(
-  environmentName = 'ELEMENT_ACCEPTANCE_PERFORMANCE_MONTH',
-): { year: number; month: number } {
-  const match = /^(\d{4})-(\d{2})$/u.exec(process.env[environmentName] ?? '');
-  if (!match) throw new Error('Element performance month is unavailable');
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  if (
-    year < 2020 ||
-    year > 2200 ||
-    month < 1 ||
-    month > 12 ||
-    new Date(Date.UTC(year, month, 0)).getUTCDate() !== 31
-  ) {
-    throw new Error('Element performance month is invalid');
+function runOrdinaryPerformanceSeed(initialDate: {
+  year: number;
+  month: number;
+  day: number;
+}): void {
+  const environmentNames = [
+    'RUNNER_TEMP',
+    'GITHUB_RUN_ID',
+    'GITHUB_RUN_ATTEMPT',
+    'ELEMENT_ACCEPTANCE_USERS_FILE',
+    'ELEMENT_ACCEPTANCE_PERFORMANCE_MANIFEST_FILE',
+    'ELEMENT_ACCEPTANCE_STAGE_FILE',
+  ];
+  const seedEnvironment: NodeJS.ProcessEnv = {
+    ELEMENT_ACCEPTANCE_PERFORMANCE_START_DATE: `${initialDate.year}-${String(initialDate.month).padStart(2, '0')}-${String(initialDate.day).padStart(2, '0')}`,
+  };
+  for (const name of environmentNames) {
+    const value = process.env[name];
+    if (!value) throw new Error('Ordinary performance fixture is unavailable');
+    seedEnvironment[name] = value;
   }
-  return { year, month };
-}
 
-function readOrdinaryPerformanceMonths(): {
-  empty: { year: number; month: number };
-  populated: { year: number; month: number };
-} {
-  const populated = readPerformanceMonth();
-  const empty = readPerformanceMonth(
-    'ELEMENT_ACCEPTANCE_PERFORMANCE_EMPTY_MONTH',
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve(process.cwd(), '../dev/element-acceptance-performance.mjs'),
+      'seed-ordinary',
+    ],
+    { env: seedEnvironment, stdio: 'ignore' },
   );
-  if (empty.year === populated.year && empty.month === populated.month) {
-    throw new Error('Element empty-range month must differ from seed month');
+  if (result.error || result.status !== 0) {
+    throw new Error('Ordinary performance fixture seeding failed');
   }
-  return { empty, populated };
 }
 
 function makePerformanceTitles(
@@ -1131,21 +1162,28 @@ function performanceRangeExpectation(
   start: number;
   end: number;
 } {
-  if (
-    sample === 'cold-list' ||
-    sample.endsWith('-cold') ||
-    sample.endsWith('-refresh') ||
-    sample.startsWith('events-25-details-')
-  ) {
+  if (sample === 'cold-list') {
     return {
       rangeClass: 'list31',
       ...performanceMonthRange(year, month, 'list'),
     };
   }
-  if (sample.endsWith('-refresh-setup')) {
+  if (sample.endsWith('-refresh-month-setup')) {
     return {
       rangeClass: 'month-padded',
       ...performanceMonthRange(year, month, 'month'),
+    };
+  }
+  if (sample.endsWith('-refresh-setup')) {
+    return {
+      rangeClass: 'preselection-padded',
+      ...performancePreselectionMonthRange(initialDate),
+    };
+  }
+  if (sample.endsWith('-refresh') || sample.startsWith('events-25-details-')) {
+    return {
+      rangeClass: 'preselection',
+      ...performancePreselectionRange(initialDate),
     };
   }
   if (sample === 'overflow-day') {
@@ -1542,18 +1580,31 @@ async function readStableList(
   );
 }
 
-async function readStableRowCount(frame: FrameLocator) {
+async function readStableRowCount(
+  frame: FrameLocator,
+  expectedTitles: readonly string[],
+) {
   const body = frame.locator('body');
   return measureStableDom(body, () =>
-    body.evaluate((bodyElement) => {
+    body.evaluate((bodyElement, expected) => {
       const root = bodyElement.ownerDocument.documentElement;
+      const titles = Array.from(
+        bodyElement.querySelectorAll('li[aria-label]'),
+        (element) => element.getAttribute('aria-label') ?? '',
+      );
+      const actual = new Set(titles);
+      const expectedSet = new Set(expected);
       return {
-        renderedCount: bodyElement.querySelectorAll('li[aria-label]').length,
+        renderedCount: titles.length,
+        identitiesMatch:
+          actual.size === expectedSet.size &&
+          titles.length === expected.length &&
+          expected.every((title) => actual.has(title)),
         horizontalOverflow:
           Math.max(root.scrollWidth, bodyElement.scrollWidth) >
           root.clientWidth,
       };
-    }),
+    }, expectedTitles),
   );
 }
 
@@ -2001,14 +2052,11 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
   browser,
 }) => {
   test.setTimeout(360_000);
-  const months = readOrdinaryPerformanceMonths();
   fixture = readFixture();
   const runId = process.env.GITHUB_RUN_ID ?? '';
   const attempt = process.env.GITHUB_RUN_ATTEMPT ?? '';
-  const report = makeEmptyOrdinaryPerformanceReport(
-    months.empty,
-    months.populated,
-  );
+  const initialDate = localCalendarDate(new Date());
+  const report = makeEmptyOrdinaryPerformanceReport(initialDate);
   recordPerformancePilot('started', report);
   const allowedOrigins = new Set([
     new URL(fixture.elementUrl).origin,
@@ -2017,15 +2065,12 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
     new URL(fixture.gatewayUrl).origin,
     new URL(fixture.widgetUrl).origin,
   ]);
-  const initialDate = localCalendarDate(new Date());
   let roomContextRecorded = false;
   let failureCode:
     | 'performance-setup-failed'
     | 'performance-widget-open-failed'
     | 'performance-host-layout-failed'
-    | 'performance-range-selection-failed'
     | 'performance-default-view-failed'
-    | 'performance-cold-list-failed'
     | 'performance-view-sample-failed'
     | 'performance-details-failed'
     | 'performance-egress-blocked'
@@ -2094,6 +2139,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
         fixture.roomName,
         fixture.teamRoomId,
         fixture.users.memberA.userId,
+        { useNormalRoomSelection: true },
       );
       caseReport.preparation.roomNavigationMs =
         elapsedMilliseconds(roomStartedAt);
@@ -2118,7 +2164,6 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       observer = apiObserver;
       const defaultSample = `${caseReport.profile}-default` as const;
       observer.setSample(defaultSample);
-      const coldSample = `${caseReport.profile}-cold` as const;
       const coldStartedAt = performance.now();
       failureCode = 'performance-widget-open-failed';
       const frame = await openCalendarWidget(element, page, {
@@ -2153,7 +2198,10 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
         throw new Error('Default calendar response was not observed');
       }
       failureCode = 'performance-view-sample-failed';
-      const defaultMeasurement = await readStableRowCount(frame);
+      const defaultMeasurement = await readStableRowCount(
+        frame,
+        expectedTitles,
+      );
       await observer.waitForSettled(defaultSample);
       const defaultEventRows = observer
         .rowsFor(defaultSample)
@@ -2186,17 +2234,44 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
         usableControlVisible: defaultUsableControl,
         stable: defaultMeasurement.stable,
       };
+      const openIdRows = observer
+        .rowsFor(defaultSample)
+        .filter((row) => row.endpoint === 'openid');
+      caseReport.coldList.durationMs = caseReport.defaultView.durationMs;
+      caseReport.coldList.openIdResponseCount = openIdRows.length;
+      caseReport.coldList.openIdMaxMs = openIdRows.length
+        ? Math.max(...openIdRows.map((row) => row.durationMs))
+        : null;
+      caseReport.coldList.apiRangeMaxMs = caseReport.defaultView.apiRangeMaxMs;
+      caseReport.coldList.selectedRoomResponseCount = defaultRoomRows.length;
+      caseReport.coldList.returnedCount = defaultReturnedCount;
+      caseReport.coldList.renderedCount =
+        defaultMeasurement.second.renderedCount;
+      caseReport.coldList.expectedRangeMatches = defaultRoomRows.length === 1;
+      caseReport.coldList.identitiesMatch =
+        defaultRoomRows.length === 1 &&
+        defaultRoomRows[0].expectedTitlesMatch === true &&
+        defaultMeasurement.second.identitiesMatch;
+      caseReport.coldList.diagnosticsZero =
+        defaultEventRows.length > 0 &&
+        defaultEventRows.every((row) => row.diagnosticCount === 0);
+      caseReport.coldList.stable = defaultMeasurement.stable;
+      caseReport.coldList.horizontalOverflow =
+        defaultMeasurement.second.horizontalOverflow;
       expect(caseReport.defaultView.durationMs).not.toBeNull();
+      expect(caseReport.defaultView.durationMs).toBeLessThanOrEqual(2000);
       expect(caseReport.defaultView.apiResponseCount).toBeGreaterThan(0);
       expect(caseReport.defaultView.apiRangeMaxMs).not.toBeNull();
       expect(caseReport.defaultView.apiRangeMaxMs).toBeLessThanOrEqual(1000);
-      expect(caseReport.defaultView.returnedCount).not.toBeNull();
-      expect(caseReport.defaultView.renderedCount).not.toBeNull();
+      expect(caseReport.defaultView.returnedCount).toBe(caseReport.eventCount);
+      expect(caseReport.defaultView.renderedCount).toBe(caseReport.eventCount);
       expect(caseReport.defaultView.rangeMatches).toBe(true);
       expect(caseReport.defaultView.countMatches).toBe(true);
       expect(caseReport.defaultView.usableControlVisible).toBe(true);
       expect(caseReport.defaultView.stable).toBe(true);
-      observer.setSample(coldSample);
+      expect(caseReport.coldList.identitiesMatch).toBe(true);
+      expect(caseReport.coldList.diagnosticsZero).toBe(true);
+      expect(caseReport.coldList.horizontalOverflow).toBe(false);
 
       failureCode = 'performance-host-layout-failed';
       const widgetCard = page.locator('.mx_WidgetCard');
@@ -2237,62 +2312,19 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       expect(caseReport.coldList.persistedHostFrameCount).toBe(1);
       expect(caseReport.coldList.persistedHostFrameVisible).toBe(true);
 
-      failureCode = 'performance-range-selection-failed';
-      const rangeSelectionStartedAt = performance.now();
-      await fillDatePicker(
-        frame,
-        frame.getByRole('button', {
-          name: /^Choose date range, selected range is/u,
-        }),
-        [caseReport.year, caseReport.month, 1],
-        [caseReport.year, caseReport.month, 31],
-      );
-
-      failureCode = 'performance-cold-list-failed';
-      await observer.waitForRoomEvents(coldSample, 'list31');
-      failureCode = 'performance-view-sample-failed';
+      failureCode = 'performance-threshold-exceeded';
+      expect(caseReport.coldList.durationMs).toBeLessThanOrEqual(2000);
+      expect(caseReport.coldList.apiRangeMaxMs).toBeLessThanOrEqual(1000);
+      expect(caseReport.coldList.openIdResponseCount).toBeGreaterThan(0);
+      expect(caseReport.coldList.selectedRoomResponseCount).toBe(1);
+      expect(caseReport.coldList.returnedCount).toBe(caseReport.eventCount);
+      expect(caseReport.coldList.renderedCount).toBe(caseReport.eventCount);
+      expect(caseReport.coldList.expectedRangeMatches).toBe(true);
+      expect(caseReport.coldList.identitiesMatch).toBe(true);
+      expect(caseReport.coldList.diagnosticsZero).toBe(true);
+      expect(caseReport.coldList.stable).toBe(true);
+      expect(caseReport.coldList.horizontalOverflow).toBe(false);
       const body = frame.locator('body');
-      const coldMeasurement = await readStableList(frame, expectedTitles);
-      await observer.waitForSettled(coldSample);
-      caseReport.coldList.rangeSelectionMs = elapsedMilliseconds(
-        rangeSelectionStartedAt,
-      );
-      caseReport.coldList.durationMs = elapsedMilliseconds(coldStartedAt);
-      const coldRows = observer.rowsFor(coldSample);
-      const coldEvents = coldRows.filter((row) => row.endpoint === 'events');
-      const coldRoomRows = coldEvents.filter(
-        (row) =>
-          row.target === 'room' &&
-          row.calendarMatches === true &&
-          row.rangeClass === 'list31' &&
-          row.rangeMatches === true,
-      );
-      const openIdRows = [
-        ...observer.rowsFor(defaultSample),
-        ...coldRows,
-      ].filter((row) => row.endpoint === 'openid');
-      caseReport.coldList.openIdResponseCount = openIdRows.length;
-      caseReport.coldList.openIdMaxMs = openIdRows.length
-        ? Math.max(...openIdRows.map((row) => row.durationMs))
-        : null;
-      caseReport.coldList.apiRangeMaxMs = coldEvents.length
-        ? Math.max(...coldEvents.map((row) => row.durationMs))
-        : null;
-      caseReport.coldList.selectedRoomResponseCount = coldRoomRows.length;
-      caseReport.coldList.returnedCount =
-        coldRoomRows.length === 1 ? coldRoomRows[0].eventCount : null;
-      caseReport.coldList.renderedCount = coldMeasurement.second.renderedCount;
-      caseReport.coldList.expectedRangeMatches = coldRoomRows.length === 1;
-      caseReport.coldList.identitiesMatch =
-        coldRoomRows.length === 1 &&
-        coldRoomRows[0].expectedTitlesMatch === true &&
-        coldMeasurement.second.identitiesMatch;
-      caseReport.coldList.diagnosticsZero =
-        coldEvents.length > 0 &&
-        coldEvents.every((row) => row.diagnosticCount === 0);
-      caseReport.coldList.stable = coldMeasurement.stable;
-      caseReport.coldList.horizontalOverflow =
-        coldMeasurement.second.horizontalOverflow;
 
       failureCode = 'performance-host-layout-failed';
       const frameDimensions = await hostIframe.evaluate((iframe) => {
@@ -2330,7 +2362,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
 
       const summarizeAction = (
         sample: PerformanceSampleKey,
-        rangeClass: 'list31' | 'month-padded',
+        rangeClass: 'preselection' | 'preselection-padded' | 'month-padded',
         measurement: {
           second: {
             renderedCount: number | null;
@@ -2377,17 +2409,46 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       };
 
       failureCode = 'performance-view-sample-failed';
+      const monthSetupSample =
+        `${caseReport.profile}-refresh-month-setup` as const;
+      observer.setSample(monthSetupSample);
+      await frame.getByRole('combobox', { name: /^View/u }).click();
+      await frame.getByRole('option', { name: 'Month', exact: true }).click();
+      await observer.waitForRoomEvents(monthSetupSample, 'month-padded');
+      const monthSetupMeasurement = await readStableMonth(
+        frame,
+        expectedTitles,
+      );
+      await observer.waitForSettled(monthSetupSample);
+      expect(monthSetupMeasurement.second.renderedCount).toBe(
+        caseReport.eventCount,
+      );
+      expect(monthSetupMeasurement.second.identitiesMatch).toBe(true);
+      expect(monthSetupMeasurement.stable).toBe(true);
+
       const setupSample = `${caseReport.profile}-refresh-setup` as const;
       observer.setSample(setupSample);
       const setupStartedAt = performance.now();
-      await frame.getByRole('combobox', { name: /^View/u }).click();
-      await frame.getByRole('option', { name: 'Month', exact: true }).click();
-      await observer.waitForRoomEvents(setupSample, 'month-padded');
+      const endDate = shiftCalendarDate(
+        initialDate.year,
+        initialDate.month,
+        initialDate.day,
+        6,
+      );
+      await fillDatePicker(
+        frame,
+        frame.getByRole('button', {
+          name: /Choose (date range|date|work week|week|month), selected/u,
+        }),
+        [initialDate.year, initialDate.month, initialDate.day],
+        [endDate.year, endDate.month, endDate.day],
+      );
+      await observer.waitForRoomEvents(setupSample, 'preselection-padded');
       const setupMeasurement = await readStableMonth(frame, expectedTitles);
       await observer.waitForSettled(setupSample);
       caseReport.refreshSetup = summarizeAction(
         setupSample,
-        'month-padded',
+        'preselection-padded',
         setupMeasurement,
         elapsedMilliseconds(setupStartedAt),
       );
@@ -2405,12 +2466,12 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       const refreshStartedAt = performance.now();
       await frame.getByRole('combobox', { name: /^View/u }).click();
       await frame.getByRole('option', { name: 'List', exact: true }).click();
-      await observer.waitForRoomEvents(refreshSample, 'list31');
+      await observer.waitForRoomEvents(refreshSample, 'preselection');
       const refreshMeasurement = await readStableList(frame, expectedTitles);
       await observer.waitForSettled(refreshSample);
       caseReport.refresh = summarizeAction(
         refreshSample,
-        'list31',
+        'preselection',
         refreshMeasurement,
         elapsedMilliseconds(refreshStartedAt),
       );
@@ -2494,9 +2555,9 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
 
   try {
     recordRuntimeVersions(browser.version());
-    for (const caseReport of report.cases) {
-      await runCase(caseReport);
-    }
+    await runCase(report.cases[0]);
+    runOrdinaryPerformanceSeed(initialDate);
+    await runCase(report.cases[1]);
     failureCode = 'performance-egress-blocked';
     expect(report.blockedRequestCount).toBe(0);
     failureCode = 'performance-page-error';
@@ -2577,7 +2638,7 @@ test('Element Web delivers a relative room reminder across restart and restore',
       fixture.roomName,
       fixture.teamRoomId,
       fixture.users.memberA.userId,
-      true,
+      { captureReminderRoomLayout: true },
     );
     recordMemberARoomObservation(
       reminderRoom,
@@ -3609,19 +3670,26 @@ async function openMemberARoomWithDiagnostics(
   roomName: string,
   roomId: string,
   expectedUserId: string,
-  captureReminderRoomLayout = false,
+  options: {
+    captureReminderRoomLayout?: boolean;
+    useNormalRoomSelection?: boolean;
+  } = {},
 ): Promise<MemberARoomResult> {
-  const roomUrl = new URL(fixture.elementUrl);
-  roomUrl.hash = `/room/${roomId}`;
+  const element = new ElementWebPage(page);
   let navigationCompleted = false;
   try {
-    await page.goto(roomUrl.href, { timeout: 20_000 });
+    if (options.useNormalRoomSelection) {
+      await element.navigateToRoomOrInvitation(roomName);
+    } else {
+      const roomUrl = new URL(fixture.elementUrl);
+      roomUrl.hash = `/room/${roomId}`;
+      await page.goto(roomUrl.href, { timeout: 20_000 });
+    }
     navigationCompleted = true;
   } catch {
     // The failure summary records only whether this bounded navigation ended.
   }
 
-  const element = new ElementWebPage(page);
   const roomNameHeading = getPinnedElementRoomNameHeading(page);
   let roomHeadingReady = false;
   if (navigationCompleted) {
@@ -3647,7 +3715,7 @@ async function openMemberARoomWithDiagnostics(
     expectedUserId,
     navigationCompleted,
     roomHeadingReady,
-    captureReminderRoomLayout,
+    options.captureReminderRoomLayout ?? false,
   ).catch(() => undefined);
   return {
     element,
