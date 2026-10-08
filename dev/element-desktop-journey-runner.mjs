@@ -1693,7 +1693,7 @@ function uidStopCensusFromLifecycle(input) {
   };
 }
 
-function captureUidStopCensus(state) {
+function captureUidStopCensus(state, spawnChild = spawn) {
   return new Promise((resolveCensus) => {
     let output = '';
     let overflow = false;
@@ -1705,7 +1705,7 @@ function captureUidStopCensus(state) {
     };
     let child;
     try {
-      child = spawn(
+      child = spawnChild(
         'timeout',
         [
           '--signal=TERM',
@@ -1751,7 +1751,7 @@ function waitForUidStopCensus(census, checkpoint, state, timeoutMs) {
   let timer;
   return Promise.race([
     Promise.resolve()
-      .then(() => census(checkpoint, state))
+      .then(() => census(state, checkpoint))
       .then(uidStopCensusFromLifecycle)
       .catch(() => uidStopCensusFromLifecycle(undefined)),
     new Promise((resolveTimeout) => {
@@ -1783,9 +1783,12 @@ export async function stopUidProcesses(
     runCommand = runQuietly,
     wait = (duration) =>
       new Promise((resolveWait) => setTimeout(resolveWait, duration)),
-    census = captureUidStopCensus,
+    census,
+    spawnCensus = spawn,
   } = {},
 ) {
+  const captureCensus =
+    census ?? ((censusState) => captureUidStopCensus(censusState, spawnCensus));
   const diagnostics = emptyUidProcessStopDiagnostics();
   const inspect = () => {
     try {
@@ -1811,7 +1814,7 @@ export async function stopUidProcesses(
   };
 
   const initialCensus = waitForUidStopCensus(
-    census,
+    captureCensus,
     'initial',
     state,
     UID_STOP_CENSUS_WAIT_LIMITS_MS.initial,
@@ -1826,7 +1829,7 @@ export async function stopUidProcesses(
 
   diagnostics.termSignal = signal('TERM');
   const postTermCensus = waitForUidStopCensus(
-    census,
+    captureCensus,
     'post-term',
     state,
     UID_STOP_CENSUS_WAIT_LIMITS_MS.postTerm,
@@ -1838,7 +1841,7 @@ export async function stopUidProcesses(
   if (postTermStatus === 0) {
     diagnostics.killSignal = signal('KILL');
     const postKillCensus = waitForUidStopCensus(
-      census,
+      captureCensus,
       'post-kill',
       state,
       UID_STOP_CENSUS_WAIT_LIMITS_MS.postKill,

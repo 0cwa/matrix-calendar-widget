@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import {
   buildDesktopPolicyArguments,
@@ -50,6 +51,83 @@ function observedUidCensus(uidProcessCount) {
     },
   };
 }
+
+function observedEmptyLifecycle() {
+  return {
+    ...emptyUidLifecycleObservation('observed'),
+    overflow: false,
+    uidProcessCount: 0,
+    nonZombieProcessCount: 0,
+    zombieCount: 0,
+    unreadableProcessCount: 0,
+    unattributedProcessCount: 0,
+    processClassCounts: {
+      application: 0,
+      browser: 0,
+      renderer: 0,
+      zygote: 0,
+      gpu: 0,
+      utility: 0,
+      other: 0,
+      unknown: 0,
+    },
+    processRoleCounts: {
+      application: 0,
+      chromium: 0,
+      keyring: 0,
+      dbus: 0,
+      xvfb: 0,
+      other: 0,
+      unknown: 0,
+    },
+  };
+}
+
+test('default UID census uses the supplied state and keeps failed capture unavailable', async () => {
+  const spawned = [];
+  const result = await stopUidProcesses(
+    { uid: 24_321 },
+    {
+      runCommand: () => 1,
+      spawnCensus: (program, args, options) => {
+        spawned.push([program, args, options]);
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        queueMicrotask(() => {
+          child.stdout.emit(
+            'data',
+            Buffer.from(JSON.stringify(observedEmptyLifecycle())),
+          );
+          child.emit('close', 0, null);
+        });
+        return child;
+      },
+    },
+  );
+
+  assert.equal(result.status, 'passed');
+  assert.equal(result.diagnostics.initial.census.state, 'observed');
+  assert.equal(result.diagnostics.initial.census.uidProcessCount, 0);
+  assert.equal(spawned.length, 1);
+  assert.equal(spawned[0][0], 'timeout');
+  assert.equal(spawned[0][1].at(-1), '24321');
+
+  const failedCapture = await stopUidProcesses(
+    { uid: 24_322 },
+    {
+      runCommand: () => 1,
+      spawnCensus: () => {
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        queueMicrotask(() => child.emit('close', 1, null));
+        return child;
+      },
+    },
+  );
+  assert.equal(failedCapture.status, 'passed');
+  assert.equal(failedCapture.diagnostics.initial.census.state, 'unavailable');
+  assert.equal(failedCapture.diagnostics.initial.census.uidProcessCount, null);
+});
 
 test('records a clear initial UID inspection without entering the signal path', async () => {
   const calls = [];
@@ -142,7 +220,7 @@ test('uses the existing conditional KILL branch and bounded waits', async () => 
         return statuses.shift();
       },
       wait: async (duration) => waits.push(duration),
-      census: async (checkpoint) => {
+      census: async (_state, checkpoint) => {
         censuses.push(checkpoint);
         return observedUidCensus(checkpoint === 'post-kill' ? 0 : 1);
       },
