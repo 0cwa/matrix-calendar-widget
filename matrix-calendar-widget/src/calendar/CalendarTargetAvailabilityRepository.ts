@@ -31,11 +31,24 @@ export type CalendarRoomCapabilities = {
   canManageReminders: boolean;
 };
 
+export type RoomCalendarListDiagnostic = {
+  outcome:
+    | 'not-requested'
+    | 'loaded'
+    | 'request-failed'
+    | 'invalid-response'
+    | 'target-mismatch';
+  httpStatus: number | null;
+  calendarCountCapped: 0 | 1 | 2 | null;
+  expectedTargetMatch: boolean | null;
+};
+
 export type CalendarListWithAvailability = {
   calendars: Calendar[];
   partialAvailability: boolean;
   canManageCalendarCollections: boolean;
   roomCapabilities?: CalendarRoomCapabilities;
+  roomCalendarListDiagnostic?: RoomCalendarListDiagnostic;
 };
 
 export type CalendarEventsWithAvailability = CalendarEventListResult & {

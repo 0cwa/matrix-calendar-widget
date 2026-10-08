@@ -17,6 +17,7 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarRepository,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
@@ -66,7 +67,7 @@ const events: CalendarEvent[] = [
   },
 ];
 
-function createWrapper(repository: InMemoryCalendarRepository) {
+function createWrapper(repository: CalendarRepository) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
     return (
       <CalendarRepositoryProvider repository={repository}>
@@ -152,7 +153,93 @@ describe('<CalendarEventsSurface />', () => {
       'data-mcw-diagnostic-room-can-read-events',
       'unknown',
     );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-outcome',
+      'unavailable',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-http-status',
+      'unknown',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-calendar-count-capped',
+      'unknown',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-target-match',
+      'unknown',
+    );
     expect(diagnostic.outerHTML).not.toContain('Team planning');
+  });
+
+  it('exposes the actual surface query room-list result without calendar data', async () => {
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars: [], events: [] }),
+      {
+        getRoomCalendarCapabilities: vi.fn().mockResolvedValue({
+          calendarId: 'opaque-room-calendar',
+          canReadEvents: true,
+          canWriteEvents: false,
+          canManageReminders: false,
+        }),
+        listCalendarsWithAvailability: vi.fn().mockResolvedValue({
+          calendars: [],
+          partialAvailability: true,
+          canManageCalendarCollections: true,
+          roomCapabilities: {
+            calendarId: 'opaque-room-calendar',
+            canReadEvents: true,
+            canWriteEvents: false,
+            canManageReminders: false,
+          },
+          roomCalendarListDiagnostic: {
+            outcome: 'target-mismatch',
+            httpStatus: 200,
+            calendarCountCapped: 1,
+            expectedTargetMatch: false,
+          },
+        }),
+        listEventsWithAvailability: vi.fn().mockResolvedValue({
+          events: [],
+          diagnostics: [],
+          partialAvailability: false,
+        }),
+      },
+    );
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const diagnostic = await screen.findByTestId(
+      'calendar-events-surface-diagnostic',
+    );
+    await waitFor(() => {
+      expect(diagnostic).toHaveAttribute(
+        'data-mcw-diagnostic-room-list-outcome',
+        'target-mismatch',
+      );
+    });
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-http-status',
+      '200',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-calendar-count-capped',
+      '1',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-target-match',
+      'false',
+    );
+    expect(diagnostic.outerHTML).not.toContain('opaque-room-calendar');
   });
 
   it('distinguishes a loaded empty source from query failure', async () => {

@@ -95,6 +95,7 @@ export type WebBCalendarSurfaceStateDiagnostic =
       eventQueryError: boolean;
       eventPartialAvailability: boolean;
       projectedOccurrenceCountCapped: 0 | 1 | 2;
+      roomCalendarList: WebBRoomCalendarListDiagnostic;
       visibleEventCountCapped: 0 | 1 | 2;
     }
   | {
@@ -110,7 +111,32 @@ export type WebBCalendarSurfaceStateDiagnostic =
       eventQueryError: null;
       eventPartialAvailability: null;
       projectedOccurrenceCountCapped: null;
+      roomCalendarList: WebBRoomCalendarListDiagnostic & {
+        state: 'unavailable';
+      };
       visibleEventCountCapped: null;
+    };
+
+export type WebBRoomCalendarListDiagnostic =
+  | {
+      state: 'observed';
+      outcome:
+        | 'not-requested'
+        | 'loaded'
+        | 'request-failed'
+        | 'invalid-response'
+        | 'target-mismatch';
+      httpStatus: number | null;
+      // 2 represents two or more room calendars.
+      calendarCountCapped: 0 | 1 | 2 | null;
+      expectedTargetMatch: boolean | null;
+    }
+  | {
+      state: 'unavailable';
+      outcome: null;
+      httpStatus: null;
+      calendarCountCapped: null;
+      expectedTargetMatch: null;
     };
 
 export type WebBEditRowRenderDiagnostic =
@@ -140,6 +166,8 @@ export type WebBEditRowRenderDiagnostic =
 export function unavailableWebBEditRowRenderDiagnostic(): WebBEditRowRenderDiagnostic;
 
 export function unavailableWebBCalendarSurfaceStateDiagnostic(): WebBCalendarSurfaceStateDiagnostic;
+
+export function unavailableWebBRoomCalendarListDiagnostic(): WebBRoomCalendarListDiagnostic;
 
 export function unavailableWebBEditSurfaceDiagnostic(): WebBEditSurfaceDiagnostic;
 
@@ -270,7 +298,7 @@ export type ReadOnlyWidgetReadinessObservation = {
 };
 
 export type DesktopJourneySummary = {
-  schemaVersion: 8;
+  schemaVersion: 9;
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;
