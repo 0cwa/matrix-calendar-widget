@@ -41,6 +41,9 @@ const JOURNEY_HOLD_MS = 180_000;
 const STARTUP_WAIT_MS = 90_000;
 const STARTUP_EXIT_WAIT_MS = 20_000;
 const PLAYWRIGHT_TIMEOUT_MS = 165_000;
+const SPAWN_SYNC_TIMEOUT_SIGNAL = 'SIGTERM';
+const SPAWN_ERROR_CODE_PATTERN = /^E[A-Z0-9]{1,31}$/u;
+const PROCESS_SIGNAL_PATTERN = /^SIG[A-Z0-9]{1,13}$/u;
 const RUNNER_STATE_NAME = 'element-desktop-journey-runner-state.json';
 const DESKTOP_RESULT_NAME = 'element-desktop-journey-startup-output.jsonl';
 const DESKTOP_STAGE_NAME = 'element-desktop-startup-stage.jsonl';
@@ -1597,34 +1600,120 @@ async function stopStartupController(controller) {
   await waitForStartupClose(controller, 5_000);
 }
 
-function runDesktopCalendarJourney(config, state) {
+export function classifyDesktopChildCompletion(result) {
+  const unknown = {
+    outcome: 'unknown',
+    exitStatus: null,
+    timedOut: false,
+  };
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) {
+    return unknown;
+  }
+
+  const status = result.status;
+  const signal = result.signal ?? null;
+  const error = result.error;
+  if (error !== undefined) {
+    if (
+      error === null ||
+      typeof error !== 'object' ||
+      Array.isArray(error) ||
+      typeof error.code !== 'string' ||
+      !SPAWN_ERROR_CODE_PATTERN.test(error.code)
+    ) {
+      return unknown;
+    }
+    if (
+      error.code === 'ETIMEDOUT' &&
+      status === null &&
+      (signal === null || signal === SPAWN_SYNC_TIMEOUT_SIGNAL)
+    ) {
+      return {
+        outcome: 'timeout',
+        exitStatus: null,
+        timedOut: true,
+      };
+    }
+    if (error.code !== 'ETIMEDOUT' && status === null && signal === null) {
+      return {
+        outcome: 'spawn_error',
+        exitStatus: null,
+        timedOut: false,
+      };
+    }
+    return unknown;
+  }
+
+  if (
+    status === null &&
+    typeof signal === 'string' &&
+    PROCESS_SIGNAL_PATTERN.test(signal)
+  ) {
+    return {
+      outcome: 'signaled',
+      exitStatus: null,
+      timedOut: false,
+    };
+  }
+  if (
+    Number.isSafeInteger(status) &&
+    status >= 0 &&
+    status <= 255 &&
+    signal === null
+  ) {
+    return {
+      outcome: 'exited',
+      exitStatus: status,
+      timedOut: false,
+    };
+  }
+  return unknown;
+}
+
+export function runDesktopCalendarJourney(
+  config,
+  state,
+  spawnSyncRunner = spawnSync,
+) {
   rmSync(config.playwrightOutput, { recursive: true, force: true });
   mkdirSync(config.playwrightOutput, { recursive: false, mode: 0o700 });
   chmodSync(config.playwrightOutput, 0o700);
   const env = createJourneyChildEnvironment(process.env, config, state);
-  const result = spawnSync(
-    'yarn',
-    [
-      'workspace',
-      'e2e',
-      'playwright',
-      'test',
-      '--config',
-      'playwright.element-desktop-acceptance.config.ts',
-      '--grep',
-      'Element Desktop room event journey',
-    ],
-    {
-      cwd: WORKSPACE_ROOT,
-      env,
-      encoding: 'utf8',
-      stdio: 'ignore',
-      timeout: PLAYWRIGHT_TIMEOUT_MS,
-    },
-  );
-  if (result.error || result.signal || result.status !== 0) {
+  let result;
+  try {
+    result = spawnSyncRunner(
+      'yarn',
+      [
+        'workspace',
+        'e2e',
+        'playwright',
+        'test',
+        '--config',
+        'playwright.element-desktop-acceptance.config.ts',
+        '--grep',
+        'Element Desktop room event journey',
+      ],
+      {
+        cwd: WORKSPACE_ROOT,
+        env,
+        encoding: 'utf8',
+        stdio: 'ignore',
+        timeout: PLAYWRIGHT_TIMEOUT_MS,
+      },
+    );
+  } catch {
+    result = undefined;
+  }
+  const completion = classifyDesktopChildCompletion(result);
+  appendStage(config.journeyStageFile, {
+    type: 'desktop-child-completion',
+    sourceSha: state.sourceSha,
+    desktopChildCompletion: completion,
+  });
+  if (completion.outcome !== 'exited' || completion.exitStatus !== 0) {
     throw failure('desktop-not-ready');
   }
+  return completion;
 }
 
 async function runDesktopStartup(config, state, mode) {

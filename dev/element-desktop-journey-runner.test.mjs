@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { emptyUidLifecycleObservation } from './element-desktop-evidence.mjs';
 import {
   buildDesktopPolicyArguments,
+  classifyDesktopChildCompletion,
   classifyPasswdLookupResult,
   cleanupProofAllowsPolicyRemoval,
   cleanupUser,
@@ -14,14 +18,30 @@ import {
   parseStartupProgressRecord,
   retryFinalUidCleanup,
   retryLateEffectiveUidStop,
+  runDesktopCalendarJourney,
   selectAvailableProbeUid,
   selectPinnedPackageHash,
   stopUidProcesses,
   validateDefaultPolicyPort,
   validateJourneyPolicyPorts,
 } from './element-desktop-journey-runner.mjs';
+import {
+  appendDesktopPlaywrightResult,
+  initializeDesktopJourneyEvidence,
+  readDesktopJourneyEvidence,
+} from './element-desktop-journey.mjs';
 
 const PACKAGE_HASH = 'a'.repeat(64);
+const JOURNEY_SOURCE_SHA = 'b'.repeat(40);
+
+function withJourneyTempDirectory(run) {
+  const runnerTemp = mkdtempSync(join(tmpdir(), 'mcw-desktop-child-test-'));
+  try {
+    run(runnerTemp);
+  } finally {
+    rmSync(runnerTemp, { recursive: true, force: true });
+  }
+}
 
 function observedUidCensus(uidProcessCount) {
   return {
@@ -111,6 +131,185 @@ function censusChild({
   });
   return child;
 }
+
+test('classifies the real Desktop child return without retaining raw fields', () => {
+  assert.deepEqual(
+    classifyDesktopChildCompletion({ status: 0, signal: null }),
+    { outcome: 'exited', exitStatus: 0, timedOut: false },
+  );
+  assert.deepEqual(
+    classifyDesktopChildCompletion({ status: 255, signal: null }),
+    { outcome: 'exited', exitStatus: 255, timedOut: false },
+  );
+  assert.deepEqual(
+    classifyDesktopChildCompletion({ status: null, signal: 'SIGTERM' }),
+    { outcome: 'signaled', exitStatus: null, timedOut: false },
+  );
+  assert.deepEqual(
+    classifyDesktopChildCompletion({
+      status: null,
+      signal: 'SIGTERM',
+      error: { code: 'ETIMEDOUT', message: 'private timeout detail' },
+      stdout: 'private stdout',
+      stderr: 'private stderr',
+    }),
+    { outcome: 'timeout', exitStatus: null, timedOut: true },
+  );
+  assert.deepEqual(
+    classifyDesktopChildCompletion({
+      status: null,
+      signal: null,
+      error: { code: 'ETIMEDOUT' },
+    }),
+    { outcome: 'timeout', exitStatus: null, timedOut: true },
+  );
+  assert.deepEqual(
+    classifyDesktopChildCompletion({
+      status: null,
+      signal: null,
+      error: { code: 'ENOENT', message: 'private spawn detail' },
+    }),
+    { outcome: 'spawn_error', exitStatus: null, timedOut: false },
+  );
+  for (const malformed of [
+    null,
+    {},
+    { status: 256, signal: null },
+    { status: -1, signal: null },
+    { status: 0, signal: 'SIGTERM' },
+    { status: 0, signal: null, error: { code: 'ETIMEDOUT' } },
+    { status: null, signal: 'not-a-signal' },
+  ]) {
+    assert.deepEqual(classifyDesktopChildCompletion(malformed), {
+      outcome: 'unknown',
+      exitStatus: null,
+      timedOut: false,
+    });
+  }
+  assert.doesNotMatch(
+    JSON.stringify(
+      classifyDesktopChildCompletion({
+        status: null,
+        signal: null,
+        error: { code: 'ENOENT', message: 'private spawn detail' },
+        stdout: 'private stdout',
+        stderr: 'private stderr',
+      }),
+    ),
+    /private spawn detail|private stdout|private stderr/u,
+  );
+});
+
+test('keeps the Desktop child timeout and nonzero failure gate unchanged', () => {
+  withJourneyTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    const config = {
+      runnerTemp,
+      workspace: runnerTemp,
+      journeyStageFile: filePath,
+      playwrightOutput: join(runnerTemp, 'playwright-output'),
+      usersFile: join(runnerTemp, 'users.json'),
+      credentialsFile: join(runnerTemp, 'credentials.json'),
+    };
+    const state = { sourceSha: JOURNEY_SOURCE_SHA, cdpPort: 42_424 };
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    let captured;
+    const completion = runDesktopCalendarJourney(
+      config,
+      state,
+      (program, args, options) => {
+        captured = { program, args, options };
+        appendDesktopPlaywrightResult({
+          filePath,
+          runnerTemp,
+          sourceSha: JOURNEY_SOURCE_SHA,
+          status: 'passed',
+        });
+        return {
+          status: 0,
+          signal: null,
+          stdout: 'private stdout',
+          stderr: 'private stderr',
+        };
+      },
+    );
+    assert.deepEqual(completion, {
+      outcome: 'exited',
+      exitStatus: 0,
+      timedOut: false,
+    });
+    assert.equal(captured.program, 'yarn');
+    assert.equal(captured.options.timeout, 165_000);
+    assert.equal(captured.options.stdio, 'ignore');
+    assert.equal(captured.options.encoding, 'utf8');
+    assert.equal(
+      readDesktopJourneyEvidence({
+        filePath,
+        runnerTemp,
+        expectedSourceSha: JOURNEY_SOURCE_SHA,
+      }).playwrightResult,
+      'passed',
+    );
+
+    rmSync(filePath);
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    assert.throws(
+      () =>
+        runDesktopCalendarJourney(config, state, () => {
+          appendDesktopPlaywrightResult({
+            filePath,
+            runnerTemp,
+            sourceSha: JOURNEY_SOURCE_SHA,
+            status: 'timedout',
+          });
+          return {
+            status: 1,
+            signal: null,
+            stdout: 'private stdout',
+            stderr: 'private stderr',
+          };
+        }),
+      (error) => error.code === 'desktop-not-ready',
+    );
+    const failed = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: JOURNEY_SOURCE_SHA,
+    });
+    assert.equal(failed.desktopChildCompletion.exitStatus, 1);
+    assert.equal(failed.desktopChildCompletion.outcome, 'exited');
+    assert.equal(failed.playwrightResult, 'timed_out');
+    assert.doesNotMatch(
+      JSON.stringify(failed),
+      /private stdout|private stderr/u,
+    );
+
+    rmSync(filePath);
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    assert.throws(
+      () =>
+        runDesktopCalendarJourney(config, state, () => {
+          throw new Error('private thrown spawn detail');
+        }),
+      (error) => error.code === 'desktop-not-ready',
+    );
+    const unknown = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: JOURNEY_SOURCE_SHA,
+    });
+    assert.deepEqual(unknown.desktopChildCompletion, {
+      outcome: 'unknown',
+      exitStatus: null,
+      timedOut: false,
+    });
+    assert.equal(unknown.playwrightResult, 'unknown');
+    assert.doesNotMatch(
+      JSON.stringify(unknown),
+      /private thrown spawn detail/u,
+    );
+  });
+});
 
 async function initialUidCensus(spawnCensus) {
   const result = await stopUidProcesses(

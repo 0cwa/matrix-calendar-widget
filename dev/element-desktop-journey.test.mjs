@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import ElementDesktopAcceptanceResultReporter from '../e2e/src/elementDesktopAcceptanceResultReporter.mjs';
 import {
   DESKTOP_JOURNEY_FAILURE_POINTS,
   DESKTOP_JOURNEY_PHASES,
@@ -302,7 +303,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 9);
+    assert.equal(summary.schemaVersion, 10);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -320,6 +321,140 @@ test('keeps journey evidence within finite phases and statuses', () => {
         '{"phase":"web-member-b-read","status":"passed"}\n',
     );
   });
+});
+
+test('records only the source-bound Playwright result and child completion', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    const sourceSha = 'a'.repeat(40);
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    const previousEnvironment = {
+      stageFile: process.env.ELEMENT_DESKTOP_JOURNEY_STAGE_FILE,
+      runnerTemp: process.env.RUNNER_TEMP,
+      sourceSha: process.env.ELEMENT_DESKTOP_SOURCE_SHA,
+    };
+    process.env.ELEMENT_DESKTOP_JOURNEY_STAGE_FILE = filePath;
+    process.env.RUNNER_TEMP = runnerTemp;
+    process.env.ELEMENT_DESKTOP_SOURCE_SHA = sourceSha;
+    try {
+      new ElementDesktopAcceptanceResultReporter().onEnd({
+        status: 'timedout',
+        errors: [{ message: 'private Playwright error' }],
+        title: 'private test title',
+        attachments: [{ body: 'private attachment' }],
+      });
+    } finally {
+      for (const [key, value] of Object.entries({
+        ELEMENT_DESKTOP_JOURNEY_STAGE_FILE: previousEnvironment.stageFile,
+        RUNNER_TEMP: previousEnvironment.runnerTemp,
+        ELEMENT_DESKTOP_SOURCE_SHA: previousEnvironment.sourceSha,
+      })) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({
+        type: 'desktop-child-completion',
+        sourceSha,
+        desktopChildCompletion: {
+          outcome: 'exited',
+          exitStatus: 1,
+          timedOut: false,
+        },
+      })}\n`,
+      { flag: 'a', mode: 0o600 },
+    );
+
+    const raw = readFileSync(filePath, 'utf8');
+    assert.equal(
+      raw,
+      `{"type":"desktop-playwright-result","sourceSha":"${sourceSha}","playwrightResult":"timed_out"}\n` +
+        `{"type":"desktop-child-completion","sourceSha":"${sourceSha}","desktopChildCompletion":{"outcome":"exited","exitStatus":1,"timedOut":false}}\n`,
+    );
+    assert.doesNotMatch(
+      raw,
+      /private Playwright error|private test title|private attachment/u,
+    );
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: sourceSha,
+    });
+    assert.equal(summary.schemaVersion, 10);
+    assert.equal(summary.sourceSha, sourceSha);
+    assert.equal(summary.status, 'incomplete');
+    assert.equal(summary.playwrightResult, 'timed_out');
+    assert.deepEqual(summary.desktopChildCompletion, {
+      outcome: 'exited',
+      exitStatus: 1,
+      timedOut: false,
+    });
+  });
+});
+
+test('reports missing, malformed, duplicate, and conflicting results as unknown', () => {
+  const sourceSha = 'c'.repeat(40);
+  const completion = (exitStatus) => ({
+    type: 'desktop-child-completion',
+    sourceSha,
+    desktopChildCompletion: {
+      outcome: 'exited',
+      exitStatus,
+      timedOut: false,
+    },
+  });
+  const reporter = (playwrightResult) => ({
+    type: 'desktop-playwright-result',
+    sourceSha,
+    playwrightResult,
+  });
+  const summarize = (...rows) =>
+    summarizeDesktopJourneyEvidence(
+      `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`,
+      { expectedSourceSha: sourceSha },
+    );
+
+  assert.equal(summarize().desktopChildCompletion.outcome, 'unknown');
+  assert.equal(summarize(completion(1)).playwrightResult, 'unknown');
+  assert.equal(
+    summarize(completion(1), {
+      ...reporter('failed'),
+      unexpected: 'private data',
+    }).playwrightResult,
+    'unknown',
+  );
+  assert.equal(
+    summarize(completion(0), reporter('passed'), reporter('passed'))
+      .playwrightResult,
+    'unknown',
+  );
+  assert.equal(
+    summarize(completion(0), reporter('failed')).playwrightResult,
+    'unknown',
+  );
+  assert.equal(
+    summarize(completion(1), reporter('passed')).playwrightResult,
+    'unknown',
+  );
+  assert.equal(
+    summarize(completion(1), reporter('failed')).playwrightResult,
+    'failed',
+  );
+  const mismatchedSource = summarize(completion(1), {
+    ...reporter('failed'),
+    sourceSha: 'd'.repeat(40),
+  });
+  assert.equal(mismatchedSource.sourceSha, sourceSha);
+  assert.equal(mismatchedSource.desktopChildCompletion.outcome, 'unknown');
+  assert.equal(mismatchedSource.playwrightResult, 'unknown');
+  const malformedSource = summarize(completion(1), {
+    ...reporter('failed'),
+    sourceSha: 'not-a-commit',
+  });
+  assert.equal(malformedSource.desktopChildCompletion.outcome, 'unknown');
+  assert.equal(malformedSource.playwrightResult, 'unknown');
 });
 
 test('records one fixed failure point for a failed Desktop room read', () => {
@@ -386,7 +521,7 @@ test('records only phase-bound Desktop create steps and closed POST facts', () =
       /private room|private title|response body|request URL/u,
     );
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 9);
+    assert.equal(summary.schemaVersion, 10);
     assert.deepEqual(summary.failurePoint, {
       phase: 'desktop-event-create',
       point: 'event-create-post-status',
@@ -509,7 +644,7 @@ test('records room-navigation evidence only at its closed failure boundary', () 
       roomNavigationDiagnostic: diagnostic,
     });
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 9);
+    assert.equal(summary.schemaVersion, 10);
     assert.deepEqual(summary.roomNavigationDiagnostic, diagnostic);
     assert.equal(summary.roomsReadyDiagnostic, null);
     assert.doesNotMatch(

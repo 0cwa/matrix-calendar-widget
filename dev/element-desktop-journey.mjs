@@ -86,6 +86,20 @@ export const DESKTOP_LOGIN_ENTRIES = Object.freeze([
   'welcome_sign_in_attempted',
   'welcome_sign_in_clicked',
 ]);
+export const DESKTOP_CHILD_COMPLETION_OUTCOMES = Object.freeze([
+  'exited',
+  'signaled',
+  'spawn_error',
+  'timeout',
+  'unknown',
+]);
+export const DESKTOP_PLAYWRIGHT_RESULTS = Object.freeze([
+  'passed',
+  'failed',
+  'timed_out',
+  'interrupted',
+  'unknown',
+]);
 
 const PHASE_SET = new Set(DESKTOP_JOURNEY_PHASES);
 const JOURNEY_FAILURE_POINT_SET = new Set(DESKTOP_JOURNEY_FAILURE_POINTS);
@@ -222,9 +236,58 @@ const JOURNEY_CREDENTIALS_NAME = 'element-acceptance-desktop-credentials.json';
 const JOURNEY_EVIDENCE_NAME = 'element-desktop-journey-stage.jsonl';
 const MAX_CREDENTIAL_BYTES = 2_048;
 const MAX_EVIDENCE_BYTES = 16_384;
+const MAX_DIAGNOSTIC_ROW_BYTES = 256;
+const SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
+const DESKTOP_CHILD_COMPLETION_UNKNOWN = Object.freeze({
+  outcome: 'unknown',
+  exitStatus: null,
+  timedOut: false,
+});
 
 function invalidInput() {
   throw new Error('Invalid Desktop journey input');
+}
+
+function validDesktopChildCompletion(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !== 'exitStatus,outcome,timedOut' ||
+    !DESKTOP_CHILD_COMPLETION_OUTCOMES.includes(value.outcome) ||
+    typeof value.timedOut !== 'boolean'
+  ) {
+    return false;
+  }
+  if (value.outcome === 'exited') {
+    return (
+      Number.isSafeInteger(value.exitStatus) &&
+      value.exitStatus >= 0 &&
+      value.exitStatus <= 255 &&
+      value.timedOut === false
+    );
+  }
+  if (value.outcome === 'timeout') {
+    return value.exitStatus === null && value.timedOut === true;
+  }
+  return value.exitStatus === null && value.timedOut === false;
+}
+
+function completionAndPlaywrightResultAgree(completion, playwrightResult) {
+  if (
+    playwrightResult === 'unknown' ||
+    completion === null ||
+    ['unknown', 'spawn_error'].includes(completion.outcome)
+  ) {
+    return false;
+  }
+  if (playwrightResult === 'passed') {
+    return completion.outcome === 'exited' && completion.exitStatus === 0;
+  }
+  if (completion.outcome === 'exited' && completion.exitStatus === 0) {
+    return false;
+  }
+  return ['failed', 'timed_out', 'interrupted'].includes(playwrightResult);
 }
 
 function validJourneyFailurePoint(phase, status, failurePoint) {
@@ -1129,14 +1192,22 @@ function unlinkOwnedPrivateFile(filePath, expectedStat) {
   }
 }
 
-function parseEvidence(input) {
+function parseEvidence(input, expectedSourceSha = null) {
   if (
     typeof input !== 'string' ||
-    Buffer.byteLength(input) > MAX_EVIDENCE_BYTES
+    Buffer.byteLength(input) > MAX_EVIDENCE_BYTES ||
+    (expectedSourceSha !== null && !SOURCE_SHA_PATTERN.test(expectedSourceSha))
   ) {
     invalidInput();
   }
 
+  let sourceSha = expectedSourceSha;
+  let desktopChildCompletion = DESKTOP_CHILD_COMPLETION_UNKNOWN;
+  let desktopChildCompletionCount = 0;
+  let desktopChildCompletionInvalid = false;
+  let playwrightResult = 'unknown';
+  let playwrightResultCount = 0;
+  let diagnosticSourceConflict = false;
   const outcomes = new Map();
   let failurePoint = null;
   let gatewayReadDiagnostic = null;
@@ -1149,7 +1220,7 @@ function parseEvidence(input) {
   let loginDiagnostic = null;
   let roomsReadyDiagnostic = null;
   const rows = input.split(/\r?\n/u).filter(Boolean);
-  if (rows.length > DESKTOP_JOURNEY_PHASES.length + 1) invalidInput();
+  if (rows.length > DESKTOP_JOURNEY_PHASES.length + 5) invalidInput();
 
   for (const row of rows) {
     let value;
@@ -1206,6 +1277,68 @@ function parseEvidence(input) {
       loginStepRecorded = true;
       continue;
     }
+    const hasDesktopChildCompletion = Object.hasOwn(
+      value,
+      'desktopChildCompletion',
+    );
+    const hasPlaywrightResult = Object.hasOwn(value, 'playwrightResult');
+    const isDesktopChildCompletion =
+      value.type === 'desktop-child-completion' || hasDesktopChildCompletion;
+    const isPlaywrightResult =
+      value.type === 'desktop-playwright-result' || hasPlaywrightResult;
+    if (
+      isDesktopChildCompletion ||
+      isPlaywrightResult ||
+      Object.hasOwn(value, 'sourceSha')
+    ) {
+      const hasSourceSha = Object.hasOwn(value, 'sourceSha');
+      const validSourceSha =
+        hasSourceSha &&
+        typeof value.sourceSha === 'string' &&
+        SOURCE_SHA_PATTERN.test(value.sourceSha) &&
+        (sourceSha === null || sourceSha === value.sourceSha);
+      if (hasSourceSha) {
+        if (!validSourceSha) diagnosticSourceConflict = true;
+        else sourceSha = value.sourceSha;
+      }
+      if (isDesktopChildCompletion) {
+        desktopChildCompletionCount = Math.min(
+          desktopChildCompletionCount + 1,
+          2,
+        );
+        const validRecord =
+          keys === 'desktopChildCompletion,sourceSha,type' &&
+          value.type === 'desktop-child-completion' &&
+          validSourceSha &&
+          Buffer.byteLength(row) <= MAX_DIAGNOSTIC_ROW_BYTES &&
+          validDesktopChildCompletion(value.desktopChildCompletion);
+        if (desktopChildCompletionCount === 1 && validRecord) {
+          desktopChildCompletion = value.desktopChildCompletion;
+        } else {
+          desktopChildCompletionInvalid = true;
+        }
+      }
+      if (isPlaywrightResult) {
+        playwrightResultCount = Math.min(playwrightResultCount + 1, 2);
+        const validRecord =
+          keys === 'playwrightResult,sourceSha,type' &&
+          value.type === 'desktop-playwright-result' &&
+          validSourceSha &&
+          Buffer.byteLength(row) <= MAX_DIAGNOSTIC_ROW_BYTES &&
+          DESKTOP_PLAYWRIGHT_RESULTS.includes(value.playwrightResult);
+        if (playwrightResultCount === 1 && validRecord) {
+          playwrightResult = value.playwrightResult;
+        } else {
+          playwrightResult = 'unknown';
+        }
+      }
+      if (!isDesktopChildCompletion && !isPlaywrightResult) {
+        playwrightResultCount = Math.min(playwrightResultCount + 1, 2);
+        playwrightResult = 'unknown';
+      }
+      continue;
+    }
+    if (Object.hasOwn(value, 'sourceSha')) invalidInput();
     const phaseKeys = Object.keys(value).sort().join(',');
     const hasFailurePoint = Object.hasOwn(value, 'failurePoint');
     const hasGatewayReadDiagnostic = Object.hasOwn(
@@ -1311,7 +1444,26 @@ function parseEvidence(input) {
     }
     outcomes.set(value.phase, value.status);
   }
+  if (desktopChildCompletionInvalid) {
+    desktopChildCompletion = DESKTOP_CHILD_COMPLETION_UNKNOWN;
+  }
+  if (diagnosticSourceConflict) {
+    desktopChildCompletion = DESKTOP_CHILD_COMPLETION_UNKNOWN;
+    playwrightResult = 'unknown';
+  }
+  if (
+    playwrightResultCount !== 1 ||
+    !completionAndPlaywrightResultAgree(
+      desktopChildCompletion,
+      playwrightResult,
+    )
+  ) {
+    playwrightResult = 'unknown';
+  }
   return {
+    sourceSha,
+    desktopChildCompletion,
+    playwrightResult,
     outcomes,
     failurePoint,
     gatewayReadDiagnostic,
@@ -1515,8 +1667,49 @@ export function appendDesktopLoginStep({
   privateFileStat(path, MAX_EVIDENCE_BYTES);
 }
 
-export function summarizeDesktopJourneyEvidence(input) {
+export function appendDesktopPlaywrightResult({
+  filePath,
+  runnerTemp,
+  sourceSha,
+  status,
+}) {
+  const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
+  privateFileStat(path, MAX_EVIDENCE_BYTES);
+  if (typeof sourceSha !== 'string' || !SOURCE_SHA_PATTERN.test(sourceSha)) {
+    invalidInput();
+  }
+  const playwrightResult =
+    status === 'passed'
+      ? 'passed'
+      : status === 'failed'
+        ? 'failed'
+        : status === 'timedout'
+          ? 'timed_out'
+          : status === 'interrupted'
+            ? 'interrupted'
+            : 'unknown';
+  const serialized = `${JSON.stringify({
+    type: 'desktop-playwright-result',
+    sourceSha,
+    playwrightResult,
+  })}\n`;
+  if (Buffer.byteLength(serialized) > MAX_DIAGNOSTIC_ROW_BYTES) invalidInput();
+  try {
+    appendFileSync(path, serialized, { encoding: 'utf8', mode: 0o600 });
+  } catch {
+    invalidInput();
+  }
+  privateFileStat(path, MAX_EVIDENCE_BYTES);
+}
+
+export function summarizeDesktopJourneyEvidence(
+  input,
+  { expectedSourceSha = null } = {},
+) {
   const {
+    sourceSha,
+    desktopChildCompletion,
+    playwrightResult,
     outcomes,
     failurePoint,
     loginStep,
@@ -1527,7 +1720,7 @@ export function summarizeDesktopJourneyEvidence(input) {
     roomNavigationDiagnostic,
     desktopEventCreateDiagnostic,
     webBEditSaveDiagnostic,
-  } = parseEvidence(input);
+  } = parseEvidence(input, expectedSourceSha);
   if (outcomes.get('desktop-login') === 'passed') {
     if (
       loginStep !== 'complete' ||
@@ -1545,8 +1738,11 @@ export function summarizeDesktopJourneyEvidence(input) {
   const failed = Object.values(cases).includes('failed');
   const complete = Object.values(cases).every((value) => value === 'passed');
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
+    sourceSha,
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
+    desktopChildCompletion,
+    playwrightResult,
     loginStep,
     loginEntry,
     loginDiagnostic,
@@ -1560,11 +1756,19 @@ export function summarizeDesktopJourneyEvidence(input) {
   };
 }
 
-export function readDesktopJourneyEvidence({ filePath, runnerTemp }) {
+export function readDesktopJourneyEvidence({
+  filePath,
+  runnerTemp,
+  expectedSourceSha = null,
+}) {
   const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
-  if (!existsSync(path)) return summarizeDesktopJourneyEvidence('');
+  if (!existsSync(path)) {
+    return summarizeDesktopJourneyEvidence('', { expectedSourceSha });
+  }
   privateFileStat(path, MAX_EVIDENCE_BYTES);
-  return summarizeDesktopJourneyEvidence(readFileSync(path, 'utf8'));
+  return summarizeDesktopJourneyEvidence(readFileSync(path, 'utf8'), {
+    expectedSourceSha,
+  });
 }
 
 if (
@@ -1574,7 +1778,18 @@ if (
   try {
     const runnerTemp = process.env.RUNNER_TEMP;
     const filePath = process.env.ELEMENT_DESKTOP_JOURNEY_STAGE_FILE;
-    const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
+    const expectedSourceSha = process.env.ELEMENT_DESKTOP_SOURCE_SHA;
+    if (
+      typeof expectedSourceSha !== 'string' ||
+      !SOURCE_SHA_PATTERN.test(expectedSourceSha)
+    ) {
+      invalidInput();
+    }
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha,
+    });
     process.stdout.write(`${JSON.stringify(summary)}\n`);
   } catch {
     process.stderr.write('Desktop journey evidence is unavailable.\n');

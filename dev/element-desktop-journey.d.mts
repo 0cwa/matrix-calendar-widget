@@ -261,8 +261,11 @@ export type ReadOnlyWidgetReadinessObservation = {
 };
 
 export type DesktopJourneySummary = {
-  schemaVersion: 9;
+  schemaVersion: 10;
+  sourceSha: string | null;
   status: 'passed' | 'failed' | 'incomplete';
+  desktopChildCompletion: DesktopChildCompletion;
+  playwrightResult: DesktopPlaywrightResult;
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;
   loginDiagnostic: DesktopLoginDiagnostic | null;
@@ -274,6 +277,19 @@ export type DesktopJourneySummary = {
   webBEditSaveDiagnostic: WebBEditSaveFailureDiagnostic | null;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
+
+export type DesktopChildCompletion = {
+  outcome: 'exited' | 'signaled' | 'spawn_error' | 'timeout' | 'unknown';
+  exitStatus: number | null;
+  timedOut: boolean;
+};
+
+export type DesktopPlaywrightResult =
+  | 'passed'
+  | 'failed'
+  | 'timed_out'
+  | 'interrupted'
+  | 'unknown';
 
 export declare const DESKTOP_JOURNEY_PHASES: readonly DesktopJourneyPhase[];
 export declare const DESKTOP_JOURNEY_FAILURE_POINTS: readonly DesktopJourneyFailurePoint[];
@@ -389,11 +405,20 @@ export declare function appendDesktopLoginStep(input: {
   roomsReadyDiagnostic?: DesktopRoomsReadyDiagnostic;
 }): void;
 
+export declare function appendDesktopPlaywrightResult(input: {
+  filePath: string;
+  runnerTemp: string;
+  sourceSha: string;
+  status: string;
+}): void;
+
 export declare function summarizeDesktopJourneyEvidence(
   input: string,
+  options?: { expectedSourceSha?: string | null },
 ): DesktopJourneySummary;
 
 export declare function readDesktopJourneyEvidence(input: {
   filePath: string;
   runnerTemp: string;
+  expectedSourceSha?: string | null;
 }): DesktopJourneySummary;

@@ -26,7 +26,7 @@ const config: PlaywrightTestConfig = {
   forbidOnly: true,
   retries: 0,
   workers: 1,
-  reporter: 'line',
+  reporter: [['line'], ['./src/elementDesktopAcceptanceResultReporter.mjs']],
   outputDir:
     process.env.ELEMENT_DESKTOP_JOURNEY_PLAYWRIGHT_OUTPUT ??
     '/tmp/element-desktop-journey-playwright',
