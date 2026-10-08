@@ -278,6 +278,8 @@ const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
       'iframeHeight',
       'widgetCardCount',
       'appDrawerCount',
+      'managementToolbarNavCountCapped',
+      'createEventButtonCountCapped',
     ],
   ],
   ['g6-browser-egress', ['count']],
@@ -305,6 +307,14 @@ const G6_ENUM_FIELDS_BY_PHASE = new Map([
   [
     'g6-unsupported-preservation',
     ['neighborPatchTitleOutcome', 'neighborCanonicalTitleReadbackOutcome'],
+  ],
+  [
+    'g6-side-panel-layout',
+    [
+      'managementToolbarNavVisibility',
+      'createEventButtonVisibility',
+      'createEventButtonEnabled',
+    ],
   ],
 ]);
 const G6_POSTSAVE_ENUM_FIELDS = new Set([
@@ -366,7 +376,64 @@ const G6_ENUM_VALUES = new Map([
       'unavailable',
     ]),
   ],
+  [
+    'managementToolbarNavVisibility',
+    new Set(['absent', 'visible', 'hidden', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'createEventButtonVisibility',
+    new Set(['absent', 'visible', 'hidden', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'createEventButtonEnabled',
+    new Set(['absent', 'enabled', 'disabled', 'ambiguous', 'unavailable']),
+  ],
 ]);
+
+function validG6SidePanelToolbarObservation(record) {
+  const requiredFields = [
+    'managementToolbarNavCountCapped',
+    'managementToolbarNavVisibility',
+    'createEventButtonCountCapped',
+    'createEventButtonVisibility',
+    'createEventButtonEnabled',
+  ];
+  if (!requiredFields.every((key) => Object.hasOwn(record, key))) {
+    return false;
+  }
+
+  const navCount = record.managementToolbarNavCountCapped;
+  const createCount = record.createEventButtonCountCapped;
+  if (navCount === null || createCount === null) {
+    return (
+      navCount === null &&
+      createCount === null &&
+      record.managementToolbarNavVisibility === 'unavailable' &&
+      record.createEventButtonVisibility === 'unavailable' &&
+      record.createEventButtonEnabled === 'unavailable'
+    );
+  }
+
+  const validCappedCount = (value) =>
+    Number.isInteger(value) && value >= 0 && value <= 2;
+  const validVisibility = (count, value) =>
+    (count === 0 && value === 'absent') ||
+    (count === 1 && ['visible', 'hidden', 'unavailable'].includes(value)) ||
+    (count === 2 && value === 'ambiguous');
+  const validEnabled = (count, value) =>
+    (count === 0 && value === 'absent') ||
+    (count === 1 && ['enabled', 'disabled', 'unavailable'].includes(value)) ||
+    (count === 2 && value === 'ambiguous');
+
+  return (
+    validCappedCount(navCount) &&
+    validCappedCount(createCount) &&
+    validVisibility(navCount, record.managementToolbarNavVisibility) &&
+    validVisibility(createCount, record.createEventButtonVisibility) &&
+    validEnabled(createCount, record.createEventButtonEnabled)
+  );
+}
+
 const G6_SEED_CREATE_OUTCOMES = new Set([
   'response',
   'timeout',
@@ -957,6 +1024,13 @@ function validG6Observation(record) {
       if (key === 'neighborListRefreshHttpStatus' && value === null) {
         return false;
       }
+      if (
+        (key === 'managementToolbarNavCountCapped' ||
+          key === 'createEventButtonCountCapped') &&
+        value === null
+      ) {
+        return false;
+      }
       if (!Number.isInteger(value)) return true;
       if (key === 'httpStatus' || key.endsWith('HttpStatus')) {
         return value < 100 || value > 599;
@@ -1081,7 +1155,7 @@ function validG6Observation(record) {
     }
   }
 
-  if (enumFields.length > 0) {
+  if (record.phase === 'g6-unsupported-preservation' && enumFields.length > 0) {
     const hasAnyEnumField = enumFields.some((key) =>
       Object.hasOwn(record, key),
     );
@@ -1169,7 +1243,8 @@ function validG6Observation(record) {
     ((record.widgetCardVisible === true && record.widgetCardCount !== 1) ||
       (record.persistedHostFramePresent === true &&
         (!Number.isInteger(record.iframeWidth) ||
-          !Number.isInteger(record.iframeHeight))))
+          !Number.isInteger(record.iframeHeight))) ||
+      !validG6SidePanelToolbarObservation(record))
   ) {
     return false;
   }

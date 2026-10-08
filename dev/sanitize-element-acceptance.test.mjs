@@ -15,6 +15,13 @@ const g6PassedTitleDiagnostic = {
   neighborPatchTitleOutcome: 'matched',
   neighborCanonicalTitleReadbackOutcome: 'not-needed',
 };
+const g6SidePanelToolbarObserved = {
+  managementToolbarNavCountCapped: 1,
+  managementToolbarNavVisibility: 'visible',
+  createEventButtonCountCapped: 1,
+  createEventButtonVisibility: 'visible',
+  createEventButtonEnabled: 'disabled',
+};
 const g6ObservedPostSaveList = {
   neighborListRefreshOutcome: 'decoded',
   neighborListRefreshHttpStatus: 200,
@@ -2920,6 +2927,7 @@ test('rejects inconsistent Element client acceptance evidence', () => {
     {
       phase: 'g6-side-panel-layout',
       status: 'passed',
+      ...g6SidePanelToolbarObserved,
       widgetCardVisible: false,
       createControlReachable: true,
       eventDetailsReachable: true,
@@ -2942,6 +2950,7 @@ test('rejects inconsistent Element client acceptance evidence', () => {
     {
       phase: 'g6-side-panel-layout',
       status: 'passed',
+      ...g6SidePanelToolbarObserved,
       widgetCardVisible: true,
       createControlReachable: true,
       eventDetailsReachable: true,
@@ -3032,6 +3041,7 @@ test('accepts the compact four-case Element client evidence contract', () => {
     {
       phase: 'g6-side-panel-layout',
       status: 'passed',
+      ...g6SidePanelToolbarObserved,
       widgetCardVisible: true,
       createControlReachable: true,
       eventDetailsReachable: true,
@@ -3076,7 +3086,7 @@ test('accepts the compact four-case Element client evidence contract', () => {
   }
   assert.match(
     summary,
-    /phase=g6-side-panel-layout status=passed widget_card_visible=true create_control_reachable=true event_details_reachable=true host_no_horizontal_overflow=true widget_no_horizontal_overflow=true persisted_host_frame_present=true viewport_width=1440 viewport_height=900 iframe_width=319 iframe_height=640 widget_card_count=1 app_drawer_count=0/u,
+    /phase=g6-side-panel-layout status=passed widget_card_visible=true create_control_reachable=true event_details_reachable=true host_no_horizontal_overflow=true widget_no_horizontal_overflow=true persisted_host_frame_present=true viewport_width=1440 viewport_height=900 iframe_width=319 iframe_height=640 widget_card_count=1 app_drawer_count=0 management_toolbar_nav_count_capped=1 create_event_button_count_capped=1 management_toolbar_nav_visibility=visible create_event_button_visibility=visible create_event_button_enabled=disabled/u,
   );
   assert.doesNotMatch(
     summary,
@@ -3114,7 +3124,65 @@ test('accepts the compact four-case Element client evidence contract', () => {
       ),
     { message: 'invalid element acceptance summary' },
   );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        records
+          .map((record) =>
+            JSON.stringify(
+              record.phase === 'g6-side-panel-layout'
+                ? {
+                    ...record,
+                    createEventButtonCountCapped: 0,
+                    createEventButtonVisibility: 'hidden',
+                    createEventButtonEnabled: 'absent',
+                  }
+                : record,
+            ),
+          )
+          .join('\n'),
+        sourceSha,
+      ),
+    { message: 'invalid element acceptance summary' },
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        records
+          .map((record) =>
+            JSON.stringify(
+              record.phase === 'g6-side-panel-layout'
+                ? { ...record, createEventButtonText: 'Create event' }
+                : record,
+            ),
+          )
+          .join('\n'),
+        sourceSha,
+      ),
+    { message: 'invalid element acceptance summary' },
+  );
   assert.doesNotMatch(summary, /Matrix Calendar|G6 unsupported|\.ics|UID:/u);
+});
+
+test('retains bounded missing Create event control evidence on a failed layout', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-side-panel-layout',
+      status: 'failed',
+      createControlReachable: false,
+      managementToolbarNavCountCapped: 1,
+      managementToolbarNavVisibility: 'visible',
+      createEventButtonCountCapped: 0,
+      createEventButtonVisibility: 'absent',
+      createEventButtonEnabled: 'absent',
+    }),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /phase=g6-side-panel-layout status=failed create_control_reachable=false management_toolbar_nav_count_capped=1 create_event_button_count_capped=0 management_toolbar_nav_visibility=visible create_event_button_visibility=absent create_event_button_enabled=absent/u,
+  );
 });
 
 test('retains only four fixed G6 create outcome and ETag diagnostics', () => {

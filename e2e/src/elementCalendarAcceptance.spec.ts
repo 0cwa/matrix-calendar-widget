@@ -155,6 +155,26 @@ type G6PostSaveListUiObservation =
     }
   | { state: 'unavailable' };
 
+type G6SidePanelControlVisibility =
+  | 'absent'
+  | 'visible'
+  | 'hidden'
+  | 'ambiguous'
+  | 'unavailable';
+type G6SidePanelControlEnabled =
+  | 'absent'
+  | 'enabled'
+  | 'disabled'
+  | 'ambiguous'
+  | 'unavailable';
+type G6SidePanelToolbarObservation = {
+  managementToolbarNavCountCapped: number | null;
+  managementToolbarNavVisibility: G6SidePanelControlVisibility;
+  createEventButtonCountCapped: number | null;
+  createEventButtonVisibility: G6SidePanelControlVisibility;
+  createEventButtonEnabled: G6SidePanelControlEnabled;
+};
+
 type G6StageRecord = {
   phase: G6Phase;
   status: 'passed' | 'failed';
@@ -228,6 +248,11 @@ type G6StageRecord = {
   iframeHeight?: number;
   widgetCardCount?: number;
   appDrawerCount?: number;
+  managementToolbarNavCountCapped?: number | null;
+  managementToolbarNavVisibility?: G6SidePanelControlVisibility;
+  createEventButtonCountCapped?: number | null;
+  createEventButtonVisibility?: G6SidePanelControlVisibility;
+  createEventButtonEnabled?: G6SidePanelControlEnabled;
   eventActionTabCount?: number;
   detailsActionTabCount?: number;
 };
@@ -1855,6 +1880,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       .getByRole('button', { name: 'Create event', exact: true })
       .isVisible()
       .catch(() => false);
+    const sidePanelToolbarObservation = await observeG6SidePanelToolbar(frameA);
     const viewport = pageA.viewportSize();
     const widgetCard = pageA.locator('.mx_WidgetCard');
     const widgetCardCount = Math.min(
@@ -1921,6 +1947,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       hostNoHorizontalOverflow,
       widgetNoHorizontalOverflow,
       persistedHostFramePresent,
+      ...sidePanelToolbarObservation,
       ...(viewport
         ? { viewportWidth: viewport.width, viewportHeight: viewport.height }
         : {}),
@@ -2600,6 +2627,90 @@ async function observeG6PostSaveListUi(
     };
   } catch {
     return { state: 'unavailable' };
+  }
+}
+
+async function observeG6SidePanelToolbar(
+  frame: FrameLocator,
+): Promise<G6SidePanelToolbarObservation> {
+  try {
+    const deleteCalendarButton = frame.getByRole('button', {
+      name: 'Delete calendar',
+      exact: true,
+      includeHidden: true,
+    });
+    const managementToolbarNav = frame
+      .locator('nav')
+      .filter({ has: deleteCalendarButton });
+    const createEventButton = frame.getByRole('button', {
+      name: 'Create event',
+      exact: true,
+      includeHidden: true,
+    });
+    const [managementToolbarNavCount, createEventButtonCount] =
+      await Promise.all([
+        managementToolbarNav.count(),
+        createEventButton.count(),
+      ]);
+    const [
+      managementToolbarNavVisible,
+      createEventButtonVisible,
+      createEventButtonEnabled,
+    ] = await Promise.all([
+      managementToolbarNavCount === 1
+        ? managementToolbarNav.isVisible()
+        : Promise.resolve(undefined),
+      createEventButtonCount === 1
+        ? createEventButton.isVisible()
+        : Promise.resolve(undefined),
+      createEventButtonCount === 1
+        ? createEventButton.isEnabled()
+        : Promise.resolve(undefined),
+    ]);
+    const visibility = (
+      count: number,
+      visible: boolean | undefined,
+    ): G6SidePanelControlVisibility =>
+      count === 0
+        ? 'absent'
+        : count > 1
+          ? 'ambiguous'
+          : visible === undefined
+            ? 'unavailable'
+            : visible
+              ? 'visible'
+              : 'hidden';
+
+    return {
+      managementToolbarNavCountCapped: Math.min(managementToolbarNavCount, 2),
+      managementToolbarNavVisibility: visibility(
+        managementToolbarNavCount,
+        managementToolbarNavVisible,
+      ),
+      createEventButtonCountCapped: Math.min(createEventButtonCount, 2),
+      createEventButtonVisibility: visibility(
+        createEventButtonCount,
+        createEventButtonVisible,
+      ),
+      createEventButtonEnabled:
+        createEventButtonCount === 0
+          ? 'absent'
+          : createEventButtonCount > 1
+            ? 'ambiguous'
+            : createEventButtonEnabled === undefined
+              ? 'unavailable'
+              : createEventButtonEnabled
+                ? 'enabled'
+                : 'disabled',
+    };
+  } catch {
+    return {
+      managementToolbarNavCountCapped: null,
+      managementToolbarNavVisibility: 'unavailable',
+      createEventButtonCountCapped: null,
+      createEventButtonVisibility: 'unavailable',
+      createEventButtonEnabled: 'unavailable',
+    };
   }
 }
 
