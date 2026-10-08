@@ -363,6 +363,7 @@ const FAILURE_CODES = new Set([
   'performance-widget-open-failed',
   'performance-host-layout-failed',
   'performance-range-selection-failed',
+  'performance-default-view-failed',
   'performance-cold-list-failed',
   'performance-warmup-failed',
   'performance-view-sample-failed',

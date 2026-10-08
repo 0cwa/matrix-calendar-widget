@@ -31,6 +31,11 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { arch, platform, release } from 'node:os';
 import { isAbsolute, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import {
+  MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+  summarizeDefaultWaitObservation,
+  type PerformanceDefaultWaitObservation,
+} from '../../dev/element-acceptance-performance-evidence.mjs';
 import { ElementWebPage } from './pages/elementWebPage';
 import { fillDatePicker } from './pages/helper';
 
@@ -476,13 +481,14 @@ type OrdinaryPerformanceCase = {
   eventCount: 0 | 25;
   preparation: PerformanceReport['preparation'];
   defaultView: PerformanceDefaultViewSample;
+  defaultWaitObservation: PerformanceDefaultWaitObservation | null;
   coldList: PerformanceReport['coldList'];
   refreshSetup: PerformanceActionSample;
   refresh: PerformanceActionSample;
   detailSamples: PerformanceDetailsSample[];
 };
 type OrdinaryPerformanceReport = {
-  version: 3;
+  version: 4;
   viewportWidth: 1280;
   viewportHeight: 800;
   calendarDays: 31;
@@ -511,6 +517,9 @@ type PerformanceApiObserver = {
   setSample: (sample: PerformanceSampleKey) => void;
   rows: () => PerformanceApiResponse[];
   rowsFor: (sample: PerformanceSampleKey) => PerformanceApiResponse[];
+  defaultWaitObservation: (
+    sample: PerformanceSampleKey,
+  ) => PerformanceDefaultWaitObservation;
   waitForRoomEvents: (
     sample: PerformanceSampleKey,
     rangeClass: 'preselection' | 'list31' | 'month-padded' | 'overflow-day',
@@ -1006,6 +1015,7 @@ function makeEmptyOrdinaryPerformanceCase(
       usableControlVisible: false,
       stable: false,
     },
+    defaultWaitObservation: null,
     coldList: makeEmptyPerformanceReport(year, month).coldList,
     refreshSetup: makeEmptyActionSample(),
     refresh: makeEmptyActionSample(),
@@ -1018,7 +1028,7 @@ function makeEmptyOrdinaryPerformanceReport(
   populatedMonth: { year: number; month: number },
 ): OrdinaryPerformanceReport {
   return {
-    version: 3,
+    version: 4,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 31,
@@ -1184,6 +1194,10 @@ function createPerformanceApiObserver(
   const homeserverOrigin = new URL(fixture.homeserverUrl).origin;
   const pending = new Map<Request, PerformancePendingRequest>();
   const pendingBySample = new Map<PerformanceSampleKey, number>();
+  const otherOriginCalendarPathCountBySample = new Map<
+    PerformanceSampleKey,
+    number
+  >();
   const apiResponses: PerformanceApiResponse[] = [];
   let activeSample: PerformanceSampleKey = 'cold-list';
 
@@ -1196,6 +1210,17 @@ function createPerformanceApiObserver(
       return;
     }
     const rawMethod = request.method();
+    if (
+      requestUrl.origin !== gatewayOrigin &&
+      requestUrl.pathname.startsWith('/v1/calendar/')
+    ) {
+      const previousCount =
+        otherOriginCalendarPathCountBySample.get(activeSample) ?? 0;
+      otherOriginCalendarPathCountBySample.set(
+        activeSample,
+        Math.min(previousCount + 1, MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT + 1),
+      );
+    }
     if (rawMethod === 'OPTIONS' || rawMethod === 'HEAD') return;
     let endpoint: PerformanceEndpoint | undefined;
     if (
@@ -1411,6 +1436,27 @@ function createPerformanceApiObserver(
     },
     rows: () => [...apiResponses],
     rowsFor: (sample) => apiResponses.filter((row) => row.sample === sample),
+    defaultWaitObservation: (sample) => {
+      const pendingCounts: Record<PerformanceEndpoint, number> = {
+        context: 0,
+        calendars: 0,
+        events: 0,
+        openid: 0,
+        'other-calendar': 0,
+        'other-api': 0,
+      };
+      for (const metadata of pending.values()) {
+        if (metadata.sample !== sample) continue;
+        pendingCounts[metadata.endpoint] = Math.min(
+          pendingCounts[metadata.endpoint] + 1,
+          MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT + 1,
+        );
+      }
+      return summarizeDefaultWaitObservation(
+        pendingCounts,
+        otherOriginCalendarPathCountBySample.get(sample) ?? 0,
+      );
+    },
     waitForRoomEvents: async (sample, expectedRangeClass) => {
       await waitUntil(() =>
         apiResponses.some(
@@ -1978,6 +2024,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
     | 'performance-widget-open-failed'
     | 'performance-host-layout-failed'
     | 'performance-range-selection-failed'
+    | 'performance-default-view-failed'
     | 'performance-cold-list-failed'
     | 'performance-view-sample-failed'
     | 'performance-details-failed'
@@ -2097,8 +2144,15 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
         },
       });
 
-      failureCode = 'performance-cold-list-failed';
-      await observer.waitForRoomEvents(defaultSample, 'preselection');
+      failureCode = 'performance-default-view-failed';
+      try {
+        await observer.waitForRoomEvents(defaultSample, 'preselection');
+      } catch {
+        caseReport.defaultWaitObservation =
+          observer.defaultWaitObservation(defaultSample);
+        throw new Error('Default calendar response was not observed');
+      }
+      failureCode = 'performance-view-sample-failed';
       const defaultMeasurement = await readStableRowCount(frame);
       await observer.waitForSettled(defaultSample);
       const defaultEventRows = observer
@@ -2196,6 +2250,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
 
       failureCode = 'performance-cold-list-failed';
       await observer.waitForRoomEvents(coldSample, 'list31');
+      failureCode = 'performance-view-sample-failed';
       const body = frame.locator('body');
       const coldMeasurement = await readStableList(frame, expectedTitles);
       await observer.waitForSettled(coldSample);

@@ -3,6 +3,7 @@ const FAILURE_CODES = new Set([
   'performance-widget-open-failed',
   'performance-host-layout-failed',
   'performance-range-selection-failed',
+  'performance-default-view-failed',
   'performance-cold-list-failed',
   'performance-warmup-failed',
   'performance-view-sample-failed',
@@ -12,14 +13,16 @@ const FAILURE_CODES = new Set([
   'performance-page-error',
   'performance-threshold-exceeded',
 ]);
-const ENDPOINTS = new Set([
+const DEFAULT_WAIT_ENDPOINTS = [
   'context',
   'calendars',
   'events',
   'openid',
   'other-calendar',
   'other-api',
-]);
+];
+const ENDPOINTS = new Set(DEFAULT_WAIT_ENDPOINTS);
+export const MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT = 512;
 const TARGETS = new Set(['none', 'personal', 'room', 'other']);
 const RANGE_CLASSES = new Set([
   'not-applicable',
@@ -252,6 +255,52 @@ function validApiResponse(value) {
   );
 }
 
+export function summarizeDefaultWaitObservation(
+  pendingEndpointCounts,
+  otherOriginCalendarPathCount,
+) {
+  if (
+    !isRecord(pendingEndpointCounts) ||
+    Object.keys(pendingEndpointCounts).length !==
+      DEFAULT_WAIT_ENDPOINTS.length ||
+    Object.keys(pendingEndpointCounts).some(
+      (endpoint) => !ENDPOINTS.has(endpoint),
+    ) ||
+    DEFAULT_WAIT_ENDPOINTS.some(
+      (endpoint) =>
+        !Number.isSafeInteger(pendingEndpointCounts[endpoint]) ||
+        pendingEndpointCounts[endpoint] < 0,
+    ) ||
+    !Number.isSafeInteger(otherOriginCalendarPathCount) ||
+    otherOriginCalendarPathCount < 0
+  ) {
+    throw new Error('invalid default wait observation input');
+  }
+
+  const pendingByEndpoint = {};
+  const pendingOverflowByEndpoint = {};
+  for (const endpoint of DEFAULT_WAIT_ENDPOINTS) {
+    const count = pendingEndpointCounts[endpoint];
+    pendingByEndpoint[endpoint] = Math.min(
+      count,
+      MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+    );
+    pendingOverflowByEndpoint[endpoint] =
+      count > MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT;
+  }
+
+  return {
+    pendingByEndpoint,
+    pendingOverflowByEndpoint,
+    otherOriginCalendarPathCount: Math.min(
+      otherOriginCalendarPathCount,
+      MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+    ),
+    otherOriginCalendarPathOverflow:
+      otherOriginCalendarPathCount > MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+  };
+}
+
 function validLegacyReport(report) {
   return (
     hasExactKeys(report, REPORT_KEYS) &&
@@ -369,6 +418,7 @@ const ORDINARY_CASE_KEYS = [
   'eventCount',
   'preparation',
   'defaultView',
+  'defaultWaitObservation',
   'coldList',
   'refreshSetup',
   'refresh',
@@ -384,6 +434,12 @@ const DEFAULT_VIEW_KEYS = [
   'countMatches',
   'usableControlVisible',
   'stable',
+];
+const DEFAULT_WAIT_OBSERVATION_KEYS = [
+  'pendingByEndpoint',
+  'pendingOverflowByEndpoint',
+  'otherOriginCalendarPathCount',
+  'otherOriginCalendarPathOverflow',
 ];
 const ACTION_KEYS = [
   'durationMs',
@@ -447,6 +503,40 @@ function validOrdinaryDefaultView(value) {
   );
 }
 
+function validDefaultWaitObservation(value) {
+  if (value === null) return true;
+  if (
+    !hasExactKeys(value, DEFAULT_WAIT_OBSERVATION_KEYS) ||
+    !hasExactKeys(value.pendingByEndpoint, DEFAULT_WAIT_ENDPOINTS) ||
+    !hasExactKeys(value.pendingOverflowByEndpoint, DEFAULT_WAIT_ENDPOINTS) ||
+    !boundedInteger(
+      value.otherOriginCalendarPathCount,
+      0,
+      MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+    ) ||
+    typeof value.otherOriginCalendarPathOverflow !== 'boolean'
+  ) {
+    return false;
+  }
+
+  for (const endpoint of DEFAULT_WAIT_ENDPOINTS) {
+    const count = value.pendingByEndpoint[endpoint];
+    const overflow = value.pendingOverflowByEndpoint[endpoint];
+    if (
+      !boundedInteger(count, 0, MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT) ||
+      typeof overflow !== 'boolean' ||
+      (overflow && count !== MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT)
+    ) {
+      return false;
+    }
+  }
+
+  return (
+    !value.otherOriginCalendarPathOverflow ||
+    value.otherOriginCalendarPathCount === MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT
+  );
+}
+
 function validOrdinaryAction(value) {
   return (
     hasExactKeys(value, ACTION_KEYS) &&
@@ -478,6 +568,7 @@ function validOrdinaryCase(value) {
       optionalMilliseconds(value.preparation[key]),
     ) &&
     validOrdinaryDefaultView(value.defaultView) &&
+    validDefaultWaitObservation(value.defaultWaitObservation) &&
     validOrdinaryColdList(value.coldList) &&
     validOrdinaryAction(value.refreshSetup) &&
     validOrdinaryAction(value.refresh) &&
@@ -492,7 +583,7 @@ function validOrdinaryCase(value) {
 function validOrdinaryReport(report) {
   return (
     hasExactKeys(report, ORDINARY_REPORT_KEYS) &&
-    report.version === 3 &&
+    report.version === 4 &&
     report.viewportWidth === 1280 &&
     report.viewportHeight === 800 &&
     report.calendarDays === 31 &&
@@ -524,7 +615,7 @@ function validOrdinaryReport(report) {
 }
 
 function validReport(report) {
-  return isRecord(report) && report.version === 3
+  return isRecord(report) && report.version === 4
     ? validOrdinaryReport(report)
     : validLegacyReport(report);
 }
@@ -888,9 +979,20 @@ function ordinaryReportPasses(report) {
 }
 
 function reportPasses(report) {
-  return report.version === 3
+  return report.version === 4
     ? ordinaryReportPasses(report)
     : legacyReportPasses(report);
+}
+
+function validDefaultWaitRecord(record) {
+  if (record.performanceReport.version !== 4) return true;
+  const snapshotCount = record.performanceReport.cases.filter(
+    (performanceCase) => performanceCase.defaultWaitObservation !== null,
+  ).length;
+  return record.status === 'failed' &&
+    record.failureCode === 'performance-default-view-failed'
+    ? snapshotCount === 1
+    : snapshotCount === 0;
 }
 
 function display(value) {
@@ -921,7 +1023,7 @@ function formatOrdinaryPerformanceEvidence(record) {
   const lines = [
     [
       'phase=performance-pilot',
-      'report_version=3',
+      'report_version=4',
       'profile=ordinary-0-25',
       `beta_gate_eligible=${record.status === 'passed'}`,
       `status=${record.status}`,
@@ -945,6 +1047,7 @@ function formatOrdinaryPerformanceEvidence(record) {
       eventCount,
       preparation,
       defaultView,
+      defaultWaitObservation,
       coldList,
     } = performanceCase;
     lines.push(
@@ -1001,6 +1104,22 @@ function formatOrdinaryPerformanceEvidence(record) {
       ),
       formatOrdinaryAction(profile, 'refresh', performanceCase.refresh),
     );
+    if (defaultWaitObservation !== null) {
+      const counts = defaultWaitObservation.pendingByEndpoint;
+      const overflows = defaultWaitObservation.pendingOverflowByEndpoint;
+      lines.push(
+        [
+          'performance_default_wait_observation',
+          `profile=${profile}`,
+          ...DEFAULT_WAIT_ENDPOINTS.flatMap((endpoint) => [
+            `pending_${endpoint.replace('-', '_')}=${counts[endpoint]}`,
+            `pending_${endpoint.replace('-', '_')}_overflow=${overflows[endpoint]}`,
+          ]),
+          `other_origin_calendar_paths=${defaultWaitObservation.otherOriginCalendarPathCount}`,
+          `other_origin_calendar_paths_overflow=${defaultWaitObservation.otherOriginCalendarPathOverflow}`,
+        ].join(' '),
+      );
+    }
     if (performanceCase.detailSamples.length === 0) {
       lines.push(`performance_details profile=${profile} samples=0`);
     }
@@ -1050,6 +1169,7 @@ export function formatPerformanceEvidence(record) {
     record.phase !== 'performance-pilot' ||
     !['started', 'passed', 'failed'].includes(record.status) ||
     !validReport(record.performanceReport) ||
+    !validDefaultWaitRecord(record) ||
     (record.failureCode !== undefined &&
       !FAILURE_CODES.has(record.failureCode)) ||
     (record.status === 'passed' &&
@@ -1061,7 +1181,7 @@ export function formatPerformanceEvidence(record) {
   }
 
   const report = record.performanceReport;
-  if (report.version === 3) {
+  if (report.version === 4) {
     return formatOrdinaryPerformanceEvidence(record);
   }
   const lines = [

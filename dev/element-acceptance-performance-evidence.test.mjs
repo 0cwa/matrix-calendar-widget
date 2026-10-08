@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {
+  MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+  summarizeDefaultWaitObservation,
+} from './element-acceptance-performance-evidence.mjs';
 import { sanitizeElementAcceptance } from './sanitize-element-acceptance.mjs';
 
 const sourceSha = 'b'.repeat(40);
@@ -282,6 +286,7 @@ function ordinaryCase(profile, year, month, eventCount) {
       usableControlVisible: true,
       stable: true,
     },
+    defaultWaitObservation: null,
     coldList: ordinaryColdList(eventCount),
     refreshSetup: ordinaryAction(eventCount, 2500),
     refresh: ordinaryAction(eventCount, 1900),
@@ -297,7 +302,7 @@ function ordinaryCase(profile, year, month, eventCount) {
 
 function ordinaryReport() {
   const report = {
-    version: 3,
+    version: 4,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 31,
@@ -387,7 +392,7 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   );
   assert.match(
     summary,
-    /phase=performance-pilot report_version=3 profile=ordinary-0-25 beta_gate_eligible=true status=passed/u,
+    /phase=performance-pilot report_version=4 profile=ordinary-0-25 beta_gate_eligible=true status=passed/u,
   );
   assert.match(summary, /performance_case profile=empty events=0/u);
   assert.match(summary, /performance_case profile=events-25 events=25/u);
@@ -406,6 +411,222 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   assert.match(summary, /performance_details profile=empty samples=0/u);
   assert.match(summary, /performance_details profile=events-25 index=5/u);
   assert.doesNotMatch(summary, /Performance\s+\d|access_token|https?:\/\//u);
+});
+
+test('summarizes default wait counters as observed zero, bounded counts, and overflow', () => {
+  const endpoints = {
+    context: 0,
+    calendars: 0,
+    events: 0,
+    openid: 0,
+    'other-calendar': 0,
+    'other-api': 0,
+  };
+  const observedZero = summarizeDefaultWaitObservation(endpoints, 0);
+  assert.equal(observedZero.pendingByEndpoint.events, 0);
+  assert.equal(observedZero.pendingOverflowByEndpoint.events, false);
+  assert.equal(observedZero.otherOriginCalendarPathCount, 0);
+  assert.equal(observedZero.otherOriginCalendarPathOverflow, false);
+
+  const saturated = summarizeDefaultWaitObservation(
+    { ...endpoints, events: MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT + 9 },
+    MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT + 1,
+  );
+  assert.equal(
+    saturated.pendingByEndpoint.events,
+    MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+  );
+  assert.equal(saturated.pendingOverflowByEndpoint.events, true);
+  assert.equal(
+    saturated.otherOriginCalendarPathCount,
+    MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+  );
+  assert.equal(saturated.otherOriginCalendarPathOverflow, true);
+  assert.throws(
+    () => summarizeDefaultWaitObservation({ ...endpoints, secret: 1 }, 0),
+    /invalid default wait observation input/u,
+  );
+});
+
+test('retains default-wait snapshots only for the matching failed stage', () => {
+  const report = ordinaryReport();
+  report.cases[0].defaultWaitObservation = summarizeDefaultWaitObservation(
+    {
+      context: 0,
+      calendars: 1,
+      events: 1,
+      openid: 0,
+      'other-calendar': 0,
+      'other-api': 0,
+    },
+    2,
+  );
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(
+      ordinaryStage('failed', report, 'performance-default-view-failed'),
+    ),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /performance_default_wait_observation profile=empty pending_context=0 pending_context_overflow=false pending_calendars=1 pending_calendars_overflow=false pending_events=1 pending_events_overflow=false pending_openid=0 pending_openid_overflow=false pending_other_calendar=0 pending_other_calendar_overflow=false pending_other_api=0 pending_other_api_overflow=false other_origin_calendar_paths=2 other_origin_calendar_paths_overflow=false/u,
+  );
+  assert.match(
+    summary,
+    /performance_api sample=empty-default endpoint=events/u,
+  );
+
+  const observedZero = ordinaryReport();
+  observedZero.cases[0].defaultWaitObservation =
+    summarizeDefaultWaitObservation(
+      {
+        context: 0,
+        calendars: 0,
+        events: 0,
+        openid: 0,
+        'other-calendar': 0,
+        'other-api': 0,
+      },
+      0,
+    );
+  const zeroSummary = sanitizeElementAcceptance(
+    JSON.stringify(
+      ordinaryStage('failed', observedZero, 'performance-default-view-failed'),
+    ),
+    sourceSha,
+  );
+  assert.match(zeroSummary, /pending_events=0 pending_events_overflow=false/u);
+  assert.match(zeroSummary, /other_origin_calendar_paths=0/u);
+
+  const overflowed = ordinaryReport();
+  overflowed.cases[0].defaultWaitObservation = summarizeDefaultWaitObservation(
+    {
+      context: 0,
+      calendars: 0,
+      events: MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT + 1,
+      openid: 0,
+      'other-calendar': 0,
+      'other-api': 0,
+    },
+    MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT + 1,
+  );
+  const overflowSummary = sanitizeElementAcceptance(
+    JSON.stringify(
+      ordinaryStage('failed', overflowed, 'performance-default-view-failed'),
+    ),
+    sourceSha,
+  );
+  assert.match(
+    overflowSummary,
+    /pending_events=512 pending_events_overflow=true/u,
+  );
+  assert.match(
+    overflowSummary,
+    /other_origin_calendar_paths=512 other_origin_calendar_paths_overflow=true/u,
+  );
+
+  const passedWithSnapshot = ordinaryReport();
+  passedWithSnapshot.cases[0].defaultWaitObservation =
+    summarizeDefaultWaitObservation(
+      {
+        context: 0,
+        calendars: 0,
+        events: 0,
+        openid: 0,
+        'other-calendar': 0,
+        'other-api': 0,
+      },
+      0,
+    );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', passedWithSnapshot)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
+test('rejects malformed or mismatched default-wait diagnostics', () => {
+  const makeObservation = () =>
+    summarizeDefaultWaitObservation(
+      {
+        context: 0,
+        calendars: 0,
+        events: 0,
+        openid: 0,
+        'other-calendar': 0,
+        'other-api': 0,
+      },
+      0,
+    );
+
+  const malformed = ordinaryReport();
+  malformed.cases[0].defaultWaitObservation = {
+    ...makeObservation(),
+    rawUrl: 'https://private.invalid',
+  };
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(
+          ordinaryStage('failed', malformed, 'performance-default-view-failed'),
+        ),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const inconsistentOverflow = ordinaryReport();
+  inconsistentOverflow.cases[0].defaultWaitObservation = makeObservation();
+  inconsistentOverflow.cases[0].defaultWaitObservation.pendingOverflowByEndpoint.events = true;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(
+          ordinaryStage(
+            'failed',
+            inconsistentOverflow,
+            'performance-default-view-failed',
+          ),
+        ),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const mismatchedFailure = ordinaryReport();
+  mismatchedFailure.cases[0].defaultWaitObservation = makeObservation();
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(
+          ordinaryStage(
+            'failed',
+            mismatchedFailure,
+            'performance-cold-list-failed',
+          ),
+        ),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(
+          ordinaryStage(
+            'failed',
+            ordinaryReport(),
+            'performance-default-view-failed',
+          ),
+        ),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
 });
 
 test('rejects contradictory empty counts, incomplete detail samples, and slow refresh', () => {
