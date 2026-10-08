@@ -44,6 +44,16 @@ const MAX_UID_LIFECYCLE_PROCESSES = 4_096;
 const MAX_CLEANUP_ORIGIN_INPUT_BYTES = 2_048;
 const MAX_CLEANUP_ORIGIN_MARKER_BYTES = 64;
 const MAX_CLEANUP_ORIGIN_PROCESSES = 4_096;
+const MAX_CLEANUP_ORIGIN_DIRECTORY_ENTRIES = MAX_CLEANUP_ORIGIN_PROCESSES + 64;
+const MAX_CLEANUP_ORIGIN_STATUS_BYTES = 1_024;
+const MAX_CLEANUP_ORIGIN_STAT_BYTES = 1_024;
+const MAX_CLEANUP_ORIGIN_SCAN_RECORDS = MAX_CLEANUP_ORIGIN_PROCESSES * 2;
+const MAX_CLEANUP_ORIGIN_OBSERVATION_BYTES = 24 * 1_024 * 1_024;
+const MAX_CLEANUP_ORIGIN_OBSERVATION_RECORDS =
+  MAX_CLEANUP_ORIGIN_SCAN_RECORDS * 2;
+const MAX_CLEANUP_ORIGIN_OBSERVATION_MS = 4_000;
+const MAX_CLEANUP_ORIGIN_ANCESTOR_DEPTH = 64;
+const MAX_CLEANUP_ORIGIN_EXE_BYTES = 4_096;
 const MAX_CDP_PROCESS_INFO_RECORDS = 128;
 const MAX_CDP_RENDERER_PIDS = 64;
 const MAX_CDP_RENDERER_HANDOFF_BYTES = 2_048;
@@ -2184,73 +2194,345 @@ function validateCleanupOriginProfile(request) {
   return null;
 }
 
-function scanCleanupOriginProcesses(uid, identityPids = []) {
-  if (!Number.isSafeInteger(uid) || uid < 1 || uid > 65_535) {
-    return { state: 'incomplete' };
-  }
-  const preferredPids = new Set(
-    Array.isArray(identityPids)
-      ? identityPids.filter(
-          (pid) =>
-            Number.isSafeInteger(pid) && pid >= 2 && pid <= 2_147_483_647,
-        )
-      : [],
+const cleanupOriginProcIo = Object.freeze({
+  opendirSync,
+  openSync,
+  readSync,
+  closeSync,
+  readlinkSync,
+  now: () => Number(process.hrtime.bigint() / 1_000_000n),
+});
+
+function validCleanupOriginProcIo(io) {
+  return (
+    io !== null &&
+    typeof io === 'object' &&
+    typeof io.opendirSync === 'function' &&
+    typeof io.openSync === 'function' &&
+    typeof io.readSync === 'function' &&
+    typeof io.closeSync === 'function' &&
+    typeof io.readlinkSync === 'function' &&
+    typeof io.now === 'function'
   );
-  let directoryEntries;
+}
+
+function createCleanupOriginObservationBudget(io) {
+  if (!validCleanupOriginProcIo(io)) return null;
+  let startedAt;
   try {
-    directoryEntries = readCappedDirectoryEntries(
-      opendirSync('/proc'),
-      MAX_CLEANUP_ORIGIN_PROCESSES,
-      (entry) => /^[0-9]+$/u.test(entry.name),
+    startedAt = io.now();
+  } catch {
+    return null;
+  }
+  if (!Number.isFinite(startedAt)) return null;
+  return {
+    io,
+    startedAt,
+    deadline: startedAt + MAX_CLEANUP_ORIGIN_OBSERVATION_MS,
+    bytesRead: 0,
+    recordsRetained: 0,
+  };
+}
+
+function cleanupOriginBudgetExceeded(budget) {
+  let currentTime;
+  try {
+    currentTime = budget.io.now();
+  } catch {
+    return true;
+  }
+  return !Number.isFinite(currentTime) || currentTime > budget.deadline;
+}
+
+function readCleanupOriginProcText(path, maximumBytes, budget) {
+  if (cleanupOriginBudgetExceeded(budget)) return { state: 'overflow' };
+  const remainingBytes =
+    MAX_CLEANUP_ORIGIN_OBSERVATION_BYTES - budget.bytesRead;
+  if (remainingBytes < maximumBytes) return { state: 'overflow' };
+
+  let descriptor;
+  let result = { state: 'incomplete' };
+  let closeFailed = false;
+  try {
+    descriptor = budget.io.openSync(
+      path,
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
     );
+    const buffer = Buffer.alloc(maximumBytes);
+    let length = 0;
+    while (length < buffer.length) {
+      if (cleanupOriginBudgetExceeded(budget)) {
+        result = { state: 'overflow' };
+        break;
+      }
+      const count = budget.io.readSync(
+        descriptor,
+        buffer,
+        length,
+        buffer.length - length,
+        null,
+      );
+      if (
+        !Number.isSafeInteger(count) ||
+        count < 0 ||
+        count > buffer.length - length
+      ) {
+        break;
+      }
+      if (count === 0) {
+        result = {
+          state: 'observed',
+          text: buffer.subarray(0, length).toString('utf8'),
+        };
+        break;
+      }
+      length += count;
+      budget.bytesRead += count;
+      if (cleanupOriginBudgetExceeded(budget)) {
+        result = { state: 'overflow' };
+        break;
+      }
+      if (length === buffer.length) {
+        result = { state: 'observed', text: buffer.toString('utf8') };
+      }
+    }
+  } catch {
+    result = { state: 'incomplete' };
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        budget.io.closeSync(descriptor);
+      } catch {
+        closeFailed = true;
+      }
+    }
+  }
+  if (closeFailed) return { state: 'incomplete' };
+  return result;
+}
+
+function readCleanupOriginDirectoryEntries(budget) {
+  if (cleanupOriginBudgetExceeded(budget)) return { state: 'overflow' };
+  let directory;
+  try {
+    directory = budget.io.opendirSync('/proc');
   } catch {
     return { state: 'unavailable' };
   }
-  if (directoryEntries.overflow) return { state: 'overflow' };
 
-  const processes = new Map();
-  for (const entry of directoryEntries.entries) {
-    const pid = Number(entry.name);
-    if (!Number.isSafeInteger(pid) || pid < 1) {
-      return { state: 'incomplete' };
+  const entries = [];
+  let rawEntryCount = 0;
+  let state = 'observed';
+  try {
+    while (true) {
+      if (cleanupOriginBudgetExceeded(budget)) {
+        state = 'overflow';
+        break;
+      }
+      const entry = directory.readSync();
+      if (entry === null) break;
+      rawEntryCount += 1;
+      if (rawEntryCount > MAX_CLEANUP_ORIGIN_DIRECTORY_ENTRIES) {
+        state = 'overflow';
+        break;
+      }
+      if (typeof entry.name !== 'string' || !/^[0-9]+$/u.test(entry.name)) {
+        continue;
+      }
+      if (entries.length === MAX_CLEANUP_ORIGIN_PROCESSES) {
+        state = 'overflow';
+        break;
+      }
+      entries.push(entry);
     }
-    const path = `/proc/${entry.name}`;
-    let statText;
-    let statusText;
+  } catch {
+    state = 'incomplete';
+  } finally {
     try {
-      statText = readFileSync(`${path}/stat`, 'utf8');
-      statusText = readFileSync(`${path}/status`, 'utf8');
+      directory.closeSync();
+    } catch {
+      state = 'incomplete';
+    }
+  }
+  return { state, entries };
+}
+
+function parseCleanupOriginUidTuple(text) {
+  const uidText = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$/mu.exec(text);
+  if (!uidText) return null;
+  const uids = uidText.slice(1).map(Number);
+  return uids.every(Number.isSafeInteger) ? uids : null;
+}
+
+function retainCleanupOriginRecord(processes, process, budget) {
+  if (processes.has(process.pid)) return true;
+  if (
+    processes.size >= MAX_CLEANUP_ORIGIN_SCAN_RECORDS ||
+    budget.recordsRetained >= MAX_CLEANUP_ORIGIN_OBSERVATION_RECORDS
+  ) {
+    return false;
+  }
+  processes.set(process.pid, process);
+  budget.recordsRetained += 1;
+  return true;
+}
+
+function readCleanupOriginProcessRecord(
+  pid,
+  budget,
+  { uids, uidMember, boundIdentity, includeExecutable },
+) {
+  const statText = readCleanupOriginProcText(
+    `/proc/${pid}/stat`,
+    MAX_CLEANUP_ORIGIN_STAT_BYTES,
+    budget,
+  );
+  if (statText.state !== 'observed') return statText;
+  const stat = parseProcStat(pid, statText.text);
+  const startTimeTicks = parseProcStartTimeTicks(pid, statText.text);
+  if (stat === null || startTimeTicks === null) return { state: 'incomplete' };
+
+  let executableName = null;
+  if (includeExecutable) {
+    if (cleanupOriginBudgetExceeded(budget)) return { state: 'overflow' };
+    if (
+      MAX_CLEANUP_ORIGIN_OBSERVATION_BYTES - budget.bytesRead <
+      MAX_CLEANUP_ORIGIN_EXE_BYTES
+    ) {
+      return { state: 'overflow' };
+    }
+    let executablePath;
+    try {
+      executablePath = budget.io.readlinkSync(`/proc/${pid}/exe`);
     } catch {
       return { state: 'incomplete' };
     }
-    const stat = parseProcStat(pid, statText);
-    const startTimeTicks = parseProcStartTimeTicks(pid, statText);
-    const status = parseProcStatus(statusText);
+    if (typeof executablePath !== 'string') return { state: 'incomplete' };
+    const executablePathBytes = Buffer.byteLength(executablePath, 'utf8');
+    if (executablePathBytes > MAX_CLEANUP_ORIGIN_EXE_BYTES) {
+      return { state: 'overflow' };
+    }
     if (
-      stat === null ||
-      startTimeTicks === null ||
-      status === null ||
-      !status.uids.every(Number.isSafeInteger)
+      budget.bytesRead + executablePathBytes >
+      MAX_CLEANUP_ORIGIN_OBSERVATION_BYTES
     ) {
-      return { state: 'incomplete' };
+      return { state: 'overflow' };
     }
-    let executableName = null;
-    if (status.uids.includes(uid) || preferredPids.has(pid)) {
-      try {
-        executableName = basename(readlinkSync(`${path}/exe`)).toLowerCase();
-      } catch {
-        executableName = null;
-      }
-    }
-    processes.set(pid, {
+    budget.bytesRead += executablePathBytes;
+    executableName = basename(executablePath).toLowerCase();
+    if (cleanupOriginBudgetExceeded(budget)) return { state: 'overflow' };
+  }
+  return {
+    state: 'observed',
+    process: {
       pid,
       parentPid: stat.parentPid,
       processGroupId: stat.processGroupId,
       state: stat.state,
       startTimeTicks,
-      uids: status.uids,
+      ...(uids === undefined ? {} : { uids }),
+      uidMember,
+      boundIdentity,
+      ancestorOnly: false,
       executableName,
+    },
+  };
+}
+
+export function scanCleanupOriginProcesses(uid, identityPids = [], budget) {
+  if (!Number.isSafeInteger(uid) || uid < 1 || uid > 65_535) {
+    return { state: 'incomplete' };
+  }
+  if (!Array.isArray(identityPids) || identityPids.length > 2) {
+    return { state: 'incomplete' };
+  }
+  const preferredPids = new Set(
+    identityPids.filter(
+      (pid) => Number.isSafeInteger(pid) && pid >= 2 && pid <= 2_147_483_647,
+    ),
+  );
+  const scanBudget =
+    budget ?? createCleanupOriginObservationBudget(cleanupOriginProcIo);
+  if (
+    scanBudget === null ||
+    !validCleanupOriginProcIo(scanBudget.io) ||
+    !Number.isFinite(scanBudget.deadline) ||
+    !Number.isSafeInteger(scanBudget.bytesRead) ||
+    !Number.isSafeInteger(scanBudget.recordsRetained)
+  ) {
+    return { state: 'unavailable' };
+  }
+  const directoryEntries = readCleanupOriginDirectoryEntries(scanBudget);
+  if (directoryEntries.state !== 'observed') {
+    return { state: directoryEntries.state };
+  }
+
+  const processes = new Map();
+  for (const entry of directoryEntries.entries) {
+    if (cleanupOriginBudgetExceeded(scanBudget)) return { state: 'overflow' };
+    const pid = Number(entry.name);
+    if (!Number.isSafeInteger(pid) || pid < 1 || pid > 2_147_483_647) {
+      return { state: 'incomplete' };
+    }
+    const statusText = readCleanupOriginProcText(
+      `/proc/${entry.name}/status`,
+      MAX_CLEANUP_ORIGIN_STATUS_BYTES,
+      scanBudget,
+    );
+    if (statusText.state !== 'observed') return { state: statusText.state };
+    const uids = parseCleanupOriginUidTuple(statusText.text);
+    if (uids === null) return { state: 'incomplete' };
+    const uidMember = uids.includes(uid);
+    const boundIdentity = preferredPids.has(pid);
+    if (!uidMember && !boundIdentity) continue;
+
+    const process = readCleanupOriginProcessRecord(pid, scanBudget, {
+      uids,
+      uidMember,
+      boundIdentity,
+      includeExecutable: true,
     });
+    if (process.state !== 'observed') return { state: process.state };
+    if (!retainCleanupOriginRecord(processes, process.process, scanBudget)) {
+      return { state: 'overflow' };
+    }
+  }
+
+  const targets = [...processes.values()].filter(
+    (process) => process.uidMember,
+  );
+  for (const target of targets) {
+    let parentPid = target.parentPid;
+    const visited = new Set();
+    for (let depth = 0; depth < MAX_CLEANUP_ORIGIN_ANCESTOR_DEPTH; depth += 1) {
+      if (parentPid === 1) break;
+      if (parentPid < 1 || visited.has(parentPid)) {
+        return { state: 'incomplete' };
+      }
+      visited.add(parentPid);
+      let parent = processes.get(parentPid);
+      if (!parent) {
+        const ancestor = readCleanupOriginProcessRecord(parentPid, scanBudget, {
+          uidMember: false,
+          boundIdentity: false,
+          includeExecutable: false,
+        });
+        if (ancestor.state !== 'observed') return { state: ancestor.state };
+        parent = {
+          pid: parentPid,
+          parentPid: ancestor.process.parentPid,
+          startTimeTicks: ancestor.process.startTimeTicks,
+          uidMember: false,
+          boundIdentity: false,
+          ancestorOnly: true,
+        };
+        if (!retainCleanupOriginRecord(processes, parent, scanBudget)) {
+          return { state: 'overflow' };
+        }
+      }
+      parentPid = parent.parentPid;
+    }
+    if (parentPid !== 1) return { state: 'incomplete' };
   }
   return { state: 'observed', processes };
 }
@@ -2263,15 +2545,21 @@ function sameCleanupOriginProcess(left, right) {
     left.parentPid === right.parentPid &&
     left.processGroupId === right.processGroupId &&
     left.startTimeTicks === right.startTimeTicks &&
-    left.uids.length === right.uids.length &&
-    left.uids.every((uid, index) => uid === right.uids[index])
+    left.uidMember === right.uidMember &&
+    left.boundIdentity === right.boundIdentity &&
+    left.ancestorOnly === right.ancestorOnly &&
+    (left.uids === undefined
+      ? right.uids === undefined
+      : Array.isArray(right.uids) &&
+        left.uids.length === right.uids.length &&
+        left.uids.every((uid, index) => uid === right.uids[index]))
   );
 }
 
 function cleanupOriginRelevantPids(processes, uid, identities) {
   const relevant = new Set();
-  const targets = [...processes.values()].filter((item) =>
-    item.uids.includes(uid),
+  const targets = [...processes.values()].filter(
+    (item) => item.uidMember === true,
   );
   for (const identity of identities) {
     if (identity !== null) relevant.add(identity.pid);
@@ -2280,7 +2568,12 @@ function cleanupOriginRelevantPids(processes, uid, identities) {
     relevant.add(target.pid);
     let parentPid = target.parentPid;
     const visited = new Set();
-    for (let depth = 0; depth < 64 && parentPid > 1; depth += 1) {
+    for (
+      let depth = 0;
+      depth < MAX_CLEANUP_ORIGIN_ANCESTOR_DEPTH && parentPid !== 1;
+      depth += 1
+    ) {
+      if (parentPid < 1) return null;
       if (visited.has(parentPid)) return null;
       visited.add(parentPid);
       relevant.add(parentPid);
@@ -2288,7 +2581,7 @@ function cleanupOriginRelevantPids(processes, uid, identities) {
       if (!parent) return null;
       parentPid = parent.parentPid;
     }
-    if (parentPid > 1) return null;
+    if (parentPid !== 1) return null;
   }
   return { pids: relevant, targets };
 }
@@ -2306,7 +2599,10 @@ function liveCleanupOriginIdentity(
     process.startTimeTicks === identity.startTimeTicks &&
     process.processGroupId === identity.pid &&
     process.state !== 'Z' &&
-    (uid === null || process.uids.every((value) => value === uid)) &&
+    (uid === null ||
+      (process.uidMember === true &&
+        Array.isArray(process.uids) &&
+        process.uids.every((value) => value === uid))) &&
     (executableName === null || process.executableName === executableName),
   );
 }
@@ -2314,8 +2610,9 @@ function liveCleanupOriginIdentity(
 function cleanupOriginAncestorRelation(process, processes, identities) {
   let parentPid = process.parentPid;
   const visited = new Set();
-  for (let depth = 0; depth < 64; depth += 1) {
-    if (parentPid <= 1) return 'unlinked';
+  for (let depth = 0; depth < MAX_CLEANUP_ORIGIN_ANCESTOR_DEPTH; depth += 1) {
+    if (parentPid === 1) return 'unlinked';
+    if (parentPid < 1) return 'unknown';
     if (visited.has(parentPid)) return 'unknown';
     visited.add(parentPid);
     const parent = processes.get(parentPid);
@@ -2550,6 +2847,7 @@ function classifyCleanupOriginSnapshots(
 export function readCleanupOriginObservation(
   request,
   scan = scanCleanupOriginProcesses,
+  procIo = cleanupOriginProcIo,
 ) {
   if (!validCleanupOriginRequest(request) || typeof scan !== 'function') {
     return emptyCleanupOriginProbe('unknown', 'invalid_request');
@@ -2561,8 +2859,12 @@ export function readCleanupOriginObservation(
   const identityPids = [request.appPid, request.controllerPid].filter(
     Number.isSafeInteger,
   );
-  const first = scan(request.uid, identityPids);
-  const second = scan(request.uid, identityPids);
+  const budget = createCleanupOriginObservationBudget(procIo);
+  if (budget === null) {
+    return emptyCleanupOriginProbe('unknown', 'process_scan_unavailable');
+  }
+  const first = scan(request.uid, identityPids, budget);
+  const second = scan(request.uid, identityPids, budget);
   for (const snapshot of [first, second]) {
     if (snapshot?.state === 'overflow') {
       return emptyCleanupOriginProbe('unknown', 'process_scan_overflow');
