@@ -37,6 +37,7 @@ import {
   type PerformanceDefaultWaitFailureSnapshot,
   type PerformanceDefaultWaitObservation,
 } from '../../dev/element-acceptance-performance-evidence.mjs';
+import { raceCalendarReadyOrIdentityPrompt } from '../../dev/element-acceptance-performance.mjs';
 import { ElementWebPage } from './pages/elementWebPage';
 import { fillDatePicker } from './pages/helper';
 
@@ -4385,16 +4386,14 @@ async function openCalendarWidget(
   let identityApprovalDurationMs = 0;
   let identityDialogShown: boolean;
   if (onTiming && waitForCalendar) {
-    const calendarReady = frame
-      .getByRole('button', { name: 'Create event', exact: true })
-      .waitFor({ timeout: 30_000 })
-      .then(() => false)
-      .catch(() => false);
-    const identityPrompt = identityContinue
-      .waitFor({ state: 'visible', timeout: 30_000 })
-      .then(() => true)
-      .catch(() => false);
-    identityDialogShown = await Promise.race([calendarReady, identityPrompt]);
+    const createEventButton = frame.getByRole('button', {
+      name: 'Create event',
+      exact: true,
+    });
+    identityDialogShown = await raceCalendarReadyOrIdentityPrompt(
+      () => expect(createEventButton).toBeEnabled({ timeout: 30_000 }),
+      () => identityContinue.waitFor({ state: 'visible', timeout: 30_000 }),
+    );
   } else {
     await identityContinue
       .waitFor({ state: 'visible', timeout: 8_000 })

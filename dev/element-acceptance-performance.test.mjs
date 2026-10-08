@@ -8,7 +8,16 @@ import {
   isSafePerformanceManifest,
   next31DayMonth,
   next31DayMonthAfter,
+  raceCalendarReadyOrIdentityPrompt,
 } from './element-acceptance-performance.mjs';
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 test('chooses a future 31-day local calendar month', () => {
   assert.deepEqual(next31DayMonth(new Date('2026-10-07T12:00:00.000Z')), {
@@ -19,6 +28,38 @@ test('chooses a future 31-day local calendar month', () => {
     year: 2026,
     month: 12,
   });
+});
+
+test('a disabled visible Create placeholder does not suppress identity approval', async () => {
+  const createControl = { visible: true, enabled: false };
+  const calendarEnabled = deferred();
+  const identityVisible = deferred();
+  const readiness = raceCalendarReadyOrIdentityPrompt(
+    () => {
+      assert.equal(createControl.visible, true);
+      return createControl.enabled
+        ? Promise.resolve()
+        : calendarEnabled.promise;
+    },
+    () => identityVisible.promise,
+  );
+
+  assert.deepEqual(createControl, { visible: true, enabled: false });
+  identityVisible.resolve();
+  assert.equal(await readiness, true);
+});
+
+test('calendar readiness wins only after the enabled-control wait resolves', async () => {
+  const createControl = { enabled: false };
+  const calendarEnabled = deferred();
+  const readiness = raceCalendarReadyOrIdentityPrompt(
+    () => (createControl.enabled ? Promise.resolve() : calendarEnabled.promise),
+    () => new Promise(() => {}),
+  );
+
+  createControl.enabled = true;
+  calendarEnabled.resolve();
+  assert.equal(await readiness, false);
 });
 
 test('chooses a distinct following 31-day month for the empty visible range', () => {

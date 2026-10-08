@@ -29,6 +29,19 @@ const PERFORMANCE_MANIFEST_STATES = new Set([
   'absent',
 ]);
 
+export async function raceCalendarReadyOrIdentityPrompt(
+  waitForCalendarEnabled,
+  waitForIdentityPrompt,
+) {
+  const calendarReady = waitForCalendarEnabled()
+    .then(() => false)
+    .catch(() => false);
+  const identityPrompt = waitForIdentityPrompt()
+    .then(() => true)
+    .catch(() => false);
+  return Promise.race([calendarReady, identityPrompt]);
+}
+
 export function next31DayMonth(now = new Date()) {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: TIMEZONE,
