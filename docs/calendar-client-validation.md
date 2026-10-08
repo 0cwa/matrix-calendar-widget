@@ -3,9 +3,10 @@
 This checklist separates automated calendar-widget evidence from testing in an
 actual Matrix client. The bounded beta targets Element Web and Element Desktop;
 test both against the isolated pinned Synapse, project-owned Radicale, and
-PostgreSQL stack before any production contact. The current candidate requires
-the actual standard side-panel WidgetCard, horizontal-overflow, and
-keyboard/focus checks described in `beta-scope.md`. The broader viewport
+PostgreSQL stack before any production contact. The current candidate requires the actual standard side-panel WidgetCard,
+horizontal-overflow, and keyboard/focus checks described in `beta-scope.md`.
+Its separate ordinary-load performance gate uses the default seven-day List
+view, as specified in `calendar-performance.md`. The broader viewport
 procedure below is reference guidance, not an additional candidate gate.
 Pinned/full-width Apps-drawer placement and Maximise/Un-maximise certification,
 mobile/other clients, and formal screen-reader certification are deferred

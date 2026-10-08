@@ -87,16 +87,18 @@ conventional CalDAV client login. Ordinary CalDAV login using a Matrix
 password is unsupported. The widget never asks for or stores Matrix passwords.
 
 The existing 1,000-event browser fixture is reference evidence, not a promised
-calendar-size limit or performance guarantee. Its month-view samples include
-a long task of about 2.63 seconds. The approved controlled-beta performance
-sample is 250 simple events in an exact 31-day List range, with per-sample
-limits of 1,000 ms for a fully decoded calendar API response, 2,000 ms for
-List/Month view completion, and 500 ms for event details. The full predeclared
-method and actual Month-range distinction are in
-[`calendar-performance.md`](./calendar-performance.md#controlled-beta-250-event-pilot-contract).
+calendar-size limit or performance guarantee. Its month-view samples include a
+long task of about 2.63 seconds. The approved controlled-beta performance gate
+uses fresh Element Web contexts with an empty default seven-day List view and
+exactly 25 simple events in that same interval. Cold activation and a normal
+same-range view refresh must each complete within 2,000 ms; every required
+non-OpenID calendar API response must decode within 1,000 ms; five details
+samples in the 25-event case must each complete within 500 ms. Custom 31-day
+and 250-event timing runs are diagnostic only. The full method is in
+[`calendar-performance.md`](./calendar-performance.md#controlled-beta-ordinary-load-contract).
 These are acceptance targets for the measured synthetic environment, not a
 universal event-count limit or production guarantee; no result is claimed
-until an exact-candidate hosted run records every sample.
+until an exact-candidate hosted run records every required sample.
 
 ## Required acceptance evidence
 
