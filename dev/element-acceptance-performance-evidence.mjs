@@ -62,6 +62,15 @@ const PAGE_ERROR_SOURCES = new Set([
   'ambiguous',
   'unclassified',
 ]);
+const PAGE_ERROR_SOURCE_MAP_STATUSES = new Set([
+  'not-eligible',
+  'not-attempted',
+  'unavailable',
+  'invalid',
+  'unmapped',
+  'mapped',
+]);
+const ORDINARY_REPORT_VERSIONS = new Set([9, 10]);
 const PAGE_ERROR_SUBTYPE_CLASS = new Map([
   ['error', 'error'],
   ['type-error', 'type-error'],
@@ -104,7 +113,7 @@ const PAGE_ERROR_STAGES = new Set([
   'case-cleanup',
 ]);
 const ORDINARY_PROFILES = new Set(['empty', 'events-25']);
-const PAGE_ERROR_OBSERVATION_KEYS = [
+const LEGACY_PAGE_ERROR_OBSERVATION_KEYS = [
   'profile',
   'stage',
   'errorClass',
@@ -112,6 +121,13 @@ const PAGE_ERROR_OBSERVATION_KEYS = [
   'errorSource',
   'stackAvailable',
   'sourceScanTruncated',
+];
+const PAGE_ERROR_OBSERVATION_KEYS = [
+  ...LEGACY_PAGE_ERROR_OBSERVATION_KEYS,
+  'sourceMapStatus',
+  'sourceRefSha256',
+  'sourceLine',
+  'sourceColumn',
 ];
 const API_SAMPLE =
   /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5]|(?:empty|events-25)-(?:default|refresh-setup|refresh)|events-25-details-[1-5])$/u;
@@ -1203,7 +1219,11 @@ function validOrdinaryReport(report) {
     Array.isArray(report.pageErrorObservations) &&
     report.pageErrorObservations.length <= 8 &&
     report.pageErrorObservations.every((observation) => {
-      if (!hasExactKeys(observation, PAGE_ERROR_OBSERVATION_KEYS)) {
+      const pageErrorObservationKeys =
+        report.version === 9
+          ? LEGACY_PAGE_ERROR_OBSERVATION_KEYS
+          : PAGE_ERROR_OBSERVATION_KEYS;
+      if (!hasExactKeys(observation, pageErrorObservationKeys)) {
         return false;
       }
       const subtypeClass = PAGE_ERROR_SUBTYPE_CLASS.get(
@@ -1221,6 +1241,30 @@ function validOrdinaryReport(report) {
           observation.errorSource === 'unclassified') &&
         (observation.errorSource === 'unclassified' ||
           (observation.stackAvailable && !observation.sourceScanTruncated));
+      const sourcePointerValid =
+        report.version === 9 ||
+        (PAGE_ERROR_SOURCE_MAP_STATUSES.has(observation.sourceMapStatus) &&
+          (observation.sourceMapStatus === 'mapped'
+            ? observation.errorSource === 'element' &&
+              observation.stage === 'widget-open' &&
+              observation.stackAvailable &&
+              !observation.sourceScanTruncated &&
+              typeof observation.sourceRefSha256 === 'string' &&
+              /^[a-f0-9]{64}$/u.test(observation.sourceRefSha256) &&
+              Number.isSafeInteger(observation.sourceLine) &&
+              observation.sourceLine >= 1 &&
+              observation.sourceLine <= 1_000_000 &&
+              Number.isSafeInteger(observation.sourceColumn) &&
+              observation.sourceColumn >= 0 &&
+              observation.sourceColumn <= 1_000_000
+            : observation.sourceRefSha256 === null &&
+              observation.sourceLine === null &&
+              observation.sourceColumn === null &&
+              (observation.sourceMapStatus === 'not-eligible' ||
+                (observation.errorSource === 'element' &&
+                  observation.stage === 'widget-open' &&
+                  observation.stackAvailable &&
+                  !observation.sourceScanTruncated))));
       return (
         ORDINARY_PROFILES.has(observation.profile) &&
         PAGE_ERROR_STAGES.has(observation.stage) &&
@@ -1228,7 +1272,8 @@ function validOrdinaryReport(report) {
         observation.errorClass !== 'none' &&
         PAGE_ERROR_SUBTYPES.has(observation.errorSubtype) &&
         subtypeClass === observation.errorClass &&
-        sourceEvidenceValid
+        sourceEvidenceValid &&
+        sourcePointerValid
       );
     }) &&
     typeof report.pageErrorObservationOverflow === 'boolean' &&
@@ -1243,7 +1288,7 @@ function validOrdinaryReport(report) {
             report.pageErrorClass));
   return (
     hasExactKeys(report, ORDINARY_REPORT_KEYS) &&
-    report.version === 9 &&
+    ORDINARY_REPORT_VERSIONS.has(report.version) &&
     report.viewportWidth === 1280 &&
     report.viewportHeight === 800 &&
     report.calendarDays === 7 &&
@@ -1276,7 +1321,7 @@ function validOrdinaryReport(report) {
 }
 
 function validReport(report) {
-  return isRecord(report) && report.version === 9
+  return isRecord(report) && ORDINARY_REPORT_VERSIONS.has(report.version)
     ? validOrdinaryReport(report)
     : validLegacyReport(report);
 }
@@ -1679,13 +1724,15 @@ function ordinaryReportPasses(report) {
 }
 
 function reportPasses(report) {
-  return report.version === 9
+  return ORDINARY_REPORT_VERSIONS.has(report.version)
     ? ordinaryReportPasses(report)
     : legacyReportPasses(report);
 }
 
 function validDefaultWaitRecord(record) {
-  if (record.performanceReport.version !== 9) return true;
+  if (!ORDINARY_REPORT_VERSIONS.has(record.performanceReport.version)) {
+    return true;
+  }
   const snapshotCount = record.performanceReport.cases.filter(
     (performanceCase) => performanceCase.defaultWaitObservation !== null,
   ).length;
@@ -1723,7 +1770,7 @@ function formatOrdinaryPerformanceEvidence(record) {
   const lines = [
     [
       'phase=performance-pilot',
-      'report_version=9',
+      `report_version=${report.version}`,
       'profile=ordinary-0-25',
       `beta_gate_eligible=${record.status === 'passed'}`,
       `status=${record.status}`,
@@ -1742,7 +1789,7 @@ function formatOrdinaryPerformanceEvidence(record) {
 
   for (const [index, observation] of report.pageErrorObservations.entries()) {
     lines.push(
-      `page_error_observation index=${index + 1} profile=${observation.profile} stage=${observation.stage} error_class=${observation.errorClass} error_subtype=${observation.errorSubtype} error_source=${observation.errorSource} stack_available=${observation.stackAvailable} source_scan_truncated=${observation.sourceScanTruncated}`,
+      `page_error_observation index=${index + 1} profile=${observation.profile} stage=${observation.stage} error_class=${observation.errorClass} error_subtype=${observation.errorSubtype} error_source=${observation.errorSource} stack_available=${observation.stackAvailable} source_scan_truncated=${observation.sourceScanTruncated}${report.version === 10 ? ` source_map_status=${observation.sourceMapStatus} source_ref_sha256=${observation.sourceRefSha256 ?? 'none'} source_line=${observation.sourceLine ?? 'none'} source_column=${observation.sourceColumn ?? 'none'}` : ''}`,
     );
   }
 
@@ -1926,7 +1973,7 @@ export function formatPerformanceEvidence(record) {
   }
 
   const report = record.performanceReport;
-  if (report.version === 9) {
+  if (ORDINARY_REPORT_VERSIONS.has(report.version)) {
     return formatOrdinaryPerformanceEvidence(record);
   }
   const lines = [

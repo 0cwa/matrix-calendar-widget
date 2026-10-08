@@ -304,7 +304,7 @@ function ordinaryCase(profile, year, month, eventCount) {
 
 function ordinaryReport() {
   const report = {
-    version: 9,
+    version: 10,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -394,7 +394,7 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   );
   assert.match(
     summary,
-    /phase=performance-pilot report_version=9 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
+    /phase=performance-pilot report_version=10 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
   );
   assert.match(summary, /performance_case profile=empty events=0/u);
   assert.match(summary, /performance_case profile=events-25 events=25/u);
@@ -422,6 +422,34 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   assert.match(summary, /performance_details profile=events-25 index=5/u);
   assert.match(summary, /page_error_observation_overflow=false/u);
   assert.doesNotMatch(summary, /Performance\s+\d|access_token|https?:\/\//u);
+});
+
+test('continues to sanitize the previous ordinary report shape', () => {
+  const report = ordinaryReport();
+  report.version = 9;
+  report.pageErrorCount = 1;
+  report.pageErrorClass = 'other';
+  report.pageErrorObservations = [
+    {
+      profile: 'empty',
+      stage: 'widget-open',
+      errorClass: 'other',
+      errorSubtype: 'named-error',
+      errorSource: 'element',
+      stackAvailable: true,
+      sourceScanTruncated: false,
+    },
+  ];
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(ordinaryStage('failed', report, 'performance-page-error')),
+    sourceSha,
+  );
+  assert.match(summary, /report_version=9/u);
+  assert.match(
+    summary,
+    /page_error_observation index=1 profile=empty stage=widget-open error_class=other error_subtype=named-error error_source=element stack_available=true source_scan_truncated=false$/mu,
+  );
+  assert.doesNotMatch(summary, /source_map_status|source_ref_sha256/u);
 });
 
 test('classifies only closed page-error subtype and configured origin buckets', () => {
@@ -582,15 +610,23 @@ test('summarizes bounded page-error stage observations without error text', () =
       errorSource: 'widget',
       stackAvailable: true,
       sourceScanTruncated: false,
+      sourceMapStatus: 'not-eligible',
+      sourceRefSha256: null,
+      sourceLine: null,
+      sourceColumn: null,
     },
     {
       profile: 'events-25',
-      stage: 'refresh',
+      stage: 'widget-open',
       errorClass: 'type-error',
       errorSubtype: 'type-error',
       errorSource: 'element',
       stackAvailable: true,
       sourceScanTruncated: false,
+      sourceMapStatus: 'mapped',
+      sourceRefSha256: 'a'.repeat(64),
+      sourceLine: 42,
+      sourceColumn: 5,
     },
   ];
   const summary = sanitizeElementAcceptance(
@@ -603,15 +639,15 @@ test('summarizes bounded page-error stage observations without error text', () =
   );
   assert.match(
     summary,
-    /page_error_observation index=1 profile=empty stage=widget-open error_class=other error_subtype=named-error error_source=widget stack_available=true source_scan_truncated=false/u,
+    /page_error_observation index=1 profile=empty stage=widget-open error_class=other error_subtype=named-error error_source=widget stack_available=true source_scan_truncated=false source_map_status=not-eligible source_ref_sha256=none source_line=none source_column=none/u,
   );
   assert.match(
     summary,
-    /page_error_observation index=2 profile=events-25 stage=refresh error_class=type-error error_subtype=type-error error_source=element stack_available=true source_scan_truncated=false/u,
+    /page_error_observation index=2 profile=events-25 stage=widget-open error_class=type-error error_subtype=type-error error_source=element stack_available=true source_scan_truncated=false source_map_status=mapped source_ref_sha256=a{64} source_line=42 source_column=5/u,
   );
   assert.doesNotMatch(
     summary,
-    /(?:error_message|error_stack)=|https?:\/\/|access_token|private error message/u,
+    /(?:error_message|error_stack)=|https?:\/\/|access_token|private error message|apps\/web/u,
   );
 
   for (const mutate of [
@@ -644,6 +680,25 @@ test('summarizes bounded page-error stage observations without error text', () =
       invalid.pageErrorObservations[0].stackAvailable = false;
       invalid.pageErrorObservations[0].sourceScanTruncated = true;
     },
+    (invalid) => {
+      invalid.pageErrorObservations[0].sourceMapStatus = 'mapped';
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[0].sourceRefSha256 = 'https://private';
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[1].sourceLine = 0;
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[1].sourceColumn = 1_000_001;
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[1].sourceMapStatus = 'unmapped';
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[1].sourceMapStatus = 'not-eligible';
+      invalid.pageErrorObservations[1].sourceRefSha256 = 'a'.repeat(64);
+    },
   ]) {
     const invalid = ordinaryReport();
     invalid.pageErrorCount = 2;
@@ -657,15 +712,23 @@ test('summarizes bounded page-error stage observations without error text', () =
         errorSource: 'widget',
         stackAvailable: true,
         sourceScanTruncated: false,
+        sourceMapStatus: 'not-eligible',
+        sourceRefSha256: null,
+        sourceLine: null,
+        sourceColumn: null,
       },
       {
         profile: 'events-25',
-        stage: 'refresh',
+        stage: 'widget-open',
         errorClass: 'type-error',
         errorSubtype: 'type-error',
         errorSource: 'element',
         stackAvailable: true,
         sourceScanTruncated: false,
+        sourceMapStatus: 'mapped',
+        sourceRefSha256: 'a'.repeat(64),
+        sourceLine: 42,
+        sourceColumn: 5,
       },
     ];
     mutate(invalid);
@@ -692,7 +755,13 @@ test('summarizes bounded page-error stage observations without error text', () =
     errorSource: index === 0 ? 'unclassified' : 'widget',
     stackAvailable: true,
     sourceScanTruncated: false,
+    sourceMapStatus: 'not-eligible',
+    sourceRefSha256: null,
+    sourceLine: null,
+    sourceColumn: null,
   }));
+  overflow.pageErrorObservations[1].errorSource = 'element';
+  overflow.pageErrorObservations[1].sourceMapStatus = 'not-attempted';
   overflow.pageErrorObservationOverflow = true;
   const overflowSummary = sanitizeElementAcceptance(
     JSON.stringify(ordinaryStage('failed', overflow, 'performance-page-error')),

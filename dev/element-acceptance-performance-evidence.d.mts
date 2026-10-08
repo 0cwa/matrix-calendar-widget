@@ -1,3 +1,5 @@
+import type { ElementErrorSourcePointer } from './element-acceptance-error-source-map.mjs';
+
 export type PerformanceHoverFailureClass =
   | 'timeout'
   | 'not-visible'
@@ -44,6 +46,23 @@ export type PerformancePageErrorClassification = {
   stackAvailable: boolean;
   sourceScanTruncated: boolean;
 };
+
+export type PerformancePageErrorObservation =
+  PerformancePageErrorClassification &
+    ElementErrorSourcePointer & {
+      profile: 'empty' | 'events-25';
+      stage:
+        | 'case-setup'
+        | 'element-login'
+        | 'room-navigation'
+        | 'widget-open'
+        | 'default-view'
+        | 'cold-layout'
+        | 'refresh-setup'
+        | 'refresh'
+        | 'details'
+        | 'case-cleanup';
+    };
 
 export type PerformanceEndpoint =
   | 'context'

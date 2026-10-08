@@ -32,6 +32,12 @@ import { arch, platform, release } from 'node:os';
 import { isAbsolute, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
+  extractElementBundleFrames,
+  resolveElementErrorSourcePointer,
+  type ElementBundleFrame,
+  type ElementErrorSourcePointer,
+} from '../../dev/element-acceptance-error-source-map.mjs';
+import {
   MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
   classifyPerformancePageError,
   summarizeDefaultWaitObservation,
@@ -324,10 +330,11 @@ type PerformancePageErrorStage =
   | 'details'
   | 'case-cleanup';
 
-type PerformancePageErrorObservation = PerformancePageErrorClassification & {
-  profile: OrdinaryPerformanceProfile;
-  stage: PerformancePageErrorStage;
-};
+type PerformancePageErrorObservation = PerformancePageErrorClassification &
+  ElementErrorSourcePointer & {
+    profile: OrdinaryPerformanceProfile;
+    stage: PerformancePageErrorStage;
+  };
 
 type OrdinaryPerformanceProfile = 'empty' | 'events-25';
 type OrdinaryPerformanceSampleKey =
@@ -499,7 +506,7 @@ type OrdinaryPerformanceCase = {
   detailSamples: PerformanceDetailsSample[];
 };
 type OrdinaryPerformanceReport = {
-  version: 9;
+  version: 10;
   viewportWidth: 1280;
   viewportHeight: 800;
   calendarDays: 7;
@@ -1056,7 +1063,7 @@ function makeEmptyOrdinaryPerformanceReport(initialDate: {
   month: number;
 }): OrdinaryPerformanceReport {
   return {
-    version: 9,
+    version: 10,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -2177,6 +2184,144 @@ test('Element Web members share events and enforce room authorization', async ({
   }
 });
 
+const ELEMENT_ERROR_SOURCE_MAP_MAX_BYTES = 64 * 1024 * 1024;
+const ELEMENT_ERROR_SOURCE_MAP_TIMEOUT_MS = 2500;
+const MAX_ELEMENT_ERROR_SOURCE_MAP_OBSERVATIONS = 2;
+const MAX_ELEMENT_ERROR_SOURCE_MAP_LOOKUPS = 4;
+
+async function readCappedElementErrorSourceMap(
+  page: Page,
+  frame: ElementBundleFrame,
+  expectedElementOrigin: string,
+  maxBytes: number,
+): Promise<{ text: string | null; bytesRead: number; limitReached: boolean }> {
+  if (
+    page.isClosed() ||
+    !Number.isSafeInteger(maxBytes) ||
+    maxBytes < 1 ||
+    maxBytes > ELEMENT_ERROR_SOURCE_MAP_MAX_BYTES
+  ) {
+    return { text: null, bytesRead: 0, limitReached: false };
+  }
+  try {
+    const result = await page.evaluate(
+      async ({ bundleUrl, expectedOrigin, maxBytes, timeoutMs }) => {
+        let byteCount = 0;
+        let budgetExhausted = false;
+        try {
+          if (window.location.origin !== expectedOrigin) {
+            return { text: null, bytesRead: 0, limitReached: false };
+          }
+          const bundle = new URL(bundleUrl);
+          if (
+            bundle.origin !== expectedOrigin ||
+            !/^\/bundles\/[a-f0-9]{8,64}\/[A-Za-z0-9._~-]+\.js$/u.test(
+              bundle.pathname,
+            ) ||
+            bundle.search !== '' ||
+            bundle.hash !== ''
+          ) {
+            return { text: null, bytesRead: 0, limitReached: false };
+          }
+          const sourceMapUrl = new URL(
+            `${bundle.pathname}.map`,
+            expectedOrigin,
+          );
+          const controller = new AbortController();
+          const timeout = window.setTimeout(
+            () => controller.abort(),
+            timeoutMs,
+          );
+          let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+          try {
+            const response = await fetch(sourceMapUrl.href, {
+              cache: 'no-store',
+              credentials: 'omit',
+              redirect: 'error',
+              signal: controller.signal,
+            });
+            if (
+              !response.ok ||
+              response.redirected ||
+              response.url !== sourceMapUrl.href ||
+              !/^application\/(?:json|octet-stream)(?:\s*;|$)/iu.test(
+                response.headers.get('content-type') ?? '',
+              )
+            ) {
+              return { text: null, bytesRead: 0, limitReached: false };
+            }
+            const contentLength = response.headers.get('content-length');
+            if (
+              contentLength !== null &&
+              (!/^\d+$/u.test(contentLength) ||
+                Number(contentLength) > maxBytes)
+            ) {
+              return { text: null, bytesRead: 0, limitReached: false };
+            }
+            if (response.body === null) {
+              return { text: null, bytesRead: 0, limitReached: false };
+            }
+
+            reader = response.body.getReader();
+            const decoder = new TextDecoder('utf-8', { fatal: true });
+            let text = '';
+            while (true) {
+              const result = await reader.read();
+              if (result.done) break;
+              if (byteCount + result.value.byteLength > maxBytes) {
+                byteCount = maxBytes;
+                budgetExhausted = true;
+                await reader.cancel();
+                return {
+                  text: null,
+                  bytesRead: maxBytes,
+                  limitReached: true,
+                };
+              }
+              byteCount += result.value.byteLength;
+              text += decoder.decode(result.value, { stream: true });
+            }
+            return {
+              text: text + decoder.decode(),
+              bytesRead: byteCount,
+              limitReached: false,
+            };
+          } finally {
+            window.clearTimeout(timeout);
+            if (reader !== undefined) reader.releaseLock();
+          }
+        } catch {
+          return {
+            text: null,
+            bytesRead: byteCount,
+            limitReached: budgetExhausted,
+          };
+        }
+      },
+      {
+        bundleUrl: frame.bundleUrl,
+        expectedOrigin: expectedElementOrigin,
+        maxBytes,
+        timeoutMs: ELEMENT_ERROR_SOURCE_MAP_TIMEOUT_MS,
+      },
+    );
+    return result !== null &&
+      typeof result === 'object' &&
+      typeof result.bytesRead === 'number' &&
+      Number.isSafeInteger(result.bytesRead) &&
+      result.bytesRead >= 0 &&
+      result.bytesRead <= maxBytes &&
+      typeof result.limitReached === 'boolean' &&
+      (result.text === null ||
+        (typeof result.text === 'string' &&
+          Buffer.byteLength(result.text, 'utf8') === result.bytesRead))
+      ? result
+      : { text: null, bytesRead: maxBytes, limitReached: true };
+  } catch {
+    return { text: null, bytesRead: 0, limitReached: false };
+  }
+}
+
 test('Element Web measures the ordinary 0-and-25-event calendar profile', async ({
   browser,
 }) => {
@@ -2221,6 +2366,12 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
     let page: Page | undefined;
     let observer: PerformanceApiObserver | undefined;
     let pageErrorStage: PerformancePageErrorStage = 'case-setup';
+    const pageErrorSourceProfiles = new Set<OrdinaryPerformanceProfile>();
+    const pageErrorSourceLookups: Array<{
+      page: Page;
+      frames: ElementBundleFrame[];
+      observation: PerformancePageErrorObservation;
+    }> = [];
     context.on('page', (openedPage) => {
       openedPage.on('pageerror', (error) => {
         report.pageErrorCount = Math.min(
@@ -2236,11 +2387,39 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
           report.pageErrorClass = errorClass;
         }
         if (report.pageErrorObservations.length < 8) {
-          report.pageErrorObservations.push({
+          const frames =
+            classification.errorSource === 'element' &&
+            pageErrorStage === 'widget-open'
+              ? extractElementBundleFrames(error, fixture.elementUrl)
+              : [];
+          const shouldResolveSource =
+            frames.length > 0 &&
+            pageErrorSourceLookups.length <
+              MAX_ELEMENT_ERROR_SOURCE_MAP_OBSERVATIONS &&
+            !pageErrorSourceProfiles.has(caseReport.profile);
+          const observation: PerformancePageErrorObservation = {
             profile: caseReport.profile,
             stage: pageErrorStage,
             ...classification,
-          });
+            sourceMapStatus:
+              frames.length === 0
+                ? 'not-eligible'
+                : shouldResolveSource
+                  ? 'unavailable'
+                  : 'not-attempted',
+            sourceRefSha256: null,
+            sourceLine: null,
+            sourceColumn: null,
+          };
+          report.pageErrorObservations.push(observation);
+          if (frames.length > 0 && shouldResolveSource) {
+            pageErrorSourceProfiles.add(caseReport.profile);
+            pageErrorSourceLookups.push({
+              page: openedPage,
+              frames,
+              observation,
+            });
+          }
         } else {
           report.pageErrorObservationOverflow = true;
         }
@@ -2714,6 +2893,47 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
     } finally {
       pageErrorStage = 'case-cleanup';
       if (observer) report.apiResponses.push(...observer.rows());
+      for (const lookup of pageErrorSourceLookups) {
+        let remainingBytes = ELEMENT_ERROR_SOURCE_MAP_MAX_BYTES;
+        const sourceMaps: Array<{
+          bundleUrl: string;
+          sourceMapText: string | null;
+        }> = [];
+        const seenBundles = new Set<string>();
+        for (const frame of lookup.frames) {
+          if (
+            seenBundles.has(frame.bundleUrl) ||
+            sourceMaps.length >= MAX_ELEMENT_ERROR_SOURCE_MAP_LOOKUPS ||
+            remainingBytes <= 0
+          ) {
+            continue;
+          }
+          seenBundles.add(frame.bundleUrl);
+          try {
+            const result = await readCappedElementErrorSourceMap(
+              lookup.page,
+              frame,
+              new URL(fixture.elementUrl).origin,
+              remainingBytes,
+            );
+            sourceMaps.push({
+              bundleUrl: frame.bundleUrl,
+              sourceMapText: result.text,
+            });
+            remainingBytes = Math.max(0, remainingBytes - result.bytesRead);
+            if (result.limitReached) remainingBytes = 0;
+          } catch {
+            sourceMaps.push({
+              bundleUrl: frame.bundleUrl,
+              sourceMapText: null,
+            });
+          }
+        }
+        Object.assign(
+          lookup.observation,
+          resolveElementErrorSourcePointer(lookup.frames, sourceMaps),
+        );
+      }
       await context.close();
     }
   };
