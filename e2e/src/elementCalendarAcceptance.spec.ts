@@ -320,6 +320,24 @@ type PerformancePageErrorClass =
   | 'eval-error'
   | 'other';
 
+type PerformancePageErrorStage =
+  | 'case-setup'
+  | 'element-login'
+  | 'room-navigation'
+  | 'widget-open'
+  | 'default-view'
+  | 'cold-layout'
+  | 'refresh-setup'
+  | 'refresh'
+  | 'details'
+  | 'case-cleanup';
+
+type PerformancePageErrorObservation = {
+  profile: OrdinaryPerformanceProfile;
+  stage: PerformancePageErrorStage;
+  errorClass: Exclude<PerformancePageErrorClass, 'none'>;
+};
+
 type OrdinaryPerformanceProfile = 'empty' | 'events-25';
 type OrdinaryPerformanceSampleKey =
   | `${OrdinaryPerformanceProfile}-default`
@@ -490,7 +508,7 @@ type OrdinaryPerformanceCase = {
   detailSamples: PerformanceDetailsSample[];
 };
 type OrdinaryPerformanceReport = {
-  version: 7;
+  version: 8;
   viewportWidth: 1280;
   viewportHeight: 800;
   calendarDays: 7;
@@ -500,6 +518,8 @@ type OrdinaryPerformanceReport = {
   blockedRequestCount: number | null;
   pageErrorCount: number | null;
   pageErrorClass: PerformancePageErrorClass;
+  pageErrorObservations: PerformancePageErrorObservation[];
+  pageErrorObservationOverflow: boolean;
 };
 type PerformanceReportData = PerformanceReport | OrdinaryPerformanceReport;
 
@@ -1045,7 +1065,7 @@ function makeEmptyOrdinaryPerformanceReport(initialDate: {
   month: number;
 }): OrdinaryPerformanceReport {
   return {
-    version: 7,
+    version: 8,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -1066,6 +1086,8 @@ function makeEmptyOrdinaryPerformanceReport(initialDate: {
     blockedRequestCount: 0,
     pageErrorCount: 0,
     pageErrorClass: 'none',
+    pageErrorObservations: [],
+    pageErrorObservationOverflow: false,
   };
 }
 
@@ -2228,14 +2250,25 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
     });
     let page: Page | undefined;
     let observer: PerformanceApiObserver | undefined;
+    let pageErrorStage: PerformancePageErrorStage = 'case-setup';
     context.on('page', (openedPage) => {
       openedPage.on('pageerror', (error) => {
         report.pageErrorCount = Math.min(
           (report.pageErrorCount ?? 0) + 1,
           100_000,
         );
+        const errorClass = classifyPerformancePageError(error);
         if (report.pageErrorClass === 'none') {
-          report.pageErrorClass = classifyPerformancePageError(error);
+          report.pageErrorClass = errorClass;
+        }
+        if (report.pageErrorObservations.length < 8) {
+          report.pageErrorObservations.push({
+            profile: caseReport.profile,
+            stage: pageErrorStage,
+            errorClass: errorClass === 'none' ? 'other' : errorClass,
+          });
+        } else {
+          report.pageErrorObservationOverflow = true;
         }
       });
     });
@@ -2265,10 +2298,12 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       });
 
       const loginStartedAt = performance.now();
+      pageErrorStage = 'element-login';
       page = await authenticateInElement(context, fixture.users.memberA);
       caseReport.preparation.elementLoginMs =
         elapsedMilliseconds(loginStartedAt);
 
+      pageErrorStage = 'room-navigation';
       activePhase = 'member-a-room-navigation';
       const roomStartedAt = performance.now();
       const roomResult = await openMemberARoomWithDiagnostics(
@@ -2302,6 +2337,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       const defaultSample = `${caseReport.profile}-default` as const;
       observer.setSample(defaultSample);
       const coldStartedAt = performance.now();
+      pageErrorStage = 'widget-open';
       failureCode = 'performance-widget-open-failed';
       const frame = await openCalendarWidget(element, page, {
         expectWidgetWarning: false,
@@ -2327,6 +2363,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       });
 
       failureCode = 'performance-default-view-failed';
+      pageErrorStage = 'default-view';
       try {
         await observer.waitForRoomEvents(defaultSample, 'preselection');
       } catch {
@@ -2473,6 +2510,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       expect(caseReport.coldList.horizontalOverflow).toBe(false);
       const body = frame.locator('body');
 
+      pageErrorStage = 'cold-layout';
       failureCode = 'performance-host-layout-failed';
       const frameDimensions = await hostIframe.evaluate((iframe) => {
         const rect = iframe.getBoundingClientRect();
@@ -2555,6 +2593,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
         };
       };
 
+      pageErrorStage = 'refresh-setup';
       failureCode = 'performance-view-sample-failed';
       const setupSample = `${caseReport.profile}-refresh-setup` as const;
       observer.setSample(setupSample, new Set());
@@ -2599,6 +2638,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       expect(caseReport.refreshSetup.stable).toBe(true);
 
       const refreshSample = `${caseReport.profile}-refresh` as const;
+      pageErrorStage = 'refresh';
       observer.setSample(refreshSample);
       const refreshStartedAt = performance.now();
       const originalEndDate = shiftCalendarDate(
@@ -2637,6 +2677,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       expect(caseReport.refresh.horizontalOverflow).toBe(false);
 
       if (caseReport.profile === 'events-25') {
+        pageErrorStage = 'details';
         for (const index of [1, 2, 3, 4, 5] as const) {
           failureCode = 'performance-details-failed';
           const sample = `events-25-details-${index}` as const;
@@ -2697,6 +2738,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
         }
       }
     } finally {
+      pageErrorStage = 'case-cleanup';
       if (observer) report.apiResponses.push(...observer.rows());
       await context.close();
     }

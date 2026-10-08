@@ -303,7 +303,7 @@ function ordinaryCase(profile, year, month, eventCount) {
 
 function ordinaryReport() {
   const report = {
-    version: 7,
+    version: 8,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -316,6 +316,8 @@ function ordinaryReport() {
     blockedRequestCount: 0,
     pageErrorCount: 0,
     pageErrorClass: 'none',
+    pageErrorObservations: [],
+    pageErrorObservationOverflow: false,
   };
   for (const performanceCase of report.cases) {
     const { profile, eventCount } = performanceCase;
@@ -391,7 +393,7 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   );
   assert.match(
     summary,
-    /phase=performance-pilot report_version=7 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
+    /phase=performance-pilot report_version=8 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
   );
   assert.match(summary, /performance_case profile=empty events=0/u);
   assert.match(summary, /performance_case profile=events-25 events=25/u);
@@ -417,7 +419,91 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   );
   assert.match(summary, /performance_details profile=empty samples=0/u);
   assert.match(summary, /performance_details profile=events-25 index=5/u);
+  assert.match(summary, /page_error_observation_overflow=false/u);
   assert.doesNotMatch(summary, /Performance\s+\d|access_token|https?:\/\//u);
+});
+
+test('summarizes bounded page-error stage observations without error text', () => {
+  const report = ordinaryReport();
+  report.pageErrorCount = 2;
+  report.pageErrorClass = 'other';
+  report.pageErrorObservations = [
+    { profile: 'empty', stage: 'widget-open', errorClass: 'other' },
+    { profile: 'events-25', stage: 'refresh', errorClass: 'type-error' },
+  ];
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(ordinaryStage('failed', report, 'performance-page-error')),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /page_errors=2 page_error_class=other page_error_observation_overflow=false/u,
+  );
+  assert.match(
+    summary,
+    /page_error_observation index=1 profile=empty stage=widget-open error_class=other/u,
+  );
+  assert.match(
+    summary,
+    /page_error_observation index=2 profile=events-25 stage=refresh error_class=type-error/u,
+  );
+  assert.doesNotMatch(
+    summary,
+    /stack|message|https?:\/\/|access_token|private/u,
+  );
+
+  for (const mutate of [
+    (invalid) => {
+      invalid.pageErrorObservations[0].stage = 'unbounded-stage';
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[0].message = 'private error message';
+    },
+    (invalid) => {
+      invalid.pageErrorObservationOverflow = true;
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[0].errorClass = 'type-error';
+    },
+  ]) {
+    const invalid = ordinaryReport();
+    invalid.pageErrorCount = 2;
+    invalid.pageErrorClass = 'other';
+    invalid.pageErrorObservations = [
+      { profile: 'empty', stage: 'widget-open', errorClass: 'other' },
+      { profile: 'events-25', stage: 'refresh', errorClass: 'type-error' },
+    ];
+    mutate(invalid);
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify(
+            ordinaryStage('failed', invalid, 'performance-page-error'),
+          ),
+          sourceSha,
+        ),
+      /invalid element acceptance summary/u,
+    );
+  }
+
+  const overflow = ordinaryReport();
+  overflow.pageErrorCount = 9;
+  overflow.pageErrorClass = 'other';
+  overflow.pageErrorObservations = Array.from({ length: 8 }, (_, index) => ({
+    profile: index < 4 ? 'empty' : 'events-25',
+    stage: 'widget-open',
+    errorClass: index === 0 ? 'other' : 'type-error',
+  }));
+  overflow.pageErrorObservationOverflow = true;
+  const overflowSummary = sanitizeElementAcceptance(
+    JSON.stringify(ordinaryStage('failed', overflow, 'performance-page-error')),
+    sourceSha,
+  );
+  assert.match(overflowSummary, /page_error_observation_overflow=true/u);
+  assert.equal(
+    (overflowSummary.match(/^page_error_observation /gmu) ?? []).length,
+    8,
+  );
 });
 
 test('accepts seeding between the empty and populated fresh-context samples', () => {

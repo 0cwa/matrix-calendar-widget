@@ -42,6 +42,20 @@ const PAGE_ERROR_CLASSES = new Set([
   'eval-error',
   'other',
 ]);
+const PAGE_ERROR_STAGES = new Set([
+  'case-setup',
+  'element-login',
+  'room-navigation',
+  'widget-open',
+  'default-view',
+  'cold-layout',
+  'refresh-setup',
+  'refresh',
+  'details',
+  'case-cleanup',
+]);
+const ORDINARY_PROFILES = new Set(['empty', 'events-25']);
+const PAGE_ERROR_OBSERVATION_KEYS = ['profile', 'stage', 'errorClass'];
 const API_SAMPLE =
   /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5]|(?:empty|events-25)-(?:default|refresh-setup|refresh)|events-25-details-[1-5])$/u;
 
@@ -695,6 +709,8 @@ const ORDINARY_REPORT_KEYS = [
   'blockedRequestCount',
   'pageErrorCount',
   'pageErrorClass',
+  'pageErrorObservations',
+  'pageErrorObservationOverflow',
 ];
 const ORDINARY_CASE_KEYS = [
   'profile',
@@ -1009,9 +1025,30 @@ function validOrdinaryCase(value) {
 }
 
 function validOrdinaryReport(report) {
+  const pageErrorObservationsValid =
+    Array.isArray(report.pageErrorObservations) &&
+    report.pageErrorObservations.length <= 8 &&
+    report.pageErrorObservations.every(
+      (observation) =>
+        hasExactKeys(observation, PAGE_ERROR_OBSERVATION_KEYS) &&
+        ORDINARY_PROFILES.has(observation.profile) &&
+        PAGE_ERROR_STAGES.has(observation.stage) &&
+        PAGE_ERROR_CLASSES.has(observation.errorClass) &&
+        observation.errorClass !== 'none',
+    ) &&
+    typeof report.pageErrorObservationOverflow === 'boolean' &&
+    (report.pageErrorCount === null
+      ? report.pageErrorObservations.length === 0 &&
+        report.pageErrorObservationOverflow === false
+      : report.pageErrorObservations.length ===
+          Math.min(report.pageErrorCount, 8) &&
+        report.pageErrorObservationOverflow === report.pageErrorCount > 8 &&
+        (report.pageErrorCount === 0 ||
+          report.pageErrorObservations[0]?.errorClass ===
+            report.pageErrorClass));
   return (
     hasExactKeys(report, ORDINARY_REPORT_KEYS) &&
-    report.version === 7 &&
+    report.version === 8 &&
     report.viewportWidth === 1280 &&
     report.viewportHeight === 800 &&
     report.calendarDays === 7 &&
@@ -1034,6 +1071,7 @@ function validOrdinaryReport(report) {
     optionalCount(report.blockedRequestCount, 100_000) &&
     optionalCount(report.pageErrorCount, 100_000) &&
     PAGE_ERROR_CLASSES.has(report.pageErrorClass) &&
+    pageErrorObservationsValid &&
     (report.pageErrorCount === null
       ? report.pageErrorClass === 'none'
       : report.pageErrorCount === 0
@@ -1043,7 +1081,7 @@ function validOrdinaryReport(report) {
 }
 
 function validReport(report) {
-  return isRecord(report) && report.version === 7
+  return isRecord(report) && report.version === 8
     ? validOrdinaryReport(report)
     : validLegacyReport(report);
 }
@@ -1396,6 +1434,8 @@ function ordinaryReportPasses(report) {
     report.blockedRequestCount === 0 &&
     report.pageErrorCount === 0 &&
     report.pageErrorClass === 'none' &&
+    report.pageErrorObservations.length === 0 &&
+    report.pageErrorObservationOverflow === false &&
     report.apiResponses.every(
       (row) =>
         row.status === 200 &&
@@ -1444,13 +1484,13 @@ function ordinaryReportPasses(report) {
 }
 
 function reportPasses(report) {
-  return report.version === 7
+  return report.version === 8
     ? ordinaryReportPasses(report)
     : legacyReportPasses(report);
 }
 
 function validDefaultWaitRecord(record) {
-  if (record.performanceReport.version !== 7) return true;
+  if (record.performanceReport.version !== 8) return true;
   const snapshotCount = record.performanceReport.cases.filter(
     (performanceCase) => performanceCase.defaultWaitObservation !== null,
   ).length;
@@ -1488,7 +1528,7 @@ function formatOrdinaryPerformanceEvidence(record) {
   const lines = [
     [
       'phase=performance-pilot',
-      'report_version=7',
+      'report_version=8',
       'profile=ordinary-0-25',
       `beta_gate_eligible=${record.status === 'passed'}`,
       `status=${record.status}`,
@@ -1501,8 +1541,15 @@ function formatOrdinaryPerformanceEvidence(record) {
       `blocked_requests=${display(report.blockedRequestCount)}`,
       `page_errors=${display(report.pageErrorCount)}`,
       `page_error_class=${report.pageErrorClass}`,
+      `page_error_observation_overflow=${report.pageErrorObservationOverflow}`,
     ].join(' '),
   ];
+
+  for (const [index, observation] of report.pageErrorObservations.entries()) {
+    lines.push(
+      `page_error_observation index=${index + 1} profile=${observation.profile} stage=${observation.stage} error_class=${observation.errorClass}`,
+    );
+  }
 
   for (const performanceCase of report.cases) {
     const {
@@ -1684,7 +1731,7 @@ export function formatPerformanceEvidence(record) {
   }
 
   const report = record.performanceReport;
-  if (report.version === 7) {
+  if (report.version === 8) {
     return formatOrdinaryPerformanceEvidence(record);
   }
   const lines = [
