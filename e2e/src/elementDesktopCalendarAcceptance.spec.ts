@@ -31,9 +31,13 @@ import { hasUniqueWidgetFrameOwnedByElement } from '../../dev/element-desktop-fr
 import {
   appendDesktopJourneyOutcome,
   appendDesktopLoginStep,
+  classifyDesktopLoginFailure,
   initializeDesktopJourneyEvidence,
   readSyntheticDesktopCredentials,
   type DesktopJourneyPhase,
+  type DesktopLoginDiagnostic,
+  type DesktopLoginFieldObservation,
+  type DesktopLoginFormObservation,
   type DesktopLoginStep,
 } from '../../dev/element-desktop-journey.mjs';
 import { ElementWebPage } from './pages/elementWebPage';
@@ -101,6 +105,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let webHttpRoute: WebHttpRouteObservation | undefined;
   let currentPhase: DesktopJourneyPhase | undefined;
   let currentLoginStep: DesktopLoginStep = 'not_observed';
+  let loginFieldsBeforeFill = unavailableDesktopLoginFormObservation();
   let failed = false;
   let evidenceInitialized = false;
 
@@ -129,6 +134,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
       name: 'Password',
       exact: true,
     });
+    loginFieldsBeforeFill = await observeDesktopLoginForm(username, password);
     try {
       currentLoginStep = 'username_fill';
       await username.fill(credentials.username);
@@ -326,10 +332,32 @@ test('Element Desktop room event journey', async ({ browser }) => {
       );
     }
     recordPhase(evidence, recorded, 'canonical-edit-read');
-  } catch {
+  } catch (error: unknown) {
     failed = true;
     if (currentPhase === 'desktop-login' && evidenceInitialized) {
-      safeRecordDesktopLoginStep(evidence, currentLoginStep);
+      const loginFieldsAtFailure = desktopPage
+        ? await observeDesktopLoginForm(
+            desktopPage.getByRole('textbox', {
+              name: 'Username',
+              exact: true,
+            }),
+            desktopPage.getByRole('textbox', {
+              name: 'Password',
+              exact: true,
+            }),
+          )
+        : unavailableDesktopLoginFormObservation();
+      const loginDiagnostic: DesktopLoginDiagnostic = {
+        failureReason: classifyDesktopLoginFailure(
+          error,
+          currentLoginStep,
+          loginFieldsBeforeFill,
+          loginFieldsAtFailure,
+        ),
+        beforeFill: loginFieldsBeforeFill,
+        atFailure: loginFieldsAtFailure,
+      };
+      safeRecordDesktopLoginStep(evidence, currentLoginStep, loginDiagnostic);
     }
     if (currentPhase && evidenceInitialized && !recorded.has(currentPhase)) {
       safeRecordPhase(evidence, recorded, currentPhase, 'failed');
@@ -815,13 +843,84 @@ function safeRecordPhase(
 function safeRecordDesktopLoginStep(
   evidence: { filePath: string; runnerTemp: string },
   step: DesktopLoginStep,
+  diagnostic?: DesktopLoginDiagnostic,
 ) {
   try {
-    appendDesktopLoginStep({ ...evidence, step });
+    appendDesktopLoginStep({
+      ...evidence,
+      step,
+      ...(diagnostic === undefined ? {} : { diagnostic }),
+    });
     return true;
   } catch {
     return false;
   }
+}
+
+function unavailableDesktopLoginFieldObservation(): DesktopLoginFieldObservation {
+  return {
+    countCapped: null,
+    visible: null,
+    enabled: null,
+    editable: null,
+  };
+}
+
+function unavailableDesktopLoginFormObservation(): DesktopLoginFormObservation {
+  return {
+    username: unavailableDesktopLoginFieldObservation(),
+    password: unavailableDesktopLoginFieldObservation(),
+  };
+}
+
+async function observeDesktopLoginField(
+  locator: Locator,
+): Promise<DesktopLoginFieldObservation> {
+  let countCapped: 0 | 1 | 2;
+  try {
+    const count = await locator.count();
+    countCapped = Math.min(count, 2) as 0 | 1 | 2;
+  } catch {
+    return unavailableDesktopLoginFieldObservation();
+  }
+  if (countCapped !== 1) {
+    return {
+      countCapped,
+      visible: null,
+      enabled: null,
+      editable: null,
+    };
+  }
+
+  const readBoolean = async (
+    read: () => Promise<boolean>,
+  ): Promise<boolean | null> => {
+    try {
+      return await read();
+    } catch {
+      return null;
+    }
+  };
+  const [visible, enabled, editable] = await Promise.all([
+    readBoolean(() => locator.isVisible()),
+    readBoolean(() => locator.isEnabled()),
+    readBoolean(() => locator.isEditable()),
+  ]);
+  return { countCapped, visible, enabled, editable };
+}
+
+async function observeDesktopLoginForm(
+  username: Locator,
+  password: Locator,
+): Promise<DesktopLoginFormObservation> {
+  const [usernameObservation, passwordObservation] = await Promise.all([
+    observeDesktopLoginField(username),
+    observeDesktopLoginField(password),
+  ]);
+  return {
+    username: usernameObservation,
+    password: passwordObservation,
+  };
 }
 
 function recordPhase(

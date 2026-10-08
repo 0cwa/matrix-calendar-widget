@@ -35,9 +35,20 @@ export const DESKTOP_LOGIN_STEPS = Object.freeze([
   'rooms_ready',
   'complete',
 ]);
+export const DESKTOP_LOGIN_FAILURE_REASONS = Object.freeze([
+  'timeout',
+  'strict-mode',
+  'not-visible',
+  'not-enabled',
+  'detached',
+  'other',
+  'unavailable',
+]);
 
 const PHASE_SET = new Set(DESKTOP_JOURNEY_PHASES);
 const LOGIN_STEP_SET = new Set(DESKTOP_LOGIN_STEPS);
+const LOGIN_FAILURE_REASON_SET = new Set(DESKTOP_LOGIN_FAILURE_REASONS);
+const LOGIN_FORM_FIELD_NAMES = Object.freeze(['username', 'password']);
 const JOURNEY_CREDENTIALS_NAME = 'element-acceptance-desktop-credentials.json';
 const JOURNEY_EVIDENCE_NAME = 'element-desktop-journey-stage.jsonl';
 const MAX_CREDENTIAL_BYTES = 2_048;
@@ -45,6 +56,126 @@ const MAX_EVIDENCE_BYTES = 16_384;
 
 function invalidInput() {
   throw new Error('Invalid Desktop journey input');
+}
+
+function validLoginFieldObservation(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'countCapped,editable,enabled,visible' ||
+    ![null, 0, 1, 2].includes(value.countCapped) ||
+    ![null, true, false].includes(value.visible) ||
+    ![null, true, false].includes(value.enabled) ||
+    ![null, true, false].includes(value.editable)
+  ) {
+    return false;
+  }
+  return (
+    value.countCapped === 1 ||
+    (value.visible === null &&
+      value.enabled === null &&
+      value.editable === null)
+  );
+}
+
+function validLoginFormObservation(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).sort().join(',') === 'password,username' &&
+    LOGIN_FORM_FIELD_NAMES.every((name) =>
+      validLoginFieldObservation(value[name]),
+    )
+  );
+}
+
+function validDesktopLoginDiagnostic(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).sort().join(',') ===
+      'atFailure,beforeFill,failureReason' &&
+    LOGIN_FAILURE_REASON_SET.has(value.failureReason) &&
+    validLoginFormObservation(value.beforeFill) &&
+    validLoginFormObservation(value.atFailure)
+  );
+}
+
+function safeErrorField(error, key) {
+  if (error === null || typeof error !== 'object') return null;
+  try {
+    const value = error[key];
+    if (typeof value !== 'string' || value.length > 512) return null;
+    return value.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function loginFieldObservation(form, field) {
+  if (
+    !validLoginFormObservation(form) ||
+    !LOGIN_FORM_FIELD_NAMES.includes(field)
+  ) {
+    return null;
+  }
+  return form[field];
+}
+
+export function classifyDesktopLoginFailure(
+  error,
+  step,
+  beforeFill,
+  atFailure,
+) {
+  if (
+    error === null ||
+    (typeof error !== 'object' && typeof error !== 'function')
+  ) {
+    return 'unavailable';
+  }
+
+  const name = safeErrorField(error, 'name');
+  const message = safeErrorField(error, 'message');
+  const field =
+    step === 'username_fill'
+      ? 'username'
+      : step === 'password_fill'
+        ? 'password'
+        : null;
+  const previous = field ? loginFieldObservation(beforeFill, field) : null;
+  const current = field ? loginFieldObservation(atFailure, field) : null;
+
+  if (message?.includes('strict mode violation')) return 'strict-mode';
+  if (
+    (previous?.countCapped === 1 && current?.countCapped === 0) ||
+    message?.includes('not attached to the dom') ||
+    message?.includes('detached from the dom')
+  ) {
+    return 'detached';
+  }
+  if (
+    (current?.countCapped === 1 && current.visible === false) ||
+    message?.includes('element is not visible')
+  ) {
+    return 'not-visible';
+  }
+  if (
+    (current?.countCapped === 1 &&
+      (current.enabled === false || current.editable === false)) ||
+    message?.includes('element is not enabled') ||
+    message?.includes('element is not editable')
+  ) {
+    return 'not-enabled';
+  }
+  if (name === 'timeouterror' || message?.includes('timeout')) {
+    return 'timeout';
+  }
+  return name !== null || message !== null ? 'other' : 'unavailable';
 }
 
 function privateRunnerPath(filePath, runnerTemp, expectedName) {
@@ -143,6 +274,7 @@ function parseEvidence(input) {
   const outcomes = new Map();
   let loginStep = 'not_observed';
   let loginStepRecorded = false;
+  let loginDiagnostic = null;
   const rows = input.split(/\r?\n/u).filter(Boolean);
   if (rows.length > DESKTOP_JOURNEY_PHASES.length + 1) invalidInput();
 
@@ -156,11 +288,19 @@ function parseEvidence(input) {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
       invalidInput();
     }
-    if (Object.keys(value).join(',') === 'loginStep') {
+    const keys = Object.keys(value).sort().join(',');
+    if (keys === 'loginStep' || keys === 'loginDiagnostic,loginStep') {
       if (loginStepRecorded || !LOGIN_STEP_SET.has(value.loginStep)) {
         invalidInput();
       }
+      if (
+        Object.hasOwn(value, 'loginDiagnostic') &&
+        !validDesktopLoginDiagnostic(value.loginDiagnostic)
+      ) {
+        invalidInput();
+      }
       loginStep = value.loginStep;
+      loginDiagnostic = value.loginDiagnostic ?? null;
       loginStepRecorded = true;
       continue;
     }
@@ -174,7 +314,7 @@ function parseEvidence(input) {
     }
     outcomes.set(value.phase, value.status);
   }
-  return { outcomes, loginStep, loginStepRecorded };
+  return { outcomes, loginStep, loginStepRecorded, loginDiagnostic };
 }
 
 export function readSyntheticDesktopCredentials({ filePath, runnerTemp }) {
@@ -249,17 +389,36 @@ export function appendDesktopJourneyOutcome({
   privateFileStat(path, MAX_EVIDENCE_BYTES);
 }
 
-export function appendDesktopLoginStep({ filePath, runnerTemp, step }) {
+export function appendDesktopLoginStep({
+  filePath,
+  runnerTemp,
+  step,
+  diagnostic,
+}) {
   const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
   privateFileStat(path, MAX_EVIDENCE_BYTES);
   const parsed = parseEvidence(readFileSync(path, 'utf8'));
-  if (!LOGIN_STEP_SET.has(step) || parsed.loginStepRecorded) invalidInput();
+  if (
+    !LOGIN_STEP_SET.has(step) ||
+    parsed.loginStepRecorded ||
+    (diagnostic !== undefined && !validDesktopLoginDiagnostic(diagnostic)) ||
+    (diagnostic !== undefined && step === 'complete')
+  ) {
+    invalidInput();
+  }
 
   try {
-    appendFileSync(path, `${JSON.stringify({ loginStep: step })}\n`, {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
+    appendFileSync(
+      path,
+      `${JSON.stringify({
+        loginStep: step,
+        ...(diagnostic === undefined ? {} : { loginDiagnostic: diagnostic }),
+      })}\n`,
+      {
+        encoding: 'utf8',
+        mode: 0o600,
+      },
+    );
   } catch {
     invalidInput();
   }
@@ -267,7 +426,7 @@ export function appendDesktopLoginStep({ filePath, runnerTemp, step }) {
 }
 
 export function summarizeDesktopJourneyEvidence(input) {
-  const { outcomes, loginStep } = parseEvidence(input);
+  const { outcomes, loginStep, loginDiagnostic } = parseEvidence(input);
   if (outcomes.get('desktop-login') === 'passed' && loginStep !== 'complete') {
     invalidInput();
   }
@@ -282,6 +441,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   return {
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
     loginStep,
+    loginDiagnostic,
     cases,
   };
 }

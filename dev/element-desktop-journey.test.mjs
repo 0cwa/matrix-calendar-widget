@@ -13,9 +13,11 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   DESKTOP_JOURNEY_PHASES,
+  DESKTOP_LOGIN_FAILURE_REASONS,
   DESKTOP_LOGIN_STEPS,
   appendDesktopJourneyOutcome,
   appendDesktopLoginStep,
+  classifyDesktopLoginFailure,
   initializeDesktopJourneyEvidence,
   readDesktopJourneyEvidence,
   readSyntheticDesktopCredentials,
@@ -250,6 +252,167 @@ test('records only the fixed Desktop login step in private journey evidence', ()
       '{"loginStep":"sign_in_submit"}\n',
     );
   });
+});
+
+test('classifies Desktop login failures to fixed reasons without retaining error text', () => {
+  const uniqueField = {
+    countCapped: 1,
+    visible: true,
+    enabled: true,
+    editable: true,
+  };
+  const absentField = {
+    countCapped: 0,
+    visible: null,
+    enabled: null,
+    editable: null,
+  };
+  const duplicateField = {
+    countCapped: 2,
+    visible: null,
+    enabled: null,
+    editable: null,
+  };
+  const beforeFill = {
+    username: uniqueField,
+    password: uniqueField,
+  };
+  const atFailure = {
+    username: uniqueField,
+    password: uniqueField,
+  };
+  const classify = (
+    error,
+    step = 'username_fill',
+    before = beforeFill,
+    after = atFailure,
+  ) => classifyDesktopLoginFailure(error, step, before, after);
+
+  const cases = [
+    [
+      Object.assign(new Error('private password text'), {
+        name: 'TimeoutError',
+      }),
+      'timeout',
+    ],
+    [
+      new Error('strict mode violation: private accessible name'),
+      'strict-mode',
+    ],
+    [
+      new Error('Element is not visible; private details omitted'),
+      'not-visible',
+    ],
+    [
+      new Error('Element is not enabled; private details omitted'),
+      'not-enabled',
+    ],
+    [
+      new Error('fill failed'),
+      'detached',
+      beforeFill,
+      { username: absentField, password: uniqueField },
+    ],
+    [new Error('private error text'), 'other'],
+    [undefined, 'unavailable'],
+  ];
+  for (const [
+    error,
+    expected,
+    before = beforeFill,
+    after = atFailure,
+  ] of cases) {
+    const result = classify(error, 'username_fill', before, after);
+    assert.equal(result, expected);
+    assert.ok(DESKTOP_LOGIN_FAILURE_REASONS.includes(result));
+    assert.doesNotMatch(JSON.stringify(result), /private|password text/u);
+  }
+  assert.equal(
+    classify(
+      new Error('strict mode violation: private'),
+      'username_fill',
+      { username: duplicateField, password: uniqueField },
+      { username: duplicateField, password: uniqueField },
+    ),
+    'strict-mode',
+  );
+});
+
+test('persists only capped Desktop login locator observations and fixed failure reasons', () => {
+  const unavailableField = {
+    countCapped: null,
+    visible: null,
+    enabled: null,
+    editable: null,
+  };
+  const duplicateField = {
+    countCapped: 2,
+    visible: null,
+    enabled: null,
+    editable: null,
+  };
+  const diagnostic = {
+    failureReason: 'timeout',
+    beforeFill: {
+      username: duplicateField,
+      password: unavailableField,
+    },
+    atFailure: {
+      username: duplicateField,
+      password: unavailableField,
+    },
+  };
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopLoginStep({
+      filePath,
+      runnerTemp,
+      step: 'username_fill',
+      diagnostic,
+    });
+
+    const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
+    assert.equal(summary.loginStep, 'username_fill');
+    assert.deepEqual(summary.loginDiagnostic, diagnostic);
+    assert.doesNotMatch(
+      readFileSync(filePath, 'utf8'),
+      /private|password text|message|URL/u,
+    );
+  });
+
+  assert.throws(
+    () =>
+      summarizeDesktopJourneyEvidence(
+        JSON.stringify({
+          loginStep: 'username_fill',
+          loginDiagnostic: {
+            ...diagnostic,
+            failureMessage: 'private error',
+          },
+        }),
+      ),
+    /Invalid Desktop journey input/u,
+  );
+  assert.throws(
+    () =>
+      summarizeDesktopJourneyEvidence(
+        JSON.stringify({
+          loginStep: 'username_fill',
+          loginDiagnostic: {
+            ...diagnostic,
+            beforeFill: {
+              username: {
+                ...duplicateField,
+                visible: true,
+              },
+              password: unavailableField,
+            },
+          },
+        }),
+      ),
+    /Invalid Desktop journey input/u,
+  );
 });
 
 test('rejects duplicate or private-shaped evidence rows', () => {

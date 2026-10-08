@@ -26,14 +26,50 @@ export type DesktopLoginStep =
   | 'rooms_ready'
   | 'complete';
 
+export type DesktopLoginFailureReason =
+  | 'timeout'
+  | 'strict-mode'
+  | 'not-visible'
+  | 'not-enabled'
+  | 'detached'
+  | 'other'
+  | 'unavailable';
+
+export type DesktopLoginFieldObservation = {
+  countCapped: 0 | 1 | 2 | null;
+  visible: boolean | null;
+  enabled: boolean | null;
+  editable: boolean | null;
+};
+
+export type DesktopLoginFormObservation = {
+  username: DesktopLoginFieldObservation;
+  password: DesktopLoginFieldObservation;
+};
+
+export type DesktopLoginDiagnostic = {
+  failureReason: DesktopLoginFailureReason;
+  beforeFill: DesktopLoginFormObservation;
+  atFailure: DesktopLoginFormObservation;
+};
+
 export type DesktopJourneySummary = {
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
+  loginDiagnostic: DesktopLoginDiagnostic | null;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
 
 export declare const DESKTOP_JOURNEY_PHASES: readonly DesktopJourneyPhase[];
 export declare const DESKTOP_LOGIN_STEPS: readonly DesktopLoginStep[];
+export declare const DESKTOP_LOGIN_FAILURE_REASONS: readonly DesktopLoginFailureReason[];
+
+export declare function classifyDesktopLoginFailure(
+  error: unknown,
+  step: DesktopLoginStep,
+  beforeFill: DesktopLoginFormObservation,
+  atFailure: DesktopLoginFormObservation,
+): DesktopLoginFailureReason;
 
 export declare function writeSyntheticDesktopCredentials(input: {
   filePath: string;
@@ -63,6 +99,7 @@ export declare function appendDesktopLoginStep(input: {
   filePath: string;
   runnerTemp: string;
   step: DesktopLoginStep;
+  diagnostic?: DesktopLoginDiagnostic;
 }): void;
 
 export declare function summarizeDesktopJourneyEvidence(
