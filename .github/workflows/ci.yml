@@ -43,20 +43,8 @@ jobs:
       - name: Check dependencies
         run: yarn depcheck
 
-      - name: Test temporary safe typecheck diagnostic
-        run: node dev/element-desktop-typecheck-diagnostic.test.mjs
-
-      - name: Type check with temporary safe diagnostics
-        run: node dev/element-desktop-typecheck-diagnostic.mjs
-
-      - name: Upload temporary safe typecheck diagnostics
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: element-desktop-typecheck-safe-diagnostics
-          path: ${{ runner.temp }}/element-desktop-typecheck-safe-diagnostics.json
-          if-no-files-found: ignore
-          retention-days: 1
+      - name: Type check
+        run: yarn tsc
 
   widget:
     name: Widget
