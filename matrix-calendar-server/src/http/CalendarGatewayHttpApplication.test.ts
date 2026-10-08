@@ -16,25 +16,47 @@
 
 import {
   Body,
-  CanActivate,
   Controller,
-  ExecutionContext,
   Get,
-  Injectable,
   Module,
   Post,
-  UnauthorizedException,
   UseGuards,
   VersioningType,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import base64url from 'base64url';
 import { NextFunction, Request, Response } from 'express';
-import { IncomingHttpHeaders, request as httpRequest } from 'http';
+import { request as httpRequest, IncomingHttpHeaders } from 'http';
+import fetch from 'jest-fetch-mock';
 import { AddressInfo } from 'net';
 import { IAppConfiguration } from '../IAppConfiguration';
+import { MatrixAuthGuard } from '../guard/MatrixAuthGuard';
+import {
+  MatrixAuthMiddleware,
+  MX_IDENTITY,
+} from '../middleware/MatrixAuthMiddleware';
 import { createCalendarGatewayHttpApplication } from './CalendarGatewayHttpApplication';
 
+jest.mock('matrix-bot-sdk', () => ({
+  UserID: class UserID {
+    domain: string;
+
+    constructor(userId: string) {
+      const separator = userId.indexOf(':');
+      if (
+        !userId.startsWith('@') ||
+        separator < 2 ||
+        separator === userId.length - 1
+      ) {
+        throw new Error('Invalid Matrix user ID');
+      }
+      this.domain = userId.slice(separator + 1);
+    }
+  },
+}));
+
 const appConfiguration = {
+  homeserver_url: 'https://matrix.example.test',
   calendar_gateway_rate_limit_requests: 1,
   calendar_gateway_rate_limit_window_ms: 60_000,
   calendar_gateway_rate_limit_max_keys: 10,
@@ -44,27 +66,15 @@ const configService = {
   getOrThrow: jest.fn(() => appConfiguration),
 };
 
-const authMiddlewareUse = jest.fn(
-  (_request: Request, _response: Response, next: NextFunction) => next(),
-);
+let matrixAuthMiddleware: MatrixAuthMiddleware;
+const authMiddlewareUse = jest.fn();
 
 class TestMatrixAuthMiddleware {}
 
 const testAuthMiddleware = { use: authMiddlewareUse };
 
-@Injectable()
-class SyntheticAuthorizationGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest<Request>();
-    if (request.headers.authorization === 'Bearer synthetic-test') {
-      return true;
-    }
-    throw new UnauthorizedException();
-  }
-}
-
 @Controller({ path: 'calendar', version: '1' })
-@UseGuards(SyntheticAuthorizationGuard)
+@UseGuards(MatrixAuthGuard)
 class CalendarGatewayHttpProbeController {
   @Get()
   list(): { available: true } {
@@ -82,7 +92,7 @@ class CalendarGatewayHttpProbeController {
   providers: [
     { provide: ConfigService, useValue: configService },
     { provide: TestMatrixAuthMiddleware, useValue: testAuthMiddleware },
-    SyntheticAuthorizationGuard,
+    MatrixAuthGuard,
   ],
 })
 class CalendarGatewayHttpProbeModule {}
@@ -100,12 +110,18 @@ describe('calendar gateway HTTP middleware setup', () => {
   let baseUrl: string;
 
   beforeEach(async () => {
+    fetch.resetMocks();
+    fetch.enableMocks();
     configService.getOrThrow.mockClear().mockReturnValue(appConfiguration);
     authMiddlewareUse
       .mockClear()
       .mockImplementation(
-        (_request: Request, _response: Response, next: NextFunction) => next(),
+        (request: Request, response: Response, next: NextFunction) =>
+          matrixAuthMiddleware.use(request, response, next),
       );
+    matrixAuthMiddleware = new MatrixAuthMiddleware(
+      appConfiguration as IAppConfiguration,
+    );
 
     const application = await createCalendarGatewayHttpApplication(
       CalendarGatewayHttpProbeModule,
@@ -125,23 +141,33 @@ describe('calendar gateway HTTP middleware setup', () => {
     }
   });
 
-  it('handles Authorization preflight before auth and quota, then exposes the limited GET', async () => {
+  it('handles Authorization preflight before OpenID verification and rejects excess GETs before verification', async () => {
     const origin = 'https://widget.example.test';
+    const authorization = `${MX_IDENTITY} ${base64url(
+      JSON.stringify({
+        access_token: 'synthetic-openid-proof',
+        matrix_server_name: 'example.test',
+      }),
+    )}`;
+    fetch.mockResponseOnce(JSON.stringify({ sub: '@alice:example.test' }));
     const preflight = await send('OPTIONS', '/v1/calendar', {
       Origin: origin,
       'Access-Control-Request-Method': 'GET',
       'Access-Control-Request-Headers': 'authorization',
     });
     const authCallsAfterPreflight = authMiddlewareUse.mock.calls.length;
+    const openIdCallsAfterPreflight = fetch.mock.calls.length;
 
     const accepted = await send('GET', '/v1/calendar', {
       Origin: origin,
-      Authorization: 'Bearer synthetic-test',
+      Authorization: authorization,
     });
+    const openIdCallsAfterAccepted = fetch.mock.calls.length;
     const limited = await send('GET', '/v1/calendar', {
       Origin: origin,
-      Authorization: 'Bearer synthetic-test',
+      Authorization: authorization,
     });
+    const openIdCallsAfterLimited = fetch.mock.calls.length;
     const retryAfter = Number(limited.headers['retry-after']);
 
     expect({
@@ -160,6 +186,9 @@ describe('calendar gateway HTTP middleware setup', () => {
         Number.isSafeInteger(retryAfter) && retryAfter > 0 && retryAfter <= 60,
       authCallsAfterGets:
         authMiddlewareUse.mock.calls.length - authCallsAfterPreflight,
+      openIdCallsAfterPreflight,
+      openIdCallsAfterAccepted,
+      openIdCallsAfterLimited,
     }).toEqual({
       preflightStatus: 204,
       preflightOrigin: '*',
@@ -174,6 +203,9 @@ describe('calendar gateway HTTP middleware setup', () => {
       limitedOrigin: '*',
       retryAfterValid: true,
       authCallsAfterGets: 1,
+      openIdCallsAfterPreflight: 0,
+      openIdCallsAfterAccepted: 1,
+      openIdCallsAfterLimited: 1,
     });
   });
 
@@ -182,7 +214,7 @@ describe('calendar gateway HTTP middleware setup', () => {
       Origin: 'https://widget.example.test',
     });
 
-    expect(response.statusCode).toBe(401);
+    expect(response.statusCode).toBe(403);
     expect(response.headers['access-control-allow-origin']).toBe('*');
     expect(authMiddlewareUse).toHaveBeenCalledTimes(1);
   });
