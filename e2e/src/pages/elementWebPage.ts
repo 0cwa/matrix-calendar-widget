@@ -22,6 +22,40 @@ export type OpenIdToken = {
   access_token: string;
 };
 
+export function getMainRoomListLocator(page: Page): Locator {
+  const panel = page.locator('.mx_RoomListPanel');
+  const currentRoomList = panel
+    .getByRole('listbox', { name: 'Room list', exact: true })
+    .or(panel.getByRole('treegrid', { name: 'Room list', exact: true }));
+  const legacyRoomTree = page.getByRole('tree', {
+    name: 'Rooms',
+    exact: true,
+  });
+  return currentRoomList.or(legacyRoomTree);
+}
+
+function escapeRegExp(value: string): string {
+  const specialCharacters = new Set([
+    '\\',
+    '^',
+    '$',
+    '.',
+    '*',
+    '+',
+    '?',
+    '(',
+    ')',
+    '[',
+    ']',
+    '{',
+    '}',
+    '|',
+  ]);
+  return Array.from(value, (character) =>
+    specialCharacters.has(character) ? `\\${character}` : character,
+  ).join('');
+}
+
 export class ElementWebPage {
   private readonly sidebarRegion: Locator;
   private readonly navigationRegion: Locator;
@@ -141,28 +175,30 @@ export class ElementWebPage {
   }
 
   private roomsListLocator() {
-    return this.page.locator(
-      '.mx_RoomListPanel [role="listbox"], .mx_RoomListPanel [role="treegrid"]',
-    );
+    return getMainRoomListLocator(this.page);
   }
 
   private roomItemLocator(name: string) {
-    const roomName = new RegExp(`^${name}( Unread messages\\.)?`);
+    const escapedRoomName = escapeRegExp(name);
+    const currentRoomAccessibleName = new RegExp(
+      `^Open room ${escapedRoomName}(?:$|\\s)`,
+    );
+    const legacyRoomName = new RegExp(
+      `^${escapedRoomName}( Unread messages\\.)?`,
+    );
     const roomsList = this.roomsListLocator();
     const currentListItem = roomsList
-      .getByRole('option', { name: roomName })
-      .or(roomsList.getByRole('row', { name: roomName }));
+      .getByRole('option', { name: currentRoomAccessibleName })
+      .or(roomsList.getByRole('row', { name: currentRoomAccessibleName }));
     const legacyListItem = this.page
       .getByRole('tree', { name: 'Rooms' })
-      .getByRole('treeitem', { name: roomName });
+      .getByRole('treeitem', { name: legacyRoomName });
     return currentListItem.or(legacyListItem);
   }
 
   async waitForRoomsList(timeout = 60_000) {
-    const legacyRoomsTree = this.page.getByRole('tree', { name: 'Rooms' });
-    await this.roomsListLocator()
-      .or(legacyRoomsTree)
-      .waitFor({ state: 'visible', timeout });
+    const roomsList = this.roomsListLocator();
+    await roomsList.waitFor({ state: 'visible', timeout });
   }
 
   async navigateToRoomOrInvitation(name: string) {
