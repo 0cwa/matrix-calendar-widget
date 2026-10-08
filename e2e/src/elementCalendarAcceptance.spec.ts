@@ -30,6 +30,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { arch, platform, release } from 'node:os';
 import { isAbsolute, resolve, sep } from 'node:path';
+import { classifyG6KeyboardFocusTarget } from '../../dev/element-g6-keyboard-focus.mjs';
 import {
   beginG6ResourceCreate,
   createG6ResourceOwnership,
@@ -2850,6 +2851,7 @@ async function observeG6KeyboardFocusTarget(
   } catch {
     return { activeTarget: 'unavailable', frameHasFocus: false };
   }
+  if (!frameHasFocus) return { activeTarget: 'outside', frameHasFocus };
 
   const targets: Array<{
     name: G6KeyboardFocusTarget;
@@ -2873,38 +2875,40 @@ async function observeG6KeyboardFocusTarget(
     },
   ];
   let ambiguousTarget = false;
-  for (const target of targets) {
-    if (target.countCapped > 1) {
+  const focusState = async (locator: Locator, countCapped: number) => {
+    if (countCapped > 1) {
       ambiguousTarget = true;
-      continue;
+      return undefined;
     }
-    if (
-      target.countCapped === 1 &&
-      (await target.locator
-        .evaluate((element) => element.ownerDocument.activeElement === element)
-        .catch(() => false))
-    ) {
-      return { activeTarget: target.name, frameHasFocus };
-    }
+    if (countCapped === 0) return false;
+    return locator
+      .evaluate((element) => element.ownerDocument.activeElement === element)
+      .catch(() => undefined);
+  };
+  const focused: Record<string, boolean | undefined> = {};
+  for (const target of targets) {
+    focused[target.name] = await focusState(target.locator, target.countCapped);
   }
 
   const dialogContentCount = await controls.dialogContent
     .count()
     .catch(() => 0);
-  if (dialogContentCount > 1) ambiguousTarget = true;
-  if (
-    dialogContentCount === 1 &&
-    (await controls.dialogContent
-      .evaluate((element) => element.ownerDocument.activeElement === element)
-      .catch(() => false))
-  ) {
-    return { activeTarget: 'dialog-content', frameHasFocus };
-  }
-  if (!frameHasFocus) return { activeTarget: 'outside', frameHasFocus };
-  if (ambiguousTarget || !activeElementAvailable) {
-    return { activeTarget: 'unavailable', frameHasFocus };
-  }
-  return { activeTarget: 'other', frameHasFocus };
+  focused['dialog-content'] = await focusState(
+    controls.dialogContent,
+    Math.min(dialogContentCount, 2),
+  );
+  return {
+    activeTarget: classifyG6KeyboardFocusTarget({
+      frameHasFocus,
+      activeElementAvailable,
+      editFocused: focused.edit,
+      deleteFocused: focused.delete,
+      closeFocused: focused.close,
+      dialogContentFocused: focused['dialog-content'],
+      ambiguousTarget,
+    }),
+    frameHasFocus,
+  };
 }
 
 function readReminderFlow(): ReminderFlow {

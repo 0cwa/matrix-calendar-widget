@@ -3410,6 +3410,17 @@ test('sanitizes bounded G6 keyboard focus diagnostics without claiming skipped a
     sourceSha,
   );
   assert.match(focusObservedWithoutEscape, /focus_returned_to_event=true/u);
+  const blurredFrameEvidence = sanitizeElementAcceptance(
+    JSON.stringify({
+      ...record,
+      detailsTabFocusObservations: [
+        { activeTarget: 'outside', frameHasFocus: false },
+        ...observations.slice(1),
+      ],
+    }),
+    sourceSha,
+  );
+  assert.match(blurredFrameEvidence, /details_tab_focus=outside:false/u);
 
   for (const invalid of [
     {
@@ -3429,6 +3440,13 @@ test('sanitizes bounded G6 keyboard focus diagnostics without claiming skipped a
       ...record,
       escapeAttempted: false,
       escapeClosedDialog: true,
+    },
+    {
+      ...record,
+      detailsTabFocusObservations: [
+        { activeTarget: 'edit', frameHasFocus: false },
+        ...observations.slice(1),
+      ],
     },
     {
       phase: 'widget-a-iframe-ready',
