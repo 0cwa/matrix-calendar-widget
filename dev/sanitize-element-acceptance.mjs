@@ -194,6 +194,7 @@ const PHASE_BOOLEAN_FIELDS = new Map([
       'unsupportedRowOmitted',
       'supportedNeighborVisible',
       'canonicalSnapshotAvailable',
+      'neighborEditedRowVisible',
       'supportedNeighborEdited',
       'canonicalUnsupportedObjectUnchanged',
       'neighborOwnershipUpdated',
@@ -847,6 +848,7 @@ const ALLOWED_KEYS = new Set([
   'unsupportedRowOmitted',
   'supportedNeighborVisible',
   'canonicalSnapshotAvailable',
+  'neighborEditedRowVisible',
   'supportedNeighborEdited',
   'canonicalUnsupportedObjectUnchanged',
   'neighborOwnershipUpdated',
@@ -946,9 +948,12 @@ function validG6Observation(record) {
         (patchOutcome !== 'unavailable' &&
           !Object.hasOwn(record, 'neighborPatchHttpStatus')) ||
         (canonicalOutcome === 'not-needed' &&
-          record.supportedNeighborEdited !== true) ||
+          record.neighborEditedRowVisible !== true) ||
+        (canonicalOutcome !== 'not-needed' &&
+          record.neighborEditedRowVisible !== false) ||
         (record.supportedNeighborEdited === true &&
-          canonicalOutcome !== 'not-needed') ||
+          (canonicalOutcome !== 'not-needed' ||
+            record.neighborEditedRowVisible !== true)) ||
         ((canonicalOutcome === 'matched' ||
           canonicalOutcome === 'mismatched') &&
           record.neighborCanonicalTitleReadbackHttpStatus !== 200) ||

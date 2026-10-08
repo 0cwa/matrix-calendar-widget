@@ -11,6 +11,7 @@ import {
 
 const sourceSha = 'a'.repeat(40);
 const g6PassedTitleDiagnostic = {
+  neighborEditedRowVisible: true,
   neighborPatchTitleOutcome: 'matched',
   neighborCanonicalTitleReadbackOutcome: 'not-needed',
 };
@@ -2465,6 +2466,7 @@ test('keeps failed neighbor readback failed while formatting finite title diagno
       unsupportedRowOmitted: true,
       supportedNeighborVisible: true,
       canonicalSnapshotAvailable: true,
+      neighborEditedRowVisible: false,
       supportedNeighborEdited: false,
       canonicalUnsupportedObjectUnchanged: true,
       neighborOwnershipUpdated: false,
@@ -2482,6 +2484,40 @@ test('keeps failed neighbor readback failed while formatting finite title diagno
   assert.doesNotMatch(summary, /G6 neighbor|event title|SUMMARY:/u);
 });
 
+test('does not require canonical readback after visible UI readback when another edit gate fails', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-unsupported-preservation',
+      status: 'failed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      neighborEditedRowVisible: true,
+      supportedNeighborEdited: false,
+      canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: false,
+      neighborUpdateIdentityMatches: false,
+      neighborPatchTitleOutcome: 'matched',
+      neighborCanonicalTitleReadbackOutcome: 'not-needed',
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /phase=g6-unsupported-preservation status=failed/u);
+  assert.match(summary, /neighbor_edited_row_visible=true/u);
+  assert.match(
+    summary,
+    /neighbor_canonical_title_readback_outcome=not-needed/u,
+  );
+  assert.doesNotMatch(summary, /event title|SUMMARY:/u);
+});
+
 test('rejects malformed or contradictory G6 title readback diagnostics', () => {
   const base = {
     phase: 'g6-unsupported-preservation',
@@ -2495,6 +2531,7 @@ test('rejects malformed or contradictory G6 title readback diagnostics', () => {
     unsupportedRowOmitted: true,
     supportedNeighborVisible: true,
     canonicalSnapshotAvailable: true,
+    neighborEditedRowVisible: true,
     supportedNeighborEdited: true,
     canonicalUnsupportedObjectUnchanged: true,
     neighborOwnershipUpdated: true,
@@ -2511,8 +2548,13 @@ test('rejects malformed or contradictory G6 title readback diagnostics', () => {
     },
     {
       ...base,
-      supportedNeighborEdited: false,
+      neighborEditedRowVisible: false,
       neighborCanonicalTitleReadbackOutcome: 'not-needed',
+    },
+    {
+      ...base,
+      neighborCanonicalTitleReadbackOutcome: 'matched',
+      neighborCanonicalTitleReadbackHttpStatus: 200,
     },
     {
       ...base,

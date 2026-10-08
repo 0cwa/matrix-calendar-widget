@@ -143,6 +143,7 @@ type G6StageRecord = {
   unsupportedRowOmitted?: boolean;
   supportedNeighborVisible?: boolean;
   canonicalSnapshotAvailable?: boolean;
+  neighborEditedRowVisible?: boolean;
   supportedNeighborEdited?: boolean;
   canonicalUnsupportedObjectUnchanged?: boolean;
   neighborOwnershipUpdated?: boolean;
@@ -1648,12 +1649,15 @@ test('Element Web preserves unsupported events and supports client interactions'
     await editedNeighborRow
       .waitFor({ state: 'visible', timeout: 20_000 })
       .catch(() => {});
+    const neighborEditedRowVisible = await editedNeighborRow
+      .isVisible()
+      .catch(() => false);
     const supportedNeighborEdited =
       neighborPatchStatus !== undefined &&
       neighborPatchStatus >= 200 &&
       neighborPatchStatus < 300 &&
       neighborOwnershipUpdated &&
-      (await editedNeighborRow.isVisible().catch(() => false));
+      neighborEditedRowVisible;
     const neighborPatchTitleOutcome: G6NeighborTitleOutcome =
       neighborUpdate.titleMatches === true
         ? 'matched'
@@ -1662,7 +1666,7 @@ test('Element Web preserves unsupported events and supports client interactions'
           : 'unavailable';
     let neighborCanonicalTitleReadbackOutcome: G6CanonicalTitleReadbackOutcome;
     let neighborCanonicalTitleReadbackHttpStatus: number | undefined;
-    if (supportedNeighborEdited) {
+    if (neighborEditedRowVisible) {
       neighborCanonicalTitleReadbackOutcome = 'not-needed';
     } else if (neighborOwnership?.confirmedCreated !== true) {
       neighborCanonicalTitleReadbackOutcome = 'not-owned';
@@ -1723,6 +1727,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       unsupportedRowOmitted,
       supportedNeighborVisible,
       canonicalSnapshotAvailable,
+      neighborEditedRowVisible,
       supportedNeighborEdited,
       canonicalUnsupportedObjectUnchanged,
       neighborOwnershipUpdated,
