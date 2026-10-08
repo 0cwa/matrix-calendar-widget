@@ -34,6 +34,7 @@ import { performance } from 'node:perf_hooks';
 import {
   MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
   summarizeDefaultWaitObservation,
+  type PerformanceDefaultWaitFailureSnapshot,
   type PerformanceDefaultWaitObservation,
 } from '../../dev/element-acceptance-performance-evidence.mjs';
 import { ElementWebPage } from './pages/elementWebPage';
@@ -489,7 +490,7 @@ type OrdinaryPerformanceCase = {
   detailSamples: PerformanceDetailsSample[];
 };
 type OrdinaryPerformanceReport = {
-  version: 5;
+  version: 6;
   viewportWidth: 1280;
   viewportHeight: 800;
   calendarDays: 7;
@@ -520,6 +521,7 @@ type PerformanceApiObserver = {
   rowsFor: (sample: PerformanceSampleKey) => PerformanceApiResponse[];
   defaultWaitObservation: (
     sample: PerformanceSampleKey,
+    failureSnapshot?: PerformanceDefaultWaitFailureSnapshot,
   ) => PerformanceDefaultWaitObservation;
   waitForRoomEvents: (
     sample: PerformanceSampleKey,
@@ -1057,7 +1059,7 @@ function makeEmptyOrdinaryPerformanceReport(initialDate: {
   month: number;
 }): OrdinaryPerformanceReport {
   return {
-    version: 5,
+    version: 6,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -1217,6 +1219,197 @@ function performanceRangeExpectation(
   return {
     rangeClass: 'preselection',
     ...performancePreselectionRange(initialDate),
+  };
+}
+
+async function observeDefaultWaitFailureSnapshot(
+  page: Page,
+  frame: ReturnType<ElementWebPage['widgetByTitle']>,
+  gatewayUrl: string,
+  expectedRoomId: string,
+  observer: PerformanceApiObserver,
+  sample: PerformanceSampleKey,
+): Promise<PerformanceDefaultWaitFailureSnapshot> {
+  const unavailableConfiguration: PerformanceDefaultWaitFailureSnapshot['widgetConfiguration'] =
+    {
+      available: false,
+      gatewayBaseParameterPresent: null,
+      gatewayBaseValuePresent: null,
+      gatewayBaseOriginMatches: null,
+      roomIdParameterPresent: null,
+      roomIdValuePresent: null,
+      roomIdMatches: null,
+      repositoryConfig: 'unavailable',
+    };
+  const widgetConfiguration = await page
+    .locator('iframe[title="Matrix Calendar"]')
+    .evaluateAll(
+      (
+        iframes,
+        expected,
+      ): PerformanceDefaultWaitFailureSnapshot['widgetConfiguration'] => {
+        const unavailable =
+          (): PerformanceDefaultWaitFailureSnapshot['widgetConfiguration'] => ({
+            available: false,
+            gatewayBaseParameterPresent: null,
+            gatewayBaseValuePresent: null,
+            gatewayBaseOriginMatches: null,
+            roomIdParameterPresent: null,
+            roomIdValuePresent: null,
+            roomIdMatches: null,
+            repositoryConfig: 'unavailable',
+          });
+        if (iframes.length !== 1) return unavailable();
+
+        try {
+          const source = iframes[0].getAttribute('src');
+          if (!source) return unavailable();
+          const widgetUrl = new URL(source, window.location.href);
+          const hashQueryStart = widgetUrl.hash.indexOf('?');
+          const hashQuery =
+            hashQueryStart >= 0 ? widgetUrl.hash.slice(hashQueryStart + 1) : '';
+          const searchParameters = new URLSearchParams(widgetUrl.search);
+          const hashParameters = new URLSearchParams(hashQuery);
+          const readParameter = (key: string) => {
+            const searchValues = searchParameters.getAll(key);
+            const hashValues = hashParameters.getAll(key);
+            if (
+              searchValues.length > 1 ||
+              hashValues.length > 1 ||
+              (searchValues.length > 0 && hashValues.length > 0)
+            ) {
+              return { unambiguous: false, present: false, value: undefined };
+            }
+            const values = searchValues.length > 0 ? searchValues : hashValues;
+            return {
+              unambiguous: true,
+              present: values.length === 1,
+              value: values[0],
+            };
+          };
+          const gatewayBase = readParameter('meetings_bot_base_url');
+          const roomId = readParameter('matrix_room_id');
+          if (!gatewayBase.unambiguous || !roomId.unambiguous) {
+            return unavailable();
+          }
+
+          const gatewayBaseValuePresent =
+            gatewayBase.present &&
+            typeof gatewayBase.value === 'string' &&
+            gatewayBase.value.length > 0;
+          const roomIdValuePresent =
+            roomId.present &&
+            typeof roomId.value === 'string' &&
+            roomId.value.length > 0;
+          let gatewayBaseOriginMatches: boolean | null = null;
+          if (
+            typeof gatewayBase.value === 'string' &&
+            gatewayBase.value.length > 0
+          ) {
+            try {
+              gatewayBaseOriginMatches =
+                new URL(gatewayBase.value).origin === expected.gatewayOrigin;
+            } catch {
+              gatewayBaseOriginMatches = false;
+            }
+          }
+          const roomIdMatches = roomIdValuePresent
+            ? roomId.value === expected.roomId
+            : null;
+          const repositoryConfig: PerformanceDefaultWaitFailureSnapshot['widgetConfiguration']['repositoryConfig'] =
+            !roomIdValuePresent ||
+            (gatewayBase.present && !gatewayBaseValuePresent)
+              ? 'in-memory-forced'
+              : gatewayBaseValuePresent
+                ? 'explicit-gateway-parameters'
+                : 'build-config-fallback-possible';
+
+          return {
+            available: true,
+            gatewayBaseParameterPresent: gatewayBase.present,
+            gatewayBaseValuePresent,
+            gatewayBaseOriginMatches,
+            roomIdParameterPresent: roomId.present,
+            roomIdValuePresent,
+            roomIdMatches,
+            repositoryConfig,
+          };
+        } catch {
+          return unavailable();
+        }
+      },
+      {
+        gatewayOrigin: new URL(gatewayUrl).origin,
+        roomId: expectedRoomId,
+      },
+    )
+    .catch(() => unavailableConfiguration);
+
+  let createControl: PerformanceDefaultWaitFailureSnapshot['createControl'] = {
+    available: false,
+    count: null,
+    visible: null,
+    enabled: null,
+  };
+  try {
+    const createLocator = frame.getByRole('button', {
+      name: 'Create event',
+      exact: true,
+    });
+    const count = Math.min(await createLocator.count(), 2) as 0 | 1 | 2;
+    if (count === 0) {
+      createControl = {
+        available: true,
+        count,
+        visible: false,
+        enabled: false,
+      };
+    } else if (count === 2) {
+      createControl = {
+        available: true,
+        count,
+        visible: null,
+        enabled: null,
+      };
+    } else {
+      const [visible, enabled] = await Promise.all([
+        createLocator.isVisible().catch(() => null),
+        createLocator.isEnabled().catch(() => null),
+      ]);
+      createControl = { available: true, count, visible, enabled };
+    }
+  } catch {
+    // A failed immediate locator read is reported as unavailable.
+  }
+
+  const completedApiRows: PerformanceDefaultWaitFailureSnapshot['completedApiRows'] =
+    [];
+  let completedApiRowsOverflow = false;
+  for (const row of observer.rowsFor(sample)) {
+    if (
+      row.endpoint !== 'context' &&
+      row.endpoint !== 'calendars' &&
+      row.endpoint !== 'events' &&
+      row.endpoint !== 'openid'
+    ) {
+      continue;
+    }
+    if (completedApiRows.length === MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT) {
+      completedApiRowsOverflow = true;
+      continue;
+    }
+    completedApiRows.push({
+      endpoint: row.endpoint,
+      status: row.status,
+      decoded: row.decoded,
+    });
+  }
+
+  return {
+    widgetConfiguration,
+    createControl,
+    completedApiRows,
+    completedApiRowsOverflow,
   };
 }
 
@@ -1474,7 +1667,7 @@ function createPerformanceApiObserver(
     },
     rows: () => [...apiResponses],
     rowsFor: (sample) => apiResponses.filter((row) => row.sample === sample),
-    defaultWaitObservation: (sample) => {
+    defaultWaitObservation: (sample, failureSnapshot) => {
       const pendingCounts: Record<PerformanceEndpoint, number> = {
         context: 0,
         calendars: 0,
@@ -1493,6 +1686,7 @@ function createPerformanceApiObserver(
       return summarizeDefaultWaitObservation(
         pendingCounts,
         otherOriginCalendarPathCountBySample.get(sample) ?? 0,
+        failureSnapshot,
       );
     },
     waitForRoomEvents: async (sample, expectedRangeClass) => {
@@ -2193,8 +2387,18 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       try {
         await observer.waitForRoomEvents(defaultSample, 'preselection');
       } catch {
-        caseReport.defaultWaitObservation =
-          observer.defaultWaitObservation(defaultSample);
+        const failureSnapshot = await observeDefaultWaitFailureSnapshot(
+          page,
+          frame,
+          fixture.gatewayUrl,
+          fixture.teamRoomId,
+          observer,
+          defaultSample,
+        ).catch(() => undefined);
+        caseReport.defaultWaitObservation = observer.defaultWaitObservation(
+          defaultSample,
+          failureSnapshot,
+        );
         throw new Error('Default calendar response was not observed');
       }
       failureCode = 'performance-view-sample-failed';

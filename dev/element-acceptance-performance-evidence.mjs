@@ -257,6 +257,7 @@ function validApiResponse(value) {
 export function summarizeDefaultWaitObservation(
   pendingEndpointCounts,
   otherOriginCalendarPathCount,
+  failureSnapshot = unavailableDefaultWaitFailureSnapshot(),
 ) {
   if (
     !isRecord(pendingEndpointCounts) ||
@@ -288,6 +289,14 @@ export function summarizeDefaultWaitObservation(
       count > MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT;
   }
 
+  if (!validDefaultWaitFailureSnapshot(failureSnapshot)) {
+    throw new Error('invalid default wait observation input');
+  }
+
+  const completedByEndpoint = summarizeCompletedDefaultApiRows(
+    failureSnapshot.completedApiRows,
+  );
+
   return {
     pendingByEndpoint,
     pendingOverflowByEndpoint,
@@ -297,7 +306,284 @@ export function summarizeDefaultWaitObservation(
     ),
     otherOriginCalendarPathOverflow:
       otherOriginCalendarPathCount > MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+    widgetConfiguration: failureSnapshot.widgetConfiguration,
+    createControl: failureSnapshot.createControl,
+    completedByEndpoint,
+    completedApiRowsOverflow: failureSnapshot.completedApiRowsOverflow,
   };
+}
+
+const DEFAULT_COMPLETED_ENDPOINTS = [
+  'context',
+  'calendars',
+  'events',
+  'openid',
+];
+const DEFAULT_REPOSITORY_SELECTIONS = new Set([
+  'explicit-gateway-parameters',
+  'in-memory-forced',
+  'build-config-fallback-possible',
+  'unavailable',
+]);
+const DEFAULT_COMPLETED_STATUS_BUCKETS = [
+  'success',
+  'clientError',
+  'serverError',
+  'otherStatus',
+  'requestFailed',
+];
+
+function unavailableDefaultWaitFailureSnapshot() {
+  return {
+    widgetConfiguration: {
+      available: false,
+      gatewayBaseParameterPresent: null,
+      gatewayBaseValuePresent: null,
+      gatewayBaseOriginMatches: null,
+      roomIdParameterPresent: null,
+      roomIdValuePresent: null,
+      roomIdMatches: null,
+      repositoryConfig: 'unavailable',
+    },
+    createControl: {
+      available: false,
+      count: null,
+      visible: null,
+      enabled: null,
+    },
+    completedApiRows: [],
+    completedApiRowsOverflow: false,
+  };
+}
+
+function validDefaultWaitFailureSnapshot(value) {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      'widgetConfiguration',
+      'createControl',
+      'completedApiRows',
+      'completedApiRowsOverflow',
+    ]) ||
+    !hasExactKeys(value.widgetConfiguration, [
+      'available',
+      'gatewayBaseParameterPresent',
+      'gatewayBaseValuePresent',
+      'gatewayBaseOriginMatches',
+      'roomIdParameterPresent',
+      'roomIdValuePresent',
+      'roomIdMatches',
+      'repositoryConfig',
+    ]) ||
+    typeof value.widgetConfiguration.available !== 'boolean' ||
+    ![null, true, false].includes(
+      value.widgetConfiguration.gatewayBaseParameterPresent,
+    ) ||
+    ![null, true, false].includes(
+      value.widgetConfiguration.gatewayBaseValuePresent,
+    ) ||
+    ![null, true, false].includes(
+      value.widgetConfiguration.gatewayBaseOriginMatches,
+    ) ||
+    ![null, true, false].includes(
+      value.widgetConfiguration.roomIdParameterPresent,
+    ) ||
+    ![null, true, false].includes(
+      value.widgetConfiguration.roomIdValuePresent,
+    ) ||
+    ![null, true, false].includes(value.widgetConfiguration.roomIdMatches) ||
+    !DEFAULT_REPOSITORY_SELECTIONS.has(
+      value.widgetConfiguration.repositoryConfig,
+    ) ||
+    !hasExactKeys(value.createControl, [
+      'available',
+      'count',
+      'visible',
+      'enabled',
+    ]) ||
+    typeof value.createControl.available !== 'boolean' ||
+    ![null, 0, 1, 2].includes(value.createControl.count) ||
+    ![null, true, false].includes(value.createControl.visible) ||
+    ![null, true, false].includes(value.createControl.enabled) ||
+    !Array.isArray(value.completedApiRows) ||
+    value.completedApiRows.length > MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT ||
+    typeof value.completedApiRowsOverflow !== 'boolean'
+  ) {
+    return false;
+  }
+
+  const configuration = value.widgetConfiguration;
+  if (
+    configuration.available !==
+    (configuration.repositoryConfig !== 'unavailable')
+  ) {
+    return false;
+  }
+  if (
+    !configuration.available &&
+    (configuration.gatewayBaseValuePresent !== null ||
+      configuration.gatewayBaseParameterPresent !== null ||
+      configuration.gatewayBaseOriginMatches !== null ||
+      configuration.roomIdParameterPresent !== null ||
+      configuration.roomIdValuePresent !== null ||
+      configuration.roomIdMatches !== null)
+  ) {
+    return false;
+  }
+  if (
+    configuration.available &&
+    (typeof configuration.gatewayBaseParameterPresent !== 'boolean' ||
+      typeof configuration.gatewayBaseValuePresent !== 'boolean' ||
+      typeof configuration.roomIdParameterPresent !== 'boolean' ||
+      typeof configuration.roomIdValuePresent !== 'boolean' ||
+      !DEFAULT_REPOSITORY_SELECTIONS.has(configuration.repositoryConfig))
+  ) {
+    return false;
+  }
+  if (
+    configuration.available &&
+    ((!configuration.gatewayBaseParameterPresent &&
+      configuration.gatewayBaseValuePresent) ||
+      (configuration.gatewayBaseValuePresent &&
+        typeof configuration.gatewayBaseOriginMatches !== 'boolean') ||
+      (!configuration.gatewayBaseValuePresent &&
+        configuration.gatewayBaseOriginMatches !== null) ||
+      (!configuration.roomIdParameterPresent &&
+        configuration.roomIdValuePresent) ||
+      (configuration.roomIdValuePresent &&
+        typeof configuration.roomIdMatches !== 'boolean') ||
+      (!configuration.roomIdValuePresent &&
+        configuration.roomIdMatches !== null))
+  ) {
+    return false;
+  }
+  if (
+    configuration.gatewayBaseValuePresent === true &&
+    configuration.gatewayBaseParameterPresent !== true
+  ) {
+    return false;
+  }
+  if (
+    configuration.roomIdValuePresent === true &&
+    configuration.roomIdParameterPresent !== true
+  ) {
+    return false;
+  }
+  if (
+    configuration.repositoryConfig === 'explicit-gateway-parameters' &&
+    (configuration.gatewayBaseParameterPresent !== true ||
+      configuration.gatewayBaseValuePresent !== true ||
+      configuration.roomIdValuePresent !== true)
+  ) {
+    return false;
+  }
+  if (
+    configuration.repositoryConfig === 'in-memory-forced' &&
+    configuration.roomIdValuePresent === true &&
+    !(
+      configuration.gatewayBaseParameterPresent === true &&
+      configuration.gatewayBaseValuePresent === false
+    )
+  ) {
+    return false;
+  }
+  if (
+    configuration.repositoryConfig === 'build-config-fallback-possible' &&
+    (configuration.gatewayBaseParameterPresent !== false ||
+      configuration.roomIdValuePresent !== true)
+  ) {
+    return false;
+  }
+  if (
+    configuration.available &&
+    configuration.repositoryConfig === 'unavailable'
+  ) {
+    return false;
+  }
+
+  if (
+    (!value.createControl.available &&
+      (value.createControl.count !== null ||
+        value.createControl.visible !== null ||
+        value.createControl.enabled !== null)) ||
+    (value.createControl.available && value.createControl.count === null) ||
+    (value.createControl.count === 0 &&
+      (value.createControl.visible !== false ||
+        value.createControl.enabled !== false)) ||
+    (value.createControl.count === 1 &&
+      (![null, true, false].includes(value.createControl.visible) ||
+        ![null, true, false].includes(value.createControl.enabled))) ||
+    (value.createControl.count === 2 &&
+      (value.createControl.visible !== null ||
+        value.createControl.enabled !== null))
+  ) {
+    return false;
+  }
+
+  if (
+    value.completedApiRowsOverflow &&
+    value.completedApiRows.length !== MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT
+  ) {
+    return false;
+  }
+
+  return value.completedApiRows.every(
+    (row) =>
+      isRecord(row) &&
+      hasExactKeys(row, ['endpoint', 'status', 'decoded']) &&
+      DEFAULT_COMPLETED_ENDPOINTS.includes(row.endpoint) &&
+      (row.status === 0 || boundedInteger(row.status, 100, 599)) &&
+      typeof row.decoded === 'boolean',
+  );
+}
+
+function emptyCompletedEndpointSummary() {
+  return {
+    count: 0,
+    success: 0,
+    clientError: 0,
+    serverError: 0,
+    otherStatus: 0,
+    requestFailed: 0,
+    decoded: 0,
+    decodeFailed: 0,
+  };
+}
+
+function summarizeCompletedDefaultApiRows(rows) {
+  const result = Object.fromEntries(
+    DEFAULT_COMPLETED_ENDPOINTS.map((endpoint) => [
+      endpoint,
+      emptyCompletedEndpointSummary(),
+    ]),
+  );
+
+  for (const row of rows) {
+    const summary = result[row.endpoint];
+    summary.count += 1;
+
+    const bucket =
+      row.status === 0
+        ? 'requestFailed'
+        : row.status >= 200 && row.status < 300
+          ? 'success'
+          : row.status >= 400 && row.status < 500
+            ? 'clientError'
+            : row.status >= 500 && row.status < 600
+              ? 'serverError'
+              : 'otherStatus';
+    summary[bucket] = Math.min(
+      summary[bucket] + 1,
+      MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+    );
+    const decodeBucket = row.decoded ? 'decoded' : 'decodeFailed';
+    summary[decodeBucket] = Math.min(
+      summary[decodeBucket] + 1,
+      MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+    );
+  }
+
+  return result;
 }
 
 function validLegacyReport(report) {
@@ -439,6 +725,32 @@ const DEFAULT_WAIT_OBSERVATION_KEYS = [
   'pendingOverflowByEndpoint',
   'otherOriginCalendarPathCount',
   'otherOriginCalendarPathOverflow',
+  'widgetConfiguration',
+  'createControl',
+  'completedByEndpoint',
+  'completedApiRowsOverflow',
+];
+const DEFAULT_WIDGET_CONFIGURATION_KEYS = [
+  'available',
+  'gatewayBaseParameterPresent',
+  'gatewayBaseValuePresent',
+  'gatewayBaseOriginMatches',
+  'roomIdParameterPresent',
+  'roomIdValuePresent',
+  'roomIdMatches',
+  'repositoryConfig',
+];
+const DEFAULT_CREATE_CONTROL_KEYS = [
+  'available',
+  'count',
+  'visible',
+  'enabled',
+];
+const DEFAULT_COMPLETED_SUMMARY_KEYS = [
+  'count',
+  ...DEFAULT_COMPLETED_STATUS_BUCKETS,
+  'decoded',
+  'decodeFailed',
 ];
 const ACTION_KEYS = [
   'durationMs',
@@ -508,12 +820,19 @@ function validDefaultWaitObservation(value) {
     !hasExactKeys(value, DEFAULT_WAIT_OBSERVATION_KEYS) ||
     !hasExactKeys(value.pendingByEndpoint, DEFAULT_WAIT_ENDPOINTS) ||
     !hasExactKeys(value.pendingOverflowByEndpoint, DEFAULT_WAIT_ENDPOINTS) ||
+    !hasExactKeys(
+      value.widgetConfiguration,
+      DEFAULT_WIDGET_CONFIGURATION_KEYS,
+    ) ||
+    !hasExactKeys(value.createControl, DEFAULT_CREATE_CONTROL_KEYS) ||
+    !hasExactKeys(value.completedByEndpoint, DEFAULT_COMPLETED_ENDPOINTS) ||
     !boundedInteger(
       value.otherOriginCalendarPathCount,
       0,
       MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
     ) ||
-    typeof value.otherOriginCalendarPathOverflow !== 'boolean'
+    typeof value.otherOriginCalendarPathOverflow !== 'boolean' ||
+    typeof value.completedApiRowsOverflow !== 'boolean'
   ) {
     return false;
   }
@@ -530,9 +849,119 @@ function validDefaultWaitObservation(value) {
     }
   }
 
+  const configuration = value.widgetConfiguration;
+  if (typeof configuration.available !== 'boolean') return false;
+  if (!configuration.available) {
+    if (
+      configuration.repositoryConfig !== 'unavailable' ||
+      DEFAULT_WIDGET_CONFIGURATION_KEYS.slice(1, -1).some(
+        (key) => configuration[key] !== null,
+      )
+    ) {
+      return false;
+    }
+  } else {
+    if (
+      configuration.repositoryConfig === 'unavailable' ||
+      typeof configuration.gatewayBaseParameterPresent !== 'boolean' ||
+      typeof configuration.gatewayBaseValuePresent !== 'boolean' ||
+      typeof configuration.roomIdParameterPresent !== 'boolean' ||
+      typeof configuration.roomIdValuePresent !== 'boolean' ||
+      !DEFAULT_REPOSITORY_SELECTIONS.has(configuration.repositoryConfig)
+    ) {
+      return false;
+    }
+    if (
+      (!configuration.gatewayBaseParameterPresent &&
+        configuration.gatewayBaseValuePresent) ||
+      (configuration.gatewayBaseValuePresent &&
+        typeof configuration.gatewayBaseOriginMatches !== 'boolean') ||
+      (!configuration.gatewayBaseValuePresent &&
+        configuration.gatewayBaseOriginMatches !== null) ||
+      (!configuration.roomIdParameterPresent &&
+        configuration.roomIdValuePresent) ||
+      (configuration.roomIdValuePresent &&
+        typeof configuration.roomIdMatches !== 'boolean') ||
+      (!configuration.roomIdValuePresent &&
+        configuration.roomIdMatches !== null)
+    ) {
+      return false;
+    }
+    if (
+      configuration.repositoryConfig === 'explicit-gateway-parameters' &&
+      (!configuration.gatewayBaseParameterPresent ||
+        !configuration.gatewayBaseValuePresent ||
+        !configuration.roomIdValuePresent)
+    ) {
+      return false;
+    }
+    if (
+      configuration.repositoryConfig === 'in-memory-forced' &&
+      configuration.roomIdValuePresent &&
+      !(
+        configuration.gatewayBaseParameterPresent &&
+        !configuration.gatewayBaseValuePresent
+      )
+    ) {
+      return false;
+    }
+    if (
+      configuration.repositoryConfig === 'build-config-fallback-possible' &&
+      (configuration.gatewayBaseParameterPresent ||
+        !configuration.roomIdValuePresent)
+    ) {
+      return false;
+    }
+  }
+
+  const createControl = value.createControl;
+  if (typeof createControl.available !== 'boolean') return false;
+  if (!createControl.available) {
+    if (
+      createControl.count !== null ||
+      createControl.visible !== null ||
+      createControl.enabled !== null
+    ) {
+      return false;
+    }
+  } else if (
+    ![0, 1, 2].includes(createControl.count) ||
+    (createControl.count === 0 &&
+      (createControl.visible !== false || createControl.enabled !== false)) ||
+    (createControl.count === 1 &&
+      (![null, true, false].includes(createControl.visible) ||
+        ![null, true, false].includes(createControl.enabled))) ||
+    (createControl.count === 2 &&
+      (createControl.visible !== null || createControl.enabled !== null))
+  ) {
+    return false;
+  }
+
+  let totalCompleted = 0;
+  for (const endpoint of DEFAULT_COMPLETED_ENDPOINTS) {
+    const summary = value.completedByEndpoint[endpoint];
+    if (
+      !hasExactKeys(summary, DEFAULT_COMPLETED_SUMMARY_KEYS) ||
+      !DEFAULT_COMPLETED_SUMMARY_KEYS.every((key) =>
+        boundedInteger(summary[key], 0, MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT),
+      ) ||
+      DEFAULT_COMPLETED_STATUS_BUCKETS.reduce(
+        (total, key) => total + summary[key],
+        0,
+      ) !== summary.count ||
+      summary.decoded + summary.decodeFailed !== summary.count
+    ) {
+      return false;
+    }
+    totalCompleted += summary.count;
+  }
+
   return (
-    !value.otherOriginCalendarPathOverflow ||
-    value.otherOriginCalendarPathCount === MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT
+    (!value.otherOriginCalendarPathOverflow ||
+      value.otherOriginCalendarPathCount ===
+        MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT) &&
+    (!value.completedApiRowsOverflow ||
+      totalCompleted === MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT)
   );
 }
 
@@ -582,7 +1011,7 @@ function validOrdinaryCase(value) {
 function validOrdinaryReport(report) {
   return (
     hasExactKeys(report, ORDINARY_REPORT_KEYS) &&
-    report.version === 5 &&
+    report.version === 6 &&
     report.viewportWidth === 1280 &&
     report.viewportHeight === 800 &&
     report.calendarDays === 7 &&
@@ -614,7 +1043,7 @@ function validOrdinaryReport(report) {
 }
 
 function validReport(report) {
-  return isRecord(report) && report.version === 5
+  return isRecord(report) && report.version === 6
     ? validOrdinaryReport(report)
     : validLegacyReport(report);
 }
@@ -1009,13 +1438,13 @@ function ordinaryReportPasses(report) {
 }
 
 function reportPasses(report) {
-  return report.version === 5
+  return report.version === 6
     ? ordinaryReportPasses(report)
     : legacyReportPasses(report);
 }
 
 function validDefaultWaitRecord(record) {
-  if (record.performanceReport.version !== 5) return true;
+  if (record.performanceReport.version !== 6) return true;
   const snapshotCount = record.performanceReport.cases.filter(
     (performanceCase) => performanceCase.defaultWaitObservation !== null,
   ).length;
@@ -1053,7 +1482,7 @@ function formatOrdinaryPerformanceEvidence(record) {
   const lines = [
     [
       'phase=performance-pilot',
-      'report_version=5',
+      'report_version=6',
       'profile=ordinary-0-25',
       `beta_gate_eligible=${record.status === 'passed'}`,
       `status=${record.status}`,
@@ -1149,6 +1578,44 @@ function formatOrdinaryPerformanceEvidence(record) {
           `other_origin_calendar_paths_overflow=${defaultWaitObservation.otherOriginCalendarPathOverflow}`,
         ].join(' '),
       );
+      const configuration = defaultWaitObservation.widgetConfiguration;
+      const createControl = defaultWaitObservation.createControl;
+      lines.push(
+        [
+          'performance_default_wait_runtime',
+          `profile=${profile}`,
+          `config_available=${configuration.available}`,
+          `gateway_base_parameter_present=${display(configuration.gatewayBaseParameterPresent)}`,
+          `gateway_base_value_present=${display(configuration.gatewayBaseValuePresent)}`,
+          `gateway_base_origin_matches=${display(configuration.gatewayBaseOriginMatches)}`,
+          `room_id_parameter_present=${display(configuration.roomIdParameterPresent)}`,
+          `room_id_value_present=${display(configuration.roomIdValuePresent)}`,
+          `room_id_matches=${display(configuration.roomIdMatches)}`,
+          `repository_config=${configuration.repositoryConfig}`,
+          `create_available=${createControl.available}`,
+          `create_count=${display(createControl.count)}`,
+          `create_visible=${display(createControl.visible)}`,
+          `create_enabled=${display(createControl.enabled)}`,
+          `completed_api_rows_overflow=${defaultWaitObservation.completedApiRowsOverflow}`,
+        ].join(' '),
+      );
+      for (const endpoint of DEFAULT_COMPLETED_ENDPOINTS) {
+        const summary = defaultWaitObservation.completedByEndpoint[endpoint];
+        lines.push(
+          [
+            'performance_default_wait_api',
+            `profile=${profile}`,
+            `endpoint=${endpoint}`,
+            `count=${summary.count}`,
+            ...DEFAULT_COMPLETED_STATUS_BUCKETS.map(
+              (bucket) =>
+                `${bucket.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`)}=${summary[bucket]}`,
+            ),
+            `decoded=${summary.decoded}`,
+            `decode_failed=${summary.decodeFailed}`,
+          ].join(' '),
+        );
+      }
     }
     if (performanceCase.detailSamples.length === 0) {
       lines.push(`performance_details profile=${profile} samples=0`);
@@ -1211,7 +1678,7 @@ export function formatPerformanceEvidence(record) {
   }
 
   const report = record.performanceReport;
-  if (report.version === 5) {
+  if (report.version === 6) {
     return formatOrdinaryPerformanceEvidence(record);
   }
   const lines = [

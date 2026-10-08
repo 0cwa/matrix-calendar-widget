@@ -303,7 +303,7 @@ function ordinaryCase(profile, year, month, eventCount) {
 
 function ordinaryReport() {
   const report = {
-    version: 5,
+    version: 6,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -396,7 +396,7 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   );
   assert.match(
     summary,
-    /phase=performance-pilot report_version=5 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
+    /phase=performance-pilot report_version=6 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
   );
   assert.match(summary, /performance_case profile=empty events=0/u);
   assert.match(summary, /performance_case profile=events-25 events=25/u);
@@ -596,6 +596,189 @@ test('retains default-wait snapshots only for the matching failed stage', () => 
       ),
     /invalid element acceptance summary/u,
   );
+});
+
+test('reports bounded failed-boundary runtime and completed API observations', () => {
+  const endpoints = {
+    context: 0,
+    calendars: 0,
+    events: 0,
+    openid: 0,
+    'other-calendar': 0,
+    'other-api': 0,
+  };
+  const snapshot = {
+    widgetConfiguration: {
+      available: true,
+      gatewayBaseParameterPresent: true,
+      gatewayBaseValuePresent: true,
+      gatewayBaseOriginMatches: true,
+      roomIdParameterPresent: true,
+      roomIdValuePresent: true,
+      roomIdMatches: true,
+      repositoryConfig: 'explicit-gateway-parameters',
+    },
+    createControl: {
+      available: true,
+      count: 1,
+      visible: true,
+      enabled: false,
+    },
+    completedApiRows: [
+      { endpoint: 'context', status: 200, decoded: true },
+      { endpoint: 'calendars', status: 200, decoded: true },
+      { endpoint: 'events', status: 0, decoded: false },
+      { endpoint: 'openid', status: 503, decoded: false },
+    ],
+    completedApiRowsOverflow: false,
+  };
+  const report = ordinaryReport();
+  report.cases[0].defaultWaitObservation = summarizeDefaultWaitObservation(
+    endpoints,
+    0,
+    snapshot,
+  );
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(
+      ordinaryStage('failed', report, 'performance-default-view-failed'),
+    ),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /performance_default_wait_runtime profile=empty config_available=true gateway_base_parameter_present=true gateway_base_value_present=true gateway_base_origin_matches=true room_id_parameter_present=true room_id_value_present=true room_id_matches=true repository_config=explicit-gateway-parameters create_available=true create_count=1 create_visible=true create_enabled=false completed_api_rows_overflow=false/u,
+  );
+  assert.match(
+    summary,
+    /performance_default_wait_api profile=empty endpoint=events count=1 success=0 client_error=0 server_error=0 other_status=0 request_failed=1 decoded=0 decode_failed=1/u,
+  );
+  assert.match(
+    summary,
+    /performance_default_wait_api profile=empty endpoint=openid count=1 success=0 client_error=0 server_error=1 other_status=0 request_failed=0 decoded=0 decode_failed=1/u,
+  );
+  assert.doesNotMatch(
+    summary,
+    /https?:\/\/|matrix_room_id|gatewayBase|access_token|event title|error message/u,
+  );
+});
+
+test('distinguishes unavailable runtime reads from observed zero responses', () => {
+  const report = ordinaryReport();
+  report.cases[0].defaultWaitObservation = summarizeDefaultWaitObservation(
+    {
+      context: 0,
+      calendars: 0,
+      events: 0,
+      openid: 0,
+      'other-calendar': 0,
+      'other-api': 0,
+    },
+    0,
+  );
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(
+      ordinaryStage('failed', report, 'performance-default-view-failed'),
+    ),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /performance_default_wait_runtime profile=empty config_available=false gateway_base_parameter_present=unavailable gateway_base_value_present=unavailable gateway_base_origin_matches=unavailable room_id_parameter_present=unavailable room_id_value_present=unavailable room_id_matches=unavailable repository_config=unavailable create_available=false create_count=unavailable create_visible=unavailable create_enabled=unavailable completed_api_rows_overflow=false/u,
+  );
+  assert.match(
+    summary,
+    /performance_default_wait_api profile=empty endpoint=events count=0 success=0 client_error=0 server_error=0 other_status=0 request_failed=0 decoded=0 decode_failed=0/u,
+  );
+});
+
+test('caps completed API rows and rejects malformed runtime snapshots', () => {
+  const endpoints = {
+    context: 0,
+    calendars: 0,
+    events: 0,
+    openid: 0,
+    'other-calendar': 0,
+    'other-api': 0,
+  };
+  const baseSnapshot = {
+    widgetConfiguration: {
+      available: true,
+      gatewayBaseParameterPresent: false,
+      gatewayBaseValuePresent: false,
+      gatewayBaseOriginMatches: null,
+      roomIdParameterPresent: true,
+      roomIdValuePresent: true,
+      roomIdMatches: true,
+      repositoryConfig: 'build-config-fallback-possible',
+    },
+    createControl: {
+      available: true,
+      count: 0,
+      visible: false,
+      enabled: false,
+    },
+    completedApiRows: [],
+    completedApiRowsOverflow: false,
+  };
+  const overflowSnapshot = {
+    ...baseSnapshot,
+    completedApiRows: Array.from(
+      { length: MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT },
+      (_, index) => ({
+        endpoint: index === 0 ? 'events' : 'context',
+        status: 200,
+        decoded: true,
+      }),
+    ),
+    completedApiRowsOverflow: true,
+  };
+  const report = ordinaryReport();
+  report.cases[0].defaultWaitObservation = summarizeDefaultWaitObservation(
+    endpoints,
+    0,
+    overflowSnapshot,
+  );
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(
+      ordinaryStage('failed', report, 'performance-default-view-failed'),
+    ),
+    sourceSha,
+  );
+  assert.match(summary, /completed_api_rows_overflow=true/u);
+  assert.match(
+    summary,
+    /performance_default_wait_api profile=empty endpoint=context count=511/u,
+  );
+  assert.match(
+    summary,
+    /performance_default_wait_api profile=empty endpoint=events count=1/u,
+  );
+
+  for (const invalidSnapshot of [
+    { ...baseSnapshot, rawUrl: 'https://private.invalid' },
+    {
+      ...baseSnapshot,
+      completedApiRows: [{ endpoint: 'unknown', status: 200, decoded: true }],
+    },
+    {
+      ...baseSnapshot,
+      completedApiRows: [{ endpoint: 'events', status: 99, decoded: true }],
+    },
+    {
+      ...baseSnapshot,
+      createControl: {
+        available: true,
+        count: 0,
+        visible: true,
+        enabled: false,
+      },
+    },
+  ]) {
+    assert.throws(
+      () => summarizeDefaultWaitObservation(endpoints, 0, invalidSnapshot),
+      /invalid default wait observation input/u,
+    );
+  }
 });
 
 test('rejects malformed or mismatched default-wait diagnostics', () => {
