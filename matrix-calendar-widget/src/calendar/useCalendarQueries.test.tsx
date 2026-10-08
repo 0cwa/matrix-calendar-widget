@@ -27,6 +27,7 @@ import {
   CalendarRepositoryProvider,
   useCalendarRepository,
 } from './CalendarRepositoryProvider';
+import type { CalendarListWithAvailability } from './CalendarTargetAvailabilityRepository';
 import {
   useCalendarEvent,
   useCalendarEvents,
@@ -115,6 +116,7 @@ describe('calendar repository hooks', () => {
       error: undefined,
       partialAvailability: false,
       canManageCalendarCollections: false,
+      roomCalendarListDiagnostic: undefined,
     });
 
     await waitForValueToChange(() => result.current.loading);
@@ -126,6 +128,7 @@ describe('calendar repository hooks', () => {
       partialAvailability: false,
       canManageCalendarCollections: true,
       roomCapabilities: undefined,
+      roomCalendarListDiagnostic: undefined,
     });
   });
 
@@ -146,7 +149,67 @@ describe('calendar repository hooks', () => {
       partialAvailability: false,
       canManageCalendarCollections: false,
       roomCapabilities: undefined,
+      roomCalendarListDiagnostic: undefined,
     });
+  });
+
+  it('keeps concurrent room-list diagnostics on their corresponding query results', async () => {
+    const failedListResult: CalendarListWithAvailability = {
+      calendars: [],
+      partialAvailability: true,
+      canManageCalendarCollections: true,
+      roomCalendarListDiagnostic: {
+        outcome: 'request-failed',
+        httpStatus: 429,
+        calendarCountCapped: null,
+        expectedTargetMatch: null,
+      },
+    };
+    const loadedListResult: CalendarListWithAvailability = {
+      calendars: [calendar],
+      partialAvailability: false,
+      canManageCalendarCollections: true,
+      roomCalendarListDiagnostic: {
+        outcome: 'loaded',
+        httpStatus: 200,
+        calendarCountCapped: 1,
+        expectedTargetMatch: true,
+      },
+    };
+    const listCalendarsWithAvailability = vi
+      .fn()
+      .mockResolvedValueOnce(failedListResult)
+      .mockResolvedValueOnce(loadedListResult);
+    const repository = Object.assign(createRepository(), {
+      getRoomCalendarCapabilities: vi.fn().mockResolvedValue({
+        calendarId: 'team',
+        canReadEvents: true,
+        canWriteEvents: false,
+        canManageReminders: false,
+      }),
+      listCalendarsWithAvailability,
+      listEventsWithAvailability: vi.fn().mockResolvedValue({
+        events: [],
+        diagnostics: [],
+        partialAvailability: false,
+      }),
+    });
+    const { result, waitForValueToChange } = renderHook(
+      () => [useCalendars(), useCalendars()] as const,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await waitForValueToChange(() =>
+      result.current.every((query) => query.loading),
+    );
+
+    expect(result.current[0].roomCalendarListDiagnostic).toEqual(
+      failedListResult.roomCalendarListDiagnostic,
+    );
+    expect(result.current[1].roomCalendarListDiagnostic).toEqual(
+      loadedListResult.roomCalendarListDiagnostic,
+    );
+    expect(listCalendarsWithAvailability).toHaveBeenCalledTimes(2);
   });
 
   it('reloads event ranges and ignores stale responses', async () => {

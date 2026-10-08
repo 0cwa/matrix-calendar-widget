@@ -17,9 +17,10 @@
 import {
   Calendar,
   CalendarEvent,
+  CalendarRepository,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
 import { vi } from 'vitest';
@@ -66,7 +67,7 @@ const events: CalendarEvent[] = [
   },
 ];
 
-function createWrapper(repository: InMemoryCalendarRepository) {
+function createWrapper(repository: CalendarRepository) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
     return (
       <CalendarRepositoryProvider repository={repository}>
@@ -76,7 +77,319 @@ function createWrapper(repository: InMemoryCalendarRepository) {
   };
 }
 
+function calendarSurfaceDiagnostic(): HTMLElement {
+  return screen.getByTestId('calendar-events-surface-diagnostic');
+}
+
 describe('<CalendarEventsSurface />', () => {
+  it('exposes capped loaded query and projection counts without event content', async () => {
+    const extraCalendar: Calendar = {
+      id: 'extra',
+      name: 'Extra calendar',
+      timezone: 'UTC',
+    };
+    const extraEvent: CalendarEvent = {
+      ...events[0],
+      id: 'extra-planning',
+      calendarId: extraCalendar.id,
+      uid: 'extra-planning@example.test',
+      title: 'Extra planning',
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [...calendars, extraCalendar],
+      events: [...events, extraEvent],
+    });
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByText('Team planning')).toBeInTheDocument();
+    const diagnostic = calendarSurfaceDiagnostic();
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-calendar-count-capped',
+      '2',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-event-source-count-capped',
+      '2',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-projected-count-capped',
+      '2',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-visible-count-capped',
+      '2',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-calendar-query-loading',
+      'false',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-calendar-query-error',
+      'false',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-event-query-loading',
+      'false',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-event-query-error',
+      'false',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-capabilities-state',
+      'absent',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-can-read-events',
+      'unknown',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-outcome',
+      'unavailable',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-http-status',
+      'unknown',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-calendar-count-capped',
+      'unknown',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-target-match',
+      'unknown',
+    );
+    expect(diagnostic.outerHTML).not.toContain('Team planning');
+  });
+
+  it('exposes the actual surface query room-list result without calendar data', async () => {
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars: [], events: [] }),
+      {
+        getRoomCalendarCapabilities: vi.fn().mockResolvedValue({
+          calendarId: 'opaque-room-calendar',
+          canReadEvents: true,
+          canWriteEvents: false,
+          canManageReminders: false,
+        }),
+        listCalendarsWithAvailability: vi.fn().mockResolvedValue({
+          calendars: [],
+          partialAvailability: true,
+          canManageCalendarCollections: true,
+          roomCapabilities: {
+            calendarId: 'opaque-room-calendar',
+            canReadEvents: true,
+            canWriteEvents: false,
+            canManageReminders: false,
+          },
+          roomCalendarListDiagnostic: {
+            outcome: 'target-mismatch',
+            httpStatus: 200,
+            calendarCountCapped: 1,
+            expectedTargetMatch: false,
+          },
+        }),
+        listEventsWithAvailability: vi.fn().mockResolvedValue({
+          events: [],
+          diagnostics: [],
+          partialAvailability: false,
+        }),
+      },
+    );
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const diagnostic = await screen.findByTestId(
+      'calendar-events-surface-diagnostic',
+    );
+    await waitFor(() => {
+      expect(diagnostic).toHaveAttribute(
+        'data-mcw-diagnostic-room-list-outcome',
+        'target-mismatch',
+      );
+    });
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-http-status',
+      '200',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-calendar-count-capped',
+      '1',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-room-list-target-match',
+      'false',
+    );
+    expect(diagnostic.outerHTML).not.toContain('opaque-room-calendar');
+  });
+
+  it('distinguishes a loaded empty source from query failure', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendars[0]],
+      events: [],
+    });
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(
+      await screen.findByText(
+        'No events scheduled that match the selected filters.',
+      ),
+    ).toBeInTheDocument();
+    const diagnostic = calendarSurfaceDiagnostic();
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-calendar-count-capped',
+      '1',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-event-source-count-capped',
+      '0',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-projected-count-capped',
+      '0',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-visible-count-capped',
+      '0',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-calendar-query-error',
+      'false',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-event-query-error',
+      'false',
+    );
+  });
+
+  it('reports only closed error facts when a query rejects', async () => {
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars: [], events: [] }),
+      {
+        listCalendars: vi
+          .fn()
+          .mockRejectedValue(new Error('private calendar error detail')),
+      },
+    );
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Calendar events could not be loaded.',
+    );
+    const diagnostic = calendarSurfaceDiagnostic();
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-calendar-query-error',
+      'true',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-calendar-query-loading',
+      'false',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-event-query-error',
+      'false',
+    );
+    expect(diagnostic.outerHTML).not.toContain('private calendar error detail');
+  });
+
+  it('reports loading flags from the real hook state', async () => {
+    let resolveCalendars!: (value: Calendar[]) => void;
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({
+        calendars: [calendars[0]],
+        events: [],
+      }),
+      {
+        listCalendars: vi.fn(
+          () =>
+            new Promise<Calendar[]>((resolve) => {
+              resolveCalendars = resolve;
+            }),
+        ),
+      },
+    );
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const diagnostic = calendarSurfaceDiagnostic();
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-calendar-query-loading',
+      'true',
+    );
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-calendar-query-error',
+      'false',
+    );
+    expect(await screen.findByRole('progressbar')).toBeInTheDocument();
+
+    await act(async () => {
+      resolveCalendars([calendars[0]]);
+    });
+    await waitFor(() =>
+      expect(calendarSurfaceDiagnostic()).toHaveAttribute(
+        'data-mcw-diagnostic-calendar-query-loading',
+        'false',
+      ),
+    );
+    expect(
+      await screen.findByText(
+        'No events scheduled that match the selected filters.',
+      ),
+    ).toBeInTheDocument();
+    expect(diagnostic).toHaveAttribute(
+      'data-mcw-diagnostic-calendar-query-loading',
+      'false',
+    );
+  });
+
   it('keeps a generic compatibility notice when a mixed calendar is hidden', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [

@@ -128,6 +128,13 @@ const WEB_B_EVENT_IDENTITY_STATES = new Set([
   'available',
   'unavailable',
 ]);
+const ROOM_CALENDAR_LIST_OUTCOMES = new Set([
+  'not-requested',
+  'loaded',
+  'request-failed',
+  'invalid-response',
+  'target-mismatch',
+]);
 const MAX_WEB_B_EVENT_LIST_ITEMS = 512;
 const MAX_WEB_B_EVENT_LIST_BYTES = 65_536;
 const WEB_B_EDIT_ROW_RENDER_OBSERVATION_TIMEOUT_MS = 500;
@@ -228,7 +235,7 @@ function validWebBEditSaveDiagnostic(value, failurePoint) {
     Array.isArray(value) ||
     Object.keys(value).sort().join(',') !==
       (isEventRowFailure
-        ? 'eventListRead,eventRowRender,matchedPatchStatus'
+        ? 'calendarSurfaceState,eventListRead,eventRowRender,matchedPatchStatus'
         : 'matchedPatchStatus')
   ) {
     return false;
@@ -255,7 +262,8 @@ function validWebBEditSaveDiagnostic(value, failurePoint) {
   ) {
     return (
       validWebBEventListReadDiagnostic(value.eventListRead) &&
-      validWebBEditRowRenderDiagnostic(value.eventRowRender)
+      validWebBEditRowRenderDiagnostic(value.eventRowRender) &&
+      validWebBCalendarSurfaceStateDiagnostic(value.calendarSurfaceState)
     );
   }
   if (
@@ -271,6 +279,139 @@ function validWebBEditSaveDiagnostic(value, failurePoint) {
     failurePoint !== 'web-b-edit-patch-status' &&
     failurePoint !== 'web-b-edit-event-row' &&
     !WEB_B_EDIT_POST_PATCH_FAILURE_POINT_SET.has(failurePoint)
+  );
+}
+
+function validWebBCalendarSurfaceStateDiagnostic(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'calendarCountCapped,calendarPartialAvailability,calendarQueryError,calendarQueryLoading,eventPartialAvailability,eventQueryError,eventQueryLoading,eventQuerySourceCountCapped,projectedOccurrenceCountCapped,roomCalendarList,roomCalendarReadable,roomCapabilitiesState,state,visibleEventCountCapped'
+  ) {
+    return false;
+  }
+  const observations = [
+    value.calendarCountCapped,
+    value.calendarQueryLoading,
+    value.calendarQueryError,
+    value.calendarPartialAvailability,
+    value.roomCapabilitiesState,
+    value.roomCalendarReadable,
+    value.eventQuerySourceCountCapped,
+    value.eventQueryLoading,
+    value.eventQueryError,
+    value.eventPartialAvailability,
+    value.projectedOccurrenceCountCapped,
+    value.visibleEventCountCapped,
+  ];
+  if (value.state === 'unavailable') {
+    return (
+      observations.every((observation) => observation === null) &&
+      validWebBRoomCalendarListDiagnostic(value.roomCalendarList) &&
+      value.roomCalendarList.state === 'unavailable'
+    );
+  }
+  if (
+    value.state !== 'observed' ||
+    !validWebBRoomCalendarListDiagnostic(value.roomCalendarList) ||
+    ![0, 1, 2].includes(value.calendarCountCapped) ||
+    typeof value.calendarQueryLoading !== 'boolean' ||
+    typeof value.calendarQueryError !== 'boolean' ||
+    typeof value.calendarPartialAvailability !== 'boolean' ||
+    !['present', 'absent'].includes(value.roomCapabilitiesState) ||
+    (value.roomCapabilitiesState === 'present'
+      ? typeof value.roomCalendarReadable !== 'boolean'
+      : value.roomCalendarReadable !== null) ||
+    ![0, 1, 2].includes(value.eventQuerySourceCountCapped) ||
+    typeof value.eventQueryLoading !== 'boolean' ||
+    typeof value.eventQueryError !== 'boolean' ||
+    typeof value.eventPartialAvailability !== 'boolean' ||
+    ![0, 1, 2].includes(value.projectedOccurrenceCountCapped) ||
+    ![0, 1, 2].includes(value.visibleEventCountCapped) ||
+    value.visibleEventCountCapped > value.projectedOccurrenceCountCapped ||
+    (value.calendarQueryLoading && value.calendarQueryError) ||
+    (value.eventQueryLoading && value.eventQueryError)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function validWebBRoomCalendarListDiagnostic(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'calendarCountCapped,expectedTargetMatch,httpStatus,outcome,state'
+  ) {
+    return false;
+  }
+  if (value.state === 'unavailable') {
+    return (
+      value.outcome === null &&
+      value.httpStatus === null &&
+      value.calendarCountCapped === null &&
+      value.expectedTargetMatch === null
+    );
+  }
+  if (
+    value.state !== 'observed' ||
+    !ROOM_CALENDAR_LIST_OUTCOMES.has(value.outcome) ||
+    (value.httpStatus !== null &&
+      (!Number.isInteger(value.httpStatus) ||
+        value.httpStatus < 100 ||
+        value.httpStatus > 599)) ||
+    (value.calendarCountCapped !== null &&
+      ![0, 1, 2].includes(value.calendarCountCapped)) ||
+    ![null, true, false].includes(value.expectedTargetMatch)
+  ) {
+    return false;
+  }
+
+  if (value.outcome === 'not-requested') {
+    return (
+      value.httpStatus === null &&
+      value.calendarCountCapped === null &&
+      value.expectedTargetMatch === null
+    );
+  }
+  if (value.outcome === 'request-failed') {
+    return (
+      value.calendarCountCapped === null &&
+      value.expectedTargetMatch === null &&
+      (value.httpStatus === null ||
+        value.httpStatus < 200 ||
+        value.httpStatus >= 300)
+    );
+  }
+  if (value.outcome === 'target-mismatch') {
+    return (
+      value.httpStatus !== null &&
+      value.httpStatus >= 200 &&
+      value.httpStatus < 300 &&
+      value.calendarCountCapped !== null &&
+      value.expectedTargetMatch === false
+    );
+  }
+  if (value.outcome === 'loaded') {
+    return (
+      value.httpStatus !== null &&
+      value.httpStatus >= 200 &&
+      value.httpStatus < 300 &&
+      value.calendarCountCapped === 1 &&
+      value.expectedTargetMatch === true
+    );
+  }
+  return (
+    value.httpStatus !== null &&
+    value.httpStatus >= 200 &&
+    value.httpStatus < 300 &&
+    ((value.calendarCountCapped === null &&
+      value.expectedTargetMatch === null) ||
+      (value.calendarCountCapped === 1 && value.expectedTargetMatch === true))
   );
 }
 
@@ -329,28 +470,230 @@ export function unavailableWebBEditRowRenderDiagnostic() {
   };
 }
 
-export async function observeWebBEditRowRenderWithinDeadline(observe) {
+export function unavailableWebBCalendarSurfaceStateDiagnostic() {
+  return {
+    state: 'unavailable',
+    calendarCountCapped: null,
+    calendarQueryLoading: null,
+    calendarQueryError: null,
+    calendarPartialAvailability: null,
+    roomCapabilitiesState: null,
+    roomCalendarReadable: null,
+    eventQuerySourceCountCapped: null,
+    eventQueryLoading: null,
+    eventQueryError: null,
+    eventPartialAvailability: null,
+    projectedOccurrenceCountCapped: null,
+    roomCalendarList: unavailableWebBRoomCalendarListDiagnostic(),
+    visibleEventCountCapped: null,
+  };
+}
+
+export function unavailableWebBRoomCalendarListDiagnostic() {
+  return {
+    state: 'unavailable',
+    outcome: null,
+    httpStatus: null,
+    calendarCountCapped: null,
+    expectedTargetMatch: null,
+  };
+}
+
+export function unavailableWebBEditSurfaceDiagnostic() {
+  return {
+    eventRowRender: unavailableWebBEditRowRenderDiagnostic(),
+    calendarSurfaceState: unavailableWebBCalendarSurfaceStateDiagnostic(),
+  };
+}
+
+export function parseWebBCalendarSurfaceStateAttributes(value) {
+  const coreKeys = [
+    'calendarCountCapped',
+    'calendarPartialAvailability',
+    'calendarQueryError',
+    'calendarQueryLoading',
+    'eventPartialAvailability',
+    'eventQueryError',
+    'eventQueryLoading',
+    'eventQuerySourceCountCapped',
+    'projectedOccurrenceCountCapped',
+    'roomCalendarReadable',
+    'roomCapabilitiesState',
+    'visibleEventCountCapped',
+  ];
+  const roomListKeys = [
+    'roomCalendarListCalendarCountCapped',
+    'roomCalendarListExpectedTargetMatch',
+    'roomCalendarListHttpStatus',
+    'roomCalendarListOutcome',
+  ];
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    coreKeys.some((key) => !Object.hasOwn(value, key)) ||
+    Object.keys(value).some(
+      (key) => !coreKeys.includes(key) && !roomListKeys.includes(key),
+    )
+  ) {
+    return unavailableWebBCalendarSurfaceStateDiagnostic();
+  }
+
+  const count = (raw) =>
+    ['0', '1', '2'].includes(raw) ? Number(raw) : undefined;
+  const boolean = (raw) =>
+    raw === 'true' ? true : raw === 'false' ? false : undefined;
+  const calendarCountCapped = count(value.calendarCountCapped);
+  const calendarQueryLoading = boolean(value.calendarQueryLoading);
+  const calendarQueryError = boolean(value.calendarQueryError);
+  const calendarPartialAvailability = boolean(
+    value.calendarPartialAvailability,
+  );
+  const roomCapabilitiesState = ['present', 'absent'].includes(
+    value.roomCapabilitiesState,
+  )
+    ? value.roomCapabilitiesState
+    : undefined;
+  const roomCalendarReadable =
+    value.roomCalendarReadable === 'true'
+      ? true
+      : value.roomCalendarReadable === 'false'
+        ? false
+        : value.roomCalendarReadable === 'unknown'
+          ? null
+          : undefined;
+  const eventQuerySourceCountCapped = count(value.eventQuerySourceCountCapped);
+  const eventQueryLoading = boolean(value.eventQueryLoading);
+  const eventQueryError = boolean(value.eventQueryError);
+  const eventPartialAvailability = boolean(value.eventPartialAvailability);
+  const projectedOccurrenceCountCapped = count(
+    value.projectedOccurrenceCountCapped,
+  );
+  const visibleEventCountCapped = count(value.visibleEventCountCapped);
+  if (
+    calendarCountCapped === undefined ||
+    calendarQueryLoading === undefined ||
+    calendarQueryError === undefined ||
+    calendarPartialAvailability === undefined ||
+    roomCapabilitiesState === undefined ||
+    roomCalendarReadable === undefined ||
+    (roomCapabilitiesState === 'present' && roomCalendarReadable === null) ||
+    (roomCapabilitiesState === 'absent' && roomCalendarReadable !== null) ||
+    eventQuerySourceCountCapped === undefined ||
+    eventQueryLoading === undefined ||
+    eventQueryError === undefined ||
+    eventPartialAvailability === undefined ||
+    projectedOccurrenceCountCapped === undefined ||
+    visibleEventCountCapped === undefined
+  ) {
+    return unavailableWebBCalendarSurfaceStateDiagnostic();
+  }
+
+  const hasRoomListDiagnostic = roomListKeys.every((key) =>
+    Object.hasOwn(value, key),
+  );
+  const roomCalendarList = hasRoomListDiagnostic
+    ? parseWebBRoomCalendarListAttributes(value)
+    : unavailableWebBRoomCalendarListDiagnostic();
+
+  const parsed = {
+    state: 'observed',
+    calendarCountCapped,
+    calendarQueryLoading,
+    calendarQueryError,
+    calendarPartialAvailability,
+    roomCapabilitiesState,
+    roomCalendarReadable:
+      roomCapabilitiesState === 'present' ? roomCalendarReadable : null,
+    eventQuerySourceCountCapped,
+    eventQueryLoading,
+    eventQueryError,
+    eventPartialAvailability,
+    projectedOccurrenceCountCapped,
+    roomCalendarList,
+    visibleEventCountCapped,
+  };
+  return validWebBCalendarSurfaceStateDiagnostic(parsed)
+    ? parsed
+    : unavailableWebBCalendarSurfaceStateDiagnostic();
+}
+
+function parseWebBRoomCalendarListAttributes(value) {
+  const count = ['0', '1', '2'].includes(
+    value.roomCalendarListCalendarCountCapped,
+  )
+    ? Number(value.roomCalendarListCalendarCountCapped)
+    : value.roomCalendarListCalendarCountCapped === 'unknown'
+      ? null
+      : undefined;
+  const status =
+    value.roomCalendarListHttpStatus === 'unknown'
+      ? null
+      : /^(?:[1-5]\d\d)$/u.test(value.roomCalendarListHttpStatus)
+        ? Number(value.roomCalendarListHttpStatus)
+        : undefined;
+  const targetMatch =
+    value.roomCalendarListExpectedTargetMatch === 'true'
+      ? true
+      : value.roomCalendarListExpectedTargetMatch === 'false'
+        ? false
+        : value.roomCalendarListExpectedTargetMatch === 'unknown'
+          ? null
+          : undefined;
+  const outcome = value.roomCalendarListOutcome;
+  if (outcome === 'unavailable') {
+    return unavailableWebBRoomCalendarListDiagnostic();
+  }
+  const parsed = {
+    state: 'observed',
+    outcome,
+    httpStatus: status,
+    calendarCountCapped: count,
+    expectedTargetMatch: targetMatch,
+  };
+  return validWebBRoomCalendarListDiagnostic(parsed)
+    ? parsed
+    : unavailableWebBRoomCalendarListDiagnostic();
+}
+
+export async function observeWebBEditSurfaceWithinDeadline(observe) {
   if (typeof observe !== 'function') {
-    return unavailableWebBEditRowRenderDiagnostic();
+    return unavailableWebBEditSurfaceDiagnostic();
   }
 
   let timer;
   try {
     const deadline = new Promise((resolve) => {
       timer = setTimeout(
-        () => resolve(unavailableWebBEditRowRenderDiagnostic()),
+        () => resolve(unavailableWebBEditSurfaceDiagnostic()),
         WEB_B_EDIT_ROW_RENDER_OBSERVATION_TIMEOUT_MS,
       );
     });
     const observation = Promise.resolve()
       .then(observe)
-      .catch(() => unavailableWebBEditRowRenderDiagnostic());
+      .catch(() => unavailableWebBEditSurfaceDiagnostic());
     const result = await Promise.race([observation, deadline]);
-    return validWebBEditRowRenderDiagnostic(result)
-      ? result
-      : unavailableWebBEditRowRenderDiagnostic();
+    if (
+      result === null ||
+      typeof result !== 'object' ||
+      Array.isArray(result) ||
+      Object.keys(result).sort().join(',') !==
+        'calendarSurfaceState,eventRowRender'
+    ) {
+      return unavailableWebBEditSurfaceDiagnostic();
+    }
+    return {
+      eventRowRender: validWebBEditRowRenderDiagnostic(result.eventRowRender)
+        ? result.eventRowRender
+        : unavailableWebBEditRowRenderDiagnostic(),
+      calendarSurfaceState: validWebBCalendarSurfaceStateDiagnostic(
+        result.calendarSurfaceState,
+      )
+        ? result.calendarSurfaceState
+        : unavailableWebBCalendarSurfaceStateDiagnostic(),
+    };
   } catch {
-    return unavailableWebBEditRowRenderDiagnostic();
+    return unavailableWebBEditSurfaceDiagnostic();
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
@@ -1370,7 +1713,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   const failed = Object.values(cases).includes('failed');
   const complete = Object.values(cases).every((value) => value === 'passed');
   return {
-    schemaVersion: 7,
+    schemaVersion: 9,
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
     loginStep,
     loginEntry,
