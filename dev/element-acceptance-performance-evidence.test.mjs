@@ -448,6 +448,15 @@ test('classifies only closed page-error subtype and configured origin buckets', 
     /private|https?:\/\/|element\.invalid|widget\.invalid|8448|3000|assets/u,
   );
 
+  const directChromiumFrameError = new Error('private message');
+  directChromiumFrameError.stack =
+    'Error: private message\n    at http://widget.invalid:3000/assets/widget.js:1:4';
+  assert.equal(
+    classifyPerformancePageError(directChromiumFrameError, fixtureUrls)
+      .errorSource,
+    'widget',
+  );
+
   const elementError = new Error('private message');
   elementError.stack =
     'Error: private message\n    at render (https://element.invalid:8448/bundles/app.js:2:5)';
@@ -469,6 +478,17 @@ test('classifies only closed page-error subtype and configured origin buckets', 
     'Error: private message\nhttps://widget.invalid:3000/private-message';
   assert.equal(
     classifyPerformancePageError(messageUrlError, fixtureUrls).errorSource,
+    'unclassified',
+  );
+
+  const unsupportedChromiumContinuationError = new Error('private message');
+  unsupportedChromiumContinuationError.stack =
+    'Error: private message\n    at continuation https://widget.invalid:3000/private-message';
+  assert.equal(
+    classifyPerformancePageError(
+      unsupportedChromiumContinuationError,
+      fixtureUrls,
+    ).errorSource,
     'unclassified',
   );
 
@@ -617,6 +637,11 @@ test('summarizes bounded page-error stage observations without error text', () =
       invalid.pageErrorObservations[0].stackAvailable = false;
     },
     (invalid) => {
+      invalid.pageErrorObservations[0].sourceScanTruncated = true;
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[0].errorSource = 'unclassified';
+      invalid.pageErrorObservations[0].stackAvailable = false;
       invalid.pageErrorObservations[0].sourceScanTruncated = true;
     },
   ]) {

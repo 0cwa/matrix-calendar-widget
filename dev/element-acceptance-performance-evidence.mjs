@@ -91,7 +91,6 @@ const PAGE_ERROR_SUBTYPE_BY_NAME = new Map([
 ]);
 const PAGE_ERROR_STACK_CHARACTER_LIMIT = 16_384;
 const PAGE_ERROR_STACK_FRAME_LIMIT = 24;
-const PAGE_ERROR_STACK_URL = /https?:\/\/[^\s()[\]{}<>"']+/gu;
 const PAGE_ERROR_STAGES = new Set([
   'case-setup',
   'element-login',
@@ -173,21 +172,22 @@ function normalizeErrorOrigin(value) {
 
 function stackFrameMatchesOrigin(frame, origin) {
   const normalizedFrame = frame.trim();
-  const browserStackFrame =
-    /^at\s+(?:.+\s+\()?https?:\/\//u.test(normalizedFrame) ||
-    /^[^@\s][^@]*@https?:\/\//u.test(normalizedFrame);
-  if (!origin || !browserStackFrame) return false;
-  for (const match of frame.matchAll(PAGE_ERROR_STACK_URL)) {
-    const candidate = match[0]
-      .replace(/:\d+:\d+$/u, '')
-      .replace(/[),;]+$/u, '');
-    try {
-      if (new URL(candidate).origin === origin) return true;
-    } catch {
-      // A malformed frame is ignored; the original stack is never retained.
-    }
+  const chromiumDirect = /^at\s+(https?:\/\/\S+)$/u.exec(normalizedFrame);
+  const chromiumNamed = /^at\s+.+\s+\((https?:\/\/.*?)\)$/u.exec(
+    normalizedFrame,
+  );
+  const firefoxNamed = /^[^@\s][^@]*@(https?:\/\/\S+)$/u.exec(normalizedFrame);
+  const frameUrl =
+    chromiumDirect?.[1] ?? chromiumNamed?.[1] ?? firefoxNamed?.[1];
+  if (!origin || !frameUrl) return false;
+
+  const candidate = frameUrl.replace(/:\d+:\d+$/u, '');
+  try {
+    return new URL(candidate).origin === origin;
+  } catch {
+    // A malformed frame is ignored; the original stack is never retained.
+    return false;
   }
-  return false;
 }
 
 /**
@@ -1213,6 +1213,7 @@ function validOrdinaryReport(report) {
         PAGE_ERROR_SOURCES.has(observation.errorSource) &&
         typeof observation.stackAvailable === 'boolean' &&
         typeof observation.sourceScanTruncated === 'boolean' &&
+        (observation.stackAvailable || !observation.sourceScanTruncated) &&
         (observation.stackAvailable ||
           (observation.errorSource === 'unclassified' &&
             !observation.sourceScanTruncated)) &&
