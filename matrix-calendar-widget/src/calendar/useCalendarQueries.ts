@@ -32,7 +32,6 @@ import {
 import {
   isCalendarTargetAvailabilityRepository,
   type CalendarRoomCapabilities,
-  type RoomCalendarListDiagnostic,
 } from './CalendarTargetAvailabilityRepository';
 
 export type CalendarQueryState<T> = {
@@ -45,7 +44,6 @@ export type CalendarListQueryState = CalendarQueryState<Calendar[]> & {
   partialAvailability: boolean;
   canManageCalendarCollections: boolean;
   roomCapabilities?: CalendarRoomCapabilities;
-  roomCalendarListDiagnostic: RoomCalendarListDiagnostic | undefined;
 };
 
 export type CalendarEventsQueryState = CalendarQueryState<CalendarEvent[]> & {
@@ -65,18 +63,12 @@ export function useCalendars(): CalendarListQueryState {
     loading: true,
     partialAvailability: false,
     canManageCalendarCollections: false,
-    roomCalendarListDiagnostic: undefined,
   });
 
   useEffect(() => {
     let ignore = false;
 
-    setState((current) => ({
-      ...current,
-      loading: true,
-      error: undefined,
-      roomCalendarListDiagnostic: undefined,
-    }));
+    setState((current) => ({ ...current, loading: true, error: undefined }));
 
     async function loadCalendars() {
       try {
@@ -94,7 +86,6 @@ export function useCalendars(): CalendarListQueryState {
             partialAvailability: result.partialAvailability,
             canManageCalendarCollections: result.canManageCalendarCollections,
             roomCapabilities: result.roomCapabilities,
-            roomCalendarListDiagnostic: result.roomCalendarListDiagnostic,
           });
         }
       } catch (error: unknown) {
@@ -106,7 +97,6 @@ export function useCalendars(): CalendarListQueryState {
             partialAvailability: false,
             canManageCalendarCollections: false,
             roomCapabilities: undefined,
-            roomCalendarListDiagnostic: undefined,
           });
         }
       }

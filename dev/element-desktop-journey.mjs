@@ -128,13 +128,6 @@ const WEB_B_EVENT_IDENTITY_STATES = new Set([
   'available',
   'unavailable',
 ]);
-const ROOM_CALENDAR_LIST_OUTCOMES = new Set([
-  'not-requested',
-  'loaded',
-  'request-failed',
-  'invalid-response',
-  'target-mismatch',
-]);
 const MAX_WEB_B_EVENT_LIST_ITEMS = 512;
 const MAX_WEB_B_EVENT_LIST_BYTES = 65_536;
 const WEB_B_EDIT_ROW_RENDER_OBSERVATION_TIMEOUT_MS = 500;
@@ -288,7 +281,7 @@ function validWebBCalendarSurfaceStateDiagnostic(value) {
     typeof value !== 'object' ||
     Array.isArray(value) ||
     Object.keys(value).sort().join(',') !==
-      'calendarCountCapped,calendarPartialAvailability,calendarQueryError,calendarQueryLoading,eventPartialAvailability,eventQueryError,eventQueryLoading,eventQuerySourceCountCapped,projectedOccurrenceCountCapped,roomCalendarList,roomCalendarReadable,roomCapabilitiesState,state,visibleEventCountCapped'
+      'calendarCountCapped,calendarPartialAvailability,calendarQueryError,calendarQueryLoading,eventPartialAvailability,eventQueryError,eventQueryLoading,eventQuerySourceCountCapped,projectedOccurrenceCountCapped,roomCalendarReadable,roomCapabilitiesState,state,visibleEventCountCapped'
   ) {
     return false;
   }
@@ -307,15 +300,10 @@ function validWebBCalendarSurfaceStateDiagnostic(value) {
     value.visibleEventCountCapped,
   ];
   if (value.state === 'unavailable') {
-    return (
-      observations.every((observation) => observation === null) &&
-      validWebBRoomCalendarListDiagnostic(value.roomCalendarList) &&
-      value.roomCalendarList.state === 'unavailable'
-    );
+    return observations.every((observation) => observation === null);
   }
   if (
     value.state !== 'observed' ||
-    !validWebBRoomCalendarListDiagnostic(value.roomCalendarList) ||
     ![0, 1, 2].includes(value.calendarCountCapped) ||
     typeof value.calendarQueryLoading !== 'boolean' ||
     typeof value.calendarQueryError !== 'boolean' ||
@@ -337,82 +325,6 @@ function validWebBCalendarSurfaceStateDiagnostic(value) {
     return false;
   }
   return true;
-}
-
-function validWebBRoomCalendarListDiagnostic(value) {
-  if (
-    value === null ||
-    typeof value !== 'object' ||
-    Array.isArray(value) ||
-    Object.keys(value).sort().join(',') !==
-      'calendarCountCapped,expectedTargetMatch,httpStatus,outcome,state'
-  ) {
-    return false;
-  }
-  if (value.state === 'unavailable') {
-    return (
-      value.outcome === null &&
-      value.httpStatus === null &&
-      value.calendarCountCapped === null &&
-      value.expectedTargetMatch === null
-    );
-  }
-  if (
-    value.state !== 'observed' ||
-    !ROOM_CALENDAR_LIST_OUTCOMES.has(value.outcome) ||
-    (value.httpStatus !== null &&
-      (!Number.isInteger(value.httpStatus) ||
-        value.httpStatus < 100 ||
-        value.httpStatus > 599)) ||
-    (value.calendarCountCapped !== null &&
-      ![0, 1, 2].includes(value.calendarCountCapped)) ||
-    ![null, true, false].includes(value.expectedTargetMatch)
-  ) {
-    return false;
-  }
-
-  if (value.outcome === 'not-requested') {
-    return (
-      value.httpStatus === null &&
-      value.calendarCountCapped === null &&
-      value.expectedTargetMatch === null
-    );
-  }
-  if (value.outcome === 'request-failed') {
-    return (
-      value.calendarCountCapped === null &&
-      value.expectedTargetMatch === null &&
-      (value.httpStatus === null ||
-        value.httpStatus < 200 ||
-        value.httpStatus >= 300)
-    );
-  }
-  if (value.outcome === 'target-mismatch') {
-    return (
-      value.httpStatus !== null &&
-      value.httpStatus >= 200 &&
-      value.httpStatus < 300 &&
-      value.calendarCountCapped !== null &&
-      value.expectedTargetMatch === false
-    );
-  }
-  if (value.outcome === 'loaded') {
-    return (
-      value.httpStatus !== null &&
-      value.httpStatus >= 200 &&
-      value.httpStatus < 300 &&
-      value.calendarCountCapped === 1 &&
-      value.expectedTargetMatch === true
-    );
-  }
-  return (
-    value.httpStatus !== null &&
-    value.httpStatus >= 200 &&
-    value.httpStatus < 300 &&
-    ((value.calendarCountCapped === null &&
-      value.expectedTargetMatch === null) ||
-      (value.calendarCountCapped === 1 && value.expectedTargetMatch === true))
-  );
 }
 
 function validWebBEditRowRenderDiagnostic(value) {
@@ -484,18 +396,7 @@ export function unavailableWebBCalendarSurfaceStateDiagnostic() {
     eventQueryError: null,
     eventPartialAvailability: null,
     projectedOccurrenceCountCapped: null,
-    roomCalendarList: unavailableWebBRoomCalendarListDiagnostic(),
     visibleEventCountCapped: null,
-  };
-}
-
-export function unavailableWebBRoomCalendarListDiagnostic() {
-  return {
-    state: 'unavailable',
-    outcome: null,
-    httpStatus: null,
-    calendarCountCapped: null,
-    expectedTargetMatch: null,
   };
 }
 
@@ -507,34 +408,12 @@ export function unavailableWebBEditSurfaceDiagnostic() {
 }
 
 export function parseWebBCalendarSurfaceStateAttributes(value) {
-  const coreKeys = [
-    'calendarCountCapped',
-    'calendarPartialAvailability',
-    'calendarQueryError',
-    'calendarQueryLoading',
-    'eventPartialAvailability',
-    'eventQueryError',
-    'eventQueryLoading',
-    'eventQuerySourceCountCapped',
-    'projectedOccurrenceCountCapped',
-    'roomCalendarReadable',
-    'roomCapabilitiesState',
-    'visibleEventCountCapped',
-  ];
-  const roomListKeys = [
-    'roomCalendarListCalendarCountCapped',
-    'roomCalendarListExpectedTargetMatch',
-    'roomCalendarListHttpStatus',
-    'roomCalendarListOutcome',
-  ];
   if (
     value === null ||
     typeof value !== 'object' ||
     Array.isArray(value) ||
-    coreKeys.some((key) => !Object.hasOwn(value, key)) ||
-    Object.keys(value).some(
-      (key) => !coreKeys.includes(key) && !roomListKeys.includes(key),
-    )
+    Object.keys(value).sort().join(',') !==
+      'calendarCountCapped,calendarPartialAvailability,calendarQueryError,calendarQueryLoading,eventPartialAvailability,eventQueryError,eventQueryLoading,eventQuerySourceCountCapped,projectedOccurrenceCountCapped,roomCalendarReadable,roomCapabilitiesState,visibleEventCountCapped'
   ) {
     return unavailableWebBCalendarSurfaceStateDiagnostic();
   }
@@ -589,13 +468,6 @@ export function parseWebBCalendarSurfaceStateAttributes(value) {
     return unavailableWebBCalendarSurfaceStateDiagnostic();
   }
 
-  const hasRoomListDiagnostic = roomListKeys.every((key) =>
-    Object.hasOwn(value, key),
-  );
-  const roomCalendarList = hasRoomListDiagnostic
-    ? parseWebBRoomCalendarListAttributes(value)
-    : unavailableWebBRoomCalendarListDiagnostic();
-
   const parsed = {
     state: 'observed',
     calendarCountCapped,
@@ -610,50 +482,11 @@ export function parseWebBCalendarSurfaceStateAttributes(value) {
     eventQueryError,
     eventPartialAvailability,
     projectedOccurrenceCountCapped,
-    roomCalendarList,
     visibleEventCountCapped,
   };
   return validWebBCalendarSurfaceStateDiagnostic(parsed)
     ? parsed
     : unavailableWebBCalendarSurfaceStateDiagnostic();
-}
-
-function parseWebBRoomCalendarListAttributes(value) {
-  const count = ['0', '1', '2'].includes(
-    value.roomCalendarListCalendarCountCapped,
-  )
-    ? Number(value.roomCalendarListCalendarCountCapped)
-    : value.roomCalendarListCalendarCountCapped === 'unknown'
-      ? null
-      : undefined;
-  const status =
-    value.roomCalendarListHttpStatus === 'unknown'
-      ? null
-      : /^(?:[1-5]\d\d)$/u.test(value.roomCalendarListHttpStatus)
-        ? Number(value.roomCalendarListHttpStatus)
-        : undefined;
-  const targetMatch =
-    value.roomCalendarListExpectedTargetMatch === 'true'
-      ? true
-      : value.roomCalendarListExpectedTargetMatch === 'false'
-        ? false
-        : value.roomCalendarListExpectedTargetMatch === 'unknown'
-          ? null
-          : undefined;
-  const outcome = value.roomCalendarListOutcome;
-  if (outcome === 'unavailable') {
-    return unavailableWebBRoomCalendarListDiagnostic();
-  }
-  const parsed = {
-    state: 'observed',
-    outcome,
-    httpStatus: status,
-    calendarCountCapped: count,
-    expectedTargetMatch: targetMatch,
-  };
-  return validWebBRoomCalendarListDiagnostic(parsed)
-    ? parsed
-    : unavailableWebBRoomCalendarListDiagnostic();
 }
 
 export async function observeWebBEditSurfaceWithinDeadline(observe) {
@@ -1713,7 +1546,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   const failed = Object.values(cases).includes('failed');
   const complete = Object.values(cases).every((value) => value === 'passed');
   return {
-    schemaVersion: 9,
+    schemaVersion: 8,
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
     loginStep,
     loginEntry,

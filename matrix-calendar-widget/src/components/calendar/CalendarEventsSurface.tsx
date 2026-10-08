@@ -183,27 +183,6 @@ export function CalendarEventsSurface({
       data-mcw-diagnostic-room-capabilities-state={
         calendars.roomCapabilities ? 'present' : 'absent'
       }
-      data-mcw-diagnostic-room-list-outcome={
-        calendars.roomCalendarListDiagnostic?.outcome ?? 'unavailable'
-      }
-      data-mcw-diagnostic-room-list-http-status={
-        calendars.roomCalendarListDiagnostic?.httpStatus === null ||
-        calendars.roomCalendarListDiagnostic?.httpStatus === undefined
-          ? 'unknown'
-          : String(calendars.roomCalendarListDiagnostic.httpStatus)
-      }
-      data-mcw-diagnostic-room-list-calendar-count-capped={
-        calendars.roomCalendarListDiagnostic?.calendarCountCapped === null ||
-        calendars.roomCalendarListDiagnostic?.calendarCountCapped === undefined
-          ? 'unknown'
-          : String(calendars.roomCalendarListDiagnostic.calendarCountCapped)
-      }
-      data-mcw-diagnostic-room-list-target-match={
-        calendars.roomCalendarListDiagnostic?.expectedTargetMatch === null ||
-        calendars.roomCalendarListDiagnostic?.expectedTargetMatch === undefined
-          ? 'unknown'
-          : String(calendars.roomCalendarListDiagnostic.expectedTargetMatch)
-      }
       data-mcw-diagnostic-surface="calendar-events"
       data-mcw-diagnostic-visible-count-capped={cappedDiagnosticCount(
         filteredEvents.length,

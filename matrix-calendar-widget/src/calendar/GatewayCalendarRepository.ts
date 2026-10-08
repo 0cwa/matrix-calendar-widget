@@ -40,7 +40,6 @@ import type {
   CalendarListWithAvailability,
   CalendarRoomCapabilities,
   CalendarTargetAvailabilityRepository,
-  RoomCalendarListDiagnostic,
 } from './CalendarTargetAvailabilityRepository';
 
 type CalendarTarget = 'personal' | 'room';
@@ -73,11 +72,6 @@ type CalendarGatewayEventResource = {
 type CalendarGatewayEventListResource = {
   events: CalendarGatewayEventResource[];
   diagnostics: CalendarEventProjectionDiagnosticSummary[];
-};
-
-type GatewayRequestObservation = {
-  onResponseStatus?: (status: number) => void;
-  onInvalidJson?: () => void;
 };
 
 export type GatewayCalendarRepositoryOptions = {
@@ -129,12 +123,6 @@ export class GatewayCalendarRepository
     const calendars: Calendar[] = [];
     let partialAvailability = false;
     let canManageCalendarCollections = false;
-    let roomCalendarListDiagnostic: RoomCalendarListDiagnostic = {
-      outcome: 'not-requested',
-      httpStatus: null,
-      calendarCountCapped: null,
-      expectedTargetMatch: null,
-    };
 
     if (personalResult.status === 'fulfilled') {
       canManageCalendarCollections = true;
@@ -152,49 +140,17 @@ export class GatewayCalendarRepository
     } else if (capabilitiesResult.value) {
       const capabilities = capabilitiesResult.value;
       if (capabilities.canReadEvents) {
-        let httpStatus: number | null = null;
-        let invalidJson = false;
         try {
           const roomCalendars = await this.requestJson<Calendar[]>(
             this.url('/v1/calendar/calendars', {
               roomId: this.options.roomId,
               target: 'room',
             }),
-            {},
-            {
-              onResponseStatus: (status) => {
-                httpStatus = status;
-              },
-              onInvalidJson: () => {
-                invalidJson = true;
-              },
-            },
           );
-          const isArray = Array.isArray(roomCalendars);
-          const calendarCountCapped = isArray
-            ? (Math.min(roomCalendars.length, 2) as 0 | 1 | 2)
-            : null;
-          const expectedTargetMatch = isArray
-            ? roomCalendars.length === 1 &&
-              roomCalendars[0]?.id === capabilities.calendarId
-            : null;
-          roomCalendarListDiagnostic = {
-            outcome: 'invalid-response',
-            httpStatus,
-            calendarCountCapped,
-            expectedTargetMatch,
-          };
           if (
             roomCalendars.length !== 1 ||
             roomCalendars[0]?.id !== capabilities.calendarId
           ) {
-            if (isArray) {
-              roomCalendarListDiagnostic = {
-                ...roomCalendarListDiagnostic,
-                outcome: 'target-mismatch',
-                expectedTargetMatch: false,
-              };
-            }
             throw new CalendarRepositoryError(
               'request-failed',
               'Room calendar target did not match the validated context',
@@ -208,27 +164,7 @@ export class GatewayCalendarRepository
               }),
             ),
           );
-          roomCalendarListDiagnostic = {
-            ...roomCalendarListDiagnostic,
-            outcome: 'loaded',
-            expectedTargetMatch: true,
-          };
         } catch {
-          if (invalidJson) {
-            roomCalendarListDiagnostic = {
-              outcome: 'invalid-response',
-              httpStatus,
-              calendarCountCapped: null,
-              expectedTargetMatch: null,
-            };
-          } else if (roomCalendarListDiagnostic.outcome === 'not-requested') {
-            roomCalendarListDiagnostic = {
-              outcome: 'request-failed',
-              httpStatus,
-              calendarCountCapped: null,
-              expectedTargetMatch: null,
-            };
-          }
           partialAvailability = true;
         }
       }
@@ -249,7 +185,6 @@ export class GatewayCalendarRepository
         capabilitiesResult.status === 'fulfilled'
           ? capabilitiesResult.value
           : undefined,
-      roomCalendarListDiagnostic,
     };
   }
 
@@ -836,18 +771,12 @@ export class GatewayCalendarRepository
   private async requestJson<T>(
     url: string,
     init: RequestInit = {},
-    observation?: GatewayRequestObservation,
   ): Promise<T> {
-    const response = await this.request(
-      url,
-      init,
-      observation?.onResponseStatus,
-    );
+    const response = await this.request(url, init);
 
     try {
       return (await response.json()) as T;
     } catch {
-      observation?.onInvalidJson?.();
       throw new CalendarRepositoryError(
         'request-failed',
         'Calendar gateway returned invalid JSON',
@@ -862,11 +791,7 @@ export class GatewayCalendarRepository
     await this.request(url, init);
   }
 
-  private async request(
-    url: string,
-    init: RequestInit,
-    onResponseStatus?: (status: number) => void,
-  ): Promise<Response> {
+  private async request(url: string, init: RequestInit): Promise<Response> {
     const authorization = await this.options.getAuthorizationHeader();
     const headers = new Headers(init.headers);
 
@@ -891,8 +816,6 @@ export class GatewayCalendarRepository
           : 'Calendar gateway request failed',
       );
     }
-
-    onResponseStatus?.(response.status);
 
     if (response.ok) {
       return response;
