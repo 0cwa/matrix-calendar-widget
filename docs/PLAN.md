@@ -454,11 +454,15 @@ access and event writes stay disabled by default.
       Hosted passing evidence is required; actual Matrix clients remain a
       separate release gate (docs/browser-calendar-validation.md).
 
-- [ ] Actual Element Web/Desktop responsive and keyboard/focus acceptance for
+- [x] Actual Element Web/Desktop responsive and keyboard/focus acceptance for
       the bounded beta target (see `docs/beta-scope.md`). Require the standard
       side-panel widget layout and overflow checks; pinned/full-width Apps-drawer
       layout certification is deferred. Mobile clients and formal screen-reader
-      certification are deferred beyond this candidate.
+      certification are deferred beyond this candidate. Exact hosted candidate
+      `235e7e446df3efd8784d3468f593f2799602767c` passed the paired Web/Desktop
+      run [37857387454](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387454):
+      105 Web phases and 12 Desktop cases, including the standard side panel,
+      keyboard/focus, G6 edit/delete, and final cleanup.
   - [x] Add current calendar grid/list/details keyboard, focus, accessible-name,
         and axe regressions. Hosted browser fixture checks pass; actual client
         embedding remains unverified; see `docs/calendar-client-validation.md`.
@@ -483,9 +487,9 @@ access and event writes stay disabled by default.
         HTTP regression through the shared production setup verifies an
         Authorization preflight does not invoke auth or consume the test quota,
         and that CORS headers remain on synthetic authorization rejection,
-        body-limit 413, and rate-limit 429 responses. This is source-level
-        middleware evidence only; it does not establish the status or cause of a
-        prior hosted calendar-list failure or complete actual-client acceptance.
+        body-limit 413, and rate-limit 429 responses. The exact hosted candidate
+        also passed the normal Element Web/Desktop room-calendar flows; operator
+        host behavior remains unverified.
   - [x] Bound calendar-gateway requests by socket peer before Matrix identity
         validation, with capped process-local state and generic retry feedback.
         Shared-proxy, restart, and replica limitations remain explicit.
@@ -551,9 +555,17 @@ access and event writes stay disabled by default.
       does not test attachment authoring or establish the remaining beta gates.
       Passed on draft PR #225 candidate `031a17e1b1c1b7d7f68b5293a80b8a2c46c5ccb6`
       in [hosted run 37569137448](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37569137448): configured Element Web 1.12.30, Synapse 1.161.0, and Radicale 3.8.0.0; observed Chromium 149.0.7827.55, Node 22.23.3, and Linux runner; blocked browser egress count was zero.
-- [ ] Complete actual Element Web/Desktop beta acceptance against isolated
-      pinned Synapse, project-owned Radicale, and PostgreSQL services before
-      any production contact.
+- [x] Complete bounded actual Element Web/Desktop user-flow acceptance
+      against isolated pinned Synapse, project-owned Radicale, and PostgreSQL services before
+      any production contact. The exact candidate `235e7e446df3efd8784d3468f593f2799602767c`
+      passed all 105 Web phases and all 12 Desktop cases in [paired hosted run
+      37857387454](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387454),
+      with all five CI checks plus hosted CodeQL, CalDAV, and standalone
+      Desktop workflows passing. The run covered authorized CRUD, outsider
+      denial, reminders across restart and paired-store restore, G6 preservation
+      and delete, keyboard/focus, and cleanup. This completes isolated
+      application acceptance only; proof that unauthorized requests stop before
+      CalDAV I/O, operator readiness, and deployment evidence remain open.
 - [x] Verify the actual Element Web shared edit, stale-ETag conflict/reload,
       and outsider denial for the bound team room and own unbound room on PR
       #227 candidate `a02932dafbbfa9316bee5e8bda1ee15ed1ddbaff`, hosted run
@@ -564,8 +576,9 @@ access and event writes stay disabled by default.
       standard side-panel layout. PR #230 passed exact hosted Element run
       [37739410969](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37739410969)
       and its applicable checks before merge in `baae43b6a8390a06f0187a54c9de55ef274cb563`.
-      This is evidence for the tested synthetic flow, not a complete Web/Desktop
-      beta acceptance result.
+      The exact candidate run above adds paired Web/Desktop acceptance for the
+      bounded synthetic flow; it does not establish operator or production
+      acceptance.
 - [x] Exercise the enabled unencrypted-room reminder path, then restart and
       separately restore both Radicale and application PostgreSQL data in an
       isolated environment. PR #227 candidate
@@ -585,10 +598,14 @@ access and event writes stay disabled by default.
         side-panel WidgetCard path, with cold activation and same-range refresh
         through the visible List date-range picker limited to 2s, API limited to
         1s, and five 25-event details samples limited to 0.5s
-        in `docs/calendar-performance.md`. Custom 31-day and 250-event timing
-        runs are diagnostic only; no complete 250-event timing series passed.
-        Pinned/full-width layout certification is deferred. Hosted measurement
-        and exact-run evidence remain open.
+        in `docs/calendar-performance.md`. Exact candidate `235e7e446df3efd8784d3468f593f2799602767c`
+        passed hosted run [37857387454](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387454):
+        cold activation was 1.351/1.713 seconds and refresh was 1.762/1.832
+        seconds for zero/25 events; five detail samples peaked at 0.420 seconds
+        and decoded API responses at 0.378 seconds. All stayed within the
+        declared limits. Custom 31-day and 250-event timing runs are diagnostic
+        only; no complete 250-event timing series passed. Pinned/full-width
+        layout certification is deferred.
   - [x] Implement the approved fail-closed page-error diagnostic policy for
         future ordinary reports: the `widget-open` stage runs from activation
         through the first default List with one decoded exact-range response,
@@ -607,10 +624,12 @@ access and event writes stay disabled by default.
       gates. The widget application source matches the `main` baseline; its
       only widget-source difference is the retained recurring-editor test
       split.
-- [ ] Complete ordinary Element Web and Desktop acceptance against the exact
-      cleaned candidate. Exact-candidate hosted verification is not yet
-      recorded; the run must exercise the native CORS normal path and pass all
-      functional, timing, and cleanup gates before any separate rollout review.
+- [x] Complete ordinary Element Web and Desktop acceptance against exact
+      candidate `235e7e446df3efd8784d3468f593f2799602767c`. Paired hosted run
+      [37857387454](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387454)
+      passed all functional, timing, and cleanup gates. Two Element-origin
+      opening errors had complete trusted Element-bundle stacks and passed the
+      approved reporting policy; source mapping did not identify their cause.
 - [ ] Complete operator evidence and independent review of the exact
       candidate before a separate rollout decision.
 

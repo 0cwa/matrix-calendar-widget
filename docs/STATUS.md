@@ -1,15 +1,17 @@
 # Project status
 
-_Last updated: 2026-10-08._
+_Last updated: 2026-10-09._
 
 _Source baseline: `main` at `094342a1a54f894775f3160d7dce447e56a609fb`._
+
+_Hosted application-acceptance candidate: `235e7e446df3efd8784d3468f593f2799602767c` (tree `c07fed72dbd881d204a700ecae702f0a23a4c99a`)._
 
 See the [dated continuation](handoff/2026-10-06/README.md) and
 [exact delivered-slice ledger](handoff/2026-10-06/ledger.json).
 
 ## Current phase
 
-**Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence timing/text and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; operator acceptance remains open. M7 has bounded bot commands and post-success room-target event notices. M8 has source-level gateway and CalDAV limits, a hosted synthetic Chromium fixture, and a completed bounded Element Web interaction run. Ordinary-load acceptance remains open because completed measurements reported widget-opening errors despite passing recorded latency limits. The paired Desktop user-flow and process-cleanup evidence also remain open. Mobile/other clients, formal screen-reader certification, and broad capacity characterization are outside the bounded beta target.
+**Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence timing/text and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; operator acceptance remains open. M7 has bounded bot commands and post-success room-target event notices. The exact application candidate identified above passed the bounded isolated Element Web/Desktop user-flow and ordinary-load acceptance: the paired hosted run passed all 105 Web phases, all 12 Desktop cases, authorization and CRUD flows, reminder restart and paired Radicale/PostgreSQL restore, G6 interactions, and cleanup. Ordinary-load measurements met their predeclared thresholds. Two Element-origin widget-opening errors were captured with complete trusted Element-bundle stacks and passed the approved diagnostic-reporting gate; that evidence does not identify their cause. The separate proof that unauthorized client requests stop before CalDAV I/O and all operator readiness gates remain open. Mobile/other clients, pinned/full-width layout certification, formal screen-reader certification, and broad capacity characterization remain outside the bounded beta target.
 
 A source review confirmed a gateway middleware-order defect: Nest 11.1.28
 applied the default CORS option during application initialization, after the
@@ -20,10 +22,10 @@ shared production setup verifies Authorization preflight handling before auth
 and quota, plus CORS headers on a synthetic authorization rejection, the
 existing body-size rejection, and a real rate-limit 429. Authentication, body
 limits, and the configured quota for actual calendar API requests remain
-unchanged; preflight does not consume that quota. This local source-level fix
-does not establish the HTTP status of an earlier hosted calendar-list failure,
-explain that failure, or demonstrate that the calendar-list flow passes. Full
-Element Web/Desktop and beta acceptance remain open.
+unchanged; preflight does not consume that quota. The exact hosted candidate
+subsequently passed the normal Element Web/Desktop calendar flows, including
+the room calendar list path. These isolated application results do not
+establish production-host behavior or operator readiness.
 
 The first hosted Element Web shared-event journey passed before merge on draft
 PR #225 candidate `031a17e1b1c1b7d7f68b5293a80b8a2c46c5ccb6` ([run
@@ -40,8 +42,30 @@ acceptance.
 The controlled-beta scope and its acceptance contract are documented in
 [`beta-scope.md`](./beta-scope.md). Its target is Element Web/Desktop, one
 server replica, the project-owned Radicale store, and separate app-owned
-PostgreSQL reminder state. Scope definition is not acceptance evidence; it
-does not complete M4/M5/M8 or authorize publication or rollout.
+PostgreSQL reminder state. The tested candidate passed the bounded hosted
+application flows. The separate before-CalDAV-I/O denial proof, operator
+preflight, real-server deployment and backup/restore evidence, and final
+candidate review remain pending; this result does not complete beta acceptance
+or authorize publication or rollout.
+
+The paired Element Web and Desktop user-flow acceptance passed against exact source
+candidate `235e7e446df3efd8784d3468f593f2799602767c` in [hosted run
+37857387454](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387454).
+All 105 Web phases and all 12 Desktop cases passed, including authorization
+and CRUD, reminder restart, restore of paired Radicale and PostgreSQL state,
+the G6 edit/delete and keyboard paths, browser-egress checks, and final
+cleanup. Client denial scenarios returned their expected statuses; a separate
+proof that unauthorized requests stop before CalDAV I/O remains open. The
+approved zero-event/25-event ordinary profile passed: cold
+activation took 1.351/1.713 seconds, refresh took 1.762/1.832 seconds, the
+five event-detail samples peaked at 0.420 seconds, and decoded API responses
+peaked at 0.378 seconds. Each result met the predeclared 2-second activation
+and refresh, 0.5-second details, and 1-second API limits. The two captured
+Element-origin opening errors had complete, trusted Element-bundle stacks and
+met the approved reporting policy; source mapping remained unresolved and no
+cause was established. The final cleanup census found no remaining processes
+and no test account. The result covers isolated application acceptance; it
+does not validate or approve a real operator deployment.
 
 This is source status, not release or deployment approval. The bounded recurrence/timezone projector can omit unsupported or malformed source resources from the visible calendar. It warns for source forms it diagnoses but does not guarantee every unsupported form is detected; the widget does not promise a complete view of every existing VEVENT. The [repository and operator readiness matrix](./repository-readiness.md) separates tested repository behavior from evidence that still requires a real operator or Matrix client.
 
@@ -183,8 +207,43 @@ loading, memory, and actual clients remain unmeasured.
 - **M4:** collection-timezone editing and remaining issue #5 acceptance work.
 - **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, arbitrary RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, attachment forms beyond ADR038, broader alarms, and conference forms beyond ADR036 are not part of the implemented editor. Unsupported recurrence or timezone sources may be omitted from projection; the widget warns for source forms it diagnoses, while preserving the canonical resource.
 - **M6:** issue #7 bounded repository criteria are complete. Keep room access, event writes, settings, delivery, and action notices off until the operator accepts each capability and its trust boundary. A passing pinned stack is not an etke-host or production proof.
-- **M8:** the bounded G6 Element Web interaction path is merged on `main`; its exact hosted Element run 37739410969 and applicable checks passed. This covers the tested synthetic shared-event edit/delete, unsupported-source preservation, keyboard/focus, and standard side-panel layout path, not broad client or beta acceptance. PR #232 also fixes stale event Details after save; its focused whole-event and recurrence-identity regression tests passed before merge. Pinned/full-width Apps-drawer layout remains deferred. The approved ordinary-load target is zero and 25 events in the default seven-day List view, with cold activation and same-range refresh ≤2s, required API responses ≤1s, and five 25-event details samples ≤0.5s. Failed ordinary-load run [37750848604](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37750848604) met recorded numeric limits but failed on two Element-origin widget-opening errors. Its v12 classifier reported the closed `element-web` namespace and `relative-path-prefix` rejection; it resolved no source location and establishes no cause. An earlier failed ordinary run is retained at [37745671795](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37745671795). The later paired hosted run on source `ef007df30481643a33ed244f04a031c5d610e6b8` ([37777775640](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37777775640)) passed all 105 recorded phases, including the ordinary zero/25-event limits, 12 Desktop cases, authorization/CRUD, reminder restart and paired restore, G6 interactions, and cleanup. The ordinary measurements were 1,505.979/1,785.557 ms cold activation and 1,828.642/1,375.124 ms refresh for zero/25 events; five details samples peaked at 416.147 ms and the required decoded API responses peaked at 424.061 ms. Its two opening errors had complete two-frame trusted Element stacks and were eligible diagnostics under the approved policy; source mapping remained unresolved and no cause was established. These historical results do not approve earlier failures retrospectively or establish readiness of the later cleaned candidate: a subsequent normal Web-to-Desktop run on `c867` failed, and exact-candidate hosted verification for `ecbb27a8b6aad747bf247edc898d56103b831492` is not recorded. The approved policy permits only ordinary-profile diagnostics emitted from activation through the first contract-ready default List: one decoded HTTP 200 room response for the exact calendar and range, exact returned and rendered event identities, a visible and enabled Create event control, and two-frame stability. The complete, untruncated stack must have a recognized Element production-bundle first frame and every frame must be a trusted bundle on that same static origin. Widget-opening errors with unknown, widget, mixed, or other origins, malformed or truncated stacks, overflow, or errors after readiness still fail. All ordinary functional, API, timing, and cleanup checks still have to pass, and this subgate does not establish beta acceptance. Custom 31-day and 250-event timings are diagnostic only; no complete 250-event timing series passed. Mobile/other clients and formal screen-reader certification remain deferred. Issue #9 remains open for beta, capacity, and client/operator acceptance. Gateway and bot quotas are process-local. Callers behind one reverse proxy share the gateway's TCP-peer quota; the beta target uses one server replica.
-- **Current candidate gate:** exact cleaned source candidate `ecbb27a8b6aad747bf247edc898d56103b831492` integrates the gateway CORS ordering fix and focused HTTP regression, final schema-8 journey reporting, fail-closed failure-only native-navigation observations, the dedicated-UID cleanup guard, and removal of temporary hidden widget query-state and room-calendar-list diagnostics. Focused checks and individual plus combined reviews are clear. Earlier public candidate `c867` failed its stale source-index assertion, stopped during Desktop room navigation before exercising the room-list/CORS path, and failed standalone cleanup verification; that cleanup run observed a pre-delete clear but ended with a final matching-process count of 1 and policy retained. A separate room-list observation failed before a `Response` reached the widget; its HTTP status and cause remain unknown, and it does not establish a 429. These are historical failures, not acceptance evidence for the cleaned source candidate. Exact-candidate hosted verification is not yet recorded. Ordinary Element Web/Desktop acceptance, holistic release-candidate review, and operator evidence remain open. No production host or configuration was inspected.
+- **M8:** The bounded G6 Element Web interaction path remains covered by merged
+  run [37739410969](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37739410969),
+  including shared-event edit/delete, unsupported-source preservation,
+  keyboard/focus, and standard side-panel layout. Exact hosted candidate
+  `235e7e446df3efd8784d3468f593f2799602767c` passed the bounded Element
+  Web/Desktop user-flow and ordinary-load acceptance in [paired run
+  37857387454](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387454):
+  105 Web phases, 12 Desktop cases, authorization and CRUD, reminder restart
+  and paired Radicale/PostgreSQL restore, G6 interactions, and cleanup.
+  Ordinary cold activation, refresh, detail, and decoded API measurements
+  met their declared limits. Two opening errors were fully captured from
+  trusted Element bundles under the approved diagnostic policy; source mapping
+  did not resolve a cause. The separate proof that unauthorized requests stop
+  before CalDAV I/O remains open. Earlier failed runs
+  [37745671795](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37745671795),
+  [37750848604](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37750848604),
+  and the prior paired run
+  [37777775640](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37777775640)
+  remain historical evidence and are not retroactively reclassified.
+  Pinned/full-width Apps-drawer layout remains deferred. Custom 31-day and
+  250-event timings are diagnostic only; no complete 250-event timing series
+  passed. Mobile/other clients and formal screen-reader certification remain
+  deferred. Issue #9 remains open for operator readiness, broad capacity, and
+  wider client acceptance. Gateway and bot quotas are process-local; callers
+  behind one reverse proxy share the gateway TCP-peer quota, and the beta
+  target uses one server replica.
+- **Current candidate gate:** application acceptance passed on exact source
+  candidate `235e7e446df3efd8784d3468f593f2799602767c`. All five CI checks
+  passed in [37857387462](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387462);
+  the hosted [CodeQL](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387344),
+  [CalDAV](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387342),
+  [standalone Desktop](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387392),
+  and [paired Element Web](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387454)
+  workflows also passed. This records isolated application behavior only. The
+  final independent candidate review, operator preflight, real deployment
+  validation, backup/restore rehearsal, and any rollout decision remain open.
+  No production host or configuration was inspected.
 - **Operator readiness:** homeserver/proxy behavior, OpenID query-token log redaction, selected Radicale image/configuration, PostgreSQL endpoint TLS/CA and role, backups/restores, secrets, network exposure, and rollback remain to be verified. The beta baseline uses the project-owned Radicale image and its own store; replacing an existing service or reusing its `/data` is optional and would require additional image/data-path compatibility and recovery evidence. The Compose sidecar does not migrate another service's data.
 - **Release/deployment:** the project remains pre-alpha. Build and contract evidence do not authorize image/chart publication or a live deployment.
 
