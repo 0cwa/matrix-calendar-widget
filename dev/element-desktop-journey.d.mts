@@ -66,6 +66,27 @@ export type DesktopJourneyFailurePointObservation =
 
 export type WebBEditSaveFailureDiagnostic = {
   matchedPatchStatus: number | null;
+  eventListRead?: WebBEventListReadDiagnostic;
+};
+
+export type WebBEventListReadDiagnostic = {
+  state:
+    | 'awaiting-events-get'
+    | 'request-pending'
+    | 'request-failed'
+    | 'decode-pending'
+    | 'decoded'
+    | 'status-not-200'
+    | 'unavailable';
+  // 2 represents two or more exact same-range requests/responses.
+  matchingGetRequestCountCapped: 0 | 1 | 2;
+  matchingGetResponseCountCapped: 0 | 1 | 2;
+  // Status belongs to the first matching GET request; it can remain null if
+  // a later matching request responds before the first request does.
+  firstMatchedGetStatus: number | null;
+  selectedEventIdentity: 'pending' | 'available' | 'unavailable';
+  sameEventObserved: boolean | null;
+  sameEventEditedTitleMatch: boolean | null;
 };
 
 export type DesktopLoginStep =
@@ -167,7 +188,7 @@ export type ReadOnlyWidgetReadinessObservation = {
 };
 
 export type DesktopJourneySummary = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;
@@ -191,6 +212,37 @@ export declare function classifyDesktopLoginFailure(
   beforeFill: DesktopLoginFormObservation,
   atFailure: DesktopLoginFormObservation,
 ): DesktopLoginFailureReason;
+
+export declare function findUniqueWebBEventId(
+  body: unknown,
+  calendarId: string,
+  title: string,
+): string | null;
+
+export declare function isBoundedWebBEventListResponse(
+  headers: unknown,
+): boolean;
+
+export declare function isBoundedWebBEventListBodyLength(
+  byteLength: number,
+): boolean;
+
+export declare function collectWebBEventTitleMatches(
+  body: unknown,
+  calendarId: string,
+  editedTitle: string,
+): Map<string, boolean> | null;
+
+export declare function inspectWebBEventList(
+  body: unknown,
+  calendarId: string,
+  eventId: string,
+  editedTitle: string,
+): {
+  state: 'decoded' | 'unavailable';
+  sameEventObserved: boolean | null;
+  sameEventEditedTitleMatch: boolean | null;
+};
 
 export declare function enterDesktopPasswordLogin(input: {
   initialForm: DesktopLoginFormObservation;

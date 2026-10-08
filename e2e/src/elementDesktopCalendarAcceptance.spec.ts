@@ -23,6 +23,7 @@ import {
   type Locator,
   type Page,
   type Request,
+  type Response,
 } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
@@ -32,9 +33,13 @@ import {
   appendDesktopJourneyOutcome,
   appendDesktopLoginStep,
   classifyDesktopLoginFailure,
+  collectWebBEventTitleMatches,
   desktopWidgetIsReady,
   enterDesktopPasswordLogin,
+  findUniqueWebBEventId,
   initializeDesktopJourneyEvidence,
+  isBoundedWebBEventListBodyLength,
+  isBoundedWebBEventListResponse,
   prepareDesktopWidget,
   readOnlyWidgetIsReady,
   readSyntheticDesktopCredentials,
@@ -49,6 +54,7 @@ import {
   type DesktopRoomsReadyDiagnostic,
   type DesktopRoomsReadyElementObservation,
   type WebBEditSaveFailureDiagnostic,
+  type WebBEventListReadDiagnostic,
 } from '../../dev/element-desktop-journey.mjs';
 import { ElementWebPage, getMainRoomListLocator } from './pages/elementWebPage';
 
@@ -96,6 +102,14 @@ type DesktopGatewayReadRequestObserver = {
   >;
   stop: () => void;
 };
+
+type WebBEventListReadObserver = {
+  snapshot: () => WebBEventListReadDiagnostic;
+  markPatchResponseObserved: () => void;
+  stop: () => void;
+};
+
+const WEB_B_EVENT_LIST_DIAGNOSTIC_DEADLINE_MS = 500;
 
 const FIXTURE_VALUES = Object.freeze({
   homeserverUrl: 'http://127.0.0.1:8008',
@@ -271,6 +285,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let desktopPage: Page | undefined;
   let desktopWidgetFrame: FrameLocator | undefined;
   let desktopGatewayReadObserver: DesktopGatewayReadRequestObserver | undefined;
+  let webBEventListReadObserver: WebBEventListReadObserver | undefined;
   const desktopWidgetPromptObservation =
     unavailableDesktopWidgetPromptObservation();
   let webHttpRoute: WebHttpRouteObservation | undefined;
@@ -473,6 +488,13 @@ test('Element Desktop room event journey', async ({ browser }) => {
     if (webReadResponse.status() !== 200) {
       throw new Error('Second member calendar read failed');
     }
+    webBEventListReadObserver = observeWebBEventListRefetch(
+      webPage,
+      fixture,
+      webReadResponse,
+      initialTitle,
+      editedTitle,
+    );
     currentFailurePoint = 'web-b-event-row';
     const eventRow = webFrame.getByRole('listitem', {
       name: initialTitle,
@@ -529,6 +551,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
     await editor.getByRole('button', { name: 'Save', exact: true }).click();
     currentFailurePoint = 'web-b-edit-patch-await';
     const updated = await updateResponse;
+    webBEventListReadObserver?.markPatchResponseObserved();
     webBEditPatchStatus = updated.status();
     currentFailurePoint = 'web-b-edit-patch-status';
     if (webBEditPatchStatus < 200 || webBEditPatchStatus >= 300) {
@@ -538,6 +561,8 @@ test('Element Desktop room event journey', async ({ browser }) => {
     await webFrame
       .getByRole('listitem', { name: editedTitle, exact: true })
       .waitFor({ state: 'visible' });
+    webBEventListReadObserver.stop();
+    webBEventListReadObserver = undefined;
     recordPhase(evidence, recorded, 'web-member-b-edit-save');
 
     enterPhase('desktop-a-refresh');
@@ -659,6 +684,21 @@ test('Element Desktop room event journey', async ({ browser }) => {
       }
       desktopGatewayReadObserver?.stop();
       desktopGatewayReadObserver = undefined;
+      let webBEditSaveDiagnostic: WebBEditSaveFailureDiagnostic | undefined;
+      if (currentPhase === 'web-member-b-edit-save') {
+        webBEditSaveDiagnostic = {
+          matchedPatchStatus: webBEditPatchStatus,
+          ...(currentFailurePoint === 'web-b-edit-event-row'
+            ? {
+                eventListRead:
+                  webBEventListReadObserver?.snapshot() ??
+                  unavailableWebBEventListReadDiagnostic(),
+              }
+            : {}),
+        };
+      }
+      webBEventListReadObserver?.stop();
+      webBEventListReadObserver = undefined;
       safeRecordPhase(
         evidence,
         recorded,
@@ -666,12 +706,11 @@ test('Element Desktop room event journey', async ({ browser }) => {
         'failed',
         currentFailurePoint,
         gatewayReadDiagnostic,
-        currentPhase === 'web-member-b-edit-save'
-          ? { matchedPatchStatus: webBEditPatchStatus }
-          : undefined,
+        webBEditSaveDiagnostic,
       );
     }
   } finally {
+    webBEventListReadObserver?.stop();
     await Promise.all(
       contexts.map(async (context) => {
         await context.close().catch(() => undefined);
@@ -1168,28 +1207,338 @@ async function tabToEventButton(page: Page, eventButton: Locator) {
   throw new Error('Keyboard navigation did not reach the event');
 }
 
+function matchesGatewayUrl(rawUrl: string, fixture: Fixture) {
+  try {
+    const url = new URL(rawUrl);
+    const query = url.searchParams;
+    return (
+      url.origin === new URL(fixture.gatewayUrl).origin &&
+      url.pathname === '/v1/calendar/events' &&
+      query.get('roomId') === fixture.teamRoomId &&
+      query.get('calendarId') === fixture.calendarId &&
+      query.get('target') === 'room'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function matchesGatewayRequest(
+  request: Request,
+  fixture: Fixture,
+  method: 'GET' | 'POST' | 'PATCH',
+) {
+  try {
+    return (
+      request.method() === method && matchesGatewayUrl(request.url(), fixture)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function matchesGatewayResponse(
+  response: Response,
+  fixture: Fixture,
+  method: 'GET' | 'POST' | 'PATCH',
+) {
+  try {
+    return (
+      response.request().method() === method &&
+      matchesGatewayUrl(response.url(), fixture)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function unavailableWebBEventListReadDiagnostic(): WebBEventListReadDiagnostic {
+  return {
+    state: 'unavailable',
+    matchingGetRequestCountCapped: 0,
+    matchingGetResponseCountCapped: 0,
+    firstMatchedGetStatus: null,
+    selectedEventIdentity: 'unavailable',
+    sameEventObserved: null,
+    sameEventEditedTitleMatch: null,
+  };
+}
+
+function startBoundedResponseJsonRead(
+  response: Response,
+  onComplete: (body: unknown | null) => void,
+) {
+  let finished = false;
+  let stopped = false;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const complete = (body: unknown | null) => {
+    if (finished || stopped) return;
+    finished = true;
+    if (deadline !== undefined) clearTimeout(deadline);
+    onComplete(body);
+  };
+
+  try {
+    const headers = response.headers();
+    if (!isBoundedWebBEventListResponse(headers)) {
+      complete(null);
+      return () => {
+        stopped = true;
+      };
+    }
+  } catch {
+    complete(null);
+    return () => {
+      stopped = true;
+    };
+  }
+
+  deadline = setTimeout(
+    () => complete(null),
+    WEB_B_EVENT_LIST_DIAGNOSTIC_DEADLINE_MS,
+  );
+  try {
+    // Playwright buffers Response.body(); only read small identity-encoded JSON
+    // responses and still verify the decoded buffer length before parsing.
+    void response
+      .body()
+      .then((bytes) => {
+        if (!isBoundedWebBEventListBodyLength(bytes.byteLength)) {
+          complete(null);
+          return;
+        }
+        try {
+          complete(JSON.parse(bytes.toString('utf8')) as unknown);
+        } catch {
+          complete(null);
+        }
+      })
+      .catch(() => complete(null));
+  } catch {
+    complete(null);
+  }
+
+  return () => {
+    stopped = true;
+    if (deadline !== undefined) clearTimeout(deadline);
+  };
+}
+
+function observeWebBEventListRefetch(
+  page: Page,
+  fixture: Fixture,
+  initialRead: Response,
+  initialTitle: string,
+  editedTitle: string,
+): WebBEventListReadObserver {
+  let selectedEventId: string | null = null;
+  let selectedEventIdentity: WebBEventListReadDiagnostic['selectedEventIdentity'] =
+    'pending';
+  let eventTitleMatches: Map<string, boolean> | null = null;
+  let state: WebBEventListReadDiagnostic['state'] = 'awaiting-events-get';
+  let matchingGetRequestCountCapped: 0 | 1 | 2 = 0;
+  let matchingGetResponseCountCapped: 0 | 1 | 2 = 0;
+  let firstMatchedGetStatus: number | null = null;
+  let patchResponseObserved = false;
+  let stopped = false;
+  let firstMatchingRequest: Request | undefined;
+  const observedMatchingRequests = new WeakSet<Request>();
+  const cancelBodyReads: Array<() => void> = [];
+
+  let rangeQuery: { start: string; end: string; timezone: string } | undefined;
+  try {
+    if (!matchesGatewayResponse(initialRead, fixture, 'GET')) {
+      throw new Error('unmatched initial response');
+    }
+    const query = new URL(initialRead.url()).searchParams;
+    const start = query.get('start');
+    const end = query.get('end');
+    const timezone = query.get('timezone');
+    if (
+      !start ||
+      !end ||
+      !timezone ||
+      start.length > 128 ||
+      end.length > 128 ||
+      timezone.length > 128
+    ) {
+      throw new Error('initial range unavailable');
+    }
+    rangeQuery = { start, end, timezone };
+  } catch {
+    state = 'unavailable';
+  }
+
+  const matchesOriginalRange = (rawUrl: string) => {
+    if (!rangeQuery || !matchesGatewayUrl(rawUrl, fixture)) {
+      return false;
+    }
+    try {
+      const query = new URL(rawUrl).searchParams;
+      return (
+        query.get('start') === rangeQuery.start &&
+        query.get('end') === rangeQuery.end &&
+        query.get('timezone') === rangeQuery.timezone
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  const identityCancel = startBoundedResponseJsonRead(initialRead, (body) => {
+    if (stopped) return;
+    selectedEventId =
+      body === null
+        ? null
+        : findUniqueWebBEventId(body, fixture.calendarId, initialTitle);
+    selectedEventIdentity = selectedEventId ? 'available' : 'unavailable';
+  });
+  cancelBodyReads.push(identityCancel);
+
+  const observeRequest = (request: Request) => {
+    if (
+      stopped ||
+      !patchResponseObserved ||
+      !rangeQuery ||
+      !matchesGatewayRequest(request, fixture, 'GET') ||
+      !matchesOriginalRange(request.url())
+    ) {
+      return;
+    }
+    observedMatchingRequests.add(request);
+    matchingGetRequestCountCapped = Math.min(
+      matchingGetRequestCountCapped + 1,
+      2,
+    ) as 0 | 1 | 2;
+    if (!firstMatchingRequest) {
+      firstMatchingRequest = request;
+      if (state !== 'unavailable') state = 'request-pending';
+    }
+  };
+
+  const observeRequestFailed = (request: Request) => {
+    if (
+      stopped ||
+      request !== firstMatchingRequest ||
+      firstMatchedGetStatus !== null
+    ) {
+      return;
+    }
+    if (state !== 'unavailable') state = 'request-failed';
+  };
+
+  const observeResponse = (response: Response) => {
+    if (stopped) return;
+    if (matchesGatewayResponse(response, fixture, 'PATCH')) {
+      patchResponseObserved = true;
+      if (state !== 'unavailable' && !firstMatchingRequest) {
+        state = 'awaiting-events-get';
+      }
+      return;
+    }
+    let request: Request;
+    try {
+      request = response.request();
+    } catch {
+      return;
+    }
+    if (!observedMatchingRequests.has(request)) return;
+    matchingGetResponseCountCapped = Math.min(
+      matchingGetResponseCountCapped + 1,
+      2,
+    ) as 0 | 1 | 2;
+    if (request !== firstMatchingRequest || firstMatchedGetStatus !== null) {
+      return;
+    }
+    firstMatchedGetStatus = response.status();
+    if (firstMatchedGetStatus !== 200) {
+      if (state !== 'unavailable') state = 'status-not-200';
+      return;
+    }
+    if (state !== 'unavailable') state = 'decode-pending';
+    const cancel = startBoundedResponseJsonRead(response, (body) => {
+      if (stopped) return;
+      eventTitleMatches =
+        body === null
+          ? null
+          : collectWebBEventTitleMatches(body, fixture.calendarId, editedTitle);
+      if (state !== 'unavailable') {
+        state = eventTitleMatches === null ? 'unavailable' : 'decoded';
+      }
+    });
+    cancelBodyReads.push(cancel);
+  };
+
+  try {
+    page.on('request', observeRequest);
+    page.on('requestfailed', observeRequestFailed);
+    page.on('response', observeResponse);
+  } catch {
+    state = 'unavailable';
+    try {
+      page.off('request', observeRequest);
+      page.off('requestfailed', observeRequestFailed);
+      page.off('response', observeResponse);
+    } catch {
+      // Setup failure leaves the fixed unavailable snapshot.
+    }
+  }
+
+  return {
+    markPatchResponseObserved: () => {
+      if (!patchResponseObserved) {
+        patchResponseObserved = true;
+        if (state !== 'unavailable') state = 'unavailable';
+      }
+    },
+    snapshot: () => {
+      let sameEventObserved: boolean | null = null;
+      let sameEventEditedTitleMatch: boolean | null = null;
+      if (
+        state === 'decoded' &&
+        selectedEventIdentity === 'available' &&
+        selectedEventId !== null &&
+        eventTitleMatches !== null
+      ) {
+        sameEventObserved = eventTitleMatches.has(selectedEventId);
+        sameEventEditedTitleMatch =
+          eventTitleMatches.get(selectedEventId) ?? false;
+      }
+      return {
+        state,
+        matchingGetRequestCountCapped,
+        matchingGetResponseCountCapped,
+        firstMatchedGetStatus,
+        selectedEventIdentity,
+        sameEventObserved,
+        sameEventEditedTitleMatch,
+      };
+    },
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      try {
+        page.off('request', observeRequest);
+        page.off('requestfailed', observeRequestFailed);
+        page.off('response', observeResponse);
+      } catch {
+        // Cleanup is best effort after the acceptance boundary.
+      }
+      for (const cancel of cancelBodyReads) cancel();
+      selectedEventId = null;
+      eventTitleMatches?.clear();
+      eventTitleMatches = null;
+    },
+  };
+}
+
 function waitForGatewayResponse(
   page: Page,
   fixture: Fixture,
   method: 'GET' | 'POST' | 'PATCH',
 ) {
   return page.waitForResponse(
-    (response) => {
-      try {
-        const url = new URL(response.url());
-        const query = url.searchParams;
-        return (
-          url.origin === new URL(fixture.gatewayUrl).origin &&
-          url.pathname === '/v1/calendar/events' &&
-          response.request().method() === method &&
-          query.get('roomId') === fixture.teamRoomId &&
-          query.get('calendarId') === fixture.calendarId &&
-          query.get('target') === 'room'
-        );
-      } catch {
-        return false;
-      }
-    },
+    (response) => matchesGatewayResponse(response, fixture, method),
     { timeout: 30_000 },
   );
 }

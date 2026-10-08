@@ -22,7 +22,11 @@ import {
   classifyDesktopLoginFailure,
   desktopWidgetIsReady,
   enterDesktopPasswordLogin,
+  findUniqueWebBEventId,
   initializeDesktopJourneyEvidence,
+  inspectWebBEventList,
+  isBoundedWebBEventListBodyLength,
+  isBoundedWebBEventListResponse,
   prepareDesktopWidget,
   readDesktopJourneyEvidence,
   readOnlyWidgetIsReady,
@@ -39,6 +43,115 @@ function withTempDirectory(run) {
     rmSync(runnerTemp, { recursive: true, force: true });
   }
 }
+
+test('inspects only bounded event identity and emits no event content', () => {
+  const privateId = 'private-event-id-7f4d1c';
+  const privateTitle = 'private event title 4d763a';
+  const calendarId = 'private-calendar-id-5c331a';
+  const editedTitle = `${privateTitle} edited`;
+  const originalBody = {
+    events: [
+      {
+        event: {
+          id: privateId,
+          calendarId,
+          title: privateTitle,
+          description: 'private description',
+        },
+      },
+    ],
+  };
+  assert.equal(
+    findUniqueWebBEventId(originalBody, calendarId, privateTitle),
+    privateId,
+  );
+
+  const editedBody = {
+    events: [
+      {
+        event: { id: privateId, calendarId, title: editedTitle },
+      },
+    ],
+  };
+  const edited = inspectWebBEventList(
+    editedBody,
+    calendarId,
+    privateId,
+    editedTitle,
+  );
+  assert.deepEqual(edited, {
+    state: 'decoded',
+    sameEventObserved: true,
+    sameEventEditedTitleMatch: true,
+  });
+  assert.doesNotMatch(JSON.stringify(edited), /private-event|private event/u);
+
+  const absent = inspectWebBEventList(
+    { events: [] },
+    calendarId,
+    privateId,
+    editedTitle,
+  );
+  assert.deepEqual(absent, {
+    state: 'decoded',
+    sameEventObserved: false,
+    sameEventEditedTitleMatch: false,
+  });
+  assert.deepEqual(
+    inspectWebBEventList(
+      { events: Array.from({ length: 513 }, () => editedBody.events[0]) },
+      calendarId,
+      privateId,
+      editedTitle,
+    ),
+    {
+      state: 'unavailable',
+      sameEventObserved: null,
+      sameEventEditedTitleMatch: null,
+    },
+  );
+  assert.equal(
+    findUniqueWebBEventId(
+      { events: [editedBody.events[0], editedBody.events[0]] },
+      calendarId,
+      editedTitle,
+    ),
+    null,
+  );
+});
+
+test('requires identity-encoded bounded JSON before reading a B event response', () => {
+  assert.equal(
+    isBoundedWebBEventListResponse({
+      'content-length': '65536',
+      'content-type': 'application/json; charset=utf-8',
+    }),
+    true,
+  );
+  for (const headers of [
+    { 'content-length': '65537', 'content-type': 'application/json' },
+    { 'content-type': 'application/json' },
+    { 'content-length': '-1', 'content-type': 'application/json' },
+    { 'content-length': '1.5', 'content-type': 'application/json' },
+    { 'content-length': '10', 'content-type': 'text/plain' },
+    {
+      'content-length': '10',
+      'content-type': 'application/json',
+      'content-encoding': 'gzip',
+    },
+    {
+      'content-length': '10',
+      'content-type': 'application/json',
+      'content-encoding': '',
+    },
+    null,
+  ]) {
+    assert.equal(isBoundedWebBEventListResponse(headers), false);
+  }
+  assert.equal(isBoundedWebBEventListBodyLength(0), true);
+  assert.equal(isBoundedWebBEventListBodyLength(65_536), true);
+  assert.equal(isBoundedWebBEventListBodyLength(65_537), false);
+});
 
 test('reads and removes private synthetic Desktop credentials', () => {
   withTempDirectory((runnerTemp) => {
@@ -187,7 +300,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 4);
+    assert.equal(summary.schemaVersion, 5);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -537,11 +650,23 @@ test('accepts only the closed failure-point enum with its failed-phase match', (
 test('correlates failed B edit/save points with a bounded matched PATCH status', () => {
   const summarize = (row) =>
     summarizeDesktopJourneyEvidence(`${JSON.stringify(row)}\n`);
-  const row = (failurePoint, matchedPatchStatus) => ({
+  const decodedEventList = {
+    state: 'decoded',
+    matchingGetRequestCountCapped: 1,
+    matchingGetResponseCountCapped: 1,
+    firstMatchedGetStatus: 200,
+    selectedEventIdentity: 'available',
+    sameEventObserved: true,
+    sameEventEditedTitleMatch: true,
+  };
+  const row = (failurePoint, matchedPatchStatus, eventListRead) => ({
     phase: 'web-member-b-edit-save',
     status: 'failed',
     failurePoint,
-    webBEditSaveDiagnostic: { matchedPatchStatus },
+    webBEditSaveDiagnostic: {
+      matchedPatchStatus,
+      ...(eventListRead === undefined ? {} : { eventListRead }),
+    },
   });
 
   for (const point of [
@@ -560,8 +685,57 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
     { matchedPatchStatus: 409 },
   );
   assert.deepEqual(
-    summarize(row('web-b-edit-event-row', 204)).webBEditSaveDiagnostic,
-    { matchedPatchStatus: 204 },
+    summarize(row('web-b-edit-event-row', 204, decodedEventList))
+      .webBEditSaveDiagnostic,
+    { matchedPatchStatus: 204, eventListRead: decodedEventList },
+  );
+  const pendingRead = {
+    state: 'request-pending',
+    matchingGetRequestCountCapped: 1,
+    matchingGetResponseCountCapped: 1,
+    firstMatchedGetStatus: null,
+    selectedEventIdentity: 'pending',
+    sameEventObserved: null,
+    sameEventEditedTitleMatch: null,
+  };
+  assert.deepEqual(
+    summarize(row('web-b-edit-event-row', 204, pendingRead))
+      .webBEditSaveDiagnostic.eventListRead,
+    pendingRead,
+  );
+  assert.deepEqual(
+    summarize(
+      row('web-b-edit-event-row', 204, {
+        ...decodedEventList,
+        sameEventEditedTitleMatch: false,
+      }),
+    ).webBEditSaveDiagnostic.eventListRead.sameEventEditedTitleMatch,
+    false,
+  );
+  const unavailableIdentityRead = {
+    ...decodedEventList,
+    selectedEventIdentity: 'unavailable',
+    sameEventObserved: null,
+    sameEventEditedTitleMatch: null,
+  };
+  assert.deepEqual(
+    summarize(row('web-b-edit-event-row', 204, unavailableIdentityRead))
+      .webBEditSaveDiagnostic.eventListRead,
+    unavailableIdentityRead,
+  );
+  const failedGetRead = {
+    state: 'status-not-200',
+    matchingGetRequestCountCapped: 1,
+    matchingGetResponseCountCapped: 1,
+    firstMatchedGetStatus: 503,
+    selectedEventIdentity: 'available',
+    sameEventObserved: null,
+    sameEventEditedTitleMatch: null,
+  };
+  assert.deepEqual(
+    summarize(row('web-b-edit-event-row', 204, failedGetRead))
+      .webBEditSaveDiagnostic.eventListRead,
+    failedGetRead,
   );
 
   for (const invalid of [
@@ -570,8 +744,70 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
     { ...row('web-b-edit-patch-status', 200) },
     { ...row('web-b-edit-patch-status', 204) },
     { ...row('web-b-edit-patch-status', 299) },
-    { ...row('web-b-edit-event-row', 409) },
-    { ...row('web-b-edit-event-row', null) },
+    { ...row('web-b-edit-event-row', 409, decodedEventList) },
+    { ...row('web-b-edit-event-row', null, decodedEventList) },
+    { ...row('web-b-edit-event-row', 204) },
+    {
+      ...row('web-b-edit-event-row', 204, {
+        ...decodedEventList,
+        matchingGetRequestCountCapped: 0,
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, {
+        ...decodedEventList,
+        matchingGetResponseCountCapped: 0,
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, {
+        ...decodedEventList,
+        firstMatchedGetStatus: 503,
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, {
+        ...failedGetRead,
+        firstMatchedGetStatus: 200,
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, {
+        ...decodedEventList,
+        selectedEventIdentity: 'unavailable',
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, {
+        ...decodedEventList,
+        matchingGetResponseCountCapped: 2,
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, {
+        ...pendingRead,
+        state: 'awaiting-patch',
+      }),
+    },
+    { ...row('web-b-edit-title-fill', null, pendingRead) },
+    {
+      ...row('web-b-edit-event-row', 204, {
+        ...pendingRead,
+        matchingGetResponseCountCapped: 3,
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, {
+        ...decodedEventList,
+        sameEventObserved: false,
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, {
+        ...decodedEventList,
+        extra: 'private text',
+      }),
+    },
     { ...row('web-b-edit-patch-status', 99) },
     { ...row('web-b-edit-patch-status', 600) },
     { ...row('web-b-edit-patch-status', 409), body: 'private response' },
@@ -614,6 +850,28 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
         .webBEditSaveDiagnostic.matchedPatchStatus,
       409,
     );
+  });
+
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopJourneyOutcome({
+      filePath,
+      runnerTemp,
+      phase: 'web-member-b-edit-save',
+      status: 'failed',
+      failurePoint: 'web-b-edit-event-row',
+      webBEditSaveDiagnostic: {
+        matchedPatchStatus: 204,
+        eventListRead: decodedEventList,
+      },
+    });
+    const persisted = readFileSync(filePath, 'utf8');
+    assert.equal(
+      persisted,
+      '{"phase":"web-member-b-edit-save","status":"failed","failurePoint":"web-b-edit-event-row","webBEditSaveDiagnostic":{"matchedPatchStatus":204,"eventListRead":{"state":"decoded","matchingGetRequestCountCapped":1,"matchingGetResponseCountCapped":1,"firstMatchedGetStatus":200,"selectedEventIdentity":"available","sameEventObserved":true,"sameEventEditedTitleMatch":true}}}\n',
+    );
+    assert.doesNotMatch(persisted, /private-event-id|private event title/u);
   });
 });
 

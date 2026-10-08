@@ -103,6 +103,22 @@ const WEB_B_EDIT_SAVE_FAILURE_POINT_SET = new Set([
   'web-b-edit-patch-status',
   'web-b-edit-event-row',
 ]);
+const WEB_B_EVENT_LIST_OBSERVATION_STATES = new Set([
+  'awaiting-events-get',
+  'request-pending',
+  'request-failed',
+  'decode-pending',
+  'decoded',
+  'status-not-200',
+  'unavailable',
+]);
+const WEB_B_EVENT_IDENTITY_STATES = new Set([
+  'pending',
+  'available',
+  'unavailable',
+]);
+const MAX_WEB_B_EVENT_LIST_ITEMS = 512;
+const MAX_WEB_B_EVENT_LIST_BYTES = 65_536;
 const LOGIN_STEP_SET = new Set(DESKTOP_LOGIN_STEPS);
 const LOGIN_FAILURE_REASON_SET = new Set(DESKTOP_LOGIN_FAILURE_REASONS);
 const LOGIN_ENTRY_SET = new Set(DESKTOP_LOGIN_ENTRIES);
@@ -193,11 +209,15 @@ function validJourneyFailurePoint(phase, status, failurePoint) {
 }
 
 function validWebBEditSaveDiagnostic(value, failurePoint) {
+  const isEventRowFailure = failurePoint === 'web-b-edit-event-row';
   if (
     value === null ||
     typeof value !== 'object' ||
     Array.isArray(value) ||
-    Object.keys(value).sort().join(',') !== 'matchedPatchStatus'
+    Object.keys(value).sort().join(',') !==
+      (isEventRowFailure
+        ? 'eventListRead,matchedPatchStatus'
+        : 'matchedPatchStatus')
   ) {
     return false;
   }
@@ -221,13 +241,236 @@ function validWebBEditSaveDiagnostic(value, failurePoint) {
     status >= 200 &&
     status < 300
   ) {
-    return true;
+    return validWebBEventListReadDiagnostic(value.eventListRead);
   }
   return (
     status === null &&
     failurePoint !== 'web-b-edit-patch-status' &&
     failurePoint !== 'web-b-edit-event-row'
   );
+}
+
+function validWebBEventListReadDiagnostic(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'firstMatchedGetStatus,matchingGetRequestCountCapped,matchingGetResponseCountCapped,sameEventEditedTitleMatch,sameEventObserved,selectedEventIdentity,state' ||
+    !WEB_B_EVENT_LIST_OBSERVATION_STATES.has(value.state) ||
+    !WEB_B_EVENT_IDENTITY_STATES.has(value.selectedEventIdentity) ||
+    ![0, 1, 2].includes(value.matchingGetRequestCountCapped) ||
+    ![0, 1, 2].includes(value.matchingGetResponseCountCapped) ||
+    value.matchingGetResponseCountCapped >
+      value.matchingGetRequestCountCapped ||
+    (value.firstMatchedGetStatus !== null &&
+      (!Number.isInteger(value.firstMatchedGetStatus) ||
+        value.firstMatchedGetStatus < 100 ||
+        value.firstMatchedGetStatus > 599)) ||
+    ![null, true, false].includes(value.sameEventObserved) ||
+    ![null, true, false].includes(value.sameEventEditedTitleMatch)
+  ) {
+    return false;
+  }
+
+  if (
+    value.firstMatchedGetStatus !== null &&
+    value.matchingGetResponseCountCapped === 0
+  ) {
+    return false;
+  }
+  const canReportEventMatch =
+    value.state === 'decoded' && value.selectedEventIdentity === 'available';
+  if (canReportEventMatch) {
+    if (
+      typeof value.sameEventObserved !== 'boolean' ||
+      typeof value.sameEventEditedTitleMatch !== 'boolean' ||
+      (!value.sameEventObserved && value.sameEventEditedTitleMatch) ||
+      (value.sameEventEditedTitleMatch && !value.sameEventObserved)
+    ) {
+      return false;
+    }
+  } else if (
+    value.sameEventObserved !== null ||
+    value.sameEventEditedTitleMatch !== null
+  ) {
+    return false;
+  }
+
+  switch (value.state) {
+    case 'awaiting-events-get':
+      return (
+        value.matchingGetRequestCountCapped === 0 &&
+        value.matchingGetResponseCountCapped === 0 &&
+        value.firstMatchedGetStatus === null
+      );
+    case 'request-pending':
+    case 'request-failed':
+      return (
+        value.matchingGetRequestCountCapped > 0 &&
+        value.firstMatchedGetStatus === null
+      );
+    case 'decode-pending':
+      return (
+        value.matchingGetRequestCountCapped > 0 &&
+        value.matchingGetResponseCountCapped > 0 &&
+        value.firstMatchedGetStatus === 200
+      );
+    case 'decoded':
+      return (
+        value.matchingGetRequestCountCapped > 0 &&
+        value.matchingGetResponseCountCapped > 0 &&
+        value.firstMatchedGetStatus === 200
+      );
+    case 'status-not-200':
+      return (
+        value.matchingGetRequestCountCapped > 0 &&
+        value.matchingGetResponseCountCapped > 0 &&
+        value.firstMatchedGetStatus !== null &&
+        value.firstMatchedGetStatus !== 200
+      );
+    case 'unavailable':
+      return true;
+  }
+  return false;
+}
+
+function validGatewayEventListBody(body) {
+  if (
+    body === null ||
+    typeof body !== 'object' ||
+    Array.isArray(body) ||
+    !('events' in body) ||
+    !Array.isArray(body.events) ||
+    body.events.length > MAX_WEB_B_EVENT_LIST_ITEMS
+  ) {
+    return false;
+  }
+  return body.events.every((resource) => {
+    if (
+      resource === null ||
+      typeof resource !== 'object' ||
+      Array.isArray(resource) ||
+      !('event' in resource)
+    ) {
+      return false;
+    }
+    const event = resource.event;
+    return (
+      event !== null &&
+      typeof event === 'object' &&
+      !Array.isArray(event) &&
+      typeof event.id === 'string' &&
+      event.id.length > 0 &&
+      event.id.length <= 256 &&
+      typeof event.calendarId === 'string' &&
+      event.calendarId.length > 0 &&
+      event.calendarId.length <= 256 &&
+      typeof event.title === 'string' &&
+      event.title.length <= 512
+    );
+  });
+}
+
+export function findUniqueWebBEventId(body, calendarId, title) {
+  if (
+    typeof calendarId !== 'string' ||
+    calendarId.length === 0 ||
+    typeof title !== 'string' ||
+    !validGatewayEventListBody(body)
+  ) {
+    return null;
+  }
+  const matchingIds = body.events
+    .filter(
+      ({ event }) => event.calendarId === calendarId && event.title === title,
+    )
+    .map(({ event }) => event.id);
+  return matchingIds.length === 1 ? matchingIds[0] : null;
+}
+
+export function isBoundedWebBEventListResponse(headers) {
+  if (
+    headers === null ||
+    typeof headers !== 'object' ||
+    Array.isArray(headers)
+  ) {
+    return false;
+  }
+  const contentLength = headers['content-length'];
+  const contentType = headers['content-type'];
+  const contentEncoding = headers['content-encoding']?.trim().toLowerCase();
+  return (
+    typeof contentLength === 'string' &&
+    /^(?:0|[1-9]\d*)$/u.test(contentLength) &&
+    Number.isSafeInteger(Number(contentLength)) &&
+    Number(contentLength) <= MAX_WEB_B_EVENT_LIST_BYTES &&
+    typeof contentType === 'string' &&
+    /^application\/json(?:\s*;|$)/iu.test(contentType) &&
+    (contentEncoding === undefined || contentEncoding === 'identity')
+  );
+}
+
+export function isBoundedWebBEventListBodyLength(byteLength) {
+  return (
+    Number.isSafeInteger(byteLength) &&
+    byteLength >= 0 &&
+    byteLength <= MAX_WEB_B_EVENT_LIST_BYTES
+  );
+}
+
+export function collectWebBEventTitleMatches(body, calendarId, editedTitle) {
+  if (
+    typeof calendarId !== 'string' ||
+    calendarId.length === 0 ||
+    typeof editedTitle !== 'string' ||
+    !validGatewayEventListBody(body)
+  ) {
+    return null;
+  }
+  const titleMatches = new Map();
+  for (const { event } of body.events) {
+    if (event.calendarId !== calendarId) continue;
+    titleMatches.set(
+      event.id,
+      event.title === editedTitle || titleMatches.get(event.id) === true,
+    );
+  }
+  return titleMatches;
+}
+
+export function inspectWebBEventList(body, calendarId, eventId, editedTitle) {
+  if (
+    typeof calendarId !== 'string' ||
+    calendarId.length === 0 ||
+    typeof eventId !== 'string' ||
+    eventId.length === 0 ||
+    typeof editedTitle !== 'string' ||
+    !validGatewayEventListBody(body)
+  ) {
+    return {
+      state: 'unavailable',
+      sameEventObserved: null,
+      sameEventEditedTitleMatch: null,
+    };
+  }
+  const titleMatches = collectWebBEventTitleMatches(
+    body,
+    calendarId,
+    editedTitle,
+  );
+  if (titleMatches === null) {
+    return {
+      state: 'unavailable',
+      sameEventObserved: null,
+      sameEventEditedTitleMatch: null,
+    };
+  }
+  return {
+    state: 'decoded',
+    sameEventObserved: titleMatches.has(eventId),
+    sameEventEditedTitleMatch: titleMatches.get(eventId) ?? false,
+  };
 }
 
 function validLoginFieldObservation(value) {
@@ -1021,7 +1264,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   const failed = Object.values(cases).includes('failed');
   const complete = Object.values(cases).every((value) => value === 'passed');
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
     loginStep,
     loginEntry,
