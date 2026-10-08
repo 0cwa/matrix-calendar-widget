@@ -34,8 +34,10 @@ The strict limits apply to every required sample:
   ms**.
 - A view-selector refresh back to the same 31-day List range, through a usable
   stable view: **≤ 2,000 ms**.
-- Each matching calendar event-range response, through full receipt and JSON
-  decoding: **≤ 1,000 ms**.
+- Each required non-OpenID calendar API response, including context,
+  calendar-metadata, and event-range requests, through full receipt and JSON
+  decoding: **≤ 1,000 ms**. OpenID timings are recorded but do not use this
+  calendar-API limit.
 - Each measured event selection through its stable details dialog: **≤ 500
   ms**.
 
@@ -46,19 +48,27 @@ approvals, OpenID exchange, range selection, API transfer and decode,
 projection, and rendering. Do not subtract startup or approval time. Matrix
 host login and room navigation are fixture preparation and are reported
 separately; they do not replace the normal widget activation or its approvals.
+Inside that same cold interval, record the initial default-view response after
+full decode, its returned and rendered counts, the visible usable control, and
+stable rows before selecting the 31-day range. This default-view observation
+has no separate latency limit; its API response still uses the 1,000 ms limit.
 After the cold List view is stable, use Element's visible view selector to
-leave List. Start the refresh timer immediately before selecting List again
-with the same 31-day range. The refresh succeeds only if that transition
-produces a new matching room-events response that is fully decoded and the
-correct List content is stable. A cached render without a new matching
-response is incomplete. Do not force cache invalidation or add a refresh
-control for the test.
+change from List to Month. Record that setup action, decoded response, and
+stable Month content without a separate 2,000 ms action limit; its calendar
+API response still uses the 1,000 ms limit. Then start the refresh timer
+immediately before the Month-to-List selector transition back to the same
+31-day range. The refresh succeeds only if that transition produces a new
+matching room-events response that is fully decoded and the correct List
+content is stable. A cached render without a new matching response is
+incomplete. Do not force cache invalidation or add a refresh control for the
+test.
 
 In each fresh context, retain one cold activation and one measured refresh. In
 the 25-event case, retain five measured details opens. A 0-event case has no
-details sample. Every applicable matching API response in the cold and refresh
-operations must be recorded through full JSON decoding and meet the 1,000 ms
-limit. Keep every observation, including failures; do not bypass
+details sample. Every required non-OpenID calendar API response in both cases,
+including the default view, List-to-Month setup, cold selected range,
+Month-to-List refresh, and details, must be recorded through full JSON decoding
+and meet the 1,000 ms limit. Keep every observation, including failures; do not bypass
 authentication, pre-open the widget, subtract phases, add warm-ups, retry slow
 samples, or discard results.
 
