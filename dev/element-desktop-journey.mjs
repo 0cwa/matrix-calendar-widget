@@ -208,7 +208,11 @@ function validWebBEditSaveDiagnostic(value, failurePoint) {
   ) {
     return false;
   }
-  if (failurePoint === 'web-b-edit-patch-status' && status !== null) {
+  if (
+    failurePoint === 'web-b-edit-patch-status' &&
+    status !== null &&
+    (status < 200 || status >= 300)
+  ) {
     return true;
   }
   if (

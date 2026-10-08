@@ -277,6 +277,10 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let currentPhase: DesktopJourneyPhase | undefined;
   let currentFailurePoint: DesktopJourneyFailurePoint | undefined;
   let webBEditPatchStatus: number | null = null;
+  const enterPhase = (phase: DesktopJourneyPhase) => {
+    currentPhase = phase;
+    currentFailurePoint = undefined;
+  };
   let currentLoginStep: DesktopLoginStep = 'not_observed';
   let loginEntry: DesktopLoginEntry = 'not_observed';
   let loginFieldsBeforeFill = unavailableDesktopLoginFormObservation();
@@ -292,7 +296,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
       roomId: fixture.teamRoomId,
     };
 
-    currentPhase = 'desktop-login';
+    enterPhase('desktop-login');
     currentLoginStep = 'cdp_connect';
     desktopBrowser = await connectToDesktop();
     currentLoginStep = 'page_select';
@@ -355,7 +359,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
     });
     recordPhase(evidence, recorded, 'desktop-login');
 
-    currentPhase = 'desktop-member-identity';
+    enterPhase('desktop-member-identity');
     const expectedMemberAUserId = `@${credentials.username}:localhost`;
     const membersAreDistinct =
       fixture.users.memberA.userId !== fixture.users.memberB.userId;
@@ -374,7 +378,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
     }
     recordPhase(evidence, recorded, 'desktop-member-identity');
 
-    currentPhase = 'desktop-room-widget-read';
+    enterPhase('desktop-room-widget-read');
     currentFailurePoint = 'room-navigation';
     await desktopElement.navigateToRoomOrInvitation(fixture.roomName);
     currentFailurePoint = 'room-heading';
@@ -415,16 +419,16 @@ test('Element Desktop room event journey', async ({ browser }) => {
     desktopGatewayReadObserver?.stop();
     desktopGatewayReadObserver = undefined;
     currentFailurePoint = undefined;
-    currentPhase = 'desktop-widget-origin-isolation';
+    enterPhase('desktop-widget-origin-isolation');
     currentFailurePoint = 'origin-isolation';
     await assertDesktopWidgetAttachment(desktopPage, fixture.widgetUrl);
     currentFailurePoint = undefined;
     recordPhase(evidence, recorded, 'desktop-widget-origin-isolation');
-    currentPhase = 'desktop-room-widget-read';
+    enterPhase('desktop-room-widget-read');
     recordPhase(evidence, recorded, 'desktop-room-widget-read');
 
     currentFailurePoint = undefined;
-    currentPhase = 'desktop-event-create';
+    enterPhase('desktop-event-create');
     const initialTitle = `Desktop acceptance ${randomUUID()}`;
     const editedTitle = `${initialTitle} edited`;
     const createResponse = waitForGatewayResponse(desktopPage, fixture, 'POST');
@@ -438,7 +442,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
       .waitFor({ state: 'visible' });
     recordPhase(evidence, recorded, 'desktop-event-create');
 
-    currentPhase = 'web-member-b-read';
+    enterPhase('web-member-b-read');
     currentFailurePoint = 'web-b-authentication';
     webHttpRoute = { observedHttpRequests: 0, blockedHttpRequests: 0 };
     const webContext = await makeMemberBContext(browser, fixture, webHttpRoute);
@@ -479,7 +483,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
     currentFailurePoint = undefined;
     recordPhase(evidence, recorded, 'web-member-b-read');
 
-    currentPhase = 'web-member-b-keyboard-open';
+    enterPhase('web-member-b-keyboard-open');
     await tabToEventButton(webPage, eventButton);
     await webPage.keyboard.press('Enter');
     const detailsDialog = webFrame.getByRole('dialog').last();
@@ -489,7 +493,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
       .waitFor({ state: 'visible' });
     recordPhase(evidence, recorded, 'web-member-b-keyboard-open');
 
-    currentPhase = 'web-member-b-details-escape-focus';
+    enterPhase('web-member-b-details-escape-focus');
     await webPage.keyboard.press('Tab');
     const focusStayedInDetails = await detailsDialog.evaluate((dialog) =>
       dialog.contains(dialog.ownerDocument.activeElement),
@@ -507,7 +511,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
     }
     recordPhase(evidence, recorded, 'web-member-b-details-escape-focus');
 
-    currentPhase = 'web-member-b-edit-save';
+    enterPhase('web-member-b-edit-save');
     currentFailurePoint = 'web-b-edit-details-open';
     await webPage.keyboard.press('Enter');
     await detailsDialog.waitFor({ state: 'visible' });
@@ -536,7 +540,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
       .waitFor({ state: 'visible' });
     recordPhase(evidence, recorded, 'web-member-b-edit-save');
 
-    currentPhase = 'desktop-a-refresh';
+    enterPhase('desktop-a-refresh');
     const roomFrame = desktopElement.widgetByTitle('Matrix Calendar');
     const refreshedRoomRead = waitForGatewayResponse(
       desktopPage,
@@ -564,7 +568,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
     await refreshedRow.waitFor({ state: 'visible' });
     recordPhase(evidence, recorded, 'desktop-a-refresh');
 
-    currentPhase = 'canonical-edit-read';
+    enterPhase('canonical-edit-read');
     const query = new URL(refreshed.url()).searchParams;
     if (
       query.get('roomId') !== fixture.teamRoomId ||

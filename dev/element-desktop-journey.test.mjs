@@ -567,6 +567,9 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
   for (const invalid of [
     { ...row('web-b-edit-title-fill', 409) },
     { ...row('web-b-edit-patch-status', null) },
+    { ...row('web-b-edit-patch-status', 200) },
+    { ...row('web-b-edit-patch-status', 204) },
+    { ...row('web-b-edit-patch-status', 299) },
     { ...row('web-b-edit-event-row', 409) },
     { ...row('web-b-edit-event-row', null) },
     { ...row('web-b-edit-patch-status', 99) },
@@ -611,6 +614,42 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
         .webBEditSaveDiagnostic.matchedPatchStatus,
       409,
     );
+  });
+});
+
+test('records a later phase failure without a completed B edit checkpoint', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopJourneyOutcome({
+      filePath,
+      runnerTemp,
+      phase: 'web-member-b-edit-save',
+      status: 'passed',
+    });
+
+    assert.throws(
+      () =>
+        appendDesktopJourneyOutcome({
+          filePath,
+          runnerTemp,
+          phase: 'desktop-a-refresh',
+          status: 'failed',
+          failurePoint: 'web-b-edit-event-row',
+        }),
+      /Invalid Desktop journey input/u,
+    );
+    appendDesktopJourneyOutcome({
+      filePath,
+      runnerTemp,
+      phase: 'desktop-a-refresh',
+      status: 'failed',
+    });
+
+    const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
+    assert.equal(summary.cases['web-member-b-edit-save'], 'passed');
+    assert.equal(summary.cases['desktop-a-refresh'], 'failed');
+    assert.equal(summary.failurePoint, null);
   });
 });
 
