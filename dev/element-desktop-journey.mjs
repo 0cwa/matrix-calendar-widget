@@ -29,6 +29,7 @@ export const DESKTOP_LOGIN_STEPS = Object.freeze([
   'page_select',
   'credentials_read',
   'login_form_select',
+  'welcome_sign_in',
   'username_fill',
   'password_fill',
   'sign_in_submit',
@@ -44,10 +45,17 @@ export const DESKTOP_LOGIN_FAILURE_REASONS = Object.freeze([
   'other',
   'unavailable',
 ]);
+export const DESKTOP_LOGIN_ENTRIES = Object.freeze([
+  'not_observed',
+  'password_form_present',
+  'welcome_sign_in_attempted',
+  'welcome_sign_in_clicked',
+]);
 
 const PHASE_SET = new Set(DESKTOP_JOURNEY_PHASES);
 const LOGIN_STEP_SET = new Set(DESKTOP_LOGIN_STEPS);
 const LOGIN_FAILURE_REASON_SET = new Set(DESKTOP_LOGIN_FAILURE_REASONS);
+const LOGIN_ENTRY_SET = new Set(DESKTOP_LOGIN_ENTRIES);
 const LOGIN_FORM_FIELD_NAMES = Object.freeze(['username', 'password']);
 const JOURNEY_CREDENTIALS_NAME = 'element-acceptance-desktop-credentials.json';
 const JOURNEY_EVIDENCE_NAME = 'element-desktop-journey-stage.jsonl';
@@ -178,6 +186,49 @@ export function classifyDesktopLoginFailure(
   return name !== null || message !== null ? 'other' : 'unavailable';
 }
 
+export async function enterDesktopPasswordLogin({
+  initialForm,
+  clickWelcomeSignIn,
+  observeForm,
+  onBeforeFill,
+  fillCredentials,
+  setLoginEntry,
+  setLoginStep,
+}) {
+  if (
+    !validLoginFormObservation(initialForm) ||
+    typeof clickWelcomeSignIn !== 'function' ||
+    typeof observeForm !== 'function' ||
+    typeof onBeforeFill !== 'function' ||
+    typeof fillCredentials !== 'function' ||
+    typeof setLoginEntry !== 'function' ||
+    typeof setLoginStep !== 'function'
+  ) {
+    invalidInput();
+  }
+
+  const passwordFormVisible = ['username', 'password'].every(
+    (name) =>
+      initialForm[name].countCapped === 1 && initialForm[name].visible === true,
+  );
+  let formBeforeFill = initialForm;
+  if (passwordFormVisible) {
+    setLoginEntry('password_form_present');
+  } else {
+    setLoginEntry('welcome_sign_in_attempted');
+    setLoginStep('welcome_sign_in');
+    await clickWelcomeSignIn();
+    setLoginEntry('welcome_sign_in_clicked');
+    setLoginStep('login_form_select');
+    formBeforeFill = await observeForm();
+    if (!validLoginFormObservation(formBeforeFill)) invalidInput();
+  }
+
+  onBeforeFill(formBeforeFill);
+  await fillCredentials();
+  return formBeforeFill;
+}
+
 function privateRunnerPath(filePath, runnerTemp, expectedName) {
   if (
     typeof filePath !== 'string' ||
@@ -274,6 +325,7 @@ function parseEvidence(input) {
   const outcomes = new Map();
   let loginStep = 'not_observed';
   let loginStepRecorded = false;
+  let loginEntry = 'not_observed';
   let loginDiagnostic = null;
   const rows = input.split(/\r?\n/u).filter(Boolean);
   if (rows.length > DESKTOP_JOURNEY_PHASES.length + 1) invalidInput();
@@ -289,8 +341,23 @@ function parseEvidence(input) {
       invalidInput();
     }
     const keys = Object.keys(value).sort().join(',');
-    if (keys === 'loginStep' || keys === 'loginDiagnostic,loginStep') {
+    if (
+      keys === 'loginStep' ||
+      keys === 'loginDiagnostic,loginStep' ||
+      keys === 'loginEntry,loginStep' ||
+      keys === 'loginDiagnostic,loginEntry,loginStep'
+    ) {
       if (loginStepRecorded || !LOGIN_STEP_SET.has(value.loginStep)) {
+        invalidInput();
+      }
+      if (
+        Object.hasOwn(value, 'loginEntry') &&
+        (!LOGIN_ENTRY_SET.has(value.loginEntry) ||
+          (value.loginEntry === 'welcome_sign_in_attempted' &&
+            value.loginStep !== 'welcome_sign_in') ||
+          (value.loginEntry === 'welcome_sign_in_clicked' &&
+            value.loginStep === 'welcome_sign_in'))
+      ) {
         invalidInput();
       }
       if (
@@ -300,6 +367,7 @@ function parseEvidence(input) {
         invalidInput();
       }
       loginStep = value.loginStep;
+      loginEntry = value.loginEntry ?? 'not_observed';
       loginDiagnostic = value.loginDiagnostic ?? null;
       loginStepRecorded = true;
       continue;
@@ -314,7 +382,13 @@ function parseEvidence(input) {
     }
     outcomes.set(value.phase, value.status);
   }
-  return { outcomes, loginStep, loginStepRecorded, loginDiagnostic };
+  return {
+    outcomes,
+    loginStep,
+    loginStepRecorded,
+    loginEntry,
+    loginDiagnostic,
+  };
 }
 
 export function readSyntheticDesktopCredentials({ filePath, runnerTemp }) {
@@ -393,6 +467,7 @@ export function appendDesktopLoginStep({
   filePath,
   runnerTemp,
   step,
+  entry,
   diagnostic,
 }) {
   const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
@@ -400,6 +475,7 @@ export function appendDesktopLoginStep({
   const parsed = parseEvidence(readFileSync(path, 'utf8'));
   if (
     !LOGIN_STEP_SET.has(step) ||
+    (entry !== undefined && !LOGIN_ENTRY_SET.has(entry)) ||
     parsed.loginStepRecorded ||
     (diagnostic !== undefined && !validDesktopLoginDiagnostic(diagnostic)) ||
     (diagnostic !== undefined && step === 'complete')
@@ -412,6 +488,7 @@ export function appendDesktopLoginStep({
       path,
       `${JSON.stringify({
         loginStep: step,
+        ...(entry === undefined ? {} : { loginEntry: entry }),
         ...(diagnostic === undefined ? {} : { loginDiagnostic: diagnostic }),
       })}\n`,
       {
@@ -426,9 +503,15 @@ export function appendDesktopLoginStep({
 }
 
 export function summarizeDesktopJourneyEvidence(input) {
-  const { outcomes, loginStep, loginDiagnostic } = parseEvidence(input);
-  if (outcomes.get('desktop-login') === 'passed' && loginStep !== 'complete') {
-    invalidInput();
+  const { outcomes, loginStep, loginEntry, loginDiagnostic } =
+    parseEvidence(input);
+  if (outcomes.get('desktop-login') === 'passed') {
+    if (
+      loginStep !== 'complete' ||
+      !['password_form_present', 'welcome_sign_in_clicked'].includes(loginEntry)
+    ) {
+      invalidInput();
+    }
   }
   const cases = Object.fromEntries(
     DESKTOP_JOURNEY_PHASES.map((phase) => [
@@ -441,6 +524,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   return {
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
     loginStep,
+    loginEntry,
     loginDiagnostic,
     cases,
   };

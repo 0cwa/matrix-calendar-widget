@@ -13,11 +13,13 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   DESKTOP_JOURNEY_PHASES,
+  DESKTOP_LOGIN_ENTRIES,
   DESKTOP_LOGIN_FAILURE_REASONS,
   DESKTOP_LOGIN_STEPS,
   appendDesktopJourneyOutcome,
   appendDesktopLoginStep,
   classifyDesktopLoginFailure,
+  enterDesktopPasswordLogin,
   initializeDesktopJourneyEvidence,
   readDesktopJourneyEvidence,
   readSyntheticDesktopCredentials,
@@ -171,6 +173,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
       filePath,
       runnerTemp,
       step: 'complete',
+      entry: 'password_form_present',
     });
     appendDesktopJourneyOutcome({
       filePath,
@@ -182,6 +185,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
+    assert.equal(summary.loginEntry, 'password_form_present');
     assert.equal(summary.cases['desktop-login'], 'passed');
     assert.equal(summary.cases['desktop-widget-origin-isolation'], 'not_run');
     assert.equal(summary.cases['web-member-b-read'], 'passed');
@@ -190,7 +194,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     assert.equal(
       readFileSync(filePath, 'utf8'),
       '{"phase":"desktop-login","status":"passed"}\n' +
-        '{"loginStep":"complete"}\n' +
+        '{"loginStep":"complete","loginEntry":"password_form_present"}\n' +
         '{"phase":"web-member-b-read","status":"passed"}\n',
     );
   });
@@ -205,6 +209,7 @@ test('records only the fixed Desktop login step in private journey evidence', ()
       'page_select',
       'credentials_read',
       'login_form_select',
+      'welcome_sign_in',
       'username_fill',
       'password_fill',
       'sign_in_submit',
@@ -220,10 +225,12 @@ test('records only the fixed Desktop login step in private journey evidence', ()
       filePath,
       runnerTemp,
       step: 'sign_in_submit',
+      entry: 'welcome_sign_in_clicked',
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
     assert.equal(summary.loginStep, 'sign_in_submit');
+    assert.equal(summary.loginEntry, 'welcome_sign_in_clicked');
     assert.throws(
       () =>
         appendDesktopLoginStep({
@@ -247,11 +254,118 @@ test('records only the fixed Desktop login step in private journey evidence', ()
         ),
       /Invalid Desktop journey input/u,
     );
+    assert.throws(
+      () =>
+        summarizeDesktopJourneyEvidence(
+          '{"loginStep":"complete","loginEntry":"private"}\n',
+        ),
+      /Invalid Desktop journey input/u,
+    );
+    assert.throws(
+      () =>
+        summarizeDesktopJourneyEvidence(
+          '{"loginStep":"username_fill","loginEntry":"welcome_sign_in_attempted"}\n',
+        ),
+      /Invalid Desktop journey input/u,
+    );
+    assert.throws(
+      () =>
+        summarizeDesktopJourneyEvidence(
+          '{"phase":"desktop-login","status":"passed"}\n' +
+            '{"loginStep":"complete","loginEntry":"welcome_sign_in_attempted"}\n',
+        ),
+      /Invalid Desktop journey input/u,
+    );
     assert.equal(
       readFileSync(filePath, 'utf8'),
-      '{"loginStep":"sign_in_submit"}\n',
+      '{"loginStep":"sign_in_submit","loginEntry":"welcome_sign_in_clicked"}\n',
     );
   });
+});
+
+test('follows the Welcome sign-in link before filling and skips it when login is already open', async () => {
+  const field = (present) =>
+    present
+      ? {
+          countCapped: 1,
+          visible: true,
+          enabled: true,
+          editable: true,
+        }
+      : {
+          countCapped: 0,
+          visible: null,
+          enabled: null,
+          editable: null,
+        };
+  const welcomeForm = {
+    username: field(false),
+    password: field(false),
+  };
+  const passwordForm = {
+    username: field(true),
+    password: field(true),
+  };
+  const flow = [];
+  const steps = [];
+  const entries = [];
+  let welcomeOpened = false;
+  const afterWelcome = await enterDesktopPasswordLogin({
+    initialForm: welcomeForm,
+    clickWelcomeSignIn: async () => {
+      flow.push('welcome-sign-in-click');
+      welcomeOpened = true;
+    },
+    observeForm: async () => (welcomeOpened ? passwordForm : welcomeForm),
+    onBeforeFill: (form) => assert.deepEqual(form, passwordForm),
+    fillCredentials: async () => {
+      flow.push('username-fill', 'password-fill');
+    },
+    setLoginEntry: (entry) => entries.push(entry),
+    setLoginStep: (step) => steps.push(step),
+  });
+  assert.deepEqual(afterWelcome, passwordForm);
+  assert.deepEqual(flow, [
+    'welcome-sign-in-click',
+    'username-fill',
+    'password-fill',
+  ]);
+  assert.deepEqual(entries, [
+    'welcome_sign_in_attempted',
+    'welcome_sign_in_clicked',
+  ]);
+  assert.deepEqual(steps, ['welcome_sign_in', 'login_form_select']);
+
+  const alreadyOpenFlow = [];
+  const alreadyOpenEntries = [];
+  const alreadyOpen = await enterDesktopPasswordLogin({
+    initialForm: passwordForm,
+    clickWelcomeSignIn: async () => {
+      alreadyOpenFlow.push('unexpected-welcome-click');
+    },
+    observeForm: async () => {
+      assert.fail('already-open login form does not need a second observation');
+    },
+    onBeforeFill: (form) => assert.deepEqual(form, passwordForm),
+    fillCredentials: async () => {
+      alreadyOpenFlow.push('username-fill', 'password-fill');
+    },
+    setLoginEntry: (entry) => alreadyOpenEntries.push(entry),
+    setLoginStep: () =>
+      assert.fail('already-open login form does not change login step'),
+  });
+  assert.deepEqual(alreadyOpen, passwordForm);
+  assert.deepEqual(alreadyOpenFlow, ['username-fill', 'password-fill']);
+  assert.deepEqual(alreadyOpenEntries, ['password_form_present']);
+  assert.deepEqual(
+    [...DESKTOP_LOGIN_ENTRIES],
+    [
+      'not_observed',
+      'password_form_present',
+      'welcome_sign_in_attempted',
+      'welcome_sign_in_clicked',
+    ],
+  );
 });
 
 test('classifies Desktop login failures to fixed reasons without retaining error text', () => {

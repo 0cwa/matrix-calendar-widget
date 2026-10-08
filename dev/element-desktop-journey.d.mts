@@ -20,6 +20,7 @@ export type DesktopLoginStep =
   | 'page_select'
   | 'credentials_read'
   | 'login_form_select'
+  | 'welcome_sign_in'
   | 'username_fill'
   | 'password_fill'
   | 'sign_in_submit'
@@ -34,6 +35,12 @@ export type DesktopLoginFailureReason =
   | 'detached'
   | 'other'
   | 'unavailable';
+
+export type DesktopLoginEntry =
+  | 'not_observed'
+  | 'password_form_present'
+  | 'welcome_sign_in_attempted'
+  | 'welcome_sign_in_clicked';
 
 export type DesktopLoginFieldObservation = {
   countCapped: 0 | 1 | 2 | null;
@@ -56,6 +63,7 @@ export type DesktopLoginDiagnostic = {
 export type DesktopJourneySummary = {
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
+  loginEntry: DesktopLoginEntry;
   loginDiagnostic: DesktopLoginDiagnostic | null;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
@@ -63,6 +71,7 @@ export type DesktopJourneySummary = {
 export declare const DESKTOP_JOURNEY_PHASES: readonly DesktopJourneyPhase[];
 export declare const DESKTOP_LOGIN_STEPS: readonly DesktopLoginStep[];
 export declare const DESKTOP_LOGIN_FAILURE_REASONS: readonly DesktopLoginFailureReason[];
+export declare const DESKTOP_LOGIN_ENTRIES: readonly DesktopLoginEntry[];
 
 export declare function classifyDesktopLoginFailure(
   error: unknown,
@@ -70,6 +79,16 @@ export declare function classifyDesktopLoginFailure(
   beforeFill: DesktopLoginFormObservation,
   atFailure: DesktopLoginFormObservation,
 ): DesktopLoginFailureReason;
+
+export declare function enterDesktopPasswordLogin(input: {
+  initialForm: DesktopLoginFormObservation;
+  clickWelcomeSignIn: () => Promise<void>;
+  observeForm: () => Promise<DesktopLoginFormObservation>;
+  onBeforeFill: (form: DesktopLoginFormObservation) => void;
+  fillCredentials: () => Promise<void>;
+  setLoginEntry: (entry: DesktopLoginEntry) => void;
+  setLoginStep: (step: DesktopLoginStep) => void;
+}): Promise<DesktopLoginFormObservation>;
 
 export declare function writeSyntheticDesktopCredentials(input: {
   filePath: string;
@@ -99,6 +118,7 @@ export declare function appendDesktopLoginStep(input: {
   filePath: string;
   runnerTemp: string;
   step: DesktopLoginStep;
+  entry?: DesktopLoginEntry;
   diagnostic?: DesktopLoginDiagnostic;
 }): void;
 

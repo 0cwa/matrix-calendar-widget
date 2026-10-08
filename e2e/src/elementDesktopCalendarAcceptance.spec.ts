@@ -32,10 +32,12 @@ import {
   appendDesktopJourneyOutcome,
   appendDesktopLoginStep,
   classifyDesktopLoginFailure,
+  enterDesktopPasswordLogin,
   initializeDesktopJourneyEvidence,
   readSyntheticDesktopCredentials,
   type DesktopJourneyPhase,
   type DesktopLoginDiagnostic,
+  type DesktopLoginEntry,
   type DesktopLoginFieldObservation,
   type DesktopLoginFormObservation,
   type DesktopLoginStep,
@@ -105,6 +107,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let webHttpRoute: WebHttpRouteObservation | undefined;
   let currentPhase: DesktopJourneyPhase | undefined;
   let currentLoginStep: DesktopLoginStep = 'not_observed';
+  let loginEntry: DesktopLoginEntry = 'not_observed';
   let loginFieldsBeforeFill = unavailableDesktopLoginFormObservation();
   let failed = false;
   let evidenceInitialized = false;
@@ -118,8 +121,9 @@ test('Element Desktop room event journey', async ({ browser }) => {
     currentLoginStep = 'cdp_connect';
     desktopBrowser = await connectToDesktop();
     currentLoginStep = 'page_select';
-    desktopPage = await getDesktopPage(desktopBrowser);
-    desktopPage.setDefaultTimeout(30_000);
+    const loginPage = await getDesktopPage(desktopBrowser);
+    desktopPage = loginPage;
+    loginPage.setDefaultTimeout(30_000);
     currentLoginStep = 'credentials_read';
     const credentials = readSyntheticDesktopCredentials({
       filePath: credentialsFile,
@@ -134,12 +138,30 @@ test('Element Desktop room event journey', async ({ browser }) => {
       name: 'Password',
       exact: true,
     });
-    loginFieldsBeforeFill = await observeDesktopLoginForm(username, password);
+    const initialLoginForm = await observeDesktopLoginForm(username, password);
+    loginFieldsBeforeFill = initialLoginForm;
     try {
-      currentLoginStep = 'username_fill';
-      await username.fill(credentials.username);
-      currentLoginStep = 'password_fill';
-      await password.fill(credentials.password);
+      await enterDesktopPasswordLogin({
+        initialForm: initialLoginForm,
+        clickWelcomeSignIn: () =>
+          loginPage.locator('a[href="#/login"]').click(),
+        observeForm: () => observeDesktopLoginForm(username, password),
+        onBeforeFill: (form) => {
+          loginFieldsBeforeFill = form;
+        },
+        fillCredentials: async () => {
+          currentLoginStep = 'username_fill';
+          await username.fill(credentials.username);
+          currentLoginStep = 'password_fill';
+          await password.fill(credentials.password);
+        },
+        setLoginEntry: (entry) => {
+          loginEntry = entry;
+        },
+        setLoginStep: (step) => {
+          currentLoginStep = step;
+        },
+      });
     } finally {
       credentials.password = '';
     }
@@ -153,7 +175,11 @@ test('Element Desktop room event journey', async ({ browser }) => {
       .getByRole('tree', { name: 'Rooms', exact: true })
       .waitFor({ state: 'visible', timeout: 60_000 });
     currentLoginStep = 'complete';
-    appendDesktopLoginStep({ ...evidence, step: currentLoginStep });
+    appendDesktopLoginStep({
+      ...evidence,
+      step: currentLoginStep,
+      entry: loginEntry,
+    });
     recordPhase(evidence, recorded, 'desktop-login');
 
     currentPhase = 'desktop-member-identity';
@@ -357,7 +383,12 @@ test('Element Desktop room event journey', async ({ browser }) => {
         beforeFill: loginFieldsBeforeFill,
         atFailure: loginFieldsAtFailure,
       };
-      safeRecordDesktopLoginStep(evidence, currentLoginStep, loginDiagnostic);
+      safeRecordDesktopLoginStep(
+        evidence,
+        currentLoginStep,
+        loginDiagnostic,
+        loginEntry,
+      );
     }
     if (currentPhase && evidenceInitialized && !recorded.has(currentPhase)) {
       safeRecordPhase(evidence, recorded, currentPhase, 'failed');
@@ -844,11 +875,13 @@ function safeRecordDesktopLoginStep(
   evidence: { filePath: string; runnerTemp: string },
   step: DesktopLoginStep,
   diagnostic?: DesktopLoginDiagnostic,
+  entry?: DesktopLoginEntry,
 ) {
   try {
     appendDesktopLoginStep({
       ...evidence,
       step,
+      ...(entry === undefined ? {} : { entry }),
       ...(diagnostic === undefined ? {} : { diagnostic }),
     });
     return true;
