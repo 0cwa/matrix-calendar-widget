@@ -174,6 +174,18 @@ type G6SidePanelToolbarObservation = {
   createEventButtonVisibility: G6SidePanelControlVisibility;
   createEventButtonEnabled: G6SidePanelControlEnabled;
 };
+type G6KeyboardFocusTarget =
+  | 'edit'
+  | 'delete'
+  | 'close'
+  | 'dialog-content'
+  | 'other'
+  | 'outside'
+  | 'unavailable';
+type G6KeyboardTabFocusObservation = {
+  activeTarget: G6KeyboardFocusTarget;
+  frameHasFocus: boolean;
+};
 
 type G6StageRecord = {
   phase: G6Phase;
@@ -226,6 +238,19 @@ type G6StageRecord = {
   closeActionFocused?: boolean;
   escapeClosedDialog?: boolean;
   focusReturnedToEvent?: boolean;
+  editActionCountCapped?: number;
+  editActionVisibility?: G6SidePanelControlVisibility;
+  editActionEnabled?: G6SidePanelControlEnabled;
+  deleteActionCountCapped?: number;
+  deleteActionVisibility?: G6SidePanelControlVisibility;
+  deleteActionEnabled?: G6SidePanelControlEnabled;
+  closeActionCountCapped?: number;
+  closeActionVisibility?: G6SidePanelControlVisibility;
+  closeActionEnabled?: G6SidePanelControlEnabled;
+  initialDetailsFocusTarget?: G6KeyboardFocusTarget;
+  keyboardFrameHasFocus?: boolean;
+  detailsTabFocusObservations?: G6KeyboardTabFocusObservation[];
+  escapeAttempted?: boolean;
   widgetCardVisible?: boolean;
   createControlReachable?: boolean;
   eventDetailsReachable?: boolean;
@@ -1999,6 +2024,37 @@ test('Element Web preserves unsupported events and supports client interactions'
       name: 'Edit',
       exact: true,
     });
+    const deleteAction = keyboardDetails.getByRole('button', {
+      name: 'Delete',
+      exact: true,
+    });
+    const closeAction = keyboardDetails.getByRole('button', {
+      name: 'Close',
+      exact: true,
+    });
+    const [
+      editControlObservation,
+      deleteControlObservation,
+      closeControlObservation,
+    ] = await Promise.all([
+      observeG6KeyboardControl(editButton),
+      observeG6KeyboardControl(deleteAction),
+      observeG6KeyboardControl(closeAction),
+    ]);
+    const keyboardFocusControls = {
+      edit: editButton,
+      editCountCapped: editControlObservation.countCapped,
+      delete: deleteAction,
+      deleteCountCapped: deleteControlObservation.countCapped,
+      close: closeAction,
+      closeCountCapped: closeControlObservation.countCapped,
+      dialogContent: keyboardDetails.locator('.MuiDialogContent-root'),
+    };
+    const initialDetailsFocus = await observeG6KeyboardFocusTarget(
+      frameB,
+      keyboardFocusControls,
+    );
+    const detailsTabFocusObservations: G6KeyboardTabFocusObservation[] = [];
     let detailsActionTabCount = 0;
     let editActionFocused = await editButton
       .evaluate((element) => element === document.activeElement)
@@ -2006,16 +2062,16 @@ test('Element Web preserves unsupported events and supports client interactions'
     while (!editActionFocused && detailsOpened && detailsActionTabCount < 12) {
       await pageB.keyboard.press('Tab');
       detailsActionTabCount += 1;
+      detailsTabFocusObservations.push(
+        await observeG6KeyboardFocusTarget(frameB, keyboardFocusControls),
+      );
       editActionFocused = await editButton
         .evaluate((element) => element === document.activeElement)
         .catch(() => false);
     }
-    const deleteAction = keyboardDetails.getByRole('button', {
-      name: 'Delete',
-      exact: true,
-    });
     let deleteActionFocused = false;
     let closeActionFocused = false;
+    let escapeAttempted = false;
     if (editActionFocused) {
       await pageB.keyboard.press('Tab');
       detailsActionTabCount += 1;
@@ -2024,10 +2080,10 @@ test('Element Web preserves unsupported events and supports client interactions'
         .catch(() => false);
       await pageB.keyboard.press('Tab');
       detailsActionTabCount += 1;
-      closeActionFocused = await keyboardDetails
-        .getByRole('button', { name: 'Close', exact: true })
+      closeActionFocused = await closeAction
         .evaluate((element) => element === document.activeElement)
         .catch(() => false);
+      escapeAttempted = true;
       await pageB.keyboard.press('Escape');
     }
     const escapeClosedDialog = await keyboardDetails
@@ -2057,6 +2113,19 @@ test('Element Web preserves unsupported events and supports client interactions'
       closeActionFocused,
       escapeClosedDialog,
       focusReturnedToEvent,
+      editActionCountCapped: editControlObservation.countCapped,
+      editActionVisibility: editControlObservation.visibility,
+      editActionEnabled: editControlObservation.enabled,
+      deleteActionCountCapped: deleteControlObservation.countCapped,
+      deleteActionVisibility: deleteControlObservation.visibility,
+      deleteActionEnabled: deleteControlObservation.enabled,
+      closeActionCountCapped: closeControlObservation.countCapped,
+      closeActionVisibility: closeControlObservation.visibility,
+      closeActionEnabled: closeControlObservation.enabled,
+      initialDetailsFocusTarget: initialDetailsFocus.activeTarget,
+      keyboardFrameHasFocus: initialDetailsFocus.frameHasFocus,
+      detailsTabFocusObservations,
+      escapeAttempted,
     });
 
     activeG6Phase = 'g6-delete-and-refresh';
@@ -2717,6 +2786,125 @@ async function observeG6SidePanelToolbar(
       createEventButtonEnabled: 'unavailable',
     };
   }
+}
+
+async function observeG6KeyboardControl(button: Locator): Promise<{
+  countCapped: number;
+  visibility: G6SidePanelControlVisibility;
+  enabled: G6SidePanelControlEnabled;
+}> {
+  const count = await button.count().catch(() => 0);
+  const [visible, enabled] = await Promise.all([
+    count === 1 ? button.isVisible().catch(() => undefined) : undefined,
+    count === 1 ? button.isEnabled().catch(() => undefined) : undefined,
+  ]);
+  return {
+    countCapped: Math.min(count, 2),
+    visibility:
+      count === 0
+        ? 'absent'
+        : count > 1
+          ? 'ambiguous'
+          : visible === undefined
+            ? 'unavailable'
+            : visible
+              ? 'visible'
+              : 'hidden',
+    enabled:
+      count === 0
+        ? 'absent'
+        : count > 1
+          ? 'ambiguous'
+          : enabled === undefined
+            ? 'unavailable'
+            : enabled
+              ? 'enabled'
+              : 'disabled',
+  };
+}
+
+async function observeG6KeyboardFocusTarget(
+  frame: FrameLocator,
+  controls: {
+    edit: Locator;
+    editCountCapped: number;
+    delete: Locator;
+    deleteCountCapped: number;
+    close: Locator;
+    closeCountCapped: number;
+    dialogContent: Locator;
+  },
+): Promise<G6KeyboardTabFocusObservation> {
+  let frameHasFocus: boolean;
+  let activeElementAvailable: boolean;
+  try {
+    ({ frameHasFocus, activeElementAvailable } = await frame
+      .locator('body')
+      .evaluate((body) => {
+        const document = body.ownerDocument;
+        return {
+          frameHasFocus: document.hasFocus(),
+          activeElementAvailable: document.activeElement !== null,
+        };
+      }));
+  } catch {
+    return { activeTarget: 'unavailable', frameHasFocus: false };
+  }
+
+  const targets: Array<{
+    name: G6KeyboardFocusTarget;
+    locator: Locator;
+    countCapped: number;
+  }> = [
+    {
+      name: 'edit',
+      locator: controls.edit,
+      countCapped: controls.editCountCapped,
+    },
+    {
+      name: 'delete',
+      locator: controls.delete,
+      countCapped: controls.deleteCountCapped,
+    },
+    {
+      name: 'close',
+      locator: controls.close,
+      countCapped: controls.closeCountCapped,
+    },
+  ];
+  let ambiguousTarget = false;
+  for (const target of targets) {
+    if (target.countCapped > 1) {
+      ambiguousTarget = true;
+      continue;
+    }
+    if (
+      target.countCapped === 1 &&
+      (await target.locator
+        .evaluate((element) => element.ownerDocument.activeElement === element)
+        .catch(() => false))
+    ) {
+      return { activeTarget: target.name, frameHasFocus };
+    }
+  }
+
+  const dialogContentCount = await controls.dialogContent
+    .count()
+    .catch(() => 0);
+  if (dialogContentCount > 1) ambiguousTarget = true;
+  if (
+    dialogContentCount === 1 &&
+    (await controls.dialogContent
+      .evaluate((element) => element.ownerDocument.activeElement === element)
+      .catch(() => false))
+  ) {
+    return { activeTarget: 'dialog-content', frameHasFocus };
+  }
+  if (!frameHasFocus) return { activeTarget: 'outside', frameHasFocus };
+  if (ambiguousTarget || !activeElementAvailable) {
+    return { activeTarget: 'unavailable', frameHasFocus };
+  }
+  return { activeTarget: 'other', frameHasFocus };
 }
 
 function readReminderFlow(): ReminderFlow {

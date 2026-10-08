@@ -267,7 +267,14 @@ const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
   ],
   [
     'g6-keyboard-focus',
-    ['count', 'eventActionTabCount', 'detailsActionTabCount'],
+    [
+      'count',
+      'eventActionTabCount',
+      'detailsActionTabCount',
+      'editActionCountCapped',
+      'deleteActionCountCapped',
+      'closeActionCountCapped',
+    ],
   ],
   [
     'g6-side-panel-layout',
@@ -316,6 +323,18 @@ const G6_ENUM_FIELDS_BY_PHASE = new Map([
       'createEventButtonEnabled',
     ],
   ],
+  [
+    'g6-keyboard-focus',
+    [
+      'editActionVisibility',
+      'editActionEnabled',
+      'deleteActionVisibility',
+      'deleteActionEnabled',
+      'closeActionVisibility',
+      'closeActionEnabled',
+      'initialDetailsFocusTarget',
+    ],
+  ],
 ]);
 const G6_POSTSAVE_ENUM_FIELDS = new Set([
   'neighborListRefreshOutcome',
@@ -328,6 +347,19 @@ const G6_POSTSAVE_BOOLEAN_FIELDS = new Set([
   'neighborListErrorVisible',
   'neighborListEditedRowVisible',
   'neighborEditedRowCountOverflow',
+]);
+const G6_KEYBOARD_BOOLEAN_FIELDS = new Set([
+  'keyboardFrameHasFocus',
+  'escapeAttempted',
+]);
+const G6_KEYBOARD_FOCUS_TARGETS = new Set([
+  'edit',
+  'delete',
+  'close',
+  'dialog-content',
+  'other',
+  'outside',
+  'unavailable',
 ]);
 const G6_POSTSAVE_DIAGNOSTIC_FIELDS = new Set([
   ...G6_POSTSAVE_ENUM_FIELDS,
@@ -360,7 +392,10 @@ const G6_EXTRA_ENUM_FIELDS = new Set(
 for (const key of G6_POSTSAVE_ENUM_FIELDS) {
   G6_EXTRA_ENUM_FIELDS.add(key);
 }
-const G6_EXTRA_BOOLEAN_FIELDS = new Set([...G6_POSTSAVE_BOOLEAN_FIELDS]);
+const G6_EXTRA_BOOLEAN_FIELDS = new Set([
+  ...G6_POSTSAVE_BOOLEAN_FIELDS,
+  ...G6_KEYBOARD_BOOLEAN_FIELDS,
+]);
 const G6_ENUM_VALUES = new Map([
   [
     'neighborPatchTitleOutcome',
@@ -388,6 +423,31 @@ const G6_ENUM_VALUES = new Map([
     'createEventButtonEnabled',
     new Set(['absent', 'enabled', 'disabled', 'ambiguous', 'unavailable']),
   ],
+  [
+    'editActionVisibility',
+    new Set(['absent', 'visible', 'hidden', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'deleteActionVisibility',
+    new Set(['absent', 'visible', 'hidden', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'closeActionVisibility',
+    new Set(['absent', 'visible', 'hidden', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'editActionEnabled',
+    new Set(['absent', 'enabled', 'disabled', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'deleteActionEnabled',
+    new Set(['absent', 'enabled', 'disabled', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'closeActionEnabled',
+    new Set(['absent', 'enabled', 'disabled', 'ambiguous', 'unavailable']),
+  ],
+  ['initialDetailsFocusTarget', G6_KEYBOARD_FOCUS_TARGETS],
 ]);
 
 function validG6SidePanelToolbarObservation(record) {
@@ -965,7 +1025,9 @@ const ALLOWED_KEYS = new Set([
   'neighborOwnershipUpdated',
   'neighborUpdateIdentityMatches',
   ...G6_EXTRA_ENUM_FIELDS,
+  ...G6_EXTRA_BOOLEAN_FIELDS,
   ...G6_POSTSAVE_DIAGNOSTIC_FIELDS,
+  'detailsTabFocusObservations',
   'deleteButtonVisible',
   'deleteConfirmationVisible',
   'deletedRowAbsent',
@@ -998,6 +1060,10 @@ function validG6Observation(record) {
   const enumFields = G6_ENUM_FIELDS_BY_PHASE.get(record.phase) ?? [];
   const postSaveFields =
     G6_POSTSAVE_FIELDS_BY_PHASE.get(record.phase) ?? new Set();
+  const keyboardFields =
+    record.phase === 'g6-keyboard-focus'
+      ? [...G6_KEYBOARD_BOOLEAN_FIELDS, 'detailsTabFocusObservations']
+      : [];
   const postSaveBooleanFields = [...G6_POSTSAVE_BOOLEAN_FIELDS].filter((key) =>
     postSaveFields.has(key),
   );
@@ -1008,6 +1074,7 @@ function validG6Observation(record) {
     ...numericFields,
     ...enumFields,
     ...postSaveFields,
+    ...keyboardFields,
     ...(record.phase === 'g6-fixture-ready' ? ['seedCreateObservations'] : []),
   ]);
   if (
@@ -1016,6 +1083,9 @@ function validG6Observation(record) {
       (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
     ) ||
     postSaveBooleanFields.some(
+      (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
+    ) ||
+    [...G6_KEYBOARD_BOOLEAN_FIELDS].some(
       (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
     ) ||
     numericFields.some((key) => {
@@ -1062,6 +1132,92 @@ function validG6Observation(record) {
     )
   ) {
     return false;
+  }
+
+  if (record.phase === 'g6-keyboard-focus') {
+    const requiredFields = [
+      'editActionCountCapped',
+      'editActionVisibility',
+      'editActionEnabled',
+      'deleteActionCountCapped',
+      'deleteActionVisibility',
+      'deleteActionEnabled',
+      'closeActionCountCapped',
+      'closeActionVisibility',
+      'closeActionEnabled',
+      'initialDetailsFocusTarget',
+      'keyboardFrameHasFocus',
+      'detailsTabFocusObservations',
+      'escapeAttempted',
+      'eventActionTabCount',
+      'detailsActionTabCount',
+    ];
+    const observationFieldsPresent = requiredFields.every((key) =>
+      Object.hasOwn(record, key),
+    );
+    const controlStateIsValid = (name) => {
+      const count = record[`${name}ActionCountCapped`];
+      const visibility = record[`${name}ActionVisibility`];
+      const enabled = record[`${name}ActionEnabled`];
+      return (
+        Number.isInteger(count) &&
+        count >= 0 &&
+        count <= 2 &&
+        ((count === 0 && visibility === 'absent' && enabled === 'absent') ||
+          (count === 1 &&
+            ['visible', 'hidden', 'unavailable'].includes(visibility) &&
+            ['enabled', 'disabled', 'unavailable'].includes(enabled)) ||
+          (count === 2 &&
+            visibility === 'ambiguous' &&
+            enabled === 'ambiguous'))
+      );
+    };
+    const tabObservations = record.detailsTabFocusObservations;
+    const tabObservationsAreValid =
+      Array.isArray(tabObservations) &&
+      tabObservations.length <= 12 &&
+      tabObservations.every(
+        (observation) =>
+          observation !== null &&
+          typeof observation === 'object' &&
+          !Array.isArray(observation) &&
+          Object.keys(observation).length === 2 &&
+          Object.hasOwn(observation, 'activeTarget') &&
+          Object.hasOwn(observation, 'frameHasFocus') &&
+          G6_KEYBOARD_FOCUS_TARGETS.has(observation.activeTarget) &&
+          typeof observation.frameHasFocus === 'boolean' &&
+          (observation.frameHasFocus ||
+            ['outside', 'unavailable'].includes(observation.activeTarget)) &&
+          (!observation.frameHasFocus ||
+            observation.activeTarget !== 'outside'),
+      );
+    const preEditTabCount =
+      record.detailsActionTabCount - (record.editActionFocused ? 2 : 0);
+    if (
+      !observationFieldsPresent ||
+      !G6_KEYBOARD_FOCUS_TARGETS.has(record.initialDetailsFocusTarget) ||
+      (!record.keyboardFrameHasFocus &&
+        !['outside', 'unavailable'].includes(
+          record.initialDetailsFocusTarget,
+        )) ||
+      (record.keyboardFrameHasFocus &&
+        record.initialDetailsFocusTarget === 'outside') ||
+      !controlStateIsValid('edit') ||
+      !controlStateIsValid('delete') ||
+      !controlStateIsValid('close') ||
+      !tabObservationsAreValid ||
+      tabObservations.length !== Math.min(12, preEditTabCount) ||
+      record.escapeAttempted !== record.editActionFocused ||
+      (!record.escapeAttempted && record.escapeClosedDialog) ||
+      (record.initialDetailsFocusTarget === 'edit' &&
+        !record.editActionFocused) ||
+      (record.initialDetailsFocusTarget === 'delete' &&
+        !record.deleteActionFocused) ||
+      (record.initialDetailsFocusTarget === 'close' &&
+        !record.closeActionFocused)
+    ) {
+      return false;
+    }
   }
 
   const hasPostSaveDiagnostics = [...postSaveFields].some((key) =>
@@ -2039,7 +2195,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       ([...G6_EXTRA_ENUM_FIELDS].some((key) => Object.hasOwn(record, key)) &&
         !G6_PHASES.has(record.phase)) ||
       ([...G6_EXTRA_BOOLEAN_FIELDS].some((key) => Object.hasOwn(record, key)) &&
-        !G6_PHASES.has(record.phase))
+        !G6_PHASES.has(record.phase)) ||
+      (Object.hasOwn(record, 'detailsTabFocusObservations') &&
+        record.phase !== 'g6-keyboard-focus')
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
@@ -3109,6 +3267,20 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         (letter) => `_${letter.toLowerCase()}`,
       );
       fields.push(`${outputKey}=${record[key]}`);
+    }
+    for (const key of G6_KEYBOARD_BOOLEAN_FIELDS) {
+      if (!Object.hasOwn(record, key)) continue;
+      const outputKey = key.replace(
+        /[A-Z]/gu,
+        (letter) => `_${letter.toLowerCase()}`,
+      );
+      fields.push(`${outputKey}=${record[key]}`);
+    }
+    if (Object.hasOwn(record, 'detailsTabFocusObservations')) {
+      const observations = record.detailsTabFocusObservations.map(
+        ({ activeTarget, frameHasFocus }) => `${activeTarget}:${frameHasFocus}`,
+      );
+      fields.push(`details_tab_focus=${observations.join(',') || 'none'}`);
     }
     lines.push(fields.join(' '));
   }

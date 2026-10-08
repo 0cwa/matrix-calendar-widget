@@ -22,6 +22,24 @@ const g6SidePanelToolbarObserved = {
   createEventButtonVisibility: 'visible',
   createEventButtonEnabled: 'disabled',
 };
+const g6KeyboardFocusDiagnostic = {
+  editActionCountCapped: 1,
+  editActionVisibility: 'visible',
+  editActionEnabled: 'enabled',
+  deleteActionCountCapped: 1,
+  deleteActionVisibility: 'visible',
+  deleteActionEnabled: 'enabled',
+  closeActionCountCapped: 1,
+  closeActionVisibility: 'visible',
+  closeActionEnabled: 'enabled',
+  initialDetailsFocusTarget: 'dialog-content',
+  keyboardFrameHasFocus: true,
+  detailsTabFocusObservations: Array.from({ length: 12 }, () => ({
+    activeTarget: 'other',
+    frameHasFocus: true,
+  })),
+  escapeAttempted: true,
+};
 const g6ObservedPostSaveList = {
   neighborListRefreshOutcome: 'decoded',
   neighborListRefreshHttpStatus: 200,
@@ -2895,6 +2913,7 @@ test('rejects inconsistent Element client acceptance evidence', () => {
       closeActionFocused: true,
       escapeClosedDialog: true,
       focusReturnedToEvent: true,
+      ...g6KeyboardFocusDiagnostic,
     },
     {
       phase: 'g6-resource-cleanup',
@@ -3037,6 +3056,7 @@ test('accepts the compact four-case Element client evidence contract', () => {
       closeActionFocused: true,
       escapeClosedDialog: true,
       focusReturnedToEvent: true,
+      ...g6KeyboardFocusDiagnostic,
     },
     {
       phase: 'g6-side-panel-layout',
@@ -3345,4 +3365,80 @@ test('retains a consistent failed G6 ownership cleanup count ledger', () => {
   assert.match(summary, /phase=g6-resource-cleanup status=failed/u);
   assert.match(summary, /create_unresolved_count=3/u);
   assert.doesNotMatch(summary, /private|\.ics|ETag/u);
+});
+
+test('sanitizes bounded G6 keyboard focus diagnostics without claiming skipped actions', () => {
+  const observations = Array.from({ length: 12 }, () => ({
+    activeTarget: 'other',
+    frameHasFocus: true,
+  }));
+  const record = {
+    phase: 'g6-keyboard-focus',
+    status: 'failed',
+    count: 66,
+    eventActionTabCount: 66,
+    detailsActionTabCount: 12,
+    keyboardEventFocused: true,
+    detailsOpened: true,
+    editActionFocused: false,
+    deleteActionFocused: false,
+    closeActionFocused: false,
+    escapeClosedDialog: false,
+    focusReturnedToEvent: false,
+    editActionCountCapped: 1,
+    editActionVisibility: 'visible',
+    editActionEnabled: 'enabled',
+    deleteActionCountCapped: 1,
+    deleteActionVisibility: 'visible',
+    deleteActionEnabled: 'enabled',
+    closeActionCountCapped: 1,
+    closeActionVisibility: 'visible',
+    closeActionEnabled: 'enabled',
+    initialDetailsFocusTarget: 'dialog-content',
+    keyboardFrameHasFocus: true,
+    detailsTabFocusObservations: observations,
+    escapeAttempted: false,
+  };
+  const summary = sanitizeElementAcceptance(JSON.stringify(record), sourceSha);
+  assert.match(summary, /edit_action_count_capped=1/u);
+  assert.match(summary, /initial_details_focus_target=dialog-content/u);
+  assert.match(summary, /escape_attempted=false/u);
+  assert.match(summary, /details_tab_focus=other:true,other:true/u);
+  assert.doesNotMatch(summary, /private|token|https?:/iu);
+  const focusObservedWithoutEscape = sanitizeElementAcceptance(
+    JSON.stringify({ ...record, focusReturnedToEvent: true }),
+    sourceSha,
+  );
+  assert.match(focusObservedWithoutEscape, /focus_returned_to_event=true/u);
+
+  for (const invalid of [
+    {
+      ...record,
+      detailsTabFocusObservations: [
+        ...observations,
+        { activeTarget: 'other', frameHasFocus: true },
+      ],
+    },
+    {
+      ...record,
+      detailsTabFocusObservations: [
+        { activeTarget: 'other', frameHasFocus: true, text: 'private title' },
+      ],
+    },
+    {
+      ...record,
+      escapeAttempted: false,
+      escapeClosedDialog: true,
+    },
+    {
+      phase: 'widget-a-iframe-ready',
+      status: 'passed',
+      detailsTabFocusObservations: observations,
+    },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(invalid), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
 });
