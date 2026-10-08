@@ -239,6 +239,167 @@ test('records one fixed failure point for a failed Desktop room read', () => {
   });
 });
 
+test('records closed gateway-read observations and distinguishes false from unavailable', () => {
+  const observedDiagnostic = {
+    eventsGetCandidateCountCapped: 2,
+    expectedRoomCalendarGetObserved: true,
+    widgetWarningObserved: false,
+    widgetWarningContinued: false,
+    capabilityPromptObserved: true,
+    capabilityApproved: false,
+    identityContinueObserved: null,
+    identityContinued: null,
+    iframeAttached: true,
+    createControlVisible: true,
+  };
+  const unavailableDiagnostic = {
+    eventsGetCandidateCountCapped: null,
+    expectedRoomCalendarGetObserved: null,
+    widgetWarningObserved: null,
+    widgetWarningContinued: null,
+    capabilityPromptObserved: null,
+    capabilityApproved: null,
+    identityContinueObserved: null,
+    identityContinued: null,
+    iframeAttached: null,
+    createControlVisible: null,
+  };
+
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopJourneyOutcome({
+      filePath,
+      runnerTemp,
+      phase: 'desktop-room-widget-read',
+      status: 'failed',
+      failurePoint: 'gateway-read-await',
+      gatewayReadDiagnostic: observedDiagnostic,
+    });
+
+    const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
+    assert.deepEqual(summary.gatewayReadDiagnostic, observedDiagnostic);
+    assert.deepEqual(summary.failurePoint, {
+      phase: 'desktop-room-widget-read',
+      point: 'gateway-read-await',
+    });
+    const evidence = readFileSync(filePath, 'utf8');
+    const row = JSON.parse(evidence);
+    assert.deepEqual(Object.keys(row).sort(), [
+      'failurePoint',
+      'gatewayReadDiagnostic',
+      'phase',
+      'status',
+    ]);
+    assert.doesNotMatch(evidence, /https?:\/\/|access_token|private-title/u);
+  });
+
+  const unavailableSummary = summarizeDesktopJourneyEvidence(
+    `${JSON.stringify({
+      phase: 'desktop-room-widget-read',
+      status: 'failed',
+      failurePoint: 'widget-open',
+      gatewayReadDiagnostic: unavailableDiagnostic,
+    })}\n`,
+  );
+  assert.deepEqual(
+    unavailableSummary.gatewayReadDiagnostic,
+    unavailableDiagnostic,
+  );
+  assert.equal(
+    unavailableSummary.gatewayReadDiagnostic.widgetWarningObserved,
+    null,
+  );
+});
+
+test('rejects inconsistent and open-ended gateway-read failure diagnostics', () => {
+  const validDiagnostic = {
+    eventsGetCandidateCountCapped: 1,
+    expectedRoomCalendarGetObserved: false,
+    widgetWarningObserved: false,
+    widgetWarningContinued: false,
+    capabilityPromptObserved: null,
+    capabilityApproved: null,
+    identityContinueObserved: null,
+    identityContinued: null,
+    iframeAttached: false,
+    createControlVisible: false,
+  };
+  const summarize = (row) =>
+    summarizeDesktopJourneyEvidence(`${JSON.stringify(row)}\n`);
+  const row = (gatewayReadDiagnostic) => ({
+    phase: 'desktop-room-widget-read',
+    status: 'failed',
+    failurePoint: 'gateway-read-await',
+    gatewayReadDiagnostic,
+  });
+
+  assert.doesNotThrow(() => summarize(row(validDiagnostic)));
+  assert.doesNotThrow(() =>
+    summarize(
+      row({
+        ...validDiagnostic,
+        iframeAttached: true,
+      }),
+    ),
+  );
+
+  for (const diagnostic of [
+    {
+      ...validDiagnostic,
+      eventsGetCandidateCountCapped: 0,
+      expectedRoomCalendarGetObserved: true,
+    },
+    {
+      ...validDiagnostic,
+      eventsGetCandidateCountCapped: null,
+      expectedRoomCalendarGetObserved: false,
+    },
+    {
+      ...validDiagnostic,
+      widgetWarningObserved: false,
+      widgetWarningContinued: true,
+    },
+    {
+      ...validDiagnostic,
+      iframeAttached: false,
+      createControlVisible: true,
+    },
+    { ...validDiagnostic, privateUrl: 'https://private.invalid/path' },
+  ]) {
+    assert.throws(
+      () => summarize(row(diagnostic)),
+      /Invalid Desktop journey input/u,
+    );
+  }
+
+  assert.throws(
+    () =>
+      summarize({
+        ...row(validDiagnostic),
+        status: 'passed',
+      }),
+    /Invalid Desktop journey input/u,
+  );
+  assert.throws(
+    () =>
+      summarize({
+        ...row(validDiagnostic),
+        failurePoint: 'room-heading',
+      }),
+    /Invalid Desktop journey input/u,
+  );
+  assert.throws(
+    () =>
+      summarize({
+        ...row(validDiagnostic),
+        phase: 'desktop-widget-origin-isolation',
+        failurePoint: 'origin-isolation',
+      }),
+    /Invalid Desktop journey input/u,
+  );
+});
+
 test('accepts only the closed failure-point enum with its failed-phase match', () => {
   assert.deepEqual(
     [...DESKTOP_JOURNEY_FAILURE_POINTS],

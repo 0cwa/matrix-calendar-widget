@@ -109,6 +109,26 @@ const ROOMS_READY_DIAGNOSTIC_KEYS = Object.freeze(
     'matrixClientMatchesMemberA',
   ].sort(),
 );
+const GATEWAY_READ_FAILURE_POINTS = new Set([
+  'widget-open',
+  'gateway-read-await',
+  'gateway-read-status',
+  'create-control',
+]);
+const GATEWAY_READ_DIAGNOSTIC_KEYS = Object.freeze(
+  [
+    'eventsGetCandidateCountCapped',
+    'expectedRoomCalendarGetObserved',
+    'widgetWarningObserved',
+    'widgetWarningContinued',
+    'capabilityPromptObserved',
+    'capabilityApproved',
+    'identityContinueObserved',
+    'identityContinued',
+    'iframeAttached',
+    'createControlVisible',
+  ].sort(),
+);
 const LOGIN_FORM_FIELD_NAMES = Object.freeze(['username', 'password']);
 const JOURNEY_CREDENTIALS_NAME = 'element-acceptance-desktop-credentials.json';
 const JOURNEY_EVIDENCE_NAME = 'element-desktop-journey-stage.jsonl';
@@ -250,6 +270,56 @@ function validRoomsReadyDiagnostic(value) {
     return false;
   }
   return true;
+}
+
+function validPromptObservation(observed, actionTaken) {
+  return (
+    [null, true, false].includes(observed) &&
+    [null, true, false].includes(actionTaken) &&
+    (observed === null
+      ? actionTaken === null
+      : observed === false
+        ? actionTaken === false
+        : typeof actionTaken === 'boolean')
+  );
+}
+
+function validDesktopGatewayReadFailureDiagnostic(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      GATEWAY_READ_DIAGNOSTIC_KEYS.join(',') ||
+    ![null, 0, 1, 2].includes(value.eventsGetCandidateCountCapped) ||
+    ![null, true, false].includes(value.expectedRoomCalendarGetObserved) ||
+    !validPromptObservation(
+      value.widgetWarningObserved,
+      value.widgetWarningContinued,
+    ) ||
+    !validPromptObservation(
+      value.capabilityPromptObserved,
+      value.capabilityApproved,
+    ) ||
+    !validPromptObservation(
+      value.identityContinueObserved,
+      value.identityContinued,
+    ) ||
+    ![null, true, false].includes(value.iframeAttached) ||
+    ![null, true, false].includes(value.createControlVisible) ||
+    (value.iframeAttached === false && value.createControlVisible === true)
+  ) {
+    return false;
+  }
+
+  if (value.eventsGetCandidateCountCapped === null) {
+    return value.expectedRoomCalendarGetObserved === null;
+  }
+  return (
+    value.expectedRoomCalendarGetObserved !== null &&
+    (value.eventsGetCandidateCountCapped !== 0 ||
+      value.expectedRoomCalendarGetObserved === false)
+  );
 }
 
 function safeErrorField(error, key) {
@@ -463,6 +533,7 @@ function parseEvidence(input) {
 
   const outcomes = new Map();
   let failurePoint = null;
+  let gatewayReadDiagnostic = null;
   let loginStep = 'not_observed';
   let loginStepRecorded = false;
   let loginEntry = 'not_observed';
@@ -528,9 +599,14 @@ function parseEvidence(input) {
     }
     const phaseKeys = Object.keys(value).sort().join(',');
     const hasFailurePoint = Object.hasOwn(value, 'failurePoint');
+    const hasGatewayReadDiagnostic = Object.hasOwn(
+      value,
+      'gatewayReadDiagnostic',
+    );
     if (
       (phaseKeys !== 'phase,status' &&
-        phaseKeys !== 'failurePoint,phase,status') ||
+        phaseKeys !== 'failurePoint,phase,status' &&
+        phaseKeys !== 'failurePoint,gatewayReadDiagnostic,phase,status') ||
       !PHASE_SET.has(value.phase) ||
       !['passed', 'failed'].includes(value.status) ||
       (hasFailurePoint &&
@@ -540,6 +616,14 @@ function parseEvidence(input) {
             value.status,
             value.failurePoint,
           ))) ||
+      (hasGatewayReadDiagnostic &&
+        (gatewayReadDiagnostic !== null ||
+          !hasFailurePoint ||
+          value.phase !== 'desktop-room-widget-read' ||
+          !GATEWAY_READ_FAILURE_POINTS.has(value.failurePoint) ||
+          !validDesktopGatewayReadFailureDiagnostic(
+            value.gatewayReadDiagnostic,
+          ))) ||
       outcomes.has(value.phase)
     ) {
       invalidInput();
@@ -547,11 +631,15 @@ function parseEvidence(input) {
     if (hasFailurePoint) {
       failurePoint = { phase: value.phase, point: value.failurePoint };
     }
+    if (hasGatewayReadDiagnostic) {
+      gatewayReadDiagnostic = value.gatewayReadDiagnostic;
+    }
     outcomes.set(value.phase, value.status);
   }
   return {
     outcomes,
     failurePoint,
+    gatewayReadDiagnostic,
     loginStep,
     loginStepRecorded,
     loginEntry,
@@ -613,6 +701,7 @@ export function appendDesktopJourneyOutcome({
   phase,
   status,
   failurePoint,
+  gatewayReadDiagnostic,
 }) {
   const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
   privateFileStat(path, MAX_EVIDENCE_BYTES);
@@ -622,7 +711,13 @@ export function appendDesktopJourneyOutcome({
     !['passed', 'failed'].includes(status) ||
     (failurePoint !== undefined &&
       (!validJourneyFailurePoint(phase, status, failurePoint) ||
-        parsed.failurePoint !== null))
+        parsed.failurePoint !== null)) ||
+    (gatewayReadDiagnostic !== undefined &&
+      (parsed.gatewayReadDiagnostic !== null ||
+        phase !== 'desktop-room-widget-read' ||
+        status !== 'failed' ||
+        !GATEWAY_READ_FAILURE_POINTS.has(failurePoint) ||
+        !validDesktopGatewayReadFailureDiagnostic(gatewayReadDiagnostic)))
   ) {
     invalidInput();
   }
@@ -635,6 +730,9 @@ export function appendDesktopJourneyOutcome({
         phase,
         status,
         ...(failurePoint === undefined ? {} : { failurePoint }),
+        ...(gatewayReadDiagnostic === undefined
+          ? {}
+          : { gatewayReadDiagnostic }),
       })}\n`,
       {
         encoding: 'utf8',
@@ -700,6 +798,7 @@ export function summarizeDesktopJourneyEvidence(input) {
     loginEntry,
     loginDiagnostic,
     roomsReadyDiagnostic,
+    gatewayReadDiagnostic,
   } = parseEvidence(input);
   if (outcomes.get('desktop-login') === 'passed') {
     if (
@@ -724,6 +823,7 @@ export function summarizeDesktopJourneyEvidence(input) {
     loginDiagnostic,
     roomsReadyDiagnostic,
     failurePoint,
+    gatewayReadDiagnostic,
     cases,
   };
 }

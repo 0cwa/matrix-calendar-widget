@@ -110,6 +110,20 @@ export type DesktopRoomsReadyDiagnostic = {
   matrixClientMatchesMemberA: boolean | null;
 };
 
+export type DesktopGatewayReadFailureDiagnostic = {
+  // 2 means two or more matching-origin/path/method events GET requests.
+  eventsGetCandidateCountCapped: 0 | 1 | 2 | null;
+  expectedRoomCalendarGetObserved: boolean | null;
+  widgetWarningObserved: boolean | null;
+  widgetWarningContinued: boolean | null;
+  capabilityPromptObserved: boolean | null;
+  capabilityApproved: boolean | null;
+  identityContinueObserved: boolean | null;
+  identityContinued: boolean | null;
+  iframeAttached: boolean | null;
+  createControlVisible: boolean | null;
+};
+
 export type DesktopJourneySummary = {
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
@@ -117,6 +131,7 @@ export type DesktopJourneySummary = {
   loginDiagnostic: DesktopLoginDiagnostic | null;
   roomsReadyDiagnostic: DesktopRoomsReadyDiagnostic | null;
   failurePoint: DesktopJourneyFailurePointObservation | null;
+  gatewayReadDiagnostic: DesktopGatewayReadFailureDiagnostic | null;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
 
@@ -166,6 +181,7 @@ export declare function appendDesktopJourneyOutcome(input: {
   phase: DesktopJourneyPhase;
   status: DesktopJourneyOutcome;
   failurePoint?: DesktopJourneyFailurePoint;
+  gatewayReadDiagnostic?: DesktopGatewayReadFailureDiagnostic;
 }): void;
 
 export declare function appendDesktopLoginStep(input: {

@@ -35,6 +35,7 @@ import {
   enterDesktopPasswordLogin,
   initializeDesktopJourneyEvidence,
   readSyntheticDesktopCredentials,
+  type DesktopGatewayReadFailureDiagnostic,
   type DesktopJourneyFailurePoint,
   type DesktopJourneyPhase,
   type DesktopLoginDiagnostic,
@@ -74,6 +75,24 @@ type WebHttpRouteObservation = {
   blockedHttpRequests: number;
 };
 
+type DesktopWidgetPromptObservation = Pick<
+  DesktopGatewayReadFailureDiagnostic,
+  | 'widgetWarningObserved'
+  | 'widgetWarningContinued'
+  | 'capabilityPromptObserved'
+  | 'capabilityApproved'
+  | 'identityContinueObserved'
+  | 'identityContinued'
+>;
+
+type DesktopGatewayReadRequestObserver = {
+  snapshot: () => Pick<
+    DesktopGatewayReadFailureDiagnostic,
+    'eventsGetCandidateCountCapped' | 'expectedRoomCalendarGetObserved'
+  >;
+  stop: () => void;
+};
+
 const FIXTURE_VALUES = Object.freeze({
   homeserverUrl: 'http://127.0.0.1:8008',
   elementUrl: 'http://127.0.0.1:8090',
@@ -83,6 +102,144 @@ const FIXTURE_VALUES = Object.freeze({
 
 const DESKTOP_CREDENTIALS_NAME = 'element-acceptance-desktop-credentials.json';
 const DESKTOP_EVIDENCE_NAME = 'element-desktop-journey-stage.jsonl';
+const DESKTOP_GATEWAY_READ_FAILURE_POINTS = new Set<DesktopJourneyFailurePoint>(
+  [
+    'widget-open',
+    'gateway-read-await',
+    'gateway-read-status',
+    'create-control',
+  ],
+);
+
+function unavailableDesktopWidgetPromptObservation(): DesktopWidgetPromptObservation {
+  return {
+    widgetWarningObserved: null,
+    widgetWarningContinued: null,
+    capabilityPromptObserved: null,
+    capabilityApproved: null,
+    identityContinueObserved: null,
+    identityContinued: null,
+  };
+}
+
+function unavailableDesktopGatewayReadFailureDiagnostic(): DesktopGatewayReadFailureDiagnostic {
+  return {
+    eventsGetCandidateCountCapped: null,
+    expectedRoomCalendarGetObserved: null,
+    ...unavailableDesktopWidgetPromptObservation(),
+    iframeAttached: null,
+    createControlVisible: null,
+  };
+}
+
+function observeDesktopGatewayReadRequests(
+  page: Page,
+  fixture: Fixture,
+): DesktopGatewayReadRequestObserver | undefined {
+  let eventsGetCandidateCountCapped: 0 | 1 | 2 = 0;
+  let expectedRoomCalendarGetObserved = false;
+  let stopped = false;
+  let gatewayOrigin: string;
+  try {
+    gatewayOrigin = new URL(fixture.gatewayUrl).origin;
+  } catch {
+    return undefined;
+  }
+
+  const observeRequest = (request: Request) => {
+    try {
+      const requestUrl = new URL(request.url());
+      if (
+        requestUrl.origin !== gatewayOrigin ||
+        requestUrl.pathname !== '/v1/calendar/events' ||
+        request.method() !== 'GET'
+      ) {
+        return;
+      }
+      eventsGetCandidateCountCapped = Math.min(
+        eventsGetCandidateCountCapped + 1,
+        2,
+      ) as 0 | 1 | 2;
+      const query = requestUrl.searchParams;
+      if (
+        query.get('roomId') === fixture.teamRoomId &&
+        query.get('calendarId') === fixture.calendarId &&
+        query.get('target') === 'room'
+      ) {
+        expectedRoomCalendarGetObserved = true;
+      }
+    } catch {
+      // Request details stay in memory; malformed observations are omitted.
+    }
+  };
+
+  try {
+    page.on('request', observeRequest);
+  } catch {
+    return undefined;
+  }
+  return {
+    snapshot: () => ({
+      eventsGetCandidateCountCapped,
+      expectedRoomCalendarGetObserved,
+    }),
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      try {
+        page.off('request', observeRequest);
+      } catch {
+        // Cleanup is best effort after the read boundary.
+      }
+    },
+  };
+}
+
+async function observeDesktopGatewayReadFailureDiagnostic(
+  page: Page,
+  requestObserver: DesktopGatewayReadRequestObserver | undefined,
+  promptObservation: DesktopWidgetPromptObservation,
+  widgetFrame: FrameLocator | undefined,
+): Promise<DesktopGatewayReadFailureDiagnostic> {
+  const requestObservation = requestObserver?.snapshot() ?? {
+    eventsGetCandidateCountCapped: null,
+    expectedRoomCalendarGetObserved: null,
+  };
+  requestObserver?.stop();
+
+  let iframeAttached: boolean | null = null;
+  try {
+    iframeAttached =
+      (await page.locator('iframe[title="Matrix Calendar"]').count()) > 0;
+  } catch {
+    // Preserve unavailable separately from an observed missing iframe.
+  }
+
+  let createControlVisible: boolean | null = null;
+  try {
+    const frame =
+      widgetFrame ?? page.frameLocator('iframe[title="Matrix Calendar"]');
+    const createControl = frame.getByRole('button', {
+      name: 'Create event',
+      exact: true,
+    });
+    const count = await createControl.count();
+    if (count === 0) {
+      createControlVisible = false;
+    } else if (count === 1) {
+      createControlVisible = await createControl.isVisible();
+    }
+  } catch {
+    // No wait or retry is added at this failure boundary.
+  }
+
+  return {
+    ...requestObservation,
+    ...promptObservation,
+    iframeAttached,
+    createControlVisible,
+  };
+}
 
 test('Element Desktop room event journey', async ({ browser }) => {
   const runnerTemp = requireAbsoluteEnvironment('RUNNER_TEMP');
@@ -108,6 +265,10 @@ test('Element Desktop room event journey', async ({ browser }) => {
   const contexts: BrowserContext[] = [];
   let desktopBrowser: Browser | undefined;
   let desktopPage: Page | undefined;
+  let desktopWidgetFrame: FrameLocator | undefined;
+  let desktopGatewayReadObserver: DesktopGatewayReadRequestObserver | undefined;
+  const desktopWidgetPromptObservation =
+    unavailableDesktopWidgetPromptObservation();
   let webHttpRoute: WebHttpRouteObservation | undefined;
   let currentPhase: DesktopJourneyPhase | undefined;
   let currentFailurePoint: DesktopJourneyFailurePoint | undefined;
@@ -225,8 +386,17 @@ test('Element Desktop room event journey', async ({ browser }) => {
       fixture,
       'GET',
     );
+    desktopGatewayReadObserver = observeDesktopGatewayReadRequests(
+      desktopPage,
+      fixture,
+    );
     currentFailurePoint = 'widget-open';
-    const desktopFrame = await openCalendarWidget(desktopPage, desktopElement);
+    const desktopFrame = await openCalendarWidget(
+      desktopPage,
+      desktopElement,
+      desktopWidgetPromptObservation,
+    );
+    desktopWidgetFrame = desktopFrame;
     currentFailurePoint = 'gateway-read-await';
     const desktopRead = await desktopReadPromise;
     currentFailurePoint = 'gateway-read-status';
@@ -237,6 +407,8 @@ test('Element Desktop room event journey', async ({ browser }) => {
     await desktopFrame
       .getByRole('button', { name: 'Create event', exact: true })
       .waitFor({ state: 'visible' });
+    desktopGatewayReadObserver?.stop();
+    desktopGatewayReadObserver = undefined;
     currentFailurePoint = undefined;
     currentPhase = 'desktop-widget-origin-isolation';
     currentFailurePoint = 'origin-isolation';
@@ -425,12 +597,37 @@ test('Element Desktop room event journey', async ({ browser }) => {
       }
     }
     if (currentPhase && evidenceInitialized && !recorded.has(currentPhase)) {
+      let gatewayReadDiagnostic:
+        | DesktopGatewayReadFailureDiagnostic
+        | undefined;
+      if (
+        currentPhase === 'desktop-room-widget-read' &&
+        currentFailurePoint !== undefined &&
+        DESKTOP_GATEWAY_READ_FAILURE_POINTS.has(currentFailurePoint)
+      ) {
+        try {
+          gatewayReadDiagnostic = desktopPage
+            ? await observeDesktopGatewayReadFailureDiagnostic(
+                desktopPage,
+                desktopGatewayReadObserver,
+                desktopWidgetPromptObservation,
+                desktopWidgetFrame,
+              )
+            : unavailableDesktopGatewayReadFailureDiagnostic();
+        } catch {
+          gatewayReadDiagnostic =
+            unavailableDesktopGatewayReadFailureDiagnostic();
+        }
+      }
+      desktopGatewayReadObserver?.stop();
+      desktopGatewayReadObserver = undefined;
       safeRecordPhase(
         evidence,
         recorded,
         currentPhase,
         'failed',
         currentFailurePoint,
+        gatewayReadDiagnostic,
       );
     }
   } finally {
@@ -680,6 +877,7 @@ async function openFixtureRoom(
 async function openCalendarWidget(
   page: Page,
   element: ElementWebPage,
+  promptObservation?: DesktopWidgetPromptObservation,
 ): Promise<FrameLocator> {
   const iframe = page.locator('iframe[title="Matrix Calendar"]');
   if (!(await iframe.isVisible().catch(() => false))) {
@@ -694,12 +892,27 @@ async function openCalendarWidget(
       .getByText('Widget added by')
       .locator('..')
       .getByRole('button', { name: 'Continue', exact: true });
-    if (await warningContinue.isVisible().catch(() => false)) {
+    const warningVisible = await warningContinue.isVisible().catch(() => null);
+    if (promptObservation) {
+      promptObservation.widgetWarningObserved = warningVisible;
+      promptObservation.widgetWarningContinued =
+        warningVisible === null ? null : false;
+    }
+    if (warningVisible === true) {
       await warningContinue.click();
+      if (promptObservation) promptObservation.widgetWarningContinued = true;
     }
 
     const permissions = page.getByRole('dialog').last();
-    if (await permissions.isVisible().catch(() => false)) {
+    const permissionPromptVisible = await permissions
+      .isVisible()
+      .catch(() => null);
+    if (promptObservation) {
+      promptObservation.capabilityPromptObserved = permissionPromptVisible;
+      promptObservation.capabilityApproved =
+        permissionPromptVisible === null ? null : false;
+    }
+    if (permissionPromptVisible === true) {
       const rememberSwitch = permissions.getByRole('switch', {
         name: 'Remember my selection for this widget',
       });
@@ -710,15 +923,27 @@ async function openCalendarWidget(
         name: 'Approve',
         exact: true,
       });
-      if (await approve.isVisible().catch(() => false)) await approve.click();
+      if (await approve.isVisible().catch(() => false)) {
+        await approve.click();
+        if (promptObservation) promptObservation.capabilityApproved = true;
+      }
     }
 
     const identityContinue = page
       .getByRole('dialog')
       .getByRole('button', { name: 'Continue', exact: true })
       .first();
-    if (await identityContinue.isVisible().catch(() => false)) {
+    const identityContinueVisible = await identityContinue
+      .isVisible()
+      .catch(() => null);
+    if (promptObservation) {
+      promptObservation.identityContinueObserved = identityContinueVisible;
+      promptObservation.identityContinued =
+        identityContinueVisible === null ? null : false;
+    }
+    if (identityContinueVisible === true) {
       await identityContinue.click();
+      if (promptObservation) promptObservation.identityContinued = true;
     }
     await iframe.waitFor({ state: 'attached', timeout: 30_000 });
   }
@@ -903,6 +1128,7 @@ function safeRecordPhase(
   phase: DesktopJourneyPhase,
   status: 'passed' | 'failed',
   failurePoint?: DesktopJourneyFailurePoint,
+  gatewayReadDiagnostic?: DesktopGatewayReadFailureDiagnostic,
 ) {
   try {
     appendDesktopJourneyOutcome({
@@ -910,6 +1136,7 @@ function safeRecordPhase(
       phase,
       status,
       ...(failurePoint === undefined ? {} : { failurePoint }),
+      ...(gatewayReadDiagnostic === undefined ? {} : { gatewayReadDiagnostic }),
     });
     recorded.add(phase);
     return true;
