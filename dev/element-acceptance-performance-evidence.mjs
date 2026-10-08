@@ -70,7 +70,21 @@ const PAGE_ERROR_SOURCE_MAP_STATUSES = new Set([
   'unmapped',
   'mapped',
 ]);
-const ORDINARY_REPORT_VERSIONS = new Set([9, 10]);
+const PAGE_ERROR_SOURCE_MAP_RESOLUTIONS = new Set([
+  'not-applicable',
+  'mapped',
+  'no-original-position',
+  'dependency-source',
+  'unsupported-source',
+  'invalid-coordinate',
+]);
+const UNMAPPED_SOURCE_RESOLUTIONS = new Set([
+  'no-original-position',
+  'dependency-source',
+  'unsupported-source',
+  'invalid-coordinate',
+]);
+const ORDINARY_REPORT_VERSIONS = new Set([9, 10, 11]);
 const PAGE_ERROR_SUBTYPE_CLASS = new Map([
   ['error', 'error'],
   ['type-error', 'type-error'],
@@ -122,12 +136,16 @@ const LEGACY_PAGE_ERROR_OBSERVATION_KEYS = [
   'stackAvailable',
   'sourceScanTruncated',
 ];
-const PAGE_ERROR_OBSERVATION_KEYS = [
+const VERSION_10_PAGE_ERROR_OBSERVATION_KEYS = [
   ...LEGACY_PAGE_ERROR_OBSERVATION_KEYS,
   'sourceMapStatus',
   'sourceRefSha256',
   'sourceLine',
   'sourceColumn',
+];
+const PAGE_ERROR_OBSERVATION_KEYS = [
+  ...VERSION_10_PAGE_ERROR_OBSERVATION_KEYS,
+  'sourceMapResolution',
 ];
 const API_SAMPLE =
   /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5]|(?:empty|events-25)-(?:default|refresh-setup|refresh)|events-25-details-[1-5])$/u;
@@ -1222,7 +1240,9 @@ function validOrdinaryReport(report) {
       const pageErrorObservationKeys =
         report.version === 9
           ? LEGACY_PAGE_ERROR_OBSERVATION_KEYS
-          : PAGE_ERROR_OBSERVATION_KEYS;
+          : report.version === 10
+            ? VERSION_10_PAGE_ERROR_OBSERVATION_KEYS
+            : PAGE_ERROR_OBSERVATION_KEYS;
       if (!hasExactKeys(observation, pageErrorObservationKeys)) {
         return false;
       }
@@ -1243,28 +1263,64 @@ function validOrdinaryReport(report) {
           (observation.stackAvailable && !observation.sourceScanTruncated));
       const sourcePointerValid =
         report.version === 9 ||
-        (PAGE_ERROR_SOURCE_MAP_STATUSES.has(observation.sourceMapStatus) &&
-          (observation.sourceMapStatus === 'mapped'
-            ? observation.errorSource === 'element' &&
-              observation.stage === 'widget-open' &&
-              observation.stackAvailable &&
-              !observation.sourceScanTruncated &&
-              typeof observation.sourceRefSha256 === 'string' &&
-              /^[a-f0-9]{64}$/u.test(observation.sourceRefSha256) &&
-              Number.isSafeInteger(observation.sourceLine) &&
-              observation.sourceLine >= 1 &&
-              observation.sourceLine <= 1_000_000 &&
-              Number.isSafeInteger(observation.sourceColumn) &&
-              observation.sourceColumn >= 0 &&
-              observation.sourceColumn <= 1_000_000
-            : observation.sourceRefSha256 === null &&
-              observation.sourceLine === null &&
-              observation.sourceColumn === null &&
-              (observation.sourceMapStatus === 'not-eligible' ||
-                (observation.errorSource === 'element' &&
-                  observation.stage === 'widget-open' &&
-                  observation.stackAvailable &&
-                  !observation.sourceScanTruncated))));
+        (report.version === 10
+          ? PAGE_ERROR_SOURCE_MAP_STATUSES.has(observation.sourceMapStatus) &&
+            (observation.sourceMapStatus === 'mapped'
+              ? observation.errorSource === 'element' &&
+                observation.stage === 'widget-open' &&
+                observation.stackAvailable &&
+                !observation.sourceScanTruncated &&
+                typeof observation.sourceRefSha256 === 'string' &&
+                /^[a-f0-9]{64}$/u.test(observation.sourceRefSha256) &&
+                Number.isSafeInteger(observation.sourceLine) &&
+                observation.sourceLine >= 1 &&
+                observation.sourceLine <= 1_000_000 &&
+                Number.isSafeInteger(observation.sourceColumn) &&
+                observation.sourceColumn >= 0 &&
+                observation.sourceColumn <= 1_000_000
+              : observation.sourceRefSha256 === null &&
+                observation.sourceLine === null &&
+                observation.sourceColumn === null &&
+                (observation.sourceMapStatus === 'not-eligible' ||
+                  (observation.errorSource === 'element' &&
+                    observation.stage === 'widget-open' &&
+                    observation.stackAvailable &&
+                    !observation.sourceScanTruncated)))
+          : PAGE_ERROR_SOURCE_MAP_STATUSES.has(observation.sourceMapStatus) &&
+            PAGE_ERROR_SOURCE_MAP_RESOLUTIONS.has(
+              observation.sourceMapResolution,
+            ) &&
+            (observation.sourceMapStatus === 'mapped'
+              ? observation.sourceMapResolution === 'mapped' &&
+                observation.errorSource === 'element' &&
+                observation.stage === 'widget-open' &&
+                observation.stackAvailable &&
+                !observation.sourceScanTruncated &&
+                typeof observation.sourceRefSha256 === 'string' &&
+                /^[a-f0-9]{64}$/u.test(observation.sourceRefSha256) &&
+                Number.isSafeInteger(observation.sourceLine) &&
+                observation.sourceLine >= 1 &&
+                observation.sourceLine <= 1_000_000 &&
+                Number.isSafeInteger(observation.sourceColumn) &&
+                observation.sourceColumn >= 0 &&
+                observation.sourceColumn <= 1_000_000
+              : observation.sourceRefSha256 === null &&
+                observation.sourceLine === null &&
+                observation.sourceColumn === null &&
+                (observation.sourceMapStatus === 'unmapped'
+                  ? observation.errorSource === 'element' &&
+                    observation.stage === 'widget-open' &&
+                    observation.stackAvailable &&
+                    !observation.sourceScanTruncated &&
+                    UNMAPPED_SOURCE_RESOLUTIONS.has(
+                      observation.sourceMapResolution,
+                    )
+                  : observation.sourceMapResolution === 'not-applicable' &&
+                    (observation.sourceMapStatus === 'not-eligible' ||
+                      (observation.errorSource === 'element' &&
+                        observation.stage === 'widget-open' &&
+                        observation.stackAvailable &&
+                        !observation.sourceScanTruncated)))));
       return (
         ORDINARY_PROFILES.has(observation.profile) &&
         PAGE_ERROR_STAGES.has(observation.stage) &&
@@ -1789,7 +1845,7 @@ function formatOrdinaryPerformanceEvidence(record) {
 
   for (const [index, observation] of report.pageErrorObservations.entries()) {
     lines.push(
-      `page_error_observation index=${index + 1} profile=${observation.profile} stage=${observation.stage} error_class=${observation.errorClass} error_subtype=${observation.errorSubtype} error_source=${observation.errorSource} stack_available=${observation.stackAvailable} source_scan_truncated=${observation.sourceScanTruncated}${report.version === 10 ? ` source_map_status=${observation.sourceMapStatus} source_ref_sha256=${observation.sourceRefSha256 ?? 'none'} source_line=${observation.sourceLine ?? 'none'} source_column=${observation.sourceColumn ?? 'none'}` : ''}`,
+      `page_error_observation index=${index + 1} profile=${observation.profile} stage=${observation.stage} error_class=${observation.errorClass} error_subtype=${observation.errorSubtype} error_source=${observation.errorSource} stack_available=${observation.stackAvailable} source_scan_truncated=${observation.sourceScanTruncated}${report.version >= 10 ? ` source_map_status=${observation.sourceMapStatus}${report.version >= 11 ? ` source_map_resolution=${observation.sourceMapResolution}` : ''} source_ref_sha256=${observation.sourceRefSha256 ?? 'none'} source_line=${observation.sourceLine ?? 'none'} source_column=${observation.sourceColumn ?? 'none'}` : ''}`,
     );
   }
 

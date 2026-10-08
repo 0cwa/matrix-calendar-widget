@@ -304,7 +304,7 @@ function ordinaryCase(profile, year, month, eventCount) {
 
 function ordinaryReport() {
   const report = {
-    version: 10,
+    version: 11,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -394,7 +394,7 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   );
   assert.match(
     summary,
-    /phase=performance-pilot report_version=10 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
+    /phase=performance-pilot report_version=11 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
   );
   assert.match(summary, /performance_case profile=empty events=0/u);
   assert.match(summary, /performance_case profile=events-25 events=25/u);
@@ -611,6 +611,7 @@ test('summarizes bounded page-error stage observations without error text', () =
       stackAvailable: true,
       sourceScanTruncated: false,
       sourceMapStatus: 'not-eligible',
+      sourceMapResolution: 'not-applicable',
       sourceRefSha256: null,
       sourceLine: null,
       sourceColumn: null,
@@ -624,6 +625,7 @@ test('summarizes bounded page-error stage observations without error text', () =
       stackAvailable: true,
       sourceScanTruncated: false,
       sourceMapStatus: 'mapped',
+      sourceMapResolution: 'mapped',
       sourceRefSha256: 'a'.repeat(64),
       sourceLine: 42,
       sourceColumn: 5,
@@ -639,16 +641,73 @@ test('summarizes bounded page-error stage observations without error text', () =
   );
   assert.match(
     summary,
-    /page_error_observation index=1 profile=empty stage=widget-open error_class=other error_subtype=named-error error_source=widget stack_available=true source_scan_truncated=false source_map_status=not-eligible source_ref_sha256=none source_line=none source_column=none/u,
+    /page_error_observation index=1 profile=empty stage=widget-open error_class=other error_subtype=named-error error_source=widget stack_available=true source_scan_truncated=false source_map_status=not-eligible source_map_resolution=not-applicable source_ref_sha256=none source_line=none source_column=none/u,
   );
   assert.match(
     summary,
-    /page_error_observation index=2 profile=events-25 stage=widget-open error_class=type-error error_subtype=type-error error_source=element stack_available=true source_scan_truncated=false source_map_status=mapped source_ref_sha256=a{64} source_line=42 source_column=5/u,
+    /page_error_observation index=2 profile=events-25 stage=widget-open error_class=type-error error_subtype=type-error error_source=element stack_available=true source_scan_truncated=false source_map_status=mapped source_map_resolution=mapped source_ref_sha256=a{64} source_line=42 source_column=5/u,
   );
   assert.doesNotMatch(
     summary,
     /(?:error_message|error_stack)=|https?:\/\/|access_token|private error message|apps\/web/u,
   );
+
+  const unmapped = ordinaryReport();
+  unmapped.pageErrorCount = 1;
+  unmapped.pageErrorClass = 'type-error';
+  unmapped.pageErrorObservations = [
+    {
+      profile: 'empty',
+      stage: 'widget-open',
+      errorClass: 'type-error',
+      errorSubtype: 'type-error',
+      errorSource: 'element',
+      stackAvailable: true,
+      sourceScanTruncated: false,
+      sourceMapStatus: 'unmapped',
+      sourceMapResolution: 'dependency-source',
+      sourceRefSha256: null,
+      sourceLine: null,
+      sourceColumn: null,
+    },
+  ];
+  const unmappedSummary = sanitizeElementAcceptance(
+    JSON.stringify(ordinaryStage('failed', unmapped, 'performance-page-error')),
+    sourceSha,
+  );
+  assert.match(
+    unmappedSummary,
+    /source_map_status=unmapped source_map_resolution=dependency-source source_ref_sha256=none/u,
+  );
+
+  const version10 = ordinaryReport();
+  version10.version = 10;
+  version10.pageErrorCount = 1;
+  version10.pageErrorClass = 'type-error';
+  version10.pageErrorObservations = [
+    {
+      profile: 'empty',
+      stage: 'widget-open',
+      errorClass: 'type-error',
+      errorSubtype: 'type-error',
+      errorSource: 'element',
+      stackAvailable: true,
+      sourceScanTruncated: false,
+      sourceMapStatus: 'unmapped',
+      sourceRefSha256: null,
+      sourceLine: null,
+      sourceColumn: null,
+    },
+  ];
+  const version10Summary = sanitizeElementAcceptance(
+    JSON.stringify(
+      ordinaryStage('failed', version10, 'performance-page-error'),
+    ),
+    sourceSha,
+  );
+  assert.match(version10Summary, /report_version=10/u);
+  assert.match(version10Summary, /source_map_status=unmapped/u);
+  assert.doesNotMatch(version10Summary, /source_map_resolution=/u);
 
   for (const mutate of [
     (invalid) => {
@@ -699,6 +758,20 @@ test('summarizes bounded page-error stage observations without error text', () =
       invalid.pageErrorObservations[1].sourceMapStatus = 'not-eligible';
       invalid.pageErrorObservations[1].sourceRefSha256 = 'a'.repeat(64);
     },
+    (invalid) => {
+      invalid.pageErrorObservations[0].sourceMapResolution = 'mapped';
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[1].sourceMapResolution =
+        'unsupported-source';
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[1].sourceMapStatus = 'unmapped';
+      invalid.pageErrorObservations[1].sourceMapResolution = 'not-applicable';
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[1].sourceMapResolution = 'private-path';
+    },
   ]) {
     const invalid = ordinaryReport();
     invalid.pageErrorCount = 2;
@@ -713,6 +786,7 @@ test('summarizes bounded page-error stage observations without error text', () =
         stackAvailable: true,
         sourceScanTruncated: false,
         sourceMapStatus: 'not-eligible',
+        sourceMapResolution: 'not-applicable',
         sourceRefSha256: null,
         sourceLine: null,
         sourceColumn: null,
@@ -726,6 +800,7 @@ test('summarizes bounded page-error stage observations without error text', () =
         stackAvailable: true,
         sourceScanTruncated: false,
         sourceMapStatus: 'mapped',
+        sourceMapResolution: 'mapped',
         sourceRefSha256: 'a'.repeat(64),
         sourceLine: 42,
         sourceColumn: 5,
@@ -756,6 +831,7 @@ test('summarizes bounded page-error stage observations without error text', () =
     stackAvailable: true,
     sourceScanTruncated: false,
     sourceMapStatus: 'not-eligible',
+    sourceMapResolution: 'not-applicable',
     sourceRefSha256: null,
     sourceLine: null,
     sourceColumn: null,

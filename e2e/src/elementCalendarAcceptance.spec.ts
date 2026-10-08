@@ -33,6 +33,7 @@ import { isAbsolute, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   extractElementBundleFrames,
+  readElementErrorSourceMapInPage,
   resolveElementErrorSourcePointer,
   type ElementBundleFrame,
   type ElementErrorSourcePointer,
@@ -506,7 +507,7 @@ type OrdinaryPerformanceCase = {
   detailSamples: PerformanceDetailsSample[];
 };
 type OrdinaryPerformanceReport = {
-  version: 10;
+  version: 11;
   viewportWidth: 1280;
   viewportHeight: 800;
   calendarDays: 7;
@@ -1063,7 +1064,7 @@ function makeEmptyOrdinaryPerformanceReport(initialDate: {
   month: number;
 }): OrdinaryPerformanceReport {
   return {
-    version: 10,
+    version: 11,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -2204,107 +2205,12 @@ async function readCappedElementErrorSourceMap(
     return { text: null, bytesRead: 0, limitReached: false };
   }
   try {
-    const result = await page.evaluate(
-      async ({ bundleUrl, expectedOrigin, maxBytes, timeoutMs }) => {
-        let byteCount = 0;
-        let budgetExhausted = false;
-        try {
-          if (window.location.origin !== expectedOrigin) {
-            return { text: null, bytesRead: 0, limitReached: false };
-          }
-          const bundle = new URL(bundleUrl);
-          if (
-            bundle.origin !== expectedOrigin ||
-            !/^\/bundles\/[a-f0-9]{8,64}\/[A-Za-z0-9._~-]+\.js$/u.test(
-              bundle.pathname,
-            ) ||
-            bundle.search !== '' ||
-            bundle.hash !== ''
-          ) {
-            return { text: null, bytesRead: 0, limitReached: false };
-          }
-          const sourceMapUrl = new URL(
-            `${bundle.pathname}.map`,
-            expectedOrigin,
-          );
-          const controller = new AbortController();
-          const timeout = window.setTimeout(
-            () => controller.abort(),
-            timeoutMs,
-          );
-          let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-          try {
-            const response = await fetch(sourceMapUrl.href, {
-              cache: 'no-store',
-              credentials: 'omit',
-              redirect: 'error',
-              signal: controller.signal,
-            });
-            if (
-              !response.ok ||
-              response.redirected ||
-              response.url !== sourceMapUrl.href ||
-              !/^application\/(?:json|octet-stream)(?:\s*;|$)/iu.test(
-                response.headers.get('content-type') ?? '',
-              )
-            ) {
-              return { text: null, bytesRead: 0, limitReached: false };
-            }
-            const contentLength = response.headers.get('content-length');
-            if (
-              contentLength !== null &&
-              (!/^\d+$/u.test(contentLength) ||
-                Number(contentLength) > maxBytes)
-            ) {
-              return { text: null, bytesRead: 0, limitReached: false };
-            }
-            if (response.body === null) {
-              return { text: null, bytesRead: 0, limitReached: false };
-            }
-
-            reader = response.body.getReader();
-            const decoder = new TextDecoder('utf-8', { fatal: true });
-            let text = '';
-            while (true) {
-              const result = await reader.read();
-              if (result.done) break;
-              if (byteCount + result.value.byteLength > maxBytes) {
-                byteCount = maxBytes;
-                budgetExhausted = true;
-                await reader.cancel();
-                return {
-                  text: null,
-                  bytesRead: maxBytes,
-                  limitReached: true,
-                };
-              }
-              byteCount += result.value.byteLength;
-              text += decoder.decode(result.value, { stream: true });
-            }
-            return {
-              text: text + decoder.decode(),
-              bytesRead: byteCount,
-              limitReached: false,
-            };
-          } finally {
-            window.clearTimeout(timeout);
-            if (reader !== undefined) reader.releaseLock();
-          }
-        } catch {
-          return {
-            text: null,
-            bytesRead: byteCount,
-            limitReached: budgetExhausted,
-          };
-        }
-      },
-      {
-        bundleUrl: frame.bundleUrl,
-        expectedOrigin: expectedElementOrigin,
-        maxBytes,
-        timeoutMs: ELEMENT_ERROR_SOURCE_MAP_TIMEOUT_MS,
-      },
-    );
+    const result = await page.evaluate(readElementErrorSourceMapInPage, {
+      bundleUrl: frame.bundleUrl,
+      expectedOrigin: expectedElementOrigin,
+      maxBytes,
+      timeoutMs: ELEMENT_ERROR_SOURCE_MAP_TIMEOUT_MS,
+    });
     return result !== null &&
       typeof result === 'object' &&
       typeof result.bytesRead === 'number' &&
@@ -2407,6 +2313,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
                 : shouldResolveSource
                   ? 'unavailable'
                   : 'not-attempted',
+            sourceMapResolution: 'not-applicable',
             sourceRefSha256: null,
             sourceLine: null,
             sourceColumn: null,

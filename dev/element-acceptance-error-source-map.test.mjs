@@ -4,6 +4,7 @@ import test from 'node:test';
 import { SourceMapGenerator } from 'source-map-js';
 import {
   extractElementBundleFrames,
+  readElementErrorSourceMapInPage,
   resolveElementErrorSourcePointer,
 } from './element-acceptance-error-source-map.mjs';
 
@@ -25,10 +26,11 @@ function errorWithFrames(frames) {
 function validMap(
   source = 'apps/web/src/components/Widget.tsx',
   file = 'app.js',
+  sourceRoot = 'webpack://element-web/./',
 ) {
   const generator = new SourceMapGenerator({
     file,
-    sourceRoot: 'webpack://element-web/./',
+    sourceRoot,
   });
   generator.addMapping({
     generated: { line: 13, column: 7 },
@@ -36,6 +38,27 @@ function validMap(
     original: { line: 42, column: 5 },
   });
   return generator.toString();
+}
+
+function expectedPointer(sourcePath, sourceLine = 42, sourceColumn = 5) {
+  return {
+    sourceMapStatus: 'mapped',
+    sourceMapResolution: 'mapped',
+    sourceRefSha256: createHash('sha256')
+      .update(
+        `element-hq/element-web@f19cfd9030429240a4209bf5175b372175cf0464:${sourcePath}`,
+      )
+      .digest('hex'),
+    sourceLine,
+    sourceColumn,
+  };
+}
+
+function pointerForMap(sourceMapText) {
+  return resolveElementErrorSourcePointer(
+    [{ bundleUrl, generatedLine: 13, generatedColumn: 7 }],
+    [{ bundleUrl, sourceMapText }],
+  );
 }
 
 test('extracts only a bounded first-party production-bundle frame', () => {
@@ -80,43 +103,81 @@ test('resolves an eligible map to an opaque pinned source reference', () => {
   const pointer = resolveElementErrorSourcePointer(frames, [
     { bundleUrl, sourceMapText: validMap() },
   ]);
-  const expectedRef = createHash('sha256')
-    .update(
-      'element-hq/element-web@f19cfd9030429240a4209bf5175b372175cf0464:apps/web/src/components/Widget.tsx',
-    )
-    .digest('hex');
-
-  assert.deepEqual(pointer, {
-    sourceMapStatus: 'mapped',
-    sourceRefSha256: expectedRef,
-    sourceLine: 42,
-    sourceColumn: 5,
-  });
+  assert.deepEqual(
+    pointer,
+    expectedPointer('apps/web/src/components/Widget.tsx'),
+  );
   assert.doesNotMatch(
     JSON.stringify(pointer),
     /Widget\.tsx|https?:\/\/|0123456789abcdef|private error/u,
   );
 });
 
-test('keeps unknown repositories and unmapped positions opaque', () => {
+test('classifies valid unmapped positions without returning source text', () => {
   const frames = extractElementBundleFrames(errorAt(bundleUrl), elementUrl);
 
-  assert.deepEqual(
-    resolveElementErrorSourcePointer(frames, [
+  for (const [source, sourceRoot] of [
+    ['../../node_modules/some-package/index.js', 'webpack://element-web/./'],
+    ['./node_modules/some-package/index.js', 'webpack://element-web/'],
+    ['webpack://element-web/../../node_modules/some-package/index.js', ''],
+  ]) {
+    assert.deepEqual(
+      resolveElementErrorSourcePointer(frames, [
+        { bundleUrl, sourceMapText: validMap(source, 'app.js', sourceRoot) },
+      ]),
       {
-        bundleUrl,
-        sourceMapText: validMap('../node_modules/some-package/index.js'),
+        sourceMapStatus: 'unmapped',
+        sourceMapResolution: 'dependency-source',
+        sourceRefSha256: null,
+        sourceLine: null,
+        sourceColumn: null,
       },
-    ]),
-    {
-      sourceMapStatus: 'unmapped',
-      sourceRefSha256: null,
-      sourceLine: null,
-      sourceColumn: null,
-    },
-  );
+    );
+  }
+
+  const noPosition = JSON.stringify({
+    version: 3,
+    file: 'app.js',
+    sourceRoot: 'webpack://element-web/',
+    sources: ['src/components/Widget.tsx'],
+    names: [],
+    mappings: '',
+  });
+  assert.deepEqual(pointerForMap(noPosition), {
+    sourceMapStatus: 'unmapped',
+    sourceMapResolution: 'no-original-position',
+    sourceRefSha256: null,
+    sourceLine: null,
+    sourceColumn: null,
+  });
+
+  const invalidCoordinate = JSON.stringify({
+    version: 3,
+    file: 'app.js',
+    sourceRoot: 'webpack://element-web/',
+    sources: ['src/components/Widget.tsx'],
+    names: [],
+    mappings: `${';'.repeat(12)}AADA`,
+  });
+  assert.deepEqual(pointerForMap(invalidCoordinate), {
+    sourceMapStatus: 'unmapped',
+    sourceMapResolution: 'invalid-coordinate',
+    sourceRefSha256: null,
+    sourceLine: null,
+    sourceColumn: null,
+  });
+
+  assert.deepEqual(pointerForMap(validMap('./external/source.ts')), {
+    sourceMapStatus: 'unmapped',
+    sourceMapResolution: 'unsupported-source',
+    sourceRefSha256: null,
+    sourceLine: null,
+    sourceColumn: null,
+  });
+
   assert.deepEqual(resolveElementErrorSourcePointer([], []), {
     sourceMapStatus: 'not-eligible',
+    sourceMapResolution: 'not-applicable',
     sourceRefSha256: null,
     sourceLine: null,
     sourceColumn: null,
@@ -130,6 +191,7 @@ test('keeps unknown repositories and unmapped positions opaque', () => {
     ]),
     {
       sourceMapStatus: 'unavailable',
+      sourceMapResolution: 'not-applicable',
       sourceRefSha256: null,
       sourceLine: null,
       sourceColumn: null,
@@ -157,6 +219,7 @@ test('rejects malformed, mismatched, and oversized maps without leaking data', (
   for (const pointer of [malformed, mismatched, oversized]) {
     assert.deepEqual(pointer, {
       sourceMapStatus: 'invalid',
+      sourceMapResolution: 'not-applicable',
       sourceRefSha256: null,
       sourceLine: null,
       sourceColumn: null,
@@ -177,7 +240,7 @@ test('skips dependency frames and continues to the first repository-owned source
   });
   vendorGenerator.addMapping({
     generated: { line: 13, column: 7 },
-    source: '../node_modules/some-package/index.js',
+    source: '../../node_modules/some-package/index.js',
     original: { line: 4, column: 2 },
   });
   const appUrl = 'https://element.invalid/bundles/0123456789abcdef/app.js';
@@ -187,7 +250,7 @@ test('skips dependency frames and continues to the first repository-owned source
   });
   appGenerator.addMapping({
     generated: { line: 14, column: 7 },
-    source: 'apps/web/src/components/Widget.tsx',
+    source: 'src/components/Widget.tsx',
     original: { line: 42, column: 5 },
   });
   const frames = extractElementBundleFrames(
@@ -203,16 +266,7 @@ test('skips dependency frames and continues to the first repository-owned source
       { bundleUrl: vendorUrl, sourceMapText: vendorGenerator.toString() },
       { bundleUrl: appUrl, sourceMapText: appGenerator.toString() },
     ]),
-    {
-      sourceMapStatus: 'mapped',
-      sourceRefSha256: createHash('sha256')
-        .update(
-          'element-hq/element-web@f19cfd9030429240a4209bf5175b372175cf0464:apps/web/src/components/Widget.tsx',
-        )
-        .digest('hex'),
-      sourceLine: 42,
-      sourceColumn: 5,
-    },
+    expectedPointer('apps/web/src/components/Widget.tsx'),
   );
 });
 
@@ -223,12 +277,12 @@ test('continues through later positions in the same bundle map', () => {
   });
   generator.addMapping({
     generated: { line: 13, column: 7 },
-    source: '../node_modules/some-package/index.js',
+    source: '../../node_modules/some-package/index.js',
     original: { line: 4, column: 2 },
   });
   generator.addMapping({
     generated: { line: 14, column: 7 },
-    source: 'apps/web/src/components/Widget.tsx',
+    source: 'src/components/Widget.tsx',
     original: { line: 42, column: 5 },
   });
   const frames = extractElementBundleFrames(
@@ -243,16 +297,7 @@ test('continues through later positions in the same bundle map', () => {
     resolveElementErrorSourcePointer(frames, [
       { bundleUrl, sourceMapText: generator.toString() },
     ]),
-    {
-      sourceMapStatus: 'mapped',
-      sourceRefSha256: createHash('sha256')
-        .update(
-          'element-hq/element-web@f19cfd9030429240a4209bf5175b372175cf0464:apps/web/src/components/Widget.tsx',
-        )
-        .digest('hex'),
-      sourceLine: 42,
-      sourceColumn: 5,
-    },
+    expectedPointer('apps/web/src/components/Widget.tsx'),
   );
 });
 
@@ -272,7 +317,7 @@ test('enforces the bounded map lookup list and keeps unavailable ahead of partia
   });
   dependencyMap.addMapping({
     generated: { line: 13, column: 7 },
-    source: '../node_modules/some-package/index.js',
+    source: '../../node_modules/some-package/index.js',
     original: { line: 4, column: 2 },
   });
 
@@ -283,6 +328,7 @@ test('enforces the bounded map lookup list and keeps unavailable ahead of partia
     ]),
     {
       sourceMapStatus: 'unavailable',
+      sourceMapResolution: 'not-applicable',
       sourceRefSha256: null,
       sourceLine: null,
       sourceColumn: null,
@@ -311,9 +357,145 @@ test('rejects a source map associated with a different captured bundle', () => {
     ]),
     {
       sourceMapStatus: 'invalid',
+      sourceMapResolution: 'not-applicable',
       sourceRefSha256: null,
       sourceLine: null,
       sourceColumn: null,
     },
   );
+});
+
+test('maps only the pinned Webpack app and exact workspace-relative sources', () => {
+  const appPath = 'apps/web/src/components/structures/MatrixChat.tsx';
+  const workspacePath = 'packages/shared-components/src/RoomListView.tsx';
+
+  for (const [source, sourceRoot] of [
+    ['src/components/structures/MatrixChat.tsx', 'webpack://element-web/'],
+    ['./src/components/structures/MatrixChat.tsx', 'webpack://element-web/./'],
+    ['webpack://element-web/src/components/structures/MatrixChat.tsx', ''],
+  ]) {
+    assert.deepEqual(
+      pointerForMap(validMap(source, 'app.js', sourceRoot)),
+      expectedPointer(appPath),
+    );
+  }
+
+  for (const [source, sourceRoot] of [
+    ['../../packages/shared-components/src/RoomListView.tsx', ''],
+    [
+      '../../packages/shared-components/src/RoomListView.tsx',
+      'webpack://element-web/',
+    ],
+    [
+      'webpack://element-web/../../packages/shared-components/src/RoomListView.tsx',
+      '',
+    ],
+  ]) {
+    assert.deepEqual(
+      pointerForMap(validMap(source, 'app.js', sourceRoot)),
+      expectedPointer(workspacePath),
+    );
+  }
+
+  for (const [source, sourceRoot] of [
+    [
+      'packages/shared-components/src/RoomListView.tsx',
+      'webpack://element-web/',
+    ],
+    [
+      '../../../packages/shared-components/src/RoomListView.tsx',
+      'webpack://element-web/',
+    ],
+    [
+      '../../packages/shared-components/../private.tsx',
+      'webpack://element-web/',
+    ],
+    ['webpack://other.example/src/private.tsx', ''],
+    ['webpack://element-web/../src/private.tsx', ''],
+  ]) {
+    assert.deepEqual(pointerForMap(validMap(source, 'app.js', sourceRoot)), {
+      sourceMapStatus: 'unmapped',
+      sourceMapResolution: 'unsupported-source',
+      sourceRefSha256: null,
+      sourceLine: null,
+      sourceColumn: null,
+    });
+  }
+});
+
+test('rejects duplicate source identities instead of choosing an ambiguous entry', () => {
+  const map = JSON.stringify({
+    version: 3,
+    file: 'app.js',
+    sourceRoot: 'webpack://element-web/',
+    sources: ['src/components/Widget.tsx', 'src/components/Widget.tsx'],
+    names: [],
+    mappings: `${';'.repeat(12)}AAAA`,
+  });
+
+  assert.deepEqual(pointerForMap(map), {
+    sourceMapStatus: 'unmapped',
+    sourceMapResolution: 'unsupported-source',
+    sourceRefSha256: null,
+    sourceLine: null,
+    sourceColumn: null,
+  });
+});
+
+test('cancels response bodies rejected before source-map streaming', async () => {
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  const sourceMapUrl = `${bundleUrl}.map`;
+
+  try {
+    globalThis.window = {
+      location: { origin: new URL(elementUrl).origin },
+      setTimeout,
+      clearTimeout,
+    };
+
+    for (const rejection of [
+      { ok: false, contentType: 'application/json', contentLength: null },
+      { ok: true, contentType: 'text/plain', contentLength: null },
+      { ok: true, contentType: 'application/json', contentLength: '65' },
+    ]) {
+      let canceled = false;
+      const body = new ReadableStream({
+        cancel() {
+          canceled = true;
+        },
+      });
+      globalThis.fetch = async () => ({
+        ok: rejection.ok,
+        redirected: false,
+        url: sourceMapUrl,
+        headers: {
+          get(name) {
+            if (name === 'content-type') return rejection.contentType;
+            if (name === 'content-length') return rejection.contentLength;
+            return null;
+          },
+        },
+        body,
+      });
+
+      const result = await readElementErrorSourceMapInPage({
+        bundleUrl,
+        expectedOrigin: new URL(elementUrl).origin,
+        maxBytes: 64,
+        timeoutMs: 100,
+      });
+
+      assert.deepEqual(result, {
+        text: null,
+        bytesRead: 0,
+        limitReached: false,
+      });
+      assert.equal(canceled, true);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
 });
