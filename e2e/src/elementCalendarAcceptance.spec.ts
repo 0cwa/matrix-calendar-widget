@@ -1990,18 +1990,7 @@ test('Element Web preserves unsupported events and supports client interactions'
     });
 
     activeG6Phase = 'g6-keyboard-focus';
-    const memberBEventsResponse = waitForG6EventsResponse(
-      pageB,
-      fixture.teamRoomId,
-    );
-    void memberBEventsResponse.catch(() => undefined);
-    frameB = await openCalendarWidget(memberBRoom.element, pageB, {
-      expectWidgetWarning: false,
-      waitForCalendar: false,
-    });
-    const memberBEvents = await memberBEventsResponse.catch(() => undefined);
-    const memberBEventsStatus = memberBEvents?.status();
-    const keyboardEventButton = frameB.getByRole('button', {
+    const keyboardEventButton = frameA.getByRole('button', {
       name: names.keyboard,
     });
     await keyboardEventButton
@@ -2012,14 +2001,14 @@ test('Element Web preserves unsupported events and supports client interactions'
       .evaluate((element) => element === document.activeElement)
       .catch(() => false);
     while (!keyboardEventFocused && eventActionTabCount < 80) {
-      await pageB.keyboard.press('Tab');
+      await pageA.keyboard.press('Tab');
       eventActionTabCount += 1;
       keyboardEventFocused = await keyboardEventButton
         .evaluate((element) => element === document.activeElement)
         .catch(() => false);
     }
-    if (keyboardEventFocused) await pageB.keyboard.press('Enter');
-    const keyboardDetails = frameB.getByRole('dialog').last();
+    if (keyboardEventFocused) await pageA.keyboard.press('Enter');
+    const keyboardDetails = frameA.getByRole('dialog').last();
     const detailsOpened = await keyboardDetails
       .waitFor({ state: 'visible', timeout: 8_000 })
       .then(() => true)
@@ -2055,7 +2044,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       dialogContent: keyboardDetails.locator('.MuiDialogContent-root'),
     };
     const initialDetailsFocus = await observeG6KeyboardFocusTarget(
-      frameB,
+      frameA,
       keyboardFocusControls,
     );
     const detailsTabFocusObservations: G6KeyboardTabFocusObservation[] = [];
@@ -2064,10 +2053,10 @@ test('Element Web preserves unsupported events and supports client interactions'
       .evaluate((element) => element === document.activeElement)
       .catch(() => false);
     while (!editActionFocused && detailsOpened && detailsActionTabCount < 12) {
-      await pageB.keyboard.press('Tab');
+      await pageA.keyboard.press('Tab');
       detailsActionTabCount += 1;
       detailsTabFocusObservations.push(
-        await observeG6KeyboardFocusTarget(frameB, keyboardFocusControls),
+        await observeG6KeyboardFocusTarget(frameA, keyboardFocusControls),
       );
       editActionFocused = await editButton
         .evaluate((element) => element === document.activeElement)
@@ -2077,18 +2066,18 @@ test('Element Web preserves unsupported events and supports client interactions'
     let closeActionFocused = false;
     let escapeAttempted = false;
     if (editActionFocused) {
-      await pageB.keyboard.press('Tab');
+      await pageA.keyboard.press('Tab');
       detailsActionTabCount += 1;
       deleteActionFocused = await deleteAction
         .evaluate((element) => element === document.activeElement)
         .catch(() => false);
-      await pageB.keyboard.press('Tab');
+      await pageA.keyboard.press('Tab');
       detailsActionTabCount += 1;
       closeActionFocused = await closeAction
         .evaluate((element) => element === document.activeElement)
         .catch(() => false);
       escapeAttempted = true;
-      await pageB.keyboard.press('Escape');
+      await pageA.keyboard.press('Escape');
     }
     const escapeClosedDialog = await keyboardDetails
       .waitFor({ state: 'hidden', timeout: 5_000 })
@@ -2131,6 +2120,18 @@ test('Element Web preserves unsupported events and supports client interactions'
       detailsTabFocusObservations,
       escapeAttempted,
     });
+
+    const memberBEventsResponse = waitForG6EventsResponse(
+      pageB,
+      fixture.teamRoomId,
+    );
+    void memberBEventsResponse.catch(() => undefined);
+    frameB = await openCalendarWidget(memberBRoom.element, pageB, {
+      expectWidgetWarning: false,
+      waitForCalendar: false,
+    });
+    const memberBEvents = await memberBEventsResponse.catch(() => undefined);
+    const memberBEventsStatus = memberBEvents?.status();
 
     activeG6Phase = 'g6-delete-and-refresh';
     const memberBDeleteRow = frameB.getByRole('listitem', {
