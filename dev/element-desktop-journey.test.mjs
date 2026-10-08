@@ -414,6 +414,19 @@ test('records only phase-bound Desktop create steps and closed POST facts', () =
       createPostStatus: null,
     },
   );
+  assert.deepEqual(
+    summarize({
+      phase: 'desktop-event-create',
+      status: 'failed',
+      failurePoint: 'event-create-setup',
+      desktopEventCreateDiagnostic: {
+        createPostObserved: false,
+        createPostRequestFailed: false,
+        createPostStatus: null,
+      },
+    }).failurePoint,
+    { phase: 'desktop-event-create', point: 'event-create-setup' },
+  );
   for (const row of [
     {
       phase: 'desktop-event-create',
@@ -747,6 +760,7 @@ test('accepts only the closed failure-point enum with its failed-phase match', (
       'gateway-read-status',
       'create-control',
       'origin-isolation',
+      'event-create-setup',
       'event-create-control-click',
       'event-create-dialog-visible',
       'event-create-calendar-select',

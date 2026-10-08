@@ -32,6 +32,7 @@ export const DESKTOP_JOURNEY_FAILURE_POINTS = Object.freeze([
   'gateway-read-status',
   'create-control',
   'origin-isolation',
+  'event-create-setup',
   'event-create-control-click',
   'event-create-dialog-visible',
   'event-create-calendar-select',
@@ -98,6 +99,7 @@ const ROOM_WIDGET_FAILURE_POINT_SET = new Set([
   'create-control',
 ]);
 const DESKTOP_EVENT_CREATE_FAILURE_POINT_SET = new Set([
+  'event-create-setup',
   'event-create-control-click',
   'event-create-dialog-visible',
   'event-create-calendar-select',

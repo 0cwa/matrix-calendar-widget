@@ -44,6 +44,7 @@ export type WebMemberBEditSaveFailurePoint =
   | 'web-b-edit-event-row';
 
 export type DesktopEventCreateFailurePoint =
+  | 'event-create-setup'
   | 'event-create-control-click'
   | 'event-create-dialog-visible'
   | 'event-create-calendar-select'

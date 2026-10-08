@@ -463,7 +463,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
 
     currentFailurePoint = undefined;
     enterPhase('desktop-event-create');
-    currentFailurePoint = 'event-create-control-click';
+    currentFailurePoint = 'event-create-setup';
     const initialTitle = `Desktop acceptance ${randomUUID()}`;
     const editedTitle = `${initialTitle} edited`;
     webBSelectedTitle = initialTitle;
