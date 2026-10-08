@@ -70,7 +70,7 @@ export class ElementWebPage {
   constructor(private readonly page: Page) {
     this.navigationRegion = page.getByRole('navigation');
     this.sidebarRegion = page.getByRole('complementary');
-    this.headerRegion = page.getByRole('main').locator('header');
+    this.headerRegion = page.locator('header.mx_RoomHeader');
     this.sendMessageTextbox = page.getByRole('textbox', { name: /message…/ });
     this.noChatPermissionText = page.getByText(
       'You do not have permission to post to this room',
