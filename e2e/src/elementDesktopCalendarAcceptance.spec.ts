@@ -48,6 +48,7 @@ import {
   type DesktopLoginStep,
   type DesktopRoomsReadyDiagnostic,
   type DesktopRoomsReadyElementObservation,
+  type WebBEditSaveFailureDiagnostic,
 } from '../../dev/element-desktop-journey.mjs';
 import { ElementWebPage, getMainRoomListLocator } from './pages/elementWebPage';
 
@@ -275,6 +276,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let webHttpRoute: WebHttpRouteObservation | undefined;
   let currentPhase: DesktopJourneyPhase | undefined;
   let currentFailurePoint: DesktopJourneyFailurePoint | undefined;
+  let webBEditPatchStatus: number | null = null;
   let currentLoginStep: DesktopLoginStep = 'not_observed';
   let loginEntry: DesktopLoginEntry = 'not_observed';
   let loginFieldsBeforeFill = unavailableDesktopLoginFormObservation();
@@ -506,21 +508,29 @@ test('Element Desktop room event journey', async ({ browser }) => {
     recordPhase(evidence, recorded, 'web-member-b-details-escape-focus');
 
     currentPhase = 'web-member-b-edit-save';
+    currentFailurePoint = 'web-b-edit-details-open';
     await webPage.keyboard.press('Enter');
     await detailsDialog.waitFor({ state: 'visible' });
+    currentFailurePoint = 'web-b-edit-open';
     await detailsDialog
       .getByRole('button', { name: 'Edit', exact: true })
       .click();
     const editor = webFrame.getByRole('dialog').last();
     const updateResponse = waitForGatewayResponse(webPage, fixture, 'PATCH');
+    currentFailurePoint = 'web-b-edit-title-fill';
     await editor
       .getByRole('textbox', { name: 'Title', exact: true })
       .fill(editedTitle);
+    currentFailurePoint = 'web-b-edit-save-click';
     await editor.getByRole('button', { name: 'Save', exact: true }).click();
+    currentFailurePoint = 'web-b-edit-patch-await';
     const updated = await updateResponse;
-    if (updated.status() < 200 || updated.status() >= 300) {
+    webBEditPatchStatus = updated.status();
+    currentFailurePoint = 'web-b-edit-patch-status';
+    if (webBEditPatchStatus < 200 || webBEditPatchStatus >= 300) {
       throw new Error('Second member event edit failed');
     }
+    currentFailurePoint = 'web-b-edit-event-row';
     await webFrame
       .getByRole('listitem', { name: editedTitle, exact: true })
       .waitFor({ state: 'visible' });
@@ -652,6 +662,9 @@ test('Element Desktop room event journey', async ({ browser }) => {
         'failed',
         currentFailurePoint,
         gatewayReadDiagnostic,
+        currentPhase === 'web-member-b-edit-save'
+          ? { matchedPatchStatus: webBEditPatchStatus }
+          : undefined,
       );
     }
   } finally {
@@ -1296,6 +1309,7 @@ function safeRecordPhase(
   status: 'passed' | 'failed',
   failurePoint?: DesktopJourneyFailurePoint,
   gatewayReadDiagnostic?: DesktopGatewayReadFailureDiagnostic,
+  webBEditSaveDiagnostic?: WebBEditSaveFailureDiagnostic,
 ) {
   try {
     appendDesktopJourneyOutcome({
@@ -1304,6 +1318,9 @@ function safeRecordPhase(
       status,
       ...(failurePoint === undefined ? {} : { failurePoint }),
       ...(gatewayReadDiagnostic === undefined ? {} : { gatewayReadDiagnostic }),
+      ...(webBEditSaveDiagnostic === undefined
+        ? {}
+        : { webBEditSaveDiagnostic }),
     });
     recorded.add(phase);
     return true;

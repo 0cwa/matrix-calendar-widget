@@ -38,6 +38,13 @@ export const DESKTOP_JOURNEY_FAILURE_POINTS = Object.freeze([
   'web-b-gateway-read-await',
   'web-b-gateway-read-status',
   'web-b-event-row',
+  'web-b-edit-details-open',
+  'web-b-edit-open',
+  'web-b-edit-title-fill',
+  'web-b-edit-save-click',
+  'web-b-edit-patch-await',
+  'web-b-edit-patch-status',
+  'web-b-edit-event-row',
 ]);
 export const DESKTOP_LOGIN_STEPS = Object.freeze([
   'not_observed',
@@ -86,6 +93,15 @@ const WEB_B_READ_FAILURE_POINT_SET = new Set([
   'web-b-gateway-read-await',
   'web-b-gateway-read-status',
   'web-b-event-row',
+]);
+const WEB_B_EDIT_SAVE_FAILURE_POINT_SET = new Set([
+  'web-b-edit-details-open',
+  'web-b-edit-open',
+  'web-b-edit-title-fill',
+  'web-b-edit-save-click',
+  'web-b-edit-patch-await',
+  'web-b-edit-patch-status',
+  'web-b-edit-event-row',
 ]);
 const LOGIN_STEP_SET = new Set(DESKTOP_LOGIN_STEPS);
 const LOGIN_FAILURE_REASON_SET = new Set(DESKTOP_LOGIN_FAILURE_REASONS);
@@ -167,9 +183,46 @@ function validJourneyFailurePoint(phase, status, failurePoint) {
   if (phase === 'web-member-b-read') {
     return WEB_B_READ_FAILURE_POINT_SET.has(failurePoint);
   }
+  if (phase === 'web-member-b-edit-save') {
+    return WEB_B_EDIT_SAVE_FAILURE_POINT_SET.has(failurePoint);
+  }
   return (
     phase === 'desktop-widget-origin-isolation' &&
     failurePoint === 'origin-isolation'
+  );
+}
+
+function validWebBEditSaveDiagnostic(value, failurePoint) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !== 'matchedPatchStatus'
+  ) {
+    return false;
+  }
+  const status = value.matchedPatchStatus;
+  if (
+    status !== null &&
+    (!Number.isInteger(status) || status < 100 || status > 599)
+  ) {
+    return false;
+  }
+  if (failurePoint === 'web-b-edit-patch-status' && status !== null) {
+    return true;
+  }
+  if (
+    failurePoint === 'web-b-edit-event-row' &&
+    status !== null &&
+    status >= 200 &&
+    status < 300
+  ) {
+    return true;
+  }
+  return (
+    status === null &&
+    failurePoint !== 'web-b-edit-patch-status' &&
+    failurePoint !== 'web-b-edit-event-row'
   );
 }
 
@@ -636,6 +689,7 @@ function parseEvidence(input) {
   const outcomes = new Map();
   let failurePoint = null;
   let gatewayReadDiagnostic = null;
+  let webBEditSaveDiagnostic = null;
   let loginStep = 'not_observed';
   let loginStepRecorded = false;
   let loginEntry = 'not_observed';
@@ -705,10 +759,15 @@ function parseEvidence(input) {
       value,
       'gatewayReadDiagnostic',
     );
+    const hasWebBEditSaveDiagnostic = Object.hasOwn(
+      value,
+      'webBEditSaveDiagnostic',
+    );
     if (
       (phaseKeys !== 'phase,status' &&
         phaseKeys !== 'failurePoint,phase,status' &&
-        phaseKeys !== 'failurePoint,gatewayReadDiagnostic,phase,status') ||
+        phaseKeys !== 'failurePoint,gatewayReadDiagnostic,phase,status' &&
+        phaseKeys !== 'failurePoint,phase,status,webBEditSaveDiagnostic') ||
       !PHASE_SET.has(value.phase) ||
       !['passed', 'failed'].includes(value.status) ||
       (hasFailurePoint &&
@@ -726,6 +785,24 @@ function parseEvidence(input) {
           !validDesktopGatewayReadFailureDiagnostic(
             value.gatewayReadDiagnostic,
           ))) ||
+      (value.phase === 'web-member-b-edit-save' &&
+        value.status === 'failed' &&
+        (!hasFailurePoint ||
+          !hasWebBEditSaveDiagnostic ||
+          !WEB_B_EDIT_SAVE_FAILURE_POINT_SET.has(value.failurePoint) ||
+          !validWebBEditSaveDiagnostic(
+            value.webBEditSaveDiagnostic,
+            value.failurePoint,
+          ))) ||
+      (hasWebBEditSaveDiagnostic &&
+        (value.phase !== 'web-member-b-edit-save' ||
+          value.status !== 'failed' ||
+          !hasFailurePoint ||
+          !WEB_B_EDIT_SAVE_FAILURE_POINT_SET.has(value.failurePoint) ||
+          !validWebBEditSaveDiagnostic(
+            value.webBEditSaveDiagnostic,
+            value.failurePoint,
+          ))) ||
       outcomes.has(value.phase)
     ) {
       invalidInput();
@@ -736,12 +813,16 @@ function parseEvidence(input) {
     if (hasGatewayReadDiagnostic) {
       gatewayReadDiagnostic = value.gatewayReadDiagnostic;
     }
+    if (hasWebBEditSaveDiagnostic) {
+      webBEditSaveDiagnostic = value.webBEditSaveDiagnostic;
+    }
     outcomes.set(value.phase, value.status);
   }
   return {
     outcomes,
     failurePoint,
     gatewayReadDiagnostic,
+    webBEditSaveDiagnostic,
     loginStep,
     loginStepRecorded,
     loginEntry,
@@ -804,6 +885,7 @@ export function appendDesktopJourneyOutcome({
   status,
   failurePoint,
   gatewayReadDiagnostic,
+  webBEditSaveDiagnostic,
 }) {
   const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
   privateFileStat(path, MAX_EVIDENCE_BYTES);
@@ -819,7 +901,19 @@ export function appendDesktopJourneyOutcome({
         phase !== 'desktop-room-widget-read' ||
         status !== 'failed' ||
         !GATEWAY_READ_FAILURE_POINTS.has(failurePoint) ||
-        !validDesktopGatewayReadFailureDiagnostic(gatewayReadDiagnostic)))
+        !validDesktopGatewayReadFailureDiagnostic(gatewayReadDiagnostic))) ||
+    (phase === 'web-member-b-edit-save' &&
+      status === 'failed' &&
+      (failurePoint === undefined ||
+        webBEditSaveDiagnostic === undefined ||
+        !WEB_B_EDIT_SAVE_FAILURE_POINT_SET.has(failurePoint) ||
+        !validWebBEditSaveDiagnostic(webBEditSaveDiagnostic, failurePoint))) ||
+    (webBEditSaveDiagnostic !== undefined &&
+      (phase !== 'web-member-b-edit-save' ||
+        status !== 'failed' ||
+        failurePoint === undefined ||
+        !WEB_B_EDIT_SAVE_FAILURE_POINT_SET.has(failurePoint) ||
+        !validWebBEditSaveDiagnostic(webBEditSaveDiagnostic, failurePoint)))
   ) {
     invalidInput();
   }
@@ -835,6 +929,9 @@ export function appendDesktopJourneyOutcome({
         ...(gatewayReadDiagnostic === undefined
           ? {}
           : { gatewayReadDiagnostic }),
+        ...(webBEditSaveDiagnostic === undefined
+          ? {}
+          : { webBEditSaveDiagnostic }),
       })}\n`,
       {
         encoding: 'utf8',
@@ -901,6 +998,7 @@ export function summarizeDesktopJourneyEvidence(input) {
     loginDiagnostic,
     roomsReadyDiagnostic,
     gatewayReadDiagnostic,
+    webBEditSaveDiagnostic,
   } = parseEvidence(input);
   if (outcomes.get('desktop-login') === 'passed') {
     if (
@@ -919,7 +1017,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   const failed = Object.values(cases).includes('failed');
   const complete = Object.values(cases).every((value) => value === 'passed');
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
     loginStep,
     loginEntry,
@@ -927,6 +1025,7 @@ export function summarizeDesktopJourneyEvidence(input) {
     roomsReadyDiagnostic,
     failurePoint,
     gatewayReadDiagnostic,
+    webBEditSaveDiagnostic,
     cases,
   };
 }

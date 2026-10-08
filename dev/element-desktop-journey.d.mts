@@ -31,10 +31,20 @@ export type WebMemberBReadFailurePoint =
   | 'web-b-gateway-read-status'
   | 'web-b-event-row';
 
+export type WebMemberBEditSaveFailurePoint =
+  | 'web-b-edit-details-open'
+  | 'web-b-edit-open'
+  | 'web-b-edit-title-fill'
+  | 'web-b-edit-save-click'
+  | 'web-b-edit-patch-await'
+  | 'web-b-edit-patch-status'
+  | 'web-b-edit-event-row';
+
 export type DesktopJourneyFailurePoint =
   | DesktopRoomWidgetFailurePoint
   | 'origin-isolation'
-  | WebMemberBReadFailurePoint;
+  | WebMemberBReadFailurePoint
+  | WebMemberBEditSaveFailurePoint;
 
 export type DesktopJourneyFailurePointObservation =
   | {
@@ -48,7 +58,15 @@ export type DesktopJourneyFailurePointObservation =
   | {
       phase: 'web-member-b-read';
       point: WebMemberBReadFailurePoint;
+    }
+  | {
+      phase: 'web-member-b-edit-save';
+      point: WebMemberBEditSaveFailurePoint;
     };
+
+export type WebBEditSaveFailureDiagnostic = {
+  matchedPatchStatus: number | null;
+};
 
 export type DesktopLoginStep =
   | 'not_observed'
@@ -149,7 +167,7 @@ export type ReadOnlyWidgetReadinessObservation = {
 };
 
 export type DesktopJourneySummary = {
-  schemaVersion: 3;
+  schemaVersion: 4;
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;
@@ -157,6 +175,7 @@ export type DesktopJourneySummary = {
   roomsReadyDiagnostic: DesktopRoomsReadyDiagnostic | null;
   failurePoint: DesktopJourneyFailurePointObservation | null;
   gatewayReadDiagnostic: DesktopGatewayReadFailureDiagnostic | null;
+  webBEditSaveDiagnostic: WebBEditSaveFailureDiagnostic | null;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
 
@@ -229,6 +248,7 @@ export declare function appendDesktopJourneyOutcome(input: {
   status: DesktopJourneyOutcome;
   failurePoint?: DesktopJourneyFailurePoint;
   gatewayReadDiagnostic?: DesktopGatewayReadFailureDiagnostic;
+  webBEditSaveDiagnostic?: WebBEditSaveFailureDiagnostic;
 }): void;
 
 export declare function appendDesktopLoginStep(input: {

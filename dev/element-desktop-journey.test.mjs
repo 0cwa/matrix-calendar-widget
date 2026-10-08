@@ -187,7 +187,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 3);
+    assert.equal(summary.schemaVersion, 4);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -433,6 +433,13 @@ test('accepts only the closed failure-point enum with its failed-phase match', (
       'web-b-gateway-read-await',
       'web-b-gateway-read-status',
       'web-b-event-row',
+      'web-b-edit-details-open',
+      'web-b-edit-open',
+      'web-b-edit-title-fill',
+      'web-b-edit-save-click',
+      'web-b-edit-patch-await',
+      'web-b-edit-patch-status',
+      'web-b-edit-event-row',
     ],
   );
 
@@ -525,6 +532,86 @@ test('accepts only the closed failure-point enum with its failed-phase match', (
       ),
     /Invalid Desktop journey input/u,
   );
+});
+
+test('correlates failed B edit/save points with a bounded matched PATCH status', () => {
+  const summarize = (row) =>
+    summarizeDesktopJourneyEvidence(`${JSON.stringify(row)}\n`);
+  const row = (failurePoint, matchedPatchStatus) => ({
+    phase: 'web-member-b-edit-save',
+    status: 'failed',
+    failurePoint,
+    webBEditSaveDiagnostic: { matchedPatchStatus },
+  });
+
+  for (const point of [
+    'web-b-edit-details-open',
+    'web-b-edit-open',
+    'web-b-edit-title-fill',
+    'web-b-edit-save-click',
+    'web-b-edit-patch-await',
+  ]) {
+    assert.deepEqual(summarize(row(point, null)).webBEditSaveDiagnostic, {
+      matchedPatchStatus: null,
+    });
+  }
+  assert.deepEqual(
+    summarize(row('web-b-edit-patch-status', 409)).webBEditSaveDiagnostic,
+    { matchedPatchStatus: 409 },
+  );
+  assert.deepEqual(
+    summarize(row('web-b-edit-event-row', 204)).webBEditSaveDiagnostic,
+    { matchedPatchStatus: 204 },
+  );
+
+  for (const invalid of [
+    { ...row('web-b-edit-title-fill', 409) },
+    { ...row('web-b-edit-patch-status', null) },
+    { ...row('web-b-edit-event-row', 409) },
+    { ...row('web-b-edit-event-row', null) },
+    { ...row('web-b-edit-patch-status', 99) },
+    { ...row('web-b-edit-patch-status', 600) },
+    { ...row('web-b-edit-patch-status', 409), body: 'private response' },
+    {
+      phase: 'web-member-b-edit-save',
+      status: 'failed',
+      failurePoint: 'web-b-edit-patch-status',
+    },
+    {
+      phase: 'web-member-b-edit-save',
+      status: 'passed',
+      failurePoint: 'web-b-edit-patch-status',
+      webBEditSaveDiagnostic: { matchedPatchStatus: 409 },
+    },
+    {
+      ...row('web-b-edit-patch-status', 409),
+      phase: 'web-member-b-read',
+    },
+  ]) {
+    assert.throws(() => summarize(invalid), /Invalid Desktop journey input/u);
+  }
+
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopJourneyOutcome({
+      filePath,
+      runnerTemp,
+      phase: 'web-member-b-edit-save',
+      status: 'failed',
+      failurePoint: 'web-b-edit-patch-status',
+      webBEditSaveDiagnostic: { matchedPatchStatus: 409 },
+    });
+    assert.equal(
+      readFileSync(filePath, 'utf8'),
+      '{"phase":"web-member-b-edit-save","status":"failed","failurePoint":"web-b-edit-patch-status","webBEditSaveDiagnostic":{"matchedPatchStatus":409}}\n',
+    );
+    assert.equal(
+      readDesktopJourneyEvidence({ filePath, runnerTemp })
+        .webBEditSaveDiagnostic.matchedPatchStatus,
+      409,
+    );
+  });
 });
 
 test('records only the fixed Desktop login step in private journey evidence', () => {
