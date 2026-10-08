@@ -1024,7 +1024,7 @@ async function observeDesktopRoomsReady(
   expectedRoomId: string | null,
   expectedMemberAId: string | null,
 ): Promise<DesktopRoomsReadyDiagnostic> {
-  const currentRoomList = await getMainRoomListLocator(page);
+  const currentRoomList = getMainRoomListLocator(page);
   const [roomList, matrixChatShell, matrixChatState] = await Promise.all([
     observeDesktopRoomsReadyElement(currentRoomList),
     observeDesktopRoomsReadyElement(page.locator('.mx_MatrixChat')),
