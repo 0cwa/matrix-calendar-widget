@@ -172,6 +172,172 @@ function stage(status, performanceReport, failureCode) {
   };
 }
 
+function ordinaryAction(eventCount, durationMs = 900) {
+  return {
+    durationMs,
+    apiResponseCount: 1,
+    apiRangeMaxMs: 600,
+    roomResponseCount: 1,
+    returnedCount: eventCount,
+    renderedCount: eventCount,
+    rangeMatches: true,
+    identitiesMatch: true,
+    diagnosticsZero: true,
+    stable: true,
+    horizontalOverflow: false,
+  };
+}
+
+function ordinaryColdList(eventCount, durationMs = 1800) {
+  return {
+    durationMs,
+    widgetStartupMs: 900,
+    activationMs: 100,
+    capabilityApprovalMs: 150,
+    identityApprovalMs: 200,
+    iframeReadyMs: 400,
+    placement: 'widget-card',
+    widgetCardCount: 1,
+    widgetCardVisible: true,
+    appDrawerCount: 0,
+    persistedHostFrameCount: 1,
+    persistedHostFrameVisible: true,
+    iframeWidth: 319,
+    iframeHeight: 690,
+    hostHorizontalOverflow: false,
+    rangeSelectionMs: 400,
+    openIdResponseCount: 1,
+    openIdMaxMs: 100,
+    apiRangeMaxMs: 600,
+    selectedRoomResponseCount: 1,
+    returnedCount: eventCount,
+    renderedCount: eventCount,
+    expectedRangeMatches: true,
+    identitiesMatch: true,
+    diagnosticsZero: true,
+    stable: true,
+    horizontalOverflow: false,
+  };
+}
+
+function ordinaryEventsResponse(sample, eventCount, rangeClass) {
+  return {
+    sample,
+    endpoint: 'events',
+    method: 'GET',
+    status: 200,
+    durationMs: 600,
+    decoded: true,
+    eventCount,
+    diagnosticCount: 0,
+    target: 'room',
+    calendarMatches: true,
+    rangeClass,
+    rangeDays:
+      rangeClass === 'preselection'
+        ? 7
+        : rangeClass === 'month-padded'
+          ? 45
+          : 31,
+    rangeMatches: true,
+    expectedTitlesMatch:
+      rangeClass === 'preselection' ? eventCount === 0 : true,
+  };
+}
+
+function openIdResponse(sample) {
+  return {
+    sample,
+    endpoint: 'openid',
+    method: 'POST',
+    status: 200,
+    durationMs: 100,
+    decoded: true,
+    eventCount: null,
+    diagnosticCount: null,
+    target: 'none',
+    calendarMatches: null,
+    rangeClass: 'not-applicable',
+    rangeDays: null,
+    rangeMatches: null,
+    expectedTitlesMatch: null,
+  };
+}
+
+function ordinaryCase(profile, year, month, eventCount) {
+  return {
+    profile,
+    year,
+    month,
+    eventCount,
+    preparation: { elementLoginMs: 3000, roomNavigationMs: 1000 },
+    defaultView: {
+      durationMs: 1200,
+      apiResponseCount: 1,
+      apiRangeMaxMs: 600,
+      returnedCount: 0,
+      renderedCount: 0,
+      rangeMatches: true,
+      countMatches: true,
+      usableControlVisible: true,
+      stable: true,
+    },
+    coldList: ordinaryColdList(eventCount),
+    refreshSetup: ordinaryAction(eventCount, 2500),
+    refresh: ordinaryAction(eventCount, 1900),
+    detailSamples:
+      eventCount === 25
+        ? Array.from({ length: 5 }, (_, index) => ({
+            ...detailSample(index + 1),
+            durationMs: 400,
+          }))
+        : [],
+  };
+}
+
+function ordinaryReport() {
+  const report = {
+    version: 3,
+    viewportWidth: 1280,
+    viewportHeight: 800,
+    calendarDays: 31,
+    timezone: 'Europe/Stockholm',
+    cases: [
+      ordinaryCase('empty', 2026, 12, 0),
+      ordinaryCase('events-25', 2027, 1, 25),
+    ],
+    apiResponses: [],
+    blockedRequestCount: 0,
+    pageErrorCount: 0,
+    pageErrorClass: 'none',
+  };
+  for (const performanceCase of report.cases) {
+    const { profile, eventCount } = performanceCase;
+    const cold = `${profile}-cold`;
+    report.apiResponses.push(
+      ordinaryEventsResponse(`${profile}-default`, 0, 'preselection'),
+      ordinaryEventsResponse(cold, eventCount, 'list31'),
+      openIdResponse(`${profile}-default`),
+      ordinaryEventsResponse(
+        `${profile}-refresh-setup`,
+        eventCount,
+        'month-padded',
+      ),
+      ordinaryEventsResponse(`${profile}-refresh`, eventCount, 'list31'),
+    );
+  }
+  return report;
+}
+
+function ordinaryStage(status, report, failureCode) {
+  return {
+    phase: 'performance-pilot',
+    status,
+    ...(failureCode ? { failureCode } : {}),
+    performanceReport: report,
+  };
+}
+
 test('sanitizes complete performance samples and bounded decoded API timings', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify(stage('passed', completeReport())),
@@ -180,6 +346,10 @@ test('sanitizes complete performance samples and bounded decoded API timings', (
   assert.match(
     summary,
     /phase=performance-pilot report_version=2 status=passed/u,
+  );
+  assert.match(
+    summary,
+    /profile=historical-250-diagnostic-only beta_gate_eligible=false/u,
   );
   assert.match(
     summary,
@@ -206,6 +376,105 @@ test('sanitizes complete performance samples and bounded decoded API timings', (
   assert.doesNotMatch(
     summary,
     /Performance\s+\d|@matrix-calendar-widget|access_token|https?:\/\/|error message|stack/u,
+  );
+});
+
+test('accepts the ordinary 0-and-25 profile and records an empty seeded default view', () => {
+  const report = ordinaryReport();
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(ordinaryStage('passed', report)),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /phase=performance-pilot report_version=3 profile=ordinary-0-25 beta_gate_eligible=true status=passed/u,
+  );
+  assert.match(summary, /performance_case profile=empty events=0/u);
+  assert.match(summary, /performance_case profile=events-25 events=25/u);
+  assert.match(
+    summary,
+    /performance_default_view profile=events-25 elapsed_ms=1200 api_responses=1 event_api_max_ms=600 returned=0 rendered=0 range_matches=true count_matches=true create_visible=true stable=true/u,
+  );
+  assert.match(
+    summary,
+    /performance_action profile=empty action=refresh-setup duration_ms=2500/u,
+  );
+  assert.match(
+    summary,
+    /performance_action profile=events-25 action=refresh duration_ms=1900/u,
+  );
+  assert.match(summary, /performance_details profile=empty samples=0/u);
+  assert.match(summary, /performance_details profile=events-25 index=5/u);
+  assert.doesNotMatch(summary, /Performance\s+\d|access_token|https?:\/\//u);
+});
+
+test('rejects contradictory empty counts, incomplete detail samples, and slow refresh', () => {
+  const mismatchedDefault = ordinaryReport();
+  mismatchedDefault.cases[1].defaultView.renderedCount = 1;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', mismatchedDefault)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const wrongEmptyCount = ordinaryReport();
+  wrongEmptyCount.cases[0].coldList.returnedCount = 1;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', wrongEmptyCount)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const missingDetail = ordinaryReport();
+  missingDetail.cases[1].detailSamples.pop();
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', missingDetail)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const emptyDetail = ordinaryReport();
+  emptyDetail.cases[0].detailSamples.push(detailSample(1));
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', emptyDetail)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const slowRefresh = ordinaryReport();
+  slowRefresh.cases[0].refresh.durationMs = 2001;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', slowRefresh)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
+test('does not apply the 2-second refresh limit to List-to-Month setup', () => {
+  const report = ordinaryReport();
+  report.cases[0].refreshSetup.durationMs = 12_000;
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(ordinaryStage('passed', report)),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /performance_action profile=empty action=refresh-setup duration_ms=12000/u,
   );
 });
 
@@ -296,7 +565,7 @@ test('keeps incomplete performance observations on failure and rejects private f
   );
   assert.match(
     failed,
-    /status=failed failure_code=performance-threshold-exceeded/u,
+    /status=failed profile=historical-250-diagnostic-only beta_gate_eligible=false failure_code=performance-threshold-exceeded/u,
   );
   assert.match(
     failed,

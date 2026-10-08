@@ -41,7 +41,7 @@ const PAGE_ERROR_CLASSES = new Set([
   'other',
 ]);
 const API_SAMPLE =
-  /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5])$/u;
+  /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5]|(?:empty|events-25)-(?:default|cold|refresh-setup|refresh)|events-25-details-[1-5])$/u;
 
 const REPORT_KEYS = [
   'version',
@@ -252,7 +252,7 @@ function validApiResponse(value) {
   );
 }
 
-function validReport(report) {
+function validLegacyReport(report) {
   return (
     hasExactKeys(report, REPORT_KEYS) &&
     report.version === 2 &&
@@ -350,6 +350,185 @@ function validReport(report) {
   );
 }
 
+const ORDINARY_REPORT_KEYS = [
+  'version',
+  'viewportWidth',
+  'viewportHeight',
+  'calendarDays',
+  'timezone',
+  'cases',
+  'apiResponses',
+  'blockedRequestCount',
+  'pageErrorCount',
+  'pageErrorClass',
+];
+const ORDINARY_CASE_KEYS = [
+  'profile',
+  'year',
+  'month',
+  'eventCount',
+  'preparation',
+  'defaultView',
+  'coldList',
+  'refreshSetup',
+  'refresh',
+  'detailSamples',
+];
+const DEFAULT_VIEW_KEYS = [
+  'durationMs',
+  'apiResponseCount',
+  'apiRangeMaxMs',
+  'returnedCount',
+  'renderedCount',
+  'rangeMatches',
+  'countMatches',
+  'usableControlVisible',
+  'stable',
+];
+const ACTION_KEYS = [
+  'durationMs',
+  'apiResponseCount',
+  'apiRangeMaxMs',
+  'roomResponseCount',
+  'returnedCount',
+  'renderedCount',
+  'rangeMatches',
+  'identitiesMatch',
+  'diagnosticsZero',
+  'stable',
+  'horizontalOverflow',
+];
+
+function validOrdinaryColdList(value) {
+  return (
+    hasExactKeys(value, COLD_KEYS) &&
+    COLD_KEYS.slice(0, 6).every((key) => optionalMilliseconds(value[key])) &&
+    ['widget-card', 'apps-drawer', 'unknown'].includes(value.placement) &&
+    boundedInteger(value.widgetCardCount, 0, 2) &&
+    typeof value.widgetCardVisible === 'boolean' &&
+    (!value.widgetCardVisible || value.widgetCardCount === 1) &&
+    boundedInteger(value.appDrawerCount, 0, 2) &&
+    boundedInteger(value.persistedHostFrameCount, 0, 2) &&
+    typeof value.persistedHostFrameVisible === 'boolean' &&
+    (!value.persistedHostFrameVisible || value.persistedHostFrameCount === 1) &&
+    optionalCount(value.iframeWidth, 4096) &&
+    optionalCount(value.iframeHeight, 4096) &&
+    (typeof value.hostHorizontalOverflow === 'boolean' ||
+      value.hostHorizontalOverflow === null) &&
+    optionalMilliseconds(value.rangeSelectionMs) &&
+    boundedInteger(value.openIdResponseCount, 0, 8) &&
+    optionalMilliseconds(value.openIdMaxMs) &&
+    optionalMilliseconds(value.apiRangeMaxMs) &&
+    boundedInteger(value.selectedRoomResponseCount, 0, 8) &&
+    optionalCount(value.returnedCount) &&
+    optionalCount(value.renderedCount) &&
+    [
+      'expectedRangeMatches',
+      'identitiesMatch',
+      'diagnosticsZero',
+      'stable',
+    ].every((key) => typeof value[key] === 'boolean') &&
+    (typeof value.horizontalOverflow === 'boolean' ||
+      value.horizontalOverflow === null)
+  );
+}
+
+function validOrdinaryDefaultView(value) {
+  return (
+    hasExactKeys(value, DEFAULT_VIEW_KEYS) &&
+    optionalMilliseconds(value.durationMs) &&
+    boundedInteger(value.apiResponseCount, 0, 64) &&
+    optionalMilliseconds(value.apiRangeMaxMs) &&
+    optionalCount(value.returnedCount, 250) &&
+    optionalCount(value.renderedCount, 250) &&
+    ['rangeMatches', 'countMatches', 'usableControlVisible', 'stable'].every(
+      (key) => typeof value[key] === 'boolean',
+    )
+  );
+}
+
+function validOrdinaryAction(value) {
+  return (
+    hasExactKeys(value, ACTION_KEYS) &&
+    optionalMilliseconds(value.durationMs) &&
+    boundedInteger(value.apiResponseCount, 0, 64) &&
+    optionalMilliseconds(value.apiRangeMaxMs) &&
+    boundedInteger(value.roomResponseCount, 0, 8) &&
+    optionalCount(value.returnedCount, 250) &&
+    optionalCount(value.renderedCount, 250) &&
+    ['rangeMatches', 'identitiesMatch', 'diagnosticsZero', 'stable'].every(
+      (key) => typeof value[key] === 'boolean',
+    ) &&
+    (typeof value.horizontalOverflow === 'boolean' ||
+      value.horizontalOverflow === null)
+  );
+}
+
+function validOrdinaryCase(value) {
+  const expectedCount = value?.profile === 'empty' ? 0 : 25;
+  return (
+    hasExactKeys(value, ORDINARY_CASE_KEYS) &&
+    (value.profile === 'empty' || value.profile === 'events-25') &&
+    boundedInteger(value.year, 2020, 2200) &&
+    boundedInteger(value.month, 1, 12) &&
+    new Date(Date.UTC(value.year, value.month, 0)).getUTCDate() === 31 &&
+    value.eventCount === expectedCount &&
+    hasExactKeys(value.preparation, PREPARATION_KEYS) &&
+    PREPARATION_KEYS.every((key) =>
+      optionalMilliseconds(value.preparation[key]),
+    ) &&
+    validOrdinaryDefaultView(value.defaultView) &&
+    validOrdinaryColdList(value.coldList) &&
+    validOrdinaryAction(value.refreshSetup) &&
+    validOrdinaryAction(value.refresh) &&
+    Array.isArray(value.detailSamples) &&
+    value.detailSamples.length <= 5 &&
+    value.detailSamples.every((sample, index) =>
+      validDetailSample(sample, index + 1),
+    )
+  );
+}
+
+function validOrdinaryReport(report) {
+  return (
+    hasExactKeys(report, ORDINARY_REPORT_KEYS) &&
+    report.version === 3 &&
+    report.viewportWidth === 1280 &&
+    report.viewportHeight === 800 &&
+    report.calendarDays === 31 &&
+    report.timezone === 'Europe/Stockholm' &&
+    Array.isArray(report.cases) &&
+    report.cases.length === 2 &&
+    report.cases[0]?.profile === 'empty' &&
+    report.cases[1]?.profile === 'events-25' &&
+    report.cases.every(validOrdinaryCase) &&
+    (report.cases[0].year !== report.cases[1].year ||
+      report.cases[0].month !== report.cases[1].month) &&
+    Array.isArray(report.apiResponses) &&
+    report.apiResponses.length <= 512 &&
+    report.apiResponses.every(validApiResponse) &&
+    report.apiResponses.every((row) =>
+      /^(?:empty|events-25)-(?:default|cold|refresh-setup|refresh)$|^events-25-details-[1-5]$/u.test(
+        row.sample,
+      ),
+    ) &&
+    optionalCount(report.blockedRequestCount, 100_000) &&
+    optionalCount(report.pageErrorCount, 100_000) &&
+    PAGE_ERROR_CLASSES.has(report.pageErrorClass) &&
+    (report.pageErrorCount === null
+      ? report.pageErrorClass === 'none'
+      : report.pageErrorCount === 0
+        ? report.pageErrorClass === 'none'
+        : report.pageErrorClass !== 'none')
+  );
+}
+
+function validReport(report) {
+  return isRecord(report) && report.version === 3
+    ? validOrdinaryReport(report)
+    : validLegacyReport(report);
+}
+
 function requiredViewSamples(report, view, count) {
   return (
     report.viewSamples.filter((sample) => sample.view === view).length === count
@@ -374,7 +553,7 @@ function samplePasses(sample, enforceViewThreshold = true) {
   );
 }
 
-function reportPasses(report) {
+function legacyReportPasses(report) {
   return (
     report.viewportWidth === 1280 &&
     report.viewportHeight === 800 &&
@@ -487,8 +666,373 @@ function reportPasses(report) {
   );
 }
 
+function ordinaryRoomRows(report, sample, rangeClass) {
+  return report.apiResponses.filter(
+    (row) =>
+      row.sample === sample &&
+      row.endpoint === 'events' &&
+      row.target === 'room' &&
+      row.calendarMatches === true &&
+      row.rangeClass === rangeClass &&
+      row.rangeMatches === true,
+  );
+}
+
+function ordinaryEvents(report, sample) {
+  return report.apiResponses.filter(
+    (row) => row.sample === sample && row.endpoint === 'events',
+  );
+}
+
+function summarizeOrdinaryApi(report, sample, action, rangeClass) {
+  const events = ordinaryEvents(report, sample);
+  const roomRows = ordinaryRoomRows(report, sample, rangeClass);
+  const maxMs = events.length
+    ? Math.max(...events.map((row) => row.durationMs))
+    : null;
+  return (
+    action.apiResponseCount === events.length &&
+    action.apiRangeMaxMs === maxMs &&
+    action.roomResponseCount === roomRows.length &&
+    action.returnedCount ===
+      (roomRows.length === 1 ? roomRows[0].eventCount : null)
+  );
+}
+
+function ordinaryDefaultMatches(report, performanceCase) {
+  const sample = `${performanceCase.profile}-default`;
+  const events = ordinaryEvents(report, sample);
+  const rooms = ordinaryRoomRows(report, sample, 'preselection');
+  const maxMs = events.length
+    ? Math.max(...events.map((row) => row.durationMs))
+    : null;
+  const view = performanceCase.defaultView;
+  return (
+    events.length === view.apiResponseCount &&
+    maxMs === view.apiRangeMaxMs &&
+    rooms.length === 1 &&
+    view.returnedCount === rooms[0].eventCount &&
+    view.renderedCount === rooms[0].eventCount
+  );
+}
+
+function ordinaryColdMatches(report, performanceCase) {
+  const sample = `${performanceCase.profile}-cold`;
+  const events = ordinaryEvents(report, sample);
+  const rooms = ordinaryRoomRows(report, sample, 'list31');
+  const openIdRows = report.apiResponses.filter(
+    (row) =>
+      (row.sample === `${performanceCase.profile}-default` ||
+        row.sample === sample) &&
+      row.endpoint === 'openid',
+  );
+  const cold = performanceCase.coldList;
+  const eventMax = events.length
+    ? Math.max(...events.map((row) => row.durationMs))
+    : null;
+  const openIdMax = openIdRows.length
+    ? Math.max(...openIdRows.map((row) => row.durationMs))
+    : null;
+  return (
+    cold.apiRangeMaxMs === eventMax &&
+    cold.selectedRoomResponseCount === rooms.length &&
+    cold.returnedCount === (rooms.length === 1 ? rooms[0].eventCount : null) &&
+    cold.openIdResponseCount === openIdRows.length &&
+    cold.openIdMaxMs === openIdMax
+  );
+}
+
+function ordinaryActionPasses(action, expectedCount, maxDuration) {
+  return (
+    action.durationMs !== null &&
+    (maxDuration === null || action.durationMs <= maxDuration) &&
+    action.apiResponseCount > 0 &&
+    action.apiRangeMaxMs !== null &&
+    action.apiRangeMaxMs <= 1000 &&
+    action.roomResponseCount === 1 &&
+    action.returnedCount === expectedCount &&
+    action.renderedCount === expectedCount &&
+    action.rangeMatches &&
+    action.identitiesMatch &&
+    action.diagnosticsZero &&
+    action.stable &&
+    action.horizontalOverflow === false
+  );
+}
+
+function ordinaryCasePasses(report, performanceCase) {
+  const count = performanceCase.eventCount;
+  const defaultView = performanceCase.defaultView;
+  const cold = performanceCase.coldList;
+  const coldSample = `${performanceCase.profile}-cold`;
+  const setupSample = `${performanceCase.profile}-refresh-setup`;
+  const refreshSample = `${performanceCase.profile}-refresh`;
+  return (
+    [
+      performanceCase.preparation.elementLoginMs,
+      performanceCase.preparation.roomNavigationMs,
+      cold.widgetStartupMs,
+      cold.activationMs,
+      cold.capabilityApprovalMs,
+      cold.identityApprovalMs,
+      cold.iframeReadyMs,
+      cold.rangeSelectionMs,
+    ].every((value) => value !== null) &&
+    defaultView.durationMs !== null &&
+    defaultView.apiResponseCount > 0 &&
+    defaultView.apiRangeMaxMs !== null &&
+    defaultView.apiRangeMaxMs <= 1000 &&
+    defaultView.returnedCount !== null &&
+    defaultView.returnedCount === defaultView.renderedCount &&
+    defaultView.rangeMatches &&
+    defaultView.countMatches &&
+    defaultView.usableControlVisible &&
+    defaultView.stable &&
+    ordinaryDefaultMatches(report, performanceCase) &&
+    cold.durationMs !== null &&
+    cold.durationMs <= 2000 &&
+    cold.openIdResponseCount > 0 &&
+    cold.openIdMaxMs !== null &&
+    cold.placement === 'widget-card' &&
+    cold.widgetCardCount === 1 &&
+    cold.widgetCardVisible &&
+    cold.persistedHostFrameCount === 1 &&
+    cold.persistedHostFrameVisible &&
+    cold.iframeWidth !== null &&
+    cold.iframeWidth > 0 &&
+    cold.iframeHeight !== null &&
+    cold.iframeHeight > 0 &&
+    cold.hostHorizontalOverflow === false &&
+    cold.expectedRangeMatches &&
+    cold.selectedRoomResponseCount === 1 &&
+    cold.returnedCount === count &&
+    cold.renderedCount === count &&
+    cold.identitiesMatch &&
+    cold.diagnosticsZero &&
+    cold.stable &&
+    cold.horizontalOverflow === false &&
+    cold.apiRangeMaxMs !== null &&
+    cold.apiRangeMaxMs <= 1000 &&
+    ordinaryColdMatches(report, performanceCase) &&
+    ordinaryActionPasses(performanceCase.refreshSetup, count, null) &&
+    summarizeOrdinaryApi(
+      report,
+      setupSample,
+      performanceCase.refreshSetup,
+      'month-padded',
+    ) &&
+    ordinaryActionPasses(performanceCase.refresh, count, 2000) &&
+    summarizeOrdinaryApi(
+      report,
+      refreshSample,
+      performanceCase.refresh,
+      'list31',
+    ) &&
+    performanceCase.detailSamples.length === (count === 25 ? 5 : 0) &&
+    performanceCase.detailSamples.every(
+      (sample) =>
+        sample.durationMs !== null &&
+        sample.durationMs <= 500 &&
+        sample.visible &&
+        sample.titleMatches &&
+        sample.stable &&
+        sample.horizontalOverflow === false,
+    ) &&
+    performanceCase.detailSamples.every(
+      (sample, index) => sample.index === index + 1,
+    )
+  );
+}
+
+function ordinaryReportPasses(report) {
+  return (
+    report.cases.every((performanceCase) =>
+      ordinaryCasePasses(report, performanceCase),
+    ) &&
+    report.blockedRequestCount === 0 &&
+    report.pageErrorCount === 0 &&
+    report.pageErrorClass === 'none' &&
+    report.apiResponses.every(
+      (row) =>
+        row.status === 200 &&
+        row.decoded &&
+        row.method === (row.endpoint === 'openid' ? 'POST' : 'GET') &&
+        (row.endpoint === 'openid' || row.durationMs <= 1000) &&
+        (row.endpoint !== 'events' || row.diagnosticCount === 0) &&
+        (row.endpoint !== 'events' ||
+          row.rangeClass === 'preselection' ||
+          row.rangeMatches === true) &&
+        (row.endpoint !== 'events' ||
+          row.target !== 'room' ||
+          (() => {
+            const performanceCase = report.cases.find(({ profile }) =>
+              row.sample.startsWith(`${profile}-`),
+            );
+            if (!performanceCase || row.calendarMatches !== true) return false;
+            const samplePhase = row.sample.slice(
+              performanceCase.profile.length + 1,
+            );
+            if (samplePhase === 'default') {
+              return row.rangeClass === 'preselection';
+            }
+            const expectedRange =
+              samplePhase === 'refresh-setup' ? 'month-padded' : 'list31';
+            return (
+              row.rangeClass === expectedRange &&
+              row.eventCount === performanceCase.eventCount &&
+              row.expectedTitlesMatch === true
+            );
+          })()),
+    )
+  );
+}
+
+function reportPasses(report) {
+  return report.version === 3
+    ? ordinaryReportPasses(report)
+    : legacyReportPasses(report);
+}
+
 function display(value) {
   return value === null ? 'unavailable' : String(value);
+}
+
+function formatOrdinaryAction(profile, actionName, action) {
+  return [
+    'performance_action',
+    `profile=${profile}`,
+    `action=${actionName}`,
+    `duration_ms=${display(action.durationMs)}`,
+    `api_responses=${action.apiResponseCount}`,
+    `event_api_max_ms=${display(action.apiRangeMaxMs)}`,
+    `room_responses=${action.roomResponseCount}`,
+    `returned=${display(action.returnedCount)}`,
+    `rendered=${display(action.renderedCount)}`,
+    `range_matches=${action.rangeMatches}`,
+    `identities_match=${action.identitiesMatch}`,
+    `diagnostics_zero=${action.diagnosticsZero}`,
+    `stable=${action.stable}`,
+    `horizontal_overflow=${display(action.horizontalOverflow)}`,
+  ].join(' ');
+}
+
+function formatOrdinaryPerformanceEvidence(record) {
+  const report = record.performanceReport;
+  const lines = [
+    [
+      'phase=performance-pilot',
+      'report_version=3',
+      'profile=ordinary-0-25',
+      `beta_gate_eligible=${record.status === 'passed'}`,
+      `status=${record.status}`,
+      `failure_code=${record.failureCode ?? 'none'}`,
+      'cases=2',
+      'calendar_days=31',
+      `timezone=${report.timezone}`,
+      `viewport_width=${report.viewportWidth}`,
+      `viewport_height=${report.viewportHeight}`,
+      `blocked_requests=${display(report.blockedRequestCount)}`,
+      `page_errors=${display(report.pageErrorCount)}`,
+      `page_error_class=${report.pageErrorClass}`,
+    ].join(' '),
+  ];
+
+  for (const performanceCase of report.cases) {
+    const {
+      profile,
+      year,
+      month,
+      eventCount,
+      preparation,
+      defaultView,
+      coldList,
+    } = performanceCase;
+    lines.push(
+      `performance_case profile=${profile} events=${eventCount} month=${year}-${String(month).padStart(2, '0')}`,
+      `performance_preparation profile=${profile} login_ms=${display(preparation.elementLoginMs)} room_navigation_ms=${display(preparation.roomNavigationMs)}`,
+      [
+        'performance_default_view',
+        `profile=${profile}`,
+        `elapsed_ms=${display(defaultView.durationMs)}`,
+        `api_responses=${defaultView.apiResponseCount}`,
+        `event_api_max_ms=${display(defaultView.apiRangeMaxMs)}`,
+        `returned=${display(defaultView.returnedCount)}`,
+        `rendered=${display(defaultView.renderedCount)}`,
+        `range_matches=${defaultView.rangeMatches}`,
+        `count_matches=${defaultView.countMatches}`,
+        `create_visible=${defaultView.usableControlVisible}`,
+        `stable=${defaultView.stable}`,
+      ].join(' '),
+      [
+        'performance_cold_list',
+        `profile=${profile}`,
+        `total_ms=${display(coldList.durationMs)}`,
+        `widget_startup_ms=${display(coldList.widgetStartupMs)}`,
+        `activation_ms=${display(coldList.activationMs)}`,
+        `capability_approval_ms=${display(coldList.capabilityApprovalMs)}`,
+        `identity_approval_ms=${display(coldList.identityApprovalMs)}`,
+        `iframe_ready_ms=${display(coldList.iframeReadyMs)}`,
+        `placement=${coldList.placement}`,
+        `widget_card_count=${coldList.widgetCardCount}`,
+        `widget_card_visible=${coldList.widgetCardVisible}`,
+        `app_drawer_count=${coldList.appDrawerCount}`,
+        `persisted_host_frame_count=${coldList.persistedHostFrameCount}`,
+        `persisted_host_frame_visible=${coldList.persistedHostFrameVisible}`,
+        `iframe_width=${display(coldList.iframeWidth)}`,
+        `iframe_height=${display(coldList.iframeHeight)}`,
+        `host_horizontal_overflow=${display(coldList.hostHorizontalOverflow)}`,
+        `range_selection_ms=${display(coldList.rangeSelectionMs)}`,
+        `openid_responses=${coldList.openIdResponseCount}`,
+        `openid_max_ms=${display(coldList.openIdMaxMs)}`,
+        `event_api_max_ms=${display(coldList.apiRangeMaxMs)}`,
+        `room_responses=${coldList.selectedRoomResponseCount}`,
+        `returned=${display(coldList.returnedCount)}`,
+        `rendered=${display(coldList.renderedCount)}`,
+        `range_matches=${coldList.expectedRangeMatches}`,
+        `identities_match=${coldList.identitiesMatch}`,
+        `diagnostics_zero=${coldList.diagnosticsZero}`,
+        `stable=${coldList.stable}`,
+        `horizontal_overflow=${display(coldList.horizontalOverflow)}`,
+      ].join(' '),
+      formatOrdinaryAction(
+        profile,
+        'refresh-setup',
+        performanceCase.refreshSetup,
+      ),
+      formatOrdinaryAction(profile, 'refresh', performanceCase.refresh),
+    );
+    if (performanceCase.detailSamples.length === 0) {
+      lines.push(`performance_details profile=${profile} samples=0`);
+    }
+    for (const sample of performanceCase.detailSamples) {
+      lines.push(
+        `performance_details profile=${profile} index=${sample.index} duration_ms=${display(sample.durationMs)} visible=${sample.visible} title_matches=${sample.titleMatches} stable=${sample.stable} horizontal_overflow=${display(sample.horizontalOverflow)}`,
+      );
+    }
+  }
+
+  for (const row of report.apiResponses) {
+    lines.push(
+      [
+        'performance_api',
+        `sample=${row.sample}`,
+        `endpoint=${row.endpoint}`,
+        `method=${row.method}`,
+        `status=${row.status}`,
+        `duration_ms=${row.durationMs}`,
+        `decoded=${row.decoded}`,
+        `event_count=${display(row.eventCount)}`,
+        `diagnostics=${display(row.diagnosticCount)}`,
+        `target=${row.target}`,
+        `calendar_matches=${display(row.calendarMatches)}`,
+        `range_class=${row.rangeClass}`,
+        `range_days=${display(row.rangeDays)}`,
+        `range_matches=${display(row.rangeMatches)}`,
+        `expected_titles_match=${display(row.expectedTitlesMatch)}`,
+      ].join(' '),
+    );
+  }
+  return lines;
 }
 
 function median(values) {
@@ -517,11 +1061,16 @@ export function formatPerformanceEvidence(record) {
   }
 
   const report = record.performanceReport;
+  if (report.version === 3) {
+    return formatOrdinaryPerformanceEvidence(record);
+  }
   const lines = [
     [
       'phase=performance-pilot',
       `report_version=${report.version}`,
       `status=${record.status}`,
+      'profile=historical-250-diagnostic-only',
+      'beta_gate_eligible=false',
       `failure_code=${record.failureCode ?? 'none'}`,
       `month=${report.year}-${String(report.month).padStart(2, '0')}`,
       `events=${report.workloadEvents}`,

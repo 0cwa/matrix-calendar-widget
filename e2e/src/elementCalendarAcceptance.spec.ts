@@ -313,6 +313,13 @@ type PerformancePageErrorClass =
   | 'eval-error'
   | 'other';
 
+type OrdinaryPerformanceProfile = 'empty' | 'events-25';
+type OrdinaryPerformanceSampleKey =
+  | `${OrdinaryPerformanceProfile}-default`
+  | `${OrdinaryPerformanceProfile}-cold`
+  | `${OrdinaryPerformanceProfile}-refresh-setup`
+  | `${OrdinaryPerformanceProfile}-refresh`
+  | `events-25-details-${1 | 2 | 3 | 4 | 5}`;
 type PerformanceSampleKey =
   | 'cold-list'
   | `warmup-${'list' | 'month'}-${1 | 2}`
@@ -322,7 +329,8 @@ type PerformanceSampleKey =
   | 'overflow-reset-month'
   | 'overflow-reset-list'
   | `details-warmup-${1 | 2}`
-  | `details-${1 | 2 | 3 | 4 | 5}`;
+  | `details-${1 | 2 | 3 | 4 | 5}`
+  | OrdinaryPerformanceSampleKey;
 type PerformanceEndpoint =
   | 'context'
   | 'calendars'
@@ -375,6 +383,17 @@ type PerformanceDetailsSample = {
   titleMatches: boolean;
   stable: boolean;
   horizontalOverflow: boolean | null;
+};
+type PerformanceDefaultViewSample = {
+  durationMs: number | null;
+  apiResponseCount: number;
+  apiRangeMaxMs: number | null;
+  returnedCount: number | null;
+  renderedCount: number | null;
+  rangeMatches: boolean;
+  countMatches: boolean;
+  usableControlVisible: boolean;
+  stable: boolean;
 };
 type PerformanceReport = {
   version: 2;
@@ -437,6 +456,44 @@ type PerformanceReport = {
   pageErrorCount: number | null;
   pageErrorClass: PerformancePageErrorClass;
 };
+type PerformanceActionSample = {
+  durationMs: number | null;
+  apiResponseCount: number;
+  apiRangeMaxMs: number | null;
+  roomResponseCount: number;
+  returnedCount: number | null;
+  renderedCount: number | null;
+  rangeMatches: boolean;
+  identitiesMatch: boolean;
+  diagnosticsZero: boolean;
+  stable: boolean;
+  horizontalOverflow: boolean | null;
+};
+type OrdinaryPerformanceCase = {
+  profile: OrdinaryPerformanceProfile;
+  year: number;
+  month: number;
+  eventCount: 0 | 25;
+  preparation: PerformanceReport['preparation'];
+  defaultView: PerformanceDefaultViewSample;
+  coldList: PerformanceReport['coldList'];
+  refreshSetup: PerformanceActionSample;
+  refresh: PerformanceActionSample;
+  detailSamples: PerformanceDetailsSample[];
+};
+type OrdinaryPerformanceReport = {
+  version: 3;
+  viewportWidth: 1280;
+  viewportHeight: 800;
+  calendarDays: 31;
+  timezone: 'Europe/Stockholm';
+  cases: OrdinaryPerformanceCase[];
+  apiResponses: PerformanceApiResponse[];
+  blockedRequestCount: number | null;
+  pageErrorCount: number | null;
+  pageErrorClass: PerformancePageErrorClass;
+};
+type PerformanceReportData = PerformanceReport | OrdinaryPerformanceReport;
 
 type PerformancePendingRequest = {
   sample: PerformanceSampleKey;
@@ -456,7 +513,7 @@ type PerformanceApiObserver = {
   rowsFor: (sample: PerformanceSampleKey) => PerformanceApiResponse[];
   waitForRoomEvents: (
     sample: PerformanceSampleKey,
-    rangeClass: 'list31' | 'month-padded' | 'overflow-day',
+    rangeClass: 'preselection' | 'list31' | 'month-padded' | 'overflow-day',
   ) => Promise<void>;
   waitForSettled: (sample: PerformanceSampleKey) => Promise<void>;
 };
@@ -911,6 +968,80 @@ function makeEmptyPerformanceReport(
   };
 }
 
+function makeEmptyActionSample(): PerformanceActionSample {
+  return {
+    durationMs: null,
+    apiResponseCount: 0,
+    apiRangeMaxMs: null,
+    roomResponseCount: 0,
+    returnedCount: null,
+    renderedCount: null,
+    rangeMatches: false,
+    identitiesMatch: false,
+    diagnosticsZero: false,
+    stable: false,
+    horizontalOverflow: null,
+  };
+}
+
+function makeEmptyOrdinaryPerformanceCase(
+  profile: OrdinaryPerformanceProfile,
+  year: number,
+  month: number,
+): OrdinaryPerformanceCase {
+  return {
+    profile,
+    year,
+    month,
+    eventCount: profile === 'empty' ? 0 : 25,
+    preparation: { elementLoginMs: null, roomNavigationMs: null },
+    defaultView: {
+      durationMs: null,
+      apiResponseCount: 0,
+      apiRangeMaxMs: null,
+      returnedCount: null,
+      renderedCount: null,
+      rangeMatches: false,
+      countMatches: false,
+      usableControlVisible: false,
+      stable: false,
+    },
+    coldList: makeEmptyPerformanceReport(year, month).coldList,
+    refreshSetup: makeEmptyActionSample(),
+    refresh: makeEmptyActionSample(),
+    detailSamples: [],
+  };
+}
+
+function makeEmptyOrdinaryPerformanceReport(
+  emptyMonth: { year: number; month: number },
+  populatedMonth: { year: number; month: number },
+): OrdinaryPerformanceReport {
+  return {
+    version: 3,
+    viewportWidth: 1280,
+    viewportHeight: 800,
+    calendarDays: 31,
+    timezone: 'Europe/Stockholm',
+    cases: [
+      makeEmptyOrdinaryPerformanceCase(
+        'empty',
+        emptyMonth.year,
+        emptyMonth.month,
+      ),
+      makeEmptyOrdinaryPerformanceCase(
+        'events-25',
+        populatedMonth.year,
+        populatedMonth.month,
+      ),
+    ],
+    apiResponses: [],
+    blockedRequestCount: 0,
+    pageErrorCount: 0,
+    pageErrorClass: 'none',
+  };
+}
+
 function classifyPerformancePageError(error: Error): PerformancePageErrorClass {
   switch (error.name) {
     case 'Error':
@@ -932,10 +1063,10 @@ function classifyPerformancePageError(error: Error): PerformancePageErrorClass {
   }
 }
 
-function readPerformanceMonth(): { year: number; month: number } {
-  const match = /^(\d{4})-(\d{2})$/u.exec(
-    process.env.ELEMENT_ACCEPTANCE_PERFORMANCE_MONTH ?? '',
-  );
+function readPerformanceMonth(
+  environmentName = 'ELEMENT_ACCEPTANCE_PERFORMANCE_MONTH',
+): { year: number; month: number } {
+  const match = /^(\d{4})-(\d{2})$/u.exec(process.env[environmentName] ?? '');
   if (!match) throw new Error('Element performance month is unavailable');
   const year = Number(match[1]);
   const month = Number(match[2]);
@@ -951,12 +1082,30 @@ function readPerformanceMonth(): { year: number; month: number } {
   return { year, month };
 }
 
-function makePerformanceTitles(runId: string, attempt: string): string[] {
+function readOrdinaryPerformanceMonths(): {
+  empty: { year: number; month: number };
+  populated: { year: number; month: number };
+} {
+  const populated = readPerformanceMonth();
+  const empty = readPerformanceMonth(
+    'ELEMENT_ACCEPTANCE_PERFORMANCE_EMPTY_MONTH',
+  );
+  if (empty.year === populated.year && empty.month === populated.month) {
+    throw new Error('Element empty-range month must differ from seed month');
+  }
+  return { empty, populated };
+}
+
+function makePerformanceTitles(
+  runId: string,
+  attempt: string,
+  count = 250,
+): string[] {
   if (!/^\d{1,20}$/u.test(runId) || !/^\d{1,6}$/u.test(attempt)) {
     throw new Error('Element performance run identity is unavailable');
   }
   return Array.from(
-    { length: 250 },
+    { length: count },
     (_, index) =>
       `Performance ${runId}-${attempt}-${String(index + 1).padStart(3, '0')}`,
   );
@@ -972,10 +1121,21 @@ function performanceRangeExpectation(
   start: number;
   end: number;
 } {
-  if (sample === 'cold-list') {
+  if (
+    sample === 'cold-list' ||
+    sample.endsWith('-cold') ||
+    sample.endsWith('-refresh') ||
+    sample.startsWith('events-25-details-')
+  ) {
     return {
       rangeClass: 'list31',
       ...performanceMonthRange(year, month, 'list'),
+    };
+  }
+  if (sample.endsWith('-refresh-setup')) {
+    return {
+      rangeClass: 'month-padded',
+      ...performanceMonthRange(year, month, 'month'),
     };
   }
   if (sample === 'overflow-day') {
@@ -1311,7 +1471,7 @@ async function readStableList(
   expectedTitles: readonly string[],
 ) {
   const rows = frame.locator('li[aria-label]');
-  await expect(rows).toHaveCount(250);
+  await expect(rows).toHaveCount(expectedTitles.length);
   const body = frame.locator('body');
   return measureStableDom(body, () =>
     body.evaluate((bodyElement, expected) => {
@@ -1333,6 +1493,21 @@ async function readStableList(
           root.clientWidth,
       };
     }, expectedTitles),
+  );
+}
+
+async function readStableRowCount(frame: FrameLocator) {
+  const body = frame.locator('body');
+  return measureStableDom(body, () =>
+    body.evaluate((bodyElement) => {
+      const root = bodyElement.ownerDocument.documentElement;
+      return {
+        renderedCount: bodyElement.querySelectorAll('li[aria-label]').length,
+        horizontalOverflow:
+          Math.max(root.scrollWidth, bodyElement.scrollWidth) >
+          root.clientWidth,
+      };
+    }),
   );
 }
 
@@ -1776,23 +1951,19 @@ test('Element Web members share events and enforce room authorization', async ({
   }
 });
 
-test('Element Web measures the 250-event calendar performance pilot', async ({
+test('Element Web measures the ordinary 0-and-25-event calendar profile', async ({
   browser,
 }) => {
   test.setTimeout(360_000);
-  const { year, month } = readPerformanceMonth();
+  const months = readOrdinaryPerformanceMonths();
   fixture = readFixture();
-  const expectedTitles = makePerformanceTitles(
-    process.env.GITHUB_RUN_ID ?? '',
-    process.env.GITHUB_RUN_ATTEMPT ?? '',
+  const runId = process.env.GITHUB_RUN_ID ?? '';
+  const attempt = process.env.GITHUB_RUN_ATTEMPT ?? '';
+  const report = makeEmptyOrdinaryPerformanceReport(
+    months.empty,
+    months.populated,
   );
-  const expectedTitleSet = new Set(expectedTitles);
-  const expectedDayTitleSet = new Set(
-    expectedTitles.filter((_, index) => index % 31 === 0),
-  );
-  const report = makeEmptyPerformanceReport(year, month);
   recordPerformancePilot('started', report);
-
   const allowedOrigins = new Set([
     new URL(fixture.elementUrl).origin,
     new URL(fixture.homeserverUrl).origin,
@@ -1801,625 +1972,484 @@ test('Element Web measures the 250-event calendar performance pilot', async ({
     new URL(fixture.widgetUrl).origin,
   ]);
   const initialDate = localCalendarDate(new Date());
-  let context: BrowserContext | undefined;
-  let page: Page | undefined;
-  let observer: PerformanceApiObserver | undefined;
-  let blockedRequestCount = 0;
-  let pageErrorCount = 0;
-  let pageErrorClass: PerformancePageErrorClass = 'none';
+  let roomContextRecorded = false;
   let failureCode:
     | 'performance-setup-failed'
     | 'performance-widget-open-failed'
     | 'performance-host-layout-failed'
     | 'performance-range-selection-failed'
     | 'performance-cold-list-failed'
-    | 'performance-warmup-failed'
     | 'performance-view-sample-failed'
-    | 'performance-overflow-failed'
     | 'performance-details-failed'
     | 'performance-egress-blocked'
     | 'performance-page-error'
     | 'performance-threshold-exceeded' = 'performance-setup-failed';
 
-  const syncApiRows = () => {
-    report.apiResponses = observer?.rows() ?? report.apiResponses;
-  };
-
-  try {
-    recordRuntimeVersions(browser.version());
-    context = await browser.newContext({
+  const runCase = async (caseReport: OrdinaryPerformanceCase) => {
+    const expectedTitles = makePerformanceTitles(
+      runId,
+      attempt,
+      caseReport.eventCount,
+    );
+    const expectedTitleSet = new Set(expectedTitles);
+    const context = await browser.newContext({
       locale: 'en-US',
       timezoneId: 'Europe/Stockholm',
       viewport: { width: 1280, height: 800 },
     });
+    let page: Page | undefined;
+    let observer: PerformanceApiObserver | undefined;
     context.on('page', (openedPage) => {
       openedPage.on('pageerror', (error) => {
-        pageErrorCount = Math.min(pageErrorCount + 1, 100_000);
-        if (pageErrorClass === 'none') {
-          pageErrorClass = classifyPerformancePageError(error);
+        report.pageErrorCount = Math.min(
+          (report.pageErrorCount ?? 0) + 1,
+          100_000,
+        );
+        if (report.pageErrorClass === 'none') {
+          report.pageErrorClass = classifyPerformancePageError(error);
         }
       });
     });
-    await context.route('**/*', async (route) => {
-      let requestOrigin: string;
-      try {
-        requestOrigin = new URL(route.request().url()).origin;
-      } catch {
-        blockedRequestCount = Math.min(blockedRequestCount + 1, 100_000);
-        await route.abort('blockedbyclient');
-        return;
-      }
-      if (!allowedOrigins.has(requestOrigin)) {
-        blockedRequestCount = Math.min(blockedRequestCount + 1, 100_000);
-        await route.abort('blockedbyclient');
-        return;
-      }
-      await route.continue();
-    });
 
-    const loginStartedAt = performance.now();
-    page = await authenticateInElement(context, fixture.users.memberA);
-    report.preparation.elementLoginMs = elapsedMilliseconds(loginStartedAt);
-
-    activePhase = 'member-a-room-navigation';
-    const roomStartedAt = performance.now();
-    const roomResult = await openMemberARoomWithDiagnostics(
-      page,
-      fixture.roomName,
-      fixture.teamRoomId,
-      fixture.users.memberA.userId,
-    );
-    report.preparation.roomNavigationMs = elapsedMilliseconds(roomStartedAt);
-    record(activePhase, roomResult.navigationCompleted ? 'passed' : 'failed');
-    recordMemberARoomObservation(roomResult);
-    const element = requireMemberARoom(roomResult);
-
-    observer = createPerformanceApiObserver(
-      page,
-      year,
-      month,
-      expectedTitleSet,
-      expectedDayTitleSet,
-      initialDate,
-    );
-    observer.setSample('cold-list');
-
-    const coldStartedAt = performance.now();
-    failureCode = 'performance-widget-open-failed';
-    const frame = await openCalendarWidget(element, page, {
-      expectWidgetWarning: false,
-      onTiming: (phase, durationMs) => {
-        switch (phase) {
-          case 'activation':
-            report.coldList.activationMs = durationMs;
-            break;
-          case 'capability-approval':
-            report.coldList.capabilityApprovalMs = durationMs;
-            break;
-          case 'identity-approval':
-            report.coldList.identityApprovalMs = durationMs;
-            break;
-          case 'iframe-ready':
-            report.coldList.iframeReadyMs = durationMs;
-            break;
-          case 'widget-startup':
-            report.coldList.widgetStartupMs = durationMs;
-            break;
-        }
-      },
-    });
-
-    failureCode = 'performance-host-layout-failed';
-    const widgetCard = page.locator('.mx_WidgetCard');
-    report.coldList.widgetCardCount = Math.min(await widgetCard.count(), 2);
-    report.coldList.widgetCardVisible =
-      report.coldList.widgetCardCount === 1 &&
-      (await widgetCard.isVisible().catch(() => false));
-    const appDrawer = page.locator('.mx_AppsDrawer');
-    report.coldList.appDrawerCount = Math.min(await appDrawer.count(), 2);
-    report.coldList.placement = report.coldList.widgetCardVisible
-      ? 'widget-card'
-      : report.coldList.appDrawerCount > 0
-        ? 'apps-drawer'
-        : 'unknown';
-    const hostIframe = page.locator(
-      '#mx_PersistedElement_container iframe[title="Matrix Calendar"]',
-    );
-    await hostIframe
-      .first()
-      .waitFor({ state: 'attached', timeout: 30_000 })
-      .catch(() => {});
-    report.coldList.persistedHostFrameCount = Math.min(
-      await hostIframe.count(),
-      2,
-    );
-    report.coldList.persistedHostFrameVisible =
-      report.coldList.persistedHostFrameCount === 1 &&
-      (await hostIframe
-        .first()
-        .isVisible()
-        .catch(() => false));
-    expect(report.coldList.widgetCardCount).toBe(1);
-    expect(report.coldList.widgetCardVisible).toBe(true);
-    expect(report.coldList.placement).toBe('widget-card');
-    expect(report.coldList.persistedHostFrameCount).toBe(1);
-    expect(report.coldList.persistedHostFrameVisible).toBe(true);
-
-    failureCode = 'performance-range-selection-failed';
-    const rangeSelectionStartedAt = performance.now();
-    await fillDatePicker(
-      frame,
-      frame.getByRole('button', {
-        name: /^Choose date range, selected range is/u,
-      }),
-      [year, month, 1],
-      [year, month, 31],
-    );
-
-    failureCode = 'performance-cold-list-failed';
-    await observer.waitForRoomEvents('cold-list', 'list31');
-    const listRows = frame.locator('li[aria-label]');
-    await expect(listRows).toHaveCount(250);
-    const body = frame.locator('body');
-    const listMeasurement = await measureStableDom(body, () =>
-      body.evaluate((bodyElement, expected) => {
-        const root = bodyElement.ownerDocument.documentElement;
-        const titles = Array.from(
-          bodyElement.querySelectorAll('li[aria-label]'),
-          (element) => element.getAttribute('aria-label') ?? '',
-        );
-        const actual = new Set(titles);
-        const expectedSet = new Set(expected);
-        return {
-          renderedCount: titles.length,
-          identitiesMatch:
-            actual.size === expectedSet.size &&
-            titles.length === expected.length &&
-            expected.every((title) => actual.has(title)),
-          horizontalOverflow:
-            Math.max(root.scrollWidth, bodyElement.scrollWidth) >
-            root.clientWidth,
-        };
-      }, expectedTitles),
-    );
-    await observer.waitForSettled('cold-list');
-    report.coldList.rangeSelectionMs = elapsedMilliseconds(
-      rangeSelectionStartedAt,
-    );
-    report.coldList.durationMs = elapsedMilliseconds(coldStartedAt);
-    const coldRows = observer.rowsFor('cold-list');
-    const coldEvents = coldRows.filter((row) => row.endpoint === 'events');
-    const selectedRoomRows = coldEvents.filter(
-      (row) =>
-        row.target === 'room' &&
-        row.calendarMatches === true &&
-        row.rangeClass === 'list31' &&
-        row.rangeMatches === true,
-    );
-    const openIdRows = coldRows.filter((row) => row.endpoint === 'openid');
-    report.coldList.openIdResponseCount = openIdRows.length;
-    report.coldList.openIdMaxMs = openIdRows.length
-      ? Math.max(...openIdRows.map((row) => row.durationMs))
-      : null;
-    report.coldList.apiRangeMaxMs = coldEvents.length
-      ? Math.max(...coldEvents.map((row) => row.durationMs))
-      : null;
-    report.coldList.selectedRoomResponseCount = selectedRoomRows.length;
-    report.coldList.returnedCount =
-      selectedRoomRows.length === 1 ? selectedRoomRows[0].eventCount : null;
-    report.coldList.renderedCount = listMeasurement.second.renderedCount;
-    report.coldList.expectedRangeMatches = selectedRoomRows.length === 1;
-    report.coldList.identitiesMatch =
-      selectedRoomRows.length === 1 &&
-      selectedRoomRows[0].expectedTitlesMatch === true &&
-      listMeasurement.second.identitiesMatch;
-    report.coldList.diagnosticsZero =
-      coldEvents.length > 0 &&
-      coldEvents.every((row) => row.diagnosticCount === 0);
-    report.coldList.stable = listMeasurement.stable;
-    report.coldList.horizontalOverflow =
-      listMeasurement.second.horizontalOverflow;
-    failureCode = 'performance-host-layout-failed';
-    const finalFrameDimensions = await hostIframe.evaluate((iframe) => {
-      const rect = iframe.getBoundingClientRect();
-      return {
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-      };
-    });
-    report.coldList.iframeWidth = finalFrameDimensions.width;
-    report.coldList.iframeHeight = finalFrameDimensions.height;
-    report.coldList.hostHorizontalOverflow = await page.evaluate(() => {
-      const root = document.documentElement;
-      const body = document.body;
-      return Math.max(root.scrollWidth, body.scrollWidth) > root.clientWidth;
-    });
-    expect(report.coldList.iframeWidth).toBeGreaterThan(0);
-    expect(report.coldList.iframeHeight).toBeGreaterThan(0);
-    expect(report.coldList.hostHorizontalOverflow).toBe(false);
-    syncApiRows();
-
-    failureCode = 'performance-threshold-exceeded';
-    expect(report.coldList.durationMs).toBeLessThanOrEqual(2000);
-    expect(report.coldList.apiRangeMaxMs).toBeLessThanOrEqual(1000);
-    expect(report.coldList.openIdResponseCount).toBeGreaterThan(0);
-    expect(report.coldList.selectedRoomResponseCount).toBe(1);
-    expect(report.coldList.returnedCount).toBe(250);
-    expect(report.coldList.renderedCount).toBe(250);
-    expect(report.coldList.expectedRangeMatches).toBe(true);
-    expect(report.coldList.identitiesMatch).toBe(true);
-    expect(report.coldList.diagnosticsZero).toBe(true);
-    expect(report.coldList.stable).toBe(true);
-    expect(report.coldList.horizontalOverflow).toBe(false);
-
-    const viewRows = async (
-      sample: PerformanceSampleKey,
-      view: 'list' | 'month',
-      index: number,
-      measurement: {
-        first: {
-          renderedCount: number | null;
-          identitiesMatch: boolean;
-          horizontalOverflow: boolean;
-        };
-        second: {
-          renderedCount: number | null;
-          identitiesMatch: boolean;
-          horizontalOverflow: boolean;
-        };
-        stable: boolean;
-      },
-      durationMs: number,
-    ): Promise<PerformanceViewSample> => {
-      const eventRows =
-        observer?.rowsFor(sample).filter((row) => row.endpoint === 'events') ??
-        [];
-      const roomRows = eventRows.filter(
-        (row) => row.target === 'room' && row.calendarMatches === true,
-      );
-      const expectedRangeClass = view === 'list' ? 'list31' : 'month-padded';
-      const expectedRows = roomRows.filter(
-        (row) =>
-          row.rangeClass === expectedRangeClass && row.rangeMatches === true,
-      );
-      const result: PerformanceViewSample = {
-        index,
-        view,
-        durationMs,
-        apiResponseCount: eventRows.length,
-        apiRangeMaxMs: eventRows.length
-          ? Math.max(...eventRows.map((row) => row.durationMs))
-          : null,
-        roomResponseCount: roomRows.length,
-        returnedCount:
-          expectedRows.length === 1 ? expectedRows[0].eventCount : null,
-        renderedCount: measurement.second.renderedCount,
-        rangeMatches: expectedRows.length === 1,
-        identitiesMatch:
-          expectedRows.length === 1 &&
-          expectedRows[0].expectedTitlesMatch === true &&
-          measurement.second.identitiesMatch,
-        diagnosticsZero:
-          eventRows.length > 0 &&
-          eventRows.every((row) => row.diagnosticCount === 0),
-        stable: measurement.stable,
-        horizontalOverflow: measurement.second.horizontalOverflow,
-      };
-      return result;
-    };
-
-    const switchViewAndWait = async (
-      sample: PerformanceSampleKey,
-      view: 'list' | 'month',
-    ) => {
-      observer?.setSample(sample);
-      const startedAt = performance.now();
-      await frame.getByRole('combobox', { name: /^View/u }).click();
-      await frame
-        .getByRole('option', {
-          name: view === 'list' ? 'List' : 'Month',
-          exact: true,
-        })
-        .click();
-      await observer?.waitForRoomEvents(
-        sample,
-        view === 'list' ? 'list31' : 'month-padded',
-      );
-      const measurement =
-        view === 'list'
-          ? await readStableList(frame, expectedTitles)
-          : await readStableMonth(frame, expectedTitles);
-      await observer?.waitForSettled(sample);
-      return {
-        measurement,
-        durationMs: elapsedMilliseconds(startedAt),
-      };
-    };
-
-    const warmupOrder: Array<'month' | 'list'> = [
-      'month',
-      'list',
-      'month',
-      'list',
-    ];
-    const warmupIndex = { list: 0, month: 0 };
-    for (const view of warmupOrder) {
-      warmupIndex[view] += 1;
-      const index = warmupIndex[view] as 1 | 2;
-      const sample = `warmup-${view}-${index}` as const;
-      failureCode = 'performance-warmup-failed';
-      const placeholder: PerformanceViewSample = {
-        index,
-        view,
-        durationMs: null,
-        apiResponseCount: 0,
-        apiRangeMaxMs: null,
-        roomResponseCount: 0,
-        returnedCount: null,
-        renderedCount: null,
-        rangeMatches: false,
-        identitiesMatch: false,
-        diagnosticsZero: false,
-        stable: false,
-        horizontalOverflow: null,
-      };
-      report.viewWarmups.push(placeholder);
-      const result = await switchViewAndWait(sample, view);
-      Object.assign(
-        placeholder,
-        await viewRows(
-          sample,
-          view,
-          index,
-          result.measurement,
-          result.durationMs,
-        ),
-      );
-      syncApiRows();
-      failureCode = 'performance-threshold-exceeded';
-      expect(placeholder.apiRangeMaxMs).toBeLessThanOrEqual(1000);
-      expect(placeholder.roomResponseCount).toBe(1);
-      expect(placeholder.returnedCount).toBe(250);
-      expect(placeholder.renderedCount).toBe(250);
-      expect(placeholder.rangeMatches).toBe(true);
-      expect(placeholder.identitiesMatch).toBe(true);
-      expect(placeholder.diagnosticsZero).toBe(true);
-      expect(placeholder.stable).toBe(true);
-      expect(placeholder.horizontalOverflow).toBe(false);
-    }
-
-    const measuredOrder: Array<'month' | 'list'> = [
-      'month',
-      'list',
-      'month',
-      'list',
-      'month',
-      'list',
-      'month',
-      'list',
-      'month',
-      'list',
-    ];
-    const measuredIndex = { list: 0, month: 0 };
-    for (const view of measuredOrder) {
-      measuredIndex[view] += 1;
-      const index = measuredIndex[view] as 1 | 2 | 3 | 4 | 5;
-      const sample = `measured-${view}-${index}` as const;
-      failureCode = 'performance-view-sample-failed';
-      const placeholder: PerformanceViewSample = {
-        index,
-        view,
-        durationMs: null,
-        apiResponseCount: 0,
-        apiRangeMaxMs: null,
-        roomResponseCount: 0,
-        returnedCount: null,
-        renderedCount: null,
-        rangeMatches: false,
-        identitiesMatch: false,
-        diagnosticsZero: false,
-        stable: false,
-        horizontalOverflow: null,
-      };
-      report.viewSamples.push(placeholder);
-      const result = await switchViewAndWait(sample, view);
-      Object.assign(
-        placeholder,
-        await viewRows(
-          sample,
-          view,
-          index,
-          result.measurement,
-          result.durationMs,
-        ),
-      );
-      syncApiRows();
-      failureCode = 'performance-threshold-exceeded';
-      expect(placeholder.durationMs).toBeLessThanOrEqual(2000);
-      expect(placeholder.apiRangeMaxMs).toBeLessThanOrEqual(1000);
-      expect(placeholder.roomResponseCount).toBe(1);
-      expect(placeholder.returnedCount).toBe(250);
-      expect(placeholder.renderedCount).toBe(250);
-      expect(placeholder.rangeMatches).toBe(true);
-      expect(placeholder.identitiesMatch).toBe(true);
-      expect(placeholder.diagnosticsZero).toBe(true);
-      expect(placeholder.stable).toBe(true);
-      expect(placeholder.horizontalOverflow).toBe(false);
-    }
-
-    failureCode = 'performance-overflow-failed';
-    observer.setSample('overflow-month');
-    await frame.getByRole('combobox', { name: /^View/u }).click();
-    await frame.getByRole('option', { name: 'Month', exact: true }).click();
-    await observer.waitForRoomEvents('overflow-month', 'month-padded');
-    const monthMeasurement = await readStableMonth(frame, expectedTitles);
-    await observer.waitForSettled('overflow-month');
-    report.overflow.visibleEventCount =
-      monthMeasurement.second.visibleEventCount;
-    report.overflow.collapsedEventCount =
-      monthMeasurement.second.collapsedEventCount;
-    report.overflow.renderedEventCount = monthMeasurement.second.renderedCount;
-    const monthDate = `${year}-${String(month).padStart(2, '0')}-01`;
-    const moreLink = frame.locator(
-      `.fc-daygrid-day[data-date="${monthDate}"] .fc-daygrid-more-link`,
-    );
-    await expect(moreLink).toBeVisible();
-    observer.setSample('overflow-day');
-    await moreLink.click();
-    report.overflow.opened = true;
-    report.overflow.expectedDayEventCount = expectedDayTitleSet.size;
-    await observer.waitForRoomEvents('overflow-day', 'overflow-day');
-    const dayEventButtons = frame.locator('.fc-timegrid-event[role="button"]');
-    await expect(dayEventButtons).toHaveCount(expectedDayTitleSet.size);
-    const dayMeasurement = await measureStableDom(body, () =>
-      body.evaluate(
-        (bodyElement, expected) => {
-          const buttons = Array.from(
-            bodyElement.querySelectorAll('.fc-timegrid-event[role="button"]'),
-            (element) => element.textContent ?? '',
+    try {
+      await context.route('**/*', async (route) => {
+        let requestOrigin: string;
+        try {
+          requestOrigin = new URL(route.request().url()).origin;
+        } catch {
+          report.blockedRequestCount = Math.min(
+            (report.blockedRequestCount ?? 0) + 1,
+            100_000,
           );
-          return {
-            dayEventCount: buttons.length,
-            dayIdentityMatches:
-              buttons.length === expected.length &&
-              expected.every((title) =>
-                buttons.some((text) => text.includes(title)),
-              ),
-          };
-        },
-        [...expectedDayTitleSet],
-      ),
-    );
-    await observer.waitForSettled('overflow-day');
-    report.overflow.dayEventCount = dayMeasurement.second.dayEventCount;
-    report.overflow.dayIdentityMatches =
-      dayMeasurement.second.dayIdentityMatches;
-    report.overflow.stable = dayMeasurement.stable;
-    syncApiRows();
+          await route.abort('blockedbyclient');
+          return;
+        }
+        if (!allowedOrigins.has(requestOrigin)) {
+          report.blockedRequestCount = Math.min(
+            (report.blockedRequestCount ?? 0) + 1,
+            100_000,
+          );
+          await route.abort('blockedbyclient');
+          return;
+        }
+        await route.continue();
+      });
 
-    for (const view of ['month', 'list'] as const) {
-      const sample =
-        view === 'month' ? 'overflow-reset-month' : 'overflow-reset-list';
-      const expectedRangeClass = view === 'month' ? 'month-padded' : 'list31';
-      observer.setSample(sample);
-      await frame.getByRole('combobox', { name: /^View/u }).click();
-      await frame
-        .getByRole('option', {
-          name: view === 'month' ? 'Month' : 'List',
-          exact: true,
-        })
-        .click();
-      await observer.waitForRoomEvents(sample, expectedRangeClass);
-      if (view === 'month') {
-        await readStableMonth(frame, expectedTitles);
-      } else {
-        await readStableList(frame, expectedTitles);
-      }
-      await observer.waitForSettled(sample);
-      syncApiRows();
-    }
+      const loginStartedAt = performance.now();
+      page = await authenticateInElement(context, fixture.users.memberA);
+      caseReport.preparation.elementLoginMs =
+        elapsedMilliseconds(loginStartedAt);
 
-    const openDetails = async (
-      sample: PerformanceSampleKey,
-      index: number,
-      measured: boolean,
-    ): Promise<PerformanceDetailsSample> => {
-      observer?.setSample(sample);
-      const placeholder: PerformanceDetailsSample = {
-        index,
-        durationMs: null,
-        visible: false,
-        titleMatches: false,
-        stable: false,
-        horizontalOverflow: null,
-      };
-      if (measured) report.detailSamples.push(placeholder);
-      else report.detailWarmups.push(placeholder);
-      const startedAt = performance.now();
-      const row = frame.getByRole('listitem', { name: expectedTitles[0] });
-      await row.click();
-      const dialog = frame.getByRole('dialog').last();
-      await expect(dialog).toBeVisible();
-      const title = dialog.getByText(expectedTitles[0], { exact: true });
-      await expect(title).toBeVisible();
-      await observer?.waitForSettled(sample);
-      const detailsMeasurement = await measureStableDom(body, async () => ({
-        visible: await dialog.isVisible().catch(() => false),
-        titleMatches: await title.isVisible().catch(() => false),
-        horizontalOverflow: await readHorizontalOverflow(body),
-      }));
-      placeholder.durationMs = elapsedMilliseconds(startedAt);
-      placeholder.visible = detailsMeasurement.second.visible;
-      placeholder.titleMatches = detailsMeasurement.second.titleMatches;
-      placeholder.stable = detailsMeasurement.stable;
-      placeholder.horizontalOverflow =
-        detailsMeasurement.second.horizontalOverflow;
-      syncApiRows();
-      await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-      await expect(dialog).toBeHidden();
-      return placeholder;
-    };
-
-    for (const index of [1, 2] as const) {
-      failureCode = 'performance-details-failed';
-      const sample = `details-warmup-${index}` as const;
-      const details = await openDetails(sample, index, false);
-      expect(details.visible).toBe(true);
-      expect(details.titleMatches).toBe(true);
-      expect(details.stable).toBe(true);
-    }
-    for (const index of [1, 2, 3, 4, 5] as const) {
-      failureCode = 'performance-details-failed';
-      const sample = `details-${index}` as const;
-      const details = await openDetails(sample, index, true);
-      failureCode = 'performance-threshold-exceeded';
-      expect(details.durationMs).toBeLessThanOrEqual(500);
-      expect(details.visible).toBe(true);
-      expect(details.titleMatches).toBe(true);
-      expect(details.stable).toBe(true);
-      expect(details.horizontalOverflow).toBe(false);
-    }
-
-    report.blockedRequestCount = blockedRequestCount;
-    report.pageErrorCount = pageErrorCount;
-    report.pageErrorClass = pageErrorClass;
-    syncApiRows();
-    failureCode = 'performance-egress-blocked';
-    expect(blockedRequestCount).toBe(0);
-    failureCode = 'performance-page-error';
-    expect(pageErrorCount).toBe(0);
-    failureCode = 'performance-threshold-exceeded';
-    expect(report.overflow.renderedEventCount).toBe(250);
-    expect(report.overflow.expectedDayEventCount).toBe(9);
-    expect(report.overflow.dayEventCount).toBe(
-      report.overflow.expectedDayEventCount,
-    );
-    expect(report.overflow.dayIdentityMatches).toBe(true);
-    expect(report.overflow.stable).toBe(true);
-    for (const response of report.apiResponses) {
-      expect(response.status).toBe(200);
-      expect(response.decoded).toBe(true);
-      expect(response.method).toBe(
-        response.endpoint === 'openid' ? 'POST' : 'GET',
+      activePhase = 'member-a-room-navigation';
+      const roomStartedAt = performance.now();
+      const roomResult = await openMemberARoomWithDiagnostics(
+        page,
+        fixture.roomName,
+        fixture.teamRoomId,
+        fixture.users.memberA.userId,
       );
-      if (response.endpoint !== 'openid') {
-        expect(response.durationMs).toBeLessThanOrEqual(1000);
+      caseReport.preparation.roomNavigationMs =
+        elapsedMilliseconds(roomStartedAt);
+      if (!roomContextRecorded) {
+        record(
+          activePhase,
+          roomResult.navigationCompleted ? 'passed' : 'failed',
+        );
+        recordMemberARoomObservation(roomResult);
+        roomContextRecorded = true;
       }
-      if (response.endpoint === 'events') {
-        expect(response.diagnosticCount).toBe(0);
-        expect(response.rangeMatches).toBe(true);
+      const element = requireMemberARoom(roomResult);
+
+      observer = createPerformanceApiObserver(
+        page,
+        caseReport.year,
+        caseReport.month,
+        expectedTitleSet,
+        new Set(),
+        initialDate,
+      );
+      const defaultSample = `${caseReport.profile}-default` as const;
+      observer.setSample(defaultSample);
+      const coldSample = `${caseReport.profile}-cold` as const;
+      const coldStartedAt = performance.now();
+      failureCode = 'performance-widget-open-failed';
+      const frame = await openCalendarWidget(element, page, {
+        expectWidgetWarning: false,
+        onTiming: (phase, durationMs) => {
+          switch (phase) {
+            case 'activation':
+              caseReport.coldList.activationMs = durationMs;
+              break;
+            case 'capability-approval':
+              caseReport.coldList.capabilityApprovalMs = durationMs;
+              break;
+            case 'identity-approval':
+              caseReport.coldList.identityApprovalMs = durationMs;
+              break;
+            case 'iframe-ready':
+              caseReport.coldList.iframeReadyMs = durationMs;
+              break;
+            case 'widget-startup':
+              caseReport.coldList.widgetStartupMs = durationMs;
+              break;
+          }
+        },
+      });
+
+      failureCode = 'performance-cold-list-failed';
+      await observer.waitForRoomEvents(defaultSample, 'preselection');
+      const defaultMeasurement = await readStableRowCount(frame);
+      await observer.waitForSettled(defaultSample);
+      const defaultEventRows = observer
+        .rowsFor(defaultSample)
+        .filter((row) => row.endpoint === 'events');
+      const defaultRoomRows = defaultEventRows.filter(
+        (row) =>
+          row.target === 'room' &&
+          row.calendarMatches === true &&
+          row.rangeClass === 'preselection' &&
+          row.rangeMatches === true,
+      );
+      const defaultReturnedCount =
+        defaultRoomRows.length === 1 ? defaultRoomRows[0].eventCount : null;
+      const defaultUsableControl = await frame
+        .getByRole('button', { name: 'Create event', exact: true })
+        .isVisible()
+        .catch(() => false);
+      caseReport.defaultView = {
+        durationMs: elapsedMilliseconds(coldStartedAt),
+        apiResponseCount: defaultEventRows.length,
+        apiRangeMaxMs: defaultEventRows.length
+          ? Math.max(...defaultEventRows.map((row) => row.durationMs))
+          : null,
+        returnedCount: defaultReturnedCount,
+        renderedCount: defaultMeasurement.second.renderedCount,
+        rangeMatches: defaultRoomRows.length === 1,
+        countMatches:
+          defaultReturnedCount !== null &&
+          defaultReturnedCount === defaultMeasurement.second.renderedCount,
+        usableControlVisible: defaultUsableControl,
+        stable: defaultMeasurement.stable,
+      };
+      expect(caseReport.defaultView.durationMs).not.toBeNull();
+      expect(caseReport.defaultView.apiResponseCount).toBeGreaterThan(0);
+      expect(caseReport.defaultView.apiRangeMaxMs).not.toBeNull();
+      expect(caseReport.defaultView.apiRangeMaxMs).toBeLessThanOrEqual(1000);
+      expect(caseReport.defaultView.returnedCount).not.toBeNull();
+      expect(caseReport.defaultView.renderedCount).not.toBeNull();
+      expect(caseReport.defaultView.rangeMatches).toBe(true);
+      expect(caseReport.defaultView.countMatches).toBe(true);
+      expect(caseReport.defaultView.usableControlVisible).toBe(true);
+      expect(caseReport.defaultView.stable).toBe(true);
+      observer.setSample(coldSample);
+
+      failureCode = 'performance-host-layout-failed';
+      const widgetCard = page.locator('.mx_WidgetCard');
+      caseReport.coldList.widgetCardCount = Math.min(
+        await widgetCard.count(),
+        2,
+      );
+      caseReport.coldList.widgetCardVisible =
+        caseReport.coldList.widgetCardCount === 1 &&
+        (await widgetCard.isVisible().catch(() => false));
+      const appDrawer = page.locator('.mx_AppsDrawer');
+      caseReport.coldList.appDrawerCount = Math.min(await appDrawer.count(), 2);
+      caseReport.coldList.placement = caseReport.coldList.widgetCardVisible
+        ? 'widget-card'
+        : caseReport.coldList.appDrawerCount > 0
+          ? 'apps-drawer'
+          : 'unknown';
+      const hostIframe = page.locator(
+        '#mx_PersistedElement_container iframe[title="Matrix Calendar"]',
+      );
+      await hostIframe
+        .first()
+        .waitFor({ state: 'attached', timeout: 30_000 })
+        .catch(() => {});
+      caseReport.coldList.persistedHostFrameCount = Math.min(
+        await hostIframe.count(),
+        2,
+      );
+      caseReport.coldList.persistedHostFrameVisible =
+        caseReport.coldList.persistedHostFrameCount === 1 &&
+        (await hostIframe
+          .first()
+          .isVisible()
+          .catch(() => false));
+      expect(caseReport.coldList.widgetCardCount).toBe(1);
+      expect(caseReport.coldList.widgetCardVisible).toBe(true);
+      expect(caseReport.coldList.placement).toBe('widget-card');
+      expect(caseReport.coldList.persistedHostFrameCount).toBe(1);
+      expect(caseReport.coldList.persistedHostFrameVisible).toBe(true);
+
+      failureCode = 'performance-range-selection-failed';
+      const rangeSelectionStartedAt = performance.now();
+      await fillDatePicker(
+        frame,
+        frame.getByRole('button', {
+          name: /^Choose date range, selected range is/u,
+        }),
+        [caseReport.year, caseReport.month, 1],
+        [caseReport.year, caseReport.month, 31],
+      );
+
+      failureCode = 'performance-cold-list-failed';
+      await observer.waitForRoomEvents(coldSample, 'list31');
+      const body = frame.locator('body');
+      const coldMeasurement = await readStableList(frame, expectedTitles);
+      await observer.waitForSettled(coldSample);
+      caseReport.coldList.rangeSelectionMs = elapsedMilliseconds(
+        rangeSelectionStartedAt,
+      );
+      caseReport.coldList.durationMs = elapsedMilliseconds(coldStartedAt);
+      const coldRows = observer.rowsFor(coldSample);
+      const coldEvents = coldRows.filter((row) => row.endpoint === 'events');
+      const coldRoomRows = coldEvents.filter(
+        (row) =>
+          row.target === 'room' &&
+          row.calendarMatches === true &&
+          row.rangeClass === 'list31' &&
+          row.rangeMatches === true,
+      );
+      const openIdRows = [
+        ...observer.rowsFor(defaultSample),
+        ...coldRows,
+      ].filter((row) => row.endpoint === 'openid');
+      caseReport.coldList.openIdResponseCount = openIdRows.length;
+      caseReport.coldList.openIdMaxMs = openIdRows.length
+        ? Math.max(...openIdRows.map((row) => row.durationMs))
+        : null;
+      caseReport.coldList.apiRangeMaxMs = coldEvents.length
+        ? Math.max(...coldEvents.map((row) => row.durationMs))
+        : null;
+      caseReport.coldList.selectedRoomResponseCount = coldRoomRows.length;
+      caseReport.coldList.returnedCount =
+        coldRoomRows.length === 1 ? coldRoomRows[0].eventCount : null;
+      caseReport.coldList.renderedCount = coldMeasurement.second.renderedCount;
+      caseReport.coldList.expectedRangeMatches = coldRoomRows.length === 1;
+      caseReport.coldList.identitiesMatch =
+        coldRoomRows.length === 1 &&
+        coldRoomRows[0].expectedTitlesMatch === true &&
+        coldMeasurement.second.identitiesMatch;
+      caseReport.coldList.diagnosticsZero =
+        coldEvents.length > 0 &&
+        coldEvents.every((row) => row.diagnosticCount === 0);
+      caseReport.coldList.stable = coldMeasurement.stable;
+      caseReport.coldList.horizontalOverflow =
+        coldMeasurement.second.horizontalOverflow;
+
+      failureCode = 'performance-host-layout-failed';
+      const frameDimensions = await hostIframe.evaluate((iframe) => {
+        const rect = iframe.getBoundingClientRect();
+        return {
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        };
+      });
+      caseReport.coldList.iframeWidth = frameDimensions.width;
+      caseReport.coldList.iframeHeight = frameDimensions.height;
+      caseReport.coldList.hostHorizontalOverflow = await page.evaluate(() => {
+        const root = document.documentElement;
+        const hostBody = document.body;
+        return (
+          Math.max(root.scrollWidth, hostBody.scrollWidth) > root.clientWidth
+        );
+      });
+      expect(caseReport.coldList.iframeWidth).toBeGreaterThan(0);
+      expect(caseReport.coldList.iframeHeight).toBeGreaterThan(0);
+      expect(caseReport.coldList.hostHorizontalOverflow).toBe(false);
+
+      failureCode = 'performance-threshold-exceeded';
+      expect(caseReport.coldList.durationMs).toBeLessThanOrEqual(2000);
+      expect(caseReport.coldList.apiRangeMaxMs).toBeLessThanOrEqual(1000);
+      expect(caseReport.coldList.openIdResponseCount).toBeGreaterThan(0);
+      expect(caseReport.coldList.selectedRoomResponseCount).toBe(1);
+      expect(caseReport.coldList.returnedCount).toBe(caseReport.eventCount);
+      expect(caseReport.coldList.renderedCount).toBe(caseReport.eventCount);
+      expect(caseReport.coldList.expectedRangeMatches).toBe(true);
+      expect(caseReport.coldList.identitiesMatch).toBe(true);
+      expect(caseReport.coldList.diagnosticsZero).toBe(true);
+      expect(caseReport.coldList.stable).toBe(true);
+      expect(caseReport.coldList.horizontalOverflow).toBe(false);
+
+      const summarizeAction = (
+        sample: PerformanceSampleKey,
+        rangeClass: 'list31' | 'month-padded',
+        measurement: {
+          second: {
+            renderedCount: number | null;
+            identitiesMatch: boolean;
+            horizontalOverflow: boolean;
+          };
+          stable: boolean;
+        },
+        durationMs: number,
+      ): PerformanceActionSample => {
+        const eventRows = observer
+          .rowsFor(sample)
+          .filter((row) => row.endpoint === 'events');
+        const matchingRoomRows = eventRows.filter(
+          (row) =>
+            row.target === 'room' &&
+            row.calendarMatches === true &&
+            row.rangeClass === rangeClass &&
+            row.rangeMatches === true,
+        );
+        return {
+          durationMs,
+          apiResponseCount: eventRows.length,
+          apiRangeMaxMs: eventRows.length
+            ? Math.max(...eventRows.map((row) => row.durationMs))
+            : null,
+          roomResponseCount: matchingRoomRows.length,
+          returnedCount:
+            matchingRoomRows.length === 1
+              ? matchingRoomRows[0].eventCount
+              : null,
+          renderedCount: measurement.second.renderedCount,
+          rangeMatches: matchingRoomRows.length === 1,
+          identitiesMatch:
+            matchingRoomRows.length === 1 &&
+            matchingRoomRows[0].expectedTitlesMatch === true &&
+            measurement.second.identitiesMatch,
+          diagnosticsZero:
+            eventRows.length > 0 &&
+            eventRows.every((row) => row.diagnosticCount === 0),
+          stable: measurement.stable,
+          horizontalOverflow: measurement.second.horizontalOverflow,
+        };
+      };
+
+      failureCode = 'performance-view-sample-failed';
+      const setupSample = `${caseReport.profile}-refresh-setup` as const;
+      observer.setSample(setupSample);
+      const setupStartedAt = performance.now();
+      await frame.getByRole('combobox', { name: /^View/u }).click();
+      await frame.getByRole('option', { name: 'Month', exact: true }).click();
+      await observer.waitForRoomEvents(setupSample, 'month-padded');
+      const setupMeasurement = await readStableMonth(frame, expectedTitles);
+      await observer.waitForSettled(setupSample);
+      caseReport.refreshSetup = summarizeAction(
+        setupSample,
+        'month-padded',
+        setupMeasurement,
+        elapsedMilliseconds(setupStartedAt),
+      );
+      expect(caseReport.refreshSetup.apiRangeMaxMs).toBeLessThanOrEqual(1000);
+      expect(caseReport.refreshSetup.roomResponseCount).toBe(1);
+      expect(caseReport.refreshSetup.returnedCount).toBe(caseReport.eventCount);
+      expect(caseReport.refreshSetup.renderedCount).toBe(caseReport.eventCount);
+      expect(caseReport.refreshSetup.rangeMatches).toBe(true);
+      expect(caseReport.refreshSetup.identitiesMatch).toBe(true);
+      expect(caseReport.refreshSetup.diagnosticsZero).toBe(true);
+      expect(caseReport.refreshSetup.stable).toBe(true);
+
+      const refreshSample = `${caseReport.profile}-refresh` as const;
+      observer.setSample(refreshSample);
+      const refreshStartedAt = performance.now();
+      await frame.getByRole('combobox', { name: /^View/u }).click();
+      await frame.getByRole('option', { name: 'List', exact: true }).click();
+      await observer.waitForRoomEvents(refreshSample, 'list31');
+      const refreshMeasurement = await readStableList(frame, expectedTitles);
+      await observer.waitForSettled(refreshSample);
+      caseReport.refresh = summarizeAction(
+        refreshSample,
+        'list31',
+        refreshMeasurement,
+        elapsedMilliseconds(refreshStartedAt),
+      );
+      failureCode = 'performance-threshold-exceeded';
+      expect(caseReport.refresh.durationMs).toBeLessThanOrEqual(2000);
+      expect(caseReport.refresh.apiRangeMaxMs).toBeLessThanOrEqual(1000);
+      expect(caseReport.refresh.roomResponseCount).toBe(1);
+      expect(caseReport.refresh.returnedCount).toBe(caseReport.eventCount);
+      expect(caseReport.refresh.renderedCount).toBe(caseReport.eventCount);
+      expect(caseReport.refresh.rangeMatches).toBe(true);
+      expect(caseReport.refresh.identitiesMatch).toBe(true);
+      expect(caseReport.refresh.diagnosticsZero).toBe(true);
+      expect(caseReport.refresh.stable).toBe(true);
+      expect(caseReport.refresh.horizontalOverflow).toBe(false);
+
+      if (caseReport.profile === 'events-25') {
+        for (const index of [1, 2, 3, 4, 5] as const) {
+          failureCode = 'performance-details-failed';
+          const sample = `events-25-details-${index}` as const;
+          observer.setSample(sample);
+          const details: PerformanceDetailsSample = {
+            index,
+            durationMs: null,
+            visible: false,
+            titleMatches: false,
+            stable: false,
+            horizontalOverflow: null,
+          };
+          caseReport.detailSamples.push(details);
+          const detailStartedAt = performance.now();
+          const selectedTitle = expectedTitles[index - 1];
+          const row = frame.getByRole('listitem', { name: selectedTitle });
+          await row.click();
+          const dialog = frame.getByRole('dialog').last();
+          await expect(dialog).toBeVisible();
+          const title = dialog.getByText(selectedTitle, { exact: true });
+          await expect(title).toBeVisible();
+          await observer.waitForSettled(sample);
+          const detailsMeasurement = await measureStableDom(body, async () => ({
+            visible: await dialog.isVisible().catch(() => false),
+            titleMatches: await title.isVisible().catch(() => false),
+            horizontalOverflow: await readHorizontalOverflow(body),
+          }));
+          details.durationMs = elapsedMilliseconds(detailStartedAt);
+          details.visible = detailsMeasurement.second.visible;
+          details.titleMatches = detailsMeasurement.second.titleMatches;
+          details.stable = detailsMeasurement.stable;
+          details.horizontalOverflow =
+            detailsMeasurement.second.horizontalOverflow;
+          failureCode = 'performance-threshold-exceeded';
+          expect(details.durationMs).toBeLessThanOrEqual(500);
+          expect(details.visible).toBe(true);
+          expect(details.titleMatches).toBe(true);
+          expect(details.stable).toBe(true);
+          expect(details.horizontalOverflow).toBe(false);
+          await dialog
+            .getByRole('button', { name: 'Close', exact: true })
+            .click();
+          await expect(dialog).toBeHidden();
+        }
       }
+
+      for (const response of observer.rows()) {
+        expect(response.status).toBe(200);
+        expect(response.decoded).toBe(true);
+        expect(response.method).toBe(
+          response.endpoint === 'openid' ? 'POST' : 'GET',
+        );
+        if (response.endpoint !== 'openid') {
+          expect(response.durationMs).toBeLessThanOrEqual(1000);
+        }
+        if (response.endpoint === 'events') {
+          expect(response.diagnosticCount).toBe(0);
+        }
+      }
+    } finally {
+      if (observer) report.apiResponses.push(...observer.rows());
+      await context.close();
     }
+  };
+
+  try {
+    recordRuntimeVersions(browser.version());
+    for (const caseReport of report.cases) {
+      await runCase(caseReport);
+    }
+    failureCode = 'performance-egress-blocked';
+    expect(report.blockedRequestCount).toBe(0);
+    failureCode = 'performance-page-error';
+    expect(report.pageErrorCount).toBe(0);
+    expect(report.pageErrorClass).toBe('none');
     recordPerformancePilot('passed', report);
   } catch {
-    report.blockedRequestCount = blockedRequestCount;
-    report.pageErrorCount = pageErrorCount;
-    report.pageErrorClass = pageErrorClass;
-    syncApiRows();
     recordPerformancePilot('failed', report, failureCode);
-    throw new Error('Element performance pilot failed');
-  } finally {
-    await context?.close();
+    throw new Error('Element ordinary performance profile failed');
   }
 });
 
@@ -5944,7 +5974,7 @@ function record(
 
 function recordPerformancePilot(
   status: 'started' | 'passed' | 'failed',
-  performanceReport: PerformanceReport,
+  performanceReport: PerformanceReportData,
   failureCode?: string,
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;

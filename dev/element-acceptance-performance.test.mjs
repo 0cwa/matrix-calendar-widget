@@ -6,6 +6,7 @@ import {
   createPerformanceManifestEvent,
   isSafePerformanceManifest,
   next31DayMonth,
+  next31DayMonthAfter,
 } from './element-acceptance-performance.mjs';
 
 test('chooses a future 31-day local calendar month', () => {
@@ -17,6 +18,12 @@ test('chooses a future 31-day local calendar month', () => {
     year: 2026,
     month: 12,
   });
+});
+
+test('chooses a distinct following 31-day month for the empty visible range', () => {
+  assert.deepEqual(next31DayMonthAfter(2026, 12), { year: 2027, month: 1 });
+  assert.deepEqual(next31DayMonthAfter(2027, 1), { year: 2027, month: 3 });
+  assert.throws(() => next31DayMonthAfter(2026, 11));
 });
 
 test('builds exactly 250 unique timed events within all 31 dates', () => {
@@ -39,6 +46,18 @@ test('builds exactly 250 unique timed events within all 31 dates', () => {
       30 * 60_000,
     );
   }
+});
+
+test('builds exactly 25 ordinary events and permits an empty visible-range set', () => {
+  const events = buildPerformanceEvents(2026, 12, '12345', '2', 25);
+  assert.equal(events.length, 25);
+  assert.deepEqual(
+    events.map(({ day }) => day),
+    Array.from({ length: 25 }, (_, index) => index + 1),
+  );
+  assert.equal(new Set(events.map(({ uid }) => uid)).size, 25);
+  assert.equal(buildPerformanceEvents(2026, 12, '12345', '2', 0).length, 0);
+  assert.throws(() => buildPerformanceEvents(2026, 12, '12345', '2', 251));
 });
 
 test('accepts only the fixed run-scoped manifest shape', () => {

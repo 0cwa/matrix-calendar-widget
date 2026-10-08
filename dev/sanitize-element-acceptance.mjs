@@ -1360,6 +1360,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
   let rejectionCategory = 'invalid-stage-record';
   let performanceTerminalStatus;
   const performanceFixturePhaseStatus = new Map();
+  let performanceFixtureSeedCount;
   for (const line of input.split(/\r?\n/u)) {
     if (!line) continue;
 
@@ -1480,11 +1481,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         const passedSeedCleanupConsistent =
           record.status !== 'passed' ||
           performanceFixturePhaseStatus.get('performance-seed') !== 'passed' ||
-          (record.manifestEventCount === 250 &&
+          (record.manifestEventCount === performanceFixtureSeedCount &&
             record.plannedCount === 0 &&
-            record.confirmedCreatedCount === 250 &&
+            record.confirmedCreatedCount === performanceFixtureSeedCount &&
             record.conflictCount === 0 &&
-            record.deletedCount + record.alreadyAbsentCount === 250);
+            record.deletedCount + record.alreadyAbsentCount ===
+              performanceFixtureSeedCount);
         const cleanupInventoryValid =
           record.phase !== 'performance-cleanup' ||
           (typeof record.inventoryAvailable === 'boolean' &&
@@ -1499,7 +1501,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
             (!Number.isInteger(record.count) ||
               record.count < 0 ||
               record.count > 250 ||
-              (record.status === 'passed' && record.count !== 250))) ||
+              (record.status === 'passed' &&
+                record.count !== 25 &&
+                record.count !== 250))) ||
           !cleanupInventoryValid ||
           (record.status === 'failed' &&
             !failureCodes.has(record.failureCode)) ||
@@ -1511,6 +1515,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           throw new SummaryValidationError(rejectionCategory, rejectedPhase);
         }
         performanceFixturePhaseStatus.set(record.phase, record.status);
+        if (record.phase === 'performance-seed' && record.status === 'passed') {
+          performanceFixtureSeedCount = record.count;
+        }
       }
     } else if (Object.hasOwn(record, 'performanceReport')) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
@@ -2152,7 +2159,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         !hasOuterRendererObservation ||
         !Object.hasOwn(record, 'outerRenderBucket') ||
         !OUTER_RENDERER_BUCKETS.has(record.outerRenderBucket) ||
-        OUTER_RENDERER_PRESENCE_FIELDS.some((key) => !Object.hasOwn(record, key))
+        OUTER_RENDERER_PRESENCE_FIELDS.some(
+          (key) => !Object.hasOwn(record, key),
+        )
       ) {
         return false;
       }
@@ -2168,8 +2177,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       ) {
         return false;
       }
-      const [matrixChatShellPresent, roomViewWrapperPresent, roomViewRendererPresent] =
-        OUTER_RENDERER_PRESENCE_FIELDS.map((key) => record[key]);
+      const [
+        matrixChatShellPresent,
+        roomViewWrapperPresent,
+        roomViewRendererPresent,
+      ] = OUTER_RENDERER_PRESENCE_FIELDS.map((key) => record[key]);
       if (record.outerRenderBucket === 'room-page') {
         return (
           matrixChatShellPresent &&
@@ -2434,6 +2446,13 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     if (PERFORMANCE_FIXTURE_FAILURES.has(phase)) {
       const fields = [`phase=${phase}`, `status=${record.status}`];
       if (phase === 'performance-cleanup') {
+        const fixtureProfile =
+          record.manifestEventCount === 25
+            ? 'ordinary-25'
+            : record.manifestEventCount === 250
+              ? 'historical-250-diagnostic-only'
+              : 'unavailable';
+        fields.push(`fixture_profile=${fixtureProfile}`);
         for (const key of PERFORMANCE_CLEANUP_COUNT_FIELDS) {
           fields.push(
             `${key.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`)}=${record[key] ?? 'unavailable'}`,
@@ -2442,6 +2461,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         fields.push(`inventory_available=${record.inventoryAvailable}`);
       } else if (Object.hasOwn(record, 'count')) {
         fields.push(`count=${record.count}`);
+        fields.push(
+          `fixture_profile=${record.count === 25 ? 'ordinary-25' : record.count === 250 ? 'historical-250-diagnostic-only' : 'unavailable'}`,
+        );
       }
       if (Object.hasOwn(record, 'httpStatus')) {
         fields.push(`http_status=${record.httpStatus}`);

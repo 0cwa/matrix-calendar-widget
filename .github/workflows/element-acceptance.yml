@@ -149,17 +149,17 @@ jobs:
           fi
           node dev/element-acceptance-setup.mjs wait
 
-      - name: Seed 250 canonical events for the approved performance pilot
+      - name: Seed 25 canonical events for the ordinary performance profiles
         run: node dev/element-acceptance-performance.mjs seed
 
-      - name: Measure the real Element Web 250-event performance pilot
+      - name: Measure the real Element Web ordinary 0-and-25-event profiles
         run: |
-          if ! yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web measures the 250-event calendar performance pilot" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
-            echo 'Element Web performance pilot failed; see sanitized phase summary.' >&2
+          if ! yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web measures the ordinary 0-and-25-event calendar profile" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+            echo 'Element Web ordinary performance profile failed; see sanitized phase summary.' >&2
             exit 1
           fi
 
-      - name: Remove the synthetic performance events
+      - name: Remove the synthetic ordinary performance events
         if: always()
         run: node dev/element-acceptance-performance.mjs cleanup
 

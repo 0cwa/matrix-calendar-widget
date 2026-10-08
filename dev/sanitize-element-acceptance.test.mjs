@@ -1762,7 +1762,10 @@ test('keeps outer-renderer values closed and distinguishes unavailable from abse
     blockedExternalRequestCount: 0,
     homeserverHttpErrorCount: 0,
   };
-  const absentShell = sanitizeElementAcceptance(JSON.stringify(base), sourceSha);
+  const absentShell = sanitizeElementAcceptance(
+    JSON.stringify(base),
+    sourceSha,
+  );
   assert.match(absentShell, /outer_render_bucket=no-shell/u);
   assert.match(absentShell, /matrix_chat_shell_present=false/u);
 
@@ -2650,10 +2653,10 @@ test('rejects unsafe container diagnostics and diagnostics on other phases', () 
 
 test('sanitizes the fixed performance seed and cleanup phases', () => {
   const completeCleanup = {
-    manifestEventCount: 250,
+    manifestEventCount: 25,
     plannedCount: 0,
-    confirmedCreatedCount: 250,
-    deletedCount: 250,
+    confirmedCreatedCount: 25,
+    deletedCount: 25,
     alreadyAbsentCount: 0,
     conflictCount: 0,
     unresolvedCount: 0,
@@ -2661,7 +2664,7 @@ test('sanitizes the fixed performance seed and cleanup phases', () => {
   };
   const stages = [
     { phase: 'performance-seed', status: 'started' },
-    { phase: 'performance-seed', status: 'passed', count: 250 },
+    { phase: 'performance-seed', status: 'passed', count: 25 },
     { phase: 'performance-cleanup', status: 'started' },
     { phase: 'performance-cleanup', status: 'passed', ...completeCleanup },
   ];
@@ -2669,10 +2672,43 @@ test('sanitizes the fixed performance seed and cleanup phases', () => {
     stages.map((stage) => JSON.stringify(stage)).join('\n'),
     sourceSha,
   );
-  assert.match(summary, /phase=performance-seed status=passed count=250/u);
   assert.match(
     summary,
-    /phase=performance-cleanup status=passed manifest_event_count=250 planned_count=0 confirmed_created_count=250 deleted_count=250 already_absent_count=0 conflict_count=0 unresolved_count=0 inventory_available=true/u,
+    /phase=performance-seed status=passed count=25 fixture_profile=ordinary-25/u,
+  );
+  assert.match(
+    summary,
+    /phase=performance-cleanup status=passed fixture_profile=ordinary-25 manifest_event_count=25 planned_count=0 confirmed_created_count=25 deleted_count=25 already_absent_count=0 conflict_count=0 unresolved_count=0 inventory_available=true/u,
+  );
+  const historical250 = sanitizeElementAcceptance(
+    [
+      { phase: 'performance-seed', status: 'started' },
+      { phase: 'performance-seed', status: 'passed', count: 250 },
+      { phase: 'performance-cleanup', status: 'started' },
+      {
+        phase: 'performance-cleanup',
+        status: 'passed',
+        manifestEventCount: 250,
+        plannedCount: 0,
+        confirmedCreatedCount: 250,
+        deletedCount: 250,
+        alreadyAbsentCount: 0,
+        conflictCount: 0,
+        unresolvedCount: 0,
+        inventoryAvailable: true,
+      },
+    ]
+      .map((stage) => JSON.stringify(stage))
+      .join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    historical250,
+    /phase=performance-seed status=passed count=250 fixture_profile=historical-250-diagnostic-only/u,
+  );
+  assert.match(
+    historical250,
+    /phase=performance-cleanup status=passed fixture_profile=historical-250-diagnostic-only manifest_event_count=250/u,
   );
   const emptyCleanup = sanitizeElementAcceptance(
     [
@@ -2696,7 +2732,7 @@ test('sanitizes the fixed performance seed and cleanup phases', () => {
   );
   assert.match(
     emptyCleanup,
-    /phase=performance-cleanup status=passed manifest_event_count=0 planned_count=0 confirmed_created_count=0 deleted_count=0 already_absent_count=0 conflict_count=0 unresolved_count=0 inventory_available=true/u,
+    /phase=performance-cleanup status=passed fixture_profile=unavailable manifest_event_count=0 planned_count=0 confirmed_created_count=0 deleted_count=0 already_absent_count=0 conflict_count=0 unresolved_count=0 inventory_available=true/u,
   );
   const unavailableCleanup = sanitizeElementAcceptance(
     [
@@ -2721,7 +2757,7 @@ test('sanitizes the fixed performance seed and cleanup phases', () => {
   );
   assert.match(
     unavailableCleanup,
-    /phase=performance-cleanup status=failed manifest_event_count=unavailable planned_count=unavailable confirmed_created_count=unavailable deleted_count=unavailable already_absent_count=unavailable conflict_count=unavailable unresolved_count=unavailable inventory_available=false failure_code=manifest-invalid/u,
+    /phase=performance-cleanup status=failed fixture_profile=unavailable manifest_event_count=unavailable planned_count=unavailable confirmed_created_count=unavailable deleted_count=unavailable already_absent_count=unavailable conflict_count=unavailable unresolved_count=unavailable inventory_available=false failure_code=manifest-invalid/u,
   );
   const partialCleanup = sanitizeElementAcceptance(
     [
@@ -2746,7 +2782,7 @@ test('sanitizes the fixed performance seed and cleanup phases', () => {
   );
   assert.match(
     partialCleanup,
-    /phase=performance-cleanup status=failed manifest_event_count=250 planned_count=1 confirmed_created_count=200 deleted_count=150 already_absent_count=20 conflict_count=1 unresolved_count=78 inventory_available=true failure_code=cleanup-incomplete/u,
+    /phase=performance-cleanup status=failed fixture_profile=historical-250-diagnostic-only manifest_event_count=250 planned_count=1 confirmed_created_count=200 deleted_count=150 already_absent_count=20 conflict_count=1 unresolved_count=78 inventory_available=true failure_code=cleanup-incomplete/u,
   );
 });
 

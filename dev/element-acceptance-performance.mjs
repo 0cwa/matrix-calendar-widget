@@ -58,7 +58,40 @@ export function next31DayMonth(now = new Date()) {
   throw new Error('No 31-day month found in bounded search');
 }
 
-export function buildPerformanceEvents(year, month, runId, attempt) {
+export function next31DayMonthAfter(year, month) {
+  if (
+    !Number.isInteger(year) ||
+    year < 2020 ||
+    year > 2200 ||
+    !Number.isInteger(month) ||
+    month < 1 ||
+    month > 12 ||
+    daysInMonth(year, month) !== 31
+  ) {
+    throw new Error('Invalid 31-day source month');
+  }
+  let nextYear = year;
+  let nextMonth = month;
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    nextMonth += 1;
+    if (nextMonth === 13) {
+      nextMonth = 1;
+      nextYear += 1;
+    }
+    if (daysInMonth(nextYear, nextMonth) === 31) {
+      return { year: nextYear, month: nextMonth };
+    }
+  }
+  throw new Error('No following 31-day month found in bounded search');
+}
+
+export function buildPerformanceEvents(
+  year,
+  month,
+  runId,
+  attempt,
+  count = MAX_EVENTS,
+) {
   if (
     !Number.isInteger(year) ||
     year < 2020 ||
@@ -68,12 +101,15 @@ export function buildPerformanceEvents(year, month, runId, attempt) {
     month > 12 ||
     daysInMonth(year, month) !== 31 ||
     !/^\d{1,20}$/u.test(runId) ||
-    !/^\d{1,6}$/u.test(attempt)
+    !/^\d{1,6}$/u.test(attempt) ||
+    !Number.isInteger(count) ||
+    count < 0 ||
+    count > MAX_EVENTS
   ) {
     throw new Error('Invalid fixed performance event plan');
   }
 
-  return Array.from({ length: MAX_EVENTS }, (_, index) => {
+  return Array.from({ length: count }, (_, index) => {
     const day = (index % 31) + 1;
     const slot = Math.floor(index / 31);
     const startMinute = 8 * 60 + slot * 45;
@@ -501,6 +537,8 @@ async function seed() {
   );
   const { runId, attempt } = manifestIdentity();
   const { year, month } = next31DayMonth();
+  const emptyMonth = next31DayMonthAfter(year, month);
+  const eventCount = 25;
   let createdCount = 0;
   let httpStatus;
   record('performance-seed', 'started');
@@ -524,7 +562,13 @@ async function seed() {
     const { ICalendarEventCodec } = loadServerClasses();
     const codec = new ICalendarEventCodec();
     const collectionUrl = calendarCollectionUrl();
-    const events = buildPerformanceEvents(year, month, runId, attempt);
+    const events = buildPerformanceEvents(
+      year,
+      month,
+      runId,
+      attempt,
+      eventCount,
+    );
     monthManifest.events = events.map((_, index) => ({
       resourceName: `element-performance-${runId}-${attempt}-${String(index + 1).padStart(3, '0')}.ics`,
       state: 'planned',
@@ -581,7 +625,7 @@ async function seed() {
     }
     appendFileSync(
       githubEnv,
-      `ELEMENT_ACCEPTANCE_PERFORMANCE_MONTH=${year}-${String(month).padStart(2, '0')}\n`,
+      `ELEMENT_ACCEPTANCE_PERFORMANCE_MONTH=${year}-${String(month).padStart(2, '0')}\nELEMENT_ACCEPTANCE_PERFORMANCE_EMPTY_MONTH=${emptyMonth.year}-${String(emptyMonth.month).padStart(2, '0')}\n`,
       {
         encoding: 'utf8',
         mode: 0o600,
