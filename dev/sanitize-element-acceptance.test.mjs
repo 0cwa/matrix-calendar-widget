@@ -10,6 +10,49 @@ import {
 } from './sanitize-element-acceptance.mjs';
 
 const sourceSha = 'a'.repeat(40);
+const g6PassedTitleDiagnostic = {
+  neighborEditedRowVisible: true,
+  neighborPatchTitleOutcome: 'matched',
+  neighborCanonicalTitleReadbackOutcome: 'not-needed',
+};
+const g6SidePanelToolbarObserved = {
+  managementToolbarNavCountCapped: 1,
+  managementToolbarNavVisibility: 'visible',
+  createEventButtonCountCapped: 1,
+  createEventButtonVisibility: 'visible',
+  createEventButtonEnabled: 'disabled',
+};
+const g6KeyboardFocusDiagnostic = {
+  editActionCountCapped: 1,
+  editActionVisibility: 'visible',
+  editActionEnabled: 'enabled',
+  deleteActionCountCapped: 1,
+  deleteActionVisibility: 'visible',
+  deleteActionEnabled: 'enabled',
+  closeActionCountCapped: 1,
+  closeActionVisibility: 'visible',
+  closeActionEnabled: 'enabled',
+  initialDetailsFocusTarget: 'dialog-content',
+  keyboardFrameHasFocus: true,
+  detailsTabFocusObservations: Array.from({ length: 12 }, () => ({
+    activeTarget: 'other',
+    frameHasFocus: true,
+  })),
+  escapeAttempted: true,
+};
+const g6ObservedPostSaveList = {
+  neighborListRefreshOutcome: 'decoded',
+  neighborListRefreshHttpStatus: 200,
+  neighborListRefreshEventCountCapped: 1,
+  neighborListRefreshEventCountOverflow: false,
+  neighborListRefreshEditedTitleMatches: true,
+  neighborListUiObservation: 'observed',
+  neighborListLoadingVisible: false,
+  neighborListErrorVisible: false,
+  neighborListEditedRowVisible: false,
+  neighborEditedRowCountCapped: 0,
+  neighborEditedRowCountOverflow: false,
+};
 
 function projectionDiagnosticCounts(overrides = {}) {
   return {
@@ -2406,6 +2449,1061 @@ test('rejects unsafe container diagnostics and diagnostics on other phases', () 
   for (const record of rejectedRecords) {
     assert.throws(
       () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
+test('formats bounded Element client acceptance evidence', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-unsupported-preservation',
+      status: 'passed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      supportedNeighborEdited: true,
+      canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
+      ...g6PassedTitleDiagnostic,
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /phase=g6-unsupported-preservation status=passed/u);
+  assert.match(summary, /projection_http_status=200/u);
+  assert.match(summary, /count=1/u);
+  assert.match(summary, /unsupported_warning_visible=true/u);
+  assert.match(summary, /neighbor_patch_title_outcome=matched/u);
+  assert.match(
+    summary,
+    /neighbor_canonical_title_readback_outcome=not-needed/u,
+  );
+  assert.doesNotMatch(summary, /G6 neighbor|uid|calendarId|private|SUMMARY:/u);
+});
+
+test('keeps failed neighbor readback failed while formatting finite title diagnostics', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-unsupported-preservation',
+      status: 'failed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      neighborCanonicalTitleReadbackHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      neighborEditedRowVisible: false,
+      supportedNeighborEdited: false,
+      canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: false,
+      neighborUpdateIdentityMatches: false,
+      neighborPatchTitleOutcome: 'matched',
+      neighborCanonicalTitleReadbackOutcome: 'matched',
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /phase=g6-unsupported-preservation status=failed/u);
+  assert.match(summary, /neighbor_patch_title_outcome=matched/u);
+  assert.match(summary, /neighbor_canonical_title_readback_outcome=matched/u);
+  assert.match(summary, /neighbor_canonical_title_readback_http_status=200/u);
+  assert.doesNotMatch(summary, /G6 neighbor|event title|SUMMARY:/u);
+});
+
+test('distinguishes a decoded edited event from an absent rendered row', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-unsupported-preservation',
+      status: 'failed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      neighborCanonicalTitleReadbackHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      neighborEditedRowVisible: false,
+      supportedNeighborEdited: false,
+      canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
+      neighborPatchTitleOutcome: 'matched',
+      neighborCanonicalTitleReadbackOutcome: 'matched',
+      ...g6ObservedPostSaveList,
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /neighbor_list_refresh_outcome=decoded/u);
+  assert.match(summary, /neighbor_list_refresh_http_status=200/u);
+  assert.match(summary, /neighbor_list_refresh_event_count_capped=1/u);
+  assert.match(summary, /neighbor_list_refresh_edited_title_matches=true/u);
+  assert.match(summary, /neighbor_list_ui_observation=observed/u);
+  assert.match(summary, /neighbor_list_loading_visible=false/u);
+  assert.match(summary, /neighbor_list_error_visible=false/u);
+  assert.match(summary, /neighbor_list_edited_row_visible=false/u);
+  assert.match(summary, /neighbor_edited_row_count_capped=0/u);
+  assert.match(summary, /neighbor_edited_row_visible=false/u);
+  assert.match(summary, /status=failed/u);
+  assert.doesNotMatch(summary, /Matrix Calendar|event title|SUMMARY:/u);
+});
+
+test('records an unobserved post-save response without treating it as an empty list', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-unsupported-preservation',
+      status: 'failed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      neighborEditedRowVisible: false,
+      supportedNeighborEdited: false,
+      canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
+      neighborPatchTitleOutcome: 'matched',
+      neighborCanonicalTitleReadbackOutcome: 'matched',
+      neighborCanonicalTitleReadbackHttpStatus: 200,
+      neighborListRefreshOutcome: 'not-observed',
+      neighborListRefreshHttpStatus: null,
+      neighborListUiObservation: 'observed',
+      neighborListLoadingVisible: true,
+      neighborListErrorVisible: false,
+      neighborListEditedRowVisible: false,
+      neighborEditedRowCountCapped: 0,
+      neighborEditedRowCountOverflow: false,
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /neighbor_list_refresh_outcome=not-observed/u);
+  assert.match(summary, /neighbor_list_refresh_http_status=null/u);
+  assert.match(summary, /neighbor_list_loading_visible=true/u);
+  assert.doesNotMatch(summary, /neighbor_list_refresh_edited_title_matches=/u);
+});
+
+test('accepts fixed pending, failed, and overflow post-save response outcomes', () => {
+  const base = {
+    phase: 'g6-unsupported-preservation',
+    status: 'failed',
+    projectionHttpStatus: 200,
+    canonicalBeforeHttpStatus: 200,
+    neighborPatchHttpStatus: 204,
+    canonicalAfterHttpStatus: 200,
+    count: 1,
+    unsupportedWarningVisible: true,
+    unsupportedRowOmitted: true,
+    supportedNeighborVisible: true,
+    canonicalSnapshotAvailable: true,
+    neighborEditedRowVisible: false,
+    supportedNeighborEdited: false,
+    canonicalUnsupportedObjectUnchanged: true,
+    neighborOwnershipUpdated: false,
+    neighborUpdateIdentityMatches: false,
+    neighborPatchTitleOutcome: 'matched',
+    neighborCanonicalTitleReadbackOutcome: 'unavailable',
+    neighborListUiObservation: 'unavailable',
+  };
+  const records = [
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decoding',
+      neighborListRefreshHttpStatus: 200,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'unexpected-status',
+      neighborListRefreshHttpStatus: 503,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decode-error',
+      neighborListRefreshHttpStatus: 200,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'invalid-response',
+      neighborListRefreshHttpStatus: 200,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decoded-overflow',
+      neighborListRefreshHttpStatus: 200,
+      neighborListRefreshEventCountCapped: 100,
+      neighborListRefreshEventCountOverflow: true,
+    },
+  ];
+  for (const record of records) {
+    const summary = sanitizeElementAcceptance(
+      JSON.stringify(record),
+      sourceSha,
+    );
+    assert.ok(
+      summary.includes(
+        `neighbor_list_refresh_outcome=${record.neighborListRefreshOutcome}`,
+      ),
+    );
+    assert.match(summary, /neighbor_list_ui_observation=unavailable/u);
+    assert.doesNotMatch(summary, /Matrix Calendar|event title|SUMMARY:/u);
+    if (record.neighborListRefreshOutcome === 'decoded-overflow') {
+      assert.match(summary, /neighbor_list_refresh_event_count_capped=100/u);
+      assert.match(summary, /neighbor_list_refresh_event_count_overflow=true/u);
+    }
+  }
+});
+
+test('rejects malformed or contradictory post-save list observations', () => {
+  const base = {
+    phase: 'g6-unsupported-preservation',
+    status: 'failed',
+    projectionHttpStatus: 200,
+    canonicalBeforeHttpStatus: 200,
+    neighborPatchHttpStatus: 204,
+    canonicalAfterHttpStatus: 200,
+    count: 1,
+    unsupportedWarningVisible: true,
+    unsupportedRowOmitted: true,
+    supportedNeighborVisible: true,
+    canonicalSnapshotAvailable: true,
+    neighborEditedRowVisible: false,
+    supportedNeighborEdited: false,
+    canonicalUnsupportedObjectUnchanged: true,
+    neighborOwnershipUpdated: true,
+    neighborUpdateIdentityMatches: true,
+    neighborPatchTitleOutcome: 'matched',
+    neighborCanonicalTitleReadbackOutcome: 'unavailable',
+    neighborListUiObservation: 'observed',
+    neighborListLoadingVisible: false,
+    neighborListErrorVisible: false,
+    neighborListEditedRowVisible: false,
+    neighborEditedRowCountCapped: 0,
+    neighborEditedRowCountOverflow: false,
+  };
+  const invalidRecords = [
+    {
+      ...base,
+      neighborListRefreshOutcome: 'not-observed',
+      neighborListRefreshHttpStatus: 200,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decoded',
+      neighborListRefreshHttpStatus: 200,
+      neighborListRefreshEventCountOverflow: false,
+      neighborListRefreshEditedTitleMatches: true,
+      neighborListEditedRowVisible: true,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decoded-overflow',
+      neighborListRefreshHttpStatus: 200,
+      neighborListRefreshEventCountCapped: 100,
+      neighborListRefreshEventCountOverflow: true,
+      neighborListRefreshEditedTitleMatches: false,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decoded',
+      neighborListRefreshHttpStatus: 200,
+      neighborListRefreshEventCountCapped: 1,
+      neighborListRefreshEventCountOverflow: false,
+      neighborListRefreshEditedTitleMatches: true,
+      neighborEditedRowVisible: true,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'unexpected-status',
+      neighborListRefreshHttpStatus: 200,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decoded',
+      neighborListRefreshHttpStatus: 200,
+      neighborListRefreshEventCountCapped: 1,
+      neighborListRefreshEventCountOverflow: false,
+      neighborListRefreshEditedTitleMatches: 'private title',
+    },
+  ];
+
+  for (const record of invalidRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
+test('does not require canonical readback after visible UI readback when another edit gate fails', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-unsupported-preservation',
+      status: 'failed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      neighborEditedRowVisible: true,
+      supportedNeighborEdited: false,
+      canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: false,
+      neighborUpdateIdentityMatches: false,
+      neighborPatchTitleOutcome: 'matched',
+      neighborCanonicalTitleReadbackOutcome: 'not-needed',
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /phase=g6-unsupported-preservation status=failed/u);
+  assert.match(summary, /neighbor_edited_row_visible=true/u);
+  assert.match(
+    summary,
+    /neighbor_canonical_title_readback_outcome=not-needed/u,
+  );
+  assert.doesNotMatch(summary, /event title|SUMMARY:/u);
+});
+
+test('rejects malformed or contradictory G6 title readback diagnostics', () => {
+  const base = {
+    phase: 'g6-unsupported-preservation',
+    status: 'passed',
+    projectionHttpStatus: 200,
+    canonicalBeforeHttpStatus: 200,
+    neighborPatchHttpStatus: 204,
+    canonicalAfterHttpStatus: 200,
+    count: 1,
+    unsupportedWarningVisible: true,
+    unsupportedRowOmitted: true,
+    supportedNeighborVisible: true,
+    canonicalSnapshotAvailable: true,
+    neighborEditedRowVisible: true,
+    supportedNeighborEdited: true,
+    canonicalUnsupportedObjectUnchanged: true,
+    neighborOwnershipUpdated: true,
+    neighborUpdateIdentityMatches: true,
+    neighborPatchTitleOutcome: 'matched',
+    neighborCanonicalTitleReadbackOutcome: 'not-needed',
+  };
+  const invalidRecords = [
+    { ...base, neighborPatchTitleOutcome: 'private title' },
+    {
+      ...base,
+      neighborCanonicalTitleReadbackOutcome: 'mismatched',
+      neighborCanonicalTitleReadbackHttpStatus: 200,
+    },
+    {
+      ...base,
+      neighborEditedRowVisible: false,
+      neighborCanonicalTitleReadbackOutcome: 'not-needed',
+    },
+    {
+      ...base,
+      neighborCanonicalTitleReadbackOutcome: 'matched',
+      neighborCanonicalTitleReadbackHttpStatus: 200,
+    },
+    {
+      ...base,
+      status: 'failed',
+      supportedNeighborEdited: false,
+      neighborCanonicalTitleReadbackOutcome: 'matched',
+      neighborCanonicalTitleReadbackHttpStatus: 404,
+    },
+  ];
+
+  for (const record of invalidRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
+test('rejects inconsistent Element client acceptance evidence', () => {
+  const invalidRecords = [
+    {
+      phase: 'g6-unsupported-preservation',
+      status: 'passed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      supportedNeighborEdited: true,
+      canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
+      ...g6PassedTitleDiagnostic,
+      eventTitle: 'private event title',
+    },
+    {
+      phase: 'g6-unsupported-preservation',
+      status: 'passed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      supportedNeighborEdited: true,
+      canonicalUnsupportedObjectUnchanged: false,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
+      ...g6PassedTitleDiagnostic,
+    },
+    {
+      phase: 'g6-unsupported-preservation',
+      status: 'passed',
+      projectionHttpStatus: 99,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      supportedNeighborEdited: true,
+      canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
+      ...g6PassedTitleDiagnostic,
+    },
+    {
+      phase: 'g6-keyboard-focus',
+      status: 'passed',
+      count: 7,
+      eventActionTabCount: 7,
+      detailsActionTabCount: 15,
+      keyboardEventFocused: true,
+      detailsOpened: true,
+      editActionFocused: true,
+      deleteActionFocused: true,
+      closeActionFocused: true,
+      escapeClosedDialog: true,
+      focusReturnedToEvent: true,
+      ...g6KeyboardFocusDiagnostic,
+    },
+    {
+      phase: 'g6-resource-cleanup',
+      status: 'passed',
+      count: 0,
+      plannedCount: 4,
+      confirmedCreatedCount: 4,
+      conflictCount: 0,
+      notCreatedCount: 0,
+      createUnresolvedCount: 0,
+      deletedCount: 0,
+      alreadyAbsentCount: 0,
+      cleanupUnresolvedCount: 0,
+      allOwnedResourcesRemoved: true,
+    },
+    {
+      phase: 'g6-resource-cleanup',
+      status: 'failed',
+      count: 0,
+      plannedCount: 4,
+      confirmedCreatedCount: 0,
+      conflictCount: 0,
+      notCreatedCount: 0,
+      createUnresolvedCount: 0,
+      deletedCount: 0,
+      alreadyAbsentCount: 0,
+      cleanupUnresolvedCount: 0,
+      allOwnedResourcesRemoved: true,
+    },
+    {
+      phase: 'g6-side-panel-layout',
+      status: 'passed',
+      ...g6SidePanelToolbarObserved,
+      widgetCardVisible: false,
+      createControlReachable: true,
+      eventDetailsReachable: true,
+      hostNoHorizontalOverflow: true,
+      widgetNoHorizontalOverflow: true,
+      persistedHostFramePresent: true,
+      viewportWidth: 1440,
+      viewportHeight: 900,
+      iframeWidth: 319,
+      iframeHeight: 640,
+      widgetCardCount: 0,
+      appDrawerCount: 1,
+    },
+    {
+      phase: 'g6-browser-egress',
+      status: 'passed',
+      count: 1,
+      browserEgressClear: true,
+    },
+    {
+      phase: 'g6-side-panel-layout',
+      status: 'passed',
+      ...g6SidePanelToolbarObserved,
+      widgetCardVisible: true,
+      createControlReachable: true,
+      eventDetailsReachable: true,
+      hostNoHorizontalOverflow: false,
+      widgetNoHorizontalOverflow: true,
+      persistedHostFramePresent: true,
+      viewportWidth: 1440,
+      viewportHeight: 900,
+      iframeWidth: 319,
+      iframeHeight: 640,
+      widgetCardCount: 1,
+      appDrawerCount: 0,
+    },
+  ];
+
+  for (const record of invalidRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
+test('accepts the compact four-case Element client evidence contract', () => {
+  const records = [
+    {
+      phase: 'g6-fixture-ready',
+      status: 'passed',
+      httpStatus: 200,
+      count: 4,
+      openIdProofValid: true,
+      allResourcesSeeded: true,
+      seedCreateObservations: Array.from({ length: 4 }, () => ({
+        outcome: 'response',
+        status: 201,
+        etagPresent: true,
+        etagStrong: true,
+      })),
+    },
+    {
+      phase: 'g6-unsupported-preservation',
+      status: 'passed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      supportedNeighborEdited: true,
+      canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
+      ...g6PassedTitleDiagnostic,
+    },
+    {
+      phase: 'g6-delete-and-refresh',
+      status: 'passed',
+      memberBEventsHttpStatus: 200,
+      deleteHttpStatus: 204,
+      canonicalDeleteHttpStatus: 404,
+      memberBReloadHttpStatus: 200,
+      count: 1,
+      memberBDeleteRowVisible: true,
+      deleteButtonVisible: true,
+      deleteConfirmationVisible: true,
+      deletedRowAbsent: true,
+      canonicalObjectAbsent: true,
+      memberBDeleteRowAbsent: true,
+      supportedNeighborVisible: true,
+    },
+    {
+      phase: 'g6-keyboard-focus',
+      status: 'passed',
+      count: 7,
+      eventActionTabCount: 7,
+      detailsActionTabCount: 14,
+      keyboardEventFocused: true,
+      detailsOpened: true,
+      editActionFocused: true,
+      deleteActionFocused: true,
+      closeActionFocused: true,
+      escapeClosedDialog: true,
+      focusReturnedToEvent: true,
+      ...g6KeyboardFocusDiagnostic,
+    },
+    {
+      phase: 'g6-side-panel-layout',
+      status: 'passed',
+      ...g6SidePanelToolbarObserved,
+      widgetCardVisible: true,
+      createControlReachable: true,
+      eventDetailsReachable: true,
+      hostNoHorizontalOverflow: true,
+      widgetNoHorizontalOverflow: true,
+      persistedHostFramePresent: true,
+      viewportWidth: 1440,
+      viewportHeight: 900,
+      iframeWidth: 319,
+      iframeHeight: 640,
+      widgetCardCount: 1,
+      appDrawerCount: 0,
+    },
+    {
+      phase: 'g6-browser-egress',
+      status: 'passed',
+      count: 0,
+      browserEgressClear: true,
+    },
+    {
+      phase: 'g6-resource-cleanup',
+      status: 'passed',
+      count: 4,
+      plannedCount: 4,
+      confirmedCreatedCount: 4,
+      conflictCount: 0,
+      notCreatedCount: 0,
+      createUnresolvedCount: 0,
+      deletedCount: 4,
+      alreadyAbsentCount: 0,
+      cleanupUnresolvedCount: 0,
+      allOwnedResourcesRemoved: true,
+    },
+  ];
+  const summary = sanitizeElementAcceptance(
+    records.map((record) => JSON.stringify(record)).join('\n'),
+    sourceSha,
+  );
+
+  for (const record of records) {
+    assert.ok(summary.includes(`phase=${record.phase} status=passed`));
+  }
+  assert.match(
+    summary,
+    /phase=g6-side-panel-layout status=passed widget_card_visible=true create_control_reachable=true event_details_reachable=true host_no_horizontal_overflow=true widget_no_horizontal_overflow=true persisted_host_frame_present=true viewport_width=1440 viewport_height=900 iframe_width=319 iframe_height=640 widget_card_count=1 app_drawer_count=0 management_toolbar_nav_count_capped=1 create_event_button_count_capped=1 management_toolbar_nav_visibility=visible create_event_button_visibility=visible create_event_button_enabled=disabled/u,
+  );
+  assert.doesNotMatch(
+    summary,
+    /pin_control|maximise|drawer_maximised|app_tile/u,
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        records
+          .map((record) =>
+            JSON.stringify(
+              record.phase === 'g6-side-panel-layout'
+                ? { ...record, widgetCardVisible: false }
+                : record,
+            ),
+          )
+          .join('\n'),
+        sourceSha,
+      ),
+    { message: 'invalid element acceptance summary' },
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        records
+          .map((record) =>
+            JSON.stringify(
+              record.phase === 'g6-side-panel-layout'
+                ? { ...record, maximiseControlVisible: true }
+                : record,
+            ),
+          )
+          .join('\n'),
+        sourceSha,
+      ),
+    { message: 'invalid element acceptance summary' },
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        records
+          .map((record) =>
+            JSON.stringify(
+              record.phase === 'g6-side-panel-layout'
+                ? {
+                    ...record,
+                    createEventButtonCountCapped: 0,
+                    createEventButtonVisibility: 'hidden',
+                    createEventButtonEnabled: 'absent',
+                  }
+                : record,
+            ),
+          )
+          .join('\n'),
+        sourceSha,
+      ),
+    { message: 'invalid element acceptance summary' },
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        records
+          .map((record) =>
+            JSON.stringify(
+              record.phase === 'g6-side-panel-layout'
+                ? { ...record, createEventButtonText: 'Create event' }
+                : record,
+            ),
+          )
+          .join('\n'),
+        sourceSha,
+      ),
+    { message: 'invalid element acceptance summary' },
+  );
+  assert.doesNotMatch(summary, /Matrix Calendar|G6 unsupported|\.ics|UID:/u);
+});
+
+test('retains bounded missing Create event control evidence on a failed layout', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-side-panel-layout',
+      status: 'failed',
+      createControlReachable: false,
+      managementToolbarNavCountCapped: 1,
+      managementToolbarNavVisibility: 'visible',
+      createEventButtonCountCapped: 0,
+      createEventButtonVisibility: 'absent',
+      createEventButtonEnabled: 'absent',
+    }),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /phase=g6-side-panel-layout status=failed create_control_reachable=false management_toolbar_nav_count_capped=1 create_event_button_count_capped=0 management_toolbar_nav_visibility=visible create_event_button_visibility=absent create_event_button_enabled=absent/u,
+  );
+});
+
+test('retains only four fixed G6 create outcome and ETag diagnostics', () => {
+  const record = {
+    phase: 'g6-fixture-ready',
+    status: 'failed',
+    httpStatus: 200,
+    count: 0,
+    openIdProofValid: true,
+    allResourcesSeeded: false,
+    seedCreateObservations: [
+      {
+        outcome: 'timeout',
+        status: null,
+        etagPresent: null,
+        etagStrong: null,
+      },
+      {
+        outcome: 'response',
+        status: 412,
+        etagPresent: false,
+        etagStrong: false,
+      },
+      {
+        outcome: 'response',
+        status: 201,
+        etagPresent: true,
+        etagStrong: false,
+      },
+      {
+        outcome: 'network-error',
+        status: null,
+        etagPresent: null,
+        etagStrong: null,
+      },
+    ],
+  };
+  const summary = sanitizeElementAcceptance(JSON.stringify(record), sourceSha);
+
+  assert.match(
+    summary,
+    /seed_create_1=timeout:none:unknown:unknown seed_create_2=response:412:false:false seed_create_3=response:201:true:false seed_create_4=network-error:none:unknown:unknown/u,
+  );
+  assert.doesNotMatch(summary, /ETag|etag_value|\.ics|UID:/u);
+
+  const invalidRecords = [
+    {
+      ...record,
+      seedCreateObservations: record.seedCreateObservations.slice(1),
+    },
+    {
+      ...record,
+      seedCreateObservations: record.seedCreateObservations.map(
+        (item, index) =>
+          index === 0 ? { ...item, outcome: 'raw-error' } : item,
+      ),
+    },
+    {
+      ...record,
+      seedCreateObservations: record.seedCreateObservations.map(
+        (item, index) =>
+          index === 2
+            ? { ...item, etagStrong: true, etagPresent: false }
+            : item,
+      ),
+    },
+    {
+      ...record,
+      seedCreateObservations: record.seedCreateObservations.map(
+        (item, index) => (index === 1 ? { ...item, status: null } : item),
+      ),
+    },
+    {
+      ...record,
+      seedCreateObservations: record.seedCreateObservations.map(
+        (item, index) =>
+          index === 0 ? { ...item, rawEtag: 'private-value' } : item,
+      ),
+    },
+  ];
+  for (const invalid of invalidRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(invalid), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
+test('accepts the real Element room observations under the g6 phase labels', () => {
+  const roomRecord = {
+    phase: 'g6-member-a-room-context',
+    status: 'passed',
+    matrixUserMatches: true,
+    matrixRoomKnown: true,
+    matrixRoomJoined: true,
+    roomNavigationCompleted: true,
+    roomHeadingReady: true,
+    roomHeadingPresent: true,
+    roomNameMatches: true,
+    roomIdMatches: true,
+    matrixSyncState: 'SYNCING',
+    blockedExternalRequestCount: 0,
+    homeserverHttpErrorCount: 0,
+  };
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(roomRecord),
+    sourceSha,
+  );
+  assert.match(summary, /phase=g6-member-a-room-context status=passed/u);
+  assert.match(summary, /matrix_room_joined=true/u);
+});
+
+test('accepts the complete bounded room layout group only for G6 member B', () => {
+  const roomRecord = {
+    phase: 'g6-member-b-room-context',
+    status: 'failed',
+    failureCode: 'element-room-heading-not-present',
+    matrixUserMatches: true,
+    matrixRoomKnown: true,
+    matrixRoomJoined: true,
+    roomNavigationCompleted: true,
+    roomHeadingReady: false,
+    roomHeadingPresent: false,
+    roomNameMatches: true,
+    roomIdMatches: true,
+    matrixSyncState: 'SYNCING',
+    blockedExternalRequestCount: 0,
+    homeserverHttpErrorCount: 0,
+    roomViewPresent: true,
+    roomHeaderPresent: true,
+    roomHeadingDomPresent: false,
+    roomInfoControlPresent: true,
+    fixtureCalendarIframePresent: false,
+  };
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(roomRecord),
+    sourceSha,
+  );
+  assert.match(summary, /phase=g6-member-b-room-context status=failed/u);
+  assert.match(
+    summary,
+    /room_view_present=true room_header_present=true room_heading_dom_present=false room_info_control_present=true fixture_calendar_iframe_present=false/u,
+  );
+
+  const incompleteGroup = { ...roomRecord };
+  delete incompleteGroup.fixtureCalendarIframePresent;
+  const nonBooleanGroup = { ...roomRecord, roomHeadingDomPresent: 'present' };
+  const unrelatedPhase = { ...roomRecord, phase: 'g6-member-a-room-context' };
+  for (const invalidRecord of [
+    incompleteGroup,
+    nonBooleanGroup,
+    unrelatedPhase,
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(invalidRecord), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
+test('rejects a passed Element edit whose updated ETag belongs to another event', () => {
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'g6-unsupported-preservation',
+          status: 'passed',
+          projectionHttpStatus: 200,
+          canonicalBeforeHttpStatus: 200,
+          neighborPatchHttpStatus: 204,
+          canonicalAfterHttpStatus: 200,
+          count: 1,
+          unsupportedWarningVisible: true,
+          unsupportedRowOmitted: true,
+          supportedNeighborVisible: true,
+          canonicalSnapshotAvailable: true,
+          supportedNeighborEdited: true,
+          canonicalUnsupportedObjectUnchanged: true,
+          neighborOwnershipUpdated: false,
+          neighborUpdateIdentityMatches: false,
+          ...g6PassedTitleDiagnostic,
+        }),
+        sourceSha,
+      ),
+    { message: 'invalid element acceptance summary' },
+  );
+});
+
+test('retains a consistent failed G6 ownership cleanup count ledger', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-resource-cleanup',
+      status: 'failed',
+      count: 1,
+      plannedCount: 4,
+      confirmedCreatedCount: 1,
+      conflictCount: 0,
+      notCreatedCount: 0,
+      createUnresolvedCount: 3,
+      deletedCount: 1,
+      alreadyAbsentCount: 0,
+      cleanupUnresolvedCount: 0,
+      allOwnedResourcesRemoved: false,
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /phase=g6-resource-cleanup status=failed/u);
+  assert.match(summary, /create_unresolved_count=3/u);
+  assert.doesNotMatch(summary, /private|\.ics|ETag/u);
+});
+
+test('sanitizes bounded G6 keyboard focus diagnostics without claiming skipped actions', () => {
+  const observations = Array.from({ length: 12 }, () => ({
+    activeTarget: 'other',
+    frameHasFocus: true,
+  }));
+  const record = {
+    phase: 'g6-keyboard-focus',
+    status: 'failed',
+    count: 66,
+    eventActionTabCount: 66,
+    detailsActionTabCount: 12,
+    keyboardEventFocused: true,
+    detailsOpened: true,
+    editActionFocused: false,
+    deleteActionFocused: false,
+    closeActionFocused: false,
+    escapeClosedDialog: false,
+    focusReturnedToEvent: false,
+    editActionCountCapped: 1,
+    editActionVisibility: 'visible',
+    editActionEnabled: 'enabled',
+    deleteActionCountCapped: 1,
+    deleteActionVisibility: 'visible',
+    deleteActionEnabled: 'enabled',
+    closeActionCountCapped: 1,
+    closeActionVisibility: 'visible',
+    closeActionEnabled: 'enabled',
+    initialDetailsFocusTarget: 'dialog-content',
+    keyboardFrameHasFocus: true,
+    detailsTabFocusObservations: observations,
+    escapeAttempted: false,
+  };
+  const summary = sanitizeElementAcceptance(JSON.stringify(record), sourceSha);
+  assert.match(summary, /edit_action_count_capped=1/u);
+  assert.match(summary, /initial_details_focus_target=dialog-content/u);
+  assert.match(summary, /escape_attempted=false/u);
+  assert.match(summary, /details_tab_focus=other:true,other:true/u);
+  assert.doesNotMatch(summary, /private|token|https?:/iu);
+  const focusObservedWithoutEscape = sanitizeElementAcceptance(
+    JSON.stringify({ ...record, focusReturnedToEvent: true }),
+    sourceSha,
+  );
+  assert.match(focusObservedWithoutEscape, /focus_returned_to_event=true/u);
+  const blurredFrameEvidence = sanitizeElementAcceptance(
+    JSON.stringify({
+      ...record,
+      detailsTabFocusObservations: [
+        { activeTarget: 'outside', frameHasFocus: false },
+        ...observations.slice(1),
+      ],
+    }),
+    sourceSha,
+  );
+  assert.match(blurredFrameEvidence, /details_tab_focus=outside:false/u);
+
+  for (const invalid of [
+    {
+      ...record,
+      detailsTabFocusObservations: [
+        ...observations,
+        { activeTarget: 'other', frameHasFocus: true },
+      ],
+    },
+    {
+      ...record,
+      detailsTabFocusObservations: [
+        { activeTarget: 'other', frameHasFocus: true, text: 'private title' },
+      ],
+    },
+    {
+      ...record,
+      escapeAttempted: false,
+      escapeClosedDialog: true,
+    },
+    {
+      ...record,
+      detailsTabFocusObservations: [
+        { activeTarget: 'edit', frameHasFocus: false },
+        ...observations.slice(1),
+      ],
+    },
+    {
+      phase: 'widget-a-iframe-ready',
+      status: 'passed',
+      detailsTabFocusObservations: observations,
+    },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(invalid), sourceSha),
       { message: 'invalid element acceptance summary' },
     );
   }
