@@ -62,6 +62,7 @@ import {
   summarizeG6ResourceOwnership,
   type G6ResourceOwnership,
 } from '../../dev/element-g6-resource-ownership.mjs';
+import { roomContextObservationForPhase } from '../../dev/element-room-context-observation.mjs';
 import { ElementWebPage } from './pages/elementWebPage';
 import { fillDatePicker } from './pages/helper';
 
@@ -8176,13 +8177,16 @@ function recordMemberARoomObservation(
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  const observation = result.observation
+    ? roomContextObservationForPhase(result.observation, phase)
+    : undefined;
   appendFileSync(
     stageFile,
     `${JSON.stringify({
       phase,
       status: result.failureCode ? 'failed' : 'passed',
       ...(result.failureCode ? { failureCode: result.failureCode } : {}),
-      ...(result.observation ?? {}),
+      ...(observation ?? {}),
       ...(reminderWidgetContext ?? {}),
     })}\n`,
     { encoding: 'utf8', mode: 0o600 },

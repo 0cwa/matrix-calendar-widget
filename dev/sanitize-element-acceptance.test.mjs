@@ -4,6 +4,7 @@ import {
   classifyRadicaleStartupLogs,
   createRadicaleFilesystemEvidence,
 } from './element-acceptance-reminder-restore.mjs';
+import { roomContextObservationForPhase } from './element-room-context-observation.mjs';
 import {
   formatSanitizerFailureSummary,
   sanitizeElementAcceptance,
@@ -3776,26 +3777,51 @@ test('accepts the real Element room observations under the g6 phase labels', () 
 });
 
 test('accepts the complete bounded room layout group only for G6 member B', () => {
-  const roomRecord = {
-    phase: 'g6-member-b-room-context',
-    status: 'failed',
-    failureCode: 'element-room-heading-not-present',
+  // This is the full observeMemberARoom result shape, including fields that
+  // must be omitted from the G6 stage record by the phase-aware producer.
+  const callbackObservation = {
     matrixUserMatches: true,
     matrixRoomKnown: true,
     matrixRoomJoined: true,
+    matrixSyncState: 'SYNCING',
     roomNavigationCompleted: true,
     roomHeadingReady: false,
     roomHeadingPresent: false,
     roomNameMatches: true,
     roomIdMatches: true,
-    matrixSyncState: 'SYNCING',
-    blockedExternalRequestCount: 0,
-    homeserverHttpErrorCount: 0,
+    outerRenderBucket: 'room-page',
+    matrixChatShellPresent: true,
+    roomViewWrapperPresent: true,
+    roomViewRendererPresent: true,
+    matrixChatStateAvailable: true,
+    matrixChatViewBucket: 'logged-in',
+    matrixChatReady: true,
+    matrixChatPageTypeBucket: 'room-view',
+    matrixChatCurrentRoomMatches: true,
+    roomRenderStateAvailable: true,
+    roomViewShellVisible: true,
+    roomViewBodyVisible: true,
+    roomPreviewVisible: false,
+    roomPreviewLoadingVisible: false,
+    roomHeaderVisible: true,
+    roomHeaderHeadingVisible: false,
+    roomErrorBoundaryVisible: false,
     roomViewPresent: true,
     roomHeaderPresent: true,
     roomHeadingDomPresent: false,
     roomInfoControlPresent: true,
     fixtureCalendarIframePresent: false,
+    blockedExternalRequestCount: 0,
+    homeserverHttpErrorCount: 0,
+  };
+  const roomRecord = {
+    phase: 'g6-member-b-room-context',
+    status: 'failed',
+    failureCode: 'element-room-heading-not-present',
+    ...roomContextObservationForPhase(
+      callbackObservation,
+      'g6-member-b-room-context',
+    ),
   };
   const summary = sanitizeElementAcceptance(
     JSON.stringify(roomRecord),
@@ -3806,21 +3832,45 @@ test('accepts the complete bounded room layout group only for G6 member B', () =
     summary,
     /room_view_present=true room_header_present=true room_heading_dom_present=false room_info_control_present=true fixture_calendar_iframe_present=false/u,
   );
+  assert.doesNotMatch(summary, /outer_render_bucket=/u);
 
   const incompleteGroup = { ...roomRecord };
   delete incompleteGroup.fixtureCalendarIframePresent;
   const nonBooleanGroup = { ...roomRecord, roomHeadingDomPresent: 'present' };
   const unrelatedPhase = { ...roomRecord, phase: 'g6-member-a-room-context' };
+  const rendererDiagnosticsLeaked = {
+    phase: 'g6-member-b-room-context',
+    status: 'failed',
+    failureCode: 'element-room-heading-not-present',
+    ...callbackObservation,
+  };
   for (const invalidRecord of [
     incompleteGroup,
     nonBooleanGroup,
     unrelatedPhase,
+    rendererDiagnosticsLeaked,
   ]) {
     assert.throws(
       () => sanitizeElementAcceptance(JSON.stringify(invalidRecord), sourceSha),
       { message: 'invalid element acceptance summary' },
     );
   }
+
+  const ordinaryObservation = roomContextObservationForPhase(
+    callbackObservation,
+    'member-a-room-context',
+  );
+  assert.equal(ordinaryObservation.outerRenderBucket, 'room-page');
+  const reminderObservation = roomContextObservationForPhase(
+    callbackObservation,
+    'reminder-room-context',
+  );
+  assert.equal(reminderObservation.outerRenderBucket, 'room-page');
+  assert.throws(
+    () =>
+      roomContextObservationForPhase(callbackObservation, 'unrelated-phase'),
+    { name: 'TypeError', message: 'invalid room context phase' },
+  );
 });
 
 test('rejects a passed Element edit whose updated ETag belongs to another event', () => {

@@ -3497,45 +3497,47 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       fields.push(`room_heading_present=${record.roomHeadingPresent}`);
       fields.push(`room_name_matches=${record.roomNameMatches}`);
       fields.push(`room_id_matches=${record.roomIdMatches}`);
-      fields.push(`outer_render_bucket=${record.outerRenderBucket}`);
-      for (const [key, label] of [
-        ['matrixChatShellPresent', 'matrix_chat_shell_present'],
-        ['roomViewWrapperPresent', 'room_view_wrapper_present'],
-        ['roomViewRendererPresent', 'room_view_renderer_present'],
-      ]) {
-        fields.push(
-          `${label}=${record[key] === null ? 'unavailable' : record[key]}`,
-        );
-      }
-      fields.push(
-        `matrix_chat_state_available=${record.matrixChatStateAvailable}`,
-      );
-      fields.push(`matrix_chat_view_bucket=${record.matrixChatViewBucket}`);
-      fields.push(
-        `matrix_chat_ready=${record.matrixChatReady === null ? 'unavailable' : record.matrixChatReady}`,
-      );
-      fields.push(
-        `matrix_chat_page_type_bucket=${record.matrixChatPageTypeBucket}`,
-      );
-      fields.push(
-        `matrix_chat_current_room_matches=${record.matrixChatCurrentRoomMatches === null ? 'unavailable' : record.matrixChatCurrentRoomMatches}`,
-      );
-      if (Object.hasOwn(record, 'roomRenderStateAvailable')) {
-        fields.push(
-          `room_render_state_available=${record.roomRenderStateAvailable}`,
-        );
+      if (ROOM_RENDER_DIAGNOSTIC_PHASES.has(phase)) {
+        fields.push(`outer_render_bucket=${record.outerRenderBucket}`);
         for (const [key, label] of [
-          ['roomViewShellVisible', 'room_view_shell_visible'],
-          ['roomViewBodyVisible', 'room_view_body_visible'],
-          ['roomPreviewVisible', 'room_preview_visible'],
-          ['roomPreviewLoadingVisible', 'room_preview_loading_visible'],
-          ['roomHeaderVisible', 'room_header_visible'],
-          ['roomHeaderHeadingVisible', 'room_header_heading_visible'],
-          ['roomErrorBoundaryVisible', 'room_error_boundary_visible'],
+          ['matrixChatShellPresent', 'matrix_chat_shell_present'],
+          ['roomViewWrapperPresent', 'room_view_wrapper_present'],
+          ['roomViewRendererPresent', 'room_view_renderer_present'],
         ]) {
           fields.push(
             `${label}=${record[key] === null ? 'unavailable' : record[key]}`,
           );
+        }
+        fields.push(
+          `matrix_chat_state_available=${record.matrixChatStateAvailable}`,
+        );
+        fields.push(`matrix_chat_view_bucket=${record.matrixChatViewBucket}`);
+        fields.push(
+          `matrix_chat_ready=${record.matrixChatReady === null ? 'unavailable' : record.matrixChatReady}`,
+        );
+        fields.push(
+          `matrix_chat_page_type_bucket=${record.matrixChatPageTypeBucket}`,
+        );
+        fields.push(
+          `matrix_chat_current_room_matches=${record.matrixChatCurrentRoomMatches === null ? 'unavailable' : record.matrixChatCurrentRoomMatches}`,
+        );
+        if (Object.hasOwn(record, 'roomRenderStateAvailable')) {
+          fields.push(
+            `room_render_state_available=${record.roomRenderStateAvailable}`,
+          );
+          for (const [key, label] of [
+            ['roomViewShellVisible', 'room_view_shell_visible'],
+            ['roomViewBodyVisible', 'room_view_body_visible'],
+            ['roomPreviewVisible', 'room_preview_visible'],
+            ['roomPreviewLoadingVisible', 'room_preview_loading_visible'],
+            ['roomHeaderVisible', 'room_header_visible'],
+            ['roomHeaderHeadingVisible', 'room_header_heading_visible'],
+            ['roomErrorBoundaryVisible', 'room_error_boundary_visible'],
+          ]) {
+            fields.push(
+              `${label}=${record[key] === null ? 'unavailable' : record[key]}`,
+            );
+          }
         }
       }
       for (const [key, label] of [

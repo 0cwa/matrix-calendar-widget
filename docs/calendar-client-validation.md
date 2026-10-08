@@ -24,7 +24,7 @@ The calendar-view, event-list, and event-details suites run in Vitest's
 | Event list and details                                | `Tab` to event, `Enter` to open, named dialog, `Escape` to close, focus returns to event | Covered                                                                                                         |
 | Calendar grid, event list, event details              | `vitest-axe` automated accessibility scan                                                | Covered; no violations in the tested fixtures                                                                   |
 | Actual CSS layout at multiple widths                  | Hosted Chromium production-preview fixture at four viewports                             | PR #216 passed 12/12 hosted cases at tree `911027044f96463a06e7d42cd2371ecf333662f7`; synthetic components only |
-| Element Web and Element Desktop                       | Embedded in real clients against isolated pinned services                                | Not run; required beta evidence                                                                                 |
+| Element Web and Element Desktop                       | Embedded in real clients against isolated pinned services                                | Bounded Web journeys are recorded; complete Web/Desktop beta acceptance remains open                            |
 | Mobile clients and formal screen-reader certification | Actual platform and assistive technology run                                             | Deferred beyond this beta                                                                                       |
 
 The automated tests use synthetic events and an in-memory calendar repository.
@@ -94,21 +94,38 @@ embedded widget rather than substituting a desktop browser emulation result.
 ## Evidence status
 
 The hosted Chromium component fixture passed at the exact tree recorded in
-[browser validation](./browser-calendar-validation.md). No actual Element Web
-or Desktop run is recorded. Automated happy-dom and standalone-browser results
-do not validate a host client. Mobile clients and formal screen-reader
-certification are outside the current beta scope.
+[browser validation](./browser-calendar-validation.md). Bounded actual Element
+Web journeys are also recorded, but they do not complete the ordinary-load or
+full beta acceptance gates. The latest ordinary-load result passed its recorded
+latency limits but failed overall after widget-opening errors in both event
+profiles; there is no clean 0/25 result yet. The paired Desktop journey and
+process cleanup also remain incomplete; completed cleanup observations have
+retained the fail-closed policy when process-clear evidence was unavailable.
+Automated happy-dom and standalone-browser results do not replace those
+host-client checks. Mobile clients and formal screen-reader certification are
+outside the current beta scope.
 
-| Client target                      | Version / device  | Result       | Evidence                                                                                                                                        |
-| ---------------------------------- | ----------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Element Web                        | Not recorded      | **Untested** | Required beta target; no actual client run recorded                                                                                             |
-| Element Desktop                    | Not recorded      | **Untested** | Required beta target; no actual client run recorded                                                                                             |
-| Element for Android                | Not recorded      | **Deferred** | Outside this beta scope                                                                                                                         |
-| Element for iOS                    | Not recorded      | **Deferred** | Outside this beta scope                                                                                                                         |
-| Screen-reader certification        | Not recorded      | **Deferred** | Outside this beta scope; axe is not certification                                                                                               |
-| Browser layout at listed viewports | Synthetic fixture | **Passed**   | Hosted Chromium job, 12/12 cases at tree `911027044f96463a06e7d42cd2371ecf333662f7`; see [browser validation](./browser-calendar-validation.md) |
+| Client target                      | Version / device       | Result         | Evidence                                                                                                                                        |
+| ---------------------------------- | ---------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Element Web                        | Configured tag 1.12.30 | **Partial**    | Bounded hosted interactions are recorded; ordinary-load acceptance remains open after widget-opening errors.                                    |
+| Element Desktop                    | Not established        | **Incomplete** | Paired user-flow and process-cleanup evidence remain open; see [project status](./STATUS.md).                                                   |
+| Element for Android                | Not recorded           | **Deferred**   | Outside this beta scope                                                                                                                         |
+| Element for iOS                    | Not recorded           | **Deferred**   | Outside this beta scope                                                                                                                         |
+| Screen-reader certification        | Not recorded           | **Deferred**   | Outside this beta scope; axe is not certification                                                                                               |
+| Browser layout at listed viewports | Synthetic fixture      | **Passed**     | Hosted Chromium job, 12/12 cases at tree `911027044f96463a06e7d42cd2371ecf333662f7`; see [browser validation](./browser-calendar-validation.md) |
 
-For each beta target, replace “Not recorded” and “Untested” with the exact
-version, pass/fail result, measured dimensions, and a link to retained
-evidence. Keep failed and unavailable targets visible in the candidate record;
-do not change deferred targets into implied support.
+The Web runs provide separate bounded results. Run
+[37611136645](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37611136645)
+covered shared event create/read/edit, stale-write conflict and reload,
+outsider denial, and reminder recovery. G6 run
+[37739410969](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37739410969)
+passed bounded edit/delete, unsupported-source preservation, keyboard/focus,
+and standard side-panel checks. Ordinary-load run
+[37733604288](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37733604288)
+met its recorded timing limits but failed overall on widget-opening errors in
+both event profiles; the complete 0/25 gate remains open.
+
+Keep each partial, failed, and unavailable result visible in the candidate
+record. Add exact versions, measured dimensions, and retained evidence as those
+facts are established; do not turn partial results into a complete acceptance
+claim or deferred targets into implied support.
