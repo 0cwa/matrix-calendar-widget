@@ -188,6 +188,13 @@ jobs:
           fi
           node dev/element-acceptance-reminder-restore.mjs verify-restore
 
+      - name: Verify Element Web client interactions and preservation
+        run: |
+          if ! yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web preserves unsupported events and supports client interactions" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+            echo 'Element Web client acceptance cases failed; see sanitized phase summary.' >&2
+            exit 1
+          fi
+
       - name: Emit sanitized acceptance summary
         if: always()
         run: |

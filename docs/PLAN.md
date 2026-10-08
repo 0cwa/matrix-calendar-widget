@@ -455,8 +455,10 @@ access and event writes stay disabled by default.
       separate release gate (docs/browser-calendar-validation.md).
 
 - [ ] Actual Element Web/Desktop responsive and keyboard/focus acceptance for
-      the bounded beta target (see `docs/beta-scope.md`). Mobile clients and
-      formal screen-reader certification are deferred beyond this candidate.
+      the bounded beta target (see `docs/beta-scope.md`). Require the standard
+      side-panel widget layout and overflow checks; pinned/full-width Apps-drawer
+      layout certification is deferred. Mobile clients and formal screen-reader
+      certification are deferred beyond this candidate.
   - [x] Add current calendar grid/list/details keyboard, focus, accessible-name,
         and axe regressions. Hosted browser fixture checks pass; actual client
         embedding remains unverified; see `docs/calendar-client-validation.md`.
