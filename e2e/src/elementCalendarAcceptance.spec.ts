@@ -33,9 +33,12 @@ import { isAbsolute, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+  classifyPerformancePageError,
   summarizeDefaultWaitObservation,
   type PerformanceDefaultWaitFailureSnapshot,
   type PerformanceDefaultWaitObservation,
+  type PerformancePageErrorClass,
+  type PerformancePageErrorClassification,
 } from '../../dev/element-acceptance-performance-evidence.mjs';
 import { raceCalendarReadyOrIdentityPrompt } from '../../dev/element-acceptance-performance.mjs';
 import { ElementWebPage } from './pages/elementWebPage';
@@ -309,17 +312,6 @@ type OpenCalendarWidgetOptions = {
   ) => void;
 };
 
-type PerformancePageErrorClass =
-  | 'none'
-  | 'error'
-  | 'type-error'
-  | 'reference-error'
-  | 'syntax-error'
-  | 'range-error'
-  | 'uri-error'
-  | 'eval-error'
-  | 'other';
-
 type PerformancePageErrorStage =
   | 'case-setup'
   | 'element-login'
@@ -332,10 +324,9 @@ type PerformancePageErrorStage =
   | 'details'
   | 'case-cleanup';
 
-type PerformancePageErrorObservation = {
+type PerformancePageErrorObservation = PerformancePageErrorClassification & {
   profile: OrdinaryPerformanceProfile;
   stage: PerformancePageErrorStage;
-  errorClass: Exclude<PerformancePageErrorClass, 'none'>;
 };
 
 type OrdinaryPerformanceProfile = 'empty' | 'events-25';
@@ -508,7 +499,7 @@ type OrdinaryPerformanceCase = {
   detailSamples: PerformanceDetailsSample[];
 };
 type OrdinaryPerformanceReport = {
-  version: 8;
+  version: 9;
   viewportWidth: 1280;
   viewportHeight: 800;
   calendarDays: 7;
@@ -1065,7 +1056,7 @@ function makeEmptyOrdinaryPerformanceReport(initialDate: {
   month: number;
 }): OrdinaryPerformanceReport {
   return {
-    version: 8,
+    version: 9,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -1089,27 +1080,6 @@ function makeEmptyOrdinaryPerformanceReport(initialDate: {
     pageErrorObservations: [],
     pageErrorObservationOverflow: false,
   };
-}
-
-function classifyPerformancePageError(error: Error): PerformancePageErrorClass {
-  switch (error.name) {
-    case 'Error':
-      return 'error';
-    case 'TypeError':
-      return 'type-error';
-    case 'ReferenceError':
-      return 'reference-error';
-    case 'SyntaxError':
-      return 'syntax-error';
-    case 'RangeError':
-      return 'range-error';
-    case 'URIError':
-      return 'uri-error';
-    case 'EvalError':
-      return 'eval-error';
-    default:
-      return 'other';
-  }
 }
 
 function runOrdinaryPerformanceSeed(initialDate: {
@@ -2257,7 +2227,11 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
           (report.pageErrorCount ?? 0) + 1,
           100_000,
         );
-        const errorClass = classifyPerformancePageError(error);
+        const classification = classifyPerformancePageError(error, {
+          elementUrl: fixture.elementUrl,
+          widgetUrl: fixture.widgetUrl,
+        });
+        const errorClass = classification.errorClass;
         if (report.pageErrorClass === 'none') {
           report.pageErrorClass = errorClass;
         }
@@ -2265,7 +2239,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
           report.pageErrorObservations.push({
             profile: caseReport.profile,
             stage: pageErrorStage,
-            errorClass: errorClass === 'none' ? 'other' : errorClass,
+            ...classification,
           });
         } else {
           report.pageErrorObservationOverflow = true;

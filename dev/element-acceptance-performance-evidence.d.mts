@@ -6,6 +6,45 @@ export type PerformanceHoverFailureClass =
   | 'detached'
   | 'other';
 
+export type PerformancePageErrorClass =
+  | 'none'
+  | 'error'
+  | 'type-error'
+  | 'reference-error'
+  | 'syntax-error'
+  | 'range-error'
+  | 'uri-error'
+  | 'eval-error'
+  | 'other';
+
+export type PerformancePageErrorSubtype =
+  | 'error'
+  | 'type-error'
+  | 'reference-error'
+  | 'syntax-error'
+  | 'range-error'
+  | 'uri-error'
+  | 'eval-error'
+  | 'aggregate-error'
+  | 'dom-exception'
+  | 'named-error'
+  | 'non-error'
+  | 'unavailable';
+
+export type PerformancePageErrorSource =
+  | 'widget'
+  | 'element'
+  | 'ambiguous'
+  | 'unclassified';
+
+export type PerformancePageErrorClassification = {
+  errorClass: Exclude<PerformancePageErrorClass, 'none'>;
+  errorSubtype: PerformancePageErrorSubtype;
+  errorSource: PerformancePageErrorSource;
+  stackAvailable: boolean;
+  sourceScanTruncated: boolean;
+};
+
 export type PerformanceEndpoint =
   | 'context'
   | 'calendars'
@@ -73,6 +112,11 @@ export type PerformanceDefaultWaitFailureSnapshot = {
 };
 
 export const MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT: 512;
+
+export function classifyPerformancePageError(
+  error: unknown,
+  fixtureUrls: { elementUrl: string; widgetUrl: string },
+): PerformancePageErrorClassification;
 
 export function classifyPerformanceHoverFailure(
   error: unknown,

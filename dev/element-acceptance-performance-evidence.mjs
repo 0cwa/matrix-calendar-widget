@@ -42,6 +42,56 @@ const PAGE_ERROR_CLASSES = new Set([
   'eval-error',
   'other',
 ]);
+const PAGE_ERROR_SUBTYPES = new Set([
+  'error',
+  'type-error',
+  'reference-error',
+  'syntax-error',
+  'range-error',
+  'uri-error',
+  'eval-error',
+  'aggregate-error',
+  'dom-exception',
+  'named-error',
+  'non-error',
+  'unavailable',
+]);
+const PAGE_ERROR_SOURCES = new Set([
+  'widget',
+  'element',
+  'ambiguous',
+  'unclassified',
+]);
+const PAGE_ERROR_SUBTYPE_CLASS = new Map([
+  ['error', 'error'],
+  ['type-error', 'type-error'],
+  ['reference-error', 'reference-error'],
+  ['syntax-error', 'syntax-error'],
+  ['range-error', 'range-error'],
+  ['uri-error', 'uri-error'],
+  ['eval-error', 'eval-error'],
+  ['aggregate-error', 'other'],
+  ['dom-exception', 'other'],
+  ['named-error', 'other'],
+  ['non-error', 'other'],
+  ['unavailable', 'other'],
+]);
+const PAGE_ERROR_CLASS_BY_NAME = new Map([
+  ['Error', 'error'],
+  ['TypeError', 'type-error'],
+  ['ReferenceError', 'reference-error'],
+  ['SyntaxError', 'syntax-error'],
+  ['RangeError', 'range-error'],
+  ['URIError', 'uri-error'],
+  ['EvalError', 'eval-error'],
+]);
+const PAGE_ERROR_SUBTYPE_BY_NAME = new Map([
+  ...PAGE_ERROR_CLASS_BY_NAME,
+  ['AggregateError', 'aggregate-error'],
+]);
+const PAGE_ERROR_STACK_CHARACTER_LIMIT = 16_384;
+const PAGE_ERROR_STACK_FRAME_LIMIT = 24;
+const PAGE_ERROR_STACK_URL = /https?:\/\/[^\s()[\]{}<>"']+/gu;
 const PAGE_ERROR_STAGES = new Set([
   'case-setup',
   'element-login',
@@ -55,7 +105,15 @@ const PAGE_ERROR_STAGES = new Set([
   'case-cleanup',
 ]);
 const ORDINARY_PROFILES = new Set(['empty', 'events-25']);
-const PAGE_ERROR_OBSERVATION_KEYS = ['profile', 'stage', 'errorClass'];
+const PAGE_ERROR_OBSERVATION_KEYS = [
+  'profile',
+  'stage',
+  'errorClass',
+  'errorSubtype',
+  'errorSource',
+  'stackAvailable',
+  'sourceScanTruncated',
+];
 const API_SAMPLE =
   /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5]|(?:empty|events-25)-(?:default|refresh-setup|refresh)|events-25-details-[1-5])$/u;
 
@@ -80,6 +138,122 @@ const REPORT_KEYS = [
   'pageErrorCount',
   'pageErrorClass',
 ];
+
+function readErrorString(error, key) {
+  if (
+    error === null ||
+    (typeof error !== 'object' && typeof error !== 'function')
+  ) {
+    return null;
+  }
+  try {
+    const value = error[key];
+    return typeof value === 'string' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function getErrorObjectTag(error) {
+  if (error === null || typeof error !== 'object') return null;
+  try {
+    return Object.prototype.toString.call(error);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeErrorOrigin(value) {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function stackFrameMatchesOrigin(frame, origin) {
+  const normalizedFrame = frame.trim();
+  const browserStackFrame =
+    /^at\s+(?:.+\s+\()?https?:\/\//u.test(normalizedFrame) ||
+    /^[^@\s][^@]*@https?:\/\//u.test(normalizedFrame);
+  if (!origin || !browserStackFrame) return false;
+  for (const match of frame.matchAll(PAGE_ERROR_STACK_URL)) {
+    const candidate = match[0]
+      .replace(/:\d+:\d+$/u, '')
+      .replace(/[),;]+$/u, '');
+    try {
+      if (new URL(candidate).origin === origin) return true;
+    } catch {
+      // A malformed frame is ignored; the original stack is never retained.
+    }
+  }
+  return false;
+}
+
+/**
+ * Classify a browser page error without retaining its message, name, stack, or
+ * source URL. Origin matching is limited to the configured Element and widget
+ * origins supplied by the acceptance fixture.
+ *
+ * @param {unknown} error Browser error supplied by Playwright.
+ * @param {{elementUrl: string, widgetUrl: string}} fixtureUrls Configured URLs.
+ * @returns {{errorClass: string, errorSubtype: string, errorSource: string, stackAvailable: boolean, sourceScanTruncated: boolean}}
+ */
+export function classifyPerformancePageError(error, fixtureUrls) {
+  const errorName = readErrorString(error, 'name');
+  const objectTag = getErrorObjectTag(error);
+  const errorClass = PAGE_ERROR_CLASS_BY_NAME.get(errorName) ?? 'other';
+  let errorSubtype = PAGE_ERROR_SUBTYPE_BY_NAME.get(errorName);
+  if (!errorSubtype) {
+    errorSubtype =
+      objectTag === '[object DOMException]'
+        ? 'dom-exception'
+        : objectTag === '[object Error]'
+          ? 'named-error'
+          : errorName === null
+            ? 'unavailable'
+            : 'non-error';
+  }
+
+  const stack = readErrorString(error, 'stack');
+  const stackAvailable = stack !== null && stack.length > 0;
+  let sourceScanTruncated = false;
+  let errorSource = 'unclassified';
+  if (stackAvailable) {
+    const boundedStack = stack.slice(0, PAGE_ERROR_STACK_CHARACTER_LIMIT);
+    const lines = boundedStack.split(/\r?\n/u);
+    const frames = lines.slice(1, PAGE_ERROR_STACK_FRAME_LIMIT + 1);
+    sourceScanTruncated =
+      stack.length > PAGE_ERROR_STACK_CHARACTER_LIMIT ||
+      lines.length > PAGE_ERROR_STACK_FRAME_LIMIT + 1;
+    if (!sourceScanTruncated) {
+      const elementOrigin = normalizeErrorOrigin(fixtureUrls.elementUrl);
+      const widgetOrigin = normalizeErrorOrigin(fixtureUrls.widgetUrl);
+      const elementSeen = frames.some((frame) =>
+        stackFrameMatchesOrigin(frame, elementOrigin),
+      );
+      const widgetSeen = frames.some((frame) =>
+        stackFrameMatchesOrigin(frame, widgetOrigin),
+      );
+      errorSource =
+        elementSeen && widgetSeen
+          ? 'ambiguous'
+          : elementSeen
+            ? 'element'
+            : widgetSeen
+              ? 'widget'
+              : 'unclassified';
+    }
+  }
+
+  return {
+    errorClass,
+    errorSubtype,
+    errorSource,
+    stackAvailable,
+    sourceScanTruncated,
+  };
+}
 const PREPARATION_KEYS = ['elementLoginMs', 'roomNavigationMs'];
 const COLD_KEYS = [
   'durationMs',
@@ -1028,14 +1202,34 @@ function validOrdinaryReport(report) {
   const pageErrorObservationsValid =
     Array.isArray(report.pageErrorObservations) &&
     report.pageErrorObservations.length <= 8 &&
-    report.pageErrorObservations.every(
-      (observation) =>
-        hasExactKeys(observation, PAGE_ERROR_OBSERVATION_KEYS) &&
+    report.pageErrorObservations.every((observation) => {
+      if (!hasExactKeys(observation, PAGE_ERROR_OBSERVATION_KEYS)) {
+        return false;
+      }
+      const subtypeClass = PAGE_ERROR_SUBTYPE_CLASS.get(
+        observation.errorSubtype,
+      );
+      const sourceEvidenceValid =
+        PAGE_ERROR_SOURCES.has(observation.errorSource) &&
+        typeof observation.stackAvailable === 'boolean' &&
+        typeof observation.sourceScanTruncated === 'boolean' &&
+        (observation.stackAvailable ||
+          (observation.errorSource === 'unclassified' &&
+            !observation.sourceScanTruncated)) &&
+        (!observation.sourceScanTruncated ||
+          observation.errorSource === 'unclassified') &&
+        (observation.errorSource === 'unclassified' ||
+          (observation.stackAvailable && !observation.sourceScanTruncated));
+      return (
         ORDINARY_PROFILES.has(observation.profile) &&
         PAGE_ERROR_STAGES.has(observation.stage) &&
         PAGE_ERROR_CLASSES.has(observation.errorClass) &&
-        observation.errorClass !== 'none',
-    ) &&
+        observation.errorClass !== 'none' &&
+        PAGE_ERROR_SUBTYPES.has(observation.errorSubtype) &&
+        subtypeClass === observation.errorClass &&
+        sourceEvidenceValid
+      );
+    }) &&
     typeof report.pageErrorObservationOverflow === 'boolean' &&
     (report.pageErrorCount === null
       ? report.pageErrorObservations.length === 0 &&
@@ -1048,7 +1242,7 @@ function validOrdinaryReport(report) {
             report.pageErrorClass));
   return (
     hasExactKeys(report, ORDINARY_REPORT_KEYS) &&
-    report.version === 8 &&
+    report.version === 9 &&
     report.viewportWidth === 1280 &&
     report.viewportHeight === 800 &&
     report.calendarDays === 7 &&
@@ -1081,7 +1275,7 @@ function validOrdinaryReport(report) {
 }
 
 function validReport(report) {
-  return isRecord(report) && report.version === 8
+  return isRecord(report) && report.version === 9
     ? validOrdinaryReport(report)
     : validLegacyReport(report);
 }
@@ -1484,13 +1678,13 @@ function ordinaryReportPasses(report) {
 }
 
 function reportPasses(report) {
-  return report.version === 8
+  return report.version === 9
     ? ordinaryReportPasses(report)
     : legacyReportPasses(report);
 }
 
 function validDefaultWaitRecord(record) {
-  if (record.performanceReport.version !== 8) return true;
+  if (record.performanceReport.version !== 9) return true;
   const snapshotCount = record.performanceReport.cases.filter(
     (performanceCase) => performanceCase.defaultWaitObservation !== null,
   ).length;
@@ -1528,7 +1722,7 @@ function formatOrdinaryPerformanceEvidence(record) {
   const lines = [
     [
       'phase=performance-pilot',
-      'report_version=8',
+      'report_version=9',
       'profile=ordinary-0-25',
       `beta_gate_eligible=${record.status === 'passed'}`,
       `status=${record.status}`,
@@ -1547,7 +1741,7 @@ function formatOrdinaryPerformanceEvidence(record) {
 
   for (const [index, observation] of report.pageErrorObservations.entries()) {
     lines.push(
-      `page_error_observation index=${index + 1} profile=${observation.profile} stage=${observation.stage} error_class=${observation.errorClass}`,
+      `page_error_observation index=${index + 1} profile=${observation.profile} stage=${observation.stage} error_class=${observation.errorClass} error_subtype=${observation.errorSubtype} error_source=${observation.errorSource} stack_available=${observation.stackAvailable} source_scan_truncated=${observation.sourceScanTruncated}`,
     );
   }
 
@@ -1731,7 +1925,7 @@ export function formatPerformanceEvidence(record) {
   }
 
   const report = record.performanceReport;
-  if (report.version === 8) {
+  if (report.version === 9) {
     return formatOrdinaryPerformanceEvidence(record);
   }
   const lines = [

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
+  classifyPerformancePageError,
   summarizeDefaultWaitObservation,
 } from './element-acceptance-performance-evidence.mjs';
 import { sanitizeElementAcceptance } from './sanitize-element-acceptance.mjs';
@@ -303,7 +304,7 @@ function ordinaryCase(profile, year, month, eventCount) {
 
 function ordinaryReport() {
   const report = {
-    version: 8,
+    version: 9,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -393,7 +394,7 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   );
   assert.match(
     summary,
-    /phase=performance-pilot report_version=8 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
+    /phase=performance-pilot report_version=9 profile=ordinary-0-25 beta_gate_eligible=true status=passed failure_code=none cases=2 calendar_days=7/u,
   );
   assert.match(summary, /performance_case profile=empty events=0/u);
   assert.match(summary, /performance_case profile=events-25 events=25/u);
@@ -423,13 +424,154 @@ test('accepts the ordinary 0-and-25 profile and records an empty seeded default 
   assert.doesNotMatch(summary, /Performance\s+\d|access_token|https?:\/\//u);
 });
 
+test('classifies only closed page-error subtype and configured origin buckets', () => {
+  const fixtureUrls = {
+    elementUrl: 'https://element.invalid:8448/',
+    widgetUrl: 'http://widget.invalid:3000/',
+  };
+  const widgetError = new TypeError('private message');
+  widgetError.stack =
+    'TypeError: private message\n    at initialize (http://widget.invalid:3000/assets/widget.js:1:4)';
+  const widgetClassification = classifyPerformancePageError(
+    widgetError,
+    fixtureUrls,
+  );
+  assert.deepEqual(widgetClassification, {
+    errorClass: 'type-error',
+    errorSubtype: 'type-error',
+    errorSource: 'widget',
+    stackAvailable: true,
+    sourceScanTruncated: false,
+  });
+  assert.doesNotMatch(
+    JSON.stringify(widgetClassification),
+    /private|https?:\/\/|element\.invalid|widget\.invalid|8448|3000|assets/u,
+  );
+
+  const elementError = new Error('private message');
+  elementError.stack =
+    'Error: private message\n    at render (https://element.invalid:8448/bundles/app.js:2:5)';
+  assert.equal(
+    classifyPerformancePageError(elementError, fixtureUrls).errorSource,
+    'element',
+  );
+
+  const firefoxStackError = new Error('private message');
+  firefoxStackError.stack =
+    'Error: private message\nrender@https://element.invalid:8448/bundles/app.js:2:5';
+  assert.equal(
+    classifyPerformancePageError(firefoxStackError, fixtureUrls).errorSource,
+    'element',
+  );
+
+  const messageUrlError = new Error('private message');
+  messageUrlError.stack =
+    'Error: private message\nhttps://widget.invalid:3000/private-message';
+  assert.equal(
+    classifyPerformancePageError(messageUrlError, fixtureUrls).errorSource,
+    'unclassified',
+  );
+
+  const unrelatedOriginError = new Error('private message');
+  unrelatedOriginError.stack =
+    'Error: private message\n    at helper (https://third-party.invalid/app.js:2:5)';
+  assert.equal(
+    classifyPerformancePageError(unrelatedOriginError, fixtureUrls).errorSource,
+    'unclassified',
+  );
+
+  const ambiguousError = new Error('private message');
+  ambiguousError.stack =
+    'Error: private message\n    at widget (http://widget.invalid:3000/app.js:1:1)\n    at element (https://element.invalid:8448/app.js:1:1)';
+  assert.equal(
+    classifyPerformancePageError(ambiguousError, fixtureUrls).errorSource,
+    'ambiguous',
+  );
+
+  const aggregateError = new AggregateError([], 'private message');
+  assert.equal(
+    classifyPerformancePageError(aggregateError, fixtureUrls).errorSubtype,
+    'aggregate-error',
+  );
+  const domException = new DOMException('private message', 'AbortError');
+  assert.equal(
+    classifyPerformancePageError(domException, fixtureUrls).errorSubtype,
+    'dom-exception',
+  );
+});
+
+test('marks unavailable or truncated stack source as unclassified', () => {
+  const fixtureUrls = {
+    elementUrl: 'https://element.invalid:8448/',
+    widgetUrl: 'http://widget.invalid:3000/',
+  };
+  const stackUnavailable = classifyPerformancePageError(
+    new Error('private message'),
+    fixtureUrls,
+  );
+  assert.equal(stackUnavailable.errorSource, 'unclassified');
+  assert.equal(stackUnavailable.stackAvailable, true);
+  assert.equal(stackUnavailable.sourceScanTruncated, false);
+
+  const noStack = Object.defineProperty({}, 'name', {
+    get() {
+      throw new Error('private getter failure');
+    },
+  });
+  const unavailable = classifyPerformancePageError(noStack, fixtureUrls);
+  assert.deepEqual(unavailable, {
+    errorClass: 'other',
+    errorSubtype: 'unavailable',
+    errorSource: 'unclassified',
+    stackAvailable: false,
+    sourceScanTruncated: false,
+  });
+
+  const truncated = new Error('private message');
+  truncated.stack = [
+    'Error: private message',
+    ...Array.from(
+      { length: 25 },
+      (_, index) =>
+        `    at frame${index} (http://widget.invalid:3000/app.js:${index + 1}:1)`,
+    ),
+  ].join('\n');
+  const truncatedClassification = classifyPerformancePageError(
+    truncated,
+    fixtureUrls,
+  );
+  assert.equal(truncatedClassification.errorSource, 'unclassified');
+  assert.equal(truncatedClassification.stackAvailable, true);
+  assert.equal(truncatedClassification.sourceScanTruncated, true);
+  assert.doesNotMatch(
+    JSON.stringify(truncatedClassification),
+    /private|https?:\/\/|element\.invalid|widget\.invalid|8448|3000/u,
+  );
+});
+
 test('summarizes bounded page-error stage observations without error text', () => {
   const report = ordinaryReport();
   report.pageErrorCount = 2;
   report.pageErrorClass = 'other';
   report.pageErrorObservations = [
-    { profile: 'empty', stage: 'widget-open', errorClass: 'other' },
-    { profile: 'events-25', stage: 'refresh', errorClass: 'type-error' },
+    {
+      profile: 'empty',
+      stage: 'widget-open',
+      errorClass: 'other',
+      errorSubtype: 'named-error',
+      errorSource: 'widget',
+      stackAvailable: true,
+      sourceScanTruncated: false,
+    },
+    {
+      profile: 'events-25',
+      stage: 'refresh',
+      errorClass: 'type-error',
+      errorSubtype: 'type-error',
+      errorSource: 'element',
+      stackAvailable: true,
+      sourceScanTruncated: false,
+    },
   ];
   const summary = sanitizeElementAcceptance(
     JSON.stringify(ordinaryStage('failed', report, 'performance-page-error')),
@@ -441,15 +583,15 @@ test('summarizes bounded page-error stage observations without error text', () =
   );
   assert.match(
     summary,
-    /page_error_observation index=1 profile=empty stage=widget-open error_class=other/u,
+    /page_error_observation index=1 profile=empty stage=widget-open error_class=other error_subtype=named-error error_source=widget stack_available=true source_scan_truncated=false/u,
   );
   assert.match(
     summary,
-    /page_error_observation index=2 profile=events-25 stage=refresh error_class=type-error/u,
+    /page_error_observation index=2 profile=events-25 stage=refresh error_class=type-error error_subtype=type-error error_source=element stack_available=true source_scan_truncated=false/u,
   );
   assert.doesNotMatch(
     summary,
-    /stack|message|https?:\/\/|access_token|private/u,
+    /(?:error_message|error_stack)=|https?:\/\/|access_token|private error message/u,
   );
 
   for (const mutate of [
@@ -465,13 +607,41 @@ test('summarizes bounded page-error stage observations without error text', () =
     (invalid) => {
       invalid.pageErrorObservations[0].errorClass = 'type-error';
     },
+    (invalid) => {
+      invalid.pageErrorObservations[0].errorSubtype = 'private error name';
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[0].errorSource = 'widget.invalid:3000';
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[0].stackAvailable = false;
+    },
+    (invalid) => {
+      invalid.pageErrorObservations[0].sourceScanTruncated = true;
+    },
   ]) {
     const invalid = ordinaryReport();
     invalid.pageErrorCount = 2;
     invalid.pageErrorClass = 'other';
     invalid.pageErrorObservations = [
-      { profile: 'empty', stage: 'widget-open', errorClass: 'other' },
-      { profile: 'events-25', stage: 'refresh', errorClass: 'type-error' },
+      {
+        profile: 'empty',
+        stage: 'widget-open',
+        errorClass: 'other',
+        errorSubtype: 'named-error',
+        errorSource: 'widget',
+        stackAvailable: true,
+        sourceScanTruncated: false,
+      },
+      {
+        profile: 'events-25',
+        stage: 'refresh',
+        errorClass: 'type-error',
+        errorSubtype: 'type-error',
+        errorSource: 'element',
+        stackAvailable: true,
+        sourceScanTruncated: false,
+      },
     ];
     mutate(invalid);
     assert.throws(
@@ -493,6 +663,10 @@ test('summarizes bounded page-error stage observations without error text', () =
     profile: index < 4 ? 'empty' : 'events-25',
     stage: 'widget-open',
     errorClass: index === 0 ? 'other' : 'type-error',
+    errorSubtype: index === 0 ? 'named-error' : 'type-error',
+    errorSource: index === 0 ? 'unclassified' : 'widget',
+    stackAvailable: true,
+    sourceScanTruncated: false,
   }));
   overflow.pageErrorObservationOverflow = true;
   const overflowSummary = sanitizeElementAcceptance(
