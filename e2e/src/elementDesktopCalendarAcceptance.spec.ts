@@ -35,6 +35,7 @@ import {
   enterDesktopPasswordLogin,
   initializeDesktopJourneyEvidence,
   readSyntheticDesktopCredentials,
+  type DesktopJourneyFailurePoint,
   type DesktopJourneyPhase,
   type DesktopLoginDiagnostic,
   type DesktopLoginEntry,
@@ -109,6 +110,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let desktopPage: Page | undefined;
   let webHttpRoute: WebHttpRouteObservation | undefined;
   let currentPhase: DesktopJourneyPhase | undefined;
+  let currentFailurePoint: DesktopJourneyFailurePoint | undefined;
   let currentLoginStep: DesktopLoginStep = 'not_observed';
   let loginEntry: DesktopLoginEntry = 'not_observed';
   let loginFieldsBeforeFill = unavailableDesktopLoginFormObservation();
@@ -207,32 +209,44 @@ test('Element Desktop room event journey', async ({ browser }) => {
     recordPhase(evidence, recorded, 'desktop-member-identity');
 
     currentPhase = 'desktop-room-widget-read';
+    currentFailurePoint = 'room-navigation';
     await desktopElement.navigateToRoomOrInvitation(fixture.roomName);
+    currentFailurePoint = 'room-heading';
     await desktopElement.roomNameText
       .getByText(fixture.roomName, { exact: true })
       .waitFor({ state: 'visible' });
+    currentFailurePoint = 'room-id';
     if (desktopElement.getCurrentRoomId() !== fixture.teamRoomId) {
       throw new Error('Desktop opened an unexpected room');
     }
+    currentFailurePoint = 'gateway-read-await';
     const desktopReadPromise = waitForGatewayResponse(
       desktopPage,
       fixture,
       'GET',
     );
+    currentFailurePoint = 'widget-open';
     const desktopFrame = await openCalendarWidget(desktopPage, desktopElement);
+    currentFailurePoint = 'gateway-read-await';
     const desktopRead = await desktopReadPromise;
+    currentFailurePoint = 'gateway-read-status';
     if (desktopRead.status() !== 200) {
       throw new Error('Desktop calendar read failed');
     }
+    currentFailurePoint = 'create-control';
     await desktopFrame
       .getByRole('button', { name: 'Create event', exact: true })
       .waitFor({ state: 'visible' });
+    currentFailurePoint = undefined;
     currentPhase = 'desktop-widget-origin-isolation';
+    currentFailurePoint = 'origin-isolation';
     await assertDesktopWidgetAttachment(desktopPage, fixture.widgetUrl);
+    currentFailurePoint = undefined;
     recordPhase(evidence, recorded, 'desktop-widget-origin-isolation');
     currentPhase = 'desktop-room-widget-read';
     recordPhase(evidence, recorded, 'desktop-room-widget-read');
 
+    currentFailurePoint = undefined;
     currentPhase = 'desktop-event-create';
     const initialTitle = `Desktop acceptance ${randomUUID()}`;
     const editedTitle = `${initialTitle} edited`;
@@ -411,7 +425,13 @@ test('Element Desktop room event journey', async ({ browser }) => {
       }
     }
     if (currentPhase && evidenceInitialized && !recorded.has(currentPhase)) {
-      safeRecordPhase(evidence, recorded, currentPhase, 'failed');
+      safeRecordPhase(
+        evidence,
+        recorded,
+        currentPhase,
+        'failed',
+        currentFailurePoint,
+      );
     }
   } finally {
     await Promise.all(
@@ -882,9 +902,15 @@ function safeRecordPhase(
   recorded: Set<DesktopJourneyPhase>,
   phase: DesktopJourneyPhase,
   status: 'passed' | 'failed',
+  failurePoint?: DesktopJourneyFailurePoint,
 ) {
   try {
-    appendDesktopJourneyOutcome({ ...evidence, phase, status });
+    appendDesktopJourneyOutcome({
+      ...evidence,
+      phase,
+      status,
+      ...(failurePoint === undefined ? {} : { failurePoint }),
+    });
     recorded.add(phase);
     return true;
   } catch {

@@ -14,6 +14,26 @@ export type DesktopJourneyPhase =
 
 export type DesktopJourneyOutcome = 'passed' | 'failed';
 
+export type DesktopJourneyFailurePoint =
+  | 'room-navigation'
+  | 'room-heading'
+  | 'room-id'
+  | 'gateway-read-await'
+  | 'widget-open'
+  | 'gateway-read-status'
+  | 'create-control'
+  | 'origin-isolation';
+
+export type DesktopJourneyFailurePointObservation =
+  | {
+      phase: 'desktop-room-widget-read';
+      point: Exclude<DesktopJourneyFailurePoint, 'origin-isolation'>;
+    }
+  | {
+      phase: 'desktop-widget-origin-isolation';
+      point: 'origin-isolation';
+    };
+
 export type DesktopLoginStep =
   | 'not_observed'
   | 'cdp_connect'
@@ -96,10 +116,12 @@ export type DesktopJourneySummary = {
   loginEntry: DesktopLoginEntry;
   loginDiagnostic: DesktopLoginDiagnostic | null;
   roomsReadyDiagnostic: DesktopRoomsReadyDiagnostic | null;
+  failurePoint: DesktopJourneyFailurePointObservation | null;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
 
 export declare const DESKTOP_JOURNEY_PHASES: readonly DesktopJourneyPhase[];
+export declare const DESKTOP_JOURNEY_FAILURE_POINTS: readonly DesktopJourneyFailurePoint[];
 export declare const DESKTOP_LOGIN_STEPS: readonly DesktopLoginStep[];
 export declare const DESKTOP_LOGIN_FAILURE_REASONS: readonly DesktopLoginFailureReason[];
 export declare const DESKTOP_LOGIN_ENTRIES: readonly DesktopLoginEntry[];
@@ -143,6 +165,7 @@ export declare function appendDesktopJourneyOutcome(input: {
   runnerTemp: string;
   phase: DesktopJourneyPhase;
   status: DesktopJourneyOutcome;
+  failurePoint?: DesktopJourneyFailurePoint;
 }): void;
 
 export declare function appendDesktopLoginStep(input: {

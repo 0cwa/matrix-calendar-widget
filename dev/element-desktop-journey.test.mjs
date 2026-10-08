@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
+  DESKTOP_JOURNEY_FAILURE_POINTS,
   DESKTOP_JOURNEY_PHASES,
   DESKTOP_LOGIN_ENTRIES,
   DESKTOP_LOGIN_FAILURE_REASONS,
@@ -187,6 +188,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
     assert.equal(summary.roomsReadyDiagnostic, null);
+    assert.equal(summary.failurePoint, null);
     assert.equal(summary.cases['desktop-login'], 'passed');
     assert.equal(summary.cases['desktop-widget-origin-isolation'], 'not_run');
     assert.equal(summary.cases['web-member-b-read'], 'passed');
@@ -199,6 +201,117 @@ test('keeps journey evidence within finite phases and statuses', () => {
         '{"phase":"web-member-b-read","status":"passed"}\n',
     );
   });
+});
+
+test('records one fixed failure point for a failed Desktop room read', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopJourneyOutcome({
+      filePath,
+      runnerTemp,
+      phase: 'desktop-room-widget-read',
+      status: 'failed',
+      failurePoint: 'gateway-read-status',
+    });
+
+    const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
+    assert.deepEqual(summary.failurePoint, {
+      phase: 'desktop-room-widget-read',
+      point: 'gateway-read-status',
+    });
+    assert.equal(summary.cases['desktop-room-widget-read'], 'failed');
+    assert.throws(
+      () =>
+        appendDesktopJourneyOutcome({
+          filePath,
+          runnerTemp,
+          phase: 'desktop-widget-origin-isolation',
+          status: 'failed',
+          failurePoint: 'origin-isolation',
+        }),
+      /Invalid Desktop journey input/u,
+    );
+    assert.equal(
+      readFileSync(filePath, 'utf8'),
+      '{"phase":"desktop-room-widget-read","status":"failed","failurePoint":"gateway-read-status"}\n',
+    );
+  });
+});
+
+test('accepts only the closed failure-point enum with its failed-phase match', () => {
+  assert.deepEqual(
+    [...DESKTOP_JOURNEY_FAILURE_POINTS],
+    [
+      'room-navigation',
+      'room-heading',
+      'room-id',
+      'gateway-read-await',
+      'widget-open',
+      'gateway-read-status',
+      'create-control',
+      'origin-isolation',
+    ],
+  );
+
+  const summarize = (row) =>
+    summarizeDesktopJourneyEvidence(`${JSON.stringify(row)}\n`);
+  assert.deepEqual(
+    summarize({
+      phase: 'desktop-widget-origin-isolation',
+      status: 'failed',
+      failurePoint: 'origin-isolation',
+    }).failurePoint,
+    {
+      phase: 'desktop-widget-origin-isolation',
+      point: 'origin-isolation',
+    },
+  );
+
+  for (const row of [
+    {
+      phase: 'desktop-room-widget-read',
+      status: 'passed',
+      failurePoint: 'gateway-read-status',
+    },
+    {
+      phase: 'desktop-room-widget-read',
+      status: 'failed',
+      failurePoint: 'origin-isolation',
+    },
+    {
+      phase: 'desktop-widget-origin-isolation',
+      status: 'failed',
+      failurePoint: 'create-control',
+    },
+    {
+      phase: 'desktop-event-create',
+      status: 'failed',
+      failurePoint: 'room-id',
+    },
+    {
+      phase: 'desktop-room-widget-read',
+      status: 'failed',
+      failurePoint: 'private-error-message',
+    },
+    {
+      phase: 'desktop-room-widget-read',
+      status: 'failed',
+      failurePoint: 'room-navigation',
+      message: 'private error text',
+    },
+  ]) {
+    assert.throws(() => summarize(row), /Invalid Desktop journey input/u);
+  }
+
+  assert.throws(
+    () =>
+      summarizeDesktopJourneyEvidence(
+        '{"phase":"desktop-room-widget-read","status":"failed","failurePoint":"room-heading"}\n' +
+          '{"phase":"desktop-widget-origin-isolation","status":"failed","failurePoint":"origin-isolation"}\n',
+      ),
+    /Invalid Desktop journey input/u,
+  );
 });
 
 test('records only the fixed Desktop login step in private journey evidence', () => {

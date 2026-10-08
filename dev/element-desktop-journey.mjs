@@ -23,6 +23,16 @@ export const DESKTOP_JOURNEY_PHASES = Object.freeze([
   'canonical-edit-read',
   'web-http-route-enforcement',
 ]);
+export const DESKTOP_JOURNEY_FAILURE_POINTS = Object.freeze([
+  'room-navigation',
+  'room-heading',
+  'room-id',
+  'gateway-read-await',
+  'widget-open',
+  'gateway-read-status',
+  'create-control',
+  'origin-isolation',
+]);
 export const DESKTOP_LOGIN_STEPS = Object.freeze([
   'not_observed',
   'cdp_connect',
@@ -53,6 +63,12 @@ export const DESKTOP_LOGIN_ENTRIES = Object.freeze([
 ]);
 
 const PHASE_SET = new Set(DESKTOP_JOURNEY_PHASES);
+const JOURNEY_FAILURE_POINT_SET = new Set(DESKTOP_JOURNEY_FAILURE_POINTS);
+const ROOM_WIDGET_FAILURE_POINT_SET = new Set(
+  DESKTOP_JOURNEY_FAILURE_POINTS.filter(
+    (point) => point !== 'origin-isolation',
+  ),
+);
 const LOGIN_STEP_SET = new Set(DESKTOP_LOGIN_STEPS);
 const LOGIN_FAILURE_REASON_SET = new Set(DESKTOP_LOGIN_FAILURE_REASONS);
 const LOGIN_ENTRY_SET = new Set(DESKTOP_LOGIN_ENTRIES);
@@ -101,6 +117,19 @@ const MAX_EVIDENCE_BYTES = 16_384;
 
 function invalidInput() {
   throw new Error('Invalid Desktop journey input');
+}
+
+function validJourneyFailurePoint(phase, status, failurePoint) {
+  if (status !== 'failed' || !JOURNEY_FAILURE_POINT_SET.has(failurePoint)) {
+    return false;
+  }
+  if (phase === 'desktop-room-widget-read') {
+    return ROOM_WIDGET_FAILURE_POINT_SET.has(failurePoint);
+  }
+  return (
+    phase === 'desktop-widget-origin-isolation' &&
+    failurePoint === 'origin-isolation'
+  );
 }
 
 function validLoginFieldObservation(value) {
@@ -433,6 +462,7 @@ function parseEvidence(input) {
   }
 
   const outcomes = new Map();
+  let failurePoint = null;
   let loginStep = 'not_observed';
   let loginStepRecorded = false;
   let loginEntry = 'not_observed';
@@ -496,18 +526,32 @@ function parseEvidence(input) {
       loginStepRecorded = true;
       continue;
     }
+    const phaseKeys = Object.keys(value).sort().join(',');
+    const hasFailurePoint = Object.hasOwn(value, 'failurePoint');
     if (
-      Object.keys(value).sort().join(',') !== 'phase,status' ||
+      (phaseKeys !== 'phase,status' &&
+        phaseKeys !== 'failurePoint,phase,status') ||
       !PHASE_SET.has(value.phase) ||
       !['passed', 'failed'].includes(value.status) ||
+      (hasFailurePoint &&
+        (failurePoint !== null ||
+          !validJourneyFailurePoint(
+            value.phase,
+            value.status,
+            value.failurePoint,
+          ))) ||
       outcomes.has(value.phase)
     ) {
       invalidInput();
+    }
+    if (hasFailurePoint) {
+      failurePoint = { phase: value.phase, point: value.failurePoint };
     }
     outcomes.set(value.phase, value.status);
   }
   return {
     outcomes,
+    failurePoint,
     loginStep,
     loginStepRecorded,
     loginEntry,
@@ -568,20 +612,35 @@ export function appendDesktopJourneyOutcome({
   runnerTemp,
   phase,
   status,
+  failurePoint,
 }) {
   const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
   privateFileStat(path, MAX_EVIDENCE_BYTES);
-  const { outcomes } = parseEvidence(readFileSync(path, 'utf8'));
-  if (!PHASE_SET.has(phase) || !['passed', 'failed'].includes(status)) {
+  const parsed = parseEvidence(readFileSync(path, 'utf8'));
+  if (
+    !PHASE_SET.has(phase) ||
+    !['passed', 'failed'].includes(status) ||
+    (failurePoint !== undefined &&
+      (!validJourneyFailurePoint(phase, status, failurePoint) ||
+        parsed.failurePoint !== null))
+  ) {
     invalidInput();
   }
-  if (outcomes.has(phase)) invalidInput();
+  if (parsed.outcomes.has(phase)) invalidInput();
 
   try {
-    appendFileSync(path, `${JSON.stringify({ phase, status })}\n`, {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
+    appendFileSync(
+      path,
+      `${JSON.stringify({
+        phase,
+        status,
+        ...(failurePoint === undefined ? {} : { failurePoint }),
+      })}\n`,
+      {
+        encoding: 'utf8',
+        mode: 0o600,
+      },
+    );
   } catch {
     invalidInput();
   }
@@ -636,6 +695,7 @@ export function appendDesktopLoginStep({
 export function summarizeDesktopJourneyEvidence(input) {
   const {
     outcomes,
+    failurePoint,
     loginStep,
     loginEntry,
     loginDiagnostic,
@@ -663,6 +723,7 @@ export function summarizeDesktopJourneyEvidence(input) {
     loginEntry,
     loginDiagnostic,
     roomsReadyDiagnostic,
+    failurePoint,
     cases,
   };
 }
