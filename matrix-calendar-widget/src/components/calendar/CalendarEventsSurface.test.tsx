@@ -293,6 +293,47 @@ describe('<CalendarEventsSurface />', () => {
     expect(await screen.findByText('Dentist')).toBeInTheDocument();
   });
 
+  it('shows the saved title in event details after a whole-event edit', async () => {
+    const event = events[0];
+    const repository = new InMemoryCalendarRepository({
+      calendars: [{ ...calendars[0], readOnly: false }],
+      events: [event],
+    });
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Team planning/ }),
+    );
+    const details = screen.getByRole('dialog', { name: 'Team planning' });
+    await userEvent.click(
+      within(details).getByRole('button', { name: 'Edit' }),
+    );
+
+    const editor = screen.getByRole('dialog', { name: 'Edit event' });
+    const titleInput = within(editor).getByLabelText(/^Title/);
+    await userEvent.clear(titleInput);
+    await userEvent.type(titleInput, 'Updated team planning');
+    await userEvent.click(within(editor).getByRole('button', { name: 'Save' }));
+
+    expect(
+      await screen.findByRole('dialog', { name: 'Updated team planning' }),
+    ).toBeInTheDocument();
+    expect((await repository.getEvent('team', event.id)).title).toBe(
+      'Updated team planning',
+    );
+  });
+
   it.each(['list', 'month'] as const)(
     'clips query-padded-only recurrence from the %s view',
     async (view) => {
@@ -386,6 +427,17 @@ describe('<CalendarEventsSurface />', () => {
         'https://radicale.example.test/team/planning.ics',
         expect.objectContaining({ title: 'Updated planning series' }),
       ),
+    );
+
+    const savedDetails = screen.getByRole('dialog');
+    expect(
+      within(savedDetails).getByRole('heading', {
+        name: 'Updated planning series',
+      }),
+    ).toBeInTheDocument();
+    expect(savedDetails).toHaveTextContent('September 26, 2026 · All day');
+    expect(savedDetails).toHaveTextContent(
+      'This is one occurrence of a recurring series.',
     );
 
     await userEvent.click(
