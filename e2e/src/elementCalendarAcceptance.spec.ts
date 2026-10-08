@@ -211,6 +211,19 @@ type MatrixSyncState =
   | 'CATCHUP'
   | 'UNKNOWN';
 
+type OuterRenderBucket =
+  | 'room-page'
+  | 'other-page'
+  | 'no-shell'
+  | 'inconsistent'
+  | 'unavailable';
+type MatrixChatViewBucket = 'logged-in' | 'other-view' | 'unavailable';
+type MatrixChatPageTypeBucket =
+  | 'room-view'
+  | 'other-page'
+  | 'missing'
+  | 'unavailable';
+
 type MemberARoomObservation = {
   matrixUserMatches: boolean;
   matrixRoomKnown: boolean;
@@ -221,6 +234,15 @@ type MemberARoomObservation = {
   roomHeadingPresent: boolean;
   roomNameMatches: boolean;
   roomIdMatches: boolean;
+  outerRenderBucket: OuterRenderBucket;
+  matrixChatShellPresent: boolean | null;
+  roomViewWrapperPresent: boolean | null;
+  roomViewRendererPresent: boolean | null;
+  matrixChatStateAvailable: boolean;
+  matrixChatViewBucket: MatrixChatViewBucket;
+  matrixChatReady: boolean | null;
+  matrixChatPageTypeBucket: MatrixChatPageTypeBucket;
+  matrixChatCurrentRoomMatches: boolean | null;
   roomRenderStateAvailable: boolean;
   roomViewShellVisible: boolean | null;
   roomViewBodyVisible: boolean | null;
@@ -3551,6 +3573,15 @@ async function openMemberARoomWithDiagnostics(
 
 type RoomRenderStateObservation = Pick<
   MemberARoomObservation,
+  | 'outerRenderBucket'
+  | 'matrixChatShellPresent'
+  | 'roomViewWrapperPresent'
+  | 'roomViewRendererPresent'
+  | 'matrixChatStateAvailable'
+  | 'matrixChatViewBucket'
+  | 'matrixChatReady'
+  | 'matrixChatPageTypeBucket'
+  | 'matrixChatCurrentRoomMatches'
   | 'roomRenderStateAvailable'
   | 'roomViewShellVisible'
   | 'roomViewBodyVisible'
@@ -3563,6 +3594,15 @@ type RoomRenderStateObservation = Pick<
 
 function unavailableRoomRenderState(): RoomRenderStateObservation {
   return {
+    outerRenderBucket: 'unavailable',
+    matrixChatShellPresent: null,
+    roomViewWrapperPresent: null,
+    roomViewRendererPresent: null,
+    matrixChatStateAvailable: false,
+    matrixChatViewBucket: 'unavailable',
+    matrixChatReady: null,
+    matrixChatPageTypeBucket: 'unavailable',
+    matrixChatCurrentRoomMatches: null,
     roomRenderStateAvailable: false,
     roomViewShellVisible: null,
     roomViewBodyVisible: null,
@@ -3576,8 +3616,82 @@ function unavailableRoomRenderState(): RoomRenderStateObservation {
 
 async function observeRoomRenderState(
   page: Page,
+  expectedRoomId: string,
 ): Promise<RoomRenderStateObservation> {
-  return page.evaluate(() => {
+  return page.evaluate((expectedRoomId) => {
+    type MatrixChatState = {
+      view?: unknown;
+      ready?: unknown;
+      page_type?: unknown;
+      currentRoomId?: unknown;
+    };
+    let matrixChatState: MatrixChatState | undefined;
+    try {
+      const matrixChat = (
+        window as Window & {
+          matrixChat?: { state?: unknown };
+        }
+      ).matrixChat;
+      if (
+        matrixChat?.state !== null &&
+        typeof matrixChat?.state === 'object' &&
+        !Array.isArray(matrixChat.state)
+      ) {
+        matrixChatState = matrixChat.state as MatrixChatState;
+      }
+    } catch {
+      // Keep Element's internal state in fixed buckets only.
+    }
+    const matrixChatStateAvailable = matrixChatState !== undefined;
+    const matrixChatViewBucket: MatrixChatViewBucket =
+      typeof matrixChatState?.view === 'number' &&
+      Number.isInteger(matrixChatState.view) &&
+      matrixChatState.view >= 0 &&
+      matrixChatState.view <= 12
+        ? matrixChatState.view === 9
+          ? 'logged-in'
+          : 'other-view'
+        : 'unavailable';
+    const matrixChatReady =
+      typeof matrixChatState?.ready === 'boolean'
+        ? matrixChatState.ready
+        : null;
+    const matrixChatPageTypeBucket: MatrixChatPageTypeBucket =
+      matrixChatState?.page_type === undefined ||
+      matrixChatState?.page_type === null
+        ? matrixChatStateAvailable
+          ? 'missing'
+          : 'unavailable'
+        : typeof matrixChatState.page_type === 'string'
+          ? matrixChatState.page_type === 'room_view'
+            ? 'room-view'
+            : 'other-page'
+          : 'unavailable';
+    const matrixChatCurrentRoomMatches =
+      typeof matrixChatState?.currentRoomId === 'string' ||
+      matrixChatState?.currentRoomId === null
+        ? matrixChatState.currentRoomId === expectedRoomId
+        : null;
+    const matrixChatShellPresent =
+      document.querySelector('.mx_MatrixChat') !== null;
+    const roomViewWrapperPresent =
+      document.querySelector('.mx_RoomView_wrapper') !== null;
+    const roomViewRendererPresent =
+      document.querySelector('.mx_RoomView') !== null;
+    const outerRenderBucket: OuterRenderBucket =
+      matrixChatShellPresent &&
+      roomViewWrapperPresent &&
+      roomViewRendererPresent
+        ? 'room-page'
+        : matrixChatShellPresent &&
+            roomViewWrapperPresent &&
+            !roomViewRendererPresent
+          ? 'other-page'
+          : !matrixChatShellPresent &&
+              !roomViewWrapperPresent &&
+              !roomViewRendererPresent
+            ? 'no-shell'
+            : 'inconsistent';
     const isVisible = (element: Element): boolean => {
       const rect = element.getBoundingClientRect();
       const style = window.getComputedStyle(element);
@@ -3591,6 +3705,15 @@ async function observeRoomRenderState(
       );
     };
     const unavailable = {
+      outerRenderBucket,
+      matrixChatShellPresent,
+      roomViewWrapperPresent,
+      roomViewRendererPresent,
+      matrixChatStateAvailable,
+      matrixChatViewBucket,
+      matrixChatReady,
+      matrixChatPageTypeBucket,
+      matrixChatCurrentRoomMatches,
       roomRenderStateAvailable: false,
       roomViewShellVisible: null,
       roomViewBodyVisible: null,
@@ -3608,6 +3731,7 @@ async function observeRoomRenderState(
     if (!roomView) {
       return {
         ...unavailable,
+        outerRenderBucket,
         roomRenderStateAvailable: true,
         roomViewShellVisible: false,
         roomViewBodyVisible: false,
@@ -3622,6 +3746,7 @@ async function observeRoomRenderState(
       Array.from(root.querySelectorAll(selector)).some(isVisible);
     const header = roomView.querySelector('header.mx_RoomHeader');
     return {
+      ...unavailable,
       roomRenderStateAvailable: true,
       roomViewShellVisible: true,
       roomViewBodyVisible: firstVisible(roomView, '.mx_RoomView_body'),
@@ -3636,7 +3761,7 @@ async function observeRoomRenderState(
         firstVisible(header, '.mx_RoomHeader_heading[role="heading"]'),
       roomErrorBoundaryVisible: firstVisible(roomView, '.mx_ErrorBoundary'),
     };
-  });
+  }, expectedRoomId);
 }
 
 async function observeMemberARoom(
@@ -3715,7 +3840,7 @@ async function observeMemberARoom(
     },
     { expectedRoomId: roomId, expectedMatrixUserId: expectedUserId },
   );
-  const roomRenderState = await observeRoomRenderState(page).catch(() =>
+  const roomRenderState = await observeRoomRenderState(page, roomId).catch(() =>
     unavailableRoomRenderState(),
   );
   const roomNameHeading = getPinnedElementRoomNameHeading(page);

@@ -155,6 +155,36 @@ const ROOM_RENDER_STATE_FIELDS = [
   'roomHeaderHeadingVisible',
   'roomErrorBoundaryVisible',
 ];
+const OUTER_RENDERER_PRESENCE_FIELDS = [
+  'matrixChatShellPresent',
+  'roomViewWrapperPresent',
+  'roomViewRendererPresent',
+];
+const OUTER_RENDERER_BUCKETS = new Set([
+  'room-page',
+  'other-page',
+  'no-shell',
+  'inconsistent',
+  'unavailable',
+]);
+const MATRIX_CHAT_VIEW_BUCKETS = new Set([
+  'logged-in',
+  'other-view',
+  'unavailable',
+]);
+const MATRIX_CHAT_PAGE_TYPE_BUCKETS = new Set([
+  'room-view',
+  'other-page',
+  'missing',
+  'unavailable',
+]);
+const MATRIX_CHAT_STATE_FIELDS = [
+  'matrixChatStateAvailable',
+  'matrixChatViewBucket',
+  'matrixChatReady',
+  'matrixChatPageTypeBucket',
+  'matrixChatCurrentRoomMatches',
+];
 const REMINDER_ROOM_LAYOUT_FIELDS = [
   'roomViewPresent',
   'roomHeaderPresent',
@@ -692,6 +722,9 @@ const ALLOWED_KEYS = new Set([
   'roomHeadingPresent',
   'roomNameMatches',
   'roomIdMatches',
+  'outerRenderBucket',
+  ...OUTER_RENDERER_PRESENCE_FIELDS,
+  ...MATRIX_CHAT_STATE_FIELDS,
   'roomRenderStateAvailable',
   ...ROOM_RENDER_STATE_FIELDS,
   ...REMINDER_ROOM_LAYOUT_FIELDS,
@@ -2092,6 +2125,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       'roomHeadingPresent',
       'roomNameMatches',
       'roomIdMatches',
+      'outerRenderBucket',
+      ...OUTER_RENDERER_PRESENCE_FIELDS,
+      ...MATRIX_CHAT_STATE_FIELDS,
       'roomRenderStateAvailable',
       ...ROOM_RENDER_STATE_FIELDS,
       ...REMINDER_ROOM_LAYOUT_FIELDS,
@@ -2108,6 +2144,82 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     const hasRoomRenderStateObservation =
       Object.hasOwn(record, 'roomRenderStateAvailable') ||
       ROOM_RENDER_STATE_FIELDS.some((key) => Object.hasOwn(record, key));
+    const hasOuterRendererObservation =
+      Object.hasOwn(record, 'outerRenderBucket') ||
+      OUTER_RENDERER_PRESENCE_FIELDS.some((key) => Object.hasOwn(record, key));
+    const outerRendererValuesValid = (() => {
+      if (
+        !hasOuterRendererObservation ||
+        !Object.hasOwn(record, 'outerRenderBucket') ||
+        !OUTER_RENDERER_BUCKETS.has(record.outerRenderBucket) ||
+        OUTER_RENDERER_PRESENCE_FIELDS.some((key) => !Object.hasOwn(record, key))
+      ) {
+        return false;
+      }
+      if (record.outerRenderBucket === 'unavailable') {
+        return OUTER_RENDERER_PRESENCE_FIELDS.every(
+          (key) => record[key] === null,
+        );
+      }
+      if (
+        OUTER_RENDERER_PRESENCE_FIELDS.some(
+          (key) => typeof record[key] !== 'boolean',
+        )
+      ) {
+        return false;
+      }
+      const [matrixChatShellPresent, roomViewWrapperPresent, roomViewRendererPresent] =
+        OUTER_RENDERER_PRESENCE_FIELDS.map((key) => record[key]);
+      if (record.outerRenderBucket === 'room-page') {
+        return (
+          matrixChatShellPresent &&
+          roomViewWrapperPresent &&
+          roomViewRendererPresent
+        );
+      }
+      if (record.outerRenderBucket === 'other-page') {
+        return (
+          matrixChatShellPresent &&
+          roomViewWrapperPresent &&
+          !roomViewRendererPresent
+        );
+      }
+      if (record.outerRenderBucket === 'no-shell') {
+        return (
+          !matrixChatShellPresent &&
+          !roomViewWrapperPresent &&
+          !roomViewRendererPresent
+        );
+      }
+      return (
+        record.outerRenderBucket === 'inconsistent' &&
+        !(
+          (matrixChatShellPresent &&
+            roomViewWrapperPresent &&
+            roomViewRendererPresent) ||
+          (matrixChatShellPresent &&
+            roomViewWrapperPresent &&
+            !roomViewRendererPresent) ||
+          (!matrixChatShellPresent &&
+            !roomViewWrapperPresent &&
+            !roomViewRendererPresent)
+        )
+      );
+    })();
+    const matrixChatStateValuesValid =
+      MATRIX_CHAT_STATE_FIELDS.every((key) => Object.hasOwn(record, key)) &&
+      typeof record.matrixChatStateAvailable === 'boolean' &&
+      MATRIX_CHAT_VIEW_BUCKETS.has(record.matrixChatViewBucket) &&
+      (record.matrixChatReady === null ||
+        typeof record.matrixChatReady === 'boolean') &&
+      MATRIX_CHAT_PAGE_TYPE_BUCKETS.has(record.matrixChatPageTypeBucket) &&
+      (record.matrixChatCurrentRoomMatches === null ||
+        typeof record.matrixChatCurrentRoomMatches === 'boolean') &&
+      (record.matrixChatStateAvailable ||
+        (record.matrixChatViewBucket === 'unavailable' &&
+          record.matrixChatReady === null &&
+          record.matrixChatPageTypeBucket === 'unavailable' &&
+          record.matrixChatCurrentRoomMatches === null));
     const roomRenderStateAvailable = record.roomRenderStateAvailable;
     const roomRenderStateValuesValid =
       hasRoomRenderStateObservation &&
@@ -2156,6 +2268,8 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (hasRoomObservation &&
         (requiredRoomBooleans.some((key) => typeof record[key] !== 'boolean') ||
           !roomRenderStateValuesValid ||
+          !outerRendererValuesValid ||
+          !matrixChatStateValuesValid ||
           !hasSyncObservation ||
           !Object.hasOwn(record, 'blockedExternalRequestCount') ||
           !Object.hasOwn(record, 'homeserverHttpErrorCount') ||
@@ -2495,6 +2609,29 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       fields.push(`room_heading_present=${record.roomHeadingPresent}`);
       fields.push(`room_name_matches=${record.roomNameMatches}`);
       fields.push(`room_id_matches=${record.roomIdMatches}`);
+      fields.push(`outer_render_bucket=${record.outerRenderBucket}`);
+      for (const [key, label] of [
+        ['matrixChatShellPresent', 'matrix_chat_shell_present'],
+        ['roomViewWrapperPresent', 'room_view_wrapper_present'],
+        ['roomViewRendererPresent', 'room_view_renderer_present'],
+      ]) {
+        fields.push(
+          `${label}=${record[key] === null ? 'unavailable' : record[key]}`,
+        );
+      }
+      fields.push(
+        `matrix_chat_state_available=${record.matrixChatStateAvailable}`,
+      );
+      fields.push(`matrix_chat_view_bucket=${record.matrixChatViewBucket}`);
+      fields.push(
+        `matrix_chat_ready=${record.matrixChatReady === null ? 'unavailable' : record.matrixChatReady}`,
+      );
+      fields.push(
+        `matrix_chat_page_type_bucket=${record.matrixChatPageTypeBucket}`,
+      );
+      fields.push(
+        `matrix_chat_current_room_matches=${record.matrixChatCurrentRoomMatches === null ? 'unavailable' : record.matrixChatCurrentRoomMatches}`,
+      );
       if (Object.hasOwn(record, 'roomRenderStateAvailable')) {
         fields.push(
           `room_render_state_available=${record.roomRenderStateAvailable}`,
