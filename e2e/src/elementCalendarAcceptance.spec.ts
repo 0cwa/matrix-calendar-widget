@@ -1692,6 +1692,14 @@ test('Element Web preserves unsupported events and supports client interactions'
         neighborUpdate.etag,
         neighborUpdate.identityMatches,
       );
+    // Saving returns to the event details dialog; close it through the normal
+    // UI before asserting that the updated row is visible in the list.
+    const savedNeighborDetails = frameA.getByRole('dialog').last();
+    await expect(savedNeighborDetails).toBeVisible();
+    await savedNeighborDetails
+      .getByRole('button', { name: 'Close', exact: true })
+      .click();
+    await expect(savedNeighborDetails).toBeHidden();
     const editedNeighborRow = frameA.getByRole('listitem', {
       name: names.neighborEdited,
     });
