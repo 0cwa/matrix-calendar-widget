@@ -223,6 +223,8 @@ function observedStopCensus(lifecycle) {
     outcome: lifecycle.overflow ? 'overflow' : 'observed',
     exitStatus: null,
     stderrOutcome: 'absent',
+    stderrEmitter: 'other',
+    stderrLineShape: 'empty',
     overflow: lifecycle.overflow,
     uidProcessCount: lifecycle.uidProcessCount,
     nonZombieProcessCount: lifecycle.nonZombieProcessCount,
@@ -489,7 +491,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes with complete verified isolation and cleanup', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 18);
+  assert.equal(summary.schemaVersion, 19);
   assert.deepEqual(summary.desktopObservation.configInMemoryObservation, {
     state: 'observed',
     matchesFixture: true,
@@ -1234,7 +1236,11 @@ test('cleanup summary accepts only correlated fixed census stderr outcomes', () 
 
   const impossibleObservedFailure = structuredClone(summary);
   impossibleObservedFailure.cleanupDiagnostics.stopDiagnostics.initial.census.stderrOutcome =
-    'timeout-permission';
+    'timeout-fork-failure';
+  impossibleObservedFailure.cleanupDiagnostics.stopDiagnostics.initial.census.stderrEmitter =
+    'timeout';
+  impossibleObservedFailure.cleanupDiagnostics.stopDiagnostics.initial.census.stderrLineShape =
+    'single';
   assert.equal(validDesktopSummary(impossibleObservedFailure), false);
 
   const observedNotAttempted = structuredClone(summary);
@@ -1246,6 +1252,59 @@ test('cleanup summary accepts only correlated fixed census stderr outcomes', () 
   notAttempted.cleanupDiagnostics.stopDiagnostics.postTerm.census.stderrOutcome =
     'absent';
   assert.equal(validDesktopSummary(notAttempted), false);
+});
+
+test('cleanup census stderr buckets are closed and correlate timeout 125 signatures', () => {
+  const summary = sanitizeDesktopStages(stages(), sourceSha);
+  const census = summary.cleanupDiagnostics.stopDiagnostics.initial.census;
+  census.state = 'unavailable';
+  census.outcome = 'nonzero-exit';
+  census.exitStatus = 125;
+  census.overflow = null;
+  census.uidProcessCount = null;
+  census.nonZombieProcessCount = null;
+  census.zombieCount = null;
+  census.unreadableProcessCount = null;
+  census.unattributedProcessCount = null;
+  census.processClassCounts = null;
+  census.processRoleCounts = null;
+  census.stderrOutcome = 'timeout-fork-failure';
+  census.stderrEmitter = 'timeout';
+  census.stderrLineShape = 'single';
+  assert.equal(validDesktopSummary(summary), true);
+
+  const wrongEmitter = structuredClone(summary);
+  wrongEmitter.cleanupDiagnostics.stopDiagnostics.initial.census.stderrEmitter =
+    'sudo';
+  assert.equal(validDesktopSummary(wrongEmitter), false);
+
+  const wrongShape = structuredClone(summary);
+  wrongShape.cleanupDiagnostics.stopDiagnostics.initial.census.stderrLineShape =
+    'multiple';
+  assert.equal(validDesktopSummary(wrongShape), false);
+
+  const wrongStatus = structuredClone(summary);
+  wrongStatus.cleanupDiagnostics.stopDiagnostics.initial.census.exitStatus = 1;
+  assert.equal(validDesktopSummary(wrongStatus), false);
+
+  const unknownEmitter = structuredClone(summary);
+  unknownEmitter.cleanupDiagnostics.stopDiagnostics.initial.census.stderrEmitter =
+    'raw-stderr-prefix';
+  assert.equal(validDesktopSummary(unknownEmitter), false);
+
+  const unknownLineShape = structuredClone(summary);
+  unknownLineShape.cleanupDiagnostics.stopDiagnostics.initial.census.stderrLineShape =
+    'three-lines';
+  assert.equal(validDesktopSummary(unknownLineShape), false);
+
+  const impossibleEmpty = structuredClone(summary);
+  impossibleEmpty.cleanupDiagnostics.stopDiagnostics.initial.census.stderrOutcome =
+    'absent';
+  assert.equal(validDesktopSummary(impossibleEmpty), false);
+
+  const previousSchema = structuredClone(summary);
+  previousSchema.schemaVersion = 18;
+  assert.equal(validDesktopSummary(previousSchema), false);
 });
 
 test('UID lifecycle sanitizer preserves bounded ownership evidence and unavailable states without private fields', () => {

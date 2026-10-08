@@ -316,9 +316,21 @@ const UID_STOP_STDERR_OUTCOMES = new Set([
   'absent',
   'not_attempted',
   'other',
-  'sudo-launch-failure',
-  'timeout-launch-failure',
-  'timeout-permission',
+  'timeout-fork-failure',
+  'timeout-wait-failure',
+  'unavailable',
+]);
+const UID_STOP_STDERR_EMITTERS = new Set([
+  'timeout',
+  'sudo',
+  'node-runtime',
+  'other',
+  'unavailable',
+]);
+const UID_STOP_STDERR_LINE_SHAPES = new Set([
+  'single',
+  'multiple',
+  'empty',
   'unavailable',
 ]);
 const STAGES = new Set([
@@ -1229,6 +1241,8 @@ function emptyUidStopCensus(state) {
     outcome: 'unavailable',
     exitStatus: null,
     stderrOutcome: state === 'not_attempted' ? 'not_attempted' : 'unavailable',
+    stderrEmitter: 'unavailable',
+    stderrLineShape: 'unavailable',
     overflow: null,
     uidProcessCount: null,
     nonZombieProcessCount: null,
@@ -1265,6 +1279,8 @@ function validateUidStopCensus(value) {
       'outcome',
       'exitStatus',
       'stderrOutcome',
+      'stderrEmitter',
+      'stderrLineShape',
       'overflow',
       'uidProcessCount',
       'nonZombieProcessCount',
@@ -1279,6 +1295,8 @@ function validateUidStopCensus(value) {
     ) ||
     !UID_STOP_CENSUS_OUTCOMES.has(value.outcome) ||
     !UID_STOP_STDERR_OUTCOMES.has(value.stderrOutcome) ||
+    !UID_STOP_STDERR_EMITTERS.has(value.stderrEmitter) ||
+    !UID_STOP_STDERR_LINE_SHAPES.has(value.stderrLineShape) ||
     (value.state !== 'not_attempted' &&
       value.stderrOutcome === 'not_attempted') ||
     !(
@@ -1287,6 +1305,29 @@ function validateUidStopCensus(value) {
         value.exitStatus >= 0 &&
         value.exitStatus <= 255)
     )
+  ) {
+    return false;
+  }
+  if (
+    (value.stderrOutcome === 'not_attempted' &&
+      (value.state !== 'not_attempted' ||
+        value.stderrEmitter !== 'unavailable' ||
+        value.stderrLineShape !== 'unavailable')) ||
+    (value.stderrOutcome === 'unavailable' &&
+      (value.stderrEmitter !== 'unavailable' ||
+        value.stderrLineShape !== 'unavailable')) ||
+    (value.stderrOutcome === 'absent' &&
+      (value.stderrEmitter !== 'other' || value.stderrLineShape !== 'empty')) ||
+    (value.stderrOutcome === 'other' &&
+      (!['single', 'multiple'].includes(value.stderrLineShape) ||
+        value.stderrEmitter === 'unavailable')) ||
+    (['timeout-fork-failure', 'timeout-wait-failure'].includes(
+      value.stderrOutcome,
+    ) &&
+      (value.outcome !== 'nonzero-exit' ||
+        value.exitStatus !== 125 ||
+        value.stderrEmitter !== 'timeout' ||
+        value.stderrLineShape !== 'single'))
   ) {
     return false;
   }
@@ -1305,7 +1346,9 @@ function validateUidStopCensus(value) {
       return (
         value.outcome === 'unavailable' &&
         value.exitStatus === null &&
-        value.stderrOutcome === 'not_attempted'
+        value.stderrOutcome === 'not_attempted' &&
+        value.stderrEmitter === 'unavailable' &&
+        value.stderrLineShape === 'unavailable'
       );
     }
     if (
@@ -1382,11 +1425,9 @@ function validateUidStopCensus(value) {
     ((value.outcome === 'observed' &&
       (value.exitStatus === null || value.exitStatus === 0) &&
       !value.overflow &&
-      ![
-        'timeout-permission',
-        'timeout-launch-failure',
-        'sudo-launch-failure',
-      ].includes(value.stderrOutcome)) ||
+      !['timeout-fork-failure', 'timeout-wait-failure'].includes(
+        value.stderrOutcome,
+      )) ||
       (value.outcome === 'overflow' &&
         (value.exitStatus === null || value.exitStatus === 0) &&
         value.state === 'partial' &&
@@ -2838,7 +2879,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 18,
+    schemaVersion: 19,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -2941,7 +2982,7 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 18 &&
+    value.schemaVersion === 19 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||

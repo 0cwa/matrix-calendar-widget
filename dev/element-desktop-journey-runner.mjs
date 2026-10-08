@@ -45,6 +45,11 @@ const DESKTOP_EVIDENCE_MAX_BYTES = 1_048_576;
 const UID_CENSUS_MAX_BYTES = 16_384;
 const UID_CENSUS_STDERR_MAX_BYTES = 4_096;
 const UID_STOP_CENSUS_CAPTURE = Symbol('uid-stop-census-capture');
+const UNAVAILABLE_UID_CENSUS_STDERR = Object.freeze({
+  outcome: 'unavailable',
+  emitter: 'unavailable',
+  lineShape: 'unavailable',
+});
 const UID_STOP_CENSUS_WAIT_LIMITS_MS = Object.freeze({
   initial: 1_200,
   postTerm: 1_500,
@@ -1672,7 +1677,7 @@ function uidStopCensusFromLifecycle(
   input,
   outcome,
   exitStatus = null,
-  stderrOutcome = 'unavailable',
+  stderr = UNAVAILABLE_UID_CENSUS_STDERR,
 ) {
   const observation = sanitizeUidLifecycleObservation(input);
   const available = ['observed', 'partial'].includes(observation.state);
@@ -1680,7 +1685,9 @@ function uidStopCensusFromLifecycle(
     ? {
         state: observation.state,
         overflow: observation.overflow,
-        stderrOutcome,
+        stderrOutcome: stderr.outcome,
+        stderrEmitter: stderr.emitter,
+        stderrLineShape: stderr.lineShape,
         uidProcessCount: observation.uidProcessCount,
         nonZombieProcessCount: observation.nonZombieProcessCount,
         zombieCount: observation.zombieCount,
@@ -1692,7 +1699,9 @@ function uidStopCensusFromLifecycle(
     : {
         state: 'unavailable',
         overflow: null,
-        stderrOutcome,
+        stderrOutcome: stderr.outcome,
+        stderrEmitter: stderr.emitter,
+        stderrLineShape: stderr.lineShape,
         uidProcessCount: null,
         nonZombieProcessCount: null,
         zombieCount: null,
@@ -1712,73 +1721,125 @@ function uidStopCensusFromLifecycle(
   return census;
 }
 
-function capturedUidStopCensus(input, outcome, exitStatus, stderrOutcome) {
-  const census = uidStopCensusFromLifecycle(
-    input,
-    outcome,
-    exitStatus,
-    stderrOutcome,
-  );
+function capturedUidStopCensus(input, outcome, exitStatus, stderr) {
+  const census = uidStopCensusFromLifecycle(input, outcome, exitStatus, stderr);
   Object.defineProperty(census, UID_STOP_CENSUS_CAPTURE, { value: true });
   return census;
 }
 
-function oneDiagnosticLine(stderr) {
-  if (stderr.endsWith('\n')) return stderr.slice(0, -1);
-  return stderr;
+function hasUidCensusStderrPrefix(bytes, start, end, prefix) {
+  if (end - start < prefix.length) return false;
+  for (let index = 0; index < prefix.length; index += 1) {
+    if (bytes[start + index] !== prefix.charCodeAt(index)) return false;
+  }
+  return true;
 }
 
-function classifyUidCensusStderr(stderr, { available, overflow, failed }) {
-  if (!available || overflow) return 'unavailable';
-  if (stderr.length === 0) return 'absent';
-  if (!failed) return 'other';
-
-  const line = oneDiagnosticLine(stderr);
-  const commandQuotes = ["'sudo'", '‘sudo’'];
-  for (const command of commandQuotes) {
-    for (const signal of ['TERM', 'KILL']) {
-      if (
-        line ===
-        `timeout: sending signal ${signal} to command ${command}: Operation not permitted`
-      ) {
-        return 'timeout-permission';
-      }
-    }
-    for (const reason of [
-      'Permission denied',
-      'No such file or directory',
-      'Exec format error',
-    ]) {
-      if (line === `timeout: failed to run command ${command}: ${reason}`) {
-        return 'timeout-launch-failure';
-      }
-    }
+function classifyUidCensusStderrEmitter(bytes, start, end) {
+  if (hasUidCensusStderrPrefix(bytes, start, end, 'timeout:')) {
+    return 'timeout';
   }
-
-  if (line === 'sudo: a password is required') return 'sudo-launch-failure';
-  for (const reason of [
-    'Permission denied',
-    'No such file or directory',
-    'Exec format error',
-  ]) {
-    if (line === `sudo: unable to execute ${process.execPath}: ${reason}`) {
-      return 'sudo-launch-failure';
-    }
+  if (hasUidCensusStderrPrefix(bytes, start, end, 'sudo:')) return 'sudo';
+  if (hasUidCensusStderrPrefix(bytes, start, end, 'node:')) {
+    return 'node-runtime';
   }
   return 'other';
+}
+
+function classifyUidCensusStderr(
+  bytes,
+  length,
+  { available, overflow, status },
+) {
+  if (!available || overflow) return UNAVAILABLE_UID_CENSUS_STDERR;
+
+  let lineCount = 0;
+  let firstLineStart = 0;
+  let firstLineEnd = 0;
+  let firstLineEmitter = null;
+  let conflictingEmitters = false;
+  let lineStart = 0;
+  for (let index = 0; index <= length; index += 1) {
+    if (index !== length && bytes[index] !== 0x0a) continue;
+    let lineEnd = index;
+    if (lineEnd > lineStart && bytes[lineEnd - 1] === 0x0d) lineEnd -= 1;
+    if (lineEnd > lineStart) {
+      const lineEmitter = classifyUidCensusStderrEmitter(
+        bytes,
+        lineStart,
+        lineEnd,
+      );
+      if (lineCount === 0) {
+        firstLineStart = lineStart;
+        firstLineEnd = lineEnd;
+        firstLineEmitter = lineEmitter;
+      } else if (
+        firstLineEmitter !== 'other' &&
+        lineEmitter !== 'other' &&
+        lineEmitter !== firstLineEmitter
+      ) {
+        conflictingEmitters = true;
+      }
+      lineCount += 1;
+    }
+    lineStart = index + 1;
+  }
+  if (lineCount === 0) {
+    return { outcome: 'absent', emitter: 'other', lineShape: 'empty' };
+  }
+
+  const lineShape = lineCount === 1 ? 'single' : 'multiple';
+  const emitter = conflictingEmitters ? 'other' : firstLineEmitter;
+  let outcome = 'other';
+
+  // GNU coreutils v9.4 emits signal-send diagnostics only with --verbose and
+  // returns 125 for these fork/wait failures (source: timeout.c, lines 201-223
+  // and 491-530; https://github.com/coreutils/coreutils/blob/v9.4/src/timeout.c).
+  // This invocation omits --verbose. Match only the fixed prefix, never the
+  // variable strerror suffix; runtime version is not asserted.
+  if (
+    status === 125 &&
+    lineShape === 'single' &&
+    emitter === 'timeout' &&
+    hasUidCensusStderrPrefix(
+      bytes,
+      firstLineStart,
+      firstLineEnd,
+      'timeout: fork system call failed: ',
+    )
+  ) {
+    outcome = 'timeout-fork-failure';
+  } else if (
+    status === 125 &&
+    lineShape === 'single' &&
+    emitter === 'timeout' &&
+    hasUidCensusStderrPrefix(
+      bytes,
+      firstLineStart,
+      firstLineEnd,
+      'timeout: error waiting for command: ',
+    )
+  ) {
+    outcome = 'timeout-wait-failure';
+  }
+
+  return { outcome, emitter, lineShape };
 }
 
 function captureUidStopCensus(state, spawnChild = spawn) {
   return new Promise((resolveCensus) => {
     let output = '';
     let overflow = false;
-    let stderr = '';
+    const stderr = Buffer.alloc(UID_CENSUS_STDERR_MAX_BYTES);
+    let stderrLength = 0;
     let stderrOverflow = false;
     let stderrAvailable = true;
     let settled = false;
     const finish = (value) => {
       if (settled) return;
       settled = true;
+      stderr.fill(0);
+      stderrLength = 0;
       resolveCensus(value);
     };
     let child;
@@ -1803,7 +1864,12 @@ function captureUidStopCensus(state, spawnChild = spawn) {
       );
     } catch {
       finish(
-        capturedUidStopCensus(undefined, 'spawn-error', null, 'unavailable'),
+        capturedUidStopCensus(
+          undefined,
+          'spawn-error',
+          null,
+          UNAVAILABLE_UID_CENSUS_STDERR,
+        ),
       );
       return;
     }
@@ -1819,37 +1885,43 @@ function captureUidStopCensus(state, spawnChild = spawn) {
     if (child.stderr && typeof child.stderr.on === 'function') {
       child.stderr.on('data', (chunk) => {
         if (stderrOverflow) return;
-        const chunkBytes = Buffer.isBuffer(chunk)
-          ? chunk.byteLength
+        const byteChunk = Buffer.isBuffer(chunk) ? chunk : undefined;
+        const chunkLength = byteChunk
+          ? byteChunk.byteLength
           : Buffer.byteLength(String(chunk));
-        if (
-          Buffer.byteLength(stderr) + chunkBytes >
-          UID_CENSUS_STDERR_MAX_BYTES
-        ) {
+        if (stderrLength + chunkLength > UID_CENSUS_STDERR_MAX_BYTES) {
           stderrOverflow = true;
-          stderr = '';
+          stderr.fill(0);
+          stderrLength = 0;
           return;
         }
-        stderr += Buffer.isBuffer(chunk)
-          ? chunk.toString('utf8')
-          : String(chunk);
+        const stderrChunk = byteChunk ?? Buffer.from(String(chunk));
+        stderrChunk.copy(stderr, stderrLength);
+        stderrLength += chunkLength;
       });
     } else {
       stderrAvailable = false;
     }
     child.once('error', () =>
       finish(
-        capturedUidStopCensus(undefined, 'spawn-error', null, 'unavailable'),
+        capturedUidStopCensus(
+          undefined,
+          'spawn-error',
+          null,
+          UNAVAILABLE_UID_CENSUS_STDERR,
+        ),
       ),
     );
     child.once('close', (status, signal) => {
-      const stderrOutcome = classifyUidCensusStderr(stderr, {
+      const stderrDiagnostics = classifyUidCensusStderr(stderr, stderrLength, {
         available: stderrAvailable,
         overflow: stderrOverflow,
-        failed: signal !== null || status !== 0,
+        status: signal === null ? status : null,
       });
       if (signal !== null) {
-        finish(capturedUidStopCensus(undefined, 'signal', null, stderrOutcome));
+        finish(
+          capturedUidStopCensus(undefined, 'signal', null, stderrDiagnostics),
+        );
         return;
       }
       if (status !== 0) {
@@ -1866,30 +1938,36 @@ function captureUidStopCensus(state, spawnChild = spawn) {
                 ? 'unavailable'
                 : 'nonzero-exit',
             exitStatus,
-            stderrOutcome,
+            stderrDiagnostics,
           ),
         );
         return;
       }
       if (overflow) {
-        finish(capturedUidStopCensus(undefined, 'overflow', 0, stderrOutcome));
+        finish(
+          capturedUidStopCensus(undefined, 'overflow', 0, stderrDiagnostics),
+        );
         return;
       }
       let observation;
       try {
         observation = JSON.parse(output);
       } catch {
-        finish(capturedUidStopCensus(undefined, 'malformed', 0, stderrOutcome));
+        finish(
+          capturedUidStopCensus(undefined, 'malformed', 0, stderrDiagnostics),
+        );
         return;
       }
       if (!isValidUidLifecycleObservation(observation)) {
-        finish(capturedUidStopCensus(undefined, 'malformed', 0, stderrOutcome));
+        finish(
+          capturedUidStopCensus(undefined, 'malformed', 0, stderrDiagnostics),
+        );
         return;
       }
       const sanitized = sanitizeUidLifecycleObservation(observation);
       if (!['observed', 'partial'].includes(sanitized.state)) {
         finish(
-          capturedUidStopCensus(undefined, 'unavailable', 0, stderrOutcome),
+          capturedUidStopCensus(undefined, 'unavailable', 0, stderrDiagnostics),
         );
         return;
       }
@@ -1898,7 +1976,7 @@ function captureUidStopCensus(state, spawnChild = spawn) {
           sanitized,
           sanitized.overflow ? 'overflow' : 'observed',
           0,
-          stderrOutcome,
+          stderrDiagnostics,
         ),
       );
     });
