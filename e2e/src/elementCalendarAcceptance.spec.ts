@@ -2060,7 +2060,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       }
       const element = requireMemberARoom(roomResult);
 
-      observer = createPerformanceApiObserver(
+      const apiObserver = createPerformanceApiObserver(
         page,
         caseReport.year,
         caseReport.month,
@@ -2068,6 +2068,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
         new Set(),
         initialDate,
       );
+      observer = apiObserver;
       const defaultSample = `${caseReport.profile}-default` as const;
       observer.setSample(defaultSample);
       const coldSample = `${caseReport.profile}-cold` as const;
@@ -2285,7 +2286,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
         },
         durationMs: number,
       ): PerformanceActionSample => {
-        const eventRows = observer
+        const eventRows = apiObserver
           .rowsFor(sample)
           .filter((row) => row.endpoint === 'events');
         const matchingRoomRows = eventRows.filter(
