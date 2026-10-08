@@ -607,9 +607,10 @@ access and event writes stay disabled by default.
       gates. The widget application source matches the `main` baseline; its
       only widget-source difference is the retained recurring-editor test
       split.
-- [ ] Re-run ordinary Element Web and Desktop acceptance against the exact
-      cleaned candidate, including the native CORS normal path, before any
-      candidate publication or separate rollout decision.
+- [ ] Complete ordinary Element Web and Desktop acceptance against the exact
+      cleaned candidate. Exact-candidate hosted verification is not yet
+      recorded; the run must exercise the native CORS normal path and pass all
+      functional, timing, and cleanup gates before any separate rollout review.
 - [ ] Complete operator evidence and independent review of the exact
       candidate before a separate rollout decision.
 
