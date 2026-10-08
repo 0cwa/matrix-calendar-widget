@@ -557,6 +557,15 @@ test('Element Desktop room event journey', async ({ browser }) => {
     if (webBEditPatchStatus < 200 || webBEditPatchStatus >= 300) {
       throw new Error('Second member event edit failed');
     }
+    currentFailurePoint = 'web-b-edit-details-returned';
+    const savedDetailsDialog = webFrame.getByRole('dialog').last();
+    await savedDetailsDialog.waitFor({ state: 'visible' });
+    currentFailurePoint = 'web-b-edit-details-close-click';
+    await savedDetailsDialog
+      .getByRole('button', { name: 'Close', exact: true })
+      .click();
+    currentFailurePoint = 'web-b-edit-details-close-hidden';
+    await savedDetailsDialog.waitFor({ state: 'hidden' });
     currentFailurePoint = 'web-b-edit-event-row';
     await webFrame
       .getByRole('listitem', { name: editedTitle, exact: true })

@@ -44,6 +44,9 @@ export const DESKTOP_JOURNEY_FAILURE_POINTS = Object.freeze([
   'web-b-edit-save-click',
   'web-b-edit-patch-await',
   'web-b-edit-patch-status',
+  'web-b-edit-details-returned',
+  'web-b-edit-details-close-click',
+  'web-b-edit-details-close-hidden',
   'web-b-edit-event-row',
 ]);
 export const DESKTOP_LOGIN_STEPS = Object.freeze([
@@ -101,7 +104,15 @@ const WEB_B_EDIT_SAVE_FAILURE_POINT_SET = new Set([
   'web-b-edit-save-click',
   'web-b-edit-patch-await',
   'web-b-edit-patch-status',
+  'web-b-edit-details-returned',
+  'web-b-edit-details-close-click',
+  'web-b-edit-details-close-hidden',
   'web-b-edit-event-row',
+]);
+const WEB_B_EDIT_POST_PATCH_FAILURE_POINT_SET = new Set([
+  'web-b-edit-details-returned',
+  'web-b-edit-details-close-click',
+  'web-b-edit-details-close-hidden',
 ]);
 const WEB_B_EVENT_LIST_OBSERVATION_STATES = new Set([
   'awaiting-events-get',
@@ -243,10 +254,19 @@ function validWebBEditSaveDiagnostic(value, failurePoint) {
   ) {
     return validWebBEventListReadDiagnostic(value.eventListRead);
   }
+  if (
+    WEB_B_EDIT_POST_PATCH_FAILURE_POINT_SET.has(failurePoint) &&
+    status !== null &&
+    status >= 200 &&
+    status < 300
+  ) {
+    return true;
+  }
   return (
     status === null &&
     failurePoint !== 'web-b-edit-patch-status' &&
-    failurePoint !== 'web-b-edit-event-row'
+    failurePoint !== 'web-b-edit-event-row' &&
+    !WEB_B_EDIT_POST_PATCH_FAILURE_POINT_SET.has(failurePoint)
   );
 }
 
@@ -1264,7 +1284,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   const failed = Object.values(cases).includes('failed');
   const complete = Object.values(cases).every((value) => value === 'passed');
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
     loginStep,
     loginEntry,

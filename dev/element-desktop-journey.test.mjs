@@ -300,7 +300,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 5);
+    assert.equal(summary.schemaVersion, 6);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -552,6 +552,9 @@ test('accepts only the closed failure-point enum with its failed-phase match', (
       'web-b-edit-save-click',
       'web-b-edit-patch-await',
       'web-b-edit-patch-status',
+      'web-b-edit-details-returned',
+      'web-b-edit-details-close-click',
+      'web-b-edit-details-close-hidden',
       'web-b-edit-event-row',
     ],
   );
@@ -684,6 +687,15 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
     summarize(row('web-b-edit-patch-status', 409)).webBEditSaveDiagnostic,
     { matchedPatchStatus: 409 },
   );
+  for (const point of [
+    'web-b-edit-details-returned',
+    'web-b-edit-details-close-click',
+    'web-b-edit-details-close-hidden',
+  ]) {
+    assert.deepEqual(summarize(row(point, 204)).webBEditSaveDiagnostic, {
+      matchedPatchStatus: 204,
+    });
+  }
   assert.deepEqual(
     summarize(row('web-b-edit-event-row', 204, decodedEventList))
       .webBEditSaveDiagnostic,
@@ -744,6 +756,10 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
     { ...row('web-b-edit-patch-status', 200) },
     { ...row('web-b-edit-patch-status', 204) },
     { ...row('web-b-edit-patch-status', 299) },
+    { ...row('web-b-edit-details-returned', null) },
+    { ...row('web-b-edit-details-returned', 409) },
+    { ...row('web-b-edit-details-close-click', 204, decodedEventList) },
+    { ...row('web-b-edit-details-close-hidden', 204, decodedEventList) },
     { ...row('web-b-edit-event-row', 409, decodedEventList) },
     { ...row('web-b-edit-event-row', null, decodedEventList) },
     { ...row('web-b-edit-event-row', 204) },

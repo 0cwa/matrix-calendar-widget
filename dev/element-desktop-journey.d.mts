@@ -38,6 +38,9 @@ export type WebMemberBEditSaveFailurePoint =
   | 'web-b-edit-save-click'
   | 'web-b-edit-patch-await'
   | 'web-b-edit-patch-status'
+  | 'web-b-edit-details-returned'
+  | 'web-b-edit-details-close-click'
+  | 'web-b-edit-details-close-hidden'
   | 'web-b-edit-event-row';
 
 export type DesktopJourneyFailurePoint =
@@ -188,7 +191,7 @@ export type ReadOnlyWidgetReadinessObservation = {
 };
 
 export type DesktopJourneySummary = {
-  schemaVersion: 5;
+  schemaVersion: 6;
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;
