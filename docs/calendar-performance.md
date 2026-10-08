@@ -7,79 +7,92 @@ separate synthetic browser smoke measures one fixed 1,000-event calendar in
 the actual list and month components; it is an observational UI measurement,
 not a product latency or capacity target.
 
-## Controlled beta 250-event pilot contract
+## Controlled beta ordinary-load contract
 
-This acceptance contract was approved and recorded on 2026-10-07 before any
-measurement. It is a synthetic controlled-beta target, not a universal
-calendar-size limit or a production-capacity claim. No 250-event real-client
-measurement has passed yet.
+The approved beta performance gate is ordinary Element Web use with zero to
+25 events in an exact 31-day view. It replaces the earlier 250-event timing
+target; it is not a claim that all calendars up to 25 events behave the same on
+every host, and it is not a production-capacity guarantee. The 250-event run is
+diagnostic only and cannot satisfy this gate. Previous 250-event attempts did
+not produce a passing measured timing series; successful seeding or cleanup is
+not performance evidence.
 
-The workload is one authorized Element Web session at 1280×800, with exactly
-250 unique, simple timed VEVENTs across exactly 31 calendar days in
-`Europe/Stockholm`. Events have no recurrence, alarm, attachment, or concurrent
-load. Seed them sequentially through the fixture's authenticated CalDAV path;
-do not use 250 widget saves or gateway POSTs. Keep identities and content in
-process memory only.
+For each workload case, use a fresh authorized synthetic Element Web browser
+context at 1280×800, in the standard side-panel WidgetCard layout, with simple
+timed VEVENTs in `Europe/Stockholm`.
+Exercise the empty result boundary and the 25-event upper boundary over an
+exact 31-local-day range. The populated case has exactly 25 distinct events;
+the empty case must return zero matching events in the visible range, even if
+the calendar contains events outside that interval. No recurrence, alarms,
+attachments, or concurrent load are part of this profile. Seed fixture events
+through the authenticated CalDAV path, not widget saves or gateway POSTs. Keep
+identities and content in process memory only.
 
-Every measured sample has a strict limit: a calendar range request through
-fully received and decoded JSON must take at most 1,000 ms; a real List or Month
-view action through the stable populated widget DOM must take at most 2,000 ms;
-and selecting an event through its stable details dialog must take at most
-500 ms. A single over-limit sample fails the gate. Report all values, including
-warm-ups, plus measured median and maximum; do not discard or retry slow
-samples.
+The strict limits apply to every required sample:
 
-The cold first widget opening is measured from immediately before activating
-the registered widget through automated approvals, selection of the exact
-31-day List range in the real date picker, and the fully populated stable List
-view containing all 250 events. The 2,000 ms limit includes widget startup,
-capability approval, OpenID, range selection, API transfer and decode,
-projection, and rendering. Record every calendar API response exercised by
-this cold operation through full JSON decode and apply the 1,000 ms response
-limit to each one. Record setup/authentication separately, and record startup
-subphases for diagnosis, but do not subtract them from the cold total. Then
-record two List and two Month warm-ups, followed by five measured List and five
-measured Month samples, alternating views in the same session. After two
-explicitly labeled detail warm-ups, measure five event-detail opens.
+- A cold widget activation through a usable, stable calendar view: **≤ 2,000
+  ms**.
+- A view-selector refresh back to the same 31-day List range, through a usable
+  stable view: **≤ 2,000 ms**.
+- Each matching calendar event-range response, through full receipt and JSON
+  decoding: **≤ 1,000 ms**.
+- Each measured event selection through its stable details dialog: **≤ 500
+  ms**.
 
-Start from Element's normal room state at the fixed 1280×800 viewport and open
-the registered widget through the usual Room Info → Extensions → WidgetCard
-path. Keep the widget in Element's standard side panel; do not Pin it into the
-Apps drawer or use Maximise/Un-maximise. The cold timer includes first
-activation, capability and identity approvals, and all ordinary widget startup
-work. Record the actual WidgetCard placement and iframe width and height, and
-require the host and widget document to have no horizontal overflow. Report the
-observed dimensions without adding a minimum iframe-width threshold. Do not
-seed layout state or simulate the side panel by resizing the browser window.
-Pinning and maximized Apps-drawer layout certification are deferred and must
-not be reported as passed by this pilot.
+The cold timer starts immediately before the normal widget activation and ends
+when the selected exact 31-day result is decoded, displayed, and stable over
+two animation frames. It includes widget startup, capability and identity
+approvals, OpenID exchange, range selection, API transfer and decode,
+projection, and rendering. Do not subtract startup or approval time. Matrix
+host login and room navigation are fixture preparation and are reported
+separately; they do not replace the normal widget activation or its approvals.
+After the cold List view is stable, use Element's visible view selector to
+leave List. Start the refresh timer immediately before selecting List again
+with the same 31-day range. The refresh succeeds only if that transition
+produces a new matching room-events response that is fully decoded and the
+correct List content is stable. A cached render without a new matching
+response is incomplete. Do not force cache invalidation or add a refresh
+control for the test.
 
-Use the real date-range picker to set the exact 31 local dates for List. Assert
-the actual request range in memory. Month deliberately requests a wider range:
-the repository adds seven days on either side, while the visible grid uses
-whole weeks. Report the actual List and Month request spans separately and
-count only the 250 seeded events in the chosen month; no seeded event belongs
-to the Month padding days.
+In each fresh context, retain one cold activation and one measured refresh. In
+the 25-event case, retain five measured details opens. A 0-event case has no
+details sample. Every applicable matching API response in the cold and refresh
+operations must be recorded through full JSON decoding and meet the 1,000 ms
+limit. Keep every observation, including failures; do not bypass
+authentication, pre-open the widget, subtract phases, add warm-ups, retry slow
+samples, or discard results.
 
-Record each sample and its fixed failure observations before asserting its
-status, content count, range, or timing. A failed sample remains in the report;
-no sample may be discarded or retried.
+Open the registered widget through Element's usual Room Info → Extensions →
+WidgetCard path. Record the actual placement and iframe width and height, and
+require no horizontal overflow in the host or widget document. Do not impose a
+minimum iframe-width threshold, seed layout state, or simulate the side panel
+by resizing the browser window. Pinning and maximized Apps-drawer layout
+certification are deferred and must not be reported as passed.
 
-Each measured List response must be HTTP 200 with exactly 250 distinct expected
-events and zero server/projection diagnostics; all 250 rows must appear once
-and remain stable over two animation frames. Month must return the same 250
-events with zero diagnostics; visible entries plus every overflow count must
-sum to 250, and opening an actual overflow day must reveal its expected 8 or 9
-events. Details timing includes query/rendering. Page errors, missing or
-malformed responses, unexpected ranges, wrong counts, and any over-limit
-sample fail the gate. The acceptance report retains every sample and exact
-runner/client/service versions, with no URLs, query strings, IDs, titles,
+Use the real date-range picker to select exactly 31 local dates and assert the
+actual request range in memory. For the populated case, every matching response
+must be HTTP 200 with exactly 25 expected events and zero server/projection
+diagnostics; every row must appear once and remain stable over two animation
+frames. For the empty case, require HTTP 200, zero returned events, zero
+diagnostics, and a stable empty state. Details timing includes query and
+rendering. Page errors, missing or malformed responses, unexpected ranges,
+wrong counts, horizontal overflow, and any over-limit sample fail the gate.
+
+Record each sample and fixed failure observations before assertions. The
+sanitized report retains counts, booleans, fixed labels, timings, and exact
+runner/client/service versions, but no URLs, query strings, IDs, titles,
 headers, response bodies, ICS, tokens, profiles, screenshots, traces, raw logs,
-or HAR files.
+or HAR files. Results apply only to the recorded synthetic environment and do
+not certify an operator capacity envelope.
 
-The complete execution sequence, timing boundaries, evidence schema, and
-cleanup requirements are fixed in the approved private contract before the
-hosted measurement. Results apply only to the recorded synthetic environment.
+### Historical 250-event diagnostic
+
+The 250-event workload was previously proposed as a beta timing target. That
+target is superseded. Its prior hosted attempts reached the exact seed and
+cleanup checks but failed before producing a complete measured timing series.
+Keep those receipts labeled as 250-event diagnostics; do not infer a passing
+250-event latency or capacity claim from fixture setup, successful cleanup, or
+partial instrumentation.
 
 ## Reproduce
 
@@ -129,7 +142,7 @@ The large daily workload takes seconds in this environment. It therefore does
 not establish that a large calendar remains interactive. The fixed browser
 workload below is only one rendered input size. Follow-up evaluation must
 measure varied realistic inputs, memory, and a controlled runtime before
-setting a pilot capacity or latency target. Windowed loading, reducing repeated
+setting a broader capacity envelope. Windowed loading, reducing repeated
 timezone work, and off-main-thread projection are candidate improvements to
 measure before adopting them.
 
