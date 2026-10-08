@@ -25,6 +25,7 @@ import {
   initializeDesktopJourneyEvidence,
   prepareDesktopWidget,
   readDesktopJourneyEvidence,
+  readOnlyWidgetIsReady,
   readSyntheticDesktopCredentials,
   summarizeDesktopJourneyEvidence,
   writeSyntheticDesktopCredentials,
@@ -186,7 +187,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 2);
+    assert.equal(summary.schemaVersion, 3);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -426,6 +427,12 @@ test('accepts only the closed failure-point enum with its failed-phase match', (
       'gateway-read-status',
       'create-control',
       'origin-isolation',
+      'web-b-authentication',
+      'web-b-room-navigation',
+      'web-b-widget-open',
+      'web-b-gateway-read-await',
+      'web-b-gateway-read-status',
+      'web-b-event-row',
     ],
   );
 
@@ -440,6 +447,17 @@ test('accepts only the closed failure-point enum with its failed-phase match', (
     {
       phase: 'desktop-widget-origin-isolation',
       point: 'origin-isolation',
+    },
+  );
+  assert.deepEqual(
+    summarize({
+      phase: 'web-member-b-read',
+      status: 'failed',
+      failurePoint: 'web-b-event-row',
+    }).failurePoint,
+    {
+      phase: 'web-member-b-read',
+      point: 'web-b-event-row',
     },
   );
 
@@ -463,6 +481,26 @@ test('accepts only the closed failure-point enum with its failed-phase match', (
       phase: 'desktop-event-create',
       status: 'failed',
       failurePoint: 'room-id',
+    },
+    {
+      phase: 'desktop-room-widget-read',
+      status: 'failed',
+      failurePoint: 'web-b-widget-open',
+    },
+    {
+      phase: 'web-member-b-read',
+      status: 'failed',
+      failurePoint: 'widget-open',
+    },
+    {
+      phase: 'web-member-b-read',
+      status: 'passed',
+      failurePoint: 'web-b-event-row',
+    },
+    {
+      phase: 'web-member-b-keyboard-open',
+      status: 'failed',
+      failurePoint: 'web-b-event-row',
     },
     {
       phase: 'desktop-room-widget-read',
@@ -762,6 +800,101 @@ test('requires an enabled Create control and orders Desktop widget consent aroun
     'warning',
     'capabilities',
     'identity-check',
+    'iframe-wait',
+  ]);
+});
+
+test('uses the exact visible read-only event as widget readiness without requiring Create permission', async () => {
+  const readyObservation = {
+    expectedEventRowCountCapped: 1,
+    expectedEventRowVisible: true,
+    capabilityPromptVisible: false,
+  };
+  assert.equal(readOnlyWidgetIsReady(readyObservation), true);
+  for (const observation of [
+    {
+      ...readyObservation,
+      expectedEventRowCountCapped: 0,
+      expectedEventRowVisible: null,
+    },
+    {
+      ...readyObservation,
+      expectedEventRowCountCapped: 2,
+      expectedEventRowVisible: null,
+    },
+    { ...readyObservation, expectedEventRowVisible: false },
+    { ...readyObservation, expectedEventRowVisible: null },
+    { ...readyObservation, capabilityPromptVisible: true },
+    { ...readyObservation, capabilityPromptVisible: null },
+  ]) {
+    assert.equal(readOnlyWidgetIsReady(observation), false);
+  }
+  assert.throws(
+    () =>
+      readOnlyWidgetIsReady({
+        ...readyObservation,
+        expectedEventRowCountCapped: 0,
+        expectedEventRowVisible: true,
+      }),
+    /Invalid Desktop journey input/u,
+  );
+  assert.throws(
+    () =>
+      readOnlyWidgetIsReady({
+        ...readyObservation,
+        privateTitle: 'sensitive event',
+      }),
+    /Invalid Desktop journey input/u,
+  );
+
+  const readyPath = [];
+  await prepareDesktopWidget({
+    isReady: async () => readOnlyWidgetIsReady(readyObservation),
+    isIframeVisible: async () => {
+      readyPath.push('unexpected-iframe-check');
+      return true;
+    },
+    activateWidget: async () => readyPath.push('unexpected-activation'),
+    approveWarning: async () => readyPath.push('warning-check'),
+    approveCapabilities: async () =>
+      readyPath.push('unexpected-capability-approval'),
+    waitForIdentityContinue: async () => {
+      readyPath.push('identity-check');
+      return false;
+    },
+    approveIdentity: async () => readyPath.push('unexpected-identity-approval'),
+    waitForIframe: async () => readyPath.push('unexpected-iframe-wait'),
+  });
+  assert.deepEqual(readyPath, ['warning-check', 'identity-check']);
+
+  const coldReadOnlyPath = [];
+  await prepareDesktopWidget({
+    isReady: async () =>
+      readOnlyWidgetIsReady({
+        ...readyObservation,
+        expectedEventRowCountCapped: 0,
+        expectedEventRowVisible: null,
+      }),
+    isIframeVisible: async () => {
+      coldReadOnlyPath.push('iframe-visible');
+      return true;
+    },
+    activateWidget: async () => coldReadOnlyPath.push('unexpected-activation'),
+    approveWarning: async () => coldReadOnlyPath.push('warning'),
+    approveCapabilities: async () => coldReadOnlyPath.push('capabilities'),
+    waitForIdentityContinue: async () => {
+      coldReadOnlyPath.push('identity-check');
+      return true;
+    },
+    approveIdentity: async () => coldReadOnlyPath.push('identity-approval'),
+    waitForIframe: async () => coldReadOnlyPath.push('iframe-wait'),
+  });
+  assert.deepEqual(coldReadOnlyPath, [
+    'iframe-visible',
+    'warning',
+    'capabilities',
+    'identity-check',
+    'identity-approval',
     'iframe-wait',
   ]);
 });

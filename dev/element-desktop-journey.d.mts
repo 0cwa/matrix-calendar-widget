@@ -14,24 +14,40 @@ export type DesktopJourneyPhase =
 
 export type DesktopJourneyOutcome = 'passed' | 'failed';
 
-export type DesktopJourneyFailurePoint =
+export type DesktopRoomWidgetFailurePoint =
   | 'room-navigation'
   | 'room-heading'
   | 'room-id'
   | 'gateway-read-await'
   | 'widget-open'
   | 'gateway-read-status'
-  | 'create-control'
-  | 'origin-isolation';
+  | 'create-control';
+
+export type WebMemberBReadFailurePoint =
+  | 'web-b-authentication'
+  | 'web-b-room-navigation'
+  | 'web-b-widget-open'
+  | 'web-b-gateway-read-await'
+  | 'web-b-gateway-read-status'
+  | 'web-b-event-row';
+
+export type DesktopJourneyFailurePoint =
+  | DesktopRoomWidgetFailurePoint
+  | 'origin-isolation'
+  | WebMemberBReadFailurePoint;
 
 export type DesktopJourneyFailurePointObservation =
   | {
       phase: 'desktop-room-widget-read';
-      point: Exclude<DesktopJourneyFailurePoint, 'origin-isolation'>;
+      point: DesktopRoomWidgetFailurePoint;
     }
   | {
       phase: 'desktop-widget-origin-isolation';
       point: 'origin-isolation';
+    }
+  | {
+      phase: 'web-member-b-read';
+      point: WebMemberBReadFailurePoint;
     };
 
 export type DesktopLoginStep =
@@ -126,8 +142,14 @@ export type DesktopGatewayReadFailureDiagnostic = {
   createControlVisible: boolean | null;
 };
 
+export type ReadOnlyWidgetReadinessObservation = {
+  expectedEventRowCountCapped: 0 | 1 | 2 | null;
+  expectedEventRowVisible: boolean | null;
+  capabilityPromptVisible: boolean | null;
+};
+
 export type DesktopJourneySummary = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;
@@ -167,6 +189,10 @@ export declare function desktopWidgetIsReady(observation: {
   createControlEnabled: boolean | null;
   capabilityPromptVisible: boolean | null;
 }): boolean;
+
+export declare function readOnlyWidgetIsReady(
+  observation: ReadOnlyWidgetReadinessObservation,
+): boolean;
 
 export declare function prepareDesktopWidget(input: {
   isReady: () => Promise<boolean>;

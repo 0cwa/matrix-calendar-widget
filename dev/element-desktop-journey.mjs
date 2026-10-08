@@ -32,6 +32,12 @@ export const DESKTOP_JOURNEY_FAILURE_POINTS = Object.freeze([
   'gateway-read-status',
   'create-control',
   'origin-isolation',
+  'web-b-authentication',
+  'web-b-room-navigation',
+  'web-b-widget-open',
+  'web-b-gateway-read-await',
+  'web-b-gateway-read-status',
+  'web-b-event-row',
 ]);
 export const DESKTOP_LOGIN_STEPS = Object.freeze([
   'not_observed',
@@ -64,11 +70,23 @@ export const DESKTOP_LOGIN_ENTRIES = Object.freeze([
 
 const PHASE_SET = new Set(DESKTOP_JOURNEY_PHASES);
 const JOURNEY_FAILURE_POINT_SET = new Set(DESKTOP_JOURNEY_FAILURE_POINTS);
-const ROOM_WIDGET_FAILURE_POINT_SET = new Set(
-  DESKTOP_JOURNEY_FAILURE_POINTS.filter(
-    (point) => point !== 'origin-isolation',
-  ),
-);
+const ROOM_WIDGET_FAILURE_POINT_SET = new Set([
+  'room-navigation',
+  'room-heading',
+  'room-id',
+  'gateway-read-await',
+  'widget-open',
+  'gateway-read-status',
+  'create-control',
+]);
+const WEB_B_READ_FAILURE_POINT_SET = new Set([
+  'web-b-authentication',
+  'web-b-room-navigation',
+  'web-b-widget-open',
+  'web-b-gateway-read-await',
+  'web-b-gateway-read-status',
+  'web-b-event-row',
+]);
 const LOGIN_STEP_SET = new Set(DESKTOP_LOGIN_STEPS);
 const LOGIN_FAILURE_REASON_SET = new Set(DESKTOP_LOGIN_FAILURE_REASONS);
 const LOGIN_ENTRY_SET = new Set(DESKTOP_LOGIN_ENTRIES);
@@ -145,6 +163,9 @@ function validJourneyFailurePoint(phase, status, failurePoint) {
   }
   if (phase === 'desktop-room-widget-read') {
     return ROOM_WIDGET_FAILURE_POINT_SET.has(failurePoint);
+  }
+  if (phase === 'web-member-b-read') {
+    return WEB_B_READ_FAILURE_POINT_SET.has(failurePoint);
   }
   return (
     phase === 'desktop-widget-origin-isolation' &&
@@ -459,6 +480,29 @@ export function desktopWidgetIsReady(observation) {
     observation.createControlCountCapped === 1 &&
     observation.createControlVisible === true &&
     observation.createControlEnabled === true &&
+    observation.capabilityPromptVisible === false
+  );
+}
+
+export function readOnlyWidgetIsReady(observation) {
+  if (
+    observation === null ||
+    typeof observation !== 'object' ||
+    Array.isArray(observation) ||
+    Object.keys(observation).sort().join(',') !==
+      'capabilityPromptVisible,expectedEventRowCountCapped,expectedEventRowVisible' ||
+    ![null, 0, 1, 2].includes(observation.expectedEventRowCountCapped) ||
+    ![null, true, false].includes(observation.expectedEventRowVisible) ||
+    ![null, true, false].includes(observation.capabilityPromptVisible) ||
+    (observation.expectedEventRowCountCapped !== 1 &&
+      observation.expectedEventRowVisible !== null)
+  ) {
+    invalidInput();
+  }
+
+  return (
+    observation.expectedEventRowCountCapped === 1 &&
+    observation.expectedEventRowVisible === true &&
     observation.capabilityPromptVisible === false
   );
 }
@@ -875,7 +919,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   const failed = Object.values(cases).includes('failed');
   const complete = Object.values(cases).every((value) => value === 'passed');
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
     loginStep,
     loginEntry,

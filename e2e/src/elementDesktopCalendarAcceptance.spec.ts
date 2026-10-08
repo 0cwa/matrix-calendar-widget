@@ -36,6 +36,7 @@ import {
   enterDesktopPasswordLogin,
   initializeDesktopJourneyEvidence,
   prepareDesktopWidget,
+  readOnlyWidgetIsReady,
   readSyntheticDesktopCredentials,
   type DesktopGatewayReadFailureDiagnostic,
   type DesktopJourneyFailurePoint,
@@ -393,7 +394,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
       fixture,
     );
     currentFailurePoint = 'widget-open';
-    const desktopFrame = await openDesktopCalendarWidget(
+    const desktopFrame = await openElementCalendarWidget(
       desktopPage,
       desktopElement,
       desktopWidgetPromptObservation,
@@ -436,23 +437,44 @@ test('Element Desktop room event journey', async ({ browser }) => {
     recordPhase(evidence, recorded, 'desktop-event-create');
 
     currentPhase = 'web-member-b-read';
+    currentFailurePoint = 'web-b-authentication';
     webHttpRoute = { observedHttpRequests: 0, blockedHttpRequests: 0 };
     const webContext = await makeMemberBContext(browser, fixture, webHttpRoute);
     contexts.push(webContext);
     const webPage = await authenticateMemberB(webContext, fixture);
+    currentFailurePoint = undefined;
+    currentFailurePoint = 'web-b-room-navigation';
     const webElement = await openFixtureRoom(webPage, fixture);
+    currentFailurePoint = undefined;
     const webRead = waitForGatewayResponse(webPage, fixture, 'GET');
-    const webFrame = await openWebCalendarWidget(webPage, webElement);
+    currentFailurePoint = 'web-b-widget-open';
+    const webFrame = await openElementCalendarWidget(
+      webPage,
+      webElement,
+      undefined,
+      async (readinessPage, readinessFrame) =>
+        readOnlyWidgetIsReady(
+          await observeReadOnlyWidgetReadiness(
+            readinessPage,
+            readinessFrame,
+            initialTitle,
+          ),
+        ),
+    );
+    currentFailurePoint = 'web-b-gateway-read-await';
     const webReadResponse = await webRead;
+    currentFailurePoint = 'web-b-gateway-read-status';
     if (webReadResponse.status() !== 200) {
       throw new Error('Second member calendar read failed');
     }
+    currentFailurePoint = 'web-b-event-row';
     const eventRow = webFrame.getByRole('listitem', {
       name: initialTitle,
       exact: true,
     });
     await eventRow.waitFor({ state: 'visible' });
     const eventButton = eventRow.getByRole('button');
+    currentFailurePoint = undefined;
     recordPhase(evidence, recorded, 'web-member-b-read');
 
     currentPhase = 'web-member-b-keyboard-open';
@@ -517,7 +539,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
     if (desktopElement.getCurrentRoomId() !== fixture.teamRoomId) {
       throw new Error('Desktop refreshed into an unexpected room');
     }
-    await openDesktopCalendarWidget(desktopPage, desktopElement);
+    await openElementCalendarWidget(desktopPage, desktopElement);
     const refreshed = await refreshedRoomRead;
     if (refreshed.status() !== 200) {
       throw new Error('Desktop refreshed calendar read failed');
@@ -876,17 +898,22 @@ async function openFixtureRoom(
   return element;
 }
 
-async function openDesktopCalendarWidget(
+async function openElementCalendarWidget(
   page: Page,
   element: ElementWebPage,
   promptObservation?: DesktopWidgetPromptObservation,
+  readinessCheck?: (page: Page, frame: FrameLocator) => Promise<boolean>,
 ): Promise<FrameLocator> {
   const iframe = page.locator('iframe[title="Matrix Calendar"]');
   const frame = element.widgetByTitle('Matrix Calendar');
 
   await prepareDesktopWidget({
-    isReady: async () =>
-      desktopWidgetIsReady(await observeDesktopWidgetReadiness(page, frame)),
+    isReady: readinessCheck
+      ? () => readinessCheck(page, frame)
+      : async () =>
+          desktopWidgetIsReady(
+            await observeDesktopWidgetReadiness(page, frame),
+          ),
     isIframeVisible: () => iframe.isVisible().catch(() => false),
     activateWidget: async () => {
       await page
@@ -1007,6 +1034,38 @@ async function observeDesktopWidgetReadiness(
   };
 }
 
+async function observeReadOnlyWidgetReadiness(
+  page: Page,
+  frame: FrameLocator,
+  expectedTitle: string,
+): Promise<{
+  expectedEventRowCountCapped: 0 | 1 | 2 | null;
+  expectedEventRowVisible: boolean | null;
+  capabilityPromptVisible: boolean | null;
+}> {
+  const expectedEventRow = frame.getByRole('listitem', {
+    name: expectedTitle,
+    exact: true,
+  });
+  let expectedEventRowCountCapped: 0 | 1 | 2 | null = null;
+  let expectedEventRowVisible: boolean | null = null;
+  try {
+    const count = await expectedEventRow.count();
+    expectedEventRowCountCapped = Math.min(count, 2) as 0 | 1 | 2;
+    if (count === 1) {
+      expectedEventRowVisible = await expectedEventRow.isVisible();
+    }
+  } catch {
+    // Unknown readiness stays on the ordinary consent path.
+  }
+
+  return {
+    expectedEventRowCountCapped,
+    expectedEventRowVisible,
+    capabilityPromptVisible: await observeDesktopCapabilityPrompt(page),
+  };
+}
+
 async function observeDesktopCapabilityPrompt(
   page: Page,
 ): Promise<boolean | null> {
@@ -1057,62 +1116,6 @@ function getDesktopWidgetWarningContinue(page: Page): Locator {
     .getByText('Widget added by')
     .locator('..')
     .getByRole('button', { name: 'Continue', exact: true });
-}
-
-async function openWebCalendarWidget(
-  page: Page,
-  element: ElementWebPage,
-): Promise<FrameLocator> {
-  const iframe = page.locator('iframe[title="Matrix Calendar"]');
-  if (!(await iframe.isVisible().catch(() => false))) {
-    await page
-      .locator('header.mx_RoomHeader button.mx_RoomHeader_infoWrapper')
-      .click();
-    const rightPanel = page.getByRole('complementary');
-    await rightPanel.getByRole('menuitem', { name: 'Extensions' }).click();
-    await rightPanel.getByRole('button', { name: 'Matrix Calendar' }).click();
-
-    const warningContinue = page
-      .getByText('Widget added by')
-      .locator('..')
-      .getByRole('button', { name: 'Continue', exact: true });
-    const warningVisible = await warningContinue.isVisible().catch(() => null);
-    if (warningVisible === true) await warningContinue.click();
-
-    const permissions = page.getByRole('dialog').last();
-    const permissionPromptVisible = await permissions
-      .isVisible()
-      .catch(() => null);
-    if (permissionPromptVisible === true) {
-      const rememberSwitch = permissions.getByRole('switch', {
-        name: 'Remember my selection for this widget',
-      });
-      if (await rememberSwitch.isVisible().catch(() => false)) {
-        await rememberSwitch.click();
-      }
-      const approve = permissions.getByRole('button', {
-        name: 'Approve',
-        exact: true,
-      });
-      if (await approve.isVisible().catch(() => false)) {
-        await approve.click();
-      }
-    }
-
-    const identityContinue = page
-      .getByRole('dialog')
-      .getByRole('button', { name: 'Continue', exact: true })
-      .first();
-    const identityContinueVisible = await identityContinue
-      .isVisible()
-      .catch(() => null);
-    if (identityContinueVisible === true) {
-      await identityContinue.click();
-    }
-    await iframe.waitFor({ state: 'attached', timeout: 30_000 });
-  }
-  void element;
-  return element.widgetByTitle('Matrix Calendar');
 }
 
 async function createEvent(
