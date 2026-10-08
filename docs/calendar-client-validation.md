@@ -76,18 +76,20 @@ date, and candidate commit. Check the following:
    observed during the client run. This is additional evidence, not a
    substitute for the required keyboard/focus flow.
 
-These viewport sizes are reference profiles for broader responsive runs. The
-“Full screen” row is a browser viewport size; it does not certify Element's
-pinned/full-width Apps-drawer layout. Native mobile app checks are deferred; if
+Use these viewport sizes for browser-based runs. The bounded beta check uses
+Element's standard side-panel WidgetCard at the desktop window size; record the
+actual iframe dimensions and verify host/widget overflow. Pinning into the Apps
+drawer and maximizing the widget to a full-width layout are deferred and are
+not certified by the beta check. Native mobile app checks are deferred; if
 later performed, record the device and effective CSS viewport reported by the
 embedded widget rather than substituting a desktop browser emulation result.
 
-| Profile      | CSS viewport |
-| ------------ | -----------: |
-| Narrow panel |    320 × 640 |
-| Phone-sized  |    390 × 844 |
-| Tablet-sized |   768 × 1024 |
-| Full screen  |   1280 × 800 |
+| Profile        | CSS viewport |
+| -------------- | -----------: |
+| Narrow panel   |    320 × 640 |
+| Phone-sized    |    390 × 844 |
+| Tablet-sized   |   768 × 1024 |
+| Desktop window |   1280 × 800 |
 
 ## Evidence status
 

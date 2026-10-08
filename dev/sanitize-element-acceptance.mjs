@@ -110,6 +110,15 @@ const PHASES = new Set([
   'performance-seed',
   'performance-cleanup',
   'performance-pilot',
+  'g6-member-a-room-context',
+  'g6-member-b-room-context',
+  'g6-fixture-ready',
+  'g6-unsupported-preservation',
+  'g6-delete-and-refresh',
+  'g6-keyboard-focus',
+  'g6-side-panel-layout',
+  'g6-browser-egress',
+  'g6-resource-cleanup',
 ]);
 const PERFORMANCE_FIXTURE_FAILURES = new Map([
   [
@@ -145,6 +154,8 @@ const PERFORMANCE_CLEANUP_COUNT_FIELDS = [
 const ROOM_CONTEXT_PHASES = new Set([
   'member-a-room-context',
   'reminder-room-context',
+  'g6-member-a-room-context',
+  'g6-member-b-room-context',
 ]);
 const ROOM_RENDER_STATE_FIELDS = [
   'roomViewShellVisible',
@@ -185,6 +196,22 @@ const MATRIX_CHAT_STATE_FIELDS = [
   'matrixChatPageTypeBucket',
   'matrixChatCurrentRoomMatches',
 ];
+const ROOM_RENDER_DIAGNOSTIC_FIELDS = [
+  'outerRenderBucket',
+  ...OUTER_RENDERER_PRESENCE_FIELDS,
+  ...MATRIX_CHAT_STATE_FIELDS,
+  'roomRenderStateAvailable',
+  ...ROOM_RENDER_STATE_FIELDS,
+];
+const ROOM_RENDER_DIAGNOSTIC_PHASES = new Set([
+  'member-a-room-context',
+  'reminder-room-context',
+]);
+const G6_PHASES = new Set(
+  [...PHASES].filter(
+    (phase) => phase.startsWith('g6-') && !ROOM_CONTEXT_PHASES.has(phase),
+  ),
+);
 const REMINDER_ROOM_LAYOUT_FIELDS = [
   'roomViewPresent',
   'roomHeaderPresent',
@@ -192,6 +219,10 @@ const REMINDER_ROOM_LAYOUT_FIELDS = [
   'roomInfoControlPresent',
   'fixtureCalendarIframePresent',
 ];
+const ROOM_LAYOUT_OBSERVATION_PHASES = new Set([
+  'reminder-room-context',
+  'g6-member-b-room-context',
+]);
 const REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS = [
   'reminderWidgetContextResponseCount',
   'reminderWidgetContextResponseStatus',
@@ -244,6 +275,324 @@ const PHASE_BOOLEAN_FIELDS = new Map([
       'attemptCountUnchanged',
     ],
   ],
+  ['g6-fixture-ready', ['openIdProofValid', 'allResourcesSeeded']],
+  [
+    'g6-unsupported-preservation',
+    [
+      'unsupportedWarningVisible',
+      'unsupportedRowOmitted',
+      'supportedNeighborVisible',
+      'canonicalSnapshotAvailable',
+      'neighborEditedRowVisible',
+      'supportedNeighborEdited',
+      'canonicalUnsupportedObjectUnchanged',
+      'neighborOwnershipUpdated',
+      'neighborUpdateIdentityMatches',
+    ],
+  ],
+  [
+    'g6-delete-and-refresh',
+    [
+      'memberBDeleteRowVisible',
+      'deleteButtonVisible',
+      'deleteConfirmationVisible',
+      'deletedRowAbsent',
+      'canonicalObjectAbsent',
+      'memberBDeleteRowAbsent',
+      'supportedNeighborVisible',
+    ],
+  ],
+  [
+    'g6-keyboard-focus',
+    [
+      'keyboardEventFocused',
+      'detailsOpened',
+      'editActionFocused',
+      'deleteActionFocused',
+      'closeActionFocused',
+      'escapeClosedDialog',
+      'focusReturnedToEvent',
+    ],
+  ],
+  [
+    'g6-side-panel-layout',
+    [
+      'widgetCardVisible',
+      'createControlReachable',
+      'eventDetailsReachable',
+      'hostNoHorizontalOverflow',
+      'widgetNoHorizontalOverflow',
+      'persistedHostFramePresent',
+    ],
+  ],
+  ['g6-browser-egress', ['browserEgressClear']],
+  ['g6-resource-cleanup', ['allOwnedResourcesRemoved']],
+]);
+const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
+  ['g6-fixture-ready', ['httpStatus', 'count']],
+  [
+    'g6-unsupported-preservation',
+    [
+      'projectionHttpStatus',
+      'canonicalBeforeHttpStatus',
+      'neighborPatchHttpStatus',
+      'canonicalAfterHttpStatus',
+      'neighborCanonicalTitleReadbackHttpStatus',
+      'neighborListRefreshHttpStatus',
+      'neighborListRefreshEventCountCapped',
+      'neighborEditedRowCountCapped',
+      'count',
+    ],
+  ],
+  [
+    'g6-delete-and-refresh',
+    [
+      'memberBEventsHttpStatus',
+      'deleteHttpStatus',
+      'canonicalDeleteHttpStatus',
+      'memberBReloadHttpStatus',
+      'count',
+    ],
+  ],
+  [
+    'g6-keyboard-focus',
+    [
+      'count',
+      'eventActionTabCount',
+      'detailsActionTabCount',
+      'editActionCountCapped',
+      'deleteActionCountCapped',
+      'closeActionCountCapped',
+    ],
+  ],
+  [
+    'g6-side-panel-layout',
+    [
+      'viewportWidth',
+      'viewportHeight',
+      'iframeWidth',
+      'iframeHeight',
+      'widgetCardCount',
+      'appDrawerCount',
+      'managementToolbarNavCountCapped',
+      'createEventButtonCountCapped',
+    ],
+  ],
+  ['g6-browser-egress', ['count']],
+  [
+    'g6-resource-cleanup',
+    [
+      'count',
+      'plannedCount',
+      'confirmedCreatedCount',
+      'conflictCount',
+      'notCreatedCount',
+      'createUnresolvedCount',
+      'deletedCount',
+      'alreadyAbsentCount',
+      'cleanupUnresolvedCount',
+    ],
+  ],
+]);
+const G6_EXTRA_NUMERIC_FIELDS = new Set(
+  [...G6_NUMERIC_FIELDS_BY_PHASE.values()]
+    .flat()
+    .filter((key) => key !== 'httpStatus' && key !== 'count'),
+);
+const G6_NUMERIC_FIELDS_SHARED_WITH_OTHER_PHASES = new Map([
+  ['performance-cleanup', new Set(PERFORMANCE_CLEANUP_COUNT_FIELDS)],
+]);
+const G6_ENUM_FIELDS_BY_PHASE = new Map([
+  [
+    'g6-unsupported-preservation',
+    ['neighborPatchTitleOutcome', 'neighborCanonicalTitleReadbackOutcome'],
+  ],
+  [
+    'g6-side-panel-layout',
+    [
+      'managementToolbarNavVisibility',
+      'createEventButtonVisibility',
+      'createEventButtonEnabled',
+    ],
+  ],
+  [
+    'g6-keyboard-focus',
+    [
+      'editActionVisibility',
+      'editActionEnabled',
+      'deleteActionVisibility',
+      'deleteActionEnabled',
+      'closeActionVisibility',
+      'closeActionEnabled',
+      'initialDetailsFocusTarget',
+    ],
+  ],
+]);
+const G6_POSTSAVE_ENUM_FIELDS = new Set([
+  'neighborListRefreshOutcome',
+  'neighborListUiObservation',
+]);
+const G6_POSTSAVE_BOOLEAN_FIELDS = new Set([
+  'neighborListRefreshEventCountOverflow',
+  'neighborListRefreshEditedTitleMatches',
+  'neighborListLoadingVisible',
+  'neighborListErrorVisible',
+  'neighborListEditedRowVisible',
+  'neighborEditedRowCountOverflow',
+]);
+const G6_KEYBOARD_BOOLEAN_FIELDS = new Set([
+  'keyboardFrameHasFocus',
+  'escapeAttempted',
+]);
+const G6_KEYBOARD_FOCUS_TARGETS = new Set([
+  'edit',
+  'delete',
+  'close',
+  'dialog-content',
+  'other',
+  'outside',
+  'unavailable',
+]);
+const G6_POSTSAVE_DIAGNOSTIC_FIELDS = new Set([
+  ...G6_POSTSAVE_ENUM_FIELDS,
+  ...G6_POSTSAVE_BOOLEAN_FIELDS,
+  'neighborListRefreshHttpStatus',
+  'neighborListRefreshEventCountCapped',
+  'neighborEditedRowCountCapped',
+]);
+const G6_POSTSAVE_ENUM_VALUES = new Map([
+  [
+    'neighborListRefreshOutcome',
+    new Set([
+      'not-observed',
+      'decoding',
+      'unexpected-status',
+      'decode-error',
+      'invalid-response',
+      'decoded',
+      'decoded-overflow',
+    ]),
+  ],
+  ['neighborListUiObservation', new Set(['observed', 'unavailable'])],
+]);
+const G6_POSTSAVE_FIELDS_BY_PHASE = new Map([
+  ['g6-unsupported-preservation', G6_POSTSAVE_DIAGNOSTIC_FIELDS],
+]);
+const G6_EXTRA_ENUM_FIELDS = new Set(
+  [...G6_ENUM_FIELDS_BY_PHASE.values()].flat(),
+);
+for (const key of G6_POSTSAVE_ENUM_FIELDS) {
+  G6_EXTRA_ENUM_FIELDS.add(key);
+}
+const G6_EXTRA_BOOLEAN_FIELDS = new Set([
+  ...G6_POSTSAVE_BOOLEAN_FIELDS,
+  ...G6_KEYBOARD_BOOLEAN_FIELDS,
+]);
+const G6_ENUM_VALUES = new Map([
+  [
+    'neighborPatchTitleOutcome',
+    new Set(['matched', 'mismatched', 'unavailable']),
+  ],
+  [
+    'neighborCanonicalTitleReadbackOutcome',
+    new Set([
+      'not-needed',
+      'not-owned',
+      'matched',
+      'mismatched',
+      'unavailable',
+    ]),
+  ],
+  [
+    'managementToolbarNavVisibility',
+    new Set(['absent', 'visible', 'hidden', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'createEventButtonVisibility',
+    new Set(['absent', 'visible', 'hidden', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'createEventButtonEnabled',
+    new Set(['absent', 'enabled', 'disabled', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'editActionVisibility',
+    new Set(['absent', 'visible', 'hidden', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'deleteActionVisibility',
+    new Set(['absent', 'visible', 'hidden', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'closeActionVisibility',
+    new Set(['absent', 'visible', 'hidden', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'editActionEnabled',
+    new Set(['absent', 'enabled', 'disabled', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'deleteActionEnabled',
+    new Set(['absent', 'enabled', 'disabled', 'ambiguous', 'unavailable']),
+  ],
+  [
+    'closeActionEnabled',
+    new Set(['absent', 'enabled', 'disabled', 'ambiguous', 'unavailable']),
+  ],
+  ['initialDetailsFocusTarget', G6_KEYBOARD_FOCUS_TARGETS],
+]);
+
+function validG6SidePanelToolbarObservation(record) {
+  const requiredFields = [
+    'managementToolbarNavCountCapped',
+    'managementToolbarNavVisibility',
+    'createEventButtonCountCapped',
+    'createEventButtonVisibility',
+    'createEventButtonEnabled',
+  ];
+  if (!requiredFields.every((key) => Object.hasOwn(record, key))) {
+    return false;
+  }
+
+  const navCount = record.managementToolbarNavCountCapped;
+  const createCount = record.createEventButtonCountCapped;
+  if (navCount === null || createCount === null) {
+    return (
+      navCount === null &&
+      createCount === null &&
+      record.managementToolbarNavVisibility === 'unavailable' &&
+      record.createEventButtonVisibility === 'unavailable' &&
+      record.createEventButtonEnabled === 'unavailable'
+    );
+  }
+
+  const validCappedCount = (value) =>
+    Number.isInteger(value) && value >= 0 && value <= 2;
+  const validVisibility = (count, value) =>
+    (count === 0 && value === 'absent') ||
+    (count === 1 && ['visible', 'hidden', 'unavailable'].includes(value)) ||
+    (count === 2 && value === 'ambiguous');
+  const validEnabled = (count, value) =>
+    (count === 0 && value === 'absent') ||
+    (count === 1 && ['enabled', 'disabled', 'unavailable'].includes(value)) ||
+    (count === 2 && value === 'ambiguous');
+
+  return (
+    validCappedCount(navCount) &&
+    validCappedCount(createCount) &&
+    validVisibility(navCount, record.managementToolbarNavVisibility) &&
+    validVisibility(createCount, record.createEventButtonVisibility) &&
+    validEnabled(createCount, record.createEventButtonEnabled)
+  );
+}
+
+const G6_SEED_CREATE_OUTCOMES = new Set([
+  'response',
+  'timeout',
+  'aborted',
+  'network-error',
+  'other-error',
+  'not-sent',
 ]);
 const REMINDER_DELIVERY_PHASES = new Set([
   'reminder-delivery-snapshot',
@@ -780,7 +1129,503 @@ const ALLOWED_KEYS = new Set([
   'canManageReminders',
   ...REMINDER_CONFIGURATION_FIELDS,
   ...VERSION_FIELDS,
+  'openIdProofValid',
+  'allResourcesSeeded',
+  'seedCreateObservations',
+  'unsupportedWarningVisible',
+  'unsupportedRowOmitted',
+  'supportedNeighborVisible',
+  'canonicalSnapshotAvailable',
+  'neighborEditedRowVisible',
+  'supportedNeighborEdited',
+  'canonicalUnsupportedObjectUnchanged',
+  'neighborOwnershipUpdated',
+  'neighborUpdateIdentityMatches',
+  ...G6_EXTRA_ENUM_FIELDS,
+  ...G6_EXTRA_BOOLEAN_FIELDS,
+  ...G6_POSTSAVE_DIAGNOSTIC_FIELDS,
+  'detailsTabFocusObservations',
+  'deleteButtonVisible',
+  'deleteConfirmationVisible',
+  'deletedRowAbsent',
+  'canonicalObjectAbsent',
+  'memberBDeleteRowVisible',
+  'memberBDeleteRowAbsent',
+  'keyboardEventFocused',
+  'detailsOpened',
+  'editActionFocused',
+  'deleteActionFocused',
+  'closeActionFocused',
+  'escapeClosedDialog',
+  'focusReturnedToEvent',
+  'widgetCardVisible',
+  'createControlReachable',
+  'eventDetailsReachable',
+  'hostNoHorizontalOverflow',
+  'widgetNoHorizontalOverflow',
+  'persistedHostFramePresent',
+  'browserEgressClear',
+  'allOwnedResourcesRemoved',
+  ...G6_EXTRA_NUMERIC_FIELDS,
 ]);
+
+function validG6Observation(record) {
+  if (!G6_PHASES.has(record.phase)) return true;
+
+  const booleanFields = PHASE_BOOLEAN_FIELDS.get(record.phase) ?? [];
+  const numericFields = G6_NUMERIC_FIELDS_BY_PHASE.get(record.phase) ?? [];
+  const enumFields = G6_ENUM_FIELDS_BY_PHASE.get(record.phase) ?? [];
+  const postSaveFields =
+    G6_POSTSAVE_FIELDS_BY_PHASE.get(record.phase) ?? new Set();
+  const keyboardFields =
+    record.phase === 'g6-keyboard-focus'
+      ? [...G6_KEYBOARD_BOOLEAN_FIELDS, 'detailsTabFocusObservations']
+      : [];
+  const postSaveBooleanFields = [...G6_POSTSAVE_BOOLEAN_FIELDS].filter((key) =>
+    postSaveFields.has(key),
+  );
+  const allowedFields = new Set([
+    'phase',
+    'status',
+    ...booleanFields,
+    ...numericFields,
+    ...enumFields,
+    ...postSaveFields,
+    ...keyboardFields,
+    ...(record.phase === 'g6-fixture-ready' ? ['seedCreateObservations'] : []),
+  ]);
+  if (
+    Object.keys(record).some((key) => !allowedFields.has(key)) ||
+    booleanFields.some(
+      (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
+    ) ||
+    postSaveBooleanFields.some(
+      (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
+    ) ||
+    [...G6_KEYBOARD_BOOLEAN_FIELDS].some(
+      (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
+    ) ||
+    numericFields.some((key) => {
+      if (!Object.hasOwn(record, key)) return false;
+      const value = record[key];
+      if (key === 'neighborListRefreshHttpStatus' && value === null) {
+        return false;
+      }
+      if (
+        (key === 'managementToolbarNavCountCapped' ||
+          key === 'createEventButtonCountCapped') &&
+        value === null
+      ) {
+        return false;
+      }
+      if (!Number.isInteger(value)) return true;
+      if (key === 'httpStatus' || key.endsWith('HttpStatus')) {
+        return value < 100 || value > 599;
+      }
+      if (key === 'neighborListRefreshEventCountCapped') {
+        return value < 0 || value > 100;
+      }
+      if (key === 'neighborEditedRowCountCapped') {
+        return value < 0 || value > 2;
+      }
+      if (key.endsWith('Width') || key.endsWith('Height')) {
+        return value < 1 || value > 10_000;
+      }
+      if (record.phase === 'g6-side-panel-layout') {
+        return value < 0 || value > 2;
+      }
+      if (key === 'eventActionTabCount') return value < 0 || value > 80;
+      if (key === 'detailsActionTabCount') return value < 0 || value > 14;
+      if (record.phase === 'g6-resource-cleanup') return value < 0 || value > 4;
+      return value < 0 || value > 100_000;
+    }) ||
+    enumFields.some(
+      (key) =>
+        Object.hasOwn(record, key) &&
+        !G6_ENUM_VALUES.get(key)?.has(record[key]),
+    ) ||
+    [...G6_POSTSAVE_ENUM_VALUES].some(
+      ([key, values]) => Object.hasOwn(record, key) && !values.has(record[key]),
+    )
+  ) {
+    return false;
+  }
+
+  if (record.phase === 'g6-keyboard-focus') {
+    const requiredFields = [
+      'editActionCountCapped',
+      'editActionVisibility',
+      'editActionEnabled',
+      'deleteActionCountCapped',
+      'deleteActionVisibility',
+      'deleteActionEnabled',
+      'closeActionCountCapped',
+      'closeActionVisibility',
+      'closeActionEnabled',
+      'initialDetailsFocusTarget',
+      'keyboardFrameHasFocus',
+      'detailsTabFocusObservations',
+      'escapeAttempted',
+      'eventActionTabCount',
+      'detailsActionTabCount',
+    ];
+    const observationFieldsPresent = requiredFields.every((key) =>
+      Object.hasOwn(record, key),
+    );
+    const controlStateIsValid = (name) => {
+      const count = record[`${name}ActionCountCapped`];
+      const visibility = record[`${name}ActionVisibility`];
+      const enabled = record[`${name}ActionEnabled`];
+      return (
+        Number.isInteger(count) &&
+        count >= 0 &&
+        count <= 2 &&
+        ((count === 0 && visibility === 'absent' && enabled === 'absent') ||
+          (count === 1 &&
+            ['visible', 'hidden', 'unavailable'].includes(visibility) &&
+            ['enabled', 'disabled', 'unavailable'].includes(enabled)) ||
+          (count === 2 &&
+            visibility === 'ambiguous' &&
+            enabled === 'ambiguous'))
+      );
+    };
+    const tabObservations = record.detailsTabFocusObservations;
+    const tabObservationsAreValid =
+      Array.isArray(tabObservations) &&
+      tabObservations.length <= 12 &&
+      tabObservations.every(
+        (observation) =>
+          observation !== null &&
+          typeof observation === 'object' &&
+          !Array.isArray(observation) &&
+          Object.keys(observation).length === 2 &&
+          Object.hasOwn(observation, 'activeTarget') &&
+          Object.hasOwn(observation, 'frameHasFocus') &&
+          G6_KEYBOARD_FOCUS_TARGETS.has(observation.activeTarget) &&
+          typeof observation.frameHasFocus === 'boolean' &&
+          (observation.frameHasFocus ||
+            ['outside', 'unavailable'].includes(observation.activeTarget)) &&
+          (!observation.frameHasFocus ||
+            observation.activeTarget !== 'outside'),
+      );
+    const preEditTabCount =
+      record.detailsActionTabCount - (record.editActionFocused ? 2 : 0);
+    if (
+      !observationFieldsPresent ||
+      !G6_KEYBOARD_FOCUS_TARGETS.has(record.initialDetailsFocusTarget) ||
+      (!record.keyboardFrameHasFocus &&
+        !['outside', 'unavailable'].includes(
+          record.initialDetailsFocusTarget,
+        )) ||
+      (record.keyboardFrameHasFocus &&
+        record.initialDetailsFocusTarget === 'outside') ||
+      !controlStateIsValid('edit') ||
+      !controlStateIsValid('delete') ||
+      !controlStateIsValid('close') ||
+      !tabObservationsAreValid ||
+      tabObservations.length !== Math.min(12, preEditTabCount) ||
+      record.escapeAttempted !== record.editActionFocused ||
+      (!record.escapeAttempted && record.escapeClosedDialog) ||
+      (record.initialDetailsFocusTarget === 'edit' &&
+        !record.editActionFocused) ||
+      (record.initialDetailsFocusTarget === 'delete' &&
+        !record.deleteActionFocused) ||
+      (record.initialDetailsFocusTarget === 'close' &&
+        !record.closeActionFocused)
+    ) {
+      return false;
+    }
+  }
+
+  const hasPostSaveDiagnostics = [...postSaveFields].some((key) =>
+    Object.hasOwn(record, key),
+  );
+  if (hasPostSaveDiagnostics) {
+    const responseOutcome = record.neighborListRefreshOutcome;
+    const responseStatus = record.neighborListRefreshHttpStatus;
+    const hasResultCount = Object.hasOwn(
+      record,
+      'neighborListRefreshEventCountCapped',
+    );
+    const hasResultOverflow = Object.hasOwn(
+      record,
+      'neighborListRefreshEventCountOverflow',
+    );
+    const hasTitleMatch = Object.hasOwn(
+      record,
+      'neighborListRefreshEditedTitleMatches',
+    );
+    const hasResultSummary =
+      hasResultCount || hasResultOverflow || hasTitleMatch;
+    const responseShapeIsValid = (() => {
+      switch (responseOutcome) {
+        case 'not-observed':
+          return responseStatus === null && !hasResultSummary;
+        case 'decoding':
+        case 'decode-error':
+        case 'invalid-response':
+          return responseStatus === 200 && !hasResultSummary;
+        case 'unexpected-status':
+          return (
+            Number.isInteger(responseStatus) &&
+            responseStatus !== 200 &&
+            !hasResultSummary
+          );
+        case 'decoded':
+          return (
+            responseStatus === 200 &&
+            Number.isInteger(record.neighborListRefreshEventCountCapped) &&
+            record.neighborListRefreshEventCountCapped >= 0 &&
+            record.neighborListRefreshEventCountCapped <= 100 &&
+            record.neighborListRefreshEventCountOverflow === false &&
+            typeof record.neighborListRefreshEditedTitleMatches === 'boolean'
+          );
+        case 'decoded-overflow':
+          return (
+            responseStatus === 200 &&
+            record.neighborListRefreshEventCountCapped === 100 &&
+            record.neighborListRefreshEventCountOverflow === true &&
+            !hasTitleMatch
+          );
+        default:
+          return false;
+      }
+    })();
+    const uiObservation = record.neighborListUiObservation;
+    const uiFields = [
+      'neighborListLoadingVisible',
+      'neighborListErrorVisible',
+      'neighborListEditedRowVisible',
+      'neighborEditedRowCountCapped',
+      'neighborEditedRowCountOverflow',
+    ];
+    const hasEveryUiField = uiFields.every((key) => Object.hasOwn(record, key));
+    const hasAnyUiField = uiFields.some((key) => Object.hasOwn(record, key));
+    const uiShapeIsValid =
+      (uiObservation === 'observed' &&
+        hasEveryUiField &&
+        record.neighborEditedRowCountCapped >= 0 &&
+        record.neighborEditedRowCountCapped <= 2 &&
+        (record.neighborEditedRowCountOverflow === false ||
+          record.neighborEditedRowCountCapped === 2) &&
+        (record.neighborListEditedRowVisible !== true ||
+          record.neighborEditedRowCountCapped > 0 ||
+          record.neighborEditedRowCountOverflow) &&
+        (record.neighborEditedRowCountCapped !== 0 ||
+          record.neighborEditedRowCountOverflow ||
+          record.neighborListEditedRowVisible === false)) ||
+      (uiObservation === 'unavailable' &&
+        Object.hasOwn(record, 'neighborEditedRowVisible') &&
+        !hasAnyUiField);
+    if (
+      !Object.hasOwn(record, 'neighborListRefreshOutcome') ||
+      !Object.hasOwn(record, 'neighborListRefreshHttpStatus') ||
+      !Object.hasOwn(record, 'neighborListUiObservation') ||
+      !responseShapeIsValid ||
+      !uiShapeIsValid
+    ) {
+      return false;
+    }
+  }
+
+  if (record.phase === 'g6-unsupported-preservation' && enumFields.length > 0) {
+    const hasAnyEnumField = enumFields.some((key) =>
+      Object.hasOwn(record, key),
+    );
+    const hasEveryEnumField = enumFields.every((key) =>
+      Object.hasOwn(record, key),
+    );
+    if (
+      (record.status === 'passed' && !hasEveryEnumField) ||
+      (hasAnyEnumField && !hasEveryEnumField)
+    ) {
+      return false;
+    }
+    if (hasEveryEnumField) {
+      const patchOutcome = record.neighborPatchTitleOutcome;
+      const canonicalOutcome = record.neighborCanonicalTitleReadbackOutcome;
+      const canonicalStatusPresent = Object.hasOwn(
+        record,
+        'neighborCanonicalTitleReadbackHttpStatus',
+      );
+      if (
+        (patchOutcome !== 'unavailable' &&
+          !Object.hasOwn(record, 'neighborPatchHttpStatus')) ||
+        (canonicalOutcome === 'not-needed' &&
+          record.neighborEditedRowVisible !== true) ||
+        (canonicalOutcome !== 'not-needed' &&
+          record.neighborEditedRowVisible !== false) ||
+        (record.supportedNeighborEdited === true &&
+          (canonicalOutcome !== 'not-needed' ||
+            record.neighborEditedRowVisible !== true)) ||
+        ((canonicalOutcome === 'matched' ||
+          canonicalOutcome === 'mismatched') &&
+          record.neighborCanonicalTitleReadbackHttpStatus !== 200) ||
+        ((canonicalOutcome === 'not-needed' ||
+          canonicalOutcome === 'not-owned') &&
+          canonicalStatusPresent)
+      ) {
+        return false;
+      }
+    }
+  }
+
+  if (Object.hasOwn(record, 'seedCreateObservations')) {
+    const observations = record.seedCreateObservations;
+    if (
+      record.phase !== 'g6-fixture-ready' ||
+      !Array.isArray(observations) ||
+      observations.length !== 4 ||
+      observations.some((observation) => {
+        if (
+          observation === null ||
+          typeof observation !== 'object' ||
+          Array.isArray(observation) ||
+          Object.keys(observation).length !== 4 ||
+          !Object.hasOwn(observation, 'outcome') ||
+          !Object.hasOwn(observation, 'status') ||
+          !Object.hasOwn(observation, 'etagPresent') ||
+          !Object.hasOwn(observation, 'etagStrong') ||
+          !G6_SEED_CREATE_OUTCOMES.has(observation.outcome)
+        ) {
+          return true;
+        }
+        if (observation.outcome === 'response') {
+          return (
+            !Number.isInteger(observation.status) ||
+            observation.status < 100 ||
+            observation.status > 599 ||
+            typeof observation.etagPresent !== 'boolean' ||
+            typeof observation.etagStrong !== 'boolean' ||
+            (observation.etagStrong && !observation.etagPresent)
+          );
+        }
+        return (
+          observation.status !== null ||
+          observation.etagPresent !== null ||
+          observation.etagStrong !== null
+        );
+      })
+    ) {
+      return false;
+    }
+  }
+
+  if (
+    record.phase === 'g6-side-panel-layout' &&
+    ((record.widgetCardVisible === true && record.widgetCardCount !== 1) ||
+      (record.persistedHostFramePresent === true &&
+        (!Number.isInteger(record.iframeWidth) ||
+          !Number.isInteger(record.iframeHeight))) ||
+      !validG6SidePanelToolbarObservation(record))
+  ) {
+    return false;
+  }
+
+  if (record.phase === 'g6-resource-cleanup') {
+    const cleanupCounts = [
+      'count',
+      'plannedCount',
+      'confirmedCreatedCount',
+      'conflictCount',
+      'notCreatedCount',
+      'createUnresolvedCount',
+      'deletedCount',
+      'alreadyAbsentCount',
+      'cleanupUnresolvedCount',
+    ];
+    if (cleanupCounts.some((key) => !Number.isInteger(record[key]))) {
+      return false;
+    }
+    if (
+      record.plannedCount !==
+        record.confirmedCreatedCount +
+          record.conflictCount +
+          record.notCreatedCount +
+          record.createUnresolvedCount ||
+      record.confirmedCreatedCount !==
+        record.deletedCount +
+          record.alreadyAbsentCount +
+          record.cleanupUnresolvedCount ||
+      record.count !== record.deletedCount + record.alreadyAbsentCount ||
+      record.allOwnedResourcesRemoved !==
+        (record.createUnresolvedCount === 0 &&
+          record.cleanupUnresolvedCount === 0)
+    ) {
+      return false;
+    }
+  }
+
+  if (record.status !== 'passed') return true;
+  switch (record.phase) {
+    case 'g6-fixture-ready':
+      return (
+        record.httpStatus === 200 &&
+        record.openIdProofValid === true &&
+        record.count === 4 &&
+        Array.isArray(record.seedCreateObservations) &&
+        record.seedCreateObservations.length === 4 &&
+        record.seedCreateObservations.every(
+          (observation) =>
+            observation.outcome === 'response' &&
+            observation.status >= 200 &&
+            observation.status < 300 &&
+            observation.etagPresent === true &&
+            observation.etagStrong === true,
+        )
+      );
+    case 'g6-unsupported-preservation':
+      return (
+        record.projectionHttpStatus === 200 &&
+        record.canonicalBeforeHttpStatus === 200 &&
+        Number.isInteger(record.neighborPatchHttpStatus) &&
+        record.neighborPatchHttpStatus >= 200 &&
+        record.neighborPatchHttpStatus < 300 &&
+        record.canonicalAfterHttpStatus === 200 &&
+        record.count === 1 &&
+        record.neighborOwnershipUpdated === true &&
+        record.neighborUpdateIdentityMatches === true
+      );
+    case 'g6-delete-and-refresh':
+      return (
+        record.memberBEventsHttpStatus === 200 &&
+        Number.isInteger(record.deleteHttpStatus) &&
+        record.deleteHttpStatus >= 200 &&
+        record.deleteHttpStatus < 300 &&
+        record.canonicalDeleteHttpStatus === 404 &&
+        record.memberBReloadHttpStatus === 200 &&
+        record.count === 1
+      );
+    case 'g6-keyboard-focus':
+      return (
+        record.count === record.eventActionTabCount &&
+        record.eventActionTabCount <= 80 &&
+        record.detailsActionTabCount <= 14
+      );
+    case 'g6-side-panel-layout':
+      return (
+        record.viewportWidth === 1440 &&
+        record.viewportHeight === 900 &&
+        record.widgetCardCount === 1 &&
+        record.widgetCardVisible === true &&
+        record.persistedHostFramePresent === true &&
+        Number.isInteger(record.iframeWidth) &&
+        record.iframeWidth > 0 &&
+        Number.isInteger(record.iframeHeight) &&
+        record.iframeHeight > 0 &&
+        record.createControlReachable === true &&
+        record.eventDetailsReachable === true &&
+        record.hostNoHorizontalOverflow === true &&
+        record.widgetNoHorizontalOverflow === true
+      );
+    case 'g6-browser-egress':
+      return record.count === 0;
+    case 'g6-resource-cleanup':
+      return record.allOwnedResourcesRemoved === true && record.count <= 4;
+    default:
+      return false;
+  }
+}
 
 function validRuntimeObservation(record) {
   const expectedKeys = new Set([
@@ -1594,6 +2439,26 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
+    if (
+      !validG6Observation(record) ||
+      ([...G6_EXTRA_NUMERIC_FIELDS].some(
+        (key) =>
+          Object.hasOwn(record, key) &&
+          !G6_NUMERIC_FIELDS_SHARED_WITH_OTHER_PHASES.get(record.phase)?.has(
+            key,
+          ),
+      ) &&
+        !G6_PHASES.has(record.phase)) ||
+      ([...G6_EXTRA_ENUM_FIELDS].some((key) => Object.hasOwn(record, key)) &&
+        !G6_PHASES.has(record.phase)) ||
+      ([...G6_EXTRA_BOOLEAN_FIELDS].some((key) => Object.hasOwn(record, key)) &&
+        !G6_PHASES.has(record.phase)) ||
+      (Object.hasOwn(record, 'detailsTabFocusObservations') &&
+        record.phase !== 'g6-keyboard-focus')
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
     const phaseBooleans = PHASE_BOOLEAN_FIELDS.get(record.phase) ?? [];
     if (
       [...PHASE_BOOLEAN_FIELDS.values()]
@@ -2131,11 +2996,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       'roomHeadingPresent',
       'roomNameMatches',
       'roomIdMatches',
-      'outerRenderBucket',
-      ...OUTER_RENDERER_PRESENCE_FIELDS,
-      ...MATRIX_CHAT_STATE_FIELDS,
-      'roomRenderStateAvailable',
-      ...ROOM_RENDER_STATE_FIELDS,
+      ...ROOM_RENDER_DIAGNOSTIC_FIELDS,
       ...REMINDER_ROOM_LAYOUT_FIELDS,
       'blockedExternalRequestCount',
       'homeserverHttpErrorCount',
@@ -2153,6 +3014,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     const hasOuterRendererObservation =
       Object.hasOwn(record, 'outerRenderBucket') ||
       OUTER_RENDERER_PRESENCE_FIELDS.some((key) => Object.hasOwn(record, key));
+    const hasRoomRenderDiagnostic = ROOM_RENDER_DIAGNOSTIC_FIELDS.some((key) =>
+      Object.hasOwn(record, key),
+    );
     const outerRendererValuesValid = (() => {
       if (
         !hasOuterRendererObservation ||
@@ -2278,9 +3142,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           !['passed', 'failed'].includes(record.status))) ||
       (hasRoomObservation &&
         (requiredRoomBooleans.some((key) => typeof record[key] !== 'boolean') ||
-          !roomRenderStateValuesValid ||
-          !outerRendererValuesValid ||
-          !matrixChatStateValuesValid ||
+          (ROOM_RENDER_DIAGNOSTIC_PHASES.has(record.phase) &&
+            (!roomRenderStateValuesValid ||
+              !outerRendererValuesValid ||
+              !matrixChatStateValuesValid)) ||
+          (!ROOM_RENDER_DIAGNOSTIC_PHASES.has(record.phase) &&
+            hasRoomRenderDiagnostic) ||
           !hasSyncObservation ||
           !Object.hasOwn(record, 'blockedExternalRequestCount') ||
           !Object.hasOwn(record, 'homeserverHttpErrorCount') ||
@@ -2292,7 +3159,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           (record.status === 'failed' &&
             !roomFailureCodes.has(record.failureCode)))) ||
       (hasReminderRoomLayoutObservation &&
-        (record.phase !== 'reminder-room-context' ||
+        (!ROOM_LAYOUT_OBSERVATION_PHASES.has(record.phase) ||
           REMINDER_ROOM_LAYOUT_FIELDS.some(
             (key) =>
               !Object.hasOwn(record, key) || typeof record[key] !== 'boolean',
@@ -2725,6 +3592,13 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     if (Object.hasOwn(record, 'failureCode')) {
       fields.push(`failure_code=${record.failureCode}`);
     }
+    if (Object.hasOwn(record, 'seedCreateObservations')) {
+      record.seedCreateObservations.forEach((observation, index) => {
+        fields.push(
+          `seed_create_${index + 1}=${observation.outcome}:${observation.status ?? 'none'}:${observation.etagPresent ?? 'unknown'}:${observation.etagStrong ?? 'unknown'}`,
+        );
+      });
+    }
     if (Object.hasOwn(record, 'missingModuleKind')) {
       fields.push(`missing_module_kind=${record.missingModuleKind}`);
     }
@@ -2800,6 +3674,58 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         );
         fields.push(`${outputKey}=${record[key]}`);
       }
+    }
+    for (const key of G6_NUMERIC_FIELDS_BY_PHASE.get(phase) ?? []) {
+      if (
+        key === 'httpStatus' ||
+        key === 'count' ||
+        !Object.hasOwn(record, key)
+      ) {
+        continue;
+      }
+      const outputKey = key.replace(
+        /[A-Z]/gu,
+        (letter) => `_${letter.toLowerCase()}`,
+      );
+      fields.push(`${outputKey}=${record[key]}`);
+    }
+    for (const key of G6_ENUM_FIELDS_BY_PHASE.get(phase) ?? []) {
+      if (!Object.hasOwn(record, key)) continue;
+      const outputKey = key.replace(
+        /[A-Z]/gu,
+        (letter) => `_${letter.toLowerCase()}`,
+      );
+      fields.push(`${outputKey}=${record[key]}`);
+    }
+    for (const key of G6_POSTSAVE_ENUM_FIELDS) {
+      if (!Object.hasOwn(record, key)) continue;
+      const outputKey = key.replace(
+        /[A-Z]/gu,
+        (letter) => `_${letter.toLowerCase()}`,
+      );
+      fields.push(`${outputKey}=${record[key]}`);
+    }
+    for (const key of G6_POSTSAVE_BOOLEAN_FIELDS) {
+      if (!Object.hasOwn(record, key)) continue;
+      const outputKey = key.replace(
+        /[A-Z]/gu,
+        (letter) => `_${letter.toLowerCase()}`,
+      );
+      fields.push(`${outputKey}=${record[key]}`);
+    }
+    for (const key of G6_KEYBOARD_BOOLEAN_FIELDS) {
+      if (!Object.hasOwn(record, key)) continue;
+      const outputKey = key.replace(
+        /[A-Z]/gu,
+        (letter) => `_${letter.toLowerCase()}`,
+      );
+      fields.push(`${outputKey}=${record[key]}`);
+    }
+    if (Object.hasOwn(record, 'detailsTabFocusObservations')) {
+      const observations = record.detailsTabFocusObservations.map(
+        ({ activeTarget, frameHasFocus }) => `${activeTarget}:${frameHasFocus}`,
+      );
+      fields.push(`details_tab_focus=${observations.join(',') || 'none'}`);
     }
     lines.push(fields.join(' '));
   }

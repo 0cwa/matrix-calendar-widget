@@ -15,6 +15,9 @@ room calendars. Element Web and Element Desktop are the only client targets in
 this beta. The operator records the exact app, browser, and operating-system
 versions tested. The service runs as one gateway replica because the gateway
 and bot limits are process-local and reminder scheduling assumes one replica.
+The required client layout is Element's standard side-panel WidgetCard path.
+Pinning the widget into the Apps drawer and certifying its maximized/full-width
+layout are deferred and are not beta pass criteria.
 
 The selected deployment shape uses the project-owned Radicale image with its
 own independent calendar store, plus a separate application-owned PostgreSQL
@@ -149,10 +152,10 @@ aliases, configuration, logs, or topology in repository artifacts.
    canonical source data intact. This check does not claim every unsupported
    source form is diagnosed. In each target client, use only the keyboard to
    reach and open an event, move through its details, close with Escape, and
-   verify focus returns to the opening event. For this candidate, certify the
-   actual standard side-panel WidgetCard and horizontal-overflow behavior.
-   Pinned/full-width Apps-drawer placement and its Maximise/Un-maximise
-   controls are deferred.
+   verify focus returns to the opening event. Check the standard side-panel
+   WidgetCard layout, record its actual iframe dimensions, and verify no
+   horizontal overflow in the host or widget. Pinned/full-width Apps-drawer
+   layout certification is deferred and must not be reported as passed.
    Automated axe and component fixtures supplement these checks; they do not
    replace them.
 5. **Reminder behavior.** Configure the app-owned PostgreSQL store and verify
