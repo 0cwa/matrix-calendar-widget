@@ -783,6 +783,7 @@ async function responseContainsEventTitle(
       return (
         Boolean(event) &&
         typeof event === 'object' &&
+        event !== null &&
         'title' in event &&
         'calendarId' in event &&
         event.title === title &&
