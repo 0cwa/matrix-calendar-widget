@@ -20,10 +20,10 @@ seeding or cleanup is not performance evidence.
 Use two fresh authorized synthetic Element Web browser contexts at 1280×800 in
 the standard side-panel WidgetCard layout. The first context observes an empty
 calendar. Then seed exactly 25 unique simple timed VEVENTs into the same room
-calendar for the current seven-day interval through the authenticated CalDAV
-fixture path, and use a second fresh context for the populated case. The empty
-calendar may be genuinely empty. Keep identities and content in process memory
-only; track every owned create and delete.
+calendar for the current seven-day interval in Europe/Stockholm through the
+authenticated CalDAV fixture path. Then use a second fresh context for the
+populated case. The empty calendar may be genuinely empty. Keep identities and
+content in process memory only; track every owned create and delete.
 
 The strict limits apply to every required sample:
 
