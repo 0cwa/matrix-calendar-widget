@@ -15,6 +15,19 @@ const g6PassedTitleDiagnostic = {
   neighborPatchTitleOutcome: 'matched',
   neighborCanonicalTitleReadbackOutcome: 'not-needed',
 };
+const g6ObservedPostSaveList = {
+  neighborListRefreshOutcome: 'decoded',
+  neighborListRefreshHttpStatus: 200,
+  neighborListRefreshEventCountCapped: 1,
+  neighborListRefreshEventCountOverflow: false,
+  neighborListRefreshEditedTitleMatches: true,
+  neighborListUiObservation: 'observed',
+  neighborListLoadingVisible: false,
+  neighborListErrorVisible: false,
+  neighborListEditedRowVisible: false,
+  neighborEditedRowCountCapped: 0,
+  neighborEditedRowCountOverflow: false,
+};
 
 function projectionDiagnosticCounts(overrides = {}) {
   return {
@@ -2482,6 +2495,238 @@ test('keeps failed neighbor readback failed while formatting finite title diagno
   assert.match(summary, /neighbor_canonical_title_readback_outcome=matched/u);
   assert.match(summary, /neighbor_canonical_title_readback_http_status=200/u);
   assert.doesNotMatch(summary, /G6 neighbor|event title|SUMMARY:/u);
+});
+
+test('distinguishes a decoded edited event from an absent rendered row', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-unsupported-preservation',
+      status: 'failed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      neighborCanonicalTitleReadbackHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      neighborEditedRowVisible: false,
+      supportedNeighborEdited: false,
+      canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
+      neighborPatchTitleOutcome: 'matched',
+      neighborCanonicalTitleReadbackOutcome: 'matched',
+      ...g6ObservedPostSaveList,
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /neighbor_list_refresh_outcome=decoded/u);
+  assert.match(summary, /neighbor_list_refresh_http_status=200/u);
+  assert.match(summary, /neighbor_list_refresh_event_count_capped=1/u);
+  assert.match(summary, /neighbor_list_refresh_edited_title_matches=true/u);
+  assert.match(summary, /neighbor_list_ui_observation=observed/u);
+  assert.match(summary, /neighbor_list_loading_visible=false/u);
+  assert.match(summary, /neighbor_list_error_visible=false/u);
+  assert.match(summary, /neighbor_list_edited_row_visible=false/u);
+  assert.match(summary, /neighbor_edited_row_count_capped=0/u);
+  assert.match(summary, /neighbor_edited_row_visible=false/u);
+  assert.match(summary, /status=failed/u);
+  assert.doesNotMatch(summary, /Matrix Calendar|event title|SUMMARY:/u);
+});
+
+test('records an unobserved post-save response without treating it as an empty list', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'g6-unsupported-preservation',
+      status: 'failed',
+      projectionHttpStatus: 200,
+      canonicalBeforeHttpStatus: 200,
+      neighborPatchHttpStatus: 204,
+      canonicalAfterHttpStatus: 200,
+      count: 1,
+      unsupportedWarningVisible: true,
+      unsupportedRowOmitted: true,
+      supportedNeighborVisible: true,
+      canonicalSnapshotAvailable: true,
+      neighborEditedRowVisible: false,
+      supportedNeighborEdited: false,
+      canonicalUnsupportedObjectUnchanged: true,
+      neighborOwnershipUpdated: true,
+      neighborUpdateIdentityMatches: true,
+      neighborPatchTitleOutcome: 'matched',
+      neighborCanonicalTitleReadbackOutcome: 'matched',
+      neighborCanonicalTitleReadbackHttpStatus: 200,
+      neighborListRefreshOutcome: 'not-observed',
+      neighborListRefreshHttpStatus: null,
+      neighborListUiObservation: 'observed',
+      neighborListLoadingVisible: true,
+      neighborListErrorVisible: false,
+      neighborListEditedRowVisible: false,
+      neighborEditedRowCountCapped: 0,
+      neighborEditedRowCountOverflow: false,
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /neighbor_list_refresh_outcome=not-observed/u);
+  assert.match(summary, /neighbor_list_refresh_http_status=null/u);
+  assert.match(summary, /neighbor_list_loading_visible=true/u);
+  assert.doesNotMatch(summary, /neighbor_list_refresh_edited_title_matches=/u);
+});
+
+test('accepts fixed pending, failed, and overflow post-save response outcomes', () => {
+  const base = {
+    phase: 'g6-unsupported-preservation',
+    status: 'failed',
+    projectionHttpStatus: 200,
+    canonicalBeforeHttpStatus: 200,
+    neighborPatchHttpStatus: 204,
+    canonicalAfterHttpStatus: 200,
+    count: 1,
+    unsupportedWarningVisible: true,
+    unsupportedRowOmitted: true,
+    supportedNeighborVisible: true,
+    canonicalSnapshotAvailable: true,
+    neighborEditedRowVisible: false,
+    supportedNeighborEdited: false,
+    canonicalUnsupportedObjectUnchanged: true,
+    neighborOwnershipUpdated: false,
+    neighborUpdateIdentityMatches: false,
+    neighborPatchTitleOutcome: 'matched',
+    neighborCanonicalTitleReadbackOutcome: 'unavailable',
+    neighborListUiObservation: 'unavailable',
+  };
+  const records = [
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decoding',
+      neighborListRefreshHttpStatus: 200,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'unexpected-status',
+      neighborListRefreshHttpStatus: 503,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decode-error',
+      neighborListRefreshHttpStatus: 200,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'invalid-response',
+      neighborListRefreshHttpStatus: 200,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decoded-overflow',
+      neighborListRefreshHttpStatus: 200,
+      neighborListRefreshEventCountCapped: 100,
+      neighborListRefreshEventCountOverflow: true,
+    },
+  ];
+  for (const record of records) {
+    const summary = sanitizeElementAcceptance(
+      JSON.stringify(record),
+      sourceSha,
+    );
+    assert.ok(
+      summary.includes(
+        `neighbor_list_refresh_outcome=${record.neighborListRefreshOutcome}`,
+      ),
+    );
+    assert.match(summary, /neighbor_list_ui_observation=unavailable/u);
+    assert.doesNotMatch(summary, /Matrix Calendar|event title|SUMMARY:/u);
+    if (record.neighborListRefreshOutcome === 'decoded-overflow') {
+      assert.match(summary, /neighbor_list_refresh_event_count_capped=100/u);
+      assert.match(summary, /neighbor_list_refresh_event_count_overflow=true/u);
+    }
+  }
+});
+
+test('rejects malformed or contradictory post-save list observations', () => {
+  const base = {
+    phase: 'g6-unsupported-preservation',
+    status: 'failed',
+    projectionHttpStatus: 200,
+    canonicalBeforeHttpStatus: 200,
+    neighborPatchHttpStatus: 204,
+    canonicalAfterHttpStatus: 200,
+    count: 1,
+    unsupportedWarningVisible: true,
+    unsupportedRowOmitted: true,
+    supportedNeighborVisible: true,
+    canonicalSnapshotAvailable: true,
+    neighborEditedRowVisible: false,
+    supportedNeighborEdited: false,
+    canonicalUnsupportedObjectUnchanged: true,
+    neighborOwnershipUpdated: true,
+    neighborUpdateIdentityMatches: true,
+    neighborPatchTitleOutcome: 'matched',
+    neighborCanonicalTitleReadbackOutcome: 'unavailable',
+    neighborListUiObservation: 'observed',
+    neighborListLoadingVisible: false,
+    neighborListErrorVisible: false,
+    neighborListEditedRowVisible: false,
+    neighborEditedRowCountCapped: 0,
+    neighborEditedRowCountOverflow: false,
+  };
+  const invalidRecords = [
+    {
+      ...base,
+      neighborListRefreshOutcome: 'not-observed',
+      neighborListRefreshHttpStatus: 200,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decoded',
+      neighborListRefreshHttpStatus: 200,
+      neighborListRefreshEventCountOverflow: false,
+      neighborListRefreshEditedTitleMatches: true,
+      neighborListEditedRowVisible: true,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decoded-overflow',
+      neighborListRefreshHttpStatus: 200,
+      neighborListRefreshEventCountCapped: 100,
+      neighborListRefreshEventCountOverflow: true,
+      neighborListRefreshEditedTitleMatches: false,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decoded',
+      neighborListRefreshHttpStatus: 200,
+      neighborListRefreshEventCountCapped: 1,
+      neighborListRefreshEventCountOverflow: false,
+      neighborListRefreshEditedTitleMatches: true,
+      neighborEditedRowVisible: true,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'unexpected-status',
+      neighborListRefreshHttpStatus: 200,
+    },
+    {
+      ...base,
+      neighborListRefreshOutcome: 'decoded',
+      neighborListRefreshHttpStatus: 200,
+      neighborListRefreshEventCountCapped: 1,
+      neighborListRefreshEventCountOverflow: false,
+      neighborListRefreshEditedTitleMatches: 'private title',
+    },
+  ];
+
+  for (const record of invalidRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
 });
 
 test('does not require canonical readback after visible UI readback when another edit gate fails', () => {

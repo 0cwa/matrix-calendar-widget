@@ -122,6 +122,38 @@ type G6CanonicalTitleReadbackOutcome =
   | 'matched'
   | 'mismatched'
   | 'unavailable';
+type G6PostSaveListResponseOutcome =
+  | 'not-observed'
+  | 'decoding'
+  | 'unexpected-status'
+  | 'decode-error'
+  | 'invalid-response'
+  | 'decoded'
+  | 'decoded-overflow';
+
+type G6PostSaveListResponseObservation = {
+  outcome: G6PostSaveListResponseOutcome;
+  httpStatus: number | null;
+  eventCountCapped?: number;
+  eventCountOverflow?: boolean;
+  editedTitleMatches?: boolean;
+};
+
+type G6PostSaveListObserver = {
+  snapshot: () => G6PostSaveListResponseObservation;
+  dispose: () => void;
+};
+
+type G6PostSaveListUiObservation =
+  | {
+      state: 'observed';
+      loadingVisible: boolean;
+      errorVisible: boolean;
+      editedRowCountCapped: number;
+      editedRowCountOverflow: boolean;
+      editedRowVisible: boolean;
+    }
+  | { state: 'unavailable' };
 
 type G6StageRecord = {
   phase: G6Phase;
@@ -151,6 +183,16 @@ type G6StageRecord = {
   neighborPatchTitleOutcome?: G6NeighborTitleOutcome;
   neighborCanonicalTitleReadbackOutcome?: G6CanonicalTitleReadbackOutcome;
   neighborCanonicalTitleReadbackHttpStatus?: number;
+  neighborListRefreshOutcome?: G6PostSaveListResponseOutcome;
+  neighborListRefreshHttpStatus?: number | null;
+  neighborListRefreshEventCountCapped?: number;
+  neighborListRefreshEventCountOverflow?: boolean;
+  neighborListRefreshEditedTitleMatches?: boolean;
+  neighborListUiObservation?: 'observed' | 'unavailable';
+  neighborListLoadingVisible?: boolean;
+  neighborListErrorVisible?: boolean;
+  neighborEditedRowCountCapped?: number;
+  neighborEditedRowCountOverflow?: boolean;
   deleteButtonVisible?: boolean;
   deleteConfirmationVisible?: boolean;
   deletedRowAbsent?: boolean;
@@ -222,6 +264,7 @@ type G6CalDavResult = {
 };
 
 const ELEMENT_WEB_CONFIGURED_TAG = 'v1.12.30';
+const G6_POSTSAVE_EVENT_COUNT_CAP = 100;
 
 const REMINDER_START_LEAD_MS = 150_000;
 const REMINDER_ALARM_OFFSET_MS = 60_000;
@@ -1380,6 +1423,7 @@ test('Element Web preserves unsupported events and supports client interactions'
     | undefined;
   let calDavClient: G6CalDavClient | undefined;
   let journeyFailed = false;
+  let neighborPostSaveListObserver: G6PostSaveListObserver | undefined;
 
   const saveG6Stage = (observation: G6StageRecord) => {
     stageRecords.set(observation.phase, observation);
@@ -1620,6 +1664,11 @@ test('Element Web preserves unsupported events and supports client interactions'
     await neighborEditor
       .getByRole('textbox', { name: 'Title' })
       .fill(names.neighborEdited);
+    neighborPostSaveListObserver = observeNextG6PostSaveListResponse(
+      pageA,
+      fixture.teamRoomId,
+      names.neighborEdited,
+    );
     await neighborEditor
       .getByRole('button', { name: 'Save', exact: true })
       .click();
@@ -1652,6 +1701,14 @@ test('Element Web preserves unsupported events and supports client interactions'
     const neighborEditedRowVisible = await editedNeighborRow
       .isVisible()
       .catch(() => false);
+    const neighborListUiObservation = await observeG6PostSaveListUi(
+      frameA,
+      editedNeighborRow,
+    );
+    const neighborListRefreshObservation =
+      neighborPostSaveListObserver.snapshot();
+    neighborPostSaveListObserver.dispose();
+    neighborPostSaveListObserver = undefined;
     const supportedNeighborEdited =
       neighborPatchStatus !== undefined &&
       neighborPatchStatus >= 200 &&
@@ -1734,6 +1791,36 @@ test('Element Web preserves unsupported events and supports client interactions'
       neighborUpdateIdentityMatches: neighborUpdate.identityMatches,
       neighborPatchTitleOutcome,
       neighborCanonicalTitleReadbackOutcome,
+      neighborListRefreshOutcome: neighborListRefreshObservation.outcome,
+      neighborListRefreshHttpStatus: neighborListRefreshObservation.httpStatus,
+      ...(neighborListRefreshObservation.eventCountCapped === undefined
+        ? {}
+        : {
+            neighborListRefreshEventCountCapped:
+              neighborListRefreshObservation.eventCountCapped,
+            neighborListRefreshEventCountOverflow:
+              neighborListRefreshObservation.eventCountOverflow,
+          }),
+      ...(neighborListRefreshObservation.editedTitleMatches === undefined
+        ? {}
+        : {
+            neighborListRefreshEditedTitleMatches:
+              neighborListRefreshObservation.editedTitleMatches,
+          }),
+      neighborListUiObservation: neighborListUiObservation.state,
+      ...(neighborListUiObservation.state === 'observed'
+        ? {
+            neighborListLoadingVisible:
+              neighborListUiObservation.loadingVisible,
+            neighborListErrorVisible: neighborListUiObservation.errorVisible,
+            neighborEditedRowCountCapped:
+              neighborListUiObservation.editedRowCountCapped,
+            neighborEditedRowCountOverflow:
+              neighborListUiObservation.editedRowCountOverflow,
+            neighborListEditedRowVisible:
+              neighborListUiObservation.editedRowVisible,
+          }
+        : {}),
       ...(neighborCanonicalTitleReadbackHttpStatus === undefined
         ? {}
         : { neighborCanonicalTitleReadbackHttpStatus }),
@@ -2060,6 +2147,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       saveG6Stage({ phase: activeG6Phase, status: 'failed' });
     }
   } finally {
+    neighborPostSaveListObserver?.dispose();
     await Promise.all(
       contexts.map((context) => context.close().catch(() => {})),
     );
@@ -2373,27 +2461,138 @@ function waitForG6EventsResponse(
   page: Page,
   roomId: string,
 ): Promise<Response> {
-  const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
-  const widgetOrigin = new URL(fixture.widgetUrl).origin;
   return page.waitForResponse(
-    (response) => {
-      try {
-        const url = new URL(response.url());
-        const request = response.request();
-        return (
-          url.origin === gatewayOrigin &&
-          url.pathname === '/v1/calendar/events' &&
-          url.searchParams.get('roomId') === roomId &&
-          url.searchParams.get('target') === 'room' &&
-          request.method() === 'GET' &&
-          new URL(request.frame().url()).origin === widgetOrigin
-        );
-      } catch {
-        return false;
-      }
-    },
+    (response) => matchesG6EventsRequest(response.request(), roomId),
     { timeout: 30_000 },
   );
+}
+
+function matchesG6EventsRequest(request: Request, roomId: string): boolean {
+  try {
+    const url = new URL(request.url());
+    return (
+      url.origin === new URL(fixture.gatewayUrl).origin &&
+      url.pathname === '/v1/calendar/events' &&
+      url.searchParams.get('roomId') === roomId &&
+      url.searchParams.get('target') === 'room' &&
+      request.method() === 'GET' &&
+      new URL(request.frame().url()).origin ===
+        new URL(fixture.widgetUrl).origin
+    );
+  } catch {
+    return false;
+  }
+}
+
+function observeNextG6PostSaveListResponse(
+  page: Page,
+  roomId: string,
+  expectedTitle: string,
+): G6PostSaveListObserver {
+  const observedRequests = new WeakSet<Request>();
+  let observation: G6PostSaveListResponseObservation = {
+    outcome: 'not-observed',
+    httpStatus: null,
+  };
+  let responseObserved = false;
+
+  const onRequest = (request: Request) => {
+    if (matchesG6EventsRequest(request, roomId)) observedRequests.add(request);
+  };
+  const onResponse = (response: Response) => {
+    const request = response.request();
+    if (responseObserved || !observedRequests.has(request)) return;
+    responseObserved = true;
+    const httpStatus = response.status();
+    observation = {
+      outcome: httpStatus === 200 ? 'decoding' : 'unexpected-status',
+      httpStatus,
+    };
+    if (httpStatus !== 200) return;
+
+    void response
+      .json()
+      .then((body: unknown) => {
+        if (!isRecord(body) || !Array.isArray(body.events)) {
+          observation = { outcome: 'invalid-response', httpStatus };
+          return;
+        }
+        const eventCount = body.events.length;
+        const eventCountCapped = Math.min(
+          eventCount,
+          G6_POSTSAVE_EVENT_COUNT_CAP,
+        );
+        const eventCountOverflow = eventCount > G6_POSTSAVE_EVENT_COUNT_CAP;
+        if (eventCountOverflow) {
+          observation = {
+            outcome: 'decoded-overflow',
+            httpStatus,
+            eventCountCapped,
+            eventCountOverflow: true,
+          };
+          return;
+        }
+        if (
+          body.events.some(
+            (resource: unknown) =>
+              !isRecord(resource) ||
+              !isRecord(resource.event) ||
+              typeof resource.event.title !== 'string',
+          )
+        ) {
+          observation = { outcome: 'invalid-response', httpStatus };
+          return;
+        }
+        observation = {
+          outcome: 'decoded',
+          httpStatus,
+          eventCountCapped,
+          eventCountOverflow: false,
+          editedTitleMatches: body.events.some(
+            (resource: { event: { title: string } }) =>
+              resource.event.title === expectedTitle,
+          ),
+        };
+      })
+      .catch(() => {
+        observation = { outcome: 'decode-error', httpStatus };
+      });
+  };
+
+  page.on('request', onRequest);
+  page.on('response', onResponse);
+  return {
+    snapshot: () => ({ ...observation }),
+    dispose: () => {
+      page.off('request', onRequest);
+      page.off('response', onResponse);
+    },
+  };
+}
+
+async function observeG6PostSaveListUi(
+  frame: FrameLocator,
+  editedRow: Locator,
+): Promise<G6PostSaveListUiObservation> {
+  try {
+    const [loadingVisible, errorVisible, rowCount, editedRowVisible] =
+      await Promise.all([
+        frame.getByRole('progressbar').isVisible(),
+        frame.locator('.MuiAlert-standardError').isVisible(),
+        editedRow.count(),
+        editedRow.isVisible(),
+      ]);
+    return {
+      state: 'observed',
+      loadingVisible,
+      errorVisible,
+      editedRowCountCapped: Math.min(rowCount, 2),
+      editedRowCountOverflow: rowCount > 2,
+      editedRowVisible,
+    };
+  } catch {
+    return { state: 'unavailable' };
+  }
 }
 
 function readReminderFlow(): ReminderFlow {

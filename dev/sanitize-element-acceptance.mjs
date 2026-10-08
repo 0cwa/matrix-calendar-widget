@@ -249,6 +249,9 @@ const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
       'neighborPatchHttpStatus',
       'canonicalAfterHttpStatus',
       'neighborCanonicalTitleReadbackHttpStatus',
+      'neighborListRefreshHttpStatus',
+      'neighborListRefreshEventCountCapped',
+      'neighborEditedRowCountCapped',
       'count',
     ],
   ],
@@ -304,9 +307,50 @@ const G6_ENUM_FIELDS_BY_PHASE = new Map([
     ['neighborPatchTitleOutcome', 'neighborCanonicalTitleReadbackOutcome'],
   ],
 ]);
+const G6_POSTSAVE_ENUM_FIELDS = new Set([
+  'neighborListRefreshOutcome',
+  'neighborListUiObservation',
+]);
+const G6_POSTSAVE_BOOLEAN_FIELDS = new Set([
+  'neighborListRefreshEventCountOverflow',
+  'neighborListRefreshEditedTitleMatches',
+  'neighborListLoadingVisible',
+  'neighborListErrorVisible',
+  'neighborListEditedRowVisible',
+  'neighborEditedRowCountOverflow',
+]);
+const G6_POSTSAVE_DIAGNOSTIC_FIELDS = new Set([
+  ...G6_POSTSAVE_ENUM_FIELDS,
+  ...G6_POSTSAVE_BOOLEAN_FIELDS,
+  'neighborListRefreshHttpStatus',
+  'neighborListRefreshEventCountCapped',
+  'neighborEditedRowCountCapped',
+]);
+const G6_POSTSAVE_ENUM_VALUES = new Map([
+  [
+    'neighborListRefreshOutcome',
+    new Set([
+      'not-observed',
+      'decoding',
+      'unexpected-status',
+      'decode-error',
+      'invalid-response',
+      'decoded',
+      'decoded-overflow',
+    ]),
+  ],
+  ['neighborListUiObservation', new Set(['observed', 'unavailable'])],
+]);
+const G6_POSTSAVE_FIELDS_BY_PHASE = new Map([
+  ['g6-unsupported-preservation', G6_POSTSAVE_DIAGNOSTIC_FIELDS],
+]);
 const G6_EXTRA_ENUM_FIELDS = new Set(
   [...G6_ENUM_FIELDS_BY_PHASE.values()].flat(),
 );
+for (const key of G6_POSTSAVE_ENUM_FIELDS) {
+  G6_EXTRA_ENUM_FIELDS.add(key);
+}
+const G6_EXTRA_BOOLEAN_FIELDS = new Set([...G6_POSTSAVE_BOOLEAN_FIELDS]);
 const G6_ENUM_VALUES = new Map([
   [
     'neighborPatchTitleOutcome',
@@ -854,6 +898,7 @@ const ALLOWED_KEYS = new Set([
   'neighborOwnershipUpdated',
   'neighborUpdateIdentityMatches',
   ...G6_EXTRA_ENUM_FIELDS,
+  ...G6_POSTSAVE_DIAGNOSTIC_FIELDS,
   'deleteButtonVisible',
   'deleteConfirmationVisible',
   'deletedRowAbsent',
@@ -884,12 +929,18 @@ function validG6Observation(record) {
   const booleanFields = PHASE_BOOLEAN_FIELDS.get(record.phase) ?? [];
   const numericFields = G6_NUMERIC_FIELDS_BY_PHASE.get(record.phase) ?? [];
   const enumFields = G6_ENUM_FIELDS_BY_PHASE.get(record.phase) ?? [];
+  const postSaveFields =
+    G6_POSTSAVE_FIELDS_BY_PHASE.get(record.phase) ?? new Set();
+  const postSaveBooleanFields = [...G6_POSTSAVE_BOOLEAN_FIELDS].filter((key) =>
+    postSaveFields.has(key),
+  );
   const allowedFields = new Set([
     'phase',
     'status',
     ...booleanFields,
     ...numericFields,
     ...enumFields,
+    ...postSaveFields,
     ...(record.phase === 'g6-fixture-ready' ? ['seedCreateObservations'] : []),
   ]);
   if (
@@ -897,12 +948,24 @@ function validG6Observation(record) {
     booleanFields.some(
       (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
     ) ||
+    postSaveBooleanFields.some(
+      (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
+    ) ||
     numericFields.some((key) => {
       if (!Object.hasOwn(record, key)) return false;
       const value = record[key];
+      if (key === 'neighborListRefreshHttpStatus' && value === null) {
+        return false;
+      }
       if (!Number.isInteger(value)) return true;
       if (key === 'httpStatus' || key.endsWith('HttpStatus')) {
         return value < 100 || value > 599;
+      }
+      if (key === 'neighborListRefreshEventCountCapped') {
+        return value < 0 || value > 100;
+      }
+      if (key === 'neighborEditedRowCountCapped') {
+        return value < 0 || value > 2;
       }
       if (key.endsWith('Width') || key.endsWith('Height')) {
         return value < 1 || value > 10_000;
@@ -919,9 +982,103 @@ function validG6Observation(record) {
       (key) =>
         Object.hasOwn(record, key) &&
         !G6_ENUM_VALUES.get(key)?.has(record[key]),
+    ) ||
+    [...G6_POSTSAVE_ENUM_VALUES].some(
+      ([key, values]) => Object.hasOwn(record, key) && !values.has(record[key]),
     )
   ) {
     return false;
+  }
+
+  const hasPostSaveDiagnostics = [...postSaveFields].some((key) =>
+    Object.hasOwn(record, key),
+  );
+  if (hasPostSaveDiagnostics) {
+    const responseOutcome = record.neighborListRefreshOutcome;
+    const responseStatus = record.neighborListRefreshHttpStatus;
+    const hasResultCount = Object.hasOwn(
+      record,
+      'neighborListRefreshEventCountCapped',
+    );
+    const hasResultOverflow = Object.hasOwn(
+      record,
+      'neighborListRefreshEventCountOverflow',
+    );
+    const hasTitleMatch = Object.hasOwn(
+      record,
+      'neighborListRefreshEditedTitleMatches',
+    );
+    const hasResultSummary =
+      hasResultCount || hasResultOverflow || hasTitleMatch;
+    const responseShapeIsValid = (() => {
+      switch (responseOutcome) {
+        case 'not-observed':
+          return responseStatus === null && !hasResultSummary;
+        case 'decoding':
+        case 'decode-error':
+        case 'invalid-response':
+          return responseStatus === 200 && !hasResultSummary;
+        case 'unexpected-status':
+          return (
+            Number.isInteger(responseStatus) &&
+            responseStatus !== 200 &&
+            !hasResultSummary
+          );
+        case 'decoded':
+          return (
+            responseStatus === 200 &&
+            Number.isInteger(record.neighborListRefreshEventCountCapped) &&
+            record.neighborListRefreshEventCountCapped >= 0 &&
+            record.neighborListRefreshEventCountCapped <= 100 &&
+            record.neighborListRefreshEventCountOverflow === false &&
+            typeof record.neighborListRefreshEditedTitleMatches === 'boolean'
+          );
+        case 'decoded-overflow':
+          return (
+            responseStatus === 200 &&
+            record.neighborListRefreshEventCountCapped === 100 &&
+            record.neighborListRefreshEventCountOverflow === true &&
+            !hasTitleMatch
+          );
+        default:
+          return false;
+      }
+    })();
+    const uiObservation = record.neighborListUiObservation;
+    const uiFields = [
+      'neighborListLoadingVisible',
+      'neighborListErrorVisible',
+      'neighborListEditedRowVisible',
+      'neighborEditedRowCountCapped',
+      'neighborEditedRowCountOverflow',
+    ];
+    const hasEveryUiField = uiFields.every((key) => Object.hasOwn(record, key));
+    const hasAnyUiField = uiFields.some((key) => Object.hasOwn(record, key));
+    const uiShapeIsValid =
+      (uiObservation === 'observed' &&
+        hasEveryUiField &&
+        record.neighborEditedRowCountCapped >= 0 &&
+        record.neighborEditedRowCountCapped <= 2 &&
+        (record.neighborEditedRowCountOverflow === false ||
+          record.neighborEditedRowCountCapped === 2) &&
+        (record.neighborListEditedRowVisible !== true ||
+          record.neighborEditedRowCountCapped > 0 ||
+          record.neighborEditedRowCountOverflow) &&
+        (record.neighborEditedRowCountCapped !== 0 ||
+          record.neighborEditedRowCountOverflow ||
+          record.neighborListEditedRowVisible === false)) ||
+      (uiObservation === 'unavailable' &&
+        Object.hasOwn(record, 'neighborEditedRowVisible') &&
+        !hasAnyUiField);
+    if (
+      !Object.hasOwn(record, 'neighborListRefreshOutcome') ||
+      !Object.hasOwn(record, 'neighborListRefreshHttpStatus') ||
+      !Object.hasOwn(record, 'neighborListUiObservation') ||
+      !responseShapeIsValid ||
+      !uiShapeIsValid
+    ) {
+      return false;
+    }
   }
 
   if (enumFields.length > 0) {
@@ -1805,6 +1962,8 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       ([...G6_EXTRA_NUMERIC_FIELDS].some((key) => Object.hasOwn(record, key)) &&
         !G6_PHASES.has(record.phase)) ||
       ([...G6_EXTRA_ENUM_FIELDS].some((key) => Object.hasOwn(record, key)) &&
+        !G6_PHASES.has(record.phase)) ||
+      ([...G6_EXTRA_BOOLEAN_FIELDS].some((key) => Object.hasOwn(record, key)) &&
         !G6_PHASES.has(record.phase))
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
@@ -2853,6 +3012,22 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       fields.push(`${outputKey}=${record[key]}`);
     }
     for (const key of G6_ENUM_FIELDS_BY_PHASE.get(phase) ?? []) {
+      if (!Object.hasOwn(record, key)) continue;
+      const outputKey = key.replace(
+        /[A-Z]/gu,
+        (letter) => `_${letter.toLowerCase()}`,
+      );
+      fields.push(`${outputKey}=${record[key]}`);
+    }
+    for (const key of G6_POSTSAVE_ENUM_FIELDS) {
+      if (!Object.hasOwn(record, key)) continue;
+      const outputKey = key.replace(
+        /[A-Z]/gu,
+        (letter) => `_${letter.toLowerCase()}`,
+      );
+      fields.push(`${outputKey}=${record[key]}`);
+    }
+    for (const key of G6_POSTSAVE_BOOLEAN_FIELDS) {
       if (!Object.hasOwn(record, key)) continue;
       const outputKey = key.replace(
         /[A-Z]/gu,
