@@ -1329,6 +1329,23 @@ test('cleanup census stderr buckets are closed and correlate timeout 125 signatu
   cappedCensus.stderrPrefixOverflow = true;
   assert.equal(validDesktopSummary(cappedPrefixCounts), true);
 
+  const impossiblePrefixOverflow = structuredClone(cappedPrefixCounts);
+  impossiblePrefixOverflow.cleanupDiagnostics.stopDiagnostics.initial.census.stderrPrefixCounts.other = 99;
+  assert.equal(validDesktopSummary(impossiblePrefixOverflow), false);
+
+  const mislabeledForkFailure = structuredClone(summary);
+  mislabeledForkFailure.cleanupDiagnostics.stopDiagnostics.initial.census.stderrOutcome =
+    'other';
+  assert.equal(validDesktopSummary(mislabeledForkFailure), false);
+
+  const mislabeledWaitFailure = structuredClone(summary);
+  const waitFailureCensus =
+    mislabeledWaitFailure.cleanupDiagnostics.stopDiagnostics.initial.census;
+  waitFailureCensus.stderrOutcome = 'other';
+  waitFailureCensus.stderrPrefixCounts.timeoutForkFailure = 0;
+  waitFailureCensus.stderrPrefixCounts.timeoutWaitFailure = 1;
+  assert.equal(validDesktopSummary(mislabeledWaitFailure), false);
+
   const wrongEmitter = structuredClone(summary);
   wrongEmitter.cleanupDiagnostics.stopDiagnostics.initial.census.stderrEmitter =
     'sudo';

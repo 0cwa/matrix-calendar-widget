@@ -1345,6 +1345,8 @@ function validateUidCensusStderrPrefixSummary(value) {
       (lineCount !== 1 || value.stderrPrefixOverflow)) ||
     (value.stderrLineShape === 'multiple' &&
       (lineCount < 2 ||
+        (value.stderrPrefixOverflow &&
+          lineCount < MAX_UID_CENSUS_STDERR_PREFIX_COUNT) ||
         (!value.stderrPrefixOverflow &&
           lineCount > MAX_UID_CENSUS_STDERR_PREFIX_COUNT)))
   ) {
@@ -1369,6 +1371,23 @@ function validateUidCensusStderrPrefixSummary(value) {
           name === 'timeoutWaitFailure' || value.stderrPrefixCounts[name] === 0,
       )
     );
+  }
+  if (
+    value.stderrOutcome === 'other' &&
+    value.outcome === 'nonzero-exit' &&
+    value.exitStatus === 125 &&
+    value.stderrLineShape === 'single' &&
+    UID_CENSUS_STDERR_PREFIX_CATEGORIES.some(
+      (name) =>
+        (name === 'timeoutForkFailure' || name === 'timeoutWaitFailure') &&
+        value.stderrPrefixCounts[name] === 1 &&
+        UID_CENSUS_STDERR_PREFIX_CATEGORIES.every(
+          (otherName) =>
+            otherName === name || value.stderrPrefixCounts[otherName] === 0,
+        ),
+    )
+  ) {
+    return false;
   }
   return true;
 }
