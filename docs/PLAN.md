@@ -601,6 +601,15 @@ access and event writes stay disabled by default.
         Preserve previous failed reports and require all functional, timing,
         authorization, CRUD, Desktop, reminder, restore, and repository checks
         before any exact candidate can pass its separate gates.
+- [x] Remove the temporary hidden widget query-state and room-calendar-list
+      diagnostics from the candidate product path. Keep the E2E event-list and
+      rendered-row observers, functional assertions, and fail-closed acceptance
+      gates. The widget application source matches the `main` baseline; its
+      only widget-source difference is the retained recurring-editor test
+      split.
+- [ ] Re-run ordinary Element Web and Desktop acceptance against the exact
+      cleaned candidate, including the native CORS normal path, before any
+      candidate publication or separate rollout decision.
 - [ ] Complete operator evidence and independent review of the exact
       candidate before a separate rollout decision.
 
