@@ -302,7 +302,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 8);
+    assert.equal(summary.schemaVersion, 9);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -358,6 +358,114 @@ test('records one fixed failure point for a failed Desktop room read', () => {
   });
 });
 
+test('records only phase-bound Desktop create steps and closed POST facts', () => {
+  const diagnostic = {
+    createPostObserved: true,
+    createPostRequestFailed: false,
+    createPostStatus: 503,
+  };
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopJourneyOutcome({
+      filePath,
+      runnerTemp,
+      phase: 'desktop-event-create',
+      status: 'failed',
+      failurePoint: 'event-create-post-status',
+      desktopEventCreateDiagnostic: diagnostic,
+    });
+
+    const raw = readFileSync(filePath, 'utf8');
+    assert.equal(
+      raw,
+      '{"phase":"desktop-event-create","status":"failed","failurePoint":"event-create-post-status","desktopEventCreateDiagnostic":{"createPostObserved":true,"createPostRequestFailed":false,"createPostStatus":503}}\n',
+    );
+    assert.doesNotMatch(
+      raw,
+      /private room|private title|response body|request URL/u,
+    );
+    const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
+    assert.equal(summary.schemaVersion, 9);
+    assert.deepEqual(summary.failurePoint, {
+      phase: 'desktop-event-create',
+      point: 'event-create-post-status',
+    });
+    assert.deepEqual(summary.desktopEventCreateDiagnostic, diagnostic);
+    assert.equal(summary.cases['desktop-event-create'], 'failed');
+  });
+
+  const summarize = (row) =>
+    summarizeDesktopJourneyEvidence(`${JSON.stringify(row)}\n`);
+  assert.deepEqual(
+    summarize({
+      phase: 'desktop-event-create',
+      status: 'failed',
+      failurePoint: 'event-create-post-await',
+      desktopEventCreateDiagnostic: {
+        createPostObserved: true,
+        createPostRequestFailed: true,
+        createPostStatus: null,
+      },
+    }).desktopEventCreateDiagnostic,
+    {
+      createPostObserved: true,
+      createPostRequestFailed: true,
+      createPostStatus: null,
+    },
+  );
+  for (const row of [
+    {
+      phase: 'desktop-event-create',
+      status: 'failed',
+      failurePoint: 'room-id',
+      desktopEventCreateDiagnostic: diagnostic,
+    },
+    {
+      phase: 'desktop-room-widget-read',
+      status: 'failed',
+      failurePoint: 'event-create-post-status',
+      desktopEventCreateDiagnostic: diagnostic,
+    },
+    {
+      phase: 'desktop-event-create',
+      status: 'failed',
+      failurePoint: 'event-create-post-status',
+    },
+    {
+      phase: 'desktop-event-create',
+      status: 'failed',
+      failurePoint: 'event-create-post-status',
+      desktopEventCreateDiagnostic: {
+        ...diagnostic,
+        responseBody: 'private event response',
+      },
+    },
+    {
+      phase: 'desktop-event-create',
+      status: 'failed',
+      failurePoint: 'event-create-post-status',
+      desktopEventCreateDiagnostic: {
+        createPostObserved: false,
+        createPostRequestFailed: false,
+        createPostStatus: 503,
+      },
+    },
+    {
+      phase: 'desktop-event-create',
+      status: 'failed',
+      failurePoint: 'event-create-post-status',
+      desktopEventCreateDiagnostic: {
+        createPostObserved: true,
+        createPostRequestFailed: true,
+        createPostStatus: 503,
+      },
+    },
+  ]) {
+    assert.throws(() => summarize(row), /Invalid Desktop journey input/u);
+  }
+});
+
 test('records room-navigation evidence only at its closed failure boundary', () => {
   const diagnostic = {
     currentOption: { countCapped: 0, visible: null, enabled: null },
@@ -388,7 +496,7 @@ test('records room-navigation evidence only at its closed failure boundary', () 
       roomNavigationDiagnostic: diagnostic,
     });
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 8);
+    assert.equal(summary.schemaVersion, 9);
     assert.deepEqual(summary.roomNavigationDiagnostic, diagnostic);
     assert.equal(summary.roomsReadyDiagnostic, null);
     assert.doesNotMatch(
@@ -639,6 +747,14 @@ test('accepts only the closed failure-point enum with its failed-phase match', (
       'gateway-read-status',
       'create-control',
       'origin-isolation',
+      'event-create-control-click',
+      'event-create-dialog-visible',
+      'event-create-calendar-select',
+      'event-create-title-fill',
+      'event-create-submit-click',
+      'event-create-post-await',
+      'event-create-post-status',
+      'event-create-exact-row-visible',
       'web-b-authentication',
       'web-b-room-navigation',
       'web-b-widget-open',

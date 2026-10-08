@@ -45,6 +45,8 @@ import {
   readOnlyWidgetIsReady,
   readSyntheticDesktopCredentials,
   unavailableWebBEditRowRenderDiagnostic,
+  type DesktopEventCreateFailureDiagnostic,
+  type DesktopEventCreateFailurePoint,
   type DesktopGatewayReadFailureDiagnostic,
   type DesktopJourneyFailurePoint,
   type DesktopJourneyPhase,
@@ -98,6 +100,11 @@ type DesktopWidgetPromptObservation = Pick<
   | 'identityApprovalAttempted'
   | 'identityApprovalCompleted'
 >;
+
+type DesktopEventCreatePostObserver = {
+  snapshot: () => DesktopEventCreateFailureDiagnostic;
+  stop: () => void;
+};
 
 type DesktopGatewayReadRequestObserver = {
   snapshot: () => Pick<
@@ -293,6 +300,9 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let webBSelectedTitle: string | undefined;
   let webBEditedTitle: string | undefined;
   let desktopGatewayReadObserver: DesktopGatewayReadRequestObserver | undefined;
+  let desktopEventCreatePostObserver:
+    | DesktopEventCreatePostObserver
+    | undefined;
   let webBEventListReadObserver: WebBEventListReadObserver | undefined;
   const desktopWidgetPromptObservation =
     unavailableDesktopWidgetPromptObservation();
@@ -453,20 +463,39 @@ test('Element Desktop room event journey', async ({ browser }) => {
 
     currentFailurePoint = undefined;
     enterPhase('desktop-event-create');
+    currentFailurePoint = 'event-create-control-click';
     const initialTitle = `Desktop acceptance ${randomUUID()}`;
     const editedTitle = `${initialTitle} edited`;
     webBSelectedTitle = initialTitle;
     webBEditedTitle = editedTitle;
+    desktopEventCreatePostObserver = observeDesktopEventCreatePost(
+      desktopPage,
+      fixture,
+    );
     const createResponse = waitForGatewayResponse(desktopPage, fixture, 'POST');
-    await createEvent(desktopFrame, initialTitle, fixture.calendarId);
+    void createResponse.catch(() => undefined);
+    await createEvent(
+      desktopFrame,
+      initialTitle,
+      fixture.calendarId,
+      (failurePoint) => {
+        currentFailurePoint = failurePoint;
+      },
+    );
+    currentFailurePoint = 'event-create-post-await';
     const created = await createResponse;
+    currentFailurePoint = 'event-create-post-status';
     if (created.status() < 200 || created.status() >= 300) {
       throw new Error('Desktop event creation failed');
     }
+    currentFailurePoint = 'event-create-exact-row-visible';
     await desktopFrame
       .getByRole('listitem', { name: initialTitle, exact: true })
       .waitFor({ state: 'visible' });
     recordPhase(evidence, recorded, 'desktop-event-create');
+    desktopEventCreatePostObserver.stop();
+    desktopEventCreatePostObserver = undefined;
+    currentFailurePoint = undefined;
 
     enterPhase('web-member-b-read');
     currentFailurePoint = 'web-b-authentication';
@@ -738,8 +767,18 @@ test('Element Desktop room event journey', async ({ browser }) => {
             : {}),
         };
       }
+      let desktopEventCreateDiagnostic:
+        | DesktopEventCreateFailureDiagnostic
+        | undefined;
+      if (currentPhase === 'desktop-event-create') {
+        desktopEventCreateDiagnostic =
+          desktopEventCreatePostObserver?.snapshot() ??
+          unavailableDesktopEventCreateFailureDiagnostic();
+      }
       webBEventListReadObserver?.stop();
       webBEventListReadObserver = undefined;
+      desktopEventCreatePostObserver?.stop();
+      desktopEventCreatePostObserver = undefined;
       safeRecordPhase(
         evidence,
         recorded,
@@ -749,10 +788,12 @@ test('Element Desktop room event journey', async ({ browser }) => {
         gatewayReadDiagnostic,
         webBEditSaveDiagnostic,
         roomNavigationDiagnostic,
+        desktopEventCreateDiagnostic,
       );
     }
   } finally {
     webBEventListReadObserver?.stop();
+    desktopEventCreatePostObserver?.stop();
     await Promise.all(
       contexts.map(async (context) => {
         await context.close().catch(() => undefined);
@@ -1220,19 +1261,109 @@ async function createEvent(
   frame: FrameLocator,
   title: string,
   calendarId: string,
+  setFailurePoint: (failurePoint: DesktopEventCreateFailurePoint) => void,
 ) {
+  setFailurePoint('event-create-control-click');
   await frame
     .getByRole('button', { name: 'Create event', exact: true })
     .click();
   const dialog = frame.getByRole('dialog').last();
+  setFailurePoint('event-create-dialog-visible');
   await dialog.waitFor({ state: 'visible' });
+  setFailurePoint('event-create-calendar-select');
   await dialog.getByRole('combobox', { name: 'Calendar' }).selectOption({
     value: `matrix-calendar-target://room/${encodeURIComponent(calendarId)}`,
   });
+  setFailurePoint('event-create-title-fill');
   await dialog.getByRole('textbox', { name: 'Title', exact: true }).fill(title);
+  setFailurePoint('event-create-submit-click');
   await dialog
     .getByRole('button', { name: 'Create event', exact: true })
     .click();
+}
+
+function unavailableDesktopEventCreateFailureDiagnostic(): DesktopEventCreateFailureDiagnostic {
+  return {
+    createPostObserved: null,
+    createPostRequestFailed: null,
+    createPostStatus: null,
+  };
+}
+
+function observeDesktopEventCreatePost(
+  page: Page,
+  fixture: Fixture,
+): DesktopEventCreatePostObserver {
+  let installed = false;
+  let firstMatchingRequest: Request | undefined;
+  let requestFailed = false;
+  let status: number | null = null;
+  let stopped = false;
+
+  const onRequest = (request: Request) => {
+    if (
+      firstMatchingRequest === undefined &&
+      matchesGatewayRequest(request, fixture, 'POST')
+    ) {
+      firstMatchingRequest = request;
+    }
+  };
+  const onRequestFailed = (request: Request) => {
+    if (request === firstMatchingRequest && status === null) {
+      requestFailed = true;
+    }
+  };
+  const onResponse = (response: Response) => {
+    if (response.request() !== firstMatchingRequest || status !== null) return;
+    try {
+      const observedStatus = response.status();
+      if (
+        Number.isInteger(observedStatus) &&
+        observedStatus >= 100 &&
+        observedStatus <= 599
+      ) {
+        status = observedStatus;
+      }
+    } catch {
+      // Preserve only the fixed request/status observations.
+    }
+  };
+  try {
+    page.on('request', onRequest);
+    page.on('requestfailed', onRequestFailed);
+    page.on('response', onResponse);
+    installed = true;
+  } catch {
+    try {
+      page.off('request', onRequest);
+      page.off('requestfailed', onRequestFailed);
+      page.off('response', onResponse);
+    } catch {
+      // Listener cleanup is best effort if the page is already closed.
+    }
+  }
+
+  return {
+    snapshot: () =>
+      installed
+        ? {
+            createPostObserved: firstMatchingRequest !== undefined,
+            createPostRequestFailed: requestFailed,
+            createPostStatus: status,
+          }
+        : unavailableDesktopEventCreateFailureDiagnostic(),
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      try {
+        page.off('request', onRequest);
+        page.off('requestfailed', onRequestFailed);
+        page.off('response', onResponse);
+      } catch {
+        // Listener cleanup is best effort if the page is already closed.
+      }
+    },
+  };
 }
 
 async function tabToEventButton(page: Page, eventButton: Locator) {
@@ -1810,6 +1941,7 @@ function safeRecordPhase(
   gatewayReadDiagnostic?: DesktopGatewayReadFailureDiagnostic,
   webBEditSaveDiagnostic?: WebBEditSaveFailureDiagnostic,
   roomNavigationDiagnostic?: DesktopRoomNavigationDiagnostic,
+  desktopEventCreateDiagnostic?: DesktopEventCreateFailureDiagnostic,
 ) {
   try {
     appendDesktopJourneyOutcome({
@@ -1824,6 +1956,9 @@ function safeRecordPhase(
       ...(roomNavigationDiagnostic === undefined
         ? {}
         : { roomNavigationDiagnostic }),
+      ...(desktopEventCreateDiagnostic === undefined
+        ? {}
+        : { desktopEventCreateDiagnostic }),
     });
     recorded.add(phase);
     return true;

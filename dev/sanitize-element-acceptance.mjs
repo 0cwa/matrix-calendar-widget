@@ -835,6 +835,14 @@ const MATRIX_SYNC_STATES = new Set([
   'CATCHUP',
   'UNKNOWN',
 ]);
+const ROOM_READINESS_TIMELINE_OUTCOMES = new Set([
+  'cancelled',
+  'budget-exhausted',
+  'unavailable',
+  'not-started',
+]);
+const ROOM_READINESS_SAMPLE_MAX_COUNT = 15;
+const ROOM_READINESS_SAMPLE_MAX_DURATION_MS = 15_000;
 const VERSION_FIELDS = new Set([
   'elementWebConfiguredTag',
   'synapseConfiguredTag',
@@ -1063,6 +1071,7 @@ const ALLOWED_KEYS = new Set([
   'matrixClientPresent',
   'matrixUserMatches',
   'matrixSyncState',
+  'roomReadinessTimeline',
   'matrixRoomKnown',
   'matrixRoomJoined',
   'roomNavigationCompleted',
@@ -1168,6 +1177,85 @@ const ALLOWED_KEYS = new Set([
   'allOwnedResourcesRemoved',
   ...G6_EXTRA_NUMERIC_FIELDS,
 ]);
+
+function validRoomReadinessTimeline(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'outcome,overflow,sampleCountCapped,samples' ||
+    !ROOM_READINESS_TIMELINE_OUTCOMES.has(value.outcome) ||
+    typeof value.overflow !== 'boolean' ||
+    !Array.isArray(value.samples) ||
+    value.samples.length > ROOM_READINESS_SAMPLE_MAX_COUNT ||
+    value.sampleCountCapped !== value.samples.length ||
+    (value.outcome === 'budget-exhausted') !== value.overflow ||
+    (['not-started', 'unavailable'].includes(value.outcome) &&
+      value.sampleCountCapped !== 0)
+  ) {
+    return false;
+  }
+
+  let previousElapsedMs = -1;
+  for (const sample of value.samples) {
+    if (
+      sample === null ||
+      typeof sample !== 'object' ||
+      Array.isArray(sample) ||
+      Object.keys(sample).sort().join(',') !==
+        'available,currentRoomMatches,elapsedMs,matrixSyncState,roomHeaderPresent,roomHeadingPresent,roomViewPresent' ||
+      typeof sample.available !== 'boolean' ||
+      !Number.isInteger(sample.elapsedMs) ||
+      sample.elapsedMs < 0 ||
+      sample.elapsedMs > ROOM_READINESS_SAMPLE_MAX_DURATION_MS ||
+      sample.elapsedMs <= previousElapsedMs ||
+      !MATRIX_SYNC_STATES.has(sample.matrixSyncState)
+    ) {
+      return false;
+    }
+    previousElapsedMs = sample.elapsedMs;
+    if (sample.available) {
+      if (
+        typeof sample.roomViewPresent !== 'boolean' ||
+        typeof sample.roomHeaderPresent !== 'boolean' ||
+        typeof sample.roomHeadingPresent !== 'boolean' ||
+        (sample.currentRoomMatches !== null &&
+          typeof sample.currentRoomMatches !== 'boolean')
+      ) {
+        return false;
+      }
+    } else if (
+      sample.roomViewPresent !== null ||
+      sample.roomHeaderPresent !== null ||
+      sample.roomHeadingPresent !== null ||
+      sample.currentRoomMatches !== null ||
+      sample.matrixSyncState !== 'UNKNOWN'
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function appendRoomReadinessTimelineSummary(fields, timeline) {
+  const booleanBucket = (value) => (value === null ? 'unknown' : String(value));
+  fields.push(`room_readiness_timeline_outcome=${timeline.outcome}`);
+  fields.push(
+    `room_readiness_timeline_sample_count=${timeline.sampleCountCapped}`,
+  );
+  fields.push(`room_readiness_timeline_overflow=${timeline.overflow}`);
+  fields.push(
+    `room_readiness_timeline_samples=${
+      timeline.samples
+        .map(
+          (sample) =>
+            `${sample.elapsedMs}:${sample.available ? 'observed' : 'unknown'}:${booleanBucket(sample.roomViewPresent)}:${booleanBucket(sample.roomHeaderPresent)}:${booleanBucket(sample.roomHeadingPresent)}:${booleanBucket(sample.currentRoomMatches)}:${sample.matrixSyncState}`,
+        )
+        .join(';') || 'none'
+    }`,
+  );
+}
 
 function validG6Observation(record) {
   if (!G6_PHASES.has(record.phase)) return true;
@@ -3115,6 +3203,10 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS.some((key) =>
         Object.hasOwn(record, key),
       );
+    const hasRoomReadinessTimeline = Object.hasOwn(
+      record,
+      'roomReadinessTimeline',
+    );
     const roomFailureCodes = new Set([
       'element-room-navigation-failed',
       'element-room-observation-unavailable',
@@ -3175,6 +3267,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
             (!Number.isInteger(record.reminderWidgetContextResponseStatus) ||
               record.reminderWidgetContextResponseStatus < 100 ||
               record.reminderWidgetContextResponseStatus > 599)))) ||
+      (hasRoomReadinessTimeline &&
+        (record.phase !== 'g6-member-b-room-context' ||
+          !validRoomReadinessTimeline(record.roomReadinessTimeline))) ||
+      (record.phase === 'g6-member-b-room-context' &&
+        !hasRoomReadinessTimeline) ||
       (ROOM_CONTEXT_PHASES.has(record.phase) &&
         !hasRoomObservation &&
         (record.status !== 'failed' ||
@@ -3551,6 +3648,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           fields.push(`${label}=${record[key]}`);
         }
       }
+      if (phase === 'g6-member-b-room-context') {
+        appendRoomReadinessTimelineSummary(
+          fields,
+          record.roomReadinessTimeline,
+        );
+      }
       if (
         phase === 'reminder-room-context' &&
         Object.hasOwn(record, 'reminderWidgetContextResponseCount')
@@ -3590,6 +3693,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           );
         }
       }
+    }
+    if (
+      phase === 'g6-member-b-room-context' &&
+      record.matrixUserMatches === undefined
+    ) {
+      appendRoomReadinessTimelineSummary(fields, record.roomReadinessTimeline);
     }
     if (Object.hasOwn(record, 'failureCode')) {
       fields.push(`failure_code=${record.failureCode}`);

@@ -43,9 +43,20 @@ export type WebMemberBEditSaveFailurePoint =
   | 'web-b-edit-details-close-hidden'
   | 'web-b-edit-event-row';
 
+export type DesktopEventCreateFailurePoint =
+  | 'event-create-control-click'
+  | 'event-create-dialog-visible'
+  | 'event-create-calendar-select'
+  | 'event-create-title-fill'
+  | 'event-create-submit-click'
+  | 'event-create-post-await'
+  | 'event-create-post-status'
+  | 'event-create-exact-row-visible';
+
 export type DesktopJourneyFailurePoint =
   | DesktopRoomWidgetFailurePoint
   | 'origin-isolation'
+  | DesktopEventCreateFailurePoint
   | WebMemberBReadFailurePoint
   | WebMemberBEditSaveFailurePoint;
 
@@ -57,6 +68,10 @@ export type DesktopJourneyFailurePointObservation =
   | {
       phase: 'desktop-widget-origin-isolation';
       point: 'origin-isolation';
+    }
+  | {
+      phase: 'desktop-event-create';
+      point: DesktopEventCreateFailurePoint;
     }
   | {
       phase: 'web-member-b-read';
@@ -71,6 +86,14 @@ export type WebBEditSaveFailureDiagnostic = {
   matchedPatchStatus: number | null;
   eventListRead?: WebBEventListReadDiagnostic;
   eventRowRender?: WebBEditRowRenderDiagnostic;
+};
+
+export type DesktopEventCreateFailureDiagnostic = {
+  // Null values mean the observer could not be installed. It records no
+  // request URL, body, response body, or failure text.
+  createPostObserved: boolean | null;
+  createPostRequestFailed: boolean | null;
+  createPostStatus: number | null;
 };
 
 export type WebBEditRowRenderDiagnostic =
@@ -237,7 +260,7 @@ export type ReadOnlyWidgetReadinessObservation = {
 };
 
 export type DesktopJourneySummary = {
-  schemaVersion: 8;
+  schemaVersion: 9;
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;
@@ -246,6 +269,7 @@ export type DesktopJourneySummary = {
   failurePoint: DesktopJourneyFailurePointObservation | null;
   gatewayReadDiagnostic: DesktopGatewayReadFailureDiagnostic | null;
   roomNavigationDiagnostic: DesktopRoomNavigationDiagnostic | null;
+  desktopEventCreateDiagnostic: DesktopEventCreateFailureDiagnostic | null;
   webBEditSaveDiagnostic: WebBEditSaveFailureDiagnostic | null;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
@@ -351,6 +375,7 @@ export declare function appendDesktopJourneyOutcome(input: {
   failurePoint?: DesktopJourneyFailurePoint;
   gatewayReadDiagnostic?: DesktopGatewayReadFailureDiagnostic;
   roomNavigationDiagnostic?: DesktopRoomNavigationDiagnostic;
+  desktopEventCreateDiagnostic?: DesktopEventCreateFailureDiagnostic;
   webBEditSaveDiagnostic?: WebBEditSaveFailureDiagnostic;
 }): void;
 

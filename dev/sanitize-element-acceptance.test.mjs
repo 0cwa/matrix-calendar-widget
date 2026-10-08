@@ -3814,12 +3814,37 @@ test('accepts the complete bounded room layout group only for G6 member B', () =
     blockedExternalRequestCount: 0,
     homeserverHttpErrorCount: 0,
   };
+  const roomReadinessTimeline = {
+    outcome: 'cancelled',
+    sampleCountCapped: 2,
+    overflow: false,
+    samples: [
+      {
+        elapsedMs: 0,
+        available: true,
+        roomViewPresent: true,
+        roomHeaderPresent: true,
+        roomHeadingPresent: false,
+        currentRoomMatches: true,
+        matrixSyncState: 'SYNCING',
+      },
+      {
+        elapsedMs: 1_000,
+        available: true,
+        roomViewPresent: true,
+        roomHeaderPresent: true,
+        roomHeadingPresent: false,
+        currentRoomMatches: true,
+        matrixSyncState: 'CATCHUP',
+      },
+    ],
+  };
   const roomRecord = {
     phase: 'g6-member-b-room-context',
     status: 'failed',
     failureCode: 'element-room-heading-not-present',
     ...roomContextObservationForPhase(
-      callbackObservation,
+      { ...callbackObservation, roomReadinessTimeline },
       'g6-member-b-room-context',
     ),
   };
@@ -3832,7 +3857,24 @@ test('accepts the complete bounded room layout group only for G6 member B', () =
     summary,
     /room_view_present=true room_header_present=true room_heading_dom_present=false room_info_control_present=true fixture_calendar_iframe_present=false/u,
   );
+  assert.match(
+    summary,
+    /room_readiness_timeline_outcome=cancelled room_readiness_timeline_sample_count=2 room_readiness_timeline_overflow=false room_readiness_timeline_samples=0:observed:true:true:false:true:SYNCING;1000:observed:true:true:false:true:CATCHUP/u,
+  );
   assert.doesNotMatch(summary, /outer_render_bucket=/u);
+
+  const budgetExhaustedRecord = {
+    ...roomRecord,
+    roomReadinessTimeline: {
+      ...roomReadinessTimeline,
+      outcome: 'budget-exhausted',
+      overflow: true,
+    },
+  };
+  assert.match(
+    sanitizeElementAcceptance(JSON.stringify(budgetExhaustedRecord), sourceSha),
+    /room_readiness_timeline_outcome=budget-exhausted room_readiness_timeline_sample_count=2 room_readiness_timeline_overflow=true/u,
+  );
 
   const incompleteGroup = { ...roomRecord };
   delete incompleteGroup.fixtureCalendarIframePresent;
@@ -3844,11 +3886,31 @@ test('accepts the complete bounded room layout group only for G6 member B', () =
     failureCode: 'element-room-heading-not-present',
     ...callbackObservation,
   };
+  const timelinePrivateField = {
+    ...roomRecord,
+    roomReadinessTimeline: {
+      ...roomReadinessTimeline,
+      error: 'private Element text',
+    },
+  };
+  const timelineOutOfRange = {
+    ...roomRecord,
+    roomReadinessTimeline: {
+      ...roomReadinessTimeline,
+      samples: Array.from({ length: 16 }, (_, index) => ({
+        ...roomReadinessTimeline.samples[0],
+        elapsedMs: index * 1_000,
+      })),
+      sampleCountCapped: 16,
+    },
+  };
   for (const invalidRecord of [
     incompleteGroup,
     nonBooleanGroup,
     unrelatedPhase,
     rendererDiagnosticsLeaked,
+    timelinePrivateField,
+    timelineOutOfRange,
   ]) {
     assert.throws(
       () => sanitizeElementAcceptance(JSON.stringify(invalidRecord), sourceSha),

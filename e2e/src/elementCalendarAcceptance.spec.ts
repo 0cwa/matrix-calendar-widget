@@ -64,7 +64,14 @@ import {
   summarizeG6ResourceOwnership,
   type G6ResourceOwnership,
 } from '../../dev/element-g6-resource-ownership.mjs';
-import { roomContextObservationForPhase } from '../../dev/element-room-context-observation.mjs';
+import {
+  ROOM_READINESS_SAMPLE_TIMEOUT_MS,
+  collectRoomReadinessTimeline,
+  roomContextObservationForPhase,
+  unavailableRoomReadinessTimeline,
+  type RoomReadinessSnapshot,
+  type RoomReadinessTimeline,
+} from '../../dev/element-room-context-observation.mjs';
 import { ElementWebPage } from './pages/elementWebPage';
 import { fillDatePicker } from './pages/helper';
 
@@ -535,6 +542,7 @@ type MemberARoomResult = {
   element: ElementWebPage;
   navigationCompleted: boolean;
   observation?: MemberARoomObservation;
+  roomReadinessTimeline?: RoomReadinessTimeline;
   failureCode?: MemberARoomFailureCode;
 };
 
@@ -3530,7 +3538,10 @@ test('Element Web preserves unsupported events and supports client interactions'
       fixture.roomName,
       fixture.teamRoomId,
       fixture.users.memberB.userId,
-      { captureReminderRoomLayout: true },
+      {
+        captureReminderRoomLayout: true,
+        captureRoomReadinessTimeline: true,
+      },
     );
     recordMemberARoomObservation(memberBRoom, activeRoomPhase);
     if (memberBRoom.failureCode) {
@@ -5690,6 +5701,7 @@ async function openMemberARoomWithDiagnostics(
   expectedUserId: string,
   options: {
     captureReminderRoomLayout?: boolean;
+    captureRoomReadinessTimeline?: boolean;
     useNormalRoomSelection?: boolean;
   } = {},
 ): Promise<MemberARoomResult> {
@@ -5710,7 +5722,17 @@ async function openMemberARoomWithDiagnostics(
 
   const roomNameHeading = getPinnedElementRoomNameHeading(page);
   let roomHeadingReady = false;
+  const timelineController = options.captureRoomReadinessTimeline
+    ? new AbortController()
+    : undefined;
+  let timelinePromise: Promise<RoomReadinessTimeline> | undefined;
   if (navigationCompleted) {
+    if (timelineController) {
+      timelinePromise = collectRoomReadinessTimeline({
+        signal: timelineController.signal,
+        observe: () => observeMemberARoomReadinessSnapshot(page, roomId),
+      }).catch(() => unavailableRoomReadinessTimeline('unavailable'));
+    }
     try {
       await roomNameHeading.waitFor({
         state: 'visible',
@@ -5722,8 +5744,15 @@ async function openMemberARoomWithDiagnostics(
       roomHeadingReady = headingText?.trim() === roomName;
     } catch {
       // The post-wait observation records only fixed booleans.
+    } finally {
+      timelineController?.abort();
     }
   }
+
+  const roomReadinessTimeline = options.captureRoomReadinessTimeline
+    ? ((await timelinePromise) ??
+      unavailableRoomReadinessTimeline('not-started'))
+    : undefined;
 
   const observation = await observeMemberARoom(
     page,
@@ -5739,8 +5768,73 @@ async function openMemberARoomWithDiagnostics(
     element,
     navigationCompleted,
     observation,
+    roomReadinessTimeline,
     failureCode: getMemberARoomFailureCode(navigationCompleted, observation),
   };
+}
+
+async function observeMemberARoomReadinessSnapshot(
+  page: Page,
+  expectedRoomId: string,
+): Promise<RoomReadinessSnapshot> {
+  return page.locator('body').evaluate(
+    (body, expectedRoomId): RoomReadinessSnapshot => {
+      const knownSyncStates = new Set([
+        'ERROR',
+        'PREPARED',
+        'RECONNECTING',
+        'STOPPED',
+        'SYNCING',
+        'CATCHUP',
+      ]);
+      let currentRoomMatches: boolean | null = null;
+      let matrixSyncState: RoomReadinessSnapshot['matrixSyncState'] = 'UNKNOWN';
+      try {
+        const matrixChat = (
+          window as Window & { matrixChat?: { state?: unknown } }
+        ).matrixChat;
+        const state = matrixChat?.state;
+        if (state !== null && typeof state === 'object') {
+          const currentRoomId = (state as { currentRoomId?: unknown })
+            .currentRoomId;
+          if (typeof currentRoomId === 'string' || currentRoomId === null) {
+            currentRoomMatches = currentRoomId === expectedRoomId;
+          }
+        }
+      } catch {
+        // Preserve only the room equality result.
+      }
+      try {
+        const matrixClient = (
+          window as Window & {
+            mxMatrixClientPeg?: {
+              get?: () => { getSyncState?: () => unknown };
+            };
+          }
+        ).mxMatrixClientPeg?.get?.();
+        const syncState = matrixClient?.getSyncState?.();
+        if (typeof syncState === 'string' && knownSyncStates.has(syncState)) {
+          matrixSyncState =
+            syncState as RoomReadinessSnapshot['matrixSyncState'];
+        }
+      } catch {
+        // Keep unknown sync state when Element exposes no safe enum.
+      }
+      const document = body.ownerDocument;
+      const roomHeader = document.querySelector('header.mx_RoomHeader');
+      return {
+        roomViewPresent: document.querySelector('.mx_RoomView') !== null,
+        roomHeaderPresent: roomHeader !== null,
+        roomHeadingPresent:
+          roomHeader !== null &&
+          roomHeader.querySelector('[role="heading"]') !== null,
+        currentRoomMatches,
+        matrixSyncState,
+      };
+    },
+    expectedRoomId,
+    { timeout: ROOM_READINESS_SAMPLE_TIMEOUT_MS },
+  );
 }
 
 type RoomRenderStateObservation = Pick<
@@ -8204,8 +8298,21 @@ function recordMemberARoomObservation(
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   if (!stageFile) throw new Error('Element acceptance fixture unavailable');
   const observation = result.observation
-    ? roomContextObservationForPhase(result.observation, phase)
-    : undefined;
+    ? roomContextObservationForPhase(
+        {
+          ...result.observation,
+          ...(result.roomReadinessTimeline
+            ? { roomReadinessTimeline: result.roomReadinessTimeline }
+            : {}),
+        },
+        phase,
+      )
+    : result.roomReadinessTimeline
+      ? roomContextObservationForPhase(
+          { roomReadinessTimeline: result.roomReadinessTimeline },
+          phase,
+        )
+      : undefined;
   appendFileSync(
     stageFile,
     `${JSON.stringify({

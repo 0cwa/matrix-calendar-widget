@@ -32,6 +32,14 @@ export const DESKTOP_JOURNEY_FAILURE_POINTS = Object.freeze([
   'gateway-read-status',
   'create-control',
   'origin-isolation',
+  'event-create-control-click',
+  'event-create-dialog-visible',
+  'event-create-calendar-select',
+  'event-create-title-fill',
+  'event-create-submit-click',
+  'event-create-post-await',
+  'event-create-post-status',
+  'event-create-exact-row-visible',
   'web-b-authentication',
   'web-b-room-navigation',
   'web-b-widget-open',
@@ -88,6 +96,16 @@ const ROOM_WIDGET_FAILURE_POINT_SET = new Set([
   'widget-open',
   'gateway-read-status',
   'create-control',
+]);
+const DESKTOP_EVENT_CREATE_FAILURE_POINT_SET = new Set([
+  'event-create-control-click',
+  'event-create-dialog-visible',
+  'event-create-calendar-select',
+  'event-create-title-fill',
+  'event-create-submit-click',
+  'event-create-post-await',
+  'event-create-post-status',
+  'event-create-exact-row-visible',
 ]);
 const WEB_B_READ_FAILURE_POINT_SET = new Set([
   'web-b-authentication',
@@ -214,6 +232,9 @@ function validJourneyFailurePoint(phase, status, failurePoint) {
   if (phase === 'desktop-room-widget-read') {
     return ROOM_WIDGET_FAILURE_POINT_SET.has(failurePoint);
   }
+  if (phase === 'desktop-event-create') {
+    return DESKTOP_EVENT_CREATE_FAILURE_POINT_SET.has(failurePoint);
+  }
   if (phase === 'web-member-b-read') {
     return WEB_B_READ_FAILURE_POINT_SET.has(failurePoint);
   }
@@ -224,6 +245,42 @@ function validJourneyFailurePoint(phase, status, failurePoint) {
     phase === 'desktop-widget-origin-isolation' &&
     failurePoint === 'origin-isolation'
   );
+}
+
+function validDesktopEventCreateFailureDiagnostic(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'createPostObserved,createPostRequestFailed,createPostStatus'
+  ) {
+    return false;
+  }
+  const { createPostObserved, createPostRequestFailed, createPostStatus } =
+    value;
+  if (
+    (createPostObserved !== null && typeof createPostObserved !== 'boolean') ||
+    (createPostRequestFailed !== null &&
+      typeof createPostRequestFailed !== 'boolean') ||
+    (createPostStatus !== null &&
+      (!Number.isInteger(createPostStatus) ||
+        createPostStatus < 100 ||
+        createPostStatus > 599))
+  ) {
+    return false;
+  }
+  if (createPostObserved === null || createPostRequestFailed === null) {
+    return (
+      createPostObserved === null &&
+      createPostRequestFailed === null &&
+      createPostStatus === null
+    );
+  }
+  if (!createPostObserved) {
+    return !createPostRequestFailed && createPostStatus === null;
+  }
+  return createPostRequestFailed ? createPostStatus === null : true;
 }
 
 function validWebBEditSaveDiagnostic(value, failurePoint) {
@@ -1082,6 +1139,7 @@ function parseEvidence(input) {
   let failurePoint = null;
   let gatewayReadDiagnostic = null;
   let roomNavigationDiagnostic = null;
+  let desktopEventCreateDiagnostic = null;
   let webBEditSaveDiagnostic = null;
   let loginStep = 'not_observed';
   let loginStepRecorded = false;
@@ -1160,12 +1218,18 @@ function parseEvidence(input) {
       value,
       'webBEditSaveDiagnostic',
     );
+    const hasDesktopEventCreateDiagnostic = Object.hasOwn(
+      value,
+      'desktopEventCreateDiagnostic',
+    );
     if (
       (phaseKeys !== 'phase,status' &&
         phaseKeys !== 'failurePoint,phase,status' &&
         phaseKeys !== 'failurePoint,gatewayReadDiagnostic,phase,status' &&
         phaseKeys !== 'failurePoint,phase,roomNavigationDiagnostic,status' &&
-        phaseKeys !== 'failurePoint,phase,status,webBEditSaveDiagnostic') ||
+        phaseKeys !== 'failurePoint,phase,status,webBEditSaveDiagnostic' &&
+        phaseKeys !==
+          'desktopEventCreateDiagnostic,failurePoint,phase,status') ||
       !PHASE_SET.has(value.phase) ||
       !['passed', 'failed'].includes(value.status) ||
       (hasFailurePoint &&
@@ -1190,6 +1254,22 @@ function parseEvidence(input) {
           value.status !== 'failed' ||
           value.failurePoint !== 'room-navigation' ||
           !validRoomNavigationDiagnostic(value.roomNavigationDiagnostic))) ||
+      (value.phase === 'desktop-event-create' &&
+        value.status === 'failed' &&
+        (!hasFailurePoint ||
+          !hasDesktopEventCreateDiagnostic ||
+          !DESKTOP_EVENT_CREATE_FAILURE_POINT_SET.has(value.failurePoint) ||
+          !validDesktopEventCreateFailureDiagnostic(
+            value.desktopEventCreateDiagnostic,
+          ))) ||
+      (hasDesktopEventCreateDiagnostic &&
+        (value.phase !== 'desktop-event-create' ||
+          value.status !== 'failed' ||
+          !hasFailurePoint ||
+          !DESKTOP_EVENT_CREATE_FAILURE_POINT_SET.has(value.failurePoint) ||
+          !validDesktopEventCreateFailureDiagnostic(
+            value.desktopEventCreateDiagnostic,
+          ))) ||
       (value.phase === 'web-member-b-edit-save' &&
         value.status === 'failed' &&
         (!hasFailurePoint ||
@@ -1221,6 +1301,9 @@ function parseEvidence(input) {
     if (hasRoomNavigationDiagnostic) {
       roomNavigationDiagnostic = value.roomNavigationDiagnostic;
     }
+    if (hasDesktopEventCreateDiagnostic) {
+      desktopEventCreateDiagnostic = value.desktopEventCreateDiagnostic;
+    }
     if (hasWebBEditSaveDiagnostic) {
       webBEditSaveDiagnostic = value.webBEditSaveDiagnostic;
     }
@@ -1231,6 +1314,7 @@ function parseEvidence(input) {
     failurePoint,
     gatewayReadDiagnostic,
     roomNavigationDiagnostic,
+    desktopEventCreateDiagnostic,
     webBEditSaveDiagnostic,
     loginStep,
     loginStepRecorded,
@@ -1295,6 +1379,7 @@ export function appendDesktopJourneyOutcome({
   failurePoint,
   gatewayReadDiagnostic,
   roomNavigationDiagnostic,
+  desktopEventCreateDiagnostic,
   webBEditSaveDiagnostic,
 }) {
   const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
@@ -1318,6 +1403,23 @@ export function appendDesktopJourneyOutcome({
         status !== 'failed' ||
         failurePoint !== 'room-navigation' ||
         !validRoomNavigationDiagnostic(roomNavigationDiagnostic))) ||
+    (phase === 'desktop-event-create' &&
+      status === 'failed' &&
+      (failurePoint === undefined ||
+        desktopEventCreateDiagnostic === undefined ||
+        !DESKTOP_EVENT_CREATE_FAILURE_POINT_SET.has(failurePoint) ||
+        !validDesktopEventCreateFailureDiagnostic(
+          desktopEventCreateDiagnostic,
+        ))) ||
+    (desktopEventCreateDiagnostic !== undefined &&
+      (parsed.desktopEventCreateDiagnostic !== null ||
+        phase !== 'desktop-event-create' ||
+        status !== 'failed' ||
+        failurePoint === undefined ||
+        !DESKTOP_EVENT_CREATE_FAILURE_POINT_SET.has(failurePoint) ||
+        !validDesktopEventCreateFailureDiagnostic(
+          desktopEventCreateDiagnostic,
+        ))) ||
     (phase === 'web-member-b-edit-save' &&
       status === 'failed' &&
       (failurePoint === undefined ||
@@ -1348,6 +1450,9 @@ export function appendDesktopJourneyOutcome({
         ...(roomNavigationDiagnostic === undefined
           ? {}
           : { roomNavigationDiagnostic }),
+        ...(desktopEventCreateDiagnostic === undefined
+          ? {}
+          : { desktopEventCreateDiagnostic }),
         ...(webBEditSaveDiagnostic === undefined
           ? {}
           : { webBEditSaveDiagnostic }),
@@ -1418,6 +1523,7 @@ export function summarizeDesktopJourneyEvidence(input) {
     roomsReadyDiagnostic,
     gatewayReadDiagnostic,
     roomNavigationDiagnostic,
+    desktopEventCreateDiagnostic,
     webBEditSaveDiagnostic,
   } = parseEvidence(input);
   if (outcomes.get('desktop-login') === 'passed') {
@@ -1437,7 +1543,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   const failed = Object.values(cases).includes('failed');
   const complete = Object.values(cases).every((value) => value === 'passed');
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
     loginStep,
     loginEntry,
@@ -1446,6 +1552,7 @@ export function summarizeDesktopJourneyEvidence(input) {
     failurePoint,
     gatewayReadDiagnostic,
     roomNavigationDiagnostic,
+    desktopEventCreateDiagnostic,
     webBEditSaveDiagnostic,
     cases,
   };
