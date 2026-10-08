@@ -186,6 +186,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
+    assert.equal(summary.roomsReadyDiagnostic, null);
     assert.equal(summary.cases['desktop-login'], 'passed');
     assert.equal(summary.cases['desktop-widget-origin-isolation'], 'not_run');
     assert.equal(summary.cases['web-member-b-read'], 'passed');
@@ -231,6 +232,7 @@ test('records only the fixed Desktop login step in private journey evidence', ()
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
     assert.equal(summary.loginStep, 'sign_in_submit');
     assert.equal(summary.loginEntry, 'welcome_sign_in_clicked');
+    assert.equal(summary.roomsReadyDiagnostic, null);
     assert.throws(
       () =>
         appendDesktopLoginStep({
@@ -525,6 +527,149 @@ test('persists only capped Desktop login locator observations and fixed failure 
           },
         }),
       ),
+    /Invalid Desktop journey input/u,
+  );
+});
+
+test('records a bounded Rooms-ready render snapshot only at that failure boundary', () => {
+  const diagnostic = {
+    roomsTree: { countCapped: 0, visibility: 'absent' },
+    matrixChatShell: { countCapped: 1, visibility: 'visible' },
+    matrixChatStateAvailable: true,
+    matrixChatView: 'logged-in',
+    matrixChatReady: true,
+    matrixChatPageType: 'other-page',
+    matrixChatCurrentRoomKnown: false,
+    matrixChatCurrentRoomMatchesExpected: false,
+    matrixChatSecurityFlowView: false,
+    matrixClientMatchesMemberA: true,
+  };
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopLoginStep({
+      filePath,
+      runnerTemp,
+      step: 'rooms_ready',
+      entry: 'welcome_sign_in_clicked',
+      roomsReadyDiagnostic: diagnostic,
+    });
+
+    const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
+    assert.equal(summary.loginStep, 'rooms_ready');
+    assert.equal(summary.loginEntry, 'welcome_sign_in_clicked');
+    assert.equal(summary.loginDiagnostic, null);
+    assert.deepEqual(summary.roomsReadyDiagnostic, diagnostic);
+    assert.equal(summary.status, 'incomplete');
+    assert.doesNotMatch(
+      readFileSync(filePath, 'utf8'),
+      /room-id|user-id|title/u,
+    );
+  });
+
+  const unavailable = {
+    roomsTree: { countCapped: null, visibility: 'unavailable' },
+    matrixChatShell: { countCapped: 1, visibility: 'visible' },
+    matrixChatStateAvailable: null,
+    matrixChatView: 'unavailable',
+    matrixChatReady: null,
+    matrixChatPageType: 'unavailable',
+    matrixChatCurrentRoomKnown: null,
+    matrixChatCurrentRoomMatchesExpected: null,
+    matrixChatSecurityFlowView: null,
+    matrixClientMatchesMemberA: null,
+  };
+  assert.deepEqual(
+    summarizeDesktopJourneyEvidence(
+      JSON.stringify({
+        loginStep: 'rooms_ready',
+        roomsReadyDiagnostic: unavailable,
+      }),
+    ).roomsReadyDiagnostic,
+    unavailable,
+  );
+});
+
+test('rejects inconsistent or private-shaped Rooms-ready snapshots', () => {
+  const diagnostic = {
+    roomsTree: { countCapped: 0, visibility: 'absent' },
+    matrixChatShell: { countCapped: 1, visibility: 'visible' },
+    matrixChatStateAvailable: true,
+    matrixChatView: 'logged-in',
+    matrixChatReady: true,
+    matrixChatPageType: 'room-view',
+    matrixChatCurrentRoomKnown: false,
+    matrixChatCurrentRoomMatchesExpected: false,
+    matrixChatSecurityFlowView: false,
+    matrixClientMatchesMemberA: true,
+  };
+  const summarize = (value) =>
+    summarizeDesktopJourneyEvidence(JSON.stringify(value));
+
+  assert.throws(
+    () =>
+      summarize({
+        loginStep: 'username_fill',
+        roomsReadyDiagnostic: diagnostic,
+      }),
+    /Invalid Desktop journey input/u,
+  );
+  assert.throws(
+    () =>
+      summarize({
+        loginStep: 'rooms_ready',
+        roomsReadyDiagnostic: {
+          ...diagnostic,
+          roomsTree: { countCapped: null, visibility: 'absent' },
+        },
+      }),
+    /Invalid Desktop journey input/u,
+  );
+  assert.throws(
+    () =>
+      summarize({
+        loginStep: 'rooms_ready',
+        roomsReadyDiagnostic: { ...diagnostic, roomName: 'private' },
+      }),
+    /Invalid Desktop journey input/u,
+  );
+  assert.throws(
+    () =>
+      summarize({
+        loginStep: 'rooms_ready',
+        loginDiagnostic: {
+          failureReason: 'timeout',
+          beforeFill: {
+            username: {
+              countCapped: 0,
+              visible: null,
+              enabled: null,
+              editable: null,
+            },
+            password: {
+              countCapped: 0,
+              visible: null,
+              enabled: null,
+              editable: null,
+            },
+          },
+          atFailure: {
+            username: {
+              countCapped: 0,
+              visible: null,
+              enabled: null,
+              editable: null,
+            },
+            password: {
+              countCapped: 0,
+              visible: null,
+              enabled: null,
+              editable: null,
+            },
+          },
+        },
+        roomsReadyDiagnostic: diagnostic,
+      }),
     /Invalid Desktop journey input/u,
   );
 });

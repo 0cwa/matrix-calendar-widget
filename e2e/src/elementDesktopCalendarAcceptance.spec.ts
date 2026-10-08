@@ -41,6 +41,8 @@ import {
   type DesktopLoginFieldObservation,
   type DesktopLoginFormObservation,
   type DesktopLoginStep,
+  type DesktopRoomsReadyDiagnostic,
+  type DesktopRoomsReadyElementObservation,
 } from '../../dev/element-desktop-journey.mjs';
 import { ElementWebPage } from './pages/elementWebPage';
 
@@ -100,6 +102,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   );
   const evidence = { filePath: evidenceFile, runnerTemp };
   let fixture: Fixture;
+  let roomsReadyIdentity: { memberAId: string; roomId: string } | undefined;
   const recorded = new Set<DesktopJourneyPhase>();
   const contexts: BrowserContext[] = [];
   let desktopBrowser: Browser | undefined;
@@ -116,6 +119,10 @@ test('Element Desktop room event journey', async ({ browser }) => {
     initializeDesktopJourneyEvidence(evidence);
     evidenceInitialized = true;
     fixture = readFixture(usersFile);
+    roomsReadyIdentity = {
+      memberAId: fixture.users.memberA.userId,
+      roomId: fixture.teamRoomId,
+    };
 
     currentPhase = 'desktop-login';
     currentLoginStep = 'cdp_connect';
@@ -361,34 +368,51 @@ test('Element Desktop room event journey', async ({ browser }) => {
   } catch (error: unknown) {
     failed = true;
     if (currentPhase === 'desktop-login' && evidenceInitialized) {
-      const loginFieldsAtFailure = desktopPage
-        ? await observeDesktopLoginForm(
-            desktopPage.getByRole('textbox', {
-              name: 'Username',
-              exact: true,
-            }),
-            desktopPage.getByRole('textbox', {
-              name: 'Password',
-              exact: true,
-            }),
-          )
-        : unavailableDesktopLoginFormObservation();
-      const loginDiagnostic: DesktopLoginDiagnostic = {
-        failureReason: classifyDesktopLoginFailure(
-          error,
+      if (currentLoginStep === 'rooms_ready') {
+        const roomsReadyDiagnostic = desktopPage
+          ? await observeDesktopRoomsReady(
+              desktopPage,
+              roomsReadyIdentity?.roomId ?? null,
+              roomsReadyIdentity?.memberAId ?? null,
+            )
+          : unavailableDesktopRoomsReadyDiagnostic();
+        safeRecordDesktopLoginStep(
+          evidence,
           currentLoginStep,
-          loginFieldsBeforeFill,
-          loginFieldsAtFailure,
-        ),
-        beforeFill: loginFieldsBeforeFill,
-        atFailure: loginFieldsAtFailure,
-      };
-      safeRecordDesktopLoginStep(
-        evidence,
-        currentLoginStep,
-        loginDiagnostic,
-        loginEntry,
-      );
+          undefined,
+          loginEntry,
+          roomsReadyDiagnostic,
+        );
+      } else if (currentLoginStep !== 'complete') {
+        const loginFieldsAtFailure = desktopPage
+          ? await observeDesktopLoginForm(
+              desktopPage.getByRole('textbox', {
+                name: 'Username',
+                exact: true,
+              }),
+              desktopPage.getByRole('textbox', {
+                name: 'Password',
+                exact: true,
+              }),
+            )
+          : unavailableDesktopLoginFormObservation();
+        const loginDiagnostic: DesktopLoginDiagnostic = {
+          failureReason: classifyDesktopLoginFailure(
+            error,
+            currentLoginStep,
+            loginFieldsBeforeFill,
+            loginFieldsAtFailure,
+          ),
+          beforeFill: loginFieldsBeforeFill,
+          atFailure: loginFieldsAtFailure,
+        };
+        safeRecordDesktopLoginStep(
+          evidence,
+          currentLoginStep,
+          loginDiagnostic,
+          loginEntry,
+        );
+      }
     }
     if (currentPhase && evidenceInitialized && !recorded.has(currentPhase)) {
       safeRecordPhase(evidence, recorded, currentPhase, 'failed');
@@ -876,6 +900,7 @@ function safeRecordDesktopLoginStep(
   step: DesktopLoginStep,
   diagnostic?: DesktopLoginDiagnostic,
   entry?: DesktopLoginEntry,
+  roomsReadyDiagnostic?: DesktopRoomsReadyDiagnostic,
 ) {
   try {
     appendDesktopLoginStep({
@@ -883,6 +908,7 @@ function safeRecordDesktopLoginStep(
       step,
       ...(entry === undefined ? {} : { entry }),
       ...(diagnostic === undefined ? {} : { diagnostic }),
+      ...(roomsReadyDiagnostic === undefined ? {} : { roomsReadyDiagnostic }),
     });
     return true;
   } catch {
@@ -954,6 +980,198 @@ async function observeDesktopLoginForm(
     username: usernameObservation,
     password: passwordObservation,
   };
+}
+
+function unavailableDesktopRoomsReadyElementObservation(): DesktopRoomsReadyElementObservation {
+  return { countCapped: null, visibility: 'unavailable' };
+}
+
+function unavailableDesktopRoomsReadyDiagnostic(): DesktopRoomsReadyDiagnostic {
+  return {
+    roomsTree: unavailableDesktopRoomsReadyElementObservation(),
+    matrixChatShell: unavailableDesktopRoomsReadyElementObservation(),
+    matrixChatStateAvailable: null,
+    matrixChatView: 'unavailable',
+    matrixChatReady: null,
+    matrixChatPageType: 'unavailable',
+    matrixChatCurrentRoomKnown: null,
+    matrixChatCurrentRoomMatchesExpected: null,
+    matrixChatSecurityFlowView: null,
+    matrixClientMatchesMemberA: null,
+  };
+}
+
+async function observeDesktopRoomsReadyElement(
+  locator: Locator,
+): Promise<DesktopRoomsReadyElementObservation> {
+  let countCapped: 0 | 1 | 2;
+  try {
+    countCapped = Math.min(await locator.count(), 2) as 0 | 1 | 2;
+  } catch {
+    return unavailableDesktopRoomsReadyElementObservation();
+  }
+  if (countCapped === 0) return { countCapped, visibility: 'absent' };
+  if (countCapped === 2) return { countCapped, visibility: 'ambiguous' };
+  try {
+    return {
+      countCapped,
+      visibility: (await locator.isVisible()) ? 'visible' : 'hidden',
+    };
+  } catch {
+    return { countCapped, visibility: 'unavailable' };
+  }
+}
+
+async function observeDesktopRoomsReady(
+  page: Page,
+  expectedRoomId: string | null,
+  expectedMemberAId: string | null,
+): Promise<DesktopRoomsReadyDiagnostic> {
+  const [roomsTree, matrixChatShell, matrixChatState] = await Promise.all([
+    observeDesktopRoomsReadyElement(
+      page.getByRole('tree', { name: 'Rooms', exact: true }),
+    ),
+    observeDesktopRoomsReadyElement(page.locator('.mx_MatrixChat')),
+    page
+      .evaluate(
+        ({ expectedRoomId, expectedMemberAId }) => {
+          type MatrixChatState = {
+            view?: unknown;
+            ready?: unknown;
+            page_type?: unknown;
+            currentRoomId?: unknown;
+          };
+          type MatrixChatInstance = { state?: unknown };
+          type MatrixClient = { getUserId?: () => string | null };
+          type MatrixClientPeg = { get?: () => MatrixClient | undefined };
+          type Result = Omit<
+            DesktopRoomsReadyDiagnostic,
+            'roomsTree' | 'matrixChatShell'
+          >;
+          const unavailableState = (
+            available: false | null,
+            matrixClientMatchesMemberA: boolean | null,
+          ): Result => ({
+            matrixChatStateAvailable: available,
+            matrixChatView: available === false ? 'missing' : 'unavailable',
+            matrixChatReady: null,
+            matrixChatPageType: available === false ? 'missing' : 'unavailable',
+            matrixChatCurrentRoomKnown: null,
+            matrixChatCurrentRoomMatchesExpected: null,
+            matrixChatSecurityFlowView: null,
+            matrixClientMatchesMemberA,
+          });
+
+          let matrixClientMatchesMemberA: boolean | null = null;
+          try {
+            const peg = (
+              window as unknown as {
+                mxMatrixClientPeg?: MatrixClientPeg;
+              }
+            ).mxMatrixClientPeg;
+            const client = peg?.get?.();
+            const userId = client?.getUserId?.();
+            if (typeof userId === 'string' && expectedMemberAId !== null) {
+              matrixClientMatchesMemberA = userId === expectedMemberAId;
+            }
+          } catch {
+            // Keep client identity unavailable without exposing runtime details.
+          }
+
+          let matrixChat: MatrixChatInstance | undefined;
+          try {
+            matrixChat = (
+              window as unknown as { matrixChat?: MatrixChatInstance }
+            ).matrixChat;
+          } catch {
+            return unavailableState(null, matrixClientMatchesMemberA);
+          }
+          if (!matrixChat) {
+            return unavailableState(false, matrixClientMatchesMemberA);
+          }
+
+          try {
+            const stateValue = matrixChat.state;
+            if (
+              stateValue === null ||
+              typeof stateValue !== 'object' ||
+              Array.isArray(stateValue)
+            ) {
+              return unavailableState(null, matrixClientMatchesMemberA);
+            }
+            const state = stateValue as MatrixChatState;
+
+            const rawView = state.view;
+            const matrixChatView =
+              rawView === 2
+                ? 'welcome'
+                : rawView === 3
+                  ? 'login'
+                  : rawView === 9
+                    ? 'logged-in'
+                    : rawView === undefined || rawView === null
+                      ? 'missing'
+                      : 'other-view';
+            const rawPageType = state.page_type;
+            const matrixChatPageType =
+              rawPageType === 'home_page'
+                ? 'home-page'
+                : rawPageType === 'room_view'
+                  ? 'room-view'
+                  : rawPageType === 'user_view'
+                    ? 'user-view'
+                    : rawPageType === undefined || rawPageType === null
+                      ? 'missing'
+                      : 'other-page';
+            const rawRoomId = state.currentRoomId;
+            const matrixChatCurrentRoomKnown =
+              rawRoomId === null
+                ? false
+                : typeof rawRoomId === 'string'
+                  ? rawRoomId.length > 0
+                  : null;
+            const matrixChatCurrentRoomMatchesExpected =
+              typeof rawRoomId === 'string' && expectedRoomId !== null
+                ? rawRoomId === expectedRoomId
+                : rawRoomId === null && expectedRoomId !== null
+                  ? false
+                  : null;
+            const matrixChatSecurityFlowView =
+              typeof rawView === 'number' &&
+              Number.isInteger(rawView) &&
+              rawView >= 0 &&
+              rawView <= 11
+                ? rawView === 6 || rawView === 7
+                : null;
+
+            return {
+              matrixChatStateAvailable: true,
+              matrixChatView,
+              matrixChatReady:
+                typeof state.ready === 'boolean' ? state.ready : null,
+              matrixChatPageType,
+              matrixChatCurrentRoomKnown,
+              matrixChatCurrentRoomMatchesExpected,
+              matrixChatSecurityFlowView,
+              matrixClientMatchesMemberA,
+            } satisfies Result;
+          } catch {
+            return unavailableState(null, matrixClientMatchesMemberA);
+          }
+        },
+        { expectedRoomId, expectedMemberAId },
+      )
+      .catch(() => null),
+  ]);
+
+  if (matrixChatState === null) {
+    return {
+      ...unavailableDesktopRoomsReadyDiagnostic(),
+      roomsTree,
+      matrixChatShell,
+    };
+  }
+  return { roomsTree, matrixChatShell, ...matrixChatState };
 }
 
 function recordPhase(

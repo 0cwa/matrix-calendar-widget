@@ -56,6 +56,43 @@ const PHASE_SET = new Set(DESKTOP_JOURNEY_PHASES);
 const LOGIN_STEP_SET = new Set(DESKTOP_LOGIN_STEPS);
 const LOGIN_FAILURE_REASON_SET = new Set(DESKTOP_LOGIN_FAILURE_REASONS);
 const LOGIN_ENTRY_SET = new Set(DESKTOP_LOGIN_ENTRIES);
+const ROOMS_READY_ELEMENT_VISIBILITY = new Set([
+  'absent',
+  'visible',
+  'hidden',
+  'ambiguous',
+  'unavailable',
+]);
+const ROOMS_READY_MATRIX_CHAT_VIEWS = new Set([
+  'welcome',
+  'login',
+  'logged-in',
+  'other-view',
+  'missing',
+  'unavailable',
+]);
+const ROOMS_READY_PAGE_TYPES = new Set([
+  'home-page',
+  'room-view',
+  'user-view',
+  'other-page',
+  'missing',
+  'unavailable',
+]);
+const ROOMS_READY_DIAGNOSTIC_KEYS = Object.freeze(
+  [
+    'roomsTree',
+    'matrixChatShell',
+    'matrixChatStateAvailable',
+    'matrixChatView',
+    'matrixChatReady',
+    'matrixChatPageType',
+    'matrixChatCurrentRoomKnown',
+    'matrixChatCurrentRoomMatchesExpected',
+    'matrixChatSecurityFlowView',
+    'matrixClientMatchesMemberA',
+  ].sort(),
+);
 const LOGIN_FORM_FIELD_NAMES = Object.freeze(['username', 'password']);
 const JOURNEY_CREDENTIALS_NAME = 'element-acceptance-desktop-credentials.json';
 const JOURNEY_EVIDENCE_NAME = 'element-desktop-journey-stage.jsonl';
@@ -111,6 +148,79 @@ function validDesktopLoginDiagnostic(value) {
     validLoginFormObservation(value.beforeFill) &&
     validLoginFormObservation(value.atFailure)
   );
+}
+
+function validRoomsReadyElementObservation(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !== 'countCapped,visibility' ||
+    ![null, 0, 1, 2].includes(value.countCapped) ||
+    !ROOMS_READY_ELEMENT_VISIBILITY.has(value.visibility)
+  ) {
+    return false;
+  }
+  if (value.countCapped === null) return value.visibility === 'unavailable';
+  if (value.countCapped === 0) return value.visibility === 'absent';
+  if (value.countCapped === 2) return value.visibility === 'ambiguous';
+  return ['visible', 'hidden', 'unavailable'].includes(value.visibility);
+}
+
+function validRoomsReadyDiagnostic(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      ROOMS_READY_DIAGNOSTIC_KEYS.join(',') ||
+    !validRoomsReadyElementObservation(value.roomsTree) ||
+    !validRoomsReadyElementObservation(value.matrixChatShell) ||
+    ![null, true, false].includes(value.matrixChatStateAvailable) ||
+    !ROOMS_READY_MATRIX_CHAT_VIEWS.has(value.matrixChatView) ||
+    ![null, true, false].includes(value.matrixChatReady) ||
+    !ROOMS_READY_PAGE_TYPES.has(value.matrixChatPageType) ||
+    ![null, true, false].includes(value.matrixChatCurrentRoomKnown) ||
+    ![null, true, false].includes(value.matrixChatCurrentRoomMatchesExpected) ||
+    ![null, true, false].includes(value.matrixChatSecurityFlowView) ||
+    ![null, true, false].includes(value.matrixClientMatchesMemberA)
+  ) {
+    return false;
+  }
+
+  if (value.matrixChatStateAvailable === null) {
+    return (
+      value.matrixChatView === 'unavailable' &&
+      value.matrixChatReady === null &&
+      value.matrixChatPageType === 'unavailable' &&
+      value.matrixChatCurrentRoomKnown === null &&
+      value.matrixChatCurrentRoomMatchesExpected === null &&
+      value.matrixChatSecurityFlowView === null
+    );
+  }
+  if (value.matrixChatStateAvailable === false) {
+    return (
+      value.matrixChatView === 'missing' &&
+      value.matrixChatReady === null &&
+      value.matrixChatPageType === 'missing' &&
+      value.matrixChatCurrentRoomKnown === null &&
+      value.matrixChatCurrentRoomMatchesExpected === null &&
+      value.matrixChatSecurityFlowView === null
+    );
+  }
+  if (
+    value.matrixChatView === 'unavailable' ||
+    value.matrixChatPageType === 'unavailable' ||
+    (value.matrixChatCurrentRoomKnown === false &&
+      value.matrixChatCurrentRoomMatchesExpected === true) ||
+    (value.matrixChatCurrentRoomKnown === true &&
+      value.matrixChatCurrentRoomMatchesExpected === null) ||
+    (value.matrixChatCurrentRoomKnown === false &&
+      value.matrixChatCurrentRoomMatchesExpected === null)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function safeErrorField(error, key) {
@@ -327,6 +437,7 @@ function parseEvidence(input) {
   let loginStepRecorded = false;
   let loginEntry = 'not_observed';
   let loginDiagnostic = null;
+  let roomsReadyDiagnostic = null;
   const rows = input.split(/\r?\n/u).filter(Boolean);
   if (rows.length > DESKTOP_JOURNEY_PHASES.length + 1) invalidInput();
 
@@ -345,7 +456,11 @@ function parseEvidence(input) {
       keys === 'loginStep' ||
       keys === 'loginDiagnostic,loginStep' ||
       keys === 'loginEntry,loginStep' ||
-      keys === 'loginDiagnostic,loginEntry,loginStep'
+      keys === 'loginDiagnostic,loginEntry,loginStep' ||
+      keys === 'loginStep,roomsReadyDiagnostic' ||
+      keys === 'loginEntry,loginStep,roomsReadyDiagnostic' ||
+      keys === 'loginDiagnostic,loginStep,roomsReadyDiagnostic' ||
+      keys === 'loginDiagnostic,loginEntry,loginStep,roomsReadyDiagnostic'
     ) {
       if (loginStepRecorded || !LOGIN_STEP_SET.has(value.loginStep)) {
         invalidInput();
@@ -366,9 +481,18 @@ function parseEvidence(input) {
       ) {
         invalidInput();
       }
+      if (
+        Object.hasOwn(value, 'roomsReadyDiagnostic') &&
+        (!validRoomsReadyDiagnostic(value.roomsReadyDiagnostic) ||
+          value.loginStep !== 'rooms_ready' ||
+          Object.hasOwn(value, 'loginDiagnostic'))
+      ) {
+        invalidInput();
+      }
       loginStep = value.loginStep;
       loginEntry = value.loginEntry ?? 'not_observed';
       loginDiagnostic = value.loginDiagnostic ?? null;
+      roomsReadyDiagnostic = value.roomsReadyDiagnostic ?? null;
       loginStepRecorded = true;
       continue;
     }
@@ -388,6 +512,7 @@ function parseEvidence(input) {
     loginStepRecorded,
     loginEntry,
     loginDiagnostic,
+    roomsReadyDiagnostic,
   };
 }
 
@@ -469,6 +594,7 @@ export function appendDesktopLoginStep({
   step,
   entry,
   diagnostic,
+  roomsReadyDiagnostic,
 }) {
   const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
   privateFileStat(path, MAX_EVIDENCE_BYTES);
@@ -478,7 +604,11 @@ export function appendDesktopLoginStep({
     (entry !== undefined && !LOGIN_ENTRY_SET.has(entry)) ||
     parsed.loginStepRecorded ||
     (diagnostic !== undefined && !validDesktopLoginDiagnostic(diagnostic)) ||
-    (diagnostic !== undefined && step === 'complete')
+    (diagnostic !== undefined && step === 'complete') ||
+    (roomsReadyDiagnostic !== undefined &&
+      (step !== 'rooms_ready' ||
+        diagnostic !== undefined ||
+        !validRoomsReadyDiagnostic(roomsReadyDiagnostic)))
   ) {
     invalidInput();
   }
@@ -490,6 +620,7 @@ export function appendDesktopLoginStep({
         loginStep: step,
         ...(entry === undefined ? {} : { loginEntry: entry }),
         ...(diagnostic === undefined ? {} : { loginDiagnostic: diagnostic }),
+        ...(roomsReadyDiagnostic === undefined ? {} : { roomsReadyDiagnostic }),
       })}\n`,
       {
         encoding: 'utf8',
@@ -503,8 +634,13 @@ export function appendDesktopLoginStep({
 }
 
 export function summarizeDesktopJourneyEvidence(input) {
-  const { outcomes, loginStep, loginEntry, loginDiagnostic } =
-    parseEvidence(input);
+  const {
+    outcomes,
+    loginStep,
+    loginEntry,
+    loginDiagnostic,
+    roomsReadyDiagnostic,
+  } = parseEvidence(input);
   if (outcomes.get('desktop-login') === 'passed') {
     if (
       loginStep !== 'complete' ||
@@ -526,6 +662,7 @@ export function summarizeDesktopJourneyEvidence(input) {
     loginStep,
     loginEntry,
     loginDiagnostic,
+    roomsReadyDiagnostic,
     cases,
   };
 }

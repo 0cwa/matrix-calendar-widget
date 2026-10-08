@@ -60,11 +60,42 @@ export type DesktopLoginDiagnostic = {
   atFailure: DesktopLoginFormObservation;
 };
 
+export type DesktopRoomsReadyElementObservation = {
+  countCapped: 0 | 1 | 2 | null;
+  visibility: 'absent' | 'visible' | 'hidden' | 'ambiguous' | 'unavailable';
+};
+
+export type DesktopRoomsReadyDiagnostic = {
+  roomsTree: DesktopRoomsReadyElementObservation;
+  matrixChatShell: DesktopRoomsReadyElementObservation;
+  matrixChatStateAvailable: boolean | null;
+  matrixChatView:
+    | 'welcome'
+    | 'login'
+    | 'logged-in'
+    | 'other-view'
+    | 'missing'
+    | 'unavailable';
+  matrixChatReady: boolean | null;
+  matrixChatPageType:
+    | 'home-page'
+    | 'room-view'
+    | 'user-view'
+    | 'other-page'
+    | 'missing'
+    | 'unavailable';
+  matrixChatCurrentRoomKnown: boolean | null;
+  matrixChatCurrentRoomMatchesExpected: boolean | null;
+  matrixChatSecurityFlowView: boolean | null;
+  matrixClientMatchesMemberA: boolean | null;
+};
+
 export type DesktopJourneySummary = {
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;
   loginDiagnostic: DesktopLoginDiagnostic | null;
+  roomsReadyDiagnostic: DesktopRoomsReadyDiagnostic | null;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
 
@@ -120,6 +151,7 @@ export declare function appendDesktopLoginStep(input: {
   step: DesktopLoginStep;
   entry?: DesktopLoginEntry;
   diagnostic?: DesktopLoginDiagnostic;
+  roomsReadyDiagnostic?: DesktopRoomsReadyDiagnostic;
 }): void;
 
 export declare function summarizeDesktopJourneyEvidence(
