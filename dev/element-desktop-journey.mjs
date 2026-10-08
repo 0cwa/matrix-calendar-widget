@@ -228,7 +228,7 @@ function validWebBEditSaveDiagnostic(value, failurePoint) {
     Array.isArray(value) ||
     Object.keys(value).sort().join(',') !==
       (isEventRowFailure
-        ? 'eventListRead,eventRowRender,matchedPatchStatus'
+        ? 'calendarSurfaceState,eventListRead,eventRowRender,matchedPatchStatus'
         : 'matchedPatchStatus')
   ) {
     return false;
@@ -255,7 +255,8 @@ function validWebBEditSaveDiagnostic(value, failurePoint) {
   ) {
     return (
       validWebBEventListReadDiagnostic(value.eventListRead) &&
-      validWebBEditRowRenderDiagnostic(value.eventRowRender)
+      validWebBEditRowRenderDiagnostic(value.eventRowRender) &&
+      validWebBCalendarSurfaceStateDiagnostic(value.calendarSurfaceState)
     );
   }
   if (
@@ -272,6 +273,58 @@ function validWebBEditSaveDiagnostic(value, failurePoint) {
     failurePoint !== 'web-b-edit-event-row' &&
     !WEB_B_EDIT_POST_PATCH_FAILURE_POINT_SET.has(failurePoint)
   );
+}
+
+function validWebBCalendarSurfaceStateDiagnostic(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'calendarCountCapped,calendarPartialAvailability,calendarQueryError,calendarQueryLoading,eventPartialAvailability,eventQueryError,eventQueryLoading,eventQuerySourceCountCapped,projectedOccurrenceCountCapped,roomCalendarReadable,roomCapabilitiesState,state,visibleEventCountCapped'
+  ) {
+    return false;
+  }
+  const observations = [
+    value.calendarCountCapped,
+    value.calendarQueryLoading,
+    value.calendarQueryError,
+    value.calendarPartialAvailability,
+    value.roomCapabilitiesState,
+    value.roomCalendarReadable,
+    value.eventQuerySourceCountCapped,
+    value.eventQueryLoading,
+    value.eventQueryError,
+    value.eventPartialAvailability,
+    value.projectedOccurrenceCountCapped,
+    value.visibleEventCountCapped,
+  ];
+  if (value.state === 'unavailable') {
+    return observations.every((observation) => observation === null);
+  }
+  if (
+    value.state !== 'observed' ||
+    ![0, 1, 2].includes(value.calendarCountCapped) ||
+    typeof value.calendarQueryLoading !== 'boolean' ||
+    typeof value.calendarQueryError !== 'boolean' ||
+    typeof value.calendarPartialAvailability !== 'boolean' ||
+    !['present', 'absent'].includes(value.roomCapabilitiesState) ||
+    (value.roomCapabilitiesState === 'present'
+      ? typeof value.roomCalendarReadable !== 'boolean'
+      : value.roomCalendarReadable !== null) ||
+    ![0, 1, 2].includes(value.eventQuerySourceCountCapped) ||
+    typeof value.eventQueryLoading !== 'boolean' ||
+    typeof value.eventQueryError !== 'boolean' ||
+    typeof value.eventPartialAvailability !== 'boolean' ||
+    ![0, 1, 2].includes(value.projectedOccurrenceCountCapped) ||
+    ![0, 1, 2].includes(value.visibleEventCountCapped) ||
+    value.visibleEventCountCapped > value.projectedOccurrenceCountCapped ||
+    (value.calendarQueryLoading && value.calendarQueryError) ||
+    (value.eventQueryLoading && value.eventQueryError)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function validWebBEditRowRenderDiagnostic(value) {
@@ -329,28 +382,151 @@ export function unavailableWebBEditRowRenderDiagnostic() {
   };
 }
 
-export async function observeWebBEditRowRenderWithinDeadline(observe) {
+export function unavailableWebBCalendarSurfaceStateDiagnostic() {
+  return {
+    state: 'unavailable',
+    calendarCountCapped: null,
+    calendarQueryLoading: null,
+    calendarQueryError: null,
+    calendarPartialAvailability: null,
+    roomCapabilitiesState: null,
+    roomCalendarReadable: null,
+    eventQuerySourceCountCapped: null,
+    eventQueryLoading: null,
+    eventQueryError: null,
+    eventPartialAvailability: null,
+    projectedOccurrenceCountCapped: null,
+    visibleEventCountCapped: null,
+  };
+}
+
+export function unavailableWebBEditSurfaceDiagnostic() {
+  return {
+    eventRowRender: unavailableWebBEditRowRenderDiagnostic(),
+    calendarSurfaceState: unavailableWebBCalendarSurfaceStateDiagnostic(),
+  };
+}
+
+export function parseWebBCalendarSurfaceStateAttributes(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'calendarCountCapped,calendarPartialAvailability,calendarQueryError,calendarQueryLoading,eventPartialAvailability,eventQueryError,eventQueryLoading,eventQuerySourceCountCapped,projectedOccurrenceCountCapped,roomCalendarReadable,roomCapabilitiesState,visibleEventCountCapped'
+  ) {
+    return unavailableWebBCalendarSurfaceStateDiagnostic();
+  }
+
+  const count = (raw) =>
+    ['0', '1', '2'].includes(raw) ? Number(raw) : undefined;
+  const boolean = (raw) =>
+    raw === 'true' ? true : raw === 'false' ? false : undefined;
+  const calendarCountCapped = count(value.calendarCountCapped);
+  const calendarQueryLoading = boolean(value.calendarQueryLoading);
+  const calendarQueryError = boolean(value.calendarQueryError);
+  const calendarPartialAvailability = boolean(
+    value.calendarPartialAvailability,
+  );
+  const roomCapabilitiesState = ['present', 'absent'].includes(
+    value.roomCapabilitiesState,
+  )
+    ? value.roomCapabilitiesState
+    : undefined;
+  const roomCalendarReadable =
+    value.roomCalendarReadable === 'true'
+      ? true
+      : value.roomCalendarReadable === 'false'
+        ? false
+        : value.roomCalendarReadable === 'unknown'
+          ? null
+          : undefined;
+  const eventQuerySourceCountCapped = count(value.eventQuerySourceCountCapped);
+  const eventQueryLoading = boolean(value.eventQueryLoading);
+  const eventQueryError = boolean(value.eventQueryError);
+  const eventPartialAvailability = boolean(value.eventPartialAvailability);
+  const projectedOccurrenceCountCapped = count(
+    value.projectedOccurrenceCountCapped,
+  );
+  const visibleEventCountCapped = count(value.visibleEventCountCapped);
+  if (
+    calendarCountCapped === undefined ||
+    calendarQueryLoading === undefined ||
+    calendarQueryError === undefined ||
+    calendarPartialAvailability === undefined ||
+    roomCapabilitiesState === undefined ||
+    roomCalendarReadable === undefined ||
+    (roomCapabilitiesState === 'present' && roomCalendarReadable === null) ||
+    (roomCapabilitiesState === 'absent' && roomCalendarReadable !== null) ||
+    eventQuerySourceCountCapped === undefined ||
+    eventQueryLoading === undefined ||
+    eventQueryError === undefined ||
+    eventPartialAvailability === undefined ||
+    projectedOccurrenceCountCapped === undefined ||
+    visibleEventCountCapped === undefined
+  ) {
+    return unavailableWebBCalendarSurfaceStateDiagnostic();
+  }
+
+  const parsed = {
+    state: 'observed',
+    calendarCountCapped,
+    calendarQueryLoading,
+    calendarQueryError,
+    calendarPartialAvailability,
+    roomCapabilitiesState,
+    roomCalendarReadable:
+      roomCapabilitiesState === 'present' ? roomCalendarReadable : null,
+    eventQuerySourceCountCapped,
+    eventQueryLoading,
+    eventQueryError,
+    eventPartialAvailability,
+    projectedOccurrenceCountCapped,
+    visibleEventCountCapped,
+  };
+  return validWebBCalendarSurfaceStateDiagnostic(parsed)
+    ? parsed
+    : unavailableWebBCalendarSurfaceStateDiagnostic();
+}
+
+export async function observeWebBEditSurfaceWithinDeadline(observe) {
   if (typeof observe !== 'function') {
-    return unavailableWebBEditRowRenderDiagnostic();
+    return unavailableWebBEditSurfaceDiagnostic();
   }
 
   let timer;
   try {
     const deadline = new Promise((resolve) => {
       timer = setTimeout(
-        () => resolve(unavailableWebBEditRowRenderDiagnostic()),
+        () => resolve(unavailableWebBEditSurfaceDiagnostic()),
         WEB_B_EDIT_ROW_RENDER_OBSERVATION_TIMEOUT_MS,
       );
     });
     const observation = Promise.resolve()
       .then(observe)
-      .catch(() => unavailableWebBEditRowRenderDiagnostic());
+      .catch(() => unavailableWebBEditSurfaceDiagnostic());
     const result = await Promise.race([observation, deadline]);
-    return validWebBEditRowRenderDiagnostic(result)
-      ? result
-      : unavailableWebBEditRowRenderDiagnostic();
+    if (
+      result === null ||
+      typeof result !== 'object' ||
+      Array.isArray(result) ||
+      Object.keys(result).sort().join(',') !==
+        'calendarSurfaceState,eventRowRender'
+    ) {
+      return unavailableWebBEditSurfaceDiagnostic();
+    }
+    return {
+      eventRowRender: validWebBEditRowRenderDiagnostic(result.eventRowRender)
+        ? result.eventRowRender
+        : unavailableWebBEditRowRenderDiagnostic(),
+      calendarSurfaceState: validWebBCalendarSurfaceStateDiagnostic(
+        result.calendarSurfaceState,
+      )
+        ? result.calendarSurfaceState
+        : unavailableWebBCalendarSurfaceStateDiagnostic(),
+    };
   } catch {
-    return unavailableWebBEditRowRenderDiagnostic();
+    return unavailableWebBEditSurfaceDiagnostic();
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
@@ -1370,7 +1546,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   const failed = Object.values(cases).includes('failed');
   const complete = Object.values(cases).every((value) => value === 'passed');
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
     loginStep,
     loginEntry,

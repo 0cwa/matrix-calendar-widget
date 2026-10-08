@@ -71,7 +71,47 @@ export type WebBEditSaveFailureDiagnostic = {
   matchedPatchStatus: number | null;
   eventListRead?: WebBEventListReadDiagnostic;
   eventRowRender?: WebBEditRowRenderDiagnostic;
+  calendarSurfaceState?: WebBCalendarSurfaceStateDiagnostic;
 };
+
+export type WebBEditSurfaceDiagnostic = {
+  eventRowRender: WebBEditRowRenderDiagnostic;
+  calendarSurfaceState: WebBCalendarSurfaceStateDiagnostic;
+};
+
+export type WebBCalendarSurfaceStateDiagnostic =
+  | {
+      state: 'observed';
+      // 2 represents two or more calendars, source events, occurrences, or
+      // visible events; these are capped counts, not exact totals.
+      calendarCountCapped: 0 | 1 | 2;
+      calendarQueryLoading: boolean;
+      calendarQueryError: boolean;
+      calendarPartialAvailability: boolean;
+      roomCapabilitiesState: 'present' | 'absent';
+      roomCalendarReadable: boolean | null;
+      eventQuerySourceCountCapped: 0 | 1 | 2;
+      eventQueryLoading: boolean;
+      eventQueryError: boolean;
+      eventPartialAvailability: boolean;
+      projectedOccurrenceCountCapped: 0 | 1 | 2;
+      visibleEventCountCapped: 0 | 1 | 2;
+    }
+  | {
+      state: 'unavailable';
+      calendarCountCapped: null;
+      calendarQueryLoading: null;
+      calendarQueryError: null;
+      calendarPartialAvailability: null;
+      roomCapabilitiesState: null;
+      roomCalendarReadable: null;
+      eventQuerySourceCountCapped: null;
+      eventQueryLoading: null;
+      eventQueryError: null;
+      eventPartialAvailability: null;
+      projectedOccurrenceCountCapped: null;
+      visibleEventCountCapped: null;
+    };
 
 export type WebBEditRowRenderDiagnostic =
   | {
@@ -99,11 +139,17 @@ export type WebBEditRowRenderDiagnostic =
 
 export function unavailableWebBEditRowRenderDiagnostic(): WebBEditRowRenderDiagnostic;
 
-export function observeWebBEditRowRenderWithinDeadline(
-  observe: () =>
-    | WebBEditRowRenderDiagnostic
-    | Promise<WebBEditRowRenderDiagnostic>,
-): Promise<WebBEditRowRenderDiagnostic>;
+export function unavailableWebBCalendarSurfaceStateDiagnostic(): WebBCalendarSurfaceStateDiagnostic;
+
+export function unavailableWebBEditSurfaceDiagnostic(): WebBEditSurfaceDiagnostic;
+
+export function parseWebBCalendarSurfaceStateAttributes(
+  value: unknown,
+): WebBCalendarSurfaceStateDiagnostic;
+
+export function observeWebBEditSurfaceWithinDeadline(
+  observe: () => WebBEditSurfaceDiagnostic | Promise<WebBEditSurfaceDiagnostic>,
+): Promise<WebBEditSurfaceDiagnostic>;
 
 export type WebBEventListReadDiagnostic = {
   state:
@@ -224,7 +270,7 @@ export type ReadOnlyWidgetReadinessObservation = {
 };
 
 export type DesktopJourneySummary = {
-  schemaVersion: 7;
+  schemaVersion: 8;
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;

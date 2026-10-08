@@ -27,13 +27,15 @@ import {
   inspectWebBEventList,
   isBoundedWebBEventListBodyLength,
   isBoundedWebBEventListResponse,
-  observeWebBEditRowRenderWithinDeadline,
+  observeWebBEditSurfaceWithinDeadline,
+  parseWebBCalendarSurfaceStateAttributes,
   prepareDesktopWidget,
   readDesktopJourneyEvidence,
   readOnlyWidgetIsReady,
   readSyntheticDesktopCredentials,
   summarizeDesktopJourneyEvidence,
-  unavailableWebBEditRowRenderDiagnostic,
+  unavailableWebBCalendarSurfaceStateDiagnostic,
+  unavailableWebBEditSurfaceDiagnostic,
   writeSyntheticDesktopCredentials,
 } from './element-desktop-journey.mjs';
 
@@ -302,7 +304,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 7);
+    assert.equal(summary.schemaVersion, 8);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -652,22 +654,121 @@ test('accepts only the closed failure-point enum with its failed-phase match', (
   );
 });
 
-test('bounds B row-render observations and keeps late results out of failure evidence', async (context) => {
+test('parses only closed capped calendar surface facts', () => {
+  const attributes = {
+    calendarCountCapped: '2',
+    calendarQueryLoading: 'false',
+    calendarQueryError: 'false',
+    calendarPartialAvailability: 'true',
+    roomCapabilitiesState: 'present',
+    roomCalendarReadable: 'true',
+    eventQuerySourceCountCapped: '1',
+    eventQueryLoading: 'false',
+    eventQueryError: 'false',
+    eventPartialAvailability: 'false',
+    projectedOccurrenceCountCapped: '2',
+    visibleEventCountCapped: '1',
+  };
+  const observed = {
+    state: 'observed',
+    calendarCountCapped: 2,
+    calendarQueryLoading: false,
+    calendarQueryError: false,
+    calendarPartialAvailability: true,
+    roomCapabilitiesState: 'present',
+    roomCalendarReadable: true,
+    eventQuerySourceCountCapped: 1,
+    eventQueryLoading: false,
+    eventQueryError: false,
+    eventPartialAvailability: false,
+    projectedOccurrenceCountCapped: 2,
+    visibleEventCountCapped: 1,
+  };
+  assert.deepEqual(
+    parseWebBCalendarSurfaceStateAttributes(attributes),
+    observed,
+  );
+
+  const unavailable = unavailableWebBCalendarSurfaceStateDiagnostic();
+  for (const invalid of [
+    Object.fromEntries(
+      Object.entries(attributes).filter(
+        ([key]) => key !== 'visibleEventCountCapped',
+      ),
+    ),
+    { ...attributes, calendarCountCapped: '3' },
+    {
+      ...attributes,
+      projectedOccurrenceCountCapped: '1',
+      visibleEventCountCapped: '2',
+    },
+    { ...attributes, calendarQueryLoading: 'true', calendarQueryError: 'true' },
+    { ...attributes, roomCapabilitiesState: 'absent' },
+    { ...attributes, privateTitle: 'private event title 4d763a' },
+  ]) {
+    const sanitized = parseWebBCalendarSurfaceStateAttributes(invalid);
+    assert.deepEqual(sanitized, unavailable);
+    assert.doesNotMatch(JSON.stringify(sanitized), /private event title/u);
+  }
+  assert.deepEqual(
+    parseWebBCalendarSurfaceStateAttributes({
+      ...attributes,
+      roomCapabilitiesState: 'absent',
+      roomCalendarReadable: 'unknown',
+    }),
+    {
+      ...observed,
+      roomCapabilitiesState: 'absent',
+      roomCalendarReadable: null,
+    },
+  );
+});
+
+test('bounds the aggregate B surface observation and keeps late results out of failure evidence', async (context) => {
   context.mock.timers.enable({ apis: ['setTimeout'] });
   let finishLateObservation;
-  const lateObservation = observeWebBEditRowRenderWithinDeadline(
+  const lateObservation = observeWebBEditSurfaceWithinDeadline(
     () =>
       new Promise((resolve) => {
         finishLateObservation = resolve;
       }),
   );
   context.mock.timers.tick(500);
-  const unavailable = unavailableWebBEditRowRenderDiagnostic();
-  const failureEvidence = { eventRowRender: await lateObservation };
-  assert.deepEqual(failureEvidence.eventRowRender, unavailable);
+  const unavailable = unavailableWebBEditSurfaceDiagnostic();
+  const failureEvidence = { surface: await lateObservation };
+  assert.deepEqual(failureEvidence.surface, unavailable);
   assert.equal(typeof finishLateObservation, 'function');
 
   finishLateObservation({
+    eventRowRender: {
+      state: 'observed',
+      editedRowCountCapped: 1,
+      editedRowVisible: true,
+      selectedRowCountCapped: 0,
+      selectedRowVisible: false,
+      calendarEventsListVisibleRowCountCapped: 1,
+      progressbarVisible: false,
+      errorAlertVisible: false,
+    },
+    calendarSurfaceState: parseWebBCalendarSurfaceStateAttributes({
+      calendarCountCapped: '1',
+      calendarQueryLoading: 'false',
+      calendarQueryError: 'false',
+      calendarPartialAvailability: 'false',
+      roomCapabilitiesState: 'absent',
+      roomCalendarReadable: 'unknown',
+      eventQuerySourceCountCapped: '1',
+      eventQueryLoading: 'false',
+      eventQueryError: 'false',
+      eventPartialAvailability: 'false',
+      projectedOccurrenceCountCapped: '2',
+      visibleEventCountCapped: '1',
+    }),
+  });
+  await Promise.resolve();
+  assert.deepEqual(failureEvidence.surface, unavailable);
+
+  const validRowRender = {
     state: 'observed',
     editedRowCountCapped: 1,
     editedRowVisible: true,
@@ -676,11 +777,20 @@ test('bounds B row-render observations and keeps late results out of failure evi
     calendarEventsListVisibleRowCountCapped: 1,
     progressbarVisible: false,
     errorAlertVisible: false,
+  };
+  const invalidAttributes = await observeWebBEditSurfaceWithinDeadline(() => ({
+    eventRowRender: validRowRender,
+    calendarSurfaceState: {
+      ...unavailableWebBCalendarSurfaceStateDiagnostic(),
+      visibleEventCountCapped: 0,
+    },
+  }));
+  assert.deepEqual(invalidAttributes, {
+    eventRowRender: validRowRender,
+    calendarSurfaceState: unavailableWebBCalendarSurfaceStateDiagnostic(),
   });
-  await Promise.resolve();
-  assert.deepEqual(failureEvidence.eventRowRender, unavailable);
 
-  const rejected = await observeWebBEditRowRenderWithinDeadline(async () => {
+  const rejected = await observeWebBEditSurfaceWithinDeadline(async () => {
     throw new Error('private browser failure');
   });
   assert.deepEqual(rejected, unavailable);
@@ -718,11 +828,29 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
     progressbarVisible: null,
     errorAlertVisible: null,
   };
+  const observedSurfaceState = {
+    state: 'observed',
+    calendarCountCapped: 1,
+    calendarQueryLoading: false,
+    calendarQueryError: false,
+    calendarPartialAvailability: false,
+    roomCapabilitiesState: 'absent',
+    roomCalendarReadable: null,
+    eventQuerySourceCountCapped: 1,
+    eventQueryLoading: false,
+    eventQueryError: false,
+    eventPartialAvailability: false,
+    projectedOccurrenceCountCapped: 2,
+    visibleEventCountCapped: 1,
+  };
+  const unavailableSurfaceState =
+    unavailableWebBCalendarSurfaceStateDiagnostic();
   const row = (
     failurePoint,
     matchedPatchStatus,
     eventListRead,
     eventRowRender = observedRowRender,
+    calendarSurfaceState = observedSurfaceState,
   ) => ({
     phase: 'web-member-b-edit-save',
     status: 'failed',
@@ -730,7 +858,9 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
     webBEditSaveDiagnostic: {
       matchedPatchStatus,
       ...(eventListRead === undefined ? {} : { eventListRead }),
-      ...(failurePoint === 'web-b-edit-event-row' ? { eventRowRender } : {}),
+      ...(failurePoint === 'web-b-edit-event-row'
+        ? { eventRowRender, calendarSurfaceState }
+        : {}),
     },
   });
 
@@ -765,6 +895,7 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
       matchedPatchStatus: 204,
       eventListRead: decodedEventList,
       eventRowRender: observedRowRender,
+      calendarSurfaceState: observedSurfaceState,
     },
   );
   assert.deepEqual(
@@ -772,6 +903,18 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
       row('web-b-edit-event-row', 204, decodedEventList, unavailableRowRender),
     ).webBEditSaveDiagnostic.eventRowRender,
     unavailableRowRender,
+  );
+  assert.deepEqual(
+    summarize(
+      row(
+        'web-b-edit-event-row',
+        204,
+        decodedEventList,
+        observedRowRender,
+        unavailableSurfaceState,
+      ),
+    ).webBEditSaveDiagnostic.calendarSurfaceState,
+    unavailableSurfaceState,
   );
   const pendingRead = {
     state: 'request-pending',
@@ -927,6 +1070,26 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
       }),
     },
     {
+      ...row('web-b-edit-event-row', 204, decodedEventList, observedRowRender, {
+        ...observedSurfaceState,
+        projectedOccurrenceCountCapped: 1,
+        visibleEventCountCapped: 2,
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, decodedEventList, observedRowRender, {
+        ...observedSurfaceState,
+        eventQueryLoading: true,
+        eventQueryError: true,
+      }),
+    },
+    {
+      ...row('web-b-edit-event-row', 204, decodedEventList, observedRowRender, {
+        ...observedSurfaceState,
+        roomCalendarReadable: true,
+      }),
+    },
+    {
       ...row('web-b-edit-event-row', 204, decodedEventList),
       webBEditSaveDiagnostic: {
         ...row('web-b-edit-event-row', 204, decodedEventList)
@@ -1013,18 +1176,24 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
         matchedPatchStatus: 204,
         eventListRead: decodedEventList,
         eventRowRender: observedRowRender,
+        calendarSurfaceState: observedSurfaceState,
       },
     });
     const persisted = readFileSync(filePath, 'utf8');
     assert.equal(
       persisted,
-      '{"phase":"web-member-b-edit-save","status":"failed","failurePoint":"web-b-edit-event-row","webBEditSaveDiagnostic":{"matchedPatchStatus":204,"eventListRead":{"state":"decoded","matchingGetRequestCountCapped":1,"matchingGetResponseCountCapped":1,"firstMatchedGetStatus":200,"selectedEventIdentity":"available","sameEventObserved":true,"sameEventEditedTitleMatch":true},"eventRowRender":{"state":"observed","editedRowCountCapped":0,"editedRowVisible":false,"selectedRowCountCapped":1,"selectedRowVisible":true,"calendarEventsListVisibleRowCountCapped":1,"progressbarVisible":false,"errorAlertVisible":false}}}\n',
+      '{"phase":"web-member-b-edit-save","status":"failed","failurePoint":"web-b-edit-event-row","webBEditSaveDiagnostic":{"matchedPatchStatus":204,"eventListRead":{"state":"decoded","matchingGetRequestCountCapped":1,"matchingGetResponseCountCapped":1,"firstMatchedGetStatus":200,"selectedEventIdentity":"available","sameEventObserved":true,"sameEventEditedTitleMatch":true},"eventRowRender":{"state":"observed","editedRowCountCapped":0,"editedRowVisible":false,"selectedRowCountCapped":1,"selectedRowVisible":true,"calendarEventsListVisibleRowCountCapped":1,"progressbarVisible":false,"errorAlertVisible":false},"calendarSurfaceState":{"state":"observed","calendarCountCapped":1,"calendarQueryLoading":false,"calendarQueryError":false,"calendarPartialAvailability":false,"roomCapabilitiesState":"absent","roomCalendarReadable":null,"eventQuerySourceCountCapped":1,"eventQueryLoading":false,"eventQueryError":false,"eventPartialAvailability":false,"projectedOccurrenceCountCapped":2,"visibleEventCountCapped":1}}}\n',
     );
     assert.doesNotMatch(persisted, /private-event-id|private event title/u);
     assert.deepEqual(
       readDesktopJourneyEvidence({ filePath, runnerTemp })
         .webBEditSaveDiagnostic.eventRowRender,
       observedRowRender,
+    );
+    assert.deepEqual(
+      readDesktopJourneyEvidence({ filePath, runnerTemp })
+        .webBEditSaveDiagnostic.calendarSurfaceState,
+      observedSurfaceState,
     );
   });
 });

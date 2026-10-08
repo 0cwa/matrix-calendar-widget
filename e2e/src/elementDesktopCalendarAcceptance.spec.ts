@@ -40,11 +40,14 @@ import {
   initializeDesktopJourneyEvidence,
   isBoundedWebBEventListBodyLength,
   isBoundedWebBEventListResponse,
-  observeWebBEditRowRenderWithinDeadline,
+  observeWebBEditSurfaceWithinDeadline,
+  parseWebBCalendarSurfaceStateAttributes,
   prepareDesktopWidget,
   readOnlyWidgetIsReady,
   readSyntheticDesktopCredentials,
+  unavailableWebBCalendarSurfaceStateDiagnostic,
   unavailableWebBEditRowRenderDiagnostic,
+  unavailableWebBEditSurfaceDiagnostic,
   type DesktopGatewayReadFailureDiagnostic,
   type DesktopJourneyFailurePoint,
   type DesktopJourneyPhase,
@@ -55,8 +58,10 @@ import {
   type DesktopLoginStep,
   type DesktopRoomsReadyDiagnostic,
   type DesktopRoomsReadyElementObservation,
+  type WebBCalendarSurfaceStateDiagnostic,
   type WebBEditRowRenderDiagnostic,
   type WebBEditSaveFailureDiagnostic,
+  type WebBEditSurfaceDiagnostic,
   type WebBEventListReadDiagnostic,
 } from '../../dev/element-desktop-journey.mjs';
 import { ElementWebPage, getMainRoomListLocator } from './pages/elementWebPage';
@@ -711,14 +716,13 @@ test('Element Desktop room event journey', async ({ browser }) => {
                 eventListRead:
                   webBEventListReadObserver?.snapshot() ??
                   unavailableWebBEventListReadDiagnostic(),
-                eventRowRender: await observeWebBEditRowRenderWithinDeadline(
-                  () =>
-                    observeWebBEditRowRender(
-                      webBFrame,
-                      webBSelectedTitle,
-                      webBEditedTitle,
-                    ),
-                ),
+                ...(await observeWebBEditSurfaceWithinDeadline(() =>
+                  observeWebBEditSurface(
+                    webBFrame,
+                    webBSelectedTitle,
+                    webBEditedTitle,
+                  ),
+                )),
               }
             : {}),
         };
@@ -1344,6 +1348,65 @@ async function observeWebBEditRowRender(
     };
   } catch {
     return unavailableWebBEditRowRenderDiagnostic();
+  }
+}
+
+async function observeWebBEditSurface(
+  frame: FrameLocator | undefined,
+  selectedTitle: string | undefined,
+  editedTitle: string | undefined,
+): Promise<WebBEditSurfaceDiagnostic> {
+  if (!frame) return unavailableWebBEditSurfaceDiagnostic();
+
+  const [eventRowRender, calendarSurfaceState] = await Promise.all([
+    observeWebBEditRowRender(frame, selectedTitle, editedTitle),
+    observeWebBCalendarSurfaceState(frame),
+  ]);
+  return { eventRowRender, calendarSurfaceState };
+}
+
+async function observeWebBCalendarSurfaceState(
+  frame: FrameLocator,
+): Promise<WebBCalendarSurfaceStateDiagnostic> {
+  try {
+    const surface = frame.locator(
+      '[data-mcw-diagnostic-surface="calendar-events"]',
+    );
+    if ((await surface.count()) !== 1) {
+      return unavailableWebBCalendarSurfaceStateDiagnostic();
+    }
+    const attributes = await surface.evaluate((element) => {
+      const read = (name: string) => element.getAttribute(name);
+      return {
+        calendarCountCapped: read('data-mcw-diagnostic-calendar-count-capped'),
+        calendarQueryLoading: read(
+          'data-mcw-diagnostic-calendar-query-loading',
+        ),
+        calendarQueryError: read('data-mcw-diagnostic-calendar-query-error'),
+        calendarPartialAvailability: read(
+          'data-mcw-diagnostic-calendar-partial',
+        ),
+        roomCapabilitiesState: read(
+          'data-mcw-diagnostic-room-capabilities-state',
+        ),
+        roomCalendarReadable: read('data-mcw-diagnostic-room-can-read-events'),
+        eventQuerySourceCountCapped: read(
+          'data-mcw-diagnostic-event-source-count-capped',
+        ),
+        eventQueryLoading: read('data-mcw-diagnostic-event-query-loading'),
+        eventQueryError: read('data-mcw-diagnostic-event-query-error'),
+        eventPartialAvailability: read('data-mcw-diagnostic-event-partial'),
+        projectedOccurrenceCountCapped: read(
+          'data-mcw-diagnostic-projected-count-capped',
+        ),
+        visibleEventCountCapped: read(
+          'data-mcw-diagnostic-visible-count-capped',
+        ),
+      };
+    });
+    return parseWebBCalendarSurfaceStateAttributes(attributes);
+  } catch {
+    return unavailableWebBCalendarSurfaceStateDiagnostic();
   }
 }
 
