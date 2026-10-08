@@ -24,7 +24,7 @@ function errorWithFrames(frames) {
 }
 
 function validMap(
-  source = 'apps/web/src/components/Widget.tsx',
+  source = 'src/components/Widget.tsx',
   file = 'app.js',
   sourceRoot = 'webpack://element-web/./',
 ) {
@@ -410,6 +410,9 @@ test('maps only the pinned Webpack app and exact workspace-relative sources', ()
       '../../packages/shared-components/../private.tsx',
       'webpack://element-web/',
     ],
+    ['apps/web/src/components/Widget.tsx', ''],
+    ['apps/web/src/components/Widget.tsx', 'webpack://element-web/'],
+    ['webpack://element-web/apps/web/src/components/Widget.tsx', ''],
     ['webpack://other.example/src/private.tsx', ''],
     ['webpack://element-web/../src/private.tsx', ''],
   ]) {

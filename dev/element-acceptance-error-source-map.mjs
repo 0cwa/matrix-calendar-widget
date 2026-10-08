@@ -358,13 +358,10 @@ function namespacePath(rawSource) {
     }
     return false;
   };
-  const safeExplicitAppSource = (candidate) =>
-    candidate.startsWith('apps/web/') && safeRepositoryPath(candidate);
   if (
     !safeAppSource(resourcePath) &&
     !safeWorkspaceSource(resourcePath) &&
-    !safeDependencySource(resourcePath) &&
-    !safeExplicitAppSource(resourcePath)
+    !safeDependencySource(resourcePath)
   ) {
     return null;
   }
@@ -474,12 +471,8 @@ function canonicalElementSourcePath(source, rawSource, sourceRoot) {
       continue;
     }
 
-    if (candidate.startsWith('apps/web/')) {
-      return safeRepositoryPath(candidate) ? candidate : null;
-    }
-
-    // A source already carrying Webpack's namespace may include the app root
-    // or the exact two-level workspace prefix in its resource path.
+    // A source already carrying Webpack's namespace may include the app
+    // source root or the exact two-level workspace prefix in its resource path.
     if (
       candidate.startsWith('webpack://element-web/src/') ||
       candidate.startsWith('webpack://element-web/./src/')
