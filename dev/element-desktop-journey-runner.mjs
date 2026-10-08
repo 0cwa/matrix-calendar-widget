@@ -21,6 +21,7 @@ import {
   emptyUidLifecycleObservation,
   emptyUidProcessStopDiagnostics,
   emptyUidStartupObservation,
+  isValidUidLifecycleObservation,
   resolveTrustedRendererSandbox,
   sanitizeDesktopStages,
   sanitizeEgressCounterObservation,
@@ -42,6 +43,7 @@ const DESKTOP_RESULT_NAME = 'element-desktop-journey-startup-output.jsonl';
 const DESKTOP_STAGE_NAME = 'element-desktop-startup-stage.jsonl';
 const DESKTOP_EVIDENCE_MAX_BYTES = 1_048_576;
 const UID_CENSUS_MAX_BYTES = 16_384;
+const UID_STOP_CENSUS_CAPTURE = Symbol('uid-stop-census-capture');
 const UID_STOP_CENSUS_WAIT_LIMITS_MS = Object.freeze({
   initial: 1_200,
   postTerm: 1_500,
@@ -1665,32 +1667,47 @@ function readDesktopStagePhases(path) {
   return phases;
 }
 
-function uidStopCensusFromLifecycle(input) {
+function uidStopCensusFromLifecycle(input, outcome, exitStatus = null) {
   const observation = sanitizeUidLifecycleObservation(input);
-  if (!['observed', 'partial'].includes(observation.state)) {
-    return {
-      state: 'unavailable',
-      overflow: null,
-      uidProcessCount: null,
-      nonZombieProcessCount: null,
-      zombieCount: null,
-      unreadableProcessCount: null,
-      unattributedProcessCount: null,
-      processClassCounts: null,
-      processRoleCounts: null,
-    };
-  }
-  return {
-    state: observation.state,
-    overflow: observation.overflow,
-    uidProcessCount: observation.uidProcessCount,
-    nonZombieProcessCount: observation.nonZombieProcessCount,
-    zombieCount: observation.zombieCount,
-    unreadableProcessCount: observation.unreadableProcessCount,
-    unattributedProcessCount: observation.unattributedProcessCount,
-    processClassCounts: observation.processClassCounts,
-    processRoleCounts: observation.processRoleCounts,
-  };
+  const available = ['observed', 'partial'].includes(observation.state);
+  const census = available
+    ? {
+        state: observation.state,
+        overflow: observation.overflow,
+        uidProcessCount: observation.uidProcessCount,
+        nonZombieProcessCount: observation.nonZombieProcessCount,
+        zombieCount: observation.zombieCount,
+        unreadableProcessCount: observation.unreadableProcessCount,
+        unattributedProcessCount: observation.unattributedProcessCount,
+        processClassCounts: observation.processClassCounts,
+        processRoleCounts: observation.processRoleCounts,
+      }
+    : {
+        state: 'unavailable',
+        overflow: null,
+        uidProcessCount: null,
+        nonZombieProcessCount: null,
+        zombieCount: null,
+        unreadableProcessCount: null,
+        unattributedProcessCount: null,
+        processClassCounts: null,
+        processRoleCounts: null,
+      };
+  census.outcome =
+    outcome ??
+    (!available
+      ? 'unavailable'
+      : observation.overflow
+        ? 'overflow'
+        : 'observed');
+  census.exitStatus = exitStatus;
+  return census;
+}
+
+function capturedUidStopCensus(input, outcome, exitStatus) {
+  const census = uidStopCensusFromLifecycle(input, outcome, exitStatus);
+  Object.defineProperty(census, UID_STOP_CENSUS_CAPTURE, { value: true });
+  return census;
 }
 
 function captureUidStopCensus(state, spawnChild = spawn) {
@@ -1724,7 +1741,7 @@ function captureUidStopCensus(state, spawnChild = spawn) {
         },
       );
     } catch {
-      finish(undefined);
+      finish(capturedUidStopCensus(undefined, 'spawn-error', null));
       return;
     }
     child.stdout.on('data', (chunk) => {
@@ -1736,13 +1753,59 @@ function captureUidStopCensus(state, spawnChild = spawn) {
       }
       output += chunk.toString('utf8');
     });
-    child.once('error', () => finish(undefined));
+    child.once('error', () =>
+      finish(capturedUidStopCensus(undefined, 'spawn-error', null)),
+    );
     child.once('close', (status, signal) => {
-      if (status !== 0 || signal !== null || overflow) {
-        finish(undefined);
+      if (signal !== null) {
+        finish(capturedUidStopCensus(undefined, 'signal', null));
         return;
       }
-      finish(output);
+      if (status !== 0) {
+        const exitStatus =
+          Number.isSafeInteger(status) && status >= 0 && status <= 255
+            ? status
+            : null;
+        finish(
+          capturedUidStopCensus(
+            undefined,
+            status === 124
+              ? 'timeout'
+              : exitStatus === null
+                ? 'unavailable'
+                : 'nonzero-exit',
+            exitStatus,
+          ),
+        );
+        return;
+      }
+      if (overflow) {
+        finish(capturedUidStopCensus(undefined, 'overflow', 0));
+        return;
+      }
+      let observation;
+      try {
+        observation = JSON.parse(output);
+      } catch {
+        finish(capturedUidStopCensus(undefined, 'malformed', 0));
+        return;
+      }
+      if (!isValidUidLifecycleObservation(observation)) {
+        finish(capturedUidStopCensus(undefined, 'malformed', 0));
+        return;
+      }
+      const sanitized = sanitizeUidLifecycleObservation(observation);
+      if (!['observed', 'partial'].includes(sanitized.state)) {
+        finish(capturedUidStopCensus(undefined, 'unavailable', 0));
+        return;
+      }
+      finish(
+        capturedUidStopCensus(
+          sanitized,
+          sanitized.overflow ? 'overflow' : 'observed',
+          0,
+        ),
+      );
     });
   });
 }
@@ -1752,11 +1815,15 @@ function waitForUidStopCensus(census, checkpoint, state, timeoutMs) {
   return Promise.race([
     Promise.resolve()
       .then(() => census(state, checkpoint))
-      .then(uidStopCensusFromLifecycle)
+      .then((result) =>
+        result?.[UID_STOP_CENSUS_CAPTURE]
+          ? result
+          : uidStopCensusFromLifecycle(result),
+      )
       .catch(() => uidStopCensusFromLifecycle(undefined)),
     new Promise((resolveTimeout) => {
       timer = setTimeout(
-        () => resolveTimeout(uidStopCensusFromLifecycle(undefined)),
+        () => resolveTimeout(uidStopCensusFromLifecycle(undefined, 'timeout')),
         timeoutMs,
       );
     }),

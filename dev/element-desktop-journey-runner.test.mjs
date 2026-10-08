@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
+import { emptyUidLifecycleObservation } from './element-desktop-evidence.mjs';
 import {
   buildDesktopPolicyArguments,
   classifyPasswdLookupResult,
@@ -16,7 +17,6 @@ import {
   validateDefaultPolicyPort,
   validateJourneyPolicyPorts,
 } from './element-desktop-journey-runner.mjs';
-import { emptyUidLifecycleObservation } from './element-desktop-evidence.mjs';
 
 const PACKAGE_HASH = 'a'.repeat(64);
 
@@ -83,6 +83,28 @@ function observedEmptyLifecycle() {
   };
 }
 
+function censusChild({ chunks = [], status = 0, signal = null, error } = {}) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  queueMicrotask(() => {
+    if (error !== undefined) {
+      child.emit('error', error);
+      return;
+    }
+    for (const chunk of chunks) child.stdout.emit('data', chunk);
+    child.emit('close', status, signal);
+  });
+  return child;
+}
+
+async function initialUidCensus(spawnCensus) {
+  const result = await stopUidProcesses(
+    { uid: 24_323 },
+    { runCommand: () => 1, spawnCensus },
+  );
+  return result.diagnostics.initial.census;
+}
+
 test('default UID census uses the supplied state and keeps failed capture unavailable', async () => {
   const spawned = [];
   const result = await stopUidProcesses(
@@ -108,6 +130,8 @@ test('default UID census uses the supplied state and keeps failed capture unavai
   assert.equal(result.status, 'passed');
   assert.equal(result.diagnostics.initial.census.state, 'observed');
   assert.equal(result.diagnostics.initial.census.uidProcessCount, 0);
+  assert.equal(result.diagnostics.initial.census.outcome, 'observed');
+  assert.equal(result.diagnostics.initial.census.exitStatus, 0);
   assert.equal(spawned.length, 1);
   assert.equal(spawned[0][0], 'timeout');
   assert.equal(spawned[0][1].at(-1), '24321');
@@ -127,6 +151,80 @@ test('default UID census uses the supplied state and keeps failed capture unavai
   assert.equal(failedCapture.status, 'passed');
   assert.equal(failedCapture.diagnostics.initial.census.state, 'unavailable');
   assert.equal(failedCapture.diagnostics.initial.census.uidProcessCount, null);
+  assert.equal(
+    failedCapture.diagnostics.initial.census.outcome,
+    'nonzero-exit',
+  );
+  assert.equal(failedCapture.diagnostics.initial.census.exitStatus, 1);
+});
+
+test('classifies UID census subprocess results without exposing subprocess output', async () => {
+  const spawnFailure = await initialUidCensus(() => {
+    throw new Error('private spawn details');
+  });
+  assert.equal(spawnFailure.state, 'unavailable');
+  assert.equal(spawnFailure.outcome, 'spawn-error');
+  assert.equal(spawnFailure.exitStatus, null);
+
+  const childFailure = await initialUidCensus(() =>
+    censusChild({ error: new Error('private child details') }),
+  );
+  assert.equal(childFailure.outcome, 'spawn-error');
+  assert.equal(childFailure.exitStatus, null);
+
+  const timeout = await initialUidCensus(() => censusChild({ status: 124 }));
+  assert.equal(timeout.outcome, 'timeout');
+  assert.equal(timeout.exitStatus, 124);
+
+  const nonzero = await initialUidCensus(() => censusChild({ status: 7 }));
+  assert.equal(nonzero.outcome, 'nonzero-exit');
+  assert.equal(nonzero.exitStatus, 7);
+
+  const signaled = await initialUidCensus(() =>
+    censusChild({ status: null, signal: 'SIGTERM' }),
+  );
+  assert.equal(signaled.outcome, 'signal');
+  assert.equal(signaled.exitStatus, null);
+
+  const outputOverflow = await initialUidCensus(() =>
+    censusChild({ chunks: [Buffer.alloc(16_385, 120)] }),
+  );
+  assert.equal(outputOverflow.outcome, 'overflow');
+  assert.equal(outputOverflow.state, 'unavailable');
+  assert.equal(outputOverflow.exitStatus, 0);
+
+  for (const output of ['not-json', JSON.stringify({ state: 'observed' })]) {
+    const malformed = await initialUidCensus(() =>
+      censusChild({ chunks: [Buffer.from(output)] }),
+    );
+    assert.equal(malformed.outcome, 'malformed');
+    assert.equal(malformed.state, 'unavailable');
+    assert.equal(malformed.exitStatus, 0);
+    assert.doesNotMatch(JSON.stringify(malformed), /not-json|private/u);
+  }
+
+  const observed = await initialUidCensus(() =>
+    censusChild({
+      chunks: [Buffer.from(JSON.stringify(observedEmptyLifecycle()))],
+    }),
+  );
+  assert.equal(observed.outcome, 'observed');
+  assert.equal(observed.state, 'observed');
+  assert.equal(observed.uidProcessCount, 0);
+  assert.equal(observed.exitStatus, 0);
+});
+
+test('marks the existing census collection deadline as a timeout outcome', async () => {
+  const census = await stopUidProcesses(
+    { uid: 24_324 },
+    {
+      runCommand: () => 1,
+      census: () => new Promise(() => {}),
+    },
+  );
+  assert.equal(census.diagnostics.initial.census.state, 'unavailable');
+  assert.equal(census.diagnostics.initial.census.outcome, 'timeout');
+  assert.equal(census.diagnostics.initial.census.exitStatus, null);
 });
 
 test('records a clear initial UID inspection without entering the signal path', async () => {

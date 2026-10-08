@@ -302,6 +302,16 @@ const PROBE_STDERR_CLASSES = new Set([
   'syntax',
   'unavailable',
 ]);
+const UID_STOP_CENSUS_OUTCOMES = new Set([
+  'observed',
+  'spawn-error',
+  'timeout',
+  'nonzero-exit',
+  'signal',
+  'overflow',
+  'malformed',
+  'unavailable',
+]);
 const STAGES = new Set([
   'target-uid-preflight',
   'desktop-startup',
@@ -1200,9 +1210,15 @@ export function sanitizeUidLifecycleObservation(input) {
   };
 }
 
+export function isValidUidLifecycleObservation(input) {
+  return validateUidLifecycleObservation(input);
+}
+
 function emptyUidStopCensus(state) {
   return {
     state,
+    outcome: 'unavailable',
+    exitStatus: null,
     overflow: null,
     uidProcessCount: null,
     nonZombieProcessCount: null,
@@ -1236,6 +1252,8 @@ function validateUidStopCensus(value) {
   if (
     !hasKeys(value, [
       'state',
+      'outcome',
+      'exitStatus',
       'overflow',
       'uidProcessCount',
       'nonZombieProcessCount',
@@ -1247,12 +1265,19 @@ function validateUidStopCensus(value) {
     ]) ||
     !['not_attempted', 'unavailable', 'partial', 'observed'].includes(
       value.state,
+    ) ||
+    !UID_STOP_CENSUS_OUTCOMES.has(value.outcome) ||
+    !(
+      value.exitStatus === null ||
+      (Number.isSafeInteger(value.exitStatus) &&
+        value.exitStatus >= 0 &&
+        value.exitStatus <= 255)
     )
   ) {
     return false;
   }
   if (value.state === 'not_attempted' || value.state === 'unavailable') {
-    return (
+    const emptyCounts =
       value.overflow === null &&
       value.uidProcessCount === null &&
       value.nonZombieProcessCount === null &&
@@ -1260,8 +1285,32 @@ function validateUidStopCensus(value) {
       value.unreadableProcessCount === null &&
       value.unattributedProcessCount === null &&
       value.processClassCounts === null &&
-      value.processRoleCounts === null
-    );
+      value.processRoleCounts === null;
+    if (!emptyCounts) return false;
+    if (value.state === 'not_attempted') {
+      return value.outcome === 'unavailable' && value.exitStatus === null;
+    }
+    switch (value.outcome) {
+      case 'spawn-error':
+      case 'signal':
+      case 'unavailable':
+        return value.exitStatus === null;
+      case 'timeout':
+        return value.exitStatus === null || value.exitStatus === 124;
+      case 'nonzero-exit':
+        return (
+          value.exitStatus !== null &&
+          value.exitStatus !== 0 &&
+          value.exitStatus !== 124
+        );
+      case 'overflow':
+      case 'malformed':
+        return value.exitStatus === 0;
+      case 'observed':
+        return false;
+      default:
+        return false;
+    }
   }
   if (
     typeof value.overflow !== 'boolean' ||
@@ -1306,7 +1355,14 @@ function validateUidStopCensus(value) {
         value.uidProcessCount &&
         classTotal === value.uidProcessCount &&
         roleTotal === value.uidProcessCount)) &&
-    (value.state !== 'observed' || !value.overflow)
+    (value.state !== 'observed' || !value.overflow) &&
+    ((value.outcome === 'observed' &&
+      (value.exitStatus === null || value.exitStatus === 0) &&
+      !value.overflow) ||
+      (value.outcome === 'overflow' &&
+        (value.exitStatus === null || value.exitStatus === 0) &&
+        value.state === 'partial' &&
+        value.overflow))
   );
 }
 
@@ -2754,7 +2810,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 16,
+    schemaVersion: 17,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -2857,7 +2913,7 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 16 &&
+    value.schemaVersion === 17 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||

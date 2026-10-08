@@ -220,6 +220,8 @@ function observedEmptyUidLifecycleObservation() {
 function observedStopCensus(lifecycle) {
   return {
     state: lifecycle.state,
+    outcome: lifecycle.overflow ? 'overflow' : 'observed',
+    exitStatus: null,
     overflow: lifecycle.overflow,
     uidProcessCount: lifecycle.uidProcessCount,
     nonZombieProcessCount: lifecycle.nonZombieProcessCount,
@@ -486,7 +488,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes with complete verified isolation and cleanup', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 16);
+  assert.equal(summary.schemaVersion, 17);
   assert.deepEqual(summary.desktopObservation.configInMemoryObservation, {
     state: 'observed',
     matchesFixture: true,
@@ -540,6 +542,14 @@ test('Desktop evidence passes with complete verified isolation and cleanup', () 
       unreadableProcessCount: 0,
     },
   });
+  assert.equal(
+    summary.cleanupDiagnostics.stopDiagnostics.initial.census.outcome,
+    'observed',
+  );
+  assert.equal(
+    summary.cleanupDiagnostics.stopDiagnostics.initial.census.uidProcessCount,
+    0,
+  );
   assert.deepEqual(summary.uidLifecycleDiagnostics, {
     beforeApp: observedEmptyUidLifecycleObservation(),
     afterAppSpawn: observedEmptyUidLifecycleObservation(),
@@ -586,6 +596,7 @@ test('cleanup keeps unavailable stop snapshots null and cannot treat them as cle
   unavailable[4].stopDiagnostics.status = 'failed';
   unavailable[4].stopDiagnostics.initial.inspection = 'unavailable';
   unavailable[4].stopDiagnostics.initial.census.state = 'unavailable';
+  unavailable[4].stopDiagnostics.initial.census.outcome = 'unavailable';
 
   const summary = sanitizeDesktopStages(unavailable, sourceSha);
   assert.equal(summary.cleanupDiagnostics.policyStatus, 'retained');
@@ -597,6 +608,17 @@ test('cleanup keeps unavailable stop snapshots null and cannot treat them as cle
     summary.cleanupDiagnostics.stopDiagnostics.initial.census.uidProcessCount,
     null,
   );
+  assert.equal(
+    summary.cleanupDiagnostics.stopDiagnostics.initial.census.outcome,
+    'unavailable',
+  );
+
+  unavailable[4].stopDiagnostics.initial.census.outcome = 'observed';
+  assert.throws(
+    () => sanitizeDesktopStages(unavailable, sourceSha),
+    /invalid Desktop evidence input/u,
+  );
+  unavailable[4].stopDiagnostics.initial.census.outcome = 'unavailable';
 
   unavailable[4].stopDiagnostics.status = 'passed';
   assert.throws(
