@@ -83,15 +83,23 @@ function observedEmptyLifecycle() {
   };
 }
 
-function censusChild({ chunks = [], status = 0, signal = null, error } = {}) {
+function censusChild({
+  chunks = [],
+  stderrChunks = [],
+  status = 0,
+  signal = null,
+  error,
+} = {}) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
   queueMicrotask(() => {
     if (error !== undefined) {
       child.emit('error', error);
       return;
     }
     for (const chunk of chunks) child.stdout.emit('data', chunk);
+    for (const chunk of stderrChunks) child.stderr.emit('data', chunk);
     child.emit('close', status, signal);
   });
   return child;
@@ -115,6 +123,7 @@ test('default UID census uses the supplied state and keeps failed capture unavai
         spawned.push([program, args, options]);
         const child = new EventEmitter();
         child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
         queueMicrotask(() => {
           child.stdout.emit(
             'data',
@@ -131,6 +140,7 @@ test('default UID census uses the supplied state and keeps failed capture unavai
   assert.equal(result.diagnostics.initial.census.state, 'observed');
   assert.equal(result.diagnostics.initial.census.uidProcessCount, 0);
   assert.equal(result.diagnostics.initial.census.outcome, 'observed');
+  assert.equal(result.diagnostics.initial.census.stderrOutcome, 'absent');
   assert.equal(result.diagnostics.initial.census.exitStatus, 0);
   assert.equal(spawned.length, 1);
   assert.equal(spawned[0][0], 'timeout');
@@ -165,12 +175,14 @@ test('classifies UID census subprocess results without exposing subprocess outpu
   assert.equal(spawnFailure.state, 'unavailable');
   assert.equal(spawnFailure.outcome, 'spawn-error');
   assert.equal(spawnFailure.exitStatus, null);
+  assert.equal(spawnFailure.stderrOutcome, 'unavailable');
 
   const childFailure = await initialUidCensus(() =>
     censusChild({ error: new Error('private child details') }),
   );
   assert.equal(childFailure.outcome, 'spawn-error');
   assert.equal(childFailure.exitStatus, null);
+  assert.equal(childFailure.stderrOutcome, 'unavailable');
 
   const timeout = await initialUidCensus(() => censusChild({ status: 124 }));
   assert.equal(timeout.outcome, 'timeout');
@@ -179,6 +191,7 @@ test('classifies UID census subprocess results without exposing subprocess outpu
   const nonzero = await initialUidCensus(() => censusChild({ status: 7 }));
   assert.equal(nonzero.outcome, 'nonzero-exit');
   assert.equal(nonzero.exitStatus, 7);
+  assert.equal(nonzero.stderrOutcome, 'absent');
 
   const signaled = await initialUidCensus(() =>
     censusChild({ status: null, signal: 'SIGTERM' }),
@@ -192,6 +205,73 @@ test('classifies UID census subprocess results without exposing subprocess outpu
   assert.equal(outputOverflow.outcome, 'overflow');
   assert.equal(outputOverflow.state, 'unavailable');
   assert.equal(outputOverflow.exitStatus, 0);
+
+  const timeoutPermissionText =
+    "timeout: sending signal TERM to command 'sudo': Operation not permitted\n";
+  const timeoutPermission = await initialUidCensus(() =>
+    censusChild({ status: 125, stderrChunks: [timeoutPermissionText] }),
+  );
+  assert.equal(timeoutPermission.stderrOutcome, 'timeout-permission');
+  assert.doesNotMatch(
+    JSON.stringify(timeoutPermission),
+    /Operation not permitted|timeout:|sudo/u,
+  );
+
+  const timeoutLaunchFailure = await initialUidCensus(() =>
+    censusChild({
+      status: 127,
+      stderrChunks: [
+        "timeout: failed to run command 'sudo': No such file or directory\n",
+      ],
+    }),
+  );
+  assert.equal(timeoutLaunchFailure.stderrOutcome, 'timeout-launch-failure');
+
+  const sudoLaunchFailure = await initialUidCensus(() =>
+    censusChild({
+      status: 1,
+      stderrChunks: ['sudo: a password is required\n'],
+    }),
+  );
+  assert.equal(sudoLaunchFailure.stderrOutcome, 'sudo-launch-failure');
+
+  const sudoExecutableFailure = await initialUidCensus(() =>
+    censusChild({
+      status: 1,
+      stderrChunks: [
+        `sudo: unable to execute ${process.execPath}: Permission denied\n`,
+      ],
+    }),
+  );
+  assert.equal(sudoExecutableFailure.stderrOutcome, 'sudo-launch-failure');
+  assert.equal(
+    JSON.stringify(sudoExecutableFailure).includes(process.execPath),
+    false,
+  );
+
+  const otherStderr = await initialUidCensus(() =>
+    censusChild({ status: 1, stderrChunks: ['unrecognized private detail\n'] }),
+  );
+  assert.equal(otherStderr.stderrOutcome, 'other');
+  assert.doesNotMatch(JSON.stringify(otherStderr), /private detail/u);
+
+  const prefixedError = await initialUidCensus(() =>
+    censusChild({
+      status: 1,
+      stderrChunks: [
+        "wrapper: timeout: sending signal TERM to command 'sudo': Operation not permitted\n",
+      ],
+    }),
+  );
+  assert.equal(prefixedError.stderrOutcome, 'other');
+
+  const stderrOverflow = await initialUidCensus(() =>
+    censusChild({
+      status: 1,
+      stderrChunks: [Buffer.alloc(4_097, 120)],
+    }),
+  );
+  assert.equal(stderrOverflow.stderrOutcome, 'unavailable');
 
   for (const output of ['not-json', JSON.stringify({ state: 'observed' })]) {
     const malformed = await initialUidCensus(() =>

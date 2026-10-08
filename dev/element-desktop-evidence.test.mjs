@@ -222,6 +222,7 @@ function observedStopCensus(lifecycle) {
     state: lifecycle.state,
     outcome: lifecycle.overflow ? 'overflow' : 'observed',
     exitStatus: null,
+    stderrOutcome: 'absent',
     overflow: lifecycle.overflow,
     uidProcessCount: lifecycle.uidProcessCount,
     nonZombieProcessCount: lifecycle.nonZombieProcessCount,
@@ -488,7 +489,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes with complete verified isolation and cleanup', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 17);
+  assert.equal(summary.schemaVersion, 18);
   assert.deepEqual(summary.desktopObservation.configInMemoryObservation, {
     state: 'observed',
     matchesFixture: true,
@@ -597,6 +598,7 @@ test('cleanup keeps unavailable stop snapshots null and cannot treat them as cle
   unavailable[4].stopDiagnostics.initial.inspection = 'unavailable';
   unavailable[4].stopDiagnostics.initial.census.state = 'unavailable';
   unavailable[4].stopDiagnostics.initial.census.outcome = 'unavailable';
+  unavailable[4].stopDiagnostics.initial.census.stderrOutcome = 'unavailable';
 
   const summary = sanitizeDesktopStages(unavailable, sourceSha);
   assert.equal(summary.cleanupDiagnostics.policyStatus, 'retained');
@@ -1221,6 +1223,24 @@ test('cleanup census sanitizer accepts the fixed process-count shape and fails c
     sanitizeUidProcessObservation({ ...observed, processId: 1234 }),
     unavailable,
   );
+});
+
+test('cleanup summary accepts only correlated fixed census stderr outcomes', () => {
+  const summary = sanitizeDesktopStages(stages(), sourceSha);
+  const unknownOutcome = structuredClone(summary);
+  unknownOutcome.cleanupDiagnostics.stopDiagnostics.initial.census.stderrOutcome =
+    'raw-stderr';
+  assert.equal(validDesktopSummary(unknownOutcome), false);
+
+  const impossibleObservedFailure = structuredClone(summary);
+  impossibleObservedFailure.cleanupDiagnostics.stopDiagnostics.initial.census.stderrOutcome =
+    'timeout-permission';
+  assert.equal(validDesktopSummary(impossibleObservedFailure), false);
+
+  const notAttempted = structuredClone(summary);
+  notAttempted.cleanupDiagnostics.stopDiagnostics.postTerm.census.stderrOutcome =
+    'absent';
+  assert.equal(validDesktopSummary(notAttempted), false);
 });
 
 test('UID lifecycle sanitizer preserves bounded ownership evidence and unavailable states without private fields', () => {

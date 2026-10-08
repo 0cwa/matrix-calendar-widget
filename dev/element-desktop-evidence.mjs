@@ -312,6 +312,15 @@ const UID_STOP_CENSUS_OUTCOMES = new Set([
   'malformed',
   'unavailable',
 ]);
+const UID_STOP_STDERR_OUTCOMES = new Set([
+  'absent',
+  'not_attempted',
+  'other',
+  'sudo-launch-failure',
+  'timeout-launch-failure',
+  'timeout-permission',
+  'unavailable',
+]);
 const STAGES = new Set([
   'target-uid-preflight',
   'desktop-startup',
@@ -1219,6 +1228,7 @@ function emptyUidStopCensus(state) {
     state,
     outcome: 'unavailable',
     exitStatus: null,
+    stderrOutcome: state === 'not_attempted' ? 'not_attempted' : 'unavailable',
     overflow: null,
     uidProcessCount: null,
     nonZombieProcessCount: null,
@@ -1254,6 +1264,7 @@ function validateUidStopCensus(value) {
       'state',
       'outcome',
       'exitStatus',
+      'stderrOutcome',
       'overflow',
       'uidProcessCount',
       'nonZombieProcessCount',
@@ -1267,6 +1278,7 @@ function validateUidStopCensus(value) {
       value.state,
     ) ||
     !UID_STOP_CENSUS_OUTCOMES.has(value.outcome) ||
+    !UID_STOP_STDERR_OUTCOMES.has(value.stderrOutcome) ||
     !(
       value.exitStatus === null ||
       (Number.isSafeInteger(value.exitStatus) &&
@@ -1288,10 +1300,20 @@ function validateUidStopCensus(value) {
       value.processRoleCounts === null;
     if (!emptyCounts) return false;
     if (value.state === 'not_attempted') {
-      return value.outcome === 'unavailable' && value.exitStatus === null;
+      return (
+        value.outcome === 'unavailable' &&
+        value.exitStatus === null &&
+        value.stderrOutcome === 'not_attempted'
+      );
+    }
+    if (value.stderrOutcome === 'not_attempted') return false;
+    if (
+      value.outcome === 'spawn-error' &&
+      value.stderrOutcome !== 'unavailable'
+    ) {
+      return false;
     }
     switch (value.outcome) {
-      case 'spawn-error':
       case 'signal':
       case 'unavailable':
         return value.exitStatus === null;
@@ -1358,7 +1380,12 @@ function validateUidStopCensus(value) {
     (value.state !== 'observed' || !value.overflow) &&
     ((value.outcome === 'observed' &&
       (value.exitStatus === null || value.exitStatus === 0) &&
-      !value.overflow) ||
+      !value.overflow &&
+      ![
+        'timeout-permission',
+        'timeout-launch-failure',
+        'sudo-launch-failure',
+      ].includes(value.stderrOutcome)) ||
       (value.outcome === 'overflow' &&
         (value.exitStatus === null || value.exitStatus === 0) &&
         value.state === 'partial' &&
@@ -2810,7 +2837,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 17,
+    schemaVersion: 18,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -2913,7 +2940,7 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 17 &&
+    value.schemaVersion === 18 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
