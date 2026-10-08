@@ -27,11 +27,13 @@ import {
   inspectWebBEventList,
   isBoundedWebBEventListBodyLength,
   isBoundedWebBEventListResponse,
+  observeWebBEditRowRenderWithinDeadline,
   prepareDesktopWidget,
   readDesktopJourneyEvidence,
   readOnlyWidgetIsReady,
   readSyntheticDesktopCredentials,
   summarizeDesktopJourneyEvidence,
+  unavailableWebBEditRowRenderDiagnostic,
   writeSyntheticDesktopCredentials,
 } from './element-desktop-journey.mjs';
 
@@ -648,6 +650,40 @@ test('accepts only the closed failure-point enum with its failed-phase match', (
       ),
     /Invalid Desktop journey input/u,
   );
+});
+
+test('bounds B row-render observations and keeps late results out of failure evidence', async (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  let finishLateObservation;
+  const lateObservation = observeWebBEditRowRenderWithinDeadline(
+    () =>
+      new Promise((resolve) => {
+        finishLateObservation = resolve;
+      }),
+  );
+  context.mock.timers.tick(500);
+  const unavailable = unavailableWebBEditRowRenderDiagnostic();
+  const failureEvidence = { eventRowRender: await lateObservation };
+  assert.deepEqual(failureEvidence.eventRowRender, unavailable);
+  assert.equal(typeof finishLateObservation, 'function');
+
+  finishLateObservation({
+    state: 'observed',
+    editedRowCountCapped: 1,
+    editedRowVisible: true,
+    selectedRowCountCapped: 0,
+    selectedRowVisible: false,
+    calendarEventsListVisibleRowCountCapped: 1,
+    progressbarVisible: false,
+    errorAlertVisible: false,
+  });
+  await Promise.resolve();
+  assert.deepEqual(failureEvidence.eventRowRender, unavailable);
+
+  const rejected = await observeWebBEditRowRenderWithinDeadline(async () => {
+    throw new Error('private browser failure');
+  });
+  assert.deepEqual(rejected, unavailable);
 });
 
 test('correlates failed B edit/save points with a bounded matched PATCH status', () => {

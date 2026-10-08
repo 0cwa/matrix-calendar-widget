@@ -130,6 +130,7 @@ const WEB_B_EVENT_IDENTITY_STATES = new Set([
 ]);
 const MAX_WEB_B_EVENT_LIST_ITEMS = 512;
 const MAX_WEB_B_EVENT_LIST_BYTES = 65_536;
+const WEB_B_EDIT_ROW_RENDER_OBSERVATION_TIMEOUT_MS = 500;
 const LOGIN_STEP_SET = new Set(DESKTOP_LOGIN_STEPS);
 const LOGIN_FAILURE_REASON_SET = new Set(DESKTOP_LOGIN_FAILURE_REASONS);
 const LOGIN_ENTRY_SET = new Set(DESKTOP_LOGIN_ENTRIES);
@@ -313,6 +314,46 @@ function validWebBEditRowRenderDiagnostic(value) {
     return false;
   }
   return true;
+}
+
+export function unavailableWebBEditRowRenderDiagnostic() {
+  return {
+    state: 'unavailable',
+    editedRowCountCapped: null,
+    editedRowVisible: null,
+    selectedRowCountCapped: null,
+    selectedRowVisible: null,
+    calendarEventsListVisibleRowCountCapped: null,
+    progressbarVisible: null,
+    errorAlertVisible: null,
+  };
+}
+
+export async function observeWebBEditRowRenderWithinDeadline(observe) {
+  if (typeof observe !== 'function') {
+    return unavailableWebBEditRowRenderDiagnostic();
+  }
+
+  let timer;
+  try {
+    const deadline = new Promise((resolve) => {
+      timer = setTimeout(
+        () => resolve(unavailableWebBEditRowRenderDiagnostic()),
+        WEB_B_EDIT_ROW_RENDER_OBSERVATION_TIMEOUT_MS,
+      );
+    });
+    const observation = Promise.resolve()
+      .then(observe)
+      .catch(() => unavailableWebBEditRowRenderDiagnostic());
+    const result = await Promise.race([observation, deadline]);
+    return validWebBEditRowRenderDiagnostic(result)
+      ? result
+      : unavailableWebBEditRowRenderDiagnostic();
+  } catch {
+    return unavailableWebBEditRowRenderDiagnostic();
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function validWebBEventListReadDiagnostic(value) {

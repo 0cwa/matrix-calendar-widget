@@ -40,9 +40,11 @@ import {
   initializeDesktopJourneyEvidence,
   isBoundedWebBEventListBodyLength,
   isBoundedWebBEventListResponse,
+  observeWebBEditRowRenderWithinDeadline,
   prepareDesktopWidget,
   readOnlyWidgetIsReady,
   readSyntheticDesktopCredentials,
+  unavailableWebBEditRowRenderDiagnostic,
   type DesktopGatewayReadFailureDiagnostic,
   type DesktopJourneyFailurePoint,
   type DesktopJourneyPhase,
@@ -709,10 +711,13 @@ test('Element Desktop room event journey', async ({ browser }) => {
                 eventListRead:
                   webBEventListReadObserver?.snapshot() ??
                   unavailableWebBEventListReadDiagnostic(),
-                eventRowRender: await observeWebBEditRowRender(
-                  webBFrame,
-                  webBSelectedTitle,
-                  webBEditedTitle,
+                eventRowRender: await observeWebBEditRowRenderWithinDeadline(
+                  () =>
+                    observeWebBEditRowRender(
+                      webBFrame,
+                      webBSelectedTitle,
+                      webBEditedTitle,
+                    ),
                 ),
               }
             : {}),
@@ -1278,17 +1283,9 @@ async function observeWebBEditRowRender(
   selectedTitle: string | undefined,
   editedTitle: string | undefined,
 ): Promise<WebBEditRowRenderDiagnostic> {
-  const unavailable: WebBEditRowRenderDiagnostic = {
-    state: 'unavailable',
-    editedRowCountCapped: null,
-    editedRowVisible: null,
-    selectedRowCountCapped: null,
-    selectedRowVisible: null,
-    calendarEventsListVisibleRowCountCapped: null,
-    progressbarVisible: null,
-    errorAlertVisible: null,
-  };
-  if (!frame || !selectedTitle || !editedTitle) return unavailable;
+  if (!frame || !selectedTitle || !editedTitle) {
+    return unavailableWebBEditRowRenderDiagnostic();
+  }
 
   try {
     const editedRow = frame.getByRole('listitem', {
@@ -1346,7 +1343,7 @@ async function observeWebBEditRowRender(
       errorAlertVisible,
     };
   } catch {
-    return unavailable;
+    return unavailableWebBEditRowRenderDiagnostic();
   }
 }
 

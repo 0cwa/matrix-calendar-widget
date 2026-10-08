@@ -97,6 +97,14 @@ export type WebBEditRowRenderDiagnostic =
       errorAlertVisible: null;
     };
 
+export function unavailableWebBEditRowRenderDiagnostic(): WebBEditRowRenderDiagnostic;
+
+export function observeWebBEditRowRenderWithinDeadline(
+  observe: () =>
+    | WebBEditRowRenderDiagnostic
+    | Promise<WebBEditRowRenderDiagnostic>,
+): Promise<WebBEditRowRenderDiagnostic>;
+
 export type WebBEventListReadDiagnostic = {
   state:
     | 'awaiting-events-get'
