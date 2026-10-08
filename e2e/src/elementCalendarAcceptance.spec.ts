@@ -1894,6 +1894,9 @@ test('Element Web preserves unsupported events and supports client interactions'
     }
     await editedNeighborRow.click();
     const narrowDetails = frameA.getByRole('dialog').last();
+    await expect(narrowDetails)
+      .toBeVisible()
+      .catch(() => {});
     const eventDetailsReachable = await narrowDetails
       .isVisible()
       .catch(() => false);
