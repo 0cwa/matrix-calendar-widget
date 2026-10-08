@@ -22,6 +22,29 @@ export type OpenIdToken = {
   access_token: string;
 };
 
+export async function getMainRoomListLocator(page: Page): Promise<Locator> {
+  const panel = page.locator('.mx_RoomListPanel');
+  try {
+    if ((await panel.count()) === 1) {
+      const accessibleName = await panel.getAttribute('aria-label');
+      if (accessibleName) {
+        return panel
+          .getByRole('listbox', { name: accessibleName, exact: true })
+          .or(
+            panel.getByRole('treegrid', {
+              name: accessibleName,
+              exact: true,
+            }),
+          );
+      }
+    }
+  } catch {
+    // Fall back to the legacy role if the current panel cannot be inspected.
+  }
+
+  return page.getByRole('tree', { name: 'Rooms', exact: true });
+}
+
 export class ElementWebPage {
   private readonly sidebarRegion: Locator;
   private readonly navigationRegion: Locator;
@@ -141,14 +164,12 @@ export class ElementWebPage {
   }
 
   private roomsListLocator() {
-    return this.page.locator(
-      '.mx_RoomListPanel [role="listbox"], .mx_RoomListPanel [role="treegrid"]',
-    );
+    return getMainRoomListLocator(this.page);
   }
 
-  private roomItemLocator(name: string) {
+  private async roomItemLocator(name: string) {
     const roomName = new RegExp(`^${name}( Unread messages\\.)?`);
-    const roomsList = this.roomsListLocator();
+    const roomsList = await this.roomsListLocator();
     const currentListItem = roomsList
       .getByRole('option', { name: roomName })
       .or(roomsList.getByRole('row', { name: roomName }));
@@ -159,18 +180,16 @@ export class ElementWebPage {
   }
 
   async waitForRoomsList(timeout = 60_000) {
-    const legacyRoomsTree = this.page.getByRole('tree', { name: 'Rooms' });
-    await this.roomsListLocator()
-      .or(legacyRoomsTree)
-      .waitFor({ state: 'visible', timeout });
+    const roomsList = await this.roomsListLocator();
+    await roomsList.waitFor({ state: 'visible', timeout });
   }
 
   async navigateToRoomOrInvitation(name: string) {
-    await this.roomItemLocator(name).click();
+    await (await this.roomItemLocator(name)).click();
   }
 
   async waitForRoom(name: string) {
-    await this.roomItemLocator(name).click();
+    await (await this.roomItemLocator(name)).click();
     await this.roomNameText.getByText(name).waitFor();
   }
 
