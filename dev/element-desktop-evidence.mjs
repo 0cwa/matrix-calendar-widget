@@ -94,6 +94,40 @@ const UID_LIFECYCLE_PROCESS_ROLES = Object.freeze([
   'other',
   'unknown',
 ]);
+const CLEANUP_ORIGIN_ATTRIBUTIONS = Object.freeze([
+  'appgroup',
+  'controllergroup',
+  'descendant',
+  'unlinked',
+  'unknown',
+]);
+const CLEANUP_ORIGIN_PROCESS_ROLES = Object.freeze([
+  'application',
+  'chromium',
+  'keyring',
+  'dbus',
+  'xvfb',
+  'other',
+  'unknown',
+]);
+const CLEANUP_ORIGIN_REASONS = new Set([
+  'no_final_processes',
+  'attributed',
+  'source_unknown',
+  'count_capped',
+  'profile_untrusted',
+  'marker_unavailable',
+  'process_scan_unavailable',
+  'process_scan_overflow',
+  'process_snapshot_incomplete',
+  'process_snapshot_changed',
+  'app_identity_unavailable',
+  'controller_identity_unavailable',
+  'both_identities_unavailable',
+  'invalid_request',
+  'final_census_unavailable',
+  'probe_unavailable',
+]);
 export const UID_CENSUS_STDERR_PREFIX_CATEGORIES = Object.freeze([
   'timeoutTimerWarning',
   'timeoutForkFailure',
@@ -851,6 +885,33 @@ export function emptyUidLifecycleObservation(state = 'not_observed') {
   };
 }
 
+function emptyCleanupOriginCounts(names, unavailable = false) {
+  return Object.fromEntries(
+    names.map((name) => [name, unavailable ? null : 0]),
+  );
+}
+
+export function emptyCleanupOriginProbe(
+  state = 'unknown',
+  reason = 'probe_unavailable',
+) {
+  const unavailable = state === 'unknown';
+  return {
+    state,
+    reason,
+    overflow: unavailable ? null : false,
+    processCount: unavailable ? null : 0,
+    attributionCounts: emptyCleanupOriginCounts(
+      CLEANUP_ORIGIN_ATTRIBUTIONS,
+      unavailable,
+    ),
+    processRoleCounts: emptyCleanupOriginCounts(
+      CLEANUP_ORIGIN_PROCESS_ROLES,
+      unavailable,
+    ),
+  };
+}
+
 function emptyCdpRendererObservation(state) {
   const securityState =
     state === 'not_observed' ? 'not_observed' : 'unavailable';
@@ -1175,6 +1236,121 @@ function validateUidLifecycleObservation(value) {
   }
 
   return true;
+}
+
+function validateCleanupOriginCounts(value, names, unavailable = false) {
+  return (
+    hasKeys(value, names) &&
+    names.every((name) =>
+      unavailable ? value[name] === null : diagnosticCount(value[name]),
+    )
+  );
+}
+
+function validateCleanupOriginProbe(value) {
+  if (
+    !hasKeys(value, [
+      'state',
+      'reason',
+      'overflow',
+      'processCount',
+      'attributionCounts',
+      'processRoleCounts',
+    ]) ||
+    !['not_required', 'observed', 'partial', 'unknown'].includes(value.state) ||
+    !CLEANUP_ORIGIN_REASONS.has(value.reason) ||
+    !validateCleanupOriginCounts(
+      value.attributionCounts,
+      CLEANUP_ORIGIN_ATTRIBUTIONS,
+      value.state === 'unknown',
+    ) ||
+    !validateCleanupOriginCounts(
+      value.processRoleCounts,
+      CLEANUP_ORIGIN_PROCESS_ROLES,
+      value.state === 'unknown',
+    )
+  ) {
+    return false;
+  }
+  if (value.state === 'unknown') {
+    return (
+      value.overflow === null &&
+      value.processCount === null &&
+      ![
+        'no_final_processes',
+        'attributed',
+        'source_unknown',
+        'count_capped',
+        'app_identity_unavailable',
+        'controller_identity_unavailable',
+        'both_identities_unavailable',
+      ].includes(value.reason)
+    );
+  }
+  if (
+    typeof value.overflow !== 'boolean' ||
+    !diagnosticCount(value.processCount) ||
+    value.processCount > MAX_DIAGNOSTIC_COUNT
+  ) {
+    return false;
+  }
+  if (value.state === 'not_required') {
+    return (
+      value.reason === 'no_final_processes' &&
+      value.overflow === false &&
+      value.processCount === 0 &&
+      [
+        ...Object.values(value.attributionCounts),
+        ...Object.values(value.processRoleCounts),
+      ].every((countValue) => countValue === 0)
+    );
+  }
+  if (value.state === 'observed') {
+    return (
+      value.reason === 'attributed' &&
+      value.overflow === false &&
+      value.processCount > 0 &&
+      value.attributionCounts.unknown === 0
+    );
+  }
+  return (
+    [
+      'source_unknown',
+      'count_capped',
+      'app_identity_unavailable',
+      'controller_identity_unavailable',
+      'both_identities_unavailable',
+    ].includes(value.reason) &&
+    value.processCount > 0 &&
+    (value.reason !== 'source_unknown' ||
+      value.attributionCounts.unknown > 0) &&
+    (value.reason !== 'count_capped' ||
+      (value.overflow === true && value.processCount === MAX_DIAGNOSTIC_COUNT))
+  );
+}
+
+export function sanitizeCleanupOriginProbe(input) {
+  const fallback = emptyCleanupOriginProbe();
+  if (typeof input === 'string' && Buffer.byteLength(input) > 8_192) {
+    return fallback;
+  }
+  let value = input;
+  if (typeof input === 'string') {
+    try {
+      value = JSON.parse(input);
+    } catch {
+      return fallback;
+    }
+  }
+  if (!validateCleanupOriginProbe(value)) return fallback;
+  return {
+    state: value.state,
+    reason: value.reason,
+    overflow: value.overflow,
+    processCount: value.processCount,
+    attributionCounts: { ...value.attributionCounts },
+    processRoleCounts: { ...value.processRoleCounts },
+  };
 }
 
 export function sanitizeUidProcessObservation(input) {
@@ -2663,6 +2839,7 @@ function validateCleanup(record) {
       'stopDiagnostics',
       'lateUidRetry',
       'uidProcessObservation',
+      'cleanupOriginProbe',
       'uidLifecycleObservationBeforeUserdel',
       'finalUidLifecycleObservation',
     ]) &&
@@ -2695,10 +2872,20 @@ function validateCleanup(record) {
       record.uidLifecycleObservationBeforeUserdel,
     ) &&
     validateUidLifecycleObservation(record.finalUidLifecycleObservation) &&
+    validateCleanupOriginProbe(record.cleanupOriginProbe) &&
     (() => {
       const projected = uidProcessObservationFromLifecycle(
         record.finalUidLifecycleObservation,
       );
+      const finalLifecycle = record.finalUidLifecycleObservation;
+      const originProbeMatchesCensus =
+        finalLifecycle.state === 'observed' &&
+        finalLifecycle.uidProcessCount === 0
+          ? record.cleanupOriginProbe.state === 'not_required'
+          : ['observed', 'partial'].includes(finalLifecycle.state) &&
+              finalLifecycle.uidProcessCount > 0
+            ? record.cleanupOriginProbe.state !== 'not_required'
+            : record.cleanupOriginProbe.state === 'unknown';
       const projectionMatches =
         record.uidProcessObservation.state === projected.state &&
         record.uidProcessObservation.overflow === projected.overflow &&
@@ -2724,6 +2911,7 @@ function validateCleanup(record) {
           record.lateUidRetry.stopDiagnostics.status === 'passed');
       return (
         projectionMatches &&
+        originProbeMatchesCensus &&
         (record.policy !== 'passed' ||
           (record.isolatedProcesses === 'passed' && finalCleanupProven)) &&
         (record.policy !== 'retained' ||
@@ -3015,6 +3203,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         stopDiagnostics: cleanup.stopDiagnostics,
         lateUidRetry: cleanup.lateUidRetry,
         uidProcessObservation: cleanup.uidProcessObservation,
+        cleanupOriginProbe: cleanup.cleanupOriginProbe,
       }
     : null;
   const checks = defaultChecks();
@@ -3075,7 +3264,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 21,
+    schemaVersion: 22,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -3178,7 +3367,7 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 21 &&
+    value.schemaVersion === 22 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
@@ -3281,6 +3470,7 @@ export function validDesktopSummary(value) {
         'stopDiagnostics',
         'lateUidRetry',
         'uidProcessObservation',
+        'cleanupOriginProbe',
       ]) &&
         ['passed', 'failed', 'not_run', 'retained'].includes(
           value.cleanupDiagnostics.policyStatus,
@@ -3314,6 +3504,9 @@ export function validDesktopSummary(value) {
         validateLateUidRetry(
           value.cleanupDiagnostics.lateUidRetry,
           value.cleanupDiagnostics.stopDiagnostics,
+        ) &&
+        validateCleanupOriginProbe(
+          value.cleanupDiagnostics.cleanupOriginProbe,
         ))) &&
     (value.cleanupDiagnostics === null
       ? value.checks?.cleanupPolicy === 'not_run'

@@ -638,6 +638,88 @@ test('does not retry for non-effective-only, overflowed, or already-signaled cle
   }
 });
 
+test('exit-0 account deletion followed by 0-to-0-to-1 census does not signal or retry', async () => {
+  const state = { username: 'mcwdesktopprobe', uid: 24_000 };
+  const commandCalls = [];
+  const initialStop = await stopUidProcesses(state, {
+    runCommand: (program, args) => {
+      commandCalls.push([program, ...args]);
+      return 1;
+    },
+    census: async () => observedUidCensus(0),
+  });
+  const beforeDelete = observedEmptyLifecycle();
+  const lateStop = await retryLateEffectiveUidStop(
+    state,
+    initialStop,
+    beforeDelete,
+    {
+      stop: async () => assert.fail('zero pre-delete census must not signal'),
+      capture: async () => assert.fail('zero pre-delete census needs no retry'),
+    },
+  );
+  const user = {
+    status: 'passed',
+    userdelStatus: 'passed',
+    userdelExitStatus: 0,
+    accountState: 'absent',
+  };
+  const afterDelete = observedUidCensus(1);
+  let stopCalls = 0;
+  let captureCalls = 0;
+  let accountChecks = 0;
+  let deleteCalls = 0;
+  const finalRetry = await retryFinalUidCleanup(
+    state,
+    lateStop.stopResult,
+    lateStop.lateUidRetry,
+    user,
+    afterDelete,
+    {
+      accountMatches: async () => {
+        accountChecks += 1;
+        return true;
+      },
+      stop: async () => {
+        stopCalls += 1;
+        return assert.fail(
+          'exit-0 deletion with absent account must not signal',
+        );
+      },
+      capture: async () => {
+        captureCalls += 1;
+        return assert.fail('exit-0 deletion must not start a cleanup retry');
+      },
+      deleteUser: async () => {
+        deleteCalls += 1;
+        return assert.fail('exit-0 deletion must not be repeated');
+      },
+    },
+  );
+  const cleanupProof = cleanupProofAllowsPolicyRemoval({
+    processStatus: finalRetry.stopResult.status,
+    beforeUserdelClear:
+      beforeDelete.state === 'observed' && beforeDelete.uidProcessCount === 0,
+    finalUidClear:
+      finalRetry.observation.state === 'observed' &&
+      finalRetry.observation.uidProcessCount === 0,
+    user: finalRetry.user,
+  });
+
+  assert.equal(initialStop.diagnostics.initial.census.uidProcessCount, 0);
+  assert.equal(beforeDelete.uidProcessCount, 0);
+  assert.equal(afterDelete.uidProcessCount, 1);
+  assert.equal(lateStop.lateUidRetry, null);
+  assert.equal(finalRetry.lateUidRetry, null);
+  assert.equal(finalRetry.observation, afterDelete);
+  assert.equal(accountChecks, 0);
+  assert.equal(stopCalls, 0);
+  assert.equal(captureCalls, 0);
+  assert.equal(deleteCalls, 0);
+  assert.deepEqual(commandCalls, [['pgrep', '-u', '24000']]);
+  assert.equal(cleanupProof, false);
+});
+
 test('retries once after a final positive UID census when the original account still matches', async () => {
   const state = { username: 'mcwdesktopprobe', uid: 24_000 };
   const initialStop = await stopUidProcesses(state, {
@@ -989,6 +1071,22 @@ test('accepts only bounded Desktop startup progress records', () => {
     parseStartupProgressRecord(
       JSON.stringify({
         phase: 'desktop-startup-progress',
+        milestone: 'after-app-spawn',
+        appPid: 12,
+        appStartTimeTicks: '12345',
+      }),
+    ),
+    {
+      phase: 'desktop-startup-progress',
+      milestone: 'after-app-spawn',
+      appPid: 12,
+      appStartTimeTicks: '12345',
+    },
+  );
+  assert.deepEqual(
+    parseStartupProgressRecord(
+      JSON.stringify({
+        phase: 'desktop-startup-progress',
         milestone: 'after-page-load',
         appPid: 12,
         cdpRendererHandoff: {
@@ -1019,6 +1117,13 @@ test('accepts only bounded Desktop startup progress records', () => {
       phase: 'desktop-startup-progress',
       milestone: 'after-app-spawn',
       appPid: 1,
+      appStartTimeTicks: '12345',
+    }),
+    JSON.stringify({
+      phase: 'desktop-startup-progress',
+      milestone: 'after-app-spawn',
+      appPid: 12,
+      appStartTimeTicks: '../proc/12/stat',
     }),
     JSON.stringify({
       phase: 'desktop-startup-progress',

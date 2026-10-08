@@ -18,11 +18,13 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import {
   acknowledgedEgressCounterObservation,
+  emptyCleanupOriginProbe,
   emptyUidLifecycleObservation,
   emptyUidProcessStopDiagnostics,
   emptyUidStartupObservation,
   isValidUidLifecycleObservation,
   resolveTrustedRendererSandbox,
+  sanitizeCleanupOriginProbe,
   sanitizeDesktopStages,
   sanitizeEgressCounterObservation,
   sanitizeUidLifecycleObservation,
@@ -83,6 +85,10 @@ const RUNNER_STATE_KEYS = Object.freeze([
   'uid',
   'groupId',
   'profileRoot',
+  'appPid',
+  'appStartTimeTicks',
+  'controllerPid',
+  'controllerStartTimeTicks',
   'cdpPort',
   'packageSha256',
   'policyMayBeInstalled',
@@ -92,7 +98,7 @@ const RUNNER_STATE_KEYS = Object.freeze([
 
 const PROGRESS_SHAPES = Object.freeze({
   'before-app': ['milestone', 'phase'],
-  'after-app-spawn': ['appPid', 'milestone', 'phase'],
+  'after-app-spawn': ['appPid', 'appStartTimeTicks', 'milestone', 'phase'],
   'after-page-load': ['appPid', 'cdpRendererHandoff', 'milestone', 'phase'],
   'desktop-journey-ready': ['milestone', 'phase'],
 });
@@ -266,12 +272,40 @@ export function parseStartupProgressRecord(line) {
     return undefined;
   }
   if (
+    value.milestone === 'after-app-spawn' &&
+    value.appStartTimeTicks !== null &&
+    (typeof value.appStartTimeTicks !== 'string' ||
+      !/^[0-9]{1,20}$/u.test(value.appStartTimeTicks))
+  ) {
+    return undefined;
+  }
+  if (
     value.milestone === 'after-page-load' &&
     !validRendererHandoff(value.cdpRendererHandoff)
   ) {
     return undefined;
   }
   return value;
+}
+
+function readProcStartTimeTicks(pid) {
+  if (!Number.isSafeInteger(pid) || pid < 2 || pid > 2_147_483_647) {
+    return null;
+  }
+  try {
+    const text = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const end = text.lastIndexOf(')');
+    if (end < 0) return null;
+    const fields = text
+      .slice(end + 2)
+      .trim()
+      .split(/\s+/u);
+    return fields.length >= 20 && /^[0-9]{1,20}$/u.test(fields[19] ?? '')
+      ? fields[19]
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function validRendererHandoff(value) {
@@ -404,6 +438,21 @@ function readState() {
       `^/tmp/mcw-element-desktop-${state.runId}-${state.runAttempt}-[A-Za-z0-9]{6}$`,
       'u',
     ).test(state.profileRoot) ||
+    (state.appPid === null) !== (state.appStartTimeTicks === null) ||
+    (state.appPid !== null &&
+      (!Number.isSafeInteger(state.appPid) ||
+        state.appPid < 2 ||
+        state.appPid > 2_147_483_647 ||
+        typeof state.appStartTimeTicks !== 'string' ||
+        !/^[0-9]{1,20}$/u.test(state.appStartTimeTicks))) ||
+    (state.controllerPid === null) !==
+      (state.controllerStartTimeTicks === null) ||
+    (state.controllerPid !== null &&
+      (!Number.isSafeInteger(state.controllerPid) ||
+        state.controllerPid < 2 ||
+        state.controllerPid > 2_147_483_647 ||
+        typeof state.controllerStartTimeTicks !== 'string' ||
+        !/^[0-9]{1,20}$/u.test(state.controllerStartTimeTicks))) ||
     !Number.isSafeInteger(state.cdpPort) ||
     state.cdpPort < 1_024 ||
     state.cdpPort > 65_535 ||
@@ -818,6 +867,10 @@ async function createPrivateProfile(config, mode) {
     uid,
     groupId,
     profileRoot,
+    appPid: null,
+    appStartTimeTicks: null,
+    controllerPid: null,
+    controllerStartTimeTicks: null,
     cdpPort,
     packageSha256: null,
     policyMayBeInstalled: false,
@@ -1186,6 +1239,14 @@ function acknowledgeMilestone(state, milestone, progress) {
   if (milestone === 'before-app') {
     observation = getUidStartupObservation(state);
   } else if (milestone === 'after-app-spawn') {
+    state.appPid = progress.appStartTimeTicks === null ? null : progress.appPid;
+    state.appStartTimeTicks = progress.appStartTimeTicks;
+    try {
+      persistState(state);
+    } catch {
+      state.appPid = null;
+      state.appStartTimeTicks = null;
+    }
     observation = getUidStartupObservation(state, progress.appPid);
   } else {
     observation = getUidStartupObservation(
@@ -1386,6 +1447,17 @@ function createStartupController(state, mode, progressObservations) {
     env: createSystemCommandEnvironment(process.env),
     stdio: ['ignore', 'pipe', 'ignore'],
   });
+  const controllerStartTimeTicks = readProcStartTimeTicks(child.pid);
+  if (controllerStartTimeTicks !== null) {
+    state.controllerPid = child.pid;
+    state.controllerStartTimeTicks = controllerStartTimeTicks;
+    try {
+      persistState(state);
+    } catch {
+      state.controllerPid = null;
+      state.controllerStartTimeTicks = null;
+    }
+  }
   let startupRecord;
   let protocolFailed = false;
   let ready = false;
@@ -2410,6 +2482,47 @@ function captureFinalUidLifecycle(state) {
   return sanitizeUidLifecycleObservation(output);
 }
 
+function captureCleanupOriginProbe(state, finalLifecycle) {
+  if (
+    finalLifecycle?.state === 'observed' &&
+    finalLifecycle.uidProcessCount === 0
+  ) {
+    return emptyCleanupOriginProbe('not_required', 'no_final_processes');
+  }
+  if (
+    !['observed', 'partial'].includes(finalLifecycle?.state) ||
+    !Number.isSafeInteger(finalLifecycle.uidProcessCount) ||
+    finalLifecycle.uidProcessCount < 1
+  ) {
+    return emptyCleanupOriginProbe('unknown', 'final_census_unavailable');
+  }
+  const request = {
+    uid: state.uid,
+    runId: state.runId,
+    runAttempt: state.runAttempt,
+    profileRoot: state.profileRoot,
+    appPid: state.appPid,
+    appStartTimeTicks: state.appStartTimeTicks,
+    controllerPid: state.controllerPid,
+    controllerStartTimeTicks: state.controllerStartTimeTicks,
+  };
+  const output = capture(
+    'timeout',
+    [
+      '--signal=TERM',
+      '--kill-after=1s',
+      '12s',
+      'sudo',
+      '-n',
+      process.execPath,
+      STARTUP_SCRIPT,
+      'cleanup-origin-observation',
+    ],
+    { input: `${JSON.stringify(request)}\n`, timeout: 15_000 },
+  );
+  return sanitizeCleanupOriginProbe(output);
+}
+
 function cleanupPolicy(state) {
   return (
     runQuietly(
@@ -2605,6 +2718,10 @@ async function cleanupRunner(config) {
   let profileStatus = 'not_run';
   let stopDiagnostics = emptyUidProcessStopDiagnostics();
   let lateUidRetry = null;
+  let cleanupOriginProbe = emptyCleanupOriginProbe(
+    'unknown',
+    'final_census_unavailable',
+  );
   let lifecycleBeforeUserdel = emptyUidLifecycleObservation('not_observed');
   let finalLifecycle = emptyUidLifecycleObservation('not_observed');
   let egressObservation = {
@@ -2674,6 +2791,7 @@ async function cleanupRunner(config) {
       policyStatus = state.policyMayBeInstalled ? 'retained' : 'not_run';
       profileStatus = cleanupProfile(state, false);
     }
+    cleanupOriginProbe = captureCleanupOriginProbe(state, finalLifecycle);
   }
   const aptStatus = cleanupAptArtifacts(config.runnerTemp)
     ? 'passed'
@@ -2706,6 +2824,7 @@ async function cleanupRunner(config) {
       stopDiagnostics,
       lateUidRetry,
       uidProcessObservation: uidProcessObservationFromLifecycle(finalLifecycle),
+      cleanupOriginProbe,
       uidLifecycleObservationBeforeUserdel: lifecycleBeforeUserdel,
       finalUidLifecycleObservation: finalLifecycle,
     });

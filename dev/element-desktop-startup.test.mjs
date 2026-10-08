@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,7 +19,9 @@ import {
   matchesProbeConfigProjection,
   parseCdpRendererHandoff,
   parseProcCommandLine,
+  parseProcStartTimeTicks,
   readCappedDirectoryEntries,
+  readCleanupOriginObservation,
   readKeyringControl,
   SANDBOX_REASONS,
   selectUidLifecycleProcessEntries,
@@ -43,6 +46,266 @@ async function withPrivateProfile(run) {
     rmSync(profileRoot, { recursive: true, force: true });
   }
 }
+
+async function withCleanupOriginProfile(run) {
+  const profileRoot = mkdtempSync('/tmp/mcw-element-desktop-41-2-');
+  chmodSync(profileRoot, 0o700);
+  const uid = process.getuid();
+  writeFileSync(
+    join(profileRoot, '.owned'),
+    'element-desktop-startup-profile-v1\n',
+    {
+      flag: 'wx',
+      mode: 0o600,
+    },
+  );
+  writeFileSync(join(profileRoot, 'process-group'), '101 1001\n', {
+    flag: 'wx',
+    mode: 0o600,
+  });
+  try {
+    await run(profileRoot, uid);
+  } finally {
+    rmSync(profileRoot, { recursive: true, force: true });
+  }
+}
+
+function cleanupOriginProcess(
+  pid,
+  parentPid,
+  processGroupId,
+  startTimeTicks,
+  uid,
+  executableName,
+  state = 'S',
+) {
+  return {
+    pid,
+    parentPid,
+    processGroupId,
+    state,
+    startTimeTicks,
+    uids: [uid, uid, uid, uid],
+    executableName,
+  };
+}
+
+function cleanupOriginSnapshot(uid) {
+  const otherUid = uid === 2 ? 3 : 2;
+  const processes = [
+    cleanupOriginProcess(1, 0, 1, '10', otherUid, 'systemd'),
+    cleanupOriginProcess(80, 1, 80, '800', otherUid, 'node'),
+    cleanupOriginProcess(90, 1, 90, '900', otherUid, 'timeout'),
+    cleanupOriginProcess(101, 80, 101, '1001', uid, 'element-desktop'),
+    cleanupOriginProcess(102, 101, 101, '1002', uid, 'chrome'),
+    cleanupOriginProcess(103, 90, 90, '1003', uid, 'dbus-daemon'),
+    cleanupOriginProcess(104, 90, 104, '1004', uid, 'gnome-keyring-daemon'),
+    cleanupOriginProcess(105, 1, 105, '1005', uid, 'other-helper'),
+    cleanupOriginProcess(106, 1, 106, '1006', uid, 'xvfb'),
+  ];
+  return new Map(processes.map((item) => [item.pid, item]));
+}
+
+function cloneCleanupOriginSnapshot(processes) {
+  return new Map(
+    [...processes].map(([pid, item]) => [
+      pid,
+      { ...item, uids: [...item.uids] },
+    ]),
+  );
+}
+
+function cleanupOriginRequest(profileRoot, uid, overrides = {}) {
+  return {
+    uid,
+    runId: '41',
+    runAttempt: '2',
+    profileRoot,
+    appPid: 101,
+    appStartTimeTicks: '1001',
+    controllerPid: 90,
+    controllerStartTimeTicks: '900',
+    ...overrides,
+  };
+}
+
+test('process start ticks are parsed after the command field, including parentheses', () => {
+  const fields = Array.from({ length: 20 }, () => '0');
+  fields[0] = 'S';
+  fields[1] = '1';
+  fields[2] = '42';
+  fields[19] = '987654';
+  const stat = `42 (synthetic ) command) ${fields.join(' ')}`;
+
+  assert.equal(parseProcStartTimeTicks(42, stat), '987654');
+  assert.equal(parseProcStartTimeTicks(42, '42 (short) S 1 2'), null);
+});
+
+test('cleanup-origin probe attributes only bounded fixed counts from stable identities', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const processes = cleanupOriginSnapshot(uid);
+    const observation = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({
+        state: 'observed',
+        processes: cloneCleanupOriginSnapshot(processes),
+      }),
+    );
+
+    assert.deepEqual(observation, {
+      state: 'observed',
+      reason: 'attributed',
+      overflow: false,
+      processCount: 6,
+      attributionCounts: {
+        appgroup: 2,
+        controllergroup: 1,
+        descendant: 1,
+        unlinked: 2,
+        unknown: 0,
+      },
+      processRoleCounts: {
+        application: 1,
+        chromium: 1,
+        keyring: 1,
+        dbus: 1,
+        xvfb: 1,
+        other: 1,
+        unknown: 0,
+      },
+    });
+    assert.doesNotMatch(
+      JSON.stringify(observation),
+      /(?:\/proc|\/tmp|appPid|controllerPid|argv|commandline|101|1001|900)/iu,
+    );
+  });
+});
+
+test('cleanup-origin probe fails closed for unbound roots, unreadable scans, overflow, and marker symlinks', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const processes = cleanupOriginSnapshot(uid);
+    const stableScan = () => ({
+      state: 'observed',
+      processes: cloneCleanupOriginSnapshot(processes),
+    });
+    const noController = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid, {
+        controllerPid: null,
+        controllerStartTimeTicks: null,
+      }),
+      stableScan,
+    );
+    assert.equal(noController.state, 'partial');
+    assert.equal(noController.reason, 'controller_identity_unavailable');
+    assert.equal(noController.attributionCounts.unlinked, 0);
+    assert.ok(noController.attributionCounts.unknown > 0);
+
+    const unreadable = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({ state: 'incomplete' }),
+    );
+    assert.equal(unreadable.state, 'unknown');
+    assert.equal(unreadable.reason, 'process_snapshot_incomplete');
+    assert.equal(unreadable.processCount, null);
+
+    const overflow = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({ state: 'overflow' }),
+    );
+    assert.equal(overflow.state, 'unknown');
+    assert.equal(overflow.reason, 'process_scan_overflow');
+    assert.equal(overflow.attributionCounts.appgroup, null);
+
+    const markerPath = join(profileRoot, 'process-group');
+    rmSync(markerPath);
+    const markerTarget = join(profileRoot, 'marker-target');
+    writeFileSync(markerTarget, '101 1001\n', { mode: 0o600 });
+    symlinkSync(markerTarget, markerPath);
+    const symlinkMarker = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      stableScan,
+    );
+    assert.equal(symlinkMarker.state, 'unknown');
+    assert.equal(symlinkMarker.reason, 'marker_unavailable');
+  });
+});
+
+test('cleanup-origin probe rejects reused group IDs when start-time bindings differ', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const processes = cleanupOriginSnapshot(uid);
+    const appReused = cloneCleanupOriginSnapshot(processes);
+    appReused.set(101, {
+      ...appReused.get(101),
+      startTimeTicks: '9001',
+    });
+    const appResult = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({
+        state: 'observed',
+        processes: cloneCleanupOriginSnapshot(appReused),
+      }),
+    );
+    assert.equal(appResult.state, 'partial');
+    assert.equal(appResult.reason, 'app_identity_unavailable');
+    assert.equal(appResult.attributionCounts.appgroup, 0);
+    assert.equal(appResult.attributionCounts.unlinked, 0);
+
+    const controllerReused = cloneCleanupOriginSnapshot(processes);
+    controllerReused.set(90, {
+      ...controllerReused.get(90),
+      startTimeTicks: '9001',
+    });
+    const controllerResult = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({
+        state: 'observed',
+        processes: cloneCleanupOriginSnapshot(controllerReused),
+      }),
+    );
+    assert.equal(controllerResult.state, 'partial');
+    assert.equal(controllerResult.reason, 'controller_identity_unavailable');
+    assert.equal(controllerResult.attributionCounts.controllergroup, 0);
+    assert.equal(controllerResult.attributionCounts.unlinked, 0);
+
+    const mismatchedMarker = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid, {
+        appStartTimeTicks: '1002',
+      }),
+      () => ({
+        state: 'observed',
+        processes: cloneCleanupOriginSnapshot(processes),
+      }),
+    );
+    assert.equal(mismatchedMarker.state, 'unknown');
+    assert.equal(mismatchedMarker.reason, 'marker_unavailable');
+  });
+});
+
+test('cleanup-origin count overflow remains capped and partial', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const processes = cleanupOriginSnapshot(uid);
+    for (let pid = 200; pid < 301; pid += 1) {
+      processes.set(
+        pid,
+        cleanupOriginProcess(pid, 1, pid, String(pid + 10_000), uid, 'helper'),
+      );
+    }
+    const observation = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({
+        state: 'observed',
+        processes: cloneCleanupOriginSnapshot(processes),
+      }),
+    );
+
+    assert.equal(observation.state, 'partial');
+    assert.equal(observation.reason, 'count_capped');
+    assert.equal(observation.overflow, true);
+    assert.equal(observation.processCount, 100);
+    assert.equal(observation.attributionCounts.unlinked, 100);
+    assert.equal(observation.processRoleCounts.other, 100);
+  });
+});
 
 test('missing desktop executable is reported as a finite spawn outcome', async () => {
   const child = spawn('/usr/bin/element-desktop-startup-missing-test', [], {

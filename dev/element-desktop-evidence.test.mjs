@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  emptyCleanupOriginProbe,
   emptyUidLifecycleObservation,
   emptyUidProcessStopDiagnostics,
   emptyUidStartupObservation,
   resolveTrustedRendererSandbox,
+  sanitizeCleanupOriginProbe,
   sanitizeDesktopStages,
   sanitizeEgressCounterObservation,
   sanitizeUidLifecycleObservation,
@@ -518,6 +520,10 @@ function stages(overrides = {}) {
         zombieCount: 0,
         unreadableProcessCount: 0,
       },
+      cleanupOriginProbe: emptyCleanupOriginProbe(
+        'not_required',
+        'no_final_processes',
+      ),
       uidLifecycleObservationBeforeUserdel:
         observedEmptyUidLifecycleObservation(),
       finalUidLifecycleObservation: observedEmptyUidLifecycleObservation(),
@@ -529,7 +535,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes with complete verified isolation and cleanup', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 21);
+  assert.equal(summary.schemaVersion, 22);
   assert.equal(
     summary.cleanupDiagnostics.stopDiagnostics.initial.census
       .effectiveUidMatchCount,
@@ -596,6 +602,10 @@ test('Desktop evidence passes with complete verified isolation and cleanup', () 
       zombieCount: 0,
       unreadableProcessCount: 0,
     },
+    cleanupOriginProbe: emptyCleanupOriginProbe(
+      'not_required',
+      'no_final_processes',
+    ),
   });
   assert.equal(
     summary.cleanupDiagnostics.stopDiagnostics.initial.census.outcome,
@@ -618,6 +628,32 @@ test('Desktop evidence passes with complete verified isolation and cleanup', () 
   assert.deepEqual(summary.egressProbe, passingProbe());
   assert.deepEqual(summary.secretService, passingSecretService());
   assert.equal(validDesktopSummary(summary), true);
+});
+
+test('schema 22 exposes only closed cleanup-origin enums and capped counts', () => {
+  const summary = sanitizeDesktopStages(stages(), sourceSha);
+  assert.equal(summary.schemaVersion, 22);
+  assert.deepEqual(
+    summary.cleanupDiagnostics.cleanupOriginProbe,
+    emptyCleanupOriginProbe('not_required', 'no_final_processes'),
+  );
+  assert.doesNotMatch(
+    JSON.stringify(summary.cleanupDiagnostics.cleanupOriginProbe),
+    /(?:pid|argv|\/tmp|username|uid)/iu,
+  );
+
+  const historicalVersion = structuredClone(summary);
+  historicalVersion.schemaVersion = 21;
+  assert.equal(validDesktopSummary(historicalVersion), false);
+
+  const extraProcessIdentity = {
+    ...emptyCleanupOriginProbe('not_required', 'no_final_processes'),
+    pid: 1234,
+  };
+  assert.deepEqual(
+    sanitizeCleanupOriginProbe(JSON.stringify(extraProcessIdentity)),
+    emptyCleanupOriginProbe(),
+  );
 });
 
 test('cleanup reports the deny policy retained when account removal is unproven', () => {
@@ -817,6 +853,10 @@ test('cleanup summary retains a failed late UID retry as failure evidence', () =
   cleanupStages[4].finalUidLifecycleObservation = lateLifecycle;
   cleanupStages[4].uidProcessObservation =
     uidProcessObservationFromLifecycle(lateLifecycle);
+  cleanupStages[4].cleanupOriginProbe = emptyCleanupOriginProbe(
+    'unknown',
+    'probe_unavailable',
+  );
 
   const summary = sanitizeDesktopStages(cleanupStages, sourceSha);
   assert.equal(summary.status, 'failed');
@@ -2030,6 +2070,10 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
     uidProcessObservationFromLifecycle(
       failedAccountCleanup[4].finalUidLifecycleObservation,
     );
+  failedAccountCleanup[4].cleanupOriginProbe = emptyCleanupOriginProbe(
+    'unknown',
+    'probe_unavailable',
+  );
   const failedAccountSummary = sanitizeDesktopStages(
     failedAccountCleanup,
     sourceSha,
@@ -2053,6 +2097,7 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
       zombieCount: 1,
       unreadableProcessCount: 0,
     },
+    cleanupOriginProbe: emptyCleanupOriginProbe('unknown', 'probe_unavailable'),
   });
 
   const privateCleanup = stages();
