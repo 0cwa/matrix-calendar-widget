@@ -1785,46 +1785,6 @@ async function readStableRowCount(
   );
 }
 
-async function readStableMonth(
-  frame: FrameLocator,
-  expectedTitles: readonly string[],
-) {
-  await expect(frame.locator('.fc-daygrid')).toBeVisible();
-  const body = frame.locator('body');
-  return measureStableDom(body, () =>
-    body.evaluate((bodyElement, expected) => {
-      const root = bodyElement.ownerDocument.documentElement;
-      const visibleEvents = Array.from(
-        bodyElement.querySelectorAll('.fc-daygrid-event'),
-      ).filter((event) => event.getClientRects().length > 0);
-      const linkCounts = Array.from(
-        bodyElement.querySelectorAll('.fc-daygrid-more-link'),
-        (link) => link.textContent?.match(/\d+/u)?.[0],
-      );
-      const collapsedEventCount = linkCounts.every(
-        (value) => value !== undefined,
-      )
-        ? linkCounts.reduce((total, value) => total + Number(value), 0)
-        : null;
-      const identitiesMatch = visibleEvents.every((event) =>
-        expected.some((title) => (event.textContent ?? '').includes(title)),
-      );
-      return {
-        visibleEventCount: visibleEvents.length,
-        collapsedEventCount,
-        renderedCount:
-          collapsedEventCount === null
-            ? null
-            : visibleEvents.length + collapsedEventCount,
-        identitiesMatch,
-        horizontalOverflow:
-          Math.max(root.scrollWidth, bodyElement.scrollWidth) >
-          root.clientWidth,
-      };
-    }, expectedTitles),
-  );
-}
-
 test('Element Web members share events and enforce room authorization', async ({
   browser,
 }) => {
