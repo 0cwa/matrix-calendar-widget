@@ -1,8 +1,8 @@
 # Project status
 
-_Last updated: 2026-10-07._
+_Last updated: 2026-10-08._
 
-_Source baseline: `main` at `ec2780497adffa0efb58602f8994bd3db34fb57e`._
+_Source baseline: `main` at `094342a1a54f894775f3160d7dce447e56a609fb`._
 
 See the [dated continuation](handoff/2026-10-06/README.md) and
 [exact delivered-slice ledger](handoff/2026-10-06/ledger.json).
@@ -10,6 +10,20 @@ See the [dated continuation](handoff/2026-10-06/README.md) and
 ## Current phase
 
 **Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence timing/text and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; actual-client and operator acceptance remain open. M7 has bounded bot commands and post-success room-target event notices. M8 has source-level gateway and CalDAV limits plus a hosted synthetic Chromium fixture. A pre-merge Element Web candidate now has shared-event and reminder/restart/paired-restore evidence; broader Web interaction, Desktop, operator-host, and measured pilot-envelope acceptance remain open. Mobile/other clients, formal screen-reader certification, and broad capacity characterization are outside the bounded beta target.
+
+A source review confirmed a gateway middleware-order defect: Nest 11.1.28
+applied the default CORS option during application initialization, after the
+server had registered its explicit request-body limit, calendar rate-limit, and
+Matrix-auth middleware. The gateway now installs the same default CORS policy
+before those early-response handlers. A loopback HTTP regression through the
+shared production setup verifies Authorization preflight handling before auth
+and quota, plus CORS headers on a synthetic authorization rejection, the
+existing body-size rejection, and a real rate-limit 429. Authentication, body
+limits, and the configured quota for actual calendar API requests remain
+unchanged; preflight does not consume that quota. This local source-level fix
+does not establish the HTTP status of an earlier hosted calendar-list failure,
+explain that failure, or demonstrate that the calendar-list flow passes. Full
+Element Web/Desktop and beta acceptance remain open.
 
 The first hosted Element Web shared-event journey passed before merge on draft
 PR #225 candidate `031a17e1b1c1b7d7f68b5293a80b8a2c46c5ccb6` ([run

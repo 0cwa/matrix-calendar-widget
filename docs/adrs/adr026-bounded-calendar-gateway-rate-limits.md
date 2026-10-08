@@ -17,7 +17,10 @@ repository has no shared rate-limit store.
 1. Register a process-local source limiter for `/v1/calendar` and its
    descendants before `MatrixAuthMiddleware`. Other HTTP routes do not consume
    its quota. The limiter counts requests before OpenID verification; it does
-   not replace actor authentication, room membership, or power checks.
+   not replace actor authentication, room membership, or power checks. Handle
+   cross-origin CORS preflight before this limiter; preflight does not consume
+   the calendar request quota, while actual calendar API requests remain
+   limited before Matrix authentication.
 2. Key requests only by the TCP peer address on `request.socket.remoteAddress`.
    Ignore `X-Forwarded-For` and other caller-supplied forwarding headers. A
    reverse proxy therefore presents one shared source to this limiter unless
