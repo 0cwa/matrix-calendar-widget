@@ -243,6 +243,17 @@ const DESKTOP_CHILD_COMPLETION_UNKNOWN = Object.freeze({
   exitStatus: null,
   timedOut: false,
 });
+const MAX_CHILD_COMPLETION_ROW_BYTES = Buffer.byteLength(
+  `${JSON.stringify({
+    type: 'desktop-child-completion',
+    sourceSha: 'f'.repeat(40),
+    desktopChildCompletion: {
+      outcome: 'spawn_error',
+      exitStatus: null,
+      timedOut: false,
+    },
+  })}\n`,
+);
 
 function invalidInput() {
   throw new Error('Invalid Desktop journey input');
@@ -1145,6 +1156,57 @@ function privateFileStat(filePath, maximumBytes) {
   return stat;
 }
 
+function appendBoundedDesktopDiagnosticRecord({
+  filePath,
+  runnerTemp,
+  record,
+  reserveBytes = 0,
+}) {
+  const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
+  const serialized = `${JSON.stringify(record)}\n`;
+  const rowBytes = Buffer.byteLength(serialized);
+  if (
+    rowBytes > MAX_DIAGNOSTIC_ROW_BYTES ||
+    !Number.isSafeInteger(reserveBytes) ||
+    reserveBytes < 0 ||
+    reserveBytes > MAX_EVIDENCE_BYTES
+  ) {
+    invalidInput();
+  }
+  const stat = privateFileStat(path, MAX_EVIDENCE_BYTES);
+  if (stat.size + rowBytes + reserveBytes > MAX_EVIDENCE_BYTES) return false;
+  try {
+    appendFileSync(path, serialized, { encoding: 'utf8', mode: 0o600 });
+  } catch {
+    invalidInput();
+  }
+  return true;
+}
+
+export function appendDesktopChildCompletion({
+  filePath,
+  runnerTemp,
+  sourceSha,
+  completion,
+}) {
+  if (
+    typeof sourceSha !== 'string' ||
+    !SOURCE_SHA_PATTERN.test(sourceSha) ||
+    !validDesktopChildCompletion(completion)
+  ) {
+    invalidInput();
+  }
+  return appendBoundedDesktopDiagnosticRecord({
+    filePath,
+    runnerTemp,
+    record: {
+      type: 'desktop-child-completion',
+      sourceSha,
+      desktopChildCompletion: completion,
+    },
+  });
+}
+
 export function writeSyntheticDesktopCredentials({
   filePath,
   runnerTemp,
@@ -1673,8 +1735,6 @@ export function appendDesktopPlaywrightResult({
   sourceSha,
   status,
 }) {
-  const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
-  privateFileStat(path, MAX_EVIDENCE_BYTES);
   if (typeof sourceSha !== 'string' || !SOURCE_SHA_PATTERN.test(sourceSha)) {
     invalidInput();
   }
@@ -1688,18 +1748,16 @@ export function appendDesktopPlaywrightResult({
           : status === 'interrupted'
             ? 'interrupted'
             : 'unknown';
-  const serialized = `${JSON.stringify({
-    type: 'desktop-playwright-result',
-    sourceSha,
-    playwrightResult,
-  })}\n`;
-  if (Buffer.byteLength(serialized) > MAX_DIAGNOSTIC_ROW_BYTES) invalidInput();
-  try {
-    appendFileSync(path, serialized, { encoding: 'utf8', mode: 0o600 });
-  } catch {
-    invalidInput();
-  }
-  privateFileStat(path, MAX_EVIDENCE_BYTES);
+  return appendBoundedDesktopDiagnosticRecord({
+    filePath,
+    runnerTemp,
+    record: {
+      type: 'desktop-playwright-result',
+      sourceSha,
+      playwrightResult,
+    },
+    reserveBytes: MAX_CHILD_COMPLETION_ROW_BYTES,
+  });
 }
 
 export function summarizeDesktopJourneyEvidence(

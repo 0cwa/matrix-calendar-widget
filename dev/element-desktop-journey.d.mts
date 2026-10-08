@@ -405,12 +405,19 @@ export declare function appendDesktopLoginStep(input: {
   roomsReadyDiagnostic?: DesktopRoomsReadyDiagnostic;
 }): void;
 
+export declare function appendDesktopChildCompletion(input: {
+  filePath: string;
+  runnerTemp: string;
+  sourceSha: string;
+  completion: DesktopChildCompletion;
+}): boolean;
+
 export declare function appendDesktopPlaywrightResult(input: {
   filePath: string;
   runnerTemp: string;
   sourceSha: string;
   status: string;
-}): void;
+}): boolean;
 
 export declare function summarizeDesktopJourneyEvidence(
   input: string,

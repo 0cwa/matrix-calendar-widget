@@ -32,6 +32,7 @@ import {
   UID_CENSUS_STDERR_PREFIX_CATEGORIES,
   uidProcessObservationFromLifecycle,
 } from './element-desktop-evidence.mjs';
+import { appendDesktopChildCompletion } from './element-desktop-journey.mjs';
 
 const PACKAGE_VERSION = '1.12.30';
 const PROBE_USERNAME = 'mcwdesktopprobe';
@@ -1705,10 +1706,11 @@ export function runDesktopCalendarJourney(
     result = undefined;
   }
   const completion = classifyDesktopChildCompletion(result);
-  appendStage(config.journeyStageFile, {
-    type: 'desktop-child-completion',
+  appendDesktopChildCompletion({
+    filePath: config.journeyStageFile,
+    runnerTemp: config.runnerTemp,
     sourceSha: state.sourceSha,
-    desktopChildCompletion: completion,
+    completion,
   });
   if (completion.outcome !== 'exited' || completion.exitStatus !== 0) {
     throw failure('desktop-not-ready');

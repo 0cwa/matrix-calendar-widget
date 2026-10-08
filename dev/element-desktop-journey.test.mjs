@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdtempSync,
@@ -18,8 +19,10 @@ import {
   DESKTOP_LOGIN_ENTRIES,
   DESKTOP_LOGIN_FAILURE_REASONS,
   DESKTOP_LOGIN_STEPS,
+  appendDesktopChildCompletion,
   appendDesktopJourneyOutcome,
   appendDesktopLoginStep,
+  appendDesktopPlaywrightResult,
   classifyDesktopLoginFailure,
   desktopWidgetIsReady,
   enterDesktopPasswordLogin,
@@ -455,6 +458,136 @@ test('reports missing, malformed, duplicate, and conflicting results as unknown'
   });
   assert.equal(malformedSource.desktopChildCompletion.outcome, 'unknown');
   assert.equal(malformedSource.playwrightResult, 'unknown');
+});
+
+test('preflights both diagnostic rows at the evidence cap without changing phase evidence', () => {
+  const sourceSha = 'e'.repeat(40);
+  const phase = 'web-member-b-keyboard-open';
+  const completion = {
+    outcome: 'spawn_error',
+    exitStatus: null,
+    timedOut: false,
+  };
+  const childRowBytes = Buffer.byteLength(
+    `${JSON.stringify({
+      type: 'desktop-child-completion',
+      sourceSha,
+      desktopChildCompletion: completion,
+    })}\n`,
+  );
+  const reporterRowBytes = Buffer.byteLength(
+    `${JSON.stringify({
+      type: 'desktop-playwright-result',
+      sourceSha,
+      playwrightResult: 'interrupted',
+    })}\n`,
+  );
+  const maximumEvidenceBytes = 16_384;
+  const createEvidenceAtSize = (runnerTemp, targetBytes) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopJourneyOutcome({
+      filePath,
+      runnerTemp,
+      phase,
+      status: 'passed',
+    });
+    const currentBytes = statSync(filePath).size;
+    assert.ok(targetBytes >= currentBytes);
+    appendFileSync(filePath, '\n'.repeat(targetBytes - currentBytes));
+    return { filePath, originalBytes: readFileSync(filePath) };
+  };
+  const appendChild = (filePath, runnerTemp) =>
+    appendDesktopChildCompletion({
+      filePath,
+      runnerTemp,
+      sourceSha,
+      completion,
+    });
+
+  withTempDirectory((runnerTemp) => {
+    const targetBytes = maximumEvidenceBytes - reporterRowBytes - childRowBytes;
+    const { filePath } = createEvidenceAtSize(runnerTemp, targetBytes);
+    assert.equal(
+      appendDesktopPlaywrightResult({
+        filePath,
+        runnerTemp,
+        sourceSha,
+        status: 'interrupted',
+      }),
+      true,
+    );
+    assert.equal(appendChild(filePath, runnerTemp), true);
+    assert.equal(statSync(filePath).size, maximumEvidenceBytes);
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: sourceSha,
+    });
+    assert.equal(summary.cases[phase], 'passed');
+    assert.equal(summary.desktopChildCompletion.outcome, 'spawn_error');
+    assert.equal(summary.playwrightResult, 'unknown');
+  });
+
+  withTempDirectory((runnerTemp) => {
+    const targetBytes =
+      maximumEvidenceBytes - reporterRowBytes - childRowBytes + 1;
+    const { filePath, originalBytes } = createEvidenceAtSize(
+      runnerTemp,
+      targetBytes,
+    );
+    assert.equal(
+      appendDesktopPlaywrightResult({
+        filePath,
+        runnerTemp,
+        sourceSha,
+        status: 'interrupted',
+      }),
+      false,
+    );
+    assert.deepEqual(readFileSync(filePath), originalBytes);
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: sourceSha,
+    });
+    assert.equal(summary.cases[phase], 'passed');
+    assert.equal(summary.desktopChildCompletion.outcome, 'unknown');
+    assert.equal(summary.playwrightResult, 'unknown');
+  });
+
+  withTempDirectory((runnerTemp) => {
+    const targetBytes = maximumEvidenceBytes - childRowBytes;
+    const { filePath } = createEvidenceAtSize(runnerTemp, targetBytes);
+    assert.equal(appendChild(filePath, runnerTemp), true);
+    assert.equal(statSync(filePath).size, maximumEvidenceBytes);
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: sourceSha,
+    });
+    assert.equal(summary.cases[phase], 'passed');
+    assert.equal(summary.desktopChildCompletion.outcome, 'spawn_error');
+    assert.equal(summary.playwrightResult, 'unknown');
+  });
+
+  withTempDirectory((runnerTemp) => {
+    const targetBytes = maximumEvidenceBytes - childRowBytes + 1;
+    const { filePath, originalBytes } = createEvidenceAtSize(
+      runnerTemp,
+      targetBytes,
+    );
+    assert.equal(appendChild(filePath, runnerTemp), false);
+    assert.deepEqual(readFileSync(filePath), originalBytes);
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: sourceSha,
+    });
+    assert.equal(summary.cases[phase], 'passed');
+    assert.equal(summary.desktopChildCompletion.outcome, 'unknown');
+    assert.equal(summary.playwrightResult, 'unknown');
+  });
 });
 
 test('records one fixed failure point for a failed Desktop room read', () => {
