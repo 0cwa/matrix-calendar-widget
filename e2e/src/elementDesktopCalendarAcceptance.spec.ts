@@ -44,7 +44,7 @@ import {
   type DesktopRoomsReadyDiagnostic,
   type DesktopRoomsReadyElementObservation,
 } from '../../dev/element-desktop-journey.mjs';
-import { ElementWebPage } from './pages/elementWebPage';
+import { ElementWebPage, getMainRoomListLocator } from './pages/elementWebPage';
 
 type FixtureUser = {
   userId: string;
@@ -1024,15 +1024,9 @@ async function observeDesktopRoomsReady(
   expectedRoomId: string | null,
   expectedMemberAId: string | null,
 ): Promise<DesktopRoomsReadyDiagnostic> {
-  const currentRoomList = page.locator(
-    '.mx_RoomListPanel [role="listbox"], .mx_RoomListPanel [role="treegrid"]',
-  );
-  const legacyRoomTree = page.getByRole('tree', {
-    name: 'Rooms',
-    exact: true,
-  });
+  const currentRoomList = await getMainRoomListLocator(page);
   const [roomList, matrixChatShell, matrixChatState] = await Promise.all([
-    observeDesktopRoomsReadyElement(currentRoomList.or(legacyRoomTree)),
+    observeDesktopRoomsReadyElement(currentRoomList),
     observeDesktopRoomsReadyElement(page.locator('.mx_MatrixChat')),
     page
       .evaluate(
