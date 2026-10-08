@@ -262,6 +262,24 @@ function passedStopDiagnostics() {
   return diagnostics;
 }
 
+function failedStopDiagnosticsWithRemainingUid(lifecycle) {
+  const census = observedStopCensus(lifecycle);
+  const diagnostics = emptyUidProcessStopDiagnostics();
+  diagnostics.status = 'failed';
+  diagnostics.initial = { inspection: 'present', census };
+  diagnostics.termSignal = 'sent';
+  diagnostics.postTerm = {
+    inspection: 'present',
+    census: structuredClone(census),
+  };
+  diagnostics.killSignal = 'sent';
+  diagnostics.postKill = {
+    inspection: 'present',
+    census: structuredClone(census),
+  };
+  return diagnostics;
+}
+
 function observedEmptyUidTcpSocketObservation() {
   return {
     coverage: 'process_owned_tcp_only',
@@ -755,6 +773,56 @@ test('cleanup evidence preserves the effective UID partition that triggered one 
     () => sanitizeDesktopStages(uncorrelatedTrigger, sourceSha),
     /invalid Desktop evidence input/u,
   );
+});
+
+test('cleanup summary rejects passing cleanup claims when a late UID retry failed', () => {
+  const summary = sanitizeDesktopStages(stages(), sourceSha);
+  const lateLifecycle = passingUidLifecycleObservation();
+  summary.cleanupDiagnostics.lateUidRetry = {
+    triggerUidProcessObservation:
+      uidProcessObservationFromLifecycle(lateLifecycle),
+    stopDiagnostics: failedStopDiagnosticsWithRemainingUid(lateLifecycle),
+  };
+
+  assert.equal(summary.checks.cleanupIsolatedProcesses, 'passed');
+  assert.equal(summary.cleanupDiagnostics.policyStatus, 'passed');
+  assert.equal(validDesktopSummary(summary), false);
+});
+
+test('cleanup summary rejects a retry that never produced a stop decision', () => {
+  const summary = sanitizeDesktopStages(stages(), sourceSha);
+  summary.cleanupDiagnostics.lateUidRetry = {
+    triggerUidProcessObservation: uidProcessObservationFromLifecycle(
+      passingUidLifecycleObservation(),
+    ),
+    stopDiagnostics: emptyUidProcessStopDiagnostics(),
+  };
+
+  assert.equal(validDesktopSummary(summary), false);
+});
+
+test('cleanup summary retains a failed late UID retry as failure evidence', () => {
+  const cleanupStages = stages();
+  const lateLifecycle = passingUidLifecycleObservation();
+  cleanupStages[4].isolatedProcesses = 'failed';
+  cleanupStages[4].policy = 'retained';
+  cleanupStages[4].user = 'failed';
+  cleanupStages[4].accountState = 'uid_match';
+  cleanupStages[4].lateUidRetry = {
+    triggerUidProcessObservation:
+      uidProcessObservationFromLifecycle(lateLifecycle),
+    stopDiagnostics: failedStopDiagnosticsWithRemainingUid(lateLifecycle),
+  };
+  cleanupStages[4].uidLifecycleObservationBeforeUserdel = lateLifecycle;
+  cleanupStages[4].finalUidLifecycleObservation = lateLifecycle;
+  cleanupStages[4].uidProcessObservation =
+    uidProcessObservationFromLifecycle(lateLifecycle);
+
+  const summary = sanitizeDesktopStages(cleanupStages, sourceSha);
+  assert.equal(summary.status, 'failed');
+  assert.equal(summary.checks.cleanupIsolatedProcesses, 'failed');
+  assert.equal(summary.cleanupDiagnostics.policyStatus, 'retained');
+  assert.equal(validDesktopSummary(summary), true);
 });
 
 test('verified dual-stack policy passes with positive DROP counts and retains each class', () => {

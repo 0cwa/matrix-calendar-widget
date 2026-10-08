@@ -1333,7 +1333,16 @@ function validateLateUidRetry(value, initialStopDiagnostics) {
     value.triggerUidProcessObservation.state === 'observed' &&
     value.triggerUidProcessObservation.overflow === false &&
     value.triggerUidProcessObservation.effectiveUidMatchCount > 0 &&
-    validateUidProcessStopDiagnostics(value.stopDiagnostics)
+    validateUidProcessStopDiagnostics(value.stopDiagnostics) &&
+    value.stopDiagnostics.status !== 'not_run'
+  );
+}
+
+function lateUidRetryPassedForCleanup(cleanupDiagnostics) {
+  return (
+    cleanupDiagnostics !== null &&
+    (cleanupDiagnostics.lateUidRetry === null ||
+      cleanupDiagnostics.lateUidRetry.stopDiagnostics.status === 'passed')
   );
 }
 
@@ -3318,8 +3327,10 @@ export function validDesktopSummary(value) {
       (value.cleanupDiagnostics?.accountState === 'absent' &&
         value.cleanupDiagnostics.stopDiagnostics.status === 'passed' &&
         value.cleanupDiagnostics.uidProcessObservation.state === 'observed' &&
-        value.cleanupDiagnostics.uidProcessObservation.uidProcessCount ===
-          0)) &&
+        value.cleanupDiagnostics.uidProcessObservation.uidProcessCount === 0 &&
+        lateUidRetryPassedForCleanup(value.cleanupDiagnostics))) &&
+    (value.cleanupDiagnostics?.policyStatus !== 'passed' ||
+      lateUidRetryPassedForCleanup(value.cleanupDiagnostics)) &&
     (value.targetUidPreflight === null ||
       validateTargetUidPreflight(value.targetUidPreflight)) &&
     value.checks?.isolatedNodePreflight ===
