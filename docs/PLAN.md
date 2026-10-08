@@ -478,6 +478,14 @@ access and event writes stay disabled by default.
         64 MiB), mapping failures to fixed upstream errors.
 - [x] Process-local rate and concurrency bounds for calendar gateway and bot
       traffic; distributed and deployment ingress controls remain operator work.
+  - [x] Install the gateway's unchanged default CORS policy before explicit
+        body-limit, calendar rate-limit, and Matrix-auth middleware. A loopback
+        HTTP regression through the shared production setup verifies an
+        Authorization preflight does not invoke auth or consume the test quota,
+        and that CORS headers remain on synthetic authorization rejection,
+        body-limit 413, and rate-limit 429 responses. This is source-level
+        middleware evidence only; it does not establish the status or cause of a
+        prior hosted calendar-list failure or complete actual-client acceptance.
   - [x] Bound calendar-gateway requests by socket peer before Matrix identity
         validation, with capped process-local state and generic retry feedback.
         Shared-proxy, restart, and replica limitations remain explicit.
