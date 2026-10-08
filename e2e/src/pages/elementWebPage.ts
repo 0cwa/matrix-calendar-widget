@@ -56,6 +56,41 @@ function escapeRegExp(value: string): string {
   ).join('');
 }
 
+type RoomNavigationTargetObservation = {
+  countCapped: 0 | 1 | 2 | null;
+  visible: boolean | null;
+  enabled: boolean | null;
+};
+
+async function observeRoomNavigationTarget(
+  locator: Locator,
+): Promise<RoomNavigationTargetObservation> {
+  let countCapped: 0 | 1 | 2;
+  try {
+    countCapped = Math.min(await locator.count(), 2) as 0 | 1 | 2;
+  } catch {
+    return { countCapped: null, visible: null, enabled: null };
+  }
+  if (countCapped !== 1) {
+    return { countCapped, visible: null, enabled: null };
+  }
+
+  const readBoolean = async (
+    read: () => Promise<boolean>,
+  ): Promise<boolean | null> => {
+    try {
+      return await read();
+    } catch {
+      return null;
+    }
+  };
+  const [visible, enabled] = await Promise.all([
+    readBoolean(() => locator.isVisible()),
+    readBoolean(() => locator.isEnabled()),
+  ]);
+  return { countCapped, visible, enabled };
+}
+
 export class ElementWebPage {
   private readonly sidebarRegion: Locator;
   private readonly navigationRegion: Locator;
@@ -178,7 +213,7 @@ export class ElementWebPage {
     return getMainRoomListLocator(this.page);
   }
 
-  private roomItemLocator(name: string) {
+  private roomNavigationCandidateLocators(name: string) {
     const escapedRoomName = escapeRegExp(name);
     const currentRoomAccessibleName = new RegExp(
       `^Open room ${escapedRoomName}(?:$|\\s)`,
@@ -187,13 +222,38 @@ export class ElementWebPage {
       `^${escapedRoomName}( Unread messages\\.)?`,
     );
     const roomsList = this.roomsListLocator();
-    const currentListItem = roomsList
-      .getByRole('option', { name: currentRoomAccessibleName })
-      .or(roomsList.getByRole('row', { name: currentRoomAccessibleName }));
-    const legacyListItem = this.page
+    const currentOption = roomsList.getByRole('option', {
+      name: currentRoomAccessibleName,
+    });
+    const currentRow = roomsList.getByRole('row', {
+      name: currentRoomAccessibleName,
+    });
+    const legacyTreeItem = this.page
       .getByRole('tree', { name: 'Rooms' })
       .getByRole('treeitem', { name: legacyRoomName });
-    return currentListItem.or(legacyListItem);
+    return { currentOption, currentRow, legacyTreeItem };
+  }
+
+  private roomItemLocator(name: string) {
+    const { currentOption, currentRow, legacyTreeItem } =
+      this.roomNavigationCandidateLocators(name);
+    return currentOption.or(currentRow).or(legacyTreeItem);
+  }
+
+  async observeRoomNavigationTargets(name: string) {
+    const { currentOption, currentRow, legacyTreeItem } =
+      this.roomNavigationCandidateLocators(name);
+    const [currentOptionObservation, currentRowObservation, legacyObservation] =
+      await Promise.all([
+        observeRoomNavigationTarget(currentOption),
+        observeRoomNavigationTarget(currentRow),
+        observeRoomNavigationTarget(legacyTreeItem),
+      ]);
+    return {
+      currentOption: currentOptionObservation,
+      currentRow: currentRowObservation,
+      legacyTreeItem: legacyObservation,
+    };
   }
 
   async waitForRoomsList(timeout = 60_000) {

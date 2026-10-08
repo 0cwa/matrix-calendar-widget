@@ -184,6 +184,12 @@ const ROOMS_READY_DIAGNOSTIC_KEYS = Object.freeze(
     'matrixClientMatchesMemberA',
   ].sort(),
 );
+const ROOM_NAVIGATION_TARGET_KEYS = Object.freeze(
+  ['countCapped', 'enabled', 'visible'].sort(),
+);
+const ROOM_NAVIGATION_DIAGNOSTIC_KEYS = Object.freeze(
+  ['currentOption', 'currentRow', 'legacyTreeItem', 'roomsReady'].sort(),
+);
 const GATEWAY_READ_FAILURE_POINTS = new Set([
   'widget-open',
   'gateway-read-await',
@@ -1068,6 +1074,39 @@ function validRoomsReadyDiagnostic(value) {
   return true;
 }
 
+function validRoomNavigationTargetObservation(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      ROOM_NAVIGATION_TARGET_KEYS.join(',') ||
+    ![null, 0, 1, 2].includes(value.countCapped) ||
+    ![null, true, false].includes(value.visible) ||
+    ![null, true, false].includes(value.enabled)
+  ) {
+    return false;
+  }
+  if (value.countCapped !== 1) {
+    return value.visible === null && value.enabled === null;
+  }
+  return true;
+}
+
+function validRoomNavigationDiagnostic(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).sort().join(',') ===
+      ROOM_NAVIGATION_DIAGNOSTIC_KEYS.join(',') &&
+    validRoomNavigationTargetObservation(value.currentOption) &&
+    validRoomNavigationTargetObservation(value.currentRow) &&
+    validRoomNavigationTargetObservation(value.legacyTreeItem) &&
+    validRoomsReadyDiagnostic(value.roomsReady)
+  );
+}
+
 function validPromptObservation(observed, actionTaken) {
   return (
     [null, true, false].includes(observed) &&
@@ -1411,6 +1450,7 @@ function parseEvidence(input) {
   const outcomes = new Map();
   let failurePoint = null;
   let gatewayReadDiagnostic = null;
+  let roomNavigationDiagnostic = null;
   let webBEditSaveDiagnostic = null;
   let loginStep = 'not_observed';
   let loginStepRecorded = false;
@@ -1481,6 +1521,10 @@ function parseEvidence(input) {
       value,
       'gatewayReadDiagnostic',
     );
+    const hasRoomNavigationDiagnostic = Object.hasOwn(
+      value,
+      'roomNavigationDiagnostic',
+    );
     const hasWebBEditSaveDiagnostic = Object.hasOwn(
       value,
       'webBEditSaveDiagnostic',
@@ -1489,6 +1533,7 @@ function parseEvidence(input) {
       (phaseKeys !== 'phase,status' &&
         phaseKeys !== 'failurePoint,phase,status' &&
         phaseKeys !== 'failurePoint,gatewayReadDiagnostic,phase,status' &&
+        phaseKeys !== 'failurePoint,phase,roomNavigationDiagnostic,status' &&
         phaseKeys !== 'failurePoint,phase,status,webBEditSaveDiagnostic') ||
       !PHASE_SET.has(value.phase) ||
       !['passed', 'failed'].includes(value.status) ||
@@ -1507,6 +1552,13 @@ function parseEvidence(input) {
           !validDesktopGatewayReadFailureDiagnostic(
             value.gatewayReadDiagnostic,
           ))) ||
+      (hasRoomNavigationDiagnostic &&
+        (roomNavigationDiagnostic !== null ||
+          !hasFailurePoint ||
+          value.phase !== 'desktop-room-widget-read' ||
+          value.status !== 'failed' ||
+          value.failurePoint !== 'room-navigation' ||
+          !validRoomNavigationDiagnostic(value.roomNavigationDiagnostic))) ||
       (value.phase === 'web-member-b-edit-save' &&
         value.status === 'failed' &&
         (!hasFailurePoint ||
@@ -1535,6 +1587,9 @@ function parseEvidence(input) {
     if (hasGatewayReadDiagnostic) {
       gatewayReadDiagnostic = value.gatewayReadDiagnostic;
     }
+    if (hasRoomNavigationDiagnostic) {
+      roomNavigationDiagnostic = value.roomNavigationDiagnostic;
+    }
     if (hasWebBEditSaveDiagnostic) {
       webBEditSaveDiagnostic = value.webBEditSaveDiagnostic;
     }
@@ -1544,6 +1599,7 @@ function parseEvidence(input) {
     outcomes,
     failurePoint,
     gatewayReadDiagnostic,
+    roomNavigationDiagnostic,
     webBEditSaveDiagnostic,
     loginStep,
     loginStepRecorded,
@@ -1607,6 +1663,7 @@ export function appendDesktopJourneyOutcome({
   status,
   failurePoint,
   gatewayReadDiagnostic,
+  roomNavigationDiagnostic,
   webBEditSaveDiagnostic,
 }) {
   const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
@@ -1624,6 +1681,12 @@ export function appendDesktopJourneyOutcome({
         status !== 'failed' ||
         !GATEWAY_READ_FAILURE_POINTS.has(failurePoint) ||
         !validDesktopGatewayReadFailureDiagnostic(gatewayReadDiagnostic))) ||
+    (roomNavigationDiagnostic !== undefined &&
+      (parsed.roomNavigationDiagnostic !== null ||
+        phase !== 'desktop-room-widget-read' ||
+        status !== 'failed' ||
+        failurePoint !== 'room-navigation' ||
+        !validRoomNavigationDiagnostic(roomNavigationDiagnostic))) ||
     (phase === 'web-member-b-edit-save' &&
       status === 'failed' &&
       (failurePoint === undefined ||
@@ -1651,6 +1714,9 @@ export function appendDesktopJourneyOutcome({
         ...(gatewayReadDiagnostic === undefined
           ? {}
           : { gatewayReadDiagnostic }),
+        ...(roomNavigationDiagnostic === undefined
+          ? {}
+          : { roomNavigationDiagnostic }),
         ...(webBEditSaveDiagnostic === undefined
           ? {}
           : { webBEditSaveDiagnostic }),
@@ -1720,6 +1786,7 @@ export function summarizeDesktopJourneyEvidence(input) {
     loginDiagnostic,
     roomsReadyDiagnostic,
     gatewayReadDiagnostic,
+    roomNavigationDiagnostic,
     webBEditSaveDiagnostic,
   } = parseEvidence(input);
   if (outcomes.get('desktop-login') === 'passed') {
@@ -1739,7 +1806,7 @@ export function summarizeDesktopJourneyEvidence(input) {
   const failed = Object.values(cases).includes('failed');
   const complete = Object.values(cases).every((value) => value === 'passed');
   return {
-    schemaVersion: 10,
+    schemaVersion: 11,
     status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
     loginStep,
     loginEntry,
@@ -1747,6 +1814,7 @@ export function summarizeDesktopJourneyEvidence(input) {
     roomsReadyDiagnostic,
     failurePoint,
     gatewayReadDiagnostic,
+    roomNavigationDiagnostic,
     webBEditSaveDiagnostic,
     cases,
   };

@@ -305,7 +305,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 10);
+    assert.equal(summary.schemaVersion, 11);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -358,6 +358,103 @@ test('records one fixed failure point for a failed Desktop room read', () => {
       readFileSync(filePath, 'utf8'),
       '{"phase":"desktop-room-widget-read","status":"failed","failurePoint":"gateway-read-status"}\n',
     );
+  });
+});
+
+test('records room-navigation evidence only at its closed failure boundary', () => {
+  const diagnostic = {
+    currentOption: { countCapped: 0, visible: null, enabled: null },
+    currentRow: { countCapped: 1, visible: false, enabled: false },
+    legacyTreeItem: { countCapped: 2, visible: null, enabled: null },
+    roomsReady: {
+      roomList: { countCapped: 1, visibility: 'visible' },
+      matrixChatShell: { countCapped: 1, visibility: 'visible' },
+      matrixChatStateAvailable: true,
+      matrixChatView: 'logged-in',
+      matrixChatReady: true,
+      matrixChatPageType: 'home-page',
+      matrixChatCurrentRoomKnown: false,
+      matrixChatCurrentRoomMatchesExpected: false,
+      matrixChatSecurityFlowView: false,
+      matrixClientMatchesMemberA: true,
+    },
+  };
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopJourneyOutcome({
+      filePath,
+      runnerTemp,
+      phase: 'desktop-room-widget-read',
+      status: 'failed',
+      failurePoint: 'room-navigation',
+      roomNavigationDiagnostic: diagnostic,
+    });
+    const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
+    assert.equal(summary.schemaVersion, 11);
+    assert.deepEqual(summary.roomNavigationDiagnostic, diagnostic);
+    assert.equal(summary.roomsReadyDiagnostic, null);
+    assert.doesNotMatch(
+      readFileSync(filePath, 'utf8'),
+      /room-name|room-id|user-id|target-name/u,
+    );
+
+    for (const override of [
+      {
+        phase: 'desktop-room-widget-read',
+        status: 'failed',
+        failurePoint: 'room-heading',
+      },
+      {
+        phase: 'desktop-member-identity',
+        status: 'failed',
+        failurePoint: 'room-navigation',
+      },
+      {
+        phase: 'desktop-room-widget-read',
+        status: 'passed',
+        failurePoint: 'room-navigation',
+      },
+    ]) {
+      assert.throws(
+        () =>
+          summarizeDesktopJourneyEvidence(
+            JSON.stringify({
+              ...override,
+              roomNavigationDiagnostic: diagnostic,
+            }),
+          ),
+        /Invalid Desktop journey input/u,
+      );
+    }
+    for (const invalid of [
+      { ...diagnostic, roomName: 'private room name' },
+      {
+        ...diagnostic,
+        currentRow: { countCapped: 2, visible: false, enabled: false },
+      },
+      {
+        ...diagnostic,
+        currentOption: {
+          countCapped: 1,
+          visible: 'private text',
+          enabled: true,
+        },
+      },
+    ]) {
+      assert.throws(
+        () =>
+          summarizeDesktopJourneyEvidence(
+            JSON.stringify({
+              phase: 'desktop-room-widget-read',
+              status: 'failed',
+              failurePoint: 'room-navigation',
+              roomNavigationDiagnostic: invalid,
+            }),
+          ),
+        /Invalid Desktop journey input/u,
+      );
+    }
   });
 });
 

@@ -282,6 +282,19 @@ export type DesktopRoomsReadyDiagnostic = {
   matrixClientMatchesMemberA: boolean | null;
 };
 
+export type DesktopRoomNavigationTargetObservation = {
+  countCapped: 0 | 1 | 2 | null;
+  visible: boolean | null;
+  enabled: boolean | null;
+};
+
+export type DesktopRoomNavigationDiagnostic = {
+  currentOption: DesktopRoomNavigationTargetObservation;
+  currentRow: DesktopRoomNavigationTargetObservation;
+  legacyTreeItem: DesktopRoomNavigationTargetObservation;
+  roomsReady: DesktopRoomsReadyDiagnostic;
+};
+
 export type DesktopGatewayReadFailureDiagnostic = {
   // 2 means two or more matching-origin/path/method events GET requests.
   eventsGetCandidateCountCapped: 0 | 1 | 2 | null;
@@ -305,7 +318,7 @@ export type ReadOnlyWidgetReadinessObservation = {
 };
 
 export type DesktopJourneySummary = {
-  schemaVersion: 10;
+  schemaVersion: 11;
   status: 'passed' | 'failed' | 'incomplete';
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;
@@ -313,6 +326,7 @@ export type DesktopJourneySummary = {
   roomsReadyDiagnostic: DesktopRoomsReadyDiagnostic | null;
   failurePoint: DesktopJourneyFailurePointObservation | null;
   gatewayReadDiagnostic: DesktopGatewayReadFailureDiagnostic | null;
+  roomNavigationDiagnostic: DesktopRoomNavigationDiagnostic | null;
   webBEditSaveDiagnostic: WebBEditSaveFailureDiagnostic | null;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
@@ -417,6 +431,7 @@ export declare function appendDesktopJourneyOutcome(input: {
   status: DesktopJourneyOutcome;
   failurePoint?: DesktopJourneyFailurePoint;
   gatewayReadDiagnostic?: DesktopGatewayReadFailureDiagnostic;
+  roomNavigationDiagnostic?: DesktopRoomNavigationDiagnostic;
   webBEditSaveDiagnostic?: WebBEditSaveFailureDiagnostic;
 }): void;
 

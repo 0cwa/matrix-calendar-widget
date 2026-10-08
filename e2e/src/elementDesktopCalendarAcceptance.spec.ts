@@ -56,6 +56,7 @@ import {
   type DesktopLoginFieldObservation,
   type DesktopLoginFormObservation,
   type DesktopLoginStep,
+  type DesktopRoomNavigationDiagnostic,
   type DesktopRoomsReadyDiagnostic,
   type DesktopRoomsReadyElementObservation,
   type WebBCalendarSurfaceStateDiagnostic,
@@ -286,6 +287,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   );
   const evidence = { filePath: evidenceFile, runnerTemp };
   let fixture: Fixture;
+  let roomNavigationTargetName: string | undefined;
   let roomsReadyIdentity: { memberAId: string; roomId: string } | undefined;
   const recorded = new Set<DesktopJourneyPhase>();
   const contexts: BrowserContext[] = [];
@@ -317,6 +319,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
     initializeDesktopJourneyEvidence(evidence);
     evidenceInitialized = true;
     fixture = readFixture(usersFile);
+    roomNavigationTargetName = fixture.roomName;
     roomsReadyIdentity = {
       memberAId: fixture.users.memberA.userId,
       roomId: fixture.teamRoomId,
@@ -707,6 +710,18 @@ test('Element Desktop room event journey', async ({ browser }) => {
       }
       desktopGatewayReadObserver?.stop();
       desktopGatewayReadObserver = undefined;
+      let roomNavigationDiagnostic: DesktopRoomNavigationDiagnostic | undefined;
+      if (
+        currentPhase === 'desktop-room-widget-read' &&
+        currentFailurePoint === 'room-navigation'
+      ) {
+        roomNavigationDiagnostic = await observeDesktopRoomNavigationFailure(
+          desktopPage,
+          roomNavigationTargetName,
+          roomsReadyIdentity?.roomId ?? null,
+          roomsReadyIdentity?.memberAId ?? null,
+        );
+      }
       let webBEditSaveDiagnostic: WebBEditSaveFailureDiagnostic | undefined;
       if (currentPhase === 'web-member-b-edit-save') {
         webBEditSaveDiagnostic = {
@@ -737,6 +752,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
         currentFailurePoint,
         gatewayReadDiagnostic,
         webBEditSaveDiagnostic,
+        roomNavigationDiagnostic,
       );
     }
   } finally {
@@ -1869,6 +1885,7 @@ function safeRecordPhase(
   failurePoint?: DesktopJourneyFailurePoint,
   gatewayReadDiagnostic?: DesktopGatewayReadFailureDiagnostic,
   webBEditSaveDiagnostic?: WebBEditSaveFailureDiagnostic,
+  roomNavigationDiagnostic?: DesktopRoomNavigationDiagnostic,
 ) {
   try {
     appendDesktopJourneyOutcome({
@@ -1880,6 +1897,9 @@ function safeRecordPhase(
       ...(webBEditSaveDiagnostic === undefined
         ? {}
         : { webBEditSaveDiagnostic }),
+      ...(roomNavigationDiagnostic === undefined
+        ? {}
+        : { roomNavigationDiagnostic }),
     });
     recorded.add(phase);
     return true;
@@ -1973,6 +1993,55 @@ async function observeDesktopLoginForm(
     username: usernameObservation,
     password: passwordObservation,
   };
+}
+
+function unavailableDesktopRoomNavigationDiagnostic(): DesktopRoomNavigationDiagnostic {
+  const unavailableTarget = {
+    countCapped: null,
+    visible: null,
+    enabled: null,
+  } as const;
+  return {
+    currentOption: unavailableTarget,
+    currentRow: unavailableTarget,
+    legacyTreeItem: unavailableTarget,
+    roomsReady: unavailableDesktopRoomsReadyDiagnostic(),
+  };
+}
+
+async function observeDesktopRoomNavigationFailure(
+  page: Page | undefined,
+  roomName: string | undefined,
+  expectedRoomId: string | null,
+  expectedMemberAId: string | null,
+): Promise<DesktopRoomNavigationDiagnostic> {
+  if (!page) return unavailableDesktopRoomNavigationDiagnostic();
+  const unavailable = unavailableDesktopRoomNavigationDiagnostic();
+  let targets = {
+    currentOption: unavailable.currentOption,
+    currentRow: unavailable.currentRow,
+    legacyTreeItem: unavailable.legacyTreeItem,
+  };
+  if (roomName !== undefined) {
+    try {
+      targets = await new ElementWebPage(page).observeRoomNavigationTargets(
+        roomName,
+      );
+    } catch {
+      // Keep locator state unavailable without retaining Playwright error text.
+    }
+  }
+  let roomsReady: DesktopRoomsReadyDiagnostic;
+  try {
+    roomsReady = await observeDesktopRoomsReady(
+      page,
+      expectedRoomId,
+      expectedMemberAId,
+    );
+  } catch {
+    roomsReady = unavailableDesktopRoomsReadyDiagnostic();
+  }
+  return { ...targets, roomsReady };
 }
 
 function unavailableDesktopRoomsReadyElementObservation(): DesktopRoomsReadyElementObservation {
