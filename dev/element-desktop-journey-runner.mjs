@@ -2101,6 +2101,7 @@ export async function stopUidProcesses(
       new Promise((resolveWait) => setTimeout(resolveWait, duration)),
     census,
     spawnCensus = spawn,
+    targetMatches = () => true,
   } = {},
 ) {
   const captureCensus =
@@ -2116,6 +2117,13 @@ export async function stopUidProcesses(
     }
   };
   const signal = (name) => {
+    let stillTarget = false;
+    try {
+      stillTarget = targetMatches() === true;
+    } catch {
+      stillTarget = false;
+    }
+    if (!stillTarget) return 'failed';
     let status;
     try {
       status = runCommand(
@@ -2210,6 +2218,133 @@ export async function retryLateEffectiveUidStop(
       ),
       stopDiagnostics: retryResult.diagnostics,
     },
+  };
+}
+
+export async function retryFinalUidCleanup(
+  state,
+  initialStopResult,
+  priorLateUidRetry,
+  user,
+  finalObservation,
+  {
+    stop,
+    capture = captureFinalUidLifecycle,
+    accountMatches = (target) => {
+      const account = lookupPasswdAccount(target.username);
+      return account.state === 'present' && account.uid === target.uid;
+    },
+    deleteUser = (target) => cleanupUser(target, true),
+  } = {},
+) {
+  const initialDiagnostics = initialStopResult?.diagnostics;
+  const retryIsIndicated =
+    priorLateUidRetry === null &&
+    user?.accountState === 'uid_match' &&
+    user?.userdelStatus === 'failed' &&
+    user?.userdelExitStatus === 8 &&
+    initialStopResult?.status === 'passed' &&
+    initialDiagnostics?.initial?.inspection === 'absent' &&
+    initialDiagnostics.termSignal === 'not_attempted' &&
+    initialDiagnostics.killSignal === 'not_attempted' &&
+    isValidUidLifecycleObservation(finalObservation) &&
+    finalObservation.state === 'observed' &&
+    finalObservation.overflow === false &&
+    finalObservation.uidProcessCount > 0 &&
+    finalObservation.effectiveUidMatchCount > 0;
+  if (!retryIsIndicated) {
+    return {
+      stopResult: initialStopResult,
+      user,
+      observation: finalObservation,
+      beforeRetryDeleteObservation: null,
+      lateUidRetry: priorLateUidRetry,
+    };
+  }
+
+  let accountMatchesBeforeStop = false;
+  try {
+    accountMatchesBeforeStop = (await accountMatches(state)) === true;
+  } catch {
+    accountMatchesBeforeStop = false;
+  }
+  if (!accountMatchesBeforeStop) {
+    return {
+      stopResult: initialStopResult,
+      user,
+      observation: finalObservation,
+      beforeRetryDeleteObservation: null,
+      lateUidRetry: priorLateUidRetry,
+    };
+  }
+
+  const guardedStop =
+    stop ??
+    ((target) =>
+      stopUidProcesses(target, {
+        targetMatches: () => {
+          try {
+            return accountMatches(target) === true;
+          } catch {
+            return false;
+          }
+        },
+      }));
+  const retry = await retryLateEffectiveUidStop(
+    state,
+    initialStopResult,
+    finalObservation,
+    { stop: guardedStop, capture },
+  );
+  const clearBeforeRetryDelete =
+    retry.stopResult.status === 'passed' &&
+    isValidUidLifecycleObservation(retry.observation) &&
+    retry.observation.state === 'observed' &&
+    retry.observation.overflow === false &&
+    retry.observation.uidProcessCount === 0;
+  if (!clearBeforeRetryDelete) {
+    return {
+      stopResult: retry.stopResult,
+      user,
+      observation: retry.observation,
+      beforeRetryDeleteObservation: null,
+      lateUidRetry: retry.lateUidRetry,
+    };
+  }
+
+  let accountMatchesBeforeDelete = false;
+  try {
+    accountMatchesBeforeDelete = (await accountMatches(state)) === true;
+  } catch {
+    accountMatchesBeforeDelete = false;
+  }
+  if (!accountMatchesBeforeDelete) {
+    return {
+      stopResult: retry.stopResult,
+      user,
+      observation: retry.observation,
+      beforeRetryDeleteObservation: null,
+      lateUidRetry: retry.lateUidRetry,
+    };
+  }
+
+  let retriedUser = user;
+  try {
+    retriedUser = await deleteUser(state);
+  } catch {
+    retriedUser = {
+      status: 'failed',
+      userdelStatus: 'not_run',
+      userdelExitStatus: null,
+      accountState: 'unavailable',
+    };
+  }
+  return {
+    stopResult: retry.stopResult,
+    user: retriedUser,
+    observation: sanitizeUidLifecycleObservation(await capture(state)),
+    beforeRetryDeleteObservation: retry.observation,
+    lateUidRetry: retry.lateUidRetry,
   };
 }
 
@@ -2501,12 +2636,31 @@ async function cleanupRunner(config) {
       lifecycleBeforeUserdel.uidProcessCount === 0;
     user = cleanupUser(state, processStatus === 'passed' && beforeUserdelClear);
     finalLifecycle = captureFinalUidLifecycle(state);
+    const finalRetry = await retryFinalUidCleanup(
+      state,
+      stopResult,
+      lateUidRetry,
+      user,
+      finalLifecycle,
+    );
+    if (finalRetry.lateUidRetry !== lateUidRetry) {
+      processStatus = finalRetry.stopResult.status;
+      user = finalRetry.user;
+      finalLifecycle = finalRetry.observation;
+      lateUidRetry = finalRetry.lateUidRetry;
+      if (finalRetry.beforeRetryDeleteObservation !== null) {
+        lifecycleBeforeUserdel = finalRetry.beforeRetryDeleteObservation;
+      }
+    }
     const finalUidClear =
       finalLifecycle.state === 'observed' &&
       finalLifecycle.uidProcessCount === 0;
+    const finalBeforeUserdelClear =
+      lifecycleBeforeUserdel.state === 'observed' &&
+      lifecycleBeforeUserdel.uidProcessCount === 0;
     const cleanupProof = cleanupProofAllowsPolicyRemoval({
       processStatus,
-      beforeUserdelClear,
+      beforeUserdelClear: finalBeforeUserdelClear,
       finalUidClear,
       user,
     });

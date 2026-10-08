@@ -12,6 +12,7 @@ import {
   createSystemCommandEnvironment,
   lookupPasswdAccount,
   parseStartupProgressRecord,
+  retryFinalUidCleanup,
   retryLateEffectiveUidStop,
   selectAvailableProbeUid,
   selectPinnedPackageHash,
@@ -635,6 +636,253 @@ test('does not retry for non-effective-only, overflowed, or already-signaled cle
     assert.equal(stopCalls, 0);
     assert.equal(captureCalls, 0);
   }
+});
+
+test('retries once after a final positive UID census when the original account still matches', async () => {
+  const state = { username: 'mcwdesktopprobe', uid: 24_000 };
+  const initialStop = await stopUidProcesses(state, {
+    runCommand: () => 1,
+    census: async () => observedEmptyLifecycle(),
+  });
+  const userAfterFailedDelete = {
+    status: 'failed',
+    userdelStatus: 'failed',
+    userdelExitStatus: 8,
+    accountState: 'uid_match',
+  };
+  const finalPositive = observedUidCensus(1);
+  const commandCalls = [];
+  const waitCalls = [];
+  const stopCalls = [];
+  const accountChecks = [];
+  const deleteCalls = [];
+  const captureCalls = [];
+  const finalRetry = await retryFinalUidCleanup(
+    state,
+    initialStop,
+    null,
+    userAfterFailedDelete,
+    finalPositive,
+    {
+      accountMatches: (target) => {
+        accountChecks.push(target);
+        return true;
+      },
+      stop: (target) => {
+        stopCalls.push(target);
+        const statuses = [0, 0, 1];
+        return stopUidProcesses(target, {
+          runCommand: (program, args) => {
+            commandCalls.push([program, ...args]);
+            return statuses.shift();
+          },
+          wait: async (duration) => waitCalls.push(duration),
+          census: async () => observedEmptyLifecycle(),
+          targetMatches: () => true,
+        });
+      },
+      capture: (target) => {
+        captureCalls.push(target);
+        return observedEmptyLifecycle();
+      },
+      deleteUser: (target) => {
+        deleteCalls.push(target);
+        return {
+          status: 'passed',
+          userdelStatus: 'passed',
+          userdelExitStatus: 0,
+          accountState: 'absent',
+        };
+      },
+    },
+  );
+
+  assert.equal(finalRetry.stopResult.status, 'passed');
+  assert.equal(finalRetry.user.accountState, 'absent');
+  assert.equal(finalRetry.observation.uidProcessCount, 0);
+  assert.equal(finalRetry.beforeRetryDeleteObservation.uidProcessCount, 0);
+  assert.equal(finalRetry.lateUidRetry.stopDiagnostics.status, 'passed');
+  assert.equal(
+    finalRetry.lateUidRetry.triggerUidProcessObservation.uidProcessCount,
+    1,
+  );
+  assert.equal(stopCalls.length, 1);
+  assert.equal(stopCalls[0], state);
+  assert.equal(accountChecks.length, 2);
+  assert.deepEqual(accountChecks, [state, state]);
+  assert.equal(deleteCalls.length, 1);
+  assert.equal(deleteCalls[0], state);
+  assert.equal(captureCalls.length, 2);
+  assert.deepEqual(waitCalls, [2_000]);
+  assert.deepEqual(
+    commandCalls.map((call) => call.slice(0, 4)),
+    [
+      ['pgrep', '-u', '24000'],
+      ['sudo', '-n', 'pkill', '-TERM'],
+      ['pgrep', '-u', '24000'],
+    ],
+  );
+  assert.equal(
+    cleanupProofAllowsPolicyRemoval({
+      processStatus: finalRetry.stopResult.status,
+      beforeUserdelClear:
+        finalRetry.beforeRetryDeleteObservation.uidProcessCount === 0,
+      finalUidClear: finalRetry.observation.uidProcessCount === 0,
+      user: finalRetry.user,
+    }),
+    true,
+  );
+});
+
+test('keeps final cleanup fail-closed on account mismatch, prior retry, or unknown census', async () => {
+  const state = { username: 'mcwdesktopprobe', uid: 24_000 };
+  const initialStop = await stopUidProcesses(state, {
+    runCommand: () => 1,
+    census: async () => observedEmptyLifecycle(),
+  });
+  const user = {
+    status: 'failed',
+    userdelStatus: 'failed',
+    userdelExitStatus: 8,
+    accountState: 'uid_match',
+  };
+  const finalPositive = observedUidCensus(1);
+  const cases = [
+    {
+      label: 'account mismatch',
+      priorRetry: null,
+      observation: finalPositive,
+      accountMatches: () => false,
+    },
+    {
+      label: 'prior retry already used',
+      priorRetry: {
+        triggerUidProcessObservation: finalPositive,
+        stopDiagnostics: initialStop.diagnostics,
+      },
+      observation: finalPositive,
+      accountMatches: () => true,
+    },
+    {
+      label: 'unknown overflowed census',
+      priorRetry: null,
+      observation: {
+        ...finalPositive,
+        state: 'partial',
+        overflow: true,
+      },
+      accountMatches: () => true,
+    },
+    {
+      label: 'different userdel failure',
+      priorRetry: null,
+      observation: finalPositive,
+      user: { ...user, userdelExitStatus: 4 },
+      accountMatches: () => true,
+    },
+  ];
+
+  for (const scenario of cases) {
+    let stopCalls = 0;
+    let deleteCalls = 0;
+    const scenarioUser = scenario.user ?? user;
+    const finalRetry = await retryFinalUidCleanup(
+      state,
+      initialStop,
+      scenario.priorRetry,
+      scenarioUser,
+      scenario.observation,
+      {
+        accountMatches: scenario.accountMatches,
+        stop: async () => {
+          stopCalls += 1;
+          return assert.fail(`${scenario.label} must not stop processes`);
+        },
+        deleteUser: async () => {
+          deleteCalls += 1;
+          return assert.fail(`${scenario.label} must not delete the account`);
+        },
+      },
+    );
+
+    assert.equal(finalRetry.user, scenarioUser, scenario.label);
+    assert.equal(finalRetry.observation, scenario.observation, scenario.label);
+    assert.equal(stopCalls, 0, scenario.label);
+    assert.equal(deleteCalls, 0, scenario.label);
+    assert.equal(
+      cleanupProofAllowsPolicyRemoval({
+        processStatus: finalRetry.stopResult.status,
+        beforeUserdelClear: true,
+        finalUidClear: finalRetry.observation.uidProcessCount === 0,
+        user: finalRetry.user,
+      }),
+      false,
+      scenario.label,
+    );
+  }
+});
+
+test('does not re-delete if account identity changes after the scoped stop', async () => {
+  const state = { username: 'mcwdesktopprobe', uid: 24_000 };
+  const initialStop = await stopUidProcesses(state, {
+    runCommand: () => 1,
+    census: async () => observedEmptyLifecycle(),
+  });
+  const user = {
+    status: 'failed',
+    userdelStatus: 'failed',
+    userdelExitStatus: 8,
+    accountState: 'uid_match',
+  };
+  const accountResults = [true, false];
+  let deleteCalls = 0;
+  const commandCalls = [];
+  const result = await retryFinalUidCleanup(
+    state,
+    initialStop,
+    null,
+    user,
+    observedUidCensus(1),
+    {
+      accountMatches: () => accountResults.shift() ?? false,
+      stop: (target) => {
+        const statuses = [0, 1];
+        return stopUidProcesses(target, {
+          runCommand: (program, args) => {
+            commandCalls.push([program, ...args]);
+            return statuses.shift();
+          },
+          wait: async () => {},
+          census: async () => observedEmptyLifecycle(),
+          targetMatches: () => false,
+        });
+      },
+      capture: () => observedEmptyLifecycle(),
+      deleteUser: () => {
+        deleteCalls += 1;
+        return assert.fail('changed account identity must not be deleted');
+      },
+    },
+  );
+
+  assert.equal(result.stopResult.status, 'passed');
+  assert.equal(result.observation.uidProcessCount, 0);
+  assert.equal(result.beforeRetryDeleteObservation, null);
+  assert.equal(result.lateUidRetry.stopDiagnostics.termSignal, 'failed');
+  assert.equal(deleteCalls, 0);
+  assert.deepEqual(commandCalls, [
+    ['pgrep', '-u', '24000'],
+    ['pgrep', '-u', '24000'],
+  ]);
+  assert.equal(
+    cleanupProofAllowsPolicyRemoval({
+      processStatus: result.stopResult.status,
+      beforeUserdelClear: true,
+      finalUidClear: true,
+      user: result.user,
+    }),
+    false,
+  );
 });
 
 test('keeps unavailable UID inspection distinct from an empty census', async () => {
