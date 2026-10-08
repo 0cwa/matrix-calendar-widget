@@ -72,6 +72,18 @@ const SUITE_IDS = new Map([
     ),
     'room-calendar-caldav-access',
   ],
+  [
+    suitePath(
+      'matrix-calendar-server/test/middleware/CalendarGatewayRateLimitMiddleware.test.ts',
+    ),
+    'calendar-gateway-rate-limit',
+  ],
+  [
+    suitePath(
+      'matrix-calendar-server/src/http/CalendarGatewayHttpApplication.test.ts',
+    ),
+    'calendar-gateway-http-setup',
+  ],
 ]);
 
 const CASE_IDS = new Map([
@@ -222,6 +234,34 @@ const CASE_IDS = new Map([
   [
     'room-calendar-caldav-access\0does not expose the application-service token in an error',
     'room-calendar-proof-error-redaction',
+  ],
+  [
+    'calendar-gateway-rate-limit\0allows a bounded burst and reports the fixed-window retry delay',
+    'calendar-gateway-rate-limit-window',
+  ],
+  [
+    'calendar-gateway-rate-limit\0fails closed at the source-key cap and frees expired entries during bounded cleanup',
+    'calendar-gateway-rate-limit-key-cap',
+  ],
+  [
+    'calendar-gateway-rate-limit\0matches only the versioned calendar route and its path-boundary descendants',
+    'calendar-gateway-rate-limit-route-scope',
+  ],
+  [
+    'calendar-gateway-rate-limit\0does not throttle non-gateway routes and ignores caller-supplied forwarded addresses',
+    'calendar-gateway-rate-limit-peer-address',
+  ],
+  [
+    'calendar-gateway-http-setup\0handles Authorization preflight before OpenID verification and rejects excess GETs before verification',
+    'calendar-gateway-openid-rate-limit-order',
+  ],
+  [
+    'calendar-gateway-http-setup\0keeps CORS headers on an authorization rejection',
+    'calendar-gateway-cors-auth-rejection',
+  ],
+  [
+    'calendar-gateway-http-setup\0keeps CORS headers on the existing request-body limit response',
+    'calendar-gateway-body-limit-before-auth',
   ],
 ]);
 

@@ -192,6 +192,41 @@ const knownCases = [
     'does not expose the application-service token in an error',
     'room-calendar-proof-error-redaction',
   ],
+  [
+    'matrix-calendar-server/test/middleware/CalendarGatewayRateLimitMiddleware.test.ts',
+    'allows a bounded burst and reports the fixed-window retry delay',
+    'calendar-gateway-rate-limit-window',
+  ],
+  [
+    'matrix-calendar-server/test/middleware/CalendarGatewayRateLimitMiddleware.test.ts',
+    'fails closed at the source-key cap and frees expired entries during bounded cleanup',
+    'calendar-gateway-rate-limit-key-cap',
+  ],
+  [
+    'matrix-calendar-server/test/middleware/CalendarGatewayRateLimitMiddleware.test.ts',
+    'matches only the versioned calendar route and its path-boundary descendants',
+    'calendar-gateway-rate-limit-route-scope',
+  ],
+  [
+    'matrix-calendar-server/test/middleware/CalendarGatewayRateLimitMiddleware.test.ts',
+    'does not throttle non-gateway routes and ignores caller-supplied forwarded addresses',
+    'calendar-gateway-rate-limit-peer-address',
+  ],
+  [
+    'matrix-calendar-server/src/http/CalendarGatewayHttpApplication.test.ts',
+    'handles Authorization preflight before OpenID verification and rejects excess GETs before verification',
+    'calendar-gateway-openid-rate-limit-order',
+  ],
+  [
+    'matrix-calendar-server/src/http/CalendarGatewayHttpApplication.test.ts',
+    'keeps CORS headers on an authorization rejection',
+    'calendar-gateway-cors-auth-rejection',
+  ],
+  [
+    'matrix-calendar-server/src/http/CalendarGatewayHttpApplication.test.ts',
+    'keeps CORS headers on the existing request-body limit response',
+    'calendar-gateway-body-limit-before-auth',
+  ],
 ];
 
 test('reports only constant IDs and closed statuses for allowlisted cases', () => {
@@ -222,6 +257,74 @@ test('reports only constant IDs and closed statuses for allowlisted cases', () =
       'contract-suite membership-guard failed',
     ].sort(),
   );
+});
+
+test('sanitizes gateway rate-limit failures and hides unknown private case details', () => {
+  const privateSentinels = [
+    'private-openid-case-title',
+    'private-openid-assertion-value',
+    'private-openid-response-body',
+    'private-openid-token',
+  ];
+  const testReport = {
+    testResults: [
+      {
+        name: suitePath(
+          'matrix-calendar-server/test/middleware/CalendarGatewayRateLimitMiddleware.test.ts',
+        ),
+        status: 'failed',
+        assertionResults: [
+          {
+            title:
+              'does not throttle non-gateway routes and ignores caller-supplied forwarded addresses',
+            status: 'failed',
+            failureMessages: ['private forwarded address detail'],
+          },
+          {
+            title: privateSentinels[0],
+            fullName: privateSentinels[1],
+            status: 'failed',
+            failureMessages: [`${privateSentinels[2]} ${privateSentinels[3]}`],
+          },
+        ],
+      },
+      {
+        name: suitePath(
+          'matrix-calendar-server/src/http/CalendarGatewayHttpApplication.test.ts',
+        ),
+        status: 'failed',
+        assertionResults: [
+          {
+            title:
+              'handles Authorization preflight before OpenID verification and rejects excess GETs before verification',
+            status: 'failed',
+            failureMessages: ['private Matrix response and credential'],
+          },
+        ],
+        failureMessage: 'private HTTP path and stack',
+      },
+    ],
+  };
+
+  const output = safeContractCaseStatusLines(testReport).join('\n');
+
+  assert.equal(
+    output,
+    [
+      'contract-case calendar-gateway-openid-rate-limit-order failed',
+      'contract-case calendar-gateway-rate-limit-peer-address failed',
+      'contract-suite calendar-gateway-http-setup failed',
+      'contract-suite calendar-gateway-rate-limit failed',
+      'unmapped-failure count=1',
+    ].join('\n'),
+  );
+  assert.doesNotMatch(
+    output,
+    /private|forwarded address|Matrix response|credential|stack/,
+  );
+  for (const sentinel of privateSentinels) {
+    assert.equal(output.includes(sentinel), false);
+  }
 });
 
 test('maps pending and unknown status values to the closed pending category', () => {
