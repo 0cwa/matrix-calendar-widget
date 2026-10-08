@@ -721,6 +721,8 @@ function emptyUidLifecycleObservation(state) {
     state,
     overflow: null,
     uidProcessCount: null,
+    effectiveUidMatchCount: null,
+    nonEffectiveUidOnlyCount: null,
     nonZombieProcessCount: null,
     zombieCount: null,
     unreadableProcessCount: null,
@@ -1190,6 +1192,8 @@ export function summarizeUidLifecycleObservation(
       : null;
   const appBoundRendererPids = new Set();
   let uidProcessCount = 0;
+  let effectiveUidMatchCount = 0;
+  let nonEffectiveUidOnlyCount = 0;
   let nonZombieProcessCount = 0;
   let zombieCount = 0;
   let unreadableProcessCount = 0;
@@ -1234,6 +1238,13 @@ export function summarizeUidLifecycleObservation(
     if (!matchesUid) continue;
 
     uidProcessCount += 1;
+    // /proc status Uid slots are real, effective, saved-set, filesystem;
+    // pgrep -u selects the effective slot, unlike this broader census.
+    if (item.uids[1] === expectedUid) {
+      effectiveUidMatchCount += 1;
+    } else {
+      nonEffectiveUidOnlyCount += 1;
+    }
     roleCounts[classifyUidProcessRole(item.args, item.pid, applicationPid)] +=
       1;
     let processUnreadable =
@@ -1277,6 +1288,8 @@ export function summarizeUidLifecycleObservation(
 
   const countValues = [
     uidProcessCount,
+    effectiveUidMatchCount,
+    nonEffectiveUidOnlyCount,
     nonZombieProcessCount,
     zombieCount,
     unreadableProcessCount,
@@ -1317,6 +1330,8 @@ export function summarizeUidLifecycleObservation(
     state,
     overflow: sawCountOverflow,
     uidProcessCount: cappedDiagnosticCount(uidProcessCount),
+    effectiveUidMatchCount: cappedDiagnosticCount(effectiveUidMatchCount),
+    nonEffectiveUidOnlyCount: cappedDiagnosticCount(nonEffectiveUidOnlyCount),
     nonZombieProcessCount: cappedDiagnosticCount(nonZombieProcessCount),
     zombieCount: cappedDiagnosticCount(zombieCount),
     unreadableProcessCount: cappedDiagnosticCount(unreadableProcessCount),

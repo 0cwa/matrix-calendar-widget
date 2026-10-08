@@ -109,6 +109,8 @@ function passingUidLifecycleObservation() {
     state: 'observed',
     overflow: false,
     uidProcessCount: 2,
+    effectiveUidMatchCount: 2,
+    nonEffectiveUidOnlyCount: 0,
     nonZombieProcessCount: 2,
     zombieCount: 0,
     unreadableProcessCount: 0,
@@ -174,6 +176,8 @@ function observedEmptyUidLifecycleObservation() {
     state: 'observed',
     overflow: false,
     uidProcessCount: 0,
+    effectiveUidMatchCount: 0,
+    nonEffectiveUidOnlyCount: 0,
     nonZombieProcessCount: 0,
     zombieCount: 0,
     unreadableProcessCount: 0,
@@ -225,8 +229,20 @@ function observedStopCensus(lifecycle) {
     stderrOutcome: 'absent',
     stderrEmitter: 'other',
     stderrLineShape: 'empty',
+    stderrPrefixCounts: {
+      timeoutTimerWarning: 0,
+      timeoutForkFailure: 0,
+      timeoutWaitFailure: 0,
+      timeoutOther: 0,
+      sudo: 0,
+      nodeRuntime: 0,
+      other: 0,
+    },
+    stderrPrefixOverflow: false,
     overflow: lifecycle.overflow,
     uidProcessCount: lifecycle.uidProcessCount,
+    effectiveUidMatchCount: lifecycle.effectiveUidMatchCount,
+    nonEffectiveUidOnlyCount: lifecycle.nonEffectiveUidOnlyCount,
     nonZombieProcessCount: lifecycle.nonZombieProcessCount,
     zombieCount: lifecycle.zombieCount,
     unreadableProcessCount: lifecycle.unreadableProcessCount,
@@ -491,7 +507,17 @@ function stages(overrides = {}) {
 test('Desktop evidence passes with complete verified isolation and cleanup', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 19);
+  assert.equal(summary.schemaVersion, 20);
+  assert.equal(
+    summary.cleanupDiagnostics.stopDiagnostics.initial.census
+      .effectiveUidMatchCount,
+    0,
+  );
+  assert.equal(
+    summary.cleanupDiagnostics.stopDiagnostics.initial.census
+      .nonEffectiveUidOnlyCount,
+    0,
+  );
   assert.deepEqual(summary.desktopObservation.configInMemoryObservation, {
     state: 'observed',
     matchesFixture: true,
@@ -1262,6 +1288,8 @@ test('cleanup census stderr buckets are closed and correlate timeout 125 signatu
   census.exitStatus = 125;
   census.overflow = null;
   census.uidProcessCount = null;
+  census.effectiveUidMatchCount = null;
+  census.nonEffectiveUidOnlyCount = null;
   census.nonZombieProcessCount = null;
   census.zombieCount = null;
   census.unreadableProcessCount = null;
@@ -1271,7 +1299,35 @@ test('cleanup census stderr buckets are closed and correlate timeout 125 signatu
   census.stderrOutcome = 'timeout-fork-failure';
   census.stderrEmitter = 'timeout';
   census.stderrLineShape = 'single';
+  census.stderrPrefixCounts = {
+    timeoutTimerWarning: 0,
+    timeoutForkFailure: 1,
+    timeoutWaitFailure: 0,
+    timeoutOther: 0,
+    sudo: 0,
+    nodeRuntime: 0,
+    other: 0,
+  };
+  census.stderrPrefixOverflow = false;
   assert.equal(validDesktopSummary(summary), true);
+
+  const cappedPrefixCounts = structuredClone(summary);
+  const cappedCensus =
+    cappedPrefixCounts.cleanupDiagnostics.stopDiagnostics.initial.census;
+  cappedCensus.stderrOutcome = 'other';
+  cappedCensus.stderrEmitter = 'other';
+  cappedCensus.stderrLineShape = 'multiple';
+  cappedCensus.stderrPrefixCounts = {
+    timeoutTimerWarning: 0,
+    timeoutForkFailure: 0,
+    timeoutWaitFailure: 0,
+    timeoutOther: 0,
+    sudo: 0,
+    nodeRuntime: 0,
+    other: 100,
+  };
+  cappedCensus.stderrPrefixOverflow = true;
+  assert.equal(validDesktopSummary(cappedPrefixCounts), true);
 
   const wrongEmitter = structuredClone(summary);
   wrongEmitter.cleanupDiagnostics.stopDiagnostics.initial.census.stderrEmitter =
@@ -1297,13 +1353,21 @@ test('cleanup census stderr buckets are closed and correlate timeout 125 signatu
     'three-lines';
   assert.equal(validDesktopSummary(unknownLineShape), false);
 
+  const wrongPrefixCount = structuredClone(summary);
+  wrongPrefixCount.cleanupDiagnostics.stopDiagnostics.initial.census.stderrPrefixCounts.timeoutForkFailure = 0;
+  assert.equal(validDesktopSummary(wrongPrefixCount), false);
+
+  const unknownPrefixCount = structuredClone(summary);
+  unknownPrefixCount.cleanupDiagnostics.stopDiagnostics.initial.census.stderrPrefixCounts.raw = 1;
+  assert.equal(validDesktopSummary(unknownPrefixCount), false);
+
   const impossibleEmpty = structuredClone(summary);
   impossibleEmpty.cleanupDiagnostics.stopDiagnostics.initial.census.stderrOutcome =
     'absent';
   assert.equal(validDesktopSummary(impossibleEmpty), false);
 
   const previousSchema = structuredClone(summary);
-  previousSchema.schemaVersion = 18;
+  previousSchema.schemaVersion = 19;
   assert.equal(validDesktopSummary(previousSchema), false);
 });
 
@@ -1326,6 +1390,13 @@ test('UID lifecycle sanitizer preserves bounded ownership evidence and unavailab
       ...observed,
       applicationPid: 98_765,
       rawCommandLine: 'private-canary',
+    }),
+    emptyUidLifecycleObservation('unavailable'),
+  );
+  assert.deepEqual(
+    sanitizeUidLifecycleObservation({
+      ...observed,
+      effectiveUidMatchCount: 1,
     }),
     emptyUidLifecycleObservation('unavailable'),
   );
@@ -1755,6 +1826,8 @@ test('Desktop evidence cannot pass with missing policy or unsuccessful cleanup',
     state: 'observed',
     overflow: false,
     uidProcessCount: 2,
+    effectiveUidMatchCount: 1,
+    nonEffectiveUidOnlyCount: 1,
     nonZombieProcessCount: 1,
     zombieCount: 1,
     unreadableProcessCount: 0,

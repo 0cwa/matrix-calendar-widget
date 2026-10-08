@@ -784,6 +784,46 @@ test('UID lifecycle cleanup keeps process ownership unobserved and retains cappe
   assert.equal(overflow.processRoleCounts.chromium, 100);
 });
 
+test('UID lifecycle separates effective matches from other UID-slot matches', () => {
+  const observed = summarizeUidLifecycleObservation(
+    [
+      lifecycleProcess(30, 1, 30, ['private-effective-command']),
+      lifecycleProcess(31, 1, 31, ['private-non-effective-command'], {
+        uids: [24_000, 35_000, 24_000, 24_000],
+      }),
+      lifecycleProcess(32, 1, 32, ['private-unmatched-command'], {
+        uids: [35_000, 35_000, 35_000, 35_000],
+      }),
+    ],
+    24_000,
+  );
+
+  assert.equal(observed.state, 'observed');
+  assert.equal(observed.uidProcessCount, 2);
+  assert.equal(observed.effectiveUidMatchCount, 1);
+  assert.equal(observed.nonEffectiveUidOnlyCount, 1);
+  assert.doesNotMatch(JSON.stringify(observed), /private|24000|35000/u);
+
+  const capped = summarizeUidLifecycleObservation(
+    [
+      ...Array.from({ length: 101 }, (_, index) =>
+        lifecycleProcess(100 + index, 1, 100 + index, ['--type=renderer']),
+      ),
+      ...Array.from({ length: 101 }, (_, index) =>
+        lifecycleProcess(300 + index, 1, 300 + index, ['--type=renderer'], {
+          uids: [24_000, 35_000, 24_000, 24_000],
+        }),
+      ),
+    ],
+    24_000,
+  );
+  assert.equal(capped.state, 'partial');
+  assert.equal(capped.overflow, true);
+  assert.equal(capped.uidProcessCount, 100);
+  assert.equal(capped.effectiveUidMatchCount, 100);
+  assert.equal(capped.nonEffectiveUidOnlyCount, 100);
+});
+
 function procTcpRow(index, uid, local, remote, state, inode) {
   return `${index}: ${local} ${remote} ${state} 00000000:00000000 00:00000000 00000000 ${uid} 0 ${inode}`;
 }

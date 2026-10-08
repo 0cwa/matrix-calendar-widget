@@ -27,6 +27,7 @@ import {
   sanitizeEgressCounterObservation,
   sanitizeUidLifecycleObservation,
   sanitizeUidStartupObservation,
+  UID_CENSUS_STDERR_PREFIX_CATEGORIES,
   uidProcessObservationFromLifecycle,
 } from './element-desktop-evidence.mjs';
 
@@ -44,11 +45,14 @@ const DESKTOP_STAGE_NAME = 'element-desktop-startup-stage.jsonl';
 const DESKTOP_EVIDENCE_MAX_BYTES = 1_048_576;
 const UID_CENSUS_MAX_BYTES = 16_384;
 const UID_CENSUS_STDERR_MAX_BYTES = 4_096;
+const UID_CENSUS_STDERR_PREFIX_COUNT_MAX = 100;
 const UID_STOP_CENSUS_CAPTURE = Symbol('uid-stop-census-capture');
 const UNAVAILABLE_UID_CENSUS_STDERR = Object.freeze({
   outcome: 'unavailable',
   emitter: 'unavailable',
   lineShape: 'unavailable',
+  prefixCounts: null,
+  prefixOverflow: null,
 });
 const UID_STOP_CENSUS_WAIT_LIMITS_MS = Object.freeze({
   initial: 1_200,
@@ -1688,7 +1692,11 @@ function uidStopCensusFromLifecycle(
         stderrOutcome: stderr.outcome,
         stderrEmitter: stderr.emitter,
         stderrLineShape: stderr.lineShape,
+        stderrPrefixCounts: stderr.prefixCounts,
+        stderrPrefixOverflow: stderr.prefixOverflow,
         uidProcessCount: observation.uidProcessCount,
+        effectiveUidMatchCount: observation.effectiveUidMatchCount,
+        nonEffectiveUidOnlyCount: observation.nonEffectiveUidOnlyCount,
         nonZombieProcessCount: observation.nonZombieProcessCount,
         zombieCount: observation.zombieCount,
         unreadableProcessCount: observation.unreadableProcessCount,
@@ -1702,7 +1710,11 @@ function uidStopCensusFromLifecycle(
         stderrOutcome: stderr.outcome,
         stderrEmitter: stderr.emitter,
         stderrLineShape: stderr.lineShape,
+        stderrPrefixCounts: stderr.prefixCounts,
+        stderrPrefixOverflow: stderr.prefixOverflow,
         uidProcessCount: null,
+        effectiveUidMatchCount: null,
+        nonEffectiveUidOnlyCount: null,
         nonZombieProcessCount: null,
         zombieCount: null,
         unreadableProcessCount: null,
@@ -1735,14 +1747,65 @@ function hasUidCensusStderrPrefix(bytes, start, end, prefix) {
   return true;
 }
 
-function classifyUidCensusStderrEmitter(bytes, start, end) {
+function classifyUidCensusStderrPrefix(bytes, start, end) {
+  if (
+    hasUidCensusStderrPrefix(
+      bytes,
+      start,
+      end,
+      'timeout: warning: timer_create:',
+    ) ||
+    hasUidCensusStderrPrefix(
+      bytes,
+      start,
+      end,
+      'timeout: warning: timer_settime:',
+    ) ||
+    hasUidCensusStderrPrefix(bytes, start, end, 'timeout: warning: setitimer:')
+  ) {
+    return 'timeoutTimerWarning';
+  }
+  if (
+    hasUidCensusStderrPrefix(
+      bytes,
+      start,
+      end,
+      'timeout: fork system call failed:',
+    )
+  ) {
+    return 'timeoutForkFailure';
+  }
+  if (
+    hasUidCensusStderrPrefix(
+      bytes,
+      start,
+      end,
+      'timeout: error waiting for command:',
+    )
+  ) {
+    return 'timeoutWaitFailure';
+  }
   if (hasUidCensusStderrPrefix(bytes, start, end, 'timeout:')) {
-    return 'timeout';
+    return 'timeoutOther';
   }
   if (hasUidCensusStderrPrefix(bytes, start, end, 'sudo:')) return 'sudo';
   if (hasUidCensusStderrPrefix(bytes, start, end, 'node:')) {
-    return 'node-runtime';
+    return 'nodeRuntime';
   }
+  return 'other';
+}
+
+function uidCensusStderrEmitter(prefix) {
+  if (
+    prefix === 'timeoutForkFailure' ||
+    prefix === 'timeoutWaitFailure' ||
+    prefix === 'timeoutTimerWarning' ||
+    prefix === 'timeoutOther'
+  ) {
+    return 'timeout';
+  }
+  if (prefix === 'nodeRuntime') return 'node-runtime';
+  if (prefix === 'sudo') return 'sudo';
   return 'other';
 }
 
@@ -1753,10 +1816,12 @@ function classifyUidCensusStderr(
 ) {
   if (!available || overflow) return UNAVAILABLE_UID_CENSUS_STDERR;
 
+  const prefixCounts = Object.fromEntries(
+    UID_CENSUS_STDERR_PREFIX_CATEGORIES.map((name) => [name, 0]),
+  );
   let lineCount = 0;
-  let firstLineStart = 0;
-  let firstLineEnd = 0;
   let firstLineEmitter = null;
+  let firstLinePrefix = null;
   let conflictingEmitters = false;
   let lineStart = 0;
   for (let index = 0; index <= length; index += 1) {
@@ -1764,15 +1829,16 @@ function classifyUidCensusStderr(
     let lineEnd = index;
     if (lineEnd > lineStart && bytes[lineEnd - 1] === 0x0d) lineEnd -= 1;
     if (lineEnd > lineStart) {
-      const lineEmitter = classifyUidCensusStderrEmitter(
+      const linePrefix = classifyUidCensusStderrPrefix(
         bytes,
         lineStart,
         lineEnd,
       );
+      prefixCounts[linePrefix] += 1;
+      const lineEmitter = uidCensusStderrEmitter(linePrefix);
       if (lineCount === 0) {
-        firstLineStart = lineStart;
-        firstLineEnd = lineEnd;
         firstLineEmitter = lineEmitter;
+        firstLinePrefix = linePrefix;
       } else if (
         firstLineEmitter !== 'other' &&
         lineEmitter !== 'other' &&
@@ -1785,7 +1851,13 @@ function classifyUidCensusStderr(
     lineStart = index + 1;
   }
   if (lineCount === 0) {
-    return { outcome: 'absent', emitter: 'other', lineShape: 'empty' };
+    return {
+      outcome: 'absent',
+      emitter: 'other',
+      lineShape: 'empty',
+      prefixCounts,
+      prefixOverflow: false,
+    };
   }
 
   const lineShape = lineCount === 1 ? 'single' : 'multiple';
@@ -1800,30 +1872,29 @@ function classifyUidCensusStderr(
   if (
     status === 125 &&
     lineShape === 'single' &&
-    emitter === 'timeout' &&
-    hasUidCensusStderrPrefix(
-      bytes,
-      firstLineStart,
-      firstLineEnd,
-      'timeout: fork system call failed: ',
-    )
+    firstLinePrefix === 'timeoutForkFailure'
   ) {
     outcome = 'timeout-fork-failure';
   } else if (
     status === 125 &&
     lineShape === 'single' &&
-    emitter === 'timeout' &&
-    hasUidCensusStderrPrefix(
-      bytes,
-      firstLineStart,
-      firstLineEnd,
-      'timeout: error waiting for command: ',
-    )
+    firstLinePrefix === 'timeoutWaitFailure'
   ) {
     outcome = 'timeout-wait-failure';
   }
 
-  return { outcome, emitter, lineShape };
+  return {
+    outcome,
+    emitter,
+    lineShape,
+    prefixCounts: Object.fromEntries(
+      UID_CENSUS_STDERR_PREFIX_CATEGORIES.map((name) => [
+        name,
+        Math.min(prefixCounts[name], UID_CENSUS_STDERR_PREFIX_COUNT_MAX),
+      ]),
+    ),
+    prefixOverflow: lineCount > UID_CENSUS_STDERR_PREFIX_COUNT_MAX,
+  };
 }
 
 function captureUidStopCensus(state, spawnChild = spawn) {
@@ -1858,7 +1929,12 @@ function captureUidStopCensus(state, spawnChild = spawn) {
           String(state.uid),
         ],
         {
-          env: createSystemCommandEnvironment(process.env),
+          // timeout(1) localizes its stderr using LC_ALL; keep the bounded
+          // prefix classifier deterministic for this census child only.
+          env: {
+            ...createSystemCommandEnvironment(process.env),
+            LC_ALL: 'C',
+          },
           stdio: ['ignore', 'pipe', 'pipe'],
         },
       );

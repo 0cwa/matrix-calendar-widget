@@ -26,6 +26,8 @@ function observedUidCensus(uidProcessCount) {
     state: 'observed',
     overflow: false,
     uidProcessCount,
+    effectiveUidMatchCount: uidProcessCount,
+    nonEffectiveUidOnlyCount: 0,
     nonZombieProcessCount: uidProcessCount,
     zombieCount: 0,
     unreadableProcessCount: 0,
@@ -57,6 +59,8 @@ function observedEmptyLifecycle() {
     ...emptyUidLifecycleObservation('observed'),
     overflow: false,
     uidProcessCount: 0,
+    effectiveUidMatchCount: 0,
+    nonEffectiveUidOnlyCount: 0,
     nonZombieProcessCount: 0,
     zombieCount: 0,
     unreadableProcessCount: 0,
@@ -139,14 +143,27 @@ test('default UID census uses the supplied state and keeps failed capture unavai
   assert.equal(result.status, 'passed');
   assert.equal(result.diagnostics.initial.census.state, 'observed');
   assert.equal(result.diagnostics.initial.census.uidProcessCount, 0);
+  assert.equal(result.diagnostics.initial.census.effectiveUidMatchCount, 0);
+  assert.equal(result.diagnostics.initial.census.nonEffectiveUidOnlyCount, 0);
   assert.equal(result.diagnostics.initial.census.outcome, 'observed');
   assert.equal(result.diagnostics.initial.census.stderrOutcome, 'absent');
   assert.equal(result.diagnostics.initial.census.stderrEmitter, 'other');
   assert.equal(result.diagnostics.initial.census.stderrLineShape, 'empty');
+  assert.deepEqual(result.diagnostics.initial.census.stderrPrefixCounts, {
+    timeoutTimerWarning: 0,
+    timeoutForkFailure: 0,
+    timeoutWaitFailure: 0,
+    timeoutOther: 0,
+    sudo: 0,
+    nodeRuntime: 0,
+    other: 0,
+  });
+  assert.equal(result.diagnostics.initial.census.stderrPrefixOverflow, false);
   assert.equal(result.diagnostics.initial.census.exitStatus, 0);
   assert.equal(spawned.length, 1);
   assert.equal(spawned[0][0], 'timeout');
   assert.equal(spawned[0][1].at(-1), '24321');
+  assert.equal(spawned[0][2].env.LC_ALL, 'C');
 
   const failedCapture = await stopUidProcesses(
     { uid: 24_322 },
@@ -230,9 +247,10 @@ test('classifies UID census subprocess results without exposing subprocess outpu
   assert.equal(timeoutSignalOutput.stderrOutcome, 'other');
   assert.equal(timeoutSignalOutput.stderrEmitter, 'timeout');
   assert.equal(timeoutSignalOutput.stderrLineShape, 'single');
+  assert.equal(timeoutSignalOutput.stderrPrefixCounts.timeoutOther, 1);
   assert.doesNotMatch(
     JSON.stringify(timeoutSignalOutput),
-    /Operation not permitted|timeout:|sudo/u,
+    /Operation not permitted|timeout:|sudo: /u,
   );
 
   const timeoutForkFailure = await initialUidCensus(() =>
@@ -246,6 +264,16 @@ test('classifies UID census subprocess results without exposing subprocess outpu
   assert.equal(timeoutForkFailure.stderrOutcome, 'timeout-fork-failure');
   assert.equal(timeoutForkFailure.stderrEmitter, 'timeout');
   assert.equal(timeoutForkFailure.stderrLineShape, 'single');
+  assert.deepEqual(timeoutForkFailure.stderrPrefixCounts, {
+    timeoutTimerWarning: 0,
+    timeoutForkFailure: 1,
+    timeoutWaitFailure: 0,
+    timeoutOther: 0,
+    sudo: 0,
+    nodeRuntime: 0,
+    other: 0,
+  });
+  assert.equal(timeoutForkFailure.stderrPrefixOverflow, false);
   assert.equal(timeoutForkFailure.exitStatus, 125);
   assert.doesNotMatch(
     JSON.stringify(timeoutForkFailure),
@@ -263,6 +291,7 @@ test('classifies UID census subprocess results without exposing subprocess outpu
   assert.equal(timeoutWaitFailure.stderrOutcome, 'timeout-wait-failure');
   assert.equal(timeoutWaitFailure.stderrEmitter, 'timeout');
   assert.equal(timeoutWaitFailure.stderrLineShape, 'single');
+  assert.equal(timeoutWaitFailure.stderrPrefixCounts.timeoutWaitFailure, 1);
   assert.doesNotMatch(
     JSON.stringify(timeoutWaitFailure),
     /Interrupted system call|timeout:/u,
@@ -313,16 +342,40 @@ test('classifies UID census subprocess results without exposing subprocess outpu
     censusChild({
       status: 125,
       stderrChunks: [
-        'timeout: fork system call failed: Resource unavailable\nsudo: later line\n',
+        'timeout: warning: timer_create: Resource unavailable\ntimeout: fork system call failed: Resource unavailable\nsudo: private later line\n',
       ],
     }),
   );
   assert.equal(multipleLines.stderrOutcome, 'other');
   assert.equal(multipleLines.stderrEmitter, 'other');
   assert.equal(multipleLines.stderrLineShape, 'multiple');
+  assert.deepEqual(multipleLines.stderrPrefixCounts, {
+    timeoutTimerWarning: 1,
+    timeoutForkFailure: 1,
+    timeoutWaitFailure: 0,
+    timeoutOther: 0,
+    sudo: 1,
+    nodeRuntime: 0,
+    other: 0,
+  });
+  assert.equal(multipleLines.stderrPrefixOverflow, false);
   assert.doesNotMatch(
     JSON.stringify(multipleLines),
-    /Resource unavailable|later line/u,
+    /Resource unavailable|private later line|timeout:|sudo: /u,
+  );
+
+  const lineCountOverflow = await initialUidCensus(() =>
+    censusChild({
+      status: 1,
+      stderrChunks: ['private census line\n'.repeat(110)],
+    }),
+  );
+  assert.equal(lineCountOverflow.stderrLineShape, 'multiple');
+  assert.equal(lineCountOverflow.stderrPrefixCounts.other, 100);
+  assert.equal(lineCountOverflow.stderrPrefixOverflow, true);
+  assert.doesNotMatch(
+    JSON.stringify(lineCountOverflow),
+    /private census line/u,
   );
 
   const otherStderr = await initialUidCensus(() =>
@@ -354,6 +407,8 @@ test('classifies UID census subprocess results without exposing subprocess outpu
   assert.equal(stderrOverflow.stderrOutcome, 'unavailable');
   assert.equal(stderrOverflow.stderrEmitter, 'unavailable');
   assert.equal(stderrOverflow.stderrLineShape, 'unavailable');
+  assert.equal(stderrOverflow.stderrPrefixCounts, null);
+  assert.equal(stderrOverflow.stderrPrefixOverflow, null);
 
   for (const output of ['not-json', JSON.stringify({ state: 'observed' })]) {
     const malformed = await initialUidCensus(() =>

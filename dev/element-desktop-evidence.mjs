@@ -94,6 +94,16 @@ const UID_LIFECYCLE_PROCESS_ROLES = Object.freeze([
   'other',
   'unknown',
 ]);
+export const UID_CENSUS_STDERR_PREFIX_CATEGORIES = Object.freeze([
+  'timeoutTimerWarning',
+  'timeoutForkFailure',
+  'timeoutWaitFailure',
+  'timeoutOther',
+  'sudo',
+  'nodeRuntime',
+  'other',
+]);
+const MAX_UID_CENSUS_STDERR_PREFIX_COUNT = 100;
 const UID_STOP_INSPECTION_STATES = new Set([
   'not_attempted',
   'unavailable',
@@ -797,6 +807,8 @@ export function emptyUidLifecycleObservation(state = 'not_observed') {
     state,
     overflow: null,
     uidProcessCount: null,
+    effectiveUidMatchCount: null,
+    nonEffectiveUidOnlyCount: null,
     nonZombieProcessCount: null,
     zombieCount: null,
     unreadableProcessCount: null,
@@ -942,6 +954,8 @@ function validateUidLifecycleObservation(value) {
       'state',
       'overflow',
       'uidProcessCount',
+      'effectiveUidMatchCount',
+      'nonEffectiveUidOnlyCount',
       'nonZombieProcessCount',
       'zombieCount',
       'unreadableProcessCount',
@@ -990,6 +1004,8 @@ function validateUidLifecycleObservation(value) {
     return (
       value.overflow === expected.overflow &&
       value.uidProcessCount === expected.uidProcessCount &&
+      value.effectiveUidMatchCount === expected.effectiveUidMatchCount &&
+      value.nonEffectiveUidOnlyCount === expected.nonEffectiveUidOnlyCount &&
       value.nonZombieProcessCount === expected.nonZombieProcessCount &&
       value.zombieCount === expected.zombieCount &&
       value.unreadableProcessCount === expected.unreadableProcessCount &&
@@ -1022,6 +1038,8 @@ function validateUidLifecycleObservation(value) {
   if (
     typeof value.overflow !== 'boolean' ||
     !diagnosticCount(value.uidProcessCount) ||
+    !diagnosticCount(value.effectiveUidMatchCount) ||
+    !diagnosticCount(value.nonEffectiveUidOnlyCount) ||
     !diagnosticCount(value.nonZombieProcessCount) ||
     !diagnosticCount(value.zombieCount) ||
     !diagnosticCount(value.unreadableProcessCount) ||
@@ -1047,6 +1065,8 @@ function validateUidLifecycleObservation(value) {
     0,
   );
   if (
+    value.effectiveUidMatchCount > value.uidProcessCount ||
+    value.nonEffectiveUidOnlyCount > value.uidProcessCount ||
     value.nonZombieProcessCount > value.uidProcessCount ||
     value.zombieCount > value.uidProcessCount ||
     value.unreadableProcessCount > value.uidProcessCount ||
@@ -1059,6 +1079,8 @@ function validateUidLifecycleObservation(value) {
     (!value.overflow &&
       (value.nonZombieProcessCount + value.zombieCount >
         value.uidProcessCount ||
+        value.effectiveUidMatchCount + value.nonEffectiveUidOnlyCount !==
+          value.uidProcessCount ||
         classCountTotal !== value.uidProcessCount ||
         roleCountTotal !== value.uidProcessCount)) ||
     (value.state === 'observed' &&
@@ -1182,6 +1204,8 @@ export function sanitizeUidLifecycleObservation(input) {
     state: value.state,
     overflow: value.overflow,
     uidProcessCount: value.uidProcessCount,
+    effectiveUidMatchCount: value.effectiveUidMatchCount,
+    nonEffectiveUidOnlyCount: value.nonEffectiveUidOnlyCount,
     nonZombieProcessCount: value.nonZombieProcessCount,
     zombieCount: value.zombieCount,
     unreadableProcessCount: value.unreadableProcessCount,
@@ -1243,8 +1267,12 @@ function emptyUidStopCensus(state) {
     stderrOutcome: state === 'not_attempted' ? 'not_attempted' : 'unavailable',
     stderrEmitter: 'unavailable',
     stderrLineShape: 'unavailable',
+    stderrPrefixCounts: null,
+    stderrPrefixOverflow: null,
     overflow: null,
     uidProcessCount: null,
+    effectiveUidMatchCount: null,
+    nonEffectiveUidOnlyCount: null,
     nonZombieProcessCount: null,
     zombieCount: null,
     unreadableProcessCount: null,
@@ -1272,6 +1300,79 @@ export function emptyUidProcessStopDiagnostics() {
   };
 }
 
+function validateUidCensusStderrPrefixSummary(value) {
+  if (
+    value.stderrOutcome === 'not_attempted' ||
+    value.stderrOutcome === 'unavailable'
+  ) {
+    return (
+      value.stderrPrefixCounts === null && value.stderrPrefixOverflow === null
+    );
+  }
+  if (!hasKeys(value.stderrPrefixCounts, UID_CENSUS_STDERR_PREFIX_CATEGORIES)) {
+    return false;
+  }
+  if (
+    UID_CENSUS_STDERR_PREFIX_CATEGORIES.some(
+      (name) =>
+        !diagnosticCount(value.stderrPrefixCounts[name]) ||
+        value.stderrPrefixCounts[name] > MAX_UID_CENSUS_STDERR_PREFIX_COUNT,
+    )
+  ) {
+    return false;
+  }
+  const lineCount = UID_CENSUS_STDERR_PREFIX_CATEGORIES.reduce(
+    (total, name) => total + value.stderrPrefixCounts[name],
+    0,
+  );
+  if (value.stderrOutcome === 'absent') {
+    return (
+      value.stderrLineShape === 'empty' &&
+      value.stderrPrefixOverflow === false &&
+      lineCount === 0
+    );
+  }
+  if (
+    value.stderrOutcome !== 'other' &&
+    value.stderrOutcome !== 'timeout-fork-failure' &&
+    value.stderrOutcome !== 'timeout-wait-failure'
+  ) {
+    return false;
+  }
+  if (typeof value.stderrPrefixOverflow !== 'boolean') return false;
+  if (
+    (value.stderrLineShape === 'single' &&
+      (lineCount !== 1 || value.stderrPrefixOverflow)) ||
+    (value.stderrLineShape === 'multiple' &&
+      (lineCount < 2 ||
+        (!value.stderrPrefixOverflow &&
+          lineCount > MAX_UID_CENSUS_STDERR_PREFIX_COUNT)))
+  ) {
+    return false;
+  }
+  if (value.stderrOutcome === 'timeout-fork-failure') {
+    return (
+      !value.stderrPrefixOverflow &&
+      value.stderrPrefixCounts.timeoutForkFailure === 1 &&
+      UID_CENSUS_STDERR_PREFIX_CATEGORIES.every(
+        (name) =>
+          name === 'timeoutForkFailure' || value.stderrPrefixCounts[name] === 0,
+      )
+    );
+  }
+  if (value.stderrOutcome === 'timeout-wait-failure') {
+    return (
+      !value.stderrPrefixOverflow &&
+      value.stderrPrefixCounts.timeoutWaitFailure === 1 &&
+      UID_CENSUS_STDERR_PREFIX_CATEGORIES.every(
+        (name) =>
+          name === 'timeoutWaitFailure' || value.stderrPrefixCounts[name] === 0,
+      )
+    );
+  }
+  return true;
+}
+
 function validateUidStopCensus(value) {
   if (
     !hasKeys(value, [
@@ -1281,8 +1382,12 @@ function validateUidStopCensus(value) {
       'stderrOutcome',
       'stderrEmitter',
       'stderrLineShape',
+      'stderrPrefixCounts',
+      'stderrPrefixOverflow',
       'overflow',
       'uidProcessCount',
+      'effectiveUidMatchCount',
+      'nonEffectiveUidOnlyCount',
       'nonZombieProcessCount',
       'zombieCount',
       'unreadableProcessCount',
@@ -1308,6 +1413,7 @@ function validateUidStopCensus(value) {
   ) {
     return false;
   }
+  if (!validateUidCensusStderrPrefixSummary(value)) return false;
   if (
     (value.stderrOutcome === 'not_attempted' &&
       (value.state !== 'not_attempted' ||
@@ -1335,6 +1441,8 @@ function validateUidStopCensus(value) {
     const emptyCounts =
       value.overflow === null &&
       value.uidProcessCount === null &&
+      value.effectiveUidMatchCount === null &&
+      value.nonEffectiveUidOnlyCount === null &&
       value.nonZombieProcessCount === null &&
       value.zombieCount === null &&
       value.unreadableProcessCount === null &&
@@ -1381,6 +1489,8 @@ function validateUidStopCensus(value) {
   if (
     typeof value.overflow !== 'boolean' ||
     !diagnosticCount(value.uidProcessCount) ||
+    !diagnosticCount(value.effectiveUidMatchCount) ||
+    !diagnosticCount(value.nonEffectiveUidOnlyCount) ||
     !diagnosticCount(value.nonZombieProcessCount) ||
     !diagnosticCount(value.zombieCount) ||
     !diagnosticCount(value.unreadableProcessCount) ||
@@ -1394,6 +1504,8 @@ function validateUidStopCensus(value) {
       (name) => !diagnosticCount(value.processRoleCounts[name]),
     ) ||
     value.nonZombieProcessCount > value.uidProcessCount ||
+    value.effectiveUidMatchCount > value.uidProcessCount ||
+    value.nonEffectiveUidOnlyCount > value.uidProcessCount ||
     value.zombieCount > value.uidProcessCount ||
     value.unreadableProcessCount > value.uidProcessCount ||
     value.unattributedProcessCount > value.uidProcessCount ||
@@ -1416,6 +1528,9 @@ function validateUidStopCensus(value) {
   );
   return (
     value.nonZombieProcessCount + value.zombieCount <= value.uidProcessCount &&
+    (value.overflow ||
+      value.effectiveUidMatchCount + value.nonEffectiveUidOnlyCount ===
+        value.uidProcessCount) &&
     (value.overflow ||
       (value.nonZombieProcessCount + value.zombieCount ===
         value.uidProcessCount &&
@@ -2879,7 +2994,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 19,
+    schemaVersion: 20,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -2982,7 +3097,7 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 19 &&
+    value.schemaVersion === 20 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
