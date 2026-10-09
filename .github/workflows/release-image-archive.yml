@@ -95,6 +95,7 @@ jobs:
           --source-root "$GITHUB_WORKSPACE/source"
           --tooling-root "$GITHUB_WORKSPACE/tooling"
           --build-root "$BUILD_ROOT"
+          --archive-root "$ARCHIVE_ROOT"
 
       - name: Install and build the exact source workspaces
         working-directory: source
@@ -250,6 +251,22 @@ jobs:
           for (const image of manifest.images) {
             process.stdout.write(
               `| ${image.name} | ${image.tag} | ${image.image_id} | ${image.buildx_manifest_digest} | ${image.archive.bytes} | ${image.archive.sha256} |\n`,
+            );
+          }
+          NODE
+          {
+            echo
+            echo '### License and notice bundle'
+            echo
+            echo '| Source path | Artifact path | Bytes | SHA-256 |'
+            echo '|---|---|---:|---|'
+          } >> "$GITHUB_STEP_SUMMARY"
+          node - "$manifest" >> "$GITHUB_STEP_SUMMARY" <<'NODE'
+          const fs = require('node:fs');
+          const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          for (const notice of manifest.notices) {
+            process.stdout.write(
+              `| ${notice.source_path} | ${notice.path} | ${notice.bytes} | ${notice.sha256} |\n`,
             );
           }
           NODE

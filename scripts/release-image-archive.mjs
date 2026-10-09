@@ -21,6 +21,8 @@ export const HELPER_PATH = 'scripts/release-image-archive.mjs';
 export const MAX_MANIFEST_BYTES = 64 * 1024;
 export const MAX_IMAGE_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024;
 export const MAX_TOTAL_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024;
+export const MAX_NOTICE_FILE_BYTES = 1024 * 1024;
+export const MAX_TOTAL_NOTICE_BYTES = 8 * 1024 * 1024;
 
 const GIT_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -49,6 +51,31 @@ const images = [
     archive: 'images/radicale-linux-amd64.tar',
     metadata: 'radicale.json',
     imageId: 'radicale.image-id',
+  },
+];
+const noticeFiles = [
+  { sourcePath: 'LICENSE', archivePath: 'notices/project-LICENSE' },
+  { sourcePath: 'NOTICE', archivePath: 'notices/project-NOTICE' },
+  {
+    sourcePath: 'matrix-calendar-server/NOTICE',
+    archivePath: 'notices/server-NOTICE',
+  },
+  {
+    sourcePath: 'matrix-calendar-widget/NOTICE',
+    archivePath: 'notices/widget-NOTICE',
+  },
+  {
+    sourcePath: 'packages/ical-timezones/NOTICE.md',
+    archivePath: 'notices/ical-timezones-NOTICE.md',
+  },
+  {
+    sourcePath: 'packages/ical-timezones/src/data/licenses/IANA-theory.html',
+    archivePath: 'notices/IANA-theory.html',
+  },
+  {
+    sourcePath:
+      'packages/ical-timezones/src/data/licenses/timezones-ical-library-LICENSE',
+    archivePath: 'notices/timezones-ical-library-LICENSE',
   },
 ];
 
@@ -204,10 +231,124 @@ async function writeNew(file, data) {
   await writeFile(file, data, { flag: 'wx' });
 }
 
+function validateNoticeSizes(noticesToCheck) {
+  let total = 0;
+  for (const { sourcePath, bytes } of noticesToCheck) {
+    if (!Number.isSafeInteger(bytes) || bytes < 1)
+      fail(`${sourcePath} notice size is invalid.`);
+    if (bytes > MAX_NOTICE_FILE_BYTES)
+      fail(`${sourcePath} exceeds the 1 MiB notice-file limit.`);
+    total += bytes;
+  }
+  if (total > MAX_TOTAL_NOTICE_BYTES)
+    fail('License and notice files exceed the 8 MiB combined limit.');
+}
+
+function sourceNoticeBlobs(sourceRoot, sourceSha) {
+  const entries = [];
+  for (const definition of noticeFiles) {
+    const treeEntry = git(sourceRoot, [
+      'ls-tree',
+      sourceSha,
+      '--',
+      definition.sourcePath,
+    ]).value;
+    const [metadata, sourcePath] = treeEntry.split('\t');
+    const [mode, type, blobSha] = (metadata ?? '').split(/\s+/);
+    if (
+      mode !== '100644' ||
+      type !== 'blob' ||
+      sourcePath !== definition.sourcePath ||
+      !GIT_SHA.test(blobSha ?? '')
+    ) {
+      fail(
+        `${definition.sourcePath} must be a regular file in the source commit.`,
+      );
+    }
+    const bytes = Number(git(sourceRoot, ['cat-file', '-s', blobSha]).value);
+    entries.push({ ...definition, blobSha, bytes });
+  }
+  validateNoticeSizes(entries);
+
+  return entries.map((entry) => {
+    const result = spawnSync(
+      'git',
+      ['-C', sourceRoot, 'cat-file', 'blob', entry.blobSha],
+      { encoding: null, maxBuffer: MAX_NOTICE_FILE_BYTES + 1 },
+    );
+    if (result.error || result.status !== 0 || !Buffer.isBuffer(result.stdout))
+      fail(
+        `Could not read ${entry.sourcePath} from the accepted source commit.`,
+      );
+    if (result.stdout.length !== entry.bytes)
+      fail(`${entry.sourcePath} changed while reading the source commit.`);
+    return { ...entry, content: result.stdout };
+  });
+}
+
+async function writeNoticeBundle(sourceRoot, sourceSha, archiveRoot) {
+  const sourceNotices = sourceNoticeBlobs(sourceRoot, sourceSha);
+  await mkdir(archiveRoot, { recursive: true });
+  const rootInfo = await lstat(archiveRoot);
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink())
+    fail('Artifact root must be a real directory.');
+  await mkdir(childPath(archiveRoot, 'notices', 'Notice bundle path'));
+  for (const notice of sourceNotices) {
+    await writeNew(
+      childPath(archiveRoot, notice.archivePath, 'Notice archive path'),
+      notice.content,
+    );
+  }
+  return sourceNotices.map((notice) => ({
+    source_path: notice.sourcePath,
+    path: notice.archivePath,
+    sha256: sha256Text(notice.content),
+    bytes: notice.bytes,
+  }));
+}
+
+async function validateNoticeBundle(sourceRoot, sourceSha, archiveRoot) {
+  const sourceNotices = sourceNoticeBlobs(sourceRoot, sourceSha);
+  const rootInfo = await lstat(archiveRoot);
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink())
+    fail('Artifact root must be a real directory.');
+  const root = await realpath(archiveRoot);
+  const noticeRoot = childPath(root, 'notices', 'Notice bundle path');
+  const noticeRootInfo = await lstat(noticeRoot);
+  if (!noticeRootInfo.isDirectory() || noticeRootInfo.isSymbolicLink())
+    fail('Notice bundle must be a real directory.');
+  const resolvedNoticeRoot = await realpath(noticeRoot);
+  if (!resolvedNoticeRoot.startsWith(`${root}${path.sep}`))
+    fail('Notice bundle resolves outside the artifact.');
+
+  const records = [];
+  for (const notice of sourceNotices) {
+    const file = childPath(root, notice.archivePath, 'Notice archive path');
+    const resolvedFile = await realpath(file);
+    if (!resolvedFile.startsWith(`${resolvedNoticeRoot}${path.sep}`))
+      fail(`${notice.archivePath} resolves outside the notice bundle.`);
+    const info = await lstat(file);
+    if (!info.isFile() || info.isSymbolicLink() || info.size !== notice.bytes) {
+      fail(`${notice.archivePath} has an invalid file type or size.`);
+    }
+    const content = await readFile(file);
+    if (!content.equals(notice.content))
+      fail(`${notice.archivePath} does not match its accepted source file.`);
+    records.push({
+      source_path: notice.sourcePath,
+      path: notice.archivePath,
+      sha256: sha256Text(notice.content),
+      bytes: notice.bytes,
+    });
+  }
+  return records;
+}
+
 export async function prepareBuild({
   sourceRoot,
   toolingRoot,
   buildRoot,
+  archiveRoot,
   context,
 }) {
   validateContext(context);
@@ -219,6 +360,7 @@ export async function prepareBuild({
   if (git(toolingRoot, ['rev-parse', 'HEAD']).value !== context.workflowSha) {
     fail('Builder checkout does not match the trusted workflow SHA.');
   }
+  const notices = await writeNoticeBundle(sourceRoot, source.sha, archiveRoot);
   const originalPath = path.join(
     sourceRoot,
     'matrix-calendar-server/Dockerfile',
@@ -239,6 +381,7 @@ export async function prepareBuild({
     path.join(buildRoot, 'server-recipe.json'),
     `${JSON.stringify(recipe, null, 2)}\n`,
   );
+  return { notices };
 }
 
 function validateArchiveSizes(archives) {
@@ -389,6 +532,11 @@ export async function createManifest({
     fail('Builder checkout does not match the trusted workflow SHA.');
   }
   const archives = await archiveRecords(archiveRoot);
+  const notices = await validateNoticeBundle(
+    sourceRoot,
+    source.sha,
+    archiveRoot,
+  );
   const runTag = `archive-${context.runId}-${context.runAttempt}`;
   const builtImages = [];
   for (const definition of images) {
@@ -404,7 +552,7 @@ export async function createManifest({
     );
   }
   const manifest = {
-    schema_version: 1,
+    schema_version: 2,
     source: {
       sha: source.sha,
       tree: source.tree,
@@ -424,6 +572,7 @@ export async function createManifest({
     },
     platform: context.platform,
     images: builtImages,
+    notices,
   };
   validateManifest(manifest);
   const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
@@ -435,7 +584,7 @@ export async function createManifest({
 
 function validateManifest(manifest) {
   if (
-    manifest?.schema_version !== 1 ||
+    manifest?.schema_version !== 2 ||
     !manifest.source ||
     !manifest.workflow ||
     !manifest.builder
@@ -526,6 +675,30 @@ function validateManifest(manifest) {
     archiveSizes.push({ name: definition.name, bytes: image.archive.bytes });
   }
   validateArchiveSizes(archiveSizes);
+  validateManifestNotices(manifest.notices);
+}
+
+function validateManifestNotices(noticesInManifest) {
+  if (
+    !Array.isArray(noticesInManifest) ||
+    noticesInManifest.length !== noticeFiles.length
+  ) {
+    fail('Manifest must contain all seven required license and notice files.');
+  }
+  const noticeSizes = [];
+  for (const definition of noticeFiles) {
+    const notice = noticesInManifest.find(
+      (entry) => entry.source_path === definition.sourcePath,
+    );
+    if (!notice || notice.path !== definition.archivePath)
+      fail(`Manifest is missing required notice ${definition.sourcePath}.`);
+    requireSha256(notice.sha256, `${definition.sourcePath} notice hash`);
+    noticeSizes.push({
+      sourcePath: definition.sourcePath,
+      bytes: notice.bytes,
+    });
+  }
+  validateNoticeSizes(noticeSizes);
 }
 
 export async function verifyArchive(
@@ -565,6 +738,7 @@ export async function verifyArchive(
   const expectedFiles = new Set([
     'manifest.json',
     ...images.map((image) => image.archive),
+    ...noticeFiles.map((notice) => notice.archivePath),
   ]);
   const archiveFiles = [];
   let totalArchiveBytes = 0;
@@ -591,9 +765,43 @@ export async function verifyArchive(
   }
   if (totalArchiveBytes > MAX_TOTAL_ARCHIVE_BYTES)
     fail('Image archives exceed the 4 GiB combined limit.');
+
+  const noticeArchiveFiles = [];
+  let totalNoticeBytes = 0;
+  const noticesRoot = childPath(root, 'notices', 'Notice bundle path');
+  const noticesRootInfo = await lstat(noticesRoot);
+  if (!noticesRootInfo.isDirectory() || noticesRootInfo.isSymbolicLink())
+    fail('Notice bundle must be a real directory.');
+  const resolvedNoticesRoot = await realpath(noticesRoot);
+  if (!resolvedNoticesRoot.startsWith(`${root}${path.sep}`))
+    fail('Notice bundle resolves outside the artifact directory.');
+  for (const notice of manifest.notices) {
+    const file = childPath(root, notice.path, 'Notice archive path');
+    const resolved = await realpath(file);
+    if (!resolved.startsWith(`${resolvedNoticesRoot}${path.sep}`))
+      fail(`${notice.path} escapes the notice bundle.`);
+    const info = await lstat(file);
+    if (!info.isFile() || info.isSymbolicLink() || info.size !== notice.bytes) {
+      fail(`${notice.path} has an invalid file type or size.`);
+    }
+    if (info.size > MAX_NOTICE_FILE_BYTES)
+      fail(`${notice.source_path} exceeds the 1 MiB notice-file limit.`);
+    totalNoticeBytes += info.size;
+    noticeArchiveFiles.push({
+      file,
+      path: notice.path,
+      sha256: notice.sha256,
+    });
+  }
+  if (totalNoticeBytes > MAX_TOTAL_NOTICE_BYTES)
+    fail('License and notice files exceed the 8 MiB combined limit.');
   for (const archive of archiveFiles) {
     if ((await sha256File(archive.file)) !== archive.sha256)
       fail(`${archive.path} failed SHA-256 verification.`);
+  }
+  for (const notice of noticeArchiveFiles) {
+    if ((await sha256File(notice.file)) !== notice.sha256)
+      fail(`${notice.path} failed SHA-256 verification.`);
   }
   async function inspect(directory, prefix = '') {
     for (const item of await readdir(directory, { withFileTypes: true })) {
@@ -603,7 +811,7 @@ export async function verifyArchive(
       if (info.isSymbolicLink())
         fail(`Artifact contains a symbolic link: ${name}.`);
       if (info.isDirectory()) {
-        if (name !== 'images')
+        if (name !== 'images' && name !== 'notices')
           fail(`Artifact contains an unexpected directory: ${name}.`);
         await inspect(file, name);
       } else if (info.isFile()) {
@@ -656,6 +864,7 @@ async function main() {
       sourceRoot: resolve('source-root'),
       toolingRoot: resolve('tooling-root'),
       buildRoot: resolve('build-root'),
+      archiveRoot: resolve('archive-root'),
       context: contextFromEnv(),
     });
     process.stdout.write('Prepared the exact source-bound build recipe.\n');

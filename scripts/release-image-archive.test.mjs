@@ -12,15 +12,45 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
+  createManifest,
   deriveServerDockerfile,
   MAX_IMAGE_ARCHIVE_BYTES,
   MAX_MANIFEST_BYTES,
+  MAX_NOTICE_FILE_BYTES,
   MAX_TOTAL_ARCHIVE_BYTES,
+  prepareBuild,
   validatePlatform,
   verifyArchive,
   verifyGitSource,
 } from './release-image-archive.mjs';
+
+const testNotices = [
+  { sourcePath: 'LICENSE', path: 'notices/project-LICENSE' },
+  { sourcePath: 'NOTICE', path: 'notices/project-NOTICE' },
+  {
+    sourcePath: 'matrix-calendar-server/NOTICE',
+    path: 'notices/server-NOTICE',
+  },
+  {
+    sourcePath: 'matrix-calendar-widget/NOTICE',
+    path: 'notices/widget-NOTICE',
+  },
+  {
+    sourcePath: 'packages/ical-timezones/NOTICE.md',
+    path: 'notices/ical-timezones-NOTICE.md',
+  },
+  {
+    sourcePath: 'packages/ical-timezones/src/data/licenses/IANA-theory.html',
+    path: 'notices/IANA-theory.html',
+  },
+  {
+    sourcePath:
+      'packages/ical-timezones/src/data/licenses/timezones-ical-library-LICENSE',
+    path: 'notices/timezones-ical-library-LICENSE',
+  },
+];
 
 function git(root, ...args) {
   return execFileSync('git', ['-C', root, ...args], {
@@ -99,6 +129,7 @@ test('server recipe changes only its two mutable Node base lines', () => {
 
 async function makeValidArtifact(root) {
   await mkdir(path.join(root, 'images'), { recursive: true });
+  await mkdir(path.join(root, 'notices'), { recursive: true });
   const imageSpecs = [
     {
       name: 'server',
@@ -160,9 +191,22 @@ async function makeValidArtifact(root) {
       },
     });
   }
+  const manifestNotices = [];
+  for (const notice of testNotices) {
+    const bytes = Buffer.from(
+      `synthetic notice source: ${notice.sourcePath}\n`,
+    );
+    await writeFile(path.join(root, notice.path), bytes);
+    manifestNotices.push({
+      source_path: notice.sourcePath,
+      path: notice.path,
+      sha256: sha256(bytes),
+      bytes: bytes.length,
+    });
+  }
   const sourceSha = '8'.repeat(40);
   const manifest = {
-    schema_version: 1,
+    schema_version: 2,
     source: { sha: sourceSha, tree: '9'.repeat(40), dispatch_sha: sourceSha },
     workflow: {
       repository: '0cwa/matrix-calendar-widget',
@@ -176,6 +220,7 @@ async function makeValidArtifact(root) {
     builder: { helper_sha256: 'c'.repeat(64), workflow_sha256: 'd'.repeat(64) },
     platform: 'linux/amd64',
     images: manifestImages,
+    notices: manifestNotices,
   };
   await writeFile(
     path.join(root, 'manifest.json'),
@@ -183,6 +228,162 @@ async function makeValidArtifact(root) {
   );
   return { manifest, sourceSha };
 }
+
+test('release preparation packages notices from the accepted source tree', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'mcw-release-notices-'));
+  try {
+    const sourceRoot = path.join(root, 'source');
+    const buildRoot = path.join(root, 'build');
+    const archiveRoot = path.join(root, 'archive');
+    const toolingRoot = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '..',
+    );
+    const scannerBase = `aquasec/trivy:0.71.2@${digest('a')}`;
+    await mkdir(path.join(sourceRoot, 'matrix-calendar-server'), {
+      recursive: true,
+    });
+    await mkdir(path.join(sourceRoot, 'matrix-calendar-widget'), {
+      recursive: true,
+    });
+    await mkdir(path.join(sourceRoot, 'radicale-auth'), { recursive: true });
+    await writeFile(
+      path.join(sourceRoot, 'matrix-calendar-server/Dockerfile'),
+      [
+        `FROM ${scannerBase} AS scanner`,
+        'FROM node:22-bookworm-slim AS builder',
+        'FROM node:22-bookworm-slim',
+        'CMD ["node"]',
+        '',
+      ].join('\n'),
+    );
+    await writeFile(
+      path.join(sourceRoot, 'matrix-calendar-widget/Dockerfile'),
+      [
+        `FROM ${scannerBase} AS scanner`,
+        `FROM ghcr.io/example/widget-server:1@${digest('b')}`,
+        '',
+      ].join('\n'),
+    );
+    await writeFile(
+      path.join(sourceRoot, 'radicale-auth/Dockerfile'),
+      `FROM ghcr.io/example/radicale:3@${digest('c')}\n`,
+    );
+    const sourceNoticeContent = new Map();
+    for (const notice of testNotices) {
+      const content = Buffer.from(`accepted notice: ${notice.sourcePath}\n`);
+      const file = path.join(sourceRoot, notice.sourcePath);
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, content);
+      sourceNoticeContent.set(notice.sourcePath, content);
+    }
+    git(sourceRoot, 'init', '--quiet', '--initial-branch=main');
+    git(sourceRoot, 'config', 'user.name', 'Release archive test');
+    git(sourceRoot, 'config', 'user.email', 'release-test@example.invalid');
+    git(sourceRoot, 'add', '.');
+    git(sourceRoot, 'commit', '--quiet', '-m', 'accepted source');
+    const sourceSha = git(sourceRoot, 'rev-parse', 'HEAD');
+    await writeFile(path.join(sourceRoot, 'main-only.txt'), 'main update\n');
+    git(sourceRoot, 'add', 'main-only.txt');
+    git(sourceRoot, 'commit', '--quiet', '-m', 'main update');
+    const dispatchSha = git(sourceRoot, 'rev-parse', 'HEAD');
+    git(sourceRoot, 'checkout', '--quiet', '--detach', sourceSha);
+
+    await writeFile(
+      path.join(sourceRoot, 'LICENSE'),
+      'uncommitted workspace change\n',
+    );
+    const workflowSha = git(toolingRoot, 'rev-parse', 'HEAD');
+    const context = {
+      sourceSha,
+      dispatchSha,
+      repository: '0cwa/matrix-calendar-widget',
+      workflowRef:
+        '0cwa/matrix-calendar-widget/.github/workflows/release-image-archive.yml@refs/heads/main',
+      workflowSha,
+      runId: '456',
+      runAttempt: '1',
+      serverUrl: 'https://github.com',
+      platform: 'linux/amd64',
+      nodeBase: `node:22-bookworm-slim@${digest('d')}`,
+    };
+    const prepared = await prepareBuild({
+      sourceRoot,
+      toolingRoot,
+      buildRoot,
+      archiveRoot,
+      context,
+    });
+    assert.deepEqual(
+      prepared.notices.map((notice) => notice.source_path),
+      testNotices.map((notice) => notice.sourcePath),
+    );
+    for (const notice of testNotices) {
+      assert.deepEqual(
+        await readFile(path.join(archiveRoot, notice.path)),
+        sourceNoticeContent.get(notice.sourcePath),
+      );
+    }
+
+    await mkdir(path.join(archiveRoot, 'images'));
+    const buildImageSpecs = [
+      {
+        name: 'server',
+        archive: 'images/server-linux-amd64.tar',
+        metadata: 'server.json',
+        imageIdFile: 'server.image-id',
+      },
+      {
+        name: 'widget',
+        archive: 'images/widget-linux-amd64.tar',
+        metadata: 'widget.json',
+        imageIdFile: 'widget.image-id',
+      },
+      {
+        name: 'radicale',
+        archive: 'images/radicale-linux-amd64.tar',
+        metadata: 'radicale.json',
+        imageIdFile: 'radicale.image-id',
+      },
+    ];
+    for (let index = 0; index < buildImageSpecs.length; index += 1) {
+      const spec = buildImageSpecs[index];
+      const archive = Buffer.from(`synthetic ${spec.name} image\n`);
+      const manifestDigest = digest(String(index + 1));
+      const imageId = digest(String(index + 4));
+      await writeFile(path.join(archiveRoot, spec.archive), archive);
+      await writeFile(
+        path.join(buildRoot, spec.metadata),
+        JSON.stringify({
+          'containerimage.digest': manifestDigest,
+          'containerimage.config.digest': imageId,
+          'containerimage.descriptor': { digest: manifestDigest },
+        }),
+      );
+      await writeFile(path.join(buildRoot, spec.imageIdFile), `${imageId}\n`);
+    }
+    const manifest = await createManifest({
+      sourceRoot,
+      toolingRoot,
+      buildRoot,
+      archiveRoot,
+      context,
+    });
+    assert.equal(manifest.schema_version, 2);
+    assert.equal(manifest.notices.length, testNotices.length);
+    assert.equal(
+      manifest.notices[0].sha256,
+      sha256(sourceNoticeContent.get('LICENSE')),
+    );
+    assert.equal(
+      (await verifyArchive(archiveRoot, { expectedSourceSha: sourceSha }))
+        .notices.length,
+      testNotices.length,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('archive verification binds source/platform and checks every archive hash', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'mcw-image-archive-'));
@@ -222,6 +423,51 @@ test('archive verification binds source/platform and checks every archive hash',
     );
     await assert.rejects(verifyArchive(root), /unexpected file/);
     await rm(path.join(root, 'extra-output.txt'));
+
+    const badNoticeMapping = JSON.parse(originalManifest);
+    badNoticeMapping.notices[0].path = 'notices/other-license';
+    await writeFile(manifestPath, JSON.stringify(badNoticeMapping));
+    await assert.rejects(
+      verifyArchive(root),
+      /missing required notice LICENSE/,
+    );
+    await writeFile(manifestPath, originalManifest);
+
+    const noticePath = path.join(root, testNotices[0].path);
+    const originalNotice = await readFile(noticePath);
+    const tamperedNotice = Buffer.from(originalNotice);
+    tamperedNotice[0] ^= 1;
+    await writeFile(noticePath, tamperedNotice);
+    await assert.rejects(
+      verifyArchive(root),
+      /notices\/project-LICENSE failed SHA-256 verification/,
+    );
+    await writeFile(noticePath, originalNotice);
+
+    const missingNotice = path.join(root, testNotices[1].path);
+    await rm(missingNotice);
+    await assert.rejects(verifyArchive(root), /ENOENT/);
+    await writeFile(
+      missingNotice,
+      Buffer.from(`synthetic notice source: ${testNotices[1].sourcePath}\n`),
+    );
+
+    const extraNotice = path.join(root, 'notices/extra.txt');
+    await writeFile(extraNotice, 'unlisted notice\n');
+    await assert.rejects(
+      verifyArchive(root),
+      /unexpected file: notices\/extra.txt/,
+    );
+    await rm(extraNotice);
+
+    const oversizedNotice = JSON.parse(originalManifest);
+    oversizedNotice.notices[0].bytes = MAX_NOTICE_FILE_BYTES + 1;
+    await writeFile(manifestPath, JSON.stringify(oversizedNotice));
+    await assert.rejects(
+      verifyArchive(root),
+      /LICENSE exceeds the 1 MiB notice-file limit/,
+    );
+    await writeFile(manifestPath, originalManifest);
 
     const oversizedManifest = JSON.parse(originalManifest);
     const oversizedImage = oversizedManifest.images[0];

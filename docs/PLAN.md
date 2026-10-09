@@ -515,9 +515,9 @@ access and event writes stay disabled by default.
       candidate from the trusted `main` workflow. The generic `linux/amd64`
       archive covers the server, widget, and project-owned Radicale images and
       must verify source/workflow identity, resolved base digests, image IDs,
-      platform, and archive hashes before use. No hosted archive has been
-      generated yet; target-specific operator comparison and deployment remain
-      separate gates.
+      platform, archive hashes, and the fixed source-derived license and notice
+      bundle before use. No hosted archive has been generated yet; target-specific
+      operator comparison and deployment remain separate gates.
 - [x] Document upgrade/migration, schema compatibility, and safe rollback for
       the project-owned stack; live operator rehearsal remains unverified.
 - [ ] Record exact Element Web and Desktop versions and results for the beta

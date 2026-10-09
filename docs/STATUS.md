@@ -258,9 +258,10 @@ loading, memory, and actual clients remain unmeasured.
 - **Source-bound image archive:** the manual main-only workflow builds an exact
   supplied source SHA and records trusted workflow identity, the generic
   `linux/amd64` platform, resolved image bases, image IDs, and archive hashes
-  for the three project images. No hosted archive has been generated yet, and
-  target-specific operator comparison remains a separate gate; see the
-  [M8 image archive task](./PLAN.md#m8--hardening-and-release).
+  for the three project images. It packages and verifies the fixed
+  source-derived license and notice bundle with the full archive. No hosted
+  archive has been generated yet, and target-specific operator comparison
+  remains a separate gate; see the [M8 image archive task](./PLAN.md#m8--hardening-and-release).
 
 ## Documentation note
 

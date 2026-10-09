@@ -37,15 +37,21 @@ environment value, or host configuration is passed to the image build. The
 server and widget Docker contexts are allowlisted by `.dockerignore`; the
 Radicale Dockerfile copies only declared paths. Each run records the source and
 trusted workflow SHAs, resolved base-image digests, build recipe hashes, local
-image IDs, platform, and SHA-256 and byte size for each saved image. The
-workflow verifies all three saved archives before either upload. It uploads a
-full image archive and a second artifact containing the same manifest alone,
-so an operator can inspect the provenance without first downloading the
-images. Both artifacts are unique to the run and attempt and expire after seven
-days. The manifest is capped at 64 KiB, each image archive at 2 GiB, and all
-three archives together at 4 GiB. This produces inspectable, temporary build
-artifacts; it does not authorize publication or a live deployment, and its
-generic platform must match the operator's separately verified target.
+image IDs, platform, and SHA-256 and byte size for each saved image. It also
+copies a fixed license and notice bundle from the accepted source Git tree,
+records each original source path, artifact path, size, and SHA-256, and checks
+that bundle with the images. The `notices/` directory contains the repository
+license and notices, server and widget notices, and the timezone package notice
+with its two referenced license files. The workflow verifies all three saved
+archives and the notice bundle before either upload. It uploads a full image
+archive and a second artifact containing the same manifest alone, so an
+operator can inspect the provenance without first downloading the images. Both
+artifacts are unique to the run and attempt and expire after seven days. The
+manifest is capped at 64 KiB, each image archive at 2 GiB, and all three
+archives together at 4 GiB. Notice files are capped at 1 MiB each and 8 MiB
+combined. This produces inspectable, temporary build artifacts; it does not
+authorize publication or a live deployment, and its generic platform must
+match the operator's separately verified target.
 
 To create an archive, start **Source-bound image archive** from the protected
 `main` branch in GitHub Actions and enter the full lowercase 40-character SHA
@@ -96,10 +102,12 @@ The hash check binds this copy to the manifest digest in the selected run's
 summary. Inspect the JSON's `source.sha`, `workflow.sha`, `workflow.run_id`,
 `workflow.run_attempt`, `platform`, and each image's `image_id`,
 `buildx_manifest_digest`, and `archive` size and SHA-256 against the expected
-source and platform. The manifest-only artifact supports this review without
-downloading image bytes; it does not verify the image archives on the receiving
-machine. Keep the same Bash session open through full archive verification so
-the checked manifest hash and trusted workflow SHA remain available.
+source and platform. Inspect each `notices` record's source path, artifact
+path, byte size, and SHA-256 as well. The manifest-only artifact supports this
+review without downloading image bytes; it does not verify the image archives
+on the receiving machine. Keep the same Bash session open through full archive
+verification so the checked manifest hash and trusted workflow SHA remain
+available.
 
 When ready for full archive verification and image loading, choose a new empty
 absolute path for `ARCHIVE_DIR` and download the exact image artifact:
@@ -134,14 +142,14 @@ node "../matrix-calendar-widget-archive-verifier-$RUN_ID/scripts/release-image-a
 guard requires the full archive's manifest to be byte-for-byte identical before
 the trusted workflow checkout or validator command runs; stop if it fails.
 The verifier checks the trusted workflow file and verifier hashes, expected
-source and platform, the manifest-and-three-archive inventory, archive sizes,
-and each saved-image SHA-256. Compare the manifest's workflow SHA and run
-identity with the Actions run you selected. The manifest's
-`buildx_manifest_digest` is the Buildx build
-manifest digest; `image_id` is the ID of the image loaded by the runner. They
-identify different objects and must not be treated as interchangeable. The
-image artifact SHA-256 in the run summary identifies the uploaded GitHub
-artifact; the verifier checks the hashes of the extracted image archives.
+source and platform, the manifest, exact notice bundle and three-archive
+inventory, size bounds, and each notice and saved-image SHA-256. Compare the
+manifest's workflow SHA and run identity with the Actions run you selected.
+The manifest's `buildx_manifest_digest` is the Buildx build manifest digest;
+`image_id` is the ID of the image loaded by the runner. They identify different
+objects and must not be treated as interchangeable. The image artifact SHA-256
+in the run summary identifies the uploaded GitHub artifact; the verifier
+checks the hashes of the extracted image archives.
 
 After verification, load the three archives and inspect the loaded IDs against
 the corresponding `image_id` entries in `manifest.json`:
@@ -157,10 +165,11 @@ docker image inspect --format '{{.Id}}' "matrix-calendar-widget/radicale-openid:
 
 Use only the run-scoped tags after the IDs match; update an operator-managed
 Compose override to those exact tags rather than `:local` or a floating tag.
-Keep the manifest and run identity with the deployment record. Complete the
-operator-specific configuration, network, persistence, backup, recovery, and
-rollback preflight below before any deployment. The archive workflow does not
-perform that preflight or verify a live target.
+Keep `notices/` with the saved images whenever copying or distributing the
+archive. Keep the manifest and run identity with the deployment record.
+Complete the operator-specific configuration, network, persistence, backup,
+recovery, and rollback preflight below before any deployment. The archive
+workflow does not perform that preflight or verify a live target.
 
 ## Runtime behavior in the current Dockerfiles
 
