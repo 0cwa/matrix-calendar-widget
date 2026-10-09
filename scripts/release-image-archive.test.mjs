@@ -541,6 +541,58 @@ test('release preparation packages notices and reports closed Buildx diagnostics
         await writeFile(serverImageIdPath, validServerImageId);
       }
     }
+
+    const malformedJsonSentinel = 'malformed-buildx-metadata-input-sentinel';
+    await writeFile(
+      serverMetadataPath,
+      `{"containerimage.digest":"${malformedJsonSentinel}`,
+    );
+    let cliError;
+    try {
+      execFileSync(
+        process.execPath,
+        [
+          path.join(toolingRoot, 'scripts/release-image-archive.mjs'),
+          'create',
+          '--source-root',
+          sourceRoot,
+          '--tooling-root',
+          toolingRoot,
+          '--build-root',
+          buildRoot,
+          '--archive-root',
+          archiveRoot,
+        ],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            RELEASE_SOURCE_SHA: context.sourceSha,
+            RELEASE_DISPATCH_SHA: context.dispatchSha,
+            RELEASE_REPOSITORY: context.repository,
+            RELEASE_WORKFLOW_REF: context.workflowRef,
+            RELEASE_WORKFLOW_SHA: context.workflowSha,
+            RELEASE_RUN_ID: context.runId,
+            RELEASE_RUN_ATTEMPT: context.runAttempt,
+            RELEASE_SERVER_URL: context.serverUrl,
+            IMAGE_PLATFORM: context.platform,
+            NODE_BASE_IMAGE: context.nodeBase,
+          },
+        },
+      );
+    } catch (error) {
+      cliError = error;
+    } finally {
+      await writeFile(serverMetadataPath, validServerMetadata);
+    }
+    assert.ok(cliError, 'malformed Buildx metadata must fail the CLI');
+    assert.equal(cliError.status, 1);
+    assert.equal(cliError.stdout, '');
+    assert.equal(
+      cliError.stderr,
+      'server Buildx metadata is invalid JSON. diagnostic={"reason":"invalid_metadata_json"}\n',
+    );
+    assert.equal(cliError.stderr.includes(malformedJsonSentinel), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -480,9 +480,20 @@ async function imageRecord(
     };
   }
 
-  const metadata = JSON.parse(
-    await readFile(path.join(buildRoot, definition.metadata), 'utf8'),
+  const metadataText = await readFile(
+    path.join(buildRoot, definition.metadata),
+    'utf8',
   );
+  let metadata;
+  try {
+    metadata = JSON.parse(metadataText);
+  } catch (error) {
+    if (error instanceof SyntaxError)
+      fail(
+        `${definition.name} Buildx metadata is invalid JSON. diagnostic={"reason":"invalid_metadata_json"}`,
+      );
+    throw error;
+  }
   const metadataIsObject = isJsonObject(metadata);
   const descriptor = metadataIsObject
     ? metadata['containerimage.descriptor']
