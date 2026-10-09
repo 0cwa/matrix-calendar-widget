@@ -26,6 +26,7 @@ export const MAX_TOTAL_NOTICE_BYTES = 8 * 1024 * 1024;
 
 const GIT_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
+const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
 const BASE_REF = /^\S+@sha256:[0-9a-f]{64}$/;
 const images = [
   {
@@ -81,6 +82,18 @@ const noticeFiles = [
 
 function fail(message) {
   throw new Error(message);
+}
+
+function isJsonObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasOwnJsonField(value, field) {
+  return isJsonObject(value) && Object.hasOwn(value, field);
+}
+
+function isImageDigest(value) {
+  return typeof value === 'string' && IMAGE_DIGEST.test(value);
 }
 
 function requireValue(value, name) {
@@ -467,29 +480,103 @@ async function imageRecord(
     };
   }
 
-  const metadata = JSON.parse(
-    await readFile(path.join(buildRoot, definition.metadata), 'utf8'),
+  const metadataText = await readFile(
+    path.join(buildRoot, definition.metadata),
+    'utf8',
   );
-  const digest = metadata['containerimage.digest'];
-  const configDigest = metadata['containerimage.config.digest'];
-  const descriptorDigest = metadata['containerimage.descriptor']?.digest;
-  if (
-    !/^sha256:[0-9a-f]{64}$/.test(digest ?? '') ||
-    descriptorDigest !== digest
-  ) {
+  let metadata;
+  try {
+    metadata = JSON.parse(metadataText);
+  } catch (error) {
+    if (error instanceof SyntaxError)
+      fail(
+        `${definition.name} Buildx metadata is invalid JSON. diagnostic={"reason":"invalid_metadata_json"}`,
+      );
+    throw error;
+  }
+  const metadataIsObject = isJsonObject(metadata);
+  const descriptor = metadataIsObject
+    ? metadata['containerimage.descriptor']
+    : undefined;
+  const descriptorIsObject = isJsonObject(descriptor);
+  const digest = metadataIsObject
+    ? metadata['containerimage.digest']
+    : undefined;
+  const configDigest = metadataIsObject
+    ? metadata['containerimage.config.digest']
+    : undefined;
+  const descriptorDigest = descriptorIsObject ? descriptor.digest : undefined;
+  let imageId = '';
+  let imageIdReadable = true;
+  let imageIdReadError;
+  try {
+    imageId = (
+      await readFile(path.join(buildRoot, definition.imageId), 'utf8')
+    ).trim();
+  } catch (error) {
+    imageIdReadable = false;
+    imageIdReadError = error;
+  }
+  const digestValid = isImageDigest(digest);
+  const descriptorDigestValid = isImageDigest(descriptorDigest);
+  const configDigestValid = isImageDigest(configDigest);
+  const imageIdValid = imageIdReadable && isImageDigest(imageId);
+  const diagnosticFacts = {
+    metadata_is_object: metadataIsObject,
+    manifest_digest_present: hasOwnJsonField(metadata, 'containerimage.digest'),
+    manifest_digest_is_string: typeof digest === 'string',
+    manifest_digest_is_sha256: digestValid,
+    descriptor_present: hasOwnJsonField(metadata, 'containerimage.descriptor'),
+    descriptor_is_object: descriptorIsObject,
+    descriptor_digest_present: hasOwnJsonField(descriptor, 'digest'),
+    descriptor_digest_is_string: typeof descriptorDigest === 'string',
+    descriptor_digest_is_sha256: descriptorDigestValid,
+    manifest_and_descriptor_values_equal:
+      typeof digest === 'string' &&
+      typeof descriptorDigest === 'string' &&
+      descriptorDigest === digest,
+    valid_manifest_and_descriptor_digests_equal:
+      digestValid && descriptorDigestValid && descriptorDigest === digest,
+    config_digest_present: hasOwnJsonField(
+      metadata,
+      'containerimage.config.digest',
+    ),
+    config_digest_is_string: typeof configDigest === 'string',
+    config_digest_is_sha256: configDigestValid,
+    loaded_image_id_available: imageIdReadable,
+    loaded_image_id_is_sha256: imageIdValid,
+    manifest_digest_equals_loaded_image_id:
+      digestValid && imageIdValid && digest === imageId,
+    config_digest_equals_loaded_image_id:
+      configDigestValid && imageIdValid && configDigest === imageId,
+  };
+  const manifestDigestReason = !digestValid
+    ? 'invalid_result_digest'
+    : !descriptorDigestValid
+      ? 'invalid_descriptor_digest'
+      : diagnosticFacts.valid_manifest_and_descriptor_digests_equal
+        ? undefined
+        : 'result_descriptor_digest_mismatch';
+  if (manifestDigestReason) {
     fail(
-      `${definition.name} Buildx metadata has no consistent image manifest digest.`,
+      `${definition.name} Buildx metadata has no consistent image manifest digest. diagnostic=${JSON.stringify(
+        { reason: manifestDigestReason, ...diagnosticFacts },
+      )}`,
     );
   }
-  const imageId = (
-    await readFile(path.join(buildRoot, definition.imageId), 'utf8')
-  ).trim();
-  if (
-    !/^sha256:[0-9a-f]{64}$/.test(configDigest ?? '') ||
-    imageId !== configDigest
-  ) {
+  if (!imageIdReadable) throw imageIdReadError;
+  const configDigestReason = !configDigestValid
+    ? 'invalid_config_digest'
+    : !imageIdValid
+      ? 'invalid_loaded_image_id'
+      : diagnosticFacts.config_digest_equals_loaded_image_id
+        ? undefined
+        : 'config_loaded_image_id_mismatch';
+  if (configDigestReason) {
     fail(
-      `${definition.name} loaded image ID does not match the Buildx config digest.`,
+      `${definition.name} loaded image ID does not match the Buildx config digest. diagnostic=${JSON.stringify(
+        { reason: configDigestReason, ...diagnosticFacts },
+      )}`,
     );
   }
   const baseImages = imageBaseRefs(buildDockerfile, definition.name);

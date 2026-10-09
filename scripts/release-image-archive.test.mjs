@@ -229,7 +229,7 @@ async function makeValidArtifact(root) {
   return { manifest, sourceSha };
 }
 
-test('release preparation packages notices from the accepted source tree', async () => {
+test('release preparation packages notices and reports closed Buildx diagnostics', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'mcw-release-notices-'));
   try {
     const sourceRoot = path.join(root, 'source');
@@ -380,6 +380,219 @@ test('release preparation packages notices from the accepted source tree', async
         .notices.length,
       testNotices.length,
     );
+
+    const serverMetadataPath = path.join(buildRoot, 'server.json');
+    const serverImageIdPath = path.join(buildRoot, 'server.image-id');
+    const validServerMetadata = await readFile(serverMetadataPath);
+    const validServerImageId = await readFile(serverImageIdPath);
+    const metadataSentinels = [
+      'raw-metadata-digest-sentinel',
+      'raw-descriptor-digest-sentinel',
+      'opaque-metadata-value-sentinel',
+      'opaque-metadata-key-sentinel',
+    ];
+    const diagnosticCases = [
+      {
+        name: 'missing descriptor with unreadable loaded ID',
+        metadata: {
+          'containerimage.digest': digest('1'),
+          'containerimage.config.digest': digest('4'),
+          [metadataSentinels[3]]: metadataSentinels[2],
+        },
+        reason: 'invalid_descriptor_digest',
+        omitImageId: true,
+        expectedFacts: {
+          manifest_digest_is_sha256: true,
+          descriptor_present: false,
+          descriptor_digest_present: false,
+          manifest_and_descriptor_values_equal: false,
+          valid_manifest_and_descriptor_digests_equal: false,
+          loaded_image_id_available: false,
+          config_digest_equals_loaded_image_id: false,
+        },
+      },
+      {
+        name: 'non-string result digest',
+        metadata: {
+          'containerimage.digest': {
+            value: metadataSentinels[0],
+          },
+          'containerimage.config.digest': digest('4'),
+          'containerimage.descriptor': { digest: digest('1') },
+        },
+        reason: 'invalid_result_digest',
+        expectedFacts: {
+          manifest_digest_is_string: false,
+          manifest_digest_is_sha256: false,
+          descriptor_digest_is_sha256: true,
+          manifest_and_descriptor_values_equal: false,
+          valid_manifest_and_descriptor_digests_equal: false,
+          config_digest_equals_loaded_image_id: true,
+        },
+      },
+      {
+        name: 'mismatching valid result and descriptor digests',
+        metadata: {
+          'containerimage.digest': digest('1'),
+          'containerimage.config.digest': digest('4'),
+          'containerimage.descriptor': {
+            digest: digest('9'),
+            opaque: metadataSentinels[1],
+          },
+        },
+        reason: 'result_descriptor_digest_mismatch',
+        expectedFacts: {
+          manifest_digest_is_sha256: true,
+          descriptor_digest_is_sha256: true,
+          manifest_and_descriptor_values_equal: false,
+          valid_manifest_and_descriptor_digests_equal: false,
+          manifest_digest_equals_loaded_image_id: false,
+          config_digest_equals_loaded_image_id: true,
+        },
+      },
+      {
+        name: 'mismatching config digest and loaded image ID',
+        metadata: {
+          'containerimage.digest': digest('1'),
+          'containerimage.config.digest': digest('b'),
+          'containerimage.descriptor': { digest: digest('1') },
+        },
+        reason: 'config_loaded_image_id_mismatch',
+        configMismatch: true,
+        expectedFacts: {
+          manifest_and_descriptor_values_equal: true,
+          valid_manifest_and_descriptor_digests_equal: true,
+          config_digest_is_sha256: true,
+          loaded_image_id_is_sha256: true,
+          manifest_digest_equals_loaded_image_id: false,
+          config_digest_equals_loaded_image_id: false,
+        },
+      },
+    ];
+
+    for (const scenario of diagnosticCases) {
+      try {
+        await writeFile(serverMetadataPath, JSON.stringify(scenario.metadata));
+        if (scenario.omitImageId) await rm(serverImageIdPath);
+        else await writeFile(serverImageIdPath, validServerImageId);
+        await assert.rejects(
+          createManifest({
+            sourceRoot,
+            toolingRoot,
+            buildRoot,
+            archiveRoot,
+            context,
+          }),
+          (error) => {
+            assert.match(
+              error.message,
+              scenario.configMismatch
+                ? /server loaded image ID does not match the Buildx config digest\./
+                : /server Buildx metadata has no consistent image manifest digest\./,
+              scenario.name,
+            );
+            const prefix = ' diagnostic=';
+            const offset = error.message.indexOf(prefix);
+            assert.notEqual(offset, -1, scenario.name);
+            const diagnostic = JSON.parse(
+              error.message.slice(offset + prefix.length),
+            );
+            assert.equal(diagnostic.reason, scenario.reason, scenario.name);
+            for (const [field, expected] of Object.entries(
+              scenario.expectedFacts,
+            ))
+              assert.equal(
+                diagnostic[field],
+                expected,
+                `${scenario.name}: ${field}`,
+              );
+            assert.equal(
+              Object.values(diagnostic).every(
+                (value) =>
+                  typeof value === 'boolean' || typeof value === 'string',
+              ),
+              true,
+              scenario.name,
+            );
+            for (const sentinel of metadataSentinels)
+              assert.equal(
+                error.message.includes(sentinel),
+                false,
+                scenario.name,
+              );
+            for (const rawDigest of [
+              digest('1'),
+              digest('4'),
+              digest('9'),
+              digest('b'),
+            ])
+              assert.equal(
+                error.message.includes(rawDigest),
+                false,
+                scenario.name,
+              );
+            assert.equal(error.message.includes('server.image-id'), false);
+            assert.equal(error.message.includes('ENOENT'), false);
+            return true;
+          },
+        );
+      } finally {
+        await writeFile(serverMetadataPath, validServerMetadata);
+        await writeFile(serverImageIdPath, validServerImageId);
+      }
+    }
+
+    const malformedJsonSentinel = 'malformed-buildx-metadata-input-sentinel';
+    await writeFile(
+      serverMetadataPath,
+      `{"containerimage.digest":"${malformedJsonSentinel}`,
+    );
+    let cliError;
+    try {
+      execFileSync(
+        process.execPath,
+        [
+          path.join(toolingRoot, 'scripts/release-image-archive.mjs'),
+          'create',
+          '--source-root',
+          sourceRoot,
+          '--tooling-root',
+          toolingRoot,
+          '--build-root',
+          buildRoot,
+          '--archive-root',
+          archiveRoot,
+        ],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            RELEASE_SOURCE_SHA: context.sourceSha,
+            RELEASE_DISPATCH_SHA: context.dispatchSha,
+            RELEASE_REPOSITORY: context.repository,
+            RELEASE_WORKFLOW_REF: context.workflowRef,
+            RELEASE_WORKFLOW_SHA: context.workflowSha,
+            RELEASE_RUN_ID: context.runId,
+            RELEASE_RUN_ATTEMPT: context.runAttempt,
+            RELEASE_SERVER_URL: context.serverUrl,
+            IMAGE_PLATFORM: context.platform,
+            NODE_BASE_IMAGE: context.nodeBase,
+          },
+        },
+      );
+    } catch (error) {
+      cliError = error;
+    } finally {
+      await writeFile(serverMetadataPath, validServerMetadata);
+    }
+    assert.ok(cliError, 'malformed Buildx metadata must fail the CLI');
+    assert.equal(cliError.status, 1);
+    assert.equal(cliError.stdout, '');
+    assert.equal(
+      cliError.stderr,
+      'server Buildx metadata is invalid JSON. diagnostic={"reason":"invalid_metadata_json"}\n',
+    );
+    assert.equal(cliError.stderr.includes(malformedJsonSentinel), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
