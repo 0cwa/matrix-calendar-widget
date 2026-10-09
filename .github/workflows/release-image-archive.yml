@@ -30,9 +30,16 @@ jobs:
       RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
       RELEASE_SERVER_URL: ${{ github.server_url }}
       RUN_TAG: archive-${{ github.run_id }}-${{ github.run_attempt }}
-      BUILD_ROOT: ${{ runner.temp }}/mcw-release-image-build
       ARCHIVE_ROOT: ${{ github.workspace }}/release-images
     steps:
+      # runner.temp is available after the job starts, not in jobs.archive.env.
+      - name: Initialize runner-local build directory
+        env:
+          BUILD_ROOT: ${{ runner.temp }}/mcw-release-image-build
+        run: |
+          set -euo pipefail
+          printf 'BUILD_ROOT=%s\n' "$BUILD_ROOT" >> "$GITHUB_ENV"
+
       - name: Validate the requested source SHA
         shell: bash
         run: |
