@@ -26,6 +26,9 @@ jobs:
           node-version: '22'
           cache: yarn
 
+      - name: Test source-bound image archive validation
+        run: node --test scripts/release-image-archive.test.mjs
+
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 

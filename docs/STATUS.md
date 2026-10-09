@@ -255,6 +255,13 @@ loading, memory, and actual clients remain unmeasured.
   remain open. No production host or configuration was inspected.
 - **Operator readiness:** homeserver/proxy behavior, OpenID query-token log redaction, selected Radicale image/configuration, PostgreSQL endpoint TLS/CA and role, backups/restores, secrets, network exposure, and rollback remain to be verified. The beta baseline uses the project-owned Radicale image and its own store; replacing an existing service or reusing its `/data` is optional and would require additional image/data-path compatibility and recovery evidence. The Compose sidecar does not migrate another service's data.
 - **Release/deployment:** the project remains pre-alpha. Build and contract evidence do not authorize image/chart publication or a live deployment.
+- **Source-bound image archive:** the manual main-only workflow builds an exact
+  supplied source SHA and records trusted workflow identity, the generic
+  `linux/amd64` platform, resolved image bases, image IDs, and archive hashes
+  for the three project images. It packages and verifies the fixed
+  source-derived license and notice bundle with the full archive. No hosted
+  archive has been generated yet, and target-specific operator comparison
+  remains a separate gate; see the [M8 image archive task](./PLAN.md#m8--hardening-and-release).
 
 ## Documentation note
 

@@ -1,0 +1,279 @@
+name: Source-bound image archive
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full 40-character SHA of the reviewed application source already merged to main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    name: Build and archive reviewed images
+    if: github.repository == '0cwa/matrix-calendar-widget' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      IMAGE_PLATFORM: linux/amd64
+      RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+      RELEASE_DISPATCH_SHA: ${{ github.sha }}
+      RELEASE_REPOSITORY: ${{ github.repository }}
+      RELEASE_WORKFLOW_REF: ${{ github.workflow_ref }}
+      RELEASE_WORKFLOW_SHA: ${{ github.workflow_sha }}
+      RELEASE_RUN_ID: ${{ github.run_id }}
+      RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
+      RELEASE_SERVER_URL: ${{ github.server_url }}
+      RUN_TAG: archive-${{ github.run_id }}-${{ github.run_attempt }}
+      ARCHIVE_ROOT: ${{ github.workspace }}/release-images
+    steps:
+      # runner.temp is available after the job starts, not in jobs.archive.env.
+      - name: Initialize runner-local build directory
+        env:
+          BUILD_ROOT: ${{ runner.temp }}/mcw-release-image-build
+        run: |
+          set -euo pipefail
+          printf 'BUILD_ROOT=%s\n' "$BUILD_ROOT" >> "$GITHUB_ENV"
+
+      - name: Validate the requested source SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'source_sha must be a full lowercase 40-character commit SHA.' >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            echo 'Run this workflow from the protected main branch.' >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REPOSITORY" != '0cwa/matrix-calendar-widget' ]]; then
+            echo 'Image archives are restricted to the canonical repository.' >&2
+            exit 1
+          fi
+
+      - name: Check out the exact application source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the trusted workflow and archive validator
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: tooling
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows/release-image-archive.yml
+            scripts/release-image-archive.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: yarn
+          cache-dependency-path: source/yarn.lock
+
+      - name: Resolve and pin the mutable Node base
+        run: |
+          set -euo pipefail
+          docker pull --platform "$IMAGE_PLATFORM" node:22-bookworm-slim
+          node_repo_digest="$(docker image inspect --format '{{ index .RepoDigests 0 }}' node:22-bookworm-slim)"
+          if [[ "$node_repo_digest" != *@sha256:* ]]; then
+            echo 'Could not resolve node:22-bookworm-slim to an immutable digest.' >&2
+            exit 1
+          fi
+          node_base_image="node:22-bookworm-slim@${node_repo_digest##*@}"
+          printf 'NODE_BASE_IMAGE=%s\n' "$node_base_image" >> "$GITHUB_ENV"
+
+      - name: Validate source binding before running source code
+        run: >-
+          node tooling/scripts/release-image-archive.mjs prepare
+          --source-root "$GITHUB_WORKSPACE/source"
+          --tooling-root "$GITHUB_WORKSPACE/tooling"
+          --build-root "$BUILD_ROOT"
+          --archive-root "$ARCHIVE_ROOT"
+
+      - name: Install and build the exact source workspaces
+        working-directory: source
+        run: |
+          yarn install --frozen-lockfile --network-timeout 1000000
+          yarn workspace @matrix-calendar-widget/calendar build
+          yarn workspace @matrix-calendar-widget/ical-timezones build
+          yarn workspace @matrix-calendar-widget/server build
+          yarn workspace @matrix-calendar-widget/widget build
+
+      - name: Build and test the server image
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$BUILD_ROOT" "$ARCHIVE_ROOT/images"
+          docker buildx build \
+            --platform "$IMAGE_PLATFORM" \
+            --tag "matrix-calendar-widget/server:$RUN_TAG" \
+            --metadata-file "$BUILD_ROOT/server.json" \
+            --load \
+            --file "$BUILD_ROOT/server.Dockerfile" \
+            .
+          server_cmd="$(docker image inspect --format '{{json .Config.Cmd}}' "matrix-calendar-widget/server:$RUN_TAG")"
+          if [[ "$server_cmd" != '["node","./lib/src/index.js"]' ]]; then
+            echo 'The source-bound server image does not use the compiled entrypoint.' >&2
+            exit 1
+          fi
+          if ! docker run --rm --network none --read-only --ulimit core=0 \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/source/dev/element-acceptance-image-smoke.mjs,target=/tmp/element-acceptance-image-smoke.mjs,readonly" \
+            --entrypoint node "matrix-calendar-widget/server:$RUN_TAG" \
+            /tmp/element-acceptance-image-smoke.mjs >/dev/null 2>&1; then
+            echo 'The source-bound server image failed its compiled entrypoint smoke.' >&2
+            exit 1
+          fi
+          docker image inspect --format '{{.Id}}' "matrix-calendar-widget/server:$RUN_TAG" > "$BUILD_ROOT/server.image-id"
+          docker image save --output "$ARCHIVE_ROOT/images/server-linux-amd64.tar" "matrix-calendar-widget/server:$RUN_TAG"
+
+      - name: Build the widget image
+        working-directory: source
+        run: >-
+          docker buildx build
+          --platform "$IMAGE_PLATFORM"
+          --build-context root=.
+          --tag "matrix-calendar-widget/widget:$RUN_TAG"
+          --metadata-file "$BUILD_ROOT/widget.json"
+          --load
+          --file matrix-calendar-widget/Dockerfile
+          matrix-calendar-widget
+
+      - name: Save the widget image
+        working-directory: source
+        run: |
+          docker image inspect --format '{{.Id}}' "matrix-calendar-widget/widget:$RUN_TAG" > "$BUILD_ROOT/widget.image-id"
+          docker image save --output "$ARCHIVE_ROOT/images/widget-linux-amd64.tar" "matrix-calendar-widget/widget:$RUN_TAG"
+
+      - name: Test and build the project-owned Radicale image
+        working-directory: source
+        run: |
+          docker buildx build --platform "$IMAGE_PLATFORM" --target test \
+            --tag "matrix-calendar-widget/radicale-openid:test-$RUN_TAG" \
+            --load --file radicale-auth/Dockerfile radicale-auth
+          docker buildx build --platform "$IMAGE_PLATFORM" --target runtime \
+            --tag "matrix-calendar-widget/radicale-openid:$RUN_TAG" \
+            --metadata-file "$BUILD_ROOT/radicale.json" \
+            --load --file radicale-auth/Dockerfile radicale-auth
+          docker image inspect --format '{{.Id}}' "matrix-calendar-widget/radicale-openid:$RUN_TAG" > "$BUILD_ROOT/radicale.image-id"
+          docker image save --output "$ARCHIVE_ROOT/images/radicale-linux-amd64.tar" "matrix-calendar-widget/radicale-openid:$RUN_TAG"
+
+      - name: Create and verify the source-bound archive manifest
+        run: |
+          node tooling/scripts/release-image-archive.mjs create \
+            --source-root "$GITHUB_WORKSPACE/source" \
+            --tooling-root "$GITHUB_WORKSPACE/tooling" \
+            --build-root "$BUILD_ROOT" \
+            --archive-root "$ARCHIVE_ROOT"
+          node tooling/scripts/release-image-archive.mjs verify \
+            --archive-root "$ARCHIVE_ROOT" \
+            --expected-source-sha "$RELEASE_SOURCE_SHA"
+
+      - name: Upload immutable per-run image archive
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: matrix-calendar-widget-images-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-images
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload the small per-run provenance manifest
+        id: provenance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: matrix-calendar-widget-provenance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-images/manifest.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+          compression-level: 6
+
+      - name: Record the public artifact identities and image provenance
+        env:
+          IMAGE_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          IMAGE_ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          IMAGE_ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          PROVENANCE_ARTIFACT_ID: ${{ steps.provenance.outputs.artifact-id }}
+          PROVENANCE_ARTIFACT_DIGEST: ${{ steps.provenance.outputs.artifact-digest }}
+          PROVENANCE_ARTIFACT_URL: ${{ steps.provenance.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          manifest="$ARCHIVE_ROOT/manifest.json"
+          manifest_sha256="$(sha256sum "$manifest" | awk '{ print $1 }')"
+          manifest_bytes="$(wc -c < "$manifest" | tr -d '[:space:]')"
+          [[ "$manifest_sha256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$manifest_bytes" =~ ^[0-9]+$ ]]
+          (( manifest_bytes > 0 && manifest_bytes <= 65536 ))
+          [[ "$IMAGE_ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          [[ "$PROVENANCE_ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          for digest in "$IMAGE_ARTIFACT_DIGEST" "$PROVENANCE_ARTIFACT_DIGEST"; do
+            if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+              echo 'GitHub did not return an uploaded artifact SHA-256 digest.' >&2
+              exit 1
+            fi
+          done
+          {
+            echo '## Source-bound image archive'
+            echo
+            echo "Source SHA: $RELEASE_SOURCE_SHA"
+            echo "Workflow SHA: $RELEASE_WORKFLOW_SHA"
+            echo "Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "Platform: $IMAGE_PLATFORM"
+            echo
+            echo '### Uploaded artifacts'
+            echo
+            echo '| Artifact | ID | SHA-256 | URL | Retention |'
+            echo '|---|---:|---|---|---:|'
+            echo "| Image archive | $IMAGE_ARTIFACT_ID | $IMAGE_ARTIFACT_DIGEST | $IMAGE_ARTIFACT_URL | 7 days |"
+            echo "| Provenance manifest | $PROVENANCE_ARTIFACT_ID | $PROVENANCE_ARTIFACT_DIGEST | $PROVENANCE_ARTIFACT_URL | 7 days |"
+            echo
+            echo "Manifest SHA-256: $manifest_sha256"
+            echo "Manifest bytes: $manifest_bytes"
+            echo
+            echo '### Image archive records'
+            echo
+            echo '| Image | Tag | Image ID | Buildx manifest digest | Archive bytes | Archive SHA-256 |'
+            echo '|---|---|---|---|---:|---|'
+          } >> "$GITHUB_STEP_SUMMARY"
+          node - "$manifest" >> "$GITHUB_STEP_SUMMARY" <<'NODE'
+          const fs = require('node:fs');
+          const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          for (const image of manifest.images) {
+            process.stdout.write(
+              `| ${image.name} | ${image.tag} | ${image.image_id} | ${image.buildx_manifest_digest} | ${image.archive.bytes} | ${image.archive.sha256} |\n`,
+            );
+          }
+          NODE
+          {
+            echo
+            echo '### License and notice bundle'
+            echo
+            echo '| Source path | Artifact path | Bytes | SHA-256 |'
+            echo '|---|---|---:|---|'
+          } >> "$GITHUB_STEP_SUMMARY"
+          node - "$manifest" >> "$GITHUB_STEP_SUMMARY" <<'NODE'
+          const fs = require('node:fs');
+          const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          for (const notice of manifest.notices) {
+            process.stdout.write(
+              `| ${notice.source_path} | ${notice.path} | ${notice.bytes} | ${notice.sha256} |\n`,
+            );
+          }
+          NODE
