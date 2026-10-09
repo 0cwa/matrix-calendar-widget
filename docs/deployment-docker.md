@@ -66,30 +66,63 @@ First download only the small provenance artifact with GitHub CLI, setting
 values. Choose a new empty absolute path for `PROVENANCE_DIR`:
 
 ```bash
+set -euo pipefail
+EXPECTED_MANIFEST_SHA256='<copy the Manifest SHA-256 from this run summary>'
 mkdir -p "$PROVENANCE_DIR"
 gh run download "$RUN_ID" \
   --name "matrix-calendar-widget-provenance-${RUN_ID}-${RUN_ATTEMPT}" \
   --dir "$PROVENANCE_DIR"
-sha256sum "$PROVENANCE_DIR/manifest.json"
+node - "$PROVENANCE_DIR/manifest.json" <<'NODE'
+const fs = require('node:fs');
+const info = fs.lstatSync(process.argv[2]);
+if (!info.isFile() || info.size < 1 || info.size > 65536) {
+  process.stderr.write('The provenance manifest must be a regular file within the 64 KiB limit.\n');
+  process.exit(1);
+}
+NODE
+PROVENANCE_SHA256="$(sha256sum "$PROVENANCE_DIR/manifest.json" | awk '{print $1}')"
+if [[ ! "$EXPECTED_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ || "$PROVENANCE_SHA256" != "$EXPECTED_MANIFEST_SHA256" ]]; then
+  echo 'The provenance manifest does not match the selected run summary.' >&2
+  exit 1
+fi
+WORKFLOW_SHA="$(node -e 'const fs = require("node:fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).workflow.sha)' "$PROVENANCE_DIR/manifest.json")"
+if [[ ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  echo 'The trusted manifest has an invalid workflow SHA.' >&2
+  exit 1
+fi
 ```
 
-Compare the printed manifest hash with the `Manifest SHA-256` in the run
-summary, then inspect the JSON's `source.sha`, `workflow.sha`, `workflow.run_id`,
+The hash check binds this copy to the manifest digest in the selected run's
+summary. Inspect the JSON's `source.sha`, `workflow.sha`, `workflow.run_id`,
 `workflow.run_attempt`, `platform`, and each image's `image_id`,
-`buildx_manifest_digest`, and `archive` size and SHA-256. The manifest-only
-artifact supports this provenance review without downloading image bytes; it
-does not verify the image archives on the receiving machine.
+`buildx_manifest_digest`, and `archive` size and SHA-256 against the expected
+source and platform. The manifest-only artifact supports this review without
+downloading image bytes; it does not verify the image archives on the receiving
+machine. Keep the same Bash session open through full archive verification so
+the checked manifest hash and trusted workflow SHA remain available.
 
 When ready for full archive verification and image loading, choose a new empty
 absolute path for `ARCHIVE_DIR` and download the exact image artifact:
 
 ```bash
+set -euo pipefail
 mkdir -p "$ARCHIVE_DIR"
 gh run download "$RUN_ID" \
   --name "matrix-calendar-widget-images-${RUN_ID}-${RUN_ATTEMPT}" \
   --dir "$ARCHIVE_DIR"
-WORKFLOW_SHA="$(node -e 'const fs = require("node:fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).workflow.sha)' "$ARCHIVE_DIR/manifest.json")"
-[[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+node - "$ARCHIVE_DIR/manifest.json" <<'NODE'
+const fs = require('node:fs');
+const info = fs.lstatSync(process.argv[2]);
+if (!info.isFile() || info.size < 1 || info.size > 65536) {
+  process.stderr.write('The full archive manifest must be a regular file within the 64 KiB limit.\n');
+  process.exit(1);
+}
+NODE
+FULL_MANIFEST_SHA256="$(sha256sum "$ARCHIVE_DIR/manifest.json" | awk '{print $1}')"
+if [[ "$FULL_MANIFEST_SHA256" != "$PROVENANCE_SHA256" ]] || ! cmp -s "$PROVENANCE_DIR/manifest.json" "$ARCHIVE_DIR/manifest.json"; then
+  echo 'The full archive manifest differs from the authenticated provenance manifest; stop.' >&2
+  exit 1
+fi
 git worktree add --detach "../matrix-calendar-widget-archive-verifier-$RUN_ID" "$WORKFLOW_SHA"
 node "../matrix-calendar-widget-archive-verifier-$RUN_ID/scripts/release-image-archive.mjs" verify \
   --archive-root "$ARCHIVE_DIR" \
@@ -97,11 +130,14 @@ node "../matrix-calendar-widget-archive-verifier-$RUN_ID/scripts/release-image-a
   --platform linux/amd64
 ```
 
-The verifier must be checked out at the workflow SHA recorded in the manifest.
-It checks the trusted workflow file and verifier hashes, expected source and
-platform, the manifest-and-three-archive inventory, archive sizes, and each
-saved-image SHA-256. Compare the manifest's workflow SHA and run identity with
-the Actions run you selected. The manifest's `buildx_manifest_digest` is the Buildx build
+`WORKFLOW_SHA` comes only from the authenticated provenance copy. The following
+guard requires the full archive's manifest to be byte-for-byte identical before
+the trusted workflow checkout or validator command runs; stop if it fails.
+The verifier checks the trusted workflow file and verifier hashes, expected
+source and platform, the manifest-and-three-archive inventory, archive sizes,
+and each saved-image SHA-256. Compare the manifest's workflow SHA and run
+identity with the Actions run you selected. The manifest's
+`buildx_manifest_digest` is the Buildx build
 manifest digest; `image_id` is the ID of the image loaded by the runner. They
 identify different objects and must not be treated as interchangeable. The
 image artifact SHA-256 in the run summary identifies the uploaded GitHub
