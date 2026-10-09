@@ -15,7 +15,7 @@
     "@matrix-widget-toolkit/mui": "^2.2.2",
     "@matrix-widget-toolkit/react": "^2.1.2",
     "@mui/icons-material": "^5.18.0",
-    "@mui/lab": "^5.0.0-alpha.177",
+    "@mui/lab": "^6.0.0-dev.20240529-082515-213b5e33ab",
     "@mui/material": "^5.18.0",
     "@mui/utils": "^9.4.0",
     "@mui/x-date-pickers": "^6.20.2",
