@@ -22,6 +22,75 @@ export type OpenIdToken = {
   access_token: string;
 };
 
+export function getMainRoomListLocator(page: Page): Locator {
+  const panel = page.locator('.mx_RoomListPanel');
+  const currentRoomList = panel
+    .getByRole('listbox', { name: 'Room list', exact: true })
+    .or(panel.getByRole('treegrid', { name: 'Room list', exact: true }));
+  const legacyRoomTree = page.getByRole('tree', {
+    name: 'Rooms',
+    exact: true,
+  });
+  return currentRoomList.or(legacyRoomTree);
+}
+
+function escapeRegExp(value: string): string {
+  const specialCharacters = new Set([
+    '\\',
+    '^',
+    '$',
+    '.',
+    '*',
+    '+',
+    '?',
+    '(',
+    ')',
+    '[',
+    ']',
+    '{',
+    '}',
+    '|',
+  ]);
+  return Array.from(value, (character) =>
+    specialCharacters.has(character) ? `\\${character}` : character,
+  ).join('');
+}
+
+type RoomNavigationTargetObservation = {
+  countCapped: 0 | 1 | 2 | null;
+  visible: boolean | null;
+  enabled: boolean | null;
+};
+
+async function observeRoomNavigationTarget(
+  locator: Locator,
+): Promise<RoomNavigationTargetObservation> {
+  let countCapped: 0 | 1 | 2;
+  try {
+    countCapped = Math.min(await locator.count(), 2) as 0 | 1 | 2;
+  } catch {
+    return { countCapped: null, visible: null, enabled: null };
+  }
+  if (countCapped !== 1) {
+    return { countCapped, visible: null, enabled: null };
+  }
+
+  const readBoolean = async (
+    read: () => Promise<boolean>,
+  ): Promise<boolean | null> => {
+    try {
+      return await read();
+    } catch {
+      return null;
+    }
+  };
+  const [visible, enabled] = await Promise.all([
+    readBoolean(() => locator.isVisible()),
+    readBoolean(() => locator.isEnabled()),
+  ]);
+  return { countCapped, visible, enabled };
+}
+
 export class ElementWebPage {
   private readonly sidebarRegion: Locator;
   private readonly navigationRegion: Locator;
@@ -36,7 +105,7 @@ export class ElementWebPage {
   constructor(private readonly page: Page) {
     this.navigationRegion = page.getByRole('navigation');
     this.sidebarRegion = page.getByRole('complementary');
-    this.headerRegion = page.getByRole('main').locator('header');
+    this.headerRegion = page.locator('header.mx_RoomHeader');
     this.sendMessageTextbox = page.getByRole('textbox', { name: /message…/ });
     this.noChatPermissionText = page.getByText(
       'You do not have permission to post to this room',
@@ -140,23 +209,64 @@ export class ElementWebPage {
     await this.switchToRoom(name);
   }
 
-  async navigateToRoomOrInvitation(name: string) {
-    await this.page
+  private roomsListLocator() {
+    return getMainRoomListLocator(this.page);
+  }
+
+  private roomNavigationCandidateLocators(name: string) {
+    const escapedRoomName = escapeRegExp(name);
+    const currentRoomAccessibleName = new RegExp(
+      `^Open room ${escapedRoomName}(?:$|\\s)`,
+    );
+    const legacyRoomName = new RegExp(
+      `^${escapedRoomName}( Unread messages\\.)?`,
+    );
+    const roomsList = this.roomsListLocator();
+    const currentOption = roomsList.getByRole('option', {
+      name: currentRoomAccessibleName,
+    });
+    const currentRow = roomsList.getByRole('row', {
+      name: currentRoomAccessibleName,
+    });
+    const legacyTreeItem = this.page
       .getByRole('tree', { name: 'Rooms' })
-      .getByRole('treeitem', {
-        name: new RegExp(`^${name}( Unread messages\\.)?`),
-      })
-      .click();
+      .getByRole('treeitem', { name: legacyRoomName });
+    return { currentOption, currentRow, legacyTreeItem };
+  }
+
+  private roomItemLocator(name: string) {
+    const { currentOption, currentRow, legacyTreeItem } =
+      this.roomNavigationCandidateLocators(name);
+    return currentOption.or(currentRow).or(legacyTreeItem);
+  }
+
+  async observeRoomNavigationTargets(name: string) {
+    const { currentOption, currentRow, legacyTreeItem } =
+      this.roomNavigationCandidateLocators(name);
+    const [currentOptionObservation, currentRowObservation, legacyObservation] =
+      await Promise.all([
+        observeRoomNavigationTarget(currentOption),
+        observeRoomNavigationTarget(currentRow),
+        observeRoomNavigationTarget(legacyTreeItem),
+      ]);
+    return {
+      currentOption: currentOptionObservation,
+      currentRow: currentRowObservation,
+      legacyTreeItem: legacyObservation,
+    };
+  }
+
+  async waitForRoomsList(timeout = 60_000) {
+    const roomsList = this.roomsListLocator();
+    await roomsList.waitFor({ state: 'visible', timeout });
+  }
+
+  async navigateToRoomOrInvitation(name: string) {
+    await this.roomItemLocator(name).click();
   }
 
   async waitForRoom(name: string) {
-    await this.page
-      .getByRole('tree', { name: 'Rooms' })
-      .getByRole('treeitem', {
-        name: new RegExp(`^${name}( Unread messages\\.)?`),
-      })
-      .click();
-
+    await this.roomItemLocator(name).click();
     await this.roomNameText.getByText(name).waitFor();
   }
 

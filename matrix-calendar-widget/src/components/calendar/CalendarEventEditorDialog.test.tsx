@@ -75,6 +75,28 @@ const recurringEvent: CalendarEvent = {
   recurrence: { rrule: 'FREQ=WEEKLY;INTERVAL=2;COUNT=8' },
 };
 
+const everyOtherWeekdayEvent: CalendarEvent = {
+  ...recurringEvent,
+  id: 'weekly-days',
+  uid: 'weekly-days@example.test',
+  title: 'Weekly planning',
+  description: undefined,
+  timing: {
+    type: 'timed',
+    start: {
+      type: 'zoned',
+      local: '2026-10-23T09:00',
+      timezone: 'Europe/Stockholm',
+    },
+    end: {
+      type: 'zoned',
+      local: '2026-10-23T10:00',
+      timezone: 'Europe/Stockholm',
+    },
+  },
+  recurrence: { rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR' },
+};
+
 const complexRecurringEvent: CalendarEvent = {
   ...recurringEvent,
   id: 'complex-series-resource',
@@ -1066,7 +1088,7 @@ describe('<CalendarEventEditorDialog />', () => {
     expect(screen.getByRole('button', { name: 'Entire series' })).toBeEnabled();
   });
 
-  it('creates, edits, and reloads an every-other-week weekday set', async () => {
+  it('creates and reloads an every-other-week weekday set', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
       idFactory: () => 'weekly-days',
@@ -1113,6 +1135,30 @@ describe('<CalendarEventEditorDialog />', () => {
     });
 
     view.rerender(<CalendarEventEditorDialog {...props} event={created} />);
+    expect(
+      await screen.findByRole('checkbox', { name: 'Choose weekdays' }),
+    ).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Monday' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Friday' })).toBeChecked();
+  });
+
+  it('edits and reloads an every-other-week weekday set', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [everyOtherWeekdayEvent],
+    });
+    const onClose = vi.fn();
+    const props = {
+      calendars: [calendar],
+      onClose,
+      open: true,
+      uidFactory: () => 'weekly-days@example.test',
+    };
+    const view = render(
+      <CalendarEventEditorDialog {...props} event={everyOtherWeekdayEvent} />,
+      { wrapper: createWrapper(repository) },
+    );
+
     expect(
       await screen.findByRole('checkbox', { name: 'Choose weekdays' }),
     ).toBeChecked();

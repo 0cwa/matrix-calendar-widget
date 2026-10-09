@@ -1,5 +1,16 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import {
+  chmodSync,
+  existsSync,
+  constants as fsConstants,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -9,9 +20,12 @@ import {
   matchesProbeConfigProjection,
   parseCdpRendererHandoff,
   parseProcCommandLine,
+  parseProcStartTimeTicks,
   readCappedDirectoryEntries,
+  readCleanupOriginObservation,
   readKeyringControl,
   SANDBOX_REASONS,
+  scanCleanupOriginProcesses,
   selectUidLifecycleProcessEntries,
   summarizeCdpRendererProcessInfo,
   summarizeProcessCoverageAndSandbox,
@@ -20,7 +34,902 @@ import {
   summarizeUidTcpSocketObservation,
   summarizeUidTcpSocketTables,
   waitForDesktopChildSpawn,
+  waitForDesktopJourneyCompletion,
+  writeDesktopJourneyCompletionMarker,
+  writeDesktopJourneyReadyMarker,
 } from './element-desktop-startup.mjs';
+
+async function withPrivateProfile(run) {
+  const profileRoot = mkdtempSync(join(tmpdir(), 'mcw-desktop-startup-test-'));
+  chmodSync(profileRoot, 0o700);
+  try {
+    await run(profileRoot, process.getuid());
+  } finally {
+    rmSync(profileRoot, { recursive: true, force: true });
+  }
+}
+
+async function withCleanupOriginProfile(run) {
+  const profileRoot = mkdtempSync('/tmp/mcw-element-desktop-41-2-');
+  chmodSync(profileRoot, 0o700);
+  const uid = process.getuid();
+  writeFileSync(
+    join(profileRoot, '.owned'),
+    'element-desktop-startup-profile-v1\n',
+    {
+      flag: 'wx',
+      mode: 0o600,
+    },
+  );
+  writeFileSync(join(profileRoot, 'process-group'), '101 1001\n', {
+    flag: 'wx',
+    mode: 0o600,
+  });
+  try {
+    await run(profileRoot, uid);
+  } finally {
+    rmSync(profileRoot, { recursive: true, force: true });
+  }
+}
+
+function cleanupOriginProcess(
+  pid,
+  parentPid,
+  processGroupId,
+  startTimeTicks,
+  uid,
+  executableName,
+  state = 'S',
+) {
+  return {
+    pid,
+    parentPid,
+    processGroupId,
+    state,
+    startTimeTicks,
+    uids: [uid, uid, uid, uid],
+    uidMember: false,
+    boundIdentity: false,
+    ancestorOnly: false,
+    executableName,
+  };
+}
+
+function cleanupOriginSnapshot(uid) {
+  const otherUid = uid === 2 ? 3 : 2;
+  const processes = [
+    cleanupOriginProcess(1, 0, 1, '10', otherUid, 'systemd'),
+    cleanupOriginProcess(80, 1, 80, '800', otherUid, 'node'),
+    cleanupOriginProcess(90, 1, 90, '900', otherUid, 'timeout'),
+    cleanupOriginProcess(101, 80, 101, '1001', uid, 'element-desktop'),
+    cleanupOriginProcess(102, 101, 101, '1002', uid, 'chrome'),
+    cleanupOriginProcess(103, 90, 90, '1003', uid, 'dbus-daemon'),
+    cleanupOriginProcess(104, 90, 104, '1004', uid, 'gnome-keyring-daemon'),
+    cleanupOriginProcess(105, 1, 105, '1005', uid, 'other-helper'),
+    cleanupOriginProcess(106, 1, 106, '1006', uid, 'xvfb'),
+  ];
+  return new Map(
+    processes.map((item) => [
+      item.pid,
+      {
+        ...item,
+        uidMember: item.uids.includes(uid),
+        boundIdentity: [90, 101].includes(item.pid),
+      },
+    ]),
+  );
+}
+
+function cloneCleanupOriginSnapshot(processes) {
+  return new Map(
+    [...processes].map(([pid, item]) => [
+      pid,
+      { ...item, uids: [...item.uids] },
+    ]),
+  );
+}
+
+function cleanupOriginRequest(profileRoot, uid, overrides = {}) {
+  return {
+    uid,
+    runId: '41',
+    runAttempt: '2',
+    profileRoot,
+    appPid: 101,
+    appStartTimeTicks: '1001',
+    controllerPid: 90,
+    controllerStartTimeTicks: '900',
+    ...overrides,
+  };
+}
+
+function fakeProcStatus(uids, { minimumBytes = 0 } = {}) {
+  const header = `Name:\tsynthetic\nUid:\t${uids.join('\t')}\n`;
+  return `${header}${'x'.repeat(Math.max(0, minimumBytes - header.length))}`;
+}
+
+function fakeProcStat(
+  pid,
+  parentPid,
+  processGroupId,
+  startTimeTicks,
+  { minimumBytes = 0, name = 'synthetic', raw } = {},
+) {
+  if (raw !== undefined) return raw;
+  const fields = Array.from({ length: 20 }, () => '0');
+  fields[0] = 'S';
+  fields[1] = String(parentPid);
+  fields[2] = String(processGroupId);
+  fields[19] = String(startTimeTicks);
+  const text = `${pid} (${name}) ${fields.join(' ')}`;
+  return `${text}${' '.repeat(Math.max(0, minimumBytes - text.length))}`;
+}
+
+function fakeCleanupOriginProcess(
+  pid,
+  parentPid,
+  processGroupId,
+  startTimeTicks,
+  uids,
+  executableName,
+  { statusBytes = 0, statBytes = 0, statText } = {},
+) {
+  return {
+    status: fakeProcStatus(uids, { minimumBytes: statusBytes }),
+    stat:
+      statText ??
+      fakeProcStat(pid, parentPid, processGroupId, startTimeTicks, {
+        minimumBytes: statBytes,
+      }),
+    executablePath: `/usr/bin/${executableName}`,
+  };
+}
+
+function fakeCleanupOriginProcIo(
+  snapshots,
+  { now = () => 0, readlink = (_path, target) => target } = {},
+) {
+  const versions = Array.isArray(snapshots) ? snapshots : [snapshots];
+  let activeSnapshot = new Map();
+  let snapshotIndex = 0;
+  let nextDescriptor = 1;
+  const descriptors = new Map();
+  const openedPaths = [];
+  const openCalls = [];
+  const readCalls = [];
+  const readlinkPaths = [];
+  const io = {
+    opendirSync(path) {
+      assert.equal(path, '/proc');
+      activeSnapshot = versions[Math.min(snapshotIndex, versions.length - 1)];
+      snapshotIndex += 1;
+      const names = [...activeSnapshot.keys()].map(String);
+      let entryIndex = 0;
+      return {
+        readSync() {
+          return entryIndex < names.length
+            ? { name: names[entryIndex++] }
+            : null;
+        },
+        closeSync() {},
+      };
+    },
+    openSync(path, flags) {
+      const match = /^\/proc\/([0-9]+)\/(status|stat)$/u.exec(path);
+      if (!match) throw new Error('Unexpected proc file');
+      const process = activeSnapshot.get(Number(match[1]));
+      const content = process?.[match[2]];
+      if (typeof content !== 'string') throw new Error('Missing proc file');
+      const descriptor = nextDescriptor++;
+      descriptors.set(descriptor, {
+        path,
+        content: Buffer.from(content),
+        offset: 0,
+      });
+      openedPaths.push(path);
+      openCalls.push({ path, flags });
+      return descriptor;
+    },
+    readSync(descriptor, buffer, offset, length) {
+      const file = descriptors.get(descriptor);
+      if (!file) throw new Error('Unknown proc descriptor');
+      const count = Math.min(length, file.content.length - file.offset);
+      if (count > 0) {
+        file.content.copy(buffer, offset, file.offset, file.offset + count);
+        file.offset += count;
+      }
+      readCalls.push({
+        path: file.path,
+        requestedBytes: length,
+        readBytes: count,
+      });
+      return count;
+    },
+    closeSync(descriptor) {
+      descriptors.delete(descriptor);
+    },
+    readlinkSync(path) {
+      readlinkPaths.push(path);
+      const match = /^\/proc\/([0-9]+)\/exe$/u.exec(path);
+      if (!match) throw new Error('Unexpected executable link');
+      const executablePath = activeSnapshot.get(
+        Number(match[1]),
+      )?.executablePath;
+      if (typeof executablePath !== 'string') {
+        throw new Error('Missing executable link');
+      }
+      return readlink(path, executablePath);
+    },
+    now: () => now(snapshotIndex),
+  };
+  return {
+    io,
+    openedPaths,
+    openCalls,
+    readCalls,
+    readlinkPaths,
+    snapshotCount: () => snapshotIndex,
+  };
+}
+
+test('process start ticks are parsed after the command field, including parentheses', () => {
+  const fields = Array.from({ length: 20 }, () => '0');
+  fields[0] = 'S';
+  fields[1] = '1';
+  fields[2] = '42';
+  fields[19] = '987654';
+  const stat = `42 (synthetic ) command) ${fields.join(' ')}`;
+
+  assert.equal(parseProcStartTimeTicks(42, stat), '987654');
+  assert.equal(parseProcStartTimeTicks(42, '42 (short) S 1 2'), null);
+});
+
+test('cleanup-origin probe attributes only bounded fixed counts from stable identities', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const processes = cleanupOriginSnapshot(uid);
+    const observation = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({
+        state: 'observed',
+        processes: cloneCleanupOriginSnapshot(processes),
+      }),
+    );
+
+    assert.deepEqual(observation, {
+      state: 'observed',
+      reason: 'attributed',
+      overflow: false,
+      processCount: 6,
+      attributionCounts: {
+        appgroup: 2,
+        controllergroup: 1,
+        descendant: 1,
+        unlinked: 2,
+        unknown: 0,
+      },
+      processRoleCounts: {
+        application: 1,
+        chromium: 1,
+        keyring: 1,
+        dbus: 1,
+        xvfb: 1,
+        other: 1,
+        unknown: 0,
+      },
+    });
+    assert.doesNotMatch(
+      JSON.stringify(observation),
+      /(?:\/proc|\/tmp|appPid|controllerPid|argv|commandline|101|1001|900)/iu,
+    );
+  });
+});
+
+test('production cleanup-origin reader keeps only UID members, bindings, and ancestry links', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const otherUid = uid === 2 ? 3 : 2;
+    const processes = new Map([
+      [
+        1,
+        fakeCleanupOriginProcess(
+          1,
+          0,
+          1,
+          '10',
+          [otherUid, otherUid, otherUid, otherUid],
+          'systemd',
+        ),
+      ],
+      [
+        80,
+        fakeCleanupOriginProcess(
+          80,
+          1,
+          80,
+          '800',
+          [otherUid, otherUid, otherUid, otherUid],
+          'node',
+        ),
+      ],
+      [
+        90,
+        fakeCleanupOriginProcess(
+          90,
+          1,
+          90,
+          '900',
+          [otherUid, otherUid, otherUid, otherUid],
+          'timeout',
+        ),
+      ],
+      [
+        101,
+        fakeCleanupOriginProcess(
+          101,
+          80,
+          101,
+          '1001',
+          [uid, uid, uid, uid],
+          'element-desktop',
+          { statusBytes: 65_536, statBytes: 65_536 },
+        ),
+      ],
+      [
+        102,
+        fakeCleanupOriginProcess(
+          102,
+          101,
+          101,
+          '1002',
+          [uid, uid, uid, uid],
+          'chrome',
+        ),
+      ],
+      [
+        200,
+        fakeCleanupOriginProcess(
+          200,
+          1,
+          200,
+          '2000',
+          [otherUid, otherUid, otherUid, otherUid],
+          'private-unrelated-command',
+          { statusBytes: 65_536 },
+        ),
+      ],
+    ]);
+    const fakeIo = fakeCleanupOriginProcIo(processes);
+    const snapshots = [];
+    const observation = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      (scanUid, identityPids, budget) => {
+        const result = scanCleanupOriginProcesses(
+          scanUid,
+          identityPids,
+          budget,
+        );
+        snapshots.push(result);
+        return result;
+      },
+      fakeIo.io,
+    );
+
+    assert.equal(observation.state, 'observed');
+    assert.equal(observation.processCount, 2);
+    assert.equal(observation.attributionCounts.appgroup, 2);
+    assert.equal(observation.processRoleCounts.application, 1);
+    assert.equal(observation.processRoleCounts.chromium, 1);
+    assert.deepEqual(
+      [...snapshots[0].processes.keys()].sort((left, right) => left - right),
+      [80, 90, 101, 102],
+    );
+    const parent = snapshots[0].processes.get(80);
+    assert.deepEqual(Object.keys(parent).sort(), [
+      'ancestorOnly',
+      'boundIdentity',
+      'parentPid',
+      'pid',
+      'startTimeTicks',
+      'uidMember',
+    ]);
+    assert.equal(parent.ancestorOnly, true);
+    assert.equal(parent.uids, undefined);
+    assert.equal(snapshots[0].processes.has(200), false);
+    assert.equal(
+      fakeIo.openedPaths.some((path) => path === '/proc/200/stat'),
+      false,
+    );
+    assert.equal(fakeIo.readlinkPaths.includes('/proc/200/exe'), false);
+    assert.equal(fakeIo.openedPaths.includes('/proc/1/stat'), false);
+    assert.equal(fakeIo.openedPaths.includes('/proc/80/status'), true);
+    assert.equal(fakeIo.readlinkPaths.includes('/proc/80/exe'), false);
+    assert.ok(fakeIo.readCalls.every((call) => call.requestedBytes <= 1_024));
+    assert.equal(
+      fakeIo.readCalls
+        .filter((call) => call.path === '/proc/200/status')
+        .reduce((sum, call) => sum + call.readBytes, 0),
+      2_048,
+    );
+    assert.equal(
+      fakeIo.readCalls
+        .filter((call) => call.path === '/proc/101/stat')
+        .reduce((sum, call) => sum + call.readBytes, 0),
+      2_048,
+    );
+    assert.ok(
+      fakeIo.openCalls.every(
+        ({ flags }) => (flags & (fsConstants.O_NOFOLLOW ?? 0)) !== 0,
+      ),
+    );
+    assert.doesNotMatch(
+      JSON.stringify(observation),
+      /200|private-unrelated-command/u,
+    );
+  });
+});
+
+test('cleanup-origin production reader shares its deadline across both snapshots', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const otherUid = uid === 2 ? 3 : 2;
+    const processes = new Map([
+      [
+        1,
+        fakeCleanupOriginProcess(
+          1,
+          0,
+          1,
+          '10',
+          [otherUid, otherUid, otherUid, otherUid],
+          'systemd',
+        ),
+      ],
+      [
+        90,
+        fakeCleanupOriginProcess(
+          90,
+          1,
+          90,
+          '900',
+          [otherUid, otherUid, otherUid, otherUid],
+          'timeout',
+        ),
+      ],
+      [
+        101,
+        fakeCleanupOriginProcess(
+          101,
+          1,
+          101,
+          '1001',
+          [uid, uid, uid, uid],
+          'element-desktop',
+        ),
+      ],
+    ]);
+    const fakeIo = fakeCleanupOriginProcIo(processes, {
+      now: (snapshotCount) => (snapshotCount >= 2 ? 5_000 : 0),
+    });
+
+    const observation = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      scanCleanupOriginProcesses,
+      fakeIo.io,
+    );
+
+    assert.equal(fakeIo.snapshotCount(), 2);
+    assert.equal(observation.state, 'unknown');
+    assert.equal(observation.reason, 'process_scan_overflow');
+    assert.equal(observation.processCount, null);
+    assert.doesNotMatch(JSON.stringify(observation), /(?:101|1001|900)/u);
+  });
+});
+
+test('cleanup-origin production reader fails closed on unreadable or overlong executable links', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const otherUid = uid === 2 ? 3 : 2;
+    const processes = new Map([
+      [
+        1,
+        fakeCleanupOriginProcess(
+          1,
+          0,
+          1,
+          '10',
+          [otherUid, otherUid, otherUid, otherUid],
+          'systemd',
+        ),
+      ],
+      [
+        90,
+        fakeCleanupOriginProcess(
+          90,
+          1,
+          90,
+          '900',
+          [otherUid, otherUid, otherUid, otherUid],
+          'timeout',
+        ),
+      ],
+      [
+        101,
+        fakeCleanupOriginProcess(
+          101,
+          1,
+          101,
+          '1001',
+          [uid, uid, uid, uid],
+          'element-desktop',
+        ),
+      ],
+    ]);
+    const cases = [
+      {
+        name: 'unreadable executable link',
+        readlink: () => {
+          throw new Error('permission denied');
+        },
+        reason: 'process_snapshot_incomplete',
+      },
+      {
+        name: 'overlong executable link',
+        readlink: () => `${'x'.repeat(4_096)}/chrome`,
+        reason: 'process_scan_overflow',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const fakeIo = fakeCleanupOriginProcIo(processes, {
+        readlink: testCase.readlink,
+      });
+      const observation = readCleanupOriginObservation(
+        cleanupOriginRequest(profileRoot, uid),
+        scanCleanupOriginProcesses,
+        fakeIo.io,
+      );
+
+      assert.equal(observation.state, 'unknown', testCase.name);
+      assert.equal(observation.reason, testCase.reason, testCase.name);
+      assert.doesNotMatch(
+        JSON.stringify(observation),
+        /(?:101|1001|900|xxxx)/u,
+      );
+    }
+  });
+});
+
+test('cleanup-origin production reader fails closed when status or stat reads fail', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const otherUid = uid === 2 ? 3 : 2;
+    const makeProcesses = () =>
+      new Map([
+        [
+          1,
+          fakeCleanupOriginProcess(
+            1,
+            0,
+            1,
+            '10',
+            [otherUid, otherUid, otherUid, otherUid],
+            'systemd',
+          ),
+        ],
+        [
+          90,
+          fakeCleanupOriginProcess(
+            90,
+            1,
+            90,
+            '900',
+            [otherUid, otherUid, otherUid, otherUid],
+            'timeout',
+          ),
+        ],
+        [
+          101,
+          fakeCleanupOriginProcess(
+            101,
+            1,
+            101,
+            '1001',
+            [uid, uid, uid, uid],
+            'element-desktop',
+          ),
+        ],
+      ]);
+    const cases = [
+      {
+        name: 'status read',
+        pid: 1,
+        field: 'status',
+      },
+      {
+        name: 'stat read',
+        pid: 101,
+        field: 'stat',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const processes = makeProcesses();
+      processes.set(testCase.pid, {
+        ...processes.get(testCase.pid),
+        [testCase.field]: undefined,
+      });
+      const fakeIo = fakeCleanupOriginProcIo(processes);
+      const observation = readCleanupOriginObservation(
+        cleanupOriginRequest(profileRoot, uid),
+        scanCleanupOriginProcesses,
+        fakeIo.io,
+      );
+
+      assert.equal(observation.state, 'unknown', testCase.name);
+      assert.equal(
+        observation.reason,
+        'process_snapshot_incomplete',
+        testCase.name,
+      );
+      assert.equal(observation.processCount, null, testCase.name);
+    }
+  });
+});
+
+test('cleanup-origin production reader applies one byte budget to both snapshots and executable links', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const otherUid = uid === 2 ? 3 : 2;
+    const processes = new Map([
+      [
+        1,
+        fakeCleanupOriginProcess(
+          1,
+          0,
+          1,
+          '10',
+          [otherUid, otherUid, otherUid, otherUid],
+          'systemd',
+        ),
+      ],
+      [
+        90,
+        fakeCleanupOriginProcess(
+          90,
+          1,
+          90,
+          '900',
+          [otherUid, otherUid, otherUid, otherUid],
+          'timeout',
+        ),
+      ],
+    ]);
+    const executableTarget = `${'x'.repeat(4_080)}/chrome`;
+    for (let pid = 101; pid < 3_101; pid += 1) {
+      processes.set(
+        pid,
+        fakeCleanupOriginProcess(
+          pid,
+          1,
+          101,
+          pid === 101 ? '1001' : String(pid + 10_000),
+          [uid, uid, uid, uid],
+          'chrome',
+          { statusBytes: 1_024, statBytes: 1_024 },
+        ),
+      );
+    }
+    const fakeIo = fakeCleanupOriginProcIo(processes, {
+      readlink: () => executableTarget,
+    });
+
+    const observation = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      scanCleanupOriginProcesses,
+      fakeIo.io,
+    );
+
+    assert.equal(observation.state, 'unknown');
+    assert.equal(observation.reason, 'process_scan_overflow');
+    assert.equal(observation.processCount, null);
+    assert.ok(fakeIo.readlinkPaths.length < 2 * 3_001);
+    assert.doesNotMatch(JSON.stringify(observation), /(?:101|1001|900|xxxx)/u);
+  });
+});
+
+test('cleanup-origin probe fails closed for unbound roots, unreadable scans, overflow, and marker symlinks', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const processes = cleanupOriginSnapshot(uid);
+    const stableScan = () => ({
+      state: 'observed',
+      processes: cloneCleanupOriginSnapshot(processes),
+    });
+    const noController = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid, {
+        controllerPid: null,
+        controllerStartTimeTicks: null,
+      }),
+      stableScan,
+    );
+    assert.equal(noController.state, 'partial');
+    assert.equal(noController.reason, 'controller_identity_unavailable');
+    assert.equal(noController.attributionCounts.unlinked, 0);
+    assert.ok(noController.attributionCounts.unknown > 0);
+
+    const unreadable = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({ state: 'incomplete' }),
+    );
+    assert.equal(unreadable.state, 'unknown');
+    assert.equal(unreadable.reason, 'process_snapshot_incomplete');
+    assert.equal(unreadable.processCount, null);
+
+    const overflow = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({ state: 'overflow' }),
+    );
+    assert.equal(overflow.state, 'unknown');
+    assert.equal(overflow.reason, 'process_scan_overflow');
+    assert.equal(overflow.attributionCounts.appgroup, null);
+
+    const markerPath = join(profileRoot, 'process-group');
+    rmSync(markerPath);
+    const markerTarget = join(profileRoot, 'marker-target');
+    writeFileSync(markerTarget, '101 1001\n', { mode: 0o600 });
+    symlinkSync(markerTarget, markerPath);
+    const symlinkMarker = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      stableScan,
+    );
+    assert.equal(symlinkMarker.state, 'unknown');
+    assert.equal(symlinkMarker.reason, 'marker_unavailable');
+  });
+});
+
+test('cleanup-origin probe rejects reused group IDs when start-time bindings differ', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const processes = cleanupOriginSnapshot(uid);
+    const appReused = cloneCleanupOriginSnapshot(processes);
+    appReused.set(101, {
+      ...appReused.get(101),
+      startTimeTicks: '9001',
+    });
+    const appResult = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({
+        state: 'observed',
+        processes: cloneCleanupOriginSnapshot(appReused),
+      }),
+    );
+    assert.equal(appResult.state, 'partial');
+    assert.equal(appResult.reason, 'app_identity_unavailable');
+    assert.equal(appResult.attributionCounts.appgroup, 0);
+    assert.equal(appResult.attributionCounts.unlinked, 0);
+
+    const controllerReused = cloneCleanupOriginSnapshot(processes);
+    controllerReused.set(90, {
+      ...controllerReused.get(90),
+      startTimeTicks: '9001',
+    });
+    const controllerResult = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({
+        state: 'observed',
+        processes: cloneCleanupOriginSnapshot(controllerReused),
+      }),
+    );
+    assert.equal(controllerResult.state, 'partial');
+    assert.equal(controllerResult.reason, 'controller_identity_unavailable');
+    assert.equal(controllerResult.attributionCounts.controllergroup, 0);
+    assert.equal(controllerResult.attributionCounts.unlinked, 0);
+
+    const appUidTupleMismatch = cloneCleanupOriginSnapshot(processes);
+    appUidTupleMismatch.set(101, {
+      ...appUidTupleMismatch.get(101),
+      uids: [uid, uid + 1, uid, uid],
+      uidMember: true,
+    });
+    const appUidResult = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({
+        state: 'observed',
+        processes: cloneCleanupOriginSnapshot(appUidTupleMismatch),
+      }),
+    );
+    assert.equal(appUidResult.state, 'partial');
+    assert.equal(appUidResult.reason, 'app_identity_unavailable');
+    assert.equal(appUidResult.attributionCounts.appgroup, 0);
+    assert.equal(appUidResult.attributionCounts.unlinked, 0);
+
+    const nonTimeoutController = cloneCleanupOriginSnapshot(processes);
+    nonTimeoutController.set(90, {
+      ...nonTimeoutController.get(90),
+      executableName: 'other-controller',
+    });
+    const controllerExecutableResult = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({
+        state: 'observed',
+        processes: cloneCleanupOriginSnapshot(nonTimeoutController),
+      }),
+    );
+    assert.equal(controllerExecutableResult.state, 'partial');
+    assert.equal(
+      controllerExecutableResult.reason,
+      'controller_identity_unavailable',
+    );
+    assert.equal(
+      controllerExecutableResult.attributionCounts.controllergroup,
+      0,
+    );
+    assert.equal(controllerExecutableResult.attributionCounts.unlinked, 0);
+
+    const mismatchedMarker = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid, {
+        appStartTimeTicks: '1002',
+      }),
+      () => ({
+        state: 'observed',
+        processes: cloneCleanupOriginSnapshot(processes),
+      }),
+    );
+    assert.equal(mismatchedMarker.state, 'unknown');
+    assert.equal(mismatchedMarker.reason, 'marker_unavailable');
+  });
+});
+
+test('cleanup-origin production reader rejects parent-link changes across snapshots', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const first = cleanupOriginSnapshot(uid);
+    const second = cloneCleanupOriginSnapshot(first);
+    second.set(102, { ...second.get(102), parentPid: 80 });
+    let scanCount = 0;
+
+    const observation = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => {
+        const processes = scanCount === 0 ? first : second;
+        scanCount += 1;
+        return {
+          state: 'observed',
+          processes: cloneCleanupOriginSnapshot(processes),
+        };
+      },
+    );
+
+    assert.equal(observation.state, 'unknown');
+    assert.equal(observation.reason, 'process_snapshot_changed');
+    assert.equal(observation.processCount, null);
+  });
+});
+
+test('cleanup-origin count overflow remains capped and partial', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const processes = cleanupOriginSnapshot(uid);
+    for (let pid = 200; pid < 301; pid += 1) {
+      processes.set(pid, {
+        ...cleanupOriginProcess(
+          pid,
+          1,
+          pid,
+          String(pid + 10_000),
+          uid,
+          'helper',
+        ),
+        uidMember: true,
+      });
+    }
+    const observation = readCleanupOriginObservation(
+      cleanupOriginRequest(profileRoot, uid),
+      () => ({
+        state: 'observed',
+        processes: cloneCleanupOriginSnapshot(processes),
+      }),
+    );
+
+    assert.equal(observation.state, 'partial');
+    assert.equal(observation.reason, 'count_capped');
+    assert.equal(observation.overflow, true);
+    assert.equal(observation.processCount, 100);
+    assert.equal(observation.attributionCounts.unlinked, 100);
+    assert.equal(observation.processRoleCounts.other, 100);
+  });
+});
 
 test('missing desktop executable is reported as a finite spawn outcome', async () => {
   const child = spawn('/usr/bin/element-desktop-startup-missing-test', [], {
@@ -33,6 +942,105 @@ test('missing desktop executable is reported as a finite spawn outcome', async (
     errorClass: 'missing-executable',
   });
   assert.equal(child.pid, undefined);
+});
+
+test('Desktop journey hold accepts only a private fixed completion marker', async () => {
+  await withPrivateProfile(async (profileRoot, expectedUid) => {
+    const completionPath = join(profileRoot, '.desktop-journey-complete');
+    assert.equal(
+      writeDesktopJourneyReadyMarker(profileRoot, expectedUid),
+      true,
+    );
+    setTimeout(() => {
+      assert.equal(
+        writeDesktopJourneyCompletionMarker(profileRoot, expectedUid),
+        true,
+      );
+    }, 10);
+    assert.equal(
+      await waitForDesktopJourneyCompletion({
+        profileRoot,
+        expectedUid,
+        timeoutMs: 1_000,
+      }),
+      true,
+    );
+    assert.equal(
+      writeDesktopJourneyCompletionMarker(profileRoot, expectedUid),
+      false,
+    );
+  });
+});
+
+test('Desktop journey hold fails closed on malformed, insecure, and late markers', async () => {
+  await withPrivateProfile(async (profileRoot, expectedUid) => {
+    const readyPath = join(profileRoot, '.desktop-journey-ready');
+    const completionPath = join(profileRoot, '.desktop-journey-complete');
+    assert.equal(
+      writeDesktopJourneyReadyMarker(profileRoot, expectedUid),
+      true,
+    );
+    writeFileSync(completionPath, 'wrong marker\n', {
+      flag: 'wx',
+      mode: 0o600,
+    });
+    assert.equal(
+      await waitForDesktopJourneyCompletion({
+        profileRoot,
+        expectedUid,
+        timeoutMs: 100,
+      }),
+      false,
+    );
+
+    rmSync(completionPath);
+    writeFileSync(
+      completionPath,
+      'matrix-calendar-desktop-journey-complete-v1\n',
+      {
+        flag: 'wx',
+        mode: 0o600,
+      },
+    );
+    chmodSync(completionPath, 0o644);
+    assert.equal(
+      await waitForDesktopJourneyCompletion({
+        profileRoot,
+        expectedUid,
+        timeoutMs: 100,
+      }),
+      false,
+    );
+
+    rmSync(completionPath);
+    assert.equal(
+      await waitForDesktopJourneyCompletion({
+        profileRoot,
+        expectedUid,
+        timeoutMs: 10,
+      }),
+      false,
+    );
+    setTimeout(() => {
+      writeFileSync(
+        completionPath,
+        'matrix-calendar-desktop-journey-complete-v1\n',
+        { flag: 'wx', mode: 0o600 },
+      );
+    }, 25);
+    assert.equal(
+      await waitForDesktopJourneyCompletion({
+        profileRoot,
+        expectedUid,
+        timeoutMs: 10,
+      }),
+      false,
+    );
+    await new Promise((resolveWait) => setTimeout(resolveWait, 30));
+    assert.equal(existsSync(completionPath), true);
+    rmSync(completionPath);
+    rmSync(readyPath);
+  });
 });
 
 test('keyring unlock entropy is encoded as an ASCII line without embedded NULs', () => {
@@ -661,6 +1669,46 @@ test('UID lifecycle cleanup keeps process ownership unobserved and retains cappe
   assert.equal(overflow.uidProcessCount, 100);
   assert.equal(overflow.processClassCounts.renderer, 100);
   assert.equal(overflow.processRoleCounts.chromium, 100);
+});
+
+test('UID lifecycle separates effective matches from other UID-slot matches', () => {
+  const observed = summarizeUidLifecycleObservation(
+    [
+      lifecycleProcess(30, 1, 30, ['private-effective-command']),
+      lifecycleProcess(31, 1, 31, ['private-non-effective-command'], {
+        uids: [24_000, 35_000, 24_000, 24_000],
+      }),
+      lifecycleProcess(32, 1, 32, ['private-unmatched-command'], {
+        uids: [35_000, 35_000, 35_000, 35_000],
+      }),
+    ],
+    24_000,
+  );
+
+  assert.equal(observed.state, 'observed');
+  assert.equal(observed.uidProcessCount, 2);
+  assert.equal(observed.effectiveUidMatchCount, 1);
+  assert.equal(observed.nonEffectiveUidOnlyCount, 1);
+  assert.doesNotMatch(JSON.stringify(observed), /private|24000|35000/u);
+
+  const capped = summarizeUidLifecycleObservation(
+    [
+      ...Array.from({ length: 101 }, (_, index) =>
+        lifecycleProcess(100 + index, 1, 100 + index, ['--type=renderer']),
+      ),
+      ...Array.from({ length: 101 }, (_, index) =>
+        lifecycleProcess(300 + index, 1, 300 + index, ['--type=renderer'], {
+          uids: [24_000, 35_000, 24_000, 24_000],
+        }),
+      ),
+    ],
+    24_000,
+  );
+  assert.equal(capped.state, 'partial');
+  assert.equal(capped.overflow, true);
+  assert.equal(capped.uidProcessCount, 100);
+  assert.equal(capped.effectiveUidMatchCount, 100);
+  assert.equal(capped.nonEffectiveUidOnlyCount, 100);
 });
 
 function procTcpRow(index, uid, local, remote, state, inode) {

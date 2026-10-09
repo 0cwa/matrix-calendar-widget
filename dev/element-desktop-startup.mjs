@@ -3,6 +3,8 @@ import { randomBytes } from 'node:crypto';
 import {
   closeSync,
   existsSync,
+  constants as fsConstants,
+  fstatSync,
   lstatSync,
   mkdirSync,
   opendirSync,
@@ -14,7 +16,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const FIXED_ORIGIN = 'vector://vector';
@@ -30,8 +32,28 @@ const SAFE_STORAGE_MODES = new Set(['encrypted', 'plaintext', 'basic_text']);
 const MAX_SAFE_STORAGE_LOG_BYTES = 1_048_576;
 const MAX_SAFE_STORAGE_LINE_LENGTH = 512;
 const DESKTOP_SPAWN_WAIT_MS = 5_000;
+const DESKTOP_JOURNEY_HOLD_MS = 180_000;
+const DESKTOP_JOURNEY_READY_MARKER = '.desktop-journey-ready';
+const DESKTOP_JOURNEY_COMPLETE_MARKER = '.desktop-journey-complete';
+const DESKTOP_JOURNEY_READY_CONTENT =
+  'matrix-calendar-desktop-journey-ready-v1\n';
+const DESKTOP_JOURNEY_COMPLETE_CONTENT =
+  'matrix-calendar-desktop-journey-complete-v1\n';
 const MAX_DIAGNOSTIC_COUNT = 100;
 const MAX_UID_LIFECYCLE_PROCESSES = 4_096;
+const MAX_CLEANUP_ORIGIN_INPUT_BYTES = 2_048;
+const MAX_CLEANUP_ORIGIN_MARKER_BYTES = 64;
+const MAX_CLEANUP_ORIGIN_PROCESSES = 4_096;
+const MAX_CLEANUP_ORIGIN_DIRECTORY_ENTRIES = MAX_CLEANUP_ORIGIN_PROCESSES + 64;
+const MAX_CLEANUP_ORIGIN_STATUS_BYTES = 1_024;
+const MAX_CLEANUP_ORIGIN_STAT_BYTES = 1_024;
+const MAX_CLEANUP_ORIGIN_SCAN_RECORDS = MAX_CLEANUP_ORIGIN_PROCESSES * 2;
+const MAX_CLEANUP_ORIGIN_OBSERVATION_BYTES = 24 * 1_024 * 1_024;
+const MAX_CLEANUP_ORIGIN_OBSERVATION_RECORDS =
+  MAX_CLEANUP_ORIGIN_SCAN_RECORDS * 2;
+const MAX_CLEANUP_ORIGIN_OBSERVATION_MS = 4_000;
+const MAX_CLEANUP_ORIGIN_ANCESTOR_DEPTH = 64;
+const MAX_CLEANUP_ORIGIN_EXE_BYTES = 4_096;
 const MAX_CDP_PROCESS_INFO_RECORDS = 128;
 const MAX_CDP_RENDERER_PIDS = 64;
 const MAX_CDP_RENDERER_HANDOFF_BYTES = 2_048;
@@ -80,6 +102,22 @@ const UID_TCP_STATES = Object.freeze([
   'unknown',
 ]);
 const UID_LIFECYCLE_PROCESS_ROLES = Object.freeze([
+  'application',
+  'chromium',
+  'keyring',
+  'dbus',
+  'xvfb',
+  'other',
+  'unknown',
+]);
+const CLEANUP_ORIGIN_ATTRIBUTIONS = Object.freeze([
+  'appgroup',
+  'controllergroup',
+  'descendant',
+  'unlinked',
+  'unknown',
+]);
+const CLEANUP_ORIGIN_PROCESS_ROLES = Object.freeze([
   'application',
   'chromium',
   'keyring',
@@ -278,6 +316,128 @@ export function waitForDesktopChildSpawn(child) {
     child.once('spawn', onSpawn);
     child.once('error', onError);
   });
+}
+
+function validDesktopJourneyMarkerRoot(profileRoot, expectedUid) {
+  if (
+    typeof profileRoot !== 'string' ||
+    !isAbsolute(profileRoot) ||
+    !Number.isSafeInteger(expectedUid) ||
+    expectedUid < 1
+  ) {
+    return false;
+  }
+  try {
+    const stat = lstatSync(profileRoot);
+    return (
+      stat.isDirectory() &&
+      !stat.isSymbolicLink() &&
+      stat.uid === expectedUid &&
+      (stat.mode & 0o777) === 0o700
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validDesktopJourneyMarker(markerPath, expectedUid, expectedContent) {
+  try {
+    const stat = lstatSync(markerPath);
+    return (
+      stat.isFile() &&
+      !stat.isSymbolicLink() &&
+      stat.nlink === 1 &&
+      stat.uid === expectedUid &&
+      (stat.mode & 0o777) === 0o600 &&
+      stat.size === Buffer.byteLength(expectedContent) &&
+      readFileSync(markerPath, 'utf8') === expectedContent
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function writeDesktopJourneyReadyMarker(profileRoot, expectedUid) {
+  if (!validDesktopJourneyMarkerRoot(profileRoot, expectedUid)) return false;
+  const markerPath = `${profileRoot}/${DESKTOP_JOURNEY_READY_MARKER}`;
+  try {
+    writeFileSync(markerPath, DESKTOP_JOURNEY_READY_CONTENT, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+  } catch {
+    return false;
+  }
+  return validDesktopJourneyMarker(
+    markerPath,
+    expectedUid,
+    DESKTOP_JOURNEY_READY_CONTENT,
+  );
+}
+
+export function writeDesktopJourneyCompletionMarker(profileRoot, expectedUid) {
+  if (
+    !validDesktopJourneyMarkerRoot(profileRoot, expectedUid) ||
+    !validDesktopJourneyMarker(
+      `${profileRoot}/${DESKTOP_JOURNEY_READY_MARKER}`,
+      expectedUid,
+      DESKTOP_JOURNEY_READY_CONTENT,
+    )
+  ) {
+    return false;
+  }
+  const markerPath = `${profileRoot}/${DESKTOP_JOURNEY_COMPLETE_MARKER}`;
+  try {
+    writeFileSync(markerPath, DESKTOP_JOURNEY_COMPLETE_CONTENT, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+  } catch {
+    return false;
+  }
+  return validDesktopJourneyMarker(
+    markerPath,
+    expectedUid,
+    DESKTOP_JOURNEY_COMPLETE_CONTENT,
+  );
+}
+
+export async function waitForDesktopJourneyCompletion({
+  profileRoot,
+  expectedUid,
+  timeoutMs = DESKTOP_JOURNEY_HOLD_MS,
+}) {
+  if (
+    !validDesktopJourneyMarkerRoot(profileRoot, expectedUid) ||
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < 1 ||
+    timeoutMs > DESKTOP_JOURNEY_HOLD_MS ||
+    !validDesktopJourneyMarker(
+      `${profileRoot}/${DESKTOP_JOURNEY_READY_MARKER}`,
+      expectedUid,
+      DESKTOP_JOURNEY_READY_CONTENT,
+    )
+  ) {
+    return false;
+  }
+  const markerPath = `${profileRoot}/${DESKTOP_JOURNEY_COMPLETE_MARKER}`;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(markerPath)) {
+      return validDesktopJourneyMarker(
+        markerPath,
+        expectedUid,
+        DESKTOP_JOURNEY_COMPLETE_CONTENT,
+      );
+    }
+    const remaining = deadline - Date.now();
+    await new Promise((resolveWait) =>
+      setTimeout(resolveWait, Math.min(100, remaining)),
+    );
+  }
+  return false;
 }
 
 export function readKeyringControl(stdout) {
@@ -592,6 +752,8 @@ function emptyUidLifecycleObservation(state) {
     state,
     overflow: null,
     uidProcessCount: null,
+    effectiveUidMatchCount: null,
+    nonEffectiveUidOnlyCount: null,
     nonZombieProcessCount: null,
     zombieCount: null,
     unreadableProcessCount: null,
@@ -1061,6 +1223,8 @@ export function summarizeUidLifecycleObservation(
       : null;
   const appBoundRendererPids = new Set();
   let uidProcessCount = 0;
+  let effectiveUidMatchCount = 0;
+  let nonEffectiveUidOnlyCount = 0;
   let nonZombieProcessCount = 0;
   let zombieCount = 0;
   let unreadableProcessCount = 0;
@@ -1105,6 +1269,13 @@ export function summarizeUidLifecycleObservation(
     if (!matchesUid) continue;
 
     uidProcessCount += 1;
+    // /proc status Uid slots are real, effective, saved-set, filesystem;
+    // pgrep -u selects the effective slot, unlike this broader census.
+    if (item.uids[1] === expectedUid) {
+      effectiveUidMatchCount += 1;
+    } else {
+      nonEffectiveUidOnlyCount += 1;
+    }
     roleCounts[classifyUidProcessRole(item.args, item.pid, applicationPid)] +=
       1;
     let processUnreadable =
@@ -1148,6 +1319,8 @@ export function summarizeUidLifecycleObservation(
 
   const countValues = [
     uidProcessCount,
+    effectiveUidMatchCount,
+    nonEffectiveUidOnlyCount,
     nonZombieProcessCount,
     zombieCount,
     unreadableProcessCount,
@@ -1188,6 +1361,8 @@ export function summarizeUidLifecycleObservation(
     state,
     overflow: sawCountOverflow,
     uidProcessCount: cappedDiagnosticCount(uidProcessCount),
+    effectiveUidMatchCount: cappedDiagnosticCount(effectiveUidMatchCount),
+    nonEffectiveUidOnlyCount: cappedDiagnosticCount(nonEffectiveUidOnlyCount),
     nonZombieProcessCount: cappedDiagnosticCount(nonZombieProcessCount),
     zombieCount: cappedDiagnosticCount(zombieCount),
     unreadableProcessCount: cappedDiagnosticCount(unreadableProcessCount),
@@ -1725,6 +1900,22 @@ function parseProcStat(pid, text) {
   return { pid, parentPid, processGroupId, state: fields[0] };
 }
 
+export function parseProcStartTimeTicks(pid, text) {
+  if (!Number.isSafeInteger(pid) || pid < 1 || typeof text !== 'string') {
+    return null;
+  }
+  const end = text.lastIndexOf(')');
+  if (end < 0) return null;
+  const fields = text
+    .slice(end + 2)
+    .trim()
+    .split(/\s+/u);
+  const startTimeTicks = fields[19];
+  return fields.length >= 20 && /^[0-9]{1,20}$/u.test(startTimeTicks ?? '')
+    ? startTimeTicks
+    : null;
+}
+
 function parseProcStatus(text) {
   const uidText = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$/mu.exec(text);
   if (!uidText) return null;
@@ -1837,6 +2028,889 @@ export function readCappedDirectoryEntries(
     directory.closeSync();
   }
   return { entries, overflow };
+}
+
+function emptyCleanupOriginProbe(state, reason) {
+  const unavailable = state === 'unknown';
+  return {
+    state,
+    reason,
+    overflow: unavailable ? null : false,
+    processCount: unavailable ? null : 0,
+    attributionCounts: Object.fromEntries(
+      CLEANUP_ORIGIN_ATTRIBUTIONS.map((name) => [name, unavailable ? null : 0]),
+    ),
+    processRoleCounts: Object.fromEntries(
+      CLEANUP_ORIGIN_PROCESS_ROLES.map((name) => [
+        name,
+        unavailable ? null : 0,
+      ]),
+    ),
+  };
+}
+
+function validCleanupOriginIdentity(pid, startTimeTicks) {
+  return (
+    Number.isSafeInteger(pid) &&
+    pid >= 2 &&
+    pid <= 2_147_483_647 &&
+    typeof startTimeTicks === 'string' &&
+    /^[0-9]{1,20}$/u.test(startTimeTicks)
+  );
+}
+
+function validCleanupOriginRequest(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      [
+        'appPid',
+        'appStartTimeTicks',
+        'controllerPid',
+        'controllerStartTimeTicks',
+        'profileRoot',
+        'runAttempt',
+        'runId',
+        'uid',
+      ]
+        .sort()
+        .join(',') ||
+    typeof value.runId !== 'string' ||
+    !/^[0-9]{1,18}$/u.test(value.runId) ||
+    typeof value.runAttempt !== 'string' ||
+    !/^[0-9]{1,6}$/u.test(value.runAttempt) ||
+    !Number.isSafeInteger(value.uid) ||
+    value.uid < 1 ||
+    value.uid > 65_535 ||
+    typeof value.profileRoot !== 'string' ||
+    dirname(value.profileRoot) !== '/tmp' ||
+    !/^mcw-element-desktop-[0-9]{1,18}-[0-9]{1,6}-[A-Za-z0-9]{6}$/u.test(
+      basename(value.profileRoot),
+    ) ||
+    !basename(value.profileRoot).startsWith(
+      `mcw-element-desktop-${value.runId}-${value.runAttempt}-`,
+    ) ||
+    (value.appPid === null) !== (value.appStartTimeTicks === null) ||
+    (value.appPid !== null &&
+      !validCleanupOriginIdentity(value.appPid, value.appStartTimeTicks)) ||
+    (value.controllerPid === null) !==
+      (value.controllerStartTimeTicks === null) ||
+    (value.controllerPid !== null &&
+      !validCleanupOriginIdentity(
+        value.controllerPid,
+        value.controllerStartTimeTicks,
+      ))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function readProtectedCleanupFile(path, expectedUid, maximumBytes) {
+  let descriptor;
+  try {
+    const flags = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0);
+    descriptor = openSync(path, flags);
+    const stat = fstatSync(descriptor);
+    if (
+      !stat.isFile() ||
+      stat.nlink !== 1 ||
+      stat.uid !== expectedUid ||
+      (stat.mode & 0o777) !== 0o600 ||
+      stat.size > maximumBytes
+    ) {
+      return undefined;
+    }
+    const buffer = Buffer.alloc(maximumBytes + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const count = readSync(
+        descriptor,
+        buffer,
+        length,
+        buffer.length - length,
+        null,
+      );
+      if (count === 0) break;
+      length += count;
+    }
+    if (length > maximumBytes) return undefined;
+    return buffer.subarray(0, length).toString('utf8');
+  } catch {
+    return undefined;
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        closeSync(descriptor);
+      } catch {
+        // The marker remains unknown if its descriptor could not be closed.
+      }
+    }
+  }
+}
+
+function validateCleanupOriginProfile(request) {
+  const root = request.profileRoot;
+  try {
+    const stat = lstatSync(root);
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      stat.uid !== request.uid ||
+      (stat.mode & 0o777) !== 0o700
+    ) {
+      return 'profile_untrusted';
+    }
+  } catch {
+    return 'profile_untrusted';
+  }
+  if (
+    readProtectedCleanupFile(`${root}/.owned`, request.uid, 128) !==
+    `${PROFILE_MARKER}\n`
+  ) {
+    return 'profile_untrusted';
+  }
+  if (!validCleanupOriginIdentity(request.appPid, request.appStartTimeTicks)) {
+    return 'marker_unavailable';
+  }
+  const marker = readProtectedCleanupFile(
+    `${root}/process-group`,
+    request.uid,
+    MAX_CLEANUP_ORIGIN_MARKER_BYTES,
+  );
+  const match =
+    typeof marker === 'string'
+      ? /^([1-9][0-9]{0,9}) ([0-9]{1,20})\n$/u.exec(marker)
+      : null;
+  if (
+    !match ||
+    Number(match[1]) !== request.appPid ||
+    match[2] !== request.appStartTimeTicks
+  ) {
+    return 'marker_unavailable';
+  }
+  return null;
+}
+
+const cleanupOriginProcIo = Object.freeze({
+  opendirSync,
+  openSync,
+  readSync,
+  closeSync,
+  readlinkSync,
+  now: () => Number(process.hrtime.bigint() / 1_000_000n),
+});
+
+function validCleanupOriginProcIo(io) {
+  return (
+    io !== null &&
+    typeof io === 'object' &&
+    typeof io.opendirSync === 'function' &&
+    typeof io.openSync === 'function' &&
+    typeof io.readSync === 'function' &&
+    typeof io.closeSync === 'function' &&
+    typeof io.readlinkSync === 'function' &&
+    typeof io.now === 'function'
+  );
+}
+
+function createCleanupOriginObservationBudget(io) {
+  if (!validCleanupOriginProcIo(io)) return null;
+  let startedAt;
+  try {
+    startedAt = io.now();
+  } catch {
+    return null;
+  }
+  if (!Number.isFinite(startedAt)) return null;
+  return {
+    io,
+    startedAt,
+    deadline: startedAt + MAX_CLEANUP_ORIGIN_OBSERVATION_MS,
+    bytesRead: 0,
+    recordsRetained: 0,
+  };
+}
+
+function cleanupOriginBudgetExceeded(budget) {
+  let currentTime;
+  try {
+    currentTime = budget.io.now();
+  } catch {
+    return true;
+  }
+  return !Number.isFinite(currentTime) || currentTime > budget.deadline;
+}
+
+function readCleanupOriginProcText(path, maximumBytes, budget) {
+  if (cleanupOriginBudgetExceeded(budget)) return { state: 'overflow' };
+  const remainingBytes =
+    MAX_CLEANUP_ORIGIN_OBSERVATION_BYTES - budget.bytesRead;
+  if (remainingBytes < maximumBytes) return { state: 'overflow' };
+
+  let descriptor;
+  let result = { state: 'incomplete' };
+  let closeFailed = false;
+  try {
+    descriptor = budget.io.openSync(
+      path,
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+    );
+    const buffer = Buffer.alloc(maximumBytes);
+    let length = 0;
+    while (length < buffer.length) {
+      if (cleanupOriginBudgetExceeded(budget)) {
+        result = { state: 'overflow' };
+        break;
+      }
+      const count = budget.io.readSync(
+        descriptor,
+        buffer,
+        length,
+        buffer.length - length,
+        null,
+      );
+      if (
+        !Number.isSafeInteger(count) ||
+        count < 0 ||
+        count > buffer.length - length
+      ) {
+        break;
+      }
+      if (count === 0) {
+        result = {
+          state: 'observed',
+          text: buffer.subarray(0, length).toString('utf8'),
+        };
+        break;
+      }
+      length += count;
+      budget.bytesRead += count;
+      if (cleanupOriginBudgetExceeded(budget)) {
+        result = { state: 'overflow' };
+        break;
+      }
+      if (length === buffer.length) {
+        result = { state: 'observed', text: buffer.toString('utf8') };
+      }
+    }
+  } catch {
+    result = { state: 'incomplete' };
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        budget.io.closeSync(descriptor);
+      } catch {
+        closeFailed = true;
+      }
+    }
+  }
+  if (closeFailed) return { state: 'incomplete' };
+  return result;
+}
+
+function readCleanupOriginDirectoryEntries(budget) {
+  if (cleanupOriginBudgetExceeded(budget)) return { state: 'overflow' };
+  let directory;
+  try {
+    directory = budget.io.opendirSync('/proc');
+  } catch {
+    return { state: 'unavailable' };
+  }
+
+  const entries = [];
+  let rawEntryCount = 0;
+  let state = 'observed';
+  try {
+    while (true) {
+      if (cleanupOriginBudgetExceeded(budget)) {
+        state = 'overflow';
+        break;
+      }
+      const entry = directory.readSync();
+      if (entry === null) break;
+      rawEntryCount += 1;
+      if (rawEntryCount > MAX_CLEANUP_ORIGIN_DIRECTORY_ENTRIES) {
+        state = 'overflow';
+        break;
+      }
+      if (typeof entry.name !== 'string' || !/^[0-9]+$/u.test(entry.name)) {
+        continue;
+      }
+      if (entries.length === MAX_CLEANUP_ORIGIN_PROCESSES) {
+        state = 'overflow';
+        break;
+      }
+      entries.push(entry);
+    }
+  } catch {
+    state = 'incomplete';
+  } finally {
+    try {
+      directory.closeSync();
+    } catch {
+      state = 'incomplete';
+    }
+  }
+  return { state, entries };
+}
+
+function parseCleanupOriginUidTuple(text) {
+  const uidText = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$/mu.exec(text);
+  if (!uidText) return null;
+  const uids = uidText.slice(1).map(Number);
+  return uids.every(Number.isSafeInteger) ? uids : null;
+}
+
+function retainCleanupOriginRecord(processes, process, budget) {
+  if (processes.has(process.pid)) return true;
+  if (
+    processes.size >= MAX_CLEANUP_ORIGIN_SCAN_RECORDS ||
+    budget.recordsRetained >= MAX_CLEANUP_ORIGIN_OBSERVATION_RECORDS
+  ) {
+    return false;
+  }
+  processes.set(process.pid, process);
+  budget.recordsRetained += 1;
+  return true;
+}
+
+function readCleanupOriginProcessRecord(
+  pid,
+  budget,
+  { uids, uidMember, boundIdentity, includeExecutable },
+) {
+  const statText = readCleanupOriginProcText(
+    `/proc/${pid}/stat`,
+    MAX_CLEANUP_ORIGIN_STAT_BYTES,
+    budget,
+  );
+  if (statText.state !== 'observed') return statText;
+  const stat = parseProcStat(pid, statText.text);
+  const startTimeTicks = parseProcStartTimeTicks(pid, statText.text);
+  if (stat === null || startTimeTicks === null) return { state: 'incomplete' };
+
+  let executableName = null;
+  if (includeExecutable) {
+    if (cleanupOriginBudgetExceeded(budget)) return { state: 'overflow' };
+    if (
+      MAX_CLEANUP_ORIGIN_OBSERVATION_BYTES - budget.bytesRead <
+      MAX_CLEANUP_ORIGIN_EXE_BYTES
+    ) {
+      return { state: 'overflow' };
+    }
+    let executablePath;
+    try {
+      executablePath = budget.io.readlinkSync(`/proc/${pid}/exe`);
+    } catch {
+      return { state: 'incomplete' };
+    }
+    if (typeof executablePath !== 'string') return { state: 'incomplete' };
+    const executablePathBytes = Buffer.byteLength(executablePath, 'utf8');
+    if (executablePathBytes > MAX_CLEANUP_ORIGIN_EXE_BYTES) {
+      return { state: 'overflow' };
+    }
+    if (
+      budget.bytesRead + executablePathBytes >
+      MAX_CLEANUP_ORIGIN_OBSERVATION_BYTES
+    ) {
+      return { state: 'overflow' };
+    }
+    budget.bytesRead += executablePathBytes;
+    executableName = basename(executablePath).toLowerCase();
+    if (cleanupOriginBudgetExceeded(budget)) return { state: 'overflow' };
+  }
+  return {
+    state: 'observed',
+    process: {
+      pid,
+      parentPid: stat.parentPid,
+      processGroupId: stat.processGroupId,
+      state: stat.state,
+      startTimeTicks,
+      ...(uids === undefined ? {} : { uids }),
+      uidMember,
+      boundIdentity,
+      ancestorOnly: false,
+      executableName,
+    },
+  };
+}
+
+export function scanCleanupOriginProcesses(uid, identityPids = [], budget) {
+  if (!Number.isSafeInteger(uid) || uid < 1 || uid > 65_535) {
+    return { state: 'incomplete' };
+  }
+  if (!Array.isArray(identityPids) || identityPids.length > 2) {
+    return { state: 'incomplete' };
+  }
+  const preferredPids = new Set(
+    identityPids.filter(
+      (pid) => Number.isSafeInteger(pid) && pid >= 2 && pid <= 2_147_483_647,
+    ),
+  );
+  const scanBudget =
+    budget ?? createCleanupOriginObservationBudget(cleanupOriginProcIo);
+  if (
+    scanBudget === null ||
+    !validCleanupOriginProcIo(scanBudget.io) ||
+    !Number.isFinite(scanBudget.deadline) ||
+    !Number.isSafeInteger(scanBudget.bytesRead) ||
+    !Number.isSafeInteger(scanBudget.recordsRetained)
+  ) {
+    return { state: 'unavailable' };
+  }
+  const directoryEntries = readCleanupOriginDirectoryEntries(scanBudget);
+  if (directoryEntries.state !== 'observed') {
+    return { state: directoryEntries.state };
+  }
+
+  const processes = new Map();
+  for (const entry of directoryEntries.entries) {
+    if (cleanupOriginBudgetExceeded(scanBudget)) return { state: 'overflow' };
+    const pid = Number(entry.name);
+    if (!Number.isSafeInteger(pid) || pid < 1 || pid > 2_147_483_647) {
+      return { state: 'incomplete' };
+    }
+    const statusText = readCleanupOriginProcText(
+      `/proc/${entry.name}/status`,
+      MAX_CLEANUP_ORIGIN_STATUS_BYTES,
+      scanBudget,
+    );
+    if (statusText.state !== 'observed') return { state: statusText.state };
+    const uids = parseCleanupOriginUidTuple(statusText.text);
+    if (uids === null) return { state: 'incomplete' };
+    const uidMember = uids.includes(uid);
+    const boundIdentity = preferredPids.has(pid);
+    if (!uidMember && !boundIdentity) continue;
+
+    const process = readCleanupOriginProcessRecord(pid, scanBudget, {
+      uids,
+      uidMember,
+      boundIdentity,
+      includeExecutable: true,
+    });
+    if (process.state !== 'observed') return { state: process.state };
+    if (!retainCleanupOriginRecord(processes, process.process, scanBudget)) {
+      return { state: 'overflow' };
+    }
+  }
+
+  const targets = [...processes.values()].filter(
+    (process) => process.uidMember,
+  );
+  for (const target of targets) {
+    let parentPid = target.parentPid;
+    const visited = new Set();
+    for (let depth = 0; depth < MAX_CLEANUP_ORIGIN_ANCESTOR_DEPTH; depth += 1) {
+      if (parentPid === 1) break;
+      if (parentPid < 1 || visited.has(parentPid)) {
+        return { state: 'incomplete' };
+      }
+      visited.add(parentPid);
+      let parent = processes.get(parentPid);
+      if (!parent) {
+        const ancestor = readCleanupOriginProcessRecord(parentPid, scanBudget, {
+          uidMember: false,
+          boundIdentity: false,
+          includeExecutable: false,
+        });
+        if (ancestor.state !== 'observed') return { state: ancestor.state };
+        parent = {
+          pid: parentPid,
+          parentPid: ancestor.process.parentPid,
+          startTimeTicks: ancestor.process.startTimeTicks,
+          uidMember: false,
+          boundIdentity: false,
+          ancestorOnly: true,
+        };
+        if (!retainCleanupOriginRecord(processes, parent, scanBudget)) {
+          return { state: 'overflow' };
+        }
+      }
+      parentPid = parent.parentPid;
+    }
+    if (parentPid !== 1) return { state: 'incomplete' };
+  }
+  return { state: 'observed', processes };
+}
+
+function sameCleanupOriginProcess(left, right) {
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    left.pid === right.pid &&
+    left.parentPid === right.parentPid &&
+    left.processGroupId === right.processGroupId &&
+    left.startTimeTicks === right.startTimeTicks &&
+    left.uidMember === right.uidMember &&
+    left.boundIdentity === right.boundIdentity &&
+    left.ancestorOnly === right.ancestorOnly &&
+    (left.uids === undefined
+      ? right.uids === undefined
+      : Array.isArray(right.uids) &&
+        left.uids.length === right.uids.length &&
+        left.uids.every((uid, index) => uid === right.uids[index]))
+  );
+}
+
+function cleanupOriginRelevantPids(processes, uid, identities) {
+  const relevant = new Set();
+  const targets = [...processes.values()].filter(
+    (item) => item.uidMember === true,
+  );
+  for (const identity of identities) {
+    if (identity !== null) relevant.add(identity.pid);
+  }
+  for (const target of targets) {
+    relevant.add(target.pid);
+    let parentPid = target.parentPid;
+    const visited = new Set();
+    for (
+      let depth = 0;
+      depth < MAX_CLEANUP_ORIGIN_ANCESTOR_DEPTH && parentPid !== 1;
+      depth += 1
+    ) {
+      if (parentPid < 1) return null;
+      if (visited.has(parentPid)) return null;
+      visited.add(parentPid);
+      relevant.add(parentPid);
+      const parent = processes.get(parentPid);
+      if (!parent) return null;
+      parentPid = parent.parentPid;
+    }
+    if (parentPid !== 1) return null;
+  }
+  return { pids: relevant, targets };
+}
+
+function liveCleanupOriginIdentity(
+  processes,
+  identity,
+  uid = null,
+  executableName = null,
+) {
+  if (identity === null) return false;
+  const process = processes.get(identity.pid);
+  return Boolean(
+    process &&
+    process.startTimeTicks === identity.startTimeTicks &&
+    process.processGroupId === identity.pid &&
+    process.state !== 'Z' &&
+    (uid === null ||
+      (process.uidMember === true &&
+        Array.isArray(process.uids) &&
+        process.uids.every((value) => value === uid))) &&
+    (executableName === null || process.executableName === executableName),
+  );
+}
+
+function cleanupOriginAncestorRelation(process, processes, identities) {
+  let parentPid = process.parentPid;
+  const visited = new Set();
+  for (let depth = 0; depth < MAX_CLEANUP_ORIGIN_ANCESTOR_DEPTH; depth += 1) {
+    if (parentPid === 1) return 'unlinked';
+    if (parentPid < 1) return 'unknown';
+    if (visited.has(parentPid)) return 'unknown';
+    visited.add(parentPid);
+    const parent = processes.get(parentPid);
+    if (!parent) return 'unknown';
+    if (
+      identities.app !== null &&
+      parent.pid === identities.app.pid &&
+      parent.startTimeTicks === identities.app.startTimeTicks
+    ) {
+      return 'descendant';
+    }
+    if (
+      identities.controller !== null &&
+      parent.pid === identities.controller.pid &&
+      parent.startTimeTicks === identities.controller.startTimeTicks
+    ) {
+      return 'descendant';
+    }
+    if (
+      (identities.app !== null && parent.pid === identities.app.pid) ||
+      (identities.controller !== null &&
+        parent.pid === identities.controller.pid)
+    ) {
+      return 'unknown';
+    }
+    parentPid = parent.parentPid;
+  }
+  return 'unknown';
+}
+
+function cleanupOriginRole(process, appIdentity) {
+  if (
+    appIdentity !== null &&
+    process.pid === appIdentity.pid &&
+    process.startTimeTicks === appIdentity.startTimeTicks
+  ) {
+    return 'application';
+  }
+  const name = process.executableName;
+  if (typeof name !== 'string' || name.length === 0) return 'unknown';
+  if (
+    [
+      'chrome',
+      'chromium',
+      'chrome-sandbox',
+      'chrome_crashpad_handler',
+      'crashpad_handler',
+    ].includes(name)
+  ) {
+    return 'chromium';
+  }
+  if (name === 'gnome-keyring-daemon') return 'keyring';
+  if (['dbus-daemon', 'dbus-broker', 'dbus-broker-launch'].includes(name)) {
+    return 'dbus';
+  }
+  if (name === 'xvfb') return 'xvfb';
+  return 'other';
+}
+
+function cleanupOriginCounts(values) {
+  return Object.fromEntries(
+    Object.entries(values).map(([name, count]) => [
+      name,
+      Math.min(count, MAX_DIAGNOSTIC_COUNT),
+    ]),
+  );
+}
+
+function classifyCleanupOriginSnapshots(
+  firstProcesses,
+  secondProcesses,
+  uid,
+  appIdentity,
+  controllerIdentity,
+) {
+  if (
+    !(firstProcesses instanceof Map) ||
+    !(secondProcesses instanceof Map) ||
+    !Number.isSafeInteger(uid) ||
+    uid < 1 ||
+    uid > 65_535
+  ) {
+    return emptyCleanupOriginProbe('unknown', 'process_snapshot_incomplete');
+  }
+  const identities = { app: appIdentity, controller: controllerIdentity };
+  const first = cleanupOriginRelevantPids(
+    firstProcesses,
+    uid,
+    Object.values(identities),
+  );
+  const second = cleanupOriginRelevantPids(
+    secondProcesses,
+    uid,
+    Object.values(identities),
+  );
+  if (
+    first === null ||
+    second === null ||
+    first.targets.length === 0 ||
+    first.targets.length !== second.targets.length ||
+    first.targets.some(
+      (process) => !second.targets.some((other) => other.pid === process.pid),
+    ) ||
+    [...first.pids].some(
+      (pid) =>
+        !sameCleanupOriginProcess(
+          firstProcesses.get(pid),
+          secondProcesses.get(pid),
+        ),
+    )
+  ) {
+    return emptyCleanupOriginProbe('unknown', 'process_snapshot_changed');
+  }
+
+  const appVerified =
+    liveCleanupOriginIdentity(firstProcesses, identities.app, uid) &&
+    liveCleanupOriginIdentity(secondProcesses, identities.app, uid);
+  // A saved group number is not ownership after PID reuse; bind each group to
+  // its live leader and the private start-time identity recorded at launch.
+  const controllerVerified =
+    liveCleanupOriginIdentity(
+      firstProcesses,
+      identities.controller,
+      null,
+      'timeout',
+    ) &&
+    liveCleanupOriginIdentity(
+      secondProcesses,
+      identities.controller,
+      null,
+      'timeout',
+    );
+  const attribution = Object.fromEntries(
+    CLEANUP_ORIGIN_ATTRIBUTIONS.map((name) => [name, 0]),
+  );
+  const roles = Object.fromEntries(
+    CLEANUP_ORIGIN_PROCESS_ROLES.map((name) => [name, 0]),
+  );
+  for (const process of first.targets) {
+    let source = 'unknown';
+    if (appVerified && process.processGroupId === identities.app.pid) {
+      source = 'appgroup';
+    } else if (
+      controllerVerified &&
+      process.processGroupId === identities.controller.pid
+    ) {
+      source = 'controllergroup';
+    } else if (
+      process.processGroupId === identities.app?.pid ||
+      process.processGroupId === identities.controller?.pid
+    ) {
+      source = 'unknown';
+    } else {
+      const ancestorRelation = cleanupOriginAncestorRelation(
+        process,
+        firstProcesses,
+        {
+          app: appVerified ? identities.app : null,
+          controller: controllerVerified ? identities.controller : null,
+        },
+      );
+      // This is only a current-link result across stable snapshots. It cannot
+      // reconstruct an earlier parent after reparenting or prove transient rows.
+      source =
+        ancestorRelation === 'unlinked' && appVerified && controllerVerified
+          ? 'unlinked'
+          : ancestorRelation === 'unlinked'
+            ? 'unknown'
+            : ancestorRelation;
+    }
+    attribution[source] += 1;
+    const other = secondProcesses.get(process.pid);
+    const role =
+      other?.executableName === process.executableName
+        ? cleanupOriginRole(process, appVerified ? identities.app : null)
+        : 'unknown';
+    roles[role] += 1;
+  }
+  const countOverflow = first.targets.length > MAX_DIAGNOSTIC_COUNT;
+  const attributionCounts = cleanupOriginCounts(attribution);
+  const processRoleCounts = cleanupOriginCounts(roles);
+  const processCount = Math.min(first.targets.length, MAX_DIAGNOSTIC_COUNT);
+  const identityReason =
+    !appVerified && !controllerVerified
+      ? 'both_identities_unavailable'
+      : !appVerified
+        ? 'app_identity_unavailable'
+        : !controllerVerified
+          ? 'controller_identity_unavailable'
+          : null;
+  const hasUnknownAttribution = attribution.unknown > 0;
+  if (countOverflow) {
+    return {
+      state: 'partial',
+      reason: 'count_capped',
+      overflow: true,
+      processCount,
+      attributionCounts,
+      processRoleCounts,
+    };
+  }
+  if (identityReason !== null) {
+    return {
+      state: 'partial',
+      reason: identityReason,
+      overflow: false,
+      processCount,
+      attributionCounts,
+      processRoleCounts,
+    };
+  }
+  if (hasUnknownAttribution) {
+    return {
+      state: 'partial',
+      reason: 'source_unknown',
+      overflow: false,
+      processCount,
+      attributionCounts,
+      processRoleCounts,
+    };
+  }
+  return {
+    state: 'observed',
+    reason: 'attributed',
+    overflow: false,
+    processCount,
+    attributionCounts,
+    processRoleCounts,
+  };
+}
+
+export function readCleanupOriginObservation(
+  request,
+  scan = scanCleanupOriginProcesses,
+  procIo = cleanupOriginProcIo,
+) {
+  if (!validCleanupOriginRequest(request) || typeof scan !== 'function') {
+    return emptyCleanupOriginProbe('unknown', 'invalid_request');
+  }
+  const profileFailure = validateCleanupOriginProfile(request);
+  if (profileFailure !== null) {
+    return emptyCleanupOriginProbe('unknown', profileFailure);
+  }
+  const identityPids = [request.appPid, request.controllerPid].filter(
+    Number.isSafeInteger,
+  );
+  const budget = createCleanupOriginObservationBudget(procIo);
+  if (budget === null) {
+    return emptyCleanupOriginProbe('unknown', 'process_scan_unavailable');
+  }
+  const first = scan(request.uid, identityPids, budget);
+  const second = scan(request.uid, identityPids, budget);
+  for (const snapshot of [first, second]) {
+    if (snapshot?.state === 'overflow') {
+      return emptyCleanupOriginProbe('unknown', 'process_scan_overflow');
+    }
+    if (snapshot?.state === 'unavailable') {
+      return emptyCleanupOriginProbe('unknown', 'process_scan_unavailable');
+    }
+    if (
+      snapshot?.state !== 'observed' ||
+      !(snapshot.processes instanceof Map)
+    ) {
+      return emptyCleanupOriginProbe('unknown', 'process_snapshot_incomplete');
+    }
+  }
+  return classifyCleanupOriginSnapshots(
+    first.processes,
+    second.processes,
+    request.uid,
+    { pid: request.appPid, startTimeTicks: request.appStartTimeTicks },
+    request.controllerPid === null
+      ? null
+      : {
+          pid: request.controllerPid,
+          startTimeTicks: request.controllerStartTimeTicks,
+        },
+  );
+}
+
+function readBoundedCleanupOriginRequest() {
+  const buffer = Buffer.alloc(MAX_CLEANUP_ORIGIN_INPUT_BYTES + 1);
+  let length = 0;
+  try {
+    while (length < buffer.length) {
+      const count = readSync(0, buffer, length, buffer.length - length, null);
+      if (count === 0) break;
+      length += count;
+    }
+  } catch {
+    return undefined;
+  }
+  if (length > MAX_CLEANUP_ORIGIN_INPUT_BYTES) return undefined;
+  try {
+    return JSON.parse(buffer.subarray(0, length).toString('utf8'));
+  } catch {
+    return undefined;
+  }
 }
 
 function readUidLifecycleObservation(
@@ -2746,6 +3820,27 @@ async function connectAndCheckPage() {
   return rendererCount;
 }
 
+async function holdForDesktopJourney() {
+  const requested = process.env.ELEMENT_DESKTOP_JOURNEY_HOLD;
+  if (requested === undefined || requested === 'false') return;
+  if (requested !== 'true') fail('invalid-config', 'config');
+  if (!writeDesktopJourneyReadyMarker(profileRoot, expectedUid)) {
+    fail('invalid-profile', 'privateProfile');
+  }
+  process.stdout.write(
+    '{"phase":"desktop-startup-progress","milestone":"desktop-journey-ready"}\n',
+  );
+  if (
+    !(await waitForDesktopJourneyCompletion({
+      profileRoot,
+      expectedUid,
+      timeoutMs: DESKTOP_JOURNEY_HOLD_MS,
+    }))
+  ) {
+    fail('desktop-not-ready', 'desktopProcess');
+  }
+}
+
 async function stopApp() {
   if (browser) {
     try {
@@ -2857,7 +3952,11 @@ async function main() {
       {
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: process.env,
+        env: Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([name]) => name !== 'ELEMENT_DESKTOP_JOURNEY_HOLD',
+          ),
+        ),
       },
     );
     appLaunchState = 'pending';
@@ -2896,14 +3995,27 @@ async function main() {
     }
     if (!Number.isSafeInteger(app.pid))
       fail('desktop-not-ready', 'desktopProcess');
-    writeFileSync(`${profileRoot}/process-group`, `${app.pid}\n`, {
-      mode: 0o600,
-    });
+    const appStartTimeTicks = (() => {
+      try {
+        return parseProcStartTimeTicks(
+          app.pid,
+          readFileSync(`/proc/${app.pid}/stat`, 'utf8'),
+        );
+      } catch {
+        return null;
+      }
+    })();
+    writeFileSync(
+      `${profileRoot}/process-group`,
+      `${app.pid} ${appStartTimeTicks ?? 'unknown'}\n`,
+      { encoding: 'utf8', flag: 'wx', mode: 0o600 },
+    );
     process.stdout.write(
       `${JSON.stringify({
         phase: 'desktop-startup-progress',
         milestone: 'after-app-spawn',
         appPid: app.pid,
+        appStartTimeTicks,
       })}\n`,
     );
     egressPhaseCounters.afterAppSpawn = emptyEgressCounterObservation(
@@ -2912,6 +4024,7 @@ async function main() {
         : 'unavailable',
     );
     rendererCount = await connectAndCheckPage();
+    await holdForDesktopJourney();
   } catch (error) {
     failureCode =
       error instanceof ProbeFailure ? error.code : 'probe-internal-error';
@@ -2951,7 +4064,19 @@ async function main() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  if (process.argv[2] === 'cleanup-observation') {
+  if (process.argv[2] === 'desktop-journey-complete') {
+    const completed = writeDesktopJourneyCompletionMarker(
+      profileRoot,
+      expectedUid,
+    );
+    process.stdout.write(
+      `${JSON.stringify({
+        phase: 'desktop-journey-completion',
+        status: completed ? 'passed' : 'failed',
+      })}\n`,
+    );
+    if (!completed) process.exitCode = 1;
+  } else if (process.argv[2] === 'cleanup-observation') {
     const requestedUid = Number(process.argv[3]);
     const observation = readUidProcessObservations(requestedUid);
     process.stdout.write(`${JSON.stringify(observation)}\n`);
@@ -2966,6 +4091,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     );
     process.stdout.write(`${JSON.stringify(observation)}\n`);
     if (observation.state === 'unavailable') process.exitCode = 1;
+  } else if (process.argv[2] === 'cleanup-origin-observation') {
+    const request =
+      process.argv.length === 3 ? readBoundedCleanupOriginRequest() : undefined;
+    let observation;
+    try {
+      observation =
+        request === undefined
+          ? emptyCleanupOriginProbe('unknown', 'invalid_request')
+          : readCleanupOriginObservation(request);
+    } catch {
+      observation = emptyCleanupOriginProbe('unknown', 'probe_unavailable');
+    }
+    process.stdout.write(`${JSON.stringify(observation)}\n`);
   } else if (process.argv[2] === 'uid-startup-observation') {
     const requestedUid = Number(process.argv[3]);
     const requestedCdpPort = Number(process.argv[4]);

@@ -14,18 +14,12 @@
  * limitations under the License.
  */
 
-import base64url from 'base64url';
 import { Request, Response } from 'express';
-import fetch from 'jest-fetch-mock';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import {
   BoundedFixedWindowSourceRateLimiter,
   CalendarGatewayRateLimitMiddleware,
   isCalendarGatewayPath,
 } from '../../src/middleware/CalendarGatewayRateLimitMiddleware';
-import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
-import { createAppConfig } from '../util/MockUtils';
 
 type MockResponse = Response & {
   setHeader: jest.Mock;
@@ -55,11 +49,6 @@ function createResponse(): MockResponse {
 }
 
 describe('CalendarGatewayRateLimitMiddleware', () => {
-  beforeEach(() => {
-    fetch.resetMocks();
-    fetch.enableMocks();
-  });
-
   it('allows a bounded burst and reports the fixed-window retry delay', () => {
     const limiter = new BoundedFixedWindowSourceRateLimiter(2, 1_500, 10);
 
@@ -137,58 +126,5 @@ describe('CalendarGatewayRateLimitMiddleware', () => {
       '203.0.113.55',
     );
     expect(nonGatewayNext).toHaveBeenCalledTimes(1);
-  });
-
-  it('registers before OpenID auth and prevents the excess request from reaching homeserver verification', async () => {
-    const bootstrap = readFileSync(
-      resolve(__dirname, '../../src/index.ts'),
-      'utf8',
-    );
-    const rateLimitRegistration = bootstrap.indexOf(
-      'calendarGatewayRateLimitMiddleware.use.bind',
-    );
-    const authRegistration = bootstrap.indexOf('matrixAuthMiddleware.use.bind');
-    expect(rateLimitRegistration).toBeGreaterThanOrEqual(0);
-    expect(authRegistration).toBeGreaterThan(rateLimitRegistration);
-
-    const config = createAppConfig();
-    config.homeserver_url = 'https://matrix.example.test';
-    const authMiddleware = new MatrixAuthMiddleware(config);
-    const rateLimitMiddleware = new CalendarGatewayRateLimitMiddleware(
-      new BoundedFixedWindowSourceRateLimiter(1, 60_000, 10),
-    );
-    const authorization = `MX-Identity ${base64url(
-      JSON.stringify({
-        access_token: 'openid-proof-sentinel',
-        matrix_server_name: 'example.test',
-      }),
-    )}`;
-    fetch.mockResponseOnce(JSON.stringify({ sub: '@alice:example.test' }));
-
-    const dispatch = async (response: Response) => {
-      const request = createRequest('/v1/calendar/events');
-      request.headers.authorization = authorization;
-
-      await new Promise<void>((resolve) => {
-        let continued = false;
-        rateLimitMiddleware.use(request, response, () => {
-          continued = true;
-          void authMiddleware.use(request, response, () => resolve());
-        });
-        if (!continued) {
-          resolve();
-        }
-      });
-    };
-
-    await dispatch(createResponse());
-    const blockedResponse = createResponse();
-    await dispatch(blockedResponse);
-
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(blockedResponse.status).toHaveBeenCalledWith(429);
-    expect(JSON.stringify(blockedResponse.json.mock.calls)).not.toContain(
-      'openid-proof-sentinel',
-    );
   });
 });

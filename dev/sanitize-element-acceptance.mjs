@@ -6,6 +6,7 @@ import {
   isRuntimeDependencyName,
   loadRuntimeDependencyAllowlist,
 } from './element-acceptance-diagnostics.mjs';
+import { formatPerformanceEvidence } from './element-acceptance-performance-evidence.mjs';
 
 const RUNTIME_DEPENDENCIES = loadRuntimeDependencyAllowlist(
   resolve(dirname(fileURLToPath(import.meta.url)), '..'),
@@ -106,6 +107,9 @@ const PHASES = new Set([
   'reminder-restore-prior-state',
   'reminder-restore-scheduler-scan',
   'reminder-restore-no-duplicate',
+  'performance-seed',
+  'performance-cleanup',
+  'performance-pilot',
   'g6-member-a-room-context',
   'g6-member-b-room-context',
   'g6-fixture-ready',
@@ -116,11 +120,92 @@ const PHASES = new Set([
   'g6-browser-egress',
   'g6-resource-cleanup',
 ]);
+const PERFORMANCE_FIXTURE_FAILURES = new Map([
+  [
+    'performance-seed',
+    new Set([
+      'environment-invalid',
+      'manifest-invalid',
+      'openid-failed',
+      'runtime-dependency-unavailable',
+      'caldav-operation-failed',
+    ]),
+  ],
+  [
+    'performance-cleanup',
+    new Set([
+      'environment-invalid',
+      'manifest-invalid',
+      'openid-failed',
+      'runtime-dependency-unavailable',
+      'cleanup-incomplete',
+    ]),
+  ],
+]);
+const PERFORMANCE_CLEANUP_COUNT_FIELDS = [
+  'manifestEventCount',
+  'plannedCount',
+  'confirmedCreatedCount',
+  'deletedCount',
+  'alreadyAbsentCount',
+  'conflictCount',
+  'unresolvedCount',
+];
 const ROOM_CONTEXT_PHASES = new Set([
   'member-a-room-context',
   'reminder-room-context',
   'g6-member-a-room-context',
   'g6-member-b-room-context',
+]);
+const ROOM_RENDER_STATE_FIELDS = [
+  'roomViewShellVisible',
+  'roomViewBodyVisible',
+  'roomPreviewVisible',
+  'roomPreviewLoadingVisible',
+  'roomHeaderVisible',
+  'roomHeaderHeadingVisible',
+  'roomErrorBoundaryVisible',
+];
+const OUTER_RENDERER_PRESENCE_FIELDS = [
+  'matrixChatShellPresent',
+  'roomViewWrapperPresent',
+  'roomViewRendererPresent',
+];
+const OUTER_RENDERER_BUCKETS = new Set([
+  'room-page',
+  'other-page',
+  'no-shell',
+  'inconsistent',
+  'unavailable',
+]);
+const MATRIX_CHAT_VIEW_BUCKETS = new Set([
+  'logged-in',
+  'other-view',
+  'unavailable',
+]);
+const MATRIX_CHAT_PAGE_TYPE_BUCKETS = new Set([
+  'room-view',
+  'other-page',
+  'missing',
+  'unavailable',
+]);
+const MATRIX_CHAT_STATE_FIELDS = [
+  'matrixChatStateAvailable',
+  'matrixChatViewBucket',
+  'matrixChatReady',
+  'matrixChatPageTypeBucket',
+  'matrixChatCurrentRoomMatches',
+];
+const ROOM_RENDER_DIAGNOSTIC_FIELDS = [
+  'outerRenderBucket',
+  ...OUTER_RENDERER_PRESENCE_FIELDS,
+  ...MATRIX_CHAT_STATE_FIELDS,
+  'roomRenderStateAvailable',
+  ...ROOM_RENDER_STATE_FIELDS,
+];
+const ROOM_RENDER_DIAGNOSTIC_PHASES = new Set([
+  'member-a-room-context',
+  'reminder-room-context',
 ]);
 const G6_PHASES = new Set(
   [...PHASES].filter(
@@ -314,6 +399,9 @@ const G6_EXTRA_NUMERIC_FIELDS = new Set(
     .flat()
     .filter((key) => key !== 'httpStatus' && key !== 'count'),
 );
+const G6_NUMERIC_FIELDS_SHARED_WITH_OTHER_PHASES = new Map([
+  ['performance-cleanup', new Set(PERFORMANCE_CLEANUP_COUNT_FIELDS)],
+]);
 const G6_ENUM_FIELDS_BY_PHASE = new Map([
   [
     'g6-unsupported-preservation',
@@ -614,6 +702,23 @@ const FAILURE_CODES = new Set([
   'element-room-heading-not-present',
   'element-room-name-mismatch',
   'element-room-heading-wait-timeout',
+  'environment-invalid',
+  'manifest-invalid',
+  'openid-failed',
+  'runtime-dependency-unavailable',
+  'caldav-operation-failed',
+  'cleanup-incomplete',
+  'performance-setup-failed',
+  'performance-widget-open-failed',
+  'performance-host-layout-failed',
+  'performance-default-view-failed',
+  'performance-warmup-failed',
+  'performance-view-sample-failed',
+  'performance-overflow-failed',
+  'performance-details-failed',
+  'performance-egress-blocked',
+  'performance-page-error',
+  'performance-threshold-exceeded',
 ]);
 const CONTAINER_STATES = new Set([
   'created',
@@ -730,6 +835,14 @@ const MATRIX_SYNC_STATES = new Set([
   'CATCHUP',
   'UNKNOWN',
 ]);
+const ROOM_READINESS_TIMELINE_OUTCOMES = new Set([
+  'cancelled',
+  'budget-exhausted',
+  'unavailable',
+  'not-started',
+]);
+const ROOM_READINESS_SAMPLE_MAX_COUNT = 15;
+const ROOM_READINESS_SAMPLE_MAX_DURATION_MS = 15_000;
 const VERSION_FIELDS = new Set([
   'elementWebConfiguredTag',
   'synapseConfiguredTag',
@@ -946,6 +1059,8 @@ const ALLOWED_KEYS = new Set([
   'status',
   'httpStatus',
   'count',
+  ...PERFORMANCE_CLEANUP_COUNT_FIELDS,
+  'inventoryAvailable',
   'originMatchesElement',
   'teamRoomMatches',
   'blockedRequestDiagnostics',
@@ -956,6 +1071,7 @@ const ALLOWED_KEYS = new Set([
   'matrixClientPresent',
   'matrixUserMatches',
   'matrixSyncState',
+  'roomReadinessTimeline',
   'matrixRoomKnown',
   'matrixRoomJoined',
   'roomNavigationCompleted',
@@ -963,12 +1079,18 @@ const ALLOWED_KEYS = new Set([
   'roomHeadingPresent',
   'roomNameMatches',
   'roomIdMatches',
+  'outerRenderBucket',
+  ...OUTER_RENDERER_PRESENCE_FIELDS,
+  ...MATRIX_CHAT_STATE_FIELDS,
+  'roomRenderStateAvailable',
+  ...ROOM_RENDER_STATE_FIELDS,
   ...REMINDER_ROOM_LAYOUT_FIELDS,
   ...REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS,
   'blockedExternalRequestCount',
   'homeserverHttpErrorCount',
   'homeserverLastHttpErrorStatus',
   'failureCode',
+  'performanceReport',
   'missingModuleKind',
   'missingDependency',
   'processExitCode',
@@ -1055,6 +1177,85 @@ const ALLOWED_KEYS = new Set([
   'allOwnedResourcesRemoved',
   ...G6_EXTRA_NUMERIC_FIELDS,
 ]);
+
+function validRoomReadinessTimeline(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'outcome,overflow,sampleCountCapped,samples' ||
+    !ROOM_READINESS_TIMELINE_OUTCOMES.has(value.outcome) ||
+    typeof value.overflow !== 'boolean' ||
+    !Array.isArray(value.samples) ||
+    value.samples.length > ROOM_READINESS_SAMPLE_MAX_COUNT ||
+    value.sampleCountCapped !== value.samples.length ||
+    (value.outcome === 'budget-exhausted') !== value.overflow ||
+    (['not-started', 'unavailable'].includes(value.outcome) &&
+      value.sampleCountCapped !== 0)
+  ) {
+    return false;
+  }
+
+  let previousElapsedMs = -1;
+  for (const sample of value.samples) {
+    if (
+      sample === null ||
+      typeof sample !== 'object' ||
+      Array.isArray(sample) ||
+      Object.keys(sample).sort().join(',') !==
+        'available,currentRoomMatches,elapsedMs,matrixSyncState,roomHeaderPresent,roomHeadingPresent,roomViewPresent' ||
+      typeof sample.available !== 'boolean' ||
+      !Number.isInteger(sample.elapsedMs) ||
+      sample.elapsedMs < 0 ||
+      sample.elapsedMs > ROOM_READINESS_SAMPLE_MAX_DURATION_MS ||
+      sample.elapsedMs <= previousElapsedMs ||
+      !MATRIX_SYNC_STATES.has(sample.matrixSyncState)
+    ) {
+      return false;
+    }
+    previousElapsedMs = sample.elapsedMs;
+    if (sample.available) {
+      if (
+        typeof sample.roomViewPresent !== 'boolean' ||
+        typeof sample.roomHeaderPresent !== 'boolean' ||
+        typeof sample.roomHeadingPresent !== 'boolean' ||
+        (sample.currentRoomMatches !== null &&
+          typeof sample.currentRoomMatches !== 'boolean')
+      ) {
+        return false;
+      }
+    } else if (
+      sample.roomViewPresent !== null ||
+      sample.roomHeaderPresent !== null ||
+      sample.roomHeadingPresent !== null ||
+      sample.currentRoomMatches !== null ||
+      sample.matrixSyncState !== 'UNKNOWN'
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function appendRoomReadinessTimelineSummary(fields, timeline) {
+  const booleanBucket = (value) => (value === null ? 'unknown' : String(value));
+  fields.push(`room_readiness_timeline_outcome=${timeline.outcome}`);
+  fields.push(
+    `room_readiness_timeline_sample_count=${timeline.sampleCountCapped}`,
+  );
+  fields.push(`room_readiness_timeline_overflow=${timeline.overflow}`);
+  fields.push(
+    `room_readiness_timeline_samples=${
+      timeline.samples
+        .map(
+          (sample) =>
+            `${sample.elapsedMs}:${sample.available ? 'observed' : 'unknown'}:${booleanBucket(sample.roomViewPresent)}:${booleanBucket(sample.roomHeaderPresent)}:${booleanBucket(sample.roomHeadingPresent)}:${booleanBucket(sample.currentRoomMatches)}:${sample.matrixSyncState}`,
+        )
+        .join(';') || 'none'
+    }`,
+  );
+}
 
 function validG6Observation(record) {
   if (!G6_PHASES.has(record.phase)) return true;
@@ -2089,6 +2290,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
   const phases = new Map();
   let rejectedPhase = 'unknown';
   let rejectionCategory = 'invalid-stage-record';
+  let performanceTerminalStatus;
+  const performanceFixturePhaseStatus = new Map();
+  let performanceFixtureSeedCount;
   for (const line of input.split(/\r?\n/u)) {
     if (!line) continue;
 
@@ -2117,6 +2321,137 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       !PHASES.has(record.phase) ||
       !STATUSES.has(record.status)
     ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    if (record.phase === 'performance-pilot') {
+      if (performanceTerminalStatus !== undefined) {
+        throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+      }
+      try {
+        formatPerformanceEvidence(record);
+      } catch {
+        throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+      }
+      if (record.status === 'started') {
+        if (Object.hasOwn(record, 'failureCode')) {
+          throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+        }
+      } else {
+        performanceTerminalStatus = record.status;
+      }
+    } else if (PERFORMANCE_FIXTURE_FAILURES.has(record.phase)) {
+      const previousStatus = performanceFixturePhaseStatus.get(record.phase);
+      const failureCodes = PERFORMANCE_FIXTURE_FAILURES.get(record.phase);
+      const exactKeys = (keys) =>
+        Object.keys(record).length === keys.length &&
+        keys.every((key) => Object.hasOwn(record, key));
+      if (record.status === 'started') {
+        if (previousStatus !== undefined || !exactKeys(['phase', 'status'])) {
+          throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+        }
+        performanceFixturePhaseStatus.set(record.phase, 'started');
+      } else {
+        const terminalKeys =
+          record.phase === 'performance-cleanup'
+            ? [
+                'phase',
+                'status',
+                ...PERFORMANCE_CLEANUP_COUNT_FIELDS,
+                'inventoryAvailable',
+                ...(record.status === 'failed' ? ['failureCode'] : []),
+                ...(Object.hasOwn(record, 'httpStatus') ? ['httpStatus'] : []),
+              ]
+            : record.status === 'passed'
+              ? ['phase', 'status', 'count']
+              : [
+                  'phase',
+                  'status',
+                  'count',
+                  'failureCode',
+                  ...(Object.hasOwn(record, 'httpStatus')
+                    ? ['httpStatus']
+                    : []),
+                ];
+        const cleanupCountsAvailable =
+          record.inventoryAvailable === true &&
+          PERFORMANCE_CLEANUP_COUNT_FIELDS.every(
+            (key) =>
+              Number.isInteger(record[key]) &&
+              record[key] >= 0 &&
+              record[key] <= 250,
+          );
+        const cleanupCountsUnknown =
+          record.inventoryAvailable === false &&
+          record.status === 'failed' &&
+          PERFORMANCE_CLEANUP_COUNT_FIELDS.every((key) => record[key] === null);
+        const cleanupCountsConsistent =
+          cleanupCountsAvailable &&
+          record.manifestEventCount ===
+            record.plannedCount +
+              record.conflictCount +
+              record.deletedCount +
+              record.alreadyAbsentCount +
+              record.unresolvedCount &&
+          record.deletedCount + record.alreadyAbsentCount <=
+            record.confirmedCreatedCount &&
+          record.plannedCount +
+            record.confirmedCreatedCount +
+            record.conflictCount <=
+            record.manifestEventCount &&
+          record.unresolvedCount <= record.manifestEventCount;
+        const passedCleanupConsistent =
+          record.status !== 'passed' ||
+          (cleanupCountsConsistent &&
+            record.unresolvedCount === 0 &&
+            record.plannedCount +
+              record.confirmedCreatedCount +
+              record.conflictCount ===
+              record.manifestEventCount &&
+            record.confirmedCreatedCount ===
+              record.deletedCount + record.alreadyAbsentCount);
+        const passedSeedCleanupConsistent =
+          record.status !== 'passed' ||
+          performanceFixturePhaseStatus.get('performance-seed') !== 'passed' ||
+          (record.manifestEventCount === performanceFixtureSeedCount &&
+            record.plannedCount === 0 &&
+            record.confirmedCreatedCount === performanceFixtureSeedCount &&
+            record.conflictCount === 0 &&
+            record.deletedCount + record.alreadyAbsentCount ===
+              performanceFixtureSeedCount);
+        const cleanupInventoryValid =
+          record.phase !== 'performance-cleanup' ||
+          (typeof record.inventoryAvailable === 'boolean' &&
+            ((cleanupCountsConsistent &&
+              passedCleanupConsistent &&
+              passedSeedCleanupConsistent) ||
+              cleanupCountsUnknown));
+        if (
+          previousStatus !== 'started' ||
+          !exactKeys(terminalKeys) ||
+          (record.phase === 'performance-seed' &&
+            (!Number.isInteger(record.count) ||
+              record.count < 0 ||
+              record.count > 250 ||
+              (record.status === 'passed' &&
+                record.count !== 25 &&
+                record.count !== 250))) ||
+          !cleanupInventoryValid ||
+          (record.status === 'failed' &&
+            !failureCodes.has(record.failureCode)) ||
+          (Object.hasOwn(record, 'httpStatus') &&
+            (!Number.isInteger(record.httpStatus) ||
+              record.httpStatus < 100 ||
+              record.httpStatus > 599))
+        ) {
+          throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+        }
+        performanceFixturePhaseStatus.set(record.phase, record.status);
+        if (record.phase === 'performance-seed' && record.status === 'passed') {
+          performanceFixtureSeedCount = record.count;
+        }
+      }
+    } else if (Object.hasOwn(record, 'performanceReport')) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
@@ -2194,7 +2529,13 @@ export function sanitizeElementAcceptance(input, sourceSha) {
 
     if (
       !validG6Observation(record) ||
-      ([...G6_EXTRA_NUMERIC_FIELDS].some((key) => Object.hasOwn(record, key)) &&
+      ([...G6_EXTRA_NUMERIC_FIELDS].some(
+        (key) =>
+          Object.hasOwn(record, key) &&
+          !G6_NUMERIC_FIELDS_SHARED_WITH_OTHER_PHASES.get(record.phase)?.has(
+            key,
+          ),
+      ) &&
         !G6_PHASES.has(record.phase)) ||
       ([...G6_EXTRA_ENUM_FIELDS].some((key) => Object.hasOwn(record, key)) &&
         !G6_PHASES.has(record.phase)) ||
@@ -2743,6 +3084,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       'roomHeadingPresent',
       'roomNameMatches',
       'roomIdMatches',
+      ...ROOM_RENDER_DIAGNOSTIC_FIELDS,
       ...REMINDER_ROOM_LAYOUT_FIELDS,
       'blockedExternalRequestCount',
       'homeserverHttpErrorCount',
@@ -2754,10 +3096,117 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     const hasReminderRoomLayoutObservation = REMINDER_ROOM_LAYOUT_FIELDS.some(
       (key) => Object.hasOwn(record, key),
     );
+    const hasRoomRenderStateObservation =
+      Object.hasOwn(record, 'roomRenderStateAvailable') ||
+      ROOM_RENDER_STATE_FIELDS.some((key) => Object.hasOwn(record, key));
+    const hasOuterRendererObservation =
+      Object.hasOwn(record, 'outerRenderBucket') ||
+      OUTER_RENDERER_PRESENCE_FIELDS.some((key) => Object.hasOwn(record, key));
+    const hasRoomRenderDiagnostic = ROOM_RENDER_DIAGNOSTIC_FIELDS.some((key) =>
+      Object.hasOwn(record, key),
+    );
+    const outerRendererValuesValid = (() => {
+      if (
+        !hasOuterRendererObservation ||
+        !Object.hasOwn(record, 'outerRenderBucket') ||
+        !OUTER_RENDERER_BUCKETS.has(record.outerRenderBucket) ||
+        OUTER_RENDERER_PRESENCE_FIELDS.some(
+          (key) => !Object.hasOwn(record, key),
+        )
+      ) {
+        return false;
+      }
+      if (record.outerRenderBucket === 'unavailable') {
+        return OUTER_RENDERER_PRESENCE_FIELDS.every(
+          (key) => record[key] === null,
+        );
+      }
+      if (
+        OUTER_RENDERER_PRESENCE_FIELDS.some(
+          (key) => typeof record[key] !== 'boolean',
+        )
+      ) {
+        return false;
+      }
+      const [
+        matrixChatShellPresent,
+        roomViewWrapperPresent,
+        roomViewRendererPresent,
+      ] = OUTER_RENDERER_PRESENCE_FIELDS.map((key) => record[key]);
+      if (record.outerRenderBucket === 'room-page') {
+        return (
+          matrixChatShellPresent &&
+          roomViewWrapperPresent &&
+          roomViewRendererPresent
+        );
+      }
+      if (record.outerRenderBucket === 'other-page') {
+        return (
+          matrixChatShellPresent &&
+          roomViewWrapperPresent &&
+          !roomViewRendererPresent
+        );
+      }
+      if (record.outerRenderBucket === 'no-shell') {
+        return (
+          !matrixChatShellPresent &&
+          !roomViewWrapperPresent &&
+          !roomViewRendererPresent
+        );
+      }
+      return (
+        record.outerRenderBucket === 'inconsistent' &&
+        !(
+          (matrixChatShellPresent &&
+            roomViewWrapperPresent &&
+            roomViewRendererPresent) ||
+          (matrixChatShellPresent &&
+            roomViewWrapperPresent &&
+            !roomViewRendererPresent) ||
+          (!matrixChatShellPresent &&
+            !roomViewWrapperPresent &&
+            !roomViewRendererPresent)
+        )
+      );
+    })();
+    const matrixChatStateValuesValid =
+      MATRIX_CHAT_STATE_FIELDS.every((key) => Object.hasOwn(record, key)) &&
+      typeof record.matrixChatStateAvailable === 'boolean' &&
+      MATRIX_CHAT_VIEW_BUCKETS.has(record.matrixChatViewBucket) &&
+      (record.matrixChatReady === null ||
+        typeof record.matrixChatReady === 'boolean') &&
+      MATRIX_CHAT_PAGE_TYPE_BUCKETS.has(record.matrixChatPageTypeBucket) &&
+      (record.matrixChatCurrentRoomMatches === null ||
+        typeof record.matrixChatCurrentRoomMatches === 'boolean') &&
+      (record.matrixChatStateAvailable ||
+        (record.matrixChatViewBucket === 'unavailable' &&
+          record.matrixChatReady === null &&
+          record.matrixChatPageTypeBucket === 'unavailable' &&
+          record.matrixChatCurrentRoomMatches === null));
+    const roomRenderStateAvailable = record.roomRenderStateAvailable;
+    const roomRenderStateValuesValid =
+      hasRoomRenderStateObservation &&
+      typeof roomRenderStateAvailable === 'boolean' &&
+      ROOM_RENDER_STATE_FIELDS.every((key) => Object.hasOwn(record, key)) &&
+      (roomRenderStateAvailable
+        ? ROOM_RENDER_STATE_FIELDS.every(
+            (key) => typeof record[key] === 'boolean',
+          ) &&
+          (!record.roomViewBodyVisible || record.roomViewShellVisible) &&
+          (!record.roomPreviewVisible || record.roomViewShellVisible) &&
+          (!record.roomPreviewLoadingVisible || record.roomPreviewVisible) &&
+          (!record.roomHeaderVisible || record.roomViewShellVisible) &&
+          (!record.roomHeaderHeadingVisible || record.roomHeaderVisible) &&
+          (!record.roomErrorBoundaryVisible || record.roomViewShellVisible)
+        : ROOM_RENDER_STATE_FIELDS.every((key) => record[key] === null));
     const hasReminderWidgetContextObservation =
       REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS.some((key) =>
         Object.hasOwn(record, key),
       );
+    const hasRoomReadinessTimeline = Object.hasOwn(
+      record,
+      'roomReadinessTimeline',
+    );
     const roomFailureCodes = new Set([
       'element-room-navigation-failed',
       'element-room-observation-unavailable',
@@ -2785,6 +3234,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           !['passed', 'failed'].includes(record.status))) ||
       (hasRoomObservation &&
         (requiredRoomBooleans.some((key) => typeof record[key] !== 'boolean') ||
+          (ROOM_RENDER_DIAGNOSTIC_PHASES.has(record.phase) &&
+            (!roomRenderStateValuesValid ||
+              !outerRendererValuesValid ||
+              !matrixChatStateValuesValid)) ||
+          (!ROOM_RENDER_DIAGNOSTIC_PHASES.has(record.phase) &&
+            hasRoomRenderDiagnostic) ||
           !hasSyncObservation ||
           !Object.hasOwn(record, 'blockedExternalRequestCount') ||
           !Object.hasOwn(record, 'homeserverHttpErrorCount') ||
@@ -2812,6 +3267,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
             (!Number.isInteger(record.reminderWidgetContextResponseStatus) ||
               record.reminderWidgetContextResponseStatus < 100 ||
               record.reminderWidgetContextResponseStatus > 599)))) ||
+      (hasRoomReadinessTimeline &&
+        (record.phase !== 'g6-member-b-room-context' ||
+          !validRoomReadinessTimeline(record.roomReadinessTimeline))) ||
+      (record.phase === 'g6-member-b-room-context' &&
+        !hasRoomReadinessTimeline) ||
       (ROOM_CONTEXT_PHASES.has(record.phase) &&
         !hasRoomObservation &&
         (record.status !== 'failed' ||
@@ -2938,6 +3398,43 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `node_observed=${record.nodeVersion}`,
         ].join(' '),
       );
+      continue;
+    }
+
+    if (phase === 'performance-pilot') {
+      lines.push(...formatPerformanceEvidence(record));
+      continue;
+    }
+
+    if (PERFORMANCE_FIXTURE_FAILURES.has(phase)) {
+      const fields = [`phase=${phase}`, `status=${record.status}`];
+      if (phase === 'performance-cleanup') {
+        const fixtureProfile =
+          record.manifestEventCount === 25
+            ? 'ordinary-25'
+            : record.manifestEventCount === 250
+              ? 'historical-250-diagnostic-only'
+              : 'unavailable';
+        fields.push(`fixture_profile=${fixtureProfile}`);
+        for (const key of PERFORMANCE_CLEANUP_COUNT_FIELDS) {
+          fields.push(
+            `${key.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`)}=${record[key] ?? 'unavailable'}`,
+          );
+        }
+        fields.push(`inventory_available=${record.inventoryAvailable}`);
+      } else if (Object.hasOwn(record, 'count')) {
+        fields.push(`count=${record.count}`);
+        fields.push(
+          `fixture_profile=${record.count === 25 ? 'ordinary-25' : record.count === 250 ? 'historical-250-diagnostic-only' : 'unavailable'}`,
+        );
+      }
+      if (Object.hasOwn(record, 'httpStatus')) {
+        fields.push(`http_status=${record.httpStatus}`);
+      }
+      if (Object.hasOwn(record, 'failureCode')) {
+        fields.push(`failure_code=${record.failureCode}`);
+      }
+      lines.push(fields.join(' '));
       continue;
     }
 
@@ -3097,6 +3594,49 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       fields.push(`room_heading_present=${record.roomHeadingPresent}`);
       fields.push(`room_name_matches=${record.roomNameMatches}`);
       fields.push(`room_id_matches=${record.roomIdMatches}`);
+      if (ROOM_RENDER_DIAGNOSTIC_PHASES.has(phase)) {
+        fields.push(`outer_render_bucket=${record.outerRenderBucket}`);
+        for (const [key, label] of [
+          ['matrixChatShellPresent', 'matrix_chat_shell_present'],
+          ['roomViewWrapperPresent', 'room_view_wrapper_present'],
+          ['roomViewRendererPresent', 'room_view_renderer_present'],
+        ]) {
+          fields.push(
+            `${label}=${record[key] === null ? 'unavailable' : record[key]}`,
+          );
+        }
+        fields.push(
+          `matrix_chat_state_available=${record.matrixChatStateAvailable}`,
+        );
+        fields.push(`matrix_chat_view_bucket=${record.matrixChatViewBucket}`);
+        fields.push(
+          `matrix_chat_ready=${record.matrixChatReady === null ? 'unavailable' : record.matrixChatReady}`,
+        );
+        fields.push(
+          `matrix_chat_page_type_bucket=${record.matrixChatPageTypeBucket}`,
+        );
+        fields.push(
+          `matrix_chat_current_room_matches=${record.matrixChatCurrentRoomMatches === null ? 'unavailable' : record.matrixChatCurrentRoomMatches}`,
+        );
+        if (Object.hasOwn(record, 'roomRenderStateAvailable')) {
+          fields.push(
+            `room_render_state_available=${record.roomRenderStateAvailable}`,
+          );
+          for (const [key, label] of [
+            ['roomViewShellVisible', 'room_view_shell_visible'],
+            ['roomViewBodyVisible', 'room_view_body_visible'],
+            ['roomPreviewVisible', 'room_preview_visible'],
+            ['roomPreviewLoadingVisible', 'room_preview_loading_visible'],
+            ['roomHeaderVisible', 'room_header_visible'],
+            ['roomHeaderHeadingVisible', 'room_header_heading_visible'],
+            ['roomErrorBoundaryVisible', 'room_error_boundary_visible'],
+          ]) {
+            fields.push(
+              `${label}=${record[key] === null ? 'unavailable' : record[key]}`,
+            );
+          }
+        }
+      }
       for (const [key, label] of [
         ['roomViewPresent', 'room_view_present'],
         ['roomHeaderPresent', 'room_header_present'],
@@ -3107,6 +3647,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         if (Object.hasOwn(record, key)) {
           fields.push(`${label}=${record[key]}`);
         }
+      }
+      if (phase === 'g6-member-b-room-context') {
+        appendRoomReadinessTimelineSummary(
+          fields,
+          record.roomReadinessTimeline,
+        );
       }
       if (
         phase === 'reminder-room-context' &&
@@ -3147,6 +3693,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           );
         }
       }
+    }
+    if (
+      phase === 'g6-member-b-room-context' &&
+      record.matrixUserMatches === undefined
+    ) {
+      appendRoomReadinessTimelineSummary(fields, record.roomReadinessTimeline);
     }
     if (Object.hasOwn(record, 'failureCode')) {
       fields.push(`failure_code=${record.failureCode}`);

@@ -4,6 +4,7 @@ import {
   classifyRadicaleStartupLogs,
   createRadicaleFilesystemEvidence,
 } from './element-acceptance-reminder-restore.mjs';
+import { roomContextObservationForPhase } from './element-room-context-observation.mjs';
 import {
   formatSanitizerFailureSummary,
   sanitizeElementAcceptance,
@@ -1184,6 +1185,23 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
         roomHeadingPresent: true,
         roomNameMatches: true,
         roomIdMatches: true,
+        outerRenderBucket: 'room-page',
+        matrixChatShellPresent: true,
+        roomViewWrapperPresent: true,
+        roomViewRendererPresent: true,
+        matrixChatStateAvailable: true,
+        matrixChatViewBucket: 'logged-in',
+        matrixChatReady: true,
+        matrixChatPageTypeBucket: 'room-view',
+        matrixChatCurrentRoomMatches: true,
+        roomRenderStateAvailable: true,
+        roomViewShellVisible: true,
+        roomViewBodyVisible: true,
+        roomPreviewVisible: false,
+        roomPreviewLoadingVisible: false,
+        roomHeaderVisible: true,
+        roomHeaderHeadingVisible: true,
+        roomErrorBoundaryVisible: false,
         blockedExternalRequestCount: 0,
         homeserverHttpErrorCount: 0,
       }),
@@ -1253,7 +1271,7 @@ test('emits bounded room, widget, identity, and gateway readiness steps', () => 
     [
       `element-acceptance source_sha=${sourceSha}`,
       'phase=member-a-room-navigation status=passed',
-      'phase=member-a-room-context status=passed matrix_user_matches=true matrix_room_known=true matrix_room_joined=true matrix_sync_state=SYNCING room_navigation_completed=true room_heading_ready=true room_heading_present=true room_name_matches=true room_id_matches=true blocked_external_request_count=0 homeserver_http_error_count=0',
+      'phase=member-a-room-context status=passed matrix_user_matches=true matrix_room_known=true matrix_room_joined=true matrix_sync_state=SYNCING room_navigation_completed=true room_heading_ready=true room_heading_present=true room_name_matches=true room_id_matches=true outer_render_bucket=room-page matrix_chat_shell_present=true room_view_wrapper_present=true room_view_renderer_present=true matrix_chat_state_available=true matrix_chat_view_bucket=logged-in matrix_chat_ready=true matrix_chat_page_type_bucket=room-view matrix_chat_current_room_matches=true room_render_state_available=true room_view_shell_visible=true room_view_body_visible=true room_preview_visible=false room_preview_loading_visible=false room_header_visible=true room_header_heading_visible=true room_error_boundary_visible=false blocked_external_request_count=0 homeserver_http_error_count=0',
       'phase=widget-a-room-info-button status=passed count=1 control_visible=true',
       'phase=widget-a-extensions-menuitem status=passed count=1 control_visible=true panel_present=true',
       'phase=widget-a-extension-row status=passed count=1 control_visible=true panel_present=true',
@@ -1542,6 +1560,23 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     roomHeadingPresent: false,
     roomNameMatches: false,
     roomIdMatches: true,
+    outerRenderBucket: 'room-page',
+    matrixChatShellPresent: true,
+    roomViewWrapperPresent: true,
+    roomViewRendererPresent: true,
+    matrixChatStateAvailable: true,
+    matrixChatViewBucket: 'logged-in',
+    matrixChatReady: true,
+    matrixChatPageTypeBucket: 'room-view',
+    matrixChatCurrentRoomMatches: false,
+    roomRenderStateAvailable: true,
+    roomViewShellVisible: true,
+    roomViewBodyVisible: true,
+    roomPreviewVisible: false,
+    roomPreviewLoadingVisible: false,
+    roomHeaderVisible: false,
+    roomHeaderHeadingVisible: false,
+    roomErrorBoundaryVisible: false,
     blockedExternalRequestCount: 0,
     homeserverHttpErrorCount: 1,
     homeserverLastHttpErrorStatus: 500,
@@ -1550,7 +1585,7 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     sanitizeElementAcceptance(JSON.stringify(roomObservation), sourceSha),
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=member-a-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-not-known',
+      'phase=member-a-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true outer_render_bucket=room-page matrix_chat_shell_present=true room_view_wrapper_present=true room_view_renderer_present=true matrix_chat_state_available=true matrix_chat_view_bucket=logged-in matrix_chat_ready=true matrix_chat_page_type_bucket=room-view matrix_chat_current_room_matches=false room_render_state_available=true room_view_shell_visible=true room_view_body_visible=true room_preview_visible=false room_preview_loading_visible=false room_header_visible=false room_header_heading_visible=false room_error_boundary_visible=false blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-not-known',
       '',
     ].join('\n'),
   );
@@ -1575,7 +1610,7 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     ),
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=reminder-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true room_view_present=true room_header_present=false room_heading_dom_present=false room_info_control_present=false fixture_calendar_iframe_present=false reminder_widget_context_response_count=0 blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-heading-wait-timeout',
+      'phase=reminder-room-context status=failed matrix_user_matches=true matrix_room_known=false matrix_room_joined=false matrix_sync_state=UNKNOWN room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true outer_render_bucket=room-page matrix_chat_shell_present=true room_view_wrapper_present=true room_view_renderer_present=true matrix_chat_state_available=true matrix_chat_view_bucket=logged-in matrix_chat_ready=true matrix_chat_page_type_bucket=room-view matrix_chat_current_room_matches=false room_render_state_available=true room_view_shell_visible=true room_view_body_visible=true room_preview_visible=false room_preview_loading_visible=false room_header_visible=false room_header_heading_visible=false room_error_boundary_visible=false room_view_present=true room_header_present=false room_heading_dom_present=false room_info_control_present=false fixture_calendar_iframe_present=false reminder_widget_context_response_count=0 blocked_external_request_count=0 homeserver_http_error_count=1 homeserver_last_http_error_status=500 failure_code=element-room-heading-wait-timeout',
       '',
     ].join('\n'),
   );
@@ -1602,6 +1637,9 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
     { ...roomObservation, failureCode: 'room name: private meeting' },
     { ...roomObservation, roomName: 'private meeting' },
     { ...roomObservation, roomViewPresent: true },
+    { ...roomObservation, roomRenderStateAvailable: false },
+    { ...roomObservation, roomViewBodyVisible: null },
+    { ...roomObservation, roomHeaderHeadingVisible: true },
     incompleteRoomLayoutObservation,
     { ...reminderRoomObservation, roomInfoControlPresent: 'present' },
     { ...reminderRoomObservation, reminderWidgetContextResponseCount: 2 },
@@ -1615,6 +1653,209 @@ test('emits bounded Element room state and rejects private-shaped values', () =>
   for (const record of invalidRecords) {
     assert.throws(() =>
       sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+    );
+  }
+});
+
+test('labels unavailable room render observations without converting them to false', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'member-a-room-context',
+      status: 'failed',
+      failureCode: 'element-room-heading-wait-timeout',
+      matrixUserMatches: true,
+      matrixRoomKnown: true,
+      matrixRoomJoined: true,
+      matrixSyncState: 'SYNCING',
+      roomNavigationCompleted: true,
+      roomHeadingReady: false,
+      roomHeadingPresent: false,
+      roomNameMatches: false,
+      roomIdMatches: true,
+      outerRenderBucket: 'no-shell',
+      matrixChatShellPresent: false,
+      roomViewWrapperPresent: false,
+      roomViewRendererPresent: false,
+      matrixChatStateAvailable: true,
+      matrixChatViewBucket: 'logged-in',
+      matrixChatReady: false,
+      matrixChatPageTypeBucket: 'missing',
+      matrixChatCurrentRoomMatches: false,
+      roomRenderStateAvailable: false,
+      roomViewShellVisible: null,
+      roomViewBodyVisible: null,
+      roomPreviewVisible: null,
+      roomPreviewLoadingVisible: null,
+      roomHeaderVisible: null,
+      roomHeaderHeadingVisible: null,
+      roomErrorBoundaryVisible: null,
+      blockedExternalRequestCount: 0,
+      homeserverHttpErrorCount: 0,
+    }),
+    sourceSha,
+  );
+
+  assert.match(summary, /outer_render_bucket=no-shell/u);
+  assert.match(summary, /matrix_chat_shell_present=false/u);
+  assert.match(summary, /matrix_chat_ready=false/u);
+  assert.match(summary, /matrix_chat_page_type_bucket=missing/u);
+  assert.match(summary, /room_render_state_available=false/u);
+  assert.match(summary, /room_view_shell_visible=unavailable/u);
+  assert.match(summary, /room_header_heading_visible=unavailable/u);
+});
+
+test('preserves observed missing-shell and loading-branch booleans', () => {
+  const base = {
+    phase: 'member-a-room-context',
+    status: 'failed',
+    failureCode: 'element-room-heading-not-present',
+    matrixUserMatches: true,
+    matrixRoomKnown: true,
+    matrixRoomJoined: true,
+    matrixSyncState: 'SYNCING',
+    roomNavigationCompleted: true,
+    roomHeadingReady: false,
+    roomHeadingPresent: false,
+    roomNameMatches: false,
+    roomIdMatches: true,
+    outerRenderBucket: 'no-shell',
+    matrixChatShellPresent: false,
+    roomViewWrapperPresent: false,
+    roomViewRendererPresent: false,
+    matrixChatStateAvailable: true,
+    matrixChatViewBucket: 'logged-in',
+    matrixChatReady: false,
+    matrixChatPageTypeBucket: 'missing',
+    matrixChatCurrentRoomMatches: false,
+    roomRenderStateAvailable: true,
+    roomViewShellVisible: false,
+    roomViewBodyVisible: false,
+    roomPreviewVisible: false,
+    roomPreviewLoadingVisible: false,
+    roomHeaderVisible: false,
+    roomHeaderHeadingVisible: false,
+    roomErrorBoundaryVisible: false,
+    blockedExternalRequestCount: 0,
+    homeserverHttpErrorCount: 0,
+  };
+  const missingShell = sanitizeElementAcceptance(
+    JSON.stringify(base),
+    sourceSha,
+  );
+  assert.match(missingShell, /room_render_state_available=true/u);
+  assert.match(missingShell, /room_view_shell_visible=false/u);
+  assert.match(missingShell, /room_header_visible=false/u);
+  assert.match(missingShell, /matrix_chat_shell_present=false/u);
+  assert.match(missingShell, /matrix_chat_ready=false/u);
+  assert.match(missingShell, /matrix_chat_page_type_bucket=missing/u);
+
+  const loadingBranch = sanitizeElementAcceptance(
+    JSON.stringify({
+      ...base,
+      outerRenderBucket: 'room-page',
+      matrixChatShellPresent: true,
+      roomViewWrapperPresent: true,
+      roomViewRendererPresent: true,
+      matrixChatReady: true,
+      matrixChatPageTypeBucket: 'room-view',
+      matrixChatCurrentRoomMatches: true,
+      roomViewShellVisible: true,
+      roomPreviewVisible: true,
+      roomPreviewLoadingVisible: true,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    loadingBranch,
+    /room_preview_visible=true room_preview_loading_visible=true room_header_visible=false/u,
+  );
+  assert.match(loadingBranch, /matrix_chat_page_type_bucket=room-view/u);
+});
+
+test('keeps outer-renderer values closed and distinguishes unavailable from absent', () => {
+  const base = {
+    phase: 'member-a-room-context',
+    status: 'failed',
+    failureCode: 'element-room-heading-not-present',
+    matrixUserMatches: true,
+    matrixRoomKnown: true,
+    matrixRoomJoined: true,
+    matrixSyncState: 'SYNCING',
+    roomNavigationCompleted: true,
+    roomHeadingReady: false,
+    roomHeadingPresent: false,
+    roomNameMatches: false,
+    roomIdMatches: true,
+    outerRenderBucket: 'no-shell',
+    matrixChatShellPresent: false,
+    roomViewWrapperPresent: false,
+    roomViewRendererPresent: false,
+    matrixChatStateAvailable: true,
+    matrixChatViewBucket: 'logged-in',
+    matrixChatReady: false,
+    matrixChatPageTypeBucket: 'missing',
+    matrixChatCurrentRoomMatches: false,
+    roomRenderStateAvailable: true,
+    roomViewShellVisible: false,
+    roomViewBodyVisible: false,
+    roomPreviewVisible: false,
+    roomPreviewLoadingVisible: false,
+    roomHeaderVisible: false,
+    roomHeaderHeadingVisible: false,
+    roomErrorBoundaryVisible: false,
+    blockedExternalRequestCount: 0,
+    homeserverHttpErrorCount: 0,
+  };
+  const absentShell = sanitizeElementAcceptance(
+    JSON.stringify(base),
+    sourceSha,
+  );
+  assert.match(absentShell, /outer_render_bucket=no-shell/u);
+  assert.match(absentShell, /matrix_chat_shell_present=false/u);
+
+  const unavailableSnapshot = sanitizeElementAcceptance(
+    JSON.stringify({
+      ...base,
+      outerRenderBucket: 'unavailable',
+      matrixChatShellPresent: null,
+      roomViewWrapperPresent: null,
+      roomViewRendererPresent: null,
+      matrixChatStateAvailable: false,
+      matrixChatViewBucket: 'unavailable',
+      matrixChatReady: null,
+      matrixChatPageTypeBucket: 'unavailable',
+      matrixChatCurrentRoomMatches: null,
+    }),
+    sourceSha,
+  );
+  assert.match(unavailableSnapshot, /outer_render_bucket=unavailable/u);
+  assert.match(unavailableSnapshot, /matrix_chat_shell_present=unavailable/u);
+  assert.match(unavailableSnapshot, /matrix_chat_ready=unavailable/u);
+
+  const otherPage = sanitizeElementAcceptance(
+    JSON.stringify({
+      ...base,
+      outerRenderBucket: 'other-page',
+      matrixChatShellPresent: true,
+      roomViewWrapperPresent: true,
+      roomViewRendererPresent: false,
+      matrixChatReady: true,
+      matrixChatPageTypeBucket: 'other-page',
+    }),
+    sourceSha,
+  );
+  assert.match(otherPage, /outer_render_bucket=other-page/u);
+  assert.match(otherPage, /matrix_chat_page_type_bucket=other-page/u);
+
+  for (const invalid of [
+    { ...base, outerRenderBucket: 'private-runtime-value' },
+    { ...base, outerRenderBucket: 'room-page' },
+    { ...base, matrixChatPageTypeBucket: 'room_view' },
+    { ...base, matrixChatViewBucket: 'view=9' },
+    { ...base, matrixChatStateAvailable: false },
+  ]) {
+    assert.throws(() =>
+      sanitizeElementAcceptance(JSON.stringify(invalid), sourceSha),
     );
   }
 });
@@ -2449,6 +2690,226 @@ test('rejects unsafe container diagnostics and diagnostics on other phases', () 
   for (const record of rejectedRecords) {
     assert.throws(
       () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
+test('sanitizes the fixed performance seed and cleanup phases', () => {
+  const completeCleanup = {
+    manifestEventCount: 25,
+    plannedCount: 0,
+    confirmedCreatedCount: 25,
+    deletedCount: 25,
+    alreadyAbsentCount: 0,
+    conflictCount: 0,
+    unresolvedCount: 0,
+    inventoryAvailable: true,
+  };
+  const stages = [
+    { phase: 'performance-seed', status: 'started' },
+    { phase: 'performance-seed', status: 'passed', count: 25 },
+    { phase: 'performance-cleanup', status: 'started' },
+    { phase: 'performance-cleanup', status: 'passed', ...completeCleanup },
+  ];
+  const summary = sanitizeElementAcceptance(
+    stages.map((stage) => JSON.stringify(stage)).join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /phase=performance-seed status=passed count=25 fixture_profile=ordinary-25/u,
+  );
+  assert.match(
+    summary,
+    /phase=performance-cleanup status=passed fixture_profile=ordinary-25 manifest_event_count=25 planned_count=0 confirmed_created_count=25 deleted_count=25 already_absent_count=0 conflict_count=0 unresolved_count=0 inventory_available=true/u,
+  );
+  const historical250 = sanitizeElementAcceptance(
+    [
+      { phase: 'performance-seed', status: 'started' },
+      { phase: 'performance-seed', status: 'passed', count: 250 },
+      { phase: 'performance-cleanup', status: 'started' },
+      {
+        phase: 'performance-cleanup',
+        status: 'passed',
+        manifestEventCount: 250,
+        plannedCount: 0,
+        confirmedCreatedCount: 250,
+        deletedCount: 250,
+        alreadyAbsentCount: 0,
+        conflictCount: 0,
+        unresolvedCount: 0,
+        inventoryAvailable: true,
+      },
+    ]
+      .map((stage) => JSON.stringify(stage))
+      .join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    historical250,
+    /phase=performance-seed status=passed count=250 fixture_profile=historical-250-diagnostic-only/u,
+  );
+  assert.match(
+    historical250,
+    /phase=performance-cleanup status=passed fixture_profile=historical-250-diagnostic-only manifest_event_count=250/u,
+  );
+  const emptyCleanup = sanitizeElementAcceptance(
+    [
+      { phase: 'performance-cleanup', status: 'started' },
+      {
+        phase: 'performance-cleanup',
+        status: 'passed',
+        manifestEventCount: 0,
+        plannedCount: 0,
+        confirmedCreatedCount: 0,
+        deletedCount: 0,
+        alreadyAbsentCount: 0,
+        conflictCount: 0,
+        unresolvedCount: 0,
+        inventoryAvailable: true,
+      },
+    ]
+      .map((stage) => JSON.stringify(stage))
+      .join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    emptyCleanup,
+    /phase=performance-cleanup status=passed fixture_profile=unavailable manifest_event_count=0 planned_count=0 confirmed_created_count=0 deleted_count=0 already_absent_count=0 conflict_count=0 unresolved_count=0 inventory_available=true/u,
+  );
+  const unavailableCleanup = sanitizeElementAcceptance(
+    [
+      { phase: 'performance-cleanup', status: 'started' },
+      {
+        phase: 'performance-cleanup',
+        status: 'failed',
+        manifestEventCount: null,
+        plannedCount: null,
+        confirmedCreatedCount: null,
+        deletedCount: null,
+        alreadyAbsentCount: null,
+        conflictCount: null,
+        unresolvedCount: null,
+        inventoryAvailable: false,
+        failureCode: 'manifest-invalid',
+      },
+    ]
+      .map((stage) => JSON.stringify(stage))
+      .join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    unavailableCleanup,
+    /phase=performance-cleanup status=failed fixture_profile=unavailable manifest_event_count=unavailable planned_count=unavailable confirmed_created_count=unavailable deleted_count=unavailable already_absent_count=unavailable conflict_count=unavailable unresolved_count=unavailable inventory_available=false failure_code=manifest-invalid/u,
+  );
+  const partialCleanup = sanitizeElementAcceptance(
+    [
+      { phase: 'performance-cleanup', status: 'started' },
+      {
+        phase: 'performance-cleanup',
+        status: 'failed',
+        manifestEventCount: 250,
+        plannedCount: 1,
+        confirmedCreatedCount: 200,
+        deletedCount: 150,
+        alreadyAbsentCount: 20,
+        conflictCount: 1,
+        unresolvedCount: 78,
+        inventoryAvailable: true,
+        failureCode: 'cleanup-incomplete',
+      },
+    ]
+      .map((stage) => JSON.stringify(stage))
+      .join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    partialCleanup,
+    /phase=performance-cleanup status=failed fixture_profile=historical-250-diagnostic-only manifest_event_count=250 planned_count=1 confirmed_created_count=200 deleted_count=150 already_absent_count=20 conflict_count=1 unresolved_count=78 inventory_available=true failure_code=cleanup-incomplete/u,
+  );
+});
+
+test('rejects invalid performance fixture counts and failure categories', () => {
+  const invalidStages = [
+    [
+      { phase: 'performance-seed', status: 'started' },
+      { phase: 'performance-seed', status: 'passed', count: 249 },
+    ],
+    [
+      { phase: 'performance-seed', status: 'started' },
+      { phase: 'performance-seed', status: 'passed', count: 250 },
+      { phase: 'performance-cleanup', status: 'started' },
+      {
+        phase: 'performance-cleanup',
+        status: 'passed',
+        manifestEventCount: 0,
+        plannedCount: 0,
+        confirmedCreatedCount: 0,
+        deletedCount: 0,
+        alreadyAbsentCount: 0,
+        conflictCount: 0,
+        unresolvedCount: 0,
+        inventoryAvailable: true,
+      },
+    ],
+    [
+      { phase: 'performance-cleanup', status: 'started' },
+      {
+        phase: 'performance-cleanup',
+        status: 'failed',
+        manifestEventCount: 250,
+        plannedCount: 0,
+        confirmedCreatedCount: 0,
+        deletedCount: 0,
+        alreadyAbsentCount: 0,
+        conflictCount: 0,
+        unresolvedCount: 0,
+        inventoryAvailable: true,
+        failureCode: 'cleanup-incomplete',
+      },
+    ],
+    [
+      { phase: 'performance-cleanup', status: 'started' },
+      {
+        phase: 'performance-cleanup',
+        status: 'passed',
+        manifestEventCount: 250,
+        plannedCount: 0,
+        confirmedCreatedCount: 250,
+        deletedCount: 125,
+        alreadyAbsentCount: 0,
+        conflictCount: 0,
+        unresolvedCount: 125,
+        inventoryAvailable: true,
+      },
+    ],
+    [
+      { phase: 'performance-cleanup', status: 'started' },
+      {
+        phase: 'performance-cleanup',
+        status: 'failed',
+        manifestEventCount: 0,
+        plannedCount: 0,
+        confirmedCreatedCount: 0,
+        deletedCount: 0,
+        alreadyAbsentCount: 0,
+        conflictCount: 0,
+        unresolvedCount: 0,
+        inventoryAvailable: true,
+        failureCode: 'caldav-operation-failed',
+      },
+    ],
+    [{ phase: 'performance-seed', status: 'passed', count: 250 }],
+    [{ phase: 'performance-seed', status: 'started', token: 'private' }],
+  ];
+  for (const stages of invalidStages) {
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          stages.map((stage) => JSON.stringify(stage)).join('\n'),
+          sourceSha,
+        ),
       { message: 'invalid element acceptance summary' },
     );
   }
@@ -3316,26 +3777,76 @@ test('accepts the real Element room observations under the g6 phase labels', () 
 });
 
 test('accepts the complete bounded room layout group only for G6 member B', () => {
-  const roomRecord = {
-    phase: 'g6-member-b-room-context',
-    status: 'failed',
-    failureCode: 'element-room-heading-not-present',
+  // This is the full observeMemberARoom result shape, including fields that
+  // must be omitted from the G6 stage record by the phase-aware producer.
+  const callbackObservation = {
     matrixUserMatches: true,
     matrixRoomKnown: true,
     matrixRoomJoined: true,
+    matrixSyncState: 'SYNCING',
     roomNavigationCompleted: true,
     roomHeadingReady: false,
     roomHeadingPresent: false,
     roomNameMatches: true,
     roomIdMatches: true,
-    matrixSyncState: 'SYNCING',
-    blockedExternalRequestCount: 0,
-    homeserverHttpErrorCount: 0,
+    outerRenderBucket: 'room-page',
+    matrixChatShellPresent: true,
+    roomViewWrapperPresent: true,
+    roomViewRendererPresent: true,
+    matrixChatStateAvailable: true,
+    matrixChatViewBucket: 'logged-in',
+    matrixChatReady: true,
+    matrixChatPageTypeBucket: 'room-view',
+    matrixChatCurrentRoomMatches: true,
+    roomRenderStateAvailable: true,
+    roomViewShellVisible: true,
+    roomViewBodyVisible: true,
+    roomPreviewVisible: false,
+    roomPreviewLoadingVisible: false,
+    roomHeaderVisible: true,
+    roomHeaderHeadingVisible: false,
+    roomErrorBoundaryVisible: false,
     roomViewPresent: true,
     roomHeaderPresent: true,
     roomHeadingDomPresent: false,
     roomInfoControlPresent: true,
     fixtureCalendarIframePresent: false,
+    blockedExternalRequestCount: 0,
+    homeserverHttpErrorCount: 0,
+  };
+  const roomReadinessTimeline = {
+    outcome: 'cancelled',
+    sampleCountCapped: 2,
+    overflow: false,
+    samples: [
+      {
+        elapsedMs: 0,
+        available: true,
+        roomViewPresent: true,
+        roomHeaderPresent: true,
+        roomHeadingPresent: false,
+        currentRoomMatches: true,
+        matrixSyncState: 'SYNCING',
+      },
+      {
+        elapsedMs: 1_000,
+        available: true,
+        roomViewPresent: true,
+        roomHeaderPresent: true,
+        roomHeadingPresent: false,
+        currentRoomMatches: true,
+        matrixSyncState: 'CATCHUP',
+      },
+    ],
+  };
+  const roomRecord = {
+    phase: 'g6-member-b-room-context',
+    status: 'failed',
+    failureCode: 'element-room-heading-not-present',
+    ...roomContextObservationForPhase(
+      { ...callbackObservation, roomReadinessTimeline },
+      'g6-member-b-room-context',
+    ),
   };
   const summary = sanitizeElementAcceptance(
     JSON.stringify(roomRecord),
@@ -3346,21 +3857,82 @@ test('accepts the complete bounded room layout group only for G6 member B', () =
     summary,
     /room_view_present=true room_header_present=true room_heading_dom_present=false room_info_control_present=true fixture_calendar_iframe_present=false/u,
   );
+  assert.match(
+    summary,
+    /room_readiness_timeline_outcome=cancelled room_readiness_timeline_sample_count=2 room_readiness_timeline_overflow=false room_readiness_timeline_samples=0:observed:true:true:false:true:SYNCING;1000:observed:true:true:false:true:CATCHUP/u,
+  );
+  assert.doesNotMatch(summary, /outer_render_bucket=/u);
+
+  const budgetExhaustedRecord = {
+    ...roomRecord,
+    roomReadinessTimeline: {
+      ...roomReadinessTimeline,
+      outcome: 'budget-exhausted',
+      overflow: true,
+    },
+  };
+  assert.match(
+    sanitizeElementAcceptance(JSON.stringify(budgetExhaustedRecord), sourceSha),
+    /room_readiness_timeline_outcome=budget-exhausted room_readiness_timeline_sample_count=2 room_readiness_timeline_overflow=true/u,
+  );
 
   const incompleteGroup = { ...roomRecord };
   delete incompleteGroup.fixtureCalendarIframePresent;
   const nonBooleanGroup = { ...roomRecord, roomHeadingDomPresent: 'present' };
   const unrelatedPhase = { ...roomRecord, phase: 'g6-member-a-room-context' };
+  const rendererDiagnosticsLeaked = {
+    phase: 'g6-member-b-room-context',
+    status: 'failed',
+    failureCode: 'element-room-heading-not-present',
+    ...callbackObservation,
+  };
+  const timelinePrivateField = {
+    ...roomRecord,
+    roomReadinessTimeline: {
+      ...roomReadinessTimeline,
+      error: 'private Element text',
+    },
+  };
+  const timelineOutOfRange = {
+    ...roomRecord,
+    roomReadinessTimeline: {
+      ...roomReadinessTimeline,
+      samples: Array.from({ length: 16 }, (_, index) => ({
+        ...roomReadinessTimeline.samples[0],
+        elapsedMs: index * 1_000,
+      })),
+      sampleCountCapped: 16,
+    },
+  };
   for (const invalidRecord of [
     incompleteGroup,
     nonBooleanGroup,
     unrelatedPhase,
+    rendererDiagnosticsLeaked,
+    timelinePrivateField,
+    timelineOutOfRange,
   ]) {
     assert.throws(
       () => sanitizeElementAcceptance(JSON.stringify(invalidRecord), sourceSha),
       { message: 'invalid element acceptance summary' },
     );
   }
+
+  const ordinaryObservation = roomContextObservationForPhase(
+    callbackObservation,
+    'member-a-room-context',
+  );
+  assert.equal(ordinaryObservation.outerRenderBucket, 'room-page');
+  const reminderObservation = roomContextObservationForPhase(
+    callbackObservation,
+    'reminder-room-context',
+  );
+  assert.equal(reminderObservation.outerRenderBucket, 'room-page');
+  assert.throws(
+    () =>
+      roomContextObservationForPhase(callbackObservation, 'unrelated-phase'),
+    { name: 'TypeError', message: 'invalid room context phase' },
+  );
 });
 
 test('rejects a passed Element edit whose updated ETag belongs to another event', () => {
