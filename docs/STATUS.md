@@ -2,16 +2,16 @@
 
 _Last updated: 2026-10-09._
 
-_Source baseline: `main` at `094342a1a54f894775f3160d7dce447e56a609fb`._
+_Source baseline: `main` at `467f87bf9cc744ef87721ae9334eee3686fc7461`._
 
-_Hosted application-acceptance candidate: `235e7e446df3efd8784d3468f593f2799602767c` (tree `c07fed72dbd881d204a700ecae702f0a23a4c99a`)._
+_Hosted application-acceptance source: PR #229 head `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378` (tree `660718db2d23a85ac688b7f194a8a66a2c8e201f`), merged to `main` as `467f87bf9cc744ef87721ae9334eee3686fc7461`._
 
 See the [dated continuation](handoff/2026-10-06/README.md) and
 [exact delivered-slice ledger](handoff/2026-10-06/ledger.json).
 
 ## Current phase
 
-**Pre-alpha.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence timing/text and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; operator acceptance remains open. M7 has bounded bot commands and post-success room-target event notices. The exact application candidate identified above passed the bounded isolated Element Web/Desktop user-flow and ordinary-load acceptance: the paired hosted run passed all 105 Web phases, all 12 Desktop cases, authorization and CRUD flows, reminder restart and paired Radicale/PostgreSQL restore, G6 interactions, and cleanup. Ordinary-load measurements met their predeclared thresholds. Two Element-origin widget-opening errors were captured with complete trusted Element-bundle stacks and passed the approved diagnostic-reporting gate; that evidence does not identify their cause. The production HTTP membership-guard test verifies that policy denials stop before CalDAV I/O; hosted Element denial flows verify outsider requests receive the expected statuses. The guard test does not itself verify OpenID identity. Operator readiness gates remain open. Mobile/other clients, pinned/full-width layout certification, formal screen-reader certification, and broad capacity characterization remain outside the bounded beta target.
+**Pre-alpha; private operator readiness is the active phase.** M0–M3 are complete for the supported scope. M4 collection management is implemented within its documented boundary; collection-timezone editing remains deferred. M5 has bounded selected-occurrence timing/text and this-and-following timing edits, but issue #6 remains open for broader recurrence and interoperability. M6 room authorization, event operations, the primary widget room-calendar workflow, reminder configuration and delivery runtime, and persistence are implemented behind independent default-off gates. The bounded repository scope for issue #7 is complete; operator acceptance remains open. M7 has bounded bot commands and post-success room-target event notices. PR #229 source `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378`, merged to `main`, passed all five CI jobs and hosted CodeQL, CalDAV, standalone Desktop, and paired Web/Desktop workflows. Source-validated isolated acceptance passed all 105 Web records and 12 paired Desktop/Web cases, including authorization and CRUD, reminders/restart, paired Radicale/PostgreSQL restore, G6 interactions, and cleanup. The ordinary zero/25-event default seven-day List profile met its predeclared gates: cold activation peaked at 1.966 s, measured same-range refresh at 1.797 s, five details samples at 0.427 s, and 42 required decoded non-OpenID responses at 0.490 s (rounded up). The separate refresh-preparation sample was 2.012 s and is diagnostic under the predeclared method; its API responses remain gated. Two complete trusted Element-origin opening-error reports met the approved diagnostic predicate; their cause is unknown. These results cover isolated synthetic application acceptance only. Private operator preflight, target-specific deployment and recovery validation, and a rollout decision remain before any rollout. Mobile/other clients, pinned/full-width layout certification, formal screen-reader certification, and broad capacity characterization remain outside the bounded beta target.
 
 A source review confirmed a gateway middleware-order defect: Nest 11.1.28
 applied the default CORS option during application initialization, after the
@@ -42,12 +42,13 @@ acceptance.
 The controlled-beta scope and its acceptance contract are documented in
 [`beta-scope.md`](./beta-scope.md). Its target is Element Web/Desktop, one
 server replica, the project-owned Radicale store, and separate app-owned
-PostgreSQL reminder state. The tested candidate passed the bounded hosted
-application flows. Operator preflight, real-server deployment and
-backup/restore evidence, and final candidate review remain pending; this result
-does not complete beta acceptance or authorize publication or rollout.
+PostgreSQL reminder state. The merged PR #229 source passed the bounded hosted
+application flows and independent source review. Private operator preflight,
+target-specific deployment and backup/restore evidence, and any rollout
+decision remain open; application acceptance does not complete beta acceptance
+or authorize publication or rollout.
 
-The paired Element Web and Desktop user-flow acceptance passed against exact source
+The earlier paired Element Web/Desktop acceptance passed against source
 candidate `235e7e446df3efd8784d3468f593f2799602767c` in [hosted run
 37857387454](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387454).
 All 105 Web phases and all 12 Desktop cases passed, including authorization
@@ -216,19 +217,19 @@ loading, memory, and actual clients remain unmeasured.
 - **M8:** The bounded G6 Element Web interaction path remains covered by merged
   run [37739410969](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37739410969),
   including shared-event edit/delete, unsupported-source preservation,
-  keyboard/focus, and standard side-panel layout. Exact hosted candidate
-  `235e7e446df3efd8784d3468f593f2799602767c` passed the bounded Element
-  Web/Desktop user-flow and ordinary-load acceptance in [paired run
-  37857387454](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387454):
-  105 Web phases, 12 Desktop cases, authorization and CRUD, reminder restart
+  keyboard/focus, and standard side-panel layout. The latest hosted candidate,
+  PR #229 source `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378`, passed the bounded
+  Element Web/Desktop user-flow and ordinary-load acceptance in [paired run
+  37916317363](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317363):
+  105 Web records, 12 Desktop cases, authorization and CRUD, reminder restart
   and paired Radicale/PostgreSQL restore, G6 interactions, and cleanup.
-  Ordinary cold activation, refresh, detail, and decoded API measurements
-  met their declared limits. Two opening errors were fully captured from
-  trusted Element bundles under the approved diagnostic policy; source mapping
-  did not resolve a cause. The production HTTP guard test verifies that policy
+  Ordinary cold activation, measured refresh, detail, and decoded API
+  measurements met their declared limits. Two opening errors were fully
+  captured from trusted Element bundles under the approved diagnostic policy;
+  their cause is unknown. The production HTTP guard test verifies that policy
   denials stop before CalDAV I/O; hosted Element denial flows verify outsider
   requests receive the expected statuses. OpenID identity validation is covered
-  separately. Earlier failed runs
+  separately. The earlier `235e7e` acceptance and failed runs
   [37745671795](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37745671795),
   [37750848604](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37750848604),
   and the prior paired run
@@ -241,17 +242,17 @@ loading, memory, and actual clients remain unmeasured.
   wider client acceptance. Gateway and bot quotas are process-local; callers
   behind one reverse proxy share the gateway TCP-peer quota, and the beta
   target uses one server replica.
-- **Current candidate gate:** application acceptance passed on exact source
-  candidate `235e7e446df3efd8784d3468f593f2799602767c`. All five CI checks
-  passed in [37857387462](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387462);
-  the hosted [CodeQL](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387344),
-  [CalDAV](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387342),
-  [standalone Desktop](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387392),
-  and [paired Element Web](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387454)
-  workflows also passed. This records isolated application behavior only. The
-  final independent candidate review, operator preflight, real deployment
-  validation, backup/restore rehearsal, and any rollout decision remain open.
-  No production host or configuration was inspected.
+- **Current candidate gate:** application acceptance passed on PR #229 source
+  `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378`, merged to `main` with the same
+  tree. [CI](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317359),
+  [CodeQL](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317433),
+  [CalDAV](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317441),
+  [standalone Desktop](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317482),
+  and [paired Element Web/Desktop](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317363)
+  workflows passed; independent source reviews cleared the candidate. This
+  records isolated application behavior only. Private operator readiness,
+  target-specific deployment and recovery validation, and any rollout decision
+  remain open. No production host or configuration was inspected.
 - **Operator readiness:** homeserver/proxy behavior, OpenID query-token log redaction, selected Radicale image/configuration, PostgreSQL endpoint TLS/CA and role, backups/restores, secrets, network exposure, and rollback remain to be verified. The beta baseline uses the project-owned Radicale image and its own store; replacing an existing service or reusing its `/data` is optional and would require additional image/data-path compatibility and recovery evidence. The Compose sidecar does not migrate another service's data.
 - **Release/deployment:** the project remains pre-alpha. Build and contract evidence do not authorize image/chart publication or a live deployment.
 
