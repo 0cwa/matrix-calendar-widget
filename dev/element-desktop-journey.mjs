@@ -1795,10 +1795,19 @@ export function summarizeDesktopJourneyEvidence(
   );
   const failed = Object.values(cases).includes('failed');
   const complete = Object.values(cases).every((value) => value === 'passed');
+  const childCompletedSuccessfully =
+    desktopChildCompletion.outcome === 'exited' &&
+    desktopChildCompletion.exitStatus === 0 &&
+    desktopChildCompletion.timedOut === false;
+  const journeyEvidencePassed =
+    complete &&
+    sourceSha !== null &&
+    childCompletedSuccessfully &&
+    playwrightResult === 'passed';
   return {
     schemaVersion: 10,
     sourceSha,
-    status: failed ? 'failed' : complete ? 'passed' : 'incomplete',
+    status: failed ? 'failed' : journeyEvidencePassed ? 'passed' : 'incomplete',
     desktopChildCompletion,
     playwrightResult,
     loginStep,

@@ -460,6 +460,71 @@ test('reports missing, malformed, duplicate, and conflicting results as unknown'
   assert.equal(malformedSource.playwrightResult, 'unknown');
 });
 
+test('passes Desktop journey evidence only with complete source-bound success diagnostics', () => {
+  const sourceSha = 'f'.repeat(40);
+  const childCompletion = (outcome, exitStatus, timedOut) => ({
+    type: 'desktop-child-completion',
+    sourceSha,
+    desktopChildCompletion: { outcome, exitStatus, timedOut },
+  });
+  const playwright = (playwrightResult, recordSourceSha = sourceSha) => ({
+    type: 'desktop-playwright-result',
+    sourceSha: recordSourceSha,
+    playwrightResult,
+  });
+  const phaseRows = [
+    ...DESKTOP_JOURNEY_PHASES.map((phase) => ({ phase, status: 'passed' })),
+    { loginStep: 'complete', loginEntry: 'password_form_present' },
+  ];
+  const summarize = (...rows) =>
+    summarizeDesktopJourneyEvidence(
+      `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`,
+      { expectedSourceSha: sourceSha },
+    );
+  const validCompletion = childCompletion('exited', 0, false);
+  const validPlaywright = playwright('passed');
+
+  assert.equal(
+    summarize(...phaseRows, validCompletion, validPlaywright).status,
+    'passed',
+  );
+
+  const incompleteEvidence = [
+    [validPlaywright],
+    [validCompletion],
+    [
+      {
+        ...validCompletion,
+        desktopChildCompletion: {
+          outcome: 'exited',
+          exitStatus: 256,
+          timedOut: false,
+        },
+      },
+      validPlaywright,
+    ],
+    [childCompletion('unknown', null, false), playwright('unknown')],
+    [childCompletion('exited', 0, false), playwright('failed')],
+    [childCompletion('exited', 1, false), playwright('failed')],
+    [childCompletion('timeout', null, true), playwright('timed_out')],
+    [validCompletion, playwright('passed', '0'.repeat(40))],
+  ];
+  for (const diagnostics of incompleteEvidence) {
+    assert.equal(summarize(...phaseRows, ...diagnostics).status, 'incomplete');
+  }
+  assert.throws(
+    () =>
+      summarizeDesktopJourneyEvidence(
+        `${phaseRows.map((row) => JSON.stringify(row)).join('\n')}\n` +
+          '{"type":"desktop-child-completion","sourceSha":"' +
+          sourceSha +
+          '","desktopChildCompletion":not-json}\n',
+        { expectedSourceSha: sourceSha },
+      ),
+    /Invalid Desktop journey input/u,
+  );
+});
+
 test('preflights both diagnostic rows at the evidence cap without changing phase evidence', () => {
   const sourceSha = 'e'.repeat(40);
   const phase = 'web-member-b-keyboard-open';

@@ -32,6 +32,8 @@ import {
   validateJourneyPolicyPorts,
 } from './element-desktop-journey-runner.mjs';
 import {
+  DESKTOP_JOURNEY_PHASES,
+  appendDesktopChildCompletion,
   appendDesktopJourneyOutcome,
   appendDesktopPlaywrightResult,
   initializeDesktopJourneyEvidence,
@@ -48,6 +50,25 @@ function withJourneyTempDirectory(run) {
   } finally {
     rmSync(runnerTemp, { recursive: true, force: true });
   }
+}
+
+function appendPassingJourneyPhases(filePath, runnerTemp) {
+  for (const phase of DESKTOP_JOURNEY_PHASES) {
+    appendDesktopJourneyOutcome({
+      filePath,
+      runnerTemp,
+      phase,
+      status: 'passed',
+    });
+  }
+  appendFileSync(
+    filePath,
+    `${JSON.stringify({
+      loginStep: 'complete',
+      loginEntry: 'password_form_present',
+    })}\n`,
+    { flag: 'a', mode: 0o600 },
+  );
 }
 
 function observedUidCensus(uidProcessCount) {
@@ -220,6 +241,7 @@ test('keeps the Desktop child timeout and nonzero failure gate unchanged', () =>
     };
     const state = { sourceSha: JOURNEY_SOURCE_SHA, cdpPort: 42_424 };
     initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendPassingJourneyPhases(filePath, runnerTemp);
     let captured;
     const completion = runDesktopCalendarJourney(
       config,
@@ -260,6 +282,7 @@ test('keeps the Desktop child timeout and nonzero failure gate unchanged', () =>
 
     rmSync(filePath);
     initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendPassingJourneyPhases(filePath, runnerTemp);
     assert.throws(
       () =>
         runDesktopCalendarJourney(config, state, () => {
@@ -286,6 +309,7 @@ test('keeps the Desktop child timeout and nonzero failure gate unchanged', () =>
     assert.equal(failed.desktopChildCompletion.exitStatus, 1);
     assert.equal(failed.desktopChildCompletion.outcome, 'exited');
     assert.equal(failed.playwrightResult, 'timed_out');
+    assert.equal(failed.status, 'incomplete');
     assert.doesNotMatch(
       JSON.stringify(failed),
       /private stdout|private stderr/u,
@@ -375,6 +399,89 @@ test('keeps phase evidence when a child diagnostic cannot fit the parser cap', (
     assert.equal(summary.cases[phase], 'passed');
     assert.equal(summary.desktopChildCompletion.outcome, 'unknown');
     assert.equal(summary.playwrightResult, 'unknown');
+  });
+});
+
+test('rejects a zero-exit child when capped completion evidence cannot be appended', () => {
+  withJourneyTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    const sourceSha = JOURNEY_SOURCE_SHA;
+    const completion = {
+      type: 'desktop-child-completion',
+      sourceSha,
+      desktopChildCompletion: {
+        outcome: 'exited',
+        exitStatus: 0,
+        timedOut: false,
+      },
+    };
+    const completionRowBytes = Buffer.byteLength(
+      `${JSON.stringify(completion)}\n`,
+    );
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendPassingJourneyPhases(filePath, runnerTemp);
+    assert.equal(
+      appendDesktopPlaywrightResult({
+        filePath,
+        runnerTemp,
+        sourceSha,
+        status: 'passed',
+      }),
+      true,
+    );
+    assert.equal(
+      appendDesktopChildCompletion({
+        filePath,
+        runnerTemp,
+        sourceSha,
+        completion: completion.desktopChildCompletion,
+      }),
+      true,
+    );
+    assert.equal(
+      readDesktopJourneyEvidence({
+        filePath,
+        runnerTemp,
+        expectedSourceSha: sourceSha,
+      }).status,
+      'passed',
+    );
+    const targetBytes = 16_384 - completionRowBytes + 1;
+    appendFileSync(
+      filePath,
+      '\n'.repeat(targetBytes - statSync(filePath).size),
+    );
+    const originalEvidence = readFileSync(filePath);
+    const config = {
+      runnerTemp,
+      workspace: runnerTemp,
+      journeyStageFile: filePath,
+      playwrightOutput: join(runnerTemp, 'playwright-output'),
+      usersFile: join(runnerTemp, 'users.json'),
+      credentialsFile: join(runnerTemp, 'credentials.json'),
+    };
+
+    assert.throws(
+      () =>
+        runDesktopCalendarJourney(
+          config,
+          { sourceSha, cdpPort: 42_424 },
+          () => ({ status: 0, signal: null }),
+        ),
+      (error) => error.code === 'desktop-not-ready',
+    );
+    assert.deepEqual(readFileSync(filePath), originalEvidence);
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: sourceSha,
+    });
+    assert.equal(summary.status, 'passed');
+    assert.ok(
+      Object.values(summary.cases).every((status) => status === 'passed'),
+    );
+    assert.equal(summary.desktopChildCompletion.exitStatus, 0);
+    assert.equal(summary.playwrightResult, 'passed');
   });
 });
 

@@ -32,7 +32,10 @@ import {
   UID_CENSUS_STDERR_PREFIX_CATEGORIES,
   uidProcessObservationFromLifecycle,
 } from './element-desktop-evidence.mjs';
-import { appendDesktopChildCompletion } from './element-desktop-journey.mjs';
+import {
+  appendDesktopChildCompletion,
+  readDesktopJourneyEvidence,
+} from './element-desktop-journey.mjs';
 
 const PACKAGE_VERSION = '1.12.30';
 const PROBE_USERNAME = 'mcwdesktopprobe';
@@ -1706,13 +1709,23 @@ export function runDesktopCalendarJourney(
     result = undefined;
   }
   const completion = classifyDesktopChildCompletion(result);
-  appendDesktopChildCompletion({
+  const completionAppended = appendDesktopChildCompletion({
     filePath: config.journeyStageFile,
     runnerTemp: config.runnerTemp,
     sourceSha: state.sourceSha,
     completion,
   });
-  if (completion.outcome !== 'exited' || completion.exitStatus !== 0) {
+  const journeySummary = readDesktopJourneyEvidence({
+    filePath: config.journeyStageFile,
+    runnerTemp: config.runnerTemp,
+    expectedSourceSha: state.sourceSha,
+  });
+  if (
+    !completionAppended ||
+    completion.outcome !== 'exited' ||
+    completion.exitStatus !== 0 ||
+    journeySummary.status !== 'passed'
+  ) {
     throw failure('desktop-not-ready');
   }
   return completion;
