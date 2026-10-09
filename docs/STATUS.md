@@ -2,7 +2,7 @@
 
 _Last updated: 2026-10-09._
 
-_Source baseline: `main` at `467f87bf9cc744ef87721ae9334eee3686fc7461`._
+_Source baseline: `main` at `0df38a81a0dccfd3e241b3011ec89f5593fd9e1c`._
 
 _Hosted application-acceptance source: PR #229 head `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378` (tree `660718db2d23a85ac688b7f194a8a66a2c8e201f`), merged to `main` as `467f87bf9cc744ef87721ae9334eee3686fc7461`._
 
@@ -255,13 +255,38 @@ loading, memory, and actual clients remain unmeasured.
   remain open. No production host or configuration was inspected.
 - **Operator readiness:** homeserver/proxy behavior, OpenID query-token log redaction, selected Radicale image/configuration, PostgreSQL endpoint TLS/CA and role, backups/restores, secrets, network exposure, and rollback remain to be verified. The beta baseline uses the project-owned Radicale image and its own store; replacing an existing service or reusing its `/data` is optional and would require additional image/data-path compatibility and recovery evidence. The Compose sidecar does not migrate another service's data.
 - **Release/deployment:** the project remains pre-alpha. Build and contract evidence do not authorize image/chart publication or a live deployment.
-- **Source-bound image archive:** the manual main-only workflow builds an exact
-  supplied source SHA and records trusted workflow identity, the generic
-  `linux/amd64` platform, resolved image bases, image IDs, and archive hashes
-  for the three project images. It packages and verifies the fixed
-  source-derived license and notice bundle with the full archive. No hosted
-  archive has been generated yet, and target-specific operator comparison
-  remains a separate gate; see the [M8 image archive task](./PLAN.md#m8--hardening-and-release).
+- **Source-bound image archive:** trusted main workflow run
+  [37952560924](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37952560924)
+  completed successfully on workflow head
+  `0df38a81a0dccfd3e241b3011ec89f5593fd9e1c`, bound to accepted application
+  source `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378` and tree
+  `660718db2d23a85ac688b7f194a8a66a2c8e201f`. The schema-v2 manifest records
+  the generic `linux/amd64` platform, the server, widget, and project-owned
+  Radicale image IDs and Buildx digests, resolved immutable base digests,
+  image-tar hashes verified on the runner before upload, and seven fixed
+  source-derived notices. The manifest SHA-256 is
+  `92231b19984afc13b81a03e5877264fcd86f1a7f0edbda46c5573619710a5660`.
+  The recorded workflow SHA-256 is
+  `0676dc861a4215f6bdb378b3a3a6e60ecdda4760fec180e0cb6ae779827437f9` and
+  validator-helper SHA-256 is
+  `28364e957804fee8b85e419d6f75d7a137e750c5f48439e85569315a4d3b855a`;
+  these are separate from the accepted source and workflow-head SHAs. The
+  hosted build, manifest creation and verification, both artifact uploads,
+  public summary, and owned builder cleanup passed. GitHub lists image
+  artifact `matrix-calendar-widget-images-37952560924-1` at 644,497,156 bytes
+  with artifact-bundle SHA-256
+  `sha256:3430df8d51e30e34d6d0be4c8ce7c24da3d56a0549b01add8d6e19db72badf3d`;
+  the companion provenance artifact is
+  `matrix-calendar-widget-provenance-37952560924-1`. The 2,162-byte provenance
+  ZIP was authenticated against its GitHub REST artifact digest
+  `sha256:4f0514733ef0e2e388e7bc0057d6a550eba58dbcd6842e795d1d5c940ee3a70e`;
+  its schema/source/tree/tooling/recipe/base and seven-notice checks passed.
+  Independent artifact review cleared at the trusted GitHub runner boundary.
+  The 644,497,156-byte image ZIP was not downloaded locally, so local
+  verification of the full ZIP is not claimed. Both artifacts are listed with
+  a seven-day expiry of 2026-10-16. Target-specific operator comparison,
+  deployment and recovery validation, and private operator readiness remain
+  open; see the [M8 image archive task](./PLAN.md#m8--hardening-and-release).
 
 ## Documentation note
 
