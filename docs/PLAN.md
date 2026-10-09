@@ -511,6 +511,13 @@ access and event writes stay disabled by default.
       boundaries, not a live etke-host deployment or recovery validation.
   - [x] Document the current Docker build/runtime contracts and the generic operator-run etke/MDAD compatibility boundary.
   - [x] Add non-publishing CI image-build smoke checks with fork-owned local tags; PR #102 run 36316604092 passed both image build steps at `0da7f3345e603e808231a24cc2ed6d979bea987a` without publishing.
+- [ ] Generate a short-lived, source-bound image archive for the exact accepted
+      candidate from the trusted `main` workflow. The generic `linux/amd64`
+      archive covers the server, widget, and project-owned Radicale images and
+      must verify source/workflow identity, resolved base digests, image IDs,
+      platform, and archive hashes before use. No hosted archive has been
+      generated yet; target-specific operator comparison and deployment remain
+      separate gates.
 - [x] Document upgrade/migration, schema compatibility, and safe rollback for
       the project-owned stack; live operator rehearsal remains unverified.
 - [ ] Record exact Element Web and Desktop versions and results for the beta
