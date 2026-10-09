@@ -511,13 +511,36 @@ access and event writes stay disabled by default.
       boundaries, not a live etke-host deployment or recovery validation.
   - [x] Document the current Docker build/runtime contracts and the generic operator-run etke/MDAD compatibility boundary.
   - [x] Add non-publishing CI image-build smoke checks with fork-owned local tags; PR #102 run 36316604092 passed both image build steps at `0da7f3345e603e808231a24cc2ed6d979bea987a` without publishing.
-- [ ] Generate a short-lived, source-bound image archive for the exact accepted
-      candidate from the trusted `main` workflow. The generic `linux/amd64`
-      archive covers the server, widget, and project-owned Radicale images and
-      must verify source/workflow identity, resolved base digests, image IDs,
-      platform, archive hashes, and the fixed source-derived license and notice
-      bundle before use. No hosted archive has been generated yet; target-specific
-      operator comparison and deployment remain separate gates.
+- [x] Generate and verify a short-lived, source-bound image archive for the
+      exact accepted candidate with the trusted `main` workflow. Hosted run
+      [37952560924](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37952560924)
+      completed successfully on workflow head
+      `0df38a81a0dccfd3e241b3011ec89f5593fd9e1c`, bound to accepted source
+      `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378` and tree
+      `660718db2d23a85ac688b7f194a8a66a2c8e201f`. Its schema-v2 manifest
+      records the generic `linux/amd64` platform, all three image IDs and
+      Buildx digests, immutable base digests, archive hashes, and the seven
+      fixed source-derived notices. The manifest SHA-256 is
+      `92231b19984afc13b81a03e5877264fcd86f1a7f0edbda46c5573619710a5660`.
+      The workflow SHA-256 is
+      `0676dc861a4215f6bdb378b3a3a6e60ecdda4760fec180e0cb6ae779827437f9`;
+      the validator-helper SHA-256 is
+      `28364e957804fee8b85e419d6f75d7a137e750c5f48439e85569315a4d3b855a`.
+      The image artifact `matrix-calendar-widget-images-37952560924-1` is
+      644,497,156 bytes; GitHub reports artifact-bundle SHA-256
+      `sha256:3430df8d51e30e34d6d0be4c8ce7c24da3d56a0549b01add8d6e19db72badf3d`.
+      The provenance artifact is
+      `matrix-calendar-widget-provenance-37952560924-1`. Image and provenance
+      uploads, hosted manifest creation/verification, builder cleanup, and the
+      public run summary succeeded. The 2,162-byte provenance ZIP matched
+      GitHub's REST artifact digest
+      `sha256:4f0514733ef0e2e388e7bc0057d6a550eba58dbcd6842e795d1d5c940ee3a70e`;
+      its schema, source/tree/tooling, recipe/base, and seven-notice checks
+      passed. Independent artifact review cleared at the trusted GitHub runner
+      boundary. The 644,497,156-byte full image ZIP was not downloaded locally,
+      so no local full-ZIP verification is claimed. These artifacts expire
+      2026-10-16. Target-specific operator comparison, deployment, and private
+      operator readiness remain separate open gates.
 - [x] Document upgrade/migration, schema compatibility, and safe rollback for
       the project-owned stack; live operator rehearsal remains unverified.
 - [ ] Record exact Element Web and Desktop versions and results for the beta
