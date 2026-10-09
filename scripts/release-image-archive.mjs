@@ -18,6 +18,9 @@ export const SUPPORTED_PLATFORM = 'linux/amd64';
 export const REPOSITORY = '0cwa/matrix-calendar-widget';
 export const WORKFLOW_PATH = '.github/workflows/release-image-archive.yml';
 export const HELPER_PATH = 'scripts/release-image-archive.mjs';
+export const MAX_MANIFEST_BYTES = 64 * 1024;
+export const MAX_IMAGE_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024;
+export const MAX_TOTAL_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024;
 
 const GIT_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -238,27 +241,55 @@ export async function prepareBuild({
   );
 }
 
-async function archiveRecord(root, relative) {
-  const file = childPath(root, relative, 'Archive path');
-  const resolvedRoot = await realpath(root);
-  const resolvedFile = await realpath(file);
-  if (!resolvedFile.startsWith(`${resolvedRoot}${path.sep}`))
-    fail(`Archive ${relative} resolves outside the artifact.`);
-  const info = await lstat(file);
-  if (
-    !info.isFile() ||
-    info.isSymbolicLink() ||
-    !Number.isSafeInteger(info.size) ||
-    info.size < 1
-  ) {
-    fail(`Archive ${relative} must be a non-empty regular file.`);
+function validateArchiveSizes(archives) {
+  let total = 0;
+  for (const { name, bytes } of archives) {
+    if (!Number.isSafeInteger(bytes) || bytes < 1)
+      fail(`${name} archive must be a non-empty regular file.`);
+    if (bytes > MAX_IMAGE_ARCHIVE_BYTES)
+      fail(`${name} archive exceeds the 2 GiB per-image limit.`);
+    total += bytes;
   }
-  return { path: relative, sha256: await sha256File(file), bytes: info.size };
+  if (total > MAX_TOTAL_ARCHIVE_BYTES)
+    fail('Image archives exceed the 4 GiB combined limit.');
+}
+
+async function archiveRecords(root) {
+  const rootInfo = await lstat(root);
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink())
+    fail('Artifact root must be a real directory.');
+  const resolvedRoot = await realpath(root);
+  const records = [];
+  for (const definition of images) {
+    const file = childPath(root, definition.archive, 'Archive path');
+    const resolvedFile = await realpath(file);
+    if (!resolvedFile.startsWith(`${resolvedRoot}${path.sep}`))
+      fail(`${definition.archive} resolves outside the artifact.`);
+    const info = await lstat(file);
+    if (!info.isFile() || info.isSymbolicLink())
+      fail(`${definition.archive} must be a non-empty regular file.`);
+    records.push({
+      name: definition.name,
+      file,
+      path: definition.archive,
+      bytes: info.size,
+    });
+  }
+  validateArchiveSizes(records);
+  const result = new Map();
+  for (const record of records) {
+    result.set(record.name, {
+      path: record.path,
+      sha256: await sha256File(record.file),
+      bytes: record.bytes,
+    });
+  }
+  return result;
 }
 
 async function imageRecord(
   definition,
-  { sourceRoot, buildRoot, archiveRoot, source, nodeBase, runTag },
+  { sourceRoot, buildRoot, source, nodeBase, runTag, archives },
 ) {
   const sourceDockerfile = await readFile(
     path.join(sourceRoot, definition.dockerfile),
@@ -337,7 +368,7 @@ async function imageRecord(
       transformation,
     },
     base_images: baseImages,
-    archive: await archiveRecord(archiveRoot, definition.archive),
+    archive: archives.get(definition.name),
   };
 }
 
@@ -357,6 +388,7 @@ export async function createManifest({
   if (git(toolingRoot, ['rev-parse', 'HEAD']).value !== context.workflowSha) {
     fail('Builder checkout does not match the trusted workflow SHA.');
   }
+  const archives = await archiveRecords(archiveRoot);
   const runTag = `archive-${context.runId}-${context.runAttempt}`;
   const builtImages = [];
   for (const definition of images) {
@@ -364,10 +396,10 @@ export async function createManifest({
       await imageRecord(definition, {
         sourceRoot,
         buildRoot,
-        archiveRoot,
         source,
         nodeBase: context.nodeBase,
         runTag,
+        archives,
       }),
     );
   }
@@ -394,10 +426,10 @@ export async function createManifest({
     images: builtImages,
   };
   validateManifest(manifest);
-  await writeNew(
-    path.join(archiveRoot, 'manifest.json'),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-  );
+  const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
+  if (Buffer.byteLength(manifestBytes) > MAX_MANIFEST_BYTES)
+    fail('Image archive manifest exceeds the 64 KiB limit.');
+  await writeNew(path.join(archiveRoot, 'manifest.json'), manifestBytes);
   return manifest;
 }
 
@@ -440,6 +472,7 @@ function validateManifest(manifest) {
     manifest.images.length !== images.length
   )
     fail('Manifest must contain all three project images.');
+  const archiveSizes = [];
   for (const definition of images) {
     const image = manifest.images.find(
       (entry) => entry.name === definition.name,
@@ -490,9 +523,9 @@ function validateManifest(manifest) {
       fail(`${definition.name} must use its exact source Dockerfile.`);
     }
     requireSha256(image.archive.sha256, `${definition.name} archive hash`);
-    if (!Number.isSafeInteger(image.archive.bytes) || image.archive.bytes < 1)
-      fail(`${definition.name} archive size is invalid.`);
+    archiveSizes.push({ name: definition.name, bytes: image.archive.bytes });
   }
+  validateArchiveSizes(archiveSizes);
 }
 
 export async function verifyArchive(
@@ -507,8 +540,11 @@ export async function verifyArchive(
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink())
     fail('Artifact root must be a real directory.');
   const manifestPath = childPath(archiveRoot, 'manifest.json', 'Manifest path');
-  if ((await lstat(manifestPath)).isSymbolicLink())
-    fail('Manifest cannot be a symbolic link.');
+  const manifestInfo = await lstat(manifestPath);
+  if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink())
+    fail('Manifest must be a regular file.');
+  if (manifestInfo.size > MAX_MANIFEST_BYTES)
+    fail('Image archive manifest exceeds the 64 KiB limit.');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   validateManifest(manifest);
   if (
@@ -530,6 +566,8 @@ export async function verifyArchive(
     'manifest.json',
     ...images.map((image) => image.archive),
   ]);
+  const archiveFiles = [];
+  let totalArchiveBytes = 0;
   for (const image of manifest.images) {
     const file = childPath(root, image.archive.path, 'Archive path');
     const resolved = await realpath(file);
@@ -542,8 +580,20 @@ export async function verifyArchive(
       info.size !== image.archive.bytes
     )
       fail(`${image.archive.path} has an invalid file type or size.`);
-    if ((await sha256File(file)) !== image.archive.sha256)
-      fail(`${image.archive.path} failed SHA-256 verification.`);
+    if (info.size > MAX_IMAGE_ARCHIVE_BYTES)
+      fail(`${image.name} archive exceeds the 2 GiB per-image limit.`);
+    totalArchiveBytes += info.size;
+    archiveFiles.push({
+      file,
+      path: image.archive.path,
+      sha256: image.archive.sha256,
+    });
+  }
+  if (totalArchiveBytes > MAX_TOTAL_ARCHIVE_BYTES)
+    fail('Image archives exceed the 4 GiB combined limit.');
+  for (const archive of archiveFiles) {
+    if ((await sha256File(archive.file)) !== archive.sha256)
+      fail(`${archive.path} failed SHA-256 verification.`);
   }
   async function inspect(directory, prefix = '') {
     for (const item of await readdir(directory, { withFileTypes: true })) {

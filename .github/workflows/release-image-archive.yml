@@ -186,24 +186,70 @@ jobs:
           retention-days: 7
           compression-level: 0
 
-      - name: Record the public artifact identity
+      - name: Upload the small per-run provenance manifest
+        id: provenance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: matrix-calendar-widget-provenance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-images/manifest.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+          compression-level: 6
+
+      - name: Record the public artifact identities and image provenance
         env:
-          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
-          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          IMAGE_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          IMAGE_ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          IMAGE_ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          PROVENANCE_ARTIFACT_ID: ${{ steps.provenance.outputs.artifact-id }}
+          PROVENANCE_ARTIFACT_DIGEST: ${{ steps.provenance.outputs.artifact-digest }}
+          PROVENANCE_ARTIFACT_URL: ${{ steps.provenance.outputs.artifact-url }}
         run: |
           set -euo pipefail
-          if [[ ! "$ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
-            echo 'GitHub did not return the uploaded artifact SHA-256 digest.' >&2
-            exit 1
-          fi
+          manifest="$ARCHIVE_ROOT/manifest.json"
+          manifest_sha256="$(sha256sum "$manifest" | awk '{ print $1 }')"
+          manifest_bytes="$(wc -c < "$manifest" | tr -d '[:space:]')"
+          [[ "$manifest_sha256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$manifest_bytes" =~ ^[0-9]+$ ]]
+          (( manifest_bytes > 0 && manifest_bytes <= 65536 ))
+          [[ "$IMAGE_ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          [[ "$PROVENANCE_ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          for digest in "$IMAGE_ARTIFACT_DIGEST" "$PROVENANCE_ARTIFACT_DIGEST"; do
+            if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+              echo 'GitHub did not return an uploaded artifact SHA-256 digest.' >&2
+              exit 1
+            fi
+          done
           {
             echo '## Source-bound image archive'
             echo
             echo "Source SHA: $RELEASE_SOURCE_SHA"
-            echo "Workflow SHA: $GITHUB_WORKFLOW_SHA"
+            echo "Workflow SHA: $RELEASE_WORKFLOW_SHA"
             echo "Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "Platform: $IMAGE_PLATFORM"
-            echo "Artifact: $ARTIFACT_URL"
-            echo "Artifact SHA-256: $ARTIFACT_DIGEST"
-            echo 'Retention: 7 days'
+            echo
+            echo '### Uploaded artifacts'
+            echo
+            echo '| Artifact | ID | SHA-256 | URL | Retention |'
+            echo '|---|---:|---|---|---:|'
+            echo "| Image archive | $IMAGE_ARTIFACT_ID | $IMAGE_ARTIFACT_DIGEST | $IMAGE_ARTIFACT_URL | 7 days |"
+            echo "| Provenance manifest | $PROVENANCE_ARTIFACT_ID | $PROVENANCE_ARTIFACT_DIGEST | $PROVENANCE_ARTIFACT_URL | 7 days |"
+            echo
+            echo "Manifest SHA-256: $manifest_sha256"
+            echo "Manifest bytes: $manifest_bytes"
+            echo
+            echo '### Image archive records'
+            echo
+            echo '| Image | Tag | Image ID | Buildx manifest digest | Archive bytes | Archive SHA-256 |'
+            echo '|---|---|---|---|---:|---|'
           } >> "$GITHUB_STEP_SUMMARY"
+          node - "$manifest" >> "$GITHUB_STEP_SUMMARY" <<'NODE'
+          const fs = require('node:fs');
+          const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          for (const image of manifest.images) {
+            process.stdout.write(
+              `| ${image.name} | ${image.tag} | ${image.image_id} | ${image.buildx_manifest_digest} | ${image.archive.bytes} | ${image.archive.sha256} |\n`,
+            );
+          }
+          NODE

@@ -25,6 +25,107 @@ docker build --build-context root=. -t matrix-calendar-widget/widget:local -f ma
 
 The widget context is `matrix-calendar-widget` so its Dockerfile can copy `dist`; the named `root` context supplies the root lockfile for the SBOM scan. Both CI image tags are local to the runner. CI does not log in to a registry, push images, or publish releases.
 
+## Source-bound image archive
+
+The manual [source-bound image archive workflow](../.github/workflows/release-image-archive.yml)
+builds the server, widget, and project-owned Radicale images for `linux/amd64`
+from an exact source commit already merged to `main`. The workflow itself and
+its verifier come from the trusted `main` workflow commit; it checks that the
+requested source is an ancestor of that commit. The checkout uses
+`persist-credentials: false`, and no GitHub token, deployment secret, private
+environment value, or host configuration is passed to the image build. The
+server and widget Docker contexts are allowlisted by `.dockerignore`; the
+Radicale Dockerfile copies only declared paths. Each run records the source and
+trusted workflow SHAs, resolved base-image digests, build recipe hashes, local
+image IDs, platform, and SHA-256 and byte size for each saved image. The
+workflow verifies all three saved archives before either upload. It uploads a
+full image archive and a second artifact containing the same manifest alone,
+so an operator can inspect the provenance without first downloading the
+images. Both artifacts are unique to the run and attempt and expire after seven
+days. The manifest is capped at 64 KiB, each image archive at 2 GiB, and all
+three archives together at 4 GiB. This produces inspectable, temporary build
+artifacts; it does not authorize publication or a live deployment, and its
+generic platform must match the operator's separately verified target.
+
+To create an archive, start **Source-bound image archive** from the protected
+`main` branch in GitHub Actions and enter the full lowercase 40-character SHA
+of the reviewed source commit. Use the run whose input matches that SHA. Before
+downloading, confirm the run succeeded and record its run ID, attempt, trusted
+workflow SHA, artifact IDs and SHA-256 digests, and manifest SHA-256 from the
+run summary. Each artifact name includes both the run ID and attempt; do not
+select an artifact from a different or newer run.
+
+The same dispatch can be started from GitHub CLI:
+
+```bash
+gh workflow run release-image-archive.yml --ref main -f source_sha="$SOURCE_SHA"
+```
+
+First download only the small provenance artifact with GitHub CLI, setting
+`RUN_ID`, `RUN_ATTEMPT`, `SOURCE_SHA`, and `PROVENANCE_DIR` to the recorded
+values. Choose a new empty absolute path for `PROVENANCE_DIR`:
+
+```bash
+mkdir -p "$PROVENANCE_DIR"
+gh run download "$RUN_ID" \
+  --name "matrix-calendar-widget-provenance-${RUN_ID}-${RUN_ATTEMPT}" \
+  --dir "$PROVENANCE_DIR"
+sha256sum "$PROVENANCE_DIR/manifest.json"
+```
+
+Compare the printed manifest hash with the `Manifest SHA-256` in the run
+summary, then inspect the JSON's `source.sha`, `workflow.sha`, `workflow.run_id`,
+`workflow.run_attempt`, `platform`, and each image's `image_id`,
+`buildx_manifest_digest`, and `archive` size and SHA-256. The manifest-only
+artifact supports this provenance review without downloading image bytes; it
+does not verify the image archives on the receiving machine.
+
+When ready for full archive verification and image loading, choose a new empty
+absolute path for `ARCHIVE_DIR` and download the exact image artifact:
+
+```bash
+mkdir -p "$ARCHIVE_DIR"
+gh run download "$RUN_ID" \
+  --name "matrix-calendar-widget-images-${RUN_ID}-${RUN_ATTEMPT}" \
+  --dir "$ARCHIVE_DIR"
+WORKFLOW_SHA="$(node -e 'const fs = require("node:fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).workflow.sha)' "$ARCHIVE_DIR/manifest.json")"
+[[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+git worktree add --detach "../matrix-calendar-widget-archive-verifier-$RUN_ID" "$WORKFLOW_SHA"
+node "../matrix-calendar-widget-archive-verifier-$RUN_ID/scripts/release-image-archive.mjs" verify \
+  --archive-root "$ARCHIVE_DIR" \
+  --expected-source-sha "$SOURCE_SHA" \
+  --platform linux/amd64
+```
+
+The verifier must be checked out at the workflow SHA recorded in the manifest.
+It checks the trusted workflow file and verifier hashes, expected source and
+platform, the manifest-and-three-archive inventory, archive sizes, and each
+saved-image SHA-256. Compare the manifest's workflow SHA and run identity with
+the Actions run you selected. The manifest's `buildx_manifest_digest` is the Buildx build
+manifest digest; `image_id` is the ID of the image loaded by the runner. They
+identify different objects and must not be treated as interchangeable. The
+image artifact SHA-256 in the run summary identifies the uploaded GitHub
+artifact; the verifier checks the hashes of the extracted image archives.
+
+After verification, load the three archives and inspect the loaded IDs against
+the corresponding `image_id` entries in `manifest.json`:
+
+```bash
+docker image load --input "$ARCHIVE_DIR/images/server-linux-amd64.tar"
+docker image load --input "$ARCHIVE_DIR/images/widget-linux-amd64.tar"
+docker image load --input "$ARCHIVE_DIR/images/radicale-linux-amd64.tar"
+docker image inspect --format '{{.Id}}' "matrix-calendar-widget/server:archive-${RUN_ID}-${RUN_ATTEMPT}"
+docker image inspect --format '{{.Id}}' "matrix-calendar-widget/widget:archive-${RUN_ID}-${RUN_ATTEMPT}"
+docker image inspect --format '{{.Id}}' "matrix-calendar-widget/radicale-openid:archive-${RUN_ID}-${RUN_ATTEMPT}"
+```
+
+Use only the run-scoped tags after the IDs match; update an operator-managed
+Compose override to those exact tags rather than `:local` or a floating tag.
+Keep the manifest and run identity with the deployment record. Complete the
+operator-specific configuration, network, persistence, backup, recovery, and
+rollback preflight below before any deployment. The archive workflow does not
+perform that preflight or verify a live target.
+
 ## Runtime behavior in the current Dockerfiles
 
 The server image uses Node 22 on Debian Bookworm slim, sets `NODE_ENV=production`, and runs `node ./lib/src/index.js` as UID 101. It copies the compiled server and calendar package, configuration files, and a Trivy-generated SBOM. It creates `/app/storage` and grants group write access to that directory. The Dockerfile does not declare a port, health check, or volume; deployments must determine the needed network access and persist any configured storage path themselves. The server reads its runtime configuration from environment variables in `matrix-calendar-server/src/configuration.ts`.

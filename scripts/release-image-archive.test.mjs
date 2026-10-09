@@ -1,12 +1,22 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  truncate,
+  writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
   deriveServerDockerfile,
+  MAX_IMAGE_ARCHIVE_BYTES,
+  MAX_MANIFEST_BYTES,
+  MAX_TOTAL_ARCHIVE_BYTES,
   validatePlatform,
   verifyArchive,
   verifyGitSource,
@@ -193,6 +203,13 @@ test('archive verification binds source/platform and checks every archive hash',
       /platform/,
     );
 
+    await writeFile(manifestPath, ' '.repeat(MAX_MANIFEST_BYTES + 1));
+    await assert.rejects(
+      verifyArchive(root),
+      /manifest exceeds the 64 KiB limit/,
+    );
+    await writeFile(manifestPath, originalManifest);
+
     const unsafeManifest = JSON.parse(originalManifest);
     unsafeManifest.images[0].archive.path = '../../outside.tar';
     await writeFile(manifestPath, JSON.stringify(unsafeManifest));
@@ -206,6 +223,29 @@ test('archive verification binds source/platform and checks every archive hash',
     await assert.rejects(verifyArchive(root), /unexpected file/);
     await rm(path.join(root, 'extra-output.txt'));
 
+    const oversizedManifest = JSON.parse(originalManifest);
+    const oversizedImage = oversizedManifest.images[0];
+    oversizedImage.archive.bytes = MAX_IMAGE_ARCHIVE_BYTES + 1;
+    await truncate(
+      path.join(root, oversizedImage.archive.path),
+      oversizedImage.archive.bytes,
+    );
+    await writeFile(manifestPath, JSON.stringify(oversizedManifest));
+    await assert.rejects(verifyArchive(root), /2 GiB per-image limit/);
+    await restoreSmallArchives(root);
+    await writeFile(manifestPath, originalManifest);
+
+    const aggregateManifest = JSON.parse(originalManifest);
+    const archiveBytes = Math.floor(MAX_TOTAL_ARCHIVE_BYTES / 3) + 1;
+    for (const image of aggregateManifest.images) {
+      image.archive.bytes = archiveBytes;
+      await truncate(path.join(root, image.archive.path), archiveBytes);
+    }
+    await writeFile(manifestPath, JSON.stringify(aggregateManifest));
+    await assert.rejects(verifyArchive(root), /4 GiB combined limit/);
+    await restoreSmallArchives(root);
+    await writeFile(manifestPath, originalManifest);
+
     const archivePath = path.join(root, 'images/server-linux-amd64.tar');
     const tampered = Buffer.from(`synthetic image archive server\n`);
     tampered[0] ^= 1;
@@ -215,3 +255,12 @@ test('archive verification binds source/platform and checks every archive hash',
     await rm(root, { recursive: true, force: true });
   }
 });
+
+async function restoreSmallArchives(root) {
+  for (const name of ['server', 'widget', 'radicale']) {
+    const archive = path.join(root, `images/${name}-linux-amd64.tar`);
+    const contents = `synthetic image archive ${name}\n`;
+    await writeFile(archive, contents);
+    await truncate(archive, Buffer.byteLength(contents));
+  }
+}
