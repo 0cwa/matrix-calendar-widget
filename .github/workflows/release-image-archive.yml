@@ -113,6 +113,35 @@ jobs:
           yarn workspace @matrix-calendar-widget/server build
           yarn workspace @matrix-calendar-widget/widget build
 
+      - name: Set up the isolated image builder
+        id: buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        with:
+          name: matrix-calendar-widget-release-${{ github.run_id }}-${{ github.run_attempt }}
+          driver: docker-container
+          version: v0.37.2
+          use: true
+          keep-state: false
+          cleanup: true
+
+      - name: Validate and select the isolated image builder
+        shell: bash
+        env:
+          IMAGE_BUILDER_NAME: ${{ steps.buildx.outputs.name }}
+          IMAGE_BUILDER_DRIVER: ${{ steps.buildx.outputs.driver }}
+        run: |
+          set -euo pipefail
+          expected_builder_name="matrix-calendar-widget-release-${RELEASE_RUN_ID}-${RELEASE_RUN_ATTEMPT}"
+          if [[ -z "${IMAGE_BUILDER_NAME:-}" || "$IMAGE_BUILDER_NAME" != "$expected_builder_name" ]]; then
+            echo 'The image builder name did not match this workflow attempt.' >&2
+            exit 1
+          fi
+          if [[ -z "${IMAGE_BUILDER_DRIVER:-}" || "$IMAGE_BUILDER_DRIVER" != 'docker-container' ]]; then
+            echo 'The image builder did not report the required docker-container driver.' >&2
+            exit 1
+          fi
+          printf 'IMAGE_BUILDER_NAME=%s\n' "$IMAGE_BUILDER_NAME" >> "$GITHUB_ENV"
+
       - name: Build and test the server image
         working-directory: source
         shell: bash
@@ -120,6 +149,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$BUILD_ROOT" "$ARCHIVE_ROOT/images"
           docker buildx build \
+            --builder "$IMAGE_BUILDER_NAME" \
             --platform "$IMAGE_PLATFORM" \
             --tag "matrix-calendar-widget/server:$RUN_TAG" \
             --metadata-file "$BUILD_ROOT/server.json" \
@@ -143,15 +173,18 @@ jobs:
 
       - name: Build the widget image
         working-directory: source
-        run: >-
-          docker buildx build
-          --platform "$IMAGE_PLATFORM"
-          --build-context root=.
-          --tag "matrix-calendar-widget/widget:$RUN_TAG"
-          --metadata-file "$BUILD_ROOT/widget.json"
-          --load
-          --file matrix-calendar-widget/Dockerfile
-          matrix-calendar-widget
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --builder "$IMAGE_BUILDER_NAME" \
+            --platform "$IMAGE_PLATFORM" \
+            --build-context root=. \
+            --tag "matrix-calendar-widget/widget:$RUN_TAG" \
+            --metadata-file "$BUILD_ROOT/widget.json" \
+            --load \
+            --file matrix-calendar-widget/Dockerfile \
+            matrix-calendar-widget
 
       - name: Save the widget image
         working-directory: source
@@ -161,11 +194,15 @@ jobs:
 
       - name: Test and build the project-owned Radicale image
         working-directory: source
+        shell: bash
         run: |
+          set -euo pipefail
           docker buildx build --platform "$IMAGE_PLATFORM" --target test \
+            --builder "$IMAGE_BUILDER_NAME" \
             --tag "matrix-calendar-widget/radicale-openid:test-$RUN_TAG" \
             --load --file radicale-auth/Dockerfile radicale-auth
           docker buildx build --platform "$IMAGE_PLATFORM" --target runtime \
+            --builder "$IMAGE_BUILDER_NAME" \
             --tag "matrix-calendar-widget/radicale-openid:$RUN_TAG" \
             --metadata-file "$BUILD_ROOT/radicale.json" \
             --load --file radicale-auth/Dockerfile radicale-auth
