@@ -217,14 +217,20 @@ function validateContext(context) {
     fail('GitHub server URL must be an HTTPS origin.');
 }
 
-function imageBaseRefs(text, name) {
+export function imageBaseRefs(text, name) {
   const refs = [];
+  const stageAliases = new Set();
   for (const line of text.split(/\r?\n/)) {
     if (!/^\s*FROM\s/i.test(line)) continue;
-    const match = line.trim().match(/^FROM\s+(\S+)(?:\s+AS\s+\S+)?\s*$/i);
-    if (!match || !BASE_REF.test(match[1]))
-      fail(`${name} has an unresolved or unpinned base image.`);
-    if (!refs.includes(match[1])) refs.push(match[1]);
+    const match = line.trim().match(/^FROM\s+(\S+)(?:\s+AS\s+(\S+))?\s*$/i);
+    if (!match) fail(`${name} has an unresolved or unpinned base image.`);
+    const [, base, stageAlias] = match;
+    if (!stageAliases.has(base)) {
+      if (!BASE_REF.test(base))
+        fail(`${name} has an unresolved or unpinned base image.`);
+      if (!refs.includes(base)) refs.push(base);
+    }
+    if (stageAlias) stageAliases.add(stageAlias);
   }
   if (refs.length === 0) fail(`${name} has no base image.`);
   return refs;

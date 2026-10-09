@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import {
   createManifest,
   deriveServerDockerfile,
+  imageBaseRefs,
   MAX_IMAGE_ARCHIVE_BYTES,
   MAX_MANIFEST_BYTES,
   MAX_NOTICE_FILE_BYTES,
@@ -124,6 +125,42 @@ test('server recipe changes only its two mutable Node base lines', () => {
   assert.throws(
     () => deriveServerDockerfile('FROM node:22-bookworm-slim\n', nodeBase),
     /exactly two/,
+  );
+});
+
+test('base image validation accepts only declared prior Dockerfile stages', async () => {
+  const projectRoot = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..',
+  );
+  const radicaleDockerfile = await readFile(
+    path.join(projectRoot, 'radicale-auth/Dockerfile'),
+    'utf8',
+  );
+  const radicaleBase = radicaleDockerfile.match(
+    /^FROM\s+(\S+)\s+AS\s+runtime-base$/im,
+  )?.[1];
+  assert.ok(radicaleBase);
+  assert.match(radicaleBase, /^\S+@sha256:[0-9a-f]{64}$/);
+  assert.deepEqual(imageBaseRefs(radicaleDockerfile, 'radicale'), [
+    radicaleBase,
+  ]);
+
+  assert.throws(
+    () =>
+      imageBaseRefs(
+        `${radicaleDockerfile}\nFROM missing-base AS invalid\n`,
+        'radicale',
+      ),
+    /radicale has an unresolved or unpinned base image/,
+  );
+  assert.throws(
+    () =>
+      imageBaseRefs(
+        'FROM ghcr.io/example/radicale:3 AS runtime-base',
+        'radicale',
+      ),
+    /radicale has an unresolved or unpinned base image/,
   );
 });
 
