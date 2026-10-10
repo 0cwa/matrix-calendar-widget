@@ -2073,6 +2073,115 @@ test('emits only fixed Radicale readiness state after an unanswered probe', () =
   );
 });
 
+test('keeps widget-only restore readiness distinct from Element readiness', () => {
+  const summary = sanitizeElementAcceptance(
+    [
+      { phase: 'restore-widget-ready', status: 'started' },
+      {
+        phase: 'restore-widget-ready',
+        status: 'passed',
+        count: 1,
+        httpStatus: 200,
+      },
+      { phase: 'restore-element-ready', status: 'started' },
+      {
+        phase: 'restore-element-ready',
+        status: 'passed',
+        count: 2,
+        httpStatus: 200,
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n'),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=restore-widget-ready status=passed http_status=200 count=1',
+      'phase=restore-element-ready status=passed http_status=200 count=2',
+      '',
+    ].join('\n'),
+  );
+
+  const invalidRecords = [
+    [
+      { phase: 'restore-element-ready', status: 'started' },
+      {
+        phase: 'restore-element-ready',
+        status: 'passed',
+        count: 1,
+        httpStatus: 200,
+      },
+    ],
+    [
+      { phase: 'restore-widget-ready', status: 'started' },
+      {
+        phase: 'restore-widget-ready',
+        status: 'passed',
+        count: 2,
+        httpStatus: 200,
+      },
+    ],
+    [
+      { phase: 'restore-widget-ready', status: 'started' },
+      {
+        phase: 'restore-widget-ready',
+        status: 'passed',
+        count: 1,
+        httpStatus: 503,
+      },
+    ],
+    [
+      { phase: 'restore-widget-ready', status: 'started' },
+      {
+        phase: 'restore-widget-ready',
+        status: 'passed',
+        count: 1,
+        httpStatus: 200,
+        elementSkipped: true,
+      },
+    ],
+    [
+      {
+        phase: 'restore-widget-ready',
+        status: 'passed',
+        count: 1,
+        httpStatus: 200,
+      },
+    ],
+  ];
+
+  for (const records of invalidRecords) {
+    assert.throws(() =>
+      sanitizeElementAcceptance(
+        records.map((record) => JSON.stringify(record)).join('\n'),
+        sourceSha,
+      ),
+    );
+  }
+
+  const failedSummary = sanitizeElementAcceptance(
+    [
+      { phase: 'restore-widget-ready', status: 'started' },
+      {
+        phase: 'restore-widget-ready',
+        status: 'failed',
+        processExitCode: 1,
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n'),
+    sourceSha,
+  );
+  assert.equal(
+    failedSummary,
+    `element-acceptance source_sha=${sourceSha}\nphase=restore-widget-ready status=failed process_exit_code=1\n`,
+  );
+});
+
 test('classifies only fixed Radicale startup signatures and sanitizes the evidence', () => {
   const rawLog =
     'An exception occurred during server startup: Radicale OpenID homeserver URL is invalid; token=private-value';

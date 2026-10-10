@@ -25,7 +25,7 @@ const MAX_COMPOSE_OVERRIDE_JSON_LENGTH = 32 * 1024;
 const MAX_COMPOSE_OVERRIDE_PATH_LENGTH = 4096;
 const MAX_RADICALE_IMAGE_LENGTH = 255;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
-const IMAGE_NAME_COMPONENT = '[a-z0-9]+(?:[._-][a-z0-9]+)*';
+const IMAGE_NAME_COMPONENT = '[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*';
 const IMAGE_REFERENCE = new RegExp(
   `^(?:(?:[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)(?::[0-9]{1,5})?\\/)?${IMAGE_NAME_COMPONENT}(?:\\/${IMAGE_NAME_COMPONENT})*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@sha256:[a-f0-9]{64})?$`,
   'u',
@@ -122,8 +122,5 @@ export function loadElementAcceptanceOverrides(environment, rootDirectory) {
 }
 
 export function appendComposeOverrideFiles(baseArguments, composeFiles) {
-  return [
-    ...baseArguments,
-    ...composeFiles.flatMap((file) => ['-f', file]),
-  ];
+  return [...baseArguments, ...composeFiles.flatMap((file) => ['-f', file])];
 }

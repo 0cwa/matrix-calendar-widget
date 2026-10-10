@@ -141,6 +141,7 @@ const PHASES = new Set([
   'restore-postgres-role-ready',
   'restore-gateway-ready',
   'restore-element-ready',
+  'restore-widget-ready',
   'restore-delivery-row',
 ]);
 const RESTORE_TARGET_STEPS = new Set([
@@ -1662,23 +1663,26 @@ async function restoreStores() {
       ),
     };
   });
-  await withStage('restore-element-ready', async () => {
-    if (ACCEPTANCE_OVERRIDES.skipElement) {
+  if (ACCEPTANCE_OVERRIDES.skipElement) {
+    await withStage('restore-widget-ready', async () => {
       requireSuccess(
         compose(['up', '--no-build', '-d', 'widget']),
-        'restore-element-ready',
+        'restore-widget-ready',
       );
       const widgetStatus = await waitForHttp(
         'http://127.0.0.1:8080/',
         (status) => status === 200,
-        'restore-element-ready',
+        'restore-widget-ready',
       );
       return {
         count: widgetStatus === 200 ? 1 : 0,
         httpStatus: widgetStatus,
-        elementSkipped: true,
       };
-    }
+    });
+    return;
+  }
+
+  await withStage('restore-element-ready', async () => {
     requireSuccess(
       compose(['up', '--no-build', '-d', 'widget', 'element']),
       'restore-element-ready',
