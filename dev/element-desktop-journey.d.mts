@@ -43,6 +43,25 @@ export type WebMemberBEditSaveFailurePoint =
   | 'web-b-edit-details-close-hidden'
   | 'web-b-edit-event-row';
 
+export type DesktopARefreshFailurePoint =
+  | 'desktop-refresh-widget-frame'
+  | 'desktop-refresh-gateway-read'
+  | 'desktop-refresh-page-reload'
+  | 'desktop-refresh-rooms-list'
+  | 'desktop-refresh-room-navigation'
+  | 'desktop-refresh-room-id'
+  | 'desktop-refresh-widget-open'
+  | 'desktop-refresh-gateway-response'
+  | 'desktop-refresh-gateway-status'
+  | 'desktop-refresh-iframe-attached'
+  | 'desktop-refresh-event-row';
+
+export type DesktopJourneyErrorClass =
+  | 'timeout'
+  | 'assertion'
+  | 'runtime'
+  | 'unknown';
+
 export type DesktopEventCreateFailurePoint =
   | 'event-create-setup'
   | 'event-create-control-click'
@@ -59,7 +78,8 @@ export type DesktopJourneyFailurePoint =
   | 'origin-isolation'
   | DesktopEventCreateFailurePoint
   | WebMemberBReadFailurePoint
-  | WebMemberBEditSaveFailurePoint;
+  | WebMemberBEditSaveFailurePoint
+  | DesktopARefreshFailurePoint;
 
 export type DesktopJourneyFailurePointObservation =
   | {
@@ -81,7 +101,8 @@ export type DesktopJourneyFailurePointObservation =
   | {
       phase: 'web-member-b-edit-save';
       point: WebMemberBEditSaveFailurePoint;
-    };
+    }
+  | { phase: 'desktop-a-refresh'; point: DesktopARefreshFailurePoint };
 
 export type WebBEditSaveFailureDiagnostic = {
   matchedPatchStatus: number | null;
@@ -260,8 +281,23 @@ export type ReadOnlyWidgetReadinessObservation = {
   capabilityPromptVisible: boolean | null;
 };
 
+export type DesktopJourneyFailureObservation =
+  | {
+      kind: 'caught-error';
+      phase: 'desktop-a-refresh';
+      failurePoint: DesktopARefreshFailurePoint;
+      errorClass: DesktopJourneyErrorClass;
+    }
+  | {
+      kind: 'unexpected-child-exit';
+      phase: 'desktop-a-refresh';
+      failurePoint: DesktopARefreshFailurePoint | null;
+      errorClass: null;
+    }
+  | null;
+
 export type DesktopJourneySummary = {
-  schemaVersion: 10;
+  schemaVersion: 11;
   sourceSha: string | null;
   status: 'passed' | 'failed' | 'incomplete';
   desktopChildCompletion: DesktopChildCompletion;
@@ -271,6 +307,7 @@ export type DesktopJourneySummary = {
   loginDiagnostic: DesktopLoginDiagnostic | null;
   roomsReadyDiagnostic: DesktopRoomsReadyDiagnostic | null;
   failurePoint: DesktopJourneyFailurePointObservation | null;
+  failureObservation: DesktopJourneyFailureObservation;
   gatewayReadDiagnostic: DesktopGatewayReadFailureDiagnostic | null;
   roomNavigationDiagnostic: DesktopRoomNavigationDiagnostic | null;
   desktopEventCreateDiagnostic: DesktopEventCreateFailureDiagnostic | null;
@@ -292,10 +329,16 @@ export type DesktopPlaywrightResult =
   | 'unknown';
 
 export declare const DESKTOP_JOURNEY_PHASES: readonly DesktopJourneyPhase[];
+export declare const DESKTOP_A_REFRESH_FAILURE_POINTS: readonly DesktopARefreshFailurePoint[];
 export declare const DESKTOP_JOURNEY_FAILURE_POINTS: readonly DesktopJourneyFailurePoint[];
+export declare const DESKTOP_JOURNEY_ERROR_CLASSES: readonly DesktopJourneyErrorClass[];
 export declare const DESKTOP_LOGIN_STEPS: readonly DesktopLoginStep[];
 export declare const DESKTOP_LOGIN_FAILURE_REASONS: readonly DesktopLoginFailureReason[];
 export declare const DESKTOP_LOGIN_ENTRIES: readonly DesktopLoginEntry[];
+
+export declare function classifyDesktopJourneyErrorClass(
+  error: unknown,
+): DesktopJourneyErrorClass;
 
 export declare function classifyDesktopLoginFailure(
   error: unknown,
@@ -384,6 +427,15 @@ export declare function initializeDesktopJourneyEvidence(input: {
   runnerTemp: string;
 }): void;
 
+export declare function appendDesktopJourneyProgress(input: {
+  filePath: string;
+  runnerTemp: string;
+  sourceSha: string;
+  event: 'begin' | 'point' | 'complete';
+  phase: 'desktop-a-refresh';
+  failurePoint?: DesktopARefreshFailurePoint;
+}): boolean;
+
 export declare function appendDesktopJourneyOutcome(input: {
   filePath: string;
   runnerTemp: string;
@@ -394,6 +446,7 @@ export declare function appendDesktopJourneyOutcome(input: {
   roomNavigationDiagnostic?: DesktopRoomNavigationDiagnostic;
   desktopEventCreateDiagnostic?: DesktopEventCreateFailureDiagnostic;
   webBEditSaveDiagnostic?: WebBEditSaveFailureDiagnostic;
+  errorClass?: DesktopJourneyErrorClass;
 }): void;
 
 export declare function appendDesktopLoginStep(input: {

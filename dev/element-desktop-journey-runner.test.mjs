@@ -32,9 +32,11 @@ import {
   validateJourneyPolicyPorts,
 } from './element-desktop-journey-runner.mjs';
 import {
+  DESKTOP_A_REFRESH_FAILURE_POINTS,
   DESKTOP_JOURNEY_PHASES,
   appendDesktopChildCompletion,
   appendDesktopJourneyOutcome,
+  appendDesktopJourneyProgress,
   appendDesktopPlaywrightResult,
   initializeDesktopJourneyEvidence,
   readDesktopJourneyEvidence,
@@ -52,8 +54,11 @@ function withJourneyTempDirectory(run) {
   }
 }
 
-function appendPassingJourneyPhases(filePath, runnerTemp) {
-  for (const phase of DESKTOP_JOURNEY_PHASES) {
+function appendPreRefreshJourneyPhases(filePath, runnerTemp) {
+  for (const phase of DESKTOP_JOURNEY_PHASES.slice(
+    0,
+    DESKTOP_JOURNEY_PHASES.indexOf('desktop-a-refresh'),
+  )) {
     appendDesktopJourneyOutcome({
       filePath,
       runnerTemp,
@@ -69,6 +74,45 @@ function appendPassingJourneyPhases(filePath, runnerTemp) {
     })}\n`,
     { flag: 'a', mode: 0o600 },
   );
+}
+
+function appendPassingJourneyPhases(filePath, runnerTemp) {
+  appendPreRefreshJourneyPhases(filePath, runnerTemp);
+  appendDesktopJourneyProgress({
+    filePath,
+    runnerTemp,
+    sourceSha: JOURNEY_SOURCE_SHA,
+    event: 'begin',
+    phase: 'desktop-a-refresh',
+  });
+  for (const failurePoint of DESKTOP_A_REFRESH_FAILURE_POINTS) {
+    appendDesktopJourneyProgress({
+      filePath,
+      runnerTemp,
+      sourceSha: JOURNEY_SOURCE_SHA,
+      event: 'point',
+      phase: 'desktop-a-refresh',
+      failurePoint,
+    });
+    appendDesktopJourneyProgress({
+      filePath,
+      runnerTemp,
+      sourceSha: JOURNEY_SOURCE_SHA,
+      event: 'complete',
+      phase: 'desktop-a-refresh',
+      failurePoint,
+    });
+  }
+  for (const phase of DESKTOP_JOURNEY_PHASES.slice(
+    DESKTOP_JOURNEY_PHASES.indexOf('desktop-a-refresh'),
+  )) {
+    appendDesktopJourneyOutcome({
+      filePath,
+      runnerTemp,
+      phase,
+      status: 'passed',
+    });
+  }
 }
 
 function observedUidCensus(uidProcessCount) {
@@ -338,6 +382,94 @@ test('keeps the Desktop child timeout and nonzero failure gate unchanged', () =>
     assert.doesNotMatch(
       JSON.stringify(unknown),
       /private thrown spawn detail/u,
+    );
+  });
+});
+
+test('reports an uncaught Desktop refresh child exit at its last finite step', () => {
+  withJourneyTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    const config = {
+      runnerTemp,
+      workspace: runnerTemp,
+      journeyStageFile: filePath,
+      playwrightOutput: join(runnerTemp, 'playwright-output'),
+      usersFile: join(runnerTemp, 'users.json'),
+      credentialsFile: join(runnerTemp, 'credentials.json'),
+    };
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendPreRefreshJourneyPhases(filePath, runnerTemp);
+    const lastObservedPoint = DESKTOP_A_REFRESH_FAILURE_POINTS[2];
+
+    assert.throws(
+      () =>
+        runDesktopCalendarJourney(
+          config,
+          { sourceSha: JOURNEY_SOURCE_SHA, cdpPort: 42_424 },
+          () => {
+            appendDesktopJourneyProgress({
+              filePath,
+              runnerTemp,
+              sourceSha: JOURNEY_SOURCE_SHA,
+              event: 'begin',
+              phase: 'desktop-a-refresh',
+            });
+            for (const failurePoint of DESKTOP_A_REFRESH_FAILURE_POINTS.slice(
+              0,
+              3,
+            )) {
+              appendDesktopJourneyProgress({
+                filePath,
+                runnerTemp,
+                sourceSha: JOURNEY_SOURCE_SHA,
+                event: 'point',
+                phase: 'desktop-a-refresh',
+                failurePoint,
+              });
+              if (failurePoint !== lastObservedPoint) {
+                appendDesktopJourneyProgress({
+                  filePath,
+                  runnerTemp,
+                  sourceSha: JOURNEY_SOURCE_SHA,
+                  event: 'complete',
+                  phase: 'desktop-a-refresh',
+                  failurePoint,
+                });
+              }
+            }
+            appendDesktopPlaywrightResult({
+              filePath,
+              runnerTemp,
+              sourceSha: JOURNEY_SOURCE_SHA,
+              status: 'failed',
+            });
+            return {
+              status: 1,
+              signal: null,
+              stdout: 'private child stdout',
+              stderr: 'private child stderr',
+            };
+          },
+        ),
+      (error) => error.code === 'desktop-not-ready',
+    );
+
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: JOURNEY_SOURCE_SHA,
+    });
+    assert.equal(summary.status, 'incomplete');
+    assert.equal(summary.cases['desktop-a-refresh'], 'not_run');
+    assert.deepEqual(summary.failureObservation, {
+      kind: 'unexpected-child-exit',
+      phase: 'desktop-a-refresh',
+      failurePoint: lastObservedPoint,
+      errorClass: null,
+    });
+    assert.doesNotMatch(
+      readFileSync(filePath, 'utf8') + JSON.stringify(summary),
+      /private child stdout|private child stderr/u,
     );
   });
 });

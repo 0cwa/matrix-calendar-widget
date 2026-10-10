@@ -20,13 +20,17 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  appendComposeOverrideFiles,
+  loadElementAcceptanceOverrides,
+} from './element-acceptance-overrides.mjs';
+import {
   inspectStoppedContainerState,
   isPrivateArtifactPath,
   isSafeRestoreTargetPlan,
 } from './element-acceptance-reminder-restore-guards.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const RADICALE_IMAGE = 'matrix-calendar-widget/radicale-openid:3.8.0.0';
+const ACCEPTANCE_OVERRIDES = loadElementAcceptanceOverrides(process.env, ROOT);
 const RADICALE_CREATE_TAR = [
   'import sys,tarfile',
   "with tarfile.open(fileobj=sys.stdout.buffer,mode='w|') as archive:",
@@ -137,6 +141,7 @@ const PHASES = new Set([
   'restore-postgres-role-ready',
   'restore-gateway-ready',
   'restore-element-ready',
+  'restore-widget-ready',
   'restore-delivery-row',
 ]);
 const RESTORE_TARGET_STEPS = new Set([
@@ -339,19 +344,22 @@ function initializeConfiguration() {
   if (restoreVolumeName !== `${projectName}_radicale-restore`) {
     throw new StageFailure('reminder-compose-validation');
   }
-  commonComposeArgs = [
-    'compose',
-    '-p',
-    projectName,
-    '--env-file',
-    envFile,
-    '-f',
-    'dev/compose.yaml',
-    '-f',
-    'dev/element-acceptance.compose.yaml',
-    '-f',
-    'dev/element-acceptance-reminder.compose.yaml',
-  ];
+  commonComposeArgs = appendComposeOverrideFiles(
+    [
+      'compose',
+      '-p',
+      projectName,
+      '--env-file',
+      envFile,
+      '-f',
+      'dev/compose.yaml',
+      '-f',
+      'dev/element-acceptance.compose.yaml',
+      '-f',
+      'dev/element-acceptance-reminder.compose.yaml',
+    ],
+    ACCEPTANCE_OVERRIDES.composeFiles,
+  );
 }
 
 function appendStage(phase, status, details = {}) {
@@ -483,7 +491,7 @@ function captureRadicaleFilesystemProbe(volumeName) {
       `type=volume,src=${volumeName},dst=/data,readonly`,
       '--entrypoint',
       '/app/bin/python',
-      RADICALE_IMAGE,
+      ACCEPTANCE_OVERRIDES.radicaleImage,
       '-c',
       RADICALE_FILESYSTEM_PROBE,
     ],
@@ -1135,7 +1143,7 @@ function backupRadicale(volumeName) {
           `type=volume,src=${volumeName},dst=/data,readonly`,
           '--entrypoint',
           '/app/bin/python',
-          RADICALE_IMAGE,
+          ACCEPTANCE_OVERRIDES.radicaleImage,
           '-c',
           RADICALE_CREATE_TAR,
         ],
@@ -1261,7 +1269,7 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName, diagnostics) {
       `type=volume,src=${restoreVolumeName},dst=/data,volume-nocopy`,
       '--entrypoint',
       '/app/bin/python',
-      RADICALE_IMAGE,
+      ACCEPTANCE_OVERRIDES.radicaleImage,
       '-c',
       RADICALE_EMPTY_DIRECTORY_CHECK,
     ]),
@@ -1321,7 +1329,7 @@ function restoreRadicaleArchive(diagnostics) {
         `type=volume,src=${restoreVolumeName},dst=/data,volume-nocopy`,
         '--entrypoint',
         '/app/bin/python',
-        RADICALE_IMAGE,
+        ACCEPTANCE_OVERRIDES.radicaleImage,
         '-c',
         RADICALE_EXTRACT_TAR,
         '/data',
@@ -1346,7 +1354,7 @@ function restoreRadicaleArchive(diagnostics) {
       `type=volume,src=${restoreVolumeName},dst=/data,readonly`,
       '--entrypoint',
       '/app/bin/python',
-      RADICALE_IMAGE,
+      ACCEPTANCE_OVERRIDES.radicaleImage,
       '-c',
       RADICALE_ENTRY_COUNT_CHECK,
     ]),
@@ -1655,6 +1663,25 @@ async function restoreStores() {
       ),
     };
   });
+  if (ACCEPTANCE_OVERRIDES.skipElement) {
+    await withStage('restore-widget-ready', async () => {
+      requireSuccess(
+        compose(['up', '--no-build', '-d', 'widget']),
+        'restore-widget-ready',
+      );
+      const widgetStatus = await waitForHttp(
+        'http://127.0.0.1:8080/',
+        (status) => status === 200,
+        'restore-widget-ready',
+      );
+      return {
+        count: widgetStatus === 200 ? 1 : 0,
+        httpStatus: widgetStatus,
+      };
+    });
+    return;
+  }
+
   await withStage('restore-element-ready', async () => {
     requireSuccess(
       compose(['up', '--no-build', '-d', 'widget', 'element']),
