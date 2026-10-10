@@ -25,8 +25,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   appendComposeOverrideFiles,
   DEFAULT_RADICALE_IMAGE,

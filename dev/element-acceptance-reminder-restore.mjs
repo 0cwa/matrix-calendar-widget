@@ -20,14 +20,14 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  appendComposeOverrideFiles,
+  loadElementAcceptanceOverrides,
+} from './element-acceptance-overrides.mjs';
+import {
   inspectStoppedContainerState,
   isPrivateArtifactPath,
   isSafeRestoreTargetPlan,
 } from './element-acceptance-reminder-restore-guards.mjs';
-import {
-  appendComposeOverrideFiles,
-  loadElementAcceptanceOverrides,
-} from './element-acceptance-overrides.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ACCEPTANCE_OVERRIDES = loadElementAcceptanceOverrides(process.env, ROOT);

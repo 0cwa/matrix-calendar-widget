@@ -7,11 +7,11 @@ import {
   diagnoseMissingModule,
   loadRuntimeDependencyAllowlist,
 } from './element-acceptance-diagnostics.mjs';
-import { writeSyntheticDesktopCredentials } from './element-desktop-journey.mjs';
 import {
   appendComposeOverrideFiles,
   loadElementAcceptanceOverrides,
 } from './element-acceptance-overrides.mjs';
+import { writeSyntheticDesktopCredentials } from './element-desktop-journey.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ACCEPTANCE_OVERRIDES = loadElementAcceptanceOverrides(process.env, ROOT);
