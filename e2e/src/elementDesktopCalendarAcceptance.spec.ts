@@ -31,7 +31,9 @@ import { isAbsolute, resolve } from 'node:path';
 import { hasUniqueWidgetFrameOwnedByElement } from '../../dev/element-desktop-frame-origin.mjs';
 import {
   appendDesktopJourneyOutcome,
+  appendDesktopJourneyProgress,
   appendDesktopLoginStep,
+  classifyDesktopJourneyErrorClass,
   classifyDesktopLoginFailure,
   collectWebBEventTitleMatches,
   desktopWidgetIsReady,
@@ -45,9 +47,11 @@ import {
   readOnlyWidgetIsReady,
   readSyntheticDesktopCredentials,
   unavailableWebBEditRowRenderDiagnostic,
+  type DesktopARefreshFailurePoint,
   type DesktopEventCreateFailureDiagnostic,
   type DesktopEventCreateFailurePoint,
   type DesktopGatewayReadFailureDiagnostic,
+  type DesktopJourneyErrorClass,
   type DesktopJourneyFailurePoint,
   type DesktopJourneyPhase,
   type DesktopLoginDiagnostic,
@@ -313,6 +317,34 @@ test('Element Desktop room event journey', async ({ browser }) => {
   const enterPhase = (phase: DesktopJourneyPhase) => {
     currentPhase = phase;
     currentFailurePoint = undefined;
+    if (phase === 'desktop-a-refresh') {
+      safeRecordDesktopJourneyProgress(evidence, 'begin', phase);
+    }
+  };
+  const enterDesktopRefreshFailurePoint = (
+    failurePoint: DesktopARefreshFailurePoint,
+  ) => {
+    currentFailurePoint = failurePoint;
+    safeRecordDesktopJourneyProgress(
+      evidence,
+      'point',
+      'desktop-a-refresh',
+      failurePoint,
+    );
+  };
+  const completeDesktopRefreshFailurePoint = (
+    failurePoint: DesktopARefreshFailurePoint,
+  ) => {
+    if (
+      safeRecordDesktopJourneyProgress(
+        evidence,
+        'complete',
+        'desktop-a-refresh',
+        failurePoint,
+      )
+    ) {
+      currentFailurePoint = undefined;
+    }
   };
   let currentLoginStep: DesktopLoginStep = 'not_observed';
   let loginEntry: DesktopLoginEntry = 'not_observed';
@@ -616,31 +648,53 @@ test('Element Desktop room event journey', async ({ browser }) => {
     recordPhase(evidence, recorded, 'web-member-b-edit-save');
 
     enterPhase('desktop-a-refresh');
+    enterDesktopRefreshFailurePoint('desktop-refresh-widget-frame');
     const roomFrame = desktopElement.widgetByTitle('Matrix Calendar');
+    completeDesktopRefreshFailurePoint('desktop-refresh-widget-frame');
+    enterDesktopRefreshFailurePoint('desktop-refresh-gateway-read');
     const refreshedRoomRead = waitForGatewayResponse(
       desktopPage,
       fixture,
       'GET',
     );
+    completeDesktopRefreshFailurePoint('desktop-refresh-gateway-read');
+    enterDesktopRefreshFailurePoint('desktop-refresh-page-reload');
     await desktopPage.reload({ waitUntil: 'domcontentloaded' });
+    completeDesktopRefreshFailurePoint('desktop-refresh-page-reload');
+    enterDesktopRefreshFailurePoint('desktop-refresh-rooms-list');
     await desktopElement.waitForRoomsList(60_000);
+    completeDesktopRefreshFailurePoint('desktop-refresh-rooms-list');
+    enterDesktopRefreshFailurePoint('desktop-refresh-room-navigation');
     await desktopElement.navigateToRoomOrInvitation(fixture.roomName);
+    completeDesktopRefreshFailurePoint('desktop-refresh-room-navigation');
+    enterDesktopRefreshFailurePoint('desktop-refresh-room-id');
     if (desktopElement.getCurrentRoomId() !== fixture.teamRoomId) {
       throw new Error('Desktop refreshed into an unexpected room');
     }
+    completeDesktopRefreshFailurePoint('desktop-refresh-room-id');
+    enterDesktopRefreshFailurePoint('desktop-refresh-widget-open');
     await openElementCalendarWidget(desktopPage, desktopElement);
+    completeDesktopRefreshFailurePoint('desktop-refresh-widget-open');
+    enterDesktopRefreshFailurePoint('desktop-refresh-gateway-response');
     const refreshed = await refreshedRoomRead;
+    completeDesktopRefreshFailurePoint('desktop-refresh-gateway-response');
+    enterDesktopRefreshFailurePoint('desktop-refresh-gateway-status');
     if (refreshed.status() !== 200) {
       throw new Error('Desktop refreshed calendar read failed');
     }
+    completeDesktopRefreshFailurePoint('desktop-refresh-gateway-status');
+    enterDesktopRefreshFailurePoint('desktop-refresh-iframe-attached');
     await desktopPage
       .locator('iframe[title="Matrix Calendar"]')
       .waitFor({ state: 'attached', timeout: 30_000 });
+    completeDesktopRefreshFailurePoint('desktop-refresh-iframe-attached');
+    enterDesktopRefreshFailurePoint('desktop-refresh-event-row');
     const refreshedRow = roomFrame.getByRole('listitem', {
       name: editedTitle,
       exact: true,
     });
     await refreshedRow.waitFor({ state: 'visible' });
+    completeDesktopRefreshFailurePoint('desktop-refresh-event-row');
     recordPhase(evidence, recorded, 'desktop-a-refresh');
 
     enterPhase('canonical-edit-read');
@@ -789,6 +843,9 @@ test('Element Desktop room event journey', async ({ browser }) => {
         webBEditSaveDiagnostic,
         roomNavigationDiagnostic,
         desktopEventCreateDiagnostic,
+        currentPhase === 'desktop-a-refresh'
+          ? classifyDesktopJourneyErrorClass(error)
+          : undefined,
       );
     }
   } finally {
@@ -1932,6 +1989,27 @@ function readFixture(filePath: string): Fixture {
   return fixture as Fixture;
 }
 
+function safeRecordDesktopJourneyProgress(
+  evidence: { filePath: string; runnerTemp: string },
+  event: 'begin' | 'point' | 'complete',
+  phase: 'desktop-a-refresh',
+  failurePoint?: DesktopARefreshFailurePoint,
+) {
+  const sourceSha = process.env.ELEMENT_DESKTOP_SOURCE_SHA;
+  if (typeof sourceSha !== 'string') return false;
+  try {
+    return appendDesktopJourneyProgress({
+      ...evidence,
+      sourceSha,
+      event,
+      phase,
+      ...(failurePoint === undefined ? {} : { failurePoint }),
+    });
+  } catch {
+    return false;
+  }
+}
+
 function safeRecordPhase(
   evidence: { filePath: string; runnerTemp: string },
   recorded: Set<DesktopJourneyPhase>,
@@ -1942,6 +2020,7 @@ function safeRecordPhase(
   webBEditSaveDiagnostic?: WebBEditSaveFailureDiagnostic,
   roomNavigationDiagnostic?: DesktopRoomNavigationDiagnostic,
   desktopEventCreateDiagnostic?: DesktopEventCreateFailureDiagnostic,
+  errorClass?: DesktopJourneyErrorClass,
 ) {
   try {
     appendDesktopJourneyOutcome({
@@ -1959,6 +2038,7 @@ function safeRecordPhase(
       ...(desktopEventCreateDiagnostic === undefined
         ? {}
         : { desktopEventCreateDiagnostic }),
+      ...(errorClass === undefined ? {} : { errorClass }),
     });
     recorded.add(phase);
     return true;
