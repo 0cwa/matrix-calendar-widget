@@ -151,13 +151,7 @@ function createUser(localpart, password, phase) {
     execFileSync(
       'docker',
       appendComposeOverrideFiles(
-        [
-          'compose',
-          '-p',
-          projectName,
-          '-f',
-          'dev/compose.yaml',
-        ],
+        ['compose', '-p', projectName, '-f', 'dev/compose.yaml'],
         ACCEPTANCE_OVERRIDES.composeFiles,
       ).concat([
         'exec',
