@@ -24,9 +24,13 @@ import {
   isPrivateArtifactPath,
   isSafeRestoreTargetPlan,
 } from './element-acceptance-reminder-restore-guards.mjs';
+import {
+  appendComposeOverrideFiles,
+  loadElementAcceptanceOverrides,
+} from './element-acceptance-overrides.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const RADICALE_IMAGE = 'matrix-calendar-widget/radicale-openid:3.8.0.0';
+const ACCEPTANCE_OVERRIDES = loadElementAcceptanceOverrides(process.env, ROOT);
 const RADICALE_CREATE_TAR = [
   'import sys,tarfile',
   "with tarfile.open(fileobj=sys.stdout.buffer,mode='w|') as archive:",
@@ -339,19 +343,22 @@ function initializeConfiguration() {
   if (restoreVolumeName !== `${projectName}_radicale-restore`) {
     throw new StageFailure('reminder-compose-validation');
   }
-  commonComposeArgs = [
-    'compose',
-    '-p',
-    projectName,
-    '--env-file',
-    envFile,
-    '-f',
-    'dev/compose.yaml',
-    '-f',
-    'dev/element-acceptance.compose.yaml',
-    '-f',
-    'dev/element-acceptance-reminder.compose.yaml',
-  ];
+  commonComposeArgs = appendComposeOverrideFiles(
+    [
+      'compose',
+      '-p',
+      projectName,
+      '--env-file',
+      envFile,
+      '-f',
+      'dev/compose.yaml',
+      '-f',
+      'dev/element-acceptance.compose.yaml',
+      '-f',
+      'dev/element-acceptance-reminder.compose.yaml',
+    ],
+    ACCEPTANCE_OVERRIDES.composeFiles,
+  );
 }
 
 function appendStage(phase, status, details = {}) {
@@ -483,7 +490,7 @@ function captureRadicaleFilesystemProbe(volumeName) {
       `type=volume,src=${volumeName},dst=/data,readonly`,
       '--entrypoint',
       '/app/bin/python',
-      RADICALE_IMAGE,
+      ACCEPTANCE_OVERRIDES.radicaleImage,
       '-c',
       RADICALE_FILESYSTEM_PROBE,
     ],
@@ -1135,7 +1142,7 @@ function backupRadicale(volumeName) {
           `type=volume,src=${volumeName},dst=/data,readonly`,
           '--entrypoint',
           '/app/bin/python',
-          RADICALE_IMAGE,
+          ACCEPTANCE_OVERRIDES.radicaleImage,
           '-c',
           RADICALE_CREATE_TAR,
         ],
@@ -1261,7 +1268,7 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName, diagnostics) {
       `type=volume,src=${restoreVolumeName},dst=/data,volume-nocopy`,
       '--entrypoint',
       '/app/bin/python',
-      RADICALE_IMAGE,
+      ACCEPTANCE_OVERRIDES.radicaleImage,
       '-c',
       RADICALE_EMPTY_DIRECTORY_CHECK,
     ]),
@@ -1321,7 +1328,7 @@ function restoreRadicaleArchive(diagnostics) {
         `type=volume,src=${restoreVolumeName},dst=/data,volume-nocopy`,
         '--entrypoint',
         '/app/bin/python',
-        RADICALE_IMAGE,
+        ACCEPTANCE_OVERRIDES.radicaleImage,
         '-c',
         RADICALE_EXTRACT_TAR,
         '/data',
@@ -1346,7 +1353,7 @@ function restoreRadicaleArchive(diagnostics) {
       `type=volume,src=${restoreVolumeName},dst=/data,readonly`,
       '--entrypoint',
       '/app/bin/python',
-      RADICALE_IMAGE,
+      ACCEPTANCE_OVERRIDES.radicaleImage,
       '-c',
       RADICALE_ENTRY_COUNT_CHECK,
     ]),

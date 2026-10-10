@@ -8,7 +8,13 @@ import {
   loadRuntimeDependencyAllowlist,
 } from './element-acceptance-diagnostics.mjs';
 import { writeSyntheticDesktopCredentials } from './element-desktop-journey.mjs';
+import {
+  appendComposeOverrideFiles,
+  loadElementAcceptanceOverrides,
+} from './element-acceptance-overrides.mjs';
 
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const ACCEPTANCE_OVERRIDES = loadElementAcceptanceOverrides(process.env, ROOT);
 const SERVICE_USER_ID = '@_matrix_calendar_service:localhost';
 const SERVICE_LOCALPART = '_matrix_calendar_service';
 const CALENDAR_ID = 'element-acceptance';
@@ -144,12 +150,16 @@ function createUser(localpart, password, phase) {
   try {
     execFileSync(
       'docker',
-      [
-        'compose',
-        '-p',
-        projectName,
-        '-f',
-        'dev/compose.yaml',
+      appendComposeOverrideFiles(
+        [
+          'compose',
+          '-p',
+          projectName,
+          '-f',
+          'dev/compose.yaml',
+        ],
+        ACCEPTANCE_OVERRIDES.composeFiles,
+      ).concat([
         'exec',
         '-T',
         'synapse',
@@ -162,9 +172,9 @@ function createUser(localpart, password, phase) {
         '/dev/stdin',
         '--no-admin',
         'http://localhost:8008',
-      ],
+      ]),
       {
-        cwd: resolve(dirname(fileURLToPath(import.meta.url)), '..'),
+        cwd: ROOT,
         encoding: 'utf8',
         input: `${password}\n`,
         maxBuffer: 1024 * 1024,
@@ -556,18 +566,21 @@ function readComposeServiceDiagnostic(service) {
     return unavailable;
   }
 
-  const cwd = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-  const composeArgs = [
-    'compose',
-    '-p',
-    projectName,
-    '--env-file',
-    envFile,
-    '-f',
-    'dev/compose.yaml',
-    '-f',
-    'dev/element-acceptance.compose.yaml',
-  ];
+  const cwd = ROOT;
+  const composeArgs = appendComposeOverrideFiles(
+    [
+      'compose',
+      '-p',
+      projectName,
+      '--env-file',
+      envFile,
+      '-f',
+      'dev/compose.yaml',
+      '-f',
+      'dev/element-acceptance.compose.yaml',
+    ],
+    ACCEPTANCE_OVERRIDES.composeFiles,
+  );
   try {
     const ids = execFileSync(
       'docker',
