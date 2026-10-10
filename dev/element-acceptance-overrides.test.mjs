@@ -49,11 +49,51 @@ test(
     const overrides = loadElementAcceptanceOverrides({}, ROOT);
 
     assert.deepEqual(overrides.composeFiles, []);
+    assert.equal(overrides.skipElement, false);
     assert.deepEqual(
       appendComposeOverrideFiles(baseArguments, overrides.composeFiles),
       baseArguments,
     );
     assert.equal(overrides.radicaleImage, DEFAULT_RADICALE_IMAGE);
+  },
+);
+
+test(
+  'Element skip accepts only explicit lowercase boolean values',
+  () => {
+    assert.equal(
+      loadElementAcceptanceOverrides(
+        { ELEMENT_ACCEPTANCE_SKIP_ELEMENT: 'true' },
+        ROOT,
+      ).skipElement,
+      true,
+    );
+    assert.equal(
+      loadElementAcceptanceOverrides(
+        { ELEMENT_ACCEPTANCE_SKIP_ELEMENT: 'false' },
+        ROOT,
+      ).skipElement,
+      false,
+    );
+
+    for (const value of [
+      '',
+      'TRUE',
+      'False',
+      '1',
+      'yes',
+      ' true',
+      'false\n',
+    ]) {
+      assert.throws(
+        () =>
+          loadElementAcceptanceOverrides(
+            { ELEMENT_ACCEPTANCE_SKIP_ELEMENT: value },
+            ROOT,
+          ),
+        /ELEMENT_ACCEPTANCE_SKIP_ELEMENT/u,
+      );
+    }
   },
 );
 
@@ -204,6 +244,10 @@ test(
       {
         environment: { ELEMENT_ACCEPTANCE_RADICALE_IMAGE: 'bad image' },
         expectedMessage: 'RADICALE_IMAGE',
+      },
+      {
+        environment: { ELEMENT_ACCEPTANCE_SKIP_ELEMENT: 'TRUE' },
+        expectedMessage: 'SKIP_ELEMENT',
       },
     ];
 

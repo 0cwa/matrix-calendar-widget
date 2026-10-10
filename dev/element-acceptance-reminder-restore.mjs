@@ -1663,6 +1663,22 @@ async function restoreStores() {
     };
   });
   await withStage('restore-element-ready', async () => {
+    if (ACCEPTANCE_OVERRIDES.skipElement) {
+      requireSuccess(
+        compose(['up', '--no-build', '-d', 'widget']),
+        'restore-element-ready',
+      );
+      const widgetStatus = await waitForHttp(
+        'http://127.0.0.1:8080/',
+        (status) => status === 200,
+        'restore-element-ready',
+      );
+      return {
+        count: widgetStatus === 200 ? 1 : 0,
+        httpStatus: widgetStatus,
+        elementSkipped: true,
+      };
+    }
     requireSuccess(
       compose(['up', '--no-build', '-d', 'widget', 'element']),
       'restore-element-ready',

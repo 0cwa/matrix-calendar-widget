@@ -98,6 +98,14 @@ function parseRadicaleImage(rawValue) {
   return rawValue;
 }
 
+function parseSkipElement(rawValue) {
+  if (rawValue === undefined || rawValue === 'false') return false;
+  if (rawValue === 'true') return true;
+  throw new TypeError(
+    'ELEMENT_ACCEPTANCE_SKIP_ELEMENT must be exactly "true" or "false"',
+  );
+}
+
 export function loadElementAcceptanceOverrides(environment, rootDirectory) {
   const composeFiles = parseComposeOverrideFiles(
     environment.ELEMENT_ACCEPTANCE_COMPOSE_OVERRIDE_FILES,
@@ -106,6 +114,7 @@ export function loadElementAcceptanceOverrides(environment, rootDirectory) {
 
   return {
     composeFiles,
+    skipElement: parseSkipElement(environment.ELEMENT_ACCEPTANCE_SKIP_ELEMENT),
     radicaleImage: parseRadicaleImage(
       environment.ELEMENT_ACCEPTANCE_RADICALE_IMAGE,
     ),
