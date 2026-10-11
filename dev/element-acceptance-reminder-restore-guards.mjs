@@ -61,3 +61,17 @@ export function inspectStoppedContainerState(state) {
     accepted: stopped && gracefulExit && oomFree,
   };
 }
+
+export function getRestoreQuiescePlan(skipElement) {
+  if (typeof skipElement !== 'boolean') {
+    throw new TypeError('skipElement must be a boolean');
+  }
+
+  return {
+    stopServices: skipElement ? ['widget'] : ['element', 'widget'],
+    inspectServices: skipElement
+      ? ['widget', 'gateway', 'radicale']
+      : ['element', 'widget', 'gateway', 'radicale'],
+    elementQuiesceSkipped: skipElement,
+  };
+}

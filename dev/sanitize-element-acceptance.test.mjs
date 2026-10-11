@@ -395,6 +395,59 @@ test('summarizes reminder restore gates without exposing backup fingerprints or 
   assert.doesNotMatch(summary, /b{64}|attempt_count=2/u);
 });
 
+test('reports skipped Element only on a three-container restore quiescence', () => {
+  const skippedSummary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'restore-quiesced',
+      status: 'passed',
+      count: 3,
+      elementQuiesceSkipped: true,
+      gatewayStoppedGracefully: true,
+      radicaleStoppedGracefully: true,
+      oomFree: true,
+    }),
+    sourceSha,
+  );
+
+  assert.match(
+    skippedSummary,
+    /phase=restore-quiesced status=passed count=3 element_quiesce_skipped=true gateway_stopped_gracefully=true radicale_stopped_gracefully=true oom_free=true/u,
+  );
+
+  for (const record of [
+    {
+      phase: 'restore-quiesced',
+      status: 'passed',
+      count: 4,
+      elementQuiesceSkipped: true,
+      gatewayStoppedGracefully: true,
+      radicaleStoppedGracefully: true,
+      oomFree: true,
+    },
+    {
+      phase: 'restore-quiesced',
+      status: 'passed',
+      count: 3,
+      elementQuiesceSkipped: false,
+      gatewayStoppedGracefully: true,
+      radicaleStoppedGracefully: true,
+      oomFree: true,
+    },
+    {
+      phase: 'restore-widget-ready',
+      status: 'passed',
+      count: 1,
+      httpStatus: 200,
+      elementQuiesceSkipped: true,
+    },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      /invalid element acceptance summary/u,
+    );
+  }
+});
+
 test('reports only an allowlisted rejection category and phase when a summary is invalid', () => {
   let failure;
   try {
