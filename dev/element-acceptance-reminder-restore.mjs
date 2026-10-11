@@ -24,6 +24,7 @@ import {
   loadElementAcceptanceOverrides,
 } from './element-acceptance-overrides.mjs';
 import {
+  getRestoreQuiescePlan,
   inspectStoppedContainerState,
   isPrivateArtifactPath,
   isSafeRestoreTargetPlan,
@@ -1052,8 +1053,9 @@ function stoppedState(service) {
 async function quiesceWriters() {
   let radicaleVolume;
   await withStage('restore-quiesced', async () => {
+    const plan = getRestoreQuiescePlan(ACCEPTANCE_OVERRIDES.skipElement);
     requireSuccess(
-      compose(['stop', '--timeout', '60', 'element', 'widget'], {
+      compose(['stop', '--timeout', '60', ...plan.stopServices], {
         timeout: COMPOSE_GRACEFUL_STOP_COMMAND_TIMEOUT_MS,
       }),
       'restore-quiesced',
@@ -1070,27 +1072,30 @@ async function quiesceWriters() {
       }),
       'restore-quiesced',
     );
-    const states = ['element', 'widget', 'gateway', 'radicale'].map(
-      stoppedState,
+    const states = Object.fromEntries(
+      plan.inspectServices.map((service) => [service, stoppedState(service)]),
     );
+    const observedStates = Object.values(states);
     radicaleVolume = inspectRadicaleVolume();
     const gatewayStoppedGracefully =
-      states[2].stopped && states[2].gracefulExit;
+      states.gateway.stopped && states.gateway.gracefulExit;
     const radicaleStoppedGracefully =
-      states[3].stopped && states[3].gracefulExit;
-    const oomFree = states.every((state) => state.oomFree);
+      states.radicale.stopped && states.radicale.gracefulExit;
+    const oomFree = observedStates.every((state) => state.oomFree);
+    const details = {
+      count: observedStates.filter((state) => state.stopped).length,
+      gatewayStoppedGracefully,
+      radicaleStoppedGracefully,
+      oomFree,
+      ...(plan.elementQuiesceSkipped ? { elementQuiesceSkipped: true } : {}),
+    };
     if (
-      !states.every((state) => state.accepted) ||
+      !observedStates.every((state) => state.accepted) ||
       !gatewayStoppedGracefully ||
       !radicaleStoppedGracefully ||
       !oomFree
     ) {
-      throw new StageFailure('restore-quiesced', {
-        count: states.filter((state) => state.stopped).length,
-        gatewayStoppedGracefully,
-        radicaleStoppedGracefully,
-        oomFree,
-      });
+      throw new StageFailure('restore-quiesced', details);
     }
     const synapse = inspectContainer('synapse', 'restore-quiesced');
     const postgres = inspectContainer('postgres', 'restore-quiesced');
@@ -1099,19 +1104,9 @@ async function quiesceWriters() {
       postgres.status !== 'running' ||
       postgres.healthStatus !== 'healthy'
     ) {
-      throw new StageFailure('restore-quiesced', {
-        count: states.filter((state) => state.stopped).length,
-        gatewayStoppedGracefully,
-        radicaleStoppedGracefully,
-        oomFree,
-      });
+      throw new StageFailure('restore-quiesced', details);
     }
-    return {
-      count: states.filter((state) => state.stopped).length,
-      gatewayStoppedGracefully,
-      radicaleStoppedGracefully,
-      oomFree,
-    };
+    return details;
   });
   return radicaleVolume;
 }

@@ -1113,6 +1113,7 @@ const ALLOWED_KEYS = new Set([
   'gatewayStoppedGracefully',
   'radicaleStoppedGracefully',
   'oomFree',
+  'elementQuiesceSkipped',
   'freshVolume',
   'freshDatabase',
   ...RESTORE_TARGET_DIAGNOSTIC_FIELDS,
@@ -2628,9 +2629,17 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     }
 
     if (
+      Object.hasOwn(record, 'elementQuiesceSkipped') &&
+      (record.phase !== 'restore-quiesced' ||
+        record.elementQuiesceSkipped !== true)
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    if (
       record.phase === 'restore-quiesced' &&
       record.status === 'passed' &&
-      record.count !== 4
+      record.count !== (record.elementQuiesceSkipped === true ? 3 : 4)
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
@@ -3577,6 +3586,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     }
     if (Object.hasOwn(record, 'count')) {
       fields.push(`count=${record.count}`);
+    }
+    if (record.elementQuiesceSkipped === true) {
+      fields.push('element_quiesce_skipped=true');
     }
     if (Object.hasOwn(record, 'restoreStep')) {
       fields.push(`restore_step=${record.restoreStep}`);

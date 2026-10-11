@@ -683,7 +683,9 @@ access and event writes stay disabled by default.
 - [ ] Complete private operator readiness evidence for the merged candidate
       before any separate rollout decision. Independent source review is
       complete; operator preflight, target-specific deployment and recovery
-      validation remain open.
+      validation remain open. The reminder restore helper now honors the
+      explicit skip-Element mode during quiescence while keeping the default
+      full Element stop and inspection path.
 
 This bounded beta path does not complete M4, M5, or the broader M8 work, and it
 does not authorize publication or live rollout. The broad M8 milestone remains

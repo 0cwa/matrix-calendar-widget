@@ -28,6 +28,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
+  getRestoreQuiescePlan,
   inspectStoppedContainerState,
   isPrivateArtifactPath,
   isSafeRestoreTargetPlan,
@@ -201,6 +202,20 @@ test('quiescent snapshot accepts graceful stop only without OOM', () => {
     }).accepted,
     false,
   );
+});
+
+test('restore quiescence only requires Element when Element is enabled', () => {
+  assert.deepEqual(getRestoreQuiescePlan(true), {
+    stopServices: ['widget'],
+    inspectServices: ['widget', 'gateway', 'radicale'],
+    elementQuiesceSkipped: true,
+  });
+  assert.deepEqual(getRestoreQuiescePlan(false), {
+    stopServices: ['element', 'widget'],
+    inspectServices: ['element', 'widget', 'gateway', 'radicale'],
+    elementQuiesceSkipped: false,
+  });
+  assert.throws(() => getRestoreQuiescePlan('true'), TypeError);
 });
 
 test('failure marker emits only a known restore substep', () => {
