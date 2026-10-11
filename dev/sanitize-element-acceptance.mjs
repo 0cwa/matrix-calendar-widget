@@ -90,6 +90,7 @@ const PHASES = new Set([
   'restore-postgres-role-ready',
   'restore-gateway-ready',
   'restore-element-ready',
+  'restore-widget-ready',
   'restore-delivery-row',
   'reminder-browser-egress',
   'reminder-room-context',
@@ -2322,6 +2323,50 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       !STATUSES.has(record.status)
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    if (record.phase === 'restore-widget-ready') {
+      const previousStatus = phases.get(record.phase)?.status;
+      const exactKeys = (keys) =>
+        Object.keys(record).length === keys.length &&
+        keys.every((key) => Object.hasOwn(record, key));
+
+      if (record.status === 'started') {
+        if (previousStatus !== undefined || !exactKeys(['phase', 'status'])) {
+          throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+        }
+      } else if (previousStatus !== 'started') {
+        throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+      } else if (record.status === 'passed') {
+        if (
+          !exactKeys(['phase', 'status', 'count', 'httpStatus']) ||
+          record.count !== 1 ||
+          record.httpStatus !== 200
+        ) {
+          throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+        }
+      } else if (record.status === 'failed') {
+        const failedWithoutDetails = exactKeys(['phase', 'status']);
+        const failedWithHttpStatus =
+          exactKeys(['phase', 'status', 'httpStatus']) &&
+          Number.isInteger(record.httpStatus) &&
+          record.httpStatus >= 100 &&
+          record.httpStatus <= 599;
+        const failedWithProcessExitCode =
+          exactKeys(['phase', 'status', 'processExitCode']) &&
+          Number.isInteger(record.processExitCode) &&
+          record.processExitCode >= 1 &&
+          record.processExitCode <= 255;
+        if (
+          !failedWithoutDetails &&
+          !failedWithHttpStatus &&
+          !failedWithProcessExitCode
+        ) {
+          throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+        }
+      } else {
+        throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+      }
     }
 
     if (record.phase === 'performance-pilot') {

@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import ElementDesktopAcceptanceResultReporter from '../e2e/src/elementDesktopAcceptanceResultReporter.mjs';
 import {
+  DESKTOP_A_REFRESH_FAILURE_POINTS,
   DESKTOP_JOURNEY_FAILURE_POINTS,
   DESKTOP_JOURNEY_PHASES,
   DESKTOP_LOGIN_ENTRIES,
@@ -21,8 +22,10 @@ import {
   DESKTOP_LOGIN_STEPS,
   appendDesktopChildCompletion,
   appendDesktopJourneyOutcome,
+  appendDesktopJourneyProgress,
   appendDesktopLoginStep,
   appendDesktopPlaywrightResult,
+  classifyDesktopJourneyErrorClass,
   classifyDesktopLoginFailure,
   desktopWidgetIsReady,
   enterDesktopPasswordLogin,
@@ -48,6 +51,63 @@ function withTempDirectory(run) {
   } finally {
     rmSync(runnerTemp, { recursive: true, force: true });
   }
+}
+
+const DESKTOP_REFRESH_SOURCE_SHA = 'e'.repeat(40);
+const DESKTOP_REFRESH_PRIOR_PHASES = DESKTOP_JOURNEY_PHASES.slice(
+  0,
+  DESKTOP_JOURNEY_PHASES.indexOf('desktop-a-refresh'),
+);
+
+function appendDesktopRefreshPrefix(filePath, runnerTemp) {
+  for (const phase of DESKTOP_REFRESH_PRIOR_PHASES) {
+    appendDesktopJourneyOutcome({
+      filePath,
+      runnerTemp,
+      phase,
+      status: 'passed',
+    });
+    if (phase === 'desktop-login') {
+      appendDesktopLoginStep({
+        filePath,
+        runnerTemp,
+        step: 'complete',
+        entry: 'password_form_present',
+      });
+    }
+  }
+}
+
+function appendDesktopRefreshBegin(filePath, runnerTemp) {
+  return appendDesktopJourneyProgress({
+    filePath,
+    runnerTemp,
+    sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+    event: 'begin',
+    phase: 'desktop-a-refresh',
+  });
+}
+
+function appendDesktopRefreshPoint(filePath, runnerTemp, failurePoint) {
+  return appendDesktopJourneyProgress({
+    filePath,
+    runnerTemp,
+    sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+    event: 'point',
+    phase: 'desktop-a-refresh',
+    failurePoint,
+  });
+}
+
+function appendDesktopRefreshComplete(filePath, runnerTemp, failurePoint) {
+  return appendDesktopJourneyProgress({
+    filePath,
+    runnerTemp,
+    sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+    event: 'complete',
+    phase: 'desktop-a-refresh',
+    failurePoint,
+  });
 }
 
 test('inspects only bounded event identity and emits no event content', () => {
@@ -306,7 +366,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 10);
+    assert.equal(summary.schemaVersion, 11);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -385,7 +445,7 @@ test('records only the source-bound Playwright result and child completion', () 
       runnerTemp,
       expectedSourceSha: sourceSha,
     });
-    assert.equal(summary.schemaVersion, 10);
+    assert.equal(summary.schemaVersion, 11);
     assert.equal(summary.sourceSha, sourceSha);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.playwrightResult, 'timed_out');
@@ -472,10 +532,40 @@ test('passes Desktop journey evidence only with complete source-bound success di
     sourceSha: recordSourceSha,
     playwrightResult,
   });
-  const phaseRows = [
-    ...DESKTOP_JOURNEY_PHASES.map((phase) => ({ phase, status: 'passed' })),
-    { loginStep: 'complete', loginEntry: 'password_form_present' },
-  ];
+  const phaseRows = [];
+  for (const phase of DESKTOP_JOURNEY_PHASES) {
+    if (phase === 'desktop-a-refresh') {
+      phaseRows.push({
+        type: 'desktop-journey-progress',
+        event: 'begin',
+        sourceSha,
+        phase,
+      });
+      for (const failurePoint of DESKTOP_A_REFRESH_FAILURE_POINTS) {
+        phaseRows.push(
+          {
+            type: 'desktop-journey-progress',
+            event: 'point',
+            sourceSha,
+            phase,
+            failurePoint,
+          },
+          {
+            type: 'desktop-journey-progress',
+            event: 'complete',
+            sourceSha,
+            phase,
+            failurePoint,
+          },
+        );
+      }
+    }
+    phaseRows.push({ phase, status: 'passed' });
+  }
+  phaseRows.push({
+    loginStep: 'complete',
+    loginEntry: 'password_form_present',
+  });
   const summarize = (...rows) =>
     summarizeDesktopJourneyEvidence(
       `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`,
@@ -719,7 +809,7 @@ test('records only phase-bound Desktop create steps and closed POST facts', () =
       /private room|private title|response body|request URL/u,
     );
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 10);
+    assert.equal(summary.schemaVersion, 11);
     assert.deepEqual(summary.failurePoint, {
       phase: 'desktop-event-create',
       point: 'event-create-post-status',
@@ -842,7 +932,7 @@ test('records room-navigation evidence only at its closed failure boundary', () 
       roomNavigationDiagnostic: diagnostic,
     });
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 10);
+    assert.equal(summary.schemaVersion, 11);
     assert.deepEqual(summary.roomNavigationDiagnostic, diagnostic);
     assert.equal(summary.roomsReadyDiagnostic, null);
     assert.doesNotMatch(
@@ -1118,6 +1208,7 @@ test('accepts only the closed failure-point enum with its failed-phase match', (
       'web-b-edit-details-close-click',
       'web-b-edit-details-close-hidden',
       'web-b-edit-event-row',
+      ...DESKTOP_A_REFRESH_FAILURE_POINTS,
     ],
   );
 
@@ -1589,40 +1680,244 @@ test('correlates failed B edit/save points with a bounded matched PATCH status',
   });
 });
 
-test('records a later phase failure without a completed B edit checkpoint', () => {
+test('requires ordered Desktop refresh progress before a complete pass', () => {
   withTempDirectory((runnerTemp) => {
     const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
     initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopRefreshPrefix(filePath, runnerTemp);
+    assert.equal(appendDesktopRefreshBegin(filePath, runnerTemp), true);
+    for (const failurePoint of DESKTOP_A_REFRESH_FAILURE_POINTS) {
+      assert.equal(
+        appendDesktopRefreshPoint(filePath, runnerTemp, failurePoint),
+        true,
+      );
+      assert.equal(
+        appendDesktopRefreshComplete(filePath, runnerTemp, failurePoint),
+        true,
+      );
+    }
     appendDesktopJourneyOutcome({
       filePath,
       runnerTemp,
-      phase: 'web-member-b-edit-save',
+      phase: 'desktop-a-refresh',
       status: 'passed',
     });
+    for (const phase of DESKTOP_JOURNEY_PHASES.slice(
+      DESKTOP_JOURNEY_PHASES.indexOf('desktop-a-refresh') + 1,
+    )) {
+      appendDesktopJourneyOutcome({
+        filePath,
+        runnerTemp,
+        phase,
+        status: 'passed',
+      });
+    }
+    appendDesktopPlaywrightResult({
+      filePath,
+      runnerTemp,
+      sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      status: 'passed',
+    });
+    appendDesktopChildCompletion({
+      filePath,
+      runnerTemp,
+      sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      completion: { outcome: 'exited', exitStatus: 0, timedOut: false },
+    });
 
-    assert.throws(
-      () =>
-        appendDesktopJourneyOutcome({
-          filePath,
-          runnerTemp,
-          phase: 'desktop-a-refresh',
-          status: 'failed',
-          failurePoint: 'web-b-edit-event-row',
-        }),
-      /Invalid Desktop journey input/u,
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+    });
+    assert.equal(summary.schemaVersion, 11);
+    assert.equal(summary.status, 'passed');
+    assert.equal(summary.cases['desktop-a-refresh'], 'passed');
+    assert.equal(summary.failureObservation, null);
+    assert.doesNotMatch(
+      readFileSync(filePath, 'utf8'),
+      /private error|PRIVATE_TOKEN_SENTINEL/u,
     );
+  });
+});
+
+test('classifies caught Desktop refresh errors without persisting error text', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    const privateError = new Error('private assertion, URL, and room text');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopRefreshPrefix(filePath, runnerTemp);
+    appendDesktopRefreshBegin(filePath, runnerTemp);
+    const failurePoint = DESKTOP_A_REFRESH_FAILURE_POINTS[2];
+    for (const point of DESKTOP_A_REFRESH_FAILURE_POINTS.slice(0, 3)) {
+      appendDesktopRefreshPoint(filePath, runnerTemp, point);
+      if (point !== failurePoint) {
+        appendDesktopRefreshComplete(filePath, runnerTemp, point);
+      }
+    }
     appendDesktopJourneyOutcome({
       filePath,
       runnerTemp,
       phase: 'desktop-a-refresh',
       status: 'failed',
+      failurePoint,
+      errorClass: classifyDesktopJourneyErrorClass(privateError),
+    });
+    appendDesktopPlaywrightResult({
+      filePath,
+      runnerTemp,
+      sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      status: 'failed',
+    });
+    appendDesktopChildCompletion({
+      filePath,
+      runnerTemp,
+      sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      completion: { outcome: 'exited', exitStatus: 1, timedOut: false },
     });
 
-    const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.cases['web-member-b-edit-save'], 'passed');
-    assert.equal(summary.cases['desktop-a-refresh'], 'failed');
-    assert.equal(summary.failurePoint, null);
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+    });
+    assert.equal(summary.status, 'failed');
+    assert.deepEqual(summary.failureObservation, {
+      kind: 'caught-error',
+      phase: 'desktop-a-refresh',
+      failurePoint,
+      errorClass: 'runtime',
+    });
+    assert.doesNotMatch(
+      readFileSync(filePath, 'utf8'),
+      /private assertion|URL|room text/u,
+    );
+    assert.equal(classifyDesktopJourneyErrorClass({}), 'unknown');
+    const timeout = new Error();
+    timeout.name = 'TimeoutError';
+    assert.equal(classifyDesktopJourneyErrorClass(timeout), 'timeout');
+    const assertion = new Error();
+    assertion.name = 'AssertionError';
+    assert.equal(classifyDesktopJourneyErrorClass(assertion), 'assertion');
   });
+});
+
+test('rejects orphaned, reordered, malformed, or unexecuted Desktop refresh evidence', () => {
+  const sourceSha = DESKTOP_REFRESH_SOURCE_SHA;
+  const priorRows = DESKTOP_REFRESH_PRIOR_PHASES.flatMap((phase) => [
+    { phase, status: 'passed' },
+    ...(phase === 'desktop-login'
+      ? [{ loginStep: 'complete', loginEntry: 'password_form_present' }]
+      : []),
+  ]);
+  const begin = {
+    type: 'desktop-journey-progress',
+    event: 'begin',
+    sourceSha,
+    phase: 'desktop-a-refresh',
+  };
+  const point = (failurePoint, extra = {}) => ({
+    type: 'desktop-journey-progress',
+    event: 'point',
+    sourceSha,
+    phase: 'desktop-a-refresh',
+    failurePoint,
+    ...extra,
+  });
+  const summarize = (rows) =>
+    summarizeDesktopJourneyEvidence(
+      `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`,
+      { expectedSourceSha: sourceSha },
+    );
+  const assertRejected = (rows) =>
+    assert.throws(() => summarize(rows), /Invalid Desktop journey input/u);
+
+  assertRejected([...priorRows, point(DESKTOP_A_REFRESH_FAILURE_POINTS[0])]);
+  assertRejected([...priorRows.slice(0, -1), begin]);
+  assertRejected([...priorRows, begin, begin]);
+  assertRejected([
+    ...priorRows,
+    begin,
+    point(DESKTOP_A_REFRESH_FAILURE_POINTS[1]),
+  ]);
+  assertRejected([...priorRows, { ...begin, phase: 'canonical-edit-read' }]);
+  assertRejected([
+    ...priorRows,
+    begin,
+    point(DESKTOP_A_REFRESH_FAILURE_POINTS[0], {
+      accessToken: 'PRIVATE_SENTINEL_SHOULD_NOT_EMIT',
+    }),
+  ]);
+  assertRejected([
+    ...priorRows,
+    begin,
+    ...DESKTOP_A_REFRESH_FAILURE_POINTS.flatMap((failurePoint, index) => [
+      point(failurePoint),
+      ...(index === DESKTOP_A_REFRESH_FAILURE_POINTS.length - 1
+        ? []
+        : [
+            {
+              type: 'desktop-journey-progress',
+              event: 'complete',
+              sourceSha,
+              phase: 'desktop-a-refresh',
+              failurePoint,
+            },
+          ]),
+    ]),
+    { phase: 'desktop-a-refresh', status: 'passed' },
+  ]);
+  assertRejected([
+    ...priorRows,
+    begin,
+    point(DESKTOP_A_REFRESH_FAILURE_POINTS[0]),
+    {
+      phase: 'desktop-a-refresh',
+      status: 'failed',
+      failurePoint: DESKTOP_A_REFRESH_FAILURE_POINTS[1],
+      errorClass: 'runtime',
+    },
+  ]);
+  assertRejected([
+    ...priorRows,
+    begin,
+    {
+      type: 'desktop-journey-progress',
+      event: 'complete',
+      sourceSha,
+      phase: 'desktop-a-refresh',
+      failurePoint: DESKTOP_A_REFRESH_FAILURE_POINTS[0],
+    },
+  ]);
+  assertRejected([
+    ...priorRows,
+    begin,
+    point(DESKTOP_A_REFRESH_FAILURE_POINTS[0]),
+    point(DESKTOP_A_REFRESH_FAILURE_POINTS[1]),
+  ]);
+  assertRejected([
+    ...priorRows,
+    begin,
+    point(DESKTOP_A_REFRESH_FAILURE_POINTS[0]),
+    {
+      type: 'desktop-journey-progress',
+      event: 'complete',
+      sourceSha,
+      phase: 'desktop-a-refresh',
+      failurePoint: DESKTOP_A_REFRESH_FAILURE_POINTS[1],
+    },
+  ]);
+  assertRejected([
+    ...priorRows,
+    begin,
+    point(DESKTOP_A_REFRESH_FAILURE_POINTS[0]),
+    {
+      phase: 'desktop-a-refresh',
+      status: 'failed',
+      failurePoint: DESKTOP_A_REFRESH_FAILURE_POINTS[0],
+      errorClass: 'private-error-message',
+    },
+  ]);
 });
 
 test('records only the fixed Desktop login step in private journey evidence', () => {
