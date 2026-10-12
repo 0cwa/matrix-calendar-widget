@@ -506,6 +506,12 @@ access and event writes stay disabled by default.
 - [x] Add a cold-backup and isolated-restore runbook for the project-owned
       Compose `radicale-data` and `server-data` volumes, with separate external
       PostgreSQL guidance; etke-managed `/data` remains unverified (PR #170).
+      The public runbook now recommends pinned Restic 0.19.1, generic
+      S3-compatible storage, operator-managed daily systemd scheduling, and 30
+      daily retention points. It preserves a coordinated PostgreSQL custom
+      dump and isolated restore boundaries. It does not provide the host-local
+      coordinator or timer, or validate an S3 provider, scheduled run, or
+      target-host recovery.
 - [x] Container images and deployment docs use fork-owned names. This covers
       repository-owned image builds and documented operator-run deployment
       boundaries, not a live etke-host deployment or recovery validation.
