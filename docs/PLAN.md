@@ -686,14 +686,15 @@ access and event writes stay disabled by default.
       validation remain open. The reminder restore helper now honors the
       explicit skip-Element mode during quiescence while keeping the default
       full Element stop and inspection path.
-  - [ ] Run the path-scoped real-Docker PostgreSQL first-initialization
+  - [x] Run the path-scoped real-Docker PostgreSQL first-initialization
         contract from `.github/workflows/operator-postgres-contract.yml`.
         Require restricted app-role ownership and writes, distinct
         file-backed bootstrap/app secrets with the tested UID/GID 70 app-file
         permissions, TCP readiness after initialization, and fail-closed
-        startup when the app secret is missing. This synthetic contract does
-        not validate the operator's database endpoint, TLS, host mounts,
-        backup, or recovery.
+        startup when the app secret is missing. The hosted contract passed on
+        PR #243 candidate `9e1bea6017279646808fe778aa294a8ad32b578c`. This
+        synthetic contract does not validate the operator's database endpoint,
+        TLS, host mounts, backup, or recovery.
 
 This bounded beta path does not complete M4, M5, or the broader M8 work, and it
 does not authorize publication or live rollout. The broad M8 milestone remains
