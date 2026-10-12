@@ -1,0 +1,12 @@
+# Example only. Install and enable only after validating the service on its host.
+[Unit]
+Description=Run the Matrix Calendar cold backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=matrix-calendar-backup.service
+
+[Install]
+WantedBy=timers.target

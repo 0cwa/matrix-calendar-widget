@@ -509,9 +509,15 @@ access and event writes stay disabled by default.
       The public runbook now recommends pinned Restic 0.19.1, generic
       S3-compatible storage, operator-managed daily systemd scheduling, and 30
       daily retention points. It preserves a coordinated PostgreSQL custom
-      dump and isolated restore boundaries. It does not provide the host-local
-      coordinator or timer, or validate an S3 provider, scheduled run, or
-      target-host recovery.
+      dump and isolated restore boundaries. The coordinator does not select a
+      provider or validate a real S3 endpoint, scheduled run, or target-host
+      recovery.
+  - [x] Add a host-local cold-capture coordinator and generic systemd service
+        and timer templates. Focused tests use fake commands only. The templates
+        remain operator-installed and disabled; the coordinator uploads a
+        verified paired capture after service restart and does not run Restic
+        initialization, retention, or pruning. Real S3, scheduling, and
+        target-host recovery remain open operator gates.
 - [x] Container images and deployment docs use fork-owned names. This covers
       repository-owned image builds and documented operator-run deployment
       boundaries, not a live etke-host deployment or recovery validation.

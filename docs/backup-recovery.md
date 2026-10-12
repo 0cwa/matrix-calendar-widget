@@ -17,11 +17,11 @@ protect them at rest.
 The volume capture below is a cold, consistent copy. The recommended off-host
 storage layer is a Restic repository on S3-compatible storage. Restic encrypts
 and deduplicates the captured files; the repository password must be kept
-separately from the repository. The project does not ship a backup script or
-systemd unit. An operator may schedule a host-local coordinator as described
-below, after validating it on that host. No S3 provider, scheduled run, or
-production recovery path has been validated here. No live etke deployment or
-etke data recovery path has been verified.
+separately from the repository. The project now ships a host-local coordinator
+and generic systemd service/timer templates. The templates are examples only:
+they are not installed or enabled by the project. No S3 provider, scheduled
+run, or production recovery path has been validated here. No live etke
+deployment or etke data recovery path has been verified.
 
 ## Restic repository and daily schedule
 
@@ -50,52 +50,32 @@ For systemd, a host-local service can use [`LoadCredential=`](https://www.freede
 to provide the
 password and S3 shared-credentials file as read-only runtime files, then set
 `RESTIC_PASSWORD_FILE=%d/restic-password`,
-`AWS_SHARED_CREDENTIALS_FILE=%d/s3-credentials`, and
-`RESTIC_REPOSITORY=<the-stable-repository-url>` in the service environment.
-Use the host's secret store for the credential sources. Do not put secret values
-in `Environment=` or `EnvironmentFile=`. Initialize the repository once from a
-protected operator session using that same configuration, and retain the
-repository password separately for recovery. Run `restic init` once with that
-protected configuration; do not put secret values on its command line.
+`AWS_SHARED_CREDENTIALS_FILE=%d/s3-credentials` in the service environment.
+The coordinator reads the non-secret repository URL and region from its
+operator-owned JSON configuration. Use the host's secret store for credential
+sources. Do not put secret values in `Environment=` or `EnvironmentFile=`.
+Initialize the repository once from a protected operator session using that
+same configuration, and retain the repository password separately for
+recovery. Run `restic init` once with that protected configuration; do not put
+secret values on its command line.
 
-An illustrative unit pair can call an operator-maintained coordinator:
-
-```ini
-# /etc/systemd/system/matrix-calendar-backup.service
-[Unit]
-Description=Cold backup of the Matrix Calendar sidecar
-
-[Service]
-Type=oneshot
-LoadCredential=restic-password:/secure/operator-credentials/restic-password
-LoadCredential=s3-credentials:/secure/operator-credentials/s3-credentials
-Environment=RESTIC_PASSWORD_FILE=%d/restic-password
-Environment=AWS_SHARED_CREDENTIALS_FILE=%d/s3-credentials
-Environment=AWS_PROFILE=default
-Environment=RESTIC_REPOSITORY=s3:https://<s3-endpoint>/<bucket>/<matrix-calendar-repository>
-ExecStart=/usr/local/sbin/matrix-calendar-cold-backup
-```
-
-```ini
-# /etc/systemd/system/matrix-calendar-backup.timer
-[Unit]
-Description=Run the Matrix Calendar cold backup daily
-
-[Timer]
-OnCalendar=*-*-* 03:00:00
-Persistent=true
-RandomizedDelaySec=15m
-Unit=matrix-calendar-backup.service
-
-[Install]
-WantedBy=timers.target
-```
+The generic examples are
+[`matrix-calendar-backup.service.example`](../deploy/systemd/matrix-calendar-backup.service.example)
+and
+[`matrix-calendar-backup.timer.example`](../deploy/systemd/matrix-calendar-backup.timer.example).
+Copying, editing, installing, and enabling them are operator actions. They
+require host-specific paths, a service account with access to the local Docker
+socket, and protected credential sources. Docker socket access is effectively
+root-equivalent; grant it only to the account that owns this backup job.
 
 Protect the credential source files with host-appropriate permissions. The S3
-credentials file uses the standard shared-credentials format. The coordinator
-path is an operator-managed script; the example unit does not install or supply
-that script. Validate its failure handling, service restart behavior, and
-systemd credential support on the target host before enabling the timer.
+credentials file uses the standard shared-credentials format. The project
+supplies the coordinator at
+[`scripts/matrix-calendar-cold-backup.mjs`](../scripts/matrix-calendar-cold-backup.mjs);
+copying it to the service's `ExecStart=` path remains an operator action. The
+example unit does not install the script. Validate its failure handling,
+service restart behavior, and systemd credential support on the target host
+before enabling the timer.
 
 After the cold archives and any PostgreSQL dump are complete, the coordinator
 should back up the completed backup directory under one stable host identity and
@@ -135,20 +115,100 @@ A missed timer run leaves a gap; the timer does not guarantee a daily recovery
 point. Pruning can lock the repository while it runs, so schedule it where it
 will not overlap a backup. Check the repository periodically and alert on
 service failure or incomplete backup results. Run `restic check` periodically
-to check repository structure.
+to check repository structure. The shipped coordinator runs `restic backup`
+only; it never initializes a repository or runs `forget` or `prune`. Review the
+dry-run selection and retention schedule separately on the target host.
 
-Restic does not schedule itself. A host operator can install the example systemd
-oneshot service and daily timer to invoke a private host-local coordinator.
-That coordinator must perform the existing quiesce, capture, verification,
-Restic upload, and restart steps as one failure-aware run: stop new widget
-requests and all Radicale/server writers, coordinate the PostgreSQL dump if
-enabled, do not upload a partial capture, and restart the services even if a
-later step fails. Restart after the local capture is complete, before the S3
-upload; preserve the capture and report failure if upload or retention fails.
-Treat Restic's incomplete-backup result as a failed recovery point even if it
-created a snapshot. Prevent overlapping runs and make failures visible to the
-operator. The repository provides neither that coordinator nor systemd units;
-timer installation and daily execution remain host responsibilities.
+Restic does not schedule itself. A host operator may install the example
+oneshot service and daily timer to invoke the shipped coordinator after local
+validation. Its daily timer can run a backup each day, while successful daily
+recovery points still depend on the service and target being available. The
+30-day policy above is controlled separately; the coordinator does not prune.
+
+## Use the shipped host-local coordinator
+
+Install the script at the path used by the service template, or edit
+`ExecStart=` to the reviewed local path. Create a mode-0600 JSON configuration
+file owned by the service account. It must explicitly set the Compose project
+directory and private interpolation env file, an existing mode-0700 capture
+directory owned by that account, the local Docker socket, a reviewed helper image pinned by digest,
+the S3 repository and region, the stable Restic host and two stable tags, and
+whether the reminder database is enabled. The systemd service must also
+provide a private writable Restic cache directory. Keep the repository URL generic until
+the operator selects an endpoint, bucket, prefix, and region; never include
+userinfo, query strings, or credentials in it.
+
+For example, this shape contains no credentials and is not directly runnable
+until its placeholders and host paths are replaced:
+
+```json
+{
+  "projectName": "matrix-calendar-sidecar",
+  "projectDirectory": "/opt/matrix-calendar-widget",
+  "composeEnvFile": "/etc/matrix-calendar/sidecar.env",
+  "captureRoot": "/var/backups/matrix-calendar",
+  "dockerSocket": "/var/run/docker.sock",
+  "helperImage": "busybox:1.37.0@sha256:<reviewed-image-digest>",
+  "reminderDatabaseEnabled": false,
+  "pgService": null,
+  "repository": "s3:https://<s3-endpoint>/<bucket>/<prefix>",
+  "awsRegion": "<selected-region>",
+  "awsProfile": "default",
+  "resticHost": "matrix-calendar-sidecar",
+  "resticTags": ["matrix-calendar-sidecar", "cold-paired-store"]
+}
+```
+
+The Compose env file, Restic password, S3 credentials, and optional PostgreSQL
+password are read only through protected paths; none is copied into a capture.
+The service template supplies the Restic password and S3 shared-credentials
+file with `LoadCredential=` and creates a private Restic cache directory. If
+running the coordinator outside systemd, set `RESTIC_CACHE_DIR` to an existing
+private directory. If the reminder database is enabled, set
+`reminderDatabaseEnabled` to `true`, set `pgService` to the selected libpq
+service, configure `PGSERVICEFILE` to a password-free service definition, and
+load a protected `.pgpass`-format file with `LoadCredential=` into
+`PGPASSFILE`. The coordinator rejects a selected libpq service containing a
+`password=` entry.
+Keep an independent recovery copy of the Restic repository password outside
+the host and S3 account; the project neither generates nor copies it.
+
+Before writing a capture, the coordinator validates configuration and private
+file permissions, the Compose model, the local Docker socket, the pinned helper
+image, both project-prefixed volumes, Restic, optional PostgreSQL tools, and
+that exactly one `widget`, `server`, and `radicale` container is running. A
+missing credential, invalid config, missing helper image, stopped service, or
+overlapping run fails closed before service changes. It does not pull images.
+It requires all three services to be running at the beginning; it will not
+silently start a service that was already stopped.
+
+The coordinator then stops `widget`, `server`, and `radicale`, verifies graceful
+stopped state, checks that no running Docker container uses either captured
+volume, and captures the explicitly configured PostgreSQL branch and
+read-only volume archives into a fresh private directory. It validates the
+dump and archives, writes checksums, and rechecks the stopped services before
+restarting `radicale`, `server`, and `widget`. It uploads only after every
+restart succeeds and the local directory has a `.capture-complete` marker.
+Any stop, dump, archive, verification, checksum, or restart failure prevents
+upload and leaves an unmarked local directory for operator inspection. Restic
+failure, including an incomplete-backup result, leaves the verified local
+capture marked complete but reports a failed run. The coordinator does not
+delete local captures automatically. Nonempty diagnostics from the dump,
+restore-list, or tar validation commands are treated as a failed capture stage.
+
+The lock is exclusive and a stale lock is not removed automatically; verify
+that no run is active before clearing one. A handled `SIGTERM` or `SIGINT`
+attempts to restart all initially running services in dependency order. A
+`SIGKILL`, host crash, or power loss can interrupt that cleanup, so check and
+start the project services after an interrupted host run. The coordinator can
+check Docker volume consumers but cannot detect every host process or external
+PostgreSQL writer. Ensure those are quiescent as well. The paired files and
+database dump form one recovery point, not a cross-store atomic snapshot.
+
+These templates and synthetic local tests do not establish a working S3
+provider, target-host scheduling, off-host upload, or restore. Validate the
+coordinator, service restart behavior, credential support, repository access,
+and paired restore on the intended host before enabling the timer.
 
 ## Prepare a backup window
 
