@@ -2,7 +2,7 @@
 
 _Last updated: 2026-10-12._
 
-_Source baseline: `main` at `4d49118103d5568a303a048ee841f6a39869952f`._
+_Source baseline: `main` at `be6d81c9193bd12c6bcb48aa16819b73350aafc9`._
 
 _Hosted application-acceptance source: PR #229 head `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378` (tree `660718db2d23a85ac688b7f194a8a66a2c8e201f`), merged to `main` as `467f87bf9cc744ef87721ae9334eee3686fc7461`._
 
@@ -259,8 +259,14 @@ loading, memory, and actual clients remain unmeasured.
   record does not establish the cause, and this failure is not classified as a
   flake. Reviewed candidate `2792294fcfcb7014cef3ae88b43dacc80f401227`
   adds bounded renderer enums and booleans to the closed G6 Member B summary;
-  one current-candidate Element Web acceptance run is pending to collect those
-  diagnostics. Issue #9 and operator readiness remain open.
+  follow-up source `deb3eba7126f6912723a7a3f3c33c37a4618ba66` (tree
+  `3076da655f1c273af4a38371e7087eea1d3b0916`) passed all five protected checks,
+  [Element Web acceptance](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38266006163),
+  and the [real-Docker PostgreSQL contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38266006168).
+  The same tree is on `main` as merge commit
+  `be6d81c9193bd12c6bcb48aa16819b73350aafc9`. This pass records acceptance on
+  the follow-up source but does not explain the original failure; no fix to its
+  underlying cause is claimed. Issue #9 and operator readiness remain open.
 
 - **Current candidate gate:** application acceptance passed on PR #229 source
   `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378`, merged to `main` with the same
