@@ -1,6 +1,6 @@
 # Project status
 
-_Last updated: 2026-10-09._
+_Last updated: 2026-10-12._
 
 _Source baseline: `main` at `0df38a81a0dccfd3e241b3011ec89f5593fd9e1c`._
 
@@ -241,7 +241,13 @@ loading, memory, and actual clients remain unmeasured.
   deferred. Issue #9 remains open for operator readiness, broad capacity, and
   wider client acceptance. Gateway and bot quotas are process-local; callers
   behind one reverse proxy share the gateway TCP-peer quota, and the beta
-  target uses one server replica.
+  target uses one server replica. A generic PostgreSQL first-initialization
+  hook and path-scoped real-Docker file-secret contract are authored for the
+  restricted app role, UID/GID 70 secret readability, positive TCP readiness,
+  and missing-secret failure. The new workflow has not run on a hosted
+  candidate yet; existing PostgreSQL CI and the current status do not claim
+  this contract passed. Its result will not establish the operator's database
+  endpoint, TLS, host mounts, backup, or recovery behavior.
 - **Current candidate gate:** application acceptance passed on PR #229 source
   `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378`, merged to `main` with the same
   tree. [CI](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317359),
