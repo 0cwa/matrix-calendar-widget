@@ -1,0 +1,38 @@
+# Example only. Review host paths, credentials, permissions, and Docker access
+# before copying this file to a systemd unit directory.
+[Unit]
+Description=Cold backup of the Matrix Calendar sidecar
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=matrix-calendar-backup
+Group=matrix-calendar-backup
+SupplementaryGroups=docker
+UMask=0077
+TimeoutStartSec=4h
+TimeoutStopSec=5m
+KillSignal=SIGTERM
+CacheDirectory=matrix-calendar-backup
+CacheDirectoryMode=0700
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+ReadWritePaths=/var/backups/matrix-calendar
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+LoadCredential=restic-password:/secure/operator-credentials/restic-password
+LoadCredential=s3-credentials:/secure/operator-credentials/s3-credentials
+Environment=RESTIC_PASSWORD_FILE=%d/restic-password
+Environment=AWS_SHARED_CREDENTIALS_FILE=%d/s3-credentials
+Environment=RESTIC_CACHE_DIR=/var/cache/matrix-calendar-backup
+
+# If the reminder database is enabled in backup.json, also configure a
+# password-free libpq service file and load its password as a credential:
+# LoadCredential=postgres-password:/secure/operator-credentials/postgres-password
+# Environment=PGSERVICEFILE=/etc/matrix-calendar/pg_service.conf
+# Environment=PGPASSFILE=%d/postgres-password
+
+ExecStart=/usr/local/sbin/matrix-calendar-cold-backup --config /etc/matrix-calendar/backup.json

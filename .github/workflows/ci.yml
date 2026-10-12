@@ -191,6 +191,7 @@ jobs:
 
       - name: Validate sidecar Compose defaults and opt-in configuration
         run: |
+          node --test scripts/matrix-calendar-cold-backup.test.mjs
           node --test scripts/validate-sidecar-compose.test.mjs
           node scripts/validate-sidecar-compose.mjs \
             --project-name matrix-calendar-sidecar \
