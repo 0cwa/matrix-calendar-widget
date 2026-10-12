@@ -23,6 +23,8 @@ export type RoomRenderDiagnosticField =
   | 'roomHeaderHeadingVisible'
   | 'roomErrorBoundaryVisible';
 
+export const ROOM_RENDER_DIAGNOSTIC_FIELDS: readonly RoomRenderDiagnosticField[];
+
 export type RoomReadinessSyncState =
   | 'ERROR'
   | 'PREPARED'

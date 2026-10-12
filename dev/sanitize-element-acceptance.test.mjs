@@ -3938,9 +3938,9 @@ test('accepts the real Element room observations under the g6 phase labels', () 
   assert.match(summary, /matrix_room_joined=true/u);
 });
 
-test('accepts the complete bounded room layout group only for G6 member B', () => {
-  // This is the full observeMemberARoom result shape, including fields that
-  // must be omitted from the G6 stage record by the phase-aware producer.
+test('accepts bounded G6 member B room-render diagnostics and rejects raw fields', () => {
+  // This is the full observeMemberARoom result shape. G6 member B retains the
+  // fixed renderer buckets and booleans in its closed summary.
   const callbackObservation = {
     matrixUserMatches: true,
     matrixRoomKnown: true,
@@ -4023,7 +4023,10 @@ test('accepts the complete bounded room layout group only for G6 member B', () =
     summary,
     /room_readiness_timeline_outcome=cancelled room_readiness_timeline_sample_count=2 room_readiness_timeline_overflow=false room_readiness_timeline_samples=0:observed:true:true:false:true:SYNCING;1000:observed:true:true:false:true:CATCHUP/u,
   );
-  assert.doesNotMatch(summary, /outer_render_bucket=/u);
+  assert.match(
+    summary,
+    /outer_render_bucket=room-page matrix_chat_shell_present=true room_view_wrapper_present=true room_view_renderer_present=true matrix_chat_state_available=true matrix_chat_view_bucket=logged-in matrix_chat_ready=true matrix_chat_page_type_bucket=room-view matrix_chat_current_room_matches=true room_render_state_available=true room_view_shell_visible=true room_view_body_visible=true room_preview_visible=false room_preview_loading_visible=false room_header_visible=true room_header_heading_visible=false room_error_boundary_visible=false/u,
+  );
 
   const budgetExhaustedRecord = {
     ...roomRecord,
@@ -4042,11 +4045,11 @@ test('accepts the complete bounded room layout group only for G6 member B', () =
   delete incompleteGroup.fixtureCalendarIframePresent;
   const nonBooleanGroup = { ...roomRecord, roomHeadingDomPresent: 'present' };
   const unrelatedPhase = { ...roomRecord, phase: 'g6-member-a-room-context' };
-  const rendererDiagnosticsLeaked = {
-    phase: 'g6-member-b-room-context',
-    status: 'failed',
-    failureCode: 'element-room-heading-not-present',
-    ...callbackObservation,
+  const privateRendererFields = {
+    ...roomRecord,
+    roomDisplayText: 'synthetic private room text',
+    rawDom: '<div>synthetic raw DOM</div>',
+    accessToken: 'synthetic-token-value',
   };
   const timelinePrivateField = {
     ...roomRecord,
@@ -4070,12 +4073,26 @@ test('accepts the complete bounded room layout group only for G6 member B', () =
     incompleteGroup,
     nonBooleanGroup,
     unrelatedPhase,
-    rendererDiagnosticsLeaked,
+    privateRendererFields,
     timelinePrivateField,
     timelineOutOfRange,
   ]) {
     assert.throws(
-      () => sanitizeElementAcceptance(JSON.stringify(invalidRecord), sourceSha),
+      () => {
+        try {
+          sanitizeElementAcceptance(JSON.stringify(invalidRecord), sourceSha);
+        } catch (error) {
+          const failureSummary = formatSanitizerFailureSummary(
+            error,
+            sourceSha,
+          );
+          assert.doesNotMatch(
+            failureSummary,
+            /synthetic private room text|synthetic raw DOM|synthetic-token-value/u,
+          );
+          throw error;
+        }
+      },
       { message: 'invalid element acceptance summary' },
     );
   }
@@ -4085,6 +4102,11 @@ test('accepts the complete bounded room layout group only for G6 member B', () =
     'member-a-room-context',
   );
   assert.equal(ordinaryObservation.outerRenderBucket, 'room-page');
+  const g6MemberAObservation = roomContextObservationForPhase(
+    callbackObservation,
+    'g6-member-a-room-context',
+  );
+  assert.equal(Object.hasOwn(g6MemberAObservation, 'outerRenderBucket'), false);
   const reminderObservation = roomContextObservationForPhase(
     callbackObservation,
     'reminder-room-context',
