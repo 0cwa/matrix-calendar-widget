@@ -14,11 +14,141 @@ configured Matrix SDK file store and may also contain crypto state if that
 feature is enabled. Treat both archives as sensitive, restrict access, and
 protect them at rest.
 
-This is an operator-run procedure for a cold, consistent copy. It does not
-configure scheduled backups, retention, off-host replication, encryption,
-monitoring, or recovery-time objectives. Choose and test those operational
-controls for the host before relying on the service. No live etke deployment or
+The volume capture below is a cold, consistent copy. The recommended off-host
+storage layer is a Restic repository on S3-compatible storage. Restic encrypts
+and deduplicates the captured files; the repository password must be kept
+separately from the repository. The project does not ship a backup script or
+systemd unit. An operator may schedule a host-local coordinator as described
+below, after validating it on that host. No S3 provider, scheduled run, or
+production recovery path has been validated here. No live etke deployment or
 etke data recovery path has been verified.
+
+## Restic repository and daily schedule
+
+Use a pinned Restic release and [verify the official binary checksums and
+signature](https://restic.readthedocs.io/en/stable/developer_information.html#verifying-the-official-binaries)
+before installing it. These examples target Restic 0.19.1. See the [Restic S3
+backend and credential options](https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html#s3-compatible-storage),
+[password and repository configuration](https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html),
+[Restic environment variables](https://restic.readthedocs.io/en/stable/075_scripting.html),
+[snapshot tags and scheduling](https://restic.readthedocs.io/en/stable/040_backup.html#scheduling-backups),
+and [retention and pruning](https://restic.readthedocs.io/en/stable/060_forget.html).
+
+Choose one stable S3 repository URL with a dedicated bucket prefix, for example
+`s3:https://<s3-endpoint>/<bucket>/<matrix-calendar-repository>`. The endpoint,
+bucket, and prefix are configuration, not credentials; keep the same repository
+path for every run and restore. Supply S3 credentials using the provider's
+supported secret mechanism. Restic supports an AWS shared-credentials file via
+`AWS_SHARED_CREDENTIALS_FILE`; do not put access keys or passwords in the
+repository URL, command arguments, shell history, unit files, or logs. Supply
+the Restic password through `RESTIC_PASSWORD_FILE`, using a protected runtime
+credential file. Keep an independently controlled recovery copy of that
+password outside the host and S3 account; losing it makes the repository
+unrecoverable. This process does not require a Matrix user's password.
+
+For systemd, a host-local service can use [`LoadCredential=`](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html#Credentials)
+to provide the
+password and S3 shared-credentials file as read-only runtime files, then set
+`RESTIC_PASSWORD_FILE=%d/restic-password`,
+`AWS_SHARED_CREDENTIALS_FILE=%d/s3-credentials`, and
+`RESTIC_REPOSITORY=<the-stable-repository-url>` in the service environment.
+Use the host's secret store for the credential sources. Do not put secret values
+in `Environment=` or `EnvironmentFile=`. Initialize the repository once from a
+protected operator session using that same configuration, and retain the
+repository password separately for recovery. Run `restic init` once with that
+protected configuration; do not put secret values on its command line.
+
+An illustrative unit pair can call an operator-maintained coordinator:
+
+```ini
+# /etc/systemd/system/matrix-calendar-backup.service
+[Unit]
+Description=Cold backup of the Matrix Calendar sidecar
+
+[Service]
+Type=oneshot
+LoadCredential=restic-password:/secure/operator-credentials/restic-password
+LoadCredential=s3-credentials:/secure/operator-credentials/s3-credentials
+Environment=RESTIC_PASSWORD_FILE=%d/restic-password
+Environment=AWS_SHARED_CREDENTIALS_FILE=%d/s3-credentials
+Environment=AWS_PROFILE=default
+Environment=RESTIC_REPOSITORY=s3:https://<s3-endpoint>/<bucket>/<matrix-calendar-repository>
+ExecStart=/usr/local/sbin/matrix-calendar-cold-backup
+```
+
+```ini
+# /etc/systemd/system/matrix-calendar-backup.timer
+[Unit]
+Description=Run the Matrix Calendar cold backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=matrix-calendar-backup.service
+
+[Install]
+WantedBy=timers.target
+```
+
+Protect the credential source files with host-appropriate permissions. The S3
+credentials file uses the standard shared-credentials format. The coordinator
+path is an operator-managed script; the example unit does not install or supply
+that script. Validate its failure handling, service restart behavior, and
+systemd credential support on the target host before enabling the timer.
+
+After the cold archives and any PostgreSQL dump are complete, the coordinator
+should back up the completed backup directory under one stable host identity and
+stable tags, for example:
+
+```bash
+restic backup --host matrix-calendar-sidecar --tag matrix-calendar-sidecar \
+  --tag cold-paired-store --group-by host,tags "$BACKUP_DIR"
+```
+
+The capture directory name contains a backup timestamp, so `host,tags` is set
+for both backup and retention; otherwise each dated source path would form a
+separate retention group. Keep the repository prefix, host identity, and both
+tags stable for this deployment.
+
+Scope retention to that identity and tag pair. First review the proposed
+deletions with `--dry-run`; only after confirming the selection, schedule the
+same command without `--dry-run` and with `--prune`:
+
+```bash
+restic forget --host matrix-calendar-sidecar \
+  --tag matrix-calendar-sidecar,cold-paired-store \
+  --group-by host,tags --keep-daily 30 --dry-run
+```
+
+After reviewing the preview, use the same scope and policy without dry-run and
+with pruning enabled:
+
+```bash
+restic forget --host matrix-calendar-sidecar \
+  --tag matrix-calendar-sidecar,cold-paired-store \
+  --group-by host,tags --keep-daily 30 --prune
+```
+
+This policy keeps one point for each of up to 30 days with a successful backup.
+A missed timer run leaves a gap; the timer does not guarantee a daily recovery
+point. Pruning can lock the repository while it runs, so schedule it where it
+will not overlap a backup. Check the repository periodically and alert on
+service failure or incomplete backup results. Run `restic check` periodically
+to check repository structure.
+
+Restic does not schedule itself. A host operator can install the example systemd
+oneshot service and daily timer to invoke a private host-local coordinator.
+That coordinator must perform the existing quiesce, capture, verification,
+Restic upload, and restart steps as one failure-aware run: stop new widget
+requests and all Radicale/server writers, coordinate the PostgreSQL dump if
+enabled, do not upload a partial capture, and restart the services even if a
+later step fails. Restart after the local capture is complete, before the S3
+upload; preserve the capture and report failure if upload or retention fails.
+Treat Restic's incomplete-backup result as a failed recovery point even if it
+created a snapshot. Prevent overlapping runs and make failures visible to the
+operator. The repository provides neither that coordinator nor systemd units;
+timer installation and daily execution remain host responsibilities.
 
 ## Prepare a backup window
 
@@ -36,7 +166,11 @@ COMPOSE_FILE=deploy/etke-sidecar.compose.yaml
 ENV_FILE=deploy/.env.local
 BACKUP_ID=$(date -u +%Y%m%dT%H%M%SZ)
 BACKUP_DIR="/secure/off-host-backups/matrix-calendar/$BACKUP_ID"
-mkdir -p "$BACKUP_DIR"
+# Set explicitly from deployment configuration; do not leave this placeholder.
+REMINDER_DB_BACKUP_ENABLED=replace-with-true-or-false
+PG_SERVICE=matrix-calendar-reminder
+mkdir -p "$(dirname "$BACKUP_DIR")"
+mkdir -m 0700 "$BACKUP_DIR"
 ```
 
 Stop every writer before copying either volume. Stopping the widget also avoids
@@ -50,8 +184,52 @@ Confirm all three services are stopped and that no other container or host
 process writes to either volume. If a service will not stop cleanly, do not
 archive a live volume and call the result consistent; resolve the shutdown
 problem first. If the optional reminder PostgreSQL store is enabled, coordinate
-its backup in this same maintenance window as described below. CalDAV and
-PostgreSQL do not provide a cross-store atomic snapshot.
+its backup in this same maintenance window as described below. Stop the calendar
+server while the database dump is made, and keep the custom-format dump inside
+`BACKUP_DIR` so the volume archives and database dump enter the same Restic
+snapshot. CalDAV and PostgreSQL do not provide a cross-store atomic snapshot.
+Never copy PostgreSQL's live data directory. Do not include the database URL, a
+password file, Matrix tokens, or resolved Compose configuration in the capture
+directory.
+
+While all writers remain stopped, capture the optional reminder database before
+archiving the volumes. Set `REMINDER_DB_BACKUP_ENABLED` explicitly to `true`
+when `MATRIX_CALENDAR_REMINDER_DATABASE_URL` is configured, and to `false` only
+when the reminder database is not configured. The private libpq service named
+by `PG_SERVICE` must resolve the database connection without putting a URL or
+password in this shell, command line, or log:
+
+```bash
+case "$REMINDER_DB_BACKUP_ENABLED" in
+  true)
+    PGSERVICE="$PG_SERVICE" pg_dump --format=custom \
+      --file="$BACKUP_DIR/reminder-postgresql.dump.partial"
+    test -s "$BACKUP_DIR/reminder-postgresql.dump.partial"
+    PGSERVICE="$PG_SERVICE" pg_restore --list \
+      "$BACKUP_DIR/reminder-postgresql.dump.partial" >/dev/null
+    mv "$BACKUP_DIR/reminder-postgresql.dump.partial" \
+      "$BACKUP_DIR/reminder-postgresql.dump"
+    ;;
+  false)
+    if [ -e "$BACKUP_DIR/reminder-postgresql.dump" ] || \
+       [ -e "$BACKUP_DIR/reminder-postgresql.dump.partial" ]; then
+      echo "Unexpected PostgreSQL dump in a no-database capture" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "Set REMINDER_DB_BACKUP_ENABLED explicitly to true or false" >&2
+    exit 1
+    ;;
+esac
+```
+
+If the enabled branch fails, stop the capture: do not mark it complete or upload
+a Restic snapshot. The coordinator must keep its restart trap active across
+this check and restart the services on failure. For a manual run, restart the
+normal project after aborting the capture. The unique `BACKUP_DIR` and explicit
+no-database branch prevent an earlier dump or partial file from being mistaken
+for the current run's paired backup.
 
 ## Archive the two volumes
 
@@ -78,6 +256,21 @@ mv "$BACKUP_DIR/server-data.tar.partial" "$BACKUP_DIR/server-data.tar"
 sha256sum "$BACKUP_DIR/radicale-data.tar" "$BACKUP_DIR/server-data.tar" \
   > "$BACKUP_DIR/SHA256SUMS"
 
+case "$REMINDER_DB_BACKUP_ENABLED" in
+  true)
+    test -s "$BACKUP_DIR/reminder-postgresql.dump"
+    sha256sum "$BACKUP_DIR/reminder-postgresql.dump" >> "$BACKUP_DIR/SHA256SUMS"
+    ;;
+  false)
+    test ! -e "$BACKUP_DIR/reminder-postgresql.dump"
+    test ! -e "$BACKUP_DIR/reminder-postgresql.dump.partial"
+    ;;
+  *)
+    echo "Set REMINDER_DB_BACKUP_ENABLED explicitly to true or false" >&2
+    exit 1
+    ;;
+esac
+
 docker run --rm \
   --mount "type=bind,source=$(realpath "$BACKUP_DIR"),target=/backup,readonly" \
   busybox:1.37.0 sh -c \
@@ -86,10 +279,9 @@ docker run --rm \
 
 Use an archive tool and extraction mode that preserve file contents, directory
 structure, symlinks, permissions, and numeric ownership for the volume. Verify
-the archives can be read and retain the checksum manifest with them. Store the
-backup off the Docker host under the organization's access-control and
-retention policy. Do not publish archive listings: calendar objects and Matrix
-SDK state may contain sensitive data.
+the archives can be read and retain the checksum manifest with them. Do not
+publish archive listings: calendar objects and Matrix SDK state may contain
+sensitive data.
 
 After both archives and checksums are verified, restart the normal project:
 
@@ -100,6 +292,12 @@ docker compose --project-name "$PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FIL
 Record the backup time, Compose project name, source revision/image identifiers,
 archive checksums, and any separately backed-up database's recovery point in
 the operator's protected backup record. Do not record secrets or event data.
+After the local capture is complete, upload `BACKUP_DIR` to the configured
+Restic repository using the stable host and tags described above. First review
+the retention preview; only then enable automatic pruning. Keep the local
+capture until Restic reports a complete snapshot. A successful upload does not
+prove that the files can be restored or that the S3 service meets a durability
+target.
 
 ## Restore into an isolated Compose project
 
@@ -163,6 +361,9 @@ project at a test Matrix homeserver and disposable bot credentials, and provide
 an isolated external PostgreSQL database if the reminder store was enabled.
 Do not start the restored copy against the production homeserver, production
 database, public hostnames, or production proxy network during validation.
+If PostgreSQL is enabled, restore its custom-format dump into the isolated
+staging database and restore required roles and grants before starting the
+project. See the separate PostgreSQL guidance below.
 Keep the isolated project name when starting Compose so it continues to use the
 restored volumes:
 
@@ -179,6 +380,25 @@ host. Keep it mode-restricted and never print its resolved Compose config.
 Validate the restored copy before changing production traffic or deleting any
 backup. At minimum:
 
+Restore the selected Restic snapshot into a new, empty staging directory first;
+never restore over an active production capture directory. Verify the restored
+`SHA256SUMS` manifest before extracting either volume archive or using the
+PostgreSQL dump. Supply the repository path, S3 credentials, and Restic
+password through the protected recovery environment; do not copy them into the
+restore command or logs. List snapshots with `restic snapshots` and select the
+intended backup by its stable host, tags, and recovery time:
+
+```bash
+RESTORE_STAGING_DIR=/secure/restore-staging/matrix-calendar
+SNAPSHOT_ID=replace-with-listed-snapshot-id
+mkdir -m 0700 "$RESTORE_STAGING_DIR"
+restic restore "$SNAPSHOT_ID" --target "$RESTORE_STAGING_DIR"
+```
+
+Restic restores the snapshot's saved paths below the target directory. Locate
+the captured backup directory there, then run the checksum and isolated-volume
+steps below against that directory.
+
 1. Confirm the isolated Compose services start and reach their expected health
    state without exposing credentials or raw calendar contents in logs.
 2. Authenticate with a dedicated staging Matrix test account and confirm a
@@ -189,9 +409,9 @@ backup. At minimum:
 3. In a dedicated canary calendar, create, read, update, and delete a canary
    event. Confirm the canary operation does not change the recovered calendar
    objects, then remove the canary calendar if appropriate.
-4. If PostgreSQL is enabled, validate its isolated restore and the reminder
-   service's startup/migration behavior against that staging database. Do not
-   send real Matrix reminders from a recovery test.
+4. If PostgreSQL is enabled, validate reminder-service startup/migration
+   behavior against the isolated staging database. Do not send real Matrix
+   reminders from a recovery test.
 5. After validation, remove only resources bearing the unique restore project
    name. First stop and remove that Compose project's containers and network,
    then remove only its two named volumes. Do not use `docker system prune` or
@@ -213,14 +433,16 @@ Radicale service or its data.
 ## Optional external PostgreSQL store
 
 The optional reminder database configured by
-`MATRIX_CALENDAR_REMINDER_DATABASE_URL` is external to the Compose volumes. It
-is not included in either archive. Use the database operator's supported
-PostgreSQL backup procedure to create and verify a separate backup, including
-the required schema/data and the separately managed roles or grants needed by
-the application. Keep database credentials and dumps protected. Coordinate
-the database recovery point with the cold volume backup by stopping the
-calendar server while both are captured; the application does not provide a
-single atomic transaction across CalDAV files and PostgreSQL.
+`MATRIX_CALENDAR_REMINDER_DATABASE_URL` is external to the Compose volumes. The
+enabled capture branch above creates its custom-format dump while the writers
+are stopped, validates it with `pg_restore --list`, and requires it in the
+checksum manifest before the capture can complete. The dump is included in the
+same Restic snapshot as the volume archives. It does not replace the separate
+protected role and grant recovery procedure. See the [PostgreSQL `pg_dump`
+documentation](https://www.postgresql.org/docs/current/app-pgdump.html) and
+[`pg_restore` documentation](https://www.postgresql.org/docs/current/app-pgrestore.html).
+Keep database credentials and dumps protected. The application does not provide
+a single atomic transaction across CalDAV files and PostgreSQL.
 
 Restore PostgreSQL into an isolated staging database before restoring or
 starting the sidecar against it. The production server requires verified TLS

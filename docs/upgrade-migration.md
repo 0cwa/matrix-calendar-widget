@@ -114,22 +114,28 @@ existing store.
    recovery point, target artifact set, and a tested recovery choice. Keep
    secret-bearing environment files out of transcripts and version control.
 
-The backup procedure covers only the project-owned `radicale-data` and
-`server-data` volumes. It does not configure backup retention, encryption,
-off-host replication, or a production RPO/RTO. The application database is
-external and needs its own backup. A volume archive and database dump from the
-same outage are coordinated but not a single atomic snapshot; the isolated
-restore must check that the paired data is coherent.
+The backup runbook covers only the project-owned `radicale-data` and
+`server-data` volumes and recommends Restic for encrypted, deduplicated,
+off-host snapshots with 30 daily retention points. The operator must provision
+the S3-compatible repository and host-local daily systemd schedule; this
+repository ships neither the backup coordinator nor systemd units. The
+operator must separately dump the external reminder database in custom format
+while the calendar server is stopped and include that dump in the same Restic
+snapshot. These captures are coordinated, not one atomic transaction; isolated
+restore must verify paired-data coherence. The target S3 service, scheduled
+execution, target-host recovery, and production RPO/RTO remain unvalidated or
+unset.
 
 ## Apply and validate an upgrade
 
 1. **Stop writes and capture the cold backup.** Use the exact Compose file,
    project name, and environment for the deployment. Follow the stop and
-   archive sequence in [backup and recovery](./backup-recovery.md), including
+   capture sequence in [backup and recovery](./backup-recovery.md), including
    stopping the widget, server, and Radicale writers and confirming no other
-   process writes to the volumes. If PostgreSQL is configured, stop the server
-   while its separate backup is made. Do not archive live volumes and call
-   them consistent.
+   process writes to the volumes. If PostgreSQL is configured, create its
+   custom-format dump while the application server is stopped. Do not archive
+   live volumes or copy PostgreSQL's live data directory and call them
+   consistent.
 2. **Apply only the pinned compatible set.** Use the release's reviewed
    deployment values and documented rollout order. The Compose `:local`
    example is not a release pin. Keep the deployment at one server replica.
