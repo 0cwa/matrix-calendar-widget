@@ -24,9 +24,10 @@ const ROOM_CONTEXT_PHASES = new Set([
 const ROOM_RENDER_DIAGNOSTIC_PHASES = new Set([
   'member-a-room-context',
   'reminder-room-context',
+  'g6-member-b-room-context',
 ]);
 const ROOM_READINESS_TIMELINE_PHASES = new Set(['g6-member-b-room-context']);
-const ROOM_RENDER_DIAGNOSTIC_FIELDS = [
+export const ROOM_RENDER_DIAGNOSTIC_FIELDS = Object.freeze([
   'outerRenderBucket',
   'matrixChatShellPresent',
   'roomViewWrapperPresent',
@@ -44,7 +45,7 @@ const ROOM_RENDER_DIAGNOSTIC_FIELDS = [
   'roomHeaderVisible',
   'roomHeaderHeadingVisible',
   'roomErrorBoundaryVisible',
-];
+]);
 const ROOM_READINESS_SYNC_STATES = new Set([
   'ERROR',
   'PREPARED',

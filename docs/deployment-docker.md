@@ -473,3 +473,50 @@ operator-controlled isolated database network. It disables TLS explicitly and
 must not be used across an untrusted network. The CI localhost PostgreSQL
 contract sets this exception only for its disposable test database. No
 production database TLS connection or etke host deployment has been validated.
+
+### First initialization with file-backed secrets
+
+[`deploy/postgres/10-create-app-role.sh`](../deploy/postgres/10-create-app-role.sh)
+is a first-initialization hook for a **fresh, project-owned PostgreSQL data
+volume**. Mount it read-only under
+`/docker-entrypoint-initdb.d/10-create-app-role.sh`. It creates the dedicated
+`matrix_calendar_app` LOGIN role and its sole `matrix_calendar` database; the
+role cannot create databases or roles and has no superuser, replication, or
+`BYPASSRLS` privilege. The database owner can create the application's schema
+and run its versioned migrations.
+
+Keep the two password files separate. PostgreSQL's
+`POSTGRES_PASSWORD_FILE` is the cluster-bootstrap credential read by the
+official image entrypoint. The hook reads the app-role credential from
+`/run/secrets/matrix_calendar_pg_app_password` (or the non-secret path setting
+`MATRIX_CALENDAR_PG_APP_PASSWORD_FILE`). Do not put either password value in
+Docker's configured environment or command arguments, write it to an SQL file,
+or log it. The official entrypoint reads the bootstrap password from its file;
+the hook passes the app password to `psql` through a temporary process
+environment while sending SQL through standard input. It suppresses
+credential-bearing diagnostics, clears its temporary environment values, and
+fails initialization when the app file is missing or malformed.
+
+For file-backed bind mounts with the tested
+`postgres:16.15-alpine3.23` image, set the bootstrap file to owner `0:0` and
+mode `0400`; set the app file to owner `70:70` and mode `0400`, because the
+entrypoint reads `POSTGRES_PASSWORD_FILE` during its root setup phase and runs
+the init hook as that PostgreSQL account afterward. Keep the temporary host
+parent directory at mode `0700` and mount both files read-only. Docker Compose's
+local file-secret mode/uid/gid settings do not change ownership on bind-mounted
+files, so set host ownership before starting the container. Verify these
+details again if selecting a different PostgreSQL image or runtime.
+
+The hook runs only while PostgreSQL initializes an empty data directory. It
+does not rotate credentials or reconcile an existing database. If the first
+initialization fails after PostgreSQL has created its data directory, an
+ordinary restart will not rerun the hook; plan explicit recovery for that
+incomplete volume. Inject the same app-role credential separately into the
+server's `MATRIX_CALENDAR_REMINDER_DATABASE_URL` through the operator's secret
+mechanism; that URL remains server-only. The path-scoped
+[Operator PostgreSQL contract workflow](../.github/workflows/operator-postgres-contract.yml)
+uses synthetic secrets and real Docker to exercise positive initialization,
+TCP readiness, restricted-role database writes, file ownership/readability,
+and missing-secret failure. Hosted execution of that workflow and the
+operator's target-specific deployment, TLS, backup, and recovery rehearsal
+remain separate acceptance gates.

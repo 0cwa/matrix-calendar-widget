@@ -7,6 +7,7 @@ import {
   loadRuntimeDependencyAllowlist,
 } from './element-acceptance-diagnostics.mjs';
 import { formatPerformanceEvidence } from './element-acceptance-performance-evidence.mjs';
+import { ROOM_RENDER_DIAGNOSTIC_FIELDS } from './element-room-context-observation.mjs';
 
 const RUNTIME_DEPENDENCIES = loadRuntimeDependencyAllowlist(
   resolve(dirname(fileURLToPath(import.meta.url)), '..'),
@@ -197,16 +198,10 @@ const MATRIX_CHAT_STATE_FIELDS = [
   'matrixChatPageTypeBucket',
   'matrixChatCurrentRoomMatches',
 ];
-const ROOM_RENDER_DIAGNOSTIC_FIELDS = [
-  'outerRenderBucket',
-  ...OUTER_RENDERER_PRESENCE_FIELDS,
-  ...MATRIX_CHAT_STATE_FIELDS,
-  'roomRenderStateAvailable',
-  ...ROOM_RENDER_STATE_FIELDS,
-];
 const ROOM_RENDER_DIAGNOSTIC_PHASES = new Set([
   'member-a-room-context',
   'reminder-room-context',
+  'g6-member-b-room-context',
 ]);
 const G6_PHASES = new Set(
   [...PHASES].filter(

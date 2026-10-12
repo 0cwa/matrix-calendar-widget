@@ -1,8 +1,8 @@
 # Project status
 
-_Last updated: 2026-10-09._
+_Last updated: 2026-10-12._
 
-_Source baseline: `main` at `0df38a81a0dccfd3e241b3011ec89f5593fd9e1c`._
+_Source baseline: `main` at `4d49118103d5568a303a048ee841f6a39869952f`._
 
 _Hosted application-acceptance source: PR #229 head `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378` (tree `660718db2d23a85ac688b7f194a8a66a2c8e201f`), merged to `main` as `467f87bf9cc744ef87721ae9334eee3686fc7461`._
 
@@ -241,7 +241,27 @@ loading, memory, and actual clients remain unmeasured.
   deferred. Issue #9 remains open for operator readiness, broad capacity, and
   wider client acceptance. Gateway and bot quotas are process-local; callers
   behind one reverse proxy share the gateway TCP-peer quota, and the beta
-  target uses one server replica.
+  target uses one server replica. PR #243 candidate
+  `9e1bea6017279646808fe778aa294a8ad32b578c` passed all five protected checks
+  and the path-scoped real-Docker PostgreSQL first-initialization contract.
+  That synthetic contract verified restricted app-role behavior, distinct
+  file-backed secrets, UID/GID 70 app-secret readability, positive TCP
+  readiness, application-owned database writes, and fail-closed startup when
+  the app secret is missing. It does not establish the operator's database
+  endpoint, TLS, host mounts, backup, or recovery behavior.
+
+  Element Web acceptance failed on that exact candidate in [run
+  38261568607](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38261568607),
+  during `g6-member-b-room-context`, before fixture seeding or the G6 client
+  interaction assertions. The sanitized record showed the expected member
+  session, route, and room membership, while sync remained `SYNCING` and the
+  room view and heading were absent through the bounded readiness window. The
+  record does not establish the cause, and this failure is not classified as a
+  flake. Reviewed candidate `2792294fcfcb7014cef3ae88b43dacc80f401227`
+  adds bounded renderer enums and booleans to the closed G6 Member B summary;
+  one current-candidate Element Web acceptance run is pending to collect those
+  diagnostics. Issue #9 and operator readiness remain open.
+
 - **Current candidate gate:** application acceptance passed on PR #229 source
   `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378`, merged to `main` with the same
   tree. [CI](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317359),

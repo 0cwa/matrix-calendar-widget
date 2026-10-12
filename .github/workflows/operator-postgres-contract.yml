@@ -1,0 +1,26 @@
+name: Operator PostgreSQL contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/operator-postgres-contract.yml'
+      - 'deploy/postgres/**'
+      - 'dev/operator-postgres-contract.py'
+      - 'docs/deployment-docker.md'
+      - 'docs/PLAN.md'
+      - 'docs/STATUS.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-bootstrap:
+    name: File-backed PostgreSQL bootstrap on Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Exercise the pinned PostgreSQL image and file secrets
+        run: python3 dev/operator-postgres-contract.py
