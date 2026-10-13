@@ -28,6 +28,13 @@ import {
 import { randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
+import {
+  compareEventTimingWithRoomRange,
+  inspectExpectedEventList,
+  readCreatedEventTiming,
+  type CreatedEventTiming,
+  type ExpectedRoomRange,
+} from '../../dev/element-acceptance-event-observation.mjs';
 import { hasUniqueWidgetFrameOwnedByElement } from '../../dev/element-desktop-frame-origin.mjs';
 import {
   appendDesktopJourneyOutcome,
@@ -107,6 +114,10 @@ type DesktopWidgetPromptObservation = Pick<
 
 type DesktopEventCreatePostObserver = {
   snapshot: () => DesktopEventCreateFailureDiagnostic;
+  collect: (
+    frame: FrameLocator | undefined,
+    expectedTitle: string | undefined,
+  ) => Promise<DesktopEventCreateFailureDiagnostic>;
   stop: () => void;
 };
 
@@ -303,6 +314,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let webBFrame: FrameLocator | undefined;
   let webBSelectedTitle: string | undefined;
   let webBEditedTitle: string | undefined;
+  let desktopEventCreateTitle: string | undefined;
   let desktopGatewayReadObserver: DesktopGatewayReadRequestObserver | undefined;
   let desktopEventCreatePostObserver:
     | DesktopEventCreatePostObserver
@@ -497,12 +509,14 @@ test('Element Desktop room event journey', async ({ browser }) => {
     enterPhase('desktop-event-create');
     currentFailurePoint = 'event-create-setup';
     const initialTitle = `Desktop acceptance ${randomUUID()}`;
+    desktopEventCreateTitle = initialTitle;
     const editedTitle = `${initialTitle} edited`;
     webBSelectedTitle = initialTitle;
     webBEditedTitle = editedTitle;
     desktopEventCreatePostObserver = observeDesktopEventCreatePost(
       desktopPage,
       fixture,
+      initialTitle,
     );
     const createResponse = waitForGatewayResponse(desktopPage, fixture, 'POST');
     void createResponse.catch(() => undefined);
@@ -826,6 +840,9 @@ test('Element Desktop room event journey', async ({ browser }) => {
         | undefined;
       if (currentPhase === 'desktop-event-create') {
         desktopEventCreateDiagnostic =
+          (await desktopEventCreatePostObserver
+            ?.collect(desktopWidgetFrame, desktopEventCreateTitle)
+            .catch(() => undefined)) ??
           desktopEventCreatePostObserver?.snapshot() ??
           unavailableDesktopEventCreateFailureDiagnostic();
       }
@@ -1344,18 +1361,165 @@ function unavailableDesktopEventCreateFailureDiagnostic(): DesktopEventCreateFai
     createPostObserved: null,
     createPostRequestFailed: null,
     createPostStatus: null,
+    createResponseHasEvent: null,
+    createResponseTitleMatches: null,
+    createResponseCalendarMatches: null,
+    postCreateEventGetRequestCountCapped: null,
+    postCreateRoomRangeGetRequestCountCapped: null,
+    postCreateRoomRangeGetResponseCountCapped: null,
+    postCreateRoomRangeGetStatus: null,
+    roomListHasEventsArray: null,
+    roomListEventCountCapped: null,
+    roomListTitleMatches: null,
+    roomListIdMatches: null,
+    roomListCalendarMatches: null,
+    createResponseTimingComparable: null,
+    createResponseEventIntersectsRoomRange: null,
+    calendarEventsRegionCountCapped: null,
+    calendarEventsRegionVisible: null,
+    calendarEventsVisibleRowCountCapped: null,
+    progressbarVisible: null,
+    errorAlertVisible: null,
+    matchingRowCountCapped: null,
+    matchingRowVisible: null,
   };
 }
 
 function observeDesktopEventCreatePost(
   page: Page,
   fixture: Fixture,
+  expectedTitle: string,
 ): DesktopEventCreatePostObserver {
   let installed = false;
   let firstMatchingRequest: Request | undefined;
   let requestFailed = false;
   let status: number | null = null;
   let stopped = false;
+  let successfulCreateResponseObserved = false;
+  let createResponseHasEvent: boolean | null = null;
+  let createResponseTitleMatches: boolean | null = null;
+  let createResponseCalendarMatches: boolean | null = null;
+  let createdEventId: string | undefined;
+  let createdEventTiming: CreatedEventTiming | undefined;
+  let expectedRoomRange: ExpectedRoomRange | undefined;
+  let postCreateEventGetRequestCountCapped: 0 | 1 | 2 = 0;
+  let postCreateRoomRangeGetRequestCountCapped: 0 | 1 | 2 = 0;
+  let postCreateRoomRangeGetResponseCountCapped: 0 | 1 | 2 = 0;
+  let postCreateRoomRangeGetStatus: number | null = null;
+  let roomListHasEventsArray: boolean | null = null;
+  let roomListEventCountCapped: 0 | 1 | 2 | null = null;
+  let roomListTitleMatches: boolean | null = null;
+  let roomListIdMatches: boolean | null = null;
+  let roomListCalendarMatches: boolean | null = null;
+  let createResponseTimingComparable: boolean | null = null;
+  let createResponseEventIntersectsRoomRange: boolean | null = null;
+  let latestRangeResponse = 0;
+  const roomRangesByRequest = new WeakMap<Request, ExpectedRoomRange>();
+  const pendingResponseReads: Promise<void>[] = [];
+  let createResponseRead: Promise<void> | undefined;
+  let calendarEventsRegionCountCapped: 0 | 1 | 2 | null = null;
+  let calendarEventsRegionVisible: boolean | null = null;
+  let calendarEventsVisibleRowCountCapped: 0 | 1 | 2 | null = null;
+  let progressbarVisible: boolean | null = null;
+  let errorAlertVisible: boolean | null = null;
+  let matchingRowCountCapped: 0 | 1 | 2 | null = null;
+  let matchingRowVisible: boolean | null = null;
+
+  const isEventsEndpoint = (rawUrl: string) => {
+    try {
+      const url = new URL(rawUrl);
+      return (
+        url.origin === new URL(fixture.gatewayUrl).origin &&
+        url.pathname === '/v1/calendar/events'
+      );
+    } catch {
+      return false;
+    }
+  };
+  const readExpectedRoomRange = (
+    rawUrl: string,
+  ): ExpectedRoomRange | undefined => {
+    try {
+      const url = new URL(rawUrl);
+      const query = url.searchParams;
+      const start = query.get('start');
+      const end = query.get('end');
+      const timezone = query.get('timezone');
+      if (
+        url.origin !== new URL(fixture.gatewayUrl).origin ||
+        url.pathname !== '/v1/calendar/events' ||
+        query.get('target') !== 'room' ||
+        query.get('roomId') !== fixture.teamRoomId ||
+        query.get('calendarId') !== fixture.calendarId ||
+        !start ||
+        !end ||
+        !timezone ||
+        start.length > 128 ||
+        end.length > 128 ||
+        timezone.length > 128 ||
+        !Number.isFinite(Date.parse(start)) ||
+        !Number.isFinite(Date.parse(end)) ||
+        Date.parse(end) <= Date.parse(start)
+      ) {
+        return undefined;
+      }
+      return { start, end, timezone };
+    } catch {
+      return undefined;
+    }
+  };
+  const readCreateResponse = async (response: Response) => {
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      return;
+    }
+    const event = isRecord(body) && isRecord(body.event) ? body.event : null;
+    createResponseHasEvent = event !== null;
+    createResponseTitleMatches = event
+      ? typeof event.title === 'string' && event.title === expectedTitle
+      : false;
+    createResponseCalendarMatches = event
+      ? typeof event.calendarId === 'string' &&
+        event.calendarId === fixture.calendarId
+      : false;
+    if (!event) return;
+    if (typeof event.id === 'string' && event.id.length > 0) {
+      createdEventId = event.id;
+    }
+    createdEventTiming = readCreatedEventTiming(event.timing);
+  };
+  const readRoomRangeResponse = async (
+    response: Response,
+    responseNumber: number,
+  ) => {
+    await createResponseRead;
+    let headers: Record<string, string>;
+    try {
+      headers = response.headers();
+    } catch {
+      return;
+    }
+    if (!isBoundedWebBEventListResponse(headers)) return;
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      return;
+    }
+    if (responseNumber !== latestRangeResponse) return;
+    const summary = inspectExpectedEventList(body, {
+      expectedTitle,
+      expectedCalendarId: fixture.calendarId,
+      ...(createdEventId ? { createdEventId } : {}),
+    });
+    roomListHasEventsArray = summary.hasEventsArray;
+    roomListEventCountCapped = summary.eventCountCapped;
+    roomListTitleMatches = summary.titleMatches;
+    roomListIdMatches = summary.idMatches;
+    roomListCalendarMatches = summary.calendarMatches;
+  };
 
   const onRequest = (request: Request) => {
     if (
@@ -1364,6 +1528,26 @@ function observeDesktopEventCreatePost(
     ) {
       firstMatchingRequest = request;
     }
+    if (
+      stopped ||
+      !successfulCreateResponseObserved ||
+      request.method() !== 'GET' ||
+      !isEventsEndpoint(request.url())
+    ) {
+      return;
+    }
+    postCreateEventGetRequestCountCapped = Math.min(
+      postCreateEventGetRequestCountCapped + 1,
+      2,
+    ) as 0 | 1 | 2;
+    const range = readExpectedRoomRange(request.url());
+    if (range && postCreateRoomRangeGetRequestCountCapped < 2) {
+      postCreateRoomRangeGetRequestCountCapped = Math.min(
+        postCreateRoomRangeGetRequestCountCapped + 1,
+        2,
+      ) as 0 | 1 | 2;
+      roomRangesByRequest.set(request, range);
+    }
   };
   const onRequestFailed = (request: Request) => {
     if (request === firstMatchingRequest && status === null) {
@@ -1371,7 +1555,32 @@ function observeDesktopEventCreatePost(
     }
   };
   const onResponse = (response: Response) => {
-    if (response.request() !== firstMatchingRequest || status !== null) return;
+    const request = response.request();
+    if (request === firstMatchingRequest && status === null) {
+      try {
+        const observedStatus = response.status();
+        if (
+          Number.isInteger(observedStatus) &&
+          observedStatus >= 100 &&
+          observedStatus <= 599
+        ) {
+          status = observedStatus;
+          successfulCreateResponseObserved =
+            observedStatus >= 200 && observedStatus < 300;
+          if (successfulCreateResponseObserved) {
+            createResponseRead = readCreateResponse(response);
+            pendingResponseReads.push(createResponseRead);
+          }
+        }
+      } catch {
+        // Preserve only fixed status and response facts.
+      }
+      return;
+    }
+    const range = roomRangesByRequest.get(request);
+    if (!range || stopped || postCreateRoomRangeGetResponseCountCapped >= 2) {
+      return;
+    }
     try {
       const observedStatus = response.status();
       if (
@@ -1379,10 +1588,27 @@ function observeDesktopEventCreatePost(
         observedStatus >= 100 &&
         observedStatus <= 599
       ) {
-        status = observedStatus;
+        postCreateRoomRangeGetResponseCountCapped = Math.min(
+          postCreateRoomRangeGetResponseCountCapped + 1,
+          2,
+        ) as 0 | 1 | 2;
+        postCreateRoomRangeGetStatus = observedStatus;
+        expectedRoomRange = range;
+        latestRangeResponse += 1;
+        const responseNumber = latestRangeResponse;
+        roomListHasEventsArray = null;
+        roomListEventCountCapped = null;
+        roomListTitleMatches = null;
+        roomListIdMatches = null;
+        roomListCalendarMatches = null;
+        createResponseTimingComparable = null;
+        createResponseEventIntersectsRoomRange = null;
+        pendingResponseReads.push(
+          readRoomRangeResponse(response, responseNumber),
+        );
       }
     } catch {
-      // Preserve only the fixed request/status observations.
+      // Preserve only fixed request/status and decoded match facts.
     }
   };
   try {
@@ -1400,27 +1626,127 @@ function observeDesktopEventCreatePost(
     }
   }
 
+  const snapshot = (): DesktopEventCreateFailureDiagnostic =>
+    installed
+      ? {
+          createPostObserved: firstMatchingRequest !== undefined,
+          createPostRequestFailed: requestFailed,
+          createPostStatus: status,
+          createResponseHasEvent,
+          createResponseTitleMatches,
+          createResponseCalendarMatches,
+          postCreateEventGetRequestCountCapped,
+          postCreateRoomRangeGetRequestCountCapped,
+          postCreateRoomRangeGetResponseCountCapped,
+          postCreateRoomRangeGetStatus,
+          roomListHasEventsArray,
+          roomListEventCountCapped,
+          roomListTitleMatches,
+          roomListIdMatches,
+          roomListCalendarMatches,
+          createResponseTimingComparable,
+          createResponseEventIntersectsRoomRange,
+          calendarEventsRegionCountCapped,
+          calendarEventsRegionVisible,
+          calendarEventsVisibleRowCountCapped,
+          progressbarVisible,
+          errorAlertVisible,
+          matchingRowCountCapped,
+          matchingRowVisible,
+        }
+      : unavailableDesktopEventCreateFailureDiagnostic();
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    try {
+      page.off('request', onRequest);
+      page.off('requestfailed', onRequestFailed);
+      page.off('response', onResponse);
+    } catch {
+      // Listener cleanup is best effort if the page is already closed.
+    }
+  };
+
   return {
-    snapshot: () =>
-      installed
-        ? {
-            createPostObserved: firstMatchingRequest !== undefined,
-            createPostRequestFailed: requestFailed,
-            createPostStatus: status,
-          }
-        : unavailableDesktopEventCreateFailureDiagnostic(),
-    stop: () => {
-      if (stopped) return;
-      stopped = true;
+    snapshot,
+    async collect(frame, title) {
+      if (!installed) return unavailableDesktopEventCreateFailureDiagnostic();
       try {
-        page.off('request', onRequest);
-        page.off('requestfailed', onRequestFailed);
-        page.off('response', onResponse);
-      } catch {
-        // Listener cleanup is best effort if the page is already closed.
+        await Promise.allSettled(pendingResponseReads);
+        if (createdEventTiming && expectedRoomRange) {
+          try {
+            const timingMatch = await page.evaluate(
+              compareEventTimingWithRoomRange,
+              { timing: createdEventTiming, range: expectedRoomRange },
+            );
+            createResponseTimingComparable = timingMatch.comparable;
+            createResponseEventIntersectsRoomRange = timingMatch.intersects;
+          } catch {
+            // Keep timing unavailable if the browser page has closed.
+          }
+        }
+
+        if (frame && title) {
+          try {
+            const eventsRegion = frame.getByRole('region', {
+              name: 'Calendar events',
+              exact: true,
+              includeHidden: true,
+            });
+            const progressbar = frame.getByRole('progressbar', {
+              includeHidden: true,
+            });
+            const errorAlerts = frame.locator('.MuiAlert-standardError');
+            const matchingRow = frame.getByRole('listitem', {
+              name: title,
+              exact: true,
+              includeHidden: true,
+            });
+            const [
+              regionCount,
+              regionVisible,
+              loading,
+              error,
+              rowCount,
+              rowVisible,
+            ] = await Promise.all([
+              eventsRegion.count(),
+              hasVisibleRenderedMatch(eventsRegion),
+              hasVisibleRenderedMatch(progressbar),
+              hasVisibleRenderedMatch(errorAlerts),
+              matchingRow.count(),
+              hasVisibleRenderedMatch(matchingRow),
+            ]);
+            calendarEventsRegionCountCapped = Math.min(regionCount, 2) as
+              | 0
+              | 1
+              | 2;
+            calendarEventsRegionVisible = regionVisible;
+            progressbarVisible = loading;
+            errorAlertVisible = error;
+            matchingRowCountCapped = Math.min(rowCount, 2) as 0 | 1 | 2;
+            matchingRowVisible = rowVisible;
+            calendarEventsVisibleRowCountCapped =
+              regionCount === 1
+                ? await visibleCalendarEventRowCountCapped(
+                    eventsRegion.locator('li[aria-label]'),
+                  )
+                : null;
+          } catch {
+            // UI values stay unavailable when the frame cannot be inspected.
+          }
+        }
+        return snapshot();
+      } finally {
+        stop();
       }
     },
+    stop,
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 async function tabToEventButton(page: Page, eventButton: Locator) {

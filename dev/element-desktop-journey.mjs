@@ -362,39 +362,102 @@ function validJourneyFailurePoint(phase, status, failurePoint) {
 }
 
 function validDesktopEventCreateFailureDiagnostic(value) {
+  const diagnosticKeys = [
+    'calendarEventsRegionCountCapped',
+    'calendarEventsRegionVisible',
+    'calendarEventsVisibleRowCountCapped',
+    'createPostObserved',
+    'createPostRequestFailed',
+    'createPostStatus',
+    'createResponseCalendarMatches',
+    'createResponseEventIntersectsRoomRange',
+    'createResponseHasEvent',
+    'createResponseTimingComparable',
+    'createResponseTitleMatches',
+    'errorAlertVisible',
+    'matchingRowCountCapped',
+    'matchingRowVisible',
+    'postCreateEventGetRequestCountCapped',
+    'postCreateRoomRangeGetRequestCountCapped',
+    'postCreateRoomRangeGetResponseCountCapped',
+    'postCreateRoomRangeGetStatus',
+    'progressbarVisible',
+    'roomListCalendarMatches',
+    'roomListEventCountCapped',
+    'roomListHasEventsArray',
+    'roomListIdMatches',
+    'roomListTitleMatches',
+  ];
+  const cappedCounts = [
+    'calendarEventsRegionCountCapped',
+    'calendarEventsVisibleRowCountCapped',
+    'matchingRowCountCapped',
+    'postCreateEventGetRequestCountCapped',
+    'postCreateRoomRangeGetRequestCountCapped',
+    'postCreateRoomRangeGetResponseCountCapped',
+    'roomListEventCountCapped',
+  ];
+  const booleans = [
+    'calendarEventsRegionVisible',
+    'createResponseCalendarMatches',
+    'createResponseEventIntersectsRoomRange',
+    'createResponseHasEvent',
+    'createResponseTimingComparable',
+    'createResponseTitleMatches',
+    'errorAlertVisible',
+    'matchingRowVisible',
+    'progressbarVisible',
+    'roomListCalendarMatches',
+    'roomListHasEventsArray',
+    'roomListIdMatches',
+    'roomListTitleMatches',
+  ];
   if (
     value === null ||
     typeof value !== 'object' ||
     Array.isArray(value) ||
-    Object.keys(value).sort().join(',') !==
-      'createPostObserved,createPostRequestFailed,createPostStatus'
+    Object.keys(value).sort().join(',') !== diagnosticKeys.join(',')
   ) {
     return false;
   }
-  const { createPostObserved, createPostRequestFailed, createPostStatus } =
-    value;
   if (
-    (createPostObserved !== null && typeof createPostObserved !== 'boolean') ||
-    (createPostRequestFailed !== null &&
-      typeof createPostRequestFailed !== 'boolean') ||
-    (createPostStatus !== null &&
-      (!Number.isInteger(createPostStatus) ||
-        createPostStatus < 100 ||
-        createPostStatus > 599))
+    ![null, true, false].includes(value.createPostObserved) ||
+    ![null, true, false].includes(value.createPostRequestFailed) ||
+    (value.createPostStatus !== null &&
+      (!Number.isInteger(value.createPostStatus) ||
+        value.createPostStatus < 100 ||
+        value.createPostStatus > 599)) ||
+    cappedCounts.some(
+      (key) => value[key] !== null && ![0, 1, 2].includes(value[key]),
+    ) ||
+    booleans.some(
+      (key) => value[key] !== null && typeof value[key] !== 'boolean',
+    ) ||
+    (value.postCreateRoomRangeGetStatus !== null &&
+      (!Number.isInteger(value.postCreateRoomRangeGetStatus) ||
+        value.postCreateRoomRangeGetStatus < 100 ||
+        value.postCreateRoomRangeGetStatus > 599))
   ) {
     return false;
   }
-  if (createPostObserved === null || createPostRequestFailed === null) {
+  if (
+    value.createPostObserved === null ||
+    value.createPostRequestFailed === null
+  ) {
     return (
-      createPostObserved === null &&
-      createPostRequestFailed === null &&
-      createPostStatus === null
+      value.createPostObserved === null &&
+      value.createPostRequestFailed === null &&
+      diagnosticKeys.every((key) =>
+        ['createPostObserved', 'createPostRequestFailed'].includes(key)
+          ? true
+          : value[key] === null,
+      )
     );
   }
-  if (!createPostObserved) {
-    return !createPostRequestFailed && createPostStatus === null;
+  if (!value.createPostObserved) {
+    return !value.createPostRequestFailed && value.createPostStatus === null;
   }
-  return createPostRequestFailed ? createPostStatus === null : true;
+  return value.createPostRequestFailed ? value.createPostStatus === null : true;
 }
 
 function validWebBEditSaveDiagnostic(value, failurePoint) {
@@ -2073,7 +2136,7 @@ export function summarizeDesktopJourneyEvidence(
     childCompletedSuccessfully &&
     playwrightResult === 'passed';
   return {
-    schemaVersion: 11,
+    schemaVersion: 12,
     sourceSha,
     status: failed ? 'failed' : journeyEvidencePassed ? 'passed' : 'incomplete',
     desktopChildCompletion,
