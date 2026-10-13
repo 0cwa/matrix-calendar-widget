@@ -21,8 +21,10 @@ import { ModuleProviderToken } from '../ModuleProviderToken';
 import { validateRoomCalendarBindings } from '../service/RoomCalendarBindingResolver';
 import { RoomCalendarCalDavAccess } from '../service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventOperations } from '../service/RoomCalendarEventOperations';
+import type { RoomCalendarPrincipalIdentityProvider } from '../service/RoomCalendarPrincipalIdentity';
 import { CanonicalRoomReminderSchedulerSource } from './CanonicalRoomReminderSchedulerSource';
 import { MatrixAppServiceReminderTransport } from './MatrixAppServiceReminderTransport';
+import { MatrixBotAccountReminderTransport } from './MatrixBotAccountReminderTransport';
 import type { RoomMentionMessage } from './RoomMentionMessage';
 import {
   RoomMentionMatrixState,
@@ -45,12 +47,23 @@ import { RoomReminderStore } from './RoomReminderStore';
 export type RoomReminderMatrixPorts = RoomMentionMatrixState &
   RoomReminderSchedulerSender;
 
+export type RoomReminderTransportFactoryOptions =
+  | Readonly<{
+      mode: 'appservice';
+      homeserverUrl: string;
+      applicationServiceToken: string;
+      applicationServiceSenderUserId: string;
+      principalIdentityProvider: RoomCalendarPrincipalIdentityProvider;
+    }>
+  | Readonly<{
+      mode: 'bot-account';
+      homeserverUrl: string;
+      accessToken: string;
+      principalIdentityProvider: RoomCalendarPrincipalIdentityProvider;
+    }>;
+
 export type RoomReminderTransportFactory = (
-  options: {
-    homeserverUrl: string;
-    applicationServiceToken: string;
-    applicationServiceSenderUserId: string;
-  },
+  options: RoomReminderTransportFactoryOptions,
   runtime: ReminderSchedulerRuntimeSource,
 ) => RoomReminderMatrixPorts;
 
@@ -63,8 +76,11 @@ export function createRoomReminderMatrixPorts(
   appConfig: IAppConfiguration,
   store: RoomReminderStore,
   runtime: ReminderSchedulerRuntimeSource,
+  principalIdentityProvider: RoomCalendarPrincipalIdentityProvider,
   createTransport: RoomReminderTransportFactory = (options, source) =>
-    new MatrixAppServiceReminderTransport(options, source),
+    options.mode === 'appservice'
+      ? new MatrixAppServiceReminderTransport(options, source)
+      : new MatrixBotAccountReminderTransport(options, source),
 ): RoomReminderMatrixPorts {
   if (
     appConfig.room_reminder_configuration_enabled !== true &&
@@ -76,8 +92,8 @@ export function createRoomReminderMatrixPorts(
   if (
     appConfig.room_calendar_access_enabled !== true ||
     store.enabled !== true ||
-    !isNonEmptyString(appConfig.application_service_token) ||
-    !isNonEmptyString(appConfig.application_service_user_id) ||
+    (appConfig.room_calendar_principal_mode !== 'appservice' &&
+      appConfig.room_calendar_principal_mode !== 'bot-account') ||
     !isSafeBaseUrl(appConfig.homeserver_url) ||
     !isSafeBaseUrl(appConfig.radicale_url) ||
     !hasSupportedBindings(appConfig.room_calendar_bindings)
@@ -86,14 +102,47 @@ export function createRoomReminderMatrixPorts(
   }
 
   try {
-    return createTransport(
-      {
-        homeserverUrl: appConfig.homeserver_url,
-        applicationServiceToken: appConfig.application_service_token,
-        applicationServiceSenderUserId: appConfig.application_service_user_id,
-      },
-      runtime,
-    );
+    if (appConfig.room_calendar_principal_mode === 'appservice') {
+      const applicationServiceToken = appConfig.application_service_token;
+      const applicationServiceSenderUserId =
+        appConfig.application_service_user_id;
+      if (
+        !isNonEmptyString(applicationServiceToken) ||
+        !isNonEmptyString(applicationServiceSenderUserId)
+      ) {
+        throw invalidRuntimeConfiguration();
+      }
+
+      return createTransport(
+        {
+          mode: 'appservice',
+          homeserverUrl: appConfig.homeserver_url,
+          applicationServiceToken,
+          applicationServiceSenderUserId,
+          principalIdentityProvider,
+        },
+        runtime,
+      );
+    }
+
+    if (appConfig.room_calendar_principal_mode === 'bot-account') {
+      const accessToken = appConfig.access_token;
+      if (!isNonEmptyString(accessToken)) {
+        throw invalidRuntimeConfiguration();
+      }
+
+      return createTransport(
+        {
+          mode: 'bot-account',
+          homeserverUrl: appConfig.homeserver_url,
+          accessToken,
+          principalIdentityProvider,
+        },
+        runtime,
+      );
+    }
+
+    throw invalidRuntimeConfiguration();
   } catch {
     throw invalidRuntimeConfiguration();
   }
@@ -146,11 +195,20 @@ export function createRoomReminderModuleProviders(): FactoryProvider[] {
   return [
     {
       provide: ConfiguredReminderSchedulerRuntimeSource,
-      useFactory: (appConfig: IAppConfiguration, store: RoomReminderStore) =>
-        new ConfiguredReminderSchedulerRuntimeSource(appConfig, store),
+      useFactory: (
+        appConfig: IAppConfiguration,
+        store: RoomReminderStore,
+        principalIdentityProvider: RoomCalendarPrincipalIdentityProvider,
+      ) =>
+        new ConfiguredReminderSchedulerRuntimeSource(
+          appConfig,
+          store,
+          principalIdentityProvider,
+        ),
       inject: [
         ModuleProviderToken.APP_CONFIGURATION,
         ModuleProviderToken.ROOM_REMINDER_STORE,
+        ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
       ],
     },
     {
@@ -159,11 +217,19 @@ export function createRoomReminderModuleProviders(): FactoryProvider[] {
         appConfig: IAppConfiguration,
         store: RoomReminderStore,
         runtime: ConfiguredReminderSchedulerRuntimeSource,
-      ) => createRoomReminderMatrixPorts(appConfig, store, runtime),
+        principalIdentityProvider: RoomCalendarPrincipalIdentityProvider,
+      ) =>
+        createRoomReminderMatrixPorts(
+          appConfig,
+          store,
+          runtime,
+          principalIdentityProvider,
+        ),
       inject: [
         ModuleProviderToken.APP_CONFIGURATION,
         ModuleProviderToken.ROOM_REMINDER_STORE,
         ConfiguredReminderSchedulerRuntimeSource,
+        ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
       ],
     },
     {

@@ -24,11 +24,16 @@ const roomId = '!team:example.test';
 const calendarId = 'team-calendar';
 const senderUserId = '@calendar_bot:example.test';
 const token = 'synthetic-appservice-token';
+const identity = Object.freeze({
+  mode: 'appservice' as const,
+  userId: senderUserId,
+});
+const principalIdentityProvider = { resolve: async () => identity };
 function createRuntime(boundRoomId = roomId): ReminderSchedulerRuntimeSource {
   return {
     getCurrentConfiguration: jest.fn(async () => ({
       roomCalendarBindings: [{ roomId: boundRoomId, calendarId }],
-      applicationServiceSenderUserId: senderUserId,
+      roomCalendarPrincipalIdentity: identity,
       roomCalendarAccessEnabled: true,
       roomReminderDeliveryEnabled: true,
       reminderStoreEnabled: true,
@@ -49,6 +54,7 @@ function createTransport(
       homeserverUrl: 'https://matrix.example.test',
       applicationServiceToken: token,
       applicationServiceSenderUserId: senderUserId,
+      principalIdentityProvider,
     },
     runtime,
     fetchMock,
@@ -93,6 +99,33 @@ describe('MatrixAppServiceReminderTransport', () => {
     expect(init?.signal).toBeInstanceOf(AbortSignal);
     expect(init?.signal).not.toBe(controller.signal);
     expect(init?.redirect).toBe('manual');
+  });
+
+  it('retains the appservice-only constructor while reading the runtime-selected identity', async () => {
+    const fetchMock = createFetchMock().mockResolvedValue(
+      new Response(JSON.stringify({ joined: { [senderUserId]: {} } }), {
+        status: 200,
+      }),
+    );
+    const runtime = createRuntime();
+    const transport = new MatrixAppServiceReminderTransport(
+      {
+        homeserverUrl: 'https://matrix.example.test',
+        applicationServiceToken: token,
+        applicationServiceSenderUserId: senderUserId,
+      },
+      runtime,
+      fetchMock,
+    );
+
+    await expect(transport.getJoinedRoomMembers(roomId)).resolves.toEqual([
+      senderUserId,
+    ]);
+
+    expect(runtime.getCurrentConfiguration).toHaveBeenCalledTimes(1);
+    expect(
+      new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('user_id'),
+    ).toBe(senderUserId);
   });
 
   it('treats only an explicit M_NOT_FOUND encryption event as plaintext', async () => {
@@ -302,7 +335,7 @@ describe('MatrixAppServiceReminderTransport', () => {
     ]);
   });
 
-  it('does not send to encrypted rooms, changed bindings, or a different configured sender', async () => {
+  it('does not send to encrypted rooms, changed bindings, or a different runtime identity', async () => {
     const encryptedFetch = createFetchMock().mockResolvedValue(
       new Response(JSON.stringify({ algorithm: 'm.megolm.v1.aes-sha2' }), {
         status: 200,
@@ -334,7 +367,7 @@ describe('MatrixAppServiceReminderTransport', () => {
     const changedRuntime = {
       getCurrentConfiguration: jest.fn(async () => ({
         roomCalendarBindings: [{ roomId, calendarId: 'other-calendar' }],
-        applicationServiceSenderUserId: senderUserId,
+        roomCalendarPrincipalIdentity: identity,
         roomCalendarAccessEnabled: true,
         roomReminderDeliveryEnabled: true,
         reminderStoreEnabled: true,
@@ -346,6 +379,7 @@ describe('MatrixAppServiceReminderTransport', () => {
         homeserverUrl: 'https://matrix.example.test',
         applicationServiceToken: token,
         applicationServiceSenderUserId: senderUserId,
+        principalIdentityProvider,
       },
       changedRuntime,
       noBindingFetch,
@@ -364,7 +398,7 @@ describe('MatrixAppServiceReminderTransport', () => {
     const disabledRuntime = {
       getCurrentConfiguration: jest.fn(async () => ({
         roomCalendarBindings: [{ roomId, calendarId }],
-        applicationServiceSenderUserId: senderUserId,
+        roomCalendarPrincipalIdentity: identity,
         roomCalendarAccessEnabled: true,
         roomReminderDeliveryEnabled: false,
         reminderStoreEnabled: true,
@@ -376,6 +410,7 @@ describe('MatrixAppServiceReminderTransport', () => {
         homeserverUrl: 'https://matrix.example.test',
         applicationServiceToken: token,
         applicationServiceSenderUserId: senderUserId,
+        principalIdentityProvider,
       },
       disabledRuntime,
       disabledFetch,
@@ -390,6 +425,41 @@ describe('MatrixAppServiceReminderTransport', () => {
       ),
     ).rejects.toMatchObject({ code: 'authorization-denied' });
     expect(disabledFetch).not.toHaveBeenCalled();
+
+    const changedIdentity = Object.freeze({
+      mode: 'appservice' as const,
+      userId: '@other-bot:example.test',
+    });
+    const mismatchedRuntime = {
+      getCurrentConfiguration: jest.fn(async () => ({
+        roomCalendarBindings: [{ roomId, calendarId }],
+        roomCalendarPrincipalIdentity: changedIdentity,
+        roomCalendarAccessEnabled: true,
+        roomReminderDeliveryEnabled: true,
+        reminderStoreEnabled: true,
+      })),
+    };
+    const mismatchFetch = createFetchMock();
+    const mismatch = new MatrixAppServiceReminderTransport(
+      {
+        homeserverUrl: 'https://matrix.example.test',
+        applicationServiceToken: token,
+        applicationServiceSenderUserId: senderUserId,
+        principalIdentityProvider,
+      },
+      mismatchedRuntime,
+      mismatchFetch,
+    );
+    await expect(
+      mismatch.sendRoomMention(
+        roomId,
+        calendarId,
+        message,
+        transactionId,
+        signal,
+      ),
+    ).rejects.toEqual(new MatrixReminderTransportError('authorization-denied'));
+    expect(mismatchFetch).not.toHaveBeenCalled();
   });
 
   it('aborts before I/O and rejects redirects without following them', async () => {

@@ -17,6 +17,10 @@
 import { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { validateRoomCalendarBindings } from '../service/RoomCalendarBindingResolver';
+import type {
+  RoomCalendarPrincipalIdentity,
+  RoomCalendarPrincipalIdentityProvider,
+} from '../service/RoomCalendarPrincipalIdentity';
 import {
   ReminderSchedulerRuntimeConfiguration,
   ReminderSchedulerRuntimeSource,
@@ -32,6 +36,7 @@ export class ConfiguredReminderSchedulerRuntimeSource implements ReminderSchedul
   constructor(
     private readonly appConfig: IAppConfiguration,
     private readonly store: RoomReminderStore,
+    private readonly principalIdentityProvider: RoomCalendarPrincipalIdentityProvider,
   ) {}
 
   async getCurrentConfiguration(
@@ -43,17 +48,26 @@ export class ConfiguredReminderSchedulerRuntimeSource implements ReminderSchedul
     const roomReminderDeliveryEnabled =
       this.appConfig.room_reminder_delivery_enabled === true;
     const reminderStoreEnabled = this.store.enabled === true;
+    const mode = this.appConfig.room_calendar_principal_mode;
+    const principalCredentialsAvailable =
+      mode === 'appservice'
+        ? hasNonEmptyString(this.appConfig.application_service_token) &&
+          hasNonEmptyString(this.appConfig.application_service_user_id)
+        : mode === 'bot-account'
+          ? hasNonEmptyString(this.appConfig.access_token)
+          : false;
     const configured =
       roomCalendarAccessEnabled &&
       roomReminderDeliveryEnabled &&
       reminderStoreEnabled &&
-      hasNonEmptyString(this.appConfig.application_service_token) &&
-      hasNonEmptyString(this.appConfig.application_service_user_id) &&
+      principalCredentialsAvailable &&
       hasNonEmptyString(this.appConfig.homeserver_url) &&
       hasNonEmptyString(this.appConfig.radicale_url);
 
     let bindings: unknown = [];
-    let senderUserId: string | undefined;
+    let roomCalendarPrincipalIdentity:
+      | RoomCalendarPrincipalIdentity
+      | undefined;
     if (configured) {
       try {
         const validated = validateRoomCalendarBindings(
@@ -63,17 +77,30 @@ export class ConfiguredReminderSchedulerRuntimeSource implements ReminderSchedul
           validated.length > 0 &&
           validated.length <= ROOM_REMINDER_SCHEDULER_LIMITS.maxBindingsPerRun
         ) {
-          bindings = validated;
-          senderUserId = this.appConfig.application_service_user_id;
+          const identity = await resolveWithAbort(
+            this.principalIdentityProvider.resolve(),
+            signal,
+          );
+          if (
+            isSelectedIdentity(
+              identity,
+              mode,
+              this.appConfig.application_service_user_id,
+            )
+          ) {
+            bindings = validated;
+            roomCalendarPrincipalIdentity = identity;
+          }
         }
       } catch {
-        // Invalid operator bindings disable delivery for this process.
+        if (signal.aborted) throw abortError();
+        // Invalid bindings or an unavailable selected identity disable delivery.
       }
     }
 
     return {
       roomCalendarBindings: bindings,
-      applicationServiceSenderUserId: senderUserId,
+      roomCalendarPrincipalIdentity,
       roomCalendarAccessEnabled,
       roomReminderDeliveryEnabled,
       reminderStoreEnabled,
@@ -131,8 +158,7 @@ export class RoomReminderSchedulerLifecycle
       this.appConfig.room_reminder_delivery_enabled !== true ||
       this.appConfig.room_calendar_access_enabled !== true ||
       !this.store.enabled ||
-      !hasNonEmptyString(this.appConfig.application_service_token) ||
-      !hasNonEmptyString(this.appConfig.application_service_user_id) ||
+      !hasSelectedPrincipalCredentials(this.appConfig) ||
       !hasNonEmptyString(this.appConfig.homeserver_url) ||
       !hasNonEmptyString(this.appConfig.radicale_url) ||
       !Number.isSafeInteger(this.intervalMs) ||
@@ -165,7 +191,8 @@ export class RoomReminderSchedulerLifecycle
       return (
         bindings.length > 0 &&
         bindings.length <= ROOM_REMINDER_SCHEDULER_LIMITS.maxBindingsPerRun &&
-        typeof this.appConfig.application_service_user_id === 'string'
+        (this.appConfig.room_calendar_principal_mode === 'bot-account' ||
+          typeof this.appConfig.application_service_user_id === 'string')
       );
     } catch {
       return false;
@@ -205,7 +232,79 @@ function hasNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+function hasSelectedPrincipalCredentials(config: IAppConfiguration): boolean {
+  if (config.room_calendar_principal_mode === 'appservice') {
+    return (
+      hasNonEmptyString(config.application_service_token) &&
+      hasNonEmptyString(config.application_service_user_id)
+    );
+  }
+  if (config.room_calendar_principal_mode === 'bot-account') {
+    return hasNonEmptyString(config.access_token);
+  }
+  return false;
+}
+
+function isSelectedIdentity(
+  identity: RoomCalendarPrincipalIdentity,
+  mode: IAppConfiguration['room_calendar_principal_mode'],
+  appServiceUserId: string | undefined,
+): boolean {
+  return (
+    identity !== null &&
+    typeof identity === 'object' &&
+    Object.isFrozen(identity) &&
+    identity.mode === mode &&
+    typeof identity.userId === 'string' &&
+    /^@[^\s:#?]+:[^\s?#]+$/.test(identity.userId) &&
+    (mode !== 'appservice' || identity.userId === appServiceUserId)
+  );
+}
+
+function resolveWithAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortError());
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener('abort', onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(abortError());
+    };
+
+    signal.addEventListener('abort', onAbort, { once: true });
+    return promise
+      .then(
+        (value) => {
+          if (!settled) {
+            settled = true;
+            cleanup();
+            resolve(value);
+          }
+          return undefined;
+        },
+        (error) => {
+          if (!settled) {
+            settled = true;
+            cleanup();
+            reject(error);
+          }
+          return undefined;
+        },
+      )
+      .catch(() => undefined);
+  });
+}
+
 function throwIfAborted(signal: AbortSignal): void {
-  if (signal.aborted)
-    throw new DOMException('The operation was aborted', 'AbortError');
+  if (signal.aborted) throw abortError();
+}
+
+function abortError(): Error {
+  return new DOMException('The operation was aborted', 'AbortError');
 }

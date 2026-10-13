@@ -17,6 +17,7 @@
 import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
 import { MATRIX_CALENDAR_MANAGE_POLICY } from '../service/MatrixCalendarAuthorization';
 import { resolveRoomCalendarBinding } from '../service/RoomCalendarBindingResolver';
+import type { RoomCalendarPrincipalIdentity } from '../service/RoomCalendarPrincipalIdentity';
 
 export type RoomMentionPowerLevel = number | string;
 
@@ -123,8 +124,8 @@ export async function authorizeRoomMentionScheduling(
 export interface RoomMentionDeliveryRequest {
   readonly roomId: string;
   readonly calendarId: string;
-  /** Trusted server-configured application-service sender, not request input. */
-  readonly applicationServiceSenderUserId: string;
+  /** Shared server-selected identity; never derived from request input. */
+  readonly roomCalendarPrincipalIdentity: RoomCalendarPrincipalIdentity;
   readonly configuredBindings: unknown;
 }
 
@@ -134,7 +135,8 @@ export async function authorizeRoomMentionDelivery(
   state: RoomMentionMatrixState,
   signal?: AbortSignal,
 ): Promise<RoomCalendarBinding | undefined> {
-  if (signal?.aborted || request.applicationServiceSenderUserId.length === 0) {
+  const identity = request.roomCalendarPrincipalIdentity;
+  if (signal?.aborted || !isValidPrincipalIdentity(identity)) {
     return undefined;
   }
 
@@ -158,12 +160,12 @@ export async function authorizeRoomMentionDelivery(
       getPowerLevels(state, request.roomId, signal),
       getRoomVersion(state, request.roomId, signal),
     ]);
-    if (!members.includes(request.applicationServiceSenderUserId)) {
+    if (!members.includes(identity.userId)) {
       return undefined;
     }
 
     const senderPower = effectivePowerLevel(
-      powerLevels?.users?.[request.applicationServiceSenderUserId],
+      powerLevels?.users?.[identity.userId],
       powerLevels?.users_default,
       0,
       roomVersion,
@@ -195,6 +197,21 @@ export async function authorizeRoomMentionDelivery(
   } catch {
     return undefined;
   }
+}
+
+function isValidPrincipalIdentity(
+  identity: RoomCalendarPrincipalIdentity | undefined,
+): identity is RoomCalendarPrincipalIdentity {
+  return (
+    identity !== undefined &&
+    Object.isFrozen(identity) &&
+    (identity.mode === 'appservice' || identity.mode === 'bot-account') &&
+    isCanonicalMatrixUserId(identity.userId)
+  );
+}
+
+function isCanonicalMatrixUserId(value: string): boolean {
+  return /^@[^\s:#?]+:[^\s?#]+$/.test(value);
 }
 
 function getJoinedRoomMembers(

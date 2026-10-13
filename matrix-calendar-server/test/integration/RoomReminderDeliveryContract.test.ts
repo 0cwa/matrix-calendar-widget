@@ -33,6 +33,10 @@ import {
   RoomReminderConfiguration,
 } from '../../src/reminder/RoomReminderStore';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
+import type {
+  RoomCalendarPrincipalIdentity,
+  RoomCalendarPrincipalIdentityProvider,
+} from '../../src/service/RoomCalendarPrincipalIdentity';
 import { InMemoryRoomReminderStore } from '../util/InMemoryRoomReminderStore';
 import {
   MatrixApplicationServiceFixtureError,
@@ -53,6 +57,7 @@ const testConfiguration = {
   homeserver_url: homeserverUrl,
   radicale_url: radicaleBaseUrl,
   room_calendar_access_enabled: true,
+  room_calendar_principal_mode: 'appservice',
   room_calendar_event_writes_enabled: true,
   room_reminder_configuration_enabled: true,
   room_reminder_delivery_enabled: true,
@@ -61,6 +66,13 @@ const testConfiguration = {
   room_calendar_bindings: [],
   caldav_max_event_response_bytes: 4 * 1024 * 1024,
 } as unknown as IAppConfiguration;
+const serviceIdentity: RoomCalendarPrincipalIdentity = Object.freeze({
+  mode: 'appservice',
+  userId: serviceUserId,
+});
+const principalIdentityProvider: RoomCalendarPrincipalIdentityProvider = {
+  resolve: async () => serviceIdentity,
+};
 
 type MatrixEvent = {
   event_id?: unknown;
@@ -176,6 +188,7 @@ describeContract(
         access = new RoomCalendarCalDavAccess(
           testConfiguration,
           recordOpenIdCredentialRequest,
+          principalIdentityProvider,
         );
         credentialFactory = new MatrixOpenIdCalDavCredentialProviderFactory();
         markReminderSetupStage('mint-service-proof');
@@ -230,6 +243,7 @@ describeContract(
         runtime = new ConfiguredReminderSchedulerRuntimeSource(
           testConfiguration,
           store,
+          principalIdentityProvider,
         );
         canonicalSource = new CanonicalRoomReminderSchedulerSource(
           testConfiguration,
@@ -242,6 +256,7 @@ describeContract(
             homeserverUrl,
             applicationServiceToken: serviceToken,
             applicationServiceSenderUserId: serviceUserId,
+            principalIdentityProvider,
           },
           runtime,
           recordMatrixRequest,

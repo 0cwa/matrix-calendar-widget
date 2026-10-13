@@ -24,6 +24,7 @@ import {
   RoomCalendarCalDavPrincipal,
 } from '../service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventOperations } from '../service/RoomCalendarEventOperations';
+import type { RoomCalendarPrincipalIdentity } from '../service/RoomCalendarPrincipalIdentity';
 import { RoomMentionMatrixState } from './RoomMentionPolicy';
 import { RoomReminderConfigurationService } from './RoomReminderConfigurationService';
 import type { RoomReminderStore } from './RoomReminderStore';
@@ -31,6 +32,10 @@ import type { RoomReminderStore } from './RoomReminderStore';
 const roomId = '!team:example.test';
 const calendarId = 'team-calendar';
 const actor = '@alice:example.test';
+const serviceIdentity: RoomCalendarPrincipalIdentity = Object.freeze({
+  mode: 'appservice',
+  userId: '@calendar-service:example.test',
+});
 const alarmUid = 'master-alarm@example.test';
 const icalendar = fs
   .readFileSync(
@@ -59,6 +64,7 @@ describe('RoomReminderConfigurationService', () => {
     configuration = {
       room_reminder_configuration_enabled: true,
       room_calendar_access_enabled: true,
+      room_calendar_principal_mode: 'appservice',
       room_calendar_bindings: [{ roomId, calendarId } as RoomCalendarBinding],
     } as unknown as IAppConfiguration;
 
@@ -87,6 +93,7 @@ describe('RoomReminderConfigurationService', () => {
     } as unknown as RoomMentionMatrixState;
 
     const principal: RoomCalendarCalDavPrincipal = {
+      identity: serviceIdentity,
       userId: '@calendar-service:example.test',
       calendarUrl: 'https://dav.example.test/calendar',
       credential: {

@@ -18,6 +18,7 @@ import { createHash } from 'crypto';
 import { performance } from 'perf_hooks';
 import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
 import { validateRoomCalendarBindings } from '../service/RoomCalendarBindingResolver';
+import type { RoomCalendarPrincipalIdentity } from '../service/RoomCalendarPrincipalIdentity';
 import {
   buildRoomMentionMessage,
   RoomMentionMessage,
@@ -88,7 +89,7 @@ export type ResolvedReminderDelivery = Readonly<{
 
 export type ReminderSchedulerRuntimeConfiguration = Readonly<{
   roomCalendarBindings: unknown;
-  applicationServiceSenderUserId?: string;
+  roomCalendarPrincipalIdentity?: RoomCalendarPrincipalIdentity;
   roomCalendarAccessEnabled: boolean;
   roomReminderDeliveryEnabled: boolean;
   reminderStoreEnabled: boolean;
@@ -354,11 +355,9 @@ export class RoomReminderScheduler {
       const after = this.configurationCursors.get(bindingKey);
       report.bindingsVisited += 1;
 
-      const senderUserId = initialRuntime.applicationServiceSenderUserId;
-      if (
-        typeof senderUserId !== 'string' ||
-        senderUserId.trim().length === 0
-      ) {
+      const roomCalendarPrincipalIdentity =
+        initialRuntime.roomCalendarPrincipalIdentity;
+      if (!roomCalendarPrincipalIdentity) {
         report.deliveriesDenied += 1;
         continue;
       }
@@ -370,7 +369,7 @@ export class RoomReminderScheduler {
               {
                 roomId: binding.roomId,
                 calendarId: binding.calendarId,
-                applicationServiceSenderUserId: senderUserId,
+                roomCalendarPrincipalIdentity,
                 configuredBindings: initialRuntime.roomCalendarBindings,
               },
               this.dependencies.matrixState,
@@ -647,11 +646,9 @@ export class RoomReminderScheduler {
         return;
       }
 
-      const senderUserId = currentRuntime.applicationServiceSenderUserId;
-      if (
-        typeof senderUserId !== 'string' ||
-        senderUserId.trim().length === 0
-      ) {
+      const roomCalendarPrincipalIdentity =
+        currentRuntime.roomCalendarPrincipalIdentity;
+      if (!roomCalendarPrincipalIdentity) {
         report.deliveriesDenied += 1;
         return;
       }
@@ -662,7 +659,7 @@ export class RoomReminderScheduler {
             {
               roomId: configuration.roomId,
               calendarId: configuration.calendarId,
-              applicationServiceSenderUserId: senderUserId,
+              roomCalendarPrincipalIdentity,
               configuredBindings: currentRuntime.roomCalendarBindings,
             },
             this.dependencies.matrixState,

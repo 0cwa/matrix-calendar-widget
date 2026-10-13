@@ -15,6 +15,7 @@
  */
 
 import { MATRIX_CALENDAR_MANAGE_POLICY } from '../service/MatrixCalendarAuthorization';
+import { RoomCalendarPrincipalIdentity } from '../service/RoomCalendarPrincipalIdentity';
 import {
   authorizeRoomMentionDelivery,
   authorizeRoomMentionScheduling,
@@ -25,6 +26,14 @@ const roomId = '!team:example.test';
 const calendarId = 'team';
 const actorUserId = '@alice:example.test';
 const senderUserId = '@calendar-bot:example.test';
+const appserviceIdentity: RoomCalendarPrincipalIdentity = Object.freeze({
+  mode: 'appservice',
+  userId: senderUserId,
+});
+const botAccountIdentity: RoomCalendarPrincipalIdentity = Object.freeze({
+  mode: 'bot-account',
+  userId: '@normal-bot:example.test',
+});
 const configuredBindings = [{ roomId, calendarId }];
 
 describe('authorizeRoomMentionScheduling', () => {
@@ -183,7 +192,7 @@ describe('authorizeRoomMentionDelivery', () => {
   const request = {
     roomId,
     calendarId,
-    applicationServiceSenderUserId: senderUserId,
+    roomCalendarPrincipalIdentity: appserviceIdentity,
     configuredBindings,
   };
 
@@ -206,6 +215,39 @@ describe('authorizeRoomMentionDelivery', () => {
         calendarId,
       },
     );
+  });
+
+  it('uses the shared bot-account identity for membership and power checks', async () => {
+    const identity = botAccountIdentity;
+    state.getJoinedRoomMembers.mockResolvedValue([identity.userId]);
+    state.getPowerLevels.mockResolvedValue({
+      users: { [identity.userId]: 50 },
+      events_default: 0,
+    });
+
+    await expect(
+      authorizeRoomMentionDelivery(
+        { ...request, roomCalendarPrincipalIdentity: identity },
+        state,
+      ),
+    ).resolves.toEqual({ roomId, calendarId });
+  });
+
+  it('denies an invalid selected principal before reading room state', async () => {
+    await expect(
+      authorizeRoomMentionDelivery(
+        {
+          ...request,
+          roomCalendarPrincipalIdentity: {
+            mode: 'bot-account',
+            userId: 'not-a-matrix-user',
+          } as RoomCalendarPrincipalIdentity,
+        },
+        state,
+      ),
+    ).resolves.toBeUndefined();
+    expect(state.isRoomEncrypted).not.toHaveBeenCalled();
+    expect(state.getJoinedRoomMembers).not.toHaveBeenCalled();
   });
 
   it('denies encrypted rooms before loading members or sender power', async () => {
