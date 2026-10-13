@@ -1,14 +1,29 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   buildOrdinaryPerformanceEvents,
+  buildOrdinaryPerformanceSeedEnvironment,
   buildPerformanceEvents,
+  calendarCollectionUrl,
   cleanupPerformanceManifestEvents,
   createPerformanceManifestEvent,
   isSafePerformanceManifest,
   next31DayMonth,
   next31DayMonthAfter,
   raceCalendarReadyOrIdentityPrompt,
+  requestPerformanceOpenIdCredential,
+  resolvePerformancePrincipal,
 } from './element-acceptance-performance.mjs';
 
 function deferred() {
@@ -18,6 +33,386 @@ function deferred() {
   });
   return { promise, resolve };
 }
+
+test('performance OpenID keeps the legacy appservice principal and body', () => {
+  const principal = resolvePerformancePrincipal(
+    {
+      principalMode: 'appservice',
+      serviceSender: {
+        userId: '@_matrix_calendar_service:localhost',
+        accessToken: 'synthetic-service-user-token',
+      },
+    },
+    'appservice',
+    'synthetic-as-token',
+  );
+
+  assert.deepEqual(principal, {
+    mode: 'appservice',
+    userId: '@_matrix_calendar_service:localhost',
+    localpart: '_matrix_calendar_service',
+    accessToken: 'synthetic-service-user-token',
+    openIdBody: { user_id: '@_matrix_calendar_service:localhost' },
+  });
+});
+
+test('performance OpenID uses the selected bot token, identity, and empty body', () => {
+  const bot = {
+    userId: '@element-acceptance-bot:localhost',
+    accessToken: 'synthetic-bot-access-token',
+  };
+  const principal = resolvePerformancePrincipal(
+    {
+      principalMode: 'bot-account',
+      users: { bot },
+      serviceSender: { ...bot },
+    },
+    'bot-account',
+    undefined,
+  );
+
+  assert.deepEqual(principal, {
+    mode: 'bot-account',
+    userId: bot.userId,
+    localpart: 'element-acceptance-bot',
+    accessToken: bot.accessToken,
+    openIdBody: {},
+  });
+  assert.equal(Object.hasOwn(principal.openIdBody, 'user_id'), false);
+});
+
+test('ordinary seed child receives the selected mode and bounded token inputs', () => {
+  assert.throws(
+    () =>
+      buildOrdinaryPerformanceSeedEnvironment(
+        { ROOM_CALENDAR_PRINCIPAL_MODE: 'invalid-mode' },
+        '2026-10-13',
+      ),
+    /Ordinary performance fixture is unavailable/u,
+  );
+
+  const root = mkdtempSync(join(tmpdir(), 'mcw-performance-seed-env-test-'));
+  const fetchStubPath = join(root, 'fetch-stub.cjs');
+  const performanceScript = fileURLToPath(
+    new URL('./element-acceptance-performance.mjs', import.meta.url),
+  );
+  writeFileSync(
+    fetchStubPath,
+    `const fs = require('node:fs');
+globalThis.fetch = async (input, init = {}) => {
+  const capturePath = process.env.FETCH_CAPTURE_FILE;
+  const captures = fs.existsSync(capturePath)
+    ? JSON.parse(fs.readFileSync(capturePath, 'utf8'))
+    : [];
+  const headers = new Headers(init.headers);
+  captures.push({
+    path: new URL(String(input)).pathname,
+    method: init.method ?? 'GET',
+    contentType: headers.get('content-type') ?? '',
+    bearerPresent: (headers.get('authorization') ?? '').startsWith('Bearer '),
+    bearerMatchesExpected:
+      headers.get('authorization') === 'Bearer ' + process.env.FETCH_EXPECTED_TOKEN,
+    body: typeof init.body === 'string' ? init.body : null,
+  });
+  fs.writeFileSync(capturePath, JSON.stringify(captures));
+  return new Response('synthetic rejection after principal resolution', {
+    status: 503,
+  });
+};
+`,
+    { mode: 0o600 },
+  );
+
+  function readCapture(capturePath) {
+    try {
+      return JSON.parse(readFileSync(capturePath, 'utf8'));
+    } catch (error) {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    }
+  }
+
+  const runSeed = (name, fixture, sourceEnvironment, expectedToken) => {
+    const caseDirectory = join(root, name);
+    mkdirSync(caseDirectory, { mode: 0o700 });
+    const usersFile = join(caseDirectory, 'users.json');
+    const manifestFile = join(caseDirectory, 'manifest.json');
+    const stageFile = join(caseDirectory, 'stage.jsonl');
+    const fetchCaptureFile = join(caseDirectory, 'fetch.json');
+    writeFileSync(usersFile, JSON.stringify(fixture), { mode: 0o600 });
+    writeFileSync(manifestFile, '[]\n', { mode: 0o600 });
+    writeFileSync(stageFile, '', { mode: 0o600 });
+
+    const seedEnvironment = buildOrdinaryPerformanceSeedEnvironment(
+      {
+        ...sourceEnvironment,
+        RUNNER_TEMP: caseDirectory,
+        GITHUB_RUN_ID: '38433266141',
+        GITHUB_RUN_ATTEMPT: '1',
+        ELEMENT_ACCEPTANCE_USERS_FILE: usersFile,
+        ELEMENT_ACCEPTANCE_PERFORMANCE_MANIFEST_FILE: manifestFile,
+        ELEMENT_ACCEPTANCE_STAGE_FILE: stageFile,
+      },
+      '2026-10-13',
+    );
+    seedEnvironment.NODE_OPTIONS = `--require=${fetchStubPath}`;
+    seedEnvironment.FETCH_CAPTURE_FILE = fetchCaptureFile;
+    seedEnvironment.FETCH_EXPECTED_TOKEN = expectedToken ?? '';
+
+    const seed = spawnSync(
+      process.execPath,
+      [performanceScript, 'seed-ordinary'],
+      { env: seedEnvironment, stdio: 'ignore' },
+    );
+    const seedRecords = readFileSync(stageFile, 'utf8')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const fetches = readCapture(fetchCaptureFile);
+    const cleanup = spawnSync(
+      process.execPath,
+      [performanceScript, 'cleanup'],
+      { env: seedEnvironment, stdio: 'ignore' },
+    );
+    const cleanupRecords = readFileSync(stageFile, 'utf8')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+
+    return {
+      seedEnvironment,
+      appserviceTokenForwarded: Object.hasOwn(
+        seedEnvironment,
+        'MATRIX_APPLICATION_SERVICE_TOKEN',
+      ),
+      seedExit: seed.status,
+      seedFailureCode: seedRecords.find(
+        (record) =>
+          record.phase === 'performance-seed' && record.status === 'failed',
+      )?.failureCode,
+      fetches,
+      cleanupExit: cleanup.status,
+      cleanup: cleanupRecords.at(-1),
+    };
+  };
+
+  try {
+    const bot = {
+      principalMode: 'bot-account',
+      users: {
+        bot: {
+          userId: '@element-acceptance-bot:localhost',
+          accessToken: 'synthetic-bot-access-token',
+        },
+      },
+      serviceSender: {
+        userId: '@element-acceptance-bot:localhost',
+        accessToken: 'synthetic-bot-access-token',
+      },
+    };
+    const appservice = {
+      principalMode: 'appservice',
+      serviceSender: {
+        userId: '@_matrix_calendar_service:localhost',
+        accessToken: 'synthetic-service-user-token',
+      },
+    };
+
+    const missingBotMode = runSeed('bot-mode-missing', bot, {});
+    assert.equal(
+      missingBotMode.seedEnvironment.ROOM_CALENDAR_PRINCIPAL_MODE,
+      'appservice',
+    );
+    assert.equal(missingBotMode.seedExit, 1);
+    assert.equal(missingBotMode.seedFailureCode, 'environment-invalid');
+    assert.equal(missingBotMode.fetches.length, 0);
+    assert.equal(missingBotMode.cleanupExit, 0);
+    assert.equal(missingBotMode.cleanup.status, 'passed');
+    assert.equal(missingBotMode.cleanup.unresolvedCount, 0);
+
+    const botRun = runSeed(
+      'bot-mode-forwarded',
+      bot,
+      {
+        ROOM_CALENDAR_PRINCIPAL_MODE: 'bot-account',
+        MATRIX_APPLICATION_SERVICE_TOKEN: 'synthetic-inherited-as-token',
+      },
+      'synthetic-bot-access-token',
+    );
+    assert.equal(
+      botRun.seedEnvironment.ROOM_CALENDAR_PRINCIPAL_MODE,
+      'bot-account',
+    );
+    assert.equal(botRun.appserviceTokenForwarded, false);
+    assert.equal(botRun.seedExit, 1);
+    assert.equal(botRun.seedFailureCode, 'openid-failed');
+    assert.equal(botRun.fetches.length, 1);
+    assert.equal(
+      botRun.fetches[0].path,
+      '/_matrix/client/v3/user/%40element-acceptance-bot%3Alocalhost/openid/request_token',
+    );
+    assert.equal(botRun.fetches[0].method, 'POST');
+    assert.equal(botRun.fetches[0].contentType, 'application/json');
+    assert.equal(botRun.fetches[0].bearerPresent, true);
+    assert.equal(botRun.fetches[0].bearerMatchesExpected, true);
+    assert.deepEqual(JSON.parse(botRun.fetches[0].body), {});
+    assert.equal(JSON.stringify(botRun.fetches).includes('synthetic'), false);
+    assert.equal(botRun.cleanupExit, 0);
+    assert.equal(botRun.cleanup.status, 'passed');
+    assert.equal(botRun.cleanup.unresolvedCount, 0);
+
+    const appserviceRun = runSeed(
+      'appservice-mode-forwarded',
+      appservice,
+      {
+        ROOM_CALENDAR_PRINCIPAL_MODE: 'appservice',
+        MATRIX_APPLICATION_SERVICE_TOKEN: 'synthetic-as-token',
+      },
+      'synthetic-service-user-token',
+    );
+    assert.equal(
+      appserviceRun.seedEnvironment.ROOM_CALENDAR_PRINCIPAL_MODE,
+      'appservice',
+    );
+    assert.equal(appserviceRun.appserviceTokenForwarded, true);
+    assert.equal(appserviceRun.seedExit, 1);
+    assert.equal(appserviceRun.seedFailureCode, 'openid-failed');
+    assert.equal(appserviceRun.fetches.length, 1);
+    assert.equal(appserviceRun.fetches[0].method, 'POST');
+    assert.equal(appserviceRun.fetches[0].contentType, 'application/json');
+    assert.equal(appserviceRun.fetches[0].bearerPresent, true);
+    assert.equal(appserviceRun.fetches[0].bearerMatchesExpected, true);
+    assert.deepEqual(JSON.parse(appserviceRun.fetches[0].body), {
+      user_id: '@_matrix_calendar_service:localhost',
+    });
+    assert.equal(
+      JSON.stringify(appserviceRun.fetches).includes('synthetic'),
+      false,
+    );
+    assert.equal(appserviceRun.cleanupExit, 0);
+    assert.equal(appserviceRun.cleanup.status, 'passed');
+    assert.equal(appserviceRun.cleanup.unresolvedCount, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('performance OpenID requests post the selected identity without query parameters', async () => {
+  const appservicePrincipal = resolvePerformancePrincipal(
+    {
+      principalMode: 'appservice',
+      serviceSender: {
+        userId: '@_matrix_calendar_service:localhost',
+        accessToken: 'synthetic-service-user-token',
+      },
+    },
+    'appservice',
+    'synthetic-as-token',
+  );
+  const bot = {
+    userId: '@element-acceptance-bot:localhost',
+    accessToken: 'synthetic-bot-access-token',
+  };
+  const botPrincipal = resolvePerformancePrincipal(
+    {
+      principalMode: 'bot-account',
+      users: { bot },
+      serviceSender: { ...bot },
+    },
+    'bot-account',
+    undefined,
+  );
+  const originalFetch = globalThis.fetch;
+
+  try {
+    for (const [principal, expectedBody] of [
+      [appservicePrincipal, { user_id: '@_matrix_calendar_service:localhost' }],
+      [botPrincipal, {}],
+    ]) {
+      let request;
+      globalThis.fetch = async (url, init) => {
+        request = { url: new URL(url), init };
+        return Response.json({
+          access_token: 'synthetic-openid-proof-token',
+          matrix_server_name: 'localhost',
+        });
+      };
+
+      const proof = await requestPerformanceOpenIdCredential(principal);
+      assert.equal(proof.matrixServerName, 'localhost');
+      assert.equal(
+        request.url.pathname,
+        `/_matrix/client/v3/user/${encodeURIComponent(principal.userId)}/openid/request_token`,
+      );
+      assert.equal(request.url.search, '');
+      assert.equal(request.init.method, 'POST');
+      assert.equal(
+        request.init.headers.Authorization,
+        `Bearer ${principal.accessToken}`,
+      );
+      assert.equal(request.init.headers['Content-Type'], 'application/json');
+      assert.equal(request.init.body, JSON.stringify(expectedBody));
+      if (principal.mode === 'bot-account') {
+        assert.equal(
+          Object.hasOwn(JSON.parse(request.init.body), 'user_id'),
+          false,
+        );
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('performance CalDAV uses the selected sender localpart', () => {
+  assert.equal(
+    calendarCollectionUrl('element-acceptance-bot'),
+    'http://127.0.0.1:5232/element-acceptance-bot/element-acceptance/',
+  );
+  assert.equal(
+    calendarCollectionUrl('_matrix_calendar_service'),
+    'http://127.0.0.1:5232/_matrix_calendar_service/element-acceptance/',
+  );
+});
+
+test('performance OpenID rejects mode, identity, token, and AS credential mismatches', () => {
+  const bot = {
+    userId: '@element-acceptance-bot:localhost',
+    accessToken: 'synthetic-bot-access-token',
+  };
+  const fixture = {
+    principalMode: 'bot-account',
+    users: { bot },
+    serviceSender: { ...bot },
+  };
+
+  assert.equal(resolvePerformancePrincipal(fixture, 'appservice'), undefined);
+  assert.equal(
+    resolvePerformancePrincipal(fixture, 'bot-account', 'unexpected-as-token'),
+    undefined,
+  );
+  assert.equal(
+    resolvePerformancePrincipal(
+      { ...fixture, serviceSender: { ...bot, userId: '@other:localhost' } },
+      'bot-account',
+      undefined,
+    ),
+    undefined,
+  );
+  assert.equal(
+    resolvePerformancePrincipal(
+      {
+        ...fixture,
+        serviceSender: { ...bot, accessToken: 'different-bot-access-token' },
+      },
+      'bot-account',
+      undefined,
+    ),
+    undefined,
+  );
+});
 
 test('chooses a future 31-day local calendar month', () => {
   assert.deepEqual(next31DayMonth(new Date('2026-10-07T12:00:00.000Z')), {

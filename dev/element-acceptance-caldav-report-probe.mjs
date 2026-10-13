@@ -1,4 +1,6 @@
 import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const SERVICE_USER_ID = '@_matrix_calendar_service:localhost';
 const SERVICE_LOCALPART = '_matrix_calendar_service';
@@ -36,6 +38,50 @@ const PROJECTION_DIAGNOSTIC_REASONS = [
   'unsupported-timezone',
   'range-this-and-future',
 ];
+
+export function resolveProbePrincipal(input, applicationServiceToken) {
+  const sender = input?.serviceSender;
+  if (input?.principalMode === 'appservice') {
+    if (
+      sender?.userId !== SERVICE_USER_ID ||
+      typeof applicationServiceToken !== 'string' ||
+      applicationServiceToken.length === 0 ||
+      applicationServiceToken.length > 4096
+    ) {
+      return undefined;
+    }
+    return {
+      mode: 'appservice',
+      userId: SERVICE_USER_ID,
+      localpart: SERVICE_LOCALPART,
+      accessToken: applicationServiceToken,
+      openIdBody: { user_id: SERVICE_USER_ID },
+    };
+  }
+
+  const bot = input?.bot;
+  if (
+    input?.principalMode !== 'bot-account' ||
+    applicationServiceToken !== undefined ||
+    typeof bot?.userId !== 'string' ||
+    !/^@([a-z0-9][a-z0-9-]{0,254}):localhost$/u.test(bot.userId) ||
+    typeof bot?.accessToken !== 'string' ||
+    bot.accessToken.length === 0 ||
+    bot.accessToken.length > 4096 ||
+    sender?.userId !== bot.userId ||
+    sender?.accessToken !== bot.accessToken
+  ) {
+    return undefined;
+  }
+
+  return {
+    mode: 'bot-account',
+    userId: bot.userId,
+    localpart: bot.userId.slice(1, bot.userId.indexOf(':')),
+    accessToken: bot.accessToken,
+    openIdBody: {},
+  };
+}
 
 function emptyProjectionDiagnosticCounts() {
   return Object.fromEntries(
@@ -191,8 +237,10 @@ async function readInput() {
 async function main() {
   const input = await readInput();
   const applicationServiceToken = process.env.MATRIX_APPLICATION_SERVICE_TOKEN;
+  const principal = resolveProbePrincipal(input, applicationServiceToken);
   if (
     !input ||
+    !principal ||
     input.calendarId !== CALENDAR_ID ||
     typeof input.eventUid !== 'string' ||
     input.eventUid.length === 0 ||
@@ -203,9 +251,7 @@ async function main() {
     !input.range.timezone ||
     !Number.isFinite(Date.parse(input.range.start)) ||
     !Number.isFinite(Date.parse(input.range.end)) ||
-    Date.parse(input.range.end) <= Date.parse(input.range.start) ||
-    typeof applicationServiceToken !== 'string' ||
-    applicationServiceToken.length === 0
+    Date.parse(input.range.end) <= Date.parse(input.range.start)
   ) {
     writeResult(unavailable());
     return;
@@ -215,16 +261,20 @@ async function main() {
   let reportStatus = null;
   try {
     const openIdUrl = new URL(
-      `/_matrix/client/v3/user/${encodeURIComponent(SERVICE_USER_ID)}/openid/request_token`,
+      `/_matrix/client/v3/user/${encodeURIComponent(principal.userId)}/openid/request_token`,
       HOMESERVER_URL,
     );
     const openIdResponse = await fetch(openIdUrl, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${applicationServiceToken}`,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${principal.accessToken}`,
+        ...(principal.openIdBody === undefined
+          ? {}
+          : { 'Content-Type': 'application/json' }),
       },
-      body: JSON.stringify({ user_id: SERVICE_USER_ID }),
+      ...(principal.openIdBody === undefined
+        ? {}
+        : { body: JSON.stringify(principal.openIdBody) }),
       redirect: 'error',
       signal: AbortSignal.timeout(10_000),
     });
@@ -254,7 +304,7 @@ async function main() {
         }),
       ).toString('base64url');
       const authorization = Buffer.from(
-        `${SERVICE_LOCALPART}:matrix-openid:${delegatedCredential}`,
+        `${principal.localpart}:matrix-openid:${delegatedCredential}`,
         'utf8',
       ).toString('base64');
       credential = {
@@ -274,7 +324,7 @@ async function main() {
     };
     const client = new CalDavEventClient(credential, trackedFetch);
     const collectionUrl = new URL(
-      `${encodeURIComponent(SERVICE_LOCALPART)}/${encodeURIComponent(CALENDAR_ID)}/`,
+      `${encodeURIComponent(principal.localpart)}/${encodeURIComponent(CALENDAR_ID)}/`,
       RADICALE_URL,
     );
     const resources = await client.listEvents(
@@ -383,4 +433,9 @@ async function main() {
   }
 }
 
-void main().catch(() => writeResult(unavailable()));
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  void main().catch(() => writeResult(unavailable()));
+}

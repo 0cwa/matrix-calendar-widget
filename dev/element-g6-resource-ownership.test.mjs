@@ -60,20 +60,82 @@ test('canonical summary comparison is inconclusive for invalid or ambiguous data
   assert.equal(g6EventSummaryMatches(Buffer.alloc(16_385), 'title'), undefined);
 });
 
-test('matches the same owned G6 resource across the two fixture Radicale origins', () => {
-  const external =
-    'http://127.0.0.1:5233/_matrix_calendar_service/element-acceptance/g6-01234567-89ab-cdef-0123-456789abcdef.ics';
-  const internal = external.replace(
-    'http://127.0.0.1:5233',
-    'http://restore-radicale:5232',
-  );
+test('matches only the selected principal resource across fixture origins', () => {
+  const resource = 'g6-01234567-89ab-cdef-0123-456789abcdef.ics';
+  const external = (localpart) =>
+    `http://127.0.0.1:5233/${localpart}/element-acceptance/${resource}`;
+  const gateway = (localpart) =>
+    `http://restore-radicale:5232/${localpart}/element-acceptance/${resource}`;
 
-  assert.equal(g6GatewayResourceIdentityMatches(internal, external), true);
-  assert.equal(g6GatewayResourceIdentityMatches(external, external), false);
   assert.equal(
     g6GatewayResourceIdentityMatches(
-      internal.replace('01234567-89ab', '11234567-89ab'),
-      external,
+      gateway('_matrix_calendar_service'),
+      external('_matrix_calendar_service'),
+      '_matrix_calendar_service',
+    ),
+    true,
+  );
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
+      gateway('calendar-bot'),
+      external('calendar-bot'),
+      'calendar-bot',
+    ),
+    true,
+  );
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
+      gateway('calendar_test_bot'),
+      external('calendar_test_bot'),
+      'calendar_test_bot',
+    ),
+    true,
+  );
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
+      gateway('calendar-bot'),
+      external('calendar-bot'),
+      '_matrix_calendar_service',
+    ),
+    false,
+  );
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
+      gateway('_matrix_calendar_service'),
+      external('_matrix_calendar_service'),
+      'calendar-bot',
+    ),
+    false,
+  );
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
+      gateway('calendar_test_bot'),
+      external('calendar_test_bot'),
+      'calendar-bot',
+    ),
+    false,
+  );
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
+      gateway('calendar-bot'),
+      external('calendar-bot'),
+      'calendar_test_bot',
+    ),
+    false,
+  );
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
+      external('_matrix_calendar_service'),
+      external('_matrix_calendar_service'),
+      '_matrix_calendar_service',
+    ),
+    false,
+  );
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
+      gateway('calendar-bot').replace('01234567-89ab', '11234567-89ab'),
+      external('calendar-bot'),
+      'calendar-bot',
     ),
     false,
   );
@@ -91,9 +153,33 @@ test('rejects foreign origins, collection paths, and decorated G6 hrefs', () => 
     `${internal}?download=1`,
     `${internal}#fragment`,
     external.replace('127.0.0.1:5233', '127.0.0.1:5232'),
+    internal.replace(
+      '_matrix_calendar_service/',
+      '_matrix_calendar_service%2f/',
+    ),
+    internal.replace('element-acceptance/', 'element-acceptance/%2e%2e/'),
   ]) {
-    assert.equal(g6GatewayResourceIdentityMatches(candidate, external), false);
+    assert.equal(
+      g6GatewayResourceIdentityMatches(
+        candidate,
+        external,
+        '_matrix_calendar_service',
+      ),
+      false,
+    );
   }
+  assert.equal(
+    g6GatewayResourceIdentityMatches(internal, external, '../escape'),
+    false,
+  );
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
+      'http://restore-radicale:5232/calendar_test_bot/element-acceptance/%2e%2e/g6-01234567-89ab-cdef-0123-456789abcdef.ics',
+      'http://127.0.0.1:5233/calendar_test_bot/element-acceptance/g6-01234567-89ab-cdef-0123-456789abcdef.ics',
+      'calendar_test_bot',
+    ),
+    false,
+  );
 });
 
 function start(name = 'private-resource-name.ics') {
@@ -152,11 +238,19 @@ test('only a confirmed strong ETag authorizes conditional cleanup', () => {
   assert.equal(summary.allOwnedResourcesRemoved, false);
 });
 
-test('a confirmed update replaces the cleanup validator before deleting', () => {
-  const resource = start();
+test('a confirmed bot-home update preserves its new cleanup validator', () => {
+  const resourceName = 'g6-01234567-89ab-cdef-0123-456789abcdef.ics';
+  const external = `http://127.0.0.1:5233/calendar_test_bot/element-acceptance/${resourceName}`;
+  const gateway = `http://restore-radicale:5232/calendar_test_bot/element-acceptance/${resourceName}`;
+  const identityMatches = g6GatewayResourceIdentityMatches(
+    gateway,
+    external,
+    'calendar_test_bot',
+  );
+  const resource = start(resourceName);
   assert.equal(recordG6ResourceCreate(resource, 201, '"created-v1"'), true);
   assert.equal(
-    recordG6ResourceUpdate(resource, 200, '"updated-v2"', true),
+    recordG6ResourceUpdate(resource, 200, '"updated-v2"', identityMatches),
     true,
   );
   assert.deepEqual(g6ResourceCleanupRequest(resource), {

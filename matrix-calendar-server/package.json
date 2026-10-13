@@ -104,8 +104,8 @@
       "^.+\\.(ts|tsx)$": "ts-jest"
     },
     "moduleDirectories": [
-      "lib",
-      "node_modules"
+      "node_modules",
+      "lib"
     ],
     "testRegex": "(/__tests__/.*|\\.(test|spec))\\.(ts|tsx|js)$",
     "moduleFileExtensions": [

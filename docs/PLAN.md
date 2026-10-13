@@ -399,6 +399,52 @@ DST regression or recurrence-editing criteria above.
         encrypted-room denial, and binding changes before and during scans
         against pinned Synapse/Radicale (PR #199). This proves the pinned stack,
         rather than exactly-once delivery on arbitrary homeservers.
+- [x] Implement the accepted ADR041 opt-in `bot-account` mode for room CalDAV
+      and reminder providers. Keep `appservice` as the strict default and
+      preserve its contracts. Resolve one shared principal identity from the
+      same Matrix SDK client constructed with `ACCESS_TOKEN`, verify
+      `AppRuntimeContext.botUserId`, and stop before OpenID, CalDAV, or reminder
+      transport requests on identity mismatch or failure. Use that same
+      identity for CalDAV expected-principal validation and reminder sender
+      checks; ordinary bot-account reminder REST calls omit the
+      application-service `user_id` query parameter. Preserve actor, binding,
+      power, ETag, default-off, PostgreSQL persistence, and paired restore gates.
+      Do not change unrelated application-service features or action notices.
+- [x] Add a separate normal-bot Element acceptance job to the shared fixture
+      runner. Require disabled synthetic AS registration and no AS token while
+      retaining the same authorization, event, reminder, restart, restore, and
+      cleanup assertions. Add offline setup, OpenID request-shape, and workflow
+      guard tests. The current source candidate also includes Synapse's
+      noninteractive synthetic-account registration flag, the required `{}`
+      bot-mode OpenID request body, fixture `fetch` forwarding to the subject
+      observer, a digest-checked Desktop archive fallback, bounded SDK whoami
+      diagnostics, and principal-mode forwarding to the 25-event seed child.
+      Focused offline tests cover these changes. Hosted results for the
+      published candidate below show only partial normal-bot path evidence.
+      The signed Desktop index offers 1.12.31 and omits pinned 1.12.30; the
+      fixture uses the digest-checked pinned archive fallback.
+- [ ] Complete normal-bot G6 unsupported-resource preservation and owned
+      cleanup, then pass acceptance on the fixed source. The published PR #247
+      head `c6a68e9ec49395a671d6a29e48617979df99de3d` passed all terminal checks
+      except normal-bot acceptance in
+      [run 38452260797](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38452260797).
+      Its Real Radicale contract passed appservice and normal-bot behavior
+      (7/7 cases in each mode). The Element acceptance passed 127 appservice
+      Web phases, both Desktop journeys (12/12), normal-bot Web CRUD, reminders,
+      PostgreSQL restart, paired restore, and both profiles' zero- and
+      25-event timing gates. Appservice G6 preservation and cleanup passed.
+      Normal-bot G6 failed its combined preservation gate: the neighbor update
+      returned HTTP 200, the edited title appeared in the refreshed list, and
+      the unsupported canonical resource stayed byte-identical, but the
+      ownership check rejected the gateway href because the fixture still
+      assumed the appservice home. The G6 state machine therefore refused to
+      advance the cleanup ETag; three of four resources were resolved, with one
+      cleanup unresolved. Source commit
+      `794cbc60a3a93e38961db49dfe358831e46f44c5` fixes the fixture check to use
+      the selected, authenticated principal's localpart while retaining fixed
+      origins, exact href identity, strong ETag checks, and fail-closed cleanup.
+      Focused offline tests, E2E TypeScript, and formatting pass; this follow-up
+      has not yet had a hosted runtime run. Operator acceptance remains open.
 - [x] Offer a safe current-room link from authorized room event details and
       display existing safe conference links. Ordinary master conference URI
       authoring follows ADR036; RTC service creation remains future work.
@@ -426,8 +472,9 @@ deferred until members explicitly verify and consent to sharing an address.
 Do not infer addresses from Matrix membership.
 
 **Exit:** repository v1 supports configured room event management and durable
-room-wide reminders. Actual Matrix-client and operator deployment acceptance
-remain separate; collection lifecycle and bindings stay operator-managed.
+room-wide reminders in the default appservice mode and the optional bot-account
+mode. Actual Matrix-client and operator deployment acceptance remain separate;
+collection lifecycle and bindings stay operator-managed.
 
 ## M7 — Non-widget fallback
 

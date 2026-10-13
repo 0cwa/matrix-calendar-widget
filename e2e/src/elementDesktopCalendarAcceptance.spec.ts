@@ -16,6 +16,7 @@
 
 import {
   chromium,
+  expect,
   test,
   type Browser,
   type BrowserContext,
@@ -28,6 +29,13 @@ import {
 import { randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
+import {
+  compareEventTimingWithRoomRange,
+  inspectExpectedEventList,
+  readCreatedEventTiming,
+  type CreatedEventTiming,
+  type ExpectedRoomRange,
+} from '../../dev/element-acceptance-event-observation.mjs';
 import { hasUniqueWidgetFrameOwnedByElement } from '../../dev/element-desktop-frame-origin.mjs';
 import {
   appendDesktopJourneyOutcome,
@@ -107,6 +115,10 @@ type DesktopWidgetPromptObservation = Pick<
 
 type DesktopEventCreatePostObserver = {
   snapshot: () => DesktopEventCreateFailureDiagnostic;
+  collect: (
+    frame: FrameLocator | undefined,
+    expectedTitle: string | undefined,
+  ) => Promise<DesktopEventCreateFailureDiagnostic>;
   stop: () => void;
 };
 
@@ -143,6 +155,172 @@ const DESKTOP_GATEWAY_READ_FAILURE_POINTS = new Set<DesktopJourneyFailurePoint>(
     'create-control',
   ],
 );
+
+test('bounds Desktop create diagnostics when a response body stalls', async () => {
+  type Listener = (value: unknown) => void;
+  const listeners = new Map<string, Set<Listener>>();
+  const fakePage = {
+    on(event: string, listener: Listener) {
+      const eventListeners = listeners.get(event) ?? new Set<Listener>();
+      eventListeners.add(listener);
+      listeners.set(event, eventListeners);
+      return this;
+    },
+    off(event: string, listener: Listener) {
+      listeners.get(event)?.delete(listener);
+      return this;
+    },
+    emit(event: string, value: unknown) {
+      for (const listener of listeners.get(event) ?? []) listener(value);
+    },
+    listenerCount(event: string) {
+      return listeners.get(event)?.size ?? 0;
+    },
+  };
+  const page = fakePage as unknown as Page;
+  const privateTitle = 'private sentinel title';
+  const privateEventId = 'private-sentinel-event-id';
+  const privateRoomId = '!private-sentinel-room:example.test';
+  const privateCalendarId = 'private-sentinel-calendar';
+  const fixture = {
+    gatewayUrl: 'http://127.0.0.1:3000',
+    teamRoomId: privateRoomId,
+    calendarId: privateCalendarId,
+  } as Fixture;
+  const eventsUrl = new URL('/v1/calendar/events', fixture.gatewayUrl);
+  eventsUrl.searchParams.set('target', 'room');
+  eventsUrl.searchParams.set('roomId', privateRoomId);
+  eventsUrl.searchParams.set('calendarId', privateCalendarId);
+  const postRequest = {
+    method: () => 'POST',
+    url: () => eventsUrl.toString(),
+  } as unknown as Request;
+  const postBody = Buffer.from(
+    JSON.stringify({
+      event: {
+        id: privateEventId,
+        title: privateTitle,
+        calendarId: privateCalendarId,
+      },
+    }),
+  );
+  let releasePostBody!: (body: Buffer) => void;
+  let postBodyRead = false;
+  const pendingPostBody = new Promise<Buffer>((resolve) => {
+    releasePostBody = resolve;
+  });
+  const postResponse = {
+    request: () => postRequest,
+    status: () => 201,
+    headers: () => ({
+      'content-length': String(postBody.byteLength),
+      'content-type': 'application/json',
+    }),
+    body: () => {
+      postBodyRead = true;
+      return pendingPostBody;
+    },
+  } as unknown as Response;
+
+  const getUrl = new URL(eventsUrl);
+  getUrl.searchParams.set('start', '2026-02-10T12:00:00.000Z');
+  getUrl.searchParams.set('end', '2026-02-10T14:00:00.000Z');
+  getUrl.searchParams.set('timezone', 'UTC');
+  const getRequest = {
+    method: () => 'GET',
+    url: () => getUrl.toString(),
+  } as unknown as Request;
+  let releaseGetBody!: (body: Buffer) => void;
+  let getBodyRead = false;
+  const pendingGetBody = new Promise<Buffer>((resolve) => {
+    releaseGetBody = resolve;
+  });
+  const getResponse = {
+    request: () => getRequest,
+    status: () => 200,
+    headers: () => ({
+      'content-length': '128',
+      'content-type': 'application/json',
+    }),
+    body: () => {
+      getBodyRead = true;
+      return pendingGetBody;
+    },
+  } as unknown as Response;
+
+  const observer = observeDesktopEventCreatePost(page, fixture, privateTitle);
+  fakePage.emit('request', postRequest);
+  fakePage.emit('response', postResponse);
+  fakePage.emit('request', getRequest);
+  fakePage.emit('response', getResponse);
+  const startedAt = Date.now();
+  const diagnostic = await observer.collect(undefined, undefined);
+  const elapsedMs = Date.now() - startedAt;
+
+  expect(elapsedMs).toBeLessThan(WEB_B_EVENT_LIST_DIAGNOSTIC_DEADLINE_MS + 500);
+  expect(postBodyRead).toBe(true);
+  expect(getBodyRead).toBe(true);
+  expect(diagnostic).toMatchObject({
+    createPostObserved: true,
+    createPostRequestFailed: false,
+    createPostStatus: 201,
+    createResponseHasEvent: null,
+    createResponseTitleMatches: null,
+    createResponseCalendarMatches: null,
+    postCreateRoomRangeGetRequestCountCapped: 1,
+    postCreateRoomRangeGetResponseCountCapped: 1,
+    postCreateRoomRangeGetStatus: 200,
+    roomListHasEventsArray: null,
+    roomListEventCountCapped: null,
+    roomListTitleMatches: null,
+    roomListIdMatches: null,
+    roomListCalendarMatches: null,
+  });
+  expect(JSON.stringify(diagnostic)).not.toContain(privateTitle);
+  expect(JSON.stringify(diagnostic)).not.toContain(privateEventId);
+  expect(JSON.stringify(diagnostic)).not.toContain(privateRoomId);
+  expect(JSON.stringify(diagnostic)).not.toContain(privateCalendarId);
+  expect(fakePage.listenerCount('request')).toBe(0);
+  expect(fakePage.listenerCount('requestfailed')).toBe(0);
+  expect(fakePage.listenerCount('response')).toBe(0);
+
+  releasePostBody(postBody);
+  releaseGetBody(Buffer.from(JSON.stringify({ events: [] })));
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(observer.snapshot()).toEqual(diagnostic);
+
+  let oversizedHeaderBodyRead = false;
+  let oversizedHeaderResult: unknown = 'pending';
+  const oversizedHeaderResponse = {
+    headers: () => ({
+      'content-length': '65537',
+      'content-type': 'application/json',
+    }),
+    body: () => {
+      oversizedHeaderBodyRead = true;
+      return Promise.resolve(Buffer.from('{}'));
+    },
+  } as unknown as Response;
+  startBoundedResponseJsonRead(oversizedHeaderResponse, (body) => {
+    oversizedHeaderResult = body;
+  });
+  expect(oversizedHeaderResult).toBeNull();
+  expect(oversizedHeaderBodyRead).toBe(false);
+
+  let oversizedActualBodyResult: unknown = 'pending';
+  const oversizedActualBodyResponse = {
+    headers: () => ({
+      'content-length': '65536',
+      'content-type': 'application/json',
+    }),
+    body: () => Promise.resolve(Buffer.alloc(65_537)),
+  } as unknown as Response;
+  startBoundedResponseJsonRead(oversizedActualBodyResponse, (body) => {
+    oversizedActualBodyResult = body;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(oversizedActualBodyResult).toBeNull();
+});
 
 function unavailableDesktopWidgetPromptObservation(): DesktopWidgetPromptObservation {
   return {
@@ -303,6 +481,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let webBFrame: FrameLocator | undefined;
   let webBSelectedTitle: string | undefined;
   let webBEditedTitle: string | undefined;
+  let desktopEventCreateTitle: string | undefined;
   let desktopGatewayReadObserver: DesktopGatewayReadRequestObserver | undefined;
   let desktopEventCreatePostObserver:
     | DesktopEventCreatePostObserver
@@ -497,12 +676,14 @@ test('Element Desktop room event journey', async ({ browser }) => {
     enterPhase('desktop-event-create');
     currentFailurePoint = 'event-create-setup';
     const initialTitle = `Desktop acceptance ${randomUUID()}`;
+    desktopEventCreateTitle = initialTitle;
     const editedTitle = `${initialTitle} edited`;
     webBSelectedTitle = initialTitle;
     webBEditedTitle = editedTitle;
     desktopEventCreatePostObserver = observeDesktopEventCreatePost(
       desktopPage,
       fixture,
+      initialTitle,
     );
     const createResponse = waitForGatewayResponse(desktopPage, fixture, 'POST');
     void createResponse.catch(() => undefined);
@@ -826,6 +1007,9 @@ test('Element Desktop room event journey', async ({ browser }) => {
         | undefined;
       if (currentPhase === 'desktop-event-create') {
         desktopEventCreateDiagnostic =
+          (await desktopEventCreatePostObserver
+            ?.collect(desktopWidgetFrame, desktopEventCreateTitle)
+            .catch(() => undefined)) ??
           desktopEventCreatePostObserver?.snapshot() ??
           unavailableDesktopEventCreateFailureDiagnostic();
       }
@@ -910,7 +1094,7 @@ async function getDesktopPage(browser: Browser): Promise<Page> {
         candidate.url().startsWith('vector://vector/webapp/'),
       );
     if (page) return page;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error('Desktop application page is unavailable');
 }
@@ -1344,18 +1528,171 @@ function unavailableDesktopEventCreateFailureDiagnostic(): DesktopEventCreateFai
     createPostObserved: null,
     createPostRequestFailed: null,
     createPostStatus: null,
+    createResponseHasEvent: null,
+    createResponseTitleMatches: null,
+    createResponseCalendarMatches: null,
+    postCreateEventGetRequestCountCapped: null,
+    postCreateRoomRangeGetRequestCountCapped: null,
+    postCreateRoomRangeGetResponseCountCapped: null,
+    postCreateRoomRangeGetStatus: null,
+    roomListHasEventsArray: null,
+    roomListEventCountCapped: null,
+    roomListTitleMatches: null,
+    roomListIdMatches: null,
+    roomListCalendarMatches: null,
+    createResponseTimingComparable: null,
+    createResponseEventIntersectsRoomRange: null,
+    calendarEventsRegionCountCapped: null,
+    calendarEventsRegionVisible: null,
+    calendarEventsVisibleRowCountCapped: null,
+    progressbarVisible: null,
+    errorAlertVisible: null,
+    matchingRowCountCapped: null,
+    matchingRowVisible: null,
   };
 }
 
 function observeDesktopEventCreatePost(
   page: Page,
   fixture: Fixture,
+  expectedTitle: string,
 ): DesktopEventCreatePostObserver {
   let installed = false;
   let firstMatchingRequest: Request | undefined;
   let requestFailed = false;
   let status: number | null = null;
   let stopped = false;
+  let successfulCreateResponseObserved = false;
+  let createResponseHasEvent: boolean | null = null;
+  let createResponseTitleMatches: boolean | null = null;
+  let createResponseCalendarMatches: boolean | null = null;
+  let createdEventId: string | undefined;
+  let createdEventTiming: CreatedEventTiming | undefined;
+  let expectedRoomRange: ExpectedRoomRange | undefined;
+  let postCreateEventGetRequestCountCapped: 0 | 1 | 2 = 0;
+  let postCreateRoomRangeGetRequestCountCapped: 0 | 1 | 2 = 0;
+  let postCreateRoomRangeGetResponseCountCapped: 0 | 1 | 2 = 0;
+  let postCreateRoomRangeGetStatus: number | null = null;
+  let roomListHasEventsArray: boolean | null = null;
+  let roomListEventCountCapped: 0 | 1 | 2 | null = null;
+  let roomListTitleMatches: boolean | null = null;
+  let roomListIdMatches: boolean | null = null;
+  let roomListCalendarMatches: boolean | null = null;
+  let createResponseTimingComparable: boolean | null = null;
+  let createResponseEventIntersectsRoomRange: boolean | null = null;
+  let latestRangeResponse = 0;
+  const roomRangesByRequest = new WeakMap<Request, ExpectedRoomRange>();
+  const pendingResponseReads: Promise<void>[] = [];
+  const responseReadCancels = new Set<() => void>();
+  let createResponseRead: Promise<void> | undefined;
+  let calendarEventsRegionCountCapped: 0 | 1 | 2 | null = null;
+  let calendarEventsRegionVisible: boolean | null = null;
+  let calendarEventsVisibleRowCountCapped: 0 | 1 | 2 | null = null;
+  let progressbarVisible: boolean | null = null;
+  let errorAlertVisible: boolean | null = null;
+  let matchingRowCountCapped: 0 | 1 | 2 | null = null;
+  let matchingRowVisible: boolean | null = null;
+
+  const isEventsEndpoint = (rawUrl: string) => {
+    try {
+      const url = new URL(rawUrl);
+      return (
+        url.origin === new URL(fixture.gatewayUrl).origin &&
+        url.pathname === '/v1/calendar/events'
+      );
+    } catch {
+      return false;
+    }
+  };
+  const readExpectedRoomRange = (
+    rawUrl: string,
+  ): ExpectedRoomRange | undefined => {
+    try {
+      const url = new URL(rawUrl);
+      const query = url.searchParams;
+      const start = query.get('start');
+      const end = query.get('end');
+      const timezone = query.get('timezone');
+      if (
+        url.origin !== new URL(fixture.gatewayUrl).origin ||
+        url.pathname !== '/v1/calendar/events' ||
+        query.get('target') !== 'room' ||
+        query.get('roomId') !== fixture.teamRoomId ||
+        query.get('calendarId') !== fixture.calendarId ||
+        !start ||
+        !end ||
+        !timezone ||
+        start.length > 128 ||
+        end.length > 128 ||
+        timezone.length > 128 ||
+        !Number.isFinite(Date.parse(start)) ||
+        !Number.isFinite(Date.parse(end)) ||
+        Date.parse(end) <= Date.parse(start)
+      ) {
+        return undefined;
+      }
+      return { start, end, timezone };
+    } catch {
+      return undefined;
+    }
+  };
+  const readBoundedResponse = (response: Response) =>
+    new Promise<unknown | null>((resolve) => {
+      let finished = false;
+      let cancelReader: () => void = () => {};
+      let cancelRead: () => void = () => {};
+      const finish = (body: unknown | null) => {
+        if (finished) return;
+        finished = true;
+        responseReadCancels.delete(cancelRead);
+        resolve(body);
+      };
+      cancelRead = () => {
+        cancelReader();
+        finish(null);
+      };
+      cancelReader = startBoundedResponseJsonRead(response, finish);
+      if (!finished) responseReadCancels.add(cancelRead);
+    });
+  const readCreateResponse = (body: unknown | null) => {
+    if (body === null) return;
+    const event = isRecord(body) && isRecord(body.event) ? body.event : null;
+    createResponseHasEvent = event !== null;
+    createResponseTitleMatches = event
+      ? typeof event.title === 'string' && event.title === expectedTitle
+      : false;
+    createResponseCalendarMatches = event
+      ? typeof event.calendarId === 'string' &&
+        event.calendarId === fixture.calendarId
+      : false;
+    if (!event) return;
+    if (typeof event.id === 'string' && event.id.length > 0) {
+      createdEventId = event.id;
+    }
+    createdEventTiming = readCreatedEventTiming(event.timing);
+  };
+  const readRoomRangeResponse = (
+    response: Response,
+    responseNumber: number,
+  ) => {
+    return readBoundedResponse(response).then(async (body): Promise<void> => {
+      await createResponseRead;
+      if (responseNumber !== latestRangeResponse || body === null) {
+        return undefined;
+      }
+      const summary = inspectExpectedEventList(body, {
+        expectedTitle,
+        expectedCalendarId: fixture.calendarId,
+        ...(createdEventId ? { createdEventId } : {}),
+      });
+      roomListHasEventsArray = summary.hasEventsArray;
+      roomListEventCountCapped = summary.eventCountCapped;
+      roomListTitleMatches = summary.titleMatches;
+      roomListIdMatches = summary.idMatches;
+      roomListCalendarMatches = summary.calendarMatches;
+      return undefined;
+    });
+  };
 
   const onRequest = (request: Request) => {
     if (
@@ -1364,6 +1701,26 @@ function observeDesktopEventCreatePost(
     ) {
       firstMatchingRequest = request;
     }
+    if (
+      stopped ||
+      !successfulCreateResponseObserved ||
+      request.method() !== 'GET' ||
+      !isEventsEndpoint(request.url())
+    ) {
+      return;
+    }
+    postCreateEventGetRequestCountCapped = Math.min(
+      postCreateEventGetRequestCountCapped + 1,
+      2,
+    ) as 0 | 1 | 2;
+    const range = readExpectedRoomRange(request.url());
+    if (range && postCreateRoomRangeGetRequestCountCapped < 2) {
+      postCreateRoomRangeGetRequestCountCapped = Math.min(
+        postCreateRoomRangeGetRequestCountCapped + 1,
+        2,
+      ) as 0 | 1 | 2;
+      roomRangesByRequest.set(request, range);
+    }
   };
   const onRequestFailed = (request: Request) => {
     if (request === firstMatchingRequest && status === null) {
@@ -1371,7 +1728,34 @@ function observeDesktopEventCreatePost(
     }
   };
   const onResponse = (response: Response) => {
-    if (response.request() !== firstMatchingRequest || status !== null) return;
+    if (stopped) return;
+    const request = response.request();
+    if (request === firstMatchingRequest && status === null) {
+      try {
+        const observedStatus = response.status();
+        if (
+          Number.isInteger(observedStatus) &&
+          observedStatus >= 100 &&
+          observedStatus <= 599
+        ) {
+          status = observedStatus;
+          successfulCreateResponseObserved =
+            observedStatus >= 200 && observedStatus < 300;
+          if (successfulCreateResponseObserved) {
+            createResponseRead =
+              readBoundedResponse(response).then(readCreateResponse);
+            pendingResponseReads.push(createResponseRead);
+          }
+        }
+      } catch {
+        // Preserve only fixed status and response facts.
+      }
+      return;
+    }
+    const range = roomRangesByRequest.get(request);
+    if (!range || stopped || postCreateRoomRangeGetResponseCountCapped >= 2) {
+      return;
+    }
     try {
       const observedStatus = response.status();
       if (
@@ -1379,10 +1763,27 @@ function observeDesktopEventCreatePost(
         observedStatus >= 100 &&
         observedStatus <= 599
       ) {
-        status = observedStatus;
+        postCreateRoomRangeGetResponseCountCapped = Math.min(
+          postCreateRoomRangeGetResponseCountCapped + 1,
+          2,
+        ) as 0 | 1 | 2;
+        postCreateRoomRangeGetStatus = observedStatus;
+        expectedRoomRange = range;
+        latestRangeResponse += 1;
+        const responseNumber = latestRangeResponse;
+        roomListHasEventsArray = null;
+        roomListEventCountCapped = null;
+        roomListTitleMatches = null;
+        roomListIdMatches = null;
+        roomListCalendarMatches = null;
+        createResponseTimingComparable = null;
+        createResponseEventIntersectsRoomRange = null;
+        pendingResponseReads.push(
+          readRoomRangeResponse(response, responseNumber),
+        );
       }
     } catch {
-      // Preserve only the fixed request/status observations.
+      // Preserve only fixed request/status and decoded match facts.
     }
   };
   try {
@@ -1395,32 +1796,139 @@ function observeDesktopEventCreatePost(
       page.off('request', onRequest);
       page.off('requestfailed', onRequestFailed);
       page.off('response', onResponse);
+      stopped = true;
     } catch {
       // Listener cleanup is best effort if the page is already closed.
     }
   }
 
+  const snapshot = (): DesktopEventCreateFailureDiagnostic =>
+    installed
+      ? {
+          createPostObserved: firstMatchingRequest !== undefined,
+          createPostRequestFailed: requestFailed,
+          createPostStatus: status,
+          createResponseHasEvent,
+          createResponseTitleMatches,
+          createResponseCalendarMatches,
+          postCreateEventGetRequestCountCapped,
+          postCreateRoomRangeGetRequestCountCapped,
+          postCreateRoomRangeGetResponseCountCapped,
+          postCreateRoomRangeGetStatus,
+          roomListHasEventsArray,
+          roomListEventCountCapped,
+          roomListTitleMatches,
+          roomListIdMatches,
+          roomListCalendarMatches,
+          createResponseTimingComparable,
+          createResponseEventIntersectsRoomRange,
+          calendarEventsRegionCountCapped,
+          calendarEventsRegionVisible,
+          calendarEventsVisibleRowCountCapped,
+          progressbarVisible,
+          errorAlertVisible,
+          matchingRowCountCapped,
+          matchingRowVisible,
+        }
+      : unavailableDesktopEventCreateFailureDiagnostic();
+  const detachListeners = () => {
+    if (stopped) return;
+    stopped = true;
+    try {
+      page.off('request', onRequest);
+      page.off('requestfailed', onRequestFailed);
+      page.off('response', onResponse);
+    } catch {
+      // Listener cleanup is best effort if the page is already closed.
+    }
+  };
+  const stop = () => {
+    detachListeners();
+    for (const cancel of [...responseReadCancels]) cancel();
+  };
+
   return {
-    snapshot: () =>
-      installed
-        ? {
-            createPostObserved: firstMatchingRequest !== undefined,
-            createPostRequestFailed: requestFailed,
-            createPostStatus: status,
-          }
-        : unavailableDesktopEventCreateFailureDiagnostic(),
-    stop: () => {
-      if (stopped) return;
-      stopped = true;
+    snapshot,
+    async collect(frame, title) {
+      if (!installed) return unavailableDesktopEventCreateFailureDiagnostic();
       try {
-        page.off('request', onRequest);
-        page.off('requestfailed', onRequestFailed);
-        page.off('response', onResponse);
-      } catch {
-        // Listener cleanup is best effort if the page is already closed.
+        const readsAtCollection = [...pendingResponseReads];
+        detachListeners();
+        await Promise.allSettled(readsAtCollection);
+        if (createdEventTiming && expectedRoomRange) {
+          try {
+            const timingMatch = await page.evaluate(
+              compareEventTimingWithRoomRange,
+              { timing: createdEventTiming, range: expectedRoomRange },
+            );
+            createResponseTimingComparable = timingMatch.comparable;
+            createResponseEventIntersectsRoomRange = timingMatch.intersects;
+          } catch {
+            // Keep timing unavailable if the browser page has closed.
+          }
+        }
+
+        if (frame && title) {
+          try {
+            const eventsRegion = frame.getByRole('region', {
+              name: 'Calendar events',
+              exact: true,
+              includeHidden: true,
+            });
+            const progressbar = frame.getByRole('progressbar', {
+              includeHidden: true,
+            });
+            const errorAlerts = frame.locator('.MuiAlert-standardError');
+            const matchingRow = frame.getByRole('listitem', {
+              name: title,
+              exact: true,
+              includeHidden: true,
+            });
+            const [
+              regionCount,
+              regionVisible,
+              loading,
+              error,
+              rowCount,
+              rowVisible,
+            ] = await Promise.all([
+              eventsRegion.count(),
+              hasVisibleRenderedMatch(eventsRegion),
+              hasVisibleRenderedMatch(progressbar),
+              hasVisibleRenderedMatch(errorAlerts),
+              matchingRow.count(),
+              hasVisibleRenderedMatch(matchingRow),
+            ]);
+            calendarEventsRegionCountCapped = Math.min(regionCount, 2) as
+              | 0
+              | 1
+              | 2;
+            calendarEventsRegionVisible = regionVisible;
+            progressbarVisible = loading;
+            errorAlertVisible = error;
+            matchingRowCountCapped = Math.min(rowCount, 2) as 0 | 1 | 2;
+            matchingRowVisible = rowVisible;
+            calendarEventsVisibleRowCountCapped =
+              regionCount === 1
+                ? await visibleCalendarEventRowCountCapped(
+                    eventsRegion.locator('li[aria-label]'),
+                  )
+                : null;
+          } catch {
+            // UI values stay unavailable when the frame cannot be inspected.
+          }
+        }
+        return snapshot();
+      } finally {
+        stop();
       }
     },
+    stop,
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 async function tabToEventButton(page: Page, eventButton: Locator) {
@@ -1604,8 +2112,10 @@ function startBoundedResponseJsonRead(
 ) {
   let finished = false;
   let stopped = false;
-  let deadline: ReturnType<typeof setTimeout> | undefined;
-  const complete = (body: unknown | null) => {
+  const complete = (
+    body: unknown | null,
+    deadline?: ReturnType<typeof setTimeout>,
+  ) => {
     if (finished || stopped) return;
     finished = true;
     if (deadline !== undefined) clearTimeout(deadline);
@@ -1627,8 +2137,8 @@ function startBoundedResponseJsonRead(
     };
   }
 
-  deadline = setTimeout(
-    () => complete(null),
+  const deadline = setTimeout(
+    () => complete(null, deadline),
     WEB_B_EVENT_LIST_DIAGNOSTIC_DEADLINE_MS,
   );
   try {
@@ -1638,18 +2148,19 @@ function startBoundedResponseJsonRead(
       .body()
       .then((bytes) => {
         if (!isBoundedWebBEventListBodyLength(bytes.byteLength)) {
-          complete(null);
-          return;
+          complete(null, deadline);
+          return null;
         }
         try {
-          complete(JSON.parse(bytes.toString('utf8')) as unknown);
+          complete(JSON.parse(bytes.toString('utf8')) as unknown, deadline);
         } catch {
-          complete(null);
+          complete(null, deadline);
         }
+        return null;
       })
-      .catch(() => complete(null));
+      .catch(() => complete(null, deadline));
   } catch {
-    complete(null);
+    complete(null, deadline);
   }
 
   return () => {

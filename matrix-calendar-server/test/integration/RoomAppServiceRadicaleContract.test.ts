@@ -24,12 +24,14 @@ import { NestFactory } from '@nestjs/core';
 import { NextFunction, Request, Response } from 'express';
 import fetchMock from 'jest-fetch-mock';
 import { MatrixClient } from 'matrix-bot-sdk';
+import { getRequestFn, setRequestFn } from 'matrix-bot-sdk/lib/request';
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
-import { request as httpRequest } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
+import { AppRuntimeContext } from '../../src/AppRuntimeContext';
 import { IAppConfiguration } from '../../src/IAppConfiguration';
 import { ModuleProviderToken } from '../../src/ModuleProviderToken';
 import { CalDavEventClient } from '../../src/caldav/CalDavEventClient';
@@ -42,9 +44,11 @@ import {
   CalendarCommandService,
   CalendarCommandTranslation,
 } from '../../src/service/CalendarCommandService';
+import { ConfiguredRoomCalendarPrincipalIdentityProvider } from '../../src/service/ConfiguredRoomCalendarPrincipalIdentityProvider';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventOperations } from '../../src/service/RoomCalendarEventOperations';
+import type { RoomCalendarPrincipalIdentityProvider } from '../../src/service/RoomCalendarPrincipalIdentity';
 import {
   MatrixApplicationServiceFixtureError,
   obtainMatrixApplicationServiceFixtureUserToken,
@@ -56,6 +60,18 @@ const serviceToken = process.env.MATRIX_APPLICATION_SERVICE_TOKEN ?? '';
 const serviceUserId =
   process.env.MATRIX_APPLICATION_SERVICE_USER_ID ??
   '@_matrix_calendar_service:localhost';
+const roomPrincipalMode =
+  process.env.ROOM_CALENDAR_PRINCIPAL_MODE ?? 'appservice';
+if (roomPrincipalMode !== 'appservice' && roomPrincipalMode !== 'bot-account') {
+  throw new Error('Room principal contract mode is invalid');
+}
+if (
+  roomPrincipalMode === 'bot-account' &&
+  (process.env.MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION !== 'disabled' ||
+    serviceToken.length > 0)
+) {
+  throw new Error('Bot-account contract requires an AS-free Synapse fixture');
+}
 const radicaleBaseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
 const homeserverUrl =
   process.env.MATRIX_CALENDAR_DEV_HOMESERVER_URL ?? 'http://localhost:8008';
@@ -64,12 +80,23 @@ const matrixServerName =
 const testConfiguration = {
   homeserver_url: homeserverUrl,
   radicale_url: radicaleBaseUrl,
+  room_calendar_principal_mode: roomPrincipalMode,
+  access_token: process.env.ACCESS_TOKEN ?? '',
   room_calendar_access_enabled: true,
   room_calendar_event_writes_enabled: true,
   application_service_token: serviceToken,
   application_service_user_id: serviceUserId,
   room_calendar_bindings: [],
 } as unknown as IAppConfiguration;
+const roomPrincipalIdentity = Object.freeze({
+  mode: 'appservice' as const,
+  userId: serviceUserId,
+});
+let roomPrincipalIdentityProvider:
+  | RoomCalendarPrincipalIdentityProvider
+  | undefined;
+let principalUserId = serviceUserId;
+let principalAccessToken = '';
 
 let app: INestApplication;
 let actorAccessToken: string;
@@ -84,7 +111,496 @@ let activeCalDavRequests:
   | undefined;
 const serviceOpenIdTokens: string[] = [];
 const serviceUserAccessTokens: string[] = [];
+const principalOpenIdRequests: Array<{
+  readonly authorizationMatchesPrincipal: boolean;
+  readonly pathUserId: string;
+  readonly hasUserIdQuery: boolean;
+  readonly hasUserIdBody: boolean;
+  readonly bodyIsEmptyObject: boolean;
+}> = [];
 const gatewayLogLines: string[] = [];
+
+describe('normal bot account registration command', () => {
+  it('chooses non-admin for non-interactive Synapse registration', () => {
+    const args = buildNormalBotAccountRegistrationArgs('synthetic-bot');
+
+    expect(args).toContain('--no-admin');
+    expect(args).not.toContain('-a');
+    expect(args).toContain('--password-file');
+  });
+});
+
+type MatrixSdkErrorClass =
+  | 'none'
+  | 'error'
+  | 'matrix-error'
+  | 'type-error'
+  | 'other';
+type MatrixSdkRequestMethod = 'unobserved' | 'get' | 'other';
+type MatrixSdkResponseShape =
+  | 'unobserved'
+  | 'missing'
+  | 'object'
+  | 'invalid-json'
+  | 'other';
+type MatrixSdkResponseUserId = 'unobserved' | 'string' | 'missing' | 'other';
+type MatrixSdkWhoAmIOutcome =
+  | 'api-unavailable'
+  | 'matched'
+  | 'mismatched'
+  | 'missing-user-id'
+  | 'rejected';
+
+interface MatrixSdkWhoAmIObservation {
+  readonly getUserIdAvailable: boolean;
+  readonly getWhoAmIAvailable: boolean;
+  readonly requestSeen: boolean;
+  readonly requestMethod: MatrixSdkRequestMethod;
+  readonly authorizationPresent: boolean | undefined;
+  readonly responseStatus: number | undefined;
+  readonly responseShape: MatrixSdkResponseShape;
+  readonly responseUserId: MatrixSdkResponseUserId;
+  readonly transportError: MatrixSdkErrorClass;
+  readonly sdkError: MatrixSdkErrorClass;
+  readonly identityMatches: boolean | undefined;
+  readonly outcome: MatrixSdkWhoAmIOutcome;
+}
+
+interface MatrixSdkWhoAmIResult {
+  readonly userId: unknown;
+  readonly error: unknown;
+  readonly observation: MatrixSdkWhoAmIObservation;
+}
+
+interface MatrixSdkRequestResponse {
+  readonly statusCode?: unknown;
+  readonly body?: unknown;
+}
+
+type MatrixSdkRequestCallback = (
+  error: unknown,
+  response?: MatrixSdkRequestResponse,
+  body?: unknown,
+) => void;
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function classifyMatrixSdkError(error: unknown): MatrixSdkErrorClass {
+  if (error === undefined || error === null) return 'none';
+  if (!isObjectRecord(error) || typeof error.name !== 'string') return 'other';
+  if (error.name === 'TypeError') return 'type-error';
+  if (error.name === 'MatrixError') return 'matrix-error';
+  if (error.name === 'Error') return 'error';
+  return 'other';
+}
+
+function readMatrixSdkResponse(
+  body: unknown,
+  response: MatrixSdkRequestResponse | undefined,
+): Pick<MatrixSdkWhoAmIObservation, 'responseShape' | 'responseUserId'> {
+  const raw = body === undefined ? response?.body : body;
+  if (raw === undefined || raw === null) {
+    return { responseShape: 'missing', responseUserId: 'unobserved' };
+  }
+
+  let value: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      value = JSON.parse(raw) as unknown;
+    } catch {
+      return { responseShape: 'invalid-json', responseUserId: 'unobserved' };
+    }
+  }
+  if (!isObjectRecord(value)) {
+    return { responseShape: 'other', responseUserId: 'unobserved' };
+  }
+
+  const responseUserId = value.user_id;
+  return {
+    responseShape: 'object',
+    responseUserId:
+      typeof responseUserId === 'string'
+        ? 'string'
+        : responseUserId === undefined
+          ? 'missing'
+          : 'other',
+  };
+}
+
+function formatMatrixSdkWhoAmIObservation(
+  accountRegistrationAndLoginVerified: boolean,
+  observation: MatrixSdkWhoAmIObservation,
+): string {
+  const authorizationPresent =
+    observation.authorizationPresent === undefined
+      ? 'unavailable'
+      : String(observation.authorizationPresent);
+  const responseStatus =
+    observation.responseStatus === undefined
+      ? 'unavailable'
+      : String(observation.responseStatus);
+  const identityMatches =
+    observation.identityMatches === undefined
+      ? 'unavailable'
+      : String(observation.identityMatches);
+
+  return [
+    'room-appservice-sdk-whoami',
+    `account_verified=${accountRegistrationAndLoginVerified}`,
+    `get_user_id_available=${observation.getUserIdAvailable}`,
+    `get_who_am_i_available=${observation.getWhoAmIAvailable}`,
+    `request_seen=${observation.requestSeen}`,
+    `request_method=${observation.requestMethod}`,
+    `authorization_present=${authorizationPresent}`,
+    `response_status=${responseStatus}`,
+    `response_shape=${observation.responseShape}`,
+    `response_user_id=${observation.responseUserId}`,
+    `transport_error=${observation.transportError}`,
+    `sdk_error=${observation.sdkError}`,
+    `identity_match=${identityMatches}`,
+    `outcome=${observation.outcome}`,
+  ].join(' ');
+}
+
+async function inspectMatrixSdkWhoAmI(
+  client: MatrixClient,
+  expectedUserId: string,
+): Promise<MatrixSdkWhoAmIResult> {
+  const getUserIdAvailable = typeof client.getUserId === 'function';
+  const getWhoAmIAvailable = typeof client.getWhoAmI === 'function';
+  const observation: {
+    getUserIdAvailable: boolean;
+    getWhoAmIAvailable: boolean;
+    requestSeen: boolean;
+    requestMethod: MatrixSdkRequestMethod;
+    authorizationPresent: boolean | undefined;
+    responseStatus: number | undefined;
+    responseShape: MatrixSdkResponseShape;
+    responseUserId: MatrixSdkResponseUserId;
+    transportError: MatrixSdkErrorClass;
+    sdkError: MatrixSdkErrorClass;
+    identityMatches: boolean | undefined;
+    outcome: MatrixSdkWhoAmIOutcome;
+  } = {
+    getUserIdAvailable,
+    getWhoAmIAvailable,
+    requestSeen: false,
+    requestMethod: 'unobserved',
+    authorizationPresent: undefined,
+    responseStatus: undefined,
+    responseShape: 'unobserved',
+    responseUserId: 'unobserved',
+    transportError: 'none',
+    sdkError: 'none',
+    identityMatches: undefined,
+    outcome: 'api-unavailable',
+  };
+
+  if (!getUserIdAvailable || !getWhoAmIAvailable) {
+    return { userId: undefined, error: undefined, observation };
+  }
+
+  const originalRequestFn = getRequestFn();
+  const whoAmIPath = '/_matrix/client/v3/account/whoami';
+  setRequestFn(
+    (requestOptions: unknown, callback: MatrixSdkRequestCallback) => {
+      const options = isObjectRecord(requestOptions) ? requestOptions : {};
+      let pathname = '';
+      try {
+        pathname = new URL(String(options.uri)).pathname;
+      } catch {
+        return originalRequestFn(requestOptions, callback);
+      }
+      if (pathname !== whoAmIPath) {
+        return originalRequestFn(requestOptions, callback);
+      }
+
+      observation.requestSeen = true;
+      observation.requestMethod =
+        typeof options.method === 'string' &&
+        options.method.toUpperCase() === 'GET'
+          ? 'get'
+          : 'other';
+      const headers = isObjectRecord(options.headers) ? options.headers : {};
+      const authorization = headers.Authorization ?? headers.authorization;
+      observation.authorizationPresent =
+        typeof authorization === 'string' &&
+        authorization.startsWith('Bearer ');
+
+      return originalRequestFn(
+        requestOptions,
+        (
+          error: unknown,
+          response: MatrixSdkRequestResponse | undefined,
+          body: unknown,
+        ) => {
+          observation.transportError = classifyMatrixSdkError(error);
+          const statusCode = response?.statusCode;
+          if (
+            typeof statusCode === 'number' &&
+            Number.isInteger(statusCode) &&
+            statusCode >= 100 &&
+            statusCode <= 599
+          ) {
+            observation.responseStatus = statusCode;
+          }
+          Object.assign(observation, readMatrixSdkResponse(body, response));
+          callback(error, response, body);
+        },
+      );
+    },
+  );
+
+  try {
+    const userId: unknown = await client.getUserId();
+    observation.identityMatches = userId === expectedUserId;
+    if (typeof userId !== 'string') {
+      observation.outcome = 'missing-user-id';
+    } else {
+      observation.outcome = observation.identityMatches
+        ? 'matched'
+        : 'mismatched';
+    }
+    return { userId, error: undefined, observation };
+  } catch (error) {
+    observation.sdkError = classifyMatrixSdkError(error);
+    observation.outcome = 'rejected';
+    return { userId: undefined, error, observation };
+  } finally {
+    setRequestFn(originalRequestFn);
+  }
+}
+
+async function withMatrixSdkRequest(
+  requestFn: (
+    requestOptions: unknown,
+    callback: MatrixSdkRequestCallback,
+  ) => unknown,
+  action: () => Promise<void>,
+): Promise<void> {
+  const originalRequestFn = getRequestFn();
+  setRequestFn(requestFn);
+  try {
+    await action();
+  } finally {
+    setRequestFn(originalRequestFn);
+  }
+}
+
+describe('Matrix SDK whoami diagnostic probe', () => {
+  const expectedUserId = '@synthetic-room-calendar:localhost';
+  const syntheticToken = 'synthetic-room-calendar-token-sentinel';
+
+  it('uses the SDK default request transport in the Jest contract environment', async () => {
+    const originalRequestFn = getRequestFn();
+    expect(typeof originalRequestFn).toBe('function');
+
+    const requests: Array<{
+      readonly method: string;
+      readonly whoAmIPath: boolean;
+      readonly authorizationPresent: boolean;
+    }> = [];
+    const server = createServer((request, response) => {
+      const authorization = request.headers.authorization;
+      requests.push({
+        method: request.method ?? '',
+        whoAmIPath: request.url === '/_matrix/client/v3/account/whoami',
+        authorizationPresent:
+          typeof authorization === 'string' &&
+          authorization.startsWith('Bearer '),
+      });
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ user_id: expectedUserId }));
+    });
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', resolve);
+      });
+      const address = server.address() as AddressInfo;
+      const result = await inspectMatrixSdkWhoAmI(
+        new MatrixClient(`http://127.0.0.1:${address.port}`, syntheticToken),
+        expectedUserId,
+      );
+
+      expect(result.userId).toBe(expectedUserId);
+      expect(result.error).toBeUndefined();
+      expect(result.observation).toMatchObject({
+        requestSeen: true,
+        requestMethod: 'get',
+        authorizationPresent: true,
+        responseStatus: 200,
+        responseShape: 'object',
+        responseUserId: 'string',
+        identityMatches: true,
+        outcome: 'matched',
+      });
+      expect(requests).toEqual([
+        {
+          method: 'GET',
+          whoAmIPath: true,
+          authorizationPresent: true,
+        },
+      ]);
+      expect(getRequestFn()).toBe(originalRequestFn);
+    } finally {
+      server.closeAllConnections();
+      if (server.listening) {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => (error ? reject(error) : resolve()));
+        });
+      }
+    }
+  }, 10000);
+
+  it('uses the installed SDK GET whoami request and verifies its identity', async () => {
+    await withMatrixSdkRequest(
+      (_requestOptions, callback) => {
+        const body = { user_id: expectedUserId };
+        callback(null, { statusCode: 200, body }, body);
+      },
+      async () => {
+        const result = await inspectMatrixSdkWhoAmI(
+          new MatrixClient('http://localhost:8008', syntheticToken),
+          expectedUserId,
+        );
+        const safeProbe = formatMatrixSdkWhoAmIObservation(
+          true,
+          result.observation,
+        );
+
+        expect(result.userId).toBe(expectedUserId);
+        expect(result.error).toBeUndefined();
+        expect(result.observation).toMatchObject({
+          getUserIdAvailable: true,
+          getWhoAmIAvailable: true,
+          requestSeen: true,
+          requestMethod: 'get',
+          authorizationPresent: true,
+          responseStatus: 200,
+          responseShape: 'object',
+          responseUserId: 'string',
+          transportError: 'none',
+          sdkError: 'none',
+          identityMatches: true,
+          outcome: 'matched',
+        });
+        expect(safeProbe).not.toContain(expectedUserId);
+        expect(safeProbe).not.toContain(syntheticToken);
+      },
+    );
+  });
+
+  it('classifies a transport TypeError without retaining its message', async () => {
+    const originalRequestFn = getRequestFn();
+    const sdkLogMessages: string[] = [];
+    const consoleError = jest
+      .spyOn(console, 'error')
+      .mockImplementation((...args) => {
+        sdkLogMessages.push(args.map(String).join(' '));
+      });
+    let safeProbe = '';
+    try {
+      await withMatrixSdkRequest(
+        (_requestOptions, callback) => {
+          callback(new TypeError('synthetic transport failure'));
+        },
+        async () => {
+          const result = await inspectMatrixSdkWhoAmI(
+            new MatrixClient('http://localhost:8008', syntheticToken),
+            expectedUserId,
+          );
+          safeProbe = formatMatrixSdkWhoAmIObservation(
+            true,
+            result.observation,
+          );
+
+          expect(result.error).toBeInstanceOf(TypeError);
+          expect(result.observation).toMatchObject({
+            requestSeen: true,
+            authorizationPresent: true,
+            responseStatus: undefined,
+            responseShape: 'missing',
+            transportError: 'type-error',
+            sdkError: 'type-error',
+            outcome: 'rejected',
+          });
+          expect(safeProbe).not.toContain('synthetic transport failure');
+          expect(safeProbe).not.toContain(syntheticToken);
+        },
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    expect(getRequestFn()).toBe(originalRequestFn);
+    const sdkLog = sdkLogMessages.join('\n');
+    expect(sdkLog).toContain('TypeError');
+    expect(sdkLog).not.toContain(syntheticToken);
+    expect(sdkLog).not.toContain(expectedUserId);
+  });
+
+  it('distinguishes a whoami response with no user_id', async () => {
+    await withMatrixSdkRequest(
+      (_requestOptions, callback) => {
+        const body = {};
+        callback(null, { statusCode: 200, body }, body);
+      },
+      async () => {
+        const result = await inspectMatrixSdkWhoAmI(
+          new MatrixClient('http://localhost:8008', syntheticToken),
+          expectedUserId,
+        );
+
+        expect(result.userId).toBeUndefined();
+        expect(result.observation).toMatchObject({
+          requestSeen: true,
+          responseStatus: 200,
+          responseShape: 'object',
+          responseUserId: 'missing',
+          identityMatches: false,
+          outcome: 'missing-user-id',
+        });
+      },
+    );
+  });
+
+  it('distinguishes a valid but mismatched whoami identity without exposing either ID', async () => {
+    const otherUserId = '@synthetic-other:localhost';
+    await withMatrixSdkRequest(
+      (_requestOptions, callback) => {
+        const body = { user_id: otherUserId };
+        callback(null, { statusCode: 200, body }, body);
+      },
+      async () => {
+        const result = await inspectMatrixSdkWhoAmI(
+          new MatrixClient('http://localhost:8008', syntheticToken),
+          expectedUserId,
+        );
+        const safeProbe = formatMatrixSdkWhoAmIObservation(
+          true,
+          result.observation,
+        );
+
+        expect(result.userId).toBe(otherUserId);
+        expect(result.observation).toMatchObject({
+          requestSeen: true,
+          responseStatus: 200,
+          responseShape: 'object',
+          responseUserId: 'string',
+          identityMatches: false,
+          outcome: 'mismatched',
+        });
+        expect(safeProbe).not.toContain(expectedUserId);
+        expect(safeProbe).not.toContain(otherUserId);
+        expect(safeProbe).not.toContain(syntheticToken);
+      },
+    );
+  });
+});
 const matrixErrorCodes = new Set([
   'M_BAD_JSON',
   'M_FORBIDDEN',
@@ -138,6 +654,31 @@ type RoomAppServiceCase =
   | 'unauthorized-write'
   | 'bot-command-write'
   | 'bot-command-denial';
+type RoomAppServiceFailureCase = 'subject-binding' | 'cross-room-denial';
+type RoomAppServiceCaseFailureStage =
+  | 'proof-selected'
+  | 'proof-available'
+  | 'identities-resolved'
+  | 'subject-is-principal'
+  | 'subject-not-room-sender'
+  | 'principal-requests-collected'
+  | 'request-path-matches-principal'
+  | 'request-policy-matches-mode'
+  | 'proof-count-captured'
+  | 'request-completed'
+  | 'response-forbidden'
+  | 'no-caldav-request'
+  | 'no-new-openid-proof'
+  | 'logs-secret-free';
+type RoomAppServiceTeardownStage =
+  | 'started'
+  | 'log-check-started'
+  | 'log-check-completed'
+  | 'app-close-started'
+  | 'app-close-completed'
+  | 'mocks-reset'
+  | 'complete';
+type RoomAppServiceTeardownFailure = 'log-check' | 'app-close' | 'mocks-reset';
 
 function captureGatewayLog(...values: unknown[]): void {
   gatewayLogLines.push(values.map(String).join(' '));
@@ -196,6 +737,17 @@ const matrixClient = {
       provide: ModuleProviderToken.APP_CONFIGURATION,
       useValue: testConfiguration,
     },
+    {
+      provide: ModuleProviderToken.NATIVE_FETCH,
+      useValue: (
+        input: Parameters<typeof globalThis.fetch>[0],
+        init?: Parameters<typeof globalThis.fetch>[1],
+      ) => globalThis.fetch(input, init),
+    },
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
+      useFactory: getRoomPrincipalIdentityProvider,
+    },
     { provide: MatrixClient, useValue: matrixClient },
     MatrixCalendarAuthorizationFactory,
     MatrixOpenIdCalDavCredentialProviderFactory,
@@ -211,7 +763,7 @@ const matrixClient = {
           maxResponseBytes: testConfiguration.caldav_max_event_response_bytes,
           radicaleBaseUrl,
           roomCalendarBindings: testConfiguration.room_calendar_bindings,
-          servicePrincipalUserId: serviceUserId,
+          principalIdentityProvider: getRoomPrincipalIdentityProvider(),
         }),
     },
     {
@@ -242,7 +794,9 @@ const matrixClient = {
 })
 class RoomAppServiceGatewayContractModule {}
 
-describeContract('room appservice proof against real Radicale', () => {
+const contractDescription = `room ${roomPrincipalMode} proof against real Radicale`;
+
+describeContract(contractDescription, () => {
   beforeAll(async () => {
     markRoomAppServiceSetupStart();
     markRoomAppServiceSetupStage('fixture-input-check');
@@ -252,7 +806,10 @@ describeContract('room appservice proof against real Radicale', () => {
     const password =
       process.env.MATRIX_CALENDAR_DEV_PASSWORD ?? 'calendar-dev-password';
     const personalCredential = process.env.CALDAV_OPENID_CREDENTIAL ?? '';
-    if (!personalCredential.startsWith('matrix-openid:') || !serviceToken) {
+    if (
+      !personalCredential.startsWith('matrix-openid:') ||
+      (roomPrincipalMode === 'appservice' && !serviceToken)
+    ) {
       throw new Error('Synthetic Matrix contract credentials are missing');
     }
     markRoomAppServiceSetupStage('decode-actor-proof');
@@ -270,7 +827,62 @@ describeContract('room appservice proof against real Radicale', () => {
     ).access_token;
 
     markRoomAppServiceSetupStage('register-service-user');
-    await registerServiceUser();
+    if (roomPrincipalMode === 'appservice') {
+      await registerServiceUser();
+      principalUserId = serviceUserId;
+      principalAccessToken = serviceToken;
+      roomPrincipalIdentityProvider = {
+        resolve: async () => roomPrincipalIdentity,
+      };
+    } else {
+      const principal = await registerNormalBotAccount();
+      principalUserId = principal.userId;
+      principalAccessToken = principal.accessToken;
+      serviceUserAccessTokens.push(principal.accessToken);
+      testConfiguration.access_token = principal.accessToken;
+      const principalClient = new MatrixClient(
+        homeserverUrl,
+        testConfiguration.access_token,
+      );
+      const sdkIdentity = await inspectMatrixSdkWhoAmI(
+        principalClient,
+        principalUserId,
+      );
+      appendRoomAppServiceSetupMarker(
+        formatMatrixSdkWhoAmIObservation(true, sdkIdentity.observation),
+      );
+      if (sdkIdentity.observation.outcome === 'api-unavailable') {
+        throw new Error('Matrix SDK whoami API is unavailable');
+      }
+      if (sdkIdentity.error !== undefined) {
+        throw sdkIdentity.error;
+      }
+      if (sdkIdentity.observation.outcome !== 'matched') {
+        throw new Error(
+          'Synthetic bot token identity did not match its account',
+        );
+      }
+      const sdkUserId = sdkIdentity.userId as string;
+      const localpart = sdkUserId.slice(1).split(':')[0];
+      const runtimeContext = new AppRuntimeContext(
+        sdkUserId,
+        localpart,
+        localpart,
+        ['en'],
+      );
+      roomPrincipalIdentityProvider =
+        new ConfiguredRoomCalendarPrincipalIdentityProvider(
+          testConfiguration,
+          principalClient,
+          runtimeContext,
+        );
+      const identity = await roomPrincipalIdentityProvider.resolve();
+      if (identity.mode !== 'bot-account' || identity.userId !== sdkUserId) {
+        throw new Error(
+          'Synthetic bot principal identity could not be verified',
+        );
+      }
+    }
     markRoomAppServiceSetupStage('create-room-one');
     const firstRoom = await createRoom('M6 room calendar contract one');
     markRoomAppServiceSetupStage('create-room-two');
@@ -295,7 +907,11 @@ describeContract('room appservice proof against real Radicale', () => {
       { roomId: nonmemberRoomId, calendarId: nonmemberCalendarId },
     ];
 
-    const access = new RoomCalendarCalDavAccess(testConfiguration);
+    const access = new RoomCalendarCalDavAccess(
+      testConfiguration,
+      undefined,
+      getRoomPrincipalIdentityProvider(),
+    );
     for (let index = 0; index < roomIds.length; index += 1) {
       markRoomAppServiceSetupStage(
         index === 0
@@ -371,13 +987,46 @@ describeContract('room appservice proof against real Radicale', () => {
           hasIfMatch: new Headers(init?.headers).has('If-Match'),
         });
       }
+      const authorization = new Headers(init?.headers).get('Authorization');
+      const openIdPath = parsedUrl.pathname.match(
+        /\/user\/([^/]+)\/openid\/request_token$/,
+      );
+      if (
+        parsedUrl.origin === new URL(homeserverUrl).origin &&
+        openIdPath !== null
+      ) {
+        let bodyHasUserId = false;
+        let bodyIsEmptyObject = false;
+        if (typeof init?.body === 'string') {
+          try {
+            const body: unknown = JSON.parse(init.body);
+            bodyHasUserId =
+              typeof body === 'object' &&
+              body !== null &&
+              Object.prototype.hasOwnProperty.call(body, 'user_id');
+            bodyIsEmptyObject =
+              typeof body === 'object' &&
+              body !== null &&
+              !Array.isArray(body) &&
+              Object.keys(body).length === 0;
+          } catch {
+            bodyHasUserId = false;
+          }
+        }
+        principalOpenIdRequests.push({
+          authorizationMatchesPrincipal:
+            authorization === `Bearer ${principalAccessToken}`,
+          pathUserId: decodeURIComponent(openIdPath[1]),
+          hasUserIdQuery: parsedUrl.searchParams.has('user_id'),
+          hasUserIdBody: bodyHasUserId,
+          bodyIsEmptyObject,
+        });
+      }
       const response = await nativeFetch(input, init);
       if (
         parsedUrl.origin === new URL(homeserverUrl).origin &&
         parsedUrl.pathname.endsWith('/openid/request_token') &&
-        init?.headers &&
-        new Headers(init.headers).get('Authorization') ===
-          `Bearer ${serviceToken}`
+        authorization === `Bearer ${principalAccessToken}`
       ) {
         const result = (await response.clone().json()) as {
           access_token?: unknown;
@@ -391,22 +1040,49 @@ describeContract('room appservice proof against real Radicale', () => {
   });
 
   afterAll(async () => {
-    try {
-      if (
-        typeof actorIdentity !== 'undefined' &&
-        (serviceOpenIdTokens.length > 0 || serviceUserAccessTokens.length > 0)
-      ) {
+    markRoomAppServiceTeardownStage('started');
+    let teardownFailed = false;
+    let teardownError: unknown;
+    if (
+      typeof actorIdentity !== 'undefined' &&
+      (serviceOpenIdTokens.length > 0 || serviceUserAccessTokens.length > 0)
+    ) {
+      markRoomAppServiceTeardownStage('log-check-started');
+      try {
         assertLogsOmitSecrets();
+        markRoomAppServiceTeardownStage('log-check-completed');
+      } catch (error) {
+        markRoomAppServiceTeardownFailure('log-check');
+        teardownFailed = true;
+        teardownError = error;
       }
-    } finally {
-      if (app) await app.close();
+    }
+    if (app) {
+      markRoomAppServiceTeardownStage('app-close-started');
+      try {
+        await app.close();
+        markRoomAppServiceTeardownStage('app-close-completed');
+      } catch (error) {
+        markRoomAppServiceTeardownFailure('app-close');
+        teardownFailed = true;
+        teardownError = error;
+      }
+    }
+    markRoomAppServiceTeardownStage('mocks-reset');
+    try {
       jest.restoreAllMocks();
       fetchMock.enableMocks();
       fetchMock.dontMock();
+    } catch (error) {
+      markRoomAppServiceTeardownFailure('mocks-reset');
+      teardownFailed = true;
+      teardownError = error;
     }
+    if (teardownFailed) throw teardownError;
+    markRoomAppServiceTeardownStage('complete');
   });
 
-  it('lists only the exact room binding through the appservice principal', async () => {
+  it('lists only the exact room binding through the selected principal', async () => {
     markRoomAppServiceCaseStarted('exact-binding');
     for (let index = 0; index < roomIds.length; index += 1) {
       activeCalDavRequests = [];
@@ -432,7 +1108,7 @@ describeContract('room appservice proof against real Radicale', () => {
       expect(
         activeCalDavRequests?.every(({ pathname }) =>
           pathname.startsWith(
-            `/_matrix_calendar_service/${calendarIds[index]}/`,
+            `/${principalLocalpart()}/${calendarIds[index]}/`,
           ),
         ),
       ).toBe(true);
@@ -440,14 +1116,15 @@ describeContract('room appservice proof against real Radicale', () => {
       expect(
         activeCalDavRequests?.some(
           ({ method, pathname }) =>
-            method === 'PROPFIND' && pathname === '/_matrix_calendar_service/',
+            method === 'PROPFIND' && pathname === `/${principalLocalpart()}/`,
         ),
       ).toBe(false);
       markRoomAppServiceListingCheckpoint(
         `${checkpointRoom}-no-root-discovery`,
       );
       const responseSecrets = [
-        serviceToken,
+        ...(serviceToken ? [serviceToken] : []),
+        principalAccessToken,
         actorAccessToken,
         ...serviceOpenIdTokens,
         ...serviceUserAccessTokens,
@@ -463,34 +1140,84 @@ describeContract('room appservice proof against real Radicale', () => {
     markRoomAppServiceListingCheckpoint('logs-secret-free');
   });
 
-  it('binds the Radicale OpenID subject to the configured service user, not the room sender', async () => {
+  it('binds the Radicale OpenID subject to the selected principal, not the room sender', async () => {
     markRoomAppServiceCaseStarted('subject-binding');
     const serviceProof = serviceOpenIdTokens[0];
+    markRoomAppServiceCaseStage('subject-binding', 'proof-selected');
     if (serviceProof === undefined) {
-      throw new Error('Synthetic appservice OpenID proof is missing');
+      throw new Error('Synthetic room principal OpenID proof is missing');
     }
+    markRoomAppServiceCaseStage('subject-binding', 'proof-available');
 
     const [serviceSubject, roomSender] = await Promise.all([
       matrixOpenIdSubject(serviceProof),
       matrixUserIdForAccessToken(actorAccessToken),
     ]);
+    markRoomAppServiceCaseStage('subject-binding', 'identities-resolved');
 
-    expect(serviceSubject).toBe(serviceUserId);
+    expect(serviceSubject).toBe(principalUserId);
+    markRoomAppServiceCaseStage('subject-binding', 'subject-is-principal');
     expect(serviceSubject).not.toBe(roomSender);
+    markRoomAppServiceCaseStage('subject-binding', 'subject-not-room-sender');
+    const selectedPrincipalRequests = principalOpenIdRequests.filter(
+      ({ authorizationMatchesPrincipal }) => authorizationMatchesPrincipal,
+    );
+    expect(selectedPrincipalRequests.length).toBeGreaterThan(0);
+    markRoomAppServiceCaseStage(
+      'subject-binding',
+      'principal-requests-collected',
+    );
+    expect(
+      selectedPrincipalRequests.every(
+        ({ pathUserId }) => pathUserId === principalUserId,
+      ),
+    ).toBe(true);
+    markRoomAppServiceCaseStage(
+      'subject-binding',
+      'request-path-matches-principal',
+    );
+    if (roomPrincipalMode === 'bot-account') {
+      expect(
+        selectedPrincipalRequests.every(
+          ({ hasUserIdQuery, hasUserIdBody }) =>
+            !hasUserIdQuery && !hasUserIdBody,
+        ),
+      ).toBe(true);
+      expect(
+        selectedPrincipalRequests.every(
+          ({ bodyIsEmptyObject }) => bodyIsEmptyObject,
+        ),
+      ).toBe(true);
+    } else {
+      expect(
+        selectedPrincipalRequests.every(({ hasUserIdBody }) => hasUserIdBody),
+      ).toBe(true);
+    }
+    markRoomAppServiceCaseStage(
+      'subject-binding',
+      'request-policy-matches-mode',
+    );
     assertLogsOmitSecrets();
+    markRoomAppServiceCaseStage('subject-binding', 'logs-secret-free');
   });
 
-  it('forbids a cross-room calendar before appservice proof or CalDAV I/O', async () => {
+  it('forbids a cross-room calendar before principal proof or CalDAV I/O', async () => {
     markRoomAppServiceCaseStarted('cross-room-denial');
     const proofCountBefore = serviceOpenIdTokens.length;
+    markRoomAppServiceCaseStage('cross-room-denial', 'proof-count-captured');
     const response = await gatewayRequest({
       roomId: roomIds[0],
       calendarId: calendarIds[1],
     });
+    markRoomAppServiceCaseStage('cross-room-denial', 'request-completed');
     expect(response.status).toBe(403);
+    markRoomAppServiceCaseStage('cross-room-denial', 'response-forbidden');
     expect(activeCalDavRequests).toEqual([]);
+    markRoomAppServiceCaseStage('cross-room-denial', 'no-caldav-request');
     expect(serviceOpenIdTokens).toHaveLength(proofCountBefore);
+    markRoomAppServiceCaseStage('cross-room-denial', 'no-new-openid-proof');
     assertLogsOmitSecrets();
+    markRoomAppServiceCaseStage('cross-room-denial', 'logs-secret-free');
   });
 
   it('creates, reads, updates, and conditionally deletes a room event', async () => {
@@ -696,7 +1423,7 @@ describeContract('room appservice proof against real Radicale', () => {
     ).toBe(true);
     expect(
       activeCalDavRequests?.every(({ pathname }) =>
-        pathname.startsWith('/_matrix_calendar_service/contract-room-one/'),
+        pathname.startsWith(`/${principalLocalpart()}/contract-room-one/`),
       ),
     ).toBe(true);
     assertLogsOmitSecrets();
@@ -833,6 +1560,29 @@ function markRoomAppServiceCaseStarted(testCase: RoomAppServiceCase): void {
   appendRoomAppServiceSetupMarker(`room-appservice-case-start-${testCase}`);
 }
 
+function markRoomAppServiceCaseStage(
+  testCase: RoomAppServiceFailureCase,
+  stage: RoomAppServiceCaseFailureStage,
+): void {
+  appendRoomAppServiceSetupMarker(
+    `room-appservice-case-stage-${testCase}-${stage}`,
+  );
+}
+
+function markRoomAppServiceTeardownStage(
+  stage: RoomAppServiceTeardownStage,
+): void {
+  appendRoomAppServiceSetupMarker(`room-appservice-teardown-stage-${stage}`);
+}
+
+function markRoomAppServiceTeardownFailure(
+  failure: RoomAppServiceTeardownFailure,
+): void {
+  appendRoomAppServiceSetupMarker(
+    `room-appservice-teardown-failure-${failure}`,
+  );
+}
+
 function appendRoomAppServiceSetupMarker(marker: string): void {
   const stageFile = process.env.CALDAV_CONTRACT_STAGE_FILE;
   if (process.env.CALDAV_CONTRACT !== '1' || !stageFile) {
@@ -885,6 +1635,75 @@ async function registerServiceUser(): Promise<void> {
     }
     throw error;
   }
+}
+
+async function registerNormalBotAccount(): Promise<{
+  readonly userId: string;
+  readonly accessToken: string;
+}> {
+  const localpart = `room-calendar-bot-${randomUUID().replace(/-/g, '')}`;
+  const password = randomBytes(32).toString('base64url');
+  try {
+    execFileSync('docker', buildNormalBotAccountRegistrationArgs(localpart), {
+      encoding: 'utf8',
+      input: password,
+      timeout: 30_000,
+    });
+  } catch {
+    throw new Error('Synthetic normal bot account registration failed');
+  }
+
+  const login = await matrixJson<{
+    user_id?: unknown;
+    access_token?: unknown;
+  }>('/_matrix/client/v3/login', {
+    method: 'POST',
+    body: {
+      type: 'm.login.password',
+      identifier: { type: 'm.id.user', user: localpart },
+      password,
+    },
+  });
+  const expectedUserId = `@${localpart}:${matrixServerName}`;
+  if (
+    login.user_id !== expectedUserId ||
+    typeof login.access_token !== 'string' ||
+    login.access_token.length === 0
+  ) {
+    throw new Error('Synthetic normal bot login could not be verified');
+  }
+  return { userId: expectedUserId, accessToken: login.access_token };
+}
+
+function buildNormalBotAccountRegistrationArgs(localpart: string): string[] {
+  return [
+    'compose',
+    '-f',
+    resolve(__dirname, '../../../dev/compose.yaml'),
+    'exec',
+    '-T',
+    'synapse',
+    'register_new_matrix_user',
+    '-c',
+    '/data/homeserver.yaml',
+    '-u',
+    localpart,
+    '--password-file',
+    '/dev/stdin',
+    '--no-admin',
+    'http://localhost:8008',
+  ];
+}
+
+function getRoomPrincipalIdentityProvider(): RoomCalendarPrincipalIdentityProvider {
+  if (!roomPrincipalIdentityProvider) {
+    throw new Error('Room principal identity provider is unavailable');
+  }
+  return roomPrincipalIdentityProvider;
+}
+
+function principalLocalpart(): string {
+  return principalUserId.slice(1).split(':')[0];
 }
 
 async function createRoom(
@@ -1085,7 +1904,7 @@ function assertLogsOmitSecrets(): void {
   const logs = `${gatewayLogLines.join('\n')}\n${serviceLogs}`;
   const actorTaggedProof = taggedProof(actorIdentity);
   const actorAuthorization = identityHeader(actorIdentity);
-  const serviceLocalpart = serviceUserId.slice(1).split(':')[0];
+  const serviceLocalpart = principalLocalpart();
   const serviceTaggedProofs = serviceOpenIdTokens.map((accessToken) =>
     taggedProof({
       access_token: accessToken,

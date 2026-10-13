@@ -168,6 +168,7 @@ export function validateSidecarComposeModel(model) {
   }
 
   const roomAccessEnabled = isEnabled(value.ROOM_CALENDAR_ACCESS_ENABLED);
+  const roomPrincipalMode = value.ROOM_CALENDAR_PRINCIPAL_MODE ?? 'appservice';
   const roomWritesEnabled = isEnabled(value.ROOM_CALENDAR_EVENT_WRITES_ENABLED);
   const reminderConfigurationEnabled = isEnabled(
     value.MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED,
@@ -183,18 +184,24 @@ export function validateSidecarComposeModel(model) {
   if (roomAccessEnabled) {
     if (
       bindings.length !== 1 ||
-      !hasNonEmptyString(value.MATRIX_APPLICATION_SERVICE_TOKEN) ||
-      value.MATRIX_APPLICATION_SERVICE_TOKEN === value.ACCESS_TOKEN ||
-      !validateServiceUserId(
-        value.MATRIX_APPLICATION_SERVICE_USER_ID,
-        radicaleEnvironment.RADICALE_MATRIX_SERVER_NAME,
-        validators,
-      ) ||
       !isSafeBaseUrl(value.HOMESERVER_URL) ||
       !isSafeBaseUrl(value.RADICALE_URL) ||
       !isSafeBaseUrl(radicaleEnvironment.RADICALE_MATRIX_HOMESERVER_URL) ||
       value.HOMESERVER_URL !==
         radicaleEnvironment.RADICALE_MATRIX_HOMESERVER_URL
+    ) {
+      fail();
+    }
+
+    if (
+      roomPrincipalMode === 'appservice' &&
+      (!hasNonEmptyString(value.MATRIX_APPLICATION_SERVICE_TOKEN) ||
+        value.MATRIX_APPLICATION_SERVICE_TOKEN === value.ACCESS_TOKEN ||
+        !validateServiceUserId(
+          value.MATRIX_APPLICATION_SERVICE_USER_ID,
+          radicaleEnvironment.RADICALE_MATRIX_SERVER_NAME,
+          validators,
+        ))
     ) {
       fail();
     }

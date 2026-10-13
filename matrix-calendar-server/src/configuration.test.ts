@@ -474,6 +474,7 @@ describe('room calendar application-service configuration', () => {
     'ROOM_CALENDAR_ACCESS_ENABLED',
     'ROOM_CALENDAR_EVENT_WRITES_ENABLED',
     'ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED',
+    'ROOM_CALENDAR_PRINCIPAL_MODE',
     'MATRIX_APPLICATION_SERVICE_TOKEN',
     'MATRIX_APPLICATION_SERVICE_USER_ID',
   ] as const;
@@ -502,6 +503,35 @@ describe('room calendar application-service configuration', () => {
     expect(configuration().config.room_reminder_delivery_enabled).toBe(false);
   });
 
+  it('normalizes empty optional AS settings to absent in bot-account mode', () => {
+    process.env.ROOM_CALENDAR_PRINCIPAL_MODE = 'bot-account';
+    process.env.MATRIX_APPLICATION_SERVICE_TOKEN = '';
+    process.env.MATRIX_APPLICATION_SERVICE_USER_ID = '';
+
+    expect(configuration().config).toMatchObject({
+      room_calendar_principal_mode: 'bot-account',
+      application_service_token: undefined,
+      application_service_user_id: undefined,
+    });
+
+    const validation = ValidationSchema.validate({
+      ACCESS_TOKEN: 'synthetic-bot-token',
+      HOMESERVER_URL: 'https://matrix.example.test',
+      MEETINGWIDGET_URL: 'https://widget.example.test/calendar',
+      BREAKOUT_SESSION_WIDGET_URL: 'https://widget.example.test/breakout',
+      MEETINGWIDGET_COCKPIT_URL: 'https://widget.example.test/cockpit',
+      MATRIX_APPLICATION_SERVICE_TOKEN: '',
+      MATRIX_APPLICATION_SERVICE_USER_ID: '',
+    });
+
+    expect(validation.error).toBeUndefined();
+    expect(validation.value.MATRIX_APPLICATION_SERVICE_TOKEN).toBeUndefined();
+    expect(validation.value.MATRIX_APPLICATION_SERVICE_USER_ID).toBeUndefined();
+    expect(
+      ValidationSchema.extract('ACCESS_TOKEN').validate('').error,
+    ).toBeDefined();
+  });
+
   it('loads the explicit gate and server-held application-service identity', () => {
     process.env.ROOM_CALENDAR_ACCESS_ENABLED = 'true';
     process.env.ROOM_CALENDAR_EVENT_WRITES_ENABLED = 'true';
@@ -517,5 +547,36 @@ describe('room calendar application-service configuration', () => {
       application_service_token: 'synthetic-as-token',
       application_service_user_id: '@_matrix_calendar_service:example.test',
     });
+  });
+});
+
+describe('room calendar principal mode configuration', () => {
+  const variable = 'ROOM_CALENDAR_PRINCIPAL_MODE';
+  const originalValue = process.env[variable];
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env[variable];
+    } else {
+      process.env[variable] = originalValue;
+    }
+  });
+
+  it('defaults to appservice and accepts only the two explicit values', () => {
+    delete process.env[variable];
+    expect(configuration().config.room_calendar_principal_mode).toBe(
+      'appservice',
+    );
+
+    const schema = ValidationSchema.extract(variable);
+    expect(schema.validate('appservice').error).toBeUndefined();
+    expect(schema.validate('bot-account').error).toBeUndefined();
+    expect(schema.validate('Bot-Account').error).toBeDefined();
+    expect(schema.validate('normal-user').error).toBeDefined();
+
+    process.env[variable] = 'bot-account';
+    expect(configuration().config.room_calendar_principal_mode).toBe(
+      'bot-account',
+    );
   });
 });

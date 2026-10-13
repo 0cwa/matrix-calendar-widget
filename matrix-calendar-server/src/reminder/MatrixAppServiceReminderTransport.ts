@@ -15,6 +15,10 @@
  */
 
 import { isCanonicalMatrixRoomId } from '../service/RoomCalendarBindingResolver';
+import type {
+  RoomCalendarPrincipalIdentity,
+  RoomCalendarPrincipalIdentityProvider,
+} from '../service/RoomCalendarPrincipalIdentity';
 import type { RoomMentionMessage } from './RoomMentionMessage';
 import {
   RoomMentionMatrixState,
@@ -36,7 +40,24 @@ export type MatrixAppServiceReminderTransportOptions = Readonly<{
   homeserverUrl: string;
   applicationServiceToken: string;
   applicationServiceSenderUserId: string;
+  /** Supplied by the shared room-principal provider in the runtime factory. */
+  principalIdentityProvider?: RoomCalendarPrincipalIdentityProvider;
 }>;
+
+export type MatrixReminderTransportBaseOptions =
+  | Readonly<{
+      mode: 'appservice';
+      homeserverUrl: string;
+      bearerToken: string;
+      expectedUserId: string;
+      principalIdentityProvider: RoomCalendarPrincipalIdentityProvider;
+    }>
+  | Readonly<{
+      mode: 'bot-account';
+      homeserverUrl: string;
+      bearerToken: string;
+      principalIdentityProvider: RoomCalendarPrincipalIdentityProvider;
+    }>;
 
 export type MatrixReminderTransportErrorCode =
   | 'invalid-configuration'
@@ -53,19 +74,14 @@ export class MatrixReminderTransportError extends Error {
   }
 }
 
-/**
- * Native Matrix Client-Server API adapter for reminder state and sends.
- * All requests are fixed to the configured application-service identity,
- * carry the scheduler's abort signal, reject redirects, and parse bounded
- * response JSON without returning server-provided error text.
- */
-export class MatrixAppServiceReminderTransport
+/** Shared bounded Matrix Client-Server API adapter for reminder state/sends. */
+export class MatrixReminderTransportBase
   implements RoomMentionMatrixState, RoomReminderSchedulerSender
 {
   private readonly homeserverBase: URL;
 
   constructor(
-    private readonly options: MatrixAppServiceReminderTransportOptions,
+    private readonly options: MatrixReminderTransportBaseOptions,
     private readonly runtime: ReminderSchedulerRuntimeSource,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {
@@ -77,8 +93,9 @@ export class MatrixAppServiceReminderTransport
         base.password ||
         base.search ||
         base.hash ||
-        !isCanonicalMatrixUserId(options.applicationServiceSenderUserId) ||
-        options.applicationServiceToken.trim().length === 0
+        options.bearerToken.trim().length === 0 ||
+        (options.mode === 'appservice' &&
+          !isCanonicalMatrixUserId(options.expectedUserId))
       ) {
         throw new Error('invalid configuration');
       }
@@ -227,10 +244,10 @@ export class MatrixAppServiceReminderTransport
       throw new MatrixReminderTransportError('invalid-response');
     }
 
+    const identity = await this.resolveTransportIdentity(signal);
     const current = await this.runtime.getCurrentConfiguration(signal);
     if (
-      current.applicationServiceSenderUserId !==
-        this.options.applicationServiceSenderUserId ||
+      current.roomCalendarPrincipalIdentity !== identity ||
       current.roomCalendarAccessEnabled !== true ||
       current.roomReminderDeliveryEnabled !== true ||
       current.reminderStoreEnabled !== true
@@ -241,8 +258,7 @@ export class MatrixAppServiceReminderTransport
       {
         roomId,
         calendarId,
-        applicationServiceSenderUserId:
-          this.options.applicationServiceSenderUserId,
+        roomCalendarPrincipalIdentity: identity,
         configuredBindings: current.roomCalendarBindings,
       },
       this,
@@ -255,10 +271,7 @@ export class MatrixAppServiceReminderTransport
     const url = this.clientUrl(
       `/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(transactionId)}`,
     );
-    url.searchParams.set(
-      'user_id',
-      this.options.applicationServiceSenderUserId,
-    );
+    this.addPrincipalQuery(url, identity);
     const requestSignal = createRequestSignal(signal);
     let response: Response;
     try {
@@ -313,11 +326,10 @@ export class MatrixAppServiceReminderTransport
     maxBytes: number,
   ): Promise<JsonResponse> {
     throwIfAborted(signal);
+    const identity = await this.resolveTransportIdentity(signal);
+    throwIfAborted(signal);
     const url = this.clientUrl(path);
-    url.searchParams.set(
-      'user_id',
-      this.options.applicationServiceSenderUserId,
-    );
+    this.addPrincipalQuery(url, identity);
     const requestSignal = createRequestSignal(signal);
     let response: Response;
     try {
@@ -363,10 +375,101 @@ export class MatrixAppServiceReminderTransport
 
   private headers(): Headers {
     return new Headers({
-      Authorization: `Bearer ${this.options.applicationServiceToken}`,
+      Authorization: `Bearer ${this.options.bearerToken}`,
       Accept: 'application/json',
     });
   }
+
+  private async resolveTransportIdentity(
+    signal?: AbortSignal,
+  ): Promise<RoomCalendarPrincipalIdentity> {
+    throwIfAborted(signal);
+    let identity: RoomCalendarPrincipalIdentity;
+    try {
+      identity = await resolveWithAbort(
+        this.options.principalIdentityProvider.resolve(),
+        signal,
+      );
+    } catch {
+      if (signal?.aborted) throw abortError();
+      throw new MatrixReminderTransportError('authorization-denied');
+    }
+    throwIfAborted(signal);
+    if (
+      identity === null ||
+      typeof identity !== 'object' ||
+      !Object.isFrozen(identity) ||
+      typeof identity.userId !== 'string' ||
+      !isCanonicalMatrixUserId(identity.userId) ||
+      identity.mode !== this.options.mode ||
+      (this.options.mode === 'appservice' &&
+        identity.userId !== this.options.expectedUserId)
+    ) {
+      throw new MatrixReminderTransportError('authorization-denied');
+    }
+    return identity;
+  }
+
+  private addPrincipalQuery(
+    url: URL,
+    identity: RoomCalendarPrincipalIdentity,
+  ): void {
+    if (identity.mode === 'appservice') {
+      url.searchParams.set('user_id', identity.userId);
+    }
+  }
+}
+
+/**
+ * Native reminder adapter retaining the established appservice wire format.
+ * Runtime-created instances receive the shared principal provider; the
+ * fallback only keeps direct legacy constructor callers source-compatible.
+ */
+export class MatrixAppServiceReminderTransport extends MatrixReminderTransportBase {
+  constructor(
+    options: MatrixAppServiceReminderTransportOptions,
+    runtime: ReminderSchedulerRuntimeSource,
+    fetchImpl: typeof fetch = fetch,
+  ) {
+    super(
+      {
+        mode: 'appservice',
+        homeserverUrl: options.homeserverUrl,
+        bearerToken: options.applicationServiceToken,
+        expectedUserId: options.applicationServiceSenderUserId,
+        principalIdentityProvider:
+          options.principalIdentityProvider ??
+          createRuntimeBackedAppServiceIdentityProvider(
+            options.applicationServiceSenderUserId,
+            runtime,
+          ),
+      },
+      runtime,
+      fetchImpl,
+    );
+  }
+}
+
+function createRuntimeBackedAppServiceIdentityProvider(
+  userId: string,
+  runtime: ReminderSchedulerRuntimeSource,
+): RoomCalendarPrincipalIdentityProvider {
+  return {
+    resolve: async () => {
+      const current = await runtime.getCurrentConfiguration(
+        new AbortController().signal,
+      );
+      const identity = current.roomCalendarPrincipalIdentity;
+      if (
+        identity?.mode !== 'appservice' ||
+        identity.userId !== userId ||
+        !Object.isFrozen(identity)
+      ) {
+        throw new MatrixReminderTransportError('authorization-denied');
+      }
+      return identity;
+    },
+  };
 }
 
 type JsonResponse = { status: number; body: unknown };
@@ -630,6 +733,47 @@ function isRedirect(status: number): boolean {
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw abortError();
+}
+
+function resolveWithAbort<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortError());
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener('abort', onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(abortError());
+    };
+
+    signal.addEventListener('abort', onAbort, { once: true });
+    return promise
+      .then(
+        (value) => {
+          if (!settled) {
+            settled = true;
+            cleanup();
+            resolve(value);
+          }
+          return undefined;
+        },
+        (error) => {
+          if (!settled) {
+            settled = true;
+            cleanup();
+            reject(error);
+          }
+          return undefined;
+        },
+      )
+      .catch(() => undefined);
+  });
 }
 
 function abortError(): Error {

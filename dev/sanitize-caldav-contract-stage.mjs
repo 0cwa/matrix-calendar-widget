@@ -38,6 +38,47 @@ const ROOM_APPSERVICE_CASES = new Set([
   'bot-command-write',
   'bot-command-denial',
 ]);
+const ROOM_APPSERVICE_CASE_FAILURE_STAGES = new Map([
+  [
+    'subject-binding',
+    new Set([
+      'proof-selected',
+      'proof-available',
+      'identities-resolved',
+      'subject-is-principal',
+      'subject-not-room-sender',
+      'principal-requests-collected',
+      'request-path-matches-principal',
+      'request-policy-matches-mode',
+      'logs-secret-free',
+    ]),
+  ],
+  [
+    'cross-room-denial',
+    new Set([
+      'proof-count-captured',
+      'request-completed',
+      'response-forbidden',
+      'no-caldav-request',
+      'no-new-openid-proof',
+      'logs-secret-free',
+    ]),
+  ],
+]);
+const ROOM_APPSERVICE_TEARDOWN_STAGES = new Set([
+  'started',
+  'log-check-started',
+  'log-check-completed',
+  'app-close-started',
+  'app-close-completed',
+  'mocks-reset',
+  'complete',
+]);
+const ROOM_APPSERVICE_TEARDOWN_FAILURES = new Set([
+  'log-check',
+  'app-close',
+  'mocks-reset',
+]);
 const ROOM_APPSERVICE_MATRIX_ERROR_CODES = new Set([
   'M_BAD_JSON',
   'M_FORBIDDEN',
@@ -201,6 +242,52 @@ export function formatRoomAppServiceCaseBodyCount(stageContent) {
     }
   }
   return `room-appservice-test-bodies started=${started.size}/${ROOM_APPSERVICE_CASES.size}\n`;
+}
+
+export function getRoomAppServiceCaseFailureStage(stageContent, testCase) {
+  const allowedStages = ROOM_APPSERVICE_CASE_FAILURE_STAGES.get(testCase);
+  if (!allowedStages || typeof stageContent !== 'string') return undefined;
+
+  let latestStage;
+  for (const line of stageContent.split(/\r?\n/)) {
+    const candidate = line.trim();
+    for (const stage of allowedStages) {
+      if (candidate === `room-appservice-case-stage-${testCase}-${stage}`) {
+        latestStage = stage;
+      }
+    }
+  }
+  return latestStage;
+}
+
+export function getRoomAppServiceTeardownStage(stageContent) {
+  let latestStage;
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const candidate = line
+        .trim()
+        .replace(/^room-appservice-teardown-stage-/, '');
+      if (ROOM_APPSERVICE_TEARDOWN_STAGES.has(candidate)) {
+        latestStage = candidate;
+      }
+    }
+  }
+  return latestStage;
+}
+
+export function getRoomAppServiceTeardownFailure(stageContent) {
+  let latestFailure;
+  if (typeof stageContent === 'string') {
+    for (const line of stageContent.split(/\r?\n/)) {
+      const candidate = line
+        .trim()
+        .replace(/^room-appservice-teardown-failure-/, '');
+      if (ROOM_APPSERVICE_TEARDOWN_FAILURES.has(candidate)) {
+        latestFailure = candidate;
+      }
+    }
+  }
+  return latestFailure;
 }
 
 export function formatRoomAppServiceSetupHttpStatus(stageContent) {

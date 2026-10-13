@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   formatPersonalOpenIdSetupDiagnostic,
+  formatRoomAppServiceFailureDiagnostic,
   formatRoomAppServiceSetupDiagnostic,
   formatRoomReminderSetupDiagnostic,
 } from './sanitize-room-appservice-setup.mjs';
@@ -165,6 +166,89 @@ test('does not interpolate unknown suite statuses or source filenames', () => {
   assert.equal(diagnostic.includes('private.example'), false);
 });
 
+test('maps a current room contract failure to its fixed case and checkpoint', () => {
+  const reportWithFailure = {
+    testResults: [
+      {
+        name: roomSuitePath,
+        status: 'failed',
+        assertionResults: [
+          {
+            title:
+              'binds the Radicale OpenID subject to the selected principal, not the room sender',
+            status: 'failed',
+            failureMessages: ['private Matrix identity details'],
+          },
+        ],
+      },
+    ],
+  };
+  const diagnostic = formatRoomAppServiceFailureDiagnostic(
+    reportWithFailure,
+    [
+      'room-appservice-setup-complete',
+      'room-appservice-case-stage-subject-binding-identities-resolved',
+      'room-appservice-case-stage-subject-binding-subject-is-principal',
+    ].join('\n'),
+  );
+
+  assert.equal(
+    diagnostic,
+    'room-appservice-test-failure case=room-appservice-subject-binding stage=subject-is-principal',
+  );
+  assert.equal(diagnostic.includes('private Matrix identity details'), false);
+});
+
+test('keeps unknown room failures unmapped and excludes raw test titles', () => {
+  const privateTitle = 'private event title and token sentinel';
+  const reportWithUnknownFailure = {
+    testResults: [
+      {
+        name: roomSuitePath,
+        status: 'failed',
+        assertionResults: [{ title: privateTitle, status: 'failed' }],
+      },
+    ],
+  };
+  const diagnostic = formatRoomAppServiceFailureDiagnostic(
+    reportWithUnknownFailure,
+    'room-appservice-setup-complete\nroom-appservice-case-stage-private-stage',
+  );
+
+  assert.equal(
+    diagnostic,
+    'room-appservice-test-failure case=unmapped stage=unavailable',
+  );
+  assert.equal(diagnostic.includes(privateTitle), false);
+});
+
+test('reports only fixed teardown hook failure markers', () => {
+  const reportWithHookFailure = {
+    testResults: [
+      {
+        name: roomSuitePath,
+        status: 'failed',
+        message: 'private hook error, credentials, and response body',
+        assertionResults: [],
+      },
+    ],
+  };
+  const diagnostic = formatRoomAppServiceFailureDiagnostic(
+    reportWithHookFailure,
+    [
+      'room-appservice-setup-complete',
+      'room-appservice-teardown-stage-app-close-started',
+      'room-appservice-teardown-failure-app-close',
+    ].join('\n'),
+  );
+
+  assert.equal(
+    diagnostic,
+    'room-appservice-hook-failure stage=app-close-started cause=app-close',
+  );
+  assert.equal(diagnostic.includes('private hook error'), false);
+});
+
 test('does not emit freeform token, API key, client secret, session key, or JSON values', () => {
   const diagnostic = formatRoomAppServiceSetupDiagnostic(
     report(
@@ -250,6 +334,69 @@ test('reports bounded Matrix request status and code for Room fixture setup', ()
   );
   assert.equal(diagnostic.includes('private-room-detail'), false);
   assert.equal(diagnostic.includes('/repo/'), false);
+});
+
+test('reports only allowlisted SDK whoami metadata after bot setup succeeds', () => {
+  const privateSentinel = 'synthetic-private-host-token-sentinel';
+  const sdkProbe = [
+    'room-appservice-sdk-whoami',
+    'account_verified=true',
+    'get_user_id_available=true',
+    'get_who_am_i_available=true',
+    'request_seen=true',
+    'request_method=get',
+    'authorization_present=true',
+    'response_status=unavailable',
+    'response_shape=missing',
+    'response_user_id=unobserved',
+    'transport_error=type-error',
+    'sdk_error=type-error',
+    'identity_match=unavailable',
+    'outcome=rejected',
+  ].join(' ');
+  const diagnostic = formatRoomAppServiceSetupDiagnostic(
+    report(
+      'TypeError: request failed for ' +
+        privateSentinel +
+        '\n    at getUserId (/private/path)',
+    ),
+    [
+      'room-appservice-setup-start',
+      'room-appservice-setup-stage-register-service-user',
+      sdkProbe,
+    ].join('\n'),
+  );
+
+  assert.match(
+    diagnostic,
+    /room-appservice-setup-test-results stage=normal-bot-sdk-whoami /,
+  );
+  assert.match(diagnostic, /room-appservice-sdk-whoami account_verified=true/);
+  assert.match(diagnostic, /request_seen=true request_method=get/);
+  assert.match(diagnostic, /transport_error=type-error sdk_error=type-error/);
+  assert.equal(diagnostic.includes(privateSentinel), false);
+  assert.equal(diagnostic.includes('/private/path'), false);
+});
+
+test('keeps setup stage and drops malformed SDK whoami marker contents', () => {
+  const privateSentinel = 'synthetic-private-token-sentinel';
+  const diagnostic = formatRoomAppServiceSetupDiagnostic(
+    report('TypeError: private failure details'),
+    [
+      'room-appservice-setup-start',
+      'room-appservice-setup-stage-register-service-user',
+      'room-appservice-sdk-whoami account_verified=true authorization_present=' +
+        privateSentinel,
+    ].join('\n'),
+  );
+
+  assert.match(
+    diagnostic,
+    /room-appservice-setup-test-results stage=register-service-user /,
+  );
+  assert.equal(diagnostic.includes('room-appservice-sdk-whoami'), false);
+  assert.equal(diagnostic.includes(privateSentinel), false);
+  assert.equal(diagnostic.includes('private failure details'), false);
 });
 
 test('Room setup diagnosis rejects injected status and Matrix code markers', () => {

@@ -72,6 +72,7 @@ import { createRoomReminderModuleProviders } from './reminder/RoomReminderModule
 import { MatrixServer } from './rpc/MatrixServer';
 import { CalendarCommandService } from './service/CalendarCommandService';
 import { CommandService } from './service/CommandService';
+import { ConfiguredRoomCalendarPrincipalIdentityProvider } from './service/ConfiguredRoomCalendarPrincipalIdentityProvider';
 import { ControlRoomMigrationService } from './service/ControlRoomMigrationService';
 import { GuestMemberService } from './service/GuestMemberService';
 import { MatrixCalendarAuthorizationFactory } from './service/MatrixCalendarAuthorization';
@@ -79,6 +80,7 @@ import { MeetingService } from './service/MeetingService';
 import { RoomCalendarCalDavAccess } from './service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventAuditService } from './service/RoomCalendarEventAuditService';
 import { RoomCalendarEventOperations } from './service/RoomCalendarEventOperations';
+import type { RoomCalendarPrincipalIdentityProvider } from './service/RoomCalendarPrincipalIdentity';
 import { RoomMessageService } from './service/RoomMessageService';
 import { WelcomeWorkflowService } from './service/WelcomeWorkflowService';
 import { WidgetLayoutService } from './service/WidgetLayoutService';
@@ -308,6 +310,24 @@ const i18nFactory: FactoryProvider<void> = {
     widgetLayoutConfigFactory,
     matrixClientFactory,
     appRuntimeContextFactory,
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        matrixClient: MatrixClient,
+        appRuntimeContext: AppRuntimeContext,
+      ) =>
+        new ConfiguredRoomCalendarPrincipalIdentityProvider(
+          appConfig,
+          matrixClient,
+          appRuntimeContext,
+        ),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        MatrixClient,
+        AppRuntimeContext,
+      ],
+    },
     i18nFactory,
     EventContentRenderer,
     JitsiClient,
@@ -324,15 +344,21 @@ const i18nFactory: FactoryProvider<void> = {
     },
     {
       provide: RoomCalendarEventOperations,
-      useFactory: (appConfig: IAppConfiguration) =>
+      useFactory: (
+        appConfig: IAppConfiguration,
+        principalIdentityProvider: RoomCalendarPrincipalIdentityProvider,
+      ) =>
         new RoomCalendarEventOperations(fetch, {
           eventWritesEnabled: appConfig.room_calendar_event_writes_enabled,
           maxResponseBytes: appConfig.caldav_max_event_response_bytes,
           radicaleBaseUrl: appConfig.radicale_url,
           roomCalendarBindings: appConfig.room_calendar_bindings,
-          servicePrincipalUserId: appConfig.application_service_user_id,
+          principalIdentityProvider,
         }),
-      inject: [ModuleProviderToken.APP_CONFIGURATION],
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
+      ],
     },
     {
       provide: RoomCalendarEventAuditService,

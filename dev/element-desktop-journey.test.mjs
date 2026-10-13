@@ -366,7 +366,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 11);
+    assert.equal(summary.schemaVersion, 12);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -445,7 +445,7 @@ test('records only the source-bound Playwright result and child completion', () 
       runnerTemp,
       expectedSourceSha: sourceSha,
     });
-    assert.equal(summary.schemaVersion, 11);
+    assert.equal(summary.schemaVersion, 12);
     assert.equal(summary.sourceSha, sourceSha);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.playwrightResult, 'timed_out');
@@ -781,12 +781,60 @@ test('records one fixed failure point for a failed Desktop room read', () => {
   });
 });
 
-test('records only phase-bound Desktop create steps and closed POST facts', () => {
-  const diagnostic = {
+test('records closed Desktop create observations without event or URL data', () => {
+  const makeDiagnostic = (overrides = {}) => ({
+    createPostObserved: null,
+    createPostRequestFailed: null,
+    createPostStatus: null,
+    createResponseHasEvent: null,
+    createResponseTitleMatches: null,
+    createResponseCalendarMatches: null,
+    postCreateEventGetRequestCountCapped: null,
+    postCreateRoomRangeGetRequestCountCapped: null,
+    postCreateRoomRangeGetResponseCountCapped: null,
+    postCreateRoomRangeGetStatus: null,
+    roomListHasEventsArray: null,
+    roomListEventCountCapped: null,
+    roomListTitleMatches: null,
+    roomListIdMatches: null,
+    roomListCalendarMatches: null,
+    createResponseTimingComparable: null,
+    createResponseEventIntersectsRoomRange: null,
+    calendarEventsRegionCountCapped: null,
+    calendarEventsRegionVisible: null,
+    calendarEventsVisibleRowCountCapped: null,
+    progressbarVisible: null,
+    errorAlertVisible: null,
+    matchingRowCountCapped: null,
+    matchingRowVisible: null,
+    ...overrides,
+  });
+  const diagnostic = makeDiagnostic({
     createPostObserved: true,
     createPostRequestFailed: false,
-    createPostStatus: 503,
-  };
+    createPostStatus: 201,
+    createResponseHasEvent: true,
+    createResponseTitleMatches: true,
+    createResponseCalendarMatches: true,
+    postCreateEventGetRequestCountCapped: 0,
+    postCreateRoomRangeGetRequestCountCapped: 1,
+    postCreateRoomRangeGetResponseCountCapped: 1,
+    postCreateRoomRangeGetStatus: 200,
+    roomListHasEventsArray: true,
+    roomListEventCountCapped: 1,
+    roomListTitleMatches: true,
+    roomListIdMatches: true,
+    roomListCalendarMatches: true,
+    createResponseTimingComparable: true,
+    createResponseEventIntersectsRoomRange: true,
+    calendarEventsRegionCountCapped: 1,
+    calendarEventsRegionVisible: true,
+    calendarEventsVisibleRowCountCapped: 1,
+    progressbarVisible: false,
+    errorAlertVisible: false,
+    matchingRowCountCapped: 1,
+    matchingRowVisible: false,
+  });
   withTempDirectory((runnerTemp) => {
     const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
     initializeDesktopJourneyEvidence({ filePath, runnerTemp });
@@ -795,24 +843,26 @@ test('records only phase-bound Desktop create steps and closed POST facts', () =
       runnerTemp,
       phase: 'desktop-event-create',
       status: 'failed',
-      failurePoint: 'event-create-post-status',
+      failurePoint: 'event-create-exact-row-visible',
       desktopEventCreateDiagnostic: diagnostic,
     });
 
     const raw = readFileSync(filePath, 'utf8');
-    assert.equal(
-      raw,
-      '{"phase":"desktop-event-create","status":"failed","failurePoint":"event-create-post-status","desktopEventCreateDiagnostic":{"createPostObserved":true,"createPostRequestFailed":false,"createPostStatus":503}}\n',
-    );
+    assert.deepEqual(JSON.parse(raw), {
+      phase: 'desktop-event-create',
+      status: 'failed',
+      failurePoint: 'event-create-exact-row-visible',
+      desktopEventCreateDiagnostic: diagnostic,
+    });
     assert.doesNotMatch(
       raw,
-      /private room|private title|response body|request URL/u,
+      /private room|private title|private-event-id|response body|request URL/u,
     );
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 11);
+    assert.equal(summary.schemaVersion, 12);
     assert.deepEqual(summary.failurePoint, {
       phase: 'desktop-event-create',
-      point: 'event-create-post-status',
+      point: 'event-create-exact-row-visible',
     });
     assert.deepEqual(summary.desktopEventCreateDiagnostic, diagnostic);
     assert.equal(summary.cases['desktop-event-create'], 'failed');
@@ -825,28 +875,37 @@ test('records only phase-bound Desktop create steps and closed POST facts', () =
       phase: 'desktop-event-create',
       status: 'failed',
       failurePoint: 'event-create-post-await',
-      desktopEventCreateDiagnostic: {
+      desktopEventCreateDiagnostic: makeDiagnostic({
         createPostObserved: true,
         createPostRequestFailed: true,
         createPostStatus: null,
-      },
+        postCreateEventGetRequestCountCapped: 0,
+        postCreateRoomRangeGetRequestCountCapped: 0,
+        postCreateRoomRangeGetResponseCountCapped: 0,
+      }),
     }).desktopEventCreateDiagnostic,
-    {
+    makeDiagnostic({
       createPostObserved: true,
       createPostRequestFailed: true,
       createPostStatus: null,
-    },
+      postCreateEventGetRequestCountCapped: 0,
+      postCreateRoomRangeGetRequestCountCapped: 0,
+      postCreateRoomRangeGetResponseCountCapped: 0,
+    }),
   );
   assert.deepEqual(
     summarize({
       phase: 'desktop-event-create',
       status: 'failed',
       failurePoint: 'event-create-setup',
-      desktopEventCreateDiagnostic: {
+      desktopEventCreateDiagnostic: makeDiagnostic({
         createPostObserved: false,
         createPostRequestFailed: false,
         createPostStatus: null,
-      },
+        postCreateEventGetRequestCountCapped: 0,
+        postCreateRoomRangeGetRequestCountCapped: 0,
+        postCreateRoomRangeGetResponseCountCapped: 0,
+      }),
     }).failurePoint,
     { phase: 'desktop-event-create', point: 'event-create-setup' },
   );
@@ -881,21 +940,21 @@ test('records only phase-bound Desktop create steps and closed POST facts', () =
       phase: 'desktop-event-create',
       status: 'failed',
       failurePoint: 'event-create-post-status',
-      desktopEventCreateDiagnostic: {
+      desktopEventCreateDiagnostic: makeDiagnostic({
         createPostObserved: false,
         createPostRequestFailed: false,
         createPostStatus: 503,
-      },
+      }),
     },
     {
       phase: 'desktop-event-create',
       status: 'failed',
       failurePoint: 'event-create-post-status',
-      desktopEventCreateDiagnostic: {
+      desktopEventCreateDiagnostic: makeDiagnostic({
         createPostObserved: true,
         createPostRequestFailed: true,
         createPostStatus: 503,
-      },
+      }),
     },
   ]) {
     assert.throws(() => summarize(row), /Invalid Desktop journey input/u);
@@ -932,7 +991,7 @@ test('records room-navigation evidence only at its closed failure boundary', () 
       roomNavigationDiagnostic: diagnostic,
     });
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 11);
+    assert.equal(summary.schemaVersion, 12);
     assert.deepEqual(summary.roomNavigationDiagnostic, diagnostic);
     assert.equal(summary.roomsReadyDiagnostic, null);
     assert.doesNotMatch(
@@ -1730,7 +1789,7 @@ test('requires ordered Desktop refresh progress before a complete pass', () => {
       runnerTemp,
       expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
     });
-    assert.equal(summary.schemaVersion, 11);
+    assert.equal(summary.schemaVersion, 12);
     assert.equal(summary.status, 'passed');
     assert.equal(summary.cases['desktop-a-refresh'], 'passed');
     assert.equal(summary.failureObservation, null);

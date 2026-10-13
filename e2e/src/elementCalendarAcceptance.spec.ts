@@ -39,6 +39,11 @@ import {
   type ElementErrorSourcePointer,
 } from '../../dev/element-acceptance-error-source-map.mjs';
 import {
+  compareEventTimingWithRoomRange,
+  readCreatedEventTiming,
+  type CreatedEventTiming,
+} from '../../dev/element-acceptance-event-observation.mjs';
+import {
   MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
   advanceOrdinaryPageErrorStage,
   capturePerformancePageError,
@@ -49,7 +54,10 @@ import {
   type PerformancePageErrorClass,
   type PerformancePageErrorClassification,
 } from '../../dev/element-acceptance-performance-evidence.mjs';
-import { raceCalendarReadyOrIdentityPrompt } from '../../dev/element-acceptance-performance.mjs';
+import {
+  buildOrdinaryPerformanceSeedEnvironment,
+  raceCalendarReadyOrIdentityPrompt,
+} from '../../dev/element-acceptance-performance.mjs';
 import { classifyG6KeyboardFocusTarget } from '../../dev/element-g6-keyboard-focus.mjs';
 import {
   beginG6ResourceCreate,
@@ -81,6 +89,8 @@ type User = {
   deviceId: string;
 };
 
+type PrincipalMode = 'appservice' | 'bot-account';
+
 type Fixture = {
   homeserverUrl: string;
   elementUrl: string;
@@ -91,10 +101,12 @@ type Fixture = {
   calendarId: string;
   outsiderRoomId: string;
   teamRoomId: string;
+  principalMode: PrincipalMode;
   users: {
     memberA: User;
     memberB: User;
     outsider: User;
+    bot: User;
   };
   serviceSender: {
     userId: string;
@@ -328,6 +340,7 @@ type G6SeedCreateObservation = {
 type G6CalDavClient = {
   authorization: string;
   collectionUrl: URL;
+  localpart: string;
 };
 
 type G6CalDavResult = {
@@ -1337,22 +1350,10 @@ function runOrdinaryPerformanceSeed(initialDate: {
   month: number;
   day: number;
 }): void {
-  const environmentNames = [
-    'RUNNER_TEMP',
-    'GITHUB_RUN_ID',
-    'GITHUB_RUN_ATTEMPT',
-    'ELEMENT_ACCEPTANCE_USERS_FILE',
-    'ELEMENT_ACCEPTANCE_PERFORMANCE_MANIFEST_FILE',
-    'ELEMENT_ACCEPTANCE_STAGE_FILE',
-  ];
-  const seedEnvironment: NodeJS.ProcessEnv = {
-    ELEMENT_ACCEPTANCE_PERFORMANCE_START_DATE: `${initialDate.year}-${String(initialDate.month).padStart(2, '0')}-${String(initialDate.day).padStart(2, '0')}`,
-  };
-  for (const name of environmentNames) {
-    const value = process.env[name];
-    if (!value) throw new Error('Ordinary performance fixture is unavailable');
-    seedEnvironment[name] = value;
-  }
+  const seedEnvironment = buildOrdinaryPerformanceSeedEnvironment(
+    process.env,
+    `${initialDate.year}-${String(initialDate.month).padStart(2, '0')}-${String(initialDate.day).padStart(2, '0')}`,
+  );
 
   const result = spawnSync(
     process.execPath,
@@ -1880,7 +1881,7 @@ function createPerformanceApiObserver(
     const deadline = performance.now() + 30_000;
     while (performance.now() < deadline) {
       if (predicate()) return;
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
     throw new Error('Calendar API observation did not settle');
   };
@@ -1945,10 +1946,8 @@ function measureStableDom<T>(
     const first = await read();
     await locator.evaluate(
       async () =>
-        new Promise<void>((resolvePromise) =>
-          requestAnimationFrame(() =>
-            requestAnimationFrame(() => resolvePromise()),
-          ),
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
         ),
     );
     const second = await read();
@@ -3106,7 +3105,9 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
   try {
     recordRuntimeVersions(browser.version());
     await runCase(report.cases[0]);
+    failureCode = 'performance-setup-failed';
     runOrdinaryPerformanceSeed(initialDate);
+    failureCode = 'performance-setup-failed';
     await runCase(report.cases[1]);
     failureCode = 'performance-egress-blocked';
     expect(report.blockedRequestCount).toBe(0);
@@ -3715,6 +3716,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       neighborPatch,
       neighborResourceHref,
       names.neighborEdited,
+      calDavClient!.localpart,
     );
     const neighborOwnership = resourceOwnershipByName.get(resources.neighbor);
     const neighborOwnershipUpdated =
@@ -3876,9 +3878,11 @@ test('Element Web preserves unsupported events and supports client interactions'
     }
     await editedNeighborRow.click();
     const narrowDetails = frameA.getByRole('dialog').last();
-    await expect(narrowDetails)
-      .toBeVisible()
-      .catch(() => {});
+    try {
+      await expect(narrowDetails).toBeVisible();
+    } catch {
+      // Record the observed visibility below without failing this probe.
+    }
     const eventDetailsReachable = await narrowDetails
       .isVisible()
       .catch(() => false);
@@ -4065,10 +4069,13 @@ test('Element Web preserves unsupported events and supports client interactions'
       .waitFor({ state: 'hidden', timeout: 5_000 })
       .then(() => true)
       .catch(() => false);
-    const focusReturnedToEvent = await expect(keyboardEventButton)
-      .toBeFocused({ timeout: 5_000 })
-      .then(() => true)
-      .catch(() => false);
+    let focusReturnedToEvent = false;
+    try {
+      await expect(keyboardEventButton).toBeFocused({ timeout: 5_000 });
+      focusReturnedToEvent = true;
+    } catch {
+      focusReturnedToEvent = false;
+    }
     const keyboardPassed =
       keyboardEventFocused &&
       detailsOpened &&
@@ -4297,19 +4304,85 @@ const G6_RADICALE_ORIGIN = 'http://127.0.0.1:5233';
 const G6_RADICALE_COLLECTION = 'element-acceptance';
 const G6_MAX_RESOURCE_BYTES = 16_384;
 
+function acceptancePrincipal(fixtureValue: Fixture):
+  | {
+      mode: PrincipalMode;
+      userId: string;
+      localpart: string;
+      accessToken: string;
+      openIdBody?: string;
+    }
+  | undefined {
+  const sender = fixtureValue?.serviceSender;
+  let userId: string;
+  let accessToken: string;
+  let openIdBody: string | undefined;
+  if (fixtureValue?.principalMode === 'appservice') {
+    const applicationServiceToken =
+      process.env.MATRIX_APPLICATION_SERVICE_TOKEN;
+    if (
+      sender?.userId !== G6_SERVICE_USER_ID ||
+      typeof applicationServiceToken !== 'string' ||
+      applicationServiceToken.length === 0 ||
+      applicationServiceToken.length > 4096
+    ) {
+      return undefined;
+    }
+    userId = G6_SERVICE_USER_ID;
+    accessToken = applicationServiceToken;
+    openIdBody = JSON.stringify({ user_id: userId });
+  } else if (fixtureValue?.principalMode === 'bot-account') {
+    const bot = fixtureValue.users?.bot;
+    if (
+      !bot ||
+      !sender ||
+      process.env.MATRIX_APPLICATION_SERVICE_TOKEN !== undefined ||
+      typeof bot.userId !== 'string' ||
+      !/^@([a-z0-9][a-z0-9-]{0,254}):localhost$/u.test(bot.userId) ||
+      typeof bot.accessToken !== 'string' ||
+      bot.accessToken.length === 0 ||
+      bot.accessToken.length > 4096 ||
+      sender.userId !== bot.userId ||
+      sender.accessToken !== bot.accessToken
+    ) {
+      return undefined;
+    }
+    userId = bot.userId;
+    accessToken = bot.accessToken;
+    openIdBody = JSON.stringify({});
+  } else {
+    return undefined;
+  }
+
+  const match =
+    fixtureValue.principalMode === 'bot-account'
+      ? /^@([a-z0-9][a-z0-9-]{0,254}):localhost$/u.exec(userId)
+      : undefined;
+  if (fixtureValue.principalMode === 'bot-account' && !match) {
+    return undefined;
+  }
+  return {
+    mode: fixtureValue.principalMode,
+    userId,
+    localpart:
+      fixtureValue.principalMode === 'appservice'
+        ? G6_SERVICE_LOCALPART
+        : (match?.[1] ?? ''),
+    accessToken,
+    ...(openIdBody === undefined ? {} : { openIdBody }),
+  };
+}
+
 async function createG6CalDavClient(fixtureValue: Fixture): Promise<{
   status?: number;
   proofValid: boolean;
   client?: G6CalDavClient;
 }> {
-  const applicationServiceToken = process.env.MATRIX_APPLICATION_SERVICE_TOKEN;
+  const principal = acceptancePrincipal(fixtureValue);
   if (
-    fixtureValue.serviceSender.userId !== G6_SERVICE_USER_ID ||
+    !principal ||
     fixtureValue.calendarId !== G6_RADICALE_COLLECTION ||
-    new URL(fixtureValue.homeserverUrl).origin !== 'http://127.0.0.1:8008' ||
-    typeof applicationServiceToken !== 'string' ||
-    applicationServiceToken.length === 0 ||
-    applicationServiceToken.length > 4096
+    new URL(fixtureValue.homeserverUrl).origin !== 'http://127.0.0.1:8008'
   ) {
     return { proofValid: false };
   }
@@ -4317,16 +4390,20 @@ async function createG6CalDavClient(fixtureValue: Fixture): Promise<{
   let openIdResponse: globalThis.Response;
   try {
     const openIdUrl = new URL(
-      `/_matrix/client/v3/user/${encodeURIComponent(G6_SERVICE_USER_ID)}/openid/request_token`,
+      `/_matrix/client/v3/user/${encodeURIComponent(principal.userId)}/openid/request_token`,
       fixtureValue.homeserverUrl,
     );
     openIdResponse = await fetch(openIdUrl, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${applicationServiceToken}`,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${principal.accessToken}`,
+        ...(principal.openIdBody === undefined
+          ? {}
+          : { 'Content-Type': 'application/json' }),
       },
-      body: JSON.stringify({ user_id: G6_SERVICE_USER_ID }),
+      ...(principal.openIdBody === undefined
+        ? {}
+        : { body: principal.openIdBody }),
       redirect: 'error',
       signal: AbortSignal.timeout(10_000),
     });
@@ -4367,11 +4444,11 @@ async function createG6CalDavClient(fixtureValue: Fixture): Promise<{
     }),
   ).toString('base64url');
   const authorization = Buffer.from(
-    `${G6_SERVICE_LOCALPART}:matrix-openid:${delegatedCredential}`,
+    `${principal.localpart}:matrix-openid:${delegatedCredential}`,
     'utf8',
   ).toString('base64');
   const collectionUrl = new URL(
-    `${encodeURIComponent(G6_SERVICE_LOCALPART)}/${encodeURIComponent(G6_RADICALE_COLLECTION)}/`,
+    `${encodeURIComponent(principal.localpart)}/${encodeURIComponent(G6_RADICALE_COLLECTION)}/`,
     `${G6_RADICALE_ORIGIN}/`,
   );
   if (collectionUrl.origin !== G6_RADICALE_ORIGIN) {
@@ -4381,7 +4458,7 @@ async function createG6CalDavClient(fixtureValue: Fixture): Promise<{
   return {
     status,
     proofValid: true,
-    client: { authorization, collectionUrl },
+    client: { authorization, collectionUrl, localpart: principal.localpart },
   };
 }
 
@@ -4403,7 +4480,7 @@ async function g6CalDavRequest(
     encodeURIComponent(resourceName),
     client.collectionUrl,
   );
-  const collectionPrefix = `/${encodeURIComponent(G6_SERVICE_LOCALPART)}/${encodeURIComponent(G6_RADICALE_COLLECTION)}/`;
+  const collectionPrefix = `/${encodeURIComponent(client.localpart)}/${encodeURIComponent(G6_RADICALE_COLLECTION)}/`;
   if (
     resourceUrl.origin !== G6_RADICALE_ORIGIN ||
     !resourceUrl.pathname.startsWith(collectionPrefix) ||
@@ -4611,7 +4688,7 @@ function observeNextG6PostSaveListResponse(
       .then((body: unknown) => {
         if (!isRecord(body) || !Array.isArray(body.events)) {
           observation = { outcome: 'invalid-response', httpStatus };
-          return;
+          return null;
         }
         const eventCount = body.events.length;
         const eventCountCapped = Math.min(
@@ -4626,7 +4703,7 @@ function observeNextG6PostSaveListResponse(
             eventCountCapped,
             eventCountOverflow: true,
           };
-          return;
+          return null;
         }
         if (
           body.events.some(
@@ -4637,7 +4714,7 @@ function observeNextG6PostSaveListResponse(
           )
         ) {
           observation = { outcome: 'invalid-response', httpStatus };
-          return;
+          return null;
         }
         observation = {
           outcome: 'decoded',
@@ -4649,6 +4726,7 @@ function observeNextG6PostSaveListResponse(
               resource.event.title === expectedTitle,
           ),
         };
+        return null;
       })
       .catch(() => {
         observation = { outcome: 'decode-error', httpStatus };
@@ -5408,8 +5486,8 @@ async function waitForReminderDelivery(
         deliveredAfterDue: deliveredAt !== null && deliveredAt >= dueAt,
       };
     }
-    await new Promise((resolvePromise) =>
-      setTimeout(resolvePromise, REMINDER_TIMELINE_POLL_MS),
+    await new Promise((resolve) =>
+      setTimeout(resolve, REMINDER_TIMELINE_POLL_MS),
     );
     latest = await inspectReminderTimeline(titles);
   }
@@ -6436,6 +6514,7 @@ async function readGatewayEventUpdate(
   response: Response | undefined,
   expectedEventHref: string,
   expectedTitle: string,
+  expectedPrincipalLocalpart: string,
 ): Promise<{
   etag?: string;
   identityMatches: boolean;
@@ -6455,7 +6534,11 @@ async function readGatewayEventUpdate(
       event !== null &&
       'id' in event &&
       typeof event.id === 'string' &&
-      g6GatewayResourceIdentityMatches(event.id, expectedEventHref);
+      g6GatewayResourceIdentityMatches(
+        event.id,
+        expectedEventHref,
+        expectedPrincipalLocalpart,
+      );
     const titleMatches =
       typeof event === 'object' &&
       event !== null &&
@@ -6813,10 +6896,9 @@ function observePostCreateVisibility(
     async collect(frame: FrameLocator, eventRow: Locator) {
       await Promise.allSettled(pendingResponseReads);
       if (createdEventTiming && expectedRoomRange) {
-        const timingMatch = await compareEventTimingWithRoomRange(
-          page,
-          createdEventTiming,
-          expectedRoomRange,
+        const timingMatch = await page.evaluate(
+          compareEventTimingWithRoomRange,
+          { timing: createdEventTiming, range: expectedRoomRange },
         );
         observation.createResponseTimingComparable = timingMatch.comparable;
         observation.createResponseEventIntersectsRoomRange =
@@ -6827,6 +6909,7 @@ function observePostCreateVisibility(
           calendarId: expectedCalendarId,
           eventUid: createdEventUid,
           range: expectedRoomRange,
+          fixture,
         });
         if (caldavProbe) {
           observation.caldavReportProbeCompleted = caldavProbe.completed;
@@ -6859,14 +6942,6 @@ type ExpectedRoomRange = {
   timezone: string;
 };
 
-type ZonedEventTiming = {
-  type: 'timed';
-  start: { type: 'zoned'; local: string; timezone: string };
-  end: { type: 'zoned'; local: string; timezone: string };
-};
-
-type CreatedEventTiming = ZonedEventTiming;
-
 type CalDavReportProbeResult = {
   completed: boolean;
   openIdStatus: number | null;
@@ -6879,11 +6954,15 @@ function runCalDavReportProbe({
   calendarId,
   eventUid,
   range,
+  fixture: fixtureValue,
 }: {
   calendarId: string;
   eventUid: string;
   range: ExpectedRoomRange;
+  fixture: Fixture;
 }): CalDavReportProbeResult | undefined {
+  const principal = acceptancePrincipal(fixtureValue);
+  if (!principal) return undefined;
   const result = spawnSync(
     process.execPath,
     [
@@ -6893,12 +6972,19 @@ function runCalDavReportProbe({
       ),
     ],
     {
-      input: JSON.stringify({ calendarId, eventUid, range }),
+      input: JSON.stringify({
+        calendarId,
+        eventUid,
+        range,
+        principalMode: fixtureValue.principalMode,
+        serviceSender: fixtureValue.serviceSender,
+        bot: fixtureValue.users.bot,
+      }),
       encoding: 'utf8',
-      env: {
-        MATRIX_APPLICATION_SERVICE_TOKEN:
-          process.env.MATRIX_APPLICATION_SERVICE_TOKEN ?? '',
-      },
+      env:
+        principal.mode === 'appservice'
+          ? { MATRIX_APPLICATION_SERVICE_TOKEN: principal.accessToken }
+          : {},
       stdio: ['pipe', 'pipe', 'ignore'],
       timeout: 20_000,
       maxBuffer: 4096,
@@ -7070,104 +7156,6 @@ function isOptionalHttpStatus(value: unknown): value is number | null {
   return (
     value === null ||
     (Number.isInteger(value) && Number(value) >= 100 && Number(value) <= 599)
-  );
-}
-
-function readCreatedEventTiming(
-  value: unknown,
-): CreatedEventTiming | undefined {
-  if (!isRecord(value) || value.type !== 'timed') return undefined;
-  const readEndpoint = (endpoint: unknown) => {
-    if (
-      !isRecord(endpoint) ||
-      endpoint.type !== 'zoned' ||
-      typeof endpoint.local !== 'string' ||
-      typeof endpoint.timezone !== 'string' ||
-      endpoint.timezone.length === 0
-    ) {
-      return undefined;
-    }
-    return {
-      type: 'zoned' as const,
-      local: endpoint.local,
-      timezone: endpoint.timezone,
-    };
-  };
-  const start = readEndpoint(value.start);
-  const end = readEndpoint(value.end);
-  return start && end ? { type: 'timed', start, end } : undefined;
-}
-
-async function compareEventTimingWithRoomRange(
-  page: Page,
-  timing: CreatedEventTiming,
-  range: ExpectedRoomRange,
-): Promise<{ comparable: boolean; intersects: boolean }> {
-  return page.evaluate(
-    ({ timing, range }) => {
-      const rangeStart = Date.parse(range.start);
-      const rangeEnd = Date.parse(range.end);
-      const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (
-        !Number.isFinite(rangeStart) ||
-        !Number.isFinite(rangeEnd) ||
-        rangeEnd <= rangeStart ||
-        timing.start.timezone !== browserTimezone ||
-        timing.end.timezone !== browserTimezone
-      ) {
-        return { comparable: false, intersects: false };
-      }
-
-      const toInstant = (local: string, timezone: string) => {
-        const match =
-          /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/u.exec(
-            local,
-          );
-        if (!match || timezone !== browserTimezone) return undefined;
-        const [, year, month, day, hour, minute, second, fraction] = match;
-        const instant = Date.parse(local);
-        if (!Number.isFinite(instant)) return undefined;
-        const parts = Object.fromEntries(
-          new Intl.DateTimeFormat('en-CA-u-ca-iso8601', {
-            timeZone: timezone,
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hourCycle: 'h23',
-          })
-            .formatToParts(new Date(instant))
-            .filter((part) => part.type !== 'literal')
-            .map((part) => [part.type, Number(part.value)]),
-        );
-        const milliseconds = Number((fraction ?? '').padEnd(3, '0') || '0');
-        if (
-          parts.year !== Number(year) ||
-          parts.month !== Number(month) ||
-          parts.day !== Number(day) ||
-          parts.hour !== Number(hour) ||
-          parts.minute !== Number(minute) ||
-          parts.second !== Number(second ?? '0') ||
-          new Date(instant).getUTCMilliseconds() !== milliseconds
-        ) {
-          return undefined;
-        }
-        return instant;
-      };
-
-      const start = toInstant(timing.start.local, timing.start.timezone);
-      const end = toInstant(timing.end.local, timing.end.timezone);
-      if (start === undefined || end === undefined || end <= start) {
-        return { comparable: false, intersects: false };
-      }
-      return {
-        comparable: true,
-        intersects: start < rangeEnd && end > rangeStart,
-      };
-    },
-    { timing, range },
   );
 }
 

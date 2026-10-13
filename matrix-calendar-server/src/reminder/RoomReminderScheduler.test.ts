@@ -15,6 +15,7 @@
  */
 
 import { InMemoryRoomReminderStore } from '../../test/util/InMemoryRoomReminderStore';
+import { RoomCalendarPrincipalIdentity } from '../service/RoomCalendarPrincipalIdentity';
 import {
   CanonicalReminderSchedulerSource,
   ReminderCandidateCursor,
@@ -32,6 +33,10 @@ import {
 const roomId = '!team:example.org';
 const calendarId = 'team-calendar';
 const senderUserId = '@calendar-bot:example.org';
+const roomPrincipalIdentity: RoomCalendarPrincipalIdentity = Object.freeze({
+  mode: 'appservice',
+  userId: senderUserId,
+});
 const now = new Date('2026-10-02T10:00:00.000Z');
 const dueAt = new Date(now.getTime() - 60_000);
 const binding = { roomId, calendarId };
@@ -141,7 +146,7 @@ function createHarness(
   const runtime = {
     getCurrentConfiguration: jest.fn(async () => ({
       roomCalendarBindings: [binding],
-      applicationServiceSenderUserId: senderUserId,
+      roomCalendarPrincipalIdentity: roomPrincipalIdentity,
       roomCalendarAccessEnabled: true,
       roomReminderDeliveryEnabled: true,
       reminderStoreEnabled: true,
@@ -396,14 +401,14 @@ describe('RoomReminderScheduler', () => {
       .fn()
       .mockResolvedValueOnce({
         roomCalendarBindings: [binding],
-        applicationServiceSenderUserId: senderUserId,
+        roomCalendarPrincipalIdentity: roomPrincipalIdentity,
         roomCalendarAccessEnabled: true,
         roomReminderDeliveryEnabled: true,
         reminderStoreEnabled: true,
       })
       .mockResolvedValueOnce({
         roomCalendarBindings: [],
-        applicationServiceSenderUserId: senderUserId,
+        roomCalendarPrincipalIdentity: roomPrincipalIdentity,
         roomCalendarAccessEnabled: true,
         roomReminderDeliveryEnabled: true,
         reminderStoreEnabled: true,
@@ -428,14 +433,14 @@ describe('RoomReminderScheduler', () => {
       .fn()
       .mockResolvedValueOnce({
         roomCalendarBindings: [binding],
-        applicationServiceSenderUserId: senderUserId,
+        roomCalendarPrincipalIdentity: roomPrincipalIdentity,
         roomCalendarAccessEnabled: true,
         roomReminderDeliveryEnabled: true,
         reminderStoreEnabled: true,
       })
       .mockResolvedValueOnce({
         roomCalendarBindings: [],
-        applicationServiceSenderUserId: senderUserId,
+        roomCalendarPrincipalIdentity: roomPrincipalIdentity,
         roomCalendarAccessEnabled: true,
         roomReminderDeliveryEnabled: false,
         reminderStoreEnabled: true,
@@ -573,7 +578,7 @@ describe('RoomReminderScheduler', () => {
         binding,
         { roomId: '!other:example.org', calendarId: 'other' },
       ],
-      applicationServiceSenderUserId: senderUserId,
+      roomCalendarPrincipalIdentity: roomPrincipalIdentity,
       roomCalendarAccessEnabled: true,
       roomReminderDeliveryEnabled: true,
       reminderStoreEnabled: true,

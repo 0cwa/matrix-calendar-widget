@@ -23,6 +23,9 @@ import {
   formatRoomReminderSetupStage,
   formatRoomReminderSetupStart,
   formatRoomReminderSetupStatus,
+  getRoomAppServiceCaseFailureStage,
+  getRoomAppServiceTeardownFailure,
+  getRoomAppServiceTeardownStage,
 } from './sanitize-caldav-contract-stage.mjs';
 
 test('emits only the latest fixed phase from the closed allowlist', () => {
@@ -115,6 +118,47 @@ test('reports whether room contract test bodies started', () => {
       ].join('\n'),
     ),
     'room-appservice-test-bodies started=3/7\n',
+  );
+});
+
+test('accepts only fixed room failure and teardown checkpoints', () => {
+  const stageContent = [
+    'room-appservice-case-stage-subject-binding-identities-resolved',
+    'room-appservice-case-stage-subject-binding-subject-is-principal',
+    'room-appservice-case-stage-subject-binding-private-value',
+    'room-appservice-case-stage-cross-room-denial-response-forbidden',
+    'room-appservice-case-stage-cross-room-denial-private-response',
+    'room-appservice-teardown-stage-app-close-started',
+    'room-appservice-teardown-stage-private-path',
+    'room-appservice-teardown-failure-app-close',
+    'room-appservice-teardown-failure-private-error',
+  ].join('\n');
+
+  assert.equal(
+    getRoomAppServiceCaseFailureStage(stageContent, 'subject-binding'),
+    'subject-is-principal',
+  );
+  assert.equal(
+    getRoomAppServiceCaseFailureStage(stageContent, 'cross-room-denial'),
+    'response-forbidden',
+  );
+  assert.equal(
+    getRoomAppServiceCaseFailureStage(
+      'room-appservice-case-stage-cross-room-denial-private-value',
+      'cross-room-denial',
+    ),
+    undefined,
+  );
+  assert.equal(
+    getRoomAppServiceTeardownStage(stageContent),
+    'app-close-started',
+  );
+  assert.equal(getRoomAppServiceTeardownFailure(stageContent), 'app-close');
+  assert.equal(
+    getRoomAppServiceTeardownFailure(
+      'room-appservice-teardown-failure-private-error',
+    ),
+    undefined,
   );
 });
 

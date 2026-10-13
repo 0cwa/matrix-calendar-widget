@@ -32,6 +32,9 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Lint E2E
+        run: yarn workspace e2e lint
+
       - name: Check formatting
         run: yarn prettier:check
 

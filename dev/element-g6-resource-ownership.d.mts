@@ -22,6 +22,7 @@ export function g6EventSummaryMatches(
 export function g6GatewayResourceIdentityMatches(
   gatewayEventHref: string,
   externallyOwnedResourceHref: string,
+  expectedPrincipalLocalpart: string,
 ): boolean;
 export function createG6ResourceOwnership(name: string): G6ResourceOwnership;
 export function isStrongG6ResourceEtag(etag: unknown): etag is string;

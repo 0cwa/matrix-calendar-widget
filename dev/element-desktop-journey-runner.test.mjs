@@ -7,6 +7,8 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,8 +22,10 @@ import {
   cleanupUser,
   createJourneyChildEnvironment,
   createSystemCommandEnvironment,
+  installPinnedDesktopPackage,
   lookupPasswdAccount,
   parseStartupProgressRecord,
+  resolvePinnedPackageAcquisition,
   retryFinalUidCleanup,
   retryLateEffectiveUidStop,
   runDesktopCalendarJourney,
@@ -43,7 +47,54 @@ import {
 } from './element-desktop-journey.mjs';
 
 const PACKAGE_HASH = 'a'.repeat(64);
+const PINNED_PACKAGE_HASH =
+  '8db1b7bb53e96b31f77d3684776efa302cd3c518e54fece603a1f085e2c4cd93';
+const PINNED_PACKAGE_URL =
+  'https://packages.element.io/debian/pool/main/e/element-desktop/element-desktop_1.12.30_amd64.deb';
 const JOURNEY_SOURCE_SHA = 'b'.repeat(40);
+
+function packageMetadata(version, hash) {
+  return [
+    'Package: element-desktop',
+    `Version: ${version}`,
+    'Architecture: amd64',
+    `SHA256: ${hash}`,
+  ].join('\n');
+}
+
+function fakePackageCommands(
+  runnerTemp,
+  { metadata, downloadedHash = PINNED_PACKAGE_HASH, failArchive = false },
+) {
+  const calls = [];
+  return {
+    calls,
+    run(program, args, options = {}) {
+      calls.push({ program, args, options });
+      if (program === 'apt-cache') return metadata;
+      if (program === 'curl') {
+        if (args.includes(PINNED_PACKAGE_URL) && failArchive) {
+          throw new Error('synthetic pinned package unavailable');
+        }
+        const output = args[args.indexOf('--output') + 1];
+        writeFileSync(output, 'synthetic downloaded package bytes');
+        return '';
+      }
+      if (program === 'apt-get' && args[0] === 'download') {
+        writeFileSync(
+          join(runnerTemp, 'element-desktop_1.12.30_amd64.deb'),
+          'synthetic apt package bytes',
+        );
+        return '';
+      }
+      if (program === 'sha256sum') {
+        return `${downloadedHash}  ${args[0]}\n`;
+      }
+      if (program === 'dpkg-query') return '1.12.30\tamd64';
+      return '';
+    },
+  };
+}
 
 function withJourneyTempDirectory(run) {
   const runnerTemp = mkdtempSync(join(tmpdir(), 'mcw-desktop-child-test-'));
@@ -1909,4 +1960,223 @@ test('selects exactly one pinned amd64 Element Desktop package hash', () => {
     () => selectPinnedPackageHash(`${block}\nSHA256: ${PACKAGE_HASH}`),
     /Element Desktop journey runner failed/u,
   );
+});
+
+test('uses the fixed official archive only when the exact pinned version is absent', () => {
+  assert.deepEqual(
+    resolvePinnedPackageAcquisition(packageMetadata('1.12.31', 'c'.repeat(64))),
+    {
+      source: 'archive',
+      packageHash: PINNED_PACKAGE_HASH,
+      url: PINNED_PACKAGE_URL,
+    },
+  );
+  assert.deepEqual(
+    resolvePinnedPackageAcquisition(
+      packageMetadata('1.12.30', PINNED_PACKAGE_HASH),
+    ),
+    { source: 'apt', packageHash: PINNED_PACKAGE_HASH },
+  );
+  assert.throws(
+    () =>
+      resolvePinnedPackageAcquisition(
+        packageMetadata('1.12.30', 'c'.repeat(64)),
+      ),
+    (error) => error.code === 'package-mismatch',
+  );
+});
+
+test('installs the verified local archive when the signed index has only a newer version', () => {
+  withJourneyTempDirectory((runnerTemp) => {
+    const commands = fakePackageCommands(runnerTemp, {
+      metadata: packageMetadata('1.12.31', 'c'.repeat(64)),
+    });
+    const packageInfo = installPinnedDesktopPackage(runnerTemp, commands.run);
+    const archiveDownloadIndex = commands.calls.findIndex(
+      ({ program, args }) =>
+        program === 'curl' && args.includes(PINNED_PACKAGE_URL),
+    );
+    const hashCheckIndex = commands.calls.findIndex(
+      ({ program }) => program === 'sha256sum',
+    );
+    const installIndex = commands.calls.findIndex(
+      ({ program, args }) =>
+        program === 'sudo' &&
+        args.includes('apt-get') &&
+        args.includes('install'),
+    );
+    const installCall = commands.calls[installIndex];
+
+    assert.equal(packageInfo.packageHash, PINNED_PACKAGE_HASH);
+    assert.ok(archiveDownloadIndex >= 0);
+    assert.ok(hashCheckIndex > archiveDownloadIndex);
+    assert.ok(installIndex > hashCheckIndex);
+    assert.ok(installCall.args.includes(packageInfo.debFile));
+    assert.equal(
+      installCall.args.includes('element-desktop:amd64=1.12.30'),
+      false,
+    );
+    assert.equal(
+      commands.calls.some(
+        ({ program, args }) => program === 'apt-get' && args[0] === 'download',
+      ),
+      false,
+    );
+  });
+});
+
+test('keeps the signed-index download path for an exact matching package', () => {
+  withJourneyTempDirectory((runnerTemp) => {
+    const commands = fakePackageCommands(runnerTemp, {
+      metadata: packageMetadata('1.12.30', PINNED_PACKAGE_HASH),
+    });
+    const packageInfo = installPinnedDesktopPackage(runnerTemp, commands.run);
+
+    assert.ok(
+      commands.calls.some(
+        ({ program, args }) => program === 'apt-get' && args[0] === 'download',
+      ),
+    );
+    assert.equal(
+      commands.calls.some(
+        ({ program, args }) =>
+          program === 'curl' && args.includes(PINNED_PACKAGE_URL),
+      ),
+      false,
+    );
+    assert.ok(
+      commands.calls.some(
+        ({ program, args }) =>
+          program === 'sudo' && args.includes(packageInfo.debFile),
+      ),
+    );
+  });
+});
+
+test('reuses a regular cached package only after verifying its fixed digest', () => {
+  withJourneyTempDirectory((runnerTemp) => {
+    const debFile = join(runnerTemp, 'element-desktop_1.12.30_amd64.deb');
+    writeFileSync(debFile, 'synthetic cached package bytes');
+    const commands = fakePackageCommands(runnerTemp, {
+      metadata: packageMetadata('1.12.31', 'c'.repeat(64)),
+    });
+    const packageInfo = installPinnedDesktopPackage(runnerTemp, commands.run);
+
+    assert.equal(packageInfo.debFile, debFile);
+    assert.ok(
+      commands.calls.some(
+        ({ program, args }) => program === 'sha256sum' && args[0] === debFile,
+      ),
+    );
+    assert.equal(
+      commands.calls.some(
+        ({ program, args }) =>
+          program === 'curl' && args.includes(PINNED_PACKAGE_URL),
+      ),
+      false,
+    );
+    assert.equal(
+      commands.calls.some(
+        ({ program, args }) => program === 'apt-get' && args[0] === 'download',
+      ),
+      false,
+    );
+  });
+});
+
+test('rejects a cached package symlink before hashing or installation', () => {
+  withJourneyTempDirectory((runnerTemp) => {
+    const debFile = join(runnerTemp, 'element-desktop_1.12.30_amd64.deb');
+    const targetFile = join(runnerTemp, 'unrelated-package.deb');
+    writeFileSync(targetFile, 'synthetic package bytes');
+    symlinkSync(targetFile, debFile);
+    const commands = fakePackageCommands(runnerTemp, {
+      metadata: packageMetadata('1.12.31', 'c'.repeat(64)),
+    });
+
+    assert.throws(
+      () => installPinnedDesktopPackage(runnerTemp, commands.run),
+      (error) => error.code === 'package-mismatch',
+    );
+    assert.equal(
+      commands.calls.some(({ program }) => program === 'sha256sum'),
+      false,
+    );
+    assert.equal(
+      commands.calls.some(
+        ({ program, args }) =>
+          program === 'sudo' &&
+          args.includes('apt-get') &&
+          args.includes('install'),
+      ),
+      false,
+    );
+  });
+});
+
+test('rejects a mismatched download and conflicting metadata before install', () => {
+  withJourneyTempDirectory((runnerTemp) => {
+    const badDownload = fakePackageCommands(runnerTemp, {
+      metadata: packageMetadata('1.12.31', 'c'.repeat(64)),
+      downloadedHash: 'd'.repeat(64),
+    });
+    assert.throws(
+      () => installPinnedDesktopPackage(runnerTemp, badDownload.run),
+      (error) => error.code === 'package-mismatch',
+    );
+    assert.equal(
+      badDownload.calls.some(
+        ({ program, args }) =>
+          program === 'sudo' &&
+          args.includes('apt-get') &&
+          args.includes('install'),
+      ),
+      false,
+    );
+  });
+
+  withJourneyTempDirectory((runnerTemp) => {
+    const conflictingIndex = fakePackageCommands(runnerTemp, {
+      metadata: packageMetadata('1.12.30', 'c'.repeat(64)),
+    });
+    assert.throws(
+      () => installPinnedDesktopPackage(runnerTemp, conflictingIndex.run),
+      (error) => error.code === 'package-mismatch',
+    );
+    assert.equal(
+      conflictingIndex.calls.some(
+        ({ program, args }) =>
+          program === 'curl' && args.includes(PINNED_PACKAGE_URL),
+      ),
+      false,
+    );
+    assert.equal(
+      conflictingIndex.calls.some(
+        ({ program, args }) => program === 'apt-get' && args[0] === 'download',
+      ),
+      false,
+    );
+  });
+});
+
+test('reports a missing fixed archive as package-unavailable', () => {
+  withJourneyTempDirectory((runnerTemp) => {
+    const commands = fakePackageCommands(runnerTemp, {
+      metadata: packageMetadata('1.12.31', 'c'.repeat(64)),
+      failArchive: true,
+    });
+    assert.throws(
+      () => installPinnedDesktopPackage(runnerTemp, commands.run),
+      (error) => error.code === 'package-unavailable',
+    );
+    assert.equal(
+      commands.calls.some(
+        ({ program, args }) =>
+          program === 'sudo' &&
+          args.includes('apt-get') &&
+          args.includes('install'),
+      ),
+      false,
+    );
+  });
 });

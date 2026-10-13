@@ -17,6 +17,10 @@
 import { FactoryProvider } from '@nestjs/common';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
+import type {
+  RoomCalendarPrincipalIdentity,
+  RoomCalendarPrincipalIdentityProvider,
+} from '../service/RoomCalendarPrincipalIdentity';
 import { CanonicalRoomReminderSchedulerSource } from './CanonicalRoomReminderSchedulerSource';
 import { RoomReminderAlarmOptionsService } from './RoomReminderAlarmOptionsService';
 import { RoomReminderConfigurationService } from './RoomReminderConfigurationService';
@@ -41,6 +45,13 @@ describe('room reminder module ports', () => {
   const runtime: ReminderSchedulerRuntimeSource = {
     getCurrentConfiguration: jest.fn(),
   };
+  const appserviceIdentity: RoomCalendarPrincipalIdentity = Object.freeze({
+    mode: 'appservice',
+    userId: '@calendar-bot:example.test',
+  });
+  const principalIdentityProvider: RoomCalendarPrincipalIdentityProvider = {
+    resolve: jest.fn(async () => appserviceIdentity),
+  };
 
   it('does not construct a Matrix transport or perform I/O while both gates are off', async () => {
     const createTransport = jest.fn<
@@ -54,6 +65,7 @@ describe('room reminder module ports', () => {
       } as unknown as IAppConfiguration,
       { enabled: false } as RoomReminderStore,
       runtime,
+      principalIdentityProvider,
       createTransport,
     );
 
@@ -81,6 +93,7 @@ describe('room reminder module ports', () => {
       room_reminder_configuration_enabled: true,
       room_reminder_delivery_enabled: false,
       room_calendar_access_enabled: true,
+      room_calendar_principal_mode: 'appservice',
       application_service_token: 'server-secret',
       application_service_user_id: '@calendar-bot:example.test',
       homeserver_url: 'https://matrix.example.test',
@@ -91,14 +104,22 @@ describe('room reminder module ports', () => {
     } as unknown as IAppConfiguration;
 
     expect(
-      createRoomReminderMatrixPorts(appConfig, store, runtime, createTransport),
+      createRoomReminderMatrixPorts(
+        appConfig,
+        store,
+        runtime,
+        principalIdentityProvider,
+        createTransport,
+      ),
     ).toBe(created);
     expect(createTransport).toHaveBeenCalledTimes(1);
     expect(createTransport).toHaveBeenCalledWith(
       {
+        mode: 'appservice',
         homeserverUrl: 'https://matrix.example.test',
         applicationServiceToken: 'server-secret',
         applicationServiceSenderUserId: '@calendar-bot:example.test',
+        principalIdentityProvider,
       },
       runtime,
     );
@@ -109,6 +130,10 @@ describe('room reminder module ports', () => {
     ['homeserver URL', { homeserver_url: 'file:///etc/passwd' }],
     ['CalDAV URL', { radicale_url: 'https://dav.example.test/?token=x' }],
     ['application-service token', { application_service_token: ' ' }],
+    [
+      'bot-account access token',
+      { room_calendar_principal_mode: 'bot-account', access_token: ' ' },
+    ],
     ['room binding', { room_calendar_bindings: [] }],
   ])('fails closed when enabled with invalid %s', (_name, override) => {
     const createTransport = jest.fn<
@@ -119,6 +144,7 @@ describe('room reminder module ports', () => {
       room_reminder_configuration_enabled: true,
       room_reminder_delivery_enabled: false,
       room_calendar_access_enabled: true,
+      room_calendar_principal_mode: 'appservice',
       application_service_token: 'server-secret',
       application_service_user_id: '@calendar-bot:example.test',
       homeserver_url: 'https://matrix.example.test',
@@ -134,6 +160,7 @@ describe('room reminder module ports', () => {
         appConfig,
         { enabled: true } as RoomReminderStore,
         runtime,
+        principalIdentityProvider,
         createTransport,
       ),
     ).toThrow('Room reminder runtime configuration is invalid');
@@ -149,6 +176,7 @@ describe('room reminder module ports', () => {
       room_reminder_configuration_enabled: true,
       room_reminder_delivery_enabled: false,
       room_calendar_access_enabled: true,
+      room_calendar_principal_mode: 'appservice',
       application_service_token: 'server-secret',
       application_service_user_id: '@calendar-bot:example.test',
       homeserver_url: 'https://matrix.example.test',
@@ -163,10 +191,59 @@ describe('room reminder module ports', () => {
         appConfig,
         { enabled: false } as RoomReminderStore,
         runtime,
+        principalIdentityProvider,
         createTransport,
       ),
     ).toThrow('Room reminder runtime configuration is invalid');
     expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it('creates bot-account reminder ports without application-service credentials or a sender ID', () => {
+    const created: RoomReminderMatrixPorts = {
+      isRoomEncrypted: jest.fn(),
+      getJoinedRoomMembers: jest.fn(),
+      getPowerLevels: jest.fn(),
+      getRoomVersion: jest.fn(),
+      sendRoomMention: jest.fn(),
+    };
+    const createTransport = jest.fn<
+      RoomReminderMatrixPorts,
+      Parameters<RoomReminderTransportFactory>
+    >(() => created);
+    const appConfig = {
+      room_reminder_configuration_enabled: true,
+      room_reminder_delivery_enabled: false,
+      room_calendar_access_enabled: true,
+      room_calendar_principal_mode: 'bot-account',
+      access_token: 'normal-bot-access-token',
+      homeserver_url: 'https://matrix.example.test',
+      radicale_url: 'https://dav.example.test/radicale',
+      room_calendar_bindings: [
+        { roomId: '!team:example.test', calendarId: 'team-calendar' },
+      ],
+    } as unknown as IAppConfiguration;
+
+    expect(
+      createRoomReminderMatrixPorts(
+        appConfig,
+        { enabled: true } as RoomReminderStore,
+        runtime,
+        principalIdentityProvider,
+        createTransport,
+      ),
+    ).toBe(created);
+    expect(createTransport).toHaveBeenCalledWith(
+      {
+        mode: 'bot-account',
+        homeserverUrl: 'https://matrix.example.test',
+        accessToken: 'normal-bot-access-token',
+        principalIdentityProvider,
+      },
+      runtime,
+    );
+    expect(createTransport.mock.calls[0][0]).not.toHaveProperty(
+      'applicationServiceSenderUserId',
+    );
   });
 
   it('wires one default-off transport through services and leaves the lifecycle inert', async () => {
@@ -174,6 +251,7 @@ describe('room reminder module ports', () => {
     const appConfig = {
       room_reminder_configuration_enabled: false,
       room_reminder_delivery_enabled: false,
+      room_calendar_principal_mode: 'appservice',
     } as unknown as IAppConfiguration;
     const store = { enabled: false } as RoomReminderStore;
     const roomCalendarAccess = {};
@@ -186,12 +264,20 @@ describe('room reminder module ports', () => {
       return provider as FactoryProvider<T>;
     };
 
+    expect(factory(ConfiguredReminderSchedulerRuntimeSource).inject).toContain(
+      ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
+    );
+    expect(
+      factory(ModuleProviderToken.ROOM_REMINDER_MATRIX_PORTS).inject,
+    ).toContain(ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY);
+
     try {
       const runtime = factory<ConfiguredReminderSchedulerRuntimeSource>(
         ConfiguredReminderSchedulerRuntimeSource,
       ).useFactory(
         appConfig,
         store,
+        principalIdentityProvider,
       ) as ConfiguredReminderSchedulerRuntimeSource;
       const getRuntimeConfiguration = jest.spyOn(
         runtime,
@@ -199,7 +285,7 @@ describe('room reminder module ports', () => {
       );
       const ports = factory<RoomReminderMatrixPorts>(
         ModuleProviderToken.ROOM_REMINDER_MATRIX_PORTS,
-      ).useFactory(appConfig, store, runtime);
+      ).useFactory(appConfig, store, runtime, principalIdentityProvider);
       expect(ports).toBe(disabledRoomReminderMatrixPorts);
 
       const canonical = factory<CanonicalRoomReminderSchedulerSource>(

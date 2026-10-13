@@ -111,11 +111,32 @@ export type WebBEditSaveFailureDiagnostic = {
 };
 
 export type DesktopEventCreateFailureDiagnostic = {
-  // Null values mean the observer could not be installed. It records no
-  // request URL, body, response body, or failure text.
+  // Null values mean unavailable or not observed. It records no request URL,
+  // body, response body, or failure text. Counts use 2 for two or more.
   createPostObserved: boolean | null;
   createPostRequestFailed: boolean | null;
   createPostStatus: number | null;
+  createResponseHasEvent: boolean | null;
+  createResponseTitleMatches: boolean | null;
+  createResponseCalendarMatches: boolean | null;
+  postCreateEventGetRequestCountCapped: 0 | 1 | 2 | null;
+  postCreateRoomRangeGetRequestCountCapped: 0 | 1 | 2 | null;
+  postCreateRoomRangeGetResponseCountCapped: 0 | 1 | 2 | null;
+  postCreateRoomRangeGetStatus: number | null;
+  roomListHasEventsArray: boolean | null;
+  roomListEventCountCapped: 0 | 1 | 2 | null;
+  roomListTitleMatches: boolean | null;
+  roomListIdMatches: boolean | null;
+  roomListCalendarMatches: boolean | null;
+  createResponseTimingComparable: boolean | null;
+  createResponseEventIntersectsRoomRange: boolean | null;
+  calendarEventsRegionCountCapped: 0 | 1 | 2 | null;
+  calendarEventsRegionVisible: boolean | null;
+  calendarEventsVisibleRowCountCapped: 0 | 1 | 2 | null;
+  progressbarVisible: boolean | null;
+  errorAlertVisible: boolean | null;
+  matchingRowCountCapped: 0 | 1 | 2 | null;
+  matchingRowVisible: boolean | null;
 };
 
 export type WebBEditRowRenderDiagnostic =
@@ -297,7 +318,7 @@ export type DesktopJourneyFailureObservation =
   | null;
 
 export type DesktopJourneySummary = {
-  schemaVersion: 11;
+  schemaVersion: 12;
   sourceSha: string | null;
   status: 'passed' | 'failed' | 'incomplete';
   desktopChildCompletion: DesktopChildCompletion;

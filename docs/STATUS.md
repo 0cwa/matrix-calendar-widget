@@ -147,6 +147,44 @@ PR #199 adds manager-authorized reminder configuration and alarm-options APIs, b
 
 PR #201 connects the primary widget to the gateway-authorized room calendar. It consumes the current room capability response, shows the authorized bound room calendar and its read/write capabilities, displays a safe link to the current Matrix room in event details, and exposes reminder controls for supported alarms to authorized managers. All eight hosted checks passed at exact source tree `a65811903363397ea0883f4e32a98ace7dfdb9a8`; independent review passed on the same tree, merged as `f49acee71280944ad6ae351111947ff01c00031d`. Issue #7's bounded repository criteria are complete. The complete local check set passed with the server Jest suite rerun serially after the parallel `yarn ci` invocation exited 1 when Jest workers were terminated by SIGKILL; the serial server run, remaining calendar/timezone suites, static checks, and production build passed. The hosted checks ran on Node 22. These checks do not establish actual Element client or operator-host acceptance.
 
+ADR041 accepts an optional process-wide `bot-account` principal mode for room
+CalDAV and reminder providers. Its source implementation and focused unit
+coverage are present on this candidate. The existing appservice mode remains
+the strict default. Both providers share one immutable identity derived from
+the exact Matrix SDK client and `ACCESS_TOKEN`, reject an identity mismatch
+before OpenID, CalDAV, or reminder transport requests, and preserve actor,
+binding, power, ETag, and default-off requirements. Switching modes selects a
+different whole-home Radicale principal; the server does not migrate calendars.
+Application-service requirements for unrelated features and action notices
+remain in force.
+
+A separate normal-bot Element acceptance job uses the shared fixture runner.
+Its setup requires disabled synthetic AS registration and no AS token; offline
+tests cover setup, OpenID request shape, and workflow guards. The published PR
+#247 head `c6a68e9ec49395a671d6a29e48617979df99de3d` passed every terminal check
+except normal-bot acceptance in [run
+38452260797](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38452260797).
+The Real Radicale contract passed appservice and normal-bot behavior (7/7
+cases each), confirming the earlier local Jest resolver fix against the hosted
+Synapse/Radicale stack. That fix only reorders Jest's module search roots; it
+does not change production authentication or Matrix wire behavior.
+
+The Element acceptance passed 127 appservice Web phases, appservice Desktop
+12/12, normal-bot Desktop 12/12, normal-bot Web CRUD, reminders, PostgreSQL
+restart, paired restore, and both profiles' numeric zero- and 25-event timing
+gates. Appservice G6 preservation and owned cleanup passed. Normal-bot G6
+failed its combined preservation gate: the supported neighbor PATCH returned
+HTTP 200, the edited title appeared in the refreshed list, and the unsupported
+canonical object remained byte-identical, but the fixture's ownership check
+rejected the gateway href because it expected the appservice home. The G6
+state machine then refused to accept the updated ETag for cleanup; three of
+four resources were resolved and one cleanup remained unresolved. Source
+commit `794cbc60a3a93e38961db49dfe358831e46f44c5` changes the fixture check to
+use the selected authenticated principal's localpart while preserving fixed
+origins, exact href equality, strong ETag checks, and fail-closed cleanup.
+Focused offline tests, E2E TypeScript, and formatting pass; the follow-up has
+not yet had a hosted runtime run. Operator acceptance remains open.
+
 Draft PR #227 candidate `a02932dafbbfa9316bee5e8bda1ee15ed1ddbaff` passed its
 hosted Element Web acceptance on exact head in [run
 37611136645](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37611136645).
@@ -213,7 +251,23 @@ loading, memory, and actual clients remain unmeasured.
 
 - **M4:** collection-timezone editing and remaining issue #5 acceptance work.
 - **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, arbitrary RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, attachment forms beyond ADR038, broader alarms, and conference forms beyond ADR036 are not part of the implemented editor. Unsupported recurrence or timezone sources may be omitted from projection; the widget warns for source forms it diagnoses, while preserving the canonical resource.
-- **M6:** issue #7 bounded repository criteria are complete. Keep room access, event writes, settings, delivery, and action notices off until the operator accepts each capability and its trust boundary. A passing pinned stack is not an etke-host or production proof.
+- **M6:** issue #7 bounded repository criteria are complete. ADR041's optional
+  bot-account principal integration is implemented; appservice remains the
+  default. The published PR #247 head
+  `c6a68e9ec49395a671d6a29e48617979df99de3d` passed the Real Radicale contract
+  in appservice and normal-bot modes (7/7 cases each), normal-bot Desktop
+  12/12, Web CRUD, reminders, PostgreSQL restart, paired restore, and both
+  profiles' zero- and 25-event timing gates in
+  [run 38452260797](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38452260797).
+  The normal-bot G6 preservation/cleanup phase failed because the fixture
+  compared the gateway href against the fixed appservice home instead of the
+  selected normal-bot home. Source follow-up
+  `794cbc60a3a93e38961db49dfe358831e46f44c5` uses the authenticated selected
+  localpart and retains exact-path, origin, ETag, and cleanup checks; it is
+  still awaiting hosted runtime verification. Keep room access, event writes,
+  settings, delivery, and action notices off until the operator accepts each
+  capability and its trust boundary. A passing pinned stack is not an
+  operator-host or production proof.
 - **M8:** The bounded G6 Element Web interaction path remains covered by merged
   run [37739410969](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37739410969),
   including shared-event edit/delete, unsupported-source preservation,

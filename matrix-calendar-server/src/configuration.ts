@@ -22,6 +22,11 @@ import {
   MAX_CALDAV_EVENT_RESPONSE_MAX_BYTES,
 } from './caldav/CalDavTransportLimits';
 import { parseRoomCalendarBindings } from './service/RoomCalendarBindingResolver';
+import type { RoomCalendarPrincipalMode } from './service/RoomCalendarPrincipalIdentity';
+
+const optionalEnvironmentValue = (
+  value: string | undefined,
+): string | undefined => (value === '' ? undefined : value);
 
 const toBoolean = (
   value: string | undefined,
@@ -61,6 +66,8 @@ function createConfiguration() {
     room_calendar_bindings: parseRoomCalendarBindings(
       process.env.ROOM_CALENDAR_BINDINGS,
     ),
+    room_calendar_principal_mode: (process.env.ROOM_CALENDAR_PRINCIPAL_MODE ??
+      'appservice') as RoomCalendarPrincipalMode,
     room_calendar_access_enabled: toBoolean(
       process.env.ROOM_CALENDAR_ACCESS_ENABLED,
       false,
@@ -73,8 +80,12 @@ function createConfiguration() {
       process.env.ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED,
       false,
     ),
-    application_service_token: process.env.MATRIX_APPLICATION_SERVICE_TOKEN,
-    application_service_user_id: process.env.MATRIX_APPLICATION_SERVICE_USER_ID,
+    application_service_token: optionalEnvironmentValue(
+      process.env.MATRIX_APPLICATION_SERVICE_TOKEN,
+    ),
+    application_service_user_id: optionalEnvironmentValue(
+      process.env.MATRIX_APPLICATION_SERVICE_USER_ID,
+    ),
     calendar_gateway_rate_limit_requests: toNumber(
       process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS,
       120,
@@ -191,11 +202,12 @@ export const ValidationSchema = Joi.object({
     .min(1)
     .max(MAX_CALDAV_EVENT_RESPONSE_MAX_BYTES),
   ROOM_CALENDAR_BINDINGS: Joi.string(),
+  ROOM_CALENDAR_PRINCIPAL_MODE: Joi.string().valid('appservice', 'bot-account'),
   ROOM_CALENDAR_ACCESS_ENABLED: Joi.boolean(),
   ROOM_CALENDAR_EVENT_WRITES_ENABLED: Joi.boolean(),
   ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED: Joi.boolean(),
-  MATRIX_APPLICATION_SERVICE_TOKEN: Joi.string(),
-  MATRIX_APPLICATION_SERVICE_USER_ID: Joi.string(),
+  MATRIX_APPLICATION_SERVICE_TOKEN: Joi.string().empty(''),
+  MATRIX_APPLICATION_SERVICE_USER_ID: Joi.string().empty(''),
   MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS: Joi.number()
     .integer()
     .min(1)

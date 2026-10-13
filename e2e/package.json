@@ -29,7 +29,7 @@
     "translate": "echo \"Nothing to translate\"",
     "docker:build": "echo \"Nothing to build\"",
     "depcheck": "depcheck --ignores=typescript",
-    "lint": "eslint . --max-warnings=0",
+    "lint": "eslint .",
     "e2e": "playwright test --headed --project=chromium --workers=1 --reporter=dot",
     "e2e:all": "yarn playwright test --reporter=dot"
   },

@@ -141,6 +141,65 @@ function matrixUserId(localpart) {
   return `@${localpart}:localhost`;
 }
 
+export function resolveAcceptancePrincipalMode(value) {
+  const mode = value ?? 'appservice';
+  if (mode !== 'appservice' && mode !== 'bot-account') {
+    throw new FixtureSetupError('accounts-ready');
+  }
+  return mode;
+}
+
+export function assertAcceptancePrincipalBootstrap({
+  mode,
+  appserviceRegistration,
+  applicationServiceToken,
+}) {
+  const appserviceModeIsEnabled =
+    appserviceRegistration === undefined ||
+    appserviceRegistration === 'enabled';
+  const bootstrapIsValid =
+    mode === 'appservice'
+      ? appserviceModeIsEnabled && safeCredential(applicationServiceToken)
+      : mode === 'bot-account' &&
+        appserviceRegistration === 'disabled' &&
+        applicationServiceToken === undefined;
+  if (!bootstrapIsValid) {
+    throw new FixtureSetupError('accounts-ready');
+  }
+}
+
+export function createPrincipalOpenIdRequest({
+  mode,
+  userId,
+  applicationServiceToken,
+  accountAccessToken,
+}) {
+  if (
+    mode === 'appservice' &&
+    userId === SERVICE_USER_ID &&
+    safeCredential(applicationServiceToken)
+  ) {
+    return {
+      path: `/_matrix/client/v3/user/${encodeURIComponent(userId)}/openid/request_token`,
+      token: applicationServiceToken,
+      body: { user_id: userId },
+    };
+  }
+  if (
+    mode === 'bot-account' &&
+    applicationServiceToken === undefined &&
+    /^@[a-z0-9][a-z0-9-]{0,254}:localhost$/u.test(userId) &&
+    safeCredential(accountAccessToken)
+  ) {
+    return {
+      path: `/_matrix/client/v3/user/${encodeURIComponent(userId)}/openid/request_token`,
+      token: accountAccessToken,
+      body: {},
+    };
+  }
+  throw new FixtureSetupError('service-calendar-ready');
+}
+
 function createUser(localpart, password, phase) {
   const projectName = requiredEnvironment('COMPOSE_PROJECT_NAME');
   if (!/^[a-z0-9][a-z0-9_-]{0,62}$/u.test(projectName)) {
@@ -295,24 +354,32 @@ async function joinRoom(token, roomId) {
 
 async function joinReminderSender(
   serviceAccessToken,
+  serviceUserId,
   roomId,
   managerToken,
   managerUserId,
 ) {
-  await matrixJson(
-    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
-    {
-      method: 'POST',
-      token: managerToken,
-      body: { user_id: SERVICE_USER_ID },
-    },
+  const joinedBeforeUpdate = await matrixJson(
+    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`,
+    { token: managerToken },
     'service-room-ready',
   );
-  await matrixJson(
-    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/join`,
-    { method: 'POST', token: serviceAccessToken },
-    'service-room-ready',
-  );
+  if (!Object.hasOwn(joinedBeforeUpdate?.joined ?? {}, serviceUserId)) {
+    await matrixJson(
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
+      {
+        method: 'POST',
+        token: managerToken,
+        body: { user_id: serviceUserId },
+      },
+      'service-room-ready',
+    );
+    await matrixJson(
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/join`,
+      { method: 'POST', token: serviceAccessToken },
+      'service-room-ready',
+    );
+  }
 
   const powerLevels = {
     ban: 100,
@@ -328,7 +395,7 @@ async function joinReminderSender(
     redact: 100,
     state_default: 100,
     users: {
-      [SERVICE_USER_ID]: 50,
+      [serviceUserId]: 50,
       [managerUserId]: 100,
     },
     users_default: 0,
@@ -357,8 +424,8 @@ async function joinReminderSender(
     ),
   ]);
   if (
-    !Object.hasOwn(joined?.joined ?? {}, SERVICE_USER_ID) ||
-    verifiedPowerLevels?.users?.[SERVICE_USER_ID] !== 50 ||
+    !Object.hasOwn(joined?.joined ?? {}, serviceUserId) ||
+    verifiedPowerLevels?.users?.[serviceUserId] !== 50 ||
     verifiedPowerLevels?.events?.['m.room.message'] !== 0 ||
     verifiedPowerLevels?.notifications?.room !== 50 ||
     verifiedPowerLevels?.events_default !== 100 ||
@@ -368,34 +435,60 @@ async function joinReminderSender(
   }
 }
 
-async function createServiceCalendar(applicationServiceToken) {
-  const serviceUser = await matrixJson(
-    '/_matrix/client/v3/register',
-    {
-      method: 'POST',
-      token: applicationServiceToken,
-      body: {
-        type: 'm.login.application_service',
-        username: SERVICE_LOCALPART,
+async function createServiceCalendar({
+  mode,
+  applicationServiceToken,
+  botAccount,
+}) {
+  let principal;
+  if (mode === 'appservice') {
+    const serviceUser = await matrixJson(
+      '/_matrix/client/v3/register',
+      {
+        method: 'POST',
+        token: applicationServiceToken,
+        body: {
+          type: 'm.login.application_service',
+          username: SERVICE_LOCALPART,
+        },
       },
-    },
-    'service-calendar-ready',
-  );
+      'service-calendar-ready',
+    );
 
-  if (
-    serviceUser.user_id !== SERVICE_USER_ID ||
-    !safeCredential(serviceUser.access_token)
+    if (
+      serviceUser.user_id !== SERVICE_USER_ID ||
+      !safeCredential(serviceUser.access_token)
+    ) {
+      throw new FixtureSetupError('service-calendar-ready');
+    }
+    addMask(serviceUser.access_token);
+    principal = {
+      userId: serviceUser.user_id,
+      accessToken: serviceUser.access_token,
+    };
+  } else if (
+    mode === 'bot-account' &&
+    botAccount &&
+    /^@[a-z0-9][a-z0-9-]{0,254}:localhost$/u.test(botAccount.userId) &&
+    safeCredential(botAccount.accessToken)
   ) {
+    principal = botAccount;
+  } else {
     throw new FixtureSetupError('service-calendar-ready');
   }
-  addMask(serviceUser.access_token);
 
+  const openIdRequest = createPrincipalOpenIdRequest({
+    mode,
+    userId: principal.userId,
+    applicationServiceToken,
+    accountAccessToken: principal.accessToken,
+  });
   const proof = await matrixJson(
-    `/_matrix/client/v3/user/${encodeURIComponent(SERVICE_USER_ID)}/openid/request_token`,
+    openIdRequest.path,
     {
       method: 'POST',
-      token: applicationServiceToken,
-      body: { user_id: SERVICE_USER_ID },
+      token: openIdRequest.token,
+      ...(openIdRequest.body === undefined ? {} : { body: openIdRequest.body }),
     },
     'service-calendar-ready',
   );
@@ -408,6 +501,10 @@ async function createServiceCalendar(applicationServiceToken) {
   }
 
   addMask(proof.access_token);
+  const principalLocalpart = principal.userId.slice(
+    1,
+    principal.userId.indexOf(':'),
+  );
   const delegatedCredential = `matrix-openid:${Buffer.from(
     JSON.stringify({
       access_token: proof.access_token,
@@ -415,10 +512,10 @@ async function createServiceCalendar(applicationServiceToken) {
     }),
   ).toString('base64url')}`;
   const authorization = `Basic ${Buffer.from(
-    `${SERVICE_LOCALPART}:${delegatedCredential}`,
+    `${principalLocalpart}:${delegatedCredential}`,
   ).toString('base64')}`;
   const collectionUrl = new URL(
-    `${encodeURIComponent(SERVICE_LOCALPART)}/${encodeURIComponent(CALENDAR_ID)}/`,
+    `${encodeURIComponent(principalLocalpart)}/${encodeURIComponent(CALENDAR_ID)}/`,
     RADICALE_URL,
   );
 
@@ -449,7 +546,7 @@ async function createServiceCalendar(applicationServiceToken) {
     throw new FixtureSetupError('service-calendar-ready', response.status);
   }
 
-  return serviceUser.access_token;
+  return principal;
 }
 
 async function registerWidget(stateRoomId, targetRoomId, actor, widgetId) {
@@ -486,6 +583,7 @@ async function registerWidget(stateRoomId, targetRoomId, actor, widgetId) {
 function writeComposeEnvironment(path, values) {
   const lines = [];
   for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) continue;
     if (!safeCredential(value) || value.includes("'")) {
       throw new FixtureSetupError('runtime-ready');
     }
@@ -675,13 +773,22 @@ async function provision() {
   const serverEnvFile = requiredEnvironment(
     'ELEMENT_ACCEPTANCE_SERVER_ENV_FILE',
   );
-  const applicationServiceToken = requiredEnvironment(
-    'MATRIX_APPLICATION_SERVICE_TOKEN',
+  const principalMode = resolveAcceptancePrincipalMode(
+    process.env.ROOM_CALENDAR_PRINCIPAL_MODE,
   );
-  if (!safeCredential(applicationServiceToken)) {
-    throw new FixtureSetupError('accounts-ready');
+  let applicationServiceToken = process.env.MATRIX_APPLICATION_SERVICE_TOKEN;
+  if (principalMode === 'appservice') {
+    applicationServiceToken = requiredEnvironment(
+      'MATRIX_APPLICATION_SERVICE_TOKEN',
+    );
+    addMask(applicationServiceToken);
   }
-  addMask(applicationServiceToken);
+  assertAcceptancePrincipalBootstrap({
+    mode: principalMode,
+    appserviceRegistration:
+      process.env.MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION,
+    applicationServiceToken,
+  });
 
   for (const path of [userFile, serverEnvFile]) {
     if (
@@ -748,8 +855,12 @@ async function provision() {
     return { teamRoomId, outsiderRoomId };
   });
 
-  const serviceUserAccessToken = await runPhase('service-calendar-ready', () =>
-    createServiceCalendar(applicationServiceToken),
+  const servicePrincipal = await runPhase('service-calendar-ready', () =>
+    createServiceCalendar({
+      mode: principalMode,
+      applicationServiceToken,
+      botAccount: actors.bot,
+    }),
   );
 
   await runPhase('widget-registered', async () => {
@@ -792,13 +903,20 @@ async function provision() {
     ELEMENT_ACCEPTANCE_ROOM_BINDING: JSON.stringify([
       { roomId: rooms.teamRoomId, calendarId: CALENDAR_ID },
     ]),
-    MATRIX_APPLICATION_SERVICE_TOKEN: applicationServiceToken,
+    ROOM_CALENDAR_PRINCIPAL_MODE: principalMode,
+    ...(principalMode === 'appservice'
+      ? {
+          MATRIX_APPLICATION_SERVICE_TOKEN: applicationServiceToken,
+          MATRIX_APPLICATION_SERVICE_USER_ID: SERVICE_USER_ID,
+        }
+      : {}),
   });
 
   const publicActors = {
     memberA: actors.memberA,
     memberB: actors.memberB,
     outsider: actors.outsider,
+    bot: actors.bot,
   };
   writePrivateJson(userFile, {
     homeserverUrl: HOMESERVER_URL,
@@ -810,10 +928,11 @@ async function provision() {
     teamRoomId: rooms.teamRoomId,
     outsiderRoomId: rooms.outsiderRoomId,
     calendarId: CALENDAR_ID,
+    principalMode,
     users: publicActors,
     serviceSender: {
-      userId: SERVICE_USER_ID,
-      accessToken: serviceUserAccessToken,
+      userId: servicePrincipal.userId,
+      accessToken: servicePrincipal.accessToken,
     },
   });
 
@@ -858,19 +977,29 @@ async function prepareReminderRoom() {
         throw new FixtureSetupError('service-room-ready');
       }
       const memberA = fixture?.users?.memberA;
+      const bot = fixture?.users?.bot;
       const serviceSender = fixture?.serviceSender;
+      const validPrincipal =
+        (fixture?.principalMode === 'appservice' &&
+          serviceSender?.userId === SERVICE_USER_ID) ||
+        (fixture?.principalMode === 'bot-account' &&
+          bot &&
+          serviceSender?.userId === bot.userId &&
+          serviceSender?.accessToken === bot.accessToken);
       if (
         !safeCredential(fixture?.teamRoomId) ||
         typeof memberA?.userId !== 'string' ||
         !/^@[a-z0-9-]+:localhost$/u.test(memberA.userId) ||
         !safeCredential(memberA?.accessToken) ||
-        serviceSender?.userId !== SERVICE_USER_ID ||
+        !validPrincipal ||
+        typeof serviceSender?.userId !== 'string' ||
         !safeCredential(serviceSender?.accessToken)
       ) {
         throw new FixtureSetupError('service-room-ready');
       }
       await joinReminderSender(
         serviceSender.accessToken,
+        serviceSender.userId,
         fixture.teamRoomId,
         memberA.accessToken,
         memberA.userId,
@@ -992,4 +1121,9 @@ async function main() {
   }
 }
 
-main();
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  main();
+}

@@ -49,13 +49,18 @@ import {
   isSafeRoomCalendarServiceUserLocalpart,
   RoomCalendarTarget,
 } from './RoomCalendarCalDavAccess';
+import type {
+  RoomCalendarPrincipalIdentity,
+  RoomCalendarPrincipalIdentityProvider,
+} from './RoomCalendarPrincipalIdentity';
 
 /**
- * Appservice identity returned by the room access gate after actor
+ * Selected room principal returned by the room access gate after actor
  * authorization and exact binding resolution. Never construct this from an
  * HTTP request or a widget actor's OpenID credential.
  */
 export interface RoomCalendarEventServicePrincipal {
+  readonly identity: RoomCalendarPrincipalIdentity;
   readonly userId: string;
   readonly calendarUrl: string;
   readonly credential: IMatrixOpenIdCredential;
@@ -98,7 +103,7 @@ export interface RoomCalendarEventOperationOptions {
   readonly maxResponseBytes?: number;
   readonly radicaleBaseUrl?: string;
   readonly roomCalendarBindings?: readonly RoomCalendarBinding[];
-  readonly servicePrincipalUserId?: string;
+  readonly principalIdentityProvider?: RoomCalendarPrincipalIdentityProvider;
 }
 
 /** Safe local error; it never includes collection, event, or credential data. */
@@ -111,7 +116,7 @@ export class RoomCalendarEventOperationError extends Error {
 
 /**
  * Provides event operations for callers that completed Matrix actor
- * authorization and received an appservice principal. The access and write
+ * authorization and received the selected principal. The access and write
  * gates are checked separately at their respective boundaries.
  */
 @Injectable()
@@ -125,12 +130,7 @@ export class RoomCalendarEventOperations {
     access: AuthorizedRoomCalendarEventAccess,
     eventId: string,
   ): Promise<RoomCalendarEventResult> {
-    const scope = validateAccess(
-      access,
-      this.options.roomCalendarBindings,
-      this.options.radicaleBaseUrl,
-      this.options.servicePrincipalUserId,
-    );
+    const scope = await this.validateAccess(access);
     const eventUrl = collectionChildUrl(scope.collectionUrl, eventId);
     const resource = await this.client(scope.servicePrincipal).getEvent(
       eventUrl,
@@ -142,12 +142,7 @@ export class RoomCalendarEventOperations {
     access: AuthorizedRoomCalendarEventAccess,
     eventId: string,
   ): Promise<RoomCalendarEventResourceResult> {
-    const scope = validateAccess(
-      access,
-      this.options.roomCalendarBindings,
-      this.options.radicaleBaseUrl,
-      this.options.servicePrincipalUserId,
-    );
+    const scope = await this.validateAccess(access);
     const eventUrl = collectionChildUrl(scope.collectionUrl, eventId, true);
     const resource = await this.client(scope.servicePrincipal).getEvent(
       eventUrl,
@@ -162,12 +157,7 @@ export class RoomCalendarEventOperations {
     access: AuthorizedRoomCalendarEventAccess,
     range: CalendarTimeRange,
   ): Promise<RoomCalendarEventResult[]> {
-    const scope = validateAccess(
-      access,
-      this.options.roomCalendarBindings,
-      this.options.radicaleBaseUrl,
-      this.options.servicePrincipalUserId,
-    );
+    const scope = await this.validateAccess(access);
     const resources = await this.client(scope.servicePrincipal).listEvents(
       scope.collectionUrl,
       range,
@@ -183,12 +173,7 @@ export class RoomCalendarEventOperations {
     input: CalendarEventInput,
   ): Promise<RoomCalendarEventResult> {
     this.assertWritesEnabled();
-    const scope = validateAccess(
-      access,
-      this.options.roomCalendarBindings,
-      this.options.radicaleBaseUrl,
-      this.options.servicePrincipalUserId,
-    );
+    const scope = await this.validateAccess(access);
     try {
       validateCalendarEventInputConference(input);
       validateCalendarEventInputAttachment(input);
@@ -236,12 +221,7 @@ export class RoomCalendarEventOperations {
     patch: CalendarEventPatch,
   ): Promise<RoomCalendarEventResult> {
     this.assertWritesEnabled();
-    const scope = validateAccess(
-      access,
-      this.options.roomCalendarBindings,
-      this.options.radicaleBaseUrl,
-      this.options.servicePrincipalUserId,
-    );
+    const scope = await this.validateAccess(access);
     try {
       validateCalendarEventPatchConference(patch);
       validateCalendarEventPatchAttachment(patch);
@@ -314,12 +294,7 @@ export class RoomCalendarEventOperations {
     expectedEtag: string,
   ): Promise<void> {
     this.assertWritesEnabled();
-    const scope = validateAccess(
-      access,
-      this.options.roomCalendarBindings,
-      this.options.radicaleBaseUrl,
-      this.options.servicePrincipalUserId,
-    );
+    const scope = await this.validateAccess(access);
     const eventUrl = collectionChildUrl(scope.collectionUrl, eventId);
     const etag = requireExpectedEtag(expectedEtag);
     const client = this.client(scope.servicePrincipal);
@@ -337,6 +312,34 @@ export class RoomCalendarEventOperations {
     }
   }
 
+  private async validateAccess(
+    access: AuthorizedRoomCalendarEventAccess,
+  ): Promise<ValidatedRoomCalendarEventAccess> {
+    const scope = validateAccessShape(
+      access,
+      this.options.roomCalendarBindings,
+      this.options.radicaleBaseUrl,
+    );
+    const identityProvider = this.options.principalIdentityProvider;
+    if (!identityProvider) {
+      throw new RoomCalendarEventOperationError('invalid-room-access');
+    }
+
+    let identity: RoomCalendarPrincipalIdentity;
+    try {
+      identity = await identityProvider.resolve();
+    } catch {
+      throw new RoomCalendarEventOperationError('invalid-room-access');
+    }
+    if (
+      scope.servicePrincipal.identity !== identity ||
+      scope.servicePrincipal.userId !== identity.userId
+    ) {
+      throw new RoomCalendarEventOperationError('invalid-room-access');
+    }
+    return scope;
+  }
+
   private client(
     principal: RoomCalendarEventServicePrincipal,
   ): CalDavEventClient {
@@ -352,16 +355,17 @@ export class RoomCalendarEventOperations {
   }
 }
 
-function validateAccess(
-  access: AuthorizedRoomCalendarEventAccess,
-  roomCalendarBindings: readonly RoomCalendarBinding[] | undefined,
-  radicaleBaseUrl: string | undefined,
-  expectedServicePrincipalUserId: string | undefined,
-): {
+interface ValidatedRoomCalendarEventAccess {
   calendarId: string;
   collectionUrl: string;
   servicePrincipal: RoomCalendarEventServicePrincipal;
-} {
+}
+
+function validateAccessShape(
+  access: AuthorizedRoomCalendarEventAccess,
+  roomCalendarBindings: readonly RoomCalendarBinding[] | undefined,
+  radicaleBaseUrl: string | undefined,
+): ValidatedRoomCalendarEventAccess {
   const { target, servicePrincipal } = access ?? {};
   if (
     !target ||
@@ -392,7 +396,9 @@ function validateAccess(
     const delimiter = servicePrincipal.userId.indexOf(':');
     if (
       !servicePrincipal.userId.startsWith('@') ||
-      servicePrincipal.userId !== expectedServicePrincipalUserId ||
+      !servicePrincipal.identity ||
+      !['appservice', 'bot-account'].includes(servicePrincipal.identity.mode) ||
+      servicePrincipal.identity.userId !== servicePrincipal.userId ||
       delimiter <= 1 ||
       delimiter === servicePrincipal.userId.length - 1 ||
       !localpart ||

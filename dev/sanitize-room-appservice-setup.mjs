@@ -17,6 +17,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { safeContractCaseStatusLines } from './caldav-contract-status.mjs';
 import {
   formatPersonalOpenIdSetupFailure,
   formatPersonalOpenIdSetupHttpStatus,
@@ -28,7 +29,10 @@ import {
   formatRoomReminderSetupHttpStatus,
   formatRoomReminderSetupMatrixErrorCode,
   formatRoomReminderSetupStage,
+  getRoomAppServiceCaseFailureStage,
   getRoomAppServiceSetupStage,
+  getRoomAppServiceTeardownFailure,
+  getRoomAppServiceTeardownStage,
 } from './sanitize-caldav-contract-stage.mjs';
 
 const ROOM_SUITE_PATH = fileURLToPath(
@@ -64,6 +68,15 @@ const ROOM_CASES = new Set([
   'bot-command-write',
   'bot-command-denial',
 ]);
+const ROOM_FAILURE_CASES = new Map([
+  ['room-appservice-exact-binding', 'exact-binding'],
+  ['room-appservice-subject-binding', 'subject-binding'],
+  ['room-appservice-cross-room-denial', 'cross-room-denial'],
+  ['room-appservice-event-write', 'event-write'],
+  ['room-appservice-unauthorized-write', 'unauthorized-write'],
+  ['room-appservice-bot-command-write', 'bot-command-write'],
+  ['room-appservice-bot-command-denial', 'bot-command-denial'],
+]);
 const ALLOWED_ERROR_NAMES = new Set([
   'AbortError',
   'AggregateError',
@@ -82,6 +95,8 @@ const ALLOWED_ERROR_NAMES = new Set([
   'SyntaxError',
   'TypeError',
 ]);
+const ROOM_SDK_WHOAMI_PROBE_PATTERN =
+  /^room-appservice-sdk-whoami account_verified=(true|false) get_user_id_available=(true|false) get_who_am_i_available=(true|false) request_seen=(true|false) request_method=(unobserved|get|other) authorization_present=(true|false|unavailable) response_status=(unavailable|[1-5]\d\d) response_shape=(unobserved|missing|object|invalid-json|other) response_user_id=(unobserved|string|missing|other) transport_error=(none|error|matrix-error|type-error|other) sdk_error=(none|error|matrix-error|type-error|other) identity_match=(unavailable|true|false) outcome=(api-unavailable|matched|mismatched|missing-user-id|rejected)$/;
 
 function readStartedCases(stageContent) {
   const started = new Set();
@@ -201,6 +216,16 @@ function caseResultCounts(suite) {
   return counts;
 }
 
+export function formatRoomAppServiceSdkWhoAmIProbe(stageContent) {
+  if (typeof stageContent !== 'string') return '';
+  const lines = stageContent.split(/\r?\n/);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index].trim();
+    if (ROOM_SDK_WHOAMI_PROBE_PATTERN.test(line)) return line;
+  }
+  return '';
+}
+
 export function formatRoomAppServiceSetupDiagnostic(testReport, stageContent) {
   const setupStarted =
     typeof stageContent === 'string' &&
@@ -234,7 +259,6 @@ export function formatRoomAppServiceSetupDiagnostic(testReport, stageContent) {
   const counts = caseResultCounts(suite);
   const error = summarizeException(reportText(suite), ROOM_SUITE_REPO_PATH);
   const failurePhase = setupStarted ? 'setup' : 'suite-load';
-  const setupStage = getRoomAppServiceSetupStage(stageContent) ?? 'unavailable';
   const httpStatus =
     formatRoomAppServiceSetupHttpStatus(stageContent).match(
       /^room-appservice-http-status (\d{3})\n$/,
@@ -243,10 +267,67 @@ export function formatRoomAppServiceSetupDiagnostic(testReport, stageContent) {
     formatRoomAppServiceSetupMatrixErrorCode(stageContent).match(
       /^room-appservice-matrix-error (M_[A-Z0-9_]+)\n$/,
     )?.[1] ?? 'unavailable';
-  return [
+  const sdkWhoAmIProbe = formatRoomAppServiceSdkWhoAmIProbe(stageContent);
+  const sdkWhoAmIOutcome = sdkWhoAmIProbe.match(
+    /\boutcome=(api-unavailable|matched|mismatched|missing-user-id|rejected)\b/,
+  )?.[1];
+  const setupStage =
+    sdkWhoAmIProbe && sdkWhoAmIOutcome !== 'matched'
+      ? 'normal-bot-sdk-whoami'
+      : (getRoomAppServiceSetupStage(stageContent) ?? 'unavailable');
+  const lines = [
     `room-appservice-${failurePhase}-test-results stage=${setupStage} http-status=${httpStatus} matrix-errcode=${matrixErrorCode} total=${counts.total} passed=${counts.passed} failed=${counts.failed} pending=${counts.pending} test-bodies-started=0/${ROOM_CASES.size}`,
     `room-appservice-${failurePhase}-exception class=${error.name} message=${JSON.stringify(error.message)} source=${error.source}`,
-  ].join('\n');
+  ];
+  if (sdkWhoAmIProbe) lines.push(sdkWhoAmIProbe);
+  return lines.join('\n');
+}
+
+export function formatRoomAppServiceFailureDiagnostic(
+  testReport,
+  stageContent,
+) {
+  const setupCompleted =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === 'room-appservice-setup-complete');
+  if (!setupCompleted) return '';
+
+  const suite = Array.isArray(testReport?.testResults)
+    ? testReport.testResults.find((result) => result?.name === ROOM_SUITE_PATH)
+    : undefined;
+  if (suite?.status !== 'failed') return '';
+
+  const failureLines = [];
+  for (const line of safeContractCaseStatusLines(testReport)) {
+    const match = /^contract-case (room-appservice-[a-z0-9-]+) failed$/.exec(
+      line,
+    );
+    if (!match) continue;
+
+    const testCase = ROOM_FAILURE_CASES.get(match[1]);
+    if (!testCase) continue;
+    const stage = getRoomAppServiceCaseFailureStage(stageContent, testCase);
+    failureLines.push(
+      `room-appservice-test-failure case=${match[1]} stage=${stage ?? 'unavailable'}`,
+    );
+  }
+
+  const teardownFailure = getRoomAppServiceTeardownFailure(stageContent);
+  if (teardownFailure) {
+    const teardownStage = getRoomAppServiceTeardownStage(stageContent);
+    failureLines.push(
+      `room-appservice-hook-failure stage=${teardownStage ?? 'unavailable'} cause=${teardownFailure}`,
+    );
+  }
+
+  if (failureLines.length === 0) {
+    failureLines.push(
+      'room-appservice-test-failure case=unmapped stage=unavailable',
+    );
+  }
+  return failureLines.join('\n');
 }
 
 export function formatPersonalOpenIdSetupDiagnostic(testReport, stageContent) {
@@ -376,6 +457,11 @@ function emitDiagnostic(reportPath, stagePath) {
     process.stdout.write(
       `${formatRoomAppServiceSetupDiagnostic(report, stageContent)}\n`,
     );
+    const roomFailure = formatRoomAppServiceFailureDiagnostic(
+      report,
+      stageContent,
+    );
+    if (roomFailure) process.stdout.write(`${roomFailure}\n`);
     process.stdout.write(
       `${formatRoomReminderSetupDiagnostic(report, stageContent)}\n`,
     );

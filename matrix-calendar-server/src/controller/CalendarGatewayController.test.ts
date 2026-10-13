@@ -64,6 +64,10 @@ describe('CalendarGatewayController', () => {
     accessToken: 'openid-token',
     matrixServerName: 'example.test',
   };
+  const applicationServiceIdentity = Object.freeze({
+    mode: 'appservice' as const,
+    userId: '@_matrix_calendar_service:example.test',
+  });
   const roomId = '!team:example.test';
   const appConfig = {
     radicale_url: 'https://radicale.example.test/',
@@ -524,6 +528,7 @@ describe('CalendarGatewayController', () => {
       createEvent: jest.fn().mockResolvedValue(result),
     } as unknown as RoomCalendarEventOperations;
     const principal: RoomCalendarCalDavPrincipal = {
+      identity: applicationServiceIdentity,
       userId: '@_matrix_calendar_service:example.test',
       calendarUrl:
         'https://radicale.example.test/_matrix_calendar_service/team-calendar/',
@@ -602,6 +607,7 @@ describe('CalendarGatewayController', () => {
       'https://radicale.example.test/_matrix_calendar_service/team-calendar/';
     const eventHref = `${collectionUrl}event.ics`;
     const principal: RoomCalendarCalDavPrincipal = {
+      identity: applicationServiceIdentity,
       userId: '@_matrix_calendar_service:example.test',
       calendarUrl: collectionUrl,
       credential: {
@@ -761,6 +767,7 @@ describe('CalendarGatewayController', () => {
       record: jest.fn().mockRejectedValue(new Error('private Matrix failure')),
     } as unknown as RoomCalendarEventAuditService;
     forAuthorizedTarget.mockResolvedValue({
+      identity: applicationServiceIdentity,
       userId: '@_matrix_calendar_service:example.test',
       calendarUrl: collectionUrl,
       credential: {
@@ -802,6 +809,7 @@ describe('CalendarGatewayController', () => {
       createEvent: jest.fn().mockRejectedValue(new Error('CalDAV failure')),
     } as unknown as RoomCalendarEventOperations;
     forAuthorizedTarget.mockResolvedValue({
+      identity: applicationServiceIdentity,
       userId: '@_matrix_calendar_service:example.test',
       calendarUrl:
         'https://radicale.example.test/_matrix_calendar_service/team-calendar/',
@@ -852,6 +860,7 @@ describe('CalendarGatewayController', () => {
     const eventUrl =
       'https://radicale.example.test/_matrix_calendar_service/team-calendar/event.ics';
     forAuthorizedTarget.mockResolvedValue({
+      identity: applicationServiceIdentity,
       userId: '@_matrix_calendar_service:example.test',
       calendarUrl:
         'https://radicale.example.test/_matrix_calendar_service/team-calendar/',
@@ -1839,6 +1848,7 @@ describe('CalendarGatewayController', () => {
       room_calendar_event_writes_enabled: true,
     } as IAppConfiguration;
     const principal: RoomCalendarCalDavPrincipal = {
+      identity: applicationServiceIdentity,
       userId: '@_matrix_calendar_service:example.test',
       calendarUrl:
         'https://radicale.example.test/_matrix_calendar_service/team-calendar/',
