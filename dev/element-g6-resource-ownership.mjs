@@ -18,7 +18,9 @@
 const STRONG_ETAG = /^"[\x21\x23-\x7e]{1,200}"$/u;
 const G6_EXTERNAL_RADICALE_ORIGIN = 'http://127.0.0.1:5233';
 const G6_GATEWAY_RADICALE_ORIGIN = 'http://restore-radicale:5232';
-const G6_COLLECTION_PATH = '/_matrix_calendar_service/element-acceptance/';
+const G6_COLLECTION_NAME = 'element-acceptance';
+const G6_SERVICE_LOCALPART = '_matrix_calendar_service';
+const G6_BOT_LOCALPART = /^[a-z0-9][a-z0-9-]{0,254}$/u;
 const G6_RESOURCE_NAME = /^g6-[0-9a-f-]{36}\.ics$/u;
 const G6_MAX_RESOURCE_BYTES = 16_384;
 
@@ -62,8 +64,24 @@ export function g6EventSummaryMatches(bytes, expectedTitle) {
   return summary === escapedExpected;
 }
 
-function parseOwnedG6ResourceHref(href, expectedOrigin) {
-  if (typeof href !== 'string') return undefined;
+function isSupportedG6PrincipalLocalpart(localpart) {
+  return (
+    localpart === G6_SERVICE_LOCALPART ||
+    (typeof localpart === 'string' && G6_BOT_LOCALPART.test(localpart))
+  );
+}
+
+function parseOwnedG6ResourceHref(
+  href,
+  expectedOrigin,
+  expectedPrincipalLocalpart,
+) {
+  if (
+    typeof href !== 'string' ||
+    !isSupportedG6PrincipalLocalpart(expectedPrincipalLocalpart)
+  ) {
+    return undefined;
+  }
   let url;
   try {
     url = new URL(href);
@@ -77,15 +95,16 @@ function parseOwnedG6ResourceHref(href, expectedOrigin) {
     url.password !== '' ||
     url.search !== '' ||
     url.hash !== '' ||
-    url.href !== href ||
-    !url.pathname.startsWith(G6_COLLECTION_PATH)
+    url.href !== href
   ) {
     return undefined;
   }
-  const resourceName = url.pathname.slice(G6_COLLECTION_PATH.length);
+  const collectionPath = `/${expectedPrincipalLocalpart}/${G6_COLLECTION_NAME}/`;
+  if (!url.pathname.startsWith(collectionPath)) return undefined;
+  const resourceName = url.pathname.slice(collectionPath.length);
   if (
     !G6_RESOURCE_NAME.test(resourceName) ||
-    url.pathname !== `${G6_COLLECTION_PATH}${resourceName}`
+    url.pathname !== `${collectionPath}${resourceName}`
   ) {
     return undefined;
   }
@@ -97,14 +116,17 @@ function parseOwnedG6ResourceHref(href, expectedOrigin) {
 export function g6GatewayResourceIdentityMatches(
   gatewayEventHref,
   externallyOwnedResourceHref,
+  expectedPrincipalLocalpart,
 ) {
   const external = parseOwnedG6ResourceHref(
     externallyOwnedResourceHref,
     G6_EXTERNAL_RADICALE_ORIGIN,
+    expectedPrincipalLocalpart,
   );
   const gateway = parseOwnedG6ResourceHref(
     gatewayEventHref,
     G6_GATEWAY_RADICALE_ORIGIN,
+    expectedPrincipalLocalpart,
   );
   return external !== undefined && gateway?.pathname === external.pathname;
 }

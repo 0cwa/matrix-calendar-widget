@@ -3716,6 +3716,7 @@ test('Element Web preserves unsupported events and supports client interactions'
       neighborPatch,
       neighborResourceHref,
       names.neighborEdited,
+      calDavClient!.localpart,
     );
     const neighborOwnership = resourceOwnershipByName.get(resources.neighbor);
     const neighborOwnershipUpdated =
@@ -6513,6 +6514,7 @@ async function readGatewayEventUpdate(
   response: Response | undefined,
   expectedEventHref: string,
   expectedTitle: string,
+  expectedPrincipalLocalpart: string,
 ): Promise<{
   etag?: string;
   identityMatches: boolean;
@@ -6532,7 +6534,11 @@ async function readGatewayEventUpdate(
       event !== null &&
       'id' in event &&
       typeof event.id === 'string' &&
-      g6GatewayResourceIdentityMatches(event.id, expectedEventHref);
+      g6GatewayResourceIdentityMatches(
+        event.id,
+        expectedEventHref,
+        expectedPrincipalLocalpart,
+      );
     const titleMatches =
       typeof event === 'object' &&
       event !== null &&
