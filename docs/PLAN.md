@@ -421,9 +421,8 @@ DST regression or recurrence-editing criteria above.
       diagnostics, and principal-mode forwarding to the 25-event seed child.
       Focused offline tests cover these changes. Hosted results for the
       published candidate below show only partial normal-bot path evidence.
-      The signed Desktop index offers 1.12.31 and omits pinned 1.12.30, so the
-      fixture uses its
-      digest-checked pinned archive fallback.
+      The signed Desktop index offers 1.12.31 and omits pinned 1.12.30; the
+      fixture uses the digest-checked pinned archive fallback.
 - [ ] Run the integrated AS-free normal-bot Synapse/Radicale room contract and
       complete normal-bot reminder, PostgreSQL restart, and paired restore
       acceptance. Offline tests do not establish these integrated paths. The
@@ -433,15 +432,17 @@ DST regression or recurrence-editing criteria above.
       [run 38433265899](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433265899)
       passed the legacy appservice phase (7/7 bodies); synthetic normal-bot
       registration and login then succeeded, but the installed SDK's
-      `getUserId()` whoami check raised an unclassified `TypeError` before any
-      bot protocol body ran (0/7). The cause is unknown. Element Web and
+      `getUserId()` identity lookup raised an unclassified `TypeError` before
+      any bot protocol body ran (0/7). The cause is unknown. Element Web and
       normal-bot acceptance in
       [run 38433266141](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433266141)
-      passed the ordinary zero-event profile and opening diagnostic, but the
-      25-event seed failed environment validation before fetching or creating
-      events because its child lacked `ROOM_CALENDAR_PRINCIPAL_MODE`; bot mode
-      defaulted to appservice, and the appservice profile's token was not
-      forwarded. Desktop startup passed in
+      recorded zero-event timing measurements within limits and one
+      Element-origin opening error. Final diagnostic eligibility remains
+      unresolved: the performance run failed at seed setup with
+      `ordinary_gate_eligible=false`. Its 25-event seed failed environment
+      validation before fetching or creating events because its child lacked
+      `ROOM_CALENDAR_PRINCIPAL_MODE`; bot mode defaulted to appservice, and the
+      appservice profile's token was not forwarded. Desktop startup passed in
       [run 38433266073](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433266073);
       its separate 12-case journey was not run. Current source adds bounded
       SDK diagnostics and forwards the principal-mode-specific seed settings;

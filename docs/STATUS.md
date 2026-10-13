@@ -167,10 +167,12 @@ Its Real Radicale contract in [run
 38433265899](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433265899)
 passed the legacy appservice phase (7/7 bodies). Synthetic normal-bot account
 registration and login succeeded; then the installed SDK's `getUserId()`
-whoami check raised an unclassified `TypeError` before any bot protocol body
-ran (0/7). The cause is unknown. Element Web and normal-bot acceptance in
+identity lookup raised an unclassified `TypeError` before any bot protocol
+body ran (0/7). The cause is unknown. Element Web and normal-bot acceptance in
 [run 38433266141](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433266141)
-passed the ordinary zero-event profile and opening diagnostic, but the
+recorded zero-event timing measurements within limits and one Element-origin
+opening error. Final diagnostic eligibility remains unresolved: the
+performance run failed at seed setup with `ordinary_gate_eligible=false`. Its
 25-event seed failed environment validation before fetching or creating events
 because its child lacked `ROOM_CALENDAR_PRINCIPAL_MODE`; bot mode defaulted to
 appservice, and the appservice profile's token was not forwarded. Desktop
@@ -254,14 +256,16 @@ loading, memory, and actual clients remain unmeasured.
   `fd691882a4fbbfc18539a94608f93c85b8fc3677`, the Real Radicale contract
   [run 38433265899](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433265899)
   passed legacy appservice behavior, then stopped after successful bot account
-  registration/login when the installed SDK whoami call raised an
-  unclassified `TypeError`; no normal-bot contract bodies ran. The cause is
-  unknown. Element Web and bot acceptance
+  registration/login when the installed SDK `getUserId()` identity lookup
+  raised an unclassified `TypeError`; no normal-bot contract bodies ran. The
+  cause is unknown. Element Web and bot acceptance
   [run 38433266141](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433266141)
-  passed the ordinary zero-event profile and opening diagnostic, but their
-  25-event seed stopped at environment validation before any fetch because the
-  child lacked `ROOM_CALENDAR_PRINCIPAL_MODE`; bot mode defaulted to appservice,
-  and the appservice profile's token was not forwarded.
+  recorded zero-event timing measurements within limits and one Element-origin
+  opening error. Final diagnostic eligibility remains unresolved: the
+  performance run failed at seed setup with `ordinary_gate_eligible=false`.
+  Its 25-event seed stopped at environment validation before any fetch because
+  the child lacked `ROOM_CALENDAR_PRINCIPAL_MODE`; bot mode defaulted to
+  appservice, and the appservice profile's token was not forwarded.
   Desktop startup passed in
   [run 38433266073](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433266073),
   while its separate 12-case journey remained not run. The current source adds
