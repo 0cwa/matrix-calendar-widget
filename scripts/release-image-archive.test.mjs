@@ -22,6 +22,7 @@ import {
   MAX_NOTICE_FILE_BYTES,
   MAX_TOTAL_ARCHIVE_BYTES,
   prepareBuild,
+  validateImageSet,
   validatePlatform,
   verifyArchive,
   verifyGitSource,
@@ -103,6 +104,13 @@ test('only the declared generic platform is accepted', () => {
     () => validatePlatform('actual-host-platform'),
     /Only linux\/amd64/,
   );
+});
+
+test('image-set selection defaults to all and rejects undeclared values', () => {
+  assert.equal(validateImageSet(), 'all');
+  assert.equal(validateImageSet('all'), 'all');
+  assert.equal(validateImageSet('server-only'), 'server-only');
+  assert.throws(() => validateImageSet('widget-only'), /Image set must be/);
 });
 
 test('server recipe changes only its two mutable Node base lines', () => {
@@ -256,6 +264,7 @@ async function makeValidArtifact(root) {
     },
     builder: { helper_sha256: 'c'.repeat(64), workflow_sha256: 'd'.repeat(64) },
     platform: 'linux/amd64',
+    image_set: 'all',
     images: manifestImages,
     notices: manifestNotices,
   };
@@ -407,6 +416,11 @@ test('release preparation packages notices and reports closed Buildx diagnostics
       context,
     });
     assert.equal(manifest.schema_version, 2);
+    assert.equal(manifest.image_set, 'all');
+    assert.deepEqual(
+      manifest.images.map((image) => image.name),
+      ['server', 'widget', 'radicale'],
+    );
     assert.equal(manifest.notices.length, testNotices.length);
     assert.equal(
       manifest.notices[0].sha256,
@@ -417,6 +431,94 @@ test('release preparation packages notices and reports closed Buildx diagnostics
         .notices.length,
       testNotices.length,
     );
+
+    await rm(path.join(archiveRoot, 'images/widget-linux-amd64.tar'));
+    await rm(path.join(archiveRoot, 'images/radicale-linux-amd64.tar'));
+    await rm(path.join(archiveRoot, 'manifest.json'));
+    const serverOnlyManifest = await createManifest({
+      sourceRoot,
+      toolingRoot,
+      buildRoot,
+      archiveRoot,
+      context: { ...context, imageSet: 'server-only' },
+    });
+    assert.equal(serverOnlyManifest.schema_version, 2);
+    assert.equal(serverOnlyManifest.image_set, 'server-only');
+    assert.deepEqual(
+      serverOnlyManifest.images.map((image) => image.name),
+      ['server'],
+    );
+    assert.equal(
+      (
+        await verifyArchive(archiveRoot, {
+          expectedSourceSha: sourceSha,
+          expectedImageSet: 'server-only',
+        })
+      ).images.length,
+      1,
+    );
+    await assert.rejects(
+      verifyArchive(archiveRoot, { expectedSourceSha: sourceSha }),
+      /image set does not match the expected image set/,
+    );
+    await assert.rejects(
+      verifyArchive(archiveRoot, { expectedImageSet: 'widget-only' }),
+      /Image set must be/,
+    );
+    const archiveHelperPath = path.join(
+      toolingRoot,
+      'scripts/release-image-archive.mjs',
+    );
+    const verifyArguments = [
+      archiveHelperPath,
+      'verify',
+      '--archive-root',
+      archiveRoot,
+      '--expected-source-sha',
+      sourceSha,
+    ];
+    const serverOnlyCliEnvironment = {
+      ...process.env,
+      RELEASE_IMAGE_SET: 'server-only',
+    };
+    assert.match(
+      execFileSync(process.execPath, verifyArguments, {
+        encoding: 'utf8',
+        env: serverOnlyCliEnvironment,
+      }),
+      /Verified 1 server-only archives/,
+    );
+    const defaultCliEnvironment = { ...process.env };
+    delete defaultCliEnvironment.RELEASE_IMAGE_SET;
+    assert.throws(
+      () =>
+        execFileSync(process.execPath, verifyArguments, {
+          encoding: 'utf8',
+          env: defaultCliEnvironment,
+        }),
+      (error) =>
+        error.status === 1 &&
+        error.stderr.includes('Artifact image set does not match'),
+    );
+
+    await rm(path.join(archiveRoot, 'manifest.json'));
+    await writeFile(
+      path.join(archiveRoot, 'images/widget-linux-amd64.tar'),
+      'synthetic widget image\n',
+    );
+    await writeFile(
+      path.join(archiveRoot, 'images/radicale-linux-amd64.tar'),
+      'synthetic radicale image\n',
+    );
+    const defaultManifest = await createManifest({
+      sourceRoot,
+      toolingRoot,
+      buildRoot,
+      archiveRoot,
+      context,
+    });
+    assert.equal(defaultManifest.image_set, 'all');
+    assert.equal(defaultManifest.images.length, 3);
 
     const serverMetadataPath = path.join(buildRoot, 'server.json');
     const serverImageIdPath = path.join(buildRoot, 'server.image-id');
@@ -645,6 +747,15 @@ test('archive verification binds source/platform and checks every archive hash',
       (await verifyArchive(root, { expectedSourceSha: sourceSha })).source.sha,
       sourceSha,
     );
+    const legacyManifest = JSON.parse(originalManifest);
+    delete legacyManifest.image_set;
+    await writeFile(manifestPath, JSON.stringify(legacyManifest));
+    assert.equal(
+      (await verifyArchive(root, { expectedSourceSha: sourceSha })).images
+        .length,
+      3,
+    );
+    await writeFile(manifestPath, originalManifest);
     await assert.rejects(
       verifyArchive(root, { expectedSourceSha: 'f'.repeat(40) }),
       /source SHA/,
