@@ -118,6 +118,11 @@ Radicale `owner_only` rights are scoped to one room.
   application-service registration for those operations. Failure to prove
   that account's identity disables the operation; it never triggers a
   principal fallback.
+- Changing the selected mode changes the Radicale home used for room
+  calendars. The application does not copy or rewrite existing calendars when
+  the mode changes; operators must bind each room to data owned by the selected
+  principal. A binding that cannot be resolved under that principal fails
+  closed.
 - The bot account has whole-home Radicale access under `owner_only`, just as
   the existing service principal does. The trust-domain constraint remains
   necessary.

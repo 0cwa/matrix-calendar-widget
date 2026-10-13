@@ -22,6 +22,7 @@ import {
   MAX_CALDAV_EVENT_RESPONSE_MAX_BYTES,
 } from './caldav/CalDavTransportLimits';
 import { parseRoomCalendarBindings } from './service/RoomCalendarBindingResolver';
+import type { RoomCalendarPrincipalMode } from './service/RoomCalendarPrincipalIdentity';
 
 const toBoolean = (
   value: string | undefined,
@@ -61,6 +62,8 @@ function createConfiguration() {
     room_calendar_bindings: parseRoomCalendarBindings(
       process.env.ROOM_CALENDAR_BINDINGS,
     ),
+    room_calendar_principal_mode: (process.env.ROOM_CALENDAR_PRINCIPAL_MODE ??
+      'appservice') as RoomCalendarPrincipalMode,
     room_calendar_access_enabled: toBoolean(
       process.env.ROOM_CALENDAR_ACCESS_ENABLED,
       false,
@@ -191,6 +194,7 @@ export const ValidationSchema = Joi.object({
     .min(1)
     .max(MAX_CALDAV_EVENT_RESPONSE_MAX_BYTES),
   ROOM_CALENDAR_BINDINGS: Joi.string(),
+  ROOM_CALENDAR_PRINCIPAL_MODE: Joi.string().valid('appservice', 'bot-account'),
   ROOM_CALENDAR_ACCESS_ENABLED: Joi.boolean(),
   ROOM_CALENDAR_EVENT_WRITES_ENABLED: Joi.boolean(),
   ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED: Joi.boolean(),

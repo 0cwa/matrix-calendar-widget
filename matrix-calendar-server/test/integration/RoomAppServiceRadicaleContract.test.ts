@@ -64,12 +64,20 @@ const matrixServerName =
 const testConfiguration = {
   homeserver_url: homeserverUrl,
   radicale_url: radicaleBaseUrl,
+  room_calendar_principal_mode: 'appservice',
   room_calendar_access_enabled: true,
   room_calendar_event_writes_enabled: true,
   application_service_token: serviceToken,
   application_service_user_id: serviceUserId,
   room_calendar_bindings: [],
 } as unknown as IAppConfiguration;
+const roomPrincipalIdentity = Object.freeze({
+  mode: 'appservice' as const,
+  userId: serviceUserId,
+});
+const roomPrincipalIdentityProvider = {
+  resolve: async () => roomPrincipalIdentity,
+};
 
 let app: INestApplication;
 let actorAccessToken: string;
@@ -196,6 +204,10 @@ const matrixClient = {
       provide: ModuleProviderToken.APP_CONFIGURATION,
       useValue: testConfiguration,
     },
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
+      useValue: roomPrincipalIdentityProvider,
+    },
     { provide: MatrixClient, useValue: matrixClient },
     MatrixCalendarAuthorizationFactory,
     MatrixOpenIdCalDavCredentialProviderFactory,
@@ -211,7 +223,7 @@ const matrixClient = {
           maxResponseBytes: testConfiguration.caldav_max_event_response_bytes,
           radicaleBaseUrl,
           roomCalendarBindings: testConfiguration.room_calendar_bindings,
-          servicePrincipalUserId: serviceUserId,
+          principalIdentityProvider: roomPrincipalIdentityProvider,
         }),
     },
     {
@@ -295,7 +307,11 @@ describeContract('room appservice proof against real Radicale', () => {
       { roomId: nonmemberRoomId, calendarId: nonmemberCalendarId },
     ];
 
-    const access = new RoomCalendarCalDavAccess(testConfiguration);
+    const access = new RoomCalendarCalDavAccess(
+      testConfiguration,
+      undefined,
+      roomPrincipalIdentityProvider,
+    );
     for (let index = 0; index < roomIds.length; index += 1) {
       markRoomAppServiceSetupStage(
         index === 0

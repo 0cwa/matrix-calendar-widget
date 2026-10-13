@@ -35,6 +35,13 @@ const roomCalendarBindings = [{ roomId, calendarId }];
 const collectionUrl =
   'https://radicale.example.test/caldav/_matrix_calendar_service/room-calendar/';
 const serviceUserId = '@_matrix_calendar_service:example.test';
+const serviceIdentity = Object.freeze({
+  mode: 'appservice' as const,
+  userId: serviceUserId,
+});
+const principalIdentityProvider = {
+  resolve: async () => serviceIdentity,
+};
 const serviceProof = 'appservice-openid-proof';
 const mixedCalendar = fs.readFileSync(
   path.resolve(__dirname, '../../../fixtures/ical/mixed-components.ics'),
@@ -85,7 +92,7 @@ describe('RoomCalendarEventOperations', () => {
       eventWritesEnabled: true,
       radicaleBaseUrl: 'https://radicale.example.test/caldav/',
       roomCalendarBindings,
-      servicePrincipalUserId: serviceUserId,
+      principalIdentityProvider,
     });
   });
 
@@ -121,6 +128,43 @@ describe('RoomCalendarEventOperations', () => {
     });
   });
 
+  it('uses the shared bot identity and its selected Radicale home', async () => {
+    const botIdentity = Object.freeze({
+      mode: 'bot-account' as const,
+      userId: '@calendar_bot:example.test',
+    });
+    const botCollectionUrl =
+      'https://radicale.example.test/caldav/calendar_bot/room-calendar/';
+    const botOperations = new RoomCalendarEventOperations(fetchMock, {
+      radicaleBaseUrl: 'https://radicale.example.test/caldav/',
+      roomCalendarBindings,
+      principalIdentityProvider: { resolve: async () => botIdentity },
+    });
+    fetchMock.mockResolvedValueOnce(
+      new Response(simpleCalendar, {
+        status: 200,
+        headers: { ETag: '"event-v1"' },
+      }),
+    );
+
+    await expect(
+      botOperations.getEvent(
+        access({
+          identity: botIdentity,
+          userId: botIdentity.userId,
+          calendarUrl: botCollectionUrl,
+          credential: {
+            accessToken: 'bot-openid-proof',
+            matrixServerName: 'example.test',
+          },
+        }),
+        `${botCollectionUrl}event.ics`,
+      ),
+    ).resolves.toMatchObject({ etag: '"event-v1"' });
+    expect(fetchMock.mock.calls[0][0]).toBe(`${botCollectionUrl}event.ics`);
+    expect(basicUsername(fetchMock.mock.calls[0][1])).toBe('calendar_bot');
+  });
+
   it('offers canonical ICS only through the internal resource method', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(simpleCalendar, {
@@ -150,7 +194,7 @@ describe('RoomCalendarEventOperations', () => {
       maxResponseBytes: 32,
       radicaleBaseUrl: 'https://radicale.example.test/caldav/',
       roomCalendarBindings,
-      servicePrincipalUserId: serviceUserId,
+      principalIdentityProvider,
     });
     fetchMock.mockResolvedValueOnce(
       new Response(simpleCalendar, {
@@ -238,6 +282,25 @@ describe('RoomCalendarEventOperations', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('fails closed when the selected principal changes and the old home is still bound', async () => {
+    const botIdentity = Object.freeze({
+      mode: 'bot-account' as const,
+      userId: '@calendar_bot:example.test',
+    });
+    const botOperations = new RoomCalendarEventOperations(fetchMock, {
+      radicaleBaseUrl: 'https://radicale.example.test/caldav/',
+      roomCalendarBindings,
+      principalIdentityProvider: {
+        resolve: async () => botIdentity,
+      },
+    });
+
+    await expect(
+      botOperations.getEvent(access(), `${collectionUrl}event.ics`),
+    ).rejects.toMatchObject({ code: 'invalid-room-access' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('re-resolves the exact configured room binding before DAV I/O', async () => {
     const unconfiguredAccess = {
       ...access(),
@@ -293,7 +356,7 @@ describe('RoomCalendarEventOperations', () => {
       const constrainedOperations = new RoomCalendarEventOperations(fetchMock, {
         radicaleBaseUrl,
         roomCalendarBindings,
-        servicePrincipalUserId: userId,
+        principalIdentityProvider,
       });
 
       await expect(
@@ -413,7 +476,7 @@ describe('RoomCalendarEventOperations', () => {
       eventWritesEnabled: false,
       radicaleBaseUrl: 'https://radicale.example.test/caldav/',
       roomCalendarBindings,
-      servicePrincipalUserId: serviceUserId,
+      principalIdentityProvider,
     });
 
     await expect(
@@ -768,7 +831,7 @@ describe('RoomCalendarEventOperations', () => {
       maxResponseBytes: byteLength + 64,
       radicaleBaseUrl: 'https://radicale.example.test/caldav/',
       roomCalendarBindings,
-      servicePrincipalUserId: serviceUserId,
+      principalIdentityProvider,
     });
     fetchMock.mockResolvedValueOnce(
       new Response(sourceCalendar, {
@@ -1119,6 +1182,7 @@ function access(
 
 function principal(): RoomCalendarEventServicePrincipal {
   return {
+    identity: serviceIdentity,
     userId: serviceUserId,
     calendarUrl: collectionUrl,
     credential: {

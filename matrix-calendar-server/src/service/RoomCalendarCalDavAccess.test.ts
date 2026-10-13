@@ -15,8 +15,11 @@
  */
 
 import { ServiceUnavailableException } from '@nestjs/common';
+import { AppRuntimeContext } from '../AppRuntimeContext';
+import { MatrixClient } from 'matrix-bot-sdk';
 import fetch from 'jest-fetch-mock';
 import { IAppConfiguration } from '../IAppConfiguration';
+import { ConfiguredRoomCalendarPrincipalIdentityProvider } from './ConfiguredRoomCalendarPrincipalIdentityProvider';
 import {
   RoomCalendarCalDavAccess,
   RoomCalendarTarget,
@@ -26,6 +29,7 @@ import {
 const roomId = '!team:example.test';
 const calendarId = 'team-calendar';
 const applicationServiceUserId = '@matrix_calendar_service:example.test';
+const botUserId = '@calendar_bot:example.test';
 const target: RoomCalendarTarget = {
   roomId,
   calendarId,
@@ -36,15 +40,45 @@ function configuration(
   overrides: Partial<IAppConfiguration> = {},
 ): IAppConfiguration {
   return {
+    access_token: 'synthetic-test-bot-token',
     homeserver_url: 'https://matrix.example.test/',
     radicale_url: 'https://radicale.example.test/caldav/',
     room_calendar_bindings: [{ roomId, calendarId }],
+    room_calendar_principal_mode: 'appservice',
     room_calendar_access_enabled: true,
     room_calendar_event_writes_enabled: false,
     application_service_token: 'synthetic-test-as-token',
     application_service_user_id: applicationServiceUserId,
     ...overrides,
   } as IAppConfiguration;
+}
+
+function createAccess(
+  config: IAppConfiguration = configuration(),
+  options: {
+    sdkUserId?: string;
+    runtimeUserId?: string;
+    getUserId?: jest.Mock<Promise<string>, []>;
+  } = {},
+): RoomCalendarCalDavAccess {
+  const identityProvider = new ConfiguredRoomCalendarPrincipalIdentityProvider(
+    config,
+    {
+      getUserId:
+        options.getUserId ??
+        jest
+          .fn<Promise<string>, []>()
+          .mockResolvedValue(options.sdkUserId ?? botUserId),
+    } as unknown as Pick<MatrixClient, 'getUserId'>,
+    {
+      botUserId: options.runtimeUserId ?? options.sdkUserId ?? botUserId,
+    } as Pick<AppRuntimeContext, 'botUserId'>,
+  );
+  return new RoomCalendarCalDavAccess(
+    config,
+    fetch as unknown as typeof globalThis.fetch,
+    identityProvider,
+  );
 }
 
 describe('RoomCalendarCalDavAccess', () => {
@@ -62,9 +96,10 @@ describe('RoomCalendarCalDavAccess', () => {
       }),
       { status: 200 },
     );
-    const access = new RoomCalendarCalDavAccess(configuration());
+    const access = createAccess(configuration());
 
     await expect(access.forAuthorizedTarget(target, 'read')).resolves.toEqual({
+      identity: { mode: 'appservice', userId: applicationServiceUserId },
       userId: applicationServiceUserId,
       calendarUrl:
         'https://radicale.example.test/caldav/matrix_calendar_service/team-calendar/',
@@ -90,7 +125,7 @@ describe('RoomCalendarCalDavAccess', () => {
   });
 
   it('never mints a proof when the access feature is disabled', async () => {
-    const access = new RoomCalendarCalDavAccess(
+    const access = createAccess(
       configuration({ room_calendar_access_enabled: false }),
     );
 
@@ -102,8 +137,29 @@ describe('RoomCalendarCalDavAccess', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('does not resolve an appservice principal when gates are off and AS config is absent', async () => {
+    const resolve = jest.fn();
+    const access = new RoomCalendarCalDavAccess(
+      configuration({
+        room_calendar_access_enabled: false,
+        application_service_token: undefined,
+        application_service_user_id: undefined,
+      }),
+      undefined,
+      { resolve },
+    );
+
+    await expect(
+      access.forAuthorizedTarget(target, 'read'),
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-caldav-disabled' },
+    });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('propagates an already-aborted caller signal without proof I/O', async () => {
-    const access = new RoomCalendarCalDavAccess(configuration());
+    const access = createAccess(configuration());
     const controller = new AbortController();
     controller.abort();
 
@@ -121,7 +177,7 @@ describe('RoomCalendarCalDavAccess', () => {
       }),
       { status: 200 },
     );
-    const access = new RoomCalendarCalDavAccess(configuration());
+    const access = createAccess(configuration());
     const controller = new AbortController();
 
     await access.forAuthorizedTarget(target, 'read', controller.signal);
@@ -130,8 +186,57 @@ describe('RoomCalendarCalDavAccess', () => {
     expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(false);
   });
 
+  it('uses the normal bot token and SDK identity for its OpenID proof', async () => {
+    fetch.mockResponseOnce(
+      JSON.stringify({
+        access_token: 'synthetic-test-openid-proof',
+        matrix_server_name: 'example.test',
+      }),
+      { status: 200 },
+    );
+    const access = createAccess(
+      configuration({
+        room_calendar_principal_mode: 'bot-account',
+        application_service_token: undefined,
+        application_service_user_id: undefined,
+      }),
+    );
+
+    await expect(
+      access.forAuthorizedTarget(target, 'read'),
+    ).resolves.toMatchObject({
+      identity: { mode: 'bot-account', userId: botUserId },
+      userId: botUserId,
+      calendarUrl:
+        'https://radicale.example.test/caldav/calendar_bot/team-calendar/',
+    });
+    expect(fetch.mock.calls[0][1]).toMatchObject({
+      headers: { Authorization: 'Bearer synthetic-test-bot-token' },
+      body: JSON.stringify({ user_id: botUserId }),
+    });
+    expect(fetch.mock.calls[0][0]).toContain(encodeURIComponent(botUserId));
+  });
+
+  it('refuses an SDK and runtime identity mismatch before proof I/O', async () => {
+    const access = createAccess(
+      configuration({
+        room_calendar_principal_mode: 'bot-account',
+        application_service_token: undefined,
+        application_service_user_id: undefined,
+      }),
+      { sdkUserId: botUserId, runtimeUserId: '@other_bot:example.test' },
+    );
+
+    await expect(
+      access.forAuthorizedTarget(target, 'read'),
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-authorization-unavailable' },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('never mints a proof for writes when the separate write gate is disabled', async () => {
-    const access = new RoomCalendarCalDavAccess(
+    const access = createAccess(
       configuration({
         room_calendar_access_enabled: true,
         room_calendar_event_writes_enabled: false,
@@ -147,7 +252,7 @@ describe('RoomCalendarCalDavAccess', () => {
   });
 
   it('does not let the write gate bypass the general room-access gate', async () => {
-    const access = new RoomCalendarCalDavAccess(
+    const access = createAccess(
       configuration({
         room_calendar_access_enabled: false,
         room_calendar_event_writes_enabled: true,
@@ -165,7 +270,7 @@ describe('RoomCalendarCalDavAccess', () => {
   it.each(['.', '..', 'a/b', 'a\\b', 'a%2Fb', 'a space'])(
     'rejects unsafe configured home segment %s before proof I/O',
     async (localpart) => {
-      const access = new RoomCalendarCalDavAccess(
+      const access = createAccess(
         configuration({
           application_service_user_id: `@${localpart}:example.test`,
         }),
@@ -180,7 +285,7 @@ describe('RoomCalendarCalDavAccess', () => {
   );
 
   it('rejects a changed or unbound target before requesting a proof', async () => {
-    const access = new RoomCalendarCalDavAccess(configuration());
+    const access = createAccess(configuration());
 
     await expect(
       access.forAuthorizedTarget(
@@ -195,7 +300,7 @@ describe('RoomCalendarCalDavAccess', () => {
 
   it('fails closed when the homeserver cannot mint the configured proof', async () => {
     fetch.mockResponseOnce('unavailable', { status: 503 });
-    const access = new RoomCalendarCalDavAccess(configuration());
+    const access = createAccess(configuration());
 
     await expect(
       access.forAuthorizedTarget(target, 'read'),
@@ -213,7 +318,7 @@ describe('RoomCalendarCalDavAccess', () => {
       }),
       { status: 200 },
     );
-    const access = new RoomCalendarCalDavAccess(configuration());
+    const access = createAccess(configuration());
 
     await expect(
       access.forAuthorizedTarget(target, 'read'),
@@ -224,7 +329,7 @@ describe('RoomCalendarCalDavAccess', () => {
 
   it('does not expose the application-service token in an error', async () => {
     fetch.mockResponseOnce('unavailable', { status: 503 });
-    const access = new RoomCalendarCalDavAccess(configuration());
+    const access = createAccess(configuration());
 
     try {
       await access.forAuthorizedTarget(target, 'read');

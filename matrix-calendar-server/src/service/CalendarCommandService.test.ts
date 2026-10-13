@@ -39,6 +39,10 @@ const EVENT_HREF = `${COLLECTION_URL}event.ics`;
 const ETAG = '"revision-1"';
 
 const servicePrincipal = {
+  identity: Object.freeze({
+    mode: 'appservice' as const,
+    userId: '@calendar-bot:example.org',
+  }),
   userId: '@calendar-bot:example.org',
   calendarUrl: COLLECTION_URL,
   credential: {

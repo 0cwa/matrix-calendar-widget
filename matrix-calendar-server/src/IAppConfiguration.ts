@@ -15,6 +15,7 @@
  */
 
 import { RoomCalendarBinding } from './model/IRoomCalendarBinding';
+import type { RoomCalendarPrincipalMode } from './service/RoomCalendarPrincipalIdentity';
 
 export interface IAppConfiguration {
   port?: string | number;
@@ -24,6 +25,7 @@ export interface IAppConfiguration {
   radicale_url?: string;
   caldav_max_event_response_bytes?: number;
   room_calendar_bindings: readonly RoomCalendarBinding[];
+  room_calendar_principal_mode: RoomCalendarPrincipalMode;
   room_calendar_access_enabled: boolean;
   room_calendar_event_writes_enabled: boolean;
   room_reminder_delivery_enabled: boolean;

@@ -519,3 +519,34 @@ describe('room calendar application-service configuration', () => {
     });
   });
 });
+
+describe('room calendar principal mode configuration', () => {
+  const variable = 'ROOM_CALENDAR_PRINCIPAL_MODE';
+  const originalValue = process.env[variable];
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env[variable];
+    } else {
+      process.env[variable] = originalValue;
+    }
+  });
+
+  it('defaults to appservice and accepts only the two explicit values', () => {
+    delete process.env[variable];
+    expect(configuration().config.room_calendar_principal_mode).toBe(
+      'appservice',
+    );
+
+    const schema = ValidationSchema.extract(variable);
+    expect(schema.validate('appservice').error).toBeUndefined();
+    expect(schema.validate('bot-account').error).toBeUndefined();
+    expect(schema.validate('Bot-Account').error).toBeDefined();
+    expect(schema.validate('normal-user').error).toBeDefined();
+
+    process.env[variable] = 'bot-account';
+    expect(configuration().config.room_calendar_principal_mode).toBe(
+      'bot-account',
+    );
+  });
+});

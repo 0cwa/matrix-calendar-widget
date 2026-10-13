@@ -26,6 +26,10 @@ import { ModuleProviderToken } from '../ModuleProviderToken';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
 import { resolveRoomCalendarBinding } from './RoomCalendarBindingResolver';
+import type {
+  RoomCalendarPrincipalIdentity,
+  RoomCalendarPrincipalIdentityProvider,
+} from './RoomCalendarPrincipalIdentity';
 
 export interface RoomCalendarTarget {
   readonly roomId: string;
@@ -35,6 +39,7 @@ export interface RoomCalendarTarget {
 }
 
 export interface RoomCalendarCalDavPrincipal {
+  readonly identity: RoomCalendarPrincipalIdentity;
   readonly userId: string;
   readonly calendarUrl: string;
   readonly credential: IMatrixOpenIdCredential;
@@ -79,9 +84,9 @@ export function parseRoomCalendarServiceUserId(
 }
 
 /**
- * Room-target CalDAV uses only a server-configured application principal and
- * exact room binding. Deployment must keep the explicit access gate disabled
- * until the real appservice and isolation contracts pass.
+ * Room-target CalDAV uses the process-selected server principal and exact room
+ * binding. Deployment must keep the explicit access gate disabled until the
+ * selected principal and isolation contracts pass.
  */
 @Injectable()
 export class RoomCalendarCalDavAccess {
@@ -94,6 +99,9 @@ export class RoomCalendarCalDavAccess {
     @Optional()
     @Inject(ModuleProviderToken.NATIVE_FETCH)
     fetchImpl?: typeof fetch,
+    @Optional()
+    @Inject(ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY)
+    private readonly principalIdentityProvider?: RoomCalendarPrincipalIdentityProvider,
   ) {
     this.fetchImpl = fetchImpl ?? fetch;
   }
@@ -103,7 +111,7 @@ export class RoomCalendarCalDavAccess {
   }
 
   /**
-   * Resolve the exact configured service-principal collection and mint its
+   * Resolve the exact selected-principal collection and mint its
    * request-scoped OpenID proof. Call only after actor authorization.
    */
   async forAuthorizedTarget(
@@ -136,16 +144,53 @@ export class RoomCalendarCalDavAccess {
       throw this.disabledError();
     }
 
-    const serviceUserId = config.application_service_user_id;
-    const serviceToken = config.application_service_token;
+    const principalMode = config.room_calendar_principal_mode;
     const radicaleUrl = config.radicale_url;
-    if (!serviceUserId || !serviceToken || !radicaleUrl) {
+    if (!radicaleUrl) {
       throw this.disabledError();
+    }
+
+    if (principalMode === 'appservice') {
+      if (
+        !config.application_service_user_id ||
+        !config.application_service_token ||
+        !parseRoomCalendarServiceUserId(config.application_service_user_id)
+      ) {
+        throw this.disabledError();
+      }
+    } else if (principalMode === 'bot-account') {
+      if (!config.access_token) throw this.disabledError();
+    } else {
+      throw this.disabledError();
+    }
+
+    const identityProvider = this.principalIdentityProvider;
+    if (!identityProvider) throw this.disabledError();
+
+    let identity: RoomCalendarPrincipalIdentity;
+    try {
+      identity = await identityProvider.resolve();
+    } catch {
+      throw this.authorizationUnavailableError();
+    }
+
+    const serviceUserId = identity.userId;
+    const serviceToken =
+      principalMode === 'appservice'
+        ? config.application_service_token
+        : config.access_token;
+    if (
+      identity.mode !== principalMode ||
+      !serviceToken ||
+      (principalMode === 'appservice' &&
+        identity.userId !== config.application_service_user_id)
+    ) {
+      throw this.authorizationUnavailableError();
     }
 
     const parsedUserId = parseRoomCalendarServiceUserId(serviceUserId);
     if (!parsedUserId) {
-      throw this.disabledError();
+      throw this.authorizationUnavailableError();
     }
     const { localpart, serverName } = parsedUserId;
 
@@ -162,7 +207,7 @@ export class RoomCalendarCalDavAccess {
       signal,
     );
 
-    return { userId: serviceUserId, calendarUrl, credential };
+    return { identity, userId: serviceUserId, calendarUrl, credential };
   }
 
   private async requestOpenIdCredential(
