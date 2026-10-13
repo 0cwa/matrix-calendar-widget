@@ -117,6 +117,16 @@ const principalOpenIdRequests: Array<{
   readonly hasUserIdBody: boolean;
 }> = [];
 const gatewayLogLines: string[] = [];
+
+describe('normal bot account registration command', () => {
+  it('chooses non-admin for non-interactive Synapse registration', () => {
+    const args = buildNormalBotAccountRegistrationArgs('synthetic-bot');
+
+    expect(args).toContain('--no-admin');
+    expect(args).not.toContain('-a');
+    expect(args).toContain('--password-file');
+  });
+});
 const matrixErrorCodes = new Set([
   'M_BAD_JSON',
   'M_FORBIDDEN',
@@ -1135,26 +1145,11 @@ async function registerNormalBotAccount(): Promise<{
   const localpart = `room-calendar-bot-${randomUUID().replace(/-/g, '')}`;
   const password = randomBytes(32).toString('base64url');
   try {
-    execFileSync(
-      'docker',
-      [
-        'compose',
-        '-f',
-        resolve(__dirname, '../../../dev/compose.yaml'),
-        'exec',
-        '-T',
-        'synapse',
-        'register_new_matrix_user',
-        '-c',
-        '/data/homeserver.yaml',
-        '-u',
-        localpart,
-        '--password-file',
-        '/dev/stdin',
-        'http://localhost:8008',
-      ],
-      { encoding: 'utf8', input: password, timeout: 30_000 },
-    );
+    execFileSync('docker', buildNormalBotAccountRegistrationArgs(localpart), {
+      encoding: 'utf8',
+      input: password,
+      timeout: 30_000,
+    });
   } catch {
     throw new Error('Synthetic normal bot account registration failed');
   }
@@ -1179,6 +1174,26 @@ async function registerNormalBotAccount(): Promise<{
     throw new Error('Synthetic normal bot login could not be verified');
   }
   return { userId: expectedUserId, accessToken: login.access_token };
+}
+
+function buildNormalBotAccountRegistrationArgs(localpart: string): string[] {
+  return [
+    'compose',
+    '-f',
+    resolve(__dirname, '../../../dev/compose.yaml'),
+    'exec',
+    '-T',
+    'synapse',
+    'register_new_matrix_user',
+    '-c',
+    '/data/homeserver.yaml',
+    '-u',
+    localpart,
+    '--password-file',
+    '/dev/stdin',
+    '--no-admin',
+    'http://localhost:8008',
+  ];
 }
 
 function getRoomPrincipalIdentityProvider(): RoomCalendarPrincipalIdentityProvider {
