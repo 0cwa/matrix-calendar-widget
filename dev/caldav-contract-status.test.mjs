@@ -114,12 +114,27 @@ const knownCases = [
   ],
   [
     'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+    'lists only the exact room binding through the selected principal',
+    'room-appservice-exact-binding',
+  ],
+  [
+    'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
     'binds the Radicale OpenID subject to the configured service user, not the room sender',
     'room-appservice-subject-binding',
   ],
   [
     'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+    'binds the Radicale OpenID subject to the selected principal, not the room sender',
+    'room-appservice-subject-binding',
+  ],
+  [
+    'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
     'forbids a cross-room calendar before appservice proof or CalDAV I/O',
+    'room-appservice-cross-room-denial',
+  ],
+  [
+    'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+    'forbids a cross-room calendar before principal proof or CalDAV I/O',
     'room-appservice-cross-room-denial',
   ],
   [
@@ -246,13 +261,21 @@ test('reports only constant IDs and closed statuses for allowlisted cases', () =
   };
 
   const lines = safeContractCaseStatusLines(testReport);
+  const expectedCaseStatuses = new Map();
+  for (const [index, [, , caseId]] of knownCases.entries()) {
+    const previous = expectedCaseStatuses.get(caseId);
+    const status = index === 0 ? 'failed' : 'passed';
+    expectedCaseStatuses.set(
+      caseId,
+      previous === 'failed' || status === 'failed' ? 'failed' : 'passed',
+    );
+  }
 
   assert.deepEqual(
     lines,
     [
-      ...knownCases.map(
-        ([, , caseId], index) =>
-          `contract-case ${caseId} ${index === 0 ? 'failed' : 'passed'}`,
+      ...[...expectedCaseStatuses].map(
+        ([caseId, status]) => `contract-case ${caseId} ${status}`,
       ),
       'contract-suite membership-guard failed',
     ].sort(),

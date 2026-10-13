@@ -170,6 +170,31 @@ type RoomAppServiceCase =
   | 'unauthorized-write'
   | 'bot-command-write'
   | 'bot-command-denial';
+type RoomAppServiceFailureCase = 'subject-binding' | 'cross-room-denial';
+type RoomAppServiceCaseFailureStage =
+  | 'proof-selected'
+  | 'proof-available'
+  | 'identities-resolved'
+  | 'subject-is-principal'
+  | 'subject-not-room-sender'
+  | 'principal-requests-collected'
+  | 'request-path-matches-principal'
+  | 'request-policy-matches-mode'
+  | 'proof-count-captured'
+  | 'request-completed'
+  | 'response-forbidden'
+  | 'no-caldav-request'
+  | 'no-new-openid-proof'
+  | 'logs-secret-free';
+type RoomAppServiceTeardownStage =
+  | 'started'
+  | 'log-check-started'
+  | 'log-check-completed'
+  | 'app-close-started'
+  | 'app-close-completed'
+  | 'mocks-reset'
+  | 'complete';
+type RoomAppServiceTeardownFailure = 'log-check' | 'app-close' | 'mocks-reset';
 
 function captureGatewayLog(...values: unknown[]): void {
   gatewayLogLines.push(values.map(String).join(' '));
@@ -504,19 +529,46 @@ describeContract(contractDescription, () => {
   });
 
   afterAll(async () => {
-    try {
-      if (
-        typeof actorIdentity !== 'undefined' &&
-        (serviceOpenIdTokens.length > 0 || serviceUserAccessTokens.length > 0)
-      ) {
+    markRoomAppServiceTeardownStage('started');
+    let teardownFailed = false;
+    let teardownError: unknown;
+    if (
+      typeof actorIdentity !== 'undefined' &&
+      (serviceOpenIdTokens.length > 0 || serviceUserAccessTokens.length > 0)
+    ) {
+      markRoomAppServiceTeardownStage('log-check-started');
+      try {
         assertLogsOmitSecrets();
+        markRoomAppServiceTeardownStage('log-check-completed');
+      } catch (error) {
+        markRoomAppServiceTeardownFailure('log-check');
+        teardownFailed = true;
+        teardownError = error;
       }
-    } finally {
-      if (app) await app.close();
+    }
+    if (app) {
+      markRoomAppServiceTeardownStage('app-close-started');
+      try {
+        await app.close();
+        markRoomAppServiceTeardownStage('app-close-completed');
+      } catch (error) {
+        markRoomAppServiceTeardownFailure('app-close');
+        teardownFailed = true;
+        teardownError = error;
+      }
+    }
+    markRoomAppServiceTeardownStage('mocks-reset');
+    try {
       jest.restoreAllMocks();
       fetchMock.enableMocks();
       fetchMock.dontMock();
+    } catch (error) {
+      markRoomAppServiceTeardownFailure('mocks-reset');
+      teardownFailed = true;
+      teardownError = error;
     }
+    if (teardownFailed) throw teardownError;
+    markRoomAppServiceTeardownStage('complete');
   });
 
   it('lists only the exact room binding through the selected principal', async () => {
@@ -580,26 +632,39 @@ describeContract(contractDescription, () => {
   it('binds the Radicale OpenID subject to the selected principal, not the room sender', async () => {
     markRoomAppServiceCaseStarted('subject-binding');
     const serviceProof = serviceOpenIdTokens[0];
+    markRoomAppServiceCaseStage('subject-binding', 'proof-selected');
     if (serviceProof === undefined) {
       throw new Error('Synthetic room principal OpenID proof is missing');
     }
+    markRoomAppServiceCaseStage('subject-binding', 'proof-available');
 
     const [serviceSubject, roomSender] = await Promise.all([
       matrixOpenIdSubject(serviceProof),
       matrixUserIdForAccessToken(actorAccessToken),
     ]);
+    markRoomAppServiceCaseStage('subject-binding', 'identities-resolved');
 
     expect(serviceSubject).toBe(principalUserId);
+    markRoomAppServiceCaseStage('subject-binding', 'subject-is-principal');
     expect(serviceSubject).not.toBe(roomSender);
+    markRoomAppServiceCaseStage('subject-binding', 'subject-not-room-sender');
     const selectedPrincipalRequests = principalOpenIdRequests.filter(
       ({ authorizationMatchesPrincipal }) => authorizationMatchesPrincipal,
     );
     expect(selectedPrincipalRequests.length).toBeGreaterThan(0);
+    markRoomAppServiceCaseStage(
+      'subject-binding',
+      'principal-requests-collected',
+    );
     expect(
       selectedPrincipalRequests.every(
         ({ pathUserId }) => pathUserId === principalUserId,
       ),
     ).toBe(true);
+    markRoomAppServiceCaseStage(
+      'subject-binding',
+      'request-path-matches-principal',
+    );
     if (roomPrincipalMode === 'bot-account') {
       expect(
         selectedPrincipalRequests.every(
@@ -612,20 +677,31 @@ describeContract(contractDescription, () => {
         selectedPrincipalRequests.every(({ hasUserIdBody }) => hasUserIdBody),
       ).toBe(true);
     }
+    markRoomAppServiceCaseStage(
+      'subject-binding',
+      'request-policy-matches-mode',
+    );
     assertLogsOmitSecrets();
+    markRoomAppServiceCaseStage('subject-binding', 'logs-secret-free');
   });
 
   it('forbids a cross-room calendar before principal proof or CalDAV I/O', async () => {
     markRoomAppServiceCaseStarted('cross-room-denial');
     const proofCountBefore = serviceOpenIdTokens.length;
+    markRoomAppServiceCaseStage('cross-room-denial', 'proof-count-captured');
     const response = await gatewayRequest({
       roomId: roomIds[0],
       calendarId: calendarIds[1],
     });
+    markRoomAppServiceCaseStage('cross-room-denial', 'request-completed');
     expect(response.status).toBe(403);
+    markRoomAppServiceCaseStage('cross-room-denial', 'response-forbidden');
     expect(activeCalDavRequests).toEqual([]);
+    markRoomAppServiceCaseStage('cross-room-denial', 'no-caldav-request');
     expect(serviceOpenIdTokens).toHaveLength(proofCountBefore);
+    markRoomAppServiceCaseStage('cross-room-denial', 'no-new-openid-proof');
     assertLogsOmitSecrets();
+    markRoomAppServiceCaseStage('cross-room-denial', 'logs-secret-free');
   });
 
   it('creates, reads, updates, and conditionally deletes a room event', async () => {
@@ -966,6 +1042,29 @@ function markRoomAppServiceSetupStage(stage: RoomAppServiceSetupStage): void {
 
 function markRoomAppServiceCaseStarted(testCase: RoomAppServiceCase): void {
   appendRoomAppServiceSetupMarker(`room-appservice-case-start-${testCase}`);
+}
+
+function markRoomAppServiceCaseStage(
+  testCase: RoomAppServiceFailureCase,
+  stage: RoomAppServiceCaseFailureStage,
+): void {
+  appendRoomAppServiceSetupMarker(
+    `room-appservice-case-stage-${testCase}-${stage}`,
+  );
+}
+
+function markRoomAppServiceTeardownStage(
+  stage: RoomAppServiceTeardownStage,
+): void {
+  appendRoomAppServiceSetupMarker(`room-appservice-teardown-stage-${stage}`);
+}
+
+function markRoomAppServiceTeardownFailure(
+  failure: RoomAppServiceTeardownFailure,
+): void {
+  appendRoomAppServiceSetupMarker(
+    `room-appservice-teardown-failure-${failure}`,
+  );
 }
 
 function appendRoomAppServiceSetupMarker(marker: string): void {

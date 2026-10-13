@@ -17,6 +17,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { safeContractCaseStatusLines } from './caldav-contract-status.mjs';
 import {
   formatPersonalOpenIdSetupFailure,
   formatPersonalOpenIdSetupHttpStatus,
@@ -28,7 +29,10 @@ import {
   formatRoomReminderSetupHttpStatus,
   formatRoomReminderSetupMatrixErrorCode,
   formatRoomReminderSetupStage,
+  getRoomAppServiceCaseFailureStage,
   getRoomAppServiceSetupStage,
+  getRoomAppServiceTeardownFailure,
+  getRoomAppServiceTeardownStage,
 } from './sanitize-caldav-contract-stage.mjs';
 
 const ROOM_SUITE_PATH = fileURLToPath(
@@ -63,6 +67,15 @@ const ROOM_CASES = new Set([
   'unauthorized-write',
   'bot-command-write',
   'bot-command-denial',
+]);
+const ROOM_FAILURE_CASES = new Map([
+  ['room-appservice-exact-binding', 'exact-binding'],
+  ['room-appservice-subject-binding', 'subject-binding'],
+  ['room-appservice-cross-room-denial', 'cross-room-denial'],
+  ['room-appservice-event-write', 'event-write'],
+  ['room-appservice-unauthorized-write', 'unauthorized-write'],
+  ['room-appservice-bot-command-write', 'bot-command-write'],
+  ['room-appservice-bot-command-denial', 'bot-command-denial'],
 ]);
 const ALLOWED_ERROR_NAMES = new Set([
   'AbortError',
@@ -249,6 +262,53 @@ export function formatRoomAppServiceSetupDiagnostic(testReport, stageContent) {
   ].join('\n');
 }
 
+export function formatRoomAppServiceFailureDiagnostic(
+  testReport,
+  stageContent,
+) {
+  const setupCompleted =
+    typeof stageContent === 'string' &&
+    stageContent
+      .split(/\r?\n/)
+      .some((line) => line.trim() === 'room-appservice-setup-complete');
+  if (!setupCompleted) return '';
+
+  const suite = Array.isArray(testReport?.testResults)
+    ? testReport.testResults.find((result) => result?.name === ROOM_SUITE_PATH)
+    : undefined;
+  if (suite?.status !== 'failed') return '';
+
+  const failureLines = [];
+  for (const line of safeContractCaseStatusLines(testReport)) {
+    const match = /^contract-case (room-appservice-[a-z0-9-]+) failed$/.exec(
+      line,
+    );
+    if (!match) continue;
+
+    const testCase = ROOM_FAILURE_CASES.get(match[1]);
+    if (!testCase) continue;
+    const stage = getRoomAppServiceCaseFailureStage(stageContent, testCase);
+    failureLines.push(
+      `room-appservice-test-failure case=${match[1]} stage=${stage ?? 'unavailable'}`,
+    );
+  }
+
+  const teardownFailure = getRoomAppServiceTeardownFailure(stageContent);
+  if (teardownFailure) {
+    const teardownStage = getRoomAppServiceTeardownStage(stageContent);
+    failureLines.push(
+      `room-appservice-hook-failure stage=${teardownStage ?? 'unavailable'} cause=${teardownFailure}`,
+    );
+  }
+
+  if (failureLines.length === 0) {
+    failureLines.push(
+      'room-appservice-test-failure case=unmapped stage=unavailable',
+    );
+  }
+  return failureLines.join('\n');
+}
+
 export function formatPersonalOpenIdSetupDiagnostic(testReport, stageContent) {
   const setupStarted =
     typeof stageContent === 'string' &&
@@ -376,6 +436,11 @@ function emitDiagnostic(reportPath, stagePath) {
     process.stdout.write(
       `${formatRoomAppServiceSetupDiagnostic(report, stageContent)}\n`,
     );
+    const roomFailure = formatRoomAppServiceFailureDiagnostic(
+      report,
+      stageContent,
+    );
+    if (roomFailure) process.stdout.write(`${roomFailure}\n`);
     process.stdout.write(
       `${formatRoomReminderSetupDiagnostic(report, stageContent)}\n`,
     );

@@ -192,11 +192,23 @@ const CASE_IDS = new Map([
     'room-appservice-exact-binding',
   ],
   [
+    'room-appservice-radicale-contract\0lists only the exact room binding through the selected principal',
+    'room-appservice-exact-binding',
+  ],
+  [
     'room-appservice-radicale-contract\0binds the Radicale OpenID subject to the configured service user, not the room sender',
     'room-appservice-subject-binding',
   ],
   [
+    'room-appservice-radicale-contract\0binds the Radicale OpenID subject to the selected principal, not the room sender',
+    'room-appservice-subject-binding',
+  ],
+  [
     'room-appservice-radicale-contract\0forbids a cross-room calendar before appservice proof or CalDAV I/O',
+    'room-appservice-cross-room-denial',
+  ],
+  [
+    'room-appservice-radicale-contract\0forbids a cross-room calendar before principal proof or CalDAV I/O',
     'room-appservice-cross-room-denial',
   ],
   [

@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   formatPersonalOpenIdSetupDiagnostic,
+  formatRoomAppServiceFailureDiagnostic,
   formatRoomAppServiceSetupDiagnostic,
   formatRoomReminderSetupDiagnostic,
 } from './sanitize-room-appservice-setup.mjs';
@@ -163,6 +164,89 @@ test('does not interpolate unknown suite statuses or source filenames', () => {
   assert.equal(diagnostic.includes(privateStatus), false);
   assert.equal(diagnostic.includes('private-user'), false);
   assert.equal(diagnostic.includes('private.example'), false);
+});
+
+test('maps a current room contract failure to its fixed case and checkpoint', () => {
+  const reportWithFailure = {
+    testResults: [
+      {
+        name: roomSuitePath,
+        status: 'failed',
+        assertionResults: [
+          {
+            title:
+              'binds the Radicale OpenID subject to the selected principal, not the room sender',
+            status: 'failed',
+            failureMessages: ['private Matrix identity details'],
+          },
+        ],
+      },
+    ],
+  };
+  const diagnostic = formatRoomAppServiceFailureDiagnostic(
+    reportWithFailure,
+    [
+      'room-appservice-setup-complete',
+      'room-appservice-case-stage-subject-binding-identities-resolved',
+      'room-appservice-case-stage-subject-binding-subject-is-principal',
+    ].join('\n'),
+  );
+
+  assert.equal(
+    diagnostic,
+    'room-appservice-test-failure case=room-appservice-subject-binding stage=subject-is-principal',
+  );
+  assert.equal(diagnostic.includes('private Matrix identity details'), false);
+});
+
+test('keeps unknown room failures unmapped and excludes raw test titles', () => {
+  const privateTitle = 'private event title and token sentinel';
+  const reportWithUnknownFailure = {
+    testResults: [
+      {
+        name: roomSuitePath,
+        status: 'failed',
+        assertionResults: [{ title: privateTitle, status: 'failed' }],
+      },
+    ],
+  };
+  const diagnostic = formatRoomAppServiceFailureDiagnostic(
+    reportWithUnknownFailure,
+    'room-appservice-setup-complete\nroom-appservice-case-stage-private-stage',
+  );
+
+  assert.equal(
+    diagnostic,
+    'room-appservice-test-failure case=unmapped stage=unavailable',
+  );
+  assert.equal(diagnostic.includes(privateTitle), false);
+});
+
+test('reports only fixed teardown hook failure markers', () => {
+  const reportWithHookFailure = {
+    testResults: [
+      {
+        name: roomSuitePath,
+        status: 'failed',
+        message: 'private hook error, credentials, and response body',
+        assertionResults: [],
+      },
+    ],
+  };
+  const diagnostic = formatRoomAppServiceFailureDiagnostic(
+    reportWithHookFailure,
+    [
+      'room-appservice-setup-complete',
+      'room-appservice-teardown-stage-app-close-started',
+      'room-appservice-teardown-failure-app-close',
+    ].join('\n'),
+  );
+
+  assert.equal(
+    diagnostic,
+    'room-appservice-hook-failure stage=app-close-started cause=app-close',
+  );
+  assert.equal(diagnostic.includes('private hook error'), false);
 });
 
 test('does not emit freeform token, API key, client secret, session key, or JSON values', () => {
