@@ -228,7 +228,9 @@ export class RoomCalendarCalDavAccess {
             Authorization: `Bearer ${serviceToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ user_id: userId }),
+          ...(this.appConfig?.room_calendar_principal_mode === 'appservice'
+            ? { body: JSON.stringify({ user_id: userId }) }
+            : {}),
           redirect: 'error',
           signal: signal
             ? AbortSignal.any([signal, AbortSignal.timeout(10_000)])

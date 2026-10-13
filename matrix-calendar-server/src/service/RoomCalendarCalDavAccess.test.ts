@@ -15,9 +15,9 @@
  */
 
 import { ServiceUnavailableException } from '@nestjs/common';
-import { AppRuntimeContext } from '../AppRuntimeContext';
-import { MatrixClient } from 'matrix-bot-sdk';
 import fetch from 'jest-fetch-mock';
+import { MatrixClient } from 'matrix-bot-sdk';
+import { AppRuntimeContext } from '../AppRuntimeContext';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ConfiguredRoomCalendarPrincipalIdentityProvider } from './ConfiguredRoomCalendarPrincipalIdentityProvider';
 import {
@@ -212,9 +212,13 @@ describe('RoomCalendarCalDavAccess', () => {
     });
     expect(fetch.mock.calls[0][1]).toMatchObject({
       headers: { Authorization: 'Bearer synthetic-test-bot-token' },
-      body: JSON.stringify({ user_id: botUserId }),
     });
-    expect(fetch.mock.calls[0][0]).toContain(encodeURIComponent(botUserId));
+    expect(fetch.mock.calls[0][1]?.body).toBeUndefined();
+    const requestUrl = new URL(String(fetch.mock.calls[0][0]));
+    expect(requestUrl.pathname).toBe(
+      `/_matrix/client/v3/user/${encodeURIComponent(botUserId)}/openid/request_token`,
+    );
+    expect(requestUrl.searchParams.has('user_id')).toBe(false);
   });
 
   it('refuses an SDK and runtime identity mismatch before proof I/O', async () => {
