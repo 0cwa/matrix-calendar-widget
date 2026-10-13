@@ -124,6 +124,39 @@ describe('RoomCalendarCalDavAccess', () => {
     });
   });
 
+  it('uses a preconstructed forwarding adapter with the active fetch observer', async () => {
+    fetch.mockResponseOnce(
+      JSON.stringify({
+        access_token: 'synthetic-observed-openid-proof',
+        matrix_server_name: 'example.test',
+      }),
+      { status: 200 },
+    );
+    const identityProvider = {
+      resolve: async () => ({
+        mode: 'appservice' as const,
+        userId: applicationServiceUserId,
+      }),
+    };
+    const access = new RoomCalendarCalDavAccess(
+      configuration(),
+      (input, init) => globalThis.fetch(input, init),
+      identityProvider,
+    );
+    const fetchObserver = jest.spyOn(globalThis, 'fetch');
+
+    try {
+      await access.forAuthorizedTarget(target, 'read');
+
+      expect(fetchObserver).toHaveBeenCalledTimes(1);
+      expect(fetchObserver.mock.calls[0][0]).toBe(
+        'https://matrix.example.test/_matrix/client/v3/user/%40matrix_calendar_service%3Aexample.test/openid/request_token',
+      );
+    } finally {
+      fetchObserver.mockRestore();
+    }
+  });
+
   it('never mints a proof when the access feature is disabled', async () => {
     const access = createAccess(
       configuration({ room_calendar_access_enabled: false }),

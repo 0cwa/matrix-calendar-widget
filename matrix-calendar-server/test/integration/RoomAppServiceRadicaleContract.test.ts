@@ -254,6 +254,11 @@ const matrixClient = {
       useValue: testConfiguration,
     },
     {
+      provide: ModuleProviderToken.NATIVE_FETCH,
+      useValue: (input: RequestInfo | URL, init?: RequestInit) =>
+        globalThis.fetch(input, init),
+    },
+    {
       provide: ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
       useFactory: getRoomPrincipalIdentityProvider,
     },
