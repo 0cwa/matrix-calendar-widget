@@ -199,6 +199,78 @@ jobs:
           fi
           exit "$test_status"
 
+      - name: Start a fresh Synapse fixture without AS registration
+        run: |
+          docker compose -f dev/compose.yaml down -v --remove-orphans
+          MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION=disabled bash dev/up.sh
+          echo "::add-mask::$MATRIX_CALENDAR_DEV_PASSWORD"
+          credential="$(node dev/mint-openid-credential.mjs)"
+          echo "::add-mask::$credential"
+          echo "CALDAV_OPENID_CREDENTIAL=$credential" >> "$GITHUB_ENV"
+
+      - name: Run the normal bot-account room CalDAV contract without AS
+        run: |
+          set +e
+          contract_log="$RUNNER_TEMP/normal-bot-contract-output.log"
+          contract_report="$RUNNER_TEMP/normal-bot-contract-results.json"
+          contract_stage_file="$RUNNER_TEMP/normal-bot-contract-stage.txt"
+          : > "$contract_stage_file"
+          env \
+            -u MATRIX_APPLICATION_SERVICE_TOKEN \
+            -u MATRIX_APPLICATION_SERVICE_USER_ID \
+            CALDAV_CONTRACT=1 \
+            ROOM_CALENDAR_PRINCIPAL_MODE=bot-account \
+            MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION=disabled \
+            CALDAV_CONTRACT_STAGE_FILE="$contract_stage_file" \
+            yarn workspace @matrix-calendar-widget/server jest \
+              test/integration/RoomAppServiceRadicaleContract.test.ts \
+              --runInBand --json --outputFile="$contract_report" \
+              > "$contract_log" 2>&1
+          test_status=$?
+          set -e
+          set +e
+          node dev/assert-caldav-contract-logs.mjs \
+            "$contract_log" "$contract_report"
+          scan_status=$?
+          contract_report_summary="$(node dev/sanitize-server-test-report.mjs \
+            "$contract_report" "$test_status" 2>/dev/null)"
+          report_summary_status=$?
+          contract_setup_summary="$(node dev/sanitize-room-appservice-setup.mjs \
+            "$contract_report" "$contract_stage_file" 2>/dev/null)"
+          contract_setup_summary_status=$?
+          contract_summary="$(node dev/sanitize-caldav-contract-stage.mjs "$contract_stage_file")"
+          printf '%s\n' "$contract_summary"
+          printf '%s\n' "$contract_report_summary"
+          printf '%s\n' "$contract_setup_summary"
+          {
+            printf '%s\n' 'AS-free normal bot-account room contract stages'
+            printf '%s\n' "$contract_summary"
+            printf '%s\n' 'AS-free normal bot-account room contract test summary'
+            printf '%s\n' "$contract_report_summary"
+            printf '%s\n' 'Normal bot-account setup diagnosis'
+            printf '%s\n' "$contract_setup_summary"
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            printf '%s\n' 'AS-free normal bot-account room contract stages'
+            printf '%s\n' "$contract_summary"
+            printf '%s\n' 'AS-free normal bot-account room contract test summary'
+            printf '%s\n' "$contract_report_summary"
+            printf '%s\n' 'Normal bot-account setup diagnosis'
+            printf '%s\n' "$contract_setup_summary"
+          } >> "$RUNNER_TEMP/caldav-safe-contract-summary.txt"
+          rm -f "$contract_log" "$contract_report" "$contract_stage_file"
+          set -e
+          if [ "$scan_status" -ne 0 ]; then
+            exit "$scan_status"
+          fi
+          if [ "$report_summary_status" -ne 0 ]; then
+            exit "$report_summary_status"
+          fi
+          if [ "$contract_setup_summary_status" -ne 0 ]; then
+            exit "$contract_setup_summary_status"
+          fi
+          exit "$test_status"
+
       - name: Stop services
         if: always()
         run: docker compose -f dev/compose.yaml down -v --remove-orphans

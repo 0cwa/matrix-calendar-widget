@@ -25,11 +25,12 @@ import { NextFunction, Request, Response } from 'express';
 import fetchMock from 'jest-fetch-mock';
 import { MatrixClient } from 'matrix-bot-sdk';
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
+import { AppRuntimeContext } from '../../src/AppRuntimeContext';
 import { IAppConfiguration } from '../../src/IAppConfiguration';
 import { ModuleProviderToken } from '../../src/ModuleProviderToken';
 import { CalDavEventClient } from '../../src/caldav/CalDavEventClient';
@@ -42,9 +43,11 @@ import {
   CalendarCommandService,
   CalendarCommandTranslation,
 } from '../../src/service/CalendarCommandService';
+import { ConfiguredRoomCalendarPrincipalIdentityProvider } from '../../src/service/ConfiguredRoomCalendarPrincipalIdentityProvider';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventOperations } from '../../src/service/RoomCalendarEventOperations';
+import type { RoomCalendarPrincipalIdentityProvider } from '../../src/service/RoomCalendarPrincipalIdentity';
 import {
   MatrixApplicationServiceFixtureError,
   obtainMatrixApplicationServiceFixtureUserToken,
@@ -56,6 +59,18 @@ const serviceToken = process.env.MATRIX_APPLICATION_SERVICE_TOKEN ?? '';
 const serviceUserId =
   process.env.MATRIX_APPLICATION_SERVICE_USER_ID ??
   '@_matrix_calendar_service:localhost';
+const roomPrincipalMode =
+  process.env.ROOM_CALENDAR_PRINCIPAL_MODE ?? 'appservice';
+if (roomPrincipalMode !== 'appservice' && roomPrincipalMode !== 'bot-account') {
+  throw new Error('Room principal contract mode is invalid');
+}
+if (
+  roomPrincipalMode === 'bot-account' &&
+  (process.env.MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION !== 'disabled' ||
+    serviceToken.length > 0)
+) {
+  throw new Error('Bot-account contract requires an AS-free Synapse fixture');
+}
 const radicaleBaseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
 const homeserverUrl =
   process.env.MATRIX_CALENDAR_DEV_HOMESERVER_URL ?? 'http://localhost:8008';
@@ -64,7 +79,8 @@ const matrixServerName =
 const testConfiguration = {
   homeserver_url: homeserverUrl,
   radicale_url: radicaleBaseUrl,
-  room_calendar_principal_mode: 'appservice',
+  room_calendar_principal_mode: roomPrincipalMode,
+  access_token: process.env.ACCESS_TOKEN ?? '',
   room_calendar_access_enabled: true,
   room_calendar_event_writes_enabled: true,
   application_service_token: serviceToken,
@@ -75,9 +91,11 @@ const roomPrincipalIdentity = Object.freeze({
   mode: 'appservice' as const,
   userId: serviceUserId,
 });
-const roomPrincipalIdentityProvider = {
-  resolve: async () => roomPrincipalIdentity,
-};
+let roomPrincipalIdentityProvider:
+  | RoomCalendarPrincipalIdentityProvider
+  | undefined;
+let principalUserId = serviceUserId;
+let principalAccessToken = '';
 
 let app: INestApplication;
 let actorAccessToken: string;
@@ -92,6 +110,12 @@ let activeCalDavRequests:
   | undefined;
 const serviceOpenIdTokens: string[] = [];
 const serviceUserAccessTokens: string[] = [];
+const principalOpenIdRequests: Array<{
+  readonly authorizationMatchesPrincipal: boolean;
+  readonly pathUserId: string;
+  readonly hasUserIdQuery: boolean;
+  readonly hasUserIdBody: boolean;
+}> = [];
 const gatewayLogLines: string[] = [];
 const matrixErrorCodes = new Set([
   'M_BAD_JSON',
@@ -206,7 +230,7 @@ const matrixClient = {
     },
     {
       provide: ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
-      useValue: roomPrincipalIdentityProvider,
+      useFactory: getRoomPrincipalIdentityProvider,
     },
     { provide: MatrixClient, useValue: matrixClient },
     MatrixCalendarAuthorizationFactory,
@@ -223,7 +247,7 @@ const matrixClient = {
           maxResponseBytes: testConfiguration.caldav_max_event_response_bytes,
           radicaleBaseUrl,
           roomCalendarBindings: testConfiguration.room_calendar_bindings,
-          principalIdentityProvider: roomPrincipalIdentityProvider,
+          principalIdentityProvider: getRoomPrincipalIdentityProvider(),
         }),
     },
     {
@@ -254,7 +278,9 @@ const matrixClient = {
 })
 class RoomAppServiceGatewayContractModule {}
 
-describeContract('room appservice proof against real Radicale', () => {
+const contractDescription = `room ${roomPrincipalMode} proof against real Radicale`;
+
+describeContract(contractDescription, () => {
   beforeAll(async () => {
     markRoomAppServiceSetupStart();
     markRoomAppServiceSetupStage('fixture-input-check');
@@ -264,7 +290,10 @@ describeContract('room appservice proof against real Radicale', () => {
     const password =
       process.env.MATRIX_CALENDAR_DEV_PASSWORD ?? 'calendar-dev-password';
     const personalCredential = process.env.CALDAV_OPENID_CREDENTIAL ?? '';
-    if (!personalCredential.startsWith('matrix-openid:') || !serviceToken) {
+    if (
+      !personalCredential.startsWith('matrix-openid:') ||
+      (roomPrincipalMode === 'appservice' && !serviceToken)
+    ) {
       throw new Error('Synthetic Matrix contract credentials are missing');
     }
     markRoomAppServiceSetupStage('decode-actor-proof');
@@ -282,7 +311,49 @@ describeContract('room appservice proof against real Radicale', () => {
     ).access_token;
 
     markRoomAppServiceSetupStage('register-service-user');
-    await registerServiceUser();
+    if (roomPrincipalMode === 'appservice') {
+      await registerServiceUser();
+      principalUserId = serviceUserId;
+      principalAccessToken = serviceToken;
+      roomPrincipalIdentityProvider = {
+        resolve: async () => roomPrincipalIdentity,
+      };
+    } else {
+      const principal = await registerNormalBotAccount();
+      principalUserId = principal.userId;
+      principalAccessToken = principal.accessToken;
+      serviceUserAccessTokens.push(principal.accessToken);
+      testConfiguration.access_token = principal.accessToken;
+      const principalClient = new MatrixClient(
+        homeserverUrl,
+        testConfiguration.access_token,
+      );
+      const sdkUserId = await principalClient.getUserId();
+      if (sdkUserId !== principalUserId) {
+        throw new Error(
+          'Synthetic bot token identity did not match its account',
+        );
+      }
+      const localpart = sdkUserId.slice(1).split(':')[0];
+      const runtimeContext = new AppRuntimeContext(
+        sdkUserId,
+        localpart,
+        localpart,
+        ['en'],
+      );
+      roomPrincipalIdentityProvider =
+        new ConfiguredRoomCalendarPrincipalIdentityProvider(
+          testConfiguration,
+          principalClient,
+          runtimeContext,
+        );
+      const identity = await roomPrincipalIdentityProvider.resolve();
+      if (identity.mode !== 'bot-account' || identity.userId !== sdkUserId) {
+        throw new Error(
+          'Synthetic bot principal identity could not be verified',
+        );
+      }
+    }
     markRoomAppServiceSetupStage('create-room-one');
     const firstRoom = await createRoom('M6 room calendar contract one');
     markRoomAppServiceSetupStage('create-room-two');
@@ -310,7 +381,7 @@ describeContract('room appservice proof against real Radicale', () => {
     const access = new RoomCalendarCalDavAccess(
       testConfiguration,
       undefined,
-      roomPrincipalIdentityProvider,
+      getRoomPrincipalIdentityProvider(),
     );
     for (let index = 0; index < roomIds.length; index += 1) {
       markRoomAppServiceSetupStage(
@@ -387,13 +458,39 @@ describeContract('room appservice proof against real Radicale', () => {
           hasIfMatch: new Headers(init?.headers).has('If-Match'),
         });
       }
+      const authorization = new Headers(init?.headers).get('Authorization');
+      const openIdPath = parsedUrl.pathname.match(
+        /\/user\/([^/]+)\/openid\/request_token$/,
+      );
+      if (
+        parsedUrl.origin === new URL(homeserverUrl).origin &&
+        openIdPath !== null
+      ) {
+        let bodyHasUserId = false;
+        if (typeof init?.body === 'string') {
+          try {
+            const body: unknown = JSON.parse(init.body);
+            bodyHasUserId =
+              typeof body === 'object' &&
+              body !== null &&
+              Object.prototype.hasOwnProperty.call(body, 'user_id');
+          } catch {
+            bodyHasUserId = false;
+          }
+        }
+        principalOpenIdRequests.push({
+          authorizationMatchesPrincipal:
+            authorization === `Bearer ${principalAccessToken}`,
+          pathUserId: decodeURIComponent(openIdPath[1]),
+          hasUserIdQuery: parsedUrl.searchParams.has('user_id'),
+          hasUserIdBody: bodyHasUserId,
+        });
+      }
       const response = await nativeFetch(input, init);
       if (
         parsedUrl.origin === new URL(homeserverUrl).origin &&
         parsedUrl.pathname.endsWith('/openid/request_token') &&
-        init?.headers &&
-        new Headers(init.headers).get('Authorization') ===
-          `Bearer ${serviceToken}`
+        authorization === `Bearer ${principalAccessToken}`
       ) {
         const result = (await response.clone().json()) as {
           access_token?: unknown;
@@ -422,7 +519,7 @@ describeContract('room appservice proof against real Radicale', () => {
     }
   });
 
-  it('lists only the exact room binding through the appservice principal', async () => {
+  it('lists only the exact room binding through the selected principal', async () => {
     markRoomAppServiceCaseStarted('exact-binding');
     for (let index = 0; index < roomIds.length; index += 1) {
       activeCalDavRequests = [];
@@ -448,7 +545,7 @@ describeContract('room appservice proof against real Radicale', () => {
       expect(
         activeCalDavRequests?.every(({ pathname }) =>
           pathname.startsWith(
-            `/_matrix_calendar_service/${calendarIds[index]}/`,
+            `/${principalLocalpart()}/${calendarIds[index]}/`,
           ),
         ),
       ).toBe(true);
@@ -456,14 +553,15 @@ describeContract('room appservice proof against real Radicale', () => {
       expect(
         activeCalDavRequests?.some(
           ({ method, pathname }) =>
-            method === 'PROPFIND' && pathname === '/_matrix_calendar_service/',
+            method === 'PROPFIND' && pathname === `/${principalLocalpart()}/`,
         ),
       ).toBe(false);
       markRoomAppServiceListingCheckpoint(
         `${checkpointRoom}-no-root-discovery`,
       );
       const responseSecrets = [
-        serviceToken,
+        ...(serviceToken ? [serviceToken] : []),
+        principalAccessToken,
         actorAccessToken,
         ...serviceOpenIdTokens,
         ...serviceUserAccessTokens,
@@ -479,11 +577,11 @@ describeContract('room appservice proof against real Radicale', () => {
     markRoomAppServiceListingCheckpoint('logs-secret-free');
   });
 
-  it('binds the Radicale OpenID subject to the configured service user, not the room sender', async () => {
+  it('binds the Radicale OpenID subject to the selected principal, not the room sender', async () => {
     markRoomAppServiceCaseStarted('subject-binding');
     const serviceProof = serviceOpenIdTokens[0];
     if (serviceProof === undefined) {
-      throw new Error('Synthetic appservice OpenID proof is missing');
+      throw new Error('Synthetic room principal OpenID proof is missing');
     }
 
     const [serviceSubject, roomSender] = await Promise.all([
@@ -491,12 +589,33 @@ describeContract('room appservice proof against real Radicale', () => {
       matrixUserIdForAccessToken(actorAccessToken),
     ]);
 
-    expect(serviceSubject).toBe(serviceUserId);
+    expect(serviceSubject).toBe(principalUserId);
     expect(serviceSubject).not.toBe(roomSender);
+    const selectedPrincipalRequests = principalOpenIdRequests.filter(
+      ({ authorizationMatchesPrincipal }) => authorizationMatchesPrincipal,
+    );
+    expect(selectedPrincipalRequests.length).toBeGreaterThan(0);
+    expect(
+      selectedPrincipalRequests.every(
+        ({ pathUserId }) => pathUserId === principalUserId,
+      ),
+    ).toBe(true);
+    if (roomPrincipalMode === 'bot-account') {
+      expect(
+        selectedPrincipalRequests.every(
+          ({ hasUserIdQuery, hasUserIdBody }) =>
+            !hasUserIdQuery && !hasUserIdBody,
+        ),
+      ).toBe(true);
+    } else {
+      expect(
+        selectedPrincipalRequests.every(({ hasUserIdBody }) => hasUserIdBody),
+      ).toBe(true);
+    }
     assertLogsOmitSecrets();
   });
 
-  it('forbids a cross-room calendar before appservice proof or CalDAV I/O', async () => {
+  it('forbids a cross-room calendar before principal proof or CalDAV I/O', async () => {
     markRoomAppServiceCaseStarted('cross-room-denial');
     const proofCountBefore = serviceOpenIdTokens.length;
     const response = await gatewayRequest({
@@ -712,7 +831,7 @@ describeContract('room appservice proof against real Radicale', () => {
     ).toBe(true);
     expect(
       activeCalDavRequests?.every(({ pathname }) =>
-        pathname.startsWith('/_matrix_calendar_service/contract-room-one/'),
+        pathname.startsWith(`/${principalLocalpart()}/contract-room-one/`),
       ),
     ).toBe(true);
     assertLogsOmitSecrets();
@@ -901,6 +1020,70 @@ async function registerServiceUser(): Promise<void> {
     }
     throw error;
   }
+}
+
+async function registerNormalBotAccount(): Promise<{
+  readonly userId: string;
+  readonly accessToken: string;
+}> {
+  const localpart = `room-calendar-bot-${randomUUID().replace(/-/g, '')}`;
+  const password = randomBytes(32).toString('base64url');
+  try {
+    execFileSync(
+      'docker',
+      [
+        'compose',
+        '-f',
+        resolve(__dirname, '../../../dev/compose.yaml'),
+        'exec',
+        '-T',
+        'synapse',
+        'register_new_matrix_user',
+        '-c',
+        '/data/homeserver.yaml',
+        '-u',
+        localpart,
+        '--password-file',
+        '/dev/stdin',
+        'http://localhost:8008',
+      ],
+      { encoding: 'utf8', input: password, timeout: 30_000 },
+    );
+  } catch {
+    throw new Error('Synthetic normal bot account registration failed');
+  }
+
+  const login = await matrixJson<{
+    user_id?: unknown;
+    access_token?: unknown;
+  }>('/_matrix/client/v3/login', {
+    method: 'POST',
+    body: {
+      type: 'm.login.password',
+      identifier: { type: 'm.id.user', user: localpart },
+      password,
+    },
+  });
+  const expectedUserId = `@${localpart}:${matrixServerName}`;
+  if (
+    login.user_id !== expectedUserId ||
+    typeof login.access_token !== 'string' ||
+    login.access_token.length === 0
+  ) {
+    throw new Error('Synthetic normal bot login could not be verified');
+  }
+  return { userId: expectedUserId, accessToken: login.access_token };
+}
+
+function getRoomPrincipalIdentityProvider(): RoomCalendarPrincipalIdentityProvider {
+  if (!roomPrincipalIdentityProvider) {
+    throw new Error('Room principal identity provider is unavailable');
+  }
+  return roomPrincipalIdentityProvider;
+}
+
+function principalLocalpart(): string {
+  return principalUserId.slice(1).split(':')[0];
 }
 
 async function createRoom(
@@ -1101,7 +1284,7 @@ function assertLogsOmitSecrets(): void {
   const logs = `${gatewayLogLines.join('\n')}\n${serviceLogs}`;
   const actorTaggedProof = taggedProof(actorIdentity);
   const actorAuthorization = identityHeader(actorIdentity);
-  const serviceLocalpart = serviceUserId.slice(1).split(':')[0];
+  const serviceLocalpart = principalLocalpart();
   const serviceTaggedProofs = serviceOpenIdTokens.map((accessToken) =>
     taggedProof({
       access_token: accessToken,

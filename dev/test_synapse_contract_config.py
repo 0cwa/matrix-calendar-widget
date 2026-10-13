@@ -17,6 +17,7 @@ import unittest
 
 from synapse_contract_config import (
     CONTRACT_LOGIN_BURST_COUNT,
+    configure_contract_appservice_registration,
     configure_contract_login_limits,
 )
 
@@ -74,6 +75,54 @@ class SynapseContractConfigTests(unittest.TestCase):
             configure_contract_login_limits(config)
 
         self.assertEqual(config["rc_login"], [])
+
+    def test_enables_only_the_contract_registration_idempotently(self):
+        config = {
+            "app_service_config_files": ["/data/other-registration.yaml"]
+        }
+
+        configure_contract_appservice_registration(
+            config, "/data/appservice-calendar-contract.yaml", "enabled"
+        )
+        configure_contract_appservice_registration(
+            config, "/data/appservice-calendar-contract.yaml", "enabled"
+        )
+
+        self.assertEqual(
+            config["app_service_config_files"],
+            [
+                "/data/other-registration.yaml",
+                "/data/appservice-calendar-contract.yaml",
+            ],
+        )
+
+    def test_disables_only_the_contract_registration_and_preserves_others(self):
+        config = {
+            "app_service_config_files": [
+                "/data/appservice-calendar-contract.yaml",
+                "/data/other-registration.yaml",
+                "/data/appservice-calendar-contract.yaml",
+            ]
+        }
+
+        configure_contract_appservice_registration(
+            config, "/data/appservice-calendar-contract.yaml", "disabled"
+        )
+
+        self.assertEqual(
+            config["app_service_config_files"],
+            ["/data/other-registration.yaml"],
+        )
+
+    def test_rejects_unknown_contract_appservice_mode(self):
+        config = {"app_service_config_files": []}
+
+        with self.assertRaises(ValueError):
+            configure_contract_appservice_registration(
+                config, "/data/appservice-calendar-contract.yaml", "automatic"
+            )
+
+        self.assertEqual(config["app_service_config_files"], [])
 
 
 if __name__ == "__main__":

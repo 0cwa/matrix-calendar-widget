@@ -5,7 +5,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE=(docker compose -f "$ROOT_DIR/dev/compose.yaml")
 MATRIX_USER="${MATRIX_CALENDAR_DEV_USER:-calendar}"
 MATRIX_PASSWORD="${MATRIX_CALENDAR_DEV_PASSWORD:-calendar-dev-password}"
+CONTRACT_APPSERVICE_REGISTRATION="${MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION:-enabled}"
 startup_failure_stage=untracked
+
+case "$CONTRACT_APPSERVICE_REGISTRATION" in
+  enabled|disabled) ;;
+  *)
+    echo "MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION must be enabled or disabled" >&2
+    exit 2
+    ;;
+esac
 
 emit_startup_failure_marker() {
   local exit_code="$1"
@@ -33,28 +42,36 @@ if ! "${COMPOSE[@]}" run --rm --entrypoint sh synapse -c 'test -f /data/homeserv
   "${COMPOSE[@]}" run --rm synapse generate >/dev/null 2>&1
 fi
 
-echo "==> Registering the synthetic local application service"
-startup_failure_stage=fixture-permission
-chmod 0644 "$ROOT_DIR/dev/appservice-calendar-contract.yaml" >/dev/null 2>&1
+if [[ "$CONTRACT_APPSERVICE_REGISTRATION" == enabled ]]; then
+  echo "==> Registering the synthetic local application service"
+  startup_failure_stage=fixture-permission
+  chmod 0644 "$ROOT_DIR/dev/appservice-calendar-contract.yaml" >/dev/null 2>&1
+else
+  echo "==> Removing the synthetic local application-service registration"
+fi
 startup_failure_stage=registration-update
-"${COMPOSE[@]}" run --rm --entrypoint python synapse -c '
+"${COMPOSE[@]}" run --rm \
+  -e "MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION=$CONTRACT_APPSERVICE_REGISTRATION" \
+  --entrypoint python synapse -c '
 import os
 import sys
 import tempfile
 import yaml
 
 sys.path.insert(0, "/data")
-from synapse_contract_config import configure_contract_login_limits
+from synapse_contract_config import (
+    configure_contract_appservice_registration,
+    configure_contract_login_limits,
+)
 
 config_path = "/data/homeserver.yaml"
 registration = "/data/appservice-calendar-contract.yaml"
 with open(config_path, encoding="utf-8") as config_file:
     config = yaml.safe_load(config_file)
-if not os.path.isfile(registration):
+registration_mode = os.environ.get("MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION")
+if registration_mode == "enabled" and not os.path.isfile(registration):
     raise SystemExit("synthetic application-service registration is missing")
-registrations = config.setdefault("app_service_config_files", [])
-if registration not in registrations:
-    registrations.append(registration)
+configure_contract_appservice_registration(config, registration, registration_mode)
 configure_contract_login_limits(config)
 directory = os.path.dirname(config_path)
 with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=False) as output:
@@ -66,9 +83,15 @@ os.replace(temporary_path, config_path)
 
 echo "==> Verifying Synapse can read its config and registration"
 startup_failure_stage=uid991-access-assertion
-"${COMPOSE[@]}" run --rm --user 991:991 --entrypoint sh synapse -c \
-  'test -r /data/homeserver.yaml && test -w /data/homeserver.yaml && test -w /data && test -r /data/appservice-calendar-contract.yaml' \
-  >/dev/null 2>&1
+if [[ "$CONTRACT_APPSERVICE_REGISTRATION" == enabled ]]; then
+  "${COMPOSE[@]}" run --rm --user 991:991 --entrypoint sh synapse -c \
+    'test -r /data/homeserver.yaml && test -w /data/homeserver.yaml && test -w /data && test -r /data/appservice-calendar-contract.yaml' \
+    >/dev/null 2>&1
+else
+  "${COMPOSE[@]}" run --rm --user 991:991 --entrypoint sh synapse -c \
+    'test -r /data/homeserver.yaml && test -w /data/homeserver.yaml && test -w /data' \
+    >/dev/null 2>&1
+fi
 
 echo "==> Starting Synapse"
 startup_failure_stage=synapse-compose-start

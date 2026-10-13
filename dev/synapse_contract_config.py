@@ -31,3 +31,29 @@ def configure_contract_login_limits(config):
         if not isinstance(scope_limits, dict):
             raise TypeError(f"Synapse rc_login.{scope} must be a mapping")
         scope_limits["burst_count"] = CONTRACT_LOGIN_BURST_COUNT
+
+
+def configure_contract_appservice_registration(config, registration, mode):
+    """Enable or remove only the isolated dev contract's AS registration."""
+    if not isinstance(config, dict):
+        raise TypeError("Synapse configuration must be a mapping")
+    if mode not in ("enabled", "disabled"):
+        raise ValueError(
+            "Contract application-service mode must be enabled or disabled"
+        )
+    if not isinstance(registration, str) or not registration:
+        raise ValueError("Contract application-service registration must be a path")
+
+    registrations = config.setdefault("app_service_config_files", [])
+    if not isinstance(registrations, list) or any(
+        not isinstance(entry, str) for entry in registrations
+    ):
+        raise TypeError("Synapse app_service_config_files must be a list of paths")
+
+    if mode == "enabled":
+        if registration not in registrations:
+            registrations.append(registration)
+    else:
+        config["app_service_config_files"] = [
+            entry for entry in registrations if entry != registration
+        ]
