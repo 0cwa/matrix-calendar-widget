@@ -158,16 +158,22 @@ different whole-home Radicale principal; the server does not migrate calendars.
 Application-service requirements for unrelated features and action notices
 remain in force.
 
-A separate normal-bot Element acceptance job now uses the shared fixture runner.
-Its setup requires disabled synthetic AS registration and no AS token, and its
-offline tests check the bot OpenID request shape and workflow guard. These
-checks do not establish the hosted normal-bot path. The latest published PR #247
-draft's Real Radicale contract failed at its subject observer in
-[run 38400030704](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38400030704).
-Keep that failure open until a new hosted run passes. This integrated candidate's
-normal-bot Element job and AS-free Synapse/Radicale room contract have not yet
-run; full reminder persistence/paired-restore and operator acceptance also
-remain open.
+A separate normal-bot Element acceptance job uses the shared fixture runner.
+Its setup requires disabled synthetic AS registration and no AS token; offline
+tests cover setup, OpenID request shape, and workflow guards. The latest
+published PR #247 candidate's hosted run,
+[38404578019](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38404578019),
+ended with failures in the Real Radicale, Desktop startup, Element Web, and
+normal-bot acceptance contexts. The legacy appservice contract phase passed;
+bot-mode setup stopped before protocol checks because Synapse's synthetic-user
+registration CLI waited for admin input. No bot protocol assertions ran. The
+current candidate adds `--no-admin`, sends the required empty JSON object for
+bot-mode OpenID requests, fixes fixture `fetch` forwarding to the subject
+observer, and falls back to the digest-checked pinned Element Desktop archive
+when the package index is stale. Focused offline tests cover these changes,
+but this candidate has not had a hosted rerun. The integrated AS-free
+Synapse/Radicale room contract, full reminder persistence, PostgreSQL restart
+and paired-restore acceptance, and operator acceptance remain open.
 
 Draft PR #227 candidate `a02932dafbbfa9316bee5e8bda1ee15ed1ddbaff` passed its
 hosted Element Web acceptance on exact head in [run
@@ -237,11 +243,17 @@ loading, memory, and actual clients remain unmeasured.
 - **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, arbitrary RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, attachment forms beyond ADR038, broader alarms, and conference forms beyond ADR036 are not part of the implemented editor. Unsupported recurrence or timezone sources may be omitted from projection; the widget warns for source forms it diagnoses, while preserving the canonical resource.
 - **M6:** issue #7 bounded repository criteria are complete. ADR041's optional
   bot-account principal source integration is implemented; appservice remains
-  the default. The integrated AS-free normal-bot room contract and full
-  reminder/PostgreSQL paired-restore acceptance remain open. Keep room access,
-  event writes, settings, delivery, and action notices off until the operator
-  accepts each capability and its trust boundary. A passing pinned stack is
-  not an operator-host or production proof.
+  the default. The latest published PR #247 candidate failed its Real Radicale,
+  Desktop startup, Element Web, and normal-bot acceptance contexts; its legacy
+  appservice contract phase passed, but bot-mode setup stopped before protocol
+  checks while synthetic-user registration waited for admin input. The current
+  candidate fixes the registration call and OpenID request body and updates the
+  acceptance fixture and Desktop archive fallback; these fixes have focused
+  offline coverage only. The integrated AS-free normal-bot room contract and
+  full reminder/PostgreSQL paired-restore acceptance remain open. Keep room
+  access, event writes, settings, delivery, and action notices off until the
+  operator accepts each capability and its trust boundary. A passing pinned
+  stack is not an operator-host or production proof.
 - **M8:** The bounded G6 Element Web interaction path remains covered by merged
   run [37739410969](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37739410969),
   including shared-event edit/delete, unsupported-source preservation,

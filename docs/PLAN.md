@@ -414,14 +414,23 @@ DST regression or recurrence-editing criteria above.
       runner. Require disabled synthetic AS registration and no AS token while
       retaining the same authorization, event, reminder, restart, restore, and
       cleanup assertions. Add offline setup, OpenID request-shape, and workflow
-      guard tests.
+      guard tests. The latest candidate also supplies Synapse's noninteractive
+      synthetic-account registration flag and sends `{}` as the bot-mode
+      OpenID request body, fixes fixture `fetch` forwarding to the subject
+      observer, and adds a digest-checked Desktop archive fallback; focused
+      offline tests pass, but none of these fixes has hosted runtime evidence
+      yet.
 - [ ] Run the integrated AS-free normal-bot Synapse/Radicale room contract and
       complete normal-bot reminder, PostgreSQL restart, and paired restore
       acceptance. Offline tests and standalone protocol feasibility do not
-      establish these integrated paths. The latest published PR #247 draft's
-      Real Radicale contract failed at its subject observer in
-      [run 38400030704](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38400030704);
-      keep that failure open until a new hosted run passes.
+      establish these integrated paths. In the latest published PR #247 run,
+      [38404578019](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38404578019),
+      the Real Radicale, Desktop startup, Element Web, and normal-bot contexts
+      failed. Its legacy appservice contract phase passed, but bot-mode setup
+      stopped before protocol checks because synthetic-user registration
+      waited for admin input. The current setup, OpenID `{}` body, fixture
+      forwarding, and Desktop archive fixes need a new hosted run; keep runtime
+      acceptance open until it passes.
 - [x] Offer a safe current-room link from authorized room event details and
       display existing safe conference links. Ordinary master conference URI
       authoring follows ADR036; RTC service creation remains future work.
