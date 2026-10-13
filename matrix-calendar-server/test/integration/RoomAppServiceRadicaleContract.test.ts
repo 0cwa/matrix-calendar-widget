@@ -24,6 +24,7 @@ import { NestFactory } from '@nestjs/core';
 import { NextFunction, Request, Response } from 'express';
 import fetchMock from 'jest-fetch-mock';
 import { MatrixClient } from 'matrix-bot-sdk';
+import { getRequestFn, setRequestFn } from 'matrix-bot-sdk/lib/request';
 import { execFileSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
@@ -126,6 +127,415 @@ describe('normal bot account registration command', () => {
     expect(args).toContain('--no-admin');
     expect(args).not.toContain('-a');
     expect(args).toContain('--password-file');
+  });
+});
+
+type MatrixSdkErrorClass =
+  | 'none'
+  | 'error'
+  | 'matrix-error'
+  | 'type-error'
+  | 'other';
+type MatrixSdkRequestMethod = 'unobserved' | 'get' | 'other';
+type MatrixSdkResponseShape =
+  | 'unobserved'
+  | 'missing'
+  | 'object'
+  | 'invalid-json'
+  | 'other';
+type MatrixSdkResponseUserId = 'unobserved' | 'string' | 'missing' | 'other';
+type MatrixSdkWhoAmIOutcome =
+  | 'api-unavailable'
+  | 'matched'
+  | 'mismatched'
+  | 'missing-user-id'
+  | 'rejected';
+
+interface MatrixSdkWhoAmIObservation {
+  readonly getUserIdAvailable: boolean;
+  readonly getWhoAmIAvailable: boolean;
+  readonly requestSeen: boolean;
+  readonly requestMethod: MatrixSdkRequestMethod;
+  readonly authorizationPresent: boolean | undefined;
+  readonly responseStatus: number | undefined;
+  readonly responseShape: MatrixSdkResponseShape;
+  readonly responseUserId: MatrixSdkResponseUserId;
+  readonly transportError: MatrixSdkErrorClass;
+  readonly sdkError: MatrixSdkErrorClass;
+  readonly identityMatches: boolean | undefined;
+  readonly outcome: MatrixSdkWhoAmIOutcome;
+}
+
+interface MatrixSdkWhoAmIResult {
+  readonly userId: unknown;
+  readonly error: unknown;
+  readonly observation: MatrixSdkWhoAmIObservation;
+}
+
+interface MatrixSdkRequestResponse {
+  readonly statusCode?: unknown;
+  readonly body?: unknown;
+}
+
+type MatrixSdkRequestCallback = (
+  error: unknown,
+  response?: MatrixSdkRequestResponse,
+  body?: unknown,
+) => void;
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function classifyMatrixSdkError(error: unknown): MatrixSdkErrorClass {
+  if (error === undefined || error === null) return 'none';
+  if (!isObjectRecord(error) || typeof error.name !== 'string') return 'other';
+  if (error.name === 'TypeError') return 'type-error';
+  if (error.name === 'MatrixError') return 'matrix-error';
+  if (error.name === 'Error') return 'error';
+  return 'other';
+}
+
+function readMatrixSdkResponse(
+  body: unknown,
+  response: MatrixSdkRequestResponse | undefined,
+): Pick<MatrixSdkWhoAmIObservation, 'responseShape' | 'responseUserId'> {
+  const raw = body === undefined ? response?.body : body;
+  if (raw === undefined || raw === null) {
+    return { responseShape: 'missing', responseUserId: 'unobserved' };
+  }
+
+  let value: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      value = JSON.parse(raw) as unknown;
+    } catch {
+      return { responseShape: 'invalid-json', responseUserId: 'unobserved' };
+    }
+  }
+  if (!isObjectRecord(value)) {
+    return { responseShape: 'other', responseUserId: 'unobserved' };
+  }
+
+  const responseUserId = value.user_id;
+  return {
+    responseShape: 'object',
+    responseUserId:
+      typeof responseUserId === 'string'
+        ? 'string'
+        : responseUserId === undefined
+          ? 'missing'
+          : 'other',
+  };
+}
+
+function formatMatrixSdkWhoAmIObservation(
+  accountRegistrationAndLoginVerified: boolean,
+  observation: MatrixSdkWhoAmIObservation,
+): string {
+  const authorizationPresent =
+    observation.authorizationPresent === undefined
+      ? 'unavailable'
+      : String(observation.authorizationPresent);
+  const responseStatus =
+    observation.responseStatus === undefined
+      ? 'unavailable'
+      : String(observation.responseStatus);
+  const identityMatches =
+    observation.identityMatches === undefined
+      ? 'unavailable'
+      : String(observation.identityMatches);
+
+  return [
+    'room-appservice-sdk-whoami',
+    `account_verified=${accountRegistrationAndLoginVerified}`,
+    `get_user_id_available=${observation.getUserIdAvailable}`,
+    `get_who_am_i_available=${observation.getWhoAmIAvailable}`,
+    `request_seen=${observation.requestSeen}`,
+    `request_method=${observation.requestMethod}`,
+    `authorization_present=${authorizationPresent}`,
+    `response_status=${responseStatus}`,
+    `response_shape=${observation.responseShape}`,
+    `response_user_id=${observation.responseUserId}`,
+    `transport_error=${observation.transportError}`,
+    `sdk_error=${observation.sdkError}`,
+    `identity_match=${identityMatches}`,
+    `outcome=${observation.outcome}`,
+  ].join(' ');
+}
+
+async function inspectMatrixSdkWhoAmI(
+  client: MatrixClient,
+  expectedUserId: string,
+): Promise<MatrixSdkWhoAmIResult> {
+  const getUserIdAvailable = typeof client.getUserId === 'function';
+  const getWhoAmIAvailable = typeof client.getWhoAmI === 'function';
+  const observation: {
+    getUserIdAvailable: boolean;
+    getWhoAmIAvailable: boolean;
+    requestSeen: boolean;
+    requestMethod: MatrixSdkRequestMethod;
+    authorizationPresent: boolean | undefined;
+    responseStatus: number | undefined;
+    responseShape: MatrixSdkResponseShape;
+    responseUserId: MatrixSdkResponseUserId;
+    transportError: MatrixSdkErrorClass;
+    sdkError: MatrixSdkErrorClass;
+    identityMatches: boolean | undefined;
+    outcome: MatrixSdkWhoAmIOutcome;
+  } = {
+    getUserIdAvailable,
+    getWhoAmIAvailable,
+    requestSeen: false,
+    requestMethod: 'unobserved',
+    authorizationPresent: undefined,
+    responseStatus: undefined,
+    responseShape: 'unobserved',
+    responseUserId: 'unobserved',
+    transportError: 'none',
+    sdkError: 'none',
+    identityMatches: undefined,
+    outcome: 'api-unavailable',
+  };
+
+  if (!getUserIdAvailable || !getWhoAmIAvailable) {
+    return { userId: undefined, error: undefined, observation };
+  }
+
+  const originalRequestFn = getRequestFn();
+  const whoAmIPath = '/_matrix/client/v3/account/whoami';
+  setRequestFn(
+    (requestOptions: unknown, callback: MatrixSdkRequestCallback) => {
+      const options = isObjectRecord(requestOptions) ? requestOptions : {};
+      let pathname = '';
+      try {
+        pathname = new URL(String(options.uri)).pathname;
+      } catch {
+        return originalRequestFn(requestOptions, callback);
+      }
+      if (pathname !== whoAmIPath) {
+        return originalRequestFn(requestOptions, callback);
+      }
+
+      observation.requestSeen = true;
+      observation.requestMethod =
+        typeof options.method === 'string' &&
+        options.method.toUpperCase() === 'GET'
+          ? 'get'
+          : 'other';
+      const headers = isObjectRecord(options.headers) ? options.headers : {};
+      const authorization = headers.Authorization ?? headers.authorization;
+      observation.authorizationPresent =
+        typeof authorization === 'string' &&
+        authorization.startsWith('Bearer ');
+
+      return originalRequestFn(
+        requestOptions,
+        (
+          error: unknown,
+          response: MatrixSdkRequestResponse | undefined,
+          body: unknown,
+        ) => {
+          observation.transportError = classifyMatrixSdkError(error);
+          const statusCode = response?.statusCode;
+          if (
+            typeof statusCode === 'number' &&
+            Number.isInteger(statusCode) &&
+            statusCode >= 100 &&
+            statusCode <= 599
+          ) {
+            observation.responseStatus = statusCode;
+          }
+          Object.assign(observation, readMatrixSdkResponse(body, response));
+          callback(error, response, body);
+        },
+      );
+    },
+  );
+
+  try {
+    const userId: unknown = await client.getUserId();
+    observation.identityMatches = userId === expectedUserId;
+    if (typeof userId !== 'string') {
+      observation.outcome = 'missing-user-id';
+    } else {
+      observation.outcome = observation.identityMatches
+        ? 'matched'
+        : 'mismatched';
+    }
+    return { userId, error: undefined, observation };
+  } catch (error) {
+    observation.sdkError = classifyMatrixSdkError(error);
+    observation.outcome = 'rejected';
+    return { userId: undefined, error, observation };
+  } finally {
+    setRequestFn(originalRequestFn);
+  }
+}
+
+async function withMatrixSdkRequest(
+  requestFn: (
+    requestOptions: unknown,
+    callback: MatrixSdkRequestCallback,
+  ) => unknown,
+  action: () => Promise<void>,
+): Promise<void> {
+  const originalRequestFn = getRequestFn();
+  setRequestFn(requestFn);
+  try {
+    await action();
+  } finally {
+    setRequestFn(originalRequestFn);
+  }
+}
+
+describe('Matrix SDK whoami diagnostic probe', () => {
+  const expectedUserId = '@synthetic-room-calendar:localhost';
+  const syntheticToken = 'synthetic-room-calendar-token-sentinel';
+
+  it('uses the installed SDK GET whoami request and verifies its identity', async () => {
+    await withMatrixSdkRequest(
+      (_requestOptions, callback) => {
+        const body = { user_id: expectedUserId };
+        callback(null, { statusCode: 200, body }, body);
+      },
+      async () => {
+        const result = await inspectMatrixSdkWhoAmI(
+          new MatrixClient('http://localhost:8008', syntheticToken),
+          expectedUserId,
+        );
+        const safeProbe = formatMatrixSdkWhoAmIObservation(
+          true,
+          result.observation,
+        );
+
+        expect(result.userId).toBe(expectedUserId);
+        expect(result.error).toBeUndefined();
+        expect(result.observation).toMatchObject({
+          getUserIdAvailable: true,
+          getWhoAmIAvailable: true,
+          requestSeen: true,
+          requestMethod: 'get',
+          authorizationPresent: true,
+          responseStatus: 200,
+          responseShape: 'object',
+          responseUserId: 'string',
+          transportError: 'none',
+          sdkError: 'none',
+          identityMatches: true,
+          outcome: 'matched',
+        });
+        expect(safeProbe).not.toContain(expectedUserId);
+        expect(safeProbe).not.toContain(syntheticToken);
+      },
+    );
+  });
+
+  it('classifies a transport TypeError without retaining its message', async () => {
+    const originalRequestFn = getRequestFn();
+    const sdkLogMessages: string[] = [];
+    const consoleError = jest
+      .spyOn(console, 'error')
+      .mockImplementation((...args) => {
+        sdkLogMessages.push(args.map(String).join(' '));
+      });
+    let safeProbe = '';
+    try {
+      await withMatrixSdkRequest(
+        (_requestOptions, callback) => {
+          callback(new TypeError('synthetic transport failure'));
+        },
+        async () => {
+          const result = await inspectMatrixSdkWhoAmI(
+            new MatrixClient('http://localhost:8008', syntheticToken),
+            expectedUserId,
+          );
+          safeProbe = formatMatrixSdkWhoAmIObservation(
+            true,
+            result.observation,
+          );
+
+          expect(result.error).toBeInstanceOf(TypeError);
+          expect(result.observation).toMatchObject({
+            requestSeen: true,
+            authorizationPresent: true,
+            responseStatus: undefined,
+            responseShape: 'missing',
+            transportError: 'type-error',
+            sdkError: 'type-error',
+            outcome: 'rejected',
+          });
+          expect(safeProbe).not.toContain('synthetic transport failure');
+          expect(safeProbe).not.toContain(syntheticToken);
+        },
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    expect(getRequestFn()).toBe(originalRequestFn);
+    const sdkLog = sdkLogMessages.join('\n');
+    expect(sdkLog).toContain('TypeError');
+    expect(sdkLog).not.toContain(syntheticToken);
+    expect(sdkLog).not.toContain(expectedUserId);
+  });
+
+  it('distinguishes a whoami response with no user_id', async () => {
+    await withMatrixSdkRequest(
+      (_requestOptions, callback) => {
+        const body = {};
+        callback(null, { statusCode: 200, body }, body);
+      },
+      async () => {
+        const result = await inspectMatrixSdkWhoAmI(
+          new MatrixClient('http://localhost:8008', syntheticToken),
+          expectedUserId,
+        );
+
+        expect(result.userId).toBeUndefined();
+        expect(result.observation).toMatchObject({
+          requestSeen: true,
+          responseStatus: 200,
+          responseShape: 'object',
+          responseUserId: 'missing',
+          identityMatches: false,
+          outcome: 'missing-user-id',
+        });
+      },
+    );
+  });
+
+  it('distinguishes a valid but mismatched whoami identity without exposing either ID', async () => {
+    const otherUserId = '@synthetic-other:localhost';
+    await withMatrixSdkRequest(
+      (_requestOptions, callback) => {
+        const body = { user_id: otherUserId };
+        callback(null, { statusCode: 200, body }, body);
+      },
+      async () => {
+        const result = await inspectMatrixSdkWhoAmI(
+          new MatrixClient('http://localhost:8008', syntheticToken),
+          expectedUserId,
+        );
+        const safeProbe = formatMatrixSdkWhoAmIObservation(
+          true,
+          result.observation,
+        );
+
+        expect(result.userId).toBe(otherUserId);
+        expect(result.observation).toMatchObject({
+          requestSeen: true,
+          responseStatus: 200,
+          responseShape: 'object',
+          responseUserId: 'string',
+          identityMatches: false,
+          outcome: 'mismatched',
+        });
+        expect(safeProbe).not.toContain(expectedUserId);
+        expect(safeProbe).not.toContain(otherUserId);
+        expect(safeProbe).not.toContain(syntheticToken);
+      },
+    );
   });
 });
 const matrixErrorCodes = new Set([
@@ -371,12 +781,25 @@ describeContract(contractDescription, () => {
         homeserverUrl,
         testConfiguration.access_token,
       );
-      const sdkUserId = await principalClient.getUserId();
-      if (sdkUserId !== principalUserId) {
+      const sdkIdentity = await inspectMatrixSdkWhoAmI(
+        principalClient,
+        principalUserId,
+      );
+      appendRoomAppServiceSetupMarker(
+        formatMatrixSdkWhoAmIObservation(true, sdkIdentity.observation),
+      );
+      if (sdkIdentity.observation.outcome === 'api-unavailable') {
+        throw new Error('Matrix SDK whoami API is unavailable');
+      }
+      if (sdkIdentity.error !== undefined) {
+        throw sdkIdentity.error;
+      }
+      if (sdkIdentity.observation.outcome !== 'matched') {
         throw new Error(
           'Synthetic bot token identity did not match its account',
         );
       }
+      const sdkUserId = sdkIdentity.userId as string;
       const localpart = sdkUserId.slice(1).split(':')[0];
       const runtimeContext = new AppRuntimeContext(
         sdkUserId,

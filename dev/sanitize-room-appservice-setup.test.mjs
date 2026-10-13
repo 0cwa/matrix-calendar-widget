@@ -336,6 +336,69 @@ test('reports bounded Matrix request status and code for Room fixture setup', ()
   assert.equal(diagnostic.includes('/repo/'), false);
 });
 
+test('reports only allowlisted SDK whoami metadata after bot setup succeeds', () => {
+  const privateSentinel = 'synthetic-private-host-token-sentinel';
+  const sdkProbe = [
+    'room-appservice-sdk-whoami',
+    'account_verified=true',
+    'get_user_id_available=true',
+    'get_who_am_i_available=true',
+    'request_seen=true',
+    'request_method=get',
+    'authorization_present=true',
+    'response_status=unavailable',
+    'response_shape=missing',
+    'response_user_id=unobserved',
+    'transport_error=type-error',
+    'sdk_error=type-error',
+    'identity_match=unavailable',
+    'outcome=rejected',
+  ].join(' ');
+  const diagnostic = formatRoomAppServiceSetupDiagnostic(
+    report(
+      'TypeError: request failed for ' +
+        privateSentinel +
+        '\n    at getUserId (/private/path)',
+    ),
+    [
+      'room-appservice-setup-start',
+      'room-appservice-setup-stage-register-service-user',
+      sdkProbe,
+    ].join('\n'),
+  );
+
+  assert.match(
+    diagnostic,
+    /room-appservice-setup-test-results stage=normal-bot-sdk-whoami /,
+  );
+  assert.match(diagnostic, /room-appservice-sdk-whoami account_verified=true/);
+  assert.match(diagnostic, /request_seen=true request_method=get/);
+  assert.match(diagnostic, /transport_error=type-error sdk_error=type-error/);
+  assert.equal(diagnostic.includes(privateSentinel), false);
+  assert.equal(diagnostic.includes('/private/path'), false);
+});
+
+test('keeps setup stage and drops malformed SDK whoami marker contents', () => {
+  const privateSentinel = 'synthetic-private-token-sentinel';
+  const diagnostic = formatRoomAppServiceSetupDiagnostic(
+    report('TypeError: private failure details'),
+    [
+      'room-appservice-setup-start',
+      'room-appservice-setup-stage-register-service-user',
+      'room-appservice-sdk-whoami account_verified=true authorization_present=' +
+        privateSentinel,
+    ].join('\n'),
+  );
+
+  assert.match(
+    diagnostic,
+    /room-appservice-setup-test-results stage=register-service-user /,
+  );
+  assert.equal(diagnostic.includes('room-appservice-sdk-whoami'), false);
+  assert.equal(diagnostic.includes(privateSentinel), false);
+  assert.equal(diagnostic.includes('private failure details'), false);
+});
+
 test('Room setup diagnosis rejects injected status and Matrix code markers', () => {
   const diagnostic = formatRoomAppServiceSetupDiagnostic(
     report(
