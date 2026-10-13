@@ -255,8 +255,10 @@ const matrixClient = {
     },
     {
       provide: ModuleProviderToken.NATIVE_FETCH,
-      useValue: (input: RequestInfo | URL, init?: RequestInit) =>
-        globalThis.fetch(input, init),
+      useValue: (
+        input: Parameters<typeof globalThis.fetch>[0],
+        init?: Parameters<typeof globalThis.fetch>[1],
+      ) => globalThis.fetch(input, init),
     },
     {
       provide: ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
