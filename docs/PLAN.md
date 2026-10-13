@@ -423,38 +423,28 @@ DST regression or recurrence-editing criteria above.
       published candidate below show only partial normal-bot path evidence.
       The signed Desktop index offers 1.12.31 and omits pinned 1.12.30; the
       fixture uses the digest-checked pinned archive fallback.
-- [ ] Run the integrated AS-free normal-bot Synapse/Radicale room contract and
-      complete normal-bot reminder, PostgreSQL restart, and paired restore
-      acceptance. Offline tests do not establish these integrated paths. The
-      latest published PR #247 head `7ed070f52b569c22729ea6d881322e2b4a03932c`
-      passed the core repository checks, PostgreSQL bootstrap, Desktop startup,
-      and CodeQL. Its Real Radicale contract in
-      [run 38439533944](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533944)
-      passed the legacy appservice phase (7/7 bodies). Synthetic normal-bot
-      account registration and login succeeded, then the SDK's `getUserId()`
-      lookup raised a `TypeError` before bot protocol cases ran (0/7). A local
-      loopback reproducer under the same Jest config traced the failure to
-      module resolution: `lib` preceded `node_modules`, causing the SDK's bare
-      `request` import to resolve to its own `lib/request` export object.
-      Putting `node_modules` first while retaining `lib`, and adding a
-      default-SDK loopback regression, pass locally. The full server suite
-      passed 85 suites and 1,399 tests (6 suites and 33 tests skipped). This is
-      a Jest resolver fix, not a production-auth or Matrix wire-protocol change;
-      hosted Synapse/Radicale confirmation remains pending. The Element Web and
-      bot acceptance in
-      [run 38439533765](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533765)
-      passed 127 appservice Web phases and appservice Desktop 12/12, including
-      reminder/restart/paired restore, numeric zero- and 25-event timings, and
-      owned cleanup. Normal-bot Web event create/readback and numeric zero- and
-      25-event timing passed, but its Desktop journey passed 4/12, failed event
-      row visibility 30 seconds after HTTP 201, and left seven cases not run.
-      Normal-bot reminders, PostgreSQL restart, and paired restore were not
-      run. One Element-origin opening error was recorded; final diagnostic
-      eligibility remains pending all functional gates. Desktop startup passed
-      all 22 checks in
-      [run 38439533769](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533769).
-      The AS-free protocol, complete normal-bot flow, reminder delivery,
-      restart, paired restore, and operator acceptance remain open.
+- [ ] Complete normal-bot G6 unsupported-resource preservation and owned
+      cleanup, then pass acceptance on the fixed source. The published PR #247
+      head `c6a68e9ec49395a671d6a29e48617979df99de3d` passed all terminal checks
+      except normal-bot acceptance in
+      [run 38452260797](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38452260797).
+      Its Real Radicale contract passed appservice and normal-bot behavior
+      (7/7 cases in each mode). The Element acceptance passed 127 appservice
+      Web phases, both Desktop journeys (12/12), normal-bot Web CRUD, reminders,
+      PostgreSQL restart, paired restore, and both profiles' zero- and
+      25-event timing gates. Appservice G6 preservation and cleanup passed.
+      Normal-bot G6 failed its combined preservation gate: the neighbor update
+      returned HTTP 200, the edited title appeared in the refreshed list, and
+      the unsupported canonical resource stayed byte-identical, but the
+      ownership check rejected the gateway href because the fixture still
+      assumed the appservice home. The G6 state machine therefore refused to
+      advance the cleanup ETag; three of four resources were resolved, with one
+      cleanup unresolved. Source commit
+      `794cbc60a3a93e38961db49dfe358831e46f44c5` fixes the fixture check to use
+      the selected, authenticated principal's localpart while retaining fixed
+      origins, exact href identity, strong ETag checks, and fail-closed cleanup.
+      Focused offline tests, E2E TypeScript, and formatting pass; this follow-up
+      has not yet had a hosted runtime run. Operator acceptance remains open.
 - [x] Offer a safe current-room link from authorized room event details and
       display existing safe conference links. Ordinary master conference URI
       authoring follows ADR036; RTC service creation remains future work.

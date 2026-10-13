@@ -160,42 +160,30 @@ remain in force.
 
 A separate normal-bot Element acceptance job uses the shared fixture runner.
 Its setup requires disabled synthetic AS registration and no AS token; offline
-tests cover setup, OpenID request shape, and workflow guards. The latest
-published PR #247 head `7ed070f52b569c22729ea6d881322e2b4a03932c` passed the
-core repository checks, PostgreSQL bootstrap, Desktop startup, and CodeQL.
-Its Real Radicale contract in [run
-38439533944](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533944)
-passed the legacy appservice phase (7/7 bodies). Synthetic normal-bot account
-registration and login succeeded, then the installed SDK's `getUserId()`
-lookup raised a `TypeError` before bot protocol cases ran (0/7). A local
-loopback reproducer under the same server Jest config traced this to Jest
-resolving the SDK's bare `request` dependency to the SDK's own
-`lib/request` export object because `lib` preceded `node_modules`. Reordering
-the roots to put `node_modules` first, while retaining `lib`, and adding a
-default-SDK loopback regression passed locally. The local full server suite
-passed 85 suites and 1,399 tests (6 suites and 33 tests skipped). This is a
-Jest resolution fix, not a Matrix wire-protocol or production-auth change; it
-has not yet been rerun against hosted Synapse/Radicale.
+tests cover setup, OpenID request shape, and workflow guards. The published PR
+#247 head `c6a68e9ec49395a671d6a29e48617979df99de3d` passed every terminal check
+except normal-bot acceptance in [run
+38452260797](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38452260797).
+The Real Radicale contract passed appservice and normal-bot behavior (7/7
+cases each), confirming the earlier local Jest resolver fix against the hosted
+Synapse/Radicale stack. That fix only reorders Jest's module search roots; it
+does not change production authentication or Matrix wire behavior.
 
-The Element Web and bot acceptance in [run
-38439533765](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533765)
-passed 127 appservice Web phases and the appservice Desktop journey passed
-12/12 cases. Appservice reminder/restart/paired-restore acceptance, numeric
-zero- and 25-event timing, and owned cleanup passed. The normal-bot Web
-event-create/readback check passed, and its zero- and 25-event timing met the
-numeric limits. Its Desktop journey passed 4/12, failed when the expected
-event row remained invisible 30 seconds after HTTP 201, and left seven cases
-not run. Normal-bot reminders, restart, and paired restore were not run; its
-overall acceptance failed. One Element-origin opening error was recorded, and
-final diagnostic eligibility remains pending all functional gates. Desktop
-startup passed all 22 checks in [run
-38439533769](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533769).
-Only the Real Radicale contract and normal-bot acceptance terminal checks
-failed on the published head; the other hosted checks succeeded. CodeRabbit
-reported success, but its independent review was skipped because the PR was a
-draft. The current source has the local Jest resolver fix, but its hosted
-AS-free Synapse/Radicale protocol result is still pending. Operator acceptance
-also remains open.
+The Element acceptance passed 127 appservice Web phases, appservice Desktop
+12/12, normal-bot Desktop 12/12, normal-bot Web CRUD, reminders, PostgreSQL
+restart, paired restore, and both profiles' numeric zero- and 25-event timing
+gates. Appservice G6 preservation and owned cleanup passed. Normal-bot G6
+failed its combined preservation gate: the supported neighbor PATCH returned
+HTTP 200, the edited title appeared in the refreshed list, and the unsupported
+canonical object remained byte-identical, but the fixture's ownership check
+rejected the gateway href because it expected the appservice home. The G6
+state machine then refused to accept the updated ETag for cleanup; three of
+four resources were resolved and one cleanup remained unresolved. Source
+commit `794cbc60a3a93e38961db49dfe358831e46f44c5` changes the fixture check to
+use the selected authenticated principal's localpart while preserving fixed
+origins, exact href equality, strong ETag checks, and fail-closed cleanup.
+Focused offline tests, E2E TypeScript, and formatting pass; the follow-up has
+not yet had a hosted runtime run. Operator acceptance remains open.
 
 Draft PR #227 candidate `a02932dafbbfa9316bee5e8bda1ee15ed1ddbaff` passed its
 hosted Element Web acceptance on exact head in [run
@@ -264,33 +252,22 @@ loading, memory, and actual clients remain unmeasured.
 - **M4:** collection-timezone editing and remaining issue #5 acceptance work.
 - **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, arbitrary RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, attachment forms beyond ADR038, broader alarms, and conference forms beyond ADR036 are not part of the implemented editor. Unsupported recurrence or timezone sources may be omitted from projection; the widget warns for source forms it diagnoses, while preserving the canonical resource.
 - **M6:** issue #7 bounded repository criteria are complete. ADR041's optional
-  bot-account principal source integration is implemented; appservice remains
-  the default. On published PR #247 head
-  `7ed070f52b569c22729ea6d881322e2b4a03932c`, the Real Radicale contract
-  [run 38439533944](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533944)
-  passed legacy appservice behavior (7/7 bodies). Bot account registration
-  and login succeeded, then SDK `getUserId()` raised a `TypeError` before any
-  bot protocol case ran (0/7). A local loopback reproduction traced this to
-  Jest resolving the bare `request` import to the SDK's own `lib/request`
-  export object; putting `node_modules` before `lib` while keeping both roots
-  and adding a default-SDK loopback regression passed the full server suite
-  locally (85 suites and 1,399 tests passed; 6 suites and 33 tests skipped).
-  This is a test-resolver fix, not a production-auth or Matrix wire-protocol
-  change; hosted Synapse/Radicale confirmation remains pending. The Element Web
-  and bot acceptance
-  [run 38439533765](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533765)
-  passed 127 appservice Web phases, appservice Desktop 12/12, appservice
-  reminder/restart/paired restore, numeric zero- and 25-event timings, and
-  owned cleanup. Normal-bot Web event create/readback and numeric zero- and
-  25-event timings passed, but Desktop passed 4/12 and failed exact row
-  visibility 30 seconds after HTTP 201; seven cases were not run. Normal-bot
-  reminders, restart, and paired restore were not run. One opening error was
-  recorded; final diagnostic eligibility remains pending all functional gates.
-  Desktop startup passed all 22 checks in
-  [run 38439533769](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533769).
-  Keep room access, event writes, settings, delivery, and action notices off
-  until the operator accepts each capability and its trust boundary. A
-  passing pinned stack is not an operator-host or production proof.
+  bot-account principal integration is implemented; appservice remains the
+  default. The published PR #247 head
+  `c6a68e9ec49395a671d6a29e48617979df99de3d` passed the Real Radicale contract
+  in appservice and normal-bot modes (7/7 cases each), normal-bot Desktop
+  12/12, Web CRUD, reminders, PostgreSQL restart, paired restore, and both
+  profiles' zero- and 25-event timing gates in
+  [run 38452260797](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38452260797).
+  The normal-bot G6 preservation/cleanup phase failed because the fixture
+  compared the gateway href against the fixed appservice home instead of the
+  selected normal-bot home. Source follow-up
+  `794cbc60a3a93e38961db49dfe358831e46f44c5` uses the authenticated selected
+  localpart and retains exact-path, origin, ETag, and cleanup checks; it is
+  still awaiting hosted runtime verification. Keep room access, event writes,
+  settings, delivery, and action notices off until the operator accepts each
+  capability and its trust boundary. A passing pinned stack is not an
+  operator-host or production proof.
 - **M8:** The bounded G6 Element Web interaction path remains covered by merged
   run [37739410969](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37739410969),
   including shared-event edit/delete, unsupported-source preservation,
