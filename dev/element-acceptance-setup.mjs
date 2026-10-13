@@ -194,7 +194,7 @@ export function createPrincipalOpenIdRequest({
     return {
       path: `/_matrix/client/v3/user/${encodeURIComponent(userId)}/openid/request_token`,
       token: accountAccessToken,
-      body: undefined,
+      body: {},
     };
   }
   throw new FixtureSetupError('service-calendar-ready');

@@ -70,6 +70,7 @@ test('both fixture jobs select one strict process-wide principal mode', () => {
   );
   assert.match(runner, /MATRIX_APPLICATION_SERVICE_USER_ID=/u);
   assert.match(e2e, /sender\.accessToken !== bot\.accessToken/u);
+  assert.match(e2e, /openIdBody = JSON\.stringify\(\{\}\)/u);
   assert.match(
     e2e,
     /process\.env\.MATRIX_APPLICATION_SERVICE_TOKEN !== undefined/u,

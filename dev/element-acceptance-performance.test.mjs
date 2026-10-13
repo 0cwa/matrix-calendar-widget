@@ -3,12 +3,15 @@ import test from 'node:test';
 import {
   buildOrdinaryPerformanceEvents,
   buildPerformanceEvents,
+  calendarCollectionUrl,
   cleanupPerformanceManifestEvents,
   createPerformanceManifestEvent,
   isSafePerformanceManifest,
   next31DayMonth,
   next31DayMonthAfter,
   raceCalendarReadyOrIdentityPrompt,
+  requestPerformanceOpenIdCredential,
+  resolvePerformancePrincipal,
 } from './element-acceptance-performance.mjs';
 
 function deferred() {
@@ -18,6 +21,168 @@ function deferred() {
   });
   return { promise, resolve };
 }
+
+test('performance OpenID keeps the legacy appservice principal and body', () => {
+  const principal = resolvePerformancePrincipal(
+    {
+      principalMode: 'appservice',
+      serviceSender: {
+        userId: '@_matrix_calendar_service:localhost',
+        accessToken: 'synthetic-service-user-token',
+      },
+    },
+    'appservice',
+    'synthetic-as-token',
+  );
+
+  assert.deepEqual(principal, {
+    mode: 'appservice',
+    userId: '@_matrix_calendar_service:localhost',
+    localpart: '_matrix_calendar_service',
+    accessToken: 'synthetic-service-user-token',
+    openIdBody: { user_id: '@_matrix_calendar_service:localhost' },
+  });
+});
+
+test('performance OpenID uses the selected bot token, identity, and empty body', () => {
+  const bot = {
+    userId: '@element-acceptance-bot:localhost',
+    accessToken: 'synthetic-bot-access-token',
+  };
+  const principal = resolvePerformancePrincipal(
+    {
+      principalMode: 'bot-account',
+      users: { bot },
+      serviceSender: { ...bot },
+    },
+    'bot-account',
+    undefined,
+  );
+
+  assert.deepEqual(principal, {
+    mode: 'bot-account',
+    userId: bot.userId,
+    localpart: 'element-acceptance-bot',
+    accessToken: bot.accessToken,
+    openIdBody: {},
+  });
+  assert.equal(Object.hasOwn(principal.openIdBody, 'user_id'), false);
+});
+
+test('performance OpenID requests post the selected identity without query parameters', async () => {
+  const appservicePrincipal = resolvePerformancePrincipal(
+    {
+      principalMode: 'appservice',
+      serviceSender: {
+        userId: '@_matrix_calendar_service:localhost',
+        accessToken: 'synthetic-service-user-token',
+      },
+    },
+    'appservice',
+    'synthetic-as-token',
+  );
+  const bot = {
+    userId: '@element-acceptance-bot:localhost',
+    accessToken: 'synthetic-bot-access-token',
+  };
+  const botPrincipal = resolvePerformancePrincipal(
+    {
+      principalMode: 'bot-account',
+      users: { bot },
+      serviceSender: { ...bot },
+    },
+    'bot-account',
+    undefined,
+  );
+  const originalFetch = globalThis.fetch;
+
+  try {
+    for (const [principal, expectedBody] of [
+      [appservicePrincipal, { user_id: '@_matrix_calendar_service:localhost' }],
+      [botPrincipal, {}],
+    ]) {
+      let request;
+      globalThis.fetch = async (url, init) => {
+        request = { url: new URL(url), init };
+        return Response.json({
+          access_token: 'synthetic-openid-proof-token',
+          matrix_server_name: 'localhost',
+        });
+      };
+
+      const proof = await requestPerformanceOpenIdCredential(principal);
+      assert.equal(proof.matrixServerName, 'localhost');
+      assert.equal(
+        request.url.pathname,
+        `/_matrix/client/v3/user/${encodeURIComponent(principal.userId)}/openid/request_token`,
+      );
+      assert.equal(request.url.search, '');
+      assert.equal(request.init.method, 'POST');
+      assert.equal(
+        request.init.headers.Authorization,
+        `Bearer ${principal.accessToken}`,
+      );
+      assert.equal(request.init.headers['Content-Type'], 'application/json');
+      assert.equal(request.init.body, JSON.stringify(expectedBody));
+      if (principal.mode === 'bot-account') {
+        assert.equal(
+          Object.hasOwn(JSON.parse(request.init.body), 'user_id'),
+          false,
+        );
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('performance CalDAV uses the selected sender localpart', () => {
+  assert.equal(
+    calendarCollectionUrl('element-acceptance-bot'),
+    'http://127.0.0.1:5232/element-acceptance-bot/element-acceptance/',
+  );
+  assert.equal(
+    calendarCollectionUrl('_matrix_calendar_service'),
+    'http://127.0.0.1:5232/_matrix_calendar_service/element-acceptance/',
+  );
+});
+
+test('performance OpenID rejects mode, identity, token, and AS credential mismatches', () => {
+  const bot = {
+    userId: '@element-acceptance-bot:localhost',
+    accessToken: 'synthetic-bot-access-token',
+  };
+  const fixture = {
+    principalMode: 'bot-account',
+    users: { bot },
+    serviceSender: { ...bot },
+  };
+
+  assert.equal(resolvePerformancePrincipal(fixture, 'appservice'), undefined);
+  assert.equal(
+    resolvePerformancePrincipal(fixture, 'bot-account', 'unexpected-as-token'),
+    undefined,
+  );
+  assert.equal(
+    resolvePerformancePrincipal(
+      { ...fixture, serviceSender: { ...bot, userId: '@other:localhost' } },
+      'bot-account',
+      undefined,
+    ),
+    undefined,
+  );
+  assert.equal(
+    resolvePerformancePrincipal(
+      {
+        ...fixture,
+        serviceSender: { ...bot, accessToken: 'different-bot-access-token' },
+      },
+      'bot-account',
+      undefined,
+    ),
+    undefined,
+  );
+});
 
 test('chooses a future 31-day local calendar month', () => {
   assert.deepEqual(next31DayMonth(new Date('2026-10-07T12:00:00.000Z')), {

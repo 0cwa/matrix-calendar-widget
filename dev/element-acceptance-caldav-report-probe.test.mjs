@@ -23,7 +23,7 @@ test('report probe keeps the legacy appservice OpenID request shape', () => {
   });
 });
 
-test('report probe uses the selected bot token with no AS credential or body', () => {
+test('report probe uses the selected bot token and empty JSON body without AS identity', () => {
   const bot = {
     userId: '@element-acceptance-bot:localhost',
     accessToken: 'synthetic-bot-token',
@@ -42,8 +42,9 @@ test('report probe uses the selected bot token with no AS credential or body', (
     userId: bot.userId,
     localpart: 'element-acceptance-bot',
     accessToken: bot.accessToken,
+    openIdBody: {},
   });
-  assert.equal(Object.hasOwn(principal, 'openIdBody'), false);
+  assert.equal(Object.hasOwn(principal.openIdBody, 'user_id'), false);
 });
 
 test('report probe rejects bot identity/token mismatches and AS credentials', () => {

@@ -4350,6 +4350,7 @@ function acceptancePrincipal(fixtureValue: Fixture):
     }
     userId = bot.userId;
     accessToken = bot.accessToken;
+    openIdBody = JSON.stringify({});
   } else {
     return undefined;
   }

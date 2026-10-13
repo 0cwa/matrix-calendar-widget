@@ -79,6 +79,7 @@ export function resolveProbePrincipal(input, applicationServiceToken) {
     userId: bot.userId,
     localpart: bot.userId.slice(1, bot.userId.indexOf(':')),
     accessToken: bot.accessToken,
+    openIdBody: {},
   };
 }
 

@@ -92,7 +92,7 @@ test('appservice OpenID setup preserves delegated sender and request body', () =
   });
 });
 
-test('bot OpenID setup uses the bot access token without a user_id body', () => {
+test('bot OpenID setup sends an empty JSON body with the bot access token', () => {
   const request = createPrincipalOpenIdRequest({
     mode: 'bot-account',
     userId: '@element-acceptance-bot:localhost',
@@ -105,7 +105,8 @@ test('bot OpenID setup uses the bot access token without a user_id body', () => 
     '/_matrix/client/v3/user/%40element-acceptance-bot%3Alocalhost/openid/request_token',
   );
   assert.equal(request.token, 'synthetic-bot-token');
-  assert.equal(request.body, undefined);
+  assert.deepEqual(request.body, {});
+  assert.equal(Object.hasOwn(request.body, 'user_id'), false);
   assert.equal(new URL(request.path, 'http://localhost').search, '');
   assert.equal(Object.hasOwn(request, 'user_id'), false);
 });

@@ -353,6 +353,60 @@ function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function safePrincipalToken(value) {
+  return (
+    typeof value === 'string' &&
+    value.length >= 16 &&
+    value.length <= 4096 &&
+    !/[\r\n\u0000-\u001f]/u.test(value)
+  );
+}
+
+export function resolvePerformancePrincipal(
+  fixture,
+  mode,
+  applicationServiceToken,
+) {
+  const sender = fixture?.serviceSender;
+  if (
+    mode === 'appservice' &&
+    fixture?.principalMode === 'appservice' &&
+    safePrincipalToken(applicationServiceToken) &&
+    sender?.userId === SERVICE_USER_ID &&
+    safePrincipalToken(sender.accessToken)
+  ) {
+    return {
+      mode,
+      userId: SERVICE_USER_ID,
+      localpart: SERVICE_LOCALPART,
+      accessToken: sender.accessToken,
+      openIdBody: { user_id: SERVICE_USER_ID },
+    };
+  }
+
+  const bot = fixture?.users?.bot;
+  if (
+    mode === 'bot-account' &&
+    fixture?.principalMode === 'bot-account' &&
+    applicationServiceToken === undefined &&
+    typeof bot?.userId === 'string' &&
+    /^@([a-z0-9][a-z0-9-]{0,254}):localhost$/u.test(bot.userId) &&
+    safePrincipalToken(bot.accessToken) &&
+    sender?.userId === bot.userId &&
+    sender?.accessToken === bot.accessToken
+  ) {
+    return {
+      mode,
+      userId: bot.userId,
+      localpart: bot.userId.slice(1, bot.userId.indexOf(':')),
+      accessToken: bot.accessToken,
+      openIdBody: {},
+    };
+  }
+
+  return undefined;
+}
+
 function requiredEnvironment(name) {
   const value = process.env[name];
   if (typeof value !== 'string' || value.length === 0) {
@@ -480,29 +534,30 @@ function privateFixture() {
     privatePath('ELEMENT_ACCEPTANCE_USERS_FILE'),
     64 * 1024,
   );
-  if (
-    !isRecord(fixture) ||
-    fixture.serviceSender?.userId !== SERVICE_USER_ID ||
-    typeof fixture.serviceSender?.accessToken !== 'string' ||
-    fixture.serviceSender.accessToken.length < 16
-  ) {
+  const mode = process.env.ROOM_CALENDAR_PRINCIPAL_MODE ?? 'appservice';
+  const principal = resolvePerformancePrincipal(
+    fixture,
+    mode,
+    process.env.MATRIX_APPLICATION_SERVICE_TOKEN,
+  );
+  if (!isRecord(fixture) || !principal) {
     throw new PerformanceFixtureError('environment-invalid');
   }
-  return fixture;
+  return { ...fixture, performancePrincipal: principal };
 }
 
-async function obtainOpenIdCredential(fixture) {
+export async function requestPerformanceOpenIdCredential(principal) {
   let response;
   try {
     response = await fetch(
-      `${HOMESERVER_URL}/_matrix/client/v3/user/${encodeURIComponent(SERVICE_USER_ID)}/openid/request_token`,
+      `${HOMESERVER_URL}/_matrix/client/v3/user/${encodeURIComponent(principal.userId)}/openid/request_token`,
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${fixture.serviceSender.accessToken}`,
+          Authorization: `Bearer ${principal.accessToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ user_id: SERVICE_USER_ID }),
+        body: JSON.stringify(principal.openIdBody),
         redirect: 'error',
         signal: AbortSignal.timeout(15_000),
       },
@@ -558,11 +613,11 @@ function loadServerClasses() {
   }
 }
 
-function makeClient(fixture, openIdCredential) {
+function makeClient(principal, openIdCredential) {
   const { CalDavEventClient, MatrixOpenIdCalDavCredentialProvider } =
     loadServerClasses();
   const credentials = new MatrixOpenIdCalDavCredentialProvider(
-    fixture.serviceSender.userId,
+    principal.userId,
     {
       accessToken: openIdCredential.accessToken,
       matrixServerName: openIdCredential.matrixServerName,
@@ -571,9 +626,9 @@ function makeClient(fixture, openIdCredential) {
   return new CalDavEventClient(credentials);
 }
 
-function calendarCollectionUrl() {
+export function calendarCollectionUrl(localpart) {
   return new URL(
-    `${encodeURIComponent(SERVICE_LOCALPART)}/${encodeURIComponent(CALENDAR_ID)}/`,
+    `${encodeURIComponent(localpart)}/${encodeURIComponent(CALENDAR_ID)}/`,
     CALDAV_URL,
   ).toString();
 }
@@ -627,6 +682,7 @@ async function seed(ordinary = false) {
     month = sourceMonth.month;
     emptyMonth = ordinary ? undefined : next31DayMonthAfter(year, month);
     const fixture = privateFixture();
+    const principal = fixture.performancePrincipal;
     const manifest = readManifest(manifestPath, runId, attempt);
     if (manifest.events.length !== 0) {
       throw new PerformanceFixtureError('manifest-invalid');
@@ -640,11 +696,11 @@ async function seed(ordinary = false) {
       events: [],
     };
     writePrivateJson(manifestPath, monthManifest);
-    const proof = await obtainOpenIdCredential(fixture);
-    const client = makeClient(fixture, proof);
+    const proof = await requestPerformanceOpenIdCredential(principal);
+    const client = makeClient(principal, proof);
     const { ICalendarEventCodec } = loadServerClasses();
     const codec = new ICalendarEventCodec();
-    const collectionUrl = calendarCollectionUrl();
+    const collectionUrl = calendarCollectionUrl(principal.localpart);
     const events = ordinary
       ? buildOrdinaryPerformanceEvents(
           `${year}-${String(month).padStart(2, '0')}-${String(ordinaryStartDate.day).padStart(2, '0')}`,
@@ -760,9 +816,10 @@ async function cleanup() {
     let collectionUrl;
     if (needsDelete) {
       const fixture = privateFixture();
-      const proof = await obtainOpenIdCredential(fixture);
-      client = makeClient(fixture, proof);
-      collectionUrl = calendarCollectionUrl();
+      const principal = fixture.performancePrincipal;
+      const proof = await requestPerformanceOpenIdCredential(principal);
+      client = makeClient(principal, proof);
+      collectionUrl = calendarCollectionUrl(principal.localpart);
     }
     cleanupSummary = await cleanupPerformanceManifestEvents(
       manifest.events,
