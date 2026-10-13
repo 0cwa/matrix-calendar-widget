@@ -16,6 +16,7 @@
 
 import {
   chromium,
+  expect,
   test,
   type Browser,
   type BrowserContext,
@@ -154,6 +155,172 @@ const DESKTOP_GATEWAY_READ_FAILURE_POINTS = new Set<DesktopJourneyFailurePoint>(
     'create-control',
   ],
 );
+
+test('bounds Desktop create diagnostics when a response body stalls', async () => {
+  type Listener = (value: unknown) => void;
+  const listeners = new Map<string, Set<Listener>>();
+  const fakePage = {
+    on(event: string, listener: Listener) {
+      const eventListeners = listeners.get(event) ?? new Set<Listener>();
+      eventListeners.add(listener);
+      listeners.set(event, eventListeners);
+      return this;
+    },
+    off(event: string, listener: Listener) {
+      listeners.get(event)?.delete(listener);
+      return this;
+    },
+    emit(event: string, value: unknown) {
+      for (const listener of listeners.get(event) ?? []) listener(value);
+    },
+    listenerCount(event: string) {
+      return listeners.get(event)?.size ?? 0;
+    },
+  };
+  const page = fakePage as unknown as Page;
+  const privateTitle = 'private sentinel title';
+  const privateEventId = 'private-sentinel-event-id';
+  const privateRoomId = '!private-sentinel-room:example.test';
+  const privateCalendarId = 'private-sentinel-calendar';
+  const fixture = {
+    gatewayUrl: 'http://127.0.0.1:3000',
+    teamRoomId: privateRoomId,
+    calendarId: privateCalendarId,
+  } as Fixture;
+  const eventsUrl = new URL('/v1/calendar/events', fixture.gatewayUrl);
+  eventsUrl.searchParams.set('target', 'room');
+  eventsUrl.searchParams.set('roomId', privateRoomId);
+  eventsUrl.searchParams.set('calendarId', privateCalendarId);
+  const postRequest = {
+    method: () => 'POST',
+    url: () => eventsUrl.toString(),
+  } as unknown as Request;
+  const postBody = Buffer.from(
+    JSON.stringify({
+      event: {
+        id: privateEventId,
+        title: privateTitle,
+        calendarId: privateCalendarId,
+      },
+    }),
+  );
+  let releasePostBody!: (body: Buffer) => void;
+  let postBodyRead = false;
+  const pendingPostBody = new Promise<Buffer>((resolve) => {
+    releasePostBody = resolve;
+  });
+  const postResponse = {
+    request: () => postRequest,
+    status: () => 201,
+    headers: () => ({
+      'content-length': String(postBody.byteLength),
+      'content-type': 'application/json',
+    }),
+    body: () => {
+      postBodyRead = true;
+      return pendingPostBody;
+    },
+  } as unknown as Response;
+
+  const getUrl = new URL(eventsUrl);
+  getUrl.searchParams.set('start', '2026-02-10T12:00:00.000Z');
+  getUrl.searchParams.set('end', '2026-02-10T14:00:00.000Z');
+  getUrl.searchParams.set('timezone', 'UTC');
+  const getRequest = {
+    method: () => 'GET',
+    url: () => getUrl.toString(),
+  } as unknown as Request;
+  let releaseGetBody!: (body: Buffer) => void;
+  let getBodyRead = false;
+  const pendingGetBody = new Promise<Buffer>((resolve) => {
+    releaseGetBody = resolve;
+  });
+  const getResponse = {
+    request: () => getRequest,
+    status: () => 200,
+    headers: () => ({
+      'content-length': '128',
+      'content-type': 'application/json',
+    }),
+    body: () => {
+      getBodyRead = true;
+      return pendingGetBody;
+    },
+  } as unknown as Response;
+
+  const observer = observeDesktopEventCreatePost(page, fixture, privateTitle);
+  fakePage.emit('request', postRequest);
+  fakePage.emit('response', postResponse);
+  fakePage.emit('request', getRequest);
+  fakePage.emit('response', getResponse);
+  const startedAt = Date.now();
+  const diagnostic = await observer.collect(undefined, undefined);
+  const elapsedMs = Date.now() - startedAt;
+
+  expect(elapsedMs).toBeLessThan(WEB_B_EVENT_LIST_DIAGNOSTIC_DEADLINE_MS + 500);
+  expect(postBodyRead).toBe(true);
+  expect(getBodyRead).toBe(true);
+  expect(diagnostic).toMatchObject({
+    createPostObserved: true,
+    createPostRequestFailed: false,
+    createPostStatus: 201,
+    createResponseHasEvent: null,
+    createResponseTitleMatches: null,
+    createResponseCalendarMatches: null,
+    postCreateRoomRangeGetRequestCountCapped: 1,
+    postCreateRoomRangeGetResponseCountCapped: 1,
+    postCreateRoomRangeGetStatus: 200,
+    roomListHasEventsArray: null,
+    roomListEventCountCapped: null,
+    roomListTitleMatches: null,
+    roomListIdMatches: null,
+    roomListCalendarMatches: null,
+  });
+  expect(JSON.stringify(diagnostic)).not.toContain(privateTitle);
+  expect(JSON.stringify(diagnostic)).not.toContain(privateEventId);
+  expect(JSON.stringify(diagnostic)).not.toContain(privateRoomId);
+  expect(JSON.stringify(diagnostic)).not.toContain(privateCalendarId);
+  expect(fakePage.listenerCount('request')).toBe(0);
+  expect(fakePage.listenerCount('requestfailed')).toBe(0);
+  expect(fakePage.listenerCount('response')).toBe(0);
+
+  releasePostBody(postBody);
+  releaseGetBody(Buffer.from(JSON.stringify({ events: [] })));
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(observer.snapshot()).toEqual(diagnostic);
+
+  let oversizedHeaderBodyRead = false;
+  let oversizedHeaderResult: unknown = 'pending';
+  const oversizedHeaderResponse = {
+    headers: () => ({
+      'content-length': '65537',
+      'content-type': 'application/json',
+    }),
+    body: () => {
+      oversizedHeaderBodyRead = true;
+      return Promise.resolve(Buffer.from('{}'));
+    },
+  } as unknown as Response;
+  startBoundedResponseJsonRead(oversizedHeaderResponse, (body) => {
+    oversizedHeaderResult = body;
+  });
+  expect(oversizedHeaderResult).toBeNull();
+  expect(oversizedHeaderBodyRead).toBe(false);
+
+  let oversizedActualBodyResult: unknown = 'pending';
+  const oversizedActualBodyResponse = {
+    headers: () => ({
+      'content-length': '65536',
+      'content-type': 'application/json',
+    }),
+    body: () => Promise.resolve(Buffer.alloc(65_537)),
+  } as unknown as Response;
+  startBoundedResponseJsonRead(oversizedActualBodyResponse, (body) => {
+    oversizedActualBodyResult = body;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(oversizedActualBodyResult).toBeNull();
+});
 
 function unavailableDesktopWidgetPromptObservation(): DesktopWidgetPromptObservation {
   return {
@@ -1416,6 +1583,7 @@ function observeDesktopEventCreatePost(
   let latestRangeResponse = 0;
   const roomRangesByRequest = new WeakMap<Request, ExpectedRoomRange>();
   const pendingResponseReads: Promise<void>[] = [];
+  const responseReadCancels = new Set<() => void>();
   let createResponseRead: Promise<void> | undefined;
   let calendarEventsRegionCountCapped: 0 | 1 | 2 | null = null;
   let calendarEventsRegionVisible: boolean | null = null;
@@ -1468,13 +1636,26 @@ function observeDesktopEventCreatePost(
       return undefined;
     }
   };
-  const readCreateResponse = async (response: Response) => {
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      return;
-    }
+  const readBoundedResponse = (response: Response) =>
+    new Promise<unknown | null>((resolve) => {
+      let finished = false;
+      let cancelReader: () => void = () => {};
+      let cancelRead: () => void = () => {};
+      const finish = (body: unknown | null) => {
+        if (finished) return;
+        finished = true;
+        responseReadCancels.delete(cancelRead);
+        resolve(body);
+      };
+      cancelRead = () => {
+        cancelReader();
+        finish(null);
+      };
+      cancelReader = startBoundedResponseJsonRead(response, finish);
+      if (!finished) responseReadCancels.add(cancelRead);
+    });
+  const readCreateResponse = (body: unknown | null) => {
+    if (body === null) return;
     const event = isRecord(body) && isRecord(body.event) ? body.event : null;
     createResponseHasEvent = event !== null;
     createResponseTitleMatches = event
@@ -1490,35 +1671,27 @@ function observeDesktopEventCreatePost(
     }
     createdEventTiming = readCreatedEventTiming(event.timing);
   };
-  const readRoomRangeResponse = async (
+  const readRoomRangeResponse = (
     response: Response,
     responseNumber: number,
   ) => {
-    await createResponseRead;
-    let headers: Record<string, string>;
-    try {
-      headers = response.headers();
-    } catch {
-      return;
-    }
-    if (!isBoundedWebBEventListResponse(headers)) return;
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      return;
-    }
-    if (responseNumber !== latestRangeResponse) return;
-    const summary = inspectExpectedEventList(body, {
-      expectedTitle,
-      expectedCalendarId: fixture.calendarId,
-      ...(createdEventId ? { createdEventId } : {}),
+    return readBoundedResponse(response).then(async (body): Promise<void> => {
+      await createResponseRead;
+      if (responseNumber !== latestRangeResponse || body === null) {
+        return undefined;
+      }
+      const summary = inspectExpectedEventList(body, {
+        expectedTitle,
+        expectedCalendarId: fixture.calendarId,
+        ...(createdEventId ? { createdEventId } : {}),
+      });
+      roomListHasEventsArray = summary.hasEventsArray;
+      roomListEventCountCapped = summary.eventCountCapped;
+      roomListTitleMatches = summary.titleMatches;
+      roomListIdMatches = summary.idMatches;
+      roomListCalendarMatches = summary.calendarMatches;
+      return undefined;
     });
-    roomListHasEventsArray = summary.hasEventsArray;
-    roomListEventCountCapped = summary.eventCountCapped;
-    roomListTitleMatches = summary.titleMatches;
-    roomListIdMatches = summary.idMatches;
-    roomListCalendarMatches = summary.calendarMatches;
   };
 
   const onRequest = (request: Request) => {
@@ -1555,6 +1728,7 @@ function observeDesktopEventCreatePost(
     }
   };
   const onResponse = (response: Response) => {
+    if (stopped) return;
     const request = response.request();
     if (request === firstMatchingRequest && status === null) {
       try {
@@ -1568,7 +1742,8 @@ function observeDesktopEventCreatePost(
           successfulCreateResponseObserved =
             observedStatus >= 200 && observedStatus < 300;
           if (successfulCreateResponseObserved) {
-            createResponseRead = readCreateResponse(response);
+            createResponseRead =
+              readBoundedResponse(response).then(readCreateResponse);
             pendingResponseReads.push(createResponseRead);
           }
         }
@@ -1621,6 +1796,7 @@ function observeDesktopEventCreatePost(
       page.off('request', onRequest);
       page.off('requestfailed', onRequestFailed);
       page.off('response', onResponse);
+      stopped = true;
     } catch {
       // Listener cleanup is best effort if the page is already closed.
     }
@@ -1655,7 +1831,7 @@ function observeDesktopEventCreatePost(
           matchingRowVisible,
         }
       : unavailableDesktopEventCreateFailureDiagnostic();
-  const stop = () => {
+  const detachListeners = () => {
     if (stopped) return;
     stopped = true;
     try {
@@ -1666,13 +1842,19 @@ function observeDesktopEventCreatePost(
       // Listener cleanup is best effort if the page is already closed.
     }
   };
+  const stop = () => {
+    detachListeners();
+    for (const cancel of [...responseReadCancels]) cancel();
+  };
 
   return {
     snapshot,
     async collect(frame, title) {
       if (!installed) return unavailableDesktopEventCreateFailureDiagnostic();
       try {
-        await Promise.allSettled(pendingResponseReads);
+        const readsAtCollection = [...pendingResponseReads];
+        detachListeners();
+        await Promise.allSettled(readsAtCollection);
         if (createdEventTiming && expectedRoomRange) {
           try {
             const timingMatch = await page.evaluate(
