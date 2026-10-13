@@ -426,28 +426,29 @@ DST regression or recurrence-editing criteria above.
 - [ ] Run the integrated AS-free normal-bot Synapse/Radicale room contract and
       complete normal-bot reminder, PostgreSQL restart, and paired restore
       acceptance. Offline tests do not establish these integrated paths. The
-      latest published PR #247 head `fd691882a4fbbfc18539a94608f93c85b8fc3677`
+      latest published PR #247 head `7ed070f52b569c22729ea6d881322e2b4a03932c`
       passed the core repository checks, PostgreSQL bootstrap, Desktop startup,
       and CodeQL. Its Real Radicale contract in
-      [run 38433265899](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433265899)
-      passed the legacy appservice phase (7/7 bodies); synthetic normal-bot
-      registration and login then succeeded, but the installed SDK's
-      `getUserId()` identity lookup raised an unclassified `TypeError` before
-      any bot protocol body ran (0/7). The cause is unknown. Element Web and
-      normal-bot acceptance in
-      [run 38433266141](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433266141)
-      recorded zero-event timing measurements within limits and one
-      Element-origin opening error. Final diagnostic eligibility remains
-      unresolved: the performance run failed at seed setup with
-      `ordinary_gate_eligible=false`. Its 25-event seed failed environment
-      validation before fetching or creating events because its child lacked
-      `ROOM_CALENDAR_PRINCIPAL_MODE`; bot mode defaulted to appservice, and the
-      appservice profile's token was not forwarded. Desktop startup passed in
-      [run 38433266073](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433266073);
-      its separate 12-case journey was not run. Current source adds bounded
-      SDK diagnostics and forwards the principal-mode-specific seed settings;
-      the integrated bot protocol, reminder delivery, PostgreSQL restart,
-      paired restore, and operator acceptance remain open.
+      [run 38439533944](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533944)
+      passed the legacy appservice phase (7/7 bodies). Synthetic normal-bot
+      account registration and login succeeded, then the SDK's `getUserId()`
+      lookup raised a `TypeError` before bot protocol cases ran (0/7). A local
+      127.0.0.1 reproducer under the same Jest config traced the failure to
+      module resolution: `lib` preceded `node_modules`, causing the SDK's bare
+      `request` import to resolve to its own `lib/request` module. Reordering
+      both roots and adding a default-SDK loopback regression now pass locally;
+      hosted Synapse/Radicale confirmation remains pending. The Element Web and
+      bot acceptance in
+      [run 38439533765](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533765)
+      met numeric timing limits for the zero- and 25-event profiles and
+      recorded one Element-origin opening error. Appservice Desktop passed
+      12/12 cases; normal-bot Desktop passed 4/12, failed event-row visibility
+      after HTTP 201, and left seven cases not run. Normal-bot reminder,
+      PostgreSQL restart, and paired restore were not exercised. Desktop startup
+      passed all 22 checks in
+      [run 38439533769](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533769).
+      The AS-free protocol, complete normal-bot flow, reminder delivery,
+      restart, paired restore, and operator acceptance remain open.
 - [x] Offer a safe current-room link from authorized room event details and
       display existing safe conference links. Ordinary master conference URI
       authoring follows ADR036; RTC service creation remains future work.
