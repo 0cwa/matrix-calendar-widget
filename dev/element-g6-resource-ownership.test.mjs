@@ -85,6 +85,14 @@ test('matches only the selected principal resource across fixture origins', () =
   );
   assert.equal(
     g6GatewayResourceIdentityMatches(
+      gateway('calendar_test_bot'),
+      external('calendar_test_bot'),
+      'calendar_test_bot',
+    ),
+    true,
+  );
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
       gateway('calendar-bot'),
       external('calendar-bot'),
       '_matrix_calendar_service',
@@ -96,6 +104,22 @@ test('matches only the selected principal resource across fixture origins', () =
       gateway('_matrix_calendar_service'),
       external('_matrix_calendar_service'),
       'calendar-bot',
+    ),
+    false,
+  );
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
+      gateway('calendar_test_bot'),
+      external('calendar_test_bot'),
+      'calendar-bot',
+    ),
+    false,
+  );
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
+      gateway('calendar-bot'),
+      external('calendar-bot'),
+      'calendar_test_bot',
     ),
     false,
   );
@@ -146,6 +170,14 @@ test('rejects foreign origins, collection paths, and decorated G6 hrefs', () => 
   }
   assert.equal(
     g6GatewayResourceIdentityMatches(internal, external, '../escape'),
+    false,
+  );
+  assert.equal(
+    g6GatewayResourceIdentityMatches(
+      'http://restore-radicale:5232/calendar_test_bot/element-acceptance/%2e%2e/g6-01234567-89ab-cdef-0123-456789abcdef.ics',
+      'http://127.0.0.1:5233/calendar_test_bot/element-acceptance/g6-01234567-89ab-cdef-0123-456789abcdef.ics',
+      'calendar_test_bot',
+    ),
     false,
   );
 });
@@ -208,12 +240,12 @@ test('only a confirmed strong ETag authorizes conditional cleanup', () => {
 
 test('a confirmed bot-home update preserves its new cleanup validator', () => {
   const resourceName = 'g6-01234567-89ab-cdef-0123-456789abcdef.ics';
-  const external = `http://127.0.0.1:5233/calendar-bot/element-acceptance/${resourceName}`;
-  const gateway = `http://restore-radicale:5232/calendar-bot/element-acceptance/${resourceName}`;
+  const external = `http://127.0.0.1:5233/calendar_test_bot/element-acceptance/${resourceName}`;
+  const gateway = `http://restore-radicale:5232/calendar_test_bot/element-acceptance/${resourceName}`;
   const identityMatches = g6GatewayResourceIdentityMatches(
     gateway,
     external,
-    'calendar-bot',
+    'calendar_test_bot',
   );
   const resource = start(resourceName);
   assert.equal(recordG6ResourceCreate(resource, 201, '"created-v1"'), true);

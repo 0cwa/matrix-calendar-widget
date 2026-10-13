@@ -20,7 +20,7 @@ const G6_EXTERNAL_RADICALE_ORIGIN = 'http://127.0.0.1:5233';
 const G6_GATEWAY_RADICALE_ORIGIN = 'http://restore-radicale:5232';
 const G6_COLLECTION_NAME = 'element-acceptance';
 const G6_SERVICE_LOCALPART = '_matrix_calendar_service';
-const G6_BOT_LOCALPART = /^[a-z0-9][a-z0-9-]{0,254}$/u;
+const G6_BOT_LOCALPART = /^[a-z0-9_][a-z0-9_-]{0,254}$/u;
 const G6_RESOURCE_NAME = /^g6-[0-9a-f-]{36}\.ics$/u;
 const G6_MAX_RESOURCE_BYTES = 16_384;
 
