@@ -910,7 +910,7 @@ async function getDesktopPage(browser: Browser): Promise<Page> {
         candidate.url().startsWith('vector://vector/webapp/'),
       );
     if (page) return page;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error('Desktop application page is unavailable');
 }
@@ -1604,8 +1604,10 @@ function startBoundedResponseJsonRead(
 ) {
   let finished = false;
   let stopped = false;
-  let deadline: ReturnType<typeof setTimeout> | undefined;
-  const complete = (body: unknown | null) => {
+  const complete = (
+    body: unknown | null,
+    deadline?: ReturnType<typeof setTimeout>,
+  ) => {
     if (finished || stopped) return;
     finished = true;
     if (deadline !== undefined) clearTimeout(deadline);
@@ -1627,8 +1629,8 @@ function startBoundedResponseJsonRead(
     };
   }
 
-  deadline = setTimeout(
-    () => complete(null),
+  const deadline = setTimeout(
+    () => complete(null, deadline),
     WEB_B_EVENT_LIST_DIAGNOSTIC_DEADLINE_MS,
   );
   try {
@@ -1638,18 +1640,19 @@ function startBoundedResponseJsonRead(
       .body()
       .then((bytes) => {
         if (!isBoundedWebBEventListBodyLength(bytes.byteLength)) {
-          complete(null);
-          return;
+          complete(null, deadline);
+          return null;
         }
         try {
-          complete(JSON.parse(bytes.toString('utf8')) as unknown);
+          complete(JSON.parse(bytes.toString('utf8')) as unknown, deadline);
         } catch {
-          complete(null);
+          complete(null, deadline);
         }
+        return null;
       })
-      .catch(() => complete(null));
+      .catch(() => complete(null, deadline));
   } catch {
-    complete(null);
+    complete(null, deadline);
   }
 
   return () => {

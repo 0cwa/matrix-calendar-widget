@@ -1880,7 +1880,7 @@ function createPerformanceApiObserver(
     const deadline = performance.now() + 30_000;
     while (performance.now() < deadline) {
       if (predicate()) return;
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
     throw new Error('Calendar API observation did not settle');
   };
@@ -1945,10 +1945,8 @@ function measureStableDom<T>(
     const first = await read();
     await locator.evaluate(
       async () =>
-        new Promise<void>((resolvePromise) =>
-          requestAnimationFrame(() =>
-            requestAnimationFrame(() => resolvePromise()),
-          ),
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
         ),
     );
     const second = await read();
@@ -3876,9 +3874,11 @@ test('Element Web preserves unsupported events and supports client interactions'
     }
     await editedNeighborRow.click();
     const narrowDetails = frameA.getByRole('dialog').last();
-    await expect(narrowDetails)
-      .toBeVisible()
-      .catch(() => {});
+    try {
+      await expect(narrowDetails).toBeVisible();
+    } catch {
+      // Record the observed visibility below without failing this probe.
+    }
     const eventDetailsReachable = await narrowDetails
       .isVisible()
       .catch(() => false);
@@ -4065,10 +4065,13 @@ test('Element Web preserves unsupported events and supports client interactions'
       .waitFor({ state: 'hidden', timeout: 5_000 })
       .then(() => true)
       .catch(() => false);
-    const focusReturnedToEvent = await expect(keyboardEventButton)
-      .toBeFocused({ timeout: 5_000 })
-      .then(() => true)
-      .catch(() => false);
+    let focusReturnedToEvent = false;
+    try {
+      await expect(keyboardEventButton).toBeFocused({ timeout: 5_000 });
+      focusReturnedToEvent = true;
+    } catch {
+      focusReturnedToEvent = false;
+    }
     const keyboardPassed =
       keyboardEventFocused &&
       detailsOpened &&
@@ -4611,7 +4614,7 @@ function observeNextG6PostSaveListResponse(
       .then((body: unknown) => {
         if (!isRecord(body) || !Array.isArray(body.events)) {
           observation = { outcome: 'invalid-response', httpStatus };
-          return;
+          return null;
         }
         const eventCount = body.events.length;
         const eventCountCapped = Math.min(
@@ -4626,7 +4629,7 @@ function observeNextG6PostSaveListResponse(
             eventCountCapped,
             eventCountOverflow: true,
           };
-          return;
+          return null;
         }
         if (
           body.events.some(
@@ -4637,7 +4640,7 @@ function observeNextG6PostSaveListResponse(
           )
         ) {
           observation = { outcome: 'invalid-response', httpStatus };
-          return;
+          return null;
         }
         observation = {
           outcome: 'decoded',
@@ -4649,6 +4652,7 @@ function observeNextG6PostSaveListResponse(
               resource.event.title === expectedTitle,
           ),
         };
+        return null;
       })
       .catch(() => {
         observation = { outcome: 'decode-error', httpStatus };
@@ -5408,8 +5412,8 @@ async function waitForReminderDelivery(
         deliveredAfterDue: deliveredAt !== null && deliveredAt >= dueAt,
       };
     }
-    await new Promise((resolvePromise) =>
-      setTimeout(resolvePromise, REMINDER_TIMELINE_POLL_MS),
+    await new Promise((resolve) =>
+      setTimeout(resolve, REMINDER_TIMELINE_POLL_MS),
     );
     latest = await inspectReminderTimeline(titles);
   }
