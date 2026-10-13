@@ -38,6 +38,13 @@ import {
 } from './element-desktop-journey.mjs';
 
 const PACKAGE_VERSION = '1.12.30';
+// Preserve the existing Desktop acceptance pin. The official archive digest
+// was verified against signed Element metadata and successful public run
+// 38400030744 at head 8004d0dbf7b28dc79c226d17452df82cd7ea6479.
+const PINNED_PACKAGE_SHA256 =
+  '8db1b7bb53e96b31f77d3684776efa302cd3c518e54fece603a1f085e2c4cd93';
+const PINNED_PACKAGE_ARCHIVE_URL =
+  'https://packages.element.io/debian/pool/main/e/element-desktop/element-desktop_1.12.30_amd64.deb';
 const PROBE_USERNAME = 'mcwdesktopprobe';
 const PROBE_UID_START = 24_000;
 const PROBE_UID_END = 65_535;
@@ -698,7 +705,7 @@ function validateEnvironment(mode) {
   };
 }
 
-export function selectPinnedPackageHash(metadata) {
+function readPinnedPackageMetadataHash(metadata) {
   if (typeof metadata !== 'string' || metadata.length > 4_194_304) {
     throw failure('package-unavailable');
   }
@@ -715,6 +722,7 @@ export function selectPinnedPackageHash(metadata) {
       fields.get('Architecture') === 'amd64'
     );
   });
+  if (matchingBlocks.length === 0) return undefined;
   const hashes = matchingBlocks.map((block) => {
     const values = block
       .split(/\r?\n/u)
@@ -729,16 +737,114 @@ export function selectPinnedPackageHash(metadata) {
   return hashes[0];
 }
 
-function installPinnedDesktopPackage(runnerTemp) {
-  const keyFile = join(runnerTemp, 'element-io-archive-keyring.gpg');
+export function selectPinnedPackageHash(metadata) {
+  const hash = readPinnedPackageMetadataHash(metadata);
+  if (hash === undefined) throw failure('package-unavailable');
+  return hash;
+}
+
+export function resolvePinnedPackageAcquisition(metadata) {
+  const metadataHash = readPinnedPackageMetadataHash(metadata);
+  if (metadataHash === undefined) {
+    return {
+      source: 'archive',
+      packageHash: PINNED_PACKAGE_SHA256,
+      url: PINNED_PACKAGE_ARCHIVE_URL,
+    };
+  }
+  if (metadataHash !== PINNED_PACKAGE_SHA256) {
+    throw failure('package-mismatch');
+  }
+  return { source: 'apt', packageHash: PINNED_PACKAGE_SHA256 };
+}
+
+function packageFileExists(filePath) {
+  let stat;
+  try {
+    stat = lstatSync(filePath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw failure('package-unavailable');
+  }
+  const currentUid = process.getuid?.();
+  if (
+    !stat.isFile() ||
+    stat.isSymbolicLink() ||
+    stat.nlink !== 1 ||
+    (currentUid !== undefined && stat.uid !== currentUid)
+  ) {
+    throw failure('package-mismatch');
+  }
+  return true;
+}
+
+function verifyPinnedPackageFile(filePath, commandRunner) {
+  let output;
+  try {
+    output = commandRunner('sha256sum', [filePath]);
+  } catch {
+    throw failure('package-unavailable');
+  }
+  const downloadedHash = output.trim().split(/\s+/u)[0];
+  if (downloadedHash !== PINNED_PACKAGE_SHA256) {
+    throw failure('package-mismatch');
+  }
+  return PINNED_PACKAGE_SHA256;
+}
+
+export function acquirePinnedDesktopPackageArtifact(
+  runnerTemp,
+  metadata,
+  commandRunner = requiredCommand,
+) {
+  const acquisition = resolvePinnedPackageAcquisition(metadata);
   const debFile = join(
     runnerTemp,
     `element-desktop_${PACKAGE_VERSION}_amd64.deb`,
   );
+
+  if (!packageFileExists(debFile)) {
+    try {
+      if (acquisition.source === 'apt') {
+        commandRunner(
+          'apt-get',
+          ['download', `element-desktop=${PACKAGE_VERSION}`],
+          { cwd: runnerTemp, timeout: 300_000 },
+        );
+      } else {
+        commandRunner(
+          'curl',
+          [
+            '--fail',
+            '--silent',
+            '--show-error',
+            '--location',
+            acquisition.url,
+            '--output',
+            debFile,
+          ],
+          { timeout: 300_000 },
+        );
+      }
+    } catch {
+      throw failure('package-unavailable');
+    }
+  }
+
+  if (!packageFileExists(debFile)) throw failure('package-unavailable');
+  verifyPinnedPackageFile(debFile, commandRunner);
+  return { packageHash: PINNED_PACKAGE_SHA256, debFile };
+}
+
+export function installPinnedDesktopPackage(
+  runnerTemp,
+  commandRunner = requiredCommand,
+) {
+  const keyFile = join(runnerTemp, 'element-io-archive-keyring.gpg');
   const sourceFile = '/etc/apt/sources.list.d/element-desktop-startup.list';
   const systemKey = '/usr/share/keyrings/element-desktop-startup.gpg';
 
-  requiredCommand('curl', [
+  commandRunner('curl', [
     '--fail',
     '--silent',
     '--show-error',
@@ -747,7 +853,7 @@ function installPinnedDesktopPackage(runnerTemp) {
     '--output',
     keyFile,
   ]);
-  requiredCommand('sudo', [
+  commandRunner('sudo', [
     '-n',
     'install',
     '-D',
@@ -756,31 +862,23 @@ function installPinnedDesktopPackage(runnerTemp) {
     keyFile,
     systemKey,
   ]);
-  requiredCommand('sudo', ['-n', 'tee', sourceFile], {
+  commandRunner('sudo', ['-n', 'tee', sourceFile], {
     input: `deb [arch=amd64 signed-by=${systemKey}] https://packages.element.io/debian/ default main\n`,
   });
-  requiredCommand('sudo', ['-n', 'apt-get', 'update', '--quiet'], {
+  commandRunner('sudo', ['-n', 'apt-get', 'update', '--quiet'], {
     timeout: 300_000,
   });
-  const packageHash = selectPinnedPackageHash(
-    requiredCommand('apt-cache', [
-      'show',
-      `element-desktop=${PACKAGE_VERSION}`,
-    ]),
+  const metadata = commandRunner('apt-cache', [
+    'show',
+    `element-desktop=${PACKAGE_VERSION}`,
+  ]);
+  const packageArtifact = acquirePinnedDesktopPackageArtifact(
+    runnerTemp,
+    metadata,
+    commandRunner,
   );
-  requiredCommand(
-    'apt-get',
-    ['download', `element-desktop=${PACKAGE_VERSION}`],
-    {
-      cwd: runnerTemp,
-      timeout: 300_000,
-    },
-  );
-  const downloadedHash = requiredCommand('sha256sum', [debFile])
-    .trim()
-    .split(/\s+/u)[0];
-  if (downloadedHash !== packageHash) throw failure('package-mismatch');
-  requiredCommand(
+  const packageHash = packageArtifact.packageHash;
+  commandRunner(
     'sudo',
     [
       '-n',
@@ -797,11 +895,11 @@ function installPinnedDesktopPackage(runnerTemp) {
       'libsecret-tools',
       'iptables',
       'iproute2',
-      `element-desktop:amd64=${PACKAGE_VERSION}`,
+      packageArtifact.debFile,
     ],
     { timeout: 600_000 },
   );
-  const installed = requiredCommand('dpkg-query', [
+  const installed = commandRunner('dpkg-query', [
     '-W',
     '-f=${Version}\t${Architecture}',
     'element-desktop',
@@ -809,7 +907,13 @@ function installPinnedDesktopPackage(runnerTemp) {
   if (installed !== `${PACKAGE_VERSION}\tamd64`) {
     throw failure('package-mismatch');
   }
-  return { packageHash, keyFile, debFile, sourceFile, systemKey };
+  return {
+    packageHash,
+    keyFile,
+    debFile: packageArtifact.debFile,
+    sourceFile,
+    systemKey,
+  };
 }
 
 function allocateUid() {
