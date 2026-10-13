@@ -161,25 +161,26 @@ remain in force.
 A separate normal-bot Element acceptance job uses the shared fixture runner.
 Its setup requires disabled synthetic AS registration and no AS token; offline
 tests cover setup, OpenID request shape, and workflow guards. The prior
-published PR #247 candidate had failures across three hosted runs: the Real
-Radicale contract in [run
-38404578019](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38404578019),
-Element Web and bot Element acceptance in
-[38404577951](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38404577951),
-and Desktop startup in
-[38404577802](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38404577802).
-The Real Radicale run passed its legacy appservice phase, then bot-mode setup
-stopped before protocol checks because Synapse's synthetic-user registration
-CLI waited for admin input; no bot protocol assertions ran. Separately, the
-normal-bot Element flow failed with HTTP 400 at `service-calendar-ready`. The
-current candidate adds `--no-admin`, sends the required empty JSON object for
-bot-mode OpenID requests, and fixes fixture `fetch` forwarding to the subject
-observer. The Desktop signed index now offers 1.12.31 and omits pinned 1.12.30;
-the candidate falls back to the digest-checked pinned archive. Focused offline
-tests cover these changes, but this candidate has not had a hosted rerun. The
-integrated AS-free Synapse/Radicale room contract, full reminder persistence,
-PostgreSQL restart and paired-restore acceptance, and operator acceptance
-remain open.
+published PR #247 head `fd691882a4fbbfc18539a94608f93c85b8fc3677` passed the
+core repository checks, PostgreSQL bootstrap, Desktop startup, and CodeQL.
+Its Real Radicale contract in [run
+38433265899](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433265899)
+passed the legacy appservice phase (7/7 bodies). Synthetic normal-bot account
+registration and login succeeded; then the installed SDK's `getUserId()`
+whoami check raised an unclassified `TypeError` before any bot protocol body
+ran (0/7). The cause is unknown. Element Web and normal-bot acceptance in
+[run 38433266141](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433266141)
+passed the ordinary zero-event profile and opening diagnostic, but the
+25-event seed failed environment validation before fetching or creating events
+because its child lacked `ROOM_CALENDAR_PRINCIPAL_MODE`; bot mode defaulted to
+appservice, and the appservice profile's token was not forwarded. Desktop
+startup passed in [run
+38433266073](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433266073);
+the separate 12-case Desktop journey was not run. The current source adds
+bounded SDK whoami diagnostics and forwards principal-mode-specific seed
+settings. The integrated AS-free Synapse/Radicale room contract, normal-bot
+reminder delivery, PostgreSQL restart and paired-restore acceptance, and
+operator acceptance remain open.
 
 Draft PR #227 candidate `a02932dafbbfa9316bee5e8bda1ee15ed1ddbaff` passed its
 hosted Element Web acceptance on exact head in [run
@@ -249,24 +250,27 @@ loading, memory, and actual clients remain unmeasured.
 - **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, arbitrary RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, attachment forms beyond ADR038, broader alarms, and conference forms beyond ADR036 are not part of the implemented editor. Unsupported recurrence or timezone sources may be omitted from projection; the widget warns for source forms it diagnoses, while preserving the canonical resource.
 - **M6:** issue #7 bounded repository criteria are complete. ADR041's optional
   bot-account principal source integration is implemented; appservice remains
-  the default. The prior published PR #247 candidate had a Real Radicale
-  failure in [run
-  38404578019](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38404578019),
-  Element Web and bot Element failures in [run
-  38404577951](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38404577951),
-  and a Desktop startup failure in [run
-  38404577802](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38404577802).
-  The Real Radicale run passed its legacy appservice phase, but bot-mode setup
-  stopped during synthetic-user registration before protocol checks. The
-  separate normal-bot Element flow failed with HTTP 400 at
-  `service-calendar-ready`. The current candidate fixes the registration call,
-  OpenID request body, fixture observer forwarding, and Desktop fallback for
-  the signed-index change from pinned 1.12.30 to 1.12.31; these fixes have
-  focused offline coverage only. The integrated AS-free normal-bot room
-  contract and full reminder/PostgreSQL paired-restore acceptance remain open.
-  Keep room access, event writes, settings, delivery, and action notices off
-  until the operator accepts each capability and its trust boundary. A passing
-  pinned stack is not an operator-host or production proof.
+  the default. On published PR #247 head
+  `fd691882a4fbbfc18539a94608f93c85b8fc3677`, the Real Radicale contract
+  [run 38433265899](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433265899)
+  passed legacy appservice behavior, then stopped after successful bot account
+  registration/login when the installed SDK whoami call raised an
+  unclassified `TypeError`; no normal-bot contract bodies ran. The cause is
+  unknown. Element Web and bot acceptance
+  [run 38433266141](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433266141)
+  passed the ordinary zero-event profile and opening diagnostic, but their
+  25-event seed stopped at environment validation before any fetch because the
+  child lacked `ROOM_CALENDAR_PRINCIPAL_MODE`; bot mode defaulted to appservice,
+  and the appservice profile's token was not forwarded.
+  Desktop startup passed in
+  [run 38433266073](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433266073),
+  while its separate 12-case journey remained not run. The current source adds
+  bounded SDK whoami diagnostics and mode-aware seed environment forwarding;
+  the AS-free room protocol, normal-bot reminders, PostgreSQL restart and
+  paired restore, and operator acceptance remain open. Keep room access,
+  event writes, settings, delivery, and action notices off until the operator
+  accepts each capability and its trust boundary. A passing pinned stack is
+  not an operator-host or production proof.
 - **M8:** The bounded G6 Element Web interaction path remains covered by merged
   run [37739410969](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37739410969),
   including shared-event edit/delete, unsupported-source preservation,

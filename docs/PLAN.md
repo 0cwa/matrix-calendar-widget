@@ -414,29 +414,39 @@ DST regression or recurrence-editing criteria above.
       runner. Require disabled synthetic AS registration and no AS token while
       retaining the same authorization, event, reminder, restart, restore, and
       cleanup assertions. Add offline setup, OpenID request-shape, and workflow
-      guard tests. The latest candidate also supplies Synapse's noninteractive
-      synthetic-account registration flag and sends `{}` as the bot-mode
-      OpenID request body, fixes fixture `fetch` forwarding to the subject
-      observer, and adds a digest-checked Desktop archive fallback; focused
-      offline tests pass, but none of these fixes has hosted runtime evidence
-      yet. The prior candidate's Desktop failure followed the signed index
-      offering 1.12.31 without the pinned 1.12.30 package.
+      guard tests. The current source candidate also includes Synapse's
+      noninteractive synthetic-account registration flag, the required `{}`
+      bot-mode OpenID request body, fixture `fetch` forwarding to the subject
+      observer, a digest-checked Desktop archive fallback, bounded SDK whoami
+      diagnostics, and principal-mode forwarding to the 25-event seed child.
+      Focused offline tests cover these changes. Hosted results for the
+      published candidate below show only partial normal-bot path evidence.
+      The signed Desktop index offers 1.12.31 and omits pinned 1.12.30, so the
+      fixture uses its
+      digest-checked pinned archive fallback.
 - [ ] Run the integrated AS-free normal-bot Synapse/Radicale room contract and
       complete normal-bot reminder, PostgreSQL restart, and paired restore
-      acceptance. Offline tests and standalone protocol feasibility do not
-      establish these integrated paths. The prior published PR #247 candidate
-      failed its Real Radicale contract in
-      [run 38404578019](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38404578019),
-      its Element Web and bot Element contexts in
-      [run 38404577951](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38404577951),
-      and Desktop startup in
-      [run 38404577802](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38404577802).
-      The Real Radicale run passed the legacy appservice phase, but bot-mode
-      setup stopped before protocol checks because synthetic-user registration
-      waited for admin input. The separate bot Element flow failed with HTTP
-      400 at `service-calendar-ready`. The current `--no-admin` setup, OpenID
-      `{}` body, fixture forwarding, and archive fallback need a new hosted run;
-      keep runtime acceptance open until it passes.
+      acceptance. Offline tests do not establish these integrated paths. The
+      latest published PR #247 head `fd691882a4fbbfc18539a94608f93c85b8fc3677`
+      passed the core repository checks, PostgreSQL bootstrap, Desktop startup,
+      and CodeQL. Its Real Radicale contract in
+      [run 38433265899](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433265899)
+      passed the legacy appservice phase (7/7 bodies); synthetic normal-bot
+      registration and login then succeeded, but the installed SDK's
+      `getUserId()` whoami check raised an unclassified `TypeError` before any
+      bot protocol body ran (0/7). The cause is unknown. Element Web and
+      normal-bot acceptance in
+      [run 38433266141](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433266141)
+      passed the ordinary zero-event profile and opening diagnostic, but the
+      25-event seed failed environment validation before fetching or creating
+      events because its child lacked `ROOM_CALENDAR_PRINCIPAL_MODE`; bot mode
+      defaulted to appservice, and the appservice profile's token was not
+      forwarded. Desktop startup passed in
+      [run 38433266073](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38433266073);
+      its separate 12-case journey was not run. Current source adds bounded
+      SDK diagnostics and forwards the principal-mode-specific seed settings;
+      the integrated bot protocol, reminder delivery, PostgreSQL restart,
+      paired restore, and operator acceptance remain open.
 - [x] Offer a safe current-room link from authorized room event details and
       display existing safe conference links. Ordinary master conference URI
       authoring follows ADR036; RTC service creation remains future work.
