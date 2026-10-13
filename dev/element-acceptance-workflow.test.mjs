@@ -69,6 +69,18 @@ test('both fixture jobs select one strict process-wide principal mode', () => {
     /bot-account\)[\s\S]*?\[\[ "\$\{MATRIX_APPLICATION_SERVICE_TOKEN\+x\}" == x \|\| "\$\{MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION:-\}" != disabled \]\]/u,
   );
   assert.match(runner, /MATRIX_APPLICATION_SERVICE_USER_ID=/u);
+  assert.match(
+    runner,
+    /bot-account\)[\s\S]*?ELEMENT_ACCEPTANCE_RATE_LIMIT_DIAGNOSTICS=true/u,
+  );
+  assert.match(
+    runner,
+    /PRINCIPAL_MODE" == appservice[\s\S]*?ELEMENT_ACCEPTANCE_RATE_LIMIT_DIAGNOSTICS=false/u,
+  );
+  assert.match(
+    runner,
+    /Show safe normal-bot gateway rate-limit diagnostics[\s\S]*?inputs\.principal-mode == 'bot-account'[\s\S]*?rg 'calendar_gateway_rate_limit_denied'/u,
+  );
   assert.match(e2e, /sender\.accessToken !== bot\.accessToken/u);
   assert.match(e2e, /openIdBody = JSON\.stringify\(\{\}\)/u);
   assert.match(

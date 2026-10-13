@@ -27,6 +27,29 @@ interface SourceWindow {
 export interface RateLimitDecision {
   allowed: boolean;
   retryAfterSeconds?: number;
+  denial?:
+    | { reason: 'source-window'; count: number; activeKeyCount: number }
+    | { reason: 'source-key-cap'; activeKeyCount: number };
+}
+
+export interface RateLimitDiagnostic {
+  event: 'calendar_gateway_rate_limit_denied';
+  reason: 'source-window' | 'source-key-cap';
+  count?: number;
+  activeKeyCount: number;
+  limit: number;
+  windowMs: number;
+  retryAfterSeconds: number;
+  method:
+    | 'GET'
+    | 'POST'
+    | 'PUT'
+    | 'PATCH'
+    | 'DELETE'
+    | 'OPTIONS'
+    | 'HEAD'
+    | 'OTHER';
+  routeClass: 'calendar-api';
 }
 
 /**
@@ -40,9 +63,9 @@ export class BoundedFixedWindowSourceRateLimiter {
   private nextCleanupAt = 0;
 
   constructor(
-    private readonly requestsPerWindow: number,
-    private readonly windowMs: number,
-    private readonly maxSources: number,
+    readonly requestsPerWindow: number,
+    readonly windowMs: number,
+    readonly maxSources: number,
   ) {
     if (!Number.isSafeInteger(requestsPerWindow) || requestsPerWindow < 1) {
       throw new Error('Rate-limit request count must be a positive integer');
@@ -71,6 +94,11 @@ export class BoundedFixedWindowSourceRateLimiter {
         return {
           allowed: false,
           retryAfterSeconds: this.retryAfterSeconds(existing.resetAt - now),
+          denial: {
+            reason: 'source-window',
+            count: existing.count,
+            activeKeyCount: this.sources.size,
+          },
         };
       }
 
@@ -89,6 +117,10 @@ export class BoundedFixedWindowSourceRateLimiter {
       return {
         allowed: false,
         retryAfterSeconds: this.retryAfterSeconds(this.windowMs),
+        denial: {
+          reason: 'source-key-cap',
+          activeKeyCount: this.sources.size,
+        },
       };
     }
 
@@ -124,7 +156,10 @@ export function isCalendarGatewayPath(path: string): boolean {
  * OpenID verification against the configured homeserver.
  */
 export class CalendarGatewayRateLimitMiddleware {
-  constructor(private readonly limiter: BoundedFixedWindowSourceRateLimiter) {}
+  constructor(
+    private readonly limiter: BoundedFixedWindowSourceRateLimiter,
+    private readonly diagnostic?: (event: RateLimitDiagnostic) => void,
+  ) {}
 
   use(request: Request, response: Response, next: NextFunction): void {
     const path = request.path ?? request.url?.split('?')[0] ?? '';
@@ -144,6 +179,30 @@ export class CalendarGatewayRateLimitMiddleware {
     }
 
     response.setHeader('Retry-After', String(decision.retryAfterSeconds));
+    if (decision.denial && this.diagnostic) {
+      const method = request.method?.toUpperCase();
+      this.diagnostic({
+        event: 'calendar_gateway_rate_limit_denied',
+        ...decision.denial,
+        limit:
+          decision.denial.reason === 'source-key-cap'
+            ? this.limiter.maxSources
+            : this.limiter.requestsPerWindow,
+        windowMs: this.limiter.windowMs,
+        retryAfterSeconds: decision.retryAfterSeconds ?? 1,
+        method:
+          method === 'GET' ||
+          method === 'POST' ||
+          method === 'PUT' ||
+          method === 'PATCH' ||
+          method === 'DELETE' ||
+          method === 'OPTIONS' ||
+          method === 'HEAD'
+            ? method
+            : 'OTHER',
+        routeClass: 'calendar-api',
+      });
+    }
     response.status(429).json({
       statusCode: 429,
       message: 'Too many requests',

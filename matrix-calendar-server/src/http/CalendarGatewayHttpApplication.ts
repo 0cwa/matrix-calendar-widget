@@ -56,7 +56,12 @@ export async function createCalendarGatewayHttpApplication(
     appConfig.calendar_gateway_rate_limit_max_keys,
   );
   const calendarGatewayRateLimitMiddleware =
-    new CalendarGatewayRateLimitMiddleware(calendarGatewayRateLimiter);
+    new CalendarGatewayRateLimitMiddleware(
+      calendarGatewayRateLimiter,
+      process.env.ELEMENT_ACCEPTANCE_RATE_LIMIT_DIAGNOSTICS === 'true'
+        ? (event) => console.info(JSON.stringify(event))
+        : undefined,
+    );
   // Keep this before MatrixAuthMiddleware: OpenID verification is an external
   // homeserver request and must only run for requests admitted by the limiter.
   app.use(

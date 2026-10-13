@@ -27,12 +27,16 @@ runs:
             fi
             echo 'MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION=disabled' >> "$GITHUB_ENV"
             echo 'MATRIX_APPLICATION_SERVICE_USER_ID=' >> "$GITHUB_ENV"
+            echo 'ELEMENT_ACCEPTANCE_RATE_LIMIT_DIAGNOSTICS=true' >> "$GITHUB_ENV"
             ;;
           *)
             echo 'The acceptance principal mode is invalid.' >&2
             exit 1
             ;;
         esac
+        if [[ "$PRINCIPAL_MODE" == appservice ]]; then
+          echo 'ELEMENT_ACCEPTANCE_RATE_LIMIT_DIAGNOSTICS=false' >> "$GITHUB_ENV"
+        fi
         echo "ROOM_CALENDAR_PRINCIPAL_MODE=$PRINCIPAL_MODE" >> "$GITHUB_ENV"
         if [[ -n "${MATRIX_APPLICATION_SERVICE_TOKEN:-}" ]]; then
           echo "::add-mask::$MATRIX_APPLICATION_SERVICE_TOKEN"
@@ -198,6 +202,13 @@ runs:
       if: ${{ always() && steps.desktop_journey.outcome != 'skipped' }}
       shell: bash
       run: node dev/element-desktop-journey-runner.mjs cleanup
+
+    - name: Show safe normal-bot gateway rate-limit diagnostics
+      if: ${{ always() && inputs.principal-mode == 'bot-account' && steps.desktop_journey.outcome != 'skipped' }}
+      shell: bash
+      run: |
+        compose=(docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ELEMENT_ACCEPTANCE_SERVER_ENV_FILE" -f dev/compose.yaml -f dev/element-acceptance.compose.yaml)
+        "${compose[@]}" logs --no-color gateway | rg 'calendar_gateway_rate_limit_denied' || true
 
     - name: Provision the synthetic reminder sender room membership
       shell: bash
