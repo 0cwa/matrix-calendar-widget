@@ -72,12 +72,12 @@ import { createRoomReminderModuleProviders } from './reminder/RoomReminderModule
 import { MatrixServer } from './rpc/MatrixServer';
 import { CalendarCommandService } from './service/CalendarCommandService';
 import { CommandService } from './service/CommandService';
+import { ConfiguredRoomCalendarPrincipalIdentityProvider } from './service/ConfiguredRoomCalendarPrincipalIdentityProvider';
 import { ControlRoomMigrationService } from './service/ControlRoomMigrationService';
 import { GuestMemberService } from './service/GuestMemberService';
 import { MatrixCalendarAuthorizationFactory } from './service/MatrixCalendarAuthorization';
 import { MeetingService } from './service/MeetingService';
 import { RoomCalendarCalDavAccess } from './service/RoomCalendarCalDavAccess';
-import { ConfiguredRoomCalendarPrincipalIdentityProvider } from './service/ConfiguredRoomCalendarPrincipalIdentityProvider';
 import { RoomCalendarEventAuditService } from './service/RoomCalendarEventAuditService';
 import { RoomCalendarEventOperations } from './service/RoomCalendarEventOperations';
 import type { RoomCalendarPrincipalIdentityProvider } from './service/RoomCalendarPrincipalIdentity';

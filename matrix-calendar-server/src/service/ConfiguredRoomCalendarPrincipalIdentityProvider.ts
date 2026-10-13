@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-import { UserID } from 'matrix-bot-sdk';
 import type { MatrixClient } from 'matrix-bot-sdk';
+import { UserID } from 'matrix-bot-sdk';
 import type { AppRuntimeContext } from '../AppRuntimeContext';
 import type { IAppConfiguration } from '../IAppConfiguration';
 import type {
