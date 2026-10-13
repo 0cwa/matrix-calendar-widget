@@ -447,11 +447,11 @@ DST regression or recurrence-editing criteria above.
       retains its timeout behavior; notice failure does not roll back CalDAV.
 - [ ] Complete the controlled-beta local and operator readiness gates for the
       selected deployment. Full isolated local Stage B has not passed: the
-      private capped-widget tmpfs Podman adapter currently fails before guest
-      execution while validating its cap-drop representation. This is an
-      environment validation blocker, not a product authorization or calendar
-      failure. Run source-bound server image/cache/runtime acceptance after
-      resolving that adapter gate. Then record the actual target's ingress,
+      local probe stopped while verifying container capabilities; the
+      inspected value was not retained and guest execution was skipped. Hosted
+      source-bound Element and CI acceptance is complete; the separate local
+      source-bound server image/cache/runtime rehearsal remains open. Then
+      record the actual target's ingress,
       DNS/TLS/proxy, account ownership, MAS, credential issuance, and secret
       facts; validate encrypted off-server Restic-compatible S3 backups with
       daily scheduling, 30-day retention, custody, and paired Radicale plus
