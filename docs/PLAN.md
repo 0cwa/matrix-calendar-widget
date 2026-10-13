@@ -419,45 +419,47 @@ DST regression or recurrence-editing criteria above.
       bot-mode OpenID request body, fixture `fetch` forwarding to the subject
       observer, a digest-checked Desktop archive fallback, bounded SDK whoami
       diagnostics, and principal-mode forwarding to the 25-event seed child.
-      Focused offline tests cover these changes. Hosted results for the
-      published candidate below show only partial normal-bot path evidence.
+      Focused offline tests cover these changes. The source-bound hosted
+      acceptance below now covers the complete normal-bot application path;
+      operator acceptance remains open.
       The signed Desktop index offers 1.12.31 and omits pinned 1.12.30; the
       fixture uses the digest-checked pinned archive fallback.
-- [ ] Complete normal-bot G6 unsupported-resource preservation and owned
-      cleanup, then pass acceptance on the fixed source. The published PR #247
-      head `c6a68e9ec49395a671d6a29e48617979df99de3d` passed all terminal checks
-      except normal-bot acceptance in
-      [run 38452260797](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38452260797).
-      Its Real Radicale contract passed appservice and normal-bot behavior
-      (7/7 cases in each mode). The Element acceptance passed 127 appservice
-      Web phases, both Desktop journeys (12/12), normal-bot Web CRUD, reminders,
-      PostgreSQL restart, paired restore, and both profiles' zero- and
-      25-event timing gates. Appservice G6 preservation and cleanup passed.
-      Normal-bot G6 failed its combined preservation gate: the neighbor update
-      returned HTTP 200, the edited title appeared in the refreshed list, and
-      the unsupported canonical resource stayed byte-identical, but the
-      ownership check rejected the gateway href because the fixture still
-      assumed the appservice home. The G6 state machine therefore refused to
-      advance the cleanup ETag; three of four resources were resolved, with one
-      cleanup unresolved. Source commit
-      `794cbc60a3a93e38961db49dfe358831e46f44c5` fixes the fixture check to use
-      the selected, authenticated principal's localpart while retaining fixed
-      origins, exact href identity, strong ETag checks, and fail-closed cleanup.
-      Focused offline tests, E2E TypeScript, and formatting pass; this follow-up
-      has not yet had a hosted runtime run. Operator acceptance remains open.
+- [x] Complete normal-bot G6 unsupported-resource preservation and owned
+      cleanup in hosted acceptance. PR #247 source
+      `acc535dfe69001403c67853b2171672e74056f51` passed the [Element run
+      38458532436](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532436):
+      the supported neighbor retained its identity after edit, the unsupported
+      canonical object remained byte-identical, all four owned resources were
+      accounted for (three deleted, one already absent, none unresolved), and
+      both appservice and normal-bot profiles passed. The [Real Radicale
+      contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532535)
+      passed 7/7 cases in each mode. Source head
+      `acc535dfe69001403c67853b2171672e74056f51` (tree
+      `784aaeac9f6cf733ed7f38b50eb46bcc4b77c333`) was merged as
+      `20dd7357d833238ac23d817bd29bdb0a9f6d4761` with the same tree. The
+      earlier failed run remains linked in its historical workflow record;
+      this passing source-bound run closes that blocker.
 - [x] Offer a safe current-room link from authorized room event details and
       display existing safe conference links. Ordinary master conference URI
       authoring follows ADR036; RTC service creation remains future work.
 - [x] Add separately gated, best-effort action notices after successful room
       create/update/delete operations (ADR032). The SDK request is awaited and
       retains its timeout behavior; notice failure does not roll back CalDAV.
-- [ ] Accept operator enablement for the selected deployment: public
-      ingress/URLs/TLS/secrets, PostgreSQL endpoint and trusted CA, and an
-      isolated restore rehearsal for both Radicale and app-owned PostgreSQL.
+- [ ] Complete the controlled-beta local and operator readiness gates for the
+      selected deployment. Full isolated local Stage B has not passed: the
+      private capped-widget tmpfs Podman adapter currently fails before guest
+      execution while validating its cap-drop representation. This is an
+      environment validation blocker, not a product authorization or calendar
+      failure. Run source-bound server image/cache/runtime acceptance after
+      resolving that adapter gate. Then record the actual target's ingress,
+      DNS/TLS/proxy, account ownership, MAS, credential issuance, and secret
+      facts; validate encrypted off-server Restic-compatible S3 backups with
+      daily scheduling, 30-day retention, custody, and paired Radicale plus
+      app-owned PostgreSQL restore; and rehearse install, disable, and rollback.
       The bounded beta baseline uses the project-owned Radicale image and its
-      own store. If an operator selects an existing etke image or `/data`
-      store, verify override, data-path preservation, backup, and rollback as
-      additional gates.
+      own store. Do not record private server, domain, account, provider, or
+      credential details in public docs. Beta readiness and deployment remain
+      not ready until these gates and a separate rollout decision are complete.
 - [ ] Room-target diagnostics beyond the supported calendar/event paths.
 
 Room access, event writes, reminder configuration, reminder delivery, and
@@ -733,18 +735,28 @@ access and event writes stay disabled by default.
       gates. The widget application source matches the `main` baseline; its
       only widget-source difference is the retained recurring-editor test
       split.
-- [x] Complete ordinary Element Web and Desktop acceptance against PR #229
-      source `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378`. Paired hosted run
-      [37916317363](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317363)
-      passed all functional, timing, authorization, CRUD, and cleanup gates.
-      Two Element-origin opening errors had complete trusted Element-bundle
-      stacks and passed the approved reporting policy; their cause is unknown.
+- [x] Complete ordinary Element Web and Desktop acceptance, including both
+      appservice and normal-bot profiles, on PR #247 source
+      `acc535dfe69001403c67853b2171672e74056f51`. [Hosted run
+      38458532436](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532436)
+      passed authorization, CRUD, Desktop (12/12 per profile), reminder
+      delivery and gateway restart, paired Radicale/PostgreSQL restore, G6
+      preservation and cleanup, and browser-egress checks. The ordinary zero-
+      and 25-event profile passed startup and refresh within 2 seconds, details
+      within 500 ms, and API responses within 1 second. The details maxima were
+      417.482 ms (appservice) and 432.221 ms (normal-bot); API maxima were
+      340.8 ms and 489.573 ms respectively. Each profile had five details
+      samples on 25 events and 44 API samples. Exactly two fully captured,
+      trusted Element-origin opening errors per profile qualified for the
+      approved opening-stage diagnostic policy; their cause is unknown. This
+      is isolated application evidence, not operator or deployment acceptance.
 - [ ] Complete private operator readiness evidence for the merged candidate
       before any separate rollout decision. Independent source review is
-      complete; operator preflight, target-specific deployment and recovery
-      validation remain open. The reminder restore helper now honors the
-      explicit skip-Element mode during quiescence while keeping the default
-      full Element stop and inspection path.
+      complete. Full isolated local Stage B and source-bound server
+      image/cache/runtime acceptance remain open, followed by actual
+      target-specific deployment facts and recovery validation. The reminder
+      restore helper honors explicit skip-Element mode during quiescence while
+      keeping the default full Element stop and inspection path.
   - [x] Run the path-scoped real-Docker PostgreSQL first-initialization
         contract from `.github/workflows/operator-postgres-contract.yml`.
         Require restricted app-role ownership and writes, distinct
