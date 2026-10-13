@@ -49,7 +49,10 @@ import {
   type PerformancePageErrorClass,
   type PerformancePageErrorClassification,
 } from '../../dev/element-acceptance-performance-evidence.mjs';
-import { raceCalendarReadyOrIdentityPrompt } from '../../dev/element-acceptance-performance.mjs';
+import {
+  buildOrdinaryPerformanceSeedEnvironment,
+  raceCalendarReadyOrIdentityPrompt,
+} from '../../dev/element-acceptance-performance.mjs';
 import { classifyG6KeyboardFocusTarget } from '../../dev/element-g6-keyboard-focus.mjs';
 import {
   beginG6ResourceCreate,
@@ -1342,22 +1345,10 @@ function runOrdinaryPerformanceSeed(initialDate: {
   month: number;
   day: number;
 }): void {
-  const environmentNames = [
-    'RUNNER_TEMP',
-    'GITHUB_RUN_ID',
-    'GITHUB_RUN_ATTEMPT',
-    'ELEMENT_ACCEPTANCE_USERS_FILE',
-    'ELEMENT_ACCEPTANCE_PERFORMANCE_MANIFEST_FILE',
-    'ELEMENT_ACCEPTANCE_STAGE_FILE',
-  ];
-  const seedEnvironment: NodeJS.ProcessEnv = {
-    ELEMENT_ACCEPTANCE_PERFORMANCE_START_DATE: `${initialDate.year}-${String(initialDate.month).padStart(2, '0')}-${String(initialDate.day).padStart(2, '0')}`,
-  };
-  for (const name of environmentNames) {
-    const value = process.env[name];
-    if (!value) throw new Error('Ordinary performance fixture is unavailable');
-    seedEnvironment[name] = value;
-  }
+  const seedEnvironment = buildOrdinaryPerformanceSeedEnvironment(
+    process.env,
+    `${initialDate.year}-${String(initialDate.month).padStart(2, '0')}-${String(initialDate.day).padStart(2, '0')}`,
+  );
 
   const result = spawnSync(
     process.execPath,
@@ -3109,7 +3100,9 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
   try {
     recordRuntimeVersions(browser.version());
     await runCase(report.cases[0]);
+    failureCode = 'performance-setup-failed';
     runOrdinaryPerformanceSeed(initialDate);
+    failureCode = 'performance-setup-failed';
     await runCase(report.cases[1]);
     failureCode = 'performance-egress-blocked';
     expect(report.blockedRequestCount).toBe(0);

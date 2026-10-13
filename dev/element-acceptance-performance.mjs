@@ -20,6 +20,14 @@ const CALDAV_URL = 'http://127.0.0.1:5232/';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const MAX_EVENTS = 250;
+const ORDINARY_SEED_ENVIRONMENT_NAMES = [
+  'RUNNER_TEMP',
+  'GITHUB_RUN_ID',
+  'GITHUB_RUN_ATTEMPT',
+  'ELEMENT_ACCEPTANCE_USERS_FILE',
+  'ELEMENT_ACCEPTANCE_PERFORMANCE_MANIFEST_FILE',
+  'ELEMENT_ACCEPTANCE_STAGE_FILE',
+];
 const PERFORMANCE_MANIFEST_STATES = new Set([
   'planned',
   'creating',
@@ -157,6 +165,41 @@ function parsePerformanceLocalDate(value) {
     return undefined;
   }
   return { year, month, day };
+}
+
+export function buildOrdinaryPerformanceSeedEnvironment(
+  sourceEnvironment,
+  startDate,
+) {
+  const mode = sourceEnvironment.ROOM_CALENDAR_PRINCIPAL_MODE ?? 'appservice';
+  if (
+    (mode !== 'appservice' && mode !== 'bot-account') ||
+    !parsePerformanceLocalDate(startDate)
+  ) {
+    throw new Error('Ordinary performance fixture is unavailable');
+  }
+
+  const seedEnvironment = {
+    ROOM_CALENDAR_PRINCIPAL_MODE: mode,
+    ELEMENT_ACCEPTANCE_PERFORMANCE_START_DATE: startDate,
+  };
+  for (const name of ORDINARY_SEED_ENVIRONMENT_NAMES) {
+    const value = sourceEnvironment[name];
+    if (typeof value !== 'string' || value.length === 0) {
+      throw new Error('Ordinary performance fixture is unavailable');
+    }
+    seedEnvironment[name] = value;
+  }
+
+  if (
+    mode === 'appservice' &&
+    sourceEnvironment.MATRIX_APPLICATION_SERVICE_TOKEN !== undefined
+  ) {
+    seedEnvironment.MATRIX_APPLICATION_SERVICE_TOKEN =
+      sourceEnvironment.MATRIX_APPLICATION_SERVICE_TOKEN;
+  }
+
+  return seedEnvironment;
 }
 
 export function buildOrdinaryPerformanceEvents(
