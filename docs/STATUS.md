@@ -169,24 +169,33 @@ passed the legacy appservice phase (7/7 bodies). Synthetic normal-bot account
 registration and login succeeded, then the installed SDK's `getUserId()`
 lookup raised a `TypeError` before bot protocol cases ran (0/7). A local
 loopback reproducer under the same server Jest config traced this to Jest
-resolving the SDK's bare `request` dependency to its own `lib/request` module
-because `lib` preceded `node_modules`. Reordering those module roots and
-adding a default-SDK loopback regression passed locally; the fix has not yet
-been rerun against Synapse/Radicale.
+resolving the SDK's bare `request` dependency to the SDK's own
+`lib/request` export object because `lib` preceded `node_modules`. Reordering
+the roots to put `node_modules` first, while retaining `lib`, and adding a
+default-SDK loopback regression passed locally. The local full server suite
+passed 85 suites and 1,399 tests (6 suites and 33 tests skipped). This is a
+Jest resolution fix, not a Matrix wire-protocol or production-auth change; it
+has not yet been rerun against hosted Synapse/Radicale.
 
 The Element Web and bot acceptance in [run
 38439533765](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533765)
-met the numeric timing limits for both zero- and 25-event profiles, and
-recorded one Element-origin opening error. The appservice Desktop journey
-passed 12/12 cases. The normal-bot Desktop journey passed 4/12, failed at
-event-create row visibility after HTTP 201, and left seven cases not run. The
-normal-bot reminder, restart, and paired-restore paths therefore remain
-unverified; final acceptance is unresolved. Desktop startup passed all 22
-checks in [run
+passed 127 appservice Web phases and the appservice Desktop journey passed
+12/12 cases. Appservice reminder/restart/paired-restore acceptance, numeric
+zero- and 25-event timing, and owned cleanup passed. The normal-bot Web
+event-create/readback check passed, and its zero- and 25-event timing met the
+numeric limits. Its Desktop journey passed 4/12, failed when the expected
+event row remained invisible 30 seconds after HTTP 201, and left seven cases
+not run. Normal-bot reminders, restart, and paired restore were not run; its
+overall acceptance failed. One Element-origin opening error was recorded, and
+final diagnostic eligibility remains pending all functional gates. Desktop
+startup passed all 22 checks in [run
 38439533769](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533769).
-The current source has the local Jest resolver fix, but its hosted AS-free
-Synapse/Radicale protocol result is still pending. Operator acceptance also
-remains open.
+Only the Real Radicale contract and normal-bot acceptance terminal checks
+failed on the published head; the other hosted checks succeeded. CodeRabbit
+reported success, but its independent review was skipped because the PR was a
+draft. The current source has the local Jest resolver fix, but its hosted
+AS-free Synapse/Radicale protocol result is still pending. Operator acceptance
+also remains open.
 
 Draft PR #227 candidate `a02932dafbbfa9316bee5e8bda1ee15ed1ddbaff` passed its
 hosted Element Web acceptance on exact head in [run
@@ -259,19 +268,25 @@ loading, memory, and actual clients remain unmeasured.
   the default. On published PR #247 head
   `7ed070f52b569c22729ea6d881322e2b4a03932c`, the Real Radicale contract
   [run 38439533944](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533944)
-  passed the legacy appservice phase (7/7 bodies). Normal-bot account
-  registration and login succeeded, then the SDK `getUserId()` lookup failed
-  before any normal-bot protocol case ran (0/7). A local loopback reproduction traced the
-  TypeError to the server Jest resolver loading the SDK's own `lib/request`
-  module instead of the `request` package; the module-root order and a focused
-  default-SDK regression are fixed locally, but the hosted Synapse/Radicale
-  contract has not been rerun. The Element Web and bot acceptance
+  passed legacy appservice behavior (7/7 bodies). Bot account registration
+  and login succeeded, then SDK `getUserId()` raised a `TypeError` before any
+  bot protocol case ran (0/7). A local loopback reproduction traced this to
+  Jest resolving the bare `request` import to the SDK's own `lib/request`
+  export object; putting `node_modules` before `lib` while keeping both roots
+  and adding a default-SDK loopback regression passed the full server suite
+  locally (85 suites and 1,399 tests passed; 6 suites and 33 tests skipped).
+  This is a test-resolver fix, not a production-auth or Matrix wire-protocol
+  change; hosted Synapse/Radicale confirmation remains pending. The Element Web
+  and bot acceptance
   [run 38439533765](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533765)
-  met the numeric timing limits for the zero- and 25-event profiles and
-  recorded one Element-origin opening error. Appservice Desktop passed 12/12;
-  normal-bot Desktop passed 4/12, then failed exact event-row visibility after
-  HTTP 201, leaving seven cases not run. The normal-bot reminder, restart, and
-  paired restore were not exercised. Desktop startup passed all 22 checks in
+  passed 127 appservice Web phases, appservice Desktop 12/12, appservice
+  reminder/restart/paired restore, numeric zero- and 25-event timings, and
+  owned cleanup. Normal-bot Web event create/readback and numeric zero- and
+  25-event timings passed, but Desktop passed 4/12 and failed exact row
+  visibility 30 seconds after HTTP 201; seven cases were not run. Normal-bot
+  reminders, restart, and paired restore were not run. One opening error was
+  recorded; final diagnostic eligibility remains pending all functional gates.
+  Desktop startup passed all 22 checks in
   [run 38439533769](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533769).
   Keep room access, event writes, settings, delivery, and action notices off
   until the operator accepts each capability and its trust boundary. A

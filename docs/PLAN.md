@@ -433,19 +433,25 @@ DST regression or recurrence-editing criteria above.
       passed the legacy appservice phase (7/7 bodies). Synthetic normal-bot
       account registration and login succeeded, then the SDK's `getUserId()`
       lookup raised a `TypeError` before bot protocol cases ran (0/7). A local
-      127.0.0.1 reproducer under the same Jest config traced the failure to
+      loopback reproducer under the same Jest config traced the failure to
       module resolution: `lib` preceded `node_modules`, causing the SDK's bare
-      `request` import to resolve to its own `lib/request` module. Reordering
-      both roots and adding a default-SDK loopback regression now pass locally;
+      `request` import to resolve to its own `lib/request` export object.
+      Putting `node_modules` first while retaining `lib`, and adding a
+      default-SDK loopback regression, pass locally. The full server suite
+      passed 85 suites and 1,399 tests (6 suites and 33 tests skipped). This is
+      a Jest resolver fix, not a production-auth or Matrix wire-protocol change;
       hosted Synapse/Radicale confirmation remains pending. The Element Web and
       bot acceptance in
       [run 38439533765](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533765)
-      met numeric timing limits for the zero- and 25-event profiles and
-      recorded one Element-origin opening error. Appservice Desktop passed
-      12/12 cases; normal-bot Desktop passed 4/12, failed event-row visibility
-      after HTTP 201, and left seven cases not run. Normal-bot reminder,
-      PostgreSQL restart, and paired restore were not exercised. Desktop startup
-      passed all 22 checks in
+      passed 127 appservice Web phases and appservice Desktop 12/12, including
+      reminder/restart/paired restore, numeric zero- and 25-event timings, and
+      owned cleanup. Normal-bot Web event create/readback and numeric zero- and
+      25-event timing passed, but its Desktop journey passed 4/12, failed event
+      row visibility 30 seconds after HTTP 201, and left seven cases not run.
+      Normal-bot reminders, PostgreSQL restart, and paired restore were not
+      run. One Element-origin opening error was recorded; final diagnostic
+      eligibility remains pending all functional gates. Desktop startup passed
+      all 22 checks in
       [run 38439533769](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38439533769).
       The AS-free protocol, complete normal-bot flow, reminder delivery,
       restart, paired restore, and operator acceptance remain open.
