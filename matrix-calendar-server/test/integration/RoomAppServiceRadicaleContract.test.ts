@@ -115,6 +115,7 @@ const principalOpenIdRequests: Array<{
   readonly pathUserId: string;
   readonly hasUserIdQuery: boolean;
   readonly hasUserIdBody: boolean;
+  readonly bodyIsEmptyObject: boolean;
 }> = [];
 const gatewayLogLines: string[] = [];
 
@@ -509,6 +510,7 @@ describeContract(contractDescription, () => {
         openIdPath !== null
       ) {
         let bodyHasUserId = false;
+        let bodyIsEmptyObject = false;
         if (typeof init?.body === 'string') {
           try {
             const body: unknown = JSON.parse(init.body);
@@ -516,6 +518,11 @@ describeContract(contractDescription, () => {
               typeof body === 'object' &&
               body !== null &&
               Object.prototype.hasOwnProperty.call(body, 'user_id');
+            bodyIsEmptyObject =
+              typeof body === 'object' &&
+              body !== null &&
+              !Array.isArray(body) &&
+              Object.keys(body).length === 0;
           } catch {
             bodyHasUserId = false;
           }
@@ -526,6 +533,7 @@ describeContract(contractDescription, () => {
           pathUserId: decodeURIComponent(openIdPath[1]),
           hasUserIdQuery: parsedUrl.searchParams.has('user_id'),
           hasUserIdBody: bodyHasUserId,
+          bodyIsEmptyObject,
         });
       }
       const response = await nativeFetch(input, init);
@@ -687,6 +695,11 @@ describeContract(contractDescription, () => {
         selectedPrincipalRequests.every(
           ({ hasUserIdQuery, hasUserIdBody }) =>
             !hasUserIdQuery && !hasUserIdBody,
+        ),
+      ).toBe(true);
+      expect(
+        selectedPrincipalRequests.every(
+          ({ bodyIsEmptyObject }) => bodyIsEmptyObject,
         ),
       ).toBe(true);
     } else {

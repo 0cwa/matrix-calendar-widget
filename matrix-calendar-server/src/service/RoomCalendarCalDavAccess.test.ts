@@ -244,9 +244,12 @@ describe('RoomCalendarCalDavAccess', () => {
         'https://radicale.example.test/caldav/calendar_bot/team-calendar/',
     });
     expect(fetch.mock.calls[0][1]).toMatchObject({
-      headers: { Authorization: 'Bearer synthetic-test-bot-token' },
+      headers: {
+        Authorization: 'Bearer synthetic-test-bot-token',
+        'Content-Type': 'application/json',
+      },
     });
-    expect(fetch.mock.calls[0][1]?.body).toBeUndefined();
+    expect(fetch.mock.calls[0][1]?.body).toBe(JSON.stringify({}));
     const requestUrl = new URL(String(fetch.mock.calls[0][0]));
     expect(requestUrl.pathname).toBe(
       `/_matrix/client/v3/user/${encodeURIComponent(botUserId)}/openid/request_token`,
