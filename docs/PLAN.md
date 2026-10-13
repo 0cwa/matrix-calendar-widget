@@ -602,6 +602,12 @@ access and event writes stay disabled by default.
       so no local full-ZIP verification is claimed. These artifacts expire
       2026-10-16. Target-specific operator comparison, deployment, and private
       operator readiness remain separate open gates.
+  - [x] Add a validated `server-only` image set to the trusted archive
+        workflow. The default remains `all`; manifest verification requires
+        the selected set, while older full manifests without an `image_set`
+        field continue to mean `all`. This reduces future archive transfer
+        needs for server-only rehearsal without closing the separate local
+        image/cache/runtime or operator-readiness gates.
 - [x] Document upgrade/migration, schema compatibility, and safe rollback for
       the project-owned stack; live operator rehearsal remains unverified.
 - [ ] Record exact Element Web and Desktop versions and results for the beta
