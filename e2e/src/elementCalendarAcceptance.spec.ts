@@ -39,6 +39,11 @@ import {
   type ElementErrorSourcePointer,
 } from '../../dev/element-acceptance-error-source-map.mjs';
 import {
+  compareEventTimingWithRoomRange,
+  readCreatedEventTiming,
+  type CreatedEventTiming,
+} from '../../dev/element-acceptance-event-observation.mjs';
+import {
   MAX_DEFAULT_WAIT_DIAGNOSTIC_COUNT,
   advanceOrdinaryPageErrorStage,
   capturePerformancePageError,
@@ -6885,10 +6890,9 @@ function observePostCreateVisibility(
     async collect(frame: FrameLocator, eventRow: Locator) {
       await Promise.allSettled(pendingResponseReads);
       if (createdEventTiming && expectedRoomRange) {
-        const timingMatch = await compareEventTimingWithRoomRange(
-          page,
-          createdEventTiming,
-          expectedRoomRange,
+        const timingMatch = await page.evaluate(
+          compareEventTimingWithRoomRange,
+          { timing: createdEventTiming, range: expectedRoomRange },
         );
         observation.createResponseTimingComparable = timingMatch.comparable;
         observation.createResponseEventIntersectsRoomRange =
@@ -6931,14 +6935,6 @@ type ExpectedRoomRange = {
   end: string;
   timezone: string;
 };
-
-type ZonedEventTiming = {
-  type: 'timed';
-  start: { type: 'zoned'; local: string; timezone: string };
-  end: { type: 'zoned'; local: string; timezone: string };
-};
-
-type CreatedEventTiming = ZonedEventTiming;
 
 type CalDavReportProbeResult = {
   completed: boolean;
@@ -7154,104 +7150,6 @@ function isOptionalHttpStatus(value: unknown): value is number | null {
   return (
     value === null ||
     (Number.isInteger(value) && Number(value) >= 100 && Number(value) <= 599)
-  );
-}
-
-function readCreatedEventTiming(
-  value: unknown,
-): CreatedEventTiming | undefined {
-  if (!isRecord(value) || value.type !== 'timed') return undefined;
-  const readEndpoint = (endpoint: unknown) => {
-    if (
-      !isRecord(endpoint) ||
-      endpoint.type !== 'zoned' ||
-      typeof endpoint.local !== 'string' ||
-      typeof endpoint.timezone !== 'string' ||
-      endpoint.timezone.length === 0
-    ) {
-      return undefined;
-    }
-    return {
-      type: 'zoned' as const,
-      local: endpoint.local,
-      timezone: endpoint.timezone,
-    };
-  };
-  const start = readEndpoint(value.start);
-  const end = readEndpoint(value.end);
-  return start && end ? { type: 'timed', start, end } : undefined;
-}
-
-async function compareEventTimingWithRoomRange(
-  page: Page,
-  timing: CreatedEventTiming,
-  range: ExpectedRoomRange,
-): Promise<{ comparable: boolean; intersects: boolean }> {
-  return page.evaluate(
-    ({ timing, range }) => {
-      const rangeStart = Date.parse(range.start);
-      const rangeEnd = Date.parse(range.end);
-      const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (
-        !Number.isFinite(rangeStart) ||
-        !Number.isFinite(rangeEnd) ||
-        rangeEnd <= rangeStart ||
-        timing.start.timezone !== browserTimezone ||
-        timing.end.timezone !== browserTimezone
-      ) {
-        return { comparable: false, intersects: false };
-      }
-
-      const toInstant = (local: string, timezone: string) => {
-        const match =
-          /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/u.exec(
-            local,
-          );
-        if (!match || timezone !== browserTimezone) return undefined;
-        const [, year, month, day, hour, minute, second, fraction] = match;
-        const instant = Date.parse(local);
-        if (!Number.isFinite(instant)) return undefined;
-        const parts = Object.fromEntries(
-          new Intl.DateTimeFormat('en-CA-u-ca-iso8601', {
-            timeZone: timezone,
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hourCycle: 'h23',
-          })
-            .formatToParts(new Date(instant))
-            .filter((part) => part.type !== 'literal')
-            .map((part) => [part.type, Number(part.value)]),
-        );
-        const milliseconds = Number((fraction ?? '').padEnd(3, '0') || '0');
-        if (
-          parts.year !== Number(year) ||
-          parts.month !== Number(month) ||
-          parts.day !== Number(day) ||
-          parts.hour !== Number(hour) ||
-          parts.minute !== Number(minute) ||
-          parts.second !== Number(second ?? '0') ||
-          new Date(instant).getUTCMilliseconds() !== milliseconds
-        ) {
-          return undefined;
-        }
-        return instant;
-      };
-
-      const start = toInstant(timing.start.local, timing.start.timezone);
-      const end = toInstant(timing.end.local, timing.end.timezone);
-      if (start === undefined || end === undefined || end <= start) {
-        return { comparable: false, intersects: false };
-      }
-      return {
-        comparable: true,
-        intersects: start < rangeEnd && end > rangeStart,
-      };
-    },
-    { timing, range },
   );
 }
 
