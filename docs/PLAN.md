@@ -410,10 +410,18 @@ DST regression or recurrence-editing criteria above.
       application-service `user_id` query parameter. Preserve actor, binding,
       power, ETag, default-off, PostgreSQL persistence, and paired restore gates.
       Do not change unrelated application-service features or action notices.
+- [x] Add a separate normal-bot Element acceptance job to the shared fixture
+      runner. Require disabled synthetic AS registration and no AS token while
+      retaining the same authorization, event, reminder, restart, restore, and
+      cleanup assertions. Add offline setup, OpenID request-shape, and workflow
+      guard tests.
 - [ ] Run the integrated AS-free normal-bot Synapse/Radicale room contract and
       complete normal-bot reminder, PostgreSQL restart, and paired restore
       acceptance. Offline tests and standalone protocol feasibility do not
-      establish these integrated paths.
+      establish these integrated paths. The latest published PR #247 draft's
+      Real Radicale contract failed at its subject observer in
+      [run 38400030704](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38400030704);
+      keep that failure open until a new hosted run passes.
 - [x] Offer a safe current-room link from authorized room event details and
       display existing safe conference links. Ordinary master conference URI
       authoring follows ADR036; RTC service creation remains future work.
