@@ -147,6 +147,18 @@ PR #199 adds manager-authorized reminder configuration and alarm-options APIs, b
 
 PR #201 connects the primary widget to the gateway-authorized room calendar. It consumes the current room capability response, shows the authorized bound room calendar and its read/write capabilities, displays a safe link to the current Matrix room in event details, and exposes reminder controls for supported alarms to authorized managers. All eight hosted checks passed at exact source tree `a65811903363397ea0883f4e32a98ace7dfdb9a8`; independent review passed on the same tree, merged as `f49acee71280944ad6ae351111947ff01c00031d`. Issue #7's bounded repository criteria are complete. The complete local check set passed with the server Jest suite rerun serially after the parallel `yarn ci` invocation exited 1 when Jest workers were terminated by SIGKILL; the serial server run, remaining calendar/timezone suites, static checks, and production build passed. The hosted checks ran on Node 22. These checks do not establish actual Element client or operator-host acceptance.
 
+ADR041 accepts an optional process-wide `bot-account` principal mode for room
+CalDAV and reminder providers; it is not implemented yet. The existing
+appservice mode remains the default and implemented behavior. The integration
+must share one immutable identity derived from the exact Matrix SDK client and
+`ACCESS_TOKEN`, reject an identity mismatch before OpenID, CalDAV, or reminder
+transport requests, and preserve the actor, binding, power, ETag, default-off,
+PostgreSQL, and paired restore requirements. It leaves application-service
+requirements for unrelated features and action notices in force. The
+protocol-only feasibility result
+does not establish gateway, scheduler, persistence, restore, Element, or
+operator acceptance.
+
 Draft PR #227 candidate `a02932dafbbfa9316bee5e8bda1ee15ed1ddbaff` passed its
 hosted Element Web acceptance on exact head in [run
 37611136645](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37611136645).
@@ -213,7 +225,12 @@ loading, memory, and actual clients remain unmeasured.
 
 - **M4:** collection-timezone editing and remaining issue #5 acceptance work.
 - **M5:** issue #6 remains open for broader recurrence authoring and actual client/server interoperability. The bounded #197/#200 operations do not provide general RECURRENCE-ID property editing, arbitrary RRULE parts, or arbitrary rule splitting. Attendee/email, individual reminder, arbitrary RRULE, attachment forms beyond ADR038, broader alarms, and conference forms beyond ADR036 are not part of the implemented editor. Unsupported recurrence or timezone sources may be omitted from projection; the widget warns for source forms it diagnoses, while preserving the canonical resource.
-- **M6:** issue #7 bounded repository criteria are complete. Keep room access, event writes, settings, delivery, and action notices off until the operator accepts each capability and its trust boundary. A passing pinned stack is not an etke-host or production proof.
+- **M6:** issue #7 bounded repository criteria are complete. ADR041's optional
+  bot-account principal integration remains open; appservice is still the
+  default and implemented behavior. Keep room access, event writes, settings,
+  delivery, and action notices off until the operator accepts each capability
+  and its trust boundary. A passing pinned stack is not an operator-host or
+  production proof.
 - **M8:** The bounded G6 Element Web interaction path remains covered by merged
   run [37739410969](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37739410969),
   including shared-event edit/delete, unsupported-source preservation,
