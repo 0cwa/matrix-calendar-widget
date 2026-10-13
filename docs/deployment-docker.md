@@ -310,22 +310,36 @@ Compose 2.24.0 or newer. See the Compose
 and [variable precedence guide](https://docs.docker.com/compose/how-tos/environment-variables/envvars-precedence/).
 
 Keep `deploy/.env.local` for the Compose interpolation values used by the
-widget, homeserver, bot, and proxy. Put room and reminder settings only in
-`deploy/.env.server`; this file supplies the server container environment and
-does not override the interpolation file. Exported shell values can override
-interpolated Compose values, so run preflight and deployment with the same
-shell, project name, and `--env-file` options. Quote values containing `$` with
-single quotes in `.env.server` so Compose treats them literally.
+widget, homeserver, bot, proxy, and `ROOM_CALENDAR_PRINCIPAL_MODE`. That mode
+selector defaults to `appservice` and is set in `.env.local` because Compose
+passes it as an explicit server environment value. Put room gates, bindings,
+application-service credentials, and reminder settings in `deploy/.env.server`;
+that file supplies the server container environment and does not override the
+interpolation file. Exported shell values can override interpolated Compose
+values, so run preflight and deployment with the same shell, project name, and
+`--env-file` options. Quote values containing `$` with single quotes in
+`.env.server` so Compose treats them literally.
 
-### Application-service identity and room collection provisioning
+### Room principal and collection provisioning
 
-Room calendars use one dedicated homeserver application-service identity. On
-Synapse, install a registration through its supported
-`app_service_config_files` setting. This example has a deliberately narrow
-exclusive namespace and no event-delivery URL: the Matrix application-service
-spec allows `url: null` when no traffic needs to be sent to the service, and
-this gateway does not implement an application-service transaction endpoint.
-See the [Matrix registration specification](https://spec.matrix.org/latest/application-service-api/#registration)
+Room CalDAV and reminder providers use one process-wide selector,
+`ROOM_CALENDAR_PRINCIPAL_MODE`. Omitting it keeps the existing `appservice`
+mode. `bot-account` uses the normal Matrix account authenticated by the same
+server-held `ACCESS_TOKEN`; the user ID is read from that authenticated SDK
+client, not from a separate setting. The mode does not enable room access,
+writes, reminders, or notices. It changes only the room CalDAV/reminder
+principal, so keep any application-service credentials required by unrelated
+features enabled in the same deployment. See [ADR041](./adrs/adr041-optional-normal-bot-account-for-room-operations.md).
+
+#### Application-service mode
+
+In the default `appservice` mode, room calendars use one dedicated homeserver
+application-service identity. On Synapse, install a registration through its
+supported `app_service_config_files` setting. This example has a deliberately
+narrow exclusive namespace and no event-delivery URL: the Matrix
+application-service spec allows `url: null` when no traffic needs to be sent
+to the service, and this gateway does not implement an application-service
+transaction endpoint. See the [Matrix registration specification](https://spec.matrix.org/latest/application-service-api/#registration)
 and [Synapse registration instructions](https://element-hq.github.io/synapse/latest/application_services.html).
 
 ```yaml
@@ -346,17 +360,16 @@ Replace both token placeholders with separately generated high-entropy values;
 never use tokens from a test fixture. Set
 `MATRIX_APPLICATION_SERVICE_TOKEN` to this registration's `as_token` and
 `MATRIX_APPLICATION_SERVICE_USER_ID` to the sender ID formed with the actual
-Matrix server name. The server's required `ACCESS_TOKEN` remains a separate
-normal bot-user access token; do not substitute either application-service
-token for it. Apply the registration through the homeserver operator's
-supported process and restart or reload the isolated acceptance homeserver
-before testing it. Do not hand-edit managed homeserver configuration.
+Matrix server name. The server's required `ACCESS_TOKEN` remains a separate normal bot-user
+access token; do not substitute either application-service token for it.
+Apply the registration through the homeserver operator's supported process
+and restart or reload the isolated acceptance homeserver before testing it.
+Do not hand-edit managed homeserver configuration.
 
-Before setting `ROOM_CALENDAR_BINDINGS` or enabling the room UI, create the
-calendar collection under the service user's Radicale home. The authorized
-operator must obtain a short-lived OpenID proof for the exact service user by
+For room collections in this mode, use the service user's Radicale home. The
+authorized operator obtains a short-lived OpenID proof for that exact user by
 calling `POST /_matrix/client/v3/user/{serviceUserId}/openid/request_token`,
-with the full `serviceUserId` URL-encoded as one path segment, then send
+with the full `serviceUserId` URL-encoded as one path segment, then sends
 `Authorization: Bearer <as_token>` and JSON body
 `{"user_id":"<same serviceUserId>"}`. Keep the `as_token` out of the URL.
 Then use Radicale's tagged credential form from
@@ -370,14 +383,36 @@ shell history, files, or artifacts. The repository does not yet provide a
 one-command provisioner, so perform this step only with an operator-approved
 secret-safe tool during isolated acceptance.
 
-Invite the service user to the single pilot room and give it only the room
-membership/state and message permissions required by the selected features.
-Then set exactly one matching room/calendar pair in `.env.server`, run the
-preflight below, and keep each feature gate separate. Room writes require the
-room access gate; either reminder gate also requires room access, the
-application-service identity, the binding, and the external reminder database.
-`ROOM_CALENDAR_ACTION_MESSAGES_ENABLED` remains independent. These settings
-are opt-in configuration, not evidence of a tested team-host deployment.
+#### Normal bot-account mode
+
+Set `ROOM_CALENDAR_PRINCIPAL_MODE=bot-account` in `deploy/.env.local` only
+when the server's existing `ACCESS_TOKEN` belongs to the intended normal bot
+account. This room path does not require an application-service registration,
+`MATRIX_APPLICATION_SERVICE_TOKEN`, or
+`MATRIX_APPLICATION_SERVICE_USER_ID`. Do not add a separately configured bot
+user ID: the server verifies the account through the same authenticated SDK
+client used for `ACCESS_TOKEN`. For Radicale provisioning, resolve that exact
+account from the token, request its short-lived OpenID proof with the same
+normal access token, and omit `user_id` from the request body and query. Use
+the same tagged credential and collection path form as above, under that
+account's localpart.
+
+Changing from `appservice` to `bot-account` (or back) selects a different
+Radicale home. The server does not copy, discover, or migrate existing
+calendars between homes. Leave the old home intact and provision and verify
+the selected home before configuring bindings. No other feature gate is
+opened by the mode change.
+
+Invite the selected principal to the single pilot room and give it only the
+room membership/state and message permissions required by the enabled
+features. Then set exactly one matching room/calendar pair in `.env.server`,
+run the preflight below, and keep each feature gate separate. Room writes
+require the room access gate. Either reminder gate also requires room access,
+a valid selected principal, the binding, and the external reminder database;
+PostgreSQL and paired Radicale-plus-PostgreSQL restore requirements remain
+unchanged. `ROOM_CALENDAR_ACTION_MESSAGES_ENABLED` remains independent. These
+settings are opt-in configuration, not evidence of a tested team-host
+deployment.
 
 This is an operator-configured sidecar pattern, not a verified etke deployment.
 Before using it, the operator must provide:

@@ -399,17 +399,21 @@ DST regression or recurrence-editing criteria above.
         encrypted-room denial, and binding changes before and during scans
         against pinned Synapse/Radicale (PR #199). This proves the pinned stack,
         rather than exactly-once delivery on arbitrary homeservers.
-- [ ] Implement the accepted ADR041 opt-in `bot-account` mode for room CalDAV
+- [x] Implement the accepted ADR041 opt-in `bot-account` mode for room CalDAV
       and reminder providers. Keep `appservice` as the strict default and
       preserve its contracts. Resolve one shared principal identity from the
       same Matrix SDK client constructed with `ACCESS_TOKEN`, verify
       `AppRuntimeContext.botUserId`, and stop before OpenID, CalDAV, or reminder
       transport requests on identity mismatch or failure. Use that same
       identity for CalDAV expected-principal validation and reminder sender
-      checks; ordinary bot-account reminder REST calls must omit the
+      checks; ordinary bot-account reminder REST calls omit the
       application-service `user_id` query parameter. Preserve actor, binding,
       power, ETag, default-off, PostgreSQL persistence, and paired restore gates.
       Do not change unrelated application-service features or action notices.
+- [ ] Run the integrated AS-free normal-bot Synapse/Radicale room contract and
+      complete normal-bot reminder, PostgreSQL restart, and paired restore
+      acceptance. Offline tests and standalone protocol feasibility do not
+      establish these integrated paths.
 - [x] Offer a safe current-room link from authorized room event details and
       display existing safe conference links. Ordinary master conference URI
       authoring follows ADR036; RTC service creation remains future work.

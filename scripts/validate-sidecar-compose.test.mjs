@@ -51,6 +51,15 @@ function roomAccessEnvironment(overrides = {}) {
   };
 }
 
+function botAccountRoomAccessEnvironment(overrides = {}) {
+  const environment = roomAccessEnvironment({
+    ROOM_CALENDAR_PRINCIPAL_MODE: 'bot-account',
+  });
+  delete environment.MATRIX_APPLICATION_SERVICE_TOKEN;
+  delete environment.MATRIX_APPLICATION_SERVICE_USER_ID;
+  return { ...environment, ...overrides };
+}
+
 test('validator restores the caller deprecation setting after SDK user ID parsing', () => {
   const priorNoDeprecation = process.noDeprecation;
   process.noDeprecation = false;
@@ -108,6 +117,59 @@ test('room reads and writes validate with one exact binding and separate gates',
   assert.equal(result.roomAccessEnabled, true);
   assert.equal(result.roomWritesEnabled, true);
   assert.equal(result.bindingCount, 1);
+});
+
+test('bot-account room access uses ACCESS_TOKEN without appservice credentials', () => {
+  const result = validateSidecarComposeModel(
+    composeModel(botAccountRoomAccessEnvironment()),
+  );
+
+  assert.equal(result.roomAccessEnabled, true);
+  assert.equal(result.bindingCount, 1);
+});
+
+test('omitted principal mode preserves the appservice credential requirement', () => {
+  const environment = roomAccessEnvironment();
+  delete environment.MATRIX_APPLICATION_SERVICE_TOKEN;
+  delete environment.MATRIX_APPLICATION_SERVICE_USER_ID;
+
+  assert.throws(() => validateSidecarComposeModel(composeModel(environment)), {
+    message: /resolved values are never displayed/,
+  });
+});
+
+test('unsupported principal modes fail even while room access is disabled', () => {
+  assert.throws(
+    () =>
+      validateSidecarComposeModel(
+        composeModel({ ROOM_CALENDAR_PRINCIPAL_MODE: 'claimed-user' }),
+      ),
+    { message: /resolved values are never displayed/ },
+  );
+});
+
+test('bot-account reminders still require app-owned PostgreSQL', () => {
+  const reminderEnvironment = botAccountRoomAccessEnvironment({
+    MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED: 'true',
+    ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED: 'true',
+  });
+
+  assert.throws(
+    () => validateSidecarComposeModel(composeModel(reminderEnvironment)),
+    { message: /resolved values are never displayed/ },
+  );
+
+  const result = validateSidecarComposeModel(
+    composeModel({
+      ...reminderEnvironment,
+      MATRIX_CALENDAR_REMINDER_DATABASE_URL:
+        'postgresql://calendar:synthetic-secret@db.example.org:5432/calendar',
+    }),
+  );
+  assert.equal(result.roomAccessEnabled, true);
+  assert.equal(result.reminderConfigurationEnabled, true);
+  assert.equal(result.reminderDeliveryEnabled, true);
+  assert.equal(result.reminderDatabaseConfigured, true);
 });
 
 test('reminders require room access, credentials, a binding, and a database', () => {

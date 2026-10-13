@@ -66,7 +66,14 @@ RADICALE_URL=https://calendar.example.com
 # Each room ID and app-owned calendar ID must be canonical and unique.
 # ROOM_CALENDAR_BINDINGS='[{"roomId":"!room-hash:example.org","calendarId":"team-calendar"}]'
 
-# Application-service identity for explicitly bound room-calendar access.
+# Process-wide room CalDAV/reminder principal; omitted defaults to appservice.
+# bot-account uses the identity verified by the same Matrix SDK client as ACCESS_TOKEN;
+# do not configure a separate claimed user ID. This setting does not enable room features.
+# Switching modes selects a different Radicale home; existing calendars are not migrated.
+# ROOM_CALENDAR_PRINCIPAL_MODE=appservice
+# See ADR041 for the principal contract and mode-switch consequences.
+
+# Application-service identity for explicitly bound room-calendar access in appservice mode.
 # Room access remains disabled unless explicitly enabled, and must stay off
 # until the M6 authorization, room-isolation, and deployment gates are accepted.
 # Store the token using deployment secret management; never put it in a widget.
@@ -237,7 +244,10 @@ GUEST_USER_DELETE_POWER_LEVEL_ON_LEAVE=true
 `ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED` defaults to `false`. Before enabling it,
 review [ADR028](./adrs/adr028-room-reminder-configuration-and-delivery.md) and
 [deployment notes](./deployment-docker.md): delivery also requires room access,
-a valid appservice/binding configuration, and the app-owned reminder database.
+a valid selected-principal/binding configuration, and the app-owned reminder
+database. Appservice mode remains the default and requires its own token and
+sender ID when room access is enabled; bot-account mode uses the normal bot
+identity from `ACCESS_TOKEN`.
 The native scheduled sender only supports unencrypted rooms and refuses
 unknown encryption state. Stable transaction IDs do not guarantee exactly-once
 Matrix delivery. `ROOM_CALENDAR_ACTION_MESSAGES_ENABLED` is a separate,
