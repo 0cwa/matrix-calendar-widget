@@ -12,15 +12,28 @@ runs:
         PRINCIPAL_MODE: ${{ inputs.principal-mode }}
       shell: bash
       run: |
-        if [[ "$PRINCIPAL_MODE" != appservice ]]; then
-          echo 'The extracted acceptance runner currently requires appservice mode.' >&2
-          exit 1
-        fi
-        if [[ -z "${MATRIX_APPLICATION_SERVICE_TOKEN:-}" || ${#MATRIX_APPLICATION_SERVICE_TOKEN} -gt 4096 ]]; then
-          echo 'The appservice acceptance run requires its bounded synthetic AS token.' >&2
-          exit 1
-        fi
-        echo 'ROOM_CALENDAR_PRINCIPAL_MODE=appservice' >> "$GITHUB_ENV"
+        case "$PRINCIPAL_MODE" in
+          appservice)
+            if [[ -z "${MATRIX_APPLICATION_SERVICE_TOKEN:-}" || ${#MATRIX_APPLICATION_SERVICE_TOKEN} -gt 4096 || "${MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION:-enabled}" != enabled ]]; then
+              echo 'The appservice acceptance run requires its bounded synthetic AS token and enabled registration.' >&2
+              exit 1
+            fi
+            echo 'MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION=enabled' >> "$GITHUB_ENV"
+            ;;
+          bot-account)
+            if [[ "${MATRIX_APPLICATION_SERVICE_TOKEN+x}" == x || "${MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION:-}" != disabled ]]; then
+              echo 'The bot-account acceptance run requires AS credentials absent and registration disabled.' >&2
+              exit 1
+            fi
+            echo 'MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION=disabled' >> "$GITHUB_ENV"
+            echo 'MATRIX_APPLICATION_SERVICE_USER_ID=' >> "$GITHUB_ENV"
+            ;;
+          *)
+            echo 'The acceptance principal mode is invalid.' >&2
+            exit 1
+            ;;
+        esac
+        echo "ROOM_CALENDAR_PRINCIPAL_MODE=$PRINCIPAL_MODE" >> "$GITHUB_ENV"
         if [[ -n "${MATRIX_APPLICATION_SERVICE_TOKEN:-}" ]]; then
           echo "::add-mask::$MATRIX_APPLICATION_SERVICE_TOKEN"
         fi
@@ -73,6 +86,7 @@ runs:
         node dev/element-acceptance-performance-evidence.test.mjs
         node dev/element-acceptance-error-source-map.test.mjs
         node --test dev/element-acceptance-workflow.test.mjs
+        node --test dev/element-acceptance-setup.test.mjs
         node --test dev/validate-element-acceptance-compose.test.mjs
 
     - name: Build calendar, server, and widget outputs
@@ -81,6 +95,7 @@ runs:
         yarn workspace @matrix-calendar-widget/ical-timezones build
         yarn workspace @matrix-calendar-widget/calendar build
         yarn workspace @matrix-calendar-widget/server build
+        node --test dev/element-acceptance-caldav-report-probe.test.mjs
         yarn workspace @matrix-calendar-widget/widget build
         docker build \
           --tag matrix-calendar-widget/server:element-acceptance \
@@ -245,7 +260,7 @@ runs:
       if: always()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: element-web-acceptance-summary
+        name: ${{ inputs.principal-mode == 'appservice' && 'element-web-acceptance-summary' || 'element-web-acceptance-normal-bot-summary' }}
         path: ${{ runner.temp }}/element-acceptance-safe-summary.txt
         if-no-files-found: ignore
         retention-days: 1
@@ -261,7 +276,7 @@ runs:
       if: always()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: element-desktop-journey-summary
+        name: ${{ inputs.principal-mode == 'appservice' && 'element-desktop-journey-summary' || 'element-desktop-journey-normal-bot-summary' }}
         path: ${{ runner.temp }}/element-desktop-journey-safe-summary.txt
         if-no-files-found: ignore
         retention-days: 1
@@ -285,7 +300,7 @@ runs:
       if: ${{ always() && steps.desktop_journey.outcome != 'skipped' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: element-desktop-startup-summary
+        name: ${{ inputs.principal-mode == 'appservice' && 'element-desktop-startup-summary' || 'element-desktop-startup-normal-bot-summary' }}
         path: ${{ runner.temp }}/element-desktop-startup-safe-summary.json
         if-no-files-found: ignore
         retention-days: 1

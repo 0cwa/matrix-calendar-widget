@@ -81,6 +81,8 @@ type User = {
   deviceId: string;
 };
 
+type PrincipalMode = 'appservice' | 'bot-account';
+
 type Fixture = {
   homeserverUrl: string;
   elementUrl: string;
@@ -91,10 +93,12 @@ type Fixture = {
   calendarId: string;
   outsiderRoomId: string;
   teamRoomId: string;
+  principalMode: PrincipalMode;
   users: {
     memberA: User;
     memberB: User;
     outsider: User;
+    bot: User;
   };
   serviceSender: {
     userId: string;
@@ -328,6 +332,7 @@ type G6SeedCreateObservation = {
 type G6CalDavClient = {
   authorization: string;
   collectionUrl: URL;
+  localpart: string;
 };
 
 type G6CalDavResult = {
@@ -4300,19 +4305,84 @@ const G6_RADICALE_ORIGIN = 'http://127.0.0.1:5233';
 const G6_RADICALE_COLLECTION = 'element-acceptance';
 const G6_MAX_RESOURCE_BYTES = 16_384;
 
+function acceptancePrincipal(fixtureValue: Fixture):
+  | {
+      mode: PrincipalMode;
+      userId: string;
+      localpart: string;
+      accessToken: string;
+      openIdBody?: string;
+    }
+  | undefined {
+  const sender = fixtureValue?.serviceSender;
+  let userId: string;
+  let accessToken: string;
+  let openIdBody: string | undefined;
+  if (fixtureValue?.principalMode === 'appservice') {
+    const applicationServiceToken =
+      process.env.MATRIX_APPLICATION_SERVICE_TOKEN;
+    if (
+      sender?.userId !== G6_SERVICE_USER_ID ||
+      typeof applicationServiceToken !== 'string' ||
+      applicationServiceToken.length === 0 ||
+      applicationServiceToken.length > 4096
+    ) {
+      return undefined;
+    }
+    userId = G6_SERVICE_USER_ID;
+    accessToken = applicationServiceToken;
+    openIdBody = JSON.stringify({ user_id: userId });
+  } else if (fixtureValue?.principalMode === 'bot-account') {
+    const bot = fixtureValue.users?.bot;
+    if (
+      !bot ||
+      !sender ||
+      process.env.MATRIX_APPLICATION_SERVICE_TOKEN !== undefined ||
+      typeof bot.userId !== 'string' ||
+      !/^@([a-z0-9][a-z0-9-]{0,254}):localhost$/u.test(bot.userId) ||
+      typeof bot.accessToken !== 'string' ||
+      bot.accessToken.length === 0 ||
+      bot.accessToken.length > 4096 ||
+      sender.userId !== bot.userId ||
+      sender.accessToken !== bot.accessToken
+    ) {
+      return undefined;
+    }
+    userId = bot.userId;
+    accessToken = bot.accessToken;
+  } else {
+    return undefined;
+  }
+
+  const match =
+    fixtureValue.principalMode === 'bot-account'
+      ? /^@([a-z0-9][a-z0-9-]{0,254}):localhost$/u.exec(userId)
+      : undefined;
+  if (fixtureValue.principalMode === 'bot-account' && !match) {
+    return undefined;
+  }
+  return {
+    mode: fixtureValue.principalMode,
+    userId,
+    localpart:
+      fixtureValue.principalMode === 'appservice'
+        ? G6_SERVICE_LOCALPART
+        : (match?.[1] ?? ''),
+    accessToken,
+    ...(openIdBody === undefined ? {} : { openIdBody }),
+  };
+}
+
 async function createG6CalDavClient(fixtureValue: Fixture): Promise<{
   status?: number;
   proofValid: boolean;
   client?: G6CalDavClient;
 }> {
-  const applicationServiceToken = process.env.MATRIX_APPLICATION_SERVICE_TOKEN;
+  const principal = acceptancePrincipal(fixtureValue);
   if (
-    fixtureValue.serviceSender.userId !== G6_SERVICE_USER_ID ||
+    !principal ||
     fixtureValue.calendarId !== G6_RADICALE_COLLECTION ||
-    new URL(fixtureValue.homeserverUrl).origin !== 'http://127.0.0.1:8008' ||
-    typeof applicationServiceToken !== 'string' ||
-    applicationServiceToken.length === 0 ||
-    applicationServiceToken.length > 4096
+    new URL(fixtureValue.homeserverUrl).origin !== 'http://127.0.0.1:8008'
   ) {
     return { proofValid: false };
   }
@@ -4320,16 +4390,20 @@ async function createG6CalDavClient(fixtureValue: Fixture): Promise<{
   let openIdResponse: globalThis.Response;
   try {
     const openIdUrl = new URL(
-      `/_matrix/client/v3/user/${encodeURIComponent(G6_SERVICE_USER_ID)}/openid/request_token`,
+      `/_matrix/client/v3/user/${encodeURIComponent(principal.userId)}/openid/request_token`,
       fixtureValue.homeserverUrl,
     );
     openIdResponse = await fetch(openIdUrl, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${applicationServiceToken}`,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${principal.accessToken}`,
+        ...(principal.openIdBody === undefined
+          ? {}
+          : { 'Content-Type': 'application/json' }),
       },
-      body: JSON.stringify({ user_id: G6_SERVICE_USER_ID }),
+      ...(principal.openIdBody === undefined
+        ? {}
+        : { body: principal.openIdBody }),
       redirect: 'error',
       signal: AbortSignal.timeout(10_000),
     });
@@ -4370,11 +4444,11 @@ async function createG6CalDavClient(fixtureValue: Fixture): Promise<{
     }),
   ).toString('base64url');
   const authorization = Buffer.from(
-    `${G6_SERVICE_LOCALPART}:matrix-openid:${delegatedCredential}`,
+    `${principal.localpart}:matrix-openid:${delegatedCredential}`,
     'utf8',
   ).toString('base64');
   const collectionUrl = new URL(
-    `${encodeURIComponent(G6_SERVICE_LOCALPART)}/${encodeURIComponent(G6_RADICALE_COLLECTION)}/`,
+    `${encodeURIComponent(principal.localpart)}/${encodeURIComponent(G6_RADICALE_COLLECTION)}/`,
     `${G6_RADICALE_ORIGIN}/`,
   );
   if (collectionUrl.origin !== G6_RADICALE_ORIGIN) {
@@ -4384,7 +4458,7 @@ async function createG6CalDavClient(fixtureValue: Fixture): Promise<{
   return {
     status,
     proofValid: true,
-    client: { authorization, collectionUrl },
+    client: { authorization, collectionUrl, localpart: principal.localpart },
   };
 }
 
@@ -4406,7 +4480,7 @@ async function g6CalDavRequest(
     encodeURIComponent(resourceName),
     client.collectionUrl,
   );
-  const collectionPrefix = `/${encodeURIComponent(G6_SERVICE_LOCALPART)}/${encodeURIComponent(G6_RADICALE_COLLECTION)}/`;
+  const collectionPrefix = `/${encodeURIComponent(client.localpart)}/${encodeURIComponent(G6_RADICALE_COLLECTION)}/`;
   if (
     resourceUrl.origin !== G6_RADICALE_ORIGIN ||
     !resourceUrl.pathname.startsWith(collectionPrefix) ||
@@ -6831,6 +6905,7 @@ function observePostCreateVisibility(
           calendarId: expectedCalendarId,
           eventUid: createdEventUid,
           range: expectedRoomRange,
+          fixture,
         });
         if (caldavProbe) {
           observation.caldavReportProbeCompleted = caldavProbe.completed;
@@ -6883,11 +6958,15 @@ function runCalDavReportProbe({
   calendarId,
   eventUid,
   range,
+  fixture: fixtureValue,
 }: {
   calendarId: string;
   eventUid: string;
   range: ExpectedRoomRange;
+  fixture: Fixture;
 }): CalDavReportProbeResult | undefined {
+  const principal = acceptancePrincipal(fixtureValue);
+  if (!principal) return undefined;
   const result = spawnSync(
     process.execPath,
     [
@@ -6897,12 +6976,19 @@ function runCalDavReportProbe({
       ),
     ],
     {
-      input: JSON.stringify({ calendarId, eventUid, range }),
+      input: JSON.stringify({
+        calendarId,
+        eventUid,
+        range,
+        principalMode: fixtureValue.principalMode,
+        serviceSender: fixtureValue.serviceSender,
+        bot: fixtureValue.users.bot,
+      }),
       encoding: 'utf8',
-      env: {
-        MATRIX_APPLICATION_SERVICE_TOKEN:
-          process.env.MATRIX_APPLICATION_SERVICE_TOKEN ?? '',
-      },
+      env:
+        principal.mode === 'appservice'
+          ? { MATRIX_APPLICATION_SERVICE_TOKEN: principal.accessToken }
+          : {},
       stdio: ['pipe', 'pipe', 'ignore'],
       timeout: 20_000,
       maxBuffer: 4096,

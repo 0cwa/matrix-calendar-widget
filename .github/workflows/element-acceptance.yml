@@ -46,3 +46,25 @@ jobs:
         uses: ./.github/actions/element-acceptance
         with:
           principal-mode: appservice
+
+  normal-bot-account-acceptance:
+    name: Normal bot account acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      MATRIX_CALENDAR_DEV_USER: calendar
+      MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION: disabled
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: yarn
+
+      - name: Run Element acceptance fixture suite with a normal bot account
+        uses: ./.github/actions/element-acceptance
+        with:
+          principal-mode: bot-account
