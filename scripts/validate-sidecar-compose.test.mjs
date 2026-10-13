@@ -128,14 +128,37 @@ test('bot-account room access uses ACCESS_TOKEN without appservice credentials',
   assert.equal(result.bindingCount, 1);
 });
 
-test('omitted principal mode preserves the appservice credential requirement', () => {
-  const environment = roomAccessEnvironment();
-  delete environment.MATRIX_APPLICATION_SERVICE_TOKEN;
-  delete environment.MATRIX_APPLICATION_SERVICE_USER_ID;
+test('bot-account room access accepts empty optional AS variables as absent', () => {
+  const result = validateSidecarComposeModel(
+    composeModel(
+      botAccountRoomAccessEnvironment({
+        MATRIX_APPLICATION_SERVICE_TOKEN: '',
+        MATRIX_APPLICATION_SERVICE_USER_ID: '',
+      }),
+    ),
+  );
 
-  assert.throws(() => validateSidecarComposeModel(composeModel(environment)), {
-    message: /resolved values are never displayed/,
+  assert.equal(result.roomAccessEnabled, true);
+  assert.equal(result.bindingCount, 1);
+});
+
+test('omitted principal mode preserves the appservice credential requirement', () => {
+  const missingCredentials = roomAccessEnvironment();
+  delete missingCredentials.MATRIX_APPLICATION_SERVICE_TOKEN;
+  delete missingCredentials.MATRIX_APPLICATION_SERVICE_USER_ID;
+  const emptyCredentials = roomAccessEnvironment({
+    MATRIX_APPLICATION_SERVICE_TOKEN: '',
+    MATRIX_APPLICATION_SERVICE_USER_ID: '',
   });
+
+  for (const environment of [missingCredentials, emptyCredentials]) {
+    assert.throws(
+      () => validateSidecarComposeModel(composeModel(environment)),
+      {
+        message: /resolved values are never displayed/,
+      },
+    );
+  }
 });
 
 test('unsupported principal modes fail even while room access is disabled', () => {

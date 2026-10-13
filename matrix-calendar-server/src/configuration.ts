@@ -24,6 +24,10 @@ import {
 import { parseRoomCalendarBindings } from './service/RoomCalendarBindingResolver';
 import type { RoomCalendarPrincipalMode } from './service/RoomCalendarPrincipalIdentity';
 
+const optionalEnvironmentValue = (
+  value: string | undefined,
+): string | undefined => (value === '' ? undefined : value);
+
 const toBoolean = (
   value: string | undefined,
   defaultValue: boolean,
@@ -76,8 +80,12 @@ function createConfiguration() {
       process.env.ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED,
       false,
     ),
-    application_service_token: process.env.MATRIX_APPLICATION_SERVICE_TOKEN,
-    application_service_user_id: process.env.MATRIX_APPLICATION_SERVICE_USER_ID,
+    application_service_token: optionalEnvironmentValue(
+      process.env.MATRIX_APPLICATION_SERVICE_TOKEN,
+    ),
+    application_service_user_id: optionalEnvironmentValue(
+      process.env.MATRIX_APPLICATION_SERVICE_USER_ID,
+    ),
     calendar_gateway_rate_limit_requests: toNumber(
       process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS,
       120,
@@ -198,8 +206,8 @@ export const ValidationSchema = Joi.object({
   ROOM_CALENDAR_ACCESS_ENABLED: Joi.boolean(),
   ROOM_CALENDAR_EVENT_WRITES_ENABLED: Joi.boolean(),
   ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED: Joi.boolean(),
-  MATRIX_APPLICATION_SERVICE_TOKEN: Joi.string(),
-  MATRIX_APPLICATION_SERVICE_USER_ID: Joi.string(),
+  MATRIX_APPLICATION_SERVICE_TOKEN: Joi.string().empty(''),
+  MATRIX_APPLICATION_SERVICE_USER_ID: Joi.string().empty(''),
   MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS: Joi.number()
     .integer()
     .min(1)
