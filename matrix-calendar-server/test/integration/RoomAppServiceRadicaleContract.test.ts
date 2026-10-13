@@ -28,7 +28,7 @@ import { getRequestFn, setRequestFn } from 'matrix-bot-sdk/lib/request';
 import { execFileSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
-import { request as httpRequest } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 import { AppRuntimeContext } from '../../src/AppRuntimeContext';
@@ -392,6 +392,69 @@ async function withMatrixSdkRequest(
 describe('Matrix SDK whoami diagnostic probe', () => {
   const expectedUserId = '@synthetic-room-calendar:localhost';
   const syntheticToken = 'synthetic-room-calendar-token-sentinel';
+
+  it('uses the SDK default request transport in the Jest contract environment', async () => {
+    const originalRequestFn = getRequestFn();
+    expect(typeof originalRequestFn).toBe('function');
+
+    const requests: Array<{
+      readonly method: string;
+      readonly whoAmIPath: boolean;
+      readonly authorizationPresent: boolean;
+    }> = [];
+    const server = createServer((request, response) => {
+      const authorization = request.headers.authorization;
+      requests.push({
+        method: request.method ?? '',
+        whoAmIPath: request.url === '/_matrix/client/v3/account/whoami',
+        authorizationPresent:
+          typeof authorization === 'string' &&
+          authorization.startsWith('Bearer '),
+      });
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ user_id: expectedUserId }));
+    });
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', resolve);
+      });
+      const address = server.address() as AddressInfo;
+      const result = await inspectMatrixSdkWhoAmI(
+        new MatrixClient(`http://127.0.0.1:${address.port}`, syntheticToken),
+        expectedUserId,
+      );
+
+      expect(result.userId).toBe(expectedUserId);
+      expect(result.error).toBeUndefined();
+      expect(result.observation).toMatchObject({
+        requestSeen: true,
+        requestMethod: 'get',
+        authorizationPresent: true,
+        responseStatus: 200,
+        responseShape: 'object',
+        responseUserId: 'string',
+        identityMatches: true,
+        outcome: 'matched',
+      });
+      expect(requests).toEqual([
+        {
+          method: 'GET',
+          whoAmIPath: true,
+          authorizationPresent: true,
+        },
+      ]);
+      expect(getRequestFn()).toBe(originalRequestFn);
+    } finally {
+      server.closeAllConnections();
+      if (server.listening) {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => (error ? reject(error) : resolve()));
+        });
+      }
+    }
+  }, 10000);
 
   it('uses the installed SDK GET whoami request and verifies its identity', async () => {
     await withMatrixSdkRequest(
