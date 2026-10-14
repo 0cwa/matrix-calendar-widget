@@ -460,6 +460,13 @@ DST regression or recurrence-editing criteria above.
       own store. Do not record private server, domain, account, provider, or
       credential details in public docs. Beta readiness and deployment remain
       not ready until these gates and a separate rollout decision are complete.
+  - [x] Add reviewed source-only local rehearsal support: [prebuilt/no-pull
+        setup](../dev/up.sh), [API probe](../dev/element-acceptance-api-probe.mjs),
+        [reminder fixture](../dev/local-reminder-fixture.mjs), and [paired
+        restore helper](../dev/element-acceptance-reminder-restore.mjs).
+        Focused checks passed 69 tests using in-process HTTP and fake commands.
+        No service, real API, image store, restart, or restore was exercised;
+        this does not pass local Stage B or image/cache/runtime acceptance.
 - [ ] Room-target diagnostics beyond the supported calendar/event paths.
 
 Room access, event writes, reminder configuration, reminder delivery, and
