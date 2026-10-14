@@ -451,12 +451,15 @@ DST regression or recurrence-editing criteria above.
       inspected value was not retained and guest execution was skipped. Hosted
       source-bound Element and CI acceptance is complete; the separate local
       source-bound server image/cache/runtime rehearsal remains open. A
+      P0 local rehearsal remains blocked pending owner-scope approval. A
       source-only Element-free gateway API probe is available at
       `dev/element-acceptance-api-probe.mjs`; it consumes the private synthetic
       fixture produced by `element-acceptance-setup.mjs setup` and verifies
       room authorization, event CRUD/ETags, cleanup, and canonical Radicale
       readback. The probe has not been run against local services, so it adds
-      no local runtime acceptance evidence. Then
+      no local-service runtime acceptance evidence and closes none of the
+      P0/P1/P2 gates.
+      Then
       record the actual target's ingress,
       DNS/TLS/proxy, account ownership, MAS, credential issuance, and secret
       facts; validate encrypted off-server Restic-compatible S3 backups with
