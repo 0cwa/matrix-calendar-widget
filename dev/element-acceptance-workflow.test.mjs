@@ -113,5 +113,52 @@ test('the shared runner preserves the Element, restart, restore, and cleanup gat
   assert.match(e2e, /toBeLessThanOrEqual\(2000\)/u);
   assert.match(e2e, /toBeLessThanOrEqual\(1000\)/u);
   assert.match(e2e, /toBeLessThanOrEqual\(500\)/u);
-  assert.doesNotMatch(runner, /continue-on-error:\s*true/u);
+  const reporterStart = runner.indexOf(
+    '    - name: Record bounded action phase summary',
+  );
+  const nextStep = runner.indexOf('\n    - name:', reporterStart + 1);
+  const reporter = runner.slice(reporterStart, nextStep);
+  assert.ok(reporterStart >= 0, 'missing bounded action phase reporter');
+  assert.ok(
+    runner.indexOf('Stop and remove the isolated stack and private evidence') <
+      reporterStart,
+    'the reporter must observe the final cleanup outcome',
+  );
+  assert.ok(
+    reporterStart <
+      runner.indexOf('    - name: Retain sanitized acceptance summary'),
+    'the reporter must append before the existing Web summary is uploaded',
+  );
+  assert.match(reporter, /if: always\(\)/u);
+  assert.match(reporter, /continue-on-error:\s*true/u);
+  assert.match(reporter, /Action phase metadata unavailable/u);
+  assert.equal(
+    [...runner.matchAll(/continue-on-error:\s*true/gu)].length,
+    1,
+    'only the diagnostic reporter may continue after failure',
+  );
+  const trackedPhaseIds = [
+    'desktop_journey',
+    'desktop_journey_cleanup',
+    'reminder_room',
+    'reminder_enable',
+    'reminder_initial',
+    'reminder_restart',
+    'reminder_restore',
+    'web_client_interactions',
+    'web_acceptance_summary',
+    'desktop_journey_summary',
+    'desktop_startup_summary',
+    'acceptance_stack_cleanup',
+  ];
+  assert.deepEqual(
+    [
+      ...reporter.matchAll(/\$\{\{\s*steps\.([a-z0-9_]+)\.outcome\s*\}\}/gu),
+    ].map((match) => match[1]),
+    trackedPhaseIds,
+  );
+  for (const phaseId of trackedPhaseIds) {
+    assert.match(runner, new RegExp(`^\\s+id: ${phaseId}$`, 'mu'));
+  }
+  assert.doesNotMatch(reporter, /toJSON\(\s*steps/u);
 });
