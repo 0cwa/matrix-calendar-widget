@@ -14,11 +14,14 @@
  * limitations under the License.
  */
 
-import { statSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { lstatSync, statSync } from 'node:fs';
+import { isAbsolute, resolve, sep } from 'node:path';
 
 export const DEFAULT_RADICALE_IMAGE =
   'matrix-calendar-widget/radicale-openid:3.8.0.0';
+
+export const LOCAL_REHEARSAL_LABEL =
+  'io.matrix-calendar-widget.local-rehearsal';
 
 const MAX_COMPOSE_OVERRIDE_FILES = 8;
 const MAX_COMPOSE_OVERRIDE_JSON_LENGTH = 32 * 1024;
@@ -106,21 +109,213 @@ function parseSkipElement(rawValue) {
   );
 }
 
+function parseLocalPrebuiltControls(environment, composeFiles, skipElement) {
+  const enabled = environment.MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL;
+  if (enabled === undefined || enabled === 'false') {
+    return { localPrebuilt: false };
+  }
+  if (enabled !== 'true') {
+    throw new TypeError(
+      'MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL must be exactly "true" or "false"',
+    );
+  }
+
+  const runId = environment.ELEMENT_ACCEPTANCE_LOCAL_RUN_ID;
+  const projectName = environment.COMPOSE_PROJECT_NAME;
+  const composeOverrideFile =
+    environment.MATRIX_CALENDAR_LOCAL_COMPOSE_OVERRIDE_FILE;
+  const composeEnvFile = environment.MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE;
+  const runnerTemp = environment.RUNNER_TEMP;
+  const dockerHostPath =
+    typeof environment.DOCKER_HOST === 'string' &&
+    environment.DOCKER_HOST.startsWith('unix:///')
+      ? environment.DOCKER_HOST.slice('unix://'.length)
+      : '';
+  const dockerConfig = environment.DOCKER_CONFIG;
+  const radicaleImage = environment.ELEMENT_ACCEPTANCE_RADICALE_IMAGE;
+  const privateFile = (file) => {
+    if (
+      typeof file !== 'string' ||
+      !isAbsolute(file) ||
+      typeof runnerTemp !== 'string' ||
+      !isAbsolute(runnerTemp) ||
+      !resolve(file).startsWith(`${resolve(runnerTemp)}${sep}`)
+    ) {
+      return false;
+    }
+    try {
+      const info = lstatSync(file);
+      return (
+        info.isFile() &&
+        !info.isSymbolicLink() &&
+        info.uid === process.getuid?.() &&
+        (info.mode & 0o077) === 0
+      );
+    } catch {
+      return false;
+    }
+  };
+  const privateConfigDirectory = () => {
+    if (typeof dockerConfig !== 'string' || !isAbsolute(dockerConfig)) {
+      return false;
+    }
+    try {
+      const info = lstatSync(dockerConfig);
+      return (
+        info.isDirectory() &&
+        !info.isSymbolicLink() &&
+        info.uid === process.getuid?.() &&
+        (info.mode & 0o077) === 0
+      );
+    } catch {
+      return false;
+    }
+  };
+  if (
+    typeof runId !== 'string' ||
+    !/^[a-f0-9]{16}$/u.test(runId) ||
+    projectName !== `mcw-p0-${runId}` ||
+    !skipElement ||
+    composeFiles.length !== 1 ||
+    !isAbsolute(composeOverrideFile ?? '') ||
+    composeFiles[0] !== composeOverrideFile ||
+    !privateFile(composeOverrideFile) ||
+    !privateFile(composeEnvFile) ||
+    !privateConfigDirectory() ||
+    dockerHostPath.length === 0 ||
+    !isAbsolute(dockerHostPath) ||
+    dockerHostPath === '/var/run/docker.sock' ||
+    dockerHostPath === '/run/docker.sock' ||
+    /^\/run\/user\/[0-9]+\/(?:docker|podman)\/podman\.sock$/u.test(
+      dockerHostPath,
+    ) ||
+    environment.DOCKER_CONTEXT !== undefined ||
+    environment.COMPOSE_FILE !== undefined ||
+    environment.COMPOSE_PROFILES !== undefined ||
+    environment.COMPOSE_ENV_FILES !== undefined ||
+    environment.COMPOSE_PATH_SEPARATOR !== undefined ||
+    typeof radicaleImage !== 'string' ||
+    !/^matrix-calendar-widget\/radicale-openid:archive-\d{1,20}-\d{1,4}$/u.test(
+      radicaleImage,
+    ) ||
+    environment.MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING !==
+      '127.0.0.1:8008:8008' ||
+    environment.MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING !==
+      '127.0.0.1:5232:5232'
+  ) {
+    throw new TypeError('Local prebuilt rehearsal controls are invalid');
+  }
+
+  return {
+    localPrebuilt: true,
+    runId,
+    projectName,
+    composeOverrideFile,
+    composeEnvFile,
+  };
+}
+
 export function loadElementAcceptanceOverrides(environment, rootDirectory) {
   const composeFiles = parseComposeOverrideFiles(
     environment.ELEMENT_ACCEPTANCE_COMPOSE_OVERRIDE_FILES,
     rootDirectory,
   );
 
+  const skipElement = parseSkipElement(
+    environment.ELEMENT_ACCEPTANCE_SKIP_ELEMENT,
+  );
+
   return {
     composeFiles,
-    skipElement: parseSkipElement(environment.ELEMENT_ACCEPTANCE_SKIP_ELEMENT),
+    skipElement,
+    ...parseLocalPrebuiltControls(environment, composeFiles, skipElement),
     radicaleImage: parseRadicaleImage(
       environment.ELEMENT_ACCEPTANCE_RADICALE_IMAGE,
     ),
   };
 }
 
+export function withLocalNoPullComposeArgs(args, localPrebuilt) {
+  if (!localPrebuilt) return args;
+  if (args[0] === 'build' || args[0] === 'pull') {
+    throw new TypeError(
+      'Local prebuilt rehearsal refuses image builds and pulls',
+    );
+  }
+  if (args[0] !== 'up' && args[0] !== 'run') return args;
+
+  const operation = args[0];
+  const pullOptions = args.filter(
+    (argument) => argument === '--pull' || argument.startsWith('--pull='),
+  );
+  if (
+    pullOptions.length > 1 ||
+    (pullOptions.length === 1 &&
+      (pullOptions[0] === '--pull'
+        ? args[args.indexOf('--pull') + 1] !== 'never'
+        : pullOptions[0] !== '--pull=never'))
+  ) {
+    throw new TypeError('Local prebuilt rehearsal refuses Compose pulls');
+  }
+  if (args.includes('--build')) {
+    throw new TypeError('Local prebuilt rehearsal refuses Compose builds');
+  }
+
+  const result = [operation];
+  if (pullOptions.length === 0) result.push('--pull', 'never');
+  if (operation === 'up' && !args.includes('--no-build')) {
+    result.push('--no-build');
+  }
+  result.push(...args.slice(1));
+  return result;
+}
+
+export function withLocalOwnedDockerRunArgs(args, controls, runCounter) {
+  if (!controls.localPrebuilt || args[0] !== 'run') return args;
+  if (
+    !Number.isSafeInteger(runCounter) ||
+    runCounter < 1 ||
+    args.some(
+      (argument) =>
+        argument === '--context' ||
+        argument.startsWith('--context=') ||
+        argument === '--pull' ||
+        argument.startsWith('--pull=') ||
+        argument === '--name' ||
+        argument.startsWith('--name=') ||
+        argument === '--label' ||
+        argument.startsWith('--label='),
+    )
+  ) {
+    throw new TypeError(
+      'Local Docker run options are controlled by the runner',
+    );
+  }
+  const name = `${controls.projectName}-local-${controls.runId}-${runCounter}`;
+  return [
+    'run',
+    '--pull=never',
+    '--label',
+    `${LOCAL_REHEARSAL_LABEL}=${controls.runId}`,
+    '--name',
+    name,
+    ...args.slice(1),
+  ];
+}
+
 export function appendComposeOverrideFiles(baseArguments, composeFiles) {
   return [...baseArguments, ...composeFiles.flatMap((file) => ['-f', file])];
+}
+
+export function appendLocalComposeEnvFile(baseArguments, controls) {
+  if (!controls.localPrebuilt) return baseArguments;
+  if (baseArguments[0] !== 'compose') {
+    throw new TypeError('Local Compose env-file requires the Compose command');
+  }
+  return [
+    baseArguments[0],
+    '--env-file',
+    controls.composeEnvFile,
+    ...baseArguments.slice(1),
+  ];
 }

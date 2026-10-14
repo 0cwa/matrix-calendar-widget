@@ -757,6 +757,18 @@ access and event writes stay disabled by default.
       target-specific deployment facts and recovery validation. The reminder
       restore helper honors explicit skip-Element mode during quiescence while
       keeping the default full Element stop and inspection path.
+  - [x] Add opt-in local prebuilt/no-pull/no-Element helper seams while
+        preserving hosted defaults. This is source support only: the bounded
+        local sequencer and reviewed run-packet/cleanup contract are still
+        open. Full local rehearsal also requires a separately reviewed
+        memberA-authorized OpenID reminder fixture that passes server-side
+        reminder authorization and proves event/configuration readback plus
+        due exactly-once room-mention delivery before writing evidence;
+        accepted source/archive/image/cache identities; a private task-owned
+        `DOCKER_HOST`/`DOCKER_CONFIG` and unchanged UID 1000 store baseline;
+        explicit runtime authorization; and an actual paired-store restore.
+        Browser, off-server recovery, and target acceptance remain separate
+        gates.
   - [x] Run the path-scoped real-Docker PostgreSQL first-initialization
         contract from `.github/workflows/operator-postgres-contract.yml`.
         Require restricted app-role ownership and writes, distinct

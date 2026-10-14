@@ -3,8 +3,28 @@ import test from 'node:test';
 import {
   assertAcceptancePrincipalBootstrap,
   createPrincipalOpenIdRequest,
+  getAcceptanceReadinessEndpoints,
   resolveAcceptancePrincipalMode,
 } from './element-acceptance-setup.mjs';
+
+test('default readiness still waits for Element after gateway and widget', () => {
+  assert.deepEqual(
+    getAcceptanceReadinessEndpoints().map(({ phase }) => phase),
+    ['gateway-ready', 'widget-ready', 'element-ready'],
+  );
+});
+
+test('local readiness omits Element and keeps gateway and widget checks', () => {
+  const endpoints = getAcceptanceReadinessEndpoints(true);
+  assert.deepEqual(
+    endpoints.map(({ phase }) => phase),
+    ['gateway-ready', 'widget-ready'],
+  );
+  assert.equal(
+    endpoints.some(({ url }) => url.includes(':8090/')),
+    false,
+  );
+});
 
 test('acceptance principal mode defaults to the legacy appservice path', () => {
   assert.equal(resolveAcceptancePrincipalMode(undefined), 'appservice');

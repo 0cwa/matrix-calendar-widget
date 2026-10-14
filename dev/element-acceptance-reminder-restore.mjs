@@ -22,6 +22,9 @@ import { fileURLToPath } from 'node:url';
 import {
   appendComposeOverrideFiles,
   loadElementAcceptanceOverrides,
+  LOCAL_REHEARSAL_LABEL,
+  withLocalNoPullComposeArgs,
+  withLocalOwnedDockerRunArgs,
 } from './element-acceptance-overrides.mjs';
 import {
   getRestoreQuiescePlan,
@@ -304,6 +307,7 @@ let commonComposeArgs;
 let failureStageRecorded = false;
 let sourceRadicaleFilesystemProbe;
 let restoredRadicaleFilesystemProbe;
+let localDockerRunCounter = 0;
 
 function initializeConfiguration() {
   runnerTemp = resolve(required('RUNNER_TEMP'));
@@ -343,6 +347,9 @@ function initializeConfiguration() {
   );
   restoreVolumeName = required('ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME');
   if (restoreVolumeName !== `${projectName}_radicale-restore`) {
+    throw new StageFailure('reminder-compose-validation');
+  }
+  if (ACCEPTANCE_OVERRIDES.localPrebuilt && !ACCEPTANCE_OVERRIDES.skipElement) {
     throw new StageFailure('reminder-compose-validation');
   }
   commonComposeArgs = appendComposeOverrideFiles(
@@ -393,6 +400,49 @@ function run(
   args,
   { input, timeout = 30_000, maxBuffer = MAX_COMMAND_BUFFER } = {},
 ) {
+  if (command === 'docker' && ACCEPTANCE_OVERRIDES.localPrebuilt) {
+    if (
+      args.some(
+        (argument) =>
+          argument === '--context' || argument.startsWith('--context='),
+      )
+    ) {
+      throw new StageFailure('reminder-compose-validation');
+    }
+    if (args[0] === 'run') {
+      localDockerRunCounter += 1;
+      args = withLocalOwnedDockerRunArgs(
+        args,
+        ACCEPTANCE_OVERRIDES,
+        localDockerRunCounter,
+      );
+    } else if (args[0] === 'volume' && args[1] === 'create') {
+      const nameIndex = args.indexOf('--name');
+      const expectedName = `${projectName}_radicale-restore`;
+      if (
+        nameIndex === -1 ||
+        args[nameIndex + 1] !== expectedName ||
+        args.includes('--label')
+      ) {
+        throw new StageFailure('restore-targets-prepared');
+      }
+      args = [
+        'volume',
+        'create',
+        '--label',
+        `${LOCAL_REHEARSAL_LABEL}=${ACCEPTANCE_OVERRIDES.runId}`,
+        ...(projectName
+          ? [
+              '--label',
+              `com.docker.compose.project=${projectName}`,
+              '--label',
+              'com.docker.compose.volume=reminder-restore-radicale-data',
+            ]
+          : []),
+        ...args.slice(2),
+      ];
+    }
+  }
   const result = spawnSync(command, args, {
     cwd: ROOT,
     input,
@@ -416,7 +466,14 @@ function requireSuccess(result, phase) {
 }
 
 function compose(args, options) {
-  return run('docker', [...commonComposeArgs, ...args], options);
+  return run(
+    'docker',
+    [
+      ...commonComposeArgs,
+      ...withLocalNoPullComposeArgs(args, ACCEPTANCE_OVERRIDES.localPrebuilt),
+    ],
+    options,
+  );
 }
 
 function isRadicaleFilesystemProbe(value) {
@@ -598,7 +655,52 @@ function serviceContainerId(service, phase = 'reminder-compose-validation') {
   if (output.length !== 1 || !/^[a-f0-9]{12,64}$/iu.test(output[0])) {
     throw new StageFailure(phase);
   }
+  if (ACCEPTANCE_OVERRIDES.localPrebuilt) {
+    const labelsOutput = requireSuccess(
+      run('docker', [
+        'inspect',
+        '--format',
+        '{{json .Config.Labels}}',
+        output[0],
+      ]),
+      phase,
+    );
+    let labels;
+    try {
+      labels = JSON.parse(labelsOutput.toString('utf8'));
+    } catch {
+      throw new StageFailure(phase);
+    }
+    if (
+      labels?.[LOCAL_REHEARSAL_LABEL] !== ACCEPTANCE_OVERRIDES.runId ||
+      labels?.['com.docker.compose.project'] !== projectName ||
+      labels?.['com.docker.compose.service'] !== service
+    ) {
+      throw new StageFailure(phase);
+    }
+  }
   return output[0];
+}
+
+function verifyLocalVolumeOwnership(name, composeVolume, phase) {
+  if (!ACCEPTANCE_OVERRIDES.localPrebuilt) return;
+  const labelsOutput = requireSuccess(
+    run('docker', ['volume', 'inspect', '--format', '{{json .Labels}}', name]),
+    phase,
+  );
+  let labels;
+  try {
+    labels = JSON.parse(labelsOutput.toString('utf8'));
+  } catch {
+    throw new StageFailure(phase);
+  }
+  if (
+    labels?.[LOCAL_REHEARSAL_LABEL] !== ACCEPTANCE_OVERRIDES.runId ||
+    labels?.['com.docker.compose.project'] !== projectName ||
+    labels?.['com.docker.compose.volume'] !== composeVolume
+  ) {
+    throw new StageFailure(phase);
+  }
 }
 
 function inspectContainer(service, phase = 'restore-quiesced') {
@@ -1041,6 +1143,11 @@ function inspectRadicaleVolume() {
   ) {
     throw new StageFailure('restore-quiesced');
   }
+  verifyLocalVolumeOwnership(
+    dataMounts[0].Name,
+    'radicale-data',
+    'restore-quiesced',
+  );
   return dataMounts[0].Name;
 }
 
@@ -1251,6 +1358,11 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName, diagnostics) {
       freshDatabase: false,
     });
   }
+  verifyLocalVolumeOwnership(
+    restoreVolumeName,
+    'reminder-restore-radicale-data',
+    'restore-targets-prepared',
+  );
   diagnostics.restoreStep = 'volume-empty-check';
   const emptyCheck = requireSuccess(
     run('docker', [
