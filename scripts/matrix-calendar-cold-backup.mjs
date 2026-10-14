@@ -53,6 +53,7 @@ const CONFIG_KEYS = new Set([
   'awsProfile',
   'resticHost',
   'resticTags',
+  'resticRetentionEnabled',
 ]);
 
 const SAFE_TAG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/u;
@@ -112,7 +113,8 @@ function validateConfig(config) {
   }
 
   if (
-    !SAFE_PROJECT.test(config.projectName ?? '') ||
+    typeof config.projectName !== 'string' ||
+    !SAFE_PROJECT.test(config.projectName) ||
     !isSafePath(config.projectDirectory) ||
     !isSafePath(config.composeEnvFile) ||
     !isSafePath(config.captureRoot) ||
@@ -123,11 +125,24 @@ function validateConfig(config) {
     !SAFE_REGION.test(config.awsRegion ?? '') ||
     (config.awsProfile !== undefined &&
       !SAFE_SERVICE.test(config.awsProfile ?? '')) ||
-    !SAFE_TAG.test(config.resticHost ?? '') ||
+    typeof config.resticHost !== 'string' ||
+    !SAFE_TAG.test(config.resticHost) ||
     !Array.isArray(config.resticTags) ||
     config.resticTags.length !== 2 ||
-    !config.resticTags.every((tag) => SAFE_TAG.test(tag)) ||
-    new Set(config.resticTags).size !== config.resticTags.length
+    !config.resticTags.every(
+      (tag) => typeof tag === 'string' && SAFE_TAG.test(tag),
+    ) ||
+    new Set(config.resticTags).size !== config.resticTags.length ||
+    (config.resticRetentionEnabled !== undefined &&
+      typeof config.resticRetentionEnabled !== 'boolean')
+  ) {
+    fail('configuration');
+  }
+
+  if (
+    config.resticRetentionEnabled &&
+    (config.resticHost !== config.projectName ||
+      !config.resticTags.includes(config.projectName))
   ) {
     fail('configuration');
   }
@@ -1289,6 +1304,32 @@ export async function runColdBackup(configInput, dependencies = {}) {
       },
       'upload',
     );
+
+    if (config.resticRetentionEnabled) {
+      await runCommand(
+        deps,
+        'restic',
+        [
+          'forget',
+          '--host',
+          config.resticHost,
+          '--tag',
+          config.resticTags.join(','),
+          '--group-by',
+          'host,tags',
+          '--keep-daily',
+          '30',
+          '--prune',
+        ],
+        {
+          env: commandEnvironment(config, paths, runtimeEnv, 'restic'),
+          signal,
+          timeoutMs: UPLOAD_TIMEOUT_MS,
+          discardStdout: true,
+        },
+        'retention',
+      );
+    }
   } catch (error) {
     failure =
       error instanceof ColdBackupFailure
@@ -1355,11 +1396,15 @@ async function main() {
         'checksums',
         'resume',
         'upload',
+        'retention',
       ].includes(error.stage)
         ? error.stage
         : 'configuration';
     process.stderr.write(
-      `Cold backup failed during ${stage}; inspect host configuration and service state.\n`,
+      stage === 'retention'
+        ? 'Cold backup upload completed, but retention failed; inspect the ' +
+            'repository and configured scope.\n'
+        : `Cold backup failed during ${stage}; inspect host configuration and service state.\n`,
     );
     process.exitCode = 1;
   } finally {
