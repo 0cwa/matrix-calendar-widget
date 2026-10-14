@@ -18,6 +18,56 @@ const e2e = readFileSync(
   'utf8',
 );
 
+test('manual acceptance profile selection defaults to both and preserves PR jobs', () => {
+  const dispatch = workflow.slice(
+    workflow.indexOf('  workflow_dispatch:'),
+    workflow.indexOf('  pull_request:'),
+  );
+  assert.match(
+    dispatch,
+    /principal_profile:[\s\S]*?type: choice[\s\S]*?options:[\s\S]*?- both[\s\S]*?- appservice[\s\S]*?- bot-account[\s\S]*?default: both[\s\S]*?required: true/u,
+  );
+
+  const appserviceJob = workflow.split('  element-web-acceptance:\n')[1];
+  const botJob = workflow.split('  normal-bot-account-acceptance:\n')[1];
+  assert.match(
+    appserviceJob,
+    /if: \$\{\{ github\.event_name != 'workflow_dispatch' \|\| inputs\.principal_profile == 'both' \|\| inputs\.principal_profile == 'appservice' \}\}/u,
+  );
+  assert.match(
+    botJob,
+    /if: \$\{\{ github\.event_name != 'workflow_dispatch' \|\| inputs\.principal_profile == 'both' \|\| inputs\.principal_profile == 'bot-account' \}\}/u,
+  );
+});
+
+test('the failed bot Desktop job retains only the safe limiter diagnostic lines', () => {
+  const capture = runner.slice(
+    runner.indexOf(
+      '    - name: Show safe normal-bot gateway rate-limit diagnostics',
+    ),
+    runner.indexOf(
+      '    - name: Provision the synthetic reminder sender room membership',
+    ),
+  );
+  assert.match(
+    capture,
+    /if: \$\{\{ always\(\) && inputs\.principal-mode == 'bot-account' && steps\.desktop_journey\.outcome != 'skipped' \}\}/u,
+  );
+  assert.match(
+    capture,
+    /docker compose[\s\S]*?logs --no-color gateway \| rg 'calendar_gateway_rate_limit_denied' \|\| true/u,
+  );
+  assert.ok(
+    runner.indexOf(
+      '    - name: Show safe normal-bot gateway rate-limit diagnostics',
+    ) <
+      runner.indexOf(
+        '    - name: Provision the synthetic reminder sender room membership',
+      ),
+    'the diagnostic capture runs before later fixture work can affect the log',
+  );
+});
+
 test('the existing required Element acceptance job keeps its context', () => {
   assert.match(
     workflow,

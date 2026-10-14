@@ -2,6 +2,16 @@ name: Element Web acceptance
 
 on:
   workflow_dispatch:
+    inputs:
+      principal_profile:
+        description: Acceptance principal profile to run
+        type: choice
+        options:
+          - both
+          - appservice
+          - bot-account
+        default: both
+        required: true
   pull_request:
     paths:
       - '.github/actions/element-acceptance/action.yml'
@@ -27,6 +37,7 @@ concurrency:
 jobs:
   element-web-acceptance:
     name: Element Web acceptance
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.principal_profile == 'both' || inputs.principal_profile == 'appservice' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -49,6 +60,7 @@ jobs:
 
   normal-bot-account-acceptance:
     name: Normal bot account acceptance
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.principal_profile == 'both' || inputs.principal_profile == 'bot-account' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
