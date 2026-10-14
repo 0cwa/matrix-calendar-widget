@@ -27,6 +27,36 @@ test('the existing required Element acceptance job keeps its context', () => {
   assert.match(workflow, /principal-mode: appservice/u);
 });
 
+test('Element workflow retains manual and all non-documentation pull request triggers', () => {
+  assert.match(
+    workflow,
+    /^on:\n\s{2}workflow_dispatch:\n\s{2}pull_request:\n\s{4}paths:\n/mu,
+  );
+
+  const pathBlock = workflow.match(
+    /^\s{2}pull_request:\n\s{4}paths:\n((?:\s{6}- .*\n)+)/mu,
+  )?.[1];
+  assert.ok(pathBlock, 'missing pull request path filters');
+  const paths = [...pathBlock.matchAll(/^\s{6}- '([^']+)'$/gmu)].map(
+    ([, path]) => path,
+  );
+
+  assert.deepEqual(paths, [
+    '.github/actions/element-acceptance/action.yml',
+    '.github/workflows/element-acceptance.yml',
+    'dev/**',
+    'e2e/**',
+    'matrix-calendar-server/**',
+    'matrix-calendar-widget/**',
+    'packages/calendar/**',
+    'packages/ical-timezones/**',
+    'package.json',
+    'yarn.lock',
+  ]);
+  assert.ok(!paths.includes('docs/PLAN.md'));
+  assert.ok(!paths.includes('docs/STATUS.md'));
+});
+
 test('both fixture jobs select one strict process-wide principal mode', () => {
   assert.match(runner, /principal-mode:[\s\S]*?required: true/u);
   assert.match(
