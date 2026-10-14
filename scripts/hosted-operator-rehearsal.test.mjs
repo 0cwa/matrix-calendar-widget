@@ -16,6 +16,7 @@ import {
   addOperatorRehearsalProfileToComposeArgs,
   assertNoCollision,
   compareForeign,
+  failureOperationForStage,
   fixtureIdentity,
   formatFailureDiagnostic,
   formatFailureSummary,
@@ -297,6 +298,7 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     attempt: '1',
     phase: 'fixture-setup',
     failureClass: 'gate-failed',
+    operation: 'gate',
     sourceImageIds: [imageId, manifestDigest, `sha256:${'c'.repeat(64)}`],
     cleanupStatus: 'pending',
     cleanupAttempted: false,
@@ -317,8 +319,10 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
+    assert.equal(initial.schema_version, 2);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
+    assert.equal(initial.failure_operation, 'gate');
     assert.deepEqual(initial.source_image_ids, fields.sourceImageIds);
     assert.equal(initial.cleanup_status, 'pending');
     assert.equal(initial.cleanup_attempted, false);
@@ -350,6 +354,7 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
     attempt: 'BEGIN:VCALENDAR',
     phase: 'private-server-name',
     failureClass: 'token=secret',
+    operation: 'https://private.example/token=secret',
     sourceImageIds: [
       imageId,
       'https://private.example/secret',
@@ -361,6 +366,7 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
   const serialized = JSON.stringify(diagnostic);
   assert.equal(diagnostic.failed_phase, 'runner');
   assert.equal(diagnostic.failure_class, 'unknown');
+  assert.equal(diagnostic.failure_operation, 'unknown');
   assert.equal(diagnostic.source_sha, 'unavailable');
   assert.equal(diagnostic.workflow_sha, 'unavailable');
   assert.equal(diagnostic.run_id, 'unavailable');
@@ -370,6 +376,133 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
   assert.equal(diagnostic.owned_cleanup_verified, false);
   assert.equal(diagnostic.foreign_inventory_unchanged, false);
   assert.doesNotMatch(serialized, /secret|https|private|BEGIN:VCALENDAR/u);
+});
+
+test('failure operation identifiers cover every literal and generated task label', () => {
+  const helperSource = readFileSync(
+    fileURLToPath(new URL('./hosted-operator-rehearsal.mjs', import.meta.url)),
+    'utf8',
+  );
+  const literalTaskLabels = [
+    ...helperSource.matchAll(
+      /\b(?:runTask|runFixtureTask|dockerJson)\s*\(\s*'([^']+)'/gu,
+    ),
+  ].map((match) => match[1]);
+  assert.ok(literalTaskLabels.length > 0);
+  for (const stage of literalTaskLabels) {
+    assert.notEqual(failureOperationForStage(stage), 'unknown', stage);
+  }
+
+  const literalCases = new Map([
+    ['docker-api-version', 'docker-api-version'],
+    ['docker-cli-version', 'docker-client-version'],
+    ['docker-compose-version', 'docker-compose-version'],
+    ['compose-config', 'compose-config'],
+    ['start-synapse-radicale', 'calendar-services-start'],
+    ['setup-fixture', 'fixture-setup'],
+    ['start-gateway-widget-postgres', 'primary-services-start'],
+    ['wait-element-free', 'primary-services-readiness'],
+    ['compose-ps-gateway', 'gateway-service-query'],
+    ['exec-synapse-smoke', 'synapse-http-smoke'],
+    ['compose-run-gateway-smoke', 'gateway-network-smoke'],
+    ['widget-http-smoke', 'widget-http-smoke'],
+    ['api-crud-probe', 'api-crud-probe'],
+    ['prepare-reminder-room', 'reminder-room-prepare'],
+    ['enable-reminder-runtime', 'reminder-runtime-enable'],
+    ['reminder-initial-fixture', 'reminder-initial-fixture'],
+    ['verify-initial-reminder-config', 'reminder-initial-config-verify'],
+    ['snapshot-initial-reminder-state', 'reminder-initial-state-snapshot'],
+    ['restart-reminder-gateway', 'reminder-gateway-restart'],
+    ['reminder-restart-fixture', 'reminder-restart-fixture'],
+    ['verify-restart-reminder-config', 'reminder-restart-config-verify'],
+    ['verify-restart-delivery', 'reminder-restart-delivery-verify'],
+    ['snapshot-restart-reminder-state', 'reminder-restart-state-snapshot'],
+    ['restore-paired-stores', 'paired-store-restore'],
+    ['reminder-restore-fixture', 'reminder-restore-fixture'],
+    ['verify-paired-restore-delivery', 'paired-restore-delivery-verify'],
+    ['success-cleanup', 'cleanup-assertion'],
+    ['failure-cleanup', 'cleanup-assertion'],
+  ]);
+  for (const [stage, operation] of literalCases) {
+    assert.equal(failureOperationForStage(stage), operation, stage);
+  }
+
+  for (const role of ['gateway', 'widget', 'radicale']) {
+    assert.equal(
+      failureOperationForStage(`inspect-${role}`),
+      'source-image-inspect',
+    );
+    assert.equal(
+      failureOperationForStage(`pre-start-image-lock-${role}`),
+      'source-image-lock-recheck',
+    );
+    assert.equal(
+      failureOperationForStage(`pre-restore-image-lock-${role}`),
+      'source-image-lock-recheck',
+    );
+  }
+  for (const role of ['synapse', 'postgres']) {
+    assert.equal(
+      failureOperationForStage(`pull-${role}`),
+      'fixture-image-pull',
+    );
+    assert.equal(
+      failureOperationForStage(`inspect-${role}`),
+      'fixture-image-inspect',
+    );
+    assert.equal(
+      failureOperationForStage(`inspect-pinned-${role}`),
+      'fixture-image-lock-recheck',
+    );
+  }
+
+  const inventoryBases = [
+    'baseline',
+    'primary',
+    'paired-restore',
+    'pre-cleanup',
+    'failure-cleanup',
+    'success-after-containers',
+    'success-after-volumes',
+    'success-final-inventory',
+    'failure-after-containers',
+    'failure-after-volumes',
+    'failure-final-inventory',
+  ];
+  const inventorySuffixes = new Map([
+    ['containers', 'inventory-list-containers'],
+    ['image-ids', 'inventory-list-images'],
+    ['network-ids', 'inventory-list-networks'],
+    ['volume-names', 'inventory-list-volumes'],
+    ['container-inspect', 'inventory-inspect-containers'],
+    ['image-inspect', 'inventory-inspect-images'],
+    ['network-inspect', 'inventory-inspect-networks'],
+    ['volume-inspect', 'inventory-inspect-volumes'],
+    ['listeners', 'inventory-list-listeners'],
+  ]);
+  for (const base of inventoryBases) {
+    for (const [suffix, operation] of inventorySuffixes) {
+      assert.equal(failureOperationForStage(`${base}-${suffix}`), operation);
+    }
+  }
+
+  const cleanupSuffixes = new Map([
+    ['inspect-container', 'cleanup-container-inspect'],
+    ['stop-container', 'cleanup-container-stop'],
+    ['remove-container', 'cleanup-container-remove'],
+    ['inspect-volume', 'cleanup-volume-inspect'],
+    ['remove-volume', 'cleanup-volume-remove'],
+    ['inspect-network', 'cleanup-network-inspect'],
+    ['remove-network', 'cleanup-network-remove'],
+  ]);
+  for (const prefix of ['success', 'failure']) {
+    for (const [suffix, operation] of cleanupSuffixes) {
+      assert.equal(failureOperationForStage(`${prefix}-${suffix}`), operation);
+    }
+  }
+
+  assert.equal(failureOperationForStage('private-token=secret'), 'unknown');
+  assert.equal(failureOperationForStage('fixture-setup'), 'gate');
 });
 
 test('workflow rehearsal input defaults off and executes between manifest verification and upload', () => {
