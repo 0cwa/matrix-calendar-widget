@@ -774,12 +774,21 @@ access and event writes stay disabled by default.
         an authorized reminder fixture, and opt-in setup, restart, paired
         restore, and evidence helpers. These changes have only offline fake-
         client/source validation; no local service rehearsal or runtime
-        acceptance has occurred. The fixture must prove authorized event and
-        reminder configuration readback plus due exactly-once room-mention
-        delivery before writing evidence. A separately approved local run,
-        source/archive/image/cache identities, and paired-store restore remain
-        open; P0/P1/P2 and the current candidate's acceptance gates remain
-        unchanged.
+        acceptance has occurred. Run setup and the API probe with
+        `ROOM_CALENDAR_PRINCIPAL_MODE=bot-account` and
+        `MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION=disabled`; the probe
+        requires bot-account mode, while setup otherwise defaults to
+        appservice. Before the reminder fixture's `initial` flow, its caller
+        must create `ELEMENT_ACCEPTANCE_REMINDER_EVENT_FILE` under
+        `RUNNER_TEMP` as an exclusive owner-private mode-0600 JSON `[]` file.
+        Reuse that same file through the sequence: `initial` writes one
+        verified title, `restart` requires that title and appends a second,
+        and `restore` requires those two titles and appends a third. The
+        fixture writes only after authorized event/configuration readback and
+        due exactly-once room-mention checks pass. A separately approved local
+        run, source/archive/image/cache identities, and paired-store restore
+        remain open; P0/P1/P2 and the current candidate's acceptance gates
+        remain unchanged.
   - [x] Run the path-scoped real-Docker PostgreSQL first-initialization
         contract from `.github/workflows/operator-postgres-contract.yml`.
         Require restricted app-role ownership and writes, distinct
