@@ -214,6 +214,17 @@ const SAFE_FAILURE_OPERATIONS = new Set([
   'runner-error',
   'unknown',
 ]);
+const SAFE_STARTUP_STAGES = new Set([
+  'docker-preflight',
+  'curl-preflight',
+  'homeserver-probe',
+  'homeserver-generate',
+  'fixture-permission',
+  'registration-update',
+  'uid991-access-assertion',
+  'synapse-compose-start',
+  'unknown',
+]);
 
 export function failureOperationForStage(stage) {
   return (
@@ -231,15 +242,24 @@ const FIXTURES = Object.freeze([
 ]);
 
 class RehearsalFailure extends Error {
-  constructor(stage, code = 'gate-failed') {
+  constructor(stage, code = 'gate-failed', startupDiagnostic = {}) {
     super('Hosted operator rehearsal failed');
     this.stage = stage;
     this.code = code;
+    this.startupStage = SAFE_STARTUP_STAGES.has(startupDiagnostic.startupStage)
+      ? startupDiagnostic.startupStage
+      : 'unknown';
+    this.childExitCode =
+      Number.isInteger(startupDiagnostic.childExitCode) &&
+      startupDiagnostic.childExitCode >= 0 &&
+      startupDiagnostic.childExitCode <= 255
+        ? startupDiagnostic.childExitCode
+        : 'unavailable';
   }
 }
 
-function fail(stage, code) {
-  throw new RehearsalFailure(stage, code);
+function fail(stage, code, startupDiagnostic) {
+  throw new RehearsalFailure(stage, code, startupDiagnostic);
 }
 
 function requireSha(value) {
@@ -715,11 +735,45 @@ function writeInitialComposeEnv(file, project, restoreVolume, radicaleImage) {
   );
 }
 
+export function parseStartupFailureMarker(stdout, childExitCode, formatter) {
+  const safeExitCode =
+    Number.isInteger(childExitCode) &&
+    childExitCode >= 0 &&
+    childExitCode <= 255
+      ? childExitCode
+      : 'unavailable';
+  const unknown = { startupStage: 'unknown', childExitCode: safeExitCode };
+  if (typeof stdout !== 'string' || typeof formatter !== 'function') {
+    return unknown;
+  }
+  const markerLikeLines = stdout
+    .split(/\r?\n/u)
+    .filter((line) => /\b(?:stage|exit_code)=/u.test(line));
+  if (markerLikeLines.length !== 1) return unknown;
+  const match = /^stage=([a-z0-9-]+) exit_code=(0|[1-9]\d{0,2})$/u.exec(
+    markerLikeLines[0],
+  );
+  if (!match || safeExitCode === 'unavailable' || safeExitCode === 0) {
+    return unknown;
+  }
+  const exitCode = Number(match[2]);
+  if (
+    exitCode !== safeExitCode ||
+    !SAFE_STARTUP_STAGES.has(match[1]) ||
+    match[1] === 'unknown' ||
+    exitCode > 255 ||
+    formatter(match[1], exitCode) !== markerLikeLines[0]
+  ) {
+    return unknown;
+  }
+  return { startupStage: match[1], childExitCode: safeExitCode };
+}
+
 function runTask(
   stage,
   command,
   args,
-  { cwd, env, taskDir, input, timeout } = {},
+  { cwd, env, taskDir, input, timeout, startupFailureFormatter } = {},
 ) {
   const result = spawn(command, args, { cwd, env, input, timeout });
   const logFile = path.join(
@@ -730,11 +784,19 @@ function runTask(
   writeFileSync(logFile, output, { mode: 0o600 });
   chmodSync(logFile, 0o600);
   if (result.error || result.status !== 0) {
+    const startupDiagnostic = startupFailureFormatter
+      ? parseStartupFailureMarker(
+          result.stdout ?? '',
+          result.status,
+          startupFailureFormatter,
+        )
+      : undefined;
     fail(
       stage,
       result.error
         ? 'command-unavailable'
         : `exit-${result.status ?? 'unknown'}`,
+      startupDiagnostic,
     );
   }
   return result.stdout ?? '';
@@ -1458,6 +1520,8 @@ export function formatFailureDiagnostic({
   phase,
   failureClass,
   operation,
+  startupStage,
+  childExitCode,
   sourceImageIds,
   cleanupStatus,
   cleanupAttempted,
@@ -1488,9 +1552,18 @@ export function formatFailureDiagnostic({
   const safeOperation = SAFE_FAILURE_OPERATIONS.has(operation)
     ? operation
     : 'unknown';
+  const safeStartupStage = SAFE_STARTUP_STAGES.has(startupStage)
+    ? startupStage
+    : 'unknown';
+  const safeChildExitCode =
+    Number.isInteger(childExitCode) &&
+    childExitCode >= 0 &&
+    childExitCode <= 255
+      ? childExitCode
+      : 'unavailable';
 
   return {
-    schema_version: 2,
+    schema_version: 3,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
@@ -1498,6 +1571,8 @@ export function formatFailureDiagnostic({
       ? failureClass
       : 'unknown',
     failure_operation: safeOperation,
+    startup_stage: safeStartupStage,
+    child_exit_code: safeChildExitCode,
     source_sha: safe(sourceSha, /^[0-9a-f]{40}$/u),
     workflow_sha: safe(workflowSha, /^[0-9a-f]{40}$/u),
     run_id: safe(runId, /^\d{1,20}$/u),
@@ -1527,6 +1602,8 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
           'failed_phase',
           'failure_class',
           'failure_operation',
+          'startup_stage',
+          'child_exit_code',
         ].every((key) => previous?.[key] === diagnostic[key])
       ) {
         fail('receipt-publish', 'failure-diagnostic-identity-mismatch');
@@ -1637,6 +1714,7 @@ async function main() {
       'dev/element-acceptance-reminder-restore.mjs',
       'dev/element-acceptance-local-prebuilt.compose.yaml',
       'dev/validate-element-acceptance-compose.mjs',
+      'dev/synapse-startup-diagnostic.mjs',
     ]) {
       const helperPath = path.join(sourceRoot, helper);
       if (
@@ -1646,6 +1724,18 @@ async function main() {
         fail('source-binding', 'source-helper-invalid');
       }
     }
+
+    const startupDiagnosticModule = await import(
+      pathToFileURL(path.join(sourceRoot, 'dev/synapse-startup-diagnostic.mjs'))
+        .href
+    );
+    if (
+      typeof startupDiagnosticModule.formatStartupStageFailure !== 'function'
+    ) {
+      fail('source-binding', 'source-helper-invalid');
+    }
+    const startupFailureFormatter =
+      startupDiagnosticModule.formatStartupStageFailure;
 
     stage = 'image-lock';
     const manifest = readJson(path.join(archiveRoot, 'manifest.json'), stage);
@@ -1846,7 +1936,11 @@ async function main() {
       'start-synapse-radicale',
       'bash',
       [path.join(sourceRoot, 'dev/up.sh')],
-      { ...context, timeout: 20 * 60_000 },
+      {
+        ...context,
+        timeout: 20 * 60_000,
+        startupFailureFormatter,
+      },
     );
     rmSync(paths.envFile, { force: false });
     stage = 'fixture-setup';
@@ -2194,6 +2288,10 @@ async function main() {
         error instanceof RehearsalFailure
           ? failureOperationForStage(error.stage)
           : 'runner-error',
+      startupStage:
+        error instanceof RehearsalFailure ? error.startupStage : 'unknown',
+      childExitCode:
+        error instanceof RehearsalFailure ? error.childExitCode : 'unavailable',
     };
     if (cleanupState && !cleanupVerified) cleanupStatus = 'pending';
     const diagnosticWritten = writeFailureDiagnostic(diagnosticRoot, {
