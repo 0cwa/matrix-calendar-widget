@@ -16,7 +16,6 @@
  */
 
 import { CalendarRepository } from '@matrix-calendar-widget/calendar';
-import { Alert, Box } from '@mui/material';
 import {
   extractRawWidgetParameters,
   WidgetApi,
@@ -26,6 +25,7 @@ import {
   MuiThemeProvider,
   MuiWidgetApiProvider,
 } from '@matrix-widget-toolkit/mui';
+import { Alert, Box } from '@mui/material';
 import { Suspense, useMemo } from 'react';
 import App from './App';
 import {
