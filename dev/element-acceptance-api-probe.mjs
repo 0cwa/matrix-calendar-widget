@@ -505,8 +505,6 @@ export async function runElementAcceptanceApiProbe({
     );
     if (remove.status !== 200 && remove.status !== 204)
       fail('event-delete', 'gateway-rejected');
-    ownedEvent = undefined;
-    currentEtag = undefined;
     mark('event-delete');
 
     const gatewayDeleteReadback = await gatewayRequest(
@@ -533,6 +531,8 @@ export async function runElementAcceptanceApiProbe({
     ) {
       fail('delete-readback', 'canonical-delete-unverified');
     }
+    ownedEvent = undefined;
+    currentEtag = undefined;
     mark('delete-readback');
   } catch (error) {
     failed =

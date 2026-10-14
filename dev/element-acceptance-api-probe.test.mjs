@@ -131,10 +131,14 @@ async function handler(request, response) {
       return json(response, 200, eventDto(record));
     }
     if (method === 'DELETE') {
-      state.deletes.push(eventId);
+      state.deletes.push({ eventId, ifMatch: request.headers['if-match'] });
       if (!record) return json(response, 404, {});
       if (request.headers['if-match'] !== record.etag)
         return json(response, 409, {});
+      if (state.leaveFirstDeleteInPlace && state.deletes.length === 1) {
+        response.writeHead(204);
+        return response.end();
+      }
       state.events.delete(record.uid);
       response.writeHead(204);
       return response.end();
@@ -173,6 +177,7 @@ before(async () => {
     outsiderStatus: 403,
     disableConflict: false,
     failCanonicalRead: false,
+    leaveFirstDeleteInPlace: false,
   };
   server = createServer((request, response) => {
     void handler(request, response).catch(() =>
@@ -199,6 +204,7 @@ function resetState() {
   state.outsiderStatus = 403;
   state.disableConflict = false;
   state.failCanonicalRead = false;
+  state.leaveFirstDeleteInPlace = false;
 }
 
 function fakeFetch(input, init) {
@@ -245,7 +251,7 @@ test('detects missing stale-ETag protection and cleans only its created event', 
   assert.equal(summary.stages['owned-cleanup'], 'passed');
   assert.equal(state.events.size, 0);
   assert.equal(state.deletes.length, 1);
-  assert.match(state.deletes[0], /local-api-probe-[0-9a-f-]+\.ics$/u);
+  assert.match(state.deletes[0].eventId, /local-api-probe-[0-9a-f-]+\.ics$/u);
   assert.doesNotMatch(JSON.stringify(summary), /secret|sensitive|probe-/u);
 });
 
@@ -265,4 +271,25 @@ test('keeps canonical-service failure bounded and removes the captured event', a
     JSON.stringify(summary),
     /secret|sensitive|Synthetic API/u,
   );
+});
+
+test('cleans up its event when DELETE succeeds but leaves the resource present', async () => {
+  resetState();
+  state.leaveFirstDeleteInPlace = true;
+  const summary = await runElementAcceptanceApiProbe({
+    fixture,
+    fetchImpl: fakeFetch,
+  });
+  assert.equal(summary.status, 'failed');
+  assert.equal(summary.failureCode, 'gateway-delete-unverified');
+  assert.equal(summary.stages['event-delete'], 'passed');
+  assert.equal(summary.stages['delete-readback'], 'failed');
+  assert.equal(summary.stages['owned-cleanup'], 'passed');
+  assert.equal(state.events.size, 0);
+  assert.equal(state.deletes.length, 2);
+  assert.equal(state.deletes[0].eventId, state.deletes[1].eventId);
+  assert.equal(state.deletes[0].ifMatch, '"probe-2"');
+  assert.equal(state.deletes[1].ifMatch, '"probe-2"');
+  assert.match(state.deletes[0].eventId, /local-api-probe-[0-9a-f-]+\.ics$/u);
+  assert.doesNotMatch(JSON.stringify(summary), /secret|sensitive|probe-/u);
 });
