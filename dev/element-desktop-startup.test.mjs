@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
+  classifyCleanupOriginSnapshots,
   classifyUidSocketProcess,
   createKeyringUnlockInput,
   createSafeStorageLogCollector,
@@ -995,6 +996,83 @@ test('cleanup-origin production reader rejects parent-link changes across snapsh
     assert.equal(observation.state, 'unknown');
     assert.equal(observation.reason, 'process_snapshot_changed');
     assert.equal(observation.processCount, null);
+  });
+});
+
+test('cleanup-origin classification preserves snapshot-change reasons and fixed diagnostics', async () => {
+  await withCleanupOriginProfile(async (_profileRoot, uid) => {
+    const processes = cleanupOriginSnapshot(uid);
+    const appIdentity = { pid: 101, startTimeTicks: '1001' };
+    const controllerIdentity = { pid: 90, startTimeTicks: '900' };
+    const incompleteAncestry = cloneCleanupOriginSnapshot(processes);
+    incompleteAncestry.set(102, {
+      ...incompleteAncestry.get(102),
+      parentPid: 999,
+    });
+    const noTargets = new Map(
+      [...processes].filter(([, process]) => !process.uidMember),
+    );
+    const identityMismatch = cloneCleanupOriginSnapshot(processes);
+    identityMismatch.set(102, {
+      ...identityMismatch.get(102),
+      parentPid: 80,
+    });
+
+    const cases = [
+      {
+        name: 'incomplete ancestry',
+        first: incompleteAncestry,
+        second: processes,
+        reason: 'process_snapshot_changed',
+        diagnosticReason: 'other_incomplete',
+      },
+      {
+        name: 'zero targets',
+        first: noTargets,
+        second: noTargets,
+        reason: 'process_snapshot_changed',
+        diagnosticReason: 'snapshot_identity_changed',
+      },
+      {
+        name: 'identity mismatch',
+        first: processes,
+        second: identityMismatch,
+        reason: 'process_snapshot_changed',
+        diagnosticReason: 'snapshot_identity_changed',
+      },
+    ];
+    for (const testCase of cases) {
+      const result = classifyCleanupOriginSnapshots(
+        testCase.first,
+        testCase.second,
+        uid,
+        appIdentity,
+        controllerIdentity,
+      );
+      assert.equal(result.reason, testCase.reason, testCase.name);
+      assert.equal(result.diagnosticStage, 'classification', testCase.name);
+      assert.equal(
+        result.diagnosticReason,
+        testCase.diagnosticReason,
+        testCase.name,
+      );
+    }
+
+    for (const [first, second, invalidUid] of [
+      [null, processes, uid],
+      [processes, processes, 0],
+    ]) {
+      const result = classifyCleanupOriginSnapshots(
+        first,
+        second,
+        invalidUid,
+        appIdentity,
+        controllerIdentity,
+      );
+      assert.equal(result.reason, 'process_snapshot_incomplete');
+      assert.equal(result.diagnosticStage, 'classification');
+      assert.equal(result.diagnosticReason, 'request_invalid');
+    }
   });
 });
 

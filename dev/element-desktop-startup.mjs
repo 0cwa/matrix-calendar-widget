@@ -2733,7 +2733,7 @@ function cleanupOriginCounts(values) {
   );
 }
 
-function classifyCleanupOriginSnapshots(
+export function classifyCleanupOriginSnapshots(
   firstProcesses,
   secondProcesses,
   uid,
@@ -2763,10 +2763,16 @@ function classifyCleanupOriginSnapshots(
     uid,
     Object.values(identities),
   );
-  if (first === null || second === null || first.targets.length === 0) {
-    return emptyCleanupOriginProbe('unknown', 'process_snapshot_incomplete', {
+  if (first === null || second === null) {
+    return emptyCleanupOriginProbe('unknown', 'process_snapshot_changed', {
       stage: 'classification',
       reason: 'other_incomplete',
+    });
+  }
+  if (first.targets.length === 0) {
+    return emptyCleanupOriginProbe('unknown', 'process_snapshot_changed', {
+      stage: 'classification',
+      reason: 'snapshot_identity_changed',
     });
   }
   if (
