@@ -31,6 +31,16 @@ visible to that daemon. The selection environment is a test-mode control, not
 an authentication boundary. This source-tooling correction does not establish
 application, target-host, or production acceptance.
 
+The next source-bound hosted run reached fixture setup but failed before the
+operator checks. Source tracing found that the runner removed the bootstrap
+Compose environment file before importing the fixture helper, which validates
+that file at module load; the helper later creates its generated server
+environment with create-only semantics. The tooling follow-up keeps a separate
+private bootstrap file through setup, validates the generated file and Compose
+model, and then switches later commands to the generated file. The rehearsal
+still requires a fresh full pass, including owned cleanup and foreign-state
+verification.
+
 A source review confirmed a gateway middleware-order defect: Nest 11.1.28
 applied the default CORS option during application initialization, after the
 server had registered its explicit request-body limit, calendar rate-limit, and
