@@ -116,6 +116,112 @@ const SAFE_PHASES = new Set([
   'failure-cleanup',
   'runner',
 ]);
+const INVENTORY_STAGE_BASES = [
+  'baseline',
+  'primary',
+  'paired-restore',
+  'pre-cleanup',
+  'failure-cleanup',
+  'success-after-containers',
+  'success-after-volumes',
+  'success-final-inventory',
+  'failure-after-containers',
+  'failure-after-volumes',
+  'failure-final-inventory',
+];
+const INVENTORY_OPERATION_SUFFIXES = [
+  ['containers', 'inventory-list-containers'],
+  ['image-ids', 'inventory-list-images'],
+  ['network-ids', 'inventory-list-networks'],
+  ['volume-names', 'inventory-list-volumes'],
+  ['container-inspect', 'inventory-inspect-containers'],
+  ['image-inspect', 'inventory-inspect-images'],
+  ['network-inspect', 'inventory-inspect-networks'],
+  ['volume-inspect', 'inventory-inspect-volumes'],
+  ['listeners', 'inventory-list-listeners'],
+];
+const failureOperationEntries = [
+  ['docker-api-version', 'docker-api-version'],
+  ['docker-cli-version', 'docker-client-version'],
+  ['docker-compose-version', 'docker-compose-version'],
+  ['compose-config', 'compose-config'],
+  ['start-synapse-radicale', 'calendar-services-start'],
+  ['setup-fixture', 'fixture-setup'],
+  ['start-gateway-widget-postgres', 'primary-services-start'],
+  ['wait-element-free', 'primary-services-readiness'],
+  ['compose-ps-gateway', 'gateway-service-query'],
+  ['exec-synapse-smoke', 'synapse-http-smoke'],
+  ['compose-run-gateway-smoke', 'gateway-network-smoke'],
+  ['widget-http-smoke', 'widget-http-smoke'],
+  ['api-crud-probe', 'api-crud-probe'],
+  ['prepare-reminder-room', 'reminder-room-prepare'],
+  ['enable-reminder-runtime', 'reminder-runtime-enable'],
+  ['reminder-initial-fixture', 'reminder-initial-fixture'],
+  ['verify-initial-reminder-config', 'reminder-initial-config-verify'],
+  ['snapshot-initial-reminder-state', 'reminder-initial-state-snapshot'],
+  ['restart-reminder-gateway', 'reminder-gateway-restart'],
+  ['reminder-restart-fixture', 'reminder-restart-fixture'],
+  ['verify-restart-reminder-config', 'reminder-restart-config-verify'],
+  ['verify-restart-delivery', 'reminder-restart-delivery-verify'],
+  ['snapshot-restart-reminder-state', 'reminder-restart-state-snapshot'],
+  ['restore-paired-stores', 'paired-store-restore'],
+  ['reminder-restore-fixture', 'reminder-restore-fixture'],
+  ['verify-paired-restore-delivery', 'paired-restore-delivery-verify'],
+  ['success-cleanup', 'cleanup-assertion'],
+  ['failure-cleanup', 'cleanup-assertion'],
+];
+for (const role of ['gateway', 'widget', 'radicale']) {
+  failureOperationEntries.push([`inspect-${role}`, 'source-image-inspect']);
+  failureOperationEntries.push([
+    `pre-start-image-lock-${role}`,
+    'source-image-lock-recheck',
+  ]);
+  failureOperationEntries.push([
+    `pre-restore-image-lock-${role}`,
+    'source-image-lock-recheck',
+  ]);
+}
+for (const role of ['synapse', 'postgres']) {
+  failureOperationEntries.push([`pull-${role}`, 'fixture-image-pull']);
+  failureOperationEntries.push([`inspect-${role}`, 'fixture-image-inspect']);
+  failureOperationEntries.push([
+    `inspect-pinned-${role}`,
+    'fixture-image-lock-recheck',
+  ]);
+}
+for (const base of INVENTORY_STAGE_BASES) {
+  for (const [suffix, operation] of INVENTORY_OPERATION_SUFFIXES) {
+    failureOperationEntries.push([`${base}-${suffix}`, operation]);
+  }
+}
+for (const prefix of ['success', 'failure']) {
+  for (const [suffix, operation] of [
+    ['inspect-container', 'cleanup-container-inspect'],
+    ['stop-container', 'cleanup-container-stop'],
+    ['remove-container', 'cleanup-container-remove'],
+    ['inspect-volume', 'cleanup-volume-inspect'],
+    ['remove-volume', 'cleanup-volume-remove'],
+    ['inspect-network', 'cleanup-network-inspect'],
+    ['remove-network', 'cleanup-network-remove'],
+  ]) {
+    failureOperationEntries.push([`${prefix}-${suffix}`, operation]);
+  }
+}
+const FAILURE_OPERATION_BY_STAGE = new Map(failureOperationEntries);
+const SAFE_FAILURE_OPERATIONS = new Set([
+  ...FAILURE_OPERATION_BY_STAGE.values(),
+  'gate',
+  'runner-error',
+  'unknown',
+]);
+
+export function failureOperationForStage(stage) {
+  return (
+    FAILURE_OPERATION_BY_STAGE.get(stage) ??
+    (SAFE_PHASES.has(stage) ? 'gate' : 'unknown')
+  );
+}
+
 const FIXTURES = Object.freeze([
   {
     role: 'synapse',
@@ -1351,6 +1457,7 @@ export function formatFailureDiagnostic({
   attempt,
   phase,
   failureClass,
+  operation,
   sourceImageIds,
   cleanupStatus,
   cleanupAttempted,
@@ -1378,15 +1485,19 @@ export function formatFailureDiagnostic({
       ? [...sourceImageIds]
       : [];
   const cleanupVerified = safeCleanup === 'verified' && attempted;
+  const safeOperation = SAFE_FAILURE_OPERATIONS.has(operation)
+    ? operation
+    : 'unknown';
 
   return {
-    schema_version: 1,
+    schema_version: 2,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
     failure_class: ['gate-failed', 'runner-error'].includes(failureClass)
       ? failureClass
       : 'unknown',
+    failure_operation: safeOperation,
     source_sha: safe(sourceSha, /^[0-9a-f]{40}$/u),
     workflow_sha: safe(workflowSha, /^[0-9a-f]{40}$/u),
     run_id: safe(runId, /^\d{1,20}$/u),
@@ -1408,9 +1519,15 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
       privatePath(file, root);
       const previous = readJson(file, 'receipt-publish');
       if (
-        !['run_id', 'attempt', 'source_sha', 'workflow_sha'].every(
-          (key) => previous?.[key] === diagnostic[key],
-        )
+        ![
+          'run_id',
+          'attempt',
+          'source_sha',
+          'workflow_sha',
+          'failed_phase',
+          'failure_class',
+          'failure_operation',
+        ].every((key) => previous?.[key] === diagnostic[key])
       ) {
         fail('receipt-publish', 'failure-diagnostic-identity-mismatch');
       }
@@ -2073,6 +2190,10 @@ async function main() {
       phase: failedPhase,
       failureClass:
         error instanceof RehearsalFailure ? 'gate-failed' : 'runner-error',
+      operation:
+        error instanceof RehearsalFailure
+          ? failureOperationForStage(error.stage)
+          : 'runner-error',
     };
     if (cleanupState && !cleanupVerified) cleanupStatus = 'pending';
     const diagnosticWritten = writeFailureDiagnostic(diagnosticRoot, {
