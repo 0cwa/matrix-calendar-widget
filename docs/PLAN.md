@@ -764,9 +764,30 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       trusted Element-origin opening errors per profile qualified for the
       approved opening-stage diagnostic policy; their cause is unknown. This
       is isolated application evidence, not operator or deployment acceptance.
+- [ ] Run the owner-approved normal-bot-only browser acceptance for the
+      integrated PR #260 candidate. The full Element Web/Desktop journey must
+      pass in `bot-account` mode, including authorization, CRUD and stale-write
+      rejection, reminders across gateway restart, paired Radicale/PostgreSQL
+      restore, G6 unsupported-resource preservation and owned cleanup, and
+      keyboard/focus, standard side-panel layout, and browser-egress checks.
+      Keep the ordinary 0/25-event thresholds unchanged:
+      cold activation and same-range refresh at or below 2,000 ms, each
+      required decoded non-OpenID calendar API response at or below 1,000 ms,
+      and all five 25-event details samples at or below 500 ms. The five
+      protected checks, CodeQL, browser-layout and real Radicale/PostgreSQL
+      contracts, and independent review must be bound to the exact integrated
+      source. Full appservice-mode Element Web/Desktop browser certification
+      is deferred until after beta; backend, identity/authentication, room
+      authorization, and CalDAV contracts remain mandatory in both modes.
+      The forward-merge base is `56ebedd97ffa778cb433707cbcd5a74beaafe5a7`
+      (tree `529bd984f398ae1921b68189fa9a66c274e1b349`); checks on the prior
+      `3643166` head or on `main` alone do not establish acceptance of the
+      integrated candidate. This scope does not authorize production
+      installation or rollout.
 - [ ] Complete private operator readiness evidence for the merged candidate
-      before any separate rollout decision. Independent source review is
-      complete. Full isolated local Stage B and source-bound server
+      before any separate rollout decision. Independent review is complete
+      only for PR #260's pre-integration candidate; review of the integrated
+      source remains required. Full isolated local Stage B and source-bound server
       image/cache/runtime acceptance remain open, followed by actual
       target-specific deployment facts and recovery validation. The reminder
       restore helper honors explicit skip-Element mode during quiescence while
