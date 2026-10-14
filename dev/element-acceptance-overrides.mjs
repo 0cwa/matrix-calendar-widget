@@ -166,8 +166,23 @@ function parseSkipElement(rawValue) {
 
 function parseLocalPrebuiltControls(environment, composeFiles, skipElement) {
   const enabled = environment.MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL;
+  const hostedSharedDockerSelection =
+    environment.MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL;
+  if (
+    hostedSharedDockerSelection !== undefined &&
+    hostedSharedDockerSelection !== 'true' &&
+    hostedSharedDockerSelection !== 'false'
+  ) {
+    throw new TypeError(
+      'MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL must be exactly "true" or "false"',
+    );
+  }
+  const hostedSharedDocker = hostedSharedDockerSelection === 'true';
+  if (hostedSharedDocker && enabled !== 'true') {
+    throw new TypeError('Local prebuilt rehearsal controls are invalid');
+  }
   if (enabled === undefined || enabled === 'false') {
-    return { localPrebuilt: false };
+    return { localPrebuilt: false, hostedSharedDocker: false };
   }
   if (enabled !== 'true') {
     throw new TypeError(
@@ -188,6 +203,12 @@ function parseLocalPrebuiltControls(environment, composeFiles, skipElement) {
       : '';
   const dockerConfig = environment.DOCKER_CONFIG;
   const radicaleImage = environment.ELEMENT_ACCEPTANCE_RADICALE_IMAGE;
+  const expectedHostedContext =
+    environment.GITHUB_ACTIONS === 'true' &&
+    environment.RUNNER_ENVIRONMENT === 'github-hosted' &&
+    environment.RUNNER_OS === 'Linux' &&
+    environment.GITHUB_REPOSITORY === '0cwa/matrix-calendar-widget' &&
+    environment.GITHUB_REF === 'refs/heads/main';
   const privateFile = (file) => {
     if (
       typeof file !== 'string' ||
@@ -237,13 +258,19 @@ function parseLocalPrebuiltControls(environment, composeFiles, skipElement) {
     !privateFile(composeOverrideFile) ||
     !privateFile(composeEnvFile) ||
     !privateConfigDirectory() ||
-    dockerHostPath.length === 0 ||
-    !isAbsolute(dockerHostPath) ||
-    dockerHostPath === '/var/run/docker.sock' ||
-    dockerHostPath === '/run/docker.sock' ||
-    /^\/run\/user\/[0-9]+\/(?:docker|podman)\/podman\.sock$/u.test(
-      dockerHostPath,
-    ) ||
+    (hostedSharedDocker
+      ? !expectedHostedContext ||
+        environment.DOCKER_HOST !== undefined ||
+        environment.DOCKER_API_VERSION !== undefined ||
+        environment.DOCKER_TLS_VERIFY !== undefined ||
+        environment.DOCKER_CERT_PATH !== undefined
+      : dockerHostPath.length === 0 ||
+        !isAbsolute(dockerHostPath) ||
+        dockerHostPath === '/var/run/docker.sock' ||
+        dockerHostPath === '/run/docker.sock' ||
+        /^\/run\/user\/[0-9]+\/(?:docker|podman)\/podman\.sock$/u.test(
+          dockerHostPath,
+        )) ||
     environment.DOCKER_CONTEXT !== undefined ||
     environment.COMPOSE_FILE !== undefined ||
     environment.COMPOSE_PROFILES !== undefined ||
@@ -263,6 +290,7 @@ function parseLocalPrebuiltControls(environment, composeFiles, skipElement) {
 
   return {
     localPrebuilt: true,
+    hostedSharedDocker,
     runId,
     projectName,
     composeOverrideFile,
