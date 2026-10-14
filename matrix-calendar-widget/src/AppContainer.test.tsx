@@ -25,7 +25,9 @@ vi.mock('@matrix-widget-toolkit/api', async (importOriginal) => ({
 
 describe('AppContainer', () => {
   it('shows an accessible configuration error instead of an in-memory calendar', () => {
-    render(<AppContainer widgetApiPromise={Promise.resolve({} as WidgetApi)} />);
+    render(
+      <AppContainer widgetApiPromise={Promise.resolve({} as WidgetApi)} />,
+    );
 
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Calendar configuration is incomplete.',
