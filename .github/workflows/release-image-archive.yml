@@ -231,6 +231,7 @@ jobs:
         if: ${{ inputs.operator_rehearsal }}
         env:
           OPERATOR_REHEARSAL_ENABLED: 'true'
+          MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL: 'true'
         run: node tooling/scripts/hosted-operator-rehearsal.mjs
 
       - name: Upload the sanitized operator rehearsal failure summary

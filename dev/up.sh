@@ -8,8 +8,24 @@ LOCAL_RUN_LABEL='io.matrix-calendar-widget.local-rehearsal'
 LOCAL_PULL_ARGS=()
 LOCAL_VALIDATION_COMPOSE=()
 DEV_LOOPBACK_HOST=localhost
+startup_failure_stage=untracked
+
+emit_startup_failure_marker() {
+  local exit_code="$1"
+  if [[ "$exit_code" == 0 ]]; then
+    return 0
+  fi
+  case "$startup_failure_stage" in
+    configuration-preflight|docker-preflight|curl-preflight|homeserver-probe|homeserver-generate|fixture-permission|registration-update|uid991-access-assertion|synapse-compose-start)
+      node "$ROOT_DIR/dev/synapse-startup-diagnostic.mjs" \
+        --stage-failure "$startup_failure_stage" "$exit_code" 2>/dev/null || true
+      ;;
+  esac
+}
+trap 'emit_startup_failure_marker "$?"' EXIT
 
 if [[ "$LOCAL_PREBUILT" == true ]]; then
+  startup_failure_stage=configuration-preflight
   if ! node --input-type=module - "$ROOT_DIR" <<'NODE'
 import { pathToFileURL } from 'node:url';
 
@@ -28,6 +44,7 @@ NODE
     echo 'Local prebuilt rehearsal inputs are invalid' >&2
     exit 2
   fi
+  startup_failure_stage=untracked
   COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}"
   MATRIX_CALENDAR_LOCAL_COMPOSE_OVERRIDE_FILE="${MATRIX_CALENDAR_LOCAL_COMPOSE_OVERRIDE_FILE:?local Compose override is required}"
   COMPOSE=(
@@ -100,7 +117,6 @@ compose_up() {
 MATRIX_USER="${MATRIX_CALENDAR_DEV_USER:-calendar}"
 MATRIX_PASSWORD="${MATRIX_CALENDAR_DEV_PASSWORD:-calendar-dev-password}"
 CONTRACT_APPSERVICE_REGISTRATION="${MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION:-enabled}"
-startup_failure_stage=untracked
 
 case "$CONTRACT_APPSERVICE_REGISTRATION" in
   enabled|disabled) ;;
@@ -109,20 +125,6 @@ case "$CONTRACT_APPSERVICE_REGISTRATION" in
     exit 2
     ;;
 esac
-
-emit_startup_failure_marker() {
-  local exit_code="$1"
-  if [[ "$exit_code" == 0 ]]; then
-    return 0
-  fi
-  case "$startup_failure_stage" in
-    docker-preflight|curl-preflight|homeserver-probe|homeserver-generate|fixture-permission|registration-update|uid991-access-assertion|synapse-compose-start)
-      node "$ROOT_DIR/dev/synapse-startup-diagnostic.mjs" \
-        --stage-failure "$startup_failure_stage" "$exit_code" 2>/dev/null || true
-      ;;
-  esac
-}
-trap 'emit_startup_failure_marker "$?"' EXIT
 
 startup_failure_stage=docker-preflight
 command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 1; }

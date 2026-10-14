@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -9,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { formatStartupStageFailure } from '../dev/synapse-startup-diagnostic.mjs';
@@ -17,6 +18,7 @@ import {
   addOperatorRehearsalProfileToComposeArgs,
   assertNoCollision,
   compareForeign,
+  enableHostedSharedDockerRehearsal,
   failureOperationForStage,
   fixtureIdentity,
   formatFailureDiagnostic,
@@ -47,6 +49,125 @@ function emptyInventory() {
     listeners: [],
   };
 }
+
+test('hosted shared-Docker mode requires a private adapter and exact hosted main context', (t) => {
+  const taskDir = mkdtempSync(join(tmpdir(), 'mcw-hosted-docker-mode-'));
+  t.after(() => rmSync(taskDir, { recursive: true, force: true }));
+  const dockerConfig = join(taskDir, 'docker-config');
+  mkdirSync(dockerConfig, { mode: 0o700 });
+  const adapter = writeDockerAdapter(taskDir, process.execPath);
+  const workflowEnvironment = {
+    MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL: 'true',
+    GITHUB_ACTIONS: 'true',
+    RUNNER_ENVIRONMENT: 'github-hosted',
+    RUNNER_OS: 'Linux',
+    GITHUB_REPOSITORY: '0cwa/matrix-calendar-widget',
+    GITHUB_REF: 'refs/heads/main',
+  };
+  const makeTaskEnvironment = () => ({
+    DOCKER_CONFIG: dockerConfig,
+    PATH: `${adapter.dockerBinDir}${delimiter}${process.env.PATH}`,
+  });
+  const adapterContext = {
+    taskDir,
+    dockerBinDir: adapter.dockerBinDir,
+    dockerAdapterPath: adapter.dockerAdapterPath,
+    dockerExecutable: process.execPath,
+  };
+
+  const taskEnvironment = makeTaskEnvironment();
+  assert.equal(
+    taskEnvironment.MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL,
+    undefined,
+  );
+  enableHostedSharedDockerRehearsal(
+    taskEnvironment,
+    workflowEnvironment,
+    adapterContext,
+  );
+  assert.equal(
+    taskEnvironment.MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL,
+    'true',
+  );
+  assert.equal(taskEnvironment.GITHUB_REF, 'refs/heads/main');
+  for (const key of [
+    'DOCKER_HOST',
+    'DOCKER_CONTEXT',
+    'DOCKER_API_VERSION',
+    'DOCKER_TLS_VERIFY',
+    'DOCKER_CERT_PATH',
+    'COMPOSE_FILE',
+    'COMPOSE_PROFILES',
+    'COMPOSE_ENV_FILES',
+    'COMPOSE_PATH_SEPARATOR',
+  ]) {
+    assert.equal(taskEnvironment[key], undefined, key);
+  }
+
+  for (const invalidWorkflowEnvironment of [
+    { ...workflowEnvironment, RUNNER_ENVIRONMENT: 'self-hosted' },
+    { ...workflowEnvironment, RUNNER_OS: 'Windows' },
+    { ...workflowEnvironment, GITHUB_REPOSITORY: 'other/project' },
+    { ...workflowEnvironment, GITHUB_REF: 'refs/heads/feature' },
+    { ...workflowEnvironment, GITHUB_ACTIONS: 'false' },
+    {
+      ...workflowEnvironment,
+      MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL: undefined,
+    },
+  ]) {
+    assert.throws(
+      () =>
+        enableHostedSharedDockerRehearsal(
+          makeTaskEnvironment(),
+          invalidWorkflowEnvironment,
+          adapterContext,
+        ),
+      (error) => error.code === 'hosted-runner-context-invalid',
+    );
+  }
+
+  for (const invalidTaskEnvironment of [
+    { ...makeTaskEnvironment(), DOCKER_HOST: 'tcp://docker.invalid:2376' },
+    { ...makeTaskEnvironment(), DOCKER_CONTEXT: 'default' },
+    { ...makeTaskEnvironment(), COMPOSE_PROFILES: 'element' },
+  ]) {
+    assert.throws(
+      () =>
+        enableHostedSharedDockerRehearsal(
+          invalidTaskEnvironment,
+          workflowEnvironment,
+          adapterContext,
+        ),
+      (error) => error.code === 'hosted-docker-context-invalid',
+    );
+  }
+
+  const helperSource = readFileSync(
+    fileURLToPath(new URL('./hosted-operator-rehearsal.mjs', import.meta.url)),
+    'utf8',
+  );
+  const baselineIndex = helperSource.indexOf(
+    "const baseline = captureInventory('baseline', context);",
+  );
+  const collisionIndex = helperSource.indexOf(
+    'assertNoCollision(baseline, id, project);',
+    baselineIndex,
+  );
+  const enableIndex = helperSource.indexOf(
+    'enableHostedSharedDockerRehearsal(dockerEnv, env, {',
+    collisionIndex,
+  );
+  const startIndex = helperSource.indexOf(
+    "'start-synapse-radicale'",
+    enableIndex,
+  );
+  assert.ok(
+    baselineIndex >= 0 &&
+      collisionIndex > baselineIndex &&
+      enableIndex > collisionIndex &&
+      startIndex > enableIndex,
+  );
+});
 
 function throwsCode(code) {
   return (error) => error?.code === code;
@@ -392,6 +513,7 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
 
 test('startup failure markers accept only one source-formatted closed marker matching child status', () => {
   const stages = [
+    'configuration-preflight',
     'docker-preflight',
     'curl-preflight',
     'homeserver-probe',
@@ -427,7 +549,7 @@ test('startup failure markers accept only one source-formatted closed marker mat
       { startupStage: stage, childExitCode: 7 },
     );
   }
-  assert.equal(stages.length, 8);
+  assert.equal(stages.length, 9);
 });
 
 test('startup failure markers fail closed on absent, duplicate, malformed, mismatched, or hostile marker lines', () => {
@@ -629,6 +751,12 @@ test('workflow rehearsal input defaults off and executes between manifest verifi
       uploadIndex > rehearsalIndex,
   );
   assert.match(rehearsalStep, /id: operator_rehearsal/u);
+  assert.match(workflow, /runs-on: ubuntu-latest/u);
+  assert.doesNotMatch(workflow, /self-hosted/u);
+  assert.match(
+    rehearsalStep,
+    /MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL: 'true'/u,
+  );
   assert.match(
     failureUpload,
     /if: \$\{\{ failure\(\) && inputs\.operator_rehearsal && steps\.operator_rehearsal\.outcome == 'failure' \}\}/u,

@@ -816,6 +816,18 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
         PR #243 candidate `9e1bea6017279646808fe778aa294a8ad32b578c`. This
         synthetic contract does not validate the operator's database endpoint,
         TLS, host mounts, backup, or recovery.
+  - [x] Make the opt-in hosted Docker rehearsal's endpoint mode explicit.
+        Only the trusted release workflow on a GitHub-hosted Linux runner may
+        select Docker CLI's default endpoint, and the helper does so only after
+        validating its private Docker config and adapter plus a collision-free
+        foreign-resource baseline. The normal local prebuilt path still
+        requires its private non-default Unix socket. The hosted runner shares
+        one daemon with the job: inventory detects foreign state but does not
+        isolate or prevent damage to resources visible to that daemon. These
+        environment checks select a test mode; they are not authentication.
+        The earlier source-bound attempt rejected the hosted default endpoint
+        before service startup. A fresh candidate still needs the complete
+        source-bound operator rehearsal; this tooling correction is not a pass.
 
 This bounded beta path does not complete M4, M5, or the broader M8 work, and it
 does not authorize publication or live rollout. The broad M8 milestone remains

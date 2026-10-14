@@ -1,6 +1,6 @@
 # Project status
 
-_Last updated: 2026-10-14._
+_Last updated: 2026-10-15._
 
 _Source baseline: `main` at `e6acd8441c8e95d4bf2b45fc6a2a37b38f570de0` (tree `9cc44badc3d69e864926757af029f68308c0bb04`), integrated into the retention candidate as its merge parent._
 
@@ -18,6 +18,18 @@ For the owner-approved bounded pilot, run full Element Web/Desktop acceptance in
 PR #247's hosted evidence is tied to source `acc535dfe69001403c67853b2171672e74056f51`, tree `784aaeac9f6cf733ed7f38b50eb46bcc4b77c333`; merge commit `20dd7357d833238ac23d817bd29bdb0a9f6d4761` has that same tree. The [Element run](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532436) passed for appservice and normal-bot profiles; the [Real Radicale contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532535), [CI](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532444), [Desktop workflow](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532500), [PostgreSQL contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532435), and [CodeQL](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532479) also passed. These runs validate that source tree, not a fresh run of the later merge commit. Independent review cleared the exact source. CodeRabbit reported workflow success while its review was skipped because the PR was draft; this is not a CodeRabbit approval. The two trusted opening errors are diagnostic only under the explicit opening-stage predicate after every startup, authentication, CRUD, Desktop, reminder, restore, and timing gate passes; unknown, widget-origin, or later errors remain failures.
 
 The local Stage B run remains incomplete. The earlier local probe stopped while verifying container capabilities; the inspected value was not retained and guest execution was skipped. This candidate includes reviewed source-only prebuilt/no-pull helpers, an API probe, an authenticated reminder fixture, and the paired-restore helper; see [`dev/up.sh`](../dev/up.sh), [`dev/element-acceptance-api-probe.mjs`](../dev/element-acceptance-api-probe.mjs), [`dev/local-reminder-fixture.mjs`](../dev/local-reminder-fixture.mjs), and [`dev/element-acceptance-reminder-restore.mjs`](../dev/element-acceptance-reminder-restore.mjs). Focused tooling checks use in-process HTTP, fake commands, and fixed-enum formatter cases only. No external service, real API, image store, restart, or restore was exercised, so local Stage B and source-bound image/cache/runtime acceptance remain open. Operator readiness also requires target-specific ingress, DNS/TLS/proxy, account-ownership, Matrix Authentication Service (MAS), credential-issuance, and secret facts; encrypted off-server Restic-compatible S3 backup with daily scheduling and up to 30 populated-calendar-day recovery points (missed runs leave gaps), independent recovery-key custody, repository-wide prune authority and I/O budget, a dedicated pilot repository or prefix, and paired Radicale/PostgreSQL restore evidence; and a concrete install/disable/rollback rehearsal. No private server, domain, account, provider, or credential details are recorded here.
+
+The first opt-in hosted Docker rehearsal exposed an endpoint-mode mismatch: the
+hosted runner's Docker CLI uses its default endpoint, while the local prebuilt
+guard intentionally requires a private non-default Unix socket. The hosted
+workflow now has a separate explicit runner-mode contract; a fresh source
+candidate must still pass the complete service, API, reminder, paired-restore,
+and owned-cleanup rehearsal before operator acceptance is recorded. The
+GitHub-hosted job shares its Docker daemon with the workflow: baseline inventory
+detects foreign resources but does not isolate or prevent damage to resources
+visible to that daemon. The selection environment is a test-mode control, not
+an authentication boundary. This source-tooling correction does not establish
+application, target-host, or production acceptance.
 
 A source review confirmed a gateway middleware-order defect: Nest 11.1.28
 applied the default CORS option during application initialization, after the

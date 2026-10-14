@@ -55,6 +55,8 @@ const PORTS = Object.freeze([8008, 5232, 3000, 8080, 5233, 8090]);
 const FAILURE_DIAGNOSTIC_FILE =
   'matrix-calendar-widget-operator-rehearsal-failure.json';
 const DISABLED_ELEMENT_PROFILE = 'operator-rehearsal-disabled';
+const HOSTED_SHARED_DOCKER_SELECTION =
+  'MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL';
 const COMPOSE_VALUE_OPTIONS = new Set([
   '-f',
   '--file',
@@ -215,6 +217,7 @@ const SAFE_FAILURE_OPERATIONS = new Set([
   'unknown',
 ]);
 const SAFE_STARTUP_STAGES = new Set([
+  'configuration-preflight',
   'docker-preflight',
   'curl-preflight',
   'homeserver-probe',
@@ -290,6 +293,16 @@ function required(env, key) {
     fail('preflight', 'required-input-missing');
   }
   return value;
+}
+
+function isSupportedGitHubHostedRunner(environment) {
+  return (
+    environment.GITHUB_ACTIONS === 'true' &&
+    environment.RUNNER_ENVIRONMENT === 'github-hosted' &&
+    environment.RUNNER_OS === 'Linux' &&
+    environment.GITHUB_REPOSITORY === '0cwa/matrix-calendar-widget' &&
+    environment.GITHUB_REF === 'refs/heads/main'
+  );
 }
 
 function privatePath(file, root, directory = false) {
@@ -705,6 +718,83 @@ function taskEnvironment(taskDir, dockerConfig, runId, project, paths) {
     OPERATOR_REHEARSAL_TASK_DIR: taskDir,
   };
   return env;
+}
+
+export function enableHostedSharedDockerRehearsal(
+  taskEnvironment,
+  workflowEnvironment,
+  { taskDir, dockerBinDir, dockerAdapterPath, dockerExecutable },
+) {
+  if (
+    workflowEnvironment[HOSTED_SHARED_DOCKER_SELECTION] !== 'true' ||
+    !isSupportedGitHubHostedRunner(workflowEnvironment)
+  ) {
+    fail('preflight', 'hosted-runner-context-invalid');
+  }
+
+  const forbiddenEnvironmentKeys = [
+    'DOCKER_HOST',
+    'DOCKER_CONTEXT',
+    'DOCKER_API_VERSION',
+    'DOCKER_TLS_VERIFY',
+    'DOCKER_CERT_PATH',
+    'COMPOSE_FILE',
+    'COMPOSE_PROFILES',
+    'COMPOSE_ENV_FILES',
+    'COMPOSE_PATH_SEPARATOR',
+    HOSTED_SHARED_DOCKER_SELECTION,
+  ];
+  if (
+    forbiddenEnvironmentKeys.some(
+      (key) => taskEnvironment[key] !== undefined,
+    ) ||
+    typeof taskEnvironment.DOCKER_CONFIG !== 'string' ||
+    !path
+      .resolve(taskEnvironment.DOCKER_CONFIG)
+      .startsWith(`${path.resolve(taskDir)}${path.sep}`) ||
+    typeof taskEnvironment.PATH !== 'string' ||
+    taskEnvironment.PATH.split(path.delimiter)[0] !== dockerBinDir ||
+    !path.isAbsolute(dockerExecutable) ||
+    path.resolve(dockerAdapterPath) !==
+      path.join(path.resolve(dockerBinDir), 'docker')
+  ) {
+    fail('docker-api-preflight', 'hosted-docker-context-invalid');
+  }
+
+  try {
+    const dockerConfigInfo = lstatSync(taskEnvironment.DOCKER_CONFIG);
+    const adapterInfo = lstatSync(dockerAdapterPath);
+    const dockerInfo = statSync(dockerExecutable);
+    const adapterSource = readFileSync(dockerAdapterPath, 'utf8');
+    if (
+      dockerConfigInfo.isSymbolicLink() ||
+      !dockerConfigInfo.isDirectory() ||
+      dockerConfigInfo.uid !== process.getuid?.() ||
+      (dockerConfigInfo.mode & 0o777) !== 0o700 ||
+      adapterInfo.isSymbolicLink() ||
+      !adapterInfo.isFile() ||
+      adapterInfo.uid !== process.getuid?.() ||
+      (adapterInfo.mode & 0o777) !== 0o700 ||
+      !dockerInfo.isFile() ||
+      (dockerInfo.mode & 0o111) === 0 ||
+      !adapterSource.includes(
+        `spawn(${JSON.stringify(dockerExecutable)}, args, {`,
+      )
+    ) {
+      fail('docker-api-preflight', 'hosted-docker-context-invalid');
+    }
+  } catch {
+    fail('docker-api-preflight', 'hosted-docker-context-invalid');
+  }
+
+  Object.assign(taskEnvironment, {
+    [HOSTED_SHARED_DOCKER_SELECTION]: 'true',
+    GITHUB_ACTIONS: 'true',
+    RUNNER_ENVIRONMENT: 'github-hosted',
+    RUNNER_OS: 'Linux',
+    GITHUB_REPOSITORY: '0cwa/matrix-calendar-widget',
+    GITHUB_REF: 'refs/heads/main',
+  });
 }
 
 function writeInitialComposeEnv(file, project, restoreVolume, radicaleImage) {
@@ -1634,6 +1724,12 @@ async function main() {
     if (env.OPERATOR_REHEARSAL_ENABLED !== 'true') {
       fail('preflight', 'operator-rehearsal-not-enabled');
     }
+    if (
+      env[HOSTED_SHARED_DOCKER_SELECTION] !== 'true' ||
+      !isSupportedGitHubHostedRunner(env)
+    ) {
+      fail('preflight', 'hosted-runner-context-invalid');
+    }
     const sourceRoot = path.resolve(
       required(env, 'GITHUB_WORKSPACE'),
       'source',
@@ -1773,6 +1869,7 @@ async function main() {
       homeDir,
       tmpDir,
       ...dockerAdapter,
+      dockerExecutable,
       overrideFile: path.join(taskDir, 'compose.override.yaml'),
       envFile: path.join(taskDir, 'compose.env'),
       stageFile: path.join(taskDir, 'phases.jsonl'),
@@ -1929,6 +2026,13 @@ async function main() {
       `${JSON.stringify(foreignInventory(baseline, id, project))}\n`,
       { mode: 0o600 },
     );
+
+    enableHostedSharedDockerRehearsal(dockerEnv, env, {
+      taskDir,
+      dockerBinDir: dockerAdapter.dockerBinDir,
+      dockerAdapterPath: dockerAdapter.dockerAdapterPath,
+      dockerExecutable,
+    });
 
     stage = 'start-calendaring-services';
     verifyLockedImages(images, context, 'pre-start-image-lock');

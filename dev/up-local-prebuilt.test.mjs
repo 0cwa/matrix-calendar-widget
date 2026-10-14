@@ -122,7 +122,7 @@ function makeSandbox(t) {
   );
   writeExecutable(
     join(bin, 'node'),
-    '#!/bin/sh\ncase "$*" in *mint-openid-credential.mjs*) printf synthetic-openid-proof ;; *) exec "$REAL_NODE_BIN" "$@" ;; esac\n',
+    '#!/bin/sh\ncase "$*" in *synapse-startup-diagnostic.mjs*--stage-failure*) printf "stage=configuration-preflight exit_code=2\\n" ;; *mint-openid-credential.mjs*) printf synthetic-openid-proof ;; *) exec "$REAL_NODE_BIN" "$@" ;; esac\n',
   );
   const common = {
     PATH: `${bin}:${process.env.PATH}`,
@@ -148,7 +148,7 @@ function makeSandbox(t) {
     MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING: '127.0.0.1:8008:8008',
     MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING: '127.0.0.1:5232:5232',
   };
-  return { dockerLog, local, common, overrideFile };
+  return { bin, dockerLog, local, common, overrideFile };
 }
 
 function runUp(environment) {
@@ -291,6 +291,26 @@ test('invalid local endpoint, image, or project controls stop before Docker muta
     assert.notEqual(result.status, 0);
   }
   assert.deepEqual(dockerCalls(dockerLog), []);
+});
+
+test('invalid prebuilt context fails before Docker and emits a closed preflight marker', (t) => {
+  const { dockerLog, local } = makeSandbox(t);
+  const result = runUp({
+    ...local,
+    DOCKER_CONTEXT: 'default',
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stdout,
+    /^stage=configuration-preflight exit_code=2\n$/u,
+    result.stderr,
+  );
+  assert.deepEqual(dockerCalls(dockerLog), []);
+  assert.doesNotMatch(
+    `${result.stdout}\n${result.stderr}`,
+    /synthetic-password|docker\.sock|BEGIN:VCALENDAR/u,
+  );
 });
 
 test('missing or mismatched overlay labels stop before run, up, or build', (t) => {
