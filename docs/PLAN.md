@@ -448,8 +448,16 @@ DST regression or recurrence-editing criteria above.
 - [ ] Complete the controlled-beta local and operator readiness gates for the
       selected deployment. Full isolated local Stage B has not passed: the
       local probe stopped while verifying container capabilities; the
-      inspected value was not retained and guest execution was skipped. Hosted
-      source-bound Element and CI acceptance is complete; the separate local
+      inspected value was not retained and guest execution was skipped. The
+      completed hosted Element and CI acceptance is historical evidence for
+      PR #247 source `acc535dfe69001403c67853b2171672e74056f51` (tree
+      `784aaeac9f6cf733ed7f38b50eb46bcc4b77c333`), as recorded in
+      `docs/STATUS.md`; it does not accept the current PR #260 candidate
+      `3643166a972a4f9e42da0b005bf3b7e3b8233180` (tree
+      `b25da53e7dd7709ae91ca351c4207c7c475d3933`). Current candidate
+      acceptance remains pending: the full normal-bot profile passed, the
+      current appservice 25-event view timing missed two declared thresholds,
+      and the later appservice acceptance has not run. The separate local
       source-bound server image/cache/runtime rehearsal remains open. A
       P0 local rehearsal remains blocked pending owner-scope approval. A
       source-only Element-free gateway API probe is available at
