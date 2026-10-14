@@ -14,9 +14,31 @@
  * limitations under the License.
  */
 
+import { InMemoryCalendarRepository } from '@matrix-calendar-widget/calendar';
 import type { WidgetApi } from '@matrix-widget-toolkit/api';
 import { render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import AppContainer from './AppContainer';
+import { useCalendarRepository } from './calendar';
+
+vi.mock('./App', () => ({
+  default: function InjectedRepositoryProbe() {
+    const repository = useCalendarRepository();
+    return (
+      <div data-testid="injected-repository">{repository.constructor.name}</div>
+    );
+  },
+}));
+
+vi.mock('@matrix-widget-toolkit/mui', () => ({
+  getEnvironment: () => undefined,
+  MuiThemeProvider: ({ children }: { children: ReactNode }) => children,
+  MuiWidgetApiProvider: ({ children }: { children: ReactNode }) => children,
+}));
+
+vi.mock('./store', () => ({
+  StoreProvider: ({ children }: { children: ReactNode }) => children,
+}));
 
 vi.mock('@matrix-widget-toolkit/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@matrix-widget-toolkit/api')>()),
@@ -34,6 +56,20 @@ describe('AppContainer', () => {
     );
     expect(screen.getByRole('alert')).toHaveTextContent(
       'A Matrix room ID and calendar API URL are required.',
+    );
+  });
+
+  it('uses an explicitly injected repository when gateway config is missing', () => {
+    render(
+      <AppContainer
+        calendarRepository={new InMemoryCalendarRepository()}
+        widgetApiPromise={Promise.resolve({} as WidgetApi)}
+      />,
+    );
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByTestId('injected-repository')).toHaveTextContent(
+      'InMemoryCalendarRepository',
     );
   });
 });
