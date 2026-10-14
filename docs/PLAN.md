@@ -498,6 +498,8 @@ access and event writes stay disabled by default.
 
 ## M8 — Hardening and release
 
+Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](./RELEASE.md). It binds evidence to an exact source candidate, keeps target-specific operator facts private, and does not grant deployment approval.
+
 - [x] Wire a separate Chromium calendar-component fixture at 320, 390, 768, and
       1280 CSS pixels, with measured overflow, keyboard focus, and axe checks.
       Hosted passing evidence is required; actual Matrix clients remain a
