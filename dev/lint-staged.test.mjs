@@ -15,6 +15,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import test from 'node:test';
@@ -29,18 +30,31 @@ test('staged lint runs configured ESLint on supplied paths and reports defects',
   );
   const validTool = resolve(temporaryDirectory, 'valid tool.mjs');
   const invalidTool = resolve(temporaryDirectory, 'invalid tool.mjs');
+  const invalidSyntaxTool = resolve(temporaryDirectory, 'invalid syntax.mjs');
   const toolingPath = 'dev/element-acceptance-workflow.test.mjs';
+  const workspacePath = resolve(
+    ROOT,
+    'matrix-calendar-widget/src/AppContainer.test.tsx',
+  );
 
   try {
-    writeFileSync(validTool, 'export const stagedProbe = true;\n');
+    writeFileSync(
+      validTool,
+      'export const stagedProbe = process.platform.length > 0;\n',
+    );
     writeFileSync(invalidTool, 'const stagedProbe = true;\n');
+    writeFileSync(invalidSyntaxTool, 'export const syntaxProbe = ;\n');
 
-    const valid = await lintStaged([toolingPath, validTool]);
+    const valid = await lintStaged([toolingPath, validTool, workspacePath]);
     assert.equal(valid.status, 0, valid.output);
 
     const invalid = await lintStaged([invalidTool]);
     assert.notEqual(invalid.status, 0, 'unused variable must fail lint');
     assert.match(invalid.output, /no-unused-vars/u);
+
+    const invalidSyntax = await lintStaged([invalidSyntaxTool]);
+    assert.notEqual(invalidSyntax.status, 0, 'syntax errors must fail lint');
+    assert.match(invalidSyntax.output, /Parsing error/u);
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
@@ -81,10 +95,14 @@ test('warning-only staged probe', async ({ page }) => {
 `,
     );
 
-    const result = await lintStaged([warningFile]);
-    assert.equal(result.status, 0, result.output);
-    assert.match(result.output, /playwright\/no-conditional-in-test/u);
-    assert.match(result.output, /0 errors, \d+ warnings/u);
+    const result = spawnSync(
+      process.execPath,
+      [resolve(ROOT, 'dev/lint-staged.mjs'), warningFile],
+      { cwd: ROOT, encoding: 'utf8' },
+    );
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /playwright\/no-conditional-in-test/u);
+    assert.match(result.stdout, /0 errors, \d+ warnings/u);
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }

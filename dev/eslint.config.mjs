@@ -14,24 +14,43 @@
  * limitations under the License.
  */
 
-import js from '@eslint/js';
-import globals from 'globals';
+import { createRequire } from 'node:module';
+
+const requireFromWorkspace = createRequire(
+  new URL('../packages/ical-timezones/eslint.config.mjs', import.meta.url),
+);
+const javascriptConfig = requireFromWorkspace('@eslint/js').configs.recommended;
+
+const toolingGlobals = Object.fromEntries(
+  [
+    'Buffer',
+    'Intl',
+    'TextDecoder',
+    'URL',
+    'clearTimeout',
+    'console',
+    'exports',
+    'module',
+    'process',
+    'queueMicrotask',
+    'require',
+    'setTimeout',
+    'fetch',
+    'Headers',
+    'Request',
+    'Response',
+  ].map((name) => [name, 'readonly']),
+);
 
 export default [
   {
     ignores: ['**/coverage/**', '**/dist/**'],
   },
-  js.configs.recommended,
+  javascriptConfig,
   {
     files: ['**/*.js', '**/*.mjs', '**/*.cjs'],
     languageOptions: {
-      globals: {
-        ...globals.node,
-        fetch: 'readonly',
-        Headers: 'readonly',
-        Request: 'readonly',
-        Response: 'readonly',
-      },
+      globals: toolingGlobals,
     },
   },
 ];
