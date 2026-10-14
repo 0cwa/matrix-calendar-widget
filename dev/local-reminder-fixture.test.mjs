@@ -19,6 +19,11 @@ const SERVICE_TOKEN = 'private-service-access-token';
 const OPENID_TOKEN = 'private-openid-assertion';
 const ETAG = '"strong-current-etag"';
 const TITLE = 'Reminder acceptance 12345678-1234-1234-1234-123456789abc';
+const FOREIGN_CONFIG = {
+  eventUid: 'foreign-event-uid',
+  recurrenceId: null,
+  alarmUid: 'foreign-alarm-uid',
+};
 
 function fixtureFiles(flow = 'initial', initialMarkers = []) {
   const runnerTemp = mkdtempSync(join(tmpdir(), 'local-reminder-fixture-'));
@@ -65,12 +70,15 @@ function createClient({
   managerPower = 100,
   alarmMinutes = 1,
   configWriteStatus = 200,
+  eventCreateResponseLost = false,
+  configWriteResponseLost = false,
+  foreignEventOnReadback = false,
   contextUserId = MEMBER_ID,
   contextRoomId = ROOM_ID,
   priorTitles = [],
 } = {}) {
   const calls = [];
-  const configRows = [];
+  const configRows = [{ ...FOREIGN_CONFIG }];
   let currentTime = 1_800_000_000_000;
   let newDeliveryAdded = false;
   const timeline = priorTitles.map((title) => ({
@@ -85,6 +93,7 @@ function createClient({
   }));
   let dueAt;
   let createdEvent;
+  let eventPersisted = false;
   const responseEvent = () => ({
     id: `http://radicale:5232/element-acceptance-bot/element-acceptance/${createdEvent.uid}.ics`,
     uid: createdEvent.uid,
@@ -155,11 +164,26 @@ function createClient({
       assert.equal(query.get('roomId'), ROOM_ID);
       assert.equal(query.get('calendarId'), 'element-acceptance');
       createdEvent = JSON.parse(options.body);
+      eventPersisted = true;
       dueAt = Date.parse(`${createdEvent.timing.start.local}Z`) - 60_000;
+      if (eventCreateResponseLost) throw new Error('synthetic lost response');
       return jsonResponse({ event: responseEvent(), etag: ETAG }, 201);
     }
     if (url.pathname === '/v1/calendar/event') {
-      assert.equal(url.searchParams.get('eventId'), responseEvent().id);
+      const eventId = url.searchParams.get('eventId');
+      if (foreignEventOnReadback) {
+        return jsonResponse({
+          event: {
+            id: eventId,
+            uid: 'foreign-event-uid',
+            title: 'Foreign reminder event',
+          },
+          etag: '"foreign-etag"',
+        });
+      }
+      if (!eventPersisted || eventId !== responseEvent().id) {
+        return jsonResponse({ code: 'not-found' }, 404);
+      }
       return jsonResponse({ event: responseEvent(), etag: ETAG });
     }
     if (url.pathname.endsWith('/reminders/options')) {
@@ -194,6 +218,7 @@ function createClient({
         recurrenceId: null,
         alarmUid: 'synthetic-alarm-uid',
       });
+      if (configWriteResponseLost) throw new Error('synthetic lost response');
       return jsonResponse(configRows.at(-1));
     }
     if (url.pathname.endsWith('/reminders') && method === 'GET') {
@@ -202,7 +227,14 @@ function createClient({
       });
     }
     if (url.pathname.endsWith('/reminders') && method === 'DELETE') {
-      configRows.splice(0);
+      const identity = JSON.parse(options.body);
+      const index = configRows.findIndex(
+        (item) =>
+          item.eventUid === identity.eventUid &&
+          item.recurrenceId === identity.recurrenceId &&
+          item.alarmUid === identity.alarmUid,
+      );
+      if (index !== -1) configRows.splice(index, 1);
       return jsonResponse({ deleted: true });
     }
     if (url.pathname.endsWith('/messages')) {
@@ -231,6 +263,7 @@ function createClient({
     if (url.pathname === '/v1/calendar/events' && method === 'DELETE') {
       assert.equal(headers.get('if-match'), ETAG);
       assert.equal(url.searchParams.get('eventId'), responseEvent().id);
+      eventPersisted = false;
       return jsonResponse({});
     }
     throw new Error(`Unexpected fake route ${method} ${url.pathname}`);
@@ -240,6 +273,12 @@ function createClient({
     fetchImpl,
     get currentTime() {
       return currentTime;
+    },
+    get configRows() {
+      return configRows;
+    },
+    get eventPersisted() {
+      return eventPersisted;
     },
     advance(milliseconds) {
       currentTime += milliseconds;
@@ -377,6 +416,82 @@ test('requires the exact room configuration to read back before writing a marker
           url.pathname === '/v1/calendar/events' && method === 'DELETE',
       ),
     );
+  } finally {
+    files.cleanup();
+  }
+});
+
+test('cleans committed event and reminder writes after their responses are lost without touching foreign state', async (t) => {
+  for (const [name, options, expectedPhase] of [
+    [
+      'event create response lost',
+      { eventCreateResponseLost: true },
+      'event-create',
+    ],
+    [
+      'configuration response lost',
+      { configWriteResponseLost: true },
+      'reminder-config-write',
+    ],
+  ]) {
+    await t.test(name, async () => {
+      const files = fixtureFiles();
+      const client = createClient(options);
+      try {
+        const result = await execute(files, client);
+        assert.equal(result.status, 'failed');
+        assert.equal(result.failurePhase, expectedPhase);
+        assert.equal(result.markerWritten, false);
+        assert.deepEqual(
+          JSON.parse(readFileSync(files.markerPath, 'utf8')),
+          [],
+        );
+        assert.equal(client.eventPersisted, false);
+        assert.deepEqual(client.configRows, [FOREIGN_CONFIG]);
+        const deletes = client.calls.filter(
+          ({ method }) => method === 'DELETE',
+        );
+        assert.ok(
+          deletes.some(
+            ({ url, headers }) =>
+              url.pathname === '/v1/calendar/events' &&
+              headers.get('if-match') === ETAG,
+          ),
+        );
+        assert.ok(
+          deletes.every(
+            ({ url, body }) =>
+              url.pathname === '/v1/calendar/events' ||
+              (url.pathname.endsWith('/reminders') &&
+                JSON.parse(body).eventUid !== FOREIGN_CONFIG.eventUid),
+          ),
+        );
+      } finally {
+        files.cleanup();
+      }
+    });
+  }
+});
+
+test('does not delete an event when ambiguous create cleanup readback identifies a foreign object', async () => {
+  const files = fixtureFiles();
+  const client = createClient({
+    eventCreateResponseLost: true,
+    foreignEventOnReadback: true,
+  });
+  try {
+    const result = await execute(files, client);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.failurePhase, 'event-create');
+    assert.equal(result.markerWritten, false);
+    assert.equal(client.eventPersisted, true);
+    assert.ok(
+      !client.calls.some(
+        ({ url, method }) =>
+          url.pathname === '/v1/calendar/events' && method === 'DELETE',
+      ),
+    );
+    assert.deepEqual(JSON.parse(readFileSync(files.markerPath, 'utf8')), []);
   } finally {
     files.cleanup();
   }

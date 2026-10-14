@@ -322,6 +322,12 @@ function eventResourceId(value, fixture, uid) {
   return { id: resource.toString(), etag: value.etag };
 }
 
+function expectedEventResourceIds(fixture, uid) {
+  const serviceLocalpart = fixture.serviceSender.userId.slice(1).split(':')[0];
+  const path = `/${encodeURIComponent(serviceLocalpart)}/${CALENDAR_ID}/${encodeURIComponent(uid)}.ics`;
+  return [`http://radicale:5232${path}`, `http://127.0.0.1:5232${path}`];
+}
+
 function isRelativeMinuteAlarm(alarm, uid) {
   return (
     isRecord(alarm) &&
@@ -517,10 +523,10 @@ async function cleanupOwnedResources(
   fixture,
   openIdToken,
   event,
-  configMayExist,
+  configWriteAttempted,
   configIdentity,
 ) {
-  if (configMayExist && configIdentity) {
+  if (configWriteAttempted && configIdentity) {
     try {
       const items = await readConfigPage(
         fetchImpl,
@@ -528,15 +534,14 @@ async function cleanupOwnedResources(
         openIdToken,
         'reminder-config-readback',
       );
-      if (
-        items.some((item) =>
-          validConfigIdentity(
-            item,
-            configIdentity.eventUid,
-            configIdentity.alarmUid,
-          ),
-        )
-      ) {
+      const matchingItems = items.filter((item) =>
+        validConfigIdentity(
+          item,
+          configIdentity.eventUid,
+          configIdentity.alarmUid,
+        ),
+      );
+      if (matchingItems.length === 1) {
         await gatewayJson(
           fetchImpl,
           fixture,
@@ -547,28 +552,69 @@ async function cleanupOwnedResources(
           'reminder-config-readback',
           configIdentity,
         );
+        const remainingItems = await readConfigPage(
+          fetchImpl,
+          fixture,
+          openIdToken,
+          'reminder-config-readback',
+        );
+        if (
+          remainingItems.some((item) =>
+            validConfigIdentity(
+              item,
+              configIdentity.eventUid,
+              configIdentity.alarmUid,
+            ),
+          )
+        ) {
+          return;
+        }
       }
     } catch {
       // Cleanup is best-effort and never changes the fixed failure report.
     }
   }
   if (event) {
-    try {
-      const query = readEventQuery(fixture, event.id);
-      await gatewayJson(
-        fetchImpl,
-        fixture,
-        openIdToken,
-        'DELETE',
-        'events',
-        query,
-        'event-readback',
-        undefined,
-        event.etag,
-        false,
-      );
-    } catch {
-      // Exact UID, resource ID, and the current strong ETag bound cleanup.
+    const resourceIds = [
+      ...(event.resourceIds ?? []),
+      ...expectedEventResourceIds(fixture, event.uid),
+    ];
+    for (const resourceId of new Set(resourceIds)) {
+      try {
+        const { response, body } = await gatewayJson(
+          fetchImpl,
+          fixture,
+          openIdToken,
+          'GET',
+          'event',
+          readEventQuery(fixture, resourceId),
+          'event-readback',
+        );
+        const currentResource = eventResourceId(body, fixture, event.uid);
+        if (
+          response.status !== 200 ||
+          !currentResource ||
+          currentResource.id !== resourceId ||
+          body.event.title !== event.title
+        ) {
+          continue;
+        }
+        await gatewayJson(
+          fetchImpl,
+          fixture,
+          openIdToken,
+          'DELETE',
+          'events',
+          readEventQuery(fixture, currentResource.id),
+          'event-readback',
+          undefined,
+          currentResource.etag,
+          false,
+        );
+        break;
+      } catch {
+        // Unavailable or mismatched readback never authorizes event deletion.
+      }
     }
   }
 }
@@ -592,7 +638,7 @@ export async function runLocalReminderFixture({
   let fixture;
   let openIdToken;
   let ownedEvent;
-  let configMayExist = false;
+  let configWriteAttempted = false;
   let configIdentity;
   try {
     if (environment.ELEMENT_ACCEPTANCE_REMINDER_FIXTURE !== '1')
@@ -704,6 +750,11 @@ export async function runLocalReminderFixture({
 
     summary.failurePhase = 'event-create';
     const createQuery = roomQuery(fixture);
+    ownedEvent = {
+      uid,
+      title,
+      resourceIds: expectedEventResourceIds(fixture, uid),
+    };
     const { response: createResponse, body: created } = await gatewayJson(
       fetchImpl,
       fixture,
@@ -715,7 +766,9 @@ export async function runLocalReminderFixture({
       createInput,
     );
     const createdResource = eventResourceId(created, fixture, uid);
-    if (createdResource) ownedEvent = createdResource;
+    if (createdResource) {
+      ownedEvent.resourceIds = [...ownedEvent.resourceIds, createdResource.id];
+    }
     if (
       (createResponse.status !== 200 && createResponse.status !== 201) ||
       !createdResource ||
@@ -751,7 +804,7 @@ export async function runLocalReminderFixture({
     ) {
       fail('event-readback');
     }
-    ownedEvent = readbackResource;
+    ownedEvent.resourceIds = [...ownedEvent.resourceIds, readbackResource.id];
 
     summary.failurePhase = 'alarm-options';
     const optionsQuery = new URLSearchParams({ eventId: createdResource.id });
@@ -799,6 +852,8 @@ export async function runLocalReminderFixture({
 
     summary.failurePhase = 'reminder-config-write';
     const reminderRoute = `rooms/${encodeURIComponent(fixture.teamRoomId)}/reminders`;
+    configIdentity = { eventUid: uid, recurrenceId: null, alarmUid };
+    configWriteAttempted = true;
     const { response: configResponse, body: configResult } = await gatewayJson(
       fetchImpl,
       fixture,
@@ -813,9 +868,11 @@ export async function runLocalReminderFixture({
         alarmUid,
       },
     );
-    configMayExist =
-      configResponse.status >= 200 && configResponse.status < 300;
-    if (!configMayExist || !validConfigIdentity(configResult, uid, alarmUid)) {
+    if (
+      configResponse.status < 200 ||
+      configResponse.status >= 300 ||
+      !validConfigIdentity(configResult, uid, alarmUid)
+    ) {
       fail('reminder-config-write');
     }
 
@@ -859,7 +916,7 @@ export async function runLocalReminderFixture({
         fixture,
         openIdToken,
         ownedEvent,
-        configMayExist,
+        configWriteAttempted,
         configIdentity,
       );
     }
