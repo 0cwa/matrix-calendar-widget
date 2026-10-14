@@ -26,10 +26,11 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const LOCAL_LABEL = 'io.matrix-calendar-widget.local-rehearsal';
 const PROJECT_LABEL = 'com.docker.compose.project';
@@ -53,6 +54,19 @@ const VOLUMES = Object.freeze([
 const PORTS = Object.freeze([8008, 5232, 3000, 8080, 5233, 8090]);
 const FAILURE_DIAGNOSTIC_FILE =
   'matrix-calendar-widget-operator-rehearsal-failure.json';
+const DISABLED_ELEMENT_PROFILE = 'operator-rehearsal-disabled';
+const COMPOSE_VALUE_OPTIONS = new Set([
+  '-f',
+  '--file',
+  '-p',
+  '--project-name',
+  '--env-file',
+  '--project-directory',
+  '--profile',
+  '--ansi',
+  '--progress',
+  '--parallel',
+]);
 const API_STAGES = Object.freeze([
   'fixture',
   'member-openid',
@@ -312,7 +326,7 @@ function makeComposeOverride(lock, runId, project) {
   }
   lines.push(
     '  element:',
-    '    profiles: ["operator-rehearsal-disabled"]',
+    `    profiles: ["${DISABLED_ELEMENT_PROFILE}"]`,
     'networks:',
     '  default:',
     '    labels:',
@@ -533,7 +547,7 @@ function gitValue(root, args, stage) {
 
 function taskEnvironment(taskDir, dockerConfig, runId, project, paths) {
   const env = {
-    PATH: required(process.env, 'PATH'),
+    PATH: `${paths.dockerBinDir}${path.delimiter}${required(process.env, 'PATH')}`,
     HOME: paths.homeDir,
     TMPDIR: paths.tmpDir,
     LANG: 'C.UTF-8',
@@ -810,6 +824,97 @@ function assertListenerScope(inventory, baseline) {
   }
 }
 
+export function addOperatorRehearsalProfileToComposeArgs(args) {
+  if (!Array.isArray(args) || args[0] !== 'compose') return args;
+  let index = 1;
+  while (index < args.length) {
+    const argument = args[index];
+    if (argument === '--') return args;
+    if (COMPOSE_VALUE_OPTIONS.has(argument)) {
+      if (index + 1 >= args.length) return args;
+      index += 2;
+      continue;
+    }
+    if (
+      [...COMPOSE_VALUE_OPTIONS].some(
+        (option) =>
+          option.startsWith('--') && argument.startsWith(`${option}=`),
+      )
+    ) {
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith('-')) return args;
+    if (argument !== 'config') return args;
+    return [
+      ...args.slice(0, index),
+      '--profile',
+      DISABLED_ELEMENT_PROFILE,
+      ...args.slice(index),
+    ];
+  }
+  return args;
+}
+
+function findNativeDockerExecutable(searchPath, stage = 'preflight') {
+  for (const directory of searchPath.split(path.delimiter)) {
+    if (!directory) continue;
+    try {
+      const candidate = realpathSync(path.join(directory, 'docker'));
+      const info = statSync(candidate);
+      if (!info.isFile() || (info.mode & 0o111) === 0) continue;
+      const version = spawnSync(candidate, ['--version'], {
+        encoding: 'utf8',
+        maxBuffer: 1024,
+        timeout: 5000,
+        windowsHide: true,
+      });
+      if (
+        !version.error &&
+        version.status === 0 &&
+        /^Docker version \d+\.\d+/u.test(version.stdout ?? '')
+      ) {
+        return candidate;
+      }
+    } catch {
+      // Continue searching without exposing host paths.
+    }
+  }
+  fail(stage, 'docker-cli-unavailable');
+}
+
+export function writeDockerAdapter(taskDir, dockerExecutable) {
+  const dockerBinDir = path.join(taskDir, 'docker-bin');
+  mkdirSync(dockerBinDir, { mode: 0o700 });
+  chmodSync(dockerBinDir, 0o700);
+  const dockerAdapterPath = path.join(dockerBinDir, 'docker');
+  const helperPath = fileURLToPath(import.meta.url);
+  const helperUrl = pathToFileURL(helperPath).href;
+  const source = `#!/usr/bin/env node
+import { spawn } from 'node:child_process';
+import { addOperatorRehearsalProfileToComposeArgs } from ${JSON.stringify(helperUrl)};
+const args = addOperatorRehearsalProfileToComposeArgs(process.argv.slice(2));
+const child = spawn(${JSON.stringify(dockerExecutable)}, args, {
+  stdio: 'inherit',
+  windowsHide: true,
+});
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => child.kill(signal));
+}
+child.on('error', () => {
+  process.stderr.write('Docker command failed to start.\\n');
+  process.exitCode = 1;
+});
+child.on('exit', (code, signal) => {
+  if (signal) process.kill(process.pid, signal);
+  else process.exitCode = Number.isInteger(code) ? code : 1;
+});
+`;
+  writePrivate(dockerAdapterPath, source);
+  chmodSync(dockerAdapterPath, 0o700);
+  return { dockerBinDir, dockerAdapterPath };
+}
+
 function composeArgs(sourceRoot, project, envFile, overrideFile) {
   return [
     'compose',
@@ -852,9 +957,7 @@ function validateComposeModel(model, lock, runId, project) {
     }
   }
   if (
-    !model.services.element?.profiles?.includes(
-      'operator-rehearsal-disabled',
-    ) ||
+    !model.services.element?.profiles?.includes(DISABLED_ELEMENT_PROFILE) ||
     model.networks?.default?.labels?.[LOCAL_LABEL] !== runId ||
     model.volumes?.['synapse-data']?.labels?.[LOCAL_LABEL] !== runId ||
     model.volumes?.['radicale-data']?.labels?.[LOCAL_LABEL] !== runId ||
@@ -908,10 +1011,13 @@ function assertPrivateTaskTree(root, current) {
   for (const name of readdirSync(root)) {
     const child = path.join(root, name);
     const info = lstatSync(child);
+    const mode = info.mode & 0o777;
+    const adapterExecutable =
+      info.isFile() && child === current.dockerAdapterPath && mode === 0o700;
     if (
       info.isSymbolicLink() ||
       info.uid !== process.getuid?.() ||
-      (info.mode & 0o777) !== (info.isDirectory() ? 0o700 : 0o600)
+      (mode !== (info.isDirectory() ? 0o700 : 0o600) && !adapterExecutable)
     ) {
       fail('private-files', 'task-entry-permissions-invalid');
     }
@@ -1448,12 +1554,18 @@ async function main() {
       mkdirSync(directory, { mode: 0o700 });
       chmodSync(directory, 0o700);
     }
+    const dockerExecutable = findNativeDockerExecutable(
+      required(process.env, 'PATH'),
+      'docker-api-preflight',
+    );
+    const dockerAdapter = writeDockerAdapter(taskDir, dockerExecutable);
     const paths = {
       runnerTemp,
       taskDir,
       dockerConfig,
       homeDir,
       tmpDir,
+      ...dockerAdapter,
       overrideFile: path.join(taskDir, 'compose.override.yaml'),
       envFile: path.join(taskDir, 'compose.env'),
       stageFile: path.join(taskDir, 'phases.jsonl'),
@@ -1876,7 +1988,10 @@ async function main() {
     const current = captureInventory('pre-cleanup', context);
     compareForeign(baseline, current, id, project);
     assertNoElement(current, id, project);
-    assertPrivateTaskTree(taskDir, { runnerTemp });
+    assertPrivateTaskTree(taskDir, {
+      runnerTemp,
+      dockerAdapterPath: paths.dockerAdapterPath,
+    });
     const cleanupPlan = planOwnedCleanup(current, id, project, images);
     const receipt = safeReceipt({
       sourceSha,
@@ -1911,7 +2026,10 @@ async function main() {
     cleanupVerified = true;
 
     stage = 'task-files-cleanup';
-    assertPrivateTaskTree(taskDir, { runnerTemp });
+    assertPrivateTaskTree(taskDir, {
+      runnerTemp,
+      dockerAdapterPath: paths.dockerAdapterPath,
+    });
     if (
       realpathSync(taskDir) !== taskDir ||
       !taskDir.startsWith(`${runnerTemp}${path.sep}`)

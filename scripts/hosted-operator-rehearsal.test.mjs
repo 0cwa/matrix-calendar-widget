@@ -1,16 +1,19 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
+  addOperatorRehearsalProfileToComposeArgs,
   assertNoCollision,
   compareForeign,
   fixtureIdentity,
@@ -19,6 +22,7 @@ import {
   formatSuccessSummary,
   planOwnedCleanup,
   validateLockedImageInspect,
+  writeDockerAdapter,
   writeFailureDiagnostic,
 } from './hosted-operator-rehearsal.mjs';
 
@@ -44,6 +48,109 @@ function emptyInventory() {
 function throwsCode(code) {
   return (error) => error?.code === code;
 }
+
+test('the task Docker adapter adds the disabled profile to config only', () => {
+  const configArgs = [
+    'compose',
+    '-p',
+    project,
+    '--env-file',
+    '/private/compose.env',
+    '-f',
+    '/private/compose.yaml',
+    'config',
+    '--format',
+    'json',
+  ];
+  assert.deepEqual(addOperatorRehearsalProfileToComposeArgs(configArgs), [
+    ...configArgs.slice(0, -3),
+    '--profile',
+    'operator-rehearsal-disabled',
+    ...configArgs.slice(-3),
+  ]);
+
+  for (const args of [
+    ['compose', '-p', project, 'up', '-d', 'synapse'],
+    ['compose', '-p', project, 'restart', 'gateway'],
+    ['compose', '-p', project, 'exec', 'gateway', 'true'],
+    ['inspect', 'some-container'],
+    ['compose', '--unknown-option', 'config'],
+  ]) {
+    assert.strictEqual(addOperatorRehearsalProfileToComposeArgs(args), args);
+  }
+});
+
+test('the task Docker adapter forwards arguments, output, and exit status', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mcw-docker-adapter-'));
+  chmodSync(root, 0o700);
+  const nativeDocker = join(root, 'docker-native');
+  const capturePath = join(root, 'argv.json');
+  const adapterArgs = [
+    'compose',
+    '-p',
+    project,
+    '-f',
+    '/private/compose.yaml',
+    'config',
+    '--format',
+    'json',
+  ];
+  try {
+    writeFileSync(
+      nativeDocker,
+      `#!/usr/bin/env node\nconst fs = require('node:fs');\nfs.writeFileSync(process.env.DOCKER_ARGS_CAPTURE, JSON.stringify(process.argv.slice(2)), { mode: 0o600 });\nprocess.stdout.write('adapter-stdout');\nprocess.stderr.write('adapter-stderr');\nprocess.exit(Number(process.env.DOCKER_EXIT));\n`,
+      { mode: 0o700, flag: 'wx' },
+    );
+    chmodSync(nativeDocker, 0o700);
+    const { dockerAdapterPath } = writeDockerAdapter(root, nativeDocker);
+    const expectedArgs = addOperatorRehearsalProfileToComposeArgs(adapterArgs);
+    const result = spawnSync(
+      process.execPath,
+      [dockerAdapterPath, ...adapterArgs],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          DOCKER_ARGS_CAPTURE: capturePath,
+          DOCKER_EXIT: '23',
+        },
+        timeout: 5000,
+      },
+    );
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 23);
+    assert.equal(result.stdout, 'adapter-stdout');
+    assert.equal(result.stderr, 'adapter-stderr');
+    assert.deepEqual(
+      JSON.parse(readFileSync(capturePath, 'utf8')),
+      expectedArgs,
+    );
+    assert.equal(statSync(dockerAdapterPath).mode & 0o777, 0o700);
+
+    const runtimeArgs = ['compose', '-p', project, 'up', '-d', 'synapse'];
+    const runtime = spawnSync(
+      process.execPath,
+      [dockerAdapterPath, ...runtimeArgs],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          DOCKER_ARGS_CAPTURE: capturePath,
+          DOCKER_EXIT: '0',
+        },
+        timeout: 5000,
+      },
+    );
+    assert.equal(runtime.error, undefined);
+    assert.equal(runtime.status, 0);
+    assert.deepEqual(
+      JSON.parse(readFileSync(capturePath, 'utf8')),
+      runtimeArgs,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('fixture tags resolve to immutable linux/amd64 IDs and RepoDigests', () => {
   const expectedTag = 'ghcr.io/element-hq/synapse:v1.161.0';
