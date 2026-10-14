@@ -454,8 +454,9 @@ DST regression or recurrence-editing criteria above.
       record the actual target's ingress,
       DNS/TLS/proxy, account ownership, MAS, credential issuance, and secret
       facts; validate encrypted off-server Restic-compatible S3 backups with
-      daily scheduling, 30 daily recovery points, custody, and paired Radicale
-      plus app-owned PostgreSQL restore; and rehearse install, disable, and
+      daily scheduling, up to 30 populated-calendar-day recovery points
+      (missed runs leave gaps), custody, and paired Radicale plus app-owned
+      PostgreSQL restore; and rehearse install, disable, and
       rollback. The coordinator's automatic forget/prune path is opt-in and
       requires the configured Restic host and project tag to match the Compose
       project name; target acceptance and recovery evidence remain open.
@@ -570,8 +571,14 @@ access and event writes stay disabled by default.
         verified paired capture after service restart and never initializes a
         Restic repository. `resticRetentionEnabled` defaults off; when enabled
         it runs the fixed `forget --keep-daily 30 --prune` policy after
-        successful upload, scoped by the configured repository, project host,
-        and both stable tags with `host,tags` grouping. Fake-command tests cover
+        successful upload. The configured repository, host, comma-joined tag
+        pair, and `host,tags` grouping scope snapshots eligible for forgetting;
+        prune itself scans the repository, preserves data referenced by any
+        retained snapshot, and may remove or repack other unreferenced data.
+        Automatic prune requires repository-wide maintenance authority and an
+        S3 I/O budget; a dedicated pilot repository or prefix is planned.
+        `--keep-daily 30` retains points for up to 30 populated calendar days,
+        so missed backup days leave gaps. Fake-command tests cover
         the backup-only default, scope validation, command order, failed-upload
         skip, and retention failure reporting. Real S3, scheduling, and
         target-host recovery remain open operator gates.

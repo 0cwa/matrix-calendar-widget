@@ -108,23 +108,33 @@ restic forget --host matrix-calendar-sidecar \
   --group-by host,tags --keep-daily 30 --prune
 ```
 
-The fixed policy keeps one recovery point for each of up to 30 recent calendar
-dates that contain a successful backup. A missed timer run leaves a gap and can
-leave the oldest retained point more than 30 elapsed days old.
-`forget --prune` removes snapshots outside that policy and performs Restic's
-physical garbage collection; there is no separate
-prune schedule, because leaving it separate would allow unreferenced data to
-accumulate even as old recovery points are forgotten. The scope is the
-configured Restic repository, exact host, and both configured tags (the tag
-pair is matched together). When using a shared repository, choose a Compose
-`projectName` unique to this deployment; automatic retention requires
-`resticHost` and one configured tag to equal that project name. Invalid or
-missing scope fails configuration validation before any command runs. A
-retention failure exits the service as a retention-stage failure even though
-the backup completed; the local capture and uploaded snapshot remain available
-for inspection. Check the repository periodically and alert on service failure
-or incomplete backup results. Run `restic check` periodically to check
-repository structure.
+The fixed policy keeps one recovery point for each of up to 30 recent
+populated calendar dates. A missed timer run leaves a gap: it creates no point
+for that date, so the policy does not guarantee 30 snapshots or 30 elapsed days
+of coverage. The oldest retained point can be more than 30 elapsed days old.
+
+The host filter and one comma-joined tag pair select the snapshots eligible
+for forgetting; both tags in that pair must match. Restic's `--prune` then
+performs repository-wide garbage collection: it scans snapshots and repository
+data, removes data no remaining snapshot references, and may repack partially
+used pack files. It preserves data referenced by retained snapshots, including
+foreign snapshots, but prune can read, remove, or rewrite repository data
+beyond this project's snapshot set. The dry run above previews the forget
+selection; it does not bound prune's repository-wide scan or repacking.
+
+The coordinator runs prune after forgetting so unreferenced data does not
+accumulate. Automatic pruning therefore requires repository-wide maintenance
+authority and a budget for S3 reads, writes, and deletes. Plan a dedicated
+repository or S3 prefix for the pilot. Keep retention disabled on a shared
+repository unless the operator has explicitly approved repository-wide prune
+activity. When using a shared repository, choose a Compose `projectName`
+unique to this deployment; automatic retention requires `resticHost` and one
+configured tag to equal that project name. Invalid or missing scope fails
+configuration validation before any command runs. A retention failure exits
+the service as a retention-stage failure even though the backup completed;
+the local capture and uploaded snapshot remain available for inspection.
+Check the repository periodically and alert on service failure or incomplete
+backup results. Run `restic check` periodically to check repository structure.
 
 Restic does not schedule itself. A host operator may install the example
 oneshot service and daily timer to invoke the shipped coordinator after local
@@ -170,11 +180,16 @@ until its placeholders and host paths are replaced:
 ```
 
 `resticRetentionEnabled` is an opt-in boolean and defaults to `false` when
-omitted. Its policy is fixed at 30 daily recovery points and includes Restic
-pruning after a successful upload. Enabling it requires `resticHost` and one of
-the two stable `resticTags` to match `projectName`, so automatic forget/prune
-has a project-specific host and tag scope. Review the dry-run selection above
-before enabling it on a target.
+omitted. Its fixed `--keep-daily 30` policy keeps one recovery point for each
+of up to 30 recent populated calendar dates; missed backup days leave gaps and
+are not covered. After a successful upload, it also invokes repository-wide
+Restic pruning. The `resticHost` and comma-joined `resticTags` scope the
+snapshots eligible for forgetting; they do not scope prune's repository scan
+or I/O. Enabling it requires `resticHost` and one of the two stable
+`resticTags` to match `projectName`. Review the forget dry-run, select a
+dedicated pilot repository or S3 prefix, and approve repository-wide prune
+authority and I/O budget before enabling it. A shared repository requires
+explicit approval for that repository-wide maintenance.
 
 The Compose env file, Restic password, S3 credentials, and optional PostgreSQL
 password are read only through protected paths; none is copied into a capture.

@@ -1403,7 +1403,7 @@ async function main() {
     process.stderr.write(
       stage === 'retention'
         ? 'Cold backup upload completed, but retention failed; inspect the ' +
-          'repository and configured scope.\n'
+            'repository and configured scope.\n'
         : `Cold backup failed during ${stage}; inspect host configuration and service state.\n`,
     );
     process.exitCode = 1;
