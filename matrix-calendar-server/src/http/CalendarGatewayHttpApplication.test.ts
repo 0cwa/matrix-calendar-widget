@@ -141,6 +141,37 @@ describe('calendar gateway HTTP middleware setup', () => {
     }
   });
 
+  it('reports only the effective acceptance diagnostic flag at startup', async () => {
+    const previousSetting =
+      process.env.ELEMENT_ACCEPTANCE_RATE_LIMIT_DIAGNOSTICS;
+    const info = jest.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      await app.close();
+      process.env.ELEMENT_ACCEPTANCE_RATE_LIMIT_DIAGNOSTICS = 'true';
+      const application = await createCalendarGatewayHttpApplication(
+        CalendarGatewayHttpProbeModule,
+        TestMatrixAuthMiddleware,
+      );
+      app = application.app;
+
+      expect(info).toHaveBeenCalledWith(
+        '{"event":"calendar_gateway_rate_limit_diagnostics_enabled","enabled":true}',
+      );
+      expect(info.mock.calls).toEqual([
+        [
+          '{"event":"calendar_gateway_rate_limit_diagnostics_enabled","enabled":true}',
+        ],
+      ]);
+    } finally {
+      if (previousSetting === undefined) {
+        delete process.env.ELEMENT_ACCEPTANCE_RATE_LIMIT_DIAGNOSTICS;
+      } else {
+        process.env.ELEMENT_ACCEPTANCE_RATE_LIMIT_DIAGNOSTICS = previousSetting;
+      }
+      info.mockRestore();
+    }
+  });
+
   it('handles Authorization preflight before OpenID verification and rejects excess GETs before verification', async () => {
     const origin = 'https://widget.example.test';
     const authorization = `${MX_IDENTITY} ${base64url(

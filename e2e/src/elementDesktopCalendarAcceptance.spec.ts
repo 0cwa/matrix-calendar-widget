@@ -36,6 +36,7 @@ import {
   type CreatedEventTiming,
   type ExpectedRoomRange,
 } from '../../dev/element-acceptance-event-observation.mjs';
+import { classifyRoomRangeResponse } from '../../dev/element-acceptance-rate-limit-diagnostics.mjs';
 import { hasUniqueWidgetFrameOwnedByElement } from '../../dev/element-desktop-frame-origin.mjs';
 import {
   appendDesktopJourneyOutcome,
@@ -269,6 +270,7 @@ test('bounds Desktop create diagnostics when a response body stalls', async () =
     createResponseCalendarMatches: null,
     postCreateRoomRangeGetRequestCountCapped: 1,
     postCreateRoomRangeGetResponseCountCapped: 1,
+    postCreateRoomRangeGetResponseCategory: 'other',
     postCreateRoomRangeGetStatus: 200,
     roomListHasEventsArray: null,
     roomListEventCountCapped: null,
@@ -1535,6 +1537,7 @@ function unavailableDesktopEventCreateFailureDiagnostic(): DesktopEventCreateFai
     postCreateRoomRangeGetRequestCountCapped: null,
     postCreateRoomRangeGetResponseCountCapped: null,
     postCreateRoomRangeGetStatus: null,
+    postCreateRoomRangeGetResponseCategory: null,
     roomListHasEventsArray: null,
     roomListEventCountCapped: null,
     roomListTitleMatches: null,
@@ -1573,6 +1576,11 @@ function observeDesktopEventCreatePost(
   let postCreateRoomRangeGetRequestCountCapped: 0 | 1 | 2 = 0;
   let postCreateRoomRangeGetResponseCountCapped: 0 | 1 | 2 = 0;
   let postCreateRoomRangeGetStatus: number | null = null;
+  let postCreateRoomRangeGetResponseCategory:
+    | 'gateway-too-many-requests'
+    | 'matrix-m-limit-exceeded'
+    | 'other'
+    | 'unknown' = 'unknown';
   let roomListHasEventsArray: boolean | null = null;
   let roomListEventCountCapped: 0 | 1 | 2 | null = null;
   let roomListTitleMatches: boolean | null = null;
@@ -1677,9 +1685,14 @@ function observeDesktopEventCreatePost(
   ) => {
     return readBoundedResponse(response).then(async (body): Promise<void> => {
       await createResponseRead;
-      if (responseNumber !== latestRangeResponse || body === null) {
+      if (responseNumber !== latestRangeResponse) {
         return undefined;
       }
+      postCreateRoomRangeGetResponseCategory = classifyRoomRangeResponse(
+        postCreateRoomRangeGetStatus,
+        body,
+      );
+      if (body === null) return undefined;
       const summary = inspectExpectedEventList(body, {
         expectedTitle,
         expectedCalendarId: fixture.calendarId,
@@ -1815,6 +1828,7 @@ function observeDesktopEventCreatePost(
           postCreateRoomRangeGetRequestCountCapped,
           postCreateRoomRangeGetResponseCountCapped,
           postCreateRoomRangeGetStatus,
+          postCreateRoomRangeGetResponseCategory,
           roomListHasEventsArray,
           roomListEventCountCapped,
           roomListTitleMatches,

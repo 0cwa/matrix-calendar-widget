@@ -78,6 +78,7 @@ runs:
       shell: bash
       run: |
         node --test dev/element-acceptance-overrides.test.mjs
+        node --test dev/element-acceptance-rate-limit-diagnostics.test.mjs
         node dev/element-acceptance-diagnostics.test.mjs
         node dev/sanitize-element-acceptance.test.mjs
         node dev/element-desktop-egress-policy.test.mjs
@@ -208,7 +209,20 @@ runs:
       shell: bash
       run: |
         compose=(docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ELEMENT_ACCEPTANCE_SERVER_ENV_FILE" -f dev/compose.yaml -f dev/element-acceptance.compose.yaml)
-        "${compose[@]}" logs --no-color gateway | rg 'calendar_gateway_rate_limit_denied' || true
+        diagnostic_file="$RUNNER_TEMP/element-acceptance-rate-limit-diagnostics.jsonl"
+        "${compose[@]}" logs --no-color --no-log-prefix gateway \
+          | node dev/element-acceptance-rate-limit-diagnostics.mjs capture \
+          > "$diagnostic_file"
+        cat "$diagnostic_file"
+
+    - name: Retain safe normal-bot gateway rate-limit diagnostics
+      if: ${{ always() && inputs.principal-mode == 'bot-account' && steps.desktop_journey.outcome != 'skipped' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: element-acceptance-normal-bot-rate-limit-diagnostics
+        path: ${{ runner.temp }}/element-acceptance-rate-limit-diagnostics.jsonl
+        if-no-files-found: ignore
+        retention-days: 1
 
     - name: Provision the synthetic reminder sender room membership
       shell: bash

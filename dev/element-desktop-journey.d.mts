@@ -123,6 +123,12 @@ export type DesktopEventCreateFailureDiagnostic = {
   postCreateRoomRangeGetRequestCountCapped: 0 | 1 | 2 | null;
   postCreateRoomRangeGetResponseCountCapped: 0 | 1 | 2 | null;
   postCreateRoomRangeGetStatus: number | null;
+  postCreateRoomRangeGetResponseCategory:
+    | 'gateway-too-many-requests'
+    | 'matrix-m-limit-exceeded'
+    | 'other'
+    | 'unknown'
+    | null;
   roomListHasEventsArray: boolean | null;
   roomListEventCountCapped: 0 | 1 | 2 | null;
   roomListTitleMatches: boolean | null;

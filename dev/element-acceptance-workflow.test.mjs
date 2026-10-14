@@ -55,7 +55,12 @@ test('the failed bot Desktop job retains only the safe limiter diagnostic lines'
   );
   assert.match(
     capture,
-    /docker compose[\s\S]*?logs --no-color gateway \| rg 'calendar_gateway_rate_limit_denied' \|\| true/u,
+    /docker compose -p "\$COMPOSE_PROJECT_NAME" --env-file "\$ELEMENT_ACCEPTANCE_SERVER_ENV_FILE" -f dev\/compose\.yaml -f dev\/element-acceptance\.compose\.yaml[\s\S]*?logs --no-color --no-log-prefix gateway[\s\S]*?element-acceptance-rate-limit-diagnostics\.mjs capture/u,
+  );
+  assert.match(capture, /cat "\$diagnostic_file"/u);
+  assert.match(
+    runner,
+    /Retain safe normal-bot gateway rate-limit diagnostics[\s\S]*?element-acceptance-rate-limit-diagnostics\.jsonl[\s\S]*?retention-days: 1/u,
   );
   assert.ok(
     runner.indexOf(
@@ -129,7 +134,7 @@ test('both fixture jobs select one strict process-wide principal mode', () => {
   );
   assert.match(
     runner,
-    /Show safe normal-bot gateway rate-limit diagnostics[\s\S]*?inputs\.principal-mode == 'bot-account'[\s\S]*?rg 'calendar_gateway_rate_limit_denied'/u,
+    /Show safe normal-bot gateway rate-limit diagnostics[\s\S]*?inputs\.principal-mode == 'bot-account'[\s\S]*?element-acceptance-rate-limit-diagnostics\.mjs capture/u,
   );
   assert.match(e2e, /sender\.accessToken !== bot\.accessToken/u);
   assert.match(e2e, /openIdBody = JSON\.stringify\(\{\}\)/u);

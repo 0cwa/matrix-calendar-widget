@@ -379,6 +379,7 @@ function validDesktopEventCreateFailureDiagnostic(value) {
     'matchingRowVisible',
     'postCreateEventGetRequestCountCapped',
     'postCreateRoomRangeGetRequestCountCapped',
+    'postCreateRoomRangeGetResponseCategory',
     'postCreateRoomRangeGetResponseCountCapped',
     'postCreateRoomRangeGetStatus',
     'progressbarVisible',
@@ -436,7 +437,14 @@ function validDesktopEventCreateFailureDiagnostic(value) {
     (value.postCreateRoomRangeGetStatus !== null &&
       (!Number.isInteger(value.postCreateRoomRangeGetStatus) ||
         value.postCreateRoomRangeGetStatus < 100 ||
-        value.postCreateRoomRangeGetStatus > 599))
+        value.postCreateRoomRangeGetStatus > 599)) ||
+    ![
+      null,
+      'gateway-too-many-requests',
+      'matrix-m-limit-exceeded',
+      'other',
+      'unknown',
+    ].includes(value.postCreateRoomRangeGetResponseCategory)
   ) {
     return false;
   }

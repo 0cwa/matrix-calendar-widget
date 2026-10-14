@@ -55,10 +55,21 @@ export async function createCalendarGatewayHttpApplication(
     appConfig.calendar_gateway_rate_limit_window_ms,
     appConfig.calendar_gateway_rate_limit_max_keys,
   );
+  const rateLimitDiagnosticsSetting =
+    process.env.ELEMENT_ACCEPTANCE_RATE_LIMIT_DIAGNOSTICS;
+  const rateLimitDiagnosticsEnabled = rateLimitDiagnosticsSetting === 'true';
+  if (rateLimitDiagnosticsEnabled) {
+    console.info(
+      JSON.stringify({
+        event: 'calendar_gateway_rate_limit_diagnostics_enabled',
+        enabled: rateLimitDiagnosticsEnabled,
+      }),
+    );
+  }
   const calendarGatewayRateLimitMiddleware =
     new CalendarGatewayRateLimitMiddleware(
       calendarGatewayRateLimiter,
-      process.env.ELEMENT_ACCEPTANCE_RATE_LIMIT_DIAGNOSTICS === 'true'
+      rateLimitDiagnosticsEnabled
         ? (event) => console.info(JSON.stringify(event))
         : undefined,
     );
