@@ -1,6 +1,17 @@
 # Matrix Calendar Widget
 
-The matrix widget that is used to manage meeting rooms.
+A Matrix calendar widget backed by an authenticated calendar gateway and CalDAV.
+
+## Runtime configuration
+
+The default widget requires a Matrix room ID (`matrix_room_id`) and a
+calendar gateway URL (the `meetings_bot_base_url` widget parameter or
+`REACT_APP_API_BASE_URL`). Missing or blank values display an initialization
+error instead of showing an in-memory calendar that cannot persist changes.
+
+Tests and standalone demos that need an in-memory calendar must explicitly
+inject `InMemoryCalendarRepository` through `AppContainer`. No fallback is
+enabled in a deployed widget.
 
 ### Available Scripts
 
