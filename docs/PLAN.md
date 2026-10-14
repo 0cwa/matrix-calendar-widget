@@ -785,8 +785,9 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       integrated candidate. This scope does not authorize production
       installation or rollout.
 - [ ] Complete private operator readiness evidence for the merged candidate
-      before any separate rollout decision. Independent source review is
-      complete. Full isolated local Stage B and source-bound server
+      before any separate rollout decision. Independent review is complete
+      only for PR #260's pre-integration candidate; review of the integrated
+      source remains required. Full isolated local Stage B and source-bound server
       image/cache/runtime acceptance remain open, followed by actual
       target-specific deployment facts and recovery validation. The reminder
       restore helper honors explicit skip-Element mode during quiescence while
