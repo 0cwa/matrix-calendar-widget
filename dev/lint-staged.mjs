@@ -67,6 +67,13 @@ export async function lintStaged(filesToLint) {
     const eslint = new ESLint({
       cwd: ROOT,
       overrideConfigFile: configPath,
+      overrideConfig: {
+        languageOptions: {
+          parserOptions: {
+            tsconfigRootDir: dirname(configPath),
+          },
+        },
+      },
       warnIgnored: false,
     });
     const results = await eslint.lintFiles(files);
