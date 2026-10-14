@@ -465,9 +465,11 @@ DST regression or recurrence-editing criteria above.
         [reminder fixture](../dev/local-reminder-fixture.mjs), and [paired
         restore helper](../dev/element-acceptance-reminder-restore.mjs).
         Focused tooling checks use in-process HTTP, fake commands, and fixed-enum
-        formatter cases. The composite action records tracked step outcomes and
-        the first tracked failure after teardown; a diagnostic write failure is
-        marked unavailable without changing acceptance or cleanup outcomes.
+        formatter cases. The composite action records fixed-enum step outcomes,
+        using `unknown` for absent, cancelled, or unrecognized outcomes. It
+        reports the first tracked failure only when the report is complete;
+        otherwise `first_failed_phase` is `unknown`. A diagnostic write failure
+        is marked unavailable without changing acceptance or cleanup outcomes.
         No external service or real API, image store, restart, or restore was exercised;
         this does not pass local Stage B or image/cache/runtime acceptance.
 - [ ] Room-target diagnostics beyond the supported calendar/event paths.

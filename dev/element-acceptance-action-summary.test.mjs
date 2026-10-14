@@ -104,13 +104,15 @@ test('missing, cancelled, and unrecognized outcomes are incomplete without expos
   outcomes.reminder_room = undefined;
   outcomes.reminder_enable = 'cancelled';
   outcomes.reminder_initial = secretLike;
+  outcomes.reminder_restore = 'failure';
 
   const summaryLine = formatActionPhaseSummary(outcomes);
   const summary = parseSummary(summaryLine);
 
-  assert.equal(summary.phases.reminder_room, 'started');
-  assert.equal(summary.phases.reminder_enable, 'started');
-  assert.equal(summary.phases.reminder_initial, 'started');
+  assert.equal(summary.phases.reminder_room, 'unknown');
+  assert.equal(summary.phases.reminder_enable, 'unknown');
+  assert.equal(summary.phases.reminder_initial, 'unknown');
+  assert.equal(summary.phases.reminder_restore, 'failed');
   assert.equal(summary.first_failed_phase, 'unknown');
   assert.equal(summary.report_complete, false);
   assert.doesNotMatch(summaryLine, /secret-token|private-hostname|cancelled/u);
@@ -140,7 +142,7 @@ test('reads only the fixed action outcome environment keys', () => {
   const summary = parseSummary(writtenSummary);
   assert.equal(summary.phases.desktop_journey, 'failed');
   assert.equal(summary.phases.reminder_initial, 'skipped');
-  assert.equal(summary.phases.reminder_restart, 'started');
+  assert.equal(summary.phases.reminder_restart, 'unknown');
   assert.equal(summary.first_failed_phase, 'unknown');
   assert.equal(summary.report_complete, false);
   assert.doesNotMatch(

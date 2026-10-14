@@ -52,9 +52,9 @@ export function summarizeActionPhaseOutcomes(outcomes) {
     const status =
       typeof outcome === 'string' && Object.hasOwn(STATUS_BY_OUTCOME, outcome)
         ? STATUS_BY_OUTCOME[outcome]
-        : 'started';
+        : 'unknown';
 
-    if (status === 'started') reportComplete = false;
+    if (status === 'unknown') reportComplete = false;
     phaseStatuses[phase] = status;
   }
 
