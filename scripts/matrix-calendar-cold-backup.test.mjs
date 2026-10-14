@@ -119,6 +119,7 @@ function fakeCommands({
   failArchiveList = false,
   failStart = [],
   resticStatus = 0,
+  resticRetentionStatus = 0,
   onFirstStop,
 } = {}) {
   const running = new Set(initialRunning);
@@ -292,6 +293,13 @@ function fakeCommands({
         stderr: 'synthetic-private-restic-diagnostic',
       };
     }
+    if (name === 'restic' && args[0] === 'forget') {
+      return {
+        status: resticRetentionStatus,
+        stdout: 'synthetic-restic-retention-output',
+        stderr: 'synthetic-private-retention-diagnostic',
+      };
+    }
     if (name === 'restic')
       return { status: 0, stdout: 'restic synthetic version' };
 
@@ -399,6 +407,18 @@ test('captures the configured paired stores, resumes services, then uploads one 
   );
 
   const resticCall = fake.calls[resticIndex];
+  assert.deepEqual(resticCall.args, [
+    'backup',
+    '--host',
+    fixture.config.resticHost,
+    '--tag',
+    fixture.config.resticTags[0],
+    '--tag',
+    fixture.config.resticTags[1],
+    '--group-by',
+    'host,tags',
+    result.captureDirectory,
+  ]);
   assert.equal(resticCall.args.at(-1), result.captureDirectory);
   assert.equal(
     resticCall.options.env.RESTIC_REPOSITORY,
@@ -422,6 +442,132 @@ test('captures the configured paired stores, resumes services, then uploads one 
     fake.calls.some((call) => call.args.includes('--prune')),
     false,
   );
+  assert.equal(
+    fake.calls.some(
+      (call) => call.name === 'restic' && call.args[0] === 'forget',
+    ),
+    false,
+  );
+});
+
+test('opt-in retention forgets only the configured host and tag group after upload', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  fixture.config.resticRetentionEnabled = true;
+  const fake = fakeCommands({ databaseEnabled: false });
+
+  const result = await runColdBackup(fixture.config, {
+    command: fake.command,
+    env: fixture.env,
+    id: () => 'retention-enabled',
+  });
+
+  const uploadIndex = commandIndex(
+    fake.calls,
+    (call) => call.name === 'restic' && call.args[0] === 'backup',
+  );
+  const retentionIndex = commandIndex(
+    fake.calls,
+    (call) => call.name === 'restic' && call.args[0] === 'forget',
+  );
+  assert.ok(uploadIndex >= 0 && retentionIndex > uploadIndex);
+
+  const retentionCall = fake.calls[retentionIndex];
+  assert.deepEqual(retentionCall.args, [
+    'forget',
+    '--host',
+    fixture.config.resticHost,
+    '--tag',
+    fixture.config.resticTags.join(','),
+    '--group-by',
+    'host,tags',
+    '--keep-daily',
+    '30',
+    '--prune',
+  ]);
+  assert.equal(
+    retentionCall.options.env.RESTIC_REPOSITORY,
+    fixture.config.repository,
+  );
+  assert.ok(
+    fake.calls.findIndex((call) =>
+      composeServiceCommand(call, 'start', 'widget'),
+    ) < uploadIndex,
+  );
+  assert.equal(
+    (await readdir(result.captureDirectory)).includes('.capture-complete'),
+    true,
+  );
+});
+
+test('retention failure is reported after preserving the successful upload', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  fixture.config.resticRetentionEnabled = true;
+  const fake = fakeCommands({
+    databaseEnabled: false,
+    resticRetentionStatus: 1,
+  });
+
+  await assert.rejects(
+    runColdBackup(fixture.config, {
+      command: fake.command,
+      env: fixture.env,
+      id: () => 'retention-failure',
+    }),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'retention',
+  );
+
+  const uploadIndex = commandIndex(
+    fake.calls,
+    (call) => call.name === 'restic' && call.args[0] === 'backup',
+  );
+  const retentionIndex = commandIndex(
+    fake.calls,
+    (call) => call.name === 'restic' && call.args[0] === 'forget',
+  );
+  assert.ok(uploadIndex >= 0 && retentionIndex > uploadIndex);
+  const captureDirectory = (await readdir(fixture.captureRoot)).find(
+    (name) => name !== '.matrix-calendar-cold-backup.lock',
+  );
+  assert.ok(
+    (await readdir(join(fixture.captureRoot, captureDirectory))).includes(
+      '.capture-complete',
+    ),
+  );
+});
+
+test('invalid or missing project retention scope fails before commands', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  const invalidConfigs = [
+    {
+      ...fixture.config,
+      resticRetentionEnabled: true,
+      resticHost: 'another-project',
+    },
+    {
+      ...fixture.config,
+      resticRetentionEnabled: true,
+      resticTags: ['another-project', 'cold-paired-store'],
+    },
+    {
+      ...fixture.config,
+      projectName: undefined,
+      resticRetentionEnabled: true,
+    },
+  ];
+
+  for (const config of invalidConfigs) {
+    const fake = fakeCommands({ databaseEnabled: false });
+    await assert.rejects(
+      runColdBackup(config, { command: fake.command, env: fixture.env }),
+      (error) =>
+        error instanceof ColdBackupFailure && error.stage === 'configuration',
+    );
+    assert.equal(fake.calls.length, 0);
+  }
 });
 
 test('dump, archive, and archive-read failures stop before upload and always resume', async (t) => {
@@ -798,6 +944,7 @@ test('preflight refuses missing configuration, a stopped service, and child fail
 test('Restic incomplete status fails after retaining a complete local capture', async (t) => {
   const fixture = await makeFixture({ databaseEnabled: false });
   t.after(fixture.cleanup);
+  fixture.config.resticRetentionEnabled = true;
   const fake = fakeCommands({ databaseEnabled: false, resticStatus: 3 });
 
   await assert.rejects(
@@ -815,6 +962,12 @@ test('Restic incomplete status fails after retaining a complete local capture', 
     (await readdir(join(fixture.captureRoot, captureDirectory))).includes(
       '.capture-complete',
     ),
+  );
+  assert.equal(
+    fake.calls.some(
+      (call) => call.name === 'restic' && call.args[0] === 'forget',
+    ),
+    false,
   );
 });
 
