@@ -456,7 +456,8 @@ DST regression or recurrence-editing criteria above.
       `3643166a972a4f9e42da0b005bf3b7e3b8233180` (tree
       `b25da53e7dd7709ae91ca351c4207c7c475d3933`). Current candidate
       acceptance remains pending: the full normal-bot profile passed, the
-      current appservice 25-event view timing missed two declared thresholds,
+      current appservice 25-event default-view sample missed the unchanged
+      2,000 ms limit twice (2001.651 ms and 2004.426 ms),
       and the later appservice acceptance has not run. The separate local
       source-bound server image/cache/runtime rehearsal remains open. A
       P0 local rehearsal remains blocked pending owner-scope approval. A
