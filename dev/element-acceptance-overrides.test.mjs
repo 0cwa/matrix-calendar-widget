@@ -31,7 +31,9 @@ import {
   appendComposeOverrideFiles,
   appendLocalComposeEnvFile,
   DEFAULT_RADICALE_IMAGE,
+  hasLocalComposeResourceOwnership,
   loadElementAcceptanceOverrides,
+  LOCAL_REHEARSAL_LABEL,
   withLocalNoPullComposeArgs,
   withLocalOwnedDockerRunArgs,
 } from './element-acceptance-overrides.mjs';
@@ -165,6 +167,52 @@ test('local prebuilt controls bind private project, env, override, and endpoint 
       'none',
       'radicale:archive-1-1',
     ],
+  );
+});
+
+test('restore helper ownership checks accept matching overlay and Compose labels only', () => {
+  const runId = '0123456789abcdef';
+  const projectName = `mcw-p0-${runId}`;
+  const serviceLabels = {
+    [LOCAL_REHEARSAL_LABEL]: runId,
+    'com.docker.compose.project': projectName,
+    'com.docker.compose.service': 'radicale',
+  };
+  const volumeLabels = {
+    [LOCAL_REHEARSAL_LABEL]: runId,
+    'com.docker.compose.project': projectName,
+    'com.docker.compose.volume': 'radicale-data',
+  };
+
+  assert.equal(
+    hasLocalComposeResourceOwnership(serviceLabels, {
+      runId,
+      projectName,
+      service: 'radicale',
+    }),
+    true,
+  );
+  assert.equal(
+    hasLocalComposeResourceOwnership(volumeLabels, {
+      runId,
+      projectName,
+      volume: 'radicale-data',
+    }),
+    true,
+  );
+  assert.equal(
+    hasLocalComposeResourceOwnership(
+      { ...serviceLabels, 'com.docker.compose.service': 'gateway' },
+      { runId, projectName, service: 'radicale' },
+    ),
+    false,
+  );
+  assert.equal(
+    hasLocalComposeResourceOwnership(
+      { ...volumeLabels, [LOCAL_REHEARSAL_LABEL]: 'fedcba9876543210' },
+      { runId, projectName, volume: 'radicale-data' },
+    ),
+    false,
   );
 });
 

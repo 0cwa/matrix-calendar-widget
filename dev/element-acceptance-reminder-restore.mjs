@@ -21,6 +21,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   appendComposeOverrideFiles,
+  hasLocalComposeResourceOwnership,
   loadElementAcceptanceOverrides,
   LOCAL_REHEARSAL_LABEL,
   withLocalNoPullComposeArgs,
@@ -672,9 +673,11 @@ function serviceContainerId(service, phase = 'reminder-compose-validation') {
       throw new StageFailure(phase);
     }
     if (
-      labels?.[LOCAL_REHEARSAL_LABEL] !== ACCEPTANCE_OVERRIDES.runId ||
-      labels?.['com.docker.compose.project'] !== projectName ||
-      labels?.['com.docker.compose.service'] !== service
+      !hasLocalComposeResourceOwnership(labels, {
+        runId: ACCEPTANCE_OVERRIDES.runId,
+        projectName,
+        service,
+      })
     ) {
       throw new StageFailure(phase);
     }
@@ -695,9 +698,11 @@ function verifyLocalVolumeOwnership(name, composeVolume, phase) {
     throw new StageFailure(phase);
   }
   if (
-    labels?.[LOCAL_REHEARSAL_LABEL] !== ACCEPTANCE_OVERRIDES.runId ||
-    labels?.['com.docker.compose.project'] !== projectName ||
-    labels?.['com.docker.compose.volume'] !== composeVolume
+    !hasLocalComposeResourceOwnership(labels, {
+      runId: ACCEPTANCE_OVERRIDES.runId,
+      projectName,
+      volume: composeVolume,
+    })
   ) {
     throw new StageFailure(phase);
   }

@@ -23,6 +23,61 @@ export const DEFAULT_RADICALE_IMAGE =
 export const LOCAL_REHEARSAL_LABEL =
   'io.matrix-calendar-widget.local-rehearsal';
 
+export const LOCAL_REHEARSAL_SERVICES = Object.freeze([
+  'synapse',
+  'radicale',
+  'gateway',
+  'widget',
+  'postgres',
+  'restore-radicale',
+  'restore-gateway',
+]);
+
+export const LOCAL_REHEARSAL_VOLUMES = Object.freeze([
+  'synapse-data',
+  'radicale-data',
+  'postgres-data',
+  'reminder-restore-radicale-data',
+]);
+
+export function hasLocalRehearsalRunLabel(labels, runId) {
+  return (
+    labels !== null &&
+    typeof labels === 'object' &&
+    !Array.isArray(labels) &&
+    typeof runId === 'string' &&
+    /^[a-f0-9]{16}$/u.test(runId) &&
+    labels[LOCAL_REHEARSAL_LABEL] === runId
+  );
+}
+
+export function hasLocalComposeResourceOwnership(
+  labels,
+  { runId, projectName, service, volume },
+) {
+  const hasService = typeof service === 'string' && service.length > 0;
+  const hasVolume = typeof volume === 'string' && volume.length > 0;
+  if (
+    !hasLocalRehearsalRunLabel(labels, runId) ||
+    projectName !== `mcw-p0-${runId}` ||
+    hasService === hasVolume ||
+    (service !== undefined && !hasService) ||
+    (volume !== undefined && !hasVolume)
+  ) {
+    return false;
+  }
+  if (service !== undefined) {
+    return (
+      labels['com.docker.compose.project'] === projectName &&
+      labels['com.docker.compose.service'] === service
+    );
+  }
+  return (
+    labels['com.docker.compose.project'] === projectName &&
+    labels['com.docker.compose.volume'] === volume
+  );
+}
+
 const MAX_COMPOSE_OVERRIDE_FILES = 8;
 const MAX_COMPOSE_OVERRIDE_JSON_LENGTH = 32 * 1024;
 const MAX_COMPOSE_OVERRIDE_PATH_LENGTH = 4096;

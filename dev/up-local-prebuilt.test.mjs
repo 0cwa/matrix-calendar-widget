@@ -28,12 +28,75 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import {
+  LOCAL_REHEARSAL_LABEL,
+  LOCAL_REHEARSAL_SERVICES,
+  LOCAL_REHEARSAL_VOLUMES,
+} from './element-acceptance-overrides.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const UP_SCRIPT = join(ROOT, 'dev/up.sh');
 const RUN_ID = '0123456789abcdef';
 const PROJECT = `mcw-p0-${RUN_ID}`;
 const RADICALE_IMAGE = 'matrix-calendar-widget/radicale-openid:archive-103-2';
+const OWNER_LABEL = LOCAL_REHEARSAL_LABEL;
+
+function fakeComposeModel() {
+  const port = (target, published) => ({
+    target,
+    published: String(published),
+    protocol: 'tcp',
+    host_ip: '127.0.0.1',
+  });
+  return {
+    services: {
+      synapse: { ports: [port(8008, 8008)] },
+      radicale: { ports: [port(5232, 5232)] },
+      gateway: { ports: [port(3000, 3000)] },
+      widget: { ports: [port(8080, 8080)] },
+      postgres: {
+        ports: [],
+        volumes: [
+          {
+            type: 'volume',
+            source: 'postgres-data',
+            target: '/var/lib/postgresql/data',
+          },
+        ],
+      },
+      'restore-radicale': { ports: [port(5232, 5233)] },
+      'restore-gateway': { ports: [port(3000, 3000)] },
+      element: { ports: [port(80, 8090)] },
+    },
+    volumes: {
+      ...Object.fromEntries(LOCAL_REHEARSAL_VOLUMES.map((name) => [name, {}])),
+      'reminder-restore-radicale-data': {
+        name: `${PROJECT}_radicale-restore`,
+        external: false,
+      },
+    },
+    networks: { default: {} },
+  };
+}
+
+function localImagesAndOwnershipOverride() {
+  const labels = { [OWNER_LABEL]: RUN_ID };
+  return {
+    services: {
+      ...Object.fromEntries(
+        LOCAL_REHEARSAL_SERVICES.map((name) => [name, { labels }]),
+      ),
+      synapse: {
+        image: `ghcr.io/element-hq/synapse@sha256:${'a'.repeat(64)}`,
+        labels,
+      },
+      radicale: { image: RADICALE_IMAGE, labels },
+    },
+    volumes: Object.fromEntries(
+      LOCAL_REHEARSAL_VOLUMES.map((name) => [name, { labels }]),
+    ),
+  };
+}
 
 function writeExecutable(path, source) {
   writeFileSync(path, source, { mode: 0o700 });
@@ -62,10 +125,41 @@ function makeSandbox(t) {
   mkdirSync(runnerTemp, { mode: 0o700 });
   const overrideFile = join(runnerTemp, 'images.override.yaml');
   const composeEnvFile = join(runnerTemp, 'compose.env');
+  const composeConfigFile = join(runnerTemp, 'compose-config.json');
+  const composeConfigScript = join(runnerTemp, 'render-compose-config.mjs');
   const dockerLog = join(root, 'docker.jsonl');
   writeFileSync(
     overrideFile,
-    `services:\n  synapse:\n    image: 'ghcr.io/element-hq/synapse@sha256:${'a'.repeat(64)}'\n  radicale:\n    image: '${RADICALE_IMAGE}'\n`,
+    JSON.stringify(localImagesAndOwnershipOverride()),
+    { mode: 0o600 },
+  );
+  writeFileSync(composeConfigFile, JSON.stringify(fakeComposeModel()), {
+    mode: 0o600,
+  });
+  writeFileSync(
+    composeConfigScript,
+    `import { readFileSync } from 'node:fs';
+
+const args = process.argv.slice(2);
+const config = JSON.parse(readFileSync(process.env.FAKE_COMPOSE_CONFIG, 'utf8'));
+const overrideIndex = args.lastIndexOf('-f');
+const override = JSON.parse(readFileSync(args[overrideIndex + 1], 'utf8'));
+for (const [name, value] of Object.entries(override.services ?? {})) {
+  config.services[name] = {
+    ...config.services[name],
+    ...value,
+    labels: { ...config.services[name]?.labels, ...value.labels },
+  };
+}
+for (const [name, value] of Object.entries(override.volumes ?? {})) {
+  config.volumes[name] = {
+    ...config.volumes[name],
+    ...value,
+    labels: { ...config.volumes[name]?.labels, ...value.labels },
+  };
+}
+process.stdout.write(JSON.stringify(config));
+`,
     { mode: 0o600 },
   );
   writeFileSync(
@@ -75,7 +169,7 @@ function makeSandbox(t) {
   );
   writeExecutable(
     join(bin, 'docker'),
-    '#!/bin/sh\nprintf "%s\\n" "$(node -e \'process.stdout.write(JSON.stringify(process.argv.slice(1)))\' "$@")" >> "$FAKE_DOCKER_LOG"\n',
+    '#!/bin/sh\nprintf "%s\\n" "$(node -e \'process.stdout.write(JSON.stringify(process.argv.slice(1)))\' "$@")" >> "$FAKE_DOCKER_LOG"\ncase "$*" in *" config --format json") exec "$REAL_NODE_BIN" "$FAKE_COMPOSE_CONFIG_SCRIPT" "$@" ;; esac\n',
   );
   writeExecutable(
     join(bin, 'curl'),
@@ -89,6 +183,8 @@ function makeSandbox(t) {
     PATH: `${bin}:${process.env.PATH}`,
     REAL_NODE_BIN: process.execPath,
     FAKE_DOCKER_LOG: dockerLog,
+    FAKE_COMPOSE_CONFIG: composeConfigFile,
+    FAKE_COMPOSE_CONFIG_SCRIPT: composeConfigScript,
     MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION: 'disabled',
     MATRIX_CALENDAR_DEV_PASSWORD: 'synthetic-password',
   };
@@ -108,7 +204,7 @@ function makeSandbox(t) {
     MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING: '127.0.0.1:8008:8008',
     MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING: '127.0.0.1:5232:5232',
   };
-  return { dockerLog, local, common };
+  return { dockerLog, local, common, overrideFile };
 }
 
 function runUp(environment) {
@@ -120,12 +216,47 @@ function runUp(environment) {
   });
 }
 
-test('local dev/up uses one explicit project, archive image, and no build or pull', (t) => {
-  const { dockerLog, local } = makeSandbox(t);
+test('local dev/up validates the owned prebuilt overlay before no-pull startup', (t) => {
+  const { dockerLog, local, overrideFile } = makeSandbox(t);
   const result = runUp(local);
   assert.equal(result.status, 0, result.stderr);
   const calls = dockerCalls(dockerLog);
   assert.ok(calls.length > 0);
+  const configIndex = calls.findIndex((args) => args.includes('config'));
+  const firstMutationIndex = calls.findIndex(
+    (args) =>
+      args.includes('run') || args.includes('up') || args.includes('build'),
+  );
+  assert.ok(configIndex >= 0);
+  assert.ok(firstMutationIndex > configIndex);
+  const override = JSON.parse(readFileSync(overrideFile, 'utf8'));
+  assert.deepEqual(
+    Object.keys(override.services).sort(),
+    [...LOCAL_REHEARSAL_SERVICES].sort(),
+  );
+  assert.deepEqual(
+    Object.keys(override.volumes).sort(),
+    [...LOCAL_REHEARSAL_VOLUMES].sort(),
+  );
+  for (const name of LOCAL_REHEARSAL_SERVICES) {
+    assert.deepEqual(override.services[name].labels, {
+      [OWNER_LABEL]: RUN_ID,
+    });
+  }
+  for (const name of LOCAL_REHEARSAL_VOLUMES) {
+    assert.deepEqual(override.volumes[name].labels, {
+      [OWNER_LABEL]: RUN_ID,
+    });
+  }
+  for (const composeFile of [
+    'dev/compose.yaml',
+    'dev/element-acceptance.compose.yaml',
+    'dev/element-acceptance-reminder.compose.yaml',
+  ]) {
+    assert.ok(
+      calls[configIndex].some((argument) => argument.endsWith(composeFile)),
+    );
+  }
   for (const args of calls) {
     assert.equal(args[0], 'compose');
     assert.ok(args.includes('-p'));
@@ -183,4 +314,32 @@ test('invalid local endpoint, image, or project controls stop before Docker muta
     assert.notEqual(result.status, 0);
   }
   assert.deepEqual(dockerCalls(dockerLog), []);
+});
+
+test('missing or mismatched overlay labels stop before run, up, or build', (t) => {
+  for (const ownershipCase of ['missing-service', 'mismatched-volume']) {
+    const { dockerLog, local, overrideFile } = makeSandbox(t);
+    const override = JSON.parse(readFileSync(overrideFile, 'utf8'));
+    if (ownershipCase === 'missing-service') {
+      delete override.services.gateway.labels[OWNER_LABEL];
+    } else {
+      override.volumes['radicale-data'].labels[OWNER_LABEL] =
+        'fedcba9876543210';
+    }
+    writeFileSync(overrideFile, JSON.stringify(override), { mode: 0o600 });
+
+    const result = runUp(local);
+
+    assert.notEqual(result.status, 0, ownershipCase);
+    const calls = dockerCalls(dockerLog);
+    assert.equal(calls.length, 1, ownershipCase);
+    assert.ok(calls[0].includes('config'), ownershipCase);
+    assert.equal(
+      calls.some((args) =>
+        ['run', 'up', 'build'].some((operation) => args.includes(operation)),
+      ),
+      false,
+      ownershipCase,
+    );
+  }
 });

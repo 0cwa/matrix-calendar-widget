@@ -6,6 +6,7 @@ LOCAL_PREBUILT="${MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL:-false}"
 LOCAL_RUN_NUMBER=0
 LOCAL_RUN_LABEL='io.matrix-calendar-widget.local-rehearsal'
 LOCAL_PULL_ARGS=()
+LOCAL_VALIDATION_COMPOSE=()
 DEV_LOOPBACK_HOST=localhost
 
 if [[ "$LOCAL_PREBUILT" == true ]]; then
@@ -33,8 +34,11 @@ NODE
     docker compose -p "$COMPOSE_PROJECT_NAME"
     --env-file "$MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE"
     -f "$ROOT_DIR/dev/compose.yaml"
+    -f "$ROOT_DIR/dev/element-acceptance.compose.yaml"
+    -f "$ROOT_DIR/dev/element-acceptance-reminder.compose.yaml"
     -f "$MATRIX_CALENDAR_LOCAL_COMPOSE_OVERRIDE_FILE"
   )
+  LOCAL_VALIDATION_COMPOSE=("${COMPOSE[@]}")
   LOCAL_PULL_ARGS=(--pull never)
   DEV_LOOPBACK_HOST=127.0.0.1
 else
@@ -43,6 +47,34 @@ else
     exit 2
   fi
   COMPOSE=(docker compose -f "$ROOT_DIR/dev/compose.yaml")
+fi
+
+if [[ "$LOCAL_PREBUILT" == true ]]; then
+  if ! local_compose_model="$(
+    ELEMENT_ACCEPTANCE_BOT_ACCESS_TOKEN=local-preflight-token \
+      ELEMENT_ACCEPTANCE_ROOM_BINDING='[]' \
+      ELEMENT_ACCEPTANCE_REMINDER_BOOTSTRAP_PASSWORD=local-preflight-secret \
+      ELEMENT_ACCEPTANCE_REMINDER_APP_PASSWORD=local-preflight-secret \
+      ELEMENT_ACCEPTANCE_REMINDER_DATABASE_URL=postgresql://local:local@postgres:5432/matrix_calendar_test \
+      ELEMENT_ACCEPTANCE_REMINDER_RESTORE_DATABASE_URL=postgresql://local:local@postgres:5432/matrix_calendar_restored \
+      ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME="${COMPOSE_PROJECT_NAME}_radicale-restore" \
+      ROOM_CALENDAR_PRINCIPAL_MODE=bot-account \
+      MATRIX_APPLICATION_SERVICE_TOKEN= \
+      MATRIX_APPLICATION_SERVICE_USER_ID= \
+      "${LOCAL_VALIDATION_COMPOSE[@]}" config --format json 2>/dev/null
+  )"; then
+    echo 'Local prebuilt Compose configuration could not be rendered' >&2
+    exit 2
+  fi
+  if ! printf '%s\n' "$local_compose_model" |
+    MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL=true \
+      ELEMENT_ACCEPTANCE_LOCAL_RUN_ID="$ELEMENT_ACCEPTANCE_LOCAL_RUN_ID" \
+      COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" \
+      node "$ROOT_DIR/dev/validate-element-acceptance-compose.mjs" \
+        >/dev/null 2>&1; then
+    echo 'Local prebuilt Compose ownership or loopback validation failed' >&2
+    exit 2
+  fi
 fi
 
 compose_run() {
