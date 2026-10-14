@@ -750,6 +750,19 @@ access and event writes stay disabled by default.
       trusted Element-origin opening errors per profile qualified for the
       approved opening-stage diagnostic policy; their cause is unknown. This
       is isolated application evidence, not operator or deployment acceptance.
+- [ ] Complete acceptance for the current PR #260 candidate source
+      `3643166a972a4f9e42da0b005bf3b7e3b8233180` (tree
+      `b25da53e7dd7709ae91ca351c4207c7c475d3933`). Its full normal-bot profile
+      passed, but the appservice 25-event default-view sample missed the
+      unchanged 2,000 ms limit twice (2001.651 ms and 2004.426 ms); the later
+      appservice acceptance for this exact candidate has not run. A separate
+      experimental run on source `d1b3578d71202ea41cb43946447dceaff5a43eee`
+      (tree `b410e86d922e51bf6bcac2f423c3d8821c9f906e`) passed the normal-bot
+      105-phase profile but failed in the AS Desktop journey: an event POST
+      returned 201, then the room-range GET returned HTTP 429 without an event
+      list. AS reminder, restart, and paired-restore phases were not reached.
+      That diagnostic run accepts neither candidate and does not waive the
+      unchanged two-profile gate.
 - [ ] Complete private operator readiness evidence for the merged candidate
       before any separate rollout decision. Independent source review is
       complete. Full isolated local Stage B and source-bound server
@@ -757,6 +770,16 @@ access and event writes stay disabled by default.
       target-specific deployment facts and recovery validation. The reminder
       restore helper honors explicit skip-Element mode during quiescence while
       keeping the default full Element stop and inspection path.
+  - [x] Prepare source-only local rehearsal tooling: an Element-free API probe,
+        an authorized reminder fixture, and opt-in setup, restart, paired
+        restore, and evidence helpers. These changes have only offline fake-
+        client/source validation; no local service rehearsal or runtime
+        acceptance has occurred. The fixture must prove authorized event and
+        reminder configuration readback plus due exactly-once room-mention
+        delivery before writing evidence. A separately approved local run,
+        source/archive/image/cache identities, and paired-store restore remain
+        open; P0/P1/P2 and the current candidate's acceptance gates remain
+        unchanged.
   - [x] Run the path-scoped real-Docker PostgreSQL first-initialization
         contract from `.github/workflows/operator-postgres-contract.yml`.
         Require restricted app-role ownership and writes, distinct
