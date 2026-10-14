@@ -2,6 +2,12 @@ name: Element Web acceptance
 
 on:
   workflow_dispatch:
+    inputs:
+      default_view_milestones:
+        description: Capture fixed cumulative default-view timing milestones for the appservice profile.
+        type: boolean
+        required: false
+        default: false
   pull_request:
     paths:
       - '.github/actions/element-acceptance/action.yml'
@@ -44,6 +50,7 @@ jobs:
         uses: ./.github/actions/element-acceptance
         with:
           principal-mode: appservice
+          default-view-milestones: ${{ github.event_name == 'workflow_dispatch' && inputs.default_view_milestones == true && 'true' || 'false' }}
 
   normal-bot-account-acceptance:
     name: Normal bot account acceptance
@@ -66,3 +73,4 @@ jobs:
         uses: ./.github/actions/element-acceptance
         with:
           principal-mode: bot-account
+          default-view-milestones: 'false'

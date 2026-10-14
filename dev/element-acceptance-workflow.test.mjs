@@ -27,10 +27,49 @@ test('the existing required Element acceptance job keeps its context', () => {
   assert.match(workflow, /principal-mode: appservice/u);
 });
 
+test('default-view milestones require manual opt-in and route only to the appservice profile', () => {
+  assert.match(
+    workflow,
+    /workflow_dispatch:\n\s+inputs:\n\s+default_view_milestones:\n\s+description:.*\n\s+type: boolean\n\s+required: false\n\s+default: false/u,
+  );
+
+  const appserviceJob = workflow
+    .split('  element-web-acceptance:\n')[1]
+    ?.split('  normal-bot-account-acceptance:\n')[0];
+  const botJob = workflow.split('  normal-bot-account-acceptance:\n')[1];
+  assert.ok(appserviceJob, 'missing appservice acceptance job');
+  assert.ok(botJob, 'missing normal bot account acceptance job');
+  assert.match(
+    appserviceJob,
+    /default-view-milestones: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.default_view_milestones == true && 'true' \|\| 'false' \}\}/u,
+  );
+  assert.match(botJob, /default-view-milestones: 'false'/u);
+
+  assert.match(
+    runner,
+    /default-view-milestones:\n\s+description:.*\n\s+required: false\n\s+default: 'false'/u,
+  );
+  const measurementStep = runner
+    .split(
+      '    - name: Measure the real Element Web ordinary 0-and-25-event profiles\n',
+    )[1]
+    ?.split('\n    - name:')[0];
+  assert.ok(measurementStep, 'missing ordinary Element performance step');
+  assert.match(
+    measurementStep,
+    /ELEMENT_ACCEPTANCE_DEFAULT_VIEW_MILESTONES: \$\{\{ inputs\['default-view-milestones'\] == 'true' && '1' \|\| '0' \}\}/u,
+  );
+  assert.doesNotMatch(
+    runner.replace(measurementStep, ''),
+    /ELEMENT_ACCEPTANCE_DEFAULT_VIEW_MILESTONES/u,
+    'the opt-in flag is limited to the ordinary browser measurement step',
+  );
+});
+
 test('Element workflow retains manual and all non-documentation pull request triggers', () => {
   assert.match(
     workflow,
-    /^on:\n\s{2}workflow_dispatch:\n\s{2}pull_request:\n\s{4}paths:\n/mu,
+    /^on:\n\s{2}workflow_dispatch:\n(?:\s{4}.*\n|\s{6}.*\n)+\s{2}pull_request:\n\s{4}paths:\n/mu,
   );
 
   const pathBlock = workflow.match(
