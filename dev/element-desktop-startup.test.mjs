@@ -855,7 +855,10 @@ test('cleanup-origin incomplete diagnostics use fixed stage and reason enums', a
       assert.equal(observation.reason, 'process_snapshot_incomplete');
       assert.equal(observation.diagnosticStage, stage);
       assert.equal(observation.diagnosticReason, reason);
-      assert.doesNotMatch(JSON.stringify(observation), /123456|private-profile|secret-value|hostile process text/u);
+      assert.doesNotMatch(
+        JSON.stringify(observation),
+        /123456|private-profile|secret-value|hostile process text/u,
+      );
       assert.equal(observation.processCount, null);
     }
 
@@ -875,10 +878,7 @@ test('cleanup-origin incomplete diagnostics use fixed stage and reason enums', a
     });
     assert.equal(changedSnapshot.reason, 'process_snapshot_changed');
     assert.equal(changedSnapshot.diagnosticStage, 'classification');
-    assert.equal(
-      changedSnapshot.diagnosticReason,
-      'snapshot_identity_changed',
-    );
+    assert.equal(changedSnapshot.diagnosticReason, 'snapshot_identity_changed');
   });
 });
 

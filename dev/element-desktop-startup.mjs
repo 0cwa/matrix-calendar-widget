@@ -2051,14 +2051,10 @@ function emptyCleanupOriginProbe(state, reason, diagnostic = null) {
   return {
     state,
     reason,
-    diagnosticStage: CLEANUP_ORIGIN_DIAGNOSTIC_STAGES.has(
-      diagnostic?.stage,
-    )
+    diagnosticStage: CLEANUP_ORIGIN_DIAGNOSTIC_STAGES.has(diagnostic?.stage)
       ? diagnostic.stage
       : null,
-    diagnosticReason: CLEANUP_ORIGIN_DIAGNOSTIC_REASONS.has(
-      diagnostic?.reason,
-    )
+    diagnosticReason: CLEANUP_ORIGIN_DIAGNOSTIC_REASONS.has(diagnostic?.reason)
       ? diagnostic.reason
       : null,
     overflow: unavailable ? null : false,
@@ -2949,18 +2945,14 @@ export function readCleanupOriginObservation(
       snapshot?.state !== 'observed' ||
       !(snapshot.processes instanceof Map)
     ) {
-      return emptyCleanupOriginProbe(
-        'unknown',
-        'process_snapshot_incomplete',
-        {
-          stage,
-          reason: CLEANUP_ORIGIN_DIAGNOSTIC_REASONS.has(
-            snapshot?.diagnosticReason,
-          )
-            ? snapshot.diagnosticReason
-            : 'other_incomplete',
-        },
-      );
+      return emptyCleanupOriginProbe('unknown', 'process_snapshot_incomplete', {
+        stage,
+        reason: CLEANUP_ORIGIN_DIAGNOSTIC_REASONS.has(
+          snapshot?.diagnosticReason,
+        )
+          ? snapshot.diagnosticReason
+          : 'other_incomplete',
+      });
     }
   }
   return classifyCleanupOriginSnapshots(
