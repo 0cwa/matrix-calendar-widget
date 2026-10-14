@@ -36,6 +36,7 @@ M8 includes process-local calendar-gateway and bot-command limits, bounded CalDA
 - [Architecture](./docs/ARCHITECTURE.md)
 - [Implementation plan](./docs/PLAN.md)
 - [Current project status](./docs/STATUS.md)
+- [Current release gate and sanitized evidence index](./docs/RELEASE.md)
 - [Controlled beta scope and acceptance](./docs/beta-scope.md)
 - [Security policy](./SECURITY.md)
 - [Threat model](./docs/threat-model.md) — current trust boundaries, controls, and open risks

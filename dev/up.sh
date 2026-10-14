@@ -2,7 +2,101 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMPOSE=(docker compose -f "$ROOT_DIR/dev/compose.yaml")
+LOCAL_PREBUILT="${MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL:-false}"
+LOCAL_RUN_NUMBER=0
+LOCAL_RUN_LABEL='io.matrix-calendar-widget.local-rehearsal'
+LOCAL_PULL_ARGS=()
+LOCAL_VALIDATION_COMPOSE=()
+DEV_LOOPBACK_HOST=localhost
+
+if [[ "$LOCAL_PREBUILT" == true ]]; then
+  if ! node --input-type=module - "$ROOT_DIR" <<'NODE'
+import { pathToFileURL } from 'node:url';
+
+const root = process.argv[2];
+const { loadElementAcceptanceOverrides } = await import(
+  pathToFileURL(`${root}/dev/element-acceptance-overrides.mjs`).href
+);
+try {
+  const settings = loadElementAcceptanceOverrides(process.env, root);
+  if (!settings.localPrebuilt) process.exitCode = 1;
+} catch {
+  process.exitCode = 1;
+}
+NODE
+  then
+    echo 'Local prebuilt rehearsal inputs are invalid' >&2
+    exit 2
+  fi
+  COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}"
+  MATRIX_CALENDAR_LOCAL_COMPOSE_OVERRIDE_FILE="${MATRIX_CALENDAR_LOCAL_COMPOSE_OVERRIDE_FILE:?local Compose override is required}"
+  COMPOSE=(
+    docker compose -p "$COMPOSE_PROJECT_NAME"
+    --env-file "$MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE"
+    -f "$ROOT_DIR/dev/compose.yaml"
+    -f "$ROOT_DIR/dev/element-acceptance.compose.yaml"
+    -f "$ROOT_DIR/dev/element-acceptance-reminder.compose.yaml"
+    -f "$ROOT_DIR/dev/element-acceptance-local-prebuilt.compose.yaml"
+    -f "$MATRIX_CALENDAR_LOCAL_COMPOSE_OVERRIDE_FILE"
+  )
+  LOCAL_VALIDATION_COMPOSE=("${COMPOSE[@]}")
+  LOCAL_PULL_ARGS=(--pull never)
+  DEV_LOOPBACK_HOST=127.0.0.1
+else
+  if [[ "$LOCAL_PREBUILT" != false ]]; then
+    echo 'MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL must be true or false' >&2
+    exit 2
+  fi
+  COMPOSE=(docker compose -f "$ROOT_DIR/dev/compose.yaml")
+fi
+
+if [[ "$LOCAL_PREBUILT" == true ]]; then
+  if ! local_compose_model="$(
+    ELEMENT_ACCEPTANCE_BOT_ACCESS_TOKEN=local-preflight-token \
+      ELEMENT_ACCEPTANCE_ROOM_BINDING='[]' \
+      ELEMENT_ACCEPTANCE_REMINDER_BOOTSTRAP_PASSWORD=local-preflight-secret \
+      ELEMENT_ACCEPTANCE_REMINDER_APP_PASSWORD=local-preflight-secret \
+      ELEMENT_ACCEPTANCE_REMINDER_DATABASE_URL=postgresql://local:local@postgres:5432/matrix_calendar_test \
+      ELEMENT_ACCEPTANCE_REMINDER_RESTORE_DATABASE_URL=postgresql://local:local@postgres:5432/matrix_calendar_restored \
+      ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME="${COMPOSE_PROJECT_NAME}_radicale-restore" \
+      ROOM_CALENDAR_PRINCIPAL_MODE=bot-account \
+      MATRIX_APPLICATION_SERVICE_TOKEN= \
+      MATRIX_APPLICATION_SERVICE_USER_ID= \
+      "${LOCAL_VALIDATION_COMPOSE[@]}" config --format json 2>/dev/null
+  )"; then
+    echo 'Local prebuilt Compose configuration could not be rendered' >&2
+    exit 2
+  fi
+  if ! printf '%s\n' "$local_compose_model" |
+    MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL=true \
+      ELEMENT_ACCEPTANCE_LOCAL_RUN_ID="$ELEMENT_ACCEPTANCE_LOCAL_RUN_ID" \
+      COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" \
+      node "$ROOT_DIR/dev/validate-element-acceptance-compose.mjs" \
+        >/dev/null 2>&1; then
+    echo 'Local prebuilt Compose ownership or loopback validation failed' >&2
+    exit 2
+  fi
+fi
+
+compose_run() {
+  if [[ "$LOCAL_PREBUILT" == true ]]; then
+    LOCAL_RUN_NUMBER=$((LOCAL_RUN_NUMBER + 1))
+    "${COMPOSE[@]}" run "${LOCAL_PULL_ARGS[@]}" \
+      --label "$LOCAL_RUN_LABEL=${ELEMENT_ACCEPTANCE_LOCAL_RUN_ID}" \
+      --name "${COMPOSE_PROJECT_NAME}-local-${ELEMENT_ACCEPTANCE_LOCAL_RUN_ID}-${LOCAL_RUN_NUMBER}" \
+      "$@"
+  else
+    "${COMPOSE[@]}" run "$@"
+  fi
+}
+
+compose_up() {
+  if [[ "$LOCAL_PREBUILT" == true ]]; then
+    "${COMPOSE[@]}" up "${LOCAL_PULL_ARGS[@]}" --no-build "$@"
+  else
+    "${COMPOSE[@]}" up "$@"
+  fi
+}
 MATRIX_USER="${MATRIX_CALENDAR_DEV_USER:-calendar}"
 MATRIX_PASSWORD="${MATRIX_CALENDAR_DEV_PASSWORD:-calendar-dev-password}"
 CONTRACT_APPSERVICE_REGISTRATION="${MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION:-enabled}"
@@ -37,9 +131,9 @@ command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
 
 echo "==> Preparing Synapse configuration"
 startup_failure_stage=homeserver-probe
-if ! "${COMPOSE[@]}" run --rm --entrypoint sh synapse -c 'test -f /data/homeserver.yaml' >/dev/null 2>&1; then
+if ! compose_run --rm --entrypoint sh synapse -c 'test -f /data/homeserver.yaml' >/dev/null 2>&1; then
   startup_failure_stage=homeserver-generate
-  "${COMPOSE[@]}" run --rm synapse generate >/dev/null 2>&1
+  compose_run --rm synapse generate >/dev/null 2>&1
 fi
 
 if [[ "$CONTRACT_APPSERVICE_REGISTRATION" == enabled ]]; then
@@ -50,7 +144,7 @@ else
   echo "==> Removing the synthetic local application-service registration"
 fi
 startup_failure_stage=registration-update
-"${COMPOSE[@]}" run --rm \
+compose_run --rm \
   -e "MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION=$CONTRACT_APPSERVICE_REGISTRATION" \
   --entrypoint python synapse -c '
 import os
@@ -84,36 +178,40 @@ os.replace(temporary_path, config_path)
 echo "==> Verifying Synapse can read its config and registration"
 startup_failure_stage=uid991-access-assertion
 if [[ "$CONTRACT_APPSERVICE_REGISTRATION" == enabled ]]; then
-  "${COMPOSE[@]}" run --rm --user 991:991 --entrypoint sh synapse -c \
+  compose_run --rm --user 991:991 --entrypoint sh synapse -c \
     'test -r /data/homeserver.yaml && test -w /data/homeserver.yaml && test -w /data && test -r /data/appservice-calendar-contract.yaml' \
     >/dev/null 2>&1
 else
-  "${COMPOSE[@]}" run --rm --user 991:991 --entrypoint sh synapse -c \
+  compose_run --rm --user 991:991 --entrypoint sh synapse -c \
     'test -r /data/homeserver.yaml && test -w /data/homeserver.yaml && test -w /data' \
     >/dev/null 2>&1
 fi
 
 echo "==> Starting Synapse"
 startup_failure_stage=synapse-compose-start
-"${COMPOSE[@]}" up -d --force-recreate synapse >/dev/null 2>&1
+compose_up -d --force-recreate synapse >/dev/null 2>&1
 
 echo "==> Waiting for Synapse"
 startup_failure_stage=readiness
 for _ in $(seq 1 90); do
-  if curl --silent --fail http://localhost:8008/_matrix/client/versions >/dev/null; then
+  if curl --silent --fail "http://${DEV_LOOPBACK_HOST}:8008/_matrix/client/versions" >/dev/null; then
     break
   fi
   sleep 1
 done
-if ! curl --silent --fail http://localhost:8008/_matrix/client/versions >/dev/null; then
+if ! curl --silent --fail "http://${DEV_LOOPBACK_HOST}:8008/_matrix/client/versions" >/dev/null; then
   synapse_status="$(
     node -e '
         const { spawnSync } = require("node:child_process");
-        const compose = spawnSync(
-          "docker",
-          ["compose", "-f", process.argv[1], "ps", "--all", "--format", "json", "synapse"],
-          { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-        );
+        const composeArgs = ["compose"];
+        if (process.env.MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL === "true") {
+          composeArgs.push("-p", process.env.COMPOSE_PROJECT_NAME ?? "");
+        }
+        composeArgs.push("-f", process.argv[1], "ps", "--all", "--format", "json", "synapse");
+        const compose = spawnSync("docker", composeArgs, {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        });
         const states = new Set(["created", "running", "paused", "restarting", "removing", "exited", "dead"]);
         const healthStates = new Set(["starting", "healthy", "unhealthy"]);
         const emit = (reason, state = "unavailable", health = "unavailable") => {
@@ -169,7 +267,7 @@ if ! printf '%s' "$login_payload" |
   curl --silent --fail \
     -H 'Content-Type: application/json' \
     --data-binary @- \
-    http://localhost:8008/_matrix/client/v3/login >/dev/null; then
+    "http://${DEV_LOOPBACK_HOST}:8008/_matrix/client/v3/login" >/dev/null; then
   echo "==> Registering dev Matrix user @$MATRIX_USER:localhost"
   printf '%s' "$MATRIX_PASSWORD" |
     "${COMPOSE[@]}" exec -T synapse register_new_matrix_user \
@@ -177,36 +275,40 @@ if ! printf '%s' "$login_payload" |
       -u "$MATRIX_USER" \
       --password-file /dev/stdin \
       -a \
-      http://localhost:8008
+      "http://${DEV_LOOPBACK_HOST}:8008"
 else
   echo "==> Dev Matrix user already exists"
 fi
 
 echo "==> Building the project-owned OpenID-only Radicale image"
-"${COMPOSE[@]}" build radicale
+if [[ "$LOCAL_PREBUILT" == true ]]; then
+  echo "Using preloaded Radicale image ${ELEMENT_ACCEPTANCE_RADICALE_IMAGE}"
+else
+  "${COMPOSE[@]}" build radicale
+fi
 
 echo "==> Starting OpenID-authenticated Radicale"
-"${COMPOSE[@]}" up -d radicale
+compose_up -d radicale
 
 echo "==> Minting a short-lived OpenID proof for the local Synapse fixture"
 OPENID_CREDENTIAL="$(node "$ROOT_DIR/dev/mint-openid-credential.mjs")"
 
 echo "==> Waiting for Radicale"
 for _ in $(seq 1 60); do
-  if curl --silent --fail --max-time 3 -u "$MATRIX_USER:$OPENID_CREDENTIAL" http://localhost:5232/ >/dev/null; then
+  if curl --silent --fail --max-time 3 -u "$MATRIX_USER:$OPENID_CREDENTIAL" "http://${DEV_LOOPBACK_HOST}:5232/" >/dev/null; then
     break
   fi
   sleep 1
 done
-curl --silent --fail --max-time 3 -u "$MATRIX_USER:$OPENID_CREDENTIAL" http://localhost:5232/ >/dev/null
+curl --silent --fail --max-time 3 -u "$MATRIX_USER:$OPENID_CREDENTIAL" "http://${DEV_LOOPBACK_HOST}:5232/" >/dev/null
 
 cat <<EOF
 Development services are ready.
 
-Matrix homeserver: http://localhost:8008
+Matrix homeserver: http://${DEV_LOOPBACK_HOST}:8008
 Matrix user:       @$MATRIX_USER:localhost
 
-Radicale:          http://localhost:5232
+Radicale:          http://${DEV_LOOPBACK_HOST}:5232
 CalDAV username:   $MATRIX_USER
 CalDAV auth:       short-lived Matrix OpenID proof
 

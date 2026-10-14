@@ -128,6 +128,22 @@ const CLEANUP_ORIGIN_REASONS = new Set([
   'final_census_unavailable',
   'probe_unavailable',
 ]);
+const CLEANUP_ORIGIN_DIAGNOSTIC_STAGES = new Set([
+  'first_scan',
+  'second_scan',
+  'classification',
+]);
+const CLEANUP_ORIGIN_DIAGNOSTIC_REASONS = new Set([
+  'status_unreadable',
+  'status_malformed',
+  'stat_unreadable',
+  'stat_malformed',
+  'ancestor_invalid',
+  'ancestor_unavailable',
+  'snapshot_identity_changed',
+  'request_invalid',
+  'other_incomplete',
+]);
 export const UID_CENSUS_STDERR_PREFIX_CATEGORIES = Object.freeze([
   'timeoutTimerWarning',
   'timeoutForkFailure',
@@ -899,6 +915,8 @@ export function emptyCleanupOriginProbe(
   return {
     state,
     reason,
+    diagnosticStage: null,
+    diagnosticReason: null,
     overflow: unavailable ? null : false,
     processCount: unavailable ? null : 0,
     attributionCounts: emptyCleanupOriginCounts(
@@ -1252,6 +1270,8 @@ function validateCleanupOriginProbe(value) {
     !hasKeys(value, [
       'state',
       'reason',
+      'diagnosticStage',
+      'diagnosticReason',
       'overflow',
       'processCount',
       'attributionCounts',
@@ -1259,6 +1279,11 @@ function validateCleanupOriginProbe(value) {
     ]) ||
     !['not_required', 'observed', 'partial', 'unknown'].includes(value.state) ||
     !CLEANUP_ORIGIN_REASONS.has(value.reason) ||
+    !(
+      (value.diagnosticStage === null && value.diagnosticReason === null) ||
+      (CLEANUP_ORIGIN_DIAGNOSTIC_STAGES.has(value.diagnosticStage) &&
+        CLEANUP_ORIGIN_DIAGNOSTIC_REASONS.has(value.diagnosticReason))
+    ) ||
     !validateCleanupOriginCounts(
       value.attributionCounts,
       CLEANUP_ORIGIN_ATTRIBUTIONS,
@@ -1346,6 +1371,8 @@ export function sanitizeCleanupOriginProbe(input) {
   return {
     state: value.state,
     reason: value.reason,
+    diagnosticStage: value.diagnosticStage,
+    diagnosticReason: value.diagnosticReason,
     overflow: value.overflow,
     processCount: value.processCount,
     attributionCounts: { ...value.attributionCounts },
@@ -3264,7 +3291,7 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 22,
+    schemaVersion: 23,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
@@ -3367,7 +3394,7 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 22 &&
+    value.schemaVersion === 23 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||

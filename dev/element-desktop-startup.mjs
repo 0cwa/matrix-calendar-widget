@@ -126,6 +126,22 @@ const CLEANUP_ORIGIN_PROCESS_ROLES = Object.freeze([
   'other',
   'unknown',
 ]);
+const CLEANUP_ORIGIN_DIAGNOSTIC_STAGES = new Set([
+  'first_scan',
+  'second_scan',
+  'classification',
+]);
+const CLEANUP_ORIGIN_DIAGNOSTIC_REASONS = new Set([
+  'status_unreadable',
+  'status_malformed',
+  'stat_unreadable',
+  'stat_malformed',
+  'ancestor_invalid',
+  'ancestor_unavailable',
+  'snapshot_identity_changed',
+  'request_invalid',
+  'other_incomplete',
+]);
 export const SANDBOX_REASONS = Object.freeze([
   'not_observed',
   'passed',
@@ -2030,11 +2046,17 @@ export function readCappedDirectoryEntries(
   return { entries, overflow };
 }
 
-function emptyCleanupOriginProbe(state, reason) {
+function emptyCleanupOriginProbe(state, reason, diagnostic = null) {
   const unavailable = state === 'unknown';
   return {
     state,
     reason,
+    diagnosticStage: CLEANUP_ORIGIN_DIAGNOSTIC_STAGES.has(diagnostic?.stage)
+      ? diagnostic.stage
+      : null,
+    diagnosticReason: CLEANUP_ORIGIN_DIAGNOSTIC_REASONS.has(diagnostic?.reason)
+      ? diagnostic.reason
+      : null,
     overflow: unavailable ? null : false,
     processCount: unavailable ? null : 0,
     attributionCounts: Object.fromEntries(
@@ -2387,10 +2409,16 @@ function readCleanupOriginProcessRecord(
     MAX_CLEANUP_ORIGIN_STAT_BYTES,
     budget,
   );
-  if (statText.state !== 'observed') return statText;
+  if (statText.state !== 'observed') {
+    return statText.state === 'incomplete'
+      ? { ...statText, diagnosticReason: 'stat_unreadable' }
+      : statText;
+  }
   const stat = parseProcStat(pid, statText.text);
   const startTimeTicks = parseProcStartTimeTicks(pid, statText.text);
-  if (stat === null || startTimeTicks === null) return { state: 'incomplete' };
+  if (stat === null || startTimeTicks === null) {
+    return { state: 'incomplete', diagnosticReason: 'stat_malformed' };
+  }
 
   let executableName = null;
   if (includeExecutable) {
@@ -2405,9 +2433,11 @@ function readCleanupOriginProcessRecord(
     try {
       executablePath = budget.io.readlinkSync(`/proc/${pid}/exe`);
     } catch {
-      return { state: 'incomplete' };
+      return { state: 'incomplete', diagnosticReason: 'other_incomplete' };
     }
-    if (typeof executablePath !== 'string') return { state: 'incomplete' };
+    if (typeof executablePath !== 'string') {
+      return { state: 'incomplete', diagnosticReason: 'other_incomplete' };
+    }
     const executablePathBytes = Buffer.byteLength(executablePath, 'utf8');
     if (executablePathBytes > MAX_CLEANUP_ORIGIN_EXE_BYTES) {
       return { state: 'overflow' };
@@ -2472,16 +2502,22 @@ export function scanCleanupOriginProcesses(uid, identityPids = [], budget) {
     if (cleanupOriginBudgetExceeded(scanBudget)) return { state: 'overflow' };
     const pid = Number(entry.name);
     if (!Number.isSafeInteger(pid) || pid < 1 || pid > 2_147_483_647) {
-      return { state: 'incomplete' };
+      return { state: 'incomplete', diagnosticReason: 'other_incomplete' };
     }
     const statusText = readCleanupOriginProcText(
       `/proc/${entry.name}/status`,
       MAX_CLEANUP_ORIGIN_STATUS_BYTES,
       scanBudget,
     );
-    if (statusText.state !== 'observed') return { state: statusText.state };
+    if (statusText.state !== 'observed') {
+      return statusText.state === 'incomplete'
+        ? { ...statusText, diagnosticReason: 'status_unreadable' }
+        : statusText;
+    }
     const uids = parseCleanupOriginUidTuple(statusText.text);
-    if (uids === null) return { state: 'incomplete' };
+    if (uids === null) {
+      return { state: 'incomplete', diagnosticReason: 'status_malformed' };
+    }
     const uidMember = uids.includes(uid);
     const boundIdentity = preferredPids.has(pid);
     if (!uidMember && !boundIdentity) continue;
@@ -2492,7 +2528,7 @@ export function scanCleanupOriginProcesses(uid, identityPids = [], budget) {
       boundIdentity,
       includeExecutable: true,
     });
-    if (process.state !== 'observed') return { state: process.state };
+    if (process.state !== 'observed') return process;
     if (!retainCleanupOriginRecord(processes, process.process, scanBudget)) {
       return { state: 'overflow' };
     }
@@ -2507,7 +2543,7 @@ export function scanCleanupOriginProcesses(uid, identityPids = [], budget) {
     for (let depth = 0; depth < MAX_CLEANUP_ORIGIN_ANCESTOR_DEPTH; depth += 1) {
       if (parentPid === 1) break;
       if (parentPid < 1 || visited.has(parentPid)) {
-        return { state: 'incomplete' };
+        return { state: 'incomplete', diagnosticReason: 'ancestor_invalid' };
       }
       visited.add(parentPid);
       let parent = processes.get(parentPid);
@@ -2517,7 +2553,17 @@ export function scanCleanupOriginProcesses(uid, identityPids = [], budget) {
           boundIdentity: false,
           includeExecutable: false,
         });
-        if (ancestor.state !== 'observed') return { state: ancestor.state };
+        if (ancestor.state !== 'observed') {
+          return ancestor.state === 'incomplete'
+            ? {
+                ...ancestor,
+                diagnosticReason:
+                  ancestor.diagnosticReason === 'stat_malformed'
+                    ? 'stat_malformed'
+                    : 'ancestor_unavailable',
+              }
+            : ancestor;
+        }
         parent = {
           pid: parentPid,
           parentPid: ancestor.process.parentPid,
@@ -2532,7 +2578,9 @@ export function scanCleanupOriginProcesses(uid, identityPids = [], budget) {
       }
       parentPid = parent.parentPid;
     }
-    if (parentPid !== 1) return { state: 'incomplete' };
+    if (parentPid !== 1) {
+      return { state: 'incomplete', diagnosticReason: 'ancestor_invalid' };
+    }
   }
   return { state: 'observed', processes };
 }
@@ -2681,7 +2729,7 @@ function cleanupOriginCounts(values) {
   );
 }
 
-function classifyCleanupOriginSnapshots(
+export function classifyCleanupOriginSnapshots(
   firstProcesses,
   secondProcesses,
   uid,
@@ -2695,7 +2743,10 @@ function classifyCleanupOriginSnapshots(
     uid < 1 ||
     uid > 65_535
   ) {
-    return emptyCleanupOriginProbe('unknown', 'process_snapshot_incomplete');
+    return emptyCleanupOriginProbe('unknown', 'process_snapshot_incomplete', {
+      stage: 'classification',
+      reason: 'request_invalid',
+    });
   }
   const identities = { app: appIdentity, controller: controllerIdentity };
   const first = cleanupOriginRelevantPids(
@@ -2708,10 +2759,19 @@ function classifyCleanupOriginSnapshots(
     uid,
     Object.values(identities),
   );
+  if (first === null || second === null) {
+    return emptyCleanupOriginProbe('unknown', 'process_snapshot_changed', {
+      stage: 'classification',
+      reason: 'other_incomplete',
+    });
+  }
+  if (first.targets.length === 0) {
+    return emptyCleanupOriginProbe('unknown', 'process_snapshot_changed', {
+      stage: 'classification',
+      reason: 'snapshot_identity_changed',
+    });
+  }
   if (
-    first === null ||
-    second === null ||
-    first.targets.length === 0 ||
     first.targets.length !== second.targets.length ||
     first.targets.some(
       (process) => !second.targets.some((other) => other.pid === process.pid),
@@ -2724,7 +2784,10 @@ function classifyCleanupOriginSnapshots(
         ),
     )
   ) {
-    return emptyCleanupOriginProbe('unknown', 'process_snapshot_changed');
+    return emptyCleanupOriginProbe('unknown', 'process_snapshot_changed', {
+      stage: 'classification',
+      reason: 'snapshot_identity_changed',
+    });
   }
 
   const appVerified =
@@ -2850,7 +2913,10 @@ export function readCleanupOriginObservation(
   procIo = cleanupOriginProcIo,
 ) {
   if (!validCleanupOriginRequest(request) || typeof scan !== 'function') {
-    return emptyCleanupOriginProbe('unknown', 'invalid_request');
+    return emptyCleanupOriginProbe('unknown', 'invalid_request', {
+      stage: 'classification',
+      reason: 'request_invalid',
+    });
   }
   const profileFailure = validateCleanupOriginProfile(request);
   if (profileFailure !== null) {
@@ -2865,7 +2931,10 @@ export function readCleanupOriginObservation(
   }
   const first = scan(request.uid, identityPids, budget);
   const second = scan(request.uid, identityPids, budget);
-  for (const snapshot of [first, second]) {
+  for (const [snapshot, stage] of [
+    [first, 'first_scan'],
+    [second, 'second_scan'],
+  ]) {
     if (snapshot?.state === 'overflow') {
       return emptyCleanupOriginProbe('unknown', 'process_scan_overflow');
     }
@@ -2876,7 +2945,14 @@ export function readCleanupOriginObservation(
       snapshot?.state !== 'observed' ||
       !(snapshot.processes instanceof Map)
     ) {
-      return emptyCleanupOriginProbe('unknown', 'process_snapshot_incomplete');
+      return emptyCleanupOriginProbe('unknown', 'process_snapshot_incomplete', {
+        stage,
+        reason: CLEANUP_ORIGIN_DIAGNOSTIC_REASONS.has(
+          snapshot?.diagnosticReason,
+        )
+          ? snapshot.diagnosticReason
+          : 'other_incomplete',
+      });
     }
   }
   return classifyCleanupOriginSnapshots(
