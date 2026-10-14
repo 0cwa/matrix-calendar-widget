@@ -1,0 +1,8 @@
+# Local prebuilt runs keep PostgreSQL state in the run-owned named volume.
+services:
+  postgres:
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:

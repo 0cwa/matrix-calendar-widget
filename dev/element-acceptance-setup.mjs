@@ -9,6 +9,7 @@ import {
 } from './element-acceptance-diagnostics.mjs';
 import {
   appendComposeOverrideFiles,
+  appendLocalComposeEnvFile,
   loadElementAcceptanceOverrides,
 } from './element-acceptance-overrides.mjs';
 import { writeSyntheticDesktopCredentials } from './element-desktop-journey.mjs';
@@ -210,7 +211,10 @@ function createUser(localpart, password, phase) {
     execFileSync(
       'docker',
       appendComposeOverrideFiles(
-        ['compose', '-p', projectName, '-f', 'dev/compose.yaml'],
+        appendLocalComposeEnvFile(
+          ['compose', '-p', projectName, '-f', 'dev/compose.yaml'],
+          ACCEPTANCE_OVERRIDES,
+        ),
         ACCEPTANCE_OVERRIDES.composeFiles,
       ).concat([
         'exec',
@@ -1047,23 +1051,42 @@ async function waitForEndpoint(phase, url, expectedStatus) {
   );
 }
 
-async function waitForServices() {
-  await waitForEndpoint(
-    'gateway-ready',
-    `${GATEWAY_URL}/v1/calendar/context`,
-    (status) => status >= 400 && status < 500,
+export function getAcceptanceReadinessEndpoints(skipElement = false) {
+  const endpoints = [
+    {
+      phase: 'gateway-ready',
+      url: `${GATEWAY_URL}/v1/calendar/context`,
+      expectedStatus: (status) => status >= 400 && status < 500,
+    },
+    {
+      phase: 'widget-ready',
+      url: `${WIDGET_URL}/`,
+      expectedStatus: (status) => status === 200,
+    },
+  ];
+  if (!skipElement) {
+    endpoints.push({
+      phase: 'element-ready',
+      url: `${ELEMENT_URL}/`,
+      expectedStatus: (status) => status === 200,
+    });
+  }
+  return endpoints;
+}
+
+async function waitForServices({ skipElement = false } = {}) {
+  for (const endpoint of getAcceptanceReadinessEndpoints(skipElement)) {
+    await waitForEndpoint(
+      endpoint.phase,
+      endpoint.url,
+      endpoint.expectedStatus,
+    );
+  }
+  process.stdout.write(
+    skipElement
+      ? 'Element-free acceptance services are ready.\n'
+      : 'Element acceptance services are ready.\n',
   );
-  await waitForEndpoint(
-    'widget-ready',
-    `${WIDGET_URL}/`,
-    (status) => status === 200,
-  );
-  await waitForEndpoint(
-    'element-ready',
-    `${ELEMENT_URL}/`,
-    (status) => status === 200,
-  );
-  process.stdout.write('Element acceptance services are ready.\n');
 }
 
 async function main() {
@@ -1075,6 +1098,14 @@ async function main() {
       await prepareReminderRoom();
     } else if (mode === 'wait') {
       await waitForServices();
+    } else if (mode === 'wait-local') {
+      if (
+        !ACCEPTANCE_OVERRIDES.localPrebuilt ||
+        !ACCEPTANCE_OVERRIDES.skipElement
+      ) {
+        throw new FixtureSetupError('accounts-ready');
+      }
+      await waitForServices({ skipElement: true });
     } else {
       throw new FixtureSetupError('accounts-ready');
     }

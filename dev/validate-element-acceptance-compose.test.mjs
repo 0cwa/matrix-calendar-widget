@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hasAcceptanceLoopbackBindings } from './validate-element-acceptance-compose.mjs';
+import {
+  LOCAL_REHEARSAL_LABEL,
+  LOCAL_REHEARSAL_SERVICES,
+  LOCAL_REHEARSAL_VOLUMES,
+} from './element-acceptance-overrides.mjs';
+import {
+  hasAcceptanceLoopbackBindings,
+  hasLocalPrebuiltOwnershipLabels,
+} from './validate-element-acceptance-compose.mjs';
 
 function port(target, published, hostIp = '127.0.0.1') {
   return {
@@ -30,6 +38,48 @@ function webAcceptanceModel() {
       element: { ports: [port(80, 8090)] },
     },
   };
+}
+
+function localPrebuiltModel(runId) {
+  const ownerLabel = LOCAL_REHEARSAL_LABEL;
+  const projectName = `mcw-p0-${runId}`;
+  const model = {
+    services: {
+      synapse: { ports: [port(8008, 8008)] },
+      radicale: { ports: [port(5232, 5232)] },
+      gateway: { ports: [port(3000, 3000)] },
+      widget: { ports: [port(8080, 8080)] },
+      postgres: {
+        ports: [],
+        volumes: [
+          {
+            type: 'volume',
+            source: 'postgres-data',
+            target: '/var/lib/postgresql/data',
+          },
+        ],
+      },
+      'restore-radicale': { ports: [port(5232, 5233)] },
+      'restore-gateway': { ports: [port(3000, 3000)] },
+      element: { ports: [port(80, 8090)] },
+    },
+    volumes: Object.fromEntries(
+      LOCAL_REHEARSAL_VOLUMES.map((name) => [
+        name,
+        {
+          labels: { [ownerLabel]: runId },
+          ...(name === 'reminder-restore-radicale-data'
+            ? { name: `${projectName}_radicale-restore`, external: false }
+            : {}),
+        },
+      ]),
+    ),
+    networks: { default: { labels: { [ownerLabel]: runId } } },
+  };
+  for (const name of LOCAL_REHEARSAL_SERVICES) {
+    model.services[name].labels = { [ownerLabel]: runId };
+  }
+  return model;
 }
 
 test('accepts base synthetic services bound only to IPv4 loopback', () => {
@@ -87,6 +137,44 @@ test('accepts paired loopback-only restore services without publishing PostgreSQ
   model.services['restore-gateway'] = { ports: [port(3000, 3000)] };
 
   assert.equal(hasAcceptanceLoopbackBindings(model), true);
+});
+
+test('local prebuilt overlay requires matching ownership labels on controlled resources', () => {
+  const runId = '0123456789abcdef';
+  const projectName = `mcw-p0-${runId}`;
+  const model = localPrebuiltModel(runId);
+
+  assert.equal(
+    hasLocalPrebuiltOwnershipLabels(model, runId, projectName),
+    true,
+  );
+  assert.equal(
+    hasAcceptanceLoopbackBindings(model) &&
+      hasLocalPrebuiltOwnershipLabels(model, runId, projectName),
+    true,
+  );
+
+  const missingServiceLabel = structuredClone(model);
+  delete missingServiceLabel.services.gateway.labels[LOCAL_REHEARSAL_LABEL];
+  assert.equal(
+    hasLocalPrebuiltOwnershipLabels(missingServiceLabel, runId, projectName),
+    false,
+  );
+
+  const mismatchedVolumeLabel = structuredClone(model);
+  mismatchedVolumeLabel.volumes['radicale-data'].labels[LOCAL_REHEARSAL_LABEL] =
+    'fedcba9876543210';
+  assert.equal(
+    hasLocalPrebuiltOwnershipLabels(mismatchedVolumeLabel, runId, projectName),
+    false,
+  );
+
+  const unexpectedNetwork = structuredClone(model);
+  unexpectedNetwork.networks.foreign = {};
+  assert.equal(
+    hasLocalPrebuiltOwnershipLabels(unexpectedNetwork, runId, projectName),
+    false,
+  );
 });
 
 test('rejects incomplete restore services, wildcard restore ports, or published PostgreSQL', () => {
