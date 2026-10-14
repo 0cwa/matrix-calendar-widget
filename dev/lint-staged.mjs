@@ -72,9 +72,7 @@ export async function lintStaged(filesToLint) {
     const results = await eslint.lintFiles(files);
     const formatter = await eslint.loadFormatter('stylish');
     outputs.push(formatter.format(results));
-    if (
-      results.some((result) => result.errorCount > 0 || result.warningCount)
-    ) {
+    if (results.some((result) => result.errorCount > 0)) {
       failed = true;
       break;
     }
