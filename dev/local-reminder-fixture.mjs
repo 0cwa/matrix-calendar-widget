@@ -558,7 +558,12 @@ async function cleanupOwnedResources(
   configWriteAttempted,
   configIdentity,
 ) {
+  const outcome = {
+    reminderConfiguration: 'not-attempted',
+    event: 'not-attempted',
+  };
   if (configWriteAttempted && configIdentity) {
+    outcome.reminderConfiguration = 'unresolved';
     try {
       const items = await readConfigPage(
         fetchImpl,
@@ -573,8 +578,10 @@ async function cleanupOwnedResources(
           configIdentity.alarmUid,
         ),
       );
-      if (matchingItems.length === 1) {
-        await gatewayJson(
+      if (matchingItems.length === 0) {
+        outcome.reminderConfiguration = 'confirmed-absent';
+      } else if (matchingItems.length === 1) {
+        const { response: deleteResponse } = await gatewayJson(
           fetchImpl,
           fixture,
           openIdToken,
@@ -584,33 +591,37 @@ async function cleanupOwnedResources(
           'reminder-config-readback',
           configIdentity,
         );
-        const remainingItems = await readConfigPage(
-          fetchImpl,
-          fixture,
-          openIdToken,
-          'reminder-config-readback',
-        );
-        if (
-          remainingItems.some((item) =>
-            validConfigIdentity(
-              item,
-              configIdentity.eventUid,
-              configIdentity.alarmUid,
-            ),
-          )
-        ) {
-          return;
+        if (deleteResponse.status >= 200 && deleteResponse.status < 300) {
+          const remainingItems = await readConfigPage(
+            fetchImpl,
+            fixture,
+            openIdToken,
+            'reminder-config-readback',
+          );
+          if (
+            !remainingItems.some((item) =>
+              validConfigIdentity(
+                item,
+                configIdentity.eventUid,
+                configIdentity.alarmUid,
+              ),
+            )
+          ) {
+            outcome.reminderConfiguration = 'confirmed-absent';
+          }
         }
       }
     } catch {
-      // Cleanup is best-effort and never changes the fixed failure report.
+      // Keep the fixed unresolved outcome without exposing the error.
     }
   }
   if (event) {
+    outcome.event = 'unresolved';
     const resourceIds = [
       ...(event.resourceIds ?? []),
       ...expectedEventResourceIds(fixture, event.uid),
     ];
+    let allCandidatesAbsent = true;
     for (const resourceId of new Set(resourceIds)) {
       try {
         const { response, body } = await gatewayJson(
@@ -622,16 +633,18 @@ async function cleanupOwnedResources(
           readEventQuery(fixture, resourceId),
           'event-readback',
         );
+        if (response.status === 404) continue;
+        allCandidatesAbsent = false;
         const currentResource = eventResourceId(body, fixture, event.uid);
         if (
           response.status !== 200 ||
           !currentResource ||
-          currentResource.id !== resourceId ||
+          !resourceIds.includes(currentResource.id) ||
           body.event.title !== event.title
         ) {
           continue;
         }
-        await gatewayJson(
+        const deleteResponse = await gatewayJson(
           fetchImpl,
           fixture,
           openIdToken,
@@ -643,12 +656,29 @@ async function cleanupOwnedResources(
           currentResource.etag,
           false,
         );
-        break;
+        if (deleteResponse.status < 200 || deleteResponse.status >= 300)
+          continue;
+        const { response: finalReadback } = await gatewayJson(
+          fetchImpl,
+          fixture,
+          openIdToken,
+          'GET',
+          'event',
+          readEventQuery(fixture, currentResource.id),
+          'event-readback',
+        );
+        if (finalReadback.status === 404) {
+          outcome.event = 'confirmed-absent';
+          break;
+        }
       } catch {
-        // Unavailable or mismatched readback never authorizes event deletion.
+        allCandidatesAbsent = false;
+        // Unavailable or mismatched readback never authorizes deletion.
       }
     }
+    if (allCandidatesAbsent) outcome.event = 'confirmed-absent';
   }
+  return outcome;
 }
 
 export async function runLocalReminderFixture({
@@ -667,6 +697,10 @@ export async function runLocalReminderFixture({
     status: 'failed',
     failurePhase: 'fixture',
     markerWritten: false,
+    cleanup: {
+      reminderConfiguration: 'not-attempted',
+      event: 'not-attempted',
+    },
   };
   let fixture;
   let openIdToken;
@@ -944,7 +978,7 @@ export async function runLocalReminderFixture({
     summary.failurePhase =
       error instanceof FixtureFailure ? error.phase : 'fixture';
     if (fixture && openIdToken) {
-      await cleanupOwnedResources(
+      summary.cleanup = await cleanupOwnedResources(
         fetchImpl,
         fixture,
         openIdToken,

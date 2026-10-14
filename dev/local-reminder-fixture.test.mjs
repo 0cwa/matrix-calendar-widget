@@ -75,6 +75,8 @@ function createClient({
   managerPower = 100,
   alarmMinutes = 1,
   configWriteStatus = 200,
+  configDeleteStatus = 200,
+  eventDeleteStatus = 200,
   eventCreateResponseLost = false,
   configWriteResponseLost = false,
   foreignEventOnReadback = false,
@@ -233,6 +235,12 @@ function createClient({
     }
     if (url.pathname.endsWith('/reminders') && method === 'DELETE') {
       const identity = JSON.parse(options.body);
+      if (configDeleteStatus !== 200) {
+        return jsonResponse(
+          { code: 'synthetic-delete-failure' },
+          configDeleteStatus,
+        );
+      }
       const index = configRows.findIndex(
         (item) =>
           item.eventUid === identity.eventUid &&
@@ -268,6 +276,12 @@ function createClient({
     if (url.pathname === '/v1/calendar/events' && method === 'DELETE') {
       assert.equal(headers.get('if-match'), ETAG);
       assert.equal(url.searchParams.get('eventId'), responseEvent().id);
+      if (eventDeleteStatus !== 200) {
+        return jsonResponse(
+          { code: 'synthetic-delete-failure' },
+          eventDeleteStatus,
+        );
+      }
       eventPersisted = false;
       return jsonResponse({});
     }
@@ -329,6 +343,10 @@ test('records a real-contract reminder only after authorization, readback, confi
       status: 'passed',
       markerWritten: true,
       markerCount: 1,
+      cleanup: {
+        reminderConfiguration: 'not-attempted',
+        event: 'not-attempted',
+      },
     });
     assert.deepEqual(JSON.parse(readFileSync(files.markerPath, 'utf8')), [
       TITLE,
@@ -406,6 +424,10 @@ test('rejects a different authenticated actor or room before creating an event',
         assert.equal(result.status, 'failed');
         assert.equal(result.failurePhase, 'gateway-authorization');
         assert.equal(result.markerWritten, false);
+        assert.deepEqual(result.cleanup, {
+          reminderConfiguration: 'not-attempted',
+          event: 'not-attempted',
+        });
         assert.deepEqual(
           JSON.parse(readFileSync(files.markerPath, 'utf8')),
           [],
@@ -420,6 +442,53 @@ test('rejects a different authenticated actor or room before creating an event',
         files.cleanup();
       }
     });
+  }
+});
+
+test('reports config cleanup failure while independently confirming event cleanup', async () => {
+  const files = fixtureFiles();
+  const client = createClient({
+    configWriteResponseLost: true,
+    configDeleteStatus: 503,
+  });
+  try {
+    const result = await execute(files, client);
+    assert.equal(result.failurePhase, 'reminder-config-write');
+    assert.deepEqual(result.cleanup, {
+      reminderConfiguration: 'unresolved',
+      event: 'confirmed-absent',
+    });
+    assert.equal(client.eventPersisted, false);
+    assert.equal(client.configRows.length, 2);
+    assert.ok(
+      client.calls.some(
+        ({ url, method }) =>
+          url.pathname === '/v1/calendar/events' && method === 'DELETE',
+      ),
+    );
+  } finally {
+    files.cleanup();
+  }
+});
+
+test('reports independent event and config cleanup failures without losing the original phase', async () => {
+  const files = fixtureFiles();
+  const client = createClient({
+    configWriteResponseLost: true,
+    configDeleteStatus: 503,
+    eventDeleteStatus: 412,
+  });
+  try {
+    const result = await execute(files, client);
+    assert.equal(result.failurePhase, 'reminder-config-write');
+    assert.deepEqual(result.cleanup, {
+      reminderConfiguration: 'unresolved',
+      event: 'unresolved',
+    });
+    assert.equal(client.eventPersisted, true);
+    assert.equal(client.configRows.length, 2);
+  } finally {
+    files.cleanup();
   }
 });
 
@@ -444,16 +513,21 @@ test('requires the exact room configuration to read back before writing a marker
 });
 
 test('cleans committed event and reminder writes after their responses are lost without touching foreign state', async (t) => {
-  for (const [name, options, expectedPhase] of [
+  for (const [name, options, expectedPhase, expectedCleanup] of [
     [
       'event create response lost',
       { eventCreateResponseLost: true },
       'event-create',
+      { reminderConfiguration: 'not-attempted', event: 'confirmed-absent' },
     ],
     [
       'configuration response lost',
       { configWriteResponseLost: true },
       'reminder-config-write',
+      {
+        reminderConfiguration: 'confirmed-absent',
+        event: 'confirmed-absent',
+      },
     ],
   ]) {
     await t.test(name, async () => {
@@ -464,6 +538,7 @@ test('cleans committed event and reminder writes after their responses are lost 
         assert.equal(result.status, 'failed');
         assert.equal(result.failurePhase, expectedPhase);
         assert.equal(result.markerWritten, false);
+        assert.deepEqual(result.cleanup, expectedCleanup);
         assert.deepEqual(
           JSON.parse(readFileSync(files.markerPath, 'utf8')),
           [],
@@ -506,6 +581,10 @@ test('does not delete an event when ambiguous create cleanup readback identifies
     assert.equal(result.status, 'failed');
     assert.equal(result.failurePhase, 'event-create');
     assert.equal(result.markerWritten, false);
+    assert.deepEqual(result.cleanup, {
+      reminderConfiguration: 'not-attempted',
+      event: 'unresolved',
+    });
     assert.equal(client.eventPersisted, true);
     assert.ok(
       !client.calls.some(
