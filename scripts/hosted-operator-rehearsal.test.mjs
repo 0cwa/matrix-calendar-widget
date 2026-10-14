@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { formatStartupStageFailure } from '../dev/synapse-startup-diagnostic.mjs';
 import {
   addOperatorRehearsalProfileToComposeArgs,
   assertNoCollision,
@@ -21,6 +22,7 @@ import {
   formatFailureDiagnostic,
   formatFailureSummary,
   formatSuccessSummary,
+  parseStartupFailureMarker,
   planOwnedCleanup,
   validateLockedImageInspect,
   writeDockerAdapter,
@@ -299,6 +301,8 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     phase: 'fixture-setup',
     failureClass: 'gate-failed',
     operation: 'gate',
+    startupStage: 'homeserver-probe',
+    childExitCode: 125,
     sourceImageIds: [imageId, manifestDigest, `sha256:${'c'.repeat(64)}`],
     cleanupStatus: 'pending',
     cleanupAttempted: false,
@@ -319,10 +323,12 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(initial.schema_version, 2);
+    assert.equal(initial.schema_version, 3);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
     assert.equal(initial.failure_operation, 'gate');
+    assert.equal(initial.startup_stage, 'homeserver-probe');
+    assert.equal(initial.child_exit_code, 125);
     assert.deepEqual(initial.source_image_ids, fields.sourceImageIds);
     assert.equal(initial.cleanup_status, 'pending');
     assert.equal(initial.cleanup_attempted, false);
@@ -338,6 +344,8 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     const final = JSON.parse(readFileSync(file, 'utf8'));
     assert.equal(final.cleanup_status, 'verified');
+    assert.equal(final.startup_stage, 'homeserver-probe');
+    assert.equal(final.child_exit_code, 125);
     assert.equal(final.cleanup_attempted, true);
     assert.equal(final.owned_cleanup_verified, true);
     assert.equal(final.foreign_inventory_unchanged, true);
@@ -355,6 +363,8 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
     phase: 'private-server-name',
     failureClass: 'token=secret',
     operation: 'https://private.example/token=secret',
+    startupStage: 'https://private.example/token=secret',
+    childExitCode: 'BEGIN:VCALENDAR',
     sourceImageIds: [
       imageId,
       'https://private.example/secret',
@@ -367,6 +377,8 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
   assert.equal(diagnostic.failed_phase, 'runner');
   assert.equal(diagnostic.failure_class, 'unknown');
   assert.equal(diagnostic.failure_operation, 'unknown');
+  assert.equal(diagnostic.startup_stage, 'unknown');
+  assert.equal(diagnostic.child_exit_code, 'unavailable');
   assert.equal(diagnostic.source_sha, 'unavailable');
   assert.equal(diagnostic.workflow_sha, 'unavailable');
   assert.equal(diagnostic.run_id, 'unavailable');
@@ -376,6 +388,89 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
   assert.equal(diagnostic.owned_cleanup_verified, false);
   assert.equal(diagnostic.foreign_inventory_unchanged, false);
   assert.doesNotMatch(serialized, /secret|https|private|BEGIN:VCALENDAR/u);
+});
+
+test('startup failure markers accept only one source-formatted closed marker matching child status', () => {
+  const stages = [
+    'docker-preflight',
+    'curl-preflight',
+    'homeserver-probe',
+    'homeserver-generate',
+    'fixture-permission',
+    'registration-update',
+    'uid991-access-assertion',
+    'synapse-compose-start',
+  ];
+  const startupDiagnosticSource = readFileSync(
+    fileURLToPath(
+      new URL('../dev/synapse-startup-diagnostic.mjs', import.meta.url),
+    ),
+    'utf8',
+  );
+  const enumSource = /const STARTUP_FAILURE_STAGES = \[([\s\S]*?)\];/u.exec(
+    startupDiagnosticSource,
+  )?.[1];
+  assert.ok(enumSource);
+  assert.deepEqual(
+    [...enumSource.matchAll(/'([^']+)'/gu)].map((match) => match[1]),
+    stages,
+  );
+  for (const stage of stages) {
+    const marker = formatStartupStageFailure(stage, 7);
+    assert.equal(marker, `stage=${stage} exit_code=7`);
+    assert.deepEqual(
+      parseStartupFailureMarker(
+        `ordinary child output\n${marker}\n`,
+        7,
+        formatStartupStageFailure,
+      ),
+      { startupStage: stage, childExitCode: 7 },
+    );
+  }
+  assert.equal(stages.length, 8);
+});
+
+test('startup failure markers fail closed on absent, duplicate, malformed, mismatched, or hostile marker lines', () => {
+  const marker = formatStartupStageFailure('homeserver-generate', 7);
+  const unknown = { startupStage: 'unknown', childExitCode: 7 };
+  for (const stdout of [
+    'ordinary child output\n',
+    `${marker}\n${marker}\n`,
+    `${marker}\nstage=bad exit_code=7 extra=BEGIN:VCALENDAR\n`,
+    `${marker}\nstage=hostile-token=secret exit_code=7\n`,
+    'stage=homeserver-generate exit_code=999\n',
+  ]) {
+    assert.deepEqual(
+      parseStartupFailureMarker(stdout, 7, formatStartupStageFailure),
+      unknown,
+    );
+  }
+  assert.deepEqual(
+    parseStartupFailureMarker(marker, 8, formatStartupStageFailure),
+    { startupStage: 'unknown', childExitCode: 8 },
+  );
+  assert.deepEqual(
+    parseStartupFailureMarker(marker, 0, formatStartupStageFailure),
+    { startupStage: 'unknown', childExitCode: 0 },
+  );
+  assert.deepEqual(
+    parseStartupFailureMarker(marker, null, formatStartupStageFailure),
+    { startupStage: 'unknown', childExitCode: 'unavailable' },
+  );
+  assert.deepEqual(
+    parseStartupFailureMarker(marker, 7, () => 'not-the-source-marker'),
+    unknown,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(
+      parseStartupFailureMarker(
+        `${marker}\nstage=hostile-token=secret exit_code=7\n`,
+        7,
+        formatStartupStageFailure,
+      ),
+    ),
+    /secret|BEGIN:VCALENDAR/u,
+  );
 });
 
 test('failure operation identifiers cover every literal and generated task label', () => {
