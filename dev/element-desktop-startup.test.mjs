@@ -640,11 +640,41 @@ test('cleanup-origin production reader fails closed when status or stat reads fa
         name: 'status read',
         pid: 1,
         field: 'status',
+        diagnosticReason: 'status_unreadable',
       },
       {
         name: 'stat read',
         pid: 101,
         field: 'stat',
+        diagnosticReason: 'stat_unreadable',
+      },
+      {
+        name: 'malformed status',
+        pid: 1,
+        field: 'status',
+        value: 'Name:\tsynthetic\nUid:\tnot-a-uid-tuple\n',
+        diagnosticReason: 'status_malformed',
+      },
+      {
+        name: 'malformed stat',
+        pid: 101,
+        field: 'stat',
+        value: 'not a proc stat record',
+        diagnosticReason: 'stat_malformed',
+      },
+      {
+        name: 'invalid ancestor link',
+        pid: 101,
+        field: 'stat',
+        value: fakeProcStat(101, 0, 101, '1001'),
+        diagnosticReason: 'ancestor_invalid',
+      },
+      {
+        name: 'unavailable ancestor record',
+        pid: 101,
+        field: 'stat',
+        value: fakeProcStat(101, 999, 101, '1001'),
+        diagnosticReason: 'ancestor_unavailable',
       },
     ];
 
@@ -652,7 +682,7 @@ test('cleanup-origin production reader fails closed when status or stat reads fa
       const processes = makeProcesses();
       processes.set(testCase.pid, {
         ...processes.get(testCase.pid),
-        [testCase.field]: undefined,
+        [testCase.field]: testCase.value,
       });
       const fakeIo = fakeCleanupOriginProcIo(processes);
       const observation = readCleanupOriginObservation(
@@ -668,6 +698,12 @@ test('cleanup-origin production reader fails closed when status or stat reads fa
         testCase.name,
       );
       assert.equal(observation.processCount, null, testCase.name);
+      assert.equal(observation.diagnosticStage, 'first_scan', testCase.name);
+      assert.equal(
+        observation.diagnosticReason,
+        testCase.diagnosticReason,
+        testCase.name,
+      );
     }
   });
 });
@@ -758,6 +794,10 @@ test('cleanup-origin probe fails closed for unbound roots, unreadable scans, ove
     assert.equal(unreadable.state, 'unknown');
     assert.equal(unreadable.reason, 'process_snapshot_incomplete');
     assert.equal(unreadable.processCount, null);
+    assert.deepEqual(
+      [unreadable.diagnosticStage, unreadable.diagnosticReason],
+      ['first_scan', 'other_incomplete'],
+    );
 
     const overflow = readCleanupOriginObservation(
       cleanupOriginRequest(profileRoot, uid),
@@ -778,6 +818,66 @@ test('cleanup-origin probe fails closed for unbound roots, unreadable scans, ove
     );
     assert.equal(symlinkMarker.state, 'unknown');
     assert.equal(symlinkMarker.reason, 'marker_unavailable');
+  });
+});
+
+test('cleanup-origin incomplete diagnostics use fixed stage and reason enums', async () => {
+  await withCleanupOriginProfile(async (profileRoot, uid) => {
+    const request = cleanupOriginRequest(profileRoot, uid);
+    const processes = cleanupOriginSnapshot(uid);
+    for (const [stageIndex, stage, reason] of [
+      [0, 'first_scan', 'status_unreadable'],
+      [1, 'second_scan', 'stat_malformed'],
+    ]) {
+      let calls = 0;
+      const observation = readCleanupOriginObservation(request, () => {
+        const currentStageIndex = calls;
+        calls += 1;
+        if (currentStageIndex < stageIndex) {
+          return {
+            state: 'observed',
+            processes: cloneCleanupOriginSnapshot(processes),
+          };
+        }
+        return currentStageIndex === stageIndex
+          ? {
+              state: 'incomplete',
+              diagnosticReason: reason,
+              pid: 123456,
+              path: '/tmp/private-profile',
+              errno: 'secret-value',
+              process: { command: 'hostile process text' },
+            }
+          : { state: 'incomplete', diagnosticReason: 'other_incomplete' };
+      });
+      assert.equal(observation.state, 'unknown');
+      assert.equal(observation.reason, 'process_snapshot_incomplete');
+      assert.equal(observation.diagnosticStage, stage);
+      assert.equal(observation.diagnosticReason, reason);
+      assert.doesNotMatch(JSON.stringify(observation), /123456|private-profile|secret-value|hostile process text/u);
+      assert.equal(observation.processCount, null);
+    }
+
+    const invalidRequest = readCleanupOriginObservation({ profileRoot });
+    assert.equal(invalidRequest.reason, 'invalid_request');
+    assert.equal(invalidRequest.diagnosticStage, 'classification');
+    assert.equal(invalidRequest.diagnosticReason, 'request_invalid');
+
+    let calls = 0;
+    const changedSnapshot = readCleanupOriginObservation(request, () => {
+      calls += 1;
+      const snapshot = cloneCleanupOriginSnapshot(processes);
+      if (calls === 2) {
+        snapshot.set(102, { ...snapshot.get(102), parentPid: 80 });
+      }
+      return { state: 'observed', processes: snapshot };
+    });
+    assert.equal(changedSnapshot.reason, 'process_snapshot_changed');
+    assert.equal(changedSnapshot.diagnosticStage, 'classification');
+    assert.equal(
+      changedSnapshot.diagnosticReason,
+      'snapshot_identity_changed',
+    );
   });
 });
 
