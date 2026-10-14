@@ -464,7 +464,10 @@ DST regression or recurrence-editing criteria above.
         setup](../dev/up.sh), [API probe](../dev/element-acceptance-api-probe.mjs),
         [reminder fixture](../dev/local-reminder-fixture.mjs), and [paired
         restore helper](../dev/element-acceptance-reminder-restore.mjs).
-        Focused checks passed 69 tests using in-process HTTP and fake commands.
+        Focused tooling checks use in-process HTTP, fake commands, and fixed-enum
+        formatter cases. The composite action records tracked step outcomes and
+        the first tracked failure after teardown; a diagnostic write failure is
+        marked unavailable without changing acceptance or cleanup outcomes.
         No external service or real API, image store, restart, or restore was exercised;
         this does not pass local Stage B or image/cache/runtime acceptance.
 - [ ] Room-target diagnostics beyond the supported calendar/event paths.
