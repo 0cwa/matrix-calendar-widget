@@ -353,20 +353,27 @@ function initializeConfiguration() {
   if (ACCEPTANCE_OVERRIDES.localPrebuilt && !ACCEPTANCE_OVERRIDES.skipElement) {
     throw new StageFailure('reminder-compose-validation');
   }
+  const commonComposeFiles = [
+    'compose',
+    '-p',
+    projectName,
+    '--env-file',
+    envFile,
+    '-f',
+    'dev/compose.yaml',
+    '-f',
+    'dev/element-acceptance.compose.yaml',
+    '-f',
+    'dev/element-acceptance-reminder.compose.yaml',
+  ];
+  if (ACCEPTANCE_OVERRIDES.localPrebuilt) {
+    commonComposeFiles.push(
+      '-f',
+      'dev/element-acceptance-local-prebuilt.compose.yaml',
+    );
+  }
   commonComposeArgs = appendComposeOverrideFiles(
-    [
-      'compose',
-      '-p',
-      projectName,
-      '--env-file',
-      envFile,
-      '-f',
-      'dev/compose.yaml',
-      '-f',
-      'dev/element-acceptance.compose.yaml',
-      '-f',
-      'dev/element-acceptance-reminder.compose.yaml',
-    ],
+    commonComposeFiles,
     ACCEPTANCE_OVERRIDES.composeFiles,
   );
 }

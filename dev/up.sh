@@ -36,6 +36,7 @@ NODE
     -f "$ROOT_DIR/dev/compose.yaml"
     -f "$ROOT_DIR/dev/element-acceptance.compose.yaml"
     -f "$ROOT_DIR/dev/element-acceptance-reminder.compose.yaml"
+    -f "$ROOT_DIR/dev/element-acceptance-local-prebuilt.compose.yaml"
     -f "$MATRIX_CALENDAR_LOCAL_COMPOSE_OVERRIDE_FILE"
   )
   LOCAL_VALIDATION_COMPOSE=("${COMPOSE[@]}")

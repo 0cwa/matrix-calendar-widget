@@ -17,6 +17,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
+  accessSync,
+  constants,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -25,7 +27,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
@@ -40,44 +42,17 @@ const RUN_ID = '0123456789abcdef';
 const PROJECT = `mcw-p0-${RUN_ID}`;
 const RADICALE_IMAGE = 'matrix-calendar-widget/radicale-openid:archive-103-2';
 const OWNER_LABEL = LOCAL_REHEARSAL_LABEL;
-
-function fakeComposeModel() {
-  const port = (target, published) => ({
-    target,
-    published: String(published),
-    protocol: 'tcp',
-    host_ip: '127.0.0.1',
+const REAL_DOCKER_BIN = (process.env.PATH ?? '')
+  .split(delimiter)
+  .map((directory) => join(directory || '.', 'docker'))
+  .find((candidate) => {
+    try {
+      accessSync(candidate, constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
   });
-  return {
-    services: {
-      synapse: { ports: [port(8008, 8008)] },
-      radicale: { ports: [port(5232, 5232)] },
-      gateway: { ports: [port(3000, 3000)] },
-      widget: { ports: [port(8080, 8080)] },
-      postgres: {
-        ports: [],
-        volumes: [
-          {
-            type: 'volume',
-            source: 'postgres-data',
-            target: '/var/lib/postgresql/data',
-          },
-        ],
-      },
-      'restore-radicale': { ports: [port(5232, 5233)] },
-      'restore-gateway': { ports: [port(3000, 3000)] },
-      element: { ports: [port(80, 8090)] },
-    },
-    volumes: {
-      ...Object.fromEntries(LOCAL_REHEARSAL_VOLUMES.map((name) => [name, {}])),
-      'reminder-restore-radicale-data': {
-        name: `${PROJECT}_radicale-restore`,
-        external: false,
-      },
-    },
-    networks: { default: {} },
-  };
-}
 
 function localImagesAndOwnershipOverride() {
   const labels = { [OWNER_LABEL]: RUN_ID };
@@ -125,41 +100,10 @@ function makeSandbox(t) {
   mkdirSync(runnerTemp, { mode: 0o700 });
   const overrideFile = join(runnerTemp, 'images.override.yaml');
   const composeEnvFile = join(runnerTemp, 'compose.env');
-  const composeConfigFile = join(runnerTemp, 'compose-config.json');
-  const composeConfigScript = join(runnerTemp, 'render-compose-config.mjs');
   const dockerLog = join(root, 'docker.jsonl');
   writeFileSync(
     overrideFile,
     JSON.stringify(localImagesAndOwnershipOverride()),
-    { mode: 0o600 },
-  );
-  writeFileSync(composeConfigFile, JSON.stringify(fakeComposeModel()), {
-    mode: 0o600,
-  });
-  writeFileSync(
-    composeConfigScript,
-    `import { readFileSync } from 'node:fs';
-
-const args = process.argv.slice(2);
-const config = JSON.parse(readFileSync(process.env.FAKE_COMPOSE_CONFIG, 'utf8'));
-const overrideIndex = args.lastIndexOf('-f');
-const override = JSON.parse(readFileSync(args[overrideIndex + 1], 'utf8'));
-for (const [name, value] of Object.entries(override.services ?? {})) {
-  config.services[name] = {
-    ...config.services[name],
-    ...value,
-    labels: { ...config.services[name]?.labels, ...value.labels },
-  };
-}
-for (const [name, value] of Object.entries(override.volumes ?? {})) {
-  config.volumes[name] = {
-    ...config.volumes[name],
-    ...value,
-    labels: { ...config.volumes[name]?.labels, ...value.labels },
-  };
-}
-process.stdout.write(JSON.stringify(config));
-`,
     { mode: 0o600 },
   );
   writeFileSync(
@@ -169,7 +113,8 @@ process.stdout.write(JSON.stringify(config));
   );
   writeExecutable(
     join(bin, 'docker'),
-    '#!/bin/sh\nprintf "%s\\n" "$(node -e \'process.stdout.write(JSON.stringify(process.argv.slice(1)))\' "$@")" >> "$FAKE_DOCKER_LOG"\ncase "$*" in *" config --format json") exec "$REAL_NODE_BIN" "$FAKE_COMPOSE_CONFIG_SCRIPT" "$@" ;; esac\n',
+    // The client-only Compose renderer is real; mutating Docker commands stay fake.
+    '#!/bin/sh\nprintf "%s\\n" "$(node -e \'process.stdout.write(JSON.stringify(process.argv.slice(1)))\' "$@")" >> "$FAKE_DOCKER_LOG"\ncase "$*" in *" config --format json") exec "$REAL_DOCKER_BIN" "$@" ;; esac\n',
   );
   writeExecutable(
     join(bin, 'curl'),
@@ -182,9 +127,8 @@ process.stdout.write(JSON.stringify(config));
   const common = {
     PATH: `${bin}:${process.env.PATH}`,
     REAL_NODE_BIN: process.execPath,
+    REAL_DOCKER_BIN,
     FAKE_DOCKER_LOG: dockerLog,
-    FAKE_COMPOSE_CONFIG: composeConfigFile,
-    FAKE_COMPOSE_CONFIG_SCRIPT: composeConfigScript,
     MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION: 'disabled',
     MATRIX_CALENDAR_DEV_PASSWORD: 'synthetic-password',
   };
@@ -216,8 +160,32 @@ function runUp(environment) {
   });
 }
 
+function hasDockerComposeClient(environment) {
+  if (!environment.REAL_DOCKER_BIN) return false;
+  const result = spawnSync(
+    environment.REAL_DOCKER_BIN,
+    ['compose', 'version'],
+    {
+      env: {
+        PATH: environment.PATH,
+        DOCKER_CONFIG: environment.DOCKER_CONFIG,
+        DOCKER_HOST: environment.DOCKER_HOST,
+      },
+      encoding: 'utf8',
+      timeout: 5_000,
+    },
+  );
+  return result.status === 0;
+}
+
 test('local dev/up validates the owned prebuilt overlay before no-pull startup', (t) => {
   const { dockerLog, local, overrideFile } = makeSandbox(t);
+  if (!hasDockerComposeClient(local)) {
+    t.skip('Docker Compose client is unavailable');
+    return;
+  }
+  assert.equal(local.DOCKER_CONTEXT, undefined);
+  assert.equal(existsSync(local.DOCKER_HOST.slice('unix://'.length)), false);
   const result = runUp(local);
   assert.equal(result.status, 0, result.stderr);
   const calls = dockerCalls(dockerLog);
@@ -252,6 +220,7 @@ test('local dev/up validates the owned prebuilt overlay before no-pull startup',
     'dev/compose.yaml',
     'dev/element-acceptance.compose.yaml',
     'dev/element-acceptance-reminder.compose.yaml',
+    'dev/element-acceptance-local-prebuilt.compose.yaml',
   ]) {
     assert.ok(
       calls[configIndex].some((argument) => argument.endsWith(composeFile)),
@@ -297,6 +266,14 @@ test('default dev/up preserves the hosted image build and Compose defaults', (t)
   assert.ok(calls.every((args) => !args.includes('-p')));
   assert.ok(calls.every((args) => !args.includes('--pull')));
   assert.ok(calls.every((args) => !args.includes('--label')));
+  assert.ok(
+    calls.every(
+      (args) =>
+        !args.some((argument) =>
+          argument.endsWith('element-acceptance-local-prebuilt.compose.yaml'),
+        ),
+    ),
+  );
 });
 
 test('invalid local endpoint, image, or project controls stop before Docker mutation', (t) => {
@@ -319,6 +296,12 @@ test('invalid local endpoint, image, or project controls stop before Docker muta
 test('missing or mismatched overlay labels stop before run, up, or build', (t) => {
   for (const ownershipCase of ['missing-service', 'mismatched-volume']) {
     const { dockerLog, local, overrideFile } = makeSandbox(t);
+    if (!hasDockerComposeClient(local)) {
+      t.skip('Docker Compose client is unavailable');
+      return;
+    }
+    assert.equal(local.DOCKER_CONTEXT, undefined);
+    assert.equal(existsSync(local.DOCKER_HOST.slice('unix://'.length)), false);
     const override = JSON.parse(readFileSync(overrideFile, 'utf8'));
     if (ownershipCase === 'missing-service') {
       delete override.services.gateway.labels[OWNER_LABEL];
