@@ -454,8 +454,11 @@ DST regression or recurrence-editing criteria above.
       record the actual target's ingress,
       DNS/TLS/proxy, account ownership, MAS, credential issuance, and secret
       facts; validate encrypted off-server Restic-compatible S3 backups with
-      daily scheduling, 30-day retention, custody, and paired Radicale plus
-      app-owned PostgreSQL restore; and rehearse install, disable, and rollback.
+      daily scheduling, 30 daily recovery points, custody, and paired Radicale
+      plus app-owned PostgreSQL restore; and rehearse install, disable, and
+      rollback. The coordinator's automatic forget/prune path is opt-in and
+      requires the configured Restic host and project tag to match the Compose
+      project name; target acceptance and recovery evidence remain open.
       The bounded beta baseline uses the project-owned Radicale image and its
       own store. Do not record private server, domain, account, provider, or
       credential details in public docs. Beta readiness and deployment remain
@@ -557,15 +560,20 @@ access and event writes stay disabled by default.
       PostgreSQL guidance; etke-managed `/data` remains unverified (PR #170).
       The public runbook now recommends pinned Restic 0.19.1, generic
       S3-compatible storage, operator-managed daily systemd scheduling, and 30
-      daily retention points. It preserves a coordinated PostgreSQL custom
+      daily recovery points. It preserves a coordinated PostgreSQL custom
       dump and isolated restore boundaries. The coordinator does not select a
       provider or validate a real S3 endpoint, scheduled run, or target-host
       recovery.
   - [x] Add a host-local cold-capture coordinator and generic systemd service
         and timer templates. Focused tests use fake commands only. The templates
         remain operator-installed and disabled; the coordinator uploads a
-        verified paired capture after service restart and does not run Restic
-        initialization, retention, or pruning. Real S3, scheduling, and
+        verified paired capture after service restart and never initializes a
+        Restic repository. `resticRetentionEnabled` defaults off; when enabled
+        it runs the fixed `forget --keep-daily 30 --prune` policy after
+        successful upload, scoped by the configured repository, project host,
+        and both stable tags with `host,tags` grouping. Fake-command tests cover
+        the backup-only default, scope validation, command order, failed-upload
+        skip, and retention failure reporting. Real S3, scheduling, and
         target-host recovery remain open operator gates.
 - [x] Container images and deployment docs use fork-owned names. This covers
       repository-owned image builds and documented operator-run deployment
