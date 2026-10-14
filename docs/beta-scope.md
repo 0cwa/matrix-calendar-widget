@@ -30,6 +30,24 @@ and rollback become additional acceptance work under
 [ADR037](./adrs/adr037-independent-radicale-store-for-controlled-beta.md) and
 [ADR024](./adrs/adr024-in-repo-radicale-openid-auth.md).
 
+### Principal-mode scope for this pilot
+
+The owner-approved pilot runs full Element Web and Desktop browser acceptance
+in `bot-account` mode. Full appservice-mode Element Web/Desktop browser
+certification is deferred until after beta. This deferral applies only to
+browser certification: backend, identity/authentication, room authorization,
+and CalDAV contract tests remain mandatory in both `appservice` and
+`bot-account` modes, including the required real Radicale contracts. The
+`appservice` mode remains the default, and selecting `bot-account` does not
+enable any capability gate.
+
+The normal-bot browser gate retains the full Web/Desktop flow and strict
+ordinary-load limits below. It includes authorization and CRUD, stale-write
+rejection, reminder behavior across gateway restart, paired Radicale and
+PostgreSQL restore, G6 unsupported-resource preservation, owned cleanup, and
+browser-egress checks. This pilot scope does not authorize a production
+installation, publication, or rollout.
+
 Room reads, event writes, reminder configuration, reminder delivery, and room
 action notices remain separate default-off capabilities. An operator enables
 only the capabilities included in the reviewed pilot. Scheduled reminders use
@@ -118,13 +136,16 @@ aliases, configuration, logs, or topology in repository artifacts.
    against the exact tested head.
 2. **Isolated client acceptance before any production contact.** Use the
    pinned local Synapse, project-owned Radicale, and PostgreSQL test services
-   with real Element Web and Element Desktop clients. Use synthetic rooms,
-   users, calendars, and events. Test widget capability approval, room binding,
-   calendar loading, event create/edit/delete, conflict recovery, and reminder
-   settings. Record client, browser, operating-system, service, and candidate
-   versions. This proves only the tested local stack; it does not establish
-   compatibility with a team host. A production rollout needs a separate
-   explicit gate after this acceptance is complete.
+   with real Element Web and Element Desktop clients in `bot-account` mode.
+   Use synthetic rooms, users, calendars, and events. Test widget capability
+   approval, room binding, calendar loading, event create/edit/delete, conflict
+   recovery, and reminder settings. Record client, browser, operating-system,
+   service, and candidate versions. This proves only the tested local stack;
+   it does not establish compatibility with a team host. Full appservice-mode
+   browser certification is deferred until after beta, while appservice and
+   bot-account backend/authentication/authorization/CalDAV contracts remain
+   required in both modes. A production rollout needs a separate explicit gate
+   after this acceptance is complete.
 
    The Desktop startup harness must prove its exact dual-stack OUTPUT policy
    for packets emitted by the isolated Desktop UID at each counter snapshot

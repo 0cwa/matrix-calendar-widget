@@ -15,10 +15,7 @@
  * limitations under the License.
  */
 
-import {
-  CalendarRepository,
-  InMemoryCalendarRepository,
-} from '@matrix-calendar-widget/calendar';
+import { CalendarRepository } from '@matrix-calendar-widget/calendar';
 import {
   extractRawWidgetParameters,
   WidgetApi,
@@ -28,12 +25,14 @@ import {
   MuiThemeProvider,
   MuiWidgetApiProvider,
 } from '@matrix-widget-toolkit/mui';
+import { Alert, Box } from '@mui/material';
 import { Suspense, useMemo } from 'react';
 import App from './App';
 import {
   CalendarRepositoryProvider,
   GatewayCalendarRepository,
 } from './calendar';
+import { resolveCalendarGatewayConfig } from './calendar/resolveCalendarGatewayConfig';
 import { LocalizationProvider } from './components/common/LocalizationProvider';
 import { PageLoader } from './components/common/PageLoader';
 import { StoreProvider } from './store';
@@ -50,6 +49,19 @@ function AppContainer({
       calendarRepository ?? createDefaultCalendarRepository(widgetApiPromise),
     [calendarRepository, widgetApiPromise],
   );
+
+  if (!repository) {
+    return (
+      <MuiThemeProvider>
+        <Box padding={2}>
+          <Alert severity="error">
+            Calendar configuration is incomplete. A Matrix room ID and calendar
+            API URL are required.
+          </Alert>
+        </Box>
+      </MuiThemeProvider>
+    );
+  }
 
   return (
     <MuiThemeProvider>
@@ -79,25 +91,20 @@ export default AppContainer;
 
 function createDefaultCalendarRepository(
   widgetApiPromise: Promise<WidgetApi>,
-): CalendarRepository {
+): CalendarRepository | undefined {
   const parameters = extractRawWidgetParameters();
-  const baseUrl =
-    parameters['meetings_bot_base_url'] ??
-    getEnvironment('REACT_APP_API_BASE_URL');
-  const roomId = parameters['matrix_room_id'];
+  const configuration = resolveCalendarGatewayConfig(
+    parameters['meetings_bot_base_url'],
+    getEnvironment('REACT_APP_API_BASE_URL'),
+    parameters['matrix_room_id'],
+  );
 
-  if (
-    typeof baseUrl !== 'string' ||
-    baseUrl.length === 0 ||
-    typeof roomId !== 'string' ||
-    roomId.length === 0
-  ) {
-    return new InMemoryCalendarRepository();
+  if (!configuration) {
+    return undefined;
   }
 
   return new GatewayCalendarRepository({
-    baseUrl,
-    roomId,
+    ...configuration,
     getAuthorizationHeader: async () => {
       const widgetApi = await widgetApiPromise;
       const credentials = await widgetApi.requestOpenIDConnectToken();

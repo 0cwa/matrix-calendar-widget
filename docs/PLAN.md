@@ -454,9 +454,9 @@ DST regression or recurrence-editing criteria above.
       record the actual target's ingress,
       DNS/TLS/proxy, account ownership, MAS, credential issuance, and secret
       facts; validate encrypted off-server Restic-compatible S3 backups with
-      daily scheduling, up to 30 populated-calendar-day recovery points
-      (missed runs leave gaps), custody, and paired Radicale plus app-owned
-      PostgreSQL restore; and rehearse install, disable, and
+      daily scheduling and up to 30 populated-calendar-day recovery points;
+      missed daily runs leave gaps. Verify independent recovery-key custody,
+      paired Radicale plus app-owned PostgreSQL restore, and install/disable/
       rollback. The coordinator's automatic forget/prune path is opt-in and
       requires the configured Restic host and project tag to match the Compose
       project name; target acceptance and recovery evidence remain open.
@@ -464,6 +464,18 @@ DST regression or recurrence-editing criteria above.
       own store. Do not record private server, domain, account, provider, or
       credential details in public docs. Beta readiness and deployment remain
       not ready until these gates and a separate rollout decision are complete.
+  - [x] Add reviewed source-only local rehearsal support: [prebuilt/no-pull
+        setup](../dev/up.sh), [API probe](../dev/element-acceptance-api-probe.mjs),
+        [reminder fixture](../dev/local-reminder-fixture.mjs), and [paired
+        restore helper](../dev/element-acceptance-reminder-restore.mjs).
+        Focused tooling checks use in-process HTTP, fake commands, and fixed-enum
+        formatter cases. The composite action records fixed-enum step outcomes,
+        using `unknown` for absent, cancelled, or unrecognized outcomes. It
+        reports the first tracked failure only when the report is complete;
+        otherwise `first_failed_phase` is `unknown`. A diagnostic write failure
+        is marked unavailable without changing acceptance or cleanup outcomes.
+        No external service or real API, image store, restart, or restore was exercised;
+        this does not pass local Stage B or image/cache/runtime acceptance.
 - [ ] Room-target diagnostics beyond the supported calendar/event paths.
 
 Room access, event writes, reminder configuration, reminder delivery, and
@@ -562,10 +574,10 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       Compose `radicale-data` and `server-data` volumes, with separate external
       PostgreSQL guidance; etke-managed `/data` remains unverified (PR #170).
       The public runbook now recommends pinned Restic 0.19.1, generic
-      S3-compatible storage, operator-managed daily systemd scheduling, and 30
-      daily recovery points. It preserves a coordinated PostgreSQL custom
-      dump and isolated restore boundaries. The coordinator does not select a
-      provider or validate a real S3 endpoint, scheduled run, or target-host
+      S3-compatible storage, operator-managed daily systemd scheduling, and up to
+      30 populated-calendar-day recovery points; missed daily runs leave gaps.
+      It preserves a coordinated PostgreSQL custom dump and isolated restore
+      boundaries. The coordinator does not select a provider or validate a real S3 endpoint, scheduled run, or target-host
       recovery.
   - [x] Add a host-local cold-capture coordinator and generic systemd service
         and timer templates. Focused tests use fake commands only. The templates
@@ -767,9 +779,30 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       trusted Element-origin opening errors per profile qualified for the
       approved opening-stage diagnostic policy; their cause is unknown. This
       is isolated application evidence, not operator or deployment acceptance.
+- [ ] Run the owner-approved normal-bot-only browser acceptance for the
+      integrated PR #260 candidate. The full Element Web/Desktop journey must
+      pass in `bot-account` mode, including authorization, CRUD and stale-write
+      rejection, reminders across gateway restart, paired Radicale/PostgreSQL
+      restore, G6 unsupported-resource preservation and owned cleanup, and
+      keyboard/focus, standard side-panel layout, and browser-egress checks.
+      Keep the ordinary 0/25-event thresholds unchanged:
+      cold activation and same-range refresh at or below 2,000 ms, each
+      required decoded non-OpenID calendar API response at or below 1,000 ms,
+      and all five 25-event details samples at or below 500 ms. The five
+      protected checks, CodeQL, browser-layout and real Radicale/PostgreSQL
+      contracts, and independent review must be bound to the exact integrated
+      source. Full appservice-mode Element Web/Desktop browser certification
+      is deferred until after beta; backend, identity/authentication, room
+      authorization, and CalDAV contracts remain mandatory in both modes.
+      The forward-merge base is `56ebedd97ffa778cb433707cbcd5a74beaafe5a7`
+      (tree `529bd984f398ae1921b68189fa9a66c274e1b349`); checks on the prior
+      `3643166` head or on `main` alone do not establish acceptance of the
+      integrated candidate. This scope does not authorize production
+      installation or rollout.
 - [ ] Complete private operator readiness evidence for the merged candidate
-      before any separate rollout decision. Independent source review is
-      complete. Full isolated local Stage B and source-bound server
+      before any separate rollout decision. Independent review is complete
+      only for PR #260's pre-integration candidate; review of the integrated
+      source remains required. Full isolated local Stage B and source-bound server
       image/cache/runtime acceptance remain open, followed by actual
       target-specific deployment facts and recovery validation. The reminder
       restore helper honors explicit skip-Element mode during quiescence while

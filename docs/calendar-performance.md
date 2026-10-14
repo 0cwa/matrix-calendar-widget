@@ -17,6 +17,12 @@ The 250-event run and custom 31-day timings are diagnostic only. Previous
 250-event attempts did not produce a passing measured timing series; successful
 seeding or cleanup is not performance evidence.
 
+For the owner-approved pilot, run this full Web ordinary-load profile in
+`bot-account` mode. The exact limits and sample rules below are unchanged.
+Full appservice-mode browser certification is deferred until after beta; this
+does not defer either mode's backend, authentication, authorization, or CalDAV
+contract checks.
+
 Use two fresh authorized synthetic Element Web browser contexts at 1280×800 in
 the standard side-panel WidgetCard layout. The first context observes an empty
 calendar. Then seed exactly 25 unique simple timed VEVENTs into the same room

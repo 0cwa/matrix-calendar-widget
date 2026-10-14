@@ -1,0 +1,1910 @@
+#!/usr/bin/env node
+
+/*
+ * Copyright 2026 Matrix Calendar Widget contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import { spawnSync } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const LOCAL_LABEL = 'io.matrix-calendar-widget.local-rehearsal';
+const PROJECT_LABEL = 'com.docker.compose.project';
+const SERVICE_LABEL = 'com.docker.compose.service';
+const VOLUME_LABEL = 'com.docker.compose.volume';
+const SERVICES = Object.freeze([
+  'synapse',
+  'radicale',
+  'gateway',
+  'widget',
+  'postgres',
+  'restore-radicale',
+  'restore-gateway',
+]);
+const VOLUMES = Object.freeze([
+  'synapse-data',
+  'radicale-data',
+  'postgres-data',
+  'reminder-restore-radicale-data',
+]);
+const PORTS = Object.freeze([8008, 5232, 3000, 8080, 5233, 8090]);
+const API_STAGES = Object.freeze([
+  'fixture',
+  'member-openid',
+  'outsider-openid',
+  'outsider-denied',
+  'event-create',
+  'canonical-readback',
+  'stale-etag-conflict',
+  'event-update',
+  'updated-readback',
+  'event-delete',
+  'delete-readback',
+  'owned-cleanup',
+]);
+const SAFE_PHASES = new Set([
+  'preflight',
+  'source-binding',
+  'inventory',
+  'image-lock',
+  'fixture-image-lock',
+  'compose-validation',
+  'inventory',
+  'service-inventory',
+  'volume-inventory',
+  'network-inventory',
+  'private-files',
+  'docker-api-preflight',
+  'baseline',
+  'foreign-inventory',
+  'listener-inventory',
+  'fixture-setup',
+  'api-route-smoke',
+  'api-crud-probe',
+  'reminder-initial',
+  'reminder-restart',
+  'paired-store-restore',
+  'owned-cleanup',
+  'owned-cleanup-preflight',
+  'task-files-cleanup',
+  'receipt-publish',
+  'source-image-inspect',
+  'fixture-image-pull',
+  'compose-inputs',
+  'inventory-baseline',
+  'start-calendaring-services',
+  'start-primary-services',
+  'failure-cleanup',
+  'runner',
+]);
+const FIXTURES = Object.freeze([
+  {
+    role: 'synapse',
+    tag: 'ghcr.io/element-hq/synapse:v1.161.0',
+  },
+  { role: 'postgres', tag: 'postgres:16.15-alpine3.23' },
+]);
+
+class RehearsalFailure extends Error {
+  constructor(stage, code = 'gate-failed') {
+    super('Hosted operator rehearsal failed');
+    this.stage = stage;
+    this.code = code;
+  }
+}
+
+function fail(stage, code) {
+  throw new RehearsalFailure(stage, code);
+}
+
+function requireSha(value) {
+  if (typeof value !== 'string' || !/^[0-9a-f]{40}$/u.test(value)) {
+    fail('source-binding', 'source-sha-invalid');
+  }
+  return value;
+}
+
+function requireDigest(value) {
+  if (typeof value !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(value)) {
+    fail('image-lock', 'image-digest-invalid');
+  }
+  return value;
+}
+
+function readJson(file, stage) {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    fail(stage, 'json-invalid');
+  }
+}
+
+function required(env, key) {
+  const value = env[key];
+  if (typeof value !== 'string' || value.length === 0) {
+    fail('preflight', 'required-input-missing');
+  }
+  return value;
+}
+
+function privatePath(file, root, directory = false) {
+  let info;
+  try {
+    info = lstatSync(file);
+  } catch {
+    fail('private-files', 'private-path-missing');
+  }
+  if (
+    info.isSymbolicLink() ||
+    (directory ? !info.isDirectory() : !info.isFile()) ||
+    info.uid !== process.getuid?.() ||
+    (info.mode & 0o777) !== (directory ? 0o700 : 0o600) ||
+    !path.resolve(file).startsWith(`${path.resolve(root)}${path.sep}`)
+  ) {
+    fail('private-files', 'private-path-invalid');
+  }
+}
+
+function writePrivate(file, value) {
+  writeFileSync(file, value, { mode: 0o600, flag: 'wx' });
+  chmodSync(file, 0o600);
+}
+
+function exactSourceImages(manifest, sourceSha, sourceTree, runId, attempt) {
+  if (
+    manifest?.schema_version !== 2 ||
+    manifest.source?.sha !== sourceSha ||
+    manifest.source?.tree !== sourceTree ||
+    manifest.source?.dispatch_sha !==
+      required(process.env, 'RELEASE_DISPATCH_SHA') ||
+    manifest.workflow?.sha !== required(process.env, 'RELEASE_WORKFLOW_SHA') ||
+    manifest.workflow?.repository !== '0cwa/matrix-calendar-widget' ||
+    manifest.workflow?.ref !==
+      '0cwa/matrix-calendar-widget/.github/workflows/release-image-archive.yml@refs/heads/main' ||
+    manifest.workflow?.run_id !==
+      Number(required(process.env, 'RELEASE_RUN_ID')) ||
+    manifest.workflow?.run_attempt !== Number(attempt) ||
+    manifest.platform !== 'linux/amd64' ||
+    !Array.isArray(manifest.images) ||
+    manifest.images.length !== 3
+  ) {
+    fail('image-lock', 'manifest-binding-mismatch');
+  }
+
+  const expected = new Map([
+    ['server', 'matrix-calendar-widget/server'],
+    ['widget', 'matrix-calendar-widget/widget'],
+    ['radicale', 'matrix-calendar-widget/radicale-openid'],
+  ]);
+  const images = [];
+  for (const [name, prefix] of expected) {
+    const image = manifest.images.find((record) => record?.name === name);
+    if (
+      !image ||
+      image.tag !== `${prefix}:archive-${runId}-${attempt}` ||
+      (image.platform !== undefined && image.platform !== 'linux/amd64')
+    ) {
+      fail('image-lock', 'manifest-image-mismatch');
+    }
+    const id = requireDigest(image.image_id);
+    requireDigest(image.buildx_manifest_digest);
+    images.push({
+      role: name === 'server' ? 'gateway' : name,
+      ref: image.tag,
+      id,
+      buildxManifestDigest: image.buildx_manifest_digest,
+      os: 'linux',
+      architecture: 'amd64',
+    });
+  }
+  return images;
+}
+
+export function validateImageInspect(actual, expected) {
+  if (
+    !Array.isArray(actual) ||
+    actual.length !== 1 ||
+    actual[0]?.Id !== expected.id ||
+    actual[0]?.Os !== 'linux' ||
+    actual[0]?.Architecture !== 'amd64' ||
+    !Array.isArray(actual[0]?.RepoTags) ||
+    !actual[0].RepoTags.includes(expected.ref)
+  ) {
+    throw new RehearsalFailure('image-lock', 'image-id-drift');
+  }
+  return actual[0];
+}
+
+export function validateLockedImageInspect(actual, expected) {
+  if (
+    !Array.isArray(actual) ||
+    actual.length !== 1 ||
+    actual[0]?.Id !== expected.id ||
+    actual[0]?.Os !== 'linux' ||
+    actual[0]?.Architecture !== 'amd64' ||
+    (expected.buildxManifestDigest
+      ? !actual[0]?.RepoTags?.includes(expected.ref)
+      : !actual[0]?.RepoDigests?.includes(expected.ref))
+  ) {
+    throw new RehearsalFailure('image-lock', 'image-id-drift');
+  }
+  return actual[0];
+}
+
+export function fixtureIdentity(actual, expectedTag) {
+  if (
+    !Array.isArray(actual) ||
+    actual.length !== 1 ||
+    !/^sha256:[0-9a-f]{64}$/u.test(actual[0]?.Id ?? '') ||
+    actual[0]?.Os !== 'linux' ||
+    actual[0]?.Architecture !== 'amd64' ||
+    !actual[0]?.RepoTags?.includes(expectedTag) ||
+    !Array.isArray(actual[0]?.RepoDigests) ||
+    actual[0].RepoDigests.length === 0
+  ) {
+    fail('fixture-image-lock', 'fixture-image-invalid');
+  }
+  const digests = [...new Set(actual[0].RepoDigests)].sort();
+  if (digests.some((value) => !/@sha256:[0-9a-f]{64}$/u.test(value))) {
+    fail('fixture-image-lock', 'fixture-digest-invalid');
+  }
+  const repository = expectedTag.slice(0, expectedTag.lastIndexOf(':'));
+  const repositoryName = repository.split(':')[0];
+  const repoDigest = digests.find(
+    (value) =>
+      value.startsWith(`${repositoryName}@`) ||
+      (repositoryName === 'postgres' &&
+        value.startsWith('docker.io/library/postgres@')),
+  );
+  if (!repoDigest) fail('fixture-image-lock', 'fixture-repository-mismatch');
+  return {
+    ref: repoDigest,
+    id: actual[0].Id,
+    repoDigests: digests,
+    os: actual[0].Os,
+    architecture: actual[0].Architecture,
+  };
+}
+
+function makeComposeOverride(lock, runId, project) {
+  const byRole = new Map(lock.images.map((image) => [image.role, image.ref]));
+  const serviceImage = (service) => {
+    if (service === 'restore-radicale') return byRole.get('radicale');
+    if (service === 'restore-gateway') return byRole.get('gateway');
+    return byRole.get(service);
+  };
+  if (SERVICES.some((service) => !serviceImage(service))) {
+    fail('compose-validation', 'image-role-missing');
+  }
+  const lines = ['services:'];
+  for (const service of SERVICES) {
+    lines.push(
+      `  ${service}:`,
+      `    image: ${serviceImage(service)}`,
+      '    labels:',
+      `      ${LOCAL_LABEL}: "${runId}"`,
+    );
+  }
+  lines.push(
+    '  element:',
+    '    profiles: ["operator-rehearsal-disabled"]',
+    'networks:',
+    '  default:',
+    '    labels:',
+    `      ${LOCAL_LABEL}: "${runId}"`,
+    'volumes:',
+  );
+  for (const volume of VOLUMES) {
+    lines.push(
+      `  ${volume}:`,
+      '    labels:',
+      `      ${LOCAL_LABEL}: "${runId}"`,
+    );
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function labelsOf(resource, kind) {
+  return kind === 'container'
+    ? (resource?.Config?.Labels ?? {})
+    : (resource?.Labels ?? {});
+}
+
+function namedForTask(resource, kind, project) {
+  const name =
+    kind === 'container' ? resource?.Name?.replace(/^\//u, '') : resource?.Name;
+  return (
+    typeof name === 'string' &&
+    (name.startsWith(`${project}-`) || name.startsWith(`${project}_`))
+  );
+}
+
+function ownership(resource, kind, runId, project) {
+  const labels = labelsOf(resource, kind);
+  const hasRun = Object.hasOwn(labels, LOCAL_LABEL);
+  const hasProject = Object.hasOwn(labels, PROJECT_LABEL);
+  const taskName = namedForTask(resource, kind, project);
+  if (!hasRun && !hasProject && !taskName) return 'foreign';
+  if (labels[LOCAL_LABEL] !== runId || labels[PROJECT_LABEL] !== project) {
+    fail('inventory', 'owner-label-mismatch');
+  }
+  return 'owned';
+}
+
+function isRehearsalListener(line) {
+  return PORTS.some((port) => new RegExp(`:${port}(?:\\s|$)`, 'u').test(line));
+}
+
+function stableContainer(value) {
+  const state = value.State ?? {};
+  const health = state.Health;
+  return {
+    Id: value.Id,
+    Name: value.Name,
+    Image: value.Image,
+    Config: {
+      Image: value.Config?.Image,
+      Labels: value.Config?.Labels,
+      Env: value.Config?.Env,
+      Cmd: value.Config?.Cmd,
+      Entrypoint: value.Config?.Entrypoint,
+      WorkingDir: value.Config?.WorkingDir,
+      User: value.Config?.User,
+    },
+    State: {
+      Status: state.Status,
+      Running: state.Running,
+      Paused: state.Paused,
+      Restarting: state.Restarting,
+      OOMKilled: state.OOMKilled,
+      Dead: state.Dead,
+      ExitCode: state.ExitCode,
+      Health: health ? { Status: health.Status } : null,
+    },
+    Mounts: value.Mounts,
+    HostConfig: {
+      NetworkMode: value.HostConfig?.NetworkMode,
+      PortBindings: value.HostConfig?.PortBindings,
+      RestartPolicy: value.HostConfig?.RestartPolicy,
+    },
+    NetworkSettings: {
+      Ports: value.NetworkSettings?.Ports,
+      Networks: value.NetworkSettings?.Networks,
+    },
+  };
+}
+
+function stableNetwork(value) {
+  return {
+    Id: value.Id,
+    Name: value.Name,
+    Driver: value.Driver,
+    Scope: value.Scope,
+    Internal: value.Internal,
+    Attachable: value.Attachable,
+    Ingress: value.Ingress,
+    Labels: value.Labels,
+    IPAM: value.IPAM,
+    Options: value.Options,
+    Containers: value.Containers,
+  };
+}
+
+function stableVolume(value) {
+  return {
+    Name: value.Name,
+    Driver: value.Driver,
+    Mountpoint: value.Mountpoint,
+    Labels: value.Labels,
+    Options: value.Options,
+    Scope: value.Scope,
+  };
+}
+
+export function foreignInventory(inventory, runId, project) {
+  const result = {
+    containers: [],
+    networks: [],
+    volumes: [],
+    images: inventory.images,
+    listeners: inventory.listeners.filter((line) => !isRehearsalListener(line)),
+  };
+  for (const [kind, property] of [
+    ['container', 'containers'],
+    ['network', 'networks'],
+    ['volume', 'volumes'],
+  ]) {
+    for (const resource of inventory[property]) {
+      if (ownership(resource, kind, runId, project) === 'foreign') {
+        result[property].push(resource);
+      }
+    }
+  }
+  return result;
+}
+
+export function assertTaskServiceSet(
+  inventory,
+  { runId, project, images, services, runningServices, stoppedServices },
+) {
+  const owners = [];
+  for (const container of inventory.containers) {
+    if (ownership(container, 'container', runId, project) === 'owned') {
+      owners.push(container);
+    }
+  }
+  const expected = [...services].sort();
+  const observed = owners
+    .map((container) => labelsOf(container, 'container')[SERVICE_LABEL])
+    .sort();
+  if (
+    JSON.stringify(observed) !== JSON.stringify(expected) ||
+    owners.length !== expected.length
+  ) {
+    fail('service-inventory', 'service-set-mismatch');
+  }
+  const imageByRole = new Map(images.map((image) => [image.role, image.id]));
+  for (const container of owners) {
+    const labels = labelsOf(container, 'container');
+    const service = labels[SERVICE_LABEL];
+    const role =
+      service === 'restore-radicale'
+        ? 'radicale'
+        : service === 'restore-gateway'
+          ? 'gateway'
+          : service;
+    if (
+      !SERVICES.includes(service) ||
+      container.Image !== imageByRole.get(role) ||
+      !/^sha256:[0-9a-f]{64}$/u.test(container.Id ?? '')
+    ) {
+      fail('service-inventory', 'service-image-mismatch');
+    }
+  }
+  for (const [service, status] of [
+    ...(runningServices ?? []).map((service) => [service, 'running']),
+    ...(stoppedServices ?? []).map((service) => [service, 'exited']),
+  ]) {
+    const container = owners.find(
+      (resource) => labelsOf(resource, 'container')[SERVICE_LABEL] === service,
+    );
+    if (container?.State?.Status !== status) {
+      fail('service-inventory', 'service-state-mismatch');
+    }
+  }
+  return owners;
+}
+
+function sortByKey(items, key) {
+  return [...items].sort((a, b) =>
+    String(a?.[key]).localeCompare(String(b?.[key])),
+  );
+}
+
+function parseLines(value) {
+  return value
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function spawn(command, args, { cwd, env, input, timeout = 15 * 60_000 } = {}) {
+  return spawnSync(command, args, {
+    cwd,
+    env,
+    input,
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+    timeout,
+    windowsHide: true,
+  });
+}
+
+function gitValue(root, args, stage) {
+  const result = spawn('git', ['-C', root, ...args]);
+  if (result.error || result.status !== 0) fail(stage, 'git-check-failed');
+  return (result.stdout ?? '').trim();
+}
+
+function taskEnvironment(taskDir, dockerConfig, runId, project, paths) {
+  const env = {
+    PATH: required(process.env, 'PATH'),
+    HOME: paths.homeDir,
+    TMPDIR: paths.tmpDir,
+    LANG: 'C.UTF-8',
+    LC_ALL: 'C.UTF-8',
+    DOCKER_CONFIG: dockerConfig,
+    RUNNER_TEMP: taskDir,
+    ELEMENT_ACCEPTANCE_LOCAL_RUN_ID: runId,
+    COMPOSE_PROJECT_NAME: project,
+    ELEMENT_ACCEPTANCE_SKIP_ELEMENT: 'true',
+    MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL: 'true',
+    MATRIX_CALENDAR_LOCAL_COMPOSE_OVERRIDE_FILE: paths.overrideFile,
+    MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE: paths.envFile,
+    ELEMENT_ACCEPTANCE_COMPOSE_OVERRIDE_FILES: JSON.stringify([
+      paths.overrideFile,
+    ]),
+    ELEMENT_ACCEPTANCE_RADICALE_IMAGE: paths.radicaleImage,
+    MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION: 'disabled',
+    MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING: '127.0.0.1:8008:8008',
+    MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING: '127.0.0.1:5232:5232',
+    ROOM_CALENDAR_PRINCIPAL_MODE: 'bot-account',
+    MATRIX_APPLICATION_SERVICE_USER_ID: '',
+    MATRIX_CALENDAR_DEV_PASSWORD: randomBytes(24).toString('base64url'),
+    ELEMENT_ACCEPTANCE_STAGE_FILE: paths.stageFile,
+    ELEMENT_ACCEPTANCE_USERS_FILE: paths.usersFile,
+    ELEMENT_ACCEPTANCE_SERVER_ENV_FILE: paths.envFile,
+    ELEMENT_ACCEPTANCE_REMINDER_EVENT_FILE: paths.eventFile,
+    ELEMENT_ACCEPTANCE_REMINDER_DELIVERY_FILE: paths.deliveryFile,
+    ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME: `${project}_radicale-restore`,
+    OPERATOR_REHEARSAL_TASK_DIR: taskDir,
+  };
+  return env;
+}
+
+function writeInitialComposeEnv(file, project, restoreVolume, radicaleImage) {
+  const values = {
+    ELEMENT_ACCEPTANCE_BOT_ACCESS_TOKEN: 'local-preflight-token',
+    ELEMENT_ACCEPTANCE_REMINDER_BOOTSTRAP_PASSWORD: 'local-preflight-secret',
+    ELEMENT_ACCEPTANCE_REMINDER_APP_PASSWORD: 'local-preflight-secret',
+    ELEMENT_ACCEPTANCE_REMINDER_DATABASE_URL:
+      'postgresql://local:local@postgres:5432/matrix_calendar_test',
+    ELEMENT_ACCEPTANCE_REMINDER_RESTORE_DATABASE_URL:
+      'postgresql://local:local@postgres:5432/matrix_calendar_restored',
+    ELEMENT_ACCEPTANCE_ROOM_BINDING: '[]',
+    ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME: restoreVolume,
+    ELEMENT_ACCEPTANCE_RADICALE_IMAGE: radicaleImage,
+    MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION: 'disabled',
+    MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING: '127.0.0.1:8008:8008',
+    MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING: '127.0.0.1:5232:5232',
+    MATRIX_APPLICATION_SERVICE_TOKEN: '',
+    MATRIX_APPLICATION_SERVICE_USER_ID: '',
+    ROOM_CALENDAR_PRINCIPAL_MODE: 'bot-account',
+    COMPOSE_PROJECT_NAME: project,
+  };
+  writePrivate(
+    file,
+    `${Object.entries(values)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n')}\n`,
+  );
+}
+
+function runTask(
+  stage,
+  command,
+  args,
+  { cwd, env, taskDir, input, timeout } = {},
+) {
+  const result = spawn(command, args, { cwd, env, input, timeout });
+  const logFile = path.join(
+    taskDir,
+    `${stage.replace(/[^a-z0-9-]/giu, '-')}.log`,
+  );
+  const output = `${result.stdout ?? ''}\n--- stderr ---\n${result.stderr ?? ''}`;
+  writeFileSync(logFile, output, { mode: 0o600 });
+  chmodSync(logFile, 0o600);
+  if (result.error || result.status !== 0) {
+    fail(
+      stage,
+      result.error
+        ? 'command-unavailable'
+        : `exit-${result.status ?? 'unknown'}`,
+    );
+  }
+  return result.stdout ?? '';
+}
+
+function dockerJson(stage, args, context) {
+  const raw = runTask(stage, 'docker', args, context);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    fail(stage, 'docker-json-invalid');
+  }
+}
+
+function verifyLockedImages(images, context, stage) {
+  for (const image of images) {
+    const actual = dockerJson(
+      `${stage}-${image.role}`,
+      ['image', 'inspect', image.ref],
+      context,
+    );
+    validateLockedImageInspect(actual, image);
+  }
+}
+
+function inspectMany(stage, ids, context) {
+  if (ids.length === 0) return [];
+  return dockerJson(stage, ['inspect', ...ids], context);
+}
+
+function captureInventory(stage, context) {
+  const ids = {
+    containers: parseLines(
+      runTask(
+        `${stage}-containers`,
+        'docker',
+        ['ps', '-aq', '--no-trunc'],
+        context,
+      ),
+    ).sort(),
+    images: [
+      ...new Set(
+        parseLines(
+          runTask(
+            `${stage}-image-ids`,
+            'docker',
+            ['image', 'ls', '--all', '--no-trunc', '-q'],
+            context,
+          ),
+        ),
+      ),
+    ].sort(),
+    networks: parseLines(
+      runTask(
+        `${stage}-network-ids`,
+        'docker',
+        ['network', 'ls', '-q'],
+        context,
+      ),
+    ).sort(),
+    volumes: parseLines(
+      runTask(
+        `${stage}-volume-names`,
+        'docker',
+        ['volume', 'ls', '-q'],
+        context,
+      ),
+    ).sort(),
+  };
+  const inventory = {
+    containers: sortByKey(
+      inspectMany(`${stage}-container-inspect`, ids.containers, context),
+      'Id',
+    ).map(stableContainer),
+    images: sortByKey(
+      inspectMany(`${stage}-image-inspect`, ids.images, context),
+      'Id',
+    ),
+    networks: sortByKey(
+      inspectMany(`${stage}-network-inspect`, ids.networks, context),
+      'Id',
+    ).map(stableNetwork),
+    volumes: sortByKey(
+      inspectMany(`${stage}-volume-inspect`, ids.volumes, context),
+      'Name',
+    ).map(stableVolume),
+    listeners: parseLines(
+      runTask(`${stage}-listeners`, 'ss', ['-H', '-ltn'], context),
+    ).sort(),
+  };
+  writeFileSync(
+    path.join(context.taskDir, `${stage}-inventory.json`),
+    `${JSON.stringify(inventory)}\n`,
+    { mode: 0o600 },
+  );
+  return inventory;
+}
+
+export function assertNoCollision(inventory, runId, project) {
+  for (const kind of ['container', 'network', 'volume']) {
+    const records = inventory[`${kind}s`];
+    for (const resource of records) {
+      if (ownership(resource, kind, runId, project) === 'owned') {
+        fail('baseline', 'project-collision');
+      }
+    }
+  }
+  if (inventory.listeners.some(isRehearsalListener)) {
+    fail('baseline', 'required-port-in-use');
+  }
+}
+
+export function compareForeign(before, after, runId, project) {
+  const left = foreignInventory(before, runId, project);
+  const right = foreignInventory(after, runId, project);
+  if (JSON.stringify(left) !== JSON.stringify(right)) {
+    fail('foreign-inventory', 'foreign-state-changed');
+  }
+}
+
+function assertVolumes(
+  inventory,
+  runId,
+  project,
+  { pairedRestore = true } = {},
+) {
+  const owned = inventory.volumes.filter(
+    (volume) => ownership(volume, 'volume', runId, project) === 'owned',
+  );
+  const byName = new Map(owned.map((volume) => [volume.Name, volume]));
+  const expectedNames = [
+    `${project}_synapse-data`,
+    `${project}_radicale-data`,
+    `${project}_postgres-data`,
+    ...(pairedRestore ? [`${project}_radicale-restore`] : []),
+  ].sort();
+  if (
+    JSON.stringify([...byName.keys()].sort()) !==
+      JSON.stringify(expectedNames) ||
+    owned.some((volume) => !VOLUMES.includes(volume.Labels?.[VOLUME_LABEL]))
+  ) {
+    fail('volume-inventory', 'volume-set-mismatch');
+  }
+  return owned;
+}
+
+function assertNetwork(inventory, runId, project) {
+  const owned = inventory.networks.filter(
+    (network) => ownership(network, 'network', runId, project) === 'owned',
+  );
+  if (
+    owned.length !== 1 ||
+    owned[0].Name !== `${project}_default` ||
+    !/^[a-f0-9]{64}$/u.test(owned[0].Id ?? '')
+  ) {
+    fail('network-inventory', 'network-set-mismatch');
+  }
+  return owned[0];
+}
+
+function assertNoElement(inventory, runId, project) {
+  const task = inventory.containers.filter(
+    (container) =>
+      ownership(container, 'container', runId, project) === 'owned',
+  );
+  if (
+    task.some(
+      (container) =>
+        labelsOf(container, 'container')[SERVICE_LABEL] === 'element',
+    )
+  ) {
+    fail('service-inventory', 'element-container-present');
+  }
+}
+
+function assertNoOwnedResources(inventory, runId, project, kind, stage) {
+  if (
+    inventory[`${kind}s`].some(
+      (resource) => ownership(resource, kind, runId, project) === 'owned',
+    )
+  ) {
+    fail(stage, `owned-${kind}-remains`);
+  }
+}
+
+function assertListenerScope(inventory, baseline) {
+  const foreign = (items) => items.filter((line) => !isRehearsalListener(line));
+  if (
+    JSON.stringify(foreign(inventory.listeners)) !==
+    JSON.stringify(foreign(baseline.listeners))
+  ) {
+    fail('listener-inventory', 'foreign-listener-changed');
+  }
+}
+
+function composeArgs(sourceRoot, project, envFile, overrideFile) {
+  return [
+    'compose',
+    '-p',
+    project,
+    '--env-file',
+    envFile,
+    '-f',
+    path.join(sourceRoot, 'dev/compose.yaml'),
+    '-f',
+    path.join(sourceRoot, 'dev/element-acceptance.compose.yaml'),
+    '-f',
+    path.join(sourceRoot, 'dev/element-acceptance-reminder.compose.yaml'),
+    '-f',
+    path.join(sourceRoot, 'dev/element-acceptance-local-prebuilt.compose.yaml'),
+    '-f',
+    overrideFile,
+  ];
+}
+
+function validateComposeModel(model, lock, runId, project) {
+  const serviceNames = Object.keys(model?.services ?? {}).sort();
+  const expected = [...SERVICES, 'element'].sort();
+  if (JSON.stringify(serviceNames) !== JSON.stringify(expected)) {
+    fail('compose-validation', 'service-model-mismatch');
+  }
+  const images = new Map(lock.images.map((image) => [image.role, image.ref]));
+  for (const service of SERVICES) {
+    const expectedRef =
+      service === 'restore-radicale'
+        ? images.get('radicale')
+        : service === 'restore-gateway'
+          ? images.get('gateway')
+          : images.get(service);
+    if (
+      model.services[service]?.image !== expectedRef ||
+      model.services[service]?.labels?.[LOCAL_LABEL] !== runId
+    ) {
+      fail('compose-validation', 'image-or-label-mismatch');
+    }
+  }
+  if (
+    !model.services.element?.profiles?.includes(
+      'operator-rehearsal-disabled',
+    ) ||
+    model.networks?.default?.labels?.[LOCAL_LABEL] !== runId ||
+    model.volumes?.['synapse-data']?.labels?.[LOCAL_LABEL] !== runId ||
+    model.volumes?.['radicale-data']?.labels?.[LOCAL_LABEL] !== runId ||
+    model.volumes?.['postgres-data']?.labels?.[LOCAL_LABEL] !== runId ||
+    model.volumes?.['reminder-restore-radicale-data']?.labels?.[LOCAL_LABEL] !==
+      runId ||
+    project !== `mcw-p0-${runId}`
+  ) {
+    fail('compose-validation', 'ownership-or-element-policy-mismatch');
+  }
+}
+
+function checkSummary(command, stage) {
+  let result;
+  try {
+    result = JSON.parse(command);
+  } catch {
+    fail(stage, 'helper-summary-invalid');
+  }
+  return result;
+}
+
+function assertReminderResult(stdout, markerPath, expectedCount, stage) {
+  const summary = checkSummary(stdout.trim(), stage);
+  if (summary.status !== 'passed' || summary.markerCount !== expectedCount) {
+    fail(stage, 'reminder-fixture-failed');
+  }
+  const markers = readJson(markerPath, stage);
+  if (!Array.isArray(markers) || markers.length !== expectedCount) {
+    fail(stage, 'reminder-marker-count-mismatch');
+  }
+  return expectedCount;
+}
+
+function assertInitialReminderState(markerPath) {
+  const markers = readJson(markerPath, 'reminder-initial');
+  if (!Array.isArray(markers) || markers.length !== 0) {
+    fail('reminder-initial', 'initial-marker-count-invalid');
+  }
+  return 0;
+}
+
+function serviceContainer(context, service) {
+  const args = [...context.compose, 'ps', '--all', '--format', 'json', service];
+  const stdout = runTask(`compose-ps-${service}`, 'docker', args, context);
+  return stdout;
+}
+
+function assertPrivateTaskTree(root, current) {
+  privatePath(root, current.runnerTemp, true);
+  for (const name of readdirSync(root)) {
+    const child = path.join(root, name);
+    const info = lstatSync(child);
+    if (
+      info.isSymbolicLink() ||
+      info.uid !== process.getuid?.() ||
+      (info.mode & 0o777) !== (info.isDirectory() ? 0o700 : 0o600)
+    ) {
+      fail('private-files', 'task-entry-permissions-invalid');
+    }
+    if (info.isDirectory()) {
+      assertPrivateTaskTree(child, current);
+    } else if (!info.isFile()) {
+      fail('private-files', 'task-file-permissions-invalid');
+    }
+  }
+}
+
+function imageEvidence(lock) {
+  return lock.images.map((image) => ({
+    role: image.role,
+    ref: image.ref,
+    id: image.id,
+    digests: image.repoDigests ?? [image.buildxManifestDigest],
+    platform: `${image.os}/${image.architecture}`,
+  }));
+}
+
+function validateOwnedResourceForCleanup(resource, kind, runId, project) {
+  if (ownership(resource, kind, runId, project) !== 'owned') {
+    fail('owned-cleanup', 'resource-owner-changed');
+  }
+  if (kind === 'container') {
+    const service = labelsOf(resource, kind)[SERVICE_LABEL];
+    if (!SERVICES.includes(service)) fail('owned-cleanup', 'unknown-service');
+  }
+}
+
+export function planOwnedCleanup(
+  inventory,
+  runId,
+  project,
+  images,
+  { allowPartial = false } = {},
+) {
+  const containers = inventory.containers.filter(
+    (resource) => ownership(resource, 'container', runId, project) === 'owned',
+  );
+  const services = containers.map(
+    (resource) => labelsOf(resource, 'container')[SERVICE_LABEL],
+  );
+  if (
+    allowPartial
+      ? services.length > 8
+      : services.length < 5 ||
+        services.length > 7 ||
+        new Set(services).size !== services.length ||
+        !['synapse', 'radicale', 'gateway', 'widget', 'postgres'].every(
+          (service) => services.includes(service),
+        ) ||
+        services.includes('restore-radicale') !==
+          services.includes('restore-gateway')
+  ) {
+    throw new RehearsalFailure('owned-cleanup', 'cleanup-service-set-invalid');
+  }
+  const owners = assertTaskServiceSet(inventory, {
+    runId,
+    project,
+    images,
+    services,
+  });
+  let volumes;
+  let network;
+  if (allowPartial) {
+    const expectedVolumes = new Map([
+      [`${project}_synapse-data`, 'synapse-data'],
+      [`${project}_radicale-data`, 'radicale-data'],
+      [`${project}_postgres-data`, 'postgres-data'],
+      [`${project}_radicale-restore`, 'reminder-restore-radicale-data'],
+    ]);
+    volumes = inventory.volumes.filter(
+      (volume) => ownership(volume, 'volume', runId, project) === 'owned',
+    );
+    if (
+      volumes.some(
+        (volume) =>
+          expectedVolumes.get(volume.Name) !== volume.Labels?.[VOLUME_LABEL],
+      )
+    ) {
+      fail('owned-cleanup', 'cleanup-volume-set-invalid');
+    }
+    const ownedNetworks = inventory.networks.filter(
+      (resource) => ownership(resource, 'network', runId, project) === 'owned',
+    );
+    if (
+      ownedNetworks.length > 1 ||
+      ownedNetworks.some(
+        (resource) =>
+          resource.Name !== `${project}_default` ||
+          !/^[a-f0-9]{64}$/u.test(resource.Id ?? ''),
+      )
+    ) {
+      fail('owned-cleanup', 'cleanup-network-set-invalid');
+    }
+    network = ownedNetworks[0];
+  } else {
+    volumes = assertVolumes(inventory, runId, project);
+    network = assertNetwork(inventory, runId, project);
+  }
+  assertNoElement(inventory, runId, project);
+  return { containers: owners, volumes, network, partial: allowPartial };
+}
+
+function currentIdentity(resource, kind, runId, project) {
+  validateOwnedResourceForCleanup(resource, kind, runId, project);
+  if (
+    kind === 'container' &&
+    !/^sha256:[0-9a-f]{64}$/u.test(resource.Image ?? '')
+  ) {
+    fail('owned-cleanup', 'container-image-invalid');
+  }
+}
+
+function assertInventoryEqual(actual, expected, stage) {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    fail(stage, 'inventory-postcondition-failed');
+  }
+}
+
+function removeOwnedResources({
+  plan,
+  context,
+  baseline,
+  runId,
+  project,
+  prefix,
+}) {
+  const stage = `${prefix}-cleanup`;
+  const plannedContainers = new Map(
+    plan.containers.map((value) => [value.Id, value]),
+  );
+  for (const containerId of [...plannedContainers.keys()].sort()) {
+    const fresh = dockerJson(
+      `${prefix}-inspect-container`,
+      ['inspect', containerId],
+      context,
+    );
+    if (fresh.length !== 1) fail(stage, 'container-changed-before-cleanup');
+    const stable = stableContainer(fresh[0]);
+    currentIdentity(stable, 'container', runId, project);
+    assertInventoryEqual(stable, plannedContainers.get(containerId), stage);
+    if (fresh[0].State?.Running === true) {
+      runTask(
+        `${prefix}-stop-container`,
+        'docker',
+        ['container', 'stop', '--time', '30', containerId],
+        context,
+      );
+    }
+    runTask(
+      `${prefix}-remove-container`,
+      'docker',
+      ['container', 'rm', containerId],
+      context,
+    );
+  }
+
+  const afterContainers = captureInventory(
+    `${prefix}-after-containers`,
+    context,
+  );
+  compareForeign(baseline, afterContainers, runId, project);
+  assertNoOwnedResources(afterContainers, runId, project, 'container', stage);
+  const observedVolumes = afterContainers.volumes.filter(
+    (volume) => ownership(volume, 'volume', runId, project) === 'owned',
+  );
+  assertInventoryEqual(observedVolumes, plan.volumes, stage);
+  const mountedVolumeNames = new Set(
+    afterContainers.containers.flatMap((container) =>
+      (container.Mounts ?? []).map((mount) => mount.Name).filter(Boolean),
+    ),
+  );
+  for (const volume of plan.volumes) {
+    const fresh = dockerJson(
+      `${prefix}-inspect-volume`,
+      ['volume', 'inspect', volume.Name],
+      context,
+    );
+    if (fresh.length !== 1) fail(stage, 'volume-changed-before-cleanup');
+    assertInventoryEqual(stableVolume(fresh[0]), volume, stage);
+    currentIdentity(volume, 'volume', runId, project);
+    if (mountedVolumeNames.has(volume.Name))
+      fail(stage, 'owned-volume-still-mounted');
+    runTask(
+      `${prefix}-remove-volume`,
+      'docker',
+      ['volume', 'rm', volume.Name],
+      context,
+    );
+  }
+
+  const afterVolumes = captureInventory(`${prefix}-after-volumes`, context);
+  compareForeign(baseline, afterVolumes, runId, project);
+  assertNoOwnedResources(afterVolumes, runId, project, 'volume', stage);
+  const observedNetworks = afterVolumes.networks.filter(
+    (network) => ownership(network, 'network', runId, project) === 'owned',
+  );
+  assertInventoryEqual(
+    observedNetworks,
+    plan.network ? [plan.network] : [],
+    stage,
+  );
+  if (plan.network) {
+    const fresh = dockerJson(
+      `${prefix}-inspect-network`,
+      ['network', 'inspect', plan.network.Id],
+      context,
+    );
+    if (fresh.length !== 1) fail(stage, 'network-changed-before-cleanup');
+    assertInventoryEqual(stableNetwork(fresh[0]), plan.network, stage);
+    currentIdentity(plan.network, 'network', runId, project);
+    if (Object.keys(plan.network.Containers ?? {}).length !== 0) {
+      fail(stage, 'owned-network-still-attached');
+    }
+    runTask(
+      `${prefix}-remove-network`,
+      'docker',
+      ['network', 'rm', plan.network.Id],
+      context,
+    );
+  }
+
+  const finalInventory = captureInventory(`${prefix}-final-inventory`, context);
+  compareForeign(baseline, finalInventory, runId, project);
+  assertInventoryEqual(finalInventory, baseline, `${prefix}-final-inventory`);
+  for (const kind of ['container', 'network', 'volume']) {
+    assertNoOwnedResources(finalInventory, runId, project, kind, stage);
+  }
+  return finalInventory;
+}
+
+function assertStageSummary(pathName, expected) {
+  const records = readFileSync(pathName, 'utf8')
+    .split(/\r?\n/u)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const record = records.find((entry) => entry?.phase === expected);
+  if (!record || record.status !== 'passed') {
+    fail('fixture-setup', 'fixture-stage-not-passed');
+  }
+}
+
+function safeReceipt({
+  sourceSha,
+  sourceTree,
+  workflowSha,
+  lock,
+  apiCount,
+  markerCounts,
+  inventoryCounts,
+}) {
+  return {
+    schema_version: 1,
+    result: 'pending-cleanup',
+    phase: 'hosted-docker-operator-v5',
+    failed_phase: null,
+    failure_code: null,
+    source_sha: sourceSha,
+    source_tree: sourceTree,
+    workflow_sha: workflowSha,
+    platform: 'linux/amd64',
+    image_lock: imageEvidence(lock),
+    api_cases: apiCount,
+    reminder_marker_counts: markerCounts,
+    primary_services: 5,
+    paired_restore_services: 2,
+    checks: {
+      source_binding: true,
+      image_identity: true,
+      api_authorization_and_crud: true,
+      reminder_restart: true,
+      paired_restore: true,
+      owned_cleanup: false,
+    },
+    foreign_inventory: 'unchanged',
+    inventory_counts: inventoryCounts,
+  };
+}
+
+export function formatSuccessSummary(receipt) {
+  if (
+    receipt?.result !== 'passed' ||
+    receipt.cleanup_verified !== true ||
+    !/^[0-9a-f]{40}$/u.test(receipt.source_sha ?? '')
+  ) {
+    throw new RehearsalFailure('receipt-publish', 'cleanup-not-verified');
+  }
+  return [
+    '## Hosted Docker operator rehearsal',
+    '',
+    `- Result: passed for source ${receipt.source_sha} on linux/amd64.`,
+    '- Phase: complete; failure phase: none.',
+    '- Source-built images: 3 verified IDs; fixture images: 2 immutable digests locked.',
+    '- API authorization and CRUD cases: 12/12 passed.',
+    '- Reminder delivery marker counts: 0 → 1 → 2 → 3.',
+    '- Paired Radicale/PostgreSQL restore: passed.',
+    '- Exact owned-resource cleanup: passed; foreign inventory unchanged.',
+    '- Element browser service: disabled for this hosted Docker rehearsal.',
+    '',
+  ].join('\n');
+}
+
+export function formatFailureSummary(sourceSha, phase, cleanup) {
+  const safeSource = /^[0-9a-f]{40}$/u.test(sourceSha ?? '')
+    ? sourceSha
+    : 'unavailable';
+  const safePhase = SAFE_PHASES.has(phase) ? phase : 'runner';
+  const safeCleanup = ['verified', 'unverified', 'not-run'].includes(cleanup)
+    ? cleanup
+    : 'unverified';
+  return [
+    '## Hosted Docker operator rehearsal',
+    '',
+    '- Result: failed.',
+    `- Source SHA: ${safeSource}.`,
+    `- Failed phase: ${safePhase}.`,
+    '- Failure code: gate-failed.',
+    `- Owned cleanup: ${safeCleanup}.`,
+    '- Success receipt: not published.',
+    '',
+  ].join('\n');
+}
+
+async function main() {
+  let stage = 'preflight';
+  let taskDir;
+  let receiptPath;
+  let sourceShaForSummary;
+  let cleanupState;
+  let cleanupVerified = false;
+  const env = process.env;
+  try {
+    if (env.OPERATOR_REHEARSAL_ENABLED !== 'true') {
+      fail('preflight', 'operator-rehearsal-not-enabled');
+    }
+    const sourceRoot = path.resolve(
+      required(env, 'GITHUB_WORKSPACE'),
+      'source',
+    );
+    const toolingRoot = path.resolve(
+      required(env, 'GITHUB_WORKSPACE'),
+      'tooling',
+    );
+    const archiveRoot = path.resolve(required(env, 'ARCHIVE_ROOT'));
+    const sourceSha = requireSha(required(env, 'RELEASE_SOURCE_SHA'));
+    sourceShaForSummary = sourceSha;
+    const workflowSha = requireSha(required(env, 'RELEASE_WORKFLOW_SHA'));
+    const runId = required(env, 'RELEASE_RUN_ID');
+    const attempt = required(env, 'RELEASE_RUN_ATTEMPT');
+    if (!/^\d{1,20}$/u.test(runId) || !/^\d{1,4}$/u.test(attempt)) {
+      fail('preflight', 'run-identity-invalid');
+    }
+    const id = createHash('sha256')
+      .update(`${runId}:${attempt}`)
+      .digest('hex')
+      .slice(0, 16);
+    const project = `mcw-p0-${id}`;
+    const runnerTemp = path.resolve(required(env, 'RUNNER_TEMP'));
+    const runnerInfo = lstatSync(runnerTemp);
+    if (
+      runnerInfo.isSymbolicLink() ||
+      !runnerInfo.isDirectory() ||
+      runnerInfo.uid !== process.getuid?.() ||
+      realpathSync(runnerTemp) !== runnerTemp
+    ) {
+      fail('preflight', 'runner-temp-invalid');
+    }
+    const checkoutSha = gitValue(
+      sourceRoot,
+      ['rev-parse', 'HEAD'],
+      'source-binding',
+    );
+    const checkoutTree = gitValue(
+      sourceRoot,
+      ['rev-parse', 'HEAD^{tree}'],
+      'source-binding',
+    );
+    const trustedSha = gitValue(
+      toolingRoot,
+      ['rev-parse', 'HEAD'],
+      'source-binding',
+    );
+    if (
+      checkoutSha !== sourceSha ||
+      trustedSha !== workflowSha ||
+      !/^[0-9a-f]{40}$/u.test(checkoutTree ?? '')
+    ) {
+      fail('source-binding', 'checkout-sha-mismatch');
+    }
+    const dispatchSha = required(env, 'RELEASE_DISPATCH_SHA');
+    requireSha(dispatchSha);
+    const sourceIsDispatchAncestor = spawn('git', [
+      '-C',
+      sourceRoot,
+      'merge-base',
+      '--is-ancestor',
+      sourceSha,
+      dispatchSha,
+    ]);
+    if (
+      sourceIsDispatchAncestor.error ||
+      sourceIsDispatchAncestor.status !== 0
+    ) {
+      fail('source-binding', 'source-not-dispatch-ancestor');
+    }
+    for (const helper of [
+      'dev/up.sh',
+      'dev/element-acceptance-setup.mjs',
+      'dev/element-acceptance-overrides.mjs',
+      'dev/element-acceptance-api-probe.mjs',
+      'dev/local-reminder-fixture.mjs',
+      'dev/element-acceptance-reminder-restore.mjs',
+      'dev/element-acceptance-local-prebuilt.compose.yaml',
+      'dev/validate-element-acceptance-compose.mjs',
+    ]) {
+      const helperPath = path.join(sourceRoot, helper);
+      if (
+        lstatSync(helperPath).isSymbolicLink() ||
+        !lstatSync(helperPath).isFile()
+      ) {
+        fail('source-binding', 'source-helper-invalid');
+      }
+    }
+
+    stage = 'image-lock';
+    const manifest = readJson(path.join(archiveRoot, 'manifest.json'), stage);
+    const sourceImages = exactSourceImages(
+      manifest,
+      sourceSha,
+      checkoutTree,
+      runId,
+      attempt,
+    );
+    const toolContext = { cwd: sourceRoot };
+    taskDir = path.join(runnerTemp, `mcw-p0-${id}`);
+    mkdirSync(taskDir, { mode: 0o700 });
+    chmodSync(taskDir, 0o700);
+    privatePath(taskDir, runnerTemp, true);
+    const dockerConfig = path.join(taskDir, 'docker-config');
+    mkdirSync(dockerConfig, { mode: 0o700 });
+    chmodSync(dockerConfig, 0o700);
+    const homeDir = path.join(taskDir, 'home');
+    const tmpDir = path.join(taskDir, 'tmp');
+    for (const directory of [homeDir, tmpDir]) {
+      mkdirSync(directory, { mode: 0o700 });
+      chmodSync(directory, 0o700);
+    }
+    const paths = {
+      runnerTemp,
+      taskDir,
+      dockerConfig,
+      homeDir,
+      tmpDir,
+      overrideFile: path.join(taskDir, 'compose.override.yaml'),
+      envFile: path.join(taskDir, 'compose.env'),
+      stageFile: path.join(taskDir, 'phases.jsonl'),
+      usersFile: path.join(taskDir, 'users.json'),
+      eventFile: path.join(taskDir, 'reminder-events.json'),
+      deliveryFile: path.join(taskDir, 'reminder-deliveries.json'),
+      radicaleImage: sourceImages.find((image) => image.role === 'radicale')
+        .ref,
+    };
+    writePrivate(paths.stageFile, '');
+    writePrivate(paths.eventFile, '[]\n');
+    writePrivate(paths.deliveryFile, '[]\n');
+
+    const dockerEnv = taskEnvironment(
+      taskDir,
+      dockerConfig,
+      id,
+      project,
+      paths,
+    );
+    const context = { cwd: sourceRoot, env: dockerEnv, taskDir };
+    stage = 'docker-api-preflight';
+    if (
+      dockerEnv.DOCKER_HOST !== undefined ||
+      dockerEnv.DOCKER_CONTEXT !== undefined ||
+      dockerEnv.DOCKER_API_VERSION !== undefined
+    ) {
+      fail(stage, 'docker-endpoint-override-present');
+    }
+    const apiVersion = runTask(
+      'docker-api-version',
+      'docker',
+      ['version', '--format', '{{.Server.APIVersion}}'],
+      context,
+    ).trim();
+    if (!/^\d+\.\d+$/u.test(apiVersion))
+      fail(stage, 'docker-api-version-invalid');
+    const dockerVersion = runTask(
+      'docker-cli-version',
+      'docker',
+      ['version', '--format', '{{.Client.Version}}'],
+      context,
+    ).trim();
+    if (!dockerVersion) fail(stage, 'docker-cli-unavailable');
+    runTask(
+      'docker-compose-version',
+      'docker',
+      ['compose', 'version', '--short'],
+      context,
+    );
+
+    stage = 'source-image-inspect';
+    for (const image of sourceImages) {
+      const actual = dockerJson(
+        `inspect-${image.role}`,
+        ['image', 'inspect', image.ref],
+        context,
+      );
+      validateImageInspect(actual, image);
+    }
+
+    stage = 'fixture-image-pull';
+    const fixtureImages = [];
+    for (const fixture of FIXTURES) {
+      runTask(
+        `pull-${fixture.role}`,
+        'docker',
+        ['pull', '--platform', 'linux/amd64', fixture.tag],
+        context,
+      );
+      const actual = dockerJson(
+        `inspect-${fixture.role}`,
+        ['image', 'inspect', fixture.tag],
+        context,
+      );
+      const locked = fixtureIdentity(actual, fixture.tag);
+      const repeated = dockerJson(
+        `inspect-pinned-${fixture.role}`,
+        ['image', 'inspect', locked.ref],
+        context,
+      );
+      validateLockedImageInspect(repeated, locked);
+      fixtureImages.push({ role: fixture.role, ...locked });
+    }
+    const images = [...sourceImages, ...fixtureImages];
+    if (
+      images.length !== 5 ||
+      new Set(images.map((image) => image.id)).size !== 5
+    ) {
+      fail('image-lock', 'five-image-lock-invalid');
+    }
+    const lock = { schema_version: 1, platform: 'linux/amd64', images };
+    const lockPath = path.join(taskDir, 'image-lock.json');
+    writePrivate(lockPath, `${JSON.stringify(lock)}\n`);
+
+    stage = 'compose-inputs';
+    const override = makeComposeOverride(lock, id, project);
+    writePrivate(paths.overrideFile, override);
+    writeInitialComposeEnv(
+      paths.envFile,
+      project,
+      `${project}_radicale-restore`,
+      paths.radicaleImage,
+    );
+    const privateFiles = [
+      paths.stageFile,
+      paths.eventFile,
+      paths.deliveryFile,
+      paths.overrideFile,
+      paths.envFile,
+      lockPath,
+    ];
+    for (const file of privateFiles) privatePath(file, taskDir);
+    const compose = composeArgs(
+      sourceRoot,
+      project,
+      paths.envFile,
+      paths.overrideFile,
+    );
+    context.compose = compose;
+    const composeModelText = runTask(
+      'compose-config',
+      'docker',
+      [...compose, 'config', '--format', 'json'],
+      context,
+    );
+    const validator = spawn(
+      process.execPath,
+      [path.join(sourceRoot, 'dev/validate-element-acceptance-compose.mjs')],
+      {
+        cwd: sourceRoot,
+        env: dockerEnv,
+        input: composeModelText,
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024,
+      },
+    );
+    writeFileSync(
+      path.join(taskDir, 'compose-validator.log'),
+      `${validator.stdout ?? ''}\n${validator.stderr ?? ''}`,
+      { mode: 0o600 },
+    );
+    if (validator.status !== 0 || validator.error)
+      fail('compose-validation', 'source-validator-failed');
+    const model = JSON.parse(composeModelText);
+    validateComposeModel(model, lock, id, project);
+
+    stage = 'inventory-baseline';
+    const baseline = captureInventory('baseline', context);
+    assertNoCollision(baseline, id, project);
+    cleanupState = { context, baseline, runId: id, project, images };
+    writeFileSync(
+      path.join(taskDir, 'baseline-foreign.json'),
+      `${JSON.stringify(foreignInventory(baseline, id, project))}\n`,
+      { mode: 0o600 },
+    );
+
+    stage = 'start-calendaring-services';
+    verifyLockedImages(images, context, 'pre-start-image-lock');
+    runTask(
+      'start-synapse-radicale',
+      'bash',
+      [path.join(sourceRoot, 'dev/up.sh')],
+      { ...context, timeout: 20 * 60_000 },
+    );
+    rmSync(paths.envFile, { force: false });
+    stage = 'fixture-setup';
+    runTask(
+      'setup-fixture',
+      process.execPath,
+      [path.join(sourceRoot, 'dev/element-acceptance-setup.mjs'), 'setup'],
+      context,
+    );
+    assertStageSummary(paths.stageFile, 'runtime-ready');
+    privatePath(paths.usersFile, taskDir);
+    privatePath(paths.envFile, taskDir);
+
+    stage = 'start-primary-services';
+    const up = [
+      ...compose,
+      'up',
+      '--pull',
+      'never',
+      '--no-build',
+      '-d',
+      'gateway',
+      'widget',
+      'postgres',
+    ];
+    runTask('start-gateway-widget-postgres', 'docker', up, {
+      ...context,
+      timeout: 15 * 60_000,
+    });
+    const readiness = runTask(
+      'wait-element-free',
+      process.execPath,
+      [path.join(sourceRoot, 'dev/element-acceptance-setup.mjs'), 'wait-local'],
+      context,
+    );
+    if (!readiness.includes('Element-free acceptance services are ready.'))
+      fail(stage, 'element-free-readiness-missing');
+    let active = captureInventory('primary', context);
+    assertTaskServiceSet(active, {
+      runId: id,
+      project,
+      images,
+      services: ['synapse', 'radicale', 'gateway', 'widget', 'postgres'],
+      runningServices: ['synapse', 'radicale', 'gateway', 'widget', 'postgres'],
+    });
+    assertVolumes(active, id, project, { pairedRestore: false });
+    assertNetwork(active, id, project);
+    assertNoElement(active, id, project);
+    assertListenerScope(active, baseline);
+
+    stage = 'api-route-smoke';
+    const fixtureEnv = {
+      ...dockerEnv,
+      ELEMENT_ACCEPTANCE_SOURCE_SHA: sourceSha,
+    };
+    const runFixtureTask = (
+      taskStage,
+      command,
+      args,
+      extraEnv = {},
+      options = {},
+    ) =>
+      runTask(taskStage, command, args, {
+        ...context,
+        ...options,
+        env: { ...fixtureEnv, ...extraEnv },
+      });
+    const composePs = serviceContainer(
+      { ...context, env: fixtureEnv, compose },
+      'gateway',
+    );
+    if (!composePs.trim()) fail(stage, 'compose-ps-empty');
+    runTask(
+      'exec-synapse-smoke',
+      'docker',
+      [
+        ...compose,
+        'exec',
+        '-T',
+        'synapse',
+        'python',
+        '-c',
+        'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8008/_matrix/client/versions", timeout=5).read()',
+      ],
+      context,
+    );
+    runTask(
+      'compose-run-gateway-smoke',
+      'docker',
+      [
+        ...compose,
+        'run',
+        '--pull',
+        'never',
+        '--no-deps',
+        '--rm',
+        '--label',
+        `${LOCAL_LABEL}=${id}`,
+        '--name',
+        `${project}-local-${id}-900`,
+        '--entrypoint',
+        'node',
+        'gateway',
+        '-e',
+        'Promise.all([fetch("http://synapse:8008/_matrix/client/versions"),fetch("http://radicale:5232/")]).then(([s,r])=>{if(s.status!==200||![401,403].includes(r.status))process.exit(1)}).catch(()=>process.exit(1))',
+      ],
+      context,
+    );
+    const widgetStatus = runTask(
+      'widget-http-smoke',
+      'curl',
+      [
+        '--silent',
+        '--show-error',
+        '--fail',
+        '--output',
+        '/dev/null',
+        '--write-out',
+        '%{http_code}',
+        '--max-time',
+        '10',
+        'http://127.0.0.1:8080/',
+      ],
+      context,
+    ).trim();
+    if (widgetStatus !== '200') fail(stage, 'widget-http-status-invalid');
+    const apiSummary = checkSummary(
+      runFixtureTask('api-crud-probe', process.execPath, [
+        path.join(sourceRoot, 'dev/element-acceptance-api-probe.mjs'),
+      ]).trim(),
+      'api-crud-probe',
+    );
+    if (
+      apiSummary.status !== 'passed' ||
+      API_STAGES.some((name) => apiSummary.stages?.[name] !== 'passed')
+    )
+      fail('api-crud-probe', 'api-stage-failed');
+
+    stage = 'reminder-initial';
+    let markers = assertInitialReminderState(paths.eventFile);
+    runFixtureTask('prepare-reminder-room', process.execPath, [
+      path.join(sourceRoot, 'dev/element-acceptance-setup.mjs'),
+      'reminder-room',
+    ]);
+    runFixtureTask('enable-reminder-runtime', process.execPath, [
+      path.join(sourceRoot, 'dev/element-acceptance-reminder-restore.mjs'),
+      'enable',
+    ]);
+    markers = assertReminderResult(
+      runFixtureTask(
+        'reminder-initial-fixture',
+        process.execPath,
+        [path.join(sourceRoot, 'dev/local-reminder-fixture.mjs')],
+        {
+          ELEMENT_ACCEPTANCE_REMINDER_FIXTURE: '1',
+          ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'initial',
+        },
+      ),
+      paths.eventFile,
+      1,
+      'reminder-initial-fixture',
+    );
+    runFixtureTask('verify-initial-reminder-config', process.execPath, [
+      path.join(sourceRoot, 'dev/element-acceptance-reminder-restore.mjs'),
+      'verify-configuration',
+    ]);
+    runFixtureTask('snapshot-initial-reminder-state', process.execPath, [
+      path.join(sourceRoot, 'dev/element-acceptance-reminder-restore.mjs'),
+      'snapshot',
+    ]);
+
+    stage = 'reminder-restart';
+    runFixtureTask('restart-reminder-gateway', process.execPath, [
+      path.join(sourceRoot, 'dev/element-acceptance-reminder-restore.mjs'),
+      'restart',
+    ]);
+    markers = assertReminderResult(
+      runFixtureTask(
+        'reminder-restart-fixture',
+        process.execPath,
+        [path.join(sourceRoot, 'dev/local-reminder-fixture.mjs')],
+        {
+          ELEMENT_ACCEPTANCE_REMINDER_FIXTURE: '1',
+          ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'restart',
+        },
+      ),
+      paths.eventFile,
+      2,
+      'reminder-restart-fixture',
+    );
+    runFixtureTask('verify-restart-reminder-config', process.execPath, [
+      path.join(sourceRoot, 'dev/element-acceptance-reminder-restore.mjs'),
+      'verify-configuration',
+    ]);
+    runFixtureTask('verify-restart-delivery', process.execPath, [
+      path.join(sourceRoot, 'dev/element-acceptance-reminder-restore.mjs'),
+      'verify-restart',
+    ]);
+    runFixtureTask('snapshot-restart-reminder-state', process.execPath, [
+      path.join(sourceRoot, 'dev/element-acceptance-reminder-restore.mjs'),
+      'snapshot',
+    ]);
+
+    stage = 'paired-store-restore';
+    verifyLockedImages(images, context, 'pre-restore-image-lock');
+    runFixtureTask(
+      'restore-paired-stores',
+      process.execPath,
+      [
+        path.join(sourceRoot, 'dev/element-acceptance-reminder-restore.mjs'),
+        'restore',
+      ],
+      {},
+      { timeout: 20 * 60_000 },
+    );
+    active = captureInventory('paired-restore', context);
+    assertTaskServiceSet(active, {
+      runId: id,
+      project,
+      images,
+      services: [...SERVICES],
+      runningServices: [
+        'synapse',
+        'widget',
+        'postgres',
+        'restore-radicale',
+        'restore-gateway',
+      ],
+      stoppedServices: ['radicale', 'gateway'],
+    });
+    assertVolumes(active, id, project);
+    assertNetwork(active, id, project);
+    assertNoElement(active, id, project);
+    assertListenerScope(active, baseline);
+    markers = assertReminderResult(
+      runFixtureTask(
+        'reminder-restore-fixture',
+        process.execPath,
+        [path.join(sourceRoot, 'dev/local-reminder-fixture.mjs')],
+        {
+          ELEMENT_ACCEPTANCE_REMINDER_FIXTURE: '1',
+          ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'restore',
+        },
+      ),
+      paths.eventFile,
+      3,
+      'reminder-restore-fixture',
+    );
+    runFixtureTask('verify-paired-restore-delivery', process.execPath, [
+      path.join(sourceRoot, 'dev/element-acceptance-reminder-restore.mjs'),
+      'verify-restore',
+    ]);
+    if (markers !== 3) fail(stage, 'restored-delivery-count-invalid');
+
+    stage = 'owned-cleanup-preflight';
+    const current = captureInventory('pre-cleanup', context);
+    compareForeign(baseline, current, id, project);
+    assertNoElement(current, id, project);
+    assertPrivateTaskTree(taskDir, { runnerTemp });
+    const cleanupPlan = planOwnedCleanup(current, id, project, images);
+    const receipt = safeReceipt({
+      sourceSha,
+      sourceTree: checkoutTree,
+      workflowSha,
+      lock,
+      apiCount: API_STAGES.length,
+      markerCounts: [0, 1, 2, 3],
+      inventoryCounts: {
+        containers_before: baseline.containers.length,
+        images_before: baseline.images.length,
+        networks_before: baseline.networks.length,
+        volumes_before: baseline.volumes.length,
+      },
+    });
+    receiptPath = path.join(runnerTemp, `.mcw-p0-${id}.receipt.json`);
+    writePrivate(
+      receiptPath,
+      `${JSON.stringify({ ...receipt, cleanup_verified: false })}\n`,
+    );
+    privatePath(receiptPath, runnerTemp);
+
+    stage = 'owned-cleanup';
+    removeOwnedResources({
+      plan: cleanupPlan,
+      context,
+      baseline,
+      runId: id,
+      project,
+      prefix: 'success',
+    });
+    cleanupVerified = true;
+
+    stage = 'task-files-cleanup';
+    assertPrivateTaskTree(taskDir, { runnerTemp });
+    if (
+      realpathSync(taskDir) !== taskDir ||
+      !taskDir.startsWith(`${runnerTemp}${path.sep}`)
+    ) {
+      fail(stage, 'task-directory-path-invalid');
+    }
+    rmSync(taskDir, { recursive: true, force: false });
+    if (lstatSync(taskDir, { throwIfNoEntry: false }))
+      fail(stage, 'task-directory-remains');
+    const successReceipt = {
+      ...receipt,
+      result: 'passed',
+      cleanup_verified: true,
+      checks: { ...receipt.checks, owned_cleanup: true },
+    };
+    writeFileSync(receiptPath, `${JSON.stringify(successReceipt)}\n`, {
+      mode: 0o600,
+      flag: 'w',
+    });
+    chmodSync(receiptPath, 0o600);
+    privatePath(receiptPath, runnerTemp);
+    if (!env.GITHUB_STEP_SUMMARY)
+      fail('receipt-publish', 'summary-path-missing');
+    writeFileSync(
+      env.GITHUB_STEP_SUMMARY,
+      formatSuccessSummary(successReceipt),
+      {
+        flag: 'a',
+        mode: 0o600,
+      },
+    );
+    process.stdout.write(
+      'Hosted Docker operator rehearsal passed; owned cleanup was verified.\n',
+    );
+  } catch (error) {
+    const failedPhase = error instanceof RehearsalFailure ? error.stage : stage;
+    let cleanupStatus = cleanupVerified ? 'verified' : 'not-run';
+    if (cleanupState && !cleanupVerified) {
+      cleanupStatus = 'unverified';
+      try {
+        const { context, baseline, runId, project, images } = cleanupState;
+        stage = 'failure-cleanup';
+        const current = captureInventory('failure-cleanup', context);
+        compareForeign(baseline, current, runId, project);
+        const plan = planOwnedCleanup(current, runId, project, images, {
+          allowPartial: true,
+        });
+        removeOwnedResources({
+          plan,
+          context,
+          baseline,
+          runId,
+          project,
+          prefix: 'failure',
+        });
+        cleanupStatus = 'verified';
+      } catch {
+        cleanupStatus = 'unverified';
+      }
+    }
+    if (env.GITHUB_STEP_SUMMARY) {
+      try {
+        writeFileSync(
+          env.GITHUB_STEP_SUMMARY,
+          formatFailureSummary(sourceShaForSummary, failedPhase, cleanupStatus),
+          { flag: 'a', mode: 0o600 },
+        );
+      } catch {
+        // The fixed stderr line below remains safe if the runner summary is unavailable.
+      }
+    }
+    process.stderr.write(
+      `Hosted Docker operator rehearsal failed at phase ${SAFE_PHASES.has(failedPhase) ? failedPhase : 'runner'}; owned cleanup ${cleanupStatus}.\n`,
+    );
+    process.exitCode = 1;
+  }
+}
+
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  await main();
+}

@@ -14,8 +14,6 @@ on:
       - 'packages/ical-timezones/**'
       - 'package.json'
       - 'yarn.lock'
-      - 'docs/PLAN.md'
-      - 'docs/STATUS.md'
 
 permissions:
   contents: read
