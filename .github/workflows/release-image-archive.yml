@@ -7,6 +7,11 @@ on:
         description: Full 40-character SHA of the reviewed application source already merged to main
         required: true
         type: string
+      operator_rehearsal:
+        description: Run the complete no-Element hosted Docker operator rehearsal before upload
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -74,6 +79,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .github/workflows/release-image-archive.yml
+            scripts/hosted-operator-rehearsal.mjs
             scripts/release-image-archive.mjs
           sparse-checkout-cone-mode: false
 
@@ -219,6 +225,12 @@ jobs:
           node tooling/scripts/release-image-archive.mjs verify \
             --archive-root "$ARCHIVE_ROOT" \
             --expected-source-sha "$RELEASE_SOURCE_SHA"
+
+      - name: Run the opt-in hosted Docker operator rehearsal
+        if: ${{ inputs.operator_rehearsal }}
+        env:
+          OPERATOR_REHEARSAL_ENABLED: 'true'
+        run: node tooling/scripts/hosted-operator-rehearsal.mjs
 
       - name: Upload immutable per-run image archive
         id: upload
