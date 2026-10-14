@@ -24,8 +24,10 @@ import {
   formatFailureDiagnostic,
   formatFailureSummary,
   formatSuccessSummary,
+  handoffGeneratedComposeEnvironment,
   parseStartupFailureMarker,
   planOwnedCleanup,
+  taskEnvironment,
   validateLockedImageInspect,
   writeDockerAdapter,
   writeFailureDiagnostic,
@@ -172,6 +174,172 @@ test('hosted shared-Docker mode requires a private adapter and exact hosted main
 function throwsCode(code) {
   return (error) => error?.code === code;
 }
+
+test('fixture setup keeps a bootstrap env until validated output is handed off', (t) => {
+  const taskDir = mkdtempSync(join(tmpdir(), 'mcw-compose-env-handoff-'));
+  chmodSync(taskDir, 0o700);
+  t.after(() => rmSync(taskDir, { recursive: true, force: true }));
+
+  const paths = {
+    dockerBinDir: join(taskDir, 'docker-bin'),
+    homeDir: join(taskDir, 'home'),
+    tmpDir: join(taskDir, 'tmp'),
+    bootstrapEnvFile: join(taskDir, 'compose.bootstrap.env'),
+    envFile: join(taskDir, 'compose.env'),
+    overrideFile: join(taskDir, 'compose.override.yaml'),
+    stageFile: join(taskDir, 'phases.jsonl'),
+    usersFile: join(taskDir, 'users.json'),
+    eventFile: join(taskDir, 'events.json'),
+    deliveryFile: join(taskDir, 'deliveries.json'),
+    radicaleImage: 'matrix-calendar-widget/radicale-openid:archive-1-1',
+  };
+  const environment = taskEnvironment(
+    taskDir,
+    join(taskDir, 'docker-config'),
+    runId,
+    project,
+    paths,
+  );
+  assert.equal(
+    environment.MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE,
+    paths.bootstrapEnvFile,
+  );
+  assert.equal(environment.ELEMENT_ACCEPTANCE_SERVER_ENV_FILE, paths.envFile);
+
+  writeFileSync(paths.bootstrapEnvFile, 'bootstrap-only\n', { mode: 0o600 });
+  chmodSync(paths.bootstrapEnvFile, 0o600);
+  writeFileSync(paths.envFile, 'generated-private-env\n', { mode: 0o600 });
+  chmodSync(paths.envFile, 0o600);
+
+  const initialCompose = ['compose', '--env-file', paths.bootstrapEnvFile];
+  const context = { env: environment, compose: initialCompose };
+  const handoff = () =>
+    handoffGeneratedComposeEnvironment(
+      context,
+      environment,
+      {
+        taskDir,
+        bootstrapEnvFile: paths.bootstrapEnvFile,
+        envFile: paths.envFile,
+        sourceRoot: '/trusted/source',
+        project,
+        overrideFile: paths.overrideFile,
+      },
+      (generatedCompose, generatedEnvironment) => {
+        assert.equal(
+          generatedCompose[generatedCompose.indexOf('--env-file') + 1],
+          paths.envFile,
+        );
+        assert.equal(
+          generatedEnvironment.MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE,
+          paths.envFile,
+        );
+        assert.equal(
+          environment.MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE,
+          paths.bootstrapEnvFile,
+        );
+      },
+    );
+
+  assert.throws(
+    () =>
+      handoffGeneratedComposeEnvironment(
+        context,
+        environment,
+        {
+          taskDir,
+          bootstrapEnvFile: paths.bootstrapEnvFile,
+          envFile: paths.envFile,
+          sourceRoot: '/trusted/source',
+          project,
+          overrideFile: paths.overrideFile,
+        },
+        () => {
+          throw new Error('generated compose validation failed');
+        },
+      ),
+    /generated compose validation failed/u,
+  );
+  assert.strictEqual(context.compose, initialCompose);
+  assert.equal(
+    environment.MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE,
+    paths.bootstrapEnvFile,
+  );
+  assert.equal(
+    readFileSync(paths.bootstrapEnvFile, 'utf8'),
+    'bootstrap-only\n',
+  );
+
+  const generatedCompose = handoff();
+  assert.strictEqual(context.compose, generatedCompose);
+  assert.equal(
+    environment.MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE,
+    paths.envFile,
+  );
+  assert.equal(environment.ELEMENT_ACCEPTANCE_SERVER_ENV_FILE, paths.envFile);
+  assert.equal(
+    generatedCompose[generatedCompose.indexOf('--env-file') + 1],
+    paths.envFile,
+  );
+  assert.equal(readFileSync(paths.envFile, 'utf8'), 'generated-private-env\n');
+  assert.equal(statSync(paths.envFile).mode & 0o777, 0o600);
+  assert.throws(() => statSync(paths.bootstrapEnvFile), { code: 'ENOENT' });
+});
+
+test('fixture setup runs before bootstrap env removal is possible', () => {
+  const helperSource = readFileSync(
+    fileURLToPath(new URL('./hosted-operator-rehearsal.mjs', import.meta.url)),
+    'utf8',
+  );
+  const setupPhaseIndex = helperSource.indexOf("stage = 'fixture-setup';");
+  const setupIndex = helperSource.indexOf("'setup-fixture'", setupPhaseIndex);
+  const handoffIndex = helperSource.indexOf(
+    'handoffGeneratedComposeEnvironment(',
+    setupIndex,
+  );
+  const primaryStartIndex = helperSource.indexOf(
+    "stage = 'start-primary-services';",
+    handoffIndex,
+  );
+  assert.ok(
+    setupPhaseIndex >= 0 &&
+      setupIndex > setupPhaseIndex &&
+      handoffIndex > setupIndex &&
+      primaryStartIndex > handoffIndex,
+  );
+  assert.equal(
+    helperSource.slice(setupPhaseIndex, handoffIndex).includes('rmSync('),
+    false,
+  );
+  assert.match(
+    helperSource.slice(setupIndex, primaryStartIndex),
+    /compose = handoffGeneratedComposeEnvironment/u,
+  );
+  assert.equal(
+    helperSource.slice(primaryStartIndex).includes('bootstrapEnvFile'),
+    false,
+  );
+
+  const setupSource = readFileSync(
+    fileURLToPath(
+      new URL('../dev/element-acceptance-setup.mjs', import.meta.url),
+    ),
+    'utf8',
+  );
+  const writerStart = setupSource.indexOf('function writeComposeEnvironment(');
+  const writerEnd = setupSource.indexOf(
+    '\nfunction writePrivateJson',
+    writerStart,
+  );
+  const writer = setupSource.slice(writerStart, writerEnd);
+  assert.match(
+    setupSource,
+    /requiredEnvironment\(\s*'ELEMENT_ACCEPTANCE_SERVER_ENV_FILE'/u,
+  );
+  assert.match(setupSource, /writeComposeEnvironment\(serverEnvFile,/u);
+  assert.match(writer, /flag:\s*'wx'/u);
+  assert.match(writer, /mode:\s*0o600/u);
+});
 
 test('the task Docker adapter adds the disabled profile to config only', () => {
   const configArgs = [

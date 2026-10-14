@@ -684,7 +684,7 @@ function gitValue(root, args, stage) {
   return (result.stdout ?? '').trim();
 }
 
-function taskEnvironment(taskDir, dockerConfig, runId, project, paths) {
+export function taskEnvironment(taskDir, dockerConfig, runId, project, paths) {
   const env = {
     PATH: `${paths.dockerBinDir}${path.delimiter}${required(process.env, 'PATH')}`,
     HOME: paths.homeDir,
@@ -698,7 +698,7 @@ function taskEnvironment(taskDir, dockerConfig, runId, project, paths) {
     ELEMENT_ACCEPTANCE_SKIP_ELEMENT: 'true',
     MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL: 'true',
     MATRIX_CALENDAR_LOCAL_COMPOSE_OVERRIDE_FILE: paths.overrideFile,
-    MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE: paths.envFile,
+    MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE: paths.bootstrapEnvFile,
     ELEMENT_ACCEPTANCE_COMPOSE_OVERRIDE_FILES: JSON.stringify([
       paths.overrideFile,
     ]),
@@ -1193,6 +1193,40 @@ function composeArgs(sourceRoot, project, envFile, overrideFile) {
   ];
 }
 
+export function handoffGeneratedComposeEnvironment(
+  context,
+  dockerEnv,
+  { taskDir, bootstrapEnvFile, envFile, sourceRoot, project, overrideFile },
+  validateGeneratedCompose,
+) {
+  if (
+    context.env !== dockerEnv ||
+    dockerEnv.MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE !== bootstrapEnvFile ||
+    dockerEnv.ELEMENT_ACCEPTANCE_SERVER_ENV_FILE !== envFile
+  ) {
+    fail('private-files', 'compose-env-handoff-invalid');
+  }
+
+  privatePath(bootstrapEnvFile, taskDir);
+  privatePath(envFile, taskDir);
+  const generatedCompose = composeArgs(
+    sourceRoot,
+    project,
+    envFile,
+    overrideFile,
+  );
+  const generatedEnvironment = {
+    ...dockerEnv,
+    MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE: envFile,
+  };
+  validateGeneratedCompose(generatedCompose, generatedEnvironment);
+
+  context.compose = generatedCompose;
+  dockerEnv.MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE = envFile;
+  rmSync(bootstrapEnvFile, { force: false });
+  return generatedCompose;
+}
+
 function validateComposeModel(model, lock, runId, project) {
   const serviceNames = Object.keys(model?.services ?? {}).sort();
   const expected = [...SERVICES, 'element'].sort();
@@ -1226,6 +1260,44 @@ function validateComposeModel(model, lock, runId, project) {
   ) {
     fail('compose-validation', 'ownership-or-element-policy-mismatch');
   }
+}
+
+function validateComposeConfiguration({
+  context,
+  dockerEnv,
+  sourceRoot,
+  taskDir,
+  compose,
+  lock,
+  runId,
+  project,
+}) {
+  const modelText = runTask(
+    'compose-config',
+    'docker',
+    [...compose, 'config', '--format', 'json'],
+    context,
+  );
+  const validator = spawn(
+    process.execPath,
+    [path.join(sourceRoot, 'dev/validate-element-acceptance-compose.mjs')],
+    {
+      cwd: sourceRoot,
+      env: dockerEnv,
+      input: modelText,
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024,
+    },
+  );
+  writeFileSync(
+    path.join(taskDir, 'compose-validator.log'),
+    `${validator.stdout ?? ''}\n${validator.stderr ?? ''}`,
+    { mode: 0o600 },
+  );
+  if (validator.status !== 0 || validator.error) {
+    fail('compose-validation', 'source-validator-failed');
+  }
+  validateComposeModel(JSON.parse(modelText), lock, runId, project);
 }
 
 function checkSummary(command, stage) {
@@ -1871,6 +1943,7 @@ async function main() {
       ...dockerAdapter,
       dockerExecutable,
       overrideFile: path.join(taskDir, 'compose.override.yaml'),
+      bootstrapEnvFile: path.join(taskDir, 'compose.bootstrap.env'),
       envFile: path.join(taskDir, 'compose.env'),
       stageFile: path.join(taskDir, 'phases.jsonl'),
       usersFile: path.join(taskDir, 'users.json'),
@@ -1969,7 +2042,7 @@ async function main() {
     const override = makeComposeOverride(lock, id, project);
     writePrivate(paths.overrideFile, override);
     writeInitialComposeEnv(
-      paths.envFile,
+      paths.bootstrapEnvFile,
       project,
       `${project}_radicale-restore`,
       paths.radicaleImage,
@@ -1979,43 +2052,27 @@ async function main() {
       paths.eventFile,
       paths.deliveryFile,
       paths.overrideFile,
-      paths.envFile,
+      paths.bootstrapEnvFile,
       lockPath,
     ];
     for (const file of privateFiles) privatePath(file, taskDir);
-    const compose = composeArgs(
+    let compose = composeArgs(
       sourceRoot,
       project,
-      paths.envFile,
+      paths.bootstrapEnvFile,
       paths.overrideFile,
     );
     context.compose = compose;
-    const composeModelText = runTask(
-      'compose-config',
-      'docker',
-      [...compose, 'config', '--format', 'json'],
+    validateComposeConfiguration({
       context,
-    );
-    const validator = spawn(
-      process.execPath,
-      [path.join(sourceRoot, 'dev/validate-element-acceptance-compose.mjs')],
-      {
-        cwd: sourceRoot,
-        env: dockerEnv,
-        input: composeModelText,
-        encoding: 'utf8',
-        maxBuffer: 1024 * 1024,
-      },
-    );
-    writeFileSync(
-      path.join(taskDir, 'compose-validator.log'),
-      `${validator.stdout ?? ''}\n${validator.stderr ?? ''}`,
-      { mode: 0o600 },
-    );
-    if (validator.status !== 0 || validator.error)
-      fail('compose-validation', 'source-validator-failed');
-    const model = JSON.parse(composeModelText);
-    validateComposeModel(model, lock, id, project);
+      dockerEnv,
+      sourceRoot,
+      taskDir,
+      compose,
+      lock,
+      runId: id,
+      project,
+    });
 
     stage = 'inventory-baseline';
     const baseline = captureInventory('baseline', context);
@@ -2046,7 +2103,6 @@ async function main() {
         startupFailureFormatter,
       },
     );
-    rmSync(paths.envFile, { force: false });
     stage = 'fixture-setup';
     runTask(
       'setup-fixture',
@@ -2057,6 +2113,32 @@ async function main() {
     assertStageSummary(paths.stageFile, 'runtime-ready');
     privatePath(paths.usersFile, taskDir);
     privatePath(paths.envFile, taskDir);
+
+    stage = 'compose-validation';
+    compose = handoffGeneratedComposeEnvironment(
+      context,
+      dockerEnv,
+      {
+        taskDir,
+        bootstrapEnvFile: paths.bootstrapEnvFile,
+        envFile: paths.envFile,
+        sourceRoot,
+        project,
+        overrideFile: paths.overrideFile,
+      },
+      (generatedCompose, generatedEnvironment) => {
+        validateComposeConfiguration({
+          context,
+          dockerEnv: generatedEnvironment,
+          sourceRoot,
+          taskDir,
+          compose: generatedCompose,
+          lock,
+          runId: id,
+          project,
+        });
+      },
+    );
 
     stage = 'start-primary-services';
     const up = [

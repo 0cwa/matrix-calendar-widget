@@ -826,8 +826,14 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
         isolate or prevent damage to resources visible to that daemon. These
         environment checks select a test mode; they are not authentication.
         The earlier source-bound attempt rejected the hosted default endpoint
-        before service startup. A fresh candidate still needs the complete
-        source-bound operator rehearsal; this tooling correction is not a pass.
+        before service startup. A later attempt reached fixture setup, where
+        source tracing found that the runner removed the bootstrap Compose env
+        file before the fixture helper loaded it, while the helper creates its
+        generated server env with create-only semantics. The tooling now keeps
+        a separate private bootstrap file until the generated file and Compose
+        model validate, then switches later commands to that generated file.
+        The complete source-bound operator rehearsal still needs a fresh pass;
+        this tooling correction is not acceptance evidence.
 
 This bounded beta path does not complete M4, M5, or the broader M8 work, and it
 does not authorize publication or live rollout. The broad M8 milestone remains
