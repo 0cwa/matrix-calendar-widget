@@ -51,6 +51,8 @@ const VOLUMES = Object.freeze([
   'reminder-restore-radicale-data',
 ]);
 const PORTS = Object.freeze([8008, 5232, 3000, 8080, 5233, 8090]);
+const FAILURE_DIAGNOSTIC_FILE =
+  'matrix-calendar-widget-operator-rehearsal-failure.json';
 const API_STAGES = Object.freeze([
   'fixture',
   'member-openid',
@@ -1236,11 +1238,95 @@ export function formatFailureSummary(sourceSha, phase, cleanup) {
   ].join('\n');
 }
 
+export function formatFailureDiagnostic({
+  sourceSha,
+  workflowSha,
+  runId,
+  attempt,
+  phase,
+  failureClass,
+  sourceImageIds,
+  cleanupStatus,
+  cleanupAttempted,
+}) {
+  const safe = (value, pattern) =>
+    typeof value === 'string' && pattern.test(value) ? value : 'unavailable';
+  const attempted = cleanupAttempted === true;
+  let safeCleanup = ['pending', 'verified', 'unverified', 'not-run'].includes(
+    cleanupStatus,
+  )
+    ? cleanupStatus
+    : 'unverified';
+  if (
+    (safeCleanup === 'verified' && !attempted) ||
+    (['not-run', 'pending'].includes(safeCleanup) && attempted)
+  )
+    safeCleanup = 'unverified';
+  const safeImageIds =
+    Array.isArray(sourceImageIds) &&
+    sourceImageIds.length === 3 &&
+    sourceImageIds.every(
+      (id) => typeof id === 'string' && /^sha256:[0-9a-f]{64}$/u.test(id),
+    ) &&
+    new Set(sourceImageIds).size === 3
+      ? [...sourceImageIds]
+      : [];
+  const cleanupVerified = safeCleanup === 'verified' && attempted;
+
+  return {
+    schema_version: 1,
+    result: 'failed',
+    phase: 'hosted-docker-operator-v5',
+    failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
+    failure_class: ['gate-failed', 'runner-error'].includes(failureClass)
+      ? failureClass
+      : 'unknown',
+    source_sha: safe(sourceSha, /^[0-9a-f]{40}$/u),
+    workflow_sha: safe(workflowSha, /^[0-9a-f]{40}$/u),
+    run_id: safe(runId, /^\d{1,20}$/u),
+    attempt: safe(attempt, /^\d{1,4}$/u),
+    source_image_ids: safeImageIds,
+    cleanup_status: safeCleanup,
+    cleanup_attempted: attempted,
+    owned_cleanup_verified: cleanupVerified,
+    foreign_inventory_unchanged: cleanupVerified,
+  };
+}
+
+export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
+  try {
+    const root = path.resolve(runnerTemp);
+    const file = path.join(root, FAILURE_DIAGNOSTIC_FILE);
+    const diagnostic = formatFailureDiagnostic(fields);
+    if (update) {
+      privatePath(file, root);
+      const previous = readJson(file, 'receipt-publish');
+      if (
+        !['run_id', 'attempt', 'source_sha', 'workflow_sha'].every(
+          (key) => previous?.[key] === diagnostic[key],
+        )
+      ) {
+        fail('receipt-publish', 'failure-diagnostic-identity-mismatch');
+      }
+    }
+    writeFileSync(file, `${JSON.stringify(diagnostic)}\n`, {
+      mode: 0o600,
+      flag: update ? 'w' : 'wx',
+    });
+    chmodSync(file, 0o600);
+    privatePath(file, root);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function main() {
   let stage = 'preflight';
   let taskDir;
   let receiptPath;
-  let sourceShaForSummary;
+  const failureIdentity = {};
+  let diagnosticRoot;
   let cleanupState;
   let cleanupVerified = false;
   const env = process.env;
@@ -1258,13 +1344,13 @@ async function main() {
     );
     const archiveRoot = path.resolve(required(env, 'ARCHIVE_ROOT'));
     const sourceSha = requireSha(required(env, 'RELEASE_SOURCE_SHA'));
-    sourceShaForSummary = sourceSha;
     const workflowSha = requireSha(required(env, 'RELEASE_WORKFLOW_SHA'));
     const runId = required(env, 'RELEASE_RUN_ID');
     const attempt = required(env, 'RELEASE_RUN_ATTEMPT');
     if (!/^\d{1,20}$/u.test(runId) || !/^\d{1,4}$/u.test(attempt)) {
       fail('preflight', 'run-identity-invalid');
     }
+    Object.assign(failureIdentity, { sourceSha, workflowSha, runId, attempt });
     const id = createHash('sha256')
       .update(`${runId}:${attempt}`)
       .digest('hex')
@@ -1280,6 +1366,7 @@ async function main() {
     ) {
       fail('preflight', 'runner-temp-invalid');
     }
+    diagnosticRoot = runnerTemp;
     const checkoutSha = gitValue(
       sourceRoot,
       ['rev-parse', 'HEAD'],
@@ -1346,6 +1433,7 @@ async function main() {
       runId,
       attempt,
     );
+    failureIdentity.sourceImageIds = sourceImages.map((image) => image.id);
     const toolContext = { cwd: sourceRoot };
     taskDir = path.join(runnerTemp, `mcw-p0-${id}`);
     mkdirSync(taskDir, { mode: 0o700 });
@@ -1861,8 +1949,22 @@ async function main() {
   } catch (error) {
     const failedPhase = error instanceof RehearsalFailure ? error.stage : stage;
     let cleanupStatus = cleanupVerified ? 'verified' : 'not-run';
+    let cleanupAttempted = cleanupVerified;
+    const failure = {
+      ...failureIdentity,
+      phase: failedPhase,
+      failureClass:
+        error instanceof RehearsalFailure ? 'gate-failed' : 'runner-error',
+    };
+    if (cleanupState && !cleanupVerified) cleanupStatus = 'pending';
+    const diagnosticWritten = writeFailureDiagnostic(diagnosticRoot, {
+      ...failure,
+      cleanupStatus,
+      cleanupAttempted,
+    });
     if (cleanupState && !cleanupVerified) {
       cleanupStatus = 'unverified';
+      cleanupAttempted = true;
       try {
         const { context, baseline, runId, project, images } = cleanupState;
         stage = 'failure-cleanup';
@@ -1884,11 +1986,22 @@ async function main() {
         cleanupStatus = 'unverified';
       }
     }
+    if (diagnosticWritten) {
+      writeFailureDiagnostic(
+        diagnosticRoot,
+        { ...failure, cleanupStatus, cleanupAttempted },
+        true,
+      );
+    }
     if (env.GITHUB_STEP_SUMMARY) {
       try {
         writeFileSync(
           env.GITHUB_STEP_SUMMARY,
-          formatFailureSummary(sourceShaForSummary, failedPhase, cleanupStatus),
+          formatFailureSummary(
+            failureIdentity.sourceSha,
+            failedPhase,
+            cleanupStatus,
+          ),
           { flag: 'a', mode: 0o600 },
         );
       } catch {
