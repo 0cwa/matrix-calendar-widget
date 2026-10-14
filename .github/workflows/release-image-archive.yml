@@ -227,10 +227,22 @@ jobs:
             --expected-source-sha "$RELEASE_SOURCE_SHA"
 
       - name: Run the opt-in hosted Docker operator rehearsal
+        id: operator_rehearsal
         if: ${{ inputs.operator_rehearsal }}
         env:
           OPERATOR_REHEARSAL_ENABLED: 'true'
         run: node tooling/scripts/hosted-operator-rehearsal.mjs
+
+      - name: Upload the sanitized operator rehearsal failure summary
+        if: ${{ failure() && inputs.operator_rehearsal && steps.operator_rehearsal.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: matrix-calendar-widget-operator-rehearsal-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/matrix-calendar-widget-operator-rehearsal-failure.json
+          if-no-files-found: ignore
+          overwrite: false
+          retention-days: 1
+          compression-level: 6
 
       - name: Upload immutable per-run image archive
         id: upload
