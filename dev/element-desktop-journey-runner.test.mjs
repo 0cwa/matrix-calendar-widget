@@ -17,6 +17,7 @@ import { emptyUidLifecycleObservation } from './element-desktop-evidence.mjs';
 import {
   buildDesktopPolicyArguments,
   classifyDesktopChildCompletion,
+  classifyDesktopStartupFailure,
   classifyPasswdLookupResult,
   cleanupProofAllowsPolicyRemoval,
   cleanupUser,
@@ -52,6 +53,22 @@ const PINNED_PACKAGE_HASH =
 const PINNED_PACKAGE_URL =
   'https://packages.element.io/debian/pool/main/e/element-desktop/element-desktop_1.12.30_amd64.deb';
 const JOURNEY_SOURCE_SHA = 'b'.repeat(40);
+
+function expectRunnerFailure(code, privateDetails = []) {
+  return (error) => {
+    assert.equal(error.code, code);
+    assert.equal(error.message, 'Element Desktop journey runner failed');
+    assert.equal(error.stdout, undefined);
+    assert.equal(error.stderr, undefined);
+    for (const detail of privateDetails) {
+      assert.doesNotMatch(
+        `${error.message}\n${error.stack}`,
+        new RegExp(detail, 'u'),
+      );
+    }
+    return true;
+  };
+}
 
 function packageMetadata(version, hash) {
   return [
@@ -165,6 +182,35 @@ function appendPassingJourneyPhases(filePath, runnerTemp) {
     });
   }
 }
+
+test('keeps runner failure categories finite across readiness and finalization', () => {
+  assert.equal(
+    classifyDesktopStartupFailure({ journeyFailureCode: 'desktop-not-ready' }),
+    'desktop-not-ready',
+  );
+  assert.equal(
+    classifyDesktopStartupFailure({
+      journeyFailureCode: 'desktop-journey-child-failed',
+    }),
+    'desktop-journey-child-failed',
+  );
+  assert.equal(
+    classifyDesktopStartupFailure({
+      journeyFailureCode: 'private child error',
+    }),
+    'desktop-startup-finalization-failed',
+  );
+  assert.equal(
+    classifyDesktopStartupFailure({ protocolFailed: true }),
+    'desktop-startup-finalization-failed',
+  );
+  assert.equal(
+    classifyDesktopStartupFailure({
+      finalizedFailureCode: 'renderer-sandbox-unconfirmed',
+    }),
+    'renderer-sandbox-unconfirmed',
+  );
+});
 
 function observedUidCensus(uidProcessCount) {
   return {
@@ -394,7 +440,10 @@ test('keeps the Desktop child timeout and nonzero failure gate unchanged', () =>
             stderr: 'private stderr',
           };
         }),
-      (error) => error.code === 'desktop-not-ready',
+      expectRunnerFailure('desktop-journey-child-failed', [
+        'private stdout',
+        'private stderr',
+      ]),
     );
     const failed = readDesktopJourneyEvidence({
       filePath,
@@ -417,7 +466,9 @@ test('keeps the Desktop child timeout and nonzero failure gate unchanged', () =>
         runDesktopCalendarJourney(config, state, () => {
           throw new Error('private thrown spawn detail');
         }),
-      (error) => error.code === 'desktop-not-ready',
+      expectRunnerFailure('desktop-journey-child-failed', [
+        'private thrown spawn detail',
+      ]),
     );
     const unknown = readDesktopJourneyEvidence({
       filePath,
@@ -502,7 +553,10 @@ test('reports an uncaught Desktop refresh child exit at its last finite step', (
             };
           },
         ),
-      (error) => error.code === 'desktop-not-ready',
+      expectRunnerFailure('desktop-journey-child-failed', [
+        'private child stdout',
+        'private child stderr',
+      ]),
     );
 
     const summary = readDesktopJourneyEvidence({
@@ -571,7 +625,7 @@ test('keeps phase evidence when a child diagnostic cannot fit the parser cap', (
           { sourceSha, cdpPort: 42_424 },
           () => ({ status: 1, signal: null }),
         ),
-      (error) => error.code === 'desktop-not-ready',
+      expectRunnerFailure('desktop-journey-child-failed'),
     );
     assert.deepEqual(readFileSync(filePath), originalEvidence);
     const summary = readDesktopJourneyEvidence({
@@ -651,7 +705,7 @@ test('rejects a zero-exit child when capped completion evidence cannot be append
           { sourceSha, cdpPort: 42_424 },
           () => ({ status: 0, signal: null }),
         ),
-      (error) => error.code === 'desktop-not-ready',
+      expectRunnerFailure('desktop-journey-child-failed'),
     );
     assert.deepEqual(readFileSync(filePath), originalEvidence);
     const summary = readDesktopJourneyEvidence({

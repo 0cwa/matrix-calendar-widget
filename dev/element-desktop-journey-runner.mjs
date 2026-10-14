@@ -123,6 +123,27 @@ function failure(code = 'desktop-journey-runner-failed') {
   return error;
 }
 
+export function classifyDesktopStartupFailure({
+  finalizedFailureCode,
+  protocolFailed,
+  journeyFailureCode,
+}) {
+  if (finalizedFailureCode === 'renderer-sandbox-unconfirmed') {
+    return 'renderer-sandbox-unconfirmed';
+  }
+  if (
+    protocolFailed ||
+    journeyFailureCode === 'desktop-startup-finalization-failed'
+  ) {
+    return 'desktop-startup-finalization-failed';
+  }
+  if (journeyFailureCode === 'desktop-not-ready') return 'desktop-not-ready';
+  if (journeyFailureCode === 'desktop-journey-child-failed') {
+    return 'desktop-journey-child-failed';
+  }
+  return 'desktop-startup-finalization-failed';
+}
+
 function safePath(input, expectedName, runnerTemp) {
   if (
     typeof input !== 'string' ||
@@ -1498,7 +1519,7 @@ function enrichStartupRecord(record, state, progressObservations, exitCode) {
   try {
     sanitizeDesktopStages([record], state.sourceSha);
   } catch {
-    throw failure('desktop-not-ready');
+    throw failure('desktop-startup-finalization-failed');
   }
   writePrivateJson(state.resultPath, record);
   appendStage(desktopStagePath(), record);
@@ -1830,7 +1851,7 @@ export function runDesktopCalendarJourney(
     completion.exitStatus !== 0 ||
     journeySummary.status !== 'passed'
   ) {
-    throw failure('desktop-not-ready');
+    throw failure('desktop-journey-child-failed');
   }
   return completion;
 }
@@ -1848,14 +1869,18 @@ async function runDesktopStartup(config, state, mode) {
       runDesktopCalendarJourney(config, state);
     } else {
       closeResult = await waitForStartupClose(controller, 140_000);
-      if (closeResult === undefined) throw failure('desktop-not-ready');
+      if (closeResult === undefined) {
+        throw failure('desktop-startup-finalization-failed');
+      }
     }
   } catch (error) {
     journeyFailure = error;
   } finally {
     if (mode === 'journey' && controller.ready) {
       const completionWritten = signalDesktopJourneyCompletion(state);
-      if (!completionWritten) journeyFailure ??= failure('desktop-not-ready');
+      if (!completionWritten) {
+        journeyFailure ??= failure('desktop-startup-finalization-failed');
+      }
       closeResult = await waitForStartupClose(controller, STARTUP_EXIT_WAIT_MS);
     }
     if (closeResult === undefined) {
@@ -1876,9 +1901,11 @@ async function runDesktopStartup(config, state, mode) {
     journeyFailure !== undefined
   ) {
     throw failure(
-      finalized?.failureCode === 'renderer-sandbox-unconfirmed'
-        ? 'renderer-sandbox-unconfirmed'
-        : 'desktop-not-ready',
+      classifyDesktopStartupFailure({
+        finalizedFailureCode: finalized?.failureCode,
+        protocolFailed: controller.protocolFailed,
+        journeyFailureCode: journeyFailure?.code,
+      }),
     );
   }
 }
