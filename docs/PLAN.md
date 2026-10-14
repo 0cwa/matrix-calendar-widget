@@ -627,6 +627,8 @@ access and event writes stay disabled by default.
 
 ### Controlled beta acceptance — separate from milestone completion
 
+Track sanitized exact-candidate release gates in the [release index](./RELEASE.md).
+
 - [x] Define the bounded Element Web/Desktop pilot scope, deployment shape,
       and acceptance evidence in `docs/beta-scope.md`.
 - [x] Add default-off sidecar Compose inputs, an optional server-only env file,
