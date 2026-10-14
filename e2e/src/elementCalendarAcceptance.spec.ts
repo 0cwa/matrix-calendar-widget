@@ -32,6 +32,10 @@ import { arch, platform, release } from 'node:os';
 import { isAbsolute, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
+  createDefaultViewMilestoneRecorder,
+  type DefaultViewMilestones,
+} from '../../dev/element-acceptance-default-view-milestones.mjs';
+import {
   extractElementBundleFrames,
   readElementErrorSourceMapInPage,
   resolveElementErrorSourcePointer,
@@ -665,6 +669,7 @@ type PerformanceDetailsSample = {
 };
 type PerformanceDefaultViewSample = {
   durationMs: number | null;
+  milestones: PerformanceDefaultViewMilestones | null;
   apiResponseCount: number;
   apiRangeMaxMs: number | null;
   returnedCount: number | null;
@@ -674,6 +679,7 @@ type PerformanceDefaultViewSample = {
   usableControlVisible: boolean;
   stable: boolean;
 };
+type PerformanceDefaultViewMilestones = DefaultViewMilestones;
 type PerformanceReport = {
   version: 2;
   year: number;
@@ -762,7 +768,7 @@ type OrdinaryPerformanceCase = {
   detailSamples: PerformanceDetailsSample[];
 };
 type OrdinaryPerformanceReport = {
-  version: 13;
+  version: 14;
   viewportWidth: 1280;
   viewportHeight: 800;
   calendarDays: 7;
@@ -1297,6 +1303,7 @@ function makeEmptyOrdinaryPerformanceCase(
     preparation: { elementLoginMs: null, roomNavigationMs: null },
     defaultView: {
       durationMs: null,
+      milestones: null,
       apiResponseCount: 0,
       apiRangeMaxMs: null,
       returnedCount: null,
@@ -1319,7 +1326,7 @@ function makeEmptyOrdinaryPerformanceReport(initialDate: {
   month: number;
 }): OrdinaryPerformanceReport {
   return {
-    version: 13,
+    version: 14,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -2625,6 +2632,13 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
       const defaultSample = `${caseReport.profile}-default` as const;
       observer.setSample(defaultSample);
       const coldStartedAt = performance.now();
+      const defaultViewMilestoneRecorder = createDefaultViewMilestoneRecorder(
+        process.env.ELEMENT_ACCEPTANCE_DEFAULT_VIEW_MILESTONES === '1',
+        () => elapsedMilliseconds(coldStartedAt),
+        (milestones) => {
+          caseReport.defaultView.milestones = milestones;
+        },
+      );
       pageErrorStage = 'widget-open';
       failureCode = 'performance-widget-open-failed';
       const frame = await openCalendarWidget(element, page, {
@@ -2649,10 +2663,12 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
           }
         },
       });
+      defaultViewMilestoneRecorder?.mark('widgetOpenElapsedMs');
 
       failureCode = 'performance-default-view-failed';
       try {
         await observer.waitForRoomEvents(defaultSample, 'preselection');
+        defaultViewMilestoneRecorder?.mark('roomRangeObservedElapsedMs');
       } catch {
         const failureSnapshot = await observeDefaultWaitFailureSnapshot(
           page,
@@ -2673,6 +2689,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
         frame,
         expectedTitles,
       );
+      defaultViewMilestoneRecorder?.mark('rowsStableElapsedMs');
       const readinessEventRows = observer
         .rowsFor(defaultSample)
         .filter((row) => row.endpoint === 'events');
@@ -2693,6 +2710,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
           createEventControl.isVisible().catch(() => false),
           createEventControl.isEnabled().catch(() => false),
         ]);
+      defaultViewMilestoneRecorder?.mark('createControlUsableElapsedMs');
       pageErrorStage = advanceOrdinaryPageErrorStage(pageErrorStage, {
         responseDecoded:
           readinessRoomRow?.status === 200 && readinessRoomRow.decoded,
@@ -2707,6 +2725,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
         stable: defaultMeasurement.stable,
       });
       await observer.waitForSettled(defaultSample);
+      defaultViewMilestoneRecorder?.mark('observerSettledElapsedMs');
       const defaultEventRows = observer
         .rowsFor(defaultSample)
         .filter((row) => row.endpoint === 'events');
@@ -2721,6 +2740,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
         defaultRoomRows.length === 1 ? defaultRoomRows[0].eventCount : null;
       caseReport.defaultView = {
         durationMs: elapsedMilliseconds(coldStartedAt),
+        milestones: caseReport.defaultView.milestones,
         apiResponseCount: defaultEventRows.length,
         apiRangeMaxMs: defaultEventRows.length
           ? Math.max(...defaultEventRows.map((row) => row.durationMs))

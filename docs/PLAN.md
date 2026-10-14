@@ -448,10 +448,21 @@ DST regression or recurrence-editing criteria above.
 - [ ] Complete the controlled-beta local and operator readiness gates for the
       selected deployment. Full isolated local Stage B has not passed: the
       local probe stopped while verifying container capabilities; the
-      inspected value was not retained and guest execution was skipped. Hosted
-      source-bound Element and CI acceptance is complete; the separate local
-      source-bound server image/cache/runtime rehearsal remains open. Then
-      record the actual target's ingress,
+      inspected value was not retained and guest execution was skipped. The
+      completed hosted Element and CI acceptance is historical evidence for
+      PR #247 source `acc535dfe69001403c67853b2171672e74056f51` (tree
+      `784aaeac9f6cf733ed7f38b50eb46bcc4b77c333`), as recorded in
+      `docs/STATUS.md`; it does not accept the current PR #260 candidate
+      `3643166a972a4f9e42da0b005bf3b7e3b8233180` (tree
+      `b25da53e7dd7709ae91ca351c4207c7c475d3933`). Current acceptance remains
+      pending: the full normal-bot profile passed, the appservice 25-event
+      default-view sample missed the unchanged 2,000 ms limit twice
+      (2001.651 ms and 2004.426 ms), and later appservice acceptance has not
+      run. The local source-bound server image/cache/runtime rehearsal remains
+      open. P0 local rehearsal remains blocked pending owner-scope approval.
+      An opt-in cumulative default-view timing diagnostic is prepared in this
+      candidate but has not been run; it changes neither threshold nor gate
+      and does not identify a cause. Then record the actual target's ingress,
       DNS/TLS/proxy, account ownership, MAS, credential issuance, and secret
       facts; validate encrypted off-server Restic-compatible S3 backups with
       daily scheduling, 30-day retention, custody, and paired Radicale plus

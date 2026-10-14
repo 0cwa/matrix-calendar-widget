@@ -131,7 +131,7 @@ const UNMAPPED_SOURCE_RESOLUTIONS = new Set([
   'unsupported-source',
   'invalid-coordinate',
 ]);
-const ORDINARY_REPORT_VERSIONS = new Set([9, 10, 11, 12, 13]);
+const ORDINARY_REPORT_VERSIONS = new Set([9, 10, 11, 12, 13, 14]);
 const PAGE_ERROR_SUBTYPE_CLASS = new Map([
   ['error', 'error'],
   ['type-error', 'type-error'],
@@ -522,7 +522,7 @@ function ordinaryPageErrorsPass(report) {
     );
   }
   return (
-    report.version === 13 &&
+    report.version >= 13 &&
     report.pageErrorCount !== null &&
     report.pageErrorCount > 0 &&
     report.pageErrorCount <= 8 &&
@@ -1176,7 +1176,7 @@ const ORDINARY_CASE_KEYS = [
   'refresh',
   'detailSamples',
 ];
-const DEFAULT_VIEW_KEYS = [
+const LEGACY_DEFAULT_VIEW_KEYS = [
   'durationMs',
   'apiResponseCount',
   'apiRangeMaxMs',
@@ -1186,6 +1186,14 @@ const DEFAULT_VIEW_KEYS = [
   'countMatches',
   'usableControlVisible',
   'stable',
+];
+const DEFAULT_VIEW_KEYS = [...LEGACY_DEFAULT_VIEW_KEYS, 'milestones'];
+const DEFAULT_VIEW_MILESTONE_KEYS = [
+  'widgetOpenElapsedMs',
+  'roomRangeObservedElapsedMs',
+  'rowsStableElapsedMs',
+  'createControlUsableElapsedMs',
+  'observerSettledElapsedMs',
 ];
 const DEFAULT_WAIT_OBSERVATION_KEYS = [
   'pendingByEndpoint',
@@ -1267,9 +1275,36 @@ function validOrdinaryColdList(value) {
   );
 }
 
-function validOrdinaryDefaultView(value) {
+function validDefaultViewMilestones(value, durationMs) {
+  if (value === null) return true;
+  if (!hasExactKeys(value, DEFAULT_VIEW_MILESTONE_KEYS)) return false;
+
+  let previousElapsed = 0;
+  let unreached = false;
+  for (const key of DEFAULT_VIEW_MILESTONE_KEYS) {
+    const elapsed = value[key];
+    if (elapsed === null) {
+      unreached = true;
+      continue;
+    }
+    if (
+      unreached ||
+      !boundedNumber(elapsed, 0, 600_000) ||
+      elapsed < previousElapsed ||
+      (durationMs !== null && elapsed > durationMs)
+    ) {
+      return false;
+    }
+    previousElapsed = elapsed;
+  }
+  return true;
+}
+
+function validOrdinaryDefaultView(value, reportVersion) {
+  const expectedKeys =
+    reportVersion >= 14 ? DEFAULT_VIEW_KEYS : LEGACY_DEFAULT_VIEW_KEYS;
   return (
-    hasExactKeys(value, DEFAULT_VIEW_KEYS) &&
+    hasExactKeys(value, expectedKeys) &&
     optionalMilliseconds(value.durationMs) &&
     boundedInteger(value.apiResponseCount, 0, 64) &&
     optionalMilliseconds(value.apiRangeMaxMs) &&
@@ -1277,7 +1312,9 @@ function validOrdinaryDefaultView(value) {
     optionalCount(value.renderedCount, 250) &&
     ['rangeMatches', 'countMatches', 'usableControlVisible', 'stable'].every(
       (key) => typeof value[key] === 'boolean',
-    )
+    ) &&
+    (reportVersion < 14 ||
+      validDefaultViewMilestones(value.milestones, value.durationMs))
   );
 }
 
@@ -1449,7 +1486,7 @@ function validOrdinaryAction(value) {
   );
 }
 
-function validOrdinaryCase(value) {
+function validOrdinaryCase(value, reportVersion) {
   const expectedCount = value?.profile === 'empty' ? 0 : 25;
   return (
     hasExactKeys(value, ORDINARY_CASE_KEYS) &&
@@ -1461,7 +1498,7 @@ function validOrdinaryCase(value) {
     PREPARATION_KEYS.every((key) =>
       optionalMilliseconds(value.preparation[key]),
     ) &&
-    validOrdinaryDefaultView(value.defaultView) &&
+    validOrdinaryDefaultView(value.defaultView, reportVersion) &&
     validDefaultWaitObservation(value.defaultWaitObservation) &&
     validOrdinaryColdList(value.coldList) &&
     value.coldList.rangeSelectionMs === null &&
@@ -1621,7 +1658,7 @@ function validOrdinaryReport(report) {
           );
         })();
       const hostStackEvidenceValid =
-        report.version !== 13 || validHostStackEvidence(observation);
+        report.version < 13 || validHostStackEvidence(observation);
       return (
         ORDINARY_PROFILES.has(observation.profile) &&
         PAGE_ERROR_STAGES.has(observation.stage) &&
@@ -1656,7 +1693,9 @@ function validOrdinaryReport(report) {
     report.cases.length === 2 &&
     report.cases[0]?.profile === 'empty' &&
     report.cases[1]?.profile === 'events-25' &&
-    report.cases.every(validOrdinaryCase) &&
+    report.cases.every((performanceCase) =>
+      validOrdinaryCase(performanceCase, report.version),
+    ) &&
     report.cases[0].year === report.cases[1].year &&
     report.cases[0].month === report.cases[1].month &&
     Array.isArray(report.apiResponses) &&
@@ -2160,6 +2199,10 @@ function formatOrdinaryPerformanceEvidence(record) {
       defaultWaitObservation,
       coldList,
     } = performanceCase;
+    const milestoneFields =
+      report.version >= 14 && defaultView.milestones !== null
+        ? ` milestone_widget_open_ms=${display(defaultView.milestones.widgetOpenElapsedMs)} milestone_room_range_observed_ms=${display(defaultView.milestones.roomRangeObservedElapsedMs)} milestone_rows_stable_ms=${display(defaultView.milestones.rowsStableElapsedMs)} milestone_create_control_usable_ms=${display(defaultView.milestones.createControlUsableElapsedMs)} milestone_observer_settled_ms=${display(defaultView.milestones.observerSettledElapsedMs)}`
+        : '';
     lines.push(
       `performance_case profile=${profile} events=${eventCount} month=${year}-${String(month).padStart(2, '0')}`,
       `performance_preparation profile=${profile} login_ms=${display(preparation.elementLoginMs)} room_navigation_ms=${display(preparation.roomNavigationMs)}`,
@@ -2174,7 +2217,7 @@ function formatOrdinaryPerformanceEvidence(record) {
         `range_matches=${defaultView.rangeMatches}`,
         `count_matches=${defaultView.countMatches}`,
         `create_visible=${defaultView.usableControlVisible}`,
-        `stable=${defaultView.stable}`,
+        `stable=${defaultView.stable}${milestoneFields}`,
       ].join(' '),
       [
         'performance_cold_default',

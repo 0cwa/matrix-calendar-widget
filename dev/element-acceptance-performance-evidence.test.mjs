@@ -339,6 +339,21 @@ function ordinaryReport() {
   return report;
 }
 
+function ordinaryReportWithDefaultViewMilestones() {
+  const report = ordinaryReport();
+  report.version = 14;
+  for (const performanceCase of report.cases) {
+    performanceCase.defaultView.milestones = {
+      widgetOpenElapsedMs: 900,
+      roomRangeObservedElapsedMs: 1100,
+      rowsStableElapsedMs: 1500,
+      createControlUsableElapsedMs: 1600,
+      observerSettledElapsedMs: 1700,
+    };
+  }
+  return report;
+}
+
 function verifiedHostObservation(overrides = {}) {
   const error = new Error('private error text');
   error.stack =
@@ -1755,6 +1770,75 @@ test('gates the cold first usable seven-day view at two seconds', () => {
         sourceSha,
       ),
     /invalid element acceptance summary/u,
+  );
+});
+
+test('validates opt-in cumulative milestones without changing the default-view gate', () => {
+  const report = ordinaryReportWithDefaultViewMilestones();
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(ordinaryStage('passed', report)),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /phase=performance-pilot report_version=14 profile=ordinary-0-25 ordinary_gate_eligible=true status=passed/u,
+  );
+  assert.match(
+    summary,
+    /performance_default_view profile=events-25 elapsed_ms=1800 .*stable=true milestone_widget_open_ms=900 milestone_room_range_observed_ms=1100 milestone_rows_stable_ms=1500 milestone_create_control_usable_ms=1600 milestone_observer_settled_ms=1700/u,
+  );
+
+  const missing = ordinaryReportWithDefaultViewMilestones();
+  delete missing.cases[1].defaultView.milestones.rowsStableElapsedMs;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', missing)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const decreasing = ordinaryReportWithDefaultViewMilestones();
+  decreasing.cases[1].defaultView.milestones.rowsStableElapsedMs = 1500;
+  decreasing.cases[1].defaultView.milestones.createControlUsableElapsedMs = 1499;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', decreasing)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const corrupt = ordinaryReportWithDefaultViewMilestones();
+  corrupt.cases[1].defaultView.milestones.observerSettledElapsedMs = -1;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', corrupt)),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const failedGate = ordinaryReportWithDefaultViewMilestones();
+  failedGate.cases[1].defaultView.durationMs = 2001;
+  failedGate.cases[1].defaultView.milestones.observerSettledElapsedMs = 2000;
+  failedGate.cases[1].coldList.durationMs = 2001;
+  const failedSummary = sanitizeElementAcceptance(
+    JSON.stringify(
+      ordinaryStage('failed', failedGate, 'performance-threshold-exceeded'),
+    ),
+    sourceSha,
+  );
+  assert.match(
+    failedSummary,
+    /ordinary_gate_eligible=false status=failed failure_code=performance-threshold-exceeded/u,
+  );
+  assert.match(
+    failedSummary,
+    /performance_default_view profile=events-25 elapsed_ms=2001 .*milestone_observer_settled_ms=2000/u,
   );
 });
 
