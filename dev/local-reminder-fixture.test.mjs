@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   chmodSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -9,7 +10,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { runLocalReminderFixture } from './local-reminder-fixture.mjs';
+import {
+  runLocalReminderFixture,
+  writeMarkerTitles,
+} from './local-reminder-fixture.mjs';
 
 const MEMBER_ID = '@element-acceptance-a:localhost';
 const SERVICE_ID = '@element-acceptance-bot:localhost';
@@ -53,6 +57,7 @@ function fixtureFiles(flow = 'initial', initialMarkers = []) {
       ELEMENT_ACCEPTANCE_REMINDER_FLOW: flow,
     },
     markerPath,
+    runnerTemp,
     cleanup: () => rmSync(runnerTemp, { recursive: true, force: true }),
   };
 }
@@ -293,6 +298,23 @@ function execute(files, client, uuid = '12345678-1234-1234-1234-123456789abc') {
     now: () => client.currentTime,
     sleep: async (milliseconds) => client.advance(milliseconds),
     uuid: () => uuid,
+  });
+}
+
+function executeWithMarkerWriteFailure(files, client) {
+  return runLocalReminderFixture({
+    environment: files.environment,
+    fetchImpl: client.fetchImpl,
+    now: () => client.currentTime,
+    sleep: async (milliseconds) => client.advance(milliseconds),
+    uuid: () => '12345678-1234-1234-1234-123456789abc',
+    writeMarker: (filePath, titles) =>
+      writeMarkerTitles(filePath, titles, {
+        writeFile(fd, content) {
+          writeFileSync(fd, content.slice(0, 5));
+          throw new Error('synthetic partial marker write');
+        },
+      }),
   });
 }
 
@@ -537,6 +559,26 @@ test('keeps prior exact-once room markers while appending the restart canary', a
       priorTitle,
       TITLE,
     ]);
+  } finally {
+    files.cleanup();
+  }
+});
+
+test('preserves old markers and removes only its partial sibling when marker writing fails', async () => {
+  const priorTitle = 'Reminder acceptance aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const files = fixtureFiles('restart', [priorTitle]);
+  const client = createClient({ priorTitles: [priorTitle] });
+  try {
+    const result = await executeWithMarkerWriteFailure(files, client);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.failurePhase, 'marker-write');
+    assert.equal(result.markerWritten, false);
+    assert.deepEqual(JSON.parse(readFileSync(files.markerPath, 'utf8')), [
+      priorTitle,
+    ]);
+    assert.ok(
+      !readdirSync(files.runnerTemp).some((name) => name.endsWith('.tmp')),
+    );
   } finally {
     files.cleanup();
   }

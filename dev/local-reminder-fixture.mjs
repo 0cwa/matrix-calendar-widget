@@ -23,6 +23,8 @@ import {
   lstatSync,
   openSync,
   readFileSync,
+  renameSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { isAbsolute, resolve, sep } from 'node:path';
@@ -500,21 +502,51 @@ async function waitForNewDelivery(
   };
 }
 
-function writeMarkerTitles(filePath, titles) {
+export function writeMarkerTitles(
+  filePath,
+  titles,
+  { writeFile = writeFileSync, rename = renameSync, remove = unlinkSync } = {},
+) {
   let fd;
+  let temporaryPath;
+  let ownsTemporaryFile = false;
   try {
+    const current = lstatSync(filePath);
+    if (!current.isFile() || (current.mode & 0o077) !== 0) fail('marker-write');
+    temporaryPath = `${filePath}.${randomUUID()}.tmp`;
     fd = openSync(
-      filePath,
-      constants.O_WRONLY | constants.O_TRUNC | constants.O_NOFOLLOW,
+      temporaryPath,
+      constants.O_WRONLY |
+        constants.O_CREAT |
+        constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o600,
     );
+    ownsTemporaryFile = true;
     const info = fstatSync(fd);
     if (!info.isFile()) fail('marker-write');
     fchmodSync(fd, 0o600);
-    writeFileSync(fd, JSON.stringify(titles));
+    writeFile(fd, JSON.stringify(titles));
+    closeSync(fd);
+    fd = undefined;
+    rename(temporaryPath, filePath);
+    ownsTemporaryFile = false;
   } catch {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Preserve the original marker and still remove only our temp file.
+      }
+    }
+    if (ownsTemporaryFile && temporaryPath) {
+      try {
+        remove(temporaryPath);
+      } catch {
+        // The fixed failure result reports no successful marker write.
+      }
+    }
     fail('marker-write');
-  } finally {
-    if (fd !== undefined) closeSync(fd);
   }
 }
 
@@ -626,6 +658,7 @@ export async function runLocalReminderFixture({
   sleep = (milliseconds) =>
     new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds)),
   uuid = randomUUID,
+  writeMarker = writeMarkerTitles,
 } = {}) {
   const flow = environment.ELEMENT_ACCEPTANCE_REMINDER_FLOW;
   const summary = {
@@ -902,7 +935,7 @@ export async function runLocalReminderFixture({
     if (!delivery.deliveredAfterDue) fail('reminder-delivery');
 
     summary.failurePhase = 'marker-write';
-    writeMarkerTitles(markerPath, allTitles);
+    writeMarker(markerPath, allTitles);
     summary.status = 'passed';
     summary.failurePhase = undefined;
     summary.markerWritten = true;
