@@ -4,7 +4,7 @@ _Last updated: 2026-10-15._
 
 _Current application-source candidate: `030106d6b3119b1d1ea6deb5bffe7823fea92020` (tree `b4db16078638078d126a9d698f2e723d3978913e`). A pending acceptance-helper follow-up adds finite API-probe failure details; fresh evidence will be attributed to the next exact merged candidate._
 
-_Fresh normal-bot and operator acceptance against this candidate is incomplete; see the current-candidate evidence below._
+_Operator acceptance against this candidate is incomplete; detailed fixed-summary reconciliation remains pending. See the current-candidate evidence below._
 
 See the [dated continuation](handoff/2026-10-06/README.md) and
 [exact delivered-slice ledger](handoff/2026-10-06/ledger.json).
