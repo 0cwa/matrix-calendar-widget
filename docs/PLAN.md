@@ -521,25 +521,26 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 - [x] Integrate #274, #259, #282, and #272 on frozen application-source
       candidate `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree
       `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`).
-- [ ] Resolve #288's deleted-event readback failure and complete fresh hosted
-      acceptance. On current source
-      `e3ffe671d24157d153a82c6707f173eaaf8015ab` (tree
-      `60a5d4d78df2c84381ef82b25927f665242329a0`), standalone Desktop, CalDAV
-      contracts in both principal modes, and PostgreSQL first-initialization
-      passed. The Element Web normal-bot job passed; the appservice job was
-      still running at the latest metadata check. The source-bound operator
-      rehearsal failed deleted-event readback with HTTP 500 and could not
-      verify owned cleanup. Source tracing found an unmapped typed CalDAV GET 404. The #288 controller change maps only that typed GET/404 case to a
-      fixed safe 404; the complete controller test file (93 tests), server
-      TypeScript, targeted ESLint, Prettier, and Nest build pass locally. The
-      change still requires independent review and a fresh source-bound run
-      with successful owned cleanup. Private operator-packet execution-plan
-      blockers are clear, but external binding remains pending; no application
-      installation or cold backup has been performed.
-- [ ] After the #288 correction merges, freeze that exact main commit as the
+- [ ] Refresh source-bound acceptance after integrating the reviewed #291
+      cleanup-settlement and reminder child-outcome changes. Current `main`
+      `2ef7af367adc931273b2807e4edc99c5fc422f33` (tree
+      `aeffa32176d6bce44be61c0e6a121ccce9096fa5`) passes CI, CodeQL, standalone
+      Desktop startup, both-mode CalDAV contracts, and PostgreSQL
+      first-initialization. In the Element Web run, normal-bot functional
+      phases, ordinary timing limits, and all 12 Desktop journey cases passed,
+      but startup/cleanup could not establish the expected UID outcome. The
+      source-bound operator rehearsal failed in the reminder-restore fixture;
+      its child outcome was not preserved, so the cause remains unknown. The
+      current source includes #288's typed GET/404 mapping. The reviewed
+      cleanup-settlement and child-outcome changes improve bounded observation
+      and reporting, but do not establish either failure's cause or an
+      acceptance pass. They require a fresh source-bound run.
+- [ ] After the combined changes merge, freeze that exact main commit as the
       #255 candidate and run all required acceptance workflows against that
       SHA. #251 remains pending those results and operator readiness; no live
-      pilot or production rollout has occurred.
+      pilot or production rollout has occurred. Source-bound images,
+      application installation, and cold paired backup/recovery also remain
+      pending.
 - [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
       StoreProvider/Redux startup retirement until after the pilot.
 
