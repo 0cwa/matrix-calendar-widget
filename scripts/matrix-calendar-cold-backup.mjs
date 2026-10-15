@@ -9,12 +9,14 @@ import {
   mkdir,
   open,
   readFile,
+  readdir,
   realpath,
   rename,
+  rmdir,
   unlink,
   writeFile,
 } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const COMPOSE_FILE = 'deploy/etke-sidecar.compose.yaml';
@@ -27,7 +29,9 @@ const DUMP_NAME = 'reminder-postgresql.dump';
 const DUMP_PARTIAL_NAME = `${DUMP_NAME}.partial`;
 const CHECKSUM_NAME = 'SHA256SUMS';
 const CAPTURE_MARKER_NAME = '.capture-complete';
+const CAPTURE_MARKER_CONTENT = 'Cold capture verified and services resumed.\n';
 const LOCK_NAME = '.matrix-calendar-cold-backup.lock';
+const SNAPSHOT_ID = /^[a-f0-9]{64}$/u;
 const COMMAND_TIMEOUT_MS = 30_000;
 const CHILD_KILL_GRACE_MS = 5_000;
 const CAPTURE_TIMEOUT_MS = 30 * 60_000;
@@ -54,6 +58,7 @@ const CONFIG_KEYS = new Set([
   'resticHost',
   'resticTags',
   'resticRetentionEnabled',
+  'cleanupSuccessfulCapture',
 ]);
 
 const SAFE_TAG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/u;
@@ -134,7 +139,9 @@ function validateConfig(config) {
     ) ||
     new Set(config.resticTags).size !== config.resticTags.length ||
     (config.resticRetentionEnabled !== undefined &&
-      typeof config.resticRetentionEnabled !== 'boolean')
+      typeof config.resticRetentionEnabled !== 'boolean') ||
+    (config.cleanupSuccessfulCapture !== undefined &&
+      typeof config.cleanupSuccessfulCapture !== 'boolean')
   ) {
     fail('configuration');
   }
@@ -182,17 +189,53 @@ async function requirePrivateDirectory(path, stage) {
   if (!isSafePath(path)) fail(stage);
   let info;
   try {
-    info = await lstat(path);
+    info = await lstat(path, { bigint: true });
   } catch {
     fail(stage);
   }
   if (
     !info.isDirectory() ||
-    (info.mode & PRIVATE_DIRECTORY_MASK) !== 0 ||
-    (typeof process.getuid === 'function' && info.uid !== process.getuid())
+    (info.mode & BigInt(PRIVATE_DIRECTORY_MASK)) !== 0n ||
+    (typeof process.getuid === 'function' &&
+      info.uid !== BigInt(process.getuid()))
   ) {
     fail(stage);
   }
+  return info;
+}
+
+async function requireNoSymlinkAncestors(path, stage) {
+  let current = resolve(path);
+  while (true) {
+    let info;
+    try {
+      info = await lstat(current, { bigint: true });
+    } catch {
+      fail(stage);
+    }
+    if (info.isSymbolicLink()) fail(stage);
+    const parent = dirname(current);
+    if (parent === current) return;
+    current = parent;
+  }
+}
+
+function directoryIdentity(info) {
+  return {
+    dev: info.dev,
+    ino: info.ino,
+    uid: info.uid,
+    mode: info.mode,
+  };
+}
+
+function sameDirectoryIdentity(left, right) {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.uid === right.uid &&
+    left.mode === right.mode
+  );
 }
 
 async function validateConfigFiles(config, runtimeEnv) {
@@ -202,7 +245,13 @@ async function validateConfigFiles(config, runtimeEnv) {
     'preflight',
   );
   await requirePrivateDirectory(runtimeEnv.RESTIC_CACHE_DIR, 'preflight');
-  await requirePrivateDirectory(config.captureRoot, 'preflight');
+  const captureRootInfo = await requirePrivateDirectory(
+    config.captureRoot,
+    'preflight',
+  );
+  if (config.cleanupSuccessfulCapture) {
+    await requireNoSymlinkAncestors(config.captureRoot, 'preflight');
+  }
 
   let projectInfo;
   let composeInfo;
@@ -236,11 +285,22 @@ async function validateConfigFiles(config, runtimeEnv) {
   }
 
   try {
+    const resolvedCaptureRoot = await realpath(config.captureRoot);
+    const resolvedCaptureRootInfo = await lstat(resolvedCaptureRoot, {
+      bigint: true,
+    });
+    if (
+      !resolvedCaptureRootInfo.isDirectory() ||
+      !sameDirectoryIdentity(captureRootInfo, resolvedCaptureRootInfo)
+    ) {
+      fail('preflight');
+    }
     return {
       projectDirectory: await realpath(config.projectDirectory),
       composeFile: await realpath(join(config.projectDirectory, COMPOSE_FILE)),
       composeEnvFile: await realpath(config.composeEnvFile),
-      captureRoot: await realpath(config.captureRoot),
+      captureRoot: resolvedCaptureRoot,
+      captureRootIdentity: directoryIdentity(resolvedCaptureRootInfo),
     };
   } catch {
     fail('preflight');
@@ -916,6 +976,328 @@ async function requireNonemptyFile(path, stage) {
   if (!info.isFile() || info.isSymbolicLink() || info.size === 0) fail(stage);
 }
 
+function isPrivateOwnedDirectory(info) {
+  return (
+    info.isDirectory() &&
+    (info.mode & 0o077n) === 0n &&
+    (typeof process.getuid !== 'function' ||
+      info.uid === BigInt(process.getuid()))
+  );
+}
+
+async function currentCaptureDirectoryIdentity(
+  paths,
+  captureDirectory,
+  runName,
+  expectedCaptureIdentity,
+) {
+  await requireNoSymlinkAncestors(captureDirectory, 'verification');
+  if (
+    captureDirectory !== join(paths.captureRoot, runName) ||
+    dirname(captureDirectory) !== paths.captureRoot ||
+    basename(captureDirectory) !== runName
+  ) {
+    fail('verification');
+  }
+
+  let resolvedRoot;
+  let resolvedCapture;
+  let rootInfo;
+  let captureInfo;
+  try {
+    [resolvedRoot, resolvedCapture, rootInfo, captureInfo] = await Promise.all([
+      realpath(paths.captureRoot),
+      realpath(captureDirectory),
+      lstat(paths.captureRoot, { bigint: true }),
+      lstat(captureDirectory, { bigint: true }),
+    ]);
+  } catch {
+    fail('verification');
+  }
+
+  if (
+    resolvedRoot !== paths.captureRoot ||
+    resolvedCapture !== captureDirectory ||
+    !isPrivateOwnedDirectory(rootInfo) ||
+    !sameDirectoryIdentity(rootInfo, paths.captureRootIdentity) ||
+    !isPrivateOwnedDirectory(captureInfo) ||
+    (expectedCaptureIdentity !== undefined &&
+      !sameDirectoryIdentity(captureInfo, expectedCaptureIdentity))
+  ) {
+    fail('verification');
+  }
+
+  return directoryIdentity(captureInfo);
+}
+
+function fileIdentity(info) {
+  return {
+    dev: info.dev,
+    ino: info.ino,
+    uid: info.uid,
+    mode: info.mode,
+    nlink: info.nlink,
+    size: info.size,
+    mtimeNs: info.mtimeNs,
+    ctimeNs: info.ctimeNs,
+  };
+}
+
+function sameFileIdentity(left, right) {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.uid === right.uid &&
+    left.mode === right.mode &&
+    left.nlink === right.nlink &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+async function captureFileIdentities(captureDirectory, expectedNames) {
+  let entries;
+  try {
+    entries = await readdir(captureDirectory);
+  } catch {
+    fail('verification');
+  }
+  const sortedEntries = [...entries].sort();
+  const sortedExpected = [...expectedNames].sort();
+  if (
+    sortedEntries.length !== sortedExpected.length ||
+    sortedEntries.some((name, index) => name !== sortedExpected[index])
+  ) {
+    fail('verification');
+  }
+
+  const identities = new Map();
+  for (const name of expectedNames) {
+    let info;
+    try {
+      info = await lstat(join(captureDirectory, name), { bigint: true });
+    } catch {
+      fail('verification');
+    }
+    if (
+      !info.isFile() ||
+      info.nlink !== 1n ||
+      (info.mode & 0o077n) !== 0n ||
+      (typeof process.getuid === 'function' &&
+        info.uid !== BigInt(process.getuid())) ||
+      info.size === 0n
+    ) {
+      fail('verification');
+    }
+    identities.set(name, fileIdentity(info));
+  }
+  return identities;
+}
+
+async function localCaptureProof(
+  paths,
+  captureDirectory,
+  runName,
+  expectedCaptureIdentity,
+  expectedNames,
+) {
+  const captureIdentity = await currentCaptureDirectoryIdentity(
+    paths,
+    captureDirectory,
+    runName,
+    expectedCaptureIdentity,
+  );
+  const files = await captureFileIdentities(captureDirectory, expectedNames);
+  let marker;
+  try {
+    marker = await readFile(
+      join(captureDirectory, CAPTURE_MARKER_NAME),
+      'utf8',
+    );
+  } catch {
+    fail('verification');
+  }
+  if (marker !== CAPTURE_MARKER_CONTENT) fail('verification');
+  return { captureIdentity, files };
+}
+
+function sameCaptureProof(left, right, expectedNames) {
+  if (!sameDirectoryIdentity(left.captureIdentity, right.captureIdentity)) {
+    return false;
+  }
+  return expectedNames.every((name) => {
+    const expected = left.files.get(name);
+    const current = right.files.get(name);
+    return (
+      expected !== undefined &&
+      current !== undefined &&
+      sameFileIdentity(expected, current)
+    );
+  });
+}
+
+function captureFileNames(hasDatabase) {
+  return [
+    ...ARCHIVE_NAMES,
+    ...(hasDatabase ? [DUMP_NAME] : []),
+    CHECKSUM_NAME,
+    CAPTURE_MARKER_NAME,
+  ];
+}
+
+function resticSnapshotId(backupOutput) {
+  const records = parseJsonLines(backupOutput, 'verification');
+  const summaries = records.filter(
+    (record) => record.message_type === 'summary',
+  );
+  const summary = records.at(-1);
+  if (
+    summaries.length !== 1 ||
+    summary?.message_type !== 'summary' ||
+    summary.dry_run === true ||
+    typeof summary.snapshot_id !== 'string' ||
+    !SNAPSHOT_ID.test(summary.snapshot_id)
+  ) {
+    fail('verification');
+  }
+  return summary.snapshot_id;
+}
+
+function verifyResticListing(
+  listingOutput,
+  snapshotId,
+  config,
+  captureDirectory,
+  expectedNames,
+  captureProof,
+) {
+  const records = parseJsonLines(listingOutput, 'verification');
+  if (records.length !== expectedNames.length + 2) fail('verification');
+  const snapshot = records[0];
+  if (
+    snapshot.message_type !== 'snapshot' ||
+    snapshot.id !== snapshotId ||
+    snapshot.hostname !== config.resticHost ||
+    !Array.isArray(snapshot.paths) ||
+    snapshot.paths.length !== 1 ||
+    snapshot.paths[0] !== captureDirectory ||
+    !Array.isArray(snapshot.tags)
+  ) {
+    fail('verification');
+  }
+
+  const actualTags = [...snapshot.tags].sort();
+  const expectedTags = [...config.resticTags].sort();
+  if (
+    actualTags.length !== expectedTags.length ||
+    actualTags.some((tag, index) => tag !== expectedTags[index])
+  ) {
+    fail('verification');
+  }
+
+  const nodes = records.slice(1);
+  if (nodes.some((node) => node.message_type !== 'node')) {
+    fail('verification');
+  }
+  const nodesByPath = new Map();
+  for (const node of nodes) {
+    if (typeof node.path !== 'string' || nodesByPath.has(node.path)) {
+      fail('verification');
+    }
+    nodesByPath.set(node.path, node);
+  }
+  if (nodesByPath.size !== expectedNames.length + 1) fail('verification');
+
+  const directoryNode = nodesByPath.get(captureDirectory);
+  if (directoryNode?.type !== 'dir') fail('verification');
+  for (const name of expectedNames) {
+    const node = nodesByPath.get(join(captureDirectory, name));
+    const fileIdentity = captureProof.files.get(name);
+    if (
+      node?.type !== 'file' ||
+      !Number.isSafeInteger(node.size) ||
+      BigInt(node.size) !== fileIdentity?.size
+    ) {
+      fail('verification');
+    }
+  }
+}
+
+async function verifyResticSnapshot(
+  snapshotId,
+  config,
+  paths,
+  runtimeEnv,
+  deps,
+  signal,
+  captureDirectory,
+  expectedNames,
+  captureProof,
+) {
+  const commandOptions = {
+    env: commandEnvironment(config, paths, runtimeEnv, 'restic'),
+    signal,
+    timeoutMs: UPLOAD_TIMEOUT_MS,
+  };
+  const listing = await runCommand(
+    deps,
+    'restic',
+    ['ls', '--json', '--recursive', snapshotId, captureDirectory],
+    commandOptions,
+    'verification',
+  );
+  verifyResticListing(
+    listing,
+    snapshotId,
+    config,
+    captureDirectory,
+    expectedNames,
+    captureProof,
+  );
+
+  const marker = await runCommand(
+    deps,
+    'restic',
+    ['dump', snapshotId, join(captureDirectory, CAPTURE_MARKER_NAME)],
+    commandOptions,
+    'verification',
+  );
+  if (marker !== CAPTURE_MARKER_CONTENT) fail('verification');
+}
+
+async function removeVerifiedCapture(
+  paths,
+  captureDirectory,
+  runName,
+  expectedNames,
+  captureProof,
+) {
+  const currentProof = await localCaptureProof(
+    paths,
+    captureDirectory,
+    runName,
+    captureProof.captureIdentity,
+    expectedNames,
+  );
+  if (!sameCaptureProof(captureProof, currentProof, expectedNames)) {
+    fail('verification');
+  }
+
+  const removalOrder = expectedNames.filter(
+    (name) => name !== CAPTURE_MARKER_NAME,
+  );
+  removalOrder.push(CAPTURE_MARKER_NAME);
+  try {
+    for (const name of removalOrder) {
+      await unlink(join(captureDirectory, name));
+    }
+    await rmdir(captureDirectory);
+  } catch {
+    fail('verification');
+  }
+}
+
 async function hashFile(path, stage) {
   return new Promise((resolveHash, rejectHash) => {
     const hash = createHash('sha256');
@@ -1156,6 +1538,7 @@ export async function runColdBackup(configInput, dependencies = {}) {
 
   const lockHandle = await acquireLock(lockPath);
   let captureDirectory;
+  let captureDirectoryIdentity;
   let stopAttempted = false;
   let failure;
 
@@ -1194,6 +1577,13 @@ export async function runColdBackup(configInput, dependencies = {}) {
       await mkdir(captureDirectory, { mode: 0o700 });
     } catch {
       fail('capture');
+    }
+    if (config.cleanupSuccessfulCapture) {
+      captureDirectoryIdentity = await currentCaptureDirectoryIdentity(
+        paths,
+        captureDirectory,
+        runName,
+      );
     }
 
     // From the first stop onward, every exit path attempts dependency-order resume.
@@ -1276,9 +1666,22 @@ export async function runColdBackup(configInput, dependencies = {}) {
 
     await createOutputFile(
       join(captureDirectory, CAPTURE_MARKER_NAME),
-      'Cold capture verified and services resumed.\n',
+      CAPTURE_MARKER_CONTENT,
       'verification',
     );
+
+    let expectedCaptureNames;
+    let captureProof;
+    if (config.cleanupSuccessfulCapture) {
+      expectedCaptureNames = captureFileNames(hasDatabase);
+      captureProof = await localCaptureProof(
+        paths,
+        captureDirectory,
+        runName,
+        captureDirectoryIdentity,
+        expectedCaptureNames,
+      );
+    }
 
     const resticArgs = [
       'backup',
@@ -1292,18 +1695,30 @@ export async function runColdBackup(configInput, dependencies = {}) {
       'host,tags',
       captureDirectory,
     ];
-    await runCommand(
+    if (config.cleanupSuccessfulCapture) {
+      resticArgs.splice(1, 0, '--quiet', '--json');
+    }
+    const uploadOutput = await runCommand(
       deps,
       'restic',
       resticArgs,
-      {
-        env: commandEnvironment(config, paths, runtimeEnv, 'restic'),
-        signal,
-        timeoutMs: UPLOAD_TIMEOUT_MS,
-        discardStdout: true,
-      },
+      config.cleanupSuccessfulCapture
+        ? {
+            env: commandEnvironment(config, paths, runtimeEnv, 'restic'),
+            signal,
+            timeoutMs: UPLOAD_TIMEOUT_MS,
+          }
+        : {
+            env: commandEnvironment(config, paths, runtimeEnv, 'restic'),
+            signal,
+            timeoutMs: UPLOAD_TIMEOUT_MS,
+            discardStdout: true,
+          },
       'upload',
     );
+    const snapshotId = config.cleanupSuccessfulCapture
+      ? resticSnapshotId(uploadOutput)
+      : undefined;
 
     if (config.resticRetentionEnabled) {
       await runCommand(
@@ -1330,6 +1745,27 @@ export async function runColdBackup(configInput, dependencies = {}) {
         'retention',
       );
     }
+
+    if (config.cleanupSuccessfulCapture) {
+      await verifyResticSnapshot(
+        snapshotId,
+        config,
+        paths,
+        runtimeEnv,
+        deps,
+        signal,
+        captureDirectory,
+        expectedCaptureNames,
+        captureProof,
+      );
+      await removeVerifiedCapture(
+        paths,
+        captureDirectory,
+        runName,
+        expectedCaptureNames,
+        captureProof,
+      );
+    }
   } catch (error) {
     failure =
       error instanceof ColdBackupFailure
@@ -1351,7 +1787,9 @@ export async function runColdBackup(configInput, dependencies = {}) {
   }
 
   if (failure) throw failure;
-  return { captureDirectory };
+  return config.cleanupSuccessfulCapture
+    ? { captureDirectory, captureDirectoryRemoved: true }
+    : { captureDirectory };
 }
 
 async function readConfigFile(path) {
