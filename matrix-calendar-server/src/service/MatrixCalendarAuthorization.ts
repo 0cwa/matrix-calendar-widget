@@ -23,9 +23,9 @@ import {
   MatrixClient,
   MatrixError,
   PowerLevelsEventContent,
-  UserID,
 } from 'matrix-bot-sdk';
 import { StateEventName } from '../model/StateEventName';
+import { isMatrixUserId } from './MatrixIdentifiers';
 
 export const MATRIX_CALENDAR_EVENT_WRITE_POLICY =
   'io.github.0cwa.matrix-calendar.event.write';
@@ -155,7 +155,7 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
         createEvent.state_key !== '' ||
         !isRecord(createEvent.content) ||
         createEvent.content.room_version !== '12' ||
-        !isCanonicalMatrixUserId(createEvent.sender)
+        !isMatrixUserId(createEvent.sender, true)
       ) {
         return false;
       }
@@ -164,7 +164,7 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
       if (
         additionalCreators !== undefined &&
         (!Array.isArray(additionalCreators) ||
-          !additionalCreators.every(isCanonicalMatrixUserId))
+          !additionalCreators.every((value) => isMatrixUserId(value)))
       ) {
         return false;
       }
@@ -208,26 +208,4 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isCanonicalMatrixUserId(value: unknown): value is string {
-  if (typeof value !== 'string') {
-    return false;
-  }
-
-  try {
-    const parsed = new UserID(value);
-    const separator = value.indexOf(':');
-    return (
-      value.startsWith('@') &&
-      separator > 1 &&
-      separator < value.length - 1 &&
-      parsed.localpart.length > 0 &&
-      parsed.domain.length > 0 &&
-      value.slice(1, separator) === parsed.localpart &&
-      value.slice(separator + 1) === parsed.domain
-    );
-  } catch {
-    return false;
-  }
 }

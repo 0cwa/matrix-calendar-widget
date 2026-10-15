@@ -268,6 +268,182 @@ describe('MatrixCalendarAuthorizationFactory', () => {
     ).resolves.toBe(true);
   });
 
+  it('accepts a slash in a current-grammar additional creator ID', async () => {
+    const slashUserId = '@alice/team:example.test';
+    when(matrixClientMock.getJoinedRoomMembers(roomId)).thenResolve([
+      slashUserId,
+    ]);
+    setPowerLevels({ users_default: 0, state_default: 50 });
+    setRoomState([
+      {
+        type: 'm.room.create',
+        state_key: '',
+        sender: '@room-owner:example.test',
+        content: {
+          room_version: '12',
+          additional_creators: [slashUserId],
+        },
+      },
+    ]);
+
+    const factory = new MatrixCalendarAuthorizationFactory(
+      instance(matrixClientMock),
+    );
+    await expect(factory.canManageCalendars(slashUserId, roomId)).resolves.toBe(
+      true,
+    );
+  });
+
+  it('preserves a historical sender localpart for a joined creator', async () => {
+    const historicalUserId = '@legacy user:example.test';
+    when(matrixClientMock.getJoinedRoomMembers(roomId)).thenResolve([
+      historicalUserId,
+    ]);
+    setPowerLevels({ users_default: 0, state_default: 50 });
+    setRoomState([
+      {
+        type: 'm.room.create',
+        state_key: '',
+        sender: historicalUserId,
+        content: { room_version: '12' },
+      },
+    ]);
+
+    const factory = new MatrixCalendarAuthorizationFactory(
+      instance(matrixClientMock),
+    );
+    await expect(
+      factory.canManageCalendars(historicalUserId, roomId),
+    ).resolves.toBe(true);
+  });
+
+  it('preserves non-surrogate Unicode in a historical sender localpart', async () => {
+    const historicalUserId = '@legacy-🗓:example.test';
+    when(matrixClientMock.getJoinedRoomMembers(roomId)).thenResolve([
+      historicalUserId,
+    ]);
+    setPowerLevels({ users_default: 0, state_default: 50 });
+    setRoomState([
+      {
+        type: 'm.room.create',
+        state_key: '',
+        sender: historicalUserId,
+        content: { room_version: '12' },
+      },
+    ]);
+
+    const factory = new MatrixCalendarAuthorizationFactory(
+      instance(matrixClientMock),
+    );
+    await expect(
+      factory.canManageCalendars(historicalUserId, roomId),
+    ).resolves.toBe(true);
+  });
+
+  it('preserves the empty historical sender localpart', async () => {
+    const historicalUserId = '@:example.test';
+    when(matrixClientMock.getJoinedRoomMembers(roomId)).thenResolve([
+      historicalUserId,
+    ]);
+    setPowerLevels({ users_default: 0, state_default: 50 });
+    setRoomState([
+      {
+        type: 'm.room.create',
+        state_key: '',
+        sender: historicalUserId,
+        content: { room_version: '12' },
+      },
+    ]);
+
+    const factory = new MatrixCalendarAuthorizationFactory(
+      instance(matrixClientMock),
+    );
+    await expect(
+      factory.canManageCalendars(historicalUserId, roomId),
+    ).resolves.toBe(true);
+  });
+
+  it.each([
+    ['historical whitespace localpart', '@old user:example.test'],
+    ['non-ASCII localpart', '@legacy-🗓:example.test'],
+    ['empty localpart', '@:example.test'],
+    ['invalid server name', '@other:bad/server'],
+    ['256-byte user ID', `@${'a'.repeat(242)}:example.test`],
+  ])(
+    'rejects %s in additional creators even beside the authenticated creator',
+    async (_label, malformedCreator) => {
+      setPowerLevels({ users_default: 0, state_default: 50 });
+      setRoomState([
+        {
+          type: 'm.room.create',
+          state_key: '',
+          sender: '@room-owner:example.test',
+          content: {
+            room_version: '12',
+            additional_creators: [userId, malformedCreator],
+          },
+        },
+      ]);
+
+      await expect(
+        authorization.isAllowed({
+          action: 'manage-calendar',
+          calendarId: 'team',
+        }),
+      ).resolves.toBe(false);
+    },
+  );
+
+  it.each([
+    ['invalid server name', '@room-owner:bad server'],
+    ['NUL localpart', '@room-owner\u0000:example.test'],
+    ['unpaired surrogate localpart', '@room-owner\ud800:example.test'],
+    ['256-byte user ID', `@${'a'.repeat(242)}:example.test`],
+  ])(
+    'rejects a v12 sender with %s even beside a listed creator',
+    async (_label, sender) => {
+      setPowerLevels({ users_default: 0, state_default: 50 });
+      setRoomState([
+        {
+          type: 'm.room.create',
+          state_key: '',
+          sender,
+          content: { room_version: '12', additional_creators: [userId] },
+        },
+      ]);
+
+      await expect(
+        authorization.isAllowed({
+          action: 'manage-calendar',
+          calendarId: 'team',
+        }),
+      ).resolves.toBe(false);
+    },
+  );
+
+  it('accepts a v12 sender at the 255-byte Matrix user-ID limit', async () => {
+    const boundaryUserId = `@${'a'.repeat(241)}:example.test`;
+    when(matrixClientMock.getJoinedRoomMembers(roomId)).thenResolve([
+      boundaryUserId,
+    ]);
+    setPowerLevels({ users_default: 0, state_default: 50 });
+    setRoomState([
+      {
+        type: 'm.room.create',
+        state_key: '',
+        sender: boundaryUserId,
+        content: { room_version: '12' },
+      },
+    ]);
+
+    const factory = new MatrixCalendarAuthorizationFactory(
+      instance(matrixClientMock),
+    );
+    await expect(
+      factory.canManageCalendars(boundaryUserId, roomId),
+    ).resolves.toBe(true);
+  });
+
   it('denies ordinary room-v12 members below manager power', async () => {
     setPowerLevels({ users_default: 0, state_default: 50 });
     setRoomState([

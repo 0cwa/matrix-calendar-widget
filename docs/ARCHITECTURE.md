@@ -178,6 +178,10 @@ malformed, duplicate, unknown-version, or unavailable create state grants no
 implicit power. The creator identity is never taken from request data. This
 follows the [Matrix room version 12 specification](https://spec.matrix.org/v1.19/rooms/v12/)
 and [stable Client-Server API](https://spec.matrix.org/v1.19/client-server-api/).
+Create-event senders retain the specification's historical-localpart handling;
+`additional_creators` uses the current user-ID grammar. Both forms require a
+valid Matrix server name and a user ID no longer than 255 UTF-8 bytes, as
+defined in the [Matrix identifier grammar](https://spec.matrix.org/v1.19/appendices/#user-identifiers).
 
 ## Room/calendar binding
 
