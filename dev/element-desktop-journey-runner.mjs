@@ -75,6 +75,7 @@ const UID_STOP_CENSUS_WAIT_LIMITS_MS = Object.freeze({
   postTerm: 1_500,
   postKill: 900,
 });
+const UID_USER_DELETE_SETTLE_DELAY_MS = 250;
 const WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const POLICY_SCRIPT = resolve(
   WORKSPACE_ROOT,
@@ -2628,6 +2629,34 @@ export async function retryFinalUidCleanup(
   };
 }
 
+export async function settleUidLifecycleBeforeUserDeletion(
+  state,
+  observation,
+  {
+    capture = captureFinalUidLifecycle,
+    wait = (duration) =>
+      new Promise((resolveWait) => setTimeout(resolveWait, duration)),
+  } = {},
+) {
+  const current = sanitizeUidLifecycleObservation(observation);
+  if (
+    !isValidUidLifecycleObservation(current) ||
+    current.state !== 'observed' ||
+    current.overflow !== false ||
+    current.unreadableProcessCount !== 0 ||
+    current.uidProcessCount === 0
+  ) {
+    return current;
+  }
+
+  try {
+    await wait(UID_USER_DELETE_SETTLE_DELAY_MS);
+    return sanitizeUidLifecycleObservation(await capture(state));
+  } catch {
+    return emptyUidLifecycleObservation('unavailable');
+  }
+}
+
 function captureFinalEgress(state) {
   const output = capture(
     'timeout',
@@ -2955,7 +2984,10 @@ async function cleanupRunner(config) {
     );
     processStatus = reconciledStop.stopResult.status;
     lateUidRetry = reconciledStop.lateUidRetry;
-    lifecycleBeforeUserdel = reconciledStop.observation;
+    lifecycleBeforeUserdel = await settleUidLifecycleBeforeUserDeletion(
+      state,
+      reconciledStop.observation,
+    );
     const beforeUserdelClear =
       lifecycleBeforeUserdel.state === 'observed' &&
       lifecycleBeforeUserdel.uidProcessCount === 0;
