@@ -3232,8 +3232,9 @@ END:VCALENDAR`,
       404,
       'https://radicale.example.test/private?token=credential-secret',
     );
+    const getEvent = jest.fn().mockRejectedValue(missingEvent);
     const operations = {
-      getEvent: jest.fn().mockRejectedValue(missingEvent),
+      getEvent,
     } as unknown as RoomCalendarEventOperations;
     const controller = createController(
       config,
@@ -3270,9 +3271,9 @@ END:VCALENDAR`,
       /https?:|body-secret|credential-secret|token=/iu,
     );
     expect(isAllowed.mock.invocationCallOrder[0]).toBeLessThan(
-      operations.getEvent.mock.invocationCallOrder[0],
+      getEvent.mock.invocationCallOrder[0],
     );
-    expect(operations.getEvent).toHaveBeenCalledTimes(1);
+    expect(getEvent).toHaveBeenCalledTimes(1);
   });
 
   it('refuses to delete a mixed personal resource before DELETE', async () => {
