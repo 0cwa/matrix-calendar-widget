@@ -26,6 +26,7 @@ import {
   formatFailureSummary,
   formatSuccessSummary,
   handoffGeneratedComposeEnvironment,
+  listenerScopeDelta,
   parseStartupFailureMarker,
   planOwnedCleanup,
   taskEnvironment,
@@ -558,6 +559,51 @@ test('foreign resources with a partial task label fail closed', () => {
   );
 });
 
+test('listener scope compares endpoint identities and counts actual changes', () => {
+  const baseline = [
+    'LISTEN 0 128 127.0.0.1:5232 0.0.0.0:*',
+    'LISTEN 0 4096 127.0.0.1:9000 0.0.0.0:*',
+  ];
+  const queueOnlyChange = [
+    'LISTEN 7 256 127.0.0.1:5232 0.0.0.0:*',
+    'LISTEN 19 8192 127.0.0.1:9000 0.0.0.0:*',
+  ];
+  assert.deepEqual(listenerScopeDelta(queueOnlyChange, baseline), {
+    added: 0,
+    removed: 0,
+  });
+  assert.deepEqual(
+    listenerScopeDelta(
+      [
+        'LISTEN 0 1 127.0.0.1:9000 0.0.0.0:*',
+        'LISTEN 0 1 127.0.0.1:9001 0.0.0.0:*',
+      ],
+      ['LISTEN 0 1 127.0.0.1:9000 0.0.0.0:*'],
+    ),
+    { added: 1, removed: 0 },
+  );
+  assert.deepEqual(
+    listenerScopeDelta(
+      ['LISTEN 0 1 127.0.0.1:9000 0.0.0.0:*'],
+      [
+        'LISTEN 0 1 127.0.0.1:9000 0.0.0.0:*',
+        'LISTEN 0 1 127.0.0.1:9001 0.0.0.0:*',
+      ],
+    ),
+    { added: 0, removed: 1 },
+  );
+  assert.throws(
+    () => listenerScopeDelta(['malformed listener row'], []),
+    throwsCode('listener-output-invalid'),
+  );
+
+  const before = emptyInventory();
+  const after = emptyInventory();
+  before.listeners = baseline;
+  after.listeners = queueOnlyChange;
+  assert.doesNotThrow(() => compareForeign(before, after, runId, project));
+});
+
 test('failure cleanup accepts an empty owned set and rejects an unknown service', () => {
   assert.deepEqual(
     planOwnedCleanup(emptyInventory(), runId, project, [], {
@@ -655,7 +701,7 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(initial.schema_version, 4);
+    assert.equal(initial.schema_version, 5);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
     assert.equal(initial.failure_operation, 'gate');
@@ -700,6 +746,11 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     assert.equal(initial.startup_stage, 'homeserver-probe');
     assert.equal(initial.child_exit_code, 125);
     assert.deepEqual(initial.source_image_ids, fields.sourceImageIds);
+    assert.deepEqual(initial.listener_scope, {
+      callsite: 'not-applicable',
+      added_count: 'unavailable',
+      removed_count: 'unavailable',
+    });
     assert.equal(initial.cleanup_status, 'pending');
     assert.equal(initial.cleanup_attempted, false);
     assert.equal(initial.owned_cleanup_verified, false);
@@ -743,6 +794,11 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
     cleanupStatus: 'verified',
     cleanupAttempted: false,
     failureCode: 'https://private.example/token=secret',
+    listenerScope: {
+      site: 'https://private.example/token=secret',
+      added: 'private-count',
+      removed: -1,
+    },
   });
   const serialized = JSON.stringify(diagnostic);
   assert.equal(diagnostic.failed_phase, 'runner');
@@ -759,6 +815,11 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
   assert.equal(diagnostic.cleanup_status, 'unverified');
   assert.equal(diagnostic.owned_cleanup_verified, false);
   assert.equal(diagnostic.foreign_inventory_unchanged, false);
+  assert.deepEqual(diagnostic.listener_scope, {
+    callsite: 'not-applicable',
+    added_count: 'unavailable',
+    removed_count: 'unavailable',
+  });
   assert.doesNotMatch(serialized, /secret|https|private|BEGIN:VCALENDAR/u);
 });
 
@@ -887,6 +948,17 @@ test('failure checks use fixed assertion codes and unknown fallback', () => {
       expected,
     );
   }
+  assert.deepEqual(
+    formatFailureDiagnostic({
+      phase: 'listener-inventory',
+      listenerScope: { site: 'paired-restore', added: 2, removed: 1 },
+    }).listener_scope,
+    {
+      callsite: 'paired-restore',
+      added_count: 2,
+      removed_count: 1,
+    },
+  );
 });
 
 test('startup failure markers accept only one source-formatted closed marker matching child status', () => {
