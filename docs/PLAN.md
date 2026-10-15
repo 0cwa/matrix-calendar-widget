@@ -528,10 +528,13 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       standalone Desktop startup passed. Normal-bot Desktop event creation
       returned HTTP 201, then its single room-range refresh returned HTTP 429;
       later route checks and Web/reminder phases were skipped. The operator
-      rehearsal passed listener-scope verification and failed at gateway
-      network smoke; the b525 summary did not identify the HTTP status or
-      target. A peer-reviewed helper adds bounded smoke diagnostics and needs
-      a fresh run. Cleanup remains unverified and no archive was published. A
+      rehearsal failed at gateway network smoke after the primary listener-
+      scope check returned successfully; its failure summary omitted listener
+      measurements and did not identify the HTTP status or target. The helper
+      now accepts a manual Radicale-root 302 as well as 401/403, consistent
+      with existing restore readiness; the earlier run's status remains
+      unknown. A fresh run is required. Cleanup remains unverified and no
+      archive was published. A
       generic encrypted synthetic backup/recovery exercise and package
       prerequisite simulation passed; no application cold backup or install
       has been performed.
