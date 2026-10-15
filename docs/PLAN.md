@@ -521,26 +521,25 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 - [x] Integrate #274, #259, #282, and #272 on frozen application-source
       candidate `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree
       `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`).
-- [ ] Complete required hosted checks for the operator sparse-checkout
-      correction. On current source `5253a412192cb242877c719b31b89f1b46e3be93`
-      (tree `4668874919d5a900abd9399505529c3ef5952d31`), CI, CodeQL, standalone
-      Desktop, both CalDAV principal modes, and PostgreSQL first-initialization
-      passed. The appservice Element Web job failed and is deferred for the
-      current pilot; the normal-bot job was still running at the latest
-      metadata check. The source-bound image workflow built three images and
-      verified its manifest, but the operator rehearsal failed and produced no
-      failure artifact. Its trusted sparse checkout omitted the API probe
-      module imported by the runner before failure-summary setup. The reviewed
-      correction adds the module and a regression test for the actual sparse
-      path list; it needs a fresh source-bound run. The earlier API-probe
-      failure on `030106d6b3119b1d1ea6deb5bffe7823fea92020` remains unexplained.
-      Private operator-packet execution-plan blockers are cleared, but external
-      binding remains pending; no application installation or cold backup has
-      been performed.
-- [ ] After the helper follow-up merges, freeze that exact main commit as the
-      #255 candidate and run all five required acceptance workflows against
-      that SHA. #251 remains pending those results and operator readiness; no
-      live pilot or production rollout has occurred.
+- [ ] Resolve #288's deleted-event readback failure and complete fresh hosted
+      acceptance. On current source
+      `e3ffe671d24157d153a82c6707f173eaaf8015ab` (tree
+      `60a5d4d78df2c84381ef82b25927f665242329a0`), standalone Desktop, CalDAV
+      contracts in both principal modes, and PostgreSQL first-initialization
+      passed. The Element Web normal-bot job passed; the appservice job was
+      still running at the latest metadata check. The source-bound operator
+      rehearsal failed deleted-event readback with HTTP 500 and could not
+      verify owned cleanup. Source tracing found an unmapped typed CalDAV GET 404. The #288 controller change maps only that typed GET/404 case to a
+      fixed safe 404; the complete controller test file (93 tests), server
+      TypeScript, targeted ESLint, Prettier, and Nest build pass locally. The
+      change still requires independent review and a fresh source-bound run
+      with successful owned cleanup. Private operator-packet execution-plan
+      blockers are clear, but external binding remains pending; no application
+      installation or cold backup has been performed.
+- [ ] After the #288 correction merges, freeze that exact main commit as the
+      #255 candidate and run all required acceptance workflows against that
+      SHA. #251 remains pending those results and operator readiness; no live
+      pilot or production rollout has occurred.
 - [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
       StoreProvider/Redux startup retirement until after the pilot.
 
