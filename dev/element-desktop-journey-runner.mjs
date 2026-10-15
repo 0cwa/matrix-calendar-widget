@@ -2462,6 +2462,20 @@ export async function stopUidProcesses(
   return { status: diagnostics.status, diagnostics };
 }
 
+export function stopCreatedProbeUidProcesses(
+  state,
+  { accountLookup = lookupPasswdAccount, ...stopOptions } = {},
+) {
+  return stopUidProcesses(state, {
+    ...stopOptions,
+    targetMatches: () => {
+      if (state.userMayBeCreated !== true) return false;
+      const account = accountLookup(state.username);
+      return account.state === 'present' && account.uid === state.uid;
+    },
+  });
+}
+
 export async function retryLateEffectiveUidStop(
   state,
   initialStopResult,
@@ -2559,18 +2573,7 @@ export async function retryFinalUidCleanup(
     };
   }
 
-  const guardedStop =
-    stop ??
-    ((target) =>
-      stopUidProcesses(target, {
-        targetMatches: () => {
-          try {
-            return accountMatches(target) === true;
-          } catch {
-            return false;
-          }
-        },
-      }));
+  const guardedStop = stop ?? stopCreatedProbeUidProcesses;
   const retry = await retryLateEffectiveUidStop(
     state,
     initialStopResult,
@@ -2999,7 +3002,7 @@ async function cleanupRunner(config) {
     overflow: null,
   };
   if (state !== undefined && !stateInvalid) {
-    const stopResult = await stopUidProcesses(state);
+    const stopResult = await stopCreatedProbeUidProcesses(state);
     processStatus = stopResult.status;
     stopDiagnostics = stopResult.diagnostics;
     egressObservation = captureFinalEgress(state);
@@ -3010,14 +3013,7 @@ async function cleanupRunner(config) {
       lifecycleBeforeUserdel,
       {
         capture: captureFinalUidLifecycle,
-        stop: (target) =>
-          stopUidProcesses(target, {
-            targetMatches: () => {
-              if (target.userMayBeCreated !== true) return false;
-              const account = lookupPasswdAccount(target.username);
-              return account.state === 'present' && account.uid === target.uid;
-            },
-          }),
+        stop: stopCreatedProbeUidProcesses,
       },
     );
     processStatus = reconciledStop.stopResult.status;

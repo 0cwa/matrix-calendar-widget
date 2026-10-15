@@ -33,6 +33,7 @@ import {
   selectPinnedPackageHash,
   settleAndRetryLateEffectiveUidStop,
   settleUidLifecycleBeforeUserDeletion,
+  stopCreatedProbeUidProcesses,
   stopUidProcesses,
   validateDefaultPolicyPort,
   validateJourneyPolicyPorts,
@@ -1357,16 +1358,16 @@ test('uses the settled effective-UID census for one guarded late stop', async ()
       },
       stop: (target) => {
         sequence.push('late-stop');
-        return stopUidProcesses(target, {
+        return stopCreatedProbeUidProcesses(target, {
           runCommand: (program, args) => {
             sequence.push(`${program}:${args.join(' ')}`);
             return commandStatuses.shift();
           },
           wait: async () => {},
           census: async () => observedEmptyLifecycle(),
-          targetMatches: () => {
+          accountLookup: (username) => {
             sequence.push('account-guard');
-            const account = lookupPasswdAccount(target.username, () => {
+            return lookupPasswdAccount(username, () => {
               accountLookups += 1;
               return {
                 status: 0,
@@ -1375,11 +1376,6 @@ test('uses the settled effective-UID census for one guarded late stop', async ()
                   'mcwdesktopprobe:x:24000:24000::/tmp:/usr/sbin/nologin\n',
               };
             });
-            return (
-              target.userMayBeCreated === true &&
-              account.state === 'present' &&
-              account.uid === target.uid
-            );
           },
         });
       },
@@ -1442,25 +1438,20 @@ test('rechecks the account before each signal and retains a persistent UID', asy
       wait: async (duration) => waitCalls.push(duration),
       capture: () => captureResults.shift(),
       stop: (target) =>
-        stopUidProcesses(target, {
+        stopCreatedProbeUidProcesses(target, {
           runCommand: (program, args) => {
             commandCalls.push([program, ...args]);
             return commandStatuses.shift();
           },
           wait: async () => {},
           census: async () => observedUidCensus(1),
-          targetMatches: () => {
+          accountLookup: (username) => {
             const accountUid = accountUids.shift();
-            const account = lookupPasswdAccount(target.username, () => ({
+            return lookupPasswdAccount(username, () => ({
               status: 0,
               signal: null,
               stdout: `mcwdesktopprobe:x:${accountUid}:24000::/tmp:/usr/sbin/nologin\n`,
             }));
-            return (
-              target.userMayBeCreated === true &&
-              account.state === 'present' &&
-              account.uid === target.uid
-            );
           },
         }),
     },
@@ -1473,8 +1464,7 @@ test('rechecks the account before each signal and retains a persistent UID', asy
   assert.deepEqual(waitCalls, [250, 250]);
   assert.equal(
     commandCalls.some(
-      ([program, ...args]) =>
-        program === 'sudo' && args.includes('-KILL'),
+      ([program, ...args]) => program === 'sudo' && args.includes('-KILL'),
     ),
     false,
   );
@@ -1490,6 +1480,39 @@ test('rechecks the account before each signal and retains a persistent UID', asy
     }),
     false,
   );
+});
+
+test('does not signal a UID when the probe account was not created', async () => {
+  const state = {
+    username: 'mcwdesktopprobe',
+    uid: 24_000,
+    userMayBeCreated: false,
+  };
+  const commandStatuses = [0, 0, 1];
+  const commandCalls = [];
+  let accountLookups = 0;
+  const result = await stopCreatedProbeUidProcesses(state, {
+    runCommand: (program, args) => {
+      commandCalls.push([program, ...args]);
+      return commandStatuses.shift();
+    },
+    wait: async () => {},
+    census: async () => observedEmptyLifecycle(),
+    accountLookup: () => {
+      accountLookups += 1;
+      return assert.fail('uncreated probe accounts must not be looked up');
+    },
+  });
+
+  assert.equal(result.status, 'passed');
+  assert.equal(result.diagnostics.termSignal, 'failed');
+  assert.equal(result.diagnostics.killSignal, 'failed');
+  assert.deepEqual(commandCalls, [
+    ['pgrep', '-u', '24000'],
+    ['pgrep', '-u', '24000'],
+    ['pgrep', '-u', '24000'],
+  ]);
+  assert.equal(accountLookups, 0);
 });
 
 test('exit-0 account deletion followed by 0-to-0-to-1 census does not signal or retry', async () => {
