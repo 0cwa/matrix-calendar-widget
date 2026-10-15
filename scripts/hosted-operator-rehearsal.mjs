@@ -311,7 +311,7 @@ export const GATEWAY_NETWORK_SMOKE_SCRIPT = `(async () => {
     probe('http://synapse:8008/_matrix/client/versions'),
     probe('http://radicale:5232/'),
   ]);
-  if (synapse.status !== 200 || ![401, 403].includes(radicale.status)) {
+  if (synapse.status !== 200 || ![302, 401, 403].includes(radicale.status)) {
     const marker =
       '${GATEWAY_NETWORK_SMOKE_MARKER} synapse=' +
       synapse.status +

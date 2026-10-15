@@ -142,6 +142,26 @@ test('gateway network smoke passes through the direct Node entrypoint for expect
   }
 });
 
+test('gateway network smoke accepts Radicale root redirect but rejects an unexpected success page', async () => {
+  const redirectedRoot = await runMockGatewayNetworkSmoke(async (url) => ({
+    status: url.includes('synapse') ? 200 : 302,
+    body: 'private response body',
+  }));
+  assert.equal(redirectedRoot.processExitCode, 0);
+  assert.equal(redirectedRoot.output, '');
+  assert.equal(redirectedRoot.requests[1].options.redirect, 'manual');
+
+  const unexpectedSuccessPage = await runMockGatewayNetworkSmoke(async () => ({
+    status: 200,
+    body: 'private response body',
+  }));
+  assert.equal(unexpectedSuccessPage.processExitCode, 1);
+  assert.equal(
+    unexpectedSuccessPage.output,
+    'gateway_network_smoke synapse=200:none radicale=200:none\n',
+  );
+});
+
 test('gateway network smoke failure marker records bounded role results only', async () => {
   const result = await runMockGatewayNetworkSmoke(async (url) => {
     if (url.includes('synapse')) {
