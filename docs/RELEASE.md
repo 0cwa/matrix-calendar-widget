@@ -1,8 +1,14 @@
-# Current release gate
+# Release gate — current decision and historical evidence
 
 **Decision: blocked. No target-install approval or production changes.** This public index contains sanitized evidence only. Target-specific operator facts, credentials, locations, rendered deployment configuration, and recovery details stay in the private operator record.
 
-## Candidate
+## Current qualification status
+
+**Candidate: not frozen in this index.** Issues #274, #259 and #282 are now closed after source fixes; this does **not** mean their historical test runs apply to current `main`. Recent operator-rehearsal tooling fixes, including #287, still require a fresh exact-source acceptance run and a reconciled manifest/evidence index under [#255](https://github.com/0cwa/matrix-calendar-widget/issues/255). Until that is entered here and the operator gates pass, status remains **blocked**. No image archive, target readiness, or installation approval is inferred from merged PRs.
+
+The evidence below is retained **for its historical source SHA only**, not as a current-candidate pass. [STATUS.md](./STATUS.md) may have more recent run diagnostics; #255 owns reconciliation of source, run, image and target evidence before promotion.
+
+## Historical candidate (not current `main`)
 
 The gate results below record the pre-integration PR [#260](https://github.com/0cwa/matrix-calendar-widget/pull/260) candidate at head `3643166a972a4f9e42da0b005bf3b7e3b8233180`, tree `b25da53e7dd7709ae91ca351c4207c7c475d3933`, on `main` base `36e5dfbe3ee5a29d7749d28c52efde7a19eee17b`. That candidate used the normal bot account (`bot-account`) pilot principal, but its evidence does not carry over to the integrated source. PR #260 was forward-merged with the newer `main` source at `1de23e45e6835cf54de91722cb52830285b1caad` in integration commit `56ebedd97ffa778cb433707cbcd5a74beaafe5a7` (tree `529bd984f398ae1921b68189fa9a66c274e1b349`). The integrated source and its final scope documentation still require exact-source checks and review.
 
@@ -21,7 +27,7 @@ does not approve a production installation, publication, or rollout. The
 historical candidate evidence below remains tied to its exact source and is
 not acceptance evidence for the integrated source.
 
-## Gate index
+## Historical gate index (source-bound)
 
 - **PASSED — Required repository checks.** All five strict branch-protection contexts passed on the exact candidate: Quality, Widget, Server and bot, Container image build smoke, and Analyze JavaScript/TypeScript. The additional Calendar browser-layout result also passed; it is not a protected context. CodeQL and the Real Radicale contract passed. Evidence: [CI run 38504762910](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38504762910), [CodeQL run 38504762929](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38504762929), and [Real Radicale contract 38504762908](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38504762908). Retain these results for exact head `3643166` only.
 - **PASSED — Independent source review.** The exact candidate received independent review. Evidence: [candidate commit](https://github.com/0cwa/matrix-calendar-widget/commit/3643166a972a4f9e42da0b005bf3b7e3b8233180) and [PR #260](https://github.com/0cwa/matrix-calendar-widget/pull/260). Repeat review if its source diff changes.
