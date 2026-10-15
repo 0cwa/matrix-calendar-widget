@@ -257,6 +257,7 @@ describe('test WelcomeWorkflowService', () => {
 
     verify(clientMock.on(anything(), anything)).never();
     verify(clientMock.joinRoom(anything())).never();
+    verify(clientMock.createRoom(anything())).never();
     verify(clientMock.leaveRoom(anything())).never();
     verify(clientMock.sendHtmlText(anything(), anything())).never();
   });
@@ -735,7 +736,7 @@ describe('test WelcomeWorkflowService', () => {
       verify(clientMock.sendHtmlText(ROOM_ID, anyString())).once();
       const txt = captureSendHtmlText();
       expect(txt).toEqual(
-        "<p>The bot is a moderator in the room <a href='originalRoomId'></a>. If you enter the command <code>!meeting setup</code> Matrix Calendar widget will be added to that room.</p>",
+        "<p>The bot is a moderator in the room <a href='originalRoomId'></a>. The legacy widget setup command is disabled. Use the calendar widget and <code>!calendar help</code> for bot commands.</p>",
       );
     });
 
