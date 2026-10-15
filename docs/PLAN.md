@@ -518,38 +518,20 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 
 ### Issue #273 pre-candidate sequence
 
-- [x] Integrate #274's calendar-only widget home, #259's legacy meeting
-      HTTP/RPC fail-closed behavior, #282's Matrix v12 creator authorization,
-      and #272's default-off backup cleanup on the frozen application-source
+- [x] Integrate #274, #259, #282, and #272 on frozen application-source
       candidate `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree
-      `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`). See ADR042 and
-      `docs/legacy-entry-points.md` for the legacy API boundary.
-- [x] Run fresh prerequisite contracts against the frozen candidate. Real
-      CalDAV contracts passed in both principal modes, the PostgreSQL
-      first-initialization contract passed, and standalone Desktop startup
-      passed. The required normal-bot Element run failed during Desktop room
-      refresh; later canonical-read and HTTP-route checks did not run, and Web
-      reminder interactions were skipped. The operator rehearsal built and
-      verified its source image manifest, then failed listener-scope
-      verification; cleanup was unverified and no archive was published.
-- [ ] Integrate the peer-cleared acceptance-helper follow-up after required
-      hosted checks. It compares listener state and endpoints without queue
-      counters, preserves fail-closed added/removed detection, and records
-      bounded failure diagnostics. The failed rehearsal did not preserve the
-      listener delta, so its specific cause remains unproven. The Desktop
-      refresh fallback preserves the fixed failure point and error class when
-      optional diagnostic recording fails; the observed refresh cause remains
-      unknown. Focused tests, the E2E TypeScript check, and formatting passed.
-      These helper-only changes do not alter frozen widget or server runtime
-      files, and neither correction has a fresh hosted rerun yet.
-- [ ] After the helper-only changes pass required checks and are integrated,
-      freeze a fresh candidate for #255 and bind required Element Web/Desktop
-      and both-backend evidence to that exact source. Prior passes and the
-      failed frozen-candidate run do not establish acceptance of the new
-      candidate.
-- [ ] Complete the remaining operator-readiness gates for the controlled
-      pilot under #251 after fresh exact-source acceptance. No live pilot or
-      production rollout has been performed.
+      `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`).
+- [ ] Complete review and required hosted checks for the peer-cleared,
+      acceptance-helper-only follow-up. Fresh CalDAV (both modes), PostgreSQL
+      first-initialization, and standalone Desktop startup passed; normal-bot
+      Element acceptance failed during Desktop refresh; later route checks and
+      Web interactions were skipped. Operator listener-scope verification
+      failed with cleanup unverified. Causes remain unknown; no archive was
+      published.
+- [ ] After the helper follow-up merges, freeze that exact main commit as the
+      #255 candidate and run all five required acceptance workflows against
+      that SHA. #251 remains pending those results and operator readiness; no
+      live pilot or production rollout has occurred.
 - [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
       StoreProvider/Redux startup retirement until after the pilot.
 
