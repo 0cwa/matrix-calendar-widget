@@ -54,6 +54,15 @@ const VOLUMES = Object.freeze([
 const PORTS = Object.freeze([8008, 5232, 3000, 8080, 5233, 8090]);
 const FAILURE_DIAGNOSTIC_FILE =
   'matrix-calendar-widget-operator-rehearsal-failure.json';
+const GATEWAY_NETWORK_SMOKE_MARKER = 'gateway_network_smoke';
+const NETWORK_SMOKE_ERROR_CLASSES = new Set([
+  'none',
+  'dns',
+  'connection-refused',
+  'connection-reset',
+  'timeout',
+  'other',
+]);
 const DISABLED_ELEMENT_PROFILE = 'operator-rehearsal-disabled';
 const HOSTED_SHARED_DOCKER_SELECTION =
   'MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL';
@@ -101,6 +110,7 @@ const SAFE_PHASES = new Set([
   'listener-inventory',
   'fixture-setup',
   'api-route-smoke',
+  'compose-run-gateway-smoke',
   'api-crud-probe',
   'reminder-initial',
   'reminder-restart',
@@ -229,6 +239,7 @@ const SAFE_STARTUP_STAGES = new Set([
   'unknown',
 ]);
 const FAILURE_CHECK_BY_CODE = new Map([
+  ['gateway-network-smoke-failed', 'network-smoke'],
   ['service-set-mismatch', 'service-set'],
   ['service-image-mismatch', 'image'],
   ['container-id-invalid', 'container-identity'],
@@ -262,6 +273,180 @@ export function failureOperationForStage(stage) {
   );
 }
 
+export const GATEWAY_NETWORK_SMOKE_SCRIPT = `(async () => {
+  const networkErrorClass = (error) => {
+    const code = error?.cause?.code;
+    if (
+      error?.name === 'TimeoutError' ||
+      ['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT'].includes(code)
+    ) {
+      return 'timeout';
+    }
+    if (['ENOTFOUND', 'EAI_AGAIN', 'EAI_FAIL'].includes(code)) return 'dns';
+    if (code === 'ECONNREFUSED') return 'connection-refused';
+    if (code === 'ECONNRESET') return 'connection-reset';
+    return 'other';
+  };
+  const probe = async (url) => {
+    try {
+      const response = await fetch(url, {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(5000),
+      });
+      const status =
+        Number.isInteger(response.status) &&
+        response.status >= 100 &&
+        response.status <= 599
+          ? response.status
+          : 'unavailable';
+      return {
+        status,
+        errorClass: status === 'unavailable' ? 'other' : 'none',
+      };
+    } catch (error) {
+      return { status: 'unavailable', errorClass: networkErrorClass(error) };
+    }
+  };
+  const [synapse, radicale] = await Promise.all([
+    probe('http://synapse:8008/_matrix/client/versions'),
+    probe('http://radicale:5232/'),
+  ]);
+  if (synapse.status !== 200 || ![401, 403].includes(radicale.status)) {
+    const marker =
+      '${GATEWAY_NETWORK_SMOKE_MARKER} synapse=' +
+      synapse.status +
+      ':' +
+      synapse.errorClass +
+      ' radicale=' +
+      radicale.status +
+      ':' +
+      radicale.errorClass +
+      '\\n';
+    process.stdout.write(marker);
+    process.exitCode = 1;
+  }
+})().catch(() => {
+  process.exitCode = 1;
+});`;
+
+export function gatewayNetworkSmokeArgs(compose, runId, project) {
+  return [
+    ...compose,
+    'run',
+    '--pull',
+    'never',
+    '--no-deps',
+    '--rm',
+    '--label',
+    `${LOCAL_LABEL}=${runId}`,
+    '--name',
+    `${project}-local-${runId}-900`,
+    '--entrypoint',
+    'node',
+    'gateway',
+    '-e',
+    GATEWAY_NETWORK_SMOKE_SCRIPT,
+  ];
+}
+
+function unavailableNetworkSmokeRole() {
+  return { http_status: 'unavailable', error_class: 'unavailable' };
+}
+
+function networkSmokeProcessExitCode(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 255
+    ? value
+    : 'unavailable';
+}
+
+function parseNetworkSmokeRole(status, errorClass) {
+  if (!NETWORK_SMOKE_ERROR_CLASSES.has(errorClass)) return undefined;
+  if (status === 'unavailable') {
+    return errorClass !== 'none'
+      ? { http_status: 'unavailable', error_class: errorClass }
+      : undefined;
+  }
+  if (
+    !Number.isInteger(status) ||
+    status < 100 ||
+    status > 599 ||
+    errorClass !== 'none'
+  ) {
+    return undefined;
+  }
+  return { http_status: status, error_class: 'none' };
+}
+
+export function parseGatewayNetworkSmokeFailure(stdout, processExitCode) {
+  const diagnostic = {
+    marker_status: 'absent',
+    process_exit_code: networkSmokeProcessExitCode(processExitCode),
+    synapse: unavailableNetworkSmokeRole(),
+    radicale: unavailableNetworkSmokeRole(),
+  };
+  const lines =
+    typeof stdout === 'string'
+      ? stdout
+          .split(/\r?\n/u)
+          .filter((line) => line.startsWith(GATEWAY_NETWORK_SMOKE_MARKER))
+      : [];
+  if (lines.length === 0) return diagnostic;
+  if (lines.length !== 1) return { ...diagnostic, marker_status: 'invalid' };
+
+  const match =
+    /^gateway_network_smoke synapse=(unavailable|[0-9]{3}):([a-z-]+) radicale=(unavailable|[0-9]{3}):([a-z-]+)$/u.exec(
+      lines[0],
+    );
+  if (!match) return { ...diagnostic, marker_status: 'invalid' };
+  const synapse = parseNetworkSmokeRole(
+    match[1] === 'unavailable' ? match[1] : Number(match[1]),
+    match[2],
+  );
+  const radicale = parseNetworkSmokeRole(
+    match[3] === 'unavailable' ? match[3] : Number(match[3]),
+    match[4],
+  );
+  if (!synapse || !radicale) {
+    return { ...diagnostic, marker_status: 'invalid' };
+  }
+  return {
+    ...diagnostic,
+    marker_status: 'captured',
+    synapse,
+    radicale,
+  };
+}
+
+function projectGatewayNetworkSmoke(diagnostic) {
+  const markerStatus = [
+    'not-applicable',
+    'absent',
+    'invalid',
+    'captured',
+  ].includes(diagnostic?.marker_status)
+    ? diagnostic.marker_status
+    : 'not-applicable';
+  const projected = {
+    marker_status: markerStatus,
+    process_exit_code:
+      markerStatus === 'not-applicable'
+        ? 'unavailable'
+        : networkSmokeProcessExitCode(diagnostic?.process_exit_code),
+    synapse: unavailableNetworkSmokeRole(),
+    radicale: unavailableNetworkSmokeRole(),
+  };
+  if (markerStatus !== 'captured') return projected;
+
+  const role = (value) =>
+    parseNetworkSmokeRole(value?.http_status, value?.error_class);
+  const synapse = role(diagnostic?.synapse);
+  const radicale = role(diagnostic?.radicale);
+  if (!synapse || !radicale) {
+    return { ...projected, marker_status: 'invalid' };
+  }
+  return { ...projected, synapse, radicale };
+}
+
 const FIXTURES = Object.freeze([
   {
     role: 'synapse',
@@ -271,24 +456,25 @@ const FIXTURES = Object.freeze([
 ]);
 
 class RehearsalFailure extends Error {
-  constructor(stage, code = 'gate-failed', startupDiagnostic = {}) {
+  constructor(stage, code = 'gate-failed', diagnostic = {}) {
     super('Hosted operator rehearsal failed');
     this.stage = stage;
     this.code = code;
-    this.startupStage = SAFE_STARTUP_STAGES.has(startupDiagnostic.startupStage)
-      ? startupDiagnostic.startupStage
+    this.startupStage = SAFE_STARTUP_STAGES.has(diagnostic.startupStage)
+      ? diagnostic.startupStage
       : 'unknown';
     this.childExitCode =
-      Number.isInteger(startupDiagnostic.childExitCode) &&
-      startupDiagnostic.childExitCode >= 0 &&
-      startupDiagnostic.childExitCode <= 255
-        ? startupDiagnostic.childExitCode
+      Number.isInteger(diagnostic.childExitCode) &&
+      diagnostic.childExitCode >= 0 &&
+      diagnostic.childExitCode <= 255
+        ? diagnostic.childExitCode
         : 'unavailable';
+    this.gatewayNetworkSmoke = diagnostic.gatewayNetworkSmoke;
   }
 }
 
-function fail(stage, code, startupDiagnostic) {
-  throw new RehearsalFailure(stage, code, startupDiagnostic);
+function fail(stage, code, diagnostic) {
+  throw new RehearsalFailure(stage, code, diagnostic);
 }
 
 function requireSha(value) {
@@ -919,7 +1105,15 @@ function runTask(
   stage,
   command,
   args,
-  { cwd, env, taskDir, input, timeout, startupFailureFormatter } = {},
+  {
+    cwd,
+    env,
+    taskDir,
+    input,
+    timeout,
+    startupFailureFormatter,
+    failureDiagnosticParser,
+  } = {},
 ) {
   const result = spawn(command, args, { cwd, env, input, timeout });
   const logFile = path.join(
@@ -930,19 +1124,27 @@ function runTask(
   writeFileSync(logFile, output, { mode: 0o600 });
   chmodSync(logFile, 0o600);
   if (result.error || result.status !== 0) {
-    const startupDiagnostic = startupFailureFormatter
+    const diagnostic = startupFailureFormatter
       ? parseStartupFailureMarker(
           result.stdout ?? '',
           result.status,
           startupFailureFormatter,
         )
-      : undefined;
+      : {};
+    if (failureDiagnosticParser) {
+      diagnostic.gatewayNetworkSmoke = failureDiagnosticParser(
+        result.stdout ?? '',
+        result.status,
+      );
+    }
     fail(
       stage,
-      result.error
-        ? 'command-unavailable'
-        : `exit-${result.status ?? 'unknown'}`,
-      startupDiagnostic,
+      failureDiagnosticParser
+        ? 'gateway-network-smoke-failed'
+        : result.error
+          ? 'command-unavailable'
+          : `exit-${result.status ?? 'unknown'}`,
+      diagnostic,
     );
   }
   return result.stdout ?? '';
@@ -1772,6 +1974,7 @@ export function formatFailureDiagnostic({
   serviceProject,
   serviceImages,
   listenerScope,
+  gatewayNetworkSmoke,
 }) {
   const safe = (value, pattern) =>
     typeof value === 'string' && pattern.test(value) ? value : 'unavailable';
@@ -1822,9 +2025,12 @@ export function formatFailureDiagnostic({
         ? listenerScope.removed
         : 'unavailable',
   };
+  const safeGatewayNetworkSmoke = projectGatewayNetworkSmoke(
+    gatewayNetworkSmoke,
+  );
 
   return {
-    schema_version: 5,
+    schema_version: 6,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
@@ -1846,6 +2052,7 @@ export function formatFailureDiagnostic({
     attempt: safe(attempt, /^\d{1,4}$/u),
     source_image_ids: safeImageIds,
     listener_scope: safeListenerScope,
+    gateway_network_smoke: safeGatewayNetworkSmoke,
     cleanup_status: safeCleanup,
     cleanup_attempted: attempted,
     owned_cleanup_verified: cleanupVerified,
@@ -1975,7 +2182,9 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
         JSON.stringify(previous?.service_roles) !==
           JSON.stringify(diagnostic.service_roles) ||
         JSON.stringify(previous?.listener_scope) !==
-          JSON.stringify(diagnostic.listener_scope)
+          JSON.stringify(diagnostic.listener_scope) ||
+        JSON.stringify(previous?.gateway_network_smoke) !==
+          JSON.stringify(diagnostic.gateway_network_smoke)
       ) {
         fail('receipt-publish', 'failure-diagnostic-identity-mismatch');
       }
@@ -2436,24 +2645,11 @@ async function main() {
     runTask(
       'compose-run-gateway-smoke',
       'docker',
-      [
-        ...compose,
-        'run',
-        '--pull',
-        'never',
-        '--no-deps',
-        '--rm',
-        '--label',
-        `${LOCAL_LABEL}=${id}`,
-        '--name',
-        `${project}-local-${id}-900`,
-        '--entrypoint',
-        'node',
-        'gateway',
-        '-e',
-        'Promise.all([fetch("http://synapse:8008/_matrix/client/versions"),fetch("http://radicale:5232/")]).then(([s,r])=>{if(s.status!==200||![401,403].includes(r.status))process.exit(1)}).catch(()=>process.exit(1))',
-      ],
-      context,
+      gatewayNetworkSmokeArgs(compose, id, project),
+      {
+        ...context,
+        failureDiagnosticParser: parseGatewayNetworkSmokeFailure,
+      },
     );
     const widgetStatus = runTask(
       'widget-http-smoke',
@@ -2703,6 +2899,10 @@ async function main() {
         error instanceof RehearsalFailure ? error.startupStage : 'unknown',
       childExitCode:
         error instanceof RehearsalFailure ? error.childExitCode : 'unavailable',
+      gatewayNetworkSmoke:
+        error instanceof RehearsalFailure
+          ? error.gatewayNetworkSmoke
+          : undefined,
       serviceInventory: diagnosticInventory,
       serviceRunId: diagnosticRunId,
       serviceProject: diagnosticProject,
