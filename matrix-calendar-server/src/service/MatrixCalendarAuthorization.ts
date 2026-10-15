@@ -23,6 +23,7 @@ import {
   MatrixClient,
   MatrixError,
   PowerLevelsEventContent,
+  UserID,
 } from 'matrix-bot-sdk';
 import { StateEventName } from '../model/StateEventName';
 
@@ -127,7 +128,54 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
       powerLevels?.state_default ??
       50;
 
-    return this.userPower(powerLevels) >= requiredPower;
+    if (this.userPower(powerLevels) >= requiredPower) {
+      return true;
+    }
+
+    return this.isImplicitRoomV12Creator();
+  }
+
+  private async isImplicitRoomV12Creator(): Promise<boolean> {
+    try {
+      const state = await this.matrixClient.getRoomState(this.roomId);
+      if (!Array.isArray(state)) {
+        return false;
+      }
+
+      const createEvents = state.filter(
+        (event: unknown) => isRecord(event) && event.type === 'm.room.create',
+      );
+      if (createEvents.length !== 1) {
+        return false;
+      }
+
+      const createEvent = createEvents[0];
+      if (
+        !isRecord(createEvent) ||
+        createEvent.state_key !== '' ||
+        !isRecord(createEvent.content) ||
+        createEvent.content.room_version !== '12' ||
+        !isCanonicalMatrixUserId(createEvent.sender)
+      ) {
+        return false;
+      }
+
+      const additionalCreators = createEvent.content.additional_creators;
+      if (
+        additionalCreators !== undefined &&
+        (!Array.isArray(additionalCreators) ||
+          !additionalCreators.every(isCanonicalMatrixUserId))
+      ) {
+        return false;
+      }
+
+      return (
+        createEvent.sender === this.userId ||
+        (additionalCreators?.includes(this.userId) ?? false)
+      );
+    } catch {
+      return false;
+    }
   }
 
   private async getPowerLevels(): Promise<PowerLevelsLookup> {
@@ -155,5 +203,31 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
 
   private userPower(powerLevels: PowerLevelsEventContent | undefined): number {
     return powerLevels?.users?.[this.userId] ?? powerLevels?.users_default ?? 0;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isCanonicalMatrixUserId(value: unknown): value is string {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  try {
+    const parsed = new UserID(value);
+    const separator = value.indexOf(':');
+    return (
+      value.startsWith('@') &&
+      separator > 1 &&
+      separator < value.length - 1 &&
+      parsed.localpart.length > 0 &&
+      parsed.domain.length > 0 &&
+      value.slice(1, separator) === parsed.localpart &&
+      value.slice(separator + 1) === parsed.domain
+    );
+  } catch {
+    return false;
   }
 }

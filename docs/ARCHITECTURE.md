@@ -170,6 +170,15 @@ membership/power policy is used by personal-principal room-context routes and
 gated application-principal room-target operations. The UI is never the
 authorization boundary.
 
+For calendar-management checks that numeric power would deny, room-version 12
+creator power is resolved from the authoritative current `m.room.create`
+state event, including its sender and `additional_creators`. The server accepts
+this implicit power only for an exact `room_version` of `12`; absent,
+malformed, duplicate, unknown-version, or unavailable create state grants no
+implicit power. The creator identity is never taken from request data. This
+follows the [Matrix room version 12 specification](https://spec.matrix.org/v1.19/rooms/v12/)
+and [stable Client-Server API](https://spec.matrix.org/v1.19/client-server-api/).
+
 ## Room/calendar binding
 
 The initial binding source is the server-only `ROOM_CALENDAR_BINDINGS` JSON

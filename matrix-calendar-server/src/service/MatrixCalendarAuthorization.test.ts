@@ -42,6 +42,7 @@ describe('MatrixCalendarAuthorizationFactory', () => {
     ).forRoom(userId, roomId);
 
     when(matrixClientMock.getJoinedRoomMembers(roomId)).thenResolve([userId]);
+    when(matrixClientMock.getRoomState(roomId)).thenResolve([]);
   });
 
   it('allows joined members to discover and read calendars', async () => {
@@ -128,6 +129,7 @@ describe('MatrixCalendarAuthorizationFactory', () => {
         eventId: 'planning',
       }),
     ).resolves.toBe(true);
+    verify(matrixClientMock.getRoomState(roomId)).never();
   });
 
   it('uses state_default for calendar management by default', async () => {
@@ -136,6 +138,14 @@ describe('MatrixCalendarAuthorizationFactory', () => {
       events_default: 0,
       state_default: 50,
     });
+    setRoomState([
+      {
+        type: 'm.room.create',
+        state_key: '',
+        sender: '@another-user:example.test',
+        content: { room_version: '11' },
+      },
+    ]);
 
     await expect(
       authorization.isAllowed({ action: 'create-calendar' }),
@@ -164,6 +174,14 @@ describe('MatrixCalendarAuthorizationFactory', () => {
     when(matrixClientMock.getJoinedRoomMembers(roomId)).thenResolve([
       '@someone-else:example.test',
     ]);
+    setRoomState([
+      {
+        type: 'm.room.create',
+        state_key: '',
+        sender: userId,
+        content: { room_version: '12' },
+      },
+    ]);
 
     const factory = new MatrixCalendarAuthorizationFactory(
       instance(matrixClientMock),
@@ -179,6 +197,7 @@ describe('MatrixCalendarAuthorizationFactory', () => {
         '',
       ),
     ).never();
+    verify(matrixClientMock.getRoomState(roomId)).never();
   });
 
   it('allows joined calendar managers to access diagnostics', async () => {
@@ -206,6 +225,196 @@ describe('MatrixCalendarAuthorizationFactory', () => {
     await expect(factory.canManageCalendars(userId, roomId)).resolves.toBe(
       false,
     );
+  });
+
+  it('recognizes the room-v12 create-event sender as a manager', async () => {
+    const factory = new MatrixCalendarAuthorizationFactory(
+      instance(matrixClientMock),
+    );
+    setPowerLevels({ users_default: 0, state_default: 50 });
+    setRoomState([
+      {
+        type: 'm.room.create',
+        state_key: '',
+        sender: userId,
+        content: { room_version: '12' },
+      },
+    ]);
+
+    await expect(factory.canManageCalendars(userId, roomId)).resolves.toBe(
+      true,
+    );
+  });
+
+  it('recognizes room-v12 additional creators as managers', async () => {
+    setPowerLevels({ users_default: 0, state_default: 50 });
+    setRoomState([
+      {
+        type: 'm.room.create',
+        state_key: '',
+        sender: '@room-owner:example.test',
+        content: {
+          room_version: '12',
+          additional_creators: [userId],
+        },
+      },
+    ]);
+
+    await expect(
+      authorization.isAllowed({
+        action: 'manage-calendar',
+        calendarId: 'team',
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('denies ordinary room-v12 members below manager power', async () => {
+    setPowerLevels({ users_default: 0, state_default: 50 });
+    setRoomState([
+      {
+        type: 'm.room.create',
+        state_key: '',
+        sender: '@room-owner:example.test',
+        content: { room_version: '12', additional_creators: [] },
+      },
+    ]);
+
+    await expect(
+      authorization.isAllowed({
+        action: 'manage-calendar',
+        calendarId: 'team',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('does not infer implicit creator power for another room version', async () => {
+    setPowerLevels({ users_default: 0, state_default: 50 });
+    setRoomState([
+      {
+        type: 'm.room.create',
+        state_key: '',
+        sender: userId,
+        content: { room_version: '11' },
+      },
+    ]);
+
+    await expect(
+      authorization.isAllowed({
+        action: 'manage-calendar',
+        calendarId: 'team',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('does not infer implicit creator power for an unknown room version', async () => {
+    setPowerLevels({ users_default: 0, state_default: 50 });
+    setRoomState([
+      {
+        type: 'm.room.create',
+        state_key: '',
+        sender: userId,
+        content: { room_version: '13' },
+      },
+    ]);
+
+    await expect(
+      authorization.isAllowed({
+        action: 'manage-calendar',
+        calendarId: 'team',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it.each([
+    ['missing create state', []],
+    [
+      'duplicate create state',
+      [
+        {
+          type: 'm.room.create',
+          state_key: '',
+          sender: userId,
+          content: { room_version: '12' },
+        },
+        {
+          type: 'm.room.create',
+          state_key: '',
+          sender: userId,
+          content: { room_version: '12' },
+        },
+      ],
+    ],
+    [
+      'malformed create state key',
+      [
+        {
+          type: 'm.room.create',
+          state_key: 'unexpected',
+          sender: userId,
+          content: { room_version: '12' },
+        },
+      ],
+    ],
+    [
+      'missing room version',
+      [
+        {
+          type: 'm.room.create',
+          state_key: '',
+          sender: userId,
+          content: {},
+        },
+      ],
+    ],
+    [
+      'malformed additional creators',
+      [
+        {
+          type: 'm.room.create',
+          state_key: '',
+          sender: '@room-owner:example.test',
+          content: { room_version: '12', additional_creators: [userId, 7] },
+        },
+      ],
+    ],
+    [
+      'non-array additional creators',
+      [
+        {
+          type: 'm.room.create',
+          state_key: '',
+          sender: '@room-owner:example.test',
+          content: { room_version: '12', additional_creators: userId },
+        },
+      ],
+    ],
+  ])(
+    'fails closed on %s when checking implicit creator power',
+    async (_label, state) => {
+      setPowerLevels({ users_default: 0, state_default: 50 });
+      setRoomState(state as Record<string, unknown>[]);
+
+      await expect(
+        authorization.isAllowed({
+          action: 'manage-calendar',
+          calendarId: 'team',
+        }),
+      ).resolves.toBe(false);
+    },
+  );
+
+  it('fails closed when current room-state lookup for creator power fails', async () => {
+    setPowerLevels({ users_default: 0, state_default: 50 });
+    when(matrixClientMock.getRoomState(roomId)).thenReject(
+      new Error('room state unavailable'),
+    );
+
+    await expect(
+      authorization.isAllowed({
+        action: 'manage-calendar',
+        calendarId: 'team',
+      }),
+    ).resolves.toBe(false);
   });
 
   it('supports dedicated Matrix power-level overrides', async () => {
@@ -303,5 +512,9 @@ describe('MatrixCalendarAuthorizationFactory', () => {
         '',
       ),
     ).thenResolve(content as PowerLevelsEventContent);
+  }
+
+  function setRoomState(state: Record<string, unknown>[]): void {
+    when(matrixClientMock.getRoomState(roomId)).thenResolve(state);
   }
 });
