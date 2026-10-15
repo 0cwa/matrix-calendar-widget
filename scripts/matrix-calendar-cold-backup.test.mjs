@@ -28,9 +28,17 @@ const containerIds = {
 
 const captureMarkerContent = 'Cold capture verified and services resumed.\n';
 const fakeSnapshotId = 'b'.repeat(64);
+const realResticBinary = process.env.COLD_BACKUP_TEST_RESTIC_BINARY;
+const realResticTestRoot = process.env.COLD_BACKUP_TEST_RESTIC_ROOT;
 
-async function makeFixture({ databaseEnabled = true, initialRunning } = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'matrix-calendar-cold-backup-'));
+async function makeFixture({
+  databaseEnabled = true,
+  initialRunning,
+  rootDirectory,
+} = {}) {
+  const root =
+    rootDirectory ??
+    (await mkdtemp(join(tmpdir(), 'matrix-calendar-cold-backup-')));
   const projectDirectory = join(root, 'project');
   const deployDirectory = join(projectDirectory, 'deploy');
   const captureRoot = join(root, 'captures');
@@ -799,6 +807,235 @@ test('opt-in cleanup rejects a symlinked capture-root ancestor before commands',
   assert.equal(fake.calls.length, 0);
   assert.deepEqual(await readdir(fixture.captureRoot), []);
 });
+
+test(
+  'verified Restic reads back and cleans only the current local capture',
+  { skip: !realResticBinary || !realResticTestRoot },
+  async () => {
+    await assert.rejects(access(realResticTestRoot));
+    await mkdir(realResticTestRoot, { mode: 0o700 });
+    const taskRootInfo = await lstat(realResticTestRoot);
+    assert.equal(taskRootInfo.isDirectory(), true);
+    assert.equal(taskRootInfo.mode & 0o777, 0o700);
+    if (typeof process.getuid === 'function') {
+      assert.equal(taskRootInfo.uid, process.getuid());
+    }
+
+    const fixtureRoot = join(realResticTestRoot, 'fixture');
+    const fixture = await makeFixture({
+      databaseEnabled: false,
+      rootDirectory: fixtureRoot,
+    });
+    const passwordInfo = await lstat(fixture.env.RESTIC_PASSWORD_FILE);
+    assert.equal(passwordInfo.isFile(), true);
+    assert.equal(passwordInfo.mode & 0o777, 0o600);
+    const repository = join(realResticTestRoot, 'repository');
+    await assert.rejects(access(repository));
+
+    const realCommands = [];
+    let reportedResticVersion;
+    let cleanupSnapshotId;
+    let cleanupListing;
+    let cleanupListingBytes;
+    let markerReadbackMatches = false;
+    const resticEnvironment = {
+      PATH: process.env.PATH ?? '/usr/bin:/bin',
+      HOME: process.env.HOME ?? '/',
+      RESTIC_PASSWORD_FILE: fixture.env.RESTIC_PASSWORD_FILE,
+      RESTIC_CACHE_DIR: fixture.env.RESTIC_CACHE_DIR,
+    };
+    const runNativeRestic = async (args, options = {}) => {
+      const env = {
+        ...options.env,
+        ...resticEnvironment,
+        RESTIC_REPOSITORY: `file:${repository}`,
+      };
+      const result = await defaultCommand(realResticBinary, args, {
+        ...options,
+        env,
+      });
+      realCommands.push([...args]);
+      if (args[0] === 'version' && result.status === 0) {
+        reportedResticVersion = /^restic ([^ ]+)/u.exec(result.stdout)?.[1];
+      }
+      if (
+        args[0] === 'backup' &&
+        args.includes('--json') &&
+        result.status === 0
+      ) {
+        const records = result.stdout
+          .trim()
+          .split(/\r?\n/u)
+          .filter(Boolean)
+          .map((line) => JSON.parse(line));
+        cleanupSnapshotId = records.find(
+          (item) => item.message_type === 'summary',
+        )?.snapshot_id;
+      }
+      if (args[0] === 'ls' && result.status === 0) {
+        cleanupListingBytes = Buffer.byteLength(result.stdout);
+        cleanupListing = result.stdout
+          .trim()
+          .split(/\r?\n/u)
+          .filter(Boolean)
+          .map((line) => JSON.parse(line));
+      }
+      if (args[0] === 'dump' && result.status === 0) {
+        markerReadbackMatches = result.stdout === captureMarkerContent;
+      }
+      return result;
+    };
+
+    const init = await runNativeRestic(['init'], { timeoutMs: 30_000 });
+    assert.equal(init.status, 0);
+
+    const olderMarkedCapture = join(fixture.captureRoot, 'older-marked');
+    const unmarkedCapture = join(fixture.captureRoot, 'unmarked');
+    await mkdir(olderMarkedCapture, { mode: 0o700 });
+    await mkdir(unmarkedCapture, { mode: 0o700 });
+    await writeFile(
+      join(olderMarkedCapture, '.capture-complete'),
+      captureMarkerContent,
+      { mode: 0o600 },
+    );
+    await writeFile(join(olderMarkedCapture, 'keep'), 'older control', {
+      mode: 0o600,
+    });
+    await writeFile(join(unmarkedCapture, 'keep'), 'unmarked control', {
+      mode: 0o600,
+    });
+    const primaryControl = join(fixtureRoot, 'primary-control');
+    await writeFile(primaryControl, 'preserve synthetic primary data', {
+      mode: 0o600,
+    });
+
+    const fake = fakeCommands({ databaseEnabled: false });
+    const command = (name, args, options) =>
+      name === 'restic'
+        ? runNativeRestic(args, options)
+        : fake.command(name, args, options);
+    const defaultResult = await runColdBackup(fixture.config, {
+      command,
+      env: fixture.env,
+      now: () => new Date('2026-10-13T02:03:04.000Z'),
+      id: () => 'real-default',
+    });
+    await access(defaultResult.captureDirectory);
+    assert.deepEqual(Object.keys(defaultResult), ['captureDirectory']);
+
+    const cleanupResult = await runColdBackup(
+      { ...fixture.config, cleanupSuccessfulCapture: true },
+      {
+        command,
+        env: fixture.env,
+        now: () => new Date('2026-10-14T02:03:04.000Z'),
+        id: () => 'real-cleanup',
+      },
+    );
+    assert.equal(cleanupResult.captureDirectoryRemoved, true);
+    await assert.rejects(access(cleanupResult.captureDirectory));
+    assert.equal(
+      await readFile(
+        join(defaultResult.captureDirectory, '.capture-complete'),
+        'utf8',
+      ),
+      captureMarkerContent,
+    );
+    assert.equal(
+      await readFile(primaryControl, 'utf8'),
+      'preserve synthetic primary data',
+    );
+    assert.equal(
+      await readFile(join(olderMarkedCapture, 'keep'), 'utf8'),
+      'older control',
+    );
+    assert.equal(
+      await readFile(join(unmarkedCapture, 'keep'), 'utf8'),
+      'unmarked control',
+    );
+    assert.deepEqual((await readdir(fixture.captureRoot)).sort(), [
+      '20261013T020304Z-real-default',
+      'older-marked',
+      'unmarked',
+    ]);
+
+    const snapshotsResult = await runNativeRestic(['snapshots', '--json']);
+    assert.equal(snapshotsResult.status, 0);
+    const snapshots = JSON.parse(snapshotsResult.stdout);
+    assert.equal(snapshots.length, 2);
+    const baselineSnapshot = snapshots.find((snapshot) =>
+      snapshot.paths.includes(defaultResult.captureDirectory),
+    );
+    const cleanupSnapshot = snapshots.find((snapshot) =>
+      snapshot.paths.includes(cleanupResult.captureDirectory),
+    );
+    assert.ok(baselineSnapshot);
+    assert.ok(cleanupSnapshot);
+    assert.equal(cleanupSnapshot.hostname, 'matrix-calendar-sidecar');
+    assert.deepEqual(cleanupSnapshot.tags.sort(), [
+      'cold-paired-store',
+      'matrix-calendar-sidecar',
+    ]);
+    assert.equal(cleanupSnapshotId, cleanupSnapshot.id);
+    assert.ok(cleanupListingBytes < 1024 * 1024);
+    assert.equal(cleanupListing[0].id, cleanupSnapshot.id);
+    assert.equal(cleanupListing[0].hostname, 'matrix-calendar-sidecar');
+    assert.deepEqual(cleanupListing[0].tags.sort(), [
+      'cold-paired-store',
+      'matrix-calendar-sidecar',
+    ]);
+    assert.deepEqual(cleanupListing[0].paths, [cleanupResult.captureDirectory]);
+    assert.equal(
+      cleanupListing.length,
+      6,
+      'snapshot, capture directory, and four expected flat files',
+    );
+    assert.equal(markerReadbackMatches, true);
+    assert.equal(reportedResticVersion, '0.19.1');
+    assert.equal(
+      realCommands.some(
+        (args) => args[0] === 'forget' || args.includes('--prune'),
+      ),
+      false,
+    );
+
+    const receipt = {
+      result: 'passed',
+      transport: 'local file repository override; this is not S3 evidence',
+      cleanup_option_default: false,
+      cleanup_snapshot_id: cleanupSnapshot.id,
+      cleanup_snapshot_host: cleanupSnapshot.hostname,
+      cleanup_snapshot_tags: cleanupSnapshot.tags,
+      cleanup_snapshot_paths: cleanupSnapshot.paths,
+      readback_listing_bytes: cleanupListingBytes,
+      readback_listing: cleanupListing.map((item) => ({
+        message_type: item.message_type,
+        ...(item.id ? { id: item.id } : {}),
+        ...(item.hostname ? { hostname: item.hostname } : {}),
+        ...(item.tags ? { tags: item.tags } : {}),
+        ...(item.paths ? { paths: item.paths } : {}),
+        ...(item.path ? { path: item.path } : {}),
+        ...(item.type ? { type: item.type } : {}),
+        ...(item.size !== undefined ? { size: item.size } : {}),
+      })),
+      marker_readback_matches: markerReadbackMatches,
+      restic_command_args: realCommands,
+      local_postconditions: {
+        current_cleanup_capture_removed: true,
+        default_off_capture_preserved: true,
+        older_marked_capture_preserved: true,
+        unmarked_capture_preserved: true,
+        primary_control_preserved: true,
+        remote_forget_or_prune_called: false,
+      },
+    };
+    await writeFile(
+      join(realResticTestRoot, 'receipt.json'),
+      `${JSON.stringify(receipt, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+  },
+);
 
 test('opt-in retention forgets only the configured host and tag group after upload', async (t) => {
   const fixture = await makeFixture({ databaseEnabled: false });

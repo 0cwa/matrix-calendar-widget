@@ -580,7 +580,9 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       boundaries. The coordinator does not select a provider or validate a real S3 endpoint, scheduled run, or target-host
       recovery.
   - [x] Add a host-local cold-capture coordinator and generic systemd service
-        and timer templates. Focused tests use fake commands only. The templates
+        and timer templates. Focused service tests use fake commands; an
+        opt-in local Restic test uses synthetic captures and a new file
+        repository. Neither test path exercises S3. The templates
         remain operator-installed and disabled; the coordinator uploads a
         verified paired capture after service restart and never initializes a
         Restic repository. `resticRetentionEnabled` defaults off; when enabled
