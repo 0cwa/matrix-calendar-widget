@@ -534,6 +534,16 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       targeted lint, and formatting passed; combined-source checks and
       independent review are pending. See ADR 042 and
       `docs/legacy-entry-points.md` for the boundaries.
+- [x] Integrate #282's Matrix v12 creator-identifier validation in the local
+      candidate based on `main` `3c4db0d2ce51dce8ca71d5ff6e75ff56fcd08702`
+      (tree `09b9da6579a37daa1871b9a8704a0e4f01935e9f`). The shared server-name
+      parser preserves room-binding behavior; create-event senders retain
+      historical localparts, while `additional_creators` requires current
+      user-ID grammar. Focused authorization/binding tests pass 65/65. The host
+      server Jest run passed 1,439 tests with 33 skipped; two later additions
+      were test-only and passed in that focused suite. TypeScript, changed-file
+      lint, formatting, and both translation dry-runs passed. Final integrated
+      review and hosted checks remain pending.
 - [ ] After the combined source passes integration review and hosted checks,
       create a fresh candidate for #255 and bind its required Element
       Web/Desktop and both-backend evidence to that exact source. Historical
