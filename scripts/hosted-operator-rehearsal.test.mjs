@@ -612,10 +612,48 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(initial.schema_version, 3);
+    assert.equal(initial.schema_version, 4);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
     assert.equal(initial.failure_operation, 'gate');
+    assert.equal(initial.failure_check, 'unknown');
+    assert.deepEqual(initial.service_roles, {
+      synapse: {
+        present: 'unavailable',
+        state: 'unavailable',
+        exit_code: 'unavailable',
+        image_matches: 'unavailable',
+        health: 'unavailable',
+      },
+      radicale: {
+        present: 'unavailable',
+        state: 'unavailable',
+        exit_code: 'unavailable',
+        image_matches: 'unavailable',
+        health: 'unavailable',
+      },
+      gateway: {
+        present: 'unavailable',
+        state: 'unavailable',
+        exit_code: 'unavailable',
+        image_matches: 'unavailable',
+        health: 'unavailable',
+      },
+      widget: {
+        present: 'unavailable',
+        state: 'unavailable',
+        exit_code: 'unavailable',
+        image_matches: 'unavailable',
+        health: 'unavailable',
+      },
+      postgres: {
+        present: 'unavailable',
+        state: 'unavailable',
+        exit_code: 'unavailable',
+        image_matches: 'unavailable',
+        health: 'unavailable',
+      },
+    });
     assert.equal(initial.startup_stage, 'homeserver-probe');
     assert.equal(initial.child_exit_code, 125);
     assert.deepEqual(initial.source_image_ids, fields.sourceImageIds);
@@ -661,11 +699,13 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
     ],
     cleanupStatus: 'verified',
     cleanupAttempted: false,
+    failureCode: 'https://private.example/token=secret',
   });
   const serialized = JSON.stringify(diagnostic);
   assert.equal(diagnostic.failed_phase, 'runner');
   assert.equal(diagnostic.failure_class, 'unknown');
   assert.equal(diagnostic.failure_operation, 'unknown');
+  assert.equal(diagnostic.failure_check, 'unknown');
   assert.equal(diagnostic.startup_stage, 'unknown');
   assert.equal(diagnostic.child_exit_code, 'unavailable');
   assert.equal(diagnostic.source_sha, 'unavailable');
@@ -677,6 +717,132 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
   assert.equal(diagnostic.owned_cleanup_verified, false);
   assert.equal(diagnostic.foreign_inventory_unchanged, false);
   assert.doesNotMatch(serialized, /secret|https|private|BEGIN:VCALENDAR/u);
+});
+
+test('failure diagnostics project only fixed primary-role inventory fields', () => {
+  const roles = ['synapse', 'radicale', 'gateway', 'widget', 'postgres'];
+  const expectedImages = roles.map((role, index) => ({
+    role,
+    id: `sha256:${String(index + 1).repeat(64)}`,
+  }));
+  const labels = (role) => ({
+    'io.matrix-calendar-widget.local-rehearsal': runId,
+    'com.docker.compose.project': project,
+    'com.docker.compose.service': role,
+    hostile: 'token=do-not-publish',
+  });
+  const container = (role, index, overrides = {}) => ({
+    Id: `container-private-${role}`,
+    Name: `/private-${role}`,
+    Image: expectedImages[index].id,
+    Config: {
+      Labels: labels(role),
+      Env: ['MATRIX_TOKEN=do-not-publish'],
+    },
+    State: {
+      Status: 'running',
+      ExitCode: 0,
+      Health: null,
+      ...overrides,
+    },
+    HostConfig: { PortBindings: { '5232/tcp': 'private-address' } },
+  });
+  const serviceInventory = {
+    containers: [
+      container('synapse', 0),
+      container('radicale', 1, { Health: { Status: 'healthy' } }),
+      container('gateway', 2, {
+        Status: 'exited',
+        ExitCode: 17,
+        Health: { Status: 'unhealthy', Log: ['private error'] },
+      }),
+      container('widget', 3),
+      container('widget', 3),
+    ],
+  };
+  const diagnostic = formatFailureDiagnostic({
+    sourceSha,
+    workflowSha: '2'.repeat(40),
+    runId,
+    attempt: '1',
+    phase: 'service-inventory',
+    failureClass: 'gate-failed',
+    operation: 'gate',
+    failureCode: 'service-state-mismatch',
+    serviceInventory,
+    serviceRunId: runId,
+    serviceProject: project,
+    serviceImages: expectedImages,
+    sourceImageIds: [imageId, manifestDigest, `sha256:${'c'.repeat(64)}`],
+    cleanupStatus: 'unverified',
+    cleanupAttempted: true,
+  });
+
+  assert.equal(diagnostic.failure_check, 'state');
+  assert.deepEqual(diagnostic.service_roles, {
+    synapse: {
+      present: true,
+      state: 'running',
+      exit_code: 0,
+      image_matches: true,
+      health: 'none',
+    },
+    radicale: {
+      present: true,
+      state: 'running',
+      exit_code: 0,
+      image_matches: true,
+      health: 'healthy',
+    },
+    gateway: {
+      present: true,
+      state: 'exited',
+      exit_code: 17,
+      image_matches: true,
+      health: 'unhealthy',
+    },
+    widget: {
+      present: true,
+      state: 'unknown',
+      exit_code: 'unavailable',
+      image_matches: 'unavailable',
+      health: 'unknown',
+    },
+    postgres: {
+      present: false,
+      state: 'unavailable',
+      exit_code: 'unavailable',
+      image_matches: 'unavailable',
+      health: 'unavailable',
+    },
+  });
+  const serialized = JSON.stringify(diagnostic);
+  assert.doesNotMatch(
+    serialized,
+    /container-private|private-|MATRIX_TOKEN|do-not-publish|private-address|private error/u,
+  );
+});
+
+test('failure checks use fixed assertion codes and unknown fallback', () => {
+  const cases = [
+    ['service-set-mismatch', 'service-set'],
+    ['service-image-mismatch', 'image'],
+    ['service-state-mismatch', 'state'],
+    ['element-container-present', 'element'],
+    ['volume-set-mismatch', 'volume'],
+    ['network-set-mismatch', 'network'],
+    ['foreign-listener-changed', 'listener'],
+    ['service-state-mismatch token=secret', 'unknown'],
+  ];
+  for (const [failureCode, expected] of cases) {
+    assert.equal(
+      formatFailureDiagnostic({
+        phase: 'service-inventory',
+        failureCode,
+      }).failure_check,
+      expected,
+    );
+  }
 });
 
 test('startup failure markers accept only one source-formatted closed marker matching child status', () => {

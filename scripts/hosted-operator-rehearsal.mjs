@@ -228,6 +228,31 @@ const SAFE_STARTUP_STAGES = new Set([
   'synapse-compose-start',
   'unknown',
 ]);
+const FAILURE_CHECK_BY_CODE = new Map([
+  ['service-set-mismatch', 'service-set'],
+  ['service-image-mismatch', 'image'],
+  ['service-state-mismatch', 'state'],
+  ['element-container-present', 'element'],
+  ['volume-set-mismatch', 'volume'],
+  ['network-set-mismatch', 'network'],
+  ['foreign-listener-changed', 'listener'],
+]);
+const PRIMARY_SERVICE_ROLES = Object.freeze([
+  'synapse',
+  'radicale',
+  'gateway',
+  'widget',
+  'postgres',
+]);
+const SAFE_CONTAINER_STATES = new Set([
+  'created',
+  'running',
+  'restarting',
+  'paused',
+  'exited',
+  'dead',
+]);
+const SAFE_HEALTH_STATES = new Set(['healthy', 'unhealthy', 'starting']);
 
 export function failureOperationForStage(stage) {
   return (
@@ -1687,6 +1712,11 @@ export function formatFailureDiagnostic({
   sourceImageIds,
   cleanupStatus,
   cleanupAttempted,
+  failureCode,
+  serviceInventory,
+  serviceRunId,
+  serviceProject,
+  serviceImages,
 }) {
   const safe = (value, pattern) =>
     typeof value === 'string' && pattern.test(value) ? value : 'unavailable';
@@ -1723,9 +1753,10 @@ export function formatFailureDiagnostic({
     childExitCode <= 255
       ? childExitCode
       : 'unavailable';
+  const safeFailureCheck = FAILURE_CHECK_BY_CODE.get(failureCode) ?? 'unknown';
 
   return {
-    schema_version: 3,
+    schema_version: 4,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
@@ -1733,6 +1764,12 @@ export function formatFailureDiagnostic({
       ? failureClass
       : 'unknown',
     failure_operation: safeOperation,
+    failure_check: safeFailureCheck,
+    service_roles: projectPrimaryServiceInventory(serviceInventory, {
+      runId: serviceRunId,
+      project: serviceProject,
+      images: serviceImages,
+    }),
     startup_stage: safeStartupStage,
     child_exit_code: safeChildExitCode,
     source_sha: safe(sourceSha, /^[0-9a-f]{40}$/u),
@@ -1745,6 +1782,104 @@ export function formatFailureDiagnostic({
     owned_cleanup_verified: cleanupVerified,
     foreign_inventory_unchanged: cleanupVerified,
   };
+}
+
+function unavailableServiceRole() {
+  return {
+    present: 'unavailable',
+    state: 'unavailable',
+    exit_code: 'unavailable',
+    image_matches: 'unavailable',
+    health: 'unavailable',
+  };
+}
+
+function unavailablePrimaryServiceInventory() {
+  return Object.fromEntries(
+    PRIMARY_SERVICE_ROLES.map((role) => [role, unavailableServiceRole()]),
+  );
+}
+
+function projectPrimaryServiceInventory(inventory, { runId, project, images }) {
+  if (
+    !inventory ||
+    !Array.isArray(inventory.containers) ||
+    typeof runId !== 'string' ||
+    typeof project !== 'string' ||
+    !Array.isArray(images)
+  ) {
+    return unavailablePrimaryServiceInventory();
+  }
+
+  const imageByRole = new Map(
+    images
+      .filter(
+        (image) =>
+          PRIMARY_SERVICE_ROLES.includes(image?.role) &&
+          typeof image?.id === 'string' &&
+          /^sha256:[0-9a-f]{64}$/u.test(image.id),
+      )
+      .map((image) => [image.role, image.id]),
+  );
+  const projected = {};
+  for (const role of PRIMARY_SERVICE_ROLES) {
+    const owned = inventory.containers.filter((container) => {
+      const labels = labelsOf(container, 'container');
+      return (
+        labels[LOCAL_LABEL] === runId &&
+        labels[PROJECT_LABEL] === project &&
+        labels[SERVICE_LABEL] === role
+      );
+    });
+    if (owned.length === 0) {
+      projected[role] = {
+        present: false,
+        state: 'unavailable',
+        exit_code: 'unavailable',
+        image_matches: 'unavailable',
+        health: 'unavailable',
+      };
+      continue;
+    }
+    if (owned.length !== 1) {
+      projected[role] = {
+        present: true,
+        state: 'unknown',
+        exit_code: 'unavailable',
+        image_matches: 'unavailable',
+        health: 'unknown',
+      };
+      continue;
+    }
+
+    const [container] = owned;
+    const status = container?.State?.Status;
+    const exitCode = container?.State?.ExitCode;
+    const health = container?.State?.Health;
+    const expectedImage = imageByRole.get(role);
+    const actualImage = container?.Image;
+    projected[role] = {
+      present: true,
+      state: SAFE_CONTAINER_STATES.has(status) ? status : 'unknown',
+      exit_code:
+        Number.isInteger(exitCode) && exitCode >= 0 && exitCode <= 255
+          ? exitCode
+          : 'unavailable',
+      image_matches:
+        expectedImage &&
+        typeof actualImage === 'string' &&
+        /^sha256:[0-9a-f]{64}$/u.test(actualImage)
+          ? actualImage === expectedImage
+          : 'unavailable',
+      health:
+        health === null
+          ? 'none'
+          : SAFE_HEALTH_STATES.has(health?.Status)
+            ? health.Status
+            : 'unknown',
+    };
+  }
+  return projected;
 }
 
 export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
@@ -1764,9 +1899,12 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
           'failed_phase',
           'failure_class',
           'failure_operation',
+          'failure_check',
           'startup_stage',
           'child_exit_code',
-        ].every((key) => previous?.[key] === diagnostic[key])
+        ].every((key) => previous?.[key] === diagnostic[key]) ||
+        JSON.stringify(previous?.service_roles) !==
+          JSON.stringify(diagnostic.service_roles)
       ) {
         fail('receipt-publish', 'failure-diagnostic-identity-mismatch');
       }
@@ -1789,6 +1927,10 @@ async function main() {
   let receiptPath;
   const failureIdentity = {};
   let diagnosticRoot;
+  let diagnosticInventory;
+  let diagnosticRunId;
+  let diagnosticProject;
+  let diagnosticImages;
   let cleanupState;
   let cleanupVerified = false;
   const env = process.env;
@@ -1824,6 +1966,8 @@ async function main() {
       .digest('hex')
       .slice(0, 16);
     const project = `mcw-p0-${id}`;
+    diagnosticRunId = id;
+    diagnosticProject = project;
     const runnerTemp = path.resolve(required(env, 'RUNNER_TEMP'));
     const runnerInfo = lstatSync(runnerTemp);
     if (
@@ -2028,6 +2172,7 @@ async function main() {
       fixtureImages.push({ role: fixture.role, ...locked });
     }
     const images = [...sourceImages, ...fixtureImages];
+    diagnosticImages = images;
     if (
       images.length !== 5 ||
       new Set(images.map((image) => image.id)).size !== 5
@@ -2165,6 +2310,7 @@ async function main() {
     if (!readiness.includes('Element-free acceptance services are ready.'))
       fail(stage, 'element-free-readiness-missing');
     let active = captureInventory('primary', context);
+    diagnosticInventory = active;
     assertTaskServiceSet(active, {
       runId: id,
       project,
@@ -2343,6 +2489,7 @@ async function main() {
       { timeout: 20 * 60_000 },
     );
     active = captureInventory('paired-restore', context);
+    diagnosticInventory = active;
     assertTaskServiceSet(active, {
       runId: id,
       project,
@@ -2383,6 +2530,7 @@ async function main() {
 
     stage = 'owned-cleanup-preflight';
     const current = captureInventory('pre-cleanup', context);
+    diagnosticInventory = current;
     compareForeign(baseline, current, id, project);
     assertNoElement(current, id, project);
     assertPrivateTaskTree(taskDir, {
@@ -2474,10 +2622,15 @@ async function main() {
         error instanceof RehearsalFailure
           ? failureOperationForStage(error.stage)
           : 'runner-error',
+      failureCode: error instanceof RehearsalFailure ? error.code : 'unknown',
       startupStage:
         error instanceof RehearsalFailure ? error.startupStage : 'unknown',
       childExitCode:
         error instanceof RehearsalFailure ? error.childExitCode : 'unavailable',
+      serviceInventory: diagnosticInventory,
+      serviceRunId: diagnosticRunId,
+      serviceProject: diagnosticProject,
+      serviceImages: diagnosticImages,
     };
     if (cleanupState && !cleanupVerified) cleanupStatus = 'pending';
     const diagnosticWritten = writeFailureDiagnostic(diagnosticRoot, {
