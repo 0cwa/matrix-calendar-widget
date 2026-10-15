@@ -1259,11 +1259,7 @@ async function verifyResticSnapshot(
   const marker = await runCommand(
     deps,
     'restic',
-    [
-      'dump',
-      snapshotId,
-      join(captureDirectory, CAPTURE_MARKER_NAME),
-    ],
+    ['dump', snapshotId, join(captureDirectory, CAPTURE_MARKER_NAME)],
     commandOptions,
     'verification',
   );

@@ -517,8 +517,7 @@ test('captures the configured paired stores, resumes services, then uploads one 
   );
   assert.equal(
     fake.calls.some(
-      (call) =>
-        call.name === 'restic' && ['ls', 'dump'].includes(call.args[0]),
+      (call) => call.name === 'restic' && ['ls', 'dump'].includes(call.args[0]),
     ),
     false,
   );
@@ -583,8 +582,7 @@ test('opt-in cleanup removes only the current capture after Restic reads it back
   assert.ok(backupCall.args.includes('--json'));
   assert.ok(backupCall.args.includes('--quiet'));
   const readbackCalls = fake.calls.filter(
-    (call) =>
-      call.name === 'restic' && ['ls', 'dump'].includes(call.args[0]),
+    (call) => call.name === 'restic' && ['ls', 'dump'].includes(call.args[0]),
   );
   assert.deepEqual(
     readbackCalls.map((call) => call.args[0]),
