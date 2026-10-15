@@ -2657,6 +2657,33 @@ export async function settleUidLifecycleBeforeUserDeletion(
   }
 }
 
+export async function settleAndRetryLateEffectiveUidStop(
+  state,
+  initialStopResult,
+  initialObservation,
+  { stop = stopUidProcesses, capture = captureFinalUidLifecycle, wait } = {},
+) {
+  const settle = (observation) =>
+    settleUidLifecycleBeforeUserDeletion(state, observation, {
+      capture,
+      ...(wait === undefined ? {} : { wait }),
+    });
+  const settledObservation = await settle(initialObservation);
+  const retry = await retryLateEffectiveUidStop(
+    state,
+    initialStopResult,
+    settledObservation,
+    { stop, capture },
+  );
+  return {
+    ...retry,
+    observation:
+      retry.lateUidRetry === null
+        ? retry.observation
+        : await settle(retry.observation),
+  };
+}
+
 function captureFinalEgress(state) {
   const output = capture(
     'timeout',
@@ -2977,17 +3004,25 @@ async function cleanupRunner(config) {
     stopDiagnostics = stopResult.diagnostics;
     egressObservation = captureFinalEgress(state);
     lifecycleBeforeUserdel = captureFinalUidLifecycle(state);
-    const reconciledStop = await retryLateEffectiveUidStop(
+    const reconciledStop = await settleAndRetryLateEffectiveUidStop(
       state,
       stopResult,
       lifecycleBeforeUserdel,
+      {
+        capture: captureFinalUidLifecycle,
+        stop: (target) =>
+          stopUidProcesses(target, {
+            targetMatches: () => {
+              if (target.userMayBeCreated !== true) return false;
+              const account = lookupPasswdAccount(target.username);
+              return account.state === 'present' && account.uid === target.uid;
+            },
+          }),
+      },
     );
     processStatus = reconciledStop.stopResult.status;
     lateUidRetry = reconciledStop.lateUidRetry;
-    lifecycleBeforeUserdel = await settleUidLifecycleBeforeUserDeletion(
-      state,
-      reconciledStop.observation,
-    );
+    lifecycleBeforeUserdel = reconciledStop.observation;
     const beforeUserdelClear =
       lifecycleBeforeUserdel.state === 'observed' &&
       lifecycleBeforeUserdel.uidProcessCount === 0;

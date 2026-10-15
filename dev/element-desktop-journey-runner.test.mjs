@@ -31,6 +31,7 @@ import {
   runDesktopCalendarJourney,
   selectAvailableProbeUid,
   selectPinnedPackageHash,
+  settleAndRetryLateEffectiveUidStop,
   settleUidLifecycleBeforeUserDeletion,
   stopUidProcesses,
   validateDefaultPolicyPort,
@@ -1325,6 +1326,170 @@ test('does not settle an incomplete initial UID observation', async () => {
   assert.notEqual(observation.state, 'observed');
   assert.equal(waitCalls, 0);
   assert.equal(captureCalls, 0);
+});
+
+test('uses the settled effective-UID census for one guarded late stop', async () => {
+  const state = {
+    username: 'mcwdesktopprobe',
+    uid: 24_000,
+    userMayBeCreated: true,
+  };
+  const initialStop = await stopUidProcesses(state, {
+    runCommand: () => 1,
+    census: async () => observedEmptyLifecycle(),
+  });
+  const firstObservation = observedUidCensus(1);
+  firstObservation.effectiveUidMatchCount = 0;
+  firstObservation.nonEffectiveUidOnlyCount = 1;
+  const captureResults = [observedUidCensus(1), observedEmptyLifecycle()];
+  const commandStatuses = [0, 0, 1];
+  const sequence = [];
+  let accountLookups = 0;
+  const result = await settleAndRetryLateEffectiveUidStop(
+    state,
+    initialStop,
+    firstObservation,
+    {
+      wait: async (duration) => sequence.push(`settle:${duration}`),
+      capture: () => {
+        sequence.push('lifecycle-capture');
+        return captureResults.shift();
+      },
+      stop: (target) => {
+        sequence.push('late-stop');
+        return stopUidProcesses(target, {
+          runCommand: (program, args) => {
+            sequence.push(`${program}:${args.join(' ')}`);
+            return commandStatuses.shift();
+          },
+          wait: async () => {},
+          census: async () => observedEmptyLifecycle(),
+          targetMatches: () => {
+            sequence.push('account-guard');
+            const account = lookupPasswdAccount(target.username, () => {
+              accountLookups += 1;
+              return {
+                status: 0,
+                signal: null,
+                stdout:
+                  'mcwdesktopprobe:x:24000:24000::/tmp:/usr/sbin/nologin\n',
+              };
+            });
+            return (
+              target.userMayBeCreated === true &&
+              account.state === 'present' &&
+              account.uid === target.uid
+            );
+          },
+        });
+      },
+    },
+  );
+
+  assert.equal(result.lateUidRetry.stopDiagnostics.termSignal, 'sent');
+  assert.equal(result.lateUidRetry.stopDiagnostics.killSignal, 'not_attempted');
+  assert.equal(result.observation.state, 'observed');
+  assert.equal(result.observation.overflow, false);
+  assert.equal(result.observation.uidProcessCount, 0);
+  assert.equal(accountLookups, 1);
+  assert.ok(sequence.indexOf('settle:250') < sequence.indexOf('late-stop'));
+  assert.ok(sequence.indexOf('late-stop') < sequence.indexOf('account-guard'));
+  assert.ok(
+    sequence.indexOf('account-guard') <
+      sequence.indexOf('sudo:-n pkill -TERM -u 24000'),
+  );
+  assert.equal(
+    cleanupProofAllowsPolicyRemoval({
+      processStatus: result.stopResult.status,
+      beforeUserdelClear:
+        result.observation.state === 'observed' &&
+        result.observation.overflow === false &&
+        result.observation.uidProcessCount === 0,
+      finalUidClear: true,
+      user: { status: 'passed', accountState: 'absent' },
+    }),
+    true,
+  );
+});
+
+test('rechecks the account before each signal and retains a persistent UID', async () => {
+  const state = {
+    username: 'mcwdesktopprobe',
+    uid: 24_000,
+    userMayBeCreated: true,
+  };
+  const initialStop = await stopUidProcesses(state, {
+    runCommand: () => 1,
+    census: async () => observedEmptyLifecycle(),
+  });
+  const firstObservation = observedUidCensus(1);
+  firstObservation.effectiveUidMatchCount = 0;
+  firstObservation.nonEffectiveUidOnlyCount = 1;
+  const captureResults = [
+    observedUidCensus(1),
+    observedUidCensus(1),
+    observedUidCensus(1),
+  ];
+  const commandStatuses = [0, 0, 0, 1];
+  const commandCalls = [];
+  const waitCalls = [];
+  const accountUids = [24_000, 24_001];
+  const result = await settleAndRetryLateEffectiveUidStop(
+    state,
+    initialStop,
+    firstObservation,
+    {
+      wait: async (duration) => waitCalls.push(duration),
+      capture: () => captureResults.shift(),
+      stop: (target) =>
+        stopUidProcesses(target, {
+          runCommand: (program, args) => {
+            commandCalls.push([program, ...args]);
+            return commandStatuses.shift();
+          },
+          wait: async () => {},
+          census: async () => observedUidCensus(1),
+          targetMatches: () => {
+            const accountUid = accountUids.shift();
+            const account = lookupPasswdAccount(target.username, () => ({
+              status: 0,
+              signal: null,
+              stdout: `mcwdesktopprobe:x:${accountUid}:24000::/tmp:/usr/sbin/nologin\n`,
+            }));
+            return (
+              target.userMayBeCreated === true &&
+              account.state === 'present' &&
+              account.uid === target.uid
+            );
+          },
+        }),
+    },
+  );
+
+  assert.equal(result.lateUidRetry.stopDiagnostics.termSignal, 'sent');
+  assert.equal(result.lateUidRetry.stopDiagnostics.killSignal, 'failed');
+  assert.equal(result.observation.state, 'observed');
+  assert.equal(result.observation.uidProcessCount, 1);
+  assert.deepEqual(waitCalls, [250, 250]);
+  assert.equal(
+    commandCalls.some(
+      ([program, ...args]) =>
+        program === 'sudo' && args.includes('-KILL'),
+    ),
+    false,
+  );
+  assert.equal(
+    cleanupProofAllowsPolicyRemoval({
+      processStatus: result.stopResult.status,
+      beforeUserdelClear:
+        result.observation.state === 'observed' &&
+        result.observation.overflow === false &&
+        result.observation.uidProcessCount === 0,
+      finalUidClear: false,
+      user: { status: 'passed', accountState: 'absent' },
+    }),
+    false,
+  );
 });
 
 test('exit-0 account deletion followed by 0-to-0-to-1 census does not signal or retry', async () => {
