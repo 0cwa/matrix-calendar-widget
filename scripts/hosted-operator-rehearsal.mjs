@@ -31,6 +31,10 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  API_PROBE_FAILURE_CODES,
+  API_PROBE_STAGES,
+} from '../dev/element-acceptance-api-probe.mjs';
 
 const LOCAL_LABEL = 'io.matrix-calendar-widget.local-rehearsal';
 const PROJECT_LABEL = 'com.docker.compose.project';
@@ -78,20 +82,8 @@ const COMPOSE_VALUE_OPTIONS = new Set([
   '--progress',
   '--parallel',
 ]);
-const API_STAGES = Object.freeze([
-  'fixture',
-  'member-openid',
-  'outsider-openid',
-  'outsider-denied',
-  'event-create',
-  'canonical-readback',
-  'stale-etag-conflict',
-  'event-update',
-  'updated-readback',
-  'event-delete',
-  'delete-readback',
-  'owned-cleanup',
-]);
+const API_STAGES = API_PROBE_STAGES;
+const API_FAILURE_CODES = new Set(API_PROBE_FAILURE_CODES);
 const SAFE_PHASES = new Set([
   'preflight',
   'source-binding',
@@ -240,6 +232,9 @@ const SAFE_STARTUP_STAGES = new Set([
 ]);
 const FAILURE_CHECK_BY_CODE = new Map([
   ['gateway-network-smoke-failed', 'network-smoke'],
+  ['api-stage-failed', 'api-contract'],
+  ['api-probe-process-failed', 'api-contract'],
+  ['helper-summary-invalid', 'api-contract'],
   ['service-set-mismatch', 'service-set'],
   ['service-image-mismatch', 'image'],
   ['container-id-invalid', 'container-identity'],
@@ -447,6 +442,174 @@ function projectGatewayNetworkSmoke(diagnostic) {
   return { ...projected, synapse, radicale };
 }
 
+function unavailableApiCrudProbe(markerStatus = 'not-applicable', exitCode) {
+  return {
+    marker_status: markerStatus,
+    process_exit_code: networkSmokeProcessExitCode(exitCode),
+    status: 'unavailable',
+    first_failed_stage: 'unavailable',
+    failure_code: 'unavailable',
+    first_failure_http_status: null,
+    owned_cleanup_status: 'unavailable',
+  };
+}
+
+export function parseApiCrudProbeFailure(stdout, processExitCode) {
+  const diagnostic = unavailableApiCrudProbe('absent', processExitCode);
+  if (typeof stdout !== 'string' || stdout.trim() === '') return diagnostic;
+
+  let summary;
+  try {
+    summary = JSON.parse(stdout.trim());
+  } catch {
+    return { ...diagnostic, marker_status: 'invalid' };
+  }
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary)) {
+    return { ...diagnostic, marker_status: 'invalid' };
+  }
+  const hasFailureCode = Object.hasOwn(summary, 'failureCode');
+  const hasFailureHttpStatus = Object.hasOwn(summary, 'failureHttpStatus');
+  const keys = Object.keys(summary).sort();
+  const expectedKeys =
+    summary.status === 'failed'
+      ? ['failureCode', 'failureHttpStatus', 'stages', 'status']
+      : ['stages', 'status'];
+  if (
+    keys.length !== expectedKeys.length ||
+    keys.some((key, index) => key !== expectedKeys[index]) ||
+    !['passed', 'failed'].includes(summary.status) ||
+    !summary.stages ||
+    typeof summary.stages !== 'object' ||
+    Array.isArray(summary.stages)
+  ) {
+    return { ...diagnostic, marker_status: 'invalid' };
+  }
+
+  const stageNames = Object.keys(summary.stages).sort();
+  const expectedStageNames = [...API_STAGES].sort();
+  if (
+    stageNames.length !== API_STAGES.length ||
+    stageNames.some((stage, index) => stage !== expectedStageNames[index]) ||
+    API_STAGES.some(
+      (stage) =>
+        !['passed', 'failed', 'skipped'].includes(summary.stages[stage]),
+    )
+  ) {
+    return { ...diagnostic, marker_status: 'invalid' };
+  }
+
+  const firstFailedStage =
+    API_STAGES.find((stage) => summary.stages[stage] === 'failed') ??
+    'unavailable';
+  const failureCode = hasFailureCode ? summary.failureCode : 'unavailable';
+  if (
+    (summary.status === 'failed' && firstFailedStage === 'unavailable') ||
+    (summary.status === 'passed' &&
+      (firstFailedStage !== 'unavailable' ||
+        API_STAGES.some((stage) => summary.stages[stage] !== 'passed') ||
+        hasFailureCode ||
+        hasFailureHttpStatus)) ||
+    (summary.status === 'failed' &&
+      (!hasFailureCode || !hasFailureHttpStatus)) ||
+    (hasFailureCode && typeof failureCode !== 'string') ||
+    (failureCode !== 'unavailable' && !API_FAILURE_CODES.has(failureCode)) ||
+    (hasFailureHttpStatus &&
+      summary.failureHttpStatus !== null &&
+      (!Number.isInteger(summary.failureHttpStatus) ||
+        summary.failureHttpStatus < 100 ||
+        summary.failureHttpStatus > 599))
+  ) {
+    return { ...diagnostic, marker_status: 'invalid' };
+  }
+
+  return {
+    ...diagnostic,
+    marker_status: 'captured',
+    status: summary.status,
+    first_failed_stage: firstFailedStage,
+    failure_code: failureCode,
+    first_failure_http_status: hasFailureHttpStatus
+      ? summary.failureHttpStatus
+      : null,
+    owned_cleanup_status: summary.stages['owned-cleanup'],
+  };
+}
+
+export function assertApiCrudProbePassed(stdout) {
+  const apiCrudProbe = parseApiCrudProbeFailure(stdout, 0);
+  if (apiCrudProbe.marker_status !== 'captured') {
+    fail('api-crud-probe', 'helper-summary-invalid', { apiCrudProbe });
+  }
+  if (apiCrudProbe.status !== 'passed') {
+    fail('api-crud-probe', 'api-stage-failed', { apiCrudProbe });
+  }
+  return apiCrudProbe;
+}
+
+function projectApiCrudProbe(diagnostic) {
+  const markerStatus = [
+    'not-applicable',
+    'absent',
+    'invalid',
+    'captured',
+  ].includes(diagnostic?.marker_status)
+    ? diagnostic.marker_status
+    : 'not-applicable';
+  const projected = unavailableApiCrudProbe(
+    markerStatus,
+    markerStatus === 'not-applicable'
+      ? undefined
+      : diagnostic?.process_exit_code,
+  );
+  if (markerStatus !== 'captured') return projected;
+
+  const status = ['passed', 'failed'].includes(diagnostic?.status)
+    ? diagnostic.status
+    : undefined;
+  const firstFailedStage = API_STAGES.includes(diagnostic?.first_failed_stage)
+    ? diagnostic.first_failed_stage
+    : diagnostic?.first_failed_stage === 'unavailable'
+      ? 'unavailable'
+      : undefined;
+  const failureCode = API_FAILURE_CODES.has(diagnostic?.failure_code)
+    ? diagnostic.failure_code
+    : diagnostic?.failure_code === 'unavailable'
+      ? 'unavailable'
+      : undefined;
+  const failureHttpStatus =
+    diagnostic?.first_failure_http_status === null ||
+    (Number.isInteger(diagnostic?.first_failure_http_status) &&
+      diagnostic.first_failure_http_status >= 100 &&
+      diagnostic.first_failure_http_status <= 599)
+      ? diagnostic.first_failure_http_status
+      : undefined;
+  const ownedCleanupStatus = ['passed', 'failed', 'skipped'].includes(
+    diagnostic?.owned_cleanup_status,
+  )
+    ? diagnostic.owned_cleanup_status
+    : undefined;
+  if (
+    !status ||
+    !firstFailedStage ||
+    !failureCode ||
+    failureHttpStatus === undefined ||
+    !ownedCleanupStatus ||
+    (status === 'failed' && firstFailedStage === 'unavailable') ||
+    (status === 'passed' &&
+      (firstFailedStage !== 'unavailable' || failureCode !== 'unavailable'))
+  ) {
+    return { ...projected, marker_status: 'invalid' };
+  }
+  return {
+    ...projected,
+    status,
+    first_failed_stage: firstFailedStage,
+    failure_code: failureCode,
+    first_failure_http_status: failureHttpStatus,
+    owned_cleanup_status: ownedCleanupStatus,
+  };
+}
+
 const FIXTURES = Object.freeze([
   {
     role: 'synapse',
@@ -470,6 +633,7 @@ class RehearsalFailure extends Error {
         ? diagnostic.childExitCode
         : 'unavailable';
     this.gatewayNetworkSmoke = diagnostic.gatewayNetworkSmoke;
+    this.apiCrudProbe = diagnostic.apiCrudProbe;
   }
 }
 
@@ -1101,7 +1265,7 @@ export function parseStartupFailureMarker(stdout, childExitCode, formatter) {
   return { startupStage: match[1], childExitCode: safeExitCode };
 }
 
-function runTask(
+export function runTask(
   stage,
   command,
   args,
@@ -1113,6 +1277,7 @@ function runTask(
     timeout,
     startupFailureFormatter,
     failureDiagnosticParser,
+    apiCrudProbeParser,
   } = {},
 ) {
   const result = spawn(command, args, { cwd, env, input, timeout });
@@ -1137,13 +1302,21 @@ function runTask(
         result.status,
       );
     }
+    if (apiCrudProbeParser) {
+      diagnostic.apiCrudProbe = apiCrudProbeParser(
+        result.stdout ?? '',
+        result.status,
+      );
+    }
     fail(
       stage,
       failureDiagnosticParser
         ? 'gateway-network-smoke-failed'
-        : result.error
-          ? 'command-unavailable'
-          : `exit-${result.status ?? 'unknown'}`,
+        : apiCrudProbeParser
+          ? 'api-probe-process-failed'
+          : result.error
+            ? 'command-unavailable'
+            : `exit-${result.status ?? 'unknown'}`,
       diagnostic,
     );
   }
@@ -1581,12 +1754,12 @@ function validateComposeConfiguration({
   validateComposeModel(JSON.parse(modelText), lock, runId, project);
 }
 
-function checkSummary(command, stage) {
+function checkSummary(command, stage, diagnostic) {
   let result;
   try {
     result = JSON.parse(command);
   } catch {
-    fail(stage, 'helper-summary-invalid');
+    fail(stage, 'helper-summary-invalid', diagnostic);
   }
   return result;
 }
@@ -1975,6 +2148,7 @@ export function formatFailureDiagnostic({
   serviceImages,
   listenerScope,
   gatewayNetworkSmoke,
+  apiCrudProbe,
 }) {
   const safe = (value, pattern) =>
     typeof value === 'string' && pattern.test(value) ? value : 'unavailable';
@@ -2027,9 +2201,10 @@ export function formatFailureDiagnostic({
   };
   const safeGatewayNetworkSmoke =
     projectGatewayNetworkSmoke(gatewayNetworkSmoke);
+  const safeApiCrudProbe = projectApiCrudProbe(apiCrudProbe);
 
   return {
-    schema_version: 6,
+    schema_version: 7,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
@@ -2052,6 +2227,7 @@ export function formatFailureDiagnostic({
     source_image_ids: safeImageIds,
     listener_scope: safeListenerScope,
     gateway_network_smoke: safeGatewayNetworkSmoke,
+    api_crud_probe: safeApiCrudProbe,
     cleanup_status: safeCleanup,
     cleanup_attempted: attempted,
     owned_cleanup_verified: cleanupVerified,
@@ -2183,7 +2359,9 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
         JSON.stringify(previous?.listener_scope) !==
           JSON.stringify(diagnostic.listener_scope) ||
         JSON.stringify(previous?.gateway_network_smoke) !==
-          JSON.stringify(diagnostic.gateway_network_smoke)
+          JSON.stringify(diagnostic.gateway_network_smoke) ||
+        JSON.stringify(previous?.api_crud_probe) !==
+          JSON.stringify(diagnostic.api_crud_probe)
       ) {
         fail('receipt-publish', 'failure-diagnostic-identity-mismatch');
       }
@@ -2668,17 +2846,14 @@ async function main() {
       context,
     ).trim();
     if (widgetStatus !== '200') fail(stage, 'widget-http-status-invalid');
-    const apiSummary = checkSummary(
-      runFixtureTask('api-crud-probe', process.execPath, [
-        path.join(sourceRoot, 'dev/element-acceptance-api-probe.mjs'),
-      ]).trim(),
+    const apiOutput = runFixtureTask(
       'api-crud-probe',
+      process.execPath,
+      [path.join(sourceRoot, 'dev/element-acceptance-api-probe.mjs')],
+      {},
+      { apiCrudProbeParser: parseApiCrudProbeFailure },
     );
-    if (
-      apiSummary.status !== 'passed' ||
-      API_STAGES.some((name) => apiSummary.stages?.[name] !== 'passed')
-    )
-      fail('api-crud-probe', 'api-stage-failed');
+    assertApiCrudProbePassed(apiOutput);
 
     stage = 'reminder-initial';
     let markers = assertInitialReminderState(paths.eventFile);
@@ -2902,6 +3077,8 @@ async function main() {
         error instanceof RehearsalFailure
           ? error.gatewayNetworkSmoke
           : undefined,
+      apiCrudProbe:
+        error instanceof RehearsalFailure ? error.apiCrudProbe : undefined,
       serviceInventory: diagnosticInventory,
       serviceRunId: diagnosticRunId,
       serviceProject: diagnosticProject,

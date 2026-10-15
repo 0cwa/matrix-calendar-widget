@@ -14,9 +14,15 @@ import { delimiter, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
+import {
+  API_PROBE_FAILURE_CODES,
+  API_PROBE_STAGES,
+  runElementAcceptanceApiProbe,
+} from '../dev/element-acceptance-api-probe.mjs';
 import { formatStartupStageFailure } from '../dev/synapse-startup-diagnostic.mjs';
 import {
   addOperatorRehearsalProfileToComposeArgs,
+  assertApiCrudProbePassed,
   assertNoCollision,
   assertTaskServiceSet,
   compareForeign,
@@ -30,9 +36,11 @@ import {
   gatewayNetworkSmokeArgs,
   handoffGeneratedComposeEnvironment,
   listenerScopeDelta,
+  parseApiCrudProbeFailure,
   parseGatewayNetworkSmokeFailure,
   parseStartupFailureMarker,
   planOwnedCleanup,
+  runTask,
   taskEnvironment,
   validateLockedImageInspect,
   writeDockerAdapter,
@@ -77,6 +85,31 @@ async function runMockGatewayNetworkSmoke(mockFetch) {
     output: output.join(''),
     requests,
     processExitCode: child.exitCode,
+  };
+}
+
+function apiProbeSummary(failedStage, failureCode, failureHttpStatus = null) {
+  const failedIndex = API_PROBE_STAGES.indexOf(failedStage);
+  const stages = Object.fromEntries(
+    API_PROBE_STAGES.map((stage, index) => [
+      stage,
+      stage === 'owned-cleanup'
+        ? failedStage === stage
+          ? 'failed'
+          : 'passed'
+        : failedStage === undefined
+          ? 'passed'
+          : index < failedIndex
+            ? 'passed'
+            : index === failedIndex
+              ? 'failed'
+              : 'skipped',
+    ]),
+  );
+  return {
+    status: failedStage === undefined ? 'passed' : 'failed',
+    stages,
+    ...(failureCode === undefined ? {} : { failureCode, failureHttpStatus }),
   };
 }
 
@@ -232,11 +265,213 @@ test('failure artifact carries only the closed gateway smoke classification', ()
     gatewayNetworkSmoke,
   });
 
-  assert.equal(diagnostic.schema_version, 6);
+  assert.equal(diagnostic.schema_version, 7);
   assert.equal(diagnostic.failed_phase, 'compose-run-gateway-smoke');
   assert.equal(diagnostic.failure_operation, 'gateway-network-smoke');
   assert.equal(diagnostic.failure_check, 'network-smoke');
   assert.deepEqual(diagnostic.gateway_network_smoke, gatewayNetworkSmoke);
+});
+
+test('API CRUD summary parser keeps only a finite first failed stage and code', () => {
+  const summary = apiProbeSummary('event-update', 'gateway-rejected');
+  const output = JSON.stringify(summary);
+  assert.deepEqual(parseApiCrudProbeFailure(output, 1), {
+    marker_status: 'captured',
+    process_exit_code: 1,
+    status: 'failed',
+    first_failed_stage: 'event-update',
+    failure_code: 'gateway-rejected',
+    first_failure_http_status: null,
+    owned_cleanup_status: 'passed',
+  });
+
+  assert.deepEqual(
+    parseApiCrudProbeFailure(JSON.stringify(apiProbeSummary()), 0),
+    {
+      marker_status: 'captured',
+      process_exit_code: 0,
+      status: 'passed',
+      first_failed_stage: 'unavailable',
+      failure_code: 'unavailable',
+      first_failure_http_status: null,
+      owned_cleanup_status: 'passed',
+    },
+  );
+  assert.equal(API_PROBE_STAGES.length, 12);
+  assert.ok(API_PROBE_FAILURE_CODES.includes('gateway-rejected'));
+  const updatedReadback = parseApiCrudProbeFailure(
+    JSON.stringify(
+      apiProbeSummary('updated-readback', 'updated-resource-unverified', 502),
+    ),
+    1,
+  );
+  assert.equal(updatedReadback.failure_code, 'updated-resource-unverified');
+  assert.equal(updatedReadback.first_failure_http_status, 502);
+});
+
+test('API CRUD producer status is captured without retaining response data', async () => {
+  const fixture = {
+    homeserverUrl: 'http://127.0.0.1:8008',
+    gatewayUrl: 'http://127.0.0.1:3000',
+    calendarId: 'element-acceptance',
+    principalMode: 'bot-account',
+    teamRoomId: '!synthetic-team:localhost',
+    outsiderRoomId: '!synthetic-outsider:localhost',
+    users: {
+      memberA: { userId: '@member-a:localhost', accessToken: 'member-token' },
+      outsider: {
+        userId: '@outsider:localhost',
+        accessToken: 'outsider-token',
+      },
+      bot: { userId: '@bot:localhost', accessToken: 'bot-token' },
+    },
+    serviceSender: { userId: '@bot:localhost', accessToken: 'bot-token' },
+  };
+  const result = await runElementAcceptanceApiProbe({
+    fixture,
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('member-a')) {
+        return new Response(
+          JSON.stringify({
+            access_token: 'private-openid-token',
+            matrix_server_name: 'localhost',
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ detail: 'private response body' }), {
+        status: 503,
+      });
+    },
+  });
+  const diagnostic = parseApiCrudProbeFailure(JSON.stringify(result), 1);
+  assert.equal(diagnostic.marker_status, 'captured');
+  assert.equal(diagnostic.status, 'failed');
+  assert.equal(diagnostic.first_failed_stage, 'outsider-openid');
+  assert.equal(diagnostic.failure_code, 'openid-rejected');
+  assert.equal(diagnostic.first_failure_http_status, 503);
+  assert.equal(diagnostic.owned_cleanup_status, 'passed');
+  assert.doesNotMatch(JSON.stringify(result), /private|token/u);
+  assert.doesNotMatch(JSON.stringify(diagnostic), /private|token/u);
+});
+
+test('API CRUD parser accepts cleanup-only failure and closes unknown or hostile summaries', () => {
+  const cleanupOnly = {
+    status: 'failed',
+    failureCode: 'cleanup-read-failed',
+    failureHttpStatus: 503,
+    stages: Object.fromEntries(
+      API_PROBE_STAGES.map((stage) => [
+        stage,
+        stage === 'owned-cleanup' ? 'failed' : 'passed',
+      ]),
+    ),
+  };
+  assert.equal(
+    parseApiCrudProbeFailure(JSON.stringify(cleanupOnly), 0).first_failed_stage,
+    'owned-cleanup',
+  );
+  assert.equal(
+    parseApiCrudProbeFailure(
+      JSON.stringify({
+        ...apiProbeSummary('fixture', 'fixture-invalid'),
+        token: 'secret',
+      }),
+      1,
+    ).marker_status,
+    'invalid',
+  );
+  assert.equal(
+    parseApiCrudProbeFailure(
+      JSON.stringify(apiProbeSummary('fixture', 'secret-token')),
+      1,
+    ).marker_status,
+    'invalid',
+  );
+  const malformed = parseApiCrudProbeFailure('private body token=secret', 1);
+  assert.equal(malformed.marker_status, 'invalid');
+  assert.equal(malformed.process_exit_code, 1);
+  assert.doesNotMatch(JSON.stringify(malformed), /private|secret|token/u);
+});
+
+test('API CRUD zero-status failure keeps its first check in the structured error', () => {
+  const output = JSON.stringify(
+    apiProbeSummary('canonical-readback', 'canonical-content-mismatch'),
+  );
+  assert.throws(
+    () => assertApiCrudProbePassed(output),
+    (error) => {
+      assert.equal(error.stage, 'api-crud-probe');
+      assert.equal(error.code, 'api-stage-failed');
+      assert.equal(error.apiCrudProbe.marker_status, 'captured');
+      assert.equal(error.apiCrudProbe.first_failed_stage, 'canonical-readback');
+      assert.equal(
+        error.apiCrudProbe.failure_code,
+        'canonical-content-mismatch',
+      );
+      return true;
+    },
+  );
+});
+
+test('API CRUD nonzero child keeps only the validated summary in its task failure', (t) => {
+  const taskDir = mkdtempSync(join(tmpdir(), 'mcw-api-probe-task-'));
+  t.after(() => rmSync(taskDir, { recursive: true, force: true }));
+  const output = JSON.stringify(
+    apiProbeSummary('outsider-denied', 'not-denied'),
+  );
+  const script = `process.stdout.write(${JSON.stringify(output)}); process.exitCode = 1;`;
+
+  assert.throws(
+    () =>
+      runTask('api-crud-probe', process.execPath, ['-e', script], {
+        taskDir,
+        apiCrudProbeParser: parseApiCrudProbeFailure,
+      }),
+    (error) => {
+      assert.equal(error.stage, 'api-crud-probe');
+      assert.equal(error.code, 'api-probe-process-failed');
+      assert.equal(error.apiCrudProbe.marker_status, 'captured');
+      assert.equal(error.apiCrudProbe.first_failed_stage, 'outsider-denied');
+      assert.equal(error.apiCrudProbe.failure_code, 'not-denied');
+      assert.doesNotMatch(
+        JSON.stringify(error.apiCrudProbe),
+        /token|secret|body/u,
+      );
+      return true;
+    },
+  );
+});
+
+test('failure artifact projects only the API CRUD probe enum fields', () => {
+  const apiCrudProbe = parseApiCrudProbeFailure(
+    JSON.stringify(apiProbeSummary('event-create', 'gateway-rejected')),
+    1,
+  );
+  const diagnostic = formatFailureDiagnostic({
+    phase: 'api-crud-probe',
+    failureCode: 'api-probe-process-failed',
+    apiCrudProbe,
+  });
+  assert.equal(diagnostic.schema_version, 7);
+  assert.equal(diagnostic.failure_check, 'api-contract');
+  assert.deepEqual(diagnostic.api_crud_probe, apiCrudProbe);
+
+  const hostile = formatFailureDiagnostic({
+    phase: 'api-crud-probe',
+    apiCrudProbe: {
+      marker_status: 'captured',
+      process_exit_code: 1,
+      status: 'failed',
+      first_failed_stage: 'event-create token=secret',
+      failure_code: 'https://private.example/token',
+      owned_cleanup_status: 'failed',
+    },
+  });
+  assert.equal(hostile.api_crud_probe.marker_status, 'invalid');
+  assert.equal(hostile.api_crud_probe.first_failed_stage, 'unavailable');
+  assert.doesNotMatch(JSON.stringify(hostile), /secret|private|https/u);
 });
 
 test('hosted shared-Docker mode requires a private adapter and exact hosted main context', (t) => {
@@ -886,7 +1121,7 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(initial.schema_version, 6);
+    assert.equal(initial.schema_version, 7);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
     assert.equal(initial.failure_operation, 'gate');
@@ -948,6 +1183,15 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
         error_class: 'unavailable',
       },
     });
+    assert.deepEqual(initial.api_crud_probe, {
+      marker_status: 'not-applicable',
+      process_exit_code: 'unavailable',
+      status: 'unavailable',
+      first_failed_stage: 'unavailable',
+      failure_code: 'unavailable',
+      first_failure_http_status: null,
+      owned_cleanup_status: 'unavailable',
+    });
     assert.equal(initial.cleanup_status, 'pending');
     assert.equal(initial.cleanup_attempted, false);
     assert.equal(initial.owned_cleanup_verified, false);
@@ -1003,6 +1247,14 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
         error_class: 'token=secret',
       },
     },
+    apiCrudProbe: {
+      marker_status: 'captured',
+      process_exit_code: 1,
+      status: 'failed',
+      first_failed_stage: 'https://private.example/token=secret',
+      failure_code: 'token=secret',
+      owned_cleanup_status: 'secret',
+    },
     listenerScope: {
       site: 'https://private.example/token=secret',
       added: 'private-count',
@@ -1034,6 +1286,8 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
     http_status: 'unavailable',
     error_class: 'unavailable',
   });
+  assert.equal(diagnostic.api_crud_probe.marker_status, 'invalid');
+  assert.equal(diagnostic.api_crud_probe.first_failed_stage, 'unavailable');
   assert.doesNotMatch(serialized, /secret|https|private|BEGIN:VCALENDAR/u);
 });
 
@@ -1144,6 +1398,8 @@ test('failure diagnostics project only fixed primary-role inventory fields', () 
 test('failure checks use fixed assertion codes and unknown fallback', () => {
   const cases = [
     ['service-set-mismatch', 'service-set'],
+    ['api-stage-failed', 'api-contract'],
+    ['api-probe-process-failed', 'api-contract'],
     ['service-image-mismatch', 'image'],
     ['container-id-invalid', 'container-identity'],
     ['service-state-mismatch', 'state'],

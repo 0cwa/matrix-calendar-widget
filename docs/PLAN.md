@@ -521,23 +521,20 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 - [x] Integrate #274, #259, #282, and #272 on frozen application-source
       candidate `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree
       `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`).
-- [ ] Complete required hosted checks for the peer-cleared acceptance-helper
-      follow-up. The fixture-only gateway budget is 1,000 requests per 60
-      seconds; the server default remains 120. On `b52542fffbac085a7cea18f4428f2bf8381c8227`,
-      fresh CalDAV contracts (both modes), PostgreSQL first-initialization, and
-      standalone Desktop startup passed. Normal-bot Desktop event creation
-      returned HTTP 201, then its single room-range refresh returned HTTP 429;
-      later route checks and Web/reminder phases were skipped. The operator
-      rehearsal failed at gateway network smoke after the primary listener-
-      scope check returned successfully; its failure summary omitted listener
-      measurements and did not identify the HTTP status or target. The helper
-      now accepts a manual Radicale-root 302 as well as 401/403, consistent
-      with existing restore readiness; the earlier run's status remains
-      unknown. A fresh run is required. Cleanup remains unverified and no
-      archive was published. A
-      generic encrypted synthetic backup/recovery exercise and package
-      prerequisite simulation passed; no application cold backup or install
-      has been performed.
+- [ ] Complete required hosted checks for the acceptance-helper follow-up. On
+      current source `030106d6b3119b1d1ea6deb5bffe7823fea92020` (tree
+      `b4db16078638078d126a9d698f2e723d3978913e`), protected CI and CodeQL,
+      normal-bot and appservice Element Web, standalone Desktop, both CalDAV
+      principal modes, and PostgreSQL first-initialization passed. Shared
+      synthetic acceptance gateways have a fixture-only ceiling of 1,000
+      requests per 60 seconds; the server default remains 120. The source-bound
+      operator rehearsal failed at `api-crud-probe`; its failure
+      summary did not preserve the probe's first failed check, code, or HTTP
+      status, so the cause is unknown. A reviewed follow-up adds finite API
+      probe failure details and needs a fresh candidate run; it does not
+      establish the cause of the earlier failure. Private operator-packet
+      review remains open, and no application installation or cold backup has
+      been performed.
 - [ ] After the helper follow-up merges, freeze that exact main commit as the
       #255 candidate and run all five required acceptance workflows against
       that SHA. #251 remains pending those results and operator readiness; no
