@@ -199,6 +199,9 @@
     "unsupportedRangeRecurrence_one": "The current renderer cannot safely display series with THISANDFUTURE range overrides. Affected series: {{count}}.",
     "unsupportedRangeRecurrence_other": "The current renderer cannot safely display series with THISANDFUTURE range overrides. Affected series: {{count}}."
   },
+  "calendarHome": {
+    "filtersTitle": "Calendar controls"
+  },
   "calendarMonthPicker": {
     "chooseMonth": "Choose month, selected month is {{date, datetime}}",
     "label": "{{date, datetime}}"

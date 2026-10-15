@@ -199,6 +199,9 @@
     "unsupportedRangeRecurrence_one": "Die aktuelle Darstellung kann Terminserien mit THISANDFUTURE-Bereichsausnahmen nicht sicher anzeigen. Betroffene Serien: {{count}}.",
     "unsupportedRangeRecurrence_other": "Die aktuelle Darstellung kann Terminserien mit THISANDFUTURE-Bereichsausnahmen nicht sicher anzeigen. Betroffene Serien: {{count}}."
   },
+  "calendarHome": {
+    "filtersTitle": "Kalendersteuerung"
+  },
   "calendarMonthPicker": {
     "chooseMonth": "Wähle einen Monat, der gewählte Monat ist {{date, datetime}}",
     "label": "{{date, datetime}}"
