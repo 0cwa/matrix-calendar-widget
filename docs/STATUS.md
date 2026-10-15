@@ -2,7 +2,7 @@
 
 _Last updated: 2026-10-15._
 
-_Frozen application-source candidate: `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`). The peer-cleared acceptance-helper follow-up changes no widget or server runtime files; evidence from a helper workflow must remain attributed to this application source._
+_Frozen application-source candidate: `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`). The peer-cleared acceptance-helper follow-up changes no widget or server runtime files; fresh evidence will be attributed to the next exact merged candidate._
 
 _Fresh normal-bot and operator acceptance against the frozen candidate is incomplete; see the current-candidate evidence below._
 
