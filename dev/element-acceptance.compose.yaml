@@ -20,6 +20,10 @@ services:
       MATRIX_APPLICATION_SERVICE_TOKEN: ${MATRIX_APPLICATION_SERVICE_TOKEN-}
       MATRIX_APPLICATION_SERVICE_USER_ID: ${MATRIX_APPLICATION_SERVICE_USER_ID-}
       ROOM_CALENDAR_PRINCIPAL_MODE: ${ROOM_CALENDAR_PRINCIPAL_MODE:-appservice}
+      # Finite 1,000-request/minute ceiling for the shared synthetic 0/25-event and multi-actor phases.
+      # The server's production default remains 120 requests per minute.
+      MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS: '1000'
+      MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS: '60000'
       MEETINGWIDGET_URL: http://widget:80/
       MEETINGWIDGET_COCKPIT_URL: http://widget:80/cockpit
       BREAKOUT_SESSION_WIDGET_URL: http://widget:80/

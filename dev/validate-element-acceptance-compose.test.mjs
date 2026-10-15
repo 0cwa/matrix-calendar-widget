@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   LOCAL_REHEARSAL_LABEL,
@@ -6,6 +7,9 @@ import {
   LOCAL_REHEARSAL_VOLUMES,
 } from './element-acceptance-overrides.mjs';
 import {
+  ACCEPTANCE_GATEWAY_RATE_LIMIT_REQUESTS,
+  ACCEPTANCE_GATEWAY_RATE_LIMIT_WINDOW_MS,
+  hasAcceptanceGatewayRateLimitBudget,
   hasAcceptanceLoopbackBindings,
   hasLocalPrebuiltOwnershipLabels,
 } from './validate-element-acceptance-compose.mjs';
@@ -116,6 +120,71 @@ test('checks loopback bindings for project services when the overlay is present'
   assert.equal(hasAcceptanceLoopbackBindings(model), true);
   model.services.widget.ports[0].host_ip = '0.0.0.0';
   assert.equal(hasAcceptanceLoopbackBindings(model), false);
+});
+
+test('acceptance gateways use the same finite rate budget across restart and restore', () => {
+  const model = webAcceptanceModel();
+  model.services.gateway.environment = {
+    MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS: String(
+      ACCEPTANCE_GATEWAY_RATE_LIMIT_REQUESTS,
+    ),
+    MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS: String(
+      ACCEPTANCE_GATEWAY_RATE_LIMIT_WINDOW_MS,
+    ),
+  };
+
+  assert.equal(ACCEPTANCE_GATEWAY_RATE_LIMIT_REQUESTS, 1000);
+  assert.equal(ACCEPTANCE_GATEWAY_RATE_LIMIT_WINDOW_MS, 60_000);
+  assert.equal(hasAcceptanceGatewayRateLimitBudget(model), true);
+
+  const missingBudget = structuredClone(model);
+  delete missingBudget.services.gateway.environment
+    .MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS;
+  assert.equal(hasAcceptanceGatewayRateLimitBudget(missingBudget), false);
+
+  const normalBudget = structuredClone(model);
+  normalBudget.services.gateway.environment.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS =
+    '120';
+  assert.equal(hasAcceptanceGatewayRateLimitBudget(normalBudget), false);
+
+  const unboundedWindow = structuredClone(model);
+  unboundedWindow.services.gateway.environment.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS =
+    '30000';
+  assert.equal(hasAcceptanceGatewayRateLimitBudget(unboundedWindow), false);
+
+  const reminderModel = structuredClone(model);
+  reminderModel.services['restore-gateway'] = {
+    environment: {
+      MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS: String(
+        ACCEPTANCE_GATEWAY_RATE_LIMIT_REQUESTS,
+      ),
+      MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS: String(
+        ACCEPTANCE_GATEWAY_RATE_LIMIT_WINDOW_MS,
+      ),
+    },
+  };
+  assert.equal(hasAcceptanceGatewayRateLimitBudget(reminderModel), true);
+
+  reminderModel.services[
+    'restore-gateway'
+  ].environment.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS = '120';
+  assert.equal(hasAcceptanceGatewayRateLimitBudget(reminderModel), false);
+});
+
+test('acceptance budget leaves the production example at 120 requests per minute', () => {
+  const serverEnvironmentExample = readFileSync(
+    new URL('../matrix-calendar-server/.env.local.default', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(
+    serverEnvironmentExample,
+    /^MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS=120$/mu,
+  );
+  assert.match(
+    serverEnvironmentExample,
+    /^MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS=60000$/mu,
+  );
 });
 
 test('preserves the full Web-only overlay without reminder restore services', () => {

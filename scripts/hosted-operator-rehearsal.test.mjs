@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
 import { formatStartupStageFailure } from '../dev/synapse-startup-diagnostic.mjs';
 import {
   addOperatorRehearsalProfileToComposeArgs,
@@ -25,8 +26,11 @@ import {
   formatFailureDiagnostic,
   formatFailureSummary,
   formatSuccessSummary,
+  GATEWAY_NETWORK_SMOKE_SCRIPT,
+  gatewayNetworkSmokeArgs,
   handoffGeneratedComposeEnvironment,
   listenerScopeDelta,
+  parseGatewayNetworkSmokeFailure,
   parseStartupFailureMarker,
   planOwnedCleanup,
   taskEnvironment,
@@ -53,6 +57,187 @@ function emptyInventory() {
     listeners: [],
   };
 }
+
+async function runMockGatewayNetworkSmoke(mockFetch) {
+  const output = [];
+  const requests = [];
+  const child = {
+    exitCode: 0,
+    stdout: { write: (value) => output.push(value) },
+  };
+  await runInNewContext(GATEWAY_NETWORK_SMOKE_SCRIPT, {
+    AbortSignal: { timeout: (milliseconds) => ({ milliseconds }) },
+    fetch: async (url, options) => {
+      requests.push({ url, options });
+      return mockFetch(url, options);
+    },
+    process: child,
+  });
+  return {
+    output: output.join(''),
+    requests,
+    processExitCode: child.exitCode,
+  };
+}
+
+test('gateway network smoke passes through the direct Node entrypoint for expected service responses', async () => {
+  const compose = [
+    'compose',
+    '--project-name',
+    project,
+    '--env-file',
+    '/private/compose.env',
+  ];
+  const args = gatewayNetworkSmokeArgs(compose, runId, project);
+  assert.deepEqual(args.slice(compose.length), [
+    'run',
+    '--pull',
+    'never',
+    '--no-deps',
+    '--rm',
+    '--label',
+    `io.matrix-calendar-widget.local-rehearsal=${runId}`,
+    '--name',
+    `${project}-local-${runId}-900`,
+    '--entrypoint',
+    'node',
+    'gateway',
+    '-e',
+    GATEWAY_NETWORK_SMOKE_SCRIPT,
+  ]);
+
+  const composeSource = readFileSync(
+    fileURLToPath(
+      new URL('../dev/element-acceptance.compose.yaml', import.meta.url),
+    ),
+    'utf8',
+  );
+  assert.match(
+    composeSource,
+    /^  gateway:\n[\s\S]*?dockerfile: matrix-calendar-server\/Dockerfile\n[\s\S]*?^  widget:/mu,
+  );
+
+  const dockerfile = readFileSync(
+    fileURLToPath(
+      new URL('../matrix-calendar-server/Dockerfile', import.meta.url),
+    ),
+    'utf8',
+  );
+  assert.match(dockerfile, /^CMD \["node", "\.\/lib\/src\/index\.js"\]$/mu);
+  assert.doesNotMatch(dockerfile, /^ENTRYPOINT\b/mu);
+
+  const result = await runMockGatewayNetworkSmoke(async (url) => ({
+    status: url.includes('synapse') ? 200 : 403,
+    body: 'private response body',
+  }));
+  assert.equal(result.processExitCode, 0);
+  assert.equal(result.output, '');
+  assert.deepEqual(
+    result.requests.map(({ url }) => url),
+    ['http://synapse:8008/_matrix/client/versions', 'http://radicale:5232/'],
+  );
+  for (const { options } of result.requests) {
+    assert.equal(options.redirect, 'manual');
+    assert.equal(options.signal.milliseconds, 5000);
+  }
+});
+
+test('gateway network smoke accepts Radicale root redirect but rejects an unexpected success page', async () => {
+  const redirectedRoot = await runMockGatewayNetworkSmoke(async (url) => ({
+    status: url.includes('synapse') ? 200 : 302,
+    body: 'private response body',
+  }));
+  assert.equal(redirectedRoot.processExitCode, 0);
+  assert.equal(redirectedRoot.output, '');
+  assert.equal(redirectedRoot.requests[1].options.redirect, 'manual');
+
+  const unexpectedSuccessPage = await runMockGatewayNetworkSmoke(async () => ({
+    status: 200,
+    body: 'private response body',
+  }));
+  assert.equal(unexpectedSuccessPage.processExitCode, 1);
+  assert.equal(
+    unexpectedSuccessPage.output,
+    'gateway_network_smoke synapse=200:none radicale=200:none\n',
+  );
+});
+
+test('gateway network smoke failure marker records bounded role results only', async () => {
+  const result = await runMockGatewayNetworkSmoke(async (url) => {
+    if (url.includes('synapse')) {
+      return { status: 503, body: 'private response body' };
+    }
+    const error = new Error('private error with token=secret');
+    error.cause = { code: 'ECONNREFUSED' };
+    throw error;
+  });
+
+  assert.equal(result.processExitCode, 1);
+  assert.equal(
+    result.output,
+    'gateway_network_smoke synapse=503:none radicale=unavailable:connection-refused\n',
+  );
+  assert.deepEqual(
+    parseGatewayNetworkSmokeFailure(result.output, result.processExitCode),
+    {
+      marker_status: 'captured',
+      process_exit_code: 1,
+      synapse: { http_status: 503, error_class: 'none' },
+      radicale: {
+        http_status: 'unavailable',
+        error_class: 'connection-refused',
+      },
+    },
+  );
+  assert.doesNotMatch(result.output, /https?:|:8008|:5232|secret|private/u);
+});
+
+test('gateway network smoke parser distinguishes absent and invalid markers without copying them', () => {
+  const absent = parseGatewayNetworkSmokeFailure(
+    'node exited before the smoke marker',
+    null,
+  );
+  assert.equal(absent.marker_status, 'absent');
+  assert.equal(absent.process_exit_code, 'unavailable');
+
+  const invalid = parseGatewayNetworkSmokeFailure(
+    'gateway_network_smoke synapse=200:none radicale=401:none token=secret\n',
+    1,
+  );
+  assert.equal(invalid.marker_status, 'invalid');
+  assert.equal(invalid.process_exit_code, 1);
+  assert.deepEqual(invalid.synapse, {
+    http_status: 'unavailable',
+    error_class: 'unavailable',
+  });
+  assert.doesNotMatch(JSON.stringify(invalid), /token|secret/u);
+
+  const repeated = parseGatewayNetworkSmokeFailure(
+    'gateway_network_smoke synapse=200:none radicale=401:none\n'.repeat(2),
+    1,
+  );
+  assert.equal(repeated.marker_status, 'invalid');
+});
+
+test('failure artifact carries only the closed gateway smoke classification', () => {
+  const gatewayNetworkSmoke = parseGatewayNetworkSmokeFailure(
+    'gateway_network_smoke synapse=503:none radicale=unavailable:dns\n',
+    1,
+  );
+  const diagnostic = formatFailureDiagnostic({
+    phase: 'compose-run-gateway-smoke',
+    failureClass: 'gate-failed',
+    operation: failureOperationForStage('compose-run-gateway-smoke'),
+    failureCode: 'gateway-network-smoke-failed',
+    gatewayNetworkSmoke,
+  });
+
+  assert.equal(diagnostic.schema_version, 6);
+  assert.equal(diagnostic.failed_phase, 'compose-run-gateway-smoke');
+  assert.equal(diagnostic.failure_operation, 'gateway-network-smoke');
+  assert.equal(diagnostic.failure_check, 'network-smoke');
+  assert.deepEqual(diagnostic.gateway_network_smoke, gatewayNetworkSmoke);
+});
 
 test('hosted shared-Docker mode requires a private adapter and exact hosted main context', (t) => {
   const taskDir = mkdtempSync(join(tmpdir(), 'mcw-hosted-docker-mode-'));
@@ -701,7 +886,7 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(initial.schema_version, 5);
+    assert.equal(initial.schema_version, 6);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
     assert.equal(initial.failure_operation, 'gate');
@@ -751,6 +936,18 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
       added_count: 'unavailable',
       removed_count: 'unavailable',
     });
+    assert.deepEqual(initial.gateway_network_smoke, {
+      marker_status: 'not-applicable',
+      process_exit_code: 'unavailable',
+      synapse: {
+        http_status: 'unavailable',
+        error_class: 'unavailable',
+      },
+      radicale: {
+        http_status: 'unavailable',
+        error_class: 'unavailable',
+      },
+    });
     assert.equal(initial.cleanup_status, 'pending');
     assert.equal(initial.cleanup_attempted, false);
     assert.equal(initial.owned_cleanup_verified, false);
@@ -794,6 +991,18 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
     cleanupStatus: 'verified',
     cleanupAttempted: false,
     failureCode: 'https://private.example/token=secret',
+    gatewayNetworkSmoke: {
+      marker_status: 'captured',
+      process_exit_code: 1,
+      synapse: {
+        http_status: 'https://private.example/token=secret',
+        error_class: 'token=secret',
+      },
+      radicale: {
+        http_status: 200,
+        error_class: 'token=secret',
+      },
+    },
     listenerScope: {
       site: 'https://private.example/token=secret',
       added: 'private-count',
@@ -819,6 +1028,11 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
     callsite: 'not-applicable',
     added_count: 'unavailable',
     removed_count: 'unavailable',
+  });
+  assert.equal(diagnostic.gateway_network_smoke.marker_status, 'invalid');
+  assert.deepEqual(diagnostic.gateway_network_smoke.synapse, {
+    http_status: 'unavailable',
+    error_class: 'unavailable',
   });
   assert.doesNotMatch(serialized, /secret|https|private|BEGIN:VCALENDAR/u);
 });
