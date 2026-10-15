@@ -430,7 +430,11 @@ export async function runElementAcceptanceApiProbe({
       fail('event-create', 'response-invalid', createResponse.status);
     }
     if (!created || created.id !== ownedEvent.id)
-      fail('event-create', 'created-resource-unverified', createResponse.status);
+      fail(
+        'event-create',
+        'created-resource-unverified',
+        createResponse.status,
+      );
     currentEtag = created.etag;
     mark('event-create');
 
@@ -514,7 +518,11 @@ export async function runElementAcceptanceApiProbe({
       fail('updated-readback', 'response-invalid', latestResponse.status);
     }
     if (!latest || latest.event.title !== `${title} updated`)
-      fail('updated-readback', 'updated-resource-unverified', latestResponse.status);
+      fail(
+        'updated-readback',
+        'updated-resource-unverified',
+        latestResponse.status,
+      );
     await directRead(
       fetchImpl,
       canonicalUrl,
@@ -551,7 +559,11 @@ export async function runElementAcceptanceApiProbe({
       'event',
     );
     if (gatewayDeleteReadback.status !== 404)
-      fail('delete-readback', 'gateway-delete-unverified', gatewayDeleteReadback.status);
+      fail(
+        'delete-readback',
+        'gateway-delete-unverified',
+        gatewayDeleteReadback.status,
+      );
     await gatewayDeleteReadback.body?.cancel().catch(() => undefined);
     const canonicalDeleteStatus = await directStatus(
       fetchImpl,
@@ -560,7 +572,11 @@ export async function runElementAcceptanceApiProbe({
       'delete-readback',
     );
     if (canonicalDeleteStatus !== 404) {
-      fail('delete-readback', 'canonical-delete-unverified', canonicalDeleteStatus);
+      fail(
+        'delete-readback',
+        'canonical-delete-unverified',
+        canonicalDeleteStatus,
+      );
     }
     ownedEvent = undefined;
     currentEtag = undefined;

@@ -491,7 +491,8 @@ export function parseApiCrudProbeFailure(stdout, processExitCode) {
     stageNames.length !== API_STAGES.length ||
     stageNames.some((stage, index) => stage !== expectedStageNames[index]) ||
     API_STAGES.some(
-      (stage) => !['passed', 'failed', 'skipped'].includes(summary.stages[stage]),
+      (stage) =>
+        !['passed', 'failed', 'skipped'].includes(summary.stages[stage]),
     )
   ) {
     return { ...diagnostic, marker_status: 'invalid' };
@@ -506,7 +507,8 @@ export function parseApiCrudProbeFailure(stdout, processExitCode) {
     (summary.status === 'passed' &&
       (firstFailedStage !== 'unavailable' ||
         API_STAGES.some((stage) => summary.stages[stage] !== 'passed') ||
-        hasFailureCode || hasFailureHttpStatus)) ||
+        hasFailureCode ||
+        hasFailureHttpStatus)) ||
     (summary.status === 'failed' &&
       (!hasFailureCode || !hasFailureHttpStatus)) ||
     (hasFailureCode && typeof failureCode !== 'string') ||
@@ -555,7 +557,9 @@ function projectApiCrudProbe(diagnostic) {
     : 'not-applicable';
   const projected = unavailableApiCrudProbe(
     markerStatus,
-    markerStatus === 'not-applicable' ? undefined : diagnostic?.process_exit_code,
+    markerStatus === 'not-applicable'
+      ? undefined
+      : diagnostic?.process_exit_code,
   );
   if (markerStatus !== 'captured') return projected;
 
@@ -1310,9 +1314,9 @@ export function runTask(
         ? 'gateway-network-smoke-failed'
         : apiCrudProbeParser
           ? 'api-probe-process-failed'
-        : result.error
-          ? 'command-unavailable'
-          : `exit-${result.status ?? 'unknown'}`,
+          : result.error
+            ? 'command-unavailable'
+            : `exit-${result.status ?? 'unknown'}`,
       diagnostic,
     );
   }
@@ -2845,9 +2849,7 @@ async function main() {
     const apiOutput = runFixtureTask(
       'api-crud-probe',
       process.execPath,
-      [
-        path.join(sourceRoot, 'dev/element-acceptance-api-probe.mjs'),
-      ],
+      [path.join(sourceRoot, 'dev/element-acceptance-api-probe.mjs')],
       {},
       { apiCrudProbeParser: parseApiCrudProbeFailure },
     );

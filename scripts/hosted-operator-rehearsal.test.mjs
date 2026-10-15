@@ -36,13 +36,13 @@ import {
   gatewayNetworkSmokeArgs,
   handoffGeneratedComposeEnvironment,
   listenerScopeDelta,
-  parseGatewayNetworkSmokeFailure,
   parseApiCrudProbeFailure,
+  parseGatewayNetworkSmokeFailure,
   parseStartupFailureMarker,
   planOwnedCleanup,
+  runTask,
   taskEnvironment,
   validateLockedImageInspect,
-  runTask,
   writeDockerAdapter,
   writeFailureDiagnostic,
 } from './hosted-operator-rehearsal.mjs';
@@ -109,9 +109,7 @@ function apiProbeSummary(failedStage, failureCode, failureHttpStatus = null) {
   return {
     status: failedStage === undefined ? 'passed' : 'failed',
     stages,
-    ...(failureCode === undefined
-      ? {}
-      : { failureCode, failureHttpStatus }),
+    ...(failureCode === undefined ? {} : { failureCode, failureHttpStatus }),
   };
 }
 
@@ -287,15 +285,18 @@ test('API CRUD summary parser keeps only a finite first failed stage and code', 
     owned_cleanup_status: 'passed',
   });
 
-  assert.deepEqual(parseApiCrudProbeFailure(JSON.stringify(apiProbeSummary()), 0), {
-    marker_status: 'captured',
-    process_exit_code: 0,
-    status: 'passed',
-    first_failed_stage: 'unavailable',
-    failure_code: 'unavailable',
-    first_failure_http_status: null,
-    owned_cleanup_status: 'passed',
-  });
+  assert.deepEqual(
+    parseApiCrudProbeFailure(JSON.stringify(apiProbeSummary()), 0),
+    {
+      marker_status: 'captured',
+      process_exit_code: 0,
+      status: 'passed',
+      first_failed_stage: 'unavailable',
+      failure_code: 'unavailable',
+      first_failure_http_status: null,
+      owned_cleanup_status: 'passed',
+    },
+  );
   assert.equal(API_PROBE_STAGES.length, 12);
   assert.ok(API_PROBE_FAILURE_CODES.includes('gateway-rejected'));
   const updatedReadback = parseApiCrudProbeFailure(
@@ -373,7 +374,10 @@ test('API CRUD parser accepts cleanup-only failure and closes unknown or hostile
   );
   assert.equal(
     parseApiCrudProbeFailure(
-      JSON.stringify({ ...apiProbeSummary('fixture', 'fixture-invalid'), token: 'secret' }),
+      JSON.stringify({
+        ...apiProbeSummary('fixture', 'fixture-invalid'),
+        token: 'secret',
+      }),
       1,
     ).marker_status,
     'invalid',
@@ -414,7 +418,9 @@ test('API CRUD zero-status failure keeps its first check in the structured error
 test('API CRUD nonzero child keeps only the validated summary in its task failure', (t) => {
   const taskDir = mkdtempSync(join(tmpdir(), 'mcw-api-probe-task-'));
   t.after(() => rmSync(taskDir, { recursive: true, force: true }));
-  const output = JSON.stringify(apiProbeSummary('outsider-denied', 'not-denied'));
+  const output = JSON.stringify(
+    apiProbeSummary('outsider-denied', 'not-denied'),
+  );
   const script = `process.stdout.write(${JSON.stringify(output)}); process.exitCode = 1;`;
 
   assert.throws(
@@ -429,7 +435,10 @@ test('API CRUD nonzero child keeps only the validated summary in its task failur
       assert.equal(error.apiCrudProbe.marker_status, 'captured');
       assert.equal(error.apiCrudProbe.first_failed_stage, 'outsider-denied');
       assert.equal(error.apiCrudProbe.failure_code, 'not-denied');
-      assert.doesNotMatch(JSON.stringify(error.apiCrudProbe), /token|secret|body/u);
+      assert.doesNotMatch(
+        JSON.stringify(error.apiCrudProbe),
+        /token|secret|body/u,
+      );
       return true;
     },
   );
