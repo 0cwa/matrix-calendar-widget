@@ -25,6 +25,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  NotFoundException,
   PayloadTooLargeException,
   ServiceUnavailableException,
   UnauthorizedException,
@@ -36,6 +37,7 @@ import path from 'path';
 import { IAppConfiguration } from '../IAppConfiguration';
 import {
   CalDavDiscoveryError,
+  CalDavEventTransportError,
   ICalendarEventCodec,
   MatrixOpenIdCalDavCredentialProviderFactory,
 } from '../caldav';
@@ -3215,6 +3217,62 @@ END:VCALENDAR`,
     const [, init] = fetch.mock.calls[1];
     expect(init?.method).toBe('DELETE');
     expect(new Headers(init?.headers).get('If-Match')).toBe('"event-etag"');
+  });
+
+  it('maps a missing room event read to a not found response', async () => {
+    isAllowed.mockResolvedValue(true);
+    const config = {
+      ...appConfig,
+      room_calendar_access_enabled: true,
+    } as IAppConfiguration;
+    const missingEvent = new CalDavEventTransportError(
+      'request-failed',
+      'Upstream body body-secret; token=credential-secret',
+      'GET',
+      404,
+      'https://radicale.example.test/private?token=credential-secret',
+    );
+    const operations = {
+      getEvent: jest.fn().mockRejectedValue(missingEvent),
+    } as unknown as RoomCalendarEventOperations;
+    const controller = createController(
+      config,
+      roomCalendarCalDavAccess,
+      undefined,
+      operations,
+    );
+    forAuthorizedTarget.mockResolvedValue({
+      identity: { mode: 'bot-account', userId: '@bot:example.test' },
+      userId: '@bot:example.test',
+      calendarUrl: 'https://radicale.example.test/bot/team/',
+      credential: openIdCredential,
+    });
+
+    const response = await controller
+      .getEvent(
+        userContext,
+        openIdCredential,
+        roomId,
+        'team-calendar',
+        'https://radicale.example.test/bot/team/event.ics',
+        'room',
+      )
+      .catch((error: unknown) => error);
+
+    expect(response).toBeInstanceOf(NotFoundException);
+    const notFound = response as NotFoundException;
+    expect(notFound.getStatus()).toBe(404);
+    expect(notFound.getResponse()).toEqual({
+      code: 'event-not-found',
+      message: 'Calendar event not found',
+    });
+    expect(JSON.stringify(notFound.getResponse())).not.toMatch(
+      /https?:|body-secret|credential-secret|token=/iu,
+    );
+    expect(isAllowed.mock.invocationCallOrder[0]).toBeLessThan(
+      operations.getEvent.mock.invocationCallOrder[0],
+    );
+    expect(operations.getEvent).toHaveBeenCalledTimes(1);
   });
 
   it('refuses to delete a mixed personal resource before DELETE', async () => {

@@ -1412,6 +1412,18 @@ export class CalendarGatewayController {
 
       if (
         error instanceof CalDavEventTransportError &&
+        error.code === 'request-failed' &&
+        error.method === 'GET' &&
+        error.status === 404
+      ) {
+        throw new NotFoundException({
+          code: 'event-not-found',
+          message: 'Calendar event not found',
+        });
+      }
+
+      if (
+        error instanceof CalDavEventTransportError &&
         error.code === 'etag-conflict'
       ) {
         throw new ConflictException({
