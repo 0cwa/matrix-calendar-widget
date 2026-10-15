@@ -17,21 +17,26 @@ For the owner-approved bounded pilot, run full Element Web/Desktop acceptance in
 
 ### Next source candidate: issue #273 sequence
 
-Current `main` is `c49136ecabf2832f5997e554b065b1f8803b6b74` (tree
-`8b6eff51998571eefa11d0c48bcfdacdb9622745`). It contains issue #274's
-peer-cleared calendar-only home; its four application/test blobs match the
-reviewed source, whose focused widget checks passed. Issue #259's legacy
-meeting guard and capability inventory are now forward-integrated with #274
-in a local candidate based on that `main`. Focused server tests, locale
-extraction, targeted lint, and formatting passed; final validation and
-independent review of the combined source remain pending. Create a fresh
-candidate for #255 only after the integrated source is reviewed and required
-checks pass, then bind Element Web/Desktop and both-backend evidence to that
-exact source; older candidate evidence does not satisfy this gate. The #251
-controlled pilot remains pending exact-source acceptance and operator-
-readiness gates. No live pilot or production rollout has been performed.
-Issues #275–#278 remain post-pilot, including #275's StoreProvider/Redux
-startup retirement.
+Current `main` is `3c4db0d2ce51dce8ca71d5ff6e75ff56fcd08702` (tree
+`09b9da6579a37daa1871b9a8704a0e4f01935e9f`). It contains issue #274's
+calendar-only home and #281's legacy meeting fail-closed guard. A separate
+local candidate based on that exact `main` also integrates issue #282's
+Matrix v12 creator-identifier validation. The implementation preserves
+historical create-event sender localparts, requires current user-ID grammar
+for `additional_creators`, and validates the shared server-name and 255-byte
+limits. All five #282 source blobs match the peer-cleared source. The focused
+auth and room-binding suites pass 65/65; the host full-server run passed 1,439
+tests with 33 skipped, and two additional test-only cases passed in the latest
+focused run. Targeted server TypeScript, lint, formatting, and both widget and
+server translation dry-runs passed. Final integration review and hosted checks
+for this combined candidate remain pending. Create a fresh candidate for #255
+only after the integrated source is reviewed and required checks pass, then
+bind Element Web/Desktop and both-backend evidence to that exact source; older
+candidate evidence does not satisfy this gate. The #251 controlled pilot
+remains pending exact-source acceptance and operator-readiness gates. No
+source-bound image/runtime acceptance, live pilot, or production rollout has
+been performed. Issues #275–#278 remain post-pilot, including #275's
+StoreProvider/Redux startup retirement.
 
 PR #247's hosted evidence is tied to source `acc535dfe69001403c67853b2171672e74056f51`, tree `784aaeac9f6cf733ed7f38b50eb46bcc4b77c333`; merge commit `20dd7357d833238ac23d817bd29bdb0a9f6d4761` has that same tree. The [Element run](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532436) passed for appservice and normal-bot profiles; the [Real Radicale contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532535), [CI](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532444), [Desktop workflow](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532500), [PostgreSQL contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532435), and [CodeQL](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532479) also passed. These runs validate that source tree, not a fresh run of the later merge commit. Independent review cleared the exact source. CodeRabbit reported workflow success while its review was skipped because the PR was draft; this is not a CodeRabbit approval. The two trusted opening errors are diagnostic only under the explicit opening-stage predicate after every startup, authentication, CRUD, Desktop, reminder, restore, and timing gate passes; unknown, widget-origin, or later errors remain failures.
 

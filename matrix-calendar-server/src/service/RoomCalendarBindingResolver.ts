@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-import { isIP } from 'node:net';
 import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
+import { isMatrixServerName } from './MatrixIdentifiers';
 
 export type RoomCalendarBindingErrorCode =
   | 'invalid_json'
@@ -177,47 +177,6 @@ export function isCanonicalMatrixRoomId(value: unknown): value is string {
     Buffer.byteLength(value, 'utf8') <= 255 &&
     isMatrixServerName(identifier.slice(delimiter + 1))
   );
-}
-
-function isMatrixServerName(value: string): boolean {
-  if (value.length === 0 || /[\s/?#@]/u.test(value)) {
-    return false;
-  }
-
-  const bracketedIpv6 = /^(\[[0-9A-Fa-f:.]+\])(?::([0-9]+))?$/.exec(value);
-  if (bracketedIpv6 !== null) {
-    const address = bracketedIpv6[1].slice(1, -1);
-    return isIP(address) === 6 && isValidPort(bracketedIpv6[2]);
-  }
-
-  const hostAndPort = /^([^:]+)(?::([0-9]+))?$/.exec(value);
-  if (hostAndPort === null) {
-    return false;
-  }
-
-  const host = hostAndPort[1];
-  if (!isValidPort(hostAndPort[2])) {
-    return false;
-  }
-  if (isIP(host) === 4) {
-    return true;
-  }
-  if (/^[0-9.]+$/.test(host) || host.length > 255) {
-    return false;
-  }
-
-  return host
-    .split('.')
-    .every((label) =>
-      /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label),
-    );
-}
-
-function isValidPort(value: string | undefined): boolean {
-  if (value === undefined) {
-    return true;
-  }
-  return /^[0-9]{1,5}$/.test(value);
 }
 
 function containsInvalidUnicode(value: string): boolean {

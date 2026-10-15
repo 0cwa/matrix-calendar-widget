@@ -25,6 +25,7 @@ import {
   PowerLevelsEventContent,
 } from 'matrix-bot-sdk';
 import { StateEventName } from '../model/StateEventName';
+import { isMatrixUserId } from './MatrixIdentifiers';
 
 export const MATRIX_CALENDAR_EVENT_WRITE_POLICY =
   'io.github.0cwa.matrix-calendar.event.write';
@@ -127,7 +128,54 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
       powerLevels?.state_default ??
       50;
 
-    return this.userPower(powerLevels) >= requiredPower;
+    if (this.userPower(powerLevels) >= requiredPower) {
+      return true;
+    }
+
+    return this.isImplicitRoomV12Creator();
+  }
+
+  private async isImplicitRoomV12Creator(): Promise<boolean> {
+    try {
+      const state = await this.matrixClient.getRoomState(this.roomId);
+      if (!Array.isArray(state)) {
+        return false;
+      }
+
+      const createEvents = state.filter(
+        (event: unknown) => isRecord(event) && event.type === 'm.room.create',
+      );
+      if (createEvents.length !== 1) {
+        return false;
+      }
+
+      const createEvent = createEvents[0];
+      if (
+        !isRecord(createEvent) ||
+        createEvent.state_key !== '' ||
+        !isRecord(createEvent.content) ||
+        createEvent.content.room_version !== '12' ||
+        !isMatrixUserId(createEvent.sender, true)
+      ) {
+        return false;
+      }
+
+      const additionalCreators = createEvent.content.additional_creators;
+      if (
+        additionalCreators !== undefined &&
+        (!Array.isArray(additionalCreators) ||
+          !additionalCreators.every((value) => isMatrixUserId(value)))
+      ) {
+        return false;
+      }
+
+      return (
+        createEvent.sender === this.userId ||
+        (additionalCreators?.includes(this.userId) ?? false)
+      );
+    } catch {
+      return false;
+    }
   }
 
   private async getPowerLevels(): Promise<PowerLevelsLookup> {
@@ -156,4 +204,8 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
   private userPower(powerLevels: PowerLevelsEventContent | undefined): number {
     return powerLevels?.users?.[this.userId] ?? powerLevels?.users_default ?? 0;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
