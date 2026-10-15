@@ -33,7 +33,7 @@ yarn ci               # canonical local CI gate
 
 This project has two deliberate feedback loops, plus a separate release gate:
 
-- **During implementation**, run the smallest relevant workspace tests, TypeScript checks, lints and recurrence/ICS fixtures first. For example, use `yarn workspace @matrix-calendar-widget/widget test:all` for widget work or `yarn workspace @matrix-calendar-widget/server test:all` for gateway work; run full checks before claiming a PR is ready. A fast smoke profile proposed in [#256](https://github.com/0cwa/matrix-calendar-widget/issues/256) is *not yet* a new canonical command.
+- **During implementation**, run the smallest relevant workspace tests, TypeScript checks, lints and recurrence/ICS fixtures first. For example, use `yarn workspace @matrix-calendar-widget/widget test:all` for widget work or `yarn workspace @matrix-calendar-widget/server test:all` for gateway work; run full checks before claiming a PR is ready. A fast smoke profile proposed in [#256](https://github.com/0cwa/matrix-calendar-widget/issues/256) is _not yet_ a new canonical command.
 - **For pull requests**, keep all five existing protected CI contexts and the integration tests applicable to the changed boundaries; do not infer auth, CalDAV or rendering correctness from mock-only tests.
 - **For a release candidate**, use the frozen-SHA evidence and operator gates in [RELEASE.md](./RELEASE.md) and [beta-scope.md](./beta-scope.md), including full approved Element Web/Desktop, image and restore rehearsals. Passing CI or the hosted synthetic suite alone is not deployment authorization.
 
@@ -77,7 +77,9 @@ A pinned Synapse + Matrix-authenticated Radicale stack lives in [dev/](../dev/RE
 yarn dev:services:up
 ```
 
-This provides the stable external integration targets now. This is a development/contract test stack, not evidence of compatibility with an operator's actual target. Follow [beta scope](./beta-scope.md) and the [release gate](./RELEASE.md) for pilot certification.
+This provides the stable external integration targets now.
+
+This is a development/contract test stack, not evidence of compatibility with an operator's actual target. Follow [beta scope](./beta-scope.md) and the [release gate](./RELEASE.md) for pilot certification.
 
 ## Code review expectations
 
