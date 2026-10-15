@@ -25,6 +25,7 @@ import {
   appendDesktopJourneyProgress,
   appendDesktopLoginStep,
   appendDesktopPlaywrightResult,
+  appendDesktopRefreshFailureWithFallback,
   classifyDesktopJourneyErrorClass,
   classifyDesktopLoginFailure,
   desktopWidgetIsReady,
@@ -1858,6 +1859,49 @@ test('classifies caught Desktop refresh errors without persisting error text', (
     const assertion = new Error();
     assertion.name = 'AssertionError';
     assert.equal(classifyDesktopJourneyErrorClass(assertion), 'assertion');
+  });
+});
+
+test('refresh failure fallback records the minimal error when optional diagnostics fail', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopRefreshPrefix(filePath, runnerTemp);
+    appendDesktopRefreshBegin(filePath, runnerTemp);
+    const failurePoint = DESKTOP_A_REFRESH_FAILURE_POINTS[4];
+    for (const point of DESKTOP_A_REFRESH_FAILURE_POINTS.slice(0, 5)) {
+      appendDesktopRefreshPoint(filePath, runnerTemp, point);
+      if (point !== failurePoint) {
+        appendDesktopRefreshComplete(filePath, runnerTemp, point);
+      }
+    }
+
+    assert.equal(
+      appendDesktopRefreshFailureWithFallback({
+        filePath,
+        runnerTemp,
+        failurePoint,
+        errorClass: 'assertion',
+        roomNavigationDiagnostic: { invalid: 'private diagnostic content' },
+      }),
+      true,
+    );
+
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+    });
+    assert.deepEqual(summary.failureObservation, {
+      kind: 'caught-error',
+      phase: 'desktop-a-refresh',
+      failurePoint,
+      errorClass: 'assertion',
+    });
+    assert.doesNotMatch(
+      readFileSync(filePath, 'utf8'),
+      /private diagnostic content/u,
+    );
   });
 });
 

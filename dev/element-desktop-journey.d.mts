@@ -470,6 +470,17 @@ export declare function appendDesktopJourneyOutcome(input: {
   errorClass?: DesktopJourneyErrorClass;
 }): void;
 
+export declare function appendDesktopRefreshFailureWithFallback(input: {
+  filePath: string;
+  runnerTemp: string;
+  failurePoint?: DesktopJourneyFailurePoint;
+  errorClass?: DesktopJourneyErrorClass;
+  gatewayReadDiagnostic?: DesktopGatewayReadFailureDiagnostic;
+  roomNavigationDiagnostic?: DesktopRoomNavigationDiagnostic;
+  desktopEventCreateDiagnostic?: DesktopEventCreateFailureDiagnostic;
+  webBEditSaveDiagnostic?: WebBEditSaveFailureDiagnostic;
+}): boolean;
+
 export declare function appendDesktopLoginStep(input: {
   filePath: string;
   runnerTemp: string;
