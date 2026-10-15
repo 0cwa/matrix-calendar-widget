@@ -521,13 +521,20 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 - [x] Integrate #274, #259, #282, and #272 on frozen application-source
       candidate `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree
       `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`).
-- [ ] Complete review and required hosted checks for the peer-cleared,
-      acceptance-helper-only follow-up. Fresh CalDAV (both modes), PostgreSQL
-      first-initialization, and standalone Desktop startup passed; normal-bot
-      Element acceptance failed during Desktop refresh; later route checks and
-      Web interactions were skipped. Operator listener-scope verification
-      failed with cleanup unverified. Causes remain unknown; no archive was
-      published.
+- [ ] Complete required hosted checks for the peer-cleared acceptance-helper
+      follow-up. The fixture-only gateway budget is 1,000 requests per 60
+      seconds; the server default remains 120. On `b52542fffbac085a7cea18f4428f2bf8381c8227`,
+      fresh CalDAV contracts (both modes), PostgreSQL first-initialization, and
+      standalone Desktop startup passed. Normal-bot Desktop event creation
+      returned HTTP 201, then its single room-range refresh returned HTTP 429;
+      later route checks and Web/reminder phases were skipped. The operator
+      rehearsal passed listener-scope verification and failed at gateway
+      network smoke; the b525 summary did not identify the HTTP status or
+      target. A peer-reviewed helper adds bounded smoke diagnostics and needs
+      a fresh run. Cleanup remains unverified and no archive was published. A
+      generic encrypted synthetic backup/recovery exercise and package
+      prerequisite simulation passed; no application cold backup or install
+      has been performed.
 - [ ] After the helper follow-up merges, freeze that exact main commit as the
       #255 candidate and run all five required acceptance workflows against
       that SHA. #251 remains pending those results and operator readiness; no
