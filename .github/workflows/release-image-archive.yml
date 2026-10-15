@@ -79,6 +79,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .github/workflows/release-image-archive.yml
+            dev/element-acceptance-api-probe.mjs
             scripts/hosted-operator-rehearsal.mjs
             scripts/release-image-archive.mjs
           sparse-checkout-cone-mode: false
