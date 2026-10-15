@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import {
   access,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -22,6 +25,9 @@ const containerIds = {
   server: 'server1234567890abcdef',
   radicale: 'radicale1234567890abcdef',
 };
+
+const captureMarkerContent = 'Cold capture verified and services resumed.\n';
+const fakeSnapshotId = 'b'.repeat(64);
 
 async function makeFixture({ databaseEnabled = true, initialRunning } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'matrix-calendar-cold-backup-'));
@@ -119,8 +125,16 @@ function fakeCommands({
   failArchiveList = false,
   failStart = [],
   resticStatus = 0,
+  resticBackupOutput,
+  resticListingStatus = 0,
+  resticSnapshotOverride = {},
+  resticNodeTransform,
+  resticMarkerStatus = 0,
+  resticMarkerOutput = captureMarkerContent,
   resticRetentionStatus = 0,
   onFirstStop,
+  onResticBackup,
+  onResticListing,
 } = {}) {
   const running = new Set(initialRunning);
   const calls = [];
@@ -287,11 +301,59 @@ function fakeCommands({
       };
     }
     if (name === 'restic' && args[0] === 'backup') {
+      if (onResticBackup) await onResticBackup(args.at(-1));
       return {
         status: resticStatus,
-        stdout: 'synthetic-restic-output',
+        stdout: args.includes('--json')
+          ? (resticBackupOutput ??
+            `${JSON.stringify({
+              message_type: 'summary',
+              dry_run: false,
+              snapshot_id: fakeSnapshotId,
+            })}\n`)
+          : 'synthetic-restic-output',
         stderr: 'synthetic-private-restic-diagnostic',
       };
+    }
+    if (name === 'restic' && args[0] === 'ls') {
+      const snapshotId = args.at(-2);
+      const captureDirectory = args.at(-1);
+      const entries = await readdir(captureDirectory);
+      const nodes = [
+        {
+          message_type: 'node',
+          path: captureDirectory,
+          type: 'dir',
+        },
+      ];
+      for (const entry of entries) {
+        const info = await lstat(join(captureDirectory, entry));
+        nodes.push({
+          message_type: 'node',
+          path: join(captureDirectory, entry),
+          type: info.isFile() ? 'file' : info.isDirectory() ? 'dir' : 'symlink',
+          ...(info.isFile() ? { size: info.size } : {}),
+        });
+      }
+      const records = [
+        {
+          message_type: 'snapshot',
+          id: snapshotId,
+          hostname: 'matrix-calendar-sidecar',
+          paths: [captureDirectory],
+          tags: ['matrix-calendar-sidecar', 'cold-paired-store'],
+          ...resticSnapshotOverride,
+        },
+        ...(resticNodeTransform ? resticNodeTransform(nodes) : nodes),
+      ];
+      const output = `${records
+        .map((record) => JSON.stringify(record))
+        .join('\n')}\n`;
+      if (onResticListing) await onResticListing(captureDirectory);
+      return { status: resticListingStatus, stdout: output };
+    }
+    if (name === 'restic' && args[0] === 'dump') {
+      return { status: resticMarkerStatus, stdout: resticMarkerOutput };
     }
     if (name === 'restic' && args[0] === 'forget') {
       return {
@@ -359,6 +421,11 @@ test('captures the configured paired stores, resumes services, then uploads one 
     join(result.captureDirectory, 'SHA256SUMS'),
     'utf8',
   );
+  assert.equal(
+    await readFile(join(result.captureDirectory, '.capture-complete'), 'utf8'),
+    captureMarkerContent,
+  );
+  assert.deepEqual(Object.keys(result), ['captureDirectory']);
   assert.match(checksums, /radicale-data\.tar/u);
   assert.match(checksums, /server-data\.tar/u);
   assert.match(checksums, /reminder-postgresql\.dump/u);
@@ -448,6 +515,291 @@ test('captures the configured paired stores, resumes services, then uploads one 
     ),
     false,
   );
+  assert.equal(
+    fake.calls.some(
+      (call) =>
+        call.name === 'restic' && ['ls', 'dump'].includes(call.args[0]),
+    ),
+    false,
+  );
+});
+
+test('opt-in cleanup removes only the current capture after Restic reads it back', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  fixture.config.cleanupSuccessfulCapture = true;
+
+  const markedCapture = join(fixture.captureRoot, 'older-marked-capture');
+  const unmarkedCapture = join(fixture.captureRoot, 'unmarked-capture');
+  await mkdir(markedCapture, { mode: 0o700 });
+  await mkdir(unmarkedCapture, { mode: 0o700 });
+  await writeFile(
+    join(markedCapture, '.capture-complete'),
+    captureMarkerContent,
+    { mode: 0o600 },
+  );
+  await writeFile(join(markedCapture, 'foreign-sentinel'), 'keep marked', {
+    mode: 0o600,
+  });
+  await writeFile(join(unmarkedCapture, 'foreign-sentinel'), 'keep unmarked', {
+    mode: 0o600,
+  });
+  const controlPath = join(fixture.root, 'primary-control');
+  await writeFile(controlPath, 'preserve primary control', { mode: 0o600 });
+
+  const fake = fakeCommands({ databaseEnabled: false });
+  const result = await runColdBackup(fixture.config, {
+    command: fake.command,
+    env: fixture.env,
+    now: () => new Date('2026-10-12T02:03:04.000Z'),
+    id: () => 'cleanup-run',
+  });
+
+  assert.equal(result.captureDirectoryRemoved, true);
+  await assert.rejects(access(result.captureDirectory));
+  assert.deepEqual((await readdir(fixture.captureRoot)).sort(), [
+    'older-marked-capture',
+    'unmarked-capture',
+  ]);
+  assert.equal(
+    await readFile(join(markedCapture, '.capture-complete'), 'utf8'),
+    captureMarkerContent,
+  );
+  assert.equal(
+    await readFile(join(markedCapture, 'foreign-sentinel'), 'utf8'),
+    'keep marked',
+  );
+  assert.equal(
+    await readFile(join(unmarkedCapture, 'foreign-sentinel'), 'utf8'),
+    'keep unmarked',
+  );
+  assert.equal(await readFile(controlPath, 'utf8'), 'preserve primary control');
+  await access(fixture.composeEnvFile);
+  await access(fixture.env.RESTIC_PASSWORD_FILE);
+
+  const backupCall = fake.calls.find(
+    (call) => call.name === 'restic' && call.args[0] === 'backup',
+  );
+  assert.ok(backupCall.args.includes('--json'));
+  assert.ok(backupCall.args.includes('--quiet'));
+  const readbackCalls = fake.calls.filter(
+    (call) =>
+      call.name === 'restic' && ['ls', 'dump'].includes(call.args[0]),
+  );
+  assert.deepEqual(
+    readbackCalls.map((call) => call.args[0]),
+    ['ls', 'dump'],
+  );
+  assert.deepEqual(readbackCalls[0].args, [
+    'ls',
+    '--json',
+    '--recursive',
+    fakeSnapshotId,
+    result.captureDirectory,
+  ]);
+  assert.deepEqual(readbackCalls[1].args, [
+    'dump',
+    fakeSnapshotId,
+    join(result.captureDirectory, '.capture-complete'),
+  ]);
+});
+
+test('opt-in cleanup preserves the marked capture when backup or snapshot proof fails', async (t) => {
+  const failures = [
+    {
+      name: 'backup command fails',
+      fakeOptions: { resticStatus: 1 },
+      stage: 'upload',
+    },
+    {
+      name: 'backup has no snapshot ID',
+      fakeOptions: {
+        resticBackupOutput: `${JSON.stringify({ message_type: 'summary' })}\n`,
+      },
+      stage: 'verification',
+    },
+    {
+      name: 'snapshot metadata does not match',
+      fakeOptions: { resticSnapshotOverride: { hostname: 'foreign-host' } },
+      stage: 'verification',
+    },
+    {
+      name: 'snapshot ID does not match backup result',
+      fakeOptions: {
+        resticSnapshotOverride: { id: 'c'.repeat(64) },
+      },
+      stage: 'verification',
+    },
+    {
+      name: 'snapshot tags do not match',
+      fakeOptions: {
+        resticSnapshotOverride: { tags: ['foreign-tag'] },
+      },
+      stage: 'verification',
+    },
+    {
+      name: 'snapshot listing command fails',
+      fakeOptions: { resticListingStatus: 1 },
+      stage: 'verification',
+    },
+    {
+      name: 'snapshot file list is incomplete',
+      fakeOptions: { resticNodeTransform: (nodes) => nodes.slice(0, -1) },
+      stage: 'verification',
+    },
+    {
+      name: 'snapshot marker content does not match',
+      fakeOptions: { resticMarkerOutput: 'foreign capture marker\n' },
+      stage: 'verification',
+    },
+  ];
+
+  for (const failure of failures) {
+    const fixture = await makeFixture({ databaseEnabled: false });
+    t.after(fixture.cleanup);
+    fixture.config.cleanupSuccessfulCapture = true;
+    const fake = fakeCommands({
+      databaseEnabled: false,
+      ...failure.fakeOptions,
+    });
+
+    await assert.rejects(
+      runColdBackup(fixture.config, {
+        command: fake.command,
+        env: fixture.env,
+        id: () => 'preserve-capture',
+      }),
+      (error) =>
+        error instanceof ColdBackupFailure && error.stage === failure.stage,
+      failure.name,
+    );
+
+    const captureNames = (await readdir(fixture.captureRoot)).filter(
+      (name) => name !== '.matrix-calendar-cold-backup.lock',
+    );
+    assert.equal(captureNames.length, 1, failure.name);
+    const captureDirectory = join(fixture.captureRoot, captureNames[0]);
+    assert.equal(
+      await readFile(join(captureDirectory, '.capture-complete'), 'utf8'),
+      captureMarkerContent,
+      failure.name,
+    );
+    assert.deepEqual((await readdir(captureDirectory)).sort(), [
+      '.capture-complete',
+      'SHA256SUMS',
+      'radicale-data.tar',
+      'server-data.tar',
+    ]);
+    assert.ok(
+      fake.calls.some(
+        (call) => call.name === 'restic' && call.args[0] === 'backup',
+      ),
+      failure.name,
+    );
+  }
+});
+
+test('opt-in cleanup leaves a modified or symlinked current capture untouched', async (t) => {
+  const tamperedFixture = await makeFixture({ databaseEnabled: false });
+  t.after(tamperedFixture.cleanup);
+  tamperedFixture.config.cleanupSuccessfulCapture = true;
+  const tamperedFake = fakeCommands({
+    databaseEnabled: false,
+    onResticListing: async (captureDirectory) => {
+      await writeFile(
+        join(captureDirectory, 'SHA256SUMS'),
+        'changed checksum\n',
+      );
+    },
+  });
+  await assert.rejects(
+    runColdBackup(tamperedFixture.config, {
+      command: tamperedFake.command,
+      env: tamperedFixture.env,
+      id: () => 'tampered-capture',
+    }),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'verification',
+  );
+  const tamperedCapture = join(
+    tamperedFixture.captureRoot,
+    (await readdir(tamperedFixture.captureRoot)).find(
+      (name) => name !== '.matrix-calendar-cold-backup.lock',
+    ),
+  );
+  assert.equal(
+    await readFile(join(tamperedCapture, 'SHA256SUMS'), 'utf8'),
+    'changed checksum\n',
+  );
+  assert.equal(
+    await readFile(join(tamperedCapture, '.capture-complete'), 'utf8'),
+    captureMarkerContent,
+  );
+
+  const symlinkFixture = await makeFixture({ databaseEnabled: false });
+  t.after(symlinkFixture.cleanup);
+  symlinkFixture.config.cleanupSuccessfulCapture = true;
+  const outsideDirectory = join(symlinkFixture.root, 'foreign-target');
+  await mkdir(outsideDirectory, { mode: 0o700 });
+  const outsideMarker = join(outsideDirectory, '.capture-complete');
+  const outsideSentinel = join(outsideDirectory, 'foreign-sentinel');
+  await writeFile(outsideMarker, captureMarkerContent, { mode: 0o600 });
+  await writeFile(outsideSentinel, 'preserve symlink target', { mode: 0o600 });
+  let displacedCapture;
+  const symlinkFake = fakeCommands({
+    databaseEnabled: false,
+    onResticListing: async (captureDirectory) => {
+      displacedCapture = `${captureDirectory}-preserved`;
+      await rename(captureDirectory, displacedCapture);
+      await symlink(outsideDirectory, captureDirectory);
+    },
+  });
+  await assert.rejects(
+    runColdBackup(symlinkFixture.config, {
+      command: symlinkFake.command,
+      env: symlinkFixture.env,
+      id: () => 'symlinked-capture',
+    }),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'verification',
+  );
+  const symlinkCapture = join(
+    symlinkFixture.captureRoot,
+    (await readdir(symlinkFixture.captureRoot)).find(
+      (name) => name !== '.matrix-calendar-cold-backup.lock',
+    ),
+  );
+  assert.equal((await lstat(symlinkCapture)).isSymbolicLink(), true);
+  assert.equal(await readFile(outsideMarker, 'utf8'), captureMarkerContent);
+  assert.equal(
+    await readFile(outsideSentinel, 'utf8'),
+    'preserve symlink target',
+  );
+  assert.equal(
+    await readFile(join(displacedCapture, '.capture-complete'), 'utf8'),
+    captureMarkerContent,
+  );
+});
+
+test('opt-in cleanup rejects a symlinked capture-root ancestor before commands', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  fixture.config.cleanupSuccessfulCapture = true;
+  const captureRootAlias = join(fixture.root, 'capture-root-alias');
+  await symlink(fixture.root, captureRootAlias);
+  fixture.config.captureRoot = join(captureRootAlias, 'captures');
+  const fake = fakeCommands({ databaseEnabled: false });
+
+  await assert.rejects(
+    runColdBackup(fixture.config, {
+      command: fake.command,
+      env: fixture.env,
+    }),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'preflight',
+  );
+  assert.equal(fake.calls.length, 0);
+  assert.deepEqual(await readdir(fixture.captureRoot), []);
 });
 
 test('opt-in retention forgets only the configured host and tag group after upload', async (t) => {
@@ -556,6 +908,10 @@ test('invalid or missing project retention scope fails before commands', async (
       ...fixture.config,
       projectName: undefined,
       resticRetentionEnabled: true,
+    },
+    {
+      ...fixture.config,
+      cleanupSuccessfulCapture: 'true',
     },
   ];
 

@@ -175,7 +175,8 @@ until its placeholders and host paths are replaced:
   "awsProfile": "default",
   "resticHost": "matrix-calendar-sidecar",
   "resticTags": ["matrix-calendar-sidecar", "cold-paired-store"],
-  "resticRetentionEnabled": false
+  "resticRetentionEnabled": false,
+  "cleanupSuccessfulCapture": false
 }
 ```
 
@@ -190,6 +191,18 @@ or I/O. Enabling it requires `resticHost` and one of the two stable
 dedicated pilot repository or S3 prefix, and approve repository-wide prune
 authority and I/O budget before enabling it. A shared repository requires
 explicit approval for that repository-wide maintenance.
+
+`cleanupSuccessfulCapture` is a separate opt-in boolean and defaults to
+`false`. Keep it off until an independent isolated restore has succeeded. When
+enabled, the coordinator removes only the current run's marked staging
+directory, and only after Restic reports a snapshot ID and bounded readback
+confirms that snapshot's ID, host, tags, capture path, expected file entries
+and sizes, and exact marker bytes. It also rechecks the private capture-root
+and current-directory identities and the staged file set before unlinking the
+known files. A failed upload, readback, or local identity check leaves the
+capture for inspection. Older, unmarked, or foreign directories are never
+swept by this option; it does not delete repository snapshots or change remote
+retention.
 
 The Compose env file, Restic password, S3 credentials, and optional PostgreSQL
 password are read only through protected paths; none is copied into a capture.
@@ -227,10 +240,12 @@ backup failure, including an incomplete-backup result, leaves the verified
 local capture marked complete but skips retention and reports an upload-stage
 failure. When opt-in retention is enabled, forget/prune runs only after Restic
 reports a successful backup; its failure reports a retention-stage failure
-without removing the local capture or undoing the uploaded snapshot. The
-coordinator does not delete local captures automatically. Nonempty diagnostics
-from the dump, restore-list, or tar validation commands are treated as a failed
-capture stage.
+without removing the local capture or undoing the uploaded snapshot. If
+`cleanupSuccessfulCapture` is enabled, cleanup follows retention and requires
+snapshot readback plus a final local identity and file-set check; otherwise the
+successful local capture remains. Nonempty diagnostics from the dump,
+restore-list, or tar validation commands are treated as a failed capture
+stage.
 
 The lock is exclusive and a stale lock is not removed automatically; verify
 that no run is active before clearing one. A handled `SIGTERM` or `SIGINT`
@@ -391,9 +406,9 @@ the operator's protected backup record. Do not record secrets or event data.
 After the local capture is complete, upload `BACKUP_DIR` to the configured
 Restic repository using the stable host and tags described above. First review
 the retention preview; only then enable automatic pruning. Keep the local
-capture until Restic reports a complete snapshot. A successful upload does not
-prove that the files can be restored or that the S3 service meets a durability
-target.
+capture until an independent isolated restore has succeeded. A successful
+upload does not prove that the files can be restored or that the S3 service
+meets a durability target.
 
 ## Restore into an isolated Compose project
 

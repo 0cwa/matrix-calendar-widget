@@ -595,7 +595,12 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
         so missed backup days leave gaps. Fake-command tests cover
         the backup-only default, scope validation, command order, failed-upload
         skip, and retention failure reporting. Real S3, scheduling, and
-        target-host recovery remain open operator gates.
+        target-host recovery remain open operator gates. The separate
+        `cleanupSuccessfulCapture` option defaults off and may remove only the
+        current marked staging directory after bounded snapshot readback and
+        local identity checks; keep it disabled until an independent isolated
+        restore succeeds. It does not sweep older captures or change remote
+        retention.
 - [x] Container images and deployment docs use fork-owned names. This covers
       repository-owned image builds and documented operator-run deployment
       boundaries, not a live etke-host deployment or recovery validation.
