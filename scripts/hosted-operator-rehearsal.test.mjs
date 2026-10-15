@@ -17,6 +17,7 @@ import { formatStartupStageFailure } from '../dev/synapse-startup-diagnostic.mjs
 import {
   addOperatorRehearsalProfileToComposeArgs,
   assertNoCollision,
+  assertTaskServiceSet,
   compareForeign,
   enableHostedSharedDockerRehearsal,
   failureOperationForStage,
@@ -485,7 +486,7 @@ test('locked image drift fails closed', () => {
 test('a preexisting container in the unique project namespace blocks the run', () => {
   const inventory = emptyInventory();
   inventory.containers.push({
-    Id: imageId,
+    Id: 'e'.repeat(64),
     Name: `/${project}-synapse-1`,
     Config: {
       Labels: {
@@ -498,6 +499,48 @@ test('a preexisting container in the unique project namespace blocks the run', (
   assert.throws(
     () => assertNoCollision(inventory, runId, project),
     throwsCode('project-collision'),
+  );
+});
+
+test('service inventory separates container IDs from locked image IDs', () => {
+  const services = ['synapse', 'radicale', 'gateway', 'widget', 'postgres'];
+  const images = services.map((role, index) => ({
+    role,
+    id: `sha256:${String(index + 1).repeat(64)}`,
+  }));
+  const containers = services.map((service, index) => ({
+    Id: String(index + 1).repeat(64),
+    Image: images[index].id,
+    Config: {
+      Labels: {
+        'io.matrix-calendar-widget.local-rehearsal': runId,
+        'com.docker.compose.project': project,
+        'com.docker.compose.service': service,
+      },
+    },
+    State: { Status: 'running' },
+  }));
+  const options = {
+    runId,
+    project,
+    images,
+    services,
+    runningServices: services,
+  };
+
+  assert.deepEqual(assertTaskServiceSet({ containers }, options), containers);
+
+  containers[0].Id = `sha256:${'a'.repeat(64)}`;
+  assert.throws(
+    () => assertTaskServiceSet({ containers }, options),
+    throwsCode('container-id-invalid'),
+  );
+
+  containers[0].Id = '1'.repeat(64);
+  containers[0].Image = `sha256:${'f'.repeat(64)}`;
+  assert.throws(
+    () => assertTaskServiceSet({ containers }, options),
+    throwsCode('service-image-mismatch'),
   );
 });
 
@@ -525,7 +568,7 @@ test('failure cleanup accepts an empty owned set and rejects an unknown service'
 
   const inventory = emptyInventory();
   inventory.containers.push({
-    Id: `sha256:${'d'.repeat(64)}`,
+    Id: 'd'.repeat(64),
     Name: `/${project}-unexpected-1`,
     Image: imageId,
     Config: {
@@ -732,7 +775,7 @@ test('failure diagnostics project only fixed primary-role inventory fields', () 
     hostile: 'token=do-not-publish',
   });
   const container = (role, index, overrides = {}) => ({
-    Id: `container-private-${role}`,
+    Id: String(index + 1).repeat(64),
     Name: `/private-${role}`,
     Image: expectedImages[index].id,
     Config: {
@@ -827,6 +870,7 @@ test('failure checks use fixed assertion codes and unknown fallback', () => {
   const cases = [
     ['service-set-mismatch', 'service-set'],
     ['service-image-mismatch', 'image'],
+    ['container-id-invalid', 'container-identity'],
     ['service-state-mismatch', 'state'],
     ['element-container-present', 'element'],
     ['volume-set-mismatch', 'volume'],
