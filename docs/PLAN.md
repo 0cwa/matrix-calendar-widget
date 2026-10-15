@@ -516,6 +516,29 @@ access and event writes stay disabled by default.
 
 Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](./RELEASE.md). It binds evidence to an exact source candidate, keeps target-specific operator facts private, and does not grant deployment approval.
 
+### Issue #273 pre-candidate sequence
+
+- [x] Implement #274's calendar-only widget home. The reviewed source is
+      forward-integrated on current `main` `92675935d77709c5f3cf1e447f84546eaed7568b`
+      in candidate commit `5d086508c9c23d06e8c2c593a0bfab372ff96396`.
+      Its four application/test blobs match the peer-cleared source exactly;
+      focused validation passed 52/52 tests, widget TypeScript, changed-file
+      lint, and Prettier. The in-memory room-calendar UI fixture verifies
+      rendering only; room authorization remains owned by the gateway and
+      server capability checks.
+- [ ] Integrate issue #259's legacy meeting HTTP fail-closed guard and
+      capability inventory. This parallel work is not yet part of the current
+      candidate.
+- [ ] After #274 and #259 are integrated, create a fresh candidate for #255
+      and bind its required Element Web/Desktop and both-backend evidence to
+      that exact source. Historical candidate results do not establish
+      acceptance of the new source.
+- [ ] Consider the controlled pilot under #251 only after the fresh candidate
+      evidence is complete and the required owner approval is recorded. The
+      pilot is not approved or ready by this plan update.
+- [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
+      StoreProvider/Redux startup retirement until after the pilot.
+
 - [x] Wire a separate Chromium calendar-component fixture at 320, 390, 768, and
       1280 CSS pixels, with measured overflow, keyboard focus, and axe checks.
       Hosted passing evidence is required; actual Matrix clients remain a
