@@ -2,9 +2,9 @@
 
 _Last updated: 2026-10-15._
 
-_Source baseline: `main` at `e6acd8441c8e95d4bf2b45fc6a2a37b38f570de0` (tree `9cc44badc3d69e864926757af029f68308c0bb04`), integrated into the retention candidate as its merge parent._
+_Frozen application-source candidate: `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`). The reviewed acceptance-helper follow-up is based on this source and does not change widget or server runtime files. The release archive workflow binds its application-source revision separately from its workflow revision, so a helper workflow update can run against this frozen source; resulting evidence must remain attributed to `b0e620f`._
 
-_Hosted normal-bot acceptance source: PR #247 head `acc535dfe69001403c67853b2171672e74056f51` (tree `784aaeac9f6cf733ed7f38b50eb46bcc4b77c333`), merged to `main` as `20dd7357d833238ac23d817bd29bdb0a9f6d4761` with the same tree._
+_Fresh normal-bot and operator acceptance against the frozen candidate is incomplete; see the current-candidate evidence below._
 
 See the [dated continuation](handoff/2026-10-06/README.md) and
 [exact delivered-slice ledger](handoff/2026-10-06/ledger.json).
@@ -15,28 +15,15 @@ See the [dated continuation](handoff/2026-10-06/README.md) and
 
 For the owner-approved bounded pilot, run full Element Web/Desktop acceptance in `bot-account` mode with the existing strict 0/25-event ordinary-load limits. Full appservice-mode Element Web/Desktop browser certification is deferred until after beta. This is a browser-scope change only: both `appservice` and `bot-account` backend, identity/authentication, authorization, and CalDAV contract tests remain mandatory, and `appservice` remains the default mode. PR #260 source `3643166a972a4f9e42da0b005bf3b7e3b8233180` was forward-merged with `main` `1de23e45e6835cf54de91722cb52830285b1caad` in commit `56ebedd97ffa778cb433707cbcd5a74beaafe5a7` (tree `529bd984f398ae1921b68189fa9a66c274e1b349`); exact-source acceptance and independent review for the integrated candidate remain pending. This scope does not authorize production installation or rollout.
 
-### Next source candidate: issue #273 sequence
+### Current frozen candidate and acceptance status
 
-Current `main` is `3c4db0d2ce51dce8ca71d5ff6e75ff56fcd08702` (tree
-`09b9da6579a37daa1871b9a8704a0e4f01935e9f`). It contains issue #274's
-calendar-only home and #281's legacy meeting fail-closed guard. A separate
-local candidate based on that exact `main` also integrates issue #282's
-Matrix v12 creator-identifier validation. The implementation preserves
-historical create-event sender localparts, requires current user-ID grammar
-for `additional_creators`, and validates the shared server-name and 255-byte
-limits. All five #282 source blobs match the peer-cleared source. The focused
-auth and room-binding suites pass 65/65; the host full-server run passed 1,439
-tests with 33 skipped, and two additional test-only cases passed in the latest
-focused run. Targeted server TypeScript, lint, formatting, and both widget and
-server translation dry-runs passed. Final integration review and hosted checks
-for this combined candidate remain pending. Create a fresh candidate for #255
-only after the integrated source is reviewed and required checks pass, then
-bind Element Web/Desktop and both-backend evidence to that exact source; older
-candidate evidence does not satisfy this gate. The #251 controlled pilot
-remains pending exact-source acceptance and operator-readiness gates. No
-source-bound image/runtime acceptance, live pilot, or production rollout has
-been performed. Issues #275–#278 remain post-pilot, including #275's
-StoreProvider/Redux startup retirement.
+The integrated application-source candidate is `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`). It includes the calendar-only home (#274), fail-closed legacy meeting entry points (#259), Matrix v12 creator authorization (#282), and the default-off backup cleanup change (#272). The application source is frozen while the acceptance-helper follow-up is reviewed; that follow-up changes only operator/browser acceptance tooling and can run against the frozen source as its source input.
+
+Fresh checks against the frozen candidate passed the Real CalDAV contract in both principal modes, the PostgreSQL first-initialization contract, and standalone Desktop startup. The required normal-bot Element run failed during Desktop room refresh; the journey did not reach its later canonical-read and HTTP-route checks. The Web portion reported no failed Web phase, while reminder interactions were skipped. These results do not satisfy #255's Element acceptance gate.
+
+The source-bound operator rehearsal built the three project images and verified its manifest, then failed at listener-scope verification. Cleanup remained unverified and no image archive was published. Source review confirmed that the listener comparison included `ss` queue counters instead of comparing listener identities; the reviewed helper correction compares listener state and endpoints and records only bounded added/removed counts. The failed run did not retain the observed listener delta, so it does not prove that queue-count changes caused that failure. The Desktop helper now retries with only the fixed failure point and error class if optional diagnostic recording fails; the underlying cause of the observed refresh failure remains unknown. Neither correction has a fresh hosted rerun yet.
+
+Create and freeze a fresh integrated candidate only after the helper-only changes pass review and required checks. Then rerun the exact-source normal-bot Element and operator acceptance gates; historical passes and the failed frozen-candidate run do not establish acceptance of the new candidate. The #251 controlled pilot remains pending exact-source acceptance and operator-readiness evidence. No live pilot or production rollout has been performed. Issues #275–#278 remain post-pilot, including #275's StoreProvider/Redux startup retirement.
 
 PR #247's hosted evidence is tied to source `acc535dfe69001403c67853b2171672e74056f51`, tree `784aaeac9f6cf733ed7f38b50eb46bcc4b77c333`; merge commit `20dd7357d833238ac23d817bd29bdb0a9f6d4761` has that same tree. The [Element run](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532436) passed for appservice and normal-bot profiles; the [Real Radicale contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532535), [CI](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532444), [Desktop workflow](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532500), [PostgreSQL contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532435), and [CodeQL](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532479) also passed. These runs validate that source tree, not a fresh run of the later merge commit. Independent review cleared the exact source. CodeRabbit reported workflow success while its review was skipped because the PR was draft; this is not a CodeRabbit approval. The two trusted opening errors are diagnostic only under the explicit opening-stage predicate after every startup, authentication, CRUD, Desktop, reminder, restore, and timing gate passes; unknown, widget-origin, or later errors remain failures.
 

@@ -518,36 +518,35 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 
 ### Issue #273 pre-candidate sequence
 
-- [x] Implement #274's calendar-only widget home. The peer-cleared source is
-      merged to current `main` `c49136ecabf2832f5997e554b065b1f8803b6b74`
-      (tree `8b6eff51998571eefa11d0c48bcfdacdb9622745`); its four
-      application/test blobs match the reviewed source. Focused validation
-      passed 52/52 tests, widget TypeScript, changed-file lint, and Prettier.
-      The in-memory room-calendar fixture verifies rendering only; server and
-      gateway capability checks remain the authorization evidence.
-- [x] Integrate #259's legacy meeting HTTP and RPC fail-closed controller
-      guard and capability inventory in the current local candidate. Legacy
-      meeting HTTP/RPC entry points are denied before handler/service
-      execution; the existing welcome-helper and private error-room gates
-      default off. Supported calendar APIs, `!calendar` commands, and ordinary
-      room joins remain available. Focused server tests, locale extraction,
-      targeted lint, and formatting passed; combined-source checks and
-      independent review are pending. See ADR 042 and
-      `docs/legacy-entry-points.md` for the boundaries.
-- [x] Integrate #282's Matrix v12 creator-identifier validation in the local
-      candidate based on `main` `3c4db0d2ce51dce8ca71d5ff6e75ff56fcd08702`
-      (tree `09b9da6579a37daa1871b9a8704a0e4f01935e9f`). The shared server-name
-      parser preserves room-binding behavior; create-event senders retain
-      historical localparts, while `additional_creators` requires current
-      user-ID grammar. Focused authorization/binding tests pass 65/65. The host
-      server Jest run passed 1,439 tests with 33 skipped; two later additions
-      were test-only and passed in that focused suite. TypeScript, changed-file
-      lint, formatting, and both translation dry-runs passed. Final integrated
-      review and hosted checks remain pending.
-- [ ] After the combined source passes integration review and hosted checks,
-      create a fresh candidate for #255 and bind its required Element
-      Web/Desktop and both-backend evidence to that exact source. Historical
-      candidate results do not establish acceptance of the new source.
+- [x] Integrate #274's calendar-only widget home, #259's legacy meeting
+      HTTP/RPC fail-closed behavior, #282's Matrix v12 creator authorization,
+      and #272's default-off backup cleanup on the frozen application-source
+      candidate `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree
+      `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`). See ADR042 and
+      `docs/legacy-entry-points.md` for the legacy API boundary.
+- [x] Run fresh prerequisite contracts against the frozen candidate. Real
+      CalDAV contracts passed in both principal modes, the PostgreSQL
+      first-initialization contract passed, and standalone Desktop startup
+      passed. The required normal-bot Element run failed during Desktop room
+      refresh; later canonical-read and HTTP-route checks did not run, and Web
+      reminder interactions were skipped. The operator rehearsal built and
+      verified its source image manifest, then failed listener-scope
+      verification; cleanup was unverified and no archive was published.
+- [ ] Integrate the peer-cleared acceptance-helper follow-up after required
+      hosted checks. It compares listener state and endpoints without queue
+      counters, preserves fail-closed added/removed detection, and records
+      bounded failure diagnostics. The failed rehearsal did not preserve the
+      listener delta, so its specific cause remains unproven. The Desktop
+      refresh fallback preserves the fixed failure point and error class when
+      optional diagnostic recording fails; the observed refresh cause remains
+      unknown. Focused tests, the E2E TypeScript check, and formatting passed.
+      These helper-only changes do not alter frozen widget or server runtime
+      files, and neither correction has a fresh hosted rerun yet.
+- [ ] After the helper-only changes pass required checks and are integrated,
+      freeze a fresh candidate for #255 and bind required Element Web/Desktop
+      and both-backend evidence to that exact source. Prior passes and the
+      failed frozen-candidate run do not establish acceptance of the new
+      candidate.
 - [ ] Complete the remaining operator-readiness gates for the controlled
       pilot under #251 after fresh exact-source acceptance. No live pilot or
       production rollout has been performed.
