@@ -15,6 +15,24 @@ See the [dated continuation](handoff/2026-10-06/README.md) and
 
 For the owner-approved bounded pilot, run full Element Web/Desktop acceptance in `bot-account` mode with the existing strict 0/25-event ordinary-load limits. Full appservice-mode Element Web/Desktop browser certification is deferred until after beta. This is a browser-scope change only: both `appservice` and `bot-account` backend, identity/authentication, authorization, and CalDAV contract tests remain mandatory, and `appservice` remains the default mode. PR #260 source `3643166a972a4f9e42da0b005bf3b7e3b8233180` was forward-merged with `main` `1de23e45e6835cf54de91722cb52830285b1caad` in commit `56ebedd97ffa778cb433707cbcd5a74beaafe5a7` (tree `529bd984f398ae1921b68189fa9a66c274e1b349`); exact-source acceptance and independent review for the integrated candidate remain pending. This scope does not authorize production installation or rollout.
 
+### Next source candidate: issue #273 sequence
+
+Current `main` is `92675935d77709c5f3cf1e447f84546eaed7568b` (tree
+`7da18b5ce9bf6cf7cef78322db3a6bb9d17ad429`). Issue #274 is peer-cleared and
+forward-integrated in local candidate commit `5d086508c9c23d06e8c2c593a0bfab372ff96396`
+(tree `0b1119feb7fed59bb6093040bbe219cc79b16183`); its four application/test
+blobs are identical to the reviewed source, whose focused validation passed
+52/52 tests plus widget type, lint, and format checks. The App-level room
+calendar fixture establishes rendering only; server and gateway capability
+checks remain the authorization evidence. Issue #259's parallel legacy meeting
+HTTP guard and inventory are not yet integrated. After both issues land, a
+fresh candidate must be created for #255 and its Web/Desktop and both-backend
+evidence must bind to that exact source; older candidate evidence does not
+satisfy this gate. The #251 controlled pilot awaits the remaining exact-source
+acceptance and operator-readiness gates; production rollout has not been
+performed. Issues #275–#278 remain post-pilot, including #275's StoreProvider/
+Redux startup retirement.
+
 PR #247's hosted evidence is tied to source `acc535dfe69001403c67853b2171672e74056f51`, tree `784aaeac9f6cf733ed7f38b50eb46bcc4b77c333`; merge commit `20dd7357d833238ac23d817bd29bdb0a9f6d4761` has that same tree. The [Element run](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532436) passed for appservice and normal-bot profiles; the [Real Radicale contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532535), [CI](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532444), [Desktop workflow](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532500), [PostgreSQL contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532435), and [CodeQL](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532479) also passed. These runs validate that source tree, not a fresh run of the later merge commit. Independent review cleared the exact source. CodeRabbit reported workflow success while its review was skipped because the PR was draft; this is not a CodeRabbit approval. The two trusted opening errors are diagnostic only under the explicit opening-stage predicate after every startup, authentication, CRUD, Desktop, reminder, restore, and timing gate passes; unknown, widget-origin, or later errors remain failures.
 
 The local Stage B run remains incomplete. The earlier local probe stopped while verifying container capabilities; the inspected value was not retained and guest execution was skipped. This candidate includes reviewed source-only prebuilt/no-pull helpers, an API probe, an authenticated reminder fixture, and the paired-restore helper; see [`dev/up.sh`](../dev/up.sh), [`dev/element-acceptance-api-probe.mjs`](../dev/element-acceptance-api-probe.mjs), [`dev/local-reminder-fixture.mjs`](../dev/local-reminder-fixture.mjs), and [`dev/element-acceptance-reminder-restore.mjs`](../dev/element-acceptance-reminder-restore.mjs). Focused tooling checks use in-process HTTP, fake commands, and fixed-enum formatter cases only. No external service, real API, image store, restart, or restore was exercised, so local Stage B and source-bound image/cache/runtime acceptance remain open. Operator readiness also requires target-specific ingress, DNS/TLS/proxy, account-ownership, Matrix Authentication Service (MAS), credential-issuance, and secret facts; encrypted off-server Restic-compatible S3 backup with daily scheduling and up to 30 populated-calendar-day recovery points (missed runs leave gaps), independent recovery-key custody, repository-wide prune authority and I/O budget, a dedicated pilot repository or prefix, and paired Radicale/PostgreSQL restore evidence; and a concrete install/disable/rollback rehearsal. No private server, domain, account, provider, or credential details are recorded here.
