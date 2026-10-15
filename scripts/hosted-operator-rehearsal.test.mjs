@@ -23,11 +23,11 @@ import {
   enableHostedSharedDockerRehearsal,
   failureOperationForStage,
   fixtureIdentity,
-  GATEWAY_NETWORK_SMOKE_SCRIPT,
-  gatewayNetworkSmokeArgs,
   formatFailureDiagnostic,
   formatFailureSummary,
   formatSuccessSummary,
+  GATEWAY_NETWORK_SMOKE_SCRIPT,
+  gatewayNetworkSmokeArgs,
   handoffGeneratedComposeEnvironment,
   listenerScopeDelta,
   parseGatewayNetworkSmokeFailure,
@@ -107,7 +107,9 @@ test('gateway network smoke passes through the direct Node entrypoint for expect
   ]);
 
   const composeSource = readFileSync(
-    fileURLToPath(new URL('../dev/element-acceptance.compose.yaml', import.meta.url)),
+    fileURLToPath(
+      new URL('../dev/element-acceptance.compose.yaml', import.meta.url),
+    ),
     'utf8',
   );
   assert.match(
@@ -116,7 +118,9 @@ test('gateway network smoke passes through the direct Node entrypoint for expect
   );
 
   const dockerfile = readFileSync(
-    fileURLToPath(new URL('../matrix-calendar-server/Dockerfile', import.meta.url)),
+    fileURLToPath(
+      new URL('../matrix-calendar-server/Dockerfile', import.meta.url),
+    ),
     'utf8',
   );
   assert.match(dockerfile, /^CMD \["node", "\.\/lib\/src\/index\.js"\]$/mu);
@@ -130,10 +134,7 @@ test('gateway network smoke passes through the direct Node entrypoint for expect
   assert.equal(result.output, '');
   assert.deepEqual(
     result.requests.map(({ url }) => url),
-    [
-      'http://synapse:8008/_matrix/client/versions',
-      'http://radicale:5232/',
-    ],
+    ['http://synapse:8008/_matrix/client/versions', 'http://radicale:5232/'],
   );
   for (const { options } of result.requests) {
     assert.equal(options.redirect, 'manual');

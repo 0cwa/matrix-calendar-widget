@@ -2025,9 +2025,8 @@ export function formatFailureDiagnostic({
         ? listenerScope.removed
         : 'unavailable',
   };
-  const safeGatewayNetworkSmoke = projectGatewayNetworkSmoke(
-    gatewayNetworkSmoke,
-  );
+  const safeGatewayNetworkSmoke =
+    projectGatewayNetworkSmoke(gatewayNetworkSmoke);
 
   return {
     schema_version: 6,
