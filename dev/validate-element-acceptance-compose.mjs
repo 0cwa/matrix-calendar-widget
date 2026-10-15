@@ -15,6 +15,9 @@ const requiredBindings = new Map([
   ['restore-gateway', { target: 3000, published: '3000' }],
   ['restore-radicale', { target: 5232, published: '5233' }],
 ]);
+export const ACCEPTANCE_GATEWAY_RATE_LIMIT_REQUESTS = 1000;
+export const ACCEPTANCE_GATEWAY_RATE_LIMIT_WINDOW_MS = 60_000;
+
 export function hasAcceptanceLoopbackBindings(model) {
   const services = model?.services;
   if (!services || typeof services !== 'object') return false;
@@ -57,6 +60,31 @@ export function hasAcceptanceLoopbackBindings(model) {
   }
 
   return true;
+}
+
+export function hasAcceptanceGatewayRateLimitBudget(model) {
+  const services = model?.services;
+  if (!services || typeof services !== 'object' || !services.gateway) {
+    return false;
+  }
+
+  const gatewayNames = ['gateway'];
+  if (services['restore-gateway'] !== undefined) {
+    gatewayNames.push('restore-gateway');
+  }
+
+  return gatewayNames.every((name) => {
+    const environment = services[name]?.environment;
+    return (
+      environment !== null &&
+      typeof environment === 'object' &&
+      !Array.isArray(environment) &&
+      String(environment.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS) ===
+        String(ACCEPTANCE_GATEWAY_RATE_LIMIT_REQUESTS) &&
+      String(environment.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS) ===
+        String(ACCEPTANCE_GATEWAY_RATE_LIMIT_WINDOW_MS)
+    );
+  });
 }
 
 export function hasLocalPrebuiltOwnershipLabels(model, runId, projectName) {
@@ -121,8 +149,13 @@ async function main() {
       process.env.MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL === 'true';
     const runId = process.env.ELEMENT_ACCEPTANCE_LOCAL_RUN_ID;
     const projectName = process.env.COMPOSE_PROJECT_NAME;
+    const services = model?.services;
+    const hasGatewayService =
+      services?.gateway !== undefined ||
+      services?.['restore-gateway'] !== undefined;
     if (
       !hasAcceptanceLoopbackBindings(model) ||
+      (hasGatewayService && !hasAcceptanceGatewayRateLimitBudget(model)) ||
       (localMode && !hasLocalPrebuiltOwnershipLabels(model, runId, projectName))
     ) {
       throw new Error('invalid-loopback-bindings');
@@ -134,7 +167,7 @@ async function main() {
     );
   } catch {
     process.stderr.write(
-      'Acceptance Compose must use loopback ports and required local ownership labels.\n',
+      'Acceptance Compose must use loopback ports, a bounded gateway rate budget, and required local ownership labels.\n',
     );
     process.exitCode = 1;
   }
