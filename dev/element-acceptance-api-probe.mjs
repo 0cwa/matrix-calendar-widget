@@ -8,7 +8,7 @@ const EXPECTED = {
   radicaleUrl: 'http://127.0.0.1:5232/',
   calendarId: 'element-acceptance',
 };
-const STAGE_NAMES = [
+export const API_PROBE_STAGES = Object.freeze([
   'fixture',
   'member-openid',
   'outsider-openid',
@@ -21,18 +21,46 @@ const STAGE_NAMES = [
   'event-delete',
   'delete-readback',
   'owned-cleanup',
-];
+]);
+export const API_PROBE_FAILURE_CODES = Object.freeze([
+  'canonical-content-mismatch',
+  'canonical-delete-unverified',
+  'canonical-read-failed',
+  'cleanup-read-failed',
+  'cleanup-resource-unverified',
+  'conflict-not-enforced',
+  'created-resource-unverified',
+  'fixture-invalid',
+  'fixture-not-private',
+  'fixture-out-of-scope',
+  'fixture-unavailable',
+  'gateway-delete-unverified',
+  'gateway-rejected',
+  'network-failed',
+  'not-denied',
+  'openid-rejected',
+  'probe-failed',
+  'response-invalid',
+  'resource-out-of-scope',
+  'updated-resource-unverified',
+  'wrong-denial',
+]);
+const STAGE_NAMES = API_PROBE_STAGES;
 
 class ProbeFailure extends Error {
-  constructor(stage, code) {
+  constructor(stage, code, httpStatus = null) {
     super('Synthetic API probe failed');
     this.stage = stage;
     this.code = code;
+    this.httpStatus =
+      Number.isInteger(httpStatus) && httpStatus >= 100 && httpStatus <= 599
+        ? httpStatus
+        : null;
   }
 }
 
-function fail(stage, code) {
-  throw new ProbeFailure(stage, code);
+function fail(stage, code, httpStatus) {
+  throw new ProbeFailure(stage, code, httpStatus);
 }
 
 function safeCredential(value) {
@@ -118,7 +146,7 @@ async function requestJson(fetchImpl, url, options, stage) {
   try {
     body = await response.json();
   } catch {
-    fail(stage, 'response-invalid');
+    fail(stage, 'response-invalid', response.status);
   }
   return { response, body };
 }
@@ -146,7 +174,7 @@ async function openId(fetchImpl, fixture, actor, stage) {
     !safeCredential(body?.access_token) ||
     body?.matrix_server_name !== 'localhost'
   ) {
-    fail(stage, 'openid-rejected');
+    fail(stage, 'openid-rejected', response.status);
   }
   return body.access_token;
 }
@@ -231,7 +259,7 @@ function directCalDavAuthorization(fixture, token) {
   return `Basic ${Buffer.from(`${localpart}:${delegated}`).toString('base64')}`;
 }
 
-function assertCalDavUrlFromGateway(fixture, resourceId, uid) {
+function assertCalDavUrlFromGateway(fixture, resourceId, uid, httpStatus) {
   const value = new URL(resourceId);
   const localpart = fixture.users.bot.userId.slice(1).split(':')[0];
   const expectedPath = `/${encodeURIComponent(localpart)}/${EXPECTED.calendarId}/${encodeURIComponent(uid)}.ics`;
@@ -240,7 +268,7 @@ function assertCalDavUrlFromGateway(fixture, resourceId, uid) {
     !['radicale:5232', '127.0.0.1:5232'].includes(value.host) ||
     value.pathname !== expectedPath
   ) {
-    fail('canonical-readback', 'resource-out-of-scope');
+    fail('canonical-readback', 'resource-out-of-scope', httpStatus);
   }
   return new URL(value.pathname, EXPECTED.radicaleUrl);
 }
@@ -263,18 +291,19 @@ async function directRead(
   } catch {
     fail(stage, 'network-failed');
   }
-  if (response.status !== 200) fail(stage, 'canonical-read-failed');
+  if (response.status !== 200)
+    fail(stage, 'canonical-read-failed', response.status);
   let icalendar;
   try {
     icalendar = await response.text();
   } catch {
-    fail(stage, 'response-invalid');
+    fail(stage, 'response-invalid', response.status);
   }
   if (
     !icalendar.includes(`UID:${expectedUid}`) ||
     !icalendar.includes(`SUMMARY:${expectedTitle}`)
   ) {
-    fail(stage, 'canonical-content-mismatch');
+    fail(stage, 'canonical-content-mismatch', response.status);
   }
 }
 
@@ -351,6 +380,7 @@ export async function runElementAcceptanceApiProbe({
       fail(
         'outsider-denied',
         outsiderResponse.status === 404 ? 'wrong-denial' : 'not-denied',
+        outsiderResponse.status,
       );
     await outsiderResponse.body?.cancel().catch(() => undefined);
     mark('outsider-denied');
@@ -392,15 +422,15 @@ export async function runElementAcceptanceApiProbe({
       input,
     );
     if (createResponse.status !== 201 && createResponse.status !== 200)
-      fail('event-create', 'gateway-rejected');
+      fail('event-create', 'gateway-rejected', createResponse.status);
     let created;
     try {
       created = eventUrlFromDto(await createResponse.json(), uid);
     } catch {
-      fail('event-create', 'response-invalid');
+      fail('event-create', 'response-invalid', createResponse.status);
     }
     if (!created || created.id !== ownedEvent.id)
-      fail('event-create', 'created-resource-unverified');
+      fail('event-create', 'created-resource-unverified', createResponse.status);
     currentEtag = created.etag;
     mark('event-create');
 
@@ -408,6 +438,7 @@ export async function runElementAcceptanceApiProbe({
       fixture,
       ownedEvent.id,
       uid,
+      createResponse.status,
     );
     const serviceAuthorization = directCalDavAuthorization(
       fixture,
@@ -435,7 +466,7 @@ export async function runElementAcceptanceApiProbe({
       '"stale-probe-etag"',
     );
     if (stale.status !== 409)
-      fail('stale-etag-conflict', 'conflict-not-enforced');
+      fail('stale-etag-conflict', 'conflict-not-enforced', stale.status);
     await stale.body?.cancel().catch(() => undefined);
     mark('stale-etag-conflict');
 
@@ -449,15 +480,16 @@ export async function runElementAcceptanceApiProbe({
       { title: `${title} updated` },
       currentEtag,
     );
-    if (update.status !== 200) fail('event-update', 'gateway-rejected');
+    if (update.status !== 200)
+      fail('event-update', 'gateway-rejected', update.status);
     let updated;
     try {
       updated = eventUrlFromDto(await update.json(), uid);
     } catch {
-      fail('event-update', 'response-invalid');
+      fail('event-update', 'response-invalid', update.status);
     }
     if (!updated || updated.event.title !== `${title} updated`)
-      fail('event-update', 'updated-resource-unverified');
+      fail('event-update', 'updated-resource-unverified', update.status);
     ownedEvent = { ...ownedEvent, ...updated, title: `${title} updated` };
     currentEtag = updated.etag;
     mark('event-update');
@@ -474,15 +506,15 @@ export async function runElementAcceptanceApiProbe({
       'event',
     );
     if (latestResponse.status !== 200)
-      fail('updated-readback', 'gateway-rejected');
+      fail('updated-readback', 'gateway-rejected', latestResponse.status);
     let latest;
     try {
       latest = eventUrlFromDto(await latestResponse.json(), uid);
     } catch {
-      fail('updated-readback', 'response-invalid');
+      fail('updated-readback', 'response-invalid', latestResponse.status);
     }
     if (!latest || latest.event.title !== `${title} updated`)
-      fail('updated-readback', 'updated-resource-unverified');
+      fail('updated-readback', 'updated-resource-unverified', latestResponse.status);
     await directRead(
       fetchImpl,
       canonicalUrl,
@@ -504,7 +536,7 @@ export async function runElementAcceptanceApiProbe({
       currentEtag,
     );
     if (remove.status !== 200 && remove.status !== 204)
-      fail('event-delete', 'gateway-rejected');
+      fail('event-delete', 'gateway-rejected', remove.status);
     mark('event-delete');
 
     const gatewayDeleteReadback = await gatewayRequest(
@@ -519,17 +551,16 @@ export async function runElementAcceptanceApiProbe({
       'event',
     );
     if (gatewayDeleteReadback.status !== 404)
-      fail('delete-readback', 'gateway-delete-unverified');
+      fail('delete-readback', 'gateway-delete-unverified', gatewayDeleteReadback.status);
     await gatewayDeleteReadback.body?.cancel().catch(() => undefined);
-    if (
-      (await directStatus(
-        fetchImpl,
-        canonicalUrl,
-        serviceAuthorization,
-        'delete-readback',
-      )) !== 404
-    ) {
-      fail('delete-readback', 'canonical-delete-unverified');
+    const canonicalDeleteStatus = await directStatus(
+      fetchImpl,
+      canonicalUrl,
+      serviceAuthorization,
+      'delete-readback',
+    );
+    if (canonicalDeleteStatus !== 404) {
+      fail('delete-readback', 'canonical-delete-unverified', canonicalDeleteStatus);
     }
     ownedEvent = undefined;
     currentEtag = undefined;
@@ -560,15 +591,15 @@ export async function runElementAcceptanceApiProbe({
           mark('owned-cleanup');
         } else {
           if (latest.status !== 200)
-            fail('owned-cleanup', 'cleanup-read-failed');
+            fail('owned-cleanup', 'cleanup-read-failed', latest.status);
           let current;
           try {
             current = eventUrlFromDto(await latest.json(), ownedEvent.uid);
           } catch {
-            fail('owned-cleanup', 'cleanup-read-failed');
+            fail('owned-cleanup', 'cleanup-read-failed', latest.status);
           }
           if (!current || current.id !== ownedEvent.id)
-            fail('owned-cleanup', 'cleanup-resource-unverified');
+            fail('owned-cleanup', 'cleanup-resource-unverified', latest.status);
           const cleanup = await gatewayRequest(
             fetchImpl,
             fixture,
@@ -588,11 +619,15 @@ export async function runElementAcceptanceApiProbe({
             mark('owned-cleanup');
           } else {
             await cleanup.body?.cancel().catch(() => undefined);
-            stages['owned-cleanup'] = 'failed';
+            fail('owned-cleanup', 'cleanup-read-failed', cleanup.status);
           }
         }
-      } catch {
+      } catch (error) {
         stages['owned-cleanup'] = 'failed';
+        failed ??=
+          error instanceof ProbeFailure
+            ? error
+            : new ProbeFailure('owned-cleanup', 'probe-failed');
       }
     } else if (!ownedEvent) {
       mark('owned-cleanup');
@@ -602,7 +637,9 @@ export async function runElementAcceptanceApiProbe({
     status:
       failed || Object.values(stages).includes('failed') ? 'failed' : 'passed',
     stages,
-    ...(failed ? { failureCode: failed.code } : {}),
+    ...(failed
+      ? { failureCode: failed.code, failureHttpStatus: failed.httpStatus }
+      : {}),
   };
 }
 
@@ -625,6 +662,7 @@ async function main() {
         ]),
       ),
       failureCode: failure.code,
+      failureHttpStatus: failure.httpStatus,
     };
   }
   process.stdout.write(`${JSON.stringify(summary)}\n`);
