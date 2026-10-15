@@ -231,6 +231,7 @@ const SAFE_STARTUP_STAGES = new Set([
 const FAILURE_CHECK_BY_CODE = new Map([
   ['service-set-mismatch', 'service-set'],
   ['service-image-mismatch', 'image'],
+  ['container-id-invalid', 'container-identity'],
   ['service-state-mismatch', 'state'],
   ['element-container-present', 'element'],
   ['volume-set-mismatch', 'volume'],
@@ -658,10 +659,12 @@ export function assertTaskServiceSet(
           : service;
     if (
       !SERVICES.includes(service) ||
-      container.Image !== imageByRole.get(role) ||
-      !/^sha256:[0-9a-f]{64}$/u.test(container.Id ?? '')
+      container.Image !== imageByRole.get(role)
     ) {
       fail('service-inventory', 'service-image-mismatch');
+    }
+    if (!/^[0-9a-f]{64}$/u.test(container.Id ?? '')) {
+      fail('service-inventory', 'container-id-invalid');
     }
   }
   for (const [service, status] of [
