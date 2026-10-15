@@ -28,10 +28,10 @@ checks remain the authorization evidence. Issue #259's parallel legacy meeting
 HTTP guard and inventory are not yet integrated. After both issues land, a
 fresh candidate must be created for #255 and its Web/Desktop and both-backend
 evidence must bind to that exact source; older candidate evidence does not
-satisfy this gate. The #251 controlled pilot is not approved or ready. Issues
-#275–#278 remain post-pilot, including #275's StoreProvider/Redux startup
-retirement. No beta-readiness, production-readiness, or rollout decision is
-recorded here.
+satisfy this gate. The #251 controlled pilot awaits the remaining exact-source
+acceptance and operator-readiness gates; production rollout has not been
+performed. Issues #275–#278 remain post-pilot, including #275's StoreProvider/
+Redux startup retirement.
 
 PR #247's hosted evidence is tied to source `acc535dfe69001403c67853b2171672e74056f51`, tree `784aaeac9f6cf733ed7f38b50eb46bcc4b77c333`; merge commit `20dd7357d833238ac23d817bd29bdb0a9f6d4761` has that same tree. The [Element run](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532436) passed for appservice and normal-bot profiles; the [Real Radicale contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532535), [CI](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532444), [Desktop workflow](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532500), [PostgreSQL contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532435), and [CodeQL](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532479) also passed. These runs validate that source tree, not a fresh run of the later merge commit. Independent review cleared the exact source. CodeRabbit reported workflow success while its review was skipped because the PR was draft; this is not a CodeRabbit approval. The two trusted opening errors are diagnostic only under the explicit opening-stage predicate after every startup, authentication, CRUD, Desktop, reminder, restore, and timing gate passes; unknown, widget-origin, or later errors remain failures.
 

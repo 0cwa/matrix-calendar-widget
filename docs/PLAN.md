@@ -533,9 +533,9 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       and bind its required Element Web/Desktop and both-backend evidence to
       that exact source. Historical candidate results do not establish
       acceptance of the new source.
-- [ ] Consider the controlled pilot under #251 only after the fresh candidate
-      evidence is complete and the required owner approval is recorded. The
-      pilot is not approved or ready by this plan update.
+- [ ] Complete the remaining operator-readiness gates for the controlled
+      pilot under #251 after fresh exact-source acceptance. Production rollout
+      has not been performed.
 - [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
       StoreProvider/Redux startup retirement until after the pilot.
 
