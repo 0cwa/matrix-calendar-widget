@@ -178,8 +178,8 @@ describe('test CommandService', () => {
     verify(matrixClientMock.sendHtmlText(ROOM_ID, anyString())).once();
     const txt = captureSendHtmlText();
     expect(txt).toMatch(/Verfügbare Befehle:/);
-    expect(txt).toContain('!meeting setup');
-    expect(txt).not.toContain('!calendar help');
+    expect(txt).not.toContain('!meeting setup');
+    expect(txt).toContain('!calendar help');
   });
 
   test('calendar help directs widget-capable clients to the widget', async () => {
@@ -691,11 +691,15 @@ describe('test CommandService', () => {
     expect(text).toContain('!calendar help');
   });
 
-  test('handleRoomMessage a custom command', async () => {
+  test('legacy setup command fails closed without calling the meeting service', async () => {
     const event = createEvent();
     event.content.body = `!meeting ${SETUP_COMMANDS[0]}`;
     await commandService.handleRoomMessage(ROOM_ID, event);
-    verify(welcomeWorkflowService.handleAddWidgetCommand(ROOM_ID)).once();
+
+    verify(welcomeWorkflowService.handleAddWidgetCommand(ROOM_ID)).never();
+    const text = capture(matrixClientMock.replyText).last()[2];
+    expect(text).toContain('Einrichtungsbefehl');
+    expect(text).toContain('!calendar help');
   });
 
   test('ignores msgtype other than m.text', async () => {
@@ -743,8 +747,10 @@ describe('test CommandService', () => {
 
   test('error NicError during command handle', async () => {
     const event = createEvent();
-    event.content.body = `!meeting ${SETUP_COMMANDS[0]}`;
-    when(welcomeWorkflowService.handleAddWidgetCommand(ROOM_ID)).thenThrow(
+    event.content.body = '!meeting lang de';
+    when(
+      welcomeWorkflowService.handleLanguageChange(ROOM_ID, anything()),
+    ).thenThrow(
       new TranslatableError('commandErrors.generic', {
         message: 'example',
       }),
@@ -759,12 +765,12 @@ describe('test CommandService', () => {
 
   test('error Error during command handle', async () => {
     const event = createEvent();
-    event.content.body = `!meeting ${SETUP_COMMANDS[0]}`;
+    event.content.body = '!meeting lang de';
 
     const errMsg = 'Error';
-    when(welcomeWorkflowService.handleAddWidgetCommand(ROOM_ID)).thenThrow(
-      new Error(errMsg),
-    );
+    when(
+      welcomeWorkflowService.handleLanguageChange(ROOM_ID, anything()),
+    ).thenThrow(new Error(errMsg));
     await commandService.handleRoomMessage(ROOM_ID, event);
 
     const txt = capture(matrixClientMock.replyText).last()[2];

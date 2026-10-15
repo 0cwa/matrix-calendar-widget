@@ -142,7 +142,7 @@ function createConfiguration() {
 
     enable_welcome_workflow: toBoolean(
       process.env.ENABLE_WELCOME_WORKFLOW,
-      true,
+      false,
     ),
     enable_control_room_migration: toBoolean(
       process.env.ENABLE_CONTROL_ROOM_MIGRATION,
@@ -150,7 +150,7 @@ function createConfiguration() {
     ),
     enable_private_room_error_sending: toBoolean(
       process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING,
-      true,
+      false,
     ),
     default_events_config:
       process.env.DEFAULT_EVENTS_CONFIG ?? 'conf/default_events.json',

@@ -39,6 +39,7 @@ import { MeetingUpdateDetailsDto } from '../dto/MeetingUpdateDetailsDto';
 import { MeetingWidgetsHandleDto } from '../dto/MeetingWidgetsHandleDto';
 import { SubMeetingsSendMessageDto } from '../dto/SubMeetingsSendMessageDto';
 import { WebExceptionFilter } from '../filter/WebExceptionFilter';
+import { LegacyMeetingDisabledGuard } from '../guard/LegacyMeetingDisabledGuard';
 import { MatrixAuthGuard } from '../guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IUserContext } from '../model/IUserContext';
@@ -52,7 +53,11 @@ import { MeetingService } from '../service/MeetingService';
   version: ['1'],
 })
 @UseFilters(WebExceptionFilter)
-@UseGuards(MatrixAuthGuard, MatrixRoomMembershipGuard)
+@UseGuards(
+  LegacyMeetingDisabledGuard,
+  MatrixAuthGuard,
+  MatrixRoomMembershipGuard,
+)
 @UsePipes(ValidationPipe)
 export class MeetingController {
   constructor(private meetingService: MeetingService) {}

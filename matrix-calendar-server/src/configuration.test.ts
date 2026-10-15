@@ -32,6 +32,9 @@ describe('reminder database configuration', () => {
   const originalRateLimitMaxKeys =
     process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS;
   const originalPgPort = process.env.PGPORT;
+  const originalEnableWelcomeWorkflow = process.env.ENABLE_WELCOME_WORKFLOW;
+  const originalEnablePrivateRoomErrorSending =
+    process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING;
 
   afterEach(() => {
     if (originalDatabaseUrl === undefined) {
@@ -67,6 +70,34 @@ describe('reminder database configuration', () => {
     } else {
       process.env.PGPORT = originalPgPort;
     }
+    if (originalEnableWelcomeWorkflow === undefined) {
+      delete process.env.ENABLE_WELCOME_WORKFLOW;
+    } else {
+      process.env.ENABLE_WELCOME_WORKFLOW = originalEnableWelcomeWorkflow;
+    }
+    if (originalEnablePrivateRoomErrorSending === undefined) {
+      delete process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING;
+    } else {
+      process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING =
+        originalEnablePrivateRoomErrorSending;
+    }
+  });
+
+  it('keeps legacy private-room workflows opt-in by default', () => {
+    delete process.env.ENABLE_WELCOME_WORKFLOW;
+    delete process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING;
+
+    expect(configuration().config).toMatchObject({
+      enable_welcome_workflow: false,
+      enable_private_room_error_sending: false,
+    });
+
+    process.env.ENABLE_WELCOME_WORKFLOW = 'true';
+    process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING = 'true';
+    expect(configuration().config).toMatchObject({
+      enable_welcome_workflow: true,
+      enable_private_room_error_sending: true,
+    });
   });
 
   it('uses bounded gateway rate-limit defaults and loads overrides', () => {

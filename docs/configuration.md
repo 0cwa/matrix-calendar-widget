@@ -206,8 +206,8 @@ MATRIX_FILTER_APPLY=true
 # optional - configure the maximum number of events in the sync response. use a higher limit to reduce the risk of getting a "limited" sync where the homeserver skips events that will then not be registered by the bot.
 MATRIX_FILTER_TIMELINE_LIMIT=50
 
-# optional - enables workflow to invite the user into a private room and receive commands to help the user with adding the Matrix Calendar widget to the room. this is triggered as soon as the bot user is invited into a room.
-ENABLE_WELCOME_WORKFLOW=true
+# optional legacy workflow - creates a private help room when the bot is invited to a non-direct room. Disabled by default for the calendar-only pilot; setting this to true opts into the legacy help flow.
+ENABLE_WELCOME_WORKFLOW=false
 
 # optional - default locale for bot-to-user communication
 WELCOME_WORKFLOW_DEFAULT_LOCALE=en
@@ -215,8 +215,8 @@ WELCOME_WORKFLOW_DEFAULT_LOCALE=en
 # optional - migrate old control rooms that were created by a older version of the bot to a 1:1 calendar room.
 ENABLE_CONTROL_ROOM_MIGRATION=false
 
-# optional - create private error rooms with the user who sent a command to the bot if an error occurred
-ENABLE_PRIVATE_ROOM_ERROR_SENDING=true
+# optional legacy error reporting - create or reuse a private error room with the sender of an RPC event when processing fails. Disabled by default for the calendar-only pilot; setting this to true opts into legacy private-room notifications.
+ENABLE_PRIVATE_ROOM_ERROR_SENDING=false
 
 # optional - configure a url where the bot can request dial-in numbers (ex: http://jitsi-dialin.example.com/dialin.json)
 JITSI_DIAL_IN_JSON_URL=
