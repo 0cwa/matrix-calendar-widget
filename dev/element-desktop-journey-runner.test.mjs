@@ -31,6 +31,7 @@ import {
   runDesktopCalendarJourney,
   selectAvailableProbeUid,
   selectPinnedPackageHash,
+  settleUidLifecycleBeforeUserDeletion,
   stopUidProcesses,
   validateDefaultPolicyPort,
   validateJourneyPolicyPorts,
@@ -1192,6 +1193,138 @@ test('does not retry for non-effective-only, overflowed, or already-signaled cle
     assert.equal(stopCalls, 0);
     assert.equal(captureCalls, 0);
   }
+});
+
+test('waits once for a complete non-effective-only UID census', async () => {
+  const state = { uid: 24_000 };
+  const lateObservation = observedUidCensus(1);
+  lateObservation.effectiveUidMatchCount = 0;
+  lateObservation.nonEffectiveUidOnlyCount = 1;
+  const waitCalls = [];
+  const captureCalls = [];
+  const observation = await settleUidLifecycleBeforeUserDeletion(
+    state,
+    lateObservation,
+    {
+      wait: async (duration) => waitCalls.push(duration),
+      capture: (target) => {
+        captureCalls.push(target);
+        return observedEmptyLifecycle();
+      },
+    },
+  );
+
+  assert.deepEqual(waitCalls, [250]);
+  assert.deepEqual(captureCalls, [state]);
+  assert.equal(observation.state, 'observed');
+  assert.equal(observation.overflow, false);
+  assert.equal(observation.uidProcessCount, 0);
+  assert.equal(
+    cleanupProofAllowsPolicyRemoval({
+      processStatus: 'passed',
+      beforeUserdelClear: observation.uidProcessCount === 0,
+      finalUidClear: true,
+      user: { status: 'passed', accountState: 'absent' },
+    }),
+    true,
+  );
+});
+
+test('keeps user deletion blocked when the settled UID observation is unsafe', async () => {
+  const state = { uid: 24_000 };
+  const lateObservation = observedUidCensus(1);
+  lateObservation.effectiveUidMatchCount = 0;
+  lateObservation.nonEffectiveUidOnlyCount = 1;
+  const partialUnreadable = {
+    ...lateObservation,
+    state: 'partial',
+    unreadableProcessCount: 1,
+  };
+  const overflowed = {
+    ...lateObservation,
+    state: 'partial',
+    overflow: true,
+  };
+  const scenarios = [
+    {
+      label: 'persistent nonzero',
+      fresh: lateObservation,
+      expectedState: 'observed',
+    },
+    {
+      label: 'unreadable partial',
+      fresh: partialUnreadable,
+      expectedState: 'partial',
+    },
+    { label: 'overflowed', fresh: overflowed, expectedState: 'partial' },
+    {
+      label: 'unavailable',
+      fresh: emptyUidLifecycleObservation('unavailable'),
+      expectedState: 'unavailable',
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const waitCalls = [];
+    let captureCalls = 0;
+    const observation = await settleUidLifecycleBeforeUserDeletion(
+      state,
+      lateObservation,
+      {
+        wait: async (duration) => waitCalls.push(duration),
+        capture: () => {
+          captureCalls += 1;
+          return scenario.fresh;
+        },
+      },
+    );
+
+    assert.deepEqual(waitCalls, [250], scenario.label);
+    assert.equal(captureCalls, 1, scenario.label);
+    assert.equal(observation.state, scenario.expectedState, scenario.label);
+    assert.equal(
+      cleanupProofAllowsPolicyRemoval({
+        processStatus: 'passed',
+        beforeUserdelClear:
+          observation.state === 'observed' &&
+          observation.overflow === false &&
+          observation.uidProcessCount === 0,
+        finalUidClear: true,
+        user: { status: 'passed', accountState: 'absent' },
+      }),
+      false,
+      scenario.label,
+    );
+  }
+});
+
+test('does not settle an incomplete initial UID observation', async () => {
+  const partial = {
+    ...observedUidCensus(1),
+    state: 'partial',
+    unreadableProcessCount: 1,
+  };
+  let waitCalls = 0;
+  let captureCalls = 0;
+  const observation = await settleUidLifecycleBeforeUserDeletion(
+    { uid: 24_000 },
+    partial,
+    {
+      wait: async () => {
+        waitCalls += 1;
+      },
+      capture: async () => {
+        captureCalls += 1;
+        return assert.fail(
+          'incomplete initial observations must stay fail-closed',
+        );
+      },
+    },
+  );
+
+  assert.notEqual(observation.state, 'observed');
+  assert.equal(waitCalls, 0);
+  assert.equal(captureCalls, 0);
 });
 
 test('exit-0 account deletion followed by 0-to-0-to-1 census does not signal or retry', async () => {

@@ -643,6 +643,26 @@ test('keeps prior exact-once room markers while appending the restart canary', a
   }
 });
 
+test('restores two prior exact-once room markers before appending the canary', async () => {
+  const priorTitles = [
+    'Reminder acceptance aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    'Reminder acceptance 11111111-2222-3333-4444-555555555555',
+  ];
+  const files = fixtureFiles('restore', priorTitles);
+  const client = createClient({ priorTitles });
+  try {
+    const result = await execute(files, client);
+    assert.equal(result.status, 'passed');
+    assert.equal(result.markerCount, 3);
+    assert.deepEqual(JSON.parse(readFileSync(files.markerPath, 'utf8')), [
+      ...priorTitles,
+      TITLE,
+    ]);
+  } finally {
+    files.cleanup();
+  }
+});
+
 test('preserves old markers and removes only its partial sibling when marker writing fails', async () => {
   const priorTitle = 'Reminder acceptance aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
   const files = fixtureFiles('restart', [priorTitle]);

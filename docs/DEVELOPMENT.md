@@ -29,6 +29,18 @@ yarn prettier:check   # formatting check
 yarn ci               # canonical local CI gate
 ```
 
+## Fast feedback versus release qualification
+
+This project has two deliberate feedback loops, plus a separate release gate:
+
+- **During implementation**, run the smallest relevant workspace tests, TypeScript checks, lints and recurrence/ICS fixtures first. For example, use `yarn workspace @matrix-calendar-widget/widget test:all` for widget work or `yarn workspace @matrix-calendar-widget/server test:all` for gateway work; run full checks before claiming a PR is ready. A fast smoke profile proposed in [#256](https://github.com/0cwa/matrix-calendar-widget/issues/256) is _not yet_ a new canonical command.
+- **For pull requests**, keep all five existing protected CI contexts and the integration tests applicable to the changed boundaries; do not infer auth, CalDAV or rendering correctness from mock-only tests.
+- **For a release candidate**, use the frozen-SHA evidence and operator gates in [RELEASE.md](./RELEASE.md) and [beta-scope.md](./beta-scope.md), including full approved Element Web/Desktop, image and restore rehearsals. Passing CI or the hosted synthetic suite alone is not deployment authorization.
+
+The distinction is speed of everyday feedback, not weaker correctness. Record the first actionable failure, harness/setup-only failures and changed-module radius before/after #256–#258. Refactor the harness only when it becomes measurably easier to operate and retains egress, sanitization and cleanup guarantees.
+
+See [ROADMAP.md](./ROADMAP.md) and [roadmap issue #273](https://github.com/0cwa/matrix-calendar-widget/issues/273) before selecting work. While #255/#251 are active, avoid broad inherited-code removal or dependency upgrades on the frozen pilot candidate.
+
 ## Agent workflow
 
 1. Read `AGENTS.md` and the relevant ADRs.
@@ -65,7 +77,9 @@ A pinned Synapse + Matrix-authenticated Radicale stack lives in [dev/](../dev/RE
 yarn dev:services:up
 ```
 
-This provides the stable external integration targets now. The calendar gateway/widget will join the stack in M2 once their final API/auth configuration exists.
+This provides the stable external integration targets now.
+
+This is a development/contract test stack, not evidence of compatibility with an operator's actual target. Follow [beta scope](./beta-scope.md) and the [release gate](./RELEASE.md) for pilot certification.
 
 ## Code review expectations
 

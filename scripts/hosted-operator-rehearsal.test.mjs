@@ -20,11 +20,13 @@ import {
   API_PROBE_STAGES,
   runElementAcceptanceApiProbe,
 } from '../dev/element-acceptance-api-probe.mjs';
+import { LOCAL_REMINDER_FIXTURE_FAILURE_PHASES } from '../dev/local-reminder-fixture.mjs';
 import { formatStartupStageFailure } from '../dev/synapse-startup-diagnostic.mjs';
 import {
   addOperatorRehearsalProfileToComposeArgs,
   assertApiCrudProbePassed,
   assertNoCollision,
+  assertReminderResult,
   assertTaskServiceSet,
   compareForeign,
   enableHostedSharedDockerRehearsal,
@@ -36,9 +38,11 @@ import {
   GATEWAY_NETWORK_SMOKE_SCRIPT,
   gatewayNetworkSmokeArgs,
   handoffGeneratedComposeEnvironment,
+  HOSTED_REMINDER_FIXTURE_FAILURE_PHASES,
   listenerScopeDelta,
   parseApiCrudProbeFailure,
   parseGatewayNetworkSmokeFailure,
+  parseReminderFixtureOutcome,
   parseStartupFailureMarker,
   planOwnedCleanup,
   runTask,
@@ -65,6 +69,28 @@ function emptyInventory() {
     volumes: [],
     listeners: [],
   };
+}
+
+function reminderFixtureSummary({
+  flow = 'initial',
+  status = 'passed',
+  failurePhase,
+  markerCount = flow === 'initial' ? 1 : flow === 'restart' ? 2 : 3,
+  cleanup = {
+    reminderConfiguration: 'not-attempted',
+    event: 'not-attempted',
+  },
+} = {}) {
+  const summary = {
+    phase: 'local-reminder-fixture',
+    flow,
+    status,
+    markerWritten: status === 'passed',
+    cleanup,
+  };
+  if (status === 'passed') summary.markerCount = markerCount;
+  else summary.failurePhase = failurePhase;
+  return summary;
 }
 
 async function runMockGatewayNetworkSmoke(mockFetch) {
@@ -266,7 +292,7 @@ test('failure artifact carries only the closed gateway smoke classification', ()
     gatewayNetworkSmoke,
   });
 
-  assert.equal(diagnostic.schema_version, 7);
+  assert.equal(diagnostic.schema_version, 8);
   assert.equal(diagnostic.failed_phase, 'compose-run-gateway-smoke');
   assert.equal(diagnostic.failure_operation, 'gateway-network-smoke');
   assert.equal(diagnostic.failure_check, 'network-smoke');
@@ -455,7 +481,7 @@ test('failure artifact projects only the API CRUD probe enum fields', () => {
     failureCode: 'api-probe-process-failed',
     apiCrudProbe,
   });
-  assert.equal(diagnostic.schema_version, 7);
+  assert.equal(diagnostic.schema_version, 8);
   assert.equal(diagnostic.failure_check, 'api-contract');
   assert.deepEqual(diagnostic.api_crud_probe, apiCrudProbe);
 
@@ -473,6 +499,262 @@ test('failure artifact projects only the API CRUD probe enum fields', () => {
   assert.equal(hostile.api_crud_probe.marker_status, 'invalid');
   assert.equal(hostile.api_crud_probe.first_failed_stage, 'unavailable');
   assert.doesNotMatch(JSON.stringify(hostile), /secret|private|https/u);
+});
+
+test('reminder outcome parser stays aligned with the producer across all flows and failure phases', () => {
+  assert.deepEqual(
+    [...HOSTED_REMINDER_FIXTURE_FAILURE_PHASES].sort(),
+    [...LOCAL_REMINDER_FIXTURE_FAILURE_PHASES].sort(),
+  );
+
+  for (const [flow, markerCount] of [
+    ['initial', 1],
+    ['restart', 2],
+    ['restore', 3],
+  ]) {
+    assert.deepEqual(
+      parseReminderFixtureOutcome(
+        `${JSON.stringify(reminderFixtureSummary({ flow, markerCount }))}\n`,
+      ),
+      {
+        marker_status: 'captured',
+        status: 'passed',
+        failure_phase: 'none',
+      },
+      flow,
+    );
+  }
+
+  for (const failurePhase of LOCAL_REMINDER_FIXTURE_FAILURE_PHASES) {
+    assert.deepEqual(
+      parseReminderFixtureOutcome(
+        JSON.stringify(
+          reminderFixtureSummary({
+            flow: 'restore',
+            status: 'failed',
+            failurePhase,
+            cleanup: {
+              reminderConfiguration: 'unresolved',
+              event: 'confirmed-absent',
+            },
+          }),
+        ),
+      ),
+      {
+        marker_status: 'captured',
+        status: 'failed',
+        failure_phase: failurePhase,
+      },
+      failurePhase,
+    );
+  }
+});
+
+test('reminder child failures retain only the finite fixture outcome and validated exit code', (t) => {
+  const taskDir = mkdtempSync(join(tmpdir(), 'mcw-reminder-fixture-task-'));
+  t.after(() => rmSync(taskDir, { recursive: true, force: true }));
+  const summary = reminderFixtureSummary({
+    flow: 'restore',
+    status: 'failed',
+    failurePhase: 'reminder-delivery',
+  });
+  const output = `${JSON.stringify(summary)}\n`;
+  const script = `process.stdout.write(${JSON.stringify(output)}); process.exitCode = 1;`;
+
+  assert.throws(
+    () =>
+      runTask('reminder-restore-fixture', process.execPath, ['-e', script], {
+        taskDir,
+        reminderFixtureOutcomeParser: parseReminderFixtureOutcome,
+      }),
+    (error) => {
+      assert.equal(error.stage, 'reminder-restore-fixture');
+      assert.equal(error.code, 'reminder-fixture-failed');
+      assert.equal(error.childExitCode, 1);
+      assert.deepEqual(error.reminderFixture, {
+        marker_status: 'captured',
+        status: 'failed',
+        failure_phase: 'reminder-delivery',
+      });
+      const diagnostic = formatFailureDiagnostic({
+        phase: error.stage,
+        failureClass: 'gate-failed',
+        operation: failureOperationForStage(error.stage),
+        failureCode: error.code,
+        childExitCode: error.childExitCode,
+        reminderFixture: error.reminderFixture,
+      });
+      assert.equal(diagnostic.schema_version, 8);
+      assert.equal(diagnostic.failure_check, 'reminder-fixture');
+      assert.equal(diagnostic.child_exit_code, 1);
+      assert.deepEqual(diagnostic.reminder_fixture, error.reminderFixture);
+      assert.doesNotMatch(JSON.stringify(diagnostic), /secret|https|body/u);
+      const artifactPath = join(
+        taskDir,
+        'matrix-calendar-widget-operator-rehearsal-failure.json',
+      );
+      assert.equal(
+        writeFailureDiagnostic(taskDir, {
+          phase: error.stage,
+          failureClass: 'gate-failed',
+          operation: failureOperationForStage(error.stage),
+          failureCode: error.code,
+          childExitCode: error.childExitCode,
+          reminderFixture: error.reminderFixture,
+          cleanupStatus: 'pending',
+          cleanupAttempted: false,
+        }),
+        true,
+      );
+      assert.equal(statSync(artifactPath).mode & 0o777, 0o600);
+      const writtenArtifact = JSON.parse(readFileSync(artifactPath, 'utf8'));
+      assert.deepEqual(writtenArtifact.reminder_fixture, error.reminderFixture);
+      assert.equal(writtenArtifact.child_exit_code, 1);
+      assert.doesNotMatch(
+        JSON.stringify(writtenArtifact),
+        /secret|https|body/u,
+      );
+      return true;
+    },
+  );
+});
+
+test('reminder failed-summary and marker-gate paths preserve bounded outcomes', () => {
+  const failed = reminderFixtureSummary({
+    flow: 'restore',
+    status: 'failed',
+    failurePhase: 'prior-deliveries',
+  });
+  assert.throws(
+    () =>
+      assertReminderResult(
+        JSON.stringify(failed),
+        '/unread/if-summary-fails-first',
+        3,
+        'reminder-restore-fixture',
+      ),
+    (error) => {
+      assert.equal(error.code, 'reminder-fixture-failed');
+      assert.equal(error.childExitCode, 0);
+      assert.deepEqual(error.reminderFixture, {
+        marker_status: 'captured',
+        status: 'failed',
+        failure_phase: 'prior-deliveries',
+      });
+      return true;
+    },
+  );
+
+  const inconsistentCount = reminderFixtureSummary({
+    flow: 'restore',
+    status: 'passed',
+    markerCount: 2,
+  });
+  assert.throws(
+    () =>
+      assertReminderResult(
+        JSON.stringify(inconsistentCount),
+        '/unread/if-count-fails-first',
+        3,
+        'reminder-restore-fixture',
+      ),
+    (error) => {
+      assert.equal(error.code, 'reminder-marker-count-mismatch');
+      assert.equal(error.childExitCode, 0);
+      assert.deepEqual(error.reminderFixture, {
+        marker_status: 'captured',
+        status: 'passed',
+        failure_phase: 'none',
+      });
+      return true;
+    },
+  );
+});
+
+test('malformed reminder outcomes remain unknown and reject extra fields or text', () => {
+  const expected = {
+    marker_status: 'invalid',
+    status: 'unknown',
+    failure_phase: 'unknown',
+  };
+  const valid = reminderFixtureSummary({
+    flow: 'restore',
+    status: 'failed',
+    failurePhase: 'reminder-delivery',
+  });
+  const unknownPhase = reminderFixtureSummary({
+    flow: 'restore',
+    status: 'failed',
+    failurePhase: 'https://private.example/token=secret',
+  });
+  const extraField = { ...valid, body: 'secret payload' };
+
+  assert.deepEqual(
+    parseReminderFixtureOutcome('private body token=secret'),
+    expected,
+  );
+  assert.deepEqual(
+    parseReminderFixtureOutcome(`${JSON.stringify(valid)}\nextra text`),
+    expected,
+  );
+  assert.deepEqual(
+    parseReminderFixtureOutcome(JSON.stringify(unknownPhase)),
+    expected,
+  );
+  assert.deepEqual(
+    parseReminderFixtureOutcome(JSON.stringify(extraField)),
+    expected,
+  );
+  assert.doesNotMatch(
+    JSON.stringify([
+      parseReminderFixtureOutcome('private body token=secret'),
+      parseReminderFixtureOutcome(JSON.stringify(unknownPhase)),
+      parseReminderFixtureOutcome(JSON.stringify(extraField)),
+    ]),
+    /secret|private|https|body/u,
+  );
+  assert.deepEqual(parseReminderFixtureOutcome(''), {
+    marker_status: 'absent',
+    status: 'unknown',
+    failure_phase: 'unknown',
+  });
+});
+
+test('unknown reminder child outcomes still fail with only unknown artifact fields', (t) => {
+  const taskDir = mkdtempSync(join(tmpdir(), 'mcw-reminder-unknown-task-'));
+  t.after(() => rmSync(taskDir, { recursive: true, force: true }));
+
+  for (const output of ['', 'private body token=secret']) {
+    const script = `process.stdout.write(${JSON.stringify(output)}); process.exitCode = 1;`;
+    assert.throws(
+      () =>
+        runTask('reminder-restore-fixture', process.execPath, ['-e', script], {
+          taskDir,
+          reminderFixtureOutcomeParser: parseReminderFixtureOutcome,
+        }),
+      (error) => {
+        assert.equal(error.childExitCode, 1);
+        assert.deepEqual(error.reminderFixture, {
+          marker_status: output === '' ? 'absent' : 'invalid',
+          status: 'unknown',
+          failure_phase: 'unknown',
+        });
+        const diagnostic = formatFailureDiagnostic({
+          phase: error.stage,
+          failureClass: 'gate-failed',
+          operation: failureOperationForStage(error.stage),
+          failureCode: error.code,
+          childExitCode: error.childExitCode,
+          reminderFixture: error.reminderFixture,
+        });
+        assert.equal(diagnostic.failure_check, 'unknown');
+        assert.equal(diagnostic.child_exit_code, 1);
+        assert.deepEqual(diagnostic.reminder_fixture, error.reminderFixture);
+        assert.doesNotMatch(JSON.stringify(diagnostic), /secret|private|body/u);
+        return true;
+      },
+    );
+  }
 });
 
 test('hosted shared-Docker mode requires a private adapter and exact hosted main context', (t) => {
@@ -1122,7 +1404,7 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(initial.schema_version, 7);
+    assert.equal(initial.schema_version, 8);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
     assert.equal(initial.failure_operation, 'gate');

@@ -47,7 +47,7 @@ const MARKER_COUNT_BY_FLOW = Object.freeze({
   restart: 1,
   restore: 2,
 });
-const FAILURE_PHASES = new Set([
+export const LOCAL_REMINDER_FIXTURE_FAILURE_PHASES = Object.freeze([
   'fixture',
   'openid',
   'room-permissions',
@@ -61,6 +61,7 @@ const FAILURE_PHASES = new Set([
   'reminder-delivery',
   'marker-write',
 ]);
+const FAILURE_PHASES = new Set(LOCAL_REMINDER_FIXTURE_FAILURE_PHASES);
 
 class FixtureFailure extends Error {
   constructor(phase) {

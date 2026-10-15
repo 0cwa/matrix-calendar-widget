@@ -84,6 +84,29 @@ const COMPOSE_VALUE_OPTIONS = new Set([
 ]);
 const API_STAGES = API_PROBE_STAGES;
 const API_FAILURE_CODES = new Set(API_PROBE_FAILURE_CODES);
+export const HOSTED_REMINDER_FIXTURE_FAILURE_PHASES = Object.freeze([
+  'fixture',
+  'openid',
+  'room-permissions',
+  'gateway-authorization',
+  'prior-deliveries',
+  'event-create',
+  'event-readback',
+  'alarm-options',
+  'reminder-config-write',
+  'reminder-config-readback',
+  'reminder-delivery',
+  'marker-write',
+]);
+const REMINDER_FIXTURE_FAILURE_PHASES = new Set(
+  HOSTED_REMINDER_FIXTURE_FAILURE_PHASES,
+);
+const REMINDER_FIXTURE_FLOWS = new Set(['initial', 'restart', 'restore']);
+const REMINDER_FIXTURE_CLEANUP_OUTCOMES = new Set([
+  'not-attempted',
+  'confirmed-absent',
+  'unresolved',
+]);
 const SAFE_PHASES = new Set([
   'preflight',
   'source-binding',
@@ -243,6 +266,9 @@ const FAILURE_CHECK_BY_CODE = new Map([
   ['volume-set-mismatch', 'volume'],
   ['network-set-mismatch', 'network'],
   ['foreign-listener-changed', 'listener'],
+  ['reminder-fixture-failed', 'reminder-fixture'],
+  ['reminder-fixture-summary-invalid', 'reminder-fixture'],
+  ['reminder-marker-count-mismatch', 'reminder-fixture'],
 ]);
 const PRIMARY_SERVICE_ROLES = Object.freeze([
   'synapse',
@@ -610,6 +636,153 @@ function projectApiCrudProbe(diagnostic) {
   };
 }
 
+function unknownReminderFixture(markerStatus = 'not-applicable') {
+  return {
+    marker_status: ['not-applicable', 'absent', 'invalid'].includes(
+      markerStatus,
+    )
+      ? markerStatus
+      : 'invalid',
+    status: 'unknown',
+    failure_phase: 'unknown',
+  };
+}
+
+function isReminderFixtureRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasExactReminderFixtureKeys(value, expectedKeys) {
+  if (!isReminderFixtureRecord(value)) return false;
+  const actualKeys = Object.keys(value).sort();
+  const sortedExpected = [...expectedKeys].sort();
+  return (
+    actualKeys.length === sortedExpected.length &&
+    actualKeys.every((key, index) => key === sortedExpected[index])
+  );
+}
+
+function validReminderFixtureCleanup(cleanup, status) {
+  if (
+    !hasExactReminderFixtureKeys(cleanup, ['reminderConfiguration', 'event']) ||
+    !REMINDER_FIXTURE_CLEANUP_OUTCOMES.has(cleanup.reminderConfiguration) ||
+    !REMINDER_FIXTURE_CLEANUP_OUTCOMES.has(cleanup.event)
+  ) {
+    return false;
+  }
+  return (
+    status !== 'passed' ||
+    (cleanup.reminderConfiguration === 'not-attempted' &&
+      cleanup.event === 'not-attempted')
+  );
+}
+
+export function parseReminderFixtureOutcome(stdout) {
+  if (typeof stdout !== 'string' || stdout.trim() === '') {
+    return unknownReminderFixture('absent');
+  }
+
+  const lines = stdout.split(/\r?\n/u);
+  if (lines.at(-1) === '') lines.pop();
+  if (lines.length !== 1 || lines[0] === '') {
+    return unknownReminderFixture('invalid');
+  }
+
+  let summary;
+  try {
+    summary = JSON.parse(lines[0]);
+  } catch {
+    return unknownReminderFixture('invalid');
+  }
+  if (
+    !isReminderFixtureRecord(summary) ||
+    summary.phase !== 'local-reminder-fixture' ||
+    !REMINDER_FIXTURE_FLOWS.has(summary.flow)
+  ) {
+    return unknownReminderFixture('invalid');
+  }
+
+  if (summary.status === 'passed') {
+    if (
+      !hasExactReminderFixtureKeys(summary, [
+        'phase',
+        'flow',
+        'status',
+        'markerWritten',
+        'cleanup',
+        'markerCount',
+      ]) ||
+      summary.markerWritten !== true ||
+      !Number.isInteger(summary.markerCount) ||
+      summary.markerCount < 1 ||
+      summary.markerCount > 3 ||
+      !validReminderFixtureCleanup(summary.cleanup, summary.status)
+    ) {
+      return unknownReminderFixture('invalid');
+    }
+    return {
+      marker_status: 'captured',
+      status: 'passed',
+      failure_phase: 'none',
+    };
+  }
+
+  if (
+    summary.status === 'failed' &&
+    hasExactReminderFixtureKeys(summary, [
+      'phase',
+      'flow',
+      'status',
+      'failurePhase',
+      'markerWritten',
+      'cleanup',
+    ]) &&
+    REMINDER_FIXTURE_FAILURE_PHASES.has(summary.failurePhase) &&
+    summary.markerWritten === false &&
+    validReminderFixtureCleanup(summary.cleanup, summary.status)
+  ) {
+    return {
+      marker_status: 'captured',
+      status: 'failed',
+      failure_phase: summary.failurePhase,
+    };
+  }
+
+  return unknownReminderFixture('invalid');
+}
+
+function projectReminderFixtureOutcome(diagnostic) {
+  const markerStatus = [
+    'not-applicable',
+    'absent',
+    'invalid',
+    'captured',
+  ].includes(diagnostic?.marker_status)
+    ? diagnostic.marker_status
+    : 'invalid';
+  if (markerStatus !== 'captured') {
+    return unknownReminderFixture(markerStatus);
+  }
+  if (diagnostic?.status === 'passed' && diagnostic.failure_phase === 'none') {
+    return {
+      marker_status: 'captured',
+      status: 'passed',
+      failure_phase: 'none',
+    };
+  }
+  if (
+    diagnostic?.status === 'failed' &&
+    REMINDER_FIXTURE_FAILURE_PHASES.has(diagnostic.failure_phase)
+  ) {
+    return {
+      marker_status: 'captured',
+      status: 'failed',
+      failure_phase: diagnostic.failure_phase,
+    };
+  }
+  return unknownReminderFixture('invalid');
+}
+
 const FIXTURES = Object.freeze([
   {
     role: 'synapse',
@@ -634,6 +807,9 @@ class RehearsalFailure extends Error {
         : 'unavailable';
     this.gatewayNetworkSmoke = diagnostic.gatewayNetworkSmoke;
     this.apiCrudProbe = diagnostic.apiCrudProbe;
+    this.reminderFixture = projectReminderFixtureOutcome(
+      diagnostic.reminderFixture,
+    );
   }
 }
 
@@ -1278,6 +1454,7 @@ export function runTask(
     startupFailureFormatter,
     failureDiagnosticParser,
     apiCrudProbeParser,
+    reminderFixtureOutcomeParser,
   } = {},
 ) {
   const result = spawn(command, args, { cwd, env, input, timeout });
@@ -1308,15 +1485,29 @@ export function runTask(
         result.status,
       );
     }
+    if (reminderFixtureOutcomeParser) {
+      try {
+        diagnostic.reminderFixture = projectReminderFixtureOutcome(
+          reminderFixtureOutcomeParser(result.stdout ?? ''),
+        );
+      } catch {
+        diagnostic.reminderFixture = unknownReminderFixture('invalid');
+      }
+    }
+    diagnostic.childExitCode = result.status;
     fail(
       stage,
       failureDiagnosticParser
         ? 'gateway-network-smoke-failed'
         : apiCrudProbeParser
           ? 'api-probe-process-failed'
-          : result.error
-            ? 'command-unavailable'
-            : `exit-${result.status ?? 'unknown'}`,
+          : reminderFixtureOutcomeParser &&
+              diagnostic.reminderFixture.marker_status === 'captured' &&
+              diagnostic.reminderFixture.status === 'failed'
+            ? 'reminder-fixture-failed'
+            : result.error
+              ? 'command-unavailable'
+              : `exit-${result.status ?? 'unknown'}`,
       diagnostic,
     );
   }
@@ -1764,14 +1955,33 @@ function checkSummary(command, stage, diagnostic) {
   return result;
 }
 
-function assertReminderResult(stdout, markerPath, expectedCount, stage) {
+export function assertReminderResult(stdout, markerPath, expectedCount, stage) {
+  const reminderFixture = parseReminderFixtureOutcome(stdout);
+  if (reminderFixture.marker_status !== 'captured') {
+    fail(stage, 'reminder-fixture-summary-invalid', {
+      reminderFixture,
+      childExitCode: 0,
+    });
+  }
+  if (reminderFixture.status !== 'passed') {
+    fail(stage, 'reminder-fixture-failed', {
+      reminderFixture,
+      childExitCode: 0,
+    });
+  }
   const summary = checkSummary(stdout.trim(), stage);
-  if (summary.status !== 'passed' || summary.markerCount !== expectedCount) {
-    fail(stage, 'reminder-fixture-failed');
+  if (summary.markerCount !== expectedCount) {
+    fail(stage, 'reminder-marker-count-mismatch', {
+      reminderFixture,
+      childExitCode: 0,
+    });
   }
   const markers = readJson(markerPath, stage);
   if (!Array.isArray(markers) || markers.length !== expectedCount) {
-    fail(stage, 'reminder-marker-count-mismatch');
+    fail(stage, 'reminder-marker-count-mismatch', {
+      reminderFixture,
+      childExitCode: 0,
+    });
   }
   return expectedCount;
 }
@@ -2149,6 +2359,7 @@ export function formatFailureDiagnostic({
   listenerScope,
   gatewayNetworkSmoke,
   apiCrudProbe,
+  reminderFixture,
 }) {
   const safe = (value, pattern) =>
     typeof value === 'string' && pattern.test(value) ? value : 'unavailable';
@@ -2202,9 +2413,10 @@ export function formatFailureDiagnostic({
   const safeGatewayNetworkSmoke =
     projectGatewayNetworkSmoke(gatewayNetworkSmoke);
   const safeApiCrudProbe = projectApiCrudProbe(apiCrudProbe);
+  const safeReminderFixture = projectReminderFixtureOutcome(reminderFixture);
 
   return {
-    schema_version: 7,
+    schema_version: 8,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
@@ -2228,6 +2440,7 @@ export function formatFailureDiagnostic({
     listener_scope: safeListenerScope,
     gateway_network_smoke: safeGatewayNetworkSmoke,
     api_crud_probe: safeApiCrudProbe,
+    reminder_fixture: safeReminderFixture,
     cleanup_status: safeCleanup,
     cleanup_attempted: attempted,
     owned_cleanup_verified: cleanupVerified,
@@ -2361,7 +2574,9 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
         JSON.stringify(previous?.gateway_network_smoke) !==
           JSON.stringify(diagnostic.gateway_network_smoke) ||
         JSON.stringify(previous?.api_crud_probe) !==
-          JSON.stringify(diagnostic.api_crud_probe)
+          JSON.stringify(diagnostic.api_crud_probe) ||
+        JSON.stringify(previous?.reminder_fixture) !==
+          JSON.stringify(diagnostic.reminder_fixture)
       ) {
         fail('receipt-publish', 'failure-diagnostic-identity-mismatch');
       }
@@ -2874,6 +3089,7 @@ async function main() {
           ELEMENT_ACCEPTANCE_REMINDER_FIXTURE: '1',
           ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'initial',
         },
+        { reminderFixtureOutcomeParser: parseReminderFixtureOutcome },
       ),
       paths.eventFile,
       1,
@@ -2902,6 +3118,7 @@ async function main() {
           ELEMENT_ACCEPTANCE_REMINDER_FIXTURE: '1',
           ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'restart',
         },
+        { reminderFixtureOutcomeParser: parseReminderFixtureOutcome },
       ),
       paths.eventFile,
       2,
@@ -2963,6 +3180,7 @@ async function main() {
           ELEMENT_ACCEPTANCE_REMINDER_FIXTURE: '1',
           ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'restore',
         },
+        { reminderFixtureOutcomeParser: parseReminderFixtureOutcome },
       ),
       paths.eventFile,
       3,
@@ -3079,6 +3297,8 @@ async function main() {
           : undefined,
       apiCrudProbe:
         error instanceof RehearsalFailure ? error.apiCrudProbe : undefined,
+      reminderFixture:
+        error instanceof RehearsalFailure ? error.reminderFixture : undefined,
       serviceInventory: diagnosticInventory,
       serviceRunId: diagnosticRunId,
       serviceProject: diagnosticProject,
