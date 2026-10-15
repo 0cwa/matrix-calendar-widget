@@ -21,6 +21,8 @@ Radicale/CalDAV stays canonical for calendar data; the app-owned PostgreSQL stor
 | **P2 after legacy retirement**                  | Remove proven-unused dependencies/assets/fixtures; contain acceptance harness; reduce editor, gateway and codec change radius                                                          | #278, #256, #257, #258       | Smaller blast radius and faster feedback, measured rather than claimed; retain all critical behavior and exact-source certification.                                                       |
 | **Deferred feature expansion**                  | Collection timezone, advanced recurrence and broad interoperability                                                                                                                    | #5, #6                       | Re-prioritize only after operational evidence and a deliberate scope decision.                                                                                                             |
 
+**P0 pilot boundary:** One room / two accounts; operator can repeat recovery.
+
 **Scope lock for the pilot:** Element Web/Desktop standard side panel; `bot-account` full browser acceptance and mandatory both-mode backend/CalDAV contracts; one gateway replica; independent project-owned Radicale store and app-owned PostgreSQL reminder store. Mobile, existing managed Radicale `/data` reuse, arbitrary recurrence authoring and additional UI layouts are not pilot blockers. See beta-scope for exact limits.
 
 ## Three validation layers
