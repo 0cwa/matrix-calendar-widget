@@ -269,6 +269,7 @@ export class CommandService {
      * t('commandErrors.noCommandProvided', 'No command provided, try <code>{{trigger}} help</code>')
      * t('commandErrors.generic', 'There was an error processing your command: {{message}}')
      * t('commandErrors.badCommand', 'Bad command, try <code>{{trigger}} help</code>')
+     * t('commandErrors.legacySetupDisabled', 'The legacy widget setup command is disabled. Use the calendar widget and <code>!calendar help</code> for bot commands.')
      *
      */
     // TODO: fix the types of i18next
